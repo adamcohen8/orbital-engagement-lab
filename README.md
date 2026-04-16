@@ -1,59 +1,32 @@
 # Orbital Engagement Lab
 
+[![CI](https://github.com/adamcohen8/orbital-engagement-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/adamcohen8/orbital-engagement-lab/actions/workflows/ci.yml)
+
 Open-core spacecraft simulation framework for closed-loop rendezvous, proximity
 operations, attitude control, sensing, estimation, and mission prototyping.
 
-This public repository contains the inspectable simulation foundation: core
-dynamics, controllers, estimators, config loading, single-run execution, API
-workflows, examples, and starter validation tools.
+Orbital Engagement Lab exists to make it easier to prototype spacecraft behavior
+as a full closed loop: orbit dynamics, attitude dynamics, sensors, estimators,
+controllers, actuators, mission logic, and outputs all running from the same
+scenario definition.
 
-## What This Public Core Includes
+The public repository is the simulation foundation. Orbital Engagement Pro adds
+workflow acceleration around that foundation: controller benchmarking,
+optimization, campaign orchestration, sensitivity studies, dashboards, and
+curated validation scenario packs.
 
-- deterministic step-based simulation
-- multi-object orbit and attitude dynamics
-- two-body, perturbation, atmosphere, SRP, third-body, and spherical harmonics support
-- actuator limits, saturation, lag, and mass depletion
-- relative sensing and object-knowledge primitives
-- orbit and attitude estimators
-- orbit and attitude controller interfaces and reference controllers
-- YAML-backed scenario configuration
-- Python API, CLI, GUI entrypoints, and examples
-- basic validation harnesses and HPOP comparison helpers
-- starter cFS/SIL integration mock
-
-## What Is Not Included
-
-Some advanced/product workflows are intentionally not part of the public core:
-
-- controller-benchmark suites and leaderboards
-- optimization and gain-tuning workflows
-- Monte Carlo and sensitivity campaign orchestration
-- campaign dashboards, baselines, and review-ready reports
-- curated validation and mission-assurance scenario packs
-
-Those capabilities live in the private/product distribution.
-
-## Install
+## First Run
 
 ```bash
+git clone https://github.com/adamcohen8/orbital-engagement-lab.git
+cd orbital-engagement-lab
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -U pip
-python -m pip install .
-```
-
-Optional profiles:
-
-```bash
 python -m pip install ".[dev]"
-python -m pip install ".[gui]"
-python -m pip install ".[ml]"
-python -m pip install ".[full]"
 ```
 
-## Quick Start
-
-Validate a scenario:
+Validate the bundled smoke scenario:
 
 ```bash
 python run_simulation.py --config configs/automation_smoke.yaml --validate-only
@@ -64,6 +37,9 @@ Run it:
 ```bash
 python run_simulation.py --config configs/automation_smoke.yaml
 ```
+
+Expected result: the run completes headlessly and writes summary artifacts under
+`outputs/automation_smoke/`.
 
 Use the API:
 
@@ -82,6 +58,61 @@ Open the GUI:
 ```bash
 python -m pip install ".[gui]"
 python run_gui.py
+```
+
+## What This Public Core Includes
+
+- deterministic step-based simulation
+- multi-object orbit and attitude dynamics
+- two-body, perturbation, atmosphere, SRP, third-body, and spherical harmonics support
+- actuator limits, saturation, lag, and mass depletion
+- relative sensing and object-knowledge primitives
+- orbit and attitude estimators
+- orbit and attitude controller interfaces and reference controllers
+- YAML-backed scenario configuration with reusable object presets
+- Python API, CLI, GUI entrypoints, and examples
+- basic validation harnesses and HPOP comparison helpers
+- starter cFS/SIL integration mock
+
+## What Orbital Engagement Pro Adds
+
+- controller-benchmark suites and leaderboards
+- optimization and gain-tuning workflows
+- Monte Carlo and sensitivity campaign orchestration
+- campaign dashboards, baselines, and review-ready reports
+- curated validation and mission-assurance scenario packs
+
+The public core is intended to be useful on its own. The pro layer is for teams
+that need repeatable analysis workflows, tuning loops, campaign management, and
+reporting on top of the same simulation foundation.
+
+## Start Here
+
+- [Quickstart](docs/quickstart.md)
+- [Scenario YAML](docs/scenario-yaml.md)
+- [Public Core And Pro Boundary](docs/public-vs-pro.md)
+- [cFS/SIL starter integration](integrations/cfs_sil/README.md)
+
+## Curated Examples
+
+- `examples/Simulation_Config_Load_Demo.py` for config loading
+- `examples/Orbit_HCW_LQR_Demo.py` for relative orbit control
+- `examples/Attitude_PD_ReactionWheel_Demo.py` for attitude control
+- `examples/Rendezvous_HCW_AttitudeLQR_Demo.py` for integrated rendezvous
+- `examples/Object_Knowledge_EKF_Demo.py` for sensing and estimation
+- `examples/CFS_SIL_SingleSat_Loop_Demo.py` for cFS/SIL integration
+
+Additional examples are included for orbit perturbations, rocket ascent,
+attitude animation, MPC controllers, machine-learning environments, and plotting.
+
+## Install Profiles
+
+```bash
+python -m pip install .
+python -m pip install ".[dev]"
+python -m pip install ".[gui]"
+python -m pip install ".[ml]"
+python -m pip install ".[full]"
 ```
 
 ## Validation Data
@@ -106,11 +137,12 @@ validation/data/DE440Coeff.mat
 - `sim/control/` orbit and attitude control
 - `sim/knowledge/` object knowledge tracking
 - `sim/mission/` mission modules and executive patterns
+- `sim/presets/` reusable object and hardware presets
 - `sim/gui/` native desktop GUI
 - `sim/rocket/` ascent/rocket components
 - `integrations/cfs_sil/` cFS/SIL starter integration
-- `validation/` validation harnesses and comparison scripts
 - `examples/` runnable demos
+- `docs/` user-facing documentation
 
 ## Scope And Safety
 

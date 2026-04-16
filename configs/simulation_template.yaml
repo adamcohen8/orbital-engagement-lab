@@ -10,12 +10,10 @@ metadata:
 rocket:
   enabled: true
   role: "rocket"
+  preset: "../sim/presets/objects/basic_two_stage_rocket.yaml"
   specs:
-    preset_stack: "BASIC_TWO_STAGE_STACK"
     payload_mass_kg: 150.0
     thrust_axis_body: [1.0, 0.0, 0.0]
-    mass_properties:
-      inertia_kg_m2: [[800000.0, 0.0, 0.0], [0.0, 800000.0, 0.0], [0.0, 0.0, 20000.0]]
   initial_state:
     launch_lat_deg: 28.5
     launch_lon_deg: -80.6
@@ -77,11 +75,9 @@ rocket:
 chaser:
   enabled: true
   role: "chaser"
+  preset: "../sim/presets/objects/basic_satellite.yaml"
   specs:
-    preset_satellite: "BASIC_SATELLITE"
     mass_kg: 200.0
-    thruster: "BASIC_CHEMICAL_Z_BOTTOM"
-    attitude_system: "BASIC_REACTION_WHEELS_3AXIS"
   initial_state:
     source: "rocket_deployment"
     deploy_time_s: 900.0
@@ -165,12 +161,11 @@ chaser:
 target:
   enabled: true
   role: "target"
+  preset: "../sim/presets/objects/basic_satellite.yaml"
   reference_orbit:
     enabled: false
   specs:
-    preset_satellite: "BASIC_SATELLITE"
     mass_kg: 400.0
-    attitude_system: "BASIC_REACTION_WHEELS_3AXIS"
   initial_state:
     coes:
       a_km: 7000.0

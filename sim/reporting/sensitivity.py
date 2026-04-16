@@ -1,8 +1,11 @@
-"""Private/product sensitivity reports are not included in the public export."""
+"""Orbital Engagement Pro sensitivity reports are not included in the public core."""
 
 
 def _unavailable(*args, **kwargs):
-    raise ImportError("Sensitivity reporting is available in the private/product distribution.")
+    raise ImportError(
+        "Sensitivity reporting is part of Orbital Engagement Pro. "
+        "The public core includes single-run outputs and lightweight validation helpers."
+    )
 
 
 analysis_metrics = _unavailable

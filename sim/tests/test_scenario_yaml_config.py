@@ -1,5 +1,6 @@
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from sim.config import load_simulation_yaml, scenario_config_from_dict
 
@@ -185,6 +186,122 @@ class TestScenarioYamlConfig(unittest.TestCase):
         self.assertTrue(cfg.target.enabled)
         self.assertGreater(cfg.simulator.dt_s, 0.0)
         self.assertGreater(cfg.simulator.duration_s, 0.0)
+
+    def test_agent_preset_yaml_merges_specs_from_relative_path(self):
+        try:
+            import yaml  # noqa: F401
+        except Exception:
+            self.skipTest("PyYAML not installed in this environment.")
+
+        with TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            preset_dir = base / "presets"
+            preset_dir.mkdir()
+            (preset_dir / "satellite.yaml").write_text(
+                """
+name: Test Satellite
+preset_type: satellite
+specs:
+  dry_mass_kg: 260.0
+  fuel_mass_kg: 40.0
+  max_thrust_n: 35.0
+  mass_properties:
+    inertia_kg_m2:
+      - [1.0, 0.0, 0.0]
+      - [0.0, 2.0, 0.0]
+      - [0.0, 0.0, 3.0]
+knowledge:
+  refresh_rate_s: 5.0
+""".lstrip(),
+                encoding="utf-8",
+            )
+            scenario_path = base / "scenario.yaml"
+            scenario_path.write_text(
+                """
+target:
+  enabled: true
+  preset: "presets/satellite.yaml"
+  specs:
+    dry_mass_kg: 180.0
+    max_thrust_n: 12.0
+simulator:
+  duration_s: 10.0
+  dt_s: 1.0
+""".lstrip(),
+                encoding="utf-8",
+            )
+
+            cfg = load_simulation_yaml(scenario_path)
+
+        self.assertEqual(cfg.target.specs["dry_mass_kg"], 180.0)
+        self.assertEqual(cfg.target.specs["fuel_mass_kg"], 40.0)
+        self.assertEqual(cfg.target.specs["max_thrust_n"], 12.0)
+        self.assertEqual(cfg.target.specs["mass_properties"]["inertia_kg_m2"][2][2], 3.0)
+        self.assertEqual(cfg.target.knowledge["refresh_rate_s"], 5.0)
+
+    def test_agent_preset_yaml_mass_override_uses_mass_kg(self):
+        try:
+            import yaml  # noqa: F401
+        except Exception:
+            self.skipTest("PyYAML not installed in this environment.")
+
+        with TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            preset_path = base / "satellite.yaml"
+            preset_path.write_text(
+                """
+specs:
+  dry_mass_kg: 260.0
+  fuel_mass_kg: 40.0
+  max_thrust_n: 35.0
+""".lstrip(),
+                encoding="utf-8",
+            )
+            cfg = scenario_config_from_dict(
+                {
+                    "target": {
+                        "preset": "satellite.yaml",
+                        "specs": {"mass_kg": 120.0},
+                    },
+                    "simulator": {"duration_s": 10.0, "dt_s": 1.0},
+                },
+                source_path=base / "scenario.yaml",
+            )
+
+        self.assertEqual(cfg.target.specs["mass_kg"], 120.0)
+        self.assertNotIn("dry_mass_kg", cfg.target.specs)
+        self.assertNotIn("fuel_mass_kg", cfg.target.specs)
+
+    def test_agent_preset_yaml_name_resolves_from_builtin_objects(self):
+        try:
+            import yaml  # noqa: F401
+        except Exception:
+            self.skipTest("PyYAML not installed in this environment.")
+
+        cfg = scenario_config_from_dict(
+            {
+                "target": {
+                    "preset": "basic_satellite",
+                    "specs": {"dry_mass_kg": 175.0, "fuel_mass_kg": 25.0},
+                },
+                "simulator": {"duration_s": 10.0, "dt_s": 1.0},
+            }
+        )
+        self.assertEqual(cfg.target.specs["preset_satellite"], "BASIC_SATELLITE")
+        self.assertEqual(cfg.target.specs["dry_mass_kg"], 175.0)
+        self.assertEqual(cfg.target.specs["fuel_mass_kg"], 25.0)
+
+    def test_missing_agent_preset_yaml_raises_clear_error(self):
+        with TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            with self.assertRaisesRegex(FileNotFoundError, "Could not resolve target preset YAML"):
+                scenario_config_from_dict(
+                    {
+                        "target": {"preset": "missing.yaml"},
+                        "simulator": {"duration_s": 10.0, "dt_s": 1.0},
+                    },
+                    source_path=base / "scenario.yaml",
+                )
 
     def test_missing_agent_sections_use_role_defaults(self):
         cfg = scenario_config_from_dict(

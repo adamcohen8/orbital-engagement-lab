@@ -1,8 +1,12 @@
-"""Private/product optimization tools are not included in the public export."""
+"""Orbital Engagement Pro optimization tools are not included in the public core."""
 
 
 def _unavailable(*args, **kwargs):
-    raise ImportError("Optimization tools are available in the private/product distribution.")
+    raise ImportError(
+        "Optimization and gain-tuning workflows are part of Orbital Engagement Pro. "
+        "The public core supports single-run simulation, controllers, estimators, "
+        "scenario YAML, and API workflows."
+    )
 
 
 class _UnavailablePrivateFeature:

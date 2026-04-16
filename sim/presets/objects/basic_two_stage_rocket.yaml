@@ -1,0 +1,12 @@
+name: "Basic Two-Stage Rocket"
+preset_type: "rocket"
+description: "Baseline two-stage launch stack for scenario YAML rocket agents."
+specs:
+  preset_stack: "BASIC_TWO_STAGE_STACK"
+  payload_mass_kg: 150.0
+  thrust_axis_body: [1.0, 0.0, 0.0]
+  mass_properties:
+    inertia_kg_m2:
+      - [800000.0, 0.0, 0.0]
+      - [0.0, 800000.0, 0.0]
+      - [0.0, 0.0, 20000.0]

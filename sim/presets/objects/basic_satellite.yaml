@@ -1,0 +1,21 @@
+name: "Basic Satellite"
+preset_type: "satellite"
+description: "Baseline satellite bus with bottom-Z chemical propulsion."
+specs:
+  preset_satellite: "BASIC_SATELLITE"
+  dry_mass_kg: 260.0
+  fuel_mass_kg: 40.0
+  bus_size_m: [1.2, 1.0, 1.0]
+  mass_properties:
+    inertia_kg_m2:
+      - [120.0, 0.0, 0.0]
+      - [0.0, 100.0, 0.0]
+      - [0.0, 0.0, 80.0]
+  thruster: "BASIC_CHEMICAL_BOTTOM_Z"
+  max_thrust_n: 35.0
+  isp_s: 220.0
+  min_impulse_bit_n_s: 0.7
+  thruster_mount_name: "Bottom Z Panel Centerline Mount"
+  thruster_position_body_m: [0.0, 0.0, -0.5]
+  thruster_direction_body: [0.0, 0.0, 1.0]
+  attitude_system: "BASIC_REACTION_WHEELS_3AXIS"

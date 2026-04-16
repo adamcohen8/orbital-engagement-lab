@@ -1,8 +1,11 @@
-"""Private/product campaign tools are not included in the public export."""
+"""Orbital Engagement Pro campaign tools are not included in the public core."""
 
 
 def _unavailable(*args, **kwargs):
-    raise ImportError("Monte Carlo campaign tools are available in the private/product distribution.")
+    raise ImportError(
+        "Monte Carlo campaign orchestration is part of Orbital Engagement Pro. "
+        "The public core supports deterministic single-run simulation and scenario YAML."
+    )
 
 
 can_run_monte_carlo_campaign = _unavailable

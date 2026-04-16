@@ -42,5 +42,8 @@ full = [
 [tool.setuptools]
 include-package-data = true
 
+[tool.setuptools.package-data]
+sim = ["presets/objects/*.yaml"]
+
 [tool.setuptools.packages.find]
 include = ["sim*", "machine_learning*"]

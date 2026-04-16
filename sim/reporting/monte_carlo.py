@@ -1,8 +1,11 @@
-"""Private/product Monte Carlo reports are not included in the public export."""
+"""Orbital Engagement Pro Monte Carlo reports are not included in the public core."""
 
 
 def _unavailable(*args, **kwargs):
-    raise ImportError("Monte Carlo reporting is available in the private/product distribution.")
+    raise ImportError(
+        "Monte Carlo reporting is part of Orbital Engagement Pro. "
+        "The public core includes single-run outputs and lightweight validation helpers."
+    )
 
 
 build_monte_carlo_report_payload = _unavailable

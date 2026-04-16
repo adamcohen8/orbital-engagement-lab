@@ -29,6 +29,19 @@ Top-Level Sections
 - outputs: Output behavior (stats/plots/animations/MC outputs).
 - monte_carlo: Optional campaign settings and parameter variations.
 
+Object Presets
+- rocket/chaser/target can point at a reusable object preset YAML file:
+  preset: "../sim/presets/objects/basic_satellite.yaml"
+- Preset paths resolve relative to the scenario YAML file first.
+- Built-in object names in sim/presets/objects also work:
+  preset: "basic_satellite"
+- Scenario-local values override preset values:
+  specs:
+    dry_mass_kg: 180.0
+    fuel_mass_kg: 20.0
+- If a scenario overrides with specs.mass_kg and does not provide dry/fuel masses,
+  the preset dry_mass_kg/fuel_mass_kg are ignored for that agent.
+
 Algorithm Pointer Format
 - Any rocket.base_guidance/guidance_modifiers/orbit_control/attitude_control/mission_strategy/mission_execution/mission_objectives entry can use:
   kind: "python"
