@@ -49,8 +49,23 @@ print(result.summary)
 
 - `configs/simulation_template.yaml` is the broad feature template.
 - `configs/hcw_lqr_two_body_perfect.yaml` is a compact rendezvous-control case.
+- `configs/plotting_rendezvous_demo.yaml` generates dashboard, rendezvous, control, estimation, and sensor plots.
 - `examples/Orbit_HCW_LQR_Demo.py` demonstrates relative orbit control.
 - `examples/Rendezvous_HCW_AttitudeLQR_Demo.py` demonstrates integrated orbit and attitude behavior.
+
+Generate the plotting demo:
+
+```bash
+python run_simulation.py --config configs/plotting_rendezvous_demo.yaml
+```
+
+Expected plot artifacts include:
+
+```text
+outputs/plotting_rendezvous_demo/run_dashboard.png
+outputs/plotting_rendezvous_demo/rendezvous_summary.png
+outputs/plotting_rendezvous_demo/sensor_access.png
+```
 
 ## Optional Profiles
 

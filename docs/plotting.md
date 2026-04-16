@@ -23,6 +23,15 @@ outputs:
 `preset` expands to a useful bundle of figure IDs. You can add more
 `figure_ids` alongside a preset.
 
+For a ready-to-run plotting scenario:
+
+```bash
+python run_simulation.py --config configs/plotting_rendezvous_demo.yaml
+```
+
+See the [plot gallery](plot-gallery.md) for checked-in examples generated from
+that config.
+
 ## Plot Presets
 
 - `minimal`: run dashboard

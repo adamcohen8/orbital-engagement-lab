@@ -187,6 +187,20 @@ class TestScenarioYamlConfig(unittest.TestCase):
         self.assertGreater(cfg.simulator.dt_s, 0.0)
         self.assertGreater(cfg.simulator.duration_s, 0.0)
 
+    def test_plotting_demo_yaml_loads(self):
+        try:
+            import yaml  # noqa: F401
+        except Exception:
+            self.skipTest("PyYAML not installed in this environment.")
+        root = Path(__file__).resolve().parents[2]
+        p = root / "configs" / "plotting_rendezvous_demo.yaml"
+        cfg = load_simulation_yaml(p)
+        self.assertEqual(cfg.scenario_name, "plotting_rendezvous_demo")
+        self.assertTrue(cfg.outputs.plots.get("enabled"))
+        self.assertIn("rendezvous", list(cfg.outputs.plots.get("preset", [])))
+        self.assertIn("estimation", list(cfg.outputs.plots.get("preset", [])))
+        self.assertTrue(cfg.chaser.knowledge.get("targets"))
+
     def test_agent_preset_yaml_merges_specs_from_relative_path(self):
         try:
             import yaml  # noqa: F401

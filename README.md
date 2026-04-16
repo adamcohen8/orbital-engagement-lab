@@ -10,6 +10,8 @@ as a full closed loop: orbit dynamics, attitude dynamics, sensors, estimators,
 controllers, actuators, mission logic, and outputs all running from the same
 scenario definition.
 
+![Run dashboard](docs/assets/plots/run_dashboard.png)
+
 The public repository is the simulation foundation. Orbital Engagement Pro adds
 workflow acceleration around that foundation: controller benchmarking,
 optimization, campaign orchestration, sensitivity studies, dashboards, and
@@ -40,6 +42,15 @@ python run_simulation.py --config configs/automation_smoke.yaml
 
 Expected result: the run completes headlessly and writes summary artifacts under
 `outputs/automation_smoke/`.
+
+Generate a public plotting demo:
+
+```bash
+python run_simulation.py --config configs/plotting_rendezvous_demo.yaml
+```
+
+Expected result: the run writes dashboard, rendezvous, control, estimation, and
+sensor-access plots under `outputs/plotting_rendezvous_demo/`.
 
 Use the API:
 
@@ -91,6 +102,7 @@ reporting on top of the same simulation foundation.
 - [Quickstart](docs/quickstart.md)
 - [Scenario YAML](docs/scenario-yaml.md)
 - [Plotting](docs/plotting.md)
+- [Plot Gallery](docs/plot-gallery.md)
 - [Public Core And Pro Boundary](docs/public-vs-pro.md)
 - [cFS/SIL starter integration](integrations/cfs_sil/README.md)
 
