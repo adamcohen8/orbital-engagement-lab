@@ -42,6 +42,22 @@ Object Presets
 - If a scenario overrides with specs.mass_kg and does not provide dry/fuel masses,
   the preset dry_mass_kg/fuel_mass_kg are ignored for that agent.
 
+Plotting
+- Single-run plots are configured under outputs.plots:
+  plots:
+    enabled: true
+    preset: "rendezvous"
+    figure_ids:
+      - "run_dashboard"
+      - "rendezvous_summary"
+- Plot presets expand to useful figure bundles:
+  minimal, orbit, rendezvous, attitude, estimation, rocket, debug
+- Common public figure IDs include:
+  run_dashboard, rendezvous_summary, ground_track, ground_track_multi,
+  control_effort, estimation_error, estimation_error_components,
+  sensor_access, trajectory_eci_multi,
+  trajectory_ric_curv_2d_multi, relative_range, control_thrust.
+
 Algorithm Pointer Format
 - Any rocket.base_guidance/guidance_modifiers/orbit_control/attitude_control/mission_strategy/mission_execution/mission_objectives entry can use:
   kind: "python"

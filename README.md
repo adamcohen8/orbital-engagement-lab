@@ -90,6 +90,7 @@ reporting on top of the same simulation foundation.
 
 - [Quickstart](docs/quickstart.md)
 - [Scenario YAML](docs/scenario-yaml.md)
+- [Plotting](docs/plotting.md)
 - [Public Core And Pro Boundary](docs/public-vs-pro.md)
 - [cFS/SIL starter integration](integrations/cfs_sil/README.md)
 

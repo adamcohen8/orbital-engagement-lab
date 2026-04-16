@@ -39,6 +39,13 @@ def test_gui_capabilities_reflect_backend_catalog() -> None:
     assert caps.analysis_ui_profiles["sensitivity_lhs"].mode_label == "Distribution"
     assert "One-at-a-time sensitivity" in caps.analysis_ui_profiles["sensitivity_one_at_a_time"].help_text
     assert "rocket_fuel_remaining" in caps.figure_ids
+    assert "run_dashboard" in caps.figure_ids
+    assert "rendezvous_summary" in caps.figure_ids
+    assert "ground_track_multi" in caps.figure_ids
+    assert "control_effort" in caps.figure_ids
+    assert "estimation_error" in caps.figure_ids
+    assert "estimation_error_components" in caps.figure_ids
+    assert "sensor_access" in caps.figure_ids
     assert "ground_track_multi" in caps.animation_types
     assert "attitude_ric_thruster" in caps.animation_types
     assert "battlespace_dashboard" in caps.animation_types

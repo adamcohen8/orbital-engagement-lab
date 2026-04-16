@@ -324,9 +324,10 @@ outputs:
     save_full_log: true
   plots:
     enabled: true
+    # Optional presets: minimal, orbit, rendezvous, attitude, rocket, debug
+    preset: "rendezvous"
     reference_object_id: "target"
     figure_ids:
-      - "orbit_eci"
       - "trajectory_eci_multi"
       - "trajectory_ecef_multi"
       - "trajectory_ric_rect_multi"

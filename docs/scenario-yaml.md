@@ -115,7 +115,9 @@ outputs:
     enabled: true
     save_json: true
   plots:
-    enabled: false
+    enabled: true
+    preset: "minimal"
+    # Other presets: orbit, rendezvous, attitude, estimation, rocket, debug.
   animations:
     enabled: false
 ```

@@ -15,7 +15,11 @@ from sim.utils.ground_track import ground_track_from_eci_history
 from sim.utils.quaternion import quaternion_to_dcm_bn
 
 AVAILABLE_FIGURE_IDS = [
+    "run_dashboard",
+    "rendezvous_summary",
     "orbit_eci",
+    "ground_track",
+    "ground_track_multi",
     "trajectory_ecef",
     "trajectory_ric_rect",
     "trajectory_ric_curv",
@@ -38,6 +42,10 @@ AVAILABLE_FIGURE_IDS = [
     "control_thrust_multi",
     "control_thrust_ric",
     "control_thrust_ric_multi",
+    "control_effort",
+    "estimation_error",
+    "estimation_error_components",
+    "sensor_access",
     "quaternion_error",
     "rocket_ascent_diagnostics",
     "rocket_orbital_elements",
@@ -45,6 +53,47 @@ AVAILABLE_FIGURE_IDS = [
     "satellite_delta_v_remaining",
     "thrust_alignment_error",
 ]
+
+PLOT_PRESETS = {
+    "minimal": ["run_dashboard"],
+    "orbit": ["run_dashboard", "trajectory_eci_multi", "ground_track_multi"],
+    "rendezvous": ["run_dashboard", "rendezvous_summary", "trajectory_ric_curv_2d_multi", "relative_range", "control_effort"],
+    "attitude": ["run_dashboard", "quaternion_eci", "rates_eci", "quaternion_error"],
+    "estimation": ["estimation_error", "estimation_error_components", "knowledge_timeline", "sensor_access"],
+    "rocket": ["run_dashboard", "rocket_ascent_diagnostics", "rocket_orbital_elements", "rocket_fuel_remaining"],
+    "debug": list(AVAILABLE_FIGURE_IDS),
+}
+
+
+def _expanded_figure_ids(plots_cfg: dict[str, Any]) -> list[str]:
+    raw_presets = plots_cfg.get("preset", plots_cfg.get("presets", []))
+    if isinstance(raw_presets, str):
+        presets = [raw_presets]
+    elif isinstance(raw_presets, list):
+        presets = [str(x) for x in raw_presets]
+    else:
+        presets = []
+
+    expanded: list[str] = []
+    for preset in presets:
+        key = preset.strip().lower()
+        if not key:
+            continue
+        if key not in PLOT_PRESETS:
+            valid = ", ".join(sorted(PLOT_PRESETS.keys()))
+            raise ValueError(f"Unknown plot preset '{preset}'. Valid presets: {valid}")
+        expanded.extend(PLOT_PRESETS[key])
+    expanded.extend(str(x) for x in list(plots_cfg.get("figure_ids", []) or []))
+
+    out: list[str] = []
+    seen: set[str] = set()
+    for figure_id in expanded:
+        fid = str(figure_id).strip()
+        if not fid or fid in seen:
+            continue
+        out.append(fid)
+        seen.add(fid)
+    return out
 
 AVAILABLE_ANIMATION_TYPES = [
     "ground_track",
@@ -202,12 +251,13 @@ def plot_outputs(
     outdir: Path,
     resolve_rocket_stack: Callable[[dict[str, Any]], RocketStackPreset],
     resolve_satellite_isp_s: Callable[[dict[str, Any]], float],
+    belief_hist: dict[str, np.ndarray] | None = None,
 ) -> dict[str, str]:
     out: dict[str, str] = {}
     if not bool(cfg.outputs.plots.get("enabled", True)):
         return out
     mode = cfg.outputs.mode
-    figure_ids = list(cfg.outputs.plots.get("figure_ids", []) or [])
+    figure_ids = _expanded_figure_ids(dict(cfg.outputs.plots or {}))
     ric_2d_planes = list(cfg.outputs.plots.get("ric_2d_planes", ["ri", "ic", "rc"]) or ["ri", "ic", "rc"])
     reference_object_id = str(cfg.outputs.plots.get("reference_object_id", "")).strip()
     reference_truth_override = None
@@ -245,6 +295,154 @@ def plot_outputs(
     plot_quaternion_components = plot_fns["plot_quaternion_components"]
     plot_ric_2d_projections = plot_fns["plot_ric_2d_projections"]
     plot_trajectory_frame = plot_fns["plot_trajectory_frame"]
+    if any(
+        fid in figure_ids
+        for fid in (
+            "run_dashboard",
+            "rendezvous_summary",
+            "control_effort",
+            "estimation_error",
+            "estimation_error_components",
+            "sensor_access",
+            "ground_track",
+            "ground_track_multi",
+        )
+    ):
+        from sim.plotting import (
+            plot_control_effort,
+            plot_estimation_error,
+            plot_estimation_error_components,
+            plot_ground_track_from_payload,
+            plot_rendezvous_summary,
+            plot_run_dashboard,
+            plot_sensor_access,
+        )
+    dpi = int(cfg.outputs.plots.get("dpi", 150))
+    show = mode in ("interactive", "both")
+    close = mode == "save"
+    save_enabled = mode in ("save", "both")
+
+    if "run_dashboard" in figure_ids:
+        p = outdir / "run_dashboard.png"
+        plot_run_dashboard(
+            t_s=t_s,
+            truth_by_object=truth_hist,
+            thrust_by_object=thrust_hist,
+            belief_by_object=belief_hist or {},
+            target_reference_orbit_truth=target_reference_orbit_truth,
+            reference_object_id=reference_object_id or None,
+            out_path=p if save_enabled else None,
+            show=show,
+            close=close,
+            dpi=dpi,
+        )
+        if save_enabled:
+            out["run_dashboard"] = str(p)
+
+    if "rendezvous_summary" in figure_ids:
+        p = outdir / "rendezvous_summary.png"
+        keepout_radius = cfg.outputs.plots.get("keepout_radius_km")
+        plot_rendezvous_summary(
+            t_s=t_s,
+            truth_by_object=truth_hist,
+            target_reference_orbit_truth=target_reference_orbit_truth,
+            reference_object_id=reference_object_id or None,
+            keepout_radius_km=None if keepout_radius is None else float(keepout_radius),
+            out_path=p if save_enabled else None,
+            show=show,
+            close=close,
+            dpi=dpi,
+        )
+        if save_enabled:
+            out["rendezvous_summary"] = str(p)
+
+    if "control_effort" in figure_ids:
+        p = outdir / "control_effort.png"
+        plot_control_effort(
+            t_s=t_s,
+            thrust_by_object=thrust_hist,
+            out_path=p if save_enabled else None,
+            show=show,
+            close=close,
+            dpi=dpi,
+        )
+        if save_enabled:
+            out["control_effort"] = str(p)
+
+    if "estimation_error" in figure_ids:
+        p = outdir / "estimation_error.png"
+        plot_estimation_error(
+            t_s=t_s,
+            truth_by_object=truth_hist,
+            belief_by_object=belief_hist or {},
+            out_path=p if save_enabled else None,
+            show=show,
+            close=close,
+            dpi=dpi,
+        )
+        if save_enabled:
+            out["estimation_error"] = str(p)
+
+    if "estimation_error_components" in figure_ids:
+        p = outdir / "estimation_error_components.png"
+        plot_estimation_error_components(
+            t_s=t_s,
+            truth_by_object=truth_hist,
+            belief_by_object=belief_hist or {},
+            out_path=p if save_enabled else None,
+            show=show,
+            close=close,
+            dpi=dpi,
+        )
+        if save_enabled:
+            out["estimation_error_components"] = str(p)
+
+    if "sensor_access" in figure_ids:
+        p = outdir / "sensor_access.png"
+        plot_sensor_access(
+            t_s=t_s,
+            truth_by_object=truth_hist,
+            knowledge_by_observer=knowledge_hist,
+            out_path=p if save_enabled else None,
+            show=show,
+            close=close,
+            dpi=dpi,
+        )
+        if save_enabled:
+            out["sensor_access"] = str(p)
+
+    if "ground_track_multi" in figure_ids:
+        p = outdir / "ground_track_multi.png"
+        plot_ground_track_from_payload(
+            t_s=t_s,
+            truth_by_object=truth_hist,
+            jd_utc_start=cfg.simulator.initial_jd_utc,
+            out_path=p if save_enabled else None,
+            show=show,
+            close=close,
+            dpi=dpi,
+        )
+        if save_enabled:
+            out["ground_track_multi"] = str(p)
+
+    if "ground_track" in figure_ids:
+        for oid, hist in truth_hist.items():
+            if hist.size == 0 or not np.any(np.isfinite(hist[:, 0])):
+                continue
+            p = outdir / f"{oid}_ground_track.png"
+            plot_ground_track_from_payload(
+                t_s=t_s,
+                truth_by_object={oid: hist},
+                jd_utc_start=cfg.simulator.initial_jd_utc,
+                object_id=oid,
+                out_path=p if save_enabled else None,
+                show=show,
+                close=close,
+                dpi=dpi,
+            )
+            if save_enabled:
+                out[f"{oid}_ground_track"] = str(p)
+
     for oid, hist in truth_hist.items():
         if not np.any(np.isfinite(hist[:, 0])):
             continue

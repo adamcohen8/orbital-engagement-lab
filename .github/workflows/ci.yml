@@ -24,6 +24,7 @@ jobs:
       - name: Run focused tests
         run: |
           python -m pytest -q \
+            sim/tests/test_plotting_public.py \
             sim/tests/test_scenario_yaml_config.py \
             sim/tests/test_app_io.py \
             sim/tests/test_api.py \
