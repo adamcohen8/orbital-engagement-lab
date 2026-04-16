@@ -1,0 +1,135 @@
+import unittest
+
+import numpy as np
+
+from sim.core.models import StateBelief, StateTruth
+from sim.mission.modules import DefensiveMissionStrategy, DefensiveRICAxisBurnMissionModule, SingleRICAxisBurnMissionModule
+
+
+def _truth() -> StateTruth:
+    return StateTruth(
+        position_eci_km=np.array([7000.0, 0.0, 0.0], dtype=float),
+        velocity_eci_km_s=np.array([0.0, 7.5, 0.0], dtype=float),
+        attitude_quat_bn=np.array([1.0, 0.0, 0.0, 0.0], dtype=float),
+        angular_rate_body_rad_s=np.zeros(3, dtype=float),
+        mass_kg=100.0,
+        t_s=0.0,
+    )
+
+
+class DefensiveRICAxisMissionTests(unittest.TestCase):
+    def test_strategy_no_knowledge_no_burn(self) -> None:
+        m = DefensiveMissionStrategy(chaser_id="chaser", axis_mode="+R", burn_accel_km_s2=2e-6)
+        out = m.update(truth=_truth(), own_knowledge={}, world_truth={})
+        self.assertTrue(np.allclose(np.array(out["fallback_thrust_eci_km_s2"], dtype=float), np.zeros(3), atol=1e-15))
+        self.assertFalse(bool(out["mission_mode"]["triggered"]))
+
+    def test_strategy_burn_triggers_with_knowledge(self) -> None:
+        m = DefensiveMissionStrategy(chaser_id="chaser", axis_mode="+I", burn_accel_km_s2=3e-6)
+        kb = StateBelief(state=np.array([7100.0, 0.0, 0.0, 0.0, 7.4, 0.0]), covariance=np.eye(6), last_update_t_s=0.0)
+        out = m.update(truth=_truth(), own_knowledge={"chaser": kb}, world_truth={})
+        thrust = np.array(out["fallback_thrust_eci_km_s2"], dtype=float)
+        self.assertAlmostEqual(float(np.linalg.norm(thrust)), 3e-6, places=12)
+        self.assertGreater(float(thrust[1]), 0.0)
+        self.assertTrue(bool(out["mission_mode"]["triggered"]))
+
+    def test_strategy_away_from_chaser_mode_points_radially_away(self) -> None:
+        m = DefensiveMissionStrategy(chaser_id="chaser", defense_mode="away_from_chaser", burn_accel_km_s2=2e-6)
+        kb = StateBelief(state=np.array([7100.0, 0.0, 0.0, 0.0, 7.4, 0.0]), covariance=np.eye(6), last_update_t_s=0.0)
+        out = m.update(truth=_truth(), own_knowledge={"chaser": kb}, world_truth={})
+        thrust = np.array(out["fallback_thrust_eci_km_s2"], dtype=float)
+        self.assertLess(float(thrust[0]), 0.0)
+        self.assertAlmostEqual(float(np.linalg.norm(thrust)), 2e-6, places=12)
+
+    def test_no_knowledge_no_burn(self) -> None:
+        m = DefensiveRICAxisBurnMissionModule(chaser_id="chaser", axis_mode="+R", burn_accel_km_s2=2e-6)
+        out = m.update(truth=_truth(), own_knowledge={}, t_s=0.0, dt_s=1.0)
+        self.assertTrue(np.allclose(np.array(out["thrust_eci_km_s2"], dtype=float), np.zeros(3), atol=1e-15))
+        self.assertFalse(bool(out["mission_mode"]["triggered"]))
+
+    def test_burn_triggers_with_knowledge(self) -> None:
+        m = DefensiveRICAxisBurnMissionModule(chaser_id="chaser", axis_mode="+I", burn_accel_km_s2=3e-6)
+        kb = StateBelief(state=np.array([7100.0, 0.0, 0.0, 0.0, 7.4, 0.0]), covariance=np.eye(6), last_update_t_s=0.0)
+        out = m.update(truth=_truth(), own_knowledge={"chaser": kb}, t_s=0.0, dt_s=1.0)
+        thrust = np.array(out["thrust_eci_km_s2"], dtype=float)
+        self.assertAlmostEqual(float(np.linalg.norm(thrust)), 3e-6, places=12)
+        self.assertGreater(float(thrust[1]), 0.0)
+        self.assertTrue(bool(out["mission_mode"]["triggered"]))
+
+    def test_negative_cross_track_direction(self) -> None:
+        m = DefensiveRICAxisBurnMissionModule(chaser_id="chaser", axis_mode="-C", burn_accel_km_s2=1e-6)
+        kb = StateBelief(state=np.array([7100.0, 0.0, 0.0, 0.0, 7.4, 0.0]), covariance=np.eye(6), last_update_t_s=0.0)
+        out = m.update(truth=_truth(), own_knowledge={"chaser": kb}, t_s=0.0, dt_s=1.0)
+        thrust = np.array(out["thrust_eci_km_s2"], dtype=float)
+        self.assertLess(float(thrust[2]), 0.0)
+
+    def test_single_burn_module_treats_plus_i_plume_as_negative_i_force(self) -> None:
+        m = SingleRICAxisBurnMissionModule(
+            target_id="target",
+            use_knowledge_for_targeting=False,
+            axis_mode="+I",
+            axis_kind="plume",
+            burn_accel_km_s2=3e-6,
+            burn_start_s=0.0,
+            burn_duration_s=10.0,
+        )
+        out = m.update(
+            truth=_truth(),
+            own_knowledge={},
+            world_truth={"target": _truth()},
+            t_s=0.0,
+            dt_s=1.0,
+        )
+        thrust = np.array(out["fallback_thrust_eci_km_s2"], dtype=float)
+        self.assertAlmostEqual(float(np.linalg.norm(thrust)), 3e-6, places=12)
+        self.assertLess(float(thrust[1]), 0.0)
+        self.assertEqual(out["mission_mode"]["phase"], "burn")
+        self.assertEqual(np.array(out["desired_attitude_quat_bn"], dtype=float).shape, (4,))
+
+    def test_single_burn_module_commands_slew_before_burn(self) -> None:
+        m = SingleRICAxisBurnMissionModule(
+            target_id="target",
+            use_knowledge_for_targeting=False,
+            axis_mode="+I",
+            axis_kind="plume",
+            burn_accel_km_s2=3e-6,
+            burn_start_s=20.0,
+            burn_duration_s=5.0,
+            slew_lead_time_s=10.0,
+        )
+        out = m.update(
+            truth=_truth(),
+            own_knowledge={},
+            world_truth={"target": _truth()},
+            t_s=15.0,
+            dt_s=1.0,
+        )
+        thrust = np.array(out["fallback_thrust_eci_km_s2"], dtype=float)
+        self.assertTrue(np.allclose(thrust, np.zeros(3), atol=1e-15))
+        self.assertEqual(out["mission_mode"]["phase"], "slew")
+        self.assertTrue(bool(out["mission_mode"]["slew_active"]))
+        self.assertEqual(np.array(out["desired_attitude_quat_bn"], dtype=float).shape, (4,))
+
+    def test_single_burn_module_coasts_after_window(self) -> None:
+        m = SingleRICAxisBurnMissionModule(
+            target_id="target",
+            axis_mode="+I",
+            axis_kind="plume",
+            burn_accel_km_s2=3e-6,
+            burn_start_s=0.0,
+            burn_duration_s=5.0,
+        )
+        out = m.update(
+            truth=_truth(),
+            own_knowledge={},
+            world_truth={"target": _truth()},
+            t_s=6.0,
+            dt_s=1.0,
+        )
+        thrust = np.array(out["fallback_thrust_eci_km_s2"], dtype=float)
+        self.assertTrue(np.allclose(thrust, np.zeros(3), atol=1e-15))
+        self.assertEqual(out["mission_mode"]["phase"], "coast")
+
+
+if __name__ == "__main__":
+    unittest.main()
