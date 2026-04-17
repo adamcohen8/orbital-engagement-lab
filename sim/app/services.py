@@ -468,16 +468,10 @@ def get_gui_capabilities() -> GuiCapabilities:
     return GuiCapabilities(
         output_modes=["interactive", "save", "both"],
         orbit_integrators=["rk4", "rkf78", "dopri5"],
-        analysis_study_types=[
-            ("monte_carlo", "Monte Carlo"),
-            ("sensitivity", "Sensitivity"),
-        ],
-        sensitivity_methods=[
-            ("one_at_a_time", "One-at-a-Time"),
-            ("lhs", "Latin Hypercube"),
-        ],
-        monte_carlo_modes=["choice", "uniform", "normal"],
-        monte_carlo_lhs_modes=["uniform", "normal"],
+        analysis_study_types=[],
+        sensitivity_methods=[],
+        monte_carlo_modes=[],
+        monte_carlo_lhs_modes=[],
         chaser_init_modes=["rocket_deployment", "relative_ric_rect", "relative_ric_curv"],
         satellite_presets=_discover_named_presets("sim.presets.satellites", "SatellitePreset"),
         rocket_preset_stacks=_discover_named_presets("sim.presets.rockets", "RocketStackPreset"),
@@ -614,9 +608,9 @@ def get_gui_capabilities() -> GuiCapabilities:
                 include_none=True,
             ),
         },
-        monte_carlo_parameter_categories=MONTE_CARLO_PARAMETER_CATEGORIES,
+        monte_carlo_parameter_categories={},
         parameter_form_schemas=PARAMETER_FORM_SCHEMAS,
-        analysis_ui_profiles=ANALYSIS_UI_PROFILES,
+        analysis_ui_profiles={},
     )
 
 

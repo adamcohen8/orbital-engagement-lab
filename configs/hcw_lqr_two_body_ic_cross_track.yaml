@@ -94,9 +94,3 @@ outputs:
   animations:
     enabled: false
     types: []
-
-monte_carlo:
-  enabled: false
-  iterations: 1
-  base_seed: 123
-  variations: []

@@ -192,8 +192,3 @@ outputs:
     fps: 30
     speed_multiple: 1.0
     frame_stride: 1
-
-monte_carlo:
-  enabled: false
-  iterations: 1
-  base_seed: 123
