@@ -3,7 +3,8 @@
 [![CI](https://github.com/adamcohen8/orbital-engagement-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/adamcohen8/orbital-engagement-lab/actions/workflows/ci.yml)
 
 Open-core spacecraft simulation framework for closed-loop rendezvous, proximity
-operations, attitude control, sensing, estimation, and mission prototyping.
+operations, attitude control, sensing, estimation, plotting, and mission
+prototyping.
 
 Orbital Engagement Lab exists to make it easier to prototype spacecraft behavior
 as a full closed loop: orbit dynamics, attitude dynamics, sensors, estimators,
@@ -12,10 +13,11 @@ scenario definition.
 
 ![Run dashboard](docs/assets/plots/run_dashboard.png)
 
-The public repository is the simulation foundation. Orbital Engagement Pro adds
-workflow acceleration around that foundation: controller benchmarking,
-optimization, campaign orchestration, sensitivity studies, dashboards, and
-curated validation scenario packs.
+The public repository is the simulation foundation: deterministic single-run
+scenarios, public controllers, estimators, object presets, plots, examples, and
+API workflows. Orbital Engagement Pro adds workflow acceleration around that
+foundation: controller benchmarking, optimization, campaign orchestration,
+sensitivity studies, dashboards, and curated validation scenario packs.
 
 ## First Run
 
@@ -71,6 +73,11 @@ python -m pip install ".[gui]"
 python run_gui.py
 ```
 
+The public CLI and GUI are intentionally scoped to deterministic single-run
+scenarios. Batch analysis settings are not exposed in public examples, and
+configs with enabled Monte Carlo or sensitivity studies are rejected with a clear
+Pro-boundary message.
+
 ## What This Public Core Includes
 
 - deterministic step-based simulation
@@ -82,7 +89,8 @@ python run_gui.py
 - orbit and attitude controller interfaces and reference controllers
 - YAML-backed scenario configuration with reusable object presets
 - Python API, CLI, GUI entrypoints, and examples
-- basic validation harnesses and HPOP comparison helpers
+- single-run dashboards, trajectory plots, estimation plots, and sensor-access plots
+- machine-learning environment helpers
 - starter cFS/SIL integration mock
 
 ## What Orbital Engagement Pro Adds
@@ -128,16 +136,6 @@ python -m pip install ".[ml]"
 python -m pip install ".[full]"
 ```
 
-## Validation Data
-
-The public repo includes lightweight validation assets. Large or
-redistribution-sensitive ephemeris data is not stored in Git. If you run
-DE440-backed HPOP parity checks, place `DE440Coeff.mat` locally at:
-
-```text
-validation/data/DE440Coeff.mat
-```
-
 ## Project Layout
 
 - `sim/core/` kernel, models, scheduling
@@ -153,6 +151,7 @@ validation/data/DE440Coeff.mat
 - `sim/presets/` reusable object and hardware presets
 - `sim/gui/` native desktop GUI
 - `sim/rocket/` ascent/rocket components
+- `machine_learning/` public environment helpers and training entrypoints
 - `integrations/cfs_sil/` cFS/SIL starter integration
 - `examples/` runnable demos
 - `docs/` user-facing documentation
