@@ -23,7 +23,7 @@ Security reports are most useful when they affect:
 - arbitrary code execution through scenario loading or plugin pointers
 - unsafe handling of local files or paths
 - dependency or packaging risks
-- integration surfaces such as cFS/SIL adapters
+- external integration or adapter surfaces
 
 Simulation-model correctness issues are also welcome, but they may be handled as
 engineering bugs rather than security vulnerabilities unless they create a clear

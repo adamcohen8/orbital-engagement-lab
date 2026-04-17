@@ -18,7 +18,7 @@ class _UnavailablePrivateFeature:
 
 
 def __getattr__(name: str):
-    _unavailable()
+    raise AttributeError(f"module 'sim.optimization' has no attribute {name!r}")
 
 
 ParameterBound = _UnavailablePrivateFeature

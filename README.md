@@ -78,6 +78,10 @@ scenarios. Batch analysis settings are not exposed in public examples, and
 configs with enabled Monte Carlo or sensitivity studies are rejected with a clear
 Pro-boundary message.
 
+Spherical-harmonic gravity can use inline YAML terms or coefficient files you
+provide. HPOP/GGM03 validation data is not bundled in the public core, so
+`source: "hpop_ggm03"` scenarios should also set `coeff_path`.
+
 ## What This Public Core Includes
 
 - deterministic step-based simulation
@@ -91,7 +95,6 @@ Pro-boundary message.
 - Python API, CLI, GUI entrypoints, and examples
 - single-run dashboards, trajectory plots, estimation plots, and sensor-access plots
 - machine-learning environment helpers
-- starter cFS/SIL integration mock
 
 ## What Orbital Engagement Pro Adds
 
@@ -100,6 +103,7 @@ Pro-boundary message.
 - Monte Carlo and sensitivity campaign orchestration
 - campaign dashboards, baselines, and review-ready reports
 - curated validation and mission-assurance scenario packs
+- cFS/SIL and program-specific flight-software integration workflows
 
 The public core is intended to be useful on its own. The pro layer is for teams
 that need repeatable analysis workflows, tuning loops, campaign management, and
@@ -112,7 +116,6 @@ reporting on top of the same simulation foundation.
 - [Plotting](docs/plotting.md)
 - [Plot Gallery](docs/plot-gallery.md)
 - [Public Core And Pro Boundary](docs/public-vs-pro.md)
-- [cFS/SIL starter integration](integrations/cfs_sil/README.md)
 
 ## Curated Examples
 
@@ -121,7 +124,6 @@ reporting on top of the same simulation foundation.
 - `examples/Attitude_PD_ReactionWheel_Demo.py` for attitude control
 - `examples/Rendezvous_HCW_AttitudeLQR_Demo.py` for integrated rendezvous
 - `examples/Object_Knowledge_EKF_Demo.py` for sensing and estimation
-- `examples/CFS_SIL_SingleSat_Loop_Demo.py` for cFS/SIL integration
 
 Additional examples are included for orbit perturbations, rocket ascent,
 attitude animation, MPC controllers, machine-learning environments, and plotting.
@@ -152,7 +154,6 @@ python -m pip install ".[full]"
 - `sim/gui/` native desktop GUI
 - `sim/rocket/` ascent/rocket components
 - `machine_learning/` public environment helpers and training entrypoints
-- `integrations/cfs_sil/` cFS/SIL starter integration
 - `examples/` runnable demos
 - `docs/` user-facing documentation
 

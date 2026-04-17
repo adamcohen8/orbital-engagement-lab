@@ -10,7 +10,6 @@ from sim.dynamics.orbit.spherical_harmonics import (
     SphericalHarmonicTerm,
     accel_spherical_harmonics_terms,
     configure_spherical_harmonics_env,
-    default_hpop_ggm03_coeff_path,
     load_icgem_gfc_terms,
     parse_spherical_harmonic_terms,
 )
@@ -99,7 +98,7 @@ class TestOrbitSphericalHarmonics(unittest.TestCase):
                 mu_km3_s2=EARTH_MU_KM3_S2,
                 re_km=6378.1363,
                 jd_utc_start=2460400.5,
-                frame_model="hpop_like",
+                frame_model="simple",
                 eop_path=str(eop_path),
             )
         a_j2 = accel_j2(r, EARTH_MU_KM3_S2, j2=0.0010826355254902923, re_km=6378.1363)
@@ -122,22 +121,29 @@ class TestOrbitSphericalHarmonics(unittest.TestCase):
         self.assertEqual(len(terms), 2)
         self.assertTrue(all(t.normalized for t in terms))
 
-    def test_configure_env_loads_hpop_terms_and_radius(self):
-        orbit_cfg = {
-            "spherical_harmonics": {
-                "enabled": True,
-                "degree": 2,
-                "order": 0,
-                "source": "hpop_ggm03",
+    def test_configure_env_loads_hpop_terms_and_radius_from_explicit_path(self):
+        with tempfile.TemporaryDirectory() as td:
+            coeff_path = Path(td) / "GGM03C.txt"
+            coeff_path.write_text(
+                "2 0 -4.841693259705e-04 0.000000000000e+00 4.68460e-11 0.00000e+00\n",
+                encoding="utf-8",
+            )
+            orbit_cfg = {
+                "spherical_harmonics": {
+                    "enabled": True,
+                    "degree": 2,
+                    "order": 0,
+                    "source": "hpop_ggm03",
+                    "coeff_path": str(coeff_path),
+                }
             }
-        }
-        env = configure_spherical_harmonics_env({}, orbit_cfg)
+            env = configure_spherical_harmonics_env({}, orbit_cfg)
         self.assertIn("spherical_harmonics_terms", env)
         self.assertEqual([(t.n, t.m) for t in env["spherical_harmonics_terms"]], [(2, 0)])
         term = env["spherical_harmonics_terms"][0]
         self.assertEqual((term.n, term.m), (2, 0))
         self.assertTrue(term.normalized)
-        self.assertEqual(Path(env["spherical_harmonics_source"]), default_hpop_ggm03_coeff_path().resolve())
+        self.assertEqual(Path(env["spherical_harmonics_source"]), coeff_path.resolve())
         self.assertAlmostEqual(float(env["spherical_harmonics_reference_radius_km"]), 6378.1363)
 
 

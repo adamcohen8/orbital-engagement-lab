@@ -52,13 +52,6 @@ rocket:
     class_name: "RocketGoNowExecution"
     params: {}
   mission_objectives: []
-  bridge:
-    enabled: false
-    mode: "sil"
-    endpoint: "udp://127.0.0.1:50100"
-    module: "integrations.cfs_sil.python_bridge"
-    class_name: "CFSBridge"
-    params: {}
   knowledge:
     refresh_rate_s: 1.0
     targets:
@@ -138,13 +131,6 @@ chaser:
       alignment_tolerance_deg: 10.0
       require_attitude_alignment: true
   mission_objectives: []
-  bridge:
-    enabled: false
-    mode: "hil"
-    endpoint: "udp://127.0.0.1:51100"
-    module: "integrations.hil.bridge"
-    class_name: "HILBridge"
-    params: {}
   knowledge:
     refresh_rate_s: 1.0
     targets:
@@ -211,13 +197,6 @@ target:
       alignment_tolerance_deg: 10.0
       require_attitude_alignment: false
   mission_objectives: []
-  bridge:
-    enabled: false
-    mode: "sil"
-    endpoint: null
-    module: null
-    class_name: null
-    params: {}
   knowledge:
     refresh_rate_s: 1.0
     targets:

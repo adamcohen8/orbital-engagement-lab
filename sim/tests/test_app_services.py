@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 import tempfile
 
+import pytest
+
 from sim.app.services import (
     dump_config_text,
     get_default_config_path,
@@ -52,6 +54,24 @@ def test_public_gui_capabilities_hide_pro_analysis_workflows() -> None:
     assert "ground_track_multi" in caps.animation_types
 
 
+def test_public_gui_window_starts_without_analysis_modes(monkeypatch) -> None:
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    try:
+        from PySide6.QtWidgets import QApplication
+    except (ImportError, ModuleNotFoundError) as exc:
+        pytest.skip(f"PySide6 is unavailable in this environment: {exc}")
+
+    from sim.gui.main_window import MainWindow
+
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    try:
+        assert window.mc_mode_combo.count() == 0
+        assert window.mc_add_update_variation_button.isEnabled() is False
+    finally:
+        window.close()
+
+
 def test_run_config_via_api_executes_single_run() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         cfg_path = Path(tmpdir) / "gui_service_run.yaml"
@@ -92,3 +112,15 @@ def test_run_config_via_api_executes_single_run() -> None:
         assert result.returncode == 0
         assert result.scenario_name == "gui_service_run"
         assert "Scenario: gui_service_run" in result.stdout
+
+
+def test_public_private_feature_stub_is_introspection_safe() -> None:
+    import sim.optimization as opt
+
+    assert hasattr(opt, "__wrapped__") is False
+    try:
+        opt.PSOConfig()
+    except ImportError as exc:
+        assert "Orbital Engagement Pro" in str(exc)
+    else:
+        raise AssertionError("Expected public optimization stub to raise ImportError.")

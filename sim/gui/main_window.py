@@ -1256,6 +1256,16 @@ class MainWindow(QMainWindow):
             self.mc_mode_combo.blockSignals(True)
             self._populate_value_combo(self.mc_mode_combo, [(mode, mode) for mode in allowed_modes])
             self.mc_mode_combo.blockSignals(False)
+        if not allowed_modes:
+            self.mc_mode_combo.setEnabled(False)
+            self.analysis_inputs_box.setEnabled(False)
+            self.analysis_editor_box.setEnabled(False)
+            self._refresh_mc_mode_ui()
+            self._refresh_mc_variation_button_state()
+            return
+        self.mc_mode_combo.setEnabled(True)
+        self.analysis_inputs_box.setEnabled(True)
+        self.analysis_editor_box.setEnabled(True)
         if current_mode not in allowed_modes:
             current_mode = allowed_modes[0]
         self._set_combo_data_or_text(self.mc_mode_combo, current_mode)
@@ -1271,8 +1281,10 @@ class MainWindow(QMainWindow):
 
     def _refresh_mc_variation_button_state(self) -> None:
         has_selection = self.mc_variations_list.currentRow() >= 0
+        has_modes = self.mc_mode_combo.count() > 0
         self.mc_add_update_variation_button.setText("Update" if has_selection else "Add")
-        self.mc_remove_variation_button.setEnabled(has_selection)
+        self.mc_add_update_variation_button.setEnabled(has_modes)
+        self.mc_remove_variation_button.setEnabled(has_selection and has_modes)
 
     def _mc_path_display_name(self, path: str) -> str:
         for entries in MC_PARAMETER_CATEGORIES.values():
@@ -1366,7 +1378,9 @@ class MainWindow(QMainWindow):
         self._refresh_mc_parameter_options()
         self.mc_custom_path_edit.clear()
         default_mode = "uniform" if (self._selected_analysis_study_type() == "sensitivity" and self._selected_sensitivity_method() == "lhs") else "choice"
-        self._set_combo_data_or_text(self.mc_mode_combo, default_mode)
+        allowed_modes = [str(self.mc_mode_combo.itemData(i) or self.mc_mode_combo.itemText(i)) for i in range(self.mc_mode_combo.count())]
+        if allowed_modes:
+            self._set_combo_data_or_text(self.mc_mode_combo, default_mode if default_mode in set(allowed_modes) else allowed_modes[0])
         self.mc_choice_options_edit.clear()
         self.mc_uniform_low_spin.setValue(0.0)
         self.mc_uniform_high_spin.setValue(0.0)

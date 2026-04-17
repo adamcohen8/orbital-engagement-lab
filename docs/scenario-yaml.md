@@ -105,6 +105,41 @@ simulator:
 `duration_s` must be a positive integer multiple of `dt_s`. Substeps must divide
 the main time step cleanly.
 
+### Spherical Harmonics
+
+Public scenarios can use inline spherical-harmonic terms directly:
+
+```yaml
+simulator:
+  dynamics:
+    orbit:
+      spherical_harmonics:
+        enabled: true
+        degree: 2
+        order: 0
+        terms:
+          - n: 2
+            m: 0
+            c_nm: -4.841693259705e-04
+            s_nm: 0.0
+            normalized: true
+```
+
+The `hpop_ggm03` source expects an explicit coefficient file path in public
+distributions:
+
+```yaml
+spherical_harmonics:
+  enabled: true
+  degree: 8
+  order: 8
+  source: "hpop_ggm03"
+  coeff_path: "/path/to/GGM03C.txt"
+```
+
+The private validation tree may contain HPOP reference data, but those files are
+not bundled with the public core.
+
 ## Outputs
 
 ```yaml

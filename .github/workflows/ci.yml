@@ -32,3 +32,62 @@ jobs:
 
       - name: Validate smoke scenario
         run: python run_simulation.py --config configs/automation_smoke.yaml --validate-only
+
+  generated-public-export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Generate public export
+        run: python tools/export_public.py "$RUNNER_TEMP/orbital-engagement-lab-public" --force
+
+      - name: Check public export boundary
+        run: python tools/check_public_export.py "$RUNNER_TEMP/orbital-engagement-lab-public"
+
+      - name: Install generated public package
+        working-directory: ${{ runner.temp }}/orbital-engagement-lab-public
+        run: |
+          python -m pip install -U pip
+          python -m pip install ".[dev,gui]"
+
+      - name: Run generated public tests
+        working-directory: ${{ runner.temp }}/orbital-engagement-lab-public
+        run: python -m pytest -q sim/tests
+
+      - name: Validate public smoke scenario
+        working-directory: ${{ runner.temp }}/orbital-engagement-lab-public
+        run: python run_simulation.py --config configs/automation_smoke.yaml --validate-only
+
+      - name: Run curated public examples headlessly
+        working-directory: ${{ runner.temp }}/orbital-engagement-lab-public
+        env:
+          MPLCONFIGDIR: ${{ runner.temp }}/matplotlib
+        run: |
+          mkdir -p "$MPLCONFIGDIR"
+          python examples/Simulation_Config_Load_Demo.py
+          python examples/Orbit_HCW_LQR_Demo.py --plot-mode save --duration 120
+          python examples/Attitude_PD_ReactionWheel_Demo.py --plot-mode save --duration 20 --attitude-dt 0.1
+          python examples/Rendezvous_HCW_AttitudeLQR_Demo.py --plot-mode save --duration 20 --dt 2
+          python examples/Object_Knowledge_EKF_Demo.py --plot-mode save
+
+      - name: Smoke public GUI startup
+        working-directory: ${{ runner.temp }}/orbital-engagement-lab-public
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          python - <<'PY'
+          import sys
+          from PySide6.QtWidgets import QApplication
+          from sim.gui.main_window import MainWindow
+
+          app = QApplication.instance() or QApplication(sys.argv)
+          window = MainWindow()
+          window.close()
+          print("public GUI startup ok")
+          PY

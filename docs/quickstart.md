@@ -77,3 +77,10 @@ python -m pip install ".[full]"
 
 The GUI profile enables `python run_gui.py`. The ML profile enables the bundled
 Gymnasium-style environments and training examples.
+
+## Gravity Coefficient Files
+
+The public core supports spherical-harmonic gravity from inline YAML terms or
+from coefficient files you provide. HPOP/GGM03 validation data is not bundled in
+the public distribution, so scenarios that set `source: "hpop_ggm03"` should also
+set `coeff_path` to a local coefficient file.

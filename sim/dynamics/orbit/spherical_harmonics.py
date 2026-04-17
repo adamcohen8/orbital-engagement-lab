@@ -323,6 +323,12 @@ def configure_spherical_harmonics_env(base_env: dict | None, orbit_cfg: dict | N
         coeff_path = default_hpop_ggm03_coeff_path() if coeff_path_raw in (None, "") else Path(str(coeff_path_raw)).expanduser()
         if not coeff_path.is_absolute():
             coeff_path = Path(__file__).resolve().parents[3] / coeff_path
+        if coeff_path_raw in (None, "") and not coeff_path.exists():
+            raise FileNotFoundError(
+                "HPOP GGM03 coefficients are not bundled with this distribution. "
+                "Provide spherical_harmonics.coeff_path/source_path, or use explicit "
+                "spherical_harmonics.terms for public-core scenarios."
+            )
         terms = load_hpop_ggm03_terms(
             coeff_path=coeff_path,
             max_degree=degree,

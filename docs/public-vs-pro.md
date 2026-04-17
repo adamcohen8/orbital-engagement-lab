@@ -4,7 +4,7 @@ Orbital Engagement Lab is organized as an open-core project.
 
 The public repository contains the simulation foundation: dynamics, controllers,
 estimators, actuators, sensors, mission modules, scenario YAML, API workflows,
-examples, validation helpers, and starter integration surfaces.
+examples, validation helpers, and lightweight extension surfaces.
 
 Orbital Engagement Pro builds on the same foundation with higher-level analysis
 workflows for teams that need repeatability, search, campaign management, and
@@ -23,7 +23,6 @@ The public core includes:
 - reusable object preset YAML files
 - Python API, CLI, and GUI entrypoints
 - examples and starter validation workflows
-- cFS/SIL mock integration
 
 The public core should be useful for research, education, prototyping, and
 inspectable engineering experiments.
@@ -38,6 +37,7 @@ The pro layer includes:
 - sensitivity studies
 - campaign dashboards and baselines
 - curated validation and mission-assurance scenario packs
+- cFS/SIL and program-specific flight-software integration workflows
 
 Those workflows are intentionally not part of the public export. Public modules
 that would otherwise expose those surfaces raise clear import errors explaining
