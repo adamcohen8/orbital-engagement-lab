@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 
@@ -219,6 +219,7 @@ class SimulationSession:
         self._step_index = 0
         self._done = False
         self._engine: Any | None = None
+        self._external_intent_providers: dict[str, Callable[..., dict[str, Any] | None]] = {}
 
     @classmethod
     def from_config(cls, config: SimulationConfig | SimulationScenarioConfig | dict[str, Any]) -> "SimulationSession":
@@ -304,6 +305,19 @@ class SimulationSession:
             applied_torque=dict(snap["applied_torque"]),
         )
 
+    def set_external_intent_provider(
+        self,
+        object_id: str,
+        provider: Callable[..., dict[str, Any] | None] | None,
+    ) -> None:
+        oid = str(object_id)
+        if provider is None:
+            self._external_intent_providers.pop(oid, None)
+        else:
+            self._external_intent_providers[oid] = provider
+        if self._engine is not None and hasattr(self._engine, "set_external_intent_provider"):
+            self._engine.set_external_intent_provider(oid, provider)
+
     def _ensure_engine(self, *, step_callback: Any | None = None) -> None:
         if self._engine is not None:
             if step_callback is not None:
@@ -313,6 +327,9 @@ class SimulationSession:
                     emit(getattr(self._engine, "current_index", 0))
             return
         self._engine = create_single_run_engine(self._active_config.to_scenario_config(), step_callback=step_callback)
+        if hasattr(self._engine, "set_external_intent_provider"):
+            for object_id, provider in self._external_intent_providers.items():
+                self._engine.set_external_intent_provider(object_id, provider)
 
     @staticmethod
     def _is_batch_analysis(config: SimulationScenarioConfig) -> bool:

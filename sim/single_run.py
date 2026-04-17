@@ -288,6 +288,7 @@ class _SingleRunEngine:
         self.burn_samples_by_object = {aid: 0 for aid in self.agents.keys()}
         self.max_accel_km_s2_by_object = {aid: 0.0 for aid in self.agents.keys()}
         self.current_index = 0
+        self.external_intent_providers: dict[str, Callable[..., dict[str, Any] | None]] = {}
 
         for aid, agent in self.agents.items():
             if not agent.active:
@@ -344,6 +345,55 @@ class _SingleRunEngine:
             "applied_thrust": {oid: np.array(hist[idx], dtype=float) for oid, hist in self.thrust_hist.items()},
             "applied_torque": {oid: np.array(hist[idx], dtype=float) for oid, hist in self.torque_hist.items()},
         }
+
+    def set_external_intent_provider(
+        self,
+        object_id: str,
+        provider: Callable[..., dict[str, Any] | None] | None,
+    ) -> None:
+        oid = str(object_id)
+        if provider is None:
+            self.external_intent_providers.pop(oid, None)
+            return
+        self.external_intent_providers[oid] = provider
+
+    def _external_intent(
+        self,
+        *,
+        agent: Any,
+        truth: StateTruth,
+        world_truth: dict[str, StateTruth],
+        t_s: float,
+        dt_s: float,
+        env: dict[str, Any],
+        orbit_controller: Any | None = None,
+        attitude_controller: Any | None = None,
+        orb_belief: StateBelief | None = None,
+        att_belief: StateBelief | None = None,
+    ) -> dict[str, Any]:
+        provider = self.external_intent_providers.get(str(agent.object_id))
+        if provider is None:
+            return {}
+        try:
+            ret = provider(
+                object_id=agent.object_id,
+                truth=truth,
+                belief=agent.belief,
+                world_truth=world_truth,
+                env=env,
+                t_s=t_s,
+                dt_s=dt_s,
+                orbit_controller=orbit_controller,
+                attitude_controller=attitude_controller,
+                orb_belief=orb_belief,
+                att_belief=att_belief,
+                dry_mass_kg=agent.dry_mass_kg,
+                fuel_capacity_kg=agent.fuel_capacity_kg,
+                thruster_direction_body=agent.thruster_direction_body,
+            )
+        except TypeError:
+            ret = provider(truth=truth, t_s=t_s, dt_s=dt_s)
+        return ret if isinstance(ret, dict) else {}
 
     def step(self) -> dict[str, Any]:
         if self.done:
@@ -504,6 +554,20 @@ class _SingleRunEngine:
                     mission_out.update(
                         _run_mission_strategy(
                             agent=agent,
+                            world_truth=world_truth_inner,
+                            t_s=t_eval,
+                            dt_s=h,
+                            env=env_inner_common,
+                            orbit_controller=agent.orbit_controller,
+                            attitude_controller=(agent.attitude_controller if self.attitude_enabled else None),
+                            orb_belief=orb_belief,
+                            att_belief=att_belief,
+                        )
+                    )
+                    mission_out.update(
+                        self._external_intent(
+                            agent=agent,
+                            truth=tr_inner,
                             world_truth=world_truth_inner,
                             t_s=t_eval,
                             dt_s=h,
