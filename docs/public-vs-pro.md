@@ -36,12 +36,19 @@ The pro layer includes:
 - Monte Carlo campaign orchestration
 - sensitivity studies
 - campaign dashboards and baselines
+- AI-assisted campaign reports from Monte Carlo and sensitivity outputs
+- report cost estimation before hosted LLM calls
 - curated validation and mission-assurance scenario packs
 - cFS/SIL and program-specific flight-software integration workflows
 
 Those workflows are intentionally not part of the public export. Public modules
 that would otherwise expose those surfaces raise clear import errors explaining
 the boundary.
+
+AI report provider adapters, prompt templates, cost-estimation helpers, hosted
+LLM smoke configs, and generated AI report artifacts belong to the Pro layer.
+The public core may mention that Pro can add AI-assisted reporting, but public
+examples should not require API keys or hosted model accounts.
 
 ## Design Principle
 

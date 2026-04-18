@@ -17,7 +17,8 @@ The public repository is the simulation foundation: deterministic single-run
 scenarios, public controllers, estimators, object presets, plots, examples, and
 API workflows. Orbital Engagement Pro adds workflow acceleration around that
 foundation: controller benchmarking, optimization, campaign orchestration,
-sensitivity studies, dashboards, and curated validation scenario packs.
+sensitivity studies, dashboards, AI-assisted campaign reports, cost estimation,
+and curated validation scenario packs.
 
 ## First Run
 
@@ -102,12 +103,15 @@ provide. HPOP/GGM03 validation data is not bundled in the public core, so
 - optimization and gain-tuning workflows
 - Monte Carlo and sensitivity campaign orchestration
 - campaign dashboards, baselines, and review-ready reports
+- AI-assisted report generation with user-supplied LLM API keys
+- report cost estimation before hosted LLM calls
 - curated validation and mission-assurance scenario packs
 - cFS/SIL and program-specific flight-software integration workflows
 
 The public core is intended to be useful on its own. The pro layer is for teams
 that need repeatable analysis workflows, tuning loops, campaign management, and
-reporting on top of the same simulation foundation.
+reporting on top of the same simulation foundation. Public examples do not
+require hosted AI accounts or API keys.
 
 ## Start Here
 

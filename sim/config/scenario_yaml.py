@@ -65,6 +65,7 @@ class OutputsSection:
     plots: dict[str, Any] = field(default_factory=dict)
     animations: dict[str, Any] = field(default_factory=dict)
     monte_carlo: dict[str, Any] = field(default_factory=dict)
+    ai_report: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -694,6 +695,7 @@ def _parse_outputs_section(value: Any) -> OutputsSection:
         plots=dict(d.get("plots", {}) or {}),
         animations=dict(d.get("animations", {}) or {}),
         monte_carlo=dict(d.get("monte_carlo", {}) or {}),
+        ai_report=dict(d.get("ai_report", {}) or {}),
     )
     if out.mode not in ("interactive", "save", "both"):
         raise ValueError("outputs.mode must be one of: interactive, save, both.")

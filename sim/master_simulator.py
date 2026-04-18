@@ -1859,6 +1859,7 @@ def _run_sensitivity_analysis(
     parallel_workers = int(sensitivity_result.get("parallel_workers", 1) or 1)
     parallel_fallback_reason = sensitivity_result.get("parallel_fallback_reason")
 
+    from sim.reporting.ai_reports import write_ai_report_artifacts
     from sim.reporting.sensitivity import build_sensitivity_report_payload, write_sensitivity_summary_artifact
 
     agg = build_sensitivity_report_payload(
@@ -1873,6 +1874,13 @@ def _run_sensitivity_analysis(
         parallel_active=parallel_active,
         parallel_workers=parallel_workers,
         parallel_fallback_reason=parallel_fallback_reason,
+    )
+    agg = write_ai_report_artifacts(
+        cfg=cfg,
+        config_path=config_path,
+        outdir=outdir,
+        payload=agg,
+        payload_kind="sensitivity",
     )
 
     return write_sensitivity_summary_artifact(outdir=outdir, payload=agg)
@@ -2084,4 +2092,16 @@ def run_master_simulation(
         run_details=run_details,
         mc_out_cfg=mc_out_cfg,
     )
+    from sim.reporting.ai_reports import write_ai_report_artifacts
+
+    agg = write_ai_report_artifacts(
+        cfg=cfg,
+        config_path=config_path,
+        outdir=outdir,
+        payload=agg,
+        payload_kind="monte_carlo",
+    )
+    summary_json = str(dict(agg.get("artifacts", {}) or {}).get("summary_json", "") or "")
+    if summary_json:
+        write_json(summary_json, agg)
     return agg
