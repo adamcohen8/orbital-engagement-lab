@@ -1,0 +1,494 @@
+SIMULATION FRAMEWORK ROADMAP
+
+Purpose
+
+This document updates the roadmap for Orbital Engagement Lab based on the
+current repository state, the recent feature review, and the repo-surface
+cleanup findings around examples and tests.
+
+The framework is no longer at the "prove the concept" stage. It already has:
+
+- a deterministic multi-object simulator,
+- orbit and attitude dynamics,
+- sensing, estimation, mission behaviors, and control stacks,
+- campaign tooling for Monte Carlo and sensitivity,
+- AI-assisted reporting workflows,
+- a desktop GUI,
+- RL-oriented interfaces,
+- a video-game/manual-control mode, and
+- early cFS/SIL integration patterns.
+
+The highest-value work now is not feature sprawl. It is productization:
+workflow clarity, validation discipline, curated examples, operational
+reliability, and confidence that users can do repeatable engineering work.
+
+
+Current Product Readiness
+
+Scoring rubric:
+
+- 1/10: scaffolding exists
+- 5/10: real feature, but still experimental or specialist-only
+- 8/10: users can do meaningful work with it today
+- 10/10: mature, dependable, discoverable, and validated for repeated use
+
+Current scores:
+
+- Core Simulator Engine: 9/10
+- Controller Bench: 8/10
+- Monte Carlo Simulation: 8/10
+- RL/ML: 7/10
+- Sensitivity Analysis: 7/10
+- AI Reports: 7/10
+- GUI: 7/10
+- Video Game Mode: 6/10
+- cFS/SIL Integration: 5/10
+
+Interpretation:
+
+- The engine is already strong enough for meaningful work.
+- Analysis tooling is real and usable, but needs more polish and reliability.
+- GUI and RL/ML are useful but still feel power-user oriented.
+- Game mode and cFS/SIL are credible capabilities, but not yet "ready by
+  default" product surfaces.
+
+
+Recent Findings That Change The Roadmap
+
+Examples and tests are now roadmap items, not housekeeping details.
+
+Findings to absorb:
+
+- The example surface had grown larger than the verified product surface.
+- Public export rules were too exclusion-driven and could accidentally expose
+  exploratory material.
+- Some examples were personal or local-artifact dependent rather than
+  reproducible user workflows.
+- The test suite had grown unevenly, while private CI exercised only a focused
+  subset.
+- Some tests wrote into repo-relative output directories instead of temporary
+  locations.
+
+Roadmap implications:
+
+- Curated config-first examples are now the primary product example surface.
+- Experimental Python demos belong in ignored/local experiment space, not the
+  user-facing product surface.
+- Public export should behave like an allowlist in practice, even if implemented
+  with exclusions.
+- Tests should be organized by product value and regression risk, not by
+  historical accumulation.
+- Hermetic, output-isolated tests are a quality requirement, not a cleanup nice
+  to have.
+
+
+North-Star Direction
+
+Orbital Engagement Lab should become a simulation platform that is:
+
+1) Architecturally coherent
+2) Easy to configure correctly
+3) Validated at multiple fidelity tiers
+4) Useful for repeatable mission and autonomy studies
+5) Capable of dependable campaign-scale analysis
+6) Clear about what is public-core versus Pro/private
+7) Stable enough that new work does not create silent regressions
+
+Guiding principle:
+
+Prefer depth over breadth.
+
+That means:
+
+- tighter interfaces over more one-off workflows,
+- fewer but better examples,
+- benchmarked and tested features over speculative expansion,
+- and explicit product surfaces over "everything in the repo is a feature."
+
+
+Feature-by-Feature Path To 10/10
+
+1) Core Simulator Engine
+
+Current score: 9/10
+
+Why it is already strong:
+
+- deterministic kernel and multi-object execution model exist,
+- the major dynamics/control/estimation pieces are wired together,
+- API/CLI/GUI all rely on the same underlying stack,
+- and the engine has broad test coverage.
+
+What would make it 10/10:
+
+- lock down one canonical execution model across API, CLI, GUI, and batch flows,
+- retire or isolate remaining legacy orchestration paths,
+- formalize compatibility/stability guarantees for the public Python API,
+- make run payloads and artifact metadata fully standardized,
+- and publish a short "engine contract" document explaining step order,
+  object lifecycles, truth/knowledge timing, and extension boundaries.
+
+2) RL/ML
+
+Current score: 7/10
+
+Why it is usable now:
+
+- Gymnasium-style wrappers exist,
+- there are attitude and rendezvous environments,
+- PPO training helpers exist,
+- vectorized rollouts and self-play support exist,
+- and tests cover core environment behavior.
+
+What would make it 10/10:
+
+- publish a small set of benchmark tasks with expected reward curves,
+- provide stable observation/action schemas and version them,
+- ship reproducible training recipes with runtime and hardware guidance,
+- add artifact conventions for checkpoints, evaluation rollups, and replay,
+- remove dependence on ad hoc local-output assumptions for policy demos,
+- and define one blessed training workflow instead of several overlapping ones.
+
+3) Controller Bench
+
+Current score: 8/10
+
+Why it is usable now:
+
+- dedicated controller-benchmark subsystem exists,
+- config-driven variant/case comparison works,
+- reporting and plots are real,
+- and the feature supports meaningful engineering comparison today.
+
+What would make it 10/10:
+
+- define canonical benchmark suites with stored baselines and pass/fail gates,
+- stabilize the metric taxonomy and objective naming scheme,
+- add stronger workflow docs for "build a new bench suite" and "interpret results",
+- make benchmark outputs comparable across runs and versions,
+- and integrate benchmark baselines directly into CI and release readiness checks.
+
+4) Monte Carlo Simulation
+
+Current score: 8/10
+
+Why it is usable now:
+
+- campaign execution plumbing is real,
+- reporting and dashboard artifacts exist,
+- parallel execution exists,
+- and the workflow supports meaningful analysis work.
+
+What would make it 10/10:
+
+- add resumable campaign execution and partial-run recovery,
+- improve reproducibility guarantees around parallel workers and seeds,
+- store campaign manifests and stronger provenance metadata by default,
+- publish benchmark runtime envelopes and expected artifact sizes,
+- and define a compact, repeatable "campaign review" workflow for users.
+
+5) Sensitivity Analysis
+
+Current score: 7/10
+
+Why it is usable now:
+
+- one-at-a-time and LHS paths both exist,
+- the feature is wired into API/CLI/GUI,
+- and sensitivity reporting is implemented.
+
+What would make it 10/10:
+
+- define standard sensitivity study templates tied to common use cases,
+- improve presentation and ranking explainability in artifacts,
+- harden edge-case validation around parameter distributions and timing grids,
+- add more benchmark-backed examples of good sensitivity study design,
+- and align the GUI/editor UX so sensitivity setup feels as polished as single-run
+  scenario setup.
+
+6) AI Reports
+
+Current score: 7/10
+
+Why it is usable now:
+
+- there are provider adapters, dry-run support, packet generation, cost
+  estimation, saved prompt/input artifacts, and CLI workflows.
+
+What would make it 10/10:
+
+- define stable report templates by use case, not just provider/model,
+- strengthen error handling and retry/report fallback behavior,
+- add better report quality checks and output validation,
+- make the "estimate -> inspect packet -> generate report" workflow more
+  discoverable and standardized,
+- and create benchmark campaign/report pairs that prove the reports add
+  practical engineering value.
+
+7) cFS/SIL Integration
+
+Current score: 5/10
+
+Why it is not just scaffolding:
+
+- bridge code exists,
+- an ICD exists,
+- a mock endpoint exists,
+- and there is a starter app/stub pattern.
+
+What would make it 10/10:
+
+- define simulator-time-master and rate-match behavior precisely,
+- add repeatable fault injection for latency, jitter, packet loss, and replay,
+- provide a supported set of SIL benchmark scenarios with known-good timing,
+- add transport diagnostics and interface conformance checks,
+- package the startup/integration workflow so a non-author can run it,
+- and publish a real SIL-readiness checklist with acceptance criteria.
+
+8) Video Game Mode
+
+Current score: 6/10
+
+Why it is meaningful today:
+
+- the runner exists,
+- the manual/dashboard modules exist,
+- configs and tests exist,
+- and users can interact with the simulator in a genuine manual-control mode.
+
+What would make it 10/10:
+
+- define a clear product purpose for game mode: training, demo, operator intuition,
+  or interactive debugging,
+- improve onboarding and control discoverability,
+- stabilize the UX and dashboard conventions,
+- add polished scenario presets oriented around intentional gameplay tasks,
+- and ensure the mode is visually and interactively coherent across supported
+  platforms.
+
+9) GUI
+
+Current score: 7/10
+
+Why it is usable now:
+
+- it is more than a thin launcher,
+- scenario editing and analysis controls are present,
+- backend capability catalogs are wired through,
+- and tests cover key service and IO flows.
+
+What would make it 10/10:
+
+- reduce the gap between what the GUI exposes and what advanced configs support,
+- make analysis, outputs, and object relationships easier to understand in-app,
+- improve validation/error feedback and migration guidance in the editor,
+- tighten the conceptual model so GUI terminology matches docs and CLI exactly,
+- and add a few polished end-to-end GUI workflows that new users can complete
+  without reading source or YAML first.
+
+
+Roadmap Phases
+
+PHASE 1 - Workflow Curation and Surface Ownership
+
+Goal:
+Make the product surface explicit.
+
+Priority work:
+
+- keep examples config-first and curated,
+- keep experiments out of the supported example surface,
+- define endorsed workflows for:
+  - public single-run scenarios,
+  - private campaign analysis,
+  - controller benchmark runs,
+  - AI-assisted review/reporting,
+  - GUI-driven configuration,
+  - SIL loop demos,
+- align docs, examples, presets, and CI around the same workflows,
+- and tighten public/private boundaries so public export reflects intentional
+  product ownership.
+
+Exit criteria:
+
+- examples are few, curated, and verified,
+- public export contains only intentional public examples,
+- docs and CI reference the same endorsed workflows,
+- and no local-artifact-dependent demos remain in the product-facing example set.
+
+PHASE 2 - Test Suite Rationalization and Validation Discipline
+
+Goal:
+Turn the test corpus into a product-confidence system.
+
+Priority work:
+
+- classify tests by value:
+  - smoke
+  - product/regression
+  - validation/reference
+  - research/experimental
+  - slow
+- make CI reflect those classes explicitly instead of hand-picking files,
+- move all kept tests to temp-directory output handling,
+- archive or delete historical tests that only protect abandoned surfaces,
+- and tie validation artifacts to benchmark scenarios and stored baselines.
+
+Exit criteria:
+
+- CI test scope is intentional and documented,
+- tests do not write into repo-relative output dirs,
+- benchmark regressions are automatically detectable,
+- and validation reports communicate pass/fail without plot forensics.
+
+PHASE 3 - Platform Consolidation
+
+Goal:
+Make the framework feel like one system rather than a collection of related
+systems.
+
+Priority work:
+
+- consolidate execution paths around the public API/session model,
+- reduce overlap between legacy orchestration and newer execution service paths,
+- standardize summaries, payloads, and artifact metadata,
+- clarify extension points versus internal implementation detail,
+- and make single-run, stepped, Monte Carlo, and sensitivity workflows feel
+  structurally related rather than separate inventions.
+
+Exit criteria:
+
+- API/CLI/GUI share the same conceptual execution model,
+- internal legacy paths are clearly isolated or retired,
+- and users can understand the main execution flow from one source of truth.
+
+PHASE 4 - Scenario and Config Maturity
+
+Goal:
+Make YAML authoring dependable and evolvable.
+
+Priority work:
+
+- simplify and document the schema around the current mission/objective model,
+- add explicit versioning and migration guidance,
+- improve invalid-combination detection,
+- keep a small set of canonical templates per workflow,
+- and document supported combinations of dynamics, controllers, objectives,
+  outputs, and analysis modes.
+
+Exit criteria:
+
+- users can start from a canonical config for each supported workflow,
+- most authoring errors fail before runtime,
+- and schema evolution is managed rather than tribal.
+
+PHASE 5 - Analysis Feature Hardening
+
+Goal:
+Push Monte Carlo, sensitivity, controller bench, and AI reports from
+"powerful" to "dependable."
+
+Priority work:
+
+- define canonical campaign and benchmark suites,
+- add artifact provenance and reproducibility metadata,
+- improve resumability and parallel robustness,
+- standardize report formats and benchmark result interpretation,
+- and make AI report generation a clearly staged workflow with quality checks.
+
+Exit criteria:
+
+- campaign and benchmark results are reproducible and reviewable,
+- controller-bench and campaign outputs have stable semantics,
+- and AI reporting is useful enough to trust as part of engineering review.
+
+PHASE 6 - Mission and Autonomy Maturity
+
+Goal:
+Make mission behavior, objectives, and autonomy use cases a first-class platform
+strength.
+
+Priority work:
+
+- harden mission executive transitions,
+- improve observability of mode changes and controller intent,
+- define archetypal mission patterns and canonical scenarios,
+- and add mission-level regression suites for representative objective flows.
+
+Exit criteria:
+
+- mission scenarios are explainable and debuggable,
+- and objective-level regressions are automatically detectable.
+
+PHASE 7 - GUI and Interactive Workflow Polish
+
+Goal:
+Raise GUI and game mode from useful tools to polished workflows.
+
+Priority work:
+
+- improve in-app guidance and workflow discoverability,
+- align GUI concepts with docs and YAML terminology,
+- polish interactive/manual-control scenarios and dashboard outputs,
+- and define when the GUI versus game mode should be used.
+
+Exit criteria:
+
+- a new user can complete at least one meaningful GUI workflow and one
+  interactive workflow without reading source code,
+- and the interactive surfaces feel intentional rather than incidental.
+
+PHASE 8 - SIL and Real-Time Hardening
+
+Goal:
+Move cFS/SIL from starter kit to repeatable co-simulation capability.
+
+Priority work:
+
+- add transport diagnostics, timing contracts, replay support, and fault models,
+- define benchmark SIL scenarios,
+- package repeatable setup and run instructions,
+- and produce formal readiness criteria.
+
+Exit criteria:
+
+- SIL workflows are repeatable,
+- timing behavior is documented and testable,
+- and communication faults can be injected and analyzed intentionally.
+
+
+Priority Order
+
+Recommended sequence:
+
+1) Workflow curation and surface ownership
+2) Test suite rationalization and validation discipline
+3) Platform consolidation
+4) Scenario and config maturity
+5) Analysis feature hardening
+6) Mission and autonomy maturity
+7) GUI and interactive workflow polish
+8) SIL and real-time hardening
+
+Why this order:
+
+- product-surface clarity prevents future rework,
+- better tests and validation increase confidence before more expansion,
+- consolidation and config maturity reduce user and maintainer friction,
+- analysis features become more trustworthy once the foundation is cleaner,
+- and SIL hardening should happen after interfaces and validation norms are
+  stabilized.
+
+
+End Goal
+
+A modular, validated, and operationally coherent orbital engagement simulation
+platform where:
+
+- the core engine is trusted,
+- public and Pro/private surfaces are intentional,
+- examples are curated and verified,
+- tests reflect real product risk,
+- advanced analysis workflows are repeatable,
+- and every major feature has a clear, credible path from current usefulness to
+  10/10 product readiness.
