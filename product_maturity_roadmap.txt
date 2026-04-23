@@ -1,10 +1,15 @@
-SIMULATION FRAMEWORK ROADMAP
+ORBITAL ENGAGEMENT LAB PRODUCT MATURITY ROADMAP
 
 Purpose
 
-This document updates the roadmap for Orbital Engagement Lab based on the
-current repository state, the recent feature review, and the repo-surface
-cleanup findings around examples and tests.
+This document replaces the earlier simulation-framework roadmap. That name
+made sense when Orbital Engagement Lab was still mostly a young technical
+framework. The project is now better understood as a simulation product and
+engineering platform with public-core and Pro/private surfaces, so the roadmap
+focuses on maturity, trust, workflow ownership, and repeatable use.
+
+This update is based on the current repository state, recent feature review, and
+repo-surface cleanup findings around examples and tests.
 
 The framework is no longer at the "prove the concept" stage. It already has:
 
@@ -34,21 +39,22 @@ Scoring rubric:
 
 Current scores:
 
-- Core Simulator Engine: 9/10
+- Core Simulator Engine: 8.5/10
 - Controller Bench: 8/10
 - Monte Carlo Simulation: 8/10
 - RL/ML: 7/10
 - Sensitivity Analysis: 7/10
 - AI Reports: 7/10
-- GUI: 7/10
+- GUI: 6.5/10
 - Video Game Mode: 6/10
 - cFS/SIL Integration: 5/10
 
 Interpretation:
 
-- The engine is already strong enough for meaningful work.
+- The engine is already strong enough for meaningful work, but it should not be
+  called fully mature until its execution and payload contracts are explicit.
 - Analysis tooling is real and usable, but needs more polish and reliability.
-- GUI and RL/ML are useful but still feel power-user oriented.
+- GUI, AI reporting, and RL/ML are useful but still feel power-user oriented.
 - Game mode and cFS/SIL are credible capabilities, but not yet "ready by
   default" product surfaces.
 
@@ -106,11 +112,35 @@ That means:
 - and explicit product surfaces over "everything in the repo is a feature."
 
 
+Contract and Baseline Artifacts
+
+The next maturity jump depends on a small set of explicit contracts. These are
+not heavyweight documents; they are short, authoritative references that turn
+implicit repo knowledge into stable engineering interfaces.
+
+Required contract artifacts:
+
+- engine contract: step order, object lifecycle, truth/belief/knowledge timing,
+  controller timing, and extension boundaries,
+- scenario contract: YAML versioning, supported combinations, migration rules,
+  and validation expectations,
+- payload contract: run summary fields, artifact manifest semantics, metrics,
+  and compatibility guarantees,
+- benchmark contract: baseline storage, pass/fail gates, metric definitions, and
+  expected tolerance review process,
+- public/private contract: what belongs in public core, what belongs in
+  Pro/private, and how export checks enforce that boundary.
+
+These contracts should be treated as product artifacts. A behavior that is not
+documented, tested, and represented in an endorsed workflow should be considered
+experimental even if working code exists.
+
+
 Feature-by-Feature Path To 10/10
 
 1) Core Simulator Engine
 
-Current score: 9/10
+Current score: 8.5/10
 
 Why it is already strong:
 
@@ -118,6 +148,12 @@ Why it is already strong:
 - the major dynamics/control/estimation pieces are wired together,
 - API/CLI/GUI all rely on the same underlying stack,
 - and the engine has broad test coverage.
+
+Why it is not yet 9+/10:
+
+- execution behavior is stronger than the written contract around it,
+- run payloads and artifact manifests still need a more formal stability story,
+- and legacy/new orchestration boundaries are not yet obvious to a new maintainer.
 
 What would make it 10/10:
 
@@ -215,6 +251,13 @@ Why it is usable now:
 - there are provider adapters, dry-run support, packet generation, cost
   estimation, saved prompt/input artifacts, and CLI workflows.
 
+Why it is not yet trustable by default:
+
+- the generation pipeline is auditable, but report quality is not yet benchmarked
+  against known-good campaign/report pairs,
+- and users still need clearer guidance on when a report is analysis aid versus
+  decision evidence.
+
 What would make it 10/10:
 
 - define stable report templates by use case, not just provider/model,
@@ -268,7 +311,7 @@ What would make it 10/10:
 
 9) GUI
 
-Current score: 7/10
+Current score: 6.5/10
 
 Why it is usable now:
 
@@ -332,13 +375,16 @@ Priority work:
 - make CI reflect those classes explicitly instead of hand-picking files,
 - move all kept tests to temp-directory output handling,
 - archive or delete historical tests that only protect abandoned surfaces,
-- and tie validation artifacts to benchmark scenarios and stored baselines.
+- tie validation artifacts to benchmark scenarios and stored baselines,
+- and make local default pytest, private CI, and generated-public CI differ only
+  where the public/private boundary requires it.
 
 Exit criteria:
 
 - CI test scope is intentional and documented,
 - tests do not write into repo-relative output dirs,
 - benchmark regressions are automatically detectable,
+- public and private CI both exercise their intended supported surfaces,
 - and validation reports communicate pass/fail without plot forensics.
 
 PHASE 3 - Platform Consolidation
@@ -352,6 +398,7 @@ Priority work:
 - consolidate execution paths around the public API/session model,
 - reduce overlap between legacy orchestration and newer execution service paths,
 - standardize summaries, payloads, and artifact metadata,
+- publish and maintain the engine and payload contracts,
 - clarify extension points versus internal implementation detail,
 - and make single-run, stepped, Monte Carlo, and sensitivity workflows feel
   structurally related rather than separate inventions.
@@ -360,6 +407,7 @@ Exit criteria:
 
 - API/CLI/GUI share the same conceptual execution model,
 - internal legacy paths are clearly isolated or retired,
+- core payload fields and artifact manifests have compatibility expectations,
 - and users can understand the main execution flow from one source of truth.
 
 PHASE 4 - Scenario and Config Maturity
@@ -372,6 +420,7 @@ Priority work:
 - simplify and document the schema around the current mission/objective model,
 - add explicit versioning and migration guidance,
 - improve invalid-combination detection,
+- publish the scenario contract and keep templates aligned with it,
 - keep a small set of canonical templates per workflow,
 - and document supported combinations of dynamics, controllers, objectives,
   outputs, and analysis modes.
@@ -393,6 +442,7 @@ Priority work:
 - define canonical campaign and benchmark suites,
 - add artifact provenance and reproducibility metadata,
 - improve resumability and parallel robustness,
+- store baseline manifests and make metric definitions explicit,
 - standardize report formats and benchmark result interpretation,
 - and make AI report generation a clearly staged workflow with quality checks.
 

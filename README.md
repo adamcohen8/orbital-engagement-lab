@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/adamcohen8/orbital-engagement-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/adamcohen8/orbital-engagement-lab/actions/workflows/ci.yml)
 
-Open-core spacecraft simulation framework for closed-loop rendezvous, proximity
+Open-core spacecraft simulation platform for closed-loop rendezvous, proximity
 operations, attitude control, sensing, estimation, plotting, and mission
 prototyping.
 
@@ -14,11 +14,12 @@ scenario definition.
 ![Run dashboard](docs/assets/plots/run_dashboard.png)
 
 The public repository is the simulation foundation: deterministic single-run
-scenarios, public controllers, estimators, object presets, plots, examples, and
-API workflows. Orbital Engagement Pro adds workflow acceleration around that
-foundation: controller benchmarking, optimization, campaign orchestration,
-sensitivity studies, dashboards, AI-assisted campaign reports, cost estimation,
-and curated validation scenario packs.
+scenarios, public controllers, estimators, object presets, plots, curated
+examples, the GUI, and API workflows. Orbital Engagement Pro adds workflow
+acceleration around that foundation: controller benchmarking, optimization,
+campaign orchestration, sensitivity studies, dashboards, AI-assisted campaign
+reports, cost estimation, curated validation scenario packs, and integration
+workflows.
 
 ## First Run
 
@@ -93,9 +94,10 @@ provide. HPOP/GGM03 validation data is not bundled in the public core, so
 - orbit and attitude estimators
 - orbit and attitude controller interfaces and reference controllers
 - YAML-backed scenario configuration with reusable object presets
-- Python API, CLI, GUI entrypoints, and examples
+- Python API, CLI, GUI entrypoints, and curated config examples
 - single-run dashboards, trajectory plots, estimation plots, and sensor-access plots
 - machine-learning environment helpers
+- product maturity roadmap and public/private boundary documentation
 
 ## What Orbital Engagement Pro Adds
 
@@ -120,6 +122,7 @@ require hosted AI accounts or API keys.
 - [Plotting](docs/plotting.md)
 - [Plot Gallery](docs/plot-gallery.md)
 - [Public Core And Pro Boundary](docs/public-vs-pro.md)
+- [Product Maturity Roadmap](product_maturity_roadmap.txt)
 
 ## Curated Examples
 
@@ -128,6 +131,10 @@ Curated examples are YAML scenario configs under `examples/configs/`:
 - `examples/configs/public_rendezvous_closed_loop.yaml` for closed-loop rendezvous, pointing, sensing, estimation, and plots
 - `examples/configs/public_orbit_environment_stack.yaml` for deterministic high-fidelity orbit/environment propagation
 - `examples/configs/public_manual_engagement.yaml` for manual/game scenario wiring
+
+The public examples are intentionally config-first. Experimental Python demos
+and local-artifact-dependent workflows are not part of the supported public
+example surface.
 
 ## Install Profiles
 
@@ -155,7 +162,7 @@ python -m pip install ".[full]"
 - `sim/gui/` native desktop GUI
 - `sim/rocket/` ascent/rocket components
 - `machine_learning/` public environment helpers and training entrypoints
-- `examples/` runnable demos
+- `examples/` curated runnable configs
 - `docs/` user-facing documentation
 
 ## Scope And Safety
