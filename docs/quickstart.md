@@ -47,16 +47,15 @@ print(result.summary)
 
 ## Next Scenarios
 
-- `configs/simulation_template.yaml` is the broad feature template.
-- `configs/hcw_lqr_two_body_perfect.yaml` is a compact rendezvous-control case.
-- `configs/plotting_rendezvous_demo.yaml` generates dashboard, rendezvous, control, estimation, and sensor plots.
-- `examples/Orbit_HCW_LQR_Demo.py` demonstrates relative orbit control.
-- `examples/Rendezvous_HCW_AttitudeLQR_Demo.py` demonstrates integrated orbit and attitude behavior.
+- `examples/configs/simulation_template.yaml` is the broad feature template.
+- `examples/configs/hcw_lqr_two_body_perfect.yaml` is a compact rendezvous-control case.
+- `examples/configs/plotting_rendezvous_demo.yaml` generates dashboard, rendezvous, control, estimation, and sensor plots.
+- `examples/configs/game_mode_basic.yaml` demonstrates the manual/game scenario shape.
 
 Generate the plotting demo:
 
 ```bash
-python run_simulation.py --config configs/plotting_rendezvous_demo.yaml
+python run_simulation.py --config examples/configs/plotting_rendezvous_demo.yaml
 ```
 
 Expected plot artifacts include:
@@ -76,7 +75,7 @@ python -m pip install ".[full]"
 ```
 
 The GUI profile enables `python run_gui.py`. The ML profile enables the bundled
-Gymnasium-style environments and training examples.
+Gymnasium-style environments.
 
 ## Gravity Coefficient Files
 

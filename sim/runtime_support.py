@@ -822,8 +822,16 @@ def _build_knowledge_base(observer_id: str, agent_cfg: Any, dt_s: float, rng: np
                     vel_sigma_km_s=np.array(noise.get("vel_sigma_km_s", [1e-4, 1e-4, 1e-4]), dtype=float),
                     pos_bias_km=np.array(noise.get("pos_bias_km", [0.0, 0.0, 0.0]), dtype=float),
                     vel_bias_km_s=np.array(noise.get("vel_bias_km_s", [0.0, 0.0, 0.0]), dtype=float),
+                    range_sigma_km=float(noise.get("range_sigma_km", 0.01)),
+                    range_rate_sigma_km_s=float(noise.get("range_rate_sigma_km_s", 1e-4)),
+                    angle_sigma_rad=float(noise.get("angle_sigma_rad", 1e-4)),
+                    range_bias_km=float(noise.get("range_bias_km", 0.0)),
+                    range_rate_bias_km_s=float(noise.get("range_rate_bias_km_s", 0.0)),
+                    az_bias_rad=float(noise.get("az_bias_rad", 0.0)),
+                    el_bias_rad=float(noise.get("el_bias_rad", 0.0)),
                 ),
                 estimator=str(estimation.get("type", "ekf")),
+                measurement_model=str(estimation.get("measurement_model", "state")),
                 ekf=KnowledgeEKFConfig(),
             )
         )

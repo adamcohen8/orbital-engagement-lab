@@ -27,13 +27,13 @@ jobs:
       - name: Validate smoke scenario
         run: python run_simulation.py --config configs/automation_smoke.yaml --validate-only
 
-      - name: Run curated public examples headlessly
-        env:
-          MPLCONFIGDIR: ${{ runner.temp }}/matplotlib
+      - name: Validate curated public example configs
         run: |
-          mkdir -p "$MPLCONFIGDIR"
-          python examples/Simulation_Config_Load_Demo.py
-          python examples/Orbit_HCW_LQR_Demo.py --plot-mode save --duration 120
-          python examples/Attitude_PD_ReactionWheel_Demo.py --plot-mode save --duration 20 --attitude-dt 0.1
-          python examples/Rendezvous_HCW_AttitudeLQR_Demo.py --plot-mode save --duration 20 --dt 2
-          python examples/Object_Knowledge_EKF_Demo.py --plot-mode save
+          python run_simulation.py --config examples/configs/automation_smoke.yaml --validate-only
+          python run_simulation.py --config examples/configs/plotting_rendezvous_demo.yaml --validate-only
+          python run_simulation.py --config examples/configs/hcw_lqr_two_body_perfect.yaml --validate-only
+          python run_simulation.py --config examples/configs/game_mode_basic.yaml --validate-only
+          python run_simulation.py --config examples/configs/simulation_template.yaml --validate-only
+
+      - name: Run representative public example config headlessly
+        run: python run_simulation.py --config examples/configs/automation_smoke.yaml

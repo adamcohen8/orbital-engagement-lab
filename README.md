@@ -123,14 +123,13 @@ require hosted AI accounts or API keys.
 
 ## Curated Examples
 
-- `examples/Simulation_Config_Load_Demo.py` for config loading
-- `examples/Orbit_HCW_LQR_Demo.py` for relative orbit control
-- `examples/Attitude_PD_ReactionWheel_Demo.py` for attitude control
-- `examples/Rendezvous_HCW_AttitudeLQR_Demo.py` for integrated rendezvous
-- `examples/Object_Knowledge_EKF_Demo.py` for sensing and estimation
+Curated examples are YAML scenario configs under `examples/configs/`:
 
-Additional examples are included for orbit perturbations, rocket ascent,
-attitude animation, MPC controllers, machine-learning environments, and plotting.
+- `examples/configs/automation_smoke.yaml` for first-run validation
+- `examples/configs/hcw_lqr_two_body_perfect.yaml` for relative orbit control
+- `examples/configs/plotting_rendezvous_demo.yaml` for public plotting outputs
+- `examples/configs/game_mode_basic.yaml` for manual/game scenario wiring
+- `examples/configs/simulation_template.yaml` as a broad starter template
 
 ## Install Profiles
 

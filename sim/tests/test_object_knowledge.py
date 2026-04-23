@@ -223,6 +223,57 @@ class TestObjectKnowledge(unittest.TestCase):
         log = SimulationKernel(SimConfig(dt_s=dt_s, steps=2, controller_budget_ms=1.0), [observer, target]).run()
         self.assertTrue(np.any(np.isfinite(log.knowledge_by_observer["obs"]["tgt"])))
 
+    def test_relative_range_rate_measurement_model_updates_track(self):
+        dt_s = 1.0
+        observer = _make_sat("obs", phase_rad=0.0, dt_s=dt_s)
+        target = _make_sat("tgt", phase_rad=0.02, dt_s=dt_s)
+        observer.knowledge_base = ObjectKnowledgeBase(
+            observer_id="obs",
+            dt_s=dt_s,
+            rng=np.random.default_rng(6),
+            tracked_objects=[
+                TrackedObjectConfig(
+                    target_id="tgt",
+                    conditions=KnowledgeConditionConfig(refresh_rate_s=1.0, max_range_km=5000.0, require_line_of_sight=True),
+                    sensor_noise=KnowledgeNoiseConfig(
+                        range_sigma_km=0.01,
+                        range_rate_sigma_km_s=1e-4,
+                    ),
+                    estimator="ekf",
+                    measurement_model="relative_range_rate",
+                    ekf=KnowledgeEKFConfig(
+                        process_noise_diag=np.ones(6) * 1e-10,
+                        meas_noise_diag=np.ones(6) * 1e-6,
+                        init_cov_diag=np.array([10.0, 10.0, 10.0, 1e-2, 1e-2, 1e-2]),
+                    ),
+                )
+            ],
+        )
+
+        log = SimulationKernel(SimConfig(dt_s=dt_s, steps=20, controller_budget_ms=1.0), [observer, target]).run()
+
+        hist = log.knowledge_by_observer["obs"]["tgt"]
+        self.assertTrue(np.any(np.isfinite(hist)))
+        summary = observer.knowledge_base.consistency_summary()
+        self.assertGreater(float(summary["tgt"]["measurement_count"]), 0.0)
+        self.assertGreater(float(summary["tgt"]["update_count"]), 0.0)
+        self.assertIsNotNone(summary["tgt"]["nis_mean"])
+        track = observer.knowledge_base._tracks["tgt"]
+        self.assertEqual(track.estimator.last_update_diagnostics.innovation.size, 2)
+
+    def test_invalid_measurement_model_raises(self):
+        with self.assertRaisesRegex(ValueError, "measurement_model"):
+            ObjectKnowledgeBase(
+                observer_id="obs",
+                dt_s=1.0,
+                tracked_objects=[
+                    TrackedObjectConfig(
+                        target_id="tgt",
+                        measurement_model="radar_magic",
+                    )
+                ],
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

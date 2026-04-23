@@ -6,7 +6,7 @@ import numpy as np
 
 from sim.core.models import Measurement, StateBelief, StateTruth
 from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2, EARTH_RADIUS_KM
-from sim.estimation.orbit_ekf import OrbitEKFEstimator
+from sim.estimation.orbit_ekf import OrbitEKFEstimator, OrbitEKFUpdateDiagnostics
 from sim.sensors.access import AccessConfig, AccessModel
 from sim.utils.quaternion import quaternion_to_dcm_bn
 
@@ -41,6 +41,13 @@ class KnowledgeNoiseConfig:
     vel_sigma_km_s: np.ndarray = field(default_factory=lambda: np.array([1e-5, 1e-5, 1e-5]))
     pos_bias_km: np.ndarray = field(default_factory=lambda: np.zeros(3))
     vel_bias_km_s: np.ndarray = field(default_factory=lambda: np.zeros(3))
+    range_sigma_km: float = 1e-3
+    range_rate_sigma_km_s: float = 1e-5
+    angle_sigma_rad: float = 1e-4
+    range_bias_km: float = 0.0
+    range_rate_bias_km_s: float = 0.0
+    az_bias_rad: float = 0.0
+    el_bias_rad: float = 0.0
 
     def __post_init__(self) -> None:
         if np.array(self.pos_sigma_km, dtype=float).reshape(-1).size not in (1, 3):
@@ -70,6 +77,7 @@ class TrackedObjectConfig:
     conditions: KnowledgeConditionConfig = KnowledgeConditionConfig()
     sensor_noise: KnowledgeNoiseConfig = KnowledgeNoiseConfig()
     estimator: str = "ekf"
+    measurement_model: str = "state"
     ekf: KnowledgeEKFConfig = KnowledgeEKFConfig()
 
 
@@ -116,6 +124,27 @@ class _OtherObjectStateSensor:
         z_vel = target_truth.velocity_eci_km_s + vel_bias + self.rng.normal(0.0, vel_sigma, size=3)
         return Measurement(vector=np.hstack((z_pos, z_vel)), t_s=t_s)
 
+    def measure_relative(
+        self,
+        observer_truth: StateTruth,
+        target_truth: StateTruth,
+        t_s: float,
+        measurement_model: str,
+    ) -> Measurement | None:
+        state_meas = self.measure(observer_truth, target_truth, t_s)
+        if state_meas is None:
+            return None
+        model = _normalize_measurement_model(measurement_model)
+        if model == "state":
+            return state_meas
+        sensor_position_eci_km, _ = self._sensor_pose_eci(observer_truth)
+        observer_state = np.hstack((sensor_position_eci_km, observer_truth.velocity_eci_km_s))
+        truth_state = np.hstack((target_truth.position_eci_km, target_truth.velocity_eci_km_s))
+        ideal = _relative_measurement_vector(model, truth_state, observer_state)
+        sigma = _relative_measurement_sigma(model, self.noise)
+        bias = _relative_measurement_bias(model, self.noise)
+        return Measurement(vector=ideal + bias + self.rng.normal(0.0, sigma, size=ideal.size), t_s=t_s)
+
     def _sensor_pose_eci(self, observer_truth: StateTruth) -> tuple[np.ndarray, np.ndarray | None]:
         c_bn = quaternion_to_dcm_bn(observer_truth.attitude_quat_bn)
         pos_body_m = np.array(self.conditions.sensor_position_body_m, dtype=float).reshape(3)
@@ -137,6 +166,7 @@ class _Track:
     target_id: str
     sensor: _OtherObjectStateSensor
     estimator: OrbitEKFEstimator
+    measurement_model: str
     init_cov_diag: np.ndarray
     belief: StateBelief | None = None
     step_count: int = 0
@@ -161,7 +191,7 @@ class _Track:
 
     def step(self, observer_truth: StateTruth, target_truth: StateTruth, t_s: float) -> StateBelief | None:
         self.step_count += 1
-        meas = self.sensor.measure(observer_truth, target_truth, t_s)
+        meas = self.sensor.measure_relative(observer_truth, target_truth, t_s, self.measurement_model)
         detect_status = str(self.sensor.last_detection_status or "unknown")
         self.detection_status_counts[detect_status] = int(self.detection_status_counts.get(detect_status, 0)) + 1
         if meas is not None:
@@ -184,16 +214,65 @@ class _Track:
         if self.belief is None:
             if meas is None:
                 return None
-            self.belief = StateBelief(state=meas.vector.copy(), covariance=np.diag(self.init_cov_diag), last_update_t_s=t_s)
+            if _normalize_measurement_model(self.measurement_model) == "state":
+                init_state = meas.vector.copy()
+            else:
+                init_state = np.hstack((target_truth.position_eci_km, target_truth.velocity_eci_km_s))
+            self.belief = StateBelief(state=init_state, covariance=np.diag(self.init_cov_diag), last_update_t_s=t_s)
             self.initialization_count += 1
             self._record_consistency(target_truth, None, t_s)
             return self.belief
-        self.belief = self.estimator.update(self.belief, meas, t_s)
+        if _normalize_measurement_model(self.measurement_model) == "state":
+            self.belief = self.estimator.update(self.belief, meas, t_s)
+        else:
+            self.belief = self._relative_ekf_update(self.belief, meas, observer_truth, t_s)
         diag = self.estimator.last_update_diagnostics
         if diag is not None and diag.update_applied:
             self.update_count += 1
         self._record_consistency(target_truth, diag, t_s)
         return self.belief
+
+    def _relative_ekf_update(
+        self,
+        belief: StateBelief,
+        measurement: Measurement | None,
+        observer_truth: StateTruth,
+        t_s: float,
+    ) -> StateBelief:
+        predicted = self.estimator.update(belief, None, t_s)
+        if measurement is None:
+            return predicted
+        model = _normalize_measurement_model(self.measurement_model)
+        sensor_position_eci_km, _ = self.sensor._sensor_pose_eci(observer_truth)
+        observer_state = np.hstack((sensor_position_eci_km, observer_truth.velocity_eci_km_s))
+        z = np.asarray(measurement.vector, dtype=float).reshape(-1)
+        h_pred = _relative_measurement_vector(model, predicted.state, observer_state)
+        h_jac = _relative_measurement_jacobian(model, predicted.state, observer_state)
+        r = np.diag(_relative_measurement_sigma(model, self.sensor.noise) ** 2)
+        innovation = _relative_innovation(model, z, h_pred)
+        s = h_jac @ predicted.covariance @ h_jac.T + r
+        hp_t = predicted.covariance @ h_jac.T
+        try:
+            k_gain = np.linalg.solve(s.T, hp_t.T).T
+            s_y = np.linalg.solve(s, innovation)
+        except np.linalg.LinAlgError:
+            s_pinv = np.linalg.pinv(s)
+            k_gain = hp_t @ s_pinv
+            s_y = s_pinv @ innovation
+        x_upd = predicted.state + k_gain @ innovation
+        i_kh = np.eye(predicted.state.size) - k_gain @ h_jac
+        p_upd = i_kh @ predicted.covariance @ i_kh.T + k_gain @ r @ k_gain.T
+        p_upd = 0.5 * (p_upd + p_upd.T)
+        self.estimator.last_update_diagnostics = OrbitEKFUpdateDiagnostics(
+            measurement_available=True,
+            update_applied=True,
+            innovation=np.array(innovation, dtype=float),
+            innovation_covariance=np.array(s, dtype=float),
+            nis=float(innovation.T @ s_y),
+            predicted_cov_trace=float(np.trace(predicted.covariance)),
+            posterior_cov_trace=float(np.trace(p_upd)),
+        )
+        return StateBelief(state=x_upd, covariance=p_upd, last_update_t_s=t_s)
 
     def _record_consistency(self, target_truth: StateTruth, diag: object | None, t_s: float) -> None:
         if self.belief is None:
@@ -292,10 +371,11 @@ class ObjectKnowledgeBase:
             )
             self._tracks[cfg.target_id] = _Track(
                 target_id=cfg.target_id,
-                sensor=sensor,
-                estimator=ekf,
-                init_cov_diag=np.array(cfg.ekf.init_cov_diag, dtype=float),
-            )
+            sensor=sensor,
+            estimator=ekf,
+            measurement_model=_normalize_measurement_model(cfg.measurement_model),
+            init_cov_diag=np.array(cfg.ekf.init_cov_diag, dtype=float),
+        )
 
     def target_ids(self) -> list[str]:
         return sorted(self._tracks.keys())
@@ -338,6 +418,118 @@ def _expand3(v: np.ndarray) -> np.ndarray:
     if a.size == 3:
         return a
     raise ValueError("Expected scalar or length-3 array.")
+
+
+def _normalize_measurement_model(model: str) -> str:
+    raw = str(model or "state").strip().lower().replace("-", "_")
+    aliases = {
+        "full_state": "state",
+        "eci_state": "state",
+        "range": "relative_range",
+        "range_rate": "relative_range_rate",
+        "angles": "relative_angles",
+        "angles_range": "relative_angles_range",
+        "angles_range_rate": "relative_angles_range_rate",
+    }
+    normalized = aliases.get(raw, raw)
+    valid = {
+        "state",
+        "relative_range",
+        "relative_range_rate",
+        "relative_angles",
+        "relative_angles_range",
+        "relative_angles_range_rate",
+    }
+    if normalized not in valid:
+        valid_txt = ", ".join(sorted(valid))
+        raise ValueError(f"Unsupported knowledge measurement_model '{model}'. Valid options: {valid_txt}")
+    return normalized
+
+
+def _relative_measurement_vector(model: str, target_state: np.ndarray, observer_state: np.ndarray) -> np.ndarray:
+    x = np.asarray(target_state, dtype=float).reshape(-1)
+    obs = np.asarray(observer_state, dtype=float).reshape(-1)
+    rel_r = x[:3] - obs[:3]
+    rel_v = x[3:6] - obs[3:6]
+    rng_km = float(np.linalg.norm(rel_r))
+    if rng_km <= 0.0:
+        los = np.zeros(3)
+        range_rate = 0.0
+    else:
+        los = rel_r / rng_km
+        range_rate = float(np.dot(rel_v, los))
+    az = float(np.arctan2(los[1], los[0])) if rng_km > 0.0 else 0.0
+    el = float(np.arcsin(np.clip(los[2], -1.0, 1.0))) if rng_km > 0.0 else 0.0
+    if model == "relative_range":
+        return np.array([rng_km], dtype=float)
+    if model == "relative_range_rate":
+        return np.array([rng_km, range_rate], dtype=float)
+    if model == "relative_angles":
+        return np.array([az, el], dtype=float)
+    if model == "relative_angles_range":
+        return np.array([az, el, rng_km], dtype=float)
+    if model == "relative_angles_range_rate":
+        return np.array([az, el, rng_km, range_rate], dtype=float)
+    raise ValueError(f"Unsupported relative measurement model '{model}'.")
+
+
+def _relative_measurement_sigma(model: str, noise: KnowledgeNoiseConfig) -> np.ndarray:
+    if model == "relative_range":
+        return np.array([float(noise.range_sigma_km)], dtype=float)
+    if model == "relative_range_rate":
+        return np.array([float(noise.range_sigma_km), float(noise.range_rate_sigma_km_s)], dtype=float)
+    if model == "relative_angles":
+        return np.array([float(noise.angle_sigma_rad), float(noise.angle_sigma_rad)], dtype=float)
+    if model == "relative_angles_range":
+        return np.array([float(noise.angle_sigma_rad), float(noise.angle_sigma_rad), float(noise.range_sigma_km)], dtype=float)
+    if model == "relative_angles_range_rate":
+        return np.array(
+            [float(noise.angle_sigma_rad), float(noise.angle_sigma_rad), float(noise.range_sigma_km), float(noise.range_rate_sigma_km_s)],
+            dtype=float,
+        )
+    return np.hstack((_expand3(noise.pos_sigma_km), _expand3(noise.vel_sigma_km_s)))
+
+
+def _relative_measurement_bias(model: str, noise: KnowledgeNoiseConfig) -> np.ndarray:
+    if model == "relative_range":
+        return np.array([float(noise.range_bias_km)], dtype=float)
+    if model == "relative_range_rate":
+        return np.array([float(noise.range_bias_km), float(noise.range_rate_bias_km_s)], dtype=float)
+    if model == "relative_angles":
+        return np.array([float(noise.az_bias_rad), float(noise.el_bias_rad)], dtype=float)
+    if model == "relative_angles_range":
+        return np.array([float(noise.az_bias_rad), float(noise.el_bias_rad), float(noise.range_bias_km)], dtype=float)
+    if model == "relative_angles_range_rate":
+        return np.array(
+            [float(noise.az_bias_rad), float(noise.el_bias_rad), float(noise.range_bias_km), float(noise.range_rate_bias_km_s)],
+            dtype=float,
+        )
+    return np.hstack((_expand3(noise.pos_bias_km), _expand3(noise.vel_bias_km_s)))
+
+
+def _relative_measurement_jacobian(model: str, target_state: np.ndarray, observer_state: np.ndarray) -> np.ndarray:
+    x = np.asarray(target_state, dtype=float).reshape(-1)
+    h0 = _relative_measurement_vector(model, x, observer_state)
+    jac = np.zeros((h0.size, x.size))
+    eps = np.array([1e-3, 1e-3, 1e-3, 1e-6, 1e-6, 1e-6], dtype=float)
+    for i in range(min(6, x.size)):
+        xp = x.copy()
+        xp[i] += eps[i]
+        hp = _relative_measurement_vector(model, xp, observer_state)
+        jac[:, i] = _relative_innovation(model, hp, h0) / eps[i]
+    return jac
+
+
+def _relative_innovation(model: str, z: np.ndarray, h: np.ndarray) -> np.ndarray:
+    innovation = np.asarray(z, dtype=float).reshape(-1) - np.asarray(h, dtype=float).reshape(-1)
+    if model in {"relative_angles", "relative_angles_range", "relative_angles_range_rate"} and innovation.size >= 2:
+        innovation[0] = _wrap_angle_rad(float(innovation[0]))
+        innovation[1] = _wrap_angle_rad(float(innovation[1]))
+    return innovation
+
+
+def _wrap_angle_rad(value: float) -> float:
+    return float((value + np.pi) % (2.0 * np.pi) - np.pi)
 
 
 def _safe_stat_array(values: list[float]) -> np.ndarray:

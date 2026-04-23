@@ -13,6 +13,7 @@ __pycache__/
 # Local outputs and generated plots
 outputs/
 examples/outputs/
+examples/experiments/
 examples/Academic/
 **/lightning_logs/
 configs/inactive/
@@ -20,6 +21,7 @@ sim/tests/test_hcw_paper_analysis.py
 
 # OS/editor noise
 .DS_Store
+**/.DS_Store
 
 # Third-party validation package (do not commit)
 validation/High Precision Orbit Propagator_4-2/

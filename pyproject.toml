@@ -47,3 +47,4 @@ sim = ["presets/objects/*.yaml"]
 
 [tool.setuptools.packages.find]
 include = ["sim*", "machine_learning*"]
+exclude = ["sim.tests", "sim.tests.*"]
