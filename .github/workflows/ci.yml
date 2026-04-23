@@ -29,11 +29,9 @@ jobs:
 
       - name: Validate curated public example configs
         run: |
-          python run_simulation.py --config examples/configs/automation_smoke.yaml --validate-only
-          python run_simulation.py --config examples/configs/plotting_rendezvous_demo.yaml --validate-only
-          python run_simulation.py --config examples/configs/hcw_lqr_two_body_perfect.yaml --validate-only
-          python run_simulation.py --config examples/configs/game_mode_basic.yaml --validate-only
-          python run_simulation.py --config examples/configs/simulation_template.yaml --validate-only
+          python run_simulation.py --config examples/configs/public_rendezvous_closed_loop.yaml --validate-only
+          python run_simulation.py --config examples/configs/public_orbit_environment_stack.yaml --validate-only
+          python run_simulation.py --config examples/configs/public_manual_engagement.yaml --validate-only
 
       - name: Run representative public example config headlessly
-        run: python run_simulation.py --config examples/configs/automation_smoke.yaml
+        run: python run_simulation.py --config examples/configs/public_rendezvous_closed_loop.yaml

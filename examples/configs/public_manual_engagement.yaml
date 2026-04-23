@@ -1,9 +1,9 @@
-scenario_name: "game_mode_basic_manual_chaser"
-scenario_description: "Keyboard-controlled chaser with ACS attitude target commands and body-mounted thruster firing."
+scenario_name: "public_manual_engagement"
+scenario_description: "Public example: manual/game-mode chaser control with attitude stabilization, knowledge, target defensive logic, and dashboard-ready outputs."
 
 metadata:
-  owner: "codex"
-  notes: "Run with `python run_game.py configs/game_mode_basic.yaml`."
+  owner: "public"
+  notes: "Run interactively with `python run_game.py examples/configs/public_manual_engagement.yaml`."
   game:
     player_max_accel_km_s2: 1.8e-4
 
@@ -135,12 +135,12 @@ target:
 
 simulator:
   scenario_type: "auto"
-  duration_s: 1200.0
-  dt_s: 0.25
+  duration_s: 600.0
+  dt_s: 0.5
   dynamics:
     orbit:
       model: "two_body"
-      orbit_substep_s: 0.25
+      orbit_substep_s: 0.5
       j2: false
       j3: false
       j4: false
@@ -165,15 +165,14 @@ simulator:
     strict: true
   termination:
     earth_impact_enabled: false
-    earth_radius_km: 6378.137
 
 outputs:
-  output_dir: "outputs/game_mode_basic"
+  output_dir: "outputs/examples/public_manual_engagement"
   mode: "save"
   stats:
     enabled: true
-    print_summary: false
-    save_json: false
+    print_summary: true
+    save_json: true
     save_csv: false
     save_full_log: false
   plots:

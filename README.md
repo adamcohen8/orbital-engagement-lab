@@ -125,11 +125,9 @@ require hosted AI accounts or API keys.
 
 Curated examples are YAML scenario configs under `examples/configs/`:
 
-- `examples/configs/automation_smoke.yaml` for first-run validation
-- `examples/configs/hcw_lqr_two_body_perfect.yaml` for relative orbit control
-- `examples/configs/plotting_rendezvous_demo.yaml` for public plotting outputs
-- `examples/configs/game_mode_basic.yaml` for manual/game scenario wiring
-- `examples/configs/simulation_template.yaml` as a broad starter template
+- `examples/configs/public_rendezvous_closed_loop.yaml` for closed-loop rendezvous, pointing, sensing, estimation, and plots
+- `examples/configs/public_orbit_environment_stack.yaml` for deterministic high-fidelity orbit/environment propagation
+- `examples/configs/public_manual_engagement.yaml` for manual/game scenario wiring
 
 ## Install Profiles
 

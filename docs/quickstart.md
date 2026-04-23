@@ -47,23 +47,22 @@ print(result.summary)
 
 ## Next Scenarios
 
-- `examples/configs/simulation_template.yaml` is the broad feature template.
-- `examples/configs/hcw_lqr_two_body_perfect.yaml` is a compact rendezvous-control case.
-- `examples/configs/plotting_rendezvous_demo.yaml` generates dashboard, rendezvous, control, estimation, and sensor plots.
-- `examples/configs/game_mode_basic.yaml` demonstrates the manual/game scenario shape.
+- `examples/configs/public_rendezvous_closed_loop.yaml` demonstrates closed-loop rendezvous with orbit control, attitude pointing, sensing, EKF knowledge, and plots.
+- `examples/configs/public_orbit_environment_stack.yaml` demonstrates deterministic high-fidelity orbit/environment propagation.
+- `examples/configs/public_manual_engagement.yaml` demonstrates the manual/game scenario shape.
 
-Generate the plotting demo:
+Run the rendezvous example:
 
 ```bash
-python run_simulation.py --config examples/configs/plotting_rendezvous_demo.yaml
+python run_simulation.py --config examples/configs/public_rendezvous_closed_loop.yaml
 ```
 
 Expected plot artifacts include:
 
 ```text
-outputs/plotting_rendezvous_demo/run_dashboard.png
-outputs/plotting_rendezvous_demo/rendezvous_summary.png
-outputs/plotting_rendezvous_demo/sensor_access.png
+outputs/examples/public_rendezvous_closed_loop/rendezvous_summary.png
+outputs/examples/public_rendezvous_closed_loop/ground_track_multi.png
+outputs/examples/public_rendezvous_closed_loop/sensor_access.png
 ```
 
 ## Optional Profiles
