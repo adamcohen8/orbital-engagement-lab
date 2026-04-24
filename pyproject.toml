@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "orbital-engagement-lab"
 version = "0.1.0"
-description = "Integrated spacecraft simulation and analysis framework for rendezvous, control, and mission prototyping."
+description = "Integrated spacecraft simulation and analysis platform for rendezvous, control, validation, and mission prototyping."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { file = "LICENSE.txt" }
