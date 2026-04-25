@@ -93,11 +93,13 @@ class MonteCarloSection:
 class AnalysisExecutionSection:
     parallel_enabled: bool = False
     parallel_workers: int = 0
+    failure_policy: str = "fail_fast"
 
 
 @dataclass(frozen=True)
 class AnalysisBaselineSection:
     enabled: bool = False
+    mode: str = "none"
     summary_json: str = ""
 
 
@@ -547,17 +549,30 @@ def _parse_analysis_execution_section(value: Any, *, fallback: MonteCarloSection
             "analysis.execution.parallel_enabled",
         ),
         parallel_workers=int(d.get("parallel_workers", default_parallel_workers)),
+        failure_policy=str(d.get("failure_policy", "fail_fast") or "fail_fast").strip().lower(),
     )
     if out.parallel_workers < 0:
         raise ValueError("analysis.execution.parallel_workers must be >= 0.")
+    if out.failure_policy not in {"fail_fast", "continue"}:
+        raise ValueError("analysis.execution.failure_policy must be one of: fail_fast, continue.")
     return out
 
 
 def _parse_analysis_baseline_section(value: Any) -> AnalysisBaselineSection:
     d = _as_dict(value, "analysis.baseline")
+    summary_json = str(d.get("summary_json", "") or "")
+    enabled = _parse_bool(d.get("enabled", False), "analysis.baseline.enabled")
+    raw_mode = str(d.get("mode", "") or "").strip().lower()
+    if not raw_mode:
+        raw_mode = "file" if summary_json else ("run" if enabled else "none")
+    if raw_mode not in {"none", "run", "file"}:
+        raise ValueError("analysis.baseline.mode must be one of: none, run, file.")
+    if raw_mode == "file" and not summary_json:
+        raise ValueError("analysis.baseline.summary_json is required when mode is 'file'.")
     return AnalysisBaselineSection(
-        enabled=_parse_bool(d.get("enabled", False), "analysis.baseline.enabled"),
-        summary_json=str(d.get("summary_json", "") or ""),
+        enabled=bool(enabled or raw_mode in {"run", "file"}),
+        mode=raw_mode,
+        summary_json=summary_json,
     )
 
 
@@ -615,8 +630,8 @@ def _parse_sensitivity_section(value: Any) -> SensitivitySection:
         seed=int(d.get("seed", 0)),
         parameters=[_parse_sensitivity_parameter(v) for v in params_raw],
     )
-    if out.method not in {"one_at_a_time", "lhs"}:
-        raise ValueError("analysis.sensitivity.method must be one of: one_at_a_time, lhs.")
+    if out.method not in {"one_at_a_time", "lhs", "two_parameter_grid"}:
+        raise ValueError("analysis.sensitivity.method must be one of: one_at_a_time, lhs, two_parameter_grid.")
     if out.samples < 0:
         raise ValueError("analysis.sensitivity.samples must be >= 0.")
     return out

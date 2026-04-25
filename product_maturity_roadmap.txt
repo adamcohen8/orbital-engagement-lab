@@ -43,7 +43,7 @@ Current scores:
 - Controller Bench: 8/10
 - Monte Carlo Simulation: 8/10
 - RL/ML: 7/10
-- Sensitivity Analysis: 7/10
+- Sensitivity Analysis: 8/10
 - AI Reports: 7/10
 - GUI: 6.5/10
 - Video Game Mode: 6/10
@@ -121,11 +121,14 @@ implicit repo knowledge into stable engineering interfaces.
 Required contract artifacts:
 
 - engine contract: step order, object lifecycle, truth/belief/knowledge timing,
-  controller timing, and extension boundaries,
+  controller timing, and extension boundaries. Initial artifact:
+  `docs/contracts/engine-contract.md`,
 - scenario contract: YAML versioning, supported combinations, migration rules,
-  and validation expectations,
+  and validation expectations. Initial artifact:
+  `docs/contracts/scenario-yaml-contract.md`,
 - payload contract: run summary fields, artifact manifest semantics, metrics,
-  and compatibility guarantees,
+  and compatibility guarantees. Initial artifact:
+  `docs/contracts/payload-artifact-contract.md`,
 - benchmark contract: baseline storage, pass/fail gates, metric definitions, and
   expected tolerance review process,
 - public/private contract: what belongs in public core, what belongs in
@@ -161,8 +164,8 @@ What would make it 10/10:
 - retire or isolate remaining legacy orchestration paths,
 - formalize compatibility/stability guarantees for the public Python API,
 - make run payloads and artifact metadata fully standardized,
-- and publish a short "engine contract" document explaining step order,
-  object lifecycles, truth/knowledge timing, and extension boundaries.
+- and maintain the engine contract with tests that protect step order, object
+  lifecycles, truth/knowledge timing, and extension boundaries.
 
 2) RL/ML
 
@@ -225,19 +228,23 @@ What would make it 10/10:
 
 5) Sensitivity Analysis
 
-Current score: 7/10
+Current score: 8/10
 
 Why it is usable now:
 
-- one-at-a-time and LHS paths both exist,
+- one-at-a-time, LHS, and two-parameter grid paths exist,
 - the feature is wired into API/CLI/GUI,
-- and sensitivity reporting is implemented.
+- generated-run preflight and failure-tolerant execution are implemented,
+- JSON, CSV, Markdown, and PNG artifacts are produced,
+- curated demo configs cover the main study modes,
+- and sensitivity-specific AI report prompting is implemented.
 
 What would make it 10/10:
 
-- define standard sensitivity study templates tied to common use cases,
-- improve presentation and ranking explainability in artifacts,
-- harden edge-case validation around parameter distributions and timing grids,
+- broaden standard sensitivity study templates tied to mission use cases,
+- add stronger statistical interpretation for LHS and interaction studies,
+- harden edge-case validation around parameter distributions, timing grids, and
+  high-cardinality studies,
 - add more benchmark-backed examples of good sensitivity study design,
 - and align the GUI/editor UX so sensitivity setup feels as polished as single-run
   scenario setup.
@@ -444,13 +451,16 @@ Priority work:
 - improve resumability and parallel robustness,
 - store baseline manifests and make metric definitions explicit,
 - standardize report formats and benchmark result interpretation,
-- and make AI report generation a clearly staged workflow with quality checks.
+- and make AI report generation a clearly staged workflow with pre-call review
+  packets, quality checks, usage/cost reconciliation, and report-payload
+  adapters for each major product workflow, including validation harness runs.
 
 Exit criteria:
 
 - campaign and benchmark results are reproducible and reviewable,
 - controller-bench and campaign outputs have stable semantics,
-- and AI reporting is useful enough to trust as part of engineering review.
+- and AI reporting is useful enough to trust as part of engineering review,
+  including auditable prompt scope and provider usage records.
 
 PHASE 6 - Mission and Autonomy Maturity
 

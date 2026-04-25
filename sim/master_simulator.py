@@ -531,6 +531,11 @@ def validate_generated_batch_configs(cfg: SimulationScenarioConfig) -> dict[str,
             ],
         }
 
+    if _analysis_study_type(cfg) == "sensitivity":
+        from sim.execution.sensitivity import validate_prepared_sensitivity_runs
+
+        return validate_prepared_sensitivity_runs(prepared=prepared, strict_plugins=strict_plugins)
+
     errors: list[dict[str, Any]] = []
     for item in prepared:
         iteration = int(item.get("iteration", 0))
@@ -1792,8 +1797,8 @@ def _run_sensitivity_analysis(
     batch_progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     sensitivity_method = str(cfg.analysis.sensitivity.method).strip().lower()
-    if sensitivity_method not in {"one_at_a_time", "lhs"}:
-        raise ValueError("analysis.sensitivity.method must be one of: one_at_a_time, lhs.")
+    if sensitivity_method not in {"one_at_a_time", "lhs", "two_parameter_grid"}:
+        raise ValueError("analysis.sensitivity.method must be one of: one_at_a_time, lhs, two_parameter_grid.")
     if not cfg.analysis.sensitivity.parameters:
         raise ValueError("analysis.sensitivity.parameters must contain at least one parameter.")
 
@@ -1814,9 +1819,10 @@ def _run_sensitivity_analysis(
     )
 
     baseline: dict[str, Any] | None = None
+    baseline_mode = str(getattr(cfg.analysis.baseline, "mode", "none") or "none").strip().lower()
     baseline_summary_json = str(cfg.analysis.baseline.summary_json or "").strip()
     strict_plugins = bool(cfg.simulator.plugin_validation.get("strict", True))
-    if baseline_summary_json:
+    if baseline_mode == "file":
         bpath = Path(baseline_summary_json)
         if not bpath.is_absolute():
             bpath = Path(config_path).resolve().parent / bpath
@@ -1826,17 +1832,20 @@ def _run_sensitivity_analysis(
                 "source": "file",
                 "path": str(bpath),
                 "summary": dict(baseline_payload.get("summary", baseline_payload.get("run", {})) or {}),
-                "metrics": dict(baseline_payload.get("aggregate_stats", {}) or {}),
+                "metrics": extract_analysis_metrics(baseline_payload, metric_paths),
             }
-    elif bool(cfg.analysis.baseline.enabled):
+    elif baseline_mode == "run" or (baseline_mode == "none" and bool(cfg.analysis.baseline.enabled)):
         baseline_root = deepcopy(root)
         mode = str(baseline_root.get("outputs", {}).get("mode", "interactive"))
         if mode == "interactive":
             baseline_root.setdefault("outputs", {})["mode"] = "save"
         baseline_root.setdefault("outputs", {})["output_dir"] = str(outdir / "sensitivity_baseline")
+        baseline_root.setdefault("analysis", {})["enabled"] = False
+        baseline_root.setdefault("monte_carlo", {})["enabled"] = False
         baseline_payload = _run_single_config(scenario_config_from_dict(baseline_root))
         baseline = {
             "source": "run",
+            "output_dir": str(outdir / "sensitivity_baseline"),
             "summary": dict(baseline_payload.get("summary", {}) or {}),
             "metrics": extract_analysis_metrics(baseline_payload, metric_paths),
         }
@@ -1858,6 +1867,8 @@ def _run_sensitivity_analysis(
     parallel_active = bool(sensitivity_result.get("parallel_active", False))
     parallel_workers = int(sensitivity_result.get("parallel_workers", 1) or 1)
     parallel_fallback_reason = sensitivity_result.get("parallel_fallback_reason")
+    preflight = dict(sensitivity_result.get("preflight", {}) or {})
+    failure_policy = str(sensitivity_result.get("failure_policy", getattr(cfg.analysis.execution, "failure_policy", "fail_fast")))
 
     from sim.reporting.ai_reports import write_ai_report_artifacts
     from sim.reporting.sensitivity import build_sensitivity_report_payload, write_sensitivity_summary_artifact
@@ -1874,6 +1885,8 @@ def _run_sensitivity_analysis(
         parallel_active=parallel_active,
         parallel_workers=parallel_workers,
         parallel_fallback_reason=parallel_fallback_reason,
+        preflight=preflight,
+        failure_policy=failure_policy,
     )
     agg = write_ai_report_artifacts(
         cfg=cfg,

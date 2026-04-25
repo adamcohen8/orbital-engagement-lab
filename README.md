@@ -122,6 +122,9 @@ require hosted AI accounts or API keys.
 - [Plotting](docs/plotting.md)
 - [Plot Gallery](docs/plot-gallery.md)
 - [Public Core And Pro Boundary](docs/public-vs-pro.md)
+- [Engine Contract](docs/contracts/engine-contract.md)
+- [Scenario YAML Contract](docs/contracts/scenario-yaml-contract.md)
+- [Payload And Artifact Contract](docs/contracts/payload-artifact-contract.md)
 - [Product Maturity Roadmap](product_maturity_roadmap.txt)
 
 ## Curated Examples
