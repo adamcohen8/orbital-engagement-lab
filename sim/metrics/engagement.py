@@ -16,10 +16,22 @@ class EngagementMetrics:
     jitter_ms_by_object: dict[str, float]
 
 
+def _sampled_dwell_time_s(mask: np.ndarray, time_s: np.ndarray) -> float:
+    inside = np.array(mask, dtype=bool).reshape(-1)
+    t = np.array(time_s, dtype=float).reshape(-1)
+    n = min(inside.size, t.size)
+    if n < 2:
+        return 0.0
+    dt = np.diff(t[:n])
+    valid = np.isfinite(dt) & (dt > 0.0)
+    if not np.any(valid):
+        return 0.0
+    return float(np.sum(dt[valid] * inside[: n - 1][valid]))
+
+
 def compute_engagement_metrics(log: SimLog, keepout_radius_km: float | None = None) -> EngagementMetrics:
     object_ids = sorted(log.truth_by_object.keys())
     t = log.t_s
-    dt = float(np.median(np.diff(t))) if t.size > 1 else 0.0
 
     min_sep = np.inf
     time_inside = 0.0
@@ -30,7 +42,7 @@ def compute_engagement_metrics(log: SimLog, keepout_radius_km: float | None = No
             d = np.linalg.norm(ri - rj, axis=1)
             min_sep = min(min_sep, float(np.min(d)))
             if keepout_radius_km is not None:
-                time_inside += float(np.sum(d < keepout_radius_km) * dt)
+                time_inside += _sampled_dwell_time_s(d < keepout_radius_km, t)
     if np.isinf(min_sep):
         min_sep = 0.0
 

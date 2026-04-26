@@ -32,3 +32,6 @@ validation/data/*.mat
 
 # Local-only RED experiment framework (private)
 RED/
+
+# Local workflow notes for future assistant sessions
+LOCAL_PUBLIC_EXPORT_WORKFLOW.md

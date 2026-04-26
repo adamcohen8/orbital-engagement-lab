@@ -6,6 +6,7 @@ from typing import Any
 import numpy as np
 
 from sim.core.models import StateTruth
+from sim.utils.frames import ric_dcm_ir_from_rv
 from sim.utils.quaternion import normalize_quaternion, quaternion_delta_from_body_rate, quaternion_multiply
 
 
@@ -17,6 +18,9 @@ class KeyboardCommandState:
     firing: bool = False
     throttle: float = 1.0
     reset_requested: bool = False
+    restart_requested: bool = False
+    paused: bool = False
+    step_requested: bool = False
     quit_requested: bool = False
 
     def reset_axes(self) -> None:
@@ -32,6 +36,8 @@ class ManualGameCommandProvider:
     max_accel_km_s2: float = 2.0e-5
     attitude_rate_deg_s: float = 8.0
     controlled_object_id: str = "chaser"
+    control_mode: str = "attitude_thrust"
+    reference_object_id: str = "target"
     _desired_attitude_quat_bn: np.ndarray | None = field(default=None, init=False, repr=False)
     _last_update_t_s: float | None = field(default=None, init=False, repr=False)
 
@@ -83,10 +89,45 @@ class ManualGameCommandProvider:
         t_s: float,
         dt_s: float,
         object_id: str | None = None,
+        world_truth: dict[str, StateTruth] | None = None,
         **_: Any,
     ) -> dict[str, Any]:
         if object_id is not None and str(object_id) != str(self.controlled_object_id):
             return {}
+        mode = str(self.control_mode or "attitude_thrust").strip().lower()
+        if mode in {"ric", "ric_translation", "translation"}:
+            throttle = float(np.clip(self.command_state.throttle, 0.0, 1.0))
+            accel_ric = np.array(
+                [
+                    float(np.clip(self.command_state.pitch, -1.0, 1.0)),
+                    float(np.clip(self.command_state.yaw, -1.0, 1.0)),
+                    float(np.clip(self.command_state.roll, -1.0, 1.0)),
+                ],
+                dtype=float,
+            )
+            nrm = float(np.linalg.norm(accel_ric))
+            if nrm > 1.0:
+                accel_ric /= nrm
+            accel_ric *= float(max(self.max_accel_km_s2, 0.0)) * throttle
+            ref = dict(world_truth or {}).get(str(self.reference_object_id))
+            if ref is not None:
+                c_ir = ric_dcm_ir_from_rv(ref.position_eci_km, ref.velocity_eci_km_s)
+                thrust_eci = c_ir @ accel_ric
+            else:
+                thrust_eci = accel_ric
+            return {
+                "thrust_eci_km_s2": thrust_eci,
+                "mission_mode": {
+                    "strategy": "manual_ric_translation",
+                    "throttle": throttle,
+                },
+                "command_mode_flags": {
+                    "player_controlled": True,
+                    "player_control_mode": "ric_translation",
+                    "player_throttle": throttle,
+                    "player_accel_ric_km_s2": accel_ric.tolist(),
+                },
+            }
         q_cmd = self._integrate_target(truth=truth, t_s=float(t_s), dt_s=float(dt_s))
         throttle = float(np.clip(self.command_state.throttle, 0.0, 1.0))
         accel_mag = float(max(self.max_accel_km_s2, 0.0)) * throttle if self.command_state.firing else 0.0

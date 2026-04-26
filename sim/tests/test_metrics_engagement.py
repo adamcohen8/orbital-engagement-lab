@@ -46,6 +46,35 @@ class TestEngagementMetrics(unittest.TestCase):
         self.assertAlmostEqual(metrics.time_inside_keepout_s, 1.0, places=9)
         self.assertAlmostEqual(metrics.fuel_used_kg_by_object["chaser"], 2.0, places=9)
 
+    def test_keepout_time_counts_intervals_not_samples(self):
+        t_s = np.array([0.0, 1.0, 2.0], dtype=float)
+        target_truth = np.array(
+            [
+                [7000.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0],
+                [7000.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0],
+                [7000.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0],
+            ],
+            dtype=float,
+        )
+        chaser_truth = target_truth.copy()
+        chaser_truth[:, 0] += 1.0
+        zeros = np.zeros((3, 3), dtype=float)
+        runtime = np.zeros(3, dtype=float)
+        skipped = np.zeros(3, dtype=bool)
+        log = SimLog(
+            t_s=t_s,
+            truth_by_object={"target": target_truth, "chaser": chaser_truth},
+            belief_by_object={"target": target_truth[:, :6], "chaser": chaser_truth[:, :6]},
+            applied_thrust_by_object={"target": zeros, "chaser": zeros},
+            applied_torque_by_object={"target": zeros, "chaser": zeros},
+            controller_runtime_ms_by_object={"target": runtime, "chaser": runtime},
+            controller_skipped_by_object={"target": skipped, "chaser": skipped},
+        )
+
+        metrics = compute_engagement_metrics(log, keepout_radius_km=3.0)
+
+        self.assertAlmostEqual(metrics.time_inside_keepout_s, 2.0, places=9)
+
 
 if __name__ == "__main__":
     unittest.main()

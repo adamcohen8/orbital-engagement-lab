@@ -17,6 +17,12 @@ def main() -> None:
     parser.add_argument("--controlled-object", default="chaser", help="Object id controlled by keyboard input.")
     parser.add_argument("--attitude-rate-deg-s", type=float, default=45.0, help="Commanded attitude target slew rate.")
     parser.add_argument("--fast", action="store_true", help="Step as fast as the dashboard can render instead of realtime.")
+    parser.add_argument(
+        "--speed-multiple",
+        type=float,
+        default=1.0,
+        help="Realtime playback speed. For example, 10 means 10 seconds of sim time per 1 second of real time.",
+    )
     args = parser.parse_args()
 
     run_game_mode(
@@ -24,6 +30,7 @@ def main() -> None:
         controlled_object_id=str(args.controlled_object),
         attitude_rate_deg_s=float(args.attitude_rate_deg_s),
         realtime=not bool(args.fast),
+        speed_multiple=float(args.speed_multiple),
     )
 
 

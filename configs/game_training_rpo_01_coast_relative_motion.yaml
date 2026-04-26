@@ -1,0 +1,160 @@
+scenario_name: "game_training_rpo_01_coast_relative_motion"
+scenario_description: "RPO trainer scenario for learning natural target-centered RIC drift and the 3D NMT shape."
+
+metadata:
+  owner: "codex"
+  notes: "Run with `python run_game.py configs/game_training_rpo_01_coast_relative_motion.yaml --fast`."
+  game:
+    control_mode: "ric_translation"
+    player_max_accel_km_s2: 2.0e-5
+    training:
+      enabled: true
+      scenario_id: "rpo_01_coast_relative_motion"
+      learning_goal: "Observe natural RIC drift, then use small R/I/C pulses to approach a passive 3D NMT with a 2:1 RI ellipse and a tilted RC ellipse."
+      target_object_id: "target"
+      chaser_object_id: "chaser"
+      keepout_radius_km: 0.25
+      goal_nmt_center_ric_km: [0.0, 0.0, 0.0]
+      goal_nmt_radial_amplitude_km: 1.5
+      goal_nmt_cross_track_amplitude_km: 1.0
+      goal_nmt_cross_track_phase_deg: 45.0
+      goal_nmt_element_tolerance_km: 0.15
+      goal_nmt_velocity_tolerance_km_s: 0.0005
+      max_time_s: 3600.0
+      max_delta_v_m_s: 8.0
+
+rocket:
+  enabled: false
+  role: "rocket"
+
+chaser:
+  enabled: true
+  role: "chaser"
+  specs:
+    mass_kg: 200.0
+  initial_state:
+    relative_to_target_ric:
+      frame: "rect"
+      state: [0.0, -3.0, 0.0, 0.0, 0.002, 0.0]
+    attitude_quat_bn: [1.0, 0.0, 0.0, 0.0]
+    angular_rate_body_rad_s: [0.0, 0.0, 0.0]
+  orbit_control:
+    kind: "python"
+    module: "sim.control.orbit.zero_controller"
+    class_name: "ZeroController"
+    params: {}
+  attitude_control:
+    kind: "python"
+    module: "sim.control.attitude.zero_torque"
+    class_name: "ZeroTorqueController"
+    params: {}
+  mission_strategy: null
+  mission_execution: null
+  mission_objectives: []
+  knowledge:
+    refresh_rate_s: 1.0
+    targets: ["target"]
+    conditions:
+      require_line_of_sight: false
+      max_range_km: 10000.0
+    sensor_error:
+      pos_sigma_km: [0.0, 0.0, 0.0]
+      vel_sigma_km_s: [0.0, 0.0, 0.0]
+    estimation:
+      type: "ekf"
+
+target:
+  enabled: true
+  role: "target"
+  reference_orbit:
+    enabled: true
+  specs:
+    mass_kg: 1800.0
+  initial_state:
+    coes:
+      a_km: 7000.0
+      ecc: 0.0
+      inc_deg: 45.0
+      raan_deg: 0.0
+      argp_deg: 0.0
+      true_anomaly_deg: 0.0
+    attitude_quat_bn: [1.0, 0.0, 0.0, 0.0]
+    angular_rate_body_rad_s: [0.0, 0.0, 0.0]
+  orbit_control:
+    kind: "python"
+    module: "sim.control.orbit.zero_controller"
+    class_name: "ZeroController"
+    params: {}
+  attitude_control:
+    kind: "python"
+    module: "sim.control.attitude.zero_torque"
+    class_name: "ZeroTorqueController"
+    params: {}
+  mission_strategy: null
+  mission_execution: null
+  mission_objectives: []
+  knowledge:
+    refresh_rate_s: 1.0
+    targets: ["chaser"]
+    conditions:
+      require_line_of_sight: false
+      max_range_km: 10000.0
+    sensor_error:
+      pos_sigma_km: [0.0, 0.0, 0.0]
+      vel_sigma_km_s: [0.0, 0.0, 0.0]
+    estimation:
+      type: "ekf"
+
+simulator:
+  scenario_type: "auto"
+  duration_s: 6000.0
+  dt_s: 1.0
+  dynamics:
+    orbit:
+      model: "two_body"
+      orbit_substep_s: 1.0
+      j2: false
+      j3: false
+      j4: false
+      drag: false
+      srp: false
+      third_body_sun: false
+      third_body_moon: false
+    attitude:
+      enabled: false
+    rocket:
+      enabled: false
+  environment:
+    ephemeris_mode: "analytic_simple"
+    atmosphere_env: {}
+  plugin_validation:
+    strict: true
+  termination:
+    earth_impact_enabled: false
+    earth_radius_km: 6378.137
+
+outputs:
+  output_dir: "outputs/game_training_rpo_01"
+  mode: "save"
+  stats:
+    enabled: true
+    print_summary: false
+    save_json: false
+    save_csv: false
+    save_full_log: false
+  plots:
+    enabled: false
+    figure_ids: []
+  animations:
+    enabled: false
+    types: []
+    battlespace_dashboard_target_object_id: "target"
+    battlespace_dashboard_chaser_object_id: "chaser"
+    battlespace_dashboard_show_trajectory: true
+    battlespace_dashboard_attitude_dims_m:
+      target: [2.0, 1.5, 1.5]
+      chaser: [2.0, 1.5, 1.5]
+    battlespace_dashboard_thruster_active_threshold_km_s2: 1.0e-15
+    fps: 30
+    speed_multiple: 1.0
+    frame_stride: 1

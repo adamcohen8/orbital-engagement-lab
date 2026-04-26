@@ -26,6 +26,9 @@ dev = [
 gui = [
   "PySide6>=6.7",
 ]
+game = [
+  "pygame>=2.5",
+]
 ml = [
   "gymnasium>=0.29",
   "torch>=2.1",
@@ -34,6 +37,7 @@ ml = [
 full = [
   "pytest>=8.0",
   "PySide6>=6.7",
+  "pygame>=2.5",
   "gymnasium>=0.29",
   "torch>=2.1",
   "lightning>=2.2",

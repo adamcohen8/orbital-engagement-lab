@@ -6,7 +6,7 @@ from typing import Any, Callable
 
 import numpy as np
 
-from sim.config import SimulationScenarioConfig, load_simulation_yaml, scenario_config_from_dict
+from sim.config import SimulationScenarioConfig, load_simulation_yaml, scenario_config_from_dict, validate_scenario_plugins
 from sim.execution import create_single_run_engine, run_simulation_scenario
 
 
@@ -326,10 +326,21 @@ class SimulationSession:
                 if callable(emit):
                     emit(getattr(self._engine, "current_index", 0))
             return
-        self._engine = create_single_run_engine(self._active_config.to_scenario_config(), step_callback=step_callback)
+        scenario = self._active_config.to_scenario_config()
+        self._validate_plugins_if_strict(scenario)
+        self._engine = create_single_run_engine(scenario, step_callback=step_callback)
         if hasattr(self._engine, "set_external_intent_provider"):
             for object_id, provider in self._external_intent_providers.items():
                 self._engine.set_external_intent_provider(object_id, provider)
+
+    @staticmethod
+    def _validate_plugins_if_strict(config: SimulationScenarioConfig) -> None:
+        if not bool(config.simulator.plugin_validation.get("strict", True)):
+            return
+        errors = validate_scenario_plugins(config)
+        if errors:
+            msg = "Plugin validation failed:\n- " + "\n- ".join(errors)
+            raise ValueError(msg)
 
     @staticmethod
     def _is_batch_analysis(config: SimulationScenarioConfig) -> bool:

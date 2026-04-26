@@ -1,25 +1,15 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
-import select
-import sys
-import termios
 from time import perf_counter
 from typing import Any
-import tty
 
-import matplotlib.pyplot as plt
 import numpy as np
 
 from sim.api import SimulationConfig, SimulationSession
-from sim.game.dashboard import LiveBattlespaceDashboard
 from sim.game.manual import KeyboardCommandState, ManualGameCommandProvider
-from sim.presets.thrusters import resolve_thruster_max_thrust_n_from_specs, resolve_thruster_mount_from_specs
-
-
-def _key_name(event: Any) -> str:
-    return str(getattr(event, "key", "") or "").strip().lower()
+from sim.game.training import RPOTrainingConfig, RPOTrainingTracker
+from sim.presets.thrusters import resolve_thruster_max_thrust_n_from_specs
 
 
 def _max_accel_from_config(config: SimulationConfig, controlled_object_id: str) -> float:
@@ -44,35 +34,23 @@ def _max_accel_from_config(config: SimulationConfig, controlled_object_id: str) 
     return 2.0e-5
 
 
-def _thruster_mounts_from_config(config: SimulationConfig) -> dict[str, dict[str, np.ndarray] | None]:
-    out: dict[str, dict[str, np.ndarray] | None] = {}
-    for oid, section in (("target", config.scenario.target), ("chaser", config.scenario.chaser)):
-        mount = resolve_thruster_mount_from_specs(dict(section.specs or {}))
-        if mount is None:
-            out[oid] = None
-        else:
-            out[oid] = {
-                "position_body_m": np.array(mount.position_body_m, dtype=float),
-                "direction_body": np.array(mount.thrust_direction_body, dtype=float),
-            }
-    return out
+def _game_control_mode(config: SimulationConfig) -> str:
+    game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
+    return str(game_cfg.get("control_mode", "attitude_thrust") or "attitude_thrust").strip().lower()
 
 
-def _attitude_dims_from_config(config: SimulationConfig) -> dict[str, list[float] | np.ndarray]:
-    anim_cfg = dict(config.scenario.outputs.animations or {})
-    raw = anim_cfg.get("battlespace_dashboard_attitude_dims_m", {})
-    return dict(raw) if isinstance(raw, dict) else {}
+def _wall_step_s(dt_s: float, speed_multiple: float) -> float:
+    return float(dt_s) / max(float(speed_multiple), 1.0e-9)
 
 
-def _mass_specs_from_config(config: SimulationConfig, key: str) -> dict[str, float | None]:
-    out: dict[str, float | None] = {}
-    for oid, section in (("target", config.scenario.target), ("chaser", config.scenario.chaser)):
-        value = dict(section.specs or {}).get(key)
-        out[oid] = None if value is None else float(value)
-    return out
-
-
-def _command_status(state: KeyboardCommandState) -> str:
+def _command_status(state: KeyboardCommandState, *, control_mode: str = "attitude_thrust") -> str:
+    if control_mode in {"ric", "ric_translation", "translation"}:
+        sim_state = "PAUSED" if state.paused else "RUNNING"
+        return (
+            "W/S radial +/-R  A/D in-track +/-I  Left/Right cross-track +/-C\n"
+            "Use small pulses, then coast and watch the target-centered RIC motion.\n"
+            f"{sim_state}  R={state.pitch:+.0f} I={state.yaw:+.0f} C={state.roll:+.0f} throttle={state.throttle:.2f}"
+        )
     burn = "FIRE" if state.firing else "coast"
     return (
         "W/S pitch  A/D yaw  Left/Right roll  Space fire  R reset  Esc quit\n"
@@ -81,121 +59,29 @@ def _command_status(state: KeyboardCommandState) -> str:
     )
 
 
-class _TerminalKeyInput:
-    def __init__(self, *, pulse_s: float = 0.8) -> None:
-        self.pulse_s = float(max(pulse_s, 0.05))
-        self.enabled = bool(sys.stdin.isatty())
-        self.fd = sys.stdin.fileno() if self.enabled else -1
-        self._old_attrs: list[Any] | None = None
-        self._buffer = ""
-        self._pitch_until = 0.0
-        self._pitch_value = 0.0
-        self._yaw_until = 0.0
-        self._yaw_value = 0.0
-        self._roll_until = 0.0
-        self._roll_value = 0.0
-        self._fire_until = 0.0
-        self._used = False
-
-    def __enter__(self) -> "_TerminalKeyInput":
-        if self.enabled:
-            self._old_attrs = termios.tcgetattr(self.fd)
-            tty.setcbreak(self.fd)
-        return self
-
-    def __exit__(self, *_: object) -> None:
-        if self.enabled and self._old_attrs is not None:
-            termios.tcsetattr(self.fd, termios.TCSADRAIN, self._old_attrs)
-
-    def poll(self, state: KeyboardCommandState) -> None:
-        if not self.enabled:
-            return
-        while True:
-            ready, _, _ = select.select([sys.stdin], [], [], 0.0)
-            if not ready:
-                break
-            chunk = os.read(self.fd, 32).decode(errors="ignore")
-            if not chunk:
-                break
-            self._buffer += chunk
-        for key in self._drain_keys():
-            self._apply_key(key, state)
-        self._apply_expiry(state)
-
-    def _drain_keys(self) -> list[str]:
-        keys: list[str] = []
-        while self._buffer:
-            if self._buffer.startswith("\x1b[D"):
-                keys.append("left")
-                self._buffer = self._buffer[3:]
-            elif self._buffer.startswith("\x1b[C"):
-                keys.append("right")
-                self._buffer = self._buffer[3:]
-            elif self._buffer.startswith("\x1b"):
-                keys.append("escape")
-                self._buffer = self._buffer[1:]
-            else:
-                keys.append(self._buffer[0].lower())
-                self._buffer = self._buffer[1:]
-        return keys
-
-    def _apply_key(self, key: str, state: KeyboardCommandState) -> None:
-        now = perf_counter()
-        until = now + self.pulse_s
-        self._used = True
-        if key == "w":
-            self._pitch_value = 1.0
-            self._pitch_until = until
-        elif key == "s":
-            self._pitch_value = -1.0
-            self._pitch_until = until
-        elif key == "a":
-            self._yaw_value = -1.0
-            self._yaw_until = until
-        elif key == "d":
-            self._yaw_value = 1.0
-            self._yaw_until = until
-        elif key == "left":
-            self._roll_value = -1.0
-            self._roll_until = until
-        elif key == "right":
-            self._roll_value = 1.0
-            self._roll_until = until
-        elif key == " ":
-            self._fire_until = until
-        elif key == "r":
-            state.reset_requested = True
-        elif key in {"escape", "\x03"}:
-            state.quit_requested = True
-        self._apply_expiry(state)
-
-    def _apply_expiry(self, state: KeyboardCommandState) -> None:
-        if not self._used:
-            return
-        now = perf_counter()
-        state.pitch = self._pitch_value if now <= self._pitch_until else 0.0
-        state.yaw = self._yaw_value if now <= self._yaw_until else 0.0
-        state.roll = self._roll_value if now <= self._roll_until else 0.0
-        state.firing = bool(now <= self._fire_until)
-        if now > max(self._pitch_until, self._yaw_until, self._roll_until, self._fire_until):
-            self._used = False
-
-
 def run_game_mode(
     config_path: str | Path,
     *,
     controlled_object_id: str = "chaser",
     attitude_rate_deg_s: float = 45.0,
     realtime: bool = True,
+    speed_multiple: float = 1.0,
 ) -> None:
+    from sim.game.pygame_dashboard import PygameRPODashboard
+
     config = SimulationConfig.from_yaml(config_path)
     session = SimulationSession.from_config(config)
+    control_mode = _game_control_mode(config)
+    training_cfg = RPOTrainingConfig.from_metadata(dict(config.scenario.metadata or {}))
+    trainer = RPOTrainingTracker(training_cfg)
     command_state = KeyboardCommandState()
     provider = ManualGameCommandProvider(
         command_state=command_state,
         max_accel_km_s2=_max_accel_from_config(config, controlled_object_id),
         attitude_rate_deg_s=attitude_rate_deg_s,
         controlled_object_id=controlled_object_id,
+        control_mode=control_mode,
+        reference_object_id=training_cfg.target_object_id,
     )
     session.set_external_intent_provider(controlled_object_id, provider)
     snapshot = session.reset()
@@ -204,72 +90,152 @@ def run_game_mode(
     provider.reset_target_to_current(snapshot.truth[controlled_object_id])
 
     anim_cfg = dict(config.scenario.outputs.animations or {})
-    dashboard = LiveBattlespaceDashboard(
+    dashboard = PygameRPODashboard(
         target_object_id=str(anim_cfg.get("battlespace_dashboard_target_object_id", "target")),
         chaser_object_id=str(anim_cfg.get("battlespace_dashboard_chaser_object_id", "chaser")),
-        prism_dims_m_by_object=_attitude_dims_from_config(config),
-        thruster_mounts_by_object=_thruster_mounts_from_config(config),
-        dry_mass_kg_by_object=_mass_specs_from_config(config, "dry_mass_kg"),
-        fuel_capacity_kg_by_object=_mass_specs_from_config(config, "fuel_mass_kg"),
-        thruster_active_threshold_km_s2=float(anim_cfg.get("battlespace_dashboard_thruster_active_threshold_km_s2", 1e-15)),
-        show_trajectory=bool(anim_cfg.get("battlespace_dashboard_show_trajectory", True)),
+        keepout_radius_km=training_cfg.keepout_radius_km,
+        goal_radius_km=training_cfg.goal_radius_km,
+        goal_relative_ric_km=training_cfg.goal_relative_ric_km,
+        goal_nmt_radial_amplitude_km=training_cfg.goal_nmt_radial_amplitude_km,
+        goal_nmt_cross_track_amplitude_km=training_cfg.goal_nmt_cross_track_amplitude_km,
+        goal_nmt_cross_track_phase_deg=training_cfg.goal_nmt_cross_track_phase_deg,
+        goal_nmt_center_ric_km=training_cfg.goal_nmt_center_ric_km,
+        fullscreen=True,
+    )
+    dashboard.push_snapshot(snapshot)
+    trainer.record(snapshot)
+    score = trainer.score()
+    dashboard.draw(
+        command_status=_command_status(command_state, control_mode=control_mode),
+        coach_hint=trainer.current_hint(),
+        mission_state=_mission_state(score),
+        mission_metrics=_mission_metrics(training_cfg, score),
     )
 
-    def on_press(event: Any) -> None:
-        key = _key_name(event)
-        if key == "w":
-            command_state.pitch = 1.0
-        elif key == "s":
-            command_state.pitch = -1.0
-        elif key == "a":
-            command_state.yaw = -1.0
-        elif key == "d":
-            command_state.yaw = 1.0
-        elif key == "left":
-            command_state.roll = -1.0
-        elif key == "right":
-            command_state.roll = 1.0
-        elif key == " ":
-            command_state.firing = True
-        elif key == "r":
-            command_state.reset_requested = True
-        elif key == "escape":
-            command_state.quit_requested = True
-
-    def on_release(event: Any) -> None:
-        key = _key_name(event)
-        if key in {"w", "s"}:
-            command_state.pitch = 0.0
-        elif key in {"a", "d"}:
-            command_state.yaw = 0.0
-        elif key in {"left", "right"}:
-            command_state.roll = 0.0
-        elif key == " ":
-            command_state.firing = False
-
-    dashboard.connect_key_handlers(on_press, on_release)
-    dashboard.push_snapshot(snapshot)
-    dashboard.render(command_status=_command_status(command_state))
-
+    pygame = dashboard.pygame
     dt_s = float(config.scenario.simulator.dt_s)
+    wall_step_s = _wall_step_s(dt_s, speed_multiple)
     last_step_wall = perf_counter()
-    with _TerminalKeyInput() as terminal_input:
-        while (not session.done) and (not dashboard.closed) and (not command_state.quit_requested):
-            terminal_input.poll(command_state)
-            dashboard.render(command_status=_command_status(command_state))
-            if realtime:
-                now = perf_counter()
-                wait_s = dt_s - (now - last_step_wall)
-                if wait_s > 0.0:
-                    plt.pause(min(wait_s, 0.03))
-                    continue
+    try:
+        while (not session.done) and (not command_state.quit_requested) and (not dashboard.closed):
+            _poll_pygame_input(pygame, command_state, control_mode=control_mode)
+            if command_state.quit_requested:
+                break
+            if command_state.restart_requested:
+                session = SimulationSession.from_config(config)
+                provider = ManualGameCommandProvider(
+                    command_state=command_state,
+                    max_accel_km_s2=_max_accel_from_config(config, controlled_object_id),
+                    attitude_rate_deg_s=attitude_rate_deg_s,
+                    controlled_object_id=controlled_object_id,
+                    control_mode=control_mode,
+                    reference_object_id=training_cfg.target_object_id,
+                )
+                session.set_external_intent_provider(controlled_object_id, provider)
+                snapshot = session.reset()
+                if snapshot is None:
+                    raise RuntimeError("Game mode requires a single-run scenario.")
+                provider.reset_target_to_current(snapshot.truth[controlled_object_id])
+                trainer.clear()
+                dashboard.clear()
+                dashboard.push_snapshot(snapshot)
+                trainer.record(snapshot)
+                command_state.restart_requested = False
+                command_state.step_requested = False
+                command_state.paused = False
                 last_step_wall = perf_counter()
-            snapshot = session.step()
-            dashboard.push_snapshot(snapshot)
-            dashboard.render(command_status=_command_status(command_state))
-            plt.pause(0.001)
+            now = perf_counter()
+            pre_score = trainer.score()
+            mission_decided = bool(pre_score.level_passed or pre_score.level_failed)
+            if mission_decided:
+                command_state.paused = True
+            step_due = (not realtime) or (now - last_step_wall >= wall_step_s)
+            should_step = ((not command_state.paused and step_due) or bool(command_state.step_requested)) and not mission_decided
+            if should_step:
+                last_step_wall = now
+                snapshot = session.step()
+                dashboard.push_snapshot(snapshot)
+                trainer.record(snapshot)
+                command_state.step_requested = False
+            score = trainer.score()
+            if score.level_passed or score.level_failed:
+                command_state.paused = True
+            dashboard.draw(
+                command_status=_command_status(command_state, control_mode=control_mode),
+                coach_hint=trainer.current_hint(),
+                mission_state=_mission_state(score),
+                mission_metrics=_mission_metrics(training_cfg, score),
+            )
+            dashboard.tick(60.0)
+    finally:
+        dashboard.close()
+        if training_cfg.enabled:
+            print(trainer.debrief_text())
 
-    plt.ioff()
-    if not dashboard.closed:
-        dashboard.render(command_status=_command_status(command_state) + "\nSimulation ended.")
-        plt.show()
+
+def _poll_pygame_input(pygame: Any, state: KeyboardCommandState, *, control_mode: str = "attitude_thrust") -> None:
+    ric_mode = str(control_mode or "").strip().lower() in {"ric", "ric_translation", "translation"}
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            state.quit_requested = True
+        elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+            state.quit_requested = True
+        elif event.type == pygame.KEYDOWN and event.key == pygame.K_r:
+            state.restart_requested = True
+        elif event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE and ric_mode:
+            state.paused = not bool(state.paused)
+        elif event.type == pygame.KEYDOWN and event.key == pygame.K_PERIOD:
+            state.step_requested = True
+
+    keys = pygame.key.get_pressed()
+    state.pitch = 0.0
+    state.yaw = 0.0
+    state.roll = 0.0
+    if keys[pygame.K_w]:
+        state.pitch += 1.0
+    if keys[pygame.K_s]:
+        state.pitch -= 1.0
+    if keys[pygame.K_d]:
+        state.yaw += 1.0
+    if keys[pygame.K_a]:
+        state.yaw -= 1.0
+    if keys[pygame.K_RIGHT]:
+        state.roll += 1.0
+    if keys[pygame.K_LEFT]:
+        state.roll -= 1.0
+    state.firing = False if ric_mode else bool(keys[pygame.K_SPACE])
+
+
+def _mission_state(score: Any) -> str:
+    if bool(getattr(score, "level_passed", False)):
+        return "passed"
+    if bool(getattr(score, "level_failed", False)):
+        return "failed"
+    return "active"
+
+
+def _mission_metrics(config: RPOTrainingConfig, score: Any) -> tuple[str, ...]:
+    metrics: list[str] = []
+    if config.max_time_s is not None:
+        remain = max(float(config.max_time_s) - float(getattr(score, "elapsed_s", 0.0)), 0.0)
+        metrics.append(f"Time {remain:4.0f}s")
+    if config.max_delta_v_m_s is not None:
+        remain = max(float(config.max_delta_v_m_s) - float(getattr(score, "approximate_delta_v_m_s", 0.0)), 0.0)
+        metrics.append(f"dV {remain:4.1f} m/s")
+    if config.goal_nmt_element_tolerance_km is not None:
+        tol = float(config.goal_nmt_element_tolerance_km)
+        r_err = float(getattr(score, "final_nmt_radial_amplitude_error_km", float("nan")))
+        c_err = float(getattr(score, "final_nmt_cross_track_amplitude_error_km", float("nan")))
+        metrics.append(f"R amp { _fmt_metric(r_err)}/{tol:.2f} km")
+        metrics.append(f"C amp { _fmt_metric(c_err)}/{tol:.2f} km")
+    if config.goal_nmt_velocity_tolerance_km_s is not None:
+        tol = float(config.goal_nmt_velocity_tolerance_km_s)
+        err = float(getattr(score, "final_nmt_drift_velocity_error_km_s", float("nan")))
+        metrics.append(f"Drift { _fmt_metric(err, precision=4)}/{tol:.4f}")
+    return tuple(metrics)
+
+
+def _fmt_metric(value: float, *, precision: int = 2) -> str:
+    if not np.isfinite(float(value)):
+        return "--"
+    return f"{float(value):.{precision}f}"
