@@ -23,6 +23,8 @@ motion understandable before adding adversarial or cooperative play.
 
 ## RPO Trainer v0
 
+Status: implemented as the current single-player Pygame trainer.
+
 Target outcome:
 
 A cadet can launch a curated scenario, command radial/in-track/cross-track
@@ -52,18 +54,28 @@ Initial curated scenarios:
 
 2. `rpo_02_vbar_approach`
    Practice small in-track corrections and patience.
+   Pass by entering the stationkeeping box behind the target with low relative
+   speed, under the time and delta-v budgets, without entering keepout.
 
 3. `rpo_03_rbar_approach`
    Compare radial motion intuition against along-track drift.
+   Pass by entering the radial hold box with low relative speed, under the
+   time and delta-v budgets, without entering keepout.
 
-4. `rpo_04_stationkeeping`
-   Hold a relative point with low delta-v.
+4. `rpo_04_rendezvous`
+   Complete final approach from the hold point to rendezvous.
+   Pass by getting within 25 meters of the target with less than 1 meter per
+   second of relative velocity.
 
 5. `rpo_05_keepout_recovery`
    Recover from an unsafe closing geometry without entering keepout.
+   Pass by preserving keepout margin, arresting closure, and settling into the
+   V-bar hold box with low relative speed under the time and delta-v budgets.
 
 6. `rpo_06_defensive_target_demo`
    Later single-player bridge toward PvP: target uses a simple defensive policy.
+   Pass by preserving keepout margin, tracking the maneuvering target, and
+   settling into a safe trailing corridor with low relative speed.
 
 ## Controls
 
@@ -121,31 +133,43 @@ an approach became unstable.
 
 ### Phase 1 - RPO Trainer Foundation
 
-- Add direct RIC translation control mode.
-- Add training scenario metadata.
-- Add keepout/goal scoring.
-- Add text debrief at run end.
-- Add one or two curated training configs.
+- Done: direct RIC translation control mode.
+- Done: training scenario metadata.
+- Done: keepout/goal scoring.
+- Done: text debrief at run end.
+- Done: curated training configs for the initial six RPO levels.
 
 ### Phase 2 - Visual Teaching Overlays
 
-- Add keepout and goal overlays to RIC plots.
-- Add relative velocity and thrust vector overlays.
-- Add coast prediction.
-- Add burn markers.
+- Done: keepout, point-goal, and 3D NMT-goal overlays.
+- Done: relative velocity and thrust vector overlays.
+- Done: difficulty-scaled coast prediction.
+- Done: burn markers.
+- Done: close-rendezvous zoom behavior for final approach.
+- Done: keepout-margin metric for recovery and approach levels.
 
 ### Phase 3 - Scenario Pack
 
-- Build the six initial cadet scenarios.
-- Add instructor notes for each scenario.
-- Add success thresholds and scorecards.
-- Treat each mission as a pass/fail level.
-- Verify each scenario can run without local artifacts.
+- In progress: build the six initial cadet scenarios.
+- Done: `rpo_01_coast_relative_motion`.
+- Done: `rpo_02_vbar_approach`.
+- Done: `rpo_03_rbar_approach`.
+- Done: `rpo_04_rendezvous`.
+- Done: `rpo_05_keepout_recovery`.
+- Done: `rpo_06_defensive_target_demo`.
+- In progress: add instructor notes for each scenario.
+- Done for implemented levels: add success thresholds and scorecards.
+- Done for implemented levels: treat each mission as a pass/fail level.
+- Done for implemented levels: verify each scenario can run without local
+  artifacts.
 
 ### Phase 4 - Instructor Workflow
 
-- Add scenario selection and reset controls.
-- Add pause, step, speed, and replay controls.
+- Done: single-window scenario selection when launching `run_game.py` without a
+  config path.
+- Done: scenario reset control.
+- Done: pause, single-step, and runtime speed controls.
+- Later: add replay controls.
 - Export debrief artifacts.
 - Provide classroom guidance.
 
@@ -157,25 +181,54 @@ an approach became unstable.
 
 ## Near-Term Implementation Target
 
-Implemented foundation:
+Current implementation:
 
 - `pygame` is the default live game backend.
 - The legacy Matplotlib game backend has been removed; Pygame is the single
   supported live game runtime.
+- Game configs live under `sim/game/configs`.
 - `control_mode: ric_translation` is available in game metadata.
 - The Pygame view launches fullscreen, grabs input through SDL, and uses Escape
   as a reliable quit path.
 - The live trainer has a ghost coast trajectory, burn markers, labeled
   relative-velocity and thrust vectors, pause/resume, single-step, and scenario
   reset.
+- Coast-prediction assistance is difficulty-scaled: easy shows one full target
+  orbit, medium shows half an orbit, hard shows a quarter orbit, and extreme
+  hides the projection.
+- Runtime speed is adjustable in-game with Up/Down across 1x, 2x, 5x, 10x,
+  25x, and 50x.
+- Live mission metrics show time, delta-v, NMT element errors, point-goal
+  error, keepout margin, and relative-speed thresholds as appropriate.
+- Level pass/fail freezes the simulation and displays a mission banner.
+- Close rendezvous levels zoom around the current state and goal so meter-scale
+  criteria stay visible.
 
-Continue RPO Trainer v0 as a narrow slice:
+Implemented levels:
 
-- `control_mode: ric_translation` in game metadata,
-- a pure trainer scoring module,
-- one curated training config,
-- dashboard keepout, point-goal, and 3D NMT-goal overlays,
-- pass/fail criteria for `rpo_01` based on NMT amplitude errors, passive
-  velocity consistency, time budget, delta-v budget, and keepout,
-- run-end text debrief,
-- focused tests for controls and scoring.
+- `rpo_01_coast_relative_motion`: match a 3D NMT with radial/cross-track
+  amplitude tolerances, passive velocity consistency, time and delta-v budgets,
+  and keepout avoidance.
+- `rpo_02_vbar_approach`: enter the V-bar stationkeeping box with low relative
+  speed, under time and delta-v budgets, without entering keepout.
+- `rpo_03_rbar_approach`: enter the radial hold box with low relative speed,
+  under time and delta-v budgets, without entering keepout.
+- `rpo_04_rendezvous`: get within 25 meters of the target with less than
+  1 meter per second of relative velocity.
+- `rpo_05_keepout_recovery`: recover from an unsafe closing state by keeping
+  out of the keepout zone and returning to the V-bar hold box with low relative
+  speed.
+- `rpo_06_defensive_target_demo`: track a target with simple defensive pulses,
+  maintain keepout margin, and settle into a safe trailing corridor. This level
+  uses the target reference orbit as the RIC display/control frame so the
+  target maneuver is visible, and caps target defensive delta-v at 5 m/s.
+
+Next focus:
+
+- Done: scenario-selection preview with objective, brief, pass criteria,
+  budgets, and instructor notes.
+- Later: add level-locking or course-progress behavior if the training flow
+  needs it.
+- Add instructor-facing notes and classroom guidance for the implemented
+  levels.
+- Add replay/debrief export once the six-level pack is stable.

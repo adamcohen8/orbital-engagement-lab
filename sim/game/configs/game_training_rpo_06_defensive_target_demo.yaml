@@ -1,0 +1,184 @@
+scenario_name: "game_training_rpo_06_defensive_target_demo"
+scenario_description: "RPO trainer scenario introducing a simple defensive target response during proximity operations."
+
+metadata:
+  owner: "codex"
+  notes: "Run with `python run_game.py sim/game/configs/game_training_rpo_06_defensive_target_demo.yaml --speed-multiple 10`."
+  game:
+    control_mode: "ric_translation"
+    ric_reference_object_id: "target_reference"
+    difficulty: "easy"
+    player_max_accel_km_s2: 1.5e-5
+    defensive_target:
+      enabled: true
+      chaser_object_id: "chaser"
+      trigger_range_km: 1.2
+      trigger_closing_speed_km_s: 0.00025
+      keepout_radius_km: 0.25
+      max_accel_km_s2: 7.5e-6
+      max_delta_v_m_s: 5.0
+      cross_track_bias: 0.65
+      pulse_period_s: 120.0
+    training:
+      enabled: true
+      scenario_id: "rpo_06_defensive_target_demo"
+      learning_goal: "Track a target that performs small defensive pulses when closure becomes unsafe; preserve keepout margin and settle into a safe trailing corridor."
+      player_brief: "The target may maneuver when your closure becomes unsafe. Track the actual target motion relative to its reference orbit and re-establish safe trailing geometry."
+      pass_criteria:
+        - "Do not enter keepout."
+        - "Track the maneuvering target and settle into the trailing corridor."
+        - "Keep relative speed below the goal threshold."
+        - "Stay under the chaser delta-v budget."
+      instructor_notes:
+        - "This is a bridge toward defensive target behavior and future PvP."
+        - "The yellow target motion is shown relative to the target reference orbit."
+        - "Target defensive maneuvering is capped at 5 m/s total delta-v."
+      target_object_id: "target"
+      chaser_object_id: "chaser"
+      keepout_radius_km: 0.25
+      goal_relative_ric_km: [0.0, -0.90, 0.0]
+      goal_radius_km: 0.25
+      max_goal_speed_km_s: 0.00035
+      max_time_s: 4800.0
+      max_delta_v_m_s: 8.0
+
+rocket:
+  enabled: false
+  role: "rocket"
+
+chaser:
+  enabled: true
+  role: "chaser"
+  specs:
+    mass_kg: 200.0
+  initial_state:
+    relative_to_target_ric:
+      frame: "rect"
+      state: [0.0, -1.80, 0.0, 0.0, 0.000, 0.0]
+    attitude_quat_bn: [1.0, 0.0, 0.0, 0.0]
+    angular_rate_body_rad_s: [0.0, 0.0, 0.0]
+  orbit_control:
+    kind: "python"
+    module: "sim.control.orbit.zero_controller"
+    class_name: "ZeroController"
+    params: {}
+  attitude_control:
+    kind: "python"
+    module: "sim.control.attitude.zero_torque"
+    class_name: "ZeroTorqueController"
+    params: {}
+  mission_strategy: null
+  mission_execution: null
+  mission_objectives: []
+  knowledge:
+    refresh_rate_s: 1.0
+    targets: ["target"]
+    conditions:
+      require_line_of_sight: false
+      max_range_km: 10000.0
+    sensor_error:
+      pos_sigma_km: [0.0, 0.0, 0.0]
+      vel_sigma_km_s: [0.0, 0.0, 0.0]
+    estimation:
+      type: "ekf"
+
+target:
+  enabled: true
+  role: "target"
+  reference_orbit:
+    enabled: true
+  specs:
+    mass_kg: 1800.0
+  initial_state:
+    coes:
+      a_km: 7000.0
+      ecc: 0.0
+      inc_deg: 45.0
+      raan_deg: 0.0
+      argp_deg: 0.0
+      true_anomaly_deg: 0.0
+    attitude_quat_bn: [1.0, 0.0, 0.0, 0.0]
+    angular_rate_body_rad_s: [0.0, 0.0, 0.0]
+  orbit_control:
+    kind: "python"
+    module: "sim.control.orbit.zero_controller"
+    class_name: "ZeroController"
+    params: {}
+  attitude_control:
+    kind: "python"
+    module: "sim.control.attitude.zero_torque"
+    class_name: "ZeroTorqueController"
+    params: {}
+  mission_strategy: null
+  mission_execution: null
+  mission_objectives: []
+  knowledge:
+    refresh_rate_s: 1.0
+    targets: ["chaser"]
+    conditions:
+      require_line_of_sight: false
+      max_range_km: 10000.0
+    sensor_error:
+      pos_sigma_km: [0.0, 0.0, 0.0]
+      vel_sigma_km_s: [0.0, 0.0, 0.0]
+    estimation:
+      type: "ekf"
+
+simulator:
+  scenario_type: "auto"
+  duration_s: 4800.0
+  dt_s: 1.0
+  dynamics:
+    orbit:
+      model: "two_body"
+      orbit_substep_s: 1.0
+      j2: false
+      j3: false
+      j4: false
+      drag: false
+      srp: false
+      third_body_sun: false
+      third_body_moon: false
+    attitude:
+      enabled: false
+    rocket:
+      enabled: false
+  environment:
+    ephemeris_mode: "analytic_simple"
+    atmosphere_env: {}
+  plugin_validation:
+    strict: true
+  termination:
+    earth_impact_enabled: false
+    earth_radius_km: 6378.137
+
+outputs:
+  output_dir: "outputs/game_training_rpo_06"
+  mode: "save"
+  stats:
+    enabled: true
+    print_summary: false
+    save_json: false
+    save_csv: false
+    save_full_log: false
+  plots:
+    enabled: false
+    figure_ids: []
+  animations:
+    enabled: false
+    types: []
+    battlespace_dashboard_target_object_id: "target"
+    battlespace_dashboard_chaser_object_id: "chaser"
+    battlespace_dashboard_show_trajectory: true
+    battlespace_dashboard_attitude_dims_m:
+      target: [2.0, 1.5, 1.5]
+      chaser: [2.0, 1.5, 1.5]
+    battlespace_dashboard_thruster_active_threshold_km_s2: 1.0e-15
+    fps: 30
+    speed_multiple: 1.0
+    frame_stride: 1
+
+monte_carlo:
+  enabled: false
+  iterations: 1
+  base_seed: 123

@@ -16,6 +16,7 @@ EARTH_MU_KM3_S2 = 398600.4418
 class PygameRPODashboard:
     target_object_id: str = "target"
     chaser_object_id: str = "chaser"
+    reference_object_id: str | None = None
     keepout_radius_km: float | None = None
     goal_radius_km: float | None = None
     goal_relative_ric_km: np.ndarray = field(default_factory=lambda: np.zeros(3, dtype=float))
@@ -27,6 +28,7 @@ class PygameRPODashboard:
     max_history: int = 900
     title: str = "Orbital Engagement Lab - RPO Trainer"
     coast_prediction_horizon_s: float = 300.0
+    coast_prediction_orbit_fraction: float | None = 1.0
     coast_prediction_dt_s: float = 10.0
     burn_marker_threshold_km_s2: float = 1.0e-12
 
@@ -50,6 +52,7 @@ class PygameRPODashboard:
         self.closed = False
         self.t_s: list[float] = []
         self.rel_hist: list[np.ndarray] = []
+        self.target_rel_hist: list[np.ndarray] = []
         self.thrust_hist: list[np.ndarray] = []
         self.thrust_ric_hist: list[np.ndarray] = []
         self.mean_motion_rad_s: float | None = None
@@ -67,6 +70,7 @@ class PygameRPODashboard:
     def clear(self) -> None:
         self.t_s.clear()
         self.rel_hist.clear()
+        self.target_rel_hist.clear()
         self.thrust_hist.clear()
         self.thrust_ric_hist.clear()
         self.mean_motion_rad_s = None
@@ -74,12 +78,17 @@ class PygameRPODashboard:
     def push_snapshot(self, snapshot: SimulationSnapshot) -> None:
         target = snapshot.truth.get(self.target_object_id)
         chaser = snapshot.truth.get(self.chaser_object_id)
-        if target is None or chaser is None:
+        reference_id = str(self.reference_object_id or self.target_object_id)
+        reference = snapshot.truth.get(reference_id)
+        if reference is None:
+            reference = target
+        if target is None or chaser is None or reference is None:
             return
-        rel = relative_ric_state_from_arrays(target, chaser)
-        target_arr = np.array(target, dtype=float).reshape(-1)
-        if target_arr.size >= 6:
-            r_norm = float(np.linalg.norm(target_arr[:3]))
+        rel = relative_ric_state_from_arrays(reference, chaser)
+        target_rel = relative_ric_state_from_arrays(reference, target)
+        reference_arr = np.array(reference, dtype=float).reshape(-1)
+        if reference_arr.size >= 6:
+            r_norm = float(np.linalg.norm(reference_arr[:3]))
             if r_norm > 0.0 and np.isfinite(r_norm):
                 self.mean_motion_rad_s = float(np.sqrt(EARTH_MU_KM3_S2 / (r_norm**3)))
         self.t_s.append(float(snapshot.time_s))
@@ -87,14 +96,17 @@ class PygameRPODashboard:
         thrust = snapshot.applied_thrust.get(self.chaser_object_id, np.zeros(3, dtype=float))
         thrust_eci = np.array(thrust, dtype=float).reshape(3)
         self.thrust_hist.append(thrust_eci)
-        if target_arr.size >= 6:
-            c_ir = ric_dcm_ir_from_rv(target_arr[:3], target_arr[3:6])
+        self.target_rel_hist.append(target_rel)
+        if reference_arr.size >= 6:
+            c_ir = ric_dcm_ir_from_rv(reference_arr[:3], reference_arr[3:6])
             self.thrust_ric_hist.append(c_ir.T @ thrust_eci)
         else:
             self.thrust_ric_hist.append(thrust_eci)
         while len(self.t_s) > int(max(self.max_history, 2)):
             self.t_s.pop(0)
             self.rel_hist.pop(0)
+            if self.target_rel_hist:
+                self.target_rel_hist.pop(0)
             if self.thrust_hist:
                 self.thrust_hist.pop(0)
             if self.thrust_ric_hist:
@@ -107,6 +119,8 @@ class PygameRPODashboard:
         coach_hint: str = "",
         mission_state: str = "active",
         mission_metrics: tuple[str, ...] = (),
+        speed_multiple: float = 1.0,
+        debrief_lines: tuple[str, ...] = (),
     ) -> None:
         pygame = self.pygame
         if self.closed:
@@ -121,9 +135,9 @@ class PygameRPODashboard:
         self._draw_top_bar(top, mission_state=mission_state, mission_metrics=mission_metrics)
         self._draw_panel(left, "RI Plane: in-track vs radial", x_axis=1, y_axis=0)
         self._draw_panel(right, "RC Plane: cross-track vs radial", x_axis=2, y_axis=0)
-        self._draw_hud(hud, command_status=command_status, coach_hint=coach_hint)
+        self._draw_hud(hud, command_status=command_status, coach_hint=coach_hint, speed_multiple=speed_multiple)
         if mission_state in {"passed", "failed"}:
-            self._draw_mission_banner(mission_state)
+            self._draw_mission_banner(mission_state, debrief_lines=debrief_lines)
         pygame.display.flip()
 
     def tick(self, fps: float = 60.0) -> None:
@@ -141,17 +155,27 @@ class PygameRPODashboard:
         if not self.rel_hist:
             return
         rel = np.vstack(self.rel_hist)
+        target_rel = np.vstack(self.target_rel_hist[-rel.shape[0] :]) if self.target_rel_hist else np.zeros((rel.shape[0], 6), dtype=float)
+        target_current = target_rel[-1, :3] if target_rel.size else np.zeros(3, dtype=float)
         ghost = self._coast_prediction()
         goal = np.array(self.goal_relative_ric_km, dtype=float).reshape(-1)
         pts = [rel[:, [x_axis, y_axis]]]
+        if target_rel.size:
+            pts.append(target_rel[:, [x_axis, y_axis]])
         if ghost.size:
             pts.append(ghost[:, [x_axis, y_axis]])
         if goal.size == 3:
-            pts.append(goal[[x_axis, y_axis]].reshape(1, 2))
+            pts.append((target_current + goal)[[x_axis, y_axis]].reshape(1, 2))
         nmt = self._nmt_points()
         if nmt.size:
             pts.append(nmt[:, [x_axis, y_axis]])
-        scale = self._scale_for_plot(pts=pts)
+        if self._use_close_goal_zoom(rel[-1]):
+            pts_for_scale = [rel[-1:, [x_axis, y_axis]]]
+            if goal.size == 3:
+                pts_for_scale.append((target_current + goal)[[x_axis, y_axis]].reshape(1, 2))
+        else:
+            pts_for_scale = pts
+        scale = self._scale_for_plot(pts=pts_for_scale)
 
         def to_px(point: np.ndarray) -> tuple[int, int]:
             x = float(point[x_axis])
@@ -162,10 +186,11 @@ class PygameRPODashboard:
 
         self._draw_grid(plot, scale=scale)
         if self.keepout_radius_km is not None and float(self.keepout_radius_km) > 0.0:
+            center = to_px(target_current)
             radius_px = max(1, int(round(float(self.keepout_radius_km) * scale)))
-            pygame.draw.circle(self.screen, (190, 68, 68), (plot.centerx, plot.centery), radius_px, width=2)
+            pygame.draw.circle(self.screen, (190, 68, 68), center, radius_px, width=2)
         if self.goal_radius_km is not None and float(self.goal_radius_km) > 0.0 and goal.size == 3:
-            center = to_px(goal)
+            center = to_px(target_current + goal)
             radius_px = max(1, int(round(float(self.goal_radius_km) * scale)))
             pygame.draw.circle(self.screen, (78, 178, 112), center, radius_px, width=2)
         if nmt.size:
@@ -176,7 +201,12 @@ class PygameRPODashboard:
                 self._draw_polyline_dashed(nmt_pts, color=(78, 178, 112), dash_px=7, gap_px=6, width=2)
         pygame.draw.line(self.screen, (90, 104, 124), (plot.left, plot.centery), (plot.right, plot.centery), width=1)
         pygame.draw.line(self.screen, (90, 104, 124), (plot.centerx, plot.top), (plot.centerx, plot.bottom), width=1)
-        pygame.draw.circle(self.screen, (60, 140, 220), (plot.centerx, plot.centery), 5)
+        pygame.draw.circle(self.screen, (80, 92, 112), (plot.centerx, plot.centery), 4)
+        target_px = to_px(target_current)
+        if target_rel.size and len(target_rel) >= 2:
+            target_trail = [to_px(row) for row in target_rel[-self.max_history :]]
+            pygame.draw.lines(self.screen, (245, 205, 92), False, target_trail, width=2)
+        pygame.draw.circle(self.screen, (245, 205, 92), target_px, 6)
 
         trail = [to_px(row) for row in rel[-self.max_history :]]
         if ghost.size:
@@ -219,7 +249,7 @@ class PygameRPODashboard:
             if plot.top <= y <= plot.bottom:
                 pygame.draw.line(self.screen, (30, 38, 50), (plot.left, y), (plot.right, y), width=1)
 
-    def _draw_hud(self, rect: Any, *, command_status: str, coach_hint: str) -> None:
+    def _draw_hud(self, rect: Any, *, command_status: str, coach_hint: str, speed_multiple: float) -> None:
         pygame = self.pygame
         pygame.draw.rect(self.screen, (18, 24, 32), rect, border_radius=10)
         pygame.draw.rect(self.screen, (82, 96, 118), rect, width=1, border_radius=10)
@@ -233,7 +263,12 @@ class PygameRPODashboard:
         line2 = command_status.splitlines()[-1] if command_status else ""
         if line2:
             self._text(line2, (rect.x + 16, rect.y + 58), self.small_font, (195, 205, 220))
-        self._text("Space pause   . step   R reset   Esc quit", (rect.right - 340, rect.y + 14), self.small_font, (220, 160, 160))
+        self._text(
+            f"Speed {float(speed_multiple):.0f}x   Up/Down speed   Space pause   . step   R reset   Esc quit",
+            (rect.right - 590, rect.y + 58),
+            self.small_font,
+            (220, 160, 160),
+        )
 
     def _draw_top_bar(self, rect: Any, *, mission_state: str, mission_metrics: tuple[str, ...]) -> None:
         pygame = self.pygame
@@ -246,15 +281,15 @@ class PygameRPODashboard:
         pygame.draw.rect(self.screen, fill, rect, border_radius=10)
         pygame.draw.rect(self.screen, stroke, rect, width=2, border_radius=10)
         self._text(label, (rect.x + 16, rect.y + 15), self.large_font, text_color)
-        x = rect.x + 210
+        x = rect.x + 280
         for metric in mission_metrics[:5]:
             self._text(metric, (x, rect.y + 18), self.small_font, (222, 230, 238))
-            x += max(148, len(metric) * 8 + 18)
+            x += max(168, len(metric) * 8 + 28)
 
-    def _draw_mission_banner(self, mission_state: str) -> None:
+    def _draw_mission_banner(self, mission_state: str, *, debrief_lines: tuple[str, ...] = ()) -> None:
         pygame = self.pygame
         width, height = self.screen.get_size()
-        rect = pygame.Rect(width // 2 - 260, height // 2 - 54, 520, 108)
+        rect = pygame.Rect(width // 2 - 360, height // 2 - 190, 720, 380)
         if mission_state == "passed":
             fill = (24, 86, 48)
             stroke = (108, 232, 142)
@@ -270,9 +305,14 @@ class PygameRPODashboard:
         pygame.draw.rect(self.screen, fill, rect, border_radius=10)
         pygame.draw.rect(self.screen, stroke, rect, width=3, border_radius=10)
         title = self.large_font.render(text, True, color)
-        self.screen.blit(title, (rect.centerx - title.get_width() // 2, rect.y + 24))
+        self.screen.blit(title, (rect.centerx - title.get_width() // 2, rect.y + 22))
+        y = rect.y + 74
+        for line in debrief_lines[:12]:
+            surf = self.font.render(str(line), True, color)
+            self.screen.blit(surf, (rect.x + 36, y))
+            y += 24
         subtitle = self.font.render(sub, True, color)
-        self.screen.blit(subtitle, (rect.centerx - subtitle.get_width() // 2, rect.y + 64))
+        self.screen.blit(subtitle, (rect.centerx - subtitle.get_width() // 2, rect.bottom - 42))
 
     def _draw_vector(
         self,
@@ -340,10 +380,21 @@ class PygameRPODashboard:
         n = self.mean_motion_rad_s
         if n is None or not np.isfinite(float(n)) or float(n) <= 0.0:
             return np.empty((0, 6), dtype=float)
-        horizon = float(max(self.coast_prediction_horizon_s, 0.0))
+        horizon = self._coast_prediction_horizon_s(float(n))
+        if horizon <= 0.0:
+            return np.empty((0, 6), dtype=float)
         dt = float(max(self.coast_prediction_dt_s, 1.0e-6))
         times = np.arange(0.0, horizon + 0.5 * dt, dt, dtype=float)
         return np.vstack([_cw_coast_state(rel0, float(t), float(n)) for t in times])
+
+    def _coast_prediction_horizon_s(self, mean_motion_rad_s: float) -> float:
+        fraction = self.coast_prediction_orbit_fraction
+        n = float(mean_motion_rad_s)
+        if fraction is None:
+            return float(max(self.coast_prediction_horizon_s, 0.0))
+        if not np.isfinite(n) or n <= 0.0:
+            return 0.0
+        return float(max(fraction, 0.0) * (2.0 * np.pi / n))
 
     def _nmt_points(self) -> np.ndarray:
         if self.goal_nmt_radial_amplitude_km is None:
@@ -372,19 +423,41 @@ class PygameRPODashboard:
             a = a[np.all(np.isfinite(a), axis=1)]
             if a.size:
                 finite.append(a)
-        span = 1.0
+        span = self._minimum_plot_span_km()
         if finite:
             all_pts = np.vstack(finite)
-            span = max(float(np.max(np.abs(all_pts))), 0.5)
+            span = max(float(np.max(np.abs(all_pts))) * 1.2, span)
         if self.keepout_radius_km is not None:
             span = max(span, float(abs(self.keepout_radius_km)) * 1.2)
         if self.goal_radius_km is not None:
-            span = max(span, float(abs(self.goal_radius_km)) * 1.2)
+            span = max(span, float(abs(self.goal_radius_km)) * 4.0)
         if self.goal_nmt_radial_amplitude_km is not None:
             span = max(span, float(abs(self.goal_nmt_radial_amplitude_km)) * 2.4)
         width, height = self.screen.get_size()
         px_span = max(min(width, height) * 0.28, 80.0)
         return float(px_span / max(span, 1e-9))
+
+    def _use_close_goal_zoom(self, current_rel: np.ndarray) -> bool:
+        if self.goal_nmt_radial_amplitude_km is not None:
+            return False
+        if self.goal_radius_km is None or float(self.goal_radius_km) > 0.05:
+            return False
+        if self.keepout_radius_km is not None:
+            return False
+        goal = np.array(self.goal_relative_ric_km, dtype=float).reshape(-1)
+        if goal.size != 3:
+            return False
+        current = np.array(current_rel, dtype=float).reshape(-1)
+        if current.size < 3 or not np.all(np.isfinite(current[:3])):
+            return False
+        target_current = self.target_rel_hist[-1][:3] if self.target_rel_hist else np.zeros(3, dtype=float)
+        distance_to_goal = float(np.linalg.norm(current[:3] - (target_current + goal)))
+        return distance_to_goal <= max(float(self.goal_radius_km) * 20.0, 0.5)
+
+    def _minimum_plot_span_km(self) -> float:
+        if self.goal_nmt_radial_amplitude_km is None and self.goal_radius_km is not None and float(self.goal_radius_km) <= 0.05:
+            return max(float(self.goal_radius_km) * 4.0, 0.05)
+        return 0.5
 
     @staticmethod
     def _nice_step(value: float) -> float:

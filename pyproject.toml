@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "orbital-engagement-lab"
-version = "0.1.0"
+version = "0.1.1"
 description = "Integrated spacecraft simulation and analysis platform for rendezvous, control, validation, and mission prototyping."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -47,7 +47,7 @@ full = [
 include-package-data = true
 
 [tool.setuptools.package-data]
-sim = ["presets/objects/*.yaml"]
+sim = ["presets/objects/*.yaml", "game/configs/*.yaml"]
 
 [tool.setuptools.packages.find]
 include = ["sim*", "machine_learning*"]

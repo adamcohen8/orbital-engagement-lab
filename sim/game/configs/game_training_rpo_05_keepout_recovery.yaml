@@ -1,27 +1,34 @@
-scenario_name: "game_training_rpo_01_coast_relative_motion"
-scenario_description: "RPO trainer scenario for learning natural target-centered RIC drift and the 3D NMT shape."
+scenario_name: "game_training_rpo_05_keepout_recovery"
+scenario_description: "RPO trainer scenario for recovering from an unsafe closing approach before entering keepout."
 
 metadata:
   owner: "codex"
-  notes: "Run with `python run_game.py configs/game_training_rpo_01_coast_relative_motion.yaml --fast`."
+  notes: "Run with `python run_game.py sim/game/configs/game_training_rpo_05_keepout_recovery.yaml --speed-multiple 10`."
   game:
     control_mode: "ric_translation"
-    player_max_accel_km_s2: 2.0e-5
+    difficulty: "medium"
+    player_max_accel_km_s2: 1.5e-5
     training:
       enabled: true
-      scenario_id: "rpo_01_coast_relative_motion"
-      learning_goal: "Observe natural RIC drift, then use small R/I/C pulses to approach a passive 3D NMT with a 2:1 RI ellipse and a tilted RC ellipse."
+      scenario_id: "rpo_05_keepout_recovery"
+      learning_goal: "Recover from an unsafe closing geometry by preserving keepout margin, arresting closure, and settling back into the V-bar hold box."
+      player_brief: "You are already in a bad closing geometry. First preserve keepout margin, then recover to the trailing hold box."
+      pass_criteria:
+        - "Never enter the 250 meter keepout zone."
+        - "Return to the V-bar hold box."
+        - "Keep relative speed below the goal threshold."
+        - "Stay under the time and delta-v budgets."
+      instructor_notes:
+        - "The first correct action may be to move away from the target, not toward the green box."
+        - "Use the keepout margin metric as the primary safety cue."
       target_object_id: "target"
       chaser_object_id: "chaser"
       keepout_radius_km: 0.25
-      goal_nmt_center_ric_km: [0.0, 0.0, 0.0]
-      goal_nmt_radial_amplitude_km: 1.5
-      goal_nmt_cross_track_amplitude_km: 1.0
-      goal_nmt_cross_track_phase_deg: 45.0
-      goal_nmt_element_tolerance_km: 0.15
-      goal_nmt_velocity_tolerance_km_s: 0.0005
+      goal_relative_ric_km: [0.0, -0.75, 0.0]
+      goal_radius_km: 0.15
+      max_goal_speed_km_s: 0.0002
       max_time_s: 3600.0
-      max_delta_v_m_s: 8.0
+      max_delta_v_m_s: 5.0
 
 rocket:
   enabled: false
@@ -35,7 +42,7 @@ chaser:
   initial_state:
     relative_to_target_ric:
       frame: "rect"
-      state: [0.0, -3.0, 0.0, 0.0, 0.002, 0.0]
+      state: [0.0, -0.45, 0.0, 0.0, 0.0005, 0.0]
     attitude_quat_bn: [1.0, 0.0, 0.0, 0.0]
     angular_rate_body_rad_s: [0.0, 0.0, 0.0]
   orbit_control:
@@ -107,7 +114,7 @@ target:
 
 simulator:
   scenario_type: "auto"
-  duration_s: 6000.0
+  duration_s: 3600.0
   dt_s: 1.0
   dynamics:
     orbit:
@@ -134,7 +141,7 @@ simulator:
     earth_radius_km: 6378.137
 
 outputs:
-  output_dir: "outputs/game_training_rpo_01"
+  output_dir: "outputs/game_training_rpo_05"
   mode: "save"
   stats:
     enabled: true
@@ -158,3 +165,8 @@ outputs:
     fps: 30
     speed_multiple: 1.0
     frame_stride: 1
+
+monte_carlo:
+  enabled: false
+  iterations: 1
+  base_seed: 123

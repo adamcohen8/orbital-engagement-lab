@@ -21,6 +21,7 @@ class KeyboardCommandState:
     restart_requested: bool = False
     paused: bool = False
     step_requested: bool = False
+    speed_multiplier_change: int = 0
     quit_requested: bool = False
 
     def reset_axes(self) -> None:

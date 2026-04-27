@@ -337,10 +337,24 @@ class _SingleRunEngine:
         idx = self.current_index if step_index is None else int(step_index)
         if idx < 0 or idx >= self.n:
             raise IndexError(f"step_index {idx} is out of range for {self.n} samples.")
+        truth = {oid: np.array(hist[idx], dtype=float) for oid, hist in self.truth_hist.items()}
+        if self.target_reference_orbit_hist is not None:
+            ref_state = np.array(self.target_reference_orbit_hist[idx], dtype=float).reshape(-1)
+            if ref_state.size >= 6 and np.all(np.isfinite(ref_state[:6])):
+                target_mass_kg = 0.0
+                target_truth = truth.get("target")
+                if target_truth is not None and np.array(target_truth).reshape(-1).size >= 14:
+                    target_mass_kg = float(np.array(target_truth, dtype=float).reshape(-1)[13])
+                truth["target_reference"] = np.hstack(
+                    (
+                        ref_state[:6],
+                        np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, target_mass_kg]),
+                    )
+                )
         return {
             "step_index": idx,
             "time_s": float(self.t_s[idx]),
-            "truth": {oid: np.array(hist[idx], dtype=float) for oid, hist in self.truth_hist.items()},
+            "truth": truth,
             "belief": {oid: np.array(hist[idx], dtype=float) for oid, hist in self.belief_hist.items()},
             "applied_thrust": {oid: np.array(hist[idx], dtype=float) for oid, hist in self.thrust_hist.items()},
             "applied_torque": {oid: np.array(hist[idx], dtype=float) for oid, hist in self.torque_hist.items()},

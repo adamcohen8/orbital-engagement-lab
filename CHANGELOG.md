@@ -6,6 +6,44 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.1.1 - 2026-04-27
+
+Video game trainer release.
+
+### Game Mode
+
+- Added the optional Pygame RPO trainer backend and launcher with selectable
+  training levels.
+- Added six RPO learning levels covering natural relative motion, V-bar and
+  R-bar approaches, close rendezvous, keepout recovery, and a defensive target
+  demonstration.
+- Added fullscreen gameplay controls, keyboard grab/release handling, speed
+  multipliers, pass/fail scoring, live mission metrics, and on-screen debriefs.
+- Added RIC translation controls, relative-motion projection difficulty
+  settings, target-reference display support, burn markers, goal/keepout
+  overlays, and close-range rendezvous zoom behavior.
+
+### Packaging
+
+- Added `pygame` as an optional `game` extra.
+- Included built-in game YAML configs in package data so installed builds can
+  open the level selector.
+
+### Fixes
+
+- Fixed terminal pass/fail states so the game window stays open long enough for
+  the debrief to be read.
+- Fixed Level 6 restarts so defensive target state and delta-v budget reset for
+  each attempt.
+- Fixed first defensive target pulses so they count against the target delta-v
+  cap.
+
+### Verification
+
+- Added focused game-mode regression coverage for launcher discovery, controls,
+  speed multipliers, scoring/debriefs, NMT goals, defensive target behavior,
+  and package-data coverage.
+
 ## 0.1.0 - 2026-04-24
 
 Initial public-core maturity release.

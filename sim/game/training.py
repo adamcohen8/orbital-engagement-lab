@@ -225,8 +225,9 @@ class RPOTrainingTracker:
         achieved_time_s = float(t[int(achieved_idx[0])] - t[0]) if achieved_idx.size else None
         budget_ok = True
         reasons: list[str] = []
+        objective_name = "NMT target" if self.config.goal_nmt_radial_amplitude_km is not None else "goal"
         if achieved_time_s is None:
-            reasons.append("NMT target not achieved within tolerance.")
+            reasons.append(f"{objective_name} not achieved within tolerance.")
         time_failed = self.config.max_time_s is not None and achieved_time_s is None and float(t[-1] - t[0]) >= float(self.config.max_time_s)
         if time_failed:
             reasons.append(f"Time budget exceeded ({float(self.config.max_time_s):.0f} s).")
@@ -295,13 +296,18 @@ class RPOTrainingTracker:
                 f"Final Speed   : {score.final_relative_speed_km_s:.5f} km/s",
                 f"Keepout Time  : {score.time_inside_keepout_s:.1f} s",
                 f"Approx dV     : {score.approximate_delta_v_m_s:.2f} m/s",
-                f"NMT Rad Amp   : {score.final_nmt_radial_amplitude_km:.3f} km",
-                f"NMT Cross Amp : {score.final_nmt_cross_track_amplitude_km:.3f} km",
-                f"NMT Drift Err : {score.final_nmt_drift_velocity_error_km_s:.6f} km/s",
                 f"Achieved Time : {_format_optional_time(score.achieved_time_s)}",
                 f"Level Passed  : {'yes' if score.level_passed else 'no'}",
             ]
         )
+        if self.config.goal_nmt_radial_amplitude_km is not None:
+            lines.extend(
+                [
+                    f"NMT Rad Amp   : {score.final_nmt_radial_amplitude_km:.3f} km",
+                    f"NMT Cross Amp : {score.final_nmt_cross_track_amplitude_km:.3f} km",
+                    f"NMT Drift Err : {score.final_nmt_drift_velocity_error_km_s:.6f} km/s",
+                ]
+            )
         for reason in score.pass_fail_reasons:
             lines.append(f"Pass/Fail     : {reason}")
         for hint in score.hints:

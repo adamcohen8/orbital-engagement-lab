@@ -1,11 +1,34 @@
-scenario_name: "game_mode_basic_manual_chaser"
-scenario_description: "Keyboard-controlled chaser with ACS attitude target commands and body-mounted thruster firing."
+scenario_name: "game_training_rpo_02_vbar_approach"
+scenario_description: "RPO trainer scenario for practicing a V-bar approach, braking, and stationkeeping outside keepout."
 
 metadata:
   owner: "codex"
-  notes: "Run with `python run_game.py configs/game_mode_basic.yaml`."
+  notes: "Run with `python run_game.py sim/game/configs/game_training_rpo_02_vbar_approach.yaml --speed-multiple 10`."
   game:
-    player_max_accel_km_s2: 1.8e-4
+    control_mode: "ric_translation"
+    difficulty: "easy"
+    player_max_accel_km_s2: 2.0e-5
+    training:
+      enabled: true
+      scenario_id: "rpo_02_vbar_approach"
+      learning_goal: "Approach along the V-bar, brake early, and settle into the stationkeeping box without entering keepout."
+      player_brief: "Approach from behind the target on the V-bar. Brake early, then settle into the green hold box outside keepout."
+      pass_criteria:
+        - "Enter the V-bar stationkeeping box."
+        - "Keep relative speed below the goal threshold."
+        - "Stay under the time and delta-v budgets."
+        - "Do not enter keepout."
+      instructor_notes:
+        - "Watch for late braking and over-controlling near the hold box."
+        - "Connect in-track pulses to the delayed radial response."
+      target_object_id: "target"
+      chaser_object_id: "chaser"
+      keepout_radius_km: 0.25
+      goal_relative_ric_km: [0.0, -0.75, 0.0]
+      goal_radius_km: 0.15
+      max_goal_speed_km_s: 0.0003
+      max_time_s: 12000.0
+      max_delta_v_m_s: 8.0
 
 rocket:
   enabled: false
@@ -15,15 +38,11 @@ chaser:
   enabled: true
   role: "chaser"
   specs:
-    preset_satellite: "BASIC_SATELLITE"
-    dry_mass_kg: 180.0
-    fuel_mass_kg: 5.0
-    thruster: "BASIC_CHEMICAL_Z_BOTTOM"
-    attitude_system: "BASIC_REACTION_WHEELS_3AXIS"
+    mass_kg: 200.0
   initial_state:
     relative_to_target_ric:
-      frame: "curv"
-      state: [0.0, -5.0, 0.0, 0.0, 0.0, 0.002]
+      frame: "rect"
+      state: [0.0, -5.0, 0.0, 0.0, 0.0, 0.0]
     attitude_quat_bn: [1.0, 0.0, 0.0, 0.0]
     angular_rate_body_rad_s: [0.0, 0.0, 0.0]
   orbit_control:
@@ -33,19 +52,9 @@ chaser:
     params: {}
   attitude_control:
     kind: "python"
-    module: "sim.control.attitude.baseline"
-    class_name: "ReactionWheelPDController"
-    params:
-      wheel_axes_body:
-        - [1.0, 0.0, 0.0]
-        - [0.0, 1.0, 0.0]
-        - [0.0, 0.0, 1.0]
-      wheel_torque_limits_nm: [5.0, 5.0, 5.0]
-      desired_attitude_quat_bn: [1.0, 0.0, 0.0, 0.0]
-      desired_rate_body_rad_s: [0.0, 0.0, 0.0]
-      kp: [20.0, 20.0, 20.0]
-      kd: [50.0, 50.0, 50.0]
-      max_body_torque_nm: 5.0
+    module: "sim.control.attitude.zero_torque"
+    class_name: "ZeroTorqueController"
+    params: {}
   mission_strategy: null
   mission_execution: null
   mission_objectives: []
@@ -67,11 +76,7 @@ target:
   reference_orbit:
     enabled: true
   specs:
-    preset_satellite: "BASIC_SATELLITE"
-    dry_mass_kg: 1800.0
-    fuel_mass_kg: 5.0
-    thruster: "BASIC_CHEMICAL_Z_BOTTOM"
-    attitude_system: "BASIC_REACTION_WHEELS_3AXIS"
+    mass_kg: 1800.0
   initial_state:
     coes:
       a_km: 7000.0
@@ -89,37 +94,11 @@ target:
     params: {}
   attitude_control:
     kind: "python"
-    module: "sim.control.attitude.baseline"
-    class_name: "ReactionWheelPDController"
-    params:
-      wheel_axes_body:
-        - [1.0, 0.0, 0.0]
-        - [0.0, 1.0, 0.0]
-        - [0.0, 0.0, 1.0]
-      wheel_torque_limits_nm: [0.05, 0.05, 0.05]
-      desired_attitude_quat_bn: [1.0, 0.0, 0.0, 0.0]
-      desired_rate_body_rad_s: [0.0, 0.0, 0.0]
-      kp: [0.25, 0.25, 0.25]
-      kd: [3.0, 3.0, 3.0]
-  mission_strategy:
-    kind: "python"
-    module: "sim.mission.modules"
-    class_name: "DefensiveMissionStrategy"
-    params:
-      chaser_id: "chaser"
-      defense_mode: "fixed_ric_axis"
-      axis_mode: "-C"
-      burn_accel_km_s2: 2.0e-6
-      require_finite_knowledge: true
-      align_to_thrust: true
-  mission_execution:
-    kind: "python"
-    module: "sim.mission.modules"
-    class_name: "ControllerPointingExecution"
-    params:
-      thruster_direction_body: [0.0, 0.0, 1.0]
-      alignment_tolerance_deg: 10.0
-      require_attitude_alignment: false
+    module: "sim.control.attitude.zero_torque"
+    class_name: "ZeroTorqueController"
+    params: {}
+  mission_strategy: null
+  mission_execution: null
   mission_objectives: []
   knowledge:
     refresh_rate_s: 1.0
@@ -135,12 +114,12 @@ target:
 
 simulator:
   scenario_type: "auto"
-  duration_s: 1200.0
-  dt_s: 0.25
+  duration_s: 12000.0
+  dt_s: 1.0
   dynamics:
     orbit:
       model: "two_body"
-      orbit_substep_s: 0.25
+      orbit_substep_s: 1.0
       j2: false
       j3: false
       j4: false
@@ -149,13 +128,7 @@ simulator:
       third_body_sun: false
       third_body_moon: false
     attitude:
-      enabled: true
-      attitude_substep_s: 0.05
-      disturbance_torques:
-        gravity_gradient: true
-        magnetic: false
-        drag: false
-        srp: false
+      enabled: false
     rocket:
       enabled: false
   environment:
@@ -168,7 +141,7 @@ simulator:
     earth_radius_km: 6378.137
 
 outputs:
-  output_dir: "outputs/game_mode_basic"
+  output_dir: "outputs/game_training_rpo_02"
   mode: "save"
   stats:
     enabled: true
@@ -192,3 +165,8 @@ outputs:
     fps: 30
     speed_multiple: 1.0
     frame_stride: 1
+
+monte_carlo:
+  enabled: false
+  iterations: 1
+  base_seed: 123
