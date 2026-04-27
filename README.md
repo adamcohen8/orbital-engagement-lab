@@ -125,7 +125,7 @@ require hosted AI accounts or API keys.
 - [Engine Contract](docs/contracts/engine-contract.md)
 - [Scenario YAML Contract](docs/contracts/scenario-yaml-contract.md)
 - [Payload And Artifact Contract](docs/contracts/payload-artifact-contract.md)
-- [Product Maturity Roadmap](product_maturity_roadmap.txt)
+- [Product Maturity Roadmap](product_maturity_roadmap.md)
 
 ## Curated Examples
 

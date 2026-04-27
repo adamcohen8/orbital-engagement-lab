@@ -1999,6 +1999,7 @@ def run_master_simulation(
             "iteration": i,
             "seed": int(p["seed"]),
             "sampled_parameters": dict(p["sampled_parameters"]),
+            "summary": ro_summary,
             "pass": bool(assessment["pass"]),
             "fail_reasons": list(assessment["fail_reasons"]),
             "duration_s": float(assessment["duration_s"]),

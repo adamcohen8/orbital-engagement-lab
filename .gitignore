@@ -13,26 +13,8 @@ __pycache__/
 # Local outputs and generated plots
 outputs/
 examples/outputs/
-examples/experiments/*
-!examples/experiments/tests/
-!examples/experiments/tests/*.py
-examples/Academic/
 **/lightning_logs/
-configs/inactive/
-sim/tests/test_hcw_paper_analysis.py
 
 # OS/editor noise
 .DS_Store
 **/.DS_Store
-
-# Third-party validation package (do not commit)
-validation/High Precision Orbit Propagator_4-2/
-validation/data/*.mat
-.idea/
-
-# Local-only RED experiment framework (private)
-RED/
-
-# Local workflow notes for future assistant sessions
-LOCAL_PUBLIC_EXPORT_WORKFLOW.md
-LOCAL_CODEX_PROJECT_CONTEXT.md
