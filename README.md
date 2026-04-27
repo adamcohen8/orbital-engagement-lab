@@ -75,6 +75,28 @@ python -m pip install ".[gui]"
 python run_gui.py
 ```
 
+Try the RPO trainer game mode:
+
+```bash
+python -m pip install ".[game]"
+python run_game.py
+```
+
+Running `run_game.py` without a config opens the level selector. Pick a level
+with Up/Down or W/S, press Enter or Space to launch, and press Escape to quit.
+The first six bundled levels teach coast-relative motion, V-bar and R-bar
+approaches, close rendezvous, keepout recovery, and a defensive-target demo.
+
+You can also launch a level directly:
+
+```bash
+python run_game.py sim/game/configs/game_training_rpo_01_coast_relative_motion.yaml
+```
+
+Default trainer controls are RIC translation pulses: W/S radial, A/D in-track,
+Left/Right cross-track, Space pause/resume, period single-step, R reset,
+Up/Down speed, and Escape quit.
+
 The public CLI and GUI are intentionally scoped to deterministic single-run
 scenarios. Batch analysis settings are not exposed in public examples, and
 configs with enabled Monte Carlo or sensitivity studies are rejected with a clear
@@ -95,6 +117,7 @@ provide. HPOP/GGM03 validation data is not bundled in the public core, so
 - orbit and attitude controller interfaces and reference controllers
 - YAML-backed scenario configuration with reusable object presets
 - Python API, CLI, GUI entrypoints, and curated config examples
+- Pygame RPO trainer game mode with bundled training levels
 - single-run dashboards, trajectory plots, estimation plots, and sensor-access plots
 - machine-learning environment helpers
 - product maturity roadmap and public/private boundary documentation
