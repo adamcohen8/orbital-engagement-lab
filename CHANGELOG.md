@@ -6,6 +6,33 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.1.2 - 2026-04-27
+
+Validation maturity release.
+
+### Validation
+
+- Added estimation/knowledge validation harness coverage with evidence summary
+  artifacts for RO/Kalman knowledge performance.
+- Added attitude/disturbance validation scenarios covering nominal control,
+  rate recovery, and disturbance-torque exposure.
+- Added evidence manifests for validation harness runs, including git,
+  dependency, benchmark, and artifact metadata.
+- Hardened HPOP reference-data discovery through a reusable path resolver that
+  supports `OEL_HPOP_ROOT` and local ignored HPOP checkouts.
+
+### Governance
+
+- Added validation setup and governance documentation for choosing suites,
+  interpreting evidence artifacts, and maintaining private/public boundaries.
+- Added a validation-plan helper that recommends focused checks from changed
+  files.
+
+### Fixes
+
+- Preserved Monte Carlo run-summary payloads in run details so knowledge
+  validation summaries can aggregate estimator evidence.
+
 ## 0.1.1 - 2026-04-27
 
 Video game trainer release.

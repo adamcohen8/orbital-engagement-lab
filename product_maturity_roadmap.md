@@ -1,6 +1,6 @@
-ORBITAL ENGAGEMENT LAB PRODUCT MATURITY ROADMAP
+# Orbital Engagement Lab Product Maturity Roadmap
 
-Purpose
+## Purpose
 
 This document is a current-state product maturity assessment for Orbital
 Engagement Lab. The project is no longer best described as a young simulation
@@ -9,9 +9,10 @@ public-core surface, Pro/private analysis workflows, validation tooling,
 interactive workflows, and early external-integration patterns.
 
 This update is based on the current repository state, the existing roadmap,
-the contract documents now present under `docs/contracts`, the curated config
-and experiment surfaces, and recent review fixes around API plugin validation
-and keepout-time metrics.
+the 0.1.1 public release, the contract documents now present under
+`docs/contracts`, the curated config and experiment surfaces, recent review
+fixes around API plugin validation and keepout-time metrics, and the public
+release of the optional Pygame RPO trainer.
 
 The project already has:
 
@@ -24,7 +25,7 @@ The project already has:
 - AI-assisted reporting workflows,
 - a desktop GUI,
 - RL-oriented interfaces,
-- a video-game/manual-control mode, and
+- a public optional video-game/manual-control training mode, and
 - early cFS/SIL integration patterns.
 
 The highest-value work now is productization, not feature sprawl:
@@ -32,7 +33,7 @@ workflow clarity, validation discipline, curated examples, operational
 reliability, and confidence that users can do repeatable engineering work.
 
 
-Current Product Readiness
+## Current Product Readiness
 
 Scoring rubric:
 
@@ -44,7 +45,7 @@ Scoring rubric:
 Current scores:
 
 - Core Simulator Engine: 8.7/10
-- Scenario YAML and Config System: 8.2/10
+- Scenario YAML and Config System: 8.4/10
 - Validation Harness and Fidelity Evidence: 7.4/10
 - Controller Bench: 8.1/10
 - Monte Carlo Simulation: 8.0/10
@@ -52,7 +53,7 @@ Current scores:
 - AI Reports: 7.2/10
 - RL/ML: 7.0/10
 - GUI: 6.6/10
-- Video Game Mode: 6.2/10
+- Video Game Mode: 7.1/10
 - cFS/SIL Integration: 5.2/10
 
 Interpretation:
@@ -72,14 +73,21 @@ Interpretation:
   contract docs, but validation evidence is not yet packaged into a simple,
   continuously enforced product-readiness story.
 - GUI, AI reporting, and RL/ML are useful but still power-user oriented.
-- Game mode and cFS/SIL are credible capabilities, but not yet "ready by
-  default" product surfaces.
+- Game mode has crossed from prototype/manual-control demo into a public
+  optional training surface. It is pilot-playable and public-demo-ready, but
+  still needs onboarding, difficulty calibration, replay/review tools, and
+  instructor-facing workflows before it is classroom-ready.
+- cFS/SIL is a credible capability, but not yet a "ready by default" product
+  surface.
 
 
-Current-State Highlights
+## Current-State Highlights
 
 What has improved since the prior roadmap:
 
+- The project has shipped a 0.1.1 public release centered on the optional
+  Pygame RPO trainer, proving that the public export process can carry a real
+  feature release rather than only a static public-core snapshot.
 - Contract artifacts exist for engine behavior, scenario YAML, payload/artifact
   shape, sensitivity analysis, and AI reports.
 - API, CLI, and GUI single-run paths are closer to one conceptual model.
@@ -90,6 +98,10 @@ What has improved since the prior roadmap:
 - Sensitivity analysis has grown into a real workflow with OAAT, LHS,
   two-parameter grid studies, generated-run preflight, failure-tolerant
   execution, report artifacts, and demo configs.
+- Video game mode now has a selectable six-level RPO progression, packaged game
+  configs, fullscreen Pygame gameplay, RIC translation controls, live metrics,
+  pass/fail scoring, on-screen debriefs, difficulty-scaled trajectory
+  projection, target-reference display support, and focused regression tests.
 - Public/private boundary docs and export tooling exist, which is a strong
   signal that the project is thinking like a product rather than a code dump.
 
@@ -107,9 +119,12 @@ What still holds maturity back:
   and legacy master-simulator orchestration.
 - Baselines, campaign manifests, and release-readiness checks are not yet
   systematic enough for the analysis features to feel fully operational.
+- The project now has public releases, but release discipline is still light.
+  A repeatable release checklist, test matrix, export checklist, and tag/publish
+  expectations should become first-class project artifacts.
 
 
-North-Star Direction
+## North-Star Direction
 
 Orbital Engagement Lab should become a simulation platform that is:
 
@@ -133,7 +148,7 @@ That means:
 - and explicit product surfaces over "everything in the repo is a feature."
 
 
-Contract and Baseline Artifacts
+## Contract and Baseline Artifacts
 
 The project has moved from "contracts needed" to "0.1 contracts exist and must
 now be maintained." These contracts should be treated as product artifacts. A
@@ -163,15 +178,18 @@ Still-needed contract/baseline work:
   and partial-run semantics,
 - validation evidence contract: what evidence is enough to call a physics or
   workflow surface validated,
+- release-readiness contract: version bump, changelog update, private-main
+  source commit, public export regeneration, public export check, public test
+  subset, public push, and release tag expectations,
 - public/private contract enforcement: the docs exist, but export checks should
   behave like an allowlist in practice,
 - release-readiness checklist: the minimum tests, examples, contracts, and
   validation artifacts required before a feature graduates.
 
 
-Feature-by-Feature Path To 10/10
+## Feature-by-Feature Path To 10/10
 
-1) Core Simulator Engine
+### 1. Core Simulator Engine
 
 Current score: 8.7/10
 
@@ -200,9 +218,9 @@ What would make it 10/10:
   lifecycles, truth/knowledge timing, plugin validation, and extension
   boundaries.
 
-2) Scenario YAML and Config System
+### 2. Scenario YAML and Config System
 
-Current score: 8.2/10
+Current score: 8.4/10
 
 Why it is strong:
 
@@ -212,6 +230,8 @@ Why it is strong:
 - preset resolution and merge semantics are documented,
 - plugin pointer shape is constrained and validated,
 - config-first examples are becoming the primary supported workflow,
+- packaged game configs now prove that non-core YAML workflows can be shipped as
+  installed product assets,
 - and the scenario YAML contract now exists.
 
 What would make it 10/10:
@@ -223,7 +243,7 @@ What would make it 10/10:
 - ensure all generated configs round-trip through validation cleanly,
 - and align GUI controls exactly with the scenario contract.
 
-3) Validation Harness and Fidelity Evidence
+### 3. Validation Harness and Fidelity Evidence
 
 Current score: 7.4/10
 
@@ -233,15 +253,21 @@ Why it is meaningful today:
 - HPOP comparison utilities and MATLAB bridge scripts exist,
 - validation configs cover multiple perturbation/fidelity combinations,
 - high-fidelity orbit and integrated-controller validation scenarios exist,
-- and validation appears as both documentation and test surface.
+- estimation/knowledge and attitude/disturbance suites now package
+  domain-specific evidence summaries,
+- validation evidence manifests capture reproducibility metadata for harness
+  runs,
+- validation setup/governance docs and a validation planner helper exist, and
+- validation appears as both documentation and test surface.
 
 Why it is not yet 9+/10:
 
-- validation evidence is not yet packaged into a concise release-readiness
-  report that a non-author can interpret quickly,
+- validation evidence is now packaged at the harness/domain-summary level, but
+  not yet as a full release-readiness package that a non-author can interpret
+  quickly,
 - reference-data provenance and tolerance rationale need clearer ownership,
-- and validation suites are not yet cleanly separated into smoke, regression,
-  slow/reference, and external-tool tiers.
+- and validation suites are improving but still need clean CI/release tiers for
+  smoke, regression, slow/reference, and external-tool checks.
 
 What would make it 10/10:
 
@@ -252,7 +278,7 @@ What would make it 10/10:
 - and maintain a validation evidence contract alongside the engine and payload
   contracts.
 
-4) Controller Bench
+### 4. Controller Bench
 
 Current score: 8.1/10
 
@@ -275,7 +301,7 @@ What would make it 10/10:
 - and integrate benchmark baselines directly into CI and release readiness
   checks.
 
-5) Monte Carlo Simulation
+### 5. Monte Carlo Simulation
 
 Current score: 8.0/10
 
@@ -296,7 +322,7 @@ What would make it 10/10:
 - define a compact, repeatable "campaign review" workflow for users,
 - and split campaign orchestration contracts from legacy implementation detail.
 
-6) Sensitivity Analysis
+### 6. Sensitivity Analysis
 
 Current score: 8.2/10
 
@@ -319,7 +345,7 @@ What would make it 10/10:
 - and align the GUI/editor UX so sensitivity setup feels as polished as
   single-run scenario setup.
 
-7) AI Reports
+### 7. AI Reports
 
 Current score: 7.2/10
 
@@ -350,7 +376,7 @@ What would make it 10/10:
 - and create benchmark campaign/report pairs that prove the reports add
   practical engineering value.
 
-8) RL/ML
+### 8. RL/ML
 
 Current score: 7.0/10
 
@@ -371,7 +397,7 @@ What would make it 10/10:
 - remove dependence on ad hoc local-output assumptions for policy demos,
 - and define one blessed training workflow instead of several overlapping ones.
 
-9) GUI
+### 9. GUI
 
 Current score: 6.6/10
 
@@ -392,28 +418,55 @@ What would make it 10/10:
   without reading source or YAML first,
 - and make the GUI read from the same schema/contract source as CLI validation.
 
-10) Video Game Mode
+### 10. Video Game Mode
 
-Current score: 6.2/10
+Current score: 7.1/10
 
 Why it is meaningful today:
 
-- the runner exists,
-- manual command providers and live dashboard modules exist,
-- configs and tests exist,
-- and users can interact with the simulator in a genuine manual-control mode.
+- it is now a public optional training surface, not just an internal manual
+  control demo,
+- `pygame` is available through the `game` extra,
+- `run_game.py` can launch a level selector without requiring a config path,
+- six packaged RPO levels provide a progression from natural relative motion to
+  rendezvous, keepout recovery, and a defensive target demonstration,
+- RIC translation controls, speed multipliers, fullscreen gameplay, keyboard
+  grab/release behavior, trajectory projection difficulty, burn markers,
+  target-reference display support, keepout/goal overlays, live metrics,
+  pass/fail scoring, and on-screen debriefs are implemented,
+- focused tests cover launcher discovery, controls, speed behavior, scoring,
+  NMT goals, defensive target behavior, terminal debrief handling, and package
+  data coverage,
+- and the mode is credible for public demos and supervised pilot usability
+  testing.
+
+Why it is not yet classroom-ready:
+
+- first-time users still need stronger onboarding for RIC axes, NMT goals,
+  keepout logic, and relative-motion intuition,
+- difficulty has not yet been calibrated with novice cadets or instructors,
+- pass/fail debriefs are useful but not yet a replay or trace-review teaching
+  workflow,
+- the level selector and HUD are functional, but still more engineering-tool
+  than polished courseware,
+- and instructor-facing knobs, lesson plans, and assessment exports do not yet
+  exist.
 
 What would make it 10/10:
 
-- define a clear product purpose for game mode: training, demo, operator
-  intuition, or interactive debugging,
-- improve onboarding and control discoverability,
-- stabilize dashboard conventions,
-- add polished scenario presets oriented around intentional gameplay tasks,
-- and ensure the mode is visually and interactively coherent across supported
-  platforms.
+- make the product purpose explicit: RPO intuition training for cadets and new
+  Space Force officers,
+- add a short in-game onboarding path with visual explanations of radial,
+  in-track, cross-track, keepout, relative speed, and natural motion,
+- add a replay/trace-review mode that marks burns, closest approach, goal
+  achievement, and failure triggers,
+- calibrate level tolerances and budgets through observed playtests,
+- add instructor-facing level tuning and assessment export workflows,
+- define classroom-ready lesson plans and pass/fail expectations,
+- and verify full-screen behavior, keyboard capture, and rendering across the
+  intended Windows/macOS/Linux classroom machines.
 
-11) cFS/SIL Integration
+### 11. cFS/SIL Integration
 
 Current score: 5.2/10
 
@@ -435,9 +488,9 @@ What would make it 10/10:
 - and publish a real SIL-readiness checklist with acceptance criteria.
 
 
-Roadmap Phases
+## Roadmap Phases
 
-PHASE 1 - Workflow Curation and Surface Ownership
+### Phase 1 - Workflow Curation and Surface Ownership
 
 Goal:
 Make the product surface explicit.
@@ -445,9 +498,12 @@ Make the product surface explicit.
 Priority work:
 
 - keep examples config-first and curated,
+- add a lightweight release checklist covering version bumps, changelog entries,
+  private/public push order, export checks, public test scope, and release tags,
 - keep broad Python experiments out of the supported example surface,
 - define endorsed workflows for:
   - public single-run scenarios,
+  - public game-mode trainer release and demo flows,
   - private campaign analysis,
   - controller benchmark runs,
   - validation evidence runs,
@@ -461,11 +517,12 @@ Priority work:
 Exit criteria:
 
 - examples are few, curated, and verified,
+- releases follow a repeatable checklist,
 - public export contains only intentional public examples,
 - docs and CI reference the same endorsed workflows,
 - and no local-artifact-dependent demos remain in the product-facing example set.
 
-PHASE 2 - Test Suite Rationalization and Validation Discipline
+### Phase 2 - Test Suite Rationalization and Validation Discipline
 
 Goal:
 Turn the test corpus into a product-confidence system.
@@ -493,7 +550,7 @@ Exit criteria:
 - public and private CI both exercise their intended supported surfaces,
 - and validation reports communicate pass/fail without plot forensics.
 
-PHASE 3 - Platform Consolidation
+### Phase 3 - Platform Consolidation
 
 Goal:
 Make the framework feel like one system rather than a collection of related
@@ -516,7 +573,7 @@ Exit criteria:
 - core payload fields and artifact manifests have compatibility expectations,
 - and users can understand the main execution flow from one source of truth.
 
-PHASE 4 - Scenario and Config Maturity
+### Phase 4 - Scenario and Config Maturity
 
 Goal:
 Make YAML authoring dependable and evolvable.
@@ -537,7 +594,7 @@ Exit criteria:
 - most authoring errors fail before runtime,
 - and schema evolution is managed rather than tribal.
 
-PHASE 5 - Analysis Feature Hardening
+### Phase 5 - Analysis Feature Hardening
 
 Goal:
 Push Monte Carlo, sensitivity, controller bench, and AI reports from
@@ -562,7 +619,7 @@ Exit criteria:
 - and AI reporting is useful enough to trust as part of engineering review,
   including auditable prompt scope and provider usage records.
 
-PHASE 6 - Validation and Fidelity Evidence
+### Phase 6 - Validation and Fidelity Evidence
 
 Goal:
 Make validation an explicit product-readiness system rather than a collection
@@ -583,7 +640,7 @@ Exit criteria:
 - representative fidelity checks are repeatable,
 - and validated claims are traceable to configs, baselines, and tolerances.
 
-PHASE 7 - Mission and Autonomy Maturity
+### Phase 7 - Mission and Autonomy Maturity
 
 Goal:
 Make mission behavior, objectives, and autonomy use cases a first-class platform
@@ -601,7 +658,7 @@ Exit criteria:
 - mission scenarios are explainable and debuggable,
 - and objective-level regressions are automatically detectable.
 
-PHASE 8 - GUI and Interactive Workflow Polish
+### Phase 8 - GUI and Interactive Workflow Polish
 
 Goal:
 Raise GUI and game mode from useful tools to polished workflows.
@@ -611,15 +668,20 @@ Priority work:
 - improve in-app guidance and workflow discoverability,
 - align GUI concepts with docs and YAML terminology,
 - polish interactive/manual-control scenarios and dashboard outputs,
+- add RPO trainer onboarding, replay/trace review, and instructor-facing
+  assessment/tuning workflows,
+- calibrate game-mode level difficulty with novice users,
 - and define when the GUI versus game mode should be used.
 
 Exit criteria:
 
 - a new user can complete at least one meaningful GUI workflow and one
   interactive workflow without reading source code,
+- a novice can complete the first game level with only in-app guidance,
+- an instructor can inspect or export pass/fail evidence from a training run,
 - and the interactive surfaces feel intentional rather than incidental.
 
-PHASE 9 - SIL and Real-Time Hardening
+### Phase 9 - SIL and Real-Time Hardening
 
 Goal:
 Move cFS/SIL from starter kit to repeatable co-simulation capability.
@@ -638,7 +700,7 @@ Exit criteria:
 - and communication faults can be injected and analyzed intentionally.
 
 
-Priority Order
+## Priority Order
 
 Recommended sequence:
 
@@ -664,34 +726,39 @@ Why this order:
   stabilized.
 
 
-Near-Term Recommendations
+## Near-Term Recommendations
 
-The next practical maturity jump should focus on five concrete moves:
+The next practical maturity jump should focus on six concrete moves:
 
 1) Establish test classes and CI targets.
 Define smoke, product-regression, validation-reference, slow, and experimental
 test groups. Make the default local command and CI command intentional.
 
-2) Turn contracts into living gates.
+2) Create a release-readiness checklist.
+Codify the 0.1.1 release flow: version bump, changelog entry, focused tests,
+public export regeneration, public export integrity check, public checkout
+tests, private push, public push, and release tag.
+
+3) Turn contracts into living gates.
 For engine, scenario YAML, payloads, sensitivity, and AI reports, add a small
 contract-test set that fails when behavior drifts from the document.
 
-3) Shrink the supported example surface.
+4) Shrink the supported example surface.
 Keep `examples/configs` as the user-facing example front door. Move broad
 Python experiments behind clear local/experimental labeling and keep public
 export conservative.
 
-4) Create baseline-backed analysis demos.
+5) Create baseline-backed analysis demos.
 Pick one Monte Carlo campaign, one sensitivity study, and one controller bench
 suite as canonical baselines with expected summary artifacts and pass/fail
 interpretation.
 
-5) Produce a validation evidence summary.
+6) Produce a validation evidence summary.
 Create one short, generated or maintained summary that says which fidelity
 claims are currently supported, which are partial, and which remain exploratory.
 
 
-End Goal
+## End Goal
 
 A modular, validated, and operationally coherent orbital engagement simulation
 platform where:
