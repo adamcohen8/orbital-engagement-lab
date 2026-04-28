@@ -17,6 +17,7 @@ from sim.dynamics.orbit.environment import EARTH_RADIUS_KM
 from sim.dynamics.orbit.spherical_harmonics import configure_spherical_harmonics_env
 from sim.master_outputs import animate_outputs as _animate_outputs_impl
 from sim.master_outputs import plot_outputs as _plot_outputs_impl
+from sim.reporting.output_index import write_output_index
 from sim.runtime_support import (
     AgentRuntime,
     _apply_chaser_relative_init_from_target,
@@ -954,6 +955,24 @@ class _SingleRunEngine:
             "rocket_throttle_cmd": self.throttle_hist.get("rocket", np.array([])).tolist() if self.throttle_hist else [],
             "rocket_metrics": {k: v.tolist() for k, v in rocket_metrics_out.items()},
         }
+        artifacts: dict[str, Any] = {}
+        if bool(self.cfg.outputs.stats.get("save_json", True)):
+            artifacts["summary_json"] = str(self.outdir / "master_run_summary.json")
+        if bool(self.cfg.outputs.stats.get("save_full_log", True)):
+            artifacts["run_log_json"] = str(self.outdir / "master_run_log.json")
+        if plot_outputs:
+            artifacts["plots"] = plot_outputs
+        if animation_outputs:
+            artifacts["animations"] = animation_outputs
+        index_path = write_output_index(
+            outdir=self.outdir,
+            workflow="single_run",
+            title=str(self.cfg.scenario_name or "single_run"),
+            summary=summary,
+            artifacts=artifacts,
+        )
+        summary["output_index_md"] = str(index_path)
+        payload["output_index_md"] = str(index_path)
         if bool(self.cfg.outputs.stats.get("save_json", True)):
             write_json(str(self.outdir / "master_run_summary.json"), summary)
         if bool(self.cfg.outputs.stats.get("save_full_log", True)):

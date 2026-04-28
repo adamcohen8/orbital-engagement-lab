@@ -152,6 +152,9 @@ should handle absent or empty rocket metrics for satellite-only scenarios.
 
 Stats artifacts:
 
+- `index.md` is the human-readable start-here file for an output directory.
+  It summarizes the workflow, scenario, key results, suggested review order,
+  and artifact inventory.
 - `master_run_summary.json` is written when `outputs.stats.save_json` is true.
 - `master_run_log.json` is written when `outputs.stats.save_full_log` is true.
 

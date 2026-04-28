@@ -137,6 +137,20 @@ Common object fields:
 - `bridge`
 - `knowledge`
 
+`initial_state` supports these orbital initialization forms for satellite
+objects:
+
+- `position_eci_km` with optional `velocity_eci_km_s`,
+- `coes`,
+- `tle`.
+
+The `tle` form accepts either `line1`/`line2` or `lines: [line1, line2]`.
+Optional `tle.require_checksum: true` enables TLE checksum validation.
+Optional `tle.propagate_to_initial_epoch: false` keeps the state at the TLE
+epoch instead of advancing mean anomaly to `simulator.initial_jd_utc`.
+The TLE initializer converts mean elements to an ECI state with a two-body
+Keplerian approximation; full SGP4 propagation is not part of this contract.
+
 Preset merge contract:
 
 - Presets load before local object overrides.
@@ -186,7 +200,6 @@ does not prove physical correctness.
 
 Common fields:
 
-- `scenario_type`
 - `duration_s`
 - `dt_s`
 - `initial_jd_utc`
@@ -194,6 +207,11 @@ Common fields:
 - `environment`
 - `plugin_validation`
 - `termination`
+
+`scenario_type` is a legacy dispatch hint and should be omitted from ordinary
+configs. The loader defaults it internally for compatibility; new user-facing
+configs should express behavior through object roles, dynamics, controllers,
+mission modules, and analysis sections instead.
 
 Dynamics contract:
 
