@@ -65,6 +65,7 @@ from sim.app.pointer_utils import (
     pointer_form_schema,
 )
 from sim.gui.sections import (
+    build_builder_tab,
     build_monte_carlo_tab,
     build_objects_tab,
     build_outputs_tab,
@@ -72,6 +73,7 @@ from sim.gui.sections import (
     build_scenario_tab,
     build_yaml_tab,
 )
+from sim.dynamics.orbit.tle import parse_tle_lines
 
 
 GUI_CAPABILITIES = get_gui_capabilities()
@@ -174,6 +176,12 @@ class MainWindow(QMainWindow):
         self.sensitivity_method_combo.currentTextChanged.connect(self._refresh_analysis_editor_ui)
         self.orbit_substep_enabled_check.toggled.connect(self._refresh_substep_visibility)
         self.attitude_substep_enabled_check.toggled.connect(self._refresh_substep_visibility)
+        self.initial_jd_enabled_check.toggled.connect(self._refresh_initial_epoch_ui)
+        self.target_init_mode.currentIndexChanged.connect(self._refresh_target_initial_state_ui)
+        self.target_tle_line1.textChanged.connect(self._refresh_tle_status)
+        self.target_tle_line2.textChanged.connect(self._refresh_tle_status)
+        self.target_tle_require_checksum.toggled.connect(self._refresh_tle_status)
+        self.target_tle_propagate_to_epoch.toggled.connect(self._refresh_tle_status)
         for combo in (
             self.target_strategy_combo,
             self.target_execution_combo,
@@ -288,6 +296,7 @@ class MainWindow(QMainWindow):
         self.tabs.currentChanged.connect(self._sync_navigation_to_tab)
         workspace_layout.addWidget(self.tabs, 1)
 
+        self.tabs.addTab(self._build_builder_tab(), "Builder")
         self.tabs.addTab(self._build_scenario_tab(), "Scenario")
         self.tabs.addTab(self._build_objects_tab(), "Objects")
         self.tabs.addTab(self._build_monte_carlo_tab(), "Analysis")
@@ -307,36 +316,42 @@ class MainWindow(QMainWindow):
     def _build_navigation_tree(self) -> QTreeWidget:
         tree = QTreeWidget()
         tree.setHeaderHidden(True)
+        builder_item = QTreeWidgetItem(["Builder"])
+        builder_item.setData(0, Qt.UserRole, 0)
+        builder_item.addChild(self._nav_item("Templates", 0))
+        builder_item.addChild(self._nav_item("Preflight", 0))
+
         scenario_item = QTreeWidgetItem(["Scenario"])
-        scenario_item.setData(0, Qt.UserRole, 0)
-        scenario_item.addChild(self._nav_item("Simulator", 0))
+        scenario_item.setData(0, Qt.UserRole, 1)
+        scenario_item.addChild(self._nav_item("Simulator", 1))
 
         objects_item = QTreeWidgetItem(["Objects"])
-        objects_item.setData(0, Qt.UserRole, 1)
-        objects_item.addChild(self._nav_item("Target", 1))
-        objects_item.addChild(self._nav_item("Chaser", 1))
-        objects_item.addChild(self._nav_item("Rocket", 1))
+        objects_item.setData(0, Qt.UserRole, 2)
+        objects_item.addChild(self._nav_item("Target", 2))
+        objects_item.addChild(self._nav_item("Chaser", 2))
+        objects_item.addChild(self._nav_item("Rocket", 2))
 
         mc_item = QTreeWidgetItem(["Analysis"])
-        mc_item.setData(0, Qt.UserRole, 2)
-        mc_item.addChild(self._nav_item("Execution", 2))
-        mc_item.addChild(self._nav_item("Study Inputs", 2))
+        mc_item.setData(0, Qt.UserRole, 3)
+        mc_item.addChild(self._nav_item("Execution", 3))
+        mc_item.addChild(self._nav_item("Study Inputs", 3))
 
         outputs_item = QTreeWidgetItem(["Outputs"])
-        outputs_item.setData(0, Qt.UserRole, 3)
-        outputs_item.addChild(self._nav_item("Stats", 3))
-        outputs_item.addChild(self._nav_item("Plots", 3))
-        outputs_item.addChild(self._nav_item("Animations", 3))
+        outputs_item.setData(0, Qt.UserRole, 4)
+        outputs_item.addChild(self._nav_item("Stats", 4))
+        outputs_item.addChild(self._nav_item("Plots", 4))
+        outputs_item.addChild(self._nav_item("Animations", 4))
 
         yaml_item = QTreeWidgetItem(["Advanced YAML"])
-        yaml_item.setData(0, Qt.UserRole, 4)
+        yaml_item.setData(0, Qt.UserRole, 5)
 
         results_item = QTreeWidgetItem(["Results"])
-        results_item.setData(0, Qt.UserRole, 5)
-        results_item.addChild(self._nav_item("Console", 5))
-        results_item.addChild(self._nav_item("Summary", 5))
-        results_item.addChild(self._nav_item("Artifacts", 5))
+        results_item.setData(0, Qt.UserRole, 6)
+        results_item.addChild(self._nav_item("Console", 6))
+        results_item.addChild(self._nav_item("Summary", 6))
+        results_item.addChild(self._nav_item("Artifacts", 6))
 
+        tree.addTopLevelItem(builder_item)
         tree.addTopLevelItem(scenario_item)
         tree.addTopLevelItem(objects_item)
         tree.addTopLevelItem(mc_item)
@@ -356,6 +371,8 @@ class MainWindow(QMainWindow):
             self.scenario_name_edit,
             self.scenario_description_edit,
             self.output_dir_edit,
+            self.target_tle_line1,
+            self.target_tle_line2,
             self.reference_object_edit,
             self.mc_baseline_summary_json,
             self.analysis_baseline_path_edit,
@@ -376,6 +393,7 @@ class MainWindow(QMainWindow):
         combo_boxes = [
             self.orbit_integrator_combo,
             self.output_mode_combo,
+            self.target_init_mode,
             self.analysis_study_type_combo,
             self.sensitivity_method_combo,
             self.chaser_init_mode,
@@ -403,6 +421,7 @@ class MainWindow(QMainWindow):
             self.orbit_substep_enabled_check,
             self.attitude_substep_enabled_check,
             self.attitude_enabled_check,
+            self.initial_jd_enabled_check,
             self.orbit_j2_check,
             self.orbit_j3_check,
             self.orbit_j4_check,
@@ -415,6 +434,8 @@ class MainWindow(QMainWindow):
             self.att_drag_check,
             self.att_srp_check,
             self.target_enabled,
+            self.target_tle_require_checksum,
+            self.target_tle_propagate_to_epoch,
             self.chaser_enabled,
             self.rocket_enabled,
             self.stats_enabled,
@@ -440,6 +461,7 @@ class MainWindow(QMainWindow):
         spin_boxes = [
             self.duration_spin,
             self.dt_spin,
+            self.initial_jd_spin,
             self.orbit_adaptive_atol_spin,
             self.orbit_adaptive_rtol_spin,
             self.orbit_substep_spin,
@@ -516,6 +538,95 @@ class MainWindow(QMainWindow):
 
     def _build_scenario_tab(self) -> QWidget:
         return build_scenario_tab(self)
+
+    def _build_builder_tab(self) -> QWidget:
+        return build_builder_tab(self)
+
+    def _refresh_initial_epoch_ui(self) -> None:
+        self.initial_jd_spin.setEnabled(bool(self.initial_jd_enabled_check.isChecked()))
+        self._refresh_tle_status()
+
+    def _refresh_target_initial_state_ui(self) -> None:
+        mode = str(self.target_init_mode.currentData() or self.target_init_mode.currentText()).strip().lower()
+        self.target_initial_state_stack.setCurrentIndex(1 if mode == "tle" else 0)
+        self._refresh_tle_status()
+
+    def _refresh_tle_status(self) -> None:
+        if not hasattr(self, "target_tle_status"):
+            return
+        line1 = self.target_tle_line1.text().strip()
+        line2 = self.target_tle_line2.text().strip()
+        if not line1 and not line2:
+            self.target_tle_status.setText("Paste TLE line 1 and line 2.")
+            return
+        try:
+            elements = parse_tle_lines(line1, line2, require_checksum=bool(self.target_tle_require_checksum.isChecked()))
+            text = (
+                f"epoch JD {elements.epoch_jd_utc:.8f}, "
+                f"inc {elements.inclination_deg:.3f} deg, "
+                f"ecc {elements.eccentricity:.7f}, "
+                f"mean motion {elements.mean_motion_rev_per_day:.6f} rev/day"
+            )
+            if self.target_tle_propagate_to_epoch.isChecked() and self.initial_jd_enabled_check.isChecked():
+                delta_days = float(self.initial_jd_spin.value()) - float(elements.epoch_jd_utc)
+                text += f"; propagated {delta_days:.3f} days to initial JD"
+                if abs(delta_days) > 14.0:
+                    text += "; warning: TLE epoch is far from the simulation epoch"
+            self.target_tle_status.setText(text)
+        except Exception as exc:
+            self.target_tle_status.setText(f"TLE not ready: {exc}")
+
+    def _apply_builder_template(self, template_key: str) -> None:
+        key = str(template_key).strip().lower()
+        self.scenario_name_edit.setText(
+            {
+                "single_tle": "single_satellite_tle",
+                "rendezvous": "rendezvous_rpo",
+                "keepout": "keepout_recovery",
+                "monte_carlo": "monte_carlo_rendezvous",
+                "sensitivity": "sensitivity_duration",
+                "rocket_ascent": "rocket_ascent",
+            }.get(key, "guided_scenario")
+        )
+        self.output_dir_edit.setText(f"outputs/{self.scenario_name_edit.text().strip()}")
+        self.output_mode_combo.setCurrentText("save")
+        self.stats_save_json.setChecked(True)
+        self.stats_print_summary.setChecked(True)
+        self.plots_enabled.setChecked(True)
+        self.target_enabled.setChecked(True)
+        self.rocket_enabled.setChecked(key == "rocket_ascent")
+        self.chaser_enabled.setChecked(key in {"rendezvous", "keepout", "monte_carlo"})
+        self.mc_enabled_check.setChecked(key in {"monte_carlo", "sensitivity"})
+        self._set_combo_data_or_text(self.analysis_study_type_combo, "sensitivity" if key == "sensitivity" else "monte_carlo")
+        self.mc_iterations_spin.setValue(25 if key == "monte_carlo" else 3)
+        self.mc_save_aggregate_summary.setChecked(key in {"monte_carlo", "sensitivity"})
+        self.mc_save_histograms.setChecked(key == "monte_carlo")
+        self.mc_save_ops_dashboard.setChecked(key == "monte_carlo")
+        if key == "single_tle":
+            self._set_combo_data_or_text(self.target_init_mode, "tle")
+            if not self.target_tle_line1.text().strip():
+                self.target_tle_line1.setText("1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9005")
+                self.target_tle_line2.setText("2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1000")
+            self.initial_jd_enabled_check.setChecked(True)
+        else:
+            self._set_combo_data_or_text(self.target_init_mode, "coes")
+        if key in {"rendezvous", "keepout", "monte_carlo"}:
+            self._set_combo_data_or_text(self.chaser_init_mode, "relative_ric_curv")
+            defaults = [0.0, -5.0, 0.0, 0.0, 0.0, 0.0]
+            if key == "keepout":
+                defaults = [0.0, -1.0, 0.0, 0.0, 0.0002, 0.0]
+            for widget, value in zip(self.chaser_init_values, defaults):
+                widget.setValue(float(value))
+        if key == "rocket_ascent":
+            self.duration_spin.setValue(900.0)
+            self.dt_spin.setValue(1.0)
+        self._refresh_target_initial_state_ui()
+        self._refresh_outputs_mode_ui()
+        self._refresh_analysis_editor_ui()
+        self._refresh_yaml()
+        self._refresh_validation_state()
+        self._mark_dirty()
+        self.statusBar().showMessage("Applied guided template.", 5000)
 
     def _browse_output_directory(self) -> None:
         current_text = self.output_dir_edit.text().strip()
@@ -1507,8 +1618,10 @@ class MainWindow(QMainWindow):
             cfg = validate_config(self._collect_config_from_widgets())
             self.current_config = cfg.to_dict()
             self._refresh_validation_panel(valid=True, issues=self._collect_validation_messages(self.current_config))
+            self._refresh_preflight_summary(valid=True, issues=self._collect_validation_messages(self.current_config))
         except Exception as exc:
             self._refresh_validation_panel(valid=False, issues=[str(exc)])
+            self._refresh_preflight_summary(valid=False, issues=[str(exc)])
 
     def _refresh_output_files(self) -> None:
         self.output_files.clear()
@@ -1811,7 +1924,7 @@ class MainWindow(QMainWindow):
             self.run_thread.start()
             self.run_button.setEnabled(False)
             self.statusBar().showMessage("Simulation running...")
-            self.tabs.setCurrentIndex(5)
+            self.tabs.setCurrentIndex(6)
         except Exception as exc:
             self._show_error("Run Failed", str(exc))
 
@@ -2032,7 +2145,78 @@ class MainWindow(QMainWindow):
         mode = str(cfg_dict.get("outputs", {}).get("mode", "")).strip().lower()
         if mode == "interactive":
             issues.append("Interactive mode in the GUI uses a temporary preview cache for plots.")
+        target_tle = dict(dict(cfg_dict.get("target", {}) or {}).get("initial_state", {}) or {}).get("tle")
+        sim = dict(cfg_dict.get("simulator", {}) or {})
+        if isinstance(target_tle, dict):
+            try:
+                lines = list(target_tle.get("lines", []) or [])
+                line1 = str(target_tle.get("line1", lines[0] if len(lines) > 0 else "") or "")
+                line2 = str(target_tle.get("line2", lines[1] if len(lines) > 1 else "") or "")
+                elements = parse_tle_lines(line1, line2, require_checksum=bool(target_tle.get("require_checksum", False)))
+                initial_jd = sim.get("initial_jd_utc")
+                if initial_jd is not None and bool(target_tle.get("propagate_to_initial_epoch", True)):
+                    delta_days = float(initial_jd) - float(elements.epoch_jd_utc)
+                    if abs(delta_days) > 14.0:
+                        issues.append(f"Target TLE epoch is {delta_days:.1f} days from simulator.initial_jd_utc.")
+            except Exception as exc:
+                issues.append(f"Target TLE warning: {exc}")
         return issues
+
+    def _refresh_preflight_summary(self, *, valid: bool, issues: list[str]) -> None:
+        if not hasattr(self, "preflight_summary"):
+            return
+        try:
+            cfg = self._collect_config_from_widgets()
+        except Exception as exc:
+            self.preflight_summary.setPlainText(f"Config cannot be collected from the form:\n{exc}")
+            return
+        sim = dict(cfg.get("simulator", {}) or {})
+        outputs = dict(cfg.get("outputs", {}) or {})
+        analysis = dict(cfg.get("analysis", {}) or {})
+        mc = dict(cfg.get("monte_carlo", {}) or {})
+        enabled_objects = [
+            name for name in ("rocket", "target", "chaser")
+            if bool(dict(cfg.get(name, {}) or {}).get("enabled", False))
+        ]
+        mode = "single run"
+        if bool(analysis.get("enabled", False)):
+            mode = str(analysis.get("study_type", "analysis"))
+        elif bool(mc.get("enabled", False)):
+            mode = "monte_carlo"
+        target_init = dict(dict(cfg.get("target", {}) or {}).get("initial_state", {}) or {})
+        if "tle" in target_init:
+            init_text = "target from TLE"
+        elif "coes" in target_init:
+            init_text = "target from COEs"
+        elif "position_eci_km" in target_init:
+            init_text = "target from ECI state"
+        else:
+            init_text = "target default orbit"
+        lines = [
+            f"Status: {'valid' if valid else 'invalid'}",
+            f"Scenario: {cfg.get('scenario_name', 'unnamed')}",
+            f"Workflow: {mode}",
+            f"Objects: {', '.join(enabled_objects) if enabled_objects else 'none enabled'}",
+            f"Timing: duration={sim.get('duration_s')} s, dt={sim.get('dt_s')} s",
+            f"Initial state: {init_text}",
+            f"Output: {outputs.get('mode', 'interactive')} -> {outputs.get('output_dir', 'outputs')}",
+            "",
+            "Preflight notes:",
+        ]
+        if issues:
+            lines.extend(f"- {issue}" for issue in issues)
+        else:
+            lines.append("- No warnings.")
+        lines.extend(
+            [
+                "",
+                "Next:",
+                "1. Adjust object initial states and outputs as needed.",
+                "2. Use Advanced YAML for fields not exposed in the guided form.",
+                "3. Click Validate & Run.",
+            ]
+        )
+        self.preflight_summary.setPlainText("\n".join(lines))
 
     def _refresh_validation_panel(self, *, valid: bool, issues: list[str]) -> None:
         if valid and not issues:

@@ -31,7 +31,9 @@ python run_simulation.py --config configs/automation_smoke.yaml
 
 The smoke scenario is intentionally small and headless. It propagates one target
 spacecraft with simple two-body orbit dynamics and attitude dynamics, then writes
-summary artifacts under `outputs/automation_smoke/`.
+summary artifacts under `outputs/automation_smoke/`. Open
+`outputs/automation_smoke/index.md` first for the run summary, review order, and
+artifact inventory.
 
 ## Use The API
 

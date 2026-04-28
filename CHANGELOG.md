@@ -6,6 +6,31 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.2.0 - 2026-04-28
+
+Guided configuration and TLE initialization release.
+
+### Configuration
+
+- Added TLE-based satellite initialization support for scenario YAML configs.
+- Added GUI support for a guided config-building workflow before running a
+  simulation.
+- Expanded config adapter coverage for generated YAML workflows.
+
+### Reporting
+
+- Added start-here output indexes for generated run artifacts.
+- Fixed output indexes so non-path artifact values render as text instead of
+  bogus links.
+- Fixed default next-step links so they only point at artifacts that were
+  actually saved.
+- Included saved Monte Carlo histogram images in aggregate artifact inventories.
+
+### Governance
+
+- Strengthened public export checks for private-only assistant tooling and
+  smoke configs.
+
 ## 0.1.2 - 2026-04-27
 
 Validation maturity release.

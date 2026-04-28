@@ -29,6 +29,7 @@ from sim.dynamics.orbit.propagator import (
     third_body_moon_plugin,
     third_body_sun_plugin,
 )
+from sim.dynamics.orbit.tle import tle_block_to_rv_eci
 from sim.estimation.joint_state import JointStateEstimator
 from sim.estimation.orbit_ekf import OrbitEKFEstimator
 from sim.knowledge.object_tracking import (
@@ -285,7 +286,7 @@ def _coe_to_rv_eci(
     return q_pf_to_eci @ r_pf, q_pf_to_eci @ v_pf
 
 
-def _rv_from_initial_state(s0: dict[str, Any]) -> tuple[np.ndarray, np.ndarray]:
+def _rv_from_initial_state(s0: dict[str, Any], *, target_jd_utc: float | None = None) -> tuple[np.ndarray, np.ndarray]:
     if "position_eci_km" in s0:
         pos = np.array(s0.get("position_eci_km", [7000.0, 0.0, 0.0]), dtype=float)
         if "velocity_eci_km_s" in s0:
@@ -294,6 +295,10 @@ def _rv_from_initial_state(s0: dict[str, Any]) -> tuple[np.ndarray, np.ndarray]:
             spd = float(np.sqrt(EARTH_MU_KM3_S2 / max(np.linalg.norm(pos), EARTH_RADIUS_KM + 1.0)))
             vel = np.array([0.0, spd, 0.0], dtype=float)
         return pos, vel
+
+    tle = s0.get("tle")
+    if isinstance(tle, dict):
+        return tle_block_to_rv_eci(tle, target_jd_utc=target_jd_utc)
 
     coes = s0.get("coes")
     if isinstance(coes, dict):
@@ -312,7 +317,7 @@ def _rv_from_initial_state(s0: dict[str, Any]) -> tuple[np.ndarray, np.ndarray]:
     return pos, np.array([0.0, spd, 0.0], dtype=float)
 
 
-def _default_truth_from_agent(agent_cfg: Any, t_s: float = 0.0) -> StateTruth:
+def _default_truth_from_agent(agent_cfg: Any, t_s: float = 0.0, target_jd_utc: float | None = None) -> StateTruth:
     s0 = dict(agent_cfg.initial_state or {})
     specs = dict(agent_cfg.specs or {})
     if ("dry_mass_kg" in specs) or ("fuel_mass_kg" in specs):
@@ -323,7 +328,7 @@ def _default_truth_from_agent(agent_cfg: Any, t_s: float = 0.0) -> StateTruth:
         mass_kg = dry_mass_kg + fuel_mass_kg
     else:
         mass_kg = float(specs.get("mass_kg", 300.0))
-    pos, vel = _rv_from_initial_state(s0)
+    pos, vel = _rv_from_initial_state(s0, target_jd_utc=target_jd_utc)
     return StateTruth(
         position_eci_km=pos,
         velocity_eci_km_s=vel,
@@ -506,7 +511,7 @@ def _create_satellite_runtime(
     cfg: SimulationScenarioConfig,
     rng: np.random.Generator,
 ) -> AgentRuntime:
-    truth = _default_truth_from_agent(agent_cfg, t_s=0.0)
+    truth = _default_truth_from_agent(agent_cfg, t_s=0.0, target_jd_utc=cfg.simulator.initial_jd_utc)
     specs = dict(agent_cfg.specs or {})
     inertia_kg_m2 = _resolve_satellite_inertia_kg_m2(specs)
     noise = dict((agent_cfg.knowledge or {}).get("sensor_error", {}) or {})

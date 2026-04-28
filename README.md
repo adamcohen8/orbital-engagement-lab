@@ -144,6 +144,7 @@ require hosted AI accounts or API keys.
 - [Scenario YAML](docs/scenario-yaml.md)
 - [Plotting](docs/plotting.md)
 - [Plot Gallery](docs/plot-gallery.md)
+- [Custom Analysis](docs/custom-analysis.md)
 - [Public Core And Pro Boundary](docs/public-vs-pro.md)
 - [Engine Contract](docs/contracts/engine-contract.md)
 - [Scenario YAML Contract](docs/contracts/scenario-yaml-contract.md)

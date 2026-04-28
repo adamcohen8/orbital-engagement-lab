@@ -68,6 +68,46 @@ If a scenario overrides with `specs.mass_kg` and does not provide
 `dry_mass_kg` or `fuel_mass_kg`, preset dry/fuel masses are ignored for that
 agent so the explicit total mass is honored.
 
+## Satellite Initial State
+
+Satellite objects can initialize their orbit from ECI position/velocity,
+classical orbital elements, or a TLE.
+
+TLE example:
+
+```yaml
+simulator:
+  # Optional. When set, TLE mean anomaly is advanced from the TLE epoch to this
+  # Julian date using two-body mean motion.
+  initial_jd_utc: 2460310.75
+
+target:
+  enabled: true
+  initial_state:
+    tle:
+      line1: "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9005"
+      line2: "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1000"
+```
+
+Equivalent list form:
+
+```yaml
+initial_state:
+  tle:
+    lines:
+      - "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9005"
+      - "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1000"
+```
+
+By default, if `simulator.initial_jd_utc` is set, the TLE state is propagated to
+that initial epoch. Set `propagate_to_initial_epoch: false` under `tle` to use
+the TLE epoch directly. Set `require_checksum: true` to reject TLE lines with
+invalid checksum digits.
+
+The built-in TLE initializer is dependency-free and converts TLE mean elements
+to an ECI state with a Keplerian/two-body approximation. It does not perform
+full SGP4 propagation or model TLE-specific drag/perturbation terms.
+
 ## Algorithm Pointers
 
 Controllers, guidance, mission strategies, and mission execution modules are

@@ -1,95 +1,183 @@
-# Canonical simulation scenario config template
-# "Everything On" baseline template
+# Canonical simulation scenario config template.
+# This file intentionally shows many features at once. For a smaller starting
+# point, use configs/automation_smoke.yaml or examples/configs/public_rendezvous_closed_loop.yaml.
 
+# Human-readable scenario identifier used in console output and saved artifacts.
 scenario_name: "everything_on_template"
 
+# Free-form metadata for ownership, notes, provenance, or tags.
 metadata:
+  # Set this to a person, team, customer, or experiment owner.
   owner: "team"
+  # Use notes to explain what makes this scenario different from nearby configs.
   notes: "Full-feature baseline with rocket + target + chaser, broad dynamics, mission hooks, plots, and animations enabled."
 
+# Rocket object. Disable this section for satellite-only rendezvous scenarios.
 rocket:
+  # Whether the rocket participates in the run.
   enabled: true
+  # Object role used by mission logic, reporting, and some conventions.
   role: "rocket"
+  # Optional preset YAML. Relative paths resolve from this file, cwd, repo root, then built-in presets.
   preset: "../sim/presets/objects/basic_two_stage_rocket.yaml"
+  # Object-specific physical parameters. These override preset values.
   specs:
+    # Payload carried by the rocket stack, in kilograms.
     payload_mass_kg: 150.0
+    # Body-frame thrust axis. Change only if the vehicle model uses a different thrust direction.
     thrust_axis_body: [1.0, 0.0, 0.0]
+  # Initial launch state for rocket scenarios.
   initial_state:
+    # Launch latitude in degrees.
     launch_lat_deg: 28.5
+    # Launch longitude in degrees.
     launch_lon_deg: -80.6
+    # Launch altitude in kilometers.
     launch_alt_km: 0.0
+    # Launch azimuth in degrees, measured clockwise from north.
     launch_azimuth_deg: 90.0
+  # Primary rocket guidance plugin.
   base_guidance:
+    # Plugin kind. User configs should normally use "python".
     kind: "python"
+    # Importable module containing the guidance class.
     module: "sim.rocket.guidance"
+    # Guidance class to instantiate from the module.
     class_name: "OpenLoopPitchProgramGuidance"
+    # Parameters passed to the guidance class constructor.
     params:
+      # Time to hold the initial vertical ascent before pitching, in seconds.
       vertical_hold_s: 8.0
+      # Time when the open-loop pitch program starts, in seconds.
       pitch_start_s: 8.0
+      # Time when the open-loop pitch program reaches the final pitch, in seconds.
       pitch_end_s: 190.0
+      # Final pitch command in degrees.
       pitch_final_deg: 75.0
+      # Maximum throttle fraction requested by guidance.
       max_throttle: 1.0
+  # Optional list of guidance modifiers. Leave empty unless testing staged/custom guidance behavior.
   guidance_modifiers: []
+  # Rocket translational controller. ZeroController means no extra orbital control beyond rocket guidance.
   orbit_control:
+    # Plugin kind for the orbit controller.
     kind: "python"
+    # Importable module containing the orbit controller class.
     module: "sim.control.orbit.zero_controller"
+    # Orbit controller class name.
     class_name: "ZeroController"
+    # Constructor parameters for the orbit controller.
     params: {}
+  # Rocket attitude controller. ZeroTorqueController applies no active torque.
   attitude_control:
+    # Plugin kind for the attitude controller.
     kind: "python"
+    # Importable module containing the attitude controller class.
     module: "sim.control.attitude.zero_torque"
+    # Attitude controller class name.
     class_name: "ZeroTorqueController"
+    # Constructor parameters for the attitude controller.
     params: {}
+  # Mission strategy decides high-level intent.
   mission_strategy:
+    # Plugin kind for mission strategy.
     kind: "python"
+    # Importable module containing the strategy class.
     module: "sim.mission.modules"
+    # Strategy class name.
     class_name: "RocketPursuitMissionStrategy"
+    # Strategy parameters.
     params:
+      # Object ID the rocket strategy considers the target.
       target_id: "target"
+  # Mission execution converts strategy intent into commands.
   mission_execution:
+    # Plugin kind for mission execution.
     kind: "python"
+    # Importable module containing the execution class.
     module: "sim.mission.modules"
+    # Execution class name.
     class_name: "RocketGoNowExecution"
+    # Execution parameters.
     params: {}
+  # Optional objective definitions. Leave empty until using objective-specific scoring/reporting.
   mission_objectives: []
+  # Optional external bridge configuration for SIL/HIL experiments.
   knowledge:
+    # Seconds between knowledge updates.
     refresh_rate_s: 1.0
+    # Object IDs this object attempts to track.
     targets:
       - "target"
+    # Access constraints for generating knowledge updates.
     conditions:
+      # Require geometric line of sight before updating knowledge.
       require_line_of_sight: true
+      # Maximum sensing range in kilometers.
       max_range_km: 50000.0
+    # Measurement error assumptions used by knowledge/estimation.
     sensor_error:
+      # Position 1-sigma error by axis, in kilometers.
       pos_sigma_km: [0.01, 0.01, 0.01]
+      # Velocity 1-sigma error by axis, in kilometers per second.
       vel_sigma_km_s: [0.0001, 0.0001, 0.0001]
+    # Estimator used for this object's knowledge updates.
     estimation:
+      # Estimator type. "ekf" is the standard choice for this template.
       type: "ekf"
 
+# Chaser spacecraft. Use this for the active rendezvous, pursuit, or interceptor object.
 chaser:
+  # Whether the chaser participates in the run.
   enabled: true
+  # Object role used by controllers, reports, and mission logic.
   role: "chaser"
+  # Satellite preset file. Override fields below when exploring variants.
   preset: "../sim/presets/objects/basic_satellite.yaml"
+  # Chaser physical parameters.
   specs:
+    # Total mass in kilograms. Use dry/fuel mass fields instead when modeling fuel depletion in more detail.
     mass_kg: 200.0
+  # Initial state for the chaser.
   initial_state:
+    # "rocket_deployment" initializes from the rocket at deploy_time_s. Use relative_to_target_ric for direct RPO setups.
     source: "rocket_deployment"
+    # Deployment time from the rocket, in seconds.
     deploy_time_s: 900.0
+    # Body-frame deployment delta-v in meters per second.
     deploy_dv_body_m_s: [10.0, 0.0, 0.0]
     # Optional alternative: initialize chaser relative to target in RIC instead of deployment/absolute state.
     # relative_to_target_ric:
     #   frame: "rect"   # "rect" | "curv"
     #   state: [2.0, -8.0, 1.2, 0.0008, -0.0012, 0.0004]  # [R,I,C,dR,dI,dC] (km, km/s)
+    # Optional alternative: initialize from a TLE. If simulator.initial_jd_utc is set,
+    # the TLE mean anomaly is advanced to that epoch with a two-body approximation.
+    # tle:
+    #   line1: "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9005"
+    #   line2: "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1000"
+    # Initial body-to-navigation attitude quaternion [w, x, y, z].
     attitude_quat_bn: [1.0, 0.0, 0.0, 0.0]
+    # Initial body angular rate in radians per second.
     angular_rate_body_rad_s: [0.0, 0.0, 0.0]
+  # Chaser translational controller.
   orbit_control:
+    # Plugin kind for the orbit controller.
     kind: "python"
+    # Importable module containing the orbit controller class.
     module: "sim.control.orbit.lqr"
+    # Controller class name.
     class_name: "HCWLQRController"
+    # Controller tuning and state mapping.
     params:
+      # Chief mean motion used by the HCW controller, in radians per second.
       mean_motion_rad_s: 0.001078
+      # Maximum commanded acceleration in kilometers per second squared.
       max_accel_km_s2: 2.0e-6
+      # Controller design/update timestep in seconds.
       design_dt_s: 10.0
+      # Slice of the relative curvilinear RIC state consumed by the controller.
       ric_curv_state_slice: [0, 6]
+      # Slice of the chief ECI state consumed by the controller.
       chief_eci_state_slice: [6, 12]
       # Optional no-radial-burn variant:
       # module: "sim.control.orbit.lqr_no_radial"
@@ -101,233 +189,450 @@ chaser:
       #   ric_curv_state_slice: [0, 6]
       #   chief_eci_state_slice: [6, 12]
       #   r_weights: [1.94e13, 1.94e13]
+  # Chaser attitude controller.
   attitude_control:
+    # Plugin kind for the attitude controller.
     kind: "python"
+    # Importable module containing the attitude controller class.
     module: "sim.control.attitude.surrogate_snap"
+    # Attitude controller class name.
     class_name: "SurrogateSnapECIController"
+    # Attitude controller parameters.
     params:
+      # Desired body-to-navigation attitude quaternion [w, x, y, z].
       desired_attitude_quat_bn: [1.0, 0.0, 0.0, 0.0]
+      # Rate-cancellation authority in radians per second squared.
       cancel_rate_mag_rad_s2: 1.0
+      # Body-rate threshold considered settled, in radians per second.
       rate_tolerance_rad_s: 1.0e-3
+      # Nominal time for a 180-degree slew, in seconds.
       slew_time_180_s: 1.0
+      # Randomized pointing noise 1-sigma, in degrees.
       pointing_sigma_deg: 0.05
+      # Default attitude controller timestep in seconds.
       default_dt_s: 1.0
+      # Random seed for repeatable pointing noise.
       rng_seed: 2
+  # Chaser mission strategy.
   mission_strategy:
+    # Plugin kind for mission strategy.
     kind: "python"
+    # Importable module containing the strategy class.
     module: "sim.mission.modules"
+    # Strategy class name.
     class_name: "PursuitMissionStrategy"
+    # Strategy parameters.
     params:
+      # Object ID the chaser pursues.
       target_id: "target"
+      # Use estimated/known target state rather than perfect truth when available.
       use_knowledge_for_targeting: true
+      # Strategy acceleration cap in kilometers per second squared.
       max_accel_km_s2: 2.0e-6
+      # Request attitude alignment with the thrust vector before firing.
       align_to_thrust: true
+  # Chaser mission execution.
   mission_execution:
+    # Plugin kind for mission execution.
     kind: "python"
+    # Importable module containing the execution class.
     module: "sim.mission.modules"
+    # Execution class name.
     class_name: "ControllerPointingExecution"
+    # Execution parameters.
     params:
+      # Thruster direction in the body frame.
       thruster_direction_body: [1.0, 0.0, 0.0]
+      # Maximum pointing error allowed before thrust is considered aligned, in degrees.
       alignment_tolerance_deg: 10.0
+      # If true, suppress thrust until attitude alignment criteria are met.
       require_attitude_alignment: true
+  # Optional objective definitions. Leave empty unless using objective-specific scoring/reporting.
   mission_objectives: []
+  # Optional external bridge configuration for HIL/SIL experiments.
   knowledge:
+    # Seconds between knowledge updates.
     refresh_rate_s: 1.0
+    # Object IDs this object attempts to track.
     targets:
       - "target"
+    # Access constraints for generating knowledge updates.
     conditions:
+      # Require geometric line of sight before updating knowledge.
       require_line_of_sight: true
+      # Maximum sensing range in kilometers.
       max_range_km: 10000.0
+    # Measurement error assumptions used by knowledge/estimation.
     sensor_error:
+      # Position 1-sigma error by axis, in kilometers.
       pos_sigma_km: [0.005, 0.005, 0.005]
+      # Velocity 1-sigma error by axis, in kilometers per second.
       vel_sigma_km_s: [0.00005, 0.00005, 0.00005]
+    # Estimator used for this object's knowledge updates.
     estimation:
+      # Estimator type. "ekf" is the standard choice for this template.
       type: "ekf"
 
+# Target spacecraft. Use this for the protected, pursued, or reference object.
 target:
+  # Whether the target participates in the run.
   enabled: true
+  # Object role used by controllers, reports, and mission logic.
   role: "target"
+  # Satellite preset file. Override fields below when exploring variants.
   preset: "../sim/presets/objects/basic_satellite.yaml"
+  # Optional passive reference orbit for RIC-frame plotting and target-reference displays.
   reference_orbit:
+    # Enable when you want to compare target motion against a passive nominal orbit.
     enabled: false
+  # Target physical parameters.
   specs:
+    # Total mass in kilograms.
     mass_kg: 400.0
+  # Initial state for the target.
   initial_state:
+    # Classical orbital elements for target initialization.
     coes:
+      # Semi-major axis in kilometers.
       a_km: 7000.0
+      # Eccentricity.
       ecc: 0.001
+      # Inclination in degrees.
       inc_deg: 45.0
+      # Right ascension of ascending node in degrees.
       raan_deg: 0.0
+      # Argument of perigee in degrees.
       argp_deg: 0.0
+      # True anomaly in degrees.
       true_anomaly_deg: 0.0
+    # Optional alternative: initialize from a TLE instead of coes.
+    # tle:
+    #   lines:
+    #     - "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9005"
+    #     - "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1000"
+    # Initial body-to-navigation attitude quaternion [w, x, y, z].
     attitude_quat_bn: [1.0, 0.0, 0.0, 0.0]
+    # Initial body angular rate in radians per second.
     angular_rate_body_rad_s: [0.0, 0.0, 0.0]
     # When target.reference_orbit.enabled is true, a passive reference orbit is propagated
     # from this same initial position/velocity for RIC-frame plotting.
+  # Target translational controller.
   orbit_control:
+    # Plugin kind for the orbit controller.
     kind: "python"
+    # Importable module containing the orbit controller class.
     module: "sim.control.orbit.zero_controller"
+    # Controller class name. ZeroController keeps the target passive translationally.
     class_name: "ZeroController"
+    # Constructor parameters for the orbit controller.
     params: {}
+  # Target attitude controller.
   attitude_control:
+    # Plugin kind for the attitude controller.
     kind: "python"
+    # Importable module containing the attitude controller class.
     module: "sim.control.attitude.surrogate_snap"
+    # Attitude controller class name.
     class_name: "SurrogateSnapECIController"
+    # Attitude controller parameters.
     params:
+      # Desired body-to-navigation attitude quaternion [w, x, y, z].
       desired_attitude_quat_bn: [1.0, 0.0, 0.0, 0.0]
+      # Rate-cancellation authority in radians per second squared.
       cancel_rate_mag_rad_s2: 1.0
+      # Body-rate threshold considered settled, in radians per second.
       rate_tolerance_rad_s: 1.0e-3
+      # Nominal time for a 180-degree slew, in seconds.
       slew_time_180_s: 1.0
+      # Randomized pointing noise 1-sigma, in degrees.
       pointing_sigma_deg: 0.05
+      # Default attitude controller timestep in seconds.
       default_dt_s: 1.0
+      # Random seed for repeatable pointing noise.
       rng_seed: 3
+  # Target mission strategy.
   mission_strategy:
+    # Plugin kind for mission strategy.
     kind: "python"
+    # Importable module containing the strategy class.
     module: "sim.mission.modules"
+    # Strategy class name.
     class_name: "HoldMissionStrategy"
+    # Strategy parameters.
     params:
+      # Hold mode. Use "hold_eci" for inertial attitude hold.
       attitude_mode: "hold_eci"
+      # Quaternion held by the target in hold_eci mode.
       hold_quat_bn: [1.0, 0.0, 0.0, 0.0]
+  # Target mission execution.
   mission_execution:
+    # Plugin kind for mission execution.
     kind: "python"
+    # Importable module containing the execution class.
     module: "sim.mission.modules"
+    # Execution class name.
     class_name: "ControllerPointingExecution"
+    # Execution parameters.
     params:
+      # Thruster direction in the body frame.
       thruster_direction_body: [1.0, 0.0, 0.0]
+      # Maximum pointing error allowed before thrust is considered aligned, in degrees.
       alignment_tolerance_deg: 10.0
+      # If false, the target may execute without requiring thrust alignment.
       require_attitude_alignment: false
+  # Optional objective definitions. Leave empty unless using objective-specific scoring/reporting.
   mission_objectives: []
+  # Optional external bridge configuration for SIL/HIL experiments.
   knowledge:
+    # Seconds between knowledge updates.
     refresh_rate_s: 1.0
+    # Object IDs this object attempts to track.
     targets:
       - "rocket"
       - "chaser"
+    # Access constraints for generating knowledge updates.
     conditions:
+      # Require geometric line of sight before updating knowledge.
       require_line_of_sight: true
+      # Maximum sensing range in kilometers.
       max_range_km: 50000.0
+    # Measurement error assumptions used by knowledge/estimation.
     sensor_error:
+      # Position 1-sigma error by axis, in kilometers.
       pos_sigma_km: [0.02, 0.02, 0.02]
+      # Velocity 1-sigma error by axis, in kilometers per second.
       vel_sigma_km_s: [0.0002, 0.0002, 0.0002]
+    # Estimator used for this object's knowledge updates.
     estimation:
+      # Estimator type. "ekf" is the standard choice for this template.
       type: "ekf"
 
+# Simulator timing, dynamics, environment, validation, and termination settings.
 simulator:
-  scenario_type: "auto"
   # Timing grid rules:
   # - duration_s must be an integer multiple of dt_s.
   # - optional orbit/attitude substeps must be positive, <= dt_s, and divide dt_s.
   # - run `python run_simulation.py --config <path> --validate-only` before long runs.
+  # Total requested simulation duration in seconds.
   duration_s: 7200.0
+  # Primary simulation output/control step in seconds.
   dt_s: 1.0
+  # Optional initial Julian date UTC. Set for time-dependent Sun/Moon/atmosphere behavior.
   initial_jd_utc: null
+  # Dynamics model settings.
   dynamics:
+    # Orbital dynamics settings.
     orbit:
+      # Base propagation model. "two_body" is the normal starting point.
       model: "two_body"
-      orbit_substep_s: null   # optional; smaller substep for orbit integration; must divide dt_s
+      # Optional smaller orbit integration substep. Null uses dt_s.
+      orbit_substep_s: null
+      # Enable J2 oblateness perturbation.
       j2: false
+      # Enable J3 perturbation.
       j3: false
+      # Enable J4 perturbation.
       j4: false
+      # Enable atmospheric drag.
       drag: true
+      # Enable solar radiation pressure.
       srp: true
+      # Optional spherical-harmonic gravity model.
       spherical_harmonics:
+        # Enable spherical harmonics in addition to the base orbit model.
         enabled: true
+        # Maximum gravity degree to use.
         degree: 8
+        # Maximum gravity order to use.
         order: 8
+    # Attitude dynamics settings.
     attitude:
+      # Enable rigid-body attitude propagation.
       enabled: true
-      attitude_substep_s: null   # optional; smaller substep for attitude integration; must divide dt_s
+      # Optional smaller attitude integration substep. Null uses dt_s.
+      attitude_substep_s: null
+      # Environmental disturbance torque toggles.
       disturbance_torques:
+        # Enable gravity-gradient torque.
         gravity_gradient: true
+        # Enable magnetic disturbance torque.
         magnetic: true
+        # Enable aerodynamic drag torque.
         drag: true
+        # Enable solar-radiation-pressure torque.
         srp: true
+    # Rocket dynamics and ascent scoring settings.
     rocket:
+      # Enable rocket-specific dynamics.
       enabled: true
+      # Atmosphere model for rocket aero calculations.
       atmosphere_model: "ussa1976"
-      attitude_mode: "dynamic"  # dynamic | cheater
+      # Rocket attitude mode. "dynamic" uses attitude dynamics; "cheater" is for simplified experiments.
+      attitude_mode: "dynamic"
+      # Target insertion altitude in kilometers.
       target_altitude_km: 500.0
+      # Allowed altitude error for insertion scoring, in kilometers.
       target_altitude_tolerance_km: 25.0
+      # Maximum eccentricity allowed for insertion scoring.
       target_eccentricity_max: 0.02
+      # Time the insertion condition must remain satisfied, in seconds.
       insertion_hold_time_s: 30.0
+      # Enable rocket aerodynamic force modeling.
       aero_model_enabled: true
+      # Use per-stage aero geometry when stage data is available.
       use_stagewise_aero_geometry: true
+      # Reference area override in square meters. Null lets stage/default geometry choose it.
       area_ref_m2: null
+      # Drag coefficient used by simpler aero paths.
       cd: 0.35
+      # Reflectivity coefficient for SRP-like calculations.
       cr: 1.2
+      # Enable throttle limiting based on dynamic pressure.
       max_q_limiter_enabled: true
+      # Maximum allowed dynamic pressure in pascals.
       max_q_pa: 45000.0
+      # Minimum throttle fraction allowed by throttle limiting.
       min_throttle: 0.0
+      # Enable automatic cutoff near orbit insertion.
       orbit_insertion_cutoff_enabled: false
+      # Minimum altitude for cutoff consideration, in kilometers.
       cutoff_min_alt_km: 90.0
+      # Minimum periapsis altitude for cutoff consideration, in kilometers.
       cutoff_min_periapsis_alt_km: 140.0
+      # Apoapsis margin for cutoff consideration, in kilometers.
       cutoff_apoapsis_margin_km: 10.0
+      # Specific orbital-energy margin for cutoff consideration.
       cutoff_energy_margin_km2_s2: 0.01
+      # Relaxation factor applied to eccentricity cutoff checks.
       cutoff_ecc_relax_factor: 3.0
+      # Enable hard cutoff protection near escape speed.
       cutoff_hard_escape_enabled: true
+      # Fractional speed margin used by the near-escape cutoff.
       cutoff_near_escape_speed_margin_frac: 0.03
+      # Detailed rocket aero coefficient model.
       aero:
+        # Reference area in square meters.
         reference_area_m2: 10.0
+        # Reference length in meters.
         reference_length_m: 30.0
+        # Center-of-pressure offset in body-frame meters.
         cp_offset_body_m: [0.0, 0.0, 0.0]
+        # Baseline drag coefficient.
         cd_base: 0.20
+        # Angle-of-attack drag coefficient multiplier.
         cd_alpha2: 0.10
+        # Supersonic drag coefficient.
         cd_supersonic: 0.28
+        # Transonic drag peak coefficient.
         transonic_peak_cd: 0.22
+        # Mach number where the transonic peak is centered.
         transonic_mach: 1.0
+        # Width of the transonic drag rise.
         transonic_width: 0.22
+        # Lift slope versus angle of attack, per radian.
         cl_alpha_per_rad: 0.15
+        # Side-force slope versus sideslip, per radian.
         cy_beta_per_rad: 0.15
+        # Pitching moment slope versus angle of attack, per radian.
         cm_alpha_per_rad: -0.02
+        # Yawing moment slope versus sideslip, per radian.
         cn_beta_per_rad: -0.02
+        # Roll damping/slope coefficient, per radian.
         cl_roll_per_rad: -0.01
+        # Angle-of-attack clamp for aero calculations, in degrees.
         alpha_limit_deg: 20.0
+        # Sideslip clamp for aero calculations, in degrees.
         beta_limit_deg: 20.0
+  # Environment and ephemeris settings.
   environment:
+    # Ephemeris mode for Sun/Moon and time-dependent environment behavior.
     ephemeris_mode: "analytic_simple"
+    # Legacy SPICE toggle. Prefer ephemeris_mode: "spice" plus configured kernels when using SPICE.
     use_spice: false
+    # Atmosphere model inputs such as solar flux or geomagnetic settings.
     atmosphere_env: {}
+  # Plugin validation behavior.
   plugin_validation:
+    # Strict validation catches missing modules/classes before long runs.
     strict: true
+  # Termination criteria.
   termination:
+    # Stop the run if a participating object intersects Earth.
     earth_impact_enabled: true
+    # Earth radius used for impact checks, in kilometers.
     earth_radius_km: 6378.137
 
+# Output artifacts, plots, animations, and analysis reports.
 outputs:
+  # Directory where all run artifacts are written.
   output_dir: "outputs/everything_on_template"
-  mode: "both"  # interactive | save | both
+  # "interactive" shows windows, "save" writes files, "both" does both.
+  mode: "both"
+  # Summary/statistics output settings.
   stats:
+    # Enable summary/stat artifact generation.
     enabled: true
+    # Print a console summary after the run.
     print_summary: true
+    # Write master_run_summary.json.
     save_json: true
+    # Reserved CSV toggle for workflows that support CSV output.
     save_csv: false
+    # Write master_run_log.json with time histories for custom analysis.
     save_full_log: true
+  # Static plot settings.
   plots:
+    # Enable static figure generation.
     enabled: true
-    # Optional presets: minimal, orbit, rendezvous, attitude, rocket, debug
+    # Optional presets: minimal, orbit, rendezvous, attitude, rocket, debug.
     preset: "rendezvous"
+    # Reference object for relative/RIC plots.
     reference_object_id: "target"
+    # Additional or explicit figure IDs to generate.
     figure_ids:
+      # Multi-object ECI trajectory plot.
       - "trajectory_eci_multi"
+      # Multi-object ECEF trajectory plot.
       - "trajectory_ecef_multi"
+      # Multi-object rectangular-RIC trajectory plot.
       - "trajectory_ric_rect_multi"
+      # Multi-object curvilinear-RIC trajectory plot.
       - "trajectory_ric_curv_multi"
+      # Single-object ECEF trajectory plot.
       - "trajectory_ecef"
+      # Single-object rectangular-RIC trajectory plot.
       - "trajectory_ric_rect"
+      # Single-object curvilinear-RIC trajectory plot.
       - "trajectory_ric_curv"
+      # Attitude visualization.
       - "attitude"
+      # Quaternion components relative to ECI.
       - "quaternion_eci"
+      # Quaternion components relative to RIC.
       - "quaternion_ric"
+      # Body rates relative to ECI.
       - "rates_eci"
+      # Body rates relative to RIC.
       - "rates_ric"
+      # Pairwise relative range over time.
       - "relative_range"
+      # Object knowledge/tracking timeline.
       - "knowledge_timeline"
+      # Per-object thrust command history.
       - "control_thrust"
+      # Multi-object thrust command history.
       - "control_thrust_multi"
+    # Figure resolution for saved PNGs.
     dpi: 160
+  # Animation settings.
   animations:
+    # Enable animation generation.
     enabled: true
+    # Animation types to render.
     types:
+      # Multi-object ground-track animation.
       - "ground_track_multi"
+      # Single-object ground-track animation.
       - "ground_track"
       # - "attitude_ric_thruster"
       # - "battlespace_dashboard"
@@ -336,26 +641,46 @@ outputs:
       # - "target_reference_ric_curv_2d_ri"
       # - "target_reference_ric_curv_2d_ic"
       # - "target_reference_ric_curv_2d_rc"
+    # Optional object IDs for attitude/RIC thruster animations.
     # attitude_ric_thruster_object_ids: ["target", "chaser"]
+    # Optional body dimensions for attitude/RIC thruster rendering.
     # attitude_ric_thruster_dims_m:
     #   target: [1.0, 1.0, 1.0]
     #   chaser: [1.0, 1.0, 1.0]
+    # Acceleration threshold for drawing active thrusters.
     # attitude_ric_thruster_active_threshold_km_s2: 1.0e-15
+    # Target object used by battlespace dashboard animations.
     # battlespace_dashboard_target_object_id: "target"
+    # Chaser object used by battlespace dashboard animations.
     # battlespace_dashboard_chaser_object_id: "chaser"
+    # Whether the battlespace dashboard should show the trajectory trace.
     # battlespace_dashboard_show_trajectory: true
+    # Body dimensions for battlespace dashboard attitude rendering.
     # battlespace_dashboard_attitude_dims_m:
     #   target: [1.0, 1.0, 1.0]
     #   chaser: [1.0, 1.0, 1.0]
+    # Acceleration threshold for drawing dashboard thrusters.
     # battlespace_dashboard_thruster_active_threshold_km_s2: 1.0e-15
+    # Object IDs included in target-reference RIC animations.
     # target_reference_ric_curv_object_ids: ["target", "chaser"]
+    # Whether target-reference 3D animations should show trajectory traces.
     # target_reference_ric_curv_3d_show_trajectory: true
+    # Whether target-reference 2D animations should show trajectory traces.
     # target_reference_ric_curv_2d_show_trajectory: true
+    # 2D target-reference planes to render.
     # target_reference_ric_curv_2d_planes: ["ri", "ic", "rc"]
+    # Whether the radial/in-track target-reference view should show trajectory traces.
     # target_reference_ric_curv_2d_ri_show_trajectory: true
+    # Whether the in-track/cross-track target-reference view should show trajectory traces.
     # target_reference_ric_curv_2d_ic_show_trajectory: true
+    # Whether the radial/cross-track target-reference view should show trajectory traces.
     # target_reference_ric_curv_2d_rc_show_trajectory: true
+    # Frames per second for saved animations.
     fps: 30
+    # Playback speed multiplier relative to simulation time.
     speed_multiple: 5.0
+    # Render every Nth sample to reduce animation size.
     frame_stride: 2
+    # Draw an Earth map/background where supported.
     draw_earth_map: true
+  # Monte Carlo output settings. These matter when monte_carlo.enabled is true.

@@ -59,6 +59,9 @@ that config.
 
 The full list is available in `sim.master_outputs.AVAILABLE_FIGURE_IDS`.
 
+For plots that are not built in, see [Custom Analysis](custom-analysis.md) for
+examples that load saved JSON/CSV artifacts and create Matplotlib figures.
+
 ## Python API
 
 The `sim.plotting` package works from a single-run payload:

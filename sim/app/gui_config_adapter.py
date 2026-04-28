@@ -19,6 +19,10 @@ class GuiConfigAdapter:
         window.scenario_description_edit.setText(str(cfg.get("scenario_description", "") or ""))
         window.duration_spin.setValue(float(sim.get("duration_s", 3600.0) or 3600.0))
         window.dt_spin.setValue(float(sim.get("dt_s", 1.0) or 1.0))
+        initial_jd = sim.get("initial_jd_utc")
+        window.initial_jd_enabled_check.setChecked(initial_jd is not None)
+        if initial_jd is not None:
+            window.initial_jd_spin.setValue(float(initial_jd))
         window.output_dir_edit.setText(str(outputs.get("output_dir", "outputs/gui_run") or "outputs/gui_run"))
         window._set_combo_text_or_append(window.output_mode_combo, str(outputs.get("mode", "interactive") or "interactive"))
 
@@ -103,9 +107,12 @@ class GuiConfigAdapter:
         window.att_srp_check.setChecked(bool(disturbance_torques.get("srp", False)))
         window._refresh_substep_visibility()
         window._refresh_integrator_visibility()
+        window._refresh_initial_epoch_ui()
 
         target_specs = dict(target.get("specs", {}) or {})
-        target_coes = dict(target.get("initial_state", {}).get("coes", {}) or {})
+        target_init = dict(target.get("initial_state", {}) or {})
+        target_coes = dict(target_init.get("coes", {}) or {})
+        target_tle = dict(target_init.get("tle", {}) or {})
         window.target_enabled.setChecked(bool(target.get("enabled", True)))
         target_default = window.target_preset.itemText(0) if window.target_preset.count() else ""
         window._set_combo_text_or_append(window.target_preset, str(target_specs.get("preset_satellite", "") or target_default))
@@ -118,6 +125,19 @@ class GuiConfigAdapter:
         window.target_raan.setValue(float(target_coes.get("raan_deg", 0.0) or 0.0))
         window.target_argp.setValue(float(target_coes.get("argp_deg", 0.0) or 0.0))
         window.target_ta.setValue(float(target_coes.get("true_anomaly_deg", 0.0) or 0.0))
+        if target_tle:
+            window._set_combo_data_or_text(window.target_init_mode, "tle")
+        else:
+            window._set_combo_data_or_text(window.target_init_mode, "coes")
+        lines = list(target_tle.get("lines", []) or [])
+        line1 = str(target_tle.get("line1", lines[0] if len(lines) > 0 else "") or "")
+        line2 = str(target_tle.get("line2", lines[1] if len(lines) > 1 else "") or "")
+        window.target_tle_line1.setText(line1)
+        window.target_tle_line2.setText(line2)
+        window.target_tle_require_checksum.setChecked(bool(target_tle.get("require_checksum", False)))
+        window.target_tle_propagate_to_epoch.setChecked(bool(target_tle.get("propagate_to_initial_epoch", True)))
+        window._refresh_target_initial_state_ui()
+        window._refresh_tle_status()
         window._set_pointer_combo_value(window.target_strategy_combo, dict(target.get("mission_strategy", {}) or {}) if target.get("mission_strategy") else None)
         window._set_pointer_combo_value(window.target_execution_combo, dict(target.get("mission_execution", {}) or {}) if target.get("mission_execution") else None)
         window._set_pointer_combo_value(window.target_orbit_control_combo, dict(target.get("orbit_control", {}) or {}) if target.get("orbit_control") else None)
@@ -230,6 +250,10 @@ class GuiConfigAdapter:
 
         sim["duration_s"] = float(window.duration_spin.value())
         sim["dt_s"] = float(window.dt_spin.value())
+        if bool(window.initial_jd_enabled_check.isChecked()):
+            sim["initial_jd_utc"] = float(window.initial_jd_spin.value())
+        else:
+            sim["initial_jd_utc"] = None
         dynamics = sim.setdefault("dynamics", {})
         orbit_dyn = dynamics.setdefault("orbit", {})
         att_dyn = dynamics.setdefault("attitude", {})
@@ -335,14 +359,31 @@ class GuiConfigAdapter:
         target["specs"]["dry_mass_kg"] = float(window.target_dry_mass.value())
         target["specs"]["fuel_mass_kg"] = float(window.target_fuel_mass.value())
         target["specs"].pop("mass_kg", None)
-        target.setdefault("initial_state", {})["coes"] = {
-            "a_km": float(window.target_a.value()),
-            "ecc": float(window.target_ecc.value()),
-            "inc_deg": float(window.target_inc.value()),
-            "raan_deg": float(window.target_raan.value()),
-            "argp_deg": float(window.target_argp.value()),
-            "true_anomaly_deg": float(window.target_ta.value()),
-        }
+        target_initial_state = dict(target.get("initial_state", {}) or {})
+        target_init_mode = str(window.target_init_mode.currentData() or window.target_init_mode.currentText()).strip().lower()
+        if target_init_mode == "tle":
+            target_initial_state["tle"] = {
+                "line1": window.target_tle_line1.text().strip(),
+                "line2": window.target_tle_line2.text().strip(),
+                "propagate_to_initial_epoch": bool(window.target_tle_propagate_to_epoch.isChecked()),
+                "require_checksum": bool(window.target_tle_require_checksum.isChecked()),
+            }
+            target_initial_state.pop("coes", None)
+            target_initial_state.pop("position_eci_km", None)
+            target_initial_state.pop("velocity_eci_km_s", None)
+        else:
+            target_initial_state["coes"] = {
+                "a_km": float(window.target_a.value()),
+                "ecc": float(window.target_ecc.value()),
+                "inc_deg": float(window.target_inc.value()),
+                "raan_deg": float(window.target_raan.value()),
+                "argp_deg": float(window.target_argp.value()),
+                "true_anomaly_deg": float(window.target_ta.value()),
+            }
+            target_initial_state.pop("tle", None)
+            target_initial_state.pop("position_eci_km", None)
+            target_initial_state.pop("velocity_eci_km_s", None)
+        target["initial_state"] = target_initial_state
         target["mission_strategy"] = window._combo_pointer_value(window.target_strategy_combo, existing=dict(target.get("mission_strategy", {}) or {}) if target.get("mission_strategy") else None)
         target["mission_execution"] = window._combo_pointer_value(window.target_execution_combo, existing=dict(target.get("mission_execution", {}) or {}) if target.get("mission_execution") else None)
         target.pop("guidance", None)

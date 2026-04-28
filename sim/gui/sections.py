@@ -41,6 +41,9 @@ def build_scenario_tab(owner) -> QWidget:
     owner.dt_spin.setRange(0.000001, 1.0e6)
     owner.dt_spin.setDecimals(6)
     owner.dt_spin.setValue(1.0)
+    owner.initial_jd_enabled_check = QCheckBox("Set Initial Epoch")
+    owner.initial_jd_spin = owner._make_free_spinbox(decimals=8)
+    owner.initial_jd_spin.setValue(2460310.5)
     owner.orbit_integrator_combo = QComboBox()
     owner.orbit_integrator_combo.addItems(owner.orbit_integrator_options)
     owner.orbit_adaptive_atol_spin = owner._make_free_spinbox(decimals=12)
@@ -76,6 +79,14 @@ def build_scenario_tab(owner) -> QWidget:
     layout.addRow("Scenario Description", owner.scenario_description_edit)
     layout.addRow("Duration (s)", owner.duration_spin)
     layout.addRow("dt (s)", owner.dt_spin)
+    epoch_row = QWidget()
+    epoch_layout = QHBoxLayout(epoch_row)
+    epoch_layout.setContentsMargins(0, 0, 0, 0)
+    epoch_layout.setSpacing(6)
+    epoch_layout.addWidget(owner.initial_jd_enabled_check)
+    epoch_layout.addWidget(owner.initial_jd_spin)
+    epoch_layout.addStretch(1)
+    layout.addRow("Initial JD UTC", epoch_row)
     layout.addRow("Orbit Integrator", owner.orbit_integrator_combo)
     layout.addRow("Output Mode", owner.output_mode_combo)
     output_dir_row = QWidget()
@@ -123,6 +134,68 @@ def build_scenario_tab(owner) -> QWidget:
     attitude_disturbances_layout.addWidget(owner.att_drag_check, 1, 0)
     attitude_disturbances_layout.addWidget(owner.att_srp_check, 1, 1)
     layout.addRow("Attitude Disturbances", attitude_disturbances)
+    return tab
+
+
+def build_builder_tab(owner) -> QWidget:
+    tab = QWidget()
+    layout = QVBoxLayout(tab)
+    layout.setContentsMargins(8, 8, 8, 8)
+    layout.setSpacing(8)
+
+    templates_box = QGroupBox("Start From Mission Intent")
+    templates_layout = QGridLayout(templates_box)
+    owner.template_buttons = {}
+    templates = [
+        ("single_tle", "Single Satellite TLE"),
+        ("rendezvous", "Rendezvous / RPO"),
+        ("keepout", "Keepout Recovery"),
+        ("monte_carlo", "Monte Carlo Campaign"),
+        ("sensitivity", "Sensitivity Study"),
+        ("rocket_ascent", "Rocket Ascent"),
+    ]
+    for idx, (key, label) in enumerate(templates):
+        button = QPushButton(label)
+        button.setMinimumHeight(36)
+        button.clicked.connect(lambda _checked=False, template_key=key: owner._apply_builder_template(template_key))
+        owner.template_buttons[key] = button
+        templates_layout.addWidget(button, idx // 3, idx % 3)
+    layout.addWidget(templates_box)
+
+    workflow_box = QGroupBox("Guided Workflow")
+    workflow_layout = QGridLayout(workflow_box)
+    steps = [
+        ("1", "Choose scenario intent"),
+        ("2", "Define target and chaser"),
+        ("3", "Select initial states"),
+        ("4", "Pick outputs"),
+        ("5", "Preflight"),
+        ("6", "Validate & run"),
+    ]
+    for idx, (num, text) in enumerate(steps):
+        pill = QLabel(f"{num}. {text}")
+        pill.setMinimumHeight(28)
+        pill.setStyleSheet("QLabel { padding: 4px 8px; border: 1px solid #888; border-radius: 4px; }")
+        workflow_layout.addWidget(pill, idx // 3, idx % 3)
+    layout.addWidget(workflow_box)
+
+    actions = QHBoxLayout()
+    owner.builder_validate_button = QPushButton("Preflight")
+    owner.builder_validate_button.clicked.connect(owner._refresh_validation_state)
+    actions.addWidget(owner.builder_validate_button)
+    owner.builder_run_button = QPushButton("Validate && Run")
+    owner.builder_run_button.clicked.connect(owner._on_run)
+    actions.addWidget(owner.builder_run_button)
+    actions.addStretch(1)
+    layout.addLayout(actions)
+
+    preflight_box = QGroupBox("Preflight Summary")
+    preflight_layout = QVBoxLayout(preflight_box)
+    owner.preflight_summary = QPlainTextEdit()
+    owner.preflight_summary.setReadOnly(True)
+    owner.preflight_summary.setMinimumHeight(220)
+    preflight_layout.addWidget(owner.preflight_summary)
+    layout.addWidget(preflight_box, 1)
     return tab
 
 
@@ -326,6 +399,10 @@ def build_objects_tab(owner) -> QWidget:
     owner.target_ta = QDoubleSpinBox()
     owner.target_ta.setRange(-360.0, 360.0)
     owner.target_ta.setDecimals(3)
+    owner.target_init_mode = QComboBox()
+    owner._populate_value_combo(owner.target_init_mode, [("coes", "COEs"), ("tle", "TLE")])
+    owner.target_init_mode.currentIndexChanged.connect(owner._refresh_target_initial_state_ui)
+    owner.target_initial_state_stack = QStackedWidget()
     target_form.addRow(owner.target_enabled)
     target_form.addRow("Preset", owner.target_preset)
     target_form.addRow("Dry Mass (kg)", owner.target_dry_mass)
@@ -335,12 +412,36 @@ def build_objects_tab(owner) -> QWidget:
     owner.target_initial_state_container = QWidget()
     target_initial_state_form = QFormLayout(owner.target_initial_state_container)
     target_initial_state_form.setContentsMargins(0, 0, 0, 0)
-    target_initial_state_form.addRow("a_km", owner.target_a)
-    target_initial_state_form.addRow("ecc", owner.target_ecc)
-    target_initial_state_form.addRow("inc_deg", owner.target_inc)
-    target_initial_state_form.addRow("raan_deg", owner.target_raan)
-    target_initial_state_form.addRow("argp_deg", owner.target_argp)
-    target_initial_state_form.addRow("true_anomaly_deg", owner.target_ta)
+    target_initial_state_form.addRow("Mode", owner.target_init_mode)
+    target_coe_page = QWidget()
+    target_coe_form = QFormLayout(target_coe_page)
+    target_coe_form.setContentsMargins(0, 0, 0, 0)
+    target_coe_form.addRow("a_km", owner.target_a)
+    target_coe_form.addRow("ecc", owner.target_ecc)
+    target_coe_form.addRow("inc_deg", owner.target_inc)
+    target_coe_form.addRow("raan_deg", owner.target_raan)
+    target_coe_form.addRow("argp_deg", owner.target_argp)
+    target_coe_form.addRow("true_anomaly_deg", owner.target_ta)
+    owner.target_initial_state_stack.addWidget(target_coe_page)
+    target_tle_page = QWidget()
+    target_tle_form = QFormLayout(target_tle_page)
+    target_tle_form.setContentsMargins(0, 0, 0, 0)
+    owner.target_tle_line1 = QLineEdit()
+    owner.target_tle_line1.setPlaceholderText("1 25544U 98067A ...")
+    owner.target_tle_line2 = QLineEdit()
+    owner.target_tle_line2.setPlaceholderText("2 25544 ...")
+    owner.target_tle_require_checksum = QCheckBox("Require Checksum")
+    owner.target_tle_propagate_to_epoch = QCheckBox("Propagate To Initial JD")
+    owner.target_tle_propagate_to_epoch.setChecked(True)
+    owner.target_tle_status = QLabel("")
+    owner.target_tle_status.setWordWrap(True)
+    target_tle_form.addRow("Line 1", owner.target_tle_line1)
+    target_tle_form.addRow("Line 2", owner.target_tle_line2)
+    target_tle_form.addRow(owner.target_tle_require_checksum)
+    target_tle_form.addRow(owner.target_tle_propagate_to_epoch)
+    target_tle_form.addRow("Parsed", owner.target_tle_status)
+    owner.target_initial_state_stack.addWidget(target_tle_page)
+    target_initial_state_form.addRow(owner.target_initial_state_stack)
     target_form.addRow(owner.target_initial_state_container)
     owner.target_strategy_combo = owner._make_pointer_combo(owner.mission_strategy_options["target"])
     owner.target_execution_combo = owner._make_pointer_combo(owner.mission_execution_options["target"])
