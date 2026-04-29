@@ -61,6 +61,9 @@ The full list is available in `sim.master_outputs.AVAILABLE_FIGURE_IDS`.
 
 For plots that are not built in, see [Custom Analysis](custom-analysis.md) for
 examples that load saved JSON/CSV artifacts and create Matplotlib figures.
+Ground-station access is currently saved as payload data and summary metrics;
+use the custom-analysis path to plot station access, range, or elevation until a
+dedicated built-in figure ID is added.
 
 ## Python API
 

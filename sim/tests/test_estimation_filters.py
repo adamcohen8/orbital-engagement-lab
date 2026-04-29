@@ -8,6 +8,7 @@ from sim.core.models import Measurement, StateBelief
 from sim.dynamics.orbit.accelerations import OrbitContext
 from sim.dynamics.orbit.propagator import OrbitPropagator
 from sim.estimation.attitude_ekf import AttitudeEKFEstimator
+from sim.estimation.joint_state import JointStateEstimator
 from sim.estimation.orbit_ekf import OrbitEKFEstimator
 from sim.estimation.orbit_ukf import OrbitUKFEstimator
 from sim.utils.quaternion import normalize_quaternion
@@ -89,6 +90,64 @@ def test_attitude_ekf_update_avoids_np_inv_and_preserves_symmetric_covariance() 
 
     assert np.allclose(updated.covariance, updated.covariance.T, atol=1e-12)
     assert np.all(np.linalg.eigvalsh(updated.covariance) >= -1e-12)
+
+
+def test_attitude_ekf_propagates_by_elapsed_belief_time() -> None:
+    estimator = AttitudeEKFEstimator(
+        dt_s=1.0,
+        inertia_kg_m2=np.diag([10.0, 12.0, 8.0]),
+        process_noise_diag=np.ones(7) * 1e-10,
+        meas_noise_diag=np.ones(7) * 1e-6,
+    )
+    belief = StateBelief(
+        state=np.hstack((np.array([1.0, 0.0, 0.0, 0.0], dtype=float), np.array([0.0, 0.0, 0.2], dtype=float))),
+        covariance=np.eye(7) * 1e-4,
+        last_update_t_s=0.0,
+    )
+
+    updated = estimator.update(belief, None, 0.25)
+
+    expected_q = normalize_quaternion(np.array([1.0, 0.0, 0.0, 0.025], dtype=float))
+    assert np.allclose(updated.state[:4], expected_q, atol=1e-10)
+    assert np.isclose(updated.last_update_t_s, 0.25)
+
+
+def test_joint_state_estimator_uses_attitude_ekf_measurement_update() -> None:
+    orbit_estimator = OrbitEKFEstimator(
+        mu_km3_s2=398600.4418,
+        dt_s=1.0,
+        process_noise_diag=np.ones(6) * 1e-10,
+        meas_noise_diag=np.ones(6) * 1e-8,
+    )
+    estimator = JointStateEstimator(
+        orbit_estimator=orbit_estimator,
+        dt_s=1.0,
+        inertia_kg_m2=np.diag([10.0, 12.0, 8.0]),
+        attitude_process_var=1e-10,
+        attitude_meas_var=1e-12,
+    )
+    q_initial = normalize_quaternion(np.array([1.0, 0.0, 0.0, 0.0], dtype=float))
+    q_measured = normalize_quaternion(np.array([1.0, 0.05, -0.02, 0.01], dtype=float))
+    state = np.hstack(
+        (
+            np.array([7000.0, 0.0, 0.0, 0.0, 7.546049108166282, 0.0], dtype=float),
+            q_initial,
+            np.array([0.0, 0.0, 0.0], dtype=float),
+        )
+    )
+    belief = StateBelief(state=state, covariance=np.eye(13) * 1e-2, last_update_t_s=0.0)
+    meas = Measurement(
+        vector=np.hstack((state[:6], q_measured, np.array([0.01, -0.02, 0.03], dtype=float))),
+        t_s=1.0,
+    )
+
+    with patch("numpy.linalg.inv", side_effect=AssertionError("np.linalg.inv should not be used")):
+        updated = estimator.update(belief, meas, 1.0)
+
+    assert np.linalg.norm(updated.state[6:10] - q_measured) < 1e-5
+    assert np.linalg.norm(updated.state[10:13] - np.array([0.01, -0.02, 0.03])) < 1e-5
+    assert np.allclose(updated.covariance, updated.covariance.T, atol=1e-12)
+    assert np.all(np.linalg.eigvalsh(updated.covariance[6:13, 6:13]) >= -1e-12)
 
 
 def test_orbit_ukf_update_avoids_np_inv_and_preserves_symmetric_covariance() -> None:

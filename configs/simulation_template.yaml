@@ -12,6 +12,21 @@ metadata:
   # Use notes to explain what makes this scenario different from nearby configs.
   notes: "Full-feature baseline with rocket + target + chaser, broad dynamics, mission hooks, plots, and animations enabled."
 
+# Optional passive ground stations. These do not command or estimate agents;
+# they only record line-of-sight/elevation/range access to active objects.
+ground_stations:
+  - id: "colorado_springs"
+    # Geodetic latitude in degrees.
+    lat_deg: 38.803
+    # Geodetic longitude in degrees.
+    lon_deg: -104.526
+    # Height above the WGS84 ellipsoid in kilometers.
+    alt_km: 1.9
+    # Minimum elevation angle required for access.
+    min_elevation_deg: 10.0
+    # Optional maximum slant range for access in kilometers.
+    max_range_km: 2500.0
+
 # Rocket object. Disable this section for satellite-only rendezvous scenarios.
 rocket:
   # Whether the rocket participates in the run.

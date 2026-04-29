@@ -79,6 +79,20 @@ class ObjectConfig:
 
 
 @dataclass
+class SimObject:
+    cfg: ObjectConfig
+    truth: StateTruth
+    belief: StateBelief
+    dynamics: Any
+    sensor: Any
+    estimator: Any
+    controller: Any
+    actuator: Any
+    limits: dict[str, Any]
+    knowledge_base: Any | None = None
+
+
+@dataclass
 class Measurement:
     vector: np.ndarray
     t_s: float

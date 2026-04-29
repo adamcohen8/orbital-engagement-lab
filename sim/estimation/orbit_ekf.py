@@ -42,15 +42,17 @@ class OrbitEKFEstimator(Estimator):
     def update(self, belief: StateBelief, measurement: Measurement | None, t_s: float) -> StateBelief:
         x_prev = belief.state
         p_prev = belief.covariance
+        dt_s = max(float(t_s) - float(belief.last_update_t_s), 0.0)
 
         x_pred = propagate_two_body_rk4(
             x_eci=x_prev,
-            dt_s=self.dt_s,
+            dt_s=dt_s,
             mu_km3_s2=self.mu_km3_s2,
             accel_cmd_eci_km_s2=self._zero_accel,
         )
-        f = self._numerical_jacobian(x_prev, base=x_pred)
-        p_pred = f @ p_prev @ f.T + self._q
+        f = self._numerical_jacobian(x_prev, base=x_pred, dt_s=dt_s)
+        q_scale = dt_s / self.dt_s if self.dt_s > 0.0 else 1.0
+        p_pred = f @ p_prev @ f.T + self._q * max(q_scale, 0.0)
 
         if measurement is None:
             self.last_update_diagnostics = OrbitEKFUpdateDiagnostics(
@@ -97,13 +99,14 @@ class OrbitEKFEstimator(Estimator):
         )
         return StateBelief(state=x_upd, covariance=p_upd, last_update_t_s=t_s)
 
-    def _numerical_jacobian(self, x: np.ndarray, *, base: np.ndarray | None = None) -> np.ndarray:
+    def _numerical_jacobian(self, x: np.ndarray, *, base: np.ndarray | None = None, dt_s: float | None = None) -> np.ndarray:
+        step_dt_s = self.dt_s if dt_s is None else float(dt_s)
         eps = 1e-6
         base_eval = base
         if base_eval is None:
             base_eval = propagate_two_body_rk4(
                 x_eci=x,
-                dt_s=self.dt_s,
+                dt_s=step_dt_s,
                 mu_km3_s2=self.mu_km3_s2,
                 accel_cmd_eci_km_s2=self._zero_accel,
             )
@@ -113,7 +116,7 @@ class OrbitEKFEstimator(Estimator):
             xp[i] += eps
             yp = propagate_two_body_rk4(
                 x_eci=xp,
-                dt_s=self.dt_s,
+                dt_s=step_dt_s,
                 mu_km3_s2=self.mu_km3_s2,
                 accel_cmd_eci_km_s2=self._zero_accel,
             )

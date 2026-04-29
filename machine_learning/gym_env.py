@@ -50,6 +50,7 @@ from sim.runtime_support import (
     _run_mission_modules,
     _run_mission_strategy,
     _sample_variation,
+    _truth_from_state6,
 )
 
 
@@ -635,7 +636,11 @@ class GymSimulationEnv(gym.Env):
                 agent.belief = agent.estimator.update(agent.belief, meas, t_eval)
             orb_belief = agent.belief
             if agent.orbit_controller is not None and orb_belief is not None:
-                chief_truth = world_truth_inner.get("target")
+                chief_truth = None
+                if agent.knowledge_base is not None:
+                    target_belief = agent.knowledge_base.snapshot().get("target")
+                    if target_belief is not None and target_belief.state.size >= 6:
+                        chief_truth = _truth_from_state6(target_belief.state[:6], t_s=target_belief.last_update_t_s)
                 if chief_truth is not None and agent_id != "target" and hasattr(agent.orbit_controller, "ric_curv_state_slice"):
                     orbit_belief_scratch.last_update_t_s = orb_belief.last_update_t_s
                     orbit_belief_scratch.state = _relative_orbit_state12(
@@ -659,7 +664,7 @@ class GymSimulationEnv(gym.Env):
             if not attitude_enabled:
                 att_belief = None
 
-            env_common = {**base_environment, "world_truth": world_truth_inner}
+            env_common = dict(base_environment)
             mission_out = _run_mission_modules(
                 agent=agent,
                 world_truth=world_truth_inner,
@@ -1146,7 +1151,12 @@ class MultiAgentSimulationEnv:
                 agent.belief = agent.estimator.update(agent.belief, meas, t_eval)
             orb_belief = agent.belief
             if agent.orbit_controller is not None and orb_belief is not None:
-                chief_truth = world_truth_inner.get("target" if agent_id != "target" else "chaser")
+                chief_truth = None
+                chief_id = "target" if agent_id != "target" else "chaser"
+                if agent.knowledge_base is not None:
+                    target_belief = agent.knowledge_base.snapshot().get(chief_id)
+                    if target_belief is not None and target_belief.state.size >= 6:
+                        chief_truth = _truth_from_state6(target_belief.state[:6], t_s=target_belief.last_update_t_s)
                 if chief_truth is not None and hasattr(agent.orbit_controller, "ric_curv_state_slice"):
                     orbit_belief_scratch.last_update_t_s = orb_belief.last_update_t_s
                     orbit_belief_scratch.state = _relative_orbit_state12(
@@ -1170,7 +1180,7 @@ class MultiAgentSimulationEnv:
             if not attitude_enabled:
                 att_belief = None
 
-            env_common = {**base_environment, "world_truth": world_truth_inner}
+            env_common = dict(base_environment)
             mission_out = _run_mission_modules(
                 agent=agent,
                 world_truth=world_truth_inner,

@@ -60,6 +60,8 @@ Private or transitional internals:
 - Batch analysis may delegate to campaign or legacy master paths.
 - Internal classes prefixed with `_`, including `_SingleRunEngine`, are not
   public extension APIs even when documented here for behavior.
+- The legacy lower-level `SimulationKernel` loop has been removed; single-run
+  behavior should be reasoned about through the canonical engine contract here.
 
 
 ## Time Grid
@@ -99,7 +101,6 @@ Object creation:
 - Enabled config sections create runtime objects.
 - Disabled config sections do not participate in truth, belief, control,
   sensing, or output histories.
-- Object IDs must be unique in lower-level kernel execution.
 
 Initial sample:
 
@@ -129,14 +130,16 @@ conceptual order.
 
 1. Resolve time and environment context.
 2. Activate any time-gated objects, such as rocket-deployed chasers.
-3. Build current world truth from active objects.
+3. Build an internal current-time world-truth snapshot from active objects at
+   `t_k`.
 4. Propagate optional reference trajectories, such as target reference orbit.
 5. For each active object, execute its runtime path:
    - rocket path: mission modules, mission strategy, mission execution,
      guidance, rocket propagation, belief update, thrust/mass/stage metrics;
-   - satellite path: internal substep loop with sensing, estimation, mission
-     modules, mission strategy, external intent, mission execution, controller
-     evaluation, actuator limiting, dynamics propagation, and debug logging.
+   - satellite path: internal substep loop with current-time mission modules,
+     mission strategy, external intent, mission execution, controller
+     evaluation, actuator limiting, dynamics propagation, post-propagation
+     sensing/estimation, and debug logging.
 6. Update bridges for objects with enabled bridge integrations.
 7. Update object knowledge bases from the post-step world truth.
 8. Write truth, belief, knowledge, applied thrust, applied torque, desired
@@ -145,16 +148,14 @@ conceptual order.
 10. Evaluate termination conditions.
 11. Return a snapshot for the current index when stepping interactively.
 
-The lower-level kernel in `sim/core/kernel.py` expresses the same high-level
-ordering in a smaller component model:
-
-1. truth propagation,
-2. sensor measurement generation,
-3. estimator update,
-4. knowledge update,
-5. controller execution,
-6. actuator application,
-7. logging and termination checks.
+The key invariant is that agents decide from current estimated information. At
+an internal satellite substep beginning at `t_i`, mission logic and controllers
+observe belief-derived own state and observer-owned knowledge at `t_i`, then
+produce the command applied over `[t_i, t_{i+1}]`. Sensors and estimators then
+update belief to `t_{i+1}` after dynamics propagation. Raw world truth is not
+exposed to agent decision logic, either as a direct `world_truth` argument or
+inside the decision-facing environment; perfect information should be modeled
+with zero-error sensors/knowledge, not by reading simulator truth.
 
 
 ## Truth, Belief, And Knowledge Timing
@@ -163,13 +164,24 @@ Truth:
 
 - Truth at index `0` is the initial condition.
 - Truth at index `k + 1` represents propagated state at `t_{k+1}`.
-- Dynamics see the latest available world truth for active objects.
+- Single-run decision logic sees belief-derived own state and observer-owned
+  knowledge. It should not see raw simulator truth for other objects.
+- Mission target/reference resolution does not fall back to raw `world_truth`;
+  if a target is not present in observer-owned knowledge, target-dependent
+  decisions must hold, coast, or use an explicitly configured blind/explicit
+  mode.
+- Dynamics may receive an object-local world-truth context for perturbations,
+  sensors, knowledge generation, and integration support, but controller and
+  mission decisions are based on estimated current-time state.
 
 Belief:
 
 - Belief at index `0` is the initial belief.
-- Estimator updates occur using measurements associated with the current
-  evaluation time.
+- Estimator updates occur after propagation using measurements associated with
+  the post-propagation evaluation time.
+- Estimators propagate by elapsed time from `belief.last_update_t_s` to the
+  requested update time; they must not advance by a fixed outer `dt_s` for each
+  internal substep update.
 - If no estimator/belief is configured for a satellite path, a truth-derived
   fallback belief may be created for control continuity.
 
@@ -192,6 +204,8 @@ other objects.
 Satellite control:
 
 - Orbit and attitude controllers may be evaluated during internal substeps.
+- Controllers act on belief and observer-owned knowledge corresponding to the
+  start of the interval they command.
 - Mission modules, mission strategy, external intent providers, and mission
   execution can modify or replace controller commands.
 - Integrated mission commands may bypass separate orbit/attitude command

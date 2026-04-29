@@ -10,8 +10,7 @@ from sim.presets.satellites import BASIC_SATELLITE, SatellitePreset
 from sim.presets.thrusters import BASIC_CHEMICAL_BOTTOM_Z, ChemicalPropulsionPreset
 from sim.actuators import AttitudeActuator, CombinedActuator, OrbitalActuator, OrbitalActuatorLimits, ReactionWheelLimits
 from sim.control.orbit.zero_controller import ZeroController
-from sim.core.kernel import SimObject
-from sim.core.models import ObjectConfig, StateBelief, StateTruth
+from sim.core.models import ObjectConfig, SimObject, StateBelief, StateTruth
 from sim.dynamics.model import OrbitalAttitudeDynamics
 from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2
 from sim.dynamics.orbit.propagator import OrbitPropagator
@@ -168,7 +167,7 @@ def build_sim_object_from_presets(
             omega_sigma_rad_s=2e-5,
             rng=rng,
         )
-        estimator = JointStateEstimator(orbit_estimator=orbit_estimator, dt_s=dt_s)
+        estimator = JointStateEstimator(orbit_estimator=orbit_estimator, dt_s=dt_s, inertia_kg_m2=satellite.inertia_kg_m2)
     else:
         sensor = NoisyOwnStateSensor(pos_sigma_km=0.001, vel_sigma_km_s=1e-5, rng=rng)
         estimator = orbit_estimator

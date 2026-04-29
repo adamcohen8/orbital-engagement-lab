@@ -64,8 +64,8 @@ outputs/my_run/master_run_log.json
 `master_run_summary.json` is enough for summary plots. `master_run_log.json` is
 the better source for time-series plots because it contains histories such as
 `time_s`, `truth_by_object`, `belief_by_object`, `applied_thrust_by_object`,
-`applied_torque_by_object`, `knowledge_by_observer`, and controller debug data
-when available.
+`applied_torque_by_object`, `knowledge_by_observer`,
+`ground_station_access`, and controller debug data when available.
 
 ## Single-Run Example: Altitude Over Time
 
@@ -135,6 +135,51 @@ fig.savefig(outdir / "custom_chaser_target_range.png", dpi=160)
 
 This is useful when a built-in figure is close to what you need but not exactly
 right for a review or paper.
+
+## Single-Run Example: Ground-Station Access
+
+When a scenario defines `ground_stations`, the full run log contains
+station/object access histories. This example plots access, elevation, and
+range for one station/object pair:
+
+```python
+import json
+from pathlib import Path
+
+import matplotlib.pyplot as plt
+import numpy as np
+
+outdir = Path("outputs/my_ground_station_run")
+payload = json.loads((outdir / "master_run_log.json").read_text())
+
+time_s = np.asarray(payload["time_s"], dtype=float)
+access_payload = payload["ground_station_access"]["colorado_springs"]["targets"]["target"]
+
+access = np.asarray(access_payload["access"], dtype=bool)
+elevation_deg = np.asarray(access_payload["elevation_deg"], dtype=float)
+range_km = np.asarray(access_payload["range_km"], dtype=float)
+
+fig, axes = plt.subplots(3, 1, figsize=(9, 7), sharex=True)
+axes[0].step(time_s / 60.0, access.astype(int), where="post")
+axes[0].set_ylabel("Access")
+axes[0].set_yticks([0, 1])
+
+axes[1].plot(time_s / 60.0, elevation_deg)
+axes[1].set_ylabel("Elevation (deg)")
+axes[1].grid(True, alpha=0.3)
+
+axes[2].plot(time_s / 60.0, range_km)
+axes[2].set_xlabel("Time (min)")
+axes[2].set_ylabel("Range (km)")
+axes[2].grid(True, alpha=0.3)
+
+fig.tight_layout()
+fig.savefig(outdir / "custom_ground_station_access.png", dpi=160)
+```
+
+For quick review without plotting, inspect `ground_station_access_summary` in
+`master_run_summary.json` or `master_run_log.json`. It includes first/last
+access time, access duration, minimum range, and maximum elevation.
 
 ## Monte Carlo Custom Plots
 

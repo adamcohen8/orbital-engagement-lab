@@ -91,6 +91,7 @@ class ManualGameCommandProvider:
         dt_s: float,
         object_id: str | None = None,
         world_truth: dict[str, StateTruth] | None = None,
+        own_knowledge: dict[str, Any] | None = None,
         **_: Any,
     ) -> dict[str, Any]:
         if object_id is not None and str(object_id) != str(self.controlled_object_id):
@@ -110,9 +111,10 @@ class ManualGameCommandProvider:
             if nrm > 1.0:
                 accel_ric /= nrm
             accel_ric *= float(max(self.max_accel_km_s2, 0.0)) * throttle
-            ref = dict(world_truth or {}).get(str(self.reference_object_id))
-            if ref is not None:
-                c_ir = ric_dcm_ir_from_rv(ref.position_eci_km, ref.velocity_eci_km_s)
+            ref = dict(own_knowledge or {}).get(str(self.reference_object_id))
+            if ref is not None and getattr(ref, "state", np.array([])).size >= 6:
+                ref_state = np.array(ref.state[:6], dtype=float)
+                c_ir = ric_dcm_ir_from_rv(ref_state[:3], ref_state[3:6])
                 thrust_eci = c_ir @ accel_ric
             else:
                 thrust_eci = accel_ric

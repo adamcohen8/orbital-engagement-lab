@@ -148,6 +148,26 @@ Rocket metrics are present only when a rocket object participates. Consumers
 should handle absent or empty rocket metrics for satellite-only scenarios.
 
 
+## Ground Station Access
+
+Ground-station fields:
+
+- `ground_station_access`
+- `ground_station_access_summary`
+- `summary.ground_station_access_summary`
+
+Conventions:
+
+- Ground stations are passive observers configured through scenario YAML.
+- Access histories are station-indexed, then target-indexed.
+- Per-sample histories include `access`, `line_of_sight`, `range_km`,
+  `elevation_deg`, and a diagnostic `reason`.
+- Summaries include access sample count, access fraction, interval-based access
+  duration, first/last access time, minimum range, and maximum elevation.
+- Ground-station access does not modify truth, belief, knowledge, control, or
+  termination behavior.
+
+
 ## Artifacts On Disk
 
 Stats artifacts:
@@ -183,6 +203,7 @@ Output directories:
 - `applied_thrust`
 - `applied_torque`
 - `knowledge`
+- `ground_station_access`
 - `artifacts`
 - `metrics`
 - `snapshot(step_index)`

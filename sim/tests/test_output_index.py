@@ -80,3 +80,22 @@ def test_write_output_index_open_first_uses_saved_artifacts_only(tmp_path: Path)
     assert "Open `master_monte_carlo_summary.json`" not in text
     assert "Open `master_monte_carlo_commander_brief.md`" not in text
     assert "Inspect campaign plots and AI report artifacts when present." in text
+
+
+def test_write_output_index_does_not_recommend_missing_single_run_plots(tmp_path: Path) -> None:
+    index_path = write_output_index(
+        outdir=tmp_path,
+        workflow="single_run",
+        title="quickstart",
+        summary={
+            "scenario_name": "quickstart",
+            "plot_outputs": {},
+            "animation_outputs": {},
+        },
+        artifacts={"summary_json": str(tmp_path / "master_run_summary.json")},
+    )
+
+    text = index_path.read_text(encoding="utf-8")
+
+    assert "Open `master_run_summary.json`" in text
+    assert "Inspect generated plot or animation artifacts listed below." not in text

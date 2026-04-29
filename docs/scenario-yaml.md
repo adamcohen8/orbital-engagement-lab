@@ -33,6 +33,19 @@ outputs:
 The common object sections are `rocket`, `chaser`, and `target`. Disabled
 sections can be omitted or set with `enabled: false`.
 
+Passive ground stations can be defined at the top level. They do not control or
+estimate spacecraft state; they only record access to active scene objects.
+
+```yaml
+ground_stations:
+  - id: "colorado_springs"
+    lat_deg: 38.803
+    lon_deg: -104.526
+    alt_km: 1.9
+    min_elevation_deg: 10.0
+    max_range_km: 2500.0
+```
+
 ## Object Presets
 
 Agents can point to reusable object preset YAML files:
@@ -107,6 +120,60 @@ invalid checksum digits.
 The built-in TLE initializer is dependency-free and converts TLE mean elements
 to an ECI state with a Keplerian/two-body approximation. It does not perform
 full SGP4 propagation or model TLE-specific drag/perturbation terms.
+
+## Ground Stations
+
+Ground stations are passive scene observers. They are useful when you want to
+know when a site can see a rocket, target, or chaser without adding a sensor,
+estimator, controller, or mission behavior to the object itself.
+
+```yaml
+ground_stations:
+  - id: "colorado_springs"
+    lat_deg: 38.803
+    lon_deg: -104.526
+    alt_km: 1.9
+    min_elevation_deg: 10.0
+    max_range_km: 2500.0
+```
+
+Fields:
+
+- `id`: station identifier used in output payloads.
+- `lat_deg`: geodetic latitude in degrees.
+- `lon_deg`: geodetic longitude in degrees.
+- `alt_km`: altitude above the WGS84 ellipsoid in kilometers.
+- `min_elevation_deg`: minimum elevation angle required for access.
+- `max_range_km`: optional maximum slant range for access.
+- `enabled`: optional boolean, default `true`.
+
+You can also use mapping form when station IDs are more readable as keys:
+
+```yaml
+ground_stations:
+  colorado_springs:
+    lat_deg: 38.803
+    lon_deg: -104.526
+    alt_km: 1.9
+    min_elevation_deg: 10.0
+```
+
+Access is true when all configured checks pass:
+
+- geometric line of sight from the station to the object,
+- elevation at least `min_elevation_deg`,
+- range no more than `max_range_km`, when a maximum range is configured.
+
+Single-run payloads include:
+
+- `ground_station_access`: per-sample station/object histories with `access`,
+  `line_of_sight`, `range_km`, `elevation_deg`, and diagnostic `reason`.
+- `ground_station_access_summary`: access sample counts, access fraction,
+  interval-based access duration, first/last access time, minimum range, and
+  maximum elevation.
+
+The same summary is also copied into `summary.ground_station_access_summary`
+and appears in `index.md` key results when stations are configured.
 
 ## Algorithm Pointers
 

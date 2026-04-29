@@ -19,10 +19,12 @@ class AttitudeEKFEstimator(Estimator):
     def update(self, belief: StateBelief, measurement: Measurement | None, t_s: float) -> StateBelief:
         x_prev = belief.state
         p_prev = belief.covariance
+        dt_s = max(float(t_s) - float(belief.last_update_t_s), 0.0)
 
-        x_pred = self._propagate_state(x_prev)
-        f = self._numerical_jacobian(x_prev)
-        q = np.diag(self.process_noise_diag)
+        x_pred = self._propagate_state(x_prev, dt_s=dt_s)
+        f = self._numerical_jacobian(x_prev, dt_s=dt_s)
+        q_scale = dt_s / self.dt_s if self.dt_s > 0.0 else 1.0
+        q = np.diag(self.process_noise_diag) * max(q_scale, 0.0)
         p_pred = f @ p_prev @ f.T + q
 
         if measurement is None:
@@ -52,25 +54,26 @@ class AttitudeEKFEstimator(Estimator):
         p_upd = 0.5 * (p_upd + p_upd.T)
         return StateBelief(state=x_upd, covariance=p_upd, last_update_t_s=t_s)
 
-    def _propagate_state(self, x: np.ndarray) -> np.ndarray:
+    def _propagate_state(self, x: np.ndarray, *, dt_s: float | None = None) -> np.ndarray:
+        step_dt_s = self.dt_s if dt_s is None else float(dt_s)
         q = normalize_quaternion(x[:4])
         w = x[4:7]
 
         q_dot = 0.5 * (omega_matrix(w) @ q)
-        q_next = normalize_quaternion(q + self.dt_s * q_dot)
+        q_next = normalize_quaternion(q + step_dt_s * q_dot)
 
         iw = self.inertia_kg_m2 @ w
         w_dot = np.linalg.solve(self.inertia_kg_m2, -np.cross(w, iw))
-        w_next = w + self.dt_s * w_dot
+        w_next = w + step_dt_s * w_dot
         return np.hstack((q_next, w_next))
 
-    def _numerical_jacobian(self, x: np.ndarray) -> np.ndarray:
+    def _numerical_jacobian(self, x: np.ndarray, *, dt_s: float | None = None) -> np.ndarray:
         eps = 1e-6
-        base = self._propagate_state(x)
+        base = self._propagate_state(x, dt_s=dt_s)
         j = np.zeros((7, 7))
         for i in range(7):
             xp = x.copy()
             xp[i] += eps
-            yp = self._propagate_state(xp)
+            yp = self._propagate_state(xp, dt_s=dt_s)
             j[:, i] = (yp - base) / eps
         return j

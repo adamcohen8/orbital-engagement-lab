@@ -56,6 +56,7 @@ from sim.config import (
     AgentSection,
     AlgorithmPointer,
     BridgePointer,
+    GroundStationSection,
     MonteCarloSection,
     MonteCarloVariation,
     OutputsSection,
@@ -78,8 +79,7 @@ from sim.config import (
     scenario_config_from_dict,
     validate_scenario_plugins,
 )
-from sim.core.kernel import SimObject, SimulationKernel
-from sim.core.models import Command, ObjectConfig, SimConfig, SimLog, StateBelief, StateTruth
+from sim.core.models import Command, ObjectConfig, SimConfig, SimLog, SimObject, StateBelief, StateTruth
 from sim.dynamics.attitude import DisturbanceTorqueConfig, DisturbanceTorqueModel
 from sim.dynamics.model import OrbitalAttitudeDynamics
 from sim.dynamics.orbit import (
@@ -279,7 +279,6 @@ __all__ = [
     "SurrogateSnapECIController",
     "SurrogateSnapRICController",
     "SimObject",
-    "SimulationKernel",
     "Command",
     "ObjectConfig",
     "SimConfig",
@@ -400,9 +399,6 @@ __all__ = [
     "animate_trajectory_frame",
     "animate_ground_track",
     "animate_multi_ground_track",
-    "run_free_tumble_one_orbit",
-    "run_free_tumble_one_orbit_ric",
-    "run_full_stack_demo",
     "ASATPhasedScenarioConfig",
     "AgentStrategyConfig",
     "KnowledgeGateConfig",
@@ -429,9 +425,6 @@ _LAZY_IMPORTS = {
     "KnowledgeGateConfig": ("sim.scenarios", "KnowledgeGateConfig"),
     "MonteCarloConfig": ("sim.scenarios", "MonteCarloConfig"),
     "run_asat_phased_engagement": ("sim.scenarios", "run_asat_phased_engagement"),
-    "run_free_tumble_one_orbit": ("sim.scenarios", "run_free_tumble_one_orbit"),
-    "run_free_tumble_one_orbit_ric": ("sim.scenarios", "run_free_tumble_one_orbit_ric"),
-    "run_full_stack_demo": ("sim.scenarios", "run_full_stack_demo"),
     "run_monte_carlo": ("sim.scenarios", "run_monte_carlo"),
     "plot_ground_track": ("sim.utils", "plot_ground_track"),
     "plot_quaternion_components": ("sim.utils", "plot_quaternion_components"),

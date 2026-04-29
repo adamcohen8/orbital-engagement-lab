@@ -7,7 +7,7 @@ import numpy as np
 import yaml
 
 from sim.api import SimulationConfig, SimulationSession
-from sim.core.models import StateTruth
+from sim.core.models import StateBelief, StateTruth
 from sim.game.defensive_target import DefensiveTargetIntentProvider
 from sim.game.launcher import discover_game_scenarios
 from sim.game.manual import KeyboardCommandState, ManualGameCommandProvider
@@ -33,6 +33,10 @@ from sim.game.training import (
     nmt_velocity_error_km_s,
 )
 from sim.utils.frames import ric_rect_state_to_eci
+
+
+def _knowledge_from_state6(state6: np.ndarray) -> StateBelief:
+    return StateBelief(state=np.array(state6, dtype=float).reshape(6), covariance=np.eye(6), last_update_t_s=0.0)
 
 
 def _game_config(tmp_path: Path) -> dict:
@@ -108,8 +112,8 @@ def test_defensive_target_provider_pulses_on_unsafe_closure() -> None:
         t_s=0.0,
     )
 
-    active = provider(truth=target, world_truth={"chaser": close_chaser}, t_s=10.0)
-    inactive = provider(truth=target, world_truth={"chaser": far_chaser}, t_s=10.0)
+    active = provider(truth=target, own_knowledge={"chaser": _knowledge_from_state6(close_chaser_state)}, t_s=10.0)
+    inactive = provider(truth=target, own_knowledge={"chaser": _knowledge_from_state6(far_chaser_state)}, t_s=10.0)
 
     assert np.isclose(np.linalg.norm(active["thrust_eci_km_s2"]), 7.5e-6)
     assert active["command_mode_flags"]["target_defensive"] is True
@@ -144,9 +148,10 @@ def test_defensive_target_provider_caps_delta_v_budget() -> None:
         t_s=0.0,
     )
 
-    first = provider(truth=target, world_truth={"chaser": chaser}, t_s=0.0)
-    second = provider(truth=target, world_truth={"chaser": chaser}, t_s=10.0)
-    third = provider(truth=target, world_truth={"chaser": chaser}, t_s=20.0)
+    own_knowledge = {"chaser": _knowledge_from_state6(chaser_state)}
+    first = provider(truth=target, own_knowledge=own_knowledge, t_s=0.0)
+    second = provider(truth=target, own_knowledge=own_knowledge, t_s=10.0)
+    third = provider(truth=target, own_knowledge=own_knowledge, t_s=20.0)
 
     assert np.isclose(np.linalg.norm(first["thrust_eci_km_s2"]), 1.0e-3)
     assert np.isclose(provider.used_delta_v_m_s, 5.0)
@@ -182,8 +187,9 @@ def test_defensive_target_provider_charges_first_timed_pulse() -> None:
         t_s=0.0,
     )
 
-    first = provider(truth=target, world_truth={"chaser": chaser}, t_s=10.0, dt_s=10.0)
-    second = provider(truth=target, world_truth={"chaser": chaser}, t_s=20.0, dt_s=10.0)
+    own_knowledge = {"chaser": _knowledge_from_state6(chaser_state)}
+    first = provider(truth=target, own_knowledge=own_knowledge, t_s=10.0, dt_s=10.0)
+    second = provider(truth=target, own_knowledge=own_knowledge, t_s=20.0, dt_s=10.0)
 
     assert np.isclose(np.linalg.norm(first["thrust_eci_km_s2"]), 5.0e-4)
     assert np.isclose(provider.used_delta_v_m_s, 5.0)
@@ -296,7 +302,13 @@ def test_ric_translation_provider_commands_direct_ric_thrust() -> None:
         t_s=0.0,
     )
 
-    out = provider(truth=target, t_s=0.0, dt_s=1.0, object_id="chaser", world_truth={"target": target})
+    out = provider(
+        truth=target,
+        t_s=0.0,
+        dt_s=1.0,
+        object_id="chaser",
+        own_knowledge={"target": _knowledge_from_state6(np.hstack((target.position_eci_km, target.velocity_eci_km_s)))},
+    )
 
     assert out["command_mode_flags"]["player_control_mode"] == "ric_translation"
     assert np.allclose(out["thrust_eci_km_s2"], np.array([2.0e-5, 0.0, 0.0]), atol=1e-12)

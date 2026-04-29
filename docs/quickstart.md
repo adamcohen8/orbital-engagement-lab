@@ -14,38 +14,70 @@ python -m pip install -U pip
 python -m pip install ".[dev]"
 ```
 
-## Validate A Scenario
+## Check Your Environment
 
 ```bash
-python run_simulation.py --config configs/automation_smoke.yaml --validate-only
+python run_simulation.py --doctor
+```
+
+Warnings for optional plotting, GUI, or game packages do not block the
+headless quickstart path.
+
+## Validate The Five-Minute Scenario
+
+```bash
+python run_simulation.py --quickstart --validate-only
 ```
 
 Validation loads the YAML, checks timing and plugin pointers, and confirms the
 scenario is structurally ready to run.
 
-## Run A Scenario
+## Run The Scenario
 
 ```bash
-python run_simulation.py --config configs/automation_smoke.yaml
+python run_simulation.py --quickstart
 ```
 
-The smoke scenario is intentionally small and headless. It propagates one target
-spacecraft with simple two-body orbit dynamics and attitude dynamics, then writes
-summary artifacts under `outputs/automation_smoke/`. Open
-`outputs/automation_smoke/index.md` first for the run summary, review order, and
-artifact inventory.
+The quickstart scenario is intentionally small and headless. It propagates a
+two-satellite rendezvous setup with public controllers, sensing, and EKF
+knowledge updates, then writes summary artifacts under
+`outputs/quickstart_5min/`. Open `outputs/quickstart_5min/index.md` first for
+the run summary, review order, and artifact inventory.
+
+Plots are disabled in this first path so local Matplotlib/NumPy installation
+issues cannot block the first successful run.
+
+To open the output folder automatically after the run:
+
+```bash
+python run_simulation.py --quickstart --open-output
+```
+
+For a guided walkthrough, see [First Five Minutes](first-five-minutes.md).
 
 ## Use The API
 
 ```python
 from sim import SimulationConfig, SimulationSession
 
-cfg = SimulationConfig.from_yaml("configs/automation_smoke.yaml")
+cfg = SimulationConfig.from_yaml("configs/quickstart_5min.yaml")
 session = SimulationSession.from_config(cfg)
 result = session.run()
 
 print(result.summary)
 ```
+
+If your scenario defines `ground_stations`, the same result exposes passive
+access histories:
+
+```python
+for station_id, station_payload in result.ground_station_access.items():
+    for object_id, access in station_payload["targets"].items():
+        print(station_id, object_id, access["access"])
+```
+
+Access is computed from line of sight, minimum elevation, and optional maximum
+range. See [Scenario YAML](scenario-yaml.md) for the ground-station fields.
 
 ## Next Scenarios
 

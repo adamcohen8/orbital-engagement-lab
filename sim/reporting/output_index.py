@@ -85,6 +85,18 @@ def _artifact_basename(artifacts: dict[str, Any], key: str, fallback: str) -> st
     return fallback
 
 
+def _has_artifact_group(artifacts: dict[str, Any], *keys: str) -> bool:
+    for key in keys:
+        value = artifacts.get(key)
+        if isinstance(value, dict) and any(str(child or "").strip() for child in value.values()):
+            return True
+        if isinstance(value, list) and any(str(child or "").strip() for child in value):
+            return True
+        if isinstance(value, (str, os.PathLike)) and str(value).strip():
+            return True
+    return False
+
+
 def _default_next_steps(*, workflow: str, artifacts: dict[str, Any]) -> list[str]:
     steps: list[str] = []
     if workflow == "single_run":
@@ -94,7 +106,8 @@ def _default_next_steps(*, workflow: str, artifacts: dict[str, Any]) -> list[str
         if "run_log_json" in artifacts:
             name = _artifact_basename(artifacts, "run_log_json", "master_run_log.json")
             steps.append(f"Open `{name}` for saved time histories and custom plotting data.")
-        steps.append("Inspect generated plot or animation artifacts listed below.")
+        if _has_artifact_group(artifacts, "plots", "animations"):
+            steps.append("Inspect generated plot or animation artifacts listed below.")
     elif workflow == "monte_carlo":
         if "summary_json" in artifacts:
             name = _artifact_basename(artifacts, "summary_json", "master_monte_carlo_summary.json")
@@ -124,7 +137,7 @@ def _single_run_metrics(summary: dict[str, Any]) -> list[str]:
             total_dv += float(dict(row or {}).get("total_dv_m_s", 0.0))
         except (TypeError, ValueError):
             pass
-    return [
+    lines = [
         f"- Samples: `{_scalar(summary.get('samples'))}`",
         f"- Duration: `{_scalar(summary.get('duration_s'))} s`",
         f"- Objects: `{_scalar(', '.join(list(summary.get('objects', []) or [])))}`",
@@ -134,6 +147,21 @@ def _single_run_metrics(summary: dict[str, Any]) -> list[str]:
         f"- Plots: `{len(dict(summary.get('plot_outputs', {}) or {}))}`",
         f"- Animations: `{len(dict(summary.get('animation_outputs', {}) or {}))}`",
     ]
+    ground_access = dict(summary.get("ground_station_access_summary", {}) or {})
+    if ground_access:
+        access_pairs = 0
+        access_duration = 0.0
+        for by_target in ground_access.values():
+            for row in dict(by_target or {}).values():
+                access_pairs += 1
+                try:
+                    access_duration += float(dict(row or {}).get("access_duration_s", 0.0))
+                except (TypeError, ValueError):
+                    pass
+        lines.append(f"- Ground stations: `{len(ground_access)}`")
+        lines.append(f"- Ground-station access pairs: `{access_pairs}`")
+        lines.append(f"- Ground-station access duration sum: `{access_duration:.4g} s`")
+    return lines
 
 
 def _monte_carlo_metrics(payload: dict[str, Any]) -> list[str]:

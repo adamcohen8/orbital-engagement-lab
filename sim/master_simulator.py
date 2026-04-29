@@ -945,6 +945,7 @@ def _create_satellite_runtime(
         estimator = JointStateEstimator(
             orbit_estimator=orbit_estimator,
             dt_s=float(cfg.simulator.dt_s),
+            inertia_kg_m2=inertia_kg_m2,
         )
     else:
         belief = StateBelief(
@@ -1287,39 +1288,19 @@ def _run_mission_modules(
     orb_belief: StateBelief | None = None,
     att_belief: StateBelief | None = None,
 ) -> dict[str, Any]:
-    if not agent.mission_modules:
-        return {}
-    own_knowledge = agent.knowledge_base.snapshot() if agent.knowledge_base is not None else {}
-    truth = world_truth.get(agent.object_id)
-    if truth is None:
-        return {}
-    out: dict[str, Any] = {}
-    for m in agent.mission_modules:
-        if not hasattr(m, "update"):
-            continue
-        ret = _call_with_compat_kwargs(
-            m.update,
-            primary_kwargs={
-                "object_id": agent.object_id,
-                "truth": truth,
-                "belief": agent.belief,
-                "own_knowledge": own_knowledge,
-                "world_truth": world_truth,
-                "env": env,
-                "t_s": t_s,
-                "dt_s": dt_s,
-                "orbit_controller": orbit_controller,
-                "attitude_controller": attitude_controller,
-                "orb_belief": orb_belief,
-                "att_belief": att_belief,
-                "rocket_state": agent.rocket_state,
-                "rocket_vehicle_cfg": (agent.rocket_sim.vehicle_cfg if agent.rocket_sim is not None else None),
-            },
-            fallback_kwargs={"truth": truth, "t_s": t_s},
-        )
-        if isinstance(ret, dict):
-            out.update(ret)
-    return out
+    from sim.runtime_support import _run_mission_modules as _impl
+
+    return _impl(
+        agent=agent,
+        world_truth=world_truth,
+        t_s=t_s,
+        dt_s=dt_s,
+        env=env,
+        orbit_controller=orbit_controller,
+        attitude_controller=attitude_controller,
+        orb_belief=orb_belief,
+        att_belief=att_belief,
+    )
 
 
 def _run_mission_strategy(
@@ -1334,43 +1315,19 @@ def _run_mission_strategy(
     orb_belief: StateBelief | None = None,
     att_belief: StateBelief | None = None,
 ) -> dict[str, Any]:
-    strategy = agent.mission_strategy
-    if strategy is None:
-        return {}
-    own_knowledge = agent.knowledge_base.snapshot() if agent.knowledge_base is not None else {}
-    truth = world_truth.get(agent.object_id)
-    if truth is None:
-        return {}
-    for method_name in ("update", "plan", "decide"):
-        if not hasattr(strategy, method_name):
-            continue
-        method = getattr(strategy, method_name)
-        ret = _call_with_compat_kwargs(
-            method,
-            primary_kwargs={
-                "object_id": agent.object_id,
-                "truth": truth,
-                "belief": agent.belief,
-                "own_knowledge": own_knowledge,
-                "world_truth": world_truth,
-                "env": env,
-                "t_s": t_s,
-                "dt_s": dt_s,
-                "orbit_controller": orbit_controller,
-                "attitude_controller": attitude_controller,
-                "orb_belief": orb_belief,
-                "att_belief": att_belief,
-                "rocket_state": agent.rocket_state,
-                "rocket_vehicle_cfg": (agent.rocket_sim.vehicle_cfg if agent.rocket_sim is not None else None),
-                "dry_mass_kg": agent.dry_mass_kg,
-                "fuel_capacity_kg": agent.fuel_capacity_kg,
-            },
-            fallback_kwargs={"truth": truth, "t_s": t_s},
-        )
-        if isinstance(ret, dict):
-            return ret
-        return {}
-    return {}
+    from sim.runtime_support import _run_mission_strategy as _impl
+
+    return _impl(
+        agent=agent,
+        world_truth=world_truth,
+        t_s=t_s,
+        dt_s=dt_s,
+        env=env,
+        orbit_controller=orbit_controller,
+        attitude_controller=attitude_controller,
+        orb_belief=orb_belief,
+        att_belief=att_belief,
+    )
 
 
 def _run_mission_execution(
@@ -1386,46 +1343,20 @@ def _run_mission_execution(
     orb_belief: StateBelief | None = None,
     att_belief: StateBelief | None = None,
 ) -> dict[str, Any]:
-    execution = intent.get("_mission_execution_override", agent.mission_execution)
-    if execution is None:
-        return {}
-    own_knowledge = agent.knowledge_base.snapshot() if agent.knowledge_base is not None else {}
-    truth = world_truth.get(agent.object_id)
-    if truth is None:
-        return {}
-    for method_name in ("update", "execute", "act"):
-        if not hasattr(execution, method_name):
-            continue
-        method = getattr(execution, method_name)
-        ret = _call_with_compat_kwargs(
-            method,
-            primary_kwargs={
-                "intent": dict(intent or {}),
-                "object_id": agent.object_id,
-                "truth": truth,
-                "belief": agent.belief,
-                "own_knowledge": own_knowledge,
-                "world_truth": world_truth,
-                "env": env,
-                "t_s": t_s,
-                "dt_s": dt_s,
-                "orbit_controller": orbit_controller,
-                "attitude_controller": attitude_controller,
-                "orb_belief": orb_belief,
-                "att_belief": att_belief,
-                "rocket_state": agent.rocket_state,
-                "rocket_vehicle_cfg": (agent.rocket_sim.vehicle_cfg if agent.rocket_sim is not None else None),
-                "dry_mass_kg": agent.dry_mass_kg,
-                "fuel_capacity_kg": agent.fuel_capacity_kg,
-                "orbital_isp_s": agent.orbital_isp_s,
-                "orbit_command_period_s": float(env.get("orbit_command_period_s", dt_s)),
-            },
-            fallback_kwargs={"intent": dict(intent or {}), "truth": truth, "t_s": t_s},
-        )
-        if isinstance(ret, dict):
-            return ret
-        return {}
-    return {}
+    from sim.runtime_support import _run_mission_execution as _impl
+
+    return _impl(
+        agent=agent,
+        intent=intent,
+        world_truth=world_truth,
+        t_s=t_s,
+        dt_s=dt_s,
+        env=env,
+        orbit_controller=orbit_controller,
+        attitude_controller=attitude_controller,
+        orb_belief=orb_belief,
+        att_belief=att_belief,
+    )
 
 
 def _fmt_float(x: float, digits: int = 3) -> str:

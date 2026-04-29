@@ -24,8 +24,11 @@ jobs:
       - name: Run public tests
         run: python -m pytest -q sim/tests
 
-      - name: Validate smoke scenario
-        run: python run_simulation.py --config configs/automation_smoke.yaml --validate-only
+      - name: Check quickstart readiness
+        run: python run_simulation.py --doctor
+
+      - name: Validate five-minute quickstart scenario
+        run: python run_simulation.py --quickstart --validate-only
 
       - name: Validate curated public example configs
         run: |
@@ -33,5 +36,10 @@ jobs:
           python run_simulation.py --config examples/configs/public_orbit_environment_stack.yaml --validate-only
           python run_simulation.py --config examples/configs/public_manual_engagement.yaml --validate-only
 
-      - name: Run representative public example config headlessly
-        run: python run_simulation.py --config examples/configs/public_rendezvous_closed_loop.yaml
+      - name: Run five-minute quickstart scenario headlessly
+        run: python run_simulation.py --quickstart
+
+      - name: Check quickstart start-here artifacts
+        run: |
+          test -f outputs/quickstart_5min/index.md
+          test -f outputs/quickstart_5min/master_run_summary.json
