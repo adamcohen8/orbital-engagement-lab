@@ -30,6 +30,17 @@ chaser:
       design_dt_s: 1.0
       ric_curv_state_slice: [0, 6]
       chief_eci_state_slice: [6, 12]
+  knowledge:
+    refresh_rate_s: 1.0
+    targets: ["target"]
+    conditions:
+      require_line_of_sight: false
+      max_range_km: 10000.0
+    sensor_error:
+      pos_sigma_km: [0.0, 0.0, 0.0]
+      vel_sigma_km_s: [0.0, 0.0, 0.0]
+    estimation:
+      type: "ekf"
 
 target:
   enabled: true

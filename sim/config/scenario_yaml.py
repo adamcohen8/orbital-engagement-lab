@@ -46,6 +46,17 @@ class AgentSection:
 
 
 @dataclass(frozen=True)
+class GroundStationSection:
+    id: str
+    lat_deg: float
+    lon_deg: float
+    alt_km: float = 0.0
+    min_elevation_deg: float = 0.0
+    max_range_km: float | None = None
+    enabled: bool = True
+
+
+@dataclass(frozen=True)
 class SimulatorSection:
     scenario_type: str = "auto"
     duration_s: float = 3600.0
@@ -148,6 +159,7 @@ class SimulationScenarioConfig:
     rocket: AgentSection = field(default_factory=lambda: AgentSection(enabled=False, role="rocket"))
     chaser: AgentSection = field(default_factory=lambda: AgentSection(enabled=False, role="chaser"))
     target: AgentSection = field(default_factory=lambda: AgentSection(enabled=True, role="target"))
+    ground_stations: list[GroundStationSection] = field(default_factory=list)
     simulator: SimulatorSection = field(default_factory=SimulatorSection)
     outputs: OutputsSection = field(default_factory=OutputsSection)
     monte_carlo: MonteCarloSection = field(default_factory=MonteCarloSection)
@@ -473,6 +485,61 @@ def _parse_agent_section(value: Any, role: str) -> AgentSection:
     )
 
 
+def _parse_ground_station_section(value: Any, index: int) -> GroundStationSection:
+    d = _as_dict(value, f"ground_stations[{index}]")
+    raw_id = d.get("id", d.get("name", f"ground_station_{index + 1}"))
+    station_id = str(raw_id or "").strip()
+    if not station_id:
+        raise ValueError(f"ground_stations[{index}].id must be non-empty.")
+    if "lat_deg" not in d:
+        raise ValueError(f"ground_stations[{index}].lat_deg is required.")
+    if "lon_deg" not in d:
+        raise ValueError(f"ground_stations[{index}].lon_deg is required.")
+    lat_deg = _parse_float(d.get("lat_deg"), f"ground_stations[{index}].lat_deg")
+    lon_deg = _parse_float(d.get("lon_deg"), f"ground_stations[{index}].lon_deg")
+    alt_km = _parse_float(d.get("alt_km", d.get("altitude_km", 0.0)), f"ground_stations[{index}].alt_km")
+    min_elevation_deg = _parse_float(
+        d.get("min_elevation_deg", 0.0),
+        f"ground_stations[{index}].min_elevation_deg",
+    )
+    max_range_km = _parse_optional_float(d.get("max_range_km"), f"ground_stations[{index}].max_range_km")
+    if not (-90.0 <= lat_deg <= 90.0):
+        raise ValueError(f"ground_stations[{index}].lat_deg must be between -90 and 90.")
+    if max_range_km is not None and max_range_km <= 0.0:
+        raise ValueError(f"ground_stations[{index}].max_range_km must be positive when provided.")
+    return GroundStationSection(
+        id=station_id,
+        lat_deg=lat_deg,
+        lon_deg=lon_deg,
+        alt_km=alt_km,
+        min_elevation_deg=min_elevation_deg,
+        max_range_km=max_range_km,
+        enabled=_parse_bool(d.get("enabled", True), f"ground_stations[{index}].enabled"),
+    )
+
+
+def _parse_ground_stations_section(value: Any) -> list[GroundStationSection]:
+    if value is None:
+        return []
+    if isinstance(value, dict):
+        items = []
+        for key, child in value.items():
+            child_dict = _as_dict(child, f"ground_stations.{key}")
+            child_dict.setdefault("id", str(key))
+            items.append(child_dict)
+    elif isinstance(value, list):
+        items = list(value)
+    else:
+        raise ValueError("ground_stations must be a list or mapping.")
+    stations = [_parse_ground_station_section(item, idx) for idx, item in enumerate(items)]
+    seen: set[str] = set()
+    for station in stations:
+        if station.id in seen:
+            raise ValueError(f"ground_stations contains duplicate id: {station.id}")
+        seen.add(station.id)
+    return stations
+
+
 def _parse_simulator_section(value: Any) -> SimulatorSection:
     d = _as_dict(value, "simulator")
     plugin_validation = {"strict": True}
@@ -735,6 +802,7 @@ def scenario_config_from_dict(data: dict[str, Any], source_path: str | Path | No
         rocket=_parse_agent_section(root.get("rocket"), role="rocket"),
         chaser=_parse_agent_section(root.get("chaser"), role="chaser"),
         target=_parse_agent_section(root.get("target"), role="target"),
+        ground_stations=_parse_ground_stations_section(root.get("ground_stations")),
         simulator=_parse_simulator_section(root.get("simulator")),
         outputs=_parse_outputs_section(root.get("outputs")),
         monte_carlo=normalized_mc,

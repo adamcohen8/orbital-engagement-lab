@@ -3,8 +3,8 @@
 [![CI](https://github.com/adamcohen8/orbital-engagement-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/adamcohen8/orbital-engagement-lab/actions/workflows/ci.yml)
 
 Open-core spacecraft simulation platform for closed-loop rendezvous, proximity
-operations, attitude control, sensing, estimation, plotting, and mission
-prototyping.
+operations, attitude control, sensing, estimation, ground-station access,
+plotting, and mission prototyping.
 
 Orbital Engagement Lab exists to make it easier to prototype spacecraft behavior
 as a full closed loop: orbit dynamics, attitude dynamics, sensors, estimators,
@@ -32,36 +32,53 @@ python -m pip install -U pip
 python -m pip install ".[dev]"
 ```
 
-Validate the bundled smoke scenario:
+Check the environment:
 
 ```bash
-python run_simulation.py --config configs/automation_smoke.yaml --validate-only
+python run_simulation.py --doctor
+```
+
+Validate the five-minute quickstart scenario:
+
+```bash
+python run_simulation.py --quickstart --validate-only
 ```
 
 Run it:
 
 ```bash
-python run_simulation.py --config configs/automation_smoke.yaml
+python run_simulation.py --quickstart
 ```
 
 Expected result: the run completes headlessly and writes summary artifacts under
-`outputs/automation_smoke/`.
+`outputs/quickstart_5min/`. Open `outputs/quickstart_5min/index.md` first.
+Plots are disabled on this first path so local Matplotlib/NumPy installation
+issues cannot block the first successful run.
 
-Generate a public plotting demo:
+To open the output folder automatically after the run:
+
+```bash
+python run_simulation.py --quickstart --open-output
+```
+
+For a guided walkthrough, see [First Five Minutes](docs/first-five-minutes.md).
+
+Generate a longer public plotting demo:
 
 ```bash
 python run_simulation.py --config configs/plotting_rendezvous_demo.yaml
 ```
 
-Expected result: the run writes dashboard, rendezvous, control, estimation, and
-sensor-access plots under `outputs/plotting_rendezvous_demo/`.
+Expected result: the 6000-second rendezvous run writes dashboard, rendezvous,
+control, estimation, sensor-access, and ground-track plots under
+`outputs/plotting_rendezvous_demo/`.
 
 Use the API:
 
 ```python
 from sim import SimulationConfig, SimulationSession
 
-cfg = SimulationConfig.from_yaml("configs/automation_smoke.yaml")
+cfg = SimulationConfig.from_yaml("configs/quickstart_5min.yaml")
 session = SimulationSession.from_config(cfg)
 result = session.run()
 
@@ -113,12 +130,13 @@ provide. HPOP/GGM03 validation data is not bundled in the public core, so
 - two-body, perturbation, atmosphere, SRP, third-body, and spherical harmonics support
 - actuator limits, saturation, lag, and mass depletion
 - relative sensing and object-knowledge primitives
+- passive ground-station access histories using line of sight, elevation, and range
 - orbit and attitude estimators
 - orbit and attitude controller interfaces and reference controllers
 - YAML-backed scenario configuration with reusable object presets
 - Python API, CLI, GUI entrypoints, and curated config examples
 - Pygame RPO trainer game mode with bundled training levels
-- single-run dashboards, trajectory plots, estimation plots, and sensor-access plots
+- single-run dashboards, trajectory plots, estimation plots, sensor-access plots, and access summaries
 - machine-learning environment helpers
 - product maturity roadmap and public/private boundary documentation
 
@@ -158,6 +176,11 @@ Curated examples are YAML scenario configs under `examples/configs/`:
 - `examples/configs/public_rendezvous_closed_loop.yaml` for closed-loop rendezvous, pointing, sensing, estimation, and plots
 - `examples/configs/public_orbit_environment_stack.yaml` for deterministic high-fidelity orbit/environment propagation
 - `examples/configs/public_manual_engagement.yaml` for manual/game scenario wiring
+
+Ground stations are configured in scenario YAML with a top-level
+`ground_stations` list or mapping. Single-run outputs include
+`ground_station_access` and `ground_station_access_summary` so users can inspect
+when each site has access to each active object.
 
 The public examples are intentionally config-first. Experimental Python demos
 and local-artifact-dependent workflows are not part of the supported public

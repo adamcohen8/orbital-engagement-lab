@@ -1,14 +1,15 @@
 # Plot Gallery
 
-These images are generated from the public-safe plotting rendezvous demo:
+These images are generated from the public-safe 6000-second plotting rendezvous
+demo:
 
 ```bash
 python run_simulation.py --config configs/plotting_rendezvous_demo.yaml
 ```
 
 The demo writes run artifacts under `outputs/plotting_rendezvous_demo/`. The
-gallery images below are checked-in snapshots so visitors can see the plotting
-surface without running the simulator first.
+gallery images below are checked-in snapshots from that run so visitors can see
+the plotting surface without running the simulator first.
 
 ## Run Dashboard
 

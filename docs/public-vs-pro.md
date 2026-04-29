@@ -18,6 +18,7 @@ The public core includes:
 - orbit and attitude dynamics
 - reference orbit and attitude controllers
 - sensing and estimation primitives
+- passive ground-station access tracking
 - actuator models and mass depletion
 - YAML scenario loading
 - reusable object preset YAML files

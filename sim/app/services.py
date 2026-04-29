@@ -243,7 +243,6 @@ PARAMETER_FORM_SCHEMAS: dict[str, list[dict[str, Any]]] = {
         {"key": "axis_mode", "label": "Axis Mode", "kind": "choice", "options": ["+R", "-R", "+I", "-I", "+C", "-C"]},
         {"key": "burn_accel_km_s2", "label": "Burn Accel (km/s^2)", "kind": "float"},
         {"key": "require_finite_knowledge", "label": "Require Finite Knowledge", "kind": "bool"},
-        {"key": "allow_truth_fallback", "label": "Allow Truth Fallback", "kind": "bool"},
         {"key": "align_to_thrust", "label": "Align To Thrust", "kind": "bool"},
     ],
     "SafeHoldMissionStrategy": [
@@ -710,6 +709,8 @@ def run_config_via_api(
             lines.append(f"Duration: {summary.get('duration_s')} s")
         if "terminated_early" in summary:
             lines.append(f"Terminated Early: {summary.get('terminated_early')}")
+        if summary.get("output_index_md"):
+            lines.append(f"Start Here: {summary.get('output_index_md')}")
     return RunResult(
         command=["api", str(path)],
         returncode=0,

@@ -47,6 +47,7 @@ Recognized top-level sections:
 - `rocket`
 - `chaser`
 - `target`
+- `ground_stations`
 - `simulator`
 - `outputs`
 - `monte_carlo`
@@ -58,6 +59,17 @@ Object sections:
 - Disabled objects may be omitted or set with `enabled: false`.
 - Enabled object sections participate in runtime creation, validation, and
   output histories.
+
+Ground station sections:
+
+- `ground_stations` may be omitted, a list of station mappings, or a mapping
+  from station ID to station mapping.
+- Ground stations are passive scene observers. They do not participate in
+  dynamics, control, estimation, or knowledge ownership.
+- Each enabled station requires `lat_deg` and `lon_deg`, and may provide
+  `alt_km`, `min_elevation_deg`, and `max_range_km`.
+- Access is defined as geometric line of sight, elevation at least
+  `min_elevation_deg`, and range no greater than `max_range_km` when configured.
 
 Analysis sections:
 

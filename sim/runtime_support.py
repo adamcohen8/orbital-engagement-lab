@@ -207,6 +207,49 @@ def _truth_state6(truth: StateTruth, out: np.ndarray | None = None) -> np.ndarra
     return state
 
 
+def _decision_truth_from_belief(agent: "AgentRuntime") -> StateTruth | None:
+    belief = agent.belief
+    if belief is None or belief.state.size < 6:
+        return None
+    state = np.array(belief.state, dtype=float).reshape(-1)
+    q = np.array([1.0, 0.0, 0.0, 0.0], dtype=float)
+    w = np.zeros(3, dtype=float)
+    mass_kg = 0.0
+    if state.size >= 13:
+        q = np.array(state[6:10], dtype=float)
+        w = np.array(state[10:13], dtype=float)
+    return StateTruth(
+        position_eci_km=np.array(state[:3], dtype=float),
+        velocity_eci_km_s=np.array(state[3:6], dtype=float),
+        attitude_quat_bn=q,
+        angular_rate_body_rad_s=w,
+        mass_kg=mass_kg,
+        t_s=float(belief.last_update_t_s),
+    )
+
+
+def _truth_from_state6(state6: np.ndarray, *, t_s: float, fallback_truth: StateTruth | None = None) -> StateTruth:
+    state = np.array(state6, dtype=float).reshape(-1)
+    if state.size < 6:
+        raise ValueError("state6 must contain at least 6 elements.")
+    return StateTruth(
+        position_eci_km=np.array(state[:3], dtype=float),
+        velocity_eci_km_s=np.array(state[3:6], dtype=float),
+        attitude_quat_bn=(
+            np.array([1.0, 0.0, 0.0, 0.0], dtype=float)
+            if fallback_truth is None
+            else np.array(fallback_truth.attitude_quat_bn, dtype=float)
+        ),
+        angular_rate_body_rad_s=(
+            np.zeros(3, dtype=float)
+            if fallback_truth is None
+            else np.array(fallback_truth.angular_rate_body_rad_s, dtype=float)
+        ),
+        mass_kg=0.0 if fallback_truth is None else float(fallback_truth.mass_kg),
+        t_s=float(t_s),
+    )
+
+
 def _attitude_state13_from_belief(
     belief: StateBelief,
     truth: StateTruth,
@@ -214,8 +257,12 @@ def _attitude_state13_from_belief(
 ) -> np.ndarray:
     state = np.empty(13, dtype=float) if out is None else out
     state[0:6] = belief.state[:6]
-    state[6:10] = truth.attitude_quat_bn
-    state[10:13] = truth.angular_rate_body_rad_s
+    if belief.state.size >= 13:
+        state[6:10] = belief.state[6:10]
+        state[10:13] = belief.state[10:13]
+    else:
+        state[6:10] = np.array([1.0, 0.0, 0.0, 0.0], dtype=float)
+        state[10:13] = np.zeros(3, dtype=float)
     return state
 
 
@@ -544,7 +591,11 @@ def _create_satellite_runtime(
             update_cadence_s=float(cfg.simulator.dt_s),
             rng=rng,
         )
-        estimator = JointStateEstimator(orbit_estimator=orbit_estimator, dt_s=float(cfg.simulator.dt_s))
+        estimator = JointStateEstimator(
+            orbit_estimator=orbit_estimator,
+            dt_s=float(cfg.simulator.dt_s),
+            inertia_kg_m2=inertia_kg_m2,
+        )
     else:
         belief = StateBelief(
             state=np.hstack((truth.position_eci_km, truth.velocity_eci_km_s)),
@@ -888,10 +939,11 @@ def _run_mission_modules(
 ) -> dict[str, Any]:
     if not agent.mission_modules:
         return {}
-    truth = world_truth.get(agent.object_id)
+    truth = _decision_truth_from_belief(agent)
     if truth is None:
         return {}
     own_knowledge = agent.knowledge_base.snapshot() if agent.knowledge_base is not None else {}
+    public_world_truth: dict[str, StateTruth] = {}
     out: dict[str, Any] = {}
     for module in agent.mission_modules:
         if not hasattr(module, "update"):
@@ -903,7 +955,7 @@ def _run_mission_modules(
                 "truth": truth,
                 "belief": agent.belief,
                 "own_knowledge": own_knowledge,
-                "world_truth": world_truth,
+                "world_truth": public_world_truth,
                 "env": env,
                 "t_s": t_s,
                 "dt_s": dt_s,
@@ -936,10 +988,11 @@ def _run_mission_strategy(
     strategy = agent.mission_strategy
     if strategy is None:
         return {}
-    truth = world_truth.get(agent.object_id)
+    truth = _decision_truth_from_belief(agent)
     if truth is None:
         return {}
     own_knowledge = agent.knowledge_base.snapshot() if agent.knowledge_base is not None else {}
+    public_world_truth: dict[str, StateTruth] = {}
     for method_name in ("update", "plan", "decide"):
         if not hasattr(strategy, method_name):
             continue
@@ -951,7 +1004,7 @@ def _run_mission_strategy(
                 "truth": truth,
                 "belief": agent.belief,
                 "own_knowledge": own_knowledge,
-                "world_truth": world_truth,
+                "world_truth": public_world_truth,
                 "env": env,
                 "t_s": t_s,
                 "dt_s": dt_s,
@@ -986,10 +1039,11 @@ def _run_mission_execution(
     execution = intent.get("_mission_execution_override", agent.mission_execution)
     if execution is None:
         return {}
-    truth = world_truth.get(agent.object_id)
+    truth = _decision_truth_from_belief(agent)
     if truth is None:
         return {}
     own_knowledge = agent.knowledge_base.snapshot() if agent.knowledge_base is not None else {}
+    public_world_truth: dict[str, StateTruth] = {}
     for method_name in ("update", "execute", "act"):
         if not hasattr(execution, method_name):
             continue
@@ -1002,7 +1056,7 @@ def _run_mission_execution(
                 "truth": truth,
                 "belief": agent.belief,
                 "own_knowledge": own_knowledge,
-                "world_truth": world_truth,
+                "world_truth": public_world_truth,
                 "env": env,
                 "t_s": t_s,
                 "dt_s": dt_s,

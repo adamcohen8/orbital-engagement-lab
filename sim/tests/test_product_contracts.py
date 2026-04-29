@@ -2,11 +2,28 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import pytest
 import yaml
 
 from sim import SimulationConfig, SimulationResult, SimulationSession
 from sim.config import AlgorithmPointer, load_simulation_yaml, scenario_config_from_dict
+
+
+class ContractRecordTimingMission:
+    def update(self, *, object_id, truth, world_truth, t_s, env, **kwargs):
+        flags = {
+            "object_id": str(object_id),
+            "decision_t_s": float(t_s),
+            "own_truth_t_s": float(truth.t_s),
+            "world_truth_keys": sorted(str(k) for k in dict(world_truth).keys()),
+            "env_has_world_truth": "world_truth" in dict(env),
+        }
+        return {
+            "mission_use_integrated_command": True,
+            "thrust_eci_km_s2": np.zeros(3, dtype=float),
+            "command_mode_flags": flags,
+        }
 
 
 def _contract_config(output_dir: Path) -> dict:
@@ -239,3 +256,109 @@ def test_payload_artifact_contract_exposes_stable_summary_histories_and_wrappers
 
     assert (tmp_path / "master_run_summary.json").is_file()
     assert (tmp_path / "master_run_log.json").is_file()
+
+
+def test_engine_timing_contract_does_not_expose_world_truth_to_agents(tmp_path: Path) -> None:
+    cfg = SimulationConfig.from_dict(
+        {
+            "scenario_name": "contract_no_world_truth_access",
+            "rocket": {"enabled": False},
+            "target": {
+                "enabled": True,
+                "specs": {"mass_kg": 100.0},
+                "initial_state": {
+                    "position_eci_km": [7000.0, 0.0, 0.0],
+                    "velocity_eci_km_s": [1.0, 7.5, 0.0],
+                },
+            },
+            "chaser": {
+                "enabled": True,
+                "specs": {"mass_kg": 100.0},
+                "initial_state": {
+                    "position_eci_km": [7100.0, 0.0, 0.0],
+                    "velocity_eci_km_s": [0.0, 7.5, 0.0],
+                },
+                "mission_objectives": [
+                    {
+                        "module": "sim.tests.test_product_contracts",
+                        "class_name": "ContractRecordTimingMission",
+                    }
+                ],
+            },
+            "simulator": {
+                "duration_s": 1.0,
+                "dt_s": 1.0,
+                "termination": {"earth_impact_enabled": False},
+                "dynamics": {"attitude": {"enabled": False}},
+            },
+            "outputs": {
+                "output_dir": str(tmp_path),
+                "mode": "save",
+                "stats": {"print_summary": False, "save_json": False, "save_full_log": False},
+                "plots": {"enabled": False, "figure_ids": []},
+                "animations": {"enabled": False, "types": []},
+            },
+            "monte_carlo": {"enabled": False},
+        }
+    )
+
+    result = SimulationSession.from_config(cfg).run()
+    flags = result.payload["controller_debug_by_object"]["chaser"][0]["mode_flags"]
+    target_truth = result.truth["target"]
+
+    assert target_truth[-1, 0] > 7000.5
+    assert flags["decision_t_s"] == 0.0
+    assert flags["own_truth_t_s"] == 0.0
+    assert flags["world_truth_keys"] == []
+    assert flags["env_has_world_truth"] is False
+
+
+def test_engine_timing_contract_estimates_after_inner_step_propagation(tmp_path: Path) -> None:
+    cfg = SimulationConfig.from_dict(
+        {
+            "scenario_name": "contract_inner_estimation",
+            "rocket": {"enabled": False},
+            "target": {
+                "enabled": True,
+                "initial_state": {
+                    "position_eci_km": [7000.0, 0.0, 0.0],
+                    "velocity_eci_km_s": [0.0, 7.546049108166282, 0.0],
+                },
+                "knowledge": {
+                    "sensor_error": {
+                        "pos_sigma_km": [0.0],
+                        "vel_sigma_km_s": [0.0],
+                        "quat_sigma": [0.0],
+                        "omega_sigma_rad_s": [0.0],
+                    }
+                },
+            },
+            "chaser": {"enabled": False},
+            "simulator": {
+                "duration_s": 1.0,
+                "dt_s": 1.0,
+                "termination": {"earth_impact_enabled": False},
+                "dynamics": {
+                    "orbit": {"orbit_substep_s": 1.0},
+                    "attitude": {"enabled": True, "attitude_substep_s": 0.25},
+                },
+            },
+            "outputs": {
+                "output_dir": str(tmp_path),
+                "mode": "save",
+                "stats": {"print_summary": False, "save_json": False, "save_full_log": False},
+                "plots": {"enabled": False, "figure_ids": []},
+                "animations": {"enabled": False, "types": []},
+            },
+            "monte_carlo": {"enabled": False},
+        }
+    )
+
+    result = SimulationSession.from_config(cfg).run()
+    truth = result.truth["target"][-1, :6]
+    belief = result.belief["target"][-1, :6]
+    debug_times = [entry["t_s"] for entry in result.payload["controller_debug_by_object"]["target"]]
+
+    assert np.linalg.norm(belief[:3] - truth[:3]) < 1e-9
+    assert np.linalg.norm(belief[3:] - truth[3:]) < 1e-12
+    assert debug_times == [0.0, 0.25, 0.5, 0.75]

@@ -6,8 +6,8 @@ from pathlib import Path
 import tempfile
 import yaml
 
-from PySide6.QtCore import QEvent, QObject, QThread, Qt, Signal
-from PySide6.QtGui import QPixmap, QTextCursor
+from PySide6.QtCore import QEvent, QObject, QThread, Qt, QUrl, Signal
+from PySide6.QtGui import QDesktopServices, QPixmap, QTextCursor
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -238,6 +238,18 @@ class MainWindow(QMainWindow):
         self.run_button = QPushButton("Run")
         self.run_button.clicked.connect(self._on_run)
         top_bar.addWidget(self.run_button)
+
+        self.open_quickstart_button = QPushButton("Open Quickstart")
+        self.open_quickstart_button.clicked.connect(self._on_open_quickstart)
+        top_bar.addWidget(self.open_quickstart_button)
+
+        self.run_quickstart_button = QPushButton("Run Quickstart")
+        self.run_quickstart_button.clicked.connect(self._on_run_quickstart)
+        top_bar.addWidget(self.run_quickstart_button)
+
+        self.open_output_button = QPushButton("Open Output Folder")
+        self.open_output_button.clicked.connect(self._open_current_output_folder)
+        top_bar.addWidget(self.open_output_button)
 
         root.addLayout(top_bar)
 
@@ -1808,6 +1820,9 @@ class MainWindow(QMainWindow):
         path = Path(path_text)
         return path if path.is_absolute() else (self.repo_root / path)
 
+    def _quickstart_config_path(self) -> Path:
+        return self.repo_root / "configs" / "quickstart_5min.yaml"
+
     def _load_selected_config_path(self, path: Path) -> None:
         if not self._prompt_discard_changes():
             self._restore_config_selector()
@@ -1856,6 +1871,23 @@ class MainWindow(QMainWindow):
         self._set_dirty(False)
         self._update_window_title()
         self.statusBar().showMessage(f"Loaded {path}", 5000)
+
+    def _on_open_quickstart(self) -> None:
+        path = self._quickstart_config_path()
+        if not path.exists():
+            self._show_error("Quickstart Missing", f"Could not find {path}")
+            return
+        self._load_selected_config_path(path)
+
+    def _open_current_output_folder(self) -> None:
+        try:
+            cfg = validate_config(self._collect_config_from_widgets())
+            output_dir = self.results_output_dir or self._resolve_output_dir(cfg.outputs.output_dir)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(output_dir)))
+            self.statusBar().showMessage(f"Opened {output_dir}", 5000)
+        except Exception as exc:
+            self._show_error("Open Output Folder Failed", str(exc))
 
     def _on_save(self) -> None:
         try:
@@ -1909,24 +1941,51 @@ class MainWindow(QMainWindow):
             self.results_output_dir = None
             if str(cfg_dict.get("outputs", {}).get("mode", "")).strip().lower() == "interactive":
                 run_config_path = self._build_preview_run_config(cfg_dict, save_path)
-            self.console.clear()
-            self.output_files.clear()
-            self.run_thread = QThread(self)
-            self.run_worker = _ApiRunWorker(run_config_path)
-            self.run_worker.moveToThread(self.run_thread)
-            self.run_thread.started.connect(self.run_worker.run)
-            self.run_worker.progress.connect(self._append_console_text)
-            self.run_worker.finished.connect(self._on_run_finished)
-            self.run_worker.failed.connect(self._on_run_failed)
-            self.run_worker.finished.connect(self.run_thread.quit)
-            self.run_worker.failed.connect(self.run_thread.quit)
-            self.run_thread.finished.connect(self._cleanup_run_worker)
-            self.run_thread.start()
-            self.run_button.setEnabled(False)
-            self.statusBar().showMessage("Simulation running...")
-            self.tabs.setCurrentIndex(6)
+            self._start_run_worker(run_config_path)
         except Exception as exc:
             self._show_error("Run Failed", str(exc))
+
+    def _on_run_quickstart(self) -> None:
+        if self.run_thread is not None:
+            self._show_error("Run In Progress", "A simulation is already running.")
+            return
+        path = self._quickstart_config_path()
+        if not path.exists():
+            self._show_error("Quickstart Missing", f"Could not find {path}")
+            return
+        if not self._prompt_discard_changes():
+            return
+        self.loaded_config_path = path
+        self.current_config = load_config(path)
+        self.save_path_edit.setText(str(path))
+        self.results_output_dir = None
+        self._sync_config_selector_to_path(path)
+        self._load_config_into_widgets(self.current_config)
+        self._refresh_yaml()
+        self._refresh_validation_state()
+        self._refresh_output_files()
+        self._set_dirty(False)
+        self._update_window_title()
+        self._start_run_worker(path)
+
+    def _start_run_worker(self, run_config_path: Path) -> None:
+        self.console.clear()
+        self.output_files.clear()
+        self.run_thread = QThread(self)
+        self.run_worker = _ApiRunWorker(run_config_path)
+        self.run_worker.moveToThread(self.run_thread)
+        self.run_thread.started.connect(self.run_worker.run)
+        self.run_worker.progress.connect(self._append_console_text)
+        self.run_worker.finished.connect(self._on_run_finished)
+        self.run_worker.failed.connect(self._on_run_failed)
+        self.run_worker.finished.connect(self.run_thread.quit)
+        self.run_worker.failed.connect(self.run_thread.quit)
+        self.run_thread.finished.connect(self._cleanup_run_worker)
+        self.run_thread.start()
+        self.run_button.setEnabled(False)
+        self.run_quickstart_button.setEnabled(False)
+        self.statusBar().showMessage("Simulation running...")
+        self.tabs.setCurrentIndex(6)
 
     def _append_console_text(self, txt: str) -> None:
         if txt:
@@ -1936,6 +1995,7 @@ class MainWindow(QMainWindow):
 
     def _on_run_finished(self, result) -> None:
         self.run_button.setEnabled(True)
+        self.run_quickstart_button.setEnabled(True)
         if getattr(result, "output_dir", None) and self.results_output_dir is None:
             self.results_output_dir = self._resolve_output_dir(str(result.output_dir))
         self._append_console_text(str(getattr(result, "stdout", "")))
@@ -1944,6 +2004,7 @@ class MainWindow(QMainWindow):
 
     def _on_run_failed(self, message: str) -> None:
         self.run_button.setEnabled(True)
+        self.run_quickstart_button.setEnabled(True)
         self._append_console_text(f"\nRun failed: {message}\n")
         self._show_error("Run Failed", message)
 

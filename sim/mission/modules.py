@@ -109,10 +109,7 @@ def _resolve_target_state(
         kb = own_knowledge[target_id]
         if kb.state.size >= 6:
             return np.array(kb.state[:3], dtype=float), np.array(kb.state[3:6], dtype=float)
-    tgt = world_truth.get(target_id)
-    if tgt is None:
-        return None
-    return np.array(tgt.position_eci_km, dtype=float), np.array(tgt.velocity_eci_km_s, dtype=float)
+    return None
 
 
 def _axis_unit_ric(axis_mode: str) -> np.ndarray:
@@ -599,7 +596,6 @@ class DefensiveMissionStrategy:
     axis_mode: str = "+R"  # +R|-R|+I|-I|+C|-C
     burn_accel_km_s2: float = 2e-6
     require_finite_knowledge: bool = True
-    allow_truth_fallback: bool = False
     align_to_thrust: bool = True
 
     def _resolve_chaser_state(
@@ -613,12 +609,7 @@ class DefensiveMissionStrategy:
             x = np.array(kb.state[:6], dtype=float)
             if (not self.require_finite_knowledge) or bool(np.all(np.isfinite(x))):
                 return np.array(x[:3], dtype=float), np.array(x[3:6], dtype=float)
-        if not self.allow_truth_fallback:
-            return None
-        tgt = world_truth.get(self.chaser_id)
-        if tgt is None:
-            return None
-        return np.array(tgt.position_eci_km, dtype=float), np.array(tgt.velocity_eci_km_s, dtype=float)
+        return None
 
     def update(
         self,
@@ -1060,14 +1051,24 @@ class RocketGoWhenPossibleExecution:
         *,
         intent: dict[str, Any],
         truth: StateTruth,
+        own_knowledge: dict[str, StateBelief] | None = None,
         world_truth: dict[str, StateTruth],
         rocket_state: RocketState | None = None,
         rocket_vehicle_cfg: RocketVehicleConfig | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         target_id = self.target_id or intent.get("target_id")
-        target_truth = world_truth.get(str(target_id)) if target_id else None
-        dv_needed = _estimate_needed_delta_v_m_s(truth, target_truth)
+        target_state = _resolve_target_state(
+            target_id=(None if target_id is None else str(target_id)),
+            use_knowledge_for_targeting=True,
+            own_knowledge=dict(own_knowledge or {}),
+            world_truth=world_truth,
+        )
+        dv_needed = (
+            np.inf
+            if target_state is None
+            else float(np.linalg.norm(np.array(target_state[1], dtype=float) - np.array(truth.velocity_eci_km_s, dtype=float)) * 1e3)
+        )
         dv_avail = _estimate_stack_delta_v_m_s(rocket_state, rocket_vehicle_cfg) if (rocket_state is not None and rocket_vehicle_cfg is not None) else np.inf
         launch_authorized = bool(np.isfinite(dv_avail) and dv_avail >= (dv_needed + float(self.go_when_possible_margin_m_s)))
         mission_mode = dict(intent.get("mission_mode", {}) or {})
@@ -1996,10 +1997,7 @@ class SatelliteMissionModule:
             kb = own_knowledge[self.target_id]
             if kb.state.size >= 6:
                 return np.array(kb.state[:3], dtype=float), np.array(kb.state[3:6], dtype=float)
-        tgt = world_truth.get(self.target_id)
-        if tgt is None:
-            return None
-        return np.array(tgt.position_eci_km, dtype=float), np.array(tgt.velocity_eci_km_s, dtype=float)
+        return None
 
     def _orbital_command(self, truth: StateTruth, own_knowledge: dict[str, StateBelief], world_truth: dict[str, StateTruth]) -> np.ndarray:
         amax = float(max(self.max_accel_km_s2, 0.0))
@@ -2251,7 +2249,7 @@ class SingleRICAxisBurnMissionModule:
     """
 
     target_id: str = "target"
-    use_knowledge_for_targeting: bool = False
+    use_knowledge_for_targeting: bool = True
     axis_mode: str = "+I"
     axis_kind: str = "plume"  # plume|force
     burn_accel_km_s2: float = 2e-6
@@ -2396,9 +2394,18 @@ class RocketMissionModule:
             if rocket_state is None or rocket_vehicle_cfg is None:
                 launch_authorized = True
             else:
-                tgt = world_truth.get(str(self.target_id)) if self.target_id else None
+                target_state = _resolve_target_state(
+                    target_id=(None if self.target_id is None else str(self.target_id)),
+                    use_knowledge_for_targeting=True,
+                    own_knowledge=own_knowledge,
+                    world_truth=world_truth,
+                )
                 dv_avail = _estimate_stack_delta_v_m_s(rocket_state=rocket_state, vehicle_cfg=rocket_vehicle_cfg)
-                dv_need = _estimate_needed_delta_v_m_s(current_truth=truth, target_truth=tgt)
+                dv_need = (
+                    np.inf
+                    if target_state is None
+                    else float(np.linalg.norm(np.array(target_state[1], dtype=float) - np.array(truth.velocity_eci_km_s, dtype=float)) * 1e3)
+                )
                 launch_authorized = dv_need <= (dv_avail - float(self.go_when_possible_margin_m_s))
         out: dict[str, Any] = {"launch_authorized": bool(launch_authorized)}
         out["mission_mode"] = {"launch": self.launch_mode, "goal": self.orbital_goal}
@@ -2458,10 +2465,7 @@ class EndStateManeuverMissionModule:
             kb = own_knowledge.get(self.target_id)
             if kb is not None and kb.state.size >= 6:
                 return np.array(kb.state[:3], dtype=float), np.array(kb.state[3:6], dtype=float)
-        tgt = world_truth.get(self.target_id)
-        if tgt is None:
-            return None
-        return np.array(tgt.position_eci_km, dtype=float), np.array(tgt.velocity_eci_km_s, dtype=float)
+        return None
 
     def update(
         self,
@@ -2584,10 +2588,7 @@ class IntegratedCommandMissionModule:
             kb = own_knowledge.get(self.target_id)
             if kb is not None and kb.state.size >= 6:
                 return np.array(kb.state[:3], dtype=float), np.array(kb.state[3:6], dtype=float)
-        tgt = world_truth.get(self.target_id)
-        if tgt is None:
-            return None
-        return np.array(tgt.position_eci_km, dtype=float), np.array(tgt.velocity_eci_km_s, dtype=float)
+        return None
 
     @staticmethod
     def _set_orbit_controller_target(controller: Any, desired_state_eci_6: np.ndarray) -> None:
@@ -2747,10 +2748,7 @@ class PredictiveIntegratedCommandMissionModule:
                 v_k = np.array(kb.state[3:6], dtype=float)
                 if np.all(np.isfinite(r_k)) and np.all(np.isfinite(v_k)):
                     return r_k, v_k
-        tgt = world_truth.get(self.target_id)
-        if tgt is None:
-            return None
-        return np.array(tgt.position_eci_km, dtype=float), np.array(tgt.velocity_eci_km_s, dtype=float)
+        return None
 
     def _predict_eci(self, x_eci: np.ndarray, horizon_s: float, dt_s: float) -> np.ndarray:
         x = np.array(x_eci, dtype=float).reshape(6)

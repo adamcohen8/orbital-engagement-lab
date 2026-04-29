@@ -19,7 +19,11 @@ _CONTRACTS = {
     "attitude_control": PluginContract(methods_all=("act",), allow_function=False),
     "mission_strategy": PluginContract(methods_all=(), methods_any=("update", "plan", "decide"), allow_function=True),
     "mission_execution": PluginContract(methods_all=(), methods_any=("update", "execute", "act"), allow_function=True),
-    "bridge": PluginContract(methods_all=(), methods_any=("step", "start", "send_command", "receive_command"), allow_function=True),
+    "bridge": PluginContract(
+        methods_all=(),
+        methods_any=("step", "start", "send_command", "receive_command", "external_intent"),
+        allow_function=True,
+    ),
     "mission_objective": PluginContract(methods_all=(), methods_any=("evaluate", "update", "check", "act"), allow_function=True),
 }
 

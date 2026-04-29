@@ -1,9 +1,9 @@
 scenario_name: "plotting_rendezvous_demo"
-scenario_description: "Short public demo that generates rendezvous, control, sensor, and estimation plots."
+scenario_description: "Public 6000-second rendezvous demo that generates dashboard, control, sensor, estimation, and ground-track plots."
 
 metadata:
   owner: "public"
-  notes: "Fast deterministic plotting demo for README and docs gallery artifacts."
+  notes: "Deterministic plotting demo for README and docs gallery artifacts."
 
 rocket:
   enabled: false
@@ -77,7 +77,7 @@ target:
 
 simulator:
   scenario_type: "auto"
-  duration_s: 300.0
+  duration_s: 6000.0
   dt_s: 1.0
   dynamics:
     orbit:

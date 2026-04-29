@@ -26,17 +26,18 @@ class DefensiveTargetIntentProvider:
         self,
         *,
         truth: StateTruth,
-        world_truth: dict[str, StateTruth],
         t_s: float,
+        world_truth: dict[str, StateTruth] | None = None,
+        own_knowledge: dict[str, Any] | None = None,
         dt_s: float | None = None,
         **_: Any,
     ) -> dict[str, Any]:
         dt_s = self._dt_since_last_call(t_s, fallback_dt_s=dt_s)
-        chaser = dict(world_truth or {}).get(str(self.chaser_object_id))
-        if chaser is None:
+        chaser_state = dict(own_knowledge or {}).get(str(self.chaser_object_id))
+        if chaser_state is None or getattr(chaser_state, "state", np.array([])).size < 6:
             return self._inactive_command()
         rel = eci_relative_to_ric_rect(
-            np.hstack((chaser.position_eci_km, chaser.velocity_eci_km_s)),
+            np.array(chaser_state.state[:6], dtype=float),
             np.hstack((truth.position_eci_km, truth.velocity_eci_km_s)),
         )
         r = rel[:3]

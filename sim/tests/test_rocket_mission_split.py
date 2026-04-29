@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import numpy as np
 
-from sim.core.models import StateTruth
+from sim.core.models import StateBelief, StateTruth
 from sim.mission.modules import (
     RocketGoNowExecution,
     RocketGoWhenPossibleExecution,
@@ -23,6 +23,15 @@ def _truth() -> StateTruth:
         angular_rate_body_rad_s=np.zeros(3, dtype=float),
         mass_kg=500.0,
         t_s=0.0,
+    )
+
+
+def _belief_with_velocity_y(vy_km_s: float) -> StateBelief:
+    truth = _truth()
+    return StateBelief(
+        state=np.array([*truth.position_eci_km, 0.0, float(vy_km_s), 0.0], dtype=float),
+        covariance=np.eye(6),
+        last_update_t_s=truth.t_s,
     )
 
 
@@ -47,29 +56,27 @@ class TestRocketMissionSplit(unittest.TestCase):
         self.assertTrue(wait_exec.update(intent=base_intent, t_s=5.0)["launch_authorized"])
         self.assertFalse(wait_exec.update(intent=base_intent, t_s=20.0)["launch_authorized"])
 
-        with patch("sim.mission.modules._estimate_needed_delta_v_m_s", return_value=100.0), patch(
-            "sim.mission.modules._estimate_stack_delta_v_m_s", return_value=150.0
-        ):
+        with patch("sim.mission.modules._estimate_stack_delta_v_m_s", return_value=150.0):
             go_exec = RocketGoWhenPossibleExecution(go_when_possible_margin_m_s=25.0)
             self.assertTrue(
                 go_exec.update(
                     intent=base_intent,
                     truth=_truth(),
-                    world_truth={"target": _truth()},
+                    own_knowledge={"target": _belief_with_velocity_y(7.6)},
+                    world_truth={},
                     rocket_state=object(),
                     rocket_vehicle_cfg=object(),
                 )["launch_authorized"]
             )
 
-        with patch("sim.mission.modules._estimate_needed_delta_v_m_s", return_value=130.0), patch(
-            "sim.mission.modules._estimate_stack_delta_v_m_s", return_value=150.0
-        ):
+        with patch("sim.mission.modules._estimate_stack_delta_v_m_s", return_value=150.0):
             go_exec = RocketGoWhenPossibleExecution(go_when_possible_margin_m_s=25.0)
             self.assertFalse(
                 go_exec.update(
                     intent=base_intent,
                     truth=_truth(),
-                    world_truth={"target": _truth()},
+                    own_knowledge={"target": _belief_with_velocity_y(7.63)},
+                    world_truth={},
                     rocket_state=object(),
                     rocket_vehicle_cfg=object(),
                 )["launch_authorized"]

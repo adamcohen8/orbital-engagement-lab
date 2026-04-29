@@ -66,17 +66,17 @@ class DefensiveRICAxisMissionTests(unittest.TestCase):
     def test_single_burn_module_treats_plus_i_plume_as_negative_i_force(self) -> None:
         m = SingleRICAxisBurnMissionModule(
             target_id="target",
-            use_knowledge_for_targeting=False,
             axis_mode="+I",
             axis_kind="plume",
             burn_accel_km_s2=3e-6,
             burn_start_s=0.0,
             burn_duration_s=10.0,
         )
+        kb = StateBelief(state=np.hstack((_truth().position_eci_km, _truth().velocity_eci_km_s)), covariance=np.eye(6), last_update_t_s=0.0)
         out = m.update(
             truth=_truth(),
-            own_knowledge={},
-            world_truth={"target": _truth()},
+            own_knowledge={"target": kb},
+            world_truth={},
             t_s=0.0,
             dt_s=1.0,
         )
@@ -89,7 +89,6 @@ class DefensiveRICAxisMissionTests(unittest.TestCase):
     def test_single_burn_module_commands_slew_before_burn(self) -> None:
         m = SingleRICAxisBurnMissionModule(
             target_id="target",
-            use_knowledge_for_targeting=False,
             axis_mode="+I",
             axis_kind="plume",
             burn_accel_km_s2=3e-6,
@@ -97,10 +96,11 @@ class DefensiveRICAxisMissionTests(unittest.TestCase):
             burn_duration_s=5.0,
             slew_lead_time_s=10.0,
         )
+        kb = StateBelief(state=np.hstack((_truth().position_eci_km, _truth().velocity_eci_km_s)), covariance=np.eye(6), last_update_t_s=0.0)
         out = m.update(
             truth=_truth(),
-            own_knowledge={},
-            world_truth={"target": _truth()},
+            own_knowledge={"target": kb},
+            world_truth={},
             t_s=15.0,
             dt_s=1.0,
         )
@@ -119,10 +119,11 @@ class DefensiveRICAxisMissionTests(unittest.TestCase):
             burn_start_s=0.0,
             burn_duration_s=5.0,
         )
+        kb = StateBelief(state=np.hstack((_truth().position_eci_km, _truth().velocity_eci_km_s)), covariance=np.eye(6), last_update_t_s=0.0)
         out = m.update(
             truth=_truth(),
-            own_knowledge={},
-            world_truth={"target": _truth()},
+            own_knowledge={"target": kb},
+            world_truth={},
             t_s=6.0,
             dt_s=1.0,
         )

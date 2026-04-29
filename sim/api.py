@@ -154,6 +154,10 @@ class SimulationResult:
         return _as_nested_array_map(self.payload.get("knowledge_by_observer", {}))
 
     @property
+    def ground_station_access(self) -> dict[str, Any]:
+        return dict(self.payload.get("ground_station_access", {}) or {})
+
+    @property
     def artifacts(self) -> dict[str, Any]:
         if self.is_batch_analysis:
             return dict(self.payload.get("artifacts", {}) or {})

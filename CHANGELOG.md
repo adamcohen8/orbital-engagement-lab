@@ -6,12 +6,17 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
-## 0.2.0 - 2026-04-28
+## 0.3.0 - 2026-04-29
 
 Guided configuration and TLE initialization release.
 
 ### Configuration
 
+- Added a headless-safe `configs/quickstart_5min.yaml` first-run scenario for
+  new public users.
+- Added `run_simulation.py --quickstart`, `--doctor`, start-here console output,
+  `--open-output`, and a first-five-minutes guide for the public onboarding
+  path.
 - Added TLE-based satellite initialization support for scenario YAML configs.
 - Added GUI support for a guided config-building workflow before running a
   simulation.
