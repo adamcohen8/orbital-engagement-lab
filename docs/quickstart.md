@@ -23,6 +23,11 @@ python run_simulation.py --doctor
 Warnings for optional plotting, GUI, or game packages do not block the
 headless quickstart path.
 
+Only run scenario YAML files from sources you trust. Scenario configs can point
+at importable Python modules/classes for controllers, guidance, mission
+strategies, and mission execution modules; loading an untrusted scenario can run
+untrusted Python code.
+
 ## Validate The Five-Minute Scenario
 
 ```bash
@@ -44,8 +49,8 @@ knowledge updates, then writes summary artifacts under
 `outputs/quickstart_5min/`. Open `outputs/quickstart_5min/index.md` first for
 the run summary, review order, and artifact inventory.
 
-Plots are disabled in this first path so local Matplotlib/NumPy installation
-issues cannot block the first successful run.
+Plots are disabled in this first path to keep the first run fast, headless, and
+focused on the generated summary artifacts.
 
 To open the output folder automatically after the run:
 
@@ -107,8 +112,9 @@ python -m pip install ".[ml]"
 python -m pip install ".[full]"
 ```
 
-The GUI profile enables `python run_gui.py`. The ML profile enables the bundled
-Gymnasium-style environments.
+The base package already installs NumPy and Matplotlib for simulation and
+plotting support. The GUI profile enables `python run_gui.py`. The ML profile
+enables the bundled Gymnasium-style environments.
 
 ## Gravity Coefficient Files
 

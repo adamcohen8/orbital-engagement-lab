@@ -1,11 +1,11 @@
 # Custom Analysis
 
 Orbital Engagement Lab writes JSON, CSV, Markdown, and image artifacts that can
-be used outside the built-in plotting system. If a user wants a plot that the
-product does not provide, the intended path is:
+be used outside the built-in plotting system. If you want a plot that the
+public core does not provide, the intended path is:
 
 1. enable the right saved data in YAML,
-2. run the scenario or campaign,
+2. run the scenario,
 3. open the output directory `index.md`, and
 4. load the saved artifacts with Python, NumPy, Matplotlib, or another analysis
    tool.
@@ -21,24 +21,9 @@ For a single run:
 - `master_run_summary.json`: stable summary metrics and artifact maps.
 - `master_run_log.json`: full time histories for custom plots.
 
-For Pro campaign workflows:
-
-- `master_monte_carlo_summary.json`: aggregate Monte Carlo campaign payload.
-- `master_monte_carlo_analyst_pack.json`: selected details intended for deeper
-  campaign review.
-- `master_analysis_sensitivity_summary.json`: sensitivity study payload.
-- `master_analysis_sensitivity_runs.csv`: one row per sensitivity run.
-- `master_analysis_sensitivity_rankings.csv`: ranked parameter effects.
-
-For AI-assisted reports:
-
-- `master_ai_report_input.json`: scoped model-facing packet.
-- `master_ai_report_prompt.md`: exact generated prompt.
-- `master_ai_report_review_packet.md`: human-readable pre-call review summary.
-
-Use the deterministic simulation and analysis artifacts for custom plotting.
-Treat AI report artifacts as audit material for the report workflow, not as the
-primary source of simulation truth.
+Pro adds campaign-scale Monte Carlo, sensitivity, controller-benchmark, and
+reporting artifacts. The public custom-analysis path focuses on deterministic
+single-run outputs.
 
 ## Save Full Single-Run Data
 
@@ -181,108 +166,11 @@ For quick review without plotting, inspect `ground_station_access_summary` in
 `master_run_summary.json` or `master_run_log.json`. It includes first/last
 access time, access duration, minimum range, and maximum elevation.
 
-## Monte Carlo Custom Plots
-
-For Pro Monte Carlo campaigns, make sure aggregate summaries are saved:
-
-```yaml
-outputs:
-  monte_carlo:
-    save_aggregate_summary: true
-    save_raw_runs: true
-```
-
-`save_aggregate_summary` writes the campaign summary. `save_raw_runs` adds a
-run-details artifact when deeper per-run review is needed.
-
-Example histogram from `master_monte_carlo_summary.json`:
-
-```python
-import json
-from pathlib import Path
-
-import matplotlib.pyplot as plt
-
-outdir = Path("outputs/ai_report_mc_smoke")
-summary = json.loads((outdir / "master_monte_carlo_summary.json").read_text())
-
-runs = summary.get("runs", [])
-closest_approach_km = [
-    float(run["closest_approach_km"])
-    for run in runs
-    if run.get("closest_approach_km") is not None
-]
-
-fig, ax = plt.subplots(figsize=(8, 4.5))
-ax.hist(closest_approach_km, bins="auto", edgecolor="black", alpha=0.8)
-ax.set_xlabel("Closest Approach (km)")
-ax.set_ylabel("Run Count")
-ax.set_title("Monte Carlo Closest Approach")
-ax.grid(True, axis="y", alpha=0.3)
-fig.tight_layout()
-fig.savefig(outdir / "custom_closest_approach_histogram.png", dpi=160)
-```
-
-If the list is empty, the campaign summary did not include the per-run field
-you need. Enable raw run details or add the metric to the campaign reporting
-payload before rerunning.
-
-## Sensitivity Custom Plots
-
-Sensitivity studies write CSV files for quick external plotting:
-
-```text
-master_analysis_sensitivity_runs.csv
-master_analysis_sensitivity_rankings.csv
-```
-
-Example using only the Python standard library plus Matplotlib:
-
-```python
-import csv
-from pathlib import Path
-
-import matplotlib.pyplot as plt
-
-outdir = Path("outputs/sensitivity_oaat_demo")
-runs_csv = outdir / "master_analysis_sensitivity_runs.csv"
-
-rows = list(csv.DictReader(runs_csv.open(newline="", encoding="utf-8")))
-
-parameter = "simulator.duration_s"
-metric = "metric:summary.duration_s"
-
-x = []
-y = []
-for row in rows:
-    if row.get("parameter_path") != parameter:
-        continue
-    value = row.get("parameter_value")
-    metric_value = row.get(metric)
-    if value not in (None, "") and metric_value not in (None, ""):
-        x.append(float(value))
-        y.append(float(metric_value))
-
-fig, ax = plt.subplots(figsize=(8, 4.5))
-ax.plot(x, y, marker="o")
-ax.set_xlabel(parameter)
-ax.set_ylabel(metric)
-ax.set_title("Custom Sensitivity Response")
-ax.grid(True, alpha=0.3)
-fig.tight_layout()
-fig.savefig(outdir / "custom_sensitivity_response.png", dpi=160)
-```
-
-CSV field names can vary with the configured metrics. Inspect the header row or
-open `index.md` and the generated sensitivity report when adapting the example.
-
 ## Practical Guidance
 
 - Open `index.md` first. It lists the artifacts actually written for that run.
 - Use `master_run_log.json` for arbitrary single-run time histories.
 - Use summary JSON for stable top-level metrics.
-- Use campaign and sensitivity CSVs when available for spreadsheet-style
-  plotting.
 - Prefer artifact maps in JSON over hard-coded filenames when writing reusable
   scripts.
 - Save custom plots back into the same output directory when they belong to the

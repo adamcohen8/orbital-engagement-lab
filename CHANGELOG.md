@@ -6,6 +6,20 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.3.1 - 2026-05-01
+
+### Governance
+
+- Added a private founder ethics and conflict-of-interest planning file for
+  outside-activity approval, IP provenance, recusal screening, communication
+  boundaries, and diligence records.
+- Added an ignored local founder-file workspace with starter ethics-review,
+  IP-provenance, operating-rule, contact-screen, and activity-log documents.
+- Softened public/commercial wording that named specific government audiences
+  where broader aerospace training language was sufficient.
+- Added a public README personal-capacity/no-endorsement notice and documented
+  which ethics/compliance artifacts are public, private, or local-only.
+
 ## 0.3.0 - 2026-04-29
 
 Guided configuration and TLE initialization release.
@@ -35,6 +49,10 @@ Guided configuration and TLE initialization release.
 
 - Strengthened public export checks for private-only assistant tooling and
   smoke configs.
+- Moved public-facing safety, trusted-scenario, compatibility, and known-limitations
+  guidance into the launch documentation.
+- Reframed the private README as a buyer-facing Pro overview and moved the
+  command-heavy workspace guide to private technical documentation.
 
 ## 0.1.2 - 2026-04-27
 

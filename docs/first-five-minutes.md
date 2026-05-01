@@ -30,8 +30,13 @@ python run_simulation.py --quickstart
 ```
 
 The command runs `configs/quickstart_5min.yaml`, a short deterministic
-two-satellite rendezvous scenario. Plots are disabled so the first run does not
-depend on Matplotlib.
+two-satellite rendezvous scenario. Plots are disabled to keep the first run
+fast, headless, and focused on the generated summary artifacts.
+
+Only run scenario YAML files from sources you trust. Scenario configs can point
+at importable Python modules/classes for controllers, guidance, mission
+strategies, and mission execution modules; loading an untrusted scenario can run
+untrusted Python code.
 
 To open the output folder automatically:
 

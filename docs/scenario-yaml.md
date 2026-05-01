@@ -4,6 +4,11 @@ Scenario YAML is the main user-facing interface for repeatable simulations. A
 scenario file defines the objects, algorithms, dynamics settings, outputs, and
 optional analysis settings for a run.
 
+Only run scenario YAML files from sources you trust. Scenario configs can point
+at importable Python modules/classes for controllers, guidance, mission
+strategies, and mission execution modules. Loading an untrusted scenario can run
+untrusted Python code.
+
 ## Top-Level Shape
 
 ```yaml
