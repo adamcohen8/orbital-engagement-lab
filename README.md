@@ -2,24 +2,58 @@
 
 [![CI](https://github.com/adamcohen8/orbital-engagement-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/adamcohen8/orbital-engagement-lab/actions/workflows/ci.yml)
 
-Open-core spacecraft simulation platform for closed-loop rendezvous, proximity
-operations, attitude control, sensing, estimation, ground-station access,
-plotting, and mission prototyping.
+Open-core Python simulator for closed-loop spacecraft rendezvous and
+proximity-operations prototyping. Define a scenario in YAML, run deterministic
+single-run simulations through the CLI/API/GUI, and inspect generated summaries,
+plots, and artifacts.
+
+The public core is intended for research, education, prototyping, pre-flight
+engineering analysis, and software-in-the-loop experimentation. It is not
+flight-qualified software and should not be treated as operational
+decision-grade without independent validation for the relevant mission envelope.
+
+## Personal-Capacity And No-Endorsement Notice
+
+Orbital Engagement Lab is an independent personal-capacity software project. It
+is not an official product, program, or endorsement of the Department of
+Defense, Department of the Air Force, United States Space Force, or any other
+U.S. Government organization.
+
+The project is intended for research, education, prototyping, pre-flight
+engineering analysis, software-in-the-loop experimentation, and validation
+workflow development. It is not flight software and is not an operational
+decision system.
+
+Project development is intended to use public technical references, original
+work, open-source dependencies, personal resources, and personal time. The
+public repository should not contain nonpublic government information,
+government-provided code, controlled operational scenarios, classified
+information, or customer-controlled technical data.
+
+Users are responsible for their own validation, security review, export-control
+review, mission qualification, and compliance obligations before using the
+software in any sensitive, commercial, government, or operational context.
+
+![Run dashboard](docs/assets/plots/run_dashboard.png)
 
 Orbital Engagement Lab exists to make it easier to prototype spacecraft behavior
 as a full closed loop: orbit dynamics, attitude dynamics, sensors, estimators,
 controllers, actuators, mission logic, and outputs all running from the same
 scenario definition.
 
-![Run dashboard](docs/assets/plots/run_dashboard.png)
+Orbital Engagement Pro adds workflow acceleration around that foundation:
+controller benchmarking, optimization, campaign orchestration, sensitivity
+studies, dashboards, AI-assisted reports, curated validation scenario packs, and
+integration workflows.
 
-The public repository is the simulation foundation: deterministic single-run
-scenarios, public controllers, estimators, object presets, plots, curated
-examples, the GUI, and API workflows. Orbital Engagement Pro adds workflow
-acceleration around that foundation: controller benchmarking, optimization,
-campaign orchestration, sensitivity studies, dashboards, AI-assisted campaign
-reports, cost estimation, curated validation scenario packs, and integration
-workflows.
+## Who This Is For
+
+- Researchers and engineers prototyping closed-loop RPO, sensing, estimation,
+  control, and mission-logic behavior.
+- Educators and students who want concrete spacecraft relative-motion examples
+  and an approachable RPO trainer.
+- Technical evaluators who want to inspect the public simulation core before
+  considering Pro workflow acceleration.
 
 ## First Run
 
@@ -52,8 +86,17 @@ python run_simulation.py --quickstart
 
 Expected result: the run completes headlessly and writes summary artifacts under
 `outputs/quickstart_5min/`. Open `outputs/quickstart_5min/index.md` first.
-Plots are disabled on this first path so local Matplotlib/NumPy installation
-issues cannot block the first successful run.
+Plots are disabled on this first path to keep the first run fast, headless, and
+focused on the generated summary artifacts.
+
+Success looks like:
+
+```text
+Scenario : quickstart_5min
+Samples  : 301
+Output   : outputs/quickstart_5min
+Start Here: outputs/quickstart_5min/index.md
+```
 
 To open the output folder automatically after the run:
 
@@ -119,6 +162,11 @@ scenarios. Batch analysis settings are not exposed in public examples, and
 configs with enabled Monte Carlo or sensitivity studies are rejected with a clear
 Pro-boundary message.
 
+Only run scenario YAML files from sources you trust. Scenario configs can point
+at importable Python modules/classes for controllers, guidance, mission
+strategies, and mission execution modules; loading an untrusted scenario can run
+untrusted Python code.
+
 Spherical-harmonic gravity can use inline YAML terms or coefficient files you
 provide. HPOP/GGM03 validation data is not bundled in the public core, so
 `source: "hpop_ggm03"` scenarios should also set `coeff_path`.
@@ -138,9 +186,9 @@ provide. HPOP/GGM03 validation data is not bundled in the public core, so
 - Pygame RPO trainer game mode with bundled training levels
 - single-run dashboards, trajectory plots, estimation plots, sensor-access plots, and access summaries
 - machine-learning environment helpers
-- product maturity roadmap and public/private boundary documentation
+- public/private boundary and known-limitations documentation
 
-## What Orbital Engagement Pro Adds
+## Pro Layer
 
 - controller-benchmark suites and leaderboards
 - optimization and gain-tuning workflows
@@ -164,10 +212,10 @@ require hosted AI accounts or API keys.
 - [Plot Gallery](docs/plot-gallery.md)
 - [Custom Analysis](docs/custom-analysis.md)
 - [Public Core And Pro Boundary](docs/public-vs-pro.md)
+- [Known Limitations](docs/known-limitations.md)
 - [Engine Contract](docs/contracts/engine-contract.md)
 - [Scenario YAML Contract](docs/contracts/scenario-yaml-contract.md)
 - [Payload And Artifact Contract](docs/contracts/payload-artifact-contract.md)
-- [Product Maturity Roadmap](product_maturity_roadmap.md)
 
 ## Curated Examples
 
@@ -192,15 +240,17 @@ example surface.
 python -m pip install .
 python -m pip install ".[dev]"
 python -m pip install ".[gui]"
+python -m pip install ".[game]"
 python -m pip install ".[ml]"
 python -m pip install ".[full]"
 ```
 
 ## Project Layout
 
-- `sim/core/` kernel, models, scheduling
 - `sim/config/` config schema, fidelity profiles, plugin validation
 - `sim/api.py` public programmatic API
+- `sim/single_run.py` and `sim/single_run_support.py` single-run orchestration
+- `sim/core/` shared core models and scheduling utilities
 - `sim/dynamics/` orbit and attitude dynamics
 - `sim/actuators/` actuator models
 - `sim/sensors/` sensor models
@@ -214,13 +264,6 @@ python -m pip install ".[full]"
 - `machine_learning/` public environment helpers and training entrypoints
 - `examples/` curated runnable configs
 - `docs/` user-facing documentation
-
-## Scope And Safety
-
-This project is intended for research, prototyping, pre-flight engineering
-analysis, and software-in-the-loop experimentation. It is not flight-qualified
-software and should not be treated as operational decision-grade without
-independent validation for the relevant mission envelope.
 
 ## License
 

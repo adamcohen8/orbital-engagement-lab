@@ -2,10 +2,10 @@
 
 ## Audience
 
-Primary users are new Space Force officers and Air Force Academy cadets learning
-rendezvous and proximity operations. The product goal is not arcade realism or
-full mission rehearsal first. The first goal is to make relative orbital motion
-legible through safe, repeatable interaction.
+Primary users are aerospace students, early-career space operators, and
+instructors teaching rendezvous and proximity operations. The product goal is
+not arcade realism or full mission rehearsal first. The first goal is to make
+relative orbital motion legible through safe, repeatable interaction.
 
 ## Product Thesis
 
@@ -79,7 +79,7 @@ Initial curated scenarios:
 
 ## Controls
 
-Default cadet trainer controls should be RIC translation:
+Default trainer controls should be RIC translation:
 
 - W/S: radial +/-R
 - A/D: in-track +/-I

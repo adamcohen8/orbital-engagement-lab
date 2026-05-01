@@ -43,7 +43,7 @@ def test_run_gui_reports_missing_pyside_with_install_hint() -> None:
     err = ModuleNotFoundError("No module named 'PySide6'")
     err.name = "PySide6"
     with patch.object(run_gui, "import_module", side_effect=err):
-        with pytest.raises(SystemExit, match="requirements-gui.txt"):
+        with pytest.raises(SystemExit, match=r"\.\[gui\]"):
             run_gui.main()
 
 
