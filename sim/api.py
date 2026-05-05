@@ -11,9 +11,9 @@ from sim.execution import create_single_run_engine, run_simulation_scenario
 
 
 def _closest_approach_metric(payload: dict[str, Any]) -> float:
-    from sim.master_simulator import _closest_approach_from_run_payload
+    from sim.execution.metrics import closest_approach_from_run_payload
 
-    return _closest_approach_from_run_payload(payload)
+    return closest_approach_from_run_payload(payload)
 
 
 def _as_array_map(value: Any) -> dict[str, np.ndarray]:

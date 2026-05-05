@@ -21,7 +21,9 @@ outputs:
 ```
 
 `preset` expands to a useful bundle of figure IDs. You can add more
-`figure_ids` alongside a preset.
+`figure_ids` alongside a preset. `reference_object_id` should name an active
+object from the scenario's canonical `objects` map; `target` is only the
+convention used by the rendezvous examples.
 
 For a ready-to-run plotting scenario:
 

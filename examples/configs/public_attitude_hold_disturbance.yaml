@@ -1,0 +1,95 @@
+# Use case: "How does an attitude controller recover from an initial pointing error?"
+#
+# Key parameters to vary:
+# - objects.bus.initial_state.attitude_quat_bn and angular_rate_body_rad_s.
+# - objects.bus.attitude_control.params.kp/kd and wheel_torque_limits_nm.
+# - simulator.dynamics.attitude.disturbance_torques toggles.
+# - simulator.duration_s for settling-time studies.
+
+scenario_name: "public_attitude_hold_disturbance"
+scenario_description: "Public example: reaction-wheel attitude hold with initial attitude/rate error and optional disturbances."
+
+metadata:
+  owner: "public"
+  notes: "Run with `python run_simulation.py --config examples/configs/public_attitude_hold_disturbance.yaml`."
+
+objects:
+  bus:
+    kind: "satellite"
+    enabled: true
+    role: "attitude_test_article"
+    specs:
+      mass_kg: 120.0
+      mass_properties:
+        inertia_kg_m2:
+          - [12.0, 0.0, 0.0]
+          - [0.0, 10.0, 0.0]
+          - [0.0, 0.0, 8.0]
+    initial_state:
+      position_eci_km: [7000.0, 0.0, 0.0]
+      velocity_eci_km_s: [0.0, 7.5, 0.0]
+      # Key knobs: initial pointing error and body rates.
+      attitude_quat_bn: [0.9063078, 0.0, 0.4226183, 0.0]
+      angular_rate_body_rad_s: [0.02, -0.015, 0.01]
+    orbit_control:
+      kind: "python"
+      module: "sim.control.orbit.zero_controller"
+      class_name: "ZeroController"
+      params: {}
+    attitude_control:
+      kind: "python"
+      module: "sim.control.attitude.baseline"
+      class_name: "ReactionWheelPDController"
+      params:
+        wheel_axes_body:
+          - [1.0, 0.0, 0.0]
+          - [0.0, 1.0, 0.0]
+          - [0.0, 0.0, 1.0]
+        # Key knob: actuator authority.
+        wheel_torque_limits_nm: [0.05, 0.05, 0.05]
+        desired_attitude_quat_bn: [1.0, 0.0, 0.0, 0.0]
+        desired_rate_body_rad_s: [0.0, 0.0, 0.0]
+        # Key knobs: controller gains.
+        kp: [0.32, 0.32, 0.32]
+        kd: [3.5, 3.5, 3.5]
+
+simulator:
+  # Key knob: run long enough to observe settling.
+  duration_s: 180.0
+  dt_s: 1.0
+  dynamics:
+    orbit:
+      model: "two_body"
+    attitude:
+      enabled: true
+      attitude_substep_s: 0.1
+      # Key knobs: turn disturbances on/off to stress the controller.
+      disturbance_torques:
+        gravity_gradient: true
+        magnetic: false
+        drag: false
+        srp: false
+    rocket:
+      enabled: false
+  plugin_validation:
+    strict: true
+  termination:
+    earth_impact_enabled: false
+
+outputs:
+  output_dir: "outputs/examples/public_attitude_hold_disturbance"
+  mode: "save"
+  stats:
+    print_summary: true
+    save_json: true
+    save_full_log: true
+  plots:
+    enabled: true
+    figure_ids: ["attitude", "quaternion_error", "rates_eci", "control_effort"]
+  animations:
+    enabled: false
+    types: []
+
+monte_carlo:
+  enabled: false
+

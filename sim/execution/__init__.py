@@ -13,6 +13,8 @@ _PRIVATE_EXPORTS = {
     "run_serial_monte_carlo_runs": ("sim.execution.campaigns", "run_serial_monte_carlo_runs"),
     "prepare_sensitivity_runs": ("sim.execution.sensitivity", "prepare_sensitivity_runs"),
     "run_sensitivity_runs": ("sim.execution.sensitivity", "run_sensitivity_runs"),
+    "prepare_batch_run_configs": ("sim.execution.validation", "prepare_batch_run_configs"),
+    "validate_generated_batch_configs": ("sim.execution.validation", "validate_generated_batch_configs"),
 }
 
 __all__ = [
@@ -20,6 +22,7 @@ __all__ = [
     "can_run_monte_carlo_campaign",
     "create_single_run_engine",
     "prepare_monte_carlo_runs",
+    "prepare_batch_run_configs",
     "prepare_sensitivity_runs",
     "run_monte_carlo_campaign",
     "run_monte_carlo_runs",
@@ -27,6 +30,7 @@ __all__ = [
     "run_sensitivity_runs",
     "run_simulation_config_file",
     "run_simulation_scenario",
+    "validate_generated_batch_configs",
 ]
 
 

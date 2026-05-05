@@ -503,25 +503,34 @@ class _RateLimitedController:
         return getattr(self.base, item)
 
 
+def _apply_relative_init_from_reference(
+    *,
+    agent: AgentRuntime,
+    reference: AgentRuntime,
+    initial_state: dict[str, Any],
+) -> None:
+    rel = _resolve_chaser_relative_ric_init(initial_state)
+    if rel is None or agent.truth is None or reference.truth is None:
+        return
+    x_rel, frame = rel
+    r_t = np.array(reference.truth.position_eci_km, dtype=float)
+    v_t = np.array(reference.truth.velocity_eci_km_s, dtype=float)
+    r0 = float(np.linalg.norm(r_t))
+    if r0 <= 0.0:
+        return
+    x_rel_rect = ric_curv_to_rect(x_rel, r0_km=r0) if frame == "curv" else np.array(x_rel, dtype=float).reshape(6)
+    x_agent_eci = ric_rect_state_to_eci(x_rel_rect, r_t, v_t)
+    agent.truth.position_eci_km = x_agent_eci[:3]
+    agent.truth.velocity_eci_km_s = x_agent_eci[3:]
+
+
 def _apply_chaser_relative_init_from_target(
     *,
     chaser: AgentRuntime,
     target: AgentRuntime,
     initial_state: dict[str, Any],
 ) -> None:
-    rel = _resolve_chaser_relative_ric_init(initial_state)
-    if rel is None or chaser.truth is None or target.truth is None:
-        return
-    x_rel, frame = rel
-    r_t = np.array(target.truth.position_eci_km, dtype=float)
-    v_t = np.array(target.truth.velocity_eci_km_s, dtype=float)
-    r0 = float(np.linalg.norm(r_t))
-    if r0 <= 0.0:
-        return
-    x_rel_rect = ric_curv_to_rect(x_rel, r0_km=r0) if frame == "curv" else np.array(x_rel, dtype=float).reshape(6)
-    x_chaser_eci = ric_rect_state_to_eci(x_rel_rect, r_t, v_t)
-    chaser.truth.position_eci_km = x_chaser_eci[:3]
-    chaser.truth.velocity_eci_km_s = x_chaser_eci[3:]
+    _apply_relative_init_from_reference(agent=chaser, reference=target, initial_state=initial_state)
 
 
 def _build_orbit_propagator(cfg: SimulationScenarioConfig) -> OrbitPropagator:
@@ -706,8 +715,12 @@ def _build_rocket_guidance(agent_cfg: Any) -> RocketGuidanceLaw:
     return guidance
 
 
-def _create_rocket_runtime(cfg: SimulationScenarioConfig) -> AgentRuntime:
-    rc = cfg.rocket
+def _create_rocket_runtime(
+    cfg: SimulationScenarioConfig,
+    object_id: str = "rocket",
+    agent_cfg: Any | None = None,
+) -> AgentRuntime:
+    rc = cfg.rocket if agent_cfg is None else agent_cfg
     r_init = dict(rc.initial_state or {})
     r_specs = dict(rc.specs or {})
     orbit_dyn = dict(cfg.simulator.dynamics.get("orbit", {}) or {})
@@ -814,7 +827,7 @@ def _create_rocket_runtime(cfg: SimulationScenarioConfig) -> AgentRuntime:
     mission_modules = [_module_obj(pointer) for pointer in list(rc.mission_objectives or [])]
     mission_modules = [module for module in mission_modules if module is not None]
     return AgentRuntime(
-        object_id="rocket",
+        object_id=object_id,
         kind="rocket",
         enabled=bool(rc.enabled),
         active=bool(rc.enabled),

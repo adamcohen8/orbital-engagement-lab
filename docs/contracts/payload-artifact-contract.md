@@ -1,6 +1,6 @@
 # Payload And Artifact Contract
 
-This document defines the 0.1 contract for simulation payloads, summaries, and
+This document defines the 0.4 contract for simulation payloads, summaries, and
 output artifacts. It focuses on single-run payloads and the public review
 surface. Batch/campaign payloads are included only at a high level because their
 full schemas remain Pro/private maturity work.
@@ -67,12 +67,16 @@ The single-run `summary` should include:
 - `rocket_insertion_achieved`
 - `rocket_insertion_time_s`
 - `target_reference_orbit_enabled`
+- `reference_object_id`
+- `primary_object_pair`
 - `thrust_stats`
 - `attitude_guardrail_stats`
 - `knowledge_detection_by_observer`
 - `knowledge_consistency_by_observer`
+- `ground_station_access_summary`
 - `plot_outputs`
 - `animation_outputs`
+- `output_index_md`
 
 Compatibility expectations:
 
@@ -84,6 +88,10 @@ Compatibility expectations:
 - `terminated_early` is the authoritative early-termination flag.
 - Termination detail fields may be `null` for nominal completion.
 - `thrust_stats` is keyed by object ID.
+- `reference_object_id` is the default object used for relative frames and
+  plots when one is available.
+- `primary_object_pair` is the default pair for relative metrics and plots; it
+  should be treated as object IDs, not fixed roles.
 - `plot_outputs` and `animation_outputs` are maps from artifact/figure IDs to
   paths or artifact descriptors.
 
@@ -227,7 +235,7 @@ Batch payloads may include:
 - sensitivity rankings,
 - AI report artifacts.
 
-These are Pro/private workflow surfaces in 0.1. They are real and tested, but
+These are Pro/private workflow surfaces in 0.4. They are real and tested, but
 their complete schema is not yet a public-core contract. Campaign and benchmark
 schema stabilization should happen in a dedicated benchmark/campaign contract.
 

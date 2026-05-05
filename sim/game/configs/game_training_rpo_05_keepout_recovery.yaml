@@ -1,124 +1,166 @@
-scenario_name: "game_training_rpo_05_keepout_recovery"
-scenario_description: "RPO trainer scenario for recovering from an unsafe closing approach before entering keepout."
-
+scenario_name: game_training_rpo_05_keepout_recovery
+scenario_description: RPO trainer scenario for recovering from an unsafe closing approach
+  before entering keepout.
 metadata:
-  owner: "codex"
-  notes: "Run with `python run_game.py sim/game/configs/game_training_rpo_05_keepout_recovery.yaml --speed-multiple 10`."
+  owner: codex
+  notes: Run with `python run_game.py sim/game/configs/game_training_rpo_05_keepout_recovery.yaml
+    --speed-multiple 10`.
   game:
-    control_mode: "ric_translation"
-    difficulty: "medium"
-    player_max_accel_km_s2: 1.5e-5
+    control_mode: ric_translation
+    difficulty: medium
+    player_max_accel_km_s2: 1.5e-05
     training:
       enabled: true
-      scenario_id: "rpo_05_keepout_recovery"
-      learning_goal: "Recover from an unsafe closing geometry by preserving keepout margin, arresting closure, and settling back into the V-bar hold box."
-      player_brief: "You are already in a bad closing geometry. First preserve keepout margin, then recover to the trailing hold box."
+      scenario_id: rpo_05_keepout_recovery
+      learning_goal: Recover from an unsafe closing geometry by preserving keepout
+        margin, arresting closure, and settling back into the V-bar hold box.
+      player_brief: You are already in a bad closing geometry. First preserve keepout
+        margin, then recover to the trailing hold box.
       pass_criteria:
-        - "Never enter the 250 meter keepout zone."
-        - "Return to the V-bar hold box."
-        - "Keep relative speed below the goal threshold."
-        - "Stay under the time and delta-v budgets."
+      - Never enter the 250 meter keepout zone.
+      - Return to the V-bar hold box.
+      - Keep relative speed below the goal threshold.
+      - Stay under the time and delta-v budgets.
       instructor_notes:
-        - "The first correct action may be to move away from the target, not toward the green box."
-        - "Use the keepout margin metric as the primary safety cue."
-      target_object_id: "target"
-      chaser_object_id: "chaser"
+      - The first correct action may be to move away from the target, not toward the
+        green box.
+      - Use the keepout margin metric as the primary safety cue.
+      target_object_id: target
+      chaser_object_id: chaser
       keepout_radius_km: 0.25
-      goal_relative_ric_km: [0.0, -0.75, 0.0]
+      goal_relative_ric_km:
+      - 0.0
+      - -0.75
+      - 0.0
       goal_radius_km: 0.15
       max_goal_speed_km_s: 0.0002
       max_time_s: 3600.0
       max_delta_v_m_s: 5.0
-
-rocket:
-  enabled: false
-  role: "rocket"
-
-chaser:
-  enabled: true
-  role: "chaser"
-  specs:
-    mass_kg: 200.0
-  initial_state:
-    relative_to_target_ric:
-      frame: "rect"
-      state: [0.0, -0.45, 0.0, 0.0, 0.0005, 0.0]
-    attitude_quat_bn: [1.0, 0.0, 0.0, 0.0]
-    angular_rate_body_rad_s: [0.0, 0.0, 0.0]
-  orbit_control:
-    kind: "python"
-    module: "sim.control.orbit.zero_controller"
-    class_name: "ZeroController"
-    params: {}
-  attitude_control:
-    kind: "python"
-    module: "sim.control.attitude.zero_torque"
-    class_name: "ZeroTorqueController"
-    params: {}
-  mission_strategy: null
-  mission_execution: null
-  mission_objectives: []
-  knowledge:
-    refresh_rate_s: 1.0
-    targets: ["target"]
-    conditions:
-      require_line_of_sight: false
-      max_range_km: 10000.0
-    sensor_error:
-      pos_sigma_km: [0.0, 0.0, 0.0]
-      vel_sigma_km_s: [0.0, 0.0, 0.0]
-    estimation:
-      type: "ekf"
-
-target:
-  enabled: true
-  role: "target"
-  reference_orbit:
+objects:
+  rocket:
+    enabled: false
+    role: rocket
+    kind: rocket
+  chaser:
     enabled: true
-  specs:
-    mass_kg: 1800.0
-  initial_state:
-    coes:
-      a_km: 7000.0
-      ecc: 0.0
-      inc_deg: 45.0
-      raan_deg: 0.0
-      argp_deg: 0.0
-      true_anomaly_deg: 0.0
-    attitude_quat_bn: [1.0, 0.0, 0.0, 0.0]
-    angular_rate_body_rad_s: [0.0, 0.0, 0.0]
-  orbit_control:
-    kind: "python"
-    module: "sim.control.orbit.zero_controller"
-    class_name: "ZeroController"
-    params: {}
-  attitude_control:
-    kind: "python"
-    module: "sim.control.attitude.zero_torque"
-    class_name: "ZeroTorqueController"
-    params: {}
-  mission_strategy: null
-  mission_execution: null
-  mission_objectives: []
-  knowledge:
-    refresh_rate_s: 1.0
-    targets: ["chaser"]
-    conditions:
-      require_line_of_sight: false
-      max_range_km: 10000.0
-    sensor_error:
-      pos_sigma_km: [0.0, 0.0, 0.0]
-      vel_sigma_km_s: [0.0, 0.0, 0.0]
-    estimation:
-      type: "ekf"
-
+    role: chaser
+    specs:
+      mass_kg: 200.0
+    initial_state:
+      relative_to_target_ric:
+        frame: rect
+        state:
+        - 0.0
+        - -0.45
+        - 0.0
+        - 0.0
+        - 0.0005
+        - 0.0
+      attitude_quat_bn:
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      angular_rate_body_rad_s:
+      - 0.0
+      - 0.0
+      - 0.0
+      relative_to: target
+    orbit_control:
+      kind: python
+      module: sim.control.orbit.zero_controller
+      class_name: ZeroController
+      params: {}
+    attitude_control:
+      kind: python
+      module: sim.control.attitude.zero_torque
+      class_name: ZeroTorqueController
+      params: {}
+    mission_strategy: null
+    mission_execution: null
+    mission_objectives: []
+    knowledge:
+      refresh_rate_s: 1.0
+      targets:
+      - target
+      conditions:
+        require_line_of_sight: false
+        max_range_km: 10000.0
+      sensor_error:
+        pos_sigma_km:
+        - 0.0
+        - 0.0
+        - 0.0
+        vel_sigma_km_s:
+        - 0.0
+        - 0.0
+        - 0.0
+      estimation:
+        type: ekf
+    kind: satellite
+  target:
+    enabled: true
+    role: target
+    reference_orbit:
+      enabled: true
+    specs:
+      mass_kg: 1800.0
+    initial_state:
+      coes:
+        a_km: 7000.0
+        ecc: 0.0
+        inc_deg: 45.0
+        raan_deg: 0.0
+        argp_deg: 0.0
+        true_anomaly_deg: 0.0
+      attitude_quat_bn:
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      angular_rate_body_rad_s:
+      - 0.0
+      - 0.0
+      - 0.0
+    orbit_control:
+      kind: python
+      module: sim.control.orbit.zero_controller
+      class_name: ZeroController
+      params: {}
+    attitude_control:
+      kind: python
+      module: sim.control.attitude.zero_torque
+      class_name: ZeroTorqueController
+      params: {}
+    mission_strategy: null
+    mission_execution: null
+    mission_objectives: []
+    knowledge:
+      refresh_rate_s: 1.0
+      targets:
+      - chaser
+      conditions:
+        require_line_of_sight: false
+        max_range_km: 10000.0
+      sensor_error:
+        pos_sigma_km:
+        - 0.0
+        - 0.0
+        - 0.0
+        vel_sigma_km_s:
+        - 0.0
+        - 0.0
+        - 0.0
+      estimation:
+        type: ekf
+    kind: satellite
 simulator:
-  scenario_type: "auto"
+  scenario_type: auto
   duration_s: 3600.0
   dt_s: 1.0
   dynamics:
     orbit:
-      model: "two_body"
+      model: two_body
       orbit_substep_s: 1.0
       j2: false
       j3: false
@@ -132,17 +174,16 @@ simulator:
     rocket:
       enabled: false
   environment:
-    ephemeris_mode: "analytic_simple"
+    ephemeris_mode: analytic_simple
     atmosphere_env: {}
   plugin_validation:
     strict: true
   termination:
     earth_impact_enabled: false
     earth_radius_km: 6378.137
-
 outputs:
-  output_dir: "outputs/game_training_rpo_05"
-  mode: "save"
+  output_dir: outputs/game_training_rpo_05
+  mode: save
   stats:
     enabled: true
     print_summary: false
@@ -155,17 +196,22 @@ outputs:
   animations:
     enabled: false
     types: []
-    battlespace_dashboard_target_object_id: "target"
-    battlespace_dashboard_chaser_object_id: "chaser"
+    battlespace_dashboard_target_object_id: target
+    battlespace_dashboard_chaser_object_id: chaser
     battlespace_dashboard_show_trajectory: true
     battlespace_dashboard_attitude_dims_m:
-      target: [2.0, 1.5, 1.5]
-      chaser: [2.0, 1.5, 1.5]
+      target:
+      - 2.0
+      - 1.5
+      - 1.5
+      chaser:
+      - 2.0
+      - 1.5
+      - 1.5
     battlespace_dashboard_thruster_active_threshold_km_s2: 1.0e-15
     fps: 30
     speed_multiple: 1.0
     frame_stride: 1
-
 monte_carlo:
   enabled: false
   iterations: 1

@@ -27,402 +27,449 @@ ground_stations:
     # Optional maximum slant range for access in kilometers.
     max_range_km: 2500.0
 
-# Rocket object. Disable this section for satellite-only rendezvous scenarios.
-rocket:
-  # Whether the rocket participates in the run.
-  enabled: true
-  # Object role used by mission logic, reporting, and some conventions.
-  role: "rocket"
-  # Optional preset YAML. Relative paths resolve from this file, cwd, repo root, then built-in presets.
-  preset: "../sim/presets/objects/basic_two_stage_rocket.yaml"
-  # Object-specific physical parameters. These override preset values.
-  specs:
-    # Payload carried by the rocket stack, in kilograms.
-    payload_mass_kg: 150.0
-    # Body-frame thrust axis. Change only if the vehicle model uses a different thrust direction.
-    thrust_axis_body: [1.0, 0.0, 0.0]
-  # Initial launch state for rocket scenarios.
-  initial_state:
-    # Launch latitude in degrees.
-    launch_lat_deg: 28.5
-    # Launch longitude in degrees.
-    launch_lon_deg: -80.6
-    # Launch altitude in kilometers.
-    launch_alt_km: 0.0
-    # Launch azimuth in degrees, measured clockwise from north.
-    launch_azimuth_deg: 90.0
-  # Primary rocket guidance plugin.
-  base_guidance:
-    # Plugin kind. User configs should normally use "python".
-    kind: "python"
-    # Importable module containing the guidance class.
-    module: "sim.rocket.guidance"
-    # Guidance class to instantiate from the module.
-    class_name: "OpenLoopPitchProgramGuidance"
-    # Parameters passed to the guidance class constructor.
-    params:
-      # Time to hold the initial vertical ascent before pitching, in seconds.
-      vertical_hold_s: 8.0
-      # Time when the open-loop pitch program starts, in seconds.
-      pitch_start_s: 8.0
-      # Time when the open-loop pitch program reaches the final pitch, in seconds.
-      pitch_end_s: 190.0
-      # Final pitch command in degrees.
-      pitch_final_deg: 75.0
-      # Maximum throttle fraction requested by guidance.
-      max_throttle: 1.0
-  # Optional list of guidance modifiers. Leave empty unless testing staged/custom guidance behavior.
-  guidance_modifiers: []
-  # Rocket translational controller. ZeroController means no extra orbital control beyond rocket guidance.
-  orbit_control:
-    # Plugin kind for the orbit controller.
-    kind: "python"
-    # Importable module containing the orbit controller class.
-    module: "sim.control.orbit.zero_controller"
-    # Orbit controller class name.
-    class_name: "ZeroController"
-    # Constructor parameters for the orbit controller.
-    params: {}
-  # Rocket attitude controller. ZeroTorqueController applies no active torque.
-  attitude_control:
-    # Plugin kind for the attitude controller.
-    kind: "python"
-    # Importable module containing the attitude controller class.
-    module: "sim.control.attitude.zero_torque"
-    # Attitude controller class name.
-    class_name: "ZeroTorqueController"
-    # Constructor parameters for the attitude controller.
-    params: {}
-  # Mission strategy decides high-level intent.
-  mission_strategy:
-    # Plugin kind for mission strategy.
-    kind: "python"
-    # Importable module containing the strategy class.
-    module: "sim.mission.modules"
-    # Strategy class name.
-    class_name: "RocketPursuitMissionStrategy"
-    # Strategy parameters.
-    params:
-      # Object ID the rocket strategy considers the target.
-      target_id: "target"
-  # Mission execution converts strategy intent into commands.
-  mission_execution:
-    # Plugin kind for mission execution.
-    kind: "python"
-    # Importable module containing the execution class.
-    module: "sim.mission.modules"
-    # Execution class name.
-    class_name: "RocketGoNowExecution"
-    # Execution parameters.
-    params: {}
-  # Optional objective definitions. Leave empty until using objective-specific scoring/reporting.
-  mission_objectives: []
-  # Optional external bridge configuration for SIL/HIL experiments.
-  knowledge:
-    # Seconds between knowledge updates.
-    refresh_rate_s: 1.0
-    # Object IDs this object attempts to track.
-    targets:
-      - "target"
-    # Access constraints for generating knowledge updates.
-    conditions:
-      # Require geometric line of sight before updating knowledge.
-      require_line_of_sight: true
-      # Maximum sensing range in kilometers.
-      max_range_km: 50000.0
-    # Measurement error assumptions used by knowledge/estimation.
-    sensor_error:
-      # Position 1-sigma error by axis, in kilometers.
-      pos_sigma_km: [0.01, 0.01, 0.01]
-      # Velocity 1-sigma error by axis, in kilometers per second.
-      vel_sigma_km_s: [0.0001, 0.0001, 0.0001]
-    # Estimator used for this object's knowledge updates.
-    estimation:
-      # Estimator type. "ekf" is the standard choice for this template.
-      type: "ekf"
+# Scene objects keyed by object ID. New configs should put rockets and satellites here;
+# legacy top-level rocket/target/chaser sections are still accepted for compatibility.
+objects:
+  # Rocket object. Disable this section for satellite-only rendezvous scenarios.
+  rocket:
+    # Whether the rocket participates in the run.
+    enabled: true
+    # Object role used by mission logic, reporting, and some conventions.
+    role: "rocket"
+    # Optional preset YAML. Relative paths resolve from this file, cwd, repo root, then built-in presets.
+    preset: "../sim/presets/objects/basic_two_stage_rocket.yaml"
+    # Object-specific physical parameters. These override preset values.
+    specs:
+      # Payload carried by the rocket stack, in kilograms.
+      payload_mass_kg: 150.0
+      # Body-frame thrust axis. Change only if the vehicle model uses a different thrust direction.
+      thrust_axis_body: [1.0, 0.0, 0.0]
+    # Initial launch state for rocket scenarios.
+    initial_state:
+      # Launch latitude in degrees.
+      launch_lat_deg: 28.5
+      # Launch longitude in degrees.
+      launch_lon_deg: -80.6
+      # Launch altitude in kilometers.
+      launch_alt_km: 0.0
+      # Launch azimuth in degrees, measured clockwise from north.
+      launch_azimuth_deg: 90.0
+    # Primary rocket guidance plugin.
+    base_guidance:
+      # Plugin kind. User configs should normally use "python".
+      kind: "python"
+      # Importable module containing the guidance class.
+      module: "sim.rocket.guidance"
+      # Guidance class to instantiate from the module.
+      class_name: "OpenLoopPitchProgramGuidance"
+      # Parameters passed to the guidance class constructor.
+      params:
+        # Time to hold the initial vertical ascent before pitching, in seconds.
+        vertical_hold_s: 8.0
+        # Time when the open-loop pitch program starts, in seconds.
+        pitch_start_s: 8.0
+        # Time when the open-loop pitch program reaches the final pitch, in seconds.
+        pitch_end_s: 190.0
+        # Final pitch command in degrees.
+        pitch_final_deg: 75.0
+        # Maximum throttle fraction requested by guidance.
+        max_throttle: 1.0
+    # Optional list of guidance modifiers. Leave empty unless testing staged/custom guidance behavior.
+    guidance_modifiers: []
+    # Rocket translational controller. ZeroController means no extra orbital control beyond rocket guidance.
+    orbit_control:
+      # Plugin kind for the orbit controller.
+      kind: "python"
+      # Importable module containing the orbit controller class.
+      module: "sim.control.orbit.zero_controller"
+      # Orbit controller class name.
+      class_name: "ZeroController"
+      # Constructor parameters for the orbit controller.
+      params: {}
+    # Rocket attitude controller. ZeroTorqueController applies no active torque.
+    attitude_control:
+      # Plugin kind for the attitude controller.
+      kind: "python"
+      # Importable module containing the attitude controller class.
+      module: "sim.control.attitude.zero_torque"
+      # Attitude controller class name.
+      class_name: "ZeroTorqueController"
+      # Constructor parameters for the attitude controller.
+      params: {}
+    # Mission strategy decides high-level intent.
+    mission_strategy:
+      # Plugin kind for mission strategy.
+      kind: "python"
+      # Importable module containing the strategy class.
+      module: "sim.mission.modules"
+      # Strategy class name.
+      class_name: "RocketPursuitMissionStrategy"
+      # Strategy parameters.
+      params:
+        # Object ID the rocket strategy considers the target.
+        target_id: "target"
+    # Mission execution converts strategy intent into commands.
+    mission_execution:
+      # Plugin kind for mission execution.
+      kind: "python"
+      # Importable module containing the execution class.
+      module: "sim.mission.modules"
+      # Execution class name.
+      class_name: "RocketGoNowExecution"
+      # Execution parameters.
+      params: {}
+    # Optional objective definitions. Leave empty until using objective-specific scoring/reporting.
+    mission_objectives: []
+    # Optional external bridge configuration. Leave disabled unless you provide a bridge plugin.
+    bridge:
+      # Keep false unless running an integration bridge.
+      enabled: false
+      # Integration mode label for your bridge.
+      mode: "external"
+      # Bridge endpoint URI. Null means no endpoint is configured.
+      endpoint: null
+      # Importable module containing the bridge class. Null means no bridge plugin is loaded.
+      module: null
+      # Bridge class name. Null means no bridge plugin is loaded.
+      class_name: null
+      # Bridge-specific parameters.
+      params: {}
+    # Knowledge/sensing configuration for what this object can observe.
+    knowledge:
+      # Seconds between knowledge updates.
+      refresh_rate_s: 1.0
+      # Object IDs this object attempts to track.
+      targets:
+        - "target"
+      # Access constraints for generating knowledge updates.
+      conditions:
+        # Require geometric line of sight before updating knowledge.
+        require_line_of_sight: true
+        # Maximum sensing range in kilometers.
+        max_range_km: 50000.0
+      # Measurement error assumptions used by knowledge/estimation.
+      sensor_error:
+        # Position 1-sigma error by axis, in kilometers.
+        pos_sigma_km: [0.01, 0.01, 0.01]
+        # Velocity 1-sigma error by axis, in kilometers per second.
+        vel_sigma_km_s: [0.0001, 0.0001, 0.0001]
+      # Estimator used for this object's knowledge updates.
+      estimation:
+        # Estimator type. "ekf" is the standard choice for this template.
+        type: "ekf"
 
-# Chaser spacecraft. Use this for the active rendezvous, pursuit, or interceptor object.
-chaser:
-  # Whether the chaser participates in the run.
-  enabled: true
-  # Object role used by controllers, reports, and mission logic.
-  role: "chaser"
-  # Satellite preset file. Override fields below when exploring variants.
-  preset: "../sim/presets/objects/basic_satellite.yaml"
-  # Chaser physical parameters.
-  specs:
-    # Total mass in kilograms. Use dry/fuel mass fields instead when modeling fuel depletion in more detail.
-    mass_kg: 200.0
-  # Initial state for the chaser.
-  initial_state:
-    # "rocket_deployment" initializes from the rocket at deploy_time_s. Use relative_to_target_ric for direct RPO setups.
-    source: "rocket_deployment"
-    # Deployment time from the rocket, in seconds.
-    deploy_time_s: 900.0
-    # Body-frame deployment delta-v in meters per second.
-    deploy_dv_body_m_s: [10.0, 0.0, 0.0]
-    # Optional alternative: initialize chaser relative to target in RIC instead of deployment/absolute state.
-    # relative_to_target_ric:
-    #   frame: "rect"   # "rect" | "curv"
-    #   state: [2.0, -8.0, 1.2, 0.0008, -0.0012, 0.0004]  # [R,I,C,dR,dI,dC] (km, km/s)
-    # Optional alternative: initialize from a TLE. If simulator.initial_jd_utc is set,
-    # the TLE mean anomaly is advanced to that epoch with a two-body approximation.
-    # tle:
-    #   line1: "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9005"
-    #   line2: "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1000"
-    # Initial body-to-navigation attitude quaternion [w, x, y, z].
-    attitude_quat_bn: [1.0, 0.0, 0.0, 0.0]
-    # Initial body angular rate in radians per second.
-    angular_rate_body_rad_s: [0.0, 0.0, 0.0]
-  # Chaser translational controller.
-  orbit_control:
-    # Plugin kind for the orbit controller.
-    kind: "python"
-    # Importable module containing the orbit controller class.
-    module: "sim.control.orbit.lqr"
-    # Controller class name.
-    class_name: "HCWLQRController"
-    # Controller tuning and state mapping.
-    params:
-      # Chief mean motion used by the HCW controller, in radians per second.
-      mean_motion_rad_s: 0.001078
-      # Maximum commanded acceleration in kilometers per second squared.
-      max_accel_km_s2: 2.0e-6
-      # Controller design/update timestep in seconds.
-      design_dt_s: 10.0
-      # Slice of the relative curvilinear RIC state consumed by the controller.
-      ric_curv_state_slice: [0, 6]
-      # Slice of the chief ECI state consumed by the controller.
-      chief_eci_state_slice: [6, 12]
-      # Optional no-radial-burn variant:
-      # module: "sim.control.orbit.lqr_no_radial"
-      # class_name: "HCWNoRadialLQRController"
-      # params:
-      #   mean_motion_rad_s: 0.001078
-      #   max_accel_km_s2: 2.0e-6
-      #   design_dt_s: 10.0
-      #   ric_curv_state_slice: [0, 6]
-      #   chief_eci_state_slice: [6, 12]
-      #   r_weights: [1.94e13, 1.94e13]
-  # Chaser attitude controller.
-  attitude_control:
-    # Plugin kind for the attitude controller.
-    kind: "python"
-    # Importable module containing the attitude controller class.
-    module: "sim.control.attitude.surrogate_snap"
-    # Attitude controller class name.
-    class_name: "SurrogateSnapECIController"
-    # Attitude controller parameters.
-    params:
-      # Desired body-to-navigation attitude quaternion [w, x, y, z].
-      desired_attitude_quat_bn: [1.0, 0.0, 0.0, 0.0]
-      # Rate-cancellation authority in radians per second squared.
-      cancel_rate_mag_rad_s2: 1.0
-      # Body-rate threshold considered settled, in radians per second.
-      rate_tolerance_rad_s: 1.0e-3
-      # Nominal time for a 180-degree slew, in seconds.
-      slew_time_180_s: 1.0
-      # Randomized pointing noise 1-sigma, in degrees.
-      pointing_sigma_deg: 0.05
-      # Default attitude controller timestep in seconds.
-      default_dt_s: 1.0
-      # Random seed for repeatable pointing noise.
-      rng_seed: 2
-  # Chaser mission strategy.
-  mission_strategy:
-    # Plugin kind for mission strategy.
-    kind: "python"
-    # Importable module containing the strategy class.
-    module: "sim.mission.modules"
-    # Strategy class name.
-    class_name: "PursuitMissionStrategy"
-    # Strategy parameters.
-    params:
-      # Object ID the chaser pursues.
-      target_id: "target"
-      # Use estimated/known target state rather than perfect truth when available.
-      use_knowledge_for_targeting: true
-      # Strategy acceleration cap in kilometers per second squared.
-      max_accel_km_s2: 2.0e-6
-      # Request attitude alignment with the thrust vector before firing.
-      align_to_thrust: true
-  # Chaser mission execution.
-  mission_execution:
-    # Plugin kind for mission execution.
-    kind: "python"
-    # Importable module containing the execution class.
-    module: "sim.mission.modules"
-    # Execution class name.
-    class_name: "ControllerPointingExecution"
-    # Execution parameters.
-    params:
-      # Thruster direction in the body frame.
-      thruster_direction_body: [1.0, 0.0, 0.0]
-      # Maximum pointing error allowed before thrust is considered aligned, in degrees.
-      alignment_tolerance_deg: 10.0
-      # If true, suppress thrust until attitude alignment criteria are met.
-      require_attitude_alignment: true
-  # Optional objective definitions. Leave empty unless using objective-specific scoring/reporting.
-  mission_objectives: []
-  # Optional external bridge configuration for HIL/SIL experiments.
-  knowledge:
-    # Seconds between knowledge updates.
-    refresh_rate_s: 1.0
-    # Object IDs this object attempts to track.
-    targets:
-      - "target"
-    # Access constraints for generating knowledge updates.
-    conditions:
-      # Require geometric line of sight before updating knowledge.
-      require_line_of_sight: true
-      # Maximum sensing range in kilometers.
-      max_range_km: 10000.0
-    # Measurement error assumptions used by knowledge/estimation.
-    sensor_error:
-      # Position 1-sigma error by axis, in kilometers.
-      pos_sigma_km: [0.005, 0.005, 0.005]
-      # Velocity 1-sigma error by axis, in kilometers per second.
-      vel_sigma_km_s: [0.00005, 0.00005, 0.00005]
-    # Estimator used for this object's knowledge updates.
-    estimation:
-      # Estimator type. "ekf" is the standard choice for this template.
-      type: "ekf"
+  # Chaser spacecraft. Use this for the active rendezvous, pursuit, or interceptor object.
+  chaser:
+    # Whether the chaser participates in the run.
+    enabled: true
+    # Object role used by controllers, reports, and mission logic.
+    role: "chaser"
+    # Satellite preset file. Override fields below when exploring variants.
+    preset: "../sim/presets/objects/basic_satellite.yaml"
+    # Chaser physical parameters.
+    specs:
+      # Total mass in kilograms. Use dry/fuel mass fields instead when modeling fuel depletion in more detail.
+      mass_kg: 200.0
+    # Initial state for the chaser.
+    initial_state:
+      # "rocket_deployment" initializes from the rocket at deploy_time_s. Use relative_to plus relative_to_target_ric for direct RPO setups.
+      source: "rocket_deployment"
+      # Deployment time from the rocket, in seconds.
+      deploy_time_s: 900.0
+      # Body-frame deployment delta-v in meters per second.
+      deploy_dv_body_m_s: [10.0, 0.0, 0.0]
+      # Optional alternative: initialize chaser relative to target in RIC instead of deployment/absolute state.
+      # relative_to: "target"
+      # relative_to_target_ric:
+      #   frame: "rect"   # "rect" | "curv"
+      #   state: [2.0, -8.0, 1.2, 0.0008, -0.0012, 0.0004]  # [R,I,C,dR,dI,dC] (km, km/s)
+      # Optional alternative: initialize from a TLE. If simulator.initial_jd_utc is set,
+      # the TLE mean anomaly is advanced to that epoch with a two-body approximation.
+      # tle:
+      #   line1: "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9005"
+      #   line2: "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1000"
+      # Initial body-to-navigation attitude quaternion [w, x, y, z].
+      attitude_quat_bn: [1.0, 0.0, 0.0, 0.0]
+      # Initial body angular rate in radians per second.
+      angular_rate_body_rad_s: [0.0, 0.0, 0.0]
+    # Chaser translational controller.
+    orbit_control:
+      # Plugin kind for the orbit controller.
+      kind: "python"
+      # Importable module containing the orbit controller class.
+      module: "sim.control.orbit.lqr"
+      # Controller class name.
+      class_name: "HCWLQRController"
+      # Controller tuning and state mapping.
+      params:
+        # Chief mean motion used by the HCW controller, in radians per second.
+        mean_motion_rad_s: 0.001078
+        # Maximum commanded acceleration in kilometers per second squared.
+        max_accel_km_s2: 2.0e-6
+        # Controller design/update timestep in seconds.
+        design_dt_s: 10.0
+        # Slice of the relative curvilinear RIC state consumed by the controller.
+        ric_curv_state_slice: [0, 6]
+        # Slice of the chief ECI state consumed by the controller.
+        chief_eci_state_slice: [6, 12]
+        # Optional no-radial-burn variant:
+        # module: "sim.control.orbit.lqr_no_radial"
+        # class_name: "HCWNoRadialLQRController"
+        # params:
+        #   mean_motion_rad_s: 0.001078
+        #   max_accel_km_s2: 2.0e-6
+        #   design_dt_s: 10.0
+        #   ric_curv_state_slice: [0, 6]
+        #   chief_eci_state_slice: [6, 12]
+        #   r_weights: [1.94e13, 1.94e13]
+    # Chaser attitude controller.
+    attitude_control:
+      # Plugin kind for the attitude controller.
+      kind: "python"
+      # Importable module containing the attitude controller class.
+      module: "sim.control.attitude.surrogate_snap"
+      # Attitude controller class name.
+      class_name: "SurrogateSnapECIController"
+      # Attitude controller parameters.
+      params:
+        # Desired body-to-navigation attitude quaternion [w, x, y, z].
+        desired_attitude_quat_bn: [1.0, 0.0, 0.0, 0.0]
+        # Rate-cancellation authority in radians per second squared.
+        cancel_rate_mag_rad_s2: 1.0
+        # Body-rate threshold considered settled, in radians per second.
+        rate_tolerance_rad_s: 1.0e-3
+        # Nominal time for a 180-degree slew, in seconds.
+        slew_time_180_s: 1.0
+        # Randomized pointing noise 1-sigma, in degrees.
+        pointing_sigma_deg: 0.05
+        # Default attitude controller timestep in seconds.
+        default_dt_s: 1.0
+        # Random seed for repeatable pointing noise.
+        rng_seed: 2
+    # Chaser mission strategy.
+    mission_strategy:
+      # Plugin kind for mission strategy.
+      kind: "python"
+      # Importable module containing the strategy class.
+      module: "sim.mission.modules"
+      # Strategy class name.
+      class_name: "PursuitMissionStrategy"
+      # Strategy parameters.
+      params:
+        # Object ID the chaser pursues.
+        target_id: "target"
+        # Use estimated/known target state rather than perfect truth when available.
+        use_knowledge_for_targeting: true
+        # Strategy acceleration cap in kilometers per second squared.
+        max_accel_km_s2: 2.0e-6
+        # Request attitude alignment with the thrust vector before firing.
+        align_to_thrust: true
+    # Chaser mission execution.
+    mission_execution:
+      # Plugin kind for mission execution.
+      kind: "python"
+      # Importable module containing the execution class.
+      module: "sim.mission.modules"
+      # Execution class name.
+      class_name: "ControllerPointingExecution"
+      # Execution parameters.
+      params:
+        # Thruster direction in the body frame.
+        thruster_direction_body: [1.0, 0.0, 0.0]
+        # Maximum pointing error allowed before thrust is considered aligned, in degrees.
+        alignment_tolerance_deg: 10.0
+        # If true, suppress thrust until attitude alignment criteria are met.
+        require_attitude_alignment: true
+    # Optional objective definitions. Leave empty unless using objective-specific scoring/reporting.
+    mission_objectives: []
+    # Optional external bridge configuration. Leave disabled unless you provide a bridge plugin.
+    bridge:
+      # Keep false unless running an integration bridge.
+      enabled: false
+      # Integration mode label.
+      mode: "external"
+      # Bridge endpoint URI. Null means no endpoint is configured.
+      endpoint: null
+      # Importable module containing the bridge class. Null means no bridge plugin is loaded.
+      module: null
+      # Bridge class name. Null means no bridge plugin is loaded.
+      class_name: null
+      # Bridge-specific parameters.
+      params: {}
+    # Knowledge/sensing configuration for the chaser.
+    knowledge:
+      # Seconds between knowledge updates.
+      refresh_rate_s: 1.0
+      # Object IDs this object attempts to track.
+      targets:
+        - "target"
+      # Access constraints for generating knowledge updates.
+      conditions:
+        # Require geometric line of sight before updating knowledge.
+        require_line_of_sight: true
+        # Maximum sensing range in kilometers.
+        max_range_km: 10000.0
+      # Measurement error assumptions used by knowledge/estimation.
+      sensor_error:
+        # Position 1-sigma error by axis, in kilometers.
+        pos_sigma_km: [0.005, 0.005, 0.005]
+        # Velocity 1-sigma error by axis, in kilometers per second.
+        vel_sigma_km_s: [0.00005, 0.00005, 0.00005]
+      # Estimator used for this object's knowledge updates.
+      estimation:
+        # Estimator type. "ekf" is the standard choice for this template.
+        type: "ekf"
 
-# Target spacecraft. Use this for the protected, pursued, or reference object.
-target:
-  # Whether the target participates in the run.
-  enabled: true
-  # Object role used by controllers, reports, and mission logic.
-  role: "target"
-  # Satellite preset file. Override fields below when exploring variants.
-  preset: "../sim/presets/objects/basic_satellite.yaml"
-  # Optional passive reference orbit for RIC-frame plotting and target-reference displays.
-  reference_orbit:
-    # Enable when you want to compare target motion against a passive nominal orbit.
-    enabled: false
-  # Target physical parameters.
-  specs:
-    # Total mass in kilograms.
-    mass_kg: 400.0
-  # Initial state for the target.
-  initial_state:
-    # Classical orbital elements for target initialization.
-    coes:
-      # Semi-major axis in kilometers.
-      a_km: 7000.0
-      # Eccentricity.
-      ecc: 0.001
-      # Inclination in degrees.
-      inc_deg: 45.0
-      # Right ascension of ascending node in degrees.
-      raan_deg: 0.0
-      # Argument of perigee in degrees.
-      argp_deg: 0.0
-      # True anomaly in degrees.
-      true_anomaly_deg: 0.0
-    # Optional alternative: initialize from a TLE instead of coes.
-    # tle:
-    #   lines:
-    #     - "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9005"
-    #     - "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1000"
-    # Initial body-to-navigation attitude quaternion [w, x, y, z].
-    attitude_quat_bn: [1.0, 0.0, 0.0, 0.0]
-    # Initial body angular rate in radians per second.
-    angular_rate_body_rad_s: [0.0, 0.0, 0.0]
-    # When target.reference_orbit.enabled is true, a passive reference orbit is propagated
-    # from this same initial position/velocity for RIC-frame plotting.
-  # Target translational controller.
-  orbit_control:
-    # Plugin kind for the orbit controller.
-    kind: "python"
-    # Importable module containing the orbit controller class.
-    module: "sim.control.orbit.zero_controller"
-    # Controller class name. ZeroController keeps the target passive translationally.
-    class_name: "ZeroController"
-    # Constructor parameters for the orbit controller.
-    params: {}
-  # Target attitude controller.
-  attitude_control:
-    # Plugin kind for the attitude controller.
-    kind: "python"
-    # Importable module containing the attitude controller class.
-    module: "sim.control.attitude.surrogate_snap"
-    # Attitude controller class name.
-    class_name: "SurrogateSnapECIController"
-    # Attitude controller parameters.
-    params:
-      # Desired body-to-navigation attitude quaternion [w, x, y, z].
-      desired_attitude_quat_bn: [1.0, 0.0, 0.0, 0.0]
-      # Rate-cancellation authority in radians per second squared.
-      cancel_rate_mag_rad_s2: 1.0
-      # Body-rate threshold considered settled, in radians per second.
-      rate_tolerance_rad_s: 1.0e-3
-      # Nominal time for a 180-degree slew, in seconds.
-      slew_time_180_s: 1.0
-      # Randomized pointing noise 1-sigma, in degrees.
-      pointing_sigma_deg: 0.05
-      # Default attitude controller timestep in seconds.
-      default_dt_s: 1.0
-      # Random seed for repeatable pointing noise.
-      rng_seed: 3
-  # Target mission strategy.
-  mission_strategy:
-    # Plugin kind for mission strategy.
-    kind: "python"
-    # Importable module containing the strategy class.
-    module: "sim.mission.modules"
-    # Strategy class name.
-    class_name: "HoldMissionStrategy"
-    # Strategy parameters.
-    params:
-      # Hold mode. Use "hold_eci" for inertial attitude hold.
-      attitude_mode: "hold_eci"
-      # Quaternion held by the target in hold_eci mode.
-      hold_quat_bn: [1.0, 0.0, 0.0, 0.0]
-  # Target mission execution.
-  mission_execution:
-    # Plugin kind for mission execution.
-    kind: "python"
-    # Importable module containing the execution class.
-    module: "sim.mission.modules"
-    # Execution class name.
-    class_name: "ControllerPointingExecution"
-    # Execution parameters.
-    params:
-      # Thruster direction in the body frame.
-      thruster_direction_body: [1.0, 0.0, 0.0]
-      # Maximum pointing error allowed before thrust is considered aligned, in degrees.
-      alignment_tolerance_deg: 10.0
-      # If false, the target may execute without requiring thrust alignment.
-      require_attitude_alignment: false
-  # Optional objective definitions. Leave empty unless using objective-specific scoring/reporting.
-  mission_objectives: []
-  # Optional external bridge configuration for SIL/HIL experiments.
-  knowledge:
-    # Seconds between knowledge updates.
-    refresh_rate_s: 1.0
-    # Object IDs this object attempts to track.
-    targets:
-      - "rocket"
-      - "chaser"
-    # Access constraints for generating knowledge updates.
-    conditions:
-      # Require geometric line of sight before updating knowledge.
-      require_line_of_sight: true
-      # Maximum sensing range in kilometers.
-      max_range_km: 50000.0
-    # Measurement error assumptions used by knowledge/estimation.
-    sensor_error:
-      # Position 1-sigma error by axis, in kilometers.
-      pos_sigma_km: [0.02, 0.02, 0.02]
-      # Velocity 1-sigma error by axis, in kilometers per second.
-      vel_sigma_km_s: [0.0002, 0.0002, 0.0002]
-    # Estimator used for this object's knowledge updates.
-    estimation:
-      # Estimator type. "ekf" is the standard choice for this template.
-      type: "ekf"
+  # Target spacecraft. Use this for the protected, pursued, or reference object.
+  target:
+    # Whether the target participates in the run.
+    enabled: true
+    # Object role used by controllers, reports, and mission logic.
+    role: "target"
+    # Satellite preset file. Override fields below when exploring variants.
+    preset: "../sim/presets/objects/basic_satellite.yaml"
+    # Optional passive reference orbit for RIC-frame plotting and target-reference displays.
+    reference_orbit:
+      # Enable when you want to compare target motion against a passive nominal orbit.
+      enabled: false
+    # Target physical parameters.
+    specs:
+      # Total mass in kilograms.
+      mass_kg: 400.0
+    # Initial state for the target.
+    initial_state:
+      # Classical orbital elements for target initialization.
+      coes:
+        # Semi-major axis in kilometers.
+        a_km: 7000.0
+        # Eccentricity.
+        ecc: 0.001
+        # Inclination in degrees.
+        inc_deg: 45.0
+        # Right ascension of ascending node in degrees.
+        raan_deg: 0.0
+        # Argument of perigee in degrees.
+        argp_deg: 0.0
+        # True anomaly in degrees.
+        true_anomaly_deg: 0.0
+      # Optional alternative: initialize from a TLE instead of coes.
+      # tle:
+      #   lines:
+      #     - "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9005"
+      #     - "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1000"
+      # Initial body-to-navigation attitude quaternion [w, x, y, z].
+      attitude_quat_bn: [1.0, 0.0, 0.0, 0.0]
+      # Initial body angular rate in radians per second.
+      angular_rate_body_rad_s: [0.0, 0.0, 0.0]
+      # When target.reference_orbit.enabled is true, a passive reference orbit is propagated
+      # from this same initial position/velocity for RIC-frame plotting.
+    # Target translational controller.
+    orbit_control:
+      # Plugin kind for the orbit controller.
+      kind: "python"
+      # Importable module containing the orbit controller class.
+      module: "sim.control.orbit.zero_controller"
+      # Controller class name. ZeroController keeps the target passive translationally.
+      class_name: "ZeroController"
+      # Constructor parameters for the orbit controller.
+      params: {}
+    # Target attitude controller.
+    attitude_control:
+      # Plugin kind for the attitude controller.
+      kind: "python"
+      # Importable module containing the attitude controller class.
+      module: "sim.control.attitude.surrogate_snap"
+      # Attitude controller class name.
+      class_name: "SurrogateSnapECIController"
+      # Attitude controller parameters.
+      params:
+        # Desired body-to-navigation attitude quaternion [w, x, y, z].
+        desired_attitude_quat_bn: [1.0, 0.0, 0.0, 0.0]
+        # Rate-cancellation authority in radians per second squared.
+        cancel_rate_mag_rad_s2: 1.0
+        # Body-rate threshold considered settled, in radians per second.
+        rate_tolerance_rad_s: 1.0e-3
+        # Nominal time for a 180-degree slew, in seconds.
+        slew_time_180_s: 1.0
+        # Randomized pointing noise 1-sigma, in degrees.
+        pointing_sigma_deg: 0.05
+        # Default attitude controller timestep in seconds.
+        default_dt_s: 1.0
+        # Random seed for repeatable pointing noise.
+        rng_seed: 3
+    # Target mission strategy.
+    mission_strategy:
+      # Plugin kind for mission strategy.
+      kind: "python"
+      # Importable module containing the strategy class.
+      module: "sim.mission.modules"
+      # Strategy class name.
+      class_name: "HoldMissionStrategy"
+      # Strategy parameters.
+      params:
+        # Hold mode. Use "hold_eci" for inertial attitude hold.
+        attitude_mode: "hold_eci"
+        # Quaternion held by the target in hold_eci mode.
+        hold_quat_bn: [1.0, 0.0, 0.0, 0.0]
+    # Target mission execution.
+    mission_execution:
+      # Plugin kind for mission execution.
+      kind: "python"
+      # Importable module containing the execution class.
+      module: "sim.mission.modules"
+      # Execution class name.
+      class_name: "ControllerPointingExecution"
+      # Execution parameters.
+      params:
+        # Thruster direction in the body frame.
+        thruster_direction_body: [1.0, 0.0, 0.0]
+        # Maximum pointing error allowed before thrust is considered aligned, in degrees.
+        alignment_tolerance_deg: 10.0
+        # If false, the target may execute without requiring thrust alignment.
+        require_attitude_alignment: false
+    # Optional objective definitions. Leave empty unless using objective-specific scoring/reporting.
+    mission_objectives: []
+    # Optional external bridge configuration. Leave disabled unless you provide a bridge plugin.
+    bridge:
+      # Keep false unless running an integration bridge.
+      enabled: false
+      # Integration mode label.
+      mode: "external"
+      # Bridge endpoint URI. Null means no endpoint is configured.
+      endpoint: null
+      # Importable module containing the bridge class. Null means no bridge plugin is loaded.
+      module: null
+      # Bridge class name. Null means no bridge plugin is loaded.
+      class_name: null
+      # Bridge-specific parameters.
+      params: {}
+    # Knowledge/sensing configuration for the target.
+    knowledge:
+      # Seconds between knowledge updates.
+      refresh_rate_s: 1.0
+      # Object IDs this object attempts to track.
+      targets:
+        - "rocket"
+        - "chaser"
+      # Access constraints for generating knowledge updates.
+      conditions:
+        # Require geometric line of sight before updating knowledge.
+        require_line_of_sight: true
+        # Maximum sensing range in kilometers.
+        max_range_km: 50000.0
+      # Measurement error assumptions used by knowledge/estimation.
+      sensor_error:
+        # Position 1-sigma error by axis, in kilometers.
+        pos_sigma_km: [0.02, 0.02, 0.02]
+        # Velocity 1-sigma error by axis, in kilometers per second.
+        vel_sigma_km_s: [0.0002, 0.0002, 0.0002]
+      # Estimator used for this object's knowledge updates.
+      estimation:
+        # Estimator type. "ekf" is the standard choice for this template.
+        type: "ekf"
 
-# Simulator timing, dynamics, environment, validation, and termination settings.
+  # Simulator timing, dynamics, environment, validation, and termination settings.
+
 simulator:
   # Timing grid rules:
   # - duration_s must be an integer multiple of dt_s.

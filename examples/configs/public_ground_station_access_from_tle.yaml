@@ -1,0 +1,91 @@
+# Use case: "When can my ground site see this satellite during the next pass window?"
+#
+# Key parameters to vary:
+# - objects.iss.initial_state.tle: replace with the spacecraft TLE.
+# - simulator.duration_s: length of the access search window.
+# - ground_stations: add sites, edit lat/lon/alt, min elevation, and max range.
+# - simulator.dynamics.orbit perturbations: keep two-body/J2 for a quick screen,
+#   then increase fidelity if the access margin is tight.
+
+scenario_name: "public_ground_station_access_from_tle"
+scenario_description: "Public example: propagate a TLE and compute passive ground-station access windows."
+
+metadata:
+  owner: "public"
+  notes: "Run with `python run_simulation.py --config examples/configs/public_ground_station_access_from_tle.yaml`."
+
+objects:
+  iss:
+    kind: "satellite"
+    enabled: true
+    role: "tracked_satellite"
+    specs:
+      mass_kg: 420000.0
+    initial_state:
+      tle:
+        line1: "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9005"
+        line2: "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1000"
+        require_checksum: false
+        propagate_to_initial_epoch: true
+    orbit_control:
+      kind: "python"
+      module: "sim.control.orbit.zero_controller"
+      class_name: "ZeroController"
+      params: {}
+
+ground_stations:
+  - id: "colorado_springs"
+    lat_deg: 38.803
+    lon_deg: -104.526
+    alt_km: 1.9
+    # Key knob: raise this for a more conservative pass-access definition.
+    min_elevation_deg: 10.0
+    # Key knob: omit or increase for wide-area access studies.
+    max_range_km: 2500.0
+
+simulator:
+  scenario_type: "auto"
+  # Key knob: six-hour search window.
+  duration_s: 21600.0
+  # Key knob: access sample cadence. Smaller values find shorter windows.
+  dt_s: 60.0
+  initial_jd_utc: 2460310.75
+  dynamics:
+    orbit:
+      model: "two_body"
+      orbit_substep_s: 60.0
+      j2: true
+      j3: false
+      j4: false
+      drag: false
+      srp: false
+    attitude:
+      enabled: false
+    rocket:
+      enabled: false
+  environment:
+    ephemeris_mode: "analytic_simple"
+    atmosphere_env: {}
+  plugin_validation:
+    strict: true
+  termination:
+    earth_impact_enabled: true
+    earth_radius_km: 6378.137
+
+outputs:
+  output_dir: "outputs/examples/public_ground_station_access_from_tle"
+  mode: "save"
+  stats:
+    print_summary: true
+    save_json: true
+    save_full_log: true
+  plots:
+    enabled: true
+    figure_ids: ["ground_track", "sensor_access"]
+  animations:
+    enabled: false
+    types: []
+
+monte_carlo:
+  enabled: false
+

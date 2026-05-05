@@ -7,7 +7,7 @@ import numpy as np
 
 from sim.presets.rockets import RocketStackPreset
 from sim.presets.thrusters import resolve_thruster_mount_from_specs
-from sim.config import SimulationScenarioConfig
+from sim.config import SimulationScenarioConfig, default_pair_object_ids, default_reference_object_id, iter_object_sections
 from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2, EARTH_RADIUS_KM
 from sim.utils.figure_size import cap_figsize
 from sim.utils.frames import ric_dcm_ir_from_rv
@@ -247,11 +247,9 @@ def _compute_satellite_delta_v_remaining(
     resolve_satellite_isp_s: Callable[[dict[str, Any]], float],
 ) -> dict[str, dict[str, Any]]:
     g0_m_s2 = 9.80665
-    section_by_id = {"chaser": cfg.chaser, "target": cfg.target}
     out: dict[str, dict[str, Any]] = {}
-    for oid in ("chaser", "target"):
+    for oid, sec in iter_object_sections(cfg, enabled_only=True, kind="satellite"):
         hist = truth_hist.get(oid)
-        sec = section_by_id.get(oid)
         if hist is None or sec is None or hist.shape[0] == 0:
             continue
         specs = dict(getattr(sec, "specs", {}) or {})
@@ -281,7 +279,7 @@ def _compute_satellite_delta_v_remaining(
 
 def _thruster_mounts_by_object(cfg: SimulationScenarioConfig) -> dict[str, dict[str, np.ndarray] | None]:
     out: dict[str, dict[str, np.ndarray] | None] = {}
-    for oid, sec in (("target", cfg.target), ("chaser", cfg.chaser)):
+    for oid, sec in iter_object_sections(cfg, enabled_only=True, kind="satellite"):
         mount = resolve_thruster_mount_from_specs(getattr(sec, "specs", None) if sec is not None else None)
         if mount is None:
             out[oid] = None
@@ -328,10 +326,8 @@ def plot_outputs(
     else:
         if reference_object_id and reference_object_id not in truth_hist:
             reference_object_id = ""
-        if not reference_object_id and "target" in truth_hist:
-            reference_object_id = "target"
-        if not reference_object_id and truth_hist:
-            reference_object_id = sorted(truth_hist.keys())[0]
+        if not reference_object_id:
+            reference_object_id = default_reference_object_id(cfg, available_ids=truth_hist.keys()) or ""
         reference_truth = truth_hist.get(reference_object_id) if reference_object_id else None
         ric_truth_hist = (
             {oid: hist for oid, hist in truth_hist.items() if oid != reference_object_id}
@@ -927,7 +923,7 @@ def plot_outputs(
 
         fig, ax = plt.subplots(figsize=cap_figsize(10, 5))
         plotted = False
-        for oid in ("chaser", "target"):
+        for oid in sorted(satellite_dv_by_object.keys()):
             dv_entry = satellite_dv_by_object.get(oid)
             if dv_entry is None:
                 continue
@@ -1194,7 +1190,8 @@ def animate_outputs(
             )
             active_mask = thrust_norm > active_threshold
             p = outdir / f"{oid}_attitude_ric_thruster.mp4"
-            body_facecolor = "#1F77B4" if oid == "target" else "#D62728"
+            color_cycle = ["#1F77B4", "#D62728", "#2CA02C", "#9467BD", "#8C564B", "#17BECF"]
+            body_facecolor = color_cycle[sum(ord(ch) for ch in oid) % len(color_cycle)]
             animate_rectangular_prism_attitude(
                 t_s=t_s[: hist.shape[0]],
                 truth_hist=hist,
@@ -1259,7 +1256,7 @@ def animate_outputs(
 
     if "ric_curv_prism_multi" in types:
         p = outdir / "ric_curv_prism_multi.mp4"
-        target_object_id = str(anim_cfg.get("target_object_id", "target"))
+        target_object_id = str(anim_cfg.get("target_object_id", default_reference_object_id(cfg, available_ids=truth_hist.keys()) or ""))
         prism_obj_ids = anim_cfg.get("ric_curv_prism_object_ids")
         if not isinstance(prism_obj_ids, list):
             prism_obj_ids = None
@@ -1282,8 +1279,9 @@ def animate_outputs(
 
     if "ric_prism_side_by_side" in types:
         p = outdir / "ric_prism_side_by_side.mp4"
-        left_object_id = str(anim_cfg.get("ric_side_by_side_left_object_id", "target"))
-        right_object_id = str(anim_cfg.get("ric_side_by_side_right_object_id", "chaser"))
+        default_pair = default_pair_object_ids(cfg, available_ids=truth_hist.keys()) or ("", "")
+        left_object_id = str(anim_cfg.get("ric_side_by_side_left_object_id", default_pair[1] or default_pair[0]))
+        right_object_id = str(anim_cfg.get("ric_side_by_side_right_object_id", default_pair[0]))
         dims_map_raw = anim_cfg.get("ric_side_by_side_dims_m", {})
         dims_map = dict(dims_map_raw) if isinstance(dims_map_raw, dict) else {}
         animate_side_by_side_rectangular_prism_ric_attitude(
@@ -1311,7 +1309,8 @@ def animate_outputs(
         if isinstance(object_ids, list):
             ref_object_ids = [str(oid) for oid in object_ids if str(oid) in truth_hist]
         else:
-            ref_object_ids = [oid for oid in ("target", "chaser") if oid in truth_hist]
+            preferred_pair = default_pair_object_ids(cfg, available_ids=truth_hist.keys())
+            ref_object_ids = [oid for oid in (preferred_pair or ()) if oid in truth_hist]
             if not ref_object_ids:
                 ref_object_ids = sorted(truth_hist.keys())
         ref_truth_hist = {oid: truth_hist[oid] for oid in ref_object_ids}
@@ -1334,8 +1333,9 @@ def animate_outputs(
                 out["target_reference_ric_curv_3d"] = str(p)
 
         if "battlespace_dashboard" in types and ref_truth_hist:
-            target_object_id = str(anim_cfg.get("battlespace_dashboard_target_object_id", "target"))
-            chaser_object_id = str(anim_cfg.get("battlespace_dashboard_chaser_object_id", "chaser"))
+            preferred_pair = default_pair_object_ids(cfg, available_ids=truth_hist.keys()) or ("", "")
+            target_object_id = str(anim_cfg.get("battlespace_dashboard_target_object_id", preferred_pair[1] or preferred_pair[0]))
+            chaser_object_id = str(anim_cfg.get("battlespace_dashboard_chaser_object_id", preferred_pair[0]))
             if target_object_id in truth_hist and chaser_object_id in truth_hist:
                 p = outdir / "battlespace_dashboard.mp4"
                 dims_map_raw = anim_cfg.get("battlespace_dashboard_attitude_dims_m", {})

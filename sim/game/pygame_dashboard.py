@@ -120,6 +120,7 @@ class PygameRPODashboard:
         mission_state: str = "active",
         mission_metrics: tuple[str, ...] = (),
         speed_multiple: float = 1.0,
+        briefing_lines: tuple[str, ...] = (),
         debrief_lines: tuple[str, ...] = (),
     ) -> None:
         pygame = self.pygame
@@ -136,6 +137,8 @@ class PygameRPODashboard:
         self._draw_panel(left, "RI Plane: in-track vs radial", x_axis=1, y_axis=0)
         self._draw_panel(right, "RC Plane: cross-track vs radial", x_axis=2, y_axis=0)
         self._draw_hud(hud, command_status=command_status, coach_hint=coach_hint, speed_multiple=speed_multiple)
+        if briefing_lines:
+            self._draw_briefing(briefing_lines)
         if mission_state in {"passed", "failed"}:
             self._draw_mission_banner(mission_state, debrief_lines=debrief_lines)
         pygame.display.flip()
@@ -283,8 +286,35 @@ class PygameRPODashboard:
         self._text(label, (rect.x + 16, rect.y + 15), self.large_font, text_color)
         x = rect.x + 280
         for metric in mission_metrics[:5]:
-            self._text(metric, (x, rect.y + 18), self.small_font, (222, 230, 238))
+            clean, metric_color = self._metric_text_and_color(metric)
+            self._text(clean, (x, rect.y + 18), self.small_font, metric_color)
             x += max(168, len(metric) * 8 + 28)
+
+    def _metric_text_and_color(self, metric: str) -> tuple[str, tuple[int, int, int]]:
+        text = str(metric)
+        if text.startswith("OK "):
+            return text, (150, 235, 170)
+        if text.startswith("WARN "):
+            return text, (245, 210, 110)
+        if text.startswith("FAIL "):
+            return text, (255, 150, 150)
+        return text, (222, 230, 238)
+
+    def _draw_briefing(self, lines: tuple[str, ...]) -> None:
+        pygame = self.pygame
+        width, height = self.screen.get_size()
+        rect = pygame.Rect(width // 2 - 430, height // 2 - 230, 860, 460)
+        pygame.draw.rect(self.screen, (15, 24, 34), rect, border_radius=10)
+        pygame.draw.rect(self.screen, (96, 174, 224), rect, width=2, border_radius=10)
+        title = self.large_font.render(str(lines[0] if lines else "Mission Brief"), True, (238, 244, 250))
+        self.screen.blit(title, (rect.x + 30, rect.y + 24))
+        y = rect.y + 70
+        for raw in lines[1:9]:
+            for line in self._wrap_text(str(raw), 82):
+                self._text(line, (rect.x + 32, y), self.font, (206, 218, 232))
+                y += 24
+            y += 4
+        self._text("Press Space to start. Esc returns to level select.", (rect.x + 32, rect.bottom - 48), self.font, (220, 160, 160))
 
     def _draw_mission_banner(self, mission_state: str, *, debrief_lines: tuple[str, ...] = ()) -> None:
         pygame = self.pygame
@@ -480,6 +510,23 @@ class PygameRPODashboard:
             return
         surf = font.render(str(text), True, color)
         self.screen.blit(surf, pos)
+
+    @staticmethod
+    def _wrap_text(value: str, max_chars: int) -> list[str]:
+        words = str(value or "").split()
+        lines: list[str] = []
+        current = ""
+        for word in words:
+            candidate = word if not current else current + " " + word
+            if len(candidate) <= max_chars:
+                current = candidate
+            else:
+                if current:
+                    lines.append(current)
+                current = word
+        if current:
+            lines.append(current)
+        return lines or [""]
 
 
 def _cw_coast_state(x0: np.ndarray, t_s: float, mean_motion_rad_s: float) -> np.ndarray:

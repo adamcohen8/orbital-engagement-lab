@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 import logging
 import os
@@ -8,24 +8,30 @@ from typing import Any, Callable
 
 import numpy as np
 
-from sim.config import SimulationScenarioConfig, scenario_config_from_dict
+from sim.config import (
+    SimulationScenarioConfig,
+    configured_objects,
+    default_reference_object_id,
+    relative_reference_for_object,
+    scenario_config_from_dict,
+)
 from sim.core.models import Command, StateTruth
 from sim.dynamics.attitude.rigid_body import get_attitude_guardrail_stats, reset_attitude_guardrail_stats
 from sim.dynamics.orbit.spherical_harmonics import configure_spherical_harmonics_env
-from sim.ground_stations import evaluate_ground_station_access
-from sim.master_outputs import animate_outputs as _animate_outputs_impl
-from sim.master_outputs import plot_outputs as _plot_outputs_impl
-from sim.reporting.output_index import write_output_index
+from sim.reporting.single_run_artifacts import (
+    SingleRunArtifactContext,
+    format_single_run_summary as _format_single_run_summary,
+    write_single_run_artifacts,
+)
+from sim.reporting.single_run_payload import SingleRunPayloadContext, build_single_run_payload
 from sim.runtime_support import (
     AgentRuntime,
-    _apply_chaser_relative_init_from_target,
+    _apply_relative_init_from_reference,
     _build_knowledge_base,
     _create_rocket_runtime,
     _create_satellite_runtime,
     _decision_truth_from_belief,
     _deploy_from_rocket,
-    _resolve_rocket_stack,
-    _resolve_satellite_isp_s,
     _rocket_state_to_truth,
     _run_mission_execution,
     _run_mission_modules,
@@ -39,7 +45,6 @@ from sim.single_run_support import (
     _SatelliteStepper,
     _TerminationMonitor,
 )
-from sim.utils.io import write_json
 
 logger = logging.getLogger(__name__)
 
@@ -56,112 +61,19 @@ def _state_truth_to_array(truth: StateTruth) -> np.ndarray:
     )
 
 
-def _plot_outputs(
-    *,
-    cfg: SimulationScenarioConfig,
-    t_s: np.ndarray,
-    truth_hist: dict[str, np.ndarray],
-    target_reference_orbit_truth: np.ndarray | None,
-    belief_hist: dict[str, np.ndarray] | None,
-    thrust_hist: dict[str, np.ndarray],
-    desired_attitude_hist: dict[str, np.ndarray] | None,
-    knowledge_hist: dict[str, dict[str, np.ndarray]],
-    rocket_metrics: dict[str, np.ndarray] | None,
-    bridge_hist: dict[str, list[dict[str, Any]]] | None,
-    outdir: Path,
-) -> dict[str, str]:
-    return _plot_outputs_impl(
-        cfg=cfg,
-        t_s=t_s,
-        truth_hist=truth_hist,
-        target_reference_orbit_truth=target_reference_orbit_truth,
-        thrust_hist=thrust_hist,
-        belief_hist=belief_hist,
-        desired_attitude_hist=desired_attitude_hist,
-        knowledge_hist=knowledge_hist,
-        rocket_metrics=rocket_metrics,
-        bridge_hist=bridge_hist,
-        outdir=outdir,
-        resolve_rocket_stack=_resolve_rocket_stack,
-        resolve_satellite_isp_s=_resolve_satellite_isp_s,
-    )
-
-
-def _animate_outputs(
-    *,
-    cfg: SimulationScenarioConfig,
-    t_s: np.ndarray,
-    truth_hist: dict[str, np.ndarray],
-    thrust_hist: dict[str, np.ndarray],
-    target_reference_orbit_truth: np.ndarray | None,
-    outdir: Path,
-) -> dict[str, str]:
-    return _animate_outputs_impl(
-        cfg=cfg,
-        t_s=t_s,
-        truth_hist=truth_hist,
-        thrust_hist=thrust_hist,
-        target_reference_orbit_truth=target_reference_orbit_truth,
-        outdir=outdir,
-        resolve_satellite_isp_s=_resolve_satellite_isp_s,
-    )
-
-
-def _fmt_float(x: float, digits: int = 3) -> str:
-    return f"{float(x):.{digits}f}"
-
-
-def _format_single_run_summary(summary: dict[str, Any]) -> str:
-    lines: list[str] = []
-    scenario_description = str(summary.get("scenario_description", "") or "").strip()
-    lines.append("")
-    lines.append("=" * 72)
-    lines.append("MASTER SIMULATION SUMMARY")
-    lines.append("=" * 72)
-    lines.append(f"Scenario   : {summary.get('scenario_name', 'unknown')}")
-    if scenario_description:
-        lines.append(f"Desc       : {scenario_description}")
-    lines.append(f"Objects    : {', '.join(summary.get('objects', []))}")
-    lines.append(f"Samples    : {summary.get('samples', 0)}")
-    lines.append(
-        f"Timing     : dt={_fmt_float(float(summary.get('dt_s', 0.0)), 3)} s, "
-        f"duration={_fmt_float(float(summary.get('duration_s', 0.0)), 1)} s"
-    )
-    lines.append("-" * 72)
-    if bool(summary.get("terminated_early", False)):
-        lines.append(
-            "Termination: EARLY "
-            f"(reason={summary.get('termination_reason')}, "
-            f"t={summary.get('termination_time_s')}, "
-            f"object={summary.get('termination_object_id')})"
-        )
-    else:
-        lines.append("Termination: nominal (full duration reached)")
-    if "rocket_insertion_achieved" in summary:
-        ins_ok = bool(summary.get("rocket_insertion_achieved", False))
-        ins_t = summary.get("rocket_insertion_time_s")
-        lines.append(f"Insertion  : achieved at t={ins_t}" if ins_ok else "Insertion  : not achieved")
-    thrust_stats = dict(summary.get("thrust_stats", {}) or {})
-    if thrust_stats:
-        lines.append("-" * 72)
-        lines.append("Thrust Stats")
-        lines.append(f"{'Object':<14}{'Burn Samples':>14}{'Max Accel (km/s^2)':>24}{'Total dV (m/s)':>18}")
-        for oid in sorted(thrust_stats.keys()):
-            stats = dict(thrust_stats.get(oid, {}) or {})
-            lines.append(
-                f"{oid:<14}"
-                f"{int(stats.get('burn_samples', 0)):>14d}"
-                f"{float(stats.get('max_accel_km_s2', 0.0)):>24.3e}"
-                f"{float(stats.get('total_dv_m_s', 0.0)):>18.3f}"
-            )
-    plot_outputs = dict(summary.get("plot_outputs", {}) or {})
-    anim_outputs = dict(summary.get("animation_outputs", {}) or {})
-    guardrails = dict(summary.get("attitude_guardrail_stats", {}) or {})
-    lines.append("-" * 72)
-    lines.append(f"Artifacts  : plots={len(plot_outputs)}  animations={len(anim_outputs)}")
-    lines.append(f"Guardrails : attitude_events={int(sum(int(v) for v in guardrails.values())) if guardrails else 0}")
-    lines.append("=" * 72)
-    return "\n".join(lines)
+@dataclass(frozen=True)
+class _SingleRunPayloadParts:
+    n_used: int
+    t_s: np.ndarray
+    truth_hist: dict[str, np.ndarray]
+    target_reference_orbit_truth: np.ndarray | None
+    belief_hist: dict[str, np.ndarray]
+    thrust_hist: dict[str, np.ndarray]
+    torque_hist: dict[str, np.ndarray]
+    desired_attitude_hist: dict[str, np.ndarray]
+    knowledge_hist: dict[str, dict[str, np.ndarray]]
+    rocket_metrics: dict[str, np.ndarray]
+    thrust_stats: dict[str, dict[str, Any]]
 
 
 class _SingleRunEngine:
@@ -206,43 +118,53 @@ class _SingleRunEngine:
         self.satellite_stepper = _SatelliteStepper(self)
         self.termination_monitor = _TerminationMonitor(self)
 
-        self.rocket = _create_rocket_runtime(cfg) if cfg.rocket.enabled else None
-        self.chaser = (
-            _create_satellite_runtime("chaser", cfg.chaser, cfg, np.random.default_rng(int(rng.integers(0, 2**31 - 1))))
-            if cfg.chaser.enabled
-            else None
-        )
-        self.target = (
-            _create_satellite_runtime("target", cfg.target, cfg, np.random.default_rng(int(rng.integers(0, 2**31 - 1))))
-            if cfg.target.enabled
-            else None
-        )
-        if self.chaser is not None and self.chaser.deploy_source == "rocket_deployment":
-            self.chaser.active = False
-
         self.agents: dict[str, AgentRuntime] = {}
-        if self.rocket is not None:
-            self.agents["rocket"] = self.rocket
-        if self.target is not None:
-            self.agents["target"] = self.target
-        if self.chaser is not None:
-            self.agents["chaser"] = self.chaser
+        self.object_configs = configured_objects(cfg)
+        for aid, agent_cfg in self.object_configs.items():
+            if not bool(agent_cfg.enabled):
+                continue
+            if str(agent_cfg.kind).strip().lower() == "rocket":
+                self.agents[aid] = _create_rocket_runtime(cfg, object_id=aid, agent_cfg=agent_cfg)
+            else:
+                self.agents[aid] = _create_satellite_runtime(
+                    aid,
+                    agent_cfg,
+                    cfg,
+                    np.random.default_rng(int(rng.integers(0, 2**31 - 1))),
+                )
+        for agent in self.agents.values():
+            if agent.kind == "satellite" and agent.deploy_source == "rocket_deployment":
+                agent.active = False
 
-        if self.chaser is not None and self.target is not None and self.chaser.deploy_source != "rocket_deployment":
-            _apply_chaser_relative_init_from_target(
-                chaser=self.chaser,
-                target=self.target,
-                initial_state=dict(cfg.chaser.initial_state or {}),
-            )
+        self.rocket = self.agents.get("rocket") or next((a for a in self.agents.values() if a.kind == "rocket"), None)
+        self.chaser = self.agents.get("chaser")
+        self.target = self.agents.get("target")
 
-        target_reference_cfg = dict(cfg.target.reference_orbit or {})
+        for aid, agent in self.agents.items():
+            if agent.kind != "satellite" or agent.deploy_source == "rocket_deployment":
+                continue
+            agent_cfg = self.object_configs.get(aid)
+            initial_state = dict(getattr(agent_cfg, "initial_state", {}) or {})
+            reference_id = str(relative_reference_for_object(cfg, aid) or "").strip()
+            reference = self.agents.get(reference_id) if reference_id else None
+            if reference is not None:
+                _apply_relative_init_from_reference(agent=agent, reference=reference, initial_state=initial_state)
+
+        target_reference_id = default_reference_object_id(cfg, available_ids=self.agents.keys()) or "target"
+        target_reference_section = self.object_configs.get(target_reference_id)
+        target_reference_cfg = dict((target_reference_section.reference_orbit if target_reference_section is not None else {}) or {})
+        target_reference_agent = self.agents.get(target_reference_id)
         self.target_reference_truth = None
         self.target_reference_dynamics = None
         self.target_reference_orbit_hist = None
-        if bool(target_reference_cfg.get("enabled", False)) and self.target is not None and self.target.truth is not None:
-            self.target_reference_truth = self.target.truth.copy()
+        if (
+            bool(target_reference_cfg.get("enabled", False))
+            and target_reference_agent is not None
+            and target_reference_agent.truth is not None
+        ):
+            self.target_reference_truth = target_reference_agent.truth.copy()
             self.target_reference_dynamics = replace(
-                self.target.dynamics,
+                target_reference_agent.dynamics,
                 disturbance_model=None,
                 propagate_attitude=False,
                 use_rectangular_prism_for_aero_srp=False,
@@ -253,7 +175,7 @@ class _SingleRunEngine:
             self.target_reference_orbit_hist[0, 3:6] = self.target_reference_truth.velocity_eci_km_s
 
         for aid, agent in self.agents.items():
-            cfg_src = cfg.rocket if aid == "rocket" else (cfg.chaser if aid == "chaser" else cfg.target)
+            cfg_src = self.object_configs[aid]
             agent.knowledge_base = _build_knowledge_base(
                 observer_id=aid,
                 agent_cfg=cfg_src,
@@ -274,7 +196,7 @@ class _SingleRunEngine:
         self._latched_orbital_thrust_cmd_by_object: dict[str, np.ndarray] = {
             aid: self.zero3.copy() for aid in self.agents.keys()
         }
-        self.throttle_hist = {"rocket": np.full(self.n, np.nan)} if self.rocket is not None else {}
+        self.throttle_hist = {aid: np.full(self.n, np.nan) for aid, agent in self.agents.items() if agent.kind == "rocket"}
         self.rocket_stage_hist = np.full(self.n, np.nan) if self.rocket is not None else None
         self.rocket_q_dyn_hist = np.full(self.n, np.nan) if self.rocket is not None else None
         self.rocket_mach_hist = np.full(self.n, np.nan) if self.rocket is not None else None
@@ -309,7 +231,7 @@ class _SingleRunEngine:
             if agent.belief is not None:
                 self._ensure_belief_hist_width(aid, agent.belief.state.size)
                 self.belief_hist[aid][0, : agent.belief.state.size] = agent.belief.state
-            if aid == "rocket" and agent.rocket_state is not None and self.rocket_stage_hist is not None:
+            if agent.kind == "rocket" and agent.rocket_state is not None and self.rocket_stage_hist is not None:
                 self.rocket_stage_hist[0] = float(agent.rocket_state.active_stage_index)
                 if self.rocket_q_dyn_hist is not None:
                     self.rocket_q_dyn_hist[0] = float(getattr(agent.rocket_state, "_last_step_q_dyn_pa", 0.0))
@@ -481,9 +403,11 @@ class _SingleRunEngine:
         t = float(self.t_s[k])
         t_next = float(self.t_s[k + 1])
 
-        if self.chaser is not None and self.rocket is not None and (not self.chaser.active):
-            if t_next >= float(self.chaser.deploy_time_s or 0.0):
-                _deploy_from_rocket(self.chaser, self.rocket, t_next)
+        if self.rocket is not None:
+            for agent in self.agents.values():
+                if agent.kind == "satellite" and not agent.active and agent.deploy_source == "rocket_deployment":
+                    if t_next >= float(agent.deploy_time_s or 0.0):
+                        _deploy_from_rocket(agent, self.rocket, t_next)
 
         world_truth_start = {
             aid: (agent.truth if agent.kind == "satellite" else _rocket_state_to_truth(agent.rocket_state))
@@ -518,7 +442,8 @@ class _SingleRunEngine:
                     t_next=t_next,
                 )
                 agent.truth = rocket_result.truth
-                self.throttle_hist["rocket"][k] = rocket_result.throttle
+                if aid in self.throttle_hist:
+                    self.throttle_hist[aid][k] = rocket_result.throttle
                 self.thrust_hist[aid][k + 1, :] = rocket_result.thrust_eci_km_s2
                 self.torque_hist[aid][k + 1, :] = rocket_result.torque_body_nm
                 self.total_dv_m_s_by_object[aid] += rocket_result.delta_v_m_s
@@ -590,7 +515,7 @@ class _SingleRunEngine:
             self.step()
         return self.build_payload()
 
-    def build_payload(self) -> dict[str, Any]:
+    def _build_payload_parts(self) -> _SingleRunPayloadParts:
         n_used = self.current_index + 1
         t_out = self.t_s[:n_used].copy()
         truth_out = {k: v[:n_used, :].copy() for k, v in self.truth_hist.items()}
@@ -602,44 +527,17 @@ class _SingleRunEngine:
         torque_out = {k: v[:n_used, :].copy() for k, v in self.torque_hist.items()}
         desired_attitude_out = {k: v[:n_used, :].copy() for k, v in self.desired_attitude_hist.items()}
         knowledge_out = {obs: {tgt: arr[:n_used, :].copy() for tgt, arr in by_tgt.items()} for obs, by_tgt in self.knowledge_hist.items()}
-        ground_station_access, ground_station_access_summary = evaluate_ground_station_access(
-            ground_stations=list(self.cfg.ground_stations),
-            t_s=t_out,
-            truth_hist=truth_out,
-            jd_utc_start=self.cfg.simulator.initial_jd_utc,
-        )
         rocket_metrics_out: dict[str, np.ndarray] = {}
         if self.rocket is not None:
+            rocket_object_id = str(getattr(self.rocket, "object_id", "rocket") or "rocket")
             if self.rocket_stage_hist is not None:
                 rocket_metrics_out["stage_index"] = self.rocket_stage_hist[:n_used].copy()
             if self.rocket_q_dyn_hist is not None:
                 rocket_metrics_out["q_dyn_pa"] = self.rocket_q_dyn_hist[:n_used].copy()
             if self.rocket_mach_hist is not None:
                 rocket_metrics_out["mach"] = self.rocket_mach_hist[:n_used].copy()
-            if "rocket" in self.throttle_hist:
-                rocket_metrics_out["throttle_cmd"] = self.throttle_hist["rocket"][:n_used].copy()
-
-        plot_outputs = _plot_outputs(
-            cfg=self.cfg,
-            t_s=t_out,
-            truth_hist=truth_out,
-            target_reference_orbit_truth=target_reference_orbit_out,
-            belief_hist=belief_out,
-            thrust_hist=thrust_out,
-            desired_attitude_hist=desired_attitude_out,
-            knowledge_hist=knowledge_out,
-            rocket_metrics=rocket_metrics_out if rocket_metrics_out else None,
-            bridge_hist=self.bridge_hist,
-            outdir=self.outdir,
-        )
-        animation_outputs = _animate_outputs(
-            cfg=self.cfg,
-            t_s=t_out,
-            truth_hist=truth_out,
-            thrust_hist=thrust_out,
-            target_reference_orbit_truth=target_reference_orbit_out,
-            outdir=self.outdir,
-        )
+            if rocket_object_id in self.throttle_hist:
+                rocket_metrics_out["throttle_cmd"] = self.throttle_hist[rocket_object_id][:n_used].copy()
 
         thrust_stats = {
             oid: {
@@ -649,80 +547,92 @@ class _SingleRunEngine:
             }
             for oid in thrust_out.keys()
         }
-        summary = {
-            "scenario_name": self.cfg.scenario_name,
-            "scenario_description": self.cfg.scenario_description,
-            "objects": sorted(list(self.agents.keys())),
-            "samples": int(n_used),
-            "dt_s": self.dt,
-            "duration_s": float(t_out[-1]) if t_out.size else 0.0,
-            "terminated_early": self.terminated_early,
-            "termination_reason": self.termination_reason,
-            "termination_time_s": self.termination_time_s,
-            "termination_object_id": self.termination_object_id,
-            "rocket_insertion_achieved": bool(self.rocket_inserted),
-            "rocket_insertion_time_s": self.rocket_insertion_time_s,
-            "target_reference_orbit_enabled": bool(target_reference_orbit_out is not None),
-            "thrust_stats": thrust_stats,
-            "attitude_guardrail_stats": get_attitude_guardrail_stats(),
-            "knowledge_detection_by_observer": {
-                aid: agent.knowledge_base.detection_summary()
-                for aid, agent in self.agents.items()
-                if agent.knowledge_base is not None
-            },
-            "knowledge_consistency_by_observer": {
-                aid: agent.knowledge_base.consistency_summary()
-                for aid, agent in self.agents.items()
-                if agent.knowledge_base is not None
-            },
-            "ground_station_access_summary": ground_station_access_summary,
-            "plot_outputs": plot_outputs,
-            "animation_outputs": animation_outputs,
-        }
-        payload = {
-            "summary": summary,
-            "time_s": t_out.tolist(),
-            "truth_by_object": {k: v.tolist() for k, v in truth_out.items()},
-            "target_reference_orbit_truth": ([] if target_reference_orbit_out is None else target_reference_orbit_out.tolist()),
-            "belief_by_object": {k: v.tolist() for k, v in belief_out.items()},
-            "applied_thrust_by_object": {k: v.tolist() for k, v in thrust_out.items()},
-            "applied_torque_by_object": {k: v.tolist() for k, v in torque_out.items()},
-            "desired_attitude_by_object": {k: v.tolist() for k, v in desired_attitude_out.items()},
-            "knowledge_by_observer": {o: {t: a.tolist() for t, a in bt.items()} for o, bt in knowledge_out.items()},
-            "knowledge_detection_by_observer": dict(summary.get("knowledge_detection_by_observer", {}) or {}),
-            "knowledge_consistency_by_observer": dict(summary.get("knowledge_consistency_by_observer", {}) or {}),
-            "ground_station_access": ground_station_access,
-            "ground_station_access_summary": ground_station_access_summary,
-            "bridge_events_by_object": self.bridge_hist,
-            "controller_debug_by_object": self.controller_debug_hist,
-            "rocket_throttle_cmd": self.throttle_hist.get("rocket", np.array([])).tolist() if self.throttle_hist else [],
-            "rocket_metrics": {k: v.tolist() for k, v in rocket_metrics_out.items()},
-        }
-        artifacts: dict[str, Any] = {}
-        if bool(self.cfg.outputs.stats.get("save_json", True)):
-            artifacts["summary_json"] = str(self.outdir / "master_run_summary.json")
-        if bool(self.cfg.outputs.stats.get("save_full_log", True)):
-            artifacts["run_log_json"] = str(self.outdir / "master_run_log.json")
-        if plot_outputs:
-            artifacts["plots"] = plot_outputs
-        if animation_outputs:
-            artifacts["animations"] = animation_outputs
-        index_path = write_output_index(
-            outdir=self.outdir,
-            workflow="single_run",
-            title=str(self.cfg.scenario_name or "single_run"),
-            summary=summary,
-            artifacts=artifacts,
+        return _SingleRunPayloadParts(
+            n_used=n_used,
+            t_s=t_out,
+            truth_hist=truth_out,
+            target_reference_orbit_truth=target_reference_orbit_out,
+            belief_hist=belief_out,
+            thrust_hist=thrust_out,
+            torque_hist=torque_out,
+            desired_attitude_hist=desired_attitude_out,
+            knowledge_hist=knowledge_out,
+            rocket_metrics=rocket_metrics_out,
+            thrust_stats=thrust_stats,
         )
-        summary["output_index_md"] = str(index_path)
-        payload["output_index_md"] = str(index_path)
-        if bool(self.cfg.outputs.stats.get("save_json", True)):
-            write_json(str(self.outdir / "master_run_summary.json"), summary)
-        if bool(self.cfg.outputs.stats.get("save_full_log", True)):
-            write_json(str(self.outdir / "master_run_log.json"), payload)
-        if bool(self.cfg.outputs.stats.get("print_summary", True)):
-            print(_format_single_run_summary(summary))
-        return payload
+
+    def _payload_from_parts(self, parts: _SingleRunPayloadParts) -> dict[str, Any]:
+        return build_single_run_payload(
+            SingleRunPayloadContext(
+                cfg=self.cfg,
+                object_ids=list(self.agents.keys()),
+                dt_s=self.dt,
+                t_s=parts.t_s,
+                truth_hist=parts.truth_hist,
+                target_reference_orbit_truth=parts.target_reference_orbit_truth,
+                belief_hist=parts.belief_hist,
+                thrust_hist=parts.thrust_hist,
+                torque_hist=parts.torque_hist,
+                desired_attitude_hist=parts.desired_attitude_hist,
+                knowledge_hist=parts.knowledge_hist,
+                bridge_hist=self.bridge_hist,
+                controller_debug_hist=self.controller_debug_hist,
+                rocket_throttle_cmd=self._primary_rocket_throttle_history(),
+                rocket_metrics=parts.rocket_metrics,
+                thrust_stats=parts.thrust_stats,
+                attitude_guardrail_stats=get_attitude_guardrail_stats(),
+                knowledge_detection_by_observer={
+                    aid: agent.knowledge_base.detection_summary()
+                    for aid, agent in self.agents.items()
+                    if agent.knowledge_base is not None
+                },
+                knowledge_consistency_by_observer={
+                    aid: agent.knowledge_base.consistency_summary()
+                    for aid, agent in self.agents.items()
+                    if agent.knowledge_base is not None
+                },
+                terminated_early=self.terminated_early,
+                termination_reason=self.termination_reason,
+                termination_time_s=self.termination_time_s,
+                termination_object_id=self.termination_object_id,
+                rocket_inserted=self.rocket_inserted,
+                rocket_insertion_time_s=self.rocket_insertion_time_s,
+            )
+        )
+
+    def _primary_rocket_throttle_history(self) -> np.ndarray:
+        if not self.throttle_hist or self.rocket is None:
+            return np.array([])
+        rocket_object_id = str(getattr(self.rocket, "object_id", "rocket") or "rocket")
+        return self.throttle_hist.get(rocket_object_id, np.array([]))
+
+    def build_run_payload(self) -> dict[str, Any]:
+        """Build the in-memory run payload without rendering or writing artifacts."""
+
+        return self._payload_from_parts(self._build_payload_parts())
+
+    def _write_artifacts(self, payload: dict[str, Any], parts: _SingleRunPayloadParts) -> dict[str, Any]:
+        return write_single_run_artifacts(
+            payload,
+            SingleRunArtifactContext(
+                cfg=self.cfg,
+                outdir=self.outdir,
+                t_s=parts.t_s,
+                truth_hist=parts.truth_hist,
+                target_reference_orbit_truth=parts.target_reference_orbit_truth,
+                belief_hist=parts.belief_hist,
+                thrust_hist=parts.thrust_hist,
+                desired_attitude_hist=parts.desired_attitude_hist,
+                knowledge_hist=parts.knowledge_hist,
+                rocket_metrics=parts.rocket_metrics,
+                bridge_hist=self.bridge_hist,
+            ),
+        )
+
+    def build_payload(self) -> dict[str, Any]:
+        parts = self._build_payload_parts()
+        payload = self._payload_from_parts(parts)
+        return self._write_artifacts(payload, parts)
 
 
 def _run_single_config(

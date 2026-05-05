@@ -9,7 +9,8 @@ from unittest.mock import patch
 import yaml
 
 import run_simulation
-from sim.master_simulator import run_master_simulation
+from sim.execution import run_simulation_config_file
+from sim.single_run import _format_single_run_summary
 
 
 def test_quickstart_5min_runs_headlessly_and_writes_start_here_artifacts(tmp_path: Path) -> None:
@@ -22,7 +23,7 @@ def test_quickstart_5min_runs_headlessly_and_writes_start_here_artifacts(tmp_pat
     cfg_path = tmp_path / "quickstart_5min.yaml"
     cfg_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
 
-    result = run_master_simulation(cfg_path)
+    result = run_simulation_config_file(cfg_path)
 
     assert result["scenario_name"] == "quickstart_5min"
     assert (outdir / "index.md").is_file()
@@ -36,6 +37,7 @@ def test_quickstart_5min_runs_headlessly_and_writes_start_here_artifacts(tmp_pat
     summary = json.loads((outdir / "master_run_summary.json").read_text(encoding="utf-8"))
     assert summary["scenario_name"] == "quickstart_5min"
     assert summary["objects"] == ["chaser", "target"]
+    assert "rocket" not in summary["objects"]
 
 
 def test_quickstart_cli_shortcut_validates() -> None:
@@ -51,6 +53,39 @@ def test_quickstart_cli_shortcut_validates() -> None:
     assert proc.returncode == 0
     assert "quickstart_5min" in proc.stdout
     assert "OK" in proc.stdout
+
+
+def test_quickstart_cli_does_not_report_rocket_insertion_for_non_rocket_scenario() -> None:
+    root = Path(__file__).resolve().parents[2]
+    proc = subprocess.run(
+        [sys.executable, "run_simulation.py", "--quickstart"],
+        cwd=root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert proc.returncode == 0
+    assert "Insertion  :" not in proc.stdout
+
+
+def test_single_run_summary_only_reports_insertion_for_enabled_rocket() -> None:
+    base_summary = {
+        "scenario_name": "summary_display",
+        "objects": ["target"],
+        "samples": 1,
+        "dt_s": 1.0,
+        "duration_s": 0.0,
+        "terminated_early": False,
+        "rocket_insertion_achieved": False,
+        "rocket_insertion_time_s": None,
+    }
+
+    assert "Insertion  :" not in _format_single_run_summary(base_summary)
+
+    rocket_summary = dict(base_summary, objects=["rocket"], rocket_insertion_achieved=True, rocket_insertion_time_s=12.0)
+
+    assert "Insertion  : achieved at t=12.0" in _format_single_run_summary(rocket_summary)
 
 
 def test_doctor_reports_quickstart_readiness() -> None:

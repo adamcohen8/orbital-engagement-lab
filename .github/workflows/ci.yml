@@ -32,8 +32,13 @@ jobs:
 
       - name: Validate curated public example configs
         run: |
+          python run_simulation.py --config examples/configs/public_tle_2hr_propagation.yaml --validate-only
+          python run_simulation.py --config examples/configs/public_ground_station_access_from_tle.yaml --validate-only
+          python run_simulation.py --config examples/configs/public_closed_loop_rendezvous_lqr.yaml --validate-only
           python run_simulation.py --config examples/configs/public_rendezvous_closed_loop.yaml --validate-only
           python run_simulation.py --config examples/configs/public_orbit_environment_stack.yaml --validate-only
+          python run_simulation.py --config examples/configs/public_attitude_hold_disturbance.yaml --validate-only
+          python run_simulation.py --config examples/configs/public_manual_rpo_training.yaml --validate-only
           python run_simulation.py --config examples/configs/public_manual_engagement.yaml --validate-only
 
       - name: Run five-minute quickstart scenario headlessly
