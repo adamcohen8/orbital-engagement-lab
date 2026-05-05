@@ -1,15 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import importlib
 import inspect
 import logging
+from dataclasses import dataclass, field
 from typing import Any, Callable
 
 import numpy as np
 
-from sim.presets.rockets import BASIC_1ST_STAGE, BASIC_SSTO_ROCKET, BASIC_TWO_STAGE_STACK, RocketStackPreset
-from sim.presets.thrusters import BASIC_CHEMICAL_BOTTOM_Z, resolve_thruster_max_thrust_n_from_specs, resolve_thruster_mount_from_specs
 from sim.config import SimulationScenarioConfig
 from sim.control.attitude.zero_torque import ZeroTorqueController
 from sim.control.orbit.zero_controller import ZeroController
@@ -38,6 +36,12 @@ from sim.knowledge.object_tracking import (
     KnowledgeNoiseConfig,
     ObjectKnowledgeBase,
     TrackedObjectConfig,
+)
+from sim.presets.rockets import BASIC_1ST_STAGE, BASIC_SSTO_ROCKET, BASIC_TWO_STAGE_STACK, RocketStackPreset
+from sim.presets.thrusters import (
+    BASIC_CHEMICAL_BOTTOM_Z,
+    resolve_thruster_max_thrust_n_from_specs,
+    resolve_thruster_mount_from_specs,
 )
 from sim.rocket import (
     MaxQThrottleLimiterGuidance,
@@ -207,7 +211,7 @@ def _truth_state6(truth: StateTruth, out: np.ndarray | None = None) -> np.ndarra
     return state
 
 
-def _decision_truth_from_belief(agent: "AgentRuntime") -> StateTruth | None:
+def _decision_truth_from_belief(agent: AgentRuntime) -> StateTruth | None:
     belief = agent.belief
     if belief is None or belief.state.size < 6:
         return None
@@ -586,7 +590,9 @@ def _create_satellite_runtime(
     attitude_enabled = bool(att_cfg.get("enabled", True))
     if attitude_enabled:
         belief = StateBelief(
-            state=np.hstack((truth.position_eci_km, truth.velocity_eci_km_s, truth.attitude_quat_bn, truth.angular_rate_body_rad_s)),
+            state=np.hstack(
+                (truth.position_eci_km, truth.velocity_eci_km_s, truth.attitude_quat_bn, truth.angular_rate_body_rad_s)
+            ),
             covariance=np.eye(13) * 1e-4,
             last_update_t_s=0.0,
         )
@@ -621,7 +627,9 @@ def _create_satellite_runtime(
     att_ctrl = (
         _RateLimitedController(
             base=att_ctrl_base,
-            period_s=float(max(float(att_cfg.get("attitude_substep_s", cfg.simulator.dt_s) or cfg.simulator.dt_s), 1e-9)),
+            period_s=float(
+                max(float(att_cfg.get("attitude_substep_s", cfg.simulator.dt_s) or cfg.simulator.dt_s), 1e-9)
+            ),
         )
         if attitude_enabled
         else None
@@ -641,7 +649,9 @@ def _create_satellite_runtime(
         inertia_kg_m2=inertia_kg_m2,
         disturbance_model=disturbance_model if attitude_enabled else None,
         orbit_substep_s=float(orbit_cfg["orbit_substep_s"]) if orbit_cfg.get("orbit_substep_s") is not None else None,
-        attitude_substep_s=float(att_cfg["attitude_substep_s"]) if att_cfg.get("attitude_substep_s") is not None else None,
+        attitude_substep_s=float(att_cfg["attitude_substep_s"])
+        if att_cfg.get("attitude_substep_s") is not None
+        else None,
         propagate_attitude=attitude_enabled,
         orbit_propagator=_build_orbit_propagator(cfg),
     )
@@ -649,7 +659,9 @@ def _create_satellite_runtime(
     mission_strategy_pointer = getattr(agent_cfg, "mission_strategy", None)
     mission_execution_pointer = getattr(agent_cfg, "mission_execution", None)
     mission_strategy = _module_obj(mission_strategy_pointer)
-    mission_execution = _apply_thruster_mount_defaults(_module_obj(mission_execution_pointer), mission_execution_pointer, specs)
+    mission_execution = _apply_thruster_mount_defaults(
+        _module_obj(mission_execution_pointer), mission_execution_pointer, specs
+    )
     mission_modules = [_module_obj(pointer) for pointer in list(agent_cfg.mission_objectives or [])]
     mission_modules = [module for module in mission_modules if module is not None]
     sat_isp_s = _resolve_satellite_isp_s(specs)
@@ -678,15 +690,21 @@ def _create_satellite_runtime(
         rocket_guidance=None,
         deploy_source=str((agent_cfg.initial_state or {}).get("source", "")) or None,
         deploy_time_s=float((agent_cfg.initial_state or {}).get("deploy_time_s", 0.0)),
-        deploy_dv_body_m_s=np.array((agent_cfg.initial_state or {}).get("deploy_dv_body_m_s", [0.0, 0.0, 0.0]), dtype=float),
+        deploy_dv_body_m_s=np.array(
+            (agent_cfg.initial_state or {}).get("deploy_dv_body_m_s", [0.0, 0.0, 0.0]), dtype=float
+        ),
         mission_modules=mission_modules,
         waiting_for_launch=False,
         orbital_isp_s=(None if sat_isp_s <= 0.0 else float(sat_isp_s)),
         dry_mass_kg=(None if dry_mass_kg is None else float(dry_mass_kg)),
         fuel_capacity_kg=(None if fuel_capacity_kg is None else float(fuel_capacity_kg)),
         orbital_max_thrust_n=sat_max_thrust_n,
-        thruster_direction_body=(None if thruster_mount is None else np.array(thruster_mount.thrust_direction_body, dtype=float)),
-        thruster_position_body_m=(None if thruster_mount is None else np.array(thruster_mount.position_body_m, dtype=float)),
+        thruster_direction_body=(
+            None if thruster_mount is None else np.array(thruster_mount.thrust_direction_body, dtype=float)
+        ),
+        thruster_position_body_m=(
+            None if thruster_mount is None else np.array(thruster_mount.position_body_m, dtype=float)
+        ),
     )
 
 
@@ -795,7 +813,9 @@ def _create_rocket_runtime(
     )
     guidance = _build_rocket_guidance(rc)
     if bool(rocket_dyn.get("tvc_steering_enabled", False)):
-        guidance = TVCSteeringGuidance(base_guidance=guidance, pass_through_attitude=bool(rocket_dyn.get("tvc_pass_through_attitude", True)))
+        guidance = TVCSteeringGuidance(
+            base_guidance=guidance, pass_through_attitude=bool(rocket_dyn.get("tvc_pass_through_attitude", True))
+        )
     if bool(rocket_dyn.get("orbit_insertion_cutoff_enabled", False)):
         guidance = OrbitInsertionCutoffGuidance(
             base_guidance=guidance,
@@ -859,7 +879,9 @@ def _create_rocket_runtime(
     )
 
 
-def _build_knowledge_base(observer_id: str, agent_cfg: Any, dt_s: float, rng: np.random.Generator) -> ObjectKnowledgeBase | None:
+def _build_knowledge_base(
+    observer_id: str, agent_cfg: Any, dt_s: float, rng: np.random.Generator
+) -> ObjectKnowledgeBase | None:
     knowledge = dict(agent_cfg.knowledge or {})
     targets = list(knowledge.get("targets", []) or [])
     if not targets:
@@ -879,7 +901,9 @@ def _build_knowledge_base(observer_id: str, agent_cfg: Any, dt_s: float, rng: np
                     solid_angle_sr=conditions.get("solid_angle_sr"),
                     require_line_of_sight=bool(conditions.get("require_line_of_sight", False)),
                     dropout_prob=float(conditions.get("dropout_prob", 0.0)),
-                    sensor_position_body_m=np.array(conditions.get("sensor_position_body_m", [0.0, 0.0, 0.0]), dtype=float),
+                    sensor_position_body_m=np.array(
+                        conditions.get("sensor_position_body_m", [0.0, 0.0, 0.0]), dtype=float
+                    ),
                     sensor_boresight_body=(
                         np.array(conditions.get("sensor_boresight_body"), dtype=float)
                         if conditions.get("sensor_boresight_body") is not None
@@ -904,11 +928,18 @@ def _build_knowledge_base(observer_id: str, agent_cfg: Any, dt_s: float, rng: np
                 ekf=KnowledgeEKFConfig(),
             )
         )
-    return ObjectKnowledgeBase(observer_id=observer_id, tracked_objects=tracked, dt_s=dt_s, rng=rng, mu_km3_s2=EARTH_MU_KM3_S2)
+    return ObjectKnowledgeBase(
+        observer_id=observer_id, tracked_objects=tracked, dt_s=dt_s, rng=rng, mu_km3_s2=EARTH_MU_KM3_S2
+    )
 
 
 def _deploy_from_rocket(agent: AgentRuntime, rocket: AgentRuntime, t_next: float) -> None:
-    if agent.kind != "satellite" or agent.active or agent.deploy_source != "rocket_deployment" or rocket.rocket_state is None:
+    if (
+        agent.kind != "satellite"
+        or agent.active
+        or agent.deploy_source != "rocket_deployment"
+        or rocket.rocket_state is None
+    ):
         return
     c_bn = quaternion_to_dcm_bn(rocket.rocket_state.attitude_quat_bn)
     dv_body = np.array(agent.deploy_dv_body_m_s if agent.deploy_dv_body_m_s is not None else np.zeros(3), dtype=float)
@@ -925,7 +956,14 @@ def _deploy_from_rocket(agent: AgentRuntime, rocket: AgentRuntime, t_next: float
     )
     if agent.belief is not None and agent.belief.state.size >= 13:
         agent.belief = StateBelief(
-            state=np.hstack((agent.truth.position_eci_km, agent.truth.velocity_eci_km_s, agent.truth.attitude_quat_bn, agent.truth.angular_rate_body_rad_s)),
+            state=np.hstack(
+                (
+                    agent.truth.position_eci_km,
+                    agent.truth.velocity_eci_km_s,
+                    agent.truth.attitude_quat_bn,
+                    agent.truth.angular_rate_body_rad_s,
+                )
+            ),
             covariance=np.eye(13) * 1e-4,
             last_update_t_s=t_next,
         )
@@ -1102,7 +1140,9 @@ def _rocket_altitude_km(r_eci_km: np.ndarray, t_s: float, sim_cfg: RocketSimConf
     return float(alt_km)
 
 
-def _orbital_elements_basic(r_km: np.ndarray, v_km_s: np.ndarray, mu_km3_s2: float = EARTH_MU_KM3_S2) -> tuple[float, float]:
+def _orbital_elements_basic(
+    r_km: np.ndarray, v_km_s: np.ndarray, mu_km3_s2: float = EARTH_MU_KM3_S2
+) -> tuple[float, float]:
     r = float(np.linalg.norm(r_km))
     v2 = float(np.dot(v_km_s, v_km_s))
     if r <= 0.0:

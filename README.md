@@ -219,6 +219,8 @@ require hosted AI accounts or API keys.
 
 - [Quickstart](docs/quickstart.md)
 - [Scenario YAML](docs/scenario-yaml.md)
+- [Python API](docs/python-api.md)
+- [Examples Matrix](docs/examples-matrix.md)
 - [Plotting](docs/plotting.md)
 - [Plot Gallery](docs/plot-gallery.md)
 - [Custom Analysis](docs/custom-analysis.md)

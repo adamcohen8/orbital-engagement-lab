@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import importlib
 import logging
+from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
 
-from sim.control.orbit.integrated import IntegratedManeuverCommand, ManeuverStrategy, OrbitalAttitudeManeuverCoordinator
 from sim.control.attitude.pose_commands import PoseCommandGenerator
+from sim.control.orbit.integrated import IntegratedManeuverCommand, ManeuverStrategy, OrbitalAttitudeManeuverCoordinator
 from sim.core.models import Command, StateBelief, StateTruth
 from sim.dynamics.orbit.two_body import propagate_two_body_rk4
 from sim.rocket.models import RocketState, RocketVehicleConfig
-from sim.utils.frames import eci_relative_to_ric_rect, ric_curv_to_rect, ric_dcm_ir_from_rv, ric_rect_state_to_eci, ric_rect_to_curv
+from sim.utils.frames import eci_relative_to_ric_rect, ric_dcm_ir_from_rv, ric_rect_state_to_eci, ric_rect_to_curv
 from sim.utils.quaternion import dcm_to_quaternion_bn, normalize_quaternion, quaternion_to_dcm_bn
 
 logger = logging.getLogger(__name__)
@@ -61,7 +61,9 @@ def _estimate_stack_delta_v_m_s(rocket_state: RocketState, vehicle_cfg: RocketVe
 def _estimate_needed_delta_v_m_s(current_truth: StateTruth, target_truth: StateTruth | None) -> float:
     if target_truth is None:
         return np.inf
-    rel_v_km_s = np.array(target_truth.velocity_eci_km_s, dtype=float) - np.array(current_truth.velocity_eci_km_s, dtype=float)
+    rel_v_km_s = np.array(target_truth.velocity_eci_km_s, dtype=float) - np.array(
+        current_truth.velocity_eci_km_s, dtype=float
+    )
     return float(np.linalg.norm(rel_v_km_s) * 1e3)
 
 
@@ -213,7 +215,9 @@ def _relative_pd_accel_eci(
         return np.zeros(3, dtype=float)
     x_self = np.hstack((np.array(truth.position_eci_km, dtype=float), np.array(truth.velocity_eci_km_s, dtype=float)))
     x_tgt = np.hstack((target_state_eci[0], target_state_eci[1]))
-    rel_err = eci_relative_to_ric_rect(x_dep_eci=x_self, x_chief_eci=x_tgt) - np.array(desired_relative_ric_rect, dtype=float).reshape(6)
+    rel_err = eci_relative_to_ric_rect(x_dep_eci=x_self, x_chief_eci=x_tgt) - np.array(
+        desired_relative_ric_rect, dtype=float
+    ).reshape(6)
     a_cmd_ric = -(float(kp_pos) * rel_err[:3] + float(kd_vel) * rel_err[3:6])
     nrm = float(np.linalg.norm(a_cmd_ric))
     amax = float(max(max_accel_km_s2, 0.0))
@@ -460,7 +464,9 @@ class StationKeepMissionStrategy:
 class InspectMissionStrategy:
     target_id: str | None = None
     use_knowledge_for_targeting: bool = True
-    desired_relative_ric_rect: np.ndarray = field(default_factory=lambda: np.array([0.0, -1.0, 0.0, 0.0, 0.0, 0.0], dtype=float))
+    desired_relative_ric_rect: np.ndarray = field(
+        default_factory=lambda: np.array([0.0, -1.0, 0.0, 0.0, 0.0, 0.0], dtype=float)
+    )
     boresight_body: np.ndarray = field(default_factory=lambda: np.array([1.0, 0.0, 0.0], dtype=float))
     kp_pos: float = 1.0e-5
     kd_vel: float = 5.0e-4
@@ -1067,10 +1073,19 @@ class RocketGoWhenPossibleExecution:
         dv_needed = (
             np.inf
             if target_state is None
-            else float(np.linalg.norm(np.array(target_state[1], dtype=float) - np.array(truth.velocity_eci_km_s, dtype=float)) * 1e3)
+            else float(
+                np.linalg.norm(np.array(target_state[1], dtype=float) - np.array(truth.velocity_eci_km_s, dtype=float))
+                * 1e3
+            )
         )
-        dv_avail = _estimate_stack_delta_v_m_s(rocket_state, rocket_vehicle_cfg) if (rocket_state is not None and rocket_vehicle_cfg is not None) else np.inf
-        launch_authorized = bool(np.isfinite(dv_avail) and dv_avail >= (dv_needed + float(self.go_when_possible_margin_m_s)))
+        dv_avail = (
+            _estimate_stack_delta_v_m_s(rocket_state, rocket_vehicle_cfg)
+            if (rocket_state is not None and rocket_vehicle_cfg is not None)
+            else np.inf
+        )
+        launch_authorized = bool(
+            np.isfinite(dv_avail) and dv_avail >= (dv_needed + float(self.go_when_possible_margin_m_s))
+        )
         mission_mode = dict(intent.get("mission_mode", {}) or {})
         mission_mode["launch"] = "go_when_possible"
         return {
@@ -1170,8 +1185,14 @@ class ControllerPointingExecution:
     nominal_mode_name: str = "nominal"
     _detumble_latched: bool = False
 
-    def _maybe_update_mode(self, truth: StateTruth, att_belief: StateBelief | None, attitude_controller: Any | None) -> None:
-        if self.detumble_enter_rate_rad_s is None or attitude_controller is None or not hasattr(attitude_controller, "set_mode"):
+    def _maybe_update_mode(
+        self, truth: StateTruth, att_belief: StateBelief | None, attitude_controller: Any | None
+    ) -> None:
+        if (
+            self.detumble_enter_rate_rad_s is None
+            or attitude_controller is None
+            or not hasattr(attitude_controller, "set_mode")
+        ):
             return
         if att_belief is not None and att_belief.state.size >= 13:
             w = np.array(att_belief.state[10:13], dtype=float)
@@ -1179,7 +1200,9 @@ class ControllerPointingExecution:
             w = np.array(truth.angular_rate_body_rad_s, dtype=float)
         w_norm = float(np.linalg.norm(w))
         enter = float(max(self.detumble_enter_rate_rad_s, 0.0))
-        exit_rate = float(max(self.detumble_exit_rate_rad_s if self.detumble_exit_rate_rad_s is not None else enter, 0.0))
+        exit_rate = float(
+            max(self.detumble_exit_rate_rad_s if self.detumble_exit_rate_rad_s is not None else enter, 0.0)
+        )
         if self._detumble_latched:
             if w_norm <= exit_rate:
                 self._detumble_latched = False
@@ -1205,7 +1228,11 @@ class ControllerPointingExecution:
     ) -> dict[str, Any]:
         self._maybe_update_mode(truth=truth, att_belief=att_belief, attitude_controller=attitude_controller)
         _apply_orbit_controller_intent(orbit_controller, intent)
-        c_orb = orbit_controller.act(orb_belief, t_s, 2.0) if (orbit_controller is not None and orb_belief is not None) else Command.zero()
+        c_orb = (
+            orbit_controller.act(orb_belief, t_s, 2.0)
+            if (orbit_controller is not None and orb_belief is not None)
+            else Command.zero()
+        )
         thrust_cmd = np.array(c_orb.thrust_eci_km_s2, dtype=float).reshape(3)
         thrust_norm = float(np.sqrt(np.dot(thrust_cmd, thrust_cmd)))
         if self.use_strategy_fallback_thrust and thrust_norm <= 1e-15 and "fallback_thrust_eci_km_s2" in intent:
@@ -1221,13 +1248,22 @@ class ControllerPointingExecution:
                 thrust_eci_km_s2=thrust_cmd,
                 thruster_direction_body=np.array(self.thruster_direction_body, dtype=float),
             )
-        if q_des is not None and q_des.size == 4 and attitude_controller is not None and hasattr(attitude_controller, "set_target"):
+        if (
+            q_des is not None
+            and q_des.size == 4
+            and attitude_controller is not None
+            and hasattr(attitude_controller, "set_target")
+        ):
             try:
                 attitude_controller.set_target(q_des)
             except (TypeError, ValueError, AttributeError) as exc:
                 logger.warning("Failed to set mission execution target quaternion: %s", exc)
 
-        c_att = attitude_controller.act(att_belief, t_s, 2.0) if (attitude_controller is not None and att_belief is not None) else Command.zero()
+        c_att = (
+            attitude_controller.act(att_belief, t_s, 2.0)
+            if (attitude_controller is not None and att_belief is not None)
+            else Command.zero()
+        )
 
         tol_rad = _resolve_angle_tolerance_rad(self.alignment_tolerance_rad, self.alignment_tolerance_deg)
         alignment_error_rad = float("nan")
@@ -1250,7 +1286,11 @@ class ControllerPointingExecution:
             "thrust_eci_km_s2": thrust_cmd,
             "torque_body_nm": np.array(c_att.torque_body_nm, dtype=float).reshape(3),
             "command_mode_flags": mode_flags,
-            "desired_attitude_quat_bn": (np.array(q_des, dtype=float).reshape(4) if q_des is not None and q_des.size == 4 else intent.get("desired_attitude_quat_bn")),
+            "desired_attitude_quat_bn": (
+                np.array(q_des, dtype=float).reshape(4)
+                if q_des is not None and q_des.size == 4
+                else intent.get("desired_attitude_quat_bn")
+            ),
             "mission_mode": {
                 **dict(intent.get("mission_mode", {}) or {}),
                 "execution": "controller_pointing",
@@ -1282,11 +1322,17 @@ class PredictiveBurnExecution:
     _detumble_latched: bool = field(default=False, init=False, repr=False)
     _countdown_s: float = field(default=-1.0, init=False, repr=False)
     _last_plan_t_s: float | None = field(default=None, init=False, repr=False)
-    _planned_accel_eci_km_s2: np.ndarray = field(default_factory=lambda: np.zeros(3, dtype=float), init=False, repr=False)
-    _planned_attitude_quat_bn: np.ndarray = field(default_factory=lambda: np.array([1.0, 0.0, 0.0, 0.0], dtype=float), init=False, repr=False)
+    _planned_accel_eci_km_s2: np.ndarray = field(
+        default_factory=lambda: np.zeros(3, dtype=float), init=False, repr=False
+    )
+    _planned_attitude_quat_bn: np.ndarray = field(
+        default_factory=lambda: np.array([1.0, 0.0, 0.0, 0.0], dtype=float), init=False, repr=False
+    )
 
     def __post_init__(self) -> None:
-        self.alignment_tolerance_rad = _resolve_angle_tolerance_rad(self.alignment_tolerance_rad, self.alignment_tolerance_deg)
+        self.alignment_tolerance_rad = _resolve_angle_tolerance_rad(
+            self.alignment_tolerance_rad, self.alignment_tolerance_deg
+        )
 
     def _target_state(
         self,
@@ -1327,7 +1373,9 @@ class PredictiveBurnExecution:
         target_state_eci: tuple[np.ndarray, np.ndarray] | None,
         lead_time_s: float,
     ) -> StateBelief:
-        x_self = np.hstack((np.array(self_truth.position_eci_km, dtype=float), np.array(self_truth.velocity_eci_km_s, dtype=float)))
+        x_self = np.hstack(
+            (np.array(self_truth.position_eci_km, dtype=float), np.array(self_truth.velocity_eci_km_s, dtype=float))
+        )
         horizon = float(max(lead_time_s, 0.0))
         hdt = float(max(min(self.predict_dt_s, max(horizon, 1e-6)), 1e-6))
         x_self_p = self._predict_eci(x_self, horizon_s=horizon, dt_s=hdt)
@@ -1381,8 +1429,14 @@ class PredictiveBurnExecution:
             return float(max(self.planning_period_s, 1e-9))
         return float(max(dt_s, 1e-9))
 
-    def _maybe_update_mode(self, truth: StateTruth, att_belief: StateBelief | None, attitude_controller: Any | None) -> None:
-        if self.detumble_enter_rate_rad_s is None or attitude_controller is None or not hasattr(attitude_controller, "set_mode"):
+    def _maybe_update_mode(
+        self, truth: StateTruth, att_belief: StateBelief | None, attitude_controller: Any | None
+    ) -> None:
+        if (
+            self.detumble_enter_rate_rad_s is None
+            or attitude_controller is None
+            or not hasattr(attitude_controller, "set_mode")
+        ):
             return
         if att_belief is not None and att_belief.state.size >= 13:
             w = np.array(att_belief.state[10:13], dtype=float)
@@ -1390,7 +1444,9 @@ class PredictiveBurnExecution:
             w = np.array(truth.angular_rate_body_rad_s, dtype=float)
         w_norm = float(np.linalg.norm(w))
         enter = float(max(self.detumble_enter_rate_rad_s, 0.0))
-        exit_rate = float(max(self.detumble_exit_rate_rad_s if self.detumble_exit_rate_rad_s is not None else enter, 0.0))
+        exit_rate = float(
+            max(self.detumble_exit_rate_rad_s if self.detumble_exit_rate_rad_s is not None else enter, 0.0)
+        )
         if self._detumble_latched:
             if w_norm <= exit_rate:
                 self._detumble_latched = False
@@ -1426,7 +1482,9 @@ class PredictiveBurnExecution:
         plan_period_s = self._effective_planning_period_s(float(dt_s))
         target_state = self._target_state(intent=intent, own_knowledge=own_knowledge, world_truth=world_truth)
         _apply_orbit_controller_intent(orbit_controller, intent)
-        plan_due = bool(self._last_plan_t_s is None or (float(t_s) - float(self._last_plan_t_s)) >= (plan_period_s - 1e-12))
+        plan_due = bool(
+            self._last_plan_t_s is None or (float(t_s) - float(self._last_plan_t_s)) >= (plan_period_s - 1e-12)
+        )
         planned_this_step = False
         lead_time_s = float(max(intent.get("lead_time_s", self.lead_time_s), 0.0))
 
@@ -1450,14 +1508,18 @@ class PredictiveBurnExecution:
             if not np.all(np.isfinite(self._planned_accel_eci_km_s2)):
                 self._planned_accel_eci_km_s2 = np.zeros(3, dtype=float)
             if float(np.linalg.norm(self._planned_accel_eci_km_s2)) <= 1e-15 and "fallback_thrust_eci_km_s2" in intent:
-                self._planned_accel_eci_km_s2 = np.array(intent.get("fallback_thrust_eci_km_s2"), dtype=float).reshape(3)
+                self._planned_accel_eci_km_s2 = np.array(intent.get("fallback_thrust_eci_km_s2"), dtype=float).reshape(
+                    3
+                )
             dv_pred = self._planned_accel_eci_km_s2 * float(max(self.predict_dt_s, 1e-6))
             q_req = OrbitalAttitudeManeuverCoordinator().maneuverer.required_attitude_for_delta_v(
                 truth=truth,
                 delta_v_eci_km_s=dv_pred,
                 thruster_direction_body=np.array(self.thruster_direction_body, dtype=float),
             )
-            self._planned_attitude_quat_bn = np.array(q_req if q_req is not None else truth.attitude_quat_bn, dtype=float)
+            self._planned_attitude_quat_bn = np.array(
+                q_req if q_req is not None else truth.attitude_quat_bn, dtype=float
+            )
             self._countdown_s = lead_time_s
             self._last_plan_t_s = float(t_s)
             planned_this_step = True
@@ -1470,7 +1532,12 @@ class PredictiveBurnExecution:
         att_belief_eff = att_belief
         if (not attitude_disabled) and att_belief_eff is None and attitude_controller is not None:
             att_belief_eff = StateBelief(
-                state=np.hstack((np.array(truth.attitude_quat_bn, dtype=float), np.array(truth.angular_rate_body_rad_s, dtype=float))),
+                state=np.hstack(
+                    (
+                        np.array(truth.attitude_quat_bn, dtype=float),
+                        np.array(truth.angular_rate_body_rad_s, dtype=float),
+                    )
+                ),
                 covariance=np.eye(7) * 1e-6,
                 last_update_t_s=float(truth.t_s),
             )
@@ -1489,12 +1556,18 @@ class PredictiveBurnExecution:
             fire = False
         else:
             if lead_time_s <= 0.0:
-                fire = bool(align_ok and float(np.linalg.norm(self._planned_accel_eci_km_s2)) > float(max(self.min_burn_accel_km_s2, 0.0)))
+                fire = bool(
+                    align_ok
+                    and float(np.linalg.norm(self._planned_accel_eci_km_s2))
+                    > float(max(self.min_burn_accel_km_s2, 0.0))
+                )
                 self._countdown_s = 0.0
             elif self._countdown_s < 0.0:
                 fire = False
             elif self._countdown_s <= float(max(dt_s, 1e-9)):
-                if align_ok and float(np.linalg.norm(self._planned_accel_eci_km_s2)) > float(max(self.min_burn_accel_km_s2, 0.0)):
+                if align_ok and float(np.linalg.norm(self._planned_accel_eci_km_s2)) > float(
+                    max(self.min_burn_accel_km_s2, 0.0)
+                ):
                     fire = True
                 self._countdown_s = -1.0
             else:
@@ -1546,14 +1619,27 @@ class DirectIntegratedExecution:
     ) -> dict[str, Any]:
         _apply_orbit_controller_intent(orbit_controller, intent)
         thrust_cmd = np.array(intent.get("command_thrust_eci_km_s2", np.zeros(3)), dtype=float).reshape(3)
-        if float(np.linalg.norm(thrust_cmd)) <= 1e-15 and self.use_orbit_controller and orbit_controller is not None and orb_belief is not None:
+        if (
+            float(np.linalg.norm(thrust_cmd)) <= 1e-15
+            and self.use_orbit_controller
+            and orbit_controller is not None
+            and orb_belief is not None
+        ):
             c_orb = orbit_controller.act(orb_belief, float(t_s), float(max(self.orbit_controller_budget_ms, 1e-9)))
             thrust_cmd = np.array(c_orb.thrust_eci_km_s2, dtype=float).reshape(3)
-        if float(np.linalg.norm(thrust_cmd)) <= 1e-15 and self.use_strategy_fallback_thrust and "fallback_thrust_eci_km_s2" in intent:
+        if (
+            float(np.linalg.norm(thrust_cmd)) <= 1e-15
+            and self.use_strategy_fallback_thrust
+            and "fallback_thrust_eci_km_s2" in intent
+        ):
             thrust_cmd = np.array(intent.get("fallback_thrust_eci_km_s2"), dtype=float).reshape(3)
 
         q_des = intent.get("desired_attitude_quat_bn")
-        if q_des is None and bool(intent.get("align_to_thrust", self.align_thruster_to_thrust)) and float(np.linalg.norm(thrust_cmd)) > 1e-15:
+        if (
+            q_des is None
+            and bool(intent.get("align_to_thrust", self.align_thruster_to_thrust))
+            and float(np.linalg.norm(thrust_cmd)) > 1e-15
+        ):
             q_des = _desired_attitude_for_thrust(
                 truth=truth,
                 thrust_eci_km_s2=thrust_cmd,
@@ -1597,7 +1683,9 @@ class IntegratedCommandExecution:
     attitude_controller_budget_ms: float = 2.0
 
     def __post_init__(self) -> None:
-        self.alignment_tolerance_rad = _resolve_angle_tolerance_rad(self.alignment_tolerance_rad, self.alignment_tolerance_deg)
+        self.alignment_tolerance_rad = _resolve_angle_tolerance_rad(
+            self.alignment_tolerance_rad, self.alignment_tolerance_deg
+        )
 
     def update(
         self,
@@ -1682,7 +1770,9 @@ class ImpulsiveExecution:
     attitude_controller_budget_ms: float = 2.0
 
     def __post_init__(self) -> None:
-        self.alignment_tolerance_rad = _resolve_angle_tolerance_rad(self.alignment_tolerance_rad, self.alignment_tolerance_deg)
+        self.alignment_tolerance_rad = _resolve_angle_tolerance_rad(
+            self.alignment_tolerance_rad, self.alignment_tolerance_deg
+        )
 
     def _pulse_active(self, t_s: float) -> bool:
         period = float(max(self.pulse_period_s, 1e-9))
@@ -1710,11 +1800,19 @@ class ImpulsiveExecution:
             else Command.zero()
         )
         thrust_cmd = np.array(c_orb.thrust_eci_km_s2, dtype=float).reshape(3)
-        if float(np.linalg.norm(thrust_cmd)) <= 1e-15 and self.use_strategy_fallback_thrust and "fallback_thrust_eci_km_s2" in intent:
+        if (
+            float(np.linalg.norm(thrust_cmd)) <= 1e-15
+            and self.use_strategy_fallback_thrust
+            and "fallback_thrust_eci_km_s2" in intent
+        ):
             thrust_cmd = np.array(intent.get("fallback_thrust_eci_km_s2"), dtype=float).reshape(3)
 
         q_des = intent.get("desired_attitude_quat_bn")
-        if q_des is None and bool(intent.get("align_to_thrust", self.align_thruster_to_thrust)) and float(np.linalg.norm(thrust_cmd)) > 1e-15:
+        if (
+            q_des is None
+            and bool(intent.get("align_to_thrust", self.align_thruster_to_thrust))
+            and float(np.linalg.norm(thrust_cmd)) > 1e-15
+        ):
             q_des = _desired_attitude_for_thrust(
                 truth=truth,
                 thrust_eci_km_s2=thrust_cmd,
@@ -1736,7 +1834,9 @@ class ImpulsiveExecution:
         alignment_ok = True
         alignment_angle_rad = 0.0
         if float(np.linalg.norm(thrust_cmd)) > float(max(self.min_burn_accel_km_s2, 0.0)):
-            alignment_ok, alignment_angle_rad = PredictiveBurnExecution._alignment(self, truth=truth, accel_eci_km_s2=thrust_cmd)
+            alignment_ok, alignment_angle_rad = PredictiveBurnExecution._alignment(
+                self, truth=truth, accel_eci_km_s2=thrust_cmd
+            )
         pulse_active = self._pulse_active(float(t_s))
         fire = bool(
             pulse_active
@@ -1781,10 +1881,14 @@ class BudgetedEndStateExecution:
     alignment_tolerance_rad: float = np.deg2rad(5.0)
     alignment_tolerance_deg: float | None = None
     terminate_on_velocity_tolerance_km_s: float = 1e-5
-    _coordinator: OrbitalAttitudeManeuverCoordinator = field(default_factory=OrbitalAttitudeManeuverCoordinator, init=False, repr=False)
+    _coordinator: OrbitalAttitudeManeuverCoordinator = field(
+        default_factory=OrbitalAttitudeManeuverCoordinator, init=False, repr=False
+    )
 
     def __post_init__(self) -> None:
-        self.alignment_tolerance_rad = _resolve_angle_tolerance_rad(self.alignment_tolerance_rad, self.alignment_tolerance_deg)
+        self.alignment_tolerance_rad = _resolve_angle_tolerance_rad(
+            self.alignment_tolerance_rad, self.alignment_tolerance_deg
+        )
 
     def update(
         self,
@@ -1841,8 +1945,12 @@ class BudgetedEndStateExecution:
             dt_s=burn_window_s,
             min_thrust_n=float(max(self.min_thrust_n, 0.0)),
             require_attitude_alignment=(bool(self.require_attitude_alignment) and (not attitude_disabled)),
-            thruster_position_body_m=None if self.thruster_position_body_m is None else np.array(self.thruster_position_body_m, dtype=float),
-            thruster_direction_body=None if self.thruster_direction_body is None else np.array(self.thruster_direction_body, dtype=float),
+            thruster_position_body_m=None
+            if self.thruster_position_body_m is None
+            else np.array(self.thruster_position_body_m, dtype=float),
+            thruster_direction_body=None
+            if self.thruster_direction_body is None
+            else np.array(self.thruster_direction_body, dtype=float),
             alignment_tolerance_rad=float(max(self.alignment_tolerance_rad, 0.0)),
         )
         _, decision = self._coordinator.execute(truth=truth, command=cmd)
@@ -1990,7 +2098,9 @@ class SatelliteMissionModule:
     spotlight_ric_direction: np.ndarray = field(default_factory=lambda: np.array([1.0, 0.0, 0.0], dtype=float))
     use_knowledge_for_targeting: bool = True
 
-    def _target_state(self, own_knowledge: dict[str, StateBelief], world_truth: dict[str, StateTruth]) -> tuple[np.ndarray, np.ndarray] | None:
+    def _target_state(
+        self, own_knowledge: dict[str, StateBelief], world_truth: dict[str, StateTruth]
+    ) -> tuple[np.ndarray, np.ndarray] | None:
         if self.target_id is None:
             return None
         if self.use_knowledge_for_targeting and self.target_id in own_knowledge:
@@ -1999,7 +2109,9 @@ class SatelliteMissionModule:
                 return np.array(kb.state[:3], dtype=float), np.array(kb.state[3:6], dtype=float)
         return None
 
-    def _orbital_command(self, truth: StateTruth, own_knowledge: dict[str, StateBelief], world_truth: dict[str, StateTruth]) -> np.ndarray:
+    def _orbital_command(
+        self, truth: StateTruth, own_knowledge: dict[str, StateBelief], world_truth: dict[str, StateTruth]
+    ) -> np.ndarray:
         amax = float(max(self.max_accel_km_s2, 0.0))
         if self.orbital_mode == "coast" or amax <= 0.0:
             return np.zeros(3, dtype=float)
@@ -2117,7 +2229,9 @@ class DefensiveRICAxisBurnMissionModule:
     min_burn_accel_km_s2: float = 1e-12
 
     def __post_init__(self) -> None:
-        self.alignment_tolerance_rad = _resolve_angle_tolerance_rad(self.alignment_tolerance_rad, self.alignment_tolerance_deg)
+        self.alignment_tolerance_rad = _resolve_angle_tolerance_rad(
+            self.alignment_tolerance_rad, self.alignment_tolerance_deg
+        )
 
     def _has_chaser_knowledge(self, own_knowledge: dict[str, StateBelief]) -> bool:
         kb = own_knowledge.get(self.chaser_id)
@@ -2186,7 +2300,9 @@ class DefensiveRICAxisBurnMissionModule:
             return out
 
         dir_ric = _axis_unit_ric(self.axis_mode)
-        c_ir = ric_dcm_ir_from_rv(np.array(truth.position_eci_km, dtype=float), np.array(truth.velocity_eci_km_s, dtype=float))
+        c_ir = ric_dcm_ir_from_rv(
+            np.array(truth.position_eci_km, dtype=float), np.array(truth.velocity_eci_km_s, dtype=float)
+        )
         dir_eci = c_ir @ dir_ric
         thrust_cmd = a_mag * _unit(dir_eci)
         q_req = OrbitalAttitudeManeuverCoordinator().maneuverer.required_attitude_for_delta_v(
@@ -2205,7 +2321,12 @@ class DefensiveRICAxisBurnMissionModule:
         att_belief_eff = att_belief
         if (not attitude_disabled) and att_belief_eff is None and attitude_controller is not None:
             att_belief_eff = StateBelief(
-                state=np.hstack((np.array(truth.attitude_quat_bn, dtype=float), np.array(truth.angular_rate_body_rad_s, dtype=float))),
+                state=np.hstack(
+                    (
+                        np.array(truth.attitude_quat_bn, dtype=float),
+                        np.array(truth.angular_rate_body_rad_s, dtype=float),
+                    )
+                ),
                 covariance=np.eye(7) * 1e-6,
                 last_update_t_s=float(truth.t_s),
             )
@@ -2386,6 +2507,7 @@ class RocketMissionModule:
         **kwargs: Any,
     ) -> dict[str, Any]:
         launch_authorized = True
+        own_knowledge = dict(kwargs.get("own_knowledge", {}) or {})
         if self.launch_mode == "go_now":
             launch_authorized = True
         elif self.launch_mode == "wait_optimal_window":
@@ -2404,7 +2526,12 @@ class RocketMissionModule:
                 dv_need = (
                     np.inf
                     if target_state is None
-                    else float(np.linalg.norm(np.array(target_state[1], dtype=float) - np.array(truth.velocity_eci_km_s, dtype=float)) * 1e3)
+                    else float(
+                        np.linalg.norm(
+                            np.array(target_state[1], dtype=float) - np.array(truth.velocity_eci_km_s, dtype=float)
+                        )
+                        * 1e3
+                    )
                 )
                 launch_authorized = dv_need <= (dv_avail - float(self.go_when_possible_margin_m_s))
         out: dict[str, Any] = {"launch_authorized": bool(launch_authorized)}
@@ -2440,10 +2567,14 @@ class EndStateManeuverMissionModule:
     alignment_tolerance_rad: float = np.deg2rad(5.0)
     alignment_tolerance_deg: float | None = None
     terminate_on_velocity_tolerance_km_s: float = 1e-5
-    _coordinator: OrbitalAttitudeManeuverCoordinator = field(default_factory=OrbitalAttitudeManeuverCoordinator, init=False, repr=False)
+    _coordinator: OrbitalAttitudeManeuverCoordinator = field(
+        default_factory=OrbitalAttitudeManeuverCoordinator, init=False, repr=False
+    )
 
     def __post_init__(self) -> None:
-        self.alignment_tolerance_rad = _resolve_angle_tolerance_rad(self.alignment_tolerance_rad, self.alignment_tolerance_deg)
+        self.alignment_tolerance_rad = _resolve_angle_tolerance_rad(
+            self.alignment_tolerance_rad, self.alignment_tolerance_deg
+        )
 
     def _resolve_desired_state(
         self,
@@ -2512,8 +2643,12 @@ class EndStateManeuverMissionModule:
             dt_s=burn_window_s,
             min_thrust_n=float(max(self.min_thrust_n, 0.0)),
             require_attitude_alignment=(bool(self.require_attitude_alignment) and (not attitude_disabled)),
-            thruster_position_body_m=None if self.thruster_position_body_m is None else np.array(self.thruster_position_body_m, dtype=float),
-            thruster_direction_body=None if self.thruster_direction_body is None else np.array(self.thruster_direction_body, dtype=float),
+            thruster_position_body_m=None
+            if self.thruster_position_body_m is None
+            else np.array(self.thruster_position_body_m, dtype=float),
+            thruster_direction_body=None
+            if self.thruster_direction_body is None
+            else np.array(self.thruster_direction_body, dtype=float),
             alignment_tolerance_rad=float(max(self.alignment_tolerance_rad, 0.0)),
         )
         _, decision = self._coordinator.execute(truth=truth, command=cmd)
@@ -2566,7 +2701,9 @@ class IntegratedCommandMissionModule:
     min_burn_accel_km_s2: float = 1e-12
 
     def __post_init__(self) -> None:
-        self.alignment_tolerance_rad = _resolve_angle_tolerance_rad(self.alignment_tolerance_rad, self.alignment_tolerance_deg)
+        self.alignment_tolerance_rad = _resolve_angle_tolerance_rad(
+            self.alignment_tolerance_rad, self.alignment_tolerance_deg
+        )
 
     def _resolve_desired_state(
         self,
@@ -2734,13 +2871,21 @@ class PredictiveIntegratedCommandMissionModule:
     detumble_mode_tokens: tuple[str, ...] = ("detumble",)
     _countdown_s: float = field(default=-1.0, init=False, repr=False)
     _last_plan_t_s: float | None = field(default=None, init=False, repr=False)
-    _planned_accel_eci_km_s2: np.ndarray = field(default_factory=lambda: np.zeros(3, dtype=float), init=False, repr=False)
-    _planned_attitude_quat_bn: np.ndarray = field(default_factory=lambda: np.array([1.0, 0.0, 0.0, 0.0], dtype=float), init=False, repr=False)
+    _planned_accel_eci_km_s2: np.ndarray = field(
+        default_factory=lambda: np.zeros(3, dtype=float), init=False, repr=False
+    )
+    _planned_attitude_quat_bn: np.ndarray = field(
+        default_factory=lambda: np.array([1.0, 0.0, 0.0, 0.0], dtype=float), init=False, repr=False
+    )
 
     def __post_init__(self) -> None:
-        self.alignment_tolerance_rad = _resolve_angle_tolerance_rad(self.alignment_tolerance_rad, self.alignment_tolerance_deg)
+        self.alignment_tolerance_rad = _resolve_angle_tolerance_rad(
+            self.alignment_tolerance_rad, self.alignment_tolerance_deg
+        )
 
-    def _target_state(self, own_knowledge: dict[str, StateBelief], world_truth: dict[str, StateTruth]) -> tuple[np.ndarray, np.ndarray] | None:
+    def _target_state(
+        self, own_knowledge: dict[str, StateBelief], world_truth: dict[str, StateTruth]
+    ) -> tuple[np.ndarray, np.ndarray] | None:
         if self.use_knowledge_for_targeting:
             kb = own_knowledge.get(self.target_id)
             if kb is not None and kb.state.size >= 6:
@@ -2766,7 +2911,9 @@ class PredictiveIntegratedCommandMissionModule:
         self_truth: StateTruth,
         target_state_eci: tuple[np.ndarray, np.ndarray] | None,
     ) -> StateBelief:
-        x_self = np.hstack((np.array(self_truth.position_eci_km, dtype=float), np.array(self_truth.velocity_eci_km_s, dtype=float)))
+        x_self = np.hstack(
+            (np.array(self_truth.position_eci_km, dtype=float), np.array(self_truth.velocity_eci_km_s, dtype=float))
+        )
         horizon = float(max(self.lead_time_s, 0.0))
         hdt = float(max(min(self.predict_dt_s, max(horizon, 1e-6)), 1e-6))
         x_self_p = self._predict_eci(x_self, horizon_s=horizon, dt_s=hdt)
@@ -2850,8 +2997,7 @@ class PredictiveIntegratedCommandMissionModule:
         plan_period_s = self._effective_planning_period_s(orbit_controller=orbit_controller, dt_s=float(dt_s))
         target_state = self._target_state(own_knowledge=own_knowledge, world_truth=world_truth)
         plan_due = bool(
-            self._last_plan_t_s is None
-            or (float(t_s) - float(self._last_plan_t_s)) >= (plan_period_s - 1e-12)
+            self._last_plan_t_s is None or (float(t_s) - float(self._last_plan_t_s)) >= (plan_period_s - 1e-12)
         )
         planned_this_step = False
 
@@ -2880,7 +3026,9 @@ class PredictiveIntegratedCommandMissionModule:
                 delta_v_eci_km_s=dv_pred,
                 thruster_direction_body=np.array(self.thruster_direction_body, dtype=float),
             )
-            self._planned_attitude_quat_bn = np.array(q_req if q_req is not None else truth.attitude_quat_bn, dtype=float)
+            self._planned_attitude_quat_bn = np.array(
+                q_req if q_req is not None else truth.attitude_quat_bn, dtype=float
+            )
             self._countdown_s = float(max(self.lead_time_s, 0.0))
             self._last_plan_t_s = float(t_s)
             planned_this_step = True
@@ -2895,7 +3043,12 @@ class PredictiveIntegratedCommandMissionModule:
         if (not attitude_disabled) and att_belief_eff is None and attitude_controller is not None:
             # Ensure integrated attitude logic can still run even if self-knowledge is not configured.
             att_belief_eff = StateBelief(
-                state=np.hstack((np.array(truth.attitude_quat_bn, dtype=float), np.array(truth.angular_rate_body_rad_s, dtype=float))),
+                state=np.hstack(
+                    (
+                        np.array(truth.attitude_quat_bn, dtype=float),
+                        np.array(truth.angular_rate_body_rad_s, dtype=float),
+                    )
+                ),
                 covariance=np.eye(7) * 1e-6,
                 last_update_t_s=float(truth.t_s),
             )
@@ -2917,13 +3070,16 @@ class PredictiveIntegratedCommandMissionModule:
                 # Zero-lead mode: continuous closed-loop burn eligibility each step.
                 fire = bool(
                     align_ok
-                    and float(np.linalg.norm(self._planned_accel_eci_km_s2)) > float(max(self.min_burn_accel_km_s2, 0.0))
+                    and float(np.linalg.norm(self._planned_accel_eci_km_s2))
+                    > float(max(self.min_burn_accel_km_s2, 0.0))
                 )
                 self._countdown_s = 0.0
             elif self._countdown_s < 0.0:
                 fire = False
             elif self._countdown_s <= float(max(dt_s, 1e-9)):
-                if align_ok and float(np.linalg.norm(self._planned_accel_eci_km_s2)) > float(max(self.min_burn_accel_km_s2, 0.0)):
+                if align_ok and float(np.linalg.norm(self._planned_accel_eci_km_s2)) > float(
+                    max(self.min_burn_accel_km_s2, 0.0)
+                ):
                     fire = True
                 self._countdown_s = -1.0
             else:

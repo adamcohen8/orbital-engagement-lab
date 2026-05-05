@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+
 import numpy as np
 
 from sim.utils.quaternion import (
@@ -48,11 +49,11 @@ def rigid_body_derivatives(
 ) -> tuple[np.ndarray, np.ndarray]:
     q = normalize_quaternion(quat_bn)
     w = np.asarray(omega_body_rad_s, dtype=float).reshape(3)
-    I = np.asarray(inertia_kg_m2, dtype=float).reshape(3, 3)
+    inertia = np.asarray(inertia_kg_m2, dtype=float).reshape(3, 3)
     tau = np.asarray(torque_body_nm, dtype=float).reshape(3)
 
     # Clamp/sanitize extremes to keep attitude propagation numerically stable.
-    if not (np.all(np.isfinite(w)) and np.all(np.isfinite(tau)) and np.all(np.isfinite(I))):
+    if not (np.all(np.isfinite(w)) and np.all(np.isfinite(tau)) and np.all(np.isfinite(inertia))):
         _ATTITUDE_GUARDRAIL_STATS.non_finite_input_events += 1
     w_nonfinite = ~np.isfinite(w)
     tau_nonfinite = ~np.isfinite(tau)
@@ -68,7 +69,7 @@ def rigid_body_derivatives(
     _ATTITUDE_GUARDRAIL_STATS.torque_clamp_events += int(np.sum(tau != tau_pre_clip))
 
     q_dot = 0.5 * omega_matrix(w) @ q
-    Iw = I @ w
+    Iw = inertia @ w
     coriolis = np.array(
         [
             w[1] * Iw[2] - w[2] * Iw[1],
@@ -81,7 +82,7 @@ def rigid_body_derivatives(
         _ATTITUDE_GUARDRAIL_STATS.non_finite_coriolis_events += 1
     rhs = tau - np.nan_to_num(coriolis, nan=0.0, posinf=_MAX_ABS_TORQUE_NM, neginf=-_MAX_ABS_TORQUE_NM)
     try:
-        omega_dot = np.linalg.solve(I, rhs)
+        omega_dot = np.linalg.solve(inertia, rhs)
     except np.linalg.LinAlgError:
         _ATTITUDE_GUARDRAIL_STATS.singular_inertia_events += 1
         omega_dot = np.zeros(3, dtype=float)

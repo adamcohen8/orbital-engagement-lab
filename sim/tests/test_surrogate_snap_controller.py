@@ -30,7 +30,9 @@ class TestSurrogateSnapController(unittest.TestCase):
             default_dt_s=1.0,
         )
         b = StateBelief(
-            state=np.hstack((np.array([7000.0, 0.0, 0.0, 0.0, 7.5, 0.0]), np.array([1.0, 0.0, 0.0, 0.0]), np.array([2.0, 0.0, 0.0]))),
+            state=np.hstack(
+                (np.array([7000.0, 0.0, 0.0, 0.0, 7.5, 0.0]), np.array([1.0, 0.0, 0.0, 0.0]), np.array([2.0, 0.0, 0.0]))
+            ),
             covariance=np.eye(13),
             last_update_t_s=0.0,
         )

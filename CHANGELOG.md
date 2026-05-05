@@ -6,6 +6,26 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.4.1 - 2026-05-05
+
+Documentation, public-export, and hygiene release.
+
+### Added
+
+- Added private controller-bench and campaign-analysis documentation plus public
+  Python API and examples-matrix guides.
+- Added Ruff lint/format configuration and a local artifact cleanup helper.
+
+### Fixed
+
+- Fixed correctness-oriented Ruff findings, including mutable defaults,
+  closure-captured loop variables, stale imports, and an undefined mission
+  targeting knowledge reference.
+- Tightened public export generation and checks so generated public releases
+  remain Ruff-clean and exclude private-only documentation and local records.
+- Limited default pytest collection to the supported `sim/tests` suite while
+  ignoring scratch experiments.
+
 ## 0.4.0 - 2026-05-05
 
 Named-object architecture and public workflow release.
@@ -47,15 +67,11 @@ Named-object architecture and public workflow release.
 
 ### Governance
 
-- Added a private founder ethics and conflict-of-interest planning file for
-  outside-activity approval, IP provenance, recusal screening, communication
-  boundaries, and diligence records.
-- Added an ignored local founder-file workspace with starter ethics-review,
-  IP-provenance, operating-rule, contact-screen, and activity-log documents.
+- Added a public README personal-capacity/no-endorsement notice.
 - Softened public/commercial wording that named specific government audiences
   where broader aerospace training language was sufficient.
-- Added a public README personal-capacity/no-endorsement notice and documented
-  which ethics/compliance artifacts are public, private, or local-only.
+- Strengthened public/private documentation boundaries and export guardrails for
+  local-only governance, compliance, and provenance records.
 
 ## 0.3.0 - 2026-04-29
 

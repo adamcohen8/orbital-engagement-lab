@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "orbital-engagement-lab"
-version = "0.4.0"
+version = "0.4.1"
 description = "Integrated spacecraft simulation and analysis platform for rendezvous, control, validation, and mission prototyping."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -22,6 +22,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "pytest>=8.0",
+  "ruff>=0.6",
 ]
 gui = [
   "PySide6>=6.7",
@@ -36,6 +37,7 @@ ml = [
 ]
 full = [
   "pytest>=8.0",
+  "ruff>=0.6",
   "PySide6>=6.7",
   "pygame>=2.5",
   "gymnasium>=0.29",
@@ -52,3 +54,34 @@ sim = ["presets/objects/*.yaml", "game/configs/*.yaml"]
 [tool.setuptools.packages.find]
 include = ["sim*", "machine_learning*"]
 exclude = ["sim.tests", "sim.tests.*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+extend-exclude = [
+  "examples/experiments",
+  "outputs",
+  "examples/outputs",
+  "validation/High Precision Orbit Propagator_4-2",
+  "validation/data",
+]
+
+[tool.ruff.lint]
+select = [
+  "E",
+  "F",
+  "I",
+  "B",
+  "UP",
+]
+ignore = [
+  "E501",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"integrations/cfs_sil/mock_cfs_endpoint.py" = ["E402"]
+"machine_learning/gym_env.py" = ["E402"]
+"validation/*.py" = ["E402"]
+
+[tool.pytest.ini_options]
+testpaths = ["sim/tests"]

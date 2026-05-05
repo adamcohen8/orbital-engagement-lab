@@ -58,9 +58,7 @@ def spice_sun_moon_positions_eci_km(jd_utc: float, env: dict) -> tuple[np.ndarra
         out = cb(float(jd_utc), env)
         if isinstance(out, dict) and "sun_pos_eci_km" in out and "moon_pos_eci_km" in out:
             return _normalize_vec3(out["sun_pos_eci_km"]), _normalize_vec3(out["moon_pos_eci_km"])
-        raise RuntimeError(
-            "spice_ephemeris_callable must return dict with 'sun_pos_eci_km' and 'moon_pos_eci_km'."
-        )
+        raise RuntimeError("spice_ephemeris_callable must return dict with 'sun_pos_eci_km' and 'moon_pos_eci_km'.")
 
     try:
         import spiceypy as sp  # type: ignore

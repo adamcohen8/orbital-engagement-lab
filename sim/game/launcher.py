@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -168,7 +168,9 @@ def _save_game_progress(progress: dict[str, tuple[str, ...]]) -> None:
     scenarios = {}
     for scenario_id, completed in sorted(progress.items()):
         completed_set = set(completed)
-        scenarios[scenario_id] = {"completed_difficulties": [item for item in DIFFICULTY_OPTIONS if item in completed_set]}
+        scenarios[scenario_id] = {
+            "completed_difficulties": [item for item in DIFFICULTY_OPTIONS if item in completed_set]
+        }
     with path.open("w", encoding="utf-8") as f:
         yaml.safe_dump({"scenarios": scenarios}, f, sort_keys=False)
 
@@ -237,9 +239,13 @@ def _run_launcher(options: tuple[GameScenarioOption, ...]) -> GameLaunchSelectio
                         difficulty_idx = 2
                     elif event.key == pygame.K_4:
                         difficulty_idx = 3
-                    scroll_offset = _scroll_for_selection(selected, scroll_offset, count=len(options), screen_height=height)
+                    scroll_offset = _scroll_for_selection(
+                        selected, scroll_offset, count=len(options), screen_height=height
+                    )
                 if event.type == pygame.MOUSEWHEEL:
-                    scroll_offset = int(max(0, min(scroll_offset - int(event.y), _max_scroll_offset(len(options), height))))
+                    scroll_offset = int(
+                        max(0, min(scroll_offset - int(event.y), _max_scroll_offset(len(options), height)))
+                    )
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     idx = _option_index_at_pos(pygame.mouse.get_pos(), count=len(options), scroll_offset=scroll_offset)
                     if idx is not None:
@@ -253,7 +259,9 @@ def _run_launcher(options: tuple[GameScenarioOption, ...]) -> GameLaunchSelectio
                             options = discover_game_scenarios(options[0].path.parent)
                             selected = min(selected, len(options) - 1)
                             difficulty_idx = _difficulty_index(options[selected].difficulty)
-                            scroll_offset = _scroll_for_selection(selected, scroll_offset, count=len(options), screen_height=height)
+                            scroll_offset = _scroll_for_selection(
+                                selected, scroll_offset, count=len(options), screen_height=height
+                            )
                             continue
                         difficulty = _difficulty_at_pos(mouse_pos)
                         if difficulty is not None:
@@ -363,7 +371,13 @@ def _draw_launcher(
     _text(screen, title_font, "Orbital Engagement Lab", (54, 36), (238, 242, 248))
     _draw_clear_progress_button(pygame, screen, font=small_font)
     _text(screen, font, "Select RPO training level", (56, 78), (172, 186, 206))
-    _text(screen, small_font, "Up/Down select   Left/Right difficulty   Enter launch   Esc quit", (56, 106), (220, 160, 160))
+    _text(
+        screen,
+        small_font,
+        "Up/Down select   Left/Right difficulty   Enter launch   Esc quit",
+        (56, 106),
+        (220, 160, 160),
+    )
     _draw_difficulty_picker(pygame, screen, selected_difficulty=selected_difficulty, font=small_font)
 
     list_rect = pygame.Rect(42, 124, 424, max(height - 164, 480))
@@ -382,7 +396,13 @@ def _draw_launcher(
         pygame.draw.rect(screen, fill, rect, border_radius=8)
         pygame.draw.rect(screen, stroke, rect, width=2 if is_selected else 1, border_radius=8)
         _text(screen, font, option.title, (rect.x + 18, rect.y + 12), (238, 244, 250))
-        _text(screen, small_font, f"Progress: {_progress_stars(option.completed_difficulties)}", (rect.x + 18, rect.y + 38), (162, 178, 198))
+        _text(
+            screen,
+            small_font,
+            f"Progress: {_progress_stars(option.completed_difficulties)}",
+            (rect.x + 18, rect.y + 38),
+            (162, 178, 198),
+        )
 
     if len(options) > visible:
         _draw_scrollbar(pygame, screen, list_rect, count=len(options), visible=visible, scroll_offset=scroll_offset)
@@ -444,12 +464,22 @@ def _draw_preview(
     y = rect.y + 18
     _text(screen, font, option.title, (rect.x + 20, y), (238, 244, 250))
     y += 34
-    _text(screen, small_font, _budget_line(option, selected_difficulty=selected_difficulty), (rect.x + 20, y), (162, 178, 198))
+    _text(
+        screen,
+        small_font,
+        _budget_line(option, selected_difficulty=selected_difficulty),
+        (rect.x + 20, y),
+        (162, 178, 198),
+    )
     y += 32
     y = _draw_section(screen, small_font, "Objective", option.learning_goal, rect.x + 20, y, rect.width - 40)
-    y = _draw_section(screen, small_font, "Brief", option.player_brief or option.description, rect.x + 20, y + 10, rect.width - 40)
+    y = _draw_section(
+        screen, small_font, "Brief", option.player_brief or option.description, rect.x + 20, y + 10, rect.width - 40
+    )
     y = _draw_bullets(screen, small_font, "Pass Criteria", option.pass_criteria, rect.x + 20, y + 10, rect.width - 40)
-    y = _draw_bullets(screen, small_font, "Instructor Notes", option.instructor_notes, rect.x + 20, y + 10, rect.width - 40)
+    y = _draw_bullets(
+        screen, small_font, "Instructor Notes", option.instructor_notes, rect.x + 20, y + 10, rect.width - 40
+    )
 
 
 def _text(screen: Any, font: Any, text: str, pos: tuple[int, int], color: tuple[int, int, int]) -> None:

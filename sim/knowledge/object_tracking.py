@@ -107,7 +107,9 @@ class _OtherObjectStateSensor:
         if not access_ok:
             self.last_detection_status = str(access_reason)
             return None
-        if self.conditions.require_line_of_sight and not _line_of_sight_clear(sensor_position_eci_km, target_truth.position_eci_km):
+        if self.conditions.require_line_of_sight and not _line_of_sight_clear(
+            sensor_position_eci_km, target_truth.position_eci_km
+        ):
             self.last_detection_status = "line_of_sight"
             return None
         if self.rng.random() < float(self.conditions.dropout_prob):
@@ -277,7 +279,9 @@ class _Track:
     def _record_consistency(self, target_truth: StateTruth, diag: object | None, t_s: float) -> None:
         if self.belief is None:
             return
-        err = np.array(self.belief.state[:6], dtype=float) - np.hstack((target_truth.position_eci_km, target_truth.velocity_eci_km_s))
+        err = np.array(self.belief.state[:6], dtype=float) - np.hstack(
+            (target_truth.position_eci_km, target_truth.velocity_eci_km_s)
+        )
         pos_err = err[:3]
         vel_err = err[3:6]
         self.pos_error_norm_km_values.append(float(np.linalg.norm(pos_err)))
@@ -371,16 +375,18 @@ class ObjectKnowledgeBase:
             )
             self._tracks[cfg.target_id] = _Track(
                 target_id=cfg.target_id,
-            sensor=sensor,
-            estimator=ekf,
-            measurement_model=_normalize_measurement_model(cfg.measurement_model),
-            init_cov_diag=np.array(cfg.ekf.init_cov_diag, dtype=float),
-        )
+                sensor=sensor,
+                estimator=ekf,
+                measurement_model=_normalize_measurement_model(cfg.measurement_model),
+                init_cov_diag=np.array(cfg.ekf.init_cov_diag, dtype=float),
+            )
 
     def target_ids(self) -> list[str]:
         return sorted(self._tracks.keys())
 
-    def update(self, observer_truth: StateTruth, world_truth: dict[str, StateTruth], t_s: float) -> dict[str, StateBelief]:
+    def update(
+        self, observer_truth: StateTruth, world_truth: dict[str, StateTruth], t_s: float
+    ) -> dict[str, StateBelief]:
         out: dict[str, StateBelief] = {}
         for target_id, track in self._tracks.items():
             tgt = world_truth.get(target_id)
@@ -399,16 +405,10 @@ class ObjectKnowledgeBase:
         return out
 
     def consistency_summary(self) -> dict[str, dict[str, float | int | None]]:
-        return {
-            str(target_id): track.consistency_summary()
-            for target_id, track in sorted(self._tracks.items())
-        }
+        return {str(target_id): track.consistency_summary() for target_id, track in sorted(self._tracks.items())}
 
     def detection_summary(self) -> dict[str, dict[str, float | int | dict[str, int] | None]]:
-        return {
-            str(target_id): track.detection_summary()
-            for target_id, track in sorted(self._tracks.items())
-        }
+        return {str(target_id): track.detection_summary() for target_id, track in sorted(self._tracks.items())}
 
 
 def _expand3(v: np.ndarray) -> np.ndarray:
@@ -481,10 +481,17 @@ def _relative_measurement_sigma(model: str, noise: KnowledgeNoiseConfig) -> np.n
     if model == "relative_angles":
         return np.array([float(noise.angle_sigma_rad), float(noise.angle_sigma_rad)], dtype=float)
     if model == "relative_angles_range":
-        return np.array([float(noise.angle_sigma_rad), float(noise.angle_sigma_rad), float(noise.range_sigma_km)], dtype=float)
+        return np.array(
+            [float(noise.angle_sigma_rad), float(noise.angle_sigma_rad), float(noise.range_sigma_km)], dtype=float
+        )
     if model == "relative_angles_range_rate":
         return np.array(
-            [float(noise.angle_sigma_rad), float(noise.angle_sigma_rad), float(noise.range_sigma_km), float(noise.range_rate_sigma_km_s)],
+            [
+                float(noise.angle_sigma_rad),
+                float(noise.angle_sigma_rad),
+                float(noise.range_sigma_km),
+                float(noise.range_rate_sigma_km_s),
+            ],
             dtype=float,
         )
     return np.hstack((_expand3(noise.pos_sigma_km), _expand3(noise.vel_sigma_km_s)))
@@ -501,7 +508,12 @@ def _relative_measurement_bias(model: str, noise: KnowledgeNoiseConfig) -> np.nd
         return np.array([float(noise.az_bias_rad), float(noise.el_bias_rad), float(noise.range_bias_km)], dtype=float)
     if model == "relative_angles_range_rate":
         return np.array(
-            [float(noise.az_bias_rad), float(noise.el_bias_rad), float(noise.range_bias_km), float(noise.range_rate_bias_km_s)],
+            [
+                float(noise.az_bias_rad),
+                float(noise.el_bias_rad),
+                float(noise.range_bias_km),
+                float(noise.range_rate_bias_km_s),
+            ],
             dtype=float,
         )
     return np.hstack((_expand3(noise.pos_bias_km), _expand3(noise.vel_bias_km_s)))

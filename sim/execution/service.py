@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from pathlib import Path
 import tempfile
+from pathlib import Path
 from typing import Any, Callable
 
 import yaml
 
 from sim.config import SimulationScenarioConfig, load_simulation_yaml, validate_scenario_plugins
-from sim.single_run import _SingleRunEngine, _coerce_noninteractive_for_automation, _run_single_config
+from sim.single_run import _coerce_noninteractive_for_automation, _run_single_config, _SingleRunEngine
 
 StepCallback = Callable[[int, int], None]
 BatchCallback = Callable[[int, int], None]

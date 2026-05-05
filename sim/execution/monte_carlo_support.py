@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import subprocess
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -25,7 +25,9 @@ def fmt_float(x: float, digits: int = 3) -> str:
     return f"{float(x):.{digits}f}"
 
 
-def quantile_stats(values: list[float] | np.ndarray, quantiles: tuple[float, ...] = (50.0, 90.0, 95.0, 99.0)) -> dict[str, float]:
+def quantile_stats(
+    values: list[float] | np.ndarray, quantiles: tuple[float, ...] = (50.0, 90.0, 95.0, 99.0)
+) -> dict[str, float]:
     arr = np.array(values, dtype=float)
     arr = arr[np.isfinite(arr)]
     if arr.size == 0:
@@ -131,7 +133,9 @@ def assess_mc_run(
     total_dv_m_s_by_object = {
         str(oid): safe_float(dict(ts or {}).get("total_dv_m_s"), default=0.0) for oid, ts in thrust_stats.items()
     }
-    total_dv_m_s_total = float(np.sum(np.array(list(total_dv_m_s_by_object.values()), dtype=float))) if total_dv_m_s_by_object else 0.0
+    total_dv_m_s_total = (
+        float(np.sum(np.array(list(total_dv_m_s_by_object.values()), dtype=float))) if total_dv_m_s_by_object else 0.0
+    )
 
     fail_reasons: list[str] = []
     if terminated_early and term_reason_txt not in success_termination_reasons:
@@ -140,7 +144,11 @@ def assess_mc_run(
         fail_reasons.append("rocket_insertion_not_achieved")
 
     min_closest_approach_km = safe_float(gates.get("min_closest_approach_km"))
-    if np.isfinite(min_closest_approach_km) and np.isfinite(closest_approach_km) and closest_approach_km < min_closest_approach_km:
+    if (
+        np.isfinite(min_closest_approach_km)
+        and np.isfinite(closest_approach_km)
+        and closest_approach_km < min_closest_approach_km
+    ):
         fail_reasons.append("gate:min_closest_approach_km")
 
     max_duration_s = safe_float(gates.get("max_duration_s"))
@@ -206,11 +214,11 @@ def build_parameter_sensitivity_rankings(run_details: list[dict[str, Any]]) -> l
         if int(np.sum(finite_x)) < 3:
             continue
 
-        def _abs_corr(y: np.ndarray) -> float:
-            finite = finite_x & np.isfinite(y)
+        def _abs_corr(y: np.ndarray, *, x_values: np.ndarray = x, finite_x_mask: np.ndarray = finite_x) -> float:
+            finite = finite_x_mask & np.isfinite(y)
             if int(np.sum(finite)) < 3:
                 return float("nan")
-            x_ok = x[finite]
+            x_ok = x_values[finite]
             y_ok = y[finite]
             if np.allclose(np.std(x_ok), 0.0) or np.allclose(np.std(y_ok), 0.0):
                 return float("nan")

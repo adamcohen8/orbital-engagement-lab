@@ -62,7 +62,9 @@ def _small_angle_error_quat(sigma_rad: float, rng: np.random.Generator) -> np.nd
         return np.array([1.0, 0.0, 0.0, 0.0], dtype=float)
     axis = dtheta / ang
     h = 0.5 * ang
-    return normalize_quaternion(np.array([np.cos(h), axis[0] * np.sin(h), axis[1] * np.sin(h), axis[2] * np.sin(h)], dtype=float))
+    return normalize_quaternion(
+        np.array([np.cos(h), axis[0] * np.sin(h), axis[1] * np.sin(h), axis[2] * np.sin(h)], dtype=float)
+    )
 
 
 @dataclass
@@ -126,8 +128,12 @@ class _BaseSurrogateSnap(Controller):
 @dataclass
 class SurrogateSnapECIController(_BaseSurrogateSnap):
     desired_attitude_quat_bn: np.ndarray = field(default_factory=lambda: np.array([1.0, 0.0, 0.0, 0.0], dtype=float))
-    _hold_q_bn: np.ndarray = field(default_factory=lambda: np.array([1.0, 0.0, 0.0, 0.0], dtype=float), init=False, repr=False)
-    _target_q_bn: np.ndarray = field(default_factory=lambda: np.array([1.0, 0.0, 0.0, 0.0], dtype=float), init=False, repr=False)
+    _hold_q_bn: np.ndarray = field(
+        default_factory=lambda: np.array([1.0, 0.0, 0.0, 0.0], dtype=float), init=False, repr=False
+    )
+    _target_q_bn: np.ndarray = field(
+        default_factory=lambda: np.array([1.0, 0.0, 0.0, 0.0], dtype=float), init=False, repr=False
+    )
 
     def __post_init__(self) -> None:
         super().__post_init__()
@@ -190,8 +196,12 @@ class SurrogateSnapECIController(_BaseSurrogateSnap):
 @dataclass
 class SurrogateSnapRICController(_BaseSurrogateSnap):
     desired_attitude_quat_br: np.ndarray = field(default_factory=lambda: np.array([1.0, 0.0, 0.0, 0.0], dtype=float))
-    _hold_q_br: np.ndarray = field(default_factory=lambda: np.array([1.0, 0.0, 0.0, 0.0], dtype=float), init=False, repr=False)
-    _target_q_br: np.ndarray = field(default_factory=lambda: np.array([1.0, 0.0, 0.0, 0.0], dtype=float), init=False, repr=False)
+    _hold_q_br: np.ndarray = field(
+        default_factory=lambda: np.array([1.0, 0.0, 0.0, 0.0], dtype=float), init=False, repr=False
+    )
+    _target_q_br: np.ndarray = field(
+        default_factory=lambda: np.array([1.0, 0.0, 0.0, 0.0], dtype=float), init=False, repr=False
+    )
 
     def __post_init__(self) -> None:
         super().__post_init__()

@@ -6,10 +6,18 @@ import numpy as np
 
 from sim.dynamics.orbit.atmosphere import density_exponential
 from sim.dynamics.orbit.eclipse import resolve_srp_geometry, srp_shadow_factor
-from sim.dynamics.orbit.environment import EARTH_J2, EARTH_J3, EARTH_J4, EARTH_RADIUS_KM, EARTH_ROT_RATE_RAD_S, SOLAR_PRESSURE_N_M2
+from sim.dynamics.orbit.environment import (
+    EARTH_J2,
+    EARTH_J3,
+    EARTH_J4,
+    EARTH_RADIUS_KM,
+    EARTH_ROT_RATE_RAD_S,
+    SOLAR_PRESSURE_N_M2,
+)
 from sim.dynamics.orbit.frames import eci_to_ecef_rotation, eci_to_ecef_rotation_hpop_like
 
 _OMEGA_EARTH_RAD_S = np.array([0.0, 0.0, EARTH_ROT_RATE_RAD_S], dtype=float)
+
 
 @dataclass(frozen=True)
 class OrbitContext:
@@ -28,7 +36,9 @@ def accel_two_body(r_eci_km: np.ndarray, mu_km3_s2: float) -> np.ndarray:
     return (-mu_km3_s2 / (r * r2)) * r_eci_km
 
 
-def accel_j2(r_eci_km: np.ndarray, mu_km3_s2: float, j2: float = EARTH_J2, re_km: float = EARTH_RADIUS_KM) -> np.ndarray:
+def accel_j2(
+    r_eci_km: np.ndarray, mu_km3_s2: float, j2: float = EARTH_J2, re_km: float = EARTH_RADIUS_KM
+) -> np.ndarray:
     x, y, z = r_eci_km
     r2 = float(np.dot(r_eci_km, r_eci_km))
     r = np.sqrt(r2)
@@ -37,14 +47,18 @@ def accel_j2(r_eci_km: np.ndarray, mu_km3_s2: float, j2: float = EARTH_J2, re_km
     z2 = z * z
     f = 1.5 * j2 * mu_km3_s2 * (re_km**2) / (r**5)
     g = 5.0 * z2 / r2
-    return np.array([
-        f * x * (g - 1.0),
-        f * y * (g - 1.0),
-        f * z * (g - 3.0),
-    ])
+    return np.array(
+        [
+            f * x * (g - 1.0),
+            f * y * (g - 1.0),
+            f * z * (g - 3.0),
+        ]
+    )
 
 
-def accel_j3(r_eci_km: np.ndarray, mu_km3_s2: float, j3: float = EARTH_J3, re_km: float = EARTH_RADIUS_KM) -> np.ndarray:
+def accel_j3(
+    r_eci_km: np.ndarray, mu_km3_s2: float, j3: float = EARTH_J3, re_km: float = EARTH_RADIUS_KM
+) -> np.ndarray:
     """
     Zonal J3 perturbation acceleration in ECI (km/s^2).
 
@@ -76,7 +90,9 @@ def accel_j3(r_eci_km: np.ndarray, mu_km3_s2: float, j3: float = EARTH_J3, re_km
     )
 
 
-def accel_j4(r_eci_km: np.ndarray, mu_km3_s2: float, j4: float = EARTH_J4, re_km: float = EARTH_RADIUS_KM) -> np.ndarray:
+def accel_j4(
+    r_eci_km: np.ndarray, mu_km3_s2: float, j4: float = EARTH_J4, re_km: float = EARTH_RADIUS_KM
+) -> np.ndarray:
     """
     Zonal J4 perturbation acceleration in ECI (km/s^2).
 

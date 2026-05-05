@@ -11,24 +11,32 @@ from matplotlib.patches import Polygon, Rectangle
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
 from sim.dynamics.orbit.environment import EARTH_RADIUS_KM
-from sim.dynamics.orbit.frames import eci_to_ecef
 from sim.dynamics.orbit.epoch import julian_date_to_datetime
-from sim.utils.frames import ric_curv_to_rect, ric_dcm_ir_from_rv, ric_rect_to_curv
-from sim.utils.ground_track import ground_track_from_eci_history, split_ground_track_dateline
+from sim.dynamics.orbit.frames import eci_to_ecef
 from sim.utils.figure_size import cap_figsize
+from sim.utils.frames import ric_dcm_ir_from_rv, ric_rect_to_curv
+from sim.utils.ground_track import ground_track_from_eci_history, split_ground_track_dateline
+from sim.utils.plot_windows import RIC_FOLLOW_MARGIN
 from sim.utils.plot_windows import attitude_axis_limits as _attitude_axis_limits
 from sim.utils.plot_windows import fuel_fraction_from_remaining_series as _fuel_fraction_from_remaining_series
-from sim.utils.plot_windows import RIC_FOLLOW_MARGIN
 from sim.utils.plot_windows import windows_from_points as _windows_from_points
-from sim.utils.thruster_plot_geometry import thruster_marker_geometry_body
-from sim.utils.quaternion import dcm_to_quaternion_bn, quaternion_to_dcm_bn
 from sim.utils.plotting import (
     plot_angular_rates as plot_angular_rates_legacy,
+)
+from sim.utils.plotting import (
     plot_attitude_ric as plot_attitude_ric_legacy,
+)
+from sim.utils.plotting import (
     plot_attitude_tumble as plot_attitude_tumble_legacy,
+)
+from sim.utils.plotting import (
     plot_ground_track as plot_ground_track_legacy,
+)
+from sim.utils.plotting import (
     plot_orbit_eci as plot_orbit_eci_legacy,
 )
+from sim.utils.quaternion import dcm_to_quaternion_bn, quaternion_to_dcm_bn
+from sim.utils.thruster_plot_geometry import thruster_marker_geometry_body
 
 PlotMode = Literal["interactive", "save", "both"]
 FrameName = Literal["eci", "ecef", "ric_rect", "ric_curv"]
@@ -91,10 +99,65 @@ def _draw_stylized_earth_map(ax: plt.Axes) -> None:
     ocean = Rectangle((-180.0, -90.0), 360.0, 180.0, facecolor="#cfe8ff", edgecolor="none", zorder=0)
     ax.add_patch(ocean)
     continents = [
-        [(-168, 72), (-145, 68), (-130, 55), (-123, 50), (-118, 34), (-105, 24), (-97, 17), (-83, 20), (-80, 27), (-66, 45), (-82, 55), (-110, 72)],
-        [(-81, 12), (-72, 8), (-66, -5), (-62, -18), (-58, -33), (-54, -54), (-69, -56), (-76, -40), (-78, -20), (-81, 0)],
-        [(-18, 35), (2, 37), (20, 33), (33, 23), (40, 8), (47, -12), (40, -28), (28, -35), (13, -35), (3, -24), (-4, -6), (-9, 14), (-16, 28)],
-        [(-10, 36), (8, 46), (30, 56), (55, 64), (90, 72), (120, 66), (145, 58), (170, 50), (155, 40), (120, 24), (102, 12), (80, 8), (55, 16), (30, 26), (18, 32), (5, 38)],
+        [
+            (-168, 72),
+            (-145, 68),
+            (-130, 55),
+            (-123, 50),
+            (-118, 34),
+            (-105, 24),
+            (-97, 17),
+            (-83, 20),
+            (-80, 27),
+            (-66, 45),
+            (-82, 55),
+            (-110, 72),
+        ],
+        [
+            (-81, 12),
+            (-72, 8),
+            (-66, -5),
+            (-62, -18),
+            (-58, -33),
+            (-54, -54),
+            (-69, -56),
+            (-76, -40),
+            (-78, -20),
+            (-81, 0),
+        ],
+        [
+            (-18, 35),
+            (2, 37),
+            (20, 33),
+            (33, 23),
+            (40, 8),
+            (47, -12),
+            (40, -28),
+            (28, -35),
+            (13, -35),
+            (3, -24),
+            (-4, -6),
+            (-9, 14),
+            (-16, 28),
+        ],
+        [
+            (-10, 36),
+            (8, 46),
+            (30, 56),
+            (55, 64),
+            (90, 72),
+            (120, 66),
+            (145, 58),
+            (170, 50),
+            (155, 40),
+            (120, 24),
+            (102, 12),
+            (80, 8),
+            (55, 16),
+            (30, 26),
+            (18, 32),
+            (5, 38),
+        ],
         [(72, 23), (85, 22), (95, 15), (103, 8), (106, 2), (102, -4), (90, 2), (82, 8), (75, 16)],
         [(113, -12), (132, -11), (150, -20), (154, -32), (145, -42), (129, -42), (116, -33), (111, -22)],
         [(-56, 82), (-42, 82), (-28, 74), (-34, 62), (-49, 60), (-60, 68)],
@@ -114,9 +177,13 @@ def _setup_ground_track_axes(
         ax = fig.add_subplot(111, projection=ccrs.PlateCarree())
         ax.set_global()
         ax.add_feature(cfeature.OCEAN.with_scale("110m"), facecolor="#cfe8ff", zorder=0)
-        ax.add_feature(cfeature.LAND.with_scale("110m"), facecolor="#dbe7c9", edgecolor="#8aa27a", linewidth=0.4, zorder=1)
+        ax.add_feature(
+            cfeature.LAND.with_scale("110m"), facecolor="#dbe7c9", edgecolor="#8aa27a", linewidth=0.4, zorder=1
+        )
         ax.coastlines(resolution="110m", linewidth=0.5, color="#5e6f57", zorder=2)
-        gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=True, linewidth=0.4, color="gray", alpha=0.4, linestyle="-")
+        gl = ax.gridlines(
+            crs=ccrs.PlateCarree(), draw_labels=True, linewidth=0.4, color="gray", alpha=0.4, linestyle="-"
+        )
         gl.top_labels = False
         gl.right_labels = False
         gl.xlabel_style = {"size": 8}
@@ -522,8 +589,8 @@ def animate_multi_ric_2d_projections(
         ax.grid(True, alpha=0.3)
         ax_by_plane[p] = ax
         for oid in sorted(trajectories.keys()):
-            line, = ax.plot([], [], linewidth=1.2, label=oid)
-            dot, = ax.plot([], [], marker="o", markersize=4)
+            (line,) = ax.plot([], [], linewidth=1.2, label=oid)
+            (dot,) = ax.plot([], [], marker="o", markersize=4)
             line_by_plane_obj[(p, oid)] = line
             dot_by_plane_obj[(p, oid)] = dot
     axes[0].legend(loc="best")
@@ -945,8 +1012,12 @@ def animate_battlespace_dashboard(
 
     dv_remaining_by_object: dict[str, np.ndarray] = {}
     for oid in (target_object_id, chaser_object_id):
-        arr = np.array((delta_v_remaining_m_s_by_object or {}).get(oid, np.full(n_frames, np.nan)), dtype=float).reshape(-1)
-        dv_remaining_by_object[oid] = arr[:n_frames] if arr.size >= n_frames else np.pad(arr, (0, n_frames - arr.size), constant_values=np.nan)
+        arr = np.array(
+            (delta_v_remaining_m_s_by_object or {}).get(oid, np.full(n_frames, np.nan)), dtype=float
+        ).reshape(-1)
+        dv_remaining_by_object[oid] = (
+            arr[:n_frames] if arr.size >= n_frames else np.pad(arr, (0, n_frames - arr.size), constant_values=np.nan)
+        )
     fuel_fraction_by_object = {
         oid: _fuel_fraction_from_remaining_series(dv_remaining_by_object[oid])
         for oid in (target_object_id, chaser_object_id)
@@ -1025,10 +1096,10 @@ def animate_battlespace_dashboard(
     rc_ix, rc_iy, _, _ = _ric_2d_plane_axes("rc")
     for oid in (target_object_id, chaser_object_id):
         color = color_by_object[oid]
-        ri_line, = ax_ri.plot([], [], linewidth=1.5, color=color, label=oid)
-        ri_dot, = ax_ri.plot([], [], marker="o", markersize=5, color=color)
-        rc_line, = ax_rc.plot([], [], linewidth=1.5, color=color, label=oid)
-        rc_dot, = ax_rc.plot([], [], marker="o", markersize=5, color=color)
+        (ri_line,) = ax_ri.plot([], [], linewidth=1.5, color=color, label=oid)
+        (ri_dot,) = ax_ri.plot([], [], marker="o", markersize=5, color=color)
+        (rc_line,) = ax_rc.plot([], [], linewidth=1.5, color=color, label=oid)
+        (rc_dot,) = ax_rc.plot([], [], marker="o", markersize=5, color=color)
         ri_line_by_object[oid] = ri_line
         ri_dot_by_object[oid] = ri_dot
         rc_line_by_object[oid] = rc_line
@@ -1100,10 +1171,7 @@ def animate_battlespace_dashboard(
                 ]
             )
 
-        current_points = [
-            traj[min(frame_i, traj.shape[0] - 1), :]
-            for traj in curv_traj_by_object.values()
-        ]
+        current_points = [traj[min(frame_i, traj.shape[0] - 1), :] for traj in curv_traj_by_object.values()]
         (ri_xlim, ri_ylim) = _windows_from_points(
             current_points,
             axis_indices=(ri_ix, ri_iy),
@@ -1215,8 +1283,8 @@ def animate_trajectory_frame(
     ax.set_zlim(-init_lim, init_lim)
     ax.set_box_aspect((1, 1, 1))
     ax.set_title(f"Trajectory Animation ({frame.upper()})")
-    line, = ax.plot([], [], [], linewidth=1.4)
-    dot, = ax.plot([], [], [], marker="o", markersize=4)
+    (line,) = ax.plot([], [], [], linewidth=1.4)
+    (dot,) = ax.plot([], [], [], marker="o", markersize=4)
 
     def update(i: int):
         line.set_data(r[: i + 1, 0], r[: i + 1, 1])
@@ -1317,8 +1385,8 @@ def animate_multi_trajectory_frame(
     line_by_obj: dict[str, Any] = {}
     dot_by_obj: dict[str, Any] = {}
     for oid in sorted(trajectories.keys()):
-        line, = ax.plot([], [], [], linewidth=1.4, label=oid)
-        dot, = ax.plot([], [], [], marker="o", markersize=4)
+        (line,) = ax.plot([], [], [], linewidth=1.4, label=oid)
+        (dot,) = ax.plot([], [], [], marker="o", markersize=4)
         line_by_obj[oid] = line
         dot_by_obj[oid] = dot
     ax.legend(loc="best")
@@ -1402,11 +1470,11 @@ def animate_ground_track(
         t_arr = np.pad(t_arr, (0, len(lon_deg) - t_arr.size), mode="edge")
     fig, ax, is_cartopy = _setup_ground_track_axes(title="Ground Track Animation", draw_earth_map=draw_earth_map)
     if is_cartopy:
-        line, = ax.plot([], [], linewidth=1.4, transform=ccrs.PlateCarree(), zorder=3)
-        dot, = ax.plot([], [], marker="o", markersize=4, transform=ccrs.PlateCarree(), zorder=4)
+        (line,) = ax.plot([], [], linewidth=1.4, transform=ccrs.PlateCarree(), zorder=3)
+        (dot,) = ax.plot([], [], marker="o", markersize=4, transform=ccrs.PlateCarree(), zorder=4)
     else:
-        line, = ax.plot([], [], linewidth=1.4, zorder=3)
-        dot, = ax.plot([], [], marker="o", markersize=4, zorder=4)
+        (line,) = ax.plot([], [], linewidth=1.4, zorder=3)
+        (dot,) = ax.plot([], [], marker="o", markersize=4, zorder=4)
     time_text = ax.text(
         0.01,
         0.99,
@@ -1508,11 +1576,11 @@ def animate_multi_ground_track(
     dot_by_obj: dict[str, Any] = {}
     for oid in sorted(tracks.keys()):
         if is_cartopy:
-            line, = ax.plot([], [], linewidth=1.4, label=oid, transform=ccrs.PlateCarree(), zorder=3)
-            dot, = ax.plot([], [], marker="o", markersize=4, transform=ccrs.PlateCarree(), zorder=4)
+            (line,) = ax.plot([], [], linewidth=1.4, label=oid, transform=ccrs.PlateCarree(), zorder=3)
+            (dot,) = ax.plot([], [], marker="o", markersize=4, transform=ccrs.PlateCarree(), zorder=4)
         else:
-            line, = ax.plot([], [], linewidth=1.4, label=oid, zorder=3)
-            dot, = ax.plot([], [], marker="o", markersize=4, zorder=4)
+            (line,) = ax.plot([], [], linewidth=1.4, label=oid, zorder=3)
+            (dot,) = ax.plot([], [], marker="o", markersize=4, zorder=4)
         line_by_obj[oid] = line
         dot_by_obj[oid] = dot
     ax.legend(loc="best")
@@ -1626,7 +1694,11 @@ def animate_multi_rectangular_prism_ric_curv(
         dtype=float,
     )
 
-    n_frames = int(min([t_s.size] + [np.array(truth_hist_by_object[oid], dtype=float).shape[0] for oid in obj_ids] + [tgt.shape[0]]))
+    n_frames = int(
+        min(
+            [t_s.size] + [np.array(truth_hist_by_object[oid], dtype=float).shape[0] for oid in obj_ids] + [tgt.shape[0]]
+        )
+    )
     if n_frames <= 0:
         return
     t_loc = np.array(t_s[:n_frames], dtype=float)
@@ -1718,8 +1790,8 @@ def animate_multi_rectangular_prism_ric_curv(
         poly = Poly3DCollection([], alpha=0.35, facecolor=color, edgecolor="k", linewidth=0.7)
         ax.add_collection3d(poly)
         poly_by_obj[oid] = poly
-        trail, = ax.plot([], [], [], linewidth=1.2, color=color, label=oid)
-        dot, = ax.plot([], [], [], marker="o", markersize=4, color=color)
+        (trail,) = ax.plot([], [], [], linewidth=1.2, color=color, label=oid)
+        (dot,) = ax.plot([], [], [], marker="o", markersize=4, color=color)
         trail_by_obj[oid] = trail
         dot_by_obj[oid] = dot
     ax.legend(loc="best")

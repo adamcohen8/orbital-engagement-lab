@@ -37,7 +37,11 @@ class TestPredictiveBurnScheduler(unittest.TestCase):
             mass_kg=100.0,
             t_s=0.0,
         )
-        b = StateBelief(state=np.hstack((chaser.position_eci_km, chaser.velocity_eci_km_s)), covariance=np.eye(6), last_update_t_s=0.0)
+        b = StateBelief(
+            state=np.hstack((chaser.position_eci_km, chaser.velocity_eci_km_s)),
+            covariance=np.eye(6),
+            last_update_t_s=0.0,
+        )
 
         d1 = sched.step(chaser, chief, b, b, dt_s=2.0)
         d2 = sched.step(chaser, chief, b, b, dt_s=2.0)

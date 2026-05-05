@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import math
 from datetime import datetime, timezone
 from functools import lru_cache
-import math
 from pathlib import Path
 
 import numpy as np
@@ -13,11 +13,17 @@ from sim.utils.geodesy import WGS84_E2, geodetic_to_ecef_km
 
 
 def _default_jb2008_sol_path() -> Path:
-    return Path(__file__).resolve().parents[3] / "validation/High Precision Orbit Propagator_4-2/High Precision Orbit Propagator_4.2.2/SOLFSMY.txt"
+    return (
+        Path(__file__).resolve().parents[3]
+        / "validation/High Precision Orbit Propagator_4-2/High Precision Orbit Propagator_4.2.2/SOLFSMY.txt"
+    )
 
 
 def _default_jb2008_dtc_path() -> Path:
-    return Path(__file__).resolve().parents[3] / "validation/High Precision Orbit Propagator_4-2/High Precision Orbit Propagator_4.2.2/DTCFILE.txt"
+    return (
+        Path(__file__).resolve().parents[3]
+        / "validation/High Precision Orbit Propagator_4-2/High Precision Orbit Propagator_4.2.2/DTCFILE.txt"
+    )
 
 
 @lru_cache(maxsize=4)
@@ -55,7 +61,9 @@ def _gd2gc_rad(lat_gd_rad: float) -> float:
 def _position_eci_from_geodetic(lat_deg: float, lon_deg: float, alt_km: float, jd_utc: float, env: dict) -> np.ndarray:
     r_ecef_km = geodetic_to_ecef_km(lat_deg, lon_deg, alt_km)
     eop_path = env.get("drag_eop_path") or env.get("spherical_harmonics_eop_path")
-    rot = eci_to_ecef_rotation_hpop_like(0.0, jd_utc_start=float(jd_utc), eop_path=None if eop_path is None else str(eop_path))
+    rot = eci_to_ecef_rotation_hpop_like(
+        0.0, jd_utc_start=float(jd_utc), eop_path=None if eop_path is None else str(eop_path)
+    )
     return rot.T @ r_ecef_km
 
 
@@ -80,26 +88,91 @@ def _xlocal(z_km: float, tc: np.ndarray) -> float:
 
 
 def _dtsub(f10: float, xlst_hr: float, xlat_rad: float, zht_km: float) -> float:
-    b = np.array([
-        -0.457512297e1, -0.512114909e1, -0.693003609e2, 0.203716701e3, 0.703316291e3, -0.194349234e4,
-        0.110651308e4, -0.174378996e3, 0.188594601e4, -0.709371517e4, 0.922454523e4, -0.384508073e4,
-        -0.645841789e1, 0.409703319e2, -0.482006560e3, 0.181870931e4, -0.237389204e4, 0.996703815e3,
-        0.361416936e2,
-    ], dtype=float)
-    c = np.array([
-        -0.155986211e2, -0.512114909e1, -0.693003609e2, 0.203716701e3, 0.703316291e3, -0.194349234e4,
-        0.110651308e4, -0.220835117e3, 0.143256989e4, -0.318481844e4, 0.328981513e4, -0.135332119e4,
-        0.199956489e2, -0.127093998e2, 0.212825156e2, -0.275555432e1, 0.110234982e2, 0.148881951e3,
-        -0.751640284e3, 0.637876542e3, 0.127093998e2, -0.212825156e2, 0.275555432e1,
-    ], dtype=float)
+    b = np.array(
+        [
+            -0.457512297e1,
+            -0.512114909e1,
+            -0.693003609e2,
+            0.203716701e3,
+            0.703316291e3,
+            -0.194349234e4,
+            0.110651308e4,
+            -0.174378996e3,
+            0.188594601e4,
+            -0.709371517e4,
+            0.922454523e4,
+            -0.384508073e4,
+            -0.645841789e1,
+            0.409703319e2,
+            -0.482006560e3,
+            0.181870931e4,
+            -0.237389204e4,
+            0.996703815e3,
+            0.361416936e2,
+        ],
+        dtype=float,
+    )
+    c = np.array(
+        [
+            -0.155986211e2,
+            -0.512114909e1,
+            -0.693003609e2,
+            0.203716701e3,
+            0.703316291e3,
+            -0.194349234e4,
+            0.110651308e4,
+            -0.220835117e3,
+            0.143256989e4,
+            -0.318481844e4,
+            0.328981513e4,
+            -0.135332119e4,
+            0.199956489e2,
+            -0.127093998e2,
+            0.212825156e2,
+            -0.275555432e1,
+            0.110234982e2,
+            0.148881951e3,
+            -0.751640284e3,
+            0.637876542e3,
+            0.127093998e2,
+            -0.212825156e2,
+            0.275555432e1,
+        ],
+        dtype=float,
+    )
     dtc = 0.0
     tx = float(xlst_hr) / 24.0
     ycs = math.cos(float(xlat_rad))
     f = (float(f10) - 100.0) / 100.0
 
     if 120.0 <= zht_km <= 200.0:
-        dtc200 = c[16] + c[17] * tx * ycs + c[18] * tx**2 * ycs + c[19] * tx**3 * ycs + c[20] * f * ycs + c[21] * tx * f * ycs + c[22] * tx**2 * f * ycs
-        s = c[0] + b[1] * f + c[2] * tx * f + c[3] * tx**2 * f + c[4] * tx**3 * f + c[5] * tx**4 * f + c[6] * tx**5 * f + c[7] * tx * ycs + c[8] * tx**2 * ycs + c[9] * tx**3 * ycs + c[10] * tx**4 * ycs + c[11] * tx**5 * ycs + c[12] * ycs + c[13] * f * ycs + c[14] * tx * f * ycs + c[15] * tx**2 * f * ycs
+        dtc200 = (
+            c[16]
+            + c[17] * tx * ycs
+            + c[18] * tx**2 * ycs
+            + c[19] * tx**3 * ycs
+            + c[20] * f * ycs
+            + c[21] * tx * f * ycs
+            + c[22] * tx**2 * f * ycs
+        )
+        s = (
+            c[0]
+            + b[1] * f
+            + c[2] * tx * f
+            + c[3] * tx**2 * f
+            + c[4] * tx**3 * f
+            + c[5] * tx**4 * f
+            + c[6] * tx**5 * f
+            + c[7] * tx * ycs
+            + c[8] * tx**2 * ycs
+            + c[9] * tx**3 * ycs
+            + c[10] * tx**4 * ycs
+            + c[11] * tx**5 * ycs
+            + c[12] * ycs
+            + c[13] * f * ycs
+            + c[14] * tx * f * ycs
+            + c[15] * tx**2 * f * ycs
+        )
         cc = 3.0 * dtc200 - s
         dd = dtc200 - cc
         zp = (zht_km - 120.0) / 80.0
@@ -107,27 +180,105 @@ def _dtsub(f10: float, xlst_hr: float, xlat_rad: float, zht_km: float) -> float:
     elif 200.0 < zht_km <= 240.0:
         h = (zht_km - 200.0) / 50.0
         dtc = (
-            c[0] * h + b[1] * f * h + c[2] * tx * f * h + c[3] * tx**2 * f * h + c[4] * tx**3 * f * h + c[5] * tx**4 * f * h + c[6] * tx**5 * f * h +
-            c[7] * tx * ycs * h + c[8] * tx**2 * ycs * h + c[9] * tx**3 * ycs * h + c[10] * tx**4 * ycs * h + c[11] * tx**5 * ycs * h + c[12] * ycs * h +
-            c[13] * f * ycs * h + c[14] * tx * f * ycs * h + c[15] * tx**2 * f * ycs * h + c[16] + c[17] * tx * ycs + c[18] * tx**2 * ycs +
-            c[19] * tx**3 * ycs + c[20] * f * ycs + c[21] * tx * f * ycs + c[22] * tx**2 * f * ycs
+            c[0] * h
+            + b[1] * f * h
+            + c[2] * tx * f * h
+            + c[3] * tx**2 * f * h
+            + c[4] * tx**3 * f * h
+            + c[5] * tx**4 * f * h
+            + c[6] * tx**5 * f * h
+            + c[7] * tx * ycs * h
+            + c[8] * tx**2 * ycs * h
+            + c[9] * tx**3 * ycs * h
+            + c[10] * tx**4 * ycs * h
+            + c[11] * tx**5 * ycs * h
+            + c[12] * ycs * h
+            + c[13] * f * ycs * h
+            + c[14] * tx * f * ycs * h
+            + c[15] * tx**2 * f * ycs * h
+            + c[16]
+            + c[17] * tx * ycs
+            + c[18] * tx**2 * ycs
+            + c[19] * tx**3 * ycs
+            + c[20] * f * ycs
+            + c[21] * tx * f * ycs
+            + c[22] * tx**2 * f * ycs
         )
     elif 240.0 < zht_km <= 300.0:
         h = 40.0 / 50.0
         aa = (
-            c[0] * h + b[1] * f * h + c[2] * tx * f * h + c[3] * tx**2 * f * h + c[4] * tx**3 * f * h + c[5] * tx**4 * f * h + c[6] * tx**5 * f * h +
-            c[7] * tx * ycs * h + c[8] * tx**2 * ycs * h + c[9] * tx**3 * ycs * h + c[10] * tx**4 * ycs * h + c[11] * tx**5 * ycs * h + c[12] * ycs * h +
-            c[13] * f * ycs * h + c[14] * tx * f * ycs * h + c[15] * tx**2 * f * ycs * h + c[16] + c[17] * tx * ycs + c[18] * tx**2 * ycs +
-            c[19] * tx**3 * ycs + c[20] * f * ycs + c[21] * tx * f * ycs + c[22] * tx**2 * f * ycs
+            c[0] * h
+            + b[1] * f * h
+            + c[2] * tx * f * h
+            + c[3] * tx**2 * f * h
+            + c[4] * tx**3 * f * h
+            + c[5] * tx**4 * f * h
+            + c[6] * tx**5 * f * h
+            + c[7] * tx * ycs * h
+            + c[8] * tx**2 * ycs * h
+            + c[9] * tx**3 * ycs * h
+            + c[10] * tx**4 * ycs * h
+            + c[11] * tx**5 * ycs * h
+            + c[12] * ycs * h
+            + c[13] * f * ycs * h
+            + c[14] * tx * f * ycs * h
+            + c[15] * tx**2 * f * ycs * h
+            + c[16]
+            + c[17] * tx * ycs
+            + c[18] * tx**2 * ycs
+            + c[19] * tx**3 * ycs
+            + c[20] * f * ycs
+            + c[21] * tx * f * ycs
+            + c[22] * tx**2 * f * ycs
         )
-        bb = c[0] + b[1] * f + c[2] * tx * f + c[3] * tx**2 * f + c[4] * tx**3 * f + c[5] * tx**4 * f + c[6] * tx**5 * f + c[7] * tx * ycs + c[8] * tx**2 * ycs + c[9] * tx**3 * ycs + c[10] * tx**4 * ycs + c[11] * tx**5 * ycs + c[12] * ycs + c[13] * f * ycs + c[14] * tx * f * ycs + c[15] * tx**2 * f * ycs
+        bb = (
+            c[0]
+            + b[1] * f
+            + c[2] * tx * f
+            + c[3] * tx**2 * f
+            + c[4] * tx**3 * f
+            + c[5] * tx**4 * f
+            + c[6] * tx**5 * f
+            + c[7] * tx * ycs
+            + c[8] * tx**2 * ycs
+            + c[9] * tx**3 * ycs
+            + c[10] * tx**4 * ycs
+            + c[11] * tx**5 * ycs
+            + c[12] * ycs
+            + c[13] * f * ycs
+            + c[14] * tx * f * ycs
+            + c[15] * tx**2 * f * ycs
+        )
         h = 3.0
         dtc300 = (
-            b[0] + b[1] * f + b[2] * tx * f + b[3] * tx**2 * f + b[4] * tx**3 * f + b[5] * tx**4 * f + b[6] * tx**5 * f + b[7] * tx * ycs +
-            b[8] * tx**2 * ycs + b[9] * tx**3 * ycs + b[10] * tx**4 * ycs + b[11] * tx**5 * ycs + b[12] * h * ycs + b[13] * tx * h * ycs +
-            b[14] * tx**2 * h * ycs + b[15] * tx**3 * h * ycs + b[16] * tx**4 * h * ycs + b[17] * tx**5 * h * ycs + b[18] * ycs
+            b[0]
+            + b[1] * f
+            + b[2] * tx * f
+            + b[3] * tx**2 * f
+            + b[4] * tx**3 * f
+            + b[5] * tx**4 * f
+            + b[6] * tx**5 * f
+            + b[7] * tx * ycs
+            + b[8] * tx**2 * ycs
+            + b[9] * tx**3 * ycs
+            + b[10] * tx**4 * ycs
+            + b[11] * tx**5 * ycs
+            + b[12] * h * ycs
+            + b[13] * tx * h * ycs
+            + b[14] * tx**2 * h * ycs
+            + b[15] * tx**3 * h * ycs
+            + b[16] * tx**4 * h * ycs
+            + b[17] * tx**5 * h * ycs
+            + b[18] * ycs
         )
-        dtc300dz = b[12] * ycs + b[13] * tx * ycs + b[14] * tx**2 * ycs + b[15] * tx**3 * ycs + b[16] * tx**4 * ycs + b[17] * tx**5 * ycs
+        dtc300dz = (
+            b[12] * ycs
+            + b[13] * tx * ycs
+            + b[14] * tx**2 * ycs
+            + b[15] * tx**3 * ycs
+            + b[16] * tx**4 * ycs
+            + b[17] * tx**5 * ycs
+        )
         cc = 3.0 * dtc300 - dtc300dz - 3.0 * aa - 2.0 * bb
         dd = dtc300 - aa - bb - cc
         zp = (zht_km - 240.0) / 60.0
@@ -135,18 +286,57 @@ def _dtsub(f10: float, xlst_hr: float, xlat_rad: float, zht_km: float) -> float:
     elif 300.0 < zht_km <= 600.0:
         h = zht_km / 100.0
         dtc = (
-            b[0] + b[1] * f + b[2] * tx * f + b[3] * tx**2 * f + b[4] * tx**3 * f + b[5] * tx**4 * f + b[6] * tx**5 * f + b[7] * tx * ycs +
-            b[8] * tx**2 * ycs + b[9] * tx**3 * ycs + b[10] * tx**4 * ycs + b[11] * tx**5 * ycs + b[12] * h * ycs + b[13] * tx * h * ycs +
-            b[14] * tx**2 * h * ycs + b[15] * tx**3 * h * ycs + b[16] * tx**4 * h * ycs + b[17] * tx**5 * h * ycs + b[18] * ycs
+            b[0]
+            + b[1] * f
+            + b[2] * tx * f
+            + b[3] * tx**2 * f
+            + b[4] * tx**3 * f
+            + b[5] * tx**4 * f
+            + b[6] * tx**5 * f
+            + b[7] * tx * ycs
+            + b[8] * tx**2 * ycs
+            + b[9] * tx**3 * ycs
+            + b[10] * tx**4 * ycs
+            + b[11] * tx**5 * ycs
+            + b[12] * h * ycs
+            + b[13] * tx * h * ycs
+            + b[14] * tx**2 * h * ycs
+            + b[15] * tx**3 * h * ycs
+            + b[16] * tx**4 * h * ycs
+            + b[17] * tx**5 * h * ycs
+            + b[18] * ycs
         )
     elif 600.0 < zht_km <= 800.0:
         hp = 6.0
         aa = (
-            b[0] + b[1] * f + b[2] * tx * f + b[3] * tx**2 * f + b[4] * tx**3 * f + b[5] * tx**4 * f + b[6] * tx**5 * f + b[7] * tx * ycs +
-            b[8] * tx**2 * ycs + b[9] * tx**3 * ycs + b[10] * tx**4 * ycs + b[11] * tx**5 * ycs + b[12] * hp * ycs + b[13] * tx * hp * ycs +
-            b[14] * tx**2 * hp * ycs + b[15] * tx**3 * hp * ycs + b[16] * tx**4 * hp * ycs + b[17] * tx**5 * hp * ycs + b[18] * ycs
+            b[0]
+            + b[1] * f
+            + b[2] * tx * f
+            + b[3] * tx**2 * f
+            + b[4] * tx**3 * f
+            + b[5] * tx**4 * f
+            + b[6] * tx**5 * f
+            + b[7] * tx * ycs
+            + b[8] * tx**2 * ycs
+            + b[9] * tx**3 * ycs
+            + b[10] * tx**4 * ycs
+            + b[11] * tx**5 * ycs
+            + b[12] * hp * ycs
+            + b[13] * tx * hp * ycs
+            + b[14] * tx**2 * hp * ycs
+            + b[15] * tx**3 * hp * ycs
+            + b[16] * tx**4 * hp * ycs
+            + b[17] * tx**5 * hp * ycs
+            + b[18] * ycs
         )
-        bb = b[12] * ycs + b[13] * tx * ycs + b[14] * tx**2 * ycs + b[15] * tx**3 * ycs + b[16] * tx**4 * ycs + b[17] * tx**5 * ycs
+        bb = (
+            b[12] * ycs
+            + b[13] * tx * ycs
+            + b[14] * tx**2 * ycs
+            + b[15] * tx**3 * ycs
+            + b[16] * tx**4 * ycs
+            + b[17] * tx**5 * ycs
+        )
         cc = -(3.0 * aa + 4.0 * bb) / 4.0
         dd = (aa + bb) / 4.0
         zp = (zht_km - 600.0) / 100.0
@@ -157,7 +347,10 @@ def _dtsub(f10: float, xlst_hr: float, xlat_rad: float, zht_km: float) -> float:
 def _semian08(day: float, ht_km: float, f10b: float, s10b: float, xm10b: float) -> tuple[float, float, float]:
     twopi = 2.0 * math.pi
     fzm = np.array([0.2689, -0.1176e-1, 0.2782e-1, -0.2782e-1, 0.3470e-3], dtype=float)
-    gtm = np.array([-0.3633, 0.8506e-1, 0.2401, -0.1897, -0.2554, -0.1790e-1, 0.5650e-3, -0.6407e-3, -0.3418e-2, -0.1252e-2], dtype=float)
+    gtm = np.array(
+        [-0.3633, 0.8506e-1, 0.2401, -0.1897, -0.2554, -0.1790e-1, 0.5650e-3, -0.6407e-3, -0.3418e-2, -0.1252e-2],
+        dtype=float,
+    )
     fsmb = float(f10b) - 0.70 * float(s10b) - 0.04 * float(xm10b)
     htz = float(ht_km) / 1000.0
     fzz = fzm[0] + fzm[1] * fsmb + fzm[2] * fsmb * htz + fzm[3] * fsmb * htz**2 + fzm[4] * fsmb**2 * htz
@@ -167,7 +360,18 @@ def _semian08(day: float, ht_km: float, f10b: float, s10b: float, xm10b: float) 
     cos1p = math.cos(twopi * tau)
     sin2p = math.sin(2.0 * twopi * tau)
     cos2p = math.cos(2.0 * twopi * tau)
-    gtz = gtm[0] + gtm[1] * sin1p + gtm[2] * cos1p + gtm[3] * sin2p + gtm[4] * cos2p + gtm[5] * fsmb + gtm[6] * fsmb * sin1p + gtm[7] * fsmb * cos1p + gtm[8] * fsmb * sin2p + gtm[9] * fsmb * cos2p
+    gtz = (
+        gtm[0]
+        + gtm[1] * sin1p
+        + gtm[2] * cos1p
+        + gtm[3] * sin2p
+        + gtm[4] * cos2p
+        + gtm[5] * fsmb
+        + gtm[6] * fsmb * sin1p
+        + gtm[7] * fsmb * cos1p
+        + gtm[8] * fsmb * sin2p
+        + gtm[9] * fsmb * cos2p
+    )
     if fzz < 1e-6:
         fzz = 1e-6
     return float(fzz), float(gtz), float(fzz * gtz)
@@ -220,12 +424,21 @@ def jb2008_density(alt_km: float, lat_deg: float, lon_deg: float, dt_utc: dateti
     frac = np.array([0.78110, 0.20955, 9.3400e-3, 1.2890e-5], dtype=float)
     rstar = 8314.32
     r1, r2, r3 = 0.010, 0.025, 0.075
-    wt = np.array([0.311111111111111, 1.422222222222222, 0.533333333333333, 1.422222222222222, 0.311111111111111], dtype=float)
+    wt = np.array(
+        [0.311111111111111, 1.422222222222222, 0.533333333333333, 1.422222222222222, 0.311111111111111], dtype=float
+    )
     cht = np.array([0.22, -0.20e-2, 0.115e-2, -0.211e-5], dtype=float)
 
     fn = min((f10b / 240.0) ** 0.25, 1.0)
     fsb = f10b * fn + s10b * (1.0 - fn)
-    tsubc = 392.4 + 3.227 * fsb + 0.298 * (f10 - f10b) + 2.259 * (s10 - s10b) + 0.312 * (xm10 - xm10b) + 0.178 * (y10 - y10b)
+    tsubc = (
+        392.4
+        + 3.227 * fsb
+        + 0.298 * (f10 - f10b)
+        + 2.259 * (s10 - s10b)
+        + 0.312 * (xm10 - xm10b)
+        + 0.178 * (y10 - y10b)
+    )
 
     eta = 0.5 * abs(sat[1] - sun[1])
     theta = 0.5 * abs(sat[1] + sun[1])
@@ -284,10 +497,19 @@ def jb2008_density(alt_km: float, lat_deg: float, lon_deg: float, dt_utc: dateti
     aln[1] = math.log(fact2 * (1.0 + frac[1]) - an)
     aln[2] = math.log(2.0 * (an - fact2))
 
-    def _apply_corrections(rho_in: float, zht_in: float, sat_lat_rad: float, aln_in: np.ndarray, temp2: float, z_for_check: float) -> float:
+    def _apply_corrections(
+        rho_in: float, zht_in: float, sat_lat_rad: float, aln_in: np.ndarray, temp2: float, z_for_check: float
+    ) -> float:
         trash = (mjd_utc - 36204.0) / 365.2422
         capphi = trash % 1.0
-        dlrsl = 0.02 * (zht_in - 90.0) * math.exp(-0.045 * (zht_in - 90.0)) * math.copysign(1.0, sat_lat_rad) * math.sin(twopi * capphi + 1.72) * math.sin(sat_lat_rad) ** 2
+        dlrsl = (
+            0.02
+            * (zht_in - 90.0)
+            * math.exp(-0.045 * (zht_in - 90.0))
+            * math.copysign(1.0, sat_lat_rad)
+            * math.sin(twopi * capphi + 1.72)
+            * math.sin(sat_lat_rad) ** 2
+        )
         dlrsa = 0.0
         if z_for_check < 2000.0:
             fzz, _, dlrsa = _semian08(doy, zht_in, f10b, s10b, xm10b)
@@ -358,13 +580,11 @@ def jb2008_density(alt_km: float, lat_deg: float, lon_deg: float, dt_utc: dateti
         sum3 += dz * sum1
 
     if zht > 500.0:
-        t500 = tloc3
         temp2 = tloc4
         altr = math.log(tloc4 / tloc2)
         fact2 = fact1 * (sum2b + sum3)
         hsign = -1.0
     else:
-        t500 = tloc4
         temp2 = tloc3
         altr = math.log(tloc3 / tloc2)
         fact2 = fact1 * sum2b
@@ -376,4 +596,3 @@ def jb2008_density(alt_km: float, lat_deg: float, lon_deg: float, dt_utc: dateti
     alnh5 = (5.5 * al10t5 - 39.40) * al10t5 + 73.13
     aln[5] = al10 * (alnh5 + 6.0) + hsign * (math.log(tloc4 / tloc3) + fact1 * sum3 * amw[5])
     return _apply_corrections(rho, zht, sat[1], aln, temp2, z)
-

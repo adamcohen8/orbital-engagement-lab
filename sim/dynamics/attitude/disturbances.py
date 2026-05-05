@@ -118,7 +118,9 @@ class DisturbanceTorqueModel:
         return np.cross(self.config.drag_cp_offset_body_m, f_drag_body)
 
     def _srp_torque(self, state: StateTruth, env: dict, c_bn: np.ndarray) -> np.ndarray:
-        sun_dir_eci = np.asarray(env.get("sun_dir_eci_unit", env.get("sun_dir_eci", self.config.sun_dir_eci)), dtype=float)
+        sun_dir_eci = np.asarray(
+            env.get("sun_dir_eci_unit", env.get("sun_dir_eci", self.config.sun_dir_eci)), dtype=float
+        )
         n = np.linalg.norm(sun_dir_eci)
         if n == 0.0:
             return np.zeros(3)

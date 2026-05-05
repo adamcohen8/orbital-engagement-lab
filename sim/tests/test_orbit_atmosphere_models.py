@@ -1,6 +1,6 @@
+import tempfile
 import unittest
 from datetime import datetime, timezone
-import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -8,10 +8,9 @@ import numpy as np
 
 from sim.dynamics.orbit.accelerations import accel_drag, accel_srp
 from sim.dynamics.orbit.atmosphere import density_exponential, density_from_model, density_ussa1976
-from sim.dynamics.orbit.epoch import datetime_to_julian_date
 from sim.dynamics.orbit.eclipse import resolve_srp_geometry, srp_shadow_factor
-from sim.dynamics.orbit.epoch import AU_KM
 from sim.dynamics.orbit.environment import EARTH_ROT_RATE_RAD_S
+from sim.dynamics.orbit.epoch import AU_KM, datetime_to_julian_date
 
 
 class TestOrbitAtmosphereModels(unittest.TestCase):

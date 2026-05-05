@@ -6,8 +6,8 @@ from typing import Literal
 import numpy as np
 
 from sim.dynamics.orbit.environment import EARTH_RADIUS_KM
-from sim.dynamics.orbit.frames import eci_to_ecef
 from sim.dynamics.orbit.epoch import julian_date_to_datetime
+from sim.dynamics.orbit.frames import eci_to_ecef
 from sim.dynamics.orbit.jb2008_backend import jb2008_density
 from sim.utils.geodesy import ecef_to_geodetic_deg_km
 
@@ -107,11 +107,53 @@ def density_ussa1976(r_eci_km: np.ndarray, t_s: float) -> float:
 
     # USSA-1976 high-altitude reference density table (kg/m^3), log-space interpolated.
     table_alt_km = np.array(
-        [86.0, 100.0, 110.0, 120.0, 130.0, 140.0, 150.0, 180.0, 200.0, 250.0, 300.0, 350.0, 400.0, 450.0, 500.0, 600.0, 700.0, 800.0, 900.0, 1000.0],
+        [
+            86.0,
+            100.0,
+            110.0,
+            120.0,
+            130.0,
+            140.0,
+            150.0,
+            180.0,
+            200.0,
+            250.0,
+            300.0,
+            350.0,
+            400.0,
+            450.0,
+            500.0,
+            600.0,
+            700.0,
+            800.0,
+            900.0,
+            1000.0,
+        ],
         dtype=float,
     )
     table_rho = np.array(
-        [6.958e-6, 5.604e-7, 9.708e-8, 2.222e-8, 8.152e-9, 3.831e-9, 2.076e-9, 5.464e-10, 2.789e-10, 7.248e-11, 2.418e-11, 9.518e-12, 3.725e-12, 1.585e-12, 6.967e-13, 1.454e-13, 3.614e-14, 1.170e-14, 5.245e-15, 3.019e-15],
+        [
+            6.958e-6,
+            5.604e-7,
+            9.708e-8,
+            2.222e-8,
+            8.152e-9,
+            3.831e-9,
+            2.076e-9,
+            5.464e-10,
+            2.789e-10,
+            7.248e-11,
+            2.418e-11,
+            9.518e-12,
+            3.725e-12,
+            1.585e-12,
+            6.967e-13,
+            1.454e-13,
+            3.614e-14,
+            1.170e-14,
+            5.245e-15,
+            3.019e-15,
+        ],
         dtype=float,
     )
     lrho = np.interp(float(alt_km), table_alt_km, np.log(table_rho))

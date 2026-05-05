@@ -9,6 +9,7 @@ __pycache__/
 # Tool/runtime caches
 .pytest_cache/
 .mypy_cache/
+.ruff_cache/
 
 # Local outputs and generated plots
 outputs/

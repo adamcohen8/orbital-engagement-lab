@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from copy import deepcopy
-from dataclasses import dataclass, field
 import importlib
 import multiprocessing as mp
+from copy import deepcopy
+from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 import numpy as np
@@ -55,34 +55,31 @@ from sim.runtime_support import (
 
 
 class SupportsActionAdapter(Protocol):
-    def adapt(self, *, action_values: dict[str, float], env: "GymSimulationEnv") -> dict[str, Any]:
-        ...
+    def adapt(self, *, action_values: dict[str, float], env: GymSimulationEnv) -> dict[str, Any]: ...
 
 
 class SupportsReward(Protocol):
     def compute_reward(
         self,
         *,
-        env: "GymSimulationEnv",
+        env: GymSimulationEnv,
         previous_snapshot: dict[str, Any] | None,
         snapshot: dict[str, Any],
         action_values: dict[str, float],
         terminated: bool,
         truncated: bool,
-    ) -> float:
-        ...
+    ) -> float: ...
 
 
 class SupportsTermination(Protocol):
     def check_termination(
         self,
         *,
-        env: "GymSimulationEnv",
+        env: GymSimulationEnv,
         previous_snapshot: dict[str, Any] | None,
         snapshot: dict[str, Any],
         action_values: dict[str, float],
-    ) -> tuple[bool, bool, dict[str, Any]]:
-        ...
+    ) -> tuple[bool, bool, dict[str, Any]]: ...
 
 
 @dataclass(frozen=True)
@@ -136,7 +133,7 @@ class MultiAgentEnvConfig:
 class EnvFactory:
     env_cfg: GymEnvConfig
 
-    def __call__(self) -> "GymSimulationEnv":
+    def __call__(self) -> GymSimulationEnv:
         return GymSimulationEnv(self.env_cfg)
 
 
@@ -295,12 +292,12 @@ def _lookup_observation_value(snapshot: dict[str, Any], path: str, probe: dict[s
 
 def _observation_dim_from_fields(fields: tuple[ObservationField, ...], probe: dict[str, Any]) -> int:
     dim = 0
-    for field in fields:
+    for obs_field in fields:
         try:
-            value = np.array(_lookup_path(probe, field.path), dtype=float).reshape(-1)
+            value = np.array(_lookup_path(probe, obs_field.path), dtype=float).reshape(-1)
         except (AttributeError, IndexError, KeyError, TypeError) as exc:
             raise ValueError(
-                f"Observation field '{field.path}' is unavailable for the enabled agents or configured knowledge targets."
+                f"Observation field '{obs_field.path}' is unavailable for the enabled agents or configured knowledge targets."
             ) from exc
         dim += int(value.size)
     return dim
@@ -332,7 +329,7 @@ def _sample_episode_variations(
 
 @dataclass
 class DirectActionAdapter:
-    def adapt(self, *, action_values: dict[str, float], env: "GymSimulationEnv") -> dict[str, Any]:
+    def adapt(self, *, action_values: dict[str, float], env: GymSimulationEnv) -> dict[str, Any]:
         out: dict[str, Any] = {}
         for key, value in action_values.items():
             _assign_path(out, key, float(value))
@@ -345,7 +342,7 @@ class ThrustVectorToPointingAdapter:
     throttle_key: str = "throttle"
     align_to_thrust: bool = True
 
-    def adapt(self, *, action_values: dict[str, float], env: "GymSimulationEnv") -> dict[str, Any]:
+    def adapt(self, *, action_values: dict[str, float], env: GymSimulationEnv) -> dict[str, Any]:
         direction = np.array(
             [
                 float(action_values.get(f"{self.direction_key_prefix}[0]", 0.0)),
@@ -381,7 +378,7 @@ class RelativeDistanceReward:
     def compute_reward(
         self,
         *,
-        env: "GymSimulationEnv",
+        env: GymSimulationEnv,
         previous_snapshot: dict[str, Any] | None,
         snapshot: dict[str, Any],
         action_values: dict[str, float],
@@ -409,7 +406,7 @@ class RangeTermination:
     def check_termination(
         self,
         *,
-        env: "GymSimulationEnv",
+        env: GymSimulationEnv,
         previous_snapshot: dict[str, Any] | None,
         snapshot: dict[str, Any],
         action_values: dict[str, float],
@@ -428,11 +425,15 @@ class GymSimulationEnv(gym.Env):
         self.cfg = cfg
         self.controlled_agent_id = str(cfg.controlled_agent_id)
         self.base_scenario_dict = (
-            cfg.scenario.to_dict() if isinstance(cfg.scenario, SimulationScenarioConfig) else deepcopy(dict(cfg.scenario))
+            cfg.scenario.to_dict()
+            if isinstance(cfg.scenario, SimulationScenarioConfig)
+            else deepcopy(dict(cfg.scenario))
         )
         self.rng = np.random.default_rng(int(self.base_scenario_dict.get("metadata", {}).get("seed", 0)))
         self.action_adapter = _load_callable(cfg.action_adapter) or DirectActionAdapter()
-        self.reward_fn = _load_callable(cfg.reward_fn) or RelativeDistanceReward(controlled_agent_id=self.controlled_agent_id)
+        self.reward_fn = _load_callable(cfg.reward_fn) or RelativeDistanceReward(
+            controlled_agent_id=self.controlled_agent_id
+        )
         self.termination_fn = _load_callable(cfg.termination_fn)
         self.agents: dict[str, Any] = {}
         self.scenario_cfg: SimulationScenarioConfig | None = None
@@ -468,12 +469,16 @@ class GymSimulationEnv(gym.Env):
             dtype=np.float32,
         )
 
-    def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[np.ndarray, dict[str, Any]]:
+    def reset(
+        self, *, seed: int | None = None, options: dict[str, Any] | None = None
+    ) -> tuple[np.ndarray, dict[str, Any]]:
         if seed is not None:
             self.rng = np.random.default_rng(int(seed))
         scenario_dict = deepcopy(self.base_scenario_dict)
         options = dict(options or {})
-        self.sampled_parameters = _sample_episode_variations(scenario_dict, tuple(self.cfg.episode_variations), self.rng)
+        self.sampled_parameters = _sample_episode_variations(
+            scenario_dict, tuple(self.cfg.episode_variations), self.rng
+        )
         for path, value in dict(options.get("override_parameters", {}) or {}).items():
             _deep_set(scenario_dict, path, value)
             self.sampled_parameters[path] = value
@@ -631,7 +636,9 @@ class GymSimulationEnv(gym.Env):
             h = float(min(sim_substep_s, t_next - t_inner))
             t_eval = t_inner + h
             world_truth_inner[agent_id] = tr_inner
-            meas = agent.sensor.measure(truth=tr_inner, env=env_sensor, t_s=t_eval) if agent.sensor is not None else None
+            meas = (
+                agent.sensor.measure(truth=tr_inner, env=env_sensor, t_s=t_eval) if agent.sensor is not None else None
+            )
             if agent.estimator is not None and agent.belief is not None:
                 agent.belief = agent.estimator.update(agent.belief, meas, t_eval)
             orb_belief = agent.belief
@@ -641,7 +648,11 @@ class GymSimulationEnv(gym.Env):
                     target_belief = agent.knowledge_base.snapshot().get("target")
                     if target_belief is not None and target_belief.state.size >= 6:
                         chief_truth = _truth_from_state6(target_belief.state[:6], t_s=target_belief.last_update_t_s)
-                if chief_truth is not None and agent_id != "target" and hasattr(agent.orbit_controller, "ric_curv_state_slice"):
+                if (
+                    chief_truth is not None
+                    and agent_id != "target"
+                    and hasattr(agent.orbit_controller, "ric_curv_state_slice")
+                ):
                     orbit_belief_scratch.last_update_t_s = orb_belief.last_update_t_s
                     orbit_belief_scratch.state = _relative_orbit_state12(
                         chief_truth=chief_truth,
@@ -721,7 +732,10 @@ class GymSimulationEnv(gym.Env):
             )
             c_att = (
                 agent.attitude_controller.act(att_belief, t_eval, 2.0)
-                if attitude_enabled and (not use_integrated_cmd) and agent.attitude_controller is not None and att_belief is not None
+                if attitude_enabled
+                and (not use_integrated_cmd)
+                and agent.attitude_controller is not None
+                and att_belief is not None
                 else Command.zero()
             )
             if use_integrated_cmd:
@@ -860,9 +874,9 @@ class GymSimulationEnv(gym.Env):
 
     def _observation_from_snapshot(self, snapshot: dict[str, Any]) -> np.ndarray:
         parts: list[np.ndarray] = []
-        for field in self.observation_fields:
-            value = _lookup_observation_value(snapshot, field.path, self._observation_probe)
-            parts.append(value * float(field.scale))
+        for obs_field in self.observation_fields:
+            value = _lookup_observation_value(snapshot, obs_field.path, self._observation_probe)
+            parts.append(value * float(obs_field.scale))
         if not parts:
             return np.zeros(0, dtype=np.float32)
         return np.concatenate(parts).astype(np.float32)
@@ -884,24 +898,23 @@ class MultiAgentSimulationEnv:
         if not self.controlled_agent_ids:
             raise ValueError("controlled_agent_ids must not be empty.")
         self.base_scenario_dict = (
-            cfg.scenario.to_dict() if isinstance(cfg.scenario, SimulationScenarioConfig) else deepcopy(dict(cfg.scenario))
+            cfg.scenario.to_dict()
+            if isinstance(cfg.scenario, SimulationScenarioConfig)
+            else deepcopy(dict(cfg.scenario))
         )
         self.rng = np.random.default_rng(int(self.base_scenario_dict.get("metadata", {}).get("seed", 0)))
         self.observation_fields_by_agent = {
-            str(agent_id): tuple(fields)
-            for agent_id, fields in dict(cfg.observation_fields_by_agent or {}).items()
+            str(agent_id): tuple(fields) for agent_id, fields in dict(cfg.observation_fields_by_agent or {}).items()
         }
         self.action_fields_by_agent = {
-            str(agent_id): tuple(fields)
-            for agent_id, fields in dict(cfg.action_fields_by_agent or {}).items()
+            str(agent_id): tuple(fields) for agent_id, fields in dict(cfg.action_fields_by_agent or {}).items()
         }
         self.action_adapters_by_agent = {
             str(agent_id): (_load_callable(adapter) or DirectActionAdapter())
             for agent_id, adapter in dict(cfg.action_adapters_by_agent or {}).items()
         }
         self.reward_fns_by_agent = {
-            str(agent_id): _load_callable(fn)
-            for agent_id, fn in dict(cfg.reward_fns_by_agent or {}).items()
+            str(agent_id): _load_callable(fn) for agent_id, fn in dict(cfg.reward_fns_by_agent or {}).items()
         }
         self.termination_fn = _load_callable(cfg.termination_fn)
         self.scenario_cfg: SimulationScenarioConfig | None = None
@@ -931,12 +944,16 @@ class MultiAgentSimulationEnv:
                 dtype=np.float32,
             )
 
-    def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[dict[str, np.ndarray], dict[str, dict[str, Any]]]:
+    def reset(
+        self, *, seed: int | None = None, options: dict[str, Any] | None = None
+    ) -> tuple[dict[str, np.ndarray], dict[str, dict[str, Any]]]:
         if seed is not None:
             self.rng = np.random.default_rng(int(seed))
         scenario_dict = deepcopy(self.base_scenario_dict)
         options = dict(options or {})
-        self.sampled_parameters = _sample_episode_variations(scenario_dict, tuple(self.cfg.episode_variations), self.rng)
+        self.sampled_parameters = _sample_episode_variations(
+            scenario_dict, tuple(self.cfg.episode_variations), self.rng
+        )
         for path, value in dict(options.get("override_parameters", {}) or {}).items():
             _deep_set(scenario_dict, path, value)
             self.sampled_parameters[path] = value
@@ -946,7 +963,9 @@ class MultiAgentSimulationEnv:
             obs_dim = _observation_dim_from_fields(self._fields_for_agent(agent_id), runtime_probe)
             expected = int(self.observation_spaces[agent_id].shape[0])
             if obs_dim != expected:
-                raise ValueError(f"Observation fields for '{agent_id}' resolved to dimension {obs_dim}, expected {expected}.")
+                raise ValueError(
+                    f"Observation fields for '{agent_id}' resolved to dimension {obs_dim}, expected {expected}."
+                )
         self._observation_probe = runtime_probe
         self._build_agents()
         dt = float(self.scenario_cfg.simulator.dt_s)
@@ -961,10 +980,7 @@ class MultiAgentSimulationEnv:
             agent_id: self._observation_from_snapshot(self.last_snapshot, self._fields_for_agent(agent_id))
             for agent_id in self.controlled_agent_ids
         }
-        infos = {
-            agent_id: self._info_dict(self.last_snapshot, agent_id)
-            for agent_id in self.controlled_agent_ids
-        }
+        infos = {agent_id: self._info_dict(self.last_snapshot, agent_id) for agent_id in self.controlled_agent_ids}
         return observations, infos
 
     def step(
@@ -999,10 +1015,7 @@ class MultiAgentSimulationEnv:
             agent_id: self._observation_from_snapshot(snapshot, self._fields_for_agent(agent_id))
             for agent_id in self.controlled_agent_ids
         }
-        infos = {
-            agent_id: self._info_dict(snapshot, agent_id)
-            for agent_id in self.controlled_agent_ids
-        }
+        infos = {agent_id: self._info_dict(snapshot, agent_id) for agent_id in self.controlled_agent_ids}
         for agent_id in self.controlled_agent_ids:
             infos[agent_id].update(dict(term_info.get(agent_id, {})))
         return observations, rewards, terminated, truncated, infos
@@ -1028,8 +1041,7 @@ class MultiAgentSimulationEnv:
         if action_arr.size != len(action_fields):
             raise ValueError(f"Expected action of size {len(action_fields)} for '{agent_id}', got {action_arr.size}.")
         return {
-            field.key: float(np.clip(action_arr[i], field.low, field.high))
-            for i, field in enumerate(action_fields)
+            field.key: float(np.clip(action_arr[i], field.low, field.high)) for i, field in enumerate(action_fields)
         }
 
     def _build_agents(self) -> None:
@@ -1146,7 +1158,9 @@ class MultiAgentSimulationEnv:
             h = float(min(sim_substep_s, t_next - t_inner))
             t_eval = t_inner + h
             world_truth_inner[agent_id] = tr_inner
-            meas = agent.sensor.measure(truth=tr_inner, env=env_sensor, t_s=t_eval) if agent.sensor is not None else None
+            meas = (
+                agent.sensor.measure(truth=tr_inner, env=env_sensor, t_s=t_eval) if agent.sensor is not None else None
+            )
             if agent.estimator is not None and agent.belief is not None:
                 agent.belief = agent.estimator.update(agent.belief, meas, t_eval)
             orb_belief = agent.belief
@@ -1240,7 +1254,10 @@ class MultiAgentSimulationEnv:
             )
             c_att = (
                 agent.attitude_controller.act(att_belief, t_eval, 2.0)
-                if attitude_enabled and (not use_integrated_cmd) and agent.attitude_controller is not None and att_belief is not None
+                if attitude_enabled
+                and (not use_integrated_cmd)
+                and agent.attitude_controller is not None
+                and att_belief is not None
                 else Command.zero()
             )
             if use_integrated_cmd:
@@ -1400,9 +1417,9 @@ class MultiAgentSimulationEnv:
 
     def _observation_from_snapshot(self, snapshot: dict[str, Any], fields: tuple[ObservationField, ...]) -> np.ndarray:
         parts: list[np.ndarray] = []
-        for field in fields:
-            value = _lookup_observation_value(snapshot, field.path, self._observation_probe)
-            parts.append(value * float(field.scale))
+        for obs_field in fields:
+            value = _lookup_observation_value(snapshot, obs_field.path, self._observation_probe)
+            parts.append(value * float(obs_field.scale))
         if not parts:
             return np.zeros(0, dtype=np.float32)
         return np.concatenate(parts).astype(np.float32)
@@ -1462,7 +1479,7 @@ class SyncVectorSimulationEnv:
         terminated_list = []
         truncated_list = []
         info_list = []
-        for idx, (env, action) in enumerate(zip(self.envs, action_arr)):
+        for env, action in zip(self.envs, action_arr):
             obs, reward, terminated, truncated, info = env.step(action)
             final_observation = None
             final_info = None

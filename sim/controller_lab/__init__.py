@@ -11,5 +11,6 @@ def _unavailable(*args, **kwargs):
 
 load_controller_bench_config = _unavailable
 run_controller_bench = _unavailable
+validate_controller_bench_config = _unavailable
 
-__all__ = ["load_controller_bench_config", "run_controller_bench"]
+__all__ = ["load_controller_bench_config", "run_controller_bench", "validate_controller_bench_config"]

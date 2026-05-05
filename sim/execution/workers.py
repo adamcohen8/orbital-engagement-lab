@@ -46,10 +46,10 @@ def run_mc_iteration_from_dict(task: dict[str, Any]) -> dict[str, Any]:
     if strict_plugins:
         errs = validate_scenario_plugins(ci)
         if errs:
-            msg = "Plugin validation failed in Monte Carlo iteration {i}:\n- ".format(i=iteration) + "\n- ".join(errs)
+            msg = f"Plugin validation failed in Monte Carlo iteration {iteration}:\n- " + "\n- ".join(errs)
             raise ValueError(msg)
 
-    last_emit = -10**9
+    last_emit = -(10**9)
 
     def _on_step(step: int, total: int) -> None:
         nonlocal last_emit

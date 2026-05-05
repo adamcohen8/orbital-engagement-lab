@@ -3,9 +3,15 @@ import warnings
 
 import numpy as np
 
-from sim.presets.rockets import RocketStackPreset, RocketStagePreset
 from sim.dynamics.orbit.environment import EARTH_RADIUS_KM
-from sim.rocket import GuidanceCommand, HoldAttitudeGuidance, RocketAscentSimulator, RocketSimConfig, RocketVehicleConfig
+from sim.presets.rockets import RocketStackPreset, RocketStagePreset
+from sim.rocket import (
+    GuidanceCommand,
+    HoldAttitudeGuidance,
+    RocketAscentSimulator,
+    RocketSimConfig,
+    RocketVehicleConfig,
+)
 
 
 class TestRocketAscentEngine(unittest.TestCase):
@@ -42,7 +48,9 @@ class TestRocketAscentEngine(unittest.TestCase):
             enable_j4=False,
         )
         vehicle_cfg = RocketVehicleConfig(stack=self._tiny_stack(), payload_mass_kg=20.0)
-        sim = RocketAscentSimulator(sim_cfg=sim_cfg, vehicle_cfg=vehicle_cfg, guidance=HoldAttitudeGuidance(throttle=1.0))
+        sim = RocketAscentSimulator(
+            sim_cfg=sim_cfg, vehicle_cfg=vehicle_cfg, guidance=HoldAttitudeGuidance(throttle=1.0)
+        )
         with warnings.catch_warnings():
             warnings.simplefilter("error", RuntimeWarning)
             out = sim.run()
@@ -60,7 +68,9 @@ class TestRocketAscentEngine(unittest.TestCase):
             enable_j4=False,
         )
         vehicle_cfg = RocketVehicleConfig(stack=self._tiny_stack(), payload_mass_kg=0.0)
-        sim = RocketAscentSimulator(sim_cfg=sim_cfg, vehicle_cfg=vehicle_cfg, guidance=HoldAttitudeGuidance(throttle=0.5))
+        sim = RocketAscentSimulator(
+            sim_cfg=sim_cfg, vehicle_cfg=vehicle_cfg, guidance=HoldAttitudeGuidance(throttle=0.5)
+        )
         out = sim.run()
         n = out.time_s.size
         self.assertEqual(out.position_eci_km.shape, (n, 3))
@@ -85,7 +95,9 @@ class TestRocketAscentEngine(unittest.TestCase):
             use_stagewise_aero_geometry=True,
         )
         vehicle_cfg = RocketVehicleConfig(stack=self._tiny_stack(), payload_mass_kg=0.0)
-        sim = RocketAscentSimulator(sim_cfg=sim_cfg, vehicle_cfg=vehicle_cfg, guidance=HoldAttitudeGuidance(throttle=0.0))
+        sim = RocketAscentSimulator(
+            sim_cfg=sim_cfg, vehicle_cfg=vehicle_cfg, guidance=HoldAttitudeGuidance(throttle=0.0)
+        )
 
         cfg0 = sim._resolve_aero_config_for_stage(0)
         cfg1 = sim._resolve_aero_config_for_stage(1)
@@ -108,7 +120,9 @@ class TestRocketAscentEngine(unittest.TestCase):
             use_stagewise_aero_geometry=True,
         )
         vehicle_cfg = RocketVehicleConfig(stack=self._tiny_stack(), payload_mass_kg=0.0)
-        sim = RocketAscentSimulator(sim_cfg=sim_cfg, vehicle_cfg=vehicle_cfg, guidance=HoldAttitudeGuidance(throttle=0.0))
+        sim = RocketAscentSimulator(
+            sim_cfg=sim_cfg, vehicle_cfg=vehicle_cfg, guidance=HoldAttitudeGuidance(throttle=0.0)
+        )
 
         cfg0 = sim._resolve_aero_config_for_stage(0)
         cfg1 = sim._resolve_aero_config_for_stage(1)
@@ -128,7 +142,9 @@ class TestRocketAscentEngine(unittest.TestCase):
             use_wgs84_geodesy=True,
         )
         vehicle_cfg = RocketVehicleConfig(stack=self._tiny_stack(), payload_mass_kg=0.0)
-        sim = RocketAscentSimulator(sim_cfg=sim_cfg, vehicle_cfg=vehicle_cfg, guidance=HoldAttitudeGuidance(throttle=0.0))
+        sim = RocketAscentSimulator(
+            sim_cfg=sim_cfg, vehicle_cfg=vehicle_cfg, guidance=HoldAttitudeGuidance(throttle=0.0)
+        )
         out = sim.run()
         self.assertAlmostEqual(out.latitude_deg[0], 28.5, places=3)
         self.assertAlmostEqual(out.longitude_deg[0], -80.6, places=3)
@@ -145,7 +161,9 @@ class TestRocketAscentEngine(unittest.TestCase):
             wind_enu_m_s=np.array([30.0, 0.0, 0.0]),
         )
         vehicle_cfg = RocketVehicleConfig(stack=self._tiny_stack(), payload_mass_kg=0.0)
-        sim = RocketAscentSimulator(sim_cfg=sim_cfg, vehicle_cfg=vehicle_cfg, guidance=HoldAttitudeGuidance(throttle=0.0))
+        sim = RocketAscentSimulator(
+            sim_cfg=sim_cfg, vehicle_cfg=vehicle_cfg, guidance=HoldAttitudeGuidance(throttle=0.0)
+        )
         out = sim.run()
         self.assertGreater(np.linalg.norm(out.wind_body_m_s[0]), 1.0)
 
@@ -202,14 +220,16 @@ class TestRocketAscentEngine(unittest.TestCase):
             enable_j4=False,
         )
         vehicle_cfg = RocketVehicleConfig(stack=stack, payload_mass_kg=0.0)
-        sim = RocketAscentSimulator(sim_cfg=sim_cfg, vehicle_cfg=vehicle_cfg, guidance=HoldAttitudeGuidance(throttle=1.0))
+        sim = RocketAscentSimulator(
+            sim_cfg=sim_cfg, vehicle_cfg=vehicle_cfg, guidance=HoldAttitudeGuidance(throttle=1.0)
+        )
         sea_state = sim.initial_state()
         high_state = sea_state.copy()
         high_state.position_eci_km = np.array([EARTH_RADIUS_KM + 200.0, 0.0, 0.0], dtype=float)
         high_state.velocity_eci_km_s = np.zeros(3)
         sea_next = sim.step(sea_state, GuidanceCommand(throttle=1.0), dt_s=0.5)
         high_next = sim.step(high_state, GuidanceCommand(throttle=1.0), dt_s=0.5)
-        self.assertGreater(getattr(high_next, "_last_step_thrust_n"), getattr(sea_next, "_last_step_thrust_n"))
+        self.assertGreater(high_next._last_step_thrust_n, sea_next._last_step_thrust_n)
 
 
 if __name__ == "__main__":

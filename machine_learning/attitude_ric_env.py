@@ -4,9 +4,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from sim.presets import BASIC_REACTION_WHEEL_TRIAD, BASIC_SATELLITE, build_sim_object_from_presets
 from sim.core.models import Command
-from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2
+from sim.presets import BASIC_SATELLITE, build_sim_object_from_presets
 from sim.utils.frames import ric_dcm_ir_from_rv
 from sim.utils.quaternion import (
     dcm_to_quaternion_bn,
@@ -172,7 +171,9 @@ class AttitudeRICRLEnv:
         self._last_err_deg = err_deg
 
         done = self.step_idx >= self.steps_max
-        success = bool(err_deg <= self.cfg.success_angle_deg and np.linalg.norm(w_br_ric) <= self.cfg.success_rate_rad_s)
+        success = bool(
+            err_deg <= self.cfg.success_angle_deg and np.linalg.norm(w_br_ric) <= self.cfg.success_rate_rad_s
+        )
         if done:
             reward += -0.1 * err_deg
             if success:

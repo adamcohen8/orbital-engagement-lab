@@ -76,9 +76,7 @@ def make_sb3_vec_env(vector_cfg: VectorEnvConfig) -> Any:
     try:
         from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
     except ModuleNotFoundError as exc:  # pragma: no cover
-        raise ModuleNotFoundError(
-            "stable_baselines3 is not installed. Install it to use make_sb3_vec_env()."
-        ) from exc
+        raise ModuleNotFoundError("stable_baselines3 is not installed. Install it to use make_sb3_vec_env().") from exc
     if int(vector_cfg.num_envs) <= 0:
         raise ValueError("num_envs must be positive.")
     env_fns = [make_env_fn(vector_cfg.env_cfg) for _ in range(int(vector_cfg.num_envs))]
@@ -116,8 +114,7 @@ def collect_multi_agent_rollout(
         obs_by_agent, _ = env.reset(**dict(reset_kwargs or {}))
     else:
         obs_by_agent = {
-            agent_id: np.array(obs, dtype=np.float32)
-            for agent_id, obs in dict(initial_obs_by_agent).items()
+            agent_id: np.array(obs, dtype=np.float32) for agent_id, obs in dict(initial_obs_by_agent).items()
         }
     agent_ids = tuple(sorted(obs_by_agent.keys()))
     obs_hist = {agent_id: [] for agent_id in agent_ids}
@@ -126,10 +123,7 @@ def collect_multi_agent_rollout(
     terminated_hist = {agent_id: [] for agent_id in agent_ids}
     truncated_hist = {agent_id: [] for agent_id in agent_ids}
     info_hist = {agent_id: [] for agent_id in agent_ids}
-    next_obs_by_agent = {
-        agent_id: np.array(obs_by_agent[agent_id], dtype=np.float32)
-        for agent_id in agent_ids
-    }
+    next_obs_by_agent = {agent_id: np.array(obs_by_agent[agent_id], dtype=np.float32) for agent_id in agent_ids}
 
     for _ in range(int(horizon)):
         actions = {
@@ -153,10 +147,7 @@ def collect_multi_agent_rollout(
         terminated_by_agent={agent_id: np.array(hist, dtype=bool) for agent_id, hist in terminated_hist.items()},
         truncated_by_agent={agent_id: np.array(hist, dtype=bool) for agent_id, hist in truncated_hist.items()},
         next_obs_by_agent=next_obs_by_agent,
-        infos_by_agent={
-            agent_id: _merge_multi_agent_infos(hist)
-            for agent_id, hist in info_hist.items()
-        },
+        infos_by_agent={agent_id: _merge_multi_agent_infos(hist) for agent_id, hist in info_hist.items()},
     )
 
 

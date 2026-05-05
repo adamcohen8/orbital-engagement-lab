@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import numpy as np
 
-
 WGS84_A_KM = 6378.137
 WGS84_F = 1.0 / 298.257223563
 WGS84_B_KM = WGS84_A_KM * (1.0 - WGS84_F)

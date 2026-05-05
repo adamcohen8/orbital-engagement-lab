@@ -24,16 +24,24 @@ class GuiConfigAdapter:
         if initial_jd is not None:
             window.initial_jd_spin.setValue(float(initial_jd))
         window.output_dir_edit.setText(str(outputs.get("output_dir", "outputs/gui_run") or "outputs/gui_run"))
-        window._set_combo_text_or_append(window.output_mode_combo, str(outputs.get("mode", "interactive") or "interactive"))
+        window._set_combo_text_or_append(
+            window.output_mode_combo, str(outputs.get("mode", "interactive") or "interactive")
+        )
 
         analysis_enabled = bool(analysis.get("enabled", False) or mc.get("enabled", False))
         study_type = str(analysis.get("study_type", "monte_carlo") or "monte_carlo").strip().lower()
         sensitivity = dict(analysis.get("sensitivity", {}) or {})
         sensitivity_method = str(sensitivity.get("method", "one_at_a_time") or "one_at_a_time").strip().lower()
         window.mc_enabled_check.setChecked(analysis_enabled)
-        window._set_combo_data_or_text(window.analysis_study_type_combo, "sensitivity" if study_type == "sensitivity" else "monte_carlo")
-        window._set_combo_data_or_text(window.sensitivity_method_combo, "lhs" if sensitivity_method == "lhs" else "one_at_a_time")
-        window.analysis_metrics_edit.setPlainText(window._format_analysis_metrics_text(list(analysis.get("metrics", []) or [])))
+        window._set_combo_data_or_text(
+            window.analysis_study_type_combo, "sensitivity" if study_type == "sensitivity" else "monte_carlo"
+        )
+        window._set_combo_data_or_text(
+            window.sensitivity_method_combo, "lhs" if sensitivity_method == "lhs" else "one_at_a_time"
+        )
+        window.analysis_metrics_edit.setPlainText(
+            window._format_analysis_metrics_text(list(analysis.get("metrics", []) or []))
+        )
         baseline = dict(analysis.get("baseline", {}) or {})
         execution = dict(analysis.get("execution", {}) or {})
         window.analysis_baseline_enable_check.setChecked(bool(baseline.get("enabled", False)))
@@ -86,7 +94,9 @@ class GuiConfigAdapter:
         disturbance_torques = dict(att_dyn.get("disturbance_torques", {}) or {})
         orbit_substep_val = orbit_dyn.get("orbit_substep_s")
         attitude_substep_val = att_dyn.get("attitude_substep_s")
-        window._set_combo_text_or_append(window.orbit_integrator_combo, str(orbit_dyn.get("integrator", "rk4") or "rk4"))
+        window._set_combo_text_or_append(
+            window.orbit_integrator_combo, str(orbit_dyn.get("integrator", "rk4") or "rk4")
+        )
         window.orbit_adaptive_atol_spin.setValue(float(orbit_dyn.get("adaptive_atol", 1.0e-9) or 0.0))
         window.orbit_adaptive_rtol_spin.setValue(float(orbit_dyn.get("adaptive_rtol", 1.0e-7) or 0.0))
         window.orbit_substep_enabled_check.setChecked(orbit_substep_val is not None)
@@ -115,7 +125,9 @@ class GuiConfigAdapter:
         target_tle = dict(target_init.get("tle", {}) or {})
         window.target_enabled.setChecked(bool(target.get("enabled", True)))
         target_default = window.target_preset.itemText(0) if window.target_preset.count() else ""
-        window._set_combo_text_or_append(window.target_preset, str(target_specs.get("preset_satellite", "") or target_default))
+        window._set_combo_text_or_append(
+            window.target_preset, str(target_specs.get("preset_satellite", "") or target_default)
+        )
         target_mass_fallback = float(target_specs.get("mass_kg", 400.0) or 0.0)
         window.target_dry_mass.setValue(float(target_specs.get("dry_mass_kg", target_mass_fallback) or 0.0))
         window.target_fuel_mass.setValue(float(target_specs.get("fuel_mass_kg", 0.0) or 0.0))
@@ -138,24 +150,40 @@ class GuiConfigAdapter:
         window.target_tle_propagate_to_epoch.setChecked(bool(target_tle.get("propagate_to_initial_epoch", True)))
         window._refresh_target_initial_state_ui()
         window._refresh_tle_status()
-        window._set_pointer_combo_value(window.target_strategy_combo, dict(target.get("mission_strategy", {}) or {}) if target.get("mission_strategy") else None)
-        window._set_pointer_combo_value(window.target_execution_combo, dict(target.get("mission_execution", {}) or {}) if target.get("mission_execution") else None)
-        window._set_pointer_combo_value(window.target_orbit_control_combo, dict(target.get("orbit_control", {}) or {}) if target.get("orbit_control") else None)
-        window._set_pointer_combo_value(window.target_attitude_control_combo, dict(target.get("attitude_control", {}) or {}) if target.get("attitude_control") else None)
+        window._set_pointer_combo_value(
+            window.target_strategy_combo,
+            dict(target.get("mission_strategy", {}) or {}) if target.get("mission_strategy") else None,
+        )
+        window._set_pointer_combo_value(
+            window.target_execution_combo,
+            dict(target.get("mission_execution", {}) or {}) if target.get("mission_execution") else None,
+        )
+        window._set_pointer_combo_value(
+            window.target_orbit_control_combo,
+            dict(target.get("orbit_control", {}) or {}) if target.get("orbit_control") else None,
+        )
+        window._set_pointer_combo_value(
+            window.target_attitude_control_combo,
+            dict(target.get("attitude_control", {}) or {}) if target.get("attitude_control") else None,
+        )
         self.load_knowledge_into_window(window, "target", dict(target.get("knowledge", {}) or {}))
 
         chaser_specs = dict(chaser.get("specs", {}) or {})
         chaser_init = dict(chaser.get("initial_state", {}) or {})
         window.chaser_enabled.setChecked(bool(chaser.get("enabled", False)))
         chaser_default = window.chaser_preset.itemText(0) if window.chaser_preset.count() else ""
-        window._set_combo_text_or_append(window.chaser_preset, str(chaser_specs.get("preset_satellite", "") or chaser_default))
+        window._set_combo_text_or_append(
+            window.chaser_preset, str(chaser_specs.get("preset_satellite", "") or chaser_default)
+        )
         chaser_mass_fallback = float(chaser_specs.get("mass_kg", 200.0) or 0.0)
         window.chaser_dry_mass.setValue(float(chaser_specs.get("dry_mass_kg", chaser_mass_fallback) or 0.0))
         window.chaser_fuel_mass.setValue(float(chaser_specs.get("fuel_mass_kg", 0.0) or 0.0))
         rel_block = dict(chaser_init.get("relative_to_target_ric", {}) or {})
         if rel_block:
             frame = str(rel_block.get("frame", "rect") or "rect").strip().lower()
-            window._set_combo_data_or_text(window.chaser_init_mode, "relative_ric_curv" if frame == "curv" else "relative_ric_rect")
+            window._set_combo_data_or_text(
+                window.chaser_init_mode, "relative_ric_curv" if frame == "curv" else "relative_ric_rect"
+            )
             values = list(rel_block.get("state", [0.0] * 6))
         elif "relative_ric_rect" in chaser_init:
             window._set_combo_data_or_text(window.chaser_init_mode, "relative_ric_rect")
@@ -169,24 +197,44 @@ class GuiConfigAdapter:
         window.chaser_deploy_time.setValue(float(chaser_init.get("deploy_time_s", 900.0) or 0.0))
         for i, widget in enumerate(window.chaser_init_values):
             widget.setValue(float(values[i] if i < len(values) else 0.0))
-        window._set_pointer_combo_value(window.chaser_strategy_combo, dict(chaser.get("mission_strategy", {}) or {}) if chaser.get("mission_strategy") else None)
-        window._set_pointer_combo_value(window.chaser_execution_combo, dict(chaser.get("mission_execution", {}) or {}) if chaser.get("mission_execution") else None)
-        window._set_pointer_combo_value(window.chaser_orbit_control_combo, dict(chaser.get("orbit_control", {}) or {}) if chaser.get("orbit_control") else None)
-        window._set_pointer_combo_value(window.chaser_attitude_control_combo, dict(chaser.get("attitude_control", {}) or {}) if chaser.get("attitude_control") else None)
+        window._set_pointer_combo_value(
+            window.chaser_strategy_combo,
+            dict(chaser.get("mission_strategy", {}) or {}) if chaser.get("mission_strategy") else None,
+        )
+        window._set_pointer_combo_value(
+            window.chaser_execution_combo,
+            dict(chaser.get("mission_execution", {}) or {}) if chaser.get("mission_execution") else None,
+        )
+        window._set_pointer_combo_value(
+            window.chaser_orbit_control_combo,
+            dict(chaser.get("orbit_control", {}) or {}) if chaser.get("orbit_control") else None,
+        )
+        window._set_pointer_combo_value(
+            window.chaser_attitude_control_combo,
+            dict(chaser.get("attitude_control", {}) or {}) if chaser.get("attitude_control") else None,
+        )
         self.load_knowledge_into_window(window, "chaser", dict(chaser.get("knowledge", {}) or {}))
 
         rocket_specs = dict(rocket.get("specs", {}) or {})
         rocket_init = dict(rocket.get("initial_state", {}) or {})
         window.rocket_enabled.setChecked(bool(rocket.get("enabled", False)))
         rocket_default = window.rocket_preset.itemText(0) if window.rocket_preset.count() else ""
-        window._set_combo_text_or_append(window.rocket_preset, str(rocket_specs.get("preset_stack", "") or rocket_default))
+        window._set_combo_text_or_append(
+            window.rocket_preset, str(rocket_specs.get("preset_stack", "") or rocket_default)
+        )
         window.rocket_payload.setValue(float(rocket_specs.get("payload_mass_kg", 150.0) or 0.0))
         window.rocket_launch_lat.setValue(float(rocket_init.get("launch_lat_deg", 28.5) or 0.0))
         window.rocket_launch_lon.setValue(float(rocket_init.get("launch_lon_deg", -80.6) or 0.0))
         window.rocket_launch_alt.setValue(float(rocket_init.get("launch_alt_km", 0.0) or 0.0))
         window.rocket_launch_az.setValue(float(rocket_init.get("launch_azimuth_deg", 90.0) or 0.0))
-        window._set_pointer_combo_value(window.rocket_strategy_combo, dict(rocket.get("mission_strategy", {}) or {}) if rocket.get("mission_strategy") else None)
-        window._set_pointer_combo_value(window.rocket_execution_combo, dict(rocket.get("mission_execution", {}) or {}) if rocket.get("mission_execution") else None)
+        window._set_pointer_combo_value(
+            window.rocket_strategy_combo,
+            dict(rocket.get("mission_strategy", {}) or {}) if rocket.get("mission_strategy") else None,
+        )
+        window._set_pointer_combo_value(
+            window.rocket_execution_combo,
+            dict(rocket.get("mission_execution", {}) or {}) if rocket.get("mission_execution") else None,
+        )
         rocket_base_guidance = dict(rocket.get("base_guidance", {}) or {}) if rocket.get("base_guidance") else None
         if rocket_base_guidance is None and rocket.get("guidance"):
             rocket_base_guidance = dict(rocket.get("guidance", {}) or {})
@@ -264,8 +312,12 @@ class GuiConfigAdapter:
         orbit_dyn["integrator"] = window.orbit_integrator_combo.currentText()
         orbit_dyn["adaptive_atol"] = float(window.orbit_adaptive_atol_spin.value())
         orbit_dyn["adaptive_rtol"] = float(window.orbit_adaptive_rtol_spin.value())
-        orbit_dyn["orbit_substep_s"] = orbit_substep if (window.orbit_substep_enabled_check.isChecked() and orbit_substep > 0.0) else None
-        att_dyn["attitude_substep_s"] = attitude_substep if (window.attitude_substep_enabled_check.isChecked() and attitude_substep > 0.0) else None
+        orbit_dyn["orbit_substep_s"] = (
+            orbit_substep if (window.orbit_substep_enabled_check.isChecked() and orbit_substep > 0.0) else None
+        )
+        att_dyn["attitude_substep_s"] = (
+            attitude_substep if (window.attitude_substep_enabled_check.isChecked() and attitude_substep > 0.0) else None
+        )
         att_dyn["enabled"] = bool(window.attitude_enabled_check.isChecked())
         orbit_dyn["j2"] = bool(window.orbit_j2_check.isChecked())
         orbit_dyn["j3"] = bool(window.orbit_j3_check.isChecked())
@@ -360,7 +412,9 @@ class GuiConfigAdapter:
         target["specs"]["fuel_mass_kg"] = float(window.target_fuel_mass.value())
         target["specs"].pop("mass_kg", None)
         target_initial_state = dict(target.get("initial_state", {}) or {})
-        target_init_mode = str(window.target_init_mode.currentData() or window.target_init_mode.currentText()).strip().lower()
+        target_init_mode = (
+            str(window.target_init_mode.currentData() or window.target_init_mode.currentText()).strip().lower()
+        )
         if target_init_mode == "tle":
             target_initial_state["tle"] = {
                 "line1": window.target_tle_line1.text().strip(),
@@ -384,12 +438,26 @@ class GuiConfigAdapter:
             target_initial_state.pop("position_eci_km", None)
             target_initial_state.pop("velocity_eci_km_s", None)
         target["initial_state"] = target_initial_state
-        target["mission_strategy"] = window._combo_pointer_value(window.target_strategy_combo, existing=dict(target.get("mission_strategy", {}) or {}) if target.get("mission_strategy") else None)
-        target["mission_execution"] = window._combo_pointer_value(window.target_execution_combo, existing=dict(target.get("mission_execution", {}) or {}) if target.get("mission_execution") else None)
+        target["mission_strategy"] = window._combo_pointer_value(
+            window.target_strategy_combo,
+            existing=dict(target.get("mission_strategy", {}) or {}) if target.get("mission_strategy") else None,
+        )
+        target["mission_execution"] = window._combo_pointer_value(
+            window.target_execution_combo,
+            existing=dict(target.get("mission_execution", {}) or {}) if target.get("mission_execution") else None,
+        )
         target.pop("guidance", None)
-        target["orbit_control"] = window._combo_pointer_value(window.target_orbit_control_combo, existing=dict(target.get("orbit_control", {}) or {}) if target.get("orbit_control") else None)
-        target["attitude_control"] = window._combo_pointer_value(window.target_attitude_control_combo, existing=dict(target.get("attitude_control", {}) or {}) if target.get("attitude_control") else None)
-        target["knowledge"] = self.collect_knowledge_from_window(window, "target", existing=dict(target.get("knowledge", {}) or {}))
+        target["orbit_control"] = window._combo_pointer_value(
+            window.target_orbit_control_combo,
+            existing=dict(target.get("orbit_control", {}) or {}) if target.get("orbit_control") else None,
+        )
+        target["attitude_control"] = window._combo_pointer_value(
+            window.target_attitude_control_combo,
+            existing=dict(target.get("attitude_control", {}) or {}) if target.get("attitude_control") else None,
+        )
+        target["knowledge"] = self.collect_knowledge_from_window(
+            window, "target", existing=dict(target.get("knowledge", {}) or {})
+        )
 
         chaser["enabled"] = bool(window.chaser_enabled.isChecked())
         chaser.setdefault("specs", {})["preset_satellite"] = window.chaser_preset.currentText().strip()
@@ -416,12 +484,26 @@ class GuiConfigAdapter:
             chaser_initial_state.pop("relative_ric_rect", None)
             chaser_initial_state.pop("relative_ric_curv", None)
         chaser["initial_state"] = chaser_initial_state
-        chaser["mission_strategy"] = window._combo_pointer_value(window.chaser_strategy_combo, existing=dict(chaser.get("mission_strategy", {}) or {}) if chaser.get("mission_strategy") else None)
-        chaser["mission_execution"] = window._combo_pointer_value(window.chaser_execution_combo, existing=dict(chaser.get("mission_execution", {}) or {}) if chaser.get("mission_execution") else None)
+        chaser["mission_strategy"] = window._combo_pointer_value(
+            window.chaser_strategy_combo,
+            existing=dict(chaser.get("mission_strategy", {}) or {}) if chaser.get("mission_strategy") else None,
+        )
+        chaser["mission_execution"] = window._combo_pointer_value(
+            window.chaser_execution_combo,
+            existing=dict(chaser.get("mission_execution", {}) or {}) if chaser.get("mission_execution") else None,
+        )
         chaser.pop("guidance", None)
-        chaser["orbit_control"] = window._combo_pointer_value(window.chaser_orbit_control_combo, existing=dict(chaser.get("orbit_control", {}) or {}) if chaser.get("orbit_control") else None)
-        chaser["attitude_control"] = window._combo_pointer_value(window.chaser_attitude_control_combo, existing=dict(chaser.get("attitude_control", {}) or {}) if chaser.get("attitude_control") else None)
-        chaser["knowledge"] = self.collect_knowledge_from_window(window, "chaser", existing=dict(chaser.get("knowledge", {}) or {}))
+        chaser["orbit_control"] = window._combo_pointer_value(
+            window.chaser_orbit_control_combo,
+            existing=dict(chaser.get("orbit_control", {}) or {}) if chaser.get("orbit_control") else None,
+        )
+        chaser["attitude_control"] = window._combo_pointer_value(
+            window.chaser_attitude_control_combo,
+            existing=dict(chaser.get("attitude_control", {}) or {}) if chaser.get("attitude_control") else None,
+        )
+        chaser["knowledge"] = self.collect_knowledge_from_window(
+            window, "chaser", existing=dict(chaser.get("knowledge", {}) or {})
+        )
 
         rocket["enabled"] = bool(window.rocket_enabled.isChecked())
         rocket.setdefault("specs", {})["preset_stack"] = window.rocket_preset.currentText().strip()
@@ -432,19 +514,27 @@ class GuiConfigAdapter:
             "launch_alt_km": float(window.rocket_launch_alt.value()),
             "launch_azimuth_deg": float(window.rocket_launch_az.value()),
         }
-        rocket["mission_strategy"] = window._combo_pointer_value(window.rocket_strategy_combo, existing=dict(rocket.get("mission_strategy", {}) or {}) if rocket.get("mission_strategy") else None)
-        rocket["mission_execution"] = window._combo_pointer_value(window.rocket_execution_combo, existing=dict(rocket.get("mission_execution", {}) or {}) if rocket.get("mission_execution") else None)
+        rocket["mission_strategy"] = window._combo_pointer_value(
+            window.rocket_strategy_combo,
+            existing=dict(rocket.get("mission_strategy", {}) or {}) if rocket.get("mission_strategy") else None,
+        )
+        rocket["mission_execution"] = window._combo_pointer_value(
+            window.rocket_execution_combo,
+            existing=dict(rocket.get("mission_execution", {}) or {}) if rocket.get("mission_execution") else None,
+        )
         rocket["base_guidance"] = window._combo_pointer_value(
             window.rocket_base_guidance_combo,
-            existing=dict(rocket.get("base_guidance", {}) or {}) if rocket.get("base_guidance") else (
-                dict(rocket.get("guidance", {}) or {}) if rocket.get("guidance") else None
-            ),
+            existing=dict(rocket.get("base_guidance", {}) or {})
+            if rocket.get("base_guidance")
+            else (dict(rocket.get("guidance", {}) or {}) if rocket.get("guidance") else None),
         )
         rocket["guidance_modifiers"] = copy.deepcopy(window.rocket_guidance_modifiers_config)
         rocket.pop("guidance", None)
         rocket.pop("orbit_control", None)
         rocket.pop("attitude_control", None)
-        rocket["knowledge"] = self.collect_knowledge_from_window(window, "rocket", existing=dict(rocket.get("knowledge", {}) or {}))
+        rocket["knowledge"] = self.collect_knowledge_from_window(
+            window, "rocket", existing=dict(rocket.get("knowledge", {}) or {})
+        )
 
         stats = outputs.setdefault("stats", {})
         plots = outputs.setdefault("plots", {})
@@ -497,11 +587,19 @@ class GuiConfigAdapter:
         conditions = dict(knowledge.get("conditions", {}) or {})
         targets = list(knowledge.get("targets", []) or [])
         getattr(window, f"{object_key}_knowledge_targets_edit").setText(", ".join(str(t) for t in targets))
-        getattr(window, f"{object_key}_knowledge_refresh_rate").setValue(float(knowledge.get("refresh_rate_s", 1.0) or 0.0))
+        getattr(window, f"{object_key}_knowledge_refresh_rate").setValue(
+            float(knowledge.get("refresh_rate_s", 1.0) or 0.0)
+        )
         getattr(window, f"{object_key}_knowledge_max_range").setValue(float(conditions.get("max_range_km", 0.0) or 0.0))
-        getattr(window, f"{object_key}_knowledge_dropout_prob").setValue(float(conditions.get("dropout_prob", 0.0) or 0.0))
-        getattr(window, f"{object_key}_knowledge_solid_angle").setValue(float(conditions.get("solid_angle_sr", 4.0 * 3.141592653589793) or 0.0))
-        getattr(window, f"{object_key}_knowledge_require_los").setChecked(bool(conditions.get("require_line_of_sight", False)))
+        getattr(window, f"{object_key}_knowledge_dropout_prob").setValue(
+            float(conditions.get("dropout_prob", 0.0) or 0.0)
+        )
+        getattr(window, f"{object_key}_knowledge_solid_angle").setValue(
+            float(conditions.get("solid_angle_sr", 4.0 * 3.141592653589793) or 0.0)
+        )
+        getattr(window, f"{object_key}_knowledge_require_los").setChecked(
+            bool(conditions.get("require_line_of_sight", False))
+        )
         sensor_pos = list(conditions.get("sensor_position_body_m", [0.0, 0.0, 0.0]) or [0.0, 0.0, 0.0])
         sensor_bore = list(conditions.get("sensor_boresight_body", [0.0, 0.0, 0.0]) or [0.0, 0.0, 0.0])
         for axis, value in zip(("x", "y", "z"), sensor_pos):
@@ -510,7 +608,9 @@ class GuiConfigAdapter:
             getattr(window, f"{object_key}_knowledge_sensor_bore_{axis}").setValue(float(value or 0.0))
         window._refresh_knowledge_summary_label(object_key)
 
-    def collect_knowledge_from_window(self, window: Any, object_key: str, existing: dict[str, Any] | None = None) -> dict[str, Any]:
+    def collect_knowledge_from_window(
+        self, window: Any, object_key: str, existing: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         knowledge = copy.deepcopy(existing or {})
         raw_targets = getattr(window, f"{object_key}_knowledge_targets_edit").text().strip()
         knowledge["targets"] = [tok.strip() for tok in raw_targets.split(",") if tok.strip()]

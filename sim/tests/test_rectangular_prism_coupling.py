@@ -2,10 +2,10 @@ import unittest
 
 import numpy as np
 
-from sim.presets import build_sim_object_from_presets
 from sim.core.models import StateTruth
 from sim.dynamics.attitude.disturbances import DisturbanceTorqueConfig, DisturbanceTorqueModel
 from sim.dynamics.spacecraft_geometry import RectangularPrismGeometry
+from sim.presets import build_sim_object_from_presets
 
 
 class TestRectangularPrismCoupling(unittest.TestCase):

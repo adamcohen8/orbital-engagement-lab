@@ -8,7 +8,7 @@ from sim.control.orbit.impulsive import AttitudeAgnosticImpulsiveManeuverer
 from sim.control.orbit.lqr import HCWLQRController
 from sim.core.models import StateBelief, StateTruth
 from sim.dynamics.orbit.two_body import propagate_two_body_rk4
-from sim.utils.frames import dcm_to_euler_321, ric_rect_to_curv, ric_dcm_ir_from_rv
+from sim.utils.frames import dcm_to_euler_321, ric_dcm_ir_from_rv, ric_rect_to_curv
 from sim.utils.quaternion import quaternion_to_dcm_bn
 
 
@@ -33,7 +33,9 @@ def _eci_to_ric_rect(x_host_eci: np.ndarray, x_dep_eci: np.ndarray) -> np.ndarra
 
     rtemp = np.cross(h, v_host)
     vtemp = np.cross(h, r_host)
-    drsw = np.column_stack((v_host / max(np.linalg.norm(r_host), 1e-12), rtemp / max(np.linalg.norm(vtemp), 1e-12), np.zeros(3)))
+    drsw = np.column_stack(
+        (v_host / max(np.linalg.norm(r_host), 1e-12), rtemp / max(np.linalg.norm(vtemp), 1e-12), np.zeros(3))
+    )
 
     x_r = rsw.T @ dr
     frame_mv = np.array(
@@ -93,7 +95,10 @@ class PredictiveBurnScheduler:
                 accel_eci_km_s2=self._planned_accel_eci_km_s2,
                 thruster_direction_body=self.thruster_direction_body,
             )
-            if np.linalg.norm(self._planned_accel_eci_km_s2) > 0.0 and align_angle_rad <= self.config.attitude_tolerance_rad:
+            if (
+                np.linalg.norm(self._planned_accel_eci_km_s2) > 0.0
+                and align_angle_rad <= self.config.attitude_tolerance_rad
+            ):
                 fire = True
                 accel_cmd = self._planned_accel_eci_km_s2.copy()
             self._countdown = -1
@@ -110,7 +115,9 @@ class PredictiveBurnScheduler:
             "planned_q_target_bn": self._planned_q_target_bn.copy(),
         }
 
-    def _plan(self, chaser_truth: StateTruth, chaser_orbit_belief: StateBelief, chief_orbit_belief: StateBelief, dt_s: float) -> None:
+    def _plan(
+        self, chaser_truth: StateTruth, chaser_orbit_belief: StateBelief, chief_orbit_belief: StateBelief, dt_s: float
+    ) -> None:
         x_chief_pred = chief_orbit_belief.state.copy()
         x_chaser_pred = chaser_orbit_belief.state.copy()
         for _ in range(self.config.horizon_steps):

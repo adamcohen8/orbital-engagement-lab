@@ -2,8 +2,8 @@ import unittest
 
 from sim.config import (
     build_default_ops_orbit_propagator,
-    default_env_for_profile,
     default_disturbance_config_for_profile,
+    default_env_for_profile,
     get_simulation_profile,
     profile_choices,
     resolve_dt_s,

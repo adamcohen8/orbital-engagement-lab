@@ -50,7 +50,9 @@ class IntegratedManeuverDecision:
 class OrbitalAttitudeManeuverCoordinator:
     maneuverer: AttitudeAgnosticImpulsiveManeuverer = field(default_factory=AttitudeAgnosticImpulsiveManeuverer)
 
-    def execute(self, truth: StateTruth, command: IntegratedManeuverCommand) -> tuple[StateTruth, IntegratedManeuverDecision]:
+    def execute(
+        self, truth: StateTruth, command: IntegratedManeuverCommand
+    ) -> tuple[StateTruth, IntegratedManeuverDecision]:
         dv = np.array(command.delta_v_eci_km_s, dtype=float)
         if dv.shape != (3,):
             raise ValueError("delta_v_eci_km_s must be a length-3 vector.")
@@ -129,7 +131,9 @@ class OrbitalAttitudeManeuverCoordinator:
             executed=result.executed,
             reason=reason,
             should_slew=should_slew,
-            required_attitude_quat_bn=None if result.required_attitude_quat_bn is None else result.required_attitude_quat_bn.copy(),
+            required_attitude_quat_bn=None
+            if result.required_attitude_quat_bn is None
+            else result.required_attitude_quat_bn.copy(),
             applied_delta_v_km_s=result.applied_delta_v_km_s,
             remaining_delta_v_km_s=result.remaining_delta_v_km_s,
             alignment_ok=result.alignment_ok,

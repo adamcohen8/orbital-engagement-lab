@@ -5,10 +5,15 @@ from typing import Any, Callable
 
 import numpy as np
 
+from sim.config import (
+    SimulationScenarioConfig,
+    default_pair_object_ids,
+    default_reference_object_id,
+    iter_object_sections,
+)
+from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2, EARTH_RADIUS_KM
 from sim.presets.rockets import RocketStackPreset
 from sim.presets.thrusters import resolve_thruster_mount_from_specs
-from sim.config import SimulationScenarioConfig, default_pair_object_ids, default_reference_object_id, iter_object_sections
-from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2, EARTH_RADIUS_KM
 from sim.utils.figure_size import cap_figsize
 from sim.utils.frames import ric_dcm_ir_from_rv
 from sim.utils.ground_track import ground_track_from_eci_history
@@ -59,7 +64,13 @@ AVAILABLE_FIGURE_IDS = [
 PLOT_PRESETS = {
     "minimal": ["run_dashboard"],
     "orbit": ["run_dashboard", "trajectory_eci_multi", "ground_track_multi"],
-    "rendezvous": ["run_dashboard", "rendezvous_summary", "trajectory_ric_curv_2d_multi", "relative_range", "control_effort"],
+    "rendezvous": [
+        "run_dashboard",
+        "rendezvous_summary",
+        "trajectory_ric_curv_2d_multi",
+        "relative_range",
+        "control_effort",
+    ],
     "attitude": ["run_dashboard", "quaternion_eci", "rates_eci", "quaternion_error"],
     "estimation": ["estimation_error", "estimation_error_components", "knowledge_timeline", "sensor_access"],
     "rocket": ["run_dashboard", "rocket_ascent_diagnostics", "rocket_orbital_elements", "rocket_fuel_remaining"],
@@ -150,6 +161,7 @@ def _bridge_io_histories(bridge_hist: dict[str, list[dict[str, Any]]] | None) ->
         }
     return out
 
+
 AVAILABLE_ANIMATION_TYPES = [
     "ground_track",
     "ground_track_multi",
@@ -169,12 +181,12 @@ def _load_plotting_functions() -> dict[str, Any]:
     from sim.utils.plotting import plot_attitude_tumble, plot_orbit_eci
     from sim.utils.plotting_capabilities import (
         animate_battlespace_dashboard,
-        animate_rectangular_prism_attitude,
         animate_ground_track,
-        animate_multi_ric_2d_projections,
         animate_multi_ground_track,
-        animate_multi_trajectory_frame,
         animate_multi_rectangular_prism_ric_curv,
+        animate_multi_ric_2d_projections,
+        animate_multi_trajectory_frame,
+        animate_rectangular_prism_attitude,
         animate_side_by_side_rectangular_prism_ric_attitude,
         plot_body_rates,
         plot_control_commands,
@@ -1036,7 +1048,9 @@ def plot_outputs(
     if "thrust_alignment_error" in figure_ids:
         import matplotlib.pyplot as plt
 
-        thrust_dir_body = np.array(cfg.outputs.plots.get("thrust_direction_body", [1.0, 0.0, 0.0]), dtype=float).reshape(-1)
+        thrust_dir_body = np.array(
+            cfg.outputs.plots.get("thrust_direction_body", [1.0, 0.0, 0.0]), dtype=float
+        ).reshape(-1)
         if thrust_dir_body.size != 3:
             thrust_dir_body = np.array([1.0, 0.0, 0.0], dtype=float)
         n_t = float(np.linalg.norm(thrust_dir_body))
@@ -1157,7 +1171,9 @@ def animate_outputs(
     animate_multi_ground_track = plot_fns["animate_multi_ground_track"]
     animate_multi_trajectory_frame = plot_fns["animate_multi_trajectory_frame"]
     animate_multi_rectangular_prism_ric_curv = plot_fns["animate_multi_rectangular_prism_ric_curv"]
-    animate_side_by_side_rectangular_prism_ric_attitude = plot_fns["animate_side_by_side_rectangular_prism_ric_attitude"]
+    animate_side_by_side_rectangular_prism_ric_attitude = plot_fns[
+        "animate_side_by_side_rectangular_prism_ric_attitude"
+    ]
     satellite_dv_by_object = _compute_satellite_delta_v_remaining(
         cfg=cfg,
         truth_hist=truth_hist,
@@ -1200,8 +1216,12 @@ def animate_outputs(
                 lz_m=float(dims[2]),
                 frame="ric",
                 thruster_active_mask=active_mask,
-                thruster_position_body_m=None if thruster_mounts.get(oid) is None else thruster_mounts[oid]["position_body_m"],
-                thruster_direction_body=None if thruster_mounts.get(oid) is None else thruster_mounts[oid]["direction_body"],
+                thruster_position_body_m=None
+                if thruster_mounts.get(oid) is None
+                else thruster_mounts[oid]["position_body_m"],
+                thruster_direction_body=None
+                if thruster_mounts.get(oid) is None
+                else thruster_mounts[oid]["direction_body"],
                 body_facecolor=body_facecolor,
                 thruster_inactive_facecolor="#808080",
                 thruster_active_facecolor="#D95F02",
@@ -1256,7 +1276,9 @@ def animate_outputs(
 
     if "ric_curv_prism_multi" in types:
         p = outdir / "ric_curv_prism_multi.mp4"
-        target_object_id = str(anim_cfg.get("target_object_id", default_reference_object_id(cfg, available_ids=truth_hist.keys()) or ""))
+        target_object_id = str(
+            anim_cfg.get("target_object_id", default_reference_object_id(cfg, available_ids=truth_hist.keys()) or "")
+        )
         prism_obj_ids = anim_cfg.get("ric_curv_prism_object_ids")
         if not isinstance(prism_obj_ids, list):
             prism_obj_ids = None
@@ -1334,7 +1356,9 @@ def animate_outputs(
 
         if "battlespace_dashboard" in types and ref_truth_hist:
             preferred_pair = default_pair_object_ids(cfg, available_ids=truth_hist.keys()) or ("", "")
-            target_object_id = str(anim_cfg.get("battlespace_dashboard_target_object_id", preferred_pair[1] or preferred_pair[0]))
+            target_object_id = str(
+                anim_cfg.get("battlespace_dashboard_target_object_id", preferred_pair[1] or preferred_pair[0])
+            )
             chaser_object_id = str(anim_cfg.get("battlespace_dashboard_chaser_object_id", preferred_pair[0]))
             if target_object_id in truth_hist and chaser_object_id in truth_hist:
                 p = outdir / "battlespace_dashboard.mp4"
@@ -1349,7 +1373,8 @@ def animate_outputs(
                     chaser_object_id=chaser_object_id,
                     thrust_hist_by_object=thrust_hist,
                     delta_v_remaining_m_s_by_object={
-                        oid: np.array(entry["remaining_m_s"], dtype=float) for oid, entry in satellite_dv_by_object.items()
+                        oid: np.array(entry["remaining_m_s"], dtype=float)
+                        for oid, entry in satellite_dv_by_object.items()
                     },
                     prism_dims_m_by_object=dims_map,
                     thruster_mounts_by_object=thruster_mounts,
@@ -1373,7 +1398,9 @@ def animate_outputs(
                 truth_hist_by_object=ref_truth_hist,
                 frame="ric_curv",
                 reference_truth_hist=reference_truth,
-                planes=list(anim_cfg.get("target_reference_ric_curv_2d_planes", ["ri", "ic", "rc"]) or ["ri", "ic", "rc"]),
+                planes=list(
+                    anim_cfg.get("target_reference_ric_curv_2d_planes", ["ri", "ic", "rc"]) or ["ri", "ic", "rc"]
+                ),
                 mode=mode,
                 out_path=str(p),
                 fps=fps,

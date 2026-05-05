@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-from sim.app.io import DEFAULT_CONFIG_PATH, dump_yaml_text, ensure_sections, list_config_files, load_config_dict, validate_config_dict
+from sim.app.io import (
+    DEFAULT_CONFIG_PATH,
+    dump_yaml_text,
+    ensure_sections,
+    list_config_files,
+    load_config_dict,
+    validate_config_dict,
+)
 
 
 def test_list_config_files_includes_template() -> None:

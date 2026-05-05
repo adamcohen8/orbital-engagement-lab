@@ -8,10 +8,10 @@ from sim.core.interfaces import DynamicsModel
 from sim.core.models import Command, StateTruth
 from sim.dynamics.attitude.disturbances import DisturbanceTorqueModel
 from sim.dynamics.attitude.rigid_body import propagate_attitude_exponential_map
+from sim.dynamics.orbit.accelerations import OrbitContext
 from sim.dynamics.orbit.atmosphere import density_from_model
 from sim.dynamics.orbit.eclipse import srp_shadow_factor
 from sim.dynamics.orbit.environment import EARTH_ROT_RATE_RAD_S
-from sim.dynamics.orbit.accelerations import OrbitContext
 from sim.dynamics.orbit.propagator import OrbitPropagator
 from sim.dynamics.spacecraft_geometry import RectangularPrismGeometry
 from sim.utils.quaternion import normalize_quaternion, quaternion_to_dcm_bn
@@ -49,7 +49,6 @@ class OrbitalAttitudeDynamics(DynamicsModel):
         geom = self._rectangular_prism_geometry()
         if self.use_rectangular_prism_for_aero_srp and geom is not None and self.disturbance_model is not None:
             c_bn = quaternion_to_dcm_bn(state.attitude_quat_bn)
-            omega_earth = np.array([0.0, 0.0, EARTH_ROT_RATE_RAD_S], dtype=float)
             v_atm_eci_km_s = np.array(
                 [
                     -EARTH_ROT_RATE_RAD_S * float(state.position_eci_km[1]),
@@ -144,7 +143,9 @@ class OrbitalAttitudeDynamics(DynamicsModel):
                     t_s=float(midpoint_truth.t_s),
                 )
                 disturbance_torque = (
-                    np.zeros(3) if self.disturbance_model is None else self.disturbance_model.total_torque_body_nm(att_state, env_local)
+                    np.zeros(3)
+                    if self.disturbance_model is None
+                    else self.disturbance_model.total_torque_body_nm(att_state, env_local)
                 )
                 total_torque = command.torque_body_nm + disturbance_torque
                 q_next, w_next = propagate_attitude_exponential_map(

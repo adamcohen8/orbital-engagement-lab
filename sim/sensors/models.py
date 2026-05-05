@@ -25,7 +25,9 @@ class OwnStateSensor(SensorModel):
     _latency_queue: list[tuple[float, np.ndarray]] = field(default_factory=list)
 
     def measure(self, truth: StateTruth, env: dict, t_s: float) -> Measurement | None:
-        if self.access_model is not None and not self.access_model.can_update(truth.position_eci_km, truth.position_eci_km, t_s):
+        if self.access_model is not None and not self.access_model.can_update(
+            truth.position_eci_km, truth.position_eci_km, t_s
+        ):
             return None
         if self.rng.random() < self.noise.dropout_prob:
             return None
@@ -73,7 +75,9 @@ class RelativeSensor(SensorModel):
         if target is None:
             return None
 
-        if self.access_model is not None and not self.access_model.can_update(truth.position_eci_km, target.position_eci_km, t_s):
+        if self.access_model is not None and not self.access_model.can_update(
+            truth.position_eci_km, target.position_eci_km, t_s
+        ):
             return None
         if self.rng.random() < self.noise.dropout_prob:
             return None

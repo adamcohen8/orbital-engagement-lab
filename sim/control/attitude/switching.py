@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import importlib
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -64,7 +64,9 @@ class DetumbleThenSlewController:
                 pass
         ctrl.set_target(q_des)
 
-    def set_target(self, desired_attitude_quat_bn: np.ndarray, desired_rate_body_rad_s: np.ndarray | None = None) -> None:
+    def set_target(
+        self, desired_attitude_quat_bn: np.ndarray, desired_rate_body_rad_s: np.ndarray | None = None
+    ) -> None:
         self._set_target_on_controller(self.nominal, desired_attitude_quat_bn, desired_rate_body_rad_s)
         self._set_target_on_controller(self.detumble, desired_attitude_quat_bn, desired_rate_body_rad_s)
 

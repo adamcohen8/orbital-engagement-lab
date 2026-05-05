@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-import math
 from typing import Any
 
 import numpy as np
@@ -159,7 +159,9 @@ def tle_to_rv_eci(
     )
 
 
-def tle_block_to_rv_eci(tle_block: dict[str, Any], *, target_jd_utc: float | None = None) -> tuple[np.ndarray, np.ndarray]:
+def tle_block_to_rv_eci(
+    tle_block: dict[str, Any], *, target_jd_utc: float | None = None
+) -> tuple[np.ndarray, np.ndarray]:
     block = dict(tle_block or {})
     lines = block.get("lines")
     if isinstance(lines, (list, tuple)) and len(lines) >= 2:

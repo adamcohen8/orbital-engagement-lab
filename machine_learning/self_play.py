@@ -9,19 +9,15 @@ from machine_learning.training_adapter import MultiAgentRolloutBatch, collect_mu
 
 
 class SupportsPolicy(Protocol):
-    def act(self, obs: np.ndarray) -> np.ndarray:
-        ...
+    def act(self, obs: np.ndarray) -> np.ndarray: ...
 
-    def clone(self) -> "SupportsPolicy":
-        ...
+    def clone(self) -> SupportsPolicy: ...
 
 
 class SupportsTrainablePolicy(SupportsPolicy, Protocol):
-    def mutate(self, rng: np.random.Generator, sigma: float) -> np.ndarray:
-        ...
+    def mutate(self, rng: np.random.Generator, sigma: float) -> np.ndarray: ...
 
-    def update(self, direction: np.ndarray, scale: float) -> None:
-        ...
+    def update(self, direction: np.ndarray, scale: float) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -62,7 +58,7 @@ class LinearPolicy:
     bias: np.ndarray
 
     @classmethod
-    def random(cls, obs_dim: int, action_dim: int, rng: np.random.Generator) -> "LinearPolicy":
+    def random(cls, obs_dim: int, action_dim: int, rng: np.random.Generator) -> LinearPolicy:
         return cls(
             weights=rng.normal(0.0, 0.05, size=(int(obs_dim), int(action_dim))),
             bias=np.zeros(int(action_dim), dtype=np.float64),
@@ -79,7 +75,7 @@ class LinearPolicy:
     def mutate(self, rng: np.random.Generator, sigma: float) -> np.ndarray:
         return rng.normal(0.0, float(sigma), size=self.weights.shape)
 
-    def clone(self) -> "LinearPolicy":
+    def clone(self) -> LinearPolicy:
         return LinearPolicy(weights=self.weights.copy(), bias=self.bias.copy())
 
 
@@ -154,7 +150,9 @@ def run_self_play_training(
             for agent_id in agent_ids:
                 direction = policies_by_agent[agent_id].mutate(rng, sigma=float(trainer_cfg.mutation_sigma))
                 reward_sum = float(stats.get(f"{agent_id}_reward_sum", 0.0))
-                policies_by_agent[agent_id].update(direction, scale=np.sign(reward_sum) * float(trainer_cfg.learning_rate))
+                policies_by_agent[agent_id].update(
+                    direction, scale=np.sign(reward_sum) * float(trainer_cfg.learning_rate)
+                )
         else:
             assert learner is not None
             direction = policies_by_agent[learner].mutate(rng, sigma=float(trainer_cfg.mutation_sigma))

@@ -54,7 +54,9 @@ def rkf78_stage_trace(deriv_fn, t_s: float, x: np.ndarray, dt_s: float) -> list[
     k9 = record(
         "k9",
         t_s + dt_s * (2.0 / 3.0),
-        x + dt_s * (2.0 * k1 - (53.0 / 6.0) * k4 + (704.0 / 45.0) * k5 - (107.0 / 9.0) * k6 + (67.0 / 90.0) * k7 + 3.0 * k8),
+        x
+        + dt_s
+        * (2.0 * k1 - (53.0 / 6.0) * k4 + (704.0 / 45.0) * k5 - (107.0 / 9.0) * k6 + (67.0 / 90.0) * k7 + 3.0 * k8),
     )
     k10 = record(
         "k10",
@@ -71,7 +73,7 @@ def rkf78_stage_trace(deriv_fn, t_s: float, x: np.ndarray, dt_s: float) -> list[
             - (1.0 / 12.0) * k9
         ),
     )
-    k11 = record(
+    record(
         "k11",
         t_s + dt_s,
         x
@@ -87,7 +89,7 @@ def rkf78_stage_trace(deriv_fn, t_s: float, x: np.ndarray, dt_s: float) -> list[
             + (18.0 / 41.0) * k10
         ),
     )
-    k12 = record(
+    record(
         "k12",
         t_s,
         x
@@ -185,7 +187,7 @@ def integrate_rkf78_hpop(
 
     while x_now < x_end:
         scale = 1.0
-        for attempt in range(max_attempts):
+        for _attempt in range(max_attempts):
             y_trial, err_vec = rkf78_step(deriv_fn, x_now, y, h)
             err = float(np.linalg.norm(err_vec))
             if err == 0.0:
@@ -203,9 +205,7 @@ def integrate_rkf78_hpop(
             elif x_now + h + 0.5 * h > x_end:
                 h = 0.5 * h
         else:
-            raise RuntimeError(
-                f"HPOP-style RKF78 failed to converge within {max_attempts} attempts at t={x_now:.9f}s."
-            )
+            raise RuntimeError(f"HPOP-style RKF78 failed to converge within {max_attempts} attempts at t={x_now:.9f}s.")
 
         y = y_trial
         x_now += h
@@ -242,12 +242,7 @@ def dopri45_step(deriv_fn, t_s: float, x: np.ndarray, dt_s: float) -> tuple[np.n
 
     x5 = x + dt_s * (35 / 384 * k1 + 500 / 1113 * k3 + 125 / 192 * k4 - 2187 / 6784 * k5 + 11 / 84 * k6)
     x4 = x + dt_s * (
-        5179 / 57600 * k1
-        + 7571 / 16695 * k3
-        + 393 / 640 * k4
-        - 92097 / 339200 * k5
-        + 187 / 2100 * k6
-        + 1 / 40 * k7
+        5179 / 57600 * k1 + 7571 / 16695 * k3 + 393 / 640 * k4 - 92097 / 339200 * k5 + 187 / 2100 * k6 + 1 / 40 * k7
     )
     err = x5 - x4
     return x5, err

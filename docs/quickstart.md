@@ -83,16 +83,12 @@ for station_id, station_payload in result.ground_station_access.items():
 
 Access is computed from line of sight, minimum elevation, and optional maximum
 range. See [Scenario YAML](scenario-yaml.md) for the ground-station fields.
+For more examples, see [Python API](python-api.md).
 
 ## Next Scenarios
 
-- `examples/configs/public_tle_2hr_propagation.yaml` predicts a two-hour state history from TLE lines.
-- `examples/configs/public_ground_station_access_from_tle.yaml` computes ground-station access windows from a TLE.
-- `examples/configs/public_closed_loop_rendezvous_lqr.yaml` demonstrates a compact closed-loop rendezvous with HCW LQR.
-- `examples/configs/public_rendezvous_closed_loop.yaml` demonstrates a broader rendezvous with attitude pointing, sensing, EKF knowledge, and plots.
-- `examples/configs/public_orbit_environment_stack.yaml` demonstrates deterministic high-fidelity orbit/environment propagation.
-- `examples/configs/public_attitude_hold_disturbance.yaml` demonstrates attitude-control recovery under initial error and disturbance torque.
-- `examples/configs/public_manual_rpo_training.yaml` demonstrates the manual/game scenario shape.
+See [Examples Matrix](examples-matrix.md) for the maintained public examples,
+what each one demonstrates, and which output artifacts to inspect first.
 
 Run the compact rendezvous example:
 

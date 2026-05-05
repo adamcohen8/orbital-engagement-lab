@@ -34,14 +34,17 @@ def ric_angular_rate_eci_from_rv(r_eci_km: np.ndarray, v_eci_km_s: np.ndarray) -
     r2 = float(np.dot(r, r))
     if r2 <= 1e-12:
         return np.zeros(3, dtype=float)
-    return np.array(
-        [
-            r[1] * v[2] - r[2] * v[1],
-            r[2] * v[0] - r[0] * v[2],
-            r[0] * v[1] - r[1] * v[0],
-        ],
-        dtype=float,
-    ) / r2
+    return (
+        np.array(
+            [
+                r[1] * v[2] - r[2] * v[1],
+                r[2] * v[0] - r[0] * v[2],
+                r[0] * v[1] - r[1] * v[0],
+            ],
+            dtype=float,
+        )
+        / r2
+    )
 
 
 def ric_rect_state_to_eci(
@@ -103,9 +106,9 @@ def dcm_to_euler_321(dcm: np.ndarray) -> np.ndarray:
 
 
 def ric_curv_to_rect(x_ric_curv: np.ndarray, r0_km: float, eps: float = 1e-12) -> np.ndarray:
-    x_r_curv, x_i_curv, x_c_curv, x_r_curv_dot, x_i_curv_dot, x_c_curv_dot = np.array(
-        x_ric_curv, dtype=float
-    ).reshape(6)
+    x_r_curv, x_i_curv, x_c_curv, x_r_curv_dot, x_i_curv_dot, x_c_curv_dot = np.array(x_ric_curv, dtype=float).reshape(
+        6
+    )
     r0 = max(float(r0_km), eps)
 
     r = max(r0 + x_r_curv, eps)

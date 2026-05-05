@@ -137,7 +137,9 @@ class AttitudeActuator(Actuator):
         inferred_mask = ~np.isfinite(j_kg_m2)
         if np.any(inferred_mask):
             infer_ok = np.isfinite(max_momentum_nms) & np.isfinite(max_speed_rad_s) & (max_speed_rad_s > 0.0)
-            j_kg_m2[inferred_mask & infer_ok] = max_momentum_nms[inferred_mask & infer_ok] / max_speed_rad_s[inferred_mask & infer_ok]
+            j_kg_m2[inferred_mask & infer_ok] = (
+                max_momentum_nms[inferred_mask & infer_ok] / max_speed_rad_s[inferred_mask & infer_ok]
+            )
             j_kg_m2[~np.isfinite(j_kg_m2)] = 5e-4
         j_kg_m2 = np.clip(j_kg_m2, 1e-9, np.inf)
 

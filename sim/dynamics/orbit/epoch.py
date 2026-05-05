@@ -14,11 +14,7 @@ def datetime_to_julian_date(dt: datetime) -> float:
     y = dt_utc.year
     m = dt_utc.month
     d = dt_utc.day
-    frac_day = (
-        dt_utc.hour / 24.0
-        + dt_utc.minute / 1440.0
-        + (dt_utc.second + dt_utc.microsecond * 1e-6) / 86400.0
-    )
+    frac_day = dt_utc.hour / 24.0 + dt_utc.minute / 1440.0 + (dt_utc.second + dt_utc.microsecond * 1e-6) / 86400.0
     if m <= 2:
         y -= 1
         m += 12
@@ -72,12 +68,7 @@ def julian_date_to_datetime(jd_utc: float) -> datetime:
 def gmst_angle_rad_from_jd(jd_utc: float) -> float:
     jd = float(jd_utc)
     t = (jd - 2451545.0) / 36525.0
-    theta_deg = (
-        280.46061837
-        + 360.98564736629 * (jd - 2451545.0)
-        + 0.000387933 * (t**2)
-        - (t**3) / 38710000.0
-    )
+    theta_deg = 280.46061837 + 360.98564736629 * (jd - 2451545.0) + 0.000387933 * (t**2) - (t**3) / 38710000.0
     return float(np.deg2rad(np.mod(theta_deg, 360.0)))
 
 
@@ -141,9 +132,7 @@ def sun_position_eci_km_enhanced(jd_utc: float) -> np.ndarray:
     lam_app_deg = true_long - 0.00569 - 0.00478 * np.sin(np.deg2rad(omega))
     lam = np.deg2rad(lam_app_deg)
 
-    eps0 = 23.0 + 26.0 / 60.0 + 21.448 / 3600.0 - (
-        46.8150 * t + 0.00059 * (t**2) - 0.001813 * (t**3)
-    ) / 3600.0
+    eps0 = 23.0 + 26.0 / 60.0 + 21.448 / 3600.0 - (46.8150 * t + 0.00059 * (t**2) - 0.001813 * (t**3)) / 3600.0
     eps = np.deg2rad(eps0 + 0.00256 * np.cos(np.deg2rad(omega)))
 
     r_km = r_au * AU_KM
@@ -158,7 +147,9 @@ def moon_position_eci_km_enhanced(jd_utc: float) -> np.ndarray:
     Enhanced low-cost Moon ephemeris with dominant periodic terms.
     """
     t = (float(jd_utc) - 2451545.0) / 36525.0
-    l_prime = _wrap_deg(218.3164477 + 481267.88123421 * t - 0.0015786 * (t**2) + (t**3) / 538841.0 - (t**4) / 65194000.0)
+    l_prime = _wrap_deg(
+        218.3164477 + 481267.88123421 * t - 0.0015786 * (t**2) + (t**3) / 538841.0 - (t**4) / 65194000.0
+    )
     d = _wrap_deg(297.8501921 + 445267.1114034 * t - 0.0018819 * (t**2) + (t**3) / 545868.0 - (t**4) / 113065000.0)
     m = _wrap_deg(357.5291092 + 35999.0502909 * t - 0.0001536 * (t**2) + (t**3) / 24490000.0)
     m_prime = _wrap_deg(134.9633964 + 477198.8675055 * t + 0.0087414 * (t**2) + (t**3) / 69699.0 - (t**4) / 14712000.0)

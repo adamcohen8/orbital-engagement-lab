@@ -11,12 +11,7 @@ _EMRAT = 81.3005682214972154
 
 
 def default_de440_coeff_path() -> Path:
-    return (
-        Path(__file__).resolve().parents[3]
-        / "validation"
-        / "data"
-        / "DE440Coeff.mat"
-    ).resolve()
+    return (Path(__file__).resolve().parents[3] / "validation" / "data" / "DE440Coeff.mat").resolve()
 
 
 def default_hpop_eop_path() -> Path:
@@ -123,15 +118,19 @@ def _find_coeff_row(pc: np.ndarray, jd_tdb: float) -> np.ndarray:
 
 def mjd_tt_to_mjd_tdb(mjd_tt: float) -> float:
     t_tt = (float(mjd_tt) - 51544.5) / 36525.0
-    return float(mjd_tt) + (
-        0.001657 * np.sin(628.3076 * t_tt + 6.2401)
-        + 0.000022 * np.sin(575.3385 * t_tt + 4.2970)
-        + 0.000014 * np.sin(1256.6152 * t_tt + 6.1969)
-        + 0.000005 * np.sin(606.9777 * t_tt + 4.0212)
-        + 0.000005 * np.sin(52.9691 * t_tt + 0.4444)
-        + 0.000002 * np.sin(21.3299 * t_tt + 5.5431)
-        + 0.000010 * np.sin(628.3076 * t_tt + 4.2490)
-    ) / 86400.0
+    return (
+        float(mjd_tt)
+        + (
+            0.001657 * np.sin(628.3076 * t_tt + 6.2401)
+            + 0.000022 * np.sin(575.3385 * t_tt + 4.2970)
+            + 0.000014 * np.sin(1256.6152 * t_tt + 6.1969)
+            + 0.000005 * np.sin(606.9777 * t_tt + 4.0212)
+            + 0.000005 * np.sin(52.9691 * t_tt + 0.4444)
+            + 0.000002 * np.sin(21.3299 * t_tt + 5.5431)
+            + 0.000010 * np.sin(628.3076 * t_tt + 4.2490)
+        )
+        / 86400.0
+    )
 
 
 def jd_utc_to_jd_tdb(jd_utc: float, eop_path: str | None = None, tai_utc_s: float | None = None) -> float:
@@ -185,10 +184,14 @@ def hpop_de440_positions_m(jd_tdb: float, coeff_path: str | Path | None = None) 
 
 def hpop_de440_positions_km(jd_utc: float, env: dict) -> dict[str, np.ndarray]:
     coeff_path_raw = env.get("de440_coeff_path")
-    coeff_path = default_de440_coeff_path() if coeff_path_raw is None else Path(str(coeff_path_raw)).expanduser().resolve()
+    coeff_path = (
+        default_de440_coeff_path() if coeff_path_raw is None else Path(str(coeff_path_raw)).expanduser().resolve()
+    )
     eop_path_raw = env.get("de440_eop_path") or env.get("spherical_harmonics_eop_path") or env.get("drag_eop_path")
     eop_path = None if eop_path_raw is None else str(Path(str(eop_path_raw)).expanduser().resolve())
     tai_utc_raw = env.get("de440_tai_utc_s")
-    jd_tdb = jd_utc_to_jd_tdb(float(jd_utc), eop_path=eop_path, tai_utc_s=None if tai_utc_raw is None else float(tai_utc_raw))
+    jd_tdb = jd_utc_to_jd_tdb(
+        float(jd_utc), eop_path=eop_path, tai_utc_s=None if tai_utc_raw is None else float(tai_utc_raw)
+    )
     pos_m = hpop_de440_positions_m(jd_tdb, coeff_path=coeff_path)
     return {k: v / 1e3 for k, v in pos_m.items()}

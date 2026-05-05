@@ -3,8 +3,8 @@ from __future__ import annotations
 import unittest
 
 from sim.config import scenario_config_from_dict
-from sim.runtime_support import _create_rocket_runtime
 from sim.rocket.guidance import MaxQThrottleLimiterGuidance, OpenLoopPitchProgramGuidance, OrbitInsertionCutoffGuidance
+from sim.runtime_support import _create_rocket_runtime
 
 
 class TestRocketGuidanceStack(unittest.TestCase):

@@ -7,7 +7,9 @@ from typing import Any
 import yaml
 
 
-def pointer_form_schema(pointer: dict[str, Any], schemas: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]] | None:
+def pointer_form_schema(
+    pointer: dict[str, Any], schemas: dict[str, list[dict[str, Any]]]
+) -> list[dict[str, Any]] | None:
     class_name = str(pointer.get("class_name", "") or "")
     return schemas.get(class_name)
 

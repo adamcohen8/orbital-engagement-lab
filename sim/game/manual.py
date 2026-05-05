@@ -80,7 +80,9 @@ class ManualGameCommandProvider:
         )
         if float(np.linalg.norm(body_rate_cmd)) > 0.0 and dt > 0.0:
             dq = quaternion_delta_from_body_rate(body_rate_cmd, dt)
-            self._desired_attitude_quat_bn = normalize_quaternion(quaternion_multiply(self._desired_attitude_quat_bn, dq))
+            self._desired_attitude_quat_bn = normalize_quaternion(
+                quaternion_multiply(self._desired_attitude_quat_bn, dq)
+            )
         return np.array(self._desired_attitude_quat_bn, dtype=float)
 
     def __call__(

@@ -3,7 +3,11 @@ import unittest
 import numpy as np
 
 from sim.core.models import StateBelief, StateTruth
-from sim.mission.modules import DefensiveMissionStrategy, DefensiveRICAxisBurnMissionModule, SingleRICAxisBurnMissionModule
+from sim.mission.modules import (
+    DefensiveMissionStrategy,
+    DefensiveRICAxisBurnMissionModule,
+    SingleRICAxisBurnMissionModule,
+)
 
 
 def _truth() -> StateTruth:
@@ -72,7 +76,11 @@ class DefensiveRICAxisMissionTests(unittest.TestCase):
             burn_start_s=0.0,
             burn_duration_s=10.0,
         )
-        kb = StateBelief(state=np.hstack((_truth().position_eci_km, _truth().velocity_eci_km_s)), covariance=np.eye(6), last_update_t_s=0.0)
+        kb = StateBelief(
+            state=np.hstack((_truth().position_eci_km, _truth().velocity_eci_km_s)),
+            covariance=np.eye(6),
+            last_update_t_s=0.0,
+        )
         out = m.update(
             truth=_truth(),
             own_knowledge={"target": kb},
@@ -96,7 +104,11 @@ class DefensiveRICAxisMissionTests(unittest.TestCase):
             burn_duration_s=5.0,
             slew_lead_time_s=10.0,
         )
-        kb = StateBelief(state=np.hstack((_truth().position_eci_km, _truth().velocity_eci_km_s)), covariance=np.eye(6), last_update_t_s=0.0)
+        kb = StateBelief(
+            state=np.hstack((_truth().position_eci_km, _truth().velocity_eci_km_s)),
+            covariance=np.eye(6),
+            last_update_t_s=0.0,
+        )
         out = m.update(
             truth=_truth(),
             own_knowledge={"target": kb},
@@ -119,7 +131,11 @@ class DefensiveRICAxisMissionTests(unittest.TestCase):
             burn_start_s=0.0,
             burn_duration_s=5.0,
         )
-        kb = StateBelief(state=np.hstack((_truth().position_eci_km, _truth().velocity_eci_km_s)), covariance=np.eye(6), last_update_t_s=0.0)
+        kb = StateBelief(
+            state=np.hstack((_truth().position_eci_km, _truth().velocity_eci_km_s)),
+            covariance=np.eye(6),
+            last_update_t_s=0.0,
+        )
         out = m.update(
             truth=_truth(),
             own_knowledge={"target": kb},

@@ -6,7 +6,12 @@ from typing import Any, Callable
 
 import numpy as np
 
-from sim.config import SimulationScenarioConfig, load_simulation_yaml, scenario_config_from_dict, validate_scenario_plugins
+from sim.config import (
+    SimulationScenarioConfig,
+    load_simulation_yaml,
+    scenario_config_from_dict,
+    validate_scenario_plugins,
+)
 from sim.execution import create_single_run_engine, run_simulation_scenario
 
 
@@ -45,12 +50,12 @@ class SimulationConfig:
     source_path: Path | None = None
 
     @classmethod
-    def from_yaml(cls, path: str | Path) -> "SimulationConfig":
+    def from_yaml(cls, path: str | Path) -> SimulationConfig:
         resolved = Path(path).expanduser().resolve()
         return cls(scenario=load_simulation_yaml(resolved), source_path=resolved)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "SimulationConfig":
+    def from_dict(cls, data: dict[str, Any]) -> SimulationConfig:
         return cls(scenario=scenario_config_from_dict(dict(data)))
 
     @property
@@ -63,7 +68,7 @@ class SimulationConfig:
     def to_scenario_config(self) -> SimulationScenarioConfig:
         return self.scenario
 
-    def with_seed(self, seed: int) -> "SimulationConfig":
+    def with_seed(self, seed: int) -> SimulationConfig:
         root = self.to_dict()
         root.setdefault("metadata", {})["seed"] = int(seed)
         return SimulationConfig(
@@ -193,8 +198,16 @@ class SimulationResult:
         if step_index < 0 or step_index >= self.num_steps:
             raise IndexError(f"step_index {step_index} is out of range for {self.num_steps} samples.")
 
-        truth = {oid: np.array(hist[step_index], dtype=float) for oid, hist in self.truth.items() if hist.shape[0] > step_index}
-        belief = {oid: np.array(hist[step_index], dtype=float) for oid, hist in self.belief.items() if hist.shape[0] > step_index}
+        truth = {
+            oid: np.array(hist[step_index], dtype=float)
+            for oid, hist in self.truth.items()
+            if hist.shape[0] > step_index
+        }
+        belief = {
+            oid: np.array(hist[step_index], dtype=float)
+            for oid, hist in self.belief.items()
+            if hist.shape[0] > step_index
+        }
         thrust = {
             oid: np.array(hist[step_index], dtype=float)
             for oid, hist in self.applied_thrust.items()
@@ -226,11 +239,11 @@ class SimulationSession:
         self._external_intent_providers: dict[str, Callable[..., dict[str, Any] | None]] = {}
 
     @classmethod
-    def from_config(cls, config: SimulationConfig | SimulationScenarioConfig | dict[str, Any]) -> "SimulationSession":
+    def from_config(cls, config: SimulationConfig | SimulationScenarioConfig | dict[str, Any]) -> SimulationSession:
         return cls(config)
 
     @classmethod
-    def from_yaml(cls, path: str | Path) -> "SimulationSession":
+    def from_yaml(cls, path: str | Path) -> SimulationSession:
         return cls(SimulationConfig.from_yaml(path))
 
     @staticmethod

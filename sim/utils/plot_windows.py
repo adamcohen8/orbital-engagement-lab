@@ -5,7 +5,9 @@ import numpy as np
 RIC_FOLLOW_MARGIN = 1.38
 
 
-def attitude_axis_limits(frame: str, lim: float) -> tuple[tuple[float, float], tuple[float, float], tuple[float, float]]:
+def attitude_axis_limits(
+    frame: str, lim: float
+) -> tuple[tuple[float, float], tuple[float, float], tuple[float, float]]:
     axis_lim = float(max(lim, 1e-9))
     if str(frame).strip().lower() == "ric":
         return (axis_lim, -axis_lim), (-axis_lim, axis_lim), (-axis_lim, axis_lim)
@@ -64,7 +66,4 @@ def windows_from_points(
             continue
         for out_idx, axis_idx in enumerate(axis_indices):
             axis_values[out_idx].append(np.array([arr[axis_idx]], dtype=float))
-    return [
-        axis_window_from_values(values, min_span=min_span, margin=margin)
-        for values in axis_values
-    ]
+    return [axis_window_from_values(values, min_span=min_span, margin=margin) for values in axis_values]

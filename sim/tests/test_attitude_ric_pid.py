@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 
-from sim.control.attitude import RICFramePIDController, ReactionWheelPIDController
+from sim.control.attitude import ReactionWheelPIDController, RICFramePIDController
 from sim.core.models import StateBelief
 from sim.utils.frames import ric_dcm_ir_from_rv
 from sim.utils.quaternion import dcm_to_quaternion_bn

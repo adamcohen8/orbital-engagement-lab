@@ -19,7 +19,9 @@ class TestReactionWheelPDController(unittest.TestCase):
         belief = StateBelief(state=state, covariance=np.eye(13), last_update_t_s=0.0)
         cmd = ctrl.act(belief, t_s=0.0, budget_ms=1.0)
         self.assertTrue(np.allclose(cmd.torque_body_nm, np.zeros(3), atol=1e-12))
-        self.assertTrue(np.allclose(np.array(cmd.mode_flags["wheel_torque_cmd_nm"], dtype=float), np.zeros(3), atol=1e-12))
+        self.assertTrue(
+            np.allclose(np.array(cmd.mode_flags["wheel_torque_cmd_nm"], dtype=float), np.zeros(3), atol=1e-12)
+        )
         self.assertEqual(cmd.mode_flags["mode"], "rw_pd")
 
     def test_saturates_per_wheel_and_supports_general_mounting(self):

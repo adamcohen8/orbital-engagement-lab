@@ -18,14 +18,6 @@ from machine_learning.gym_env import (
     make_env_fn,
     make_vector_env,
 )
-from machine_learning.training_adapter import (
-    MultiAgentRolloutBatch,
-    RolloutBatch,
-    build_sb3_env_fns,
-    collect_multi_agent_rollout,
-    collect_vector_rollout,
-    make_sb3_vec_env,
-)
 from machine_learning.self_play import (
     LinearPolicy,
     OpponentPool,
@@ -33,6 +25,14 @@ from machine_learning.self_play import (
     evaluate_self_play_policies,
     run_self_play_training,
     summarize_multi_agent_batch,
+)
+from machine_learning.training_adapter import (
+    MultiAgentRolloutBatch,
+    RolloutBatch,
+    build_sb3_env_fns,
+    collect_multi_agent_rollout,
+    collect_vector_rollout,
+    make_sb3_vec_env,
 )
 
 __all__ = [

@@ -3,7 +3,13 @@ import unittest
 import numpy as np
 
 from sim.core.models import Command, StateBelief, StateTruth
-from sim.mission.modules import BudgetedEndStateExecution, ControllerPointingExecution, DesiredStateMissionStrategy, IntegratedCommandExecution, PredictiveBurnExecution
+from sim.mission.modules import (
+    BudgetedEndStateExecution,
+    ControllerPointingExecution,
+    DesiredStateMissionStrategy,
+    IntegratedCommandExecution,
+    PredictiveBurnExecution,
+)
 from sim.utils.quaternion import quaternion_to_dcm_bn
 
 
@@ -46,15 +52,23 @@ class MissionArchitectureMigrationTests(unittest.TestCase):
             desired_velocity_eci_km_s=np.array([0.1, 7.4, 0.0]),
         )
         out = s.update(own_knowledge={}, world_truth={})
-        self.assertTrue(np.allclose(np.array(out["desired_state_eci_6"], dtype=float), np.array([7100.0, 1.0, 2.0, 0.1, 7.4, 0.0])))
+        self.assertTrue(
+            np.allclose(np.array(out["desired_state_eci_6"], dtype=float), np.array([7100.0, 1.0, 2.0, 0.1, 7.4, 0.0]))
+        )
 
     def test_integrated_command_execution_consumes_desired_state_intent(self) -> None:
         e = IntegratedCommandExecution(alignment_tolerance_deg=180.0)
         controller = _ConstantOrbitController([1.0e-5, 0.0, 0.0])
         att = _ZeroAttitudeController()
         truth = _truth()
-        orb_belief = StateBelief(state=np.hstack((truth.position_eci_km, truth.velocity_eci_km_s)), covariance=np.eye(6), last_update_t_s=0.0)
-        att_belief = StateBelief(state=np.hstack((truth.attitude_quat_bn, truth.angular_rate_body_rad_s)), covariance=np.eye(7), last_update_t_s=0.0)
+        orb_belief = StateBelief(
+            state=np.hstack((truth.position_eci_km, truth.velocity_eci_km_s)), covariance=np.eye(6), last_update_t_s=0.0
+        )
+        att_belief = StateBelief(
+            state=np.hstack((truth.attitude_quat_bn, truth.angular_rate_body_rad_s)),
+            covariance=np.eye(7),
+            last_update_t_s=0.0,
+        )
         out = e.update(
             intent={"desired_state_eci_6": np.array([7100.0, 0.0, 0.0, 0.0, 7.4, 0.0])},
             truth=truth,
@@ -65,7 +79,9 @@ class MissionArchitectureMigrationTests(unittest.TestCase):
             t_s=0.0,
             env={"attitude_disabled": False},
         )
-        self.assertTrue(np.allclose(np.array(controller.target_state, dtype=float), np.array([7100.0, 0.0, 0.0, 0.0, 7.4, 0.0])))
+        self.assertTrue(
+            np.allclose(np.array(controller.target_state, dtype=float), np.array([7100.0, 0.0, 0.0, 0.0, 7.4, 0.0]))
+        )
         self.assertGreater(float(np.linalg.norm(np.array(out["thrust_eci_km_s2"], dtype=float))), 0.0)
 
     def test_budgeted_end_state_execution_reduces_delta_v_budget(self) -> None:
@@ -158,8 +174,14 @@ class MissionArchitectureMigrationTests(unittest.TestCase):
         controller = _ConstantOrbitController([1.0e-5, 0.0, 0.0])
         att = _ZeroAttitudeController()
         truth = _truth()
-        orb_belief = StateBelief(state=np.hstack((truth.position_eci_km, truth.velocity_eci_km_s)), covariance=np.eye(6), last_update_t_s=0.0)
-        att_belief = StateBelief(state=np.hstack((truth.attitude_quat_bn, truth.angular_rate_body_rad_s)), covariance=np.eye(7), last_update_t_s=0.0)
+        orb_belief = StateBelief(
+            state=np.hstack((truth.position_eci_km, truth.velocity_eci_km_s)), covariance=np.eye(6), last_update_t_s=0.0
+        )
+        att_belief = StateBelief(
+            state=np.hstack((truth.attitude_quat_bn, truth.angular_rate_body_rad_s)),
+            covariance=np.eye(7),
+            last_update_t_s=0.0,
+        )
 
         out = e.update(
             intent={},

@@ -43,7 +43,9 @@ class TestRocketMissionSplit(unittest.TestCase):
         self.assertEqual(out["mission_mode"]["orbital_goal"], "pursuit")
 
     def test_rocket_predefined_strategy_reports_goal(self):
-        out = RocketPredefinedOrbitMissionStrategy(predef_target_alt_km=500.0, predef_target_ecc=0.01).update(truth=_truth())
+        out = RocketPredefinedOrbitMissionStrategy(predef_target_alt_km=500.0, predef_target_ecc=0.01).update(
+            truth=_truth()
+        )
         self.assertEqual(out["orbital_goal"], "predefined_orbit")
         self.assertEqual(out["predefined_orbit_goal"]["target_alt_km"], 500.0)
         self.assertEqual(out["predefined_orbit_goal"]["target_ecc"], 0.01)

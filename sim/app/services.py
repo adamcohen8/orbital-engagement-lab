@@ -1,14 +1,11 @@
 from __future__ import annotations
 
 import importlib
-from pathlib import Path
 import time
+from pathlib import Path
 from typing import Any
 
-from sim.app.models import ConfigSummary
-from sim.app.models import AnalysisUiProfile
-from sim.app.models import GuiCapabilities
-from sim.app.models import RunResult
+from sim.api import SimulationSession
 from sim.app.io import (
     CONFIG_DIR,
     DEFAULT_CONFIG_PATH,
@@ -25,7 +22,7 @@ from sim.app.io import (
     save_config_dict,
     validate_config_dict,
 )
-from sim.api import SimulationSession
+from sim.app.models import AnalysisUiProfile, ConfigSummary, GuiCapabilities, RunResult
 from sim.config import enabled_object_ids
 from sim.config.scenario_yaml import SimulationScenarioConfig
 from sim.master_outputs import AVAILABLE_ANIMATION_TYPES, AVAILABLE_FIGURE_IDS
@@ -98,7 +95,12 @@ PARAMETER_FORM_SCHEMAS: dict[str, list[dict[str, Any]]] = {
         {"key": "max_accel_km_s2", "label": "Max Accel (km/s^2)", "kind": "float"},
         {"key": "horizon_steps", "label": "Horizon Steps", "kind": "int"},
         {"key": "step_dt_s", "label": "Step dt (s)", "kind": "float"},
-        {"key": "gradient_method", "label": "Gradient Method", "kind": "choice", "options": ["spsa", "finite_difference"]},
+        {
+            "key": "gradient_method",
+            "label": "Gradient Method",
+            "kind": "choice",
+            "options": ["spsa", "finite_difference"],
+        },
         {"key": "max_iterations", "label": "Max Iterations", "kind": "int"},
         {"key": "target_rel_ric_rect", "label": "Target Rel RIC Rect", "kind": "vector", "length": 6},
         {"key": "q_weights", "label": "Q Weights", "kind": "vector", "length": 6},
@@ -111,7 +113,12 @@ PARAMETER_FORM_SCHEMAS: dict[str, list[dict[str, Any]]] = {
         {"key": "horizon_time_s", "label": "Horizon Time (s)", "kind": "float"},
         {"key": "default_model_dt_s", "label": "Default Model dt (s)", "kind": "float"},
         {"key": "model_dt_s", "label": "Model dt (s)", "kind": "optional_float"},
-        {"key": "gradient_method", "label": "Gradient Method", "kind": "choice", "options": ["spsa", "finite_difference"]},
+        {
+            "key": "gradient_method",
+            "label": "Gradient Method",
+            "kind": "choice",
+            "options": ["spsa", "finite_difference"],
+        },
         {"key": "max_iterations", "label": "Max Iterations", "kind": "int"},
         {"key": "target_rel_ric_rect", "label": "Target Rel RIC Rect", "kind": "vector", "length": 6},
         {"key": "q_weights", "label": "Q Weights", "kind": "vector", "length": 6},
@@ -124,7 +131,12 @@ PARAMETER_FORM_SCHEMAS: dict[str, list[dict[str, Any]]] = {
         {"key": "horizon_time_s", "label": "Horizon Time (s)", "kind": "float"},
         {"key": "default_model_dt_s", "label": "Default Model dt (s)", "kind": "float"},
         {"key": "model_dt_s", "label": "Model dt (s)", "kind": "optional_float"},
-        {"key": "gradient_method", "label": "Gradient Method", "kind": "choice", "options": ["spsa", "finite_difference"]},
+        {
+            "key": "gradient_method",
+            "label": "Gradient Method",
+            "kind": "choice",
+            "options": ["spsa", "finite_difference"],
+        },
         {"key": "max_iterations", "label": "Max Iterations", "kind": "int"},
         {"key": "target_rel_ric_rect", "label": "Target Rel RIC Rect", "kind": "vector", "length": 6},
         {"key": "q_weights", "label": "Q Weights", "kind": "vector", "length": 6},
@@ -156,7 +168,12 @@ PARAMETER_FORM_SCHEMAS: dict[str, list[dict[str, Any]]] = {
         {"key": "rng_seed", "label": "RNG Seed", "kind": "int"},
     ],
     "RocketMissionModule": [
-        {"key": "launch_mode", "label": "Launch Mode", "kind": "choice", "options": ["go_now", "go_when_possible", "wait_optimal_window"]},
+        {
+            "key": "launch_mode",
+            "label": "Launch Mode",
+            "kind": "choice",
+            "options": ["go_now", "go_when_possible", "wait_optimal_window"],
+        },
         {"key": "orbital_goal", "label": "Orbital Goal", "kind": "choice", "options": ["pursuit", "predefined_orbit"]},
         {"key": "target_id", "label": "Target ID", "kind": "string"},
         {"key": "go_when_possible_margin_m_s", "label": "Go Margin (m/s)", "kind": "float"},
@@ -166,8 +183,18 @@ PARAMETER_FORM_SCHEMAS: dict[str, list[dict[str, Any]]] = {
         {"key": "predef_target_ecc", "label": "Predef Target Ecc", "kind": "float"},
     ],
     "SatelliteMissionModule": [
-        {"key": "orbital_mode", "label": "Orbital Mode", "kind": "choice", "options": ["coast", "pursuit_knowledge", "evade_knowledge", "pursuit_blind", "evade_blind"]},
-        {"key": "attitude_mode", "label": "Attitude Mode", "kind": "choice", "options": ["hold_eci", "hold_ric", "spotlight", "sun_track", "pursuit", "evade", "sensing"]},
+        {
+            "key": "orbital_mode",
+            "label": "Orbital Mode",
+            "kind": "choice",
+            "options": ["coast", "pursuit_knowledge", "evade_knowledge", "pursuit_blind", "evade_blind"],
+        },
+        {
+            "key": "attitude_mode",
+            "label": "Attitude Mode",
+            "kind": "choice",
+            "options": ["hold_eci", "hold_ric", "spotlight", "sun_track", "pursuit", "evade", "sensing"],
+        },
         {"key": "target_id", "label": "Target ID", "kind": "string"},
         {"key": "max_accel_km_s2", "label": "Max Accel (km/s^2)", "kind": "float"},
         {"key": "blind_direction_eci", "label": "Blind Direction ECI", "kind": "vector", "length": 3},
@@ -195,7 +222,12 @@ PARAMETER_FORM_SCHEMAS: dict[str, list[dict[str, Any]]] = {
         {"key": "align_to_thrust", "label": "Align To Thrust", "kind": "bool"},
     ],
     "HoldMissionStrategy": [
-        {"key": "attitude_mode", "label": "Attitude Mode", "kind": "choice", "options": ["hold_eci", "hold_ric", "sun_track", "spotlight", "sensing"]},
+        {
+            "key": "attitude_mode",
+            "label": "Attitude Mode",
+            "kind": "choice",
+            "options": ["hold_eci", "hold_ric", "sun_track", "spotlight", "sensing"],
+        },
         {"key": "target_id", "label": "Target ID", "kind": "string"},
         {"key": "use_knowledge_for_targeting", "label": "Use Knowledge", "kind": "bool"},
         {"key": "hold_quat_bn", "label": "Hold Quaternion BN", "kind": "vector", "length": 4},
@@ -213,7 +245,12 @@ PARAMETER_FORM_SCHEMAS: dict[str, list[dict[str, Any]]] = {
     ],
     "DesiredStateMissionStrategy": [
         {"key": "target_id", "label": "Target ID", "kind": "string"},
-        {"key": "desired_state_source", "label": "Desired State Source", "kind": "choice", "options": ["target", "explicit"]},
+        {
+            "key": "desired_state_source",
+            "label": "Desired State Source",
+            "kind": "choice",
+            "options": ["target", "explicit"],
+        },
         {"key": "use_knowledge_for_targeting", "label": "Use Knowledge", "kind": "bool"},
         {"key": "desired_position_eci_km", "label": "Desired Position ECI", "kind": "vector", "length": 3},
         {"key": "desired_velocity_eci_km_s", "label": "Desired Velocity ECI", "kind": "vector", "length": 3},
@@ -240,19 +277,34 @@ PARAMETER_FORM_SCHEMAS: dict[str, list[dict[str, Any]]] = {
     ],
     "DefensiveMissionStrategy": [
         {"key": "chaser_id", "label": "Chaser ID", "kind": "string"},
-        {"key": "defense_mode", "label": "Defense Mode", "kind": "choice", "options": ["fixed_ric_axis", "away_from_chaser"]},
+        {
+            "key": "defense_mode",
+            "label": "Defense Mode",
+            "kind": "choice",
+            "options": ["fixed_ric_axis", "away_from_chaser"],
+        },
         {"key": "axis_mode", "label": "Axis Mode", "kind": "choice", "options": ["+R", "-R", "+I", "-I", "+C", "-C"]},
         {"key": "burn_accel_km_s2", "label": "Burn Accel (km/s^2)", "kind": "float"},
         {"key": "require_finite_knowledge", "label": "Require Finite Knowledge", "kind": "bool"},
         {"key": "align_to_thrust", "label": "Align To Thrust", "kind": "bool"},
     ],
     "SafeHoldMissionStrategy": [
-        {"key": "attitude_mode", "label": "Attitude Mode", "kind": "choice", "options": ["hold_current", "hold_eci", "sun_track"]},
+        {
+            "key": "attitude_mode",
+            "label": "Attitude Mode",
+            "kind": "choice",
+            "options": ["hold_current", "hold_eci", "sun_track"],
+        },
         {"key": "hold_quat_bn", "label": "Hold Quaternion BN", "kind": "vector", "length": 4},
         {"key": "boresight_body", "label": "Boresight Body", "kind": "vector", "length": 3},
     ],
     "RocketMissionStrategy": [
-        {"key": "launch_mode", "label": "Launch Mode", "kind": "choice", "options": ["go_now", "go_when_possible", "wait_optimal_window"]},
+        {
+            "key": "launch_mode",
+            "label": "Launch Mode",
+            "kind": "choice",
+            "options": ["go_now", "go_when_possible", "wait_optimal_window"],
+        },
         {"key": "orbital_goal", "label": "Orbital Goal", "kind": "choice", "options": ["pursuit", "predefined_orbit"]},
         {"key": "target_id", "label": "Target ID", "kind": "string"},
         {"key": "go_when_possible_margin_m_s", "label": "Go Margin (m/s)", "kind": "float"},
@@ -308,7 +360,12 @@ PARAMETER_FORM_SCHEMAS: dict[str, list[dict[str, Any]]] = {
         {"key": "attitude_controller_budget_ms", "label": "Attitude Budget (ms)", "kind": "float"},
     ],
     "BudgetedEndStateExecution": [
-        {"key": "strategy", "label": "Maneuver Strategy", "kind": "choice", "options": ["thrust_limited", "burn_all", "attitude_only"]},
+        {
+            "key": "strategy",
+            "label": "Maneuver Strategy",
+            "kind": "choice",
+            "options": ["thrust_limited", "burn_all", "attitude_only"],
+        },
         {"key": "max_thrust_n", "label": "Max Thrust (N)", "kind": "float"},
         {"key": "min_thrust_n", "label": "Min Thrust (N)", "kind": "float"},
         {"key": "burn_dt_s", "label": "Burn dt (s)", "kind": "float"},
@@ -456,11 +513,7 @@ def _discover_pointer_options(
 def _discover_named_presets(module_name: str, type_name: str) -> list[str]:
     module = importlib.import_module(module_name)
     preset_type = getattr(module, type_name)
-    names = [
-        name
-        for name, value in vars(module).items()
-        if name.isupper() and isinstance(value, preset_type)
-    ]
+    names = [name for name, value in vars(module).items() if name.isupper() and isinstance(value, preset_type)]
     return sorted(names)
 
 
@@ -502,10 +555,18 @@ def get_gui_capabilities() -> GuiCapabilities:
                     ("Zero Controller", "sim.control.orbit.zero_controller", "ZeroController"),
                     ("HCW LQR", "sim.control.orbit.lqr", "HCWLQRController"),
                     ("HCW LQR (No Radial Burn)", "sim.control.orbit.lqr_no_radial", "HCWNoRadialLQRController"),
-                    ("HCW Manual Gain (No Radial Burn)", "sim.control.orbit.lqr_no_radial", "HCWNoRadialManualController"),
+                    (
+                        "HCW Manual Gain (No Radial Burn)",
+                        "sim.control.orbit.lqr_no_radial",
+                        "HCWNoRadialManualController",
+                    ),
                     ("Relative Orbit MPC", "sim.control.orbit.relative_mpc", "RelativeOrbitMPCController"),
                     ("HCW Relative MPC", "sim.control.orbit.hcw_mpc", "HCWRelativeOrbitMPCController"),
-                    ("HCW Relative MPC (In/Cross Track Only)", "sim.control.orbit.hcw_mpc", "HCWInTrackCrossTrackMPCController"),
+                    (
+                        "HCW Relative MPC (In/Cross Track Only)",
+                        "sim.control.orbit.hcw_mpc",
+                        "HCWInTrackCrossTrackMPCController",
+                    ),
                     ("Stationkeeping", "sim.control.orbit.baseline", "StationkeepingController"),
                 ]
             ),

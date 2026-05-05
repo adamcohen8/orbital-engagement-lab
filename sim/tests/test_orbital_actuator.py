@@ -47,7 +47,9 @@ class TestOrbitalActuator(unittest.TestCase):
 
         out = actuator.apply(command, limits, dt_s=1.0)
 
-        self.assertTrue(np.allclose(np.array(out.thrust_eci_km_s2, dtype=float), np.array([0.001, 0.0, 0.0], dtype=float)))
+        self.assertTrue(
+            np.allclose(np.array(out.thrust_eci_km_s2, dtype=float), np.array([0.001, 0.0, 0.0], dtype=float))
+        )
         self.assertAlmostEqual(float(out.mode_flags["effective_max_accel_km_s2"]), 0.001, places=12)
 
     def test_orbital_actuator_couples_applied_thrust_to_current_attitude(self):
@@ -70,7 +72,9 @@ class TestOrbitalActuator(unittest.TestCase):
 
         out = actuator.apply(command, limits, dt_s=1.0)
 
-        self.assertTrue(np.allclose(np.array(out.thrust_eci_km_s2, dtype=float), np.array([0.0, 0.0, -0.002], dtype=float)))
+        self.assertTrue(
+            np.allclose(np.array(out.thrust_eci_km_s2, dtype=float), np.array([0.0, 0.0, -0.002], dtype=float))
+        )
 
     def test_orbital_actuator_adds_thruster_mount_torque(self):
         actuator = OrbitalActuator()

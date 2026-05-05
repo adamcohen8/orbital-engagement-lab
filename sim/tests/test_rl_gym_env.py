@@ -7,11 +7,10 @@ import numpy as np
 from machine_learning import (
     ActionField,
     AsyncVectorSimulationEnv,
-    collect_multi_agent_rollout,
-    collect_vector_rollout,
     DirectActionAdapter,
     GymEnvConfig,
     GymSimulationEnv,
+    LinearPolicy,
     MultiAgentEnvConfig,
     MultiAgentSimulationEnv,
     ObservationField,
@@ -21,7 +20,8 @@ from machine_learning import (
     SyncVectorSimulationEnv,
     ThrustVectorToPointingAdapter,
     VectorEnvConfig,
-    LinearPolicy,
+    collect_multi_agent_rollout,
+    collect_vector_rollout,
     make_sb3_vec_env,
     make_vector_env,
     run_self_play_training,
@@ -326,8 +326,12 @@ class TestGymSimulationEnv(unittest.TestCase):
         result = run_self_play_training(
             env,
             policies_by_agent={
-                "chaser": LinearPolicy.random(obs_dim=int(obs["chaser"].size), action_dim=1, rng=np.random.default_rng(1)),
-                "target": LinearPolicy.random(obs_dim=int(obs["target"].size), action_dim=1, rng=np.random.default_rng(2)),
+                "chaser": LinearPolicy.random(
+                    obs_dim=int(obs["chaser"].size), action_dim=1, rng=np.random.default_rng(1)
+                ),
+                "target": LinearPolicy.random(
+                    obs_dim=int(obs["target"].size), action_dim=1, rng=np.random.default_rng(2)
+                ),
             },
             trainer_cfg=SelfPlayTrainerConfig(
                 update_mode="alternating",

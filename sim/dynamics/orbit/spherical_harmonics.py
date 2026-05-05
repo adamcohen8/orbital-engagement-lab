@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import math
+import urllib.request
 from dataclasses import dataclass
 from functools import lru_cache
-import math
 from pathlib import Path
-import urllib.request
 
 import numpy as np
 
@@ -307,7 +307,10 @@ def configure_spherical_harmonics_env(base_env: dict | None, orbit_cfg: dict | N
         env["drag_earth_rotation_rad_s"] = float(orbit["drag_earth_rotation_rad_s"])
     if not bool(sh.get("enabled", False)):
         if str(env.get("drag_frame_model", "")).strip().lower() == "hpop_like" and env.get("drag_eop_path") is None:
-            default_eop = Path(__file__).resolve().parents[3] / "validation/High Precision Orbit Propagator_4-2/High Precision Orbit Propagator_4.2.2/EOP-All.txt"
+            default_eop = (
+                Path(__file__).resolve().parents[3]
+                / "validation/High Precision Orbit Propagator_4-2/High Precision Orbit Propagator_4.2.2/EOP-All.txt"
+            )
             env["drag_eop_path"] = str(default_eop.resolve())
         return env
 
@@ -320,7 +323,9 @@ def configure_spherical_harmonics_env(base_env: dict | None, orbit_cfg: dict | N
 
     if source in {"hpop", "hpop_ggm03", "ggm03"}:
         coeff_path_raw = sh.get("coeff_path") or sh.get("source_path")
-        coeff_path = default_hpop_ggm03_coeff_path() if coeff_path_raw in (None, "") else Path(str(coeff_path_raw)).expanduser()
+        coeff_path = (
+            default_hpop_ggm03_coeff_path() if coeff_path_raw in (None, "") else Path(str(coeff_path_raw)).expanduser()
+        )
         if not coeff_path.is_absolute():
             coeff_path = Path(__file__).resolve().parents[3] / coeff_path
         if coeff_path_raw in (None, "") and not coeff_path.exists():
@@ -339,7 +344,10 @@ def configure_spherical_harmonics_env(base_env: dict | None, orbit_cfg: dict | N
         env["spherical_harmonics_source"] = str(coeff_path.resolve())
         env["spherical_harmonics_reference_radius_km"] = float(sh.get("reference_radius_km", 6378.1363))
         env["spherical_harmonics_frame_model"] = str(sh.get("frame_model", "hpop_like"))
-        eop_path_raw = sh.get("eop_path") or "validation/High Precision Orbit Propagator_4-2/High Precision Orbit Propagator_4.2.2/EOP-All.txt"
+        eop_path_raw = (
+            sh.get("eop_path")
+            or "validation/High Precision Orbit Propagator_4-2/High Precision Orbit Propagator_4.2.2/EOP-All.txt"
+        )
         eop_path = Path(str(eop_path_raw)).expanduser()
         if not eop_path.is_absolute():
             eop_path = Path(__file__).resolve().parents[3] / eop_path
@@ -362,7 +370,10 @@ def configure_spherical_harmonics_env(base_env: dict | None, orbit_cfg: dict | N
         if env.get("spherical_harmonics_eop_path") is not None:
             env["drag_eop_path"] = str(env["spherical_harmonics_eop_path"])
         else:
-            default_eop = Path(__file__).resolve().parents[3] / "validation/High Precision Orbit Propagator_4-2/High Precision Orbit Propagator_4.2.2/EOP-All.txt"
+            default_eop = (
+                Path(__file__).resolve().parents[3]
+                / "validation/High Precision Orbit Propagator_4-2/High Precision Orbit Propagator_4.2.2/EOP-All.txt"
+            )
             env["drag_eop_path"] = str(default_eop.resolve())
     return env
 
@@ -370,11 +381,7 @@ def configure_spherical_harmonics_env(base_env: dict | None, orbit_cfg: dict | N
 def _fully_normalized_legendre_scale(n: int, m: int) -> float:
     # sqrt((2-delta_0m)*(2n+1)*(n-m)!/(n+m)!)
     delta = 1.0 if m == 0 else 0.0
-    log_scale = (
-        math.log((2.0 - delta) * (2.0 * n + 1.0))
-        + math.lgamma(n - m + 1.0)
-        - math.lgamma(n + m + 1.0)
-    )
+    log_scale = math.log((2.0 - delta) * (2.0 * n + 1.0)) + math.lgamma(n - m + 1.0) - math.lgamma(n + m + 1.0)
     return float(math.exp(0.5 * log_scale))
 
 
@@ -453,9 +460,7 @@ def load_icgem_gfc_terms(
             )
 
     if not out:
-        raise ValueError(
-            f"No usable spherical harmonic terms found in {path} for n<= {n_max}, m<= {m_max}."
-        )
+        raise ValueError(f"No usable spherical harmonic terms found in {path} for n<= {n_max}, m<= {m_max}.")
     return out
 
 

@@ -10,6 +10,9 @@ from sim.dynamics.orbit.frames import ecef_to_eci
 from sim.utils.frames import ric_dcm_ir_from_rv
 from sim.utils.quaternion import dcm_to_quaternion_bn, quaternion_to_dcm_bn
 
+_DEFAULT_PANEL_NORMAL_BODY = np.array([0.0, 0.0, 1.0])
+_DEFAULT_BORESIGHT_BODY = np.array([1.0, 0.0, 0.0])
+
 
 def _unit(v: np.ndarray, eps: float = 1e-12) -> np.ndarray:
     x = np.array(v, dtype=float).reshape(3)
@@ -89,7 +92,7 @@ class PoseCommandGenerator:
     def sun_track(
         truth: StateTruth,
         sun_dir_eci: np.ndarray,
-        panel_normal_body: np.ndarray = np.array([0.0, 0.0, 1.0]),
+        panel_normal_body: np.ndarray | None = None,
         panel_tangent_body: np.ndarray | None = None,
     ) -> np.ndarray:
         """
@@ -97,7 +100,10 @@ class PoseCommandGenerator:
         """
         return _attitude_quat_align_primary(
             truth=truth,
-            primary_axis_body=np.array(panel_normal_body, dtype=float),
+            primary_axis_body=np.array(
+                _DEFAULT_PANEL_NORMAL_BODY if panel_normal_body is None else panel_normal_body,
+                dtype=float,
+            ),
             target_axis_eci=np.array(sun_dir_eci, dtype=float),
             secondary_axis_body=None if panel_tangent_body is None else np.array(panel_tangent_body, dtype=float),
             secondary_axis_eci_hint=None,
@@ -109,7 +115,7 @@ class PoseCommandGenerator:
         latitude_deg: float,
         longitude_deg: float,
         altitude_km: float = 0.0,
-        boresight_body: np.ndarray = np.array([1.0, 0.0, 0.0]),
+        boresight_body: np.ndarray | None = None,
         up_body: np.ndarray | None = None,
     ) -> np.ndarray:
         """
@@ -130,7 +136,9 @@ class PoseCommandGenerator:
         los_eci = r_target_eci - np.array(truth.position_eci_km, dtype=float)
         return _attitude_quat_align_primary(
             truth=truth,
-            primary_axis_body=np.array(boresight_body, dtype=float),
+            primary_axis_body=np.array(
+                _DEFAULT_BORESIGHT_BODY if boresight_body is None else boresight_body, dtype=float
+            ),
             target_axis_eci=los_eci,
             secondary_axis_body=None if up_body is None else np.array(up_body, dtype=float),
             secondary_axis_eci_hint=None,
@@ -140,7 +148,7 @@ class PoseCommandGenerator:
     def spotlight_ric_direction(
         truth: StateTruth,
         ric_direction: np.ndarray,
-        boresight_body: np.ndarray = np.array([1.0, 0.0, 0.0]),
+        boresight_body: np.ndarray | None = None,
         up_body: np.ndarray | None = None,
     ) -> np.ndarray:
         """
@@ -151,7 +159,9 @@ class PoseCommandGenerator:
         d_eci = c_ir @ d_ric
         return _attitude_quat_align_primary(
             truth=truth,
-            primary_axis_body=np.array(boresight_body, dtype=float),
+            primary_axis_body=np.array(
+                _DEFAULT_BORESIGHT_BODY if boresight_body is None else boresight_body, dtype=float
+            ),
             target_axis_eci=d_eci,
             secondary_axis_body=None if up_body is None else np.array(up_body, dtype=float),
             secondary_axis_eci_hint=None,

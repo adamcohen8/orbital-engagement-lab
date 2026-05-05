@@ -2,43 +2,51 @@ from __future__ import annotations
 
 import copy
 import json
-from pathlib import Path
 import tempfile
-import yaml
+from pathlib import Path
 
-from PySide6.QtCore import QEvent, QObject, QThread, Qt, QUrl, Signal
+import yaml
+from PySide6.QtCore import QEvent, QObject, Qt, QThread, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QPixmap, QTextCursor
 from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
+    QDoubleSpinBox,
     QFileDialog,
-    QFrame,
     QFormLayout,
-    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QListWidget,
     QMainWindow,
     QMessageBox,
-    QPushButton,
     QPlainTextEdit,
-    QCheckBox,
+    QPushButton,
     QScrollArea,
-    QStackedWidget,
-    QSplitter,
     QSpinBox,
-    QDoubleSpinBox,
+    QSplitter,
     QStatusBar,
     QTabWidget,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
-    QComboBox,
 )
 
+from sim.app.gui_config_adapter import GUI_CONFIG_ADAPTER
+from sim.app.models import AnalysisUiProfile
+from sim.app.pointer_utils import (
+    default_params_for_pointer,
+    format_vector_text,
+    format_yaml_text,
+    normalize_form_value,
+    parse_vector_text,
+    parse_yaml_text,
+    pointer_display_name,
+    pointer_form_schema,
+)
 from sim.app.services import (
     dump_config_text,
     get_default_config_path,
@@ -52,18 +60,7 @@ from sim.app.services import (
     save_config,
     validate_config,
 )
-from sim.app.models import AnalysisUiProfile
-from sim.app.gui_config_adapter import GUI_CONFIG_ADAPTER
-from sim.app.pointer_utils import (
-    default_params_for_pointer,
-    format_vector_text,
-    format_yaml_text,
-    normalize_form_value,
-    parse_vector_text,
-    parse_yaml_text,
-    pointer_display_name,
-    pointer_form_schema,
-)
+from sim.dynamics.orbit.tle import parse_tle_lines
 from sim.gui.sections import (
     build_builder_tab,
     build_monte_carlo_tab,
@@ -73,8 +70,6 @@ from sim.gui.sections import (
     build_scenario_tab,
     build_yaml_tab,
 )
-from sim.dynamics.orbit.tle import parse_tle_lines
-
 
 GUI_CAPABILITIES = get_gui_capabilities()
 OUTPUT_MODES = GUI_CAPABILITIES.output_modes
@@ -398,9 +393,7 @@ class MainWindow(QMainWindow):
             signal = getattr(widget, "textChanged", None)
             if signal is not None:
                 signal.connect(self._mark_dirty)
-        for widget in (
-            self.analysis_metrics_edit,
-        ):
+        for widget in (self.analysis_metrics_edit,):
             widget.textChanged.connect(self._mark_dirty)
         combo_boxes = [
             self.orbit_integrator_combo,
@@ -572,7 +565,9 @@ class MainWindow(QMainWindow):
             self.target_tle_status.setText("Paste TLE line 1 and line 2.")
             return
         try:
-            elements = parse_tle_lines(line1, line2, require_checksum=bool(self.target_tle_require_checksum.isChecked()))
+            elements = parse_tle_lines(
+                line1, line2, require_checksum=bool(self.target_tle_require_checksum.isChecked())
+            )
             text = (
                 f"epoch JD {elements.epoch_jd_utc:.8f}, "
                 f"inc {elements.inclination_deg:.3f} deg, "
@@ -609,7 +604,9 @@ class MainWindow(QMainWindow):
         self.rocket_enabled.setChecked(key == "rocket_ascent")
         self.chaser_enabled.setChecked(key in {"rendezvous", "keepout", "monte_carlo"})
         self.mc_enabled_check.setChecked(key in {"monte_carlo", "sensitivity"})
-        self._set_combo_data_or_text(self.analysis_study_type_combo, "sensitivity" if key == "sensitivity" else "monte_carlo")
+        self._set_combo_data_or_text(
+            self.analysis_study_type_combo, "sensitivity" if key == "sensitivity" else "monte_carlo"
+        )
         self.mc_iterations_spin.setValue(25 if key == "monte_carlo" else 3)
         self.mc_save_aggregate_summary.setChecked(key in {"monte_carlo", "sensitivity"})
         self.mc_save_histograms.setChecked(key == "monte_carlo")
@@ -945,7 +942,9 @@ class MainWindow(QMainWindow):
         return dict(pointer) if isinstance(pointer, dict) else None
 
     def _edit_pointer_params(self, object_key: str, pointer_kind: str, combo: QComboBox) -> None:
-        pointer = self._combo_pointer_value(combo, existing=self._get_existing_pointer_for_editor(object_key, pointer_kind))
+        pointer = self._combo_pointer_value(
+            combo, existing=self._get_existing_pointer_for_editor(object_key, pointer_kind)
+        )
         if pointer is None:
             self.statusBar().showMessage("No pointer selected for parameter editing.", 5000)
             return
@@ -956,7 +955,9 @@ class MainWindow(QMainWindow):
         self._edit_pointer_params_yaml(pointer, combo, object_key, pointer_kind, params)
         self._on_mc_catalog_source_changed()
 
-    def _edit_pointer_params_yaml(self, pointer: dict, combo: QComboBox, object_key: str, pointer_kind: str, params: dict) -> None:
+    def _edit_pointer_params_yaml(
+        self, pointer: dict, combo: QComboBox, object_key: str, pointer_kind: str, params: dict
+    ) -> None:
         dialog = QDialog(self)
         dialog.setWindowTitle(f"Edit Params: {object_key}.{pointer_kind}")
         dialog.resize(520, 420)
@@ -990,7 +991,10 @@ class MainWindow(QMainWindow):
             return
 
     def _refresh_rocket_guidance_modifiers_label(self) -> None:
-        names = [str(item.get("class_name", "") or item.get("function", "") or "Unknown") for item in self.rocket_guidance_modifiers_config]
+        names = [
+            str(item.get("class_name", "") or item.get("function", "") or "Unknown")
+            for item in self.rocket_guidance_modifiers_config
+        ]
         self.rocket_guidance_modifiers_label.setText(", ".join(names) if names else "None")
 
     def _edit_rocket_guidance_modifiers(self) -> None:
@@ -1059,7 +1063,9 @@ class MainWindow(QMainWindow):
     def _parse_yaml_text(self, text: str) -> object:
         return parse_yaml_text(text)
 
-    def _edit_pointer_params_structured(self, pointer: dict, combo: QComboBox, object_key: str, pointer_kind: str) -> bool:
+    def _edit_pointer_params_structured(
+        self, pointer: dict, combo: QComboBox, object_key: str, pointer_kind: str
+    ) -> bool:
         schema = self._pointer_form_schema(pointer)
         if not schema:
             return False
@@ -1088,7 +1094,7 @@ class MainWindow(QMainWindow):
                 widget.setPlaceholderText("Leave blank for default/None")
             elif kind == "int":
                 widget = QSpinBox()
-                widget.setRange(-10**9, 10**9)
+                widget.setRange(-(10**9), 10**9)
                 widget.setValue(int(value or 0))
             elif kind == "bool":
                 widget = QCheckBox()
@@ -1206,7 +1212,11 @@ class MainWindow(QMainWindow):
             ("chaser", "attitude_control", cfg.get("chaser", {}).get("attitude_control")),
             ("rocket", "mission_strategy", cfg.get("rocket", {}).get("mission_strategy")),
             ("rocket", "mission_execution", cfg.get("rocket", {}).get("mission_execution")),
-            ("rocket", "base_guidance", cfg.get("rocket", {}).get("base_guidance") or cfg.get("rocket", {}).get("guidance")),
+            (
+                "rocket",
+                "base_guidance",
+                cfg.get("rocket", {}).get("base_guidance") or cfg.get("rocket", {}).get("guidance"),
+            ),
         ]
         for object_key, pointer_key, pointer in pointer_paths:
             if not isinstance(pointer, dict):
@@ -1230,7 +1240,9 @@ class MainWindow(QMainWindow):
             options.extend(self._flatten_mc_parameter_options(params, base_path, base_label))
         return options
 
-    def _flatten_mc_parameter_options(self, value: object, path_prefix: str, label_prefix: str) -> list[tuple[str, str]]:
+    def _flatten_mc_parameter_options(
+        self, value: object, path_prefix: str, label_prefix: str
+    ) -> list[tuple[str, str]]:
         if isinstance(value, dict):
             out: list[tuple[str, str]] = []
             for key, child in value.items():
@@ -1337,7 +1349,9 @@ class MainWindow(QMainWindow):
                 start_dir = candidate.parent if candidate.is_file() else candidate
             elif candidate.parent.exists():
                 start_dir = candidate.parent
-        path_str, _ = QFileDialog.getOpenFileName(self, "Select Baseline Summary", str(start_dir), "JSON Files (*.json)")
+        path_str, _ = QFileDialog.getOpenFileName(
+            self, "Select Baseline Summary", str(start_dir), "JSON Files (*.json)"
+        )
         if path_str:
             self.analysis_baseline_path_edit.setText(path_str)
 
@@ -1375,7 +1389,10 @@ class MainWindow(QMainWindow):
 
         allowed_modes = MC_LHS_MODE_OPTIONS if lhs_active else MC_MODE_OPTIONS
         current_mode = str(self.mc_mode_combo.currentData() or self.mc_mode_combo.currentText()).strip().lower()
-        if [str(self.mc_mode_combo.itemData(i) or self.mc_mode_combo.itemText(i)) for i in range(self.mc_mode_combo.count())] != allowed_modes:
+        if [
+            str(self.mc_mode_combo.itemData(i) or self.mc_mode_combo.itemText(i))
+            for i in range(self.mc_mode_combo.count())
+        ] != allowed_modes:
             self.mc_mode_combo.blockSignals(True)
             self._populate_value_combo(self.mc_mode_combo, [(mode, mode) for mode in allowed_modes])
             self.mc_mode_combo.blockSignals(False)
@@ -1423,7 +1440,9 @@ class MainWindow(QMainWindow):
         path = str(variation.get("parameter_path", "") or "")
         mode = str(variation.get("mode", "choice") or "choice").lower()
         label = self._mc_path_display_name(path)
-        lhs_active = self._selected_analysis_study_type() == "sensitivity" and self._selected_sensitivity_method() == "lhs"
+        lhs_active = (
+            self._selected_analysis_study_type() == "sensitivity" and self._selected_sensitivity_method() == "lhs"
+        )
         if mode == "choice":
             options = list(variation.get("options", []) or [])
             return f"{label} | choice | {len(options)} option(s)"
@@ -1480,7 +1499,10 @@ class MainWindow(QMainWindow):
         variation = dict(self.mc_variations[row] or {})
         self._set_mc_variation_path_selection(str(variation.get("parameter_path", "") or ""))
         mode = str(variation.get("mode", "choice") or "choice").lower()
-        allowed_modes = [str(self.mc_mode_combo.itemData(i) or self.mc_mode_combo.itemText(i)) for i in range(self.mc_mode_combo.count())]
+        allowed_modes = [
+            str(self.mc_mode_combo.itemData(i) or self.mc_mode_combo.itemText(i))
+            for i in range(self.mc_mode_combo.count())
+        ]
         fallback_mode = allowed_modes[0] if allowed_modes else "choice"
         self._set_combo_data_or_text(self.mc_mode_combo, mode if mode in set(allowed_modes) else fallback_mode)
         self.mc_choice_options_edit.setText(", ".join(str(v) for v in list(variation.get("options", []) or [])))
@@ -1500,10 +1522,19 @@ class MainWindow(QMainWindow):
             self.mc_category_combo.setCurrentIndex(0)
         self._refresh_mc_parameter_options()
         self.mc_custom_path_edit.clear()
-        default_mode = "uniform" if (self._selected_analysis_study_type() == "sensitivity" and self._selected_sensitivity_method() == "lhs") else "choice"
-        allowed_modes = [str(self.mc_mode_combo.itemData(i) or self.mc_mode_combo.itemText(i)) for i in range(self.mc_mode_combo.count())]
+        default_mode = (
+            "uniform"
+            if (self._selected_analysis_study_type() == "sensitivity" and self._selected_sensitivity_method() == "lhs")
+            else "choice"
+        )
+        allowed_modes = [
+            str(self.mc_mode_combo.itemData(i) or self.mc_mode_combo.itemText(i))
+            for i in range(self.mc_mode_combo.count())
+        ]
         if allowed_modes:
-            self._set_combo_data_or_text(self.mc_mode_combo, default_mode if default_mode in set(allowed_modes) else allowed_modes[0])
+            self._set_combo_data_or_text(
+                self.mc_mode_combo, default_mode if default_mode in set(allowed_modes) else allowed_modes[0]
+            )
         self.mc_choice_options_edit.clear()
         self.mc_uniform_low_spin.setValue(0.0)
         self.mc_uniform_high_spin.setValue(0.0)
@@ -1535,7 +1566,9 @@ class MainWindow(QMainWindow):
         if not parameter_path:
             raise ValueError("Select a parameter or enter a custom path.")
         mode = str(self.mc_mode_combo.currentData() or self.mc_mode_combo.currentText()).strip().lower()
-        lhs_active = self._selected_analysis_study_type() == "sensitivity" and self._selected_sensitivity_method() == "lhs"
+        lhs_active = (
+            self._selected_analysis_study_type() == "sensitivity" and self._selected_sensitivity_method() == "lhs"
+        )
         variation: dict[str, object] = {"parameter_path": parameter_path, "mode": mode}
         if mode == "choice":
             if lhs_active:
@@ -1722,7 +1755,9 @@ class MainWindow(QMainWindow):
         ):
             if key in data:
                 lines.append(f"{key}: {data.get(key)}")
-        remaining = {k: v for k, v in data.items() if k not in {line.split(':', 1)[0] for line in lines[2:] if ': ' in line}}
+        remaining = {
+            k: v for k, v in data.items() if k not in {line.split(":", 1)[0] for line in lines[2:] if ": " in line}
+        }
         if remaining:
             lines.append("")
             lines.append(json.dumps(remaining, indent=2)[:4000])
@@ -1907,7 +1942,9 @@ class MainWindow(QMainWindow):
             self._show_error("Save Failed", str(exc))
 
     def _on_save_as(self) -> None:
-        start_dir = str(self.loaded_config_path.parent if self.loaded_config_path.exists() else (self.repo_root / "configs"))
+        start_dir = str(
+            self.loaded_config_path.parent if self.loaded_config_path.exists() else (self.repo_root / "configs")
+        )
         path_str, _ = QFileDialog.getSaveFileName(self, "Save Config As", start_dir, "YAML Files (*.yaml *.yml)")
         if not path_str:
             return
@@ -2043,7 +2080,10 @@ class MainWindow(QMainWindow):
 
     def _monte_carlo_path_warning(self, cfg_dict: dict) -> str:
         analysis = dict(cfg_dict.get("analysis", {}) or {})
-        if bool(analysis.get("enabled", False)) and str(analysis.get("study_type", "")).strip().lower() == "sensitivity":
+        if (
+            bool(analysis.get("enabled", False))
+            and str(analysis.get("study_type", "")).strip().lower() == "sensitivity"
+        ):
             sensitivity = dict(analysis.get("sensitivity", {}) or {})
             for param in list(sensitivity.get("parameters", []) or []):
                 path = str(dict(param or {}).get("parameter_path", "") or "").strip()
@@ -2194,7 +2234,11 @@ class MainWindow(QMainWindow):
             self.tabs.setCurrentIndex(tab_index)
 
     def _sync_navigation_to_tab(self, tab_index: int) -> None:
-        root_item = self.navigation_tree.topLevelItem(tab_index) if 0 <= tab_index < self.navigation_tree.topLevelItemCount() else None
+        root_item = (
+            self.navigation_tree.topLevelItem(tab_index)
+            if 0 <= tab_index < self.navigation_tree.topLevelItemCount()
+            else None
+        )
         if root_item is not None:
             self.navigation_tree.setCurrentItem(root_item)
 
@@ -2213,7 +2257,9 @@ class MainWindow(QMainWindow):
                 lines = list(target_tle.get("lines", []) or [])
                 line1 = str(target_tle.get("line1", lines[0] if len(lines) > 0 else "") or "")
                 line2 = str(target_tle.get("line2", lines[1] if len(lines) > 1 else "") or "")
-                elements = parse_tle_lines(line1, line2, require_checksum=bool(target_tle.get("require_checksum", False)))
+                elements = parse_tle_lines(
+                    line1, line2, require_checksum=bool(target_tle.get("require_checksum", False))
+                )
                 initial_jd = sim.get("initial_jd_utc")
                 if initial_jd is not None and bool(target_tle.get("propagate_to_initial_epoch", True)):
                     delta_days = float(initial_jd) - float(elements.epoch_jd_utc)
@@ -2238,13 +2284,12 @@ class MainWindow(QMainWindow):
         objects_cfg = dict(cfg.get("objects", {}) or {})
         if objects_cfg:
             enabled_objects = [
-                str(name)
-                for name, section in objects_cfg.items()
-                if bool(dict(section or {}).get("enabled", True))
+                str(name) for name, section in objects_cfg.items() if bool(dict(section or {}).get("enabled", True))
             ]
         else:
             enabled_objects = [
-                name for name in ("rocket", "target", "chaser")
+                name
+                for name in ("rocket", "target", "chaser")
                 if bool(dict(cfg.get(name, {}) or {}).get("enabled", False))
             ]
         mode = "single run"
