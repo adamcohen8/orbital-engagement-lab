@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
 from typing import Any
@@ -7,6 +8,7 @@ from typing import Any
 import numpy as np
 
 from sim.api import SimulationConfig, SimulationSession
+from sim.config import object_section
 from sim.game.defensive_target import DefensiveTargetIntentProvider
 from sim.game.manual import KeyboardCommandState, ManualGameCommandProvider
 from sim.game.training import RPOTrainingConfig, RPOTrainingTracker
@@ -15,8 +17,17 @@ from sim.presets.thrusters import resolve_thruster_max_thrust_n_from_specs
 SPEED_MULTIPLIER_OPTIONS: tuple[float, ...] = (1.0, 2.0, 5.0, 10.0, 25.0, 50.0)
 
 
+@dataclass(frozen=True)
+class GameRunResult:
+    config_path: Path
+    difficulty: str
+    level_passed: bool
+
+
 def _max_accel_from_config(config: SimulationConfig, controlled_object_id: str) -> float:
-    section = config.scenario.chaser if controlled_object_id == "chaser" else config.scenario.target
+    section = object_section(config.scenario, str(controlled_object_id))
+    if section is None:
+        raise ValueError(f"Unknown controlled object '{controlled_object_id}'.")
     game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
     if "player_max_accel_km_s2" in game_cfg:
         return float(game_cfg["player_max_accel_km_s2"])
@@ -39,7 +50,9 @@ def _max_accel_from_config(config: SimulationConfig, controlled_object_id: str) 
 
 def _game_control_mode(config: SimulationConfig) -> str:
     game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
-    return str(game_cfg.get("control_mode", "attitude_thrust") or "attitude_thrust").strip().lower()
+    training_cfg = dict(game_cfg.get("training", {}) or {})
+    default = "ric_translation" if training_cfg else "attitude_thrust"
+    return str(game_cfg.get("control_mode", default) or default).strip().lower()
 
 
 def _game_difficulty(config: SimulationConfig) -> str:
@@ -67,6 +80,33 @@ def _game_defensive_target_provider(config: SimulationConfig) -> DefensiveTarget
 def _game_ric_reference_object_id(config: SimulationConfig, default: str) -> str:
     game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
     return str(game_cfg.get("ric_reference_object_id", default) or default)
+
+
+def _dashboard_object_ids(training_cfg: RPOTrainingConfig, anim_cfg: dict[str, Any]) -> tuple[str, str]:
+    return (
+        str(anim_cfg.get("battlespace_dashboard_target_object_id", training_cfg.target_object_id)),
+        str(anim_cfg.get("battlespace_dashboard_chaser_object_id", training_cfg.chaser_object_id)),
+    )
+
+
+def _training_briefing_lines(config: SimulationConfig, training_cfg: RPOTrainingConfig, *, difficulty: str) -> tuple[str, ...]:
+    if not training_cfg.enabled:
+        return ()
+    game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
+    raw = dict(game_cfg.get("training", {}) or {})
+    lines = [
+        str(training_cfg.scenario_id or config.scenario.scenario_name or "RPO training"),
+        f"Assists: {str(difficulty or 'easy').title()}",
+    ]
+    if training_cfg.learning_goal:
+        lines.append(f"Objective: {training_cfg.learning_goal}")
+    player_brief = str(raw.get("player_brief", "") or "").strip()
+    if player_brief:
+        lines.append(f"Plan: {player_brief}")
+    pass_criteria = _as_str_tuple(raw.get("pass_criteria"))
+    for item in pass_criteria[:4]:
+        lines.append(f"Gate: {item}")
+    return tuple(lines)
 
 
 def _coast_prediction_orbit_fraction(difficulty: str) -> float:
@@ -123,16 +163,20 @@ def run_game_mode(
     attitude_rate_deg_s: float = 45.0,
     realtime: bool = True,
     speed_multiple: float = 1.0,
-) -> None:
+    difficulty_override: str | None = None,
+) -> GameRunResult:
     from sim.game.pygame_dashboard import PygameRPODashboard
 
     config = SimulationConfig.from_yaml(config_path)
     control_mode = _game_control_mode(config)
-    difficulty = _game_difficulty(config)
+    difficulty = str(difficulty_override or _game_difficulty(config)).strip().lower()
     training_cfg = RPOTrainingConfig.from_metadata(dict(config.scenario.metadata or {}))
     ric_reference_object_id = _game_ric_reference_object_id(config, training_cfg.target_object_id)
     trainer = RPOTrainingTracker(training_cfg)
     command_state = KeyboardCommandState()
+    command_state.paused = bool(training_cfg.enabled)
+    briefing_open = bool(training_cfg.enabled)
+    briefing_lines = _training_briefing_lines(config, training_cfg, difficulty=difficulty)
     session, _, snapshot = _start_game_attempt(
         config,
         command_state=command_state,
@@ -145,9 +189,10 @@ def run_game_mode(
 
     anim_cfg = dict(config.scenario.outputs.animations or {})
     current_speed_multiple = _coerce_speed_multiple(speed_multiple)
+    dashboard_target_id, dashboard_chaser_id = _dashboard_object_ids(training_cfg, anim_cfg)
     dashboard = PygameRPODashboard(
-        target_object_id=str(anim_cfg.get("battlespace_dashboard_target_object_id", "target")),
-        chaser_object_id=str(anim_cfg.get("battlespace_dashboard_chaser_object_id", "chaser")),
+        target_object_id=dashboard_target_id,
+        chaser_object_id=dashboard_chaser_id,
         reference_object_id=ric_reference_object_id,
         keepout_radius_km=training_cfg.keepout_radius_km,
         goal_radius_km=training_cfg.goal_radius_km,
@@ -168,6 +213,7 @@ def run_game_mode(
         mission_state=_mission_state(score),
         mission_metrics=_mission_metrics(training_cfg, score),
         speed_multiple=current_speed_multiple,
+        briefing_lines=briefing_lines if briefing_open else (),
         debrief_lines=_score_debrief_lines(score),
     )
 
@@ -180,6 +226,8 @@ def run_game_mode(
             _poll_pygame_input(pygame, command_state, control_mode=control_mode)
             if command_state.quit_requested:
                 break
+            if briefing_open and not command_state.paused:
+                briefing_open = False
             if command_state.speed_multiplier_change:
                 current_speed_multiple = _adjust_speed_multiple(current_speed_multiple, command_state.speed_multiplier_change)
                 wall_step_s = _wall_step_s(dt_s, current_speed_multiple)
@@ -202,7 +250,8 @@ def run_game_mode(
                 command_state.restart_requested = False
                 command_state.step_requested = False
                 command_state.speed_multiplier_change = 0
-                command_state.paused = False
+                command_state.paused = bool(training_cfg.enabled)
+                briefing_open = bool(training_cfg.enabled)
                 last_step_wall = perf_counter()
             now = perf_counter()
             pre_score = trainer.score()
@@ -232,6 +281,7 @@ def run_game_mode(
                 mission_state=_mission_state(score),
                 mission_metrics=_mission_metrics(training_cfg, score),
                 speed_multiple=current_speed_multiple,
+                briefing_lines=briefing_lines if briefing_open else (),
                 debrief_lines=_score_debrief_lines(score),
             )
             dashboard.tick(60.0)
@@ -239,6 +289,7 @@ def run_game_mode(
         dashboard.close()
         if training_cfg.enabled:
             print(trainer.debrief_text())
+    return GameRunResult(config_path=Path(config_path), difficulty=difficulty, level_passed=bool(score.level_passed))
 
 
 def _start_game_attempt(
@@ -325,31 +376,43 @@ def _mission_metrics(config: RPOTrainingConfig, score: Any) -> tuple[str, ...]:
     metrics: list[str] = []
     if config.max_time_s is not None:
         remain = max(float(config.max_time_s) - float(getattr(score, "elapsed_s", 0.0)), 0.0)
-        metrics.append(f"Time {remain:4.0f}s")
+        ratio = remain / max(float(config.max_time_s), 1.0e-9)
+        metrics.append(f"{_status_tag(remain > 0.0, ratio > 0.2)} Time {remain:4.0f}s")
     if config.max_delta_v_m_s is not None:
         remain = max(float(config.max_delta_v_m_s) - float(getattr(score, "approximate_delta_v_m_s", 0.0)), 0.0)
-        metrics.append(f"dV {remain:4.1f} m/s")
+        ratio = remain / max(float(config.max_delta_v_m_s), 1.0e-9)
+        metrics.append(f"{_status_tag(remain > 0.0, ratio > 0.2)} dV {remain:4.1f} m/s")
     if config.goal_nmt_radial_amplitude_km is None and config.keepout_radius_km is not None:
         final_range = float(getattr(score, "final_range_km", float("nan")))
         margin = final_range - float(config.keepout_radius_km)
-        metrics.append(f"KO {_fmt_distance(margin)}")
+        metrics.append(f"{_status_tag(margin >= 0.0, margin > 0.1)} KO {_fmt_distance(margin)}")
     if config.goal_nmt_element_tolerance_km is not None:
         tol = float(config.goal_nmt_element_tolerance_km)
         r_err = float(getattr(score, "final_nmt_radial_amplitude_error_km", float("nan")))
         c_err = float(getattr(score, "final_nmt_cross_track_amplitude_error_km", float("nan")))
-        metrics.append(f"R amp { _fmt_metric(r_err)}/{tol:.2f} km")
-        metrics.append(f"C amp { _fmt_metric(c_err)}/{tol:.2f} km")
+        metrics.append(f"{_status_tag(r_err <= tol, r_err <= 0.75 * tol)} R amp { _fmt_metric(r_err)}/{tol:.2f} km")
+        metrics.append(f"{_status_tag(c_err <= tol, c_err <= 0.75 * tol)} C amp { _fmt_metric(c_err)}/{tol:.2f} km")
     if config.goal_nmt_velocity_tolerance_km_s is not None:
         tol = float(config.goal_nmt_velocity_tolerance_km_s)
         err = float(getattr(score, "final_nmt_drift_velocity_error_km_s", float("nan")))
-        metrics.append(f"Drift { _fmt_metric(err, precision=4)}/{tol:.4f}")
+        metrics.append(f"{_status_tag(err <= tol, err <= 0.75 * tol)} Drift { _fmt_metric(err, precision=4)}/{tol:.4f}")
     if config.goal_nmt_radial_amplitude_km is None and config.goal_radius_km is not None:
         err = float(getattr(score, "final_goal_error_km", float("nan")))
-        metrics.append(f"Goal {_fmt_distance(err)}/{_fmt_distance(float(config.goal_radius_km))}")
+        tol = float(config.goal_radius_km)
+        metrics.append(f"{_status_tag(err <= tol, err <= 0.75 * tol)} Goal {_fmt_distance(err)}/{_fmt_distance(tol)}")
     if config.goal_nmt_radial_amplitude_km is None and config.max_goal_speed_km_s is not None:
         speed = float(getattr(score, "final_relative_speed_km_s", float("nan")))
-        metrics.append(f"Speed {_fmt_speed(speed)}/{_fmt_speed(float(config.max_goal_speed_km_s))}")
+        tol = float(config.max_goal_speed_km_s)
+        metrics.append(f"{_status_tag(speed <= tol, speed <= 0.75 * tol)} Speed {_fmt_speed(speed)}/{_fmt_speed(tol)}")
     return tuple(metrics)
+
+
+def _status_tag(ok: bool, strong: bool) -> str:
+    if not bool(ok):
+        return "FAIL"
+    if not bool(strong):
+        return "WARN"
+    return "OK"
 
 
 def _score_debrief_lines(score: Any) -> tuple[str, ...]:
@@ -396,3 +459,13 @@ def _optional_float(value: Any) -> float | None:
     if value is None:
         return None
     return float(value)
+
+
+def _as_str_tuple(value: Any) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        return (value,)
+    if isinstance(value, (list, tuple)):
+        return tuple(str(item) for item in value if str(item))
+    return (str(value),)

@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from sim.game.launcher import choose_game_scenario
+from sim.game.launcher import choose_game_launch, record_game_progress
 from sim.game.runner import run_game_mode
 
 
@@ -25,17 +25,32 @@ def main() -> None:
         help="Realtime playback speed. For example, 10 means 10 seconds of sim time per 1 second of real time.",
     )
     args = parser.parse_args()
-    config_path = Path(args.config) if args.config else choose_game_scenario()
-    if config_path is None:
+    if args.config:
+        result = run_game_mode(
+            Path(args.config),
+            controlled_object_id=str(args.controlled_object),
+            attitude_rate_deg_s=float(args.attitude_rate_deg_s),
+            realtime=not bool(args.fast),
+            speed_multiple=float(args.speed_multiple),
+        )
+        if result.level_passed:
+            record_game_progress(result.config_path, result.difficulty)
         return
 
-    run_game_mode(
-        config_path,
-        controlled_object_id=str(args.controlled_object),
-        attitude_rate_deg_s=float(args.attitude_rate_deg_s),
-        realtime=not bool(args.fast),
-        speed_multiple=float(args.speed_multiple),
-    )
+    while True:
+        selection = choose_game_launch()
+        if selection is None:
+            return
+        result = run_game_mode(
+            selection.path,
+            controlled_object_id=str(args.controlled_object),
+            attitude_rate_deg_s=float(args.attitude_rate_deg_s),
+            realtime=not bool(args.fast),
+            speed_multiple=float(args.speed_multiple),
+            difficulty_override=selection.difficulty,
+        )
+        if result.level_passed:
+            record_game_progress(result.config_path, result.difficulty)
 
 
 if __name__ == "__main__":

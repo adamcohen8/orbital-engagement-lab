@@ -8,6 +8,7 @@ from typing import Any
 import numpy as np
 
 from sim.actuators.orbital import attitude_coupled_thrust_eci, effective_max_accel_km_s2, thruster_disturbance_torque_body_nm
+from sim.config.object_refs import relative_reference_for_object
 from sim.core.models import Command, StateBelief, StateTruth
 from sim.dynamics.orbit.environment import EARTH_RADIUS_KM
 from sim.runtime_support import (
@@ -240,14 +241,15 @@ class _SatelliteBeliefAdapter:
         orb_belief = agent.belief
         if agent.orbit_controller is not None and orb_belief is not None:
             chief_truth = None
+            reference_id = str(relative_reference_for_object(e.cfg, aid) or "").strip()
             if agent.knowledge_base is not None:
-                target_belief = agent.knowledge_base.snapshot().get("target")
+                target_belief = agent.knowledge_base.snapshot().get(reference_id) if reference_id else None
                 if target_belief is not None and target_belief.state.size >= 6:
                     chief_truth = _truth_from_state6(
                         target_belief.state[:6],
                         t_s=target_belief.last_update_t_s,
                     )
-            if chief_truth is not None and aid != "target" and hasattr(agent.orbit_controller, "ric_curv_state_slice"):
+            if chief_truth is not None and aid != reference_id and hasattr(agent.orbit_controller, "ric_curv_state_slice"):
                 self.orbit_belief_scratch.last_update_t_s = orb_belief.last_update_t_s
                 self.orbit_belief_scratch.state = _relative_orbit_state12(
                     chief_truth=chief_truth,

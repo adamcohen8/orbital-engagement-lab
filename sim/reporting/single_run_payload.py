@@ -1,0 +1,94 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+
+import numpy as np
+
+from sim.config import SimulationScenarioConfig, default_pair_object_ids, default_reference_object_id
+from sim.ground_stations import evaluate_ground_station_access
+
+
+@dataclass(frozen=True)
+class SingleRunPayloadContext:
+    cfg: SimulationScenarioConfig
+    object_ids: list[str]
+    dt_s: float
+    t_s: np.ndarray
+    truth_hist: dict[str, np.ndarray]
+    target_reference_orbit_truth: np.ndarray | None
+    belief_hist: dict[str, np.ndarray]
+    thrust_hist: dict[str, np.ndarray]
+    torque_hist: dict[str, np.ndarray]
+    desired_attitude_hist: dict[str, np.ndarray]
+    knowledge_hist: dict[str, dict[str, np.ndarray]]
+    bridge_hist: dict[str, list[dict[str, Any]]]
+    controller_debug_hist: dict[str, list[dict[str, Any]]]
+    rocket_throttle_cmd: np.ndarray
+    rocket_metrics: dict[str, np.ndarray]
+    thrust_stats: dict[str, dict[str, Any]]
+    attitude_guardrail_stats: dict[str, int]
+    knowledge_detection_by_observer: dict[str, Any]
+    knowledge_consistency_by_observer: dict[str, Any]
+    terminated_early: bool
+    termination_reason: str | None
+    termination_time_s: float | None
+    termination_object_id: str | None
+    rocket_inserted: bool
+    rocket_insertion_time_s: float | None
+
+
+def build_single_run_payload(context: SingleRunPayloadContext) -> dict[str, Any]:
+    ground_station_access, ground_station_access_summary = evaluate_ground_station_access(
+        ground_stations=list(context.cfg.ground_stations),
+        t_s=context.t_s,
+        truth_hist=context.truth_hist,
+        jd_utc_start=context.cfg.simulator.initial_jd_utc,
+    )
+    reference_object_id = default_reference_object_id(context.cfg, available_ids=context.object_ids)
+    primary_pair = default_pair_object_ids(context.cfg, available_ids=context.object_ids)
+    summary = {
+        "scenario_name": context.cfg.scenario_name,
+        "scenario_description": context.cfg.scenario_description,
+        "objects": sorted(str(item) for item in context.object_ids),
+        "samples": int(context.t_s.size),
+        "dt_s": float(context.dt_s),
+        "duration_s": float(context.t_s[-1]) if context.t_s.size else 0.0,
+        "terminated_early": bool(context.terminated_early),
+        "termination_reason": context.termination_reason,
+        "termination_time_s": context.termination_time_s,
+        "termination_object_id": context.termination_object_id,
+        "rocket_insertion_achieved": bool(context.rocket_inserted),
+        "rocket_insertion_time_s": context.rocket_insertion_time_s,
+        "target_reference_orbit_enabled": bool(context.target_reference_orbit_truth is not None),
+        "reference_object_id": reference_object_id,
+        "primary_object_pair": list(primary_pair) if primary_pair is not None else [],
+        "thrust_stats": context.thrust_stats,
+        "attitude_guardrail_stats": context.attitude_guardrail_stats,
+        "knowledge_detection_by_observer": context.knowledge_detection_by_observer,
+        "knowledge_consistency_by_observer": context.knowledge_consistency_by_observer,
+        "ground_station_access_summary": ground_station_access_summary,
+        "plot_outputs": {},
+        "animation_outputs": {},
+    }
+    return {
+        "summary": summary,
+        "time_s": context.t_s.tolist(),
+        "truth_by_object": {k: v.tolist() for k, v in context.truth_hist.items()},
+        "target_reference_orbit_truth": (
+            [] if context.target_reference_orbit_truth is None else context.target_reference_orbit_truth.tolist()
+        ),
+        "belief_by_object": {k: v.tolist() for k, v in context.belief_hist.items()},
+        "applied_thrust_by_object": {k: v.tolist() for k, v in context.thrust_hist.items()},
+        "applied_torque_by_object": {k: v.tolist() for k, v in context.torque_hist.items()},
+        "desired_attitude_by_object": {k: v.tolist() for k, v in context.desired_attitude_hist.items()},
+        "knowledge_by_observer": {o: {t: a.tolist() for t, a in bt.items()} for o, bt in context.knowledge_hist.items()},
+        "knowledge_detection_by_observer": dict(context.knowledge_detection_by_observer),
+        "knowledge_consistency_by_observer": dict(context.knowledge_consistency_by_observer),
+        "ground_station_access": ground_station_access,
+        "ground_station_access_summary": ground_station_access_summary,
+        "bridge_events_by_object": context.bridge_hist,
+        "controller_debug_by_object": context.controller_debug_hist,
+        "rocket_throttle_cmd": context.rocket_throttle_cmd.tolist(),
+        "rocket_metrics": {k: v.tolist() for k, v in context.rocket_metrics.items()},
+    }

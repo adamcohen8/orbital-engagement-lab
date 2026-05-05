@@ -24,6 +24,7 @@ The public core includes:
 - reusable object preset YAML files
 - Python API, CLI, and GUI entrypoints
 - examples and starter validation workflows
+- public use-case configs under `examples/configs/public_*.yaml`
 
 The public core should be useful for research, education, prototyping, and
 inspectable engineering experiments.
@@ -41,6 +42,7 @@ The pro layer includes:
 - report cost estimation before hosted LLM calls
 - curated validation and mission-assurance scenario packs
 - cFS/SIL and program-specific flight-software integration workflows
+- Pro workflow configs under `examples/configs/pro_*.yaml`
 
 Those workflows are intentionally not part of the public export. Public modules
 that would otherwise expose those surfaces raise clear import errors explaining

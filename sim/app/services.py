@@ -26,6 +26,7 @@ from sim.app.io import (
     validate_config_dict,
 )
 from sim.api import SimulationSession
+from sim.config import enabled_object_ids
 from sim.config.scenario_yaml import SimulationScenarioConfig
 from sim.master_outputs import AVAILABLE_ANIMATION_TYPES, AVAILABLE_FIGURE_IDS
 
@@ -655,11 +656,7 @@ def save_config(path: str | Path, data: dict[str, Any]) -> Path:
 
 
 def summarize_config(cfg: SimulationScenarioConfig) -> ConfigSummary:
-    objects = [
-        object_id
-        for object_id, section in (("rocket", cfg.rocket), ("chaser", cfg.chaser), ("target", cfg.target))
-        if bool(section.enabled)
-    ]
+    objects = enabled_object_ids(cfg)
     analysis_enabled = bool(cfg.analysis.enabled)
     analysis_study_type = str(cfg.analysis.study_type if analysis_enabled else "single_run")
     return ConfigSummary(

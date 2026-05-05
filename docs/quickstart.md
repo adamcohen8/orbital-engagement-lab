@@ -86,17 +86,21 @@ range. See [Scenario YAML](scenario-yaml.md) for the ground-station fields.
 
 ## Next Scenarios
 
-- `examples/configs/public_rendezvous_closed_loop.yaml` demonstrates closed-loop rendezvous with orbit control, attitude pointing, sensing, EKF knowledge, and plots.
+- `examples/configs/public_tle_2hr_propagation.yaml` predicts a two-hour state history from TLE lines.
+- `examples/configs/public_ground_station_access_from_tle.yaml` computes ground-station access windows from a TLE.
+- `examples/configs/public_closed_loop_rendezvous_lqr.yaml` demonstrates a compact closed-loop rendezvous with HCW LQR.
+- `examples/configs/public_rendezvous_closed_loop.yaml` demonstrates a broader rendezvous with attitude pointing, sensing, EKF knowledge, and plots.
 - `examples/configs/public_orbit_environment_stack.yaml` demonstrates deterministic high-fidelity orbit/environment propagation.
-- `examples/configs/public_manual_engagement.yaml` demonstrates the manual/game scenario shape.
+- `examples/configs/public_attitude_hold_disturbance.yaml` demonstrates attitude-control recovery under initial error and disturbance torque.
+- `examples/configs/public_manual_rpo_training.yaml` demonstrates the manual/game scenario shape.
 
-Run the rendezvous example:
+Run the compact rendezvous example:
 
 ```bash
-python run_simulation.py --config examples/configs/public_rendezvous_closed_loop.yaml
+python run_simulation.py --config examples/configs/public_closed_loop_rendezvous_lqr.yaml
 ```
 
-Expected plot artifacts include:
+The broader plotting example writes artifacts such as:
 
 ```text
 outputs/examples/public_rendezvous_closed_loop/rendezvous_summary.png

@@ -116,6 +116,17 @@ Expected result: the 6000-second rendezvous run writes dashboard, rendezvous,
 control, estimation, sensor-access, and ground-track plots under
 `outputs/plotting_rendezvous_demo/`.
 
+## Use-Case Cookbook
+
+| If you want to... | Run this |
+| --- | --- |
+| Predict where a satellite will be two hours from a TLE | `python run_simulation.py --config examples/configs/public_tle_2hr_propagation.yaml` |
+| Compute ground-station access windows from a TLE | `python run_simulation.py --config examples/configs/public_ground_station_access_from_tle.yaml` |
+| Run a closed-loop chaser/target rendezvous with HCW LQR | `python run_simulation.py --config examples/configs/public_closed_loop_rendezvous_lqr.yaml` |
+| Inspect orbit perturbations, drag, SRP, and third-body toggles | `python run_simulation.py --config examples/configs/public_orbit_environment_stack.yaml` |
+| Evaluate attitude hold under initial error and disturbance torque | `python run_simulation.py --config examples/configs/public_attitude_hold_disturbance.yaml` |
+| Practice manual RPO/game-style control | `python run_game.py examples/configs/public_manual_rpo_training.yaml` |
+
 Use the API:
 
 ```python
@@ -221,9 +232,16 @@ require hosted AI accounts or API keys.
 
 Curated examples are YAML scenario configs under `examples/configs/`:
 
-- `examples/configs/public_rendezvous_closed_loop.yaml` for closed-loop rendezvous, pointing, sensing, estimation, and plots
-- `examples/configs/public_orbit_environment_stack.yaml` for deterministic high-fidelity orbit/environment propagation
-- `examples/configs/public_manual_engagement.yaml` for manual/game scenario wiring
+- `examples/configs/public_tle_2hr_propagation.yaml` for TLE propagation
+- `examples/configs/public_ground_station_access_from_tle.yaml` for ground-station access windows
+- `examples/configs/public_closed_loop_rendezvous_lqr.yaml` for closed-loop rendezvous
+- `examples/configs/public_orbit_environment_stack.yaml` for perturbation/environment propagation
+- `examples/configs/public_attitude_hold_disturbance.yaml` for attitude-control recovery
+- `examples/configs/public_manual_rpo_training.yaml` for manual/game scenario wiring
+
+New examples use the canonical `objects` map in scenario YAML. Conventional
+names such as `chaser` and `target` are readable scenario IDs, not fixed engine
+slots.
 
 Ground stations are configured in scenario YAML with a top-level
 `ground_stations` list or mapping. Single-run outputs include

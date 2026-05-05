@@ -9,19 +9,33 @@ import yaml
 from sim.api import SimulationConfig, SimulationSession
 from sim.core.models import StateBelief, StateTruth
 from sim.game.defensive_target import DefensiveTargetIntentProvider
-from sim.game.launcher import discover_game_scenarios
+from sim.game.launcher import (
+    _clear_progress_at_pos,
+    _difficulty_at_pos,
+    _difficulty_index,
+    _game_progress_path,
+    _progress_stars,
+    _option_index_at_pos,
+    _scroll_for_selection,
+    clear_game_progress,
+    discover_game_scenarios,
+    record_game_progress,
+)
 from sim.game.manual import KeyboardCommandState, ManualGameCommandProvider
 from sim.game.pygame_dashboard import PygameRPODashboard, _cw_coast_state
 from sim.game.runner import (
     _adjust_speed_multiple,
     _coast_prediction_orbit_fraction,
     _coerce_speed_multiple,
+    _dashboard_object_ids,
+    _game_control_mode,
     _game_loop_should_exit,
     _game_ric_reference_object_id,
     _mission_metrics,
     _poll_pygame_input,
     _score_debrief_lines,
     _start_game_attempt,
+    _training_briefing_lines,
     _wall_step_s,
 )
 from sim.game.training import (
@@ -74,6 +88,138 @@ def test_game_configs_are_packaged_with_sim_package() -> None:
     pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
 
     assert '"game/configs/*.yaml"' in pyproject.read_text(encoding="utf-8")
+
+
+def test_training_game_configs_default_to_ric_translation(tmp_path: Path) -> None:
+    cfg = _game_config(tmp_path)
+    cfg["metadata"]["game"]["training"] = {
+        "enabled": True,
+        "scenario_id": "custom_training",
+        "target_object_id": "training_target",
+        "chaser_object_id": "training_chaser",
+    }
+    cfg["metadata"]["game"].pop("control_mode", None)
+    path = tmp_path / "training_default.yaml"
+    path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+
+    assert _game_control_mode(SimulationConfig.from_yaml(path)) == "ric_translation"
+
+
+def test_non_training_game_configs_default_to_attitude_thrust(tmp_path: Path) -> None:
+    cfg = _game_config(tmp_path)
+    cfg["metadata"]["game"].pop("training", None)
+    cfg["metadata"]["game"].pop("control_mode", None)
+    path = tmp_path / "legacy_default.yaml"
+    path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+
+    assert _game_control_mode(SimulationConfig.from_yaml(path)) == "attitude_thrust"
+
+
+def test_dashboard_object_ids_follow_training_defaults() -> None:
+    training_cfg = RPOTrainingConfig(
+        enabled=True,
+        target_object_id="training_target",
+        chaser_object_id="training_chaser",
+    )
+
+    assert _dashboard_object_ids(training_cfg, {}) == ("training_target", "training_chaser")
+    assert _dashboard_object_ids(
+        training_cfg,
+        {
+            "battlespace_dashboard_target_object_id": "visual_target",
+            "battlespace_dashboard_chaser_object_id": "visual_chaser",
+        },
+    ) == ("visual_target", "visual_chaser")
+
+
+def test_training_briefing_lines_include_objective_and_assists() -> None:
+    config_path = Path(__file__).resolve().parents[1] / "game" / "configs" / "game_training_rpo_01_coast_relative_motion.yaml"
+    config = SimulationConfig.from_yaml(config_path)
+    training_cfg = RPOTrainingConfig.from_metadata(dict(config.scenario.metadata or {}))
+
+    lines = _training_briefing_lines(config, training_cfg, difficulty="hard")
+
+    assert lines[0] == "rpo_01_coast_relative_motion"
+    assert "Assists: Hard" in lines
+    assert any(line.startswith("Objective:") for line in lines)
+    assert any(line.startswith("Gate:") for line in lines)
+
+
+def test_launcher_hit_test_accounts_for_scroll_offset() -> None:
+    assert _option_index_at_pos((60, 120), count=12, scroll_offset=4) is None
+    assert _option_index_at_pos((60, 140), count=12, scroll_offset=0) == 0
+    assert _option_index_at_pos((60, 140), count=12, scroll_offset=4) == 4
+    assert _option_index_at_pos((60, 200), count=12, scroll_offset=4) == 4
+    assert _option_index_at_pos((60, 214), count=12, scroll_offset=4) == 5
+    assert _option_index_at_pos((60, 204), count=12, scroll_offset=4) is None
+
+
+def test_launcher_scroll_tracks_keyboard_selection() -> None:
+    assert _scroll_for_selection(0, 0, count=12, screen_height=680) == 0
+    assert _scroll_for_selection(6, 0, count=12, screen_height=680) == 1
+    assert _scroll_for_selection(11, 1, count=12, screen_height=680) == 6
+    assert _scroll_for_selection(4, 6, count=12, screen_height=680) == 4
+
+
+def test_launcher_difficulty_helpers_support_picker() -> None:
+    assert _difficulty_index("easy") == 0
+    assert _difficulty_index("normal") == 1
+    assert _difficulty_index("expert") == 3
+    assert _difficulty_index("unknown") == 0
+    assert _difficulty_at_pos((650, 94)) == "easy"
+    assert _difficulty_at_pos((908, 94)) == "extreme"
+    assert _difficulty_at_pos((500, 94)) is None
+
+
+def test_launcher_progress_helpers_persist_user_state_without_mutating_yaml(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("OEL_GAME_PROGRESS_PATH", str(tmp_path / "progress.yaml"))
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    path = config_dir / "game_training_rpo_01_demo.yaml"
+    cfg = _game_config(tmp_path)
+    cfg["metadata"]["game"]["training"] = {"scenario_id": "rpo_01_demo"}
+    path.write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
+    original_yaml = path.read_text(encoding="utf-8")
+
+    record_game_progress(path, "hard")
+    options = discover_game_scenarios(config_dir)
+
+    assert path.read_text(encoding="utf-8") == original_yaml
+    assert _game_progress_path().exists()
+    assert options[0].completed_difficulties == ("hard",)
+    assert _progress_stars(options[0].completed_difficulties) == "★★★☆"
+
+    clear_game_progress(config_dir)
+    options = discover_game_scenarios(config_dir)
+
+    assert path.read_text(encoding="utf-8") == original_yaml
+    assert options[0].completed_difficulties == ()
+    assert _progress_stars(options[0].completed_difficulties) == "☆☆☆☆"
+
+
+def test_clear_progress_suppresses_legacy_yaml_progress_without_mutating_yaml(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("OEL_GAME_PROGRESS_PATH", str(tmp_path / "progress.yaml"))
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    path = config_dir / "game_training_rpo_01_demo.yaml"
+    cfg = _game_config(tmp_path)
+    cfg["metadata"]["game"]["training"] = {"scenario_id": "rpo_01_demo"}
+    cfg["metadata"]["game"]["progress"] = {"completed_difficulties": ["hard"]}
+    path.write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
+    original_yaml = path.read_text(encoding="utf-8")
+
+    assert discover_game_scenarios(config_dir)[0].completed_difficulties == ("hard",)
+
+    clear_game_progress(config_dir)
+    options = discover_game_scenarios(config_dir)
+
+    assert path.read_text(encoding="utf-8") == original_yaml
+    assert options[0].completed_difficulties == ()
+
+
+def test_clear_progress_button_hit_test() -> None:
+    assert _clear_progress_at_pos((860, 44)) is True
+    assert _clear_progress_at_pos((800, 44)) is False
 
 
 def test_defensive_target_provider_pulses_on_unsafe_closure() -> None:
@@ -490,9 +636,9 @@ def test_training_tracker_stationkeeping_goal_passes_with_goal_and_speed() -> No
 
     assert score.level_passed is True
     assert score.level_failed is False
-    assert any(item.startswith("KO ") for item in metrics)
-    assert any(item.startswith("Goal ") for item in metrics)
-    assert any(item.startswith("Speed ") for item in metrics)
+    assert any("KO " in item for item in metrics)
+    assert any("Goal " in item for item in metrics)
+    assert any("Speed " in item for item in metrics)
     assert not any("NMT" in reason for reason in score.pass_fail_reasons)
 
 
@@ -527,8 +673,8 @@ def test_training_tracker_rendezvous_metrics_use_close_approach_units() -> None:
     metrics = _mission_metrics(cfg, score)
 
     assert score.level_passed is True
-    assert "Goal 20 m/25 m" in metrics
-    assert "Speed 0.50 m/s/1.00 m/s" in metrics
+    assert "WARN Goal 20 m/25 m" in metrics
+    assert "OK Speed 0.50 m/s/1.00 m/s" in metrics
 
 
 def test_score_debrief_lines_show_after_terminal_mission_state() -> None:

@@ -8,6 +8,9 @@ import yaml
 
 from sim import SimulationConfig, SimulationResult, SimulationSession
 from sim.config import AlgorithmPointer, load_simulation_yaml, scenario_config_from_dict
+from sim.execution import create_single_run_engine
+from sim.execution import service as execution_service
+from sim.execution.metrics import closest_approach_from_run_payload
 
 
 class ContractRecordTimingMission:
@@ -256,6 +259,92 @@ def test_payload_artifact_contract_exposes_stable_summary_histories_and_wrappers
 
     assert (tmp_path / "master_run_summary.json").is_file()
     assert (tmp_path / "master_run_log.json").is_file()
+
+
+def test_engine_can_build_run_payload_without_artifact_side_effects(tmp_path: Path) -> None:
+    cfg = scenario_config_from_dict(_contract_config(tmp_path))
+    engine = create_single_run_engine(cfg)
+    while not engine.done:
+        engine.step()
+
+    payload = engine.build_run_payload()
+    summary = payload["summary"]
+
+    assert summary["samples"] == 3
+    assert summary["plot_outputs"] == {}
+    assert summary["animation_outputs"] == {}
+    assert "output_index_md" not in summary
+    assert "output_index_md" not in payload
+    assert not (tmp_path / "master_run_summary.json").exists()
+    assert not (tmp_path / "master_run_log.json").exists()
+    assert not (tmp_path / "README.md").exists()
+
+
+def test_engine_runs_named_multi_satellite_objects_with_relative_initialization(tmp_path: Path) -> None:
+    raw = _contract_config(tmp_path)
+    raw.pop("target", None)
+    raw.pop("chaser", None)
+    raw.pop("rocket", None)
+    raw["objects"] = {
+        "red_asset": {
+            "kind": "satellite",
+            "role": "asset",
+            "enabled": True,
+            "specs": {"mass_kg": 100.0},
+            "initial_state": {
+                "position_eci_km": [7000.0, 0.0, 0.0],
+                "velocity_eci_km_s": [0.0, 7.5, 0.0],
+            },
+        },
+        "blue_one": {
+            "kind": "satellite",
+            "role": "interceptor",
+            "enabled": True,
+            "specs": {"mass_kg": 100.0},
+            "initial_state": {
+                "relative_to": "red_asset",
+                "relative_ric_rect": [1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            },
+        },
+        "blue_two": {
+            "kind": "satellite",
+            "role": "observer",
+            "enabled": True,
+            "specs": {"mass_kg": 100.0},
+            "initial_state": {
+                "position_eci_km": [7010.0, 0.0, 0.0],
+                "velocity_eci_km_s": [0.0, 7.49, 0.0],
+            },
+        },
+    }
+
+    result = SimulationSession.from_config(SimulationConfig.from_dict(raw)).run()
+
+    assert result.summary["objects"] == ["blue_one", "blue_two", "red_asset"]
+    assert result.summary["reference_object_id"] == "red_asset"
+    assert result.summary["primary_object_pair"] == ["blue_one", "red_asset"]
+    assert set(result.truth.keys()) == {"blue_one", "blue_two", "red_asset"}
+    initial_separation = np.linalg.norm(result.truth["blue_one"][0, 0:3] - result.truth["red_asset"][0, 0:3])
+    assert initial_separation == pytest.approx(1.0)
+    assert closest_approach_from_run_payload(result.payload) < 2.0
+
+
+def test_batch_config_temp_yaml_is_cleaned_up_after_serialization_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = scenario_config_from_dict(_contract_config(tmp_path))
+    source_path = tmp_path / "scenario.yaml"
+
+    def _fail_safe_dump(*_: object, **__: object) -> None:
+        raise RuntimeError("synthetic serialization failure")
+
+    monkeypatch.setattr(execution_service.yaml, "safe_dump", _fail_safe_dump)
+
+    with pytest.raises(RuntimeError, match="synthetic serialization failure"):
+        execution_service.SimulationExecutionService().run_batch_from_config(cfg, source_path=source_path)
+
+    assert list(tmp_path.glob("tmp*.yaml")) == []
 
 
 def test_engine_timing_contract_does_not_expose_world_truth_to_agents(tmp_path: Path) -> None:

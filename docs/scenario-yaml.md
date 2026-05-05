@@ -14,17 +14,19 @@ untrusted Python code.
 ```yaml
 scenario_name: "my_scenario"
 
-target:
-  enabled: true
-  preset: "basic_satellite"
-  initial_state:
-    coes:
-      a_km: 7000.0
-      ecc: 0.0
-      inc_deg: 45.0
-      raan_deg: 0.0
-      argp_deg: 0.0
-      true_anomaly_deg: 0.0
+objects:
+  target:
+    kind: "satellite"
+    enabled: true
+    preset: "basic_satellite"
+    initial_state:
+      coes:
+        a_km: 7000.0
+        ecc: 0.0
+        inc_deg: 45.0
+        raan_deg: 0.0
+        argp_deg: 0.0
+        true_anomaly_deg: 0.0
 
 simulator:
   duration_s: 120.0
@@ -35,8 +37,12 @@ outputs:
   mode: "save"
 ```
 
-The common object sections are `rocket`, `chaser`, and `target`. Disabled
-sections can be omitted or set with `enabled: false`.
+New configs should define scene participants under `objects`, keyed by object
+ID. The conventional IDs `rocket`, `chaser`, and `target` still work, but they
+are names rather than fixed engine slots. Legacy top-level `rocket`, `chaser`,
+and `target` sections remain accepted for compatibility. If both a canonical
+`objects.<id>` entry and a matching legacy alias appear, the `objects.<id>`
+entry is the source of truth.
 
 Passive ground stations can be defined at the top level. They do not control or
 estimate spacecraft state; they only record access to active scene objects.
@@ -56,12 +62,14 @@ ground_stations:
 Agents can point to reusable object preset YAML files:
 
 ```yaml
-chaser:
-  enabled: true
-  preset: "../sim/presets/objects/basic_satellite.yaml"
-  specs:
-    dry_mass_kg: 180.0
-    fuel_mass_kg: 20.0
+objects:
+  chaser:
+    kind: "satellite"
+    enabled: true
+    preset: "../sim/presets/objects/basic_satellite.yaml"
+    specs:
+      dry_mass_kg: 180.0
+      fuel_mass_kg: 20.0
 ```
 
 Preset paths resolve in this order:
@@ -74,9 +82,11 @@ Preset paths resolve in this order:
 This means built-in names work directly:
 
 ```yaml
-target:
-  enabled: true
-  preset: "basic_satellite"
+objects:
+  target:
+    kind: "satellite"
+    enabled: true
+    preset: "basic_satellite"
 ```
 
 Scenario-local values override preset values. Nested dictionaries, such as
@@ -99,12 +109,14 @@ simulator:
   # Julian date using two-body mean motion.
   initial_jd_utc: 2460310.75
 
-target:
-  enabled: true
-  initial_state:
-    tle:
-      line1: "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9005"
-      line2: "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1000"
+objects:
+  target:
+    kind: "satellite"
+    enabled: true
+    initial_state:
+      tle:
+        line1: "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9005"
+        line2: "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1000"
 ```
 
 Equivalent list form:
@@ -129,8 +141,8 @@ full SGP4 propagation or model TLE-specific drag/perturbation terms.
 ## Ground Stations
 
 Ground stations are passive scene observers. They are useful when you want to
-know when a site can see a rocket, target, or chaser without adding a sensor,
-estimator, controller, or mission behavior to the object itself.
+know when a site can see configured objects without adding a sensor, estimator,
+controller, or mission behavior to the object itself.
 
 ```yaml
 ground_stations:

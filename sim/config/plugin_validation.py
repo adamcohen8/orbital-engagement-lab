@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import importlib
-from sim.rocket.guidance import OpenLoopPitchProgramGuidance
+import inspect
 from typing import Any
 
+from sim.config.object_refs import configured_objects, object_parameter_prefix
 
 @dataclass(frozen=True)
 class PluginContract:
@@ -51,16 +52,14 @@ def _validate_pointer(pointer: Any, contract: PluginContract, path: str) -> list
             errs.append(f"{path}: class '{class_name}' not found in module '{pointer.module}'.")
             return errs
         cls = getattr(mod, class_name)
-        try:
-            obj = cls(**params)
-        except Exception as ex:
-            errs.append(f"{path}: failed to construct class '{class_name}' with params {params}: {ex}")
+        if not inspect.isclass(cls):
+            errs.append(f"{path}: '{class_name}' in module '{pointer.module}' is not a class.")
             return errs
         for m in contract.methods_all:
-            if not hasattr(obj, m) or not callable(getattr(obj, m)):
+            if not _class_has_callable(cls, m):
                 errs.append(f"{path}: class '{class_name}' missing required callable method '{m}'.")
         if contract.methods_any:
-            if not any(hasattr(obj, m) and callable(getattr(obj, m)) for m in contract.methods_any):
+            if not any(_class_has_callable(cls, m) for m in contract.methods_any):
                 errs.append(f"{path}: class '{class_name}' must implement one of {list(contract.methods_any)}.")
         return errs
 
@@ -80,83 +79,52 @@ def _validate_pointer(pointer: Any, contract: PluginContract, path: str) -> list
     return errs
 
 
+def _class_has_callable(cls: type, method_name: str) -> bool:
+    for base in cls.__mro__:
+        if method_name in base.__dict__:
+            attr = base.__dict__[method_name]
+            if isinstance(attr, (staticmethod, classmethod)):
+                return callable(attr.__func__)
+            return callable(attr)
+    return False
+
+
 def validate_scenario_plugins(cfg: Any) -> list[str]:
     errs: list[str] = []
-    # Rocket
-    if getattr(cfg.rocket, "enabled", False):
-        errs.extend(_validate_pointer(getattr(cfg.rocket, "guidance", None), _CONTRACTS["guidance"], "rocket.guidance"))
-        errs.extend(_validate_pointer(getattr(cfg.rocket, "base_guidance", None), _CONTRACTS["guidance"], "rocket.base_guidance"))
-        for i, p in enumerate(getattr(cfg.rocket, "guidance_modifiers", []) or []):
-            errs.extend(_validate_rocket_guidance_modifier(p, f"rocket.guidance_modifiers[{i}]"))
+    for object_id, agent in configured_objects(cfg).items():
+        if not getattr(agent, "enabled", False):
+            continue
+        path = object_parameter_prefix(str(object_id))
+        if str(getattr(agent, "kind", "satellite")).strip().lower() == "rocket":
+            errs.extend(_validate_pointer(getattr(agent, "guidance", None), _CONTRACTS["guidance"], f"{path}.guidance"))
+            errs.extend(
+                _validate_pointer(getattr(agent, "base_guidance", None), _CONTRACTS["guidance"], f"{path}.base_guidance")
+            )
+            for i, p in enumerate(getattr(agent, "guidance_modifiers", []) or []):
+                errs.extend(_validate_rocket_guidance_modifier(p, f"{path}.guidance_modifiers[{i}]"))
         errs.extend(
-            _validate_pointer(getattr(cfg.rocket, "orbit_control", None), _CONTRACTS["orbit_control"], "rocket.orbit_control")
+            _validate_pointer(getattr(agent, "orbit_control", None), _CONTRACTS["orbit_control"], f"{path}.orbit_control")
         )
         errs.extend(
             _validate_pointer(
-                getattr(cfg.rocket, "attitude_control", None), _CONTRACTS["attitude_control"], "rocket.attitude_control"
+                getattr(agent, "attitude_control", None), _CONTRACTS["attitude_control"], f"{path}.attitude_control"
             )
-        )
-        errs.extend(
-            _validate_pointer(getattr(cfg.rocket, "mission_strategy", None), _CONTRACTS["mission_strategy"], "rocket.mission_strategy")
         )
         errs.extend(
             _validate_pointer(
-                getattr(cfg.rocket, "mission_execution", None), _CONTRACTS["mission_execution"], "rocket.mission_execution"
+                getattr(agent, "mission_strategy", None), _CONTRACTS["mission_strategy"], f"{path}.mission_strategy"
             )
-        )
-        rb = getattr(cfg.rocket, "bridge", None)
-        if rb is not None and getattr(rb, "enabled", False):
-            errs.extend(_validate_pointer(rb, _CONTRACTS["bridge"], "rocket.bridge"))
-        for i, p in enumerate(getattr(cfg.rocket, "mission_objectives", []) or []):
-            errs.extend(_validate_pointer(p, _CONTRACTS["mission_objective"], f"rocket.mission_objectives[{i}]"))
-
-    # Chaser
-    if getattr(cfg.chaser, "enabled", False):
-        errs.extend(
-            _validate_pointer(getattr(cfg.chaser, "orbit_control", None), _CONTRACTS["orbit_control"], "chaser.orbit_control")
         )
         errs.extend(
             _validate_pointer(
-                getattr(cfg.chaser, "attitude_control", None), _CONTRACTS["attitude_control"], "chaser.attitude_control"
+                getattr(agent, "mission_execution", None), _CONTRACTS["mission_execution"], f"{path}.mission_execution"
             )
         )
-        errs.extend(
-            _validate_pointer(getattr(cfg.chaser, "mission_strategy", None), _CONTRACTS["mission_strategy"], "chaser.mission_strategy")
-        )
-        errs.extend(
-            _validate_pointer(
-                getattr(cfg.chaser, "mission_execution", None), _CONTRACTS["mission_execution"], "chaser.mission_execution"
-            )
-        )
-        cb = getattr(cfg.chaser, "bridge", None)
-        if cb is not None and getattr(cb, "enabled", False):
-            errs.extend(_validate_pointer(cb, _CONTRACTS["bridge"], "chaser.bridge"))
-        for i, p in enumerate(getattr(cfg.chaser, "mission_objectives", []) or []):
-            errs.extend(_validate_pointer(p, _CONTRACTS["mission_objective"], f"chaser.mission_objectives[{i}]"))
-
-    # Target
-    if getattr(cfg.target, "enabled", False):
-        errs.extend(
-            _validate_pointer(getattr(cfg.target, "orbit_control", None), _CONTRACTS["orbit_control"], "target.orbit_control")
-        )
-        errs.extend(
-            _validate_pointer(
-                getattr(cfg.target, "attitude_control", None), _CONTRACTS["attitude_control"], "target.attitude_control"
-            )
-        )
-        errs.extend(
-            _validate_pointer(getattr(cfg.target, "mission_strategy", None), _CONTRACTS["mission_strategy"], "target.mission_strategy")
-        )
-        errs.extend(
-            _validate_pointer(
-                getattr(cfg.target, "mission_execution", None), _CONTRACTS["mission_execution"], "target.mission_execution"
-            )
-        )
-        tb = getattr(cfg.target, "bridge", None)
-        if tb is not None and getattr(tb, "enabled", False):
-            errs.extend(_validate_pointer(tb, _CONTRACTS["bridge"], "target.bridge"))
-        for i, p in enumerate(getattr(cfg.target, "mission_objectives", []) or []):
-            errs.extend(_validate_pointer(p, _CONTRACTS["mission_objective"], f"target.mission_objectives[{i}]"))
+        bridge = getattr(agent, "bridge", None)
+        if bridge is not None and getattr(bridge, "enabled", False):
+            errs.extend(_validate_pointer(bridge, _CONTRACTS["bridge"], f"{path}.bridge"))
+        for i, p in enumerate(getattr(agent, "mission_objectives", []) or []):
+            errs.extend(_validate_pointer(p, _CONTRACTS["mission_objective"], f"{path}.mission_objectives[{i}]"))
     return errs
 
 
@@ -178,11 +146,8 @@ def _validate_rocket_guidance_modifier(pointer: Any, path: str) -> list[str]:
     if not hasattr(mod, class_name):
         return [f"{path}: class '{class_name}' not found in module '{pointer.module}'."]
     cls = getattr(mod, class_name)
-    params = dict(getattr(pointer, "params", {}) or {})
-    try:
-        obj = cls(base_guidance=OpenLoopPitchProgramGuidance(), **params)
-    except Exception as ex:
-        return [f"{path}: failed to construct guidance modifier '{class_name}' with params {params}: {ex}"]
-    if not hasattr(obj, "command") or not callable(getattr(obj, "command")):
+    if not inspect.isclass(cls):
+        return [f"{path}: '{class_name}' in module '{pointer.module}' is not a class."]
+    if not _class_has_callable(cls, "command"):
         errs.append(f"{path}: class '{class_name}' missing required callable method 'command'.")
     return errs

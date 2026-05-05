@@ -6,6 +6,43 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.4.0 - 2026-05-05
+
+Named-object architecture and public workflow release.
+
+### Configuration
+
+- Added canonical `objects.<object_id>` scenario configuration for named
+  satellites, rockets, and role-specific objects while keeping legacy
+  `rocket`/`chaser`/`target` aliases as a compatibility layer.
+- Updated curated public and private configs to use named objects and clearer
+  comments around the parameters users are expected to vary.
+- Added focused public use-case configs for TLE propagation, ground-station
+  access, closed-loop rendezvous, attitude hold, and manual RPO training.
+
+### Execution
+
+- Moved single-run, Monte Carlo, sensitivity, and validation dispatch behind
+  the `sim.execution` service boundary.
+- Split core run payload assembly from artifact writing so the engine can be
+  used more cleanly as a library.
+- Kept generated Monte Carlo and sensitivity configs consistent when legacy
+  object parameter paths are used with canonical `objects` configs.
+
+### Reporting And Public Export
+
+- Refreshed public/private documentation, README use-case guidance, and public
+  export checks for the new example set.
+- Preserved payload compatibility for existing consumers, including legacy
+  rocket throttle fields.
+
+### Migration Notes
+
+- New scenario YAML should prefer `objects.<object_id>` paths. Legacy
+  `rocket`, `chaser`, and `target` sections remain supported for compatibility.
+- Batch parameter paths may still use legacy object aliases, but release 0.4.0
+  synchronizes those changes into the canonical `objects` map before execution.
+
 ## 0.3.1 - 2026-05-01
 
 ### Governance

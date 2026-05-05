@@ -87,10 +87,12 @@ fig.savefig(outdir / "custom_target_altitude.png", dpi=160)
 If `master_run_log.json` is missing, set `outputs.stats.save_full_log: true`
 and rerun the scenario.
 
-## Single-Run Example: Chaser-Target Range
+## Single-Run Example: Two-Object Range
 
 For two-object scenarios, relative range can be computed directly from the
-truth histories:
+truth histories. This example uses the `chaser` and `target` IDs from the
+public rendezvous config; replace them with your own object IDs for other
+scenarios.
 
 ```python
 import json
@@ -112,7 +114,7 @@ fig, ax = plt.subplots(figsize=(8, 4.5))
 ax.plot(time_s, range_km)
 ax.set_xlabel("Time (s)")
 ax.set_ylabel("Range (km)")
-ax.set_title("Chaser-Target Range")
+ax.set_title("Object-to-Object Range")
 ax.grid(True, alpha=0.3)
 fig.tight_layout()
 fig.savefig(outdir / "custom_chaser_target_range.png", dpi=160)

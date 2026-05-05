@@ -1,6 +1,6 @@
 # Scenario YAML Contract
 
-This document defines the 0.1 compatibility contract for scenario YAML files.
+This document defines the 0.4 compatibility contract for scenario YAML files.
 It complements the user-facing guide in `docs/scenario-yaml.md` by stating what
 scenario authors, examples, GUI workflows, tests, and migration tools may rely
 on.
@@ -44,6 +44,7 @@ Recognized top-level sections:
 - `scenario_name`
 - `scenario_description`
 - `metadata`
+- `objects`
 - `rocket`
 - `chaser`
 - `target`
@@ -55,9 +56,15 @@ Recognized top-level sections:
 
 Object sections:
 
-- `rocket`, `chaser`, and `target` are the canonical object roles.
+- `objects` is the canonical object map for new configs.
+- Object IDs are user-facing names. Conventional IDs such as `rocket`,
+  `chaser`, and `target` are supported but are not the only valid IDs.
+- Top-level `rocket`, `chaser`, and `target` sections are accepted as a legacy
+  compatibility layer. When both `objects.<id>` and a matching legacy alias are
+  present, `objects.<id>` is authoritative; loaders keep the legacy dataclass
+  aliases synchronized for compatibility.
 - Disabled objects may be omitted or set with `enabled: false`.
-- Enabled object sections participate in runtime creation, validation, and
+- Enabled object entries participate in runtime creation, validation, and
   output histories.
 
 Ground station sections:
@@ -133,6 +140,8 @@ sample still preserves these grid rules.
 Common object fields:
 
 - `enabled`
+- `object_id`
+- `kind`
 - `role`
 - `preset`, `preset_yaml`, or `preset_path`
 - `specs`
@@ -203,9 +212,11 @@ Pointer contract:
 - `params` must be a mapping.
 - File-path plugin loading is not part of the scenario YAML contract.
 
-Plugin validation checks constructor/importability and required callable
-methods for supported plugin roles. Validation is intentionally structural; it
-does not prove physical correctness.
+Plugin validation checks importability, symbols, and required callable methods
+for supported plugin roles without constructing user plugin instances. Validation
+is intentionally structural; it does not prove physical correctness. Plugins
+that need richer checks should expose explicit validation hooks rather than
+depending on constructor side effects.
 
 
 ## Simulator Section

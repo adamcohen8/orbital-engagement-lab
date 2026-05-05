@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import asdict
 from pathlib import Path
 import subprocess
 import sys
@@ -51,7 +50,7 @@ def validate_yaml_text(yaml_text: str) -> SimulationScenarioConfig:
 
 
 def config_to_dict(cfg: SimulationScenarioConfig) -> dict[str, Any]:
-    return asdict(cfg)
+    return cfg.to_dict()
 
 
 def load_config_dict(path: str | Path) -> dict[str, Any]:

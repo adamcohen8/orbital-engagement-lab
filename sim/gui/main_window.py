@@ -2235,24 +2235,34 @@ class MainWindow(QMainWindow):
         outputs = dict(cfg.get("outputs", {}) or {})
         analysis = dict(cfg.get("analysis", {}) or {})
         mc = dict(cfg.get("monte_carlo", {}) or {})
-        enabled_objects = [
-            name for name in ("rocket", "target", "chaser")
-            if bool(dict(cfg.get(name, {}) or {}).get("enabled", False))
-        ]
+        objects_cfg = dict(cfg.get("objects", {}) or {})
+        if objects_cfg:
+            enabled_objects = [
+                str(name)
+                for name, section in objects_cfg.items()
+                if bool(dict(section or {}).get("enabled", True))
+            ]
+        else:
+            enabled_objects = [
+                name for name in ("rocket", "target", "chaser")
+                if bool(dict(cfg.get(name, {}) or {}).get("enabled", False))
+            ]
         mode = "single run"
         if bool(analysis.get("enabled", False)):
             mode = str(analysis.get("study_type", "analysis"))
         elif bool(mc.get("enabled", False)):
             mode = "monte_carlo"
-        target_init = dict(dict(cfg.get("target", {}) or {}).get("initial_state", {}) or {})
+        reference_object = enabled_objects[0] if enabled_objects else "target"
+        target_section = dict(objects_cfg.get(reference_object, {}) or dict(cfg.get("target", {}) or {}))
+        target_init = dict(target_section.get("initial_state", {}) or {})
         if "tle" in target_init:
-            init_text = "target from TLE"
+            init_text = f"{reference_object} from TLE"
         elif "coes" in target_init:
-            init_text = "target from COEs"
+            init_text = f"{reference_object} from COEs"
         elif "position_eci_km" in target_init:
-            init_text = "target from ECI state"
+            init_text = f"{reference_object} from ECI state"
         else:
-            init_text = "target default orbit"
+            init_text = f"{reference_object} default orbit"
         lines = [
             f"Status: {'valid' if valid else 'invalid'}",
             f"Scenario: {cfg.get('scenario_name', 'unnamed')}",

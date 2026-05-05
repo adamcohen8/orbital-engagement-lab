@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from copy import deepcopy
+from dataclasses import dataclass, field, fields, is_dataclass
 import math
 from pathlib import Path
 from typing import Any
@@ -28,6 +29,8 @@ class BridgePointer:
 
 @dataclass(frozen=True)
 class AgentSection:
+    object_id: str = ""
+    kind: str = "satellite"
     enabled: bool = True
     role: str = "agent"
     specs: dict[str, Any] = field(default_factory=dict)
@@ -62,22 +65,213 @@ class SimulatorSection:
     duration_s: float = 3600.0
     dt_s: float = 1.0
     initial_jd_utc: float | None = None
-    dynamics: dict[str, Any] = field(default_factory=dict)
-    environment: dict[str, Any] = field(default_factory=dict)
-    plugin_validation: dict[str, Any] = field(default_factory=lambda: {"strict": True})
-    termination: dict[str, Any] = field(default_factory=lambda: {"earth_impact_enabled": True, "earth_radius_km": 6378.137})
+    dynamics: "SimulatorDynamicsSection" = field(default_factory=lambda: SimulatorDynamicsSection())
+    environment: "SimulatorEnvironmentSection" = field(default_factory=lambda: SimulatorEnvironmentSection())
+    plugin_validation: "SimulatorPluginValidationSection" = field(default_factory=lambda: SimulatorPluginValidationSection())
+    termination: "SimulatorTerminationSection" = field(default_factory=lambda: SimulatorTerminationSection())
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "dynamics", SimulatorDynamicsSection(self.dynamics))
+        object.__setattr__(self, "environment", SimulatorEnvironmentSection(self.environment))
+        object.__setattr__(self, "plugin_validation", SimulatorPluginValidationSection(self.plugin_validation))
+        object.__setattr__(self, "termination", SimulatorTerminationSection(self.termination))
+
+
+class _TypedConfigDict(dict):
+    _defaults: dict[str, Any] = {}
+
+    def __init__(self, value: Any = None, **overrides: Any) -> None:
+        data = deepcopy(self._defaults)
+        if value is not None:
+            data.update(deepcopy(dict(value)))
+        data.update(deepcopy(overrides))
+        super().__init__(data)
+
+
+class SimulatorDynamicsSection(_TypedConfigDict):
+    _defaults: dict[str, Any] = {}
+
+    @property
+    def orbit(self) -> dict[str, Any]:
+        return dict(self.get("orbit", {}) or {})
+
+    @property
+    def attitude(self) -> dict[str, Any]:
+        return dict(self.get("attitude", {}) or {})
+
+    @property
+    def rocket(self) -> dict[str, Any]:
+        return dict(self.get("rocket", {}) or {})
+
+
+class SimulatorEnvironmentSection(_TypedConfigDict):
+    _defaults: dict[str, Any] = {}
+
+    @property
+    def atmosphere_env(self) -> dict[str, Any]:
+        return dict(self.get("atmosphere_env", {}) or {})
+
+
+class SimulatorPluginValidationSection(_TypedConfigDict):
+    _defaults = {"strict": True}
+
+    @property
+    def strict(self) -> bool:
+        return bool(self.get("strict", True))
+
+
+class SimulatorTerminationSection(_TypedConfigDict):
+    _defaults = {
+        "earth_impact_enabled": True,
+        "earth_radius_km": 6378.137,
+    }
+
+    @property
+    def earth_impact_enabled(self) -> bool:
+        return bool(self.get("earth_impact_enabled", True))
+
+    @property
+    def earth_radius_km(self) -> float:
+        return float(self.get("earth_radius_km", 6378.137))
+
+
+class OutputStatsSection(_TypedConfigDict):
+    _defaults = {
+        "print_summary": True,
+        "save_json": True,
+        "save_full_log": True,
+    }
+
+    @property
+    def print_summary(self) -> bool:
+        return bool(self.get("print_summary", True))
+
+    @property
+    def save_json(self) -> bool:
+        return bool(self.get("save_json", True))
+
+    @property
+    def save_full_log(self) -> bool:
+        return bool(self.get("save_full_log", True))
+
+
+class OutputPlotsSection(_TypedConfigDict):
+    _defaults = {
+        "enabled": True,
+        "figure_ids": [],
+        "dpi": 150,
+    }
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.get("enabled", True))
+
+    @property
+    def figure_ids(self) -> list[Any]:
+        return list(self.get("figure_ids", []) or [])
+
+    @property
+    def dpi(self) -> int:
+        return int(self.get("dpi", 150))
+
+
+class OutputAnimationsSection(_TypedConfigDict):
+    _defaults = {
+        "enabled": False,
+        "types": [],
+        "fps": 30.0,
+    }
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.get("enabled", False))
+
+    @property
+    def types(self) -> list[Any]:
+        return list(self.get("types", []) or [])
+
+    @property
+    def fps(self) -> float:
+        return float(self.get("fps", 30.0))
+
+
+class OutputMonteCarloSection(_TypedConfigDict):
+    _defaults = {
+        "save_histograms": False,
+        "display_histograms": False,
+        "save_ops_dashboard": True,
+        "display_ops_dashboard": False,
+        "save_iteration_summaries": False,
+        "success_termination_reasons": ["rocket_orbit_insertion"],
+    }
+
+    @property
+    def save_histograms(self) -> bool:
+        return bool(self.get("save_histograms", False))
+
+    @property
+    def display_histograms(self) -> bool:
+        return bool(self.get("display_histograms", False))
+
+    @property
+    def save_iteration_summaries(self) -> bool:
+        return bool(self.get("save_iteration_summaries", False))
+
+    @property
+    def success_termination_reasons(self) -> list[Any]:
+        return list(self.get("success_termination_reasons", ["rocket_orbit_insertion"]) or [])
+
+
+class OutputAIReportSection(_TypedConfigDict):
+    _defaults: dict[str, Any] = {}
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.get("enabled", False))
+
+    @property
+    def provider(self) -> str:
+        return str(self.get("provider", "ollama") or "ollama")
+
+    @property
+    def model(self) -> str:
+        return str(self.get("model", "") or "")
+
+
+class OutputAIConfigSection(_TypedConfigDict):
+    _defaults: dict[str, Any] = {}
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.get("enabled", True))
+
+    @property
+    def provider(self) -> str:
+        return str(self.get("provider", "ollama") or "ollama")
+
+    @property
+    def model(self) -> str:
+        return str(self.get("model", "") or "")
 
 
 @dataclass(frozen=True)
 class OutputsSection:
     output_dir: str = "outputs"
     mode: str = "interactive"
-    stats: dict[str, Any] = field(default_factory=dict)
-    plots: dict[str, Any] = field(default_factory=dict)
-    animations: dict[str, Any] = field(default_factory=dict)
-    monte_carlo: dict[str, Any] = field(default_factory=dict)
-    ai_report: dict[str, Any] = field(default_factory=dict)
-    ai_config: dict[str, Any] = field(default_factory=dict)
+    stats: OutputStatsSection = field(default_factory=OutputStatsSection)
+    plots: OutputPlotsSection = field(default_factory=OutputPlotsSection)
+    animations: OutputAnimationsSection = field(default_factory=OutputAnimationsSection)
+    monte_carlo: OutputMonteCarloSection = field(default_factory=OutputMonteCarloSection)
+    ai_report: OutputAIReportSection = field(default_factory=OutputAIReportSection)
+    ai_config: OutputAIConfigSection = field(default_factory=OutputAIConfigSection)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "stats", OutputStatsSection(self.stats))
+        object.__setattr__(self, "plots", OutputPlotsSection(self.plots))
+        object.__setattr__(self, "animations", OutputAnimationsSection(self.animations))
+        object.__setattr__(self, "monte_carlo", OutputMonteCarloSection(self.monte_carlo))
+        object.__setattr__(self, "ai_report", OutputAIReportSection(self.ai_report))
+        object.__setattr__(self, "ai_config", OutputAIConfigSection(self.ai_config))
 
 
 @dataclass(frozen=True)
@@ -159,6 +353,7 @@ class SimulationScenarioConfig:
     rocket: AgentSection = field(default_factory=lambda: AgentSection(enabled=False, role="rocket"))
     chaser: AgentSection = field(default_factory=lambda: AgentSection(enabled=False, role="chaser"))
     target: AgentSection = field(default_factory=lambda: AgentSection(enabled=True, role="target"))
+    objects: dict[str, AgentSection] = field(default_factory=dict)
     ground_stations: list[GroundStationSection] = field(default_factory=list)
     simulator: SimulatorSection = field(default_factory=SimulatorSection)
     outputs: OutputsSection = field(default_factory=OutputsSection)
@@ -167,7 +362,19 @@ class SimulationScenarioConfig:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return _plain_config_data(self)
+
+
+def _plain_config_data(value: Any) -> Any:
+    if is_dataclass(value) and not isinstance(value, type):
+        return {item.name: _plain_config_data(getattr(value, item.name)) for item in fields(value)}
+    if isinstance(value, dict):
+        return {_plain_config_data(k): _plain_config_data(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_plain_config_data(item) for item in value]
+    if isinstance(value, tuple):
+        return [_plain_config_data(item) for item in value]
+    return deepcopy(value)
 
 
 def _as_dict(value: Any, section_name: str) -> dict[str, Any]:
@@ -180,6 +387,8 @@ def _as_dict(value: Any, section_name: str) -> dict[str, Any]:
 
 _AGENT_PRESET_KEYS = ("preset", "preset_yaml", "preset_path")
 _AGENT_FRAGMENT_KEYS = {
+    "object_id",
+    "kind",
     "enabled",
     "role",
     "specs",
@@ -295,6 +504,16 @@ def _resolve_agent_presets(root: dict[str, Any], base_dir: Path | None) -> dict[
     for role in ("rocket", "chaser", "target"):
         if role in resolved:
             resolved[role] = _resolve_agent_preset(resolved.get(role), role=role, base_dir=base_dir)
+    objects_raw = resolved.get("objects")
+    if isinstance(objects_raw, dict):
+        resolved_objects = {}
+        for object_id, object_value in objects_raw.items():
+            resolved_objects[str(object_id)] = _resolve_agent_preset(
+                object_value,
+                role=f"objects.{object_id}",
+                base_dir=base_dir,
+            )
+        resolved["objects"] = resolved_objects
     return resolved
 
 
@@ -443,7 +662,14 @@ def _parse_bridge_pointer(value: Any) -> BridgePointer | None:
     )
 
 
-def _parse_agent_section(value: Any, role: str) -> AgentSection:
+def _parse_agent_section(
+    value: Any,
+    role: str,
+    *,
+    object_id: str | None = None,
+    default_enabled: bool | None = None,
+    default_kind: str | None = None,
+) -> AgentSection:
     d = _as_dict(value, role)
     objectives = d.get("mission_objectives", []) or []
     if not isinstance(objectives, list):
@@ -451,24 +677,29 @@ def _parse_agent_section(value: Any, role: str) -> AgentSection:
     guidance_modifiers = d.get("guidance_modifiers", []) or []
     if not isinstance(guidance_modifiers, list):
         raise ValueError(f"Section '{role}.guidance_modifiers' must be a list.")
-    if role != "rocket" and d.get("guidance") is not None:
+    default_enabled_by_role = {"rocket": False, "chaser": False, "target": True}
+    resolved_object_id = str(d.get("object_id", object_id or role)).strip()
+    if not resolved_object_id:
+        raise ValueError(f"Section '{role}.object_id' must be non-empty.")
+    resolved_role = str(d.get("role", role.split(".")[-1]))
+    resolved_kind = str(d.get("kind", default_kind or ("rocket" if resolved_role == "rocket" else "satellite"))).strip().lower()
+    if resolved_kind not in {"satellite", "rocket"}:
+        raise ValueError(f"Section '{role}.kind' must be one of: satellite, rocket.")
+    if resolved_kind != "rocket" and d.get("guidance") is not None:
         raise ValueError(
             f"Section '{role}.guidance' is no longer supported. "
             "Use mission_objectives for mission logic and orbit_control/attitude_control for controllers."
         )
     base_guidance = d.get("base_guidance")
     legacy_guidance = d.get("guidance")
-    if role == "rocket" and base_guidance is None and legacy_guidance is not None:
+    if resolved_kind == "rocket" and base_guidance is None and legacy_guidance is not None:
         base_guidance = legacy_guidance
-    default_enabled_by_role = {
-        "rocket": False,
-        "chaser": False,
-        "target": True,
-    }
-    default_enabled = bool(default_enabled_by_role.get(role, True))
+    resolved_default_enabled = bool(default_enabled_by_role.get(role, True)) if default_enabled is None else bool(default_enabled)
     return AgentSection(
-        enabled=_parse_bool(d.get("enabled", default_enabled), f"{role}.enabled"),
-        role=str(d.get("role", role)),
+        object_id=resolved_object_id,
+        kind=resolved_kind,
+        enabled=_parse_bool(d.get("enabled", resolved_default_enabled), f"{role}.enabled"),
+        role=resolved_role,
         specs=dict(d.get("specs", {}) or {}),
         initial_state=dict(d.get("initial_state", {}) or {}),
         reference_orbit=dict(d.get("reference_orbit", {}) or {}),
@@ -516,6 +747,44 @@ def _parse_ground_station_section(value: Any, index: int) -> GroundStationSectio
         max_range_km=max_range_km,
         enabled=_parse_bool(d.get("enabled", True), f"ground_stations[{index}].enabled"),
     )
+
+
+def _parse_objects_section(
+    value: Any,
+    *,
+    legacy_agents: dict[str, AgentSection],
+    has_objects_section: bool,
+    legacy_keys_present: set[str],
+) -> dict[str, AgentSection]:
+    objects: dict[str, AgentSection] = {}
+    if value is not None:
+        raw_objects = _as_dict(value, "objects")
+        for object_id, raw_agent in raw_objects.items():
+            oid = str(object_id).strip()
+            if not oid:
+                raise ValueError("objects keys must be non-empty object ids.")
+            agent = _parse_agent_section(
+                raw_agent,
+                role=f"objects.{oid}",
+                object_id=oid,
+                default_enabled=True,
+                default_kind="rocket" if oid == "rocket" else "satellite",
+            )
+            if agent.object_id != oid:
+                raise ValueError(f"objects.{oid}.object_id must match its object id key.")
+            objects[oid] = agent
+
+    for legacy_id, legacy_agent in legacy_agents.items():
+        if legacy_id in objects:
+            continue
+        if legacy_id in legacy_keys_present:
+            objects[legacy_id] = legacy_agent
+        elif not has_objects_section and legacy_id == "target":
+            objects[legacy_id] = legacy_agent
+        elif not has_objects_section and bool(legacy_agent.enabled):
+            objects[legacy_id] = legacy_agent
+
+    return objects
 
 
 def _parse_ground_stations_section(value: Any) -> list[GroundStationSection]:
@@ -796,12 +1065,34 @@ def scenario_config_from_dict(data: dict[str, Any], source_path: str | Path | No
     legacy_mc = _parse_monte_carlo_section(root.get("monte_carlo"))
     analysis = _parse_analysis_section(root.get("analysis"), legacy_mc=legacy_mc)
     normalized_mc, normalized_analysis = _normalize_analysis_and_monte_carlo(legacy_mc, analysis)
+    legacy_keys_present = {key for key in ("rocket", "chaser", "target") if key in root}
+    has_objects_section = "objects" in root
+    rocket = _parse_agent_section(root.get("rocket"), role="rocket", object_id="rocket", default_kind="rocket")
+    chaser = _parse_agent_section(root.get("chaser"), role="chaser", object_id="chaser", default_kind="satellite")
+    target = _parse_agent_section(
+        root.get("target"),
+        role="target",
+        object_id="target",
+        default_kind="satellite",
+        default_enabled=(False if has_objects_section and "target" not in legacy_keys_present else None),
+    )
+    legacy_agents = {"rocket": rocket, "chaser": chaser, "target": target}
+    objects = _parse_objects_section(
+        root.get("objects"),
+        legacy_agents=legacy_agents,
+        has_objects_section=has_objects_section,
+        legacy_keys_present=legacy_keys_present,
+    )
+    rocket = objects.get("rocket", rocket)
+    chaser = objects.get("chaser", chaser)
+    target = objects.get("target", target)
     cfg = SimulationScenarioConfig(
         scenario_name=str(root.get("scenario_name", "unnamed_scenario")),
         scenario_description=str(root.get("scenario_description", "") or ""),
-        rocket=_parse_agent_section(root.get("rocket"), role="rocket"),
-        chaser=_parse_agent_section(root.get("chaser"), role="chaser"),
-        target=_parse_agent_section(root.get("target"), role="target"),
+        rocket=rocket,
+        chaser=chaser,
+        target=target,
+        objects=objects,
         ground_stations=_parse_ground_stations_section(root.get("ground_stations")),
         simulator=_parse_simulator_section(root.get("simulator")),
         outputs=_parse_outputs_section(root.get("outputs")),
@@ -809,8 +1100,9 @@ def scenario_config_from_dict(data: dict[str, Any], source_path: str | Path | No
         analysis=normalized_analysis,
         metadata=dict(root.get("metadata", {}) or {}),
     )
-    if bool(dict(cfg.target.reference_orbit or {}).get("enabled", False)) and (not bool(cfg.target.enabled)):
-        raise ValueError("target.reference_orbit.enabled requires target.enabled to be true.")
+    for object_id, section in dict(cfg.objects or {}).items():
+        if bool(dict(section.reference_orbit or {}).get("enabled", False)) and (not bool(section.enabled)):
+            raise ValueError(f"{object_id}.reference_orbit.enabled requires {object_id}.enabled to be true.")
     return cfg
 
 

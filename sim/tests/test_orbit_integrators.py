@@ -4,7 +4,7 @@ import numpy as np
 
 from sim.config import scenario_config_from_dict
 from sim.dynamics.orbit.integrators import integrate_adaptive
-from sim.master_simulator import _build_orbit_propagator
+from sim.runtime_support import _build_orbit_propagator
 
 
 class TestOrbitIntegrators(unittest.TestCase):

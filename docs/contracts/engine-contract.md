@@ -21,7 +21,7 @@ fully covered here.
 
 ## Stability Level
 
-This is a 0.1 contract. It is meant to document intended behavior, not freeze
+This is a 0.4 contract. It is meant to document intended behavior, not freeze
 every implementation detail permanently. Changes that alter the observable
 contract should update this document, tests, and release notes together.
 
@@ -56,8 +56,12 @@ paths to reason about normal single-run behavior.
 
 Private or transitional internals:
 
-- `sim.master_simulator` remains important for legacy and batch workflows.
-- Batch analysis may delegate to campaign or legacy master paths.
+- `sim.master_simulator` is a compatibility facade for legacy imports.
+- Batch analysis and campaign workflows are owned by `sim.execution`.
+- Single-run payload construction and artifact writing are split between the
+  engine-facing payload builder and reporting/artifact writers. The engine is
+  responsible for simulation state evolution; reporting modules consume the
+  resulting payload.
 - Internal classes prefixed with `_`, including `_SingleRunEngine`, are not
   public extension APIs even when documented here for behavior.
 - The legacy lower-level `SimulationKernel` loop has been removed; single-run
@@ -90,17 +94,23 @@ unless an explicit migration or compatibility note says otherwise.
 
 ## Object Lifecycle
 
-Supported object roles:
+Supported object model:
 
-- `rocket`
-- `chaser`
-- `target`
+- Scenario YAML should define active scene participants under the canonical
+  `objects` map.
+- Object IDs are user-facing names and may be domain-specific, such as
+  `inspection_sat`, `depot`, `chief`, or `deputy`.
+- Conventional IDs `rocket`, `chaser`, and `target` remain supported as names
+  and compatibility aliases, but they are not fixed engine slots.
+- Object `kind` selects the runtime family, currently `satellite` or `rocket`.
 
 Object creation:
 
 - Enabled config sections create runtime objects.
 - Disabled config sections do not participate in truth, belief, control,
   sensing, or output histories.
+- Relative initialization, knowledge targets, controller objectives, benchmark
+  objectives, and output histories refer to object IDs by name.
 
 Initial sample:
 
@@ -111,8 +121,8 @@ Initial sample:
 Activation:
 
 - Most enabled objects are active at initialization.
-- A chaser configured for rocket deployment may exist but remain inactive until
-  deployment time.
+- A satellite configured for rocket deployment may exist but remain inactive
+  until deployment time.
 - Inactive objects are skipped for propagation/control until activated.
 
 Rocket-specific lifecycle:
@@ -287,7 +297,7 @@ Single-run payloads should include:
 - summary metadata,
 - plot and animation artifact paths when enabled.
 
-The summary is the primary stable review surface for 0.1. It should include:
+The summary is the primary stable review surface for 0.4. It should include:
 
 - scenario name and description,
 - object IDs,
@@ -346,7 +356,8 @@ release notes and accompanied by focused tests.
 ## Known Gaps
 
 - Batch workflow contracts are not yet fully documented.
-- Scenario YAML contract and payload/artifact contract need dedicated documents.
+- Campaign and benchmark contracts are not yet as complete as the single-run,
+  scenario YAML, payload/artifact, sensitivity, and AI-report contracts.
 - Public GUI workflows do not yet expose every advanced YAML capability.
 - Release-grade validation packages are still private maturity work, not a
   completed public-core contract.

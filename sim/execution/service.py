@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+import tempfile
 from typing import Any, Callable
+
+import yaml
 
 from sim.config import SimulationScenarioConfig, load_simulation_yaml, validate_scenario_plugins
 from sim.single_run import _SingleRunEngine, _coerce_noninteractive_for_automation, _run_single_config
@@ -87,9 +90,30 @@ class SimulationExecutionService:
         source_path: str | Path | None = None,
         step_callback: StepCallback | None = None,
     ) -> dict[str, Any]:
-        del source_path, step_callback
-        self._reject_batch_analysis(cfg)
-        raise AssertionError("unreachable")
+        del step_callback
+        temp_dir = str(Path(source_path).expanduser().resolve().parent) if source_path is not None else str(Path.cwd())
+        tmp_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                suffix=".yaml",
+                mode="w",
+                delete=False,
+                encoding="utf-8",
+                dir=temp_dir,
+            ) as tmp:
+                tmp_path = Path(tmp.name)
+                yaml.safe_dump(cfg.to_dict(), tmp, sort_keys=False)
+            self._reject_batch_analysis(cfg)
+            raise ImportError(
+                "Batch execution from in-memory configs is part of Orbital Engagement Pro. "
+                "The public core runs deterministic single scenarios."
+            )
+        finally:
+            if tmp_path is not None:
+                try:
+                    tmp_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     def wrap_single_file_payload(
         self,
