@@ -89,7 +89,9 @@ def _dashboard_object_ids(training_cfg: RPOTrainingConfig, anim_cfg: dict[str, A
     )
 
 
-def _training_briefing_lines(config: SimulationConfig, training_cfg: RPOTrainingConfig, *, difficulty: str) -> tuple[str, ...]:
+def _training_briefing_lines(
+    config: SimulationConfig, training_cfg: RPOTrainingConfig, *, difficulty: str
+) -> tuple[str, ...]:
     if not training_cfg.enabled:
         return ()
     game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
@@ -229,7 +231,9 @@ def run_game_mode(
             if briefing_open and not command_state.paused:
                 briefing_open = False
             if command_state.speed_multiplier_change:
-                current_speed_multiple = _adjust_speed_multiple(current_speed_multiple, command_state.speed_multiplier_change)
+                current_speed_multiple = _adjust_speed_multiple(
+                    current_speed_multiple, command_state.speed_multiplier_change
+                )
                 wall_step_s = _wall_step_s(dt_s, current_speed_multiple)
                 command_state.speed_multiplier_change = 0
                 last_step_wall = perf_counter()
@@ -390,12 +394,12 @@ def _mission_metrics(config: RPOTrainingConfig, score: Any) -> tuple[str, ...]:
         tol = float(config.goal_nmt_element_tolerance_km)
         r_err = float(getattr(score, "final_nmt_radial_amplitude_error_km", float("nan")))
         c_err = float(getattr(score, "final_nmt_cross_track_amplitude_error_km", float("nan")))
-        metrics.append(f"{_status_tag(r_err <= tol, r_err <= 0.75 * tol)} R amp { _fmt_metric(r_err)}/{tol:.2f} km")
-        metrics.append(f"{_status_tag(c_err <= tol, c_err <= 0.75 * tol)} C amp { _fmt_metric(c_err)}/{tol:.2f} km")
+        metrics.append(f"{_status_tag(r_err <= tol, r_err <= 0.75 * tol)} R amp {_fmt_metric(r_err)}/{tol:.2f} km")
+        metrics.append(f"{_status_tag(c_err <= tol, c_err <= 0.75 * tol)} C amp {_fmt_metric(c_err)}/{tol:.2f} km")
     if config.goal_nmt_velocity_tolerance_km_s is not None:
         tol = float(config.goal_nmt_velocity_tolerance_km_s)
         err = float(getattr(score, "final_nmt_drift_velocity_error_km_s", float("nan")))
-        metrics.append(f"{_status_tag(err <= tol, err <= 0.75 * tol)} Drift { _fmt_metric(err, precision=4)}/{tol:.4f}")
+        metrics.append(f"{_status_tag(err <= tol, err <= 0.75 * tol)} Drift {_fmt_metric(err, precision=4)}/{tol:.4f}")
     if config.goal_nmt_radial_amplitude_km is None and config.goal_radius_km is not None:
         err = float(getattr(score, "final_goal_error_km", float("nan")))
         tol = float(config.goal_radius_km)

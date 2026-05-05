@@ -28,9 +28,7 @@ class HCWRelativeOrbitMPCController(Controller):
     target_rel_ric_rect: np.ndarray = field(default_factory=lambda: np.zeros(6))
 
     q_weights: np.ndarray = field(default_factory=lambda: np.array([2.0e3, 2.0e3, 2.0e3, 3.0e7, 3.0e7, 3.0e7]))
-    terminal_weights: np.ndarray = field(
-        default_factory=lambda: np.array([8.0e3, 8.0e3, 8.0e3, 1.2e8, 1.2e8, 1.2e8])
-    )
+    terminal_weights: np.ndarray = field(default_factory=lambda: np.array([8.0e3, 8.0e3, 8.0e3, 1.2e8, 1.2e8, 1.2e8]))
     r_weights: np.ndarray = field(default_factory=lambda: np.ones(3) * 4.0e12)
     rd_weights: np.ndarray = field(default_factory=lambda: np.ones(3) * 4.0e12)
 
@@ -170,7 +168,11 @@ class HCWRelativeOrbitMPCController(Controller):
         if r0 <= 0.0:
             return Command.zero()
 
-        n = float(self.mean_motion_rad_s) if self.mean_motion_rad_s is not None else float(np.sqrt(self.mu_km3_s2 / (r0**3)))
+        n = (
+            float(self.mean_motion_rad_s)
+            if self.mean_motion_rad_s is not None
+            else float(np.sqrt(self.mu_km3_s2 / (r0**3)))
+        )
         if n <= 0.0 or (not np.isfinite(n)):
             return Command.zero()
         dt_model = self._resolve_model_dt(t_s)

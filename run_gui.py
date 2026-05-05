@@ -9,8 +9,7 @@ def main() -> int:
     except ModuleNotFoundError as exc:
         if str(getattr(exc, "name", "") or "").split(".", 1)[0] == "PySide6":
             raise SystemExit(
-                "PySide6 is not installed. Install GUI dependencies with "
-                '`python -m pip install ".[gui]"`.'
+                'PySide6 is not installed. Install GUI dependencies with `python -m pip install ".[gui]"`.'
             ) from exc
         raise
     return int(gui_main.main())

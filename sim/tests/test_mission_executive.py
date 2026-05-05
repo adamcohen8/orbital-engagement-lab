@@ -52,7 +52,9 @@ class MissionExecutiveTests(unittest.TestCase):
             world_truth={"target": _truth([7001.0, 0.0, 0.0])},
         )
 
-        self.assertTrue(np.allclose(np.array(out["fallback_thrust_eci_km_s2"], dtype=float), np.array([1e-6, 0.0, 0.0])))
+        self.assertTrue(
+            np.allclose(np.array(out["fallback_thrust_eci_km_s2"], dtype=float), np.array([1e-6, 0.0, 0.0]))
+        )
 
     def test_range_transition_obeys_min_mode_duration(self) -> None:
         executive = MissionExecutiveStrategy(
@@ -72,13 +74,19 @@ class MissionExecutiveTests(unittest.TestCase):
         )
         own_knowledge = {"target": _belief([7008.0, 0.0, 0.0])}
 
-        out0 = executive.update(truth=_truth([7000.0, 0.0, 0.0], t_s=0.0), own_knowledge=own_knowledge, world_truth={}, t_s=0.0)
+        out0 = executive.update(
+            truth=_truth([7000.0, 0.0, 0.0], t_s=0.0), own_knowledge=own_knowledge, world_truth={}, t_s=0.0
+        )
         self.assertEqual(out0["mission_mode"]["executive_mode"], "hold")
 
-        out1 = executive.update(truth=_truth([7000.0, 0.0, 0.0], t_s=3.0), own_knowledge=own_knowledge, world_truth={}, t_s=3.0)
+        out1 = executive.update(
+            truth=_truth([7000.0, 0.0, 0.0], t_s=3.0), own_knowledge=own_knowledge, world_truth={}, t_s=3.0
+        )
         self.assertEqual(out1["mission_mode"]["executive_mode"], "hold")
 
-        out2 = executive.update(truth=_truth([7000.0, 0.0, 0.0], t_s=5.0), own_knowledge=own_knowledge, world_truth={}, t_s=5.0)
+        out2 = executive.update(
+            truth=_truth([7000.0, 0.0, 0.0], t_s=5.0), own_knowledge=own_knowledge, world_truth={}, t_s=5.0
+        )
         self.assertEqual(out2["mission_mode"]["executive_mode"], "defend")
 
     def test_range_hysteresis_requires_reset_threshold_to_rearm(self) -> None:
@@ -111,22 +119,34 @@ class MissionExecutiveTests(unittest.TestCase):
         mid_knowledge = {"target": _belief([7012.0, 0.0, 0.0])}
         far_knowledge = {"target": _belief([7016.0, 0.0, 0.0])}
 
-        out0 = executive.update(truth=_truth([7000.0, 0.0, 0.0], t_s=0.0), own_knowledge=close_knowledge, world_truth={}, t_s=0.0)
+        out0 = executive.update(
+            truth=_truth([7000.0, 0.0, 0.0], t_s=0.0), own_knowledge=close_knowledge, world_truth={}, t_s=0.0
+        )
         self.assertEqual(out0["mission_mode"]["executive_mode"], "defend")
 
-        out1 = executive.update(truth=_truth([7000.0, 0.0, 0.0], t_s=1.0), own_knowledge=mid_knowledge, world_truth={}, t_s=1.0)
+        out1 = executive.update(
+            truth=_truth([7000.0, 0.0, 0.0], t_s=1.0), own_knowledge=mid_knowledge, world_truth={}, t_s=1.0
+        )
         self.assertEqual(out1["mission_mode"]["executive_mode"], "defend")
 
-        out2 = executive.update(truth=_truth([7000.0, 0.0, 0.0], t_s=2.0), own_knowledge=far_knowledge, world_truth={}, t_s=2.0)
+        out2 = executive.update(
+            truth=_truth([7000.0, 0.0, 0.0], t_s=2.0), own_knowledge=far_knowledge, world_truth={}, t_s=2.0
+        )
         self.assertEqual(out2["mission_mode"]["executive_mode"], "hold")
 
-        out3 = executive.update(truth=_truth([7000.0, 0.0, 0.0], t_s=3.0), own_knowledge=mid_knowledge, world_truth={}, t_s=3.0)
+        out3 = executive.update(
+            truth=_truth([7000.0, 0.0, 0.0], t_s=3.0), own_knowledge=mid_knowledge, world_truth={}, t_s=3.0
+        )
         self.assertEqual(out3["mission_mode"]["executive_mode"], "hold")
 
-        out4 = executive.update(truth=_truth([7000.0, 0.0, 0.0], t_s=4.0), own_knowledge=far_knowledge, world_truth={}, t_s=4.0)
+        out4 = executive.update(
+            truth=_truth([7000.0, 0.0, 0.0], t_s=4.0), own_knowledge=far_knowledge, world_truth={}, t_s=4.0
+        )
         self.assertEqual(out4["mission_mode"]["executive_mode"], "hold")
 
-        out5 = executive.update(truth=_truth([7000.0, 0.0, 0.0], t_s=5.0), own_knowledge=close_knowledge, world_truth={}, t_s=5.0)
+        out5 = executive.update(
+            truth=_truth([7000.0, 0.0, 0.0], t_s=5.0), own_knowledge=close_knowledge, world_truth={}, t_s=5.0
+        )
         self.assertEqual(out5["mission_mode"]["executive_mode"], "defend")
 
     def test_fuel_hysteresis_uses_reset_threshold_fraction(self) -> None:

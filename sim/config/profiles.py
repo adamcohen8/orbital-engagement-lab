@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Literal
 
 import numpy as np
-from datetime import datetime, timezone
 
 from sim.dynamics.attitude.disturbances import DisturbanceTorqueConfig
 from sim.dynamics.orbit.epoch import datetime_to_julian_date

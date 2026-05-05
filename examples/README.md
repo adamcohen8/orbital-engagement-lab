@@ -27,3 +27,6 @@ are not included in the public export.
 
 Older exploratory Python demos live outside the supported public examples
 surface.
+
+For a task-oriented table of public examples, expected outputs, and recommended
+starting points, see [Examples Matrix](../docs/examples-matrix.md).

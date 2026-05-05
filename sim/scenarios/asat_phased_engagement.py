@@ -5,7 +5,6 @@ from typing import Literal
 
 import numpy as np
 
-from sim.presets.rockets import BASIC_TWO_STAGE_STACK
 from sim.core.models import StateBelief, StateTruth
 from sim.dynamics.orbit.accelerations import OrbitContext
 from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2
@@ -17,6 +16,7 @@ from sim.knowledge.object_tracking import (
     ObjectKnowledgeBase,
     TrackedObjectConfig,
 )
+from sim.presets.rockets import BASIC_TWO_STAGE_STACK
 from sim.rocket import (
     OpenLoopPitchProgramGuidance,
     RocketAscentSimulator,
@@ -169,23 +169,29 @@ def run_asat_phased_engagement(
     rocket_vehicle_cfg: RocketVehicleConfig | None = None,
     rocket_guidance: RocketGuidanceLaw | None = None,
     target_initial_truth: StateTruth | None = None,
-    rocket_strategy: AgentStrategyConfig = AgentStrategyConfig(mode="coast", max_accel_km_s2=0.0),
-    target_strategy: AgentStrategyConfig = AgentStrategyConfig(mode="coast", max_accel_km_s2=0.0),
-    chaser_strategy: AgentStrategyConfig = AgentStrategyConfig(mode="coast", max_accel_km_s2=0.0),
-    gates: KnowledgeGateConfig = KnowledgeGateConfig(),
+    rocket_strategy: AgentStrategyConfig | None = None,
+    target_strategy: AgentStrategyConfig | None = None,
+    chaser_strategy: AgentStrategyConfig | None = None,
+    gates: KnowledgeGateConfig | None = None,
     rocket_track_cfg: TrackedObjectConfig | None = None,
     target_track_cfg: TrackedObjectConfig | None = None,
     chaser_track_cfg: TrackedObjectConfig | None = None,
 ) -> dict:
     rng = np.random.default_rng(scenario_cfg.seed)
+    rocket_strategy = rocket_strategy or AgentStrategyConfig(mode="coast", max_accel_km_s2=0.0)
+    target_strategy = target_strategy or AgentStrategyConfig(mode="coast", max_accel_km_s2=0.0)
+    chaser_strategy = chaser_strategy or AgentStrategyConfig(mode="coast", max_accel_km_s2=0.0)
+    gates = gates or KnowledgeGateConfig()
     dt = float(scenario_cfg.dt_s)
     n = int(np.floor(scenario_cfg.duration_s / dt)) + 1
     t_s = np.arange(n, dtype=float) * dt
 
-    sim_cfg = rocket_sim_cfg or RocketSimConfig(dt_s=dt, max_time_s=scenario_cfg.duration_s, atmosphere_model=scenario_cfg.atmosphere_model)
+    sim_cfg = rocket_sim_cfg or RocketSimConfig(
+        dt_s=dt, max_time_s=scenario_cfg.duration_s, atmosphere_model=scenario_cfg.atmosphere_model
+    )
     vehicle_cfg = rocket_vehicle_cfg or RocketVehicleConfig(stack=BASIC_TWO_STAGE_STACK, payload_mass_kg=150.0)
     guidance = rocket_guidance or OpenLoopPitchProgramGuidance()
-    target = (target_initial_truth.copy() if target_initial_truth is not None else _default_target_state())
+    target = target_initial_truth.copy() if target_initial_truth is not None else _default_target_state()
     target.t_s = 0.0
 
     rocket_sim = RocketAscentSimulator(sim_cfg=sim_cfg, vehicle_cfg=vehicle_cfg, guidance=guidance)
@@ -196,13 +202,22 @@ def run_asat_phased_engagement(
     chaser_track = chaser_track_cfg or _default_track(target_id=scenario_cfg.target_id, refresh_s=max(dt, 1.0))
 
     rocket_kb = ObjectKnowledgeBase(
-        observer_id=scenario_cfg.rocket_id, tracked_objects=[rocket_track], dt_s=dt, rng=np.random.default_rng(rng.integers(0, 2**31 - 1))
+        observer_id=scenario_cfg.rocket_id,
+        tracked_objects=[rocket_track],
+        dt_s=dt,
+        rng=np.random.default_rng(rng.integers(0, 2**31 - 1)),
     )
     target_kb = ObjectKnowledgeBase(
-        observer_id=scenario_cfg.target_id, tracked_objects=[target_track], dt_s=dt, rng=np.random.default_rng(rng.integers(0, 2**31 - 1))
+        observer_id=scenario_cfg.target_id,
+        tracked_objects=[target_track],
+        dt_s=dt,
+        rng=np.random.default_rng(rng.integers(0, 2**31 - 1)),
     )
     chaser_kb = ObjectKnowledgeBase(
-        observer_id=scenario_cfg.chaser_id, tracked_objects=[chaser_track], dt_s=dt, rng=np.random.default_rng(rng.integers(0, 2**31 - 1))
+        observer_id=scenario_cfg.chaser_id,
+        tracked_objects=[chaser_track],
+        dt_s=dt,
+        rng=np.random.default_rng(rng.integers(0, 2**31 - 1)),
     )
 
     ids = [scenario_cfg.rocket_id, scenario_cfg.target_id, scenario_cfg.chaser_id]
@@ -339,8 +354,10 @@ def run_asat_phased_engagement(
 
         if scenario_cfg.terminate_on_earth_impact:
             impact_map = {
-                scenario_cfg.rocket_id: float(np.linalg.norm(rocket.position_eci_km)) <= float(scenario_cfg.earth_impact_radius_km),
-                scenario_cfg.target_id: float(np.linalg.norm(target.position_eci_km)) <= float(scenario_cfg.earth_impact_radius_km),
+                scenario_cfg.rocket_id: float(np.linalg.norm(rocket.position_eci_km))
+                <= float(scenario_cfg.earth_impact_radius_km),
+                scenario_cfg.target_id: float(np.linalg.norm(target.position_eci_km))
+                <= float(scenario_cfg.earth_impact_radius_km),
             }
             if chaser is not None:
                 impact_map[scenario_cfg.chaser_id] = float(np.linalg.norm(chaser.position_eci_km)) <= float(

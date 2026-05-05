@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
 import tempfile
+from pathlib import Path
 
 import pytest
 
@@ -63,7 +63,7 @@ def test_public_gui_window_starts_without_analysis_modes(monkeypatch) -> None:
 
     from sim.gui.main_window import MainWindow
 
-    app = QApplication.instance() or QApplication([])
+    _app = QApplication.instance() or QApplication([])
     window = MainWindow()
     try:
         assert window.mc_mode_combo.count() == 0

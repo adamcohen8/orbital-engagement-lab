@@ -4,23 +4,29 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from sim.presets.attitude_control import BASIC_REACTION_WHEEL_TRIAD, ReactionWheelAssemblyPreset
-from sim.presets.rockets import BASIC_SSTO_ROCKET, BASIC_TWO_STAGE_STACK, RocketStackPreset, RocketStagePreset
-from sim.presets.satellites import BASIC_SATELLITE, SatellitePreset
-from sim.presets.thrusters import BASIC_CHEMICAL_BOTTOM_Z, ChemicalPropulsionPreset
-from sim.actuators import AttitudeActuator, CombinedActuator, OrbitalActuator, OrbitalActuatorLimits, ReactionWheelLimits
-from sim.control.orbit.zero_controller import ZeroController
-from sim.core.models import ObjectConfig, SimObject, StateBelief, StateTruth
-from sim.dynamics.model import OrbitalAttitudeDynamics
-from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2
-from sim.dynamics.orbit.propagator import OrbitPropagator
+from sim.actuators import (
+    AttitudeActuator,
+    CombinedActuator,
+    OrbitalActuator,
+    OrbitalActuatorLimits,
+    ReactionWheelLimits,
+)
 from sim.config import (
     build_default_ops_orbit_propagator,
     default_disturbance_config_for_profile,
     get_simulation_profile,
 )
+from sim.control.orbit.zero_controller import ZeroController
+from sim.core.models import ObjectConfig, SimObject, StateBelief, StateTruth
+from sim.dynamics.model import OrbitalAttitudeDynamics
+from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2
+from sim.dynamics.orbit.propagator import OrbitPropagator
 from sim.estimation.joint_state import JointStateEstimator
 from sim.estimation.orbit_ekf import OrbitEKFEstimator
+from sim.presets.attitude_control import BASIC_REACTION_WHEEL_TRIAD, ReactionWheelAssemblyPreset
+from sim.presets.rockets import BASIC_SSTO_ROCKET, BASIC_TWO_STAGE_STACK, RocketStackPreset, RocketStagePreset
+from sim.presets.satellites import BASIC_SATELLITE, SatellitePreset
+from sim.presets.thrusters import BASIC_CHEMICAL_BOTTOM_Z, ChemicalPropulsionPreset
 from sim.sensors.joint_state import JointStateSensor
 from sim.sensors.noisy_own_state import NoisyOwnStateSensor
 
@@ -136,7 +142,9 @@ def build_sim_object_from_presets(
                 srp_cp_offset_body_m=disturbance_cfg.srp_cp_offset_body_m,
                 sun_dir_eci=disturbance_cfg.sun_dir_eci,
                 use_rectangular_prism_faces=bool(use_rectangular_prism_aero_srp),
-                rectangular_prism_dims_m=tuple(float(v) for v in prism_dims) if use_rectangular_prism_aero_srp else None,
+                rectangular_prism_dims_m=tuple(float(v) for v in prism_dims)
+                if use_rectangular_prism_aero_srp
+                else None,
             ),
         )
     else:
@@ -167,7 +175,9 @@ def build_sim_object_from_presets(
             omega_sigma_rad_s=2e-5,
             rng=rng,
         )
-        estimator = JointStateEstimator(orbit_estimator=orbit_estimator, dt_s=dt_s, inertia_kg_m2=satellite.inertia_kg_m2)
+        estimator = JointStateEstimator(
+            orbit_estimator=orbit_estimator, dt_s=dt_s, inertia_kg_m2=satellite.inertia_kg_m2
+        )
     else:
         sensor = NoisyOwnStateSensor(pos_sigma_km=0.001, vel_sigma_km_s=1e-5, rng=rng)
         estimator = orbit_estimator

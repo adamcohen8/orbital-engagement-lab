@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import argparse
 import os
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 from sim.config import load_simulation_yaml, validate_scenario_plugins
 from sim.execution import run_simulation_config_file
-
 
 QUICKSTART_CONFIG = Path(__file__).resolve().parent / "configs" / "quickstart_5min.yaml"
 
@@ -20,7 +19,7 @@ def _print_preflight(config_path: str, cfg, errors: list[str]) -> None:
     print("=" * 72)
     print(f"Config   : {Path(config_path).resolve()}")
     print(f"Scenario : {cfg.scenario_name}")
-    print(f"Mode     : Single Run")
+    print("Mode     : Single Run")
     print(f"Timing   : duration={float(cfg.simulator.duration_s):.1f} s, dt={float(cfg.simulator.dt_s):.3f} s")
     if errors:
         print("Status   : INVALID")
@@ -59,7 +58,13 @@ def _print_doctor_report() -> bool:
         ("Python", sys.version_info >= (3, 9), sys.version.split()[0], True),
         ("Quickstart config", QUICKSTART_CONFIG.exists(), str(QUICKSTART_CONFIG), True),
     ]
-    for module_name, required in (("yaml", True), ("numpy", True), ("matplotlib", False), ("PySide6", False), ("pygame", False)):
+    for module_name, required in (
+        ("yaml", True),
+        ("numpy", True),
+        ("matplotlib", False),
+        ("PySide6", False),
+        ("pygame", False),
+    ):
         ok, detail = _check_import(module_name)
         checks.append((module_name, ok, detail, required))
     try:
@@ -89,7 +94,11 @@ def _print_doctor_report() -> bool:
         if required and not ok:
             overall_ok = False
     print("-" * 72)
-    print("Ready: run `python run_simulation.py --quickstart`." if overall_ok else "Not ready: fix FAIL items and rerun doctor.")
+    print(
+        "Ready: run `python run_simulation.py --quickstart`."
+        if overall_ok
+        else "Not ready: fix FAIL items and rerun doctor."
+    )
     print("Optional plotting/GUI/game dependencies may show WARN and are not required for quickstart.")
     print("=" * 72)
     return overall_ok
@@ -129,12 +138,35 @@ def _open_output_folder(path_text: str | Path) -> bool:
         return False
 
 
+def _print_single_run_summary(out: dict) -> None:
+    run = dict(out.get("run", {}) or {})
+    objects = [str(item) for item in list(run.get("objects", []) or [])]
+    print("")
+    print("=" * 72)
+    print("SIMULATION COMPLETED")
+    print("=" * 72)
+    print(f"Scenario : {out.get('scenario_name', run.get('scenario_name', 'unknown'))}")
+    print(f"Samples  : {run.get('samples', 0)}")
+    print(f"Duration : {float(run.get('duration_s', 0.0)):.1f} s")
+    print(f"Output   : {run.get('output_dir', '')}")
+    if "rocket" in objects and "rocket_insertion_achieved" in run:
+        if bool(run.get("rocket_insertion_achieved", False)):
+            print(f"Insertion  : achieved at t={run.get('rocket_insertion_time_s')}")
+        else:
+            print("Insertion  : not achieved")
+    print("=" * 72)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run a public-core Orbital Engagement Lab scenario.")
     parser.add_argument("--config", default="", help="Path to a simulation scenario YAML file.")
     parser.add_argument("--quickstart", action="store_true", help="Run the bundled five-minute quickstart scenario.")
-    parser.add_argument("--doctor", action="store_true", help="Check the local Python environment and quickstart readiness.")
-    parser.add_argument("--open-output", action="store_true", help="Open the output folder after a successful simulation run.")
+    parser.add_argument(
+        "--doctor", action="store_true", help="Check the local Python environment and quickstart readiness."
+    )
+    parser.add_argument(
+        "--open-output", action="store_true", help="Open the output folder after a successful simulation run."
+    )
     parser.add_argument(
         "--validate-only",
         action="store_true",

@@ -15,7 +15,7 @@ class StateTruth:
     mass_kg: float
     t_s: float
 
-    def copy(self) -> "StateTruth":
+    def copy(self) -> StateTruth:
         return StateTruth(
             position_eci_km=self.position_eci_km.copy(),
             velocity_eci_km_s=self.velocity_eci_km_s.copy(),
@@ -40,7 +40,7 @@ class Command:
     mode_flags: dict[str, Any] = field(default_factory=dict)
 
     @staticmethod
-    def zero() -> "Command":
+    def zero() -> Command:
         return Command()
 
 
@@ -131,9 +131,7 @@ class SimLog:
             },
             "applied_thrust_by_object": {k: v.tolist() for k, v in self.applied_thrust_by_object.items()},
             "applied_torque_by_object": {k: v.tolist() for k, v in self.applied_torque_by_object.items()},
-            "controller_runtime_ms_by_object": {
-                k: v.tolist() for k, v in self.controller_runtime_ms_by_object.items()
-            },
+            "controller_runtime_ms_by_object": {k: v.tolist() for k, v in self.controller_runtime_ms_by_object.items()},
             "controller_skipped_by_object": {
                 k: v.astype(int).tolist() for k, v in self.controller_skipped_by_object.items()
             },

@@ -46,7 +46,9 @@ class JointStateEstimator(Estimator):
         att_belief = StateBelief(state=att_state, covariance=att_cov, last_update_t_s=belief.last_update_t_s)
         att_meas = None
         if measurement is not None and measurement.vector.size >= 13:
-            att_meas_vec = np.hstack((normalize_quaternion(measurement.vector[6:10]), np.array(measurement.vector[10:13], dtype=float)))
+            att_meas_vec = np.hstack(
+                (normalize_quaternion(measurement.vector[6:10]), np.array(measurement.vector[10:13], dtype=float))
+            )
             att_meas = Measurement(vector=att_meas_vec, t_s=measurement.t_s)
         assert self.attitude_estimator is not None
         att_upd = self.attitude_estimator.update(att_belief, att_meas, t_s)

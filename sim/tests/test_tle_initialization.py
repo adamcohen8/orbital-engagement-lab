@@ -5,7 +5,6 @@ import numpy as np
 from sim import SimulationConfig, SimulationSession
 from sim.dynamics.orbit.tle import parse_tle_lines, tle_to_rv_eci
 
-
 ISS_LINE1 = "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9005"
 ISS_LINE2 = "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1000"
 

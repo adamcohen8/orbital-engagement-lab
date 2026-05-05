@@ -82,7 +82,9 @@ def build_single_run_payload(context: SingleRunPayloadContext) -> dict[str, Any]
         "applied_thrust_by_object": {k: v.tolist() for k, v in context.thrust_hist.items()},
         "applied_torque_by_object": {k: v.tolist() for k, v in context.torque_hist.items()},
         "desired_attitude_by_object": {k: v.tolist() for k, v in context.desired_attitude_hist.items()},
-        "knowledge_by_observer": {o: {t: a.tolist() for t, a in bt.items()} for o, bt in context.knowledge_hist.items()},
+        "knowledge_by_observer": {
+            o: {t: a.tolist() for t, a in bt.items()} for o, bt in context.knowledge_hist.items()
+        },
         "knowledge_detection_by_observer": dict(context.knowledge_detection_by_observer),
         "knowledge_consistency_by_observer": dict(context.knowledge_consistency_by_observer),
         "ground_station_access": ground_station_access,

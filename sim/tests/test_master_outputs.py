@@ -6,7 +6,12 @@ import numpy as np
 
 from sim.config import scenario_config_from_dict
 from sim.master_outputs import animate_outputs, plot_outputs
-from sim.utils.plot_windows import attitude_axis_limits, axis_window_from_values, fuel_fraction_from_remaining_series, windows_from_points
+from sim.utils.plot_windows import (
+    attitude_axis_limits,
+    axis_window_from_values,
+    fuel_fraction_from_remaining_series,
+    windows_from_points,
+)
 from sim.utils.thruster_plot_geometry import thruster_marker_geometry_body
 
 
@@ -35,7 +40,9 @@ def test_plot_outputs_uses_target_reference_orbit_for_ric_multi(monkeypatch, tmp
     ) -> None:
         captured["frame"] = frame
         captured["keys"] = sorted(truth_hist_by_object.keys())
-        captured["reference_truth_hist"] = None if reference_truth_hist is None else np.array(reference_truth_hist, dtype=float)
+        captured["reference_truth_hist"] = (
+            None if reference_truth_hist is None else np.array(reference_truth_hist, dtype=float)
+        )
         captured["out_path"] = out_path
 
     def _noop(*args, **kwargs) -> None:
@@ -133,7 +140,9 @@ def test_animate_outputs_uses_target_reference_orbit_for_curv_animations(monkeyp
         captured["3d_keys"] = sorted(truth_hist_by_object.keys())
         captured["3d_frame"] = frame
         captured["3d_show_trajectory"] = show_trajectory
-        captured["3d_reference_truth_hist"] = None if reference_truth_hist is None else np.array(reference_truth_hist, dtype=float)
+        captured["3d_reference_truth_hist"] = (
+            None if reference_truth_hist is None else np.array(reference_truth_hist, dtype=float)
+        )
         captured["3d_out_path"] = out_path
 
     def _capture_2d(

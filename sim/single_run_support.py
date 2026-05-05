@@ -1,13 +1,17 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import logging
+from dataclasses import dataclass
 from time import perf_counter
 from typing import Any
 
 import numpy as np
 
-from sim.actuators.orbital import attitude_coupled_thrust_eci, effective_max_accel_km_s2, thruster_disturbance_torque_body_nm
+from sim.actuators.orbital import (
+    attitude_coupled_thrust_eci,
+    effective_max_accel_km_s2,
+    thruster_disturbance_torque_body_nm,
+)
 from sim.config.object_refs import relative_reference_for_object
 from sim.core.models import Command, StateBelief, StateTruth
 from sim.dynamics.orbit.environment import EARTH_RADIUS_KM
@@ -191,7 +195,9 @@ class _RocketStepper:
             agent.belief.state[:6] = _truth_state6(agent.truth, agent.belief.state[:6])
             agent.belief.last_update_t_s = t_next
         thrust_n = float(getattr(agent.rocket_state, "_last_step_thrust_n", 0.0))
-        axis_eci = quaternion_to_dcm_bn(agent.rocket_state.attitude_quat_bn).T @ np.array(agent.rocket_sim.vehicle_cfg.thrust_axis_body, dtype=float)
+        axis_eci = quaternion_to_dcm_bn(agent.rocket_state.attitude_quat_bn).T @ np.array(
+            agent.rocket_sim.vehicle_cfg.thrust_axis_body, dtype=float
+        )
         accel = (thrust_n / max(agent.rocket_state.mass_kg, 1e-9)) * axis_eci / 1e3
         accel_mag = float(np.linalg.norm(accel))
         return _RocketStepResult(
@@ -249,7 +255,11 @@ class _SatelliteBeliefAdapter:
                         target_belief.state[:6],
                         t_s=target_belief.last_update_t_s,
                     )
-            if chief_truth is not None and aid != reference_id and hasattr(agent.orbit_controller, "ric_curv_state_slice"):
+            if (
+                chief_truth is not None
+                and aid != reference_id
+                and hasattr(agent.orbit_controller, "ric_curv_state_slice")
+            ):
                 self.orbit_belief_scratch.last_update_t_s = orb_belief.last_update_t_s
                 self.orbit_belief_scratch.state = _relative_orbit_state12(
                     chief_truth=chief_truth,
@@ -327,7 +337,12 @@ class _SatelliteCommandBuilder:
             c_orb = agent.orbit_controller.act(orb_belief, t_s, 2.0)
             orbit_runtime_ms = (perf_counter() - orbit_t0) * 1000.0
         c_att = Command.zero()
-        if e.attitude_enabled and (not use_integrated_cmd) and agent.attitude_controller is not None and att_belief is not None:
+        if (
+            e.attitude_enabled
+            and (not use_integrated_cmd)
+            and agent.attitude_controller is not None
+            and att_belief is not None
+        ):
             attitude_t0 = perf_counter()
             c_att = agent.attitude_controller.act(att_belief, t_s, 2.0)
             attitude_runtime_ms = (perf_counter() - attitude_t0) * 1000.0
@@ -421,7 +436,11 @@ class _SatelliteCommandBuilder:
             cmd_step.mode_flags["delta_mass_kg"] = applied_delta_mass_kg
 
         thruster_torque_body_nm = np.zeros(3, dtype=float)
-        if e.attitude_enabled and agent.thruster_direction_body is not None and agent.thruster_position_body_m is not None:
+        if (
+            e.attitude_enabled
+            and agent.thruster_direction_body is not None
+            and agent.thruster_position_body_m is not None
+        ):
             thruster_torque_body_nm = thruster_disturbance_torque_body_nm(
                 cmd_step.thrust_eci_km_s2,
                 current_mass_kg=float(max(truth.mass_kg, 0.0)),
@@ -451,7 +470,11 @@ class _SatelliteEstimatorUpdater:
         world_truth: dict[str, StateTruth],
         t_s: float,
     ) -> None:
-        meas = agent.sensor.measure(truth=truth, env={"world_truth": world_truth}, t_s=t_s) if agent.sensor is not None else None
+        meas = (
+            agent.sensor.measure(truth=truth, env={"world_truth": world_truth}, t_s=t_s)
+            if agent.sensor is not None
+            else None
+        )
         if agent.estimator is not None and agent.belief is not None:
             agent.belief = agent.estimator.update(agent.belief, meas, t_s)
 
@@ -479,8 +502,12 @@ class _ControllerDebugRecorder:
                 "interval_end_t_s": float(interval_end_t_s),
                 "dt_s": float(dt_s),
                 "belief": (np.array(agent.belief.state, dtype=float).tolist() if agent.belief is not None else None),
-                "orbit_belief": (np.array(orbit_belief.state, dtype=float).tolist() if orbit_belief is not None else None),
-                "attitude_belief": (np.array(attitude_belief.state, dtype=float).tolist() if attitude_belief is not None else None),
+                "orbit_belief": (
+                    np.array(orbit_belief.state, dtype=float).tolist() if orbit_belief is not None else None
+                ),
+                "attitude_belief": (
+                    np.array(attitude_belief.state, dtype=float).tolist() if attitude_belief is not None else None
+                ),
                 "orbit_controller_runtime_ms": float(command_result.orbit_runtime_ms),
                 "attitude_controller_runtime_ms": float(command_result.attitude_runtime_ms),
                 "controller_runtime_ms": float(command_result.orbit_runtime_ms + command_result.attitude_runtime_ms),
@@ -694,7 +721,9 @@ class _TerminationMonitor:
         sim_cfg = rocket.rocket_sim.sim_cfg
         alt_km = _rocket_altitude_km(rs.position_eci_km, rs.t_s, sim_cfg)
         near_alt = abs(float(alt_km) - float(sim_cfg.target_altitude_km)) <= float(sim_cfg.target_altitude_tolerance_km)
-        _, ecc_now = _orbital_elements_basic(np.array(rs.position_eci_km, dtype=float), np.array(rs.velocity_eci_km_s, dtype=float))
+        _, ecc_now = _orbital_elements_basic(
+            np.array(rs.position_eci_km, dtype=float), np.array(rs.velocity_eci_km_s, dtype=float)
+        )
         low_e = float(ecc_now) <= float(sim_cfg.target_eccentricity_max)
         stages_done = int(rs.active_stage_index) >= len(rocket.rocket_sim.vehicle_cfg.stack.stages)
         if near_alt and low_e and stages_done:

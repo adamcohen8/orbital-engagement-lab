@@ -105,7 +105,7 @@ class RocketState:
     payload_attached: bool = True
     thrust_vector_body: np.ndarray = field(default_factory=lambda: np.array([1.0, 0.0, 0.0], dtype=float))
 
-    def copy(self) -> "RocketState":
+    def copy(self) -> RocketState:
         return RocketState(
             t_s=float(self.t_s),
             position_eci_km=self.position_eci_km.copy(),
@@ -129,8 +129,9 @@ class GuidanceCommand:
 
 
 class RocketGuidanceLaw(Protocol):
-    def command(self, state: RocketState, sim_cfg: RocketSimConfig, vehicle_cfg: RocketVehicleConfig) -> GuidanceCommand:
-        ...
+    def command(
+        self, state: RocketState, sim_cfg: RocketSimConfig, vehicle_cfg: RocketVehicleConfig
+    ) -> GuidanceCommand: ...
 
 
 @dataclass

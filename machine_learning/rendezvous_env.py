@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from sim.presets import BASIC_CHEMICAL_BOTTOM_Z, BASIC_SATELLITE, build_sim_object_from_presets
 from sim.core.models import Command
 from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2
 from sim.dynamics.orbit.two_body import propagate_two_body_rk4
@@ -15,6 +14,7 @@ from sim.knowledge import (
     ObjectKnowledgeBase,
     TrackedObjectConfig,
 )
+from sim.presets import BASIC_CHEMICAL_BOTTOM_Z, BASIC_SATELLITE, build_sim_object_from_presets
 from sim.utils.quaternion import quaternion_to_dcm_bn
 
 
@@ -36,7 +36,9 @@ def _ric_rect_to_eci(x_host_eci: np.ndarray, x_rel_rect: np.ndarray) -> np.ndarr
     dr = np.linalg.inv(rsw.T) @ xr
     rtemp = np.cross(h, v_host)
     vtemp = np.cross(h, r_host)
-    drsw = np.column_stack((v_host / max(np.linalg.norm(r_host), 1e-12), rtemp / max(np.linalg.norm(vtemp), 1e-12), np.zeros(3)))
+    drsw = np.column_stack(
+        (v_host / max(np.linalg.norm(r_host), 1e-12), rtemp / max(np.linalg.norm(vtemp), 1e-12), np.zeros(3))
+    )
     frame_mv = np.array(
         [
             xr[0] * (r_host @ v_host) / (max(np.linalg.norm(r_host), 1e-12) ** 2),
@@ -61,8 +63,12 @@ class RLRendezvousConfig:
     knowledge_dropout_prob: float = 0.0
     target_pos_sigma_km: np.ndarray = field(default_factory=lambda: np.array([5e-3, 5e-3, 5e-3]))
     target_vel_sigma_km_s: np.ndarray = field(default_factory=lambda: np.array([5e-5, 5e-5, 5e-5]))
-    target_ekf_process_diag: np.ndarray = field(default_factory=lambda: np.array([1e-8, 1e-8, 1e-8, 1e-10, 1e-10, 1e-10]))
-    target_ekf_meas_diag: np.ndarray = field(default_factory=lambda: np.array([2.5e-5, 2.5e-5, 2.5e-5, 2.5e-9, 2.5e-9, 2.5e-9]))
+    target_ekf_process_diag: np.ndarray = field(
+        default_factory=lambda: np.array([1e-8, 1e-8, 1e-8, 1e-10, 1e-10, 1e-10])
+    )
+    target_ekf_meas_diag: np.ndarray = field(
+        default_factory=lambda: np.array([2.5e-5, 2.5e-5, 2.5e-5, 2.5e-9, 2.5e-9, 2.5e-9])
+    )
     target_ekf_init_cov_diag: np.ndarray = field(default_factory=lambda: np.array([1.0, 1.0, 1.0, 1e-2, 1e-2, 1e-2]))
     reward_mode: str = "lookahead_terminal_closest"
     lookahead_horizon_s: float = 600.0

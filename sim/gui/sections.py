@@ -240,9 +240,7 @@ def build_monte_carlo_tab(owner) -> QWidget:
     owner.analysis_lhs_samples_spin.setRange(1, 1000000)
     owner.analysis_metrics_edit = QPlainTextEdit()
     owner.analysis_metrics_edit.setPlaceholderText(
-        "summary.duration_s\n"
-        "derived.closest_approach_km\n"
-        "summary.thrust_stats.chaser.total_dv_m_s"
+        "summary.duration_s\nderived.closest_approach_km\nsummary.thrust_stats.chaser.total_dv_m_s"
     )
     owner.analysis_metrics_edit.setMaximumHeight(78)
     owner.analysis_baseline_enable_check = QCheckBox("Enable Baseline Comparison")
@@ -452,10 +450,19 @@ def build_objects_tab(owner) -> QWidget:
     owner.target_gnc_container = QWidget()
     target_gnc_form = QFormLayout(owner.target_gnc_container)
     target_gnc_form.setContentsMargins(0, 0, 0, 0)
-    target_gnc_form.addRow("Mission Strategy", owner._make_pointer_editor_row(owner.target_strategy_combo, "target", "mission_strategy"))
-    target_gnc_form.addRow("Mission Execution", owner._make_pointer_editor_row(owner.target_execution_combo, "target", "mission_execution"))
-    target_gnc_form.addRow("Orbit Control", owner._make_pointer_editor_row(owner.target_orbit_control_combo, "target", "orbit_control"))
-    target_gnc_form.addRow("Attitude Control", owner._make_pointer_editor_row(owner.target_attitude_control_combo, "target", "attitude_control"))
+    target_gnc_form.addRow(
+        "Mission Strategy", owner._make_pointer_editor_row(owner.target_strategy_combo, "target", "mission_strategy")
+    )
+    target_gnc_form.addRow(
+        "Mission Execution", owner._make_pointer_editor_row(owner.target_execution_combo, "target", "mission_execution")
+    )
+    target_gnc_form.addRow(
+        "Orbit Control", owner._make_pointer_editor_row(owner.target_orbit_control_combo, "target", "orbit_control")
+    )
+    target_gnc_form.addRow(
+        "Attitude Control",
+        owner._make_pointer_editor_row(owner.target_attitude_control_combo, "target", "attitude_control"),
+    )
     target_form.addRow(owner.target_gnc_container)
     owner.target_knowledge_button = owner._make_section_toggle_button("target", "knowledge")
     target_form.addRow("Knowledge / Sensor", owner.target_knowledge_button)
@@ -504,10 +511,19 @@ def build_objects_tab(owner) -> QWidget:
     owner.chaser_gnc_container = QWidget()
     chaser_gnc_form = QFormLayout(owner.chaser_gnc_container)
     chaser_gnc_form.setContentsMargins(0, 0, 0, 0)
-    chaser_gnc_form.addRow("Mission Strategy", owner._make_pointer_editor_row(owner.chaser_strategy_combo, "chaser", "mission_strategy"))
-    chaser_gnc_form.addRow("Mission Execution", owner._make_pointer_editor_row(owner.chaser_execution_combo, "chaser", "mission_execution"))
-    chaser_gnc_form.addRow("Orbit Control", owner._make_pointer_editor_row(owner.chaser_orbit_control_combo, "chaser", "orbit_control"))
-    chaser_gnc_form.addRow("Attitude Control", owner._make_pointer_editor_row(owner.chaser_attitude_control_combo, "chaser", "attitude_control"))
+    chaser_gnc_form.addRow(
+        "Mission Strategy", owner._make_pointer_editor_row(owner.chaser_strategy_combo, "chaser", "mission_strategy")
+    )
+    chaser_gnc_form.addRow(
+        "Mission Execution", owner._make_pointer_editor_row(owner.chaser_execution_combo, "chaser", "mission_execution")
+    )
+    chaser_gnc_form.addRow(
+        "Orbit Control", owner._make_pointer_editor_row(owner.chaser_orbit_control_combo, "chaser", "orbit_control")
+    )
+    chaser_gnc_form.addRow(
+        "Attitude Control",
+        owner._make_pointer_editor_row(owner.chaser_attitude_control_combo, "chaser", "attitude_control"),
+    )
     chaser_form.addRow(owner.chaser_gnc_container)
     owner.chaser_knowledge_button = owner._make_section_toggle_button("chaser", "knowledge")
     chaser_form.addRow("Knowledge / Sensor", owner.chaser_knowledge_button)
@@ -561,9 +577,15 @@ def build_objects_tab(owner) -> QWidget:
     owner.rocket_gnc_container = QWidget()
     rocket_gnc_form = QFormLayout(owner.rocket_gnc_container)
     rocket_gnc_form.setContentsMargins(0, 0, 0, 0)
-    rocket_gnc_form.addRow("Mission Strategy", owner._make_pointer_editor_row(owner.rocket_strategy_combo, "rocket", "mission_strategy"))
-    rocket_gnc_form.addRow("Mission Execution", owner._make_pointer_editor_row(owner.rocket_execution_combo, "rocket", "mission_execution"))
-    rocket_gnc_form.addRow("Base Guidance", owner._make_pointer_editor_row(owner.rocket_base_guidance_combo, "rocket", "base_guidance"))
+    rocket_gnc_form.addRow(
+        "Mission Strategy", owner._make_pointer_editor_row(owner.rocket_strategy_combo, "rocket", "mission_strategy")
+    )
+    rocket_gnc_form.addRow(
+        "Mission Execution", owner._make_pointer_editor_row(owner.rocket_execution_combo, "rocket", "mission_execution")
+    )
+    rocket_gnc_form.addRow(
+        "Base Guidance", owner._make_pointer_editor_row(owner.rocket_base_guidance_combo, "rocket", "base_guidance")
+    )
     rocket_guidance_modifiers_row = QWidget()
     rocket_guidance_modifiers_layout = QHBoxLayout(rocket_guidance_modifiers_row)
     rocket_guidance_modifiers_layout.setContentsMargins(0, 0, 0, 0)

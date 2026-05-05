@@ -99,7 +99,9 @@ class OrbitEKFEstimator(Estimator):
         )
         return StateBelief(state=x_upd, covariance=p_upd, last_update_t_s=t_s)
 
-    def _numerical_jacobian(self, x: np.ndarray, *, base: np.ndarray | None = None, dt_s: float | None = None) -> np.ndarray:
+    def _numerical_jacobian(
+        self, x: np.ndarray, *, base: np.ndarray | None = None, dt_s: float | None = None
+    ) -> np.ndarray:
         step_dt_s = self.dt_s if dt_s is None else float(dt_s)
         eps = 1e-6
         base_eval = base

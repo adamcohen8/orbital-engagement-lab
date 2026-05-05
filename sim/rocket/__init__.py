@@ -1,3 +1,4 @@
+from sim.rocket.aero import RocketAeroConfig
 from sim.rocket.engine import RocketAscentSimulator
 from sim.rocket.guidance import (
     ClosedLoopInsertionGuidance,
@@ -7,7 +8,6 @@ from sim.rocket.guidance import (
     OrbitInsertionCutoffGuidance,
     TVCSteeringGuidance,
 )
-from sim.rocket.aero import RocketAeroConfig
 from sim.rocket.models import (
     GuidanceCommand,
     RocketGuidanceLaw,

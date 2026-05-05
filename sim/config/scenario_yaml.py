@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import math
 from copy import deepcopy
 from dataclasses import dataclass, field, fields, is_dataclass
-import math
 from pathlib import Path
 from typing import Any
 
@@ -65,10 +65,12 @@ class SimulatorSection:
     duration_s: float = 3600.0
     dt_s: float = 1.0
     initial_jd_utc: float | None = None
-    dynamics: "SimulatorDynamicsSection" = field(default_factory=lambda: SimulatorDynamicsSection())
-    environment: "SimulatorEnvironmentSection" = field(default_factory=lambda: SimulatorEnvironmentSection())
-    plugin_validation: "SimulatorPluginValidationSection" = field(default_factory=lambda: SimulatorPluginValidationSection())
-    termination: "SimulatorTerminationSection" = field(default_factory=lambda: SimulatorTerminationSection())
+    dynamics: SimulatorDynamicsSection = field(default_factory=lambda: SimulatorDynamicsSection())
+    environment: SimulatorEnvironmentSection = field(default_factory=lambda: SimulatorEnvironmentSection())
+    plugin_validation: SimulatorPluginValidationSection = field(
+        default_factory=lambda: SimulatorPluginValidationSection()
+    )
+    termination: SimulatorTerminationSection = field(default_factory=lambda: SimulatorTerminationSection())
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "dynamics", SimulatorDynamicsSection(self.dynamics))
@@ -452,7 +454,9 @@ def _load_yaml_mapping(path: Path, section_name: str) -> dict[str, Any]:
     try:
         import yaml  # type: ignore
     except Exception as exc:
-        raise RuntimeError("PyYAML is required to load simulation YAML configs. Install with `pip install pyyaml`.") from exc
+        raise RuntimeError(
+            "PyYAML is required to load simulation YAML configs. Install with `pip install pyyaml`."
+        ) from exc
     with path.open("r", encoding="utf-8") as f:
         raw = yaml.safe_load(f) or {}
     if not isinstance(raw, dict):
@@ -682,7 +686,9 @@ def _parse_agent_section(
     if not resolved_object_id:
         raise ValueError(f"Section '{role}.object_id' must be non-empty.")
     resolved_role = str(d.get("role", role.split(".")[-1]))
-    resolved_kind = str(d.get("kind", default_kind or ("rocket" if resolved_role == "rocket" else "satellite"))).strip().lower()
+    resolved_kind = (
+        str(d.get("kind", default_kind or ("rocket" if resolved_role == "rocket" else "satellite"))).strip().lower()
+    )
     if resolved_kind not in {"satellite", "rocket"}:
         raise ValueError(f"Section '{role}.kind' must be one of: satellite, rocket.")
     if resolved_kind != "rocket" and d.get("guidance") is not None:
@@ -694,7 +700,9 @@ def _parse_agent_section(
     legacy_guidance = d.get("guidance")
     if resolved_kind == "rocket" and base_guidance is None and legacy_guidance is not None:
         base_guidance = legacy_guidance
-    resolved_default_enabled = bool(default_enabled_by_role.get(role, True)) if default_enabled is None else bool(default_enabled)
+    resolved_default_enabled = (
+        bool(default_enabled_by_role.get(role, True)) if default_enabled is None else bool(default_enabled)
+    )
     return AgentSection(
         object_id=resolved_object_id,
         kind=resolved_kind,
@@ -815,7 +823,9 @@ def _parse_simulator_section(value: Any) -> SimulatorSection:
     plugin_validation.update(dict(d.get("plugin_validation", {}) or {}))
     termination = {"earth_impact_enabled": True, "earth_radius_km": 6378.137}
     termination.update(dict(d.get("termination", {}) or {}))
-    plugin_validation["strict"] = _parse_bool(plugin_validation.get("strict", True), "simulator.plugin_validation.strict")
+    plugin_validation["strict"] = _parse_bool(
+        plugin_validation.get("strict", True), "simulator.plugin_validation.strict"
+    )
     termination["earth_impact_enabled"] = _parse_bool(
         termination.get("earth_impact_enabled", True),
         "simulator.termination.earth_impact_enabled",
@@ -876,7 +886,9 @@ def _parse_monte_carlo_section(value: Any) -> MonteCarloSection:
     return out
 
 
-def _parse_analysis_execution_section(value: Any, *, fallback: MonteCarloSection | None = None) -> AnalysisExecutionSection:
+def _parse_analysis_execution_section(
+    value: Any, *, fallback: MonteCarloSection | None = None
+) -> AnalysisExecutionSection:
     d = _as_dict(value, "analysis.execution")
     default_parallel_enabled = bool(fallback.parallel_enabled) if fallback is not None else False
     default_parallel_workers = int(fallback.parallel_workers) if fallback is not None else 0
@@ -913,7 +925,9 @@ def _parse_analysis_baseline_section(value: Any) -> AnalysisBaselineSection:
     )
 
 
-def _parse_analysis_monte_carlo_section(value: Any, *, fallback: MonteCarloSection | None = None) -> AnalysisMonteCarloSection:
+def _parse_analysis_monte_carlo_section(
+    value: Any, *, fallback: MonteCarloSection | None = None
+) -> AnalysisMonteCarloSection:
     d = _as_dict(value, "analysis.monte_carlo")
     vars_raw = d.get("variations")
     if vars_raw is None:
@@ -1110,7 +1124,9 @@ def load_simulation_yaml(path: str | Path) -> SimulationScenarioConfig:
     try:
         import yaml  # type: ignore
     except Exception as exc:
-        raise RuntimeError("PyYAML is required to load simulation YAML configs. Install with `pip install pyyaml`.") from exc
+        raise RuntimeError(
+            "PyYAML is required to load simulation YAML configs. Install with `pip install pyyaml`."
+        ) from exc
     p = Path(path)
     with p.open("r", encoding="utf-8") as f:
         raw = yaml.safe_load(f) or {}

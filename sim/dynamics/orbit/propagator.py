@@ -17,7 +17,6 @@ from sim.dynamics.orbit.accelerations import (
 )
 from sim.dynamics.orbit.atmosphere import density_from_model
 from sim.dynamics.orbit.eclipse import resolve_srp_geometry, srp_shadow_factor
-from sim.dynamics.orbit.epoch import resolve_body_position_eci_km, resolve_sun_moon_positions
 from sim.dynamics.orbit.environment import (
     EARTH_RADIUS_KM,
     JUPITER_MU_KM3_S2,
@@ -31,13 +30,13 @@ from sim.dynamics.orbit.environment import (
     URANUS_MU_KM3_S2,
     VENUS_MU_KM3_S2,
 )
+from sim.dynamics.orbit.epoch import resolve_body_position_eci_km, resolve_sun_moon_positions
 from sim.dynamics.orbit.integrators import integrate_adaptive, rk4_step_state
 from sim.dynamics.orbit.spherical_harmonics import (
     accel_spherical_harmonics_terms,
     load_real_earth_gravity_terms,
     parse_spherical_harmonic_terms,
 )
-
 
 AccelerationPlugin = Callable[[float, np.ndarray, dict, OrbitContext], np.ndarray]
 PLANETARY_MU_KM3_S2 = {

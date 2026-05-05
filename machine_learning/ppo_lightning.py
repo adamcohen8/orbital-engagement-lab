@@ -13,8 +13,10 @@ from machine_learning.rendezvous_env import RLRendezvousEnv
 try:
     from tqdm.auto import tqdm
 except Exception:  # pragma: no cover
+
     def tqdm(iterable=None, **kwargs):
         if iterable is None:
+
             class _NoopBar:
                 def update(self, n=1):
                     return None
@@ -71,7 +73,9 @@ class _ActorCritic(nn.Module):
         return mu, thrust_logits, value
 
 
-def _gae(rewards: np.ndarray, values: np.ndarray, dones: np.ndarray, gamma: float, lam: float) -> tuple[np.ndarray, np.ndarray]:
+def _gae(
+    rewards: np.ndarray, values: np.ndarray, dones: np.ndarray, gamma: float, lam: float
+) -> tuple[np.ndarray, np.ndarray]:
     t = rewards.size
     adv = np.zeros_like(rewards)
     last = 0.0
@@ -175,7 +179,9 @@ class PPOLightningModule(LightningModule):
         closest_km: list[float] = []
         captures = 0
 
-        show_progress = bool(self.cfg.rollout_progress and (self.trainer is None or getattr(self.trainer, "is_global_zero", True)))
+        show_progress = bool(
+            self.cfg.rollout_progress and (self.trainer is None or getattr(self.trainer, "is_global_zero", True))
+        )
         ep_iter = range(self.cfg.episodes_per_epoch)
         if show_progress:
             ep_iter = tqdm(
@@ -193,13 +199,17 @@ class PPOLightningModule(LightningModule):
             ep_rewards: list[float] = []
             ep_dones: list[bool] = []
             ep_values: list[float] = []
-            step_bar = tqdm(
-                total=self.env.max_steps,
-                desc=f"  Ep {ep_idx + 1} steps",
-                unit="step",
-                leave=False,
-                dynamic_ncols=True,
-            ) if show_progress else None
+            step_bar = (
+                tqdm(
+                    total=self.env.max_steps,
+                    desc=f"  Ep {ep_idx + 1} steps",
+                    unit="step",
+                    leave=False,
+                    dynamic_ncols=True,
+                )
+                if show_progress
+                else None
+            )
             while not done:
                 obs_t = torch.from_numpy(obs).float().to(self.device).unsqueeze(0)
                 mu, thrust_logits, v = self.model(obs_t)
@@ -255,5 +265,5 @@ class PPOLightningModule(LightningModule):
         obs_t = torch.from_numpy(obs).float().to(self.device).unsqueeze(0)
         mu, thrust_logits, _ = self.model(obs_t)
         torque_norm = torch.clamp(mu, -1.0, 1.0).squeeze(0).cpu().numpy()
-        thrust_on = (torch.sigmoid(thrust_logits).item() >= 0.5)
+        thrust_on = torch.sigmoid(thrust_logits).item() >= 0.5
         return np.hstack((torque_norm, np.array([1.0 if thrust_on else 0.0], dtype=np.float32)))

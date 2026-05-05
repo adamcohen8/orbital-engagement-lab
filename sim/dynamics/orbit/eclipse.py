@@ -78,7 +78,6 @@ def srp_shadow_factor(
     if r_norm <= earth_radius_km:
         return 0.0
 
-    rho = np.asarray(geometry["rho_sc_to_sun_km"], dtype=float)
     rho_norm = float(geometry["rho_norm_km"])
     if rho_norm <= 0.0:
         return 1.0

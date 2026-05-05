@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import time
+from pathlib import Path
 from typing import Any
 
 from sim.config.scenario_yaml import SimulationScenarioConfig, load_simulation_yaml, scenario_config_from_dict

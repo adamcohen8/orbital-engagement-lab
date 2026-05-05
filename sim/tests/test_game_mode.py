@@ -14,8 +14,8 @@ from sim.game.launcher import (
     _difficulty_at_pos,
     _difficulty_index,
     _game_progress_path,
-    _progress_stars,
     _option_index_at_pos,
+    _progress_stars,
     _scroll_for_selection,
     clear_game_progress,
     discover_game_scenarios,
@@ -54,7 +54,9 @@ def _knowledge_from_state6(state6: np.ndarray) -> StateBelief:
 
 
 def _game_config(tmp_path: Path) -> dict:
-    with (Path(__file__).resolve().parents[2] / "sim" / "game" / "configs" / "game_mode_basic.yaml").open("r", encoding="utf-8") as f:
+    with (Path(__file__).resolve().parents[2] / "sim" / "game" / "configs" / "game_mode_basic.yaml").open(
+        "r", encoding="utf-8"
+    ) as f:
         cfg = yaml.safe_load(f)
     cfg = deepcopy(cfg)
     cfg["simulator"]["duration_s"] = 1.0
@@ -133,7 +135,9 @@ def test_dashboard_object_ids_follow_training_defaults() -> None:
 
 
 def test_training_briefing_lines_include_objective_and_assists() -> None:
-    config_path = Path(__file__).resolve().parents[1] / "game" / "configs" / "game_training_rpo_01_coast_relative_motion.yaml"
+    config_path = (
+        Path(__file__).resolve().parents[1] / "game" / "configs" / "game_training_rpo_01_coast_relative_motion.yaml"
+    )
     config = SimulationConfig.from_yaml(config_path)
     training_cfg = RPOTrainingConfig.from_metadata(dict(config.scenario.metadata or {}))
 
@@ -241,23 +245,6 @@ def test_defensive_target_provider_pulses_on_unsafe_closure() -> None:
         mass_kg=1800.0,
         t_s=0.0,
     )
-    close_chaser = StateTruth(
-        position_eci_km=close_chaser_state[:3],
-        velocity_eci_km_s=close_chaser_state[3:],
-        attitude_quat_bn=np.array([1.0, 0.0, 0.0, 0.0], dtype=float),
-        angular_rate_body_rad_s=np.zeros(3, dtype=float),
-        mass_kg=200.0,
-        t_s=0.0,
-    )
-    far_chaser = StateTruth(
-        position_eci_km=far_chaser_state[:3],
-        velocity_eci_km_s=far_chaser_state[3:],
-        attitude_quat_bn=np.array([1.0, 0.0, 0.0, 0.0], dtype=float),
-        angular_rate_body_rad_s=np.zeros(3, dtype=float),
-        mass_kg=200.0,
-        t_s=0.0,
-    )
-
     active = provider(truth=target, own_knowledge={"chaser": _knowledge_from_state6(close_chaser_state)}, t_s=10.0)
     inactive = provider(truth=target, own_knowledge={"chaser": _knowledge_from_state6(far_chaser_state)}, t_s=10.0)
 
@@ -285,15 +272,6 @@ def test_defensive_target_provider_caps_delta_v_budget() -> None:
         mass_kg=1800.0,
         t_s=0.0,
     )
-    chaser = StateTruth(
-        position_eci_km=chaser_state[:3],
-        velocity_eci_km_s=chaser_state[3:],
-        attitude_quat_bn=np.array([1.0, 0.0, 0.0, 0.0], dtype=float),
-        angular_rate_body_rad_s=np.zeros(3, dtype=float),
-        mass_kg=200.0,
-        t_s=0.0,
-    )
-
     own_knowledge = {"chaser": _knowledge_from_state6(chaser_state)}
     first = provider(truth=target, own_knowledge=own_knowledge, t_s=0.0)
     second = provider(truth=target, own_knowledge=own_knowledge, t_s=10.0)
@@ -324,15 +302,6 @@ def test_defensive_target_provider_charges_first_timed_pulse() -> None:
         mass_kg=1800.0,
         t_s=0.0,
     )
-    chaser = StateTruth(
-        position_eci_km=chaser_state[:3],
-        velocity_eci_km_s=chaser_state[3:],
-        attitude_quat_bn=np.array([1.0, 0.0, 0.0, 0.0], dtype=float),
-        angular_rate_body_rad_s=np.zeros(3, dtype=float),
-        mass_kg=200.0,
-        t_s=0.0,
-    )
-
     own_knowledge = {"chaser": _knowledge_from_state6(chaser_state)}
     first = provider(truth=target, own_knowledge=own_knowledge, t_s=10.0, dt_s=10.0)
     second = provider(truth=target, own_knowledge=own_knowledge, t_s=20.0, dt_s=10.0)
@@ -344,7 +313,9 @@ def test_defensive_target_provider_charges_first_timed_pulse() -> None:
 
 
 def test_level_six_uses_target_reference_for_game_ric_frame() -> None:
-    config_path = Path(__file__).resolve().parents[1] / "game" / "configs" / "game_training_rpo_06_defensive_target_demo.yaml"
+    config_path = (
+        Path(__file__).resolve().parents[1] / "game" / "configs" / "game_training_rpo_06_defensive_target_demo.yaml"
+    )
     config = SimulationConfig.from_yaml(config_path)
     session = SimulationSession.from_config(config)
     snap = session.reset()
@@ -356,7 +327,9 @@ def test_level_six_uses_target_reference_for_game_ric_frame() -> None:
 
 
 def test_level_six_restart_gets_fresh_defensive_target_provider() -> None:
-    config_path = Path(__file__).resolve().parents[1] / "game" / "configs" / "game_training_rpo_06_defensive_target_demo.yaml"
+    config_path = (
+        Path(__file__).resolve().parents[1] / "game" / "configs" / "game_training_rpo_06_defensive_target_demo.yaml"
+    )
     config = SimulationConfig.from_yaml(config_path)
     training_cfg = RPOTrainingConfig.from_metadata(dict(config.scenario.metadata or {}))
     state = KeyboardCommandState()
@@ -383,7 +356,7 @@ def test_level_six_restart_gets_fresh_defensive_target_provider() -> None:
     target_provider1 = session1._external_intent_providers["target"]
     target_provider2 = session2._external_intent_providers["target"]
     assert target_provider1 is not target_provider2
-    assert getattr(target_provider2, "used_delta_v_m_s") == 0.0
+    assert target_provider2.used_delta_v_m_s == 0.0
 
 
 def test_terminal_mission_state_keeps_game_loop_open_after_session_done() -> None:
@@ -516,13 +489,19 @@ def test_nmt_velocity_goal_matches_passive_hcw_relationship() -> None:
     state = np.array([0.0, -3.0, 0.0, -0.0015, 0.0, 0.0], dtype=float)
     stopped_on_ellipse = np.array([0.0, -3.0, 0.0, 0.0, 0.0, 0.0], dtype=float)
 
-    assert nmt_velocity_error_km_s(state, mean_motion_rad_s=n, radial_amplitude_km=1.5, center_ric_km=np.zeros(3)) < 1.0e-12
-    assert nmt_velocity_error_km_s(
-        stopped_on_ellipse,
-        mean_motion_rad_s=n,
-        radial_amplitude_km=1.5,
-        center_ric_km=np.zeros(3),
-    ) > 0.0
+    assert (
+        nmt_velocity_error_km_s(state, mean_motion_rad_s=n, radial_amplitude_km=1.5, center_ric_km=np.zeros(3))
+        < 1.0e-12
+    )
+    assert (
+        nmt_velocity_error_km_s(
+            stopped_on_ellipse,
+            mean_motion_rad_s=n,
+            radial_amplitude_km=1.5,
+            center_ric_km=np.zeros(3),
+        )
+        > 0.0
+    )
 
 
 def test_nmt_cross_track_phase_creates_rc_ellipse() -> None:
@@ -535,13 +514,16 @@ def test_nmt_cross_track_phase_creates_rc_ellipse() -> None:
 
     assert np.ptp(curve[:, 2]) > 1.9
     assert abs(np.corrcoef(curve[:, 0], curve[:, 2])[0, 1]) > 0.5
-    assert nmt_position_error_km(
-        curve[[25, 180, 320]],
-        radial_amplitude_km=1.5,
-        cross_track_amplitude_km=1.0,
-        cross_track_phase_deg=45.0,
-        center_ric_km=np.zeros(3),
-    ).max() == 0.0
+    assert (
+        nmt_position_error_km(
+            curve[[25, 180, 320]],
+            radial_amplitude_km=1.5,
+            cross_track_amplitude_km=1.0,
+            cross_track_phase_deg=45.0,
+            center_ric_km=np.zeros(3),
+        ).max()
+        == 0.0
+    )
 
 
 def test_nmt_element_errors_ignore_phase_but_enforce_amplitudes_and_drift() -> None:

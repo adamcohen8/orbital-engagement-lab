@@ -53,7 +53,9 @@ class _ActorCritic(nn.Module):
         return mu, value
 
 
-def _gae(rewards: np.ndarray, values: np.ndarray, dones: np.ndarray, gamma: float, lam: float) -> tuple[np.ndarray, np.ndarray]:
+def _gae(
+    rewards: np.ndarray, values: np.ndarray, dones: np.ndarray, gamma: float, lam: float
+) -> tuple[np.ndarray, np.ndarray]:
     t = rewards.size
     adv = np.zeros_like(rewards)
     last = 0.0
@@ -138,7 +140,9 @@ class AttitudeRICPPOLightningModule(LightningModule):
 
         self.log("train/loss", last_loss, prog_bar=True, on_step=False, on_epoch=True)
         self.log("train/err_deg_mean", float(roll["err_deg_mean"]), prog_bar=True, on_step=False, on_epoch=True)
-        self.log("train/err_deg_final_mean", float(roll["err_deg_final_mean"]), prog_bar=True, on_step=False, on_epoch=True)
+        self.log(
+            "train/err_deg_final_mean", float(roll["err_deg_final_mean"]), prog_bar=True, on_step=False, on_epoch=True
+        )
         self.log("train/success_rate", float(roll["success_rate"]), prog_bar=True, on_step=False, on_epoch=True)
         self.log("train_err_deg_final_mean", float(roll["err_deg_final_mean"]), on_step=False, on_epoch=True)
         return last_loss

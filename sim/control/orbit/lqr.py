@@ -118,7 +118,9 @@ class HCWLQRController(Controller):
             return np.array([], dtype=complex)
 
         scale = max(1.0, float(np.max(np.abs(coeff))))
-        coeff = coeff[np.argmax(np.abs(coeff) > 1e-10 * scale) :] if np.any(np.abs(coeff) > 1e-10 * scale) else coeff[-1:]
+        coeff = (
+            coeff[np.argmax(np.abs(coeff) > 1e-10 * scale) :] if np.any(np.abs(coeff) > 1e-10 * scale) else coeff[-1:]
+        )
         if coeff.size <= 1:
             return np.array([], dtype=complex)
         return np.roots(coeff)
@@ -264,18 +266,20 @@ class HCWLQRController(Controller):
         )
 
     @staticmethod
-    def _discretize_zoh_series(A: np.ndarray, B: np.ndarray, dt: float, terms: int = 30) -> tuple[np.ndarray, np.ndarray]:
+    def _discretize_zoh_series(
+        A: np.ndarray, B: np.ndarray, dt: float, terms: int = 30
+    ) -> tuple[np.ndarray, np.ndarray]:
         n = A.shape[0]
-        I = np.eye(n)
+        identity = np.eye(n)
 
-        ad = I.copy()
-        Ak = I.copy()
+        ad = identity.copy()
+        Ak = identity.copy()
         for k in range(1, terms + 1):
             Ak = Ak @ (A * dt / float(k))
             ad = ad + Ak
 
         bd = np.zeros_like(B)
-        Ak = I.copy()
+        Ak = identity.copy()
         for k in range(0, terms):
             coeff = dt / float(k + 1)
             bd = bd + coeff * (Ak @ B)

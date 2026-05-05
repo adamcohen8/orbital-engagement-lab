@@ -21,8 +21,7 @@ class TestCurvilinearRICPDController(unittest.TestCase):
         cmd = ctrl.act(belief, t_s=0.0, budget_ms=1.0)
 
         expected_curv = -(
-            np.diag([1.0e-6, 2.0e-6, 3.0e-6]) @ state[0:3]
-            + np.diag([1.0e-3, 2.0e-3, 3.0e-3]) @ state[3:6]
+            np.diag([1.0e-6, 2.0e-6, 3.0e-6]) @ state[0:3] + np.diag([1.0e-3, 2.0e-3, 3.0e-3]) @ state[3:6]
         )
         expected_rect = curv_accel_to_rect(expected_curv, position_curv_km=state[0:3], r0_km=7000.0)
         self.assertTrue(np.allclose(cmd.mode_flags["accel_curv_ric_km_s2"], expected_curv, atol=1e-15))

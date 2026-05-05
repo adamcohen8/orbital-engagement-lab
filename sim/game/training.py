@@ -33,7 +33,7 @@ class RPOTrainingConfig:
     max_delta_v_m_s: float | None = None
 
     @classmethod
-    def from_metadata(cls, metadata: dict[str, Any]) -> "RPOTrainingConfig":
+    def from_metadata(cls, metadata: dict[str, Any]) -> RPOTrainingConfig:
         game_cfg = dict(metadata.get("game", {}) or {})
         raw = dict(game_cfg.get("training", {}) or {})
         if not raw:
@@ -58,7 +58,9 @@ class RPOTrainingConfig:
             goal_nmt_cross_track_phase_deg=float(raw.get("goal_nmt_cross_track_phase_deg", 0.0) or 0.0),
             goal_nmt_center_ric_km=nmt_center.astype(float),
             goal_nmt_tolerance_km=_optional_float(raw.get("goal_nmt_tolerance_km")),
-            goal_nmt_element_tolerance_km=_optional_float(raw.get("goal_nmt_element_tolerance_km", raw.get("goal_nmt_tolerance_km"))),
+            goal_nmt_element_tolerance_km=_optional_float(
+                raw.get("goal_nmt_element_tolerance_km", raw.get("goal_nmt_tolerance_km"))
+            ),
             goal_nmt_velocity_tolerance_km_s=_optional_float(raw.get("goal_nmt_velocity_tolerance_km_s")),
             max_time_s=_optional_float(raw.get("max_time_s")),
             max_goal_speed_km_s=_optional_float(raw.get("max_goal_speed_km_s")),
@@ -216,7 +218,9 @@ class RPOTrainingTracker:
             goal_met_samples &= element_errors["radial_amplitude_error_km"] <= tol
             goal_met_samples &= element_errors["cross_track_amplitude_error_km"] <= tol
         if element_errors is not None and self.config.goal_nmt_velocity_tolerance_km_s is not None:
-            goal_met_samples &= element_errors["drift_velocity_error_km_s"] <= float(self.config.goal_nmt_velocity_tolerance_km_s)
+            goal_met_samples &= element_errors["drift_velocity_error_km_s"] <= float(
+                self.config.goal_nmt_velocity_tolerance_km_s
+            )
         if self.config.max_time_s is not None:
             goal_met_samples &= (t - t[0]) <= float(self.config.max_time_s)
         if self.config.max_goal_speed_km_s is not None:
@@ -228,7 +232,11 @@ class RPOTrainingTracker:
         objective_name = "NMT target" if self.config.goal_nmt_radial_amplitude_km is not None else "goal"
         if achieved_time_s is None:
             reasons.append(f"{objective_name} not achieved within tolerance.")
-        time_failed = self.config.max_time_s is not None and achieved_time_s is None and float(t[-1] - t[0]) >= float(self.config.max_time_s)
+        time_failed = (
+            self.config.max_time_s is not None
+            and achieved_time_s is None
+            and float(t[-1] - t[0]) >= float(self.config.max_time_s)
+        )
         if time_failed:
             reasons.append(f"Time budget exceeded ({float(self.config.max_time_s):.0f} s).")
         dv_failed = False

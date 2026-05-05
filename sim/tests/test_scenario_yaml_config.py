@@ -14,7 +14,9 @@ class TestScenarioYamlConfig(unittest.TestCase):
                 "rocket": {
                     "enabled": True,
                     "base_guidance": {"module": "sim.rocket.guidance", "class_name": "OpenLoopPitchProgramGuidance"},
-                    "guidance_modifiers": [{"module": "sim.rocket.guidance", "class_name": "MaxQThrottleLimiterGuidance"}],
+                    "guidance_modifiers": [
+                        {"module": "sim.rocket.guidance", "class_name": "MaxQThrottleLimiterGuidance"}
+                    ],
                 },
                 "chaser": {"enabled": False},
                 "target": {"enabled": True},

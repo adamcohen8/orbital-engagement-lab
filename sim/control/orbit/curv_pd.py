@@ -73,10 +73,9 @@ def curv_accel_to_rect(
         h = h_base * max(1.0, abs(float(q[idx])))
         dq = np.zeros(3, dtype=float)
         dq[idx] = h
-        jac[:, idx] = (
-            _curv_position_to_rect(q + dq, r0_km=r0_km)
-            - _curv_position_to_rect(q - dq, r0_km=r0_km)
-        ) / (2.0 * h)
+        jac[:, idx] = (_curv_position_to_rect(q + dq, r0_km=r0_km) - _curv_position_to_rect(q - dq, r0_km=r0_km)) / (
+            2.0 * h
+        )
     return jac @ u_curv
 
 

@@ -16,8 +16,33 @@ python -m pip install ".[dev]"
 Run the focused public checks before opening a pull request:
 
 ```bash
+python -m ruff check <changed-python-files>
+python -m ruff format --check <changed-python-files>
 python -m pytest -q sim/tests/test_scenario_yaml_config.py sim/tests/test_app_io.py sim/tests/test_api.py sim/tests/test_master_simulator.py
 python run_simulation.py --config configs/automation_smoke.yaml --validate-only
+```
+
+Ruff is being rolled in incrementally. Use the changed-file commands for normal
+PRs until the existing project baseline has been cleaned enough for
+`python -m ruff check .` and `python -m ruff format --check .` to become hard
+repo-wide gates.
+
+To format intentionally:
+
+```bash
+python -m ruff format .
+```
+
+To preview local generated artifacts and caches that can be cleaned:
+
+```bash
+python tools/clean_local_artifacts.py
+```
+
+Apply the cleanup only after reviewing the dry run:
+
+```bash
+python tools/clean_local_artifacts.py --apply
 ```
 
 ## Contribution Scope

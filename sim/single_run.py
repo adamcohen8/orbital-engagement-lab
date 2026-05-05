@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
-from pathlib import Path
 import logging
 import os
+from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import Any, Callable
 
 import numpy as np
@@ -20,7 +20,6 @@ from sim.dynamics.attitude.rigid_body import get_attitude_guardrail_stats, reset
 from sim.dynamics.orbit.spherical_harmonics import configure_spherical_harmonics_env
 from sim.reporting.single_run_artifacts import (
     SingleRunArtifactContext,
-    format_single_run_summary as _format_single_run_summary,
     write_single_run_artifacts,
 )
 from sim.reporting.single_run_payload import SingleRunPayloadContext, build_single_run_payload
@@ -105,7 +104,9 @@ class _SingleRunEngine:
         orbit_substep_s = float(max(float(orbit_cfg.get("orbit_substep_s", self.dt) or self.dt), 1e-9))
         attitude_substep_s = float(max(float(att_cfg.get("attitude_substep_s", self.dt) or self.dt), 1e-9))
         self.orbit_command_period_s = orbit_substep_s
-        self.sim_substep_s = float(min(orbit_substep_s, attitude_substep_s)) if self.attitude_enabled else orbit_substep_s
+        self.sim_substep_s = (
+            float(min(orbit_substep_s, attitude_substep_s)) if self.attitude_enabled else orbit_substep_s
+        )
         self.eye6 = np.eye(6) * 1e-4
         self.eye12 = np.eye(12) * 1e-4
         self.zero3 = np.zeros(3, dtype=float)
@@ -152,7 +153,9 @@ class _SingleRunEngine:
 
         target_reference_id = default_reference_object_id(cfg, available_ids=self.agents.keys()) or "target"
         target_reference_section = self.object_configs.get(target_reference_id)
-        target_reference_cfg = dict((target_reference_section.reference_orbit if target_reference_section is not None else {}) or {})
+        target_reference_cfg = dict(
+            (target_reference_section.reference_orbit if target_reference_section is not None else {}) or {}
+        )
         target_reference_agent = self.agents.get(target_reference_id)
         self.target_reference_truth = None
         self.target_reference_dynamics = None
@@ -196,7 +199,9 @@ class _SingleRunEngine:
         self._latched_orbital_thrust_cmd_by_object: dict[str, np.ndarray] = {
             aid: self.zero3.copy() for aid in self.agents.keys()
         }
-        self.throttle_hist = {aid: np.full(self.n, np.nan) for aid, agent in self.agents.items() if agent.kind == "rocket"}
+        self.throttle_hist = {
+            aid: np.full(self.n, np.nan) for aid, agent in self.agents.items() if agent.kind == "rocket"
+        }
         self.rocket_stage_hist = np.full(self.n, np.nan) if self.rocket is not None else None
         self.rocket_q_dyn_hist = np.full(self.n, np.nan) if self.rocket is not None else None
         self.rocket_mach_hist = np.full(self.n, np.nan) if self.rocket is not None else None
@@ -447,7 +452,9 @@ class _SingleRunEngine:
                 self.thrust_hist[aid][k + 1, :] = rocket_result.thrust_eci_km_s2
                 self.torque_hist[aid][k + 1, :] = rocket_result.torque_body_nm
                 self.total_dv_m_s_by_object[aid] += rocket_result.delta_v_m_s
-                self.max_accel_km_s2_by_object[aid] = max(self.max_accel_km_s2_by_object[aid], rocket_result.max_accel_km_s2)
+                self.max_accel_km_s2_by_object[aid] = max(
+                    self.max_accel_km_s2_by_object[aid], rocket_result.max_accel_km_s2
+                )
                 if rocket_result.burned:
                     self.burn_samples_by_object[aid] += 1
                 if self.rocket_stage_hist is not None and rocket_result.stage_index is not None:
@@ -470,11 +477,15 @@ class _SingleRunEngine:
                 self.thrust_hist[aid][k + 1, :] = sat_result.average_thrust_eci_km_s2
                 self.torque_hist[aid][k + 1, :] = sat_result.average_torque_body_nm
                 self.total_dv_m_s_by_object[aid] += sat_result.delta_v_m_s
-                self.max_accel_km_s2_by_object[aid] = max(self.max_accel_km_s2_by_object[aid], sat_result.max_accel_km_s2)
+                self.max_accel_km_s2_by_object[aid] = max(
+                    self.max_accel_km_s2_by_object[aid], sat_result.max_accel_km_s2
+                )
                 if sat_result.burned:
                     self.burn_samples_by_object[aid] += 1
 
-            world_truth_live[aid] = agent.truth if agent.kind == "satellite" else _rocket_state_to_truth(agent.rocket_state)
+            world_truth_live[aid] = (
+                agent.truth if agent.kind == "satellite" else _rocket_state_to_truth(agent.rocket_state)
+            )
             if agent.bridge is not None:
                 evt = {"t_s": t_next, "object_id": aid}
                 if hasattr(agent.bridge, "step"):
@@ -526,7 +537,10 @@ class _SingleRunEngine:
         thrust_out = {k: v[:n_used, :].copy() for k, v in self.thrust_hist.items()}
         torque_out = {k: v[:n_used, :].copy() for k, v in self.torque_hist.items()}
         desired_attitude_out = {k: v[:n_used, :].copy() for k, v in self.desired_attitude_hist.items()}
-        knowledge_out = {obs: {tgt: arr[:n_used, :].copy() for tgt, arr in by_tgt.items()} for obs, by_tgt in self.knowledge_hist.items()}
+        knowledge_out = {
+            obs: {tgt: arr[:n_used, :].copy() for tgt, arr in by_tgt.items()}
+            for obs, by_tgt in self.knowledge_hist.items()
+        }
         rocket_metrics_out: dict[str, np.ndarray] = {}
         if self.rocket is not None:
             rocket_object_id = str(getattr(self.rocket, "object_id", "rocket") or "rocket")

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Iterable
 
 from sim.config.scenario_yaml import AgentSection, SimulationScenarioConfig
 

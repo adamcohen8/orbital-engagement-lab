@@ -91,7 +91,9 @@ class ReactionWheelPDController(Controller):
         self._kp = kp
         self._kd = kd
 
-    def set_target(self, desired_attitude_quat_bn: np.ndarray, desired_rate_body_rad_s: np.ndarray | None = None) -> None:
+    def set_target(
+        self, desired_attitude_quat_bn: np.ndarray, desired_rate_body_rad_s: np.ndarray | None = None
+    ) -> None:
         q = np.array(desired_attitude_quat_bn, dtype=float).reshape(-1)
         if q.size != 4:
             raise ValueError("desired_attitude_quat_bn must be length-4.")
@@ -172,7 +174,9 @@ class ReactionWheelPIDController(ReactionWheelPDController):
         self._integral_error = np.zeros(3)
         self._last_t_s = None
 
-    def set_target(self, desired_attitude_quat_bn: np.ndarray, desired_rate_body_rad_s: np.ndarray | None = None) -> None:
+    def set_target(
+        self, desired_attitude_quat_bn: np.ndarray, desired_rate_body_rad_s: np.ndarray | None = None
+    ) -> None:
         super().set_target(desired_attitude_quat_bn, desired_rate_body_rad_s)
         if self.reset_integral_on_target_update:
             self.reset_integral()
@@ -263,10 +267,10 @@ class SmallAngleLQRController(Controller):
     _wheel_limits_nm: np.ndarray = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        I = np.array(self.inertia_kg_m2, dtype=float)
-        if I.shape != (3, 3):
+        inertia = np.array(self.inertia_kg_m2, dtype=float)
+        if inertia.shape != (3, 3):
             raise ValueError("inertia_kg_m2 must be 3x3.")
-        if np.linalg.det(I) == 0.0:
+        if np.linalg.det(inertia) == 0.0:
             raise ValueError("inertia_kg_m2 must be nonsingular.")
 
         axes = np.array(self.wheel_axes_body, dtype=float)
@@ -328,7 +332,7 @@ class SmallAngleLQRController(Controller):
                 [np.zeros((3, 3)), np.zeros((3, 3))],
             ]
         )
-        B = np.vstack((np.zeros((3, G.shape[1])), np.linalg.solve(I, G)))
+        B = np.vstack((np.zeros((3, G.shape[1])), np.linalg.solve(inertia, G)))
         Ad = np.eye(6) + self.design_dt_s * A
         Bd = self.design_dt_s * B
         Q = np.diag(q_weights)
@@ -392,7 +396,9 @@ class SmallAngleLQRController(Controller):
             },
         )
 
-    def set_target(self, desired_attitude_quat_bn: np.ndarray, desired_rate_body_rad_s: np.ndarray | None = None) -> None:
+    def set_target(
+        self, desired_attitude_quat_bn: np.ndarray, desired_rate_body_rad_s: np.ndarray | None = None
+    ) -> None:
         q = np.array(desired_attitude_quat_bn, dtype=float).reshape(-1)
         if q.size != 4:
             raise ValueError("desired_attitude_quat_bn must be length-4.")
@@ -410,7 +416,7 @@ class SmallAngleLQRController(Controller):
         wheel_axes_body: np.ndarray,
         wheel_torque_limits_nm: np.ndarray,
         design_dt_s: float,
-    ) -> "SmallAngleLQRController":
+    ) -> SmallAngleLQRController:
         """Factory for a more robust capture+track profile across varied initial conditions."""
         return cls(
             inertia_kg_m2=inertia_kg_m2,

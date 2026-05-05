@@ -1,8 +1,9 @@
-import unittest
 import tempfile
+import unittest
 from pathlib import Path
 
 import numpy as np
+
 from sim.dynamics.orbit.accelerations import accel_j2
 from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2
 from sim.dynamics.orbit.propagator import spherical_harmonics_plugin

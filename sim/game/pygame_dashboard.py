@@ -158,7 +158,11 @@ class PygameRPODashboard:
         if not self.rel_hist:
             return
         rel = np.vstack(self.rel_hist)
-        target_rel = np.vstack(self.target_rel_hist[-rel.shape[0] :]) if self.target_rel_hist else np.zeros((rel.shape[0], 6), dtype=float)
+        target_rel = (
+            np.vstack(self.target_rel_hist[-rel.shape[0] :])
+            if self.target_rel_hist
+            else np.zeros((rel.shape[0], 6), dtype=float)
+        )
         target_current = target_rel[-1, :3] if target_rel.size else np.zeros(3, dtype=float)
         ghost = self._coast_prediction()
         goal = np.array(self.goal_relative_ric_km, dtype=float).reshape(-1)
@@ -224,7 +228,9 @@ class PygameRPODashboard:
         if rel.shape[1] >= 6:
             v = np.zeros(3, dtype=float)
             v[[x_axis, y_axis]] = rel[-1, [x_axis + 3, y_axis + 3]]
-            self._draw_vector(to_px(rel[-1]), v[[x_axis, y_axis]] * 120.0, color=(245, 205, 92), scale=scale, label="Vrel")
+            self._draw_vector(
+                to_px(rel[-1]), v[[x_axis, y_axis]] * 120.0, color=(245, 205, 92), scale=scale, label="Vrel"
+            )
         if self.thrust_ric_hist:
             thrust_ric = self.thrust_ric_hist[-1]
             if np.linalg.norm(thrust_ric) > 0.0:
@@ -261,8 +267,18 @@ class PygameRPODashboard:
             rng = float(np.linalg.norm(rel[:3]))
             spd = float(np.linalg.norm(rel[3:]))
             t = self.t_s[-1] if self.t_s else 0.0
-            self._text(f"t={t:7.1f}s   range={rng:7.3f} km   rel speed={spd:8.5f} km/s", (rect.x + 16, rect.y + 12), self.font, (235, 240, 245))
-        self._text(command_status.splitlines()[0] if command_status else "", (rect.x + 16, rect.y + 38), self.small_font, (195, 205, 220))
+            self._text(
+                f"t={t:7.1f}s   range={rng:7.3f} km   rel speed={spd:8.5f} km/s",
+                (rect.x + 16, rect.y + 12),
+                self.font,
+                (235, 240, 245),
+            )
+        self._text(
+            command_status.splitlines()[0] if command_status else "",
+            (rect.x + 16, rect.y + 38),
+            self.small_font,
+            (195, 205, 220),
+        )
         line2 = command_status.splitlines()[-1] if command_status else ""
         if line2:
             self._text(line2, (rect.x + 16, rect.y + 58), self.small_font, (195, 205, 220))
@@ -314,7 +330,12 @@ class PygameRPODashboard:
                 self._text(line, (rect.x + 32, y), self.font, (206, 218, 232))
                 y += 24
             y += 4
-        self._text("Press Space to start. Esc returns to level select.", (rect.x + 32, rect.bottom - 48), self.font, (220, 160, 160))
+        self._text(
+            "Press Space to start. Esc returns to level select.",
+            (rect.x + 32, rect.bottom - 48),
+            self.font,
+            (220, 160, 160),
+        )
 
     def _draw_mission_banner(self, mission_state: str, *, debrief_lines: tuple[str, ...] = ()) -> None:
         pygame = self.pygame
@@ -485,7 +506,11 @@ class PygameRPODashboard:
         return distance_to_goal <= max(float(self.goal_radius_km) * 20.0, 0.5)
 
     def _minimum_plot_span_km(self) -> float:
-        if self.goal_nmt_radial_amplitude_km is None and self.goal_radius_km is not None and float(self.goal_radius_km) <= 0.05:
+        if (
+            self.goal_nmt_radial_amplitude_km is None
+            and self.goal_radius_km is not None
+            and float(self.goal_radius_km) <= 0.05
+        ):
             return max(float(self.goal_radius_km) * 4.0, 0.05)
         return 0.5
 

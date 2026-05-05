@@ -6,9 +6,8 @@ from unittest.mock import patch
 import numpy as np
 
 from sim.core.models import Command, StateTruth
-from sim.dynamics.attitude import disturbances as disturbance_module
-from sim.dynamics.attitude.disturbances import DisturbanceTorqueConfig, DisturbanceTorqueModel
 from sim.dynamics import model as dynamics_model_module
+from sim.dynamics.attitude.disturbances import DisturbanceTorqueConfig, DisturbanceTorqueModel
 from sim.dynamics.model import OrbitalAttitudeDynamics
 
 
@@ -199,7 +198,9 @@ class TestAttitudeDisturbances(unittest.TestCase):
         out = dyn.step(state.copy(), Command.zero(), env={}, dt_s=10.0)
 
         expected_pos = 0.5 * (np.array(state.position_eci_km, dtype=float) + np.array(out.position_eci_km, dtype=float))
-        expected_vel = 0.5 * (np.array(state.velocity_eci_km_s, dtype=float) + np.array(out.velocity_eci_km_s, dtype=float))
+        expected_vel = 0.5 * (
+            np.array(state.velocity_eci_km_s, dtype=float) + np.array(out.velocity_eci_km_s, dtype=float)
+        )
         expected_t = float(state.t_s + 5.0)
 
         self.assertGreater(len(disturbance.samples), 1)

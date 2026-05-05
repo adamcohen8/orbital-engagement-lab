@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import importlib
 import inspect
+from dataclasses import dataclass
 from typing import Any
 
 from sim.config.object_refs import configured_objects, object_parameter_prefix
+
 
 @dataclass(frozen=True)
 class PluginContract:
@@ -25,7 +26,9 @@ _CONTRACTS = {
         methods_any=("step", "start", "send_command", "receive_command", "external_intent"),
         allow_function=True,
     ),
-    "mission_objective": PluginContract(methods_all=(), methods_any=("evaluate", "update", "check", "act"), allow_function=True),
+    "mission_objective": PluginContract(
+        methods_all=(), methods_any=("evaluate", "update", "check", "act"), allow_function=True
+    ),
 }
 
 
@@ -45,7 +48,6 @@ def _validate_pointer(pointer: Any, contract: PluginContract, path: str) -> list
 
     class_name = getattr(pointer, "class_name", None)
     function = getattr(pointer, "function", None)
-    params = dict(getattr(pointer, "params", {}) or {})
 
     if class_name:
         if not hasattr(mod, class_name):
@@ -98,12 +100,16 @@ def validate_scenario_plugins(cfg: Any) -> list[str]:
         if str(getattr(agent, "kind", "satellite")).strip().lower() == "rocket":
             errs.extend(_validate_pointer(getattr(agent, "guidance", None), _CONTRACTS["guidance"], f"{path}.guidance"))
             errs.extend(
-                _validate_pointer(getattr(agent, "base_guidance", None), _CONTRACTS["guidance"], f"{path}.base_guidance")
+                _validate_pointer(
+                    getattr(agent, "base_guidance", None), _CONTRACTS["guidance"], f"{path}.base_guidance"
+                )
             )
             for i, p in enumerate(getattr(agent, "guidance_modifiers", []) or []):
                 errs.extend(_validate_rocket_guidance_modifier(p, f"{path}.guidance_modifiers[{i}]"))
         errs.extend(
-            _validate_pointer(getattr(agent, "orbit_control", None), _CONTRACTS["orbit_control"], f"{path}.orbit_control")
+            _validate_pointer(
+                getattr(agent, "orbit_control", None), _CONTRACTS["orbit_control"], f"{path}.orbit_control"
+            )
         )
         errs.extend(
             _validate_pointer(

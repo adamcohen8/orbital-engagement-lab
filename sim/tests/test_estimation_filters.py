@@ -81,7 +81,9 @@ def test_attitude_ekf_update_avoids_np_inv_and_preserves_symmetric_covariance() 
         last_update_t_s=0.0,
     )
     measurement = Measurement(
-        vector=np.hstack((normalize_quaternion(np.array([1.0, 0.012, -0.018, 0.002])), np.array([0.011, -0.019, 0.029]))),
+        vector=np.hstack(
+            (normalize_quaternion(np.array([1.0, 0.012, -0.018, 0.002])), np.array([0.011, -0.019, 0.029]))
+        ),
         t_s=0.1,
     )
 

@@ -6,8 +6,8 @@ import numpy as np
 
 from sim.core.interfaces import Estimator
 from sim.core.models import Measurement, StateBelief
-from sim.dynamics.orbit.propagator import OrbitPropagator
 from sim.dynamics.orbit.accelerations import OrbitContext
+from sim.dynamics.orbit.propagator import OrbitPropagator
 
 
 @dataclass

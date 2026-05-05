@@ -12,7 +12,6 @@ from sim.utils.frames import ric_dcm_ir_from_rv
 from sim.utils.ground_track import ground_track_from_eci_history, split_ground_track_dateline
 from sim.utils.plotting import _draw_earth_sphere_3d
 
-
 ArrayMap = dict[str, np.ndarray]
 NestedArrayMap = dict[str, dict[str, np.ndarray]]
 
@@ -50,7 +49,9 @@ def _nested_array_map(value: Any) -> NestedArrayMap:
     return out
 
 
-def _payload_arrays(payload: dict[str, Any]) -> tuple[np.ndarray, ArrayMap, ArrayMap, ArrayMap, NestedArrayMap, np.ndarray | None]:
+def _payload_arrays(
+    payload: dict[str, Any],
+) -> tuple[np.ndarray, ArrayMap, ArrayMap, ArrayMap, NestedArrayMap, np.ndarray | None]:
     t_s = np.array(payload.get("time_s", []), dtype=float).reshape(-1)
     truth = _array_map(payload.get("truth_by_object", {}))
     thrust = _array_map(payload.get("applied_thrust_by_object", {}))
@@ -89,7 +90,9 @@ def _choose_reference(
     return None, None
 
 
-def _choose_subject(truth_by_object: ArrayMap, reference_id: str | None, object_id: str | None = None) -> tuple[str, np.ndarray] | tuple[None, None]:
+def _choose_subject(
+    truth_by_object: ArrayMap, reference_id: str | None, object_id: str | None = None
+) -> tuple[str, np.ndarray] | tuple[None, None]:
     if object_id and object_id in truth_by_object:
         return object_id, truth_by_object[object_id]
     preferred = [k for k in ("chaser", "target", "rocket") if k in truth_by_object and k != reference_id]
@@ -211,7 +214,9 @@ def plot_run_dashboard(
     dpi: int = 150,
 ) -> plt.Figure:
     if payload is not None:
-        t_s, truth_by_object, thrust_by_object, belief_by_object, _, target_reference_orbit_truth = _payload_arrays(payload)
+        t_s, truth_by_object, thrust_by_object, belief_by_object, _, target_reference_orbit_truth = _payload_arrays(
+            payload
+        )
     t = np.array([] if t_s is None else t_s, dtype=float).reshape(-1)
     truth = dict(truth_by_object or {})
     thrust = dict(thrust_by_object or {})
@@ -336,7 +341,9 @@ def plot_rendezvous_summary(
             ax.scatter([ric[0, ix]], [ric[0, iy]], color="green", s=24, label="start")
             ax.scatter([ric[-1, ix]], [ric[-1, iy]], color="red", s=24, label="end")
         if keepout_radius_km is not None and np.isfinite(float(keepout_radius_km)) and float(keepout_radius_km) > 0.0:
-            circ = plt.Circle((0.0, 0.0), float(keepout_radius_km), color="tab:red", fill=False, linestyle="--", alpha=0.6)
+            circ = plt.Circle(
+                (0.0, 0.0), float(keepout_radius_km), color="tab:red", fill=False, linestyle="--", alpha=0.6
+            )
             ax.add_patch(circ)
         ax.set_xlabel(f"{xlab} (km)")
         ax.set_ylabel(f"{ylab} (km)")
@@ -552,7 +559,12 @@ def plot_sensor_access(
 
         obs_truth = truth.get(obs)
         target_truth = truth.get(target)
-        if obs_truth is not None and target_truth is not None and obs_truth.shape[1] >= 3 and target_truth.shape[1] >= 3:
+        if (
+            obs_truth is not None
+            and target_truth is not None
+            and obs_truth.shape[1] >= 3
+            and target_truth.shape[1] >= 3
+        ):
             nr = min(obs_truth.shape[0], target_truth.shape[0], t.size)
             rel = target_truth[:nr, :3] - obs_truth[:nr, :3]
             axes[1].plot(t[:nr], np.linalg.norm(rel, axis=1), label=f"{obs}->{target}")

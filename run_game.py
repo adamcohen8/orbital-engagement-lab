@@ -17,7 +17,9 @@ def main() -> None:
     )
     parser.add_argument("--controlled-object", default="chaser", help="Object id controlled by keyboard input.")
     parser.add_argument("--attitude-rate-deg-s", type=float, default=45.0, help="Commanded attitude target slew rate.")
-    parser.add_argument("--fast", action="store_true", help="Step as fast as the dashboard can render instead of realtime.")
+    parser.add_argument(
+        "--fast", action="store_true", help="Step as fast as the dashboard can render instead of realtime."
+    )
     parser.add_argument(
         "--speed-multiple",
         type=float,

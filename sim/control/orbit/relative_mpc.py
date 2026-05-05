@@ -26,9 +26,7 @@ class RelativeOrbitMPCController(Controller):
     target_rel_ric_rect: np.ndarray = field(default_factory=lambda: np.zeros(6))
 
     q_weights: np.ndarray = field(default_factory=lambda: np.array([2.0e3, 2.0e3, 2.0e3, 3.0e7, 3.0e7, 3.0e7]))
-    terminal_weights: np.ndarray = field(
-        default_factory=lambda: np.array([8.0e3, 8.0e3, 8.0e3, 1.2e8, 1.2e8, 1.2e8])
-    )
+    terminal_weights: np.ndarray = field(default_factory=lambda: np.array([8.0e3, 8.0e3, 8.0e3, 1.2e8, 1.2e8, 1.2e8]))
     r_weights: np.ndarray = field(default_factory=lambda: np.ones(3) * 4.0e12)
     rd_weights: np.ndarray = field(default_factory=lambda: np.ones(3) * 4.0e12)
 

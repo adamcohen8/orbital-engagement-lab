@@ -1,16 +1,30 @@
 from __future__ import annotations
 
+import io
 import json
-from pathlib import Path
 import subprocess
 import sys
+from contextlib import redirect_stdout
+from pathlib import Path
 from unittest.mock import patch
 
 import yaml
 
 import run_simulation
 from sim.execution import run_simulation_config_file
-from sim.single_run import _format_single_run_summary
+
+
+def _single_run_summary_text(summary: dict) -> str:
+    stream = io.StringIO()
+    with redirect_stdout(stream):
+        run_simulation._print_single_run_summary(
+            {
+                "config_path": "",
+                "scenario_name": summary.get("scenario_name", "summary_display"),
+                "run": summary,
+            }
+        )
+    return stream.getvalue()
 
 
 def test_quickstart_5min_runs_headlessly_and_writes_start_here_artifacts(tmp_path: Path) -> None:
@@ -81,11 +95,13 @@ def test_single_run_summary_only_reports_insertion_for_enabled_rocket() -> None:
         "rocket_insertion_time_s": None,
     }
 
-    assert "Insertion  :" not in _format_single_run_summary(base_summary)
+    assert "Insertion  :" not in _single_run_summary_text(base_summary)
 
-    rocket_summary = dict(base_summary, objects=["rocket"], rocket_insertion_achieved=True, rocket_insertion_time_s=12.0)
+    rocket_summary = dict(
+        base_summary, objects=["rocket"], rocket_insertion_achieved=True, rocket_insertion_time_s=12.0
+    )
 
-    assert "Insertion  : achieved at t=12.0" in _format_single_run_summary(rocket_summary)
+    assert "Insertion  : achieved at t=12.0" in _single_run_summary_text(rocket_summary)
 
 
 def test_doctor_reports_quickstart_readiness() -> None:

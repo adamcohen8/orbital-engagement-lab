@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -209,7 +209,9 @@ def write_output_index(
     payload = dict(payload or {})
     artifacts = dict(artifacts or {})
     scenario_name = summary.get("scenario_name", payload.get("scenario_name", title))
-    scenario_description = str(summary.get("scenario_description", payload.get("scenario_description", "")) or "").strip()
+    scenario_description = str(
+        summary.get("scenario_description", payload.get("scenario_description", "")) or ""
+    ).strip()
 
     if workflow == "single_run":
         key_metrics = _single_run_metrics(summary)

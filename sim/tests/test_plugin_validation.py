@@ -1,7 +1,7 @@
-from pathlib import Path
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 
 from sim.config import scenario_config_from_dict, validate_scenario_plugins
 
@@ -24,7 +24,11 @@ class TestPluginValidation(unittest.TestCase):
                             "params": {"max_q_pa": 45000.0, "min_throttle": 0.1},
                         }
                     ],
-                    "orbit_control": {"module": "sim.control.orbit.zero_controller", "class_name": "ZeroController", "params": {}},
+                    "orbit_control": {
+                        "module": "sim.control.orbit.zero_controller",
+                        "class_name": "ZeroController",
+                        "params": {},
+                    },
                     "attitude_control": {
                         "module": "sim.control.attitude.zero_torque",
                         "class_name": "ZeroTorqueController",
@@ -43,7 +47,11 @@ class TestPluginValidation(unittest.TestCase):
                         "class_name": "ControllerPointingExecution",
                         "params": {},
                     },
-                    "orbit_control": {"module": "sim.control.orbit.zero_controller", "class_name": "ZeroController", "params": {}},
+                    "orbit_control": {
+                        "module": "sim.control.orbit.zero_controller",
+                        "class_name": "ZeroController",
+                        "params": {},
+                    },
                     "attitude_control": {
                         "module": "sim.control.attitude.zero_torque",
                         "class_name": "ZeroTorqueController",
@@ -80,7 +88,11 @@ class TestPluginValidation(unittest.TestCase):
             {
                 "rocket": {
                     "enabled": True,
-                    "base_guidance": {"module": "sim.control.orbit.zero_controller", "class_name": "ZeroController", "params": {}},
+                    "base_guidance": {
+                        "module": "sim.control.orbit.zero_controller",
+                        "class_name": "ZeroController",
+                        "params": {},
+                    },
                 },
                 "chaser": {"enabled": False},
                 "target": {"enabled": False},

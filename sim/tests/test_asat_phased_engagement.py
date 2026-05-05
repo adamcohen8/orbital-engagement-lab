@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 
-from sim.scenarios import ASATPhasedScenarioConfig, AgentStrategyConfig, run_asat_phased_engagement
+from sim.scenarios import AgentStrategyConfig, ASATPhasedScenarioConfig, run_asat_phased_engagement
 
 
 class TestASATPhasedEngagement(unittest.TestCase):
@@ -17,7 +17,9 @@ class TestASATPhasedEngagement(unittest.TestCase):
         out = run_asat_phased_engagement(
             cfg,
             target_strategy=AgentStrategyConfig(mode="coast", max_accel_km_s2=0.0, target_id=cfg.rocket_id),
-            chaser_strategy=AgentStrategyConfig(mode="knowledge_pursuit", max_accel_km_s2=1e-6, target_id=cfg.target_id),
+            chaser_strategy=AgentStrategyConfig(
+                mode="knowledge_pursuit", max_accel_km_s2=1e-6, target_id=cfg.target_id
+            ),
         )
         self.assertTrue(out["chaser_deployed"])
         self.assertGreaterEqual(out["chaser_deploy_index"], 0)
