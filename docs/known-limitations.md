@@ -25,6 +25,9 @@ not flight-qualified or operational decision-grade software.
   private/product surfaces and are not bundled in the public repo.
 - Users should independently validate behavior for their mission envelope,
   force models, time spans, controller assumptions, and numerical tolerances.
+- Public scenarios such as `configs/hcw_pd_10km_experiment.yaml` are review
+  workflows and examples. They are not mission qualification evidence by
+  themselves; see [Validation Claims](validation-claims.md).
 
 ## Scenario Safety
 

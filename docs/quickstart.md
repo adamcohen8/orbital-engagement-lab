@@ -60,6 +60,24 @@ python run_simulation.py --quickstart --open-output
 
 For a guided walkthrough, see [First Five Minutes](first-five-minutes.md).
 
+## Run The Flagship Review Scenario
+
+After the quickstart succeeds, run the polished 10 km HCW PD rendezvous
+workflow:
+
+```bash
+python run_simulation.py --config configs/hcw_pd_10km_experiment.yaml --validate-only
+python run_simulation.py --config configs/hcw_pd_10km_experiment.yaml
+```
+
+This scenario is longer than the quickstart. It exercises a tuned HCW PD orbit
+controller, attitude dynamics, reaction-wheel control, and thrust-alignment
+gating, then writes review artifacts under `outputs/flagship_hcw_pd_10km/`.
+Open `outputs/flagship_hcw_pd_10km/index.md` first.
+
+For the scenario-specific review path, see
+[Flagship HCW PD 10 km Scenario](flagship-hcw-pd-10km.md).
+
 ## Use The API
 
 ```python
@@ -84,6 +102,15 @@ for station_id, station_payload in result.ground_station_access.items():
 Access is computed from line of sight, minimum elevation, and optional maximum
 range. See [Scenario YAML](scenario-yaml.md) for the ground-station fields.
 For more examples, see [Python API](python-api.md).
+
+The flagship scenario also has a companion analysis script:
+
+```bash
+python examples/python/flagship_analysis.py
+```
+
+It writes custom review metrics under
+`outputs/flagship_hcw_pd_10km/custom_analysis/`.
 
 ## Next Scenarios
 

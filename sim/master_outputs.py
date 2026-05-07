@@ -303,6 +303,68 @@ def _thruster_mounts_by_object(cfg: SimulationScenarioConfig) -> dict[str, dict[
     return out
 
 
+def _unit_vector_or_none(value: Any) -> np.ndarray | None:
+    if value is None:
+        return None
+    try:
+        arr = np.array(value, dtype=float).reshape(3)
+    except (TypeError, ValueError):
+        return None
+    n = float(np.linalg.norm(arr))
+    if not np.isfinite(n) or n <= 0.0:
+        return None
+    return arr / n
+
+
+def _thruster_direction_body_by_object(cfg: SimulationScenarioConfig) -> dict[str, np.ndarray]:
+    plot_default = _unit_vector_or_none(cfg.outputs.plots.get("thrust_direction_body"))
+    out: dict[str, np.ndarray] = {}
+    for oid, sec in iter_object_sections(cfg, enabled_only=True, kind="satellite"):
+        direction = None
+        mission_execution = getattr(sec, "mission_execution", None)
+        params = dict(getattr(mission_execution, "params", {}) or {})
+        if "thruster_direction_body" in params:
+            direction = _unit_vector_or_none(params.get("thruster_direction_body"))
+        if direction is None:
+            mount = resolve_thruster_mount_from_specs(getattr(sec, "specs", None) if sec is not None else None)
+            direction = None if mount is None else _unit_vector_or_none(mount.thrust_direction_body)
+        if direction is None:
+            direction = plot_default
+        out[oid] = np.array(direction if direction is not None else [1.0, 0.0, 0.0], dtype=float)
+    return out
+
+
+def _thrust_alignment_error_deg_series(
+    *,
+    t_s: np.ndarray,
+    truth_hist: np.ndarray,
+    thrust_hist: np.ndarray,
+    thruster_direction_body: np.ndarray,
+) -> np.ndarray:
+    err_deg = np.full(t_s.shape, np.nan, dtype=float)
+    thrust_dir_body = _unit_vector_or_none(thruster_direction_body)
+    if thrust_dir_body is None:
+        thrust_dir_body = np.array([1.0, 0.0, 0.0], dtype=float)
+    for k in range(min(truth_hist.shape[0], thrust_hist.shape[0], t_s.size)):
+        a_cmd = np.array(thrust_hist[k, :], dtype=float)
+        if not np.all(np.isfinite(a_cmd)):
+            continue
+        a_norm = float(np.linalg.norm(a_cmd))
+        if a_norm <= 1e-15:
+            continue
+        q_bn = np.array(truth_hist[k, 6:10], dtype=float)
+        if not np.all(np.isfinite(q_bn)):
+            continue
+        c_bn = quaternion_to_dcm_bn(q_bn)
+        thrust_axis_eci = c_bn.T @ thrust_dir_body
+        burn_dir_eci = -a_cmd / a_norm
+        cosang = float(np.clip(np.dot(thrust_axis_eci, burn_dir_eci), -1.0, 1.0))
+        if not np.isfinite(cosang):
+            continue
+        err_deg[k] = float(np.degrees(np.arccos(cosang)))
+    return err_deg
+
+
 def plot_outputs(
     *,
     cfg: SimulationScenarioConfig,
@@ -1048,16 +1110,7 @@ def plot_outputs(
     if "thrust_alignment_error" in figure_ids:
         import matplotlib.pyplot as plt
 
-        thrust_dir_body = np.array(
-            cfg.outputs.plots.get("thrust_direction_body", [1.0, 0.0, 0.0]), dtype=float
-        ).reshape(-1)
-        if thrust_dir_body.size != 3:
-            thrust_dir_body = np.array([1.0, 0.0, 0.0], dtype=float)
-        n_t = float(np.linalg.norm(thrust_dir_body))
-        if n_t <= 0.0:
-            thrust_dir_body = np.array([1.0, 0.0, 0.0], dtype=float)
-            n_t = 1.0
-        thrust_dir_body = thrust_dir_body / n_t
+        thrust_dir_by_object = _thruster_direction_body_by_object(cfg)
 
         for oid, hist in truth_hist.items():
             u = thrust_hist.get(oid)
@@ -1066,24 +1119,12 @@ def plot_outputs(
             thrust_norm = np.linalg.norm(np.nan_to_num(u, nan=0.0), axis=1)
             if not np.any(thrust_norm > 1e-15):
                 continue
-            err_deg = np.full(t_s.shape, np.nan, dtype=float)
-            for k in range(min(hist.shape[0], u.shape[0], t_s.size)):
-                a_cmd = np.array(u[k, :], dtype=float)
-                if not np.all(np.isfinite(a_cmd)):
-                    continue
-                a_norm = float(np.linalg.norm(a_cmd))
-                if a_norm <= 1e-15:
-                    continue
-                q_bn = np.array(hist[k, 6:10], dtype=float)
-                if not np.all(np.isfinite(q_bn)):
-                    continue
-                c_bn = quaternion_to_dcm_bn(q_bn)
-                thrust_axis_eci = c_bn.T @ thrust_dir_body
-                burn_dir_eci = -a_cmd / a_norm
-                cosang = float(np.clip(np.dot(thrust_axis_eci, burn_dir_eci), -1.0, 1.0))
-                if not np.isfinite(cosang):
-                    continue
-                err_deg[k] = float(np.degrees(np.arccos(cosang)))
+            err_deg = _thrust_alignment_error_deg_series(
+                t_s=t_s,
+                truth_hist=hist,
+                thrust_hist=u,
+                thruster_direction_body=thrust_dir_by_object.get(oid, np.array([1.0, 0.0, 0.0], dtype=float)),
+            )
 
             fig, ax = plt.subplots(figsize=cap_figsize(10, 5))
             finite = np.isfinite(err_deg)

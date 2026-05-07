@@ -69,6 +69,61 @@ def test_quickstart_cli_shortcut_validates() -> None:
     assert "OK" in proc.stdout
 
 
+def test_flagship_hcw_pd_config_validates() -> None:
+    root = Path(__file__).resolve().parents[2]
+    proc = subprocess.run(
+        [sys.executable, "run_simulation.py", "--config", "configs/hcw_pd_10km_experiment.yaml", "--validate-only"],
+        cwd=root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert proc.returncode == 0
+    assert "hcw_pd_10km_experiment" in proc.stdout
+    assert "OK" in proc.stdout
+
+
+def test_flagship_analysis_script_writes_custom_metrics(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[2]
+    source_cfg = root / "configs" / "hcw_pd_10km_experiment.yaml"
+    config = yaml.safe_load(source_cfg.read_text(encoding="utf-8"))
+    outdir = tmp_path / "flagship_short"
+    config["outputs"]["output_dir"] = str(outdir)
+    config["outputs"]["plots"]["enabled"] = False
+    config["outputs"]["plots"]["figure_ids"] = []
+    config["simulator"]["duration_s"] = 2.0
+
+    cfg_path = tmp_path / "flagship_short.yaml"
+    cfg_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "examples/python/flagship_analysis.py",
+            "--config",
+            str(cfg_path),
+            "--output-dir",
+            str(outdir),
+        ],
+        cwd=root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    metrics_path = outdir / "custom_analysis" / "flagship_metrics.json"
+    csv_path = outdir / "custom_analysis" / "flagship_metrics.csv"
+    assert metrics_path.is_file()
+    assert csv_path.is_file()
+    metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+    assert metrics["scenario_name"] == "hcw_pd_10km_experiment"
+    assert metrics["deputy"] == "chaser"
+    assert metrics["chief"] == "target"
+    assert metrics["samples"] > 0
+
+
 def test_single_run_summary_only_reports_insertion_for_enabled_rocket() -> None:
     base_summary = {
         "scenario_name": "summary_display",
