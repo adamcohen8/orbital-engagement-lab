@@ -61,7 +61,18 @@ histories in `master_run_log.json`.
 
 ## 5. Try The Next Layer
 
-After the quickstart works, generate plots:
+After the quickstart works, run the flagship 10 km HCW PD review scenario:
+
+```bash
+python run_simulation.py --config configs/hcw_pd_10km_experiment.yaml --validate-only
+python run_simulation.py --config configs/hcw_pd_10km_experiment.yaml
+```
+
+Open `outputs/flagship_hcw_pd_10km/index.md`, then inspect the rendezvous,
+control-effort, and thrust-alignment plots. For the full review order, see
+[Flagship HCW PD 10 km Scenario](flagship-hcw-pd-10km.md).
+
+For a shorter plotting demo:
 
 ```bash
 python run_simulation.py --config configs/plotting_rendezvous_demo.yaml

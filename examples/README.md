@@ -22,6 +22,20 @@ python run_simulation.py --config examples/configs/public_tle_2hr_propagation.ya
 Public configs use the canonical `objects` map. Conventional object IDs such as
 `chaser` and `target` are example names, not required engine slots.
 
+## Flagship Built-In Scenario
+
+After the quickstart, the recommended public review path is the built-in HCW PD
+10 km scenario:
+
+```bash
+python run_simulation.py --config configs/hcw_pd_10km_experiment.yaml --validate-only
+python run_simulation.py --config configs/hcw_pd_10km_experiment.yaml
+python examples/python/flagship_analysis.py
+```
+
+Open `outputs/flagship_hcw_pd_10km/index.md` first, then inspect the custom
+metrics under `outputs/flagship_hcw_pd_10km/custom_analysis/`.
+
 Private/Pro examples use `pro_*.yaml` names in the full private workspace and
 are not included in the public export.
 

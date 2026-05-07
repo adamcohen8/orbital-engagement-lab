@@ -1,7 +1,16 @@
 scenario_name: hcw_pd_10km_experiment
+scenario_description: Public flagship HCW PD 10 km RPO review scenario with attitude-coupled burn gating, deterministic two-body dynamics, and report-ready rendezvous artifacts.
 metadata:
-  owner: controller_lab
-  notes: Single-run HCW PD rendezvous sandbox using tuned 10 km rectangular-RIC gains.
+  owner: public
+  notes: Run after the quickstart with `python run_simulation.py --config configs/hcw_pd_10km_experiment.yaml`, then open outputs/flagship_hcw_pd_10km/index.md.
+  intent: Demonstrate a tuned HCW PD controller closing a 10 km-class relative-motion case while the chaser must satisfy attitude alignment before thrust is applied.
+  evidence_role: Public golden-path artifact for single-run closed-loop RPO behavior; not a mission qualification or high-fidelity validation claim.
+  recommended_review:
+    - outputs/flagship_hcw_pd_10km/index.md
+    - outputs/flagship_hcw_pd_10km/master_run_summary.json
+    - outputs/flagship_hcw_pd_10km/rendezvous_summary.png
+    - outputs/flagship_hcw_pd_10km/control_effort.png
+    - outputs/flagship_hcw_pd_10km/chaser_thrust_alignment_error.png
 objects:
   rocket:
     enabled: false
@@ -203,8 +212,8 @@ simulator:
   termination:
     earth_impact_enabled: false
 outputs:
-  output_dir: outputs/hcw_pd_10km_experiment_attitude
-  mode: interactive
+  output_dir: outputs/flagship_hcw_pd_10km
+  mode: save
   stats:
     enabled: true
     print_summary: true

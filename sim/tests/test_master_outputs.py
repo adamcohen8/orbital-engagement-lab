@@ -5,7 +5,12 @@ from pathlib import Path
 import numpy as np
 
 from sim.config import scenario_config_from_dict
-from sim.master_outputs import animate_outputs, plot_outputs
+from sim.master_outputs import (
+    _thrust_alignment_error_deg_series,
+    _thruster_direction_body_by_object,
+    animate_outputs,
+    plot_outputs,
+)
 from sim.utils.plot_windows import (
     attitude_axis_limits,
     axis_window_from_values,
@@ -558,6 +563,57 @@ def test_thruster_marker_geometry_prioritizes_plume_face_over_conflicting_mount_
     )
 
     assert float(np.min(points[:, 2])) > 1.5
+
+
+def test_thrust_alignment_plot_uses_object_thruster_direction() -> None:
+    cfg = scenario_config_from_dict(
+        {
+            "scenario_name": "alignment_direction",
+            "chaser": {
+                "enabled": True,
+                "specs": {"thruster": "BASIC_CHEMICAL_Z_BOTTOM"},
+                "mission_execution": {
+                    "module": "sim.mission.modules",
+                    "class_name": "IntegratedCommandExecution",
+                    "params": {"thruster_direction_body": [0.0, 0.0, 1.0]},
+                },
+            },
+            "simulator": {"duration_s": 1.0, "dt_s": 1.0},
+            "outputs": {
+                "plots": {
+                    "thrust_direction_body": [1.0, 0.0, 0.0],
+                },
+            },
+            "monte_carlo": {"enabled": False},
+        }
+    )
+
+    directions = _thruster_direction_body_by_object(cfg)
+
+    assert np.allclose(directions["chaser"], np.array([0.0, 0.0, 1.0]))
+
+
+def test_thrust_alignment_error_series_uses_resolved_thruster_axis() -> None:
+    t_s = np.array([0.0, 1.0], dtype=float)
+    truth = _truth_hist([[7000.0, 0.0, 0.0], [7000.0, 0.0, 0.0]])
+    thrust = np.array([[0.0, 0.0, -1.0e-6], [0.0, 0.0, 0.0]], dtype=float)
+
+    err_z = _thrust_alignment_error_deg_series(
+        t_s=t_s,
+        truth_hist=truth,
+        thrust_hist=thrust,
+        thruster_direction_body=np.array([0.0, 0.0, 1.0], dtype=float),
+    )
+    err_x = _thrust_alignment_error_deg_series(
+        t_s=t_s,
+        truth_hist=truth,
+        thrust_hist=thrust,
+        thruster_direction_body=np.array([1.0, 0.0, 0.0], dtype=float),
+    )
+
+    assert np.isclose(err_z[0], 0.0)
+    assert np.isclose(err_x[0], 90.0)
+    assert np.isnan(err_z[1])
 
 
 def test_axis_window_from_values_expands_independently() -> None:

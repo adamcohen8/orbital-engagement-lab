@@ -25,10 +25,10 @@ outputs:
 object from the scenario's canonical `objects` map; `target` is only the
 convention used by the rendezvous examples.
 
-For a ready-to-run plotting scenario:
+For the flagship plotting scenario used by the checked-in gallery:
 
 ```bash
-python run_simulation.py --config configs/plotting_rendezvous_demo.yaml
+python run_simulation.py --config configs/hcw_pd_10km_experiment.yaml
 ```
 
 See the [plot gallery](plot-gallery.md) for checked-in examples generated from

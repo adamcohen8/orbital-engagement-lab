@@ -4,8 +4,8 @@
 
 Open-core Python simulator for closed-loop spacecraft rendezvous and
 proximity-operations prototyping. Define a scenario in YAML, run deterministic
-single-run simulations through the CLI/API/GUI, and inspect generated summaries,
-plots, and artifacts.
+single-run simulations through the CLI, API, or GUI, and inspect generated
+summaries, plots, and artifacts.
 
 The public core is intended for research, education, prototyping, pre-flight
 engineering analysis, and software-in-the-loop experimentation. It is not
@@ -34,7 +34,9 @@ Users are responsible for their own validation, security review, export-control
 review, mission qualification, and compliance obligations before using the
 software in any sensitive, commercial, government, or operational context.
 
-![Run dashboard](docs/assets/plots/run_dashboard.png)
+A checked-in dashboard from the flagship 10 km HCW PD RPO scenario:
+
+![Flagship run dashboard](docs/assets/plots/run_dashboard.png)
 
 Orbital Engagement Lab exists to make it easier to prototype spacecraft behavior
 as a full closed loop: orbit dynamics, attitude dynamics, sensors, estimators,
@@ -106,15 +108,18 @@ python run_simulation.py --quickstart --open-output
 
 For a guided walkthrough, see [First Five Minutes](docs/first-five-minutes.md).
 
-Generate a longer public plotting demo:
+Review the flagship 10 km HCW PD RPO scenario:
 
 ```bash
-python run_simulation.py --config configs/plotting_rendezvous_demo.yaml
+python run_simulation.py --config configs/hcw_pd_10km_experiment.yaml --validate-only
+python run_simulation.py --config configs/hcw_pd_10km_experiment.yaml
 ```
 
 Expected result: the 6000-second rendezvous run writes dashboard, rendezvous,
-control, estimation, sensor-access, and ground-track plots under
-`outputs/plotting_rendezvous_demo/`.
+control-effort, relative-range, trajectory, attitude, quaternion-error, and
+thrust-alignment plots under `outputs/flagship_hcw_pd_10km/`. Open
+`outputs/flagship_hcw_pd_10km/index.md` first, then compare against the
+checked-in [Plot Gallery](docs/plot-gallery.md).
 
 ## Use-Case Cookbook
 
@@ -123,6 +128,7 @@ control, estimation, sensor-access, and ground-track plots under
 | Predict where a satellite will be two hours from a TLE | `python run_simulation.py --config examples/configs/public_tle_2hr_propagation.yaml` |
 | Compute ground-station access windows from a TLE | `python run_simulation.py --config examples/configs/public_ground_station_access_from_tle.yaml` |
 | Run a closed-loop chaser/target rendezvous with HCW LQR | `python run_simulation.py --config examples/configs/public_closed_loop_rendezvous_lqr.yaml` |
+| Review the flagship 10 km HCW PD RPO scenario | `python run_simulation.py --config configs/hcw_pd_10km_experiment.yaml` |
 | Inspect orbit perturbations, drag, SRP, and third-body toggles | `python run_simulation.py --config examples/configs/public_orbit_environment_stack.yaml` |
 | Evaluate attitude hold under initial error and disturbance torque | `python run_simulation.py --config examples/configs/public_attitude_hold_disturbance.yaml` |
 | Practice manual RPO/game-style control | `python run_game.py examples/configs/public_manual_rpo_training.yaml` |
@@ -218,6 +224,7 @@ require hosted AI accounts or API keys.
 ## Start Here
 
 - [Quickstart](docs/quickstart.md)
+- [Flagship HCW PD 10 km Scenario](docs/flagship-hcw-pd-10km.md)
 - [Scenario YAML](docs/scenario-yaml.md)
 - [Python API](docs/python-api.md)
 - [Examples Matrix](docs/examples-matrix.md)
@@ -240,6 +247,10 @@ Curated examples are YAML scenario configs under `examples/configs/`:
 - `examples/configs/public_orbit_environment_stack.yaml` for perturbation/environment propagation
 - `examples/configs/public_attitude_hold_disturbance.yaml` for attitude-control recovery
 - `examples/configs/public_manual_rpo_training.yaml` for manual/game scenario wiring
+
+The built-in flagship review scenario lives at
+`configs/hcw_pd_10km_experiment.yaml`; it is the recommended next run after the
+quickstart when you want the full plot/artifact path.
 
 New examples use the canonical `objects` map in scenario YAML. Conventional
 names such as `chaser` and `target` are readable scenario IDs, not fixed engine

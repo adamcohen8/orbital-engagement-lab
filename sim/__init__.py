@@ -4,10 +4,12 @@ import importlib
 from typing import Any
 
 _API_EXPORTS = [
+    "MetricStudyResult",
     "SimulationConfig",
     "SimulationResult",
     "SimulationSession",
     "SimulationSnapshot",
+    "SimulationWorkspace",
 ]
 
 _ACTUATOR_EXPORTS = [

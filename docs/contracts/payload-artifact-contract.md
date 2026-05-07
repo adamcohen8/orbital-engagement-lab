@@ -206,6 +206,9 @@ Output directories:
 
 - `summary`
 - `time_s`
+- `object_ids`
+- `reference_object_id`
+- `primary_pair`
 - `truth`
 - `belief`
 - `applied_thrust`
@@ -215,10 +218,24 @@ Output directories:
 - `artifacts`
 - `metrics`
 - `snapshot(step_index)`
+- `relative_state(...)`
+- `range_between(...)`
+- `min_range(...)`
+- `time_of_min_range(...)`
+- `collision_event(...)`
+- `keepout_violations(...)`
+- `to_records(...)`
+- `to_dataframe(...)`
+- `SimulationWorkspace.validate(...)`
+- `SimulationWorkspace.run(...)`
 
 These wrappers are part of the intended public API. If payload keys change,
 wrappers should either preserve compatibility or receive release-note coverage
 and focused tests.
+
+Private Pro workflow helpers such as controller-bench execution, Monte Carlo
+custom-metric runners, parameter sweeps, and AI report/config helpers are
+documented separately in the private Pro Python API guide.
 
 
 ## Batch And Campaign Payloads

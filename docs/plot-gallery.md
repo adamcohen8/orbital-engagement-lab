@@ -1,15 +1,17 @@
 # Plot Gallery
 
-These images are generated from the public-safe 6000-second plotting rendezvous
-demo:
+These images are generated from the public-safe flagship 10 km HCW PD RPO
+scenario:
 
 ```bash
-python run_simulation.py --config configs/plotting_rendezvous_demo.yaml
+python run_simulation.py --config configs/hcw_pd_10km_experiment.yaml
 ```
 
-The demo writes run artifacts under `outputs/plotting_rendezvous_demo/`. The
+The scenario writes run artifacts under `outputs/flagship_hcw_pd_10km/`. The
 gallery images below are checked-in snapshots from that run so visitors can see
-the plotting surface without running the simulator first.
+the flagship plotting surface without running the simulator first. When you run
+the scenario locally, start with `outputs/flagship_hcw_pd_10km/index.md` and use
+this page as a quick visual reference.
 
 ## Run Dashboard
 
@@ -23,14 +25,24 @@ the plotting surface without running the simulator first.
 
 ![Control effort](assets/plots/control_effort.png)
 
-## Estimation Error Components
+## Relative Range
 
-![Estimation error components](assets/plots/estimation_error_components.png)
+![Relative range](assets/plots/relative_ranges.png)
 
-## Sensor Access
+## RIC Curvilinear Trajectory
 
-![Sensor access](assets/plots/sensor_access.png)
+![RIC curvilinear trajectory](assets/plots/trajectory_ric_curv_2d_multi.png)
 
-## Ground Track
+## Integrated Attitude And Burn Gating
 
-![Ground track](assets/plots/ground_track_multi.png)
+### Chaser Attitude
+
+![Chaser attitude](assets/plots/chaser_attitude.png)
+
+### Chaser Quaternion Error
+
+![Chaser quaternion error](assets/plots/chaser_quaternion_error.png)
+
+### Chaser Thrust Alignment Error
+
+![Chaser thrust alignment error](assets/plots/chaser_thrust_alignment_error.png)

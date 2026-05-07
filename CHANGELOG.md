@@ -6,6 +6,33 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.5.0 - 2026-05-07
+
+Flagship public workflow and Python API release.
+
+### Added
+
+- Added the public flagship `configs/hcw_pd_10km_experiment.yaml` review
+  scenario with saved report artifacts, refreshed plot gallery images, and a
+  companion custom-analysis script.
+- Added public Python API helpers for single-run workspace validation, relative
+  state/range analysis, event checks, records/dataframes, and callback metrics.
+- Added private Pro Python API documentation for controller-bench, campaign,
+  sweep, and AI workflow helpers while keeping those docs out of the public
+  export.
+
+### Fixed
+
+- Fixed thrust-alignment error plots to use the object-resolved thruster axis
+  instead of a plot-level default, eliminating false 90-degree alignment errors.
+- Fixed `SimulationResult.first_crossing()` so time-window filtering is applied
+  consistently to both timestamps and values.
+- Fixed workspace validation so generated Monte Carlo/sensitivity configs are
+  still checked when plugin validation is non-strict and plugin issues are
+  warnings.
+- Tightened the public export boundary so public users cannot access Pro API
+  workflow helpers through the exported package.
+
 ## 0.4.2 - 2026-05-07
 
 HCW PD controller and validation workflow release.
