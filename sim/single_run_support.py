@@ -389,7 +389,7 @@ class _SatelliteCommandBuilder:
             cmd_step.mode_flags["thruster_direction_body"] = np.array(agent.thruster_direction_body, dtype=float)
         if agent.thruster_position_body_m is not None:
             cmd_step.mode_flags["thruster_position_body_m"] = np.array(agent.thruster_position_body_m, dtype=float)
-        if agent.thruster_direction_body is not None:
+        if e.attitude_enabled and agent.thruster_direction_body is not None:
             cmd_step.mode_flags["commanded_thrust_eci_km_s2"] = np.array(cmd_step.thrust_eci_km_s2, dtype=float)
             cmd_step.thrust_eci_km_s2 = attitude_coupled_thrust_eci(
                 cmd_step.thrust_eci_km_s2,

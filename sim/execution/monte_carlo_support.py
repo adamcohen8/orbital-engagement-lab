@@ -409,15 +409,21 @@ def mc_initial_relative_ric_curv_samples(
     base_state = np.array(rel_block.get("state", []), dtype=float).reshape(-1)
     if frame != "curv" or base_state.size != 6 or not run_details:
         return {}
-    path_prefix = object_parameter_prefix(object_id)
+    path_prefixes = [object_parameter_prefix(object_id)]
+    canonical_prefix = f"objects.{object_id}"
+    if canonical_prefix not in path_prefixes:
+        path_prefixes.append(canonical_prefix)
+    legacy_prefix = str(object_id)
+    if legacy_prefix not in path_prefixes:
+        path_prefixes.append(legacy_prefix)
 
     paths = {
-        "radial_sep_km": f"{path_prefix}.initial_state.relative_to_target_ric.state[0]",
-        "in_track_sep_km": f"{path_prefix}.initial_state.relative_to_target_ric.state[1]",
-        "cross_track_sep_km": f"{path_prefix}.initial_state.relative_to_target_ric.state[2]",
-        "radial_vel_km_s": f"{path_prefix}.initial_state.relative_to_target_ric.state[3]",
-        "in_track_vel_km_s": f"{path_prefix}.initial_state.relative_to_target_ric.state[4]",
-        "cross_track_vel_km_s": f"{path_prefix}.initial_state.relative_to_target_ric.state[5]",
+        "radial_sep_km": [f"{prefix}.initial_state.relative_to_target_ric.state[0]" for prefix in path_prefixes],
+        "in_track_sep_km": [f"{prefix}.initial_state.relative_to_target_ric.state[1]" for prefix in path_prefixes],
+        "cross_track_sep_km": [f"{prefix}.initial_state.relative_to_target_ric.state[2]" for prefix in path_prefixes],
+        "radial_vel_km_s": [f"{prefix}.initial_state.relative_to_target_ric.state[3]" for prefix in path_prefixes],
+        "in_track_vel_km_s": [f"{prefix}.initial_state.relative_to_target_ric.state[4]" for prefix in path_prefixes],
+        "cross_track_vel_km_s": [f"{prefix}.initial_state.relative_to_target_ric.state[5]" for prefix in path_prefixes],
     }
     index_by_name = {
         "radial_sep_km": 0,
@@ -428,12 +434,17 @@ def mc_initial_relative_ric_curv_samples(
         "cross_track_vel_km_s": 5,
     }
     out: dict[str, np.ndarray] = {}
-    for name, path in paths.items():
+    for name, path_candidates in paths.items():
         idx = index_by_name[name]
         vals: list[float] = []
         for rd in run_details:
             sampled = dict(rd.get("sampled_parameters", {}) or {})
-            vals.append(float(safe_float(sampled.get(path), default=float(base_state[idx]))))
+            value = None
+            for path in path_candidates:
+                if path in sampled:
+                    value = sampled.get(path)
+                    break
+            vals.append(float(safe_float(value, default=float(base_state[idx]))))
         out[name] = np.array(vals, dtype=float)
     return out
 
