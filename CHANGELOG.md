@@ -6,6 +6,28 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.4.2 - 2026-05-07
+
+HCW PD controller and validation workflow release.
+
+### Added
+
+- Added an HCW PD orbital controller with 10 km rendezvous experiment,
+  Monte Carlo, and controller-bench tuning configs.
+- Added campaign-level Monte Carlo range-timeseries plotting and Gemini-backed
+  post-run AI report settings for the HCW PD experiment.
+- Added validation evidence packaging, release workflow tests, pytest marker
+  tiers, and split validation harness suites for orbit, attitude, actuator,
+  sensor, integrated RPO, and HPOP reference checks.
+
+### Fixed
+
+- Kept relative-initialization belief state synchronized with adjusted truth
+  state so controllers and logs start from the same state.
+- Fixed Monte Carlo sampled-parameter reporting for canonical
+  `objects.<object_id>` paths in initial relative-state plots.
+- Limited attitude-coupled thrust application to attitude-enabled runs.
+
 ## 0.4.1 - 2026-05-05
 
 Documentation, public-export, and hygiene release.

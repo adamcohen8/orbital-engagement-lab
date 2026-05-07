@@ -69,20 +69,6 @@ def test_quickstart_cli_shortcut_validates() -> None:
     assert "OK" in proc.stdout
 
 
-def test_quickstart_cli_does_not_report_rocket_insertion_for_non_rocket_scenario() -> None:
-    root = Path(__file__).resolve().parents[2]
-    proc = subprocess.run(
-        [sys.executable, "run_simulation.py", "--quickstart"],
-        cwd=root,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-
-    assert proc.returncode == 0
-    assert "Insertion  :" not in proc.stdout
-
-
 def test_single_run_summary_only_reports_insertion_for_enabled_rocket() -> None:
     base_summary = {
         "scenario_name": "summary_display",

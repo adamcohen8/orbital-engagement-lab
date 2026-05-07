@@ -2,6 +2,7 @@ from sim.control.orbit.advanced import RobustMPCController, StochasticPolicyCont
 from sim.control.orbit.baseline import RiskThresholdController, SafetyBarrierController, StationkeepingController
 from sim.control.orbit.curv_pd import CurvilinearRICPDController, curv_accel_to_rect
 from sim.control.orbit.hcw_mpc import HCWInTrackCrossTrackMPCController, HCWRelativeOrbitMPCController
+from sim.control.orbit.hcw_pd import HCWPDController
 from sim.control.orbit.hcw_transfer import (
     HCWEvasionOptimizationResult,
     HCWPositionTransferSolution,
@@ -44,6 +45,7 @@ __all__ = [
     "IntegratedManeuverDecision",
     "OrbitalAttitudeManeuverCoordinator",
     "HCWLQRController",
+    "HCWPDController",
     "HCWNoRadialLQRController",
     "HCWNoRadialManualController",
     "HCWCurvInputRectOutputController",

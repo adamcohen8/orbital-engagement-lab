@@ -526,6 +526,9 @@ def _apply_relative_init_from_reference(
     x_agent_eci = ric_rect_state_to_eci(x_rel_rect, r_t, v_t)
     agent.truth.position_eci_km = x_agent_eci[:3]
     agent.truth.velocity_eci_km_s = x_agent_eci[3:]
+    if agent.belief is not None and agent.belief.state.size >= 6:
+        agent.belief.state[:3] = agent.truth.position_eci_km
+        agent.belief.state[3:6] = agent.truth.velocity_eci_km_s
 
 
 def _apply_chaser_relative_init_from_target(
