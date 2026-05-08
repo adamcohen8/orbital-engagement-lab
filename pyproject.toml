@@ -59,6 +59,8 @@ exclude = ["sim.tests", "sim.tests.*"]
 line-length = 120
 target-version = "py39"
 extend-exclude = [
+  "build",
+  "dist",
   "examples/experiments",
   "outputs",
   "examples/outputs",
