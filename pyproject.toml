@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "orbital-engagement-lab"
-version = "0.5.0"
+version = "0.5.1"
 description = "Integrated spacecraft simulation and analysis platform for rendezvous, control, validation, and mission prototyping."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -59,6 +59,8 @@ exclude = ["sim.tests", "sim.tests.*"]
 line-length = 120
 target-version = "py39"
 extend-exclude = [
+  "build",
+  "dist",
   "examples/experiments",
   "outputs",
   "examples/outputs",

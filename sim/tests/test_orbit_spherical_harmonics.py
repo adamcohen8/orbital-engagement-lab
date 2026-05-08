@@ -1,13 +1,17 @@
+import hashlib
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 
+import sim.dynamics.orbit.spherical_harmonics as spherical_harmonics
 from sim.dynamics.orbit.accelerations import accel_j2
 from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2
 from sim.dynamics.orbit.propagator import spherical_harmonics_plugin
 from sim.dynamics.orbit.spherical_harmonics import (
+    GravityModelDownload,
     SphericalHarmonicTerm,
     accel_spherical_harmonics_terms,
     configure_spherical_harmonics_env,
@@ -146,6 +150,85 @@ class TestOrbitSphericalHarmonics(unittest.TestCase):
         self.assertTrue(term.normalized)
         self.assertEqual(Path(env["spherical_harmonics_source"]), coeff_path.resolve())
         self.assertAlmostEqual(float(env["spherical_harmonics_reference_radius_km"]), 6378.1363)
+
+    def test_download_model_file_verifies_sha256_before_cache_write(self):
+        payload = b"modelname TEST\n" + (b"gfc 2 0 0 0 0 0\n" * 128)
+        digest = hashlib.sha256(payload).hexdigest()
+        old_spec = spherical_harmonics._REAL_MODEL_DOWNLOADS.get("TESTMODEL")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            source = root / "source.gfc"
+            source.write_bytes(payload)
+            outpath = root / "cache" / "TESTMODEL.gfc"
+            spherical_harmonics._REAL_MODEL_DOWNLOADS["TESTMODEL"] = GravityModelDownload(
+                urls=(source.as_uri(),),
+                sha256=digest,
+                min_size_bytes=1,
+            )
+            try:
+                spherical_harmonics._download_model_file("TESTMODEL", outpath)
+            finally:
+                if old_spec is None:
+                    spherical_harmonics._REAL_MODEL_DOWNLOADS.pop("TESTMODEL", None)
+                else:
+                    spherical_harmonics._REAL_MODEL_DOWNLOADS["TESTMODEL"] = old_spec
+
+            self.assertEqual(outpath.read_bytes(), payload)
+
+    def test_download_model_file_rejects_hash_mismatch_without_final_cache_file(self):
+        payload = b"modelname TEST\n" + (b"gfc 2 0 0 0 0 0\n" * 128)
+        old_spec = spherical_harmonics._REAL_MODEL_DOWNLOADS.get("TESTMODEL")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            source = root / "source.gfc"
+            source.write_bytes(payload)
+            outpath = root / "cache" / "TESTMODEL.gfc"
+            spherical_harmonics._REAL_MODEL_DOWNLOADS["TESTMODEL"] = GravityModelDownload(
+                urls=(source.as_uri(),),
+                sha256="0" * 64,
+                min_size_bytes=1,
+            )
+            try:
+                with self.assertRaisesRegex(RuntimeError, "integrity check failed"):
+                    spherical_harmonics._download_model_file("TESTMODEL", outpath)
+            finally:
+                if old_spec is None:
+                    spherical_harmonics._REAL_MODEL_DOWNLOADS.pop("TESTMODEL", None)
+                else:
+                    spherical_harmonics._REAL_MODEL_DOWNLOADS["TESTMODEL"] = old_spec
+
+            self.assertFalse(outpath.exists())
+
+    def test_cached_real_terms_verifies_existing_managed_cache(self):
+        payload = b"not the expected model"
+        old_spec = spherical_harmonics._REAL_MODEL_DOWNLOADS.get("TESTMODEL")
+        spherical_harmonics._cached_real_terms.cache_clear()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cache_file = root / ".orbital_engagement_lab" / "gravity_models" / "TESTMODEL.gfc"
+            cache_file.parent.mkdir(parents=True)
+            cache_file.write_bytes(payload)
+            spherical_harmonics._REAL_MODEL_DOWNLOADS["TESTMODEL"] = GravityModelDownload(
+                urls=(),
+                sha256="0" * 64,
+                min_size_bytes=1,
+            )
+            try:
+                with patch("pathlib.Path.home", return_value=root):
+                    with self.assertRaisesRegex(RuntimeError, "integrity check failed"):
+                        spherical_harmonics._cached_real_terms(
+                            model="TESTMODEL",
+                            coeff_path=None,
+                            max_degree=2,
+                            max_order=0,
+                            allow_download=False,
+                        )
+            finally:
+                spherical_harmonics._cached_real_terms.cache_clear()
+                if old_spec is None:
+                    spherical_harmonics._REAL_MODEL_DOWNLOADS.pop("TESTMODEL", None)
+                else:
+                    spherical_harmonics._REAL_MODEL_DOWNLOADS["TESTMODEL"] = old_spec
 
 
 if __name__ == "__main__":

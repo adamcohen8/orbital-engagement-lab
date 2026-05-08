@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import math
+import os
+import tempfile
 import urllib.request
 from dataclasses import dataclass
 from functools import lru_cache
@@ -38,6 +41,14 @@ class SphericalHarmonicTerm:
             raise ValueError("n must be >= 2 for perturbation terms.")
         if self.m < 0 or self.m > self.n:
             raise ValueError("m must satisfy 0 <= m <= n.")
+
+
+@dataclass(frozen=True)
+class GravityModelDownload:
+    urls: tuple[str, ...]
+    sha256: str
+    min_size_bytes: int = 1
+    size_bytes: int | None = None
 
 
 def _double_factorial(k: int) -> float:
@@ -520,25 +531,84 @@ def load_hpop_ggm03_terms(
     return out
 
 
-_REAL_MODEL_URLS = {
-    "EGM96": [
-        # SatelliteToolboxGravityModels.jl documented direct ICGEM link.
-        "https://icgem.gfz-potsdam.de/getmodel/gfc/971b0a3b49a497910aad23cd85e066d4cd9af0aeafe7ce6301a696bed8570be3/EGM96.gfc",
-    ]
+_REAL_MODEL_DOWNLOADS = {
+    "EGM96": GravityModelDownload(
+        urls=(
+            # SatelliteToolboxGravityModels.jl documented direct ICGEM link.
+            "https://icgem.gfz-potsdam.de/getmodel/gfc/"
+            "971b0a3b49a497910aad23cd85e066d4cd9af0aeafe7ce6301a696bed8570be3/EGM96.gfc",
+        ),
+        sha256="5247a9e9c316dd2c8f8fd491d53be0e163cb5cb3676b021754240cc9e44cb43b",
+        min_size_bytes=5_000_000,
+        size_bytes=5_620_000,
+    )
 }
 
 
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _verify_downloaded_model_file(model: str, path: Path) -> None:
+    spec = _REAL_MODEL_DOWNLOADS.get(model.upper())
+    if spec is None:
+        raise RuntimeError(f"No download metadata configured for gravity model '{model}'.")
+    if not path.exists():
+        raise FileNotFoundError(path)
+    size = path.stat().st_size
+    if size < spec.min_size_bytes:
+        raise RuntimeError(
+            f"Downloaded gravity model '{model}' at {path} is too small: "
+            f"{size} bytes < {spec.min_size_bytes} bytes."
+        )
+    if spec.size_bytes is not None and size != spec.size_bytes:
+        raise RuntimeError(
+            f"Downloaded gravity model '{model}' at {path} has unexpected size: "
+            f"{size} bytes != {spec.size_bytes} bytes."
+        )
+    actual = _sha256_file(path)
+    expected = spec.sha256.lower()
+    if actual.lower() != expected:
+        raise RuntimeError(
+            f"Gravity model '{model}' integrity check failed for {path}: "
+            f"sha256={actual}, expected {expected}."
+        )
+
+
 def _download_model_file(model: str, outpath: Path) -> None:
-    urls = _REAL_MODEL_URLS.get(model.upper(), [])
+    spec = _REAL_MODEL_DOWNLOADS.get(model.upper())
+    urls = () if spec is None else spec.urls
     last_err: Exception | None = None
     for url in urls:
+        tmp_path: Path | None = None
         try:
             outpath.parent.mkdir(parents=True, exist_ok=True)
-            urllib.request.urlretrieve(url, str(outpath))
-            if outpath.exists() and outpath.stat().st_size > 0:
-                return
+            with tempfile.NamedTemporaryFile(
+                prefix=f".{outpath.name}.",
+                suffix=".tmp",
+                dir=outpath.parent,
+                delete=False,
+            ) as tmp:
+                tmp_path = Path(tmp.name)
+                with urllib.request.urlopen(url, timeout=120.0) as response:
+                    while True:
+                        chunk = response.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        tmp.write(chunk)
+                tmp.flush()
+                os.fsync(tmp.fileno())
+            _verify_downloaded_model_file(model=model, path=tmp_path)
+            os.replace(tmp_path, outpath)
+            return
         except Exception as exc:
             last_err = exc
+            if tmp_path is not None:
+                tmp_path.unlink(missing_ok=True)
     if last_err is not None:
         raise RuntimeError(f"Failed downloading gravity model '{model}' to {outpath}: {last_err}") from last_err
     raise RuntimeError(f"No download URL configured for gravity model '{model}'.")
@@ -561,7 +631,15 @@ def _cached_real_terms(
         legacy_path = legacy_cache_dir / f"{model.upper()}.gfc"
         # Preserve older cached downloads while moving new cache writes to the renamed project namespace.
         path = legacy_path if not preferred_path.exists() and legacy_path.exists() else preferred_path
-        if not path.exists():
+        if path.exists():
+            try:
+                _verify_downloaded_model_file(model=model, path=path)
+            except RuntimeError:
+                if not allow_download:
+                    raise
+                path = preferred_path
+                _download_model_file(model=model, outpath=path)
+        else:
             if not allow_download:
                 raise FileNotFoundError(
                     f"Real gravity coefficients requested but file not found: {path}. "

@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from sim import SimulationConfig, SimulationWorkspace
+from sim import SimulationConfig, SimulationWorkspace  # noqa: E402
 
 
 def _as_float(value: Any, default: float = float("nan")) -> float:

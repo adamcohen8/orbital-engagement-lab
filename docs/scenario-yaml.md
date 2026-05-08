@@ -79,6 +79,10 @@ Preset paths resolve in this order:
 - relative to the repository root
 - by name inside `sim/presets/objects`
 
+For untrusted YAML, preset paths must stay inside the approved config/project
+roots. Absolute paths, `~`, and traversal outside those roots require the caller
+to opt into trusted external config paths.
+
 This means built-in names work directly:
 
 ```yaml
@@ -279,6 +283,35 @@ outputs:
     # Other presets: orbit, rendezvous, attitude, estimation, rocket, debug.
   animations:
     enabled: false
+  resource_limits:
+    # Configs may lower this cap; raise it from the caller with
+    # --max-history-memory-mb or OEL_MAX_HISTORY_MEMORY_MB.
+    max_history_memory_mb: 1024
+```
+
+Config-controlled output directories are bounded by the path policy. Relative
+paths under the project/output roots work by default; external absolute paths or
+directory escapes require explicit trust from the CLI or Python API.
+
+Before allocating dense in-memory histories, single-run execution estimates the
+history arrays required by `duration_s`, `dt_s`, active objects, rocket metrics,
+and tracked knowledge pairs. The default caller-controlled cap is 1024 MB. Set
+`outputs.resource_limits.max_history_memory_mb` to a smaller scenario-specific
+budget, or raise the process budget with `--max-history-memory-mb` /
+`OEL_MAX_HISTORY_MEMORY_MB` for intentionally large trusted runs.
+
+Monte Carlo relative-range time-series plots are written through a bounded
+streaming artifact writer. This avoids retaining every run's range history in
+campaign memory. The plot follows `save_histograms` / `display_histograms` by
+default and can be controlled explicitly:
+
+```yaml
+outputs:
+  monte_carlo:
+    save_relative_range_timeseries: true
+    display_relative_range_timeseries: false
+    relative_range_max_runs: 200
+    relative_range_max_points_per_run: 1000
 ```
 
 Use `configs/automation_smoke.yaml` for the smallest headless example and
