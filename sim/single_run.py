@@ -23,6 +23,12 @@ from sim.reporting.single_run_artifacts import (
     write_single_run_artifacts,
 )
 from sim.reporting.single_run_payload import SingleRunPayloadContext, build_single_run_payload
+from sim.resource_limits import (
+    HistoryMemoryEstimate,
+    bytes_from_mb,
+    configured_history_memory_limit_mb,
+    enforce_history_memory_budget,
+)
 from sim.runtime_support import (
     AgentRuntime,
     _apply_relative_init_from_reference,
@@ -88,9 +94,7 @@ class _SingleRunEngine:
 
         self.dt = float(cfg.simulator.dt_s)
         self.n = int(np.floor(float(cfg.simulator.duration_s) / self.dt)) + 1
-        self.t_s = np.arange(self.n, dtype=float) * self.dt
         self.outdir = Path(cfg.outputs.output_dir)
-        self.outdir.mkdir(parents=True, exist_ok=True)
 
         seed = int(cfg.metadata.get("seed", 123))
         rng = np.random.default_rng(seed)
@@ -173,9 +177,6 @@ class _SingleRunEngine:
                 use_rectangular_prism_for_aero_srp=False,
                 rectangular_prism_dims_m=None,
             )
-            self.target_reference_orbit_hist = np.full((self.n, 6), np.nan)
-            self.target_reference_orbit_hist[0, 0:3] = self.target_reference_truth.position_eci_km
-            self.target_reference_orbit_hist[0, 3:6] = self.target_reference_truth.velocity_eci_km_s
 
         for aid, agent in self.agents.items():
             cfg_src = self.object_configs[aid]
@@ -185,6 +186,17 @@ class _SingleRunEngine:
                 dt_s=self.dt,
                 rng=np.random.default_rng(int(rng.integers(0, 2**31 - 1))),
             )
+
+        self.history_memory_estimate = self._estimate_history_memory()
+        enforce_history_memory_budget(self.history_memory_estimate)
+
+        self.t_s = np.arange(self.n, dtype=float) * self.dt
+        self.outdir.mkdir(parents=True, exist_ok=True)
+
+        if self.target_reference_truth is not None and self.target_reference_orbit_hist is None:
+            self.target_reference_orbit_hist = np.full((self.n, 6), np.nan)
+            self.target_reference_orbit_hist[0, 0:3] = self.target_reference_truth.position_eci_km
+            self.target_reference_orbit_hist[0, 3:6] = self.target_reference_truth.velocity_eci_km_s
 
         self.truth_hist = {aid: np.full((self.n, 14), np.nan) for aid in self.agents.keys()}
         self.belief_hist = {
@@ -245,6 +257,52 @@ class _SingleRunEngine:
 
         self._emit_step_callback(0)
 
+    def _estimate_history_memory(self) -> HistoryMemoryEstimate:
+        itemsize = np.dtype(float).itemsize
+        samples = int(max(self.n, 0))
+        active_objects = int(len(self.agents))
+        float_columns = 1  # t_s
+        if self.target_reference_truth is not None:
+            float_columns += 6
+        for agent in self.agents.values():
+            float_columns += 14  # truth
+            float_columns += int(agent.belief.state.size) if agent.belief is not None else 0
+            float_columns += 3  # thrust
+            float_columns += 3  # torque
+            float_columns += 4  # desired attitude
+            if agent.kind == "rocket":
+                float_columns += 1  # throttle history
+        if self.rocket is not None:
+            float_columns += 3  # stage index, dynamic pressure, mach
+
+        knowledge_pairs = 0
+        for agent in self.agents.values():
+            if agent.knowledge_base is None:
+                continue
+            targets = list(agent.knowledge_base.target_ids())
+            knowledge_pairs += len(targets)
+            float_columns += 6 * len(targets)
+
+        retained_python_bytes_per_sample = 0
+        for agent in self.agents.values():
+            if agent.kind != "rocket":
+                retained_python_bytes_per_sample += 4096  # controller_debug_hist row estimate
+            if agent.bridge is not None:
+                retained_python_bytes_per_sample += 512  # bridge event row estimate
+
+        array_bytes = int(samples * float_columns * itemsize) + int(samples * retained_python_bytes_per_sample)
+        # Payload construction copies history arrays before serialization/plotting, so budget against likely peak.
+        estimated_peak_bytes = int(array_bytes * 2)
+        limit_bytes = bytes_from_mb(configured_history_memory_limit_mb(self.cfg))
+        return HistoryMemoryEstimate(
+            samples=samples,
+            active_objects=active_objects,
+            knowledge_pairs=knowledge_pairs,
+            array_bytes=array_bytes,
+            estimated_peak_bytes=estimated_peak_bytes,
+            limit_bytes=limit_bytes,
+        )
+
     @property
     def total_steps(self) -> int:
         return max(self.n - 1, 0)
@@ -266,6 +324,18 @@ class _SingleRunEngine:
         hist = self.belief_hist[aid]
         if hist.shape[1] >= int(width):
             return
+        extra_columns = int(width) - int(hist.shape[1])
+        extra_array_bytes = int(self.n * extra_columns * np.dtype(float).itemsize)
+        next_estimate = HistoryMemoryEstimate(
+            samples=self.history_memory_estimate.samples,
+            active_objects=self.history_memory_estimate.active_objects,
+            knowledge_pairs=self.history_memory_estimate.knowledge_pairs,
+            array_bytes=self.history_memory_estimate.array_bytes + extra_array_bytes,
+            estimated_peak_bytes=self.history_memory_estimate.estimated_peak_bytes + (2 * extra_array_bytes),
+            limit_bytes=self.history_memory_estimate.limit_bytes,
+        )
+        enforce_history_memory_budget(next_estimate)
+        self.history_memory_estimate = next_estimate
         expanded = np.full((self.n, int(width)), np.nan)
         if hist.shape[1] > 0:
             expanded[:, : hist.shape[1]] = hist

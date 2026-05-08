@@ -6,6 +6,8 @@ from dataclasses import dataclass, field, fields, is_dataclass
 from pathlib import Path
 from typing import Any
 
+from sim.security import ConfigPathPolicy
+
 
 @dataclass(frozen=True)
 class AlgorithmPointer:
@@ -256,6 +258,19 @@ class OutputAIConfigSection(_TypedConfigDict):
         return str(self.get("model", "") or "")
 
 
+class OutputResourceLimitsSection(_TypedConfigDict):
+    _defaults: dict[str, Any] = {
+        "max_history_memory_mb": None,
+    }
+
+    @property
+    def max_history_memory_mb(self) -> float | None:
+        value = self.get("max_history_memory_mb")
+        if value in (None, ""):
+            return None
+        return float(value)
+
+
 @dataclass(frozen=True)
 class OutputsSection:
     output_dir: str = "outputs"
@@ -266,6 +281,7 @@ class OutputsSection:
     monte_carlo: OutputMonteCarloSection = field(default_factory=OutputMonteCarloSection)
     ai_report: OutputAIReportSection = field(default_factory=OutputAIReportSection)
     ai_config: OutputAIConfigSection = field(default_factory=OutputAIConfigSection)
+    resource_limits: OutputResourceLimitsSection = field(default_factory=OutputResourceLimitsSection)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "stats", OutputStatsSection(self.stats))
@@ -274,6 +290,7 @@ class OutputsSection:
         object.__setattr__(self, "monte_carlo", OutputMonteCarloSection(self.monte_carlo))
         object.__setattr__(self, "ai_report", OutputAIReportSection(self.ai_report))
         object.__setattr__(self, "ai_config", OutputAIConfigSection(self.ai_config))
+        object.__setattr__(self, "resource_limits", OutputResourceLimitsSection(self.resource_limits))
 
 
 @dataclass(frozen=True)
@@ -427,7 +444,12 @@ def _deep_merge_dicts(base: dict[str, Any], override: dict[str, Any]) -> dict[st
     return merged
 
 
-def _resolve_preset_path(preset_ref: str, base_dir: Path | None, role: str) -> Path:
+def _resolve_preset_path(
+    preset_ref: str,
+    base_dir: Path | None,
+    role: str,
+    path_policy: ConfigPathPolicy | None = None,
+) -> Path:
     ref_path = Path(preset_ref).expanduser()
     candidates: list[Path] = []
     if ref_path.is_absolute():
@@ -444,7 +466,9 @@ def _resolve_preset_path(preset_ref: str, base_dir: Path | None, role: str) -> P
 
     for candidate in candidates:
         if candidate.is_file():
-            return candidate
+            if path_policy is None:
+                return candidate
+            return path_policy.resolve_input_file(candidate, purpose=f"{role}.preset", must_exist=True)
 
     checked = ", ".join(str(c) for c in candidates)
     raise FileNotFoundError(f"Could not resolve {role} preset YAML '{preset_ref}'. Checked: {checked}")
@@ -479,7 +503,12 @@ def _agent_fragment_from_preset(preset: dict[str, Any], role: str, preset_path: 
     return {"specs": specs}
 
 
-def _resolve_agent_preset(value: Any, role: str, base_dir: Path | None) -> dict[str, Any]:
+def _resolve_agent_preset(
+    value: Any,
+    role: str,
+    base_dir: Path | None,
+    path_policy: ConfigPathPolicy | None = None,
+) -> dict[str, Any]:
     d = _as_dict(value, role)
     preset_ref = next((d.get(key) for key in _AGENT_PRESET_KEYS if d.get(key) is not None), None)
     if preset_ref is None:
@@ -487,7 +516,12 @@ def _resolve_agent_preset(value: Any, role: str, base_dir: Path | None) -> dict[
     if not isinstance(preset_ref, str) or not preset_ref.strip():
         raise ValueError(f"{role}.preset must be a non-empty YAML file path.")
 
-    preset_path = _resolve_preset_path(preset_ref.strip(), base_dir=base_dir, role=role)
+    preset_path = _resolve_preset_path(
+        preset_ref.strip(),
+        base_dir=base_dir,
+        role=role,
+        path_policy=path_policy,
+    )
     preset_raw = _load_yaml_mapping(preset_path, f"{role} preset")
     preset_fragment = _agent_fragment_from_preset(preset_raw, role=role, preset_path=preset_path)
     local_fragment = {k: v for k, v in d.items() if k not in _AGENT_PRESET_KEYS}
@@ -503,11 +537,20 @@ def _resolve_agent_preset(value: Any, role: str, base_dir: Path | None) -> dict[
     return merged
 
 
-def _resolve_agent_presets(root: dict[str, Any], base_dir: Path | None) -> dict[str, Any]:
+def _resolve_agent_presets(
+    root: dict[str, Any],
+    base_dir: Path | None,
+    path_policy: ConfigPathPolicy | None = None,
+) -> dict[str, Any]:
     resolved = dict(root)
     for role in ("rocket", "chaser", "target"):
         if role in resolved:
-            resolved[role] = _resolve_agent_preset(resolved.get(role), role=role, base_dir=base_dir)
+            resolved[role] = _resolve_agent_preset(
+                resolved.get(role),
+                role=role,
+                base_dir=base_dir,
+                path_policy=path_policy,
+            )
     objects_raw = resolved.get("objects")
     if isinstance(objects_raw, dict):
         resolved_objects = {}
@@ -516,6 +559,7 @@ def _resolve_agent_presets(root: dict[str, Any], base_dir: Path | None) -> dict[
                 object_value,
                 role=f"objects.{object_id}",
                 base_dir=base_dir,
+                path_policy=path_policy,
             )
         resolved["objects"] = resolved_objects
     return resolved
@@ -1052,7 +1096,7 @@ def _normalize_analysis_and_monte_carlo(
     return legacy_mc, analysis
 
 
-def _parse_outputs_section(value: Any) -> OutputsSection:
+def _parse_outputs_section(value: Any, path_policy: ConfigPathPolicy | None = None) -> OutputsSection:
     d = _as_dict(value, "outputs")
     out = OutputsSection(
         output_dir=str(d.get("output_dir", "outputs")),
@@ -1063,18 +1107,66 @@ def _parse_outputs_section(value: Any) -> OutputsSection:
         monte_carlo=dict(d.get("monte_carlo", {}) or {}),
         ai_report=dict(d.get("ai_report", {}) or {}),
         ai_config=dict(d.get("ai_config", {}) or {}),
+        resource_limits=dict(d.get("resource_limits", {}) or {}),
     )
     if out.mode not in ("interactive", "save", "both"):
         raise ValueError("outputs.mode must be one of: interactive, save, both.")
     if not out.output_dir.strip():
         raise ValueError("outputs.output_dir must be non-empty.")
+    max_history_memory_mb = out.resource_limits.max_history_memory_mb
+    if max_history_memory_mb is not None and max_history_memory_mb <= 0:
+        raise ValueError("outputs.resource_limits.max_history_memory_mb must be positive when set.")
+    if path_policy is not None:
+        path_policy.resolve_output_dir(out.output_dir, purpose="outputs.output_dir")
     return out
 
 
-def scenario_config_from_dict(data: dict[str, Any], source_path: str | Path | None = None) -> SimulationScenarioConfig:
+def _validate_config_read_paths(root: dict[str, Any], path_policy: ConfigPathPolicy | None) -> None:
+    if path_policy is None:
+        return
+    simulator = _as_dict(root.get("simulator"), "simulator")
+    dynamics = _as_dict(simulator.get("dynamics"), "simulator.dynamics")
+    orbit = _as_dict(dynamics.get("orbit"), "simulator.dynamics.orbit")
+    path_fields = (
+        ("drag_eop_path", "simulator.dynamics.orbit.drag_eop_path"),
+        ("de440_coeff_path", "simulator.dynamics.orbit.de440_coeff_path"),
+        ("de440_eop_path", "simulator.dynamics.orbit.de440_eop_path"),
+    )
+    for key, purpose in path_fields:
+        if orbit.get(key) not in (None, ""):
+            path_policy.resolve_input_file(
+                str(orbit[key]),
+                purpose=purpose,
+                base_dir=path_policy.workspace_root,
+                must_exist=False,
+            )
+    sh = _as_dict(orbit.get("spherical_harmonics"), "simulator.dynamics.orbit.spherical_harmonics")
+    sh_path_fields = (
+        ("coeff_path", "simulator.dynamics.orbit.spherical_harmonics.coeff_path"),
+        ("source_path", "simulator.dynamics.orbit.spherical_harmonics.source_path"),
+        ("eop_path", "simulator.dynamics.orbit.spherical_harmonics.eop_path"),
+    )
+    for key, purpose in sh_path_fields:
+        if sh.get(key) not in (None, ""):
+            path_policy.resolve_input_file(
+                str(sh[key]),
+                purpose=purpose,
+                base_dir=path_policy.workspace_root,
+                must_exist=False,
+            )
+
+
+def scenario_config_from_dict(
+    data: dict[str, Any],
+    source_path: str | Path | None = None,
+    path_policy: ConfigPathPolicy | None = None,
+) -> SimulationScenarioConfig:
     root = _as_dict(data, "root")
     base_dir = None if source_path is None else Path(source_path).expanduser().resolve().parent
-    root = _resolve_agent_presets(root, base_dir=base_dir)
+    if path_policy is None and source_path is not None:
+        path_policy = ConfigPathPolicy.default(config_path=source_path)
+    root = _resolve_agent_presets(root, base_dir=base_dir, path_policy=path_policy)
+    _validate_config_read_paths(root, path_policy)
     _enforce_strict_booleans(root)
     legacy_mc = _parse_monte_carlo_section(root.get("monte_carlo"))
     analysis = _parse_analysis_section(root.get("analysis"), legacy_mc=legacy_mc)
@@ -1109,7 +1201,7 @@ def scenario_config_from_dict(data: dict[str, Any], source_path: str | Path | No
         objects=objects,
         ground_stations=_parse_ground_stations_section(root.get("ground_stations")),
         simulator=_parse_simulator_section(root.get("simulator")),
-        outputs=_parse_outputs_section(root.get("outputs")),
+        outputs=_parse_outputs_section(root.get("outputs"), path_policy=path_policy),
         monte_carlo=normalized_mc,
         analysis=normalized_analysis,
         metadata=dict(root.get("metadata", {}) or {}),
@@ -1120,7 +1212,13 @@ def scenario_config_from_dict(data: dict[str, Any], source_path: str | Path | No
     return cfg
 
 
-def load_simulation_yaml(path: str | Path) -> SimulationScenarioConfig:
+def load_simulation_yaml(
+    path: str | Path,
+    *,
+    path_policy: ConfigPathPolicy | None = None,
+    allow_external_config_paths: bool = False,
+    allow_external_ai_prompt_files: bool = False,
+) -> SimulationScenarioConfig:
     try:
         import yaml  # type: ignore
     except Exception as exc:
@@ -1132,4 +1230,9 @@ def load_simulation_yaml(path: str | Path) -> SimulationScenarioConfig:
         raw = yaml.safe_load(f) or {}
     if not isinstance(raw, dict):
         raise ValueError("Simulation YAML root must be a mapping/object.")
-    return scenario_config_from_dict(raw, source_path=p)
+    policy = path_policy or ConfigPathPolicy.default(
+        config_path=p,
+        allow_external_config_paths=allow_external_config_paths,
+        allow_external_ai_prompt_files=allow_external_ai_prompt_files,
+    )
+    return scenario_config_from_dict(raw, source_path=p, path_policy=policy)

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import importlib
-from collections.abc import Mapping
+import inspect
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Union
@@ -15,11 +16,14 @@ from sim.config import (
     scenario_config_from_dict,
     validate_scenario_plugins,
 )
+from sim.core.models import Command, StateBelief
 from sim.execution import create_single_run_engine, run_simulation_scenario
 from sim.execution.study import analysis_study_type
 from sim.execution.validation import validate_generated_batch_configs
+from sim.security import ConfigPathPolicy
 
 MetricCallback = Callable[["SimulationResult"], Union[Mapping[str, Any], Any]]
+ControllerFactory = Callable[[], Any]
 
 _STATE_COLUMNS = [
     "x_eci_km",
@@ -199,6 +203,109 @@ def _numeric_metric_value(row: Mapping[str, Any], metric: str) -> float:
         return float("nan")
 
 
+def _compatible_call(fn: Callable[..., Any], kwargs: dict[str, Any], fallback_kwargs: dict[str, Any]) -> Any:
+    try:
+        signature = inspect.signature(fn)
+    except (TypeError, ValueError):
+        return fn(**kwargs)
+
+    if any(param.kind == inspect.Parameter.VAR_KEYWORD for param in signature.parameters.values()):
+        return fn(**kwargs)
+
+    filtered: dict[str, Any] = {}
+    for name, param in signature.parameters.items():
+        if param.kind == inspect.Parameter.POSITIONAL_ONLY:
+            return fn(**fallback_kwargs)
+        if param.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY) and name in kwargs:
+            filtered[name] = kwargs[name]
+
+    missing_required = [
+        name
+        for name, param in signature.parameters.items()
+        if param.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+        and param.default is inspect.Signature.empty
+        and name not in filtered
+    ]
+    if missing_required:
+        return fn(**fallback_kwargs)
+    return fn(**filtered)
+
+
+class _CallableControllerAdapter:
+    def __init__(self, fn: Callable[..., Any], *, command_kind: str) -> None:
+        self.fn = fn
+        self.command_kind = str(command_kind)
+
+    def act(self, belief: StateBelief, t_s: float, budget_ms: float) -> Command:
+        ret = _compatible_call(
+            self.fn,
+            {
+                "belief": belief,
+                "state": belief.state,
+                "t_s": t_s,
+                "budget_ms": budget_ms,
+            },
+            {
+                "belief": belief,
+                "t_s": t_s,
+            },
+        )
+        return _coerce_controller_return(ret, command_kind=self.command_kind)
+
+
+class _CallableMissionAdapter:
+    def __init__(self, fn: Callable[..., Any]) -> None:
+        self.fn = fn
+
+    def update(self, **kwargs: Any) -> dict[str, Any]:
+        ret = _compatible_call(self.fn, dict(kwargs), {"truth": kwargs.get("truth"), "t_s": kwargs.get("t_s", 0.0)})
+        return dict(ret) if isinstance(ret, Mapping) else {}
+
+
+def _coerce_controller_return(value: Any, *, command_kind: str) -> Command:
+    if value is None:
+        return Command.zero()
+    if isinstance(value, Command):
+        return value
+    if isinstance(value, Mapping):
+        cmd = Command.zero()
+        if "thrust_eci_km_s2" in value:
+            cmd.thrust_eci_km_s2 = np.array(value["thrust_eci_km_s2"], dtype=float).reshape(3)
+        elif "accel_eci_km_s2" in value:
+            cmd.thrust_eci_km_s2 = np.array(value["accel_eci_km_s2"], dtype=float).reshape(3)
+        if "torque_body_nm" in value:
+            cmd.torque_body_nm = np.array(value["torque_body_nm"], dtype=float).reshape(3)
+        if isinstance(value.get("mode_flags"), Mapping):
+            cmd.mode_flags.update(dict(value["mode_flags"]))
+        return cmd
+    arr = np.array(value, dtype=float).reshape(-1)
+    if arr.size != 3:
+        raise TypeError("Controller callables must return Command, mapping, None, or a length-3 vector.")
+    if command_kind == "attitude":
+        return Command(torque_body_nm=arr.copy(), mode_flags={"mode": "api_attitude_controller"})
+    return Command(thrust_eci_km_s2=arr.copy(), mode_flags={"mode": "api_orbit_controller"})
+
+
+def _controller_object(value: Any, *, command_kind: str) -> Any:
+    if value is None:
+        return None
+    if hasattr(value, "act") and callable(value.act):
+        return value
+    if callable(value):
+        return _CallableControllerAdapter(value, command_kind=command_kind)
+    raise TypeError("Controller override must be a controller object with .act(), a callable, or None.")
+
+
+def _mission_object(value: Any) -> Any:
+    if value is None:
+        return None
+    if any(callable(getattr(value, name, None)) for name in ("update", "plan", "decide", "execute", "act")):
+        return value
+    if callable(value):
+        return _CallableMissionAdapter(value)
+    raise TypeError("Mission override must be an object with a mission method, a callable, or None.")
+
+
 def _require_private_workflow(module_name: str, symbol_name: str, feature: str) -> Any:
     try:
         module = importlib.import_module(module_name)
@@ -248,9 +355,24 @@ class SimulationConfig:
     source_path: Path | None = None
 
     @classmethod
-    def from_yaml(cls, path: str | Path) -> SimulationConfig:
+    def from_yaml(
+        cls,
+        path: str | Path,
+        *,
+        path_policy: ConfigPathPolicy | None = None,
+        allow_external_config_paths: bool = False,
+        allow_external_ai_prompt_files: bool = False,
+    ) -> SimulationConfig:
         resolved = Path(path).expanduser().resolve()
-        return cls(scenario=load_simulation_yaml(resolved), source_path=resolved)
+        return cls(
+            scenario=load_simulation_yaml(
+                resolved,
+                path_policy=path_policy,
+                allow_external_config_paths=allow_external_config_paths,
+                allow_external_ai_prompt_files=allow_external_ai_prompt_files,
+            ),
+            source_path=resolved,
+        )
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> SimulationConfig:
@@ -726,6 +848,10 @@ class SimulationSession:
         self._done = False
         self._engine: Any | None = None
         self._external_intent_providers: dict[str, Callable[..., dict[str, Any] | None]] = {}
+        self._controller_overrides: dict[tuple[str, str], ControllerFactory] = {}
+        self._mission_overrides: dict[tuple[str, str], ControllerFactory] = {}
+        self._controller_originals: dict[tuple[str, str], Any] = {}
+        self._mission_originals: dict[tuple[str, str], Any] = {}
 
     @classmethod
     def from_config(cls, config: SimulationConfig | SimulationScenarioConfig | dict[str, Any]) -> SimulationSession:
@@ -781,6 +907,8 @@ class SimulationSession:
 
     def run(self, *, step_callback: Any | None = None) -> SimulationResult:
         if self._is_batch_analysis(self._active_config.scenario):
+            if self._controller_overrides or self._mission_overrides:
+                raise RuntimeError("Runtime API controller/mission overrides are only supported for single-run sessions.")
             payload = self._run_batch_analysis(self._active_config)
             self._result = SimulationResult(config=self._active_config, payload=payload)
             self._done = True
@@ -824,6 +952,74 @@ class SimulationSession:
         if self._engine is not None and hasattr(self._engine, "set_external_intent_provider"):
             self._engine.set_external_intent_provider(oid, provider)
 
+    def set_orbit_controller(self, object_id: str, controller: Any | None) -> None:
+        """Attach a trusted Python orbit controller object or callable to a single-run session."""
+
+        self._set_controller_override("orbit", object_id, None if controller is None else lambda: controller)
+
+    def set_orbit_controller_factory(self, object_id: str, factory: ControllerFactory | None) -> None:
+        """Attach a factory that creates a fresh orbit controller for each engine reset."""
+
+        self._set_controller_override("orbit", object_id, factory)
+
+    def set_attitude_controller(self, object_id: str, controller: Any | None) -> None:
+        """Attach a trusted Python attitude controller object or callable to a single-run session."""
+
+        self._set_controller_override("attitude", object_id, None if controller is None else lambda: controller)
+
+    def set_attitude_controller_factory(self, object_id: str, factory: ControllerFactory | None) -> None:
+        """Attach a factory that creates a fresh attitude controller for each engine reset."""
+
+        self._set_controller_override("attitude", object_id, factory)
+
+    def set_mission_strategy(self, object_id: str, strategy: Any | None) -> None:
+        self._set_mission_override("strategy", object_id, None if strategy is None else lambda: strategy)
+
+    def set_mission_strategy_factory(self, object_id: str, factory: ControllerFactory | None) -> None:
+        self._set_mission_override("strategy", object_id, factory)
+
+    def set_mission_execution(self, object_id: str, execution: Any | None) -> None:
+        self._set_mission_override("execution", object_id, None if execution is None else lambda: execution)
+
+    def set_mission_execution_factory(self, object_id: str, factory: ControllerFactory | None) -> None:
+        self._set_mission_override("execution", object_id, factory)
+
+    def _set_controller_override(
+        self,
+        controller_kind: str,
+        object_id: str,
+        factory: ControllerFactory | None,
+    ) -> None:
+        kind = str(controller_kind)
+        oid = str(object_id)
+        key = (kind, oid)
+        if factory is None:
+            self._controller_overrides.pop(key, None)
+        elif not callable(factory):
+            raise TypeError("Controller factory must be callable.")
+        else:
+            self._controller_overrides[key] = factory
+        if self._engine is not None:
+            self._apply_single_controller_override(kind, oid, factory)
+
+    def _set_mission_override(
+        self,
+        mission_kind: str,
+        object_id: str,
+        factory: ControllerFactory | None,
+    ) -> None:
+        kind = str(mission_kind)
+        oid = str(object_id)
+        key = (kind, oid)
+        if factory is None:
+            self._mission_overrides.pop(key, None)
+        elif not callable(factory):
+            raise TypeError("Mission factory must be callable.")
+        else:
+            self._mission_overrides[key] = factory
+        if self._engine is not None:
+            self._apply_single_mission_override(kind, oid, factory)
+
     def _ensure_engine(self, *, step_callback: Any | None = None) -> None:
         if self._engine is not None:
             if step_callback is not None:
@@ -835,9 +1031,79 @@ class SimulationSession:
         scenario = self._active_config.to_scenario_config()
         self._validate_plugins_if_strict(scenario)
         self._engine = create_single_run_engine(scenario, step_callback=step_callback)
+        self._controller_originals.clear()
+        self._mission_originals.clear()
         if hasattr(self._engine, "set_external_intent_provider"):
             for object_id, provider in self._external_intent_providers.items():
                 self._engine.set_external_intent_provider(object_id, provider)
+        self._apply_runtime_overrides()
+
+    def _apply_runtime_overrides(self) -> None:
+        for (kind, object_id), factory in self._controller_overrides.items():
+            self._apply_single_controller_override(kind, object_id, factory)
+        for (kind, object_id), factory in self._mission_overrides.items():
+            self._apply_single_mission_override(kind, object_id, factory)
+
+    def _agent_for_override(self, object_id: str) -> Any:
+        assert self._engine is not None
+        agents = getattr(self._engine, "agents", {})
+        oid = str(object_id)
+        if oid not in agents:
+            raise KeyError(f"No active object with id '{oid}' in this session.")
+        return agents[oid]
+
+    def _apply_single_controller_override(
+        self,
+        kind: str,
+        object_id: str,
+        factory: ControllerFactory | None,
+    ) -> None:
+        key = (str(kind), str(object_id))
+        attr = "attitude_controller" if kind == "attitude" else "orbit_controller"
+        if factory is None:
+            if self._engine is not None and key in self._controller_originals:
+                agent = self._agent_for_override(object_id)
+                current = getattr(agent, attr, None)
+                original = self._controller_originals.pop(key)
+                if current is not None and hasattr(current, "base"):
+                    current.base = original
+                    if hasattr(current, "_last_eval_t_s"):
+                        current._last_eval_t_s = None
+                    if hasattr(current, "_last_cmd"):
+                        current._last_cmd = Command.zero()
+                else:
+                    setattr(agent, attr, original)
+            return
+        agent = self._agent_for_override(object_id)
+        controller = _controller_object(factory(), command_kind=kind)
+        current = getattr(agent, attr, None)
+        if current is not None and hasattr(current, "base"):
+            self._controller_originals.setdefault(key, current.base)
+            current.base = controller
+            if hasattr(current, "_last_eval_t_s"):
+                current._last_eval_t_s = None
+            if hasattr(current, "_last_cmd"):
+                current._last_cmd = Command.zero()
+        else:
+            self._controller_originals.setdefault(key, current)
+            setattr(agent, attr, controller)
+
+    def _apply_single_mission_override(
+        self,
+        kind: str,
+        object_id: str,
+        factory: ControllerFactory | None,
+    ) -> None:
+        key = (str(kind), str(object_id))
+        attr = "mission_execution" if kind == "execution" else "mission_strategy"
+        if factory is None:
+            if self._engine is not None and key in self._mission_originals:
+                agent = self._agent_for_override(object_id)
+                setattr(agent, attr, self._mission_originals.pop(key))
+            return
+        agent = self._agent_for_override(object_id)
+        self._mission_originals.setdefault(key, getattr(agent, attr, None))
+        setattr(agent, attr, _mission_object(factory()))
 
     @staticmethod
     def _validate_plugins_if_strict(config: SimulationScenarioConfig) -> None:
@@ -860,8 +1126,33 @@ class SimulationSession:
 class SimulationWorkspace:
     """Higher-level programmatic facade for CLI-equivalent workflows."""
 
+    def __init__(
+        self,
+        *,
+        allow_external_config_paths: bool = False,
+        allow_external_ai_prompt_files: bool = False,
+        read_roots: Iterable[str | Path] = (),
+        write_roots: Iterable[str | Path] = (),
+        workspace_root: str | Path | None = None,
+    ) -> None:
+        self.allow_external_config_paths = bool(allow_external_config_paths)
+        self.allow_external_ai_prompt_files = bool(allow_external_ai_prompt_files)
+        self.read_roots = tuple(read_roots)
+        self.write_roots = tuple(write_roots)
+        self.workspace_root = workspace_root
+
+    def _path_policy_for(self, path: str | Path) -> ConfigPathPolicy:
+        return ConfigPathPolicy.default(
+            config_path=path,
+            workspace_root=self.workspace_root,
+            read_roots=self.read_roots,
+            write_roots=self.write_roots,
+            allow_external_config_paths=self.allow_external_config_paths,
+            allow_external_ai_prompt_files=self.allow_external_ai_prompt_files,
+        )
+
     def load(self, path: str | Path) -> SimulationConfig:
-        return SimulationConfig.from_yaml(path)
+        return SimulationConfig.from_yaml(path, path_policy=self._path_policy_for(path))
 
     def from_dict(self, data: dict[str, Any]) -> SimulationConfig:
         return SimulationConfig.from_dict(data)
@@ -1065,6 +1356,7 @@ class SimulationWorkspace:
         *,
         output_dir: str | Path = "",
         controller_bench: bool = False,
+        ai_options: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         if controller_bench:
             estimate = _require_private_workflow(
@@ -1072,9 +1364,9 @@ class SimulationWorkspace:
                 "_estimate_ai_report_from_controller_bench",
                 "AI report workflows",
             )
-            return estimate(str(config_path), output_dir=str(output_dir or ""))
+            return estimate(str(config_path), output_dir=str(output_dir or ""), ai_options=dict(ai_options or {}))
         estimate = _require_private_workflow("run_simulation", "_estimate_ai_report_from_outputs", "AI report workflows")
-        return estimate(str(config_path), output_dir=str(output_dir or ""))
+        return estimate(str(config_path), output_dir=str(output_dir or ""), ai_options=dict(ai_options or {}))
 
     def create_ai_report(
         self,
@@ -1082,16 +1374,29 @@ class SimulationWorkspace:
         *,
         output_dir: str | Path = "",
         controller_bench: bool = False,
+        ai_options: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
+        options = dict(ai_options or {})
+        allow_custom_endpoint = bool(options.get("allow_custom_endpoint", False))
         if controller_bench:
             create = _require_private_workflow(
                 "run_simulation",
                 "_create_ai_report_from_controller_bench",
                 "AI report workflows",
             )
-            return create(str(config_path), output_dir=str(output_dir or ""))
+            return create(
+                str(config_path),
+                output_dir=str(output_dir or ""),
+                ai_options=options,
+                allow_custom_endpoint=allow_custom_endpoint,
+            )
         create = _require_private_workflow("run_simulation", "_create_ai_report_from_outputs", "AI report workflows")
-        return create(str(config_path), output_dir=str(output_dir or ""))
+        return create(
+            str(config_path),
+            output_dir=str(output_dir or ""),
+            ai_options=options,
+            allow_custom_endpoint=allow_custom_endpoint,
+        )
 
     def estimate_ai_config_cost(
         self,
@@ -1100,6 +1405,7 @@ class SimulationWorkspace:
         prompt: str = "",
         prompt_file: str | Path = "",
         output_dir: str | Path = "",
+        ai_options: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         estimate = _require_private_workflow("run_simulation", "_estimate_ai_config_cost", "AI config workflows")
 
@@ -1108,6 +1414,7 @@ class SimulationWorkspace:
             prompt=str(prompt or ""),
             prompt_file=str(prompt_file or ""),
             output_dir=str(output_dir or ""),
+            ai_options=dict(ai_options or {}),
         )
 
     def create_ai_config(
@@ -1117,14 +1424,18 @@ class SimulationWorkspace:
         prompt: str = "",
         prompt_file: str | Path = "",
         output_dir: str | Path = "",
+        ai_options: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         create = _require_private_workflow("run_simulation", "_create_ai_config_draft", "AI config workflows")
+        options = dict(ai_options or {})
 
         return create(
             str(config_path),
             prompt=str(prompt or ""),
             prompt_file=str(prompt_file or ""),
             output_dir=str(output_dir or ""),
+            ai_options=options,
+            allow_custom_endpoint=bool(options.get("allow_custom_endpoint", False)),
         )
 
     @staticmethod
@@ -1133,10 +1444,10 @@ class SimulationWorkspace:
             return str(Path(config).expanduser())
         return None
 
-    @staticmethod
     def _coerce_config(
+        self,
         config: str | Path | SimulationConfig | SimulationScenarioConfig | dict[str, Any],
     ) -> SimulationConfig:
         if isinstance(config, (str, Path)):
-            return SimulationConfig.from_yaml(config)
+            return SimulationConfig.from_yaml(config, path_policy=self._path_policy_for(config))
         return SimulationSession._coerce_config(config)

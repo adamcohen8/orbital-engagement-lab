@@ -6,6 +6,30 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.5.1 - 2026-05-08
+
+Security, resource, and public-boundary hardening release.
+
+### Added
+
+- Added caller-controlled config path policies for scenario presets, output
+  directories, external dynamics data, and AI prompt/question files.
+- Added AI endpoint trust gates so hosted provider requests use built-in
+  endpoints unless callers explicitly opt into custom endpoints for trusted
+  configs.
+- Added single-run history memory budgeting with CLI/API caps before dense
+  history arrays are allocated.
+- Added bounded Monte Carlo relative-range plotting that avoids retaining every
+  run's full time history in campaign memory.
+
+### Fixed
+
+- Verified downloaded real gravity model cache files by size and SHA-256 before
+  using or replacing managed cache files.
+- Hardened public export checks to scan the full generated tree for sensitive
+  text, local-only files, and cache artifacts.
+- Added Ruff checks to private and generated-public CI gates.
+
 ## 0.5.0 - 2026-05-07
 
 Flagship public workflow and Python API release.

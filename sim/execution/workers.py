@@ -42,6 +42,7 @@ def run_mc_iteration_from_dict(task: dict[str, Any]) -> dict[str, Any]:
     progress_queue = task.get("progress_queue")
     emit_every = int(task.get("progress_emit_every", 20) or 20)
     emit_every = max(1, emit_every)
+    collect_relative_range_series = bool(task.get("collect_relative_range_series", False))
     ci = scenario_config_from_dict(cdict)
     if strict_plugins:
         errs = validate_scenario_plugins(ci)
@@ -86,12 +87,14 @@ def run_mc_iteration_from_dict(task: dict[str, Any]) -> dict[str, Any]:
             )
         except Exception:
             pass
-    return {
+    result = {
         "iteration": iteration,
         "summary": ro["summary"],
         "closest_approach_km": closest_approach_from_run_payload(ro),
-        "relative_range_series": relative_range_series_from_run_payload(ro),
     }
+    if collect_relative_range_series:
+        result["relative_range_series"] = relative_range_series_from_run_payload(ro)
+    return result
 
 
 _set_parallel_worker_thread_limits = set_parallel_worker_thread_limits
