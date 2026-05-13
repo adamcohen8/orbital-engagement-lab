@@ -22,6 +22,13 @@ def test_write_output_index_creates_single_run_start_here_file(tmp_path: Path) -
             "samples": 4,
             "duration_s": 30.0,
             "terminated_early": False,
+            "relative_range_summary": {
+                "object_pair": ["chaser", "target"],
+                "initial_range_km": 10.0,
+                "closest_approach_km": 0.5,
+                "closest_approach_time_s": 25.0,
+                "final_range_km": 0.75,
+            },
             "thrust_stats": {"chaser": {"total_dv_m_s": 1.25}},
             "plot_outputs": {"run_dashboard": str(tmp_path / "run_dashboard.png")},
             "animation_outputs": {},
@@ -36,11 +43,16 @@ def test_write_output_index_creates_single_run_start_here_file(tmp_path: Path) -
     text = index_path.read_text(encoding="utf-8")
 
     assert index_path == tmp_path / "index.md"
-    assert "# Output Index" in text
+    assert "# Start Here" in text
+    assert "## Run Status" in text
+    assert "## What Happened" in text
     assert "Workflow: `single_run`" in text
     assert "Scenario: `demo`" in text
+    assert "Closest approach: `0.5 km`" in text
     assert "Total delta-v: `1.25 m/s`" in text
-    assert "master_run_summary.json" in text
+    assert "Open [`run_dashboard.png`](run_dashboard.png) for the fastest visual overview." in text
+    assert "Open [`master_run_summary.json`](master_run_summary.json)" in text
+    assert "## Next Command" in text
     assert "master_run_log.json" in text
     assert "plots.run_dashboard" in text
 
@@ -77,8 +89,8 @@ def test_write_output_index_open_first_uses_saved_artifacts_only(tmp_path: Path)
 
     text = index_path.read_text(encoding="utf-8")
 
-    assert "Open `master_monte_carlo_summary.json`" not in text
-    assert "Open `master_monte_carlo_commander_brief.md`" not in text
+    assert "master_monte_carlo_summary.json" not in text
+    assert "master_monte_carlo_commander_brief.md" not in text
     assert "Inspect campaign plots and AI report artifacts when present." in text
 
 
@@ -97,5 +109,6 @@ def test_write_output_index_does_not_recommend_missing_single_run_plots(tmp_path
 
     text = index_path.read_text(encoding="utf-8")
 
-    assert "Open `master_run_summary.json`" in text
+    assert "Open [`master_run_summary.json`](master_run_summary.json)" in text
     assert "Inspect generated plot or animation artifacts listed below." not in text
+    assert "No plot or animation artifacts were generated for this run" in text

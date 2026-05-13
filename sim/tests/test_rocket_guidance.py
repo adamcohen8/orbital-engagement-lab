@@ -2,6 +2,7 @@ import unittest
 
 import numpy as np
 
+from sim.core.models import StateBelief
 from sim.presets.rockets import BASIC_TWO_STAGE_STACK
 from sim.rocket import (
     GuidanceCommand,
@@ -12,6 +13,8 @@ from sim.rocket import (
     RocketVehicleConfig,
     TVCSteeringGuidance,
 )
+from sim.runtime_support import AgentRuntime, _rocket_state_to_truth
+from sim.single_run_support import _RocketStepper
 
 
 class TestRocketGuidance(unittest.TestCase):
@@ -84,6 +87,84 @@ class TestRocketGuidance(unittest.TestCase):
         self.assertIsNone(cmd.attitude_quat_bn_cmd)
         self.assertIsNotNone(cmd.thrust_vector_body_cmd)
         self.assertGreater(np.linalg.norm(cmd.thrust_vector_body_cmd[1:]), 1e-6)
+
+    def test_rocket_stepper_preserves_tvc_vector_when_overriding_throttle(self):
+        class _VectorGuidance:
+            def command(self, state, sim_cfg, vehicle_cfg):
+                return GuidanceCommand(
+                    throttle=1.0,
+                    torque_body_nm_cmd=np.zeros(3),
+                    thrust_vector_body_cmd=np.array([1.0, 1.0, 0.0]),
+                )
+
+        class _DecisionContexts:
+            def outer_context(self, **kwargs):
+                return kwargs
+
+        class _Engine:
+            dt = 1.0
+            zero3 = np.zeros(3)
+            decision_contexts = _DecisionContexts()
+
+            def _run_agent_decision(self, *args, **kwargs):
+                return {"guidance_throttle": 0.5}
+
+        from sim.rocket import RocketAscentSimulator
+
+        sim_cfg = RocketSimConfig(
+            max_time_s=1.0,
+            dt_s=1.0,
+            enable_drag=False,
+            enable_j2=False,
+            enable_j3=False,
+            enable_j4=False,
+            tvc_time_constant_s=0.01,
+            tvc_rate_limit_deg_s=180.0,
+            tvc_max_gimbal_deg=45.0,
+        )
+        guidance = _VectorGuidance()
+        rocket_sim = RocketAscentSimulator(
+            sim_cfg=sim_cfg,
+            vehicle_cfg=self._vehicle(),
+            guidance=guidance,
+        )
+        rocket_state = rocket_sim.initial_state()
+        truth = _rocket_state_to_truth(rocket_state)
+        agent = AgentRuntime(
+            object_id="rocket",
+            kind="rocket",
+            enabled=True,
+            active=True,
+            truth=truth,
+            belief=StateBelief(
+                state=np.hstack((truth.position_eci_km, truth.velocity_eci_km_s)),
+                covariance=np.eye(6),
+                last_update_t_s=0.0,
+            ),
+            sensor=None,
+            estimator=None,
+            orbit_controller=None,
+            attitude_controller=None,
+            dynamics=None,
+            knowledge_base=None,
+            bridge=None,
+            mission_strategy=None,
+            mission_execution=None,
+            rocket_sim=rocket_sim,
+            rocket_state=rocket_state,
+            rocket_guidance=guidance,
+            deploy_source=None,
+            deploy_time_s=None,
+            deploy_dv_body_m_s=None,
+            mission_modules=[],
+            waiting_for_launch=False,
+        )
+
+        result = _RocketStepper(_Engine()).step(agent=agent, world_truth_decision={}, t_s=0.0, t_next=1.0)
+
+        self.assertAlmostEqual(result.throttle, 0.5, places=12)
+        self.assertGreater(agent.rocket_state.thrust_vector_body[1], 0.1)
+        self.assertGreater(abs(result.thrust_eci_km_s2[1]), 1e-9)
 
 
 if __name__ == "__main__":

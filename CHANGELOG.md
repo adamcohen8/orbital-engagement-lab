@@ -6,6 +6,28 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.6.0 - 2026-05-12
+
+Rocket GNC, controller-bench, and public/private boundary release.
+
+### Added
+
+- Added private rocket ascent, launch-to-orbit, TVC tracking, and controller-bench
+  GNC configs, including nominal, heavy-payload, wind, and PSO tuning cases.
+- Added rocket navigation, orbital insertion scoring, ascent summary metrics,
+  and controller-bench reporting for rocket GNC design workflows.
+- Added GUI and output-index support for rocket-aware run summaries, artifacts,
+  and controller-bench result inspection.
+
+### Fixed
+
+- Tightened the public/private boundary so pro rocket GNC workflows, configs,
+  and contracts stay out of generated public releases.
+- Added public export checks and release rehearsal artifacts for the new
+  boundary rules.
+- Guarded public release dry-run cleanup with a generated-workspace marker so
+  existing ordinary directories are never deleted by accident.
+
 ## 0.5.1 - 2026-05-08
 
 Security, resource, and public-boundary hardening release.

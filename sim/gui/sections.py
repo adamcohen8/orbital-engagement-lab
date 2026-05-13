@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QPlainTextEdit,
+    QProgressBar,
     QPushButton,
     QScrollArea,
     QSpinBox,
@@ -143,34 +144,40 @@ def build_builder_tab(owner) -> QWidget:
     layout.setContentsMargins(8, 8, 8, 8)
     layout.setSpacing(8)
 
-    templates_box = QGroupBox("Start From Mission Intent")
+    templates_box = QGroupBox("Start Here")
     templates_layout = QGridLayout(templates_box)
     owner.template_buttons = {}
     templates = [
-        ("single_tle", "Single Satellite TLE"),
-        ("rendezvous", "Rendezvous / RPO"),
-        ("keepout", "Keepout Recovery"),
-        ("monte_carlo", "Monte Carlo Campaign"),
+        ("quickstart", "Run Quickstart"),
+        ("rendezvous", "Rendezvous Scenario"),
+        ("single_tle", "Satellite From TLE"),
+        ("monte_carlo", "Monte Carlo Study"),
         ("sensitivity", "Sensitivity Study"),
         ("rocket_ascent", "Rocket Ascent"),
+        ("open_existing", "Open Existing"),
     ]
     for idx, (key, label) in enumerate(templates):
         button = QPushButton(label)
-        button.setMinimumHeight(36)
-        button.clicked.connect(lambda _checked=False, template_key=key: owner._apply_builder_template(template_key))
+        button.setMinimumHeight(44)
+        if key == "quickstart":
+            button.clicked.connect(owner._on_run_quickstart)
+        elif key == "open_existing":
+            button.clicked.connect(owner._on_open_file)
+        else:
+            button.clicked.connect(lambda _checked=False, template_key=key: owner._apply_builder_template(template_key))
         owner.template_buttons[key] = button
-        templates_layout.addWidget(button, idx // 3, idx % 3)
+        templates_layout.addWidget(button, idx // 4, idx % 4)
     layout.addWidget(templates_box)
 
-    workflow_box = QGroupBox("Guided Workflow")
+    workflow_box = QGroupBox("Guided Run Flow")
     workflow_layout = QGridLayout(workflow_box)
     steps = [
-        ("1", "Choose scenario intent"),
-        ("2", "Define target and chaser"),
-        ("3", "Select initial states"),
-        ("4", "Pick outputs"),
-        ("5", "Preflight"),
-        ("6", "Validate & run"),
+        ("1", "Choose a start"),
+        ("2", "Set the main values"),
+        ("3", "Check preflight"),
+        ("4", "Run simulation"),
+        ("5", "Review Start Here"),
+        ("6", "Open artifacts"),
     ]
     for idx, (num, text) in enumerate(steps):
         pill = QLabel(f"{num}. {text}")
@@ -787,6 +794,13 @@ def build_results_tab(owner) -> QWidget:
 
     console_tab = QWidget()
     console_layout = QVBoxLayout(console_tab)
+    owner.run_status_label = QLabel("No run active.")
+    owner.run_status_label.setWordWrap(True)
+    console_layout.addWidget(owner.run_status_label)
+    owner.run_progress = QProgressBar()
+    owner.run_progress.setRange(0, 1)
+    owner.run_progress.setValue(0)
+    console_layout.addWidget(owner.run_progress)
     owner.console = QPlainTextEdit()
     owner.console.setReadOnly(True)
     console_layout.addWidget(owner.console)

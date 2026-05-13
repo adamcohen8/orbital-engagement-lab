@@ -55,6 +55,7 @@ AVAILABLE_FIGURE_IDS = [
     "cfs_attitude_sensor",
     "cfs_actuator_commands",
     "rocket_ascent_diagnostics",
+    "rocket_gnc_diagnostics",
     "rocket_orbital_elements",
     "rocket_fuel_remaining",
     "satellite_delta_v_remaining",
@@ -73,7 +74,13 @@ PLOT_PRESETS = {
     ],
     "attitude": ["run_dashboard", "quaternion_eci", "rates_eci", "quaternion_error"],
     "estimation": ["estimation_error", "estimation_error_components", "knowledge_timeline", "sensor_access"],
-    "rocket": ["run_dashboard", "rocket_ascent_diagnostics", "rocket_orbital_elements", "rocket_fuel_remaining"],
+    "rocket": [
+        "run_dashboard",
+        "rocket_ascent_diagnostics",
+        "rocket_gnc_diagnostics",
+        "rocket_orbital_elements",
+        "rocket_fuel_remaining",
+    ],
     "debug": list(AVAILABLE_FIGURE_IDS),
 }
 
@@ -926,6 +933,70 @@ def plot_outputs(
         if mode in ("save", "both"):
             fig.savefig(p, dpi=int(cfg.outputs.plots.get("dpi", 150)))
             out["rocket_ascent_diagnostics"] = str(p)
+        if mode == "save":
+            plt.close(fig)
+
+    if "rocket_gnc_diagnostics" in figure_ids and "rocket" in truth_hist:
+        import matplotlib.pyplot as plt
+
+        def _metric(name: str, default: float = 0.0) -> np.ndarray:
+            if rocket_metrics is None or name not in rocket_metrics:
+                return np.full(t_s.size, default, dtype=float)
+            arr = np.array(rocket_metrics[name], dtype=float).reshape(-1)
+            out_arr = np.full(t_s.size, np.nan, dtype=float)
+            n = min(t_s.size, arr.size)
+            out_arr[:n] = arr[:n]
+            return out_arr
+
+        fpa = _metric("flight_path_angle_deg")
+        vertical_speed = _metric("vertical_speed_km_s")
+        alpha = _metric("alpha_deg")
+        beta = _metric("beta_deg")
+        tvc = _metric("tvc_gimbal_deg")
+        twr = _metric("thrust_to_weight")
+        apo = _metric("apoapsis_alt_km", np.nan)
+        peri = _metric("periapsis_alt_km", np.nan)
+
+        fig, ax = plt.subplots(4, 1, figsize=cap_figsize(11, 11), sharex=True)
+
+        ax0r = ax[0].twinx()
+        l00 = ax[0].plot(t_s, fpa, label="flight path angle (deg)", color="tab:blue")
+        l01 = ax0r.plot(t_s, vertical_speed, label="vertical speed (km/s)", color="tab:orange")
+        ax[0].set_ylabel("FPA (deg)")
+        ax0r.set_ylabel("vertical speed (km/s)")
+        ax[0].set_title("Rocket GNC: Flight-Path State")
+        ax[0].grid(True, alpha=0.3)
+        ax[0].legend(l00 + l01, [ln.get_label() for ln in (l00 + l01)], loc="best")
+
+        l10 = ax[1].plot(t_s, alpha, label="alpha (deg)", color="tab:red")
+        l11 = ax[1].plot(t_s, beta, label="beta (deg)", color="tab:purple")
+        ax[1].set_ylabel("angle (deg)")
+        ax[1].set_title("Aero Angles")
+        ax[1].grid(True, alpha=0.3)
+        ax[1].legend(l10 + l11, [ln.get_label() for ln in (l10 + l11)], loc="best")
+
+        ax2r = ax[2].twinx()
+        l20 = ax[2].plot(t_s, tvc, label="TVC gimbal (deg)", color="tab:green")
+        l21 = ax2r.plot(t_s, twr, label="thrust-to-weight", color="tab:brown")
+        ax[2].set_ylabel("gimbal (deg)")
+        ax2r.set_ylabel("T/W")
+        ax[2].set_title("Control Authority")
+        ax[2].grid(True, alpha=0.3)
+        ax[2].legend(l20 + l21, [ln.get_label() for ln in (l20 + l21)], loc="best")
+
+        l30 = ax[3].plot(t_s, apo, label="apoapsis alt (km)", color="tab:cyan")
+        l31 = ax[3].plot(t_s, peri, label="periapsis alt (km)", color="tab:gray")
+        ax[3].set_ylabel("altitude (km)")
+        ax[3].set_xlabel("time (s)")
+        ax[3].set_title("Targeting Energy")
+        ax[3].grid(True, alpha=0.3)
+        ax[3].legend(l30 + l31, [ln.get_label() for ln in (l30 + l31)], loc="best")
+
+        fig.tight_layout()
+        p = outdir / "rocket_gnc_diagnostics.png"
+        if mode in ("save", "both"):
+            fig.savefig(p, dpi=int(cfg.outputs.plots.get("dpi", 150)))
+            out["rocket_gnc_diagnostics"] = str(p)
         if mode == "save":
             plt.close(fig)
 

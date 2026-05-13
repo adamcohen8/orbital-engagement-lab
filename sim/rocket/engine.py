@@ -289,27 +289,34 @@ class RocketAscentSimulator:
         insertion_hold_counter = 0.0
         hold_needed = self.sim_cfg.insertion_hold_time_s
 
-        for k in range(steps + 1):
-            t[k] = state.t_s
-            r[k, :] = state.position_eci_km
-            v[k, :] = state.velocity_eci_km_s
-            q[k, :] = state.attitude_quat_bn
-            w[k, :] = state.angular_rate_body_rad_s
-            m[k] = state.mass_kg
-            stg[k] = state.active_stage_index
+        def _record_sample(idx: int, sample_state: RocketState) -> None:
+            t[idx] = sample_state.t_s
+            r[idx, :] = sample_state.position_eci_km
+            v[idx, :] = sample_state.velocity_eci_km_s
+            q[idx, :] = sample_state.attitude_quat_bn
+            w[idx, :] = sample_state.angular_rate_body_rad_s
+            m[idx] = sample_state.mass_kg
+            stg[idx] = sample_state.active_stage_index
             lat_now, lon_now, alt_now = _geodetic_state_from_eci(
-                state.position_eci_km,
-                state.t_s,
+                sample_state.position_eci_km,
+                sample_state.t_s,
                 jd_utc_start=self.sim_cfg.atmosphere_env.get("jd_utc_start"),
             )
-            alt[k] = float(
-                alt_now if self.sim_cfg.use_wgs84_geodesy else np.linalg.norm(state.position_eci_km) - EARTH_RADIUS_KM
+            alt[idx] = float(
+                alt_now
+                if self.sim_cfg.use_wgs84_geodesy
+                else np.linalg.norm(sample_state.position_eci_km) - EARTH_RADIUS_KM
             )
-            lat_deg[k] = float(lat_now)
-            lon_deg[k] = float(lon_now)
-            a_km, e_k = _orbital_elements_basic(state.position_eci_km, state.velocity_eci_km_s, EARTH_MU_KM3_S2)
-            sma[k] = a_km
-            ecc[k] = e_k
+            lat_deg[idx] = float(lat_now)
+            lon_deg[idx] = float(lon_now)
+            a_km, e_k = _orbital_elements_basic(
+                sample_state.position_eci_km, sample_state.velocity_eci_km_s, EARTH_MU_KM3_S2
+            )
+            sma[idx] = a_km
+            ecc[idx] = e_k
+
+        for k in range(steps + 1):
+            _record_sample(k, state)
             if k == steps:
                 break
 
@@ -317,6 +324,7 @@ class RocketAscentSimulator:
             throttle = _clamp(float(cmd.throttle), 0.0, 1.0)
             thr_cmd[k] = throttle
             state = self._step_once(state, cmd, throttle, dt)
+            _record_sample(k + 1, state)
             thrust_n[k] = float(state._last_step_thrust_n) if hasattr(state, "_last_step_thrust_n") else 0.0
             q_dyn[k] = float(getattr(state, "_last_step_q_dyn_pa", 0.0))
             mach[k] = float(getattr(state, "_last_step_mach", 0.0))
@@ -467,6 +475,8 @@ class RocketAscentSimulator:
         stage_i = s.active_stage_index
         thrust_n = 0.0
         dm_prop = 0.0
+        mass_start_kg = float(s.mass_kg)
+        mass_for_thrust_kg = max(mass_start_kg, 1e-9)
         stage_separated = False
         env = {"atmosphere_model": self.sim_cfg.atmosphere_model, **dict(self.sim_cfg.atmosphere_env)}
         if self.sim_cfg.use_wgs84_geodesy:
@@ -484,9 +494,13 @@ class RocketAscentSimulator:
             if prop_left > 0.0 and throttle > 0.0:
                 stage = self.vehicle_cfg.stack.stages[stage_i]
                 stage_thrust_n, stage_isp_s = _stage_engine_perf(stage, ambient_pressure_pa)
-                thrust_n = float(throttle * stage_thrust_n)
-                mdot = thrust_n / max(stage_isp_s * G0_M_S2, 1e-9)
-                dm_prop = min(prop_left, mdot * dt_s)
+                full_step_thrust_n = float(throttle * stage_thrust_n)
+                mdot = full_step_thrust_n / max(stage_isp_s * G0_M_S2, 1e-9)
+                full_step_dm_prop = mdot * dt_s
+                dm_prop = min(prop_left, full_step_dm_prop)
+                burn_fraction = 0.0 if full_step_dm_prop <= 0.0 else float(dm_prop / full_step_dm_prop)
+                thrust_n = full_step_thrust_n * burn_fraction
+                mass_for_thrust_kg = max(mass_start_kg - 0.5 * dm_prop, 1e-9)
                 s.stage_prop_remaining_kg[stage_i] = prop_left - dm_prop
                 s.mass_kg = max(0.0, s.mass_kg - dm_prop)
 
@@ -515,7 +529,7 @@ class RocketAscentSimulator:
 
         c_bn = quaternion_to_dcm_bn(s.attitude_quat_bn)
         thrust_axis_eci = c_bn.T @ s.thrust_vector_body
-        accel_thrust_eci_km_s2 = (thrust_n / max(s.mass_kg, 1e-9)) * thrust_axis_eci / 1e3
+        accel_thrust_eci_km_s2 = (thrust_n / mass_for_thrust_kg) * thrust_axis_eci / 1e3
         torque_aero_body_nm = np.zeros(3)
         accel_aero_eci_km_s2 = np.zeros(3)
         torque_tvc_body_nm = np.cross(
@@ -614,6 +628,8 @@ class RocketAscentSimulator:
         # attach last-step telemetry attribute for logging convenience.
         s._last_step_thrust_n = thrust_n
         s._last_step_stage_sep = stage_separated
+        s._last_step_thrust_axis_eci = thrust_axis_eci.copy()
+        s._last_step_thrust_accel_eci_km_s2 = accel_thrust_eci_km_s2.copy()
         s._last_step_q_dyn_pa = last_q_dyn
         s._last_step_mach = last_mach
         s._last_step_wind_body_m_s = last_wind_body_m_s.copy()

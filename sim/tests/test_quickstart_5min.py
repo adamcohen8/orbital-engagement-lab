@@ -45,12 +45,17 @@ def test_quickstart_5min_runs_headlessly_and_writes_start_here_artifacts(tmp_pat
     assert not any(outdir.glob("*.png"))
 
     index_text = (outdir / "index.md").read_text(encoding="utf-8")
-    assert "Open `master_run_summary.json`" in index_text
+    assert "# Start Here" in index_text
+    assert "## What Happened" in index_text
+    assert "Open [`master_run_summary.json`](master_run_summary.json)" in index_text
+    assert "Closest approach:" in index_text
+    assert "python run_simulation.py --config configs/hcw_pd_10km_experiment.yaml" in index_text
     assert "Inspect generated plot or animation artifacts listed below." not in index_text
 
     summary = json.loads((outdir / "master_run_summary.json").read_text(encoding="utf-8"))
     assert summary["scenario_name"] == "quickstart_5min"
     assert summary["objects"] == ["chaser", "target"]
+    assert summary["relative_range_summary"]["object_pair"] == ["chaser", "target"]
     assert "rocket" not in summary["objects"]
 
 

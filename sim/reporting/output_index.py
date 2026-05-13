@@ -85,6 +85,20 @@ def _artifact_basename(artifacts: dict[str, Any], key: str, fallback: str) -> st
     return fallback
 
 
+def _artifact_path(artifacts: dict[str, Any], key: str) -> str:
+    value = artifacts.get(key)
+    if isinstance(value, (str, os.PathLike)) and str(value).strip():
+        return str(value)
+    return ""
+
+
+def _nested_artifact_path(artifacts: dict[str, Any], group: str, key: str) -> str:
+    value = dict(artifacts.get(group, {}) or {}).get(key)
+    if isinstance(value, (str, os.PathLike)) and str(value).strip():
+        return str(value)
+    return ""
+
+
 def _has_artifact_group(artifacts: dict[str, Any], *keys: str) -> bool:
     for key in keys:
         value = artifacts.get(key)
@@ -97,39 +111,136 @@ def _has_artifact_group(artifacts: dict[str, Any], *keys: str) -> bool:
     return False
 
 
-def _default_next_steps(*, workflow: str, artifacts: dict[str, Any]) -> list[str]:
+def _linked_artifact_name(artifacts: dict[str, Any], key: str, fallback: str, *, base_dir: Path) -> str:
+    path_text = _artifact_path(artifacts, key)
+    if path_text:
+        return _path_link(path_text, base_dir=base_dir)
+    return f"`{fallback}`"
+
+
+def _linked_nested_artifact_name(
+    artifacts: dict[str, Any], group: str, key: str, fallback: str, *, base_dir: Path
+) -> str:
+    path_text = _nested_artifact_path(artifacts, group, key)
+    if path_text:
+        return _path_link(path_text, base_dir=base_dir)
+    return f"`{fallback}`"
+
+
+def _default_next_steps(*, workflow: str, artifacts: dict[str, Any], base_dir: Path) -> list[str]:
     steps: list[str] = []
     if workflow == "single_run":
+        if _nested_artifact_path(artifacts, "plots", "run_dashboard"):
+            name = _linked_nested_artifact_name(
+                artifacts, "plots", "run_dashboard", "run_dashboard.png", base_dir=base_dir
+            )
+            steps.append(f"Open {name} for the fastest visual overview.")
         if "summary_json" in artifacts:
-            name = _artifact_basename(artifacts, "summary_json", "master_run_summary.json")
-            steps.append(f"Open `{name}` for stable run metadata and metrics.")
+            name = _linked_artifact_name(
+                artifacts, "summary_json", "master_run_summary.json", base_dir=base_dir
+            )
+            steps.append(f"Open {name} for stable run metadata and metrics.")
         if "run_log_json" in artifacts:
-            name = _artifact_basename(artifacts, "run_log_json", "master_run_log.json")
-            steps.append(f"Open `{name}` for saved time histories and custom plotting data.")
+            name = _linked_artifact_name(artifacts, "run_log_json", "master_run_log.json", base_dir=base_dir)
+            steps.append(f"Open {name} for saved time histories and custom plotting data.")
         if _has_artifact_group(artifacts, "plots", "animations"):
             steps.append("Inspect generated plot or animation artifacts listed below.")
     elif workflow == "monte_carlo":
         if "summary_json" in artifacts:
-            name = _artifact_basename(artifacts, "summary_json", "master_monte_carlo_summary.json")
-            steps.append(f"Open `{name}` for aggregate campaign results.")
+            name = _linked_artifact_name(
+                artifacts, "summary_json", "master_monte_carlo_summary.json", base_dir=base_dir
+            )
+            steps.append(f"Open {name} for aggregate campaign results.")
         if "commander_brief_md" in artifacts:
-            name = _artifact_basename(artifacts, "commander_brief_md", "master_monte_carlo_commander_brief.md")
-            steps.append(f"Open `{name}` for the human-readable campaign brief.")
+            name = _linked_artifact_name(
+                artifacts, "commander_brief_md", "master_monte_carlo_commander_brief.md", base_dir=base_dir
+            )
+            steps.append(f"Open {name} for the human-readable campaign brief.")
         steps.append("Inspect campaign plots and AI report artifacts when present.")
     elif workflow == "sensitivity":
         if "report_md" in artifacts:
-            name = _artifact_basename(artifacts, "report_md", "master_analysis_sensitivity_report.md")
-            steps.append(f"Open `{name}` for the human-readable study report.")
+            name = _linked_artifact_name(
+                artifacts, "report_md", "master_analysis_sensitivity_report.md", base_dir=base_dir
+            )
+            steps.append(f"Open {name} for the human-readable study report.")
         if "rankings_csv" in artifacts:
-            name = _artifact_basename(artifacts, "rankings_csv", "master_analysis_sensitivity_rankings.csv")
-            steps.append(f"Open `{name}` to inspect ranked parameter effects.")
+            name = _linked_artifact_name(
+                artifacts, "rankings_csv", "master_analysis_sensitivity_rankings.csv", base_dir=base_dir
+            )
+            steps.append(f"Open {name} to inspect ranked parameter effects.")
         steps.append("Inspect generated response, scatter, grid, or ranking figures listed below.")
     else:
         steps.append("Inspect the artifact inventory below.")
     return steps or ["Inspect the artifact inventory below."]
 
 
-def _single_run_metrics(summary: dict[str, Any]) -> list[str]:
+def _single_run_status(summary: dict[str, Any]) -> str:
+    if bool(summary.get("terminated_early", False)):
+        reason = str(summary.get("termination_reason") or "unknown").strip()
+        if reason == "rocket_orbit_insertion":
+            return "success - rocket orbit insertion achieved"
+        return f"stopped early - {reason or 'unknown reason'}"
+    return "nominal - full duration reached"
+
+
+def _guardrail_event_count(summary: dict[str, Any]) -> int:
+    total = 0
+    for value in dict(summary.get("attitude_guardrail_stats", {}) or {}).values():
+        try:
+            total += int(value)
+        except (TypeError, ValueError):
+            pass
+    return total
+
+
+def _relative_range_summary(summary: dict[str, Any]) -> dict[str, Any]:
+    return dict(summary.get("relative_range_summary", {}) or {})
+
+
+def _format_pair(pair: Any) -> str:
+    values = [str(item) for item in list(pair or []) if str(item).strip()]
+    return " to ".join(values) if len(values) == 2 else "primary pair"
+
+
+def _single_run_narrative(summary: dict[str, Any], artifacts: dict[str, Any]) -> list[str]:
+    objects = [str(item) for item in list(summary.get("objects", []) or [])]
+    object_text = ", ".join(objects) if objects else "the configured objects"
+    duration = _scalar(summary.get("duration_s"))
+    samples = _scalar(summary.get("samples"))
+    status = _single_run_status(summary)
+    total_dv = _single_run_total_dv(summary)
+    range_summary = _relative_range_summary(summary)
+    plot_count = len(dict(summary.get("plot_outputs", {}) or {}))
+    animation_count = len(dict(summary.get("animation_outputs", {}) or {}))
+
+    lines = [
+        (
+            f"This single-run simulation completed with status **{status}** for objects: {object_text}. "
+            f"It covered `{duration} s` across `{samples}` saved samples."
+        )
+    ]
+    if range_summary:
+        pair = _format_pair(range_summary.get("object_pair"))
+        lines.append(
+            f"The closest {pair} range was `{_scalar(range_summary.get('closest_approach_km'))} km` "
+            f"at `t={_scalar(range_summary.get('closest_approach_time_s'))} s`; "
+            f"the final range was `{_scalar(range_summary.get('final_range_km'))} km`."
+        )
+    lines.append(
+        f"The run used `{total_dv:.4g} m/s` total delta-v and recorded `{_guardrail_event_count(summary)}` "
+        "attitude guardrail events."
+    )
+    if plot_count or animation_count:
+        lines.append(
+            f"It generated `{plot_count}` plot artifact(s) and `{animation_count}` animation artifact(s); "
+            "open the listed visual artifacts before diving into raw JSON."
+        )
+    elif "summary_json" in artifacts:
+        lines.append("No plot or animation artifacts were generated for this run; start with the summary JSON.")
+    return lines
+
+
+def _single_run_total_dv(summary: dict[str, Any]) -> float:
     thrust_stats = dict(summary.get("thrust_stats", {}) or {})
     total_dv = 0.0
     for row in thrust_stats.values():
@@ -137,16 +248,41 @@ def _single_run_metrics(summary: dict[str, Any]) -> list[str]:
             total_dv += float(dict(row or {}).get("total_dv_m_s", 0.0))
         except (TypeError, ValueError):
             pass
+    return total_dv
+
+
+def _single_run_next_command(summary: dict[str, Any]) -> str:
+    scenario_name = str(summary.get("scenario_name", "") or "").strip()
+    if scenario_name == "quickstart_5min":
+        return "python run_simulation.py --config configs/hcw_pd_10km_experiment.yaml"
+    if scenario_name == "hcw_pd_10km_experiment":
+        return "python run_simulation.py --config examples/configs/public_closed_loop_rendezvous_lqr.yaml --validate-only"
+    return "python run_simulation.py --doctor"
+
+
+def _single_run_metrics(summary: dict[str, Any]) -> list[str]:
+    total_dv = _single_run_total_dv(summary)
+    range_summary = _relative_range_summary(summary)
     lines = [
         f"- Samples: `{_scalar(summary.get('samples'))}`",
         f"- Duration: `{_scalar(summary.get('duration_s'))} s`",
         f"- Objects: `{_scalar(', '.join(list(summary.get('objects', []) or [])))}`",
-        f"- Terminated early: `{_scalar(summary.get('terminated_early'))}`",
-        f"- Termination reason: `{_scalar(summary.get('termination_reason'))}`",
+        f"- Status: `{_single_run_status(summary)}`",
         f"- Total delta-v: `{total_dv:.4g} m/s`",
+        f"- Attitude guardrail events: `{_guardrail_event_count(summary)}`",
         f"- Plots: `{len(dict(summary.get('plot_outputs', {}) or {}))}`",
         f"- Animations: `{len(dict(summary.get('animation_outputs', {}) or {}))}`",
     ]
+    if range_summary:
+        lines.extend(
+            [
+                f"- Primary range pair: `{_format_pair(range_summary.get('object_pair'))}`",
+                f"- Initial range: `{_scalar(range_summary.get('initial_range_km'))} km`",
+                f"- Closest approach: `{_scalar(range_summary.get('closest_approach_km'))} km`",
+                f"- Closest approach time: `{_scalar(range_summary.get('closest_approach_time_s'))} s`",
+                f"- Final range: `{_scalar(range_summary.get('final_range_km'))} km`",
+            ]
+        )
     ground_access = dict(summary.get("ground_station_access_summary", {}) or {})
     if ground_access:
         access_pairs = 0
@@ -215,17 +351,31 @@ def write_output_index(
 
     if workflow == "single_run":
         key_metrics = _single_run_metrics(summary)
+        status = _single_run_status(summary)
+        narrative = _single_run_narrative(summary, artifacts)
+        next_command = _single_run_next_command(summary)
     elif workflow == "monte_carlo":
         key_metrics = _monte_carlo_metrics(payload)
+        status = "campaign complete"
+        narrative = []
+        next_command = ""
     elif workflow == "sensitivity":
         key_metrics = _sensitivity_metrics(payload)
+        status = "analysis complete"
+        narrative = []
+        next_command = ""
     else:
         key_metrics = ["- No workflow-specific metrics are available yet."]
+        status = "complete"
+        narrative = []
+        next_command = ""
 
-    steps = list(next_steps or _default_next_steps(workflow=workflow, artifacts=artifacts))
+    steps = list(next_steps or _default_next_steps(workflow=workflow, artifacts=artifacts, base_dir=outdir))
     lines = [
-        "# Output Index",
+        "# Start Here",
         "",
+        "## Run Status",
+        f"- Status: `{status}`",
         f"- Workflow: `{workflow}`",
         f"- Scenario: `{_scalar(scenario_name)}`",
     ]
@@ -236,11 +386,17 @@ def write_output_index(
             f"- Output directory: `{outdir}`",
             f"- Generated UTC: `{datetime.now(timezone.utc).isoformat()}`",
             "",
+            "## What Happened",
+            *(narrative or ["Review the key results and artifact inventory below."]),
+            "",
             "## Key Results",
             *key_metrics,
             "",
             "## Open First",
             *[f"{idx}. {step}" for idx, step in enumerate(steps, start=1)],
+            "",
+            "## Next Command",
+            f"```bash\n{next_command}\n```" if next_command else "No default next command is defined for this workflow.",
             "",
             "## Artifact Inventory",
             *_artifact_lines(artifacts, base_dir=outdir),

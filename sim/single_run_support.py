@@ -15,6 +15,7 @@ from sim.actuators.orbital import (
 from sim.config.object_refs import relative_reference_for_object
 from sim.core.models import Command, StateBelief, StateTruth
 from sim.dynamics.orbit.environment import EARTH_RADIUS_KM
+from sim.rocket.navigation import build_rocket_nav_state
 from sim.runtime_support import (
     AgentRuntime,
     _attitude_state13_from_belief,
@@ -119,6 +120,7 @@ class _RocketStepResult:
     stage_index: float | None = None
     q_dyn_pa: float | None = None
     mach: float | None = None
+    metrics: dict[str, float] | None = None
 
 
 @dataclass
@@ -141,6 +143,23 @@ class _SatelliteBeliefContext:
 class _RocketStepper:
     def __init__(self, engine: Any) -> None:
         self.engine = engine
+
+    def _guidance_phase_code(self, guidance: Any) -> float:
+        phase_map = {
+            "ascent": 1.0,
+            "coast_to_apoapsis": 2.0,
+            "circularize": 3.0,
+            "complete": 4.0,
+        }
+        current = guidance
+        for _ in range(8):
+            phase = getattr(current, "_phase", None)
+            if phase is not None:
+                return float(phase_map.get(str(phase), np.nan))
+            current = getattr(current, "base_guidance", None)
+            if current is None:
+                break
+        return float("nan")
 
     def step(
         self,
@@ -179,6 +198,7 @@ class _RocketStepper:
                 stage_index=float(agent.rocket_state.active_stage_index),
                 q_dyn_pa=0.0,
                 mach=0.0,
+                metrics={},
             )
 
         cmd = agent.rocket_guidance.command(agent.rocket_state, agent.rocket_sim.sim_cfg, agent.rocket_sim.vehicle_cfg)
@@ -187,6 +207,7 @@ class _RocketStepper:
                 throttle=float(mission_out.get("guidance_throttle", cmd.throttle)),
                 attitude_quat_bn_cmd=cmd.attitude_quat_bn_cmd,
                 torque_body_nm_cmd=cmd.torque_body_nm_cmd,
+                thrust_vector_body_cmd=cmd.thrust_vector_body_cmd,
             )
         throttle = float(np.clip(cmd.throttle, 0.0, 1.0))
         agent.rocket_state = agent.rocket_sim.step(agent.rocket_state, cmd, dt_s=e.dt)
@@ -195,11 +216,45 @@ class _RocketStepper:
             agent.belief.state[:6] = _truth_state6(agent.truth, agent.belief.state[:6])
             agent.belief.last_update_t_s = t_next
         thrust_n = float(getattr(agent.rocket_state, "_last_step_thrust_n", 0.0))
-        axis_eci = quaternion_to_dcm_bn(agent.rocket_state.attitude_quat_bn).T @ np.array(
-            agent.rocket_sim.vehicle_cfg.thrust_axis_body, dtype=float
+        fallback_axis_eci = quaternion_to_dcm_bn(agent.rocket_state.attitude_quat_bn).T @ np.array(
+            getattr(agent.rocket_state, "thrust_vector_body", agent.rocket_sim.vehicle_cfg.thrust_axis_body),
+            dtype=float,
         )
-        accel = (thrust_n / max(agent.rocket_state.mass_kg, 1e-9)) * axis_eci / 1e3
+        accel = np.array(
+            getattr(
+                agent.rocket_state,
+                "_last_step_thrust_accel_eci_km_s2",
+                (thrust_n / max(agent.rocket_state.mass_kg, 1e-9)) * fallback_axis_eci / 1e3,
+            ),
+            dtype=float,
+        )
         accel_mag = float(np.linalg.norm(accel))
+        nav = build_rocket_nav_state(
+            agent.rocket_state,
+            agent.rocket_sim.sim_cfg,
+            agent.rocket_sim.vehicle_cfg,
+            throttle_cmd=throttle,
+            thrust_n=thrust_n,
+        )
+        metrics = {
+            "altitude_km": float(nav.altitude_km),
+            "speed_km_s": float(nav.speed_km_s),
+            "vertical_speed_km_s": float(nav.vertical_speed_km_s),
+            "horizontal_speed_km_s": float(nav.horizontal_speed_km_s),
+            "flight_path_angle_deg": float(nav.flight_path_angle_deg),
+            "apoapsis_alt_km": float(nav.apoapsis_alt_km),
+            "periapsis_alt_km": float(nav.periapsis_alt_km),
+            "eccentricity": float(nav.eccentricity),
+            "alpha_deg": float(getattr(agent.rocket_state, "_last_step_alpha_deg", nav.alpha_deg)),
+            "beta_deg": float(getattr(agent.rocket_state, "_last_step_beta_deg", nav.beta_deg)),
+            "tvc_gimbal_deg": float(getattr(agent.rocket_state, "_last_step_tvc_gimbal_deg", 0.0)),
+            "aero_force_n": float(getattr(agent.rocket_state, "_last_step_aero_force_n", 0.0)),
+            "aero_moment_nm": float(getattr(agent.rocket_state, "_last_step_aero_moment_nm", 0.0)),
+            "thrust_to_weight": float(nav.thrust_to_weight),
+            "propellant_remaining_kg": float(nav.propellant_remaining_kg),
+            "propellant_remaining_fraction": float(nav.propellant_remaining_fraction),
+            "guidance_phase_code": self._guidance_phase_code(agent.rocket_guidance),
+        }
         return _RocketStepResult(
             truth=agent.truth,
             throttle=throttle,
@@ -211,6 +266,7 @@ class _RocketStepper:
             stage_index=float(agent.rocket_state.active_stage_index),
             q_dyn_pa=float(getattr(agent.rocket_state, "_last_step_q_dyn_pa", 0.0)),
             mach=float(getattr(agent.rocket_state, "_last_step_mach", 0.0)),
+            metrics=metrics,
         )
 
 

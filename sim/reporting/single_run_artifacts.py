@@ -88,6 +88,7 @@ def write_single_run_artifacts(
     context: SingleRunArtifactContext,
 ) -> dict[str, Any]:
     summary = payload.setdefault("summary", {})
+    _add_relative_range_summary(summary=summary, context=context)
     plot_outputs = _plot_outputs(
         cfg=context.cfg,
         t_s=context.t_s,
@@ -137,6 +138,37 @@ def write_single_run_artifacts(
     if bool(context.cfg.outputs.stats.get("print_summary", True)):
         print(format_single_run_summary(summary))
     return payload
+
+
+def _add_relative_range_summary(*, summary: dict[str, Any], context: SingleRunArtifactContext) -> None:
+    pair = [str(item) for item in list(summary.get("primary_object_pair", []) or [])]
+    if len(pair) != 2:
+        return
+    deputy_id, chief_id = pair
+    deputy = context.truth_hist.get(deputy_id)
+    chief = context.truth_hist.get(chief_id)
+    if deputy is None or chief is None or deputy.ndim != 2 or chief.ndim != 2:
+        return
+    n = int(min(deputy.shape[0], chief.shape[0], context.t_s.size))
+    if n <= 0 or deputy.shape[1] < 3 or chief.shape[1] < 3:
+        return
+    rel = np.asarray(deputy[:n, :3], dtype=float) - np.asarray(chief[:n, :3], dtype=float)
+    ranges = np.linalg.norm(rel, axis=1)
+    finite = np.isfinite(ranges)
+    if not bool(np.any(finite)):
+        return
+    finite_indices = np.flatnonzero(finite)
+    closest_local = int(np.argmin(ranges[finite]))
+    closest_idx = int(finite_indices[closest_local])
+    final_idx = int(finite_indices[-1])
+    initial_idx = int(finite_indices[0])
+    summary["relative_range_summary"] = {
+        "object_pair": [deputy_id, chief_id],
+        "initial_range_km": float(ranges[initial_idx]),
+        "final_range_km": float(ranges[final_idx]),
+        "closest_approach_km": float(ranges[closest_idx]),
+        "closest_approach_time_s": float(context.t_s[closest_idx]),
+    }
 
 
 def _plot_outputs(
