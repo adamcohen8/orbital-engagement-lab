@@ -231,6 +231,65 @@ class TestRocketAscentEngine(unittest.TestCase):
         high_next = sim.step(high_state, GuidanceCommand(throttle=1.0), dt_s=0.5)
         self.assertGreater(high_next._last_step_thrust_n, sea_next._last_step_thrust_n)
 
+    def test_early_termination_history_includes_post_step_state(self):
+        sim_cfg = RocketSimConfig(
+            dt_s=1.0,
+            max_time_s=5.0,
+            enable_drag=False,
+            enable_j2=False,
+            enable_j3=False,
+            enable_j4=False,
+            terminate_on_earth_impact=True,
+            earth_impact_radius_km=1.0e9,
+            use_wgs84_geodesy=False,
+        )
+        vehicle_cfg = RocketVehicleConfig(stack=self._tiny_stack(), payload_mass_kg=0.0)
+        sim = RocketAscentSimulator(
+            sim_cfg=sim_cfg, vehicle_cfg=vehicle_cfg, guidance=HoldAttitudeGuidance(throttle=0.0)
+        )
+
+        out = sim.run()
+
+        self.assertTrue(out.terminated_early)
+        self.assertEqual(out.termination_reason, "earth_impact")
+        self.assertEqual(out.time_s.tolist(), [0.0, 1.0])
+        self.assertAlmostEqual(out.termination_time_s, out.time_s[-1], places=12)
+        self.assertGreater(np.linalg.norm(out.position_eci_km[-1]), 1.0)
+        self.assertGreater(np.linalg.norm(out.velocity_eci_km_s[-1] - out.velocity_eci_km_s[0]), 0.0)
+
+    def test_propellant_depletion_limits_average_step_thrust(self):
+        stage = RocketStagePreset(
+            name="short",
+            dry_mass_kg=10.0,
+            propellant_mass_kg=1.0,
+            max_thrust_n=1000.0,
+            isp_s=100.0,
+            burn_time_s=1.0,
+            diameter_m=1.0,
+            length_m=3.0,
+        )
+        stack = RocketStackPreset(name="short_stack", stages=(stage,))
+        sim_cfg = RocketSimConfig(
+            dt_s=10.0,
+            max_time_s=10.0,
+            enable_drag=False,
+            enable_j2=False,
+            enable_j3=False,
+            enable_j4=False,
+            terminate_on_earth_impact=False,
+        )
+        vehicle_cfg = RocketVehicleConfig(stack=stack, payload_mass_kg=100.0)
+        sim = RocketAscentSimulator(
+            sim_cfg=sim_cfg, vehicle_cfg=vehicle_cfg, guidance=HoldAttitudeGuidance(throttle=1.0)
+        )
+
+        next_state = sim.step(sim.initial_state(), GuidanceCommand(throttle=1.0), dt_s=10.0)
+
+        expected_average_thrust_n = stage.propellant_mass_kg * stage.isp_s * 9.80665 / 10.0
+        self.assertAlmostEqual(next_state._last_step_thrust_n, expected_average_thrust_n, places=6)
+        self.assertEqual(next_state.active_stage_index, 1)
+        self.assertAlmostEqual(next_state.stage_prop_remaining_kg[0], 0.0, places=12)
+
 
 if __name__ == "__main__":
     unittest.main()

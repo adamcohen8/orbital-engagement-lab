@@ -16,6 +16,7 @@ from sim.rocket.models import (
     RocketState,
     RocketVehicleConfig,
 )
+from sim.rocket.navigation import RocketNavState, build_rocket_nav_state
 
 __all__ = [
     "RocketAscentSimulator",
@@ -32,4 +33,6 @@ __all__ = [
     "OrbitInsertionCutoffGuidance",
     "HoldAttitudeGuidance",
     "TVCSteeringGuidance",
+    "RocketNavState",
+    "build_rocket_nav_state",
 ]

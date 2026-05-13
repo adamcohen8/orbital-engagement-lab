@@ -29,6 +29,7 @@ from sim.resource_limits import (
     configured_history_memory_limit_mb,
     enforce_history_memory_budget,
 )
+from sim.rocket.navigation import build_rocket_nav_state
 from sim.runtime_support import (
     AgentRuntime,
     _apply_relative_init_from_reference,
@@ -217,6 +218,30 @@ class _SingleRunEngine:
         self.rocket_stage_hist = np.full(self.n, np.nan) if self.rocket is not None else None
         self.rocket_q_dyn_hist = np.full(self.n, np.nan) if self.rocket is not None else None
         self.rocket_mach_hist = np.full(self.n, np.nan) if self.rocket is not None else None
+        self.rocket_metric_hist_keys = [
+            "altitude_km",
+            "speed_km_s",
+            "vertical_speed_km_s",
+            "horizontal_speed_km_s",
+            "flight_path_angle_deg",
+            "apoapsis_alt_km",
+            "periapsis_alt_km",
+            "eccentricity",
+            "alpha_deg",
+            "beta_deg",
+            "tvc_gimbal_deg",
+            "aero_force_n",
+            "aero_moment_nm",
+            "thrust_to_weight",
+            "propellant_remaining_kg",
+            "propellant_remaining_fraction",
+            "guidance_phase_code",
+        ]
+        self.rocket_metric_hists = (
+            {key: np.full(self.n, np.nan) for key in self.rocket_metric_hist_keys}
+            if self.rocket is not None
+            else {}
+        )
         self.knowledge_hist: dict[str, dict[str, np.ndarray]] = {}
         self.bridge_hist: dict[str, list[dict[str, Any]]] = {aid: [] for aid in self.agents.keys()}
         for aid, agent in self.agents.items():
@@ -254,6 +279,33 @@ class _SingleRunEngine:
                     self.rocket_q_dyn_hist[0] = float(getattr(agent.rocket_state, "_last_step_q_dyn_pa", 0.0))
                 if self.rocket_mach_hist is not None:
                     self.rocket_mach_hist[0] = float(getattr(agent.rocket_state, "_last_step_mach", 0.0))
+                if agent.rocket_sim is not None:
+                    nav = build_rocket_nav_state(
+                        agent.rocket_state,
+                        agent.rocket_sim.sim_cfg,
+                        agent.rocket_sim.vehicle_cfg,
+                    )
+                    initial_metrics = {
+                        "altitude_km": nav.altitude_km,
+                        "speed_km_s": nav.speed_km_s,
+                        "vertical_speed_km_s": nav.vertical_speed_km_s,
+                        "horizontal_speed_km_s": nav.horizontal_speed_km_s,
+                        "flight_path_angle_deg": nav.flight_path_angle_deg,
+                        "apoapsis_alt_km": nav.apoapsis_alt_km,
+                        "periapsis_alt_km": nav.periapsis_alt_km,
+                        "eccentricity": nav.eccentricity,
+                        "alpha_deg": nav.alpha_deg,
+                        "beta_deg": nav.beta_deg,
+                        "tvc_gimbal_deg": 0.0,
+                        "aero_force_n": 0.0,
+                        "aero_moment_nm": 0.0,
+                        "thrust_to_weight": nav.thrust_to_weight,
+                        "propellant_remaining_kg": nav.propellant_remaining_kg,
+                        "propellant_remaining_fraction": nav.propellant_remaining_fraction,
+                    }
+                    for metric_key, metric_value in initial_metrics.items():
+                        if metric_key in self.rocket_metric_hists:
+                            self.rocket_metric_hists[metric_key][0] = float(metric_value)
 
         self._emit_step_callback(0)
 
@@ -274,6 +326,7 @@ class _SingleRunEngine:
                 float_columns += 1  # throttle history
         if self.rocket is not None:
             float_columns += 3  # stage index, dynamic pressure, mach
+            float_columns += 17  # rocket GNC/navigation metric histories
 
         knowledge_pairs = 0
         for agent in self.agents.values():
@@ -533,6 +586,9 @@ class _SingleRunEngine:
                     self.rocket_q_dyn_hist[k + 1] = rocket_result.q_dyn_pa
                 if self.rocket_mach_hist is not None and rocket_result.mach is not None:
                     self.rocket_mach_hist[k + 1] = rocket_result.mach
+                for metric_key, metric_value in dict(rocket_result.metrics or {}).items():
+                    if metric_key in self.rocket_metric_hists:
+                        self.rocket_metric_hists[metric_key][k + 1] = float(metric_value)
             else:
                 sat_result = self.satellite_stepper.step(
                     aid=aid,
@@ -622,6 +678,8 @@ class _SingleRunEngine:
                 rocket_metrics_out["mach"] = self.rocket_mach_hist[:n_used].copy()
             if rocket_object_id in self.throttle_hist:
                 rocket_metrics_out["throttle_cmd"] = self.throttle_hist[rocket_object_id][:n_used].copy()
+            for metric_key, metric_hist in getattr(self, "rocket_metric_hists", {}).items():
+                rocket_metrics_out[metric_key] = metric_hist[:n_used].copy()
 
         thrust_stats = {
             oid: {

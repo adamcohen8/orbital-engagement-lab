@@ -151,9 +151,29 @@ Rocket-specific fields may include:
 - `rocket_metrics.q_dyn_pa`
 - `rocket_metrics.mach`
 - `rocket_metrics.throttle_cmd`
+- `rocket_metrics.altitude_km`
+- `rocket_metrics.speed_km_s`
+- `rocket_metrics.vertical_speed_km_s`
+- `rocket_metrics.horizontal_speed_km_s`
+- `rocket_metrics.flight_path_angle_deg`
+- `rocket_metrics.apoapsis_alt_km`
+- `rocket_metrics.periapsis_alt_km`
+- `rocket_metrics.eccentricity`
+- `rocket_metrics.alpha_deg`
+- `rocket_metrics.beta_deg`
+- `rocket_metrics.tvc_gimbal_deg`
+- `rocket_metrics.aero_force_n`
+- `rocket_metrics.aero_moment_nm`
+- `rocket_metrics.thrust_to_weight`
+- `rocket_metrics.propellant_remaining_kg`
+- `rocket_metrics.propellant_remaining_fraction`
+- `rocket_metrics.guidance_phase_code`
+- `summary.rocket_metrics_summary`
 
 Rocket metrics are present only when a rocket object participates. Consumers
 should handle absent or empty rocket metrics for satellite-only scenarios.
+The exact rocket metric set may grow as the rocket GNC stack matures; consumers
+should prefer explicit key checks over assuming a fixed list.
 
 
 ## Ground Station Access

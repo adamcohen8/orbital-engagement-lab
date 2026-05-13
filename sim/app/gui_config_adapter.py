@@ -5,15 +5,28 @@ from typing import Any
 
 
 class GuiConfigAdapter:
+    def _agent_section(self, cfg: dict[str, Any], object_key: str) -> dict[str, Any]:
+        objects = cfg.get("objects")
+        if isinstance(objects, dict) and isinstance(objects.get(object_key), dict):
+            return copy.deepcopy(objects[object_key])
+        return copy.deepcopy(dict(cfg.get(object_key, {}) or {}))
+
+    def _sync_agent_section(self, cfg: dict[str, Any], object_key: str, section: dict[str, Any]) -> None:
+        normalized = copy.deepcopy(section)
+        cfg[object_key] = copy.deepcopy(normalized)
+        objects = cfg.get("objects")
+        if isinstance(objects, dict) and (objects or object_key in objects):
+            objects[object_key] = copy.deepcopy(normalized)
+
     def load_into_window(self, window: Any, cfg: dict[str, Any]) -> None:
         window._suppress_dirty_tracking = True
         sim = dict(cfg.get("simulator", {}) or {})
         outputs = dict(cfg.get("outputs", {}) or {})
         mc = dict(cfg.get("monte_carlo", {}) or {})
         analysis = dict(cfg.get("analysis", {}) or {})
-        target = dict(cfg.get("target", {}) or {})
-        chaser = dict(cfg.get("chaser", {}) or {})
-        rocket = dict(cfg.get("rocket", {}) or {})
+        target = self._agent_section(cfg, "target")
+        chaser = self._agent_section(cfg, "chaser")
+        rocket = self._agent_section(cfg, "rocket")
 
         window.scenario_name_edit.setText(str(cfg.get("scenario_name", "")))
         window.scenario_description_edit.setText(str(cfg.get("scenario_description", "") or ""))
@@ -285,16 +298,16 @@ class GuiConfigAdapter:
         window._suppress_dirty_tracking = False
 
     def collect_from_window(self, window: Any, current_config: dict[str, Any]) -> dict[str, Any]:
-        cfg = dict(current_config)
+        cfg = copy.deepcopy(current_config)
         cfg["scenario_name"] = window.scenario_name_edit.text().strip()
         cfg["scenario_description"] = window.scenario_description_edit.text().strip()
         sim = cfg.setdefault("simulator", {})
         outputs = cfg.setdefault("outputs", {})
         mc = cfg.setdefault("monte_carlo", {})
         analysis = cfg.setdefault("analysis", {})
-        target = cfg.setdefault("target", {})
-        chaser = cfg.setdefault("chaser", {})
-        rocket = cfg.setdefault("rocket", {})
+        target = self._agent_section(cfg, "target")
+        chaser = self._agent_section(cfg, "chaser")
+        rocket = self._agent_section(cfg, "rocket")
 
         sim["duration_s"] = float(window.duration_spin.value())
         sim["dt_s"] = float(window.dt_spin.value())
@@ -535,6 +548,9 @@ class GuiConfigAdapter:
         rocket["knowledge"] = self.collect_knowledge_from_window(
             window, "rocket", existing=dict(rocket.get("knowledge", {}) or {})
         )
+        self._sync_agent_section(cfg, "target", target)
+        self._sync_agent_section(cfg, "chaser", chaser)
+        self._sync_agent_section(cfg, "rocket", rocket)
 
         stats = outputs.setdefault("stats", {})
         plots = outputs.setdefault("plots", {})

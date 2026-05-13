@@ -71,6 +71,38 @@ def build_single_run_payload(context: SingleRunPayloadContext) -> dict[str, Any]
         "plot_outputs": {},
         "animation_outputs": {},
     }
+    rocket_summary: dict[str, Any] = {}
+    if context.rocket_metrics:
+        def _last_finite(name: str) -> float | None:
+            arr = np.array(context.rocket_metrics.get(name, []), dtype=float).reshape(-1)
+            finite = arr[np.isfinite(arr)]
+            return None if finite.size == 0 else float(finite[-1])
+
+        def _max_finite(name: str) -> float | None:
+            arr = np.array(context.rocket_metrics.get(name, []), dtype=float).reshape(-1)
+            finite = arr[np.isfinite(arr)]
+            return None if finite.size == 0 else float(np.max(finite))
+
+        def _max_abs_finite(name: str) -> float | None:
+            arr = np.array(context.rocket_metrics.get(name, []), dtype=float).reshape(-1)
+            finite = arr[np.isfinite(arr)]
+            return None if finite.size == 0 else float(np.max(np.abs(finite)))
+
+        rocket_summary = {
+            "final_altitude_km": _last_finite("altitude_km"),
+            "final_speed_km_s": _last_finite("speed_km_s"),
+            "final_apoapsis_alt_km": _last_finite("apoapsis_alt_km"),
+            "final_periapsis_alt_km": _last_finite("periapsis_alt_km"),
+            "final_eccentricity": _last_finite("eccentricity"),
+            "final_propellant_remaining_fraction": _last_finite("propellant_remaining_fraction"),
+            "max_dynamic_pressure_pa": _max_finite("q_dyn_pa"),
+            "max_mach": _max_finite("mach"),
+            "max_abs_alpha_deg": _max_abs_finite("alpha_deg"),
+            "max_tvc_gimbal_deg": _max_finite("tvc_gimbal_deg"),
+            "max_aero_force_n": _max_finite("aero_force_n"),
+            "max_aero_moment_nm": _max_finite("aero_moment_nm"),
+        }
+        summary["rocket_metrics_summary"] = rocket_summary
     return {
         "summary": summary,
         "time_s": context.t_s.tolist(),

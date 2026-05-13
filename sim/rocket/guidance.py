@@ -6,8 +6,8 @@ import numpy as np
 
 from sim.dynamics.orbit.atmosphere import atmosphere_state_from_model
 from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2, EARTH_RADIUS_KM
-from sim.rocket.engine import _geodetic_state_from_eci, _resolve_wind_eci_m_s
 from sim.rocket.models import GuidanceCommand, RocketGuidanceLaw, RocketSimConfig, RocketState, RocketVehicleConfig
+from sim.rocket.navigation import _geodetic_state_from_eci, _resolve_wind_eci_m_s, build_rocket_nav_state
 from sim.utils.quaternion import dcm_to_quaternion_bn, quaternion_to_dcm_bn
 
 
@@ -278,16 +278,14 @@ class ClosedLoopInsertionGuidance(RocketGuidanceLaw):
             t_hat = self._horizontal_azimuth_dir(r_hat, sim_cfg.launch_azimuth_deg)
         t_guided = self._guided_tangential_dir(r_hat, v, t_hat)
 
-        _, _, alt_geo_km = _geodetic_state_from_eci(
-            state.position_eci_km,
-            state.t_s,
-            jd_utc_start=sim_cfg.atmosphere_env.get("jd_utc_start"),
-        )
-        alt_km = float(alt_geo_km if sim_cfg.use_wgs84_geodesy else r_norm - EARTH_RADIUS_KM)
+        nav = build_rocket_nav_state(state, sim_cfg, vehicle_cfg, throttle_cmd=self.max_throttle)
+        alt_km = nav.altitude_km
         target_alt_km = float(sim_cfg.target_altitude_km)
         target_r_km = EARTH_RADIUS_KM + target_alt_km
-        ra_alt, rp_alt, _, ecc = _apo_peri_alt_km(r, v, EARTH_MU_KM3_S2)
-        vr = float(np.dot(v, r_hat))
+        ra_alt = nav.apoapsis_alt_km
+        rp_alt = nav.periapsis_alt_km
+        ecc = nav.eccentricity
+        vr = nav.vertical_speed_km_s
         vt = float(np.dot(v, t_guided))
 
         # Phase transitions.

@@ -25,6 +25,8 @@ The public core includes:
 - Python API, CLI, and GUI entrypoints
 - examples and starter validation workflows
 - public use-case configs under `examples/configs/public_*.yaml`
+- lightweight educational rocket/ascent primitives, without tuned orbital
+  insertion scenarios or launch-vehicle design workflows
 
 The public core should be useful for research, education, prototyping, and
 inspectable engineering experiments.
@@ -43,6 +45,9 @@ The pro layer includes:
 - curated validation and mission-assurance scenario packs
 - cFS/SIL and program-specific flight-software integration workflows
 - Pro workflow configs under `examples/configs/pro_*.yaml`
+- tuned rocket launch-to-orbit scenarios, TVC/ascent GNC benchmarks,
+  insertion contracts, payload-margin studies, and rocket guidance comparison
+  workflows
 
 Those workflows are intentionally not part of the public export. Public modules
 that would otherwise expose those surfaces raise clear import errors explaining

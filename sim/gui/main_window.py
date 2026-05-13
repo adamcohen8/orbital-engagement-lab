@@ -144,6 +144,7 @@ class MainWindow(QMainWindow):
         self.results_output_dir: Path | None = None
         self.preview_temp_dir: tempfile.TemporaryDirectory[str] | None = None
         self.rocket_guidance_modifiers_config: list[dict] = []
+        self._yaml_has_unapplied_changes = False
         self.output_modes = OUTPUT_MODES
         self.orbit_integrator_options = ORBIT_INTEGRATOR_OPTIONS
         self.analysis_study_types = ANALYSIS_STUDY_TYPES
@@ -246,6 +247,10 @@ class MainWindow(QMainWindow):
         self.open_output_button.clicked.connect(self._open_current_output_folder)
         top_bar.addWidget(self.open_output_button)
 
+        self.advanced_mode_check = QCheckBox("Advanced Mode")
+        self.advanced_mode_check.toggled.connect(self._refresh_advanced_mode_ui)
+        top_bar.addWidget(self.advanced_mode_check)
+
         root.addLayout(top_bar)
 
         save_bar = QHBoxLayout()
@@ -310,6 +315,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self._build_outputs_tab(), "Outputs")
         self.tabs.addTab(self._build_yaml_tab(), "Advanced YAML")
         self.tabs.addTab(self._build_results_tab(), "Results")
+        self._refresh_advanced_mode_ui()
         self.navigation_tree.setCurrentItem(self.navigation_tree.topLevelItem(0))
         splitter.addWidget(workspace)
         splitter.setStretchFactor(0, 0)
@@ -384,7 +390,6 @@ class MainWindow(QMainWindow):
             self.mc_baseline_summary_json,
             self.analysis_baseline_path_edit,
             self.save_path_edit,
-            self.yaml_editor,
             self.target_knowledge_targets_edit,
             self.chaser_knowledge_targets_edit,
             self.rocket_knowledge_targets_edit,
@@ -395,6 +400,7 @@ class MainWindow(QMainWindow):
                 signal.connect(self._mark_dirty)
         for widget in (self.analysis_metrics_edit,):
             widget.textChanged.connect(self._mark_dirty)
+        self.yaml_editor.textChanged.connect(self._on_yaml_editor_changed)
         combo_boxes = [
             self.orbit_integrator_combo,
             self.output_mode_combo,
@@ -540,6 +546,19 @@ class MainWindow(QMainWindow):
         ):
             widget.toggled.connect(self._mark_dirty)
         self.orbit_integrator_combo.currentIndexChanged.connect(self._refresh_integrator_visibility)
+
+    def _refresh_advanced_mode_ui(self) -> None:
+        if not hasattr(self, "tabs"):
+            return
+        advanced = bool(getattr(self, "advanced_mode_check", None) and self.advanced_mode_check.isChecked())
+        yaml_index = 5
+        if hasattr(self.tabs, "setTabVisible") and self.tabs.count() > yaml_index:
+            self.tabs.setTabVisible(yaml_index, advanced)
+        yaml_item = self.navigation_tree.topLevelItem(yaml_index) if hasattr(self, "navigation_tree") else None
+        if yaml_item is not None:
+            yaml_item.setHidden(not advanced)
+        if not advanced and self.tabs.currentIndex() == yaml_index:
+            self.tabs.setCurrentIndex(0)
 
     def _build_scenario_tab(self) -> QWidget:
         return build_scenario_tab(self)
@@ -1635,7 +1654,14 @@ class MainWindow(QMainWindow):
             pass
         self._suppress_dirty_tracking = True
         self.yaml_editor.setPlainText(dump_config_text(self.current_config))
+        self._yaml_has_unapplied_changes = False
         self._suppress_dirty_tracking = False
+
+    def _on_yaml_editor_changed(self) -> None:
+        if self._suppress_dirty_tracking:
+            return
+        self._yaml_has_unapplied_changes = True
+        self._set_dirty(True)
 
     def _apply_yaml_to_form(self) -> None:
         try:
@@ -1646,6 +1672,8 @@ class MainWindow(QMainWindow):
             self._load_config_into_widgets(cfg)
             self._refresh_validation_state()
             self._refresh_output_files()
+            self._yaml_has_unapplied_changes = False
+            self._mark_dirty()
             self.statusBar().showMessage("Applied YAML to form.", 5000)
         except Exception as exc:
             self._show_error("Apply YAML Failed", str(exc))
@@ -1668,6 +1696,38 @@ class MainWindow(QMainWindow):
             self._refresh_validation_panel(valid=False, issues=[str(exc)])
             self._refresh_preflight_summary(valid=False, issues=[str(exc)])
 
+    def _config_for_save_or_run(self) -> dict:
+        if self._yaml_has_unapplied_changes:
+            cfg = parse_config_text(self.yaml_editor.toPlainText())
+            validated = validate_config(cfg)
+            self.current_config = validated.to_dict()
+            self.results_output_dir = None
+            self._load_config_into_widgets(self.current_config)
+            self._yaml_has_unapplied_changes = False
+            self.statusBar().showMessage("Applied Advanced YAML before continuing.", 5000)
+            return self.current_config
+        return self._collect_config_from_widgets()
+
+    def _save_current_config(self, *, show_status: bool = True) -> Path | None:
+        try:
+            cfg_dict = self._config_for_save_or_run()
+            save_path = save_config(self.save_path_edit.text().strip(), cfg_dict)
+            self.loaded_config_path = save_path
+            self.current_config = load_config(save_path)
+            self.save_path_edit.setText(str(save_path))
+            self.results_output_dir = None
+            self._sync_config_selector_to_path(save_path)
+            self._refresh_yaml()
+            self._refresh_validation_state()
+            self._set_dirty(False)
+            self._update_window_title()
+            if show_status:
+                self.statusBar().showMessage(f"Saved {save_path}", 5000)
+            return save_path
+        except Exception as exc:
+            self._show_error("Save Failed", str(exc))
+            return None
+
     def _refresh_output_files(self) -> None:
         self.output_files.clear()
         self.preview_image_path = None
@@ -1682,13 +1742,15 @@ class MainWindow(QMainWindow):
         try:
             cfg = validate_config(self._collect_config_from_widgets())
             output_dir = self.results_output_dir or self._resolve_output_dir(cfg.outputs.output_dir)
-            files = get_output_files(output_dir)
+            files = sorted(get_output_files(output_dir), key=self._artifact_priority)
             for path in files:
                 label = self._artifact_label(path)
                 item_text = label
                 self.output_files.addItem(item_text)
                 self.output_files.item(self.output_files.count() - 1).setData(Qt.UserRole, str(path))
             self._refresh_results_summary(output_dir, files, used_temp_dir=self.results_output_dir is not None)
+            if self.output_files.count() > 0:
+                self.output_files.setCurrentRow(0)
         except Exception:
             return
 
@@ -1696,6 +1758,7 @@ class MainWindow(QMainWindow):
         summary_path = output_dir / "master_run_summary.json"
         mc_summary_path = output_dir / "master_monte_carlo_summary.json"
         analysis_summary_path = output_dir / "master_analysis_sensitivity_summary.json"
+        index_path = output_dir / "index.md"
         text = []
         if used_temp_dir:
             text.append(
@@ -1703,6 +1766,12 @@ class MainWindow(QMainWindow):
                 "=================\n"
                 "This run used `outputs.mode: interactive`, so the GUI redirected plot artifacts to a temporary "
                 f"preview directory instead of your normal output folder:\n{output_dir}"
+            )
+        if index_path.exists():
+            text.append(
+                "Start Here\n"
+                "==========\n"
+                f"Open {index_path.name} first for the run status, key results, and recommended artifacts."
             )
         if summary_path.exists():
             try:
@@ -1843,6 +1912,21 @@ class MainWindow(QMainWindow):
             return str(path)
 
     def _artifact_label(self, path: Path) -> str:
+        known = {
+            "index.md": "Start Here",
+            "master_run_summary.json": "Run Summary",
+            "master_monte_carlo_summary.json": "Monte Carlo Summary",
+            "master_analysis_sensitivity_summary.json": "Sensitivity Summary",
+            "run_dashboard.png": "Run Dashboard",
+            "rendezvous_summary.png": "Rendezvous Summary",
+            "control_effort.png": "Control Effort",
+            "chaser_thrust_alignment_error.png": "Thrust Alignment",
+        }
+        if path.name in known:
+            label = known[path.name]
+            if path.suffix:
+                label = f"{label} ({path.suffix.lower().lstrip('.')})"
+            return label
         stem = path.stem.replace("_", " ").strip()
         if not stem:
             stem = path.name
@@ -1850,6 +1934,21 @@ class MainWindow(QMainWindow):
         if path.suffix:
             label = f"{label} ({path.suffix.lower().lstrip('.')})"
         return label
+
+    def _artifact_priority(self, path: Path) -> tuple[int, str]:
+        name = path.name.lower()
+        suffix = path.suffix.lower()
+        if name == "index.md":
+            return (0, str(path))
+        if "dashboard" in name and suffix in {".png", ".jpg", ".jpeg", ".html"}:
+            return (1, str(path))
+        if name in {"master_run_summary.json", "master_monte_carlo_summary.json", "master_analysis_sensitivity_summary.json"}:
+            return (2, str(path))
+        if suffix in {".png", ".jpg", ".jpeg"}:
+            return (3, str(path))
+        if suffix in {".md", ".txt", ".json"}:
+            return (4, str(path))
+        return (5, str(path))
 
     def _path_from_display(self, path_text: str) -> Path:
         path = Path(path_text)
@@ -1925,21 +2024,7 @@ class MainWindow(QMainWindow):
             self._show_error("Open Output Folder Failed", str(exc))
 
     def _on_save(self) -> None:
-        try:
-            cfg_dict = self._collect_config_from_widgets()
-            save_path = save_config(self.save_path_edit.text().strip(), cfg_dict)
-            self.loaded_config_path = save_path
-            self.current_config = load_config(save_path)
-            self.save_path_edit.setText(str(save_path))
-            self.results_output_dir = None
-            self._sync_config_selector_to_path(save_path)
-            self._refresh_yaml()
-            self._refresh_validation_state()
-            self._set_dirty(False)
-            self._update_window_title()
-            self.statusBar().showMessage(f"Saved {save_path}", 5000)
-        except Exception as exc:
-            self._show_error("Save Failed", str(exc))
+        self._save_current_config()
 
     def _on_save_as(self) -> None:
         start_dir = str(
@@ -1972,8 +2057,17 @@ class MainWindow(QMainWindow):
             self._show_error("Run In Progress", "A simulation is already running.")
             return
         try:
-            cfg_dict = self._collect_config_from_widgets()
+            cfg_dict = self._config_for_save_or_run()
+            if not self._confirm_output_overwrite(cfg_dict):
+                return
             save_path = save_config(self.save_path_edit.text().strip(), cfg_dict)
+            self.loaded_config_path = save_path
+            self.current_config = load_config(save_path)
+            self.save_path_edit.setText(str(save_path))
+            self._sync_config_selector_to_path(save_path)
+            self._refresh_yaml()
+            self._refresh_validation_state()
+            self._set_dirty(False)
             run_config_path = save_path
             self.results_output_dir = None
             if str(cfg_dict.get("outputs", {}).get("mode", "")).strip().lower() == "interactive":
@@ -1981,6 +2075,22 @@ class MainWindow(QMainWindow):
             self._start_run_worker(run_config_path)
         except Exception as exc:
             self._show_error("Run Failed", str(exc))
+
+    def _confirm_output_overwrite(self, cfg_dict: dict) -> bool:
+        outputs = dict(cfg_dict.get("outputs", {}) or {})
+        if str(outputs.get("mode", "")).strip().lower() != "save":
+            return True
+        output_dir = self._resolve_output_dir(str(outputs.get("output_dir", "") or "outputs"))
+        if not output_dir.exists() or not any(output_dir.iterdir()):
+            return True
+        result = QMessageBox.question(
+            self,
+            "Output Folder Exists",
+            f"{output_dir} already contains files. Continue and add or overwrite run artifacts?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        return result == QMessageBox.Yes
 
     def _on_run_quickstart(self) -> None:
         if self.run_thread is not None:
@@ -2008,6 +2118,12 @@ class MainWindow(QMainWindow):
     def _start_run_worker(self, run_config_path: Path) -> None:
         self.console.clear()
         self.output_files.clear()
+        self._set_run_controls_enabled(False)
+        if hasattr(self, "run_progress"):
+            self.run_progress.setRange(0, 0)
+            self.run_progress.setValue(0)
+        if hasattr(self, "run_status_label"):
+            self.run_status_label.setText(f"Running {run_config_path.name}")
         self.run_thread = QThread(self)
         self.run_worker = _ApiRunWorker(run_config_path)
         self.run_worker.moveToThread(self.run_thread)
@@ -2019,30 +2135,56 @@ class MainWindow(QMainWindow):
         self.run_worker.failed.connect(self.run_thread.quit)
         self.run_thread.finished.connect(self._cleanup_run_worker)
         self.run_thread.start()
-        self.run_button.setEnabled(False)
-        self.run_quickstart_button.setEnabled(False)
         self.statusBar().showMessage("Simulation running...")
         self.tabs.setCurrentIndex(6)
 
     def _append_console_text(self, txt: str) -> None:
         if txt:
+            self._update_progress_from_text(txt)
             self.console.moveCursor(QTextCursor.End)
             self.console.insertPlainText(txt)
             self.console.ensureCursorVisible()
 
+    def _update_progress_from_text(self, txt: str) -> None:
+        if "[progress] step " not in txt or not hasattr(self, "run_progress"):
+            return
+        marker = txt.rsplit("[progress] step ", 1)[-1].strip().splitlines()[0]
+        if "/" not in marker:
+            return
+        step_text, total_text = marker.split("/", 1)
+        try:
+            step = max(int(step_text), 0)
+            total = max(int(total_text), 0)
+        except ValueError:
+            return
+        if total <= 0:
+            return
+        self.run_progress.setRange(0, total)
+        self.run_progress.setValue(min(step, total))
+        if hasattr(self, "run_status_label"):
+            self.run_status_label.setText(f"Running step {min(step, total)} of {total}")
+
     def _on_run_finished(self, result) -> None:
-        self.run_button.setEnabled(True)
-        self.run_quickstart_button.setEnabled(True)
+        self._set_run_controls_enabled(True)
         if getattr(result, "output_dir", None) and self.results_output_dir is None:
             self.results_output_dir = self._resolve_output_dir(str(result.output_dir))
         self._append_console_text(str(getattr(result, "stdout", "")))
+        if hasattr(self, "run_progress"):
+            self.run_progress.setRange(0, 1)
+            self.run_progress.setValue(1)
+        if hasattr(self, "run_status_label"):
+            self.run_status_label.setText("Simulation finished.")
         self.statusBar().showMessage("Simulation finished.", 10000)
         self._refresh_output_files()
 
     def _on_run_failed(self, message: str) -> None:
-        self.run_button.setEnabled(True)
-        self.run_quickstart_button.setEnabled(True)
+        self._set_run_controls_enabled(True)
         self._append_console_text(f"\nRun failed: {message}\n")
+        if hasattr(self, "run_progress"):
+            self.run_progress.setRange(0, 1)
+            self.run_progress.setValue(0)
+        if hasattr(self, "run_status_label"):
+            self.run_status_label.setText("Run failed.")
         self._show_error("Run Failed", message)
 
     def _cleanup_run_worker(self) -> None:
@@ -2052,6 +2194,26 @@ class MainWindow(QMainWindow):
             self.run_thread.deleteLater()
         self.run_worker = None
         self.run_thread = None
+
+    def _set_run_controls_enabled(self, enabled: bool) -> None:
+        for button_name in ("run_button", "run_quickstart_button", "builder_run_button"):
+            button = getattr(self, button_name, None)
+            if button is not None:
+                button.setEnabled(enabled)
+
+    def closeEvent(self, event) -> None:
+        if self.run_thread is not None:
+            QMessageBox.warning(
+                self,
+                "Run In Progress",
+                "A simulation is still running. Wait for it to finish before closing the GUI.",
+            )
+            event.ignore()
+            return
+        if not self._prompt_discard_changes():
+            event.ignore()
+            return
+        event.accept()
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -2134,14 +2296,16 @@ class MainWindow(QMainWindow):
     def _prompt_discard_changes(self) -> bool:
         if not self.is_dirty:
             return True
-        result = QMessageBox.question(
+        result = QMessageBox.warning(
             self,
             "Unsaved Changes",
-            "You have unsaved changes. Discard them?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
+            "You have unsaved changes.",
+            QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
+            QMessageBox.Save,
         )
-        return result == QMessageBox.Yes
+        if result == QMessageBox.Save:
+            return self._save_current_config(show_status=True) is not None
+        return result == QMessageBox.Discard
 
     def _sync_config_selector_to_path(self, path: Path) -> None:
         try:
@@ -2309,7 +2473,7 @@ class MainWindow(QMainWindow):
         else:
             init_text = f"{reference_object} default orbit"
         lines = [
-            f"Status: {'valid' if valid else 'invalid'}",
+            f"Status: {'Ready to run' if valid and not issues else ('Ready with warnings' if valid else 'Needs attention')}",
             f"Scenario: {cfg.get('scenario_name', 'unnamed')}",
             f"Workflow: {mode}",
             f"Objects: {', '.join(enabled_objects) if enabled_objects else 'none enabled'}",
@@ -2336,16 +2500,16 @@ class MainWindow(QMainWindow):
 
     def _refresh_validation_panel(self, *, valid: bool, issues: list[str]) -> None:
         if valid and not issues:
-            self.validation_label.setText("Config valid. No warnings.")
+            self.validation_label.setText("Ready to run. No warnings.")
             self.validation_panel.setPlainText("")
             self.validation_panel.hide()
             self.validation_toggle.setText("Show Details")
             self._collapse_validation_on_startup = False
             return
         if valid:
-            self.validation_label.setText(f"Config valid with {len(issues)} warning(s).")
+            self.validation_label.setText(f"Ready to run with {len(issues)} warning(s).")
         else:
-            self.validation_label.setText("Config invalid.")
+            self.validation_label.setText("Needs attention before running.")
         self.validation_panel.setPlainText("\n".join(issues))
         if self._collapse_validation_on_startup:
             self.validation_panel.hide()
