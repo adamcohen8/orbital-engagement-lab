@@ -7,8 +7,12 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-PySide6 = pytest.importorskip("PySide6")
-from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
+try:
+    from PySide6 import QtWidgets
+except ImportError as exc:
+    pytest.skip(f"PySide6 QtWidgets unavailable: {exc}", allow_module_level=True)
+QApplication = QtWidgets.QApplication
+QMessageBox = QtWidgets.QMessageBox
 
 from sim.app.services import dump_config_text, validate_config  # noqa: E402
 from sim.config.object_refs import configured_objects  # noqa: E402
