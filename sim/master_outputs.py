@@ -12,6 +12,7 @@ from sim.config import (
     iter_object_sections,
 )
 from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2, EARTH_RADIUS_KM
+from sim.ground_stations import evaluate_ground_station_access
 from sim.presets.rockets import RocketStackPreset
 from sim.presets.thrusters import resolve_thruster_mount_from_specs
 from sim.utils.figure_size import cap_figsize
@@ -23,6 +24,14 @@ AVAILABLE_FIGURE_IDS = [
     "run_dashboard",
     "rendezvous_summary",
     "orbit_eci",
+    "orbital_element_a",
+    "orbital_element_ecc",
+    "orbital_element_inc",
+    "orbital_element_raan",
+    "orbital_element_argp",
+    "orbital_element_true_anomaly",
+    "orbital_elements_summary",
+    "orbital_elements_angles",
     "ground_track",
     "ground_track_multi",
     "trajectory_ecef",
@@ -51,20 +60,27 @@ AVAILABLE_FIGURE_IDS = [
     "estimation_error",
     "estimation_error_components",
     "sensor_access",
+    "ground_station_access",
     "quaternion_error",
+    "attitude_control_summary",
     "cfs_attitude_sensor",
     "cfs_actuator_commands",
     "rocket_ascent_diagnostics",
     "rocket_gnc_diagnostics",
     "rocket_orbital_elements",
     "rocket_fuel_remaining",
+    "rocket_mission_timeline",
+    "rocket_downrange_altitude",
+    "rocket_maxq_throttle",
+    "rocket_tvc_aero_authority",
+    "rocket_insertion_scorecard",
     "satellite_delta_v_remaining",
     "thrust_alignment_error",
 ]
 
 PLOT_PRESETS = {
     "minimal": ["run_dashboard"],
-    "orbit": ["run_dashboard", "trajectory_eci_multi", "ground_track_multi"],
+    "orbit": ["run_dashboard", "trajectory_eci_multi", "ground_track_multi", "orbital_elements_summary"],
     "rendezvous": [
         "run_dashboard",
         "rendezvous_summary",
@@ -72,14 +88,20 @@ PLOT_PRESETS = {
         "relative_range",
         "control_effort",
     ],
-    "attitude": ["run_dashboard", "quaternion_eci", "rates_eci", "quaternion_error"],
+    "attitude": ["run_dashboard", "quaternion_eci", "rates_eci", "quaternion_error", "attitude_control_summary"],
     "estimation": ["estimation_error", "estimation_error_components", "knowledge_timeline", "sensor_access"],
+    "access": ["ground_station_access", "ground_track_multi"],
     "rocket": [
         "run_dashboard",
         "rocket_ascent_diagnostics",
         "rocket_gnc_diagnostics",
         "rocket_orbital_elements",
         "rocket_fuel_remaining",
+        "rocket_mission_timeline",
+        "rocket_downrange_altitude",
+        "rocket_maxq_throttle",
+        "rocket_tvc_aero_authority",
+        "rocket_insertion_scorecard",
     ],
     "debug": list(AVAILABLE_FIGURE_IDS),
 }
@@ -257,6 +279,78 @@ def _orbital_elements_basic(
     e_vec = np.cross(v_km_s, h) / mu_km3_s2 - r_km / r
     e = float(np.linalg.norm(e_vec))
     return a, e
+
+
+def _rocket_metric_array(
+    rocket_metrics: dict[str, np.ndarray] | None,
+    name: str,
+    size: int,
+    default: float = np.nan,
+) -> np.ndarray:
+    out = np.full(size, default, dtype=float)
+    if rocket_metrics is None or name not in rocket_metrics:
+        return out
+    arr = np.array(rocket_metrics[name], dtype=float).reshape(-1)
+    n = min(size, arr.size)
+    if n > 0:
+        out[:n] = arr[:n]
+    return out
+
+
+def _last_finite_value(series: np.ndarray) -> float:
+    arr = np.array(series, dtype=float).reshape(-1)
+    finite = arr[np.isfinite(arr)]
+    return float(finite[-1]) if finite.size else float("nan")
+
+
+def _max_abs_finite_value(series: np.ndarray) -> float:
+    arr = np.array(series, dtype=float).reshape(-1)
+    finite = arr[np.isfinite(arr)]
+    return float(np.max(np.abs(finite))) if finite.size else float("nan")
+
+
+def _max_finite_value(series: np.ndarray) -> float:
+    arr = np.array(series, dtype=float).reshape(-1)
+    finite = arr[np.isfinite(arr)]
+    return float(np.max(finite)) if finite.size else float("nan")
+
+
+def _first_true_time(t_s: np.ndarray, mask: np.ndarray) -> float | None:
+    idx = np.flatnonzero(np.array(mask, dtype=bool))
+    if idx.size == 0:
+        return None
+    i = int(idx[0])
+    if i < 0 or i >= t_s.size:
+        return None
+    return float(t_s[i])
+
+
+def _rocket_launch_site(cfg: SimulationScenarioConfig) -> tuple[float, float] | None:
+    initial_state = dict(getattr(cfg.rocket, "initial_state", {}) or {})
+    try:
+        return float(initial_state["launch_lat_deg"]), float(initial_state["launch_lon_deg"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _haversine_distance_km(lat0_deg: float, lon0_deg: float, lat_deg: np.ndarray, lon_deg: np.ndarray) -> np.ndarray:
+    lat0 = np.deg2rad(float(lat0_deg))
+    lon0 = np.deg2rad(float(lon0_deg))
+    lat = np.deg2rad(np.array(lat_deg, dtype=float))
+    lon = np.deg2rad(np.array(lon_deg, dtype=float))
+    dlat = lat - lat0
+    dlon = lon - lon0
+    a = np.sin(dlat / 2.0) ** 2 + np.cos(lat0) * np.cos(lat) * np.sin(dlon / 2.0) ** 2
+    c = 2.0 * np.arctan2(np.sqrt(np.clip(a, 0.0, 1.0)), np.sqrt(np.clip(1.0 - a, 0.0, 1.0)))
+    return EARTH_RADIUS_KM * c
+
+
+def _rocket_target_altitude_cfg(cfg: SimulationScenarioConfig) -> tuple[float, float, float]:
+    dyn = dict(getattr(cfg.simulator.dynamics, "rocket", {}) or {})
+    target = float(dyn.get("target_altitude_km", np.nan))
+    tol = float(dyn.get("target_altitude_tolerance_km", np.nan))
+    ecc_max = float(dyn.get("target_eccentricity_max", np.nan))
+    return target, tol, ecc_max
 
 
 def _compute_satellite_delta_v_remaining(
@@ -437,15 +531,30 @@ def plot_outputs(
             "estimation_error",
             "estimation_error_components",
             "sensor_access",
+            "ground_station_access",
+            "attitude_control_summary",
+            "orbital_element_a",
+            "orbital_element_ecc",
+            "orbital_element_inc",
+            "orbital_element_raan",
+            "orbital_element_argp",
+            "orbital_element_true_anomaly",
+            "orbital_elements_summary",
+            "orbital_elements_angles",
             "ground_track",
             "ground_track_multi",
         )
     ):
         from sim.plotting import (
+            plot_attitude_control_summary,
             plot_control_effort,
             plot_estimation_error,
             plot_estimation_error_components,
+            plot_ground_station_access,
             plot_ground_track_from_payload,
+            plot_orbital_element,
+            plot_orbital_elements_angles,
+            plot_orbital_elements_summary,
             plot_rendezvous_summary,
             plot_run_dashboard,
             plot_sensor_access,
@@ -454,6 +563,7 @@ def plot_outputs(
     show = mode in ("interactive", "both")
     close = mode == "save"
     save_enabled = mode in ("save", "both")
+    draw_ground_track_map = bool(cfg.outputs.plots.get("draw_earth_map", False))
 
     if "run_dashboard" in figure_ids:
         p = outdir / "run_dashboard.png"
@@ -544,6 +654,95 @@ def plot_outputs(
         if save_enabled:
             out["sensor_access"] = str(p)
 
+    if "ground_station_access" in figure_ids:
+        ground_access, _ = evaluate_ground_station_access(
+            ground_stations=list(cfg.ground_stations),
+            t_s=t_s,
+            truth_hist=truth_hist,
+            jd_utc_start=cfg.simulator.initial_jd_utc,
+        )
+        p = outdir / "ground_station_access.png"
+        plot_ground_station_access(
+            t_s=t_s,
+            ground_station_access=ground_access,
+            out_path=p if save_enabled else None,
+            show=show,
+            close=close,
+            dpi=dpi,
+        )
+        if save_enabled:
+            out["ground_station_access"] = str(p)
+
+    if "attitude_control_summary" in figure_ids:
+        p = outdir / "attitude_control_summary.png"
+        plot_attitude_control_summary(
+            t_s=t_s,
+            truth_by_object=truth_hist,
+            thrust_by_object=thrust_hist,
+            desired_attitude_by_object=desired_attitude_hist or {},
+            thrust_axis_body_by_object=_thruster_direction_body_by_object(cfg),
+            out_path=p if save_enabled else None,
+            show=show,
+            close=close,
+            dpi=dpi,
+        )
+        if save_enabled:
+            out["attitude_control_summary"] = str(p)
+
+    orbital_element_ids = {
+        "orbital_element_a": "a",
+        "orbital_element_ecc": "ecc",
+        "orbital_element_inc": "inc",
+        "orbital_element_raan": "raan",
+        "orbital_element_argp": "argp",
+        "orbital_element_true_anomaly": "true_anomaly",
+    }
+    orbital_object_id = str(cfg.outputs.plots.get("orbital_elements_object_id", "") or "").strip() or None
+    for figure_id, element_id in orbital_element_ids.items():
+        if figure_id not in figure_ids:
+            continue
+        p = outdir / f"{figure_id}.png"
+        plot_orbital_element(
+            t_s=t_s,
+            truth_by_object=truth_hist,
+            element_id=element_id,
+            object_id=orbital_object_id,
+            out_path=p if save_enabled else None,
+            show=show,
+            close=close,
+            dpi=dpi,
+        )
+        if save_enabled:
+            out[figure_id] = str(p)
+
+    if "orbital_elements_summary" in figure_ids:
+        p = outdir / "orbital_elements_summary.png"
+        plot_orbital_elements_summary(
+            t_s=t_s,
+            truth_by_object=truth_hist,
+            object_id=orbital_object_id,
+            out_path=p if save_enabled else None,
+            show=show,
+            close=close,
+            dpi=dpi,
+        )
+        if save_enabled:
+            out["orbital_elements_summary"] = str(p)
+
+    if "orbital_elements_angles" in figure_ids:
+        p = outdir / "orbital_elements_angles.png"
+        plot_orbital_elements_angles(
+            t_s=t_s,
+            truth_by_object=truth_hist,
+            object_id=orbital_object_id,
+            out_path=p if save_enabled else None,
+            show=show,
+            close=close,
+            dpi=dpi,
+        )
+        if save_enabled:
+            out["orbital_elements_angles"] = str(p)
+
     if ("cfs_attitude_sensor" in figure_ids) or ("cfs_actuator_commands" in figure_ids):
         import matplotlib.pyplot as plt
 
@@ -620,6 +819,7 @@ def plot_outputs(
             t_s=t_s,
             truth_by_object=truth_hist,
             jd_utc_start=cfg.simulator.initial_jd_utc,
+            draw_earth_map=draw_ground_track_map,
             out_path=p if save_enabled else None,
             show=show,
             close=close,
@@ -638,6 +838,7 @@ def plot_outputs(
                 truth_by_object={oid: hist},
                 jd_utc_start=cfg.simulator.initial_jd_utc,
                 object_id=oid,
+                draw_earth_map=draw_ground_track_map,
                 out_path=p if save_enabled else None,
                 show=show,
                 close=close,
@@ -1055,6 +1256,300 @@ def plot_outputs(
             fig.savefig(p, dpi=int(cfg.outputs.plots.get("dpi", 150)))
             out["rocket_fuel_remaining"] = str(p)
         if mode == "save":
+            plt.close(fig)
+
+    if "rocket_mission_timeline" in figure_ids and "rocket" in truth_hist:
+        import matplotlib.pyplot as plt
+
+        x = truth_hist["rocket"]
+        target_alt_km, alt_tol_km, ecc_max = _rocket_target_altitude_cfg(cfg)
+        alt_km = _rocket_metric_array(rocket_metrics, "altitude_km", t_s.size)
+        if not np.any(np.isfinite(alt_km)):
+            alt_km = np.linalg.norm(x[:, 0:3], axis=1) - EARTH_RADIUS_KM
+        apo = _rocket_metric_array(rocket_metrics, "apoapsis_alt_km", t_s.size)
+        peri = _rocket_metric_array(rocket_metrics, "periapsis_alt_km", t_s.size)
+        ecc = _rocket_metric_array(rocket_metrics, "eccentricity", t_s.size)
+        q_dyn = _rocket_metric_array(rocket_metrics, "q_dyn_pa", t_s.size, 0.0)
+        stage = _rocket_metric_array(rocket_metrics, "stage_index", t_s.size, 0.0)
+
+        events: list[tuple[float, str, str]] = [(float(t_s[0]) if t_s.size else 0.0, "Liftoff", "tab:green")]
+        guidance = getattr(cfg.rocket, "base_guidance", None)
+        guidance_params = dict(getattr(guidance, "params", {}) or {})
+        for key, label in (("pitch_start_s", "Pitch start"), ("pitch_end_s", "Pitch complete")):
+            value = guidance_params.get(key)
+            if value is not None:
+                events.append((float(value), label, "tab:blue"))
+        finite_q = np.isfinite(q_dyn)
+        if np.any(finite_q):
+            i_q = int(np.nanargmax(np.where(finite_q, q_dyn, np.nan)))
+            events.append((float(t_s[i_q]), "Max Q", "tab:red"))
+        finite_stage = np.isfinite(stage)
+        if np.any(finite_stage):
+            for idx in np.flatnonzero(np.diff(stage[finite_stage]) > 0.5):
+                event_t = float(t_s[np.flatnonzero(finite_stage)[idx + 1]])
+                events.append((event_t, "Stage event", "tab:purple"))
+        insertion_mask = np.zeros(t_s.size, dtype=bool)
+        if np.isfinite(target_alt_km) and np.isfinite(alt_tol_km) and np.isfinite(ecc_max):
+            altitude_ok = np.abs(alt_km - target_alt_km) <= alt_tol_km
+            orbit_ok = np.isfinite(apo) & np.isfinite(peri) & (ecc <= ecc_max)
+            insertion_mask = altitude_ok & orbit_ok
+        insertion_t = _first_true_time(t_s, insertion_mask)
+        if insertion_t is not None:
+            events.append((insertion_t, "Insertion band", "tab:orange"))
+        if t_s.size:
+            events.append((float(t_s[-1]), "Final sample", "tab:gray"))
+
+        fig, ax = plt.subplots(figsize=cap_figsize(11, 3.8))
+        ax.axhline(0.0, color="0.3", linewidth=1.4)
+        for i, (event_t, label, color) in enumerate(sorted(events, key=lambda row: row[0])):
+            offset = 0.34 if i % 2 == 0 else -0.34
+            ax.vlines(event_t, 0.0, offset, color=color, linewidth=1.6)
+            ax.scatter([event_t], [0.0], color=color, s=42, zorder=3)
+            ax.text(event_t, offset, label, ha="center", va="bottom" if offset > 0 else "top", fontsize=8)
+        ax.set_xlabel("Time (s)")
+        ax.set_yticks([])
+        ax.set_ylim(-0.9, 0.9)
+        ax.set_title("Rocket Mission Timeline")
+        ax.grid(True, axis="x", alpha=0.25)
+        fig.tight_layout()
+        p = outdir / "rocket_mission_timeline.png"
+        if mode in ("save", "both"):
+            fig.savefig(p, dpi=int(cfg.outputs.plots.get("dpi", 150)))
+            out["rocket_mission_timeline"] = str(p)
+        if mode in ("interactive", "both"):
+            plt.show(block=False)
+        else:
+            plt.close(fig)
+
+    if "rocket_downrange_altitude" in figure_ids and "rocket" in truth_hist:
+        import matplotlib.pyplot as plt
+
+        x = truth_hist["rocket"]
+        launch_site = _rocket_launch_site(cfg)
+        lat, lon, _ = ground_track_from_eci_history(
+            x[:, 0:3],
+            t_s=t_s[: x.shape[0]],
+            jd_utc_start=cfg.simulator.initial_jd_utc,
+        )
+        if launch_site is None:
+            lat0, lon0 = float(lat[0]), float(lon[0])
+        else:
+            lat0, lon0 = launch_site
+        downrange_km = _haversine_distance_km(lat0, lon0, lat, lon)
+        alt_km = _rocket_metric_array(rocket_metrics, "altitude_km", t_s.size)
+        if not np.any(np.isfinite(alt_km)):
+            alt_km = np.linalg.norm(x[:, 0:3], axis=1) - EARTH_RADIUS_KM
+        speed = _rocket_metric_array(rocket_metrics, "speed_km_s", t_s.size)
+
+        fig, ax = plt.subplots(figsize=cap_figsize(10, 5.5))
+        n = min(downrange_km.size, alt_km.size, t_s.size)
+        if n > 0 and np.any(np.isfinite(downrange_km[:n]) & np.isfinite(alt_km[:n])):
+            if np.any(np.isfinite(speed[:n])):
+                sc = ax.scatter(downrange_km[:n], alt_km[:n], c=speed[:n], s=9, cmap="viridis")
+                fig.colorbar(sc, ax=ax, label="speed (km/s)")
+            else:
+                ax.plot(downrange_km[:n], alt_km[:n], linewidth=1.5)
+            ax.scatter([downrange_km[0]], [alt_km[0]], color="tab:green", s=35, label="start")
+            ax.scatter([downrange_km[n - 1]], [alt_km[n - 1]], color="tab:red", s=35, label="final")
+            ax.legend(loc="best")
+        else:
+            ax.text(0.5, 0.5, "No valid downrange/altitude samples", transform=ax.transAxes, ha="center")
+        ax.set_xlabel("Downrange distance (km)")
+        ax.set_ylabel("Altitude (km)")
+        ax.set_title("Rocket Altitude vs Downrange Distance")
+        ax.grid(True, alpha=0.3)
+        fig.tight_layout()
+        p = outdir / "rocket_downrange_altitude.png"
+        if mode in ("save", "both"):
+            fig.savefig(p, dpi=int(cfg.outputs.plots.get("dpi", 150)))
+            out["rocket_downrange_altitude"] = str(p)
+        if mode in ("interactive", "both"):
+            plt.show(block=False)
+        else:
+            plt.close(fig)
+
+    if "rocket_maxq_throttle" in figure_ids and "rocket" in truth_hist:
+        import matplotlib.pyplot as plt
+
+        q_dyn = _rocket_metric_array(rocket_metrics, "q_dyn_pa", t_s.size, 0.0)
+        throttle = _rocket_metric_array(rocket_metrics, "throttle_cmd", t_s.size, 0.0)
+        mach = _rocket_metric_array(rocket_metrics, "mach", t_s.size, 0.0)
+        alt_km = _rocket_metric_array(rocket_metrics, "altitude_km", t_s.size)
+        fig, axes = plt.subplots(3, 1, figsize=cap_figsize(11, 8), sharex=True)
+        axes[0].plot(t_s, q_dyn, color="tab:red", label="dynamic pressure")
+        max_q_cfg = None
+        for modifier in list(getattr(cfg.rocket, "guidance_modifiers", []) or []):
+            params = dict(getattr(modifier, "params", {}) or {})
+            if params.get("max_q_pa") is not None:
+                max_q_cfg = float(params.get("max_q_pa"))
+                break
+        if max_q_cfg is not None:
+            axes[0].axhline(max_q_cfg, color="black", linestyle="--", label=f"limit {max_q_cfg:.0f} Pa")
+        if np.any(np.isfinite(q_dyn)):
+            i_q = int(np.nanargmax(np.where(np.isfinite(q_dyn), q_dyn, np.nan)))
+            axes[0].axvline(t_s[i_q], color="tab:red", linestyle=":", alpha=0.8)
+            axes[0].text(t_s[i_q], q_dyn[i_q], " max Q", fontsize=8, va="bottom")
+        axes[0].set_ylabel("q (Pa)")
+        axes[0].set_title("Max-Q Throttle Limiting")
+        axes[0].grid(True, alpha=0.3)
+        axes[0].legend(loc="best")
+
+        axes[1].plot(t_s, throttle, color="tab:blue", label="throttle")
+        axes[1].set_ylabel("throttle")
+        axes[1].set_ylim(-0.05, 1.05)
+        axes[1].grid(True, alpha=0.3)
+        axes[1].legend(loc="best")
+
+        axes[2].plot(t_s, mach, color="tab:purple", label="Mach")
+        if np.any(np.isfinite(alt_km)):
+            ax_alt = axes[2].twinx()
+            ax_alt.plot(t_s, alt_km, color="tab:gray", alpha=0.7, label="altitude")
+            ax_alt.set_ylabel("altitude (km)")
+        axes[2].set_xlabel("Time (s)")
+        axes[2].set_ylabel("Mach")
+        axes[2].grid(True, alpha=0.3)
+        axes[2].legend(loc="best")
+        fig.tight_layout()
+        p = outdir / "rocket_maxq_throttle.png"
+        if mode in ("save", "both"):
+            fig.savefig(p, dpi=int(cfg.outputs.plots.get("dpi", 150)))
+            out["rocket_maxq_throttle"] = str(p)
+        if mode in ("interactive", "both"):
+            plt.show(block=False)
+        else:
+            plt.close(fig)
+
+    if "rocket_tvc_aero_authority" in figure_ids and "rocket" in truth_hist:
+        import matplotlib.pyplot as plt
+
+        tvc = _rocket_metric_array(rocket_metrics, "tvc_gimbal_deg", t_s.size, 0.0)
+        alpha = _rocket_metric_array(rocket_metrics, "alpha_deg", t_s.size, 0.0)
+        beta = _rocket_metric_array(rocket_metrics, "beta_deg", t_s.size, 0.0)
+        aero_force = _rocket_metric_array(rocket_metrics, "aero_force_n", t_s.size, 0.0)
+        aero_moment = _rocket_metric_array(rocket_metrics, "aero_moment_nm", t_s.size, 0.0)
+        q_dyn = _rocket_metric_array(rocket_metrics, "q_dyn_pa", t_s.size, 0.0)
+        twr = _rocket_metric_array(rocket_metrics, "thrust_to_weight", t_s.size)
+
+        fig, axes = plt.subplots(4, 1, figsize=cap_figsize(11, 10), sharex=True)
+        axes[0].plot(t_s, tvc, color="tab:green", label="TVC gimbal")
+        tvc_limit = float(dict(cfg.simulator.dynamics.rocket).get("tvc_max_gimbal_deg", np.nan))
+        if np.isfinite(tvc_limit):
+            axes[0].axhline(tvc_limit, color="black", linestyle="--", linewidth=0.9)
+            axes[0].axhline(-tvc_limit, color="black", linestyle="--", linewidth=0.9)
+        axes[0].set_ylabel("deg")
+        axes[0].set_title("TVC and Aero Authority")
+        axes[0].grid(True, alpha=0.3)
+        axes[0].legend(loc="best")
+
+        axes[1].plot(t_s, alpha, label="alpha", color="tab:red")
+        axes[1].plot(t_s, beta, label="beta", color="tab:purple")
+        axes[1].set_ylabel("deg")
+        axes[1].grid(True, alpha=0.3)
+        axes[1].legend(loc="best")
+
+        ax_force = axes[2].twinx()
+        l0 = axes[2].plot(t_s, aero_force, label="aero force", color="tab:orange")
+        l1 = ax_force.plot(t_s, aero_moment, label="aero moment", color="tab:brown")
+        axes[2].set_ylabel("force (N)")
+        ax_force.set_ylabel("moment (N-m)")
+        axes[2].grid(True, alpha=0.3)
+        axes[2].legend(l0 + l1, [ln.get_label() for ln in l0 + l1], loc="best")
+
+        ax_twr = axes[3].twinx()
+        l2 = axes[3].plot(t_s, q_dyn, label="q", color="tab:blue")
+        l3 = ax_twr.plot(t_s, twr, label="T/W", color="tab:gray")
+        axes[3].set_xlabel("Time (s)")
+        axes[3].set_ylabel("q (Pa)")
+        ax_twr.set_ylabel("T/W")
+        axes[3].grid(True, alpha=0.3)
+        axes[3].legend(l2 + l3, [ln.get_label() for ln in l2 + l3], loc="best")
+        fig.tight_layout()
+        p = outdir / "rocket_tvc_aero_authority.png"
+        if mode in ("save", "both"):
+            fig.savefig(p, dpi=int(cfg.outputs.plots.get("dpi", 150)))
+            out["rocket_tvc_aero_authority"] = str(p)
+        if mode in ("interactive", "both"):
+            plt.show(block=False)
+        else:
+            plt.close(fig)
+
+    if "rocket_insertion_scorecard" in figure_ids and "rocket" in truth_hist:
+        import matplotlib.pyplot as plt
+
+        target_alt_km, alt_tol_km, ecc_max = _rocket_target_altitude_cfg(cfg)
+        final_alt = _last_finite_value(_rocket_metric_array(rocket_metrics, "altitude_km", t_s.size))
+        final_apo = _last_finite_value(_rocket_metric_array(rocket_metrics, "apoapsis_alt_km", t_s.size))
+        final_peri = _last_finite_value(_rocket_metric_array(rocket_metrics, "periapsis_alt_km", t_s.size))
+        final_ecc = _last_finite_value(_rocket_metric_array(rocket_metrics, "eccentricity", t_s.size))
+        prop_frac = _last_finite_value(
+            _rocket_metric_array(rocket_metrics, "propellant_remaining_fraction", t_s.size)
+        )
+        max_q = _max_finite_value(_rocket_metric_array(rocket_metrics, "q_dyn_pa", t_s.size))
+        max_alpha = _max_abs_finite_value(_rocket_metric_array(rocket_metrics, "alpha_deg", t_s.size))
+        max_tvc = _max_finite_value(_rocket_metric_array(rocket_metrics, "tvc_gimbal_deg", t_s.size))
+        max_force = _max_finite_value(_rocket_metric_array(rocket_metrics, "aero_force_n", t_s.size))
+        metrics_rows = [
+            ("Final altitude", final_alt, "km", target_alt_km, alt_tol_km),
+            ("Final apoapsis", final_apo, "km", target_alt_km, alt_tol_km),
+            ("Final periapsis", final_peri, "km", target_alt_km, alt_tol_km),
+            ("Final eccentricity", final_ecc, "", ecc_max, None),
+            ("Propellant remaining", prop_frac, "fraction", None, None),
+            ("Max dynamic pressure", max_q, "Pa", None, None),
+            ("Max |alpha|", max_alpha, "deg", None, None),
+            ("Max TVC gimbal", max_tvc, "deg", float(dict(cfg.simulator.dynamics.rocket).get("tvc_max_gimbal_deg", np.nan)), None),
+            ("Max aero force", max_force, "N", None, None),
+        ]
+        fig, ax = plt.subplots(figsize=cap_figsize(10, 5.8))
+        ax.axis("off")
+        title = "Rocket Insertion Scorecard"
+        if np.isfinite(target_alt_km):
+            title += f" (target {target_alt_km:.0f} km)"
+        ax.set_title(title, fontsize=14, pad=16)
+        table_data = []
+        row_colors = []
+        for name, value, unit, target, tol in metrics_rows:
+            value_txt = "n/a" if not np.isfinite(value) else f"{value:.3g}"
+            if unit:
+                value_txt = f"{value_txt} {unit}"
+            target_txt = ""
+            passed = None
+            if target is not None and np.isfinite(float(target)):
+                if tol is not None and np.isfinite(float(tol)):
+                    target_txt = f"{float(target):.3g} +/- {float(tol):.3g}"
+                    passed = bool(np.isfinite(value) and abs(value - float(target)) <= float(tol))
+                elif name == "Final eccentricity":
+                    target_txt = f"<= {float(target):.3g}"
+                    passed = bool(np.isfinite(value) and value <= float(target))
+                elif "TVC" in name:
+                    target_txt = f"<= {float(target):.3g}"
+                    passed = bool(np.isfinite(value) and value <= float(target))
+            status = "OK" if passed is True else ("Check" if passed is False else "")
+            table_data.append([name, value_txt, target_txt, status])
+            row_colors.append("#eaf6ea" if passed is True else ("#fdeaea" if passed is False else "#f7f7f7"))
+        table = ax.table(
+            cellText=table_data,
+            colLabels=["Metric", "Value", "Target / Limit", "Status"],
+            loc="center",
+            cellLoc="left",
+            colLoc="left",
+        )
+        table.auto_set_font_size(False)
+        table.set_fontsize(9)
+        table.scale(1.0, 1.35)
+        for row_idx, color in enumerate(row_colors, start=1):
+            for col_idx in range(4):
+                table[(row_idx, col_idx)].set_facecolor(color)
+        for col_idx in range(4):
+            table[(0, col_idx)].set_facecolor("#d9e8f5")
+            table[(0, col_idx)].set_text_props(weight="bold")
+        fig.tight_layout()
+        p = outdir / "rocket_insertion_scorecard.png"
+        if mode in ("save", "both"):
+            fig.savefig(p, dpi=int(cfg.outputs.plots.get("dpi", 150)))
+            out["rocket_insertion_scorecard"] = str(p)
+        if mode in ("interactive", "both"):
+            plt.show(block=False)
+        else:
             plt.close(fig)
 
     satellite_dv_by_object = _compute_satellite_delta_v_remaining(

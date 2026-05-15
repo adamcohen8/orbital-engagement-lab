@@ -13,6 +13,8 @@ metadata:
   owner: "public"
   notes: "Run interactively with `python run_game.py examples/configs/public_manual_rpo_training.yaml`."
   game:
+    # Use direct RIC translation controls for the public game-style trainer.
+    control_mode: "ric_translation"
     # Key knob: player control authority.
     player_max_accel_km_s2: 1.8e-4
 
@@ -115,4 +117,3 @@ outputs:
 
 monte_carlo:
   enabled: false
-

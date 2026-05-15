@@ -10,6 +10,7 @@ import numpy as np
 from sim.control.attitude.pose_commands import PoseCommandGenerator
 from sim.control.orbit.integrated import IntegratedManeuverCommand, ManeuverStrategy, OrbitalAttitudeManeuverCoordinator
 from sim.core.models import Command, StateBelief, StateTruth
+from sim.dynamics.orbit.elements import coes_target_state_at_current_true_anomaly, orbital_element_feedback_accel
 from sim.dynamics.orbit.two_body import propagate_two_body_rk4
 from sim.rocket.models import RocketState, RocketVehicleConfig
 from sim.utils.frames import eci_relative_to_ric_rect, ric_dcm_ir_from_rv, ric_rect_state_to_eci, ric_rect_to_curv
@@ -225,6 +226,26 @@ def _relative_pd_accel_eci(
         a_cmd_ric *= amax / nrm
     c_ir = ric_dcm_ir_from_rv(target_state_eci[0], target_state_eci[1])
     return c_ir @ a_cmd_ric
+
+
+def _absolute_pd_accel_eci(
+    *,
+    truth: StateTruth,
+    desired_state_eci_6: np.ndarray,
+    kp_pos: float,
+    kd_vel: float,
+    max_accel_km_s2: float,
+) -> np.ndarray:
+    x_self = np.hstack((np.array(truth.position_eci_km, dtype=float), np.array(truth.velocity_eci_km_s, dtype=float)))
+    x_des = np.array(desired_state_eci_6, dtype=float).reshape(6)
+    a_cmd = float(kp_pos) * (x_des[:3] - x_self[:3]) + float(kd_vel) * (x_des[3:6] - x_self[3:6])
+    nrm = float(np.linalg.norm(a_cmd))
+    amax = float(max(max_accel_km_s2, 0.0))
+    if amax <= 0.0:
+        return np.zeros(3, dtype=float)
+    if nrm > amax:
+        a_cmd *= amax / nrm
+    return a_cmd
 
 
 def _resolve_desired_state_from_inputs(
@@ -457,6 +478,94 @@ class StationKeepMissionStrategy:
             "fallback_thrust_eci_km_s2": fallback_accel,
             "align_to_thrust": bool(self.align_to_thrust),
             "mission_mode": {"strategy": "stationkeep"},
+        }
+
+
+@dataclass
+class OrbitalElementsStationKeepMissionStrategy:
+    target_coes: dict[str, Any] = field(default_factory=dict)
+    kp_pos: float = 1.0e-6
+    kd_vel: float = 2.0e-3
+    max_accel_km_s2: float = 5.0e-6
+    align_to_thrust: bool = True
+
+    def update(
+        self,
+        *,
+        truth: StateTruth,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        current_state = np.hstack(
+            (np.array(truth.position_eci_km, dtype=float), np.array(truth.velocity_eci_km_s, dtype=float))
+        )
+        desired_state = coes_target_state_at_current_true_anomaly(dict(self.target_coes or {}), current_state)
+        fallback_accel = _absolute_pd_accel_eci(
+            truth=truth,
+            desired_state_eci_6=desired_state,
+            kp_pos=float(self.kp_pos),
+            kd_vel=float(self.kd_vel),
+            max_accel_km_s2=float(self.max_accel_km_s2),
+        )
+        return {
+            "strategy_name": "orbital_elements_stationkeep",
+            "desired_state_eci_6": desired_state,
+            "fallback_thrust_eci_km_s2": fallback_accel,
+            "align_to_thrust": bool(self.align_to_thrust),
+            "mission_mode": {
+                "strategy": "orbital_elements_stationkeep",
+                "phase_mode": "current_true_anomaly",
+            },
+        }
+
+
+@dataclass
+class OrbitalElementsTrackingMissionStrategy:
+    target_coes: dict[str, Any] = field(default_factory=dict)
+    controlled_elements: tuple[str, ...] | list[str] | str = ("a", "ecc", "inc", "raan", "argp")
+    energy_gain_per_s: float = 1.0e-3
+    eccentricity_gain_per_s: float = 5.0e-4
+    plane_gain_per_s: float = 5.0e-4
+    max_accel_km_s2: float = 5.0e-5
+    align_to_thrust: bool = True
+
+    def update(
+        self,
+        *,
+        truth: StateTruth,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        current_state = np.hstack(
+            (np.array(truth.position_eci_km, dtype=float), np.array(truth.velocity_eci_km_s, dtype=float))
+        )
+        result = orbital_element_feedback_accel(
+            current_state,
+            dict(self.target_coes or {}),
+            controlled_elements=self.controlled_elements,
+            energy_gain_per_s=float(self.energy_gain_per_s),
+            eccentricity_gain_per_s=float(self.eccentricity_gain_per_s),
+            plane_gain_per_s=float(self.plane_gain_per_s),
+            max_accel_km_s2=float(self.max_accel_km_s2),
+        )
+        coes = result.current_coes
+        controlled_elements = (
+            [self.controlled_elements] if isinstance(self.controlled_elements, str) else list(self.controlled_elements)
+        )
+        return {
+            "strategy_name": "orbital_elements_tracking",
+            "fallback_thrust_eci_km_s2": np.array(result.accel_eci_km_s2, dtype=float),
+            "align_to_thrust": bool(self.align_to_thrust),
+            "mission_mode": {
+                "strategy": "orbital_elements_tracking",
+                "controlled_elements": controlled_elements,
+                "current_a_km": float(coes.a_km),
+                "current_ecc": float(coes.ecc),
+                "current_inc_deg": float(coes.inc_deg),
+                "current_raan_deg": float(coes.raan_deg),
+                "current_argp_deg": float(coes.argp_deg),
+                "energy_error_km2_s2": float(result.energy_error_km2_s2),
+                "eccentricity_vector_error_norm": float(np.linalg.norm(result.eccentricity_vector_error)),
+                "hhat_error_norm": float(np.linalg.norm(result.hhat_error)),
+            },
         }
 
 

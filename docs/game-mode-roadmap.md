@@ -169,6 +169,8 @@ an approach became unstable.
   config path.
 - Done: scenario reset control.
 - Done: pause, single-step, and runtime speed controls.
+- Done: level-selector video toggle with per-attempt MP4 recording saved on
+  pass/fail and discarded on restart or early quit.
 - Later: add replay controls.
 - Export debrief artifacts.
 - Provide classroom guidance.
@@ -197,7 +199,7 @@ Current implementation:
   orbit, medium shows half an orbit, hard shows a quarter orbit, and extreme
   hides the projection.
 - Runtime speed is adjustable in-game with Up/Down across 1x, 2x, 5x, 10x,
-  25x, and 50x.
+  25x, 50x, and 100x.
 - Live mission metrics show time, delta-v, NMT element errors, point-goal
   error, keepout margin, and relative-speed thresholds as appropriate.
 - Level pass/fail freezes the simulation and displays a mission banner.

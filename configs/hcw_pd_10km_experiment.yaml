@@ -226,6 +226,7 @@ outputs:
     reference_object_id: target
     figure_ids:
       - attitude
+      - attitude_control_summary
       - quaternion_error
       - control_thrust_ric
       - trajectory_ric_rect_2d_multi

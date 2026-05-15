@@ -125,9 +125,11 @@ right for a review or paper.
 
 ## Single-Run Example: Ground-Station Access
 
-When a scenario defines `ground_stations`, the full run log contains
-station/object access histories. This example plots access, elevation, and
-range for one station/object pair:
+When a scenario defines `ground_stations`, the built-in `ground_station_access`
+figure plots access, elevation, and range for configured station/object pairs.
+The full run log also contains the raw histories. Use the custom-analysis path
+when you need a station-specific, publication-specific, or heavily customized
+variant:
 
 ```python
 import json

@@ -1,9 +1,16 @@
 scenario_name: plotting_rendezvous_demo
 scenario_description: Public 6000-second rendezvous demo that generates dashboard,
-  control, sensor, estimation, and ground-track plots.
+  control, sensor, estimation, ground-track, access, and orbital-element plots.
 metadata:
   owner: public
   notes: Deterministic plotting demo for README and docs gallery artifacts.
+ground_stations:
+- id: colorado_springs
+  lat_deg: 38.803
+  lon_deg: -104.526
+  alt_km: 1.9
+  min_elevation_deg: 10.0
+  max_range_km: 2500.0
 objects:
   rocket:
     enabled: false
@@ -140,9 +147,19 @@ outputs:
     preset:
     - rendezvous
     - estimation
+    - access
     reference_object_id: target
+    orbital_elements_object_id: target
     figure_ids:
     - ground_track_multi
+    - orbital_element_a
+    - orbital_element_ecc
+    - orbital_element_inc
+    - orbital_element_raan
+    - orbital_element_argp
+    - orbital_element_true_anomaly
+    - orbital_elements_summary
+    - orbital_elements_angles
     dpi: 140
   animations:
     enabled: false

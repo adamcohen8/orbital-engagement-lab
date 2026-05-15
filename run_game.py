@@ -50,6 +50,7 @@ def main() -> None:
             realtime=not bool(args.fast),
             speed_multiple=float(args.speed_multiple),
             difficulty_override=selection.difficulty,
+            record_video=selection.record_video,
         )
         if result.level_passed:
             record_game_progress(result.config_path, result.difficulty)

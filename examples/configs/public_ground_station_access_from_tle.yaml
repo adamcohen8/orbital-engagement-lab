@@ -81,11 +81,11 @@ outputs:
     save_full_log: true
   plots:
     enabled: true
-    figure_ids: ["ground_track", "sensor_access"]
+    draw_earth_map: true
+    figure_ids: ["ground_track", "ground_station_access"]
   animations:
     enabled: false
     types: []
 
 monte_carlo:
   enabled: false
-

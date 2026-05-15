@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
+import pytest
 import yaml
 
+import sim.game.runner as game_runner
 from sim.api import SimulationConfig, SimulationSession
 from sim.core.models import StateBelief, StateTruth
 from sim.game.defensive_target import DefensiveTargetIntentProvider
@@ -16,6 +19,7 @@ from sim.game.launcher import (
     _game_progress_path,
     _option_index_at_pos,
     _progress_stars,
+    _record_video_at_pos,
     _scroll_for_selection,
     clear_game_progress,
     discover_game_scenarios,
@@ -23,6 +27,7 @@ from sim.game.launcher import (
 )
 from sim.game.manual import KeyboardCommandState, ManualGameCommandProvider
 from sim.game.pygame_dashboard import PygameRPODashboard, _cw_coast_state
+from sim.game.recording import GameFrameRecorder, game_recording_path
 from sim.game.runner import (
     _adjust_speed_multiple,
     _coast_prediction_orbit_fraction,
@@ -33,6 +38,7 @@ from sim.game.runner import (
     _game_ric_reference_object_id,
     _mission_metrics,
     _poll_pygame_input,
+    _realtime_steps_due,
     _score_debrief_lines,
     _start_game_attempt,
     _training_briefing_lines,
@@ -46,7 +52,7 @@ from sim.game.training import (
     nmt_position_error_km,
     nmt_velocity_error_km_s,
 )
-from sim.utils.frames import ric_rect_state_to_eci
+from sim.utils.frames import ric_dcm_ir_from_rv, ric_rect_state_to_eci
 
 
 def _knowledge_from_state6(state6: np.ndarray) -> StateBelief:
@@ -115,6 +121,12 @@ def test_non_training_game_configs_default_to_attitude_thrust(tmp_path: Path) ->
     path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
 
     assert _game_control_mode(SimulationConfig.from_yaml(path)) == "attitude_thrust"
+
+
+def test_public_manual_rpo_example_uses_ric_translation_controls() -> None:
+    path = Path(__file__).resolve().parents[2] / "examples" / "configs" / "public_manual_rpo_training.yaml"
+
+    assert _game_control_mode(SimulationConfig.from_yaml(path)) == "ric_translation"
 
 
 def test_dashboard_object_ids_follow_training_defaults() -> None:
@@ -226,6 +238,118 @@ def test_clear_progress_button_hit_test() -> None:
     assert _clear_progress_at_pos((800, 44)) is False
 
 
+def test_record_video_button_hit_test() -> None:
+    assert _record_video_at_pos((700, 44)) is True
+    assert _record_video_at_pos((650, 44)) is False
+
+
+def test_game_recording_path_uses_scenario_difficulty_and_attempt(tmp_path: Path) -> None:
+    path = game_recording_path(
+        scenario_name="RPO 06 Defensive Target Demo",
+        difficulty="Hard",
+        attempt_index=3,
+        output_dir=tmp_path,
+        timestamp=datetime(2026, 5, 14, 12, 30, 45),
+    )
+
+    assert path == tmp_path / "rpo_06_defensive_target_demo_hard_20260514_123045_attempt03.mp4"
+
+
+def test_game_frame_recorder_finishes_or_discards_with_fake_writer(tmp_path: Path) -> None:
+    class FakeWriter:
+        def __init__(self, path: Path):
+            self.path = path
+            self.frames: list[np.ndarray] = []
+            self.closed = False
+
+        def append_data(self, frame: np.ndarray) -> None:
+            self.frames.append(np.array(frame, dtype=np.uint8))
+
+        def close(self) -> None:
+            self.closed = True
+            self.path.write_bytes(b"fake-mp4")
+
+    writers: list[FakeWriter] = []
+
+    def factory(path: Path, fps: float) -> FakeWriter:
+        assert fps == 12.0
+        writer = FakeWriter(path)
+        writers.append(writer)
+        return writer
+
+    path = tmp_path / "attempt.mp4"
+    recorder = GameFrameRecorder.start(path, fps=12.0, writer_factory=factory)
+    recorder.capture_frame(np.zeros((2, 3, 3), dtype=np.uint8))
+
+    assert recorder.finish() == path
+    assert recorder.saved is True
+    assert recorder.frames_written == 1
+    assert writers[-1].closed is True
+    assert path.exists()
+
+    recorder = GameFrameRecorder.start(path, fps=12.0, writer_factory=factory)
+    recorder.capture_frame(np.zeros((2, 3, 4), dtype=np.uint8))
+    recorder.discard()
+
+    assert recorder.saved is False
+    assert writers[-1].closed is True
+    assert not path.exists()
+
+
+def test_game_recording_defaults_to_dashboard_fps() -> None:
+    assert game_runner.run_game_mode.__kwdefaults__["recording_fps"] == game_runner.DASHBOARD_FPS
+
+
+def test_run_game_mode_discards_recorder_when_initial_capture_fails(tmp_path: Path, monkeypatch) -> None:
+    import sim.game.pygame_dashboard as dashboard_module
+
+    class FakeDashboard:
+        instances: list[FakeDashboard] = []
+
+        def __init__(self, *args, **kwargs):
+            self.screen = object()
+            self.closed = False
+            FakeDashboard.instances.append(self)
+
+        def push_snapshot(self, snapshot) -> None:
+            pass
+
+        def draw(self, **kwargs) -> None:
+            pass
+
+        def close(self) -> None:
+            self.closed = True
+
+    class FakeRecorder:
+        saved = False
+
+        def __init__(self) -> None:
+            self.discarded = False
+
+        def discard(self) -> None:
+            self.discarded = True
+
+    recorder = FakeRecorder()
+    cfg = _game_config(tmp_path)
+    path = tmp_path / "game.yaml"
+    with path.open("w", encoding="utf-8") as f:
+        yaml.safe_dump(cfg, f)
+
+    monkeypatch.setattr(dashboard_module, "PygameRPODashboard", FakeDashboard)
+    monkeypatch.setattr(game_runner, "_start_game_recorder", lambda **kwargs: recorder)
+    monkeypatch.setattr(
+        game_runner,
+        "_capture_recording_frame",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("capture failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="capture failed"):
+        game_runner.run_game_mode(path, record_video=True)
+
+    assert recorder.discarded is True
+    assert FakeDashboard.instances[-1].closed is True
+
+
 def test_defensive_target_provider_pulses_on_unsafe_closure() -> None:
     provider = DefensiveTargetIntentProvider(
         trigger_range_km=1.2,
@@ -324,6 +448,31 @@ def test_level_six_uses_target_reference_for_game_ric_frame() -> None:
     assert snap is not None
     assert "target_reference" in snap.truth
     assert snap.truth["target_reference"].shape[0] >= 6
+
+
+def test_level_six_ric_translation_commands_use_target_reference_frame() -> None:
+    config_path = (
+        Path(__file__).resolve().parents[1] / "game" / "configs" / "game_training_rpo_06_defensive_target_demo.yaml"
+    )
+    config = SimulationConfig.from_yaml(config_path)
+    training_cfg = RPOTrainingConfig.from_metadata(dict(config.scenario.metadata or {}))
+    state = KeyboardCommandState(yaw=1.0)
+
+    session, _, snap0 = _start_game_attempt(
+        config,
+        command_state=state,
+        training_cfg=training_cfg,
+        controlled_object_id="chaser",
+        attitude_rate_deg_s=45.0,
+        control_mode="ric_translation",
+        ric_reference_object_id="target_reference",
+    )
+    snap1 = session.step()
+
+    ref_state = np.array(snap0.truth["target_reference"][:6], dtype=float)
+    c_ir = ric_dcm_ir_from_rv(ref_state[:3], ref_state[3:6])
+    expected = c_ir @ np.array([0.0, 1.5e-5, 0.0], dtype=float)
+    assert np.allclose(snap1.applied_thrust["chaser"], expected, atol=1e-12)
 
 
 def test_level_six_restart_gets_fresh_defensive_target_provider() -> None:
@@ -832,8 +981,28 @@ def test_speed_multiple_adjustment_uses_allowed_options() -> None:
     assert _adjust_speed_multiple(2.0, 1) == 5.0
     assert _adjust_speed_multiple(10.0, 1) == 25.0
     assert _adjust_speed_multiple(25.0, 1) == 50.0
-    assert _adjust_speed_multiple(50.0, 1) == 50.0
+    assert _adjust_speed_multiple(50.0, 1) == 100.0
+    assert _adjust_speed_multiple(100.0, 1) == 100.0
     assert _adjust_speed_multiple(50.0, -2) == 10.0
+
+
+def test_realtime_steps_due_supports_multi_step_catchup_for_100x() -> None:
+    steps, next_wall = _realtime_steps_due(now_s=10.016, last_step_wall_s=10.0, wall_step_s=0.01)
+
+    assert steps == 1
+    assert np.isclose(next_wall, 10.01)
+
+    steps, next_wall = _realtime_steps_due(now_s=10.033, last_step_wall_s=10.01, wall_step_s=0.01)
+
+    assert steps == 2
+    assert np.isclose(next_wall, 10.03)
+
+
+def test_realtime_steps_due_caps_stall_catchup() -> None:
+    steps, next_wall = _realtime_steps_due(now_s=20.0, last_step_wall_s=10.0, wall_step_s=0.01, max_steps=12)
+
+    assert steps == 12
+    assert next_wall == 20.0
 
 
 def test_cw_coast_state_zero_time_returns_initial_state() -> None:

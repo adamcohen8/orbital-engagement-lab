@@ -463,7 +463,7 @@ class _SingleRunEngine:
                 truth=decision_truth,
                 belief=agent.belief,
                 own_knowledge=(agent.knowledge_base.snapshot() if agent.knowledge_base is not None else {}),
-                world_truth={},
+                world_truth=ctx.internal_world_truth,
                 env=ctx.env,
                 t_s=ctx.t_s,
                 dt_s=ctx.dt_s,
@@ -542,6 +542,8 @@ class _SingleRunEngine:
             for aid, agent in self.agents.items()
             if agent.active
         }
+        if self.target_reference_truth is not None:
+            world_truth_start["target_reference"] = self.target_reference_truth.copy()
         world_truth_live = dict(world_truth_start)
 
         if self.target_reference_truth is not None and self.target_reference_dynamics is not None:
@@ -555,6 +557,7 @@ class _SingleRunEngine:
             assert self.target_reference_orbit_hist is not None
             self.target_reference_orbit_hist[k + 1, 0:3] = self.target_reference_truth.position_eci_km
             self.target_reference_orbit_hist[k + 1, 3:6] = self.target_reference_truth.velocity_eci_km_s
+            world_truth_live["target_reference"] = self.target_reference_truth.copy()
 
         for aid, agent in self.agents.items():
             if not agent.active:

@@ -67,5 +67,5 @@ def test_machine_learning_lazy_exports_report_missing_ml_stack() -> None:
         return real_import_module(name, package)
 
     with patch.object(machine_learning.importlib, "import_module", side_effect=_fake_import_module):
-        with pytest.raises(ModuleNotFoundError, match="requirements-ml.txt"):
+        with pytest.raises(ModuleNotFoundError, match="requirements/ml.txt"):
             machine_learning.__getattr__("PPOConfig")

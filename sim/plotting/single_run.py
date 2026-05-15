@@ -6,14 +6,25 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 
-from sim.dynamics.orbit.environment import EARTH_RADIUS_KM
+from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2, EARTH_RADIUS_KM
 from sim.utils.figure_size import cap_figsize
 from sim.utils.frames import ric_dcm_ir_from_rv
 from sim.utils.ground_track import ground_track_from_eci_history, split_ground_track_dateline
 from sim.utils.plotting import _draw_earth_sphere_3d
+from sim.utils.plotting_capabilities import _setup_ground_track_axes
+from sim.utils.quaternion import quaternion_to_dcm_bn
 
 ArrayMap = dict[str, np.ndarray]
 NestedArrayMap = dict[str, dict[str, np.ndarray]]
+
+ORBITAL_ELEMENT_SPECS: dict[str, tuple[str, str]] = {
+    "a": ("Semi-Major Axis", "km"),
+    "ecc": ("Eccentricity", ""),
+    "inc": ("Inclination", "deg"),
+    "raan": ("RAAN", "deg"),
+    "argp": ("Argument of Perigee", "deg"),
+    "true_anomaly": ("True Anomaly", "deg"),
+}
 
 
 def _as_array(value: Any, *, cols: int | None = None) -> np.ndarray:
@@ -196,6 +207,169 @@ def _cumulative_delta_v_m_s(t_s: np.ndarray, accel_km_s2: np.ndarray) -> np.ndar
     dt = np.diff(t_s[: mag.size], prepend=t_s[0] if t_s.size else 0.0)
     dt = np.clip(dt, 0.0, None)
     return np.cumsum(mag * dt) * 1000.0
+
+
+def _quat_error_angle_deg(q_des: np.ndarray, q_cur: np.ndarray) -> float:
+    qd = np.array(q_des, dtype=float).reshape(-1)
+    qc = np.array(q_cur, dtype=float).reshape(-1)
+    if qd.size != 4 or qc.size != 4:
+        return float("nan")
+    nd = float(np.linalg.norm(qd))
+    nc = float(np.linalg.norm(qc))
+    if nd <= 0.0 or nc <= 0.0:
+        return float("nan")
+    qd = qd / nd
+    qc = qc / nc
+    dot = abs(float(np.dot(qd, qc)))
+    dot = float(np.clip(dot, -1.0, 1.0))
+    return float(np.degrees(2.0 * np.arccos(dot)))
+
+
+def _quat_error_series_deg(
+    *,
+    truth_hist: np.ndarray,
+    desired_attitude_hist: np.ndarray | None,
+    n_s: int,
+) -> np.ndarray:
+    err_deg = np.full(n_s, np.nan, dtype=float)
+    if desired_attitude_hist is None or desired_attitude_hist.size == 0:
+        return err_deg
+    qd = np.array(desired_attitude_hist[:n_s, :], dtype=float)
+    qc = np.array(truth_hist[:n_s, 6:10], dtype=float)
+    for k in range(1, n_s):
+        if not np.all(np.isfinite(qd[k, :])) and np.all(np.isfinite(qd[k - 1, :])):
+            qd[k, :] = qd[k - 1, :]
+    for k in range(n_s):
+        if not (np.all(np.isfinite(qd[k, :])) and np.all(np.isfinite(qc[k, :]))):
+            continue
+        err_deg[k] = _quat_error_angle_deg(qd[k, :], qc[k, :])
+    return err_deg
+
+
+def _thrust_alignment_error_deg_series(
+    *,
+    truth_hist: np.ndarray,
+    thrust_hist: np.ndarray,
+    thrust_axis_body: np.ndarray,
+    n_s: int,
+) -> np.ndarray:
+    axis_body = np.array(thrust_axis_body, dtype=float).reshape(-1)
+    if axis_body.size != 3:
+        axis_body = np.array([1.0, 0.0, 0.0], dtype=float)
+    norm_axis = float(np.linalg.norm(axis_body))
+    if norm_axis <= 0.0:
+        axis_body = np.array([1.0, 0.0, 0.0], dtype=float)
+    else:
+        axis_body = axis_body / norm_axis
+    err_deg = np.full(n_s, np.nan, dtype=float)
+    for k in range(n_s):
+        a_cmd = np.array(thrust_hist[k, :3], dtype=float)
+        a_norm = float(np.linalg.norm(a_cmd))
+        if a_norm <= 1e-15 or not np.all(np.isfinite(a_cmd)):
+            continue
+        q_bn = np.array(truth_hist[k, 6:10], dtype=float)
+        if not np.all(np.isfinite(q_bn)):
+            continue
+        c_bn = quaternion_to_dcm_bn(q_bn)
+        thrust_axis_eci = c_bn.T @ axis_body
+        burn_dir_eci = -a_cmd / a_norm
+        cosang = float(np.clip(np.dot(thrust_axis_eci, burn_dir_eci), -1.0, 1.0))
+        err_deg[k] = float(np.degrees(np.arccos(cosang)))
+    return err_deg
+
+
+def _safe_angle_deg(cos_value: float, *, flip: bool = False) -> float:
+    angle = float(np.degrees(np.arccos(float(np.clip(cos_value, -1.0, 1.0)))))
+    return 360.0 - angle if flip and angle > 0.0 else angle
+
+
+def _classical_orbital_elements_series(
+    truth_hist: np.ndarray,
+    *,
+    mu_km3_s2: float = EARTH_MU_KM3_S2,
+) -> dict[str, np.ndarray]:
+    arr = np.array(truth_hist, dtype=float)
+    n = arr.shape[0] if arr.ndim == 2 else 0
+    out = {key: np.full(n, np.nan, dtype=float) for key in ORBITAL_ELEMENT_SPECS}
+    if n == 0 or arr.shape[1] < 6 or not np.isfinite(mu_km3_s2) or mu_km3_s2 <= 0.0:
+        return out
+
+    h_tol = 1e-10
+    n_tol = 1e-10
+    e_tol = 1e-8
+    k_hat = np.array([0.0, 0.0, 1.0], dtype=float)
+    for idx in range(n):
+        r_vec = np.array(arr[idx, 0:3], dtype=float)
+        v_vec = np.array(arr[idx, 3:6], dtype=float)
+        if not (np.all(np.isfinite(r_vec)) and np.all(np.isfinite(v_vec))):
+            continue
+        r = float(np.linalg.norm(r_vec))
+        if r <= 0.0:
+            continue
+        h_vec = np.cross(r_vec, v_vec)
+        h = float(np.linalg.norm(h_vec))
+        if h <= h_tol:
+            continue
+        v2 = float(np.dot(v_vec, v_vec))
+        eps = 0.5 * v2 - mu_km3_s2 / r
+        if abs(eps) > 1e-14:
+            out["a"][idx] = float(-mu_km3_s2 / (2.0 * eps))
+        e_vec = np.cross(v_vec, h_vec) / mu_km3_s2 - r_vec / r
+        ecc = float(np.linalg.norm(e_vec))
+        out["ecc"][idx] = ecc
+        out["inc"][idx] = _safe_angle_deg(h_vec[2] / h)
+
+        n_vec = np.cross(k_hat, h_vec)
+        n_norm = float(np.linalg.norm(n_vec))
+        if n_norm > n_tol:
+            out["raan"][idx] = _safe_angle_deg(n_vec[0] / n_norm, flip=n_vec[1] < 0.0)
+        if n_norm > n_tol and ecc > e_tol:
+            out["argp"][idx] = _safe_angle_deg(
+                float(np.dot(n_vec, e_vec)) / (n_norm * ecc),
+                flip=e_vec[2] < 0.0,
+            )
+        if ecc > e_tol:
+            out["true_anomaly"][idx] = _safe_angle_deg(
+                float(np.dot(e_vec, r_vec)) / (ecc * r),
+                flip=float(np.dot(r_vec, v_vec)) < 0.0,
+            )
+    return out
+
+
+def _orbital_element_object_ids(truth_by_object: ArrayMap, object_id: str | None) -> list[str]:
+    if object_id:
+        return [object_id] if object_id in truth_by_object else []
+    return sorted(truth_by_object.keys())
+
+
+def _plot_element_on_axis(
+    ax: plt.Axes,
+    *,
+    t_s: np.ndarray,
+    truth_by_object: ArrayMap,
+    element_id: str,
+    object_id: str | None,
+    label_prefix: bool = False,
+) -> bool:
+    plotted = False
+    for oid in _orbital_element_object_ids(truth_by_object, object_id):
+        hist = truth_by_object.get(oid)
+        if hist is None:
+            continue
+        series = _classical_orbital_elements_series(hist).get(element_id)
+        if series is None:
+            continue
+        n = min(t_s.size, series.size)
+        if n <= 0:
+            continue
+        y = np.array(series[:n], dtype=float)
+        finite = np.isfinite(y)
+        if not np.any(finite):
+            continue
+        label = f"{oid} {element_id}" if label_prefix else oid
+        ax.plot(t_s[:n], y, linewidth=1.2, label=label)
+        plotted = True
+    return plotted
 
 
 def plot_run_dashboard(
@@ -609,6 +783,7 @@ def plot_ground_track_from_payload(
     truth_by_object: ArrayMap | None = None,
     jd_utc_start: float | None = None,
     object_id: str | None = None,
+    draw_earth_map: bool = False,
     out_path: str | Path | None = None,
     show: bool = False,
     close: bool = False,
@@ -619,13 +794,7 @@ def plot_ground_track_from_payload(
     t = np.array([] if t_s is None else t_s, dtype=float).reshape(-1)
     truth = dict(truth_by_object or {})
     ids = [object_id] if object_id and object_id in truth else sorted(truth.keys())
-    fig, ax = plt.subplots(figsize=cap_figsize(11, 5))
-    ax.set_xlim(-180.0, 180.0)
-    ax.set_ylim(-90.0, 90.0)
-    ax.set_xlabel("Longitude (deg)")
-    ax.set_ylabel("Latitude (deg)")
-    ax.set_title("Ground Track")
-    ax.grid(True, alpha=0.3)
+    fig, ax, is_cartopy = _setup_ground_track_axes(title="Ground Track", draw_earth_map=bool(draw_earth_map))
     for oid in ids:
         hist = truth.get(oid)
         if hist is None or hist.shape[1] < 3:
@@ -633,14 +802,346 @@ def plot_ground_track_from_payload(
         n = min(hist.shape[0], t.size)
         lat, lon, _ = ground_track_from_eci_history(hist[:n, :3], t_s=t[:n], jd_utc_start=jd_utc_start)
         lon_p, lat_p = split_ground_track_dateline(lon_deg=lon, lat_deg=lat, jump_threshold_deg=180.0)
-        ax.plot(lon_p, lat_p, label=oid)
+        if is_cartopy:
+            import cartopy.crs as ccrs  # type: ignore
+
+            ax.plot(lon_p, lat_p, linewidth=1.4, label=oid, transform=ccrs.PlateCarree(), zorder=3)
+        else:
+            ax.plot(lon_p, lat_p, linewidth=1.4, label=oid)
         finite = np.isfinite(lon) & np.isfinite(lat)
         idx = np.where(finite)[0]
         if idx.size:
-            ax.scatter([lon[idx[0]]], [lat[idx[0]]], color="green", s=18)
-            ax.scatter([lon[idx[-1]]], [lat[idx[-1]]], color="red", s=18)
+            if is_cartopy:
+                ax.scatter(
+                    [lon[idx[0]]],
+                    [lat[idx[0]]],
+                    color="green",
+                    s=18,
+                    transform=ccrs.PlateCarree(),
+                    zorder=4,
+                )
+                ax.scatter(
+                    [lon[idx[-1]]],
+                    [lat[idx[-1]]],
+                    color="red",
+                    s=18,
+                    transform=ccrs.PlateCarree(),
+                    zorder=4,
+                )
+            else:
+                ax.scatter([lon[idx[0]]], [lat[idx[0]]], color="green", s=18)
+                ax.scatter([lon[idx[-1]]], [lat[idx[-1]]], color="red", s=18)
     if ids:
         ax.legend(loc="best")
+    fig.tight_layout()
+    _save_show_close(fig, out_path=out_path, show=show, close=close, dpi=dpi)
+    return fig
+
+
+def plot_orbital_element(
+    payload: dict[str, Any] | None = None,
+    *,
+    element_id: str,
+    t_s: np.ndarray | None = None,
+    truth_by_object: ArrayMap | None = None,
+    object_id: str | None = None,
+    out_path: str | Path | None = None,
+    show: bool = False,
+    close: bool = False,
+    dpi: int = 150,
+) -> plt.Figure:
+    if payload is not None:
+        t_s, truth_by_object, _, _, _, _ = _payload_arrays(payload)
+    element_key = str(element_id or "").strip()
+    if element_key not in ORBITAL_ELEMENT_SPECS:
+        valid = ", ".join(sorted(ORBITAL_ELEMENT_SPECS))
+        raise ValueError(f"Unknown orbital element '{element_id}'. Valid elements: {valid}")
+    t = np.array([] if t_s is None else t_s, dtype=float).reshape(-1)
+    truth = dict(truth_by_object or {})
+    title, unit = ORBITAL_ELEMENT_SPECS[element_key]
+
+    fig, ax = plt.subplots(figsize=cap_figsize(10, 5))
+    plotted = _plot_element_on_axis(
+        ax,
+        t_s=t,
+        truth_by_object=truth,
+        element_id=element_key,
+        object_id=object_id,
+    )
+    if not plotted:
+        ax.text(0.5, 0.5, "No valid COE samples available", ha="center", va="center", transform=ax.transAxes)
+    ax.set_title(f"{title} Over Time")
+    ax.set_xlabel("time (s)")
+    ax.set_ylabel(title if not unit else f"{title} ({unit})")
+    ax.grid(True, alpha=0.3)
+    if plotted:
+        ax.legend(loc="best")
+    fig.tight_layout()
+    _save_show_close(fig, out_path=out_path, show=show, close=close, dpi=dpi)
+    return fig
+
+
+def plot_orbital_elements_summary(
+    payload: dict[str, Any] | None = None,
+    *,
+    t_s: np.ndarray | None = None,
+    truth_by_object: ArrayMap | None = None,
+    object_id: str | None = None,
+    out_path: str | Path | None = None,
+    show: bool = False,
+    close: bool = False,
+    dpi: int = 150,
+) -> plt.Figure:
+    if payload is not None:
+        t_s, truth_by_object, _, _, _, _ = _payload_arrays(payload)
+    t = np.array([] if t_s is None else t_s, dtype=float).reshape(-1)
+    truth = dict(truth_by_object or {})
+
+    fig, axes = plt.subplots(3, 2, figsize=cap_figsize(13, 10), sharex=True)
+    for ax, element_key in zip(axes.ravel(), ORBITAL_ELEMENT_SPECS.keys()):
+        title, unit = ORBITAL_ELEMENT_SPECS[element_key]
+        plotted = _plot_element_on_axis(
+            ax,
+            t_s=t,
+            truth_by_object=truth,
+            element_id=element_key,
+            object_id=object_id,
+        )
+        if not plotted:
+            ax.text(0.5, 0.5, "No valid samples", ha="center", va="center", transform=ax.transAxes)
+        ax.set_title(title)
+        ax.set_ylabel(unit or title)
+        ax.grid(True, alpha=0.3)
+        if plotted:
+            ax.legend(loc="best")
+    axes[-1, 0].set_xlabel("time (s)")
+    axes[-1, 1].set_xlabel("time (s)")
+    fig.suptitle("Classical Orbital Elements")
+    fig.tight_layout()
+    _save_show_close(fig, out_path=out_path, show=show, close=close, dpi=dpi)
+    return fig
+
+
+def plot_orbital_elements_angles(
+    payload: dict[str, Any] | None = None,
+    *,
+    t_s: np.ndarray | None = None,
+    truth_by_object: ArrayMap | None = None,
+    object_id: str | None = None,
+    out_path: str | Path | None = None,
+    show: bool = False,
+    close: bool = False,
+    dpi: int = 150,
+) -> plt.Figure:
+    if payload is not None:
+        t_s, truth_by_object, _, _, _, _ = _payload_arrays(payload)
+    t = np.array([] if t_s is None else t_s, dtype=float).reshape(-1)
+    truth = dict(truth_by_object or {})
+    angle_ids = ("inc", "raan", "argp", "true_anomaly")
+
+    fig, ax = plt.subplots(figsize=cap_figsize(11, 5.5))
+    plotted = False
+    for element_key in angle_ids:
+        plotted = (
+            _plot_element_on_axis(
+                ax,
+                t_s=t,
+                truth_by_object=truth,
+                element_id=element_key,
+                object_id=object_id,
+                label_prefix=True,
+            )
+            or plotted
+        )
+    if not plotted:
+        ax.text(0.5, 0.5, "No valid angular COE samples available", ha="center", va="center", transform=ax.transAxes)
+    ax.set_title("Orbital Element Angles")
+    ax.set_xlabel("time (s)")
+    ax.set_ylabel("deg")
+    ax.grid(True, alpha=0.3)
+    if plotted:
+        ax.legend(loc="best", ncol=2)
+    fig.tight_layout()
+    _save_show_close(fig, out_path=out_path, show=show, close=close, dpi=dpi)
+    return fig
+
+
+def plot_ground_station_access(
+    payload: dict[str, Any] | None = None,
+    *,
+    t_s: np.ndarray | None = None,
+    ground_station_access: dict[str, Any] | None = None,
+    out_path: str | Path | None = None,
+    show: bool = False,
+    close: bool = False,
+    dpi: int = 150,
+) -> plt.Figure:
+    if payload is not None:
+        t_s = np.array(payload.get("time_s", []), dtype=float).reshape(-1)
+        ground_station_access = dict(payload.get("ground_station_access", {}) or {})
+    t = np.array([] if t_s is None else t_s, dtype=float).reshape(-1)
+    access_root = dict(ground_station_access or {})
+
+    pairs: list[tuple[str, str, dict[str, Any]]] = []
+    for station_id, station_payload in sorted(access_root.items()):
+        targets = dict(dict(station_payload or {}).get("targets", {}) or {})
+        for target_id, target_payload in sorted(targets.items()):
+            pairs.append((str(station_id), str(target_id), dict(target_payload or {})))
+
+    fig, axes = plt.subplots(3, 1, figsize=cap_figsize(12, 9), sharex=True)
+    if not pairs or t.size == 0:
+        for ax in axes:
+            ax.text(
+                0.5,
+                0.5,
+                "No ground-station access history available",
+                ha="center",
+                va="center",
+                transform=ax.transAxes,
+            )
+        fig.tight_layout()
+        _save_show_close(fig, out_path=out_path, show=show, close=close, dpi=dpi)
+        return fig
+
+    y_ticks = []
+    y_labels = []
+    for row, (station_id, target_id, target_payload) in enumerate(pairs):
+        label = f"{station_id}->{target_id}"
+        access = np.array(target_payload.get("access", []), dtype=float).reshape(-1)
+        los = np.array(target_payload.get("line_of_sight", []), dtype=float).reshape(-1)
+        elev_values = list(target_payload.get("elevation_deg", []) or [])
+        range_values = list(target_payload.get("range_km", []) or [])
+        elev = np.array([float("nan") if value is None else float(value) for value in elev_values], dtype=float)
+        rng = np.array([float("nan") if value is None else float(value) for value in range_values], dtype=float)
+        n_access = min(t.size, access.size)
+        if n_access:
+            axes[0].step(t[:n_access], access[:n_access] + row * 1.3, where="post", linewidth=1.5)
+        n_los = min(t.size, los.size)
+        if n_los:
+            axes[0].step(
+                t[:n_los],
+                0.35 * los[:n_los] + row * 1.3,
+                where="post",
+                linewidth=0.9,
+                linestyle=":",
+                alpha=0.65,
+            )
+        n_elev = min(t.size, elev.size)
+        if n_elev:
+            axes[1].plot(t[:n_elev], elev[:n_elev], linewidth=1.2, label=label)
+        n_rng = min(t.size, rng.size)
+        if n_rng:
+            axes[2].plot(t[:n_rng], rng[:n_rng], linewidth=1.2, label=label)
+        y_ticks.append(row * 1.3 + 0.5)
+        y_labels.append(label)
+
+    axes[0].set_title("Ground-Station Access Timeline")
+    axes[0].set_ylabel("access")
+    axes[0].set_yticks(y_ticks)
+    axes[0].set_yticklabels(y_labels)
+    axes[0].set_ylim(-0.2, max(y_ticks) + 0.95)
+    axes[0].grid(True, alpha=0.3)
+
+    axes[1].set_title("Elevation")
+    axes[1].set_ylabel("deg")
+    axes[1].grid(True, alpha=0.3)
+    if axes[1].lines:
+        axes[1].legend(loc="best")
+
+    axes[2].set_title("Slant Range")
+    axes[2].set_ylabel("km")
+    axes[2].set_xlabel("time (s)")
+    axes[2].grid(True, alpha=0.3)
+    if axes[2].lines:
+        axes[2].legend(loc="best")
+
+    fig.tight_layout()
+    _save_show_close(fig, out_path=out_path, show=show, close=close, dpi=dpi)
+    return fig
+
+
+def plot_attitude_control_summary(
+    payload: dict[str, Any] | None = None,
+    *,
+    t_s: np.ndarray | None = None,
+    truth_by_object: ArrayMap | None = None,
+    thrust_by_object: ArrayMap | None = None,
+    desired_attitude_by_object: ArrayMap | None = None,
+    thrust_axis_body_by_object: dict[str, np.ndarray] | None = None,
+    object_id: str | None = None,
+    out_path: str | Path | None = None,
+    show: bool = False,
+    close: bool = False,
+    dpi: int = 150,
+) -> plt.Figure:
+    if payload is not None:
+        t_s, truth_by_object, thrust_by_object, _, _, _ = _payload_arrays(payload)
+        desired_attitude_by_object = _array_map(payload.get("desired_attitude_by_object", {}))
+    t = np.array([] if t_s is None else t_s, dtype=float).reshape(-1)
+    truth = dict(truth_by_object or {})
+    thrust = dict(thrust_by_object or {})
+    desired = dict(desired_attitude_by_object or {})
+    axes_by_object = dict(thrust_axis_body_by_object or {})
+    ids = [object_id] if object_id and object_id in truth else sorted(truth.keys())
+
+    fig, axes = plt.subplots(4, 1, figsize=cap_figsize(12, 10), sharex=True)
+    plotted = False
+    for oid in ids:
+        hist = truth.get(oid)
+        if hist is None or hist.ndim != 2 or hist.shape[1] < 13:
+            continue
+        n = min(hist.shape[0], t.size)
+        if n <= 0:
+            continue
+        q_err = _quat_error_series_deg(
+            truth_hist=hist,
+            desired_attitude_hist=desired.get(oid),
+            n_s=n,
+        )
+        rate_norm = np.linalg.norm(np.nan_to_num(hist[:n, 10:13], nan=0.0), axis=1)
+        u = thrust.get(oid, np.zeros((n, 3), dtype=float))
+        n_u = min(u.shape[0], n)
+        thrust_mag = np.full(n, np.nan, dtype=float)
+        if n_u > 0 and u.ndim == 2 and u.shape[1] >= 3:
+            thrust_mag[:n_u] = np.linalg.norm(np.nan_to_num(u[:n_u, :3], nan=0.0), axis=1)
+            align = _thrust_alignment_error_deg_series(
+                truth_hist=hist,
+                thrust_hist=u,
+                thrust_axis_body=axes_by_object.get(oid, np.array([1.0, 0.0, 0.0], dtype=float)),
+                n_s=n_u,
+            )
+        else:
+            align = np.full(n, np.nan, dtype=float)
+        axes[0].plot(t[:n], q_err, linewidth=1.2, label=oid)
+        axes[1].plot(t[:n], rate_norm, linewidth=1.2, label=oid)
+        axes[2].plot(t[:n], thrust_mag, linewidth=1.2, label=oid)
+        axes[3].plot(t[: align.size], align, linewidth=1.2, label=oid)
+        plotted = True
+
+    if not plotted:
+        for ax in axes:
+            ax.text(
+                0.5,
+                0.5,
+                "No attitude-control history available",
+                ha="center",
+                va="center",
+                transform=ax.transAxes,
+            )
+
+    axes[0].set_title("Quaternion Tracking Error")
+    axes[0].set_ylabel("deg")
+    axes[1].set_title("Body Rate Norm")
+    axes[1].set_ylabel("rad/s")
+    axes[2].set_title("Applied Thrust Magnitude")
+    axes[2].set_ylabel("km/s^2")
+    axes[3].set_title("Thrust Alignment Error")
+    axes[3].set_ylabel("deg")
+    axes[3].set_xlabel("time (s)")
+    for ax in axes:
+        ax.grid(True, alpha=0.3)
+        if plotted:
+            ax.legend(loc="best")
     fig.tight_layout()
     _save_show_close(fig, out_path=out_path, show=show, close=close, dpi=dpi)
     return fig

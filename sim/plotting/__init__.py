@@ -1,8 +1,13 @@
 __all__ = [
+    "plot_attitude_control_summary",
     "plot_control_effort",
     "plot_estimation_error",
     "plot_estimation_error_components",
+    "plot_ground_station_access",
     "plot_ground_track_from_payload",
+    "plot_orbital_element",
+    "plot_orbital_elements_angles",
+    "plot_orbital_elements_summary",
     "plot_rendezvous_summary",
     "plot_run_dashboard",
     "plot_sensor_access",

@@ -17,6 +17,16 @@ from sim.dynamics.orbit.atmosphere import (
     density_ussa1976,
 )
 from sim.dynamics.orbit.eclipse import srp_shadow_factor
+from sim.dynamics.orbit.elements import (
+    ClassicalOrbitalElements,
+    OrbitalElementFeedbackResult,
+    coe_to_rv_eci,
+    coes_mapping_to_element_targets,
+    coes_mapping_to_rv_eci,
+    coes_target_state_at_current_true_anomaly,
+    orbital_element_feedback_accel,
+    rv_to_coe_eci,
+)
 from sim.dynamics.orbit.environment import EARTH_J2, EARTH_J3, EARTH_J4, EARTH_MU_KM3_S2, EARTH_RADIUS_KM
 from sim.dynamics.orbit.epoch import (
     datetime_to_julian_date,
@@ -59,6 +69,14 @@ __all__ = [
     "EARTH_J2",
     "EARTH_J3",
     "EARTH_J4",
+    "ClassicalOrbitalElements",
+    "OrbitalElementFeedbackResult",
+    "coe_to_rv_eci",
+    "coes_mapping_to_rv_eci",
+    "coes_mapping_to_element_targets",
+    "coes_target_state_at_current_true_anomaly",
+    "orbital_element_feedback_accel",
+    "rv_to_coe_eci",
     "resolve_body_position_eci_km",
     "datetime_to_julian_date",
     "julian_date_to_datetime",

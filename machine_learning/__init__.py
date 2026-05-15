@@ -81,7 +81,7 @@ def _load_optional_attr(*, module_name: str, attr_names: dict[str, str], request
     except ModuleNotFoundError as exc:
         raise ModuleNotFoundError(
             f"Optional ML dependency is missing while loading '{requested_name}'. "
-            f"Install ML dependencies with `python -m pip install -r requirements-ml.txt`."
+            f"Install ML dependencies with `python -m pip install -r requirements/ml.txt`."
         ) from exc
     return getattr(mod, attr_names[requested_name])
 

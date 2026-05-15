@@ -14,6 +14,7 @@ from sim.control.orbit.zero_controller import ZeroController
 from sim.core.models import Command, StateBelief, StateTruth
 from sim.dynamics.attitude.disturbances import DisturbanceTorqueConfig, DisturbanceTorqueModel
 from sim.dynamics.model import OrbitalAttitudeDynamics
+from sim.dynamics.orbit.elements import coe_to_rv_eci as _coe_to_rv_eci
 from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2, EARTH_RADIUS_KM
 from sim.dynamics.orbit.frames import eci_to_ecef
 from sim.dynamics.orbit.propagator import (
@@ -291,50 +292,6 @@ def _relative_orbit_state12(
     state[6:9] = r_c
     state[9:12] = v_c
     return state
-
-
-def _coe_to_rv_eci(
-    *,
-    a_km: float,
-    ecc: float,
-    inc_deg: float,
-    raan_deg: float,
-    argp_deg: float,
-    true_anomaly_deg: float,
-    mu_km3_s2: float = EARTH_MU_KM3_S2,
-) -> tuple[np.ndarray, np.ndarray]:
-    a = float(a_km)
-    e = float(ecc)
-    if a <= 0.0:
-        raise ValueError("COE a_km must be positive.")
-    if e < 0.0 or e >= 1.0:
-        raise ValueError("COE eccentricity must satisfy 0 <= e < 1 for current support.")
-
-    inc = np.deg2rad(float(inc_deg))
-    raan = np.deg2rad(float(raan_deg))
-    argp = np.deg2rad(float(argp_deg))
-    nu = np.deg2rad(float(true_anomaly_deg))
-
-    p = a * (1.0 - e * e)
-    if p <= 0.0:
-        raise ValueError("Invalid COE set: semi-latus rectum must be positive.")
-
-    cnu, snu = np.cos(nu), np.sin(nu)
-    r_pf = np.array([p * cnu / (1.0 + e * cnu), p * snu / (1.0 + e * cnu), 0.0], dtype=float)
-    v_pf = np.sqrt(mu_km3_s2 / p) * np.array([-snu, e + cnu, 0.0], dtype=float)
-
-    cO, sO = np.cos(raan), np.sin(raan)
-    ci, si = np.cos(inc), np.sin(inc)
-    cw, sw = np.cos(argp), np.sin(argp)
-    q_pf_to_eci = np.array(
-        [
-            [cO * cw - sO * sw * ci, -cO * sw - sO * cw * ci, sO * si],
-            [sO * cw + cO * sw * ci, -sO * sw + cO * cw * ci, -cO * si],
-            [sw * si, cw * si, ci],
-        ],
-        dtype=float,
-    )
-    return q_pf_to_eci @ r_pf, q_pf_to_eci @ v_pf
 
 
 def _rv_from_initial_state(s0: dict[str, Any], *, target_jd_utc: float | None = None) -> tuple[np.ndarray, np.ndarray]:
