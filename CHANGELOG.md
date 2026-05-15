@@ -6,6 +6,38 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.6.1 - 2026-05-15
+
+Public workflow, plotting, and game-mode update.
+
+### Added
+
+- Added `config_help.py` plus public/private-scoped YAML config help topics so
+  users can discover valid config fields and inspect current YAML values without
+  running a simulation.
+- Added orbital-elements conversion helpers, feedback controllers, mission
+  strategies, stationkeeping/tracking example configs, and public plots for
+  classical orbital-element histories.
+- Added ground-station access plotting, map-backed ground-track support,
+  attitude-control summary plots, and expanded rocket story diagnostics.
+- Added in-level game-mode MP4 recording with level-selector controls, restart
+  discard behavior, and 100x runtime speed support.
+
+### Changed
+
+- Moved requirements compatibility shims under `requirements/` while keeping the
+  root `requirements.txt` shim for base installs.
+- Moved private release/export operations docs under `docs/operations/` and
+  project roadmap material under `docs/project/`.
+
+### Fixed
+
+- Fixed public manual RPO training to use RIC translation controls and fixed the
+  defensive-target demo RIC command frame to use the target reference state.
+- Kept generated public exports scoped to public config-help topics while
+  preserving private Pro help topics in the private tree.
+- Fixed optional ML dependency install hints after the requirements shim move.
+
 ## 0.6.0 - 2026-05-12
 
 Rocket GNC, controller-bench, and public/private boundary release.
