@@ -1,0 +1,368 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+
+import numpy as np
+
+from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2
+
+
+@dataclass(frozen=True)
+class ClassicalOrbitalElements:
+    a_km: float
+    ecc: float
+    inc_deg: float
+    raan_deg: float
+    argp_deg: float
+    true_anomaly_deg: float
+
+
+@dataclass(frozen=True)
+class OrbitalElementFeedbackResult:
+    accel_eci_km_s2: np.ndarray
+    current_coes: ClassicalOrbitalElements
+    target_energy_km2_s2: float
+    current_energy_km2_s2: float
+    energy_error_km2_s2: float
+    current_eccentricity_vector: np.ndarray
+    target_eccentricity_vector: np.ndarray
+    eccentricity_vector_error: np.ndarray
+    current_hhat: np.ndarray
+    target_hhat: np.ndarray
+    hhat_error: np.ndarray
+
+
+def _angle_deg(rad: float) -> float:
+    return float(np.rad2deg(np.mod(rad, 2.0 * np.pi)))
+
+
+def coe_to_rv_eci(
+    *,
+    a_km: float,
+    ecc: float,
+    inc_deg: float,
+    raan_deg: float,
+    argp_deg: float,
+    true_anomaly_deg: float,
+    mu_km3_s2: float = EARTH_MU_KM3_S2,
+) -> tuple[np.ndarray, np.ndarray]:
+    a = float(a_km)
+    e = float(ecc)
+    if a <= 0.0:
+        raise ValueError("COE a_km must be positive.")
+    if e < 0.0 or e >= 1.0:
+        raise ValueError("COE eccentricity must satisfy 0 <= e < 1 for current support.")
+
+    inc = np.deg2rad(float(inc_deg))
+    raan = np.deg2rad(float(raan_deg))
+    argp = np.deg2rad(float(argp_deg))
+    nu = np.deg2rad(float(true_anomaly_deg))
+
+    p = a * (1.0 - e * e)
+    if p <= 0.0:
+        raise ValueError("Invalid COE set: semi-latus rectum must be positive.")
+
+    cnu, snu = np.cos(nu), np.sin(nu)
+    r_pf = np.array([p * cnu / (1.0 + e * cnu), p * snu / (1.0 + e * cnu), 0.0], dtype=float)
+    v_pf = np.sqrt(mu_km3_s2 / p) * np.array([-snu, e + cnu, 0.0], dtype=float)
+
+    cO, sO = np.cos(raan), np.sin(raan)
+    ci, si = np.cos(inc), np.sin(inc)
+    cw, sw = np.cos(argp), np.sin(argp)
+    q_pf_to_eci = np.array(
+        [
+            [cO * cw - sO * sw * ci, -cO * sw - sO * cw * ci, sO * si],
+            [sO * cw + cO * sw * ci, -sO * sw + cO * cw * ci, -cO * si],
+            [sw * si, cw * si, ci],
+        ],
+        dtype=float,
+    )
+    return q_pf_to_eci @ r_pf, q_pf_to_eci @ v_pf
+
+
+def rv_to_coe_eci(
+    r_eci_km: np.ndarray,
+    v_eci_km_s: np.ndarray,
+    *,
+    mu_km3_s2: float = EARTH_MU_KM3_S2,
+) -> ClassicalOrbitalElements:
+    r = np.array(r_eci_km, dtype=float).reshape(3)
+    v = np.array(v_eci_km_s, dtype=float).reshape(3)
+    r_norm = float(np.linalg.norm(r))
+    v_norm = float(np.linalg.norm(v))
+    if r_norm <= 0.0:
+        raise ValueError("Position norm must be positive.")
+
+    h = np.cross(r, v)
+    h_norm = float(np.linalg.norm(h))
+    if h_norm <= 0.0:
+        raise ValueError("Angular momentum norm must be positive.")
+
+    k_hat = np.array([0.0, 0.0, 1.0], dtype=float)
+    n_vec = np.cross(k_hat, h)
+    n_norm = float(np.linalg.norm(n_vec))
+    e_vec = (np.cross(v, h) / float(mu_km3_s2)) - (r / r_norm)
+    ecc = float(np.linalg.norm(e_vec))
+    energy = 0.5 * v_norm * v_norm - float(mu_km3_s2) / r_norm
+    if abs(energy) <= 1e-15:
+        raise ValueError("Parabolic COEs are not supported.")
+    a_km = float(-float(mu_km3_s2) / (2.0 * energy))
+    if a_km <= 0.0 or ecc >= 1.0:
+        raise ValueError("Only elliptical Earth-centered COEs are supported.")
+
+    inc = float(np.arccos(np.clip(h[2] / h_norm, -1.0, 1.0)))
+    raan = 0.0
+    if n_norm > 1e-12:
+        raan = float(np.arccos(np.clip(n_vec[0] / n_norm, -1.0, 1.0)))
+        if n_vec[1] < 0.0:
+            raan = 2.0 * np.pi - raan
+
+    argp = 0.0
+    if n_norm > 1e-12 and ecc > 1e-10:
+        argp = float(np.arccos(np.clip(np.dot(n_vec, e_vec) / (n_norm * ecc), -1.0, 1.0)))
+        if e_vec[2] < 0.0:
+            argp = 2.0 * np.pi - argp
+
+    if ecc > 1e-10:
+        nu = float(np.arccos(np.clip(np.dot(e_vec, r) / (ecc * r_norm), -1.0, 1.0)))
+        if np.dot(r, v) < 0.0:
+            nu = 2.0 * np.pi - nu
+    elif n_norm > 1e-12:
+        nu = float(np.arccos(np.clip(np.dot(n_vec, r) / (n_norm * r_norm), -1.0, 1.0)))
+        if r[2] < 0.0:
+            nu = 2.0 * np.pi - nu
+    else:
+        nu = float(np.arctan2(r[1], r[0]))
+
+    return ClassicalOrbitalElements(
+        a_km=a_km,
+        ecc=ecc,
+        inc_deg=_angle_deg(inc),
+        raan_deg=_angle_deg(raan),
+        argp_deg=_angle_deg(argp),
+        true_anomaly_deg=_angle_deg(nu),
+    )
+
+
+def coes_mapping_to_rv_eci(
+    coes: dict[str, Any],
+    *,
+    true_anomaly_deg: float | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    d = dict(coes or {})
+    if true_anomaly_deg is None:
+        ta_deg = float(d.get("ta_deg", d.get("true_anomaly_deg", 0.0)))
+    else:
+        ta_deg = float(true_anomaly_deg)
+    return coe_to_rv_eci(
+        a_km=float(d.get("a_km", d.get("semi_major_axis_km", 7000.0))),
+        ecc=float(d.get("ecc", d.get("e", 0.0))),
+        inc_deg=float(d.get("inc_deg", d.get("inclination_deg", 0.0))),
+        raan_deg=float(d.get("raan_deg", 0.0)),
+        argp_deg=float(d.get("argp_deg", d.get("arg_periapsis_deg", 0.0))),
+        true_anomaly_deg=ta_deg,
+    )
+
+
+def coes_target_state_at_current_true_anomaly(
+    target_coes: dict[str, Any],
+    current_state_eci_6: np.ndarray,
+) -> np.ndarray:
+    x = np.array(current_state_eci_6, dtype=float).reshape(6)
+    current_coes = rv_to_coe_eci(x[:3], x[3:6])
+    r_tgt, v_tgt = coes_mapping_to_rv_eci(target_coes, true_anomaly_deg=current_coes.true_anomaly_deg)
+    return np.hstack((r_tgt, v_tgt))
+
+
+def _eccentricity_vector(r_eci_km: np.ndarray, v_eci_km_s: np.ndarray, mu_km3_s2: float) -> np.ndarray:
+    r = np.array(r_eci_km, dtype=float).reshape(3)
+    v = np.array(v_eci_km_s, dtype=float).reshape(3)
+    r_norm = float(np.linalg.norm(r))
+    h = np.cross(r, v)
+    return np.cross(v, h) / float(mu_km3_s2) - r / max(r_norm, 1e-12)
+
+
+def _hhat(r_eci_km: np.ndarray, v_eci_km_s: np.ndarray) -> np.ndarray:
+    h = np.cross(np.array(r_eci_km, dtype=float).reshape(3), np.array(v_eci_km_s, dtype=float).reshape(3))
+    return h / max(float(np.linalg.norm(h)), 1e-12)
+
+
+def coes_mapping_to_element_targets(
+    coes: dict[str, Any],
+    *,
+    mu_km3_s2: float = EARTH_MU_KM3_S2,
+) -> tuple[float, np.ndarray, np.ndarray]:
+    d = dict(coes or {})
+    a_km = float(d.get("a_km", d.get("semi_major_axis_km", 7000.0)))
+    if a_km <= 0.0:
+        raise ValueError("target COE a_km must be positive.")
+    r_tgt, v_tgt = coes_mapping_to_rv_eci({**d, "true_anomaly_deg": float(d.get("true_anomaly_deg", 0.0))})
+    target_energy = -float(mu_km3_s2) / (2.0 * a_km)
+    return (
+        target_energy,
+        _eccentricity_vector(r_tgt, v_tgt, float(mu_km3_s2)),
+        _hhat(r_tgt, v_tgt),
+    )
+
+
+def _has_any_key(data: dict[str, Any], keys: tuple[str, ...]) -> bool:
+    return any(key in data for key in keys)
+
+
+def _canonical_controlled_elements(controlled_elements: list[str] | tuple[str, ...] | str) -> set[str]:
+    if isinstance(controlled_elements, str):
+        raw_tokens = [controlled_elements]
+    else:
+        raw_tokens = list(controlled_elements)
+    aliases = {
+        "a": {"a"},
+        "sma": {"a"},
+        "energy": {"a"},
+        "semi_major_axis": {"a"},
+        "semi_major_axis_km": {"a"},
+        "ecc": {"ecc"},
+        "e": {"ecc"},
+        "eccentricity": {"ecc"},
+        "eccentricity_vector": {"ecc"},
+        "inc": {"inc"},
+        "inclination": {"inc"},
+        "inclination_deg": {"inc"},
+        "raan": {"raan"},
+        "raan_deg": {"raan"},
+        "plane": {"inc", "raan"},
+        "hhat": {"inc", "raan"},
+        "argp": {"argp"},
+        "arg_periapsis": {"argp"},
+        "arg_periapsis_deg": {"argp"},
+        "argument_of_periapsis": {"argp"},
+        "argument_of_periapsis_deg": {"argp"},
+    }
+    canonical: set[str] = set()
+    unknown: list[str] = []
+    for raw in raw_tokens:
+        token = str(raw).strip().lower()
+        if not token:
+            continue
+        mapped = aliases.get(token)
+        if mapped is None:
+            unknown.append(str(raw))
+            continue
+        canonical.update(mapped)
+    if unknown:
+        supported = ", ".join(sorted(aliases))
+        raise ValueError(f"Unsupported controlled_elements token(s): {unknown}. Supported tokens: {supported}.")
+    return canonical
+
+
+def _validate_target_coes_for_controlled_elements(target_coes: dict[str, Any], element_tokens: set[str]) -> None:
+    d = dict(target_coes or {})
+    missing: list[str] = []
+    if "a" in element_tokens and not _has_any_key(d, ("a_km", "semi_major_axis_km")):
+        missing.append("a_km")
+    if "ecc" in element_tokens and not _has_any_key(d, ("ecc", "e")):
+        missing.append("ecc")
+    if "inc" in element_tokens and not _has_any_key(d, ("inc_deg", "inclination_deg")):
+        missing.append("inc_deg")
+    if "raan" in element_tokens and "raan_deg" not in d:
+        missing.append("raan_deg")
+    if "argp" in element_tokens:
+        if not _has_any_key(d, ("ecc", "e")):
+            missing.append("ecc")
+        if not _has_any_key(d, ("inc_deg", "inclination_deg")):
+            missing.append("inc_deg")
+        if "raan_deg" not in d:
+            missing.append("raan_deg")
+        if not _has_any_key(d, ("argp_deg", "arg_periapsis_deg", "argument_of_periapsis_deg")):
+            missing.append("argp_deg")
+    if missing:
+        ordered_missing = list(dict.fromkeys(missing))
+        raise ValueError(
+            "target_coes is missing required field(s) for controlled_elements "
+            f"{sorted(element_tokens)}: {ordered_missing}."
+        )
+
+
+def orbital_element_feedback_accel(
+    current_state_eci_6: np.ndarray,
+    target_coes: dict[str, Any],
+    *,
+    controlled_elements: list[str] | tuple[str, ...] | str = ("a", "ecc", "inc", "raan", "argp"),
+    energy_gain_per_s: float = 1.0e-3,
+    eccentricity_gain_per_s: float = 5.0e-4,
+    plane_gain_per_s: float = 5.0e-4,
+    max_accel_km_s2: float = 5.0e-5,
+    mu_km3_s2: float = EARTH_MU_KM3_S2,
+) -> OrbitalElementFeedbackResult:
+    x = np.array(current_state_eci_6, dtype=float).reshape(6)
+    r = x[:3]
+    v = x[3:6]
+    mu = float(mu_km3_s2)
+    r_norm = float(np.linalg.norm(r))
+    v_norm = float(np.linalg.norm(v))
+    h = np.cross(r, v)
+    h_norm = float(np.linalg.norm(h))
+    if r_norm <= 0.0 or h_norm <= 0.0:
+        raise ValueError("Current state must have nonzero position and angular momentum.")
+
+    element_tokens = _canonical_controlled_elements(controlled_elements)
+    _validate_target_coes_for_controlled_elements(dict(target_coes or {}), element_tokens)
+
+    current_coes = rv_to_coe_eci(r, v, mu_km3_s2=mu)
+    target_energy, target_e_vec, target_hhat = coes_mapping_to_element_targets(target_coes, mu_km3_s2=mu)
+    current_energy = 0.5 * v_norm * v_norm - mu / r_norm
+    current_e_vec = _eccentricity_vector(r, v, mu)
+    current_hhat = h / h_norm
+
+    rows: list[np.ndarray] = []
+    rhs_parts: list[np.ndarray] = []
+    if "a" in element_tokens:
+        rows.append(v.reshape(1, 3))
+        rhs_parts.append(np.array([float(energy_gain_per_s) * (target_energy - current_energy)], dtype=float))
+
+    def ecc_rate_for_accel(accel_eci: np.ndarray) -> np.ndarray:
+        return (np.cross(accel_eci, h) + np.cross(v, np.cross(r, accel_eci))) / mu
+
+    basis = np.eye(3, dtype=float)
+    if element_tokens.intersection({"ecc", "argp"}):
+        ecc_jac = np.column_stack([ecc_rate_for_accel(basis[:, i]) for i in range(3)])
+        rows.append(ecc_jac)
+        rhs_parts.append(float(eccentricity_gain_per_s) * (target_e_vec - current_e_vec))
+
+    if element_tokens.intersection({"inc", "raan"}):
+        hhat_jac = np.column_stack(
+            [
+                (np.eye(3, dtype=float) - np.outer(current_hhat, current_hhat)) @ np.cross(r, basis[:, i]) / h_norm
+                for i in range(3)
+            ]
+        )
+        rows.append(hhat_jac)
+        rhs_parts.append(float(plane_gain_per_s) * (target_hhat - current_hhat))
+
+    if rows:
+        lhs = np.vstack(rows)
+        rhs = np.hstack(rhs_parts)
+        accel_eci, *_ = np.linalg.lstsq(lhs, rhs, rcond=None)
+    else:
+        accel_eci = np.zeros(3, dtype=float)
+
+    n = float(np.linalg.norm(accel_eci))
+    amax = float(max(max_accel_km_s2, 0.0))
+    if amax <= 0.0:
+        accel_eci = np.zeros(3, dtype=float)
+    elif n > amax:
+        accel_eci *= amax / n
+
+    return OrbitalElementFeedbackResult(
+        accel_eci_km_s2=np.array(accel_eci, dtype=float),
+        current_coes=current_coes,
+        target_energy_km2_s2=float(target_energy),
+        current_energy_km2_s2=float(current_energy),
+        energy_error_km2_s2=float(target_energy - current_energy),
+        current_eccentricity_vector=current_e_vec,
+        target_eccentricity_vector=target_e_vec,
+        eccentricity_vector_error=target_e_vec - current_e_vec,
+        current_hhat=current_hhat,
+        target_hhat=target_hhat,
+        hhat_error=target_hhat - current_hhat,
+    )

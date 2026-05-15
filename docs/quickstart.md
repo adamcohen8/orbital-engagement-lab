@@ -78,6 +78,27 @@ Open `outputs/flagship_hcw_pd_10km/index.md` first.
 For the scenario-specific review path, see
 [Flagship HCW PD 10 km Scenario](flagship-hcw-pd-10km.md).
 
+## Get Config Field Help
+
+When editing scenario YAML, use `config_help.py` to list valid values for a
+field or topic:
+
+```bash
+python config_help.py "ephemeris model"
+python config_help.py "plot preset"
+python config_help.py --list
+```
+
+Add `--config` to inspect the value currently set in a scenario file without
+loading scenario plugins or running the simulation:
+
+```bash
+python config_help.py "ephemeris model" --config configs/hcw_pd_10km_experiment.yaml
+```
+
+The helper accepts fuzzy queries, so near-misses such as `"emphemeris model"`
+still resolve to the ephemeris-mode field.
+
 ## Use The API
 
 ```python
@@ -130,6 +151,9 @@ outputs/examples/public_rendezvous_closed_loop/rendezvous_summary.png
 outputs/examples/public_rendezvous_closed_loop/ground_track_multi.png
 outputs/examples/public_rendezvous_closed_loop/sensor_access.png
 ```
+
+See [Plotting](plotting.md) for the maintained plot presets, figure IDs, and
+map-backed ground-track option.
 
 ## Optional Profiles
 

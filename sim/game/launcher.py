@@ -16,6 +16,7 @@ OPTION_WIDTH = 398
 OPTION_HEIGHT = 64
 OPTION_ROW_HEIGHT = 78
 CLEAR_PROGRESS_RECT = (846, 36, 150, 30)
+RECORD_VIDEO_RECT = (682, 36, 144, 30)
 
 
 @dataclass(frozen=True)
@@ -41,6 +42,7 @@ class GameScenarioOption:
 class GameLaunchSelection:
     path: Path
     difficulty: str
+    record_video: bool = False
 
 
 def discover_game_scenarios(config_dir: Path | None = None) -> tuple[GameScenarioOption, ...]:
@@ -210,6 +212,7 @@ def _run_launcher(options: tuple[GameScenarioOption, ...]) -> GameLaunchSelectio
     selected = 0
     scroll_offset = 0
     difficulty_idx = _difficulty_index(options[selected].difficulty)
+    record_video = False
 
     try:
         while True:
@@ -226,7 +229,13 @@ def _run_launcher(options: tuple[GameScenarioOption, ...]) -> GameLaunchSelectio
                     elif event.key in {pygame.K_UP, pygame.K_w}:
                         selected = max(selected - 1, 0)
                     elif event.key in {pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE}:
-                        return GameLaunchSelection(path=options[selected].path, difficulty=selected_difficulty)
+                        return GameLaunchSelection(
+                            path=options[selected].path,
+                            difficulty=selected_difficulty,
+                            record_video=record_video,
+                        )
+                    elif event.key == pygame.K_v:
+                        record_video = not record_video
                     elif event.key in {pygame.K_LEFT, pygame.K_a}:
                         difficulty_idx = max(difficulty_idx - 1, 0)
                     elif event.key in {pygame.K_RIGHT, pygame.K_d}:
@@ -250,10 +259,17 @@ def _run_launcher(options: tuple[GameScenarioOption, ...]) -> GameLaunchSelectio
                     idx = _option_index_at_pos(pygame.mouse.get_pos(), count=len(options), scroll_offset=scroll_offset)
                     if idx is not None:
                         if idx == selected:
-                            return GameLaunchSelection(path=options[selected].path, difficulty=selected_difficulty)
+                            return GameLaunchSelection(
+                                path=options[selected].path,
+                                difficulty=selected_difficulty,
+                                record_video=record_video,
+                            )
                         selected = idx
                     else:
                         mouse_pos = pygame.mouse.get_pos()
+                        if _record_video_at_pos(mouse_pos):
+                            record_video = not record_video
+                            continue
                         if _clear_progress_at_pos(mouse_pos):
                             clear_game_progress(options[0].path.parent)
                             options = discover_game_scenarios(options[0].path.parent)
@@ -280,6 +296,7 @@ def _run_launcher(options: tuple[GameScenarioOption, ...]) -> GameLaunchSelectio
                 selected=selected,
                 scroll_offset=scroll_offset,
                 selected_difficulty=selected_difficulty,
+                record_video=record_video,
                 font=font,
                 small_font=small_font,
                 title_font=title_font,
@@ -354,6 +371,12 @@ def _clear_progress_at_pos(pos: tuple[int, int]) -> bool:
     return x <= px <= x + w and y <= py <= y + h
 
 
+def _record_video_at_pos(pos: tuple[int, int]) -> bool:
+    x, y, w, h = RECORD_VIDEO_RECT
+    px, py = pos
+    return x <= px <= x + w and y <= py <= y + h
+
+
 def _draw_launcher(
     pygame: Any,
     screen: Any,
@@ -362,6 +385,7 @@ def _draw_launcher(
     selected: int,
     scroll_offset: int,
     selected_difficulty: str,
+    record_video: bool,
     font: Any,
     small_font: Any,
     title_font: Any,
@@ -369,12 +393,13 @@ def _draw_launcher(
     width, height = screen.get_size()
     screen.fill((12, 16, 22))
     _text(screen, title_font, "Orbital Engagement Lab", (54, 36), (238, 242, 248))
+    _draw_record_video_button(pygame, screen, enabled=record_video, font=small_font)
     _draw_clear_progress_button(pygame, screen, font=small_font)
     _text(screen, font, "Select RPO training level", (56, 78), (172, 186, 206))
     _text(
         screen,
         small_font,
-        "Up/Down select   Left/Right difficulty   Enter launch   Esc quit",
+        "Up/Down select   Left/Right difficulty   V video   Enter launch   Esc quit",
         (56, 106),
         (220, 160, 160),
     )
@@ -435,6 +460,16 @@ def _draw_clear_progress_button(pygame: Any, screen: Any, *, font: Any) -> None:
     pygame.draw.rect(screen, (32, 38, 48), rect, border_radius=6)
     pygame.draw.rect(screen, (120, 132, 150), rect, width=1, border_radius=6)
     _text(screen, font, "Clear Progress", (rect.x + 15, rect.y + 8), (230, 238, 245))
+
+
+def _draw_record_video_button(pygame: Any, screen: Any, *, enabled: bool, font: Any) -> None:
+    rect = pygame.Rect(*RECORD_VIDEO_RECT)
+    fill = (76, 34, 42) if enabled else (32, 38, 48)
+    stroke = (245, 94, 108) if enabled else (120, 132, 150)
+    pygame.draw.rect(screen, fill, rect, border_radius=6)
+    pygame.draw.rect(screen, stroke, rect, width=1, border_radius=6)
+    label = "Video: ON" if enabled else "Video: OFF"
+    _text(screen, font, label, (rect.x + 18, rect.y + 8), (246, 238, 242))
 
 
 def _draw_difficulty_picker(pygame: Any, screen: Any, *, selected_difficulty: str, font: Any) -> None:

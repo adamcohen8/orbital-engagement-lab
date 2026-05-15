@@ -646,10 +646,14 @@ outputs:
   plots:
     # Enable static figure generation.
     enabled: true
-    # Optional presets: minimal, orbit, rendezvous, attitude, rocket, debug.
+    # Optional presets: minimal, orbit, rendezvous, attitude, estimation, access, rocket, debug.
     preset: "rendezvous"
     # Reference object for relative/RIC plots.
     reference_object_id: "target"
+    # Draw a world-map background for static ground-track plots when possible.
+    draw_earth_map: true
+    # Optional object filter for orbital-element plots. Leave blank to overlay all objects.
+    orbital_elements_object_id: ""
     # Additional or explicit figure IDs to generate.
     figure_ids:
       # Multi-object ECI trajectory plot.

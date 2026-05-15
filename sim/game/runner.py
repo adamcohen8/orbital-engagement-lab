@@ -11,10 +11,13 @@ from sim.api import SimulationConfig, SimulationSession
 from sim.config import object_section
 from sim.game.defensive_target import DefensiveTargetIntentProvider
 from sim.game.manual import KeyboardCommandState, ManualGameCommandProvider
+from sim.game.recording import GameFrameRecorder, game_recording_path
 from sim.game.training import RPOTrainingConfig, RPOTrainingTracker
 from sim.presets.thrusters import resolve_thruster_max_thrust_n_from_specs
 
-SPEED_MULTIPLIER_OPTIONS: tuple[float, ...] = (1.0, 2.0, 5.0, 10.0, 25.0, 50.0)
+SPEED_MULTIPLIER_OPTIONS: tuple[float, ...] = (1.0, 2.0, 5.0, 10.0, 25.0, 50.0, 100.0)
+MAX_REALTIME_STEPS_PER_FRAME = 12
+DASHBOARD_FPS = 60.0
 
 
 @dataclass(frozen=True)
@@ -22,6 +25,7 @@ class GameRunResult:
     config_path: Path
     difficulty: str
     level_passed: bool
+    recording_path: Path | None = None
 
 
 def _max_accel_from_config(config: SimulationConfig, controlled_object_id: str) -> float:
@@ -142,6 +146,25 @@ def _adjust_speed_multiple(speed_multiple: float, change: int) -> float:
     return SPEED_MULTIPLIER_OPTIONS[idx]
 
 
+def _realtime_steps_due(
+    *,
+    now_s: float,
+    last_step_wall_s: float,
+    wall_step_s: float,
+    max_steps: int = MAX_REALTIME_STEPS_PER_FRAME,
+) -> tuple[int, float]:
+    wall_step = float(max(wall_step_s, 1.0e-9))
+    elapsed = max(float(now_s) - float(last_step_wall_s), 0.0)
+    due = int(elapsed // wall_step)
+    if due <= 0:
+        return 0, float(last_step_wall_s)
+    cap = max(int(max_steps), 1)
+    steps = min(due, cap)
+    if due > cap:
+        return steps, float(now_s)
+    return steps, float(last_step_wall_s) + float(steps) * wall_step
+
+
 def _command_status(state: KeyboardCommandState, *, control_mode: str = "attitude_thrust") -> str:
     if control_mode in {"ric", "ric_translation", "translation"}:
         sim_state = "PAUSED" if state.paused else "RUNNING"
@@ -166,6 +189,9 @@ def run_game_mode(
     realtime: bool = True,
     speed_multiple: float = 1.0,
     difficulty_override: str | None = None,
+    record_video: bool = False,
+    recording_output_dir: str | Path | None = None,
+    recording_fps: float = DASHBOARD_FPS,
 ) -> GameRunResult:
     from sim.game.pygame_dashboard import PygameRPODashboard
 
@@ -206,30 +232,43 @@ def run_game_mode(
         coast_prediction_orbit_fraction=_coast_prediction_orbit_fraction(difficulty),
         fullscreen=True,
     )
-    dashboard.push_snapshot(snapshot)
-    trainer.record(snapshot)
-    score = trainer.score()
-    dashboard.draw(
-        command_status=_command_status(command_state, control_mode=control_mode),
-        coach_hint=trainer.current_hint(),
-        mission_state=_mission_state(score),
-        mission_metrics=_mission_metrics(training_cfg, score),
-        speed_multiple=current_speed_multiple,
-        briefing_lines=briefing_lines if briefing_open else (),
-        debrief_lines=_score_debrief_lines(score),
-    )
-
-    pygame = dashboard.pygame
-    dt_s = float(config.scenario.simulator.dt_s)
-    wall_step_s = _wall_step_s(dt_s, current_speed_multiple)
-    last_step_wall = perf_counter()
+    recording_attempt = 1
+    recording_path: Path | None = None
+    recorder: GameFrameRecorder | None = None
     try:
+        recorder = _start_game_recorder(
+            enabled=record_video,
+            config=config,
+            difficulty=difficulty,
+            attempt_index=recording_attempt,
+            output_dir=recording_output_dir,
+            fps=recording_fps,
+        )
+        dashboard.push_snapshot(snapshot)
+        trainer.record(snapshot)
+        score = trainer.score()
+        dashboard.draw(
+            command_status=_command_status(command_state, control_mode=control_mode),
+            coach_hint=trainer.current_hint(),
+            mission_state=_mission_state(score),
+            mission_metrics=_mission_metrics(training_cfg, score),
+            speed_multiple=current_speed_multiple,
+            briefing_lines=briefing_lines if briefing_open else (),
+            debrief_lines=_score_debrief_lines(score),
+        )
+        _capture_recording_frame(recorder, dashboard)
+
+        pygame = dashboard.pygame
+        dt_s = float(config.scenario.simulator.dt_s)
+        wall_step_s = _wall_step_s(dt_s, current_speed_multiple)
+        last_step_wall = perf_counter()
         while (not command_state.quit_requested) and (not dashboard.closed):
             _poll_pygame_input(pygame, command_state, control_mode=control_mode)
             if command_state.quit_requested:
                 break
             if briefing_open and not command_state.paused:
                 briefing_open = False
+                last_step_wall = perf_counter()
             if command_state.speed_multiplier_change:
                 current_speed_multiple = _adjust_speed_multiple(
                     current_speed_multiple, command_state.speed_multiplier_change
@@ -238,6 +277,18 @@ def run_game_mode(
                 command_state.speed_multiplier_change = 0
                 last_step_wall = perf_counter()
             if command_state.restart_requested:
+                if recorder is not None:
+                    recorder.discard()
+                recording_attempt += 1
+                recorder = _start_game_recorder(
+                    enabled=record_video,
+                    config=config,
+                    difficulty=difficulty,
+                    attempt_index=recording_attempt,
+                    output_dir=recording_output_dir,
+                    fps=recording_fps,
+                )
+                recording_path = None
                 session, _, snapshot = _start_game_attempt(
                     config,
                     command_state=command_state,
@@ -264,19 +315,36 @@ def run_game_mode(
                 break
             if mission_decided:
                 command_state.paused = True
-            step_due = (not realtime) or (now - last_step_wall >= wall_step_s)
-            should_step = (
-                ((not command_state.paused and step_due) or bool(command_state.step_requested))
-                and not mission_decided
-                and not session.done
-            )
-            if should_step:
+            if command_state.paused and not command_state.step_requested:
                 last_step_wall = now
+            steps_to_run = 0
+            if not mission_decided and not session.done:
+                if command_state.step_requested:
+                    steps_to_run = 1
+                    last_step_wall = now
+                elif not command_state.paused:
+                    if realtime:
+                        steps_to_run, last_step_wall = _realtime_steps_due(
+                            now_s=now,
+                            last_step_wall_s=last_step_wall,
+                            wall_step_s=wall_step_s,
+                        )
+                    else:
+                        steps_to_run = 1
+                        last_step_wall = now
+            score = pre_score
+            for _ in range(steps_to_run):
+                if session.done:
+                    break
                 snapshot = session.step()
                 dashboard.push_snapshot(snapshot)
                 trainer.record(snapshot)
-                command_state.step_requested = False
-            score = trainer.score()
+                score = trainer.score()
+                if score.level_passed or score.level_failed:
+                    break
+            command_state.step_requested = False
+            if steps_to_run <= 0:
+                score = trainer.score()
             if score.level_passed or score.level_failed:
                 command_state.paused = True
             dashboard.draw(
@@ -288,12 +356,50 @@ def run_game_mode(
                 briefing_lines=briefing_lines if briefing_open else (),
                 debrief_lines=_score_debrief_lines(score),
             )
-            dashboard.tick(60.0)
+            _capture_recording_frame(recorder, dashboard)
+            if recorder is not None and (score.level_passed or score.level_failed) and not recorder.saved:
+                recording_path = recorder.finish()
+                if recording_path is not None:
+                    print(f"Saved game recording: {recording_path}")
+            dashboard.tick(DASHBOARD_FPS)
     finally:
+        if recorder is not None and not recorder.saved:
+            recorder.discard()
         dashboard.close()
         if training_cfg.enabled:
             print(trainer.debrief_text())
-    return GameRunResult(config_path=Path(config_path), difficulty=difficulty, level_passed=bool(score.level_passed))
+    return GameRunResult(
+        config_path=Path(config_path),
+        difficulty=difficulty,
+        level_passed=bool(score.level_passed),
+        recording_path=recording_path,
+    )
+
+
+def _start_game_recorder(
+    *,
+    enabled: bool,
+    config: SimulationConfig,
+    difficulty: str,
+    attempt_index: int,
+    output_dir: str | Path | None,
+    fps: float,
+) -> GameFrameRecorder | None:
+    if not bool(enabled):
+        return None
+    path = game_recording_path(
+        scenario_name=str(config.scenario.scenario_name or "game"),
+        difficulty=difficulty,
+        attempt_index=attempt_index,
+        output_dir=output_dir,
+    )
+    return GameFrameRecorder.start(path, fps=fps)
+
+
+def _capture_recording_frame(recorder: GameFrameRecorder | None, dashboard: Any) -> None:
+    if recorder is None or recorder.saved:
+        return
+    recorder.capture_surface(dashboard.screen)
 
 
 def _start_game_attempt(

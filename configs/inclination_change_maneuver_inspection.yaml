@@ -1,0 +1,130 @@
+scenario_name: inclination_change_maneuver_inspection
+metadata:
+  owner: validation
+  notes: Single-satellite fixed-axis normal burn inspection case for increasing inclination near the ascending node.
+objects:
+  rocket:
+    enabled: false
+    role: rocket
+    kind: rocket
+  chaser:
+    enabled: false
+    role: chaser
+    kind: satellite
+  target:
+    enabled: true
+    role: target
+    kind: satellite
+    specs:
+      preset_satellite: BASIC_SATELLITE
+      dry_mass_kg: 180.0
+      fuel_mass_kg: 20.0
+      thruster: BASIC_CHEMICAL_Z_BOTTOM
+      attitude_system: BASIC_REACTION_WHEELS_3AXIS
+    initial_state:
+      coes:
+        a_km: 7000.0
+        ecc: 0.0
+        inc_deg: 44.0
+        raan_deg: 0.0
+        argp_deg: 0.0
+        true_anomaly_deg: 0.0
+      attitude_quat_bn:
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      angular_rate_body_rad_s:
+      - 0.0
+      - 0.0
+      - 0.0
+    orbit_control:
+      kind: python
+      module: sim.control.orbit.zero_controller
+      class_name: ZeroController
+      params: {}
+    attitude_control:
+      kind: python
+      module: sim.control.attitude.baseline
+      class_name: QuaternionPDController
+      params:
+        desired_attitude_quat_bn:
+        - 1.0
+        - 0.0
+        - 0.0
+        - 0.0
+        kp: 0.8
+        kd: 1.6
+        max_torque_nm: 0.05
+    mission_strategy:
+      kind: python
+      module: sim.mission.modules
+      class_name: PursuitMissionStrategy
+      params:
+        target_id: null
+        max_accel_km_s2: 2.0e-4
+        blind_direction_eci:
+        - 0.0
+        - -1.0
+        - 0.0
+        align_to_thrust: true
+    mission_execution:
+      kind: python
+      module: sim.mission.modules
+      class_name: ControllerPointingExecution
+      params:
+        require_attitude_alignment: false
+        alignment_tolerance_deg: 180.0
+    mission_objectives: []
+simulator:
+  scenario_type: auto
+  duration_s: 6000.0
+  dt_s: 1.0
+  dynamics:
+    orbit:
+      model: two_body
+      orbit_substep_s: 1.0
+      j2: false
+      j3: false
+      j4: false
+      drag: false
+      srp: false
+    attitude:
+      enabled: true
+      attitude_substep_s: 0.1
+      disturbance_torques:
+        gravity_gradient: false
+        magnetic: false
+        drag: false
+        srp: false
+    rocket:
+      enabled: false
+  environment:
+    ephemeris_mode: analytic_simple
+    atmosphere_env: {}
+  plugin_validation:
+    strict: true
+  termination:
+    earth_impact_enabled: true
+    earth_radius_km: 6378.137
+outputs:
+  output_dir: outputs/inclination_change_maneuver_inspection
+  mode: interactive
+  stats:
+    enabled: true
+    print_summary: false
+    save_json: true
+    save_csv: true
+    save_full_log: true
+  plots:
+    enabled: true
+    dpi: 160
+    orbital_elements_object_id: target
+    figure_ids:
+    - orbital_elements_summary
+    - orbital_elements_angles
+    - control_thrust
+    - thrust_alignment_error
+  animations:
+    enabled: false
+    types: []

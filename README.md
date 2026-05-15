@@ -160,9 +160,12 @@ python run_game.py
 ```
 
 Running `run_game.py` without a config opens the level selector. Pick a level
-with Up/Down or W/S, press Enter or Space to launch, and press Escape to quit.
-The first six bundled levels teach coast-relative motion, V-bar and R-bar
-approaches, close rendezvous, keepout recovery, and a defensive-target demo.
+with Up/Down or W/S, toggle video recording with V or the Video button, press
+Enter or Space to launch, and press Escape to quit. Recordings are saved under
+`outputs/game_recordings/` when a level reaches pass/fail; restarting or
+quitting early discards the current attempt video. The first six bundled levels
+teach coast-relative motion, V-bar and R-bar approaches, close rendezvous,
+keepout recovery, and a defensive-target demo.
 
 You can also launch a level directly:
 
@@ -259,7 +262,10 @@ slots.
 Ground stations are configured in scenario YAML with a top-level
 `ground_stations` list or mapping. Single-run outputs include
 `ground_station_access` and `ground_station_access_summary` so users can inspect
-when each site has access to each active object.
+when each site has access to each active object. Add the `ground_station_access`
+figure ID for a built-in access/elevation/range plot, and set
+`outputs.plots.draw_earth_map: true` when you want static ground-track figures
+to use a world-map background.
 
 The public examples are intentionally config-first. Experimental Python demos
 and local-artifact-dependent workflows are not part of the supported public

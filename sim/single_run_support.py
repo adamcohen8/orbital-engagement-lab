@@ -696,6 +696,8 @@ class _KnowledgeSynchronizer:
             for aid, agent in e.agents.items()
             if agent.active
         }
+        if getattr(e, "target_reference_truth", None) is not None:
+            initial_world_truth["target_reference"] = e.target_reference_truth.copy()
         for aid, agent in e.agents.items():
             if not agent.active or agent.knowledge_base is None:
                 continue

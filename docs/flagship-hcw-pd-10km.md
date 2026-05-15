@@ -41,11 +41,14 @@ Then inspect the rendezvous and control plots:
 
 For the integrated orbit-attitude behavior, review:
 
+- `outputs/flagship_hcw_pd_10km/attitude_control_summary.png`
 - `outputs/flagship_hcw_pd_10km/chaser_thrust_alignment_error.png`
 - `outputs/flagship_hcw_pd_10km/chaser_attitude.png`
 - `outputs/flagship_hcw_pd_10km/chaser_quaternion_error.png`
 
-The same visual set is checked into the public [Plot Gallery](plot-gallery.md).
+Selected snapshots from this visual set are checked into the public
+[Plot Gallery](plot-gallery.md). The local `index.md` remains the authoritative
+artifact inventory for the current config.
 
 ## Python Analysis
 

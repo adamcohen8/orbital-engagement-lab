@@ -95,6 +95,7 @@ objects:
       refresh_rate_s: 1.0
       targets:
       - target
+      - target_reference
       conditions:
         require_line_of_sight: false
         max_range_km: 10000.0

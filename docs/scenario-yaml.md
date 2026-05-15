@@ -9,6 +9,20 @@ at importable Python modules/classes for controllers, guidance, mission
 strategies, and mission execution modules. Loading an untrusted scenario can run
 untrusted Python code.
 
+When you are unsure what values a field accepts, use the config help CLI. It
+accepts fuzzy topic names, prints valid options with descriptions, and can show
+the value currently set in a scenario file:
+
+```bash
+python config_help.py "ephemeris model"
+python config_help.py "ephemeris model" --config configs/automation_smoke.yaml
+python config_help.py "plot preset"
+python config_help.py --list
+```
+
+The `--config` form parses YAML as plain data only. It does not resolve object
+presets, import configured plugin classes, or run the simulation.
+
 ## Top-Level Shape
 
 ```yaml
@@ -36,6 +50,14 @@ outputs:
   output_dir: "outputs/my_scenario"
   mode: "save"
 ```
+
+To station-keep a single satellite against a desired orbit, use
+`OrbitalElementsStationKeepMissionStrategy` with `target_coes` and pair it with
+`ControllerPointingExecution`. The current implementation maintains the desired
+COE shape/orientation at the satellite's current true anomaly; it does not
+target a specific phase yet. See
+`configs/orbital_elements_stationkeep_smoke.yaml` for a complete single-satellite
+example.
 
 New configs should define scene participants under `objects`, keyed by object
 ID. The conventional IDs `rocket`, `chaser`, and `target` still work, but they
@@ -195,6 +217,9 @@ Single-run payloads include:
 
 The same summary is also copied into `summary.ground_station_access_summary`
 and appears in `index.md` key results when stations are configured.
+Add `ground_station_access` to `outputs.plots.figure_ids` for a built-in access,
+elevation, and slant-range figure. Set `outputs.plots.draw_earth_map: true`
+when static ground-track figures should use a world-map background.
 
 ## Algorithm Pointers
 

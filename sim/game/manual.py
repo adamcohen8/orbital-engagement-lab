@@ -113,9 +113,12 @@ class ManualGameCommandProvider:
             if nrm > 1.0:
                 accel_ric /= nrm
             accel_ric *= float(max(self.max_accel_km_s2, 0.0)) * throttle
-            ref = dict(own_knowledge or {}).get(str(self.reference_object_id))
-            if ref is not None and getattr(ref, "state", np.array([])).size >= 6:
-                ref_state = np.array(ref.state[:6], dtype=float)
+            ref_state = _reference_state6(
+                reference_object_id=self.reference_object_id,
+                own_knowledge=own_knowledge,
+                world_truth=world_truth,
+            )
+            if ref_state is not None:
                 c_ir = ric_dcm_ir_from_rv(ref_state[:3], ref_state[3:6])
                 thrust_eci = c_ir @ accel_ric
             else:
@@ -152,3 +155,19 @@ class ManualGameCommandProvider:
                 "player_throttle": throttle,
             },
         }
+
+
+def _reference_state6(
+    *,
+    reference_object_id: str,
+    own_knowledge: dict[str, Any] | None,
+    world_truth: dict[str, StateTruth] | None,
+) -> np.ndarray | None:
+    ref_id = str(reference_object_id)
+    ref = dict(own_knowledge or {}).get(ref_id)
+    if ref is not None and getattr(ref, "state", np.array([])).size >= 6:
+        return np.array(ref.state[:6], dtype=float)
+    truth = dict(world_truth or {}).get(ref_id)
+    if truth is not None:
+        return np.hstack((truth.position_eci_km, truth.velocity_eci_km_s)).astype(float)
+    return None

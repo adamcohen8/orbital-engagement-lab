@@ -1,5 +1,11 @@
 from sim.control.orbit.advanced import RobustMPCController, StochasticPolicyController
-from sim.control.orbit.baseline import RiskThresholdController, SafetyBarrierController, StationkeepingController
+from sim.control.orbit.baseline import (
+    OrbitalElementsFeedbackController,
+    RiskThresholdController,
+    SafetyBarrierController,
+    SemiMajorAxisEccentricityController,
+    StationkeepingController,
+)
 from sim.control.orbit.curv_pd import CurvilinearRICPDController, curv_accel_to_rect
 from sim.control.orbit.hcw_mpc import HCWInTrackCrossTrackMPCController, HCWRelativeOrbitMPCController
 from sim.control.orbit.hcw_pd import HCWPDController
@@ -65,6 +71,8 @@ __all__ = [
     "PredictiveBurnConfig",
     "PredictiveBurnScheduler",
     "StationkeepingController",
+    "OrbitalElementsFeedbackController",
+    "SemiMajorAxisEccentricityController",
     "SafetyBarrierController",
     "RiskThresholdController",
     "RobustMPCController",

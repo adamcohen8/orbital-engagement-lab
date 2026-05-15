@@ -214,6 +214,10 @@ for station_id, station_payload in result.ground_station_access.items():
 Ground-station access is passive. It does not modify truth, belief, control,
 knowledge, or termination.
 
+Add `ground_station_access` to `outputs.plots.figure_ids` for the built-in
+access/elevation/range figure, and set `outputs.plots.draw_earth_map: true`
+when static ground tracks should use a world-map background.
+
 ## Artifacts
 
 Output artifacts are recorded in the result summary. Use artifact maps instead
@@ -252,6 +256,9 @@ print(payload["run"]["scenario_name"])
 
 The `SimulationSession` wrapper is the preferred public API when you need a
 stable object-oriented surface.
+
+See [Plotting](plotting.md) for the current single-run figure ID catalog and
+the public plotting helper functions.
 
 ## Extension Guidance
 

@@ -10,17 +10,28 @@ from sim.core.models import Command, StateBelief
 
 @dataclass
 class QuaternionPDController(Controller):
+    desired_attitude_quat_bn: np.ndarray = field(default_factory=lambda: np.array([1.0, 0.0, 0.0, 0.0]))
     kp: float = 0.1
     kd: float = 0.05
     max_torque_nm: float = 0.05
+
+    def __post_init__(self) -> None:
+        self.desired_attitude_quat_bn = _normalize_quaternion(np.array(self.desired_attitude_quat_bn, dtype=float))
+
+    def set_target(self, desired_attitude_quat_bn: np.ndarray) -> None:
+        self.desired_attitude_quat_bn = _normalize_quaternion(np.array(desired_attitude_quat_bn, dtype=float))
 
     def act(self, belief: StateBelief, t_s: float, budget_ms: float) -> Command:
         # Expected state layout: [r(3),v(3),q(4),w(3)] at minimum
         if belief.state.size < 13:
             return Command.zero()
-        q = belief.state[6:10]
-        w = belief.state[10:13]
-        q_err_vec = q[1:4]
+        q = _normalize_quaternion(belief.state[6:10])
+        q_des = _normalize_quaternion(self.desired_attitude_quat_bn)
+        w = np.array(belief.state[10:13], dtype=float)
+        q_err = _quat_multiply(_quat_conjugate(q_des), q)
+        if q_err[0] < 0.0:
+            q_err *= -1.0
+        q_err_vec = q_err[1:4]
         torque = -self.kp * q_err_vec - self.kd * w
         n = np.linalg.norm(torque)
         if n > self.max_torque_nm and n > 0.0:
