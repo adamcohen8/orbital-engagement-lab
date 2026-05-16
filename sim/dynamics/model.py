@@ -25,6 +25,8 @@ class OrbitalAttitudeDynamics(DynamicsModel):
     area_m2: float = 1.0
     cd: float = 2.2
     cr: float = 1.2
+    drag_area_m2: float | None = None
+    srp_area_m2: float | None = None
     use_rectangular_prism_for_aero_srp: bool = False
     rectangular_prism_dims_m: tuple[float, float, float] | None = None
     orbit_substep_s: float | None = None
@@ -46,6 +48,10 @@ class OrbitalAttitudeDynamics(DynamicsModel):
 
     def step(self, state: StateTruth, command: Command, env: dict, dt_s: float) -> StateTruth:
         env_local = dict(env)
+        if self.drag_area_m2 is not None:
+            env_local["drag_area_m2"] = float(self.drag_area_m2)
+        if self.srp_area_m2 is not None:
+            env_local["srp_area_m2"] = float(self.srp_area_m2)
         geom = self._rectangular_prism_geometry()
         if self.use_rectangular_prism_for_aero_srp and geom is not None and self.disturbance_model is not None:
             c_bn = quaternion_to_dcm_bn(state.attitude_quat_bn)

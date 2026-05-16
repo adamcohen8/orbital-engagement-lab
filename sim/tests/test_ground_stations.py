@@ -7,7 +7,13 @@ import pytest
 
 from sim import SimulationConfig, SimulationSession
 from sim.config import GroundStationSection, scenario_config_from_dict
+from sim.dynamics.orbit.epoch import datetime_to_julian_date
 from sim.ground_stations import evaluate_ground_station_access
+from sim.reporting.ground_station_access_reports import (
+    DEFAULT_ACCESS_REPORT_EPOCH_UTC,
+    build_ground_station_access_report_views,
+    extract_access_windows,
+)
 
 
 def _ground_station_config(output_dir: Path) -> dict:
@@ -140,3 +146,75 @@ def test_single_run_records_ground_station_access_payload(tmp_path: Path) -> Non
     assert summary["access_samples"] >= 1
     assert summary["first_access_time_s"] == 0.0
     assert summary["min_range_km"] == pytest.approx(621.863, rel=1e-4)
+
+    assert result.summary["ground_station_access_report_epoch_utc"] == "2026-01-01T00:00:00Z"
+    report_outputs = result.summary["ground_station_access_report_outputs"]
+    by_satellite = Path(report_outputs["by_satellite"])
+    by_station = Path(report_outputs["by_ground_station"])
+    assert by_satellite.exists()
+    assert by_station.exists()
+    assert "2026-01-01T00:00:00Z" in by_satellite.read_text(encoding="utf-8")
+    assert "equator_prime -> target" in by_station.read_text(encoding="utf-8")
+
+
+def test_ground_station_access_reports_use_configured_utc_epoch() -> None:
+    jd_start = datetime_to_julian_date(DEFAULT_ACCESS_REPORT_EPOCH_UTC) + 1.0
+    t_s = np.array([0.0, 10.0, 20.0, 30.0])
+    target_payload = {
+        "access": [False, True, True, False],
+        "range_km": [None, 900.0, 800.0, None],
+        "elevation_deg": [None, 20.0, 40.0, None],
+    }
+
+    windows = extract_access_windows(t_s=t_s, target_payload=target_payload, jd_utc_start=jd_start)
+
+    assert windows == [
+        {
+            "start_index": 1,
+            "end_index": 2,
+            "start_time_s": 10.0,
+            "end_time_s": 30.0,
+            "duration_s": 20.0,
+            "aos_utc": "2026-01-02T00:00:10Z",
+            "los_utc": "2026-01-02T00:00:30Z",
+            "min_range_km": 800.0,
+            "max_elevation_deg": 40.0,
+        }
+    ]
+
+
+def test_ground_station_access_report_views_support_both_orientations() -> None:
+    views = build_ground_station_access_report_views(
+        ground_station_access={
+            "site_a": {
+                "station": {"id": "site_a"},
+                "targets": {
+                    "sat_1": {
+                        "access": [True, False],
+                        "range_km": [700.0, 710.0],
+                        "elevation_deg": [50.0, 45.0],
+                    }
+                },
+            }
+        },
+        ground_station_access_summary={
+            "site_a": {
+                "sat_1": {
+                    "access_duration_s": 10.0,
+                    "first_access_time_s": 0.0,
+                    "last_access_time_s": 0.0,
+                    "min_range_km": 700.0,
+                    "max_elevation_deg": 50.0,
+                }
+            }
+        },
+        t_s=np.array([0.0, 10.0]),
+        initial_jd_utc=None,
+    )
+
+    assert "sat_1" in views["by_satellite"]
+    assert "site_a" in views["by_satellite"]["sat_1"]["stations"]
+    assert "site_a" in views["by_ground_station"]
+    assert "sat_1" in views["by_ground_station"]["site_a"]["satellites"]
+    station_summary = views["by_ground_station"]["site_a"]["satellites"]["sat_1"]["summary"]
+    assert station_summary["first_access_utc"] == "2026-01-01T00:00:00Z"

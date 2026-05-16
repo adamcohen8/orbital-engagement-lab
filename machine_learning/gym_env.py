@@ -678,7 +678,6 @@ class GymSimulationEnv(gym.Env):
             env_common = dict(base_environment)
             mission_out = _run_mission_modules(
                 agent=agent,
-                world_truth=world_truth_inner,
                 t_s=t_eval,
                 dt_s=h,
                 env=env_common,
@@ -690,7 +689,6 @@ class GymSimulationEnv(gym.Env):
             mission_out.update(
                 _run_mission_strategy(
                     agent=agent,
-                    world_truth=world_truth_inner,
                     t_s=t_eval,
                     dt_s=h,
                     env=env_common,
@@ -708,7 +706,6 @@ class GymSimulationEnv(gym.Env):
                 _run_mission_execution(
                     agent=agent,
                     intent=mission_out,
-                    world_truth=world_truth_inner,
                     t_s=t_eval,
                     dt_s=h,
                     env=env_common,
@@ -1197,7 +1194,6 @@ class MultiAgentSimulationEnv:
             env_common = dict(base_environment)
             mission_out = _run_mission_modules(
                 agent=agent,
-                world_truth=world_truth_inner,
                 t_s=t_eval,
                 dt_s=h,
                 env=env_common,
@@ -1209,7 +1205,6 @@ class MultiAgentSimulationEnv:
             mission_out.update(
                 _run_mission_strategy(
                     agent=agent,
-                    world_truth=world_truth_inner,
                     t_s=t_eval,
                     dt_s=h,
                     env=env_common,
@@ -1231,7 +1226,6 @@ class MultiAgentSimulationEnv:
                 _run_mission_execution(
                     agent=agent,
                     intent=mission_out,
-                    world_truth=world_truth_inner,
                     t_s=t_eval,
                     dt_s=h,
                     env=env_common,

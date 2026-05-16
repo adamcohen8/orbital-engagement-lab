@@ -625,27 +625,49 @@ class _SatelliteStepper:
             )
             orb_belief = belief_ctx.orbit_belief
             att_belief = belief_ctx.attitude_belief
-            mission_out = e._run_agent_decision(
-                e.decision_contexts.satellite_context(
+            control_available_time_s = agent.control_available_time_s
+            control_available = (
+                control_available_time_s is None or t_decision >= float(control_available_time_s) - 1e-12
+            )
+            if control_available:
+                mission_out = e._run_agent_decision(
+                    e.decision_contexts.satellite_context(
+                        agent=agent,
+                        internal_world_truth=world_truth_inner,
+                        t_s=t_decision,
+                        dt_s=h,
+                        orb_belief=orb_belief,
+                        att_belief=att_belief,
+                    ),
+                )
+                command_result = self.command_builder.build(
+                    aid=aid,
                     agent=agent,
-                    internal_world_truth=world_truth_inner,
-                    t_s=t_decision,
-                    dt_s=h,
+                    truth=tr_inner,
+                    mission_out=mission_out,
                     orb_belief=orb_belief,
                     att_belief=att_belief,
-                ),
-            )
-            command_result = self.command_builder.build(
-                aid=aid,
-                agent=agent,
-                truth=tr_inner,
-                mission_out=mission_out,
-                orb_belief=orb_belief,
-                att_belief=att_belief,
-                t_s=t_decision,
-                dt_s=h,
-                sample_index=sample_index,
-            )
+                    t_s=t_decision,
+                    dt_s=h,
+                    sample_index=sample_index,
+                )
+            else:
+                cmd_zero = Command.zero()
+                cmd_zero.mode_flags.update(
+                    {
+                        "initialization_delay_active": True,
+                        "control_available_time_s": float(control_available_time_s),
+                    }
+                )
+                command_result = _SatelliteCommandResult(
+                    command_applied=cmd_zero,
+                    command_orbit=Command.zero(),
+                    command_attitude=Command.zero(),
+                    command_raw=Command.zero(),
+                    use_integrated_command=False,
+                    orbit_runtime_ms=0.0,
+                    attitude_runtime_ms=0.0,
+                )
             cmd_step = command_result.command_applied
             self.debug_recorder.record(
                 aid=aid,

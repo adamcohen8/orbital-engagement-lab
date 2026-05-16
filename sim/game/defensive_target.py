@@ -27,7 +27,6 @@ class DefensiveTargetIntentProvider:
         *,
         truth: StateTruth,
         t_s: float,
-        world_truth: dict[str, StateTruth] | None = None,
         own_knowledge: dict[str, Any] | None = None,
         dt_s: float | None = None,
         **_: Any,

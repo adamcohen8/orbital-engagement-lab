@@ -21,6 +21,8 @@ The public core includes:
 - passive ground-station access tracking
 - actuator models and mass depletion
 - YAML scenario loading
+- adversarial and engagement-style simulation primitives, including generic
+  chaser/target knowledge, pursuit, evade, and defensive behaviors
 - reusable object preset YAML files
 - Python API, CLI, and GUI entrypoints
 - examples and starter validation workflows
@@ -43,6 +45,7 @@ The pro layer includes:
 - AI-assisted campaign reports from Monte Carlo and sensitivity outputs
 - report cost estimation before hosted LLM calls
 - curated validation and mission-assurance scenario packs
+- rocket insertion engagement scenarios and deeper adversarial campaign packs
 - cFS/SIL and program-specific flight-software integration workflows
 - Pro workflow configs under `examples/configs/pro_*.yaml`
 - tuned rocket launch-to-orbit scenarios, TVC/ascent GNC benchmarks,

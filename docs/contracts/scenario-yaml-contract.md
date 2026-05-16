@@ -163,7 +163,15 @@ objects:
 
 - `position_eci_km` with optional `velocity_eci_km_s`,
 - `coes`,
-- `tle`.
+- `tle`,
+- `source: rocket_deployment` with `deploy_time_s`,
+- `source: rocket_insertion`.
+
+Rocket-deployed satellites may also set `deploy_dv_body_m_s`, a body-frame
+deployment delta-v in meters per second. `initialization_delay_s` is optional
+and defaults to `0.0`; while the delay is active, the satellite coasts and is
+visible to truth/knowledge/history, but its mission and controllers cannot
+command thrust or torque.
 
 The `tle` form accepts either `line1`/`line2` or `lines: [line1, line2]`.
 Optional `tle.require_checksum: true` enables TLE checksum validation.

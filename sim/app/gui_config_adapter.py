@@ -204,6 +204,9 @@ class GuiConfigAdapter:
         elif "relative_ric_curv" in chaser_init:
             window._set_combo_data_or_text(window.chaser_init_mode, "relative_ric_curv")
             values = list(chaser_init.get("relative_ric_curv", [0.0] * 6))
+        elif str(chaser_init.get("source", "") or "").strip() == "rocket_insertion":
+            window._set_combo_data_or_text(window.chaser_init_mode, "rocket_insertion")
+            values = list(chaser_init.get("deploy_dv_body_m_s", [10.0, 0.0, 0.0])) + [0.0, 0.0, 0.0]
         else:
             window._set_combo_data_or_text(window.chaser_init_mode, "rocket_deployment")
             values = list(chaser_init.get("deploy_dv_body_m_s", [10.0, 0.0, 0.0])) + [0.0, 0.0, 0.0]
@@ -483,6 +486,13 @@ class GuiConfigAdapter:
             chaser_initial_state["source"] = "rocket_deployment"
             chaser_initial_state["deploy_time_s"] = float(window.chaser_deploy_time.value())
             chaser_initial_state["deploy_dv_body_m_s"] = [float(window.chaser_init_values[i].value()) for i in range(3)]
+            chaser_initial_state.pop("relative_to_target_ric", None)
+            chaser_initial_state.pop("relative_ric_rect", None)
+            chaser_initial_state.pop("relative_ric_curv", None)
+        elif init_mode == "rocket_insertion":
+            chaser_initial_state["source"] = "rocket_insertion"
+            chaser_initial_state["deploy_dv_body_m_s"] = [float(window.chaser_init_values[i].value()) for i in range(3)]
+            chaser_initial_state.pop("deploy_time_s", None)
             chaser_initial_state.pop("relative_to_target_ric", None)
             chaser_initial_state.pop("relative_ric_rect", None)
             chaser_initial_state.pop("relative_ric_curv", None)

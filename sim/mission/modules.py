@@ -104,7 +104,6 @@ def _resolve_target_state(
     target_id: str | None,
     use_knowledge_for_targeting: bool,
     own_knowledge: dict[str, StateBelief],
-    world_truth: dict[str, StateTruth],
 ) -> tuple[np.ndarray, np.ndarray] | None:
     if target_id is None:
         return None
@@ -256,7 +255,6 @@ def _resolve_desired_state_from_inputs(
     desired_position_eci_km: np.ndarray | None,
     desired_velocity_eci_km_s: np.ndarray | None,
     own_knowledge: dict[str, StateBelief],
-    world_truth: dict[str, StateTruth],
 ) -> tuple[np.ndarray, np.ndarray] | None:
     src = str(desired_state_source).lower()
     if src == "explicit":
@@ -270,7 +268,6 @@ def _resolve_desired_state_from_inputs(
         target_id=target_id,
         use_knowledge_for_targeting=use_knowledge_for_targeting,
         own_knowledge=own_knowledge,
-        world_truth=world_truth,
     )
 
 
@@ -303,14 +300,12 @@ class PursuitMissionStrategy:
         *,
         truth: StateTruth,
         own_knowledge: dict[str, StateBelief],
-        world_truth: dict[str, StateTruth],
         **kwargs: Any,
     ) -> dict[str, Any]:
         tgt = _resolve_target_state(
             target_id=self.target_id,
             use_knowledge_for_targeting=self.use_knowledge_for_targeting,
             own_knowledge=own_knowledge,
-            world_truth=world_truth,
         )
         if tgt is None:
             direction = _unit(np.array(self.blind_direction_eci, dtype=float))
@@ -338,14 +333,12 @@ class EvadeMissionStrategy:
         *,
         truth: StateTruth,
         own_knowledge: dict[str, StateBelief],
-        world_truth: dict[str, StateTruth],
         **kwargs: Any,
     ) -> dict[str, Any]:
         tgt = _resolve_target_state(
             target_id=self.target_id,
             use_knowledge_for_targeting=self.use_knowledge_for_targeting,
             own_knowledge=own_knowledge,
-            world_truth=world_truth,
         )
         if tgt is None:
             direction = _unit(np.array(self.blind_direction_eci, dtype=float))
@@ -378,7 +371,6 @@ class HoldMissionStrategy:
         *,
         truth: StateTruth,
         own_knowledge: dict[str, StateBelief],
-        world_truth: dict[str, StateTruth],
         env: dict[str, Any],
         **kwargs: Any,
     ) -> dict[str, Any]:
@@ -415,7 +407,6 @@ class HoldMissionStrategy:
                 target_id=self.target_id,
                 use_knowledge_for_targeting=self.use_knowledge_for_targeting,
                 own_knowledge=own_knowledge,
-                world_truth=world_truth,
             )
             if tgt is None:
                 q_cmd = normalize_quaternion(np.array(truth.attitude_quat_bn, dtype=float))
@@ -447,7 +438,6 @@ class StationKeepMissionStrategy:
         *,
         truth: StateTruth,
         own_knowledge: dict[str, StateBelief],
-        world_truth: dict[str, StateTruth],
         **kwargs: Any,
     ) -> dict[str, Any]:
         desired_rel = np.array(self.desired_relative_ric_rect, dtype=float).reshape(6)
@@ -455,7 +445,6 @@ class StationKeepMissionStrategy:
             target_id=self.target_id,
             use_knowledge_for_targeting=self.use_knowledge_for_targeting,
             own_knowledge=own_knowledge,
-            world_truth=world_truth,
         )
         desired_state_eci = None
         fallback_accel = np.zeros(3, dtype=float)
@@ -587,7 +576,6 @@ class InspectMissionStrategy:
         *,
         truth: StateTruth,
         own_knowledge: dict[str, StateBelief],
-        world_truth: dict[str, StateTruth],
         **kwargs: Any,
     ) -> dict[str, Any]:
         desired_rel = np.array(self.desired_relative_ric_rect, dtype=float).reshape(6)
@@ -595,7 +583,6 @@ class InspectMissionStrategy:
             target_id=self.target_id,
             use_knowledge_for_targeting=self.use_knowledge_for_targeting,
             own_knowledge=own_knowledge,
-            world_truth=world_truth,
         )
         desired_state_eci = None
         desired_attitude = np.array(truth.attitude_quat_bn, dtype=float)
@@ -677,7 +664,6 @@ class DesiredStateMissionStrategy:
         self,
         *,
         own_knowledge: dict[str, StateBelief],
-        world_truth: dict[str, StateTruth],
         **kwargs: Any,
     ) -> dict[str, Any]:
         desired = _resolve_desired_state_from_inputs(
@@ -687,7 +673,6 @@ class DesiredStateMissionStrategy:
             desired_position_eci_km=self.desired_position_eci_km,
             desired_velocity_eci_km_s=self.desired_velocity_eci_km_s,
             own_knowledge=own_knowledge,
-            world_truth=world_truth,
         )
         if desired is None:
             return {
@@ -717,7 +702,6 @@ class DefensiveMissionStrategy:
         self,
         *,
         own_knowledge: dict[str, StateBelief],
-        world_truth: dict[str, StateTruth],
     ) -> tuple[np.ndarray, np.ndarray] | None:
         kb = own_knowledge.get(self.chaser_id)
         if kb is not None and kb.state.size >= 6:
@@ -731,10 +715,9 @@ class DefensiveMissionStrategy:
         *,
         truth: StateTruth,
         own_knowledge: dict[str, StateBelief],
-        world_truth: dict[str, StateTruth],
         **kwargs: Any,
     ) -> dict[str, Any]:
-        chaser_state = self._resolve_chaser_state(own_knowledge=own_knowledge, world_truth=world_truth)
+        chaser_state = self._resolve_chaser_state(own_knowledge=own_knowledge)
         thrust_cmd = np.zeros(3, dtype=float)
         direction_source = "none"
         if chaser_state is not None and float(max(self.burn_accel_km_s2, 0.0)) > 0.0:
@@ -840,7 +823,6 @@ class MissionExecutiveStrategy:
         *,
         truth: StateTruth,
         own_knowledge: dict[str, StateBelief],
-        world_truth: dict[str, StateTruth],
         target_id: str | None,
         use_knowledge: bool,
     ) -> float | None:
@@ -848,7 +830,6 @@ class MissionExecutiveStrategy:
             target_id=target_id,
             use_knowledge_for_targeting=use_knowledge,
             own_knowledge=own_knowledge,
-            world_truth=world_truth,
         )
         if tgt is None:
             return None
@@ -870,7 +851,6 @@ class MissionExecutiveStrategy:
         transition: dict[str, Any],
         truth: StateTruth,
         own_knowledge: dict[str, StateBelief],
-        world_truth: dict[str, StateTruth],
         dry_mass_kg: float | None,
         rocket_state: RocketState | None,
         rocket_vehicle_cfg: RocketVehicleConfig | None,
@@ -881,7 +861,6 @@ class MissionExecutiveStrategy:
             range_km = self._range_km(
                 truth=truth,
                 own_knowledge=own_knowledge,
-                world_truth=world_truth,
                 target_id=(None if transition.get("target_id") is None else str(transition.get("target_id"))),
                 use_knowledge=bool(transition.get("use_knowledge_for_targeting", True)),
             )
@@ -916,7 +895,6 @@ class MissionExecutiveStrategy:
         transition: dict[str, Any],
         truth: StateTruth,
         own_knowledge: dict[str, StateBelief],
-        world_truth: dict[str, StateTruth],
         dry_mass_kg: float | None,
         rocket_state: RocketState | None,
         rocket_vehicle_cfg: RocketVehicleConfig | None,
@@ -927,7 +905,6 @@ class MissionExecutiveStrategy:
             return self._range_km(
                 truth=truth,
                 own_knowledge=own_knowledge,
-                world_truth=world_truth,
                 target_id=(None if transition.get("target_id") is None else str(transition.get("target_id"))),
                 use_knowledge=bool(transition.get("use_knowledge_for_targeting", True)),
             )
@@ -970,7 +947,6 @@ class MissionExecutiveStrategy:
         *,
         truth: StateTruth,
         own_knowledge: dict[str, StateBelief],
-        world_truth: dict[str, StateTruth],
         dry_mass_kg: float | None,
         rocket_state: RocketState | None,
         rocket_vehicle_cfg: RocketVehicleConfig | None,
@@ -993,7 +969,6 @@ class MissionExecutiveStrategy:
                 transition=transition,
                 truth=truth,
                 own_knowledge=own_knowledge,
-                world_truth=world_truth,
                 dry_mass_kg=dry_mass_kg,
                 rocket_state=rocket_state,
                 rocket_vehicle_cfg=rocket_vehicle_cfg,
@@ -1016,7 +991,6 @@ class MissionExecutiveStrategy:
                 transition=transition,
                 truth=truth,
                 own_knowledge=own_knowledge,
-                world_truth=world_truth,
                 dry_mass_kg=dry_mass_kg,
                 rocket_state=rocket_state,
                 rocket_vehicle_cfg=rocket_vehicle_cfg,
@@ -1041,7 +1015,6 @@ class MissionExecutiveStrategy:
         *,
         truth: StateTruth,
         own_knowledge: dict[str, StateBelief],
-        world_truth: dict[str, StateTruth],
         dry_mass_kg: float | None = None,
         fuel_capacity_kg: float | None = None,
         rocket_state: RocketState | None = None,
@@ -1058,7 +1031,6 @@ class MissionExecutiveStrategy:
         self._maybe_transition(
             truth=truth,
             own_knowledge=own_knowledge,
-            world_truth=world_truth,
             dry_mass_kg=dry_mass_kg,
             rocket_state=rocket_state,
             rocket_vehicle_cfg=rocket_vehicle_cfg,
@@ -1074,7 +1046,6 @@ class MissionExecutiveStrategy:
             {
                 "truth": truth,
                 "own_knowledge": own_knowledge,
-                "world_truth": world_truth,
                 "env": dict(kwargs.get("env", {}) or {}),
                 "dry_mass_kg": dry_mass_kg,
                 "fuel_capacity_kg": fuel_capacity_kg,
@@ -1167,7 +1138,6 @@ class RocketGoWhenPossibleExecution:
         intent: dict[str, Any],
         truth: StateTruth,
         own_knowledge: dict[str, StateBelief] | None = None,
-        world_truth: dict[str, StateTruth],
         rocket_state: RocketState | None = None,
         rocket_vehicle_cfg: RocketVehicleConfig | None = None,
         **kwargs: Any,
@@ -1177,7 +1147,6 @@ class RocketGoWhenPossibleExecution:
             target_id=(None if target_id is None else str(target_id)),
             use_knowledge_for_targeting=True,
             own_knowledge=dict(own_knowledge or {}),
-            world_truth=world_truth,
         )
         dv_needed = (
             np.inf
@@ -1241,7 +1210,6 @@ class RocketMissionStrategy:
         self,
         *,
         truth: StateTruth,
-        world_truth: dict[str, StateTruth],
         t_s: float,
         rocket_state: RocketState | None = None,
         rocket_vehicle_cfg: RocketVehicleConfig | None = None,
@@ -1270,7 +1238,6 @@ class RocketMissionStrategy:
                 ).update(
                     intent=out,
                     truth=truth,
-                    world_truth=world_truth,
                     rocket_state=rocket_state,
                     rocket_vehicle_cfg=rocket_vehicle_cfg,
                 )
@@ -1448,7 +1415,6 @@ class PredictiveBurnExecution:
         *,
         intent: dict[str, Any],
         own_knowledge: dict[str, StateBelief],
-        world_truth: dict[str, StateTruth],
     ) -> tuple[np.ndarray, np.ndarray] | None:
         desired_state = intent.get("desired_state_eci_6")
         if desired_state is not None:
@@ -1461,7 +1427,6 @@ class PredictiveBurnExecution:
             target_id=(None if target_id is None else str(target_id)),
             use_knowledge_for_targeting=use_knowledge,
             own_knowledge=own_knowledge,
-            world_truth=world_truth,
         )
 
     def _predict_eci(self, x_eci: np.ndarray, horizon_s: float, dt_s: float) -> np.ndarray:
@@ -1573,7 +1538,6 @@ class PredictiveBurnExecution:
         intent: dict[str, Any],
         truth: StateTruth,
         own_knowledge: dict[str, StateBelief],
-        world_truth: dict[str, StateTruth],
         orbit_controller: Any | None = None,
         attitude_controller: Any | None = None,
         att_belief: StateBelief | None = None,
@@ -1589,7 +1553,7 @@ class PredictiveBurnExecution:
         in_detumble_mode, mode_str = self._attitude_controller_in_detumble_mode(attitude_controller)
         planning_blocked_by_detumble = bool(self.skip_orbit_planning_in_detumble_mode and in_detumble_mode)
         plan_period_s = self._effective_planning_period_s(float(dt_s))
-        target_state = self._target_state(intent=intent, own_knowledge=own_knowledge, world_truth=world_truth)
+        target_state = self._target_state(intent=intent, own_knowledge=own_knowledge)
         _apply_orbit_controller_intent(orbit_controller, intent)
         plan_due = bool(
             self._last_plan_t_s is None or (float(t_s) - float(self._last_plan_t_s)) >= (plan_period_s - 1e-12)
@@ -2207,9 +2171,7 @@ class SatelliteMissionModule:
     spotlight_ric_direction: np.ndarray = field(default_factory=lambda: np.array([1.0, 0.0, 0.0], dtype=float))
     use_knowledge_for_targeting: bool = True
 
-    def _target_state(
-        self, own_knowledge: dict[str, StateBelief], world_truth: dict[str, StateTruth]
-    ) -> tuple[np.ndarray, np.ndarray] | None:
+    def _target_state(self, own_knowledge: dict[str, StateBelief]) -> tuple[np.ndarray, np.ndarray] | None:
         if self.target_id is None:
             return None
         if self.use_knowledge_for_targeting and self.target_id in own_knowledge:
@@ -2218,14 +2180,12 @@ class SatelliteMissionModule:
                 return np.array(kb.state[:3], dtype=float), np.array(kb.state[3:6], dtype=float)
         return None
 
-    def _orbital_command(
-        self, truth: StateTruth, own_knowledge: dict[str, StateBelief], world_truth: dict[str, StateTruth]
-    ) -> np.ndarray:
+    def _orbital_command(self, truth: StateTruth, own_knowledge: dict[str, StateBelief]) -> np.ndarray:
         amax = float(max(self.max_accel_km_s2, 0.0))
         if self.orbital_mode == "coast" or amax <= 0.0:
             return np.zeros(3, dtype=float)
         if self.orbital_mode in ("pursuit_knowledge", "evade_knowledge", "pursuit_blind", "evade_blind"):
-            tgt = self._target_state(own_knowledge=own_knowledge, world_truth=world_truth)
+            tgt = self._target_state(own_knowledge=own_knowledge)
             if tgt is None:
                 d = _unit(np.array(self.blind_direction_eci, dtype=float))
             else:
@@ -2239,10 +2199,11 @@ class SatelliteMissionModule:
         self,
         truth: StateTruth,
         own_knowledge: dict[str, StateBelief],
-        world_truth: dict[str, StateTruth],
-        env: dict[str, Any],
-        orbital_accel_cmd: np.ndarray,
+        env: dict[str, Any] | None = None,
+        orbital_accel_cmd: np.ndarray | None = None,
     ) -> np.ndarray:
+        env = dict(env or {})
+        orbital_accel_cmd = np.zeros(3, dtype=float) if orbital_accel_cmd is None else np.array(orbital_accel_cmd)
         mode = str(self.attitude_mode).lower()
         if mode == "hold_eci":
             return normalize_quaternion(np.array(self.hold_quat_bn, dtype=float))
@@ -2283,7 +2244,7 @@ class SatelliteMissionModule:
                 sun_dir_eci=d,
                 panel_normal_body=np.array(self.boresight_body, dtype=float),
             )
-        tgt = self._target_state(own_knowledge=own_knowledge, world_truth=world_truth)
+        tgt = self._target_state(own_knowledge=own_knowledge)
         if tgt is not None:
             d = _unit(tgt[0] - np.array(truth.position_eci_km, dtype=float))
             return PoseCommandGenerator.sun_track(
@@ -2299,17 +2260,15 @@ class SatelliteMissionModule:
         object_id: str,
         truth: StateTruth,
         own_knowledge: dict[str, StateBelief],
-        world_truth: dict[str, StateTruth],
         env: dict[str, Any],
         t_s: float,
         dt_s: float,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        a_cmd = self._orbital_command(truth=truth, own_knowledge=own_knowledge, world_truth=world_truth)
+        a_cmd = self._orbital_command(truth=truth, own_knowledge=own_knowledge)
         q_cmd = self._attitude_command(
             truth=truth,
             own_knowledge=own_knowledge,
-            world_truth=world_truth,
             env=env,
             orbital_accel_cmd=a_cmd,
         )
@@ -2493,13 +2452,11 @@ class SingleRICAxisBurnMissionModule:
         self,
         *,
         own_knowledge: dict[str, StateBelief],
-        world_truth: dict[str, StateTruth],
     ) -> tuple[np.ndarray, np.ndarray] | None:
         ref = _resolve_target_state(
             target_id=self.target_id,
             use_knowledge_for_targeting=bool(self.use_knowledge_for_targeting),
             own_knowledge=own_knowledge,
-            world_truth=world_truth,
         )
         if ref is None:
             return None
@@ -2516,13 +2473,12 @@ class SingleRICAxisBurnMissionModule:
         *,
         truth: StateTruth,
         own_knowledge: dict[str, StateBelief],
-        world_truth: dict[str, StateTruth],
         t_s: float,
         dt_s: float,
         **kwargs: Any,
     ) -> dict[str, Any]:
         out: dict[str, Any] = {}
-        ref = self._reference_state(own_knowledge=own_knowledge, world_truth=world_truth)
+        ref = self._reference_state(own_knowledge=own_knowledge)
         burn_start_s = float(self.burn_start_s)
         burn_duration_s = float(max(self.burn_duration_s, 0.0))
         slew_lead_time_s = float(max(self.slew_lead_time_s, 0.0))
@@ -2609,7 +2565,6 @@ class RocketMissionModule:
         *,
         object_id: str,
         truth: StateTruth,
-        world_truth: dict[str, StateTruth],
         t_s: float,
         rocket_state: RocketState | None = None,
         rocket_vehicle_cfg: RocketVehicleConfig | None = None,
@@ -2629,7 +2584,6 @@ class RocketMissionModule:
                     target_id=(None if self.target_id is None else str(self.target_id)),
                     use_knowledge_for_targeting=True,
                     own_knowledge=own_knowledge,
-                    world_truth=world_truth,
                 )
                 dv_avail = _estimate_stack_delta_v_m_s(rocket_state=rocket_state, vehicle_cfg=rocket_vehicle_cfg)
                 dv_need = (
@@ -2689,7 +2643,6 @@ class EndStateManeuverMissionModule:
         self,
         *,
         own_knowledge: dict[str, StateBelief],
-        world_truth: dict[str, StateTruth],
     ) -> tuple[np.ndarray, np.ndarray] | None:
         src = str(self.desired_state_source).lower()
         if src == "explicit":
@@ -2713,7 +2666,6 @@ class EndStateManeuverMissionModule:
         object_id: str,
         truth: StateTruth,
         own_knowledge: dict[str, StateBelief],
-        world_truth: dict[str, StateTruth],
         t_s: float,
         dt_s: float,
         dry_mass_kg: float | None = None,
@@ -2724,7 +2676,7 @@ class EndStateManeuverMissionModule:
         env = dict(kwargs.get("env", {}) or {})
         attitude_disabled = bool(env.get("attitude_disabled", False))
         out: dict[str, Any] = {}
-        desired = self._resolve_desired_state(own_knowledge=own_knowledge, world_truth=world_truth)
+        desired = self._resolve_desired_state(own_knowledge=own_knowledge)
         if desired is None:
             out["mission_mode"] = {"type": "end_state", "phase": "hold_no_target"}
             return out
@@ -2818,7 +2770,6 @@ class IntegratedCommandMissionModule:
         self,
         *,
         own_knowledge: dict[str, StateBelief],
-        world_truth: dict[str, StateTruth],
     ) -> tuple[np.ndarray, np.ndarray] | None:
         src = str(self.desired_state_source).lower()
         if src == "explicit":
@@ -2889,7 +2840,6 @@ class IntegratedCommandMissionModule:
         object_id: str,
         truth: StateTruth,
         own_knowledge: dict[str, StateBelief],
-        world_truth: dict[str, StateTruth],
         orbit_controller: Any | None = None,
         attitude_controller: Any | None = None,
         orb_belief: StateBelief | None = None,
@@ -2901,7 +2851,7 @@ class IntegratedCommandMissionModule:
         env = dict(kwargs.get("env", {}) or {})
         attitude_disabled = bool(env.get("attitude_disabled", False))
         out: dict[str, Any] = {}
-        desired = self._resolve_desired_state(own_knowledge=own_knowledge, world_truth=world_truth)
+        desired = self._resolve_desired_state(own_knowledge=own_knowledge)
         if desired is not None:
             x_des = np.hstack((desired[0], desired[1]))
             self._set_orbit_controller_target(orbit_controller, x_des)
@@ -2992,9 +2942,7 @@ class PredictiveIntegratedCommandMissionModule:
             self.alignment_tolerance_rad, self.alignment_tolerance_deg
         )
 
-    def _target_state(
-        self, own_knowledge: dict[str, StateBelief], world_truth: dict[str, StateTruth]
-    ) -> tuple[np.ndarray, np.ndarray] | None:
+    def _target_state(self, own_knowledge: dict[str, StateBelief]) -> tuple[np.ndarray, np.ndarray] | None:
         if self.use_knowledge_for_targeting:
             kb = own_knowledge.get(self.target_id)
             if kb is not None and kb.state.size >= 6:
@@ -3089,7 +3037,6 @@ class PredictiveIntegratedCommandMissionModule:
         *,
         truth: StateTruth,
         own_knowledge: dict[str, StateBelief],
-        world_truth: dict[str, StateTruth],
         orbit_controller: Any | None = None,
         attitude_controller: Any | None = None,
         orb_belief: StateBelief | None = None,
@@ -3104,7 +3051,7 @@ class PredictiveIntegratedCommandMissionModule:
         in_detumble_mode, mode_str = self._attitude_controller_in_detumble_mode(attitude_controller)
         planning_blocked_by_detumble = bool(self.skip_orbit_planning_in_detumble_mode and in_detumble_mode)
         plan_period_s = self._effective_planning_period_s(orbit_controller=orbit_controller, dt_s=float(dt_s))
-        target_state = self._target_state(own_knowledge=own_knowledge, world_truth=world_truth)
+        target_state = self._target_state(own_knowledge=own_knowledge)
         plan_due = bool(
             self._last_plan_t_s is None or (float(t_s) - float(self._last_plan_t_s)) >= (plan_period_s - 1e-12)
         )

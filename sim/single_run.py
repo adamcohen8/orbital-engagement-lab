@@ -139,7 +139,7 @@ class _SingleRunEngine:
                     np.random.default_rng(int(rng.integers(0, 2**31 - 1))),
                 )
         for agent in self.agents.values():
-            if agent.kind == "satellite" and agent.deploy_source == "rocket_deployment":
+            if agent.kind == "satellite" and agent.deploy_source in {"rocket_deployment", "rocket_insertion"}:
                 agent.active = False
 
         self.rocket = self.agents.get("rocket") or next((a for a in self.agents.values() if a.kind == "rocket"), None)
@@ -147,7 +147,7 @@ class _SingleRunEngine:
         self.target = self.agents.get("target")
 
         for aid, agent in self.agents.items():
-            if agent.kind != "satellite" or agent.deploy_source == "rocket_deployment":
+            if agent.kind != "satellite" or agent.deploy_source in {"rocket_deployment", "rocket_insertion"}:
                 continue
             agent_cfg = self.object_configs.get(aid)
             initial_state = dict(getattr(agent_cfg, "initial_state", {}) or {})
@@ -463,7 +463,6 @@ class _SingleRunEngine:
                 truth=decision_truth,
                 belief=agent.belief,
                 own_knowledge=(agent.knowledge_base.snapshot() if agent.knowledge_base is not None else {}),
-                world_truth=ctx.internal_world_truth,
                 env=ctx.env,
                 t_s=ctx.t_s,
                 dt_s=ctx.dt_s,
@@ -483,7 +482,6 @@ class _SingleRunEngine:
         agent = ctx.agent
         mission_out = _run_mission_modules(
             agent=agent,
-            world_truth=ctx.internal_world_truth,
             t_s=ctx.t_s,
             dt_s=ctx.dt_s,
             env=ctx.env,
@@ -495,7 +493,6 @@ class _SingleRunEngine:
         mission_out.update(
             _run_mission_strategy(
                 agent=agent,
-                world_truth=ctx.internal_world_truth,
                 t_s=ctx.t_s,
                 dt_s=ctx.dt_s,
                 env=ctx.env,
@@ -511,7 +508,6 @@ class _SingleRunEngine:
             _run_mission_execution(
                 agent=agent,
                 intent=mission_out,
-                world_truth=ctx.internal_world_truth,
                 t_s=ctx.t_s,
                 dt_s=ctx.dt_s,
                 env=ctx.env,
@@ -534,7 +530,7 @@ class _SingleRunEngine:
         if self.rocket is not None:
             for agent in self.agents.values():
                 if agent.kind == "satellite" and not agent.active and agent.deploy_source == "rocket_deployment":
-                    if t_next >= float(agent.deploy_time_s or 0.0):
+                    if agent.deploy_time_s is not None and t_next >= float(agent.deploy_time_s):
                         _deploy_from_rocket(agent, self.rocket, t_next)
 
         world_truth_start = {
@@ -626,6 +622,14 @@ class _SingleRunEngine:
                         evt["bridge_error"] = str(ex)
                 self.bridge_hist[aid].append(evt)
 
+        self.termination_monitor.update_rocket_insertion(t_s=t_next)
+        if self.rocket is not None and self.rocket_inserted:
+            for aid, agent in self.agents.items():
+                if agent.kind == "satellite" and not agent.active and agent.deploy_source == "rocket_insertion":
+                    _deploy_from_rocket(agent, self.rocket, t_next)
+                    if agent.active and agent.truth is not None:
+                        world_truth_live[aid] = agent.truth
+
         self.knowledge_sync.update_after_step(
             world_truth=world_truth_live,
             sample_index=k + 1,
@@ -646,8 +650,6 @@ class _SingleRunEngine:
 
         if self.termination_monitor.check_earth_impact(t_s=t_next):
             return self.snapshot()
-        self.termination_monitor.update_rocket_insertion(t_s=t_next)
-
         return self.snapshot()
 
     def run(self) -> dict[str, Any]:

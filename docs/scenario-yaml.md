@@ -217,6 +217,10 @@ Single-run payloads include:
 
 The same summary is also copied into `summary.ground_station_access_summary`
 and appears in `index.md` key results when stations are configured.
+Single-run artifacts also include satellite-oriented and ground-station-oriented
+Markdown access reports. Report AOS/LOS times use UTC based on
+`simulator.initial_jd_utc`; if no epoch is configured, the report epoch defaults
+to `2026-01-01T00:00:00Z`.
 Add `ground_station_access` to `outputs.plots.figure_ids` for a built-in access,
 elevation, and slant-range figure. Set `outputs.plots.draw_earth_map: true`
 when static ground-track figures should use a world-map background.

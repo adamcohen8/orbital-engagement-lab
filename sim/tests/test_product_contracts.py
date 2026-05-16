@@ -14,12 +14,12 @@ from sim.execution.metrics import closest_approach_from_run_payload
 
 
 class ContractRecordTimingMission:
-    def update(self, *, object_id, truth, world_truth, t_s, env, **kwargs):
+    def update(self, *, object_id, truth, t_s, env, **kwargs):
         flags = {
             "object_id": str(object_id),
             "decision_t_s": float(t_s),
             "own_truth_t_s": float(truth.t_s),
-            "world_truth_keys": sorted(str(k) for k in dict(world_truth).keys()),
+            "received_world_truth": "world_truth" in kwargs,
             "env_has_world_truth": "world_truth" in dict(env),
         }
         return {
@@ -398,8 +398,62 @@ def test_engine_timing_contract_does_not_expose_world_truth_to_agents(tmp_path: 
     assert target_truth[-1, 0] > 7000.5
     assert flags["decision_t_s"] == 0.0
     assert flags["own_truth_t_s"] == 0.0
-    assert flags["world_truth_keys"] == []
+    assert flags["received_world_truth"] is False
     assert flags["env_has_world_truth"] is False
+
+
+def test_external_intent_provider_does_not_receive_world_truth(tmp_path: Path) -> None:
+    cfg = SimulationConfig.from_dict(
+        {
+            "scenario_name": "contract_external_intent_no_world_truth_access",
+            "rocket": {"enabled": False},
+            "target": {
+                "enabled": True,
+                "specs": {"mass_kg": 100.0},
+                "initial_state": {
+                    "position_eci_km": [7000.0, 0.0, 0.0],
+                    "velocity_eci_km_s": [1.0, 7.5, 0.0],
+                },
+            },
+            "chaser": {
+                "enabled": True,
+                "specs": {"mass_kg": 100.0},
+                "initial_state": {
+                    "position_eci_km": [7100.0, 0.0, 0.0],
+                    "velocity_eci_km_s": [0.0, 7.5, 0.0],
+                },
+            },
+            "simulator": {
+                "duration_s": 1.0,
+                "dt_s": 1.0,
+                "termination": {"earth_impact_enabled": False},
+                "dynamics": {"attitude": {"enabled": False}},
+            },
+            "outputs": {
+                "output_dir": str(tmp_path),
+                "mode": "save",
+                "stats": {"print_summary": False, "save_json": False, "save_full_log": False},
+                "plots": {"enabled": False, "figure_ids": []},
+                "animations": {"enabled": False, "types": []},
+            },
+            "monte_carlo": {"enabled": False},
+        }
+    )
+    calls: list[dict[str, object]] = []
+
+    def provider(**kwargs: object) -> dict[str, object]:
+        calls.append(dict(kwargs))
+        return {}
+
+    session = SimulationSession.from_config(cfg)
+    session.set_external_intent_provider("chaser", provider)
+    result = session.run()
+
+    assert calls
+    assert result.truth["target"][-1, 0] > 7000.5
+    assert all("world_truth" not in call for call in calls)
+    assert all("world_truth" not in dict(call.get("env", {})) for call in calls)
+    assert all("own_knowledge" in call for call in calls)
 
 
 def test_engine_timing_contract_estimates_after_inner_step_propagation(tmp_path: Path) -> None:
