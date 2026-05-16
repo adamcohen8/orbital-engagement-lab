@@ -43,13 +43,12 @@ def _belief(position_eci_km: list[float]) -> StateBelief:
 
 
 class MissionExecutiveTests(unittest.TestCase):
-    def test_world_truth_is_not_targeting_fallback(self) -> None:
+    def test_targeting_does_not_fallback_without_knowledge(self) -> None:
         strategy = PursuitMissionStrategy(target_id="target", use_knowledge_for_targeting=False, max_accel_km_s2=1e-6)
 
         out = strategy.update(
             truth=_truth([7000.0, 0.0, 0.0]),
             own_knowledge={},
-            world_truth={"target": _truth([7001.0, 0.0, 0.0])},
         )
 
         self.assertTrue(
@@ -75,17 +74,17 @@ class MissionExecutiveTests(unittest.TestCase):
         own_knowledge = {"target": _belief([7008.0, 0.0, 0.0])}
 
         out0 = executive.update(
-            truth=_truth([7000.0, 0.0, 0.0], t_s=0.0), own_knowledge=own_knowledge, world_truth={}, t_s=0.0
+            truth=_truth([7000.0, 0.0, 0.0], t_s=0.0), own_knowledge=own_knowledge, t_s=0.0
         )
         self.assertEqual(out0["mission_mode"]["executive_mode"], "hold")
 
         out1 = executive.update(
-            truth=_truth([7000.0, 0.0, 0.0], t_s=3.0), own_knowledge=own_knowledge, world_truth={}, t_s=3.0
+            truth=_truth([7000.0, 0.0, 0.0], t_s=3.0), own_knowledge=own_knowledge, t_s=3.0
         )
         self.assertEqual(out1["mission_mode"]["executive_mode"], "hold")
 
         out2 = executive.update(
-            truth=_truth([7000.0, 0.0, 0.0], t_s=5.0), own_knowledge=own_knowledge, world_truth={}, t_s=5.0
+            truth=_truth([7000.0, 0.0, 0.0], t_s=5.0), own_knowledge=own_knowledge, t_s=5.0
         )
         self.assertEqual(out2["mission_mode"]["executive_mode"], "defend")
 
@@ -120,32 +119,32 @@ class MissionExecutiveTests(unittest.TestCase):
         far_knowledge = {"target": _belief([7016.0, 0.0, 0.0])}
 
         out0 = executive.update(
-            truth=_truth([7000.0, 0.0, 0.0], t_s=0.0), own_knowledge=close_knowledge, world_truth={}, t_s=0.0
+            truth=_truth([7000.0, 0.0, 0.0], t_s=0.0), own_knowledge=close_knowledge, t_s=0.0
         )
         self.assertEqual(out0["mission_mode"]["executive_mode"], "defend")
 
         out1 = executive.update(
-            truth=_truth([7000.0, 0.0, 0.0], t_s=1.0), own_knowledge=mid_knowledge, world_truth={}, t_s=1.0
+            truth=_truth([7000.0, 0.0, 0.0], t_s=1.0), own_knowledge=mid_knowledge, t_s=1.0
         )
         self.assertEqual(out1["mission_mode"]["executive_mode"], "defend")
 
         out2 = executive.update(
-            truth=_truth([7000.0, 0.0, 0.0], t_s=2.0), own_knowledge=far_knowledge, world_truth={}, t_s=2.0
+            truth=_truth([7000.0, 0.0, 0.0], t_s=2.0), own_knowledge=far_knowledge, t_s=2.0
         )
         self.assertEqual(out2["mission_mode"]["executive_mode"], "hold")
 
         out3 = executive.update(
-            truth=_truth([7000.0, 0.0, 0.0], t_s=3.0), own_knowledge=mid_knowledge, world_truth={}, t_s=3.0
+            truth=_truth([7000.0, 0.0, 0.0], t_s=3.0), own_knowledge=mid_knowledge, t_s=3.0
         )
         self.assertEqual(out3["mission_mode"]["executive_mode"], "hold")
 
         out4 = executive.update(
-            truth=_truth([7000.0, 0.0, 0.0], t_s=4.0), own_knowledge=far_knowledge, world_truth={}, t_s=4.0
+            truth=_truth([7000.0, 0.0, 0.0], t_s=4.0), own_knowledge=far_knowledge, t_s=4.0
         )
         self.assertEqual(out4["mission_mode"]["executive_mode"], "hold")
 
         out5 = executive.update(
-            truth=_truth([7000.0, 0.0, 0.0], t_s=5.0), own_knowledge=close_knowledge, world_truth={}, t_s=5.0
+            truth=_truth([7000.0, 0.0, 0.0], t_s=5.0), own_knowledge=close_knowledge, t_s=5.0
         )
         self.assertEqual(out5["mission_mode"]["executive_mode"], "defend")
 
@@ -174,7 +173,6 @@ class MissionExecutiveTests(unittest.TestCase):
         out0 = executive.update(
             truth=_truth([7000.0, 0.0, 0.0], mass_kg=103.0, t_s=0.0),
             own_knowledge={},
-            world_truth={},
             dry_mass_kg=100.0,
             fuel_capacity_kg=20.0,
             t_s=0.0,
@@ -184,7 +182,6 @@ class MissionExecutiveTests(unittest.TestCase):
         out1 = executive.update(
             truth=_truth([7000.0, 0.0, 0.0], mass_kg=126.0, t_s=1.0),
             own_knowledge={},
-            world_truth={},
             dry_mass_kg=100.0,
             fuel_capacity_kg=20.0,
             t_s=1.0,
@@ -194,7 +191,6 @@ class MissionExecutiveTests(unittest.TestCase):
         out2 = executive.update(
             truth=_truth([7000.0, 0.0, 0.0], mass_kg=130.0, t_s=2.0),
             own_knowledge={},
-            world_truth={},
             dry_mass_kg=100.0,
             fuel_capacity_kg=20.0,
             t_s=2.0,

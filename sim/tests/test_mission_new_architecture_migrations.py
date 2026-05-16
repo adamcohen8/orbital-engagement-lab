@@ -51,7 +51,7 @@ class MissionArchitectureMigrationTests(unittest.TestCase):
             desired_position_eci_km=np.array([7100.0, 1.0, 2.0]),
             desired_velocity_eci_km_s=np.array([0.1, 7.4, 0.0]),
         )
-        out = s.update(own_knowledge={}, world_truth={})
+        out = s.update(own_knowledge={})
         self.assertTrue(
             np.allclose(np.array(out["desired_state_eci_6"], dtype=float), np.array([7100.0, 1.0, 2.0, 0.1, 7.4, 0.0]))
         )
@@ -156,7 +156,6 @@ class MissionArchitectureMigrationTests(unittest.TestCase):
             intent={"desired_state_eci_6": np.array([7100.0, 0.0, 0.0, 0.0, 7.4, 0.0])},
             truth=truth,
             own_knowledge={},
-            world_truth={},
             orbit_controller=controller,
             attitude_controller=att,
             att_belief=None,

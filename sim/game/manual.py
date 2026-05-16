@@ -5,7 +5,7 @@ from typing import Any
 
 import numpy as np
 
-from sim.core.models import StateTruth
+from sim.core.models import StateBelief, StateTruth
 from sim.utils.frames import ric_dcm_ir_from_rv
 from sim.utils.quaternion import normalize_quaternion, quaternion_delta_from_body_rate, quaternion_multiply
 
@@ -92,8 +92,7 @@ class ManualGameCommandProvider:
         t_s: float,
         dt_s: float,
         object_id: str | None = None,
-        world_truth: dict[str, StateTruth] | None = None,
-        own_knowledge: dict[str, Any] | None = None,
+        own_knowledge: dict[str, StateBelief] | None = None,
         **_: Any,
     ) -> dict[str, Any]:
         if object_id is not None and str(object_id) != str(self.controlled_object_id):
@@ -116,7 +115,6 @@ class ManualGameCommandProvider:
             ref_state = _reference_state6(
                 reference_object_id=self.reference_object_id,
                 own_knowledge=own_knowledge,
-                world_truth=world_truth,
             )
             if ref_state is not None:
                 c_ir = ric_dcm_ir_from_rv(ref_state[:3], ref_state[3:6])
@@ -160,14 +158,10 @@ class ManualGameCommandProvider:
 def _reference_state6(
     *,
     reference_object_id: str,
-    own_knowledge: dict[str, Any] | None,
-    world_truth: dict[str, StateTruth] | None,
+    own_knowledge: dict[str, StateBelief] | None,
 ) -> np.ndarray | None:
     ref_id = str(reference_object_id)
     ref = dict(own_knowledge or {}).get(ref_id)
     if ref is not None and getattr(ref, "state", np.array([])).size >= 6:
         return np.array(ref.state[:6], dtype=float)
-    truth = dict(world_truth or {}).get(ref_id)
-    if truth is not None:
-        return np.hstack((truth.position_eci_km, truth.velocity_eci_km_s)).astype(float)
     return None

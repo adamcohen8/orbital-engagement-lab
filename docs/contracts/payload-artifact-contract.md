@@ -183,6 +183,7 @@ Ground-station fields:
 - `ground_station_access`
 - `ground_station_access_summary`
 - `summary.ground_station_access_summary`
+- `summary.ground_station_access_report_outputs`
 
 Conventions:
 
@@ -192,6 +193,11 @@ Conventions:
   `elevation_deg`, and a diagnostic `reason`.
 - Summaries include access sample count, access fraction, interval-based access
   duration, first/last access time, minimum range, and maximum elevation.
+- Human-readable access reports are written in both satellite-oriented and
+  ground-station-oriented Markdown forms when access data exists.
+- Access report AOS/LOS rows use UTC. The report epoch is
+  `simulator.initial_jd_utc` when supplied, otherwise
+  `2026-01-01T00:00:00Z`.
 - Ground-station access does not modify truth, belief, knowledge, control, or
   termination behavior.
 

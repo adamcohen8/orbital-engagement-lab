@@ -211,6 +211,11 @@ for station_id, station_payload in result.ground_station_access.items():
         print(station_id, object_id, access["access"][:5])
 ```
 
+Single-run artifacts also include two Markdown access reports when access data
+exists: one organized by satellite and one organized by ground station. Report
+AOS/LOS times are UTC based on `simulator.initial_jd_utc`, defaulting to
+`2026-01-01T00:00:00Z` when no epoch is configured.
+
 Ground-station access is passive. It does not modify truth, belief, control,
 knowledge, or termination.
 

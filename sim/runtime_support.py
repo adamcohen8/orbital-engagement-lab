@@ -367,6 +367,34 @@ def _resolve_satellite_inertia_kg_m2(specs: dict[str, Any]) -> np.ndarray:
     return np.diag([120.0, 100.0, 80.0])
 
 
+def _satellite_spec_float(
+    specs: dict[str, Any],
+    names: tuple[str, ...],
+    *,
+    default: float,
+    min_value: float | None = 0.0,
+) -> tuple[float, bool]:
+    for name in names:
+        if name not in specs or specs.get(name) is None:
+            continue
+        value = float(specs[name])
+        if not np.isfinite(value):
+            raise ValueError(f"specs.{name} must be finite.")
+        if min_value is not None and value < min_value:
+            raise ValueError(f"specs.{name} must be >= {min_value}.")
+        return value, True
+    return float(default), False
+
+
+def _initial_state_nonnegative_float(initial_state: dict[str, Any], name: str, *, default: float = 0.0) -> float:
+    value = float(initial_state.get(name, default) if initial_state.get(name) is not None else default)
+    if not np.isfinite(value):
+        raise ValueError(f"initial_state.{name} must be finite.")
+    if value < 0.0:
+        raise ValueError(f"initial_state.{name} must be >= 0.0.")
+    return value
+
+
 def _apply_thruster_mount_defaults(module_obj: Any | None, pointer: Any | None, specs: dict[str, Any]) -> Any | None:
     if module_obj is None:
         return None
@@ -434,6 +462,8 @@ class AgentRuntime:
     deploy_source: str | None
     deploy_time_s: float | None
     deploy_dv_body_m_s: np.ndarray | None
+    initialization_delay_s: float
+    control_available_time_s: float | None
     mission_modules: list[Any]
     waiting_for_launch: bool
     orbital_isp_s: float | None = None
@@ -531,9 +561,21 @@ def _create_satellite_runtime(
     cfg: SimulationScenarioConfig,
     rng: np.random.Generator,
 ) -> AgentRuntime:
+    initial_state = dict(agent_cfg.initial_state or {})
     truth = _default_truth_from_agent(agent_cfg, t_s=0.0, target_jd_utc=cfg.simulator.initial_jd_utc)
     specs = dict(agent_cfg.specs or {})
     inertia_kg_m2 = _resolve_satellite_inertia_kg_m2(specs)
+    area_m2, area_specified = _satellite_spec_float(
+        specs, ("area_ref_m2", "area_m2", "reference_area_m2"), default=1.0
+    )
+    drag_area_m2, drag_area_specified = _satellite_spec_float(
+        specs, ("drag_area_m2",), default=area_m2
+    )
+    srp_area_m2, srp_area_specified = _satellite_spec_float(
+        specs, ("srp_area_m2", "solar_area_m2"), default=area_m2
+    )
+    cd, cd_specified = _satellite_spec_float(specs, ("cd", "drag_cd"), default=2.2)
+    cr, cr_specified = _satellite_spec_float(specs, ("cr", "srp_cr"), default=1.2)
     noise = dict((agent_cfg.knowledge or {}).get("sensor_error", {}) or {})
     pos_sigma = float(np.array(noise.get("pos_sigma_km", [0.001])).reshape(-1)[0])
     vel_sigma = float(np.array(noise.get("vel_sigma_km_s", [1e-5])).reshape(-1)[0])
@@ -594,20 +636,34 @@ def _create_satellite_runtime(
         if attitude_enabled
         else None
     )
+    disturbance_config_kwargs: dict[str, Any] = {
+        "use_gravity_gradient": bool(dist_cfg.get("gravity_gradient", False)),
+        "use_magnetic": bool(dist_cfg.get("magnetic", False)),
+        "use_drag": bool(dist_cfg.get("drag", False)),
+        "use_srp": bool(dist_cfg.get("srp", False)),
+    }
+    if drag_area_specified or area_specified:
+        disturbance_config_kwargs["drag_area_m2"] = drag_area_m2
+    if cd_specified:
+        disturbance_config_kwargs["drag_cd"] = cd
+    if srp_area_specified or area_specified:
+        disturbance_config_kwargs["srp_area_m2"] = srp_area_m2
+    if cr_specified:
+        disturbance_config_kwargs["srp_cr"] = cr
     disturbance_model = DisturbanceTorqueModel(
         mu_km3_s2=EARTH_MU_KM3_S2,
         inertia_kg_m2=inertia_kg_m2,
-        config=DisturbanceTorqueConfig(
-            use_gravity_gradient=bool(dist_cfg.get("gravity_gradient", False)),
-            use_magnetic=bool(dist_cfg.get("magnetic", False)),
-            use_drag=bool(dist_cfg.get("drag", False)),
-            use_srp=bool(dist_cfg.get("srp", False)),
-        ),
+        config=DisturbanceTorqueConfig(**disturbance_config_kwargs),
     )
     dynamics = OrbitalAttitudeDynamics(
         mu_km3_s2=EARTH_MU_KM3_S2,
         inertia_kg_m2=inertia_kg_m2,
         disturbance_model=disturbance_model if attitude_enabled else None,
+        area_m2=area_m2,
+        cd=cd,
+        cr=cr,
+        drag_area_m2=drag_area_m2 if drag_area_specified else None,
+        srp_area_m2=srp_area_m2 if srp_area_specified else None,
         orbit_substep_s=float(orbit_cfg["orbit_substep_s"]) if orbit_cfg.get("orbit_substep_s") is not None else None,
         attitude_substep_s=float(att_cfg["attitude_substep_s"])
         if att_cfg.get("attitude_substep_s") is not None
@@ -629,6 +685,7 @@ def _create_satellite_runtime(
     dry_mass_kg = specs.get("dry_mass_kg")
     fuel_capacity_kg = specs.get("fuel_mass_kg")
     thruster_mount = resolve_thruster_mount_from_specs(specs)
+    initialization_delay_s = _initial_state_nonnegative_float(initial_state, "initialization_delay_s")
     return AgentRuntime(
         object_id=object_id,
         kind="satellite",
@@ -648,11 +705,17 @@ def _create_satellite_runtime(
         rocket_sim=None,
         rocket_state=None,
         rocket_guidance=None,
-        deploy_source=str((agent_cfg.initial_state or {}).get("source", "")) or None,
-        deploy_time_s=float((agent_cfg.initial_state or {}).get("deploy_time_s", 0.0)),
-        deploy_dv_body_m_s=np.array(
-            (agent_cfg.initial_state or {}).get("deploy_dv_body_m_s", [0.0, 0.0, 0.0]), dtype=float
+        deploy_source=str(initial_state.get("source", "")) or None,
+        deploy_time_s=(
+            float(initial_state.get("deploy_time_s"))
+            if initial_state.get("deploy_time_s") is not None
+            else None
         ),
+        deploy_dv_body_m_s=np.array(
+            initial_state.get("deploy_dv_body_m_s", [0.0, 0.0, 0.0]), dtype=float
+        ),
+        initialization_delay_s=initialization_delay_s,
+        control_available_time_s=initialization_delay_s if bool(agent_cfg.enabled) else None,
         mission_modules=mission_modules,
         waiting_for_launch=False,
         orbital_isp_s=(None if sat_isp_s <= 0.0 else float(sat_isp_s)),
@@ -828,6 +891,8 @@ def _create_rocket_runtime(
         deploy_source=None,
         deploy_time_s=None,
         deploy_dv_body_m_s=None,
+        initialization_delay_s=0.0,
+        control_available_time_s=0.0,
         mission_modules=mission_modules,
         waiting_for_launch=False,
         orbital_isp_s=None,
@@ -897,7 +962,7 @@ def _deploy_from_rocket(agent: AgentRuntime, rocket: AgentRuntime, t_next: float
     if (
         agent.kind != "satellite"
         or agent.active
-        or agent.deploy_source != "rocket_deployment"
+        or agent.deploy_source not in {"rocket_deployment", "rocket_insertion"}
         or rocket.rocket_state is None
     ):
         return
@@ -933,13 +998,13 @@ def _deploy_from_rocket(agent: AgentRuntime, rocket: AgentRuntime, t_next: float
             covariance=np.eye(6) * 1e-4,
             last_update_t_s=t_next,
         )
+    agent.control_available_time_s = float(t_next) + float(max(agent.initialization_delay_s, 0.0))
     agent.active = True
 
 
 def _run_mission_modules(
     *,
     agent: AgentRuntime,
-    world_truth: dict[str, StateTruth],
     t_s: float,
     dt_s: float,
     env: dict[str, Any],
@@ -954,7 +1019,6 @@ def _run_mission_modules(
     if truth is None:
         return {}
     own_knowledge = agent.knowledge_base.snapshot() if agent.knowledge_base is not None else {}
-    public_world_truth: dict[str, StateTruth] = {}
     out: dict[str, Any] = {}
     for module in agent.mission_modules:
         if not hasattr(module, "update"):
@@ -966,7 +1030,6 @@ def _run_mission_modules(
                 "truth": truth,
                 "belief": agent.belief,
                 "own_knowledge": own_knowledge,
-                "world_truth": public_world_truth,
                 "env": env,
                 "t_s": t_s,
                 "dt_s": dt_s,
@@ -987,7 +1050,6 @@ def _run_mission_modules(
 def _run_mission_strategy(
     *,
     agent: AgentRuntime,
-    world_truth: dict[str, StateTruth],
     t_s: float,
     dt_s: float,
     env: dict[str, Any],
@@ -1003,7 +1065,6 @@ def _run_mission_strategy(
     if truth is None:
         return {}
     own_knowledge = agent.knowledge_base.snapshot() if agent.knowledge_base is not None else {}
-    public_world_truth: dict[str, StateTruth] = {}
     for method_name in ("update", "plan", "decide"):
         if not hasattr(strategy, method_name):
             continue
@@ -1015,7 +1076,6 @@ def _run_mission_strategy(
                 "truth": truth,
                 "belief": agent.belief,
                 "own_knowledge": own_knowledge,
-                "world_truth": public_world_truth,
                 "env": env,
                 "t_s": t_s,
                 "dt_s": dt_s,
@@ -1038,7 +1098,6 @@ def _run_mission_execution(
     *,
     agent: AgentRuntime,
     intent: dict[str, Any],
-    world_truth: dict[str, StateTruth],
     t_s: float,
     dt_s: float,
     env: dict[str, Any],
@@ -1054,7 +1113,6 @@ def _run_mission_execution(
     if truth is None:
         return {}
     own_knowledge = agent.knowledge_base.snapshot() if agent.knowledge_base is not None else {}
-    public_world_truth: dict[str, StateTruth] = {}
     for method_name in ("update", "execute", "act"):
         if not hasattr(execution, method_name):
             continue
@@ -1067,7 +1125,6 @@ def _run_mission_execution(
                 "truth": truth,
                 "belief": agent.belief,
                 "own_knowledge": own_knowledge,
-                "world_truth": public_world_truth,
                 "env": env,
                 "t_s": t_s,
                 "dt_s": dt_s,

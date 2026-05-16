@@ -36,7 +36,6 @@ python run_simulation.py --config examples/configs/public_tle_2hr_propagation.ya
 | `configs/hcw_pd_10km_experiment.yaml` | Flagship 10 km HCW PD RPO review scenario with attitude-gated thrust | `python run_simulation.py --config configs/hcw_pd_10km_experiment.yaml` |
 | `configs/automation_smoke.yaml` | Small headless validation config | `python run_simulation.py --config configs/automation_smoke.yaml --validate-only` |
 | `configs/plotting_rendezvous_demo.yaml` | Standalone rendezvous plotting demo | `python run_simulation.py --config configs/plotting_rendezvous_demo.yaml` |
-| `configs/rocket_launch_to_orbit.yaml` | Tuned rocket ascent benchmark with Rocket GNC story plots | `python run_simulation.py --config configs/rocket_launch_to_orbit.yaml` |
 
 ## Game Levels
 
@@ -63,7 +62,6 @@ python run_game.py sim/game/configs/game_training_rpo_04_rendezvous.yaml
 - Ground-station access: start with `public_ground_station_access_from_tle.yaml`.
 - Closed-loop control: start with `public_closed_loop_rendezvous_lqr.yaml`.
 - Plot/artifact review: start with `configs/hcw_pd_10km_experiment.yaml`.
-- Rocket GNC story artifacts: start with `configs/rocket_launch_to_orbit.yaml`.
 - Manual RPO training: start with `run_game.py` or
   `public_manual_rpo_training.yaml`.
 

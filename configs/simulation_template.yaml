@@ -172,10 +172,14 @@ objects:
       mass_kg: 200.0
     # Initial state for the chaser.
     initial_state:
-      # "rocket_deployment" initializes from the rocket at deploy_time_s. Use relative_to plus relative_to_target_ric for direct RPO setups.
-      source: "rocket_deployment"
-      # Deployment time from the rocket, in seconds.
-      deploy_time_s: 900.0
+      # "rocket_insertion" initializes from the rocket when orbit insertion is achieved.
+      # "rocket_deployment" initializes from the rocket at deploy_time_s.
+      # Use relative_to plus relative_to_target_ric for direct RPO setups.
+      source: "rocket_insertion"
+      # Optional coast period after deployment before mission/controllers can command the satellite.
+      # initialization_delay_s: 0.0
+      # Deployment time from the rocket, in seconds. Only used with source: "rocket_deployment".
+      # deploy_time_s: 900.0
       # Body-frame deployment delta-v in meters per second.
       deploy_dv_body_m_s: [10.0, 0.0, 0.0]
       # Optional alternative: initialize chaser relative to target in RIC instead of deployment/absolute state.

@@ -156,6 +156,8 @@ class TestRocketGuidance(unittest.TestCase):
             deploy_source=None,
             deploy_time_s=None,
             deploy_dv_body_m_s=None,
+            initialization_delay_s=0.0,
+            control_available_time_s=0.0,
             mission_modules=[],
             waiting_for_launch=False,
         )

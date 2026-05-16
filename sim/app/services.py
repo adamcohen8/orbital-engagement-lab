@@ -452,6 +452,7 @@ MONTE_CARLO_PARAMETER_CATEGORIES: dict[str, list[tuple[str, str]]] = {
         ("Launch Azimuth", "rocket.initial_state.launch_azimuth_deg"),
     ],
     "Chaser Init": [
+        ("Initialization Delay", "chaser.initial_state.initialization_delay_s"),
         ("Deploy Time", "chaser.initial_state.deploy_time_s"),
         ("Deploy dV X", "chaser.initial_state.deploy_dv_body_m_s[0]"),
         ("Deploy dV Y", "chaser.initial_state.deploy_dv_body_m_s[1]"),
@@ -558,7 +559,7 @@ def get_gui_capabilities() -> GuiCapabilities:
         sensitivity_methods=[],
         monte_carlo_modes=[],
         monte_carlo_lhs_modes=[],
-        chaser_init_modes=["rocket_deployment", "relative_ric_rect", "relative_ric_curv"],
+        chaser_init_modes=["rocket_insertion", "rocket_deployment", "relative_ric_rect", "relative_ric_curv"],
         satellite_presets=_discover_named_presets("sim.presets.satellites", "SatellitePreset"),
         rocket_preset_stacks=_discover_named_presets("sim.presets.rockets", "RocketStackPreset"),
         figure_ids=list(AVAILABLE_FIGURE_IDS),

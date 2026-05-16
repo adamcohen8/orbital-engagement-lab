@@ -257,15 +257,6 @@ _UTIL_EXPORTS = [
     "animate_multi_ground_track",
 ]
 
-_SCENARIO_EXPORTS = [
-    "ASATPhasedScenarioConfig",
-    "AgentStrategyConfig",
-    "KnowledgeGateConfig",
-    "run_asat_phased_engagement",
-    "MonteCarloConfig",
-    "run_monte_carlo",
-]
-
 _ROCKET_EXPORTS = [
     "GuidanceCommand",
     "RocketAeroConfig",
@@ -296,7 +287,6 @@ __all__ = [
     *_KNOWLEDGE_EXPORTS,
     *_SENSOR_EXPORTS,
     *_UTIL_EXPORTS,
-    *_SCENARIO_EXPORTS,
     "run_master_simulation",
     *_ROCKET_EXPORTS,
 ]
@@ -324,7 +314,6 @@ _register(_OPTIMIZATION_EXPORTS, "sim.optimization")
 _register(_KNOWLEDGE_EXPORTS, "sim.knowledge")
 _register(_SENSOR_EXPORTS, "sim.sensors")
 _register(_UTIL_EXPORTS, "sim.utils")
-_register(_SCENARIO_EXPORTS, "sim.scenarios")
 _register(_ROCKET_EXPORTS, "sim.rocket")
 _LAZY_IMPORTS["run_master_simulation"] = ("sim.master_simulator", "run_master_simulation")
 

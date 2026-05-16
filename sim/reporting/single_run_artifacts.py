@@ -9,6 +9,7 @@ import numpy as np
 from sim.config import SimulationScenarioConfig
 from sim.master_outputs import animate_outputs as _animate_outputs_impl
 from sim.master_outputs import plot_outputs as _plot_outputs_impl
+from sim.reporting.ground_station_access_reports import write_ground_station_access_reports
 from sim.reporting.output_index import write_output_index
 from sim.runtime_support import _resolve_rocket_stack, _resolve_satellite_isp_s
 from sim.utils.io import write_json
@@ -112,6 +113,18 @@ def write_single_run_artifacts(
     )
     summary["plot_outputs"] = plot_outputs
     summary["animation_outputs"] = animation_outputs
+    access_report_paths, access_report_views = write_ground_station_access_reports(
+        outdir=context.outdir,
+        ground_station_access=dict(payload.get("ground_station_access", {}) or {}),
+        ground_station_access_summary=dict(payload.get("ground_station_access_summary", {}) or {}),
+        t_s=context.t_s,
+        initial_jd_utc=context.cfg.simulator.initial_jd_utc,
+    )
+    if access_report_paths:
+        summary["ground_station_access_report_epoch_utc"] = access_report_views.get("epoch_utc")
+        summary["ground_station_access_report_epoch_jd_utc"] = access_report_views.get("epoch_jd_utc")
+        summary["ground_station_access_report_outputs"] = access_report_paths
+        payload["ground_station_access_report_views"] = access_report_views
 
     artifacts: dict[str, Any] = {}
     if bool(context.cfg.outputs.stats.get("save_json", True)):
@@ -122,6 +135,8 @@ def write_single_run_artifacts(
         artifacts["plots"] = plot_outputs
     if animation_outputs:
         artifacts["animations"] = animation_outputs
+    if access_report_paths:
+        artifacts["ground_station_access_reports"] = access_report_paths
     index_path = write_output_index(
         outdir=context.outdir,
         workflow="single_run",

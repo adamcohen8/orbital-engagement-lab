@@ -65,7 +65,6 @@ class TestRocketMissionSplit(unittest.TestCase):
                     intent=base_intent,
                     truth=_truth(),
                     own_knowledge={"target": _belief_with_velocity_y(7.6)},
-                    world_truth={},
                     rocket_state=object(),
                     rocket_vehicle_cfg=object(),
                 )["launch_authorized"]
@@ -78,7 +77,6 @@ class TestRocketMissionSplit(unittest.TestCase):
                     intent=base_intent,
                     truth=_truth(),
                     own_knowledge={"target": _belief_with_velocity_y(7.63)},
-                    world_truth={},
                     rocket_state=object(),
                     rocket_vehicle_cfg=object(),
                 )["launch_authorized"]

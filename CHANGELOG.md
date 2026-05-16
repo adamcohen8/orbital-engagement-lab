@@ -6,6 +6,48 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.6.2 - 2026-05-16
+
+Rocket insertion, access reporting, and release-readiness update.
+
+### Added
+
+- Added a private current-architecture rocket insertion engagement scenario
+  with regression coverage for insertion-triggered deployment and
+  initialization-delay coasting.
+- Added an interactive 30-degree inclined geosynchronous ground-track review
+  config initialized over 90 degrees west longitude.
+- Added satellite- and ground-station-oriented Markdown access reports with UTC
+  AOS/LOS windows for runs that include ground-station access data.
+- Added satellite physical-spec propagation for drag/SRP area and coefficient
+  settings.
+- Added commercial-readiness gates and expanded product maturity subcategory
+  scoring for release, validation, GUI, game, RL/ML, rocket GNC, simulator, and
+  public/private workflow planning.
+
+### Changed
+
+- Removed the legacy `sim.scenarios` package and its phased-ASAT/Monte Carlo
+  helper APIs. Current scenario work should use YAML configs and the
+  `sim.execution`/`SimulationSession` paths instead.
+- Tightened mission decision APIs so agent-facing mission logic uses
+  observer-owned knowledge instead of raw `world_truth`.
+- Updated public/private export rules so private rocket insertion configs and
+  their private regression tests stay out of generated public releases.
+
+### Fixed
+
+- Fixed ML/Gym mission helper calls after decision-facing `world_truth` removal.
+- Hardened validation evidence dependency-version collection against malformed
+  or missing package metadata.
+- Removed excluded Pro rocket configs from the public examples matrix.
+- Made public plotting tests skip cleanly when the optional Matplotlib stack is
+  installed but unusable in the local environment.
+- Made the versioned public release gate run release evidence commands with
+  the invoking Python interpreter instead of a hardcoded `.venv` path.
+- Restored the inclined GEO ground-track review config to interactive mode with
+  the requested 30-degree inclination and 90-degree west longitude setup.
+
 ## 0.6.1 - 2026-05-15
 
 Public workflow, plotting, and game-mode update.

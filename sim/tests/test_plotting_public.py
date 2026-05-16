@@ -2,9 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import matplotlib
+import pytest
 
-matplotlib.use("Agg")
+try:
+    import matplotlib
+
+    matplotlib.use("Agg")
+except Exception as exc:  # pragma: no cover - depends on local optional plotting stack
+    pytest.skip(f"matplotlib is not usable in this environment: {exc}", allow_module_level=True)
 
 import numpy as np
 
