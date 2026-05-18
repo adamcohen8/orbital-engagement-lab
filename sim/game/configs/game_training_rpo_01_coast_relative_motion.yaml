@@ -6,6 +6,7 @@ metadata:
   notes: Run with `python run_game.py sim/game/configs/game_training_rpo_01_coast_relative_motion.yaml
     --fast`.
   game:
+    level_name: Level 1 - Relative Orbit
     control_mode: ric_translation
     difficulty: easy
     player_max_accel_km_s2: 2.0e-05
@@ -13,11 +14,13 @@ metadata:
       enabled: true
       scenario_id: rpo_01_coast_relative_motion
       learning_goal: Observe natural RIC drift, then use small R/I/C pulses to approach
-        a passive 3D NMT with a 2:1 RI ellipse and a tilted RC ellipse.
+        a passive 3D NMT with a 2:1 RI ellipse and circular RC phasing.
       player_brief: Use small pulses and long coast arcs to shape the relative orbit
-        into the green 3D NMT. The objective is not to park on the target.
+        into the green 3D NMT. Burn cross-track near the top or bottom of the RI
+        ellipse so the RC plot becomes a circle.
       pass_criteria:
       - Match the target radial and cross-track NMT amplitudes within tolerance.
+      - Make the cross-track burn near the top or bottom of the RI ellipse.
       - Satisfy the passive NMT velocity relationship.
       - Stay under the time and delta-v budgets.
       - Do not enter keepout.
@@ -32,10 +35,16 @@ metadata:
       - 0.0
       - 0.0
       goal_nmt_radial_amplitude_km: 1.5
-      goal_nmt_cross_track_amplitude_km: 1.0
-      goal_nmt_cross_track_phase_deg: 45.0
+      goal_nmt_cross_track_amplitude_km: 1.5
+      goal_nmt_cross_track_phase_deg: 90.0
       goal_nmt_element_tolerance_km: 0.15
       goal_nmt_velocity_tolerance_km_s: 0.0005
+      required_phase_burns:
+      - name: Cross-track phase burn
+        axis: cross_track
+        radial_abs_km: 1.5
+        radial_tolerance_km: 0.25
+        max_abs_intrack_km: 0.5
       max_time_s: 3600.0
       max_delta_v_m_s: 8.0
 objects:
@@ -56,7 +65,7 @@ objects:
         - -3.0
         - 0.0
         - 0.0
-        - 0.002
+        - 0.0
         - 0.0
       attitude_quat_bn:
       - 1.0

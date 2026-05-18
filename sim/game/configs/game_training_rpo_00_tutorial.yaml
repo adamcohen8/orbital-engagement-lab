@@ -1,41 +1,50 @@
-scenario_name: game_training_rpo_05_keepout_recovery
-scenario_description: RPO trainer scenario for recovering from an unsafe closing approach
-  before entering keepout.
+scenario_name: game_training_rpo_00_tutorial
+scenario_description: Introductory RPO trainer scenario for learning pulse-and-coast
+  translation controls in the target-centered RIC views.
 metadata:
   owner: codex
-  notes: Run with `python run_game.py sim/game/configs/game_training_rpo_05_keepout_recovery.yaml
-    --speed-multiple 10`.
+  notes: Run with `python run_game.py sim/game/configs/game_training_rpo_00_tutorial.yaml
+    --fast`.
   game:
+    level_name: Level 0 - Tutorial
     control_mode: ric_translation
-    difficulty: medium
-    player_max_accel_km_s2: 1.5e-05
+    camera_mode: target_pair
+    plot_overlays_in_zoom: false
+    difficulty: easy
+    player_max_accel_km_s2: 1.0e-05
     training:
       enabled: true
-      scenario_id: rpo_05_keepout_recovery
-      learning_goal: Recover from an unsafe closing geometry by preserving keepout
-        margin, arresting closure, and settling back into the V-bar hold box.
-      player_brief: You are already in a bad closing geometry. First preserve keepout
-        margin, then recover to the trailing hold box.
+      scenario_id: rpo_00_tutorial
+      learning_goal: Learn to pulse, coast, and read the RI and RC views while
+        approaching a passive target.
+      player_brief: The red satellite is you. Use short R/I/C translation pulses,
+        then coast and watch the motion in the two target-centered plots. Reach
+        the green 250 m range circle around the yellow target after trying each
+        translation axis and changing the speed multiplier.
       pass_criteria:
-      - Never enter the 250 meter keepout zone.
-      - Return to the V-bar hold box.
-      - Keep relative speed below the goal threshold.
-      - Stay under the time and delta-v budgets.
+      - Perform at least one radial burn.
+      - Perform at least one in-track burn.
+      - Perform at least one cross-track burn.
+      - Change the speed multiplier at least once.
+      - Get within 250 m of the passive target.
+      - Stay under the generous tutorial time and delta-v budgets.
       instructor_notes:
-      - The first correct action may be to move away from the target, not toward the
-        green box.
-      - Use the keepout margin metric as the primary safety cue.
+      - This level teaches the controls before introducing natural-motion matching,
+        keepout constraints, or target evasion.
+      - Encourage short pulses followed by coasting rather than continuous thrust.
+      - The RI view shows in-track versus radial motion; the RC view shows cross-track
+        versus radial motion.
       target_object_id: target
       chaser_object_id: chaser
-      keepout_radius_km: 0.25
-      goal_relative_ric_km:
-      - 0.0
-      - -0.75
-      - 0.0
-      goal_radius_km: 0.15
-      max_goal_speed_km_s: 0.0002
-      max_time_s: 3600.0
-      max_delta_v_m_s: 5.0
+      goal_range_km: 0.25
+      max_time_s: 18000.0
+      max_delta_v_m_s: 12.0
+      required_burn_axes:
+      - radial
+      - in_track
+      - cross_track
+      required_burn_axis_min_component_fraction: 0.75
+      require_speed_multiplier_change: true
 objects:
   rocket:
     enabled: false
@@ -51,10 +60,10 @@ objects:
         frame: rect
         state:
         - 0.0
-        - -0.45
+        - -0.8
         - 0.0
         - 0.0
-        - 0.0005
+        - 0.0
         - 0.0
       attitude_quat_bn:
       - 1.0
@@ -83,6 +92,7 @@ objects:
       refresh_rate_s: 1.0
       targets:
       - target
+      - target_reference
       conditions:
         require_line_of_sight: false
         max_range_km: 10000.0
@@ -139,6 +149,7 @@ objects:
       refresh_rate_s: 1.0
       targets:
       - chaser
+      - target_reference
       conditions:
         require_line_of_sight: false
         max_range_km: 10000.0
@@ -156,7 +167,7 @@ objects:
     kind: satellite
 simulator:
   scenario_type: auto
-  duration_s: 3600.0
+  duration_s: 18000.0
   dt_s: 1.0
   dynamics:
     orbit:
@@ -182,7 +193,7 @@ simulator:
     earth_impact_enabled: false
     earth_radius_km: 6378.137
 outputs:
-  output_dir: outputs/game_training_rpo_05
+  output_dir: outputs/game_training_rpo_00
   mode: save
   stats:
     enabled: true

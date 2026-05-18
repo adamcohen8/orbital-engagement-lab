@@ -15,7 +15,11 @@ def main() -> None:
         default=None,
         help="Simulation YAML config to run. Omit to open the level selector.",
     )
-    parser.add_argument("--controlled-object", default="chaser", help="Object id controlled by keyboard input.")
+    parser.add_argument(
+        "--controlled-object",
+        default=None,
+        help="Object id controlled by keyboard input. Defaults to the game config setting.",
+    )
     parser.add_argument("--attitude-rate-deg-s", type=float, default=45.0, help="Commanded attitude target slew rate.")
     parser.add_argument(
         "--fast", action="store_true", help="Step as fast as the dashboard can render instead of realtime."
@@ -30,13 +34,18 @@ def main() -> None:
     if args.config:
         result = run_game_mode(
             Path(args.config),
-            controlled_object_id=str(args.controlled_object),
+            controlled_object_id=None if args.controlled_object is None else str(args.controlled_object),
             attitude_rate_deg_s=float(args.attitude_rate_deg_s),
             realtime=not bool(args.fast),
             speed_multiple=float(args.speed_multiple),
         )
-        if result.level_passed:
-            record_game_progress(result.config_path, result.difficulty)
+        if result.level_passed or result.arcade_score > 0:
+            record_game_progress(
+                result.config_path,
+                result.difficulty,
+                score=result.arcade_score,
+                completed=result.level_passed,
+            )
         return
 
     while True:
@@ -45,15 +54,21 @@ def main() -> None:
             return
         result = run_game_mode(
             selection.path,
-            controlled_object_id=str(args.controlled_object),
+            controlled_object_id=None if args.controlled_object is None else str(args.controlled_object),
             attitude_rate_deg_s=float(args.attitude_rate_deg_s),
             realtime=not bool(args.fast),
             speed_multiple=float(args.speed_multiple),
             difficulty_override=selection.difficulty,
+            music_enabled=selection.music_enabled,
             record_video=selection.record_video,
         )
-        if result.level_passed:
-            record_game_progress(result.config_path, result.difficulty)
+        if result.level_passed or result.arcade_score > 0:
+            record_game_progress(
+                result.config_path,
+                result.difficulty,
+                score=result.arcade_score,
+                completed=result.level_passed,
+            )
 
 
 if __name__ == "__main__":

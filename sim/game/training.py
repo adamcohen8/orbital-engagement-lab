@@ -6,9 +6,230 @@ from typing import Any
 import numpy as np
 
 from sim.api import SimulationSnapshot
-from sim.utils.frames import eci_relative_to_ric_rect
+from sim.utils.frames import eci_relative_to_ric_rect, ric_dcm_ir_from_rv
 
 EARTH_MU_KM3_S2 = 398600.4418
+_BURN_AXIS_INDEX = {"radial": 0, "in_track": 1, "cross_track": 2}
+_BURN_AXIS_LABEL = {"radial": "Radial", "in_track": "In-track", "cross_track": "Cross-track"}
+_BURN_AXIS_MIN_COMPONENT_FRACTION = 0.75
+
+
+@dataclass(frozen=True)
+class ForbiddenRegionConfig:
+    name: str
+    min_ric_km: np.ndarray
+    max_ric_km: np.ndarray
+    plot_planes: tuple[str, ...] = ()
+    kind: str = "box"
+    plane: str = "RI"
+    center_ric_km: np.ndarray = field(default_factory=lambda: np.zeros(3, dtype=float))
+    inner_radius_km: float | None = None
+    outer_radius_km: float | None = None
+    angle_min_deg: float | None = None
+    angle_max_deg: float | None = None
+    max_abs_out_of_plane_km: float | None = None
+    axis: str = "I"
+    radius_km: float | None = None
+    height_km: float | None = None
+
+    @classmethod
+    def from_mapping(cls, raw: dict[str, Any], *, index: int) -> ForbiddenRegionConfig:
+        plot_planes = _plot_planes_from_metadata(raw.get("plot_planes"))
+        plane = str(raw.get("plane", plot_planes[0] if plot_planes else "RI") or "RI").strip().upper()
+        return cls(
+            name=str(raw.get("name", f"forbidden_region_{index}") or f"forbidden_region_{index}"),
+            min_ric_km=_ric_bound_array(raw.get("min_ric_km"), default=-np.inf, field_name="min_ric_km"),
+            max_ric_km=_ric_bound_array(raw.get("max_ric_km"), default=np.inf, field_name="max_ric_km"),
+            plot_planes=plot_planes,
+            kind=str(raw.get("kind", "box") or "box").strip().lower(),
+            plane=plane,
+            center_ric_km=_ric_bound_array(raw.get("center_ric_km"), default=0.0, field_name="center_ric_km"),
+            inner_radius_km=_optional_float(raw.get("inner_radius_km")),
+            outer_radius_km=_optional_float(raw.get("outer_radius_km")),
+            angle_min_deg=_optional_float(raw.get("angle_min_deg")),
+            angle_max_deg=_optional_float(raw.get("angle_max_deg")),
+            max_abs_out_of_plane_km=_optional_float(raw.get("max_abs_out_of_plane_km")),
+            axis=str(raw.get("axis", "I") or "I").strip().upper(),
+            radius_km=_optional_float(raw.get("radius_km")),
+            height_km=_optional_float(raw.get("height_km")),
+        )
+
+    def contains_positions(self, ric_positions_km: np.ndarray) -> np.ndarray:
+        pos = np.array(ric_positions_km, dtype=float)
+        if pos.ndim == 1:
+            pos = pos.reshape(1, -1)
+        if pos.shape[1] < 3:
+            raise ValueError("ric_positions_km must contain R, I, and C components.")
+        if self.kind == "annular_sector":
+            return self._contains_annular_sector(pos)
+        if self.kind == "cylinder":
+            return self._contains_cylinder(pos)
+        lower = np.array(self.min_ric_km, dtype=float).reshape(1, 3)
+        upper = np.array(self.max_ric_km, dtype=float).reshape(1, 3)
+        return np.all((pos[:, :3] >= lower) & (pos[:, :3] <= upper), axis=1)
+
+    def sector_polygon_ric(self, *, samples: int = 64) -> np.ndarray:
+        if self.kind != "annular_sector" or self.inner_radius_km is None or self.outer_radius_km is None:
+            return np.zeros((0, 3), dtype=float)
+        x_axis, y_axis, _ = _plane_axes(self.plane)
+        inner = max(float(self.inner_radius_km), 0.0)
+        outer = max(float(self.outer_radius_km), inner)
+        start = 0.0 if self.angle_min_deg is None else float(self.angle_min_deg)
+        end = 360.0 if self.angle_max_deg is None else float(self.angle_max_deg)
+        while end <= start:
+            end += 360.0
+        angles = np.deg2rad(np.linspace(start, end, max(int(samples), 8)))
+        center = np.array(self.center_ric_km, dtype=float).reshape(3)
+        pts: list[np.ndarray] = []
+        for radius, seq in ((outer, angles), (inner, angles[::-1])):
+            for theta in seq:
+                point = center.copy()
+                point[x_axis] += radius * float(np.cos(theta))
+                point[y_axis] += radius * float(np.sin(theta))
+                pts.append(point)
+        return np.vstack(pts) if pts else np.zeros((0, 3), dtype=float)
+
+    def _contains_annular_sector(self, pos: np.ndarray) -> np.ndarray:
+        if self.inner_radius_km is None or self.outer_radius_km is None:
+            return np.zeros(pos.shape[0], dtype=bool)
+        x_axis, y_axis, out_axis = _plane_axes(self.plane)
+        delta = pos[:, :3] - np.array(self.center_ric_km, dtype=float).reshape(1, 3)
+        xy = delta[:, [x_axis, y_axis]]
+        radius = np.linalg.norm(xy, axis=1)
+        ok = (radius >= float(self.inner_radius_km)) & (radius <= float(self.outer_radius_km))
+        if self.max_abs_out_of_plane_km is not None:
+            ok &= np.abs(delta[:, out_axis]) <= float(self.max_abs_out_of_plane_km)
+        if self.angle_min_deg is not None or self.angle_max_deg is not None:
+            start = 0.0 if self.angle_min_deg is None else float(self.angle_min_deg)
+            end = 360.0 if self.angle_max_deg is None else float(self.angle_max_deg)
+            angles = np.rad2deg(np.arctan2(xy[:, 1], xy[:, 0]))
+            ok &= _angles_in_range_deg(angles, start, end)
+        return ok
+
+    def _contains_cylinder(self, pos: np.ndarray) -> np.ndarray:
+        if self.radius_km is None or self.height_km is None:
+            return np.zeros(pos.shape[0], dtype=bool)
+        axis = _axis_index(self.axis)
+        cross_axes = tuple(idx for idx in (0, 1, 2) if idx != axis)
+        delta = pos[:, :3] - np.array(self.center_ric_km, dtype=float).reshape(1, 3)
+        cross_radius = np.linalg.norm(delta[:, cross_axes], axis=1)
+        half_height = float(self.height_km) / 2.0
+        return (cross_radius <= float(self.radius_km)) & (np.abs(delta[:, axis]) <= half_height)
+
+
+@dataclass(frozen=True)
+class ApproachGateConfig:
+    name: str
+    radial_ric_km: float
+    radial_tolerance_km: float = 0.08
+    max_abs_intrack_km: float | None = None
+    max_abs_cross_track_km: float | None = None
+    max_abs_radial_rate_km_s: float | None = None
+    max_total_speed_km_s: float | None = None
+    required: bool = True
+
+    @classmethod
+    def from_mapping(cls, raw: dict[str, Any], *, index: int) -> ApproachGateConfig:
+        if "radial_ric_km" not in raw:
+            raise ValueError("Approach gate radial_ric_km is required.")
+        return cls(
+            name=str(raw.get("name", f"approach_gate_{index}") or f"approach_gate_{index}"),
+            radial_ric_km=float(raw["radial_ric_km"]),
+            radial_tolerance_km=float(raw.get("radial_tolerance_km", 0.08) or 0.08),
+            max_abs_intrack_km=_optional_float(raw.get("max_abs_intrack_km")),
+            max_abs_cross_track_km=_optional_float(raw.get("max_abs_cross_track_km")),
+            max_abs_radial_rate_km_s=_optional_float(raw.get("max_abs_radial_rate_km_s")),
+            max_total_speed_km_s=_optional_float(raw.get("max_total_speed_km_s")),
+            required=bool(raw.get("required", True)),
+        )
+
+    def samples_near_gate(self, relative_ric_state: np.ndarray) -> np.ndarray:
+        rel = np.array(relative_ric_state, dtype=float)
+        if rel.ndim == 1:
+            rel = rel.reshape(1, -1)
+        if rel.shape[1] < 6:
+            raise ValueError("relative_ric_state must contain RIC position and velocity.")
+        return np.abs(rel[:, 0] - float(self.radial_ric_km)) <= float(self.radial_tolerance_km)
+
+    def samples_satisfying_gate(self, relative_ric_state: np.ndarray) -> np.ndarray:
+        rel = np.array(relative_ric_state, dtype=float)
+        if rel.ndim == 1:
+            rel = rel.reshape(1, -1)
+        if rel.shape[1] < 6:
+            raise ValueError("relative_ric_state must contain RIC position and velocity.")
+        ok = self.samples_near_gate(rel)
+        if self.max_abs_intrack_km is not None:
+            ok &= np.abs(rel[:, 1]) <= float(self.max_abs_intrack_km)
+        if self.max_abs_cross_track_km is not None:
+            ok &= np.abs(rel[:, 2]) <= float(self.max_abs_cross_track_km)
+        if self.max_abs_radial_rate_km_s is not None:
+            ok &= np.abs(rel[:, 3]) <= float(self.max_abs_radial_rate_km_s)
+        if self.max_total_speed_km_s is not None:
+            ok &= np.linalg.norm(rel[:, 3:6], axis=1) <= float(self.max_total_speed_km_s)
+        return ok
+
+
+@dataclass(frozen=True)
+class InspectionGateConfig:
+    name: str
+    center_ric_km: np.ndarray
+    half_width_ric_km: np.ndarray
+    max_total_speed_km_s: float | None = None
+
+    @classmethod
+    def from_mapping(cls, raw: dict[str, Any], *, index: int) -> InspectionGateConfig:
+        return cls(
+            name=str(raw.get("name", f"inspection_gate_{index}") or f"inspection_gate_{index}"),
+            center_ric_km=_ric_bound_array(raw.get("center_ric_km"), default=0.0, field_name="center_ric_km"),
+            half_width_ric_km=_ric_bound_array(
+                raw.get("half_width_ric_km", [0.25, 0.25, 0.25]),
+                default=0.25,
+                field_name="half_width_ric_km",
+            ),
+            max_total_speed_km_s=_optional_float(raw.get("max_total_speed_km_s")),
+        )
+
+    def samples_satisfying_gate(self, relative_ric_state: np.ndarray) -> np.ndarray:
+        rel = np.array(relative_ric_state, dtype=float)
+        if rel.ndim == 1:
+            rel = rel.reshape(1, -1)
+        if rel.shape[1] < 6:
+            raise ValueError("relative_ric_state must contain RIC position and velocity.")
+        center = np.array(self.center_ric_km, dtype=float).reshape(1, 3)
+        half_width = np.array(self.half_width_ric_km, dtype=float).reshape(1, 3)
+        ok = np.all(np.abs(rel[:, :3] - center) <= half_width, axis=1)
+        if self.max_total_speed_km_s is not None:
+            ok &= np.linalg.norm(rel[:, 3:6], axis=1) <= float(self.max_total_speed_km_s)
+        return ok
+
+    def segment_satisfies_gate(self, start_relative_ric_state: np.ndarray, end_relative_ric_state: np.ndarray) -> bool:
+        start = np.array(start_relative_ric_state, dtype=float).reshape(-1)
+        end = np.array(end_relative_ric_state, dtype=float).reshape(-1)
+        if start.size < 6 or end.size < 6:
+            raise ValueError("relative_ric_state must contain RIC position and velocity.")
+        center = np.array(self.center_ric_km, dtype=float).reshape(3)
+        half_width = np.array(self.half_width_ric_km, dtype=float).reshape(3)
+        if not _position_segment_intersects_box(start[:3], end[:3], center=center, half_width=half_width):
+            return False
+        if self.max_total_speed_km_s is None:
+            return True
+        endpoint_speed = max(float(np.linalg.norm(start[3:6])), float(np.linalg.norm(end[3:6])))
+        return endpoint_speed <= float(self.max_total_speed_km_s)
+
+
+@dataclass(frozen=True)
+class RequiredPhaseBurnConfig:
+    name: str
+    axis: str
+    radial_abs_km: float
+    radial_tolerance_km: float
+    max_abs_intrack_km: float
+    threshold_km_s2: float = 1.0e-10
+    min_component_fraction: float = _BURN_AXIS_MIN_COMPONENT_FRACTION
+
+    @property
+    def label(self) -> str:
+        return self.name or f"{_BURN_AXIS_LABEL[self.axis]} phase burn"
 
 
 @dataclass(frozen=True)
@@ -19,6 +240,8 @@ class RPOTrainingConfig:
     target_object_id: str = "target"
     chaser_object_id: str = "chaser"
     keepout_radius_km: float | None = None
+    goal_range_km: float | None = None
+    goal_range_tolerance_km: float | None = None
     goal_radius_km: float | None = None
     goal_relative_ric_km: np.ndarray = field(default_factory=lambda: np.zeros(3, dtype=float))
     goal_nmt_radial_amplitude_km: float | None = None
@@ -28,9 +251,23 @@ class RPOTrainingConfig:
     goal_nmt_tolerance_km: float | None = None
     goal_nmt_element_tolerance_km: float | None = None
     goal_nmt_velocity_tolerance_km_s: float | None = None
+    forbidden_regions: tuple[ForbiddenRegionConfig, ...] = ()
+    approach_gates: tuple[ApproachGateConfig, ...] = ()
+    inspection_gates: tuple[InspectionGateConfig, ...] = ()
     max_time_s: float | None = None
     max_goal_speed_km_s: float | None = None
+    hard_speed_limit_radius_km: float | None = None
+    hard_speed_limit_km_s: float | None = None
     max_delta_v_m_s: float | None = None
+    max_target_delta_v_m_s: float | None = None
+    fail_on_delta_v_budget: bool = True
+    coast_chaser_after_delta_v_budget: bool = False
+    survival_goal: bool = False
+    required_burn_axes: tuple[str, ...] = ()
+    required_burn_axis_threshold_km_s2: float = 1.0e-10
+    required_burn_axis_min_component_fraction: float = _BURN_AXIS_MIN_COMPONENT_FRACTION
+    required_phase_burns: tuple[RequiredPhaseBurnConfig, ...] = ()
+    require_speed_multiplier_change: bool = False
 
     @classmethod
     def from_metadata(cls, metadata: dict[str, Any]) -> RPOTrainingConfig:
@@ -51,6 +288,8 @@ class RPOTrainingConfig:
             target_object_id=str(raw.get("target_object_id", game_cfg.get("target_object_id", "target")) or "target"),
             chaser_object_id=str(raw.get("chaser_object_id", game_cfg.get("chaser_object_id", "chaser")) or "chaser"),
             keepout_radius_km=_optional_float(raw.get("keepout_radius_km")),
+            goal_range_km=_optional_float(raw.get("goal_range_km")),
+            goal_range_tolerance_km=_optional_float(raw.get("goal_range_tolerance_km")),
             goal_radius_km=_optional_float(raw.get("goal_radius_km")),
             goal_relative_ric_km=goal.astype(float),
             goal_nmt_radial_amplitude_km=_optional_float(raw.get("goal_nmt_radial_amplitude_km")),
@@ -62,9 +301,25 @@ class RPOTrainingConfig:
                 raw.get("goal_nmt_element_tolerance_km", raw.get("goal_nmt_tolerance_km"))
             ),
             goal_nmt_velocity_tolerance_km_s=_optional_float(raw.get("goal_nmt_velocity_tolerance_km_s")),
+            forbidden_regions=_forbidden_regions_from_metadata(raw.get("forbidden_regions")),
+            approach_gates=_approach_gates_from_metadata(raw.get("approach_gates")),
+            inspection_gates=_inspection_gates_from_metadata(raw.get("inspection_gates")),
             max_time_s=_optional_float(raw.get("max_time_s")),
             max_goal_speed_km_s=_optional_float(raw.get("max_goal_speed_km_s")),
+            hard_speed_limit_radius_km=_optional_float(raw.get("hard_speed_limit_radius_km")),
+            hard_speed_limit_km_s=_optional_float(raw.get("hard_speed_limit_km_s")),
             max_delta_v_m_s=_optional_float(raw.get("max_delta_v_m_s")),
+            max_target_delta_v_m_s=_optional_float(raw.get("max_target_delta_v_m_s")),
+            fail_on_delta_v_budget=bool(raw.get("fail_on_delta_v_budget", True)),
+            coast_chaser_after_delta_v_budget=bool(raw.get("coast_chaser_after_delta_v_budget", False)),
+            survival_goal=bool(raw.get("survival_goal", False)),
+            required_burn_axes=_burn_axes_from_metadata(raw.get("required_burn_axes")),
+            required_burn_axis_threshold_km_s2=float(raw.get("required_burn_axis_threshold_km_s2", 1.0e-10)),
+            required_burn_axis_min_component_fraction=float(
+                raw.get("required_burn_axis_min_component_fraction", _BURN_AXIS_MIN_COMPONENT_FRACTION)
+            ),
+            required_phase_burns=_required_phase_burns_from_metadata(raw.get("required_phase_burns")),
+            require_speed_multiplier_change=bool(raw.get("require_speed_multiplier_change", False)),
         )
 
 
@@ -80,6 +335,10 @@ class RPOTrainingScore:
     final_relative_speed_km_s: float
     time_inside_keepout_s: float
     approximate_delta_v_m_s: float
+    target_delta_v_m_s: float
+    burn_axes_satisfied: tuple[str, ...]
+    phase_burns_satisfied: tuple[str, ...]
+    speed_multiplier_changed: bool
     achieved_time_s: float | None
     min_goal_error_km: float
     final_nmt_radial_amplitude_km: float
@@ -92,6 +351,16 @@ class RPOTrainingScore:
     level_failed: bool
     pass_fail_reasons: tuple[str, ...]
     keepout_violation: bool
+    hard_speed_limit_violation: bool
+    forbidden_region_violation: bool
+    forbidden_region_names: tuple[str, ...]
+    approach_gate_violation: bool
+    approach_gate_names: tuple[str, ...]
+    approach_gates_satisfied: int
+    approach_gates_total: int
+    inspection_gates_satisfied: int
+    inspection_gates_total: int
+    inspection_gate_names: tuple[str, ...]
     hints: tuple[str, ...]
 
 
@@ -101,13 +370,27 @@ class RPOTrainingTracker:
         self.t_s: list[float] = []
         self.rel_ric_hist: list[np.ndarray] = []
         self.thrust_hist: list[np.ndarray] = []
+        self.thrust_ric_hist: list[np.ndarray] = []
+        self.target_thrust_hist: list[np.ndarray] = []
         self.mean_motion_hist: list[float] = []
+        self._speed_multiplier_changed = False
+        self._speed_multiplier_change_sample_idx: int | None = None
+        self._score_cache: RPOTrainingScore | None = None
+        self._inspection_gate_names: list[str] = []
+        self._inspection_gate_completed_idx: int | None = None
 
     def clear(self) -> None:
         self.t_s.clear()
         self.rel_ric_hist.clear()
         self.thrust_hist.clear()
+        self.thrust_ric_hist.clear()
+        self.target_thrust_hist.clear()
         self.mean_motion_hist.clear()
+        self._speed_multiplier_changed = False
+        self._speed_multiplier_change_sample_idx = None
+        self._score_cache = None
+        self._inspection_gate_names.clear()
+        self._inspection_gate_completed_idx = None
 
     def record(self, snapshot: SimulationSnapshot) -> None:
         if not self.config.enabled:
@@ -127,9 +410,120 @@ class RPOTrainingTracker:
                 n = float(np.sqrt(EARTH_MU_KM3_S2 / (r_norm**3)))
         self.mean_motion_hist.append(n)
         thrust = snapshot.applied_thrust.get(self.config.chaser_object_id, np.zeros(3, dtype=float))
-        self.thrust_hist.append(np.array(thrust, dtype=float).reshape(3))
+        thrust_eci = np.array(thrust, dtype=float).reshape(3)
+        self.thrust_hist.append(thrust_eci)
+        if target_arr.size >= 6:
+            c_ir = ric_dcm_ir_from_rv(target_arr[:3], target_arr[3:6])
+            self.thrust_ric_hist.append(c_ir.T @ thrust_eci)
+        else:
+            self.thrust_ric_hist.append(np.zeros(3, dtype=float))
+        target_thrust = snapshot.applied_thrust.get(self.config.target_object_id, np.zeros(3, dtype=float))
+        self.target_thrust_hist.append(np.array(target_thrust, dtype=float).reshape(3))
+        self._record_inspection_gate_sample(rel)
+        self._score_cache = None
+
+    def record_speed_multiplier_change(self) -> None:
+        self._speed_multiplier_changed = True
+        self._speed_multiplier_change_sample_idx = max(len(self.t_s) - 1, 0) if self.t_s else 0
+        self._score_cache = None
+
+    def _burn_axis_first_sample_indices(self) -> dict[str, int]:
+        if not self.config.required_burn_axes or not self.thrust_ric_hist:
+            return {}
+        thrust_ric = np.vstack(self.thrust_ric_hist)
+        threshold = max(float(self.config.required_burn_axis_threshold_km_s2), 0.0)
+        min_fraction = float(np.clip(self.config.required_burn_axis_min_component_fraction, 0.0, 1.0))
+        sample_norm = np.linalg.norm(thrust_ric, axis=1)
+        first_indices: dict[str, int] = {}
+        for axis in self.config.required_burn_axes:
+            axis_idx = _BURN_AXIS_INDEX[axis]
+            component = np.abs(thrust_ric[:, axis_idx])
+            hits = np.flatnonzero(
+                (component > threshold) & (component >= min_fraction * sample_norm)
+            )
+            if hits.size:
+                first_indices[axis] = int(hits[0])
+        return first_indices
+
+    def _burn_axes_satisfied(self) -> tuple[str, ...]:
+        first_indices = self._burn_axis_first_sample_indices()
+        return tuple(axis for axis in self.config.required_burn_axes if axis in first_indices)
+
+    def _phase_burn_first_sample_indices(self) -> dict[str, int]:
+        if not self.config.required_phase_burns or not self.thrust_ric_hist or not self.rel_ric_hist:
+            return {}
+        thrust_ric = np.vstack(self.thrust_ric_hist)
+        rel = np.vstack(self.rel_ric_hist)
+        sample_count = min(thrust_ric.shape[0], rel.shape[0])
+        thrust_ric = thrust_ric[:sample_count]
+        rel = rel[:sample_count]
+        sample_norm = np.linalg.norm(thrust_ric, axis=1)
+        first_indices: dict[str, int] = {}
+        for phase_burn in self.config.required_phase_burns:
+            axis_idx = _BURN_AXIS_INDEX[phase_burn.axis]
+            threshold = max(float(phase_burn.threshold_km_s2), 0.0)
+            min_fraction = float(np.clip(phase_burn.min_component_fraction, 0.0, 1.0))
+            component = np.abs(thrust_ric[:, axis_idx])
+            radial_error = np.abs(np.abs(rel[:, 0]) - float(phase_burn.radial_abs_km))
+            hits = np.flatnonzero(
+                (component > threshold)
+                & (component >= min_fraction * sample_norm)
+                & (radial_error <= float(phase_burn.radial_tolerance_km))
+                & (np.abs(rel[:, 1]) <= float(phase_burn.max_abs_intrack_km))
+            )
+            if hits.size:
+                first_indices[phase_burn.name] = int(hits[0])
+        return first_indices
+
+    def _phase_burns_satisfied(self) -> tuple[str, ...]:
+        first_indices = self._phase_burn_first_sample_indices()
+        return tuple(
+            phase_burn.name for phase_burn in self.config.required_phase_burns if phase_burn.name in first_indices
+        )
+
+    def _missing_tutorial_requirements(self) -> tuple[str, ...]:
+        missing: list[str] = []
+        satisfied = set(self._burn_axes_satisfied())
+        for axis in self.config.required_burn_axes:
+            if axis not in satisfied:
+                missing.append(f"{_BURN_AXIS_LABEL[axis]} burn")
+        phase_satisfied = set(self._phase_burns_satisfied())
+        for phase_burn in self.config.required_phase_burns:
+            if phase_burn.name not in phase_satisfied:
+                missing.append(phase_burn.label)
+        if self.config.require_speed_multiplier_change and not self._speed_multiplier_changed:
+            missing.append("speed multiplier change")
+        return tuple(missing)
+
+    def _record_inspection_gate_sample(self, rel: np.ndarray) -> None:
+        gates = self.config.inspection_gates
+        if not gates or len(self._inspection_gate_names) >= len(gates):
+            return
+        sample_idx = len(self.rel_ric_hist) - 1
+        previous = self.rel_ric_hist[sample_idx - 1] if sample_idx > 0 else None
+        satisfied = set(self._inspection_gate_names)
+        for gate in gates:
+            if gate.name in satisfied:
+                continue
+            current_hits_gate = bool(gate.samples_satisfying_gate(rel.reshape(1, -1))[0])
+            segment_hits_gate = bool(previous is not None and gate.segment_satisfies_gate(previous, rel))
+            if current_hits_gate or segment_hits_gate:
+                self._inspection_gate_names.append(gate.name)
+                satisfied.add(gate.name)
+                if len(self._inspection_gate_names) >= len(gates):
+                    self._inspection_gate_completed_idx = sample_idx
+                    break
+
+    def _inspection_gate_status(self) -> dict[str, Any]:
+        return {
+            "satisfied": tuple(self._inspection_gate_names),
+            "completed_idx": self._inspection_gate_completed_idx,
+        }
 
     def current_hint(self) -> str:
+        return self._current_hint()
+
+    def _current_hint(self, *, inspection_gates_satisfied: int | None = None) -> str:
         if not self.rel_ric_hist:
             return ""
         rel = self.rel_ric_hist[-1]
@@ -141,6 +535,59 @@ class RPOTrainingTracker:
         keepout = self.config.keepout_radius_km
         if keepout is not None and rng < float(keepout):
             return "Inside keepout: arrest closing motion and translate away from the target."
+        if self.config.inspection_gates:
+            gate_status = self._inspection_gate_status()
+            satisfied_names = set(gate_status["satisfied"])
+            if len(satisfied_names) >= len(self.config.inspection_gates):
+                return "All inspection gates complete: level should complete."
+            gate = next(gate for gate in self.config.inspection_gates if gate.name not in satisfied_names)
+            delta = np.array(gate.center_ric_km, dtype=float).reshape(3) - r
+            return (
+                f"Next inspection gate: {gate.name}; drift toward "
+                f"R {delta[0]:+.2f} km, I {delta[1]:+.2f} km, C {delta[2]:+.2f} km."
+            )
+        if self.config.survival_goal:
+            keepout = self.config.keepout_radius_km
+            if keepout is not None:
+                margin = rng - float(keepout)
+                return f"Evade: keep at least {_format_distance_text(float(keepout))} separation. Margin {_format_distance_text(margin)}."
+            return "Evade: keep separation until the timer expires."
+        missing_requirements = self._missing_tutorial_requirements()
+        if missing_requirements:
+            return f"Tutorial checklist: complete {', '.join(missing_requirements)} before finishing."
+        if self.config.goal_nmt_radial_amplitude_km is None and self.config.goal_range_km is not None:
+            target_range = float(self.config.goal_range_km)
+            tolerance = self.config.goal_range_tolerance_km
+            speed_limit = self.config.max_goal_speed_km_s
+            range_error = rng - target_range
+            if tolerance is None:
+                if rng <= target_range:
+                    if speed_limit is not None and speed > float(speed_limit):
+                        return f"Inside green circle: slow below {float(speed_limit) * 1000.0:.2f} m/s to finish."
+                    return "Inside green circle with speed under limit: level should complete."
+                return f"Enter the green circle: close to {_format_distance_text(target_range)} or less."
+            if abs(range_error) <= float(tolerance):
+                if speed_limit is not None and speed > float(speed_limit):
+                    return f"At target range: slow below {float(speed_limit) * 1000.0:.2f} m/s to finish."
+                return "At target range with speed under limit: level should complete."
+            if abs(range_error) <= max(float(tolerance) * 2.0, 0.1):
+                if speed_limit is not None:
+                    return f"Near target range: brake below {float(speed_limit) * 1000.0:.2f} m/s."
+                return "Near target range: settle in the green range band."
+        if self.config.goal_nmt_radial_amplitude_km is None and self.config.goal_radius_km is not None:
+            goal = np.array(self.config.goal_relative_ric_km, dtype=float).reshape(-1)
+            if goal.size == 3:
+                goal_error = float(np.linalg.norm(r - goal))
+                goal_radius = float(self.config.goal_radius_km)
+                speed_limit = self.config.max_goal_speed_km_s
+                if goal_error <= goal_radius:
+                    if speed_limit is not None and speed > float(speed_limit):
+                        return f"Inside hold box: slow below {float(speed_limit) * 1000.0:.2f} m/s to finish."
+                    return "Inside hold box with speed under limit: level should complete."
+                if goal_error <= max(goal_radius * 2.0, goal_radius + 0.05):
+                    if speed_limit is not None:
+                        return f"Near hold box: center in the green circle and brake below {float(speed_limit) * 1000.0:.2f} m/s."
+                    return "Near hold box: center in the green circle."
         if closing and speed > 0.01:
             return "Closing quickly: reduce relative speed before correcting position."
         if abs(float(r[1])) > max(abs(float(r[0])), abs(float(r[2])), 0.1):
@@ -150,8 +597,10 @@ class RPOTrainingTracker:
         return "Use small pulses, then coast and observe the RIC trajectory."
 
     def score(self) -> RPOTrainingScore:
+        if self._score_cache is not None:
+            return self._score_cache
         if not self.rel_ric_hist:
-            return RPOTrainingScore(
+            score = RPOTrainingScore(
                 scenario_id=self.config.scenario_id,
                 learning_goal=self.config.learning_goal,
                 samples=0,
@@ -162,6 +611,10 @@ class RPOTrainingTracker:
                 final_relative_speed_km_s=float("nan"),
                 time_inside_keepout_s=0.0,
                 approximate_delta_v_m_s=0.0,
+                target_delta_v_m_s=0.0,
+                burn_axes_satisfied=(),
+                phase_burns_satisfied=(),
+                speed_multiplier_changed=bool(self._speed_multiplier_changed),
                 achieved_time_s=None,
                 min_goal_error_km=float("nan"),
                 final_nmt_radial_amplitude_km=float("nan"),
@@ -174,11 +627,30 @@ class RPOTrainingTracker:
                 level_failed=False,
                 pass_fail_reasons=("No samples recorded.",),
                 keepout_violation=False,
+                hard_speed_limit_violation=False,
+                forbidden_region_violation=False,
+                forbidden_region_names=(),
+                approach_gate_violation=False,
+                approach_gate_names=(),
+                approach_gates_satisfied=0,
+                approach_gates_total=len(self.config.approach_gates),
+                inspection_gates_satisfied=0,
+                inspection_gates_total=len(self.config.inspection_gates),
+                inspection_gate_names=(),
                 hints=(),
             )
+            self._score_cache = score
+            return score
         rel = np.vstack(self.rel_ric_hist)
         t = np.array(self.t_s, dtype=float)
         thrust = np.vstack(self.thrust_hist) if self.thrust_hist else np.zeros((rel.shape[0], 3), dtype=float)
+        burn_axis_first_sample_idx = self._burn_axis_first_sample_indices()
+        burn_axes_satisfied = self._burn_axes_satisfied()
+        phase_burn_first_sample_idx = self._phase_burn_first_sample_indices()
+        phase_burns_satisfied = self._phase_burns_satisfied()
+        target_thrust = (
+            np.vstack(self.target_thrust_hist) if self.target_thrust_hist else np.zeros((rel.shape[0], 3), dtype=float)
+        )
         ranges = np.linalg.norm(rel[:, :3], axis=1)
         speeds = np.linalg.norm(rel[:, 3:], axis=1)
         n_hist = np.array(self.mean_motion_hist, dtype=float).reshape(-1)
@@ -190,6 +662,14 @@ class RPOTrainingTracker:
                 cross_track_phase_deg=float(self.config.goal_nmt_cross_track_phase_deg),
                 center_ric_km=self.config.goal_nmt_center_ric_km,
             )
+        elif self.config.goal_range_km is not None:
+            if self.config.goal_range_tolerance_km is None:
+                goal_err = np.maximum(ranges - float(self.config.goal_range_km), 0.0)
+            else:
+                goal_err = np.abs(ranges - float(self.config.goal_range_km))
+        elif self.config.inspection_gates:
+            gate_centers = np.vstack([gate.center_ric_km for gate in self.config.inspection_gates])
+            goal_err = np.min(np.linalg.norm(rel[:, None, :3] - gate_centers[None, :, :], axis=2), axis=1)
         else:
             goal_err = np.linalg.norm(rel[:, :3] - self.config.goal_relative_ric_km.reshape(1, 3), axis=1)
         element_errors = None
@@ -207,9 +687,35 @@ class RPOTrainingTracker:
             inside = ranges < float(self.config.keepout_radius_km)
             keepout_violation = bool(np.any(inside))
             keepout_time = _sampled_dwell_time_s(inside, t)
+        hard_speed_limit_violation = False
+        if self.config.hard_speed_limit_radius_km is not None and self.config.hard_speed_limit_km_s is not None:
+            hard_speed_limit_violation = _hard_speed_limit_violated(
+                rel,
+                radius_km=float(self.config.hard_speed_limit_radius_km),
+                speed_limit_km_s=float(self.config.hard_speed_limit_km_s),
+            )
+        forbidden_region_names: list[str] = []
+        for region in self.config.forbidden_regions:
+            if bool(np.any(region.contains_positions(rel[:, :3]))):
+                forbidden_region_names.append(region.name)
+        forbidden_region_violation = bool(forbidden_region_names)
         dv_m_s = _integrated_delta_v_m_s(thrust, t)
+        target_dv_m_s = _integrated_delta_v_m_s(target_thrust, t)
+        inspection_gate_status = self._inspection_gate_status()
         goal_met_samples = np.ones(rel.shape[0], dtype=bool)
-        if self.config.goal_radius_km is not None:
+        if self.config.survival_goal:
+            goal_met_samples = np.zeros(rel.shape[0], dtype=bool)
+            if self.config.max_time_s is not None:
+                goal_met_samples |= (t - t[0]) >= float(self.config.max_time_s)
+        elif self.config.inspection_gates:
+            goal_met_samples = np.zeros(rel.shape[0], dtype=bool)
+            if inspection_gate_status["completed_idx"] is not None:
+                goal_met_samples[int(inspection_gate_status["completed_idx"]) :] = True
+        elif self.config.goal_range_km is not None and self.config.goal_range_tolerance_km is None:
+            goal_met_samples &= ranges <= float(self.config.goal_range_km)
+        elif self.config.goal_range_km is not None and self.config.goal_range_tolerance_km is not None:
+            goal_met_samples &= goal_err <= float(self.config.goal_range_tolerance_km)
+        elif self.config.goal_radius_km is not None:
             goal_met_samples &= goal_err <= float(self.config.goal_radius_km)
         if self.config.goal_nmt_tolerance_km is not None:
             goal_met_samples &= goal_err <= float(self.config.goal_nmt_tolerance_km)
@@ -221,15 +727,45 @@ class RPOTrainingTracker:
             goal_met_samples &= element_errors["drift_velocity_error_km_s"] <= float(
                 self.config.goal_nmt_velocity_tolerance_km_s
             )
-        if self.config.max_time_s is not None:
+        if self.config.max_time_s is not None and not self.config.survival_goal:
             goal_met_samples &= (t - t[0]) <= float(self.config.max_time_s)
         if self.config.max_goal_speed_km_s is not None:
             goal_met_samples &= speeds <= float(self.config.max_goal_speed_km_s)
+        for axis in self.config.required_burn_axes:
+            axis_sample_idx = burn_axis_first_sample_idx.get(axis)
+            if axis_sample_idx is None:
+                goal_met_samples &= False
+            else:
+                goal_met_samples[: min(axis_sample_idx, goal_met_samples.size)] = False
+        for phase_burn in self.config.required_phase_burns:
+            phase_sample_idx = phase_burn_first_sample_idx.get(phase_burn.name)
+            if phase_sample_idx is None:
+                goal_met_samples &= False
+            else:
+                goal_met_samples[: min(phase_sample_idx, goal_met_samples.size)] = False
+        if self.config.require_speed_multiplier_change:
+            speed_change_idx = self._speed_multiplier_change_sample_idx
+            if speed_change_idx is None:
+                goal_met_samples &= False
+            else:
+                goal_met_samples[: min(speed_change_idx, goal_met_samples.size)] = False
         achieved_idx = np.flatnonzero(goal_met_samples)
         achieved_time_s = float(t[int(achieved_idx[0])] - t[0]) if achieved_idx.size else None
+        gate_eval_end = int(achieved_idx[0]) + 1 if achieved_idx.size else rel.shape[0]
+        gate_rel = rel[: max(gate_eval_end, 1)]
+        gate_status = _approach_gate_status(self.config.approach_gates, gate_rel)
         budget_ok = True
         reasons: list[str] = []
-        objective_name = "NMT target" if self.config.goal_nmt_radial_amplitude_km is not None else "goal"
+        if self.config.goal_nmt_radial_amplitude_km is not None:
+            objective_name = "NMT target"
+        elif self.config.survival_goal:
+            objective_name = "survival objective"
+        elif self.config.inspection_gates:
+            objective_name = "inspection gates"
+        elif self.config.goal_range_km is not None:
+            objective_name = "range goal"
+        else:
+            objective_name = "goal"
         if achieved_time_s is None:
             reasons.append(f"{objective_name} not achieved within tolerance.")
         time_failed = (
@@ -241,21 +777,79 @@ class RPOTrainingTracker:
             reasons.append(f"Time budget exceeded ({float(self.config.max_time_s):.0f} s).")
         dv_failed = False
         if self.config.max_delta_v_m_s is not None and dv_m_s > float(self.config.max_delta_v_m_s):
+            if self.config.fail_on_delta_v_budget:
+                budget_ok = False
+                dv_failed = True
+                reasons.append(f"Delta-v budget exceeded ({float(self.config.max_delta_v_m_s):.1f} m/s).")
+        target_dv_failed = False
+        if self.config.max_target_delta_v_m_s is not None and target_dv_m_s > float(self.config.max_target_delta_v_m_s):
             budget_ok = False
-            dv_failed = True
-            reasons.append(f"Delta-v budget exceeded ({float(self.config.max_delta_v_m_s):.1f} m/s).")
+            target_dv_failed = True
+            reasons.append(f"Target delta-v budget exceeded ({float(self.config.max_target_delta_v_m_s):.1f} m/s).")
         if self.config.keepout_radius_km is not None:
             budget_ok = budget_ok and not keepout_violation
             if keepout_violation:
                 reasons.append("Keepout was violated.")
-        level_passed = bool(achieved_time_s is not None and budget_ok)
-        level_failed = bool((keepout_violation or dv_failed or time_failed) and not level_passed)
+        if hard_speed_limit_violation:
+            budget_ok = False
+            assert self.config.hard_speed_limit_radius_km is not None
+            assert self.config.hard_speed_limit_km_s is not None
+            reasons.append(
+                "Hard speed limit violated inside "
+                f"{_format_distance_text(float(self.config.hard_speed_limit_radius_km))}: "
+                f"{_format_speed_text(float(self.config.hard_speed_limit_km_s))} max."
+            )
+        if forbidden_region_violation:
+            budget_ok = False
+            regions = ", ".join(forbidden_region_names[:3])
+            suffix = "..." if len(forbidden_region_names) > 3 else ""
+            reasons.append(f"Forbidden region violated: {regions}{suffix}.")
+        approach_gate_warnings = list(gate_status["required_violated"])
+        approach_gate_names: list[str] = []
+        if achieved_time_s is not None:
+            approach_gate_names.extend(approach_gate_warnings)
+            approach_gate_names.extend(gate_status["required_missed"])
+        approach_gate_violation = bool(approach_gate_names)
+        if approach_gate_violation:
+            budget_ok = False
+            gates = ", ".join(approach_gate_names[:3])
+            suffix = "..." if len(approach_gate_names) > 3 else ""
+            reasons.append(f"R-bar approach gate failed: {gates}{suffix}.")
+        requirements_ok = True
+        burn_axes_set = set(burn_axes_satisfied)
+        for axis in self.config.required_burn_axes:
+            if axis not in burn_axes_set:
+                requirements_ok = False
+                reasons.append(f"{_BURN_AXIS_LABEL[axis]} burn required.")
+        phase_burns_set = set(phase_burns_satisfied)
+        for phase_burn in self.config.required_phase_burns:
+            if phase_burn.name not in phase_burns_set:
+                requirements_ok = False
+                reasons.append(f"{phase_burn.label} required.")
+        if self.config.require_speed_multiplier_change and not self._speed_multiplier_changed:
+            requirements_ok = False
+            reasons.append("Speed multiplier change required.")
+        level_passed = bool(achieved_time_s is not None and budget_ok and requirements_ok)
+        level_failed = bool(
+            (
+                keepout_violation
+                or hard_speed_limit_violation
+                or forbidden_region_violation
+                or approach_gate_violation
+                or dv_failed
+                or target_dv_failed
+                or time_failed
+            )
+            and not level_passed
+        )
         goal_met = level_passed
         if level_passed:
             reasons.append("All pass criteria satisfied.")
         final_elements = _final_nmt_element_values(element_errors)
-        hints = tuple(h for h in (self.current_hint(),) if h)
-        return RPOTrainingScore(
+        hints = tuple(
+            h for h in (self._current_hint(inspection_gates_satisfied=len(inspection_gate_status["satisfied"])),) if h
+        )
+        score = RPOTrainingScore(
             scenario_id=self.config.scenario_id,
             learning_goal=self.config.learning_goal,
             samples=int(rel.shape[0]),
@@ -266,6 +860,10 @@ class RPOTrainingTracker:
             final_relative_speed_km_s=float(speeds[-1]),
             time_inside_keepout_s=float(keepout_time),
             approximate_delta_v_m_s=float(dv_m_s),
+            target_delta_v_m_s=float(target_dv_m_s),
+            burn_axes_satisfied=tuple(burn_axes_satisfied),
+            phase_burns_satisfied=tuple(phase_burns_satisfied),
+            speed_multiplier_changed=bool(self._speed_multiplier_changed),
             achieved_time_s=achieved_time_s,
             min_goal_error_km=float(np.min(goal_err)),
             final_nmt_radial_amplitude_km=final_elements["radial_amplitude_km"],
@@ -278,8 +876,20 @@ class RPOTrainingTracker:
             level_failed=bool(level_failed),
             pass_fail_reasons=tuple(reasons),
             keepout_violation=bool(keepout_violation),
+            hard_speed_limit_violation=bool(hard_speed_limit_violation),
+            forbidden_region_violation=bool(forbidden_region_violation),
+            forbidden_region_names=tuple(forbidden_region_names),
+            approach_gate_violation=bool(approach_gate_violation),
+            approach_gate_names=tuple(approach_gate_names),
+            approach_gates_satisfied=len(gate_status["satisfied"]),
+            approach_gates_total=len(self.config.approach_gates),
+            inspection_gates_satisfied=len(inspection_gate_status["satisfied"]),
+            inspection_gates_total=len(self.config.inspection_gates),
+            inspection_gate_names=tuple(inspection_gate_status["satisfied"]),
             hints=hints,
         )
+        self._score_cache = score
+        return score
 
     def debrief_text(self) -> str:
         score = self.score()
@@ -304,10 +914,27 @@ class RPOTrainingTracker:
                 f"Final Speed   : {score.final_relative_speed_km_s:.5f} km/s",
                 f"Keepout Time  : {score.time_inside_keepout_s:.1f} s",
                 f"Approx dV     : {score.approximate_delta_v_m_s:.2f} m/s",
+                f"Target dV     : {score.target_delta_v_m_s:.2f} m/s",
                 f"Achieved Time : {_format_optional_time(score.achieved_time_s)}",
                 f"Level Passed  : {'yes' if score.level_passed else 'no'}",
             ]
         )
+        if score.forbidden_region_violation:
+            lines.append(f"Forbidden Reg : {', '.join(score.forbidden_region_names)}")
+        if score.approach_gates_total:
+            lines.append(f"R-Bar Gates   : {score.approach_gates_satisfied}/{score.approach_gates_total}")
+        if score.inspection_gates_total:
+            lines.append(f"Inspect Gates : {score.inspection_gates_satisfied}/{score.inspection_gates_total}")
+        if score.approach_gate_violation:
+            lines.append(f"Gate Failure  : {', '.join(score.approach_gate_names)}")
+        if self.config.required_burn_axes:
+            axes = ", ".join(score.burn_axes_satisfied) if score.burn_axes_satisfied else "none"
+            lines.append(f"Burn Axes     : {axes}")
+        if self.config.required_phase_burns:
+            burns = ", ".join(score.phase_burns_satisfied) if score.phase_burns_satisfied else "none"
+            lines.append(f"Phase Burns   : {burns}")
+        if self.config.require_speed_multiplier_change:
+            lines.append(f"Speed Changed : {'yes' if score.speed_multiplier_changed else 'no'}")
         if self.config.goal_nmt_radial_amplitude_km is not None:
             lines.extend(
                 [
@@ -478,10 +1105,367 @@ def _format_optional_time(value: float | None) -> str:
     return f"{float(value):.1f} s"
 
 
+def _format_distance_text(value_km: float) -> str:
+    if abs(float(value_km)) < 0.1:
+        return f"{float(value_km) * 1000.0:.0f} m"
+    return f"{float(value_km):.2f} km"
+
+
+def _format_speed_text(value_km_s: float) -> str:
+    return f"{float(value_km_s) * 1000.0:.2f} m/s"
+
+
 def _optional_float(value: Any) -> float | None:
     if value is None:
         return None
     return float(value)
+
+
+def _burn_axes_from_metadata(value: Any) -> tuple[str, ...]:
+    if value is None or value is False:
+        return ()
+    if not isinstance(value, list):
+        raise ValueError("metadata.game.training.required_burn_axes must be a list.")
+    axes: list[str] = []
+    for item in value:
+        axis = _burn_axis_from_metadata_value(item)
+        if axis not in axes:
+            axes.append(axis)
+    return tuple(axes)
+
+
+def _burn_axis_from_metadata_value(value: Any) -> str:
+    aliases = {
+        "r": "radial",
+        "radial": "radial",
+        "i": "in_track",
+        "in_track": "in_track",
+        "in-track": "in_track",
+        "intrack": "in_track",
+        "along_track": "in_track",
+        "along-track": "in_track",
+        "c": "cross_track",
+        "cross_track": "cross_track",
+        "cross-track": "cross_track",
+        "crosstrack": "cross_track",
+    }
+    key = str(value or "").strip().lower()
+    axis = aliases.get(key)
+    if axis is None:
+        raise ValueError(f"Unknown burn axis '{value}'.")
+    return axis
+
+
+def _required_phase_burns_from_metadata(value: Any) -> tuple[RequiredPhaseBurnConfig, ...]:
+    if value is None or value is False:
+        return ()
+    if not isinstance(value, list):
+        raise ValueError("metadata.game.training.required_phase_burns must be a list.")
+    burns: list[RequiredPhaseBurnConfig] = []
+    for idx, raw_value in enumerate(value, start=1):
+        if not isinstance(raw_value, dict):
+            raise ValueError("metadata.game.training.required_phase_burns entries must be mappings.")
+        axis = _burn_axis_from_metadata_value(raw_value.get("axis", "cross_track"))
+        name = str(raw_value.get("name", f"{axis}_phase_burn_{idx}") or f"{axis}_phase_burn_{idx}")
+        burns.append(
+            RequiredPhaseBurnConfig(
+                name=name,
+                axis=axis,
+                radial_abs_km=float(raw_value["radial_abs_km"]),
+                radial_tolerance_km=float(raw_value.get("radial_tolerance_km", 0.2)),
+                max_abs_intrack_km=float(raw_value.get("max_abs_intrack_km", 0.35)),
+                threshold_km_s2=float(raw_value.get("threshold_km_s2", 1.0e-10)),
+                min_component_fraction=float(
+                    raw_value.get("min_component_fraction", _BURN_AXIS_MIN_COMPONENT_FRACTION)
+                ),
+            )
+        )
+    return tuple(burns)
+
+
+def _forbidden_regions_from_metadata(value: Any) -> tuple[ForbiddenRegionConfig, ...]:
+    if value is None or value is False:
+        return ()
+    if not isinstance(value, list):
+        raise ValueError("metadata.game.training.forbidden_regions must be a list.")
+    regions: list[ForbiddenRegionConfig] = []
+    for idx, item in enumerate(value, start=1):
+        if not isinstance(item, dict):
+            raise ValueError("Each forbidden region must be a mapping.")
+        region = ForbiddenRegionConfig.from_mapping(item, index=idx)
+        if region.kind == "box" and np.any(region.min_ric_km > region.max_ric_km):
+            raise ValueError(f"Forbidden region '{region.name}' has min_ric_km greater than max_ric_km.")
+        if region.kind == "annular_sector":
+            _validate_annular_sector_region(region)
+        elif region.kind == "cylinder":
+            _validate_cylinder_region(region)
+        elif region.kind != "box":
+            raise ValueError(f"Forbidden region '{region.name}' has unknown kind '{region.kind}'.")
+        regions.append(region)
+    return tuple(regions)
+
+
+def _approach_gates_from_metadata(value: Any) -> tuple[ApproachGateConfig, ...]:
+    if value is None or value is False:
+        return ()
+    if not isinstance(value, list):
+        raise ValueError("metadata.game.training.approach_gates must be a list.")
+    gates: list[ApproachGateConfig] = []
+    for idx, item in enumerate(value, start=1):
+        if not isinstance(item, dict):
+            raise ValueError("Each approach gate must be a mapping.")
+        gate = ApproachGateConfig.from_mapping(item, index=idx)
+        if gate.radial_tolerance_km <= 0.0:
+            raise ValueError(f"Approach gate '{gate.name}' radial_tolerance_km must be positive.")
+        gates.append(gate)
+    return tuple(gates)
+
+
+def _inspection_gates_from_metadata(value: Any) -> tuple[InspectionGateConfig, ...]:
+    if value is None or value is False:
+        return ()
+    if not isinstance(value, list):
+        raise ValueError("metadata.game.training.inspection_gates must be a list.")
+    gates: list[InspectionGateConfig] = []
+    for idx, item in enumerate(value, start=1):
+        if not isinstance(item, dict):
+            raise ValueError("Each inspection gate must be a mapping.")
+        gate = InspectionGateConfig.from_mapping(item, index=idx)
+        if np.any(np.array(gate.half_width_ric_km, dtype=float) <= 0.0):
+            raise ValueError(f"Inspection gate '{gate.name}' half_width_ric_km values must be positive.")
+        gates.append(gate)
+    return tuple(gates)
+
+
+def _approach_gate_status(gates: tuple[ApproachGateConfig, ...], relative_ric_state: np.ndarray) -> dict[str, tuple[str, ...]]:
+    satisfied: list[str] = []
+    violated: list[str] = []
+    missed: list[str] = []
+    required_violated: list[str] = []
+    required_missed: list[str] = []
+    for gate in gates:
+        near = gate.samples_near_gate(relative_ric_state)
+        ok = gate.samples_satisfying_gate(relative_ric_state)
+        if bool(np.any(ok)):
+            satisfied.append(gate.name)
+        elif bool(np.any(near)):
+            violated.append(gate.name)
+            if gate.required:
+                required_violated.append(gate.name)
+        else:
+            missed.append(gate.name)
+            if gate.required:
+                required_missed.append(gate.name)
+    return {
+        "satisfied": tuple(satisfied),
+        "violated": tuple(violated),
+        "missed": tuple(missed),
+        "required_violated": tuple(required_violated),
+        "required_missed": tuple(required_missed),
+    }
+
+
+def _inspection_gate_status(gates: tuple[InspectionGateConfig, ...], relative_ric_state: np.ndarray) -> dict[str, Any]:
+    if not gates:
+        return {"satisfied": (), "completed_idx": None}
+    rel = np.array(relative_ric_state, dtype=float)
+    if rel.ndim == 1:
+        rel = rel.reshape(1, -1)
+    if rel.shape[1] < 6:
+        raise ValueError("relative_ric_state must contain RIC position and velocity.")
+    satisfied: list[str] = []
+    completed_idx: int | None = None
+    for sample_idx in range(rel.shape[0]):
+        if len(satisfied) >= len(gates):
+            break
+        for gate in gates:
+            if gate.name in satisfied:
+                continue
+            current_hits_gate = bool(gate.samples_satisfying_gate(rel[sample_idx : sample_idx + 1])[0])
+            segment_hits_gate = bool(
+                sample_idx > 0 and gate.segment_satisfies_gate(rel[sample_idx - 1], rel[sample_idx])
+            )
+            if current_hits_gate or segment_hits_gate:
+                satisfied.append(gate.name)
+                if len(satisfied) >= len(gates):
+                    completed_idx = sample_idx
+                    break
+    return {"satisfied": tuple(satisfied), "completed_idx": completed_idx}
+
+
+def _position_segment_intersects_box(
+    start_ric_km: np.ndarray, end_ric_km: np.ndarray, *, center: np.ndarray, half_width: np.ndarray
+) -> bool:
+    start = np.array(start_ric_km, dtype=float).reshape(3)
+    end = np.array(end_ric_km, dtype=float).reshape(3)
+    lo = np.array(center, dtype=float).reshape(3) - np.array(half_width, dtype=float).reshape(3)
+    hi = np.array(center, dtype=float).reshape(3) + np.array(half_width, dtype=float).reshape(3)
+    delta = end - start
+    t_min = 0.0
+    t_max = 1.0
+    for axis in range(3):
+        if abs(float(delta[axis])) <= 1.0e-12:
+            if start[axis] < lo[axis] or start[axis] > hi[axis]:
+                return False
+            continue
+        inv_delta = 1.0 / float(delta[axis])
+        t1 = float((lo[axis] - start[axis]) * inv_delta)
+        t2 = float((hi[axis] - start[axis]) * inv_delta)
+        t_near = min(t1, t2)
+        t_far = max(t1, t2)
+        t_min = max(t_min, t_near)
+        t_max = min(t_max, t_far)
+        if t_min > t_max:
+            return False
+    return True
+
+
+def _hard_speed_limit_violated(relative_ric_state: np.ndarray, *, radius_km: float, speed_limit_km_s: float) -> bool:
+    rel = np.array(relative_ric_state, dtype=float)
+    if rel.ndim == 1:
+        rel = rel.reshape(1, -1)
+    if rel.shape[1] < 6:
+        raise ValueError("relative_ric_state must contain RIC position and velocity.")
+    positions = rel[:, :3]
+    velocities = rel[:, 3:6]
+    ranges = np.linalg.norm(positions, axis=1)
+    speeds = np.linalg.norm(velocities, axis=1)
+    if bool(np.any((ranges <= float(radius_km)) & (speeds > float(speed_limit_km_s)))):
+        return True
+    if rel.shape[0] < 2:
+        return False
+    for idx in range(1, rel.shape[0]):
+        interval = _position_segment_sphere_interval(
+            positions[idx - 1],
+            positions[idx],
+            radius_km=float(radius_km),
+        )
+        if interval is None:
+            continue
+        u0, u1 = interval
+        v0 = velocities[idx - 1]
+        dv = velocities[idx] - velocities[idx - 1]
+        entry_speed = float(np.linalg.norm(v0 + dv * u0))
+        exit_speed = float(np.linalg.norm(v0 + dv * u1))
+        if max(entry_speed, exit_speed) > float(speed_limit_km_s):
+            return True
+    return False
+
+
+def _position_segment_sphere_interval(
+    start_ric_km: np.ndarray,
+    end_ric_km: np.ndarray,
+    *,
+    radius_km: float,
+) -> tuple[float, float] | None:
+    start = np.array(start_ric_km, dtype=float).reshape(3)
+    end = np.array(end_ric_km, dtype=float).reshape(3)
+    radius = float(radius_km)
+    if radius < 0.0:
+        return None
+    inside_start = float(np.linalg.norm(start)) <= radius
+    inside_end = float(np.linalg.norm(end)) <= radius
+    if inside_start and inside_end:
+        return (0.0, 1.0)
+    delta = end - start
+    a = float(np.dot(delta, delta))
+    if a <= 1.0e-18:
+        return (0.0, 1.0) if inside_start else None
+    b = 2.0 * float(np.dot(start, delta))
+    c = float(np.dot(start, start) - radius * radius)
+    disc = b * b - 4.0 * a * c
+    if disc < 0.0:
+        return None
+    sqrt_disc = float(np.sqrt(max(disc, 0.0)))
+    t0 = (-b - sqrt_disc) / (2.0 * a)
+    t1 = (-b + sqrt_disc) / (2.0 * a)
+    if t0 > t1:
+        t0, t1 = t1, t0
+    entry = max(0.0, t0)
+    exit_ = min(1.0, t1)
+    if inside_start:
+        entry = 0.0
+    if inside_end:
+        exit_ = 1.0
+    if entry <= exit_ and t1 >= 0.0 and t0 <= 1.0:
+        return (float(entry), float(exit_))
+    return None
+
+
+def _ric_bound_array(value: Any, *, default: float, field_name: str) -> np.ndarray:
+    if value is None:
+        return np.full(3, float(default), dtype=float)
+    if not isinstance(value, (list, tuple)) or len(value) != 3:
+        raise ValueError(f"Forbidden region {field_name} must be a length-3 list.")
+    vals = [float(default) if item is None else float(item) for item in value]
+    return np.array(vals, dtype=float).reshape(3)
+
+
+def _validate_annular_sector_region(region: ForbiddenRegionConfig) -> None:
+    _plane_axes(region.plane)
+    if region.inner_radius_km is None or region.outer_radius_km is None:
+        raise ValueError(f"Forbidden region '{region.name}' annular_sector requires inner_radius_km and outer_radius_km.")
+    if float(region.inner_radius_km) < 0.0:
+        raise ValueError(f"Forbidden region '{region.name}' inner_radius_km must be nonnegative.")
+    if float(region.outer_radius_km) <= float(region.inner_radius_km):
+        raise ValueError(f"Forbidden region '{region.name}' outer_radius_km must be greater than inner_radius_km.")
+    if region.max_abs_out_of_plane_km is not None and float(region.max_abs_out_of_plane_km) < 0.0:
+        raise ValueError(f"Forbidden region '{region.name}' max_abs_out_of_plane_km must be nonnegative.")
+
+
+def _validate_cylinder_region(region: ForbiddenRegionConfig) -> None:
+    _axis_index(region.axis)
+    if region.radius_km is None or region.height_km is None:
+        raise ValueError(f"Forbidden region '{region.name}' cylinder requires radius_km and height_km.")
+    if float(region.radius_km) <= 0.0:
+        raise ValueError(f"Forbidden region '{region.name}' radius_km must be positive.")
+    if float(region.height_km) <= 0.0:
+        raise ValueError(f"Forbidden region '{region.name}' height_km must be positive.")
+
+
+def _axis_index(axis: str) -> int:
+    key = str(axis or "").strip().upper()
+    if key == "R":
+        return 0
+    if key == "I":
+        return 1
+    if key == "C":
+        return 2
+    raise ValueError(f"Forbidden region axis must be one of R, I, or C; got '{axis}'.")
+
+
+def _plane_axes(plane: str) -> tuple[int, int, int]:
+    key = str(plane or "").strip().upper()
+    if key == "RI":
+        return 1, 0, 2
+    if key == "RC":
+        return 2, 0, 1
+    if key == "IC":
+        return 1, 2, 0
+    raise ValueError(f"Forbidden region plane must be one of RI, RC, or IC; got '{plane}'.")
+
+
+def _angles_in_range_deg(angles_deg: np.ndarray, start_deg: float, end_deg: float) -> np.ndarray:
+    span = float(end_deg) - float(start_deg)
+    if span >= 360.0:
+        return np.ones_like(np.array(angles_deg, dtype=float), dtype=bool)
+    while span < 0.0:
+        span += 360.0
+    relative = (np.array(angles_deg, dtype=float) - float(start_deg)) % 360.0
+    return relative <= span
+
+
+def _plot_planes_from_metadata(value: Any) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        raise ValueError("Forbidden region plot_planes must be a list.")
+    valid = {"RI", "RC", "IC"}
+    planes = tuple(str(item).strip().upper() for item in value if str(item).strip())
+    unknown = [item for item in planes if item not in valid]
+    if unknown:
+        raise ValueError(f"Forbidden region plot_planes contains unknown plane(s): {', '.join(unknown)}.")
+    return planes
 
 
 def _sampled_dwell_time_s(mask: np.ndarray, time_s: np.ndarray) -> float:

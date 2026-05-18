@@ -7,7 +7,23 @@ metadata:
     --speed-multiple 10`.
   game:
     control_mode: ric_translation
+    camera_mode: target_pair
     difficulty: easy
+    plot_overlays_in_zoom: false
+    plot_overlays_in_zoom_by_plane:
+      RC: true
+    plot_axis_scale:
+      RI:
+        x: 1.2
+    plot_fixed_axis_half_span_km:
+      RI:
+        y: 0.75
+      RC:
+        y: 0.75
+    plot_equal_axis_scale_planes:
+    - RC
+    proximity_ring_plot_planes:
+    - RI
     player_max_accel_km_s2: 2.0e-05
     training:
       enabled: true
@@ -19,6 +35,7 @@ metadata:
       pass_criteria:
       - Enter the V-bar stationkeeping box.
       - Keep relative speed below the goal threshold.
+      - Stay inside the V-bar approach corridor.
       - Stay under the time and delta-v budgets.
       - Do not enter keepout.
       instructor_notes:
@@ -33,7 +50,66 @@ metadata:
       - 0.0
       goal_radius_km: 0.15
       max_goal_speed_km_s: 0.0003
-      max_time_s: 12000.0
+      forbidden_regions:
+      - name: upper radial rail of V-bar U
+        plot_planes:
+        - RI
+        min_ric_km:
+        - 0.45
+        - -5.8
+        - -0.8
+        max_ric_km:
+        - 5.8
+        - 0.0
+        - 0.8
+      - name: lower radial rail of V-bar U
+        plot_planes:
+        - RI
+        min_ric_km:
+        - -5.8
+        - -5.8
+        - -0.8
+        max_ric_km:
+        - -0.45
+        - 0.0
+        - 0.8
+      - name: target-side arch of V-bar U
+        kind: annular_sector
+        plane: RI
+        plot_planes:
+        - RI
+        center_ric_km:
+        - 0.0
+        - 0.0
+        - 0.0
+        inner_radius_km: 0.45
+        outer_radius_km: 5.8
+        angle_min_deg: -90.0
+        angle_max_deg: 90.0
+        max_abs_out_of_plane_km: 0.8
+      - name: upper radial ceiling in RC
+        plot_planes:
+        - RC
+        min_ric_km:
+        - 0.45
+        - -5.8
+        - -5.8
+        max_ric_km:
+        - 5.8
+        - 0.0
+        - 5.8
+      - name: lower radial floor in RC
+        plot_planes:
+        - RC
+        min_ric_km:
+        - -5.8
+        - -5.8
+        - -5.8
+        max_ric_km:
+        - -0.45
+        - 0.0
+        - 5.8
+      max_time_s: 18000.0
       max_delta_v_m_s: 8.0
 objects:
   rocket:
@@ -155,7 +231,7 @@ objects:
     kind: satellite
 simulator:
   scenario_type: auto
-  duration_s: 12000.0
+  duration_s: 18000.0
   dt_s: 1.0
   dynamics:
     orbit:

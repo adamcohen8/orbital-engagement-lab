@@ -64,13 +64,12 @@ Initial curated scenarios:
 
 4. `rpo_04_rendezvous`
    Complete final approach from the hold point to rendezvous.
-   Pass by getting within 25 meters of the target with less than 1 meter per
-   second of relative velocity.
+   Pass by getting within 10 meters of the target with less than 0.1 meters per
+   second of relative velocity, without entering the 25 meter proximity zone too fast.
 
-5. `rpo_05_keepout_recovery`
-   Recover from an unsafe closing geometry without entering keepout.
-   Pass by preserving keepout margin, arresting closure, and settling into the
-   V-bar hold box with low relative speed under the time and delta-v budgets.
+5. `rpo_05_passive_cross_track_approach`
+   Build a passively safe cross-track orbit and drift through inspection gates
+   without entering the in-track forbidden cylinder.
 
 6. `rpo_06_defensive_target_demo`
    Later single-player bridge toward PvP: target uses a simple defensive policy.
@@ -155,7 +154,7 @@ an approach became unstable.
 - Done: `rpo_02_vbar_approach`.
 - Done: `rpo_03_rbar_approach`.
 - Done: `rpo_04_rendezvous`.
-- Done: `rpo_05_keepout_recovery`.
+- Done: `rpo_05_passive_cross_track_approach`.
 - Done: `rpo_06_defensive_target_demo`.
 - In progress: add instructor notes for each scenario.
 - Done for implemented levels: add success thresholds and scorecards.
@@ -215,11 +214,12 @@ Implemented levels:
   speed, under time and delta-v budgets, without entering keepout.
 - `rpo_03_rbar_approach`: enter the radial hold box with low relative speed,
   under time and delta-v budgets, without entering keepout.
-- `rpo_04_rendezvous`: get within 25 meters of the target with less than
-  1 meter per second of relative velocity.
-- `rpo_05_keepout_recovery`: recover from an unsafe closing state by keeping
-  out of the keepout zone and returning to the V-bar hold box with low relative
-  speed.
+- `rpo_04_rendezvous`: get within 10 meters of the target with less than
+  0.1 meters per second of relative velocity, without entering the 25 meter
+  proximity zone faster than 0.1 meters per second.
+- `rpo_05_passive_cross_track_approach`: build a passively safe cross-track
+  orbit and drift through the RC inspection gates without entering the in-track
+  forbidden cylinder.
 - `rpo_06_defensive_target_demo`: track a target with simple defensive pulses,
   maintain keepout margin, and settle into a safe trailing corridor. This level
   uses the target reference orbit as the RIC display/control frame so the

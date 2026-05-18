@@ -1,75 +1,55 @@
-scenario_name: game_training_rpo_03_rbar_approach
-scenario_description: RPO trainer scenario for practicing an R-bar approach while
-  managing radial/in-track coupling.
+scenario_name: game_training_rpo_arcade_pursuit
+scenario_description: Arcade RPO pursuit mode where each cleared round restarts
+  level 6 with a new random target evasion direction.
 metadata:
   owner: codex
-  notes: Run with `python run_game.py sim/game/configs/game_training_rpo_03_rbar_approach.yaml
+  notes: Run with `python run_game.py sim/game/configs/game_training_rpo_arcade_pursuit.yaml
     --speed-multiple 10`.
   game:
+    level_name: Pursuit Arcade
     control_mode: ric_translation
+    ric_reference_object_id: target_reference
+    camera_mode: target_pair
     difficulty: easy
-    plot_overlays_in_zoom: false
-    player_max_accel_km_s2: 1.0e-05
+    player_max_accel_km_s2: 1.5e-05
+    arcade:
+      enabled: true
+      initial_time_s: 12000.0
+      round_bonus_time_s: 500.0
+      delta_v_bonus_time_per_m_s: 100.0
+    defensive_target:
+      enabled: true
+      chaser_object_id: chaser
+      trigger_range_km: 1.2
+      trigger_closing_speed_km_s: 0.00025
+      keepout_radius_km: 0.1
+      max_accel_km_s2: 7.5e-06
+      max_delta_v_m_s: 0.1
+      cross_track_bias: 0.65
+      pulse_period_s: 120.0
     training:
       enabled: true
-      scenario_id: rpo_03_rbar_approach
-      learning_goal: "Learn the R-bar approach rhythm: pulse toward the target,
-        coast, brake in stages, and arrive at the standoff range with low relative
-        speed."
-      player_brief: Start below the target on the R-bar. Tap W briefly to build
-        upward closure, coast most of the time, tap S periodically to slow down,
-        and use A/D or Left/Right only for small centering corrections.
+      scenario_id: rpo_arcade_pursuit
+      learning_goal: Clear as many pursuit rounds as possible against targets that
+        choose a different fixed evasion burn direction each round.
+      player_brief: Chase the target to within 100 m. Each successful round resets
+        your fuel, gives the target a new random evasion direction, and adds
+        500 seconds plus 100 seconds per unused m/s of chaser delta-v to your
+        remaining clock.
       pass_criteria:
-      - "Controls: W moves up the R-bar, S brakes downward, A/D and Left/Right
-        should be tiny centering taps only."
-      - "Playbook: pulse W briefly, coast, tap S in stages, repeat."
-      - Enter the green standoff range circle.
-      - Keep relative speed below the goal threshold.
-      - Stay inside the broad R-bar safety envelope.
-      - Stay under the time and delta-v budgets.
-      - Do not enter keepout.
+      - Get within 100 m of the maneuvering target.
+      - Keep clearing rounds until you run out of time or chaser delta-v.
       instructor_notes:
-      - Use this level to compare intuition from R-bar versus V-bar approaches.
-      - Have cadets explain why radial motion creates along-track drift and why
-        staged braking is safer than one continuous closure.
-      - A first successful run should use short W pulses, long coasts, and short
-        S braking pulses before entering the standoff range.
+      - This is an arcade variant of level 6.
+      - Each round uses one random fixed target burn direction.
+      - Round score is weighted by round number and added to the run total.
+      - The yellow target motion is shown relative to the target reference orbit.
+      - Target defensive maneuvering is capped at 0.1 m/s total delta-v each round.
       target_object_id: target
       chaser_object_id: chaser
-      keepout_radius_km: 0.25
-      goal_range_km: 0.75
-      max_goal_speed_km_s: 0.0003
-      forbidden_regions:
-      - name: RI R-bar arch safety envelope
-        kind: annular_sector
-        plane: RI
-        plot_planes:
-        - RI
-        center_ric_km:
-        - 0.0
-        - 0.0
-        - 0.0
-        inner_radius_km: 0.95
-        outer_radius_km: 5.8
-        angle_min_deg: -65.0
-        angle_max_deg: 245.0
-        max_abs_out_of_plane_km: 0.9
-      - name: RC R-bar arch safety envelope
-        kind: annular_sector
-        plane: RC
-        plot_planes:
-        - RC
-        center_ric_km:
-        - 0.0
-        - 0.0
-        - 0.0
-        inner_radius_km: 0.95
-        outer_radius_km: 5.8
-        angle_min_deg: -65.0
-        angle_max_deg: 245.0
-        max_abs_out_of_plane_km: 1.2
+      goal_range_km: 0.1
       max_time_s: 12000.0
-      max_delta_v_m_s: 10.0
+      max_delta_v_m_s: 8.0
 objects:
   rocket:
     enabled: false
@@ -84,11 +64,11 @@ objects:
       relative_to_target_ric:
         frame: rect
         state:
-        - -7.0
-        - -10.0
+        - 0.0
+        - -1.8
         - 0.0
         - 0.0
-        - 0.013
+        - 0.0
         - 0.0
       attitude_quat_bn:
       - 1.0
@@ -117,6 +97,7 @@ objects:
       refresh_rate_s: 1.0
       targets:
       - target
+      - target_reference
       conditions:
         require_line_of_sight: false
         max_range_km: 10000.0
@@ -216,7 +197,7 @@ simulator:
     earth_impact_enabled: false
     earth_radius_km: 6378.137
 outputs:
-  output_dir: outputs/game_training_rpo_03
+  output_dir: outputs/game_training_rpo_arcade_pursuit
   mode: save
   stats:
     enabled: true
