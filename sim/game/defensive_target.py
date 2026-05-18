@@ -17,6 +17,7 @@ class DefensiveTargetIntentProvider:
     keepout_radius_km: float = 0.25
     max_accel_km_s2: float = 7.5e-6
     max_delta_v_m_s: float | None = None
+    fixed_direction_ric: tuple[float, float, float] | None = None
     cross_track_bias: float = 0.65
     pulse_period_s: float = 120.0
     _used_delta_v_m_s: float = 0.0
@@ -49,13 +50,17 @@ class DefensiveTargetIntentProvider:
         if not active:
             return self._inactive_command()
 
-        away_from_chaser = -r / rng
-        cross_sign = 1.0 if int(float(t_s) // max(float(self.pulse_period_s), 1.0e-9)) % 2 == 0 else -1.0
-        cross = np.array([0.0, 0.0, cross_sign], dtype=float)
-        if rng < max(float(self.keepout_radius_km) * 2.0, 1.0e-9):
-            direction_ric = away_from_chaser
+        fixed_direction = self._fixed_direction_ric()
+        if fixed_direction is not None:
+            direction_ric = fixed_direction
         else:
-            direction_ric = away_from_chaser + float(self.cross_track_bias) * cross
+            away_from_chaser = -r / rng
+            cross_sign = 1.0 if int(float(t_s) // max(float(self.pulse_period_s), 1.0e-9)) % 2 == 0 else -1.0
+            cross = np.array([0.0, 0.0, cross_sign], dtype=float)
+            if rng < max(float(self.keepout_radius_km) * 2.0, 1.0e-9):
+                direction_ric = away_from_chaser
+            else:
+                direction_ric = away_from_chaser + float(self.cross_track_bias) * cross
         nrm = float(np.linalg.norm(direction_ric))
         if nrm <= 0.0 or not np.isfinite(nrm):
             return self._inactive_command()
@@ -98,6 +103,15 @@ class DefensiveTargetIntentProvider:
         if dt_s <= 0.0:
             return accel
         return min(accel, remaining_m_s / max(dt_s, 1.0e-9) / 1000.0)
+
+    def _fixed_direction_ric(self) -> np.ndarray | None:
+        if self.fixed_direction_ric is None:
+            return None
+        direction = np.array(self.fixed_direction_ric, dtype=float).reshape(3)
+        nrm = float(np.linalg.norm(direction))
+        if nrm <= 0.0 or not np.isfinite(nrm):
+            return None
+        return direction / nrm
 
     def _inactive_command(self, *, budget_exhausted: bool = False) -> dict[str, Any]:
         return _target_command(

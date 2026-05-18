@@ -1,74 +1,89 @@
-scenario_name: game_training_rpo_03_rbar_approach
-scenario_description: RPO trainer scenario for practicing an R-bar approach while
-  managing radial/in-track coupling.
+scenario_name: game_training_rpo_05_passive_cross_track_approach
+scenario_description: RPO trainer scenario for building a passively safe cross-track
+  orbit from in front of the target, then drifting backward through staggered
+  inspection gates in the radial/cross-track frame.
 metadata:
   owner: codex
-  notes: Run with `python run_game.py sim/game/configs/game_training_rpo_03_rbar_approach.yaml
+  notes: Run with `python run_game.py sim/game/configs/game_training_rpo_05_passive_cross_track_approach.yaml
     --speed-multiple 10`.
   game:
+    level_name: Level 5 - Safe Inspection
     control_mode: ric_translation
-    difficulty: easy
-    plot_overlays_in_zoom: false
-    player_max_accel_km_s2: 1.0e-05
+    difficulty: medium
+    player_max_accel_km_s2: 2.0e-05
     training:
       enabled: true
-      scenario_id: rpo_03_rbar_approach
-      learning_goal: "Learn the R-bar approach rhythm: pulse toward the target,
-        coast, brake in stages, and arrive at the standoff range with low relative
-        speed."
-      player_brief: Start below the target on the R-bar. Tap W briefly to build
-        upward closure, coast most of the time, tap S periodically to slow down,
-        and use A/D or Left/Right only for small centering corrections.
+      scenario_id: rpo_05_passive_cross_track_approach
+      learning_goal: Build a passively safe cross-track orbit from in front of
+        the target, then initiate a slow backward in-track inspection drift through
+        the staggered gates without entering the in-track forbidden cylinder.
+      player_brief: The direct corridor through the target is forbidden. First build
+        separation outside the red cylinder while in front of the target, then drift
+        backward through the four staggered green inspection gates.
       pass_criteria:
-      - "Controls: W moves up the R-bar, S brakes downward, A/D and Left/Right
-        should be tiny centering taps only."
-      - "Playbook: pulse W briefly, coast, tap S in stages, repeat."
-      - Enter the green standoff range circle.
-      - Keep relative speed below the goal threshold.
-      - Stay inside the broad R-bar safety envelope.
+      - Pass through all four staggered inspection gates.
+      - Never enter the in-track forbidden cylinder.
       - Stay under the time and delta-v budgets.
-      - Do not enter keepout.
       instructor_notes:
-      - Use this level to compare intuition from R-bar versus V-bar approaches.
-      - Have cadets explain why radial motion creates along-track drift and why
-        staged braking is safer than one continuous closure.
-      - A first successful run should use short W pulses, long coasts, and short
-        S braking pulses before entering the standoff range.
+      - The red region is a cylinder about the in-track axis, not a sphere.
+      - A safe solution establishes more than 0.5 km of cross-track separation before
+        crossing the target's in-track station.
+      - The player should create the passive-safe geometry first, then let the
+        relative orbit drift backward through the staggered RC inspection gates.
+      - This level is about geometry and patience, not a time crunch.
       target_object_id: target
       chaser_object_id: chaser
-      keepout_radius_km: 0.25
-      goal_range_km: 0.75
-      max_goal_speed_km_s: 0.0003
-      forbidden_regions:
-      - name: RI R-bar arch safety envelope
-        kind: annular_sector
-        plane: RI
-        plot_planes:
-        - RI
+      inspection_gates:
+      - name: west RC inspection gate
         center_ric_km:
         - 0.0
+        - 2.25
+        - -0.75
+        half_width_ric_km:
+        - 0.25
+        - 0.7
+        - 0.12
+      - name: south RC inspection gate
+        center_ric_km:
+        - -0.75
+        - 0.75
         - 0.0
+        half_width_ric_km:
+        - 0.12
+        - 0.7
+        - 0.25
+      - name: east RC inspection gate
+        center_ric_km:
         - 0.0
-        inner_radius_km: 0.95
-        outer_radius_km: 5.8
-        angle_min_deg: -65.0
-        angle_max_deg: 245.0
-        max_abs_out_of_plane_km: 0.9
-      - name: RC R-bar arch safety envelope
-        kind: annular_sector
-        plane: RC
+        - -0.75
+        - 0.75
+        half_width_ric_km:
+        - 0.25
+        - 0.7
+        - 0.12
+      - name: north RC inspection gate
+        center_ric_km:
+        - 0.75
+        - -2.25
+        - 0.0
+        half_width_ric_km:
+        - 0.12
+        - 0.7
+        - 0.25
+      forbidden_regions:
+      - name: passive safety in-track cylinder
+        kind: cylinder
+        axis: I
         plot_planes:
+        - RI
         - RC
         center_ric_km:
         - 0.0
         - 0.0
         - 0.0
-        inner_radius_km: 0.95
-        outer_radius_km: 5.8
-        angle_min_deg: -65.0
-        angle_max_deg: 245.0
-        max_abs_out_of_plane_km: 1.2
-      max_time_s: 12000.0
+        radius_km: 0.5
+        height_km: 6.0
+      max_time_s: 28800.0
       max_delta_v_m_s: 10.0
 objects:
   rocket:
@@ -84,11 +99,11 @@ objects:
       relative_to_target_ric:
         frame: rect
         state:
-        - -7.0
-        - -10.0
+        - 0.0
+        - 5.5
         - 0.0
         - 0.0
-        - 0.013
+        - 0.0
         - 0.0
       attitude_quat_bn:
       - 1.0
@@ -190,7 +205,7 @@ objects:
     kind: satellite
 simulator:
   scenario_type: auto
-  duration_s: 12000.0
+  duration_s: 28800.0
   dt_s: 1.0
   dynamics:
     orbit:
@@ -216,7 +231,7 @@ simulator:
     earth_impact_enabled: false
     earth_radius_km: 6378.137
 outputs:
-  output_dir: outputs/game_training_rpo_03
+  output_dir: outputs/game_training_rpo_05
   mode: save
   stats:
     enabled: true

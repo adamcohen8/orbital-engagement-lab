@@ -1,75 +1,46 @@
-scenario_name: game_training_rpo_03_rbar_approach
-scenario_description: RPO trainer scenario for practicing an R-bar approach while
-  managing radial/in-track coupling.
+scenario_name: game_training_rpo_07_evasive_target_survival
+scenario_description: RPO trainer scenario where the player flies the target while
+  an HCW PD chaser attempts rendezvous.
 metadata:
   owner: codex
-  notes: Run with `python run_game.py sim/game/configs/game_training_rpo_03_rbar_approach.yaml
+  notes: Run with `python run_game.py sim/game/configs/game_training_rpo_07_evasive_target_survival.yaml
     --speed-multiple 10`.
   game:
+    level_name: Level 7 - Evasive Target
     control_mode: ric_translation
-    difficulty: easy
-    plot_overlays_in_zoom: false
-    player_max_accel_km_s2: 1.0e-05
+    controlled_object_id: target
+    ric_reference_object_id: target_reference
+    camera_mode: target_pair
+    show_target_hcw_path: true
+    difficulty: hard
+    player_max_accel_km_s2: 1.5e-05
     training:
       enabled: true
-      scenario_id: rpo_03_rbar_approach
-      learning_goal: "Learn the R-bar approach rhythm: pulse toward the target,
-        coast, brake in stages, and arrive at the standoff range with low relative
-        speed."
-      player_brief: Start below the target on the R-bar. Tap W briefly to build
-        upward closure, coast most of the time, tap S periodically to slow down,
-        and use A/D or Left/Right only for small centering corrections.
+      scenario_id: rpo_07_evasive_target_survival
+      learning_goal: Fly the target vehicle and evade an autonomous HCW PD chaser
+        until the timer expires.
+      player_brief: You are the target. The red chaser is using the HCW PD controller
+        from the 10 km rendezvous experiment to close on you. Use small R/I/C pulses
+        to keep at least 100 m of separation until time expires.
       pass_criteria:
-      - "Controls: W moves up the R-bar, S brakes downward, A/D and Left/Right
-        should be tiny centering taps only."
-      - "Playbook: pulse W briefly, coast, tap S in stages, repeat."
-      - Enter the green standoff range circle.
-      - Keep relative speed below the goal threshold.
-      - Stay inside the broad R-bar safety envelope.
-      - Stay under the time and delta-v budgets.
-      - Do not enter keepout.
+      - Maintain at least 100 m separation from the chaser.
+      - Survive until the timer expires.
+      - Stay under the target delta-v budget.
       instructor_notes:
-      - Use this level to compare intuition from R-bar versus V-bar approaches.
-      - Have cadets explain why radial motion creates along-track drift and why
-        staged braking is safer than one continuous closure.
-      - A first successful run should use short W pulses, long coasts, and short
-        S braking pulses before entering the standoff range.
+      - This is the reverse of level 6: the player flies the target, not the chaser.
+      - The chaser uses sim.control.orbit.hcw_pd.HCWPDController with the 10 km experiment gains.
+      - The camera follows the target/chaser pair so evasive motion stays visible.
+      - The yellow dashed curve is the target vehicle's current HCW coast path.
+      - If the chaser uses its full delta-v budget, it coasts for the rest of the attempt.
       target_object_id: target
       chaser_object_id: chaser
-      keepout_radius_km: 0.25
-      goal_range_km: 0.75
-      max_goal_speed_km_s: 0.0003
-      forbidden_regions:
-      - name: RI R-bar arch safety envelope
-        kind: annular_sector
-        plane: RI
-        plot_planes:
-        - RI
-        center_ric_km:
-        - 0.0
-        - 0.0
-        - 0.0
-        inner_radius_km: 0.95
-        outer_radius_km: 5.8
-        angle_min_deg: -65.0
-        angle_max_deg: 245.0
-        max_abs_out_of_plane_km: 0.9
-      - name: RC R-bar arch safety envelope
-        kind: annular_sector
-        plane: RC
-        plot_planes:
-        - RC
-        center_ric_km:
-        - 0.0
-        - 0.0
-        - 0.0
-        inner_radius_km: 0.95
-        outer_radius_km: 5.8
-        angle_min_deg: -65.0
-        angle_max_deg: 245.0
-        max_abs_out_of_plane_km: 1.2
-      max_time_s: 12000.0
-      max_delta_v_m_s: 10.0
+      keepout_radius_km: 0.1
+      survival_goal: true
+      max_time_s: 6000.0
+      max_target_delta_v_m_s: 1.0
+      max_delta_v_m_s: 25.0
+      fail_on_delta_v_budget: false
+      coast_chaser_after_delta_v_budget: true
 objects:
   rocket:
     enabled: false
@@ -82,14 +53,14 @@ objects:
       mass_kg: 200.0
     initial_state:
       relative_to_target_ric:
-        frame: rect
+        frame: curv
         state:
-        - -7.0
+        - 0.0
         - -10.0
         - 0.0
         - 0.0
-        - 0.013
         - 0.0
+        - 0.001
       attitude_quat_bn:
       - 1.0
       - 0.0
@@ -102,9 +73,51 @@ objects:
       relative_to: target
     orbit_control:
       kind: python
-      module: sim.control.orbit.zero_controller
-      class_name: ZeroController
-      params: {}
+      module: sim.control.orbit.hcw_pd
+      class_name: HCWPDController
+      params:
+        max_accel_km_s2: 1.0e-04
+        mean_motion_rad_s: 0.001078
+        kp:
+        - - 4.0e-06
+          - 0.0
+          - 0.0
+        - - 0.0
+          - 4.0e-06
+          - 0.0
+        - - 0.0
+          - 0.0
+          - 4.0e-06
+        kd:
+        - - 0.004
+          - 0.0
+          - 0.0
+        - - 0.0
+          - 0.004
+          - 0.0
+        - - 0.0
+          - 0.0
+          - 0.004
+        desired_state_ric:
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        ric_curv_state_slice:
+        - 0
+        - 6
+        chief_eci_state_slice:
+        - 6
+        - 12
+        state_signs:
+        - 1.0
+        - 1.0
+        - 1.0
+        - 1.0
+        - 1.0
+        - 1.0
     attitude_control:
       kind: python
       module: sim.control.attitude.zero_torque
@@ -117,6 +130,7 @@ objects:
       refresh_rate_s: 1.0
       targets:
       - target
+      - target_reference
       conditions:
         require_line_of_sight: false
         max_range_km: 10000.0
@@ -173,6 +187,7 @@ objects:
       refresh_rate_s: 1.0
       targets:
       - chaser
+      - target_reference
       conditions:
         require_line_of_sight: false
         max_range_km: 10000.0
@@ -190,7 +205,7 @@ objects:
     kind: satellite
 simulator:
   scenario_type: auto
-  duration_s: 12000.0
+  duration_s: 6000.0
   dt_s: 1.0
   dynamics:
     orbit:
@@ -216,7 +231,7 @@ simulator:
     earth_impact_enabled: false
     earth_radius_km: 6378.137
 outputs:
-  output_dir: outputs/game_training_rpo_03
+  output_dir: outputs/game_training_rpo_07
   mode: save
   stats:
     enabled: true

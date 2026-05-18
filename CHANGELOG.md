@@ -6,6 +6,42 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.7.0 - 2026-05-17
+
+Interactive RPO trainer expansion and public game export update.
+
+### Added
+
+- Added a branded game start screen, level-selector progress tracking, optional
+  music controls, per-attempt debrief JSON, and in-game objective checklists.
+- Added Level 0 tutorial training, a passive cross-track inspection level, an
+  evasive-target survival level, and Pursuit Arcade mode with round scoring,
+  random target evasion directions, and time bonuses.
+- Added optional synthetic arcade music cues and round-clear sound effects, kept
+  outside the source distribution as separately managed WAV assets.
+
+### Changed
+
+- Reworked game camera and plot scaling behavior for R/I and R/C training views,
+  including level-specific zoom, fixed-axis support, target/chaser pair framing,
+  and cleaner overlay/proximity-ring controls.
+- Updated RPO training objectives, scoring, and mission feedback for burn-axis
+  requirements, cross-track phasing, speed-multiplier practice, target delta-v
+  limits, and arcade carry-forward timing.
+- Replaced the old keepout-recovery Level 5 with a passive cross-track approach
+  level and updated the game-mode roadmap to match the current level set.
+- Kept optional game music WAVs out of the public export while packaging the
+  start-screen PNG needed by the public game.
+
+### Fixed
+
+- Fixed arcade round transitions, music restart behavior, delta-v formatting, and
+  missing-audio handling so the game can run without optional music assets.
+- Fixed Level 2 and Level 3 plot framing and overlays so their RI/RC views match
+  the intended training geometry.
+- Fixed Level 1 cross-track phase-burn tracking so radial burns no longer satisfy
+  the in-track or phase objective by accident.
+
 ## 0.6.2 - 2026-05-16
 
 Rocket insertion, access reporting, and release-readiness update.

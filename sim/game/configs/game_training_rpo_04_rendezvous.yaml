@@ -12,13 +12,15 @@ metadata:
     training:
       enabled: true
       scenario_id: rpo_04_rendezvous
-      learning_goal: Complete the final rendezvous by reducing range below 25 meters
-        while keeping relative speed below 1 meter per second.
+      learning_goal: Complete the final rendezvous by reducing range below 10 meters
+        while keeping relative speed below 0.1 meters per second.
       player_brief: Complete final approach from the hold point. Close gently enough
-        to satisfy the range and speed gates at the same time.
+        to enter the 25 meter proximity zone below 0.1 m/s, then settle inside
+        the final 10 meter goal.
       pass_criteria:
-      - Get within 25 meters of the target.
-      - Keep relative speed below 1 meter per second.
+      - Get within 10 meters of the target.
+      - Keep relative speed below 0.1 meters per second.
+      - Do not enter the 25 meter proximity zone faster than 0.1 meters per second.
       - Stay under the time and delta-v budgets.
       instructor_notes:
       - This level intentionally has no keepout hard fail because rendezvous requires
@@ -30,8 +32,10 @@ metadata:
       - 0.0
       - 0.0
       - 0.0
-      goal_radius_km: 0.025
-      max_goal_speed_km_s: 1.0e-05
+      goal_radius_km: 0.01
+      max_goal_speed_km_s: 0.0001
+      hard_speed_limit_radius_km: 0.025
+      hard_speed_limit_km_s: 0.0001
       max_time_s: 7200.0
       max_delta_v_m_s: 6.0
 objects:
@@ -53,7 +57,7 @@ objects:
         - 0.0
         - 0.0
         - 0.0
-        - 0.0
+        - 0.0001
       attitude_quat_bn:
       - 1.0
       - 0.0
