@@ -69,7 +69,7 @@ metadata:
         angle_max_deg: 245.0
         max_abs_out_of_plane_km: 1.2
       max_time_s: 12000.0
-      max_delta_v_m_s: 10.0
+      max_delta_v_m_s: 12.0
 objects:
   rocket:
     enabled: false
@@ -86,7 +86,7 @@ objects:
         state:
         - -7.0
         - -10.0
-        - 0.0
+        - 1.0
         - 0.0
         - 0.013
         - 0.0

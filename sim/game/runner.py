@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
 from typing import Any
@@ -12,8 +12,13 @@ from sim.config import object_section
 from sim.game.arcade import (
     _arcade_mission_metrics,
     _arcade_round_briefing_lines,
+    _arcade_round_initial_state_rng,
+    _arcade_round_is_boss,
+    _arcade_round_music_track,
     _arcade_round_rng,
+    _arcade_round_simulation_config,
     _arcade_round_time_bonus_s,
+    _arcade_round_training_config,
     _arcade_round_weighted_score,
     _arcade_score,
     _game_arcade_enabled,
@@ -25,12 +30,14 @@ from sim.game.arcade import (
 )
 from sim.game.audio import (
     ARCADE_ROUND_CLEAR_SOUND_PATH,
+    GAME_MUSIC_DIR,
     _play_game_sound_effect,
     _stop_game_music,
     _sync_game_music,
 )
 from sim.game.debrief import game_debrief_path, tracker_replay_history, write_game_debrief
 from sim.game.defensive_target import DefensiveTargetIntentProvider
+from sim.game.formatting import format_distance_km, format_speed_km_s, format_speed_m_s
 from sim.game.manual import KeyboardCommandState, ManualGameCommandProvider
 from sim.game.recording import GameFrameRecorder, game_recording_path
 from sim.game.session import (
@@ -44,8 +51,8 @@ SPEED_MULTIPLIER_OPTIONS: tuple[float, ...] = (1.0, 2.0, 5.0, 10.0, 25.0, 50.0, 
 MAX_REALTIME_STEPS_PER_FRAME = 12
 DASHBOARD_FPS = 60.0
 HIGH_SPEED_DASHBOARD_FPS = 30.0
-HIGH_SPEED_MANEUVER_THRESHOLD = 50.0
 MANEUVER_CONTROL_SPEED = 10.0
+BRIEFING_SCROLL_STEP_PX = 48
 
 
 @dataclass(frozen=True)
@@ -116,6 +123,16 @@ def _game_plot_overlays_in_zoom_by_plane(config: SimulationConfig) -> dict[str, 
         if key in {"RI", "RC", "IC"}:
             parsed[key] = bool(value)
     return parsed
+
+
+def _game_plot_prediction_in_zoom(config: SimulationConfig) -> bool:
+    game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
+    return bool(game_cfg.get("plot_prediction_in_zoom", False))
+
+
+def _game_plot_prediction_zoom_max_span_km(config: SimulationConfig) -> float | None:
+    game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
+    return _positive_float_or_none(game_cfg.get("plot_prediction_zoom_max_span_km"))
 
 
 def _positive_float_or_none(value: Any) -> float | None:
@@ -191,6 +208,43 @@ def _game_plot_fixed_axis_half_span_km(config: SimulationConfig) -> dict[str, tu
 def _game_plot_equal_axis_scale_planes(config: SimulationConfig) -> tuple[str, ...]:
     game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
     raw = game_cfg.get("plot_equal_axis_scale_planes", ())
+    return _game_plane_tuple(raw)
+
+
+def _game_target_centered_plot_planes(config: SimulationConfig) -> tuple[str, ...]:
+    game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
+    raw = game_cfg.get("target_centered_plot_planes", ())
+    return _game_plane_tuple(raw)
+
+
+def _game_target_centered_plot_axes(config: SimulationConfig) -> dict[str, tuple[str, ...]]:
+    game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
+    raw = game_cfg.get("target_centered_plot_axes", {}) or {}
+    if not isinstance(raw, dict):
+        return {}
+    parsed: dict[str, tuple[str, ...]] = {}
+    for plane, value in raw.items():
+        key = str(plane or "").strip().upper()
+        if key not in {"RI", "RC", "IC"}:
+            continue
+        if isinstance(value, str):
+            values = [value]
+        else:
+            try:
+                values = list(value)
+            except TypeError:
+                continue
+        axes: list[str] = []
+        for raw_axis in values:
+            axis = str(raw_axis or "").strip().lower()
+            if axis in {"x", "y"} and axis not in axes:
+                axes.append(axis)
+        if axes:
+            parsed[key] = tuple(axes)
+    return parsed
+
+
+def _game_plane_tuple(raw: Any) -> tuple[str, ...]:
     if isinstance(raw, str):
         values = [raw]
     else:
@@ -229,9 +283,27 @@ def _game_camera_mode(config: SimulationConfig) -> str:
     return str(game_cfg.get("camera_mode", "reference") or "reference")
 
 
+def _game_level_title(config: SimulationConfig) -> str:
+    game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
+    title = str(game_cfg.get("level_name", "") or "").strip()
+    if title:
+        return title
+    training_cfg = dict(game_cfg.get("training", {}) or {})
+    scenario_id = str(training_cfg.get("scenario_id", config.scenario.scenario_name or "") or "")
+    parts = scenario_id.split("_")
+    if len(parts) >= 3 and parts[0] == "rpo" and parts[1].isdigit():
+        return f"Level {int(parts[1])} - {' '.join(parts[2:]).title()}"
+    return str(config.scenario.scenario_name or "Level").replace("_", " ").title()
+
+
 def _game_show_target_hcw_path(config: SimulationConfig) -> bool:
     game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
     return bool(game_cfg.get("show_target_hcw_path", False))
+
+
+def _game_coast_prediction_model(config: SimulationConfig) -> str:
+    game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
+    return str(game_cfg.get("coast_prediction_model", "hcw") or "hcw").strip().lower()
 
 
 def _game_coast_chaser_after_delta_v_budget(config: RPOTrainingConfig) -> bool:
@@ -317,7 +389,7 @@ def _speed_after_maneuver_input(
     control_mode: str = "attitude_thrust",
 ) -> float:
     speed = _coerce_speed_multiple(speed_multiple)
-    if speed >= HIGH_SPEED_MANEUVER_THRESHOLD and _has_maneuver_input(state, control_mode=control_mode):
+    if speed > MANEUVER_CONTROL_SPEED and _has_maneuver_input(state, control_mode=control_mode):
         return MANEUVER_CONTROL_SPEED
     return speed
 
@@ -389,14 +461,31 @@ def run_game_mode(
     control_mode = _game_control_mode(config)
     difficulty = str(difficulty_override or _game_difficulty(config)).strip().lower()
     training_cfg = RPOTrainingConfig.from_metadata(dict(config.scenario.metadata or {}))
+    base_training_cfg = training_cfg
     arcade_enabled = _game_arcade_enabled(config)
     arcade_seed_value = _new_arcade_seed() if arcade_enabled and arcade_seed is None else arcade_seed
     arcade_round_index = 1
     arcade_total_score = 0
     arcade_remaining_time_s = _game_arcade_initial_time_s(config, training_cfg) if arcade_enabled else None
     if arcade_enabled:
-        training_cfg = replace(training_cfg, max_time_s=arcade_remaining_time_s)
+        training_cfg = _arcade_round_training_config(
+            config,
+            training_cfg,
+            round_index=arcade_round_index,
+            max_time_s=arcade_remaining_time_s,
+        )
+    attempt_config = _arcade_round_simulation_config(
+        config,
+        training_cfg,
+        round_index=arcade_round_index,
+        rng=(
+            _arcade_round_initial_state_rng(int(arcade_seed_value), arcade_round_index)
+            if arcade_enabled and arcade_seed_value is not None
+            else None
+        ),
+    )
     ric_reference_object_id = _game_ric_reference_object_id(config, training_cfg.target_object_id)
+    level_title = _game_level_title(config)
     current_speed_multiple = _coerce_speed_multiple(speed_multiple)
     trainer = RPOTrainingTracker(training_cfg)
     command_state = KeyboardCommandState()
@@ -404,7 +493,7 @@ def run_game_mode(
     briefing_open = bool(training_cfg.enabled)
     briefing_lines = _training_briefing_lines(config, training_cfg, difficulty=difficulty)
     session, _, snapshot = _start_game_attempt(
-        config,
+        attempt_config,
         command_state=command_state,
         training_cfg=training_cfg,
         controlled_object_id=controlled_object_id,
@@ -431,25 +520,35 @@ def run_game_mode(
         goal_range_km=training_cfg.goal_range_km,
         goal_range_tolerance_km=training_cfg.goal_range_tolerance_km,
         goal_radius_km=training_cfg.goal_radius_km,
+        hard_speed_limit_radius_km=training_cfg.hard_speed_limit_radius_km,
+        hard_speed_limit_km_s=training_cfg.hard_speed_limit_km_s,
         goal_relative_ric_km=training_cfg.goal_relative_ric_km,
         goal_nmt_radial_amplitude_km=training_cfg.goal_nmt_radial_amplitude_km,
         goal_nmt_cross_track_amplitude_km=training_cfg.goal_nmt_cross_track_amplitude_km,
         goal_nmt_cross_track_phase_deg=training_cfg.goal_nmt_cross_track_phase_deg,
         goal_nmt_center_ric_km=training_cfg.goal_nmt_center_ric_km,
+        goal_nmt_element_tolerance_km=training_cfg.goal_nmt_element_tolerance_km,
         coast_prediction_orbit_fraction=_coast_prediction_orbit_fraction(difficulty),
+        coast_prediction_model=_game_coast_prediction_model(attempt_config),
         forbidden_regions=training_cfg.forbidden_regions,
         approach_gates=training_cfg.approach_gates,
         inspection_gates=training_cfg.inspection_gates,
         plot_overlays_in_zoom=_game_plot_overlays_in_zoom(config),
         plot_overlays_in_zoom_by_plane=_game_plot_overlays_in_zoom_by_plane(config),
+        plot_prediction_in_zoom=_game_plot_prediction_in_zoom(config),
+        plot_prediction_zoom_max_span_km=_game_plot_prediction_zoom_max_span_km(config),
         plot_axis_scale=_game_plot_axis_scale(config),
         plot_fixed_axis_half_span_km=_game_plot_fixed_axis_half_span_km(config),
         plot_equal_axis_scale_planes=_game_plot_equal_axis_scale_planes(config),
+        target_centered_plot_planes=_game_target_centered_plot_planes(config),
+        target_centered_plot_axes=_game_target_centered_plot_axes(config),
         proximity_ring_plot_planes=_game_proximity_ring_plot_planes(config),
         camera_mode=_game_camera_mode(config),
         show_target_coast_prediction=_game_show_target_hcw_path(config),
         fullscreen=True,
     )
+    _sync_dashboard_training_config(dashboard, training_cfg)
+    _sync_dashboard_round_config(dashboard, attempt_config)
     recording_attempt = 1
     recording_path: Path | None = None
     debrief_path: Path | None = None
@@ -470,11 +569,13 @@ def run_game_mode(
             command_status=_command_status(command_state, control_mode=control_mode),
             coach_hint=trainer.current_hint(),
             mission_state=_mission_state(score),
+            level_title=level_title,
             mission_metrics=_arcade_mission_metrics(
                 _mission_metrics(training_cfg, score),
                 enabled=arcade_enabled,
                 round_index=arcade_round_index,
                 total_score=arcade_total_score,
+                is_boss=_arcade_round_is_boss(config, arcade_round_index),
             ),
             objective_checklist=_mission_checklist(training_cfg, score),
             speed_multiple=current_speed_multiple,
@@ -490,16 +591,20 @@ def run_game_mode(
             training_cfg=training_cfg,
             music_enabled=music_enabled,
             active_path=None,
+            override_level_path=_arcade_round_music_path(config, arcade_round_index) if arcade_enabled else None,
         )
         dt_s = float(config.scenario.simulator.dt_s)
         wall_step_s = _wall_step_s(dt_s, current_speed_multiple)
         last_step_wall = perf_counter()
         while (not command_state.quit_requested) and (not dashboard.closed):
-            _poll_pygame_input(pygame, command_state, control_mode=control_mode)
+            _poll_pygame_input(pygame, command_state, control_mode=control_mode, briefing_open=briefing_open)
             if command_state.quit_requested:
                 break
+            if briefing_open and command_state.briefing_scroll_px:
+                dashboard.scroll_briefing(command_state.briefing_scroll_px)
             if briefing_open and not command_state.paused:
                 briefing_open = False
+                dashboard.reset_briefing_scroll()
                 last_step_wall = perf_counter()
             if command_state.speed_multiplier_change:
                 previous_speed_multiple = current_speed_multiple
@@ -529,6 +634,9 @@ def run_game_mode(
                     training_cfg=training_cfg,
                     music_enabled=music_enabled,
                     active_path=active_game_music_path,
+                    override_level_path=(
+                        _arcade_round_music_path(config, arcade_round_index) if arcade_enabled else None
+                    ),
                 )
             if command_state.restart_requested:
                 if recorder is not None:
@@ -538,8 +646,23 @@ def run_game_mode(
                 if arcade_enabled:
                     arcade_round_index = 1
                     arcade_total_score = 0
-                    arcade_remaining_time_s = _game_arcade_initial_time_s(config, training_cfg)
-                    training_cfg = replace(training_cfg, max_time_s=arcade_remaining_time_s)
+                    arcade_remaining_time_s = _game_arcade_initial_time_s(config, base_training_cfg)
+                    training_cfg = _arcade_round_training_config(
+                        config,
+                        base_training_cfg,
+                        round_index=arcade_round_index,
+                        max_time_s=arcade_remaining_time_s,
+                    )
+                    attempt_config = _arcade_round_simulation_config(
+                        config,
+                        training_cfg,
+                        round_index=arcade_round_index,
+                        rng=(
+                            _arcade_round_initial_state_rng(int(arcade_seed_value), arcade_round_index)
+                            if arcade_seed_value is not None
+                            else None
+                        ),
+                    )
                     trainer = RPOTrainingTracker(training_cfg)
                 recording_attempt += 1
                 recorder = _start_game_recorder(
@@ -553,7 +676,7 @@ def run_game_mode(
                 recording_path = None
                 debrief_path = None
                 session, _, snapshot = _start_game_attempt(
-                    config,
+                    attempt_config,
                     command_state=command_state,
                     training_cfg=training_cfg,
                     controlled_object_id=controlled_object_id,
@@ -571,6 +694,8 @@ def run_game_mode(
                 )
                 trainer.clear()
                 dashboard.clear()
+                _sync_dashboard_training_config(dashboard, training_cfg)
+                _sync_dashboard_round_config(dashboard, attempt_config)
                 dashboard.push_snapshot(snapshot)
                 trainer.record(snapshot)
                 command_state.restart_requested = False
@@ -579,6 +704,7 @@ def run_game_mode(
                 command_state.music_toggle_requested = False
                 command_state.paused = bool(training_cfg.enabled)
                 briefing_open = bool(training_cfg.enabled)
+                dashboard.reset_briefing_scroll()
                 dt_s = float(config.scenario.simulator.dt_s)
                 wall_step_s = _wall_step_s(dt_s, current_speed_multiple)
                 last_step_wall = perf_counter()
@@ -624,10 +750,16 @@ def run_game_mode(
                     score,
                     difficulty=difficulty,
                     round_index=arcade_round_index,
+                    arcade_config=config,
                 )
                 arcade_total_score += int(round_score)
                 time_used = _score_time_used_s(score)
-                round_bonus_s = _arcade_round_time_bonus_s(config, training_cfg, score)
+                round_bonus_s = _arcade_round_time_bonus_s(
+                    config,
+                    training_cfg,
+                    score,
+                    round_index=arcade_round_index,
+                )
                 assert arcade_remaining_time_s is not None
                 arcade_remaining_time_s = (
                     max(float(arcade_remaining_time_s) - time_used, 0.0)
@@ -635,10 +767,21 @@ def run_game_mode(
                 )
                 cleared_round_index = arcade_round_index
                 arcade_round_index += 1
-                training_cfg = replace(training_cfg, max_time_s=arcade_remaining_time_s)
+                training_cfg = _arcade_round_training_config(
+                    config,
+                    base_training_cfg,
+                    round_index=arcade_round_index,
+                    max_time_s=arcade_remaining_time_s,
+                )
+                attempt_config = _arcade_round_simulation_config(
+                    config,
+                    training_cfg,
+                    round_index=arcade_round_index,
+                    rng=_arcade_round_initial_state_rng(int(arcade_seed_value), arcade_round_index),
+                )
                 trainer = RPOTrainingTracker(training_cfg)
                 session, _, snapshot = _start_game_attempt(
-                    config,
+                    attempt_config,
                     command_state=command_state,
                     training_cfg=training_cfg,
                     controlled_object_id=controlled_object_id,
@@ -651,6 +794,8 @@ def run_game_mode(
                     ),
                 )
                 dashboard.clear()
+                _sync_dashboard_training_config(dashboard, training_cfg)
+                _sync_dashboard_round_config(dashboard, attempt_config)
                 dashboard.push_snapshot(snapshot)
                 trainer.record(snapshot)
                 score = trainer.score()
@@ -662,6 +807,8 @@ def run_game_mode(
                     time_used_s=time_used,
                     bonus_time_s=round_bonus_s,
                     next_time_budget_s=arcade_remaining_time_s,
+                    next_goal_range_km=training_cfg.goal_range_km,
+                    next_is_boss=_arcade_round_is_boss(config, arcade_round_index),
                 )
                 command_state.paused = True
                 command_state.step_requested = False
@@ -669,6 +816,7 @@ def run_game_mode(
                 command_state.speed_multiplier_change = 0
                 command_state.music_toggle_requested = False
                 briefing_open = True
+                dashboard.reset_briefing_scroll()
                 active_game_music_path = None
                 last_step_wall = perf_counter()
             active_game_music_path = _sync_game_music(
@@ -677,16 +825,19 @@ def run_game_mode(
                 training_cfg=training_cfg,
                 music_enabled=music_enabled,
                 active_path=active_game_music_path,
+                override_level_path=_arcade_round_music_path(config, arcade_round_index) if arcade_enabled else None,
             )
             dashboard.draw(
                 command_status=_command_status(command_state, control_mode=control_mode),
                 coach_hint=trainer.current_hint(),
                 mission_state=_mission_state(score),
+                level_title=level_title,
                 mission_metrics=_arcade_mission_metrics(
                     _mission_metrics(training_cfg, score),
                     enabled=arcade_enabled,
                     round_index=arcade_round_index,
                     total_score=arcade_total_score,
+                    is_boss=_arcade_round_is_boss(config, arcade_round_index),
                 ),
                 objective_checklist=_mission_checklist(training_cfg, score),
                 speed_multiple=current_speed_multiple,
@@ -734,6 +885,7 @@ def run_game_mode(
             score,
             difficulty=difficulty,
             round_index=arcade_round_index,
+            arcade_config=config,
         )
     return GameRunResult(
         config_path=Path(config_path),
@@ -770,6 +922,39 @@ def _capture_recording_frame(recorder: GameFrameRecorder | None, dashboard: Any)
     if recorder is None or recorder.saved:
         return
     recorder.capture_surface(dashboard.screen)
+
+
+def _sync_dashboard_training_config(dashboard: Any, training_cfg: RPOTrainingConfig) -> None:
+    dashboard.keepout_radius_km = training_cfg.keepout_radius_km
+    dashboard.goal_range_km = training_cfg.goal_range_km
+    dashboard.goal_range_tolerance_km = training_cfg.goal_range_tolerance_km
+    dashboard.goal_radius_km = training_cfg.goal_radius_km
+    dashboard.hard_speed_limit_radius_km = training_cfg.hard_speed_limit_radius_km
+    dashboard.hard_speed_limit_km_s = training_cfg.hard_speed_limit_km_s
+    dashboard.goal_relative_ric_km = training_cfg.goal_relative_ric_km
+    dashboard.goal_nmt_radial_amplitude_km = training_cfg.goal_nmt_radial_amplitude_km
+    dashboard.goal_nmt_cross_track_amplitude_km = training_cfg.goal_nmt_cross_track_amplitude_km
+    dashboard.goal_nmt_cross_track_phase_deg = training_cfg.goal_nmt_cross_track_phase_deg
+    dashboard.goal_nmt_center_ric_km = training_cfg.goal_nmt_center_ric_km
+    dashboard.goal_nmt_element_tolerance_km = training_cfg.goal_nmt_element_tolerance_km
+    if hasattr(dashboard, "_frame_cache_dirty"):
+        dashboard._frame_cache_dirty = True
+
+
+def _sync_dashboard_round_config(dashboard: Any, config: SimulationConfig) -> None:
+    dashboard.coast_prediction_model = _game_coast_prediction_model(config)
+    if hasattr(dashboard, "_prediction_cache"):
+        dashboard._prediction_cache = {}
+    if hasattr(dashboard, "_frame_cache_dirty"):
+        dashboard._frame_cache_dirty = True
+
+
+def _arcade_round_music_path(config: SimulationConfig, round_index: int) -> Path | None:
+    track = _arcade_round_music_track(config, round_index)
+    if track is None:
+        return None
+    path = Path(track)
+    return path if path.is_absolute() else GAME_MUSIC_DIR / path
 
 
 def _step_game_attempt(
@@ -827,17 +1012,34 @@ def _start_game_attempt(
     return session, provider, snapshot
 
 
-def _poll_pygame_input(pygame: Any, state: KeyboardCommandState, *, control_mode: str = "attitude_thrust") -> None:
+def _poll_pygame_input(
+    pygame: Any,
+    state: KeyboardCommandState,
+    *,
+    control_mode: str = "attitude_thrust",
+    briefing_open: bool = False,
+) -> None:
     ric_mode = str(control_mode or "").strip().lower() in {"ric", "ric_translation", "translation"}
+    state.briefing_scroll_px = 0
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             state.quit_requested = True
+        elif briefing_open and event.type == getattr(pygame, "MOUSEWHEEL", object()):
+            state.briefing_scroll_px -= int(getattr(event, "y", 0)) * BRIEFING_SCROLL_STEP_PX
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
             state.quit_requested = True
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_r:
             state.restart_requested = True
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE and ric_mode:
             state.paused = not bool(state.paused)
+        elif briefing_open and event.type == pygame.KEYDOWN and event.key == getattr(pygame, "K_PAGEUP", object()):
+            state.briefing_scroll_px -= BRIEFING_SCROLL_STEP_PX * 4
+        elif briefing_open and event.type == pygame.KEYDOWN and event.key == getattr(pygame, "K_PAGEDOWN", object()):
+            state.briefing_scroll_px += BRIEFING_SCROLL_STEP_PX * 4
+        elif briefing_open and event.type == pygame.KEYDOWN and event.key == getattr(pygame, "K_HOME", object()):
+            state.briefing_scroll_px = -1000000
+        elif briefing_open and event.type == pygame.KEYDOWN and event.key == getattr(pygame, "K_END", object()):
+            state.briefing_scroll_px = 1000000
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_PERIOD:
             state.step_requested = True
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_m:
@@ -900,11 +1102,11 @@ def _mission_metrics(config: RPOTrainingConfig, score: Any) -> tuple[str, ...]:
         else:
             tag = "OK"
         suffix = " coast" if not config.fail_on_delta_v_budget and remain <= 0.0 else ""
-        metrics.append(f"{tag} Chaser dV {remain:5.2f} m/s{suffix}")
+        metrics.append(f"{tag} Chaser dV {format_speed_m_s(remain)}{suffix}")
     if config.max_target_delta_v_m_s is not None:
         remain = max(float(config.max_target_delta_v_m_s) - float(getattr(score, "target_delta_v_m_s", 0.0)), 0.0)
         ratio = remain / max(float(config.max_target_delta_v_m_s), 1.0e-9)
-        metrics.append(f"{_status_tag(remain > 0.0, ratio > 0.2)} Target dV {remain:5.2f} m/s")
+        metrics.append(f"{_status_tag(remain > 0.0, ratio > 0.2)} Target dV {format_speed_m_s(remain)}")
     if config.required_burn_axes:
         satisfied = set(getattr(score, "burn_axes_satisfied", ()))
         parts = [
@@ -924,12 +1126,20 @@ def _mission_metrics(config: RPOTrainingConfig, score: Any) -> tuple[str, ...]:
         tol = float(config.goal_nmt_element_tolerance_km)
         r_err = float(getattr(score, "final_nmt_radial_amplitude_error_km", float("nan")))
         c_err = float(getattr(score, "final_nmt_cross_track_amplitude_error_km", float("nan")))
-        metrics.append(f"{_status_tag(r_err <= tol, r_err <= 0.75 * tol)} R amp {_fmt_metric(r_err)}/{tol:.2f} km")
-        metrics.append(f"{_status_tag(c_err <= tol, c_err <= 0.75 * tol)} C amp {_fmt_metric(c_err)}/{tol:.2f} km")
+        metrics.append(
+            f"{_status_tag(r_err <= tol, r_err <= 0.75 * tol)} R amp {_fmt_distance(r_err)}/{_fmt_distance(tol)}"
+        )
+        metrics.append(
+            f"{_status_tag(c_err <= tol, c_err <= 0.75 * tol)} C amp {_fmt_distance(c_err)}/{_fmt_distance(tol)}"
+        )
     if config.goal_nmt_velocity_tolerance_km_s is not None:
         tol = float(config.goal_nmt_velocity_tolerance_km_s)
         err = float(getattr(score, "final_nmt_drift_velocity_error_km_s", float("nan")))
-        metrics.append(f"{_status_tag(err <= tol, err <= 0.75 * tol)} Drift {_fmt_metric(err, precision=4)}/{tol:.4f}")
+        metrics.append(f"{_status_tag(err <= tol, err <= 0.75 * tol)} Drift {_fmt_speed(err)}/{_fmt_speed(tol)}")
+    if config.max_cross_track_amplitude_km is not None:
+        tol = float(config.max_cross_track_amplitude_km)
+        amp = float(getattr(score, "final_nmt_cross_track_amplitude_km", float("nan")))
+        metrics.append(f"{_status_tag(amp <= tol, amp <= 0.75 * tol)} C amp {_fmt_distance(amp)}/{_fmt_distance(tol)}")
     if config.goal_nmt_radial_amplitude_km is None and config.goal_range_km is not None:
         err = float(getattr(score, "final_goal_error_km", float("nan")))
         tol = config.goal_range_tolerance_km
@@ -1017,6 +1227,9 @@ def _mission_checklist(config: RPOTrainingConfig, score: Any) -> tuple[str, ...]
     elif config.goal_nmt_radial_amplitude_km is not None:
         passed = bool(getattr(score, "level_passed", False))
         checklist.append(f"{'OK' if passed else 'WARN'} Match NMT")
+    if config.max_cross_track_amplitude_km is not None:
+        amp = float(getattr(score, "final_nmt_cross_track_amplitude_km", float("nan")))
+        checklist.append(f"{'OK' if amp <= float(config.max_cross_track_amplitude_km) else 'WARN'} Damp C amp")
     if config.keepout_radius_km is not None:
         clear = not bool(getattr(score, "keepout_violation", False))
         checklist.append(f"{'OK' if clear else 'FAIL'} Keepout clear")
@@ -1065,8 +1278,8 @@ def _score_debrief_lines(
         f"Goal Error    {_fmt_distance(float(getattr(score, 'final_goal_error_km', float('nan'))))}",
         f"Final Speed   {_fmt_speed(float(getattr(score, 'final_relative_speed_km_s', float('nan'))))}",
         f"Keepout Time  {float(getattr(score, 'time_inside_keepout_s', 0.0)):.1f} s",
-        f"Approx dV     {float(getattr(score, 'approximate_delta_v_m_s', 0.0)):.2f} m/s",
-        f"Target dV     {float(getattr(score, 'target_delta_v_m_s', 0.0)):.2f} m/s",
+        f"Approx dV     {format_speed_m_s(float(getattr(score, 'approximate_delta_v_m_s', 0.0)))}",
+        f"Target dV     {format_speed_m_s(float(getattr(score, 'target_delta_v_m_s', 0.0)))}",
     ]
     lines = [line for line in lines if line]
     for reason in tuple(getattr(score, "pass_fail_reasons", ()) or ())[:3]:
@@ -1074,26 +1287,12 @@ def _score_debrief_lines(
     return tuple(lines)
 
 
-def _fmt_metric(value: float, *, precision: int = 2) -> str:
-    if not np.isfinite(float(value)):
-        return "--"
-    return f"{float(value):.{precision}f}"
-
-
 def _fmt_distance(value_km: float) -> str:
-    if not np.isfinite(float(value_km)):
-        return "--"
-    if abs(float(value_km)) < 0.1:
-        return f"{float(value_km) * 1000.0:.0f} m"
-    return f"{float(value_km):.2f} km"
+    return format_distance_km(value_km)
 
 
 def _fmt_speed(value_km_s: float) -> str:
-    if not np.isfinite(float(value_km_s)):
-        return "--"
-    if abs(float(value_km_s)) < 0.01:
-        return f"{float(value_km_s) * 1000.0:.2f} m/s"
-    return f"{float(value_km_s):.4f} km/s"
+    return format_speed_km_s(value_km_s)
 
 
 def _optional_float(value: Any) -> float | None:

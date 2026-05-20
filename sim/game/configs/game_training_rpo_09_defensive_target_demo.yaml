@@ -1,55 +1,17 @@
-scenario_name: game_training_rpo_arcade_pursuit
-scenario_description: Arcade RPO pursuit mode where each cleared round restarts
-  level 9 with a new random target evasion direction.
+scenario_name: game_training_rpo_09_defensive_target_demo
+scenario_description: RPO trainer scenario introducing a simple defensive target response
+  during proximity operations.
 metadata:
   owner: codex
-  notes: Run with `python run_game.py sim/game/configs/game_training_rpo_arcade_pursuit.yaml
+  notes: Run with `python run_game.py sim/game/configs/game_training_rpo_09_defensive_target_demo.yaml
     --speed-multiple 10`.
   game:
-    level_name: Pursuit Arcade
+    level_name: Level 9 - Pursuit
     control_mode: ric_translation
     ric_reference_object_id: target_reference
     camera_mode: target_pair
     difficulty: easy
     player_max_accel_km_s2: 1.5e-05
-    arcade:
-      enabled: true
-      initial_time_s: 12000.0
-      round_bonus_time_s: 3000.0
-      delta_v_bonus_time_per_m_s: 1000.0
-      goal_range_step_km: 0.005
-      min_goal_range_km: 0.005
-      boss_round_interval: 5
-      boss:
-        target_coes:
-          a_km: 9000.0
-          ecc: 0.25
-          inc_deg: 45.0
-          raan_deg: 0.0
-          argp_deg: 0.0
-          true_anomaly_deg: 0.0
-        true_anomaly_range_deg:
-        - 0.0
-        - 360.0
-        coast_prediction_model: tschauner_hempel
-        music_track: 28_high_shred_boss_riff.wav
-        score_multiplier: 2.0
-        bonus_time_s: 1000.0
-      random_initial_state:
-        enabled: true
-        radial_range_km:
-        - -1.0
-        - 1.0
-        in_track_range_km:
-        - -10.0
-        - 10.0
-        cross_track_range_km:
-        - -1.0
-        - 1.0
-        min_range_km: 5.0
-        cross_track_rate_range_km_s:
-        - -0.001
-        - 0.001
     defensive_target:
       enabled: true
       chaser_object_id: chaser
@@ -62,40 +24,24 @@ metadata:
       pulse_period_s: 120.0
     training:
       enabled: true
-      scenario_id: rpo_arcade_pursuit
-      learning_goal: Clear as many pursuit rounds as possible against targets that
-        choose a different fixed evasion burn direction each round.
-      player_brief: Chase the target to within 100 m. Each successful round resets
-        your fuel, gives the target a new random evasion direction, tightens the
-        target range by 5 m down to a 5 m minimum, and adds 3000 seconds plus
-        1000 seconds per unused m/s of chaser delta-v to your remaining clock.
-        Round 1 starts from the level 9 setup; later rounds randomize the chaser's
-        RIC state outside 5 km while keeping its semimajor axis matched to the
-        target. Every fifth round is a boss round with an elliptical target orbit
-        and a randomized target true anomaly.
+      scenario_id: rpo_09_defensive_target_demo
+      learning_goal: Track a target that performs small defensive pulses when closure
+        becomes unsafe; close to within 100 m.
+      player_brief: The target may maneuver when your closure becomes unsafe. Track
+        the actual target motion relative to its reference orbit, correct the miss,
+        and finish inside 100 m.
       pass_criteria:
-      - Get within the current round's target range; it starts at 100 m and tightens
-        by 5 m after each cleared round.
-      - Keep clearing rounds until you run out of time or chaser delta-v.
+      - Get within 100 m of the maneuvering target.
+      - Stay under the chaser delta-v budget.
       instructor_notes:
-      - This is an arcade variant of level 9.
-      - Each round uses one random fixed target burn direction.
-      - The pursuit goal tightens by 5 m each round and floors at 5 m.
-      - Every fifth round changes the target orbit to an elliptical boss setup,
-        randomizes target true anomaly, switches to the TH coast projection, and
-        uses the boss music cue.
-      - Round 1 preserves the configured level 9 initial state. Rounds 2+ sample
-        R within +/-1 km, I within +/-10 km, C within +/-1 km, reject starts inside
-        5 km, sample dC within +/-1 m/s, set dR to zero, and solve dI for equal
-        target/chaser orbital energy.
-      - Round score is weighted by round number and added to the run total.
+      - This is a bridge toward defensive target behavior and future PvP.
       - The yellow target motion is shown relative to the target reference orbit.
-      - Target defensive maneuvering is capped at 0.1 m/s total delta-v each round.
+      - Target defensive maneuvering is capped at 0.1 m/s total delta-v.
       target_object_id: target
       chaser_object_id: chaser
       goal_range_km: 0.1
-      max_time_s: 12000.0
-      max_delta_v_m_s: 5.0
+      max_time_s: 14400.0
+      max_delta_v_m_s: 8.0
 objects:
   rocket:
     enabled: false
@@ -217,7 +163,7 @@ objects:
     kind: satellite
 simulator:
   scenario_type: auto
-  duration_s: 12000.0
+  duration_s: 14400.0
   dt_s: 1.0
   dynamics:
     orbit:
@@ -243,7 +189,7 @@ simulator:
     earth_impact_enabled: false
     earth_radius_km: 6378.137
 outputs:
-  output_dir: outputs/game_training_rpo_arcade_pursuit
+  output_dir: outputs/game_training_rpo_09
   mode: save
   stats:
     enabled: true

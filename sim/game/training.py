@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Any
 
 import numpy as np
 
 from sim.api import SimulationSnapshot
+from sim.game.formatting import format_distance_km, format_speed_km_s, format_speed_m_s
 from sim.utils.frames import eci_relative_to_ric_rect, ric_dcm_ir_from_rv
 
 EARTH_MU_KM3_S2 = 398600.4418
@@ -251,6 +253,7 @@ class RPOTrainingConfig:
     goal_nmt_tolerance_km: float | None = None
     goal_nmt_element_tolerance_km: float | None = None
     goal_nmt_velocity_tolerance_km_s: float | None = None
+    max_cross_track_amplitude_km: float | None = None
     forbidden_regions: tuple[ForbiddenRegionConfig, ...] = ()
     approach_gates: tuple[ApproachGateConfig, ...] = ()
     inspection_gates: tuple[InspectionGateConfig, ...] = ()
@@ -301,6 +304,7 @@ class RPOTrainingConfig:
                 raw.get("goal_nmt_element_tolerance_km", raw.get("goal_nmt_tolerance_km"))
             ),
             goal_nmt_velocity_tolerance_km_s=_optional_float(raw.get("goal_nmt_velocity_tolerance_km_s")),
+            max_cross_track_amplitude_km=_optional_float(raw.get("max_cross_track_amplitude_km")),
             forbidden_regions=_forbidden_regions_from_metadata(raw.get("forbidden_regions")),
             approach_gates=_approach_gates_from_metadata(raw.get("approach_gates")),
             inspection_gates=_inspection_gates_from_metadata(raw.get("inspection_gates")),
@@ -378,6 +382,22 @@ class RPOTrainingTracker:
         self._score_cache: RPOTrainingScore | None = None
         self._inspection_gate_names: list[str] = []
         self._inspection_gate_completed_idx: int | None = None
+        self._hard_speed_limit_violation = False
+        self._burn_axis_first_indices: dict[str, int] = {}
+        self._phase_burn_first_indices: dict[str, int] = {}
+        self._history_capacity = 0
+        self._history_count = 0
+        self._t_array = np.zeros(0, dtype=float)
+        self._rel_array = np.zeros((0, 6), dtype=float)
+        self._thrust_array = np.zeros((0, 3), dtype=float)
+        self._target_thrust_array = np.zeros((0, 3), dtype=float)
+        self._mean_motion_array = np.zeros(0, dtype=float)
+        self._nmt_radial_amplitude_array = np.zeros(0, dtype=float)
+        self._nmt_cross_track_amplitude_array = np.zeros(0, dtype=float)
+        self._nmt_radial_amplitude_error_array = np.zeros(0, dtype=float)
+        self._nmt_cross_track_amplitude_error_array = np.zeros(0, dtype=float)
+        self._nmt_drift_velocity_error_array = np.zeros(0, dtype=float)
+        self._nmt_element_goal_error_array = np.zeros(0, dtype=float)
 
     def clear(self) -> None:
         self.t_s.clear()
@@ -391,6 +411,10 @@ class RPOTrainingTracker:
         self._score_cache = None
         self._inspection_gate_names.clear()
         self._inspection_gate_completed_idx = None
+        self._hard_speed_limit_violation = False
+        self._burn_axis_first_indices.clear()
+        self._phase_burn_first_indices.clear()
+        self._history_count = 0
 
     def record(self, snapshot: SimulationSnapshot) -> None:
         if not self.config.enabled:
@@ -418,7 +442,19 @@ class RPOTrainingTracker:
         else:
             self.thrust_ric_hist.append(np.zeros(3, dtype=float))
         target_thrust = snapshot.applied_thrust.get(self.config.target_object_id, np.zeros(3, dtype=float))
-        self.target_thrust_hist.append(np.array(target_thrust, dtype=float).reshape(3))
+        target_thrust_eci = np.array(target_thrust, dtype=float).reshape(3)
+        self.target_thrust_hist.append(target_thrust_eci)
+        self._append_history_arrays(
+            t_s=float(snapshot.time_s),
+            rel=rel,
+            thrust=thrust_eci,
+            target_thrust=target_thrust_eci,
+            mean_motion_rad_s=n,
+            target_state=target_arr,
+            chaser_state=np.array(chaser, dtype=float).reshape(-1),
+        )
+        self._record_burn_requirement_sample(rel, self.thrust_ric_hist[-1])
+        self._record_hard_speed_limit_sample(rel)
         self._record_inspection_gate_sample(rel)
         self._score_cache = None
 
@@ -427,59 +463,225 @@ class RPOTrainingTracker:
         self._speed_multiplier_change_sample_idx = max(len(self.t_s) - 1, 0) if self.t_s else 0
         self._score_cache = None
 
-    def _burn_axis_first_sample_indices(self) -> dict[str, int]:
-        if not self.config.required_burn_axes or not self.thrust_ric_hist:
-            return {}
-        thrust_ric = np.vstack(self.thrust_ric_hist)
-        threshold = max(float(self.config.required_burn_axis_threshold_km_s2), 0.0)
-        min_fraction = float(np.clip(self.config.required_burn_axis_min_component_fraction, 0.0, 1.0))
-        sample_norm = np.linalg.norm(thrust_ric, axis=1)
-        first_indices: dict[str, int] = {}
+    def _record_burn_requirement_sample(self, rel: np.ndarray, thrust_ric: np.ndarray) -> None:
+        if not self.config.required_burn_axes and not self.config.required_phase_burns:
+            return
+        sample_idx = len(self.rel_ric_hist) - 1
+        thrust = np.array(thrust_ric, dtype=float).reshape(3)
+        thrust_norm = float(np.linalg.norm(thrust))
+        if thrust_norm <= 0.0:
+            return
         for axis in self.config.required_burn_axes:
+            if axis in self._burn_axis_first_indices:
+                continue
             axis_idx = _BURN_AXIS_INDEX[axis]
-            component = np.abs(thrust_ric[:, axis_idx])
-            hits = np.flatnonzero(
-                (component > threshold) & (component >= min_fraction * sample_norm)
-            )
-            if hits.size:
-                first_indices[axis] = int(hits[0])
-        return first_indices
+            threshold = max(float(self.config.required_burn_axis_threshold_km_s2), 0.0)
+            min_fraction = float(np.clip(self.config.required_burn_axis_min_component_fraction, 0.0, 1.0))
+            component = abs(float(thrust[axis_idx]))
+            if component > threshold and component >= min_fraction * thrust_norm:
+                self._burn_axis_first_indices[axis] = sample_idx
+        if not self.config.required_phase_burns:
+            return
+        rel_arr = np.array(rel, dtype=float).reshape(-1)
+        for phase_burn in self.config.required_phase_burns:
+            if phase_burn.name in self._phase_burn_first_indices:
+                continue
+            axis_idx = _BURN_AXIS_INDEX[phase_burn.axis]
+            threshold = max(float(phase_burn.threshold_km_s2), 0.0)
+            min_fraction = float(np.clip(phase_burn.min_component_fraction, 0.0, 1.0))
+            component = abs(float(thrust[axis_idx]))
+            radial_error = abs(abs(float(rel_arr[0])) - float(phase_burn.radial_abs_km))
+            if (
+                component > threshold
+                and component >= min_fraction * thrust_norm
+                and radial_error <= float(phase_burn.radial_tolerance_km)
+                and abs(float(rel_arr[1])) <= float(phase_burn.max_abs_intrack_km)
+            ):
+                self._phase_burn_first_indices[phase_burn.name] = sample_idx
+
+    def _burn_axis_first_sample_indices(self) -> dict[str, int]:
+        return dict(self._burn_axis_first_indices)
 
     def _burn_axes_satisfied(self) -> tuple[str, ...]:
         first_indices = self._burn_axis_first_sample_indices()
         return tuple(axis for axis in self.config.required_burn_axes if axis in first_indices)
 
     def _phase_burn_first_sample_indices(self) -> dict[str, int]:
-        if not self.config.required_phase_burns or not self.thrust_ric_hist or not self.rel_ric_hist:
-            return {}
-        thrust_ric = np.vstack(self.thrust_ric_hist)
-        rel = np.vstack(self.rel_ric_hist)
-        sample_count = min(thrust_ric.shape[0], rel.shape[0])
-        thrust_ric = thrust_ric[:sample_count]
-        rel = rel[:sample_count]
-        sample_norm = np.linalg.norm(thrust_ric, axis=1)
-        first_indices: dict[str, int] = {}
-        for phase_burn in self.config.required_phase_burns:
-            axis_idx = _BURN_AXIS_INDEX[phase_burn.axis]
-            threshold = max(float(phase_burn.threshold_km_s2), 0.0)
-            min_fraction = float(np.clip(phase_burn.min_component_fraction, 0.0, 1.0))
-            component = np.abs(thrust_ric[:, axis_idx])
-            radial_error = np.abs(np.abs(rel[:, 0]) - float(phase_burn.radial_abs_km))
-            hits = np.flatnonzero(
-                (component > threshold)
-                & (component >= min_fraction * sample_norm)
-                & (radial_error <= float(phase_burn.radial_tolerance_km))
-                & (np.abs(rel[:, 1]) <= float(phase_burn.max_abs_intrack_km))
-            )
-            if hits.size:
-                first_indices[phase_burn.name] = int(hits[0])
-        return first_indices
+        return dict(self._phase_burn_first_indices)
 
     def _phase_burns_satisfied(self) -> tuple[str, ...]:
         first_indices = self._phase_burn_first_sample_indices()
         return tuple(
             phase_burn.name for phase_burn in self.config.required_phase_burns if phase_burn.name in first_indices
         )
+
+    def _record_hard_speed_limit_sample(self, rel: np.ndarray) -> None:
+        if self._hard_speed_limit_violation:
+            return
+        if self.config.hard_speed_limit_radius_km is None or self.config.hard_speed_limit_km_s is None:
+            return
+        current = np.array(rel, dtype=float).reshape(6)
+        previous = self.rel_ric_hist[-2] if len(self.rel_ric_hist) >= 2 else None
+        self._hard_speed_limit_violation = _hard_speed_limit_sample_violated(
+            previous,
+            current,
+            radius_km=float(self.config.hard_speed_limit_radius_km),
+            speed_limit_km_s=float(self.config.hard_speed_limit_km_s),
+        )
+
+    def _append_history_arrays(
+        self,
+        *,
+        t_s: float,
+        rel: np.ndarray,
+        thrust: np.ndarray,
+        target_thrust: np.ndarray,
+        mean_motion_rad_s: float,
+        target_state: np.ndarray | None = None,
+        chaser_state: np.ndarray | None = None,
+    ) -> None:
+        idx = int(self._history_count)
+        if idx >= int(self._history_capacity):
+            self._grow_history_arrays(max(idx + 1, 64 if self._history_capacity <= 0 else self._history_capacity * 2))
+        self._t_array[idx] = float(t_s)
+        self._rel_array[idx, :] = np.array(rel, dtype=float).reshape(6)
+        self._thrust_array[idx, :] = np.array(thrust, dtype=float).reshape(3)
+        self._target_thrust_array[idx, :] = np.array(target_thrust, dtype=float).reshape(3)
+        self._mean_motion_array[idx] = float(mean_motion_rad_s)
+        self._append_nmt_element_arrays(
+            idx=idx,
+            rel=rel,
+            mean_motion_rad_s=mean_motion_rad_s,
+            target_state=target_state,
+            chaser_state=chaser_state,
+        )
+        self._history_count = idx + 1
+
+    def _grow_history_arrays(self, capacity: int) -> None:
+        new_capacity = int(max(capacity, 1))
+        old_count = int(self._history_count)
+
+        def grow_1d(current: np.ndarray, *, fill_value: float = 0.0) -> np.ndarray:
+            out = np.full(new_capacity, fill_value, dtype=float)
+            if old_count:
+                out[:old_count] = current[:old_count]
+            return out
+
+        def grow_2d(current: np.ndarray, width: int) -> np.ndarray:
+            out = np.zeros((new_capacity, width), dtype=float)
+            if old_count:
+                out[:old_count, :] = current[:old_count, :]
+            return out
+
+        self._t_array = grow_1d(self._t_array)
+        self._rel_array = grow_2d(self._rel_array, 6)
+        self._thrust_array = grow_2d(self._thrust_array, 3)
+        self._target_thrust_array = grow_2d(self._target_thrust_array, 3)
+        self._mean_motion_array = grow_1d(self._mean_motion_array)
+        self._nmt_radial_amplitude_array = grow_1d(self._nmt_radial_amplitude_array, fill_value=float("nan"))
+        self._nmt_cross_track_amplitude_array = grow_1d(
+            self._nmt_cross_track_amplitude_array, fill_value=float("nan")
+        )
+        self._nmt_radial_amplitude_error_array = grow_1d(
+            self._nmt_radial_amplitude_error_array, fill_value=float("nan")
+        )
+        self._nmt_cross_track_amplitude_error_array = grow_1d(
+            self._nmt_cross_track_amplitude_error_array, fill_value=float("nan")
+        )
+        self._nmt_drift_velocity_error_array = grow_1d(
+            self._nmt_drift_velocity_error_array, fill_value=float("nan")
+        )
+        self._nmt_element_goal_error_array = grow_1d(
+            self._nmt_element_goal_error_array, fill_value=float("nan")
+        )
+        self._history_capacity = new_capacity
+
+    def _append_nmt_element_arrays(
+        self,
+        *,
+        idx: int,
+        rel: np.ndarray,
+        mean_motion_rad_s: float,
+        target_state: np.ndarray | None,
+        chaser_state: np.ndarray | None,
+    ) -> None:
+        if self.config.goal_nmt_radial_amplitude_km is None and self.config.max_cross_track_amplitude_km is None:
+            return
+        drift_error = _semimajor_axis_drift_velocity_error_km_s(target_state, chaser_state)
+        values = _nmt_element_error_values(
+            rel,
+            mean_motion_rad_s=float(mean_motion_rad_s),
+            radial_amplitude_km=float(self.config.goal_nmt_radial_amplitude_km or 0.0),
+            cross_track_amplitude_km=float(self.config.goal_nmt_cross_track_amplitude_km),
+            center_ric_km=self.config.goal_nmt_center_ric_km,
+            drift_velocity_error_km_s=drift_error,
+        )
+        self._nmt_radial_amplitude_array[idx] = values["radial_amplitude_km"]
+        self._nmt_cross_track_amplitude_array[idx] = values["cross_track_amplitude_km"]
+        self._nmt_radial_amplitude_error_array[idx] = values["radial_amplitude_error_km"]
+        self._nmt_cross_track_amplitude_error_array[idx] = values["cross_track_amplitude_error_km"]
+        self._nmt_drift_velocity_error_array[idx] = values["drift_velocity_error_km_s"]
+        self._nmt_element_goal_error_array[idx] = _nmt_element_goal_error_km(
+            radial_amplitude_error_km=values["radial_amplitude_error_km"],
+            cross_track_amplitude_error_km=values["cross_track_amplitude_error_km"],
+            include_radial=self.config.goal_nmt_radial_amplitude_km is not None,
+            include_cross_track=(
+                self.config.goal_nmt_radial_amplitude_km is not None
+                or self.config.max_cross_track_amplitude_km is not None
+            ),
+        )
+
+    def _nmt_element_error_arrays(self, rel: np.ndarray, n_hist: np.ndarray) -> dict[str, np.ndarray]:
+        if self._history_arrays_available() and int(self._history_count) >= int(rel.shape[0]):
+            count = int(rel.shape[0])
+            return {
+                "radial_amplitude_km": self._nmt_radial_amplitude_array[:count],
+                "cross_track_amplitude_km": self._nmt_cross_track_amplitude_array[:count],
+                "radial_amplitude_error_km": self._nmt_radial_amplitude_error_array[:count],
+                "cross_track_amplitude_error_km": self._nmt_cross_track_amplitude_error_array[:count],
+                "drift_velocity_error_km_s": self._nmt_drift_velocity_error_array[:count],
+            }
+        return nmt_element_errors(
+            rel,
+            mean_motion_rad_s=n_hist[: rel.shape[0]],
+            radial_amplitude_km=float(self.config.goal_nmt_radial_amplitude_km or 0.0),
+            cross_track_amplitude_km=float(self.config.goal_nmt_cross_track_amplitude_km),
+            center_ric_km=self.config.goal_nmt_center_ric_km,
+        )
+
+    def _nmt_element_goal_error_array_for(self, element_errors: dict[str, np.ndarray]) -> np.ndarray:
+        if self._history_arrays_available():
+            return self._nmt_element_goal_error_array[: int(self._history_count)]
+        return _nmt_element_goal_error_array(
+            element_errors,
+            include_radial=self.config.goal_nmt_radial_amplitude_km is not None,
+            include_cross_track=(
+                self.config.goal_nmt_radial_amplitude_km is not None
+                or self.config.max_cross_track_amplitude_km is not None
+            ),
+        )
+
+    def _history_arrays_available(self) -> bool:
+        return int(self._history_count) == len(self.rel_ric_hist) and int(self._history_count) > 0
+
+    def _history_arrays(self) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        if self._history_arrays_available():
+            count = int(self._history_count)
+            return (
+                self._rel_array[:count],
+                self._t_array[:count],
+                self._thrust_array[:count],
+                self._target_thrust_array[:count],
+                self._mean_motion_array[:count],
+            )
+        rel = np.vstack(self.rel_ric_hist)
+        t = np.array(self.t_s, dtype=float)
+        thrust = np.vstack(self.thrust_hist) if self.thrust_hist else np.zeros((rel.shape[0], 3), dtype=float)
+        target_thrust = (
+            np.vstack(self.target_thrust_hist) if self.target_thrust_hist else np.zeros((rel.shape[0], 3), dtype=float)
+        )
+        n_hist = np.array(self.mean_motion_hist, dtype=float).reshape(-1)
+        return rel, t, thrust, target_thrust, n_hist
 
     def _missing_tutorial_requirements(self) -> tuple[str, ...]:
         missing: list[str] = []
@@ -532,6 +734,7 @@ class RPOTrainingTracker:
         rng = float(np.linalg.norm(r))
         speed = float(np.linalg.norm(v))
         closing = float(np.dot(r, v)) < 0.0
+        cross_track_amplitude = self._current_cross_track_amplitude_km(rel)
         keepout = self.config.keepout_radius_km
         if keepout is not None and rng < float(keepout):
             return "Inside keepout: arrest closing motion and translate away from the target."
@@ -544,7 +747,9 @@ class RPOTrainingTracker:
             delta = np.array(gate.center_ric_km, dtype=float).reshape(3) - r
             return (
                 f"Next inspection gate: {gate.name}; drift toward "
-                f"R {delta[0]:+.2f} km, I {delta[1]:+.2f} km, C {delta[2]:+.2f} km."
+                f"R {_format_signed_distance_text(delta[0])}, "
+                f"I {_format_signed_distance_text(delta[1])}, "
+                f"C {_format_signed_distance_text(delta[2])}."
             )
         if self.config.survival_goal:
             keepout = self.config.keepout_radius_km
@@ -563,16 +768,25 @@ class RPOTrainingTracker:
             if tolerance is None:
                 if rng <= target_range:
                     if speed_limit is not None and speed > float(speed_limit):
-                        return f"Inside green circle: slow below {float(speed_limit) * 1000.0:.2f} m/s to finish."
+                        return f"Inside green circle: slow below {_format_speed_text(float(speed_limit))} to finish."
+                    if (
+                        cross_track_amplitude is not None
+                        and self.config.max_cross_track_amplitude_km is not None
+                        and cross_track_amplitude > float(self.config.max_cross_track_amplitude_km)
+                    ):
+                        return (
+                            "Inside green circle: damp C amplitude below "
+                            f"{_format_distance_text(float(self.config.max_cross_track_amplitude_km))}."
+                        )
                     return "Inside green circle with speed under limit: level should complete."
                 return f"Enter the green circle: close to {_format_distance_text(target_range)} or less."
             if abs(range_error) <= float(tolerance):
                 if speed_limit is not None and speed > float(speed_limit):
-                    return f"At target range: slow below {float(speed_limit) * 1000.0:.2f} m/s to finish."
+                    return f"At target range: slow below {_format_speed_text(float(speed_limit))} to finish."
                 return "At target range with speed under limit: level should complete."
             if abs(range_error) <= max(float(tolerance) * 2.0, 0.1):
                 if speed_limit is not None:
-                    return f"Near target range: brake below {float(speed_limit) * 1000.0:.2f} m/s."
+                    return f"Near target range: brake below {_format_speed_text(float(speed_limit))}."
                 return "Near target range: settle in the green range band."
         if self.config.goal_nmt_radial_amplitude_km is None and self.config.goal_radius_km is not None:
             goal = np.array(self.config.goal_relative_ric_km, dtype=float).reshape(-1)
@@ -582,11 +796,23 @@ class RPOTrainingTracker:
                 speed_limit = self.config.max_goal_speed_km_s
                 if goal_error <= goal_radius:
                     if speed_limit is not None and speed > float(speed_limit):
-                        return f"Inside hold box: slow below {float(speed_limit) * 1000.0:.2f} m/s to finish."
+                        return f"Inside hold box: slow below {_format_speed_text(float(speed_limit))} to finish."
+                    if (
+                        cross_track_amplitude is not None
+                        and self.config.max_cross_track_amplitude_km is not None
+                        and cross_track_amplitude > float(self.config.max_cross_track_amplitude_km)
+                    ):
+                        return (
+                            "Inside hold box: damp C amplitude below "
+                            f"{_format_distance_text(float(self.config.max_cross_track_amplitude_km))}."
+                        )
                     return "Inside hold box with speed under limit: level should complete."
                 if goal_error <= max(goal_radius * 2.0, goal_radius + 0.05):
                     if speed_limit is not None:
-                        return f"Near hold box: center in the green circle and brake below {float(speed_limit) * 1000.0:.2f} m/s."
+                        return (
+                            "Near hold box: center in the green circle and brake below "
+                            f"{_format_speed_text(float(speed_limit))}."
+                        )
                     return "Near hold box: center in the green circle."
         if closing and speed > 0.01:
             return "Closing quickly: reduce relative speed before correcting position."
@@ -595,6 +821,16 @@ class RPOTrainingTracker:
         if speed < 0.001 and rng > 1.0:
             return "Mostly coasting: watch the natural relative drift before burning again."
         return "Use small pulses, then coast and observe the RIC trajectory."
+
+    def _current_cross_track_amplitude_km(self, rel: np.ndarray) -> float | None:
+        if self.config.max_cross_track_amplitude_km is None or not self.mean_motion_hist:
+            return None
+        n = float(self.mean_motion_hist[-1])
+        if not np.isfinite(n) or abs(n) <= 1.0e-12:
+            return None
+        state = np.array(rel, dtype=float).reshape(6)
+        center_c = float(np.array(self.config.goal_nmt_center_ric_km, dtype=float).reshape(3)[2])
+        return float(np.sqrt((state[2] - center_c) ** 2 + (state[5] / n) ** 2))
 
     def score(self) -> RPOTrainingScore:
         if self._score_cache is not None:
@@ -641,27 +877,32 @@ class RPOTrainingTracker:
             )
             self._score_cache = score
             return score
-        rel = np.vstack(self.rel_ric_hist)
-        t = np.array(self.t_s, dtype=float)
-        thrust = np.vstack(self.thrust_hist) if self.thrust_hist else np.zeros((rel.shape[0], 3), dtype=float)
+        rel, t, thrust, target_thrust, n_hist = self._history_arrays()
         burn_axis_first_sample_idx = self._burn_axis_first_sample_indices()
         burn_axes_satisfied = self._burn_axes_satisfied()
         phase_burn_first_sample_idx = self._phase_burn_first_sample_indices()
         phase_burns_satisfied = self._phase_burns_satisfied()
-        target_thrust = (
-            np.vstack(self.target_thrust_hist) if self.target_thrust_hist else np.zeros((rel.shape[0], 3), dtype=float)
-        )
         ranges = np.linalg.norm(rel[:, :3], axis=1)
         speeds = np.linalg.norm(rel[:, 3:], axis=1)
-        n_hist = np.array(self.mean_motion_hist, dtype=float).reshape(-1)
+        element_errors = None
+        if (
+            self.config.goal_nmt_radial_amplitude_km is not None
+            or self.config.max_cross_track_amplitude_km is not None
+        ) and n_hist.size:
+            element_errors = self._nmt_element_error_arrays(rel, n_hist)
         if self.config.goal_nmt_radial_amplitude_km is not None:
-            goal_err = nmt_position_error_km(
-                rel[:, :3],
-                radial_amplitude_km=float(self.config.goal_nmt_radial_amplitude_km),
-                cross_track_amplitude_km=float(self.config.goal_nmt_cross_track_amplitude_km),
-                cross_track_phase_deg=float(self.config.goal_nmt_cross_track_phase_deg),
-                center_ric_km=self.config.goal_nmt_center_ric_km,
-            )
+            if self.config.goal_nmt_tolerance_km is not None:
+                goal_err = nmt_position_error_km(
+                    rel[:, :3],
+                    radial_amplitude_km=float(self.config.goal_nmt_radial_amplitude_km),
+                    cross_track_amplitude_km=float(self.config.goal_nmt_cross_track_amplitude_km),
+                    cross_track_phase_deg=float(self.config.goal_nmt_cross_track_phase_deg),
+                    center_ric_km=self.config.goal_nmt_center_ric_km,
+                )
+            elif element_errors is not None:
+                goal_err = self._nmt_element_goal_error_array_for(element_errors)
+            else:
+                goal_err = np.linalg.norm(rel[:, :3] - self.config.goal_nmt_center_ric_km.reshape(1, 3), axis=1)
         elif self.config.goal_range_km is not None:
             if self.config.goal_range_tolerance_km is None:
                 goal_err = np.maximum(ranges - float(self.config.goal_range_km), 0.0)
@@ -672,15 +913,6 @@ class RPOTrainingTracker:
             goal_err = np.min(np.linalg.norm(rel[:, None, :3] - gate_centers[None, :, :], axis=2), axis=1)
         else:
             goal_err = np.linalg.norm(rel[:, :3] - self.config.goal_relative_ric_km.reshape(1, 3), axis=1)
-        element_errors = None
-        if self.config.goal_nmt_radial_amplitude_km is not None and n_hist.size:
-            element_errors = nmt_element_errors(
-                rel,
-                mean_motion_rad_s=n_hist[: rel.shape[0]],
-                radial_amplitude_km=float(self.config.goal_nmt_radial_amplitude_km),
-                cross_track_amplitude_km=float(self.config.goal_nmt_cross_track_amplitude_km),
-                center_ric_km=self.config.goal_nmt_center_ric_km,
-            )
         keepout_time = 0.0
         keepout_violation = False
         if self.config.keepout_radius_km is not None:
@@ -689,11 +921,7 @@ class RPOTrainingTracker:
             keepout_time = _sampled_dwell_time_s(inside, t)
         hard_speed_limit_violation = False
         if self.config.hard_speed_limit_radius_km is not None and self.config.hard_speed_limit_km_s is not None:
-            hard_speed_limit_violation = _hard_speed_limit_violated(
-                rel,
-                radius_km=float(self.config.hard_speed_limit_radius_km),
-                speed_limit_km_s=float(self.config.hard_speed_limit_km_s),
-            )
+            hard_speed_limit_violation = bool(self._hard_speed_limit_violation)
         forbidden_region_names: list[str] = []
         for region in self.config.forbidden_regions:
             if bool(np.any(region.contains_positions(rel[:, :3]))):
@@ -726,6 +954,10 @@ class RPOTrainingTracker:
         if element_errors is not None and self.config.goal_nmt_velocity_tolerance_km_s is not None:
             goal_met_samples &= element_errors["drift_velocity_error_km_s"] <= float(
                 self.config.goal_nmt_velocity_tolerance_km_s
+            )
+        if element_errors is not None and self.config.max_cross_track_amplitude_km is not None:
+            goal_met_samples &= element_errors["cross_track_amplitude_km"] <= float(
+                self.config.max_cross_track_amplitude_km
             )
         if self.config.max_time_s is not None and not self.config.survival_goal:
             goal_met_samples &= (t - t[0]) <= float(self.config.max_time_s)
@@ -768,6 +1000,17 @@ class RPOTrainingTracker:
             objective_name = "goal"
         if achieved_time_s is None:
             reasons.append(f"{objective_name} not achieved within tolerance.")
+        if (
+            achieved_time_s is None
+            and self.config.max_cross_track_amplitude_km is not None
+            and element_errors is not None
+            and np.isfinite(element_errors["cross_track_amplitude_km"][-1])
+            and element_errors["cross_track_amplitude_km"][-1] > float(self.config.max_cross_track_amplitude_km)
+        ):
+            reasons.append(
+                "Cross-track amplitude above "
+                f"{_format_distance_text(float(self.config.max_cross_track_amplitude_km))}."
+            )
         time_failed = (
             self.config.max_time_s is not None
             and achieved_time_s is None
@@ -780,12 +1023,14 @@ class RPOTrainingTracker:
             if self.config.fail_on_delta_v_budget:
                 budget_ok = False
                 dv_failed = True
-                reasons.append(f"Delta-v budget exceeded ({float(self.config.max_delta_v_m_s):.1f} m/s).")
+                reasons.append(f"Delta-v budget exceeded ({format_speed_m_s(float(self.config.max_delta_v_m_s))}).")
         target_dv_failed = False
         if self.config.max_target_delta_v_m_s is not None and target_dv_m_s > float(self.config.max_target_delta_v_m_s):
             budget_ok = False
             target_dv_failed = True
-            reasons.append(f"Target delta-v budget exceeded ({float(self.config.max_target_delta_v_m_s):.1f} m/s).")
+            reasons.append(
+                f"Target delta-v budget exceeded ({format_speed_m_s(float(self.config.max_target_delta_v_m_s))})."
+            )
         if self.config.keepout_radius_km is not None:
             budget_ok = budget_ok and not keepout_violation
             if keepout_violation:
@@ -907,14 +1152,14 @@ class RPOTrainingTracker:
             [
                 f"Samples       : {score.samples}",
                 f"Elapsed       : {score.elapsed_s:.1f} s",
-                f"Closest App   : {score.closest_approach_km:.3f} km",
-                f"Final Range   : {score.final_range_km:.3f} km",
-                f"Goal Error    : {score.final_goal_error_km:.3f} km",
-                f"Best Goal Err : {score.min_goal_error_km:.3f} km",
-                f"Final Speed   : {score.final_relative_speed_km_s:.5f} km/s",
+                f"Closest App   : {_format_distance_text(score.closest_approach_km)}",
+                f"Final Range   : {_format_distance_text(score.final_range_km)}",
+                f"Goal Error    : {_format_distance_text(score.final_goal_error_km)}",
+                f"Best Goal Err : {_format_distance_text(score.min_goal_error_km)}",
+                f"Final Speed   : {_format_speed_text(score.final_relative_speed_km_s)}",
                 f"Keepout Time  : {score.time_inside_keepout_s:.1f} s",
-                f"Approx dV     : {score.approximate_delta_v_m_s:.2f} m/s",
-                f"Target dV     : {score.target_delta_v_m_s:.2f} m/s",
+                f"Approx dV     : {format_speed_m_s(score.approximate_delta_v_m_s)}",
+                f"Target dV     : {format_speed_m_s(score.target_delta_v_m_s)}",
                 f"Achieved Time : {_format_optional_time(score.achieved_time_s)}",
                 f"Level Passed  : {'yes' if score.level_passed else 'no'}",
             ]
@@ -938,11 +1183,13 @@ class RPOTrainingTracker:
         if self.config.goal_nmt_radial_amplitude_km is not None:
             lines.extend(
                 [
-                    f"NMT Rad Amp   : {score.final_nmt_radial_amplitude_km:.3f} km",
-                    f"NMT Cross Amp : {score.final_nmt_cross_track_amplitude_km:.3f} km",
-                    f"NMT Drift Err : {score.final_nmt_drift_velocity_error_km_s:.6f} km/s",
+                    f"NMT Rad Amp   : {_format_distance_text(score.final_nmt_radial_amplitude_km)}",
+                    f"NMT Cross Amp : {_format_distance_text(score.final_nmt_cross_track_amplitude_km)}",
+                    f"NMT Drift Err : {_format_speed_text(score.final_nmt_drift_velocity_error_km_s)}",
                 ]
             )
+        elif self.config.max_cross_track_amplitude_km is not None:
+            lines.append(f"Cross Amp     : {_format_distance_text(score.final_nmt_cross_track_amplitude_km)}")
         for reason in score.pass_fail_reasons:
             lines.append(f"Pass/Fail     : {reason}")
         for hint in score.hints:
@@ -1001,11 +1248,33 @@ def nmt_curve_points_km(
         a_c = 0.0
     phase = np.deg2rad(float(cross_track_phase_deg))
     center = np.array(center_ric_km, dtype=float).reshape(3)
+    return _cached_nmt_curve_points_km(
+        float(a_r),
+        float(a_c),
+        float(phase),
+        (float(center[0]), float(center[1]), float(center[2])),
+        int(max(int(samples), 8)),
+    ).copy()
+
+
+@lru_cache(maxsize=64)
+def _cached_nmt_curve_points_km(
+    radial_amplitude_km: float,
+    cross_track_amplitude_km: float,
+    phase_rad: float,
+    center_ric_km: tuple[float, float, float],
+    samples: int,
+) -> np.ndarray:
+    a_r = float(radial_amplitude_km)
+    a_c = float(cross_track_amplitude_km)
+    phase = float(phase_rad)
+    center = np.array(center_ric_km, dtype=float).reshape(3)
     theta = np.linspace(0.0, 2.0 * np.pi, max(int(samples), 8), endpoint=True)
     pts = np.zeros((theta.size, 3), dtype=float)
     pts[:, 0] = center[0] + a_r * np.cos(theta)
     pts[:, 1] = center[1] - 2.0 * a_r * np.sin(theta)
     pts[:, 2] = center[2] + a_c * np.cos(theta + phase)
+    pts.setflags(write=False)
     return pts
 
 
@@ -1086,6 +1355,109 @@ def nmt_element_errors(
     }
 
 
+def _nmt_element_error_values(
+    relative_ric_state: np.ndarray,
+    *,
+    mean_motion_rad_s: float,
+    radial_amplitude_km: float,
+    cross_track_amplitude_km: float,
+    center_ric_km: np.ndarray,
+    drift_velocity_error_km_s: float | None = None,
+) -> dict[str, float]:
+    rel = np.array(relative_ric_state, dtype=float).reshape(-1)
+    center = np.array(center_ric_km, dtype=float).reshape(3)
+    if rel.size < 6:
+        raise ValueError("relative_ric_state must contain RIC position and velocity.")
+    n = float(mean_motion_rad_s)
+    if not np.isfinite(n) or abs(n) <= 1.0e-12:
+        return {
+            "radial_amplitude_km": float("nan"),
+            "cross_track_amplitude_km": float("nan"),
+            "radial_amplitude_error_km": float("nan"),
+            "cross_track_amplitude_error_km": float("nan"),
+            "drift_velocity_error_km_s": float("nan"),
+        }
+    pos = rel[:3] - center
+    vel = rel[3:6]
+    radial_amp = float(np.sqrt(pos[0] ** 2 + (vel[0] / n) ** 2))
+    cross_amp = float(np.sqrt(pos[2] ** 2 + (vel[2] / n) ** 2))
+    drift_error = (
+        float(drift_velocity_error_km_s)
+        if drift_velocity_error_km_s is not None and np.isfinite(float(drift_velocity_error_km_s))
+        else abs(float(vel[1]) + 2.0 * n * float(pos[0]))
+    )
+    return {
+        "radial_amplitude_km": radial_amp,
+        "cross_track_amplitude_km": cross_amp,
+        "radial_amplitude_error_km": abs(radial_amp - float(radial_amplitude_km)),
+        "cross_track_amplitude_error_km": abs(cross_amp - float(cross_track_amplitude_km)),
+        "drift_velocity_error_km_s": abs(drift_error),
+    }
+
+
+def _semimajor_axis_drift_velocity_error_km_s(
+    target_state_eci: np.ndarray | None,
+    chaser_state_eci: np.ndarray | None,
+    *,
+    mu_km3_s2: float = EARTH_MU_KM3_S2,
+) -> float | None:
+    if target_state_eci is None or chaser_state_eci is None:
+        return None
+    target_a = _semimajor_axis_km(target_state_eci, mu_km3_s2=mu_km3_s2)
+    chaser_a = _semimajor_axis_km(chaser_state_eci, mu_km3_s2=mu_km3_s2)
+    if target_a is None or chaser_a is None or target_a <= 0.0:
+        return None
+    n = float(np.sqrt(float(mu_km3_s2) / (float(target_a) ** 3)))
+    return float(abs(0.5 * n * (float(chaser_a) - float(target_a))))
+
+
+def _semimajor_axis_km(state_eci: np.ndarray, *, mu_km3_s2: float = EARTH_MU_KM3_S2) -> float | None:
+    state = np.array(state_eci, dtype=float).reshape(-1)
+    if state.size < 6:
+        return None
+    r_norm = float(np.linalg.norm(state[:3]))
+    v_norm = float(np.linalg.norm(state[3:6]))
+    if not np.isfinite(r_norm) or not np.isfinite(v_norm) or r_norm <= 0.0:
+        return None
+    specific_energy = 0.5 * v_norm * v_norm - float(mu_km3_s2) / r_norm
+    if not np.isfinite(specific_energy) or abs(specific_energy) <= 1.0e-12:
+        return None
+    return float(-float(mu_km3_s2) / (2.0 * specific_energy))
+
+
+def _nmt_element_goal_error_km(
+    *,
+    radial_amplitude_error_km: float,
+    cross_track_amplitude_error_km: float,
+    include_radial: bool,
+    include_cross_track: bool,
+) -> float:
+    values = []
+    if include_radial:
+        values.append(float(radial_amplitude_error_km))
+    if include_cross_track:
+        values.append(float(cross_track_amplitude_error_km))
+    finite = [value for value in values if np.isfinite(value)]
+    return float(max(finite)) if finite else float("nan")
+
+
+def _nmt_element_goal_error_array(
+    element_errors: dict[str, np.ndarray],
+    *,
+    include_radial: bool,
+    include_cross_track: bool,
+) -> np.ndarray:
+    values: list[np.ndarray] = []
+    if include_radial:
+        values.append(np.array(element_errors["radial_amplitude_error_km"], dtype=float).reshape(-1))
+    if include_cross_track:
+        values.append(np.array(element_errors["cross_track_amplitude_error_km"], dtype=float).reshape(-1))
+    if not values:
+        first = next(iter(element_errors.values()), np.zeros(0, dtype=float))
+        return np.zeros(np.array(first, dtype=float).reshape(-1).shape, dtype=float)
+    return np.nanmax(np.vstack(values), axis=0)
+
+
 def _final_nmt_element_values(element_errors: dict[str, np.ndarray] | None) -> dict[str, float]:
     keys = (
         "radial_amplitude_km",
@@ -1106,13 +1478,16 @@ def _format_optional_time(value: float | None) -> str:
 
 
 def _format_distance_text(value_km: float) -> str:
-    if abs(float(value_km)) < 0.1:
-        return f"{float(value_km) * 1000.0:.0f} m"
-    return f"{float(value_km):.2f} km"
+    return format_distance_km(value_km)
 
 
 def _format_speed_text(value_km_s: float) -> str:
-    return f"{float(value_km_s) * 1000.0:.2f} m/s"
+    return format_speed_km_s(value_km_s)
+
+
+def _format_signed_distance_text(value_km: float) -> str:
+    sign = "+" if float(value_km) >= 0.0 else "-"
+    return sign + format_distance_km(abs(float(value_km)))
 
 
 def _optional_float(value: Any) -> float | None:
@@ -1350,6 +1725,32 @@ def _hard_speed_limit_violated(relative_ric_state: np.ndarray, *, radius_km: flo
         if max(entry_speed, exit_speed) > float(speed_limit_km_s):
             return True
     return False
+
+
+def _hard_speed_limit_sample_violated(
+    previous_relative_ric_state: np.ndarray | None,
+    current_relative_ric_state: np.ndarray,
+    *,
+    radius_km: float,
+    speed_limit_km_s: float,
+) -> bool:
+    current = np.array(current_relative_ric_state, dtype=float).reshape(6)
+    radius = float(radius_km)
+    speed_limit = float(speed_limit_km_s)
+    if float(np.linalg.norm(current[:3])) <= radius and float(np.linalg.norm(current[3:6])) > speed_limit:
+        return True
+    if previous_relative_ric_state is None:
+        return False
+    previous = np.array(previous_relative_ric_state, dtype=float).reshape(6)
+    interval = _position_segment_sphere_interval(previous[:3], current[:3], radius_km=radius)
+    if interval is None:
+        return False
+    u0, u1 = interval
+    v0 = previous[3:6]
+    dv = current[3:6] - previous[3:6]
+    entry_speed = float(np.linalg.norm(v0 + dv * u0))
+    exit_speed = float(np.linalg.norm(v0 + dv * u1))
+    return bool(max(entry_speed, exit_speed) > speed_limit)
 
 
 def _position_segment_sphere_interval(

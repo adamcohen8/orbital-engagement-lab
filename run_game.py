@@ -48,10 +48,12 @@ def main() -> None:
             )
         return
 
+    show_start_screen = True
     while True:
-        selection = choose_game_launch()
+        selection = choose_game_launch(show_start_screen=show_start_screen)
         if selection is None:
             return
+        show_start_screen = False
         result = run_game_mode(
             selection.path,
             controlled_object_id=None if args.controlled_object is None else str(args.controlled_object),

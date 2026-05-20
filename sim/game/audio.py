@@ -14,7 +14,11 @@ LEVEL_MUSIC_PATHS: dict[str, Path] = {
     "rpo_03_rbar_approach": GAME_MUSIC_DIR / "18_keepout_zone_accelerando.wav",
     "rpo_04_rendezvous": GAME_MUSIC_DIR / "06_casting_the_orbit_line.wav",
     "rpo_05_passive_cross_track_approach": GAME_MUSIC_DIR / "19_cross_track_ghost_orbit.wav",
-    "rpo_06_defensive_target_demo": GAME_MUSIC_DIR / "17_orbital_boss_metal.wav",
+    "rpo_06_elliptic_burn_then_approach": GAME_MUSIC_DIR / "08_silent_running_radar.wav",
+    "rpo_07_elliptic_nmc": GAME_MUSIC_DIR / "04_docking_bay_neon.wav",
+    "rpo_08_elliptic_rendezvous": GAME_MUSIC_DIR / "23_elliptic_final_burn_cinematic.wav",
+    "rpo_09_defensive_target_demo": GAME_MUSIC_DIR / "17_orbital_boss_metal.wav",
+    "rpo_10_evasive_target_survival": GAME_MUSIC_DIR / "09_defender_boss_vector.wav",
     "rpo_arcade_pursuit": GAME_MUSIC_DIR / "21_pursuit_arcade_overdrive_no_siren_demo.wav",
 }
 MISSION_SUCCESS_MUSIC_PATH = GAME_MUSIC_DIR / "05_final_burn_victory_loop.wav"
@@ -41,9 +45,10 @@ def _sync_game_music(
     training_cfg: RPOTrainingConfig,
     music_enabled: bool,
     active_path: Path | None,
+    override_level_path: Path | None = None,
 ) -> Path | None:
     result_path = _result_music_path(score)
-    desired_path = (result_path or _level_music_path(training_cfg)) if music_enabled else None
+    desired_path = (result_path or override_level_path or _level_music_path(training_cfg)) if music_enabled else None
     if desired_path == active_path:
         return active_path
     _stop_game_music(pygame)

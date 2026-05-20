@@ -1,8 +1,8 @@
 # Game Music Assets
 
 Original, synthetic arcade-style cues for the Pygame RPO trainer. They were
-generated from scratch with simple square, pulse, triangle, sine, and noise
-waveforms; no external samples or third-party music assets were used.
+generated from scratch with procedural oscillators, noise, and plucked-string
+synthesis; no external samples or third-party music assets were used.
 
 The WAV files are optional runtime assets. Source releases and public exports can
 run without them; missing files simply disable music or sound effects.
@@ -46,6 +46,14 @@ Tracks:
   same arrangement as track 20, minus the radar-siren layer.
 - `22_arcade_round_clear_flyover.wav`: short arcade flyover sound effect for
   cleared Pursuit Arcade rounds.
+- `23_elliptic_final_burn_cinematic.wav`: original Level 8 elliptical-rendezvous
+  cue with urgent propulsion hits, organ-like synth pressure, warning tones,
+  and a rising final-burn escalation.
+- `27_high_tempo_boss_riff.wav`: heavy boss-round guitar-riff cue with slower
+  low-string chugs, power-chord accents, double-kick pressure, a late guitar
+  solo, and minimal atmosphere.
+- `28_high_shred_boss_riff.wav`: alternate boss-round guitar-riff cue using the
+  track 27 backing bed with a higher-pitched shred-style solo overlay.
 
 Before public redistribution, review asset provenance and licensing posture as
 part of the normal public/private release process.

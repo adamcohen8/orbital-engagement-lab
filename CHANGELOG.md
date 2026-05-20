@@ -6,6 +6,45 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.7.1 - 2026-05-20
+
+Pygame RPO trainer polish, elliptical-orbit lessons, and Pursuit Arcade tuning.
+
+### Added
+
+- Added Levels 6-8 for elliptical-target RPO: burn familiarization plus
+  approach, elliptical NMC entry, and terminal rendezvous in the eccentric-orbit
+  setup.
+- Added Tschauner-Hempel-style elliptical coast projections, target true anomaly
+  display, NMC boundary overlays, and level-specific RI/RC camera rules for the
+  elliptical lessons.
+- Added Pursuit Arcade boss rounds with elliptical target orbits, randomized
+  target true anomaly, boss music, bonus scoring, and randomized energy-matched
+  starts after round 1.
+- Added new optional synthetic game music cues for Level 8 and arcade boss
+  rounds.
+
+### Changed
+
+- Renumbered the former defensive/evasion levels to Levels 9 and 10 and updated
+  launcher, roadmap, and public docs to match the current progression.
+- Tuned Pursuit Arcade to tighten the goal radius by 5 meters per cleared round,
+  cap the player at 5 m/s of delta-v, and award 3000 seconds plus 1000 seconds
+  per unused m/s of chaser delta-v after each cleared round.
+- Standardized game UI engineering notation and expanded level title/status
+  text so active missions show the level number and name.
+
+### Fixed
+
+- Improved Pygame performance for high-speed play by throttling expensive
+  projection refreshes, caching elliptical prediction work, and refreshing more
+  aggressively while the player is burning.
+- Fixed Escape handling so active levels return to the level selector instead
+  of the start screen.
+- Fixed long in-level instruction cards by allowing scrollable briefing text.
+- Fixed camera framing for selected levels, including fixed Level 7 RI framing
+  and Level 8 scaling from the two current satellites.
+
 ## 0.7.0 - 2026-05-17
 
 Interactive RPO trainer expansion and public game export update.
