@@ -23,6 +23,7 @@ class KeyboardCommandState:
     step_requested: bool = False
     speed_multiplier_change: int = 0
     music_toggle_requested: bool = False
+    briefing_scroll_px: int = 0
     quit_requested: bool = False
 
     def reset_axes(self) -> None:

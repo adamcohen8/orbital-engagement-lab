@@ -40,6 +40,11 @@ python run_simulation.py --config examples/configs/public_tle_2hr_propagation.ya
 ## Game Levels
 
 The optional Pygame trainer includes packaged levels under `sim/game/configs/`.
+The launcher progression starts with `rpo_00_tutorial`, then runs through
+Levels 1-10 and a replayable `rpo_arcade_pursuit` variant. Levels 6-8 use an
+elliptical coast-projection model for eccentric-orbit RPO lessons; Pursuit
+Arcade adds tightening goals, randomized later-round starts, and every-fifth
+round elliptical boss encounters.
 
 ```bash
 python -m pip install ".[game]"
@@ -62,7 +67,8 @@ python run_game.py sim/game/configs/game_training_rpo_04_rendezvous.yaml
 - Ground-station access: start with `public_ground_station_access_from_tle.yaml`.
 - Closed-loop control: start with `public_closed_loop_rendezvous_lqr.yaml`.
 - Plot/artifact review: start with `configs/hcw_pd_10km_experiment.yaml`.
-- Manual RPO training: start with `run_game.py` or
+- Guided RPO trainer: start with `run_game.py`.
+- Manual RPO config wiring: start with
   `public_manual_rpo_training.yaml`.
 
 Public examples use the canonical `objects` map. Names such as `chaser` and

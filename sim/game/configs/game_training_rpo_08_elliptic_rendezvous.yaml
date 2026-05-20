@@ -1,101 +1,55 @@
-scenario_name: game_training_rpo_arcade_pursuit
-scenario_description: Arcade RPO pursuit mode where each cleared round restarts
-  level 9 with a new random target evasion direction.
+scenario_name: game_training_rpo_08_elliptic_rendezvous
+scenario_description: RPO trainer scenario for completing a close rendezvous with
+  an eccentric-orbit target.
 metadata:
   owner: codex
-  notes: Run with `python run_game.py sim/game/configs/game_training_rpo_arcade_pursuit.yaml
+  notes: Run with `python run_game.py sim/game/configs/game_training_rpo_08_elliptic_rendezvous.yaml
     --speed-multiple 10`.
   game:
-    level_name: Pursuit Arcade
+    level_name: Level 8 - Elliptical Rendezvous
     control_mode: ric_translation
-    ric_reference_object_id: target_reference
     camera_mode: target_pair
-    difficulty: easy
+    coast_prediction_model: tschauner_hempel
+    target_centered_plot_planes:
+    - RI
+    difficulty: hard
     player_max_accel_km_s2: 1.5e-05
-    arcade:
-      enabled: true
-      initial_time_s: 12000.0
-      round_bonus_time_s: 3000.0
-      delta_v_bonus_time_per_m_s: 1000.0
-      goal_range_step_km: 0.005
-      min_goal_range_km: 0.005
-      boss_round_interval: 5
-      boss:
-        target_coes:
-          a_km: 9000.0
-          ecc: 0.25
-          inc_deg: 45.0
-          raan_deg: 0.0
-          argp_deg: 0.0
-          true_anomaly_deg: 0.0
-        true_anomaly_range_deg:
-        - 0.0
-        - 360.0
-        coast_prediction_model: tschauner_hempel
-        music_track: 28_high_shred_boss_riff.wav
-        score_multiplier: 2.0
-        bonus_time_s: 1000.0
-      random_initial_state:
-        enabled: true
-        radial_range_km:
-        - -1.0
-        - 1.0
-        in_track_range_km:
-        - -10.0
-        - 10.0
-        cross_track_range_km:
-        - -1.0
-        - 1.0
-        min_range_km: 5.0
-        cross_track_rate_range_km_s:
-        - -0.001
-        - 0.001
-    defensive_target:
-      enabled: true
-      chaser_object_id: chaser
-      trigger_range_km: 1.2
-      trigger_closing_speed_km_s: 0.00025
-      keepout_radius_km: 0.1
-      max_accel_km_s2: 7.5e-06
-      max_delta_v_m_s: 0.1
-      cross_track_bias: 0.65
-      pulse_period_s: 120.0
     training:
       enabled: true
-      scenario_id: rpo_arcade_pursuit
-      learning_goal: Clear as many pursuit rounds as possible against targets that
-        choose a different fixed evasion burn direction each round.
-      player_brief: Chase the target to within 100 m. Each successful round resets
-        your fuel, gives the target a new random evasion direction, tightens the
-        target range by 5 m down to a 5 m minimum, and adds 3000 seconds plus
-        1000 seconds per unused m/s of chaser delta-v to your remaining clock.
-        Round 1 starts from the level 9 setup; later rounds randomize the chaser's
-        RIC state outside 5 km while keeping its semimajor axis matched to the
-        target. Every fifth round is a boss round with an elliptical target orbit
-        and a randomized target true anomaly.
+      scenario_id: rpo_08_elliptic_rendezvous
+      learning_goal: Complete the final rendezvous with an eccentric-orbit target
+        by reducing range below 10 meters while keeping relative speed below
+        0.1 meters per second.
+      player_brief: This is the Level 4 rendezvous problem in the eccentric-orbit
+        environment. Use the elliptical coast predictor to manage the changing
+        local dynamics, enter the 25 meter proximity zone below 0.1 m/s, then
+        settle inside the final 10 meter goal.
       pass_criteria:
-      - Get within the current round's target range; it starts at 100 m and tightens
-        by 5 m after each cleared round.
-      - Keep clearing rounds until you run out of time or chaser delta-v.
+      - Get within 10 meters of the target.
+      - Keep relative speed below 0.1 meters per second.
+      - Do not enter the 25 meter proximity zone faster than 0.1 meters per second.
+      - Stay under the time and delta-v budgets.
       instructor_notes:
-      - This is an arcade variant of level 9.
-      - Each round uses one random fixed target burn direction.
-      - The pursuit goal tightens by 5 m each round and floors at 5 m.
-      - Every fifth round changes the target orbit to an elliptical boss setup,
-        randomizes target true anomaly, switches to the TH coast projection, and
-        uses the boss music cue.
-      - Round 1 preserves the configured level 9 initial state. Rounds 2+ sample
-        R within +/-1 km, I within +/-10 km, C within +/-1 km, reject starts inside
-        5 km, sample dC within +/-1 m/s, set dR to zero, and solve dI for equal
-        target/chaser orbital energy.
-      - Round score is weighted by round number and added to the run total.
-      - The yellow target motion is shown relative to the target reference orbit.
-      - Target defensive maneuvering is capped at 0.1 m/s total delta-v each round.
+      - This level repeats the Level 4 terminal-rendezvous objective after the
+        eccentric-orbit approach and NMC lessons.
+      - This level intentionally has no keepout hard fail because rendezvous
+        requires final closure.
+      - Use the close zoom to discuss why speed matters as much as range when
+        the local orbital rate is changing.
+      - The coast predictor uses a Tschauner-Hempel-style elliptical linear model
+        rather than the circular-orbit HCW projection.
       target_object_id: target
       chaser_object_id: chaser
-      goal_range_km: 0.1
-      max_time_s: 12000.0
-      max_delta_v_m_s: 5.0
+      goal_relative_ric_km:
+      - 0.0
+      - 0.0
+      - 0.0
+      goal_radius_km: 0.01
+      max_goal_speed_km_s: 0.0001
+      hard_speed_limit_radius_km: 0.025
+      hard_speed_limit_km_s: 0.0001
+      max_time_s: 14400.0
+      max_delta_v_m_s: 3.0
 objects:
   rocket:
     enabled: false
@@ -111,11 +65,11 @@ objects:
         frame: rect
         state:
         - 0.0
-        - -1.8
+        - -0.75
         - 0.0
         - 0.0
         - 0.0
-        - 0.0
+        - 0.0001
       attitude_quat_bn:
       - 1.0
       - 0.0
@@ -143,7 +97,6 @@ objects:
       refresh_rate_s: 1.0
       targets:
       - target
-      - target_reference
       conditions:
         require_line_of_sight: false
         max_range_km: 10000.0
@@ -168,12 +121,12 @@ objects:
       mass_kg: 1800.0
     initial_state:
       coes:
-        a_km: 7000.0
-        ecc: 0.0
+        a_km: 9000.0
+        ecc: 0.25
         inc_deg: 45.0
         raan_deg: 0.0
         argp_deg: 0.0
-        true_anomaly_deg: 0.0
+        true_anomaly_deg: 100.0
       attitude_quat_bn:
       - 1.0
       - 0.0
@@ -217,7 +170,7 @@ objects:
     kind: satellite
 simulator:
   scenario_type: auto
-  duration_s: 12000.0
+  duration_s: 7200.0
   dt_s: 1.0
   dynamics:
     orbit:
@@ -243,7 +196,7 @@ simulator:
     earth_impact_enabled: false
     earth_radius_km: 6378.137
 outputs:
-  output_dir: outputs/game_training_rpo_arcade_pursuit
+  output_dir: outputs/game_training_rpo_08
   mode: save
   stats:
     enabled: true

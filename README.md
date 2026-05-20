@@ -131,7 +131,8 @@ checked-in [Plot Gallery](docs/plot-gallery.md).
 | Review the flagship 10 km HCW PD RPO scenario | `python run_simulation.py --config configs/hcw_pd_10km_experiment.yaml` |
 | Inspect orbit perturbations, drag, SRP, and third-body toggles | `python run_simulation.py --config examples/configs/public_orbit_environment_stack.yaml` |
 | Evaluate attitude hold under initial error and disturbance torque | `python run_simulation.py --config examples/configs/public_attitude_hold_disturbance.yaml` |
-| Practice manual RPO/game-style control | `python run_game.py examples/configs/public_manual_rpo_training.yaml` |
+| Open the guided RPO trainer level selector | `python run_game.py` |
+| Practice manual RPO/game-style control from a public config | `python run_game.py examples/configs/public_manual_rpo_training.yaml` |
 
 Use the API:
 
@@ -161,11 +162,14 @@ python run_game.py
 
 Running `run_game.py` without a config opens the level selector. Pick a level
 with Up/Down or W/S, toggle video recording with V or the Video button, press
-Enter or Space to launch, and press Escape to quit. Recordings are saved under
-`outputs/game_recordings/` when a level reaches pass/fail; restarting or
-quitting early discards the current attempt video. The first six bundled levels
-teach coast-relative motion, V-bar and R-bar approaches, close rendezvous,
-keepout recovery, and a defensive-target demo.
+Enter or Space to launch, and press Escape in a level to return to the selector.
+Recordings are saved under `outputs/game_recordings/` when a level reaches
+pass/fail; restarting or quitting early discards the current attempt video. The
+bundled progression now starts with a tutorial, then covers coast-relative
+motion, V-bar and R-bar approaches, close rendezvous, passively safe inspection,
+eccentric-orbit approach and NMC lessons, defensive-target tracking,
+evasive-target survival, and an arcade pursuit variant with tightening goals,
+randomized later-round starts, and elliptical boss rounds.
 
 You can also launch a level directly:
 
@@ -175,7 +179,7 @@ python run_game.py sim/game/configs/game_training_rpo_01_coast_relative_motion.y
 
 Default trainer controls are RIC translation pulses: W/S radial, A/D in-track,
 Left/Right cross-track, Space pause/resume, period single-step, R reset,
-Up/Down speed, and Escape quit.
+Up/Down speed, and Escape level exit.
 
 The public CLI and GUI are intentionally scoped to deterministic single-run
 scenarios. Batch analysis settings are not exposed in public examples, and

@@ -7,6 +7,8 @@ from typing import Any
 
 import yaml
 
+from sim.game.formatting import format_speed_km_s, format_speed_m_s
+
 GAME_CONFIG_DIR = Path(__file__).resolve().parent / "configs"
 LAUNCHER_MUSIC_PATH = Path(__file__).resolve().parent / "music" / "01_insert_coin_to_orbit.wav"
 START_SCREEN_LOGO_PATH = Path(__file__).resolve().parent / "assets" / "OEL_RPO_Trainer.png"
@@ -81,11 +83,11 @@ def choose_game_scenario(config_dir: Path | None = None) -> Path | None:
     return None if selection is None else selection.path
 
 
-def choose_game_launch(config_dir: Path | None = None) -> GameLaunchSelection | None:
+def choose_game_launch(config_dir: Path | None = None, *, show_start_screen: bool = True) -> GameLaunchSelection | None:
     options = discover_game_scenarios(config_dir)
     if not options:
         raise RuntimeError(f"No game training configs found in {Path(config_dir) if config_dir else GAME_CONFIG_DIR}.")
-    return _run_launcher(options)
+    return _run_launcher(options, show_start_screen=show_start_screen)
 
 
 def _scenario_option_from_yaml(
@@ -238,7 +240,7 @@ def _title_from_scenario_id(scenario_id: str, *, level_number: int) -> str:
     return str(scenario_id).replace("_", " ").title()
 
 
-def _run_launcher(options: tuple[GameScenarioOption, ...]) -> GameLaunchSelection | None:
+def _run_launcher(options: tuple[GameScenarioOption, ...], *, show_start_screen: bool = True) -> GameLaunchSelection | None:
     try:
         import pygame
     except ImportError as exc:  # pragma: no cover - exercised only without optional dependency.
@@ -262,7 +264,7 @@ def _run_launcher(options: tuple[GameScenarioOption, ...]) -> GameLaunchSelectio
     music_enabled = _start_launcher_music(pygame)
     start_artwork = _load_start_screen_artwork(pygame)
     record_video = False
-    start_screen_open = True
+    start_screen_open = bool(show_start_screen)
 
     try:
         while True:
@@ -919,11 +921,11 @@ def _budget_line(option: GameScenarioOption) -> str:
     if option.time_budget_s is not None:
         parts.append(f"Time: {option.time_budget_s:.0f}s")
     if option.delta_v_budget_m_s is not None:
-        parts.append(f"Chaser dV: {option.delta_v_budget_m_s:.1f} m/s")
+        parts.append(f"Chaser dV: {format_speed_m_s(option.delta_v_budget_m_s)}")
     if option.goal_speed_km_s is not None:
-        parts.append(f"Speed gate: {option.goal_speed_km_s * 1000.0:.2f} m/s")
+        parts.append(f"Speed gate: {format_speed_km_s(option.goal_speed_km_s)}")
     if option.target_delta_v_budget_m_s is not None:
-        parts.append(f"Target dV: {option.target_delta_v_budget_m_s:.1f} m/s")
+        parts.append(f"Target dV: {format_speed_m_s(option.target_delta_v_budget_m_s)}")
     return "   ".join(parts)
 
 

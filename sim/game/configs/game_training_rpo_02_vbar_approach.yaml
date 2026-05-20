@@ -20,6 +20,9 @@ metadata:
         y: 0.75
       RC:
         y: 0.75
+    target_centered_plot_axes:
+      RI:
+      - y
     plot_equal_axis_scale_planes:
     - RC
     proximity_ring_plot_planes:
@@ -30,11 +33,13 @@ metadata:
       scenario_id: rpo_02_vbar_approach
       learning_goal: Approach along the V-bar, brake early, and settle into the stationkeeping
         box without entering keepout.
-      player_brief: Approach from behind the target on the V-bar. Brake early, then
-        settle into the green hold box outside keepout.
+      player_brief: Approach from behind the target on the V-bar. Brake early, damp
+        out the small cross-track oscillation, then settle into the green hold box
+        outside keepout.
       pass_criteria:
       - Enter the V-bar stationkeeping box.
       - Keep relative speed below the goal threshold.
+      - Drive the cross-track amplitude close to zero.
       - Stay inside the V-bar approach corridor.
       - Stay under the time and delta-v budgets.
       - Do not enter keepout.
@@ -50,6 +55,7 @@ metadata:
       - 0.0
       goal_radius_km: 0.15
       max_goal_speed_km_s: 0.0003
+      max_cross_track_amplitude_km: 0.02
       forbidden_regions:
       - name: upper radial rail of V-bar U
         plot_planes:
@@ -110,7 +116,7 @@ metadata:
         - 0.0
         - 5.8
       max_time_s: 18000.0
-      max_delta_v_m_s: 8.0
+      max_delta_v_m_s: 1.0
 objects:
   rocket:
     enabled: false
@@ -130,7 +136,7 @@ objects:
         - 0.0
         - 0.0
         - 0.0
-        - 0.0
+        - 0.0005
       attitude_quat_bn:
       - 1.0
       - 0.0

@@ -1,46 +1,62 @@
-scenario_name: game_training_rpo_06_defensive_target_demo
-scenario_description: RPO trainer scenario introducing a simple defensive target response
-  during proximity operations.
+scenario_name: game_training_rpo_06_elliptic_burn_then_approach
+scenario_description: RPO trainer scenario for testing burns around an eccentric
+  target orbit, then completing a slow approach to a hold circle.
 metadata:
   owner: codex
-  notes: Run with `python run_game.py sim/game/configs/game_training_rpo_06_defensive_target_demo.yaml
+  notes: Run with `python run_game.py sim/game/configs/game_training_rpo_06_elliptic_burn_then_approach.yaml
     --speed-multiple 10`.
   game:
+    level_name: Level 6 - Elliptical Approach
     control_mode: ric_translation
-    ric_reference_object_id: target_reference
     camera_mode: target_pair
-    difficulty: easy
+    coast_prediction_model: tschauner_hempel
+    target_centered_plot_planes:
+    - RI
+    plot_prediction_in_zoom: true
+    plot_prediction_zoom_max_span_km: 8.0
+    difficulty: medium
     player_max_accel_km_s2: 1.5e-05
-    defensive_target:
-      enabled: true
-      chaser_object_id: chaser
-      trigger_range_km: 1.2
-      trigger_closing_speed_km_s: 0.00025
-      keepout_radius_km: 0.1
-      max_accel_km_s2: 7.5e-06
-      max_delta_v_m_s: 0.1
-      cross_track_bias: 0.65
-      pulse_period_s: 120.0
     training:
       enabled: true
-      scenario_id: rpo_06_defensive_target_demo
-      learning_goal: Track a target that performs small defensive pulses when closure
-        becomes unsafe; close to within 100 m.
-      player_brief: The target may maneuver when your closure becomes unsafe. Track
-        the actual target motion relative to its reference orbit, correct the miss,
-        and finish inside 100 m.
+      scenario_id: rpo_06_elliptic_burn_then_approach
+      learning_goal: Test radial and in-track burns around an eccentric-orbit
+        target, then use the elliptical coast predictor to complete a slow
+        approach to the hold circle.
+      player_brief: The target is not in a circular orbit. Watch the dashed
+        prediction bend as orbital rate changes. First test radial and in-track
+        burns, then settle into the green hold circle behind the target.
       pass_criteria:
-      - Get within 100 m of the maneuvering target.
-      - Stay under the chaser delta-v budget.
+      - Perform at least one radial burn.
+      - Perform at least one in-track burn.
+      - Enter the in-track hold circle behind the target.
+      - Keep relative speed below the goal threshold.
+      - Do not enter the 250 m keepout zone.
+      - Change the speed multiplier at least once.
+      - Stay under the time and delta-v budgets.
       instructor_notes:
-      - This is a bridge toward defensive target behavior and future PvP.
-      - The yellow target motion is shown relative to the target reference orbit.
-      - Target defensive maneuvering is capped at 0.1 m/s total delta-v.
+      - This level intentionally combines play-and-observe familiarization with
+        a concrete terminal approach objective.
+      - The coast predictor uses a Tschauner-Hempel-style elliptical linear model
+        rather than the circular-orbit HCW projection.
+      - Ask students how the RI trace changes as the target orbital rate
+        increases away from apogee.
+      - The correct behavior is short prediction-informed pulses, long coasts,
+        and patient braking before the final hold circle.
       target_object_id: target
       chaser_object_id: chaser
-      goal_range_km: 0.1
-      max_time_s: 14400.0
+      keepout_radius_km: 0.25
+      goal_relative_ric_km:
+      - 0.0
+      - -0.75
+      - 0.0
+      goal_radius_km: 0.18
+      max_goal_speed_km_s: 0.00035
+      max_time_s: 9000.0
       max_delta_v_m_s: 8.0
+      required_burn_axes:
+      - radial
+      - in_track
+      require_speed_multiplier_change: true
 objects:
   rocket:
     enabled: false
@@ -56,10 +72,10 @@ objects:
         frame: rect
         state:
         - 0.0
-        - -1.8
+        - -4.5
+        - 0.2
         - 0.0
-        - 0.0
-        - 0.0
+        - -0.0007
         - 0.0
       attitude_quat_bn:
       - 1.0
@@ -88,7 +104,6 @@ objects:
       refresh_rate_s: 1.0
       targets:
       - target
-      - target_reference
       conditions:
         require_line_of_sight: false
         max_range_km: 10000.0
@@ -113,12 +128,12 @@ objects:
       mass_kg: 1800.0
     initial_state:
       coes:
-        a_km: 7000.0
-        ecc: 0.0
+        a_km: 9000.0
+        ecc: 0.25
         inc_deg: 45.0
         raan_deg: 0.0
         argp_deg: 0.0
-        true_anomaly_deg: 0.0
+        true_anomaly_deg: 60.0
       attitude_quat_bn:
       - 1.0
       - 0.0
@@ -162,7 +177,7 @@ objects:
     kind: satellite
 simulator:
   scenario_type: auto
-  duration_s: 14400.0
+  duration_s: 9000.0
   dt_s: 1.0
   dynamics:
     orbit:
