@@ -6,6 +6,45 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.7.2 - 2026-05-21
+
+RPO trainer music packaging, recording polish, Level 5 tuning, and RMOE controller
+support.
+
+### Added
+
+- Added default public game music assets for the RPO trainer, with a lean
+  no-music public export option for smaller downloads.
+- Added looped level music muxing for saved game recordings, while preserving a
+  silent-recording fallback if audio processing fails.
+- Added a rule-based RMOE if-then orbit controller, GUI controller registration,
+  and a demo config/test path for RMOE-driven natural-motion targeting.
+- Added initial game-module architecture boundaries for input polling, audio,
+  recording, mission phase state, and tuning constants.
+
+### Changed
+
+- Mapped Level 1 to the existing `07_starfield_attract_mode.wav` track and
+  tightened public packaging so only runtime-referenced WAV files are tracked.
+- Retuned Level 5 around a 3 km in-track forbidden cylinder, four 0.25 km
+  inspection cubes, and a 3 km-ahead chaser start for a safer passive RC-circle
+  drift.
+- Added `200x` game speed support and lowered the default recording FPS so very
+  high-speed recordings are less expensive.
+- Added public README instructions for users who only want to clone and launch
+  the video game.
+
+### Fixed
+
+- Hardened game recording startup, frame capture, finalization, and cleanup so
+  recording failures do not crash an active game.
+- Cleared live burn axes on Pygame focus loss/minimize/hide events to avoid
+  stale thrust input.
+- Made opposing RIC translation key behavior explicit: opposite inputs on the
+  same axis cancel while multi-axis burns still combine normally.
+- Updated public-export scanning so binary music files do not trigger text-only
+  sensitive-pattern checks.
+
 ## 0.7.1 - 2026-05-20
 
 Pygame RPO trainer polish, elliptical-orbit lessons, and Pursuit Arcade tuning.

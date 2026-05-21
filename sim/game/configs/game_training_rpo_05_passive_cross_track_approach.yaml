@@ -1,7 +1,7 @@
 scenario_name: game_training_rpo_05_passive_cross_track_approach
 scenario_description: RPO trainer scenario for building a passively safe cross-track
-  orbit from in front of the target, then drifting backward through staggered
-  inspection gates in the radial/cross-track frame.
+  orbit from in front of the target, then drifting backward through inspection
+  gates aligned with a natural-motion RC circle.
 metadata:
   owner: codex
   notes: Run with `python run_game.py sim/game/configs/game_training_rpo_05_passive_cross_track_approach.yaml
@@ -15,13 +15,13 @@ metadata:
       enabled: true
       scenario_id: rpo_05_passive_cross_track_approach
       learning_goal: Build a passively safe cross-track orbit from in front of
-        the target, then initiate a slow backward in-track inspection drift through
-        the staggered gates without entering the in-track forbidden cylinder.
+        the target, then initiate a slow backward in-track inspection drift that
+        carries the chaser around a safe RC circle outside the forbidden cylinder.
       player_brief: The direct corridor through the target is forbidden. First build
         separation outside the red cylinder while in front of the target, then drift
-        backward through the four staggered green inspection gates.
+        backward through the four green inspection gates around the safe RC circle.
       pass_criteria:
-      - Pass through all four staggered inspection gates.
+      - Pass through all four inspection gates around the safe RC circle.
       - Never enter the in-track forbidden cylinder.
       - Stay under the time and delta-v budgets.
       instructor_notes:
@@ -29,46 +29,46 @@ metadata:
       - A safe solution establishes more than 0.5 km of cross-track separation before
         crossing the target's in-track station.
       - The player should create the passive-safe geometry first, then let the
-        relative orbit drift backward through the staggered RC inspection gates.
+        relative orbit drift backward through the RC inspection gates.
       - This level is about geometry and patience, not a time crunch.
       target_object_id: target
       chaser_object_id: chaser
       inspection_gates:
-      - name: west RC inspection gate
+      - name: left/front RC inspection gate
         center_ric_km:
         - 0.0
-        - 2.25
+        - 1.125
         - -0.75
         half_width_ric_km:
         - 0.25
-        - 0.7
-        - 0.12
-      - name: south RC inspection gate
-        center_ric_km:
-        - -0.75
-        - 0.75
-        - 0.0
-        half_width_ric_km:
-        - 0.12
-        - 0.7
         - 0.25
-      - name: east RC inspection gate
+        - 0.25
+      - name: upper RC inspection gate
         center_ric_km:
-        - 0.0
-        - -0.75
         - 0.75
+        - 0.375
+        - 0.0
         half_width_ric_km:
         - 0.25
-        - 0.7
-        - 0.12
-      - name: north RC inspection gate
+        - 0.25
+        - 0.25
+      - name: aft-right RC inspection gate
         center_ric_km:
+        - 0.0
+        - -1.5
         - 0.75
-        - -2.25
+        half_width_ric_km:
+        - 0.25
+        - 0.25
+        - 0.25
+      - name: lower RC inspection gate
+        center_ric_km:
+        - -0.75
+        - -0.375
         - 0.0
         half_width_ric_km:
-        - 0.12
-        - 0.7
+        - 0.25
+        - 0.25
         - 0.25
       forbidden_regions:
       - name: passive safety in-track cylinder
@@ -82,7 +82,7 @@ metadata:
         - 0.0
         - 0.0
         radius_km: 0.5
-        height_km: 6.0
+        height_km: 3.0
       max_time_s: 28800.0
       max_delta_v_m_s: 10.0
 objects:
@@ -100,7 +100,7 @@ objects:
         frame: rect
         state:
         - 0.0
-        - 5.5
+        - 3.0
         - 0.0
         - 0.0
         - 0.0

@@ -121,6 +121,24 @@ thrust-alignment plots under `outputs/flagship_hcw_pd_10km/`. Open
 `outputs/flagship_hcw_pd_10km/index.md` first, then compare against the
 checked-in [Plot Gallery](docs/plot-gallery.md).
 
+## Just Here For The Video Game?
+
+Clone the public repo, install the game extras, and launch the RPO trainer:
+
+```bash
+git clone https://github.com/adamcohen8/orbital-engagement-lab.git
+cd orbital-engagement-lab
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -U pip
+python -m pip install ".[game]"
+python run_game.py
+```
+
+Running `run_game.py` opens the level selector. Use Up/Down or W/S to choose a
+level, Left/Right to change assists, Enter or Space to launch, and Escape to
+return to the selector.
+
 ## Use-Case Cookbook
 
 | If you want to... | Run this |
@@ -165,7 +183,22 @@ with Up/Down or W/S, toggle video recording with V or the Video button, press
 Enter or Space to launch, and press Escape in a level to return to the selector.
 Recordings are saved under `outputs/game_recordings/` when a level reaches
 pass/fail; restarting or quitting early discards the current attempt video. The
-bundled progression now starts with a tutorial, then covers coast-relative
+saved MP4 includes the level's mapped music track looped over the video when a
+track is available.
+
+The normal public repository includes the game music so the default download has
+the full trainer experience. To clone a smaller no-music copy, use a partial
+clone with sparse checkout:
+
+```bash
+git clone --filter=blob:none --no-checkout https://github.com/adamcohen8/orbital-engagement-lab.git
+cd orbital-engagement-lab
+git sparse-checkout init --no-cone
+git sparse-checkout set "/*" "!/sim/game/music/*.wav"
+git checkout main
+```
+
+The bundled progression now starts with a tutorial, then covers coast-relative
 motion, V-bar and R-bar approaches, close rendezvous, passively safe inspection,
 eccentric-orbit approach and NMC lessons, defensive-target tracking,
 evasive-target survival, and an arcade pursuit variant with tightening goals,

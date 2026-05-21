@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime
 from importlib.util import find_spec
 from pathlib import Path
 from typing import Any, Callable
+from uuid import uuid4
 
 import numpy as np
 
 WriterFactory = Callable[[Path, float], Any]
+CommandRunner = Callable[..., subprocess.CompletedProcess[Any]]
 
 
 @dataclass
@@ -110,6 +113,67 @@ def game_recording_path(
     scenario = _slug(scenario_name or "game")
     diff = _slug(difficulty or "easy")
     return root / f"{scenario}_{diff}_{stamp}_attempt{max(int(attempt_index), 1):02d}.mp4"
+
+
+def add_looped_audio_to_video(
+    video_path: str | Path,
+    audio_path: str | Path | None,
+    *,
+    ffmpeg_exe: str | Path | None = None,
+    runner: CommandRunner = subprocess.run,
+) -> Path:
+    video = Path(video_path)
+    if audio_path is None:
+        return video
+    audio = Path(audio_path)
+    if not video.exists():
+        raise FileNotFoundError(video)
+    if not audio.exists():
+        raise FileNotFoundError(audio)
+    if ffmpeg_exe is None:
+        try:
+            import imageio_ffmpeg
+        except ImportError as exc:
+            raise RuntimeError(
+                "Adding music to game recordings requires `imageio-ffmpeg`. Install with `pip install .[game]`."
+            ) from exc
+        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+
+    tmp = video.with_name(f".{video.stem}.audio-{uuid4().hex}{video.suffix}")
+    cmd = [
+        str(ffmpeg_exe),
+        "-y",
+        "-i",
+        str(video),
+        "-stream_loop",
+        "-1",
+        "-i",
+        str(audio),
+        "-map",
+        "0:v:0",
+        "-map",
+        "1:a:0",
+        "-c:v",
+        "copy",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "160k",
+        "-shortest",
+        "-movflags",
+        "+faststart",
+        str(tmp),
+    ]
+    try:
+        runner(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        tmp.replace(video)
+    except Exception:
+        try:
+            tmp.unlink()
+        except FileNotFoundError:
+            pass
+        raise
+    return video
 
 
 def _slug(value: str) -> str:

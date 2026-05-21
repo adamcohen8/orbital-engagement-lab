@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "orbital-engagement-lab"
-version = "0.7.1"
+version = "0.7.2"
 description = "Integrated spacecraft simulation and analysis platform for rendezvous, control, validation, and mission prototyping."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -57,6 +57,24 @@ sim = [
   "presets/objects/*.yaml",
   "game/configs/*.yaml",
   "game/assets/*.png",
+  "game/music/*.md",
+  "game/music/01_insert_coin_to_orbit.wav",
+  "game/music/02_rendezvous_vector.wav",
+  "game/music/04_docking_bay_neon.wav",
+  "game/music/05_final_burn_victory_loop.wav",
+  "game/music/06_casting_the_orbit_line.wav",
+  "game/music/07_starfield_attract_mode.wav",
+  "game/music/08_silent_running_radar.wav",
+  "game/music/09_defender_boss_vector.wav",
+  "game/music/10_training_grid_sunrise.wav",
+  "game/music/15_mission_failed_lament_credits.wav",
+  "game/music/17_orbital_boss_metal.wav",
+  "game/music/18_keepout_zone_accelerando.wav",
+  "game/music/19_cross_track_ghost_orbit.wav",
+  "game/music/21_pursuit_arcade_overdrive_no_siren_demo.wav",
+  "game/music/22_arcade_round_clear_flyover.wav",
+  "game/music/23_elliptic_final_burn_cinematic.wav",
+  "game/music/28_high_shred_boss_riff.wav",
 ]
 
 [tool.setuptools.packages.find]
