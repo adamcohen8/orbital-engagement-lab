@@ -10,6 +10,7 @@ from sim.game.training import RPOTrainingConfig
 GAME_MUSIC_DIR = Path(__file__).resolve().parent / "music"
 LEVEL_MUSIC_PATHS: dict[str, Path] = {
     "rpo_00_tutorial": GAME_MUSIC_DIR / "10_training_grid_sunrise.wav",
+    "rpo_01_coast_relative_motion": GAME_MUSIC_DIR / "07_starfield_attract_mode.wav",
     "rpo_02_vbar_approach": GAME_MUSIC_DIR / "02_rendezvous_vector.wav",
     "rpo_03_rbar_approach": GAME_MUSIC_DIR / "18_keepout_zone_accelerando.wav",
     "rpo_04_rendezvous": GAME_MUSIC_DIR / "06_casting_the_orbit_line.wav",

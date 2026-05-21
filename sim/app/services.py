@@ -601,6 +601,7 @@ def get_gui_capabilities() -> GuiCapabilities:
                         "sim.control.orbit.hcw_mpc",
                         "HCWInTrackCrossTrackMPCController",
                     ),
+                    ("RMOE If-Then", "sim.control.orbit.rmoe", "RMOEIfThenController"),
                     ("Stationkeeping", "sim.control.orbit.baseline", "StationkeepingController"),
                     ("SMA/Ecc Feedback", "sim.control.orbit.baseline", "SemiMajorAxisEccentricityController"),
                     ("COE Feedback", "sim.control.orbit.baseline", "OrbitalElementsFeedbackController"),

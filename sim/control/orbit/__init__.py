@@ -37,6 +37,7 @@ from sim.control.orbit.lqr_curv_variant import HCWCurvInputRectOutputController
 from sim.control.orbit.lqr_no_radial import HCWNoRadialLQRController, HCWNoRadialManualController
 from sim.control.orbit.predictive_burn import PredictiveBurnConfig, PredictiveBurnScheduler
 from sim.control.orbit.relative_mpc import RelativeOrbitMPCController
+from sim.control.orbit.rmoe import RMOEIfThenController, estimate_rmoes_from_rect_ric
 from sim.control.orbit.zero_controller import ZeroController
 
 __all__ = [
@@ -68,6 +69,8 @@ __all__ = [
     "HCWPositionTransferSolution",
     "HCWEvasionOptimizationResult",
     "RelativeOrbitMPCController",
+    "RMOEIfThenController",
+    "estimate_rmoes_from_rect_ric",
     "PredictiveBurnConfig",
     "PredictiveBurnScheduler",
     "StationkeepingController",

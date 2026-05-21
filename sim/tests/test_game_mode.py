@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from copy import deepcopy
 from dataclasses import replace
 from datetime import datetime
@@ -10,6 +11,7 @@ import pytest
 import yaml
 
 import sim.game.launcher as game_launcher
+import sim.game.recording_controller as game_recording_controller
 import sim.game.runner as game_runner
 import sim.game.training as game_training
 from sim.api import SimulationConfig, SimulationSession
@@ -85,13 +87,15 @@ from sim.game.pygame_dashboard import (
     _true_anomaly_deg_from_state,
     _two_body_coast_state,
 )
-from sim.game.recording import GameFrameRecorder, game_recording_path
+from sim.game.recording import GameFrameRecorder, add_looped_audio_to_video, game_recording_path
 from sim.game.runner import (
+    _add_level_music_to_recording,
     _adjust_speed_multiple,
     _coast_prediction_orbit_fraction,
     _coerce_speed_multiple,
     _dashboard_fps_for_speed,
     _dashboard_object_ids,
+    _finish_game_recording,
     _game_camera_mode,
     _game_coast_chaser_after_delta_v_budget,
     _game_coast_prediction_model,
@@ -113,11 +117,14 @@ from sim.game.runner import (
     _game_target_centered_plot_planes,
     _mission_checklist,
     _mission_metrics,
+    _opposing_key_axis,
     _poll_pygame_input,
     _realtime_steps_due,
+    _safe_capture_recording_frame,
     _score_debrief_lines,
     _speed_after_maneuver_input,
     _start_game_attempt,
+    _start_game_recorder,
     _step_game_attempt,
     _sync_dashboard_training_config,
     _training_briefing_lines,
@@ -202,13 +209,48 @@ def test_game_launcher_discovers_ordered_training_levels() -> None:
     assert options[11].delta_v_budget_m_s == pytest.approx(5.0)
 
 
-def test_game_configs_are_packaged_and_music_is_optional() -> None:
-    pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
-    text = pyproject.read_text(encoding="utf-8")
+def test_game_configs_and_music_assets_are_packaged() -> None:
+    def music_tracks(value: object) -> set[str]:
+        if isinstance(value, dict):
+            tracks = {str(track) for key, track in value.items() if key == "music_track" and track}
+            for nested in value.values():
+                tracks.update(music_tracks(nested))
+            return tracks
+        if isinstance(value, list):
+            tracks: set[str] = set()
+            for nested in value:
+                tracks.update(music_tracks(nested))
+            return tracks
+        return set()
+
+    root = Path(__file__).resolve().parents[2]
+    text = (root / "pyproject.toml").read_text(encoding="utf-8")
+    expected_music = {path.name for path in LEVEL_MUSIC_PATHS.values()}
+    expected_music.update(
+        {
+            game_launcher.LAUNCHER_MUSIC_PATH.name,
+            MISSION_SUCCESS_MUSIC_PATH.name,
+            MISSION_FAILURE_MUSIC_PATH.name,
+            ARCADE_ROUND_CLEAR_SOUND_PATH.name,
+        }
+    )
+    for config_path in (root / "sim/game/configs").glob("*.yaml"):
+        cfg = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        expected_music.update(music_tracks(cfg))
+    package_music = set(re.findall(r'"game/music/([^"]+\.wav)"', text))
 
     assert '"game/configs/*.yaml"' in text
     assert '"game/assets/*.png"' in text
-    assert '"game/music/' not in text
+    assert '"game/music/*.md"' in text
+    assert '"game/music/*.wav"' not in text
+    assert package_music == expected_music
+    try:
+        from tools.export_public import DEFAULT_GAME_MUSIC_FILES
+    except ModuleNotFoundError:
+        DEFAULT_GAME_MUSIC_FILES = None
+    if DEFAULT_GAME_MUSIC_FILES is not None:
+        public_export_music = {Path(path).name for path in DEFAULT_GAME_MUSIC_FILES}
+        assert public_export_music == expected_music
 
 
 def test_training_game_configs_default_to_ric_translation(tmp_path: Path) -> None:
@@ -616,30 +658,88 @@ def test_game_frame_recorder_finishes_or_discards_with_fake_writer(tmp_path: Pat
     assert not path.exists()
 
 
-def test_game_recording_defaults_to_dashboard_fps() -> None:
-    assert game_runner.run_game_mode.__kwdefaults__["recording_fps"] == game_runner.DASHBOARD_FPS
+def test_add_looped_audio_to_video_muxes_audio_with_ffmpeg(tmp_path: Path) -> None:
+    video = tmp_path / "attempt.mp4"
+    audio = tmp_path / "level.wav"
+    video.write_bytes(b"silent-video")
+    audio.write_bytes(b"level-audio")
+    captured: dict[str, list[str]] = {}
+
+    def fake_runner(cmd, **kwargs):
+        captured["cmd"] = [str(part) for part in cmd]
+        assert kwargs["check"] is True
+        Path(cmd[-1]).write_bytes(b"muxed-video")
+
+    out = add_looped_audio_to_video(video, audio, ffmpeg_exe="/usr/local/bin/ffmpeg", runner=fake_runner)
+
+    assert out == video
+    assert video.read_bytes() == b"muxed-video"
+    cmd = captured["cmd"]
+    assert cmd[:6] == ["/usr/local/bin/ffmpeg", "-y", "-i", str(video), "-stream_loop", "-1"]
+    assert cmd[6:8] == ["-i", str(audio)]
+    assert "-shortest" in cmd
+    assert cmd[cmd.index("-c:v") + 1] == "copy"
+    assert cmd[cmd.index("-c:a") + 1] == "aac"
 
 
-def test_run_game_mode_discards_recorder_when_initial_capture_fails(tmp_path: Path, monkeypatch) -> None:
-    import sim.game.pygame_dashboard as dashboard_module
+def test_add_level_music_to_recording_uses_training_level_track(tmp_path: Path, monkeypatch) -> None:
+    video = tmp_path / "attempt.mp4"
+    video.write_bytes(b"silent-video")
+    calls: list[tuple[Path, Path]] = []
 
-    class FakeDashboard:
-        instances: list[FakeDashboard] = []
+    def fake_add_audio(recording_path: Path, music_path: Path) -> Path:
+        calls.append((recording_path, music_path))
+        return recording_path
 
-        def __init__(self, *args, **kwargs):
-            self.screen = object()
-            self.closed = False
-            FakeDashboard.instances.append(self)
+    monkeypatch.setattr(game_recording_controller, "add_looped_audio_to_video", fake_add_audio)
+    cfg = RPOTrainingConfig(enabled=True, scenario_id="rpo_00_tutorial")
 
-        def push_snapshot(self, snapshot) -> None:
-            pass
+    assert _add_level_music_to_recording(video, cfg) == video
+    assert calls == [(video, LEVEL_MUSIC_PATHS["rpo_00_tutorial"])]
 
-        def draw(self, **kwargs) -> None:
-            pass
 
-        def close(self) -> None:
-            self.closed = True
+def test_add_level_music_to_recording_prefers_arcade_override(tmp_path: Path, monkeypatch) -> None:
+    video = tmp_path / "attempt.mp4"
+    video.write_bytes(b"silent-video")
+    calls: list[tuple[Path, Path]] = []
 
+    def fake_add_audio(recording_path: Path, music_path: Path) -> Path:
+        calls.append((recording_path, music_path))
+        return recording_path
+
+    monkeypatch.setattr(game_recording_controller, "add_looped_audio_to_video", fake_add_audio)
+    cfg = RPOTrainingConfig(enabled=True, scenario_id="rpo_arcade_pursuit")
+    boss_track = game_runner.GAME_MUSIC_DIR / "28_high_shred_boss_riff.wav"
+
+    assert _add_level_music_to_recording(video, cfg, override_level_path=boss_track) == video
+    assert calls == [(video, boss_track)]
+
+
+def test_game_recording_defaults_to_recording_fps() -> None:
+    assert game_runner.run_game_mode.__kwdefaults__["recording_fps"] == game_runner.GAME_RECORDING_FPS
+
+
+def test_start_game_recorder_disables_when_writer_start_fails(tmp_path: Path, monkeypatch) -> None:
+    config = SimulationConfig.from_dict(_game_config(tmp_path))
+    monkeypatch.setattr(
+        game_recording_controller.GameFrameRecorder,
+        "start",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("writer unavailable")),
+    )
+
+    recorder = _start_game_recorder(
+        enabled=True,
+        config=config,
+        difficulty="easy",
+        attempt_index=1,
+        output_dir=tmp_path,
+        fps=30.0,
+    )
+
+    assert recorder is None
+
+
+def test_safe_capture_recording_frame_discards_and_disables_on_capture_failure(monkeypatch) -> None:
     class FakeRecorder:
         saved = False
 
@@ -650,24 +750,68 @@ def test_run_game_mode_discards_recorder_when_initial_capture_fails(tmp_path: Pa
             self.discarded = True
 
     recorder = FakeRecorder()
-    cfg = _game_config(tmp_path)
-    path = tmp_path / "game.yaml"
-    with path.open("w", encoding="utf-8") as f:
-        yaml.safe_dump(cfg, f)
-
-    monkeypatch.setattr(dashboard_module, "PygameRPODashboard", FakeDashboard)
-    monkeypatch.setattr(game_runner, "_start_game_recorder", lambda **kwargs: recorder)
     monkeypatch.setattr(
-        game_runner,
-        "_capture_recording_frame",
+        game_recording_controller,
+        "capture_recording_frame",
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("capture failed")),
     )
 
-    with pytest.raises(RuntimeError, match="capture failed"):
-        game_runner.run_game_mode(path, record_video=True)
+    returned = _safe_capture_recording_frame(recorder, type("Dashboard", (), {"screen": object()})())
 
+    assert returned is None
     assert recorder.discarded is True
-    assert FakeDashboard.instances[-1].closed is True
+
+
+def test_finish_game_recording_discards_and_disables_on_finalize_failure() -> None:
+    class FakeRecorder:
+        def __init__(self) -> None:
+            self.discarded = False
+
+        def finish(self) -> Path:
+            raise RuntimeError("encode failed")
+
+        def discard(self) -> None:
+            self.discarded = True
+
+    recorder = FakeRecorder()
+
+    returned = _finish_game_recording(recorder, RPOTrainingConfig(enabled=True))
+
+    assert returned is None
+    assert recorder.discarded is True
+
+
+def test_recording_controller_restart_does_not_delete_saved_recording(tmp_path: Path, monkeypatch) -> None:
+    class FakeRecorder:
+        saved = True
+
+        def __init__(self) -> None:
+            self.discarded = False
+
+        def discard(self) -> None:
+            self.discarded = True
+
+    saved_recorder = FakeRecorder()
+    starts: list[int] = []
+
+    def fake_start(**kwargs):
+        starts.append(int(kwargs["attempt_index"]))
+        return None
+
+    monkeypatch.setattr(game_recording_controller, "start_game_recorder", fake_start)
+    controller = game_recording_controller.GameRecordingController(
+        enabled=True,
+        config=SimulationConfig.from_dict(_game_config(tmp_path)),
+        difficulty="easy",
+        output_dir=tmp_path,
+        recorder=saved_recorder,
+    )
+
+    controller.restart()
+
+    assert saved_recorder.discarded is False
+    assert starts == [2]
+    assert controller.attempt_index == 2
 
 
 def test_defensive_target_provider_pulses_on_unsafe_closure() -> None:
@@ -1380,6 +1524,7 @@ def test_result_music_paths_follow_terminal_mission_state() -> None:
 
 def test_level_music_maps_rendezvous_vector_to_level_2() -> None:
     tutorial = RPOTrainingConfig(enabled=True, scenario_id="rpo_00_tutorial")
+    level1 = RPOTrainingConfig(enabled=True, scenario_id="rpo_01_coast_relative_motion")
     level2 = RPOTrainingConfig(enabled=True, scenario_id="rpo_02_vbar_approach")
     level3 = RPOTrainingConfig(enabled=True, scenario_id="rpo_03_rbar_approach")
     level4 = RPOTrainingConfig(enabled=True, scenario_id="rpo_04_rendezvous")
@@ -1394,6 +1539,8 @@ def test_level_music_maps_rendezvous_vector_to_level_2() -> None:
 
     assert _level_music_path(tutorial) == LEVEL_MUSIC_PATHS["rpo_00_tutorial"]
     assert _level_music_path(tutorial).name == "10_training_grid_sunrise.wav"
+    assert _level_music_path(level1) == LEVEL_MUSIC_PATHS["rpo_01_coast_relative_motion"]
+    assert _level_music_path(level1).name == "07_starfield_attract_mode.wav"
     assert _level_music_path(level2) == LEVEL_MUSIC_PATHS["rpo_02_vbar_approach"]
     assert _level_music_path(level2).name == "02_rendezvous_vector.wav"
     assert _level_music_path(level3) == LEVEL_MUSIC_PATHS["rpo_03_rbar_approach"]
@@ -2256,32 +2403,34 @@ def test_passive_cross_track_level_uses_intrack_cylinder_forbidden_region() -> N
     assert cfg.max_time_s == 28800.0
     assert len(cfg.inspection_gates) == 4
     assert [gate.name for gate in cfg.inspection_gates] == [
-        "west RC inspection gate",
-        "south RC inspection gate",
-        "east RC inspection gate",
-        "north RC inspection gate",
+        "left/front RC inspection gate",
+        "upper RC inspection gate",
+        "aft-right RC inspection gate",
+        "lower RC inspection gate",
     ]
-    assert np.allclose(cfg.inspection_gates[0].center_ric_km, np.array([0.0, 2.25, -0.75], dtype=float))
-    assert np.allclose(cfg.inspection_gates[1].center_ric_km, np.array([-0.75, 0.75, 0.0], dtype=float))
-    assert np.allclose(cfg.inspection_gates[2].center_ric_km, np.array([0.0, -0.75, 0.75], dtype=float))
-    assert np.allclose(cfg.inspection_gates[3].center_ric_km, np.array([0.75, -2.25, 0.0], dtype=float))
-    assert np.allclose(cfg.inspection_gates[0].half_width_ric_km, np.array([0.25, 0.7, 0.12], dtype=float))
-    assert np.allclose(cfg.inspection_gates[1].half_width_ric_km, np.array([0.12, 0.7, 0.25], dtype=float))
+    assert np.allclose(cfg.inspection_gates[0].center_ric_km, np.array([0.0, 1.125, -0.75], dtype=float))
+    assert np.allclose(cfg.inspection_gates[1].center_ric_km, np.array([0.75, 0.375, 0.0], dtype=float))
+    assert np.allclose(cfg.inspection_gates[2].center_ric_km, np.array([0.0, -1.5, 0.75], dtype=float))
+    assert np.allclose(cfg.inspection_gates[3].center_ric_km, np.array([-0.75, -0.375, 0.0], dtype=float))
+    assert np.allclose(cfg.inspection_gates[0].half_width_ric_km, np.array([0.25, 0.25, 0.25], dtype=float))
+    assert np.allclose(cfg.inspection_gates[1].half_width_ric_km, np.array([0.25, 0.25, 0.25], dtype=float))
+    assert np.allclose(cfg.inspection_gates[2].half_width_ric_km, np.array([0.25, 0.25, 0.25], dtype=float))
+    assert np.allclose(cfg.inspection_gates[3].half_width_ric_km, np.array([0.25, 0.25, 0.25], dtype=float))
     assert {gate.max_total_speed_km_s for gate in cfg.inspection_gates} == {None}
     chaser_state = sim_cfg.scenario.objects["chaser"].initial_state["relative_to_target_ric"]["state"]
-    assert np.allclose(chaser_state, np.array([0.0, 5.5, 0.0, 0.0, 0.0, 0.0], dtype=float))
+    assert np.allclose(chaser_state, np.array([0.0, 3.0, 0.0, 0.0, 0.0, 0.0], dtype=float))
     assert len(cfg.forbidden_regions) == 1
     cylinder = cfg.forbidden_regions[0]
     assert cylinder.kind == "cylinder"
     assert cylinder.axis == "I"
     assert cylinder.radius_km == 0.5
-    assert cylinder.height_km == 6.0
+    assert cylinder.height_km == 3.0
     assert cylinder.plot_planes == ("RI", "RC")
     assert bool(cylinder.contains_positions(np.array([[0.25, 0.0, 0.25]], dtype=float))[0]) is True
-    assert bool(cylinder.contains_positions(np.array([[0.45, 3.1, 0.0]], dtype=float))[0]) is False
+    assert bool(cylinder.contains_positions(np.array([[0.45, 1.6, 0.0]], dtype=float))[0]) is False
     assert bool(cylinder.contains_positions(np.array([[0.6, 0.0, 0.0]], dtype=float))[0]) is False
-    assert bool(cylinder.contains_positions(np.array([[0.0, -1.5, 0.6]], dtype=float))[0]) is False
-    assert bool(cylinder.contains_positions(np.array([[0.0, -1.5, 0.5]], dtype=float))[0]) is True
+    assert bool(cylinder.contains_positions(np.array([[0.0, -0.75, 0.6]], dtype=float))[0]) is False
+    assert bool(cylinder.contains_positions(np.array([[0.0, -0.75, 0.5]], dtype=float))[0]) is True
 
 
 def test_passive_cross_track_level_passes_after_ordered_inspection_gates() -> None:
@@ -2299,10 +2448,10 @@ def test_passive_cross_track_level_passes_after_ordered_inspection_gates() -> No
     target = np.hstack((target_state, np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0])))
 
     gate_states = (
-        np.array([0.0, 2.25, -0.75, 0.0, 0.0001, 0.0], dtype=float),
-        np.array([-0.75, 0.75, 0.0, 0.0, 0.0001, 0.0], dtype=float),
-        np.array([0.0, -0.75, 0.75, 0.0, 0.0001, 0.0], dtype=float),
-        np.array([0.75, -2.25, 0.0, 0.0, 0.0001, 0.0], dtype=float),
+        np.array([0.0, 1.125, -0.75, 0.0, 0.0001, 0.0], dtype=float),
+        np.array([0.75, 0.375, 0.0, 0.0, 0.0001, 0.0], dtype=float),
+        np.array([0.0, -1.5, 0.75, 0.0, 0.0001, 0.0], dtype=float),
+        np.array([-0.75, -0.375, 0.0, 0.0, 0.0001, 0.0], dtype=float),
     )
     for idx, rel_ric in enumerate(gate_states):
         chaser_state = ric_rect_state_to_eci(rel_ric, target_state[:3], target_state[3:])
@@ -2345,20 +2494,20 @@ def test_passive_cross_track_level_counts_swept_gate_crossings() -> None:
 
     gate_passage_segments = (
         (
-            np.array([0.35, 2.25, -0.75, 0.0, 0.0001, 0.0], dtype=float),
-            np.array([-0.35, 2.25, -0.75, 0.0, 0.0001, 0.0], dtype=float),
+            np.array([0.35, 1.125, -0.75, 0.0, 0.0001, 0.0], dtype=float),
+            np.array([-0.35, 1.125, -0.75, 0.0, 0.0001, 0.0], dtype=float),
         ),
         (
-            np.array([-0.75, 0.75, 0.35, 0.0, 0.0001, 0.0], dtype=float),
-            np.array([-0.75, 0.75, -0.35, 0.0, 0.0001, 0.0], dtype=float),
+            np.array([0.75, 0.375, 0.35, 0.0, 0.0001, 0.0], dtype=float),
+            np.array([0.75, 0.375, -0.35, 0.0, 0.0001, 0.0], dtype=float),
         ),
         (
-            np.array([-0.35, -0.75, 0.75, 0.0, 0.0001, 0.0], dtype=float),
-            np.array([0.35, -0.75, 0.75, 0.0, 0.0001, 0.0], dtype=float),
+            np.array([-0.35, -1.5, 0.75, 0.0, 0.0001, 0.0], dtype=float),
+            np.array([0.35, -1.5, 0.75, 0.0, 0.0001, 0.0], dtype=float),
         ),
         (
-            np.array([0.75, -2.25, -0.35, 0.0, 0.0001, 0.0], dtype=float),
-            np.array([0.75, -2.25, 0.35, 0.0, 0.0001, 0.0], dtype=float),
+            np.array([-0.75, -0.375, -0.35, 0.0, 0.0001, 0.0], dtype=float),
+            np.array([-0.75, -0.375, 0.35, 0.0, 0.0001, 0.0], dtype=float),
         ),
     )
     idx = 0
@@ -2401,10 +2550,10 @@ def test_passive_cross_track_gates_register_without_hidden_speed_limit() -> None
     target = np.hstack((target_state, np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0])))
 
     gate_states = (
-        np.array([0.0, 2.25, -0.75, 0.0, 0.0020, 0.0], dtype=float),
-        np.array([-0.75, 0.75, 0.0, 0.0, 0.0020, 0.0], dtype=float),
-        np.array([0.0, -0.75, 0.75, 0.0, 0.0020, 0.0], dtype=float),
-        np.array([0.75, -2.25, 0.0, 0.0, 0.0020, 0.0], dtype=float),
+        np.array([0.0, 1.125, -0.75, 0.0, 0.0020, 0.0], dtype=float),
+        np.array([0.75, 0.375, 0.0, 0.0, 0.0020, 0.0], dtype=float),
+        np.array([0.0, -1.5, 0.75, 0.0, 0.0020, 0.0], dtype=float),
+        np.array([-0.75, -0.375, 0.0, 0.0, 0.0020, 0.0], dtype=float),
     )
     for idx, rel_ric in enumerate(gate_states):
         chaser_state = ric_rect_state_to_eci(rel_ric, target_state[:3], target_state[3:])
@@ -2442,10 +2591,10 @@ def test_passive_cross_track_gate_progress_is_incremental(monkeypatch: pytest.Mo
     target = np.hstack((target_state, np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0])))
 
     gate_states = (
-        np.array([0.0, 2.25, -0.75, 0.0, 0.0001, 0.0], dtype=float),
-        np.array([-0.75, 0.75, 0.0, 0.0, 0.0001, 0.0], dtype=float),
-        np.array([0.0, -0.75, 0.75, 0.0, 0.0001, 0.0], dtype=float),
-        np.array([0.75, -2.25, 0.0, 0.0, 0.0001, 0.0], dtype=float),
+        np.array([0.0, 1.125, -0.75, 0.0, 0.0001, 0.0], dtype=float),
+        np.array([0.75, 0.375, 0.0, 0.0, 0.0001, 0.0], dtype=float),
+        np.array([0.0, -1.5, 0.75, 0.0, 0.0001, 0.0], dtype=float),
+        np.array([-0.75, -0.375, 0.0, 0.0, 0.0001, 0.0], dtype=float),
     )
     for idx, rel_ric in enumerate(gate_states):
         chaser_state = ric_rect_state_to_eci(rel_ric, target_state[:3], target_state[3:])
@@ -2490,10 +2639,10 @@ def test_passive_cross_track_gates_register_out_of_order_passes() -> None:
     target = np.hstack((target_state, np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0])))
 
     gate_states = (
-        np.array([0.0, -0.75, 0.75, 0.0, 0.0001, 0.0], dtype=float),
-        np.array([0.75, -2.25, 0.0, 0.0, 0.0001, 0.0], dtype=float),
-        np.array([0.0, 2.25, -0.75, 0.0, 0.0001, 0.0], dtype=float),
-        np.array([-0.75, 0.75, 0.0, 0.0, 0.0001, 0.0], dtype=float),
+        np.array([0.0, -1.5, 0.75, 0.0, 0.0001, 0.0], dtype=float),
+        np.array([-0.75, -0.375, 0.0, 0.0, 0.0001, 0.0], dtype=float),
+        np.array([0.0, 1.125, -0.75, 0.0, 0.0001, 0.0], dtype=float),
+        np.array([0.75, 0.375, 0.0, 0.0, 0.0001, 0.0], dtype=float),
     )
     for idx, rel_ric in enumerate(gate_states):
         chaser_state = ric_rect_state_to_eci(rel_ric, target_state[:3], target_state[3:])
@@ -3346,6 +3495,56 @@ def test_pygame_input_mapping_sets_ric_axes_and_quit() -> None:
     assert state.briefing_scroll_px == 288
 
 
+def test_pygame_focus_loss_clears_live_axes() -> None:
+    class FakeKeys:
+        def __getitem__(self, key):
+            return key in {"w", "d", "right", "space"}
+
+    class FakePygame:
+        QUIT = "quit"
+        KEYDOWN = "keydown"
+        WINDOWFOCUSLOST = "focuslost"
+        K_w = "w"
+        K_s = "s"
+        K_d = "d"
+        K_a = "a"
+        K_RIGHT = "right"
+        K_LEFT = "left"
+        K_SPACE = "space"
+
+        class event:
+            @staticmethod
+            def get():
+                return [type("FocusEvent", (), {"type": FakePygame.WINDOWFOCUSLOST})()]
+
+        class key:
+            @staticmethod
+            def get_pressed():
+                return FakeKeys()
+
+    state = KeyboardCommandState(pitch=1.0, yaw=-1.0, roll=1.0, firing=True)
+
+    _poll_pygame_input(FakePygame, state, control_mode="attitude_thrust")
+
+    assert state.pitch == 0.0
+    assert state.yaw == 0.0
+    assert state.roll == 0.0
+    assert state.firing is False
+
+
+def test_opposing_ric_translation_keys_cancel_axis() -> None:
+    class FakeKeys:
+        def __init__(self, pressed: set[str]) -> None:
+            self.pressed = pressed
+
+        def __getitem__(self, key):
+            return key in self.pressed
+
+    assert _opposing_key_axis(FakeKeys({"d"}), positive_key="d", negative_key="a") == 1.0
+    assert _opposing_key_axis(FakeKeys({"a"}), positive_key="d", negative_key="a") == -1.0
+    assert _opposing_key_axis(FakeKeys({"d", "a"}), positive_key="d", negative_key="a") == 0.0
+
+
 def test_speed_multiple_converts_sim_dt_to_wall_step() -> None:
     assert _wall_step_s(10.0, 10.0) == 1.0
     assert _wall_step_s(0.25, 2.0) == 0.125
@@ -3359,7 +3558,8 @@ def test_speed_multiple_adjustment_uses_allowed_options() -> None:
     assert _adjust_speed_multiple(10.0, 1) == 25.0
     assert _adjust_speed_multiple(25.0, 1) == 50.0
     assert _adjust_speed_multiple(50.0, 1) == 100.0
-    assert _adjust_speed_multiple(100.0, 1) == 100.0
+    assert _adjust_speed_multiple(100.0, 1) == 200.0
+    assert _adjust_speed_multiple(200.0, 1) == 200.0
     assert _adjust_speed_multiple(50.0, -2) == 10.0
 
 
@@ -3368,13 +3568,14 @@ def test_maneuver_input_above_control_speed_drops_to_control_speed() -> None:
     coasting_state = KeyboardCommandState()
     no_throttle_state = KeyboardCommandState(pitch=1.0, throttle=0.0)
 
+    assert _speed_after_maneuver_input(200.0, ric_state, control_mode="ric_translation") == 10.0
     assert _speed_after_maneuver_input(100.0, ric_state, control_mode="ric_translation") == 10.0
     assert _speed_after_maneuver_input(50.0, ric_state, control_mode="ric_translation") == 10.0
     assert _speed_after_maneuver_input(25.0, ric_state, control_mode="ric_translation") == 10.0
     assert _speed_after_maneuver_input(10.0, ric_state, control_mode="ric_translation") == 10.0
     assert _speed_after_maneuver_input(5.0, ric_state, control_mode="ric_translation") == 5.0
-    assert _speed_after_maneuver_input(100.0, coasting_state, control_mode="ric_translation") == 100.0
-    assert _speed_after_maneuver_input(100.0, no_throttle_state, control_mode="ric_translation") == 100.0
+    assert _speed_after_maneuver_input(200.0, coasting_state, control_mode="ric_translation") == 200.0
+    assert _speed_after_maneuver_input(200.0, no_throttle_state, control_mode="ric_translation") == 200.0
 
 
 def test_attitude_or_thrust_input_above_control_speed_drops_to_control_speed() -> None:
@@ -3382,19 +3583,22 @@ def test_attitude_or_thrust_input_above_control_speed_drops_to_control_speed() -
     firing_state = KeyboardCommandState(firing=True)
     coasting_state = KeyboardCommandState()
 
+    assert _speed_after_maneuver_input(200.0, rotate_state, control_mode="attitude_thrust") == 10.0
     assert _speed_after_maneuver_input(100.0, rotate_state, control_mode="attitude_thrust") == 10.0
     assert _speed_after_maneuver_input(50.0, firing_state, control_mode="attitude_thrust") == 10.0
     assert _speed_after_maneuver_input(25.0, firing_state, control_mode="attitude_thrust") == 10.0
     assert _speed_after_maneuver_input(10.0, firing_state, control_mode="attitude_thrust") == 10.0
     assert _speed_after_maneuver_input(5.0, firing_state, control_mode="attitude_thrust") == 5.0
-    assert _speed_after_maneuver_input(100.0, coasting_state, control_mode="attitude_thrust") == 100.0
+    assert _speed_after_maneuver_input(200.0, coasting_state, control_mode="attitude_thrust") == 200.0
 
 
 def test_dashboard_fps_drops_at_high_speed_unless_recording() -> None:
     assert _dashboard_fps_for_speed(10.0) == 60.0
     assert _dashboard_fps_for_speed(50.0) == 45.0
     assert _dashboard_fps_for_speed(100.0) == 30.0
-    assert _dashboard_fps_for_speed(100.0, recording=True) == 60.0
+    assert _dashboard_fps_for_speed(200.0) == 30.0
+    assert _dashboard_fps_for_speed(200.0, recording=True) == game_runner.GAME_RECORDING_FPS
+    assert _dashboard_fps_for_speed(200.0, recording=True, recording_fps=24.0) == 24.0
 
 
 def test_step_game_attempt_stops_on_first_terminal_score() -> None:
@@ -3851,8 +4055,8 @@ def test_level5_plot_scale_keeps_forbidden_region_and_gates_visible() -> None:
         min_span_km=rc_min_span,
     )
 
-    assert rc_min_span == pytest.approx(0.87 * 1.18)
-    assert ri_min_span == pytest.approx(3.0 * 1.18)
+    assert rc_min_span == pytest.approx(1.0 * 1.18)
+    assert ri_min_span == pytest.approx(1.75 * 1.18)
     assert close_scale == pytest.approx(dashboard._scale_for_plot(pts=[], min_span_km=rc_min_span))
     assert wide_scale < close_scale
 

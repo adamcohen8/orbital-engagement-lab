@@ -9,6 +9,8 @@ import numpy as np
 
 from sim.api import SimulationConfig, SimulationSession
 from sim.config import object_section
+from sim.game import input as game_input
+from sim.game import recording_controller as game_recording
 from sim.game.arcade import (
     _arcade_mission_metrics,
     _arcade_round_briefing_lines,
@@ -29,30 +31,37 @@ from sim.game.arcade import (
     _score_time_used_s,
 )
 from sim.game.audio import (
-    ARCADE_ROUND_CLEAR_SOUND_PATH,
     GAME_MUSIC_DIR,
-    _play_game_sound_effect,
     _stop_game_music,
-    _sync_game_music,
 )
+from sim.game.audio_controller import GameAudioController
 from sim.game.debrief import game_debrief_path, tracker_replay_history, write_game_debrief
 from sim.game.defensive_target import DefensiveTargetIntentProvider
 from sim.game.formatting import format_distance_km, format_speed_km_s, format_speed_m_s
 from sim.game.manual import KeyboardCommandState, ManualGameCommandProvider
-from sim.game.recording import GameFrameRecorder, game_recording_path
+from sim.game.recording_controller import GameRecordingController
 from sim.game.session import (
     _attempt_config_for_training_clock,
     _install_chaser_delta_v_limiter,
 )
+from sim.game.state import (
+    GamePhase,
+    mission_state_for_dashboard,
+    phase_from_score,
+    phase_is_terminal,
+    phase_shows_briefing,
+)
 from sim.game.training import RPOTrainingConfig, RPOTrainingTracker
+from sim.game.tuning import (
+    DASHBOARD_FPS,
+    GAME_RECORDING_FPS,
+    HIGH_SPEED_DASHBOARD_FPS,
+    MANEUVER_CONTROL_SPEED,
+    MAX_REALTIME_STEPS_PER_FRAME,
+    MEDIUM_HIGH_SPEED_DASHBOARD_FPS,
+    SPEED_MULTIPLIER_OPTIONS,
+)
 from sim.presets.thrusters import resolve_thruster_max_thrust_n_from_specs
-
-SPEED_MULTIPLIER_OPTIONS: tuple[float, ...] = (1.0, 2.0, 5.0, 10.0, 25.0, 50.0, 100.0)
-MAX_REALTIME_STEPS_PER_FRAME = 12
-DASHBOARD_FPS = 60.0
-HIGH_SPEED_DASHBOARD_FPS = 30.0
-MANEUVER_CONTROL_SPEED = 10.0
-BRIEFING_SCROLL_STEP_PX = 48
 
 
 @dataclass(frozen=True)
@@ -394,13 +403,18 @@ def _speed_after_maneuver_input(
     return speed
 
 
-def _dashboard_fps_for_speed(speed_multiple: float, *, recording: bool = False) -> float:
+def _dashboard_fps_for_speed(
+    speed_multiple: float,
+    *,
+    recording: bool = False,
+    recording_fps: float = GAME_RECORDING_FPS,
+) -> float:
     if bool(recording):
-        return DASHBOARD_FPS
+        return float(max(recording_fps, 1.0))
     if float(speed_multiple) >= 100.0:
         return HIGH_SPEED_DASHBOARD_FPS
     if float(speed_multiple) >= 50.0:
-        return 45.0
+        return MEDIUM_HIGH_SPEED_DASHBOARD_FPS
     return DASHBOARD_FPS
 
 
@@ -450,7 +464,7 @@ def run_game_mode(
     music_enabled: bool = True,
     record_video: bool = False,
     recording_output_dir: str | Path | None = None,
-    recording_fps: float = DASHBOARD_FPS,
+    recording_fps: float = GAME_RECORDING_FPS,
     arcade_seed: int | None = None,
     debrief_output_dir: str | Path | None = None,
 ) -> GameRunResult:
@@ -490,7 +504,7 @@ def run_game_mode(
     trainer = RPOTrainingTracker(training_cfg)
     command_state = KeyboardCommandState()
     command_state.paused = bool(training_cfg.enabled)
-    briefing_open = bool(training_cfg.enabled)
+    phase = GamePhase.BRIEFING if training_cfg.enabled else GamePhase.PLAYING
     briefing_lines = _training_briefing_lines(config, training_cfg, difficulty=difficulty)
     session, _, snapshot = _start_game_attempt(
         attempt_config,
@@ -552,23 +566,25 @@ def run_game_mode(
     recording_attempt = 1
     recording_path: Path | None = None
     debrief_path: Path | None = None
-    recorder: GameFrameRecorder | None = None
+    recording_controller = GameRecordingController(
+        enabled=record_video,
+        config=config,
+        difficulty=difficulty,
+        attempt_index=recording_attempt,
+        output_dir=recording_output_dir,
+        fps=recording_fps,
+    )
+    audio_controller: GameAudioController | None = None
     try:
-        recorder = _start_game_recorder(
-            enabled=record_video,
-            config=config,
-            difficulty=difficulty,
-            attempt_index=recording_attempt,
-            output_dir=recording_output_dir,
-            fps=recording_fps,
-        )
+        recording_controller.start()
         dashboard.push_snapshot(snapshot)
         trainer.record(snapshot)
         score = trainer.score()
+        phase = phase_from_score(score, briefing_open=phase_shows_briefing(phase), paused=command_state.paused)
         dashboard.draw(
             command_status=_command_status(command_state, control_mode=control_mode),
             coach_hint=trainer.current_hint(),
-            mission_state=_mission_state(score),
+            mission_state=mission_state_for_dashboard(phase),
             level_title=level_title,
             mission_metrics=_arcade_mission_metrics(
                 _mission_metrics(training_cfg, score),
@@ -579,31 +595,30 @@ def run_game_mode(
             ),
             objective_checklist=_mission_checklist(training_cfg, score),
             speed_multiple=current_speed_multiple,
-            briefing_lines=briefing_lines if briefing_open else (),
+            briefing_lines=briefing_lines if phase_shows_briefing(phase) else (),
             debrief_lines=_score_debrief_lines(score, config=training_cfg, difficulty=difficulty),
         )
-        _capture_recording_frame(recorder, dashboard)
+        recording_controller.capture(dashboard)
 
         pygame = dashboard.pygame
-        active_game_music_path: Path | None = _sync_game_music(
-            pygame,
+        audio_controller = GameAudioController(pygame=pygame, music_enabled=music_enabled)
+        audio_controller.sync(
             score,
             training_cfg=training_cfg,
-            music_enabled=music_enabled,
-            active_path=None,
             override_level_path=_arcade_round_music_path(config, arcade_round_index) if arcade_enabled else None,
         )
         dt_s = float(config.scenario.simulator.dt_s)
         wall_step_s = _wall_step_s(dt_s, current_speed_multiple)
         last_step_wall = perf_counter()
         while (not command_state.quit_requested) and (not dashboard.closed):
+            briefing_open = phase_shows_briefing(phase)
             _poll_pygame_input(pygame, command_state, control_mode=control_mode, briefing_open=briefing_open)
             if command_state.quit_requested:
                 break
             if briefing_open and command_state.briefing_scroll_px:
                 dashboard.scroll_briefing(command_state.briefing_scroll_px)
             if briefing_open and not command_state.paused:
-                briefing_open = False
+                phase = GamePhase.PLAYING
                 dashboard.reset_briefing_scroll()
                 last_step_wall = perf_counter()
             if command_state.speed_multiplier_change:
@@ -626,23 +641,17 @@ def run_game_mode(
                 wall_step_s = _wall_step_s(dt_s, current_speed_multiple)
                 last_step_wall = perf_counter()
             if command_state.music_toggle_requested:
-                music_enabled = not bool(music_enabled)
                 command_state.music_toggle_requested = False
-                active_game_music_path = _sync_game_music(
-                    pygame,
+                audio_controller.toggle(
                     trainer.score(),
                     training_cfg=training_cfg,
-                    music_enabled=music_enabled,
-                    active_path=active_game_music_path,
                     override_level_path=(
                         _arcade_round_music_path(config, arcade_round_index) if arcade_enabled else None
                     ),
                 )
             if command_state.restart_requested:
-                if recorder is not None:
-                    recorder.discard()
-                _stop_game_music(pygame)
-                active_game_music_path = None
+                recording_controller.discard()
+                audio_controller.stop()
                 if arcade_enabled:
                     arcade_round_index = 1
                     arcade_total_score = 0
@@ -664,15 +673,8 @@ def run_game_mode(
                         ),
                     )
                     trainer = RPOTrainingTracker(training_cfg)
-                recording_attempt += 1
-                recorder = _start_game_recorder(
-                    enabled=record_video,
-                    config=config,
-                    difficulty=difficulty,
-                    attempt_index=recording_attempt,
-                    output_dir=recording_output_dir,
-                    fps=recording_fps,
-                )
+                recording_controller.restart()
+                recording_attempt = recording_controller.attempt_index
                 recording_path = None
                 debrief_path = None
                 session, _, snapshot = _start_game_attempt(
@@ -703,14 +705,19 @@ def run_game_mode(
                 command_state.speed_multiplier_change = 0
                 command_state.music_toggle_requested = False
                 command_state.paused = bool(training_cfg.enabled)
-                briefing_open = bool(training_cfg.enabled)
+                phase = GamePhase.BRIEFING if training_cfg.enabled else GamePhase.PLAYING
                 dashboard.reset_briefing_scroll()
                 dt_s = float(config.scenario.simulator.dt_s)
                 wall_step_s = _wall_step_s(dt_s, current_speed_multiple)
                 last_step_wall = perf_counter()
             now = perf_counter()
             pre_score = trainer.score()
-            mission_decided = bool(pre_score.level_passed or pre_score.level_failed)
+            phase = phase_from_score(
+                pre_score,
+                briefing_open=phase_shows_briefing(phase),
+                paused=command_state.paused,
+            )
+            mission_decided = phase_is_terminal(phase)
             if _game_loop_should_exit(session_done=session.done, score=pre_score):
                 break
             if mission_decided:
@@ -742,9 +749,15 @@ def run_game_mode(
             command_state.step_requested = False
             if score.level_passed or score.level_failed:
                 command_state.paused = True
+                phase = phase_from_score(score, paused=True)
+            else:
+                phase = phase_from_score(
+                    score,
+                    briefing_open=phase_shows_briefing(phase),
+                    paused=command_state.paused,
+                )
             if arcade_enabled and bool(getattr(score, "level_passed", False)):
-                if music_enabled:
-                    _play_game_sound_effect(pygame, ARCADE_ROUND_CLEAR_SOUND_PATH, volume=0.74)
+                audio_controller.play_round_clear()
                 round_score = _arcade_round_weighted_score(
                     training_cfg,
                     score,
@@ -815,22 +828,25 @@ def run_game_mode(
                 command_state.restart_requested = False
                 command_state.speed_multiplier_change = 0
                 command_state.music_toggle_requested = False
-                briefing_open = True
+                phase = GamePhase.ARCADE_TRANSITION
                 dashboard.reset_briefing_scroll()
-                active_game_music_path = None
+                audio_controller.clear_active_path()
                 last_step_wall = perf_counter()
-            active_game_music_path = _sync_game_music(
-                pygame,
+            recording_music_path = _arcade_round_music_path(config, arcade_round_index) if arcade_enabled else None
+            audio_controller.sync(
                 score,
                 training_cfg=training_cfg,
-                music_enabled=music_enabled,
-                active_path=active_game_music_path,
-                override_level_path=_arcade_round_music_path(config, arcade_round_index) if arcade_enabled else None,
+                override_level_path=recording_music_path,
+            )
+            phase = phase_from_score(
+                score,
+                briefing_open=phase_shows_briefing(phase),
+                paused=command_state.paused,
             )
             dashboard.draw(
                 command_status=_command_status(command_state, control_mode=control_mode),
                 coach_hint=trainer.current_hint(),
-                mission_state=_mission_state(score),
+                mission_state=mission_state_for_dashboard(phase),
                 level_title=level_title,
                 mission_metrics=_arcade_mission_metrics(
                     _mission_metrics(training_cfg, score),
@@ -841,14 +857,20 @@ def run_game_mode(
                 ),
                 objective_checklist=_mission_checklist(training_cfg, score),
                 speed_multiple=current_speed_multiple,
-                briefing_lines=briefing_lines if briefing_open else (),
+                briefing_lines=briefing_lines if phase_shows_briefing(phase) else (),
                 debrief_lines=_score_debrief_lines(score, config=training_cfg, difficulty=difficulty),
             )
-            _capture_recording_frame(recorder, dashboard)
+            recording_controller.capture(dashboard)
+            recorder = recording_controller.recorder
             if recorder is not None and (score.level_passed or score.level_failed) and not recorder.saved:
-                recording_path = recorder.finish()
+                recording_path = recording_controller.finish(
+                    base_training_cfg,
+                    override_level_path=recording_music_path,
+                )
                 if recording_path is not None:
                     print(f"Saved game recording: {recording_path}")
+                else:
+                    recorder = None
             if (score.level_passed or score.level_failed) and debrief_path is None:
                 debrief_path = write_game_debrief(
                     game_debrief_path(
@@ -870,11 +892,21 @@ def run_game_mode(
                     replay_history=tracker_replay_history(trainer),
                 )
                 print(f"Saved game debrief: {debrief_path}")
-            dashboard.tick(_dashboard_fps_for_speed(current_speed_multiple, recording=recorder is not None))
+            dashboard.tick(
+                _dashboard_fps_for_speed(
+                    current_speed_multiple,
+                    recording=recording_controller.recorder is not None,
+                    recording_fps=recording_fps,
+                )
+            )
     finally:
+        recorder = recording_controller.recorder
         if recorder is not None and not recorder.saved:
-            recorder.discard()
-        _stop_game_music(getattr(dashboard, "pygame", None))
+            recording_controller.discard()
+        if audio_controller is not None:
+            audio_controller.stop()
+        else:
+            _stop_game_music(getattr(dashboard, "pygame", None))
         dashboard.close()
         if training_cfg.enabled:
             print(trainer.debrief_text())
@@ -906,22 +938,49 @@ def _start_game_recorder(
     attempt_index: int,
     output_dir: str | Path | None,
     fps: float,
-) -> GameFrameRecorder | None:
-    if not bool(enabled):
-        return None
-    path = game_recording_path(
-        scenario_name=str(config.scenario.scenario_name or "game"),
+) -> Any:
+    return game_recording.start_game_recorder(
+        enabled=enabled,
+        config=config,
         difficulty=difficulty,
         attempt_index=attempt_index,
         output_dir=output_dir,
+        fps=fps,
     )
-    return GameFrameRecorder.start(path, fps=fps)
 
 
-def _capture_recording_frame(recorder: GameFrameRecorder | None, dashboard: Any) -> None:
-    if recorder is None or recorder.saved:
-        return
-    recorder.capture_surface(dashboard.screen)
+def _capture_recording_frame(recorder: Any, dashboard: Any) -> None:
+    game_recording.capture_recording_frame(recorder, dashboard)
+
+
+def _safe_capture_recording_frame(recorder: Any, dashboard: Any) -> Any:
+    return game_recording.safe_capture_recording_frame(recorder, dashboard)
+
+
+def _finish_game_recording(
+    recorder: Any,
+    training_cfg: RPOTrainingConfig,
+    *,
+    override_level_path: Path | None = None,
+) -> Path | None:
+    return game_recording.finish_game_recording(recorder, training_cfg, override_level_path=override_level_path)
+
+
+def _discard_recorder_safely(recorder: Any) -> None:
+    game_recording.discard_recorder_safely(recorder)
+
+
+def _add_level_music_to_recording(
+    recording_path: Path,
+    training_cfg: RPOTrainingConfig,
+    *,
+    override_level_path: Path | None = None,
+) -> Path:
+    return game_recording.add_level_music_to_recording(
+        recording_path,
+        training_cfg,
+        override_level_path=override_level_path,
+    )
 
 
 def _sync_dashboard_training_config(dashboard: Any, training_cfg: RPOTrainingConfig) -> None:
@@ -1019,61 +1078,19 @@ def _poll_pygame_input(
     control_mode: str = "attitude_thrust",
     briefing_open: bool = False,
 ) -> None:
-    ric_mode = str(control_mode or "").strip().lower() in {"ric", "ric_translation", "translation"}
-    state.briefing_scroll_px = 0
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            state.quit_requested = True
-        elif briefing_open and event.type == getattr(pygame, "MOUSEWHEEL", object()):
-            state.briefing_scroll_px -= int(getattr(event, "y", 0)) * BRIEFING_SCROLL_STEP_PX
-        elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-            state.quit_requested = True
-        elif event.type == pygame.KEYDOWN and event.key == pygame.K_r:
-            state.restart_requested = True
-        elif event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE and ric_mode:
-            state.paused = not bool(state.paused)
-        elif briefing_open and event.type == pygame.KEYDOWN and event.key == getattr(pygame, "K_PAGEUP", object()):
-            state.briefing_scroll_px -= BRIEFING_SCROLL_STEP_PX * 4
-        elif briefing_open and event.type == pygame.KEYDOWN and event.key == getattr(pygame, "K_PAGEDOWN", object()):
-            state.briefing_scroll_px += BRIEFING_SCROLL_STEP_PX * 4
-        elif briefing_open and event.type == pygame.KEYDOWN and event.key == getattr(pygame, "K_HOME", object()):
-            state.briefing_scroll_px = -1000000
-        elif briefing_open and event.type == pygame.KEYDOWN and event.key == getattr(pygame, "K_END", object()):
-            state.briefing_scroll_px = 1000000
-        elif event.type == pygame.KEYDOWN and event.key == pygame.K_PERIOD:
-            state.step_requested = True
-        elif event.type == pygame.KEYDOWN and event.key == pygame.K_m:
-            state.music_toggle_requested = True
-        elif event.type == pygame.KEYDOWN and event.key == pygame.K_UP:
-            state.speed_multiplier_change += 1
-        elif event.type == pygame.KEYDOWN and event.key == pygame.K_DOWN:
-            state.speed_multiplier_change -= 1
+    game_input.poll_pygame_input(pygame, state, control_mode=control_mode, briefing_open=briefing_open)
 
-    keys = pygame.key.get_pressed()
-    state.pitch = 0.0
-    state.yaw = 0.0
-    state.roll = 0.0
-    if keys[pygame.K_w]:
-        state.pitch += 1.0
-    if keys[pygame.K_s]:
-        state.pitch -= 1.0
-    if keys[pygame.K_d]:
-        state.yaw += 1.0
-    if keys[pygame.K_a]:
-        state.yaw -= 1.0
-    if keys[pygame.K_RIGHT]:
-        state.roll += 1.0
-    if keys[pygame.K_LEFT]:
-        state.roll -= 1.0
-    state.firing = False if ric_mode else bool(keys[pygame.K_SPACE])
+
+def _pygame_focus_lost(pygame: Any, event: Any) -> bool:
+    return game_input.pygame_focus_lost(pygame, event)
+
+
+def _opposing_key_axis(keys: Any, *, positive_key: Any, negative_key: Any) -> float:
+    return game_input.opposing_key_axis(keys, positive_key=positive_key, negative_key=negative_key)
 
 
 def _mission_state(score: Any) -> str:
-    if bool(getattr(score, "level_passed", False)):
-        return "passed"
-    if bool(getattr(score, "level_failed", False)):
-        return "failed"
-    return "active"
+    return mission_state_for_dashboard(phase_from_score(score))
 
 
 def _game_loop_should_exit(*, session_done: bool, score: Any) -> bool:
