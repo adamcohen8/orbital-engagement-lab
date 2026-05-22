@@ -1,0 +1,205 @@
+scenario_name: game_training_rpo_sandbox
+scenario_description: Open RPO sandbox for experimenting with target-centered relative motion.
+metadata:
+  owner: codex
+  notes: Run with `python run_game.py sim/game/configs/game_training_rpo_sandbox.yaml --fast`.
+  game:
+    level_name: Sandbox
+    control_mode: ric_translation
+    camera_mode: target_pair
+    camera_rule_mode: full_trajectory
+    plot_overlays_in_zoom: false
+    plot_prediction_in_zoom: true
+    target_centered_plot_planes:
+    - RI
+    - RC
+    coast_prediction_model: hcw
+    difficulty: easy
+    sandbox: true
+    player_max_accel_km_s2: 2.0e-05
+    training:
+      enabled: true
+      sandbox_mode: true
+      scenario_id: rpo_sandbox
+      learning_goal: Experiment with RIC translation controls and relative orbital motion without pass/fail goals.
+      player_brief: Edit the starting RIC state and target orbit in the setup panel, then maneuver freely. Delta-v used remains visible, but there is no delta-v budget.
+      pass_criteria:
+      - No pass/fail objective; experiment freely.
+      instructor_notes:
+      - Use this mode to demonstrate how initial relative state and target eccentricity change relative motion.
+      - Set eccentricity to zero for HCW-style circular-orbit intuition, or nonzero for elliptical prediction.
+      target_object_id: target
+      chaser_object_id: chaser
+      max_time_s: 20000.0
+objects:
+  rocket:
+    enabled: false
+    role: rocket
+    kind: rocket
+  chaser:
+    enabled: true
+    role: chaser
+    specs:
+      mass_kg: 200.0
+    initial_state:
+      relative_to_target_ric:
+        frame: rect
+        state:
+        - 0.0
+        - -3.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+      attitude_quat_bn:
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      angular_rate_body_rad_s:
+      - 0.0
+      - 0.0
+      - 0.0
+      relative_to: target
+    orbit_control:
+      kind: python
+      module: sim.control.orbit.zero_controller
+      class_name: ZeroController
+      params: {}
+    attitude_control:
+      kind: python
+      module: sim.control.attitude.zero_torque
+      class_name: ZeroTorqueController
+      params: {}
+    mission_strategy: null
+    mission_execution: null
+    mission_objectives: []
+    knowledge:
+      refresh_rate_s: 1.0
+      targets:
+      - target
+      conditions:
+        require_line_of_sight: false
+        max_range_km: 10000.0
+      sensor_error:
+        pos_sigma_km:
+        - 0.0
+        - 0.0
+        - 0.0
+        vel_sigma_km_s:
+        - 0.0
+        - 0.0
+        - 0.0
+      estimation:
+        type: ekf
+    kind: satellite
+  target:
+    enabled: true
+    role: target
+    reference_orbit:
+      enabled: true
+    specs:
+      mass_kg: 1800.0
+    initial_state:
+      coes:
+        a_km: 7000.0
+        ecc: 0.0
+        inc_deg: 45.0
+        raan_deg: 0.0
+        argp_deg: 0.0
+        true_anomaly_deg: 0.0
+      attitude_quat_bn:
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      angular_rate_body_rad_s:
+      - 0.0
+      - 0.0
+      - 0.0
+    orbit_control:
+      kind: python
+      module: sim.control.orbit.zero_controller
+      class_name: ZeroController
+      params: {}
+    attitude_control:
+      kind: python
+      module: sim.control.attitude.zero_torque
+      class_name: ZeroTorqueController
+      params: {}
+    mission_strategy: null
+    mission_execution: null
+    mission_objectives: []
+    knowledge:
+      refresh_rate_s: 1.0
+      targets:
+      - chaser
+      conditions:
+        require_line_of_sight: false
+        max_range_km: 10000.0
+      sensor_error:
+        pos_sigma_km:
+        - 0.0
+        - 0.0
+        - 0.0
+        vel_sigma_km_s:
+        - 0.0
+        - 0.0
+        - 0.0
+      estimation:
+        type: ekf
+    kind: satellite
+simulator:
+  scenario_type: auto
+  duration_s: 20000.0
+  dt_s: 1.0
+  dynamics:
+    orbit:
+      model: two_body
+      orbit_substep_s: 1.0
+      j2: false
+      j3: false
+      j4: false
+      drag: false
+      srp: false
+      third_body_sun: false
+      third_body_moon: false
+    attitude:
+      enabled: false
+    rocket:
+      enabled: false
+  environment:
+    ephemeris_mode: analytic_simple
+    atmosphere_env: {}
+  plugin_validation:
+    strict: true
+  termination:
+    earth_impact_enabled: false
+    earth_radius_km: 6378.137
+outputs:
+  output_dir: outputs/game_training_rpo_sandbox
+  mode: save
+  stats:
+    enabled: true
+    print_summary: false
+    save_json: false
+    save_csv: false
+    save_full_log: false
+  plots:
+    enabled: false
+    figure_ids: []
+  animations:
+    enabled: false
+    types: []
+    battlespace_dashboard_target_object_id: target
+    battlespace_dashboard_chaser_object_id: chaser
+    battlespace_dashboard_show_trajectory: true
+    battlespace_dashboard_attitude_dims_m:
+      target:
+      - 2.0
+      - 1.5
+      - 1.5
+      chaser:
+      - 1.0
+      - 0.8
+      - 0.8

@@ -68,6 +68,7 @@ from sim.game.launcher import (
     _progress_stars,
     _record_video_at_pos,
     _scroll_for_selection,
+    _show_progress_text,
     _start_artwork_rect,
     _start_screen_event_action,
     _wrap_text_px,
@@ -89,14 +90,18 @@ from sim.game.pygame_dashboard import (
 )
 from sim.game.recording import GameFrameRecorder, add_looped_audio_to_video, game_recording_path
 from sim.game.runner import (
+    SandboxSetupValues,
     _add_level_music_to_recording,
     _adjust_speed_multiple,
+    _apply_sandbox_setup_to_config,
     _coast_prediction_orbit_fraction,
     _coerce_speed_multiple,
+    _command_status,
     _dashboard_fps_for_speed,
     _dashboard_object_ids,
     _finish_game_recording,
     _game_camera_mode,
+    _game_camera_rule_mode,
     _game_coast_chaser_after_delta_v_budget,
     _game_coast_prediction_model,
     _game_control_mode,
@@ -112,15 +117,32 @@ from sim.game.runner import (
     _game_plot_prediction_zoom_max_span_km,
     _game_proximity_ring_plot_planes,
     _game_ric_reference_object_id,
+    _game_sandbox_enabled,
     _game_show_target_hcw_path,
     _game_target_centered_plot_axes,
     _game_target_centered_plot_planes,
+    _guided_tutorial_delta_v_m_s,
+    _guided_tutorial_expected_key,
+    _guided_tutorial_input_matches,
+    _guided_tutorial_speed_step_follows_burn,
+    _guided_tutorial_speed_step_hint,
+    _guided_tutorial_speed_step_reached,
+    _guided_tutorial_stage_hint,
+    _guided_tutorial_target_path,
+    _guided_tutorial_update_dashboard_path,
+    _guided_tutorial_wrong_input_active,
     _mission_checklist,
     _mission_metrics,
     _opposing_key_axis,
     _poll_pygame_input,
     _realtime_steps_due,
+    _reset_guided_tutorial_stage_attempt,
+    _run_sandbox_setup_form,
     _safe_capture_recording_frame,
+    _sandbox_coast_prediction_model,
+    _sandbox_setup_briefing_lines,
+    _sandbox_setup_from_config,
+    _sandbox_setup_from_text_values,
     _score_debrief_lines,
     _speed_after_maneuver_input,
     _start_game_attempt,
@@ -134,6 +156,8 @@ from sim.game.session import _attempt_config_for_training_clock, _DeltaVLimitedO
 from sim.game.training import (
     ApproachGateConfig,
     ForbiddenRegionConfig,
+    GuidedTutorialBurnConfig,
+    GuidedTutorialSpeedStepConfig,
     RequiredPhaseBurnConfig,
     RPOTrainingConfig,
     RPOTrainingScore,
@@ -180,6 +204,7 @@ def test_game_launcher_discovers_ordered_training_levels() -> None:
         "rpo_09_defensive_target_demo",
         "rpo_10_evasive_target_survival",
         "rpo_arcade_pursuit",
+        "rpo_sandbox",
     ]
     assert options[0].title == "Level 0 - Tutorial"
     assert options[1].title == "Level 1 - Relative Orbit"
@@ -207,6 +232,10 @@ def test_game_launcher_discovers_ordered_training_levels() -> None:
     assert options[11].title == "Pursuit Arcade"
     assert options[11].time_budget_s == pytest.approx(12000.0)
     assert options[11].delta_v_budget_m_s == pytest.approx(5.0)
+    assert options[12].title == "Sandbox"
+    assert options[12].path.name == "game_training_rpo_sandbox.yaml"
+    assert options[12].time_budget_s == pytest.approx(20000.0)
+    assert options[12].delta_v_budget_m_s is None
 
 
 def test_game_configs_and_music_assets_are_packaged() -> None:
@@ -314,6 +343,268 @@ def test_training_briefing_lines_include_objective_and_assists() -> None:
     assert "Assists: Hard" in lines
     assert any(line.startswith("Objective:") for line in lines)
     assert any(line.startswith("Gate:") for line in lines)
+
+
+def test_sandbox_config_is_open_ended_setup_mode() -> None:
+    config_path = Path(__file__).resolve().parents[1] / "game" / "configs" / "game_training_rpo_sandbox.yaml"
+    config = SimulationConfig.from_yaml(config_path)
+    training_cfg = RPOTrainingConfig.from_metadata(dict(config.scenario.metadata or {}))
+    score = RPOTrainingScore(
+        scenario_id=training_cfg.scenario_id,
+        learning_goal=training_cfg.learning_goal,
+        samples=2,
+        elapsed_s=12.0,
+        closest_approach_km=3.0,
+        final_range_km=3.0,
+        final_goal_error_km=3.0,
+        final_relative_speed_km_s=0.0,
+        time_inside_keepout_s=0.0,
+        approximate_delta_v_m_s=1.25,
+        target_delta_v_m_s=0.0,
+        burn_axes_satisfied=(),
+        phase_burns_satisfied=(),
+        speed_multiplier_changed=False,
+        coast_after_burn_satisfied=False,
+        coast_after_burn_s=0.0,
+        guided_tutorial_burns_satisfied=(),
+        guided_tutorial_burns_total=0,
+        guided_tutorial_speed_satisfied=True,
+        guided_tutorial_speed_target=None,
+        achieved_time_s=None,
+        min_goal_error_km=3.0,
+        final_nmt_radial_amplitude_km=float("nan"),
+        final_nmt_cross_track_amplitude_km=float("nan"),
+        final_nmt_radial_amplitude_error_km=float("nan"),
+        final_nmt_cross_track_amplitude_error_km=float("nan"),
+        final_nmt_drift_velocity_error_km_s=float("nan"),
+        goal_met=False,
+        level_passed=False,
+        level_failed=False,
+        pass_fail_reasons=("Sandbox active; no pass/fail objective.",),
+        keepout_violation=False,
+        hard_speed_limit_violation=False,
+        forbidden_region_violation=False,
+        forbidden_region_names=(),
+        approach_gate_violation=False,
+        approach_gate_names=(),
+        approach_gates_satisfied=0,
+        approach_gates_total=0,
+        inspection_gates_satisfied=0,
+        inspection_gates_total=0,
+        inspection_gate_names=(),
+        hints=(),
+    )
+
+    assert _game_sandbox_enabled(config) is True
+    assert _game_camera_rule_mode(config) == "full_trajectory"
+    assert training_cfg.sandbox_mode is True
+    assert training_cfg.max_time_s == pytest.approx(20000.0)
+    assert training_cfg.max_delta_v_m_s is None
+    assert config.scenario.simulator.duration_s == pytest.approx(20000.0)
+    assert config.scenario.simulator.dt_s == pytest.approx(1.0)
+    assert _game_target_centered_plot_planes(config) == ("RI", "RC")
+    assert _sandbox_coast_prediction_model(_sandbox_setup_from_config(config)) == "hcw"
+    assert "INFO dV Used 1.250 m/s" in _mission_metrics(training_cfg, score)
+    assert _mission_checklist(training_cfg, score) == ("INFO Experiment Freely",)
+
+
+def test_training_tracker_sandbox_stays_open_until_time_limit_then_succeeds() -> None:
+    cfg = RPOTrainingConfig(
+        enabled=True,
+        scenario_id="sandbox-unit",
+        sandbox_mode=True,
+        max_time_s=1.0,
+    )
+    tracker = RPOTrainingTracker(cfg)
+    target_state = np.array([7000.0, 0.0, 0.0, 0.0, 7.54605329, 0.0], dtype=float)
+    rel_ric = np.array([0.0, -3.0, 0.0, 0.0, 0.0, 0.0], dtype=float)
+    chaser_state = ric_rect_state_to_eci(rel_ric, target_state[:3], target_state[3:])
+
+    for time_s in (0.0, 2.0):
+        tracker.record(
+            snapshot=type(
+                "Snapshot",
+                (),
+                {
+                    "time_s": time_s,
+                    "truth": {"target": target_state, "chaser": chaser_state},
+                    "applied_thrust": {"chaser": np.zeros(3, dtype=float)},
+                },
+            )()
+        )
+
+    score = tracker.score()
+
+    assert score.level_passed is True
+    assert score.level_failed is False
+    assert "Sandbox complete; time limit reached." in score.pass_fail_reasons
+
+    active_cfg = RPOTrainingConfig(
+        enabled=True,
+        scenario_id="sandbox-active-unit",
+        sandbox_mode=True,
+        max_time_s=10.0,
+    )
+    active_tracker = RPOTrainingTracker(active_cfg)
+    for time_s in (0.0, 2.0):
+        active_tracker.record(
+            snapshot=type(
+                "Snapshot",
+                (),
+                {
+                    "time_s": time_s,
+                    "truth": {"target": target_state, "chaser": chaser_state},
+                    "applied_thrust": {"chaser": np.zeros(3, dtype=float)},
+                },
+            )()
+        )
+    active_score = active_tracker.score()
+
+    assert active_score.level_passed is False
+    assert active_score.level_failed is False
+    assert active_score.pass_fail_reasons == ("Sandbox active; no pass/fail objective.",)
+    assert active_tracker.current_hint() == "Sandbox: Maneuver freely, coast, and watch the relative orbit respond."
+
+
+def test_sandbox_setup_form_values_update_runtime_config() -> None:
+    config_path = Path(__file__).resolve().parents[1] / "game" / "configs" / "game_training_rpo_sandbox.yaml"
+    config = SimulationConfig.from_yaml(config_path)
+    values = [
+        "1.2",
+        "-4.5",
+        "0.25",
+        "0.3",
+        "-0.4",
+        "0.5",
+        "7200",
+        "0.1",
+        "45",
+    ]
+
+    setup, error = _sandbox_setup_from_text_values(values)
+    assert error == ""
+    assert setup == SandboxSetupValues(
+        radial_km=1.2,
+        in_track_km=-4.5,
+        cross_track_km=0.25,
+        radial_rate_m_s=0.3,
+        in_track_rate_m_s=-0.4,
+        cross_track_rate_m_s=0.5,
+        target_a_km=7200.0,
+        target_ecc=0.1,
+        target_true_anomaly_deg=45.0,
+    )
+
+    updated = _apply_sandbox_setup_to_config(config, setup)
+    chaser = updated.scenario.objects["chaser"]
+    target = updated.scenario.objects["target"]
+    training_cfg = RPOTrainingConfig.from_metadata(dict(updated.scenario.metadata or {}))
+
+    assert chaser.initial_state["relative_to_target_ric"]["state"] == pytest.approx(
+        [1.2, -4.5, 0.25, 0.0003, -0.0004, 0.0005]
+    )
+    assert target.initial_state["coes"]["a_km"] == pytest.approx(7200.0)
+    assert target.initial_state["coes"]["ecc"] == pytest.approx(0.1)
+    assert target.initial_state["coes"]["true_anomaly_deg"] == pytest.approx(45.0)
+    assert _game_coast_prediction_model(updated) == "tschauner_hempel"
+    assert _game_camera_rule_mode(updated) == "full_trajectory"
+    assert _game_target_centered_plot_planes(updated) == ("RI", "RC")
+    assert training_cfg.sandbox_mode is True
+    assert training_cfg.max_time_s == pytest.approx(20000.0)
+    assert training_cfg.max_delta_v_m_s is None
+    assert updated.scenario.simulator.duration_s == pytest.approx(20000.0)
+    assert updated.scenario.simulator.dt_s == pytest.approx(1.0)
+
+    attempt_config = _attempt_config_for_training_clock(updated, training_cfg)
+    assert attempt_config.scenario.simulator.duration_s == pytest.approx(20000.0)
+    assert attempt_config.scenario.simulator.dt_s == pytest.approx(1.0)
+
+    session = SimulationSession.from_config(attempt_config)
+    snapshot = session.step()
+    assert {"target", "chaser"}.issubset(snapshot.truth)
+
+
+def test_sandbox_setup_form_validation_and_lines() -> None:
+    setup, error = _sandbox_setup_from_text_values(["0"] * 9)
+    assert setup is None
+    assert error == "Target Semimajor Axis must be positive."
+
+    setup, error = _sandbox_setup_from_text_values(["0", "0", "0", "0", "0", "0", "7000", "1", "0"])
+    assert setup is None
+    assert error == "Target Eccentricity must satisfy 0 <= e < 1."
+
+    lines = _sandbox_setup_briefing_lines(["0"] * 9, active_index=2, error="Target Eccentricity must satisfy 0 <= e < 1.")
+
+    assert lines[0] == "Sandbox Setup"
+    assert "> Cross-Track C: 0 km" in lines
+    assert any(line.startswith("Input Error:") for line in lines)
+
+
+def test_sandbox_setup_form_supports_briefing_scroll() -> None:
+    class FakeEventSource:
+        def __init__(self, batches: list[list[object]]) -> None:
+            self._batches = list(batches)
+
+        def get(self) -> list[object]:
+            if not self._batches:
+                return []
+            return self._batches.pop(0)
+
+    class FakePygame:
+        QUIT = "quit"
+        KEYDOWN = "keydown"
+        MOUSEWHEEL = "mousewheel"
+        K_ESCAPE = "escape"
+        K_RETURN = "return"
+        K_KP_ENTER = "kp_enter"
+        K_SPACE = "space"
+        K_TAB = "tab"
+        K_DOWN = "down"
+        K_UP = "up"
+        K_PAGEUP = "pageup"
+        K_PAGEDOWN = "pagedown"
+        K_HOME = "home"
+        K_END = "end"
+        K_BACKSPACE = "backspace"
+        K_DELETE = "delete"
+
+        def __init__(self, batches: list[list[object]]) -> None:
+            self.event = FakeEventSource(batches)
+
+    class FakeDashboard:
+        closed = False
+
+        def __init__(self, batches: list[list[object]]) -> None:
+            self.pygame = FakePygame(batches)
+            self.scrolls: list[int] = []
+            self.draws = 0
+
+        def scroll_briefing(self, delta_px: int) -> None:
+            self.scrolls.append(int(delta_px))
+
+        def draw(self, **_: object) -> None:
+            self.draws += 1
+
+        def tick(self, _: float) -> None:
+            return None
+
+    wheel = type("WheelEvent", (), {"type": FakePygame.MOUSEWHEEL, "y": -2})()
+    page_down = type("KeyEvent", (), {"type": FakePygame.KEYDOWN, "key": FakePygame.K_PAGEDOWN, "unicode": ""})()
+    enter = type("KeyEvent", (), {"type": FakePygame.KEYDOWN, "key": FakePygame.K_RETURN, "unicode": ""})()
+    dashboard = FakeDashboard([[wheel, page_down], [enter]])
+    config_path = Path(__file__).resolve().parents[1] / "game" / "configs" / "game_training_rpo_sandbox.yaml"
+    config = SimulationConfig.from_yaml(config_path)
+
+    setup = _run_sandbox_setup_form(
+        dashboard,
+        config=config,
+        speed_multiple=1.0,
+        level_title="Sandbox",
+    )
+
+    assert setup == _sandbox_setup_from_config(config)
+    assert dashboard.scrolls == [96, 192]
+    assert dashboard.draws == 1
 
 
 def test_launcher_hit_test_accounts_for_scroll_offset() -> None:
@@ -489,6 +780,14 @@ def _launcher_option_with_long_preview() -> GameScenarioOption:
         high_score=12345,
         level_number=1,
     )
+
+
+def test_launcher_hides_tutorial_progress_text() -> None:
+    option = _launcher_option_with_long_preview()
+    tutorial = replace(option, scenario_id="rpo_00_tutorial", title="Level 0 - Tutorial", level_number=0)
+
+    assert _show_progress_text(tutorial) is False
+    assert _show_progress_text(option) is True
 
 
 def test_launcher_preview_wraps_text_to_pixel_width() -> None:
@@ -1014,6 +1313,7 @@ def test_pursuit_arcade_uses_level_nine_shape_with_arcade_clock() -> None:
     assert training_cfg.max_time_s == pytest.approx(12000.0)
     assert training_cfg.max_delta_v_m_s == pytest.approx(5.0)
     assert config.scenario.simulator.duration_s == pytest.approx(12000.0)
+    assert config.scenario.simulator.dt_s == pytest.approx(1.0)
     assert defensive_target["max_delta_v_m_s"] == pytest.approx(0.1)
 
 
@@ -1033,10 +1333,28 @@ def test_level_zero_tutorial_is_passive_close_range_intro() -> None:
     assert training_cfg.goal_range_km == pytest.approx(0.25)
     assert training_cfg.goal_radius_km is None
     assert training_cfg.keepout_radius_km is None
+    assert training_cfg.max_goal_speed_km_s == pytest.approx(0.0003)
     assert training_cfg.max_time_s == pytest.approx(18000.0)
     assert training_cfg.max_delta_v_m_s == pytest.approx(12.0)
-    assert training_cfg.required_burn_axes == ("radial", "in_track", "cross_track")
-    assert training_cfg.require_speed_multiplier_change is True
+    assert training_cfg.required_burn_axes == ()
+    assert training_cfg.require_speed_multiplier_change is False
+    assert training_cfg.required_coast_after_burn_s is None
+    assert [burn.display_label for burn in training_cfg.guided_tutorial_burns] == [
+        "+I burn",
+        "-I burn",
+        "+R burn",
+        "-R burn",
+        "+C burn",
+        "-C burn",
+    ]
+    assert {burn.axis for burn in training_cfg.guided_tutorial_burns} == {"radial", "in_track", "cross_track"}
+    assert all(burn.delta_v_m_s == pytest.approx(0.25) for burn in training_cfg.guided_tutorial_burns)
+    assert training_cfg.guided_tutorial_speed_step is not None
+    assert training_cfg.guided_tutorial_speed_step.after_burn_name == "plus_in_track"
+    assert training_cfg.guided_tutorial_speed_step.target_speed_multiplier == pytest.approx(10.0)
+    assert "Want to go faster" in training_cfg.guided_tutorial_speed_step.hint
+    assert "toward or away from Earth" in training_cfg.axis_descriptions["radial"]
+    assert "Stage 2" in training_cfg.tutorial_stage_hints["in_track"]
     assert config.scenario.simulator.duration_s == pytest.approx(18000.0)
     assert chaser_initial["frame"] == "rect"
     assert np.allclose(chaser_initial["state"], np.array([0.0, -0.8, 0.0, 0.0, 0.0, 0.0]))
@@ -1756,6 +2074,69 @@ def test_ric_translation_provider_commands_direct_ric_thrust() -> None:
     assert np.allclose(out["thrust_eci_km_s2"], np.array([2.0e-5, 0.0, 0.0]), atol=1e-12)
 
 
+def test_ric_translation_provider_uses_timed_input_duty_cycle() -> None:
+    state = KeyboardCommandState(yaw=1.0, use_timing_accumulator=True)
+    provider = ManualGameCommandProvider(
+        command_state=state,
+        max_accel_km_s2=2.0e-5,
+        control_mode="ric_translation",
+        reference_object_id="target",
+    )
+    target = StateTruth(
+        position_eci_km=np.array([7000.0, 0.0, 0.0], dtype=float),
+        velocity_eci_km_s=np.array([0.0, 7.5, 0.0], dtype=float),
+        attitude_quat_bn=np.array([1.0, 0.0, 0.0, 0.0], dtype=float),
+        angular_rate_body_rad_s=np.zeros(3, dtype=float),
+        mass_kg=100.0,
+        t_s=0.0,
+    )
+    state.accumulate_timed_input(0.05, speed_multiple=10.0, control_mode="ric_translation")
+
+    out = provider(
+        truth=target,
+        t_s=0.0,
+        dt_s=2.0,
+        object_id="chaser",
+        own_knowledge={},
+    )
+    empty = provider(
+        truth=target,
+        t_s=2.0,
+        dt_s=2.0,
+        object_id="chaser",
+        own_knowledge={},
+    )
+
+    assert np.allclose(out["thrust_eci_km_s2"], np.array([0.0, 5.0e-6, 0.0]), atol=1e-12)
+    assert np.allclose(empty["thrust_eci_km_s2"], np.zeros(3, dtype=float), atol=1e-15)
+
+
+def test_attitude_thrust_provider_uses_timed_firing_duty_cycle() -> None:
+    state = KeyboardCommandState(firing=True, use_timing_accumulator=True)
+    provider = ManualGameCommandProvider(
+        command_state=state,
+        max_accel_km_s2=2.0e-5,
+        control_mode="attitude_thrust",
+    )
+    target = StateTruth(
+        position_eci_km=np.array([7000.0, 0.0, 0.0], dtype=float),
+        velocity_eci_km_s=np.array([0.0, 7.5, 0.0], dtype=float),
+        attitude_quat_bn=np.array([1.0, 0.0, 0.0, 0.0], dtype=float),
+        angular_rate_body_rad_s=np.zeros(3, dtype=float),
+        mass_kg=100.0,
+        t_s=0.0,
+    )
+    state.accumulate_timed_input(0.05, speed_multiple=10.0, control_mode="attitude_thrust")
+
+    out = provider(truth=target, t_s=0.0, dt_s=2.0, object_id="chaser")
+    empty = provider(truth=target, t_s=2.0, dt_s=2.0, object_id="chaser")
+
+    assert out["mission_mode"]["firing_duty_cycle"] == pytest.approx(0.25)
+    assert np.allclose(out["thrust_eci_km_s2"], np.array([5.0e-6, 0.0, 0.0]), atol=1e-12)
+    assert empty["mission_mode"]["firing_duty_cycle"] == pytest.approx(0.0)
+    assert np.allclose(empty["thrust_eci_km_s2"], np.zeros(3, dtype=float), atol=1e-15)
+
+
 def test_training_tracker_scores_keepout_and_goal() -> None:
     cfg = RPOTrainingConfig(
         enabled=True,
@@ -1832,7 +2213,7 @@ def test_training_tracker_requires_tutorial_burn_axes_and_speed_change() -> None
     assert "Cross-track burn required." in score.pass_fail_reasons
     assert "Speed multiplier change required." in score.pass_fail_reasons
     assert "WARN Burns R-/I-/C-" in metrics
-    assert "WARN Speed x" in metrics
+    assert "WARN Speed X" in metrics
     assert checklist[:4] == (
         "WARN Radial burn",
         "WARN In-track burn",
@@ -1958,13 +2339,273 @@ def test_training_tracker_passes_tutorial_after_required_controls() -> None:
     assert score.burn_axes_satisfied == ("radial", "in_track", "cross_track")
     assert score.speed_multiplier_changed is True
     assert "OK Burns R+/I+/C+" in metrics
-    assert "OK Speed x" in metrics
+    assert "OK Speed X" in metrics
     assert checklist[:4] == (
         "OK Radial burn",
         "OK In-track burn",
         "OK Cross-track burn",
         "OK Change speed",
     )
+
+
+def test_training_tracker_requires_tutorial_coast_after_burn() -> None:
+    cfg = RPOTrainingConfig(
+        enabled=True,
+        scenario_id="tutorial-unit",
+        learning_goal="test",
+        goal_range_km=0.25,
+        required_burn_axes=("radial",),
+        required_coast_after_burn_s=10.0,
+        tutorial_stage_hints={
+            "radial": "Tap radial.",
+            "coast": "Coast after a pulse.",
+            "final_approach": "Settle gently.",
+        },
+    )
+    tracker = RPOTrainingTracker(cfg)
+    target_state = np.array([7000.0, 0.0, 0.0, 0.0, 7.54605329, 0.0], dtype=float)
+    rel_ric = np.array([0.0, -0.2, 0.0, 0.0, 0.0, 0.0], dtype=float)
+    chaser_state = ric_rect_state_to_eci(rel_ric, target_state[:3], target_state[3:])
+    c_ir = ric_dcm_ir_from_rv(target_state[:3], target_state[3:])
+
+    for time_s, thrust_ric in (
+        (0.0, np.array([1.0e-5, 0.0, 0.0], dtype=float)),
+        (5.0, np.zeros(3, dtype=float)),
+    ):
+        tracker.record(
+            snapshot=type(
+                "Snapshot",
+                (),
+                {
+                    "time_s": time_s,
+                    "truth": {"target": target_state, "chaser": chaser_state},
+                    "applied_thrust": {"chaser": c_ir @ thrust_ric},
+                },
+            )()
+        )
+
+    score = tracker.score()
+
+    assert score.level_passed is False
+    assert score.coast_after_burn_satisfied is False
+    assert "Coast for 10 s after a burn required." in score.pass_fail_reasons
+    assert "Coast after a pulse." in tracker.current_hint()
+
+    for time_s in (10.0, 15.0):
+        tracker.record(
+            snapshot=type(
+                "Snapshot",
+                (),
+                {
+                    "time_s": time_s,
+                    "truth": {"target": target_state, "chaser": chaser_state},
+                    "applied_thrust": {"chaser": np.zeros(3, dtype=float)},
+                },
+            )()
+        )
+
+    score = tracker.score()
+
+    assert score.level_passed is True
+    assert score.coast_after_burn_satisfied is True
+    assert score.coast_after_burn_s == pytest.approx(10.0)
+
+
+def test_guided_tutorial_input_matches_only_requested_axis() -> None:
+    stage = GuidedTutorialBurnConfig(name="plus_i", axis="in_track", sign=1, delta_v_m_s=0.25)
+    state = KeyboardCommandState(yaw=1.0)
+
+    assert _guided_tutorial_input_matches(state, stage) is True
+    assert _guided_tutorial_wrong_input_active(state, stage) is False
+
+    state.pitch = 1.0
+    assert _guided_tutorial_input_matches(state, stage) is False
+    assert _guided_tutorial_wrong_input_active(state, stage) is True
+
+    state.pitch = 0.0
+    state.yaw = -1.0
+    assert _guided_tutorial_input_matches(state, stage) is False
+    assert _guided_tutorial_wrong_input_active(state, stage) is True
+
+    state.yaw = 0.0
+    assert _guided_tutorial_wrong_input_active(state, stage) is False
+
+
+def test_guided_tutorial_wrong_key_hint_names_expected_control() -> None:
+    stage = GuidedTutorialBurnConfig(name="plus_i", axis="in_track", sign=1, delta_v_m_s=0.25)
+    runtime = game_runner.GuidedTutorialRuntime(wrong_key_active=True)
+
+    assert _guided_tutorial_expected_key(stage) == "D"
+    assert _guided_tutorial_stage_hint(stage, runtime) == "Wrong key - hold D for +I burn."
+
+
+def test_guided_tutorial_target_path_applies_requested_burn() -> None:
+    rel0 = np.array([0.0, -0.8, 0.0, 0.0, 0.0, 0.0], dtype=float)
+    stage = GuidedTutorialBurnConfig(name="minus_c", axis="cross_track", sign=-1, delta_v_m_s=0.25)
+
+    path = _guided_tutorial_target_path(rel0, 0.001, stage, samples=5)
+
+    assert path.shape == (5, 6)
+    assert path[0, 5] == pytest.approx(-0.00025)
+    assert np.allclose(path[0, :5], rel0[:5])
+
+
+def test_guided_tutorial_dashboard_path_uses_tracker_history() -> None:
+    cfg = RPOTrainingConfig(
+        enabled=True,
+        scenario_id="tutorial-guided",
+        guided_tutorial_burns=(
+            GuidedTutorialBurnConfig(name="plus_i", axis="in_track", sign=1, delta_v_m_s=0.25),
+        ),
+    )
+    tracker = RPOTrainingTracker(cfg)
+    tracker.rel_ric_hist.append(np.array([0.0, -0.8, 0.0, 0.0, 0.0, 0.0], dtype=float))
+    tracker.mean_motion_hist.append(0.001)
+    runtime = game_runner.GuidedTutorialRuntime()
+    dashboard = type("Dashboard", (), {"tutorial_target_path_ric": np.empty((0, 6)), "_frame_cache_dirty": False})()
+
+    _guided_tutorial_update_dashboard_path(dashboard, tracker, cfg, runtime)
+
+    assert dashboard.tutorial_target_path_ric.shape[1] == 6
+    assert dashboard.tutorial_target_path_ric[0, 4] == pytest.approx(0.00025)
+    assert dashboard._frame_cache_dirty is True
+
+
+def test_guided_tutorial_speed_step_helpers() -> None:
+    burn = GuidedTutorialBurnConfig(name="plus_i", axis="in_track", sign=1, delta_v_m_s=0.25)
+    cfg = RPOTrainingConfig(
+        enabled=True,
+        scenario_id="tutorial-guided",
+        guided_tutorial_burns=(burn,),
+        guided_tutorial_speed_step=GuidedTutorialSpeedStepConfig(
+            name="speed_to_10x",
+            after_burn_name="plus_i",
+            target_speed_multiplier=10.0,
+            hint="Want to go faster? Hit the up arrow key.",
+        ),
+    )
+
+    assert _guided_tutorial_speed_step_follows_burn(cfg, burn) is True
+    assert _guided_tutorial_speed_step_reached(cfg, 5.0) is False
+    assert _guided_tutorial_speed_step_reached(cfg, 10.0) is True
+    assert "Current speed: 5x" in _guided_tutorial_speed_step_hint(cfg, 5.0)
+
+
+def test_guided_tutorial_speed_step_reset_uses_zero_relative_velocity() -> None:
+    config_path = (
+        Path(__file__).resolve().parents[1] / "game" / "configs" / "game_training_rpo_00_tutorial.yaml"
+    )
+    config = SimulationConfig.from_yaml(config_path)
+    training_cfg = RPOTrainingConfig.from_metadata(dict(config.scenario.metadata or {}))
+    command_state = KeyboardCommandState(yaw=1.0)
+    trainer = RPOTrainingTracker(training_cfg)
+    trainer.mark_guided_tutorial_burn_complete("plus_in_track")
+
+    class FakeDashboard:
+        def __init__(self) -> None:
+            self.snapshots: list[object] = []
+            self._frame_cache_dirty = False
+
+        def clear(self) -> None:
+            self.snapshots.clear()
+
+        def push_snapshot(self, snapshot: object) -> None:
+            self.snapshots.append(snapshot)
+
+    dashboard = FakeDashboard()
+
+    _reset_guided_tutorial_stage_attempt(
+        attempt_config=config,
+        command_state=command_state,
+        trainer=trainer,
+        dashboard=dashboard,
+        training_cfg=training_cfg,
+        controlled_object_id="chaser",
+        attitude_rate_deg_s=45.0,
+        control_mode="ric_translation",
+        ric_reference_object_id="target",
+    )
+
+    assert command_state.yaw == pytest.approx(0.0)
+    assert trainer.guided_tutorial_burns_satisfied() == ("plus_in_track",)
+    assert np.allclose(trainer.rel_ric_hist[-1][3:], np.zeros(3, dtype=float))
+    assert dashboard.snapshots
+
+
+def test_training_tracker_requires_guided_tutorial_speed_step() -> None:
+    burn = GuidedTutorialBurnConfig(name="plus_i", axis="in_track", sign=1, delta_v_m_s=0.25)
+    cfg = RPOTrainingConfig(
+        enabled=True,
+        scenario_id="tutorial-guided-speed",
+        goal_range_km=1.0,
+        guided_tutorial_burns=(burn,),
+        guided_tutorial_speed_step=GuidedTutorialSpeedStepConfig(
+            name="speed_to_10x",
+            after_burn_name="plus_i",
+            target_speed_multiplier=10.0,
+            label="Speed 10x",
+        ),
+    )
+    tracker = RPOTrainingTracker(cfg)
+    target_state = np.array([7000.0, 0.0, 0.0, 0.0, 7.54605329, 0.0], dtype=float)
+    tracker.record(
+        snapshot=type(
+            "Snapshot",
+            (),
+            {
+                "time_s": 0.0,
+                "truth": {"target": target_state, "chaser": target_state},
+                "applied_thrust": {"chaser": np.zeros(3, dtype=float)},
+            },
+        )()
+    )
+    tracker.mark_guided_tutorial_burn_complete("plus_i")
+
+    score = tracker.score()
+
+    assert score.level_passed is False
+    assert score.guided_tutorial_speed_satisfied is False
+    assert "Speed 10x tutorial step required." in score.pass_fail_reasons
+
+    tracker.mark_guided_tutorial_speed_complete()
+    score = tracker.score()
+
+    assert score.level_passed is True
+    assert score.guided_tutorial_speed_satisfied is True
+
+
+def test_guided_tutorial_delta_v_tracks_signed_axis_progress() -> None:
+    cfg = RPOTrainingConfig(
+        enabled=True,
+        scenario_id="tutorial-guided",
+        guided_tutorial_burns=(
+            GuidedTutorialBurnConfig(name="plus_r", axis="radial", sign=1, delta_v_m_s=0.25),
+        ),
+    )
+    tracker = RPOTrainingTracker(cfg)
+    target_state = np.array([7000.0, 0.0, 0.0, 0.0, 7.54605329, 0.0], dtype=float)
+    chaser_state = ric_rect_state_to_eci(np.zeros(6, dtype=float), target_state[:3], target_state[3:])
+    c_ir = ric_dcm_ir_from_rv(target_state[:3], target_state[3:])
+
+    for time_s, thrust_ric in (
+        (0.0, np.zeros(3, dtype=float)),
+        (10.0, np.array([1.0e-5, 0.0, 0.0], dtype=float)),
+        (20.0, np.array([1.0e-5, 0.0, 0.0], dtype=float)),
+        (30.0, np.array([-1.0e-5, 0.0, 0.0], dtype=float)),
+    ):
+        tracker.record(
+            snapshot=type(
+                "Snapshot",
+                (),
+                {
+                    "time_s": time_s,
+                    "truth": {"target": target_state, "chaser": chaser_state},
+                    "applied_thrust": {"chaser": c_ir @ thrust_ric},
+                },
+            )()
+        )
+
+    assert _guided_tutorial_delta_v_m_s(tracker, cfg.guided_tutorial_burns[0]) == pytest.approx(0.2)
 
 
 def test_nmt_goal_uses_two_to_one_intrack_radial_shape() -> None:
@@ -2335,7 +2976,7 @@ def test_training_tracker_can_require_cross_track_amplitude_for_bar_approaches()
     assert high_c_amp.level_passed is False
     assert high_c_amp.final_nmt_cross_track_amplitude_km > 0.02
     assert any("Cross-track amplitude above" in reason for reason in high_c_amp.pass_fail_reasons)
-    assert any("C amp" in item for item in metrics)
+    assert any("C Amp" in item for item in metrics)
     assert low_c_amp.level_passed is True
     assert low_c_amp.final_nmt_cross_track_amplitude_km <= 0.02
 
@@ -2757,7 +3398,7 @@ def test_training_tracker_hard_fails_on_forbidden_region_violation() -> None:
     assert score.forbidden_region_violation is True
     assert score.forbidden_region_names == ("off-axis test region",)
     assert any("Forbidden region" in reason for reason in score.pass_fail_reasons)
-    assert "FAIL FR violated" in metrics
+    assert "FAIL FR Violated" in metrics
 
 
 def test_training_tracker_enforces_rbar_approach_gates() -> None:
@@ -3402,6 +4043,7 @@ def test_pygame_input_mapping_sets_ric_axes_and_quit() -> None:
         K_r = "r"
         K_PERIOD = "."
         K_m = "m"
+        K_c = "c"
         K_PAGEUP = "pageup"
         K_PAGEDOWN = "pagedown"
         K_HOME = "home"
@@ -3455,6 +4097,7 @@ def test_pygame_input_mapping_sets_ric_axes_and_quit() -> None:
                     FakeEvent(FakePygame.KEYDOWN, FakePygame.K_UP),
                     FakeEvent(FakePygame.KEYDOWN, FakePygame.K_r),
                     FakeEvent(FakePygame.KEYDOWN, FakePygame.K_m),
+                    FakeEvent(FakePygame.KEYDOWN, FakePygame.K_c),
                 ]
 
     state = KeyboardCommandState()
@@ -3466,6 +4109,7 @@ def test_pygame_input_mapping_sets_ric_axes_and_quit() -> None:
     assert state.speed_multiplier_change == 1
     assert state.restart_requested is True
     assert state.music_toggle_requested is True
+    assert state.camera_rule_toggle_requested is True
 
     class SlowDownPygame(FakePygame):
         class event:
@@ -3561,6 +4205,18 @@ def test_speed_multiple_adjustment_uses_allowed_options() -> None:
     assert _adjust_speed_multiple(100.0, 1) == 200.0
     assert _adjust_speed_multiple(200.0, 1) == 200.0
     assert _adjust_speed_multiple(50.0, -2) == 10.0
+
+
+def test_command_status_uses_capitalized_indicators() -> None:
+    ric_status = _command_status(KeyboardCommandState(paused=True, yaw=1.0), control_mode="ric_translation")
+    attitude_status = _command_status(KeyboardCommandState(firing=False), control_mode="attitude_thrust")
+
+    assert "W/S Radial" in ric_status
+    assert "M Music" in ric_status
+    assert "Throttle=" in ric_status
+    assert "W/S Pitch" in attitude_status
+    assert "Space Fire" in attitude_status
+    assert "Thrust=Coast" in attitude_status
 
 
 def test_maneuver_input_above_control_speed_drops_to_control_speed() -> None:
@@ -3763,7 +4419,7 @@ def test_briefing_body_wraps_all_lines_for_scrollable_card() -> None:
 
     assert any("Instruction 11" in line for line in wrapped)
     assert len(wrapped) > len(lines)
-    assert PygameRPODashboard._briefing_footer_text(scrollable=True).startswith("Scroll to read.")
+    assert PygameRPODashboard._briefing_footer_text(scrollable=True).startswith("Scroll To Read.")
 
 
 def test_elliptic_linear_coast_matches_hcw_for_circular_chief() -> None:
@@ -3805,6 +4461,46 @@ def test_dashboard_samples_long_polylines_for_drawing() -> None:
     assert sampled.shape[0] <= 120
     assert np.allclose(sampled[0], rows[0])
     assert np.allclose(sampled[-1], rows[-1])
+
+
+def test_dashboard_frame_cache_samples_shared_draw_rows_once() -> None:
+    dashboard = object.__new__(PygameRPODashboard)
+    rows = 500
+    rel = np.zeros((rows, 6), dtype=float)
+    rel[:, 1] = np.linspace(-10.0, 10.0, rows)
+    target_rel = np.zeros((rows, 6), dtype=float)
+    target_rel[:, 0] = np.linspace(0.0, 1.0, rows)
+    thrust = np.zeros((rows, 3), dtype=float)
+    thrust[::3, 1] = 1.0e-5
+    ghost = np.zeros((300, 6), dtype=float)
+    ghost[:, 1] = np.linspace(0.0, 30.0, 300)
+    target_ghost = np.zeros((240, 6), dtype=float)
+    target_ghost[:, 0] = np.linspace(0.0, 12.0, 240)
+    dashboard.rel_hist = [row for row in rel]
+    dashboard.target_rel_hist = [row for row in target_rel]
+    dashboard.thrust_ric_hist = [row for row in thrust]
+    dashboard._rel_array = rel
+    dashboard._target_rel_array = target_rel
+    dashboard._thrust_ric_array = thrust
+    dashboard.max_history = 900
+    dashboard.burn_marker_threshold_km_s2 = 1.0e-12
+    dashboard._frame_cache = {}
+    dashboard._frame_cache_dirty = True
+    dashboard._coast_prediction_from_cached = lambda *_, **__: ghost
+    dashboard._target_coast_prediction = lambda *_: target_ghost
+    dashboard._nmt_points = lambda: np.empty((0, 3), dtype=float)
+    dashboard._nmt_boundary_points = lambda: ()
+
+    dashboard._prepare_frame_cache()
+
+    assert dashboard._frame_cache_dirty is False
+    assert dashboard._frame_cache["rel_trail"].shape[0] <= 260
+    assert dashboard._frame_cache["target_trail"].shape[0] <= 260
+    assert dashboard._frame_cache["ghost_sample"].shape[0] <= 120
+    assert dashboard._frame_cache["target_ghost_sample"].shape[0] <= 120
+    assert dashboard._frame_cache["burn_marker_rel"].shape[0] <= 80
+    assert np.allclose(dashboard._frame_cache["rel_trail"][0], rel[0])
+    assert np.allclose(dashboard._frame_cache["rel_trail"][-1], rel[-1])
 
 
 def test_coast_prediction_caps_draw_points() -> None:
@@ -3939,6 +4635,91 @@ def test_plot_scale_uses_current_satellites_not_old_trail_or_overlays() -> None:
 
     assert close_scale > history_scale
     assert close_scale == pytest.approx(dashboard._scale_for_plot(pts=[close_rel[:2].reshape(1, 2)]))
+
+
+def test_camera_rule_toggle_switches_between_current_pair_and_full_trajectory_scale() -> None:
+    dashboard = object.__new__(PygameRPODashboard)
+    dashboard.camera_rule_mode = "current_pair"
+    dashboard._frame_cache_dirty = False
+    dashboard.plot_prediction_in_zoom = True
+    dashboard.plot_prediction_zoom_max_span_km = None
+    rel = np.array(
+        [
+            [0.0, -0.2, 0.0, 0.0, 0.0, 0.0],
+            [0.0, -4.0, 0.0, 0.0, 0.0, 0.0],
+        ],
+        dtype=float,
+    )
+    target_rel = np.array(
+        [
+            [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            [0.1, 0.0, 0.0, 0.0, 0.0, 0.0],
+        ],
+        dtype=float,
+    )
+    ghost = np.array(
+        [
+            [0.0, -0.2, 0.0, 0.0, 0.0, 0.0],
+            [0.0, -8.0, 0.0, 0.0, 0.0, 0.0],
+        ],
+        dtype=float,
+    )
+
+    assert dashboard._camera_rule_mode_key() == "current_pair"
+    assert (
+        dashboard._camera_rule_scale_points(
+            rel=rel,
+            target_rel=target_rel,
+            ghost=ghost,
+            x_axis=1,
+            y_axis=0,
+            camera_center=np.zeros(3, dtype=float),
+        )
+        == []
+    )
+    assert dashboard.toggle_camera_rule_mode() == "full_trajectory"
+    assert dashboard._frame_cache_dirty is True
+
+    points = dashboard._camera_rule_scale_points(
+        rel=rel,
+        target_rel=target_rel,
+        ghost=ghost,
+        x_axis=1,
+        y_axis=0,
+        camera_center=np.zeros(3, dtype=float),
+    )
+
+    assert dashboard._camera_rule_mode_key() == "full_trajectory"
+    assert len(points) == 3
+    assert np.max(np.abs(np.vstack(points))) == pytest.approx(8.0)
+    assert dashboard.toggle_camera_rule_mode() == "current_pair"
+
+
+def test_default_camera_rule_preserves_prediction_zoom_scaling() -> None:
+    dashboard = object.__new__(PygameRPODashboard)
+    dashboard.camera_rule_mode = "default"
+    dashboard.plot_prediction_in_zoom = True
+    dashboard.plot_prediction_zoom_max_span_km = 5.0
+    ghost = np.array(
+        [
+            [0.0, -2.0, 0.0, 0.0, 0.0, 0.0],
+            [0.0, -8.0, 0.0, 0.0, 0.0, 0.0],
+        ],
+        dtype=float,
+    )
+
+    points = dashboard._camera_rule_scale_points(
+        rel=np.empty((0, 6), dtype=float),
+        target_rel=np.empty((0, 6), dtype=float),
+        ghost=ghost,
+        x_axis=1,
+        y_axis=0,
+        camera_center=np.zeros(3, dtype=float),
+    )
+
+    assert dashboard._camera_rule_mode_key() == "default"
+    assert len(points) == 1
+    assert np.max(np.abs(points[0])) == pytest.approx(5.0)
 
 
 def test_target_pair_camera_centers_ri_between_current_satellites() -> None:
@@ -4225,6 +5006,6 @@ def test_level2_plot_scale_can_ignore_forbidden_region_zoom_extent() -> None:
     assert _game_proximity_ring_plot_planes(sim_cfg) == ("RI",)
     assert dashboard._show_proximity_rings_for_plane(x_axis=1, y_axis=0) is True
     assert dashboard._show_proximity_rings_for_plane(x_axis=2, y_axis=0) is False
-    assert ri_ignored_span == pytest.approx(0.05)
+    assert ri_ignored_span == pytest.approx(0.005)
     assert rc_fixed_span > 5.0
     assert ri_full_overlay_span > 5.0

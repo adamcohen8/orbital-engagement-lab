@@ -15,18 +15,21 @@ metadata:
     training:
       enabled: true
       scenario_id: rpo_00_tutorial
-      learning_goal: Learn to pulse, coast, and read the RI and RC views while
-        approaching a passive target.
-      player_brief: The red satellite is you. Use short R/I/C translation pulses,
-        then coast and watch the motion in the two target-centered plots. Reach
-        the green 250 m range circle around the yellow target after trying each
-        translation axis and changing the speed multiplier.
+      learning_goal: Learn what R, I, and C mean by creating six small target
+        orbits, then use short pulse-and-coast translations to settle near a
+        passive target.
+      player_brief: The red satellite is you. R is radial, toward or away from
+        Earth through the target. I is in-track, forward or backward along the
+        target's orbit. C is cross-track, out of the target's orbital plane. For
+        each guided stage, the simulation pauses until you hold the requested
+        control. Follow the green path to build the shown 0.25 m/s burn, then the
+        trainer resets for the next axis before the final approach.
       pass_criteria:
-      - Perform at least one radial burn.
-      - Perform at least one in-track burn.
-      - Perform at least one cross-track burn.
-      - Change the speed multiplier at least once.
-      - Get within 250 m of the passive target.
+      - Complete the +I and -I guided orbit demonstrations.
+      - After +I, increase the speed multiple to 10x.
+      - Complete the +R and -R guided orbit demonstrations.
+      - Complete the +C and -C guided orbit demonstrations.
+      - Get within 250 m of the passive target below 0.3 m/s.
       - Stay under the generous tutorial time and delta-v budgets.
       instructor_notes:
       - This level teaches the controls before introducing natural-motion matching,
@@ -34,17 +37,76 @@ metadata:
       - Encourage short pulses followed by coasting rather than continuous thrust.
       - The RI view shows in-track versus radial motion; the RC view shows cross-track
         versus radial motion.
+      axis_descriptions:
+        radial: Radial R moves toward or away from Earth through the target.
+        in_track: In-track I moves forward or backward along the target's orbit.
+        cross_track: Cross-track C moves out of the target's orbital plane.
+      tutorial_stage_hints:
+        radial: Stage 1 - Radial R points toward or away from Earth through the
+          target. Tap W or S, then watch the red satellite move up/down in both
+          plots.
+        in_track: Stage 2 - In-track I is forward/back along the orbit. Tap A or
+          D, then coast and watch the delayed radial response in the RI plot.
+        cross_track: Stage 3 - Cross-track C leaves the orbital plane. Tap Left
+          or Right, then watch the RC plot separate out of plane.
+        final_approach: Guided burns complete. Settle gently into the green 250
+          m circle. Keep pulses short and arrive below 0.3 m/s.
+      guided_tutorial_burns:
+      - name: plus_in_track
+        axis: in_track
+        sign: plus
+        delta_v_m_s: 0.25
+        label: +I burn
+        hint: Hold D for +I. The green path shows the orbit created by a 0.25
+          m/s forward in-track burn.
+      - name: minus_in_track
+        axis: in_track
+        sign: minus
+        delta_v_m_s: 0.25
+        label: -I burn
+        hint: Hold A for -I. Watch the green path flip to the backward in-track
+          case.
+      - name: plus_radial
+        axis: radial
+        sign: plus
+        delta_v_m_s: 0.25
+        label: +R burn
+        hint: Hold W for +R. Radial burns move along the vertical R axis first,
+          then orbital motion bends the path.
+      - name: minus_radial
+        axis: radial
+        sign: minus
+        delta_v_m_s: 0.25
+        label: -R burn
+        hint: Hold S for -R. Compare this green path against the previous radial
+          burn.
+      - name: plus_cross_track
+        axis: cross_track
+        sign: plus
+        delta_v_m_s: 0.25
+        label: +C burn
+        hint: Hold Right for +C. The RC plot shows the out-of-plane orbit you
+          are creating.
+      - name: minus_cross_track
+        axis: cross_track
+        sign: minus
+        delta_v_m_s: 0.25
+        label: -C burn
+        hint: Hold Left for -C. This completes the cross-track pair before the
+          final approach begins.
+      guided_tutorial_speed_step:
+        name: speed_to_10x
+        after_burn_name: plus_in_track
+        target_speed_multiplier: 10.0
+        label: Speed 10x
+        hint: Want to go faster? Hit the up arrow key to increase the speed
+          multiple. Try going up to 10x.
       target_object_id: target
       chaser_object_id: chaser
       goal_range_km: 0.25
+      max_goal_speed_km_s: 0.0003
       max_time_s: 18000.0
       max_delta_v_m_s: 12.0
-      required_burn_axes:
-      - radial
-      - in_track
-      - cross_track
-      required_burn_axis_min_component_fraction: 0.75
-      require_speed_multiplier_change: true
 objects:
   rocket:
     enabled: false

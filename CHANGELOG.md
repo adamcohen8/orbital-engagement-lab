@@ -6,6 +6,45 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.7.3 - 2026-05-22
+
+RPO trainer tutorial, Sandbox, and precision-thrust update.
+
+### Added
+
+- Added a guided Level 0 tutorial flow with staged +/-I, +/-R, and +/-C burn
+  demonstrations, green target orbit paths, axis explanations, wrong-key
+  feedback, and a required 10x speed-multiplier step after the first burn.
+- Added an open-ended Sandbox mode after Pursuit Arcade with editable pre-launch
+  RIC state and target orbit inputs, unlimited chaser delta-v, delta-v-used UI,
+  target-centered RI/RC views, and success on the 20,000 second timeout.
+- Added a Sandbox camera-rule toggle on `C` for switching between full
+  trajectory/projection framing and satellites-only close-up framing.
+
+### Changed
+
+- Changed Sandbox timing to a 20,000 second scenario with a 1 second simulator
+  step for finer manual maneuvering.
+- Reworked manual game thrust timing so player key duration contributes
+  fractional-step thrust duty cycle across tutorial, levels, Arcade, and
+  Sandbox.
+- Lowered the game dashboard minimum zoom span to 0.005 km and cached sampled
+  dashboard trail/projection rows and burn markers for smoother close-range
+  Sandbox views.
+- Refreshed the product maturity roadmap against the current game/tutorial,
+  Sandbox, recording, release, and RMOE-controller posture.
+
+### Fixed
+
+- Fixed Sandbox setup launch so the setup-applied runtime preserves the intended
+  20,000 second duration and 1 second simulator step.
+- Fixed Sandbox setup scrolling, RI/RC target-centering, and timeout completion
+  behavior.
+- Hid tutorial progress/high-score selector text and capitalized game UI
+  indicators consistently.
+- Fixed guided tutorial burn completion so the requested 0.25 m/s burn clears
+  without needing excess delta-v.
+
 ## 0.7.2 - 2026-05-21
 
 RPO trainer music packaging, recording polish, Level 5 tuning, and RMOE controller

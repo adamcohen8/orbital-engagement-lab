@@ -22,15 +22,79 @@ class KeyboardCommandState:
     paused: bool = False
     step_requested: bool = False
     speed_multiplier_change: int = 0
+    camera_rule_toggle_requested: bool = False
     music_toggle_requested: bool = False
     briefing_scroll_px: int = 0
     quit_requested: bool = False
+    use_timing_accumulator: bool = False
+    pitch_sim_s: float = 0.0
+    yaw_sim_s: float = 0.0
+    roll_sim_s: float = 0.0
+    firing_sim_s: float = 0.0
 
     def reset_axes(self) -> None:
         self.pitch = 0.0
         self.yaw = 0.0
         self.roll = 0.0
         self.firing = False
+        self.clear_timed_input()
+
+    def clear_timed_input(self) -> None:
+        self.pitch_sim_s = 0.0
+        self.yaw_sim_s = 0.0
+        self.roll_sim_s = 0.0
+        self.firing_sim_s = 0.0
+
+    def accumulate_timed_input(
+        self,
+        wall_dt_s: float,
+        *,
+        speed_multiple: float,
+        control_mode: str = "attitude_thrust",
+    ) -> None:
+        if not bool(self.use_timing_accumulator):
+            return
+        elapsed_sim_s = float(max(wall_dt_s, 0.0)) * float(max(speed_multiple, 0.0))
+        if elapsed_sim_s <= 0.0:
+            return
+        mode = str(control_mode or "").strip().lower()
+        if mode in {"ric", "ric_translation", "translation"}:
+            if float(self.throttle) <= 0.0:
+                return
+            self.pitch_sim_s += float(np.clip(self.pitch, -1.0, 1.0)) * elapsed_sim_s
+            self.yaw_sim_s += float(np.clip(self.yaw, -1.0, 1.0)) * elapsed_sim_s
+            self.roll_sim_s += float(np.clip(self.roll, -1.0, 1.0)) * elapsed_sim_s
+        elif bool(self.firing):
+            self.firing_sim_s += elapsed_sim_s
+
+    def consume_ric_duty_cycle(self, dt_s: float) -> np.ndarray:
+        if not bool(self.use_timing_accumulator):
+            return np.array(
+                [
+                    float(np.clip(self.pitch, -1.0, 1.0)),
+                    float(np.clip(self.yaw, -1.0, 1.0)),
+                    float(np.clip(self.roll, -1.0, 1.0)),
+                ],
+                dtype=float,
+            )
+        dt = float(max(dt_s, 1.0e-9))
+        values = [self.pitch_sim_s, self.yaw_sim_s, self.roll_sim_s]
+        consumed: list[float] = []
+        remaining: list[float] = []
+        for value in values:
+            amount = np.sign(float(value)) * min(abs(float(value)), dt)
+            consumed.append(float(amount) / dt)
+            remaining.append(float(value) - float(amount))
+        self.pitch_sim_s, self.yaw_sim_s, self.roll_sim_s = remaining
+        return np.array(consumed, dtype=float)
+
+    def consume_firing_duty_cycle(self, dt_s: float) -> float:
+        if not bool(self.use_timing_accumulator):
+            return 1.0 if bool(self.firing) else 0.0
+        dt = float(max(dt_s, 1.0e-9))
+        amount = min(max(float(self.firing_sim_s), 0.0), dt)
+        self.firing_sim_s = max(float(self.firing_sim_s) - amount, 0.0)
+        return float(amount) / dt
 
 
 @dataclass
@@ -102,14 +166,7 @@ class ManualGameCommandProvider:
         mode = str(self.control_mode or "attitude_thrust").strip().lower()
         if mode in {"ric", "ric_translation", "translation"}:
             throttle = float(np.clip(self.command_state.throttle, 0.0, 1.0))
-            accel_ric = np.array(
-                [
-                    float(np.clip(self.command_state.pitch, -1.0, 1.0)),
-                    float(np.clip(self.command_state.yaw, -1.0, 1.0)),
-                    float(np.clip(self.command_state.roll, -1.0, 1.0)),
-                ],
-                dtype=float,
-            )
+            accel_ric = self.command_state.consume_ric_duty_cycle(float(dt_s))
             nrm = float(np.linalg.norm(accel_ric))
             if nrm > 1.0:
                 accel_ric /= nrm
@@ -138,7 +195,8 @@ class ManualGameCommandProvider:
             }
         q_cmd = self._integrate_target(truth=truth, t_s=float(t_s), dt_s=float(dt_s))
         throttle = float(np.clip(self.command_state.throttle, 0.0, 1.0))
-        accel_mag = float(max(self.max_accel_km_s2, 0.0)) * throttle if self.command_state.firing else 0.0
+        firing_duty = self.command_state.consume_firing_duty_cycle(float(dt_s))
+        accel_mag = float(max(self.max_accel_km_s2, 0.0)) * throttle * firing_duty
         return {
             "desired_attitude_quat_bn": q_cmd,
             # The simulator later replaces this placeholder direction with the
@@ -148,11 +206,13 @@ class ManualGameCommandProvider:
                 "strategy": "manual_game",
                 "firing": bool(self.command_state.firing),
                 "throttle": throttle,
+                "firing_duty_cycle": firing_duty,
             },
             "command_mode_flags": {
                 "player_controlled": True,
                 "player_firing": bool(self.command_state.firing),
                 "player_throttle": throttle,
+                "player_firing_duty_cycle": firing_duty,
             },
         }
 

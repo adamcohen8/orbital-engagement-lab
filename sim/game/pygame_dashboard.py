@@ -18,6 +18,7 @@ from sim.utils.frames import ric_dcm_ir_from_rv
 
 EARTH_MU_KM3_S2 = 398600.4418
 PLOT_OVERLAY_MARGIN = 1.18
+MIN_PLOT_SPAN_KM = 0.005
 MAX_TRAIL_DRAW_POINTS = 260
 MAX_GHOST_DRAW_POINTS = 120
 TEXT_CACHE_LIMIT = 512
@@ -68,6 +69,8 @@ class PygameRPODashboard:
     target_centered_plot_axes: dict[str, tuple[str, ...]] = field(default_factory=dict)
     proximity_ring_plot_planes: tuple[str, ...] = ("RI", "RC", "IC")
     camera_mode: str = "reference"
+    camera_rule_mode: str = "default"
+    tutorial_target_path_ric: np.ndarray = field(default_factory=lambda: np.empty((0, 6), dtype=float))
 
     def __post_init__(self) -> None:
         try:
@@ -131,6 +134,7 @@ class PygameRPODashboard:
         self._frame_cache_dirty = True
         self._prediction_cache = {}
         self.briefing_scroll_px = 0
+        self.tutorial_target_path_ric = np.empty((0, 6), dtype=float)
 
     def reset_briefing_scroll(self) -> None:
         self.briefing_scroll_px = 0
@@ -225,8 +229,8 @@ class PygameRPODashboard:
             mission_metrics=mission_metrics,
             objective_checklist=objective_checklist,
         )
-        self._draw_panel(left, "RI Plane: in-track vs radial", x_axis=1, y_axis=0)
-        self._draw_panel(right, "RC Plane: cross-track vs radial", x_axis=2, y_axis=0)
+        self._draw_panel(left, "RI Plane: In-Track Vs Radial", x_axis=1, y_axis=0)
+        self._draw_panel(right, "RC Plane: Cross-Track Vs Radial", x_axis=2, y_axis=0)
         self._draw_hud(hud, command_status=command_status, coach_hint=coach_hint, speed_multiple=speed_multiple)
         if briefing_lines:
             self._draw_briefing(briefing_lines)
@@ -262,6 +266,9 @@ class PygameRPODashboard:
         ghost = self._frame_cache.get("ghost")
         if ghost is None:
             ghost = self._coast_prediction()
+        tutorial_path = np.array(getattr(self, "tutorial_target_path_ric", np.empty((0, 6))), dtype=float)
+        if tutorial_path.ndim != 2 or tutorial_path.shape[1] < 3:
+            tutorial_path = np.empty((0, 6), dtype=float)
         target_ghost = self._frame_cache.get("target_ghost")
         if target_ghost is None:
             target_ghost = self._target_coast_prediction(target_rel)
@@ -283,15 +290,18 @@ class PygameRPODashboard:
             (chaser_current - camera_center)[[x_axis, y_axis]].reshape(1, 2),
             (target_current - camera_center)[[x_axis, y_axis]].reshape(1, 2),
         ]
-        if bool(getattr(self, "plot_prediction_in_zoom", False)) and ghost.size:
-            capped = self._capped_projection_points_for_zoom(
-                ghost,
+        pts_for_scale.extend(
+            self._camera_rule_scale_points(
+                rel=rel,
+                target_rel=target_rel,
+                ghost=ghost,
                 x_axis=x_axis,
                 y_axis=y_axis,
                 camera_center=camera_center,
             )
-            if capped.size:
-                pts_for_scale.append(capped)
+        )
+        if tutorial_path.size:
+            pts_for_scale.append((tutorial_path[:, :3] - camera_center.reshape(1, 3))[:, [x_axis, y_axis]])
         min_span_km = self._minimum_plot_span_km(
             x_axis=x_axis,
             y_axis=y_axis,
@@ -372,26 +382,32 @@ class PygameRPODashboard:
         if _should_draw_nominal_nmt(nmt, nmt_bounds):
             nmt_pts = rows_to_px(nmt)
             self._draw_polyline_dashed(nmt_pts, color=(120, 236, 154), dash_px=18, gap_px=14, width=2)
+        if tutorial_path.size:
+            tutorial_pts = rows_to_px(_sample_rows(tutorial_path, MAX_GHOST_DRAW_POINTS))
+            self._draw_polyline_dashed(tutorial_pts, color=(92, 240, 132), dash_px=16, gap_px=8, width=3)
         pygame.draw.line(self.screen, (90, 104, 124), (plot.left, plot.centery), (plot.right, plot.centery), width=1)
         pygame.draw.line(self.screen, (90, 104, 124), (plot.centerx, plot.top), (plot.centerx, plot.bottom), width=1)
         pygame.draw.circle(self.screen, (80, 92, 112), (plot.centerx, plot.centery), 4)
         target_px = to_px(target_current)
-        if bool(getattr(self, "show_target_coast_prediction", False)) and target_ghost.size:
-            target_ghost_pts = rows_to_px(_sample_rows(target_ghost, MAX_GHOST_DRAW_POINTS))
+        target_ghost_sample = self._frame_cache.get("target_ghost_sample", target_ghost)
+        if bool(getattr(self, "show_target_coast_prediction", False)) and target_ghost_sample.size:
+            target_ghost_pts = rows_to_px(target_ghost_sample)
             self._draw_polyline_dashed(target_ghost_pts, color=(135, 150, 172), dash_px=10, gap_px=7, width=2)
-        if target_rel.size and len(target_rel) >= 2:
-            target_trail = rows_to_px(_sample_rows(target_rel[-self.max_history :], MAX_TRAIL_DRAW_POINTS))
+        target_trail_rows = self._frame_cache.get("target_trail", target_rel[-self.max_history :])
+        if target_trail_rows.size and len(target_trail_rows) >= 2:
+            target_trail = rows_to_px(target_trail_rows)
             pygame.draw.lines(self.screen, (245, 205, 92), False, target_trail, width=2)
         pygame.draw.circle(self.screen, (245, 205, 92), target_px, 6)
 
-        trail_rows = _sample_rows(rel[-self.max_history :], MAX_TRAIL_DRAW_POINTS)
+        trail_rows = self._frame_cache.get("rel_trail", rel[-self.max_history :])
         trail = rows_to_px(trail_rows)
-        if ghost.size:
-            ghost_pts = rows_to_px(_sample_rows(ghost, MAX_GHOST_DRAW_POINTS))
+        ghost_sample = self._frame_cache.get("ghost_sample", ghost)
+        if ghost_sample.size:
+            ghost_pts = rows_to_px(ghost_sample)
             self._draw_polyline_dashed(ghost_pts, color=(135, 150, 172), dash_px=8, gap_px=8, width=2)
         if len(trail) >= 2:
             pygame.draw.lines(self.screen, (215, 86, 86), False, trail, width=2)
-        self._draw_burn_markers(rel=rel, to_px=to_px)
+        self._draw_burn_markers(rel=rel, to_px=to_px, marker_rows=self._frame_cache.get("burn_marker_rel"))
         chaser = trail[-1]
         pygame.draw.circle(self.screen, (245, 92, 92), chaser, 7)
 
@@ -433,11 +449,21 @@ class PygameRPODashboard:
         )
         latest_thrust = self.thrust_ric_hist[-1] if self.thrust_ric_hist else np.zeros(3, dtype=float)
         active_burn = bool(np.linalg.norm(latest_thrust) > float(self.burn_marker_threshold_km_s2))
+        thrust = _dashboard_history_array(self, "_thrust_ric_array", self.thrust_ric_hist[-rel.shape[0] :], width=3)
+        target_ghost = self._target_coast_prediction(target_rel)
+        ghost = self._coast_prediction_from_cached("chaser", rel[-1], active_burn=active_burn)
+        burn_marker_rel = self._burn_marker_rows(rel=rel, thrust=thrust)
         self._frame_cache = {
             "rel": rel,
             "target_rel": target_rel,
-            "ghost": self._coast_prediction_from_cached("chaser", rel[-1], active_burn=active_burn),
-            "target_ghost": self._target_coast_prediction(target_rel),
+            "thrust": thrust,
+            "ghost": ghost,
+            "ghost_sample": _sample_rows(ghost, MAX_GHOST_DRAW_POINTS),
+            "target_ghost": target_ghost,
+            "target_ghost_sample": _sample_rows(target_ghost, MAX_GHOST_DRAW_POINTS),
+            "rel_trail": _sample_rows(rel[-self.max_history :], MAX_TRAIL_DRAW_POINTS),
+            "target_trail": _sample_rows(target_rel[-self.max_history :], MAX_TRAIL_DRAW_POINTS),
+            "burn_marker_rel": burn_marker_rel,
             "nmt": self._nmt_points(),
             "nmt_bounds": self._nmt_boundary_points(),
         }
@@ -691,22 +717,28 @@ class PygameRPODashboard:
             anomaly = self._true_anomaly_indicator_text()
             suffix = f"   {anomaly}" if anomaly else ""
             self._text(
-                f"t={t:7.1f}s   range={format_distance_km(rng)}   rel speed={format_speed_km_s(spd)}{suffix}",
+                f"T={t:7.1f}s   Range={format_distance_km(rng)}   Rel Speed={format_speed_km_s(spd)}{suffix}",
                 (rect.x + 16, rect.y + 12),
                 self.font,
                 (235, 240, 245),
             )
+        hint_text = coach_hint or ""
+        hint_is_alert = hint_text.lower().startswith("wrong key")
+        if hint_is_alert:
+            alert_rect = pygame.Rect(rect.x + 10, rect.y + 34, min(rect.width - 20, 560), 24)
+            pygame.draw.rect(self.screen, (96, 28, 34), alert_rect, border_radius=4)
+            pygame.draw.rect(self.screen, (242, 92, 104), alert_rect, width=1, border_radius=4)
         self._text(
-            coach_hint or "",
+            hint_text,
             (rect.x + 16, rect.y + 38),
             self.small_font,
-            (245, 210, 110),
+            (255, 190, 198) if hint_is_alert else (245, 210, 110),
         )
         command_line = command_status.splitlines()[0] if command_status else ""
         if command_line:
             self._text(command_line, (rect.x + 16, rect.y + 60), self.small_font, (195, 205, 220))
         self._text(
-            f"Speed {float(speed_multiple):.0f}x   Up/Down speed   Space pause   . step   R reset   Esc quit",
+            f"Speed {float(speed_multiple):.0f}x   Up/Down Speed   Space Pause   . Step   R Reset   Esc Quit",
             (rect.right - 590, rect.y + 58),
             self.small_font,
             (220, 160, 160),
@@ -848,8 +880,8 @@ class PygameRPODashboard:
     @staticmethod
     def _briefing_footer_text(scrollable: bool) -> str:
         if scrollable:
-            return "Scroll to read. Press Space to start. Esc returns to level select."
-        return "Press Space to start. Esc returns to level select."
+            return "Scroll To Read. Press Space To Start. Esc Returns To Level Select."
+        return "Press Space To Start. Esc Returns To Level Select."
 
     def _draw_mission_banner(self, mission_state: str, *, debrief_lines: tuple[str, ...] = ()) -> None:
         pygame = self.pygame
@@ -859,13 +891,13 @@ class PygameRPODashboard:
             fill = (24, 86, 48)
             stroke = (108, 232, 142)
             text = "MISSION PASSED"
-            sub = "Press R to replay or Esc to quit"
+            sub = "Press R To Replay Or Esc To Quit"
             color = (210, 255, 220)
         else:
             fill = (90, 30, 36)
             stroke = (244, 102, 102)
             text = "MISSION FAILED"
-            sub = "Press R to retry or Esc to quit"
+            sub = "Press R To Retry Or Esc To Quit"
             color = (255, 220, 220)
         pygame.draw.rect(self.screen, fill, rect, border_radius=10)
         pygame.draw.rect(self.screen, stroke, rect, width=3, border_radius=10)
@@ -898,18 +930,44 @@ class PygameRPODashboard:
         if label:
             self._text(label, (end[0] + 6, end[1] - 8), self.small_font, color)
 
-    def _draw_burn_markers(self, *, rel: np.ndarray, to_px: Any) -> None:
-        if not self.thrust_ric_hist:
-            return
-        pygame = self.pygame
-        thrust = _dashboard_history_array(self, "_thrust_ric_array", self.thrust_ric_hist[-rel.shape[0] :], width=3)
-        active = np.linalg.norm(thrust, axis=1) > float(self.burn_marker_threshold_km_s2)
+    def _burn_marker_rows(self, *, rel: np.ndarray, thrust: np.ndarray) -> np.ndarray:
+        thrust_arr = np.array(thrust, dtype=float).reshape(-1, 3)
+        if thrust_arr.size == 0:
+            return np.empty((0, 6), dtype=float)
+        rel_arr = np.array(rel, dtype=float).reshape(-1, 6)
+        count = min(rel_arr.shape[0], thrust_arr.shape[0])
+        if count <= 0:
+            return np.empty((0, 6), dtype=float)
+        rel_arr = rel_arr[-count:]
+        thrust_arr = thrust_arr[-count:]
+        active = np.linalg.norm(thrust_arr, axis=1) > float(self.burn_marker_threshold_km_s2)
         idxs = np.where(active)[0]
         if idxs.size == 0:
-            return
+            return np.empty((0, 6), dtype=float)
         stride = max(1, int(np.ceil(idxs.size / 80)))
-        for idx in idxs[::stride]:
-            pygame.draw.circle(self.screen, (255, 145, 60), to_px(rel[int(idx)]), 3)
+        return rel_arr[idxs[::stride]]
+
+    def _draw_burn_markers(self, *, rel: np.ndarray, to_px: Any, marker_rows: np.ndarray | None = None) -> None:
+        if marker_rows is None and not self.thrust_ric_hist:
+            return
+        pygame = self.pygame
+        markers = (
+            self._burn_marker_rows(
+                rel=rel,
+                thrust=_dashboard_history_array(
+                    self,
+                    "_thrust_ric_array",
+                    self.thrust_ric_hist[-rel.shape[0] :],
+                    width=3,
+                ),
+            )
+            if marker_rows is None
+            else np.array(marker_rows, dtype=float).reshape(-1, 6)
+        )
+        if markers.size == 0:
+            return
+        for row in markers:
+            pygame.draw.circle(self.screen, (255, 145, 60), to_px(row), 3)
 
     def _draw_translucent_polygon(
         self, plot: Any, points: list[tuple[int, int]], *, color: tuple[int, int, int, int]
@@ -1156,7 +1214,7 @@ class PygameRPODashboard:
             a = a[np.all(np.isfinite(a), axis=1)]
             if a.size:
                 finite.append(a)
-        span = self._minimum_plot_span_km() if min_span_km is None else float(max(min_span_km, 0.05))
+        span = self._minimum_plot_span_km() if min_span_km is None else float(max(min_span_km, MIN_PLOT_SPAN_KM))
         if finite:
             all_pts = np.vstack(finite)
             span = max(float(np.max(np.abs(all_pts))) * 1.2, span)
@@ -1206,7 +1264,7 @@ class PygameRPODashboard:
             a = a[np.all(np.isfinite(a), axis=1)]
             if a.size:
                 finite.append(a[:, int(axis_index)])
-        span = float(max(0.05 if min_span_km is None else min_span_km, 0.05))
+        span = float(max(MIN_PLOT_SPAN_KM if min_span_km is None else min_span_km, MIN_PLOT_SPAN_KM))
         if finite:
             values = np.concatenate(finite)
             span = max(float(np.max(np.abs(values))) * 1.2, span)
@@ -1217,7 +1275,7 @@ class PygameRPODashboard:
     def _scale_for_fixed_half_span(*, plot_px: float, half_span_km: float) -> float:
         span = float(half_span_km)
         if not np.isfinite(span) or span <= 0.0:
-            span = 0.05
+            span = MIN_PLOT_SPAN_KM
         return float(max(float(plot_px) * 0.5, 1.0) / span)
 
     def _axis_scale_for_plane(self, *, x_axis: int, y_axis: int) -> tuple[float, float]:
@@ -1255,6 +1313,77 @@ class PygameRPODashboard:
         key = _plane_key_for_axes(x_axis=x_axis, y_axis=y_axis)
         planes = tuple(str(plane or "").strip().upper() for plane in getattr(self, "proximity_ring_plot_planes", ()))
         return key in planes
+
+    def _camera_rule_mode_key(self) -> str:
+        value = str(getattr(self, "camera_rule_mode", "default") or "default").strip().lower()
+        if value in {"full", "full_trajectory", "trajectory", "trail", "trail_projection"}:
+            return "full_trajectory"
+        if value in {"current_pair", "pair", "satellites", "satellites_only", "current"}:
+            return "current_pair"
+        return "default"
+
+    def toggle_camera_rule_mode(self) -> str:
+        next_mode = "current_pair" if self._camera_rule_mode_key() == "full_trajectory" else "full_trajectory"
+        self.camera_rule_mode = next_mode
+        if hasattr(self, "_frame_cache_dirty"):
+            self._frame_cache_dirty = True
+        return next_mode
+
+    def _full_trajectory_scale_points(
+        self,
+        *,
+        rel: np.ndarray,
+        target_rel: np.ndarray,
+        ghost: np.ndarray,
+        x_axis: int,
+        y_axis: int,
+        camera_center: np.ndarray,
+    ) -> list[np.ndarray]:
+        points: list[np.ndarray] = []
+        center = np.array(camera_center, dtype=float).reshape(1, 3)
+        rel_arr = np.array(rel, dtype=float)
+        if rel_arr.ndim == 2 and rel_arr.shape[1] >= 3:
+            points.append((rel_arr[:, :3] - center)[:, [int(x_axis), int(y_axis)]])
+        target_arr = np.array(target_rel, dtype=float)
+        if target_arr.ndim == 2 and target_arr.shape[1] >= 3:
+            points.append((target_arr[:, :3] - center)[:, [int(x_axis), int(y_axis)]])
+        ghost_arr = np.array(ghost, dtype=float)
+        if ghost_arr.ndim == 2 and ghost_arr.shape[1] >= 3:
+            points.append((ghost_arr[:, :3] - center)[:, [int(x_axis), int(y_axis)]])
+        return points
+
+    def _camera_rule_scale_points(
+        self,
+        *,
+        rel: np.ndarray,
+        target_rel: np.ndarray,
+        ghost: np.ndarray,
+        x_axis: int,
+        y_axis: int,
+        camera_center: np.ndarray,
+    ) -> list[np.ndarray]:
+        mode = self._camera_rule_mode_key()
+        if mode == "full_trajectory":
+            return self._full_trajectory_scale_points(
+                rel=rel,
+                target_rel=target_rel,
+                ghost=ghost,
+                x_axis=x_axis,
+                y_axis=y_axis,
+                camera_center=camera_center,
+            )
+        if mode == "current_pair":
+            return []
+        if bool(getattr(self, "plot_prediction_in_zoom", False)) and np.array(ghost, dtype=float).size:
+            capped = self._capped_projection_points_for_zoom(
+                ghost,
+                x_axis=x_axis,
+                y_axis=y_axis,
+                camera_center=camera_center,
+            )
+            if capped.size:
+                return [capped]
+        return []
 
     def _camera_center_ric(
         self,
@@ -1301,7 +1430,7 @@ class PygameRPODashboard:
         y_axis: int | None = None,
         offset: np.ndarray | None = None,
     ) -> float:
-        span = 0.05
+        span = MIN_PLOT_SPAN_KM
         if x_axis is None or y_axis is None:
             return span
         plane = _plane_key_for_axes(x_axis=int(x_axis), y_axis=int(y_axis))
@@ -1609,13 +1738,19 @@ def _true_anomaly_deg_from_state(state: np.ndarray) -> float | None:
 
 
 def _history_array_tail(array: np.ndarray, row: np.ndarray, *, width: int, max_rows: int) -> np.ndarray:
-    row_arr = np.array(row, dtype=float).reshape(1, int(width))
-    current = np.array(array, dtype=float).reshape(-1, int(width))
-    combined = row_arr if current.size == 0 else np.concatenate((current, row_arr), axis=0)
     rows = int(max(max_rows, 1))
-    if combined.shape[0] > rows:
-        combined = combined[-rows:, :]
-    return combined
+    row_arr = np.asarray(row, dtype=float).reshape(int(width))
+    current = np.asarray(array, dtype=float).reshape(-1, int(width))
+    if current.size == 0:
+        return row_arr.reshape(1, int(width)).copy()
+    if current.shape[0] < rows:
+        return np.concatenate((current, row_arr.reshape(1, int(width))), axis=0)
+    if current.shape[0] > rows:
+        current = current[-rows:, :].copy()
+    if rows > 1:
+        current[:-1, :] = current[1:, :]
+    current[-1, :] = row_arr
+    return current
 
 
 def _dashboard_history_array(
