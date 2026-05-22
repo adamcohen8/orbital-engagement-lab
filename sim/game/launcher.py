@@ -624,7 +624,7 @@ def _draw_start_screen(
     pygame.draw.rect(screen, (18, 34, 48), prompt_rect, border_radius=6)
     pygame.draw.rect(screen, accent, prompt_rect, width=1, border_radius=6)
     _text_centered(screen, font, "HIT ANY KEY TO BEGIN", prompt_rect.center, (238, 244, 250))
-    _text_centered(screen, small_font, "Esc quits", (center[0], prompt_rect.bottom + 22), (152, 166, 186))
+    _text_centered(screen, small_font, "Esc Quits", (center[0], prompt_rect.bottom + 22), (152, 166, 186))
 
 
 def _draw_launcher(
@@ -648,14 +648,14 @@ def _draw_launcher(
     _draw_music_button(pygame, screen, enabled=music_enabled, font=small_font)
     _draw_record_video_button(pygame, screen, enabled=record_video, font=small_font)
     _draw_clear_progress_button(pygame, screen, font=small_font)
-    _text(screen, font, "Select RPO training level", (56, 78), (172, 186, 206))
+    _text(screen, font, "Select RPO Training Level", (56, 78), (172, 186, 206))
     _draw_difficulty_picker(pygame, screen, selected_difficulty=selected_difficulty, font=small_font)
 
     footer_y = max(height - small_font.get_height() - FOOTER_BOTTOM_MARGIN, PANEL_TOP + 16)
     _text(
         screen,
         small_font,
-        "Up/Down select   Left/Right difficulty   M music   V video   Enter launch   Esc quit",
+        "Up/Down Select   Left/Right Difficulty   M Music   V Video   Enter Launch   Esc Quit",
         (56, footer_y),
         (220, 160, 160),
     )
@@ -677,13 +677,18 @@ def _draw_launcher(
         pygame.draw.rect(screen, fill, rect, border_radius=8)
         pygame.draw.rect(screen, stroke, rect, width=2 if is_selected else 1, border_radius=8)
         _text(screen, font, option.title, (rect.x + 18, rect.y + 12), (238, 244, 250))
-        _text(
-            screen,
-            small_font,
-            f"Progress: {_progress_stars(option.completed_difficulties)}   High: {_format_high_score(option.high_score)}",
-            (rect.x + 18, rect.y + 38),
-            (162, 178, 198),
-        )
+        if _show_progress_text(option):
+            _text(
+                screen,
+                small_font,
+                (
+                    "Progress: "
+                    f"{_progress_stars(option.completed_difficulties)}   "
+                    f"High: {_format_high_score(option.high_score)}"
+                ),
+                (rect.x + 18, rect.y + 38),
+                (162, 178, 198),
+            )
 
     if len(options) > visible:
         _draw_scrollbar(pygame, screen, list_rect, count=len(options), visible=visible, scroll_offset=scroll_offset)
@@ -776,7 +781,7 @@ def _draw_preview(
     _text(screen, small_font, budget, (content_rect.x, y), (162, 178, 198))
     y += 32
     high = _format_high_score(option.high_score)
-    if high != "--":
+    if _show_progress_text(option) and high != "--":
         _text(screen, small_font, f"High Score: {high}", (content_rect.x, y), (245, 205, 92))
         y += PREVIEW_LINE_HEIGHT + PREVIEW_SECTION_GAP
     y = _draw_section(screen, small_font, "Objective", option.learning_goal, content_rect.x, y, content_rect.width, max_y)
@@ -833,7 +838,7 @@ def _preview_content_height(option: GameScenarioOption, *, font: Any, small_font
     y = 0
     y += 34
     y += 32
-    if option.high_score > 0:
+    if _show_progress_text(option) and option.high_score > 0:
         y += PREVIEW_LINE_HEIGHT + PREVIEW_SECTION_GAP
     y = _section_height(option.learning_goal, small_font, y, width_px)
     y = _section_height(option.player_brief or option.description, small_font, y + PREVIEW_SECTION_GAP, width_px)
@@ -846,6 +851,10 @@ def _section_height(body: str, font: Any, y: int, width_px: int) -> int:
     y += PREVIEW_SECTION_TITLE_GAP
     y += len(_wrap_text_px(body, font, width_px)) * PREVIEW_LINE_HEIGHT
     return y
+
+
+def _show_progress_text(option: GameScenarioOption) -> bool:
+    return str(option.scenario_id) != "rpo_00_tutorial"
 
 
 def _bullets_height(items: tuple[str, ...], font: Any, y: int, width_px: int) -> int:
@@ -923,7 +932,7 @@ def _budget_line(option: GameScenarioOption) -> str:
     if option.delta_v_budget_m_s is not None:
         parts.append(f"Chaser dV: {format_speed_m_s(option.delta_v_budget_m_s)}")
     if option.goal_speed_km_s is not None:
-        parts.append(f"Speed gate: {format_speed_km_s(option.goal_speed_km_s)}")
+        parts.append(f"Speed Gate: {format_speed_km_s(option.goal_speed_km_s)}")
     if option.target_delta_v_budget_m_s is not None:
         parts.append(f"Target dV: {format_speed_m_s(option.target_delta_v_budget_m_s)}")
     return "   ".join(parts)

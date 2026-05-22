@@ -41,6 +41,8 @@ def poll_pygame_input(
             state.step_requested = True
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_m:
             state.music_toggle_requested = True
+        elif event.type == pygame.KEYDOWN and event.key == getattr(pygame, "K_c", object()):
+            state.camera_rule_toggle_requested = True
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_UP:
             state.speed_multiplier_change += 1
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_DOWN:

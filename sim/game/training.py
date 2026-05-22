@@ -13,6 +13,7 @@ from sim.utils.frames import eci_relative_to_ric_rect, ric_dcm_ir_from_rv
 EARTH_MU_KM3_S2 = 398600.4418
 _BURN_AXIS_INDEX = {"radial": 0, "in_track": 1, "cross_track": 2}
 _BURN_AXIS_LABEL = {"radial": "Radial", "in_track": "In-track", "cross_track": "Cross-track"}
+_BURN_AXIS_SHORT_LABEL = {"radial": "R", "in_track": "I", "cross_track": "C"}
 _BURN_AXIS_MIN_COMPONENT_FRACTION = 0.75
 
 
@@ -235,6 +236,32 @@ class RequiredPhaseBurnConfig:
 
 
 @dataclass(frozen=True)
+class GuidedTutorialBurnConfig:
+    name: str
+    axis: str
+    sign: int
+    delta_v_m_s: float
+    label: str = ""
+    hint: str = ""
+
+    @property
+    def display_label(self) -> str:
+        if self.label:
+            return self.label
+        prefix = "+" if self.sign >= 0 else "-"
+        return f"{prefix}{_BURN_AXIS_SHORT_LABEL[self.axis]} burn"
+
+
+@dataclass(frozen=True)
+class GuidedTutorialSpeedStepConfig:
+    name: str = "speed_multiplier"
+    after_burn_name: str = ""
+    target_speed_multiplier: float = 10.0
+    label: str = "Speed 10x"
+    hint: str = ""
+
+
+@dataclass(frozen=True)
 class RPOTrainingConfig:
     enabled: bool = False
     scenario_id: str = ""
@@ -266,11 +293,17 @@ class RPOTrainingConfig:
     fail_on_delta_v_budget: bool = True
     coast_chaser_after_delta_v_budget: bool = False
     survival_goal: bool = False
+    sandbox_mode: bool = False
     required_burn_axes: tuple[str, ...] = ()
     required_burn_axis_threshold_km_s2: float = 1.0e-10
     required_burn_axis_min_component_fraction: float = _BURN_AXIS_MIN_COMPONENT_FRACTION
     required_phase_burns: tuple[RequiredPhaseBurnConfig, ...] = ()
     require_speed_multiplier_change: bool = False
+    required_coast_after_burn_s: float | None = None
+    axis_descriptions: dict[str, str] = field(default_factory=dict)
+    tutorial_stage_hints: dict[str, str] = field(default_factory=dict)
+    guided_tutorial_burns: tuple[GuidedTutorialBurnConfig, ...] = ()
+    guided_tutorial_speed_step: GuidedTutorialSpeedStepConfig | None = None
 
     @classmethod
     def from_metadata(cls, metadata: dict[str, Any]) -> RPOTrainingConfig:
@@ -317,6 +350,7 @@ class RPOTrainingConfig:
             fail_on_delta_v_budget=bool(raw.get("fail_on_delta_v_budget", True)),
             coast_chaser_after_delta_v_budget=bool(raw.get("coast_chaser_after_delta_v_budget", False)),
             survival_goal=bool(raw.get("survival_goal", False)),
+            sandbox_mode=bool(raw.get("sandbox_mode", False)),
             required_burn_axes=_burn_axes_from_metadata(raw.get("required_burn_axes")),
             required_burn_axis_threshold_km_s2=float(raw.get("required_burn_axis_threshold_km_s2", 1.0e-10)),
             required_burn_axis_min_component_fraction=float(
@@ -324,6 +358,15 @@ class RPOTrainingConfig:
             ),
             required_phase_burns=_required_phase_burns_from_metadata(raw.get("required_phase_burns")),
             require_speed_multiplier_change=bool(raw.get("require_speed_multiplier_change", False)),
+            required_coast_after_burn_s=_optional_float(raw.get("required_coast_after_burn_s")),
+            axis_descriptions=_axis_descriptions_from_metadata(raw.get("axis_descriptions")),
+            tutorial_stage_hints=_string_mapping_from_metadata(
+                raw.get("tutorial_stage_hints"), "metadata.game.training.tutorial_stage_hints"
+            ),
+            guided_tutorial_burns=_guided_tutorial_burns_from_metadata(raw.get("guided_tutorial_burns")),
+            guided_tutorial_speed_step=_guided_tutorial_speed_step_from_metadata(
+                raw.get("guided_tutorial_speed_step")
+            ),
         )
 
 
@@ -343,6 +386,12 @@ class RPOTrainingScore:
     burn_axes_satisfied: tuple[str, ...]
     phase_burns_satisfied: tuple[str, ...]
     speed_multiplier_changed: bool
+    coast_after_burn_satisfied: bool
+    coast_after_burn_s: float
+    guided_tutorial_burns_satisfied: tuple[str, ...]
+    guided_tutorial_burns_total: int
+    guided_tutorial_speed_satisfied: bool
+    guided_tutorial_speed_target: float | None
     achieved_time_s: float | None
     min_goal_error_km: float
     final_nmt_radial_amplitude_km: float
@@ -385,6 +434,8 @@ class RPOTrainingTracker:
         self._hard_speed_limit_violation = False
         self._burn_axis_first_indices: dict[str, int] = {}
         self._phase_burn_first_indices: dict[str, int] = {}
+        self._guided_tutorial_burn_names: list[str] = []
+        self._guided_tutorial_speed_complete = False
         self._history_capacity = 0
         self._history_count = 0
         self._t_array = np.zeros(0, dtype=float)
@@ -399,7 +450,7 @@ class RPOTrainingTracker:
         self._nmt_drift_velocity_error_array = np.zeros(0, dtype=float)
         self._nmt_element_goal_error_array = np.zeros(0, dtype=float)
 
-    def clear(self) -> None:
+    def clear(self, *, reset_guided_tutorial_progress: bool = True) -> None:
         self.t_s.clear()
         self.rel_ric_hist.clear()
         self.thrust_hist.clear()
@@ -414,7 +465,28 @@ class RPOTrainingTracker:
         self._hard_speed_limit_violation = False
         self._burn_axis_first_indices.clear()
         self._phase_burn_first_indices.clear()
+        if reset_guided_tutorial_progress:
+            self._guided_tutorial_burn_names.clear()
+            self._guided_tutorial_speed_complete = False
         self._history_count = 0
+
+    def mark_guided_tutorial_burn_complete(self, name: str) -> None:
+        stage_name = str(name or "").strip()
+        if stage_name and stage_name not in self._guided_tutorial_burn_names:
+            self._guided_tutorial_burn_names.append(stage_name)
+            self._score_cache = None
+
+    def guided_tutorial_burns_satisfied(self) -> tuple[str, ...]:
+        configured = {stage.name for stage in self.config.guided_tutorial_burns}
+        return tuple(name for name in self._guided_tutorial_burn_names if name in configured)
+
+    def mark_guided_tutorial_speed_complete(self) -> None:
+        if not self._guided_tutorial_speed_complete:
+            self._guided_tutorial_speed_complete = True
+            self._score_cache = None
+
+    def guided_tutorial_speed_satisfied(self) -> bool:
+        return bool(self._guided_tutorial_speed_complete or self.config.guided_tutorial_speed_step is None)
 
     def record(self, snapshot: SimulationSnapshot) -> None:
         if not self.config.enabled:
@@ -695,7 +767,44 @@ class RPOTrainingTracker:
                 missing.append(phase_burn.label)
         if self.config.require_speed_multiplier_change and not self._speed_multiplier_changed:
             missing.append("speed multiplier change")
+        if self.config.required_coast_after_burn_s is not None:
+            coast_satisfied, _, _ = self._coast_after_burn_status()
+            if not coast_satisfied:
+                missing.append("coast after a burn")
+        if self.config.guided_tutorial_speed_step is not None and not self.guided_tutorial_speed_satisfied():
+            missing.append(self.config.guided_tutorial_speed_step.label)
         return tuple(missing)
+
+    def _coast_after_burn_status(self) -> tuple[bool, int | None, float]:
+        required_s = self.config.required_coast_after_burn_s
+        if required_s is None:
+            return True, None, 0.0
+        threshold = float(self.config.required_burn_axis_threshold_km_s2)
+        if len(self.t_s) < 2 or len(self.thrust_ric_hist) < 2:
+            return False, None, 0.0
+        t = np.array(self.t_s, dtype=float).reshape(-1)
+        thrust = np.vstack(self.thrust_ric_hist)
+        n = min(t.size, thrust.shape[0])
+        if n < 2:
+            return False, None, 0.0
+        active = np.linalg.norm(thrust[:n], axis=1) > threshold
+        active_idx = np.flatnonzero(active)
+        if active_idx.size == 0:
+            return False, None, 0.0
+        coast_s = 0.0
+        best_s = 0.0
+        for idx in range(int(active_idx[0]) + 1, n - 1):
+            dt = float(t[idx + 1] - t[idx])
+            if not np.isfinite(dt) or dt <= 0.0:
+                continue
+            if active[idx]:
+                coast_s = 0.0
+                continue
+            coast_s += dt
+            best_s = max(best_s, coast_s)
+            if coast_s >= float(required_s):
+                return True, idx + 1, best_s
+        return False, None, best_s
 
     def _record_inspection_gate_sample(self, rel: np.ndarray) -> None:
         gates = self.config.inspection_gates
@@ -738,6 +847,8 @@ class RPOTrainingTracker:
         keepout = self.config.keepout_radius_km
         if keepout is not None and rng < float(keepout):
             return "Inside keepout: arrest closing motion and translate away from the target."
+        if self.config.sandbox_mode:
+            return "Sandbox: Maneuver freely, coast, and watch the relative orbit respond."
         if self.config.inspection_gates:
             gate_status = self._inspection_gate_status()
             satisfied_names = set(gate_status["satisfied"])
@@ -759,6 +870,9 @@ class RPOTrainingTracker:
             return "Evade: keep separation until the timer expires."
         missing_requirements = self._missing_tutorial_requirements()
         if missing_requirements:
+            staged_hint = self._tutorial_stage_hint()
+            if staged_hint:
+                return staged_hint
             return f"Tutorial checklist: complete {', '.join(missing_requirements)} before finishing."
         if self.config.goal_nmt_radial_amplitude_km is None and self.config.goal_range_km is not None:
             target_range = float(self.config.goal_range_km)
@@ -779,6 +893,9 @@ class RPOTrainingTracker:
                             f"{_format_distance_text(float(self.config.max_cross_track_amplitude_km))}."
                         )
                     return "Inside green circle with speed under limit: level should complete."
+                final_hint = self.config.tutorial_stage_hints.get("final_approach", "")
+                if final_hint:
+                    return final_hint
                 return f"Enter the green circle: close to {_format_distance_text(target_range)} or less."
             if abs(range_error) <= float(tolerance):
                 if speed_limit is not None and speed > float(speed_limit):
@@ -788,6 +905,9 @@ class RPOTrainingTracker:
                 if speed_limit is not None:
                     return f"Near target range: brake below {_format_speed_text(float(speed_limit))}."
                 return "Near target range: settle in the green range band."
+            final_hint = self.config.tutorial_stage_hints.get("final_approach", "")
+            if final_hint:
+                return final_hint
         if self.config.goal_nmt_radial_amplitude_km is None and self.config.goal_radius_km is not None:
             goal = np.array(self.config.goal_relative_ric_km, dtype=float).reshape(-1)
             if goal.size == 3:
@@ -820,7 +940,24 @@ class RPOTrainingTracker:
             return "In-track error dominates: small along-track burns can create delayed radial effects."
         if speed < 0.001 and rng > 1.0:
             return "Mostly coasting: watch the natural relative drift before burning again."
-        return "Use small pulses, then coast and observe the RIC trajectory."
+        return "Pulse gently, coast, and watch the relative motion before the next correction."
+
+    def _tutorial_stage_hint(self) -> str:
+        hints = self.config.tutorial_stage_hints
+        satisfied = set(self._burn_axes_satisfied())
+        for axis in self.config.required_burn_axes:
+            if axis not in satisfied:
+                return hints.get(axis) or self.config.axis_descriptions.get(axis, "")
+        if self.config.require_speed_multiplier_change and not self._speed_multiplier_changed:
+            return hints.get("speed_multiplier", "")
+        if self.config.required_coast_after_burn_s is not None:
+            coast_satisfied, _, coast_s = self._coast_after_burn_status()
+            if not coast_satisfied:
+                hint = hints.get("coast", "")
+                if hint and coast_s > 0.0:
+                    return f"{hint} Current coast: {coast_s:.0f} s."
+                return hint
+        return ""
 
     def _current_cross_track_amplitude_km(self, rel: np.ndarray) -> float | None:
         if self.config.max_cross_track_amplitude_km is None or not self.mean_motion_hist:
@@ -851,6 +988,16 @@ class RPOTrainingTracker:
                 burn_axes_satisfied=(),
                 phase_burns_satisfied=(),
                 speed_multiplier_changed=bool(self._speed_multiplier_changed),
+                coast_after_burn_satisfied=False,
+                coast_after_burn_s=0.0,
+                guided_tutorial_burns_satisfied=(),
+                guided_tutorial_burns_total=len(self.config.guided_tutorial_burns),
+                guided_tutorial_speed_satisfied=self.config.guided_tutorial_speed_step is None,
+                guided_tutorial_speed_target=(
+                    None
+                    if self.config.guided_tutorial_speed_step is None
+                    else float(self.config.guided_tutorial_speed_step.target_speed_multiplier)
+                ),
                 achieved_time_s=None,
                 min_goal_error_km=float("nan"),
                 final_nmt_radial_amplitude_km=float("nan"),
@@ -882,6 +1029,9 @@ class RPOTrainingTracker:
         burn_axes_satisfied = self._burn_axes_satisfied()
         phase_burn_first_sample_idx = self._phase_burn_first_sample_indices()
         phase_burns_satisfied = self._phase_burns_satisfied()
+        coast_after_burn_satisfied, coast_after_burn_idx, coast_after_burn_s = self._coast_after_burn_status()
+        guided_tutorial_burns_satisfied = self.guided_tutorial_burns_satisfied()
+        guided_tutorial_speed_satisfied = self.guided_tutorial_speed_satisfied()
         ranges = np.linalg.norm(rel[:, :3], axis=1)
         speeds = np.linalg.norm(rel[:, 3:], axis=1)
         element_errors = None
@@ -981,6 +1131,11 @@ class RPOTrainingTracker:
                 goal_met_samples &= False
             else:
                 goal_met_samples[: min(speed_change_idx, goal_met_samples.size)] = False
+        if self.config.required_coast_after_burn_s is not None:
+            if coast_after_burn_idx is None:
+                goal_met_samples &= False
+            else:
+                goal_met_samples[: min(coast_after_burn_idx, goal_met_samples.size)] = False
         achieved_idx = np.flatnonzero(goal_met_samples)
         achieved_time_s = float(t[int(achieved_idx[0])] - t[0]) if achieved_idx.size else None
         gate_eval_end = int(achieved_idx[0]) + 1 if achieved_idx.size else rel.shape[0]
@@ -1074,19 +1229,40 @@ class RPOTrainingTracker:
         if self.config.require_speed_multiplier_change and not self._speed_multiplier_changed:
             requirements_ok = False
             reasons.append("Speed multiplier change required.")
-        level_passed = bool(achieved_time_s is not None and budget_ok and requirements_ok)
-        level_failed = bool(
-            (
-                keepout_violation
-                or hard_speed_limit_violation
-                or forbidden_region_violation
-                or approach_gate_violation
-                or dv_failed
-                or target_dv_failed
-                or time_failed
+        if self.config.required_coast_after_burn_s is not None and not coast_after_burn_satisfied:
+            requirements_ok = False
+            reasons.append(f"Coast for {float(self.config.required_coast_after_burn_s):.0f} s after a burn required.")
+        guided_tutorial_burn_set = set(guided_tutorial_burns_satisfied)
+        for stage in self.config.guided_tutorial_burns:
+            if stage.name not in guided_tutorial_burn_set:
+                requirements_ok = False
+                reasons.append(f"{stage.display_label} tutorial stage required.")
+        if self.config.guided_tutorial_speed_step is not None and not guided_tutorial_speed_satisfied:
+            requirements_ok = False
+            reasons.append(f"{self.config.guided_tutorial_speed_step.label} tutorial step required.")
+        if self.config.sandbox_mode:
+            sandbox_elapsed = float(t[-1] - t[0]) if t.size >= 2 else 0.0
+            level_passed = bool(self.config.max_time_s is not None and sandbox_elapsed >= float(self.config.max_time_s))
+            level_failed = False
+            reasons = (
+                ["Sandbox complete; time limit reached."]
+                if level_passed
+                else ["Sandbox active; no pass/fail objective."]
             )
-            and not level_passed
-        )
+        else:
+            level_passed = bool(achieved_time_s is not None and budget_ok and requirements_ok)
+            level_failed = bool(
+                (
+                    keepout_violation
+                    or hard_speed_limit_violation
+                    or forbidden_region_violation
+                    or approach_gate_violation
+                    or dv_failed
+                    or target_dv_failed
+                    or time_failed
+                )
+                and not level_passed
+            )
         goal_met = level_passed
         if level_passed:
             reasons.append("All pass criteria satisfied.")
@@ -1109,6 +1285,16 @@ class RPOTrainingTracker:
             burn_axes_satisfied=tuple(burn_axes_satisfied),
             phase_burns_satisfied=tuple(phase_burns_satisfied),
             speed_multiplier_changed=bool(self._speed_multiplier_changed),
+            coast_after_burn_satisfied=bool(coast_after_burn_satisfied),
+            coast_after_burn_s=float(coast_after_burn_s),
+            guided_tutorial_burns_satisfied=tuple(guided_tutorial_burns_satisfied),
+            guided_tutorial_burns_total=len(self.config.guided_tutorial_burns),
+            guided_tutorial_speed_satisfied=bool(guided_tutorial_speed_satisfied),
+            guided_tutorial_speed_target=(
+                None
+                if self.config.guided_tutorial_speed_step is None
+                else float(self.config.guided_tutorial_speed_step.target_speed_multiplier)
+            ),
             achieved_time_s=achieved_time_s,
             min_goal_error_km=float(np.min(goal_err)),
             final_nmt_radial_amplitude_km=final_elements["radial_amplitude_km"],
@@ -1161,7 +1347,7 @@ class RPOTrainingTracker:
                 f"Approx dV     : {format_speed_m_s(score.approximate_delta_v_m_s)}",
                 f"Target dV     : {format_speed_m_s(score.target_delta_v_m_s)}",
                 f"Achieved Time : {_format_optional_time(score.achieved_time_s)}",
-                f"Level Passed  : {'yes' if score.level_passed else 'no'}",
+                f"Level Passed  : {'Yes' if score.level_passed else 'No'}",
             ]
         )
         if score.forbidden_region_violation:
@@ -1173,13 +1359,14 @@ class RPOTrainingTracker:
         if score.approach_gate_violation:
             lines.append(f"Gate Failure  : {', '.join(score.approach_gate_names)}")
         if self.config.required_burn_axes:
-            axes = ", ".join(score.burn_axes_satisfied) if score.burn_axes_satisfied else "none"
+            axes = ", ".join(_BURN_AXIS_LABEL.get(axis, axis.title()) for axis in score.burn_axes_satisfied)
+            axes = axes if axes else "None"
             lines.append(f"Burn Axes     : {axes}")
         if self.config.required_phase_burns:
-            burns = ", ".join(score.phase_burns_satisfied) if score.phase_burns_satisfied else "none"
+            burns = ", ".join(score.phase_burns_satisfied) if score.phase_burns_satisfied else "None"
             lines.append(f"Phase Burns   : {burns}")
         if self.config.require_speed_multiplier_change:
-            lines.append(f"Speed Changed : {'yes' if score.speed_multiplier_changed else 'no'}")
+            lines.append(f"Speed Changed : {'Yes' if score.speed_multiplier_changed else 'No'}")
         if self.config.goal_nmt_radial_amplitude_km is not None:
             lines.extend(
                 [
@@ -1473,7 +1660,7 @@ def _final_nmt_element_values(element_errors: dict[str, np.ndarray] | None) -> d
 
 def _format_optional_time(value: float | None) -> str:
     if value is None:
-        return "not achieved"
+        return "Not Achieved"
     return f"{float(value):.1f} s"
 
 
@@ -1529,6 +1716,90 @@ def _burn_axis_from_metadata_value(value: Any) -> str:
     if axis is None:
         raise ValueError(f"Unknown burn axis '{value}'.")
     return axis
+
+
+def _axis_descriptions_from_metadata(value: Any) -> dict[str, str]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError("metadata.game.training.axis_descriptions must be a mapping.")
+    descriptions: dict[str, str] = {}
+    for raw_axis, raw_text in value.items():
+        axis = _burn_axis_from_metadata_value(raw_axis)
+        text = str(raw_text or "").strip()
+        if text:
+            descriptions[axis] = text
+    return descriptions
+
+
+def _string_mapping_from_metadata(value: Any, field_name: str) -> dict[str, str]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError(f"{field_name} must be a mapping.")
+    return {str(key or "").strip(): str(text or "").strip() for key, text in value.items() if str(text or "").strip()}
+
+
+def _guided_tutorial_burns_from_metadata(value: Any) -> tuple[GuidedTutorialBurnConfig, ...]:
+    if value is None or value is False:
+        return ()
+    if not isinstance(value, list):
+        raise ValueError("metadata.game.training.guided_tutorial_burns must be a list.")
+    stages: list[GuidedTutorialBurnConfig] = []
+    for idx, raw_value in enumerate(value, start=1):
+        if not isinstance(raw_value, dict):
+            raise ValueError("metadata.game.training.guided_tutorial_burns entries must be mappings.")
+        axis = _burn_axis_from_metadata_value(raw_value.get("axis", "in_track"))
+        sign = _sign_from_metadata(raw_value.get("sign", 1))
+        name = str(raw_value.get("name", "") or "").strip()
+        if not name:
+            prefix = "plus" if sign >= 0 else "minus"
+            name = f"{prefix}_{axis}_{idx}"
+        delta_v = float(raw_value.get("delta_v_m_s", 0.25) or 0.25)
+        if not np.isfinite(delta_v) or delta_v <= 0.0:
+            raise ValueError("metadata.game.training.guided_tutorial_burns.delta_v_m_s must be positive.")
+        stages.append(
+            GuidedTutorialBurnConfig(
+                name=name,
+                axis=axis,
+                sign=sign,
+                delta_v_m_s=delta_v,
+                label=str(raw_value.get("label", "") or "").strip(),
+                hint=str(raw_value.get("hint", "") or "").strip(),
+            )
+        )
+    return tuple(stages)
+
+
+def _guided_tutorial_speed_step_from_metadata(value: Any) -> GuidedTutorialSpeedStepConfig | None:
+    if value is None or value is False:
+        return None
+    if value is True:
+        raw: dict[str, Any] = {}
+    elif isinstance(value, dict):
+        raw = value
+    else:
+        raise ValueError("metadata.game.training.guided_tutorial_speed_step must be a mapping.")
+    target = float(raw.get("target_speed_multiplier", 10.0) or 10.0)
+    if not np.isfinite(target) or target <= 0.0:
+        raise ValueError("metadata.game.training.guided_tutorial_speed_step.target_speed_multiplier must be positive.")
+    return GuidedTutorialSpeedStepConfig(
+        name=str(raw.get("name", "speed_multiplier") or "speed_multiplier").strip(),
+        after_burn_name=str(raw.get("after_burn_name", "") or "").strip(),
+        target_speed_multiplier=target,
+        label=str(raw.get("label", "") or "").strip() or f"Speed {target:g}x",
+        hint=str(raw.get("hint", "") or "").strip(),
+    )
+
+
+def _sign_from_metadata(value: Any) -> int:
+    if isinstance(value, str):
+        key = value.strip().lower()
+        if key in {"+", "+1", "plus", "positive", "pos"}:
+            return 1
+        if key in {"-", "-1", "minus", "negative", "neg"}:
+            return -1
+    return 1 if float(value) >= 0.0 else -1
 
 
 def _required_phase_burns_from_metadata(value: Any) -> tuple[RequiredPhaseBurnConfig, ...]:
