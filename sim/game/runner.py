@@ -35,7 +35,13 @@ from sim.game.audio import (
     _stop_game_music,
 )
 from sim.game.audio_controller import GameAudioController
-from sim.game.debrief import game_debrief_path, tracker_replay_history, write_game_debrief
+from sim.game.debrief import (
+    game_debrief_path,
+    next_game_debrief_attempt_index,
+    open_game_debrief_folder,
+    tracker_replay_history,
+    write_game_debrief,
+)
 from sim.game.defensive_target import DefensiveTargetIntentProvider
 from sim.game.formatting import format_distance_km, format_speed_km_s, format_speed_m_s
 from sim.game.manual import KeyboardCommandState, ManualGameCommandProvider
@@ -962,6 +968,11 @@ def run_game_mode(
             round_index=arcade_round_index,
             max_time_s=arcade_remaining_time_s,
         )
+    debrief_enabled = _game_debrief_enabled(
+        config,
+        training_cfg,
+        arcade_enabled=arcade_enabled,
+    )
     attempt_config = _arcade_round_simulation_config(
         config,
         training_cfg,
@@ -993,6 +1004,7 @@ def run_game_mode(
         defensive_target_provider=(
             _game_random_direction_defensive_target_provider(
                 config,
+                round_index=arcade_round_index,
                 rng=_arcade_round_rng(int(arcade_seed_value), arcade_round_index),
             )
             if arcade_enabled and arcade_seed_value is not None
@@ -1043,6 +1055,7 @@ def run_game_mode(
     recording_attempt = 1
     recording_path: Path | None = None
     debrief_path: Path | None = None
+    debrief_folder_to_open: Path | None = None
     recording_controller = GameRecordingController(
         enabled=record_video,
         config=config,
@@ -1073,6 +1086,11 @@ def run_game_mode(
             config = _apply_sandbox_setup_to_config(config, setup)
             training_cfg = RPOTrainingConfig.from_metadata(dict(config.scenario.metadata or {}))
             base_training_cfg = training_cfg
+            debrief_enabled = _game_debrief_enabled(
+                config,
+                training_cfg,
+                arcade_enabled=arcade_enabled,
+            )
             attempt_config = _arcade_round_simulation_config(
                 config,
                 training_cfg,
@@ -1101,6 +1119,7 @@ def run_game_mode(
                 defensive_target_provider=(
                     _game_random_direction_defensive_target_provider(
                         config,
+                        round_index=arcade_round_index,
                         rng=_arcade_round_rng(int(arcade_seed_value), arcade_round_index),
                     )
                     if arcade_enabled and arcade_seed_value is not None
@@ -1149,6 +1168,7 @@ def run_game_mode(
             speed_multiple=current_speed_multiple,
             briefing_lines=briefing_lines if phase_shows_briefing(phase) else (),
             debrief_lines=_score_debrief_lines(score, config=training_cfg, difficulty=difficulty),
+            debrief_available=debrief_enabled,
         )
         recording_controller.capture(dashboard)
 
@@ -1165,7 +1185,10 @@ def run_game_mode(
         last_input_wall = last_step_wall
         while (not command_state.quit_requested) and (not dashboard.closed):
             briefing_open = phase_shows_briefing(phase)
+            debrief_hotkey_enabled = phase_is_terminal(phase)
             _poll_pygame_input(pygame, command_state, control_mode=control_mode, briefing_open=briefing_open)
+            if not debrief_hotkey_enabled:
+                command_state.open_debrief_requested = False
             input_now = perf_counter()
             input_elapsed_wall = max(float(input_now) - float(last_input_wall), 0.0)
             last_input_wall = input_now
@@ -1274,6 +1297,7 @@ def run_game_mode(
                     defensive_target_provider=(
                         _game_random_direction_defensive_target_provider(
                             config,
+                            round_index=arcade_round_index,
                             rng=_arcade_round_rng(int(arcade_seed_value), arcade_round_index),
                         )
                         if arcade_enabled and arcade_seed_value is not None
@@ -1293,6 +1317,7 @@ def run_game_mode(
                 command_state.speed_multiplier_change = 0
                 command_state.camera_rule_toggle_requested = False
                 command_state.music_toggle_requested = False
+                command_state.open_debrief_requested = False
                 command_state.paused = bool(training_cfg.enabled)
                 phase = GamePhase.BRIEFING if training_cfg.enabled else GamePhase.PLAYING
                 dashboard.reset_briefing_scroll()
@@ -1484,6 +1509,7 @@ def run_game_mode(
                     ric_reference_object_id=ric_reference_object_id,
                     defensive_target_provider=_game_random_direction_defensive_target_provider(
                         config,
+                        round_index=arcade_round_index,
                         rng=_arcade_round_rng(int(arcade_seed_value), arcade_round_index),
                     ),
                 )
@@ -1510,6 +1536,7 @@ def run_game_mode(
                 command_state.restart_requested = False
                 command_state.speed_multiplier_change = 0
                 command_state.music_toggle_requested = False
+                command_state.open_debrief_requested = False
                 phase = GamePhase.ARCADE_TRANSITION
                 dashboard.reset_briefing_scroll()
                 audio_controller.clear_active_path()
@@ -1555,6 +1582,7 @@ def run_game_mode(
                 speed_multiple=current_speed_multiple,
                 briefing_lines=briefing_lines if phase_shows_briefing(phase) else (),
                 debrief_lines=_score_debrief_lines(score, config=training_cfg, difficulty=difficulty),
+                debrief_available=debrief_enabled,
             )
             recording_controller.capture(dashboard)
             recorder = recording_controller.recorder
@@ -1567,12 +1595,16 @@ def run_game_mode(
                     print(f"Saved game recording: {recording_path}")
                 else:
                     recorder = None
-            if (score.level_passed or score.level_failed) and debrief_path is None:
+            if debrief_enabled and (score.level_passed or score.level_failed) and debrief_path is None:
+                debrief_attempt = next_game_debrief_attempt_index(
+                    scenario_id=training_cfg.scenario_id,
+                    output_dir=debrief_output_dir,
+                )
                 debrief_path = write_game_debrief(
                     game_debrief_path(
                         scenario_id=training_cfg.scenario_id,
                         difficulty=difficulty,
-                        attempt_index=recording_attempt,
+                        attempt_index=debrief_attempt,
                         output_dir=debrief_output_dir,
                     ),
                     config=training_cfg,
@@ -1588,6 +1620,10 @@ def run_game_mode(
                     replay_history=tracker_replay_history(trainer),
                 )
                 print(f"Saved game debrief: {debrief_path}")
+            if command_state.open_debrief_requested and phase_is_terminal(phase) and debrief_path is not None:
+                debrief_folder_to_open = debrief_path.parent
+                command_state.quit_requested = True
+                break
             dashboard.tick(
                 _dashboard_fps_for_speed(
                     current_speed_multiple,
@@ -1604,6 +1640,12 @@ def run_game_mode(
         else:
             _stop_game_music(getattr(dashboard, "pygame", None))
         dashboard.close()
+        if debrief_folder_to_open is not None:
+            opened = open_game_debrief_folder(debrief_folder_to_open)
+            if opened:
+                print(f"Opened game debrief folder: {debrief_folder_to_open}")
+            else:
+                print(f"Game debrief folder: {debrief_folder_to_open}")
         if training_cfg.enabled:
             print(trainer.debrief_text())
     final_arcade_score = arcade_total_score
@@ -1793,6 +1835,19 @@ def _mission_state(score: Any) -> str:
 def _game_loop_should_exit(*, session_done: bool, score: Any) -> bool:
     terminal_score = bool(getattr(score, "level_passed", False)) or bool(getattr(score, "level_failed", False))
     return bool(session_done) and not terminal_score
+
+
+def _game_debrief_enabled(
+    config: SimulationConfig,
+    training_cfg: RPOTrainingConfig,
+    *,
+    arcade_enabled: bool | None = None,
+) -> bool:
+    if bool(arcade_enabled) or (arcade_enabled is None and _game_arcade_enabled(config)):
+        return False
+    if bool(getattr(training_cfg, "sandbox_mode", False)):
+        return False
+    return bool(getattr(training_cfg, "enabled", False))
 
 
 def _mission_metrics(config: RPOTrainingConfig, score: Any) -> tuple[str, ...]:

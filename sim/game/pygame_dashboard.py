@@ -210,6 +210,7 @@ class PygameRPODashboard:
         speed_multiple: float = 1.0,
         briefing_lines: tuple[str, ...] = (),
         debrief_lines: tuple[str, ...] = (),
+        debrief_available: bool = True,
     ) -> None:
         pygame = self.pygame
         if self.closed:
@@ -235,7 +236,11 @@ class PygameRPODashboard:
         if briefing_lines:
             self._draw_briefing(briefing_lines)
         if mission_state in {"passed", "failed"}:
-            self._draw_mission_banner(mission_state, debrief_lines=debrief_lines)
+            self._draw_mission_banner(
+                mission_state,
+                debrief_lines=debrief_lines,
+                debrief_available=debrief_available,
+            )
         pygame.display.flip()
 
     def tick(self, fps: float = 60.0) -> None:
@@ -883,7 +888,13 @@ class PygameRPODashboard:
             return "Scroll To Read. Press Space To Start. Esc Returns To Level Select."
         return "Press Space To Start. Esc Returns To Level Select."
 
-    def _draw_mission_banner(self, mission_state: str, *, debrief_lines: tuple[str, ...] = ()) -> None:
+    def _draw_mission_banner(
+        self,
+        mission_state: str,
+        *,
+        debrief_lines: tuple[str, ...] = (),
+        debrief_available: bool = True,
+    ) -> None:
         pygame = self.pygame
         width, height = self.screen.get_size()
         rect = pygame.Rect(width // 2 - 360, height // 2 - 190, 720, 380)
@@ -891,13 +902,21 @@ class PygameRPODashboard:
             fill = (24, 86, 48)
             stroke = (108, 232, 142)
             text = "MISSION PASSED"
-            sub = "Press R To Replay Or Esc To Quit"
+            sub = (
+                "Press D to Open Debrief. Press R To Replay Or Esc To Quit"
+                if debrief_available
+                else "Press R To Replay Or Esc To Quit"
+            )
             color = (210, 255, 220)
         else:
             fill = (90, 30, 36)
             stroke = (244, 102, 102)
             text = "MISSION FAILED"
-            sub = "Press R To Retry Or Esc To Quit"
+            sub = (
+                "Press D to Open Debrief. Press R To Retry Or Esc To Quit"
+                if debrief_available
+                else "Press R To Retry Or Esc To Quit"
+            )
             color = (255, 220, 220)
         pygame.draw.rect(self.screen, fill, rect, border_radius=10)
         pygame.draw.rect(self.screen, stroke, rect, width=3, border_radius=10)

@@ -24,6 +24,7 @@ class KeyboardCommandState:
     speed_multiplier_change: int = 0
     camera_rule_toggle_requested: bool = False
     music_toggle_requested: bool = False
+    open_debrief_requested: bool = False
     briefing_scroll_px: int = 0
     quit_requested: bool = False
     use_timing_accumulator: bool = False

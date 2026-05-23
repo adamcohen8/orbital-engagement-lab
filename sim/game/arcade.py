@@ -128,7 +128,7 @@ def _arcade_round_simulation_config(
 
     root = config.to_dict()
     if boss_round:
-        _apply_arcade_boss_round_config(root, config, training_cfg, rng=rng)
+        _apply_arcade_boss_round_config(root, config, training_cfg, round_index=round_index, rng=rng)
     if not randomize_initial_state:
         return SimulationConfig.from_dict(root)
     attempt_config = SimulationConfig.from_dict(root)
@@ -176,14 +176,28 @@ def _game_defensive_target_provider(config: SimulationConfig) -> DefensiveTarget
     )
 
 
+def _arcade_target_delta_v_budget_m_s(config: SimulationConfig, *, round_index: int | None) -> float | None:
+    game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
+    raw = dict(game_cfg.get("defensive_target", {}) or {})
+    base_budget = _optional_float(raw.get("max_delta_v_m_s"))
+    if base_budget is None or round_index is None:
+        return base_budget
+    after_round = int(raw.get("delta_v_ramp_after_round", 0) or 0)
+    step_m_s = float(raw.get("delta_v_ramp_step_m_s", 0.0) or 0.0)
+    extra_rounds = max(int(round_index) - max(after_round, 0), 0)
+    return float(max(base_budget + extra_rounds * max(step_m_s, 0.0), 0.0))
+
+
 def _game_random_direction_defensive_target_provider(
     config: SimulationConfig,
     *,
+    round_index: int | None = None,
     rng: np.random.Generator,
 ) -> DefensiveTargetIntentProvider | None:
     provider = _game_defensive_target_provider(config)
     if provider is None:
         return None
+    provider.max_delta_v_m_s = _arcade_target_delta_v_budget_m_s(config, round_index=round_index)
     direction = rng.normal(size=3)
     nrm = float(np.linalg.norm(direction))
     if nrm <= 0.0 or not np.isfinite(nrm):
@@ -316,12 +330,13 @@ def _apply_arcade_boss_round_config(
     config: SimulationConfig,
     training_cfg: RPOTrainingConfig,
     *,
+    round_index: int,
     rng: np.random.Generator,
 ) -> None:
     target_id = str(training_cfg.target_object_id or "target")
     target = root.setdefault("objects", {}).setdefault(target_id, {})
     initial_state = dict(target.get("initial_state", {}) or {})
-    coes = _arcade_boss_target_coes(config, rng=rng)
+    coes = _arcade_boss_target_coes(config, round_index=round_index, rng=rng)
     initial_state["coes"] = coes
     initial_state.pop("position_eci_km", None)
     initial_state.pop("velocity_eci_km_s", None)
@@ -335,7 +350,12 @@ def _apply_arcade_boss_round_config(
         root["metadata"]["game"] = game_cfg
 
 
-def _arcade_boss_target_coes(config: SimulationConfig, *, rng: np.random.Generator) -> dict[str, float]:
+def _arcade_boss_target_coes(
+    config: SimulationConfig,
+    *,
+    round_index: int,
+    rng: np.random.Generator,
+) -> dict[str, float]:
     raw = _game_arcade_boss_config(config)
     base = raw.get("target_coes", {}) or {}
     coes = dict(base) if isinstance(base, dict) else {}
@@ -354,15 +374,29 @@ def _arcade_boss_target_coes(config: SimulationConfig, *, rng: np.random.Generat
     if not coes:
         coes = {
             "a_km": 9000.0,
-            "ecc": 0.25,
+            "ecc": 0.05,
             "inc_deg": 45.0,
             "raan_deg": 0.0,
             "argp_deg": 0.0,
             "true_anomaly_deg": 0.0,
         }
+    coes["ecc"] = _arcade_boss_eccentricity(config, round_index=round_index, fallback=float(coes.get("ecc", 0.05)))
     anomaly_range = _range_pair(raw.get("true_anomaly_range_deg"), (0.0, 360.0))
     coes["true_anomaly_deg"] = float(rng.uniform(anomaly_range[0], anomaly_range[1]) % 360.0)
     return {str(key): float(value) for key, value in coes.items()}
+
+
+def _arcade_boss_eccentricity(config: SimulationConfig, *, round_index: int, fallback: float) -> float:
+    raw = _game_arcade_boss_config(config)
+    interval = _game_arcade_boss_round_interval(config)
+    if interval <= 0:
+        return float(np.clip(float(fallback), 0.0, 0.999))
+    boss_number = max(int(round_index) // interval, 1)
+    start = float(raw.get("eccentricity_start", fallback) or fallback)
+    step = float(raw.get("eccentricity_step", 0.0) or 0.0)
+    max_ecc = float(raw.get("eccentricity_max", start) or start)
+    ecc = min(start + max(boss_number - 1, 0) * step, max_ecc)
+    return float(np.clip(ecc, 0.0, 0.999))
 
 
 def _game_arcade_random_initial_state_config(config: SimulationConfig) -> dict[str, Any]:

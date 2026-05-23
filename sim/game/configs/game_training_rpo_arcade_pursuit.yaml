@@ -15,15 +15,18 @@ metadata:
     arcade:
       enabled: true
       initial_time_s: 12000.0
-      round_bonus_time_s: 3000.0
+      round_bonus_time_s: 0.0
       delta_v_bonus_time_per_m_s: 1000.0
       goal_range_step_km: 0.005
       min_goal_range_km: 0.005
       boss_round_interval: 5
       boss:
+        eccentricity_start: 0.05
+        eccentricity_step: 0.05
+        eccentricity_max: 0.20
         target_coes:
           a_km: 9000.0
-          ecc: 0.25
+          ecc: 0.05
           inc_deg: 45.0
           raan_deg: 0.0
           argp_deg: 0.0
@@ -34,7 +37,7 @@ metadata:
         coast_prediction_model: tschauner_hempel
         music_track: 28_high_shred_boss_riff.wav
         score_multiplier: 2.0
-        bonus_time_s: 1000.0
+        bonus_time_s: 5000.0
       random_initial_state:
         enabled: true
         radial_range_km:
@@ -58,6 +61,8 @@ metadata:
       keepout_radius_km: 0.1
       max_accel_km_s2: 7.5e-06
       max_delta_v_m_s: 0.1
+      delta_v_ramp_after_round: 20
+      delta_v_ramp_step_m_s: 0.01
       cross_track_bias: 0.65
       pulse_period_s: 120.0
     training:
@@ -67,12 +72,15 @@ metadata:
         choose a different fixed evasion burn direction each round.
       player_brief: Chase the target to within 100 m. Each successful round resets
         your fuel, gives the target a new random evasion direction, tightens the
-        target range by 5 m down to a 5 m minimum, and adds 3000 seconds plus
-        1000 seconds per unused m/s of chaser delta-v to your remaining clock.
+        target range by 5 m down to a 5 m minimum, and adds 1000 seconds per
+        unused m/s of chaser delta-v to your remaining clock. Every fifth boss
+        round also adds a flat 5000 second bonus. Boss target eccentricity starts
+        at 0.05 and increases by 0.05 each boss round up to 0.20.
         Round 1 starts from the level 9 setup; later rounds randomize the chaser's
         RIC state outside 5 km while keeping its semimajor axis matched to the
-        target. Every fifth round is a boss round with an elliptical target orbit
-        and a randomized target true anomaly.
+        target. The target's defensive delta-v budget is fixed through round 20,
+        then increases by 0.01 m/s each round. Every fifth round is a boss round
+        with an elliptical target orbit and a randomized target true anomaly.
       pass_criteria:
       - Get within the current round's target range; it starts at 100 m and tightens
         by 5 m after each cleared round.
@@ -82,20 +90,22 @@ metadata:
       - Each round uses one random fixed target burn direction.
       - The pursuit goal tightens by 5 m each round and floors at 5 m.
       - Every fifth round changes the target orbit to an elliptical boss setup,
-        randomizes target true anomaly, switches to the TH coast projection, and
-        uses the boss music cue.
+        raises boss eccentricity by 0.05 up to 0.20, randomizes target true
+        anomaly, switches to the TH coast projection, and uses the boss music
+        cue.
       - Round 1 preserves the configured level 9 initial state. Rounds 2+ sample
         R within +/-1 km, I within +/-10 km, C within +/-1 km, reject starts inside
         5 km, sample dC within +/-1 m/s, set dR to zero, and solve dI for equal
         target/chaser orbital energy.
       - Round score is weighted by round number and added to the run total.
       - The yellow target motion is shown relative to the target reference orbit.
-      - Target defensive maneuvering is capped at 0.1 m/s total delta-v each round.
+      - Target defensive maneuvering is capped at 0.1 m/s total delta-v through
+        round 20, then increases by 0.01 m/s per round.
       target_object_id: target
       chaser_object_id: chaser
       goal_range_km: 0.1
       max_time_s: 12000.0
-      max_delta_v_m_s: 5.0
+      max_delta_v_m_s: 3.0
 objects:
   rocket:
     enabled: false

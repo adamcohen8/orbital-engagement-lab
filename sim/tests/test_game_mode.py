@@ -50,7 +50,17 @@ from sim.game.audio import (
     _play_game_sound_effect,
     _result_music_path,
 )
-from sim.game.debrief import game_debrief_path, tracker_replay_history, write_game_debrief
+from sim.game.debrief import (
+    _active_segments,
+    _cumulative_delta_v_m_s,
+    _event_timeline,
+    _plane_axes,
+    game_debrief_path,
+    next_game_debrief_attempt_index,
+    open_game_debrief_folder,
+    tracker_replay_history,
+    write_game_debrief,
+)
 from sim.game.defensive_target import DefensiveTargetIntentProvider
 from sim.game.formatting import format_distance_km, format_speed_km_s, format_speed_m_s
 from sim.game.launcher import (
@@ -106,6 +116,7 @@ from sim.game.runner import (
     _game_coast_prediction_model,
     _game_control_mode,
     _game_controlled_object_id,
+    _game_debrief_enabled,
     _game_level_title,
     _game_loop_should_exit,
     _game_plot_axis_scale,
@@ -231,7 +242,7 @@ def test_game_launcher_discovers_ordered_training_levels() -> None:
     assert options[9].target_delta_v_budget_m_s == pytest.approx(0.1)
     assert options[11].title == "Pursuit Arcade"
     assert options[11].time_budget_s == pytest.approx(12000.0)
-    assert options[11].delta_v_budget_m_s == pytest.approx(5.0)
+    assert options[11].delta_v_budget_m_s == pytest.approx(3.0)
     assert options[12].title == "Sandbox"
     assert options[12].path.name == "game_training_rpo_sandbox.yaml"
     assert options[12].time_budget_s == pytest.approx(20000.0)
@@ -903,17 +914,347 @@ def test_game_debrief_writer_exports_summary_and_replay(tmp_path: Path) -> None:
         recording_path=tmp_path / "attempt.mp4",
         replay_history=tracker_replay_history(tracker),
     )
-    payload = yaml.safe_load(out.read_text(encoding="utf-8"))
+    summary_path = out.parent / "summary.json"
+    payload = yaml.safe_load(summary_path.read_text(encoding="utf-8"))
 
-    assert out == tmp_path / "unit_debrief_easy_20260514_123045_attempt02.json"
+    assert out == tmp_path / "unit_debrief" / "attempt_002_easy_20260514_123045" / "report.md"
+    assert summary_path == out.parent / "summary.json"
     assert payload["scenario_id"] == "unit-debrief"
     assert payload["level_passed"] is True
     assert payload["score"]["arcade_score"] == 123
     assert payload["score"]["arcade_seed"] == 456
     assert payload["score"]["arcade_round_index"] == 7
     assert payload["artifacts"]["recording_path"].endswith("attempt.mp4")
+    assert payload["artifacts"]["report_path"].endswith("report.md")
+    assert payload["artifacts"]["summary_path"].endswith("summary.json")
+    assert "ric_2d" in payload["artifacts"]["plot_paths"]
+    assert "mission_timeline" in payload["artifacts"]["plot_paths"]
+    assert (out.parent / "plots" / "ric_2d_plots.png").exists()
+    assert (out.parent / "plots" / "mission_timeline.png").exists()
+    assert "Pass/Failure" in out.read_text(encoding="utf-8")
+    assert "## Event Timeline" not in out.read_text(encoding="utf-8")
+    assert "![Mission Timeline](plots/mission_timeline.png)" in out.read_text(encoding="utf-8")
+    assert "![2D RIC Plots](plots/ric_2d_plots.png)" in out.read_text(encoding="utf-8")
     assert payload["replay"]["time_s"] == [0.0]
     assert payload["replay"]["relative_ric"][0][:3] == pytest.approx([0.0, -0.2, 0.0])
+
+
+def test_game_debrief_attempt_index_counts_level_folders(tmp_path: Path) -> None:
+    first = game_debrief_path(
+        scenario_id="Unit Debrief",
+        difficulty="easy",
+        attempt_index=1,
+        output_dir=tmp_path,
+        timestamp=datetime(2026, 5, 14, 12, 30, 45),
+    )
+    first.parent.mkdir(parents=True)
+
+    assert next_game_debrief_attempt_index(scenario_id="Unit Debrief", output_dir=tmp_path) == 2
+
+
+def test_game_debrief_is_disabled_for_sandbox_and_arcade_modes() -> None:
+    sandbox_path = Path(__file__).resolve().parents[1] / "game" / "configs" / "game_training_rpo_sandbox.yaml"
+    sandbox_config = SimulationConfig.from_yaml(sandbox_path)
+    sandbox_training = RPOTrainingConfig.from_metadata(dict(sandbox_config.scenario.metadata or {}))
+
+    arcade_path = Path(__file__).resolve().parents[1] / "game" / "configs" / "game_training_rpo_arcade_pursuit.yaml"
+    arcade_config = SimulationConfig.from_yaml(arcade_path)
+    arcade_training = RPOTrainingConfig.from_metadata(dict(arcade_config.scenario.metadata or {}))
+
+    normal_path = Path(__file__).resolve().parents[1] / "game" / "configs" / "game_training_rpo_01_coast_relative_motion.yaml"
+    normal_config = SimulationConfig.from_yaml(normal_path)
+    normal_cfg = RPOTrainingConfig.from_metadata(dict(normal_config.scenario.metadata or {}))
+
+    assert _game_debrief_enabled(sandbox_config, sandbox_training, arcade_enabled=False) is False
+    assert _game_debrief_enabled(arcade_config, arcade_training, arcade_enabled=True) is False
+    assert _game_debrief_enabled(normal_config, normal_cfg, arcade_enabled=False) is True
+
+
+@pytest.mark.parametrize(
+    "config_name,expected_enabled",
+    [
+        ("game_training_rpo_00_tutorial.yaml", True),
+        ("game_training_rpo_01_coast_relative_motion.yaml", True),
+        ("game_training_rpo_02_vbar_approach.yaml", True),
+        ("game_training_rpo_03_rbar_approach.yaml", True),
+        ("game_training_rpo_04_rendezvous.yaml", True),
+        ("game_training_rpo_05_passive_cross_track_approach.yaml", True),
+        ("game_training_rpo_06_elliptic_burn_then_approach.yaml", True),
+        ("game_training_rpo_07_elliptic_nmc.yaml", True),
+        ("game_training_rpo_08_elliptic_rendezvous.yaml", True),
+        ("game_training_rpo_09_defensive_target_demo.yaml", True),
+        ("game_training_rpo_10_evasive_target_survival.yaml", True),
+        ("game_training_rpo_arcade_pursuit.yaml", False),
+        ("game_training_rpo_sandbox.yaml", False),
+    ],
+)
+def test_game_debrief_policy_and_writer_across_levels(
+    config_name: str,
+    expected_enabled: bool,
+    tmp_path: Path,
+) -> None:
+    config = SimulationConfig.from_yaml(Path(__file__).resolve().parents[1] / "game" / "configs" / config_name)
+    training_cfg = RPOTrainingConfig.from_metadata(dict(config.scenario.metadata or {}))
+    enabled = _game_debrief_enabled(
+        config,
+        training_cfg,
+        arcade_enabled=_game_arcade_enabled(config),
+    )
+
+    assert enabled is expected_enabled
+    if not enabled:
+        return
+
+    score = RPOTrainingScore(
+        scenario_id=training_cfg.scenario_id,
+        learning_goal=training_cfg.learning_goal,
+        samples=3,
+        elapsed_s=2.0,
+        closest_approach_km=0.25,
+        final_range_km=0.3,
+        final_goal_error_km=0.05,
+        final_relative_speed_km_s=0.0001,
+        time_inside_keepout_s=0.0,
+        approximate_delta_v_m_s=0.04,
+        target_delta_v_m_s=0.0,
+        burn_axes_satisfied=tuple(training_cfg.required_burn_axes),
+        phase_burns_satisfied=tuple(burn.name for burn in training_cfg.required_phase_burns),
+        speed_multiplier_changed=bool(training_cfg.require_speed_multiplier_change),
+        coast_after_burn_satisfied=training_cfg.required_coast_after_burn_s is None,
+        coast_after_burn_s=0.0,
+        guided_tutorial_burns_satisfied=tuple(burn.name for burn in training_cfg.guided_tutorial_burns),
+        guided_tutorial_burns_total=len(training_cfg.guided_tutorial_burns),
+        guided_tutorial_speed_satisfied=True,
+        guided_tutorial_speed_target=(
+            None
+            if training_cfg.guided_tutorial_speed_step is None
+            else training_cfg.guided_tutorial_speed_step.target_speed_multiplier
+        ),
+        achieved_time_s=2.0,
+        min_goal_error_km=0.04,
+        final_nmt_radial_amplitude_km=training_cfg.goal_nmt_radial_amplitude_km or 0.0,
+        final_nmt_cross_track_amplitude_km=training_cfg.goal_nmt_cross_track_amplitude_km,
+        final_nmt_radial_amplitude_error_km=0.0,
+        final_nmt_cross_track_amplitude_error_km=0.0,
+        final_nmt_drift_velocity_error_km_s=0.0,
+        goal_met=True,
+        level_passed=True,
+        level_failed=False,
+        pass_fail_reasons=("All pass criteria satisfied.",),
+        keepout_violation=False,
+        hard_speed_limit_violation=False,
+        forbidden_region_violation=False,
+        forbidden_region_names=(),
+        approach_gate_violation=False,
+        approach_gate_names=(),
+        approach_gates_satisfied=len(training_cfg.approach_gates),
+        approach_gates_total=len(training_cfg.approach_gates),
+        inspection_gates_satisfied=len(training_cfg.inspection_gates),
+        inspection_gates_total=len(training_cfg.inspection_gates),
+        inspection_gate_names=tuple(gate.name for gate in training_cfg.inspection_gates),
+        hints=(),
+    )
+    replay = {
+        "time_s": [0.0, 1.0, 2.0],
+        "relative_ric": [
+            [0.0, -1.0, 0.0, 0.0, 0.0, 0.0],
+            [0.1, -0.7, 0.05, 0.0001, 0.0, 0.0],
+            [0.0, -0.3, 0.0, 0.0, 0.0001, 0.0],
+        ],
+        "chaser_thrust_ric_km_s2": [
+            [0.0, 0.0, 0.0],
+            [0.00001, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+        ],
+        "target_thrust_eci_km_s2": [
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+        ],
+    }
+    out = write_game_debrief(
+        game_debrief_path(
+            scenario_id=training_cfg.scenario_id,
+            difficulty="easy",
+            attempt_index=1,
+            output_dir=tmp_path,
+            timestamp=datetime(2026, 5, 22, 12, 0, 0),
+        ),
+        config=training_cfg,
+        score=score,
+        difficulty="easy",
+        objective_checklist=_mission_checklist(training_cfg, score),
+        replay_history=replay,
+    )
+
+    assert out.exists()
+    assert (out.parent / "summary.json").exists()
+    assert (out.parent / "plots" / "mission_timeline.png").exists()
+    assert (out.parent / "plots" / "ric_2d_plots.png").exists()
+    assert "## Stats Summary" in out.read_text(encoding="utf-8")
+
+
+def test_tutorial_debrief_history_can_scope_to_final_free_maneuver_phase() -> None:
+    cfg = RPOTrainingConfig(
+        enabled=True,
+        scenario_id="rpo_00_tutorial",
+        guided_tutorial_burns=(
+            GuidedTutorialBurnConfig(
+                name="plus_in_track",
+                axis="in_track",
+                sign=1,
+                delta_v_m_s=0.25,
+            ),
+        ),
+    )
+    tracker = RPOTrainingTracker(cfg)
+    target_state = np.array([7000.0, 0.0, 0.0, 0.0, 7.54605329, 0.0], dtype=float)
+    guided_rel = np.array([0.0, -0.8, 0.0, 0.0, 0.0, 0.0], dtype=float)
+    final_rel = np.array([0.0, -0.25, 0.0, 0.0, 0.0, 0.0], dtype=float)
+
+    for time_s, rel_ric in ((1.0, guided_rel),):
+        tracker.record(
+            snapshot=type(
+                "Snapshot",
+                (),
+                {
+                    "time_s": time_s,
+                    "truth": {
+                        "target": target_state,
+                        "chaser": ric_rect_state_to_eci(rel_ric, target_state[:3], target_state[3:]),
+                    },
+                    "applied_thrust": {"chaser": np.zeros(3, dtype=float)},
+                },
+            )()
+        )
+    tracker.mark_guided_tutorial_burn_complete("plus_in_track")
+    tracker.clear(reset_guided_tutorial_progress=False)
+    tracker.record(
+        snapshot=type(
+            "Snapshot",
+            (),
+            {
+                "time_s": 99.0,
+                "truth": {
+                    "target": target_state,
+                    "chaser": ric_rect_state_to_eci(final_rel, target_state[:3], target_state[3:]),
+                },
+                "applied_thrust": {"chaser": np.zeros(3, dtype=float)},
+            },
+        )()
+    )
+
+    replay = tracker_replay_history(tracker)
+
+    assert tracker.guided_tutorial_burns_satisfied() == ("plus_in_track",)
+    assert replay["time_s"] == [99.0]
+    assert replay["relative_ric"][0][:3] == pytest.approx([0.0, -0.25, 0.0])
+
+
+def test_game_debrief_ric_plot_axes_keep_radial_vertical() -> None:
+    assert _plane_axes("RI") == (1, 0, "I", "R")
+    assert _plane_axes("RC") == (2, 0, "C", "R")
+    assert _plane_axes("IC") == (1, 2, "I", "C")
+
+
+def test_game_debrief_cumulative_delta_v_matches_sampled_accel_integral() -> None:
+    thrust_km_s2 = np.array(
+        [
+            [0.001, 0.0, 0.0],
+            [0.0, 0.002, 0.0],
+            [np.nan, 0.0, 0.0],
+            [0.003, 0.0, 0.0],
+        ],
+        dtype=float,
+    )
+    t_s = np.array([0.0, 2.0, 5.0, 8.0], dtype=float)
+
+    cumulative = _cumulative_delta_v_m_s(thrust_km_s2, t_s)
+
+    assert cumulative == pytest.approx([0.0, 2.0, 8.0, 8.0])
+
+
+def test_game_debrief_timeline_uses_burn_intervals() -> None:
+    cfg = RPOTrainingConfig(enabled=True, scenario_id="timeline-unit")
+    score = RPOTrainingScore(
+        scenario_id=cfg.scenario_id,
+        learning_goal="",
+        samples=5,
+        elapsed_s=4.0,
+        closest_approach_km=0.2,
+        final_range_km=0.3,
+        final_goal_error_km=0.0,
+        final_relative_speed_km_s=0.0,
+        time_inside_keepout_s=0.0,
+        approximate_delta_v_m_s=0.0,
+        target_delta_v_m_s=0.0,
+        burn_axes_satisfied=(),
+        phase_burns_satisfied=(),
+        speed_multiplier_changed=False,
+        coast_after_burn_satisfied=True,
+        coast_after_burn_s=0.0,
+        guided_tutorial_burns_satisfied=(),
+        guided_tutorial_burns_total=0,
+        guided_tutorial_speed_satisfied=True,
+        guided_tutorial_speed_target=None,
+        achieved_time_s=4.0,
+        min_goal_error_km=0.0,
+        final_nmt_radial_amplitude_km=0.0,
+        final_nmt_cross_track_amplitude_km=0.0,
+        final_nmt_radial_amplitude_error_km=0.0,
+        final_nmt_cross_track_amplitude_error_km=0.0,
+        final_nmt_drift_velocity_error_km_s=0.0,
+        goal_met=True,
+        level_passed=True,
+        level_failed=False,
+        pass_fail_reasons=("All pass criteria satisfied.",),
+        keepout_violation=False,
+        hard_speed_limit_violation=False,
+        forbidden_region_violation=False,
+        forbidden_region_names=(),
+        approach_gate_violation=False,
+        approach_gate_names=(),
+        approach_gates_satisfied=0,
+        approach_gates_total=0,
+        inspection_gates_satisfied=0,
+        inspection_gates_total=0,
+        inspection_gate_names=(),
+        hints=(),
+    )
+    replay = {
+        "time_s": [0.0, 1.0, 2.0, 3.0, 4.0],
+        "relative_ric": [[0.0, 0.0, 0.0, 0.0, 0.0, 0.0]] * 5,
+        "chaser_thrust_ric_km_s2": [
+            [0.0, 0.0, 0.0],
+            [0.001, 0.0, 0.0],
+            [0.001, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.001, 0.0, 0.0],
+        ],
+    }
+
+    events = _event_timeline(config=cfg, score=score, replay_history=replay)
+    burn_events = [event for event in events if event.get("kind") == "interval"]
+
+    assert _active_segments(np.array([False, True, True, False, True])) == [(1, 2), (4, 4)]
+    assert burn_events[0]["start_time_s"] == pytest.approx(1.0)
+    assert burn_events[0]["end_time_s"] == pytest.approx(3.0)
+    assert burn_events[0]["label"] == "Control input"
+    assert burn_events[1]["start_time_s"] == pytest.approx(4.0)
+    assert burn_events[1]["end_time_s"] == pytest.approx(4.0)
+
+
+def test_open_game_debrief_folder_opens_report_parent(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    calls: list[list[str]] = []
+    report = tmp_path / "attempt_001" / "report.md"
+    report.parent.mkdir()
+    report.write_text("# Debrief\n", encoding="utf-8")
+
+    monkeypatch.setattr("sim.game.debrief.sys.platform", "darwin")
+    monkeypatch.setattr("sim.game.debrief.subprocess.Popen", lambda cmd: calls.append(list(cmd)))
+
+    assert open_game_debrief_folder(report) is True
+    assert calls == [["open", str(report.parent)]]
 
 
 def test_game_frame_recorder_finishes_or_discards_with_fake_writer(tmp_path: Path) -> None:
@@ -1303,7 +1644,7 @@ def test_pursuit_arcade_uses_level_nine_shape_with_arcade_clock() -> None:
 
     assert _game_arcade_enabled(config) is True
     assert _game_arcade_initial_time_s(config, training_cfg) == pytest.approx(12000.0)
-    assert _game_arcade_round_bonus_time_s(config) == pytest.approx(3000.0)
+    assert _game_arcade_round_bonus_time_s(config) == pytest.approx(0.0)
     assert _game_arcade_delta_v_bonus_time_per_m_s(config) == pytest.approx(1000.0)
     assert _game_arcade_goal_range_step_km(config) == pytest.approx(0.005)
     assert _game_arcade_min_goal_range_km(config) == pytest.approx(0.005)
@@ -1311,10 +1652,12 @@ def test_pursuit_arcade_uses_level_nine_shape_with_arcade_clock() -> None:
     assert training_cfg.scenario_id == "rpo_arcade_pursuit"
     assert training_cfg.goal_range_km == pytest.approx(0.1)
     assert training_cfg.max_time_s == pytest.approx(12000.0)
-    assert training_cfg.max_delta_v_m_s == pytest.approx(5.0)
+    assert training_cfg.max_delta_v_m_s == pytest.approx(3.0)
     assert config.scenario.simulator.duration_s == pytest.approx(12000.0)
     assert config.scenario.simulator.dt_s == pytest.approx(1.0)
     assert defensive_target["max_delta_v_m_s"] == pytest.approx(0.1)
+    assert defensive_target["delta_v_ramp_after_round"] == 20
+    assert defensive_target["delta_v_ramp_step_m_s"] == pytest.approx(0.01)
 
 
 def test_level_zero_tutorial_is_passive_close_range_intro() -> None:
@@ -1529,18 +1872,35 @@ def test_pursuit_arcade_boss_rounds_use_elliptical_target_and_random_anomaly() -
         round_index=10,
         rng=_arcade_round_initial_state_rng(1234, 10),
     )
+    round25 = _arcade_round_simulation_config(
+        config,
+        base_cfg,
+        round_index=25,
+        rng=_arcade_round_initial_state_rng(1234, 25),
+    )
+    round30 = _arcade_round_simulation_config(
+        config,
+        base_cfg,
+        round_index=30,
+        rng=_arcade_round_initial_state_rng(1234, 30),
+    )
 
     normal_coes = round4.scenario.objects["target"].initial_state["coes"]
     boss_coes = round5.scenario.objects["target"].initial_state["coes"]
     boss_repeat_coes = round5_repeat.scenario.objects["target"].initial_state["coes"]
     boss_10_coes = round10.scenario.objects["target"].initial_state["coes"]
+    boss_25_coes = round25.scenario.objects["target"].initial_state["coes"]
+    boss_30_coes = round30.scenario.objects["target"].initial_state["coes"]
 
     assert _arcade_round_is_boss(config, 4) is False
     assert _arcade_round_is_boss(config, 5) is True
     assert _arcade_round_is_boss(config, 10) is True
     assert normal_coes["ecc"] == pytest.approx(0.0)
     assert boss_coes["a_km"] == pytest.approx(9000.0)
-    assert boss_coes["ecc"] == pytest.approx(0.25)
+    assert boss_coes["ecc"] == pytest.approx(0.05)
+    assert boss_10_coes["ecc"] == pytest.approx(0.10)
+    assert boss_25_coes["ecc"] == pytest.approx(0.20)
+    assert boss_30_coes["ecc"] == pytest.approx(0.20)
     assert 0.0 <= float(boss_coes["true_anomaly_deg"]) < 360.0
     assert boss_coes["true_anomaly_deg"] == pytest.approx(boss_repeat_coes["true_anomaly_deg"])
     assert boss_coes["true_anomaly_deg"] != pytest.approx(boss_10_coes["true_anomaly_deg"])
@@ -1586,15 +1946,15 @@ def test_pursuit_arcade_boss_round_music_and_bonuses() -> None:
     assert _arcade_round_music_track(config, 5) == "28_high_shred_boss_riff.wav"
     assert _arcade_round_coast_prediction_model(config, 5) == "tschauner_hempel"
     assert _arcade_round_score_multiplier(config, 5) == pytest.approx(2.0)
-    assert _arcade_round_time_bonus_s(config, training_cfg, score, round_index=4) == pytest.approx(5500.0)
-    assert _arcade_round_time_bonus_s(config, training_cfg, score, round_index=5) == pytest.approx(6500.0)
+    assert _arcade_round_time_bonus_s(config, training_cfg, score, round_index=4) == pytest.approx(500.0)
+    assert _arcade_round_time_bonus_s(config, training_cfg, score, round_index=5) == pytest.approx(5500.0)
     assert _arcade_round_weighted_score(
         training_cfg,
         score,
         difficulty="easy",
         round_index=5,
         arcade_config=config,
-    ) == 144000
+    ) == 124000
 
 
 def test_pursuit_arcade_keeps_round_one_initial_state() -> None:
@@ -1700,6 +2060,27 @@ def test_pursuit_arcade_random_target_provider_sets_fixed_direction() -> None:
     assert second.fixed_direction_ric is not None
     assert np.linalg.norm(first.fixed_direction_ric) == pytest.approx(1.0)
     assert not np.allclose(first.fixed_direction_ric, second.fixed_direction_ric)
+
+
+def test_pursuit_arcade_target_delta_v_budget_ramps_after_round_twenty() -> None:
+    config_path = (
+        Path(__file__).resolve().parents[1] / "game" / "configs" / "game_training_rpo_arcade_pursuit.yaml"
+    )
+    config = SimulationConfig.from_yaml(config_path)
+
+    round1 = _game_random_direction_defensive_target_provider(config, round_index=1, rng=np.random.default_rng(1))
+    round20 = _game_random_direction_defensive_target_provider(config, round_index=20, rng=np.random.default_rng(1))
+    round21 = _game_random_direction_defensive_target_provider(config, round_index=21, rng=np.random.default_rng(1))
+    round25 = _game_random_direction_defensive_target_provider(config, round_index=25, rng=np.random.default_rng(1))
+
+    assert round1 is not None
+    assert round20 is not None
+    assert round21 is not None
+    assert round25 is not None
+    assert round1.max_delta_v_m_s == pytest.approx(0.10)
+    assert round20.max_delta_v_m_s == pytest.approx(0.10)
+    assert round21.max_delta_v_m_s == pytest.approx(0.11)
+    assert round25.max_delta_v_m_s == pytest.approx(0.15)
 
 
 def test_pursuit_arcade_round_rng_varies_by_session_seed() -> None:
@@ -1941,10 +2322,11 @@ def test_arcade_round_time_bonus_adds_delta_v_remaining() -> None:
         Path(__file__).resolve().parents[1] / "game" / "configs" / "game_training_rpo_arcade_pursuit.yaml"
     )
     config = SimulationConfig.from_yaml(config_path)
-    training_cfg = RPOTrainingConfig(enabled=True, max_delta_v_m_s=5.0)
+    training_cfg = RPOTrainingConfig(enabled=True, max_delta_v_m_s=3.0)
     score = type("Score", (), {"approximate_delta_v_m_s": 2.5})()
 
-    assert _arcade_round_time_bonus_s(config, training_cfg, score) == pytest.approx(5500.0)
+    assert _arcade_round_time_bonus_s(config, training_cfg, score) == pytest.approx(500.0)
+    assert _arcade_round_time_bonus_s(config, training_cfg, score, round_index=5) == pytest.approx(5500.0)
 
 
 def test_arcade_round_briefing_lines_show_transition_summary() -> None:
@@ -4097,6 +4479,7 @@ def test_pygame_input_mapping_sets_ric_axes_and_quit() -> None:
                     FakeEvent(FakePygame.KEYDOWN, FakePygame.K_UP),
                     FakeEvent(FakePygame.KEYDOWN, FakePygame.K_r),
                     FakeEvent(FakePygame.KEYDOWN, FakePygame.K_m),
+                    FakeEvent(FakePygame.KEYDOWN, FakePygame.K_d),
                     FakeEvent(FakePygame.KEYDOWN, FakePygame.K_c),
                 ]
 
@@ -4109,6 +4492,7 @@ def test_pygame_input_mapping_sets_ric_axes_and_quit() -> None:
     assert state.speed_multiplier_change == 1
     assert state.restart_requested is True
     assert state.music_toggle_requested is True
+    assert state.open_debrief_requested is True
     assert state.camera_rule_toggle_requested is True
 
     class SlowDownPygame(FakePygame):

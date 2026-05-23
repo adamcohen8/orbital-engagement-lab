@@ -107,12 +107,16 @@ Arcade variant:
 - `rpo_arcade_pursuit`
   Repeat the Level 9 pursuit problem across randomized target-evasion rounds.
   Each cleared round resets fuel, changes the target evasion direction, tightens
-  the goal radius by 5 meters down to a 5 meter floor, adds bonus time, and
-  rolls the weighted round score into the run total. Round 1 preserves the
-  Level 9 start; later rounds randomize the chaser's RIC state while matching
-  target/chaser orbital energy. Every fifth round becomes a boss round with an
-  elliptical target orbit, randomized target true anomaly, TH projection, boss
-  scoring, and boss music.
+  the goal radius by 5 meters down to a 5 meter floor, and rolls the weighted
+  round score into the run total. The chaser has a 3 m/s round delta-v budget;
+  regular rounds award time only from conserved chaser delta-v at 1000 seconds
+  per unused m/s. Round 1 preserves the Level 9 start; later rounds randomize
+  the chaser's RIC state while matching target/chaser orbital energy. Every
+  fifth round becomes a boss round with an elliptical target orbit, randomized
+  target true anomaly, TH projection, boss scoring, boss music, and a 5000
+  second flat time bonus. Boss eccentricity ramps from 0.05 to 0.20, and the
+  target defensive delta-v budget holds at 0.1 m/s through round 20 before
+  increasing by 0.01 m/s per round.
 
 ## Controls
 
@@ -124,6 +128,7 @@ Default trainer controls should be RIC translation:
 - Space: pause/resume
 - Period: single-step while paused
 - R: reset the current attempt
+- D: open the debrief folder from the pass/fail screen, when available
 - Up/Down: adjust runtime speed
 - Esc: leave the active level; when launched from the selector, this returns to
   level selection.
@@ -173,6 +178,14 @@ Each run should produce a concise debrief:
 This debrief matters as much as live control. Cadets will learn from seeing why
 an approach became unstable.
 
+Current implementation writes Markdown debrief reports for structured training
+levels under `outputs/game_debriefs/<scenario_id>/attempt_.../`. Reports include
+`summary.json`, a mission timeline figure with filled burn intervals, 2D RIC
+trajectory plots, relative range and velocity histories, cumulative delta-v, and
+control-command plots. Sandbox and Pursuit Arcade intentionally skip report
+generation because they are open-ended/replayable modes; the tutorial report is
+scoped to the final free-maneuver phase.
+
 ## Roadmap
 
 ### Phase 1 - RPO Trainer Foundation
@@ -180,7 +193,7 @@ an approach became unstable.
 - Done: direct RIC translation control mode.
 - Done: training scenario metadata.
 - Done: keepout/goal scoring.
-- Done: text debrief at run end.
+- Done: terminal pass/fail summary at run end.
 - Done: curated training configs for the tutorial and numbered RPO levels.
 
 ### Phase 2 - Visual Teaching Overlays
@@ -221,7 +234,8 @@ an approach became unstable.
 - Done: pause, single-step, and runtime speed controls.
 - Done: level-selector video toggle with per-attempt MP4 recording saved on
   pass/fail and discarded on restart or early quit.
-- Done: JSON debrief artifacts for terminal attempts.
+- Done: Markdown debrief reports with JSON summaries and matplotlib plots for
+  structured terminal attempts.
 - Later: add replay controls.
 - Provide classroom guidance.
 
@@ -258,8 +272,9 @@ Current implementation:
 - Live mission metrics show time, delta-v, NMT element errors, point-goal
   error, keepout margin, and relative-speed thresholds as appropriate.
 - Level pass/fail freezes the simulation and displays a mission banner.
-- Terminal attempts can write per-run JSON debriefs, and the launcher can save
-  MP4 recordings for completed attempts.
+- Terminal attempts can write per-run Markdown debrief reports with JSON
+  summaries and plots, and the launcher can save MP4 recordings for completed
+  attempts.
 - Close rendezvous levels zoom around the current state and goal so meter-scale
   criteria stay visible.
 
@@ -296,8 +311,8 @@ Implemented levels:
   the timer expires under the target delta-v budget.
 - `rpo_arcade_pursuit`: clear repeated pursuit rounds against randomized target
   evasion directions, tightening goal radius, randomized energy-matched starts,
-  elliptical boss rounds, round-weighted scoring, and bonus time that strongly
-  rewards conserved chaser delta-v.
+  elliptical boss rounds, round-weighted scoring, conserved-delta-v time
+  rewards, ramping boss eccentricity, and a late-round target delta-v ramp.
 
 Next focus:
 

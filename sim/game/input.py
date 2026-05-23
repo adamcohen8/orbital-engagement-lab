@@ -15,6 +15,7 @@ def poll_pygame_input(
 ) -> None:
     ric_mode = str(control_mode or "").strip().lower() in {"ric", "ric_translation", "translation"}
     state.briefing_scroll_px = 0
+    state.open_debrief_requested = False
     focus_lost = False
     for event in pygame.event.get():
         if pygame_focus_lost(pygame, event):
@@ -41,6 +42,8 @@ def poll_pygame_input(
             state.step_requested = True
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_m:
             state.music_toggle_requested = True
+        elif event.type == pygame.KEYDOWN and event.key == pygame.K_d:
+            state.open_debrief_requested = True
         elif event.type == pygame.KEYDOWN and event.key == getattr(pygame, "K_c", object()):
             state.camera_rule_toggle_requested = True
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_UP:
