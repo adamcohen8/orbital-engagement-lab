@@ -44,7 +44,10 @@ The launcher progression starts with `rpo_00_tutorial`, then runs through
 Levels 1-10 and a replayable `rpo_arcade_pursuit` variant. Levels 6-8 use an
 elliptical coast-projection model for eccentric-orbit RPO lessons; Pursuit
 Arcade adds tightening goals, randomized later-round starts, and every-fifth
-round elliptical boss encounters.
+round elliptical boss encounters. Completed structured training levels save
+Markdown debrief reports with JSON summaries and matplotlib plots under
+`outputs/game_debriefs/`; Sandbox and Pursuit Arcade skip reports because they
+are open-ended/replayable modes.
 
 ```bash
 python -m pip install ".[game]"

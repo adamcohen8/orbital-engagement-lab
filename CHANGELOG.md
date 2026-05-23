@@ -6,6 +6,43 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.7.4 - 2026-05-23
+
+RPO trainer debrief reports and Pursuit Arcade balance update.
+
+### Added
+
+- Added per-attempt Markdown game debrief reports for structured training
+  levels, saved under `outputs/game_debriefs/<scenario_id>/attempt_.../` with
+  `summary.json` and matplotlib plot artifacts.
+- Added debrief plots for mission timeline, 2D RIC trajectory planes, relative
+  range, relative velocity, cumulative delta-v, and RIC control commands.
+- Added a terminal-screen `D` shortcut that closes the game and opens the
+  debrief attempt folder for levels that generate debriefs.
+
+### Changed
+
+- Scoped debrief generation to structured training levels only; Sandbox and
+  Pursuit Arcade do not generate debrief reports, and the tutorial report
+  covers only the final free-maneuver phase.
+- Replaced the debrief text event timeline with a timeline figure and rendered
+  burn activity as filled start-to-stop intervals.
+- Retuned Pursuit Arcade to a 3 m/s chaser delta-v cap, no regular-round flat
+  time bonus, 1000 seconds per unused m/s of chaser delta-v, and a 5000 second
+  boss-round bonus.
+- Made Pursuit Arcade boss target eccentricity ramp from 0.05 upward by 0.05
+  per boss round, capped at 0.20.
+- Added a Pursuit Arcade target defensive delta-v ramp that holds at 0.1 m/s
+  through round 20, then increases by 0.01 m/s per round.
+
+### Fixed
+
+- Fixed debrief 2D RIC plot conventions so radial position is vertical in RI
+  and RC plots, cross-track position is vertical in IC plots, and the legend
+  stays below the figure on one row.
+- Fixed cumulative delta-v plotting to match the sampled acceleration
+  integration used by the game training tracker.
+
 ## 0.7.3 - 2026-05-22
 
 RPO trainer tutorial, Sandbox, and precision-thrust update.

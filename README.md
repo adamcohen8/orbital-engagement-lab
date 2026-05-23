@@ -186,6 +186,14 @@ pass/fail; restarting or quitting early discards the current attempt video. The
 saved MP4 includes the level's mapped music track looped over the video when a
 track is available.
 
+Structured training levels also save Markdown debrief reports under
+`outputs/game_debriefs/<scenario_id>/attempt_.../`. These reports include
+pass/fail status, failure reasons, summary stats, mission timeline and burn
+interval figures, 2D RIC plots, relative range and velocity histories,
+cumulative delta-v, and control-command plots. On the pass/fail screen, press
+`D` to close the game and open the attempt folder. Sandbox and Pursuit Arcade
+skip debrief reports because they are open-ended/replayable modes.
+
 The normal public repository includes the game music so the default download has
 the full trainer experience. To clone a smaller no-music copy, use a partial
 clone with sparse checkout:
@@ -202,7 +210,9 @@ The bundled progression now starts with a tutorial, then covers coast-relative
 motion, V-bar and R-bar approaches, close rendezvous, passively safe inspection,
 eccentric-orbit approach and NMC lessons, defensive-target tracking,
 evasive-target survival, and an arcade pursuit variant with tightening goals,
-randomized later-round starts, and elliptical boss rounds.
+randomized later-round starts, elliptical boss rounds, a conserved-delta-v time
+economy, boss eccentricity ramping to 0.20, and a post-round-20 target
+defensive delta-v ramp.
 
 You can also launch a level directly:
 
@@ -212,7 +222,8 @@ python run_game.py sim/game/configs/game_training_rpo_01_coast_relative_motion.y
 
 Default trainer controls are RIC translation pulses: W/S radial, A/D in-track,
 Left/Right cross-track, Space pause/resume, period single-step, R reset,
-Up/Down speed, and Escape level exit.
+Up/Down speed, `D` to open a completed debrief folder when available, and Escape
+level exit.
 
 The public CLI and GUI are intentionally scoped to deterministic single-run
 scenarios. Batch analysis settings are not exposed in public examples, and
