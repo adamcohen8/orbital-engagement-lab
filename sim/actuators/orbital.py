@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Literal
 
 import numpy as np
 
@@ -85,12 +86,54 @@ class OrbitalActuatorLimits:
     thruster_direction_body: np.ndarray | None = None
     thruster_position_body_m: np.ndarray | None = None
     couple_to_attitude: bool = True
+    rcs_cluster: RcsClusterLimits | None = None
+    electric_propulsion: ElectricPropulsionLimits | None = None
+    gimbaled_thruster: GimbaledThrusterLimits | None = None
+
+
+@dataclass(frozen=True)
+class RcsThruster:
+    name: str
+    position_body_m: np.ndarray
+    force_direction_body: np.ndarray
+    max_thrust_n: float
+    min_impulse_bit_n_s: float = 0.0
+    isp_s: float = 220.0
+
+
+@dataclass(frozen=True)
+class RcsClusterLimits:
+    thrusters: tuple[RcsThruster, ...]
+    allocation_mode: Literal["force_torque", "torque_only", "force_only"] = "force_torque"
+    pulse_quantum_s: float = 0.0
+    duty_cycle: float = 1.0
+
+
+@dataclass(frozen=True)
+class ElectricPropulsionLimits:
+    max_thrust_n: float
+    isp_s: float = 1500.0
+    duty_cycle: float = 1.0
+    max_power_w: float | None = None
+    power_per_newton_w: float | None = None
+    throttle_time_constant_s: float = 0.0
+
+
+@dataclass(frozen=True)
+class GimbaledThrusterLimits:
+    neutral_direction_body: np.ndarray
+    position_body_m: np.ndarray | None = None
+    max_gimbal_angle_rad: float = 0.0
+    max_gimbal_rate_rad_s: float = np.inf
+    response_time_constant_s: float = 0.0
 
 
 @dataclass
 class OrbitalActuator(Actuator):
     lag_tau_s: float = 0.0
     _last_accel: np.ndarray = field(default_factory=lambda: np.zeros(3))
+    _last_electric_accel: np.ndarray = field(default_factory=lambda: np.zeros(3))
+    _gimbal_direction_body: np.ndarray | None = None
 
     def apply(self, command: Command, limits: dict, dt_s: float) -> Command:
         lim: OrbitalActuatorLimits = limits["orbital"]
@@ -105,6 +148,28 @@ class OrbitalActuator(Actuator):
             max_accel_km_s2=lim.max_accel_km_s2,
             max_thrust_n=lim.max_thrust_n,
         )
+        attitude_quat_bn = mode_flags.get("current_attitude_quat_bn")
+        mass_isp_s = float(lim.isp_s)
+
+        if lim.rcs_cluster is not None:
+            return self._apply_rcs_cluster(
+                command=command,
+                cluster=lim.rcs_cluster,
+                mode_flags=mode_flags,
+                dt_s=dt_s,
+                current_mass_kg=current_mass_kg,
+                attitude_quat_bn=attitude_quat_bn,
+            )
+
+        if lim.electric_propulsion is not None:
+            accel_filtered, electric_diag = self._apply_electric_propulsion(
+                accel_filtered,
+                ep=lim.electric_propulsion,
+                current_mass_kg=current_mass_kg,
+                dt_s=dt_s,
+            )
+            mode_flags.update(electric_diag)
+            mass_isp_s = float(lim.electric_propulsion.isp_s)
 
         norm = np.linalg.norm(accel_filtered)
         if norm > effective_max_accel > 0.0:
@@ -128,8 +193,19 @@ class OrbitalActuator(Actuator):
 
         self._last_accel = accel_filtered.copy()
         accel_applied = accel_filtered.copy()
-        if bool(lim.couple_to_attitude):
-            attitude_quat_bn = mode_flags.get("current_attitude_quat_bn")
+        gimbaled_direction_body = None
+        if bool(lim.couple_to_attitude) and lim.gimbaled_thruster is not None and attitude_quat_bn is not None:
+            accel_applied, gimbaled_direction_body, gimbal_diag = self._apply_gimbaled_thruster(
+                accel_filtered,
+                gimbal=lim.gimbaled_thruster,
+                attitude_quat_bn=np.array(attitude_quat_bn, dtype=float),
+                dt_s=dt_s,
+            )
+            mode_flags.update(gimbal_diag)
+            thruster_direction_body = gimbaled_direction_body
+            if lim.gimbaled_thruster.position_body_m is not None:
+                thruster_position_body_m = lim.gimbaled_thruster.position_body_m
+        elif bool(lim.couple_to_attitude):
             if thruster_direction_body is not None and attitude_quat_bn is not None:
                 accel_applied = attitude_coupled_thrust_eci(
                     accel_filtered,
@@ -139,11 +215,13 @@ class OrbitalActuator(Actuator):
         g0_m_s2 = 9.80665
         accel_mag_m_s2 = float(np.linalg.norm(accel_applied) * 1e3)
         thrust_n = max(current_mass_kg, 0.0) * accel_mag_m_s2
-        mdot_kg_s = 0.0 if lim.isp_s <= 0.0 or thrust_n <= 0.0 else thrust_n / (lim.isp_s * g0_m_s2)
+        mdot_kg_s = 0.0 if mass_isp_s <= 0.0 or thrust_n <= 0.0 else thrust_n / (mass_isp_s * g0_m_s2)
         mode_flags["delta_mass_kg"] = float(mdot_kg_s * dt_s)
         mode_flags["effective_max_accel_km_s2"] = float(effective_max_accel)
         if lim.max_thrust_n is not None:
             mode_flags["max_thrust_n"] = float(max(lim.max_thrust_n, 0.0))
+        if gimbaled_direction_body is not None:
+            mode_flags["thruster_direction_body"] = np.array(gimbaled_direction_body, dtype=float).tolist()
         thruster_torque_body_nm = np.zeros(3, dtype=float)
         if thruster_direction_body is not None and thruster_position_body_m is not None:
             thruster_torque_body_nm = thruster_disturbance_torque_body_nm(
@@ -155,3 +233,215 @@ class OrbitalActuator(Actuator):
             torque_applied = torque_applied + thruster_torque_body_nm
         mode_flags["thruster_torque_body_nm"] = thruster_torque_body_nm.tolist()
         return Command(thrust_eci_km_s2=accel_applied, torque_body_nm=torque_applied, mode_flags=mode_flags)
+
+    def _apply_electric_propulsion(
+        self,
+        accel_cmd_eci_km_s2: np.ndarray,
+        *,
+        ep: ElectricPropulsionLimits,
+        current_mass_kg: float,
+        dt_s: float,
+    ) -> tuple[np.ndarray, dict[str, object]]:
+        accel = np.array(accel_cmd_eci_km_s2, dtype=float).reshape(3)
+        max_thrust_n = float(max(ep.max_thrust_n, 0.0))
+        if ep.max_power_w is not None and ep.power_per_newton_w is not None and ep.power_per_newton_w > 0.0:
+            max_thrust_n = min(max_thrust_n, float(max(ep.max_power_w, 0.0)) / float(ep.power_per_newton_w))
+        max_thrust_n *= float(np.clip(ep.duty_cycle, 0.0, 1.0))
+        max_accel = 0.0 if current_mass_kg <= 0.0 else max_thrust_n / current_mass_kg / 1e3
+        norm = float(np.linalg.norm(accel))
+        if norm > max_accel > 0.0:
+            accel = accel * (max_accel / norm)
+        elif max_accel <= 0.0:
+            accel = np.zeros(3, dtype=float)
+        tau_s = float(max(ep.throttle_time_constant_s, 0.0))
+        if dt_s > 0.0 and tau_s > 0.0:
+            alpha = float(np.clip(dt_s / tau_s, 0.0, 1.0))
+            accel = self._last_electric_accel + alpha * (accel - self._last_electric_accel)
+        self._last_electric_accel = accel.copy()
+        g0_m_s2 = 9.80665
+        thrust_n = max(current_mass_kg, 0.0) * float(np.linalg.norm(accel) * 1e3)
+        mdot_kg_s = 0.0 if ep.isp_s <= 0.0 or thrust_n <= 0.0 else thrust_n / (float(ep.isp_s) * g0_m_s2)
+        return accel, {
+            "electric_propulsion_thrust_n": float(thrust_n),
+            "electric_propulsion_max_thrust_n": float(max_thrust_n),
+            "electric_propulsion_delta_mass_kg": float(mdot_kg_s * max(dt_s, 0.0)),
+        }
+
+    def _apply_gimbaled_thruster(
+        self,
+        accel_cmd_eci_km_s2: np.ndarray,
+        *,
+        gimbal: GimbaledThrusterLimits,
+        attitude_quat_bn: np.ndarray,
+        dt_s: float,
+    ) -> tuple[np.ndarray, np.ndarray, dict[str, object]]:
+        accel = np.array(accel_cmd_eci_km_s2, dtype=float).reshape(3)
+        accel_mag = float(np.linalg.norm(accel))
+        neutral = _unit(np.array(gimbal.neutral_direction_body, dtype=float).reshape(3))
+        if accel_mag <= 0.0 or float(np.linalg.norm(neutral)) <= 0.0:
+            if self._gimbal_direction_body is None:
+                self._gimbal_direction_body = neutral.copy()
+            return np.zeros(3, dtype=float), self._gimbal_direction_body.copy(), {
+                "gimbal_angle_rad": 0.0,
+                "gimbal_rate_limited": False,
+            }
+        c_bn = quaternion_to_dcm_bn(np.array(attitude_quat_bn, dtype=float).reshape(4))
+        desired_force_body = _unit(c_bn @ accel)
+        desired_plume_body = -desired_force_body
+        limited_target = _rotate_toward(neutral, desired_plume_body, float(max(gimbal.max_gimbal_angle_rad, 0.0)))
+        current = neutral if self._gimbal_direction_body is None else _unit(self._gimbal_direction_body)
+        max_step = float(max(gimbal.max_gimbal_rate_rad_s, 0.0)) * max(dt_s, 0.0)
+        if gimbal.response_time_constant_s > 0.0:
+            max_step = min(max_step, float(max(dt_s, 0.0) / gimbal.response_time_constant_s))
+        rate_limited = _angle_between(current, limited_target) > max_step + 1e-12
+        next_dir = _rotate_toward(current, limited_target, max_step)
+        self._gimbal_direction_body = next_dir.copy()
+        achieved_force_eci = c_bn.T @ (-next_dir)
+        gimbal_angle = _angle_between(neutral, next_dir)
+        return accel_mag * achieved_force_eci, next_dir, {
+            "gimbal_direction_body": next_dir.tolist(),
+            "gimbal_angle_rad": float(gimbal_angle),
+            "gimbal_rate_limited": bool(rate_limited),
+        }
+
+    def _apply_rcs_cluster(
+        self,
+        *,
+        command: Command,
+        cluster: RcsClusterLimits,
+        mode_flags: dict,
+        dt_s: float,
+        current_mass_kg: float,
+        attitude_quat_bn: np.ndarray | None,
+    ) -> Command:
+        thrusters = tuple(cluster.thrusters or ())
+        if not thrusters or current_mass_kg <= 0.0:
+            mode_flags["rcs_thruster_forces_n"] = []
+            return Command(
+                thrust_eci_km_s2=np.zeros(3, dtype=float),
+                torque_body_nm=np.zeros(3, dtype=float),
+                mode_flags=mode_flags,
+            )
+        c_bn = (
+            quaternion_to_dcm_bn(np.array(attitude_quat_bn, dtype=float).reshape(4))
+            if attitude_quat_bn is not None
+            else np.eye(3)
+        )
+        desired_force_eci_n = np.array(command.thrust_eci_km_s2, dtype=float).reshape(3) * current_mass_kg * 1e3
+        desired_force_body_n = c_bn @ desired_force_eci_n
+        desired_torque_body_nm = np.array(command.torque_body_nm, dtype=float).reshape(3)
+        if cluster.allocation_mode == "torque_only":
+            target = desired_torque_body_nm
+            rows = slice(3, 6)
+        elif cluster.allocation_mode == "force_only":
+            target = desired_force_body_n
+            rows = slice(0, 3)
+        else:
+            target = np.hstack((desired_force_body_n, desired_torque_body_nm))
+            rows = slice(0, 6)
+
+        force_dirs = []
+        torque_dirs = []
+        max_forces = []
+        min_impulses = []
+        isps = []
+        names = []
+        for thruster in thrusters:
+            force_dir = _unit(np.array(thruster.force_direction_body, dtype=float).reshape(3))
+            pos = np.array(thruster.position_body_m, dtype=float).reshape(3)
+            force_dirs.append(force_dir)
+            torque_dirs.append(np.cross(pos, force_dir))
+            max_forces.append(float(max(thruster.max_thrust_n, 0.0)))
+            min_impulses.append(float(max(thruster.min_impulse_bit_n_s, 0.0)))
+            isps.append(float(thruster.isp_s))
+            names.append(str(thruster.name))
+        allocation = np.vstack((np.column_stack(force_dirs), np.column_stack(torque_dirs)))[rows, :]
+        forces = _bounded_nonnegative_lstsq(allocation, np.array(target, dtype=float).reshape(-1), np.array(max_forces))
+        duty = float(np.clip(cluster.duty_cycle, 0.0, 1.0))
+        forces *= duty
+        if cluster.pulse_quantum_s > 0.0 and dt_s > 0.0:
+            on_time = np.round((forces / np.maximum(max_forces, 1e-12)) * dt_s / cluster.pulse_quantum_s)
+            on_time = np.clip(on_time * cluster.pulse_quantum_s, 0.0, dt_s)
+            forces = np.array(max_forces, dtype=float) * (on_time / dt_s)
+        if dt_s > 0.0:
+            for idx, min_impulse in enumerate(min_impulses):
+                if 0.0 < forces[idx] * dt_s < min_impulse:
+                    forces[idx] = 0.0
+        force_body_n = np.sum(np.array(force_dirs).T * forces.reshape(1, -1), axis=1)
+        rcs_torque_body_nm = np.sum(np.array(torque_dirs).T * forces.reshape(1, -1), axis=1)
+        torque_body_nm = (
+            desired_torque_body_nm + rcs_torque_body_nm
+            if cluster.allocation_mode == "force_only"
+            else rcs_torque_body_nm
+        )
+        force_eci_n = c_bn.T @ force_body_n
+        accel_eci_km_s2 = force_eci_n / current_mass_kg / 1e3
+        g0_m_s2 = 9.80665
+        mdot = 0.0
+        for force_n, isp_s in zip(forces, isps):
+            if force_n > 0.0 and isp_s > 0.0:
+                mdot += float(force_n / (isp_s * g0_m_s2))
+        mode_flags["rcs_thruster_names"] = names
+        mode_flags["rcs_thruster_forces_n"] = forces.tolist()
+        mode_flags["rcs_force_body_n"] = force_body_n.tolist()
+        mode_flags["rcs_torque_body_nm"] = rcs_torque_body_nm.tolist()
+        mode_flags["delta_mass_kg"] = float(mdot * max(dt_s, 0.0))
+        return Command(thrust_eci_km_s2=accel_eci_km_s2, torque_body_nm=torque_body_nm, mode_flags=mode_flags)
+
+
+def _angle_between(a: np.ndarray, b: np.ndarray) -> float:
+    ua = _unit(a)
+    ub = _unit(b)
+    if float(np.linalg.norm(ua)) <= 0.0 or float(np.linalg.norm(ub)) <= 0.0:
+        return 0.0
+    return float(np.arccos(np.clip(float(np.dot(ua, ub)), -1.0, 1.0)))
+
+
+def _rotate_toward(current: np.ndarray, target: np.ndarray, max_angle_rad: float) -> np.ndarray:
+    cur = _unit(current)
+    tgt = _unit(target)
+    if float(np.linalg.norm(cur)) <= 0.0:
+        return tgt
+    if float(np.linalg.norm(tgt)) <= 0.0:
+        return cur
+    angle = _angle_between(cur, tgt)
+    if angle <= max_angle_rad or angle <= 1e-12:
+        return tgt
+    axis = np.cross(cur, tgt)
+    axis_norm = float(np.linalg.norm(axis))
+    if axis_norm <= 1e-12:
+        helper = np.array([1.0, 0.0, 0.0], dtype=float)
+        if abs(float(np.dot(cur, helper))) > 0.9:
+            helper = np.array([0.0, 1.0, 0.0], dtype=float)
+        axis = np.cross(cur, helper)
+        axis_norm = float(np.linalg.norm(axis))
+    axis = axis / max(axis_norm, 1e-12)
+    step = float(max(max_angle_rad, 0.0))
+    out = cur * np.cos(step) + np.cross(axis, cur) * np.sin(step) + axis * np.dot(axis, cur) * (1.0 - np.cos(step))
+    return _unit(out)
+
+
+def _bounded_nonnegative_lstsq(a: np.ndarray, b: np.ndarray, upper: np.ndarray) -> np.ndarray:
+    matrix = np.array(a, dtype=float)
+    target = np.array(b, dtype=float).reshape(matrix.shape[0])
+    upper = np.array(upper, dtype=float).reshape(matrix.shape[1])
+    free = np.ones(matrix.shape[1], dtype=bool)
+    x = np.zeros(matrix.shape[1], dtype=float)
+    residual = target.copy()
+    for _ in range(matrix.shape[1] + 1):
+        if not np.any(free):
+            break
+        sol, *_ = np.linalg.lstsq(matrix[:, free], residual, rcond=None)
+        trial = np.zeros_like(x)
+        trial[free] = sol
+        too_low = trial < 0.0
+        too_high = trial > upper
+        if not np.any(too_low | too_high):
+            x[free] = trial[free]
+            break
+        newly_fixed = free & (too_low | too_high)
+        x[newly_fixed & too_low] = 0.0
+        x[newly_fixed & too_high] = upper[newly_fixed & too_high]
+        free[newly_fixed] = False
+        residual = target - matrix @ x
+    return np.clip(x, 0.0, upper)

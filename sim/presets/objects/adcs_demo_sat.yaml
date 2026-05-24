@@ -1,0 +1,15 @@
+name: "ADCS Demo Satellite"
+preset_type: "satellite"
+description: "Attitude-control demonstration bus with reaction-wheel and magnetorquer-oriented defaults."
+specs:
+  preset_satellite: "ADCS_DEMO_SAT"
+  dry_mass_kg: 120.0
+  fuel_mass_kg: 5.0
+  bus_size_m: [0.8, 0.7, 0.6]
+  mass_properties:
+    inertia_kg_m2:
+      - [14.0, 0.0, 0.0]
+      - [0.0, 12.0, 0.0]
+      - [0.0, 0.0, 10.0]
+  actuator_preset: "BASIC_MAGNETORQUER_TRIAD"
+  attitude_system: "BASIC_REACTION_WHEELS_3AXIS"

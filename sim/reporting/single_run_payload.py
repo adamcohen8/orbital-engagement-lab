@@ -38,6 +38,58 @@ class SingleRunPayloadContext:
     rocket_insertion_time_s: float | None
 
 
+def _summarize_actuator_diagnostics(controller_debug_hist: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+    summary: dict[str, Any] = {}
+    for oid, rows in dict(controller_debug_hist or {}).items():
+        object_summary: dict[str, Any] = {
+            "actuator_stack_samples": 0,
+            "fault_stuck_off_samples": 0,
+            "rcs_active_samples": 0,
+            "magnetorquer_active_samples": 0,
+            "cmg_active_samples": 0,
+            "wheel_desaturation_samples": 0,
+            "max_gimbal_angle_rad": 0.0,
+            "max_commanded_rcs_thruster_force_n": 0.0,
+            "max_electric_propulsion_thrust_n": 0.0,
+        }
+        for row in list(rows or []):
+            flags = dict(row.get("mode_flags", {}) or {})
+            if bool(flags.get("actuator_stack_enabled", False)):
+                object_summary["actuator_stack_samples"] += 1
+            if bool(flags.get("actuator_fault_stuck_off", False)):
+                object_summary["fault_stuck_off_samples"] += 1
+            if flags.get("rcs_thruster_forces_n") is not None:
+                forces = np.array(flags.get("rcs_thruster_forces_n", []), dtype=float).reshape(-1)
+                finite = forces[np.isfinite(forces)]
+                if finite.size and float(np.max(np.abs(finite))) > 1e-15:
+                    object_summary["rcs_active_samples"] += 1
+                    object_summary["max_commanded_rcs_thruster_force_n"] = max(
+                        float(object_summary["max_commanded_rcs_thruster_force_n"]),
+                        float(np.max(np.abs(finite))),
+                    )
+            if str(flags.get("magnetorquer_mode", "") or ""):
+                object_summary["magnetorquer_active_samples"] += 1
+            if flags.get("cmg_torque_body_nm") is not None:
+                cmg = np.array(flags.get("cmg_torque_body_nm", []), dtype=float).reshape(-1)
+                if cmg.size and float(np.linalg.norm(cmg)) > 1e-15:
+                    object_summary["cmg_active_samples"] += 1
+            if bool(flags.get("wheel_desaturation_active", False)):
+                object_summary["wheel_desaturation_samples"] += 1
+            if flags.get("gimbal_angle_rad") is not None:
+                object_summary["max_gimbal_angle_rad"] = max(
+                    float(object_summary["max_gimbal_angle_rad"]),
+                    abs(float(flags.get("gimbal_angle_rad", 0.0))),
+                )
+            if flags.get("electric_propulsion_thrust_n") is not None:
+                object_summary["max_electric_propulsion_thrust_n"] = max(
+                    float(object_summary["max_electric_propulsion_thrust_n"]),
+                    abs(float(flags.get("electric_propulsion_thrust_n", 0.0))),
+                )
+        if any(float(v) > 0.0 for v in object_summary.values()):
+            summary[str(oid)] = object_summary
+    return summary
+
+
 def build_single_run_payload(context: SingleRunPayloadContext) -> dict[str, Any]:
     ground_station_access, ground_station_access_summary = evaluate_ground_station_access(
         ground_stations=list(context.cfg.ground_stations),
@@ -68,6 +120,7 @@ def build_single_run_payload(context: SingleRunPayloadContext) -> dict[str, Any]
         "knowledge_detection_by_observer": context.knowledge_detection_by_observer,
         "knowledge_consistency_by_observer": context.knowledge_consistency_by_observer,
         "ground_station_access_summary": ground_station_access_summary,
+        "actuator_diagnostics_summary": _summarize_actuator_diagnostics(context.controller_debug_hist),
         "plot_outputs": {},
         "animation_outputs": {},
     }

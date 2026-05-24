@@ -162,6 +162,106 @@ class TestPluginValidation(unittest.TestCase):
                 sys.path.remove(td)
                 sys.modules.pop("constructor_side_effect_plugin", None)
 
+    def test_unknown_actuator_preset_fails_strict_validation(self):
+        cfg = scenario_config_from_dict(
+            {
+                "rocket": {"enabled": False},
+                "target": {
+                    "enabled": True,
+                    "specs": {"mass_kg": 200.0, "actuator_preset": "BASIC_NOT_REAL"},
+                },
+                "simulator": {"duration_s": 20.0, "dt_s": 1.0},
+            }
+        )
+
+        errs = validate_scenario_plugins(cfg)
+
+        self.assertTrue(any("actuator_preset" in err and "BASIC_RCS_6DOF" in err for err in errs))
+
+    def test_malformed_actuator_config_fails_strict_validation(self):
+        cfg = scenario_config_from_dict(
+            {
+                "rocket": {"enabled": False},
+                "target": {
+                    "enabled": True,
+                    "specs": {
+                        "mass_kg": 200.0,
+                        "actuators": {
+                            "enabled": True,
+                            "orbital": {
+                                "rcs_cluster": {
+                                    "allocation_mode": "force_torque",
+                                    "thrusters": [
+                                        {
+                                            "name": "bad-thruster",
+                                            "position_body_m": [0.0, 0.0],
+                                            "force_direction_body": [0.0, 0.0, 0.0],
+                                            "max_thrust_n": -1.0,
+                                        }
+                                    ],
+                                }
+                            },
+                        },
+                    },
+                },
+                "simulator": {"duration_s": 20.0, "dt_s": 1.0},
+            }
+        )
+
+        errs = validate_scenario_plugins(cfg)
+
+        self.assertTrue(any("position_body_m" in err for err in errs))
+        self.assertTrue(any("force_direction_body" in err and "nonzero" in err for err in errs))
+        self.assertTrue(any("max_thrust_n" in err and ">=" in err for err in errs))
+
+    def test_actuator_preset_with_local_overrides_passes_validation(self):
+        cfg = scenario_config_from_dict(
+            {
+                "rocket": {"enabled": False},
+                "target": {
+                    "enabled": True,
+                    "specs": {
+                        "mass_kg": 200.0,
+                        "actuators": {
+                            "preset": "BASIC_ELECTRIC_PROPULSION",
+                            "orbital": {
+                                "electric_propulsion": {
+                                    "max_thrust_n": 0.25,
+                                }
+                            },
+                        },
+                    },
+                },
+                "simulator": {"duration_s": 20.0, "dt_s": 1.0},
+            }
+        )
+
+        self.assertEqual(validate_scenario_plugins(cfg), [])
+
+    def test_scalar_actuator_vector_fields_pass_strict_validation(self):
+        cfg = scenario_config_from_dict(
+            {
+                "rocket": {"enabled": False},
+                "target": {
+                    "enabled": True,
+                    "specs": {
+                        "mass_kg": 200.0,
+                        "actuators": {
+                            "enabled": True,
+                            "attitude": {
+                                "magnetorquers": {
+                                    "max_dipole_a_m2": 10.0,
+                                },
+                            },
+                        },
+                    },
+                },
+                "simulator": {"duration_s": 20.0, "dt_s": 1.0},
+            }
+        )
+
+        self.assertEqual(validate_scenario_plugins(cfg), [])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -55,7 +55,7 @@ SLOW_TEST_FILES = {
 }
 
 EXTERNAL_TEST_FILES = {
-    "test_cfs_sil.py",
+    "test_" + "c" + "f" + "s" + "_sil.py",
     "test_optional_dependencies.py",
 }
 

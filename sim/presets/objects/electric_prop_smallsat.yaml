@@ -1,0 +1,15 @@
+name: "Electric Propulsion SmallSat"
+preset_type: "satellite"
+description: "Low-thrust high-Isp small satellite for stationkeeping and orbit-raising studies."
+specs:
+  preset_satellite: "ELECTRIC_PROP_SMALLSAT"
+  dry_mass_kg: 180.0
+  fuel_mass_kg: 25.0
+  bus_size_m: [1.0, 0.8, 0.8]
+  mass_properties:
+    inertia_kg_m2:
+      - [45.0, 0.0, 0.0]
+      - [0.0, 38.0, 0.0]
+      - [0.0, 0.0, 30.0]
+  actuator_preset: "BASIC_ELECTRIC_PROPULSION"
+  attitude_system: "BASIC_REACTION_WHEELS_3AXIS"

@@ -6,6 +6,45 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## Unreleased
+
+## 0.8.0 - 2026-05-24
+
+### Added
+
+- Added a Pro-only GNC workbench scaffold helper for custom orbit and attitude
+  controller plugins, including generated controller code,
+  strict-plugin-validation smoke scenarios, pytest smoke tests, local review
+  instructions, and public-export exclusions.
+- Added public actuator models for RCS thruster clusters, electric propulsion,
+  spacecraft gimbaled thrusters, physical magnetorquers, simplified CMGs, wheel
+  desaturation assist, and actuator fault/degradation wrappers.
+- Wired public actuator-stack diagnostics into configured satellite runtime
+  report resource data sources.
+- Added public actuator-aware controller scaffolds for magnetorquer B-dot,
+  wheel desaturation, CMG steering, RCS allocation preview, electric propulsion,
+  and gimbaled-thruster reachability.
+- Added local smoke configs for each actuator-aware controller family.
+- Added public actuator presets for RCS, electric propulsion, magnetorquers,
+  CMGs, and gimbaled thrusters; added strict actuator config validation, a
+  multi-family actuator lab smoke scenario, and Pro GNC workbench
+  `--actuator-preset` targeting.
+- Added satellite presets for `CUBESAT_6U`, `SMALLSAT_RPO`,
+  `TARGET_BUS_PASSIVE`, `ELECTRIC_PROP_SMALLSAT`, and `ADCS_DEMO_SAT`, with
+  matching scenario YAML object presets.
+- Added a public interactive Orbital Calculator with category menus for quick
+  two-body, GEO, apogee/perigee, plane-change, sun-synchronous, phasing,
+  atmospheric-drag/deorbit-lifetime range, rocket-equation, and robust
+  state-vector/orbital-element conversion estimates, plus Hohmann rendezvous
+  phase/wait-time helpers, first-order J2 secular-rate estimates, HCW
+  relative-motion drift, eclipse, ground-track, and entry-interface estimates.
+
+### Fixed
+
+- Fixed `BASIC_RCS_6DOF` so the preset guarantees full six-axis force and torque
+  allocation authority, including body-X roll torque.
+- Fixed strict actuator validation so scalar-or-vector actuator fields accept
+  scalar values when the runtime actuator stack supports them.
 ## 0.7.4 - 2026-05-23
 
 RPO trainer debrief reports and Pursuit Arcade balance update.
@@ -551,7 +590,6 @@ Initial public-core maturity release.
 
 - Added Pro/private workflows for controller benchmarking, optimization,
   Monte Carlo and sensitivity campaigns, AI-assisted reports, validation
-  harnesses, and early cFS/SIL integration patterns.
 - Added a validation maturity plan covering current confidence level, HPOP/MATLAB
   evidence, remaining decision-grade gaps, and validation investment priorities.
 - Added a product maturity roadmap focused on workflow curation, validation,

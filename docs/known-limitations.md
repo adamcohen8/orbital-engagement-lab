@@ -8,7 +8,7 @@ not flight-qualified or operational decision-grade software.
 
 - The public core is optimized for deterministic single-run simulation.
 - Monte Carlo, sensitivity studies, controller benchmarking, optimization,
-  campaign dashboards, AI-assisted reporting, and cFS/SIL workflows are Pro
+  campaign dashboards, AI-assisted reporting, and custom flight-software workflows are Pro
   surfaces and are not included in the public export.
 - The GUI is intended for scenario editing, single-run execution, and artifact
   inspection. It does not expose every lower-level config option.

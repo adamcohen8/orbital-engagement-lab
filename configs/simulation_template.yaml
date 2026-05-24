@@ -563,9 +563,9 @@ simulator:
       orbit_insertion_cutoff_enabled: false
       # Minimum altitude for cutoff consideration, in kilometers.
       cutoff_min_alt_km: 90.0
-      # Minimum periapsis altitude for cutoff consideration, in kilometers.
+      # Minimum perigee altitude for cutoff consideration, in kilometers.
       cutoff_min_periapsis_alt_km: 140.0
-      # Apoapsis margin for cutoff consideration, in kilometers.
+      # Apogee margin for cutoff consideration, in kilometers.
       cutoff_apoapsis_margin_km: 10.0
       # Specific orbital-energy margin for cutoff consideration.
       cutoff_energy_margin_km2_s2: 0.01

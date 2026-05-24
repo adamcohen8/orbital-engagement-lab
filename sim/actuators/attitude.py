@@ -6,6 +6,7 @@ import numpy as np
 
 from sim.core.interfaces import Actuator
 from sim.core.models import Command
+from sim.utils.quaternion import quaternion_to_dcm_bn
 
 
 @dataclass(frozen=True)
@@ -31,21 +32,40 @@ class ThrusterPulseLimits:
     pulse_quantum_s: float = 0.02
 
 
+@dataclass(frozen=True)
+class ControlMomentGyroLimits:
+    max_torque_nm: np.ndarray | float
+    momentum_nms: np.ndarray | float
+    gimbal_rate_limit_rad_s: np.ndarray | float = np.inf
+    torque_time_constant_s: float = 0.0
+
+
+@dataclass(frozen=True)
+class WheelDesaturationLimits:
+    momentum_fraction_threshold: float = 0.8
+    unload_gain_s_inv: float = 0.02
+    max_unload_torque_nm: float = 0.01
+
+
 @dataclass
 class AttitudeActuator(Actuator):
     reaction_wheels: ReactionWheelLimits | None = None
     magnetorquers: MagnetorquerLimits | None = None
     thruster_pulse: ThrusterPulseLimits | None = None
+    control_moment_gyros: ControlMomentGyroLimits | None = None
+    wheel_desaturation: WheelDesaturationLimits | None = None
     # Body-equivalent wheel momentum vector (N*m*s) for telemetry/compatibility.
     wheel_momentum_nms: np.ndarray = field(default_factory=lambda: np.zeros(3))
     # Per-wheel internal states (allocated lazily from wheel config).
     wheel_momentum_wheels_nms: np.ndarray = field(default_factory=lambda: np.zeros(0))
     wheel_speed_rad_s: np.ndarray = field(default_factory=lambda: np.zeros(0))
     wheel_motor_torque_nm: np.ndarray = field(default_factory=lambda: np.zeros(0))
+    cmg_torque_nm: np.ndarray = field(default_factory=lambda: np.zeros(3))
 
     def apply(self, command: Command, limits: dict, dt_s: float) -> Command:
         torque = np.array(command.torque_body_nm, dtype=float)
         mode_flags = dict(command.mode_flags)
+        pre_step_wheel_momentum_nms = np.array(self.wheel_momentum_nms, dtype=float).reshape(3)
 
         if self.reaction_wheels is not None:
             torque, rw_diag = self._apply_reaction_wheels(
@@ -55,6 +75,18 @@ class AttitudeActuator(Actuator):
             )
             mode_flags.update(rw_diag)
 
+        if self.wheel_desaturation is not None and self.reaction_wheels is not None:
+            h_now = np.array(self.wheel_momentum_nms, dtype=float).reshape(3)
+            if np.linalg.norm(pre_step_wheel_momentum_nms) > np.linalg.norm(h_now):
+                h_now = pre_step_wheel_momentum_nms
+            unload_torque, desat_diag = self._desaturation_torque(h_now)
+            torque = torque + unload_torque
+            mode_flags.update(desat_diag)
+
+        if self.control_moment_gyros is not None:
+            torque, cmg_diag = self._apply_control_moment_gyros(torque, dt_s=dt_s)
+            mode_flags.update(cmg_diag)
+
         if self.thruster_pulse is not None:
             tp = self.thruster_pulse
             torque = np.clip(torque, -tp.max_torque_nm, tp.max_torque_nm)
@@ -63,11 +95,9 @@ class AttitudeActuator(Actuator):
                 scale = 0.0 if pulses <= 0 else pulses * tp.pulse_quantum_s / dt_s
                 torque *= scale
 
-        # Magnetorquer coupling to geomagnetic field would require B-field in env.
-        # Here we enforce achievable moment command proxy via clamp.
         if self.magnetorquers is not None:
-            mt = self.magnetorquers
-            torque = np.clip(torque, -np.abs(mt.max_dipole_a_m2), np.abs(mt.max_dipole_a_m2))
+            torque, mt_diag = self._apply_magnetorquers(torque, mode_flags)
+            mode_flags.update(mt_diag)
 
         return Command(
             thrust_eci_km_s2=np.array(command.thrust_eci_km_s2, dtype=float),
@@ -207,3 +237,91 @@ class AttitudeActuator(Actuator):
             "rw_momentum_body_nms": self.wheel_momentum_nms.tolist(),
         }
         return torque_body_nm, diag
+
+    def _apply_magnetorquers(self, torque_body_cmd_nm: np.ndarray, mode_flags: dict) -> tuple[np.ndarray, dict]:
+        mt = self.magnetorquers
+        if mt is None:
+            return torque_body_cmd_nm, {}
+        max_dipole = np.abs(np.array(mt.max_dipole_a_m2, dtype=float).reshape(-1))
+        if max_dipole.size == 1:
+            max_dipole = np.full(3, float(max_dipole[0]), dtype=float)
+        if max_dipole.size != 3:
+            raise ValueError("max_dipole_a_m2 must be scalar or length-3.")
+
+        b_body = mode_flags.get("magnetic_field_body_t")
+        if b_body is None and mode_flags.get("magnetic_field_eci_t") is not None:
+            q = mode_flags.get("current_attitude_quat_bn")
+            if q is not None:
+                c_bn = quaternion_to_dcm_bn(np.array(q, dtype=float).reshape(4))
+                b_body = c_bn @ np.array(mode_flags["magnetic_field_eci_t"], dtype=float).reshape(3)
+        if b_body is None:
+            proxy = np.clip(torque_body_cmd_nm, -max_dipole, max_dipole)
+            return proxy, {
+                "magnetorquer_mode": "dipole_proxy_no_b_field",
+                "magnetorquer_dipole_cmd_a_m2": np.clip(torque_body_cmd_nm, -max_dipole, max_dipole).tolist(),
+            }
+
+        b = np.array(b_body, dtype=float).reshape(3)
+        b2 = float(np.dot(b, b))
+        if b2 <= 1e-24:
+            dipole = np.zeros(3, dtype=float)
+            torque = np.zeros(3, dtype=float)
+        else:
+            desired = np.array(torque_body_cmd_nm, dtype=float).reshape(3)
+            dipole = np.cross(b, desired) / b2
+            dipole = np.clip(dipole, -max_dipole, max_dipole)
+            torque = np.cross(dipole, b)
+        return torque, {
+            "magnetorquer_mode": "physical_b_cross_m",
+            "magnetic_field_body_t": b.tolist(),
+            "magnetorquer_dipole_cmd_a_m2": dipole.tolist(),
+            "magnetorquer_torque_body_nm": torque.tolist(),
+        }
+
+    def _apply_control_moment_gyros(self, torque_body_cmd_nm: np.ndarray, *, dt_s: float) -> tuple[np.ndarray, dict]:
+        cmg = self.control_moment_gyros
+        if cmg is None:
+            return torque_body_cmd_nm, {}
+        max_torque = self._as_vector(cmg.max_torque_nm, 3, default=0.0)
+        momentum = self._as_vector(cmg.momentum_nms, 3, default=0.0)
+        rate_limit = self._as_vector(cmg.gimbal_rate_limit_rad_s, 3, default=np.inf)
+        gimbal_torque_cap = np.abs(momentum * rate_limit)
+        cap = np.minimum(np.abs(max_torque), gimbal_torque_cap)
+        target = np.clip(np.array(torque_body_cmd_nm, dtype=float).reshape(3), -cap, cap)
+        tau_s = float(max(cmg.torque_time_constant_s, 0.0))
+        if dt_s > 0.0 and tau_s > 0.0:
+            alpha = float(np.clip(dt_s / tau_s, 0.0, 1.0))
+            target = self.cmg_torque_nm + alpha * (target - self.cmg_torque_nm)
+        self.cmg_torque_nm = target.copy()
+        return target, {
+            "cmg_torque_body_nm": target.tolist(),
+            "cmg_torque_cap_nm": cap.tolist(),
+        }
+
+    def _desaturation_torque(self, h_body_nms: np.ndarray | None = None) -> tuple[np.ndarray, dict]:
+        desat = self.wheel_desaturation
+        if desat is None or self.reaction_wheels is None:
+            return np.zeros(3, dtype=float), {}
+        h_body = (
+            np.array(self.wheel_momentum_nms, dtype=float).reshape(3)
+            if h_body_nms is None
+            else np.array(h_body_nms, dtype=float).reshape(3)
+        )
+        h_norm = float(np.linalg.norm(h_body))
+        max_h = np.array(self.reaction_wheels.max_momentum_nms, dtype=float).reshape(-1)
+        threshold = float(np.clip(desat.momentum_fraction_threshold, 0.0, 1.0)) * float(np.linalg.norm(max_h))
+        if h_norm <= threshold or h_norm <= 0.0:
+            return np.zeros(3, dtype=float), {
+                "wheel_desaturation_active": False,
+                "wheel_desaturation_torque_body_nm": [0.0, 0.0, 0.0],
+            }
+        unload = -float(max(desat.unload_gain_s_inv, 0.0)) * h_body
+        unload_norm = float(np.linalg.norm(unload))
+        max_unload = float(max(desat.max_unload_torque_nm, 0.0))
+        if unload_norm > max_unload > 0.0:
+            unload *= max_unload / unload_norm
+        return unload, {
+            "wheel_desaturation_active": True,
+            "wheel_desaturation_torque_body_nm": unload.tolist(),
+            "wheel_desaturation_momentum_norm_nms": h_norm,
+        }

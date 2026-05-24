@@ -1,0 +1,14 @@
+name: "6U CubeSat"
+preset_type: "satellite"
+description: "Small education/prototyping CubeSat bus for passive, sensing, and attitude-control demos."
+specs:
+  preset_satellite: "CUBESAT_6U"
+  dry_mass_kg: 12.0
+  fuel_mass_kg: 0.0
+  bus_size_m: [0.3, 0.2, 0.1]
+  mass_properties:
+    inertia_kg_m2:
+      - [0.05, 0.0, 0.0]
+      - [0.0, 0.10, 0.0]
+      - [0.0, 0.0, 0.13]
+  attitude_system: "BASIC_REACTION_WHEELS_3AXIS"

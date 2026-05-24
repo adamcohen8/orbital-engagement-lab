@@ -1,0 +1,81 @@
+scenario_name: "controller_cmg_steering_smoke"
+scenario_description: "Local smoke scenario for the public CMGSteeringController."
+
+rocket:
+  enabled: false
+
+chaser:
+  enabled: false
+
+target:
+  enabled: true
+  specs:
+    mass_kg: 120.0
+    mass_properties:
+      inertia_kg_m2:
+        - [12.0, 0.0, 0.0]
+        - [0.0, 10.0, 0.0]
+        - [0.0, 0.0, 8.0]
+    actuators:
+      enabled: true
+      attitude:
+        control_moment_gyros:
+          max_torque_nm: [0.02, 0.02, 0.02]
+          momentum_nms: [0.5, 0.5, 0.5]
+          gimbal_rate_limit_rad_s: [0.1, 0.1, 0.1]
+  initial_state:
+    position_eci_km: [7000.0, 0.0, 0.0]
+    velocity_eci_km_s: [0.0, 7.5, 0.0]
+    attitude_quat_bn: [0.9961947, 0.0, 0.0871557, 0.0]
+    angular_rate_body_rad_s: [0.0, 0.0, 0.0]
+  attitude_control:
+    kind: "python"
+    module: "sim.control.attitude.cmg_steering"
+    class_name: "CMGSteeringController"
+    params:
+      max_torque_nm: [0.02, 0.02, 0.02]
+      momentum_nms: [0.5, 0.5, 0.5]
+      gimbal_rate_limit_rad_s: [0.1, 0.1, 0.1]
+      base_controller:
+        module: "sim.control.attitude.baseline"
+        class_name: "QuaternionPDController"
+        params:
+          desired_attitude_quat_bn: [1.0, 0.0, 0.0, 0.0]
+          kp: 0.1
+          kd: 0.02
+          max_torque_nm: 0.05
+
+simulator:
+  duration_s: 5.0
+  dt_s: 1.0
+  dynamics:
+    orbit:
+      model: "two_body"
+      orbit_substep_s: 1.0
+    attitude:
+      enabled: true
+      attitude_substep_s: 0.5
+      disturbance_torques:
+        gravity_gradient: false
+        magnetic: false
+        drag: false
+        srp: false
+  plugin_validation:
+    strict: true
+  termination:
+    earth_impact_enabled: false
+
+outputs:
+  output_dir: "outputs/controller_smokes/cmg_steering"
+  mode: "save"
+  stats:
+    print_summary: false
+    save_json: true
+    save_csv: false
+    save_full_log: false
+  plots:
+    enabled: false
+    figure_ids: []
+  animations:
+    enabled: false
+    types: []

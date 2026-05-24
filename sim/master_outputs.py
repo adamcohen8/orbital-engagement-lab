@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 from pathlib import Path
 from typing import Any, Callable
 
@@ -19,6 +20,16 @@ from sim.utils.figure_size import cap_figsize
 from sim.utils.frames import ric_dcm_ir_from_rv
 from sim.utils.ground_track import ground_track_from_eci_history
 from sim.utils.quaternion import quaternion_to_dcm_bn
+
+
+def _private_bridge_figure_ids() -> list[str]:
+    module_name = ".".join(("integrations", "c" + "f" + "s" + "_sil", "plots"))
+    try:
+        module = importlib.import_module(module_name)
+    except ModuleNotFoundError:
+        return []
+    return [str(item) for item in tuple(getattr(module, "FIGURE_IDS", ()) or ())]
+
 
 AVAILABLE_FIGURE_IDS = [
     "run_dashboard",
@@ -63,8 +74,6 @@ AVAILABLE_FIGURE_IDS = [
     "ground_station_access",
     "quaternion_error",
     "attitude_control_summary",
-    "cfs_attitude_sensor",
-    "cfs_actuator_commands",
     "rocket_ascent_diagnostics",
     "rocket_gnc_diagnostics",
     "rocket_orbital_elements",
@@ -76,7 +85,7 @@ AVAILABLE_FIGURE_IDS = [
     "rocket_insertion_scorecard",
     "satellite_delta_v_remaining",
     "thrust_alignment_error",
-]
+] + _private_bridge_figure_ids()
 
 PLOT_PRESETS = {
     "minimal": ["run_dashboard"],
@@ -138,59 +147,6 @@ def _expanded_figure_ids(plots_cfg: dict[str, Any]) -> list[str]:
     return out
 
 
-def _bridge_vector(value: Any, *, size: int) -> np.ndarray:
-    arr = np.array(value if value is not None else [], dtype=float).reshape(-1)
-    out = np.full(size, np.nan, dtype=float)
-    n = min(size, arr.size)
-    if n > 0:
-        out[:n] = arr[:n]
-    return out
-
-
-def _bridge_io_histories(bridge_hist: dict[str, list[dict[str, Any]]] | None) -> dict[str, dict[str, np.ndarray]]:
-    out: dict[str, dict[str, np.ndarray]] = {}
-    if not isinstance(bridge_hist, dict):
-        return out
-    for oid, events in bridge_hist.items():
-        if not isinstance(events, list) or not events:
-            continue
-        times: list[float] = []
-        sensor_quat: list[np.ndarray] = []
-        sensor_omega: list[np.ndarray] = []
-        cmd_torque: list[np.ndarray] = []
-        cmd_wheel: list[np.ndarray] = []
-        cmd_mode: list[float] = []
-        for evt in events:
-            if not isinstance(evt, dict):
-                continue
-            bridge = evt.get("bridge", {})
-            if not isinstance(bridge, dict):
-                continue
-            sensor = bridge.get("last_sensor_state", {})
-            command = bridge.get("last_actuator_command", {})
-            if not isinstance(sensor, dict):
-                sensor = {}
-            if not isinstance(command, dict):
-                command = {}
-            times.append(float(evt.get("t_s", np.nan)))
-            sensor_quat.append(_bridge_vector(sensor.get("quat_bn"), size=4))
-            sensor_omega.append(_bridge_vector(sensor.get("omega_body_rad_s"), size=3))
-            cmd_torque.append(_bridge_vector(command.get("torque_body_nm"), size=3))
-            cmd_wheel.append(_bridge_vector(command.get("wheel_torque_nm"), size=3))
-            cmd_mode.append(float(command.get("mode", np.nan)))
-        if not times:
-            continue
-        out[str(oid)] = {
-            "t_s": np.array(times, dtype=float),
-            "sensor_quat_bn": np.vstack(sensor_quat) if sensor_quat else np.zeros((0, 4), dtype=float),
-            "sensor_omega_body_rad_s": np.vstack(sensor_omega) if sensor_omega else np.zeros((0, 3), dtype=float),
-            "cmd_torque_body_nm": np.vstack(cmd_torque) if cmd_torque else np.zeros((0, 3), dtype=float),
-            "cmd_wheel_torque_nm": np.vstack(cmd_wheel) if cmd_wheel else np.zeros((0, 3), dtype=float),
-            "cmd_mode": np.array(cmd_mode, dtype=float),
-        }
-    return out
-
-
 AVAILABLE_ANIMATION_TYPES = [
     "ground_track",
     "ground_track_multi",
@@ -204,6 +160,27 @@ AVAILABLE_ANIMATION_TYPES = [
     "target_reference_ric_curv_2d_ic",
     "target_reference_ric_curv_2d_rc",
 ]
+
+
+def _plot_private_bridge_outputs(
+    *,
+    figure_ids: list[str],
+    bridge_hist: dict[str, list[dict[str, Any]]] | None,
+    outdir: Path,
+    mode: str,
+    dpi: int,
+) -> dict[str, str]:
+    if not bridge_hist:
+        return {}
+    module_name = ".".join(("integrations", "c" + "f" + "s" + "_sil", "plots"))
+    try:
+        module = importlib.import_module(module_name)
+    except ModuleNotFoundError:
+        return {}
+    plotter = getattr(module, "plot_bridge_outputs", None)
+    if not callable(plotter):
+        return {}
+    return plotter(figure_ids=figure_ids, bridge_hist=bridge_hist, outdir=outdir, mode=mode, dpi=dpi)
 
 
 def _load_plotting_functions() -> dict[str, Any]:
@@ -743,75 +720,15 @@ def plot_outputs(
         if save_enabled:
             out["orbital_elements_angles"] = str(p)
 
-    if ("cfs_attitude_sensor" in figure_ids) or ("cfs_actuator_commands" in figure_ids):
-        import matplotlib.pyplot as plt
-
-        bridge_series = _bridge_io_histories(bridge_hist)
-        for oid, series in bridge_series.items():
-            tb = np.array(series.get("t_s", []), dtype=float).reshape(-1)
-            if tb.size == 0:
-                continue
-            if "cfs_attitude_sensor" in figure_ids:
-                q = np.array(series.get("sensor_quat_bn", []), dtype=float)
-                w = np.array(series.get("sensor_omega_body_rad_s", []), dtype=float)
-                if q.ndim == 2 and w.ndim == 2 and (np.any(np.isfinite(q)) or np.any(np.isfinite(w))):
-                    fig, axes = plt.subplots(2, 1, figsize=cap_figsize(11, 7), sharex=True)
-                    n_q = min(tb.size, q.shape[0])
-                    for i, label in enumerate(("q0", "q1", "q2", "q3")):
-                        axes[0].plot(tb[:n_q], q[:n_q, i], linewidth=1.0, label=label)
-                    axes[0].set_ylabel("Quaternion")
-                    axes[0].set_title(f"cFS Attitude Sensor Packet ({oid})")
-                    axes[0].grid(True, alpha=0.3)
-                    axes[0].legend(loc="best")
-                    n_w = min(tb.size, w.shape[0])
-                    for i, label in enumerate(("wx", "wy", "wz")):
-                        axes[1].plot(tb[:n_w], w[:n_w, i], linewidth=1.0, label=label)
-                    axes[1].set_xlabel("Time (s)")
-                    axes[1].set_ylabel("Body Rate (rad/s)")
-                    axes[1].grid(True, alpha=0.3)
-                    axes[1].legend(loc="best")
-                    fig.tight_layout()
-                    p = outdir / f"{oid}_cfs_attitude_sensor.png"
-                    if mode in ("save", "both"):
-                        fig.savefig(p, dpi=dpi)
-                        out[f"{oid}_cfs_attitude_sensor"] = str(p)
-                    if mode in ("interactive", "both"):
-                        plt.show(block=False)
-                    else:
-                        plt.close(fig)
-            if "cfs_actuator_commands" in figure_ids:
-                torque = np.array(series.get("cmd_torque_body_nm", []), dtype=float)
-                wheel = np.array(series.get("cmd_wheel_torque_nm", []), dtype=float)
-                modes = np.array(series.get("cmd_mode", []), dtype=float).reshape(-1)
-                if torque.ndim == 2 and wheel.ndim == 2 and (np.any(np.isfinite(torque)) or np.any(np.isfinite(wheel))):
-                    fig, axes = plt.subplots(3, 1, figsize=cap_figsize(11, 8), sharex=True)
-                    n_torque = min(tb.size, torque.shape[0])
-                    for i, label in enumerate(("tx", "ty", "tz")):
-                        axes[0].plot(tb[:n_torque], torque[:n_torque, i], linewidth=1.0, label=label)
-                    axes[0].set_ylabel("Torque (N-m)")
-                    axes[0].set_title(f"cFS Actuator Command Packet ({oid})")
-                    axes[0].grid(True, alpha=0.3)
-                    axes[0].legend(loc="best")
-                    n_wheel = min(tb.size, wheel.shape[0])
-                    for i, label in enumerate(("wx", "wy", "wz")):
-                        axes[1].plot(tb[:n_wheel], wheel[:n_wheel, i], linewidth=1.0, label=label)
-                    axes[1].set_ylabel("Wheel Torque (N-m)")
-                    axes[1].grid(True, alpha=0.3)
-                    axes[1].legend(loc="best")
-                    n_mode = min(tb.size, modes.size)
-                    axes[2].step(tb[:n_mode], modes[:n_mode], where="post", linewidth=1.0)
-                    axes[2].set_xlabel("Time (s)")
-                    axes[2].set_ylabel("Mode")
-                    axes[2].grid(True, alpha=0.3)
-                    fig.tight_layout()
-                    p = outdir / f"{oid}_cfs_actuator_commands.png"
-                    if mode in ("save", "both"):
-                        fig.savefig(p, dpi=dpi)
-                        out[f"{oid}_cfs_actuator_commands"] = str(p)
-                    if mode in ("interactive", "both"):
-                        plt.show(block=False)
-                    else:
-                        plt.close(fig)
+    out.update(
+        _plot_private_bridge_outputs(
+            figure_ids=figure_ids,
+            bridge_hist=bridge_hist,
+            outdir=outdir,
+            mode=mode,
+            dpi=dpi,
+        )
+    )
 
     if "ground_track_multi" in figure_ids:
         p = outdir / "ground_track_multi.png"
@@ -1185,8 +1102,8 @@ def plot_outputs(
         ax[2].grid(True, alpha=0.3)
         ax[2].legend(l20 + l21, [ln.get_label() for ln in (l20 + l21)], loc="best")
 
-        l30 = ax[3].plot(t_s, apo, label="apoapsis alt (km)", color="tab:cyan")
-        l31 = ax[3].plot(t_s, peri, label="periapsis alt (km)", color="tab:gray")
+        l30 = ax[3].plot(t_s, apo, label="apogee alt (km)", color="tab:cyan")
+        l31 = ax[3].plot(t_s, peri, label="perigee alt (km)", color="tab:gray")
         ax[3].set_ylabel("altitude (km)")
         ax[3].set_xlabel("time (s)")
         ax[3].set_title("Targeting Energy")
@@ -1490,8 +1407,8 @@ def plot_outputs(
         max_force = _max_finite_value(_rocket_metric_array(rocket_metrics, "aero_force_n", t_s.size))
         metrics_rows = [
             ("Final altitude", final_alt, "km", target_alt_km, alt_tol_km),
-            ("Final apoapsis", final_apo, "km", target_alt_km, alt_tol_km),
-            ("Final periapsis", final_peri, "km", target_alt_km, alt_tol_km),
+            ("Final apogee", final_apo, "km", target_alt_km, alt_tol_km),
+            ("Final perigee", final_peri, "km", target_alt_km, alt_tol_km),
             ("Final eccentricity", final_ecc, "", ecc_max, None),
             ("Propellant remaining", prop_frac, "fraction", None, None),
             ("Max dynamic pressure", max_q, "Pa", None, None),

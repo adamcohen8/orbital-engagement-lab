@@ -46,7 +46,7 @@ The pro layer includes:
 - report cost estimation before hosted LLM calls
 - curated validation and mission-assurance scenario packs
 - rocket insertion engagement scenarios and deeper adversarial campaign packs
-- cFS/SIL and program-specific flight-software integration workflows
+- custom and program-specific flight-software integration workflows
 - Pro workflow configs under `examples/configs/pro_*.yaml`
 - tuned rocket launch-to-orbit scenarios, TVC/ascent GNC benchmarks,
   insertion contracts, payload-margin studies, and rocket guidance comparison
