@@ -21,6 +21,27 @@ _ACTUATOR_EXPORTS = [
     "ReactionWheelLimits",
     "MagnetorquerLimits",
     "ThrusterPulseLimits",
+    "ControlMomentGyroLimits",
+    "WheelDesaturationLimits",
+    "RcsThruster",
+    "RcsClusterLimits",
+    "ElectricPropulsionLimits",
+    "GimbaledThrusterLimits",
+    "ActuatorFaultConfig",
+    "FaultedActuator",
+    "apply_actuator_faults",
+]
+
+_ACTUATOR_PRESET_EXPORTS = [
+    "BASIC_RCS_6DOF",
+    "BASIC_ELECTRIC_PROPULSION",
+    "BASIC_MAGNETORQUER_TRIAD",
+    "BASIC_CMG_TRIAD",
+    "BASIC_GIMBALED_THRUSTER",
+    "ACTUATOR_PRESETS",
+    "available_actuator_preset_names",
+    "actuator_preset_to_specs",
+    "resolve_actuator_specs_from_satellite_specs",
 ]
 
 _CONTROL_EXPORTS = [
@@ -39,6 +60,9 @@ _CONTROL_EXPORTS = [
     "HCWCurvInputRectOutputController",
     "HCWInTrackCrossTrackMPCController",
     "RelativeOrbitMPCController",
+    "RCSAllocationAwareController",
+    "ElectricPropulsionController",
+    "GimbaledThrusterController",
     "PredictiveBurnConfig",
     "PredictiveBurnScheduler",
     "OrbitalAttitudeManeuverCoordinator",
@@ -59,6 +83,9 @@ _CONTROL_EXPORTS = [
     "QuaternionPDController",
     "ReactionWheelPDController",
     "ReactionWheelPIDController",
+    "MagnetorquerBdotController",
+    "WheelDesaturationController",
+    "CMGSteeringController",
     "SmallAngleLQRController",
     "RICFrameLQRController",
     "RICFramePDController",
@@ -273,6 +300,7 @@ _ROCKET_EXPORTS = [
 
 __all__ = [
     *_ACTUATOR_EXPORTS,
+    *_ACTUATOR_PRESET_EXPORTS,
     *_CONTROL_EXPORTS,
     *_API_EXPORTS,
     *_CONFIG_EXPORTS,
@@ -301,6 +329,7 @@ def _register(names: list[str], module_name: str) -> None:
 
 _register(_API_EXPORTS, "sim.api")
 _register(_ACTUATOR_EXPORTS, "sim.actuators")
+_register(_ACTUATOR_PRESET_EXPORTS, "sim.actuators.presets")
 _register(_CONTROL_EXPORTS, "sim.control")
 _register(_CONFIG_EXPORTS, "sim.config")
 _register(_CORE_EXPORTS, "sim.core.models")

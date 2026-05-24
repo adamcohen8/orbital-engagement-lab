@@ -1,7 +1,7 @@
 scenario_name: orbital_elements_stationkeep_raise_sma_circularize
 metadata:
   owner: validation
-  notes: Inspect COE stationkeeping while raising semi-major axis and circularizing one satellite from apoapsis.
+  notes: Inspect COE stationkeeping while raising semi-major axis and circularizing one satellite from apogee.
 objects:
   rocket:
     enabled: false

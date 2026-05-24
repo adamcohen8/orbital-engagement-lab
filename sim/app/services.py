@@ -57,8 +57,8 @@ PARAMETER_FORM_SCHEMAS: dict[str, list[dict[str, Any]]] = {
     ],
     "OrbitInsertionCutoffGuidance": [
         {"key": "min_cutoff_alt_km", "label": "Min Cutoff Alt (km)", "kind": "float"},
-        {"key": "min_periapsis_alt_km", "label": "Min Periapsis Alt (km)", "kind": "float"},
-        {"key": "apoapsis_margin_km", "label": "Apoapsis Margin (km)", "kind": "float"},
+        {"key": "min_periapsis_alt_km", "label": "Min Perigee Alt (km)", "kind": "float"},
+        {"key": "apoapsis_margin_km", "label": "Apogee Margin (km)", "kind": "float"},
         {"key": "energy_margin_km2_s2", "label": "Energy Margin", "kind": "float"},
         {"key": "ecc_relax_factor", "label": "Ecc Relax Factor", "kind": "float"},
         {"key": "hard_escape_cutoff", "label": "Hard Escape Cutoff", "kind": "bool"},
@@ -481,7 +481,7 @@ MONTE_CARLO_PARAMETER_CATEGORIES: dict[str, list[tuple[str, str]]] = {
         ("Eccentricity", "target.initial_state.coes.ecc"),
         ("Inclination", "target.initial_state.coes.inc_deg"),
         ("RAAN", "target.initial_state.coes.raan_deg"),
-        ("Arg Periapsis", "target.initial_state.coes.argp_deg"),
+        ("Arg Perigee", "target.initial_state.coes.argp_deg"),
         ("True Anomaly", "target.initial_state.coes.true_anomaly_deg"),
     ],
     "Environment": [

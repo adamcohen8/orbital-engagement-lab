@@ -1,0 +1,15 @@
+name: "SmallSat RPO"
+preset_type: "satellite"
+description: "Agile small satellite baseline for rendezvous, inspection, and proximity-operations scenarios."
+specs:
+  preset_satellite: "SMALLSAT_RPO"
+  dry_mass_kg: 160.0
+  fuel_mass_kg: 40.0
+  bus_size_m: [0.8, 0.7, 0.7]
+  mass_properties:
+    inertia_kg_m2:
+      - [20.0, 0.0, 0.0]
+      - [0.0, 18.0, 0.0]
+      - [0.0, 0.0, 15.0]
+  actuator_preset: "BASIC_RCS_6DOF"
+  attitude_system: "BASIC_REACTION_WHEELS_3AXIS"

@@ -1,0 +1,71 @@
+scenario_name: "controller_magnetorquer_bdot_smoke"
+scenario_description: "Local smoke scenario for the public MagnetorquerBdotController."
+
+rocket:
+  enabled: false
+
+chaser:
+  enabled: false
+
+target:
+  enabled: true
+  specs:
+    mass_kg: 120.0
+    mass_properties:
+      inertia_kg_m2:
+        - [12.0, 0.0, 0.0]
+        - [0.0, 10.0, 0.0]
+        - [0.0, 0.0, 8.0]
+    actuators:
+      enabled: true
+      attitude:
+        magnetorquers:
+          max_dipole_a_m2: [20.0, 20.0, 20.0]
+  initial_state:
+    position_eci_km: [7000.0, 0.0, 0.0]
+    velocity_eci_km_s: [0.0, 7.5, 0.0]
+    attitude_quat_bn: [1.0, 0.0, 0.0, 0.0]
+    angular_rate_body_rad_s: [0.02, -0.01, 0.005]
+  attitude_control:
+    kind: "python"
+    module: "sim.control.attitude.bdot_magnetorquer"
+    class_name: "MagnetorquerBdotController"
+    params:
+      magnetic_field_body_t: [0.0, 0.0, 5.0e-5]
+      gain: 1.0e5
+      max_torque_nm: 1.0e-4
+
+simulator:
+  duration_s: 5.0
+  dt_s: 1.0
+  dynamics:
+    orbit:
+      model: "two_body"
+      orbit_substep_s: 1.0
+    attitude:
+      enabled: true
+      attitude_substep_s: 0.5
+      disturbance_torques:
+        gravity_gradient: false
+        magnetic: false
+        drag: false
+        srp: false
+  plugin_validation:
+    strict: true
+  termination:
+    earth_impact_enabled: false
+
+outputs:
+  output_dir: "outputs/controller_smokes/magnetorquer_bdot"
+  mode: "save"
+  stats:
+    print_summary: false
+    save_json: true
+    save_csv: false
+    save_full_log: false
+  plots:
+    enabled: false
+    figure_ids: []
+  animations:
+    enabled: false
+    types: []

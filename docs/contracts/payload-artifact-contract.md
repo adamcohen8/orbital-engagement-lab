@@ -156,8 +156,8 @@ Rocket-specific fields may include:
 - `rocket_metrics.vertical_speed_km_s`
 - `rocket_metrics.horizontal_speed_km_s`
 - `rocket_metrics.flight_path_angle_deg`
-- `rocket_metrics.apoapsis_alt_km`
-- `rocket_metrics.periapsis_alt_km`
+- `rocket_metrics.apoapsis_alt_km` (apogee altitude)
+- `rocket_metrics.periapsis_alt_km` (perigee altitude)
 - `rocket_metrics.eccentricity`
 - `rocket_metrics.alpha_deg`
 - `rocket_metrics.beta_deg`

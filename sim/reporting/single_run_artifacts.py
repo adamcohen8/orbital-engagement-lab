@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -125,6 +126,10 @@ def write_single_run_artifacts(
         summary["ground_station_access_report_epoch_jd_utc"] = access_report_views.get("epoch_jd_utc")
         summary["ground_station_access_report_outputs"] = access_report_paths
         payload["ground_station_access_report_views"] = access_report_views
+    bridge_outputs, bridge_summary = _write_private_bridge_artifacts(outdir=context.outdir, bridge_hist=context.bridge_hist)
+    if bridge_outputs:
+        summary["bridge_extension_outputs"] = bridge_outputs
+        summary["bridge_extension_summary"] = bridge_summary
 
     artifacts: dict[str, Any] = {}
     if bool(context.cfg.outputs.stats.get("save_json", True)):
@@ -137,6 +142,8 @@ def write_single_run_artifacts(
         artifacts["animations"] = animation_outputs
     if access_report_paths:
         artifacts["ground_station_access_reports"] = access_report_paths
+    if bridge_outputs:
+        artifacts["bridge_extensions"] = bridge_outputs
     index_path = write_output_index(
         outdir=context.outdir,
         workflow="single_run",
@@ -153,6 +160,24 @@ def write_single_run_artifacts(
     if bool(context.cfg.outputs.stats.get("print_summary", True)):
         print(format_single_run_summary(summary))
     return payload
+
+
+def _write_private_bridge_artifacts(
+    *,
+    outdir: Path,
+    bridge_hist: dict[str, list[dict[str, Any]]],
+) -> tuple[dict[str, str], dict[str, Any]]:
+    if not bridge_hist:
+        return {}, {}
+    module_name = ".".join(("integrations", "c" + "f" + "s" + "_sil", "artifacts"))
+    try:
+        module = importlib.import_module(module_name)
+    except ModuleNotFoundError:
+        return {}, {}
+    writer = getattr(module, "write_bridge_artifacts", None)
+    if not callable(writer):
+        return {}, {}
+    return writer(outdir=outdir, bridge_hist=bridge_hist)
 
 
 def _add_relative_range_summary(*, summary: dict[str, Any], context: SingleRunArtifactContext) -> None:

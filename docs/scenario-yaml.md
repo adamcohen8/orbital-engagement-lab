@@ -115,12 +115,53 @@ objects:
     preset: "basic_satellite"
 ```
 
+Built-in satellite object presets include `basic_satellite`, `cubesat_6u`,
+`smallsat_rpo`, `target_bus_passive`, `electric_prop_smallsat`, and
+`adcs_demo_sat`.
+
 Scenario-local values override preset values. Nested dictionaries, such as
 `specs.mass_properties`, merge recursively.
 
 If a scenario overrides with `specs.mass_kg` and does not provide
 `dry_mass_kg` or `fuel_mass_kg`, preset dry/fuel masses are ignored for that
 agent so the explicit total mass is honored.
+
+## Actuator Presets
+
+Satellite specs can opt into the public actuator stack with
+`specs.actuator_preset` or `specs.actuators.preset`:
+
+```yaml
+objects:
+  chaser:
+    kind: "satellite"
+    enabled: true
+    specs:
+      mass_kg: 250.0
+      actuator_preset: BASIC_RCS_6DOF
+```
+
+Available actuator presets are `BASIC_RCS_6DOF`,
+`BASIC_ELECTRIC_PROPULSION`, `BASIC_MAGNETORQUER_TRIAD`, `BASIC_CMG_TRIAD`,
+and `BASIC_GIMBALED_THRUSTER`. `BASIC_RCS_6DOF` is the full six-axis RCS
+cluster preset: its geometry is tested for independent force and torque
+authority along body X, Y, and Z. When using `specs.actuators.preset`, nested
+fields in the same `actuators` block override the preset:
+
+```yaml
+specs:
+  mass_kg: 250.0
+  actuators:
+    preset: BASIC_ELECTRIC_PROPULSION
+    orbital:
+      electric_propulsion:
+        max_thrust_n: 0.25
+```
+
+Strict plugin validation also validates actuator preset names and core actuator
+schema fields before the simulation starts. Scalar-or-vector actuator fields can
+use either a single scalar value or a three-element vector, matching the runtime
+actuator stack.
 
 ## Satellite Initial State
 

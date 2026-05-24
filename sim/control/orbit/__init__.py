@@ -7,6 +7,8 @@ from sim.control.orbit.baseline import (
     StationkeepingController,
 )
 from sim.control.orbit.curv_pd import CurvilinearRICPDController, curv_accel_to_rect
+from sim.control.orbit.electric_propulsion import ElectricPropulsionController
+from sim.control.orbit.gimbaled_thruster import GimbaledThrusterController
 from sim.control.orbit.hcw_mpc import HCWInTrackCrossTrackMPCController, HCWRelativeOrbitMPCController
 from sim.control.orbit.hcw_pd import HCWPDController
 from sim.control.orbit.hcw_transfer import (
@@ -36,6 +38,7 @@ from sim.control.orbit.lqr import HCWLQRController
 from sim.control.orbit.lqr_curv_variant import HCWCurvInputRectOutputController
 from sim.control.orbit.lqr_no_radial import HCWNoRadialLQRController, HCWNoRadialManualController
 from sim.control.orbit.predictive_burn import PredictiveBurnConfig, PredictiveBurnScheduler
+from sim.control.orbit.rcs_allocator import RCSAllocationAwareController
 from sim.control.orbit.relative_mpc import RelativeOrbitMPCController
 from sim.control.orbit.rmoe import RMOEIfThenController, estimate_rmoes_from_rect_ric
 from sim.control.orbit.zero_controller import ZeroController
@@ -60,6 +63,9 @@ __all__ = [
     "curv_accel_to_rect",
     "HCWInTrackCrossTrackMPCController",
     "HCWRelativeOrbitMPCController",
+    "RCSAllocationAwareController",
+    "ElectricPropulsionController",
+    "GimbaledThrusterController",
     "hcw_state_transition_matrix",
     "hcw_state_transition_blocks",
     "hcw_phi_rv",

@@ -147,7 +147,7 @@ class _RocketStepper:
     def _guidance_phase_code(self, guidance: Any) -> float:
         phase_map = {
             "ascent": 1.0,
-            "coast_to_apoapsis": 2.0,
+            "coast_to_apogee": 2.0,
             "circularize": 3.0,
             "complete": 4.0,
         }
@@ -346,6 +346,37 @@ class _SatelliteCommandBuilder:
     def __init__(self, engine: Any) -> None:
         self.engine = engine
 
+    @staticmethod
+    def _minimum_mass_kg(agent: AgentRuntime) -> float:
+        if agent.dry_mass_kg is not None and np.isfinite(float(agent.dry_mass_kg)):
+            return float(max(float(agent.dry_mass_kg), 0.0))
+        return 0.0
+
+    @staticmethod
+    def _limit_propellant_consumption(
+        *,
+        cmd_step: Command,
+        truth: StateTruth,
+        min_mass_kg: float,
+        dt_s: float,
+    ) -> Command:
+        mode_flags = dict(cmd_step.mode_flags or {})
+        requested_delta_mass_kg = mode_flags.get("delta_mass_kg")
+        if requested_delta_mass_kg is None:
+            return cmd_step
+        delta_mass_kg = float(requested_delta_mass_kg)
+        available_propellant_kg = float(max(float(truth.mass_kg) - float(min_mass_kg), 0.0))
+        applied_delta_mass_kg = float(min(max(delta_mass_kg, 0.0), available_propellant_kg))
+        if delta_mass_kg > 1e-15 and applied_delta_mass_kg < (delta_mass_kg - 1e-15):
+            propellant_scale = float(np.clip(applied_delta_mass_kg / delta_mass_kg, 0.0, 1.0))
+            cmd_step.thrust_eci_km_s2 = np.array(cmd_step.thrust_eci_km_s2, dtype=float) * propellant_scale
+            mode_flags["propellant_limited_scale"] = propellant_scale
+        mode_flags["delta_mass_kg"] = applied_delta_mass_kg
+        mode_flags["available_propellant_kg"] = available_propellant_kg
+        mode_flags["actuator_step_s"] = float(dt_s)
+        cmd_step.mode_flags = mode_flags
+        return cmd_step
+
     def build(
         self,
         *,
@@ -445,6 +476,32 @@ class _SatelliteCommandBuilder:
             cmd_step.mode_flags["thruster_direction_body"] = np.array(agent.thruster_direction_body, dtype=float)
         if agent.thruster_position_body_m is not None:
             cmd_step.mode_flags["thruster_position_body_m"] = np.array(agent.thruster_position_body_m, dtype=float)
+        cmd_step.mode_flags["current_mass_kg"] = float(truth.mass_kg)
+        min_mass_kg = self._minimum_mass_kg(agent)
+        cmd_step.mode_flags["min_mass_kg"] = float(min_mass_kg)
+        if agent.use_actuator_stack and agent.actuator is not None:
+            if bool(truth.mass_kg <= (min_mass_kg + 1e-12)):
+                cmd_step.thrust_eci_km_s2 = np.zeros(3, dtype=float)
+                cmd_step.mode_flags["fuel_depleted"] = True
+            applied = agent.actuator.apply(cmd_step, dict(agent.actuator_limits or {}), dt_s)
+            applied.mode_flags = dict(applied.mode_flags or {})
+            applied.mode_flags["actuator_stack_enabled"] = True
+            applied.mode_flags["min_mass_kg"] = float(min_mass_kg)
+            applied = self._limit_propellant_consumption(
+                cmd_step=applied,
+                truth=truth,
+                min_mass_kg=min_mass_kg,
+                dt_s=dt_s,
+            )
+            return _SatelliteCommandResult(
+                command_applied=applied,
+                command_orbit=c_orb,
+                command_attitude=c_att,
+                command_raw=cmd,
+                use_integrated_command=use_integrated_cmd,
+                orbit_runtime_ms=orbit_runtime_ms,
+                attitude_runtime_ms=attitude_runtime_ms,
+            )
         if e.attitude_enabled and agent.thruster_direction_body is not None:
             cmd_step.mode_flags["commanded_thrust_eci_km_s2"] = np.array(cmd_step.thrust_eci_km_s2, dtype=float)
             cmd_step.thrust_eci_km_s2 = attitude_coupled_thrust_eci(
@@ -453,9 +510,6 @@ class _SatelliteCommandBuilder:
                 thruster_direction_body=np.array(agent.thruster_direction_body, dtype=float),
             )
 
-        min_mass_kg = 0.0
-        if agent.dry_mass_kg is not None and np.isfinite(float(agent.dry_mass_kg)):
-            min_mass_kg = float(max(float(agent.dry_mass_kg), 0.0))
         if bool(truth.mass_kg <= (min_mass_kg + 1e-12)):
             cmd_step.thrust_eci_km_s2 = np.zeros(3, dtype=float)
             cmd_step.mode_flags["fuel_depleted"] = True
@@ -474,8 +528,6 @@ class _SatelliteCommandBuilder:
                 cmd_step.thrust_eci_km_s2 = np.zeros(3, dtype=float)
             cmd_step.mode_flags["effective_max_accel_km_s2"] = float(eff_max_accel_km_s2)
             cmd_step.mode_flags["max_thrust_n"] = float(agent.orbital_max_thrust_n)
-        cmd_step.mode_flags["min_mass_kg"] = float(min_mass_kg)
-
         isp_s = agent.orbital_isp_s
         if isp_s is not None and float(isp_s) > 0.0 and "delta_mass_kg" not in cmd_step.mode_flags:
             g0_m_s2 = 9.80665

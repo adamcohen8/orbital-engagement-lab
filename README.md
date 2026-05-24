@@ -123,6 +123,8 @@ checked-in [Plot Gallery](docs/plot-gallery.md).
 
 ## Just Here For The Video Game?
 
+![OEL RPO Trainer start screen](sim/game/assets/OEL_RPO_Trainer.png)
+
 Clone the public repo, install the game extras, and launch the RPO trainer:
 
 ```bash
@@ -147,6 +149,7 @@ return to the selector.
 | Compute ground-station access windows from a TLE | `python run_simulation.py --config examples/configs/public_ground_station_access_from_tle.yaml` |
 | Run a closed-loop chaser/target rendezvous with HCW LQR | `python run_simulation.py --config examples/configs/public_closed_loop_rendezvous_lqr.yaml` |
 | Review the flagship 10 km HCW PD RPO scenario | `python run_simulation.py --config configs/hcw_pd_10km_experiment.yaml` |
+| Smoke-test public actuator presets | `python run_simulation.py --config configs/actuator_lab_presets_smoke.yaml` |
 | Inspect orbit perturbations, drag, SRP, and third-body toggles | `python run_simulation.py --config examples/configs/public_orbit_environment_stack.yaml` |
 | Evaluate attitude hold under initial error and disturbance torque | `python run_simulation.py --config examples/configs/public_attitude_hold_disturbance.yaml` |
 | Open the guided RPO trainer level selector | `python run_game.py` |
@@ -244,7 +247,9 @@ provide. HPOP/GGM03 validation data is not bundled in the public core, so
 - deterministic step-based simulation
 - multi-object orbit and attitude dynamics
 - two-body, perturbation, atmosphere, SRP, third-body, and spherical harmonics support
-- actuator limits, saturation, lag, and mass depletion
+- actuator limits, saturation, lag, mass depletion, full six-axis RCS clusters,
+  electric propulsion, magnetorquers, CMGs, gimbaled thrusters, desaturation
+  assist, and fault/degradation wrappers
 - relative sensing and object-knowledge primitives
 - passive ground-station access histories using line of sight, elevation, and range
 - orbit and attitude estimators
@@ -260,12 +265,13 @@ provide. HPOP/GGM03 validation data is not bundled in the public core, so
 
 - controller-benchmark suites and leaderboards
 - optimization and gain-tuning workflows
+- custom GNC/controller workbench scaffolding
 - Monte Carlo and sensitivity campaign orchestration
 - campaign dashboards, baselines, and review-ready reports
 - AI-assisted report generation with user-supplied LLM API keys
 - report cost estimation before hosted LLM calls
 - curated validation and mission-assurance scenario packs
-- cFS/SIL and program-specific flight-software integration workflows
+- custom and program-specific flight-software integration workflows
 
 The public core is intended to be useful on its own. The pro layer is for teams
 that need repeatable analysis workflows, tuning loops, campaign management, and
@@ -337,7 +343,7 @@ python -m pip install ".[full]"
 - `sim/single_run.py` and `sim/single_run_support.py` single-run orchestration
 - `sim/core/` shared core models and scheduling utilities
 - `sim/dynamics/` orbit and attitude dynamics
-- `sim/actuators/` actuator models
+- `sim/actuators/` public actuator models; see `docs/actuators.md`
 - `sim/sensors/` sensor models
 - `sim/estimation/` EKF/UKF and joint-state estimation
 - `sim/control/` orbit and attitude control

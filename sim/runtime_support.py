@@ -8,6 +8,24 @@ from typing import Any, Callable
 
 import numpy as np
 
+from sim.actuators import (
+    ActuatorFaultConfig,
+    AttitudeActuator,
+    CombinedActuator,
+    ControlMomentGyroLimits,
+    ElectricPropulsionLimits,
+    FaultedActuator,
+    GimbaledThrusterLimits,
+    MagnetorquerLimits,
+    OrbitalActuator,
+    OrbitalActuatorLimits,
+    RcsClusterLimits,
+    RcsThruster,
+    ReactionWheelLimits,
+    ThrusterPulseLimits,
+    WheelDesaturationLimits,
+)
+from sim.actuators.presets import resolve_actuator_specs_from_satellite_specs
 from sim.config import SimulationScenarioConfig
 from sim.control.attitude.zero_torque import ZeroTorqueController
 from sim.control.orbit.zero_controller import ZeroController
@@ -386,6 +404,198 @@ def _satellite_spec_float(
     return float(default), False
 
 
+def _array_or_none(value: Any, *, shape: tuple[int, ...] | None = None) -> np.ndarray | None:
+    if value is None:
+        return None
+    arr = np.array(value, dtype=float)
+    if shape is not None:
+        arr = arr.reshape(shape)
+    if not np.all(np.isfinite(arr)):
+        raise ValueError("actuator vector values must be finite.")
+    return arr
+
+
+def _angle_value_rad(raw: dict[str, Any], *, rad_name: str, deg_name: str, default_rad: float = 0.0) -> float:
+    if rad_name in raw and raw.get(rad_name) is not None:
+        return float(raw[rad_name])
+    if deg_name in raw and raw.get(deg_name) is not None:
+        return float(np.deg2rad(float(raw[deg_name])))
+    return float(default_rad)
+
+
+def _build_rcs_cluster(raw: Any) -> RcsClusterLimits | None:
+    if not isinstance(raw, dict) or not bool(raw.get("enabled", True)):
+        return None
+    thrusters_raw = list(raw.get("thrusters", []) or [])
+    thrusters: list[RcsThruster] = []
+    for idx, item in enumerate(thrusters_raw):
+        row = dict(item or {})
+        thrusters.append(
+            RcsThruster(
+                name=str(row.get("name", f"rcs_{idx}")),
+                position_body_m=np.array(row.get("position_body_m", [0.0, 0.0, 0.0]), dtype=float).reshape(3),
+                force_direction_body=np.array(row.get("force_direction_body", [1.0, 0.0, 0.0]), dtype=float).reshape(
+                    3
+                ),
+                max_thrust_n=float(row.get("max_thrust_n", 0.0)),
+                min_impulse_bit_n_s=float(row.get("min_impulse_bit_n_s", 0.0)),
+                isp_s=float(row.get("isp_s", raw.get("isp_s", 220.0))),
+            )
+        )
+    if not thrusters:
+        return None
+    return RcsClusterLimits(
+        thrusters=tuple(thrusters),
+        allocation_mode=str(raw.get("allocation_mode", "force_torque")),
+        pulse_quantum_s=float(raw.get("pulse_quantum_s", 0.0)),
+        duty_cycle=float(raw.get("duty_cycle", 1.0)),
+    )
+
+
+def _build_electric_propulsion(raw: Any) -> ElectricPropulsionLimits | None:
+    if not isinstance(raw, dict) or not bool(raw.get("enabled", True)):
+        return None
+    return ElectricPropulsionLimits(
+        max_thrust_n=float(raw.get("max_thrust_n", 0.0)),
+        isp_s=float(raw.get("isp_s", 1500.0)),
+        duty_cycle=float(raw.get("duty_cycle", 1.0)),
+        max_power_w=(None if raw.get("max_power_w") is None else float(raw.get("max_power_w"))),
+        power_per_newton_w=(None if raw.get("power_per_newton_w") is None else float(raw.get("power_per_newton_w"))),
+        throttle_time_constant_s=float(raw.get("throttle_time_constant_s", 0.0)),
+    )
+
+
+def _build_gimbaled_thruster(raw: Any) -> GimbaledThrusterLimits | None:
+    if not isinstance(raw, dict) or not bool(raw.get("enabled", True)):
+        return None
+    return GimbaledThrusterLimits(
+        neutral_direction_body=np.array(raw.get("neutral_direction_body", [-1.0, 0.0, 0.0]), dtype=float).reshape(3),
+        position_body_m=_array_or_none(raw.get("position_body_m"), shape=(3,)),
+        max_gimbal_angle_rad=_angle_value_rad(raw, rad_name="max_gimbal_angle_rad", deg_name="max_gimbal_angle_deg"),
+        max_gimbal_rate_rad_s=_angle_value_rad(
+            raw,
+            rad_name="max_gimbal_rate_rad_s",
+            deg_name="max_gimbal_rate_deg_s",
+            default_rad=float("inf"),
+        ),
+        response_time_constant_s=float(raw.get("response_time_constant_s", 0.0)),
+    )
+
+
+def _build_reaction_wheels(raw: Any) -> ReactionWheelLimits | None:
+    if not isinstance(raw, dict) or not bool(raw.get("enabled", True)):
+        return None
+    return ReactionWheelLimits(
+        max_torque_nm=np.array(raw.get("max_torque_nm", [0.05, 0.05, 0.05]), dtype=float).reshape(-1),
+        max_momentum_nms=np.array(raw.get("max_momentum_nms", [0.2, 0.2, 0.2]), dtype=float).reshape(-1),
+        wheel_axes_body=_array_or_none(raw.get("wheel_axes_body")),
+        wheel_inertia_kg_m2=_array_or_none(raw.get("wheel_inertia_kg_m2")),
+        max_speed_rad_s=_array_or_none(raw.get("max_speed_rad_s")),
+        torque_time_constant_s=float(raw.get("torque_time_constant_s", 0.0)),
+        viscous_friction_nms=raw.get("viscous_friction_nms", 0.0),
+        coulomb_friction_nm=raw.get("coulomb_friction_nm", 0.0),
+    )
+
+
+def _build_satellite_actuator_stack_from_specs(specs: dict[str, Any]) -> tuple[Any | None, dict[str, Any], bool]:
+    raw = resolve_actuator_specs_from_satellite_specs(specs)
+    if not isinstance(raw, dict) or not bool(raw.get("enabled", True)):
+        return None, {}, False
+    orbital_raw = dict(raw.get("orbital", {}) or {})
+    attitude_raw = dict(raw.get("attitude", {}) or {})
+    mount = resolve_thruster_mount_from_specs(specs)
+    max_thrust_n = orbital_raw.get("max_thrust_n", resolve_thruster_max_thrust_n_from_specs(specs))
+    isp_s = float(orbital_raw.get("isp_s", _resolve_satellite_isp_s(specs) or 220.0))
+    default_direction = None if mount is None else np.array(mount.thrust_direction_body, dtype=float)
+    default_position = None if mount is None else np.array(mount.position_body_m, dtype=float)
+
+    orbital_limits = OrbitalActuatorLimits(
+        max_accel_km_s2=float(orbital_raw.get("max_accel_km_s2", specs.get("max_accel_km_s2", 1.0e9))),
+        max_thrust_n=(None if max_thrust_n is None else float(max_thrust_n)),
+        min_impulse_bit_km_s=float(orbital_raw.get("min_impulse_bit_km_s", 0.0)),
+        max_throttle_rate_km_s2_s=float(orbital_raw.get("max_throttle_rate_km_s2_s", 1.0e9)),
+        isp_s=isp_s,
+        thruster_direction_body=_array_or_none(orbital_raw.get("thruster_direction_body"), shape=(3,))
+        if "thruster_direction_body" in orbital_raw
+        else default_direction,
+        thruster_position_body_m=_array_or_none(orbital_raw.get("thruster_position_body_m"), shape=(3,))
+        if "thruster_position_body_m" in orbital_raw
+        else default_position,
+        couple_to_attitude=bool(orbital_raw.get("couple_to_attitude", True)),
+        rcs_cluster=_build_rcs_cluster(orbital_raw.get("rcs_cluster")),
+        electric_propulsion=_build_electric_propulsion(orbital_raw.get("electric_propulsion")),
+        gimbaled_thruster=_build_gimbaled_thruster(orbital_raw.get("gimbaled_thruster")),
+    )
+    attitude_act = AttitudeActuator(
+        reaction_wheels=_build_reaction_wheels(attitude_raw.get("reaction_wheels")),
+        magnetorquers=(
+            None
+            if not isinstance(attitude_raw.get("magnetorquers"), dict)
+            else MagnetorquerLimits(
+                max_dipole_a_m2=np.array(
+                    dict(attitude_raw.get("magnetorquers") or {}).get("max_dipole_a_m2", [0.0, 0.0, 0.0]),
+                    dtype=float,
+                ).reshape(-1)
+            )
+        ),
+        thruster_pulse=(
+            None
+            if not isinstance(attitude_raw.get("thruster_pulse"), dict)
+            else ThrusterPulseLimits(
+                max_torque_nm=np.array(
+                    dict(attitude_raw.get("thruster_pulse") or {}).get("max_torque_nm", [0.0, 0.0, 0.0]),
+                    dtype=float,
+                ).reshape(3),
+                pulse_quantum_s=float(dict(attitude_raw.get("thruster_pulse") or {}).get("pulse_quantum_s", 0.02)),
+            )
+        ),
+        control_moment_gyros=(
+            None
+            if not isinstance(attitude_raw.get("control_moment_gyros"), dict)
+            else ControlMomentGyroLimits(
+                max_torque_nm=dict(attitude_raw.get("control_moment_gyros") or {}).get("max_torque_nm", 0.0),
+                momentum_nms=dict(attitude_raw.get("control_moment_gyros") or {}).get("momentum_nms", 0.0),
+                gimbal_rate_limit_rad_s=dict(attitude_raw.get("control_moment_gyros") or {}).get(
+                    "gimbal_rate_limit_rad_s", np.inf
+                ),
+                torque_time_constant_s=float(
+                    dict(attitude_raw.get("control_moment_gyros") or {}).get("torque_time_constant_s", 0.0)
+                ),
+            )
+        ),
+        wheel_desaturation=(
+            None
+            if not isinstance(attitude_raw.get("wheel_desaturation"), dict)
+            else WheelDesaturationLimits(
+                momentum_fraction_threshold=float(
+                    dict(attitude_raw.get("wheel_desaturation") or {}).get("momentum_fraction_threshold", 0.8)
+                ),
+                unload_gain_s_inv=float(dict(attitude_raw.get("wheel_desaturation") or {}).get("unload_gain_s_inv", 0.02)),
+                max_unload_torque_nm=float(
+                    dict(attitude_raw.get("wheel_desaturation") or {}).get("max_unload_torque_nm", 0.01)
+                ),
+            )
+        ),
+    )
+    actuator: Any = CombinedActuator(
+        orbital=OrbitalActuator(lag_tau_s=float(orbital_raw.get("lag_tau_s", 0.0))),
+        attitude=attitude_act,
+    )
+    fault_raw = dict(raw.get("faults", {}) or {})
+    if fault_raw:
+        actuator = FaultedActuator(
+            base=actuator,
+            faults=ActuatorFaultConfig(
+                stuck_off=bool(fault_raw.get("stuck_off", False)),
+                thrust_scale=float(fault_raw.get("thrust_scale", 1.0)),
+                torque_scale=float(fault_raw.get("torque_scale", 1.0)),
+                thrust_bias_eci_km_s2=np.array(fault_raw.get("thrust_bias_eci_km_s2", [0.0, 0.0, 0.0]), dtype=float),
+                torque_bias_body_nm=np.array(fault_raw.get("torque_bias_body_nm", [0.0, 0.0, 0.0]), dtype=float),
+            ),
+        )
+    return actuator, {"orbital": orbital_limits}, True
+
+
 def _initial_state_nonnegative_float(initial_state: dict[str, Any], name: str, *, default: float = 0.0) -> float:
     value = float(initial_state.get(name, default) if initial_state.get(name) is not None else default)
     if not np.isfinite(value):
@@ -472,6 +682,9 @@ class AgentRuntime:
     orbital_max_thrust_n: float | None = None
     thruster_direction_body: np.ndarray | None = None
     thruster_position_body_m: np.ndarray | None = None
+    actuator: Any | None = None
+    actuator_limits: dict[str, Any] = field(default_factory=dict)
+    use_actuator_stack: bool = False
 
 
 @dataclass
@@ -685,6 +898,7 @@ def _create_satellite_runtime(
     dry_mass_kg = specs.get("dry_mass_kg")
     fuel_capacity_kg = specs.get("fuel_mass_kg")
     thruster_mount = resolve_thruster_mount_from_specs(specs)
+    actuator, actuator_limits, use_actuator_stack = _build_satellite_actuator_stack_from_specs(specs)
     initialization_delay_s = _initial_state_nonnegative_float(initial_state, "initialization_delay_s")
     return AgentRuntime(
         object_id=object_id,
@@ -728,6 +942,9 @@ def _create_satellite_runtime(
         thruster_position_body_m=(
             None if thruster_mount is None else np.array(thruster_mount.position_body_m, dtype=float)
         ),
+        actuator=actuator,
+        actuator_limits=actuator_limits,
+        use_actuator_stack=use_actuator_stack,
     )
 
 

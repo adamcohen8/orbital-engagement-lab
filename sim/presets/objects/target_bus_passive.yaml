@@ -1,0 +1,14 @@
+name: "Passive Target Bus"
+preset_type: "satellite"
+description: "Larger passive resident-space-object target bus for rendezvous and inspection scenarios."
+specs:
+  preset_satellite: "TARGET_BUS_PASSIVE"
+  dry_mass_kg: 500.0
+  fuel_mass_kg: 0.0
+  bus_size_m: [2.0, 1.5, 1.5]
+  mass_properties:
+    inertia_kg_m2:
+      - [260.0, 0.0, 0.0]
+      - [0.0, 220.0, 0.0]
+      - [0.0, 0.0, 180.0]
+  attitude_system: "PASSIVE"

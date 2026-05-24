@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "orbital-engagement-lab"
-version = "0.7.4"
+version = "0.8.0"
 description = "Integrated spacecraft simulation and analysis platform for rendezvous, control, validation, and mission prototyping."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -107,7 +107,6 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"integrations/cfs_sil/mock_cfs_endpoint.py" = ["E402"]
 "machine_learning/gym_env.py" = ["E402"]
 "validation/*.py" = ["E402"]
 

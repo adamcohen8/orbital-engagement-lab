@@ -105,9 +105,9 @@ class ClosedLoopInsertionGuidance(RocketGuidanceLaw):
     """Closed-loop ascent guidance with simple phase logic for insertion targeting.
 
     Phases:
-    - ascent: gravity-turn style pitch with apoapsis growth target
-    - coast_to_apoapsis: hold near-prograde while waiting for apoapsis
-    - circularize: near-apoapsis prograde burn to raise periapsis / reduce eccentricity
+    - ascent: gravity-turn style pitch with apogee growth target
+    - coast_to_apogee: hold near-prograde while waiting for apogee
+    - circularize: near-apogee prograde burn to raise perigee / reduce eccentricity
     - complete: cutoff
     """
 
@@ -290,8 +290,8 @@ class ClosedLoopInsertionGuidance(RocketGuidanceLaw):
 
         # Phase transitions.
         if self._phase == "ascent" and ra_alt >= (target_alt_km - float(max(self.apoapsis_switch_margin_km, 0.0))):
-            self._phase = "coast_to_apoapsis"
-        if self._phase == "coast_to_apoapsis":
+            self._phase = "coast_to_apogee"
+        if self._phase == "coast_to_apogee":
             near_target_radius = abs(r_norm - target_r_km) <= float(max(self.circularize_window_alt_km, 0.0))
             crossed_apo = self._last_radial_speed_km_s > 0.0 and vr <= 0.0
             if near_target_radius or crossed_apo:
@@ -308,7 +308,7 @@ class ClosedLoopInsertionGuidance(RocketGuidanceLaw):
         if self._phase == "complete":
             return self._cmd_from_axis(v_hat, throttle=0.0, r_hat=r_hat)
 
-        if self._phase == "coast_to_apoapsis":
+        if self._phase == "coast_to_apogee":
             # Coast to avoid overshooting energy while preserving near-prograde attitude.
             return self._cmd_from_axis(v_hat, throttle=0.0, r_hat=r_hat)
 
@@ -472,15 +472,15 @@ class OrbitInsertionCutoffGuidance(RocketGuidanceLaw):
         target_r_km = float(EARTH_RADIUS_KM + sim_cfg.target_altitude_km)
         periapsis_ok = rp_km >= float(EARTH_RADIUS_KM + max(self.min_periapsis_alt_km, 0.0))
 
-        # Pre-escape protection should only shut down once periapsis is also safe.
+        # Pre-escape protection should only shut down once perigee is also safe.
         v_esc = float(np.sqrt(2.0 * mu / r_norm))
         margin = float(np.clip(self.near_escape_speed_margin_frac, 0.0, 0.5))
         if periapsis_ok and v_mag >= (1.0 - margin) * v_esc:
             return True, "near_escape_speed"
         if not periapsis_ok:
-            return False, "periapsis_too_low"
+            return False, "perigee_too_low"
         if ra_km >= (target_r_km - float(max(self.apoapsis_margin_km, 0.0))):
-            return True, "apoapsis_target_reached"
+            return True, "apogee_target_reached"
 
         eps_target = float(-mu / (2.0 * max(target_r_km, 1e-6)))
         e_lim = float(max(sim_cfg.target_eccentricity_max, 0.0) * max(self.ecc_relax_factor, 1.0))

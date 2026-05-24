@@ -1,3 +1,14 @@
+from sim.actuators.presets import (
+    ACTUATOR_PRESETS,
+    BASIC_CMG_TRIAD,
+    BASIC_ELECTRIC_PROPULSION,
+    BASIC_GIMBALED_THRUSTER,
+    BASIC_MAGNETORQUER_TRIAD,
+    BASIC_RCS_6DOF,
+    actuator_preset_to_specs,
+    available_actuator_preset_names,
+    resolve_actuator_specs_from_satellite_specs,
+)
 from sim.presets.attitude_control import (
     BASIC_REACTION_WHEEL_TRIAD,
     BASIC_REACTION_WHEEL_X,
@@ -14,7 +25,15 @@ from sim.presets.rockets import (
     RocketStackPreset,
     RocketStagePreset,
 )
-from sim.presets.satellites import BASIC_SATELLITE, SatellitePreset
+from sim.presets.satellites import (
+    ADCS_DEMO_SAT,
+    BASIC_SATELLITE,
+    CUBESAT_6U,
+    ELECTRIC_PROP_SMALLSAT,
+    SMALLSAT_RPO,
+    TARGET_BUS_PASSIVE,
+    SatellitePreset,
+)
 from sim.presets.simulation import (
     DEFAULT_ROCKET_VEHICLE,
     DEFAULT_TWO_STAGE_VEHICLE,
@@ -38,6 +57,11 @@ __all__ = [
     "DEFAULT_TWO_STAGE_VEHICLE",
     "SatellitePreset",
     "BASIC_SATELLITE",
+    "CUBESAT_6U",
+    "SMALLSAT_RPO",
+    "TARGET_BUS_PASSIVE",
+    "ELECTRIC_PROP_SMALLSAT",
+    "ADCS_DEMO_SAT",
     "ThrusterMountPreset",
     "ChemicalPropulsionPreset",
     "BASIC_CHEMICAL_BOTTOM_Z",
@@ -47,4 +71,13 @@ __all__ = [
     "BASIC_REACTION_WHEEL_Y",
     "BASIC_REACTION_WHEEL_Z",
     "BASIC_REACTION_WHEEL_TRIAD",
+    "BASIC_RCS_6DOF",
+    "BASIC_ELECTRIC_PROPULSION",
+    "BASIC_MAGNETORQUER_TRIAD",
+    "BASIC_CMG_TRIAD",
+    "BASIC_GIMBALED_THRUSTER",
+    "ACTUATOR_PRESETS",
+    "available_actuator_preset_names",
+    "actuator_preset_to_specs",
+    "resolve_actuator_specs_from_satellite_specs",
 ]
