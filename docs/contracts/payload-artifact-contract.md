@@ -78,6 +78,7 @@ The single-run `summary` should include:
 - `reentry_summary_by_object`
 - `plot_outputs`
 - `animation_outputs`
+- `review_outputs`
 - `output_index_md`
 
 Compatibility expectations:
@@ -241,6 +242,8 @@ Stats artifacts:
   and artifact inventory.
 - `master_run_summary.json` is written when `outputs.stats.save_json` is true.
 - `master_run_log.json` is written when `outputs.stats.save_full_log` is true.
+- `review/run.sqlite` and `review/schema.json` are written when
+  `outputs.review.enabled` is true.
 
 Plot and animation artifacts:
 
@@ -248,6 +251,14 @@ Plot and animation artifacts:
 - Animation artifacts are represented in `summary.animation_outputs`.
 - Consumers should read artifact maps instead of constructing filenames from
   assumptions.
+
+Review artifacts:
+
+- Review-store artifact paths are represented in `summary.review_outputs` when
+  enabled and successfully written.
+- The first single-run review store is a SQLite database intended for output
+  review and SQL-like inspection, not a replacement for the authoritative
+  scenario config or deterministic simulator.
 
 Output directories:
 

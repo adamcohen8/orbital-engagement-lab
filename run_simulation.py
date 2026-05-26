@@ -99,7 +99,7 @@ def _print_doctor_report() -> bool:
         if overall_ok
         else "Not ready: fix FAIL items and rerun doctor."
     )
-    print("Optional plotting/GUI/game dependencies may show WARN and are not required for quickstart.")
+    print("Optional plotting/ORW/game dependencies may show WARN and are not required for quickstart.")
     print("=" * 72)
     return overall_ok
 

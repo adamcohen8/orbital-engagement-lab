@@ -45,8 +45,9 @@ that environment before relying on it.
 
 ## Modeling Limits
 
-- TLE initialization uses a dependency-free Keplerian/two-body approximation;
-  it does not perform full SGP4 propagation.
+- TLE initialization uses a dependency-free Keplerian/two-body approximation.
+  Subsequent propagation uses the configured OEL numerical special-perturbations
+  force model; it does not perform SGP4/general-perturbations propagation.
 - Ground-station access is passive and geometric. It tracks line of sight,
   elevation, and range; it does not model RF link budgets, weather, scheduling,
   or command/telemetry behavior.

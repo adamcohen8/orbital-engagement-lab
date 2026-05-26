@@ -191,6 +191,7 @@ class OutputPlotsSection(_TypedConfigDict):
         "enabled": True,
         "figure_ids": [],
         "dpi": 150,
+        "style": "oel_dark",
     }
 
     @property
@@ -204,6 +205,10 @@ class OutputPlotsSection(_TypedConfigDict):
     @property
     def dpi(self) -> int:
         return int(self.get("dpi", 150))
+
+    @property
+    def style(self) -> str:
+        return str(self.get("style", "oel_dark") or "oel_dark")
 
 
 class OutputAnimationsSection(_TypedConfigDict):
@@ -224,6 +229,13 @@ class OutputAnimationsSection(_TypedConfigDict):
     @property
     def fps(self) -> float:
         return float(self.get("fps", 30.0))
+
+    @property
+    def style(self) -> str | None:
+        value = self.get("style")
+        if value in (None, ""):
+            return None
+        return str(value)
 
 
 class OutputMonteCarloSection(_TypedConfigDict):
@@ -298,6 +310,26 @@ class OutputResourceLimitsSection(_TypedConfigDict):
         return float(value)
 
 
+class OutputReviewSection(_TypedConfigDict):
+    _defaults: dict[str, Any] = {
+        "enabled": False,
+        "detail": "standard",
+        "strict": False,
+    }
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.get("enabled", False))
+
+    @property
+    def detail(self) -> str:
+        return str(self.get("detail", "standard") or "standard")
+
+    @property
+    def strict(self) -> bool:
+        return bool(self.get("strict", False))
+
+
 @dataclass(frozen=True)
 class OutputsSection:
     output_dir: str = "outputs"
@@ -308,6 +340,7 @@ class OutputsSection:
     monte_carlo: OutputMonteCarloSection = field(default_factory=OutputMonteCarloSection)
     ai_report: OutputAIReportSection = field(default_factory=OutputAIReportSection)
     ai_config: OutputAIConfigSection = field(default_factory=OutputAIConfigSection)
+    review: OutputReviewSection = field(default_factory=OutputReviewSection)
     resource_limits: OutputResourceLimitsSection = field(default_factory=OutputResourceLimitsSection)
 
     def __post_init__(self) -> None:
@@ -317,6 +350,7 @@ class OutputsSection:
         object.__setattr__(self, "monte_carlo", OutputMonteCarloSection(self.monte_carlo))
         object.__setattr__(self, "ai_report", OutputAIReportSection(self.ai_report))
         object.__setattr__(self, "ai_config", OutputAIConfigSection(self.ai_config))
+        object.__setattr__(self, "review", OutputReviewSection(self.review))
         object.__setattr__(self, "resource_limits", OutputResourceLimitsSection(self.resource_limits))
 
 
@@ -1301,6 +1335,7 @@ def _parse_outputs_section(value: Any, path_policy: ConfigPathPolicy | None = No
         monte_carlo=dict(d.get("monte_carlo", {}) or {}),
         ai_report=dict(d.get("ai_report", {}) or {}),
         ai_config=dict(d.get("ai_config", {}) or {}),
+        review=dict(d.get("review", {}) or {}),
         resource_limits=dict(d.get("resource_limits", {}) or {}),
     )
     if out.mode not in ("interactive", "save", "both"):
@@ -1310,6 +1345,8 @@ def _parse_outputs_section(value: Any, path_policy: ConfigPathPolicy | None = No
     max_history_memory_mb = out.resource_limits.max_history_memory_mb
     if max_history_memory_mb is not None and max_history_memory_mb <= 0:
         raise ValueError("outputs.resource_limits.max_history_memory_mb must be positive when set.")
+    if out.review.detail not in {"compact", "standard", "full"}:
+        raise ValueError("outputs.review.detail must be one of: compact, standard, full.")
     if path_policy is not None:
         path_policy.resolve_output_dir(out.output_dir, purpose="outputs.output_dir")
     return out

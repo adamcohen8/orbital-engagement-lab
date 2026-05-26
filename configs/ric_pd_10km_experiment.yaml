@@ -224,7 +224,7 @@ simulator:
     earth_impact_enabled: false
 outputs:
   output_dir: outputs/flagship_ric_pd_10km
-  mode: interactive
+  mode: save
   stats:
     enabled: true
     print_summary: true
@@ -235,6 +235,7 @@ outputs:
     enabled: true
     preset: rendezvous
     reference_object_id: target
+    style: oel_dark
     figure_ids:
       - attitude
       - attitude_control_summary

@@ -64,10 +64,13 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
+from sim.plotting.style import artifact_metadata, save_oel_figure
+
 EARTH_RADIUS_KM = 6378.137
 
 outdir = Path("outputs/plotting_rendezvous_demo")
 payload = json.loads((outdir / "master_run_log.json").read_text())
+metadata = artifact_metadata(scenario_name=payload.get("summary", {}).get("scenario_name", "custom_analysis"))
 
 time_s = np.asarray(payload["time_s"], dtype=float)
 target_truth = np.asarray(payload["truth_by_object"]["target"], dtype=float)
@@ -81,7 +84,14 @@ ax.set_ylabel("Altitude (km)")
 ax.set_title("Target Altitude")
 ax.grid(True, alpha=0.3)
 fig.tight_layout()
-fig.savefig(outdir / "custom_target_altitude.png", dpi=160)
+save_oel_figure(
+    fig,
+    outdir / "custom_target_altitude.png",
+    dpi=160,
+    metadata=metadata,
+    artifact_id="custom_target_altitude",
+    style_name="oel_dark",
+)
 ```
 
 If `master_run_log.json` is missing, set `outputs.stats.save_full_log: true`
@@ -101,8 +111,11 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
+from sim.plotting.style import artifact_metadata, save_oel_figure
+
 outdir = Path("outputs/examples/public_rendezvous_closed_loop")
 payload = json.loads((outdir / "master_run_log.json").read_text())
+metadata = artifact_metadata(scenario_name=payload.get("summary", {}).get("scenario_name", "custom_analysis"))
 
 time_s = np.asarray(payload["time_s"], dtype=float)
 target = np.asarray(payload["truth_by_object"]["target"], dtype=float)
@@ -117,7 +130,14 @@ ax.set_ylabel("Range (km)")
 ax.set_title("Object-to-Object Range")
 ax.grid(True, alpha=0.3)
 fig.tight_layout()
-fig.savefig(outdir / "custom_chaser_target_range.png", dpi=160)
+save_oel_figure(
+    fig,
+    outdir / "custom_chaser_target_range.png",
+    dpi=160,
+    metadata=metadata,
+    artifact_id="custom_chaser_target_range",
+    style_name="oel_dark",
+)
 ```
 
 This is useful when a built-in figure is close to what you need but not exactly
@@ -138,8 +158,11 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
+from sim.plotting.style import artifact_metadata, save_oel_figure
+
 outdir = Path("outputs/my_ground_station_run")
 payload = json.loads((outdir / "master_run_log.json").read_text())
+metadata = artifact_metadata(scenario_name=payload.get("summary", {}).get("scenario_name", "custom_analysis"))
 
 time_s = np.asarray(payload["time_s"], dtype=float)
 access_payload = payload["ground_station_access"]["colorado_springs"]["targets"]["target"]
@@ -163,7 +186,14 @@ axes[2].set_ylabel("Range (km)")
 axes[2].grid(True, alpha=0.3)
 
 fig.tight_layout()
-fig.savefig(outdir / "custom_ground_station_access.png", dpi=160)
+save_oel_figure(
+    fig,
+    outdir / "custom_ground_station_access.png",
+    dpi=160,
+    metadata=metadata,
+    artifact_id="custom_ground_station_access",
+    style_name="oel_dark",
+)
 ```
 
 For quick review without plotting, inspect `ground_station_access_summary` in

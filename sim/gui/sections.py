@@ -3,6 +3,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
@@ -20,6 +21,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSpinBox,
     QStackedWidget,
+    QTableWidget,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -806,12 +808,12 @@ def build_results_tab(owner) -> QWidget:
     console_layout.addWidget(owner.console)
     owner.results_tabs.addTab(console_tab, "Console")
 
-    summary_tab = QWidget()
-    summary_layout = QVBoxLayout(summary_tab)
+    overview_tab = QWidget()
+    summary_layout = QVBoxLayout(overview_tab)
     owner.results_summary = QPlainTextEdit()
     owner.results_summary.setReadOnly(True)
     summary_layout.addWidget(owner.results_summary)
-    owner.results_tabs.addTab(summary_tab, "Summary")
+    owner.results_tabs.addTab(overview_tab, "Overview")
 
     artifacts_tab = QWidget()
     artifacts_layout = QGridLayout(artifacts_tab)
@@ -862,5 +864,29 @@ def build_results_tab(owner) -> QWidget:
     artifacts_layout.setColumnStretch(0, 2)
     artifacts_layout.setColumnStretch(1, 3)
     owner.results_tabs.addTab(artifacts_tab, "Artifacts")
+
+    query_tab = QWidget()
+    query_layout = QVBoxLayout(query_tab)
+    query_header = QHBoxLayout()
+    owner.review_query_status = QLabel("Open an output folder with review/run.sqlite to query results.")
+    owner.review_query_status.setWordWrap(True)
+    query_header.addWidget(owner.review_query_status, 1)
+    owner.review_query_run_button = QPushButton("Run Query")
+    owner.review_query_run_button.clicked.connect(owner._run_review_query)
+    query_header.addWidget(owner.review_query_run_button)
+    owner.review_query_save_figure_button = QPushButton("Save Figure")
+    owner.review_query_save_figure_button.clicked.connect(owner._save_review_query_figure)
+    query_header.addWidget(owner.review_query_save_figure_button)
+    query_layout.addLayout(query_header)
+    owner.review_query_editor = QPlainTextEdit()
+    owner.review_query_editor.setPlainText(
+        "SELECT time_s, range_km\nFROM relative_state\nORDER BY time_s\nLIMIT 200"
+    )
+    owner.review_query_editor.setMinimumHeight(110)
+    query_layout.addWidget(owner.review_query_editor)
+    owner.review_query_table = QTableWidget()
+    owner.review_query_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+    query_layout.addWidget(owner.review_query_table, 1)
+    owner.results_tabs.addTab(query_tab, "Query")
     owner.preview_image.setPixmap(QPixmap())
     return tab

@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import json
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
@@ -28,6 +29,7 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QSplitter,
     QStatusBar,
+    QTableWidgetItem,
     QTabWidget,
     QTreeWidget,
     QTreeWidgetItem,
@@ -70,6 +72,8 @@ from sim.gui.sections import (
     build_scenario_tab,
     build_yaml_tab,
 )
+from sim.plotting.style import artifact_metadata, save_oel_figure
+from sim.review import ReviewQueryError, ReviewWorkspace
 
 GUI_CAPABILITIES = get_gui_capabilities()
 OUTPUT_MODES = GUI_CAPABILITIES.output_modes
@@ -127,8 +131,9 @@ class _ApiRunWorker(QObject):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self) -> None:
+    def __init__(self, output_dir: Path | None = None) -> None:
         super().__init__()
+        self.review_only_mode = output_dir is not None
         self.repo_root = get_repo_root()
         self.loaded_config_path = get_default_config_path()
         self.current_config = load_config(self.loaded_config_path)
@@ -143,6 +148,8 @@ class MainWindow(QMainWindow):
         self.preview_drag_last_pos = None
         self.results_output_dir: Path | None = None
         self.preview_temp_dir: tempfile.TemporaryDirectory[str] | None = None
+        self.review_workspace: ReviewWorkspace | None = None
+        self.review_query_result = None
         self.rocket_guidance_modifiers_config: list[dict] = []
         self._yaml_has_unapplied_changes = False
         self.output_modes = OUTPUT_MODES
@@ -165,6 +172,8 @@ class MainWindow(QMainWindow):
         self._suppress_dirty_tracking = False
         self._suppress_config_selector_load = False
         self._build_ui()
+        if self.review_only_mode:
+            self._apply_output_review_mode_ui()
         self._connect_dirty_tracking()
         self.mc_enabled_check.toggled.connect(self._refresh_outputs_mode_ui)
         self.analysis_study_type_combo.currentTextChanged.connect(self._refresh_outputs_mode_ui)
@@ -196,6 +205,8 @@ class MainWindow(QMainWindow):
         self._refresh_yaml()
         self._refresh_validation_state()
         self._refresh_output_files()
+        if output_dir is not None:
+            self.open_output_review(output_dir)
         self._set_dirty(False)
         self._update_window_title()
 
@@ -212,6 +223,12 @@ class MainWindow(QMainWindow):
         top_bar = QHBoxLayout()
         top_bar.setContentsMargins(0, 0, 0, 0)
         top_bar.setSpacing(4)
+        self.review_mode_label = QLabel("Output Review Workbench")
+        self.review_mode_label.setStyleSheet("font-weight: 700; font-size: 15px;")
+        self.review_mode_label.hide()
+        top_bar.addWidget(self.review_mode_label)
+
+        self.base_config_label = QLabel("Base Config")
         self.config_selector = QComboBox()
         for path in list_available_configs():
             self.config_selector.addItem(str(path.relative_to(self.repo_root)), str(path))
@@ -220,7 +237,7 @@ class MainWindow(QMainWindow):
         idx = self.config_selector.findText(current_rel)
         if idx >= 0:
             self.config_selector.setCurrentIndex(idx)
-        top_bar.addWidget(QLabel("Base Config"))
+        top_bar.addWidget(self.base_config_label)
         top_bar.addWidget(self.config_selector, 1)
 
         self.new_button = QPushButton("New")
@@ -230,6 +247,10 @@ class MainWindow(QMainWindow):
         self.open_button = QPushButton("Open...")
         self.open_button.clicked.connect(self._on_open_file)
         top_bar.addWidget(self.open_button)
+
+        self.open_review_button = QPushButton("Open Output...")
+        self.open_review_button.clicked.connect(self._on_open_output_review)
+        top_bar.addWidget(self.open_review_button)
 
         self.run_button = QPushButton("Run")
         self.run_button.clicked.connect(self._on_run)
@@ -253,7 +274,8 @@ class MainWindow(QMainWindow):
 
         root.addLayout(top_bar)
 
-        save_bar = QHBoxLayout()
+        self.save_bar_widget = QWidget()
+        save_bar = QHBoxLayout(self.save_bar_widget)
         save_bar.setContentsMargins(0, 0, 0, 0)
         save_bar.setSpacing(4)
         self.save_path_edit = QLineEdit(str(self.repo_root / "configs" / "gui_working.yaml"))
@@ -268,27 +290,27 @@ class MainWindow(QMainWindow):
         self.save_as_button.clicked.connect(self._on_save_as)
         save_bar.addWidget(self.save_as_button)
 
-        root.addLayout(save_bar)
+        root.addWidget(self.save_bar_widget)
 
         splitter = QSplitter(Qt.Horizontal)
         root.addWidget(splitter, 1)
 
-        nav_container = QWidget()
-        nav_layout = QVBoxLayout(nav_container)
+        self.nav_container = QWidget()
+        nav_layout = QVBoxLayout(self.nav_container)
         nav_layout.setContentsMargins(0, 0, 0, 0)
         nav_layout.setSpacing(4)
         nav_layout.addWidget(QLabel("Scenario Tree"))
         self.navigation_tree = self._build_navigation_tree()
         self.navigation_tree.itemSelectionChanged.connect(self._on_navigation_selected)
         nav_layout.addWidget(self.navigation_tree, 1)
-        splitter.addWidget(nav_container)
+        splitter.addWidget(self.nav_container)
 
         workspace = QWidget()
         workspace_layout = QVBoxLayout(workspace)
         workspace_layout.setContentsMargins(0, 0, 0, 0)
         workspace_layout.setSpacing(4)
-        validation_box = QGroupBox("Validation")
-        validation_layout = QVBoxLayout(validation_box)
+        self.validation_box = QGroupBox("Validation")
+        validation_layout = QVBoxLayout(self.validation_box)
         validation_layout.setContentsMargins(6, 6, 6, 6)
         validation_layout.setSpacing(4)
         self.validation_toggle = QPushButton("Show Details")
@@ -302,7 +324,7 @@ class MainWindow(QMainWindow):
         self.validation_panel.setMaximumHeight(120)
         self.validation_panel.hide()
         validation_layout.addWidget(self.validation_panel)
-        workspace_layout.addWidget(validation_box)
+        workspace_layout.addWidget(self.validation_box)
 
         self.tabs = QTabWidget()
         self.tabs.currentChanged.connect(self._sync_navigation_to_tab)
@@ -325,6 +347,29 @@ class MainWindow(QMainWindow):
         status = QStatusBar(self)
         self.setStatusBar(status)
         status.showMessage("Ready.")
+
+    def _apply_output_review_mode_ui(self) -> None:
+        self.setWindowTitle("Orbital Engagement Lab - Output Review Workbench")
+        self.review_mode_label.show()
+        self.base_config_label.hide()
+        self.config_selector.hide()
+        for widget in (
+            self.new_button,
+            self.open_button,
+            self.run_button,
+            self.open_quickstart_button,
+            self.run_quickstart_button,
+            self.advanced_mode_check,
+        ):
+            widget.hide()
+        self.save_bar_widget.hide()
+        self.nav_container.hide()
+        self.validation_box.hide()
+        for index in range(self.tabs.count()):
+            self.tabs.setTabVisible(index, index == 6)
+        self.tabs.setCurrentIndex(6)
+        if hasattr(self, "results_tabs"):
+            self.results_tabs.setCurrentIndex(0)
 
     def _build_navigation_tree(self) -> QTreeWidget:
         tree = QTreeWidget()
@@ -361,8 +406,9 @@ class MainWindow(QMainWindow):
         results_item = QTreeWidgetItem(["Results"])
         results_item.setData(0, Qt.UserRole, 6)
         results_item.addChild(self._nav_item("Console", 6))
-        results_item.addChild(self._nav_item("Summary", 6))
+        results_item.addChild(self._nav_item("Overview", 6))
         results_item.addChild(self._nav_item("Artifacts", 6))
+        results_item.addChild(self._nav_item("Query", 6))
 
         tree.addTopLevelItem(builder_item)
         tree.addTopLevelItem(scenario_item)
@@ -549,6 +595,10 @@ class MainWindow(QMainWindow):
 
     def _refresh_advanced_mode_ui(self) -> None:
         if not hasattr(self, "tabs"):
+            return
+        if getattr(self, "review_only_mode", False):
+            for index in range(self.tabs.count()):
+                self.tabs.setTabVisible(index, index == 6)
             return
         advanced = bool(getattr(self, "advanced_mode_check", None) and self.advanced_mode_check.isChecked())
         yaml_index = 5
@@ -1739,20 +1789,37 @@ class MainWindow(QMainWindow):
         self.zoom_label.setText("Fit")
         self.preview_text.clear()
         self.results_summary.clear()
+        self.review_workspace = None
+        self.review_query_result = None
         try:
-            cfg = validate_config(self._collect_config_from_widgets())
-            output_dir = self.results_output_dir or self._resolve_output_dir(cfg.outputs.output_dir)
+            if self.results_output_dir is not None:
+                output_dir = self.results_output_dir
+                used_temp_dir = self._is_preview_output_dir(output_dir)
+            else:
+                cfg = validate_config(self._collect_config_from_widgets())
+                output_dir = self._resolve_output_dir(cfg.outputs.output_dir)
+                used_temp_dir = False
             files = sorted(get_output_files(output_dir), key=self._artifact_priority)
             for path in files:
                 label = self._artifact_label(path)
                 item_text = label
                 self.output_files.addItem(item_text)
                 self.output_files.item(self.output_files.count() - 1).setData(Qt.UserRole, str(path))
-            self._refresh_results_summary(output_dir, files, used_temp_dir=self.results_output_dir is not None)
+            self._refresh_results_summary(output_dir, files, used_temp_dir=used_temp_dir)
+            self._refresh_review_workspace(output_dir)
             if self.output_files.count() > 0:
                 self.output_files.setCurrentRow(0)
         except Exception:
             return
+
+    def _is_preview_output_dir(self, output_dir: Path) -> bool:
+        if self.preview_temp_dir is None:
+            return False
+        try:
+            output_dir.resolve().relative_to(Path(self.preview_temp_dir.name).resolve())
+            return True
+        except ValueError:
+            return False
 
     def _refresh_results_summary(self, output_dir: Path, files: list[Path], *, used_temp_dir: bool) -> None:
         summary_path = output_dir / "master_run_summary.json"
@@ -1801,7 +1868,40 @@ class MainWindow(QMainWindow):
                 f"JSON files: {json_count}\n"
                 "No recognized run summary file found yet."
             )
+        review_db = output_dir / "review" / "run.sqlite"
+        if review_db.exists():
+            text.append(
+                "Output Review Store\n"
+                "===================\n"
+                f"SQLite: {review_db}\n"
+                "Use the Query tab to inspect structured run evidence."
+            )
+        else:
+            text.append(
+                "Output Review Store\n"
+                "===================\n"
+                "No review/run.sqlite store found. Legacy artifact preview is still available."
+            )
         self.results_summary.setPlainText("\n\n".join(text))
+
+    def _refresh_review_workspace(self, output_dir: Path) -> None:
+        if not hasattr(self, "review_query_status"):
+            return
+        try:
+            workspace = ReviewWorkspace.open(output_dir)
+            self.review_workspace = workspace
+            tables = ", ".join(workspace.tables())
+            self.review_query_status.setText(f"Review store loaded: {workspace.db_path}\nTables: {tables}")
+            self.review_query_run_button.setEnabled(True)
+            self.review_query_save_figure_button.setEnabled(False)
+        except Exception:
+            self.review_workspace = None
+            self.review_query_status.setText("No review/run.sqlite store found for this output folder.")
+            self.review_query_run_button.setEnabled(False)
+            self.review_query_save_figure_button.setEnabled(False)
+            self.review_query_table.clear()
+            self.review_query_table.setRowCount(0)
+            self.review_query_table.setColumnCount(0)
 
     def _format_json_summary(self, title: str, data: dict) -> str:
         lines = [title, "=" * len(title)]
@@ -1831,6 +1931,139 @@ class MainWindow(QMainWindow):
             lines.append("")
             lines.append(json.dumps(remaining, indent=2)[:4000])
         return "\n".join(lines)
+
+    def _run_review_query(self) -> None:
+        if self.review_workspace is None:
+            self._show_error("Review Store Missing", "Open an output folder with review/run.sqlite first.")
+            return
+        sql = self.review_query_editor.toPlainText()
+        self.review_query_result = None
+        try:
+            result = self.review_workspace.query(sql, max_rows=1000)
+        except ReviewQueryError as exc:
+            self.review_query_status.setText(f"Query failed: {exc}")
+            self.review_query_save_figure_button.setEnabled(False)
+            return
+        self.review_query_result = result
+        self.review_query_table.clear()
+        self.review_query_table.setColumnCount(len(result.columns))
+        self.review_query_table.setRowCount(result.row_count)
+        self.review_query_table.setHorizontalHeaderLabels(result.columns)
+        for row_idx, row in enumerate(result.rows):
+            for col_idx, column in enumerate(result.columns):
+                value = row.get(column)
+                item = QTableWidgetItem("" if value is None else str(value))
+                self.review_query_table.setItem(row_idx, col_idx, item)
+        self.review_query_table.resizeColumnsToContents()
+        suffix = " (truncated)" if result.truncated else ""
+        self.review_query_status.setText(f"Query returned {result.row_count} row(s){suffix}.")
+        self.review_query_save_figure_button.setEnabled(bool(result.rows))
+
+    def _save_review_query_figure(self) -> None:
+        if self.review_workspace is None or self.review_query_result is None:
+            self._show_error("No Query Result", "Run a review query before saving a figure.")
+            return
+        numeric_columns = self._numeric_query_columns(self.review_query_result.rows, self.review_query_result.columns)
+        if len(numeric_columns) < 2:
+            self._show_error("Cannot Save Figure", "The current query result needs at least two numeric columns.")
+            return
+        x_col, y_col = numeric_columns[0], numeric_columns[1]
+        pairs = [
+            (float(row[x_col]), float(row[y_col]))
+            for row in self.review_query_result.rows
+            if row.get(x_col) is not None and row.get(y_col) is not None
+        ]
+        if not pairs:
+            self._show_error("Cannot Save Figure", "The current query result does not contain plottable values.")
+            return
+        import matplotlib.pyplot as plt
+
+        figures_dir = self.review_workspace.output_dir / "review" / "figures"
+        figures_dir.mkdir(parents=True, exist_ok=True)
+        artifact_id = f"query_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+        path = figures_dir / f"{artifact_id}.png"
+        fig, ax = plt.subplots(figsize=(8, 4.5))
+        x_vals = [item[0] for item in pairs]
+        y_vals = [item[1] for item in pairs]
+        ax.plot(x_vals, y_vals, marker="o", markersize=3)
+        ax.set_title(f"{y_col} vs {x_col}")
+        ax.set_xlabel(x_col)
+        ax.set_ylabel(y_col)
+        ax.grid(True, alpha=0.35)
+        save_oel_figure(
+            fig,
+            path,
+            dpi=150,
+            metadata=artifact_metadata(
+                scenario_name=self._review_scenario_name(),
+                artifact_id=artifact_id,
+            ),
+            artifact_id=artifact_id,
+            style_name="oel_dark",
+            bbox_inches="tight",
+        )
+        plt.close(fig)
+        self._record_generated_review_artifact(path=path, artifact_id=artifact_id, x_col=x_col, y_col=y_col)
+        self._refresh_output_files()
+        self.statusBar().showMessage(f"Saved figure {path}", 5000)
+
+    def _numeric_query_columns(self, rows, columns: list[str]) -> list[str]:
+        numeric = []
+        for column in columns:
+            saw_value = False
+            for row in rows:
+                value = row.get(column)
+                if value is None:
+                    continue
+                try:
+                    float(value)
+                except (TypeError, ValueError):
+                    break
+                saw_value = True
+            else:
+                if saw_value:
+                    numeric.append(column)
+        return numeric
+
+    def _review_scenario_name(self) -> str:
+        if self.review_workspace is None:
+            return ""
+        try:
+            result = self.review_workspace.query("SELECT scenario_name FROM run_metadata", max_rows=1)
+            if result.rows:
+                return str(result.rows[0].get("scenario_name") or "")
+        except Exception:
+            return ""
+        return ""
+
+    def _record_generated_review_artifact(self, *, path: Path, artifact_id: str, x_col: str, y_col: str) -> None:
+        if self.review_workspace is None:
+            return
+        index_path = self.review_workspace.output_dir / "review" / "generated_artifacts.json"
+        existing = []
+        if index_path.exists():
+            try:
+                data = json.loads(index_path.read_text(encoding="utf-8"))
+                existing = list(data.get("artifacts", []) if isinstance(data, dict) else [])
+            except Exception:
+                existing = []
+        try:
+            rel_path = path.relative_to(self.review_workspace.output_dir).as_posix()
+        except ValueError:
+            rel_path = str(path)
+        existing.append(
+            {
+                "artifact_id": artifact_id,
+                "artifact_type": "figure",
+                "path": rel_path,
+                "created_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "source": "output_review_workbench",
+                "x_column": x_col,
+                "y_column": y_col,
+                "query": self.review_query_editor.toPlainText(),
+            }
+        )
+        index_path.write_text(json.dumps({"artifacts": existing}, indent=2) + "\n", encoding="utf-8")
 
     def _on_output_file_selected(self, _text: str) -> None:
         item = self.output_files.currentItem()
@@ -2006,6 +2239,24 @@ class MainWindow(QMainWindow):
         self._update_window_title()
         self.statusBar().showMessage(f"Loaded {path}", 5000)
 
+    def _on_open_output_review(self) -> None:
+        start = str(self.results_output_dir or self._resolve_output_dir(self.output_dir_edit.text().strip() or "outputs"))
+        path_str = QFileDialog.getExistingDirectory(self, "Open Output Folder", start)
+        if not path_str:
+            return
+        self.open_output_review(Path(path_str))
+
+    def open_output_review(self, output_dir: str | Path) -> None:
+        path = Path(output_dir).expanduser()
+        if not path.is_absolute():
+            path = self.repo_root / path
+        self.results_output_dir = path.resolve()
+        self._refresh_output_files()
+        self.tabs.setCurrentIndex(6)
+        if hasattr(self, "results_tabs"):
+            self.results_tabs.setCurrentIndex(0)
+        self.statusBar().showMessage(f"Opened output review: {self.results_output_dir}", 5000)
+
     def _on_open_quickstart(self) -> None:
         path = self._quickstart_config_path()
         if not path.exists():
@@ -2176,6 +2427,16 @@ class MainWindow(QMainWindow):
             self.run_status_label.setText("Simulation finished.")
         self.statusBar().showMessage("Simulation finished.", 10000)
         self._refresh_output_files()
+        if self.results_output_dir is not None:
+            answer = QMessageBox.question(
+                self,
+                "Open Output Review Workbench?",
+                "Simulation finished. Open the Output Review Workbench for this output folder?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
+            )
+            if answer == QMessageBox.Yes:
+                self.open_output_review(self.results_output_dir)
 
     def _on_run_failed(self, message: str) -> None:
         self._set_run_controls_enabled(True)
@@ -2291,6 +2552,10 @@ class MainWindow(QMainWindow):
 
     def _update_window_title(self) -> None:
         marker = "*" if self.is_dirty else ""
+        if getattr(self, "review_only_mode", False):
+            output_name = self.results_output_dir.name if self.results_output_dir is not None else "Output"
+            self.setWindowTitle(f"{marker}{output_name} - OEL Output Review Workbench")
+            return
         self.setWindowTitle(f"{marker}{self.loaded_config_path.name} - Orbital Engagement Lab Operator Console")
 
     def _prompt_discard_changes(self) -> bool:

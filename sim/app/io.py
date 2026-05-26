@@ -73,6 +73,7 @@ def ensure_sections(data: dict[str, Any]) -> dict[str, Any]:
     out["outputs"].setdefault("animations", {})
     out["outputs"].setdefault("monte_carlo", {})
     out["outputs"].setdefault("ai_report", {})
+    out["outputs"].setdefault("review", {})
     return out
 
 

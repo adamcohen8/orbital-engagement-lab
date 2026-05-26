@@ -11,8 +11,10 @@ try:
 except Exception as exc:  # pragma: no cover - depends on local optional plotting stack
     pytest.skip(f"matplotlib is not usable in this environment: {exc}", allow_module_level=True)
 
+import matplotlib.pyplot as plt
 import numpy as np
 
+import sim.plotting.style as oel_style
 from sim.config import scenario_config_from_dict
 from sim.master_outputs import PLOT_PRESETS, plot_outputs
 from sim.plotting import (
@@ -30,6 +32,7 @@ from sim.plotting import (
     plot_run_dashboard,
     plot_sensor_access,
 )
+from sim.plotting.style import artifact_metadata, oel_plot_context, save_oel_animation, save_oel_figure
 
 
 def _hist(pos: np.ndarray) -> np.ndarray:
@@ -98,6 +101,65 @@ def _payload() -> dict[str, object]:
         "ground_station_access": ground_access,
         "target_reference_orbit_truth": [],
     }
+
+
+def test_oel_plot_style_adds_public_safe_footer(tmp_path: Path) -> None:
+    path = tmp_path / "nested" / "styled_artifact.png"
+    metadata = artifact_metadata(
+        scenario_name="style_smoke",
+        generated_utc="2026-05-26T00:00:00Z",
+        version_text="0.9.0",
+    )
+    with oel_plot_context(style_name="oel_dark", metadata=metadata):
+        fig, ax = plt.subplots(figsize=(4, 3))
+        ax.plot([0.0, 1.0], [0.0, 1.0], label="actual")
+        ax.legend(loc="best")
+        save_oel_figure(fig, path, dpi=80, artifact_id="style_smoke_plot")
+        footer_texts = [item.get_text() for item in fig.texts]
+        plt.close(fig)
+
+    assert path.exists()
+    assert path.parent.exists()
+    assert any("Orbital Engagement Lab" in text for text in footer_texts)
+    assert any("scenario: style_smoke" in text for text in footer_texts)
+
+
+def test_oel_version_falls_back_when_distribution_metadata_is_malformed(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _raise_malformed_metadata(_package_name: str) -> str:
+        raise TypeError("missing distribution metadata")
+
+    monkeypatch.setattr(oel_style, "version", _raise_malformed_metadata)
+
+    assert oel_style.get_oel_version() != "unknown"
+
+
+def test_oel_animation_save_adds_public_safe_footer(tmp_path: Path) -> None:
+    path = tmp_path / "nested" / "styled_animation.gif"
+    metadata = artifact_metadata(
+        scenario_name="animation_style_smoke",
+        generated_utc="2026-05-26T00:00:00Z",
+        version_text="0.9.0",
+    )
+    captured: dict[str, object] = {}
+
+    class _AnimationStub:
+        def save(self, path_str: str, *, fps: float, **kwargs: object) -> None:
+            captured["path"] = path_str
+            captured["fps"] = fps
+            captured["kwargs"] = kwargs
+
+    with oel_plot_context(style_name="oel_light", metadata=metadata):
+        fig, ax = plt.subplots(figsize=(4, 3))
+        ax.plot([0.0, 1.0], [1.0, 0.0])
+        save_oel_animation(_AnimationStub(), fig, path, fps=4.0, artifact_id="style_smoke_movie")
+        footer_texts = [item.get_text() for item in fig.texts]
+        plt.close(fig)
+
+    assert path.parent.exists()
+    assert captured["path"] == str(path)
+    assert captured["fps"] == 4.0
+    assert any("Orbital Engagement Lab" in text for text in footer_texts)
+    assert any("artifact: style_smoke_movie" in text for text in footer_texts)
 
 
 def test_payload_plotting_api_writes_expected_artifacts(tmp_path: Path) -> None:

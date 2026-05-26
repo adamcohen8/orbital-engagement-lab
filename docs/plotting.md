@@ -15,10 +15,14 @@ outputs:
     preset: "rendezvous"
     reference_object_id: "target"
     draw_earth_map: true
+    style: "oel_dark"
     figure_ids:
       - "run_dashboard"
       - "rendezvous_summary"
     dpi: 160
+  animations:
+    enabled: false
+    style: "oel_dark"
 ```
 
 `preset` expands to a useful bundle of figure IDs. You can add more
@@ -31,6 +35,14 @@ histories.
 Set `draw_earth_map: true` under `outputs.plots` to use a world-map background
 for static `ground_track` and `ground_track_multi` figures. The plotter uses
 Cartopy when available and otherwise falls back to a lightweight built-in map.
+Set `style` to `oel_dark` for the default screen/game-aligned OEL artifact
+identity, `oel_light` for print-friendly report figures, or `matplotlib` to use
+unbranded Matplotlib defaults. Saved animations use the same visual identity
+and footer metadata; set `outputs.animations.style` only when a movie should
+override `outputs.plots.style`. Branded static plots share the same save path,
+footer metadata, role-color conventions, and show/close behavior across
+single-run, campaign, benchmark, game-debrief, validation, and animation
+workflows.
 
 For the flagship plotting scenario used by the checked-in gallery:
 
@@ -131,6 +143,11 @@ Available API functions:
 - `plot_orbital_elements_angles`
 - `plot_attitude_control_summary`
 - `plot_sensor_access`
+
+Custom Matplotlib figures should use `sim.plotting.style.save_oel_figure` when
+they are intended to sit beside OEL-generated artifacts. That keeps footer
+metadata, theme colors, output directory creation, and save behavior consistent
+with built-in plots.
 
 ## Public And Pro Boundary
 

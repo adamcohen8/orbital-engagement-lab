@@ -11,6 +11,7 @@ from sim.master_outputs import (
     animate_outputs,
     plot_outputs,
 )
+from sim.plotting.style import current_artifact_metadata, current_style_name
 from sim.utils.plot_windows import (
     attitude_axis_limits,
     axis_window_from_values,
@@ -149,6 +150,9 @@ def test_animate_outputs_uses_target_reference_orbit_for_curv_animations(monkeyp
             None if reference_truth_hist is None else np.array(reference_truth_hist, dtype=float)
         )
         captured["3d_out_path"] = out_path
+        captured["style_name"] = current_style_name()
+        meta = current_artifact_metadata()
+        captured["scenario_name"] = "" if meta is None else meta.scenario_name
 
     def _capture_2d(
         t_s: np.ndarray,
@@ -211,8 +215,10 @@ def test_animate_outputs_uses_target_reference_orbit_for_curv_animations(monkeyp
             "outputs": {
                 "output_dir": str(tmp_path),
                 "mode": "save",
+                "plots": {"style": "oel_dark"},
                 "animations": {
                     "enabled": True,
+                    "style": "oel_light",
                     "types": [
                         "target_reference_ric_curv_3d",
                         "target_reference_ric_curv_2d",
@@ -258,6 +264,8 @@ def test_animate_outputs_uses_target_reference_orbit_for_curv_animations(monkeyp
     assert out["target_reference_ric_curv_2d_ri"].endswith("target_reference_ric_curv_2d_ri.mp4")
     assert out["target_reference_ric_curv_2d_rc"].endswith("target_reference_ric_curv_2d_rc.mp4")
     assert captured["3d_frame"] == "ric_curv"
+    assert captured["style_name"] == "oel_light"
+    assert captured["scenario_name"] == "target_reference_animation"
     assert captured["3d_keys"] == ["chaser", "target"]
     assert captured["3d_show_trajectory"] is False
     assert np.allclose(captured["3d_reference_truth_hist"], target_reference_orbit_truth)

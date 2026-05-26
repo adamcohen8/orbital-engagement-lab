@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Literal
 
 import matplotlib.pyplot as plt
@@ -8,6 +7,7 @@ import numpy as np
 from matplotlib.patches import Polygon, Rectangle
 
 from sim.dynamics.orbit.environment import EARTH_RADIUS_KM
+from sim.plotting.style import show_save_close_oel
 from sim.utils.figure_size import cap_figsize
 from sim.utils.frames import dcm_to_euler_321, ric_dcm_ir_from_rv
 from sim.utils.ground_track import split_ground_track_dateline
@@ -23,6 +23,10 @@ except Exception:
 
 
 PlotMode = Literal["interactive", "save", "both"]
+
+
+def _show_save_close(fig: plt.Figure, *, mode: PlotMode, out_path: str | None, dpi: int = 150) -> None:
+    show_save_close_oel(fig, mode=mode, out_path=out_path, dpi=dpi, plt_module=plt, show_block=True)
 
 
 def _draw_earth_sphere_3d(ax: plt.Axes, radius_km: float = EARTH_RADIUS_KM) -> None:
@@ -54,14 +58,7 @@ def plot_orbit_eci(truth_hist: np.ndarray, mode: PlotMode = "interactive", out_p
     ax.set_title("One-Orbit ECI Trajectory")
     ax.set_box_aspect((1, 1, 1))
     fig.tight_layout()
-    if mode in ("save", "both"):
-        if out_path is None:
-            raise ValueError("out_path is required when mode is 'save' or 'both'")
-        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(out_path, dpi=150)
-    if mode in ("interactive", "both"):
-        plt.show()
-    plt.close(fig)
+    _show_save_close(fig, mode=mode, out_path=out_path)
 
 
 def plot_attitude_tumble(
@@ -88,14 +85,7 @@ def plot_attitude_tumble(
     axes[1].grid(True, alpha=0.3)
 
     fig.tight_layout()
-    if mode in ("save", "both"):
-        if out_path is None:
-            raise ValueError("out_path is required when mode is 'save' or 'both'")
-        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(out_path, dpi=150)
-    if mode in ("interactive", "both"):
-        plt.show()
-    plt.close(fig)
+    _show_save_close(fig, mode=mode, out_path=out_path)
 
 
 def plot_attitude_ric(
@@ -133,14 +123,7 @@ def plot_attitude_ric(
     axes[0].set_title("Body Attitude Relative to RIC Frame (Project Axis Convention)")
 
     fig.tight_layout()
-    if mode in ("save", "both"):
-        if out_path is None:
-            raise ValueError("out_path is required when mode is 'save' or 'both'")
-        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(out_path, dpi=150)
-    if mode in ("interactive", "both"):
-        plt.show()
-    plt.close(fig)
+    _show_save_close(fig, mode=mode, out_path=out_path)
 
 
 def plot_angular_rates(
@@ -157,14 +140,7 @@ def plot_angular_rates(
     axes[0].set_title("Body Angular Rates Over Time")
 
     fig.tight_layout()
-    if mode in ("save", "both"):
-        if out_path is None:
-            raise ValueError("out_path is required when mode is 'save' or 'both'")
-        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(out_path, dpi=150)
-    if mode in ("interactive", "both"):
-        plt.show()
-    plt.close(fig)
+    _show_save_close(fig, mode=mode, out_path=out_path)
 
 
 def plot_ground_track(
@@ -209,18 +185,10 @@ def plot_ground_track(
         ax.set_title(title)
         fig.tight_layout()
         try:
-            if mode in ("save", "both"):
-                if out_path is None:
-                    raise ValueError("out_path is required when mode is 'save' or 'both'")
-                Path(out_path).parent.mkdir(parents=True, exist_ok=True)
-                fig.savefig(out_path, dpi=150)
-            if mode in ("interactive", "both"):
-                plt.show()
+            _show_save_close(fig, mode=mode, out_path=out_path)
             cartopy_ok = True
         except Exception:
             cartopy_ok = False
-        finally:
-            plt.close(fig)
 
     if cartopy_attempted and cartopy_ok:
         return
@@ -247,14 +215,7 @@ def plot_ground_track(
     for yv in np.arange(-90, 91, 15):
         ax.axhline(yv, color="gray", linewidth=0.35, alpha=0.35, zorder=0)
     fig.tight_layout()
-    if mode in ("save", "both"):
-        if out_path is None:
-            raise ValueError("out_path is required when mode is 'save' or 'both'")
-        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(out_path, dpi=150)
-    if mode in ("interactive", "both"):
-        plt.show()
-    plt.close(fig)
+    _show_save_close(fig, mode=mode, out_path=out_path)
 
 
 def _draw_stylized_earth_map(ax: plt.Axes) -> None:

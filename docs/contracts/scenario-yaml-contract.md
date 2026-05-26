@@ -178,7 +178,9 @@ Optional `tle.require_checksum: true` enables TLE checksum validation.
 Optional `tle.propagate_to_initial_epoch: false` keeps the state at the TLE
 epoch instead of advancing mean anomaly to `simulator.initial_jd_utc`.
 The TLE initializer converts mean elements to an ECI state with a two-body
-Keplerian approximation; full SGP4 propagation is not part of this contract.
+Keplerian approximation. Subsequent propagation uses the configured OEL
+numerical special-perturbations force model; SGP4/general-perturbations
+propagation is not part of this contract.
 
 Preset merge contract:
 
@@ -306,6 +308,7 @@ Common fields:
 - `animations`
 - `monte_carlo`
 - `ai_report`
+- `review`
 
 Output modes:
 
@@ -325,6 +328,14 @@ Plot and animation contract:
 - Disabled plots/animations should not be required for simulation correctness.
 - Artifact filenames and figure IDs should be consumed through summary artifact
   mappings rather than hard-coded when possible.
+
+Review store contract:
+
+- `review.enabled` controls whether a single-run SQLite review store is written
+  under `outputs.output_dir/review/`.
+- `review.detail` must be one of `compact`, `standard`, or `full`.
+- `review.strict` controls whether review-store writer failures raise or are
+  recorded as non-fatal review status while preserving normal artifacts.
 
 
 ## Public And Pro Fields

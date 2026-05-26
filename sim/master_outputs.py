@@ -15,6 +15,7 @@ from sim.config import (
 )
 from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2, EARTH_RADIUS_KM
 from sim.ground_stations import evaluate_ground_station_access
+from sim.plotting.style import artifact_metadata, oel_plot_context, save_oel_figure, style_name_from_config
 from sim.presets.rockets import RocketStackPreset
 from sim.presets.thrusters import resolve_thruster_mount_from_specs
 from sim.utils.figure_size import cap_figsize
@@ -485,6 +486,46 @@ def plot_outputs(
     bridge_hist: dict[str, list[dict[str, Any]]] | None = None,
     reentry_metrics: dict[str, dict[str, np.ndarray]] | None = None,
 ) -> dict[str, str]:
+    metadata = artifact_metadata(scenario_name=str(cfg.scenario_name or ""))
+    style_name = style_name_from_config(dict(cfg.outputs.plots or {}))
+    with oel_plot_context(style_name=style_name, metadata=metadata):
+        return _plot_outputs_impl(
+            cfg=cfg,
+            t_s=t_s,
+            truth_hist=truth_hist,
+            target_reference_orbit_truth=target_reference_orbit_truth,
+            thrust_hist=thrust_hist,
+            desired_attitude_hist=desired_attitude_hist,
+            knowledge_hist=knowledge_hist,
+            rocket_metrics=rocket_metrics,
+            outdir=outdir,
+            resolve_rocket_stack=resolve_rocket_stack,
+            resolve_satellite_isp_s=resolve_satellite_isp_s,
+            belief_hist=belief_hist,
+            knowledge_measurement_hist=knowledge_measurement_hist,
+            bridge_hist=bridge_hist,
+            reentry_metrics=reentry_metrics,
+        )
+
+
+def _plot_outputs_impl(
+    *,
+    cfg: SimulationScenarioConfig,
+    t_s: np.ndarray,
+    truth_hist: dict[str, np.ndarray],
+    target_reference_orbit_truth: np.ndarray | None,
+    thrust_hist: dict[str, np.ndarray],
+    desired_attitude_hist: dict[str, np.ndarray] | None,
+    knowledge_hist: dict[str, dict[str, np.ndarray]],
+    rocket_metrics: dict[str, np.ndarray] | None,
+    outdir: Path,
+    resolve_rocket_stack: Callable[[dict[str, Any]], RocketStackPreset],
+    resolve_satellite_isp_s: Callable[[dict[str, Any]], float],
+    belief_hist: dict[str, np.ndarray] | None = None,
+    knowledge_measurement_hist: dict[str, dict[str, np.ndarray]] | None = None,
+    bridge_hist: dict[str, list[dict[str, Any]]] | None = None,
+    reentry_metrics: dict[str, dict[str, np.ndarray]] | None = None,
+) -> dict[str, str]:
     out: dict[str, str] = {}
     if not bool(cfg.outputs.plots.get("enabled", True)):
         return out
@@ -911,7 +952,7 @@ def plot_outputs(
         ax.legend(loc="best")
         p = outdir / "relative_ranges.png"
         if mode in ("save", "both"):
-            fig.savefig(p, dpi=int(cfg.outputs.plots.get("dpi", 150)))
+            save_oel_figure(fig, p, dpi=int(cfg.outputs.plots.get("dpi", 150)), artifact_id=p.stem)
             out["relative_ranges"] = str(p)
         if mode in ("interactive", "both"):
             plt.show(block=False)
@@ -949,7 +990,7 @@ def plot_outputs(
             ax.grid(True, alpha=0.3)
             p = outdir / f"{oid}_quaternion_error.png"
             if mode in ("save", "both"):
-                fig.savefig(p, dpi=int(cfg.outputs.plots.get("dpi", 150)))
+                save_oel_figure(fig, p, dpi=int(cfg.outputs.plots.get("dpi", 150)), artifact_id=p.stem)
                 out[f"{oid}_quaternion_error"] = str(p)
             if mode in ("interactive", "both"):
                 plt.show(block=False)
@@ -1161,7 +1202,7 @@ def plot_outputs(
         fig.tight_layout()
         p = outdir / "rocket_ascent_diagnostics.png"
         if mode in ("save", "both"):
-            fig.savefig(p, dpi=int(cfg.outputs.plots.get("dpi", 150)))
+            save_oel_figure(fig, p, dpi=int(cfg.outputs.plots.get("dpi", 150)), artifact_id=p.stem)
             out["rocket_ascent_diagnostics"] = str(p)
         if mode == "save":
             plt.close(fig)
@@ -1225,7 +1266,7 @@ def plot_outputs(
         fig.tight_layout()
         p = outdir / "rocket_gnc_diagnostics.png"
         if mode in ("save", "both"):
-            fig.savefig(p, dpi=int(cfg.outputs.plots.get("dpi", 150)))
+            save_oel_figure(fig, p, dpi=int(cfg.outputs.plots.get("dpi", 150)), artifact_id=p.stem)
             out["rocket_gnc_diagnostics"] = str(p)
         if mode == "save":
             plt.close(fig)
@@ -1252,7 +1293,7 @@ def plot_outputs(
         fig.tight_layout()
         p = outdir / "rocket_orbital_elements.png"
         if mode in ("save", "both"):
-            fig.savefig(p, dpi=int(cfg.outputs.plots.get("dpi", 150)))
+            save_oel_figure(fig, p, dpi=int(cfg.outputs.plots.get("dpi", 150)), artifact_id=p.stem)
             out["rocket_orbital_elements"] = str(p)
         if mode == "save":
             plt.close(fig)
@@ -1282,7 +1323,7 @@ def plot_outputs(
         fig.tight_layout()
         p = outdir / "rocket_fuel_remaining.png"
         if mode in ("save", "both"):
-            fig.savefig(p, dpi=int(cfg.outputs.plots.get("dpi", 150)))
+            save_oel_figure(fig, p, dpi=int(cfg.outputs.plots.get("dpi", 150)), artifact_id=p.stem)
             out["rocket_fuel_remaining"] = str(p)
         if mode == "save":
             plt.close(fig)
@@ -1343,7 +1384,7 @@ def plot_outputs(
         fig.tight_layout()
         p = outdir / "rocket_mission_timeline.png"
         if mode in ("save", "both"):
-            fig.savefig(p, dpi=int(cfg.outputs.plots.get("dpi", 150)))
+            save_oel_figure(fig, p, dpi=int(cfg.outputs.plots.get("dpi", 150)), artifact_id=p.stem)
             out["rocket_mission_timeline"] = str(p)
         if mode in ("interactive", "both"):
             plt.show(block=False)
@@ -1390,7 +1431,7 @@ def plot_outputs(
         fig.tight_layout()
         p = outdir / "rocket_downrange_altitude.png"
         if mode in ("save", "both"):
-            fig.savefig(p, dpi=int(cfg.outputs.plots.get("dpi", 150)))
+            save_oel_figure(fig, p, dpi=int(cfg.outputs.plots.get("dpi", 150)), artifact_id=p.stem)
             out["rocket_downrange_altitude"] = str(p)
         if mode in ("interactive", "both"):
             plt.show(block=False)
@@ -1441,7 +1482,7 @@ def plot_outputs(
         fig.tight_layout()
         p = outdir / "rocket_maxq_throttle.png"
         if mode in ("save", "both"):
-            fig.savefig(p, dpi=int(cfg.outputs.plots.get("dpi", 150)))
+            save_oel_figure(fig, p, dpi=int(cfg.outputs.plots.get("dpi", 150)), artifact_id=p.stem)
             out["rocket_maxq_throttle"] = str(p)
         if mode in ("interactive", "both"):
             plt.show(block=False)
@@ -1495,7 +1536,7 @@ def plot_outputs(
         fig.tight_layout()
         p = outdir / "rocket_tvc_aero_authority.png"
         if mode in ("save", "both"):
-            fig.savefig(p, dpi=int(cfg.outputs.plots.get("dpi", 150)))
+            save_oel_figure(fig, p, dpi=int(cfg.outputs.plots.get("dpi", 150)), artifact_id=p.stem)
             out["rocket_tvc_aero_authority"] = str(p)
         if mode in ("interactive", "both"):
             plt.show(block=False)
@@ -1574,7 +1615,7 @@ def plot_outputs(
         fig.tight_layout()
         p = outdir / "rocket_insertion_scorecard.png"
         if mode in ("save", "both"):
-            fig.savefig(p, dpi=int(cfg.outputs.plots.get("dpi", 150)))
+            save_oel_figure(fig, p, dpi=int(cfg.outputs.plots.get("dpi", 150)), artifact_id=p.stem)
             out["rocket_insertion_scorecard"] = str(p)
         if mode in ("interactive", "both"):
             plt.show(block=False)
@@ -1612,7 +1653,7 @@ def plot_outputs(
             fig.tight_layout()
             p = outdir / "satellite_delta_v_remaining.png"
             if mode in ("save", "both"):
-                fig.savefig(p, dpi=int(cfg.outputs.plots.get("dpi", 150)))
+                save_oel_figure(fig, p, dpi=int(cfg.outputs.plots.get("dpi", 150)), artifact_id=p.stem)
                 out["satellite_delta_v_remaining"] = str(p)
             if mode == "save":
                 plt.close(fig)
@@ -1742,7 +1783,7 @@ def plot_outputs(
             ax.grid(True, alpha=0.3)
             p = outdir / f"{oid}_thrust_alignment_error.png"
             if mode in ("save", "both"):
-                fig.savefig(p, dpi=int(cfg.outputs.plots.get("dpi", 150)))
+                save_oel_figure(fig, p, dpi=int(cfg.outputs.plots.get("dpi", 150)), artifact_id=p.stem)
                 out[f"{oid}_thrust_alignment_error"] = str(p)
             if mode in ("interactive", "both"):
                 plt.show(block=False)
@@ -1766,7 +1807,7 @@ def plot_outputs(
         ax.legend(loc="best")
         p = outdir / "knowledge_timeline.png"
         if mode in ("save", "both"):
-            fig.savefig(p, dpi=int(cfg.outputs.plots.get("dpi", 150)))
+            save_oel_figure(fig, p, dpi=int(cfg.outputs.plots.get("dpi", 150)), artifact_id=p.stem)
             out["knowledge_timeline"] = str(p)
         if mode in ("interactive", "both"):
             plt.show(block=False)
@@ -1777,6 +1818,32 @@ def plot_outputs(
 
 
 def animate_outputs(
+    *,
+    cfg: SimulationScenarioConfig,
+    t_s: np.ndarray,
+    truth_hist: dict[str, np.ndarray],
+    thrust_hist: dict[str, np.ndarray],
+    target_reference_orbit_truth: np.ndarray | None,
+    outdir: Path,
+    resolve_satellite_isp_s: Callable[[dict[str, Any]], float],
+) -> dict[str, str]:
+    plot_style_name = style_name_from_config(dict(cfg.outputs.plots or {}))
+    anim_cfg = dict(cfg.outputs.animations or {})
+    style_name = str(anim_cfg.get("style", plot_style_name) or plot_style_name).strip().lower()
+    metadata = artifact_metadata(scenario_name=str(getattr(cfg, "scenario_name", "") or ""))
+    with oel_plot_context(style_name=style_name, metadata=metadata):
+        return _animate_outputs_impl(
+            cfg=cfg,
+            t_s=t_s,
+            truth_hist=truth_hist,
+            thrust_hist=thrust_hist,
+            target_reference_orbit_truth=target_reference_orbit_truth,
+            outdir=outdir,
+            resolve_satellite_isp_s=resolve_satellite_isp_s,
+        )
+
+
+def _animate_outputs_impl(
     *,
     cfg: SimulationScenarioConfig,
     t_s: np.ndarray,
