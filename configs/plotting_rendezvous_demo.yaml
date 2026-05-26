@@ -150,6 +150,7 @@ outputs:
     - access
     reference_object_id: target
     orbital_elements_object_id: target
+    style: oel_dark
     figure_ids:
     - ground_track_multi
     - orbital_element_a

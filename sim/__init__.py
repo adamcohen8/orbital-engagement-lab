@@ -298,6 +298,13 @@ _ROCKET_EXPORTS = [
     "HoldAttitudeGuidance",
 ]
 
+_REVIEW_EXPORTS = [
+    "ReviewQueryError",
+    "ReviewQueryResult",
+    "ReviewStoreNotFoundError",
+    "ReviewWorkspace",
+]
+
 __all__ = [
     *_ACTUATOR_EXPORTS,
     *_ACTUATOR_PRESET_EXPORTS,
@@ -317,6 +324,7 @@ __all__ = [
     *_UTIL_EXPORTS,
     "run_master_simulation",
     *_ROCKET_EXPORTS,
+    *_REVIEW_EXPORTS,
 ]
 
 _LAZY_IMPORTS: dict[str, tuple[str, str]] = {}
@@ -344,6 +352,7 @@ _register(_KNOWLEDGE_EXPORTS, "sim.knowledge")
 _register(_SENSOR_EXPORTS, "sim.sensors")
 _register(_UTIL_EXPORTS, "sim.utils")
 _register(_ROCKET_EXPORTS, "sim.rocket")
+_register(_REVIEW_EXPORTS, "sim.review")
 _LAZY_IMPORTS["run_master_simulation"] = ("sim.master_simulator", "run_master_simulation")
 
 

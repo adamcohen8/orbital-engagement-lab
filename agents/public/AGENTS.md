@@ -22,9 +22,10 @@ simulation and reporting to OEL itself.
 4. Run the scenario through `run_simulation.py`.
 5. Inspect generated `index.md`, `master_run_summary.json`, CSV, and plot
    artifacts.
-6. Evaluate the run with `agents/public/evaluation-rubric.md`.
-7. Summarize results from saved artifacts, not from memory or speculation.
-8. Add tests or smoke checks for new agent-facing examples.
+6. Use `python -m sim.review` when a run includes `review/run.sqlite`.
+7. Evaluate the run with `agents/public/evaluation-rubric.md`.
+8. Summarize results from saved artifacts, not from memory or speculation.
+9. Add tests or smoke checks for new agent-facing examples.
 
 ## Canonical Commands
 
@@ -74,8 +75,43 @@ Public AI report generation is not a default open-source workflow. In the
 public core, treat `index.md`, JSON summaries, CSV files, plots, and game
 debriefs as report artifacts.
 
+Inspect review stores when enabled:
+
+```bash
+python -m sim.review outputs/my_run --query "SELECT scenario_name, duration_s FROM run_metadata"
+python -m sim.review outputs/my_run --query "SELECT time_s, range_km FROM relative_state LIMIT 20" --json
+```
+
+When using the review store, cite the SQL query or saved view that supports the
+answer. Keep queries read-only, prefer `SELECT`/`WITH`, and inspect table names
+with the Python API if needed:
+
+```python
+from sim.review import ReviewWorkspace
+
+workspace = ReviewWorkspace.open("outputs/my_run")
+print(workspace.tables())
+print(workspace.schema()["columns"].keys())
+```
+
+Use review tables for time-history questions, range closure, burn activity,
+ground-access checks, metrics, and artifact inventories. If `review/run.sqlite`
+is missing, fall back to `index.md`, `master_run_summary.json`, CSV histories,
+and plots without claiming structured review evidence exists.
+
+The Output Review Workbench is an experimental preview and is not currently
+recommended for routine agent review. Prefer `python -m sim.review`. Use ORW
+only when the user explicitly asks for the interactive local workbench:
+
+```bash
+python run_orw.py --output outputs/my_run
+```
+
 ## Scenario Generation Rules
 
+- Start with the simplest deterministic scenario that can answer the user's
+  question. Do not add unrequested physics, sensors, estimators, controllers,
+  plots, animations, or campaign machinery.
 - Start from a nearby public example whenever possible. When the user asks for
   a new scenario from scratch, use examples for structure but write a new YAML
   file with a distinct scenario name and output directory.
@@ -85,11 +121,27 @@ debriefs as report artifacts.
   `_km_s`, `_kg`, `_n`, and similar suffixes.
 - Keep first drafts short, headless, and deterministic: plots off, animations
   off, modest duration, and public controllers.
+- Use simple dynamics first. Do not enable J2, J3, J4, drag, SRP, third bodies,
+  high-fidelity propagation, sensing, estimation, Monte Carlo, sensitivity, or
+  reports unless the user asks for them or they are necessary for the stated
+  study.
 - For JSON outputs, use `outputs.stats.save_json: true` for the compact
   `master_run_summary.json`. Set `outputs.stats.save_full_log: true` only when
   the user needs detailed time-history review in `master_run_log.json`.
 - Validate every generated config with `--validate-only`.
 - Run only trusted YAML. Scenario plugin pointers can import Python code.
+
+Ask a clarifying question when a missing detail changes the study: duration,
+initial orbit/TLE/relative state, passive vs controlled behavior, success
+metric, termination condition, or fidelity level. Do not ask about incidental
+details that are not needed for the requested workflow. For example, do not ask
+about sensing/estimation unless observation uncertainty, tracking, access, or
+closed-loop knowledge is part of the request.
+
+For deorbit, decay, access, or "realistic" requests, clarify the intended
+fidelity instead of silently enabling every force model. A simple deorbit
+maneuver geometry demo and a drag-including orbital decay study are different
+configs.
 
 ## Rendezvous Evaluation Notes
 
@@ -110,6 +162,9 @@ outputs:
     save_json: true
     save_csv: true
     save_full_log: true
+  review:
+    enabled: true
+    detail: standard
   plots:
     enabled: true
     figure_ids: ["relative_range", "trajectory_ric_curv_2d_multi", "control_effort"]

@@ -13,6 +13,14 @@ from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from sim.dynamics.orbit.environment import EARTH_RADIUS_KM
 from sim.dynamics.orbit.epoch import julian_date_to_datetime
 from sim.dynamics.orbit.frames import eci_to_ecef
+from sim.plotting.style import (
+    OEL_DARK_PALETTE,
+    OEL_LIGHT_PALETTE,
+    current_style_name,
+    role_color,
+    save_oel_animation,
+    show_save_close_oel,
+)
 from sim.utils.figure_size import cap_figsize
 from sim.utils.frames import ric_dcm_ir_from_rv, ric_rect_to_curv
 from sim.utils.ground_track import ground_track_from_eci_history, split_ground_track_dateline
@@ -53,17 +61,7 @@ except Exception:
 
 
 def _show_save_close(fig: plt.Figure, *, mode: PlotMode, out_path: str | None, dpi: int = 150) -> None:
-    if mode in ("save", "both"):
-        if out_path is None:
-            raise ValueError("out_path is required when mode is 'save' or 'both'.")
-        p = Path(out_path)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(str(p), dpi=dpi)
-    if mode in ("interactive", "both"):
-        # Non-blocking show lets master simulation queue all figures first.
-        plt.show(block=False)
-    else:
-        plt.close(fig)
+    show_save_close_oel(fig, mode=mode, out_path=out_path, dpi=dpi, plt_module=plt, show_block=False)
 
 
 def _play_interactive_animation(
@@ -95,8 +93,45 @@ def _play_interactive_animation(
     plt.show()
 
 
+def _object_role_color(object_id: str) -> str | None:
+    oid = str(object_id or "").strip().lower()
+    if "target" in oid or "chief" in oid:
+        return role_color("target")
+    if "chaser" in oid or "deputy" in oid:
+        return role_color("chaser")
+    return None
+
+
+def _map_colors() -> dict[str, str]:
+    style_key = current_style_name()
+    if style_key == "oel_dark":
+        return {
+            "ocean": OEL_DARK_PALETTE["panel"],
+            "land": OEL_DARK_PALETTE["panel_alt"],
+            "land_edge": OEL_DARK_PALETTE["edge"],
+            "coast": OEL_DARK_PALETTE["muted_text"],
+            "grid": OEL_DARK_PALETTE["grid"],
+        }
+    if style_key == "oel_light":
+        return {
+            "ocean": OEL_LIGHT_PALETTE["panel_alt"],
+            "land": "#D9E8C6",
+            "land_edge": OEL_LIGHT_PALETTE["edge"],
+            "coast": OEL_LIGHT_PALETTE["muted_text"],
+            "grid": OEL_LIGHT_PALETTE["grid"],
+        }
+    return {
+        "ocean": "#cfe8ff",
+        "land": "#dbe7c9",
+        "land_edge": "#8aa27a",
+        "coast": "#5e6f57",
+        "grid": "gray",
+    }
+
+
 def _draw_stylized_earth_map(ax: plt.Axes) -> None:
-    ocean = Rectangle((-180.0, -90.0), 360.0, 180.0, facecolor="#cfe8ff", edgecolor="none", zorder=0)
+    colors = _map_colors()
+    ocean = Rectangle((-180.0, -90.0), 360.0, 180.0, facecolor=colors["ocean"], edgecolor="none", zorder=0)
     ax.add_patch(ocean)
     continents = [
         [
@@ -164,7 +199,16 @@ def _draw_stylized_earth_map(ax: plt.Axes) -> None:
         [(-180, -62), (-120, -64), (-60, -66), (0, -68), (60, -66), (120, -64), (180, -62), (180, -90), (-180, -90)],
     ]
     for poly in continents:
-        ax.add_patch(Polygon(poly, closed=True, facecolor="#dbe7c9", edgecolor="#8aa27a", linewidth=0.6, zorder=1))
+        ax.add_patch(
+            Polygon(
+                poly,
+                closed=True,
+                facecolor=colors["land"],
+                edgecolor=colors["land_edge"],
+                linewidth=0.6,
+                zorder=1,
+            )
+        )
 
 
 def _setup_ground_track_axes(
@@ -172,17 +216,22 @@ def _setup_ground_track_axes(
     title: str,
     draw_earth_map: bool,
 ) -> tuple[plt.Figure, Any, bool]:
+    colors = _map_colors()
     if draw_earth_map and _HAS_CARTOPY:
         fig = plt.figure(figsize=cap_figsize(11, 5))
         ax = fig.add_subplot(111, projection=ccrs.PlateCarree())
         ax.set_global()
-        ax.add_feature(cfeature.OCEAN.with_scale("110m"), facecolor="#cfe8ff", zorder=0)
+        ax.add_feature(cfeature.OCEAN.with_scale("110m"), facecolor=colors["ocean"], zorder=0)
         ax.add_feature(
-            cfeature.LAND.with_scale("110m"), facecolor="#dbe7c9", edgecolor="#8aa27a", linewidth=0.4, zorder=1
+            cfeature.LAND.with_scale("110m"),
+            facecolor=colors["land"],
+            edgecolor=colors["land_edge"],
+            linewidth=0.4,
+            zorder=1,
         )
-        ax.coastlines(resolution="110m", linewidth=0.5, color="#5e6f57", zorder=2)
+        ax.coastlines(resolution="110m", linewidth=0.5, color=colors["coast"], zorder=2)
         gl = ax.gridlines(
-            crs=ccrs.PlateCarree(), draw_labels=True, linewidth=0.4, color="gray", alpha=0.4, linestyle="-"
+            crs=ccrs.PlateCarree(), draw_labels=True, linewidth=0.4, color=colors["grid"], alpha=0.4, linestyle="-"
         )
         gl.top_labels = False
         gl.right_labels = False
@@ -203,9 +252,9 @@ def _setup_ground_track_axes(
     ax.set_xticks(np.arange(-180, 181, 30))
     ax.set_yticks(np.arange(-90, 91, 15))
     for xv in np.arange(-180, 181, 30):
-        ax.axvline(xv, color="gray", linewidth=0.35, alpha=0.35, zorder=0)
+        ax.axvline(xv, color=colors["grid"], linewidth=0.35, alpha=0.35, zorder=0)
     for yv in np.arange(-90, 91, 15):
-        ax.axhline(yv, color="gray", linewidth=0.35, alpha=0.35, zorder=0)
+        ax.axhline(yv, color=colors["grid"], linewidth=0.35, alpha=0.35, zorder=0)
     return fig, ax, False
 
 
@@ -589,8 +638,9 @@ def animate_multi_ric_2d_projections(
         ax.grid(True, alpha=0.3)
         ax_by_plane[p] = ax
         for oid in sorted(trajectories.keys()):
-            (line,) = ax.plot([], [], linewidth=1.2, label=oid)
-            (dot,) = ax.plot([], [], marker="o", markersize=4)
+            color = _object_role_color(oid)
+            (line,) = ax.plot([], [], linewidth=1.2, label=oid, color=color)
+            (dot,) = ax.plot([], [], marker="o", markersize=4, color=color)
             line_by_plane_obj[(p, oid)] = line
             dot_by_plane_obj[(p, oid)] = dot
     axes[0].legend(loc="best")
@@ -638,9 +688,8 @@ def animate_multi_ric_2d_projections(
         if out_path is None:
             raise ValueError("out_path is required when mode is 'save' or 'both'.")
         p = Path(out_path)
-        p.parent.mkdir(parents=True, exist_ok=True)
         try:
-            ani.save(str(p), fps=max(float(fps), 1.0))
+            save_oel_animation(ani, fig, p, fps=fps, artifact_id=p.stem)
         except Exception as exc:
             print(f"Warning: failed to save animation ({exc}).")
         del ani
@@ -916,9 +965,8 @@ def animate_rectangular_prism_attitude(
         if out_path is None:
             raise ValueError("out_path is required when mode is 'save' or 'both'.")
         p = Path(out_path)
-        p.parent.mkdir(parents=True, exist_ok=True)
         try:
-            ani.save(str(p), fps=max(float(fps), 1.0))
+            save_oel_animation(ani, fig, p, fps=fps, artifact_id=p.stem)
         except Exception as exc:
             print(f"Warning: failed to save animation ({exc}).")
     if mode in ("interactive", "both"):
@@ -1035,10 +1083,7 @@ def animate_battlespace_dashboard(
     ax_rc = fig.add_subplot(gs[1, 0])
     ax_target = fig.add_subplot(gs[1, 1], projection="3d")
 
-    color_by_object = {
-        target_object_id: "#1F77B4",
-        chaser_object_id: "#D62728",
-    }
+    color_by_object = {target_object_id: role_color("target"), chaser_object_id: role_color("chaser")}
     thruster_inactive_facecolor = "#808080"
     thruster_active_facecolor = "#D95F02"
     thruster_inactive_edgecolor = "#5F5F5F"
@@ -1246,9 +1291,8 @@ def animate_battlespace_dashboard(
         if out_path is None:
             raise ValueError("out_path is required when mode is 'save' or 'both'.")
         p = Path(out_path)
-        p.parent.mkdir(parents=True, exist_ok=True)
         try:
-            ani.save(str(p), fps=max(float(fps), 1.0))
+            save_oel_animation(ani, fig, p, fps=fps, artifact_id=p.stem)
         except Exception as exc:
             print(f"Warning: failed to save animation ({exc}).")
         del ani
@@ -1283,8 +1327,8 @@ def animate_trajectory_frame(
     ax.set_zlim(-init_lim, init_lim)
     ax.set_box_aspect((1, 1, 1))
     ax.set_title(f"Trajectory Animation ({frame.upper()})")
-    (line,) = ax.plot([], [], [], linewidth=1.4)
-    (dot,) = ax.plot([], [], [], marker="o", markersize=4)
+    (line,) = ax.plot([], [], [], linewidth=1.4, color=role_color("actual"))
+    (dot,) = ax.plot([], [], [], marker="o", markersize=4, color=role_color("actual"))
 
     def update(i: int):
         line.set_data(r[: i + 1, 0], r[: i + 1, 1])
@@ -1320,9 +1364,8 @@ def animate_trajectory_frame(
         if out_path is None:
             raise ValueError("out_path is required when mode is 'save' or 'both'.")
         p = Path(out_path)
-        p.parent.mkdir(parents=True, exist_ok=True)
         try:
-            ani.save(str(p), fps=max(float(fps), 1.0))
+            save_oel_animation(ani, fig, p, fps=fps, artifact_id=p.stem)
         except Exception as exc:
             print(f"Warning: failed to save animation ({exc}).")
         del ani
@@ -1385,8 +1428,9 @@ def animate_multi_trajectory_frame(
     line_by_obj: dict[str, Any] = {}
     dot_by_obj: dict[str, Any] = {}
     for oid in sorted(trajectories.keys()):
-        (line,) = ax.plot([], [], [], linewidth=1.4, label=oid)
-        (dot,) = ax.plot([], [], [], marker="o", markersize=4)
+        color = _object_role_color(oid)
+        (line,) = ax.plot([], [], [], linewidth=1.4, label=oid, color=color)
+        (dot,) = ax.plot([], [], [], marker="o", markersize=4, color=color)
         line_by_obj[oid] = line
         dot_by_obj[oid] = dot
     ax.legend(loc="best")
@@ -1442,9 +1486,8 @@ def animate_multi_trajectory_frame(
         if out_path is None:
             raise ValueError("out_path is required when mode is 'save' or 'both'.")
         p = Path(out_path)
-        p.parent.mkdir(parents=True, exist_ok=True)
         try:
-            ani.save(str(p), fps=max(float(fps), 1.0))
+            save_oel_animation(ani, fig, p, fps=fps, artifact_id=p.stem)
         except Exception as exc:
             print(f"Warning: failed to save animation ({exc}).")
         del ani
@@ -1470,11 +1513,26 @@ def animate_ground_track(
         t_arr = np.pad(t_arr, (0, len(lon_deg) - t_arr.size), mode="edge")
     fig, ax, is_cartopy = _setup_ground_track_axes(title="Ground Track Animation", draw_earth_map=draw_earth_map)
     if is_cartopy:
-        (line,) = ax.plot([], [], linewidth=1.4, transform=ccrs.PlateCarree(), zorder=3)
-        (dot,) = ax.plot([], [], marker="o", markersize=4, transform=ccrs.PlateCarree(), zorder=4)
+        (line,) = ax.plot(
+            [],
+            [],
+            linewidth=1.4,
+            color=role_color("actual"),
+            transform=ccrs.PlateCarree(),
+            zorder=3,
+        )
+        (dot,) = ax.plot(
+            [],
+            [],
+            marker="o",
+            markersize=4,
+            color=role_color("actual"),
+            transform=ccrs.PlateCarree(),
+            zorder=4,
+        )
     else:
-        (line,) = ax.plot([], [], linewidth=1.4, zorder=3)
-        (dot,) = ax.plot([], [], marker="o", markersize=4, zorder=4)
+        (line,) = ax.plot([], [], linewidth=1.4, color=role_color("actual"), zorder=3)
+        (dot,) = ax.plot([], [], marker="o", markersize=4, color=role_color("actual"), zorder=4)
     time_text = ax.text(
         0.01,
         0.99,
@@ -1520,9 +1578,8 @@ def animate_ground_track(
         if out_path is None:
             raise ValueError("out_path is required when mode is 'save' or 'both'.")
         p = Path(out_path)
-        p.parent.mkdir(parents=True, exist_ok=True)
         try:
-            ani.save(str(p), fps=max(float(fps), 1.0))
+            save_oel_animation(ani, fig, p, fps=fps, artifact_id=p.stem)
         except Exception as exc:
             print(f"Warning: failed to save animation ({exc}).")
         del ani
@@ -1575,12 +1632,13 @@ def animate_multi_ground_track(
     line_by_obj: dict[str, Any] = {}
     dot_by_obj: dict[str, Any] = {}
     for oid in sorted(tracks.keys()):
+        color = _object_role_color(oid)
         if is_cartopy:
-            (line,) = ax.plot([], [], linewidth=1.4, label=oid, transform=ccrs.PlateCarree(), zorder=3)
-            (dot,) = ax.plot([], [], marker="o", markersize=4, transform=ccrs.PlateCarree(), zorder=4)
+            (line,) = ax.plot([], [], linewidth=1.4, label=oid, color=color, transform=ccrs.PlateCarree(), zorder=3)
+            (dot,) = ax.plot([], [], marker="o", markersize=4, color=color, transform=ccrs.PlateCarree(), zorder=4)
         else:
-            (line,) = ax.plot([], [], linewidth=1.4, label=oid, zorder=3)
-            (dot,) = ax.plot([], [], marker="o", markersize=4, zorder=4)
+            (line,) = ax.plot([], [], linewidth=1.4, label=oid, color=color, zorder=3)
+            (dot,) = ax.plot([], [], marker="o", markersize=4, color=color, zorder=4)
         line_by_obj[oid] = line
         dot_by_obj[oid] = dot
     ax.legend(loc="best")
@@ -1637,9 +1695,8 @@ def animate_multi_ground_track(
         if out_path is None:
             raise ValueError("out_path is required when mode is 'save' or 'both'.")
         p = Path(out_path)
-        p.parent.mkdir(parents=True, exist_ok=True)
         try:
-            ani.save(str(p), fps=max(float(fps), 1.0))
+            save_oel_animation(ani, fig, p, fps=fps, artifact_id=p.stem)
         except Exception as exc:
             print(f"Warning: failed to save animation ({exc}).")
         del ani
@@ -1781,12 +1838,11 @@ def animate_multi_rectangular_prism_ric_curv(
     ax.set_zlabel("R (km)")
     ax.set_title("Target-Centered Curvilinear RIC Prism Animation")
 
-    cmap = plt.get_cmap("tab10")
     poly_by_obj: dict[str, Poly3DCollection] = {}
     trail_by_obj: dict[str, Any] = {}
     dot_by_obj: dict[str, Any] = {}
-    for i, oid in enumerate(obj_ids):
-        color = cmap(i % 10)
+    for oid in obj_ids:
+        color = _object_role_color(oid) or role_color("actual")
         poly = Poly3DCollection([], alpha=0.35, facecolor=color, edgecolor="k", linewidth=0.7)
         ax.add_collection3d(poly)
         poly_by_obj[oid] = poly
@@ -1847,9 +1903,8 @@ def animate_multi_rectangular_prism_ric_curv(
         if out_path is None:
             raise ValueError("out_path is required when mode is 'save' or 'both'.")
         p = Path(out_path)
-        p.parent.mkdir(parents=True, exist_ok=True)
         try:
-            ani.save(str(p), fps=max(float(fps), 1.0))
+            save_oel_animation(ani, fig, p, fps=fps, artifact_id=p.stem)
         except Exception as exc:
             print(f"Warning: failed to save animation ({exc}).")
     if mode in ("interactive", "both"):
@@ -1948,8 +2003,20 @@ def animate_side_by_side_rectangular_prism_ric_attitude(
         ax.set_zlabel("R (km)")
         ax.set_title(f"{title} Body in Local RIC")
 
-    poly_left = Poly3DCollection([], alpha=0.4, facecolor="#4C9F70", edgecolor="k", linewidth=0.7)
-    poly_right = Poly3DCollection([], alpha=0.4, facecolor="#2E86C1", edgecolor="k", linewidth=0.7)
+    poly_left = Poly3DCollection(
+        [],
+        alpha=0.4,
+        facecolor=_object_role_color(left_object_id) or role_color("target"),
+        edgecolor="k",
+        linewidth=0.7,
+    )
+    poly_right = Poly3DCollection(
+        [],
+        alpha=0.4,
+        facecolor=_object_role_color(right_object_id) or role_color("chaser"),
+        edgecolor="k",
+        linewidth=0.7,
+    )
     ax_left.add_collection3d(poly_left)
     ax_right.add_collection3d(poly_right)
 
@@ -1981,9 +2048,8 @@ def animate_side_by_side_rectangular_prism_ric_attitude(
         if out_path is None:
             raise ValueError("out_path is required when mode is 'save' or 'both'.")
         p = Path(out_path)
-        p.parent.mkdir(parents=True, exist_ok=True)
         try:
-            ani.save(str(p), fps=max(float(fps), 1.0))
+            save_oel_animation(ani, fig, p, fps=fps, artifact_id=p.stem)
         except Exception as exc:
             print(f"Warning: failed to save animation ({exc}).")
     if mode in ("interactive", "both"):

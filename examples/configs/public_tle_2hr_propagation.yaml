@@ -4,15 +4,18 @@
 # - simulator.duration_s: prediction horizon in seconds. 7200 = two hours.
 # - simulator.dt_s: output cadence and integration step. Use smaller values for denser output.
 # - objects.iss.initial_state.tle: replace line1/line2 with your trusted TLE.
-# - simulator.dynamics.orbit perturbation flags: start simple, then enable J2/drag/SRP
-#   when you want a richer engineering approximation.
+# - simulator.dynamics.orbit perturbation flags: this example enables J2/J3/J4,
+#   drag, SRP, and Sun/Moon third-body effects for a richer engineering screen.
+#   It does not use an SGP4/general-perturbations propagator; OEL initializes
+#   from the TLE, then numerically integrates its configured special-perturbations
+#   force model.
 
 scenario_name: "public_tle_2hr_propagation"
-scenario_description: "Public example: propagate one satellite for two hours from a TLE and save the predicted state history."
+scenario_description: "Public example: propagate one satellite for two hours from a TLE with OEL numerical perturbations and save the predicted state history."
 
 metadata:
   owner: "public"
-  notes: "Run with `python run_simulation.py --config examples/configs/public_tle_2hr_propagation.yaml`."
+  notes: "Run with `python run_simulation.py --config examples/configs/public_tle_2hr_propagation.yaml`. This is not SGP4/general-perturbations propagation; OEL initializes from the TLE and numerically integrates its configured special-perturbations force model."
 
 objects:
   iss:
@@ -53,14 +56,15 @@ simulator:
     orbit:
       model: "two_body"
       orbit_substep_s: 60.0
-      # Key knobs: enable perturbations one at a time to see their effect.
+      # High-fidelity screen: keep the base central-body model and turn on
+      # OEL's configured numerical perturbation terms.
       j2: true
-      j3: false
-      j4: false
-      drag: false
-      srp: false
-      third_body_sun: false
-      third_body_moon: false
+      j3: true
+      j4: true
+      drag: true
+      srp: true
+      third_body_sun: true
+      third_body_moon: true
     attitude:
       enabled: false
     rocket:

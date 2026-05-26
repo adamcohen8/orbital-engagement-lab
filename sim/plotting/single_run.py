@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2, EARTH_RADIUS_KM
+from sim.plotting.style import role_color, show_save_close_oel
 from sim.utils.figure_size import cap_figsize
 from sim.utils.frames import ric_dcm_ir_from_rv
 from sim.utils.ground_track import ground_track_from_eci_history, split_ground_track_dateline
@@ -25,6 +26,15 @@ ORBITAL_ELEMENT_SPECS: dict[str, tuple[str, str]] = {
     "argp": ("Argument of Perigee", "deg"),
     "true_anomaly": ("True Anomaly", "deg"),
 }
+
+
+def _object_color(object_id: str) -> str | None:
+    oid = str(object_id or "").lower()
+    if "target" in oid:
+        return role_color("target")
+    if "chaser" in oid or "deputy" in oid or "red" in oid:
+        return role_color("chaser")
+    return None
 
 
 def _as_array(value: Any, *, cols: int | None = None) -> np.ndarray:
@@ -84,14 +94,20 @@ def _payload_reentry_metrics(payload: dict[str, Any] | None) -> NestedArrayMap:
 
 
 def _save_show_close(fig: plt.Figure, *, out_path: str | Path | None, show: bool, close: bool, dpi: int) -> None:
-    if out_path is not None:
-        p = Path(out_path)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(p, dpi=int(dpi))
-    if show:
-        plt.show(block=False)
-    if close:
-        plt.close(fig)
+    mode = "both" if out_path is not None and show else "save" if out_path is not None else "interactive" if show else "none"
+    if mode == "none":
+        if close:
+            plt.close(fig)
+        return
+    show_save_close_oel(
+        fig,
+        mode=mode,
+        out_path=out_path,
+        dpi=int(dpi),
+        plt_module=plt,
+        close=close,
+        show_block=False,
+    )
 
 
 def _choose_reference(
@@ -184,10 +200,19 @@ def _plot_eci_trajectories(ax: Any, truth_by_object: ArrayMap) -> None:
         mask = _finite_rows(r)
         if not np.any(mask):
             continue
-        ax.plot(r[mask, 0], r[mask, 1], r[mask, 2], linewidth=1.2, label=oid)
+        color = _object_color(oid)
+        ax.plot(r[mask, 0], r[mask, 1], r[mask, 2], linewidth=1.8, label=oid, color=color)
         idx = np.where(mask)[0]
-        ax.scatter([r[idx[0], 0]], [r[idx[0], 1]], [r[idx[0], 2]], color="green", s=18)
-        ax.scatter([r[idx[-1], 0]], [r[idx[-1], 1]], [r[idx[-1], 2]], color="red", s=18)
+        ax.scatter([r[idx[0], 0]], [r[idx[0], 1]], [r[idx[0], 2]], color=role_color("coast"), s=18)
+        ax.scatter(
+            [r[idx[-1], 0]],
+            [r[idx[-1], 1]],
+            [r[idx[-1], 2]],
+            facecolors="none",
+            edgecolors=color or role_color("actual"),
+            s=38,
+            linewidths=1.4,
+        )
         plotted.append(r)
     earth_extent = np.array(
         [
@@ -878,13 +903,26 @@ def plot_rendezvous_summary(
 
     planes = ((1, 0, "I", "R"), (1, 2, "I", "C"), (2, 0, "C", "R"))
     for ax, (ix, iy, xlab, ylab) in zip(axes[0], planes):
-        ax.plot(ric[:, ix], ric[:, iy], linewidth=1.3)
+        ax.plot(ric[:, ix], ric[:, iy], linewidth=2.0, color=role_color("actual"), label="actual")
         if ric.shape[0]:
-            ax.scatter([ric[0, ix]], [ric[0, iy]], color="green", s=24, label="start")
-            ax.scatter([ric[-1, ix]], [ric[-1, iy]], color="red", s=24, label="end")
+            ax.scatter([ric[0, ix]], [ric[0, iy]], color=role_color("coast"), s=24, label="start")
+            ax.scatter(
+                [ric[-1, ix]],
+                [ric[-1, iy]],
+                facecolors="none",
+                edgecolors=role_color("chaser"),
+                s=46,
+                linewidths=1.5,
+                label="final",
+            )
         if keepout_radius_km is not None and np.isfinite(float(keepout_radius_km)) and float(keepout_radius_km) > 0.0:
             circ = plt.Circle(
-                (0.0, 0.0), float(keepout_radius_km), color="tab:red", fill=False, linestyle="--", alpha=0.6
+                (0.0, 0.0),
+                float(keepout_radius_km),
+                color=role_color("safety_zone"),
+                fill=False,
+                linestyle="--",
+                alpha=0.7,
             )
             ax.add_patch(circ)
         ax.set_xlabel(f"{xlab} (km)")
@@ -893,13 +931,13 @@ def plot_rendezvous_summary(
         ax.grid(True, alpha=0.3)
         ax.axis("equal")
 
-    axes[1, 0].plot(t[:n], rng)
+    axes[1, 0].plot(t[:n], rng, color=role_color("actual"))
     axes[1, 0].set_title("Relative Range")
     axes[1, 0].set_ylabel("km")
     axes[1, 0].set_xlabel("time (s)")
     axes[1, 0].grid(True, alpha=0.3)
 
-    axes[1, 1].plot(t[:n], spd)
+    axes[1, 1].plot(t[:n], spd, color=role_color("chaser"))
     axes[1, 1].set_title("Relative Speed")
     axes[1, 1].set_ylabel("km/s")
     axes[1, 1].set_xlabel("time (s)")

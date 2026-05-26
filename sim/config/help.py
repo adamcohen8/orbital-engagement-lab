@@ -213,12 +213,51 @@ CONFIG_HELP_ENTRIES: tuple[ConfigHelpEntry, ...] = (
         example='outputs:\n  plots:\n    figure_ids: ["run_dashboard", "relative_range"]',
     ),
     ConfigHelpEntry(
+        path="outputs.plots.style",
+        title="Plot Style",
+        description="Controls the visual identity applied to saved single-run plot artifacts.",
+        aliases=("plot style", "plot theme", "artifact style", "artifact theme"),
+        options=(
+            _option("oel_dark", "Branded dark OEL artifact style for screen review and demos."),
+            _option("oel_light", "Branded light OEL artifact style for reports and print-friendly review."),
+            _option("matplotlib", "Use Matplotlib defaults without OEL artifact styling."),
+        ),
+        example='outputs:\n  plots:\n    style: "oel_dark"',
+    ),
+    ConfigHelpEntry(
         path="outputs.animations.types",
         title="Animation Types",
         description="Animation artifacts to request when outputs.animations.enabled is true.",
         aliases=("animation types", "animations", "animation ids"),
         option_loader=_animation_type_options,
         example='outputs:\n  animations:\n    enabled: true\n    types: ["ground_track_multi"]',
+    ),
+    ConfigHelpEntry(
+        path="outputs.animations.style",
+        title="Animation Style",
+        description="Controls the visual identity applied to saved animation artifacts. Defaults to outputs.plots.style.",
+        aliases=("animation style", "animation theme", "movie style", "movie theme"),
+        options=(
+            _option("oel_dark", "Branded dark OEL artifact style for screen review and demos."),
+            _option("oel_light", "Branded light OEL artifact style for reports and print-friendly review."),
+            _option("matplotlib", "Use Matplotlib defaults without OEL artifact styling."),
+        ),
+        example='outputs:\n  animations:\n    style: "oel_dark"',
+    ),
+    ConfigHelpEntry(
+        path="outputs.review",
+        title="Output Review Store",
+        description=(
+            "Enables the durable SQLite review store for completed single-run outputs. "
+            "This is the planned data layer for the Output Review Workbench."
+        ),
+        aliases=("review store", "output review", "orw", "sqlite review", "outputs review"),
+        options=(
+            _option("enabled", "Write review/run.sqlite and review/schema.json beside normal artifacts."),
+            _option("detail", "compact, standard, or full. Initial tables focus on standard single-run review."),
+            _option("strict", "Raise if review-store writing fails instead of preserving normal artifacts."),
+        ),
+        example='outputs:\n  review:\n    enabled: true\n    detail: "standard"',
     ),
     ConfigHelpEntry(
         path="objects.<id>.kind",

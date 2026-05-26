@@ -4,7 +4,7 @@
 
 Open-core Python simulator for closed-loop spacecraft rendezvous and
 proximity-operations prototyping. Define a scenario in YAML, run deterministic
-single-run simulations through the CLI, API, or GUI, and inspect generated
+single-run simulations through the CLI or API, and inspect generated
 summaries, plots, and artifacts.
 
 The public core is intended for research, education, prototyping, pre-flight
@@ -34,7 +34,22 @@ Users are responsible for their own validation, security review, export-control
 review, mission qualification, and compliance obligations before using the
 software in any sensitive, commercial, government, or operational context.
 
-A checked-in dashboard from the flagship 10 km RIC_PD RPO scenario:
+## Contents
+
+- [Who This Is For](#who-this-is-for)
+- [First Run](#first-run)
+- [Use OEL With AI Coding Agents](#use-oel-with-ai-coding-agents)
+- [Just Here For The Video Game?](#just-here-for-the-video-game)
+- [Use-Case Cookbook](#use-case-cookbook)
+- [What This Public Core Includes](#what-this-public-core-includes)
+- [Pro Layer](#pro-layer)
+- [Start Here](#start-here)
+- [Curated Examples](#curated-examples)
+- [Install Profiles](#install-profiles)
+- [Project Layout](#project-layout)
+- [License](#license)
+
+A checked-in OEL-styled dashboard from the flagship 10 km RIC_PD RPO scenario:
 
 ![Flagship run dashboard](docs/assets/plots/run_dashboard.png)
 
@@ -108,18 +123,50 @@ python run_simulation.py --quickstart --open-output
 
 For a guided walkthrough, see [First Five Minutes](docs/first-five-minutes.md).
 
+## Use OEL With AI Coding Agents
+
+The public repo includes `AGENTS.md`, a checked-in playbook for AI coding
+assistants such as Codex, Cursor, Claude Code, and Gemini CLI. It tells agents
+how to work with OEL safely: start from public docs and examples, generate or
+edit scenario YAML, validate configs before running them, execute simulations
+through `run_simulation.py`, and summarize saved artifacts instead of inventing
+shortcut physics.
+
+For the fuller public workflow, point your agent at
+[`AGENTS.md`](AGENTS.md), [`agents/public/AGENTS.md`](agents/public/AGENTS.md),
+and [`docs/oel-agents.md`](docs/oel-agents.md), then try prompts like:
+
+- "Create a short public rendezvous scenario where the chaser starts 3 km
+  behind the target, validate it, run it, and summarize the output artifacts."
+- "Use the TLE propagation example to explain what force models are enabled and
+  whether this is SGP4 or OEL numerical propagation."
+- "Review `outputs/quickstart_5min/index.md` and
+  `master_run_summary.json`; tell me what happened and what limitations I
+  should keep in mind."
+
+Runs that opt into `outputs.review.enabled: true` also produce a local SQLite
+review store for structured inspection. The recommended path for agents and
+scripts is the SELECT-only review CLI/API:
+
+```bash
+python -m sim.review outputs/my_run --query "SELECT scenario_name, duration_s FROM run_metadata"
+```
+
+`run_orw.py --output outputs/my_run` exists as an experimental desktop preview,
+but ORW is not currently recommended for routine review workflows.
+
 Review the flagship 10 km RIC_PD RPO scenario:
 
 ```bash
-python run_simulation.py --config configs/ric_pd_10km_experiment.yaml --validate-only
-python run_simulation.py --config configs/ric_pd_10km_experiment.yaml
+python run_simulation.py --config configs/ric_pd_10km_experiment.yaml --validate-only --resource-profile off
+python run_simulation.py --config configs/ric_pd_10km_experiment.yaml --resource-profile off
 ```
 
-Expected result: the 6000-second rendezvous run writes dashboard, rendezvous,
-control-effort, relative-range, trajectory, attitude, quaternion-error, and
-thrust-alignment plots under `outputs/flagship_ric_pd_10km/`. Open
-`outputs/flagship_ric_pd_10km/index.md` first, then compare against the
-checked-in [Plot Gallery](docs/plot-gallery.md).
+Expected result: the 12000-second rendezvous run writes OEL-styled dashboard,
+rendezvous, control-effort, relative-range, trajectory, attitude,
+quaternion-error, and thrust-alignment plots under
+`outputs/flagship_ric_pd_10km/`. Open `outputs/flagship_ric_pd_10km/index.md`
+first, then compare against the checked-in [Plot Gallery](docs/plot-gallery.md).
 
 ## Just Here For The Video Game?
 
@@ -148,7 +195,7 @@ return to the selector.
 | Predict where a satellite will be two hours from a TLE | `python run_simulation.py --config examples/configs/public_tle_2hr_propagation.yaml` |
 | Compute ground-station access windows from a TLE | `python run_simulation.py --config examples/configs/public_ground_station_access_from_tle.yaml` |
 | Run a closed-loop chaser/target rendezvous with HCW LQR | `python run_simulation.py --config examples/configs/public_closed_loop_rendezvous_lqr.yaml` |
-| Review the flagship 10 km RIC_PD RPO scenario | `python run_simulation.py --config configs/ric_pd_10km_experiment.yaml` |
+| Review the flagship 10 km RIC_PD RPO scenario | `python run_simulation.py --config configs/ric_pd_10km_experiment.yaml --resource-profile off` |
 | Smoke-test public actuator presets | `python run_simulation.py --config configs/actuator_lab_presets_smoke.yaml` |
 | Review atmospheric re-entry diagnostics and kill criteria | `python run_simulation.py --config configs/reentry_smoke.yaml` |
 | Open the 10-day interactive re-entry plotting demo | `python run_simulation.py --config examples/configs/public_reentry_interactive_demo.yaml` |
@@ -170,12 +217,15 @@ result = session.run()
 print(result.summary["scenario_name"])
 ```
 
-Open the GUI:
+Experimental Output Review Workbench preview:
 
 ```bash
 python -m pip install ".[gui]"
-python run_gui.py
+python run_orw.py --output outputs/quickstart_5min
 ```
+
+ORW is not currently recommended for routine review. Prefer
+`python -m sim.review` for structured output questions.
 
 Try the RPO trainer game mode:
 
@@ -231,7 +281,7 @@ Left/Right cross-track, Space pause/resume, period single-step, R reset,
 Up/Down speed, `D` to open a completed debrief folder when available, and Escape
 level exit.
 
-The public CLI and GUI are intentionally scoped to deterministic single-run
+The public CLI is intentionally scoped to deterministic single-run
 scenarios. Batch analysis settings are not exposed in public examples, and
 configs with enabled Monte Carlo or sensitivity studies are rejected with a clear
 Pro-boundary message.
@@ -262,7 +312,7 @@ provide. HPOP/GGM03 validation data is not bundled in the public core, so
 - orbit and attitude estimators
 - orbit and attitude controller interfaces and reference controllers
 - YAML-backed scenario configuration with reusable object presets
-- Python API, CLI, GUI entrypoints, and curated config examples
+- Python API, CLI, experimental ORW preview, and curated config examples
 - Pygame RPO trainer game mode with bundled training levels
 - single-run dashboards, trajectory plots, estimation plots, sensor-access plots, and access summaries
 - machine-learning environment helpers
@@ -293,6 +343,7 @@ require hosted AI accounts or API keys.
 - [RIC_PD 10 km Validation Package](docs/validation-ric-pd-10km.md)
 - [Scenario YAML](docs/scenario-yaml.md)
 - [Python API](docs/python-api.md)
+- [OEL Agents](docs/oel-agents.md)
 - [Examples Matrix](docs/examples-matrix.md)
 - [Plotting](docs/plotting.md)
 - [Plot Gallery](docs/plot-gallery.md)
@@ -302,6 +353,7 @@ require hosted AI accounts or API keys.
 - [Engine Contract](docs/contracts/engine-contract.md)
 - [Scenario YAML Contract](docs/contracts/scenario-yaml-contract.md)
 - [Payload And Artifact Contract](docs/contracts/payload-artifact-contract.md)
+- [Review Store Contract](docs/review-store.md)
 
 ## Curated Examples
 
@@ -363,7 +415,7 @@ python -m pip install ".[full]"
 - `sim/knowledge/` object knowledge tracking
 - `sim/mission/` mission modules and executive patterns
 - `sim/presets/` reusable object and hardware presets
-- `sim/gui/` native desktop GUI
+- `sim/gui/` experimental desktop Output Review Workbench preview
 - `sim/rocket/` ascent/rocket components
 - `machine_learning/` public environment helpers and training entrypoints
 - `examples/` curated runnable configs

@@ -19,8 +19,8 @@ python run_simulation.py --config examples/configs/public_tle_2hr_propagation.ya
 
 | Config | What It Demonstrates | Main Outputs | Notes |
 | --- | --- | --- | --- |
-| `public_tle_2hr_propagation.yaml` | TLE initialization and two-hour propagation | summary JSON, trajectory histories | Uses the built-in two-body TLE approximation, not full SGP4. |
-| `public_ground_station_access_from_tle.yaml` | Passive station access from a TLE object | access summary, access/elevation/range plot, and map-backed ground track | Good starting point for line-of-sight, elevation, and range checks. |
+| `public_tle_2hr_propagation.yaml` | TLE initialization and two-hour propagation with J2/J3/J4, drag, SRP, and Sun/Moon third-body effects | summary JSON, trajectory histories | Not SGP4/general perturbations: OEL initializes from the TLE, then numerically integrates its configured special-perturbations force model. |
+| `public_ground_station_access_from_tle.yaml` | Passive station access from a TLE object | access summary, access/elevation/range plot, and map-backed ground track | Uses the same two-body TLE initializer with J2 propagation enabled for a quick access screen. |
 | `public_closed_loop_rendezvous_lqr.yaml` | Compact closed-loop chaser/target rendezvous with HCW LQR | run summary and rendezvous metrics | Fastest controller example for reading the YAML shape. |
 | `public_rendezvous_closed_loop.yaml` | Broader rendezvous with attitude pointing, sensing, EKF knowledge, and plots | dashboard, rendezvous, control, estimation, sensor-access, and ground-track plots | Best public example for end-to-end closed-loop artifact review. |
 | `public_orbit_environment_stack.yaml` | Perturbation and environment toggles | summary JSON and optional plots | Use to inspect deterministic force-model configuration. |

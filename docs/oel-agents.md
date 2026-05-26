@@ -33,8 +33,9 @@ Codex, Cursor, Claude Code, Gemini CLI, and similar tools should begin with:
    `docs/quickstart.md`, `docs/python-api.md`, or `docs/game-mode-roadmap.md`.
 4. Start from the nearest public config or example.
 5. Validate any generated or edited scenario before running it.
-6. Summarize results only from generated artifacts.
-7. Use `agents/public/evaluation-rubric.md` to judge whether the scenario
+6. Prefer `python -m sim.review` when the run includes `review/run.sqlite`.
+7. Summarize results only from generated artifacts.
+8. Use `agents/public/evaluation-rubric.md` to judge whether the scenario
    supports the user's goal.
 
 Agents should keep changes scoped, cite files they changed or inspected, and
@@ -102,6 +103,21 @@ PY
 
 For a normal completed run, inspect `index.md` first, then
 `master_run_summary.json`, CSV histories, plots, and any custom analysis files.
+When the run has `outputs.review.enabled: true`, prefer the review query API
+over ad hoc parsing of large logs:
+
+```bash
+python -m sim.review outputs/my_run --query "SELECT scenario_name, duration_s FROM run_metadata"
+python -m sim.review outputs/my_run --query "SELECT time_s, range_km FROM relative_state LIMIT 20" --json
+```
+
+For agent review, prefer `python -m sim.review`. The Output Review Workbench is
+an experimental preview and is not currently recommended for routine review.
+Use it only when the user explicitly asks for an interactive local workbench:
+
+```bash
+python run_orw.py --output outputs/my_run
+```
 
 ## Natural Requests
 
@@ -118,10 +134,45 @@ Example user requests:
 - "Evaluate the run in this output folder and tell me whether it supports my
   goal."
 
-The agent should choose public defaults when the request is underspecified,
-write those defaults into the generated YAML, validate before running, and
-state any assumptions in the result summary. The agent should ask a clarifying
-question only when a reasonable public default would be misleading or risky.
+The agent should choose simple public defaults when the request is
+underspecified, write those defaults into the generated YAML, validate before
+running, and state any assumptions in the result summary. The agent should ask a
+clarifying question when a missing detail changes the study, and should not ask
+about incidental details that are not needed for the requested workflow.
+
+## Scenario Simplicity And Clarifying Questions
+
+Start with the simplest deterministic scenario that can answer the user's
+question. Add complexity only when the user asks for it or the requested study
+requires it.
+
+Ask a clarifying question for mission-shaping gaps:
+
+- duration or time horizon,
+- initial orbit, TLE, altitude, or relative state,
+- passive vs controlled behavior,
+- success metric or termination condition,
+- fidelity level for requests such as "realistic", "high fidelity",
+  "operational", "deorbit", "decay", or "access",
+- whether the user wants plots, review-store inspection, or only summary
+  outputs.
+
+Default quietly for incidental choices:
+
+- headless run,
+- plots and animations off unless requested,
+- attitude disabled unless attitude matters,
+- no sensing or estimation unless observation uncertainty, tracking, access, or
+  closed-loop knowledge is part of the request,
+- no Monte Carlo, sensitivity, campaign, optimizer, or report workflow unless
+  requested,
+- simple dynamics first.
+
+Do not silently enable J2, J3, J4, drag, SRP, third bodies, or high-fidelity
+propagation. For example, if the user asks for a simple deorbit study, ask
+whether they want a simple maneuver geometry case or a drag-including decay
+study. If the user asks to propagate a satellite for two hours, use simple
+propagation unless they ask for perturbations or realistic force modeling.
 
 ## Agent Example Cookbook
 
@@ -158,14 +209,17 @@ outputs:
     save_json: true
     save_csv: true
     save_full_log: true
+  review:
+    enabled: true
+    detail: standard
   plots:
     enabled: true
     figure_ids: ["relative_range", "trajectory_ric_curv_2d_multi", "control_effort"]
 ```
 
-Those artifacts help the agent inspect range history, range-rate behavior,
-controller transients, burn timing, trajectory shape, and whether closure was
-monotonic.
+Those artifacts and review tables help the agent inspect range history,
+range-rate behavior, controller transients, burn timing, trajectory shape, and
+whether closure was monotonic.
 
 ## Scenario Generation Pattern
 
@@ -179,12 +233,15 @@ When turning natural language into YAML:
 3. Keep units explicit and preserve OEL field names.
 4. Prefer public controllers, presets, and examples.
 5. Keep first drafts headless unless the user asks for plots or animation.
-6. Use `outputs.stats.save_json: true` for summary JSON. Add
+6. Use simple dynamics, no sensing/estimation, and no perturbation stack unless
+   the request requires them.
+7. Ask for mission-shaping missing details before writing YAML.
+8. Use `outputs.stats.save_json: true` for summary JSON. Add
    `outputs.stats.save_full_log: true` only when the user needs detailed
    time-history review.
-7. Validate the config.
-8. Run the config only after validation passes.
-9. Evaluate the run with `agents/public/evaluation-rubric.md`.
+9. Validate the config.
+10. Run the config only after validation passes.
+11. Evaluate the run with `agents/public/evaluation-rubric.md`.
 
 Example request:
 

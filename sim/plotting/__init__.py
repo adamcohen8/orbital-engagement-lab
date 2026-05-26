@@ -16,11 +16,30 @@ __all__ = [
     "plot_rendezvous_summary",
     "plot_run_dashboard",
     "plot_sensor_access",
+    "OEL_STYLE_DARK",
+    "OEL_STYLE_LIGHT",
+    "OEL_ROLE_COLORS",
+    "oel_plot_context",
+    "role_color",
+    "save_oel_animation",
+    "show_save_close_oel",
 ]
 
 
 def __getattr__(name: str):
     if name in __all__:
+        if name in {
+            "OEL_STYLE_DARK",
+            "OEL_STYLE_LIGHT",
+            "OEL_ROLE_COLORS",
+            "oel_plot_context",
+            "role_color",
+            "save_oel_animation",
+            "show_save_close_oel",
+        }:
+            from sim.plotting import style
+
+            return getattr(style, name)
         from sim.plotting import single_run
 
         return getattr(single_run, name)

@@ -12,6 +12,7 @@ from sim.master_outputs import animate_outputs as _animate_outputs_impl
 from sim.master_outputs import plot_outputs as _plot_outputs_impl
 from sim.reporting.ground_station_access_reports import write_ground_station_access_reports
 from sim.reporting.output_index import write_output_index
+from sim.reporting.review_store import write_single_run_review_store
 from sim.runtime_support import _resolve_rocket_stack, _resolve_satellite_isp_s
 from sim.utils.io import write_json
 
@@ -155,6 +156,11 @@ def write_single_run_artifacts(
         artifacts["ground_station_access_reports"] = access_report_paths
     if bridge_outputs:
         artifacts["bridge_extensions"] = bridge_outputs
+    review_outputs = _write_review_store(payload=payload, context=context, artifacts=artifacts)
+    if review_outputs:
+        summary["review_outputs"] = review_outputs
+        payload["review_outputs"] = review_outputs
+        artifacts["review_store"] = review_outputs
     index_path = write_output_index(
         outdir=context.outdir,
         workflow="single_run",
@@ -171,6 +177,25 @@ def write_single_run_artifacts(
     if bool(context.cfg.outputs.stats.get("print_summary", True)):
         print(format_single_run_summary(summary))
     return payload
+
+
+def _write_review_store(
+    *,
+    payload: dict[str, Any],
+    context: SingleRunArtifactContext,
+    artifacts: dict[str, Any],
+) -> dict[str, str]:
+    review_cfg = context.cfg.outputs.review
+    if not bool(review_cfg.enabled):
+        return {}
+    try:
+        return write_single_run_review_store(payload=payload, context=context, artifacts=artifacts)
+    except Exception as exc:
+        if bool(review_cfg.strict):
+            raise
+        status = f"failed:{type(exc).__name__}: {exc}"
+        payload.setdefault("summary", {})["review_store_status"] = status
+        return {}
 
 
 def _write_private_bridge_artifacts(

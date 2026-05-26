@@ -202,8 +202,10 @@ the TLE epoch directly. Set `require_checksum: true` to reject TLE lines with
 invalid checksum digits.
 
 The built-in TLE initializer is dependency-free and converts TLE mean elements
-to an ECI state with a Keplerian/two-body approximation. It does not perform
-full SGP4 propagation or model TLE-specific drag/perturbation terms.
+to an ECI state with a Keplerian/two-body approximation. Subsequent propagation
+uses the configured OEL numerical special-perturbations force model. It does
+not perform SGP4/general-perturbations propagation or reuse TLE-specific
+drag/perturbation terms.
 
 ## Ground Stations
 
@@ -509,9 +511,15 @@ outputs:
   plots:
     enabled: true
     preset: "minimal"
+    style: "oel_dark"
     # Other presets: orbit, rendezvous, attitude, estimation, rocket, reentry, debug.
   animations:
     enabled: false
+    # Optional override; defaults to outputs.plots.style.
+    style: "oel_dark"
+  review:
+    enabled: false
+    detail: "standard"
   resource_limits:
     # Configs may lower this cap; raise it from the caller with
     # --max-history-memory-mb or OEL_MAX_HISTORY_MEMORY_MB.
@@ -523,6 +531,21 @@ outputs:
 Config-controlled output directories are bounded by the path policy. Relative
 paths under the project/output roots work by default; external absolute paths or
 directory escapes require explicit trust from the CLI or Python API.
+
+Saved single-run plots and animations use the OEL artifact style by default. Set
+`outputs.plots.style` to `oel_dark` for screen/demo artifacts, `oel_light` for
+print-friendly report figures, or `matplotlib` to use unbranded Matplotlib
+defaults. Saved animations inherit that plot style unless
+`outputs.animations.style` is set. Branded artifacts include a public-safe
+footer with the OEL version, scenario name, artifact ID, and generation
+timestamp.
+
+Set `outputs.review.enabled: true` to write a durable SQLite review store under
+`outputs.output_dir/review/`. The initial single-run review store writes
+`review/run.sqlite` and `review/schema.json` with normalized metadata, object
+state, primary-pair relative state, thrust, ground-access, metric, event, and
+artifact tables. See [Review Store Contract](review-store.md) for the current
+schema and Output Review Workbench direction.
 
 Before allocating dense in-memory histories, single-run execution estimates the
 history arrays required by `duration_s`, `dt_s`, active objects, rocket metrics,

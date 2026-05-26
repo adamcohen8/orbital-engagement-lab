@@ -11,6 +11,7 @@ from typing import Any
 import numpy as np
 
 from sim.game.training import RPOTrainingConfig
+from sim.plotting.style import OELArtifactMetadata, artifact_metadata, role_color, save_oel_figure
 
 
 def game_debrief_path(
@@ -226,15 +227,18 @@ def write_game_debrief_plots(
         return {}
 
     paths: dict[str, Path] = {}
+    metadata = artifact_metadata(
+        scenario_name=str(getattr(config, "scenario_id", "") or getattr(config, "name", "") or "game_debrief")
+    )
     plot_style = {
-        "trajectory": "#1f77b4",
-        "start": "#2ca02c",
-        "end": "#d62728",
-        "burn": "#ff7f0e",
-        "keepout": "#d62728",
-        "goal": "#2ca02c",
-        "forbidden": "#d62728",
-        "gate": "#9467bd",
+        "trajectory": role_color("actual", style_name="oel_dark"),
+        "start": role_color("coast", style_name="oel_dark"),
+        "end": role_color("chaser", style_name="oel_dark"),
+        "burn": role_color("burn", style_name="oel_dark"),
+        "keepout": role_color("warning", style_name="oel_dark"),
+        "goal": role_color("desired", style_name="oel_dark"),
+        "forbidden": role_color("warning", style_name="oel_dark"),
+        "gate": role_color("safety_zone", style_name="oel_dark"),
     }
 
     timeline_path = _save_event_timeline_plot(
@@ -242,6 +246,7 @@ def write_game_debrief_plots(
         output / "mission_timeline.png",
         event_timeline,
         elapsed_s=float(t[-1] - t[0]) if t.size >= 2 else 0.0,
+        metadata=metadata,
     )
     if timeline_path is not None:
         paths["mission_timeline"] = timeline_path
@@ -286,7 +291,15 @@ def write_game_debrief_plots(
     fig.suptitle("2D RIC Trajectory", y=0.98)
     fig.subplots_adjust(top=0.85, bottom=0.18, wspace=0.28)
     paths["ric_2d"] = output / "ric_2d_plots.png"
-    fig.savefig(paths["ric_2d"], dpi=160, bbox_inches="tight")
+    save_oel_figure(
+        fig,
+        paths["ric_2d"],
+        dpi=160,
+        metadata=metadata,
+        artifact_id=paths["ric_2d"].stem,
+        style_name="oel_dark",
+        bbox_inches="tight",
+    )
     plt.close(fig)
 
     range_km = np.linalg.norm(rel[:, :3], axis=1)
@@ -301,6 +314,7 @@ def write_game_debrief_plots(
         [(range_km, "Relative range", "#1f77b4")],
         title="Relative Range vs Time",
         ylabel="Range (km)",
+        metadata=metadata,
     )
     paths["relative_velocity"] = _save_time_plot(
         plt,
@@ -309,6 +323,7 @@ def write_game_debrief_plots(
         [(rel_speed_m_s, "Relative speed", "#d62728")],
         title="Relative Velocity vs Time",
         ylabel="Speed (m/s)",
+        metadata=metadata,
     )
     paths["cumulative_delta_v"] = _save_time_plot(
         plt,
@@ -317,6 +332,7 @@ def write_game_debrief_plots(
         [(cumulative_dv_m_s, "Cumulative dV", "#2ca02c")],
         title="Cumulative Delta V vs Time",
         ylabel="Delta V (m/s)",
+        metadata=metadata,
     )
     paths["control_commands"] = _save_time_plot(
         plt,
@@ -329,6 +345,7 @@ def write_game_debrief_plots(
         ],
         title="Control Commands vs Time",
         ylabel="Applied acceleration (m/s^2)",
+        metadata=metadata,
     )
     return paths
 
@@ -614,7 +631,16 @@ def _draw_forbidden_region(ax: Any, *, region: Any, plane: str, patches: tuple[A
         )
 
 
-def _save_time_plot(plt: Any, path: Path, t_s: np.ndarray, series: list[tuple[np.ndarray, str, str]], *, title: str, ylabel: str) -> Path:
+def _save_time_plot(
+    plt: Any,
+    path: Path,
+    t_s: np.ndarray,
+    series: list[tuple[np.ndarray, str, str]],
+    *,
+    title: str,
+    ylabel: str,
+    metadata: OELArtifactMetadata | None = None,
+) -> Path:
     fig, ax = plt.subplots(figsize=(10, 4.5), constrained_layout=True)
     for values, label, color in series:
         ax.plot(t_s, np.array(values, dtype=float), label=label, color=color, linewidth=1.6)
@@ -624,7 +650,15 @@ def _save_time_plot(plt: Any, path: Path, t_s: np.ndarray, series: list[tuple[np
     ax.grid(True, alpha=0.28)
     if len(series) > 1:
         ax.legend(loc="best")
-    fig.savefig(path, dpi=160, bbox_inches="tight")
+    save_oel_figure(
+        fig,
+        path,
+        dpi=160,
+        metadata=metadata,
+        artifact_id=path.stem,
+        style_name="oel_dark",
+        bbox_inches="tight",
+    )
     plt.close(fig)
     return path
 
@@ -635,6 +669,7 @@ def _save_event_timeline_plot(
     events: list[dict[str, Any]],
     *,
     elapsed_s: float,
+    metadata: OELArtifactMetadata | None = None,
 ) -> Path | None:
     finite_events = [
         {
@@ -716,7 +751,15 @@ def _save_event_timeline_plot(
     ax.grid(True, axis="x", alpha=0.25)
     for spine in ("left", "right", "top"):
         ax.spines[spine].set_visible(False)
-    fig.savefig(path, dpi=160, bbox_inches="tight")
+    save_oel_figure(
+        fig,
+        path,
+        dpi=160,
+        metadata=metadata,
+        artifact_id=path.stem,
+        style_name="oel_dark",
+        bbox_inches="tight",
+    )
     plt.close(fig)
     return path
 

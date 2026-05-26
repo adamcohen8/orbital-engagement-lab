@@ -14,6 +14,45 @@ migration-sensitive behavior explicitly.
 
 ### Fixed
 
+## 0.9.1 - 2026-05-26
+
+### Added
+
+- Added the OEL plot style layer with dark and light Matplotlib themes,
+  role-color conventions, artifact footer metadata, and shared helpers for
+  static plots and animations.
+- Added public README navigation and a more prominent OEL Agents section with
+  example prompts for AI coding assistants.
+- Added an opt-in SQLite review store writer for single-run outputs, including
+  metadata, object-state, relative-state, thrust, ground-access, event, metric,
+  and artifact tables for future review/query workflows.
+- Added the `sim.review` SELECT-only query API and `python -m sim.review` smoke
+  CLI as the recommended review path for agents/scripts, plus an experimental
+  `run_orw.py --output <folder>` Output Review Workbench preview that is not
+  currently recommended for routine review workflows.
+
+### Changed
+
+- Unified built-in plot, animation, game-debrief, campaign, sensitivity,
+  validation, and custom-analysis save paths around the OEL artifact style
+  helpers.
+- Refreshed the checked-in plot gallery images with OEL-styled artifacts and
+  updated plotting docs to describe `oel_dark`, `oel_light`, and custom figure
+  usage.
+- Updated the public TLE propagation example to use OEL numerical
+  special-perturbations propagation with J2, J3, J4, drag, SRP, and sun/moon
+  third-body effects enabled, and clarified that the run is not SGP4/general
+  perturbations propagation.
+
+### Fixed
+
+- Made OEL figure saving create missing output directories consistently with
+  animation saving.
+- Preserved scenario metadata in streaming Monte Carlo relative-range plot
+  footers.
+- Made plot artifact version discovery fall back cleanly in uninstalled or
+  exported source trees with incomplete package metadata.
+
 ## 0.9.0 - 2026-05-26
 
 ### Added
