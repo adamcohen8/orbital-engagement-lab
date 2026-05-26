@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "orbital-engagement-lab"
-version = "0.8.0"
+version = "0.9.0"
 description = "Integrated spacecraft simulation and analysis platform for rendezvous, control, validation, and mission prototyping."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -37,6 +37,9 @@ ml = [
   "torch>=2.1",
   "lightning>=2.2",
 ]
+accel = [
+  "numba>=0.59",
+]
 full = [
   "pytest>=8.0",
   "ruff>=0.6",
@@ -47,6 +50,7 @@ full = [
   "gymnasium>=0.29",
   "torch>=2.1",
   "lightning>=2.2",
+  "numba>=0.59",
 ]
 
 [tool.setuptools]

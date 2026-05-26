@@ -132,8 +132,8 @@ For a complete public script using this API surface, run:
 python examples/python/flagship_analysis.py
 ```
 
-It runs `configs/hcw_pd_10km_experiment.yaml` and writes a custom metrics JSON
-and CSV package under `outputs/flagship_hcw_pd_10km/custom_analysis/`.
+It runs `configs/ric_pd_10km_experiment.yaml` and writes a custom metrics JSON
+and CSV package under `outputs/flagship_ric_pd_10km/custom_analysis/`.
 
 ## Run A Scenario
 

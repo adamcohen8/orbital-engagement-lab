@@ -6,6 +6,7 @@ from typing import Any, Callable
 
 import numpy as np
 
+from sim.aero import aero_spec_get
 from sim.config import (
     SimulationScenarioConfig,
     default_pair_object_ids,
@@ -70,6 +71,7 @@ AVAILABLE_FIGURE_IDS = [
     "control_effort",
     "estimation_error",
     "estimation_error_components",
+    "knowledge_filtering",
     "sensor_access",
     "ground_station_access",
     "quaternion_error",
@@ -83,6 +85,10 @@ AVAILABLE_FIGURE_IDS = [
     "rocket_maxq_throttle",
     "rocket_tvc_aero_authority",
     "rocket_insertion_scorecard",
+    "reentry_summary",
+    "reentry_aero",
+    "reentry_thermal",
+    "atmospheric_pass",
     "satellite_delta_v_remaining",
     "thrust_alignment_error",
 ] + _private_bridge_figure_ids()
@@ -98,7 +104,13 @@ PLOT_PRESETS = {
         "control_effort",
     ],
     "attitude": ["run_dashboard", "quaternion_eci", "rates_eci", "quaternion_error", "attitude_control_summary"],
-    "estimation": ["estimation_error", "estimation_error_components", "knowledge_timeline", "sensor_access"],
+    "estimation": [
+        "estimation_error",
+        "estimation_error_components",
+        "knowledge_filtering",
+        "knowledge_timeline",
+        "sensor_access",
+    ],
     "access": ["ground_station_access", "ground_track_multi"],
     "rocket": [
         "run_dashboard",
@@ -112,6 +124,8 @@ PLOT_PRESETS = {
         "rocket_tvc_aero_authority",
         "rocket_insertion_scorecard",
     ],
+    "reentry": ["reentry_summary", "reentry_aero", "reentry_thermal"],
+    "aero_assist": ["atmospheric_pass", "reentry_aero", "reentry_thermal", "trajectory_eci_multi"],
     "debug": list(AVAILABLE_FIGURE_IDS),
 }
 
@@ -412,6 +426,16 @@ def _thruster_direction_body_by_object(cfg: SimulationScenarioConfig) -> dict[st
     return out
 
 
+def _lift_axis_body_by_object(cfg: SimulationScenarioConfig) -> dict[str, np.ndarray]:
+    out: dict[str, np.ndarray] = {}
+    for oid, sec in iter_object_sections(cfg, enabled_only=True, kind="satellite"):
+        specs = dict(getattr(sec, "specs", {}) or {})
+        axis = _unit_vector_or_none(aero_spec_get(specs, ("lift_axis_body", "lift_vector_body")))
+        if axis is not None:
+            out[oid] = axis
+    return out
+
+
 def _thrust_alignment_error_deg_series(
     *,
     t_s: np.ndarray,
@@ -457,7 +481,9 @@ def plot_outputs(
     resolve_rocket_stack: Callable[[dict[str, Any]], RocketStackPreset],
     resolve_satellite_isp_s: Callable[[dict[str, Any]], float],
     belief_hist: dict[str, np.ndarray] | None = None,
+    knowledge_measurement_hist: dict[str, dict[str, np.ndarray]] | None = None,
     bridge_hist: dict[str, list[dict[str, Any]]] | None = None,
+    reentry_metrics: dict[str, dict[str, np.ndarray]] | None = None,
 ) -> dict[str, str]:
     out: dict[str, str] = {}
     if not bool(cfg.outputs.plots.get("enabled", True)):
@@ -507,6 +533,7 @@ def plot_outputs(
             "control_effort",
             "estimation_error",
             "estimation_error_components",
+            "knowledge_filtering",
             "sensor_access",
             "ground_station_access",
             "attitude_control_summary",
@@ -520,18 +547,27 @@ def plot_outputs(
             "orbital_elements_angles",
             "ground_track",
             "ground_track_multi",
+            "reentry_summary",
+            "reentry_aero",
+            "reentry_thermal",
+            "atmospheric_pass",
         )
     ):
         from sim.plotting import (
+            plot_atmospheric_pass,
             plot_attitude_control_summary,
             plot_control_effort,
             plot_estimation_error,
             plot_estimation_error_components,
             plot_ground_station_access,
             plot_ground_track_from_payload,
+            plot_knowledge_filtering,
             plot_orbital_element,
             plot_orbital_elements_angles,
             plot_orbital_elements_summary,
+            plot_reentry_aero,
+            plot_reentry_summary,
+            plot_reentry_thermal,
             plot_rendezvous_summary,
             plot_run_dashboard,
             plot_sensor_access,
@@ -617,6 +653,21 @@ def plot_outputs(
         if save_enabled:
             out["estimation_error_components"] = str(p)
 
+    if "knowledge_filtering" in figure_ids:
+        p = outdir / "knowledge_filtering.png"
+        plot_knowledge_filtering(
+            t_s=t_s,
+            truth_by_object=truth_hist,
+            knowledge_by_observer=knowledge_hist,
+            knowledge_measurements_by_observer=knowledge_measurement_hist or {},
+            out_path=p if save_enabled else None,
+            show=show,
+            close=close,
+            dpi=dpi,
+        )
+        if save_enabled:
+            out["knowledge_filtering"] = str(p)
+
     if "sensor_access" in figure_ids:
         p = outdir / "sensor_access.png"
         plot_sensor_access(
@@ -665,6 +716,67 @@ def plot_outputs(
         )
         if save_enabled:
             out["attitude_control_summary"] = str(p)
+
+    reentry_cfg = dict(dict(cfg.simulator.dynamics or {}).get("reentry", {}) or {})
+    if "reentry_summary" in figure_ids:
+        p = outdir / "reentry_summary.png"
+        plot_reentry_summary(
+            t_s=t_s,
+            reentry_metrics_by_object=reentry_metrics or {},
+            begin_altitude_km=(
+                None if reentry_cfg.get("begin_altitude_km") is None else float(reentry_cfg.get("begin_altitude_km"))
+            ),
+            out_path=p if save_enabled else None,
+            show=show,
+            close=close,
+            dpi=dpi,
+        )
+        if save_enabled:
+            out["reentry_summary"] = str(p)
+
+    if "reentry_aero" in figure_ids:
+        p = outdir / "reentry_aero.png"
+        plot_reentry_aero(
+            t_s=t_s,
+            reentry_metrics_by_object=reentry_metrics or {},
+            out_path=p if save_enabled else None,
+            show=show,
+            close=close,
+            dpi=dpi,
+        )
+        if save_enabled:
+            out["reentry_aero"] = str(p)
+
+    if "reentry_thermal" in figure_ids:
+        p = outdir / "reentry_thermal.png"
+        plot_reentry_thermal(
+            t_s=t_s,
+            reentry_metrics_by_object=reentry_metrics or {},
+            out_path=p if save_enabled else None,
+            show=show,
+            close=close,
+            dpi=dpi,
+        )
+        if save_enabled:
+            out["reentry_thermal"] = str(p)
+
+    if "atmospheric_pass" in figure_ids:
+        p = outdir / "atmospheric_pass.png"
+        plot_atmospheric_pass(
+            t_s=t_s,
+            truth_by_object=truth_hist,
+            reentry_metrics_by_object=reentry_metrics or {},
+            lift_axis_body_by_object=_lift_axis_body_by_object(cfg),
+            begin_altitude_km=(
+                None if reentry_cfg.get("begin_altitude_km") is None else float(reentry_cfg.get("begin_altitude_km"))
+            ),
+            out_path=p if save_enabled else None,
+            show=show,
+            close=close,
+            dpi=dpi,
+        )
+        if save_enabled:
+            out["atmospheric_pass"] = str(p)
 
     orbital_element_ids = {
         "orbital_element_a": "a",

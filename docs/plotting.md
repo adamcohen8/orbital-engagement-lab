@@ -35,7 +35,7 @@ Cartopy when available and otherwise falls back to a lightweight built-in map.
 For the flagship plotting scenario used by the checked-in gallery:
 
 ```bash
-python run_simulation.py --config configs/hcw_pd_10km_experiment.yaml
+python run_simulation.py --config configs/ric_pd_10km_experiment.yaml
 ```
 
 See the [plot gallery](plot-gallery.md) for checked-in examples generated from
@@ -47,9 +47,11 @@ that config.
 - `orbit`: run dashboard, multi-object ECI trajectory, multi-object ground track, orbital-elements summary
 - `rendezvous`: run dashboard, rendezvous summary, RIC projections, relative range, control effort
 - `attitude`: run dashboard, quaternion components, body rates, quaternion error
-- `estimation`: estimation error norms, component errors, knowledge timeline, sensor access
+- `estimation`: estimation error norms, component errors, knowledge timeline, sensor access, truth/measurement/estimate filtering
 - `access`: ground-station access and multi-object ground track
 - `rocket`: run dashboard, ascent/GNC diagnostics, fuel, orbital elements, timeline, downrange/altitude, max-Q throttle, TVC/aero authority, and insertion scorecard
+- `reentry`: atmospheric re-entry summary, aero, and thermal-load plots
+- `aero_assist`: atmospheric-pass summary, lift/drag histories, thermal-load, lift-axis alignment, and ECI trajectory plots
 - `debug`: every public single-run figure ID
 
 ## Common Figure IDs
@@ -69,6 +71,7 @@ that config.
 - `control_effort`: thrust components, magnitude, and cumulative delta-v
 - `estimation_error`: position and velocity belief error against truth
 - `estimation_error_components`: position and velocity component errors
+- `knowledge_filtering`: truth, raw measurement, and filtered estimate comparison for knowledge tracks, including position/velocity residual histograms and normalized residuals when sensor noise is supplied
 - `sensor_access`: observer-target access timeline, range, and knowledge position error
 - `ground_station_access`: station-target access timeline, elevation, and slant range
 - `attitude_control_summary`: quaternion tracking error, body-rate norm, thrust magnitude, and thrust-alignment error
@@ -81,6 +84,10 @@ that config.
 - `rocket_maxq_throttle`: dynamic pressure, throttle, Mach, and altitude around max-Q limiting
 - `rocket_tvc_aero_authority`: TVC gimbal, alpha/beta, aero loads, dynamic pressure, and thrust-to-weight
 - `rocket_insertion_scorecard`: final orbit/resource/control scorecard against configured insertion targets
+- `reentry_summary`: altitude, dynamic pressure, g-load, and heat-rate overview for tracked re-entry objects
+- `reentry_aero`: density, relative atmospheric speed, dynamic pressure, and drag-deceleration histories
+- `reentry_thermal`: Sutton-Graves heat-rate and integrated heat-load histories
+- `atmospheric_pass`: altitude, drag/lift acceleration, dynamic pressure, cross-track motion, heat load, and lift-axis alignment
 - `trajectory_eci_multi`: all-object 3D ECI trajectories
 - `trajectory_ric_curv_2d_multi`: all-object RIC curvilinear 2D projections
 - `relative_range`: pairwise relative range over time
@@ -115,6 +122,8 @@ Available API functions:
 - `plot_control_effort`
 - `plot_estimation_error`
 - `plot_estimation_error_components`
+- `plot_knowledge_filtering`
+- `plot_atmospheric_pass`
 - `plot_ground_track_from_payload`
 - `plot_ground_station_access`
 - `plot_orbital_element`
@@ -129,3 +138,9 @@ Public plotting focuses on understanding one run. Pro plotting focuses on many
 runs: Monte Carlo histograms, sensitivity plots, controller-benchmark
 comparisons, optimization convergence, campaign dashboards, baseline comparison,
 and report packs.
+
+Pro Monte Carlo campaigns with generic metric gates also emit study-metric
+histograms, CDFs, sampled-parameter versus metric scatter plots, pass/fail
+parameter maps, and metric-gate margin plots. Sensitivity studies emit
+method-specific response, scatter, or heatmap plots plus ranking bars and, when
+a numeric baseline is available, baseline-delta bars.

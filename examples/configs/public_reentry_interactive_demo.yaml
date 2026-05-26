@@ -1,0 +1,64 @@
+scenario_name: "public_reentry_interactive_demo"
+scenario_description: "Interactive 10-day atmospheric re-entry diagnostics demo starting at the entry threshold."
+
+objects:
+  capsule:
+    kind: "satellite"
+    role: "reentry_demo_vehicle"
+    specs:
+      mass_kg: 100.0
+      aero:
+        drag_area_m2: 2.0
+        cd: 2.2
+        nose_radius_m: 0.4
+    initial_state:
+      # 300 km circular-equatorial state: Earth radius 6378.137 km + 300 km.
+      position_eci_km: [6678.137, 0.0, 0.0]
+      velocity_eci_km_s: [0.0, 7.725760232077136, 0.0]
+
+simulator:
+  duration_s: 864000.0
+  dt_s: 10.0
+  dynamics:
+    orbit:
+      model: "two_body"
+      drag: true
+      atmosphere_model: "ussa1976"
+      orbit_substep_s: 10.0
+    reentry:
+      enabled: true
+      begin_altitude_km: 300.0
+      object_ids: ["capsule"]
+      atmosphere_model: "ussa1976"
+      termination:
+        enabled: true
+        terminate_on_entry: false
+        # Treat this as the end of useful satellite survivability.
+        min_altitude_km: 80.0
+        # Similar order of magnitude to a conservative max-Q structural limit.
+        max_dynamic_pressure_pa: 50000.0
+        # Stop around an 8 g drag-deceleration load.
+        max_g_load: 8.0
+        # Conservative first-pass thermal limits for an unprotected small spacecraft.
+        max_heat_rate_w_m2: 1000000.0
+        max_heat_load_j_m2: 500000000.0
+    attitude:
+      enabled: false
+  environment:
+    atmosphere_env: {}
+  termination:
+    earth_impact_enabled: true
+
+outputs:
+  output_dir: "outputs/examples/public_reentry_interactive_demo"
+  mode: "interactive"
+  stats:
+    print_summary: true
+    save_json: true
+    save_full_log: true
+  plots:
+    enabled: true
+    preset: "reentry"
+    dpi: 150
+  animations:
+    enabled: false

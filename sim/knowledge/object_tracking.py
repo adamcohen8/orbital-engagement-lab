@@ -190,13 +190,16 @@ class _Track:
     last_detected: bool = False
     time_since_last_detection_s_values: list[float] = field(default_factory=list)
     detection_status_counts: dict[str, int] = field(default_factory=dict)
+    last_measurement_vector: np.ndarray | None = None
 
     def step(self, observer_truth: StateTruth, target_truth: StateTruth, t_s: float) -> StateBelief | None:
         self.step_count += 1
+        self.last_measurement_vector = None
         meas = self.sensor.measure_relative(observer_truth, target_truth, t_s, self.measurement_model)
         detect_status = str(self.sensor.last_detection_status or "unknown")
         self.detection_status_counts[detect_status] = int(self.detection_status_counts.get(detect_status, 0)) + 1
         if meas is not None:
+            self.last_measurement_vector = np.array(meas.vector, dtype=float).reshape(-1)
             self.measurement_count += 1
             self.last_measurement_t_s = float(t_s)
             self.detected_count += 1
@@ -402,6 +405,13 @@ class ObjectKnowledgeBase:
         for target_id, track in self._tracks.items():
             if track.belief is not None:
                 out[target_id] = track.belief
+        return out
+
+    def measurement_snapshot(self) -> dict[str, np.ndarray]:
+        out: dict[str, np.ndarray] = {}
+        for target_id, track in self._tracks.items():
+            if track.last_measurement_vector is not None:
+                out[target_id] = np.array(track.last_measurement_vector, dtype=float).reshape(-1)
         return out
 
     def consistency_summary(self) -> dict[str, dict[str, float | int | None]]:

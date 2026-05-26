@@ -44,6 +44,13 @@ objects:
       payload_mass_kg: 150.0
       # Body-frame thrust axis. Change only if the vehicle model uses a different thrust direction.
       thrust_axis_body: [1.0, 0.0, 0.0]
+      # Shared object-level aerodynamics. Rocket-specific coefficient models can still be refined
+      # under simulator.dynamics.rocket.aero.
+      aero:
+        reference_area_m2: 10.0
+        reference_length_m: 30.0
+        cp_offset_body_m: [0.0, 0.0, 0.0]
+        cd: 0.20
     # Initial launch state for rocket scenarios.
     initial_state:
       # Launch latitude in degrees.
@@ -170,6 +177,24 @@ objects:
     specs:
       # Total mass in kilograms. Use dry/fuel mass fields instead when modeling fuel depletion in more detail.
       mass_kg: 200.0
+      # Shared object-level aerodynamics. Keep vehicle physical/aero properties here.
+      # Flat aliases like cl/lift_area_m2 remain accepted for compatibility.
+      aero:
+        reference_area_m2: 1.0
+        drag_area_m2: 1.0
+        cd: 2.2
+        # Optional atmospheric steering coefficient of lift. Requires orbit.drag to affect motion.
+        cl: 0.0
+        # Optional lift reference area in square meters. Defaults to drag_area_m2/area when omitted.
+        lift_area_m2: null
+        # Optional body-frame lift steering axis. Current attitude maps this vector into inertial lift direction.
+        lift_axis_body: [0.0, 0.0, 1.0]
+        # Optional nose radius for Sutton-Graves re-entry heating diagnostics.
+        nose_radius_m: 0.5
+        # Optional reference length for aero moment models.
+        reference_length_m: 1.0
+        # Optional center-of-pressure offset in body-frame meters.
+        cp_offset_body_m: [0.0, 0.0, 0.0]
     # Initial state for the chaser.
     initial_state:
       # "rocket_insertion" initializes from the rocket when orbit insertion is achieved.
@@ -340,6 +365,11 @@ objects:
     specs:
       # Total mass in kilograms.
       mass_kg: 400.0
+      # Shared object-level aerodynamics.
+      aero:
+        cd: 2.2
+        cl: 0.0
+        lift_axis_body: [0.0, 0.0, 1.0]
     # Initial state for the target.
     initial_state:
       # Classical orbital elements for target initialization.
@@ -485,6 +515,8 @@ simulator:
   dt_s: 1.0
   # Optional initial Julian date UTC. Set for time-dependent Sun/Moon/atmosphere behavior.
   initial_jd_utc: null
+  # Runtime resource profile: config, laptop-safe, standard, aggressive, or off.
+  resource_profile: config
   # Dynamics model settings.
   dynamics:
     # Orbital dynamics settings.
@@ -511,6 +543,38 @@ simulator:
         degree: 8
         # Maximum gravity order to use.
         order: 8
+    # Atmospheric re-entry diagnostics. Drag remains controlled by orbit.drag.
+    reentry:
+      # Enable re-entry regime tracking and aero/thermal metrics.
+      enabled: false
+      # Mark re-entry active while an object is below this altitude.
+      begin_altitude_km: 300.0
+      # Empty tracks all active satellites; use ["chaser"] or ["*"] for explicit selection.
+      object_ids: []
+      # Optional override for atmosphere density/temperature lookup.
+      atmosphere_model: "ussa1976"
+      # Sutton-Graves heat-rate coefficient in SI units.
+      heat_rate_coefficient: 1.83e-4
+      # Optional re-entry kill/termination limits. Null disables each limit.
+      termination:
+        # Enable re-entry-based early termination.
+        enabled: false
+        # Stop as soon as the re-entry altitude threshold is crossed.
+        terminate_on_entry: false
+        # Stop below this altitude, in kilometers.
+        min_altitude_km: null
+        # Stop at or above this dynamic pressure, in pascals.
+        max_dynamic_pressure_pa: null
+        # Stop at or above this drag deceleration, in m/s^2.
+        max_drag_decel_m_s2: null
+        # Stop at or above this drag deceleration, in Earth g.
+        max_g_load: null
+        # Stop at or above this Sutton-Graves heat rate, in W/m^2.
+        max_heat_rate_w_m2: null
+        # Stop at or above this integrated heat load, in J/m^2.
+        max_heat_load_j_m2: null
+        # Optional per-object overrides. Missing fields inherit the defaults above.
+        by_object: {}
     # Attitude dynamics settings.
     attitude:
       # Enable rigid-body attitude propagation.
@@ -627,6 +691,8 @@ simulator:
     earth_impact_enabled: true
     # Earth radius used for impact checks, in kilometers.
     earth_radius_km: 6378.137
+    # Optional per-object Earth-impact overrides for rockets, stages, and payloads.
+    by_object: {}
 
 # Output artifacts, plots, animations, and analysis reports.
 outputs:
@@ -754,3 +820,9 @@ outputs:
     # Draw an Earth map/background where supported.
     draw_earth_map: true
   # Monte Carlo output settings. These matter when monte_carlo.enabled is true.
+  resource_limits:
+    max_history_memory_mb: 1024
+    checkpoint_enabled: true
+    throttle_enabled: true
+
+# Monte Carlo study definition. Keep disabled for ordinary single-run use.

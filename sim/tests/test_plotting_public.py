@@ -22,6 +22,7 @@ from sim.plotting import (
     plot_estimation_error_components,
     plot_ground_station_access,
     plot_ground_track_from_payload,
+    plot_knowledge_filtering,
     plot_orbital_element,
     plot_orbital_elements_angles,
     plot_orbital_elements_summary,
@@ -65,6 +66,9 @@ def _payload() -> dict[str, object]:
     knowledge = chaser[:, :6].copy()
     knowledge[0, :] = np.nan
     knowledge[2, 0] += 0.02
+    measurements = chaser[:, :6].copy()
+    measurements[:, 0] += np.array([0.03, -0.02, 0.01, -0.01], dtype=float)
+    measurements[:, 3] += np.array([1.0e-4, -1.0e-4, 5.0e-5, -5.0e-5], dtype=float)
     ground_access = {
         "equator_prime": {
             "station": {"id": "equator_prime"},
@@ -90,6 +94,7 @@ def _payload() -> dict[str, object]:
             "chaser": np.tile(np.array([1.0, 0.0, 0.0, 0.0], dtype=float), (t.size, 1)).tolist(),
         },
         "knowledge_by_observer": {"chaser": {"target": knowledge.tolist()}},
+        "knowledge_measurements_by_observer": {"chaser": {"target": measurements.tolist()}},
         "ground_station_access": ground_access,
         "target_reference_orbit_truth": [],
     }
@@ -103,6 +108,7 @@ def test_payload_plotting_api_writes_expected_artifacts(tmp_path: Path) -> None:
         "control": tmp_path / "control.png",
         "estimation": tmp_path / "estimation.png",
         "estimation_components": tmp_path / "estimation_components.png",
+        "knowledge_filtering": tmp_path / "knowledge_filtering.png",
         "sensor_access": tmp_path / "sensor_access.png",
         "ground_station_access": tmp_path / "ground_station_access.png",
         "attitude_control_summary": tmp_path / "attitude_control_summary.png",
@@ -123,6 +129,17 @@ def test_payload_plotting_api_writes_expected_artifacts(tmp_path: Path) -> None:
     plot_control_effort(payload, out_path=outputs["control"], close=True)
     plot_estimation_error(payload, out_path=outputs["estimation"], close=True)
     plot_estimation_error_components(payload, out_path=outputs["estimation_components"], close=True)
+    plot_knowledge_filtering(
+        payload,
+        knowledge_noise_by_observer={
+            "chaser": {
+                "pos_sigma_km": [0.02, 0.02, 0.02],
+                "vel_sigma_km_s": [1.0e-4, 1.0e-4, 1.0e-4],
+            }
+        },
+        out_path=outputs["knowledge_filtering"],
+        close=True,
+    )
     plot_sensor_access(payload, out_path=outputs["sensor_access"], close=True)
     plot_ground_station_access(payload, out_path=outputs["ground_station_access"], close=True)
     plot_attitude_control_summary(payload, out_path=outputs["attitude_control_summary"], close=True)
@@ -175,6 +192,7 @@ def test_plot_outputs_expands_public_plot_presets(tmp_path: Path) -> None:
                         "control_effort",
                         "estimation_error",
                         "estimation_error_components",
+                        "knowledge_filtering",
                         "sensor_access",
                         "ground_station_access",
                         "attitude_control_summary",
@@ -205,6 +223,10 @@ def test_plot_outputs_expands_public_plot_presets(tmp_path: Path) -> None:
         obs: {tgt: np.array(arr, dtype=float) for tgt, arr in by_tgt.items()}
         for obs, by_tgt in dict(payload["knowledge_by_observer"]).items()
     }
+    measurements = {
+        obs: {tgt: np.array(arr, dtype=float) for tgt, arr in by_tgt.items()}
+        for obs, by_tgt in dict(payload["knowledge_measurements_by_observer"]).items()
+    }
 
     out = plot_outputs(
         cfg=cfg,
@@ -219,6 +241,7 @@ def test_plot_outputs_expands_public_plot_presets(tmp_path: Path) -> None:
         resolve_rocket_stack=lambda specs: None,
         resolve_satellite_isp_s=lambda specs: 0.0,
         belief_hist=belief,
+        knowledge_measurement_hist=measurements,
     )
 
     assert set(out) >= {
@@ -227,6 +250,7 @@ def test_plot_outputs_expands_public_plot_presets(tmp_path: Path) -> None:
         "control_effort",
         "estimation_error",
         "estimation_error_components",
+        "knowledge_filtering",
         "sensor_access",
         "ground_station_access",
         "attitude_control_summary",

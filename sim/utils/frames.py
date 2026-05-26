@@ -2,8 +2,35 @@ from __future__ import annotations
 
 import numpy as np
 
+from sim.acceleration.kernels.frames import (
+    eci_relative_to_ric_rect_kernel,
+    ric_angular_rate_eci_from_rv_kernel,
+    ric_curv_to_rect_kernel,
+    ric_dcm_ir_from_rv_kernel,
+    ric_rect_state_to_eci_kernel,
+    ric_rect_to_curv_kernel,
+)
+from sim.acceleration.settings import acceleration_cache_key, acceleration_settings_from_mode
+
+_FRAME_ACCEL_CACHE_KEY: tuple[str, bool] | None = None
+_FRAME_ACCEL_CACHE_ENABLED: bool | None = None
+
+
+def _frame_acceleration_enabled() -> bool:
+    global _FRAME_ACCEL_CACHE_ENABLED, _FRAME_ACCEL_CACHE_KEY
+    cache_key = acceleration_cache_key()
+    if cache_key != _FRAME_ACCEL_CACHE_KEY:
+        _FRAME_ACCEL_CACHE_KEY = cache_key
+        _FRAME_ACCEL_CACHE_ENABLED = bool(acceleration_settings_from_mode().enabled)
+    return bool(_FRAME_ACCEL_CACHE_ENABLED)
+
 
 def ric_dcm_ir_from_rv(r_eci_km: np.ndarray, v_eci_km_s: np.ndarray) -> np.ndarray:
+    if _frame_acceleration_enabled():
+        return ric_dcm_ir_from_rv_kernel(
+            np.asarray(r_eci_km, dtype=float).reshape(3),
+            np.asarray(v_eci_km_s, dtype=float).reshape(3),
+        )
     r = np.asarray(r_eci_km, dtype=float).reshape(3)
     v = np.asarray(v_eci_km_s, dtype=float).reshape(3)
     r_hat = r / max(float(np.sqrt(np.dot(r, r))), 1e-12)
@@ -29,6 +56,11 @@ def ric_dcm_ir_from_rv(r_eci_km: np.ndarray, v_eci_km_s: np.ndarray) -> np.ndarr
 
 
 def ric_angular_rate_eci_from_rv(r_eci_km: np.ndarray, v_eci_km_s: np.ndarray) -> np.ndarray:
+    if _frame_acceleration_enabled():
+        return ric_angular_rate_eci_from_rv_kernel(
+            np.asarray(r_eci_km, dtype=float).reshape(3),
+            np.asarray(v_eci_km_s, dtype=float).reshape(3),
+        )
     r = np.asarray(r_eci_km, dtype=float).reshape(3)
     v = np.asarray(v_eci_km_s, dtype=float).reshape(3)
     r2 = float(np.dot(r, r))
@@ -52,6 +84,12 @@ def ric_rect_state_to_eci(
     r_chief_eci_km: np.ndarray,
     v_chief_eci_km_s: np.ndarray,
 ) -> np.ndarray:
+    if _frame_acceleration_enabled():
+        return ric_rect_state_to_eci_kernel(
+            np.asarray(x_rel_ric_rect, dtype=float).reshape(6),
+            np.asarray(r_chief_eci_km, dtype=float).reshape(3),
+            np.asarray(v_chief_eci_km_s, dtype=float).reshape(3),
+        )
     x_rel = np.array(x_rel_ric_rect, dtype=float).reshape(6)
     c_ir = ric_dcm_ir_from_rv(r_chief_eci_km, v_chief_eci_km_s)
     omega_ric_eci = ric_angular_rate_eci_from_rv(r_chief_eci_km, v_chief_eci_km_s)
@@ -77,6 +115,11 @@ def eci_relative_to_ric_rect(
     x_dep_eci: np.ndarray,
     x_chief_eci: np.ndarray,
 ) -> np.ndarray:
+    if _frame_acceleration_enabled():
+        return eci_relative_to_ric_rect_kernel(
+            np.asarray(x_dep_eci, dtype=float).reshape(6),
+            np.asarray(x_chief_eci, dtype=float).reshape(6),
+        )
     x_dep = np.array(x_dep_eci, dtype=float).reshape(6)
     x_chief = np.array(x_chief_eci, dtype=float).reshape(6)
     r_chief = x_chief[:3]
@@ -106,6 +149,8 @@ def dcm_to_euler_321(dcm: np.ndarray) -> np.ndarray:
 
 
 def ric_curv_to_rect(x_ric_curv: np.ndarray, r0_km: float, eps: float = 1e-12) -> np.ndarray:
+    if _frame_acceleration_enabled():
+        return ric_curv_to_rect_kernel(np.asarray(x_ric_curv, dtype=float).reshape(6), float(r0_km), float(eps))
     x_r_curv, x_i_curv, x_c_curv, x_r_curv_dot, x_i_curv_dot, x_c_curv_dot = np.array(x_ric_curv, dtype=float).reshape(
         6
     )
@@ -140,6 +185,8 @@ def ric_curv_to_rect(x_ric_curv: np.ndarray, r0_km: float, eps: float = 1e-12) -
 
 
 def ric_rect_to_curv(x_ric_rect: np.ndarray, r0_km: float, eps: float = 1e-12) -> np.ndarray:
+    if _frame_acceleration_enabled():
+        return ric_rect_to_curv_kernel(np.asarray(x_ric_rect, dtype=float).reshape(6), float(r0_km), float(eps))
     x_r, x_i, x_c, x_rdot, x_idot, x_cdot = np.array(x_ric_rect, dtype=float).reshape(6)
     r0 = max(float(r0_km), eps)
 

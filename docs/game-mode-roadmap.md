@@ -97,7 +97,7 @@ Bundled training scenarios:
    staying under the chaser delta-v budget.
 
 10. `rpo_10_evasive_target_survival`
-   Reverse the roles: the player flies the target while an autonomous HCW PD
+   Reverse the roles: the player flies the target while an autonomous RIC_PD
    chaser attempts rendezvous. Pass by maintaining at least 100 meters of
    separation until the timer expires while staying under the target delta-v
    budget.
@@ -307,7 +307,7 @@ Implemented levels:
   uses the target reference orbit as the RIC display/control frame so the
   target maneuver is visible, and caps target defensive delta-v at 0.1 m/s.
 - `rpo_10_evasive_target_survival`: fly the target vehicle, evade an autonomous
-  HCW PD chaser, preserve at least 100 meters of separation, and survive until
+  RIC_PD chaser, preserve at least 100 meters of separation, and survive until
   the timer expires under the target delta-v budget.
 - `rpo_arcade_pursuit`: clear repeated pursuit rounds against randomized target
   evasion directions, tightening goal radius, randomized energy-matched starts,

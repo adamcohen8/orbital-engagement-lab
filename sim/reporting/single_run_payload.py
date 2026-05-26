@@ -22,10 +22,12 @@ class SingleRunPayloadContext:
     torque_hist: dict[str, np.ndarray]
     desired_attitude_hist: dict[str, np.ndarray]
     knowledge_hist: dict[str, dict[str, np.ndarray]]
+    knowledge_measurement_hist: dict[str, dict[str, np.ndarray]]
     bridge_hist: dict[str, list[dict[str, Any]]]
     controller_debug_hist: dict[str, list[dict[str, Any]]]
     rocket_throttle_cmd: np.ndarray
     rocket_metrics: dict[str, np.ndarray]
+    reentry_metrics: dict[str, dict[str, np.ndarray]]
     thrust_stats: dict[str, dict[str, Any]]
     attitude_guardrail_stats: dict[str, int]
     knowledge_detection_by_observer: dict[str, Any]
@@ -90,6 +92,73 @@ def _summarize_actuator_diagnostics(controller_debug_hist: dict[str, list[dict[s
     return summary
 
 
+def _finite_min(arr: np.ndarray) -> float | None:
+    finite = arr[np.isfinite(arr)]
+    return None if finite.size == 0 else float(np.min(finite))
+
+
+def _finite_max(arr: np.ndarray) -> float | None:
+    finite = arr[np.isfinite(arr)]
+    return None if finite.size == 0 else float(np.max(finite))
+
+
+def _last_finite(arr: np.ndarray) -> float | None:
+    finite = arr[np.isfinite(arr)]
+    return None if finite.size == 0 else float(finite[-1])
+
+
+def _summarize_reentry_metrics(
+    *,
+    t_s: np.ndarray,
+    reentry_metrics: dict[str, dict[str, np.ndarray]],
+) -> dict[str, Any]:
+    summary: dict[str, Any] = {}
+    for oid, metrics in dict(reentry_metrics or {}).items():
+        active = np.array(metrics.get("active", []), dtype=float).reshape(-1)
+        n = min(active.size, t_s.size)
+        if n <= 0:
+            continue
+        entered = np.isfinite(active[:n]) & (active[:n] > 0.5)
+        entry_time_s = None
+        if bool(np.any(entered)):
+            entry_time_s = float(t_s[int(np.flatnonzero(entered)[0])])
+        starts = np.flatnonzero(entered & np.concatenate(([True], ~entered[:-1])))
+        exits = np.flatnonzero(~entered & np.concatenate(([False], entered[:-1])))
+        latest_exit_time_s = float(t_s[int(exits[-1])]) if exits.size else None
+
+        object_summary = {
+            "entered_reentry": bool(np.any(entered)),
+            "currently_in_reentry": bool(entered[n - 1]) if n > 0 else False,
+            "reentry_episode_count": int(starts.size),
+            "entry_time_s": entry_time_s,
+            "latest_exit_time_s": latest_exit_time_s,
+            "min_altitude_km": _finite_min(np.array(metrics.get("altitude_km", []), dtype=float).reshape(-1)[:n]),
+            "peak_density_kg_m3": _finite_max(np.array(metrics.get("density_kg_m3", []), dtype=float).reshape(-1)[:n]),
+            "peak_relative_speed_m_s": _finite_max(
+                np.array(metrics.get("relative_speed_m_s", []), dtype=float).reshape(-1)[:n]
+            ),
+            "peak_dynamic_pressure_pa": _finite_max(
+                np.array(metrics.get("dynamic_pressure_pa", []), dtype=float).reshape(-1)[:n]
+            ),
+            "peak_drag_decel_m_s2": _finite_max(
+                np.array(metrics.get("drag_decel_m_s2", []), dtype=float).reshape(-1)[:n]
+            ),
+            "peak_lift_accel_m_s2": _finite_max(
+                np.array(metrics.get("lift_accel_m_s2", []), dtype=float).reshape(-1)[:n]
+            ),
+            "peak_lift_to_drag": _finite_max(np.array(metrics.get("lift_to_drag", []), dtype=float).reshape(-1)[:n]),
+            "peak_g_load": _finite_max(np.array(metrics.get("g_load", []), dtype=float).reshape(-1)[:n]),
+            "peak_heat_rate_w_m2": _finite_max(
+                np.array(metrics.get("heat_rate_w_m2", []), dtype=float).reshape(-1)[:n]
+            ),
+            "final_heat_load_j_m2": _last_finite(
+                np.array(metrics.get("heat_load_j_m2", []), dtype=float).reshape(-1)[:n]
+            ),
+        }
+        summary[str(oid)] = object_summary
+    return summary
+
+
 def build_single_run_payload(context: SingleRunPayloadContext) -> dict[str, Any]:
     ground_station_access, ground_station_access_summary = evaluate_ground_station_access(
         ground_stations=list(context.cfg.ground_stations),
@@ -124,6 +193,9 @@ def build_single_run_payload(context: SingleRunPayloadContext) -> dict[str, Any]
         "plot_outputs": {},
         "animation_outputs": {},
     }
+    reentry_summary = _summarize_reentry_metrics(t_s=context.t_s, reentry_metrics=context.reentry_metrics)
+    if reentry_summary:
+        summary["reentry_summary_by_object"] = reentry_summary
     rocket_summary: dict[str, Any] = {}
     if context.rocket_metrics:
         def _last_finite(name: str) -> float | None:
@@ -170,6 +242,9 @@ def build_single_run_payload(context: SingleRunPayloadContext) -> dict[str, Any]
         "knowledge_by_observer": {
             o: {t: a.tolist() for t, a in bt.items()} for o, bt in context.knowledge_hist.items()
         },
+        "knowledge_measurements_by_observer": {
+            o: {t: a.tolist() for t, a in bt.items()} for o, bt in context.knowledge_measurement_hist.items()
+        },
         "knowledge_detection_by_observer": dict(context.knowledge_detection_by_observer),
         "knowledge_consistency_by_observer": dict(context.knowledge_consistency_by_observer),
         "ground_station_access": ground_station_access,
@@ -178,4 +253,8 @@ def build_single_run_payload(context: SingleRunPayloadContext) -> dict[str, Any]
         "controller_debug_by_object": context.controller_debug_hist,
         "rocket_throttle_cmd": context.rocket_throttle_cmd.tolist(),
         "rocket_metrics": {k: v.tolist() for k, v in context.rocket_metrics.items()},
+        "reentry_metrics_by_object": {
+            oid: {key: arr.tolist() for key, arr in metrics.items()}
+            for oid, metrics in context.reentry_metrics.items()
+        },
     }

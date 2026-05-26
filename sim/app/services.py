@@ -74,6 +74,21 @@ PARAMETER_FORM_SCHEMAS: dict[str, list[dict[str, Any]]] = {
         {"key": "riccati_max_iter", "label": "Riccati Max Iter", "kind": "int"},
         {"key": "riccati_tol", "label": "Riccati Tolerance", "kind": "float"},
     ],
+    "RICPDTransferController": [
+        {"key": "max_accel_km_s2", "label": "Max Accel (km/s^2)", "kind": "float"},
+        {"key": "mean_motion_rad_s", "label": "Mean Motion (rad/s)", "kind": "float"},
+        {"key": "transfer_time_s", "label": "Transfer Time (s)", "kind": "float"},
+        {"key": "burn_time_constant_s", "label": "Burn Time Constant (s)", "kind": "float"},
+        {"key": "correction_interval_s", "label": "Correction Interval (s)", "kind": "float"},
+        {"key": "velocity_deadband_m_s", "label": "Velocity Deadband (m/s)", "kind": "float"},
+        {"key": "final_brake_start_s", "label": "Final Brake Start (s)", "kind": "float"},
+        {"key": "terminal_start_s", "label": "Terminal Start (s)", "kind": "float"},
+        {"key": "terminal_range_km", "label": "Terminal Range (km)", "kind": "float"},
+        {"key": "terminal_kp", "label": "Terminal Kp YAML", "kind": "yaml"},
+        {"key": "terminal_kd", "label": "Terminal Kd YAML", "kind": "yaml"},
+        {"key": "desired_state_ric", "label": "Desired State RIC", "kind": "vector", "length": 6},
+        {"key": "state_signs", "label": "State Signs", "kind": "vector", "length": 6},
+    ],
     "HCWNoRadialLQRController": [
         {"key": "mean_motion_rad_s", "label": "Mean Motion (rad/s)", "kind": "float"},
         {"key": "max_accel_km_s2", "label": "Max Accel (km/s^2)", "kind": "float"},
@@ -587,6 +602,7 @@ def get_gui_capabilities() -> GuiCapabilities:
             "chaser": _discover_pointer_options(
                 [
                     ("Zero Controller", "sim.control.orbit.zero_controller", "ZeroController"),
+                    ("RIC_PD Transfer", "sim.control.orbit.ric_pd", "RICPDTransferController"),
                     ("HCW LQR", "sim.control.orbit.lqr", "HCWLQRController"),
                     ("HCW LQR (No Radial Burn)", "sim.control.orbit.lqr_no_radial", "HCWNoRadialLQRController"),
                     (

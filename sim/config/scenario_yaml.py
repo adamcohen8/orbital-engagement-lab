@@ -61,26 +61,6 @@ class GroundStationSection:
     enabled: bool = True
 
 
-@dataclass(frozen=True)
-class SimulatorSection:
-    scenario_type: str = "auto"
-    duration_s: float = 3600.0
-    dt_s: float = 1.0
-    initial_jd_utc: float | None = None
-    dynamics: SimulatorDynamicsSection = field(default_factory=lambda: SimulatorDynamicsSection())
-    environment: SimulatorEnvironmentSection = field(default_factory=lambda: SimulatorEnvironmentSection())
-    plugin_validation: SimulatorPluginValidationSection = field(
-        default_factory=lambda: SimulatorPluginValidationSection()
-    )
-    termination: SimulatorTerminationSection = field(default_factory=lambda: SimulatorTerminationSection())
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "dynamics", SimulatorDynamicsSection(self.dynamics))
-        object.__setattr__(self, "environment", SimulatorEnvironmentSection(self.environment))
-        object.__setattr__(self, "plugin_validation", SimulatorPluginValidationSection(self.plugin_validation))
-        object.__setattr__(self, "termination", SimulatorTerminationSection(self.termination))
-
-
 class _TypedConfigDict(dict):
     _defaults: dict[str, Any] = {}
 
@@ -91,6 +71,48 @@ class _TypedConfigDict(dict):
         data.update(deepcopy(overrides))
         super().__init__(data)
 
+
+class SimulatorAccelerationSection(_TypedConfigDict):
+    _defaults = {
+        "mode": "off",
+        "warmup": False,
+        "env_override": True,
+    }
+
+    @property
+    def mode(self) -> str:
+        return str(self.get("mode", "off") or "off")
+
+    @property
+    def warmup(self) -> bool:
+        return bool(self.get("warmup", False))
+
+    @property
+    def env_override(self) -> bool:
+        return bool(self.get("env_override", True))
+
+
+@dataclass(frozen=True)
+class SimulatorSection:
+    scenario_type: str = "auto"
+    duration_s: float = 3600.0
+    dt_s: float = 1.0
+    initial_jd_utc: float | None = None
+    resource_profile: str | None = None
+    acceleration: SimulatorAccelerationSection = field(default_factory=lambda: SimulatorAccelerationSection())
+    dynamics: SimulatorDynamicsSection = field(default_factory=lambda: SimulatorDynamicsSection())
+    environment: SimulatorEnvironmentSection = field(default_factory=lambda: SimulatorEnvironmentSection())
+    plugin_validation: SimulatorPluginValidationSection = field(
+        default_factory=lambda: SimulatorPluginValidationSection()
+    )
+    termination: SimulatorTerminationSection = field(default_factory=lambda: SimulatorTerminationSection())
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "acceleration", SimulatorAccelerationSection(self.acceleration))
+        object.__setattr__(self, "dynamics", SimulatorDynamicsSection(self.dynamics))
+        object.__setattr__(self, "environment", SimulatorEnvironmentSection(self.environment))
+        object.__setattr__(self, "plugin_validation", SimulatorPluginValidationSection(self.plugin_validation))
+        object.__setattr__(self, "termination", SimulatorTerminationSection(self.termination))
 
 class SimulatorDynamicsSection(_TypedConfigDict):
     _defaults: dict[str, Any] = {}
@@ -128,6 +150,7 @@ class SimulatorTerminationSection(_TypedConfigDict):
     _defaults = {
         "earth_impact_enabled": True,
         "earth_radius_km": 6378.137,
+        "by_object": {},
     }
 
     @property
@@ -137,6 +160,10 @@ class SimulatorTerminationSection(_TypedConfigDict):
     @property
     def earth_radius_km(self) -> float:
         return float(self.get("earth_radius_km", 6378.137))
+
+    @property
+    def by_object(self) -> dict[str, Any]:
+        return dict(self.get("by_object", {}) or {})
 
 
 class OutputStatsSection(_TypedConfigDict):
@@ -359,7 +386,7 @@ class AnalysisSection:
     enabled: bool = False
     study_type: str = "monte_carlo"
     execution: AnalysisExecutionSection = field(default_factory=AnalysisExecutionSection)
-    metrics: list[str] = field(default_factory=list)
+    metrics: list[Any] = field(default_factory=list)
     baseline: AnalysisBaselineSection = field(default_factory=AnalysisBaselineSection)
     monte_carlo: AnalysisMonteCarloSection = field(default_factory=AnalysisMonteCarloSection)
     sensitivity: SensitivitySection = field(default_factory=SensitivitySection)
@@ -678,6 +705,112 @@ def _validate_sim_timing(out: SimulatorSection) -> None:
         )
 
 
+_REENTRY_TERMINATION_LIMIT_FIELDS = (
+    "min_altitude_km",
+    "max_dynamic_pressure_pa",
+    "max_drag_decel_m_s2",
+    "max_g_load",
+    "max_heat_rate_w_m2",
+    "max_heat_load_j_m2",
+)
+
+
+def _normalize_reentry_termination_block(
+    value: Any,
+    path: str,
+    *,
+    fill_bool_defaults: bool,
+) -> dict[str, Any]:
+    termination = _as_dict(value, path)
+    if fill_bool_defaults or "enabled" in termination:
+        termination["enabled"] = _parse_bool(
+            termination.get("enabled", False),
+            f"{path}.enabled",
+        )
+    if fill_bool_defaults or "terminate_on_entry" in termination:
+        termination["terminate_on_entry"] = _parse_bool(
+            termination.get("terminate_on_entry", False),
+            f"{path}.terminate_on_entry",
+        )
+    for key in _REENTRY_TERMINATION_LIMIT_FIELDS:
+        if termination.get(key) is None:
+            continue
+        termination[key] = _parse_float(termination.get(key), f"{path}.{key}")
+        if float(termination[key]) < 0.0:
+            raise ValueError(f"{path}.{key} must be >= 0.")
+    return termination
+
+
+def _normalize_reentry_section(dynamics: dict[str, Any]) -> dict[str, Any]:
+    out = dict(dynamics or {})
+    if "reentry" not in out:
+        return out
+    raw = _as_dict(out.get("reentry"), "simulator.dynamics.reentry")
+    normalized = dict(raw)
+    normalized["enabled"] = _parse_bool(
+        normalized.get("enabled", False),
+        "simulator.dynamics.reentry.enabled",
+    )
+    normalized["begin_altitude_km"] = _parse_float(
+        normalized.get("begin_altitude_km", 300.0),
+        "simulator.dynamics.reentry.begin_altitude_km",
+    )
+    if normalized["begin_altitude_km"] < 0.0:
+        raise ValueError("simulator.dynamics.reentry.begin_altitude_km must be >= 0.")
+    if normalized.get("nose_radius_m") is not None:
+        normalized["nose_radius_m"] = _parse_float(
+            normalized.get("nose_radius_m"),
+            "simulator.dynamics.reentry.nose_radius_m",
+        )
+        if normalized["nose_radius_m"] <= 0.0:
+            raise ValueError("simulator.dynamics.reentry.nose_radius_m must be positive.")
+    normalized["heat_rate_coefficient"] = _parse_float(
+        normalized.get("heat_rate_coefficient", 1.83e-4),
+        "simulator.dynamics.reentry.heat_rate_coefficient",
+    )
+    if normalized["heat_rate_coefficient"] < 0.0:
+        raise ValueError("simulator.dynamics.reentry.heat_rate_coefficient must be >= 0.")
+    object_ids = normalized.get("object_ids", [])
+    if isinstance(object_ids, str):
+        normalized["object_ids"] = [object_ids]
+    elif isinstance(object_ids, list):
+        normalized["object_ids"] = [str(item) for item in object_ids]
+    else:
+        raise ValueError("simulator.dynamics.reentry.object_ids must be a string or list of strings.")
+    atmosphere_model = normalized.get("atmosphere_model")
+    if atmosphere_model is not None:
+        atmosphere_model = str(atmosphere_model).strip().lower()
+        if atmosphere_model not in {"", "exponential", "ussa1976", "nrlmsise00", "jb2008"}:
+            raise ValueError(
+                "simulator.dynamics.reentry.atmosphere_model must be one of: "
+                "exponential, ussa1976, nrlmsise00, jb2008."
+            )
+        normalized["atmosphere_model"] = atmosphere_model
+    termination = dict(normalized.get("termination", {}) or {})
+    if termination:
+        by_object_raw = termination.pop("by_object", {})
+        termination = _normalize_reentry_termination_block(
+            termination,
+            "simulator.dynamics.reentry.termination",
+            fill_bool_defaults=True,
+        )
+        if by_object_raw is not None:
+            if not isinstance(by_object_raw, dict):
+                raise ValueError("simulator.dynamics.reentry.termination.by_object must be a mapping.")
+            by_object: dict[str, Any] = {}
+            for object_id, object_termination in by_object_raw.items():
+                object_path = f"simulator.dynamics.reentry.termination.by_object.{object_id}"
+                by_object[str(object_id)] = _normalize_reentry_termination_block(
+                    object_termination,
+                    object_path,
+                    fill_bool_defaults=False,
+                )
+            termination["by_object"] = by_object
+    normalized["termination"] = termination
+    out["reentry"] = normalized
+    return out
+
+
 def _parse_algorithm_pointer(value: Any) -> AlgorithmPointer | None:
     if value is None:
         return None
@@ -861,29 +994,68 @@ def _parse_ground_stations_section(value: Any) -> list[GroundStationSection]:
     return stations
 
 
+def _normalize_simulator_termination_block(
+    value: Any,
+    path: str,
+    *,
+    fill_defaults: bool,
+) -> dict[str, Any]:
+    termination = _as_dict(value, path)
+    if "enabled" in termination and "earth_impact_enabled" not in termination:
+        termination["earth_impact_enabled"] = termination.pop("enabled")
+    elif "enabled" in termination:
+        termination.pop("enabled")
+    if fill_defaults or "earth_impact_enabled" in termination:
+        termination["earth_impact_enabled"] = _parse_bool(
+            termination.get("earth_impact_enabled", True),
+            f"{path}.earth_impact_enabled",
+        )
+    if fill_defaults or "earth_radius_km" in termination:
+        termination["earth_radius_km"] = _parse_float(
+            termination.get("earth_radius_km", 6378.137),
+            f"{path}.earth_radius_km",
+        )
+        if float(termination["earth_radius_km"]) <= 0.0:
+            raise ValueError(f"{path}.earth_radius_km must be positive.")
+    return termination
+
+
 def _parse_simulator_section(value: Any) -> SimulatorSection:
     d = _as_dict(value, "simulator")
     plugin_validation = {"strict": True}
     plugin_validation.update(dict(d.get("plugin_validation", {}) or {}))
+    termination_raw = dict(d.get("termination", {}) or {})
+    termination_by_object_raw = termination_raw.pop("by_object", {})
     termination = {"earth_impact_enabled": True, "earth_radius_km": 6378.137}
-    termination.update(dict(d.get("termination", {}) or {}))
+    termination.update(termination_raw)
     plugin_validation["strict"] = _parse_bool(
         plugin_validation.get("strict", True), "simulator.plugin_validation.strict"
     )
-    termination["earth_impact_enabled"] = _parse_bool(
-        termination.get("earth_impact_enabled", True),
-        "simulator.termination.earth_impact_enabled",
+    termination = _normalize_simulator_termination_block(
+        termination,
+        "simulator.termination",
+        fill_defaults=True,
     )
-    termination["earth_radius_km"] = _parse_float(
-        termination.get("earth_radius_km", 6378.137),
-        "simulator.termination.earth_radius_km",
-    )
+    if termination_by_object_raw is not None:
+        if not isinstance(termination_by_object_raw, dict):
+            raise ValueError("simulator.termination.by_object must be a mapping.")
+        by_object: dict[str, Any] = {}
+        for object_id, object_termination in termination_by_object_raw.items():
+            object_path = f"simulator.termination.by_object.{object_id}"
+            by_object[str(object_id)] = _normalize_simulator_termination_block(
+                object_termination,
+                object_path,
+                fill_defaults=False,
+            )
+        termination["by_object"] = by_object
     out = SimulatorSection(
         scenario_type=str(d.get("scenario_type", "auto")),
         duration_s=_parse_float(d.get("duration_s", 3600.0), "simulator.duration_s"),
         dt_s=_parse_float(d.get("dt_s", 1.0), "simulator.dt_s"),
         initial_jd_utc=_parse_optional_float(d.get("initial_jd_utc"), "simulator.initial_jd_utc"),
-        dynamics=dict(d.get("dynamics", {}) or {}),
+        resource_profile=_parse_resource_profile(d.get("resource_profile"), "simulator.resource_profile"),
+        acceleration=_parse_acceleration_section(d.get("acceleration")),
+        dynamics=_normalize_reentry_section(dict(d.get("dynamics", {}) or {})),
         environment=dict(d.get("environment", {}) or {}),
         plugin_validation=plugin_validation,
         termination=termination,
@@ -892,6 +1064,28 @@ def _parse_simulator_section(value: Any) -> SimulatorSection:
     if not out.scenario_type.strip():
         raise ValueError("simulator.scenario_type must be non-empty.")
     return out
+
+
+def _parse_resource_profile(value: Any, field_name: str) -> str | None:
+    if value in (None, ""):
+        return None
+    profile = str(value).strip().lower()
+    if profile not in {"config", "laptop-safe", "standard", "aggressive", "off"}:
+        raise ValueError(f"{field_name} must be one of: config, laptop-safe, standard, aggressive, off.")
+    return profile
+
+
+def _parse_acceleration_section(value: Any) -> dict[str, Any]:
+    d = _as_dict(value, "simulator.acceleration")
+    mode = str(d.get("mode", "off") or "off").strip().lower()
+    if mode not in {"off", "auto", "numba"}:
+        raise ValueError("simulator.acceleration.mode must be one of: off, auto, numba.")
+    return {
+        **d,
+        "mode": mode,
+        "warmup": _parse_bool(d.get("warmup", False), "simulator.acceleration.warmup"),
+        "env_override": _parse_bool(d.get("env_override", True), "simulator.acceleration.env_override"),
+    }
 
 
 def _parse_mc_variation(value: Any) -> MonteCarloVariation:
@@ -1041,7 +1235,7 @@ def _parse_analysis_section(value: Any, *, legacy_mc: MonteCarloSection) -> Anal
         enabled=_parse_bool(d.get("enabled", False), "analysis.enabled"),
         study_type=str(d.get("study_type", "monte_carlo")).strip().lower(),
         execution=_parse_analysis_execution_section(d.get("execution"), fallback=legacy_mc),
-        metrics=[str(x) for x in metrics],
+        metrics=list(metrics),
         baseline=_parse_analysis_baseline_section(d.get("baseline")),
         monte_carlo=_parse_analysis_monte_carlo_section(d.get("monte_carlo"), fallback=legacy_mc),
         sensitivity=_parse_sensitivity_section(d.get("sensitivity")),

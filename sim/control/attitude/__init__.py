@@ -1,3 +1,4 @@
+from sim.control.attitude.aero_assist import AtmosphericLiftAxisController
 from sim.control.attitude.baseline import (
     QuaternionPDController,
     ReactionWheelPDController,
@@ -20,6 +21,7 @@ from sim.control.attitude.zero_torque import ZeroTorqueController
 
 __all__ = [
     "ZeroTorqueController",
+    "AtmosphericLiftAxisController",
     "SnapAttitudeController",
     "SnapAndHoldRICAttitudeController",
     "SurrogateSnapECIController",

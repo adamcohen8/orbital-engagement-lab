@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 from copy import deepcopy
 from dataclasses import replace
@@ -14,6 +15,7 @@ import sim.game.launcher as game_launcher
 import sim.game.recording_controller as game_recording_controller
 import sim.game.runner as game_runner
 import sim.game.training as game_training
+from sim.acceleration.settings import ACCELERATION_ENV, acceleration_settings_from_config
 from sim.api import SimulationConfig, SimulationSession
 from sim.core.models import Command, StateBelief, StateTruth
 from sim.dynamics.orbit.elements import coes_mapping_to_rv_eci
@@ -1579,6 +1581,29 @@ def test_level_nine_ric_translation_commands_use_target_reference_frame() -> Non
     assert np.allclose(snap1.applied_thrust["chaser"], expected, atol=1e-12)
 
 
+def test_game_attempt_forces_acceleration_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    config_path = Path(__file__).resolve().parents[1] / "game" / "configs" / "game_training_rpo_00_tutorial.yaml"
+    config = SimulationConfig.from_yaml(config_path).with_value("simulator.acceleration.mode", "auto")
+    training_cfg = RPOTrainingConfig.from_metadata(dict(config.scenario.metadata or {}))
+    monkeypatch.setenv(ACCELERATION_ENV, "auto")
+
+    session, _, _ = _start_game_attempt(
+        config,
+        command_state=KeyboardCommandState(),
+        training_cfg=training_cfg,
+        controlled_object_id="chaser",
+        attitude_rate_deg_s=45.0,
+        control_mode="ric_translation",
+        ric_reference_object_id="target",
+    )
+
+    assert os.environ[ACCELERATION_ENV] == "auto"
+    assert session.config.scenario.simulator.acceleration.mode == "off"
+    assert session.config.scenario.simulator.acceleration.warmup is False
+    assert session.config.scenario.simulator.acceleration["env_override"] is False
+    assert acceleration_settings_from_config(session.config.scenario).enabled is False
+
+
 def test_level_nine_restart_gets_fresh_defensive_target_provider() -> None:
     config_path = (
         Path(__file__).resolve().parents[1] / "game" / "configs" / "game_training_rpo_09_defensive_target_demo.yaml"
@@ -2102,7 +2127,7 @@ def test_pursuit_arcade_round_rng_varies_by_session_seed() -> None:
     assert not np.allclose(seeded_a.fixed_direction_ric, seeded_b.fixed_direction_ric)
 
 
-def test_level_ten_is_player_target_survival_against_hcw_pd_chaser() -> None:
+def test_level_ten_is_player_target_survival_against_ric_pd_chaser() -> None:
     config_path = (
         Path(__file__).resolve().parents[1]
         / "game"
@@ -2114,7 +2139,7 @@ def test_level_ten_is_player_target_survival_against_hcw_pd_chaser() -> None:
     chaser = config.scenario.objects["chaser"]
     chaser_initial = chaser.initial_state["relative_to_target_ric"]
     source_config = yaml.safe_load(
-        (Path(__file__).resolve().parents[2] / "configs" / "hcw_pd_10km_experiment.yaml").read_text(
+        (Path(__file__).resolve().parents[2] / "configs" / "ric_pd_10km_experiment.yaml").read_text(
             encoding="utf-8"
         )
     )
@@ -2135,8 +2160,8 @@ def test_level_ten_is_player_target_survival_against_hcw_pd_chaser() -> None:
     assert config.scenario.simulator.duration_s == pytest.approx(6000.0)
     assert training_cfg.fail_on_delta_v_budget is False
     assert _game_coast_chaser_after_delta_v_budget(training_cfg) is True
-    assert chaser.orbit_control.module == "sim.control.orbit.hcw_pd"
-    assert chaser.orbit_control.class_name == "HCWPDController"
+    assert chaser.orbit_control.module == "sim.control.orbit.ric_pd"
+    assert chaser.orbit_control.class_name == "RICPDTransferController"
     assert chaser.orbit_control.module == source_control["module"]
     assert chaser.orbit_control.class_name == source_control["class_name"]
     assert chaser.orbit_control.params == source_control["params"]

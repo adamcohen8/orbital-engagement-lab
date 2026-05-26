@@ -62,21 +62,21 @@ For a guided walkthrough, see [First Five Minutes](first-five-minutes.md).
 
 ## Run The Flagship Review Scenario
 
-After the quickstart succeeds, run the polished 10 km HCW PD rendezvous
+After the quickstart succeeds, run the polished 10 km RIC_PD rendezvous
 workflow:
 
 ```bash
-python run_simulation.py --config configs/hcw_pd_10km_experiment.yaml --validate-only
-python run_simulation.py --config configs/hcw_pd_10km_experiment.yaml
+python run_simulation.py --config configs/ric_pd_10km_experiment.yaml --validate-only
+python run_simulation.py --config configs/ric_pd_10km_experiment.yaml
 ```
 
-This scenario is longer than the quickstart. It exercises a tuned HCW PD orbit
+This scenario is longer than the quickstart. It exercises a tuned RIC_PD orbit
 controller, attitude dynamics, reaction-wheel control, and thrust-alignment
-gating, then writes review artifacts under `outputs/flagship_hcw_pd_10km/`.
-Open `outputs/flagship_hcw_pd_10km/index.md` first.
+gating, then writes review artifacts under `outputs/flagship_ric_pd_10km/`.
+Open `outputs/flagship_ric_pd_10km/index.md` first.
 
 For the scenario-specific review path, see
-[Flagship HCW PD 10 km Scenario](flagship-hcw-pd-10km.md).
+[Flagship RIC_PD 10 km Scenario](flagship-ric-pd-10km.md).
 
 ## Get Config Field Help
 
@@ -93,7 +93,7 @@ Add `--config` to inspect the value currently set in a scenario file without
 loading scenario plugins or running the simulation:
 
 ```bash
-python config_help.py "ephemeris model" --config configs/hcw_pd_10km_experiment.yaml
+python config_help.py "ephemeris model" --config configs/ric_pd_10km_experiment.yaml
 ```
 
 The helper accepts fuzzy queries, so near-misses such as `"emphemeris model"`
@@ -131,7 +131,7 @@ python examples/python/flagship_analysis.py
 ```
 
 It writes custom review metrics under
-`outputs/flagship_hcw_pd_10km/custom_analysis/`.
+`outputs/flagship_ric_pd_10km/custom_analysis/`.
 
 ## Next Scenarios
 
@@ -154,6 +154,14 @@ outputs/examples/public_rendezvous_closed_loop/sensor_access.png
 
 See [Plotting](plotting.md) for the maintained plot presets, figure IDs, and
 map-backed ground-track option.
+
+Atmospheric re-entry diagnostics have a short public smoke config and a longer
+interactive plotting demo:
+
+```bash
+python run_simulation.py --config configs/reentry_smoke.yaml
+python run_simulation.py --config examples/configs/public_reentry_interactive_demo.yaml
+```
 
 ## Optional Profiles
 

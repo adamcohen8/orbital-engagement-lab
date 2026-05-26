@@ -14,9 +14,12 @@ The public repository supports these claims:
   estimation, and control examples are covered by unit and regression tests.
 - Curated public scenarios produce reproducible JSON, CSV, Markdown, and PNG
   artifacts when run in a supported local Python environment.
-- The flagship HCW PD 10 km scenario demonstrates a closed-loop RPO workflow
+- The flagship RIC_PD 10 km scenario demonstrates a closed-loop RPO workflow
   with tuned public controller gains and attitude-gated thrust application under
-  the assumptions written in `configs/hcw_pd_10km_experiment.yaml`.
+  the assumptions written in `configs/ric_pd_10km_experiment.yaml`.
+- The focused RIC_PD 10 km validation package can rerun the flagship scenario
+  through the validation harness and check final range, final relative speed,
+  delta-v, burn-sample, attitude, and knowledge-history gates.
 - The public payload and artifact surfaces are documented in the engine,
   scenario YAML, and payload contracts.
 
@@ -39,16 +42,22 @@ For public users, the first evidence path is:
 
 ```bash
 python run_simulation.py --quickstart
-python run_simulation.py --config configs/hcw_pd_10km_experiment.yaml
+python run_simulation.py --config configs/ric_pd_10km_experiment.yaml
 python examples/python/flagship_analysis.py
+python validation/automated_validation_harness.py --suite ric_pd_10km
 ```
 
 Review:
 
 - `outputs/quickstart_5min/index.md`
-- `outputs/flagship_hcw_pd_10km/index.md`
-- `outputs/flagship_hcw_pd_10km/master_run_summary.json`
-- `outputs/flagship_hcw_pd_10km/custom_analysis/flagship_metrics.json`
+- `outputs/flagship_ric_pd_10km/index.md`
+- `outputs/flagship_ric_pd_10km/master_run_summary.json`
+- `outputs/flagship_ric_pd_10km/custom_analysis/flagship_metrics.json`
+- `outputs/validation_harness_ric_pd_10km/validation_harness_report.md`
+- `outputs/validation_harness_ric_pd_10km/validation_evidence_manifest.json`
+
+For the focused validation claim and gates, see
+[RIC_PD 10 km Validation Package](validation-ric-pd-10km.md).
 
 Private validation harnesses, HPOP comparison workflows, and evidence manifests
 exist in the Pro/private workspace. Those artifacts are useful for engineering

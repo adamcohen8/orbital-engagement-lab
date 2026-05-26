@@ -1,4 +1,5 @@
 from sim.control.orbit.advanced import RobustMPCController, StochasticPolicyController
+from sim.control.orbit.aero_assist import AtmosphericPassController
 from sim.control.orbit.baseline import (
     OrbitalElementsFeedbackController,
     RiskThresholdController,
@@ -40,11 +41,13 @@ from sim.control.orbit.lqr_no_radial import HCWNoRadialLQRController, HCWNoRadia
 from sim.control.orbit.predictive_burn import PredictiveBurnConfig, PredictiveBurnScheduler
 from sim.control.orbit.rcs_allocator import RCSAllocationAwareController
 from sim.control.orbit.relative_mpc import RelativeOrbitMPCController
+from sim.control.orbit.ric_pd import RICPDTransferController
 from sim.control.orbit.rmoe import RMOEIfThenController, estimate_rmoes_from_rect_ric
 from sim.control.orbit.zero_controller import ZeroController
 
 __all__ = [
     "ZeroController",
+    "AtmosphericPassController",
     "ImpulsiveManeuver",
     "DeltaVManeuver",
     "ThrustLimitedDeltaVManeuver",
@@ -55,6 +58,7 @@ __all__ = [
     "IntegratedManeuverDecision",
     "OrbitalAttitudeManeuverCoordinator",
     "HCWLQRController",
+    "RICPDTransferController",
     "HCWPDController",
     "HCWNoRadialLQRController",
     "HCWNoRadialManualController",

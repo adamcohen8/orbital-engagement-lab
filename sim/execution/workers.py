@@ -4,7 +4,11 @@ import os
 from typing import Any
 
 from sim.config import scenario_config_from_dict, validate_scenario_plugins
-from sim.execution.metrics import closest_approach_from_run_payload, relative_range_series_from_run_payload
+from sim.execution.metrics import (
+    closest_approach_from_run_payload,
+    relative_motion_summary_from_run_payload,
+    relative_range_series_from_run_payload,
+)
 from sim.single_run import _run_single_config
 
 _PARALLEL_WORKER_THREAD_ENV_VARS = (
@@ -43,6 +47,7 @@ def run_mc_iteration_from_dict(task: dict[str, Any]) -> dict[str, Any]:
     emit_every = int(task.get("progress_emit_every", 20) or 20)
     emit_every = max(1, emit_every)
     collect_relative_range_series = bool(task.get("collect_relative_range_series", False))
+    collect_payload = bool(task.get("collect_payload", False))
     ci = scenario_config_from_dict(cdict)
     if strict_plugins:
         errs = validate_scenario_plugins(ci)
@@ -91,7 +96,16 @@ def run_mc_iteration_from_dict(task: dict[str, Any]) -> dict[str, Any]:
         "iteration": iteration,
         "summary": ro["summary"],
         "closest_approach_km": closest_approach_from_run_payload(ro),
+        "derived": {
+            "relative_motion": relative_motion_summary_from_run_payload(ro),
+        },
     }
+    rel = dict(result["derived"]["relative_motion"])
+    for key in ("initial_range_km", "final_range_km", "final_relative_speed_m_s", "max_relative_speed_m_s"):
+        if key in rel:
+            result["derived"][key] = rel.get(key)
+    if collect_payload:
+        result["payload"] = ro
     if collect_relative_range_series:
         result["relative_range_series"] = relative_range_series_from_run_payload(ro)
     return result

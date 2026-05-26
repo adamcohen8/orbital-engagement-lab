@@ -44,6 +44,7 @@ A single-run payload should include these top-level keys when applicable:
 - `controller_debug_by_object`
 - `rocket_throttle_cmd`
 - `rocket_metrics`
+- `reentry_metrics_by_object`
 
 Consumers should treat `summary` as the most stable review surface. Detailed
 histories and debug maps are available for analysis, but fields not documented
@@ -74,6 +75,7 @@ The single-run `summary` should include:
 - `knowledge_detection_by_observer`
 - `knowledge_consistency_by_observer`
 - `ground_station_access_summary`
+- `reentry_summary_by_object`
 - `plot_outputs`
 - `animation_outputs`
 - `output_index_md`
@@ -174,6 +176,34 @@ Rocket metrics are present only when a rocket object participates. Consumers
 should handle absent or empty rocket metrics for satellite-only scenarios.
 The exact rocket metric set may grow as the rocket GNC stack matures; consumers
 should prefer explicit key checks over assuming a fixed list.
+
+
+## Re-Entry Metrics
+
+Re-entry fields may include:
+
+- `reentry_metrics_by_object.<object_id>.active`
+- `reentry_metrics_by_object.<object_id>.altitude_km`
+- `reentry_metrics_by_object.<object_id>.density_kg_m3`
+- `reentry_metrics_by_object.<object_id>.relative_speed_m_s`
+- `reentry_metrics_by_object.<object_id>.dynamic_pressure_pa`
+- `reentry_metrics_by_object.<object_id>.drag_decel_m_s2`
+- `reentry_metrics_by_object.<object_id>.lift_accel_m_s2`
+- `reentry_metrics_by_object.<object_id>.lift_to_drag`
+- `reentry_metrics_by_object.<object_id>.g_load`
+- `reentry_metrics_by_object.<object_id>.heat_rate_w_m2`
+- `reentry_metrics_by_object.<object_id>.heat_load_j_m2`
+- `summary.reentry_summary_by_object`
+
+Re-entry metrics are present only when `simulator.dynamics.reentry.enabled` is
+true. The metrics are sampled after each propagation step from the current
+state. `active` means the object is currently below the configured re-entry
+altitude threshold, while `summary.reentry_summary_by_object` preserves
+ever-entered state, episode count, latest exit time, peak lift acceleration,
+lift-to-drag ratio, and cumulative heat load.
+During satellite burns, the burn influences the sampled state, but
+`drag_decel_m_s2` and `g_load` remain aerodynamic drag-load estimates rather
+than total acceleration.
 
 
 ## Ground Station Access

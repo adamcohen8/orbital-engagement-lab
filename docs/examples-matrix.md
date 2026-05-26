@@ -24,6 +24,7 @@ python run_simulation.py --config examples/configs/public_tle_2hr_propagation.ya
 | `public_closed_loop_rendezvous_lqr.yaml` | Compact closed-loop chaser/target rendezvous with HCW LQR | run summary and rendezvous metrics | Fastest controller example for reading the YAML shape. |
 | `public_rendezvous_closed_loop.yaml` | Broader rendezvous with attitude pointing, sensing, EKF knowledge, and plots | dashboard, rendezvous, control, estimation, sensor-access, and ground-track plots | Best public example for end-to-end closed-loop artifact review. |
 | `public_orbit_environment_stack.yaml` | Perturbation and environment toggles | summary JSON and optional plots | Use to inspect deterministic force-model configuration. |
+| `public_reentry_interactive_demo.yaml` | 10-day atmospheric re-entry diagnostics with conservative kill thresholds | interactive re-entry summary, aero, and thermal plots plus JSON artifacts | Starts at the 300 km entry threshold with drag and re-entry termination enabled. |
 | `public_attitude_hold_disturbance.yaml` | Attitude hold under initial error and disturbance torque | attitude histories and control artifacts | Requires no GUI; useful for attitude-control sanity checks. |
 | `public_manual_rpo_training.yaml` | Manual/game-style RPO scenario wiring | game/manual-control-compatible config | Can be launched with `run_game.py` when the `game` extra is installed. |
 | `public_manual_engagement.yaml` | Manual engagement-style scenario with knowledge and defensive behavior | run outputs or game-mode behavior depending on entrypoint | More advanced than the first manual training config. |
@@ -33,9 +34,10 @@ python run_simulation.py --config examples/configs/public_tle_2hr_propagation.ya
 | Config | Purpose | Normal Command |
 | --- | --- | --- |
 | `configs/quickstart_5min.yaml` | Fast first-run smoke scenario | `python run_simulation.py --quickstart` |
-| `configs/hcw_pd_10km_experiment.yaml` | Flagship 10 km HCW PD RPO review scenario with attitude-gated thrust | `python run_simulation.py --config configs/hcw_pd_10km_experiment.yaml` |
+| `configs/ric_pd_10km_experiment.yaml` | Flagship 10 km RIC_PD RPO review scenario with attitude-gated thrust | `python run_simulation.py --config configs/ric_pd_10km_experiment.yaml` |
 | `configs/automation_smoke.yaml` | Small headless validation config | `python run_simulation.py --config configs/automation_smoke.yaml --validate-only` |
 | `configs/plotting_rendezvous_demo.yaml` | Standalone rendezvous plotting demo | `python run_simulation.py --config configs/plotting_rendezvous_demo.yaml` |
+| `configs/reentry_smoke.yaml` | Short atmospheric re-entry diagnostics and plot smoke case | `python run_simulation.py --config configs/reentry_smoke.yaml` |
 
 ## Game Levels
 
@@ -64,12 +66,14 @@ python run_game.py sim/game/configs/game_training_rpo_04_rendezvous.yaml
 ## Choosing A Starting Point
 
 - New user: start with `configs/quickstart_5min.yaml`.
-- Flagship review workflow: run `configs/hcw_pd_10km_experiment.yaml`, then
+- Flagship review workflow: run `configs/ric_pd_10km_experiment.yaml`, then
   `examples/python/flagship_analysis.py`.
 - TLE propagation: start with `public_tle_2hr_propagation.yaml`.
 - Ground-station access: start with `public_ground_station_access_from_tle.yaml`.
+- Atmospheric re-entry: start with `configs/reentry_smoke.yaml`, then use
+  `public_reentry_interactive_demo.yaml` for the longer interactive plot view.
 - Closed-loop control: start with `public_closed_loop_rendezvous_lqr.yaml`.
-- Plot/artifact review: start with `configs/hcw_pd_10km_experiment.yaml`.
+- Plot/artifact review: start with `configs/ric_pd_10km_experiment.yaml`.
 - Guided RPO trainer: start with `run_game.py`.
 - Manual RPO config wiring: start with
   `public_manual_rpo_training.yaml`.

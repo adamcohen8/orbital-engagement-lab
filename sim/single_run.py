@@ -8,6 +8,8 @@ from typing import Any, Callable
 
 import numpy as np
 
+from sim.acceleration.settings import acceleration_context_from_config
+from sim.aero import resolve_vehicle_aero_properties
 from sim.config import (
     SimulationScenarioConfig,
     configured_objects,
@@ -18,6 +20,12 @@ from sim.config import (
 from sim.core.models import Command, StateTruth
 from sim.dynamics.attitude.rigid_body import get_attitude_guardrail_stats, reset_attitude_guardrail_stats
 from sim.dynamics.orbit.spherical_harmonics import configure_spherical_harmonics_env
+from sim.dynamics.reentry import (
+    REENTRY_METRIC_KEYS,
+    ReentryObjectProperties,
+    reentry_config_from_dynamics,
+    reentry_metrics_for_state,
+)
 from sim.reporting.single_run_artifacts import (
     SingleRunArtifactContext,
     write_single_run_artifacts,
@@ -78,7 +86,9 @@ class _SingleRunPayloadParts:
     torque_hist: dict[str, np.ndarray]
     desired_attitude_hist: dict[str, np.ndarray]
     knowledge_hist: dict[str, dict[str, np.ndarray]]
+    knowledge_measurement_hist: dict[str, dict[str, np.ndarray]]
     rocket_metrics: dict[str, np.ndarray]
+    reentry_metrics: dict[str, dict[str, np.ndarray]]
     thrust_stats: dict[str, dict[str, Any]]
 
 
@@ -103,8 +113,11 @@ class _SingleRunEngine:
         orbit_cfg = dict(dynamics_cfg.get("orbit", {}) or {})
         att_cfg = dict(dynamics_cfg.get("attitude", {}) or {})
         self.base_environment = configure_spherical_harmonics_env(dict(cfg.simulator.environment or {}), orbit_cfg)
+        if orbit_cfg.get("atmosphere_model") not in (None, "") and "atmosphere_model" not in self.base_environment:
+            self.base_environment["atmosphere_model"] = str(orbit_cfg.get("atmosphere_model")).strip().lower()
         if cfg.simulator.initial_jd_utc is not None and "jd_utc_start" not in self.base_environment:
             self.base_environment["jd_utc_start"] = float(cfg.simulator.initial_jd_utc)
+        self.reentry_cfg = reentry_config_from_dynamics(dynamics_cfg)
         self.attitude_enabled = bool(att_cfg.get("enabled", True))
         orbit_substep_s = float(max(float(orbit_cfg.get("orbit_substep_s", self.dt) or self.dt), 1e-9))
         attitude_substep_s = float(max(float(att_cfg.get("attitude_substep_s", self.dt) or self.dt), 1e-9))
@@ -145,6 +158,8 @@ class _SingleRunEngine:
         self.rocket = self.agents.get("rocket") or next((a for a in self.agents.values() if a.kind == "rocket"), None)
         self.chaser = self.agents.get("chaser")
         self.target = self.agents.get("target")
+        self.reentry_object_ids = self._resolve_reentry_object_ids()
+        self.reentry_active_by_object = {aid: False for aid in self.reentry_object_ids}
 
         for aid, agent in self.agents.items():
             if agent.kind != "satellite" or agent.deploy_source in {"rocket_deployment", "rocket_insertion"}:
@@ -242,13 +257,20 @@ class _SingleRunEngine:
             if self.rocket is not None
             else {}
         )
+        self.reentry_metric_hists = {
+            aid: {key: np.full(self.n, np.nan) for key in REENTRY_METRIC_KEYS}
+            for aid in self.reentry_object_ids
+        }
         self.knowledge_hist: dict[str, dict[str, np.ndarray]] = {}
+        self.knowledge_measurement_hist: dict[str, dict[str, np.ndarray]] = {}
         self.bridge_hist: dict[str, list[dict[str, Any]]] = {aid: [] for aid in self.agents.keys()}
         for aid, agent in self.agents.items():
             if agent.knowledge_base is not None:
                 self.knowledge_hist[aid] = {}
+                self.knowledge_measurement_hist[aid] = {}
                 for tid in agent.knowledge_base.target_ids():
                     self.knowledge_hist[aid][tid] = np.full((self.n, 6), np.nan)
+                    self.knowledge_measurement_hist[aid][tid] = np.full((self.n, 6), np.nan)
         self.knowledge_sync = _KnowledgeSynchronizer(self)
         self.knowledge_sync.initialize()
 
@@ -306,8 +328,71 @@ class _SingleRunEngine:
                     for metric_key, metric_value in initial_metrics.items():
                         if metric_key in self.rocket_metric_hists:
                             self.rocket_metric_hists[metric_key][0] = float(metric_value)
+            self._record_reentry_metrics(aid=aid, truth=truth, sample_index=0, dt_s=0.0)
 
+        self.termination_monitor.check_reentry(t_s=float(self.t_s[0]))
         self._emit_step_callback(0)
+
+    def _resolve_reentry_object_ids(self) -> list[str]:
+        if not bool(self.reentry_cfg.enabled):
+            return []
+        configured = [str(item).strip() for item in self.reentry_cfg.object_ids if str(item).strip()]
+        if configured and not any(item in {"*", "all"} for item in configured):
+            return [aid for aid in configured if aid in self.agents]
+        return [aid for aid, agent in self.agents.items() if agent.kind == "satellite"]
+
+    def _reentry_properties_for_agent(self, aid: str, agent: AgentRuntime, truth: StateTruth) -> ReentryObjectProperties:
+        agent_cfg = self.object_configs.get(aid)
+        specs = dict(getattr(agent_cfg, "specs", {}) or {}) if agent_cfg is not None else {}
+        dynamics = getattr(agent, "dynamics", None)
+        aero = resolve_vehicle_aero_properties(
+            specs,
+            default_reference_area_m2=1.0,
+            default_cd=2.2,
+            default_cl=0.0,
+            default_nose_radius_m=self.reentry_cfg.default_nose_radius_m,
+        )
+        area_m2 = float(getattr(dynamics, "area_m2", aero.reference_area_m2) or aero.reference_area_m2)
+        drag_area_m2 = getattr(dynamics, "drag_area_m2", None)
+        if drag_area_m2 is None:
+            drag_area_m2 = aero.drag_area_m2 if aero.drag_area_m2 is not None else area_m2
+        cd = float(getattr(dynamics, "cd", aero.cd) or aero.cd)
+        lift_area_m2 = getattr(dynamics, "lift_area_m2", None)
+        if lift_area_m2 is None:
+            lift_area_m2 = aero.lift_area_m2 if aero.lift_area_m2 is not None else drag_area_m2
+        cl = float(getattr(dynamics, "lift_coefficient", aero.cl) or 0.0)
+        return ReentryObjectProperties(
+            mass_kg=float(max(float(truth.mass_kg), 1e-12)),
+            drag_area_m2=float(max(float(drag_area_m2), 0.0)),
+            cd=cd,
+            nose_radius_m=float(aero.nose_radius_m),
+            lift_area_m2=None if lift_area_m2 is None else float(max(float(lift_area_m2), 0.0)),
+            cl=cl,
+        )
+
+    def _record_reentry_metrics(self, *, aid: str, truth: StateTruth, sample_index: int, dt_s: float) -> None:
+        if aid not in self.reentry_metric_hists:
+            return
+        altitude_km = float(np.linalg.norm(truth.position_eci_km) - 6378.137)
+        active = bool(altitude_km <= self.reentry_cfg.begin_altitude_km)
+        self.reentry_active_by_object[aid] = bool(self.reentry_active_by_object.get(aid, False) or active)
+        prev_heat = 0.0
+        if sample_index > 0:
+            prev_heat = float(self.reentry_metric_hists[aid]["heat_load_j_m2"][sample_index - 1])
+        metrics = reentry_metrics_for_state(
+            r_eci_km=truth.position_eci_km,
+            v_eci_km_s=truth.velocity_eci_km_s,
+            t_s=truth.t_s,
+            dt_s=dt_s,
+            cfg=self.reentry_cfg,
+            props=self._reentry_properties_for_agent(aid, self.agents[aid], truth),
+            env=self.base_environment,
+            active=active,
+            previous_heat_load_j_m2=prev_heat,
+        )
+        for key, value in metrics.items():
+            if key in self.reentry_metric_hists[aid]:
+                self.reentry_metric_hists[aid][key][sample_index] = float(value)
 
     def _estimate_history_memory(self) -> HistoryMemoryEstimate:
         itemsize = np.dtype(float).itemsize
@@ -327,6 +412,7 @@ class _SingleRunEngine:
         if self.rocket is not None:
             float_columns += 3  # stage index, dynamic pressure, mach
             float_columns += 17  # rocket GNC/navigation metric histories
+        float_columns += len(getattr(self, "reentry_object_ids", []) or []) * len(REENTRY_METRIC_KEYS)
 
         knowledge_pairs = 0
         for agent in self.agents.values():
@@ -334,7 +420,7 @@ class _SingleRunEngine:
                 continue
             targets = list(agent.knowledge_base.target_ids())
             knowledge_pairs += len(targets)
-            float_columns += 6 * len(targets)
+            float_columns += 12 * len(targets)  # estimated state and raw measurement histories
 
         retained_python_bytes_per_sample = 0
         for agent in self.agents.values():
@@ -520,6 +606,13 @@ class _SingleRunEngine:
         return mission_out
 
     def step(self) -> dict[str, Any]:
+        if not bool(getattr(self, "_acceleration_context_active", False)):
+            with acceleration_context_from_config(self.cfg):
+                self._acceleration_context_active = True
+                try:
+                    return self.step()
+                finally:
+                    self._acceleration_context_active = False
         if self.done:
             return self.snapshot()
 
@@ -644,15 +737,25 @@ class _SingleRunEngine:
             if agent.belief is not None:
                 self._ensure_belief_hist_width(aid, agent.belief.state.size)
                 self.belief_hist[aid][k + 1, : agent.belief.state.size] = agent.belief.state
+            self._record_reentry_metrics(aid=aid, truth=truth, sample_index=k + 1, dt_s=self.dt)
 
         self.current_index = k + 1
         self._emit_step_callback(self.current_index)
 
+        if self.termination_monitor.check_reentry(t_s=t_next):
+            return self.snapshot()
         if self.termination_monitor.check_earth_impact(t_s=t_next):
             return self.snapshot()
         return self.snapshot()
 
     def run(self) -> dict[str, Any]:
+        if not bool(getattr(self, "_acceleration_context_active", False)):
+            with acceleration_context_from_config(self.cfg):
+                self._acceleration_context_active = True
+                try:
+                    return self.run()
+                finally:
+                    self._acceleration_context_active = False
         while not self.done:
             self.step()
         return self.build_payload()
@@ -672,6 +775,10 @@ class _SingleRunEngine:
             obs: {tgt: arr[:n_used, :].copy() for tgt, arr in by_tgt.items()}
             for obs, by_tgt in self.knowledge_hist.items()
         }
+        knowledge_measurements_out = {
+            obs: {tgt: arr[:n_used, :].copy() for tgt, arr in by_tgt.items()}
+            for obs, by_tgt in getattr(self, "knowledge_measurement_hist", {}).items()
+        }
         rocket_metrics_out: dict[str, np.ndarray] = {}
         if self.rocket is not None:
             rocket_object_id = str(getattr(self.rocket, "object_id", "rocket") or "rocket")
@@ -685,6 +792,10 @@ class _SingleRunEngine:
                 rocket_metrics_out["throttle_cmd"] = self.throttle_hist[rocket_object_id][:n_used].copy()
             for metric_key, metric_hist in getattr(self, "rocket_metric_hists", {}).items():
                 rocket_metrics_out[metric_key] = metric_hist[:n_used].copy()
+        reentry_metrics_out = {
+            oid: {key: hist[:n_used].copy() for key, hist in metrics.items()}
+            for oid, metrics in getattr(self, "reentry_metric_hists", {}).items()
+        }
 
         thrust_stats = {
             oid: {
@@ -704,7 +815,9 @@ class _SingleRunEngine:
             torque_hist=torque_out,
             desired_attitude_hist=desired_attitude_out,
             knowledge_hist=knowledge_out,
+            knowledge_measurement_hist=knowledge_measurements_out,
             rocket_metrics=rocket_metrics_out,
+            reentry_metrics=reentry_metrics_out,
             thrust_stats=thrust_stats,
         )
 
@@ -722,10 +835,12 @@ class _SingleRunEngine:
                 torque_hist=parts.torque_hist,
                 desired_attitude_hist=parts.desired_attitude_hist,
                 knowledge_hist=parts.knowledge_hist,
+                knowledge_measurement_hist=parts.knowledge_measurement_hist,
                 bridge_hist=self.bridge_hist,
                 controller_debug_hist=self.controller_debug_hist,
                 rocket_throttle_cmd=self._primary_rocket_throttle_history(),
                 rocket_metrics=parts.rocket_metrics,
+                reentry_metrics=parts.reentry_metrics,
                 thrust_stats=parts.thrust_stats,
                 attitude_guardrail_stats=get_attitude_guardrail_stats(),
                 knowledge_detection_by_observer={
@@ -771,12 +886,21 @@ class _SingleRunEngine:
                 thrust_hist=parts.thrust_hist,
                 desired_attitude_hist=parts.desired_attitude_hist,
                 knowledge_hist=parts.knowledge_hist,
+                knowledge_measurement_hist=parts.knowledge_measurement_hist,
                 rocket_metrics=parts.rocket_metrics,
+                reentry_metrics=parts.reentry_metrics,
                 bridge_hist=self.bridge_hist,
             ),
         )
 
     def build_payload(self) -> dict[str, Any]:
+        if not bool(getattr(self, "_acceleration_context_active", False)):
+            with acceleration_context_from_config(self.cfg):
+                self._acceleration_context_active = True
+                try:
+                    return self.build_payload()
+                finally:
+                    self._acceleration_context_active = False
         parts = self._build_payload_parts()
         payload = self._payload_from_parts(parts)
         return self._write_artifacts(payload, parts)
@@ -786,7 +910,8 @@ def _run_single_config(
     cfg: SimulationScenarioConfig,
     step_callback: Callable[[int, int], None] | None = None,
 ) -> dict[str, Any]:
-    return _SingleRunEngine(cfg, step_callback=step_callback).run()
+    with acceleration_context_from_config(cfg):
+        return _SingleRunEngine(cfg, step_callback=step_callback).run()
 
 
 def _is_truthy_env(name: str) -> bool:

@@ -129,6 +129,14 @@ _SANDBOX_SETUP_FIELDS: tuple[tuple[str, str, str], ...] = (
 )
 
 
+def _force_game_acceleration_off_config(config: SimulationConfig) -> SimulationConfig:
+    return (
+        config.with_value("simulator.acceleration.mode", "off")
+        .with_value("simulator.acceleration.warmup", False)
+        .with_value("simulator.acceleration.env_override", False)
+    )
+
+
 def _max_accel_from_config(config: SimulationConfig, controlled_object_id: str) -> float:
     section = object_section(config.scenario, str(controlled_object_id))
     if section is None:
@@ -950,7 +958,7 @@ def run_game_mode(
 ) -> GameRunResult:
     from sim.game.pygame_dashboard import PygameRPODashboard
 
-    config = SimulationConfig.from_yaml(config_path)
+    config = _force_game_acceleration_off_config(SimulationConfig.from_yaml(config_path))
     controlled_object_id = _game_controlled_object_id(config, default=controlled_object_id or "chaser")
     control_mode = _game_control_mode(config)
     difficulty = str(difficulty_override or _game_difficulty(config)).strip().lower()
@@ -1787,6 +1795,7 @@ def _start_game_attempt(
     ric_reference_object_id: str,
     defensive_target_provider: DefensiveTargetIntentProvider | None = None,
 ) -> tuple[SimulationSession, ManualGameCommandProvider, Any]:
+    config = _force_game_acceleration_off_config(config)
     session = SimulationSession.from_config(_attempt_config_for_training_clock(config, training_cfg))
     provider = ManualGameCommandProvider(
         command_state=command_state,

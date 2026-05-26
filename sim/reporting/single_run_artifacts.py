@@ -27,7 +27,9 @@ class SingleRunArtifactContext:
     thrust_hist: dict[str, np.ndarray]
     desired_attitude_hist: dict[str, np.ndarray]
     knowledge_hist: dict[str, dict[str, np.ndarray]]
+    knowledge_measurement_hist: dict[str, dict[str, np.ndarray]]
     rocket_metrics: dict[str, np.ndarray]
+    reentry_metrics: dict[str, dict[str, np.ndarray]]
     bridge_hist: dict[str, list[dict[str, Any]]]
 
 
@@ -62,6 +64,13 @@ def format_single_run_summary(summary: dict[str, Any]) -> str:
         ins_ok = bool(summary.get("rocket_insertion_achieved", False))
         ins_t = summary.get("rocket_insertion_time_s")
         lines.append(f"Insertion  : achieved at t={ins_t}" if ins_ok else "Insertion  : not achieved")
+    reentry_summary = dict(summary.get("reentry_summary_by_object", {}) or {})
+    if reentry_summary:
+        entered = [oid for oid, item in reentry_summary.items() if bool(dict(item or {}).get("entered_reentry"))]
+        lines.append(
+            "Re-entry   : "
+            + (", ".join(sorted(entered)) if entered else "configured, threshold not crossed")
+        )
     thrust_stats = dict(summary.get("thrust_stats", {}) or {})
     if thrust_stats:
         lines.append("-" * 72)
@@ -100,7 +109,9 @@ def write_single_run_artifacts(
         thrust_hist=context.thrust_hist,
         desired_attitude_hist=context.desired_attitude_hist,
         knowledge_hist=context.knowledge_hist,
+        knowledge_measurement_hist=context.knowledge_measurement_hist,
         rocket_metrics=context.rocket_metrics if context.rocket_metrics else None,
+        reentry_metrics=context.reentry_metrics,
         bridge_hist=context.bridge_hist,
         outdir=context.outdir,
     )
@@ -221,7 +232,9 @@ def _plot_outputs(
     thrust_hist: dict[str, np.ndarray],
     desired_attitude_hist: dict[str, np.ndarray] | None,
     knowledge_hist: dict[str, dict[str, np.ndarray]],
+    knowledge_measurement_hist: dict[str, dict[str, np.ndarray]],
     rocket_metrics: dict[str, np.ndarray] | None,
+    reentry_metrics: dict[str, dict[str, np.ndarray]] | None,
     bridge_hist: dict[str, list[dict[str, Any]]] | None,
     outdir: Path,
 ) -> dict[str, str]:
@@ -234,7 +247,9 @@ def _plot_outputs(
         belief_hist=belief_hist,
         desired_attitude_hist=desired_attitude_hist,
         knowledge_hist=knowledge_hist,
+        knowledge_measurement_hist=knowledge_measurement_hist,
         rocket_metrics=rocket_metrics,
+        reentry_metrics=reentry_metrics or {},
         bridge_hist=bridge_hist,
         outdir=outdir,
         resolve_rocket_stack=_resolve_rocket_stack,

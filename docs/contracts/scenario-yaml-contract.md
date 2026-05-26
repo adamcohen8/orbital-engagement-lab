@@ -249,6 +249,40 @@ Dynamics contract:
 - Orbit dynamics live under `simulator.dynamics.orbit`.
 - Attitude dynamics live under `simulator.dynamics.attitude`.
 - Rocket dynamics configuration lives under `simulator.dynamics.rocket`.
+- Atmospheric re-entry diagnostics live under `simulator.dynamics.reentry`.
+  `enabled` must be a boolean, `begin_altitude_km` must be non-negative, and
+  `object_ids` must be a string or list of strings. Vehicle nose geometry belongs
+  on object specs under `aero.nose_radius_m`, with `nose_radius_m` and
+  `reentry_nose_radius_m` accepted as legacy aliases. Re-entry tracking
+  is current-state based: objects are active while below `begin_altitude_km`,
+  while summaries preserve whether they ever entered and how many entry episodes
+  occurred. Re-entry tracking does not override `orbit.drag`; drag remains the
+  force-model toggle. Optional atmospheric steering also depends on `orbit.drag`
+  and is configured on satellite object specs under `aero` with `cl`, optional
+  `lift_area_m2`, and `lift_axis_body` or `lift_vector_body`. The flat forms
+  remain accepted as aliases.
+- Shared vehicle aero properties should live under `objects.<id>.specs.aero`.
+  Common keys are `reference_area_m2`, `drag_area_m2`, `lift_area_m2`, `cd`,
+  `cl`, `nose_radius_m`, `reference_length_m`,
+  `lift_axis_body`/`lift_vector_body`, and `cp_offset_body_m`.
+  `objects.<id>.specs.aero` owns vehicle physical/aero properties;
+  `simulator.dynamics.orbit.drag` owns force-model enablement;
+  `simulator.dynamics.reentry` owns diagnostics, limits, and termination; and
+  `simulator.dynamics.rocket.aero` owns detailed rocket coefficient refinements.
+  Flat compatibility aliases override same-named nested `specs.aero` values
+  when both are present. Rocket-specific coefficient refinements under
+  `simulator.dynamics.rocket.aero` are still supported and override the shared
+  object-level defaults for rocket ascent.
+  Aero numeric values must be finite. Areas and `cd` must be non-negative,
+  `cl` may be signed, and `nose_radius_m` and `reference_length_m` must be
+  positive.
+- Re-entry early termination lives under
+  `simulator.dynamics.reentry.termination`. `enabled` and
+  `terminate_on_entry` must be booleans. Numeric limits must be non-negative:
+  `min_altitude_km`, `max_dynamic_pressure_pa`, `max_drag_decel_m_s2`,
+  `max_g_load`, `max_heat_rate_w_m2`, and `max_heat_load_j_m2`.
+  `termination.by_object` may provide per-object overrides using the same keys;
+  unspecified object values inherit the scenario-level termination defaults.
 - Time-dependent environment behavior may use `initial_jd_utc` and environment
   ephemeris settings.
 
@@ -256,6 +290,9 @@ Termination contract:
 
 - `termination.earth_impact_enabled` controls Earth-impact termination.
 - `termination.earth_radius_km` defines the impact radius when enabled.
+- `termination.by_object` may override `earth_impact_enabled` and
+  `earth_radius_km` per object. Object overrides inherit the scenario-level
+  Earth-impact defaults unless a field is supplied.
 
 
 ## Outputs Section

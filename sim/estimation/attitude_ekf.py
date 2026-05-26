@@ -1,9 +1,14 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
+from sim.acceleration.kernels.estimation import (
+    attitude_ekf_numerical_jacobian_kernel,
+    attitude_ekf_propagate_state_kernel,
+)
+from sim.acceleration.settings import acceleration_settings_from_mode
 from sim.core.interfaces import Estimator
 from sim.core.models import Measurement, StateBelief
 from sim.utils.quaternion import normalize_quaternion, omega_matrix
@@ -15,6 +20,17 @@ class AttitudeEKFEstimator(Estimator):
     inertia_kg_m2: np.ndarray
     process_noise_diag: np.ndarray
     meas_noise_diag: np.ndarray
+    acceleration_mode: str = "off"
+    _acceleration_enabled_value: bool = field(default=False, init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        self.inertia_kg_m2 = np.asarray(self.inertia_kg_m2, dtype=float).reshape(3, 3)
+        self.process_noise_diag = np.asarray(self.process_noise_diag, dtype=float).reshape(7)
+        self.meas_noise_diag = np.asarray(self.meas_noise_diag, dtype=float).reshape(7)
+        self._acceleration_enabled_value = bool(acceleration_settings_from_mode(self.acceleration_mode).enabled)
+
+    def _acceleration_enabled(self) -> bool:
+        return self._acceleration_enabled_value
 
     def update(self, belief: StateBelief, measurement: Measurement | None, t_s: float) -> StateBelief:
         x_prev = belief.state
@@ -56,6 +72,12 @@ class AttitudeEKFEstimator(Estimator):
 
     def _propagate_state(self, x: np.ndarray, *, dt_s: float | None = None) -> np.ndarray:
         step_dt_s = self.dt_s if dt_s is None else float(dt_s)
+        if self._acceleration_enabled():
+            return attitude_ekf_propagate_state_kernel(
+                np.asarray(x, dtype=float).reshape(7),
+                step_dt_s,
+                np.asarray(self.inertia_kg_m2, dtype=float).reshape(3, 3),
+            )
         q = normalize_quaternion(x[:4])
         w = x[4:7]
 
@@ -70,6 +92,13 @@ class AttitudeEKFEstimator(Estimator):
     def _numerical_jacobian(self, x: np.ndarray, *, dt_s: float | None = None) -> np.ndarray:
         eps = 1e-6
         base = self._propagate_state(x, dt_s=dt_s)
+        if self._acceleration_enabled():
+            return attitude_ekf_numerical_jacobian_kernel(
+                np.asarray(x, dtype=float).reshape(7),
+                np.asarray(base, dtype=float).reshape(7),
+                self.dt_s if dt_s is None else float(dt_s),
+                np.asarray(self.inertia_kg_m2, dtype=float).reshape(3, 3),
+            )
         j = np.zeros((7, 7))
         for i in range(7):
             xp = x.copy()
