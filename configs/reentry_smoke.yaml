@@ -1,0 +1,47 @@
+scenario_name: "reentry_smoke"
+scenario_description: "Short atmospheric re-entry diagnostics smoke case."
+
+objects:
+  capsule:
+    kind: "satellite"
+    role: "reentry_test_article"
+    specs:
+      mass_kg: 100.0
+      aero:
+        drag_area_m2: 2.0
+        cd: 2.2
+        nose_radius_m: 0.4
+    initial_state:
+      position_eci_km: [6500.0, 0.0, 0.0]
+      velocity_eci_km_s: [0.0, 7.8, 0.0]
+
+simulator:
+  duration_s: 20.0
+  dt_s: 1.0
+  dynamics:
+    orbit:
+      model: "two_body"
+      drag: false
+    reentry:
+      enabled: true
+      begin_altitude_km: 130.0
+      object_ids: ["capsule"]
+      atmosphere_model: "ussa1976"
+    attitude:
+      enabled: false
+  termination:
+    earth_impact_enabled: false
+
+outputs:
+  output_dir: "outputs/reentry_smoke"
+  mode: "save"
+  stats:
+    print_summary: true
+    save_json: true
+    save_full_log: true
+  plots:
+    enabled: true
+    preset: "reentry"
+    dpi: 150
+  animations:
+    enabled: false

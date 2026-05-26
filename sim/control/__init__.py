@@ -1,4 +1,5 @@
 from sim.control.attitude import (
+    AtmosphericLiftAxisController,
     CMGSteeringController,
     DetumbleThenSlewController,
     ECIDetumblePDController,
@@ -20,6 +21,7 @@ from sim.control.attitude import (
     ZeroTorqueController,
 )
 from sim.control.orbit import (
+    AtmosphericPassController,
     AttitudeAgnosticImpulsiveManeuverer,
     DeltaVManeuver,
     ElectricPropulsionController,
@@ -53,6 +55,7 @@ from sim.control.orbit import (
 
 __all__ = [
     "ZeroController",
+    "AtmosphericPassController",
     "DeltaVManeuver",
     "ThrustLimitedDeltaVManeuver",
     "ThrustLimitedDeltaVManeuverResult",
@@ -82,6 +85,7 @@ __all__ = [
     "RobustMPCController",
     "StochasticPolicyController",
     "ZeroTorqueController",
+    "AtmosphericLiftAxisController",
     "PoseCommandGenerator",
     "DetumbleThenSlewController",
     "ECIDetumblePDController",

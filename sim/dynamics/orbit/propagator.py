@@ -5,12 +5,15 @@ from typing import Callable
 
 import numpy as np
 
+from sim.acceleration.kernels.orbit import rk4_zonal_step_state
+from sim.acceleration.settings import acceleration_settings_from_mode
 from sim.dynamics.orbit.accelerations import (
     OrbitContext,
     accel_drag,
     accel_j2,
     accel_j3,
     accel_j4,
+    accel_lift,
     accel_srp,
     accel_third_body,
     accel_two_body,
@@ -167,6 +170,36 @@ def drag_plugin(t_s: float, x_eci: np.ndarray, env: dict, ctx: OrbitContext) -> 
     )
 
 
+def lift_plugin(t_s: float, x_eci: np.ndarray, env: dict, ctx: OrbitContext) -> np.ndarray:
+    cl = float(env.get("lift_coefficient", env.get("cl", 0.0)) or 0.0)
+    lift_direction = env.get("lift_direction_eci")
+    if lift_direction is None or cl == 0.0:
+        return np.zeros(3)
+    density = env.get("density_kg_m3")
+    if density is None:
+        atmo_model = str(env.get("atmosphere_model", "exponential")).lower()
+        density = density_from_model(
+            atmo_model,
+            x_eci[:3],
+            t_s,
+            env=env,
+        )
+    return accel_lift(
+        x_eci[:3],
+        x_eci[3:],
+        t_s,
+        ctx.mass_kg,
+        ctx.area_m2,
+        cl,
+        np.array(lift_direction, dtype=float).reshape(3),
+        {
+            "density_kg_m3": density,
+            "lift_area_m2": env.get("lift_area_m2", env.get("drag_area_m2", ctx.area_m2)),
+            "drag_earth_rotation_rad_s": env.get("drag_earth_rotation_rad_s"),
+        },
+    )
+
+
 def srp_plugin(t_s: float, x_eci: np.ndarray, env: dict, ctx: OrbitContext) -> np.ndarray:
     srp_geometry = resolve_srp_geometry(x_eci[:3], t_s, env)
     return accel_srp(
@@ -230,8 +263,12 @@ class OrbitPropagator:
     plugins: list[AccelerationPlugin] = field(default_factory=list)
     adaptive_atol: float = 1e-9
     adaptive_rtol: float = 1e-7
+    acceleration_mode: str = "off"
     _rkf78_h_next: float | None = field(default=None, init=False, repr=False)
     _rkf78_last_t_s: float | None = field(default=None, init=False, repr=False)
+    _acceleration_enabled_cache: bool | None = field(default=None, init=False, repr=False)
+    _zonal_rk4_fast_path_checked: bool = field(default=False, init=False, repr=False)
+    _zonal_rk4_fast_path_flags_cache: tuple[bool, bool, bool] | None = field(default=None, init=False, repr=False)
 
     def propagate(
         self,
@@ -242,6 +279,19 @@ class OrbitPropagator:
         env: dict,
         ctx: OrbitContext,
     ) -> np.ndarray:
+        fast_flags = self._zonal_rk4_fast_path_flags()
+        if self._acceleration_enabled() and fast_flags is not None:
+            include_j2, include_j3, include_j4 = fast_flags
+            return rk4_zonal_step_state(
+                np.asarray(x_eci, dtype=float).reshape(6),
+                float(dt_s),
+                np.asarray(command_accel_eci_km_s2, dtype=float).reshape(3),
+                float(ctx.mu_km3_s2),
+                include_j2,
+                include_j3,
+                include_j4,
+            )
+
         def deriv(t_local: float, x_local: np.ndarray) -> np.ndarray:
             dx = np.empty(6, dtype=float)
             dx[:3] = x_local[3:]
@@ -279,3 +329,24 @@ class OrbitPropagator:
                 method=adaptive_method,
             )
         return rk4_step_state(deriv_fn=deriv, t_s=t_s, x=x_eci, dt_s=dt_s)
+
+    def _acceleration_enabled(self) -> bool:
+        if self._acceleration_enabled_cache is None:
+            self._acceleration_enabled_cache = bool(acceleration_settings_from_mode(self.acceleration_mode).enabled)
+        return bool(self._acceleration_enabled_cache)
+
+    def _zonal_rk4_fast_path_flags(self) -> tuple[bool, bool, bool] | None:
+        if self._zonal_rk4_fast_path_checked:
+            return self._zonal_rk4_fast_path_flags_cache
+        self._zonal_rk4_fast_path_checked = True
+        if str(self.integrator).strip().lower() != "rk4":
+            return None
+        supported = {j2_plugin, j3_plugin, j4_plugin}
+        if any(plugin not in supported for plugin in self.plugins):
+            return None
+        self._zonal_rk4_fast_path_flags_cache = (
+            j2_plugin in self.plugins,
+            j3_plugin in self.plugins,
+            j4_plugin in self.plugins,
+        )
+        return self._zonal_rk4_fast_path_flags_cache

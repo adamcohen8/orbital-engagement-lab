@@ -49,7 +49,7 @@ def test_quickstart_5min_runs_headlessly_and_writes_start_here_artifacts(tmp_pat
     assert "## What Happened" in index_text
     assert "Open [`master_run_summary.json`](master_run_summary.json)" in index_text
     assert "Closest approach:" in index_text
-    assert "python run_simulation.py --config configs/hcw_pd_10km_experiment.yaml" in index_text
+    assert "python run_simulation.py --config configs/ric_pd_10km_experiment.yaml" in index_text
     assert "Inspect generated plot or animation artifacts listed below." not in index_text
 
     summary = json.loads((outdir / "master_run_summary.json").read_text(encoding="utf-8"))
@@ -74,10 +74,10 @@ def test_quickstart_cli_shortcut_validates() -> None:
     assert "OK" in proc.stdout
 
 
-def test_flagship_hcw_pd_config_validates() -> None:
+def test_flagship_ric_pd_config_validates() -> None:
     root = Path(__file__).resolve().parents[2]
     proc = subprocess.run(
-        [sys.executable, "run_simulation.py", "--config", "configs/hcw_pd_10km_experiment.yaml", "--validate-only"],
+        [sys.executable, "run_simulation.py", "--config", "configs/ric_pd_10km_experiment.yaml", "--validate-only"],
         cwd=root,
         text=True,
         capture_output=True,
@@ -85,13 +85,13 @@ def test_flagship_hcw_pd_config_validates() -> None:
     )
 
     assert proc.returncode == 0
-    assert "hcw_pd_10km_experiment" in proc.stdout
+    assert "ric_pd_10km_experiment" in proc.stdout
     assert "OK" in proc.stdout
 
 
 def test_flagship_analysis_script_writes_custom_metrics(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[2]
-    source_cfg = root / "configs" / "hcw_pd_10km_experiment.yaml"
+    source_cfg = root / "configs" / "ric_pd_10km_experiment.yaml"
     config = yaml.safe_load(source_cfg.read_text(encoding="utf-8"))
     outdir = tmp_path / "flagship_short"
     config["outputs"]["output_dir"] = str(outdir)
@@ -123,7 +123,7 @@ def test_flagship_analysis_script_writes_custom_metrics(tmp_path: Path) -> None:
     assert metrics_path.is_file()
     assert csv_path.is_file()
     metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
-    assert metrics["scenario_name"] == "hcw_pd_10km_experiment"
+    assert metrics["scenario_name"] == "ric_pd_10km_experiment"
     assert metrics["deputy"] == "chaser"
     assert metrics["chief"] == "target"
     assert metrics["samples"] > 0

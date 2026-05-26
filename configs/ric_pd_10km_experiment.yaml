@@ -1,16 +1,16 @@
-scenario_name: hcw_pd_10km_experiment
-scenario_description: Public flagship HCW PD 10 km RPO review scenario with attitude-coupled burn gating, deterministic two-body dynamics, and report-ready rendezvous artifacts.
+scenario_name: ric_pd_10km_experiment
+scenario_description: Public flagship RIC_PD 10 km RPO review scenario with attitude-coupled burn gating, deterministic two-body dynamics, and report-ready rendezvous artifacts.
 metadata:
   owner: public
-  notes: Run after the quickstart with `python run_simulation.py --config configs/hcw_pd_10km_experiment.yaml`, then open outputs/flagship_hcw_pd_10km/index.md.
-  intent: Demonstrate a tuned HCW PD controller closing a 10 km-class relative-motion case while the chaser must satisfy attitude alignment before thrust is applied.
+  notes: Run after the quickstart with `python run_simulation.py --config configs/ric_pd_10km_experiment.yaml`, then open outputs/flagship_ric_pd_10km/index.md.
+  intent: Demonstrate an RIC_PD transfer controller closing a 10 km-class relative-motion case by acquiring a low-energy coast arc before terminal cleanup while the chaser must satisfy attitude alignment before thrust is applied.
   evidence_role: Public golden-path artifact for single-run closed-loop RPO behavior; not a mission qualification or high-fidelity validation claim.
   recommended_review:
-    - outputs/flagship_hcw_pd_10km/index.md
-    - outputs/flagship_hcw_pd_10km/master_run_summary.json
-    - outputs/flagship_hcw_pd_10km/rendezvous_summary.png
-    - outputs/flagship_hcw_pd_10km/control_effort.png
-    - outputs/flagship_hcw_pd_10km/chaser_thrust_alignment_error.png
+    - outputs/flagship_ric_pd_10km/index.md
+    - outputs/flagship_ric_pd_10km/master_run_summary.json
+    - outputs/flagship_ric_pd_10km/rendezvous_summary.png
+    - outputs/flagship_ric_pd_10km/control_effort.png
+    - outputs/flagship_ric_pd_10km/chaser_thrust_alignment_error.png
 objects:
   rocket:
     enabled: false
@@ -47,19 +47,26 @@ objects:
         - 0.0
     orbit_control:
       kind: python
-      module: sim.control.orbit.hcw_pd
-      class_name: HCWPDController
+      module: sim.control.orbit.ric_pd
+      class_name: RICPDTransferController
       params:
-        max_accel_km_s2: 1.0e-4
+        max_accel_km_s2: 6.0e-5
         mean_motion_rad_s: 0.001078
-        kp:
-          - [4.0e-6, 0.0, 0.0]
-          - [0.0, 4.0e-6, 0.0]
-          - [0.0, 0.0, 4.0e-6]
-        kd:
-          - [0.004, 0.0, 0.0]
-          - [0.0, 0.004, 0.0]
-          - [0.0, 0.0, 0.004]
+        transfer_time_s: 4800.0
+        burn_time_constant_s: 35.0
+        correction_interval_s: 300.0
+        velocity_deadband_m_s: 0.03
+        final_brake_start_s: 0.0
+        terminal_start_s: 900.0
+        terminal_range_km: 0.15
+        terminal_kp:
+          - [2.5e-6, 0.0, 0.0]
+          - [0.0, 2.5e-6, 0.0]
+          - [0.0, 0.0, 2.5e-6]
+        terminal_kd:
+          - [0.0035, 0.0, 0.0]
+          - [0.0, 0.0035, 0.0]
+          - [0.0, 0.0, 0.0035]
         desired_state_ric:
           - 0.0
           - 0.0
@@ -181,8 +188,12 @@ objects:
     kind: satellite
 simulator:
   scenario_type: auto
-  duration_s: 6000.0
+  duration_s: 12000.0
   dt_s: 1.0
+  resource_profile: laptop-safe
+  acceleration:
+    mode: auto
+    warmup: true
   dynamics:
     orbit:
       model: two_body
@@ -212,8 +223,8 @@ simulator:
   termination:
     earth_impact_enabled: false
 outputs:
-  output_dir: outputs/flagship_hcw_pd_10km
-  mode: save
+  output_dir: outputs/flagship_ric_pd_10km
+  mode: interactive
   stats:
     enabled: true
     print_summary: true

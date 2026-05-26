@@ -290,6 +290,10 @@ The simulator section defines run duration, step size, and dynamics models:
 simulator:
   duration_s: 600.0
   dt_s: 1.0
+  resource_profile: config
+  acceleration:
+    mode: "off"
+    warmup: false
   dynamics:
     orbit:
       model: "two_body"
@@ -302,6 +306,161 @@ simulator:
 
 `duration_s` must be a positive integer multiple of `dt_s`. Substeps must divide
 the main time step cleanly.
+
+`resource_profile` is optional and defaults to config behavior. Set it to
+`laptop-safe`, `standard`, `aggressive`, or `off` to select the runtime resource
+profile from the scenario file.
+
+`acceleration.mode` is optional and defaults to `off`. Set it to `auto` to use
+available optional numeric acceleration for supported kernels, or `numba` to
+request the Numba backend explicitly. Unsupported dynamics combinations fall
+back to the standard Python path. Set `acceleration.warmup: true` to compile
+supported kernels before the run starts.
+
+### Atmospheric Passes And Re-Entry
+
+Atmospheric passes and re-entry diagnostics live under
+`simulator.dynamics.reentry`. This feature does not silently change the force
+model: `simulator.dynamics.orbit.drag` still controls whether atmospheric drag
+and lift affect the trajectory. Re-entry tracking is active while a selected
+object is below `begin_altitude_km`; summaries still record whether the object
+ever entered, episode count, latest exit time, and cumulative heat load. That
+means a vehicle can dip below the threshold for an aero-assisted pass, burn back
+above it, and no longer be considered currently in re-entry.
+
+The metric history records density, relative atmospheric speed, dynamic
+pressure, drag deceleration, lift acceleration, lift-to-drag ratio, g-load,
+Sutton-Graves heat rate, and integrated heat load.
+
+```yaml
+simulator:
+  dynamics:
+    orbit:
+      drag: true
+    reentry:
+      enabled: true
+      begin_altitude_km: 300.0
+      object_ids: ["chaser"]
+      atmosphere_model: "ussa1976"
+      termination:
+        enabled: true
+        max_g_load: 8.0
+        max_dynamic_pressure_pa: 50000.0
+        max_heat_rate_w_m2: 1000000.0
+        max_heat_load_j_m2: 50000000.0
+        by_object:
+          launch_vehicle:
+            enabled: false
+          chaser:
+            max_g_load: 12.0
+```
+
+Set each vehicle's re-entry nose geometry on its object specs with
+`nose_radius_m` or `reentry_nose_radius_m`. Leave `object_ids` empty to track all
+active satellites, or use `"*"`/`"all"` for explicit all-satellite tracking. Add
+plot preset `reentry` or figure IDs `reentry_summary`, `reentry_aero`, and
+`reentry_thermal` to render the re-entry plot suite. Use preset `aero_assist` or
+figure ID `atmospheric_pass` when the run is about a recoverable atmospheric
+pass rather than terminal disposal. Optional `termination` limits can stop the
+run when the tracked object enters re-entry, drops below `min_altitude_km`,
+exceeds dynamic pressure, drag deceleration, g-load, heat rate, or integrated
+heat load thresholds. Scenario-level re-entry termination values are defaults;
+`termination.by_object.<object_id>` can disable termination for a vehicle or
+override individual limits while preserving the rest of the defaults.
+
+Earth-impact termination is also object-aware:
+
+```yaml
+simulator:
+  termination:
+    earth_impact_enabled: true
+    earth_radius_km: 6378.137
+    by_object:
+      launch_vehicle:
+        earth_impact_enabled: false
+      payload:
+        earth_impact_enabled: true
+```
+
+This lets a launch vehicle, disposed stage, or atmospheric test article coexist
+with satellites whose mission should continue.
+
+Vehicle aerodynamics use a shared object-level vocabulary under `specs.aero`.
+Keep physical vehicle properties there; use `simulator.dynamics.orbit.drag` to
+turn aerodynamic forces on or off, `simulator.dynamics.reentry` for diagnostics
+and termination limits, and `simulator.dynamics.rocket.aero` only for detailed
+rocket coefficient refinements. The same area, drag, lift, nose-radius,
+reference-length, and center-of-pressure terms are used by satellite
+re-entry/aero-assist diagnostics and rocket ascent aero. Older flat satellite
+aliases such as `specs.cd`, `specs.drag_area_m2`, `specs.cl`, and
+`specs.nose_radius_m` still work and take precedence over same-named nested
+`specs.aero` values when both are present.
+
+Satellites can use first-pass atmospheric steering when `orbit.drag` is enabled
+by setting object aero specs:
+
+```yaml
+objects:
+  chaser:
+    specs:
+      aero:
+        drag_area_m2: 2.0
+        cd: 2.2
+        cl: 0.2
+        lift_area_m2: 2.0
+        lift_axis_body: [0.0, 0.0, 1.0]
+        nose_radius_m: 0.5
+        reference_length_m: 1.0
+        cp_offset_body_m: [0.0, 0.0, 0.0]
+```
+
+Rocket objects can use the same object-level block for the common geometry and
+baseline drag terms:
+
+```yaml
+objects:
+  launch_vehicle:
+    kind: "rocket"
+    specs:
+      aero:
+        reference_area_m2: 10.0
+        reference_length_m: 30.0
+        cp_offset_body_m: [-2.5, 0.0, 0.0]
+        cd: 0.20
+```
+
+`lift_axis_body` is mapped through the current attitude and projected
+perpendicular to atmosphere-relative velocity before applying lift. This supports
+aero-assisted passes, such as dipping into the atmosphere for plane-change
+authority and then burning back up.
+
+The product includes two first-pass controllers for that pattern:
+
+```yaml
+orbit_control:
+  module: "sim.control.orbit.aero_assist"
+  class_name: "AtmosphericPassController"
+  params:
+    raise_start_s: 240.0
+    raise_end_s: 740.0
+    prograde_accel_km_s2: 0.0003
+attitude_control:
+  module: "sim.control.attitude.aero_assist"
+  class_name: "AtmosphericLiftAxisController"
+  params:
+    lift_axis_body: [0.0, 0.0, 1.0]
+    desired_lift_ric: [0.0, 0.0, 1.0]
+```
+
+See `configs/aero_assisted_plane_change_demo.yaml` for the canonical checked-in
+example.
+
+If a satellite is burning during re-entry, the burn affects the propagated
+position and velocity through the normal dynamics path before re-entry metrics
+are sampled. The reported `drag_decel_m_s2` and `g_load` are aerodynamic
+drag-load estimates only; they do not include commanded thrust acceleration,
+plume heating, ablation, or higher-fidelity aero than the configured drag/lift
+coefficients and attitude-coupled lift axis.
 
 ### Spherical Harmonics
 
@@ -350,13 +509,15 @@ outputs:
   plots:
     enabled: true
     preset: "minimal"
-    # Other presets: orbit, rendezvous, attitude, estimation, rocket, debug.
+    # Other presets: orbit, rendezvous, attitude, estimation, rocket, reentry, debug.
   animations:
     enabled: false
   resource_limits:
     # Configs may lower this cap; raise it from the caller with
     # --max-history-memory-mb or OEL_MAX_HISTORY_MEMORY_MB.
     max_history_memory_mb: 1024
+    checkpoint_enabled: true
+    throttle_enabled: true
 ```
 
 Config-controlled output directories are bounded by the path policy. Relative
@@ -369,6 +530,18 @@ and tracked knowledge pairs. The default caller-controlled cap is 1024 MB. Set
 `outputs.resource_limits.max_history_memory_mb` to a smaller scenario-specific
 budget, or raise the process budget with `--max-history-memory-mb` /
 `OEL_MAX_HISTORY_MEMORY_MB` for intentionally large trusted runs.
+
+For Monte Carlo and validation-style batch runs, `simulator.resource_profile`
+controls the resource profile. `laptop-safe` forces one case at a time, disables
+plots when the scenario is launched through `run_simulation.py` or the validation
+harness, enables checkpoint/resume, and pauses between cases when memory or CPU
+load pressure is high. The legacy
+`outputs.resource_limits.resource_profile` field is still accepted for older
+configs, but new configs should use `simulator.resource_profile`. Use
+`run_simulation.py --estimate-resource-requirements` before long campaigns.
+Monte Carlo checkpoints are stored under `outputs.output_dir/mc_checkpoints`
+and keyed by generated iteration config hashes. Use
+`run_simulation.py --clear-checkpoints` when you want a clean rerun.
 
 Monte Carlo relative-range time-series plots are written through a bounded
 streaming artifact writer. This avoids retaining every run's range history in

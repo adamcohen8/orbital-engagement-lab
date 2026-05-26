@@ -26,6 +26,9 @@ class OrbitalAttitudeDynamics(DynamicsModel):
     cd: float = 2.2
     cr: float = 1.2
     drag_area_m2: float | None = None
+    lift_area_m2: float | None = None
+    lift_coefficient: float = 0.0
+    lift_axis_body: np.ndarray | None = None
     srp_area_m2: float | None = None
     use_rectangular_prism_for_aero_srp: bool = False
     rectangular_prism_dims_m: tuple[float, float, float] | None = None
@@ -33,6 +36,7 @@ class OrbitalAttitudeDynamics(DynamicsModel):
     attitude_substep_s: float | None = None
     propagate_attitude: bool = True
     orbit_propagator: OrbitPropagator = field(default_factory=lambda: OrbitPropagator(integrator="rk4"))
+    acceleration_mode: str = "off"
 
     def __post_init__(self) -> None:
         if self.use_rectangular_prism_for_aero_srp:
@@ -50,6 +54,15 @@ class OrbitalAttitudeDynamics(DynamicsModel):
         env_local = dict(env)
         if self.drag_area_m2 is not None:
             env_local["drag_area_m2"] = float(self.drag_area_m2)
+        if self.lift_area_m2 is not None:
+            env_local["lift_area_m2"] = float(self.lift_area_m2)
+        if self.lift_axis_body is not None and float(self.lift_coefficient) != 0.0:
+            c_bn = quaternion_to_dcm_bn(state.attitude_quat_bn)
+            lift_axis_body = np.array(self.lift_axis_body, dtype=float).reshape(3)
+            axis_norm = float(np.linalg.norm(lift_axis_body))
+            if axis_norm > 0.0:
+                env_local["lift_coefficient"] = float(self.lift_coefficient)
+                env_local["lift_direction_eci"] = c_bn.T @ (lift_axis_body / axis_norm)
         if self.srp_area_m2 is not None:
             env_local["srp_area_m2"] = float(self.srp_area_m2)
         geom = self._rectangular_prism_geometry()
@@ -160,6 +173,7 @@ class OrbitalAttitudeDynamics(DynamicsModel):
                     inertia_kg_m2=self.inertia_kg_m2,
                     torque_body_nm=total_torque,
                     dt_s=h,
+                    acceleration_mode=self.acceleration_mode,
                 )
                 t_att += h
 

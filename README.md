@@ -34,7 +34,7 @@ Users are responsible for their own validation, security review, export-control
 review, mission qualification, and compliance obligations before using the
 software in any sensitive, commercial, government, or operational context.
 
-A checked-in dashboard from the flagship 10 km HCW PD RPO scenario:
+A checked-in dashboard from the flagship 10 km RIC_PD RPO scenario:
 
 ![Flagship run dashboard](docs/assets/plots/run_dashboard.png)
 
@@ -108,17 +108,17 @@ python run_simulation.py --quickstart --open-output
 
 For a guided walkthrough, see [First Five Minutes](docs/first-five-minutes.md).
 
-Review the flagship 10 km HCW PD RPO scenario:
+Review the flagship 10 km RIC_PD RPO scenario:
 
 ```bash
-python run_simulation.py --config configs/hcw_pd_10km_experiment.yaml --validate-only
-python run_simulation.py --config configs/hcw_pd_10km_experiment.yaml
+python run_simulation.py --config configs/ric_pd_10km_experiment.yaml --validate-only
+python run_simulation.py --config configs/ric_pd_10km_experiment.yaml
 ```
 
 Expected result: the 6000-second rendezvous run writes dashboard, rendezvous,
 control-effort, relative-range, trajectory, attitude, quaternion-error, and
-thrust-alignment plots under `outputs/flagship_hcw_pd_10km/`. Open
-`outputs/flagship_hcw_pd_10km/index.md` first, then compare against the
+thrust-alignment plots under `outputs/flagship_ric_pd_10km/`. Open
+`outputs/flagship_ric_pd_10km/index.md` first, then compare against the
 checked-in [Plot Gallery](docs/plot-gallery.md).
 
 ## Just Here For The Video Game?
@@ -148,8 +148,11 @@ return to the selector.
 | Predict where a satellite will be two hours from a TLE | `python run_simulation.py --config examples/configs/public_tle_2hr_propagation.yaml` |
 | Compute ground-station access windows from a TLE | `python run_simulation.py --config examples/configs/public_ground_station_access_from_tle.yaml` |
 | Run a closed-loop chaser/target rendezvous with HCW LQR | `python run_simulation.py --config examples/configs/public_closed_loop_rendezvous_lqr.yaml` |
-| Review the flagship 10 km HCW PD RPO scenario | `python run_simulation.py --config configs/hcw_pd_10km_experiment.yaml` |
+| Review the flagship 10 km RIC_PD RPO scenario | `python run_simulation.py --config configs/ric_pd_10km_experiment.yaml` |
 | Smoke-test public actuator presets | `python run_simulation.py --config configs/actuator_lab_presets_smoke.yaml` |
+| Review atmospheric re-entry diagnostics and kill criteria | `python run_simulation.py --config configs/reentry_smoke.yaml` |
+| Open the 10-day interactive re-entry plotting demo | `python run_simulation.py --config examples/configs/public_reentry_interactive_demo.yaml` |
+| Explore lift-axis atmospheric steering and raise-burn recovery | `python run_simulation.py --config configs/aero_assisted_plane_change_demo.yaml` |
 | Inspect orbit perturbations, drag, SRP, and third-body toggles | `python run_simulation.py --config examples/configs/public_orbit_environment_stack.yaml` |
 | Evaluate attitude hold under initial error and disturbance torque | `python run_simulation.py --config examples/configs/public_attitude_hold_disturbance.yaml` |
 | Open the guided RPO trainer level selector | `python run_game.py` |
@@ -247,6 +250,10 @@ provide. HPOP/GGM03 validation data is not bundled in the public core, so
 - deterministic step-based simulation
 - multi-object orbit and attitude dynamics
 - two-body, perturbation, atmosphere, SRP, third-body, and spherical harmonics support
+- atmospheric re-entry diagnostics with aero/thermal histories, plots, and
+  threshold termination criteria
+- shared vehicle aero properties under `objects.<id>.specs.aero`, including
+  first-pass drag/lift steering and atmospheric-pass examples
 - actuator limits, saturation, lag, mass depletion, full six-axis RCS clusters,
   electric propulsion, magnetorquers, CMGs, gimbaled thrusters, desaturation
   assist, and fault/degradation wrappers
@@ -281,7 +288,9 @@ require hosted AI accounts or API keys.
 ## Start Here
 
 - [Quickstart](docs/quickstart.md)
-- [Flagship HCW PD 10 km Scenario](docs/flagship-hcw-pd-10km.md)
+- [Product Inventory](docs/product-inventory.md)
+- [Flagship RIC_PD 10 km Scenario](docs/flagship-ric-pd-10km.md)
+- [RIC_PD 10 km Validation Package](docs/validation-ric-pd-10km.md)
 - [Scenario YAML](docs/scenario-yaml.md)
 - [Python API](docs/python-api.md)
 - [Examples Matrix](docs/examples-matrix.md)
@@ -303,11 +312,15 @@ Curated examples are YAML scenario configs under `examples/configs/`:
 - `examples/configs/public_closed_loop_rendezvous_lqr.yaml` for closed-loop rendezvous
 - `examples/configs/public_orbit_environment_stack.yaml` for perturbation/environment propagation
 - `examples/configs/public_attitude_hold_disturbance.yaml` for attitude-control recovery
+- `examples/configs/public_reentry_interactive_demo.yaml` for atmospheric re-entry plots and threshold termination
 - `examples/configs/public_manual_rpo_training.yaml` for manual/game scenario wiring
 
 The built-in flagship review scenario lives at
-`configs/hcw_pd_10km_experiment.yaml`; it is the recommended next run after the
+`configs/ric_pd_10km_experiment.yaml`; it is the recommended next run after the
 quickstart when you want the full plot/artifact path.
+Atmospheric re-entry examples live at `configs/reentry_smoke.yaml` for a short
+headless check and `examples/configs/public_reentry_interactive_demo.yaml` for
+a longer plotting demo with conservative satellite-kill thresholds.
 
 New examples use the canonical `objects` map in scenario YAML. Conventional
 names such as `chaser` and `target` are readable scenario IDs, not fixed engine

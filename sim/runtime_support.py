@@ -26,6 +26,7 @@ from sim.actuators import (
     WheelDesaturationLimits,
 )
 from sim.actuators.presets import resolve_actuator_specs_from_satellite_specs
+from sim.aero import aero_spec_get, resolve_vehicle_aero_properties
 from sim.config import SimulationScenarioConfig
 from sim.control.attitude.zero_torque import ZeroTorqueController
 from sim.control.orbit.zero_controller import ZeroController
@@ -41,6 +42,7 @@ from sim.dynamics.orbit.propagator import (
     j2_plugin,
     j3_plugin,
     j4_plugin,
+    lift_plugin,
     spherical_harmonics_plugin,
     srp_plugin,
     third_body_moon_plugin,
@@ -81,6 +83,28 @@ from sim.utils.geodesy import ecef_to_geodetic_deg_km
 from sim.utils.quaternion import quaternion_to_dcm_bn
 
 logger = logging.getLogger(__name__)
+
+
+def _earth_impact_policy_for_object(termination: Any, object_id: str) -> dict[str, Any]:
+    root = dict(termination or {})
+    policy = {
+        "earth_impact_enabled": bool(root.get("earth_impact_enabled", True)),
+        "earth_radius_km": float(root.get("earth_radius_km", EARTH_RADIUS_KM)),
+    }
+    by_object = root.get("by_object", {}) or {}
+    if not isinstance(by_object, dict):
+        return policy
+    for key in ("*", "all", str(object_id)):
+        override = by_object.get(key)
+        if not isinstance(override, dict):
+            continue
+        if "earth_impact_enabled" in override:
+            policy["earth_impact_enabled"] = bool(override.get("earth_impact_enabled"))
+        elif "enabled" in override:
+            policy["earth_impact_enabled"] = bool(override.get("enabled"))
+        if override.get("earth_radius_km") is not None:
+            policy["earth_radius_km"] = float(override.get("earth_radius_km"))
+    return policy
 
 
 def _module_obj(pointer, *, extra_kwargs: dict[str, Any] | None = None) -> Any | None:
@@ -402,6 +426,18 @@ def _satellite_spec_float(
             raise ValueError(f"specs.{name} must be >= {min_value}.")
         return value, True
     return float(default), False
+
+
+def _satellite_spec_vector3(value: Any, *, field_name: str) -> np.ndarray | None:
+    if value is None:
+        return None
+    arr = np.array(value, dtype=float).reshape(3)
+    if not np.all(np.isfinite(arr)):
+        raise ValueError(f"specs.{field_name} must contain finite values.")
+    norm = float(np.linalg.norm(arr))
+    if norm <= 0.0:
+        raise ValueError(f"specs.{field_name} must be non-zero.")
+    return arr / norm
 
 
 def _array_or_none(value: Any, *, shape: tuple[int, ...] | None = None) -> np.ndarray | None:
@@ -742,6 +778,7 @@ def _apply_chaser_relative_init_from_target(
 
 def _build_orbit_propagator(cfg: SimulationScenarioConfig) -> OrbitPropagator:
     orbit = dict(cfg.simulator.dynamics.get("orbit", {}) or {})
+    acceleration = dict(getattr(cfg.simulator, "acceleration", {}) or {})
     sh = dict(orbit.get("spherical_harmonics", {}) or {})
     plugins = []
     if bool(orbit.get("j2", False)):
@@ -754,6 +791,7 @@ def _build_orbit_propagator(cfg: SimulationScenarioConfig) -> OrbitPropagator:
         plugins.append(spherical_harmonics_plugin)
     if bool(orbit.get("drag", False)):
         plugins.append(drag_plugin)
+        plugins.append(lift_plugin)
     if bool(orbit.get("srp", False)):
         plugins.append(srp_plugin)
     if bool(orbit.get("third_body_sun", False)):
@@ -765,6 +803,7 @@ def _build_orbit_propagator(cfg: SimulationScenarioConfig) -> OrbitPropagator:
         plugins=plugins,
         adaptive_atol=float(orbit.get("adaptive_atol", 1e-9)),
         adaptive_rtol=float(orbit.get("adaptive_rtol", 1e-7)),
+        acceleration_mode=str(acceleration.get("mode", "off") or "off"),
     )
 
 
@@ -778,25 +817,39 @@ def _create_satellite_runtime(
     truth = _default_truth_from_agent(agent_cfg, t_s=0.0, target_jd_utc=cfg.simulator.initial_jd_utc)
     specs = dict(agent_cfg.specs or {})
     inertia_kg_m2 = _resolve_satellite_inertia_kg_m2(specs)
-    area_m2, area_specified = _satellite_spec_float(
-        specs, ("area_ref_m2", "area_m2", "reference_area_m2"), default=1.0
+    aero_props = resolve_vehicle_aero_properties(
+        specs,
+        default_reference_area_m2=1.0,
+        default_cd=2.2,
+        default_cl=0.0,
+        default_nose_radius_m=0.5,
+        default_reference_length_m=1.0,
     )
-    drag_area_m2, drag_area_specified = _satellite_spec_float(
-        specs, ("drag_area_m2",), default=area_m2
-    )
+    area_m2 = aero_props.reference_area_m2
+    area_specified = aero_spec_get(specs, ("area_ref_m2", "area_m2", "reference_area_m2")) is not None
+    drag_area_m2 = aero_props.drag_area_m2
+    drag_area_specified = aero_spec_get(specs, ("drag_area_m2",)) is not None
+    lift_area_m2 = aero_props.drag_area_m2 if aero_props.lift_area_m2 is None else aero_props.lift_area_m2
+    lift_area_specified = aero_spec_get(specs, ("lift_area_m2",)) is not None
+    lift_coefficient = aero_props.cl
+    lift_axis_body = aero_props.lift_axis_body
+    cp_offset_specified = aero_spec_get(specs, ("cp_offset_body_m", "center_of_pressure_offset_body_m")) is not None
     srp_area_m2, srp_area_specified = _satellite_spec_float(
         specs, ("srp_area_m2", "solar_area_m2"), default=area_m2
     )
-    cd, cd_specified = _satellite_spec_float(specs, ("cd", "drag_cd"), default=2.2)
+    cd = aero_props.cd
+    cd_specified = aero_spec_get(specs, ("cd", "drag_cd")) is not None
     cr, cr_specified = _satellite_spec_float(specs, ("cr", "srp_cr"), default=1.2)
     noise = dict((agent_cfg.knowledge or {}).get("sensor_error", {}) or {})
     pos_sigma = float(np.array(noise.get("pos_sigma_km", [0.001])).reshape(-1)[0])
     vel_sigma = float(np.array(noise.get("vel_sigma_km_s", [1e-5])).reshape(-1)[0])
+    acceleration = dict(getattr(cfg.simulator, "acceleration", {}) or {})
     orbit_estimator = OrbitEKFEstimator(
         mu_km3_s2=EARTH_MU_KM3_S2,
         dt_s=float(cfg.simulator.dt_s),
         process_noise_diag=np.array([1e-8, 1e-8, 1e-8, 1e-10, 1e-10, 1e-10]),
         meas_noise_diag=np.array([1e-6, 1e-6, 1e-6, 1e-10, 1e-10, 1e-10]),
+        acceleration_mode=str(acceleration.get("mode", "off") or "off"),
     )
     orbit_ctrl_base = _module_obj(agent_cfg.orbit_control) or ZeroController()
     att_ctrl_base = _module_obj(agent_cfg.attitude_control) or ZeroTorqueController()
@@ -825,6 +878,7 @@ def _create_satellite_runtime(
             orbit_estimator=orbit_estimator,
             dt_s=float(cfg.simulator.dt_s),
             inertia_kg_m2=inertia_kg_m2,
+            acceleration_mode=str(acceleration.get("mode", "off") or "off"),
         )
     else:
         belief = StateBelief(
@@ -859,6 +913,8 @@ def _create_satellite_runtime(
         disturbance_config_kwargs["drag_area_m2"] = drag_area_m2
     if cd_specified:
         disturbance_config_kwargs["drag_cd"] = cd
+    if cp_offset_specified:
+        disturbance_config_kwargs["drag_cp_offset_body_m"] = aero_props.cp_offset_body_m
     if srp_area_specified or area_specified:
         disturbance_config_kwargs["srp_area_m2"] = srp_area_m2
     if cr_specified:
@@ -876,6 +932,9 @@ def _create_satellite_runtime(
         cd=cd,
         cr=cr,
         drag_area_m2=drag_area_m2 if drag_area_specified else None,
+        lift_area_m2=lift_area_m2 if lift_area_specified else None,
+        lift_coefficient=lift_coefficient,
+        lift_axis_body=lift_axis_body,
         srp_area_m2=srp_area_m2 if srp_area_specified else None,
         orbit_substep_s=float(orbit_cfg["orbit_substep_s"]) if orbit_cfg.get("orbit_substep_s") is not None else None,
         attitude_substep_s=float(att_cfg["attitude_substep_s"])
@@ -883,6 +942,7 @@ def _create_satellite_runtime(
         else None,
         propagate_attitude=attitude_enabled,
         orbit_propagator=_build_orbit_propagator(cfg),
+        acceleration_mode=str(acceleration.get("mode", "off") or "off"),
     )
     bridge = _module_obj(agent_cfg.bridge) if (agent_cfg.bridge is not None and agent_cfg.bridge.enabled) else None
     mission_strategy_pointer = getattr(agent_cfg, "mission_strategy", None)
@@ -984,14 +1044,32 @@ def _create_rocket_runtime(
     orbit_dyn = dict(cfg.simulator.dynamics.get("orbit", {}) or {})
     att_dyn = dict(cfg.simulator.dynamics.get("attitude", {}) or {})
     rocket_dyn = dict(cfg.simulator.dynamics.get("rocket", {}) or {})
+    object_aero = resolve_vehicle_aero_properties(
+        r_specs,
+        default_reference_area_m2=10.0,
+        default_cd=0.20,
+        default_cl=0.0,
+        default_nose_radius_m=0.5,
+        default_reference_length_m=30.0,
+    )
     aero_dyn = dict(rocket_dyn.get("aero", {}) or {})
+    rocket_area_ref_m2 = (
+        float(rocket_dyn.get("area_ref_m2"))
+        if rocket_dyn.get("area_ref_m2") is not None
+        else (
+            object_aero.reference_area_m2
+            if aero_spec_get(r_specs, ("reference_area_m2", "area_ref_m2", "area_m2")) is not None
+            else None
+        )
+    )
     atmosphere_env = dict(cfg.simulator.environment.get("atmosphere_env", {}) or {})
+    earth_impact_policy = _earth_impact_policy_for_object(cfg.simulator.termination, object_id)
     aero_cfg = RocketAeroConfig(
         enabled=bool(rocket_dyn.get("aero_model_enabled", True)),
-        reference_area_m2=float(aero_dyn.get("reference_area_m2", 10.0)),
-        reference_length_m=float(aero_dyn.get("reference_length_m", 30.0)),
-        cp_offset_body_m=np.array(aero_dyn.get("cp_offset_body_m", [0.0, 0.0, 0.0]), dtype=float),
-        cd_base=float(aero_dyn.get("cd_base", 0.20)),
+        reference_area_m2=float(aero_dyn.get("reference_area_m2", object_aero.reference_area_m2)),
+        reference_length_m=float(aero_dyn.get("reference_length_m", object_aero.reference_length_m)),
+        cp_offset_body_m=np.array(aero_dyn.get("cp_offset_body_m", object_aero.cp_offset_body_m), dtype=float),
+        cd_base=float(aero_dyn.get("cd_base", aero_dyn.get("cd", object_aero.cd))),
         cd_alpha2=float(aero_dyn.get("cd_alpha2", 0.10)),
         cd_supersonic=float(aero_dyn.get("cd_supersonic", 0.28)),
         transonic_peak_cd=float(aero_dyn.get("transonic_peak_cd", 0.22)),
@@ -1022,9 +1100,9 @@ def _create_rocket_runtime(
         enable_j2=bool(orbit_dyn.get("j2", True)),
         enable_j3=bool(orbit_dyn.get("j3", False)),
         enable_j4=bool(orbit_dyn.get("j4", False)),
-        terminate_on_earth_impact=bool(cfg.simulator.termination.get("earth_impact_enabled", True)),
-        earth_impact_radius_km=float(cfg.simulator.termination.get("earth_radius_km", 6378.137)),
-        area_ref_m2=(None if rocket_dyn.get("area_ref_m2") is None else float(rocket_dyn.get("area_ref_m2"))),
+        terminate_on_earth_impact=bool(earth_impact_policy.get("earth_impact_enabled", True)),
+        earth_impact_radius_km=float(earth_impact_policy.get("earth_radius_km", 6378.137)),
+        area_ref_m2=rocket_area_ref_m2,
         use_stagewise_aero_geometry=bool(rocket_dyn.get("use_stagewise_aero_geometry", True)),
         cd=float(rocket_dyn.get("cd", 0.35)),
         cr=float(rocket_dyn.get("cr", 1.2)),
@@ -1121,6 +1199,13 @@ def _create_rocket_runtime(
     )
 
 
+def _knowledge_ekf_diag(value: Any, default: list[float]) -> np.ndarray:
+    arr = np.array(value if value is not None else default, dtype=float).reshape(-1)
+    if arr.size != 6:
+        return np.array(default, dtype=float)
+    return arr
+
+
 def _build_knowledge_base(
     observer_id: str, agent_cfg: Any, dt_s: float, rng: np.random.Generator
 ) -> ObjectKnowledgeBase | None:
@@ -1131,6 +1216,7 @@ def _build_knowledge_base(
     conditions = dict(knowledge.get("conditions", {}) or {})
     noise = dict(knowledge.get("sensor_error", {}) or {})
     estimation = dict(knowledge.get("estimation", {}) or {})
+    ekf_cfg = dict(estimation.get("ekf", knowledge.get("ekf", {})) or {})
     tracked: list[TrackedObjectConfig] = []
     for target_id in targets:
         tracked.append(
@@ -1167,7 +1253,20 @@ def _build_knowledge_base(
                 ),
                 estimator=str(estimation.get("type", "ekf")),
                 measurement_model=str(estimation.get("measurement_model", "state")),
-                ekf=KnowledgeEKFConfig(),
+                ekf=KnowledgeEKFConfig(
+                    process_noise_diag=_knowledge_ekf_diag(
+                        ekf_cfg.get("process_noise_diag"),
+                        [1e-8, 1e-8, 1e-8, 1e-10, 1e-10, 1e-10],
+                    ),
+                    meas_noise_diag=_knowledge_ekf_diag(
+                        ekf_cfg.get("meas_noise_diag"),
+                        [1e-6, 1e-6, 1e-6, 1e-10, 1e-10, 1e-10],
+                    ),
+                    init_cov_diag=_knowledge_ekf_diag(
+                        ekf_cfg.get("init_cov_diag"),
+                        [1.0, 1.0, 1.0, 1e-2, 1e-2, 1e-2],
+                    ),
+                ),
             )
         )
     return ObjectKnowledgeBase(

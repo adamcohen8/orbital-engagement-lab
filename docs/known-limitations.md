@@ -25,7 +25,7 @@ not flight-qualified or operational decision-grade software.
   private/product surfaces and are not bundled in the public repo.
 - Users should independently validate behavior for their mission envelope,
   force models, time spans, controller assumptions, and numerical tolerances.
-- Public scenarios such as `configs/hcw_pd_10km_experiment.yaml` are review
+- Public scenarios such as `configs/ric_pd_10km_experiment.yaml` are review
   workflows and examples. They are not mission qualification evidence by
   themselves; see [Validation Claims](validation-claims.md).
 
@@ -52,5 +52,14 @@ that environment before relying on it.
   or command/telemetry behavior.
 - Spherical-harmonic gravity can use inline terms or user-provided coefficient
   files. HPOP/GGM03 reference data is not distributed with the public core.
+- Atmospheric re-entry diagnostics are first-pass aero/thermal estimates. They
+  use atmosphere-relative speed, configured drag area/coefficient, and
+  Sutton-Graves heat rate. Optional satellite lift is coefficient/vector based
+  and intended for first-pass atmospheric steering studies, with vehicle aero
+  properties supplied through `objects.<id>.specs.aero`. Reported re-entry
+  g-load is aerodynamic drag load, not total acceleration during thrusting.
+  The model does not include ablation, plasma, breakup debris, plume heating,
+  high-fidelity hypersonic aerodynamics, or detailed thermal protection
+  response.
 - The bundled RPO trainer is educational and interactive; it is not a
   certification, mission-assurance, or operational training system.

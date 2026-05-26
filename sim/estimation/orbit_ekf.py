@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from sim.acceleration.kernels.estimation import orbit_ekf_numerical_jacobian_kernel, propagate_two_body_rk4_kernel
+from sim.acceleration.settings import acceleration_settings_from_mode
 from sim.core.interfaces import Estimator
 from sim.core.models import Measurement, StateBelief
 from sim.dynamics.orbit.two_body import propagate_two_body_rk4
@@ -27,29 +29,27 @@ class OrbitEKFEstimator(Estimator):
     process_noise_diag: np.ndarray
     meas_noise_diag: np.ndarray
     last_update_diagnostics: OrbitEKFUpdateDiagnostics | None = field(default=None, init=False, repr=False)
+    acceleration_mode: str = "off"
     _q: np.ndarray = field(default_factory=lambda: np.zeros((6, 6)), init=False, repr=False)
     _r: np.ndarray = field(default_factory=lambda: np.zeros((6, 6)), init=False, repr=False)
     _h: np.ndarray = field(default_factory=lambda: np.eye(6), init=False, repr=False)
     _i6: np.ndarray = field(default_factory=lambda: np.eye(6), init=False, repr=False)
     _zero_accel: np.ndarray = field(default_factory=lambda: np.zeros(3), init=False, repr=False)
+    _acceleration_enabled_value: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self.process_noise_diag = np.array(self.process_noise_diag, dtype=float)
         self.meas_noise_diag = np.array(self.meas_noise_diag, dtype=float)
         self._q = np.diag(self.process_noise_diag)
         self._r = np.diag(self.meas_noise_diag)
+        self._acceleration_enabled_value = bool(acceleration_settings_from_mode(self.acceleration_mode).enabled)
 
     def update(self, belief: StateBelief, measurement: Measurement | None, t_s: float) -> StateBelief:
         x_prev = belief.state
         p_prev = belief.covariance
         dt_s = max(float(t_s) - float(belief.last_update_t_s), 0.0)
 
-        x_pred = propagate_two_body_rk4(
-            x_eci=x_prev,
-            dt_s=dt_s,
-            mu_km3_s2=self.mu_km3_s2,
-            accel_cmd_eci_km_s2=self._zero_accel,
-        )
+        x_pred = self._propagate_state(x_prev, dt_s=dt_s)
         f = self._numerical_jacobian(x_prev, base=x_pred, dt_s=dt_s)
         q_scale = dt_s / self.dt_s if self.dt_s > 0.0 else 1.0
         p_pred = f @ p_prev @ f.T + self._q * max(q_scale, 0.0)
@@ -99,6 +99,20 @@ class OrbitEKFEstimator(Estimator):
         )
         return StateBelief(state=x_upd, covariance=p_upd, last_update_t_s=t_s)
 
+    def _acceleration_enabled(self) -> bool:
+        return self._acceleration_enabled_value
+
+    def _propagate_state(self, x: np.ndarray, *, dt_s: float) -> np.ndarray:
+        step_dt_s = float(dt_s)
+        if self._acceleration_enabled():
+            return propagate_two_body_rk4_kernel(np.asarray(x, dtype=float).reshape(6), step_dt_s, float(self.mu_km3_s2))
+        return propagate_two_body_rk4(
+            x_eci=x,
+            dt_s=step_dt_s,
+            mu_km3_s2=self.mu_km3_s2,
+            accel_cmd_eci_km_s2=self._zero_accel,
+        )
+
     def _numerical_jacobian(
         self, x: np.ndarray, *, base: np.ndarray | None = None, dt_s: float | None = None
     ) -> np.ndarray:
@@ -106,11 +120,13 @@ class OrbitEKFEstimator(Estimator):
         eps = 1e-6
         base_eval = base
         if base_eval is None:
-            base_eval = propagate_two_body_rk4(
-                x_eci=x,
-                dt_s=step_dt_s,
-                mu_km3_s2=self.mu_km3_s2,
-                accel_cmd_eci_km_s2=self._zero_accel,
+            base_eval = self._propagate_state(x, dt_s=step_dt_s)
+        if self._acceleration_enabled():
+            return orbit_ekf_numerical_jacobian_kernel(
+                np.asarray(x, dtype=float).reshape(6),
+                np.asarray(base_eval, dtype=float).reshape(6),
+                step_dt_s,
+                float(self.mu_km3_s2),
             )
         j = np.zeros((6, 6))
         for i in range(6):

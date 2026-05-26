@@ -18,6 +18,7 @@ class JointStateEstimator(Estimator):
     inertia_kg_m2: np.ndarray | None = None
     attitude_process_var: float = 1e-8
     attitude_meas_var: float = 1e-6
+    acceleration_mode: str = "off"
     attitude_estimator: AttitudeEKFEstimator | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -28,6 +29,7 @@ class JointStateEstimator(Estimator):
             inertia_kg_m2=inertia,
             process_noise_diag=np.ones(7, dtype=float) * float(self.attitude_process_var),
             meas_noise_diag=np.ones(7, dtype=float) * float(self.attitude_meas_var),
+            acceleration_mode=self.acceleration_mode,
         )
 
     def update(self, belief: StateBelief, measurement: Measurement | None, t_s: float) -> StateBelief:

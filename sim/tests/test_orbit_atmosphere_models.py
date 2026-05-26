@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import numpy as np
 
-from sim.dynamics.orbit.accelerations import accel_drag, accel_srp
+from sim.dynamics.orbit.accelerations import accel_drag, accel_lift, accel_srp
 from sim.dynamics.orbit.atmosphere import density_exponential, density_from_model, density_ussa1976
 from sim.dynamics.orbit.eclipse import resolve_srp_geometry, srp_shadow_factor
 from sim.dynamics.orbit.environment import EARTH_ROT_RATE_RAD_S
@@ -116,6 +116,41 @@ class TestOrbitAtmosphereModels(unittest.TestCase):
             env={"density_kg_m3": density_exponential(r, 0.0)},
         )
         self.assertTrue(np.linalg.norm(a) < 1e-14)
+
+    def test_lift_projects_attitude_vector_perpendicular_to_relative_wind(self):
+        r = np.array([7000.0, 0.0, 0.0], dtype=float)
+        v = np.array([0.0, 7.6, 0.0], dtype=float)
+
+        a = accel_lift(
+            r_eci_km=r,
+            v_eci_km_s=v,
+            t_s=0.0,
+            mass_kg=100.0,
+            area_m2=2.0,
+            cl=0.8,
+            lift_direction_eci=np.array([0.0, 0.0, 1.0]),
+            env={"density_kg_m3": 1.0e-9},
+        )
+
+        self.assertGreater(a[2], 0.0)
+        self.assertAlmostEqual(float(np.dot(a, v)), 0.0, delta=1e-12)
+
+    def test_lift_returns_zero_when_axis_is_along_relative_wind(self):
+        r = np.array([7000.0, 0.0, 0.0], dtype=float)
+        v = np.array([0.0, 7.6, 0.0], dtype=float)
+
+        a = accel_lift(
+            r_eci_km=r,
+            v_eci_km_s=v,
+            t_s=0.0,
+            mass_kg=100.0,
+            area_m2=2.0,
+            cl=0.8,
+            lift_direction_eci=np.array([0.0, 1.0, 0.0]),
+            env={"density_kg_m3": 1.0e-9},
+        )
+
+        np.testing.assert_allclose(a, np.zeros(3), atol=1e-15)
 
     def test_srp_scales_with_sun_spacecraft_distance(self):
         r = np.array([6878.137, 0.0, 0.0], dtype=float)

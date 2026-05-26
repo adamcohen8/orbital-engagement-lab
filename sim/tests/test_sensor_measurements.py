@@ -3,6 +3,13 @@ from __future__ import annotations
 import numpy as np
 
 from sim.core.models import StateTruth
+from sim.knowledge.object_tracking import (
+    KnowledgeConditionConfig,
+    KnowledgeEKFConfig,
+    KnowledgeNoiseConfig,
+    ObjectKnowledgeBase,
+    TrackedObjectConfig,
+)
 from sim.sensors.access import AccessConfig, AccessModel
 from sim.sensors.joint_state import JointStateSensor
 from sim.sensors.models import OwnStateSensor, RelativeSensor, SensorNoiseConfig
@@ -125,3 +132,36 @@ def test_noisy_own_state_sensor_noise_statistics_are_centered() -> None:
     assert np.all(np.abs(np.mean(errors[:, 3:], axis=0)) < 0.0002)
     assert np.all(np.std(errors[:, :3], axis=0) > 0.005)
     assert np.all(np.std(errors[:, 3:], axis=0) > 0.0005)
+
+
+def test_object_knowledge_base_exposes_raw_state_measurement_snapshot() -> None:
+    observer = _truth(position=np.array([7000.0, 0.0, 0.0]), velocity=np.array([0.0, 7.5, 0.0]))
+    target = _truth(position=np.array([7001.0, 2.0, 3.0]), velocity=np.array([0.01, 7.49, -0.02]))
+    target_state = np.hstack((target.position_eci_km, target.velocity_eci_km_s))
+    knowledge = ObjectKnowledgeBase(
+        observer_id="chaser",
+        tracked_objects=[
+            TrackedObjectConfig(
+                target_id="target",
+                conditions=KnowledgeConditionConfig(refresh_rate_s=1.0),
+                sensor_noise=KnowledgeNoiseConfig(
+                    pos_sigma_km=np.zeros(3),
+                    vel_sigma_km_s=np.zeros(3),
+                ),
+                ekf=KnowledgeEKFConfig(
+                    process_noise_diag=np.ones(6) * 1e-12,
+                    meas_noise_diag=np.ones(6) * 1e-12,
+                    init_cov_diag=np.ones(6) * 1e-6,
+                ),
+            )
+        ],
+        dt_s=1.0,
+        rng=np.random.default_rng(5),
+    )
+
+    beliefs = knowledge.update(observer, {"target": target}, t_s=0.0)
+    measurements = knowledge.measurement_snapshot()
+
+    assert "target" in beliefs
+    assert "target" in measurements
+    assert np.allclose(measurements["target"], target_state)

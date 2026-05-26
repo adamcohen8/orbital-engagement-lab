@@ -8,6 +8,7 @@ from typing import Any
 import numpy as np
 
 from sim.config import SimulationScenarioConfig, iter_object_sections, object_parameter_prefix
+from sim.execution.metrics import evaluate_study_metric_gates
 from sim.presets.thrusters import BASIC_CHEMICAL_BOTTOM_Z
 
 
@@ -117,10 +118,19 @@ def satellite_initial_delta_v_budget_m_s(agent_cfg: Any) -> float:
 def assess_mc_run(
     *,
     run_entry: dict[str, Any],
-    gates: dict[str, Any],
+    gates: Any,
     success_termination_reasons: set[str],
     require_rocket_insertion: bool,
 ) -> dict[str, Any]:
+    legacy_gates = dict(gates if isinstance(gates, dict) else {})
+    if isinstance(gates, list):
+        metric_gates = list(gates)
+    else:
+        metric_gates = []
+        for key in ("metric_gates", "metrics", "generic"):
+            raw = legacy_gates.get(key)
+            if isinstance(raw, list):
+                metric_gates.extend(raw)
     summary = dict(run_entry.get("summary", {}) or {})
     term_reason = summary.get("termination_reason")
     term_reason_txt = str(term_reason) if term_reason is not None else "none"
@@ -143,7 +153,7 @@ def assess_mc_run(
     if require_rocket_insertion and (not bool(summary.get("rocket_insertion_achieved", False))):
         fail_reasons.append("rocket_insertion_not_achieved")
 
-    min_closest_approach_km = safe_float(gates.get("min_closest_approach_km"))
+    min_closest_approach_km = safe_float(legacy_gates.get("min_closest_approach_km"))
     if (
         np.isfinite(min_closest_approach_km)
         and np.isfinite(closest_approach_km)
@@ -151,23 +161,28 @@ def assess_mc_run(
     ):
         fail_reasons.append("gate:min_closest_approach_km")
 
-    max_duration_s = safe_float(gates.get("max_duration_s"))
+    max_duration_s = safe_float(legacy_gates.get("max_duration_s"))
     if np.isfinite(max_duration_s) and duration_s > max_duration_s:
         fail_reasons.append("gate:max_duration_s")
 
-    max_guardrail_events = safe_float(gates.get("max_guardrail_events"))
+    max_guardrail_events = safe_float(legacy_gates.get("max_guardrail_events"))
     if np.isfinite(max_guardrail_events) and float(guardrail_events) > max_guardrail_events:
         fail_reasons.append("gate:max_guardrail_events")
 
-    max_total_dv_m_s = safe_float(gates.get("max_total_dv_m_s"))
+    max_total_dv_m_s = safe_float(legacy_gates.get("max_total_dv_m_s"))
     if np.isfinite(max_total_dv_m_s) and total_dv_m_s_total > max_total_dv_m_s:
         fail_reasons.append("gate:max_total_dv_m_s")
 
-    max_dv_by_object = coerce_numeric_map(gates.get("max_total_dv_m_s_by_object"))
+    max_dv_by_object = coerce_numeric_map(legacy_gates.get("max_total_dv_m_s_by_object"))
     for oid, dv_limit in max_dv_by_object.items():
         dv = safe_float(total_dv_m_s_by_object.get(oid), default=0.0)
         if dv > dv_limit:
             fail_reasons.append(f"gate:max_total_dv_m_s_by_object:{oid}")
+
+    metric_gate_results = evaluate_study_metric_gates(run_entry, metric_gates)
+    for result in metric_gate_results:
+        if not bool(result.get("pass", False)):
+            fail_reasons.append(f"gate:{result.get('name') or result.get('metric')}")
 
     return {
         "pass": len(fail_reasons) == 0,
@@ -180,6 +195,8 @@ def assess_mc_run(
         "rocket_insertion_achieved": bool(summary.get("rocket_insertion_achieved", False)),
         "total_dv_m_s_total": total_dv_m_s_total,
         "total_dv_m_s_by_object": total_dv_m_s_by_object,
+        "metric_gate_results": metric_gate_results,
+        "gate_metrics": {str(item.get("name")): item.get("actual") for item in metric_gate_results},
     }
 
 
@@ -194,6 +211,18 @@ def build_parameter_sensitivity_rankings(run_details: list[dict[str, Any]]) -> l
     pass_arr = np.array([1.0 if bool(d.get("pass", False)) else 0.0 for d in run_details], dtype=float)
     ca_arr = np.array([safe_float(d.get("closest_approach_km")) for d in run_details], dtype=float)
     dv_arr = np.array([safe_float(d.get("total_dv_m_s_total"), default=0.0) for d in run_details], dtype=float)
+    gate_metric_names = sorted(
+        {
+            str(name)
+            for detail in run_details
+            for name in dict(detail.get("gate_metrics", {}) or {}).keys()
+            if str(name)
+        }
+    )
+    gate_metric_arrays = {
+        name: np.array([safe_float(dict(d.get("gate_metrics", {}) or {}).get(name)) for d in run_details], dtype=float)
+        for name in gate_metric_names
+    }
 
     for path in sorted(all_paths):
         vals: list[float] = []
@@ -227,7 +256,8 @@ def build_parameter_sensitivity_rankings(run_details: list[dict[str, Any]]) -> l
         corr_pass = _abs_corr(pass_arr)
         corr_ca = _abs_corr(ca_arr)
         corr_dv = _abs_corr(dv_arr)
-        finite_corrs = np.array([corr_pass, corr_ca, corr_dv], dtype=float)
+        metric_corrs = {name: _abs_corr(arr) for name, arr in gate_metric_arrays.items()}
+        finite_corrs = np.array([corr_pass, corr_ca, corr_dv, *metric_corrs.values()], dtype=float)
         finite_corrs = finite_corrs[np.isfinite(finite_corrs)]
         importance = float(np.max(finite_corrs)) if finite_corrs.size else float("nan")
         if not np.isfinite(importance):
@@ -239,6 +269,7 @@ def build_parameter_sensitivity_rankings(run_details: list[dict[str, Any]]) -> l
                 "abs_corr_pass": corr_pass,
                 "abs_corr_closest_approach_km": corr_ca,
                 "abs_corr_total_dv_m_s": corr_dv,
+                "abs_corr_gate_metrics": metric_corrs,
                 "importance_score": importance,
             }
         )
@@ -345,20 +376,31 @@ def build_baseline_comparison(current_payload: dict[str, Any], baseline_payload:
     }
 
 
-def write_commander_brief_markdown(path: Path, brief: dict[str, Any]) -> None:
+def write_commander_brief_markdown(
+    path: Path,
+    brief: dict[str, Any],
+    *,
+    title: str = "Monte Carlo Commander Brief",
+) -> None:
     top_fail = list(brief.get("top_failure_modes", []) or [])
+    neutral_study = "study" in str(title).lower()
     lines = [
-        "# Monte Carlo Commander Brief",
+        f"# {title}",
         "",
         f"- Scenario: {brief.get('scenario_name', 'unknown')}",
         f"- Runs: {int(brief.get('runs', 0))}",
         f"- P(success): {100.0 * safe_float(brief.get('p_success'), default=0.0):.1f}%",
         f"- P(fail): {100.0 * safe_float(brief.get('p_fail'), default=0.0):.1f}%",
-        f"- P(keepout violation): {100.0 * safe_float(brief.get('p_keepout_violation'), default=0.0):.1f}%",
-        f"- Worst-case closest approach (km): {fmt_float(safe_float(brief.get('worst_case_closest_approach_km'), default=0.0), 3)}",
-        "",
-        "## Confidence Bands",
     ]
+    if not neutral_study:
+        lines.extend(
+            [
+                f"- P(keepout violation): {100.0 * safe_float(brief.get('p_keepout_violation'), default=0.0):.1f}%",
+                f"- Worst-case closest approach (km): "
+                f"{fmt_float(safe_float(brief.get('worst_case_closest_approach_km'), default=0.0), 3)}",
+            ]
+        )
+    lines.extend(["", "## Confidence Bands"])
     timeline = dict(brief.get("timeline_confidence_bands_s", {}) or {})
     fuel = dict(brief.get("fuel_confidence_bands_total_dv_m_s", {}) or {})
     lines.extend(
@@ -373,15 +415,10 @@ def write_commander_brief_markdown(path: Path, brief: dict[str, Any]) -> None:
             "## Risk Metrics",
         ]
     )
-    lines.extend(
-        [
-            f"- P(catastrophic outcome): {100.0 * safe_float(brief.get('p_catastrophic_outcome'), default=0.0):.1f}%",
-            f"- P(exceed dV budget): {100.0 * safe_float(brief.get('p_exceed_dv_budget'), default=0.0):.1f}%",
-            f"- P(exceed time budget): {100.0 * safe_float(brief.get('p_exceed_time_budget'), default=0.0):.1f}%",
-            "",
-            "## Top Failure Modes",
-        ]
-    )
+    lines.append(f"- P(catastrophic outcome): {100.0 * safe_float(brief.get('p_catastrophic_outcome'), default=0.0):.1f}%")
+    lines.append(f"- P(exceed dV budget): {100.0 * safe_float(brief.get('p_exceed_dv_budget'), default=0.0):.1f}%")
+    lines.append(f"- P(exceed time budget): {100.0 * safe_float(brief.get('p_exceed_time_budget'), default=0.0):.1f}%")
+    lines.extend(["", "## Top Failure Modes"])
     if top_fail:
         for row in top_fail:
             reason = str(row.get("reason", "unknown"))
@@ -390,6 +427,17 @@ def write_commander_brief_markdown(path: Path, brief: dict[str, Any]) -> None:
             lines.append(f"- {reason}: {count} runs ({frac:.1f}%)")
     else:
         lines.append("- none")
+    metric_gates = dict(brief.get("metric_gate_summary", {}) or {})
+    if metric_gates:
+        lines.extend(["", "## Metric Gates"])
+        for name, raw in sorted(metric_gates.items()):
+            row = dict(raw or {})
+            pass_rate = 100.0 * safe_float(row.get("pass_rate"), default=0.0)
+            stats = dict(row.get("actual_stats", {}) or {})
+            lines.append(
+                f"- {name}: pass={pass_rate:.1f}%, "
+                f"P95={fmt_float(safe_float(stats.get('p95'), default=0.0), 3)}"
+            )
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 

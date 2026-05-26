@@ -4,6 +4,8 @@ from dataclasses import asdict, dataclass
 
 import numpy as np
 
+from sim.acceleration.kernels.attitude import propagate_attitude_exponential_map_kernel
+from sim.acceleration.settings import acceleration_settings_from_mode
 from sim.utils.quaternion import (
     normalize_quaternion,
     omega_matrix,
@@ -39,6 +41,18 @@ def reset_attitude_guardrail_stats() -> None:
 
 def get_attitude_guardrail_stats() -> dict[str, int]:
     return asdict(_ATTITUDE_GUARDRAIL_STATS)
+
+
+def _add_guardrail_counts(counts: np.ndarray) -> None:
+    values = np.asarray(counts, dtype=int).reshape(-1)
+    if values.size < 6:
+        return
+    _ATTITUDE_GUARDRAIL_STATS.non_finite_input_events += int(values[0])
+    _ATTITUDE_GUARDRAIL_STATS.rate_clamp_events += int(values[1])
+    _ATTITUDE_GUARDRAIL_STATS.torque_clamp_events += int(values[2])
+    _ATTITUDE_GUARDRAIL_STATS.non_finite_coriolis_events += int(values[3])
+    _ATTITUDE_GUARDRAIL_STATS.singular_inertia_events += int(values[4])
+    _ATTITUDE_GUARDRAIL_STATS.non_finite_output_events += int(values[5])
 
 
 def rigid_body_derivatives(
@@ -116,7 +130,19 @@ def propagate_attitude_exponential_map(
     inertia_kg_m2: np.ndarray,
     torque_body_nm: np.ndarray,
     dt_s: float,
+    acceleration_mode: str = "off",
 ) -> tuple[np.ndarray, np.ndarray]:
+    if acceleration_settings_from_mode(acceleration_mode).enabled:
+        q_next, omega_next, counts = propagate_attitude_exponential_map_kernel(
+            np.asarray(quat_bn, dtype=float).reshape(4),
+            np.asarray(omega_body_rad_s, dtype=float).reshape(3),
+            np.asarray(inertia_kg_m2, dtype=float).reshape(3, 3),
+            np.asarray(torque_body_nm, dtype=float).reshape(3),
+            float(dt_s),
+        )
+        _add_guardrail_counts(counts)
+        return q_next, omega_next
+
     # Integrate angular-rate dynamics with first-order step.
     _, omega_dot = rigid_body_derivatives(quat_bn, omega_body_rad_s, inertia_kg_m2, torque_body_nm)
     dt = float(max(dt_s, 0.0))

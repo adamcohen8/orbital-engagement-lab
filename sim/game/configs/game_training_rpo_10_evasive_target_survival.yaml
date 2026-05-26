@@ -1,6 +1,6 @@
 scenario_name: game_training_rpo_10_evasive_target_survival
 scenario_description: RPO trainer scenario where the player flies the target while
-  an HCW PD chaser attempts rendezvous.
+  an RIC_PD chaser attempts rendezvous.
 metadata:
   owner: codex
   notes: Run with `python run_game.py sim/game/configs/game_training_rpo_10_evasive_target_survival.yaml
@@ -17,9 +17,9 @@ metadata:
     training:
       enabled: true
       scenario_id: rpo_10_evasive_target_survival
-      learning_goal: Fly the target vehicle and evade an autonomous HCW PD chaser
+      learning_goal: Fly the target vehicle and evade an autonomous RIC_PD chaser
         until the timer expires.
-      player_brief: You are the target. The red chaser is using the HCW PD controller
+      player_brief: You are the target. The red chaser is using the RIC_PD controller
         from the 10 km rendezvous experiment to close on you. Use small R/I/C pulses
         to keep at least 100 m of separation until time expires.
       pass_criteria:
@@ -28,7 +28,7 @@ metadata:
       - Stay under the target delta-v budget.
       instructor_notes:
       - This is the reverse of level 9: the player flies the target, not the chaser.
-      - The chaser uses sim.control.orbit.hcw_pd.HCWPDController with the 10 km experiment gains.
+      - The chaser uses sim.control.orbit.ric_pd.RICPDTransferController with the 10 km experiment guidance settings.
       - The camera follows the target/chaser pair so evasive motion stays visible.
       - The yellow dashed curve is the target vehicle's current HCW coast path.
       - If the chaser uses its full delta-v budget, it coasts for the rest of the attempt.
@@ -73,31 +73,38 @@ objects:
       relative_to: target
     orbit_control:
       kind: python
-      module: sim.control.orbit.hcw_pd
-      class_name: HCWPDController
+      module: sim.control.orbit.ric_pd
+      class_name: RICPDTransferController
       params:
-        max_accel_km_s2: 1.0e-04
+        max_accel_km_s2: 6.0e-05
         mean_motion_rad_s: 0.001078
-        kp:
-        - - 4.0e-06
+        transfer_time_s: 4800.0
+        burn_time_constant_s: 35.0
+        correction_interval_s: 300.0
+        velocity_deadband_m_s: 0.03
+        final_brake_start_s: 0.0
+        terminal_start_s: 900.0
+        terminal_range_km: 0.15
+        terminal_kp:
+        - - 2.5e-06
           - 0.0
           - 0.0
         - - 0.0
-          - 4.0e-06
+          - 2.5e-06
           - 0.0
         - - 0.0
           - 0.0
-          - 4.0e-06
-        kd:
-        - - 0.004
+          - 2.5e-06
+        terminal_kd:
+        - - 0.0035
           - 0.0
           - 0.0
         - - 0.0
-          - 0.004
+          - 0.0035
           - 0.0
         - - 0.0
           - 0.0
-          - 0.004
+          - 0.0035
         desired_state_ric:
         - 0.0
         - 0.0

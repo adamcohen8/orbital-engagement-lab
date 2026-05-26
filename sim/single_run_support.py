@@ -15,12 +15,14 @@ from sim.actuators.orbital import (
 from sim.config.object_refs import relative_reference_for_object
 from sim.core.models import Command, StateBelief, StateTruth
 from sim.dynamics.orbit.environment import EARTH_RADIUS_KM
+from sim.dynamics.reentry import evaluate_reentry_termination
 from sim.rocket.navigation import build_rocket_nav_state
 from sim.runtime_support import (
     AgentRuntime,
     _attitude_state13_from_belief,
     _combine_commands,
     _command_to_dict,
+    _earth_impact_policy_for_object,
     _orbital_elements_basic,
     _relative_orbit_state12,
     _rocket_altitude_km,
@@ -804,12 +806,18 @@ class _KnowledgeSynchronizer:
         if agent.knowledge_base is None:
             return
         snap = agent.knowledge_base.snapshot()
+        measurements = agent.knowledge_base.measurement_snapshot()
         for tid, hist in e.knowledge_hist.get(aid, {}).items():
             belief = snap.get(tid)
             if belief is not None:
                 hist[sample_index, :] = belief.state[:6]
             elif sample_index > 0:
                 hist[sample_index, :] = hist[sample_index - 1, :]
+            meas = measurements.get(tid)
+            measurement_hist = getattr(e, "knowledge_measurement_hist", {}).get(aid, {}).get(tid)
+            if meas is not None and measurement_hist is not None:
+                n = min(int(meas.size), int(measurement_hist.shape[1]))
+                measurement_hist[sample_index, :n] = meas[:n]
 
 
 class _TerminationMonitor:
@@ -818,10 +826,11 @@ class _TerminationMonitor:
 
     def check_earth_impact(self, *, t_s: float) -> bool:
         e = self.engine
-        if not bool(e.cfg.simulator.termination.get("earth_impact_enabled", True)):
-            return False
-        re = float(e.cfg.simulator.termination.get("earth_radius_km", EARTH_RADIUS_KM))
         for aid, agent in e.agents.items():
+            policy = _earth_impact_policy_for_object(e.cfg.simulator.termination, aid)
+            if not bool(policy.get("earth_impact_enabled", True)):
+                continue
+            re = float(policy.get("earth_radius_km", EARTH_RADIUS_KM))
             if not agent.active:
                 continue
             if agent.kind == "rocket" and agent.waiting_for_launch:
@@ -836,6 +845,32 @@ class _TerminationMonitor:
                 e.termination_time_s = float(t_s)
                 e.termination_object_id = aid
                 return True
+        return False
+
+    def check_reentry(self, *, t_s: float) -> bool:
+        e = self.engine
+        reentry_cfg = getattr(e, "reentry_cfg", None)
+        if reentry_cfg is None or not bool(getattr(reentry_cfg, "enabled", False)):
+            return False
+        metrics_by_object = getattr(e, "reentry_metric_hists", {}) or {}
+        sample_index = int(getattr(e, "current_index", 0))
+        for aid, metrics_by_key in dict(metrics_by_object).items():
+            agent = e.agents.get(aid)
+            if agent is None or not agent.active:
+                continue
+            sample_metrics: dict[str, float] = {}
+            for key, series in dict(metrics_by_key).items():
+                arr = np.array(series, dtype=float).reshape(-1)
+                if sample_index < arr.size:
+                    sample_metrics[str(key)] = float(arr[sample_index])
+            reason = evaluate_reentry_termination(sample_metrics, reentry_cfg, object_id=aid)
+            if reason is None:
+                continue
+            e.terminated_early = True
+            e.termination_reason = reason
+            e.termination_time_s = float(t_s)
+            e.termination_object_id = aid
+            return True
         return False
 
     def update_rocket_insertion(self, *, t_s: float) -> None:

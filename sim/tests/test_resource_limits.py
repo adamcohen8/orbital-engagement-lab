@@ -6,7 +6,12 @@ import pytest
 
 from sim.config import scenario_config_from_dict
 from sim.execution import create_single_run_engine
-from sim.resource_limits import SimulationMemoryBudgetError
+from sim.resource_limits import (
+    ResourceGovernor,
+    SimulationMemoryBudgetError,
+    apply_resource_profile_to_config_dict,
+    estimate_resource_requirements,
+)
 
 
 def _single_target_config(output_dir: Path, *, duration_s: float = 1000.0) -> dict:
@@ -71,3 +76,65 @@ def test_history_memory_guard_allows_run_under_budget(tmp_path: Path) -> None:
     engine = create_single_run_engine(cfg)
 
     assert engine.history_memory_estimate.estimated_peak_mb < 10.0
+
+
+def test_laptop_safe_profile_rewrites_batch_config(tmp_path: Path) -> None:
+    root = _single_target_config(tmp_path / "mc", duration_s=10.0)
+    root["monte_carlo"] = {
+        "enabled": True,
+        "iterations": 4,
+        "parallel_enabled": True,
+        "parallel_workers": 8,
+        "variations": [],
+    }
+    root["outputs"]["plots"] = {"enabled": True}
+
+    profiled = apply_resource_profile_to_config_dict(root, "laptop-safe")
+
+    assert profiled["monte_carlo"]["parallel_enabled"] is False
+    assert profiled["monte_carlo"]["parallel_workers"] == 1
+    assert profiled["outputs"]["plots"]["enabled"] is False
+    assert profiled["outputs"]["monte_carlo"]["checkpoint_enabled"] is True
+    assert profiled["simulator"]["resource_profile"] == "laptop-safe"
+
+
+def test_resource_estimate_reports_effective_batch_shape(tmp_path: Path) -> None:
+    root = _single_target_config(tmp_path / "mc", duration_s=12.0)
+    root["monte_carlo"] = {
+        "enabled": True,
+        "iterations": 3,
+        "parallel_enabled": True,
+        "parallel_workers": 2,
+        "variations": [],
+    }
+    cfg = scenario_config_from_dict(root)
+
+    estimate = estimate_resource_requirements(cfg)
+
+    assert estimate.study_type == "monte_carlo"
+    assert estimate.runs == 3
+    assert estimate.steps_per_run == 12
+    assert estimate.effective_workers == 2
+
+
+def test_resource_governor_honors_off_profile(tmp_path: Path) -> None:
+    root = _single_target_config(tmp_path / "mc", duration_s=2.0)
+    root["simulator"]["resource_profile"] = "off"
+    cfg = scenario_config_from_dict(root)
+
+    governor = ResourceGovernor(cfg)
+
+    assert governor.enabled is False
+
+
+def test_simulator_resource_profile_is_canonical_over_legacy_outputs_profile(tmp_path: Path) -> None:
+    root = _single_target_config(tmp_path / "mc", duration_s=2.0)
+    root["simulator"]["resource_profile"] = "laptop-safe"
+    root["outputs"]["resource_limits"] = {"resource_profile": "off"}
+    cfg = scenario_config_from_dict(root)
+
+    estimate = estimate_resource_requirements(cfg)
+    governor = ResourceGovernor(cfg)
+
+    assert estimate.profile == "laptop-safe"
+    assert governor.profile.name == "laptop-safe"

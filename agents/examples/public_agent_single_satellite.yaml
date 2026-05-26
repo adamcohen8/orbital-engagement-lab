@@ -1,0 +1,93 @@
+scenario_name: public_agent_single_satellite
+metadata:
+  owner: public-oel-agents
+  notes: >
+    Minimal AI-agent-generated public scenario. Propagates one passive
+    satellite with two-body orbit dynamics and zero control.
+objects:
+  target:
+    enabled: true
+    role: target
+    kind: satellite
+    specs:
+      mass_kg: 300.0
+    initial_state:
+      coes:
+        a_km: 7000.0
+        ecc: 0.0
+        inc_deg: 45.0
+        raan_deg: 0.0
+        argp_deg: 0.0
+        true_anomaly_deg: 0.0
+      attitude_quat_bn:
+        - 1.0
+        - 0.0
+        - 0.0
+        - 0.0
+      angular_rate_body_rad_s:
+        - 0.0
+        - 0.0
+        - 0.0
+    orbit_control:
+      kind: python
+      module: sim.control.orbit.zero_controller
+      class_name: ZeroController
+      params: {}
+    attitude_control:
+      kind: python
+      module: sim.control.attitude.zero_torque
+      class_name: ZeroTorqueController
+      params: {}
+    mission_objectives: []
+simulator:
+  scenario_type: auto
+  duration_s: 60.0
+  dt_s: 1.0
+  dynamics:
+    orbit:
+      model: two_body
+      orbit_substep_s: 1.0
+      j2: false
+      j3: false
+      j4: false
+      drag: false
+      srp: false
+    attitude:
+      enabled: true
+      attitude_substep_s: 0.1
+      disturbance_torques:
+        gravity_gradient: false
+        magnetic: false
+        drag: false
+        srp: false
+    rocket:
+      enabled: false
+  environment:
+    ephemeris_mode: analytic_simple
+    atmosphere_env: {}
+  plugin_validation:
+    strict: true
+  termination:
+    earth_impact_enabled: true
+    earth_radius_km: 6378.137
+outputs:
+  output_dir: outputs/agents/public_agent_single_satellite
+  mode: save
+  stats:
+    enabled: true
+    print_summary: false
+    save_json: true
+    save_csv: false
+    save_full_log: false
+  plots:
+    enabled: false
+    figure_ids: []
+  animations:
+    enabled: false
+    types: []
+monte_carlo:
+  enabled: false
+  iterations: 1
+  base_seed: 123
+  variations: []
+

@@ -32,6 +32,7 @@ jobs:
 
       - name: Validate curated public example configs
         run: |
+          python run_simulation.py --config configs/aero_assisted_plane_change_demo.yaml --validate-only
           python run_simulation.py --config examples/configs/public_tle_2hr_propagation.yaml --validate-only
           python run_simulation.py --config examples/configs/public_ground_station_access_from_tle.yaml --validate-only
           python run_simulation.py --config examples/configs/public_closed_loop_rendezvous_lqr.yaml --validate-only

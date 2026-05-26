@@ -84,10 +84,10 @@ def build_flagship_metrics(config_path: Path, output_dir: Path | None = None) ->
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run the flagship HCW PD 10 km analysis workflow.")
+    parser = argparse.ArgumentParser(description="Run the flagship RIC_PD 10 km analysis workflow.")
     parser.add_argument(
         "--config",
-        default="configs/hcw_pd_10km_experiment.yaml",
+        default="configs/ric_pd_10km_experiment.yaml",
         help="Scenario YAML to run.",
     )
     parser.add_argument(

@@ -21,9 +21,10 @@ objects:
     role: "tracked_satellite"
     specs:
       mass_kg: 420000.0
-      area_ref_m2: 900.0
+      aero:
+        reference_area_m2: 900.0
+        cd: 2.2
       cr: 1.2
-      cd: 2.2
     initial_state:
       tle:
         # Example ISS-like TLE lines for demonstration. Replace these with current
@@ -89,4 +90,3 @@ outputs:
 
 monte_carlo:
   enabled: false
-

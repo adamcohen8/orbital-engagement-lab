@@ -1,17 +1,17 @@
 # Plot Gallery
 
-These images are generated from the public-safe flagship 10 km HCW PD RPO
+These images are generated from the public-safe flagship 10 km RIC_PD RPO
 scenario:
 
 ```bash
-python run_simulation.py --config configs/hcw_pd_10km_experiment.yaml
+python run_simulation.py --config configs/ric_pd_10km_experiment.yaml
 ```
 
-The scenario writes run artifacts under `outputs/flagship_hcw_pd_10km/`. The
+The scenario writes run artifacts under `outputs/flagship_ric_pd_10km/`. The
 gallery images below are checked-in snapshots from that run so visitors can see
 the flagship plotting surface without running the simulator first. The live
 config may generate additional figures as the plotting catalog grows; when you
-run the scenario locally, start with `outputs/flagship_hcw_pd_10km/index.md` for
+run the scenario locally, start with `outputs/flagship_ric_pd_10km/index.md` for
 the authoritative artifact list and use this page as a quick visual reference.
 
 ## Run Dashboard

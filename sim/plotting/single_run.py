@@ -60,6 +60,10 @@ def _nested_array_map(value: Any) -> NestedArrayMap:
     return out
 
 
+def _reentry_metric_map(value: Any) -> NestedArrayMap:
+    return _nested_array_map(value)
+
+
 def _payload_arrays(
     payload: dict[str, Any],
 ) -> tuple[np.ndarray, ArrayMap, ArrayMap, ArrayMap, NestedArrayMap, np.ndarray | None]:
@@ -71,6 +75,12 @@ def _payload_arrays(
     ref = _as_array(payload.get("target_reference_orbit_truth", []), cols=14)
     ref_out = ref if ref.ndim == 2 and ref.shape[0] > 0 and ref.shape[1] >= 6 else None
     return t_s, truth, thrust, belief, knowledge, ref_out
+
+
+def _payload_reentry_metrics(payload: dict[str, Any] | None) -> NestedArrayMap:
+    if payload is None:
+        return {}
+    return _reentry_metric_map(payload.get("reentry_metrics_by_object", {}))
 
 
 def _save_show_close(fig: plt.Figure, *, out_path: str | Path | None, show: bool, close: bool, dpi: int) -> None:
@@ -198,6 +208,364 @@ def _plot_eci_trajectories(ax: Any, truth_by_object: ArrayMap) -> None:
 def _time_for(arr: np.ndarray, t_s: np.ndarray) -> np.ndarray:
     n = min(arr.shape[0], t_s.size)
     return t_s[:n]
+
+
+def _plot_reentry_series(
+    ax: plt.Axes,
+    *,
+    t_s: np.ndarray,
+    reentry_metrics_by_object: NestedArrayMap,
+    metric_key: str,
+    ylabel: str,
+    scale: float = 1.0,
+    active_only: bool = True,
+) -> bool:
+    plotted = False
+    for oid, metrics in sorted(reentry_metrics_by_object.items()):
+        series = np.array(metrics.get(metric_key, []), dtype=float).reshape(-1)
+        if series.size == 0:
+            continue
+        n = min(series.size, t_s.size)
+        if n <= 0:
+            continue
+        y = series[:n] * float(scale)
+        finite = np.isfinite(y)
+        if active_only:
+            active = np.array(metrics.get("active", []), dtype=float).reshape(-1)
+            if active.size:
+                active_mask = np.zeros(n, dtype=bool)
+                n_active = min(active.size, n)
+                active_mask[:n_active] = active[:n_active] > 0.5
+                finite &= active_mask
+        if not bool(np.any(finite)):
+            continue
+        ax.plot(t_s[:n][finite], y[finite], linewidth=1.25, label=oid)
+        plotted = True
+    ax.set_ylabel(ylabel)
+    ax.grid(True, alpha=0.3)
+    if plotted:
+        ax.legend(loc="best")
+    return plotted
+
+
+def _mark_reentry_threshold(
+    ax: plt.Axes,
+    *,
+    begin_altitude_km: float | None,
+) -> None:
+    if begin_altitude_km is not None:
+        ax.axhline(float(begin_altitude_km), color="tab:red", linestyle="--", linewidth=1.0, label="entry threshold")
+
+
+def plot_reentry_summary(
+    payload: dict[str, Any] | None = None,
+    *,
+    t_s: np.ndarray | None = None,
+    reentry_metrics_by_object: NestedArrayMap | None = None,
+    begin_altitude_km: float | None = None,
+    out_path: str | Path | None = None,
+    show: bool = False,
+    close: bool = False,
+    dpi: int = 150,
+) -> plt.Figure:
+    t = np.array([] if t_s is None else t_s, dtype=float).reshape(-1)
+    metrics = dict(reentry_metrics_by_object or {})
+    if payload is not None:
+        t = np.array(payload.get("time_s", []), dtype=float).reshape(-1)
+        metrics = _payload_reentry_metrics(payload)
+    fig, axes = plt.subplots(2, 2, figsize=cap_figsize(13, 8), constrained_layout=True)
+    ax_alt, ax_q, ax_g, ax_heat = axes.reshape(-1)
+    altitude_plotted = _plot_reentry_series(
+        ax_alt,
+        t_s=t,
+        reentry_metrics_by_object=metrics,
+        metric_key="altitude_km",
+        ylabel="altitude (km)",
+        active_only=False,
+    )
+    _mark_reentry_threshold(ax_alt, begin_altitude_km=begin_altitude_km)
+    if altitude_plotted or begin_altitude_km is not None:
+        ax_alt.legend(loc="best")
+    _plot_reentry_series(
+        ax_q,
+        t_s=t,
+        reentry_metrics_by_object=metrics,
+        metric_key="dynamic_pressure_pa",
+        ylabel="dynamic pressure (kPa)",
+        scale=1.0e-3,
+    )
+    _plot_reentry_series(
+        ax_g,
+        t_s=t,
+        reentry_metrics_by_object=metrics,
+        metric_key="g_load",
+        ylabel="drag decel (g)",
+    )
+    _plot_reentry_series(
+        ax_heat,
+        t_s=t,
+        reentry_metrics_by_object=metrics,
+        metric_key="heat_rate_w_m2",
+        ylabel="heat rate (MW/m^2)",
+        scale=1.0e-6,
+    )
+    for ax in axes[-1, :]:
+        ax.set_xlabel("time (s)")
+    fig.suptitle("Atmospheric Re-Entry Summary")
+    _save_show_close(fig, out_path=out_path, show=show, close=close, dpi=dpi)
+    return fig
+
+
+def plot_reentry_aero(
+    payload: dict[str, Any] | None = None,
+    *,
+    t_s: np.ndarray | None = None,
+    reentry_metrics_by_object: NestedArrayMap | None = None,
+    out_path: str | Path | None = None,
+    show: bool = False,
+    close: bool = False,
+    dpi: int = 150,
+) -> plt.Figure:
+    t = np.array([] if t_s is None else t_s, dtype=float).reshape(-1)
+    metrics = dict(reentry_metrics_by_object or {})
+    if payload is not None:
+        t = np.array(payload.get("time_s", []), dtype=float).reshape(-1)
+        metrics = _payload_reentry_metrics(payload)
+    fig, axes = plt.subplots(2, 2, figsize=cap_figsize(13, 8), constrained_layout=True)
+    ax_rho, ax_v, ax_q, ax_decel = axes.reshape(-1)
+    _plot_reentry_series(
+        ax_rho,
+        t_s=t,
+        reentry_metrics_by_object=metrics,
+        metric_key="density_kg_m3",
+        ylabel="density (kg/m^3)",
+    )
+    ax_rho.set_yscale("log")
+    _plot_reentry_series(
+        ax_v,
+        t_s=t,
+        reentry_metrics_by_object=metrics,
+        metric_key="relative_speed_m_s",
+        ylabel="relative speed (km/s)",
+        scale=1.0e-3,
+    )
+    _plot_reentry_series(
+        ax_q,
+        t_s=t,
+        reentry_metrics_by_object=metrics,
+        metric_key="dynamic_pressure_pa",
+        ylabel="dynamic pressure (kPa)",
+        scale=1.0e-3,
+    )
+    _plot_reentry_series(
+        ax_decel,
+        t_s=t,
+        reentry_metrics_by_object=metrics,
+        metric_key="drag_decel_m_s2",
+        ylabel="drag decel (m/s^2)",
+    )
+    for ax in axes[-1, :]:
+        ax.set_xlabel("time (s)")
+    fig.suptitle("Atmospheric Re-Entry Aerodynamics")
+    _save_show_close(fig, out_path=out_path, show=show, close=close, dpi=dpi)
+    return fig
+
+
+def plot_reentry_thermal(
+    payload: dict[str, Any] | None = None,
+    *,
+    t_s: np.ndarray | None = None,
+    reentry_metrics_by_object: NestedArrayMap | None = None,
+    out_path: str | Path | None = None,
+    show: bool = False,
+    close: bool = False,
+    dpi: int = 150,
+) -> plt.Figure:
+    t = np.array([] if t_s is None else t_s, dtype=float).reshape(-1)
+    metrics = dict(reentry_metrics_by_object or {})
+    if payload is not None:
+        t = np.array(payload.get("time_s", []), dtype=float).reshape(-1)
+        metrics = _payload_reentry_metrics(payload)
+    fig, axes = plt.subplots(2, 1, figsize=cap_figsize(12, 7), constrained_layout=True)
+    _plot_reentry_series(
+        axes[0],
+        t_s=t,
+        reentry_metrics_by_object=metrics,
+        metric_key="heat_rate_w_m2",
+        ylabel="heat rate (MW/m^2)",
+        scale=1.0e-6,
+    )
+    _plot_reentry_series(
+        axes[1],
+        t_s=t,
+        reentry_metrics_by_object=metrics,
+        metric_key="heat_load_j_m2",
+        ylabel="heat load (MJ/m^2)",
+        scale=1.0e-6,
+    )
+    axes[1].set_xlabel("time (s)")
+    fig.suptitle("Atmospheric Re-Entry Thermal Loads")
+    _save_show_close(fig, out_path=out_path, show=show, close=close, dpi=dpi)
+    return fig
+
+
+def _cross_track_axis_from_truth(hist: np.ndarray) -> np.ndarray | None:
+    arr = np.array(hist, dtype=float)
+    if arr.ndim != 2 or arr.shape[1] < 6 or arr.shape[0] == 0:
+        return None
+    for row in arr:
+        r = row[:3]
+        v = row[3:6]
+        h = np.cross(r, v)
+        norm = float(np.linalg.norm(h))
+        if norm > 0.0 and np.all(np.isfinite(h)):
+            return h / norm
+    return None
+
+
+def _plot_cross_track_kinematics(ax: plt.Axes, *, t_s: np.ndarray, truth_by_object: ArrayMap) -> bool:
+    plotted = False
+    for oid, hist in sorted(truth_by_object.items()):
+        axis = _cross_track_axis_from_truth(hist)
+        if axis is None:
+            continue
+        n = min(hist.shape[0], t_s.size)
+        if n <= 0:
+            continue
+        cross_track_km = hist[:n, :3] @ axis
+        cross_track_m_s = (hist[:n, 3:6] @ axis) * 1.0e3
+        finite = np.isfinite(cross_track_km) & np.isfinite(cross_track_m_s)
+        if not bool(np.any(finite)):
+            continue
+        ax.plot(t_s[:n][finite], cross_track_km[finite], linewidth=1.25, label=f"{oid} C pos (km)")
+        ax.plot(t_s[:n][finite], cross_track_m_s[finite], linestyle="--", linewidth=1.0, label=f"{oid} C vel (m/s)")
+        plotted = True
+    ax.set_ylabel("cross-track")
+    ax.grid(True, alpha=0.3)
+    if plotted:
+        ax.legend(loc="best")
+    return plotted
+
+
+def _plot_lift_axis_alignment(
+    ax: plt.Axes,
+    *,
+    t_s: np.ndarray,
+    truth_by_object: ArrayMap,
+    lift_axis_body_by_object: dict[str, np.ndarray] | None,
+) -> bool:
+    axes_by_object = dict(lift_axis_body_by_object or {})
+    plotted = False
+    for oid, hist in sorted(truth_by_object.items()):
+        if hist.shape[1] < 10:
+            continue
+        cross_track_axis = _cross_track_axis_from_truth(hist)
+        if cross_track_axis is None:
+            continue
+        lift_axis_body = np.array(axes_by_object.get(oid, np.array([0.0, 0.0, 1.0])), dtype=float).reshape(3)
+        norm = float(np.linalg.norm(lift_axis_body))
+        if norm <= 0.0:
+            continue
+        lift_axis_body = lift_axis_body / norm
+        n = min(hist.shape[0], t_s.size)
+        alignment = np.full(n, np.nan)
+        for k in range(n):
+            q = hist[k, 6:10]
+            if np.all(np.isfinite(q)):
+                lift_axis_eci = quaternion_to_dcm_bn(q).T @ lift_axis_body
+                alignment[k] = float(np.dot(lift_axis_eci, cross_track_axis))
+        finite = np.isfinite(alignment)
+        if not bool(np.any(finite)):
+            continue
+        ax.plot(t_s[:n][finite], alignment[finite], linewidth=1.25, label=oid)
+        plotted = True
+    ax.set_ylabel("lift-axis C alignment")
+    ax.set_ylim(-1.05, 1.05)
+    ax.grid(True, alpha=0.3)
+    if plotted:
+        ax.legend(loc="best")
+    return plotted
+
+
+def plot_atmospheric_pass(
+    payload: dict[str, Any] | None = None,
+    *,
+    t_s: np.ndarray | None = None,
+    truth_by_object: ArrayMap | None = None,
+    reentry_metrics_by_object: NestedArrayMap | None = None,
+    lift_axis_body_by_object: dict[str, np.ndarray] | None = None,
+    begin_altitude_km: float | None = None,
+    out_path: str | Path | None = None,
+    show: bool = False,
+    close: bool = False,
+    dpi: int = 150,
+) -> plt.Figure:
+    t = np.array([] if t_s is None else t_s, dtype=float).reshape(-1)
+    truth = dict(truth_by_object or {})
+    metrics = dict(reentry_metrics_by_object or {})
+    if payload is not None:
+        t, truth, _, _, _, _ = _payload_arrays(payload)
+        metrics = _payload_reentry_metrics(payload)
+
+    fig, axes = plt.subplots(3, 2, figsize=cap_figsize(14, 10), constrained_layout=True)
+    ax_alt, ax_aero, ax_q, ax_ct, ax_heat, ax_axis = axes.reshape(-1)
+    altitude_plotted = _plot_reentry_series(
+        ax_alt,
+        t_s=t,
+        reentry_metrics_by_object=metrics,
+        metric_key="altitude_km",
+        ylabel="altitude (km)",
+        active_only=False,
+    )
+    _mark_reentry_threshold(ax_alt, begin_altitude_km=begin_altitude_km)
+    if altitude_plotted or begin_altitude_km is not None:
+        ax_alt.legend(loc="best")
+    _plot_reentry_series(
+        ax_aero,
+        t_s=t,
+        reentry_metrics_by_object=metrics,
+        metric_key="drag_decel_m_s2",
+        ylabel="aero accel (m/s^2)",
+    )
+    for oid, metrics_by_key in sorted(metrics.items()):
+        lift = np.array(metrics_by_key.get("lift_accel_m_s2", []), dtype=float).reshape(-1)
+        active = np.array(metrics_by_key.get("active", []), dtype=float).reshape(-1)
+        n = min(lift.size, active.size, t.size)
+        finite = np.isfinite(lift[:n]) & (active[:n] > 0.5) if n > 0 else np.zeros(0, dtype=bool)
+        if bool(np.any(finite)):
+            ax_aero.plot(t[:n][finite], lift[:n][finite], linestyle="--", linewidth=1.25, label=f"{oid} lift")
+    handles, _ = ax_aero.get_legend_handles_labels()
+    if handles:
+        ax_aero.legend(loc="best")
+    _plot_reentry_series(
+        ax_q,
+        t_s=t,
+        reentry_metrics_by_object=metrics,
+        metric_key="dynamic_pressure_pa",
+        ylabel="dynamic pressure (kPa)",
+        scale=1.0e-3,
+    )
+    _plot_cross_track_kinematics(ax_ct, t_s=t, truth_by_object=truth)
+    _plot_reentry_series(
+        ax_heat,
+        t_s=t,
+        reentry_metrics_by_object=metrics,
+        metric_key="heat_load_j_m2",
+        ylabel="heat load (MJ/m^2)",
+        scale=1.0e-6,
+        active_only=False,
+    )
+    _plot_lift_axis_alignment(
+        ax_axis,
+        t_s=t,
+        truth_by_object=truth,
+        lift_axis_body_by_object=lift_axis_body_by_object,
+    )
+    for ax in axes[-1, :]:
+        ax.set_xlabel("time (s)")
+    fig.suptitle("Atmospheric Pass and Aero-Assist Summary")
+    _save_show_close(fig, out_path=out_path, show=show, close=close, dpi=dpi)
+    return fig
 
 
 def _cumulative_delta_v_m_s(t_s: np.ndarray, accel_km_s2: np.ndarray) -> np.ndarray:
@@ -688,6 +1056,194 @@ def plot_estimation_error_components(
         axes[0].legend(loc="best", ncol=2)
         axes[1].legend(loc="best", ncol=2)
     fig.tight_layout()
+    _save_show_close(fig, out_path=out_path, show=show, close=close, dpi=dpi)
+    return fig
+
+
+def plot_knowledge_filtering(
+    payload: dict[str, Any] | None = None,
+    *,
+    t_s: np.ndarray | None = None,
+    truth_by_object: ArrayMap | None = None,
+    knowledge_by_observer: NestedArrayMap | None = None,
+    knowledge_measurements_by_observer: NestedArrayMap | None = None,
+    knowledge_noise_by_observer: dict[str, dict[str, Any]] | None = None,
+    out_path: str | Path | None = None,
+    show: bool = False,
+    close: bool = False,
+    dpi: int = 150,
+) -> plt.Figure:
+    if payload is not None:
+        t_s, truth_by_object, _, _, knowledge_by_observer, _ = _payload_arrays(payload)
+        knowledge_measurements_by_observer = _nested_array_map(payload.get("knowledge_measurements_by_observer", {}))
+    t = np.array([] if t_s is None else t_s, dtype=float).reshape(-1)
+    truth = dict(truth_by_object or {})
+    estimates = dict(knowledge_by_observer or {})
+    measurements = dict(knowledge_measurements_by_observer or {})
+    noise_by_observer = dict(knowledge_noise_by_observer or {})
+    fig, axes = plt.subplots(2, 3, figsize=cap_figsize(15, 8), constrained_layout=True)
+    ax_range, ax_pos, ax_vel, ax_pos_hist, ax_vel_hist, ax_norm_hist = axes.reshape(-1)
+    plotted = False
+    pos_hist_values: list[np.ndarray] = []
+    vel_hist_values: list[np.ndarray] = []
+    norm_hist_values: list[np.ndarray] = []
+    pos_sigma_markers_m: list[tuple[float, float]] = []
+    vel_sigma_markers_mm_s: list[tuple[float, float]] = []
+    for obs, by_target in sorted(estimates.items()):
+        for target, estimate in sorted(by_target.items()):
+            target_truth = truth.get(target)
+            observer_truth = truth.get(obs)
+            measurement = measurements.get(obs, {}).get(target)
+            if target_truth is None or target_truth.shape[1] < 6 or estimate.shape[1] < 6:
+                continue
+            n = min(target_truth.shape[0], estimate.shape[0], t.size)
+            if n <= 0:
+                continue
+            label = f"{obs}->{target}"
+            if observer_truth is not None and observer_truth.shape[1] >= 3:
+                nr = min(n, observer_truth.shape[0])
+                truth_range = np.linalg.norm(target_truth[:nr, :3] - observer_truth[:nr, :3], axis=1)
+                estimate_range = np.linalg.norm(estimate[:nr, :3] - observer_truth[:nr, :3], axis=1)
+                ax_range.plot(t[:nr], truth_range, color="black", linewidth=1.4, label=f"{label} truth")
+                ax_range.plot(t[:nr], estimate_range, linewidth=1.1, label=f"{label} estimate")
+                if measurement is not None and measurement.shape[1] >= 3:
+                    nm = min(nr, measurement.shape[0])
+                    meas_range = np.linalg.norm(measurement[:nm, :3] - observer_truth[:nm, :3], axis=1)
+                    valid_meas = np.all(np.isfinite(measurement[:nm, :3]), axis=1)
+                    ax_range.scatter(t[:nm][valid_meas], meas_range[valid_meas], s=8, alpha=0.35, label=f"{label} meas")
+            pos_err_est = np.linalg.norm(estimate[:n, :3] - target_truth[:n, :3], axis=1)
+            vel_err_est = np.linalg.norm(estimate[:n, 3:6] - target_truth[:n, 3:6], axis=1)
+            ax_pos.plot(t[:n], pos_err_est, linewidth=1.2, label=f"{label} estimate")
+            ax_vel.plot(t[:n], vel_err_est * 1000.0, linewidth=1.2, label=f"{label} estimate")
+            if measurement is not None and measurement.shape[1] >= 6:
+                nm = min(n, measurement.shape[0])
+                meas_pos_err = measurement[:nm, :3] - target_truth[:nm, :3]
+                meas_vel_err = measurement[:nm, 3:6] - target_truth[:nm, 3:6]
+                valid_pos = np.all(np.isfinite(meas_pos_err), axis=1)
+                valid_vel = np.all(np.isfinite(meas_vel_err), axis=1)
+                ax_pos.scatter(
+                    t[:nm][valid_pos],
+                    np.linalg.norm(meas_pos_err[valid_pos], axis=1),
+                    s=8,
+                    alpha=0.35,
+                    label=f"{label} measurement",
+                )
+                ax_vel.scatter(
+                    t[:nm][valid_vel],
+                    np.linalg.norm(meas_vel_err[valid_vel], axis=1) * 1000.0,
+                    s=8,
+                    alpha=0.35,
+                    label=f"{label} measurement",
+                )
+                if np.any(valid_pos):
+                    pos_hist_values.append(meas_pos_err[valid_pos].reshape(-1))
+                if np.any(valid_vel):
+                    vel_hist_values.append(meas_vel_err[valid_vel].reshape(-1))
+                noise = noise_by_observer.get(obs, {})
+                pos_sigma = np.array(noise.get("pos_sigma_km", []), dtype=float).reshape(-1)
+                vel_sigma = np.array(noise.get("vel_sigma_km_s", []), dtype=float).reshape(-1)
+                pos_bias = np.array(noise.get("pos_bias_km", np.zeros(3)), dtype=float).reshape(-1)
+                vel_bias = np.array(noise.get("vel_bias_km_s", np.zeros(3)), dtype=float).reshape(-1)
+                if pos_sigma.size in (1, 3) and np.any(pos_sigma > 0.0) and np.any(valid_pos):
+                    ps = np.full(3, float(pos_sigma[0])) if pos_sigma.size == 1 else pos_sigma[:3]
+                    pb = (
+                        np.zeros(3, dtype=float)
+                        if pos_bias.size == 0
+                        else np.full(3, float(pos_bias[0]))
+                        if pos_bias.size == 1
+                        else pos_bias[:3]
+                    )
+                    usable = ps > 0.0
+                    norm_hist_values.append(((meas_pos_err[valid_pos][:, usable] - pb[usable]) / ps[usable]).reshape(-1))
+                    pos_sigma_markers_m.append((float(np.mean(pb)) * 1000.0, float(np.sqrt(np.mean(ps**2))) * 1000.0))
+                if vel_sigma.size in (1, 3) and np.any(vel_sigma > 0.0) and np.any(valid_vel):
+                    vs = np.full(3, float(vel_sigma[0])) if vel_sigma.size == 1 else vel_sigma[:3]
+                    vb = (
+                        np.zeros(3, dtype=float)
+                        if vel_bias.size == 0
+                        else np.full(3, float(vel_bias[0]))
+                        if vel_bias.size == 1
+                        else vel_bias[:3]
+                    )
+                    usable = vs > 0.0
+                    norm_hist_values.append(((meas_vel_err[valid_vel][:, usable] - vb[usable]) / vs[usable]).reshape(-1))
+                    vel_sigma_markers_mm_s.append(
+                        (float(np.mean(vb)) * 1.0e6, float(np.sqrt(np.mean(vs**2))) * 1.0e6)
+                    )
+            plotted = True
+
+    def _unique_sigma_markers(markers: list[tuple[float, float]]) -> list[tuple[float, float]]:
+        unique: list[tuple[float, float]] = []
+        for bias, sigma in markers:
+            if not any(np.isclose(bias, b, rtol=1e-9, atol=1e-12) and np.isclose(sigma, s, rtol=1e-9, atol=1e-12) for b, s in unique):
+                unique.append((bias, sigma))
+        return unique
+
+    if pos_hist_values:
+        values_m = np.concatenate(pos_hist_values) * 1000.0
+        finite = values_m[np.isfinite(values_m)]
+        if finite.size:
+            ax_pos_hist.hist(finite, bins=40, density=True, alpha=0.75, color="tab:blue", label="residuals")
+            ax_pos_hist.axvline(float(np.mean(finite)), color="black", linestyle="--", linewidth=1.0, label="mean")
+            for marker_idx, (bias_m, sigma_m) in enumerate(_unique_sigma_markers(pos_sigma_markers_m)):
+                label = "+/- cfg sigma" if marker_idx == 0 else None
+                ax_pos_hist.axvline(bias_m - sigma_m, color="tab:red", linestyle=":", linewidth=1.0, label=label)
+                ax_pos_hist.axvline(bias_m + sigma_m, color="tab:red", linestyle=":", linewidth=1.0)
+            ax_pos_hist.legend(loc="best")
+    if vel_hist_values:
+        values_mm_s = np.concatenate(vel_hist_values) * 1.0e6
+        finite = values_mm_s[np.isfinite(values_mm_s)]
+        if finite.size:
+            ax_vel_hist.hist(finite, bins=40, density=True, alpha=0.75, color="tab:orange", label="residuals")
+            ax_vel_hist.axvline(float(np.mean(finite)), color="black", linestyle="--", linewidth=1.0, label="mean")
+            for marker_idx, (bias_mm_s, sigma_mm_s) in enumerate(_unique_sigma_markers(vel_sigma_markers_mm_s)):
+                label = "+/- cfg sigma" if marker_idx == 0 else None
+                ax_vel_hist.axvline(
+                    bias_mm_s - sigma_mm_s, color="tab:red", linestyle=":", linewidth=1.0, label=label
+                )
+                ax_vel_hist.axvline(bias_mm_s + sigma_mm_s, color="tab:red", linestyle=":", linewidth=1.0)
+            ax_vel_hist.legend(loc="best")
+    if norm_hist_values:
+        finite = np.concatenate(norm_hist_values)
+        finite = finite[np.isfinite(finite)]
+        if finite.size:
+            ax_norm_hist.hist(finite, bins=40, density=True, alpha=0.7, color="tab:green", label="normalized residuals")
+            x = np.linspace(-4.0, 4.0, 241)
+            pdf = np.exp(-0.5 * x**2) / np.sqrt(2.0 * np.pi)
+            ax_norm_hist.plot(x, pdf, color="black", linewidth=1.1, label="N(0,1)")
+            ax_norm_hist.axvline(0.0, color="black", linestyle="--", linewidth=1.0)
+            ax_norm_hist.legend(loc="best")
+    if not plotted:
+        for ax in axes.reshape(-1):
+            ax.text(
+                0.5,
+                0.5,
+                "No truth/measurement/estimate chain available",
+                ha="center",
+                va="center",
+                transform=ax.transAxes,
+            )
+    ax_range.set_title("Truth / Measurement / Estimate Range")
+    ax_range.set_ylabel("km")
+    ax_pos.set_title("Position Error Norm")
+    ax_pos.set_ylabel("km")
+    ax_vel.set_title("Velocity Error Norm")
+    ax_vel.set_ylabel("m/s")
+    ax_vel.set_xlabel("time (s)")
+    ax_pos_hist.set_title("Position Measurement Residuals")
+    ax_pos_hist.set_xlabel("measurement - truth (m)")
+    ax_pos_hist.set_ylabel("density")
+    ax_vel_hist.set_title("Velocity Measurement Residuals")
+    ax_vel_hist.set_xlabel("measurement - truth (mm/s)")
+    ax_vel_hist.set_ylabel("density")
+    ax_norm_hist.set_title("Normalized Measurement Residuals")
+    ax_norm_hist.set_xlabel("(measurement - truth - bias) / sigma")
+    ax_norm_hist.set_ylabel("density")
+    for ax in axes.reshape(-1):
+        ax.grid(True, alpha=0.3)
+    for ax in (ax_range, ax_pos, ax_vel):
+        if ax.lines or ax.collections:
+            ax.legend(loc="best")
     _save_show_close(fig, out_path=out_path, show=show, close=close, dpi=dpi)
     return fig
 

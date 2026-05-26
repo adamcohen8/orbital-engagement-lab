@@ -187,6 +187,53 @@ def accel_drag(
     return a_m_s2 / 1e3
 
 
+def accel_lift(
+    r_eci_km: np.ndarray,
+    v_eci_km_s: np.ndarray,
+    t_s: float,
+    mass_kg: float,
+    area_m2: float,
+    cl: float,
+    lift_direction_eci: np.ndarray,
+    env: dict,
+) -> np.ndarray:
+    rho = float(env.get("density_kg_m3", 0.0))
+    if rho <= 0.0 or mass_kg <= 0.0:
+        return np.zeros(3)
+    area_eff_m2 = float(env.get("lift_area_m2", area_m2))
+    if area_eff_m2 <= 0.0 or float(cl) == 0.0:
+        return np.zeros(3)
+    omega_raw = env.get("drag_earth_rotation_rad_s", EARTH_ROT_RATE_RAD_S)
+    omega_earth_rad_s = float(EARTH_ROT_RATE_RAD_S if omega_raw is None else omega_raw)
+    v_atm_eci_km_s = np.array(
+        [
+            -omega_earth_rad_s * float(r_eci_km[1]),
+            omega_earth_rad_s * float(r_eci_km[0]),
+            0.0,
+        ],
+        dtype=float,
+    )
+    v_rel_eci_km_s = np.array(v_eci_km_s, dtype=float).reshape(3) - v_atm_eci_km_s
+    v_rel_m_s = v_rel_eci_km_s * 1e3
+    speed_m_s = float(np.linalg.norm(v_rel_m_s))
+    if speed_m_s <= 0.0:
+        return np.zeros(3)
+    v_hat = v_rel_m_s / speed_m_s
+    desired = np.array(lift_direction_eci, dtype=float).reshape(3)
+    desired_norm = float(np.linalg.norm(desired))
+    if desired_norm <= 0.0:
+        return np.zeros(3)
+    desired = desired / desired_norm
+    lift_dir = desired - float(np.dot(desired, v_hat)) * v_hat
+    lift_norm = float(np.linalg.norm(lift_dir))
+    if lift_norm <= 1e-12:
+        return np.zeros(3)
+    lift_dir = lift_dir / lift_norm
+    q_dyn_pa = 0.5 * rho * speed_m_s * speed_m_s
+    a_m_s2 = q_dyn_pa * area_eff_m2 * float(cl) / float(mass_kg)
+    return (a_m_s2 / 1e3) * lift_dir
+
+
 def accel_srp(
     r_eci_km: np.ndarray,
     mass_kg: float,

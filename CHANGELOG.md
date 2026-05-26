@@ -8,6 +8,87 @@ migration-sensitive behavior explicitly.
 
 ## Unreleased
 
+### Added
+
+### Changed
+
+### Fixed
+
+## 0.9.0 - 2026-05-26
+
+### Added
+
+- Added OEL Agents, a public-safe agent workflow layer for using AI coding
+  agents with Orbital Engagement Lab through documented YAML, CLI validation,
+  simulation execution, output inspection, and evaluation workflows.
+- Added root `AGENTS.md`, `agents/public/AGENTS.md`, and `docs/oel-agents.md`
+  so agents such as Codex, Cursor, Claude Code, and Gemini CLI can generate
+  scenarios, validate configs, run simulations, inspect artifacts, and explain
+  results without bypassing the deterministic physics engine.
+- Added public agent-generated scenario examples for passive orbit propagation,
+  closed-loop rendezvous, TLE ground-station access, and attitude hold.
+- Added `agents/public/evaluation-rubric.md` to help agents distinguish config
+  validity, execution evidence, physical interpretation, goal fit, and model
+  limitations.
+- Added public-agent tests that validate and run the agent-generated examples
+  headlessly, plus private-only coverage for controlled internal agent
+  guidance.
+- Added an opt-in acceleration subsystem with optional Numba/JIT kernels, warmup
+  tooling, local benchmark tooling, CLI/config controls, and an RK4 fast path
+  for supported two-body/J2/J3/J4 orbit propagation plus accelerated
+  exponential-map attitude propagation, RIC frame transforms, and orbit/attitude
+  EKF finite-difference Jacobian paths.
+- Added the product-facing RIC_PD 10 km flagship scenario, validation harness
+  suite, validation package documentation, and public/private docs links.
+- Added validation resource profiles, resource preflight reporting,
+  checkpoint/resume for Monte Carlo validation, checkpoint cleanup commands,
+  and runtime pressure gates for long local runs.
+- Added `simulator.resource_profile` as the canonical scenario-level resource
+  profile field and made unsafe resource preflight block validation/simulation
+  starts unless explicitly overridden.
+- Added raw knowledge-measurement histories, `knowledge_filtering` plots, and
+  validation harness truth/measurement/estimate metrics for sensor distribution
+  and estimator noise-filtering evidence.
+- Added a dedicated noisy `knowledge_filtering_single` validation benchmark
+  with normalized residual and filter-improvement gates.
+- Forced game-mode runs to disable optional acceleration so gameplay never pays
+  first-run JIT compilation latency.
+- Added generated-config hashes to Monte Carlo checkpoints so stale or legacy
+  checkpoints are ignored after scenario/controller changes.
+- Added a product inventory covering orbital controllers, attitude
+  controllers, and mission modules.
+- Added campaign study metrics/gates, campaign plot/report extensions, and
+  re-entry diagnostics/examples for private/pro analysis workflows.
+- Added first-pass atmospheric steering for satellites with object-level lift
+  coefficient, lift area, and attitude-coupled lift-axis specs.
+- Added atmospheric-pass controllers, demo scenario, validation hooks, and
+  plotting for aero-assisted plane-change/raise-burn studies.
+
+### Changed
+
+- Clarified that users should be able to ask agents for OEL workflows in
+  ordinary language rather than copy-pasting structured prompts.
+- Added rendezvous-specific agent guidance distinguishing "validated and ran"
+  from rendezvous success, with notes on when to enable full logs, CSV, and
+  plots for trajectory-quality review.
+- Updated public export exclusions so private-only agent guidance and tests stay
+  out of the public export.
+- Renamed the flagship product-facing controller/scenario/docs from HCW PD to
+  RIC_PD where the controller identity is RIC-frame PD rather than HCW as the
+  user-facing method.
+- Documented controller naming conventions for future controller modules,
+  classes, configs, reports, and product-facing labels.
+- Re-entry metric `active` now represents current threshold state, while
+  summaries preserve ever-entered state, episode count, latest exit time, and
+  cumulative heat load.
+
+### Fixed
+
+- Suppressed incomplete relative-range time-series plot artifacts when Monte
+  Carlo resumes from checkpoints that do not contain the bounded plot series.
+- Made resource preflight count canonical enabled objects instead of double
+  counting normalized legacy/object aliases.
+
 ## 0.8.0 - 2026-05-24
 
 ### Added
@@ -361,7 +442,7 @@ Flagship public workflow and Python API release.
 
 ### Added
 
-- Added the public flagship `configs/hcw_pd_10km_experiment.yaml` review
+- Added the public flagship `configs/ric_pd_10km_experiment.yaml` review
   scenario with saved report artifacts, refreshed plot gallery images, and a
   companion custom-analysis script.
 - Added public Python API helpers for single-run workspace validation, relative
@@ -384,14 +465,14 @@ Flagship public workflow and Python API release.
 
 ## 0.4.2 - 2026-05-07
 
-HCW PD controller and validation workflow release.
+Predecessor RIC-frame PD controller and validation workflow release.
 
 ### Added
 
-- Added an HCW PD orbital controller with 10 km rendezvous experiment,
+- Added a RIC-frame PD orbital controller with 10 km rendezvous experiment,
   Monte Carlo, and controller-bench tuning configs.
 - Added campaign-level Monte Carlo range-timeseries plotting and Gemini-backed
-  post-run AI report settings for the HCW PD experiment.
+  post-run AI report settings for the RIC-frame PD experiment.
 - Added validation evidence packaging, release workflow tests, pytest marker
   tiers, and split validation harness suites for orbit, attitude, actuator,
   sensor, integrated RPO, and HPOP reference checks.
