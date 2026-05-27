@@ -4,8 +4,12 @@ Thanks for taking a look at Orbital Engagement Lab.
 
 ## Development Setup
 
+Use Python 3.10 through 3.12. The commands below use Python 3.11; replace
+`python3.11` with `python3.10` or `python3.12` if that is your installed
+interpreter.
+
 ```bash
-python3 -m venv .venv
+python3.11 -m venv .venv
 source .venv/bin/activate
 python -m pip install -U pip
 python -m pip install ".[dev]"

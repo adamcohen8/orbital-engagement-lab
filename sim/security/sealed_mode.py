@@ -1,0 +1,198 @@
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+from typing import Any
+from urllib.parse import urlparse
+
+from sim.config.object_refs import configured_objects, object_parameter_prefix
+
+_HOSTED_AI_PROVIDERS = {"anthropic", "claude", "gemini", "google", "openai"}
+_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
+_TRUSTED_PLUGIN_PREFIXES = ("sim.", "integrations.cfs_sil.")
+
+_DEFAULT_AI_ENDPOINTS = {
+    "ollama": "http://localhost:11434",
+    "google": "https://generativelanguage.googleapis.com/v1beta",
+    "gemini": "https://generativelanguage.googleapis.com/v1beta",
+    "openai": "https://api.openai.com/v1",
+    "anthropic": "https://api.anthropic.com/v1",
+    "claude": "https://api.anthropic.com/v1",
+}
+
+
+@dataclass(frozen=True)
+class SealedModePolicy:
+    allow_untrusted_plugin_imports: bool = False
+    allow_hosted_ai: bool = False
+    allow_custom_ai_endpoints: bool = False
+    allow_non_loopback_sil: bool = False
+    allow_high_detail_outputs: bool = False
+    trusted_plugin_prefixes: tuple[str, ...] = _TRUSTED_PLUGIN_PREFIXES
+
+
+def sealed_mode_enabled(explicit: bool = False) -> bool:
+    return bool(explicit or os.environ.get("OEL_SEALED_MODE", "").strip().lower() in {"1", "true", "yes", "on"})
+
+
+def validate_sealed_mode(cfg: Any, policy: SealedModePolicy | None = None) -> list[str]:
+    policy = policy or SealedModePolicy()
+    errors: list[str] = []
+    errors.extend(_validate_plugin_modules(cfg, policy))
+    errors.extend(
+        _validate_ai_section(
+            dict(getattr(getattr(cfg, "outputs", None), "ai_report", {}) or {}),
+            "outputs.ai_report",
+            policy,
+            enabled_default=False,
+        )
+    )
+    errors.extend(
+        _validate_ai_section(
+            dict(getattr(getattr(cfg, "outputs", None), "ai_config", {}) or {}),
+            "outputs.ai_config",
+            policy,
+            enabled_default=True,
+        )
+    )
+    errors.extend(_validate_sil_networking(cfg, policy))
+    errors.extend(_validate_output_retention(cfg, policy))
+    return errors
+
+
+def _validate_plugin_modules(cfg: Any, policy: SealedModePolicy) -> list[str]:
+    if policy.allow_untrusted_plugin_imports:
+        return []
+    errors: list[str] = []
+    for object_id, agent in configured_objects(cfg).items():
+        if not getattr(agent, "enabled", False):
+            continue
+        base_path = object_parameter_prefix(str(object_id))
+        for field_name, pointer in _plugin_pointers(agent):
+            module = str(getattr(pointer, "module", "") or "").strip()
+            if not module:
+                continue
+            if not module.startswith(policy.trusted_plugin_prefixes):
+                errors.append(
+                    f"{base_path}.{field_name}: sealed mode blocks plugin module '{module}'. "
+                    "Use built-in OEL modules or pass --allow-untrusted-plugin-imports for a trusted scenario."
+                )
+    return errors
+
+
+def _plugin_pointers(agent: Any) -> list[tuple[str, Any]]:
+    out: list[tuple[str, Any]] = []
+    for field_name in (
+        "guidance",
+        "base_guidance",
+        "orbit_control",
+        "attitude_control",
+        "mission_strategy",
+        "mission_execution",
+    ):
+        pointer = getattr(agent, field_name, None)
+        if pointer is not None:
+            out.append((field_name, pointer))
+    for idx, pointer in enumerate(getattr(agent, "guidance_modifiers", []) or []):
+        out.append((f"guidance_modifiers[{idx}]", pointer))
+    for idx, pointer in enumerate(getattr(agent, "mission_objectives", []) or []):
+        out.append((f"mission_objectives[{idx}]", pointer))
+    bridge = getattr(agent, "bridge", None)
+    if bridge is not None and getattr(bridge, "enabled", False):
+        out.append(("bridge", bridge))
+    return out
+
+
+def _validate_ai_section(
+    ai_cfg: dict[str, Any],
+    path: str,
+    policy: SealedModePolicy,
+    *,
+    enabled_default: bool,
+) -> list[str]:
+    errors: list[str] = []
+    provider = str(ai_cfg.get("provider", "ollama") or "ollama").strip().lower()
+    live_call_enabled = bool(ai_cfg.get("enabled", enabled_default)) and not bool(ai_cfg.get("dry_run", False))
+    if live_call_enabled and provider in _HOSTED_AI_PROVIDERS and not policy.allow_hosted_ai:
+        errors.append(
+            f"{path}.provider: sealed mode blocks hosted AI provider '{provider}'. "
+            "Use provider='ollama', set dry_run: true, or pass --allow-hosted-ai for an approved environment."
+        )
+    endpoint = str(ai_cfg.get("endpoint", "") or "").strip().rstrip("/")
+    if endpoint and _default_endpoint(provider) != endpoint and not policy.allow_custom_ai_endpoints:
+        errors.append(
+            f"{path}.endpoint: sealed mode blocks custom AI endpoint '{endpoint}'. "
+            "Use the built-in endpoint or pass --allow-custom-ai-endpoints for a trusted gateway."
+        )
+    return errors
+
+
+def _default_endpoint(provider: str) -> str:
+    return str(_DEFAULT_AI_ENDPOINTS.get(provider, "") or "").rstrip("/")
+
+
+def _validate_sil_networking(cfg: Any, policy: SealedModePolicy) -> list[str]:
+    if policy.allow_non_loopback_sil:
+        return []
+    errors: list[str] = []
+    scenario_type = str(getattr(getattr(cfg, "simulator", None), "scenario_type", "") or "").strip().lower()
+    for object_id, agent in configured_objects(cfg).items():
+        if not getattr(agent, "enabled", False):
+            continue
+        bridge = getattr(agent, "bridge", None)
+        if bridge is None or not getattr(bridge, "enabled", False):
+            continue
+        module = str(getattr(bridge, "module", "") or "")
+        class_name = str(getattr(bridge, "class_name", "") or "")
+        if scenario_type != "cfs_sil" and not module.startswith("integrations.cfs_sil.") and not class_name.startswith("CfsSil"):
+            continue
+        params = dict(getattr(bridge, "params", {}) or {})
+        bind_host = str(params.get("bind_host", "127.0.0.1") or "127.0.0.1")
+        cfs_host = str(params.get("cfs_host", "127.0.0.1") or "127.0.0.1")
+        allow_non_loopback = bool(params.get("allow_non_loopback", False))
+        if allow_non_loopback or not _is_loopback_host(bind_host) or not _is_loopback_host(cfs_host):
+            errors.append(
+                f"{object_parameter_prefix(str(object_id))}.bridge: sealed mode blocks non-loopback cFS/SIL UDP networking. "
+                "Use loopback hosts and allow_non_loopback: false, or pass --allow-non-loopback-sil for an isolated test network."
+            )
+    return errors
+
+
+def _is_loopback_host(host: str) -> bool:
+    parsed = urlparse(host if "://" in host else f"//{host}")
+    normalized = (parsed.hostname or host or "").strip().lower()
+    return normalized in _LOOPBACK_HOSTS
+
+
+def _validate_output_retention(cfg: Any, policy: SealedModePolicy) -> list[str]:
+    if policy.allow_high_detail_outputs:
+        return []
+    outputs = getattr(cfg, "outputs", None)
+    errors: list[str] = []
+    stats = dict(getattr(outputs, "stats", {}) or {})
+    if bool(stats.get("save_full_log", True)):
+        errors.append(
+            "outputs.stats.save_full_log: sealed mode blocks full run logs. "
+            "Set save_full_log: false or pass --allow-high-detail-outputs for approved retention."
+        )
+    review = dict(getattr(outputs, "review", {}) or {})
+    if str(review.get("detail", "standard") or "standard").strip().lower() == "full":
+        errors.append(
+            "outputs.review.detail: sealed mode blocks detail='full'. "
+            "Use compact/standard review detail or pass --allow-high-detail-outputs for approved retention."
+        )
+    monte_carlo = dict(getattr(outputs, "monte_carlo", {}) or {})
+    if bool(monte_carlo.get("save_raw_runs", False)):
+        errors.append(
+            "outputs.monte_carlo.save_raw_runs: sealed mode blocks raw Monte Carlo run payloads. "
+            "Set save_raw_runs: false or pass --allow-high-detail-outputs for approved retention."
+        )
+    ai_report = dict(getattr(outputs, "ai_report", {}) or {})
+    if bool(ai_report.get("enabled", False)):
+        data_scope = str(ai_report.get("data_scope", "summary_only") or "summary_only").strip().lower()
+        if data_scope != "summary_only":
+            errors.append(
+                "outputs.ai_report.data_scope: sealed mode blocks AI report data_scope values beyond summary_only. "
+                "Use summary_only or pass --allow-high-detail-outputs for approved retention."
+            )
+    return errors

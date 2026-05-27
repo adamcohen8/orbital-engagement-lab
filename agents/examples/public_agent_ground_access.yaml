@@ -1,16 +1,20 @@
-# Agent example: TLE propagation plus passive ground-station access.
+# Agent example: TLE-initialized propagation plus passive ground-station access.
 #
 # Natural-language source:
 # "Create a short public scenario that propagates a TLE and checks whether a
 # Colorado Springs ground station can see it. Keep the run headless and save
 # JSON summary outputs."
+#
+# Assumption boundary: this is not SGP4/general-perturbations propagation. OEL
+# converts the TLE to an initial ECI state, then numerically integrates its
+# configured force model.
 
 scenario_name: public_agent_ground_access
-scenario_description: "Agent-generated public TLE and ground-station access smoke scenario."
+scenario_description: "Agent-generated public TLE-initialized ground-station access smoke scenario."
 
 metadata:
   owner: public-oel-agents
-  notes: "Headless agent example for access-window scenario generation."
+  notes: "Headless agent example for access-window scenario generation. This is not SGP4/general-perturbations propagation; OEL initializes from the TLE and numerically integrates its configured force model."
 
 objects:
   iss:
@@ -83,4 +87,3 @@ outputs:
 
 monte_carlo:
   enabled: false
-

@@ -10,13 +10,13 @@ pointing, and thrust-alignment gating in one deterministic run.
 Validate first:
 
 ```bash
-python run_simulation.py --config configs/ric_pd_10km_experiment.yaml --validate-only
+.venv/bin/python run_simulation.py --config configs/ric_pd_10km_experiment.yaml --validate-only
 ```
 
 Run the scenario:
 
 ```bash
-python run_simulation.py --config configs/ric_pd_10km_experiment.yaml
+.venv/bin/python run_simulation.py --config configs/ric_pd_10km_experiment.yaml
 ```
 
 Open the start-here file first:
@@ -56,7 +56,7 @@ The companion API example runs the same config and writes a small custom metrics
 package:
 
 ```bash
-python examples/python/flagship_analysis.py
+.venv/bin/python examples/python/flagship_analysis.py
 ```
 
 It writes:
@@ -83,19 +83,10 @@ payload summary.
 
 ## Validation Package
 
-The focused validation package for this scenario is:
-
-```bash
-python validation/automated_validation_harness.py --suite ric_pd_10km
-```
-
-It writes:
-
-```text
-outputs/validation_harness_ric_pd_10km/validation_harness_report.json
-outputs/validation_harness_ric_pd_10km/validation_harness_report.md
-outputs/validation_harness_ric_pd_10km/validation_evidence_manifest.json
-```
+The public export can rerun the scenario and companion analysis script above.
+The automated validation harness, Monte Carlo envelope, and evidence manifests
+for this scenario live in the Pro/private workspace and are not shipped in the
+open-core export.
 
 For the validation claim, gates, and limitations, see
 [RIC_PD 10 km Validation Package](validation-ric-pd-10km.md).

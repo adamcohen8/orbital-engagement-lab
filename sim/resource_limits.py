@@ -317,24 +317,88 @@ def _read_macos_memory_mb() -> tuple[float | None, float | None]:
     vm_text = _run_text(["vm_stat"])
     if not vm_text:
         return total_mb, None
+    parsed_total_mb, available_mb = _parse_macos_vm_stat_mb(vm_text)
+    if total_mb is None:
+        total_mb = parsed_total_mb
+    return total_mb, available_mb
+
+
+def _parse_macos_vm_stat_mb(vm_text: str) -> tuple[float | None, float | None]:
     page_size = 4096.0
-    available_pages = 0.0
+    values: dict[str, float] = {}
     for line in vm_text.splitlines():
         if "page size of" in line:
             words = [w for w in line.replace(".", "").split() if w.isdigit()]
             if words:
                 page_size = float(words[-1])
+            continue
         label, _, raw_value = line.partition(":")
         key = label.strip()
         value_text = raw_value.strip().rstrip(".").replace(",", "")
         try:
-            pages = float(value_text)
+            values[key] = float(value_text)
         except ValueError:
             continue
-        if key in {"Pages free", "Pages speculative"}:
-            available_pages += pages
+
+    # macOS keeps useful cache in inactive/speculative pages. Counting only
+    # "Pages free" makes ordinary desktops look exhausted and causes false
+    # resource-preflight pressure for runs that only need modest memory.
+    available_pages = sum(
+        values.get(key, 0.0)
+        for key in (
+            "Pages free",
+            "Pages speculative",
+            "Pages inactive",
+            "Pages purgeable",
+        )
+    )
+    total_pages = sum(
+        values.get(key, 0.0)
+        for key in (
+            "Pages free",
+            "Pages active",
+            "Pages inactive",
+            "Pages speculative",
+            "Pages wired down",
+            "Pages occupied by compressor",
+        )
+    )
     available_mb = (available_pages * page_size) / (1024.0 * 1024.0) if available_pages > 0 else None
+    total_mb = (total_pages * page_size) / (1024.0 * 1024.0) if total_pages > 0 else None
     return total_mb, available_mb
+
+
+def _memory_bytes_to_mb(total_bytes: int, available_bytes: int) -> tuple[float, float]:
+    return float(total_bytes) / (1024.0 * 1024.0), float(available_bytes) / (1024.0 * 1024.0)
+
+
+def _read_windows_memory_mb() -> tuple[float | None, float | None]:
+    if platform.system() != "Windows":
+        return None, None
+    try:
+        import ctypes
+
+        class MEMORYSTATUSEX(ctypes.Structure):
+            _fields_ = [
+                ("dwLength", ctypes.c_ulong),
+                ("dwMemoryLoad", ctypes.c_ulong),
+                ("ullTotalPhys", ctypes.c_ulonglong),
+                ("ullAvailPhys", ctypes.c_ulonglong),
+                ("ullTotalPageFile", ctypes.c_ulonglong),
+                ("ullAvailPageFile", ctypes.c_ulonglong),
+                ("ullTotalVirtual", ctypes.c_ulonglong),
+                ("ullAvailVirtual", ctypes.c_ulonglong),
+                ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+            ]
+
+        status = MEMORYSTATUSEX()
+        status.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+        ok = ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status))
+        if not ok:
+            return None, None
+        return _memory_bytes_to_mb(int(status.ullTotalPhys), int(status.ullAvailPhys))
+    except Exception:
+        return None, None
 
 
 def current_resource_snapshot() -> ResourceSnapshot:
@@ -347,6 +411,8 @@ def current_resource_snapshot() -> ResourceSnapshot:
     total_mb, available_mb = _read_proc_mem_available_mb()
     if total_mb is None and available_mb is None:
         total_mb, available_mb = _read_macos_memory_mb()
+    if total_mb is None and available_mb is None:
+        total_mb, available_mb = _read_windows_memory_mb()
     return ResourceSnapshot(
         timestamp_s=time.monotonic(),
         cpu_count=cpu_count,
@@ -462,12 +528,33 @@ def _study_type(cfg: Any) -> str:
     return "single_run"
 
 
+def _sensitivity_run_count(cfg: Any) -> int:
+    sensitivity = getattr(getattr(cfg, "analysis", None), "sensitivity", None)
+    method = str(getattr(sensitivity, "method", "one_at_a_time") or "one_at_a_time").strip().lower()
+    params = list(getattr(sensitivity, "parameters", []) or [])
+    if method == "lhs":
+        return max(int(getattr(sensitivity, "samples", 0) or 0), 0)
+    if method == "two_parameter_grid" and len(params) == 2:
+        return int(len(list(getattr(params[0], "values", []) or [])) * len(list(getattr(params[1], "values", []) or [])))
+    return int(sum(len(list(getattr(param, "values", []) or [])) for param in params))
+
+
 def estimate_resource_requirements(cfg: Any) -> ResourceEstimate:
     study_type = _study_type(cfg)
     steps = int(max(float(getattr(cfg.simulator, "duration_s", 0.0)) / max(float(getattr(cfg.simulator, "dt_s", 1.0)), 1e-9), 0))
-    runs = int(getattr(cfg.monte_carlo, "iterations", 1) if study_type == "monte_carlo" else 1)
-    parallel_enabled = bool(getattr(cfg.monte_carlo, "parallel_enabled", False)) if study_type == "monte_carlo" else False
-    requested_workers = int(getattr(cfg.monte_carlo, "parallel_workers", 0) or 0) if parallel_enabled else 1
+    if study_type == "monte_carlo":
+        runs = int(getattr(cfg.monte_carlo, "iterations", 1))
+        parallel_enabled = bool(getattr(cfg.monte_carlo, "parallel_enabled", False))
+        requested_workers = int(getattr(cfg.monte_carlo, "parallel_workers", 0) or 0) if parallel_enabled else 1
+    elif study_type == "sensitivity":
+        runs = max(_sensitivity_run_count(cfg), 1)
+        execution = getattr(getattr(cfg, "analysis", None), "execution", None)
+        parallel_enabled = bool(getattr(execution, "parallel_enabled", False))
+        requested_workers = int(getattr(execution, "parallel_workers", 0) or 0) if parallel_enabled else 1
+    else:
+        runs = 1
+        parallel_enabled = False
+        requested_workers = 1
     if parallel_enabled and requested_workers <= 0:
         requested_workers = max(1, int(os.cpu_count() or 1) - 1)
     effective_workers = max(1, min(requested_workers, max(runs, 1)))

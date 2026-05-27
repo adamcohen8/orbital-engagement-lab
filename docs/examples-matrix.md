@@ -15,12 +15,16 @@ Then run the scenario:
 python run_simulation.py --config examples/configs/public_tle_2hr_propagation.yaml
 ```
 
+TLE examples use the TLE only to initialize an ECI state. OEL does not run
+SGP4/general-perturbations propagation; after initialization it numerically
+integrates the configured OEL force model.
+
 ## Public Examples
 
 | Config | What It Demonstrates | Main Outputs | Notes |
 | --- | --- | --- | --- |
 | `public_tle_2hr_propagation.yaml` | TLE initialization and two-hour propagation with J2/J3/J4, drag, SRP, and Sun/Moon third-body effects | summary JSON, trajectory histories | Not SGP4/general perturbations: OEL initializes from the TLE, then numerically integrates its configured special-perturbations force model. |
-| `public_ground_station_access_from_tle.yaml` | Passive station access from a TLE object | access summary, access/elevation/range plot, and map-backed ground track | Uses the same two-body TLE initializer with J2 propagation enabled for a quick access screen. |
+| `public_ground_station_access_from_tle.yaml` | Passive station access from a TLE-initialized object | access summary, access/elevation/range plot, and map-backed ground track | Not SGP4/general perturbations: uses the same TLE-to-ECI initializer, then OEL numerical propagation with J2 enabled for a quick access screen. |
 | `public_closed_loop_rendezvous_lqr.yaml` | Compact closed-loop chaser/target rendezvous with HCW LQR | run summary and rendezvous metrics | Fastest controller example for reading the YAML shape. |
 | `public_rendezvous_closed_loop.yaml` | Broader rendezvous with attitude pointing, sensing, EKF knowledge, and plots | dashboard, rendezvous, control, estimation, sensor-access, and ground-track plots | Best public example for end-to-end closed-loop artifact review. |
 | `public_orbit_environment_stack.yaml` | Perturbation and environment toggles | summary JSON and optional plots | Use to inspect deterministic force-model configuration. |
@@ -68,7 +72,7 @@ python run_game.py sim/game/configs/game_training_rpo_04_rendezvous.yaml
 - New user: start with `configs/quickstart_5min.yaml`.
 - Flagship review workflow: run `configs/ric_pd_10km_experiment.yaml`, then
   `examples/python/flagship_analysis.py`.
-- TLE propagation: start with `public_tle_2hr_propagation.yaml`.
+- TLE-initialized numerical propagation: start with `public_tle_2hr_propagation.yaml`.
 - Ground-station access: start with `public_ground_station_access_from_tle.yaml`.
 - Atmospheric re-entry: start with `configs/reentry_smoke.yaml`, then use
   `public_reentry_interactive_demo.yaml` for the longer interactive plot view.

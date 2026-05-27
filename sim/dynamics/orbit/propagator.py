@@ -34,7 +34,12 @@ from sim.dynamics.orbit.environment import (
     VENUS_MU_KM3_S2,
 )
 from sim.dynamics.orbit.epoch import resolve_body_position_eci_km, resolve_sun_moon_positions
-from sim.dynamics.orbit.integrators import integrate_adaptive, rk4_step_state
+from sim.dynamics.orbit.integrators import (
+    AdaptiveStepInfo,
+    combine_adaptive_step_info,
+    integrate_adaptive,
+    rk4_step_state,
+)
 from sim.dynamics.orbit.spherical_harmonics import (
     accel_spherical_harmonics_terms,
     load_real_earth_gravity_terms,
@@ -269,6 +274,8 @@ class OrbitPropagator:
     _acceleration_enabled_cache: bool | None = field(default=None, init=False, repr=False)
     _zonal_rk4_fast_path_checked: bool = field(default=False, init=False, repr=False)
     _zonal_rk4_fast_path_flags_cache: tuple[bool, bool, bool] | None = field(default=None, init=False, repr=False)
+    last_adaptive_step_info: AdaptiveStepInfo | None = field(default=None, init=False, repr=False)
+    adaptive_step_info: AdaptiveStepInfo | None = field(default=None, init=False, repr=False)
 
     def propagate(
         self,
@@ -303,23 +310,9 @@ class OrbitPropagator:
 
         if self.integrator in ("rkf78", "dopri5", "adaptive"):
             adaptive_method = "rkf78" if self.integrator in ("rkf78", "adaptive") else "dopri5"
-            if adaptive_method == "rkf78":
-                if self._rkf78_last_t_s is None or float(t_s) < float(self._rkf78_last_t_s) - 1e-12:
-                    self._rkf78_h_next = None
-                from sim.dynamics.orbit.integrators import integrate_rkf78_hpop
-
-                x_next, h_next = integrate_rkf78_hpop(
-                    deriv_fn=deriv,
-                    t_s=t_s,
-                    x=x_eci,
-                    dt_s=dt_s,
-                    tolerance=self.adaptive_rtol,
-                    h_init=self._rkf78_h_next,
-                )
-                self._rkf78_h_next = float(h_next)
-                self._rkf78_last_t_s = float(t_s + dt_s)
-                return x_next
-            return integrate_adaptive(
+            if self._rkf78_last_t_s is None or float(t_s) < float(self._rkf78_last_t_s) - 1e-12:
+                self._rkf78_h_next = None
+            x_next, step_info = integrate_adaptive(
                 deriv_fn=deriv,
                 t_s=t_s,
                 x=x_eci,
@@ -327,7 +320,15 @@ class OrbitPropagator:
                 atol=self.adaptive_atol,
                 rtol=self.adaptive_rtol,
                 method=adaptive_method,
+                h_init=self._rkf78_h_next,
+                return_info=True,
             )
+            self._rkf78_h_next = step_info.suggested_next_step_s
+            self._rkf78_last_t_s = float(t_s + dt_s)
+            self.last_adaptive_step_info = step_info
+            previous = [] if self.adaptive_step_info is None else [self.adaptive_step_info]
+            self.adaptive_step_info = combine_adaptive_step_info(adaptive_method, [*previous, step_info])
+            return x_next
         return rk4_step_state(deriv_fn=deriv, t_s=t_s, x=x_eci, dt_s=dt_s)
 
     def _acceleration_enabled(self) -> bool:

@@ -9,7 +9,10 @@ from sim.execution import create_single_run_engine
 from sim.resource_limits import (
     ResourceGovernor,
     SimulationMemoryBudgetError,
+    _memory_bytes_to_mb,
+    _parse_macos_vm_stat_mb,
     apply_resource_profile_to_config_dict,
+    current_resource_snapshot,
     estimate_resource_requirements,
 )
 
@@ -117,6 +120,30 @@ def test_resource_estimate_reports_effective_batch_shape(tmp_path: Path) -> None
     assert estimate.effective_workers == 2
 
 
+def test_resource_estimate_reports_sensitivity_shape(tmp_path: Path) -> None:
+    root = _single_target_config(tmp_path / "sensitivity", duration_s=12.0)
+    root["analysis"] = {
+        "enabled": True,
+        "study_type": "sensitivity",
+        "execution": {"parallel_enabled": True, "parallel_workers": 3},
+        "sensitivity": {
+            "method": "two_parameter_grid",
+            "parameters": [
+                {"parameter_path": "target.specs.mass_kg", "values": [90.0, 100.0]},
+                {"parameter_path": "target.specs.drag_area_m2", "values": [0.8, 1.0, 1.2]},
+            ],
+        },
+    }
+    cfg = scenario_config_from_dict(root)
+
+    estimate = estimate_resource_requirements(cfg)
+
+    assert estimate.study_type == "sensitivity"
+    assert estimate.runs == 6
+    assert estimate.requested_workers == 3
+    assert estimate.effective_workers == 3
+
+
 def test_resource_governor_honors_off_profile(tmp_path: Path) -> None:
     root = _single_target_config(tmp_path / "mc", duration_s=2.0)
     root["simulator"]["resource_profile"] = "off"
@@ -138,3 +165,43 @@ def test_simulator_resource_profile_is_canonical_over_legacy_outputs_profile(tmp
 
     assert estimate.profile == "laptop-safe"
     assert governor.profile.name == "laptop-safe"
+
+
+def test_macos_vm_stat_parser_counts_reclaimable_inactive_memory() -> None:
+    text = """
+Mach Virtual Memory Statistics: (page size of 16384 bytes)
+Pages free:                                7100.
+Pages active:                            130919.
+Pages inactive:                          127528.
+Pages speculative:                         2780.
+Pages wired down:                        145265.
+Pages purgeable:                           4311.
+Pages occupied by compressor:             74159.
+""".strip()
+
+    total_mb, available_mb = _parse_macos_vm_stat_mb(text)
+
+    free_only_mb = (7100 + 2780) * 16384 / (1024 * 1024)
+    assert available_mb is not None
+    assert total_mb is not None
+    assert available_mb > free_only_mb * 10
+
+
+def test_windows_memory_bytes_convert_to_mb() -> None:
+    total_mb, available_mb = _memory_bytes_to_mb(16 * 1024 * 1024 * 1024, 5 * 1024 * 1024 * 1024)
+
+    assert total_mb == 16384.0
+    assert available_mb == 5120.0
+
+
+def test_resource_snapshot_uses_windows_memory_reader_when_unix_readers_are_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("sim.resource_limits._read_proc_mem_available_mb", lambda: (None, None))
+    monkeypatch.setattr("sim.resource_limits._read_macos_memory_mb", lambda: (None, None))
+    monkeypatch.setattr("sim.resource_limits._read_windows_memory_mb", lambda: (8192.0, 4096.0))
+
+    snapshot = current_resource_snapshot()
+
+    assert snapshot.total_memory_mb == 8192.0
+    assert snapshot.available_memory_mb == 4096.0

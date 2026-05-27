@@ -3,6 +3,7 @@ import unittest
 import numpy as np
 
 from sim.config import scenario_config_from_dict
+from sim.dynamics.orbit.accelerations import OrbitContext
 from sim.dynamics.orbit.integrators import integrate_adaptive
 from sim.runtime_support import _build_orbit_propagator
 
@@ -30,6 +31,40 @@ class TestOrbitIntegrators(unittest.TestCase):
         self.assertAlmostEqual(float(x1[0]), float(np.e), places=8)
         self.assertTrue(all(0.0 <= t <= 1.0 for t in eval_times))
 
+    def test_adaptive_integrator_reports_accepted_and_rejected_steps(self):
+        def deriv(_t_s: float, x: np.ndarray) -> np.ndarray:
+            return x
+
+        x0 = np.array([1.0], dtype=float)
+        x1, info = integrate_adaptive(
+            deriv_fn=deriv,
+            t_s=0.0,
+            x=x0,
+            dt_s=1.0,
+            atol=1e-12,
+            rtol=1e-10,
+            method="rkf78",
+            h_init=1.0,
+            return_info=True,
+        )
+
+        self.assertAlmostEqual(float(x1[0]), float(np.e), places=8)
+        self.assertGreaterEqual(info.accepted_steps, 1)
+        self.assertGreaterEqual(info.rejected_steps, 1)
+        self.assertEqual(info.attempted_steps, info.accepted_steps + info.rejected_steps)
+        self.assertIsNotNone(info.suggested_next_step_s)
+
+    def test_adaptive_tolerance_tightening_reduces_error(self):
+        def deriv(_t_s: float, x: np.ndarray) -> np.ndarray:
+            return x
+
+        x0 = np.array([1.0], dtype=float)
+        loose = integrate_adaptive(deriv, 0.0, x0, 2.0, atol=1e-8, rtol=1e-6, method="rkf78")
+        tight = integrate_adaptive(deriv, 0.0, x0, 2.0, atol=1e-12, rtol=1e-10, method="rkf78")
+        expected = float(np.exp(2.0))
+
+        self.assertLess(abs(float(tight[0]) - expected), abs(float(loose[0]) - expected))
+
     def test_master_simulator_orbit_propagator_can_select_rkf78(self):
         cfg = scenario_config_from_dict(
             {
@@ -52,6 +87,38 @@ class TestOrbitIntegrators(unittest.TestCase):
         self.assertEqual(prop.integrator, "rkf78")
         self.assertAlmostEqual(prop.adaptive_atol, 1e-12)
         self.assertAlmostEqual(prop.adaptive_rtol, 1e-10)
+
+    def test_orbit_propagator_exposes_adaptive_step_accounting(self):
+        cfg = scenario_config_from_dict(
+            {
+                "scenario_name": "rkf78_builder",
+                "simulator": {
+                    "duration_s": 1.0,
+                    "dt_s": 1.0,
+                    "dynamics": {
+                        "orbit": {
+                            "integrator": "rkf78",
+                            "adaptive_atol": 1e-12,
+                            "adaptive_rtol": 1e-10,
+                        }
+                    },
+                },
+            }
+        )
+        prop = _build_orbit_propagator(cfg)
+
+        prop.propagate(
+            np.array([7000.0, 0.0, 0.0, 0.0, 7.5, 0.0], dtype=float),
+            1.0,
+            0.0,
+            np.zeros(3),
+            {},
+            OrbitContext(mu_km3_s2=398600.4418, mass_kg=100.0),
+        )
+
+        self.assertIsNotNone(prop.last_adaptive_step_info)
+        self.assertGreater(prop.last_adaptive_step_info.accepted_steps, 0)
+        self.assertEqual(prop.adaptive_step_info.accepted_steps, prop.last_adaptive_step_info.accepted_steps)
 
 
 if __name__ == "__main__":

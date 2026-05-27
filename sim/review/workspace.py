@@ -106,16 +106,30 @@ class ReviewWorkspace:
         parameters: Any = None,
         *,
         max_rows: int = 1000,
+        max_vm_steps: int = 250_000,
     ) -> ReviewQueryResult:
         statement = _validate_select_sql(sql)
         limit = int(max(max_rows, 1))
+        step_budget = int(max(max_vm_steps, 1))
         params = () if parameters is None else parameters
         try:
             with self._connect(authorize=True) as conn:
+                steps = 0
+
+                def _abort_long_query() -> int:
+                    nonlocal steps
+                    steps += 1000
+                    return 1 if steps > step_budget else 0
+
+                conn.set_progress_handler(_abort_long_query, 1000)
                 cursor = conn.execute(statement, params)
                 rows = cursor.fetchmany(limit + 1)
+                conn.set_progress_handler(None, 0)
         except sqlite3.Error as exc:
-            raise ReviewQueryError(str(exc)) from exc
+            message = str(exc)
+            if "interrupted" in message.lower():
+                message = "Review query exceeded the execution step budget."
+            raise ReviewQueryError(message) from exc
         columns = [str(item[0]) for item in (cursor.description or [])]
         truncated = len(rows) > limit
         visible_rows = rows[:limit]

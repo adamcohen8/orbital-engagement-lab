@@ -8,6 +8,7 @@ from pathlib import Path
 
 from sim.config import load_simulation_yaml, validate_scenario_plugins
 from sim.execution import run_simulation_config_file
+from sim.security.sealed_mode import SealedModePolicy, validate_sealed_mode
 
 QUICKSTART_CONFIG = Path(__file__).resolve().parent / "configs" / "quickstart_5min.yaml"
 
@@ -55,7 +56,7 @@ def _check_import(module_name: str) -> tuple[bool, str]:
 
 def _print_doctor_report() -> bool:
     checks: list[tuple[str, bool, str, bool]] = [
-        ("Python", sys.version_info >= (3, 9), sys.version.split()[0], True),
+        ("Python", sys.version_info >= (3, 10), sys.version.split()[0], True),
         ("Quickstart config", QUICKSTART_CONFIG.exists(), str(QUICKSTART_CONFIG), True),
     ]
     for module_name, required in (
@@ -172,6 +173,41 @@ def main() -> None:
         action="store_true",
         help="Validate the scenario config and exit without running the simulator.",
     )
+    parser.add_argument(
+        "--safe-validate",
+        action="store_true",
+        help="Validate schema and plugin pointer shape without importing configured plugin modules.",
+    )
+    parser.add_argument(
+        "--sealed-mode",
+        action="store_true",
+        help="Apply a restricted profile for shared/classroom/government use.",
+    )
+    parser.add_argument(
+        "--allow-untrusted-plugin-imports",
+        action="store_true",
+        help="In --sealed-mode, allow scenario plugin modules outside the built-in OEL allowlist.",
+    )
+    parser.add_argument(
+        "--allow-hosted-ai",
+        action="store_true",
+        help="In --sealed-mode, allow live hosted AI providers.",
+    )
+    parser.add_argument(
+        "--allow-custom-ai-endpoints",
+        action="store_true",
+        help="In --sealed-mode, allow custom AI endpoints.",
+    )
+    parser.add_argument(
+        "--allow-non-loopback-sil",
+        action="store_true",
+        help="In --sealed-mode, allow cFS/SIL UDP hosts outside loopback.",
+    )
+    parser.add_argument(
+        "--allow-high-detail-outputs",
+        action="store_true",
+        help="In --sealed-mode, allow full logs, full review stores, raw MC runs, or non-summary AI packets.",
+    )
     args = parser.parse_args()
     if args.doctor:
         if not _print_doctor_report():
@@ -183,8 +219,26 @@ def main() -> None:
 
     cfg = load_simulation_yaml(config_path)
     _reject_batch_analysis(cfg)
-    errors = list(validate_scenario_plugins(cfg)) if bool(cfg.simulator.plugin_validation.get("strict", True)) else []
-    if args.validate_only:
+    import_plugins = bool(not args.safe_validate and not args.sealed_mode)
+    errors = (
+        list(validate_scenario_plugins(cfg, import_plugins=import_plugins))
+        if bool(cfg.simulator.plugin_validation.get("strict", True))
+        else []
+    )
+    if args.sealed_mode:
+        errors.extend(
+            validate_sealed_mode(
+                cfg,
+                SealedModePolicy(
+                    allow_untrusted_plugin_imports=bool(args.allow_untrusted_plugin_imports),
+                    allow_hosted_ai=bool(args.allow_hosted_ai),
+                    allow_custom_ai_endpoints=bool(args.allow_custom_ai_endpoints),
+                    allow_non_loopback_sil=bool(args.allow_non_loopback_sil),
+                    allow_high_detail_outputs=bool(args.allow_high_detail_outputs),
+                ),
+            )
+        )
+    if args.validate_only or args.safe_validate:
         _print_preflight(config_path, cfg, errors)
         if errors:
             raise SystemExit(1)

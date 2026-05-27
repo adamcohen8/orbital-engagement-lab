@@ -20,6 +20,8 @@ from machine_learning import (
     SyncVectorSimulationEnv,
     ThrustVectorToPointingAdapter,
     VectorEnvConfig,
+    build_policy_card,
+    classify_observation_fields,
     collect_multi_agent_rollout,
     collect_vector_rollout,
     make_sb3_vec_env,
@@ -74,6 +76,20 @@ def _base_scenario() -> dict:
 
 
 class TestGymSimulationEnv(unittest.TestCase):
+    def test_default_observations_use_belief_not_truth(self):
+        env = GymSimulationEnv(
+            GymEnvConfig(
+                scenario=_base_scenario(),
+                controlled_agent_id="chaser",
+                action_fields=(),
+            )
+        )
+
+        obs, _ = env.reset(seed=11)
+
+        self.assertEqual(obs.shape, (6,))
+        self.assertTrue(all(field.path.startswith("belief.chaser.state") for field in env.observation_fields))
+
     def test_reset_and_step_use_gymnasium_signature(self):
         env = GymSimulationEnv(
             GymEnvConfig(
@@ -140,6 +156,47 @@ class TestGymSimulationEnv(unittest.TestCase):
 
         self.assertEqual(obs.shape, (6,))
         self.assertTrue(np.allclose(obs, np.zeros(6, dtype=np.float32)))
+
+    def test_policy_card_labels_truth_observations_as_oracle_baseline(self):
+        env_cfg = GymEnvConfig(
+            scenario=_base_scenario(),
+            controlled_agent_id="chaser",
+            observation_fields=(
+                ObservationField("truth.chaser.position_eci_km"),
+                ObservationField("belief.chaser.state[0]"),
+            ),
+            action_fields=(),
+        )
+
+        card = build_policy_card(env_cfg, policy_name="truth_debug_policy")
+
+        self.assertEqual(card.observation_source["contract"], "oracle_baseline")
+        self.assertTrue(card.privileged_data["uses_privileged_data"])
+        self.assertIn("truth.chaser.position_eci_km", card.privileged_data["privileged_paths_by_agent"]["chaser"])
+
+    def test_policy_card_defaults_to_observer_owned(self):
+        card = build_policy_card(
+            GymEnvConfig(
+                scenario=_base_scenario(),
+                controlled_agent_id="chaser",
+                action_fields=(),
+            ),
+            policy_name="belief_policy",
+        )
+
+        self.assertEqual(card.observation_source["contract"], "observer_owned")
+        self.assertFalse(card.privileged_data["uses_privileged_data"])
+        paths = [
+            row["path"]
+            for row in card.observation_source["by_agent"]["chaser"]["fields"]
+        ]
+        self.assertTrue(all(path.startswith("belief.chaser.state") for path in paths))
+
+    def test_observation_classifier_marks_simulator_metrics_privileged(self):
+        summary = classify_observation_fields((ObservationField("metrics.range_km"),))
+
+        self.assertEqual(summary["policy_label"], "simulator_metric_baseline")
+        self.assertTrue(summary["uses_privileged_data"])
 
     def test_invalid_observation_path_for_disabled_agent_fails_fast(self):
         scenario = _base_scenario()
@@ -279,6 +336,21 @@ class TestGymSimulationEnv(unittest.TestCase):
         self.assertEqual(set(terminations.keys()), {"chaser", "target"})
         self.assertEqual(set(truncations.keys()), {"chaser", "target"})
         self.assertIn("metrics", step_infos["target"])
+
+    def test_multi_agent_default_observations_use_belief(self):
+        env = MultiAgentSimulationEnv(
+            MultiAgentEnvConfig(
+                scenario=_base_scenario(),
+                controlled_agent_ids=("chaser", "target"),
+                action_fields_by_agent={"chaser": (), "target": ()},
+            )
+        )
+
+        obs, _ = env.reset(seed=5)
+
+        self.assertEqual(obs["chaser"].shape, (6,))
+        self.assertEqual(obs["target"].shape, (6,))
+        self.assertTrue(all(field.path.startswith("belief.chaser.state") for field in env._fields_for_agent("chaser")))
 
     def test_collect_multi_agent_rollout_returns_per_agent_batches(self):
         cfg = MultiAgentEnvConfig(

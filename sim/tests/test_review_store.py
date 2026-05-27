@@ -160,6 +160,17 @@ def test_review_workspace_rejects_unsafe_queries(tmp_path: Path) -> None:
             workspace.query(sql)
 
 
+def test_review_workspace_rejects_expensive_queries(tmp_path: Path) -> None:
+    SimulationSession.from_config(SimulationConfig.from_dict(_review_store_config(tmp_path))).run()
+    workspace = ReviewWorkspace.open(tmp_path)
+
+    with pytest.raises(ReviewQueryError, match="step budget"):
+        workspace.query(
+            "WITH RECURSIVE cnt(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM cnt LIMIT 1000000) SELECT max(x) FROM cnt",
+            max_vm_steps=1,
+        )
+
+
 def test_review_cli_queries_output_folder(tmp_path: Path) -> None:
     SimulationSession.from_config(SimulationConfig.from_dict(_review_store_config(tmp_path))).run()
 

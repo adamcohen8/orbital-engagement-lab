@@ -152,7 +152,7 @@ def build_builder_tab(owner) -> QWidget:
     templates = [
         ("quickstart", "Run Quickstart"),
         ("rendezvous", "Rendezvous Scenario"),
-        ("single_tle", "Satellite From TLE"),
+        ("single_tle", "TLE-Initialized Satellite"),
         ("monte_carlo", "Monte Carlo Study"),
         ("sensitivity", "Sensitivity Study"),
         ("rocket_ascent", "Rocket Ascent"),
@@ -407,7 +407,7 @@ def build_objects_tab(owner) -> QWidget:
     owner.target_ta.setRange(-360.0, 360.0)
     owner.target_ta.setDecimals(3)
     owner.target_init_mode = QComboBox()
-    owner._populate_value_combo(owner.target_init_mode, [("coes", "COEs"), ("tle", "TLE")])
+    owner._populate_value_combo(owner.target_init_mode, [("coes", "COEs"), ("tle", "TLE Init")])
     owner.target_init_mode.currentIndexChanged.connect(owner._refresh_target_initial_state_ui)
     owner.target_initial_state_stack = QStackedWidget()
     target_form.addRow(owner.target_enabled)
@@ -440,8 +440,13 @@ def build_objects_tab(owner) -> QWidget:
     owner.target_tle_require_checksum = QCheckBox("Require Checksum")
     owner.target_tle_propagate_to_epoch = QCheckBox("Propagate To Initial JD")
     owner.target_tle_propagate_to_epoch.setChecked(True)
+    owner.target_tle_assumption = QLabel(
+        "TLE is used for initialization only. OEL does not run SGP4; it numerically propagates the configured force model."
+    )
+    owner.target_tle_assumption.setWordWrap(True)
     owner.target_tle_status = QLabel("")
     owner.target_tle_status.setWordWrap(True)
+    target_tle_form.addRow(owner.target_tle_assumption)
     target_tle_form.addRow("Line 1", owner.target_tle_line1)
     target_tle_form.addRow("Line 2", owner.target_tle_line2)
     target_tle_form.addRow(owner.target_tle_require_checksum)

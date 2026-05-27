@@ -14,6 +14,52 @@ migration-sensitive behavior explicitly.
 
 ### Fixed
 
+## 0.9.2 - 2026-05-27
+
+### Added
+
+- Added sealed mode for restricted/shared environments, with explicit gates for
+  untrusted scenario plugin imports, hosted AI, custom AI endpoints,
+- Added supply-chain and procurement baseline documentation, SBOM generation,
+  dependency-audit evidence workflow, data-handling/export/CUI boundary notes,
+  incident response guidance, and release-checklist gates for procurement
+  review.
+- Added a validation evidence matrix generator and catalog for current
+  validation posture, including scenario, claim, validity envelope, truth source,
+  pass/fail gates, last run date, commit/version, known limits, and status.
+- Added numerical-methods convergence evidence for RK4/RKF78 behavior, adaptive
+  step accounting, and resource-aware batch-study execution improvements.
+- Added ML/RL policy-card helpers and docs that distinguish observer-owned
+  belief/knowledge observations from truth-state oracle baselines.
+
+### Changed
+
+- Raised the supported Python baseline to Python 3.10 through 3.12 and updated
+  first-run docs, doctor checks, package metadata, and generated public stubs to
+  avoid accidentally creating Python 3.9 virtual environments.
+- Clarified TLE workflows at the README, cookbook, example, and scenario points
+  of use: TLEs initialize ECI state only, then OEL numerically propagates the
+  configured force model rather than running SGP4/general perturbations.
+- Tightened public README/CLI alignment around supported public flags,
+  `.venv/bin/python` command paths, validation/export checks, and public/private
+  docs boundaries.
+- Updated HPOP/MATLAB reference handling and validation docs to distinguish
+  available current evidence from external reference data that must be supplied
+  locally.
+- Expanded release checklist expectations for sealed-mode exceptions,
+  dependency audit artifacts, validation evidence matrix regeneration, and
+  public/private push discipline.
+
+### Fixed
+
+- Fixed sealed-mode validation for `outputs.ai_config` so it matches execution
+  semantics and treats AI config creation as enabled by default unless disabled
+  or dry-run.
+- Fixed resource preflight and benchmark guidance for systems where plain
+  `python` or `python3` resolves to an unsupported interpreter.
+- Fixed public-export drift around private/pro paths, unsupported public
+  workflows, and release-facing command examples.
+
 ## 0.9.1 - 2026-05-26
 
 ### Added

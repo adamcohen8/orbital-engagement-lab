@@ -1,6 +1,54 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+from typing import Any
+
 import numpy as np
+
+
+@dataclass(frozen=True)
+class AdaptiveStepInfo:
+    method: str
+    accepted_steps: int = 0
+    rejected_steps: int = 0
+    attempted_steps: int = 0
+    min_step_s: float | None = None
+    max_step_s: float | None = None
+    final_step_s: float | None = None
+    suggested_next_step_s: float | None = None
+    max_error_ratio: float = 0.0
+
+    def to_dict(self) -> dict[str, float | int | str | None]:
+        return {
+            "method": self.method,
+            "accepted_steps": int(self.accepted_steps),
+            "rejected_steps": int(self.rejected_steps),
+            "attempted_steps": int(self.attempted_steps),
+            "min_step_s": self.min_step_s,
+            "max_step_s": self.max_step_s,
+            "final_step_s": self.final_step_s,
+            "suggested_next_step_s": self.suggested_next_step_s,
+            "max_error_ratio": float(self.max_error_ratio),
+        }
+
+
+def combine_adaptive_step_info(method: str, items: list[AdaptiveStepInfo]) -> AdaptiveStepInfo:
+    nonempty = [item for item in items if item.attempted_steps > 0]
+    if not nonempty:
+        return AdaptiveStepInfo(method=method)
+    min_steps = [float(item.min_step_s) for item in nonempty if item.min_step_s is not None]
+    max_steps = [float(item.max_step_s) for item in nonempty if item.max_step_s is not None]
+    return AdaptiveStepInfo(
+        method=method,
+        accepted_steps=sum(int(item.accepted_steps) for item in nonempty),
+        rejected_steps=sum(int(item.rejected_steps) for item in nonempty),
+        attempted_steps=sum(int(item.attempted_steps) for item in nonempty),
+        min_step_s=min(min_steps) if min_steps else None,
+        max_step_s=max(max_steps) if max_steps else None,
+        final_step_s=nonempty[-1].final_step_s,
+        suggested_next_step_s=nonempty[-1].suggested_next_step_s,
+        max_error_ratio=max(float(item.max_error_ratio) for item in nonempty),
+    )
 
 
 def rk4_step_state(deriv_fn, t_s: float, x: np.ndarray, dt_s: float) -> np.ndarray:
@@ -162,11 +210,35 @@ def integrate_rkf78_hpop(
     tolerance: float = 1e-10,
     h_init: float | None = None,
     max_attempts: int = 12,
-) -> tuple[np.ndarray, float]:
+    return_info: bool = False,
+) -> tuple[np.ndarray, float] | tuple[np.ndarray, float, AdaptiveStepInfo]:
+    accepted_steps = 0
+    rejected_steps = 0
+    attempted_steps = 0
+    min_step_s: float | None = None
+    max_step_s: float | None = None
+    max_error_ratio = 0.0
+
+    def _finish(y_out: np.ndarray, h_out: float, final_step_s: float | None) -> Any:
+        info = AdaptiveStepInfo(
+            method="rkf78_hpop",
+            accepted_steps=accepted_steps,
+            rejected_steps=rejected_steps,
+            attempted_steps=attempted_steps,
+            min_step_s=min_step_s,
+            max_step_s=max_step_s,
+            final_step_s=final_step_s,
+            suggested_next_step_s=float(h_out),
+            max_error_ratio=max_error_ratio,
+        )
+        if return_info:
+            return y_out, float(h_out), info
+        return y_out, float(h_out)
+
     if dt_s < 0.0:
         raise ValueError("dt_s must be non-negative.")
     if dt_s == 0.0:
-        return np.array(x, dtype=float, copy=True), float(h_init if h_init is not None else 0.01)
+        return _finish(np.array(x, dtype=float, copy=True), float(h_init if h_init is not None else 0.01), 0.0)
 
     min_scale = 0.125
     max_scale = 4.0
@@ -188,17 +260,28 @@ def integrate_rkf78_hpop(
     while x_now < x_end:
         scale = 1.0
         for _attempt in range(max_attempts):
+            attempted_steps += 1
+            h_attempt = float(h)
             y_trial, err_vec = rkf78_step(deriv_fn, x_now, y, h)
             err = float(np.linalg.norm(err_vec))
             if err == 0.0:
                 scale = max_scale
+                accepted_steps += 1
+                min_step_s = h_attempt if min_step_s is None else min(min_step_s, h_attempt)
+                max_step_s = h_attempt if max_step_s is None else max(max_step_s, h_attempt)
                 break
             y_norm = float(np.linalg.norm(y))
             yy = tol_per_unit if y_norm == 0.0 else y_norm
+            err_ratio = float(err / max(tol_per_unit * yy, 1e-300))
+            max_error_ratio = max(max_error_ratio, err_ratio)
             scale = 0.8 * (tol_per_unit * yy / err) ** err_exponent
             scale = min(max(scale, min_scale), max_scale)
             if err < (tol_per_unit * yy):
+                accepted_steps += 1
+                min_step_s = h_attempt if min_step_s is None else min(min_step_s, h_attempt)
+                max_step_s = h_attempt if max_step_s is None else max(max_step_s, h_attempt)
                 break
+            rejected_steps += 1
             h *= scale
             if x_now + h > x_end:
                 h = x_end - x_now
@@ -212,14 +295,14 @@ def integrate_rkf78_hpop(
         h *= scale
         h_next = h
         if last_interval:
-            return y, h_next
+            return _finish(y, h_next, float(h / scale) if scale != 0.0 else float(h))
         if x_now + h > x_end:
             last_interval = True
             h = x_end - x_now
         elif x_now + h + 0.5 * h > x_end:
             h = 0.5 * h
 
-    return y, float(h)
+    return _finish(y, float(h), None)
 
 
 def dopri45_step(deriv_fn, t_s: float, x: np.ndarray, dt_s: float) -> tuple[np.ndarray, np.ndarray]:
@@ -257,23 +340,23 @@ def integrate_adaptive(
     rtol: float = 1e-7,
     max_substeps: int = 4096,
     method: str = "rkf78",
-) -> np.ndarray:
+    h_init: float | None = None,
+    return_info: bool = False,
+) -> np.ndarray | tuple[np.ndarray, AdaptiveStepInfo]:
+    def _finish(state: np.ndarray, info: AdaptiveStepInfo) -> np.ndarray | tuple[np.ndarray, AdaptiveStepInfo]:
+        if return_info:
+            return state, info
+        return state
+
     if dt_s < 0.0:
         raise ValueError("dt_s must be non-negative.")
     if dt_s == 0.0:
-        return np.array(x, dtype=float, copy=True)
+        return _finish(np.array(x, dtype=float, copy=True), AdaptiveStepInfo(method=str(method).strip().lower()))
 
     method_name = str(method).strip().lower()
     if method_name == "rkf78":
-        x_next, _ = integrate_rkf78_hpop(
-            deriv_fn=deriv_fn,
-            t_s=t_s,
-            x=x,
-            dt_s=dt_s,
-            tolerance=rtol,
-            h_init=min(dt_s, 0.01),
-        )
-        return x_next
+        step_fn = rkf78_step
+        growth_exponent = -1.0 / 8.0
     elif method_name in ("dopri5", "dopri45"):
         step_fn = dopri45_step
         growth_exponent = -1.0 / 5.0
@@ -283,25 +366,39 @@ def integrate_adaptive(
     t = t_s
     xk = x
     remain = dt_s
-    h = min(dt_s, 1.0)
+    h = min(dt_s, float(h_init if h_init is not None and h_init > 0.0 else 1.0))
     min_h = max(1e-12, 1e-12 * max(1.0, abs(dt_s)))
     steps = 0
+    accepted_steps = 0
+    rejected_steps = 0
+    attempted_steps = 0
+    min_step_s: float | None = None
+    max_step_s: float | None = None
+    final_step_s: float | None = None
+    max_error_ratio = 0.0
 
     while remain > 0.0 and steps < max_substeps:
         h = min(h, remain)
         x_next, err = step_fn(deriv_fn, t, xk, h)
+        attempted_steps += 1
         scale = atol + rtol * np.maximum(np.abs(xk), np.abs(x_next))
         err_ratio = float(np.max(np.abs(err) / np.maximum(scale, 1e-14)))
+        max_error_ratio = max(max_error_ratio, err_ratio)
 
         if err_ratio <= 1.0:
             t += h
             xk = x_next
             remain -= h
+            accepted_steps += 1
+            final_step_s = float(h)
+            min_step_s = float(h) if min_step_s is None else min(min_step_s, float(h))
+            max_step_s = float(h) if max_step_s is None else max(max_step_s, float(h))
             if err_ratio < 1e-10:
                 h *= 2.0
             else:
                 h *= min(2.0, max(0.5, 0.9 * err_ratio**growth_exponent))
         else:
+            rejected_steps += 1
             h *= max(0.1, 0.9 * err_ratio**growth_exponent)
             if h < min_h:
                 raise RuntimeError(
@@ -313,4 +410,15 @@ def integrate_adaptive(
         raise RuntimeError(
             f"Adaptive integrator exhausted {max_substeps} internal substeps with {remain:.9e}s remaining."
         )
-    return xk
+    info = AdaptiveStepInfo(
+        method=method_name,
+        accepted_steps=accepted_steps,
+        rejected_steps=rejected_steps,
+        attempted_steps=attempted_steps,
+        min_step_s=min_step_s,
+        max_step_s=max_step_s,
+        final_step_s=final_step_s,
+        suggested_next_step_s=float(h),
+        max_error_ratio=max_error_ratio,
+    )
+    return _finish(xk, info)

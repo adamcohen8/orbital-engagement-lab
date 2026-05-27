@@ -7,18 +7,20 @@ Numba.
 ## Install
 
 ```bash
-pip install -e ".[accel]"
+.venv/bin/python -m pip install -e ".[accel]"
 ```
 
 For compatibility installs, `.[full]` also includes the acceleration extra.
+The acceleration extra installs Numba plus SciPy because Numba's linear algebra
+lowering uses SciPy BLAS symbols on supported JIT paths.
 
 ## Warmup
 
 Warmup compiles the supported kernels and populates Numba's on-disk cache for the current Python, platform, and CPU.
 
 ```bash
-python -m sim.acceleration.warmup
-python -m sim.acceleration.warmup --profile validation
+.venv/bin/python -m sim.acceleration.warmup
+.venv/bin/python -m sim.acceleration.warmup --profile validation
 ```
 
 The command also works without Numba installed; in that case it exercises the Python fallback kernels and reports the
@@ -29,8 +31,8 @@ backend as `python`.
 Use the bundled benchmark to confirm the supported RK4/J2 orbit fast path on a local machine:
 
 ```bash
-python -m sim.acceleration.benchmarks --iterations 10000
-python -m sim.acceleration.benchmarks --iterations 10000 --json
+.venv/bin/python -m sim.acceleration.benchmarks --iterations 10000
+.venv/bin/python -m sim.acceleration.benchmarks --iterations 10000 --json
 ```
 
 The benchmark reports baseline Python propagator time, accelerated-path time, speedup, and final state delta norm.
@@ -38,19 +40,13 @@ Use `--kind attitude` to include the attitude exponential-map propagation benchm
 orbit/attitude EKF finite-difference Jacobian paths, or `--kind all` to run every local acceleration benchmark:
 
 ```bash
-python -m sim.acceleration.benchmarks --kind all
-python -m sim.acceleration.benchmarks --kind estimation --estimation-iterations 1000
+.venv/bin/python -m sim.acceleration.benchmarks --kind all
+.venv/bin/python -m sim.acceleration.benchmarks --kind estimation --estimation-iterations 1000
 ```
 
 ## Runtime Controls
 
-Acceleration is disabled by default. Enable it per run with:
-
-```bash
-python run_simulation.py --config configs/ric_pd_10km_experiment.yaml --acceleration auto
-```
-
-or in YAML:
+Acceleration is disabled by default. Enable it in YAML:
 
 ```yaml
 simulator:
@@ -86,6 +82,7 @@ updates dominate runtime after the core orbit and attitude dynamics are accelera
 
 ## Resource Notes
 
-Acceleration reduces runtime per supported numerical step; it does not replace resource profiles, checkpointing, or
-thermal safeguards. For Monte Carlo validation, keep using `--resource-profile laptop-safe` or `standard` on local
-machines. The first accelerated call may include compilation overhead unless kernels have already been warmed.
+Acceleration reduces runtime per supported numerical step; it does not replace
+resource planning, checkpointing, or thermal safeguards for long campaign
+workflows. The first accelerated call may include compilation overhead unless
+kernels have already been warmed.

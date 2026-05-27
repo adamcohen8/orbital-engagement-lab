@@ -102,6 +102,26 @@ class TestPluginValidation(unittest.TestCase):
         errs = validate_scenario_plugins(cfg)
         self.assertTrue(any("rocket.base_guidance" in e for e in errs))
 
+    def test_safe_validation_does_not_import_plugin_modules(self):
+        cfg = scenario_config_from_dict(
+            {
+                "rocket": {"enabled": False},
+                "chaser": {
+                    "enabled": True,
+                    "orbit_control": {
+                        "module": "module_that_must_not_be_imported_for_safe_validation",
+                        "class_name": "ControllerShapeOnly",
+                        "params": {},
+                    },
+                },
+                "target": {"enabled": False},
+                "simulator": {"duration_s": 20.0, "dt_s": 1.0},
+            }
+        )
+
+        self.assertEqual(validate_scenario_plugins(cfg, import_plugins=False), [])
+        self.assertTrue(validate_scenario_plugins(cfg, import_plugins=True))
+
     def test_named_object_plugins_are_validated(self):
         cfg = scenario_config_from_dict(
             {
