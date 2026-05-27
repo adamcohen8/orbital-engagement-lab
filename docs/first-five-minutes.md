@@ -8,16 +8,22 @@ larger scenarios.
 ```bash
 git clone https://github.com/adamcohen8/orbital-engagement-lab.git
 cd orbital-engagement-lab
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -U pip
-python -m pip install ".[dev]"
+python3.11 -m venv .venv
+.venv/bin/python -m pip install -U pip
+.venv/bin/python -m pip install ".[dev]"
 ```
+
+Use Python 3.10 through 3.12. Replace `python3.11` with `python3.10` or
+`python3.12` if that is your installed interpreter.
+
+The commands below use `.venv/bin/python` so they work even on systems where
+`python` is not on `PATH`. If you activate the virtual environment first,
+`python` is equivalent.
 
 ## 2. Check Your Environment
 
 ```bash
-python run_simulation.py --doctor
+.venv/bin/python run_simulation.py --doctor
 ```
 
 `WARN` entries for plotting, GUI, or game dependencies are okay for the first
@@ -26,7 +32,7 @@ run. Fix any `FAIL` entries before continuing.
 ## 3. Run The Quickstart
 
 ```bash
-python run_simulation.py --quickstart
+.venv/bin/python run_simulation.py --quickstart
 ```
 
 The command runs `configs/quickstart_5min.yaml`, a short deterministic
@@ -41,7 +47,7 @@ untrusted Python code.
 To open the output folder automatically:
 
 ```bash
-python run_simulation.py --quickstart --open-output
+.venv/bin/python run_simulation.py --quickstart --open-output
 ```
 
 ## 4. Open The Start-Here File
@@ -64,8 +70,8 @@ histories in `master_run_log.json`.
 After the quickstart works, run the flagship 10 km RIC_PD review scenario:
 
 ```bash
-python run_simulation.py --config configs/ric_pd_10km_experiment.yaml --validate-only
-python run_simulation.py --config configs/ric_pd_10km_experiment.yaml
+.venv/bin/python run_simulation.py --config configs/ric_pd_10km_experiment.yaml --validate-only
+.venv/bin/python run_simulation.py --config configs/ric_pd_10km_experiment.yaml
 ```
 
 Open `outputs/flagship_ric_pd_10km/index.md`, then inspect the rendezvous,
@@ -75,14 +81,14 @@ control-effort, and thrust-alignment plots. For the full review order, see
 For a shorter plotting demo:
 
 ```bash
-python run_simulation.py --config configs/plotting_rendezvous_demo.yaml
+.venv/bin/python run_simulation.py --config configs/plotting_rendezvous_demo.yaml
 ```
 
 Or open the GUI:
 
 ```bash
-python -m pip install ".[gui]"
-python run_gui.py
+.venv/bin/python -m pip install ".[gui]"
+.venv/bin/python run_gui.py
 ```
 
 In the GUI, use **Open Quickstart** or **Run Quickstart** from the top bar.

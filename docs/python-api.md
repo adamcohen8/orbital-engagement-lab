@@ -196,6 +196,10 @@ Calling `step()` after completion returns the final snapshot.
 When a scenario defines `ground_stations`, the result exposes passive access
 histories.
 
+The public TLE access example initializes the object from TLE lines, then runs
+OEL numerical propagation. It is not an SGP4/general-perturbations access
+workflow.
+
 ```python
 cfg = SimulationConfig.from_yaml(
     "examples/configs/public_ground_station_access_from_tle.yaml"

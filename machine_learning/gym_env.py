@@ -129,6 +129,23 @@ class MultiAgentEnvConfig:
     max_steps: int | None = None
 
 
+def default_observation_fields_for_agent(agent_id: str) -> tuple[ObservationField, ...]:
+    """Belief-owned default observation vector for autonomy policies.
+
+    Simulator truth remains available through explicit `truth.*` paths, but those
+    paths are treated as oracle-baseline observations by the policy-card helpers.
+    """
+
+    return (
+        ObservationField(path=f"belief.{agent_id}.state[0]"),
+        ObservationField(path=f"belief.{agent_id}.state[1]"),
+        ObservationField(path=f"belief.{agent_id}.state[2]"),
+        ObservationField(path=f"belief.{agent_id}.state[3]"),
+        ObservationField(path=f"belief.{agent_id}.state[4]"),
+        ObservationField(path=f"belief.{agent_id}.state[5]"),
+    )
+
+
 @dataclass(frozen=True)
 class EnvFactory:
     env_cfg: GymEnvConfig
@@ -445,14 +462,7 @@ class GymSimulationEnv(gym.Env):
         self.last_snapshot: dict[str, Any] | None = None
         self._observation_probe = _observation_probe_from_scenario_dict(self.base_scenario_dict)
 
-        obs_fields = tuple(cfg.observation_fields) or (
-            ObservationField(path=f"truth.{self.controlled_agent_id}.position_eci_km[0]"),
-            ObservationField(path=f"truth.{self.controlled_agent_id}.position_eci_km[1]"),
-            ObservationField(path=f"truth.{self.controlled_agent_id}.position_eci_km[2]"),
-            ObservationField(path=f"truth.{self.controlled_agent_id}.velocity_eci_km_s[0]"),
-            ObservationField(path=f"truth.{self.controlled_agent_id}.velocity_eci_km_s[1]"),
-            ObservationField(path=f"truth.{self.controlled_agent_id}.velocity_eci_km_s[2]"),
-        )
+        obs_fields = tuple(cfg.observation_fields) or default_observation_fields_for_agent(self.controlled_agent_id)
         self.observation_fields = obs_fields
         low = np.array([float(field.low) for field in cfg.action_fields], dtype=np.float32)
         high = np.array([float(field.high) for field in cfg.action_fields], dtype=np.float32)
@@ -1021,11 +1031,7 @@ class MultiAgentSimulationEnv:
         fields = self.observation_fields_by_agent.get(agent_id)
         if fields:
             return fields
-        return (
-            ObservationField(path=f"truth.{agent_id}.position_eci_km"),
-            ObservationField(path=f"truth.{agent_id}.velocity_eci_km_s"),
-            ObservationField(path="metrics.range_km"),
-        )
+        return default_observation_fields_for_agent(agent_id)
 
     def _parse_agent_action(self, agent_id: str, action: np.ndarray | list[float] | None) -> dict[str, float]:
         action_fields = self.action_fields_by_agent.get(agent_id, ())

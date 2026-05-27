@@ -34,12 +34,25 @@ _CONTRACTS = {
 }
 
 
-def _validate_pointer(pointer: Any, contract: PluginContract, path: str) -> list[str]:
+def _validate_pointer(pointer: Any, contract: PluginContract, path: str, *, import_plugins: bool = True) -> list[str]:
     errs: list[str] = []
     if pointer is None:
         return errs
     if not getattr(pointer, "module", None):
         errs.append(f"{path}: missing 'module'.")
+        return errs
+    class_name = getattr(pointer, "class_name", None)
+    function = getattr(pointer, "function", None)
+    if class_name and function:
+        errs.append(f"{path}: define either 'class_name' or 'function', not both.")
+        return errs
+    if function and not contract.allow_function:
+        errs.append(f"{path}: function pointers are not allowed for this plugin type.")
+        return errs
+    if not class_name and not function:
+        errs.append(f"{path}: must define either 'class_name' or 'function'.")
+        return errs
+    if not import_plugins:
         return errs
 
     try:
@@ -47,9 +60,6 @@ def _validate_pointer(pointer: Any, contract: PluginContract, path: str) -> list
     except Exception as ex:
         errs.append(f"{path}: failed to import module '{pointer.module}': {ex}")
         return errs
-
-    class_name = getattr(pointer, "class_name", None)
-    function = getattr(pointer, "function", None)
 
     if class_name:
         if not hasattr(mod, class_name):
@@ -68,9 +78,6 @@ def _validate_pointer(pointer: Any, contract: PluginContract, path: str) -> list
         return errs
 
     if function:
-        if not contract.allow_function:
-            errs.append(f"{path}: function pointers are not allowed for this plugin type.")
-            return errs
         if not hasattr(mod, function):
             errs.append(f"{path}: function '{function}' not found in module '{pointer.module}'.")
             return errs
@@ -93,48 +100,78 @@ def _class_has_callable(cls: type, method_name: str) -> bool:
     return False
 
 
-def validate_scenario_plugins(cfg: Any) -> list[str]:
+def validate_scenario_plugins(cfg: Any, *, import_plugins: bool = True) -> list[str]:
     errs: list[str] = []
     for object_id, agent in configured_objects(cfg).items():
         if not getattr(agent, "enabled", False):
             continue
         path = object_parameter_prefix(str(object_id))
         if str(getattr(agent, "kind", "satellite")).strip().lower() == "rocket":
-            errs.extend(_validate_pointer(getattr(agent, "guidance", None), _CONTRACTS["guidance"], f"{path}.guidance"))
             errs.extend(
                 _validate_pointer(
-                    getattr(agent, "base_guidance", None), _CONTRACTS["guidance"], f"{path}.base_guidance"
+                    getattr(agent, "guidance", None),
+                    _CONTRACTS["guidance"],
+                    f"{path}.guidance",
+                    import_plugins=import_plugins,
+                )
+            )
+            errs.extend(
+                _validate_pointer(
+                    getattr(agent, "base_guidance", None),
+                    _CONTRACTS["guidance"],
+                    f"{path}.base_guidance",
+                    import_plugins=import_plugins,
                 )
             )
             for i, p in enumerate(getattr(agent, "guidance_modifiers", []) or []):
-                errs.extend(_validate_rocket_guidance_modifier(p, f"{path}.guidance_modifiers[{i}]"))
+                errs.extend(
+                    _validate_rocket_guidance_modifier(
+                        p, f"{path}.guidance_modifiers[{i}]", import_plugins=import_plugins
+                    )
+                )
         else:
             errs.extend(_validate_satellite_actuator_specs(getattr(agent, "specs", {}) or {}, f"{path}.specs"))
         errs.extend(
             _validate_pointer(
-                getattr(agent, "orbit_control", None), _CONTRACTS["orbit_control"], f"{path}.orbit_control"
+                getattr(agent, "orbit_control", None),
+                _CONTRACTS["orbit_control"],
+                f"{path}.orbit_control",
+                import_plugins=import_plugins,
             )
         )
         errs.extend(
             _validate_pointer(
-                getattr(agent, "attitude_control", None), _CONTRACTS["attitude_control"], f"{path}.attitude_control"
+                getattr(agent, "attitude_control", None),
+                _CONTRACTS["attitude_control"],
+                f"{path}.attitude_control",
+                import_plugins=import_plugins,
             )
         )
         errs.extend(
             _validate_pointer(
-                getattr(agent, "mission_strategy", None), _CONTRACTS["mission_strategy"], f"{path}.mission_strategy"
+                getattr(agent, "mission_strategy", None),
+                _CONTRACTS["mission_strategy"],
+                f"{path}.mission_strategy",
+                import_plugins=import_plugins,
             )
         )
         errs.extend(
             _validate_pointer(
-                getattr(agent, "mission_execution", None), _CONTRACTS["mission_execution"], f"{path}.mission_execution"
+                getattr(agent, "mission_execution", None),
+                _CONTRACTS["mission_execution"],
+                f"{path}.mission_execution",
+                import_plugins=import_plugins,
             )
         )
         bridge = getattr(agent, "bridge", None)
         if bridge is not None and getattr(bridge, "enabled", False):
-            errs.extend(_validate_pointer(bridge, _CONTRACTS["bridge"], f"{path}.bridge"))
+            errs.extend(_validate_pointer(bridge, _CONTRACTS["bridge"], f"{path}.bridge", import_plugins=import_plugins))
         for i, p in enumerate(getattr(agent, "mission_objectives", []) or []):
-            errs.extend(_validate_pointer(p, _CONTRACTS["mission_objective"], f"{path}.mission_objectives[{i}]"))
+            errs.extend(
+                _validate_pointer(
+                    p, _CONTRACTS["mission_objective"], f"{path}.mission_objectives[{i}]", import_plugins=import_plugins
+                )
+            )
     return errs
 
 
@@ -486,7 +523,7 @@ def _validate_fault_block(raw: dict[str, Any], path: str) -> list[str]:
     return errs
 
 
-def _validate_rocket_guidance_modifier(pointer: Any, path: str) -> list[str]:
+def _validate_rocket_guidance_modifier(pointer: Any, path: str, *, import_plugins: bool = True) -> list[str]:
     errs: list[str] = []
     if pointer is None:
         return errs
@@ -494,13 +531,15 @@ def _validate_rocket_guidance_modifier(pointer: Any, path: str) -> list[str]:
         return [f"{path}: only kind='python' is supported."]
     if not getattr(pointer, "module", None):
         return [f"{path}: 'module' is required for python pointers."]
+    class_name = getattr(pointer, "class_name", None)
+    if not class_name:
+        return [f"{path}: must define 'class_name'."]
+    if not import_plugins:
+        return errs
     try:
         mod = importlib.import_module(str(pointer.module))
     except Exception as ex:
         return [f"{path}: failed to import module '{pointer.module}': {ex}"]
-    class_name = getattr(pointer, "class_name", None)
-    if not class_name:
-        return [f"{path}: must define 'class_name'."]
     if not hasattr(mod, class_name):
         return [f"{path}: class '{class_name}' not found in module '{pointer.module}'."]
     cls = getattr(mod, class_name)

@@ -38,10 +38,12 @@ loading an untrusted scenario can run untrusted Python code.
 
 ## Compatibility
 
-The package currently declares Python `>=3.9`. Public CI exercises the default
+The package currently declares Python `>=3.10`. Public CI exercises the default
 public test suite on Python 3.11. Broader Python-version CI is planned; if you
 depend on another supported Python version, run the public test suite locally in
-that environment before relying on it.
+that environment before relying on it. Python 3.9 is no longer a supported
+procurement baseline because several dependency vulnerability fixes require
+Python 3.10 or newer.
 
 ## Modeling Limits
 

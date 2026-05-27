@@ -9,15 +9,37 @@ at importable Python modules/classes for controllers, guidance, mission
 strategies, and mission execution modules. Loading an untrusted scenario can run
 untrusted Python code.
 
+For a first pass over an untrusted scenario, use safe validation:
+
+```bash
+.venv/bin/python run_simulation.py --config <path> --safe-validate
+```
+
+Safe validation parses the YAML, applies path-policy checks, and validates plugin
+pointer shape without importing configured plugin modules. It is only an
+inspection aid; run scenarios only after you trust the referenced code and
+paths.
+
+For a stronger restricted profile, add sealed mode:
+
+```bash
+.venv/bin/python run_simulation.py --config <path> --sealed-mode --validate-only
+```
+
+Sealed mode uses shape-only plugin validation and then rejects plugin modules
+outside OEL's trusted built-in prefixes, hosted AI calls, custom AI endpoints,
+non-loopback cFS/SIL networking, and high-detail output retention unless the
+caller provides an explicit `--allow-*` opt-in.
+
 When you are unsure what values a field accepts, use the config help CLI. It
 accepts fuzzy topic names, prints valid options with descriptions, and can show
 the value currently set in a scenario file:
 
 ```bash
-python config_help.py "ephemeris model"
-python config_help.py "ephemeris model" --config configs/automation_smoke.yaml
-python config_help.py "plot preset"
-python config_help.py --list
+.venv/bin/python config_help.py "ephemeris model"
+.venv/bin/python config_help.py "ephemeris model" --config configs/automation_smoke.yaml
+.venv/bin/python config_help.py "plot preset"
+.venv/bin/python config_help.py --list
 ```
 
 The `--config` form parses YAML as plain data only. It does not resolve object
@@ -561,10 +583,14 @@ harness, enables checkpoint/resume, and pauses between cases when memory or CPU
 load pressure is high. The legacy
 `outputs.resource_limits.resource_profile` field is still accepted for older
 configs, but new configs should use `simulator.resource_profile`. Use
-`run_simulation.py --estimate-resource-requirements` before long campaigns.
+Private campaign workflows can estimate requirements before long campaign runs.
 Monte Carlo checkpoints are stored under `outputs.output_dir/mc_checkpoints`
-and keyed by generated iteration config hashes. Use
-`run_simulation.py --clear-checkpoints` when you want a clean rerun.
+and keyed by generated iteration config hashes. Remove that checkpoint directory
+when you intentionally want a clean private campaign rerun.
+Sensitivity-study checkpoints are stored under
+`outputs.output_dir/sensitivity_checkpoints` and use the same generated-config
+hash rule. Resource preflight estimates sensitivity run count for
+one-at-a-time, LHS, and two-parameter grid studies before launch.
 
 Monte Carlo relative-range time-series plots are written through a bounded
 streaming artifact writer. This avoids retaining every run's range history in

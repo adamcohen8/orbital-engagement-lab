@@ -17,9 +17,10 @@ The public repository supports these claims:
 - The flagship RIC_PD 10 km scenario demonstrates a closed-loop RPO workflow
   with tuned public controller gains and attitude-gated thrust application under
   the assumptions written in `configs/ric_pd_10km_experiment.yaml`.
-- The focused RIC_PD 10 km validation package can rerun the flagship scenario
-  through the validation harness and check final range, final relative speed,
-  delta-v, burn-sample, attitude, and knowledge-history gates.
+- The focused RIC_PD 10 km validation posture documents the flagship scenario's
+  intended gates and limitations. The public export can rerun the scenario and
+  companion analysis script; the automated validation harness and evidence
+  manifests live in the Pro/private workspace.
 - The public payload and artifact surfaces are documented in the engine,
   scenario YAML, and payload contracts.
 
@@ -41,10 +42,9 @@ The public repository does not claim:
 For public users, the first evidence path is:
 
 ```bash
-python run_simulation.py --quickstart
-python run_simulation.py --config configs/ric_pd_10km_experiment.yaml
-python examples/python/flagship_analysis.py
-python validation/automated_validation_harness.py --suite ric_pd_10km
+.venv/bin/python run_simulation.py --quickstart
+.venv/bin/python run_simulation.py --config configs/ric_pd_10km_experiment.yaml
+.venv/bin/python examples/python/flagship_analysis.py
 ```
 
 Review:
@@ -53,8 +53,6 @@ Review:
 - `outputs/flagship_ric_pd_10km/index.md`
 - `outputs/flagship_ric_pd_10km/master_run_summary.json`
 - `outputs/flagship_ric_pd_10km/custom_analysis/flagship_metrics.json`
-- `outputs/validation_harness_ric_pd_10km/validation_harness_report.md`
-- `outputs/validation_harness_ric_pd_10km/validation_evidence_manifest.json`
 
 For the focused validation claim and gates, see
 [RIC_PD 10 km Validation Package](validation-ric-pd-10km.md).

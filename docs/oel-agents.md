@@ -130,6 +130,11 @@ Example user requests:
 - "Create a short rendezvous case where the chaser starts 3 km behind the
   target."
 - "Can you check when this TLE is visible from Colorado Springs?"
+
+For TLE requests, say explicitly that OEL uses TLE lines to initialize an ECI
+state and then runs configured OEL numerical propagation. Do not describe the
+result as SGP4/general-perturbations propagation unless an SGP4 workflow is
+actually added.
 - "Build an attitude-hold scenario with an initial pointing error."
 - "Evaluate the run in this output folder and tell me whether it supports my
   goal."

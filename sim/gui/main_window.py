@@ -631,7 +631,7 @@ class MainWindow(QMainWindow):
         line1 = self.target_tle_line1.text().strip()
         line2 = self.target_tle_line2.text().strip()
         if not line1 and not line2:
-            self.target_tle_status.setText("Paste TLE line 1 and line 2.")
+            self.target_tle_status.setText("Paste TLE line 1 and line 2. OEL initializes from TLE; it does not run SGP4.")
             return
         try:
             elements = parse_tle_lines(
@@ -641,7 +641,8 @@ class MainWindow(QMainWindow):
                 f"epoch JD {elements.epoch_jd_utc:.8f}, "
                 f"inc {elements.inclination_deg:.3f} deg, "
                 f"ecc {elements.eccentricity:.7f}, "
-                f"mean motion {elements.mean_motion_rev_per_day:.6f} rev/day"
+                f"mean motion {elements.mean_motion_rev_per_day:.6f} rev/day; "
+                "initial-state conversion only, not SGP4"
             )
             if self.target_tle_propagate_to_epoch.isChecked() and self.initial_jd_enabled_check.isChecked():
                 delta_days = float(self.initial_jd_spin.value()) - float(elements.epoch_jd_utc)
@@ -2682,6 +2683,9 @@ class MainWindow(QMainWindow):
         target_tle = dict(dict(cfg_dict.get("target", {}) or {}).get("initial_state", {}) or {}).get("tle")
         sim = dict(cfg_dict.get("simulator", {}) or {})
         if isinstance(target_tle, dict):
+            issues.append(
+                "Target TLE is used only to initialize an ECI state; propagation is OEL numerical, not SGP4."
+            )
             try:
                 lines = list(target_tle.get("lines", []) or [])
                 line1 = str(target_tle.get("line1", lines[0] if len(lines) > 0 else "") or "")
@@ -2730,7 +2734,7 @@ class MainWindow(QMainWindow):
         target_section = dict(objects_cfg.get(reference_object, {}) or dict(cfg.get("target", {}) or {}))
         target_init = dict(target_section.get("initial_state", {}) or {})
         if "tle" in target_init:
-            init_text = f"{reference_object} from TLE"
+            init_text = f"{reference_object} from TLE initial state"
         elif "coes" in target_init:
             init_text = f"{reference_object} from COEs"
         elif "position_eci_km" in target_init:

@@ -11,7 +11,7 @@
 #   force model.
 
 scenario_name: "public_tle_2hr_propagation"
-scenario_description: "Public example: propagate one satellite for two hours from a TLE with OEL numerical perturbations and save the predicted state history."
+scenario_description: "Public example: initialize one satellite from a TLE, propagate for two hours with OEL numerical perturbations, and save the predicted state history."
 
 metadata:
   owner: "public"

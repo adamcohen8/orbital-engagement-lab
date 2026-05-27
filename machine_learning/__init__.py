@@ -15,8 +15,16 @@ from machine_learning.gym_env import (
     SyncVectorSimulationEnv,
     ThrustVectorToPointingAdapter,
     VectorEnvConfig,
+    default_observation_fields_for_agent,
     make_env_fn,
     make_vector_env,
+)
+from machine_learning.policy_card import (
+    PolicyCard,
+    build_policy_card,
+    classify_observation_fields,
+    policy_card_markdown,
+    write_policy_card,
 )
 from machine_learning.self_play import (
     LinearPolicy,
@@ -58,8 +66,14 @@ __all__ = [
     "ThrustVectorToPointingAdapter",
     "RelativeDistanceReward",
     "RangeTermination",
+    "default_observation_fields_for_agent",
     "make_env_fn",
     "make_vector_env",
+    "PolicyCard",
+    "classify_observation_fields",
+    "build_policy_card",
+    "policy_card_markdown",
+    "write_policy_card",
     "RolloutBatch",
     "MultiAgentRolloutBatch",
     "collect_vector_rollout",

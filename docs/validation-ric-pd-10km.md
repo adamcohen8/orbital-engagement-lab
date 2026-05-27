@@ -17,35 +17,20 @@ flight-qualification claim, external truth-model validation, or proof of
 performance outside the configured initial condition, dynamics, sensor,
 actuator, and controller assumptions.
 
-## Run Command
+## Public Reproduction Path
 
 ```bash
-python validation/automated_validation_harness.py --suite ric_pd_10km
+.venv/bin/python run_simulation.py --config configs/ric_pd_10km_experiment.yaml --validate-only
+.venv/bin/python run_simulation.py --config configs/ric_pd_10km_experiment.yaml
+.venv/bin/python examples/python/flagship_analysis.py
 ```
 
-Validation defaults to the `laptop-safe` resource profile. Simulation
-benchmarks run one Monte Carlo case at a time, disable plots, checkpoint each
-completed case, and refuse to start when current resource preflight is unsafe.
-During batch execution, the resource governor also pauses before launching the
-next case if local memory or load pressure is high. To inspect the expected load
-without running:
+The public export ships the deterministic flagship scenario and the companion
+analysis script. The automated validation harness, Monte Carlo envelope,
+resource preflight, checkpointing, and evidence manifests live in the
+Pro/private workspace and are not part of the open-core checkout.
 
-```bash
-python validation/automated_validation_harness.py --suite ric_pd_10km --estimate-resource-requirements
-```
-
-To intentionally discard saved Monte Carlo progress and start fresh:
-
-```bash
-python validation/automated_validation_harness.py --suite ric_pd_10km --clear-checkpoints
-```
-
-Checkpoints are reused only when their generated iteration config hash still
-matches the current scenario and controller settings.
-Use `--allow-unsafe-resource-start` only for intentional local overrides after
-reviewing the preflight output.
-
-The suite performs:
+The private validation suite performs:
 
 - plugin validation for the flagship config,
 - one deterministic single-run simulation,
@@ -67,8 +52,7 @@ envelope.
 
 ## Acceptance Gates
 
-The canonical gates live in `configs/validation_harness_ric_pd_10km.yaml`.
-The headline checks are:
+The private harness tracks these headline checks:
 
 | Gate | Threshold |
 | --- | ---: |
@@ -84,10 +68,10 @@ The headline checks are:
 | Chaser attitude finite fraction | `1.0` |
 | Chaser-target knowledge finite fraction | `1.0` |
 
-The Monte Carlo envelope lives in `configs/ric_pd_10km_experiment_mc.yaml`.
-It varies the initial in-track separation from `-12 km` to `-8 km`, initial
-radial velocity from `-0.25 m/s` to `+0.25 m/s`, and initial cross-track
-velocity from `0.7 m/s` to `1.3 m/s`. Each run must satisfy:
+The private Monte Carlo envelope varies the initial in-track separation from
+`-12 km` to `-8 km`, initial radial velocity from `-0.25 m/s` to `+0.25 m/s`,
+and initial cross-track velocity from `0.7 m/s` to `1.3 m/s`. Each run must
+satisfy:
 
 | Monte Carlo per-run gate | Threshold |
 | --- | ---: |
@@ -102,7 +86,16 @@ The aggregate harness gate requires all three runs to pass.
 
 ## Evidence Artifacts
 
-The harness writes:
+The public reproduction path writes:
+
+```text
+outputs/flagship_ric_pd_10km/index.md
+outputs/flagship_ric_pd_10km/master_run_summary.json
+outputs/flagship_ric_pd_10km/custom_analysis/flagship_metrics.json
+outputs/flagship_ric_pd_10km/custom_analysis/flagship_metrics.csv
+```
+
+The private harness additionally writes:
 
 ```text
 outputs/validation_harness_ric_pd_10km/validation_harness_report.json
@@ -115,7 +108,7 @@ outputs/validation_harness_ric_pd_10km/validation_estimation_knowledge_summary.m
 outputs/validation_harness_ric_pd_10km/ric_pd_10km_single_run/truth_measurement_estimate_chain.png
 ```
 
-The single-run benchmark also writes a copy of the scenario outputs under:
+The private single-run benchmark also writes a copy of the scenario outputs under:
 
 ```text
 outputs/validation_harness_ric_pd_10km/ric_pd_10km_single_run/

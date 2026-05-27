@@ -6,13 +6,15 @@
 # - ground_stations: add sites, edit lat/lon/alt, min elevation, and max range.
 # - simulator.dynamics.orbit perturbations: keep two-body/J2 for a quick screen,
 #   then increase fidelity if the access margin is tight.
+#   This does not use an SGP4/general-perturbations propagator; OEL initializes
+#   from the TLE, then numerically integrates its configured force model.
 
 scenario_name: "public_ground_station_access_from_tle"
-scenario_description: "Public example: propagate a TLE and compute passive ground-station access windows."
+scenario_description: "Public example: initialize from a TLE and compute passive ground-station access windows with OEL numerical propagation."
 
 metadata:
   owner: "public"
-  notes: "Run with `python run_simulation.py --config examples/configs/public_ground_station_access_from_tle.yaml`."
+  notes: "Run with `python run_simulation.py --config examples/configs/public_ground_station_access_from_tle.yaml`. This is not SGP4/general-perturbations propagation; OEL initializes from the TLE and numerically integrates its configured force model."
 
 objects:
   iss:

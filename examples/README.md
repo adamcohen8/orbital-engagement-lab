@@ -10,8 +10,8 @@ python run_simulation.py --config examples/configs/public_tle_2hr_propagation.ya
 
 ## Public Configs
 
-- `public_tle_2hr_propagation.yaml`: predict a satellite state history for two hours from TLE lines.
-- `public_ground_station_access_from_tle.yaml`: compute ground-station access windows from a TLE.
+- `public_tle_2hr_propagation.yaml`: initialize from TLE lines, then predict a two-hour state history with OEL numerical propagation.
+- `public_ground_station_access_from_tle.yaml`: initialize from a TLE, then compute ground-station access windows with OEL numerical propagation.
 - `public_closed_loop_rendezvous_lqr.yaml`: run a closed-loop chaser/target rendezvous with HCW LQR.
 - `public_orbit_environment_stack.yaml`: inspect perturbation/environment toggles in deterministic propagation.
 - `public_attitude_hold_disturbance.yaml`: evaluate attitude hold with initial pointing error and disturbance torque.
@@ -21,6 +21,11 @@ python run_simulation.py --config examples/configs/public_tle_2hr_propagation.ya
 
 Public configs use the canonical `objects` map. Conventional object IDs such as
 `chaser` and `target` are example names, not required engine slots.
+
+TLE examples are not SGP4/general-perturbations workflows. OEL converts the TLE
+to an initial ECI state, optionally advances mean anomaly to
+`simulator.initial_jd_utc` with a two-body approximation, then integrates the
+configured OEL force model.
 
 ## Flagship Built-In Scenario
 

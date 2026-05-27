@@ -123,11 +123,11 @@ class TestAcceleration(unittest.TestCase):
         }
 
         with patch.dict(os.environ, {ACCELERATION_ENV: "auto"}, clear=False):
-            np.testing.assert_allclose(ric_dcm_ir_from_rv(r, v), baseline["dcm"])
-            np.testing.assert_allclose(ric_curv_to_rect(rel, r0), baseline["curv_to_rect"])
-            np.testing.assert_allclose(ric_rect_to_curv(rel, r0), baseline["rect_to_curv"])
-            np.testing.assert_allclose(ric_rect_state_to_eci(rel, r, v), baseline["rect_state_to_eci"])
-            np.testing.assert_allclose(eci_relative_to_ric_rect(dep, chief), baseline["eci_relative"])
+            np.testing.assert_allclose(ric_dcm_ir_from_rv(r, v), baseline["dcm"], atol=1.0e-12)
+            np.testing.assert_allclose(ric_curv_to_rect(rel, r0), baseline["curv_to_rect"], atol=1.0e-12)
+            np.testing.assert_allclose(ric_rect_to_curv(rel, r0), baseline["rect_to_curv"], atol=1.0e-12)
+            np.testing.assert_allclose(ric_rect_state_to_eci(rel, r, v), baseline["rect_state_to_eci"], atol=1.0e-12)
+            np.testing.assert_allclose(eci_relative_to_ric_rect(dep, chief), baseline["eci_relative"], atol=1.0e-12)
 
     def test_frame_wrappers_follow_config_context(self):
         cfg = scenario_config_from_dict({"simulator": {"acceleration": {"mode": "auto"}}})

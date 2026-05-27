@@ -42,6 +42,7 @@ software in any sensitive, commercial, government, or operational context.
 - [Just Here For The Video Game?](#just-here-for-the-video-game)
 - [Use-Case Cookbook](#use-case-cookbook)
 - [What This Public Core Includes](#what-this-public-core-includes)
+- [Security And Procurement](#security-and-procurement)
 - [Pro Layer](#pro-layer)
 - [Start Here](#start-here)
 - [Curated Examples](#curated-examples)
@@ -74,31 +75,38 @@ integration workflows.
 
 ## First Run
 
+Use Python 3.10 through 3.12. The commands below use Python 3.11; replace
+`python3.11` with `python3.10` or `python3.12` if that is your installed
+interpreter.
+
 ```bash
 git clone https://github.com/adamcohen8/orbital-engagement-lab.git
 cd orbital-engagement-lab
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -U pip
-python -m pip install ".[dev]"
+python3.11 -m venv .venv
+.venv/bin/python -m pip install -U pip
+.venv/bin/python -m pip install ".[dev]"
 ```
+
+The commands below use `.venv/bin/python` so they work even on systems where
+`python` is not on `PATH`. If you activate the virtual environment first,
+`python` is equivalent.
 
 Check the environment:
 
 ```bash
-python run_simulation.py --doctor
+.venv/bin/python run_simulation.py --doctor
 ```
 
 Validate the five-minute quickstart scenario:
 
 ```bash
-python run_simulation.py --quickstart --validate-only
+.venv/bin/python run_simulation.py --quickstart --validate-only
 ```
 
 Run it:
 
 ```bash
-python run_simulation.py --quickstart
+.venv/bin/python run_simulation.py --quickstart
 ```
 
 Expected result: the run completes headlessly and writes summary artifacts under
@@ -118,7 +126,7 @@ Start Here: outputs/quickstart_5min/index.md
 To open the output folder automatically after the run:
 
 ```bash
-python run_simulation.py --quickstart --open-output
+.venv/bin/python run_simulation.py --quickstart --open-output
 ```
 
 For a guided walkthrough, see [First Five Minutes](docs/first-five-minutes.md).
@@ -149,7 +157,7 @@ review store for structured inspection. The recommended path for agents and
 scripts is the SELECT-only review CLI/API:
 
 ```bash
-python -m sim.review outputs/my_run --query "SELECT scenario_name, duration_s FROM run_metadata"
+.venv/bin/python -m sim.review outputs/my_run --query "SELECT scenario_name, duration_s FROM run_metadata"
 ```
 
 `run_orw.py --output outputs/my_run` exists as an experimental desktop preview,
@@ -158,8 +166,8 @@ but ORW is not currently recommended for routine review workflows.
 Review the flagship 10 km RIC_PD RPO scenario:
 
 ```bash
-python run_simulation.py --config configs/ric_pd_10km_experiment.yaml --validate-only --resource-profile off
-python run_simulation.py --config configs/ric_pd_10km_experiment.yaml --resource-profile off
+.venv/bin/python run_simulation.py --config configs/ric_pd_10km_experiment.yaml --validate-only
+.venv/bin/python run_simulation.py --config configs/ric_pd_10km_experiment.yaml
 ```
 
 Expected result: the 12000-second rendezvous run writes OEL-styled dashboard,
@@ -174,14 +182,15 @@ first, then compare against the checked-in [Plot Gallery](docs/plot-gallery.md).
 
 Clone the public repo, install the game extras, and launch the RPO trainer:
 
+Use the same Python 3.10 through 3.12 interpreter you used for the main install.
+
 ```bash
 git clone https://github.com/adamcohen8/orbital-engagement-lab.git
 cd orbital-engagement-lab
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -U pip
-python -m pip install ".[game]"
-python run_game.py
+python3.11 -m venv .venv
+.venv/bin/python -m pip install -U pip
+.venv/bin/python -m pip install ".[game]"
+.venv/bin/python run_game.py
 ```
 
 Running `run_game.py` opens the level selector. Use Up/Down or W/S to choose a
@@ -192,18 +201,22 @@ return to the selector.
 
 | If you want to... | Run this |
 | --- | --- |
-| Predict where a satellite will be two hours from a TLE | `python run_simulation.py --config examples/configs/public_tle_2hr_propagation.yaml` |
-| Compute ground-station access windows from a TLE | `python run_simulation.py --config examples/configs/public_ground_station_access_from_tle.yaml` |
-| Run a closed-loop chaser/target rendezvous with HCW LQR | `python run_simulation.py --config examples/configs/public_closed_loop_rendezvous_lqr.yaml` |
-| Review the flagship 10 km RIC_PD RPO scenario | `python run_simulation.py --config configs/ric_pd_10km_experiment.yaml --resource-profile off` |
-| Smoke-test public actuator presets | `python run_simulation.py --config configs/actuator_lab_presets_smoke.yaml` |
-| Review atmospheric re-entry diagnostics and kill criteria | `python run_simulation.py --config configs/reentry_smoke.yaml` |
-| Open the 10-day interactive re-entry plotting demo | `python run_simulation.py --config examples/configs/public_reentry_interactive_demo.yaml` |
-| Explore lift-axis atmospheric steering and raise-burn recovery | `python run_simulation.py --config configs/aero_assisted_plane_change_demo.yaml` |
-| Inspect orbit perturbations, drag, SRP, and third-body toggles | `python run_simulation.py --config examples/configs/public_orbit_environment_stack.yaml` |
-| Evaluate attitude hold under initial error and disturbance torque | `python run_simulation.py --config examples/configs/public_attitude_hold_disturbance.yaml` |
-| Open the guided RPO trainer level selector | `python run_game.py` |
-| Practice manual RPO/game-style control from a public config | `python run_game.py examples/configs/public_manual_rpo_training.yaml` |
+| Predict where a satellite will be two hours from a TLE | `.venv/bin/python run_simulation.py --config examples/configs/public_tle_2hr_propagation.yaml` |
+| Compute ground-station access windows from a TLE | `.venv/bin/python run_simulation.py --config examples/configs/public_ground_station_access_from_tle.yaml` |
+| Run a closed-loop chaser/target rendezvous with HCW LQR | `.venv/bin/python run_simulation.py --config examples/configs/public_closed_loop_rendezvous_lqr.yaml` |
+| Review the flagship 10 km RIC_PD RPO scenario | `.venv/bin/python run_simulation.py --config configs/ric_pd_10km_experiment.yaml` |
+| Smoke-test public actuator presets | `.venv/bin/python run_simulation.py --config configs/actuator_lab_presets_smoke.yaml` |
+| Review atmospheric re-entry diagnostics and kill criteria | `.venv/bin/python run_simulation.py --config configs/reentry_smoke.yaml` |
+| Open the 10-day interactive re-entry plotting demo | `.venv/bin/python run_simulation.py --config examples/configs/public_reentry_interactive_demo.yaml` |
+| Explore lift-axis atmospheric steering and raise-burn recovery | `.venv/bin/python run_simulation.py --config configs/aero_assisted_plane_change_demo.yaml` |
+| Inspect orbit perturbations, drag, SRP, and third-body toggles | `.venv/bin/python run_simulation.py --config examples/configs/public_orbit_environment_stack.yaml` |
+| Evaluate attitude hold under initial error and disturbance torque | `.venv/bin/python run_simulation.py --config examples/configs/public_attitude_hold_disturbance.yaml` |
+| Open the guided RPO trainer level selector | `.venv/bin/python run_game.py` |
+| Practice manual RPO/game-style control from a public config | `.venv/bin/python run_game.py examples/configs/public_manual_rpo_training.yaml` |
+
+TLE examples use the TLE only to initialize an ECI state. OEL does not run
+SGP4/general-perturbations propagation; after initialization it numerically
+integrates the configured OEL force model.
 
 Use the API:
 
@@ -220,18 +233,18 @@ print(result.summary["scenario_name"])
 Experimental Output Review Workbench preview:
 
 ```bash
-python -m pip install ".[gui]"
-python run_orw.py --output outputs/quickstart_5min
+.venv/bin/python -m pip install ".[gui]"
+.venv/bin/python run_orw.py --output outputs/quickstart_5min
 ```
 
 ORW is not currently recommended for routine review. Prefer
-`python -m sim.review` for structured output questions.
+`.venv/bin/python -m sim.review` for structured output questions.
 
 Try the RPO trainer game mode:
 
 ```bash
-python -m pip install ".[game]"
-python run_game.py
+.venv/bin/python -m pip install ".[game]"
+.venv/bin/python run_game.py
 ```
 
 Running `run_game.py` without a config opens the level selector. Pick a level
@@ -273,7 +286,7 @@ defensive delta-v ramp.
 You can also launch a level directly:
 
 ```bash
-python run_game.py sim/game/configs/game_training_rpo_01_coast_relative_motion.yaml
+.venv/bin/python run_game.py sim/game/configs/game_training_rpo_01_coast_relative_motion.yaml
 ```
 
 Default trainer controls are RIC translation pulses: W/S radial, A/D in-track,
@@ -318,6 +331,16 @@ provide. HPOP/GGM03 validation data is not bundled in the public core, so
 - machine-learning environment helpers
 - public/private boundary and known-limitations documentation
 
+## Security And Procurement
+
+For vulnerability reporting, supply-chain evidence, data handling, export/CUI
+boundaries, and incident response, start with:
+
+- [Security Policy](SECURITY.md)
+- [Supply Chain And Procurement Baseline](docs/security/supply-chain.md)
+- [Data Handling And Boundary Statement](docs/security/data-handling.md)
+- [Security Incident Process](docs/security/incident-response.md)
+
 ## Pro Layer
 
 - controller-benchmark suites and leaderboards
@@ -350,6 +373,7 @@ require hosted AI accounts or API keys.
 - [Custom Analysis](docs/custom-analysis.md)
 - [Public Core And Pro Boundary](docs/public-vs-pro.md)
 - [Known Limitations](docs/known-limitations.md)
+- [ML/RL Policy Contracts](docs/ml-rl-contracts.md)
 - [Engine Contract](docs/contracts/engine-contract.md)
 - [Scenario YAML Contract](docs/contracts/scenario-yaml-contract.md)
 - [Payload And Artifact Contract](docs/contracts/payload-artifact-contract.md)
@@ -359,8 +383,8 @@ require hosted AI accounts or API keys.
 
 Curated examples are YAML scenario configs under `examples/configs/`:
 
-- `examples/configs/public_tle_2hr_propagation.yaml` for TLE propagation
-- `examples/configs/public_ground_station_access_from_tle.yaml` for ground-station access windows
+- `examples/configs/public_tle_2hr_propagation.yaml` for TLE-initialized OEL numerical propagation
+- `examples/configs/public_ground_station_access_from_tle.yaml` for TLE-initialized ground-station access windows
 - `examples/configs/public_closed_loop_rendezvous_lqr.yaml` for closed-loop rendezvous
 - `examples/configs/public_orbit_environment_stack.yaml` for perturbation/environment propagation
 - `examples/configs/public_attitude_hold_disturbance.yaml` for attitude-control recovery
@@ -393,12 +417,12 @@ example surface.
 ## Install Profiles
 
 ```bash
-python -m pip install .
-python -m pip install ".[dev]"
-python -m pip install ".[gui]"
-python -m pip install ".[game]"
-python -m pip install ".[ml]"
-python -m pip install ".[full]"
+.venv/bin/python -m pip install .
+.venv/bin/python -m pip install ".[dev]"
+.venv/bin/python -m pip install ".[gui]"
+.venv/bin/python -m pip install ".[game]"
+.venv/bin/python -m pip install ".[ml]"
+.venv/bin/python -m pip install ".[full]"
 ```
 
 ## Project Layout

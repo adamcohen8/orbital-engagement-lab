@@ -14,12 +14,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("output_dir", help="Output directory or review/run.sqlite path.")
     parser.add_argument("--query", "-q", required=True, help="Read-only SELECT query to run.")
     parser.add_argument("--max-rows", type=int, default=50, help="Maximum rows to print.")
+    parser.add_argument("--max-vm-steps", type=int, default=250_000, help="SQLite virtual-machine step budget.")
     parser.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
     args = parser.parse_args(argv)
 
     try:
         workspace = ReviewWorkspace.open(Path(args.output_dir))
-        result = workspace.query(args.query, max_rows=max(int(args.max_rows), 1))
+        result = workspace.query(
+            args.query,
+            max_rows=max(int(args.max_rows), 1),
+            max_vm_steps=max(int(args.max_vm_steps), 1),
+        )
     except (ReviewStoreNotFoundError, ReviewQueryError) as exc:
         print(f"review query failed: {exc}", file=sys.stderr)
         return 2
