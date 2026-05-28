@@ -100,12 +100,18 @@ from sim.game.pygame_dashboard import (
     _true_anomaly_deg_from_state,
     _two_body_coast_state,
 )
-from sim.game.recording import GameFrameRecorder, add_looped_audio_to_video, game_recording_path
+from sim.game.recording import (
+    GameFrameRecorder,
+    add_looped_audio_to_video,
+    game_clip_recording_path,
+    game_recording_path,
+)
 from sim.game.runner import (
     SandboxSetupValues,
     _add_level_music_to_recording,
     _adjust_speed_multiple,
     _apply_sandbox_setup_to_config,
+    _clip_recording_status,
     _coast_prediction_orbit_fraction,
     _coerce_speed_multiple,
     _command_status,
@@ -159,6 +165,7 @@ from sim.game.runner import (
     _score_debrief_lines,
     _speed_after_maneuver_input,
     _start_game_attempt,
+    _start_game_clip_recorder,
     _start_game_recorder,
     _step_game_attempt,
     _sync_dashboard_training_config,
@@ -873,6 +880,18 @@ def test_game_recording_path_uses_scenario_difficulty_and_attempt(tmp_path: Path
     assert path == tmp_path / "rpo_09_defensive_target_demo_hard_20260514_123045_attempt03.mp4"
 
 
+def test_game_clip_recording_path_uses_clip_folder_and_index(tmp_path: Path) -> None:
+    path = game_clip_recording_path(
+        scenario_name="RPO 01 Relative Orbit",
+        difficulty="Easy",
+        clip_index=2,
+        output_dir=tmp_path,
+        timestamp=datetime(2026, 5, 27, 9, 8, 7),
+    )
+
+    assert path == tmp_path / "clips" / "rpo_01_relative_orbit_easy_20260527_090807_clip02.mp4"
+
+
 def test_game_debrief_writer_exports_summary_and_replay(tmp_path: Path) -> None:
     cfg = RPOTrainingConfig(
         enabled=True,
@@ -1379,6 +1398,73 @@ def test_start_game_recorder_disables_when_writer_start_fails(tmp_path: Path, mo
     )
 
     assert recorder is None
+
+
+def test_start_game_clip_recorder_uses_clip_path(tmp_path: Path, monkeypatch) -> None:
+    config = SimulationConfig.from_dict(_game_config(tmp_path))
+    starts: list[Path] = []
+
+    def fake_start(path, **kwargs):
+        starts.append(Path(path))
+        return "recorder"
+
+    monkeypatch.setattr(game_recording_controller.GameFrameRecorder, "start", fake_start)
+
+    recorder = _start_game_clip_recorder(
+        enabled=True,
+        config=config,
+        difficulty="easy",
+        clip_index=4,
+        output_dir=tmp_path,
+        fps=30.0,
+    )
+
+    assert recorder == "recorder"
+    assert starts[0].parent == tmp_path / "clips"
+    assert starts[0].name.startswith(f"{config.scenario.scenario_name}_easy_")
+    assert starts[0].name.endswith("_clip04.mp4")
+
+
+def test_recording_hold_frame_count_uses_duration_and_fps() -> None:
+    assert game_recording_controller.recording_hold_frame_count(duration_s=3.0, fps=30.0) == 90
+    assert game_recording_controller.recording_hold_frame_count(duration_s=2.5, fps=24.0) == 60
+    assert game_recording_controller.recording_hold_frame_count(duration_s=-1.0, fps=30.0) == 0
+
+
+def test_next_available_recording_path_avoids_existing_clip(tmp_path: Path) -> None:
+    base = tmp_path / "clip.mp4"
+    base.write_bytes(b"existing")
+
+    assert game_recording_controller.next_available_recording_path(base) == tmp_path / "clip_02.mp4"
+
+    (tmp_path / "clip_02.mp4").write_bytes(b"existing")
+
+    assert game_recording_controller.next_available_recording_path(base) == tmp_path / "clip_03.mp4"
+
+
+def test_recording_controller_capture_hold_repeats_current_frame(tmp_path: Path, monkeypatch) -> None:
+    config = SimulationConfig.from_dict(_game_config(tmp_path))
+    captures: list[object] = []
+
+    class FakeRecorder:
+        saved = False
+
+    def fake_capture(recorder, dashboard):
+        captures.append(dashboard)
+        return recorder
+
+    monkeypatch.setattr(game_recording_controller, "safe_capture_recording_frame", fake_capture)
+    controller = game_recording_controller.GameRecordingController(
+        enabled=True,
+        config=config,
+        difficulty="easy",
+        fps=10.0,
+        recorder=FakeRecorder(),
+    )
+    dashboard = object()
+
+    assert controller.capture_hold(dashboard, duration_s=3.0) is controller.recorder
+    assert captures == [dashboard] * 30
 
 
 def test_safe_capture_recording_frame_discards_and_disables_on_capture_failure(monkeypatch) -> None:
@@ -4451,6 +4537,10 @@ def test_pygame_input_mapping_sets_ric_axes_and_quit() -> None:
         K_PERIOD = "."
         K_m = "m"
         K_c = "c"
+        K_g = "g"
+        K_F9 = "f9"
+        K_RETURN = "return"
+        K_KP_ENTER = "kp_enter"
         K_PAGEUP = "pageup"
         K_PAGEDOWN = "pagedown"
         K_HOME = "home"
@@ -4506,6 +4596,8 @@ def test_pygame_input_mapping_sets_ric_axes_and_quit() -> None:
                     FakeEvent(FakePygame.KEYDOWN, FakePygame.K_m),
                     FakeEvent(FakePygame.KEYDOWN, FakePygame.K_d),
                     FakeEvent(FakePygame.KEYDOWN, FakePygame.K_c),
+                    FakeEvent(FakePygame.KEYDOWN, FakePygame.K_g),
+                    FakeEvent(FakePygame.KEYDOWN, FakePygame.K_RETURN),
                 ]
 
     state = KeyboardCommandState()
@@ -4519,6 +4611,8 @@ def test_pygame_input_mapping_sets_ric_axes_and_quit() -> None:
     assert state.music_toggle_requested is True
     assert state.open_debrief_requested is True
     assert state.camera_rule_toggle_requested is True
+    assert state.clip_record_toggle_requested is True
+    assert state.clip_record_save_requested is True
 
     class SlowDownPygame(FakePygame):
         class event:
@@ -4539,6 +4633,7 @@ def test_pygame_input_mapping_sets_ric_axes_and_quit() -> None:
                 return [
                     type("WheelEvent", (), {"type": FakePygame.MOUSEWHEEL, "y": -2})(),
                     FakeEvent(FakePygame.KEYDOWN, FakePygame.K_PAGEDOWN),
+                    FakeEvent(FakePygame.KEYDOWN, FakePygame.K_RETURN),
                 ]
 
     state = KeyboardCommandState()
@@ -4546,6 +4641,7 @@ def test_pygame_input_mapping_sets_ric_axes_and_quit() -> None:
     _poll_pygame_input(BriefingScrollPygame, state, control_mode="ric_translation", briefing_open=True)
 
     assert state.briefing_scroll_px == 288
+    assert state.clip_record_save_requested is False
 
 
 def test_pygame_focus_loss_clears_live_axes() -> None:
@@ -4664,6 +4760,44 @@ def test_dashboard_fps_drops_at_high_speed_unless_recording() -> None:
     assert _dashboard_fps_for_speed(200.0) == 30.0
     assert _dashboard_fps_for_speed(200.0, recording=True) == game_runner.GAME_RECORDING_FPS
     assert _dashboard_fps_for_speed(200.0, recording=True, recording_fps=24.0) == 24.0
+
+
+def test_clip_recording_status_shows_elapsed_and_recent_messages(tmp_path: Path) -> None:
+    class FakeRecorder:
+        saved = False
+
+    controller = game_recording_controller.GameClipRecordingController(
+        config=SimulationConfig.from_dict(_game_config(tmp_path)),
+        difficulty="easy",
+        recorder=FakeRecorder(),
+    )
+
+    assert _clip_recording_status(controller, started_wall_s=10.0, now_wall_s=75.0) == (
+        "REC 01:05  G/F9 discard  Enter save"
+    )
+
+    controller.recorder = None
+
+    assert (
+        _clip_recording_status(
+            controller,
+            started_wall_s=None,
+            now_wall_s=12.0,
+            status_message="Clip saved",
+            status_until_wall_s=13.0,
+        )
+        == "Clip saved"
+    )
+    assert (
+        _clip_recording_status(
+            controller,
+            started_wall_s=None,
+            now_wall_s=14.0,
+            status_message="Clip saved",
+            status_until_wall_s=13.0,
+        )
+        == ""
+    )
 
 
 def test_step_game_attempt_stops_on_first_terminal_score() -> None:

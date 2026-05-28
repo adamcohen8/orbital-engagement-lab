@@ -14,6 +14,30 @@ migration-sensitive behavior explicitly.
 
 ### Fixed
 
+## 0.9.3 - 2026-05-28
+
+### Added
+
+- Added in-level RPO trainer clip recording for short demo/social captures:
+  press G during gameplay to start a clip, press G again to discard it, and
+  press Enter/Return to save it under `outputs/game_recordings/clips/`. F9
+  remains an alternate when the operating system forwards function keys to the
+  game.
+
+### Changed
+
+- Full-attempt game recordings now include three seconds of level-brief context
+  at the beginning and three seconds of pass/fail screen context before
+  finalizing.
+
+### Fixed
+
+- Prevented manual game clip recording from starting from briefing or terminal
+  pass/fail screens; active clips can still be saved or discarded after a level
+  ends.
+- Avoided overwriting existing manual clip MP4s by appending a numeric suffix
+  when a generated clip path already exists.
+
 ## 0.9.2 - 2026-05-27
 
 ### Added

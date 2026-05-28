@@ -208,6 +208,7 @@ class PygameRPODashboard:
         mission_metrics: tuple[str, ...] = (),
         objective_checklist: tuple[str, ...] = (),
         speed_multiple: float = 1.0,
+        recording_status: str = "",
         briefing_lines: tuple[str, ...] = (),
         debrief_lines: tuple[str, ...] = (),
         debrief_available: bool = True,
@@ -232,7 +233,13 @@ class PygameRPODashboard:
         )
         self._draw_panel(left, "RI Plane: In-Track Vs Radial", x_axis=1, y_axis=0)
         self._draw_panel(right, "RC Plane: Cross-Track Vs Radial", x_axis=2, y_axis=0)
-        self._draw_hud(hud, command_status=command_status, coach_hint=coach_hint, speed_multiple=speed_multiple)
+        self._draw_hud(
+            hud,
+            command_status=command_status,
+            coach_hint=coach_hint,
+            speed_multiple=speed_multiple,
+            recording_status=recording_status,
+        )
         if briefing_lines:
             self._draw_briefing(briefing_lines)
         if mission_state in {"passed", "failed"}:
@@ -710,7 +717,15 @@ class PygameRPODashboard:
             pygame.draw.rect(self.screen, (100, 226, 142), clipped, width=1)
             self._text(str(idx), (clipped.x + 5, clipped.y + 4), self.small_font, (170, 250, 190))
 
-    def _draw_hud(self, rect: Any, *, command_status: str, coach_hint: str, speed_multiple: float) -> None:
+    def _draw_hud(
+        self,
+        rect: Any,
+        *,
+        command_status: str,
+        coach_hint: str,
+        speed_multiple: float,
+        recording_status: str = "",
+    ) -> None:
         pygame = self.pygame
         pygame.draw.rect(self.screen, (18, 24, 32), rect, border_radius=10)
         pygame.draw.rect(self.screen, (82, 96, 118), rect, width=1, border_radius=10)
@@ -727,6 +742,19 @@ class PygameRPODashboard:
                 self.font,
                 (235, 240, 245),
             )
+        status_text = str(recording_status or "G Clip").strip()
+        active = status_text.upper().startswith("REC")
+        text_width = self._text_width(self.small_font, status_text)
+        pill_width = min(max(text_width + 22, 86), max(rect.width // 2, 86))
+        pill = pygame.Rect(rect.right - pill_width - 12, rect.y + 10, pill_width, 24)
+        pygame.draw.rect(self.screen, (96, 22, 32) if active else (34, 48, 62), pill, border_radius=4)
+        pygame.draw.rect(self.screen, (248, 84, 100) if active else (104, 130, 156), pill, width=1, border_radius=4)
+        self._text(
+            self._fit_text_px(status_text, self.small_font, pill.width - 16),
+            (pill.x + 8, pill.y + 5),
+            self.small_font,
+            (255, 220, 224) if active else (220, 234, 246),
+        )
         hint_text = coach_hint or ""
         hint_is_alert = hint_text.lower().startswith("wrong key")
         if hint_is_alert:
@@ -739,12 +767,18 @@ class PygameRPODashboard:
             self.small_font,
             (255, 190, 198) if hint_is_alert else (245, 210, 110),
         )
+        footer = f"Speed {float(speed_multiple):.0f}x   Up/Down Speed   Space Pause   . Step   R Reset   Esc Quit"
+        footer_text = self._fit_text_px(footer, self.small_font, min(rect.width - 24, 690))
+        footer_width = self._text_width(self.small_font, footer_text)
+        footer_x = rect.right - footer_width - 16
         command_line = command_status.splitlines()[0] if command_status else ""
-        if command_line:
-            self._text(command_line, (rect.x + 16, rect.y + 60), self.small_font, (195, 205, 220))
+        command_max_width = max(0, footer_x - (rect.x + 16) - 12)
+        if command_line and command_max_width > 48:
+            command_text = self._fit_text_px(command_line, self.small_font, command_max_width)
+            self._text(command_text, (rect.x + 16, rect.y + 60), self.small_font, (195, 205, 220))
         self._text(
-            f"Speed {float(speed_multiple):.0f}x   Up/Down Speed   Space Pause   . Step   R Reset   Esc Quit",
-            (rect.right - 590, rect.y + 58),
+            footer_text,
+            (footer_x, rect.y + 58),
             self.small_font,
             (220, 160, 160),
         )
