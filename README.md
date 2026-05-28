@@ -252,8 +252,17 @@ with Up/Down or W/S, toggle video recording with V or the Video button, press
 Enter or Space to launch, and press Escape in a level to return to the selector.
 Recordings are saved under `outputs/game_recordings/` when a level reaches
 pass/fail; restarting or quitting early discards the current attempt video. The
-saved MP4 includes the level's mapped music track looped over the video when a
-track is available.
+saved MP4 includes three seconds of the level brief, three seconds of the
+pass/fail screen, and the level's mapped music track looped over the video when
+a track is available.
+During a level, press G to start a short social clip, press G again to discard
+it, or press Enter/Return to save it under `outputs/game_recordings/clips/`.
+F9 remains an alternate clip key when the operating system forwards function
+keys to the game.
+Clips can only be started during gameplay; if a level ends while a clip is
+active, save or discard it from the pass/fail screen before leaving.
+If a generated clip filename already exists, OEL appends a numeric suffix
+instead of overwriting the older clip.
 
 Structured training levels also save Markdown debrief reports under
 `outputs/game_debriefs/<scenario_id>/attempt_.../`. These reports include

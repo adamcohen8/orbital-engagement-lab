@@ -45,7 +45,7 @@ from sim.game.debrief import (
 from sim.game.defensive_target import DefensiveTargetIntentProvider
 from sim.game.formatting import format_distance_km, format_speed_km_s, format_speed_m_s
 from sim.game.manual import KeyboardCommandState, ManualGameCommandProvider
-from sim.game.recording_controller import GameRecordingController
+from sim.game.recording_controller import GameClipRecordingController, GameRecordingController
 from sim.game.session import (
     _attempt_config_for_training_clock,
     _install_chaser_delta_v_limiter,
@@ -69,6 +69,8 @@ from sim.game.tuning import (
     SPEED_MULTIPLIER_OPTIONS,
 )
 from sim.presets.thrusters import resolve_thruster_max_thrust_n_from_specs
+
+FULL_ATTEMPT_RECORDING_PAD_S = 3.0
 
 
 @dataclass(frozen=True)
@@ -906,6 +908,24 @@ def _dashboard_fps_for_speed(
     return DASHBOARD_FPS
 
 
+def _clip_recording_status(
+    controller: GameClipRecordingController,
+    *,
+    started_wall_s: float | None,
+    now_wall_s: float,
+    status_message: str = "",
+    status_until_wall_s: float = 0.0,
+) -> str:
+    if controller.recording:
+        elapsed = 0.0 if started_wall_s is None else max(float(now_wall_s) - float(started_wall_s), 0.0)
+        minutes = int(elapsed // 60)
+        seconds = int(elapsed % 60)
+        return f"REC {minutes:02d}:{seconds:02d}  G/F9 discard  Enter save"
+    if status_message and float(now_wall_s) < float(status_until_wall_s):
+        return status_message
+    return ""
+
+
 def _realtime_steps_due(
     *,
     now_s: float,
@@ -1072,6 +1092,15 @@ def run_game_mode(
         output_dir=recording_output_dir,
         fps=recording_fps,
     )
+    clip_recording_controller = GameClipRecordingController(
+        config=config,
+        difficulty=difficulty,
+        output_dir=recording_output_dir,
+        fps=recording_fps,
+    )
+    clip_recording_started_wall: float | None = None
+    clip_recording_status_message = ""
+    clip_recording_status_until = 0.0
     audio_controller: GameAudioController | None = None
     try:
         if _game_sandbox_enabled(config):
@@ -1147,6 +1176,15 @@ def run_game_mode(
                 output_dir=recording_output_dir,
                 fps=recording_fps,
             )
+            clip_recording_controller = GameClipRecordingController(
+                config=config,
+                difficulty=difficulty,
+                output_dir=recording_output_dir,
+                fps=recording_fps,
+            )
+            clip_recording_started_wall = None
+            clip_recording_status_message = ""
+            clip_recording_status_until = 0.0
         recording_controller.start()
         dashboard.push_snapshot(snapshot)
         trainer.record(snapshot)
@@ -1174,11 +1212,21 @@ def run_game_mode(
             ),
             objective_checklist=_mission_checklist(training_cfg, score),
             speed_multiple=current_speed_multiple,
+            recording_status=_clip_recording_status(
+                clip_recording_controller,
+                started_wall_s=clip_recording_started_wall,
+                now_wall_s=perf_counter(),
+                status_message=clip_recording_status_message,
+                status_until_wall_s=clip_recording_status_until,
+            ),
             briefing_lines=briefing_lines if phase_shows_briefing(phase) else (),
             debrief_lines=_score_debrief_lines(score, config=training_cfg, difficulty=difficulty),
             debrief_available=debrief_enabled,
         )
         recording_controller.capture(dashboard)
+        if phase_shows_briefing(phase):
+            recording_controller.capture_hold(dashboard, duration_s=FULL_ATTEMPT_RECORDING_PAD_S)
+        clip_recording_controller.capture(dashboard)
 
         pygame = dashboard.pygame
         audio_controller = GameAudioController(pygame=pygame, music_enabled=music_enabled)
@@ -1265,8 +1313,51 @@ def run_game_mode(
                         _arcade_round_music_path(config, arcade_round_index) if arcade_enabled else None
                     ),
                 )
+            if command_state.clip_record_toggle_requested:
+                command_state.clip_record_toggle_requested = False
+                if clip_recording_controller.recording:
+                    clip_recording_controller.discard()
+                    clip_recording_started_wall = None
+                    clip_recording_status_message = "Clip discarded"
+                    clip_recording_status_until = perf_counter() + 2.5
+                elif phase_shows_briefing(phase) or phase_is_terminal(phase):
+                    clip_recording_status_message = "Clip starts during play"
+                    clip_recording_status_until = perf_counter() + 2.5
+                else:
+                    recorder = clip_recording_controller.start_next()
+                    if recorder is not None:
+                        clip_recording_started_wall = perf_counter()
+                        clip_recording_status_message = ""
+                        clip_recording_status_until = 0.0
+                    else:
+                        clip_recording_started_wall = None
+                        clip_recording_status_message = "Clip recording unavailable"
+                        clip_recording_status_until = perf_counter() + 2.5
+            if command_state.clip_record_save_requested:
+                command_state.clip_record_save_requested = False
+                if clip_recording_controller.recording:
+                    clip_path = clip_recording_controller.finish(
+                        base_training_cfg,
+                        override_level_path=(
+                            _arcade_round_music_path(config, arcade_round_index) if arcade_enabled else None
+                        ),
+                    )
+                    clip_recording_started_wall = None
+                    if clip_path is not None:
+                        print(f"Saved game clip recording: {clip_path}")
+                        clip_recording_status_message = "Clip saved"
+                    else:
+                        clip_recording_status_message = "Clip save failed"
+                    clip_recording_status_until = perf_counter() + 2.5
+                else:
+                    clip_recording_status_message = "No active clip"
+                    clip_recording_status_until = perf_counter() + 2.5
             if command_state.restart_requested:
                 recording_controller.discard()
+                clip_recording_controller.discard()
+                clip_recording_started_wall = None
+                clip_recording_status_message = ""
+                clip_recording_status_until = 0.0
                 audio_controller.stop()
                 if arcade_enabled:
                     arcade_round_index = 1
@@ -1325,6 +1416,8 @@ def run_game_mode(
                 command_state.speed_multiplier_change = 0
                 command_state.camera_rule_toggle_requested = False
                 command_state.music_toggle_requested = False
+                command_state.clip_record_toggle_requested = False
+                command_state.clip_record_save_requested = False
                 command_state.open_debrief_requested = False
                 command_state.paused = bool(training_cfg.enabled)
                 phase = GamePhase.BRIEFING if training_cfg.enabled else GamePhase.PLAYING
@@ -1588,13 +1681,22 @@ def run_game_mode(
                 ),
                 objective_checklist=_mission_checklist(training_cfg, score),
                 speed_multiple=current_speed_multiple,
+                recording_status=_clip_recording_status(
+                    clip_recording_controller,
+                    started_wall_s=clip_recording_started_wall,
+                    now_wall_s=perf_counter(),
+                    status_message=clip_recording_status_message,
+                    status_until_wall_s=clip_recording_status_until,
+                ),
                 briefing_lines=briefing_lines if phase_shows_briefing(phase) else (),
                 debrief_lines=_score_debrief_lines(score, config=training_cfg, difficulty=difficulty),
                 debrief_available=debrief_enabled,
             )
             recording_controller.capture(dashboard)
+            clip_recording_controller.capture(dashboard)
             recorder = recording_controller.recorder
             if recorder is not None and (score.level_passed or score.level_failed) and not recorder.saved:
+                recording_controller.capture_hold(dashboard, duration_s=FULL_ATTEMPT_RECORDING_PAD_S)
                 recording_path = recording_controller.finish(
                     base_training_cfg,
                     override_level_path=recording_music_path,
@@ -1635,7 +1737,7 @@ def run_game_mode(
             dashboard.tick(
                 _dashboard_fps_for_speed(
                     current_speed_multiple,
-                    recording=recording_controller.recorder is not None,
+                    recording=recording_controller.recorder is not None or clip_recording_controller.recording,
                     recording_fps=recording_fps,
                 )
             )
@@ -1643,6 +1745,8 @@ def run_game_mode(
         recorder = recording_controller.recorder
         if recorder is not None and not recorder.saved:
             recording_controller.discard()
+        if clip_recording_controller.recording:
+            clip_recording_controller.discard()
         if audio_controller is not None:
             audio_controller.stop()
         else:
@@ -1690,6 +1794,25 @@ def _start_game_recorder(
         config=config,
         difficulty=difficulty,
         attempt_index=attempt_index,
+        output_dir=output_dir,
+        fps=fps,
+    )
+
+
+def _start_game_clip_recorder(
+    *,
+    enabled: bool,
+    config: SimulationConfig,
+    difficulty: str,
+    clip_index: int,
+    output_dir: str | Path | None,
+    fps: float,
+) -> Any:
+    return game_recording.start_game_clip_recorder(
+        enabled=enabled,
+        config=config,
+        difficulty=difficulty,
+        clip_index=clip_index,
         output_dir=output_dir,
         fps=fps,
     )

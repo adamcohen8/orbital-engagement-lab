@@ -115,6 +115,21 @@ def game_recording_path(
     return root / f"{scenario}_{diff}_{stamp}_attempt{max(int(attempt_index), 1):02d}.mp4"
 
 
+def game_clip_recording_path(
+    *,
+    scenario_name: str,
+    difficulty: str,
+    clip_index: int,
+    output_dir: str | Path | None = None,
+    timestamp: datetime | None = None,
+) -> Path:
+    root = Path(output_dir) if output_dir is not None else Path("outputs") / "game_recordings"
+    stamp = (timestamp or datetime.now()).strftime("%Y%m%d_%H%M%S")
+    scenario = _slug(scenario_name or "game")
+    diff = _slug(difficulty or "easy")
+    return root / "clips" / f"{scenario}_{diff}_{stamp}_clip{max(int(clip_index), 1):02d}.mp4"
+
+
 def add_looped_audio_to_video(
     video_path: str | Path,
     audio_path: str | Path | None,

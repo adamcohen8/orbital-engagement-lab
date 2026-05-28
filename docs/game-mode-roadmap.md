@@ -233,7 +233,11 @@ scoped to the final free-maneuver phase.
 - Done: scenario reset control.
 - Done: pause, single-step, and runtime speed controls.
 - Done: level-selector video toggle with per-attempt MP4 recording saved on
-  pass/fail and discarded on restart or early quit.
+  pass/fail, padded with three seconds of briefing/result screen context, and
+  discarded on restart or early quit.
+- Done: in-level manual clip recording with G start/discard during gameplay,
+  F9 as an alternate key when available, Enter/Return save, HUD status, and clip
+  outputs under `outputs/game_recordings/clips/`.
 - Done: Markdown debrief reports with JSON summaries and matplotlib plots for
   structured terminal attempts.
 - Later: add replay controls.
@@ -274,7 +278,9 @@ Current implementation:
 - Level pass/fail freezes the simulation and displays a mission banner.
 - Terminal attempts can write per-run Markdown debrief reports with JSON
   summaries and plots, and the launcher can save MP4 recordings for completed
-  attempts.
+  attempts with three seconds of level brief and pass/fail screen context.
+- Players can also capture short gameplay clips with G and save them with
+  Enter/Return for social/demo use.
 - Close rendezvous levels zoom around the current state and goal so meter-scale
   criteria stay visible.
 
