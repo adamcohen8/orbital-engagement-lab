@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability or sensitive data exposure
+    url: https://github.com/adamcohen8/orbital-engagement-lab/security/advisories/new
+    about: Do not open a public issue for vulnerabilities, secrets, customer data, CUI, export-controlled data, or classified information. Use the private process described in SECURITY.md.

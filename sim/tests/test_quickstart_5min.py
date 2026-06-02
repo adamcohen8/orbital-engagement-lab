@@ -160,9 +160,9 @@ def test_doctor_reports_quickstart_readiness() -> None:
         check=False,
     )
 
-    assert proc.returncode == 0
     assert "ORBITAL ENGAGEMENT LAB DOCTOR" in proc.stdout
     assert "Quickstart validation" in proc.stdout
+    assert proc.returncode == 0
 
 
 def test_open_output_folder_uses_platform_opener(tmp_path: Path) -> None:

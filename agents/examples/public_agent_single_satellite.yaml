@@ -79,6 +79,9 @@ outputs:
     save_json: true
     save_csv: false
     save_full_log: false
+  review:
+    enabled: true
+    detail: standard
   plots:
     enabled: false
     figure_ids: []
@@ -90,4 +93,3 @@ monte_carlo:
   iterations: 1
   base_seed: 123
   variations: []
-

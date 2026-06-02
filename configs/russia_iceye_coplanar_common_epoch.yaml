@@ -1,0 +1,196 @@
+scenario_name: "russia_iceye_coplanar_common_epoch"
+scenario_description: "TLE-initialized OEL screen of reported COSMOS 2610-2614 geometry relative to ICEYE-X36 at a shared epoch."
+
+metadata:
+  owner: "private_analysis"
+  source: "CelesTrak GP TLEs pulled 2026-06-01"
+  common_epoch_utc: "2026-06-01T08:03:56.733120Z"
+  common_epoch_jd_utc: 2461192.836073299870
+  caveat: "OEL initializes from TLE mean elements and numerically propagates; this is not SGP4/general-perturbations propagation."
+  force_model: "Two-body plus J2/J3/J4 and atmospheric drag using OEL's deterministic numerical force model."
+  drag_assumption: "All objects use mass_kg=100.0, drag_area_m2=1.0, cd=2.2 pending object-specific physical data."
+
+objects:
+  target:
+    kind: "satellite"
+    enabled: true
+    role: "iceye_x36_reference"
+    specs:
+      mass_kg: 100.0
+      aero:
+        drag_area_m2: 1.0
+        cd: 2.2
+    initial_state:
+      tle:
+        line1: "1 59103U 24043F   26152.31302275  .00004566  00000+0  31137-3 0  9998"
+        line2: "2 59103  97.8357 290.1077 0006332  29.3163 330.8418 15.06737422122754"
+        require_checksum: false
+        propagate_to_initial_epoch: true
+    orbit_control:
+      kind: "python"
+      module: "sim.control.orbit.zero_controller"
+      class_name: "ZeroController"
+      params: {}
+
+  cosmos_2610:
+    kind: "satellite"
+    enabled: true
+    role: "reported_russian_coplanar_object"
+    specs:
+      mass_kg: 100.0
+      aero:
+        drag_area_m2: 1.0
+        cd: 2.2
+    initial_state:
+      relative_to: "target"
+      tle:
+        line1: "1 68758U 26083F   26152.26366491  .00003431  00000+0  23671-3 0  9998"
+        line2: "2 68758  97.8032 290.0167 0011871 106.9303 253.3226 15.06441965  6808"
+        require_checksum: false
+        propagate_to_initial_epoch: true
+    orbit_control:
+      kind: "python"
+      module: "sim.control.orbit.zero_controller"
+      class_name: "ZeroController"
+      params: {}
+
+  cosmos_2611:
+    kind: "satellite"
+    enabled: true
+    role: "reported_russian_coplanar_object"
+    specs:
+      mass_kg: 100.0
+      aero:
+        drag_area_m2: 1.0
+        cd: 2.2
+    initial_state:
+      relative_to: "target"
+      tle:
+        line1: "1 68759U 26083G   26152.33607330  .00003246  00000+0  22615-3 0  9998"
+        line2: "2 68759  97.8088 289.5343 0012577 112.7745 247.4811 15.06111542  6807"
+        require_checksum: false
+        propagate_to_initial_epoch: true
+    orbit_control:
+      kind: "python"
+      module: "sim.control.orbit.zero_controller"
+      class_name: "ZeroController"
+      params: {}
+
+  cosmos_2612:
+    kind: "satellite"
+    enabled: true
+    role: "reported_russian_coplanar_object"
+    specs:
+      mass_kg: 100.0
+      aero:
+        drag_area_m2: 1.0
+        cd: 2.2
+    initial_state:
+      relative_to: "target"
+      tle:
+        line1: "1 68762U 26083H   26152.31722687  .00002930  00000+0  20001-3 0  9999"
+        line2: "2 68762  97.8523 290.1024 0014434 103.0741 257.2097 15.06935067  6814"
+        require_checksum: false
+        propagate_to_initial_epoch: true
+    orbit_control:
+      kind: "python"
+      module: "sim.control.orbit.zero_controller"
+      class_name: "ZeroController"
+      params: {}
+
+  cosmos_2613:
+    kind: "satellite"
+    enabled: true
+    role: "reported_russian_coplanar_object"
+    specs:
+      mass_kg: 100.0
+      aero:
+        drag_area_m2: 1.0
+        cd: 2.2
+    initial_state:
+      relative_to: "target"
+      tle:
+        line1: "1 68763U 26083J   26152.30616928  .00002637  00000+0  17824-3 0  9992"
+        line2: "2 68763  97.7785 290.1639 0011407 106.0664 254.1820 15.07416785  6812"
+        require_checksum: false
+        propagate_to_initial_epoch: true
+    orbit_control:
+      kind: "python"
+      module: "sim.control.orbit.zero_controller"
+      class_name: "ZeroController"
+      params: {}
+
+  cosmos_2614:
+    kind: "satellite"
+    enabled: true
+    role: "reported_russian_coplanar_object"
+    specs:
+      mass_kg: 100.0
+      aero:
+        drag_area_m2: 1.0
+        cd: 2.2
+    initial_state:
+      relative_to: "target"
+      tle:
+        line1: "1 68764U 26083K   26152.31503043  .00002744  00000+0  19404-3 0  9992"
+        line2: "2 68764  97.7765 289.4001 0007845  76.1040 284.1058 15.05712491  6818"
+        require_checksum: false
+        propagate_to_initial_epoch: true
+    orbit_control:
+      kind: "python"
+      module: "sim.control.orbit.zero_controller"
+      class_name: "ZeroController"
+      params: {}
+
+simulator:
+  scenario_type: "auto"
+  duration_s: 86400.0
+  dt_s: 60.0
+  initial_jd_utc: 2461192.836073299870
+  dynamics:
+    orbit:
+      model: "two_body"
+      orbit_substep_s: 60.0
+      j2: true
+      j3: true
+      j4: true
+      drag: true
+      atmosphere_model: "ussa1976"
+      srp: false
+      third_body_sun: false
+      third_body_moon: false
+    attitude:
+      enabled: false
+    rocket:
+      enabled: false
+  environment:
+    ephemeris_mode: "analytic_simple"
+    atmosphere_env: {}
+  plugin_validation:
+    strict: true
+  termination:
+    earth_impact_enabled: true
+    earth_radius_km: 6378.137
+
+outputs:
+  output_dir: "outputs/russia_iceye_coplanar_common_epoch"
+  mode: "save"
+  stats:
+    print_summary: true
+    save_json: true
+    save_full_log: false
+  plots:
+    enabled: true
+    style: "oel_dark"
+    reference_object_id: "target"
+    reference_object_label: "ICEYE-X36"
+    figure_ids:
+      - "trajectory_ric_curv_multi"
+      - "trajectory_ric_curv_2d_multi"
+      - "ground_track"
+  animations:
+    enabled: false
+    types: []
+  review:
+    enabled: true
+    detail: "standard"

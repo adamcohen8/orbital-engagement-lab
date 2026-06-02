@@ -167,20 +167,35 @@ _CURRENT_STYLE_NAME: ContextVar[str] = ContextVar("oel_plot_style_name", default
 
 
 def get_oel_version() -> str:
+    pyproject_version = _version_from_source_pyproject()
+    if pyproject_version:
+        return pyproject_version
     try:
         value = str(version("orbital-engagement-lab") or "").strip()
         if value and value.lower() != "none":
             return value
     except (PackageNotFoundError, TypeError, KeyError, AttributeError, ValueError):
         pass
+    return "unknown"
+
+
+def _version_from_source_pyproject() -> str | None:
     pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
     try:
+        in_project = False
         for line in pyproject.read_text(encoding="utf-8").splitlines():
-            if line.strip().startswith("version"):
-                return line.split("=", 1)[1].strip().strip('"').strip("'") or "unknown"
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            if stripped.startswith("[") and stripped.endswith("]"):
+                in_project = stripped == "[project]"
+                continue
+            if in_project and stripped.startswith("version"):
+                value = stripped.split("=", 1)[1].strip().strip('"').strip("'")
+                return value or None
     except OSError:
-        pass
-    return "unknown"
+        return None
+    return None
 
 
 def utc_stamp() -> str:

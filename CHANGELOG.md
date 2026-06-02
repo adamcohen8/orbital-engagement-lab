@@ -6,13 +6,64 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
-## Unreleased
+## 0.10.0 - 2026-06-02
+
+Release thesis: `v0.10.0` introduces **OEL Agents v0**, a tested public
+workflow for AI coding agents to generate scenario YAML, validate configs, run
+deterministic simulations, query review evidence, summarize artifacts, and
+submit opt-in public-safe feedback without bypassing the checked-in physics
+engine.
 
 ### Added
 
+- Added the OEL Agents v0 task-card evaluation set with public task cards for
+  passive propagation, closed-loop rendezvous, TLE ground access, attitude hold,
+  and one-variable comparison. Each card includes prompts, assumptions,
+  validate/run commands, review-store SQL, expected answer shape, pass criteria,
+  red flags, and a golden answer example.
+- Added `docs/agent-evaluation-packet.md`,
+  `docs/agent-capability-routing.md`, `docs/agent-task-cards.md`,
+  `docs/agent-review-queries.md`, and `docs/agent-feedback-loop.md` so users
+  can route broad agent requests, evaluate agent behavior, query run evidence,
+  and submit opt-in public-safe feedback.
+- Added built-in named review queries exposed through
+  `python -m sim.review --list-saved-queries` and
+  `python -m sim.review --saved-query <name>`.
+- Added public GitHub issue forms for bug reports, documentation issues,
+  feature/workflow requests, and agent feedback.
+- Added `tools/prepare_agent_feedback.py`, a local helper that drafts
+  public-safe Agent Feedback issue text without submitting anything.
+
 ### Changed
 
+- Updated public agent guidance so OEL Agents follow the evidence loop:
+  natural-language request -> scenario YAML -> validation -> deterministic run
+  -> review-store query or artifact inspection -> evidence-backed answer.
+- Refocused public agent guidance on general user-intent handling: examples and
+  task cards are onboarding rails and evaluation fixtures, not the boundary of
+  supported agent workflows.
+- Updated public agent examples to enable standard review output so agents can
+  practice querying `review/run.sqlite` after a successful run.
+- Updated public README and security/contribution docs to separate normal
+  public bug reports from private vulnerability or sensitive-data reporting.
+
 ### Fixed
+
+- Tightened public-agent preflight validation so malformed nested
+  `relative_to_target_ric.state` blocks fail during `--validate-only` instead
+  of surfacing later at runtime.
+- Clarified `--doctor` Python failures by showing the detected interpreter
+  version and the required Python `>=3.10` baseline.
+- Added an attitude-specific saved review query for first/final quaternion and
+  body-rate evidence, and clarified that orbital `thrust` rows are not
+  reaction-wheel telemetry.
+- Clarified the compare-one-change task card so scenario name and output
+  directory edits are bookkeeping, while the one-change rule applies to
+  physical scenario parameters.
+- Added regression coverage that validates the public agent task cards,
+  executes each card's review-store SQL against generated outputs, checks named
+  saved review queries, verifies feedback draft generation, and confirms agent
+  materials survive generated public export.
 
 ## 0.9.3 - 2026-05-28
 

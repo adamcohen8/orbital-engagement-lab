@@ -118,7 +118,7 @@ Success looks like:
 
 ```text
 Scenario : quickstart_5min
-Samples  : 301
+Samples  : 37
 Output   : outputs/quickstart_5min
 Start Here: outputs/quickstart_5min/index.md
 ```
@@ -133,16 +133,23 @@ For a guided walkthrough, see [First Five Minutes](docs/first-five-minutes.md).
 
 ## Use OEL With AI Coding Agents
 
-The public repo includes `AGENTS.md`, a checked-in playbook for AI coding
-assistants such as Codex, Cursor, Claude Code, and Gemini CLI. It tells agents
-how to work with OEL safely: start from public docs and examples, generate or
-edit scenario YAML, validate configs before running them, execute simulations
-through `run_simulation.py`, and summarize saved artifacts instead of inventing
-shortcut physics.
+The public repo includes OEL Agents v0, a checked-in and tested workflow for AI
+coding assistants such as Codex, Cursor, Claude Code, Gemini CLI, and Grok
+Build. The core loop is: natural-language request -> scenario YAML ->
+validation -> deterministic run -> review-store query or artifact inspection ->
+evidence-backed answer.
+
+Examples and task cards are onboarding and evaluation rails, not the limits of
+agent support. Agents should use documented OEL interfaces to create the
+minimum viable validated scenario for the user's actual question.
+Use [`docs/agent-capability-routing.md`](docs/agent-capability-routing.md) to
+map broad requests to public workflows, evidence, clarifying questions, and
+limits.
 
 For the fuller public workflow, point your agent at
 [`AGENTS.md`](AGENTS.md), [`agents/public/AGENTS.md`](agents/public/AGENTS.md),
-and [`docs/oel-agents.md`](docs/oel-agents.md), then try prompts like:
+[`docs/oel-agents.md`](docs/oel-agents.md), and
+[`docs/agent-task-cards.md`](docs/agent-task-cards.md), then try prompts like:
 
 - "Create a short public rendezvous scenario where the chaser starts 3 km
   behind the target, validate it, run it, and summarize the output artifacts."
@@ -154,11 +161,18 @@ and [`docs/oel-agents.md`](docs/oel-agents.md), then try prompts like:
 
 Runs that opt into `outputs.review.enabled: true` also produce a local SQLite
 review store for structured inspection. The recommended path for agents and
-scripts is the SELECT-only review CLI/API:
+scripts is the SELECT-only review CLI/API, including built-in saved queries for
+common agent tasks:
 
 ```bash
 .venv/bin/python -m sim.review outputs/my_run --query "SELECT scenario_name, duration_s FROM run_metadata"
+.venv/bin/python -m sim.review outputs/my_run --saved-query run_metadata
 ```
+
+If an agent finds public-safe OEL workflow friction, it can follow
+[`docs/agent-feedback-loop.md`](docs/agent-feedback-loop.md): prepare a draft,
+show the user what would be sent, ask for approval, and then open an Agent
+Feedback issue. Agents must not submit feedback silently.
 
 `run_orw.py --output outputs/my_run` exists as an experimental desktop preview,
 but ORW is not currently recommended for routine review workflows.
@@ -349,6 +363,22 @@ boundaries, and incident response, start with:
 - [Supply Chain And Procurement Baseline](docs/security/supply-chain.md)
 - [Data Handling And Boundary Statement](docs/security/data-handling.md)
 - [Security Incident Process](docs/security/incident-response.md)
+
+## Bug Reports
+
+For non-security bugs, open a GitHub Issue and use the Bug Report template.
+Maintainers monitor repository issue notifications.
+
+Include the OEL version or commit, operating system, Python version, install
+profile, exact command, minimal scenario/config or reproduction steps, expected
+behavior, actual behavior, and relevant traceback or artifact path. For
+simulation-model concerns, include the physical claim, scenario, reference
+source or tolerance, and generated evidence.
+
+Do not post secrets, API keys, customer data, CUI, export-controlled data,
+classified information, or private generated report packets in public issues.
+Report vulnerabilities or sensitive-data exposure privately through
+[SECURITY.md](SECURITY.md).
 
 ## Pro Layer
 

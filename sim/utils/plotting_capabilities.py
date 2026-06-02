@@ -408,6 +408,64 @@ def _draw_earth_sphere_3d(ax: Any, radius_km: float = EARTH_RADIUS_KM) -> None:
     ax.plot_wireframe(x, y, z, rstride=6, cstride=6, color="#5D86AA", alpha=0.15, linewidth=0.4, zorder=0)
 
 
+def _bottom_center_figure_legend(fig: plt.Figure, handles: list[Any], labels: list[str]) -> None:
+    if not handles:
+        return
+    fig.legend(
+        handles,
+        labels,
+        loc="lower center",
+        bbox_to_anchor=(0.5, 0.035),
+        ncol=len(labels),
+        borderaxespad=0.0,
+        fontsize="small",
+        handlelength=1.6,
+        handletextpad=0.5,
+        columnspacing=0.9,
+    )
+
+
+def _reference_origin_label(reference_label: str | None) -> str | None:
+    label = str(reference_label or "").strip()
+    return label or None
+
+
+def _draw_ric_reference_origin_3d(ax: Any, *, label: str | None) -> None:
+    legend_label = _reference_origin_label(label)
+    if legend_label is None:
+        return
+    ax.scatter(
+        [0.0],
+        [0.0],
+        [0.0],
+        marker="*",
+        s=90,
+        color="#F8FAFC",
+        edgecolors="#111827",
+        linewidths=0.7,
+        label=legend_label,
+        zorder=8,
+    )
+
+
+def _draw_ric_reference_origin_2d(axes: list[Any], *, label: str | None) -> None:
+    legend_label = _reference_origin_label(label)
+    if legend_label is None:
+        return
+    for idx, ax in enumerate(axes):
+        ax.scatter(
+            [0.0],
+            [0.0],
+            marker="*",
+            s=80,
+            color="#F8FAFC",
+            edgecolors="#111827",
+            linewidths=0.7,
+            label=legend_label if idx == 0 else "_nolegend_",
+            zorder=8,
+        )
+
+
 def plot_trajectory_frame(
     t_s: np.ndarray,
     truth_hist: np.ndarray,
@@ -415,6 +473,7 @@ def plot_trajectory_frame(
     frame: FrameName = "eci",
     jd_utc_start: float | None = None,
     reference_truth_hist: np.ndarray | None = None,
+    reference_label: str | None = None,
     mode: PlotMode = "interactive",
     out_path: str | None = None,
 ) -> None:
@@ -457,10 +516,11 @@ def plot_multi_trajectory_frame(
     frame: FrameName = "eci",
     jd_utc_start: float | None = None,
     reference_truth_hist: np.ndarray | None = None,
+    reference_label: str | None = None,
     mode: PlotMode = "interactive",
     out_path: str | None = None,
 ) -> None:
-    fig = plt.figure(figsize=cap_figsize(9, 7))
+    fig = plt.figure(figsize=cap_figsize(9, 8))
     ax = fig.add_subplot(111, projection="3d")
     if frame in ("ric_rect", "ric_curv"):
         # Display RIC with radial on y-axis: x=I, y=R, z=C.
@@ -471,6 +531,8 @@ def plot_multi_trajectory_frame(
         xlbl, ylbl, zlbl = "x", "y", "z"
         if frame in ("eci", "ecef"):
             _draw_earth_sphere_3d(ax)
+    if frame in ("ric_rect", "ric_curv"):
+        _draw_ric_reference_origin_3d(ax, label=reference_label)
     for oid, hist in truth_hist_by_object.items():
         if hist.size == 0 or not np.any(np.isfinite(hist[:, 0])):
             continue
@@ -491,8 +553,9 @@ def plot_multi_trajectory_frame(
     ax.set_xlabel(xlbl)
     ax.set_ylabel(ylbl)
     ax.set_zlabel(zlbl)
-    ax.legend(loc="best")
-    fig.tight_layout()
+    handles, labels = ax.get_legend_handles_labels()
+    _bottom_center_figure_legend(fig, handles, labels)
+    fig.tight_layout(rect=(0.0, 0.12, 1.0, 1.0))
     _show_save_close(fig, mode=mode, out_path=out_path)
 
 
@@ -513,6 +576,7 @@ def plot_ric_2d_projections(
     *,
     frame: Literal["ric_rect", "ric_curv"] = "ric_rect",
     reference_truth_hist: np.ndarray,
+    reference_label: str | None = None,
     planes: list[str] | None = None,
     mode: PlotMode = "interactive",
     out_path: str | None = None,
@@ -552,6 +616,7 @@ def plot_multi_ric_2d_projections(
     *,
     frame: Literal["ric_rect", "ric_curv"] = "ric_rect",
     reference_truth_hist: np.ndarray,
+    reference_label: str | None = None,
     planes: list[str] | None = None,
     mode: PlotMode = "interactive",
     out_path: str | None = None,
@@ -559,9 +624,10 @@ def plot_multi_ric_2d_projections(
     if frame not in ("ric_rect", "ric_curv"):
         raise ValueError("frame must be 'ric_rect' or 'ric_curv'.")
     p_list = planes if planes is not None and len(planes) > 0 else ["ri", "ic", "rc"]
-    fig, axes = plt.subplots(1, len(p_list), figsize=cap_figsize(5.0 * len(p_list), 4.5))
+    fig, axes = plt.subplots(1, len(p_list), figsize=cap_figsize(5.0 * len(p_list), 5.5))
     if len(p_list) == 1:
         axes = [axes]
+    _draw_ric_reference_origin_2d(list(axes), label=reference_label)
     for oid, hist in truth_hist_by_object.items():
         if hist.size == 0 or not np.any(np.isfinite(hist[:, 0])):
             continue
@@ -585,9 +651,10 @@ def plot_multi_ric_2d_projections(
         ax.set_ylabel(ylbl)
         ax.set_title(f"{xlbl}-{ylbl}")
         ax.grid(True, alpha=0.3)
-    axes[0].legend(loc="best")
+    handles, labels = axes[0].get_legend_handles_labels()
+    _bottom_center_figure_legend(fig, handles, labels)
     fig.suptitle(f"RIC 2D Projections Multi ({'Rect' if frame == 'ric_rect' else 'Curvilinear'})")
-    fig.tight_layout()
+    fig.tight_layout(rect=(0.0, 0.17, 1.0, 1.0))
     _show_save_close(fig, mode=mode, out_path=out_path)
 
 

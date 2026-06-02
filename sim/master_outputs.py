@@ -533,6 +533,7 @@ def _plot_outputs_impl(
     figure_ids = _expanded_figure_ids(dict(cfg.outputs.plots or {}))
     ric_2d_planes = list(cfg.outputs.plots.get("ric_2d_planes", ["ri", "ic", "rc"]) or ["ri", "ic", "rc"])
     reference_object_id = str(cfg.outputs.plots.get("reference_object_id", "")).strip()
+    reference_object_label = str(cfg.outputs.plots.get("reference_object_label", "")).strip() or None
     reference_truth_override = None
     if target_reference_orbit_truth is not None:
         ref_arr = np.array(target_reference_orbit_truth, dtype=float)
@@ -1014,6 +1015,7 @@ def _plot_outputs_impl(
             ric_truth_hist,
             frame="ric_rect",
             reference_truth_hist=reference_truth,
+            reference_label=reference_object_label,
             mode=mode,
             out_path=str(p),
         )
@@ -1026,6 +1028,7 @@ def _plot_outputs_impl(
             ric_truth_hist,
             frame="ric_curv",
             reference_truth_hist=reference_truth,
+            reference_label=reference_object_label,
             mode=mode,
             out_path=str(p),
         )
@@ -1038,6 +1041,7 @@ def _plot_outputs_impl(
             ric_truth_hist,
             frame="ric_rect",
             reference_truth_hist=reference_truth,
+            reference_label=reference_object_label,
             planes=ric_2d_planes,
             mode=mode,
             out_path=str(p),
@@ -1051,6 +1055,7 @@ def _plot_outputs_impl(
             ric_truth_hist,
             frame="ric_curv",
             reference_truth_hist=reference_truth,
+            reference_label=reference_object_label,
             planes=ric_2d_planes,
             mode=mode,
             out_path=str(p),
