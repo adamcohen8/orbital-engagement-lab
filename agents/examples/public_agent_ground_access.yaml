@@ -3,7 +3,7 @@
 # Natural-language source:
 # "Create a short public scenario that propagates a TLE and checks whether a
 # Colorado Springs ground station can see it. Keep the run headless and save
-# JSON summary outputs."
+# JSON summary plus queryable review outputs."
 #
 # Assumption boundary: this is not SGP4/general-perturbations propagation. OEL
 # converts the TLE to an initial ECI state, then numerically integrates its
@@ -78,6 +78,9 @@ outputs:
     save_json: true
     save_csv: false
     save_full_log: false
+  review:
+    enabled: true
+    detail: standard
   plots:
     enabled: false
     figure_ids: []

@@ -106,6 +106,7 @@ def validate_scenario_plugins(cfg: Any, *, import_plugins: bool = True) -> list[
         if not getattr(agent, "enabled", False):
             continue
         path = object_parameter_prefix(str(object_id))
+        errs.extend(_validate_initial_state(getattr(agent, "initial_state", {}) or {}, f"{path}.initial_state"))
         if str(getattr(agent, "kind", "satellite")).strip().lower() == "rocket":
             errs.extend(
                 _validate_pointer(
@@ -172,6 +173,52 @@ def validate_scenario_plugins(cfg: Any, *, import_plugins: bool = True) -> list[
                     p, _CONTRACTS["mission_objective"], f"{path}.mission_objectives[{i}]", import_plugins=import_plugins
                 )
             )
+    return errs
+
+
+def _validate_initial_state(initial_state: dict[str, Any], path: str) -> list[str]:
+    errs: list[str] = []
+    raw = dict(initial_state or {})
+    rel_block = raw.get("relative_to_target_ric")
+    if rel_block is not None:
+        if not isinstance(rel_block, dict):
+            errs.append(f"{path}.relative_to_target_ric: must be a mapping/object.")
+        else:
+            rel = dict(rel_block)
+            frame = str(rel.get("frame", "rect") or "").strip().lower()
+            if frame not in {"rect", "curv"}:
+                errs.append(f"{path}.relative_to_target_ric.frame: must be 'rect' or 'curv'.")
+            if "state" not in rel:
+                errs.append(f"{path}.relative_to_target_ric.state: must be a length-6 finite numeric list.")
+            else:
+                errs.extend(
+                    _validate_numeric_sequence(
+                        rel.get("state"),
+                        f"{path}.relative_to_target_ric.state",
+                        length=6,
+                    )
+                )
+    if "relative_ric_rect" in raw:
+        errs.extend(_validate_numeric_sequence(raw.get("relative_ric_rect"), f"{path}.relative_ric_rect", length=6))
+    if "relative_ric_curv" in raw:
+        errs.extend(_validate_numeric_sequence(raw.get("relative_ric_curv"), f"{path}.relative_ric_curv", length=6))
+    return errs
+
+
+def _validate_numeric_sequence(value: Any, path: str, *, length: int) -> list[str]:
+    if not isinstance(value, (list, tuple)):
+        return [f"{path}: must be a length-{length} finite numeric list."]
+    if len(value) != length:
+        return [f"{path}: must contain exactly {length} values."]
+    errs: list[str] = []
+    for i, item in enumerate(value):
+        try:
+            numeric = float(item)
+        except (TypeError, ValueError):
+            errs.append(f"{path}[{i}]: must be a finite number.")
+            continue
+        if not math.isfinite(numeric):
+            errs.append(f"{path}[{i}]: must be a finite number.")
     return errs
 
 

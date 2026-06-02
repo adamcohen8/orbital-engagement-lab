@@ -4,15 +4,24 @@ Orbital Engagement Lab agents should orchestrate documented workflows. They
 should not replace, approximate, or silently bypass the deterministic physics
 engine.
 
+Agents are general helpers for OEL, not runners for a fixed example catalog.
+Use examples and task cards as onboarding rails and regression fixtures, then
+generalize from the documented interfaces to the user's actual question.
+
 This file is intentionally public-safe. It helps AI coding agents such as
-Codex, Cursor, Claude Code, and Gemini CLI work with the open-source OEL core.
+Codex, Cursor, Claude Code, Gemini CLI, and Grok Build work with the
+open-source OEL core.
 For the fuller public agent playbook, read `agents/public/AGENTS.md` and
-`docs/oel-agents.md`.
+`docs/oel-agents.md`. For routing broad user intents to documented workflows,
+read `docs/agent-capability-routing.md`.
 
 ## Default Agent Posture
 
 - Treat scenario YAML, CLI commands, Python APIs, tests, docs, and generated
   artifacts as the supported interface.
+- Interpret the user's intent first. Choose a nearby example only when it
+  genuinely fits; otherwise create the minimum viable validated scenario that
+  answers the request.
 - Prefer small, inspectable changes that match existing OEL patterns.
 - Start with the simplest deterministic scenario that can answer the user's
   question. Do not add unrequested physics, sensors, estimators, controllers,
@@ -28,6 +37,9 @@ For the fuller public agent playbook, read `agents/public/AGENTS.md` and
 - Explain orbital mechanics, equations, controllers, and outputs from public
   source and public docs only.
 - Call out uncertainty, missing validation evidence, and model limits plainly.
+- When OEL itself appears hard to use, confusing, or missing an agent-facing
+  workflow, follow `docs/agent-feedback-loop.md`: prepare a public-safe
+  feedback draft, ask the user for permission, and submit only after approval.
 
 ## Scenario Generation Posture
 
@@ -67,6 +79,24 @@ Examples:
   the user asks for perturbations or realistic force modeling.
 - For "rendezvous with noisy measurements", sensing and estimation are
   relevant. For "rendezvous with perfect knowledge", do not add estimation.
+
+## When The User Asks Something New
+
+Do not force new user requests into the checked-in examples. Instead:
+
+1. Restate the study goal in OEL terms.
+2. Identify the minimum scenario elements needed: objects, initial state,
+   dynamics, controller posture, duration, outputs, and review evidence.
+3. Reuse public examples for structure when helpful, but give the new scenario
+   a distinct name and output directory.
+4. Validate before running, inspect artifacts after running, and explain what
+   evidence supports the answer.
+5. Name missing evidence or public-core limits instead of stretching an example
+   beyond what it proves.
+
+Use `docs/agent-capability-routing.md` to map broader requests such as TLE
+propagation, access, attitude, plotting, game/training, validation, sealed-mode,
+or comparison work to the right public workflow and evidence.
 
 ## Review Query Workflow
 
@@ -113,6 +143,24 @@ Rules for agents:
   experimental preview and should only be used when the user explicitly asks
   for the interactive local workbench. Prefer `python -m sim.review`.
 
+## Agent Feedback Loop
+
+If an agent encounters a feedback-worthy OEL problem while helping a user, it
+may propose submitting public feedback. Examples include missing examples,
+confusing validation errors, insufficient artifacts for a reasonable public
+question, unclear docs, or agent guidance conflicts.
+
+Rules:
+
+- Never submit feedback silently.
+- Show the user the public-safe summary before submitting.
+- Ask for explicit approval.
+- Do not include secrets, API keys, customer data, CUI, export-controlled data,
+  classified information, private configs, or private generated report packets.
+- Use the private `SECURITY.md` process for vulnerabilities or sensitive-data
+  exposure.
+- Use the GitHub Agent Feedback issue template after approval.
+
 ## Public Commands
 
 ```bash
@@ -125,12 +173,14 @@ python -m sim.review outputs/<scenario_name> --query "SELECT scenario_name FROM 
 python run_game.py
 ```
 
-For generated examples:
+For generated examples and evaluation fixtures:
 
 ```bash
 python run_simulation.py --config agents/examples/public_agent_single_satellite.yaml --validate-only
 python run_simulation.py --config agents/examples/public_agent_single_satellite.yaml
 ```
+
+For repeatable public agent task checks, use `docs/agent-task-cards.md`.
 
 ## Safety And IP Boundary
 

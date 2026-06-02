@@ -15,6 +15,32 @@ python -m pip install -U pip
 python -m pip install ".[dev]"
 ```
 
+## Reporting Bugs
+
+For non-security bugs, open a GitHub Issue in the public repository and use the
+Bug Report template. Maintainers monitor repository issue notifications.
+
+Good bug reports include:
+
+- the OEL version, release, branch, or commit SHA,
+- operating system and Python version,
+- install profile, such as core, dev, gui, game, ml, or full,
+- the exact command that failed,
+- the smallest scenario YAML, code snippet, or game/trainer step that
+  reproduces the issue,
+- expected behavior and actual behavior,
+- relevant traceback, log excerpt, or output artifact path,
+- whether the issue is repeatable from a clean checkout.
+
+For simulation-model or validation concerns, also include the physical claim
+being questioned, the scenario/config used, any external reference or expected
+tolerance, and the generated artifacts that support the concern.
+
+Do not post secrets, API keys, customer data, CUI, export-controlled data,
+classified information, or private generated report packets in public issues.
+For suspected vulnerabilities or sensitive data exposure, follow `SECURITY.md`
+instead of opening a public issue.
+
 ## Checks
 
 Run the focused public checks before opening a pull request:

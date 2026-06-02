@@ -55,8 +55,10 @@ def _check_import(module_name: str) -> tuple[bool, str]:
 
 
 def _print_doctor_report() -> bool:
+    python_ok = sys.version_info >= (3, 10)
+    python_detail = sys.version.split()[0] if python_ok else f"{sys.version.split()[0]} (requires >=3.10)"
     checks: list[tuple[str, bool, str, bool]] = [
-        ("Python", sys.version_info >= (3, 10), sys.version.split()[0], True),
+        ("Python", python_ok, python_detail, True),
         ("Quickstart config", QUICKSTART_CONFIG.exists(), str(QUICKSTART_CONFIG), True),
     ]
     for module_name, required in (
@@ -100,6 +102,8 @@ def _print_doctor_report() -> bool:
         if overall_ok
         else "Not ready: fix FAIL items and rerun doctor."
     )
+    if not overall_ok:
+        print("For Python FAIL, rerun with Python 3.10+ or the project virtual environment.")
     print("Optional plotting/ORW/game dependencies may show WARN and are not required for quickstart.")
     print("=" * 72)
     return overall_ok

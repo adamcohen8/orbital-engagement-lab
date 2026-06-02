@@ -7,10 +7,13 @@ from .service import (
 
 _PRIVATE_EXPORTS = {
     "can_run_monte_carlo_campaign": ("sim.execution.campaigns", "can_run_monte_carlo_campaign"),
+    "load_config_campaign": ("sim.execution.campaigns", "load_config_campaign"),
     "prepare_monte_carlo_runs": ("sim.execution.campaigns", "prepare_monte_carlo_runs"),
+    "run_config_campaign": ("sim.execution.campaigns", "run_config_campaign"),
     "run_monte_carlo_campaign": ("sim.execution.campaigns", "run_monte_carlo_campaign"),
     "run_monte_carlo_runs": ("sim.execution.campaigns", "run_monte_carlo_runs"),
     "run_serial_monte_carlo_runs": ("sim.execution.campaigns", "run_serial_monte_carlo_runs"),
+    "validate_config_campaign": ("sim.execution.campaigns", "validate_config_campaign"),
     "prepare_sensitivity_runs": ("sim.execution.sensitivity", "prepare_sensitivity_runs"),
     "run_sensitivity_runs": ("sim.execution.sensitivity", "run_sensitivity_runs"),
     "prepare_batch_run_configs": ("sim.execution.validation", "prepare_batch_run_configs"),
@@ -21,15 +24,18 @@ __all__ = [
     "SimulationExecutionService",
     "can_run_monte_carlo_campaign",
     "create_single_run_engine",
+    "load_config_campaign",
     "prepare_monte_carlo_runs",
     "prepare_batch_run_configs",
     "prepare_sensitivity_runs",
+    "run_config_campaign",
     "run_monte_carlo_campaign",
     "run_monte_carlo_runs",
     "run_serial_monte_carlo_runs",
     "run_sensitivity_runs",
     "run_simulation_config_file",
     "run_simulation_scenario",
+    "validate_config_campaign",
     "validate_generated_batch_configs",
 ]
 

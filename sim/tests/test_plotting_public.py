@@ -133,6 +133,15 @@ def test_oel_version_falls_back_when_distribution_metadata_is_malformed(monkeypa
     assert oel_style.get_oel_version() != "unknown"
 
 
+def test_oel_version_prefers_source_pyproject_over_installed_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _stale_distribution_metadata(_package_name: str) -> str:
+        return "0.0.0"
+
+    monkeypatch.setattr(oel_style, "version", _stale_distribution_metadata)
+
+    assert oel_style.get_oel_version() == oel_style._version_from_source_pyproject()
+
+
 def test_oel_animation_save_adds_public_safe_footer(tmp_path: Path) -> None:
     path = tmp_path / "nested" / "styled_animation.gif"
     metadata = artifact_metadata(

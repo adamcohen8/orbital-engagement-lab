@@ -23,6 +23,9 @@ python run_simulation.py --config <scenario.yaml> --validate-only
 - The run writes an output directory.
 - `index.md` exists when the output writer creates one.
 - `master_run_summary.json` exists for single-run review.
+- `review/run.sqlite` exists when `outputs.review.enabled: true`.
+- The agent uses `python -m sim.review` for review-store evidence when the
+  review store exists.
 - `master_run_log.json` exists only when detailed time-history output was
   requested with `outputs.stats.save_full_log: true`.
 - Any requested plots, CSV files, or custom artifacts are present.
@@ -36,6 +39,7 @@ python run_simulation.py --config <scenario.yaml> --validate-only
 - The agent explains what changed physically: orbit propagation, relative
   motion, attitude response, access windows, thrusting, or termination.
 - The agent reports metrics from artifacts, not from memory.
+- The agent states the SQL query or artifact path used for important claims.
 - The agent distinguishes simulated model behavior from real mission behavior.
 
 ## 4. Goal Fit
@@ -59,6 +63,9 @@ python run_simulation.py --config <scenario.yaml> --validate-only
   committed.
 - The agent does not claim flight readiness or operational decision authority.
 - The agent does not claim validation beyond checked artifacts and tests.
+- If the agent proposes upstream feedback, it follows
+  `docs/agent-feedback-loop.md`, shows a public-safe draft, and asks for user
+  approval before submitting.
 
 ## Suggested Result Summary
 
@@ -67,6 +74,7 @@ Status: validated / ran / needs fixes
 Scenario: <scenario_name>
 Command: <command>
 Outputs inspected: <files>
+Review query: <SQL query or not applicable>
 What happened: <artifact-supported summary>
 Key metrics: <metric names and values>
 Goal fit: <supported / partial / unsupported>

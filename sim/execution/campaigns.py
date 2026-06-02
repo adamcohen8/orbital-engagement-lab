@@ -9,8 +9,11 @@ def _unavailable(*args, **kwargs):
 
 
 can_run_monte_carlo_campaign = _unavailable
+load_config_campaign = _unavailable
 prepare_monte_carlo_runs = _unavailable
+run_config_campaign = _unavailable
 run_monte_carlo_campaign = _unavailable
 run_monte_carlo_runs = _unavailable
 run_serial_monte_carlo_runs = _unavailable
 sample_monte_carlo_variation = _unavailable
+validate_config_campaign = _unavailable

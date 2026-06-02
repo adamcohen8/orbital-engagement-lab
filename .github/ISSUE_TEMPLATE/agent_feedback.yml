@@ -1,0 +1,99 @@
+name: Agent feedback
+description: Share public-safe feedback discovered while an AI agent used OEL.
+title: "[Agent feedback]: "
+labels: ["agent-feedback"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form when an AI coding agent found a workflow gap, confusing
+        documentation, missing example, hard-to-use validation message, or
+        artifact/review-store limitation while helping with OEL.
+
+        Do not include secrets, API keys, customer data, CUI,
+        export-controlled data, classified information, private configs, or
+        private generated report packets. For vulnerabilities or sensitive data
+        exposure, use the private process in SECURITY.md instead.
+  - type: dropdown
+    id: agent_tool
+    attributes:
+      label: Agent/tool used
+      options:
+        - Codex
+        - Claude Code
+        - Cursor
+        - Gemini CLI
+        - Grok Build
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: workflow_stage
+    attributes:
+      label: Workflow stage
+      options:
+        - Scenario generation
+        - Config validation
+        - Simulation execution
+        - Review-store query
+        - Artifact interpretation
+        - Docs and examples
+        - Agent safety or public/private boundary
+        - Install or environment
+        - Game or training workflow
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: user_goal
+    attributes:
+      label: User goal, paraphrased
+      description: Remove sensitive details. Describe what the user was trying to accomplish.
+      placeholder: "The user wanted a short public rendezvous scenario with review-store evidence."
+    validations:
+      required: true
+  - type: textarea
+    id: issue_summary
+    attributes:
+      label: What did the agent notice?
+      description: Describe the friction, gap, confusing behavior, or missing artifact.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Public-safe evidence
+      description: Include commands, validation messages, SQL queries, artifact paths, or minimal snippets when safe.
+      placeholder: |
+        Command:
+        python run_simulation.py --config ...
+
+        Review query:
+        SELECT ...
+    validations:
+      required: false
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected agent workflow
+      description: What should have been easier, clearer, or better supported?
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested improvement
+      description: Optional. Suggest a doc, example, validation message, review table, artifact, or workflow change.
+    validations:
+      required: false
+  - type: checkboxes
+    id: consent_and_safety
+    attributes:
+      label: Consent and public safety
+      options:
+        - label: The user approved submitting this public feedback.
+          required: true
+        - label: I have not included secrets, API keys, customer data, CUI, export-controlled data, classified information, private configs, or private generated report packets.
+          required: true
+        - label: This is not a suspected vulnerability or sensitive-data exposure. If it is, I will use the private SECURITY.md process instead.
+          required: true

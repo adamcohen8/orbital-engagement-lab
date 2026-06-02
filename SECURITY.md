@@ -30,12 +30,13 @@ Customer or pilot agreements may define stricter response targets.
 
 ## Supported Versions
 
-Security fixes target the current public release line and active private/Pro
-customer-supported release lines. The project targets Python 3.10 through 3.12.
-Blocking CI currently exercises Python 3.11, so evaluators should run acceptance
-on their exact target interpreter and operating system. Python 3.9 is no longer
-a supported procurement baseline because several vulnerability fixes in the
-Python packaging and ML/plotting ecosystem require Python 3.10 or newer.
+Security fixes target the current public release line, currently `v0.10.0`, and
+active private/Pro customer-supported release lines. The project targets Python
+3.10 through 3.12. Blocking CI currently exercises Python 3.11, so evaluators
+should run acceptance on their exact target interpreter and operating system.
+Python 3.9 is no longer a supported procurement baseline because several
+vulnerability fixes in the Python packaging and ML/plotting ecosystem require
+Python 3.10 or newer.
 
 ## Supported Scope
 
@@ -49,6 +50,9 @@ Security reports are most useful when they affect:
 Simulation-model correctness issues are also welcome, but they may be handled as
 engineering bugs rather than security vulnerabilities unless they create a clear
 security impact.
+
+For non-security bugs, use the public repository's GitHub Issues and the Bug
+Report template. Do not include sensitive data in public issues.
 
 ## Running Untrusted Scenarios
 

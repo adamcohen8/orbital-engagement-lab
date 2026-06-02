@@ -14,6 +14,11 @@ Agents should be transparent contributors. They should cite the files or docs
 they used, prefer public examples over invention, and leave deterministic
 simulation and reporting to OEL itself.
 
+Examples are rails, not boundaries. Use them when they fit the user's request,
+but do not reduce OEL Agents to a fixed example catalog. The durable agent
+interface is the documented workflow: scenario YAML, validation, deterministic
+runs, review queries, artifacts, tests, and honest limits.
+
 ## Supported Workflows
 
 1. Read the relevant docs and examples.
@@ -26,6 +31,22 @@ simulation and reporting to OEL itself.
 7. Evaluate the run with `agents/public/evaluation-rubric.md`.
 8. Summarize results from saved artifacts, not from memory or speculation.
 9. Add tests or smoke checks for new agent-facing examples.
+
+The preferred agent evidence loop is:
+
+```text
+ordinary-language request -> scenario YAML -> validate -> run
+-> review query or artifact inspection -> evidence-backed answer
+```
+
+Use `docs/agent-evaluation-packet.md` to evaluate whether an agent follows this
+loop. Use `docs/agent-capability-routing.md` to map broad user intents to
+workflows, starting docs, evidence, and public-core limits. Use
+`docs/agent-review-queries.md` for reusable review-store SQL. Use
+`docs/agent-feedback-loop.md` when an agent finds public-safe workflow feedback
+worth sending upstream. Use `docs/agent-task-cards.md` for the repeatable
+public agent task-card set; task cards are evaluation fixtures, not the
+boundary of what agents can help users do.
 
 ## Canonical Commands
 
@@ -143,6 +164,31 @@ fidelity instead of silently enabling every force model. A simple deorbit
 maneuver geometry demo and a drag-including orbital decay study are different
 configs.
 
+## When The User Asks Something New
+
+Agents should generalize from OEL's documented interfaces, not from memorized
+example outcomes. For a request that is not exactly one of the checked-in
+examples:
+
+1. Translate the request into a small OEL study: objects, initial state,
+   dynamics, controller posture, duration, outputs, and success evidence.
+2. Decide whether an existing public example is close enough to copy, or
+   whether a new scenario YAML file is clearer.
+3. Keep only the complexity required by the user's goal.
+4. Validate the generated config before execution.
+5. Run the deterministic simulator and inspect saved artifacts.
+6. Use `python -m sim.review` when a review store exists.
+7. State assumptions, missing evidence, and model limits in the answer.
+
+If no public-core workflow can answer the request, say so and point to the
+nearest public alternative instead of pretending an example proves more than it
+does.
+
+For common routing decisions, use `docs/agent-capability-routing.md` before
+choosing an example. It lists workflow evidence and clarifying-question
+triggers for propagation, TLEs, rendezvous, access, attitude, plotting, game
+training, comparison, validation, sealed mode, and public-core boundaries.
+
 ## Rendezvous Evaluation Notes
 
 For a closed-loop rendezvous scenario, compact summary JSON is enough for a
@@ -174,7 +220,7 @@ Use those richer artifacts to inspect range history, range-rate behavior,
 controller transients, burn timing, trajectory shape, and whether closure was
 monotonic or merely improved at the final sample.
 
-## Natural-Language To YAML Examples
+## Example Rails
 
 Request:
 
@@ -239,7 +285,8 @@ or risky.
 ## Agent-Generated Example Configs
 
 These examples are intentionally short and headless so users can validate,
-run, and inspect them quickly:
+run, and inspect them quickly. They are useful starting points and regression
+fixtures, not a complete list of supported agent workflows:
 
 ```bash
 python run_simulation.py --config agents/examples/public_agent_single_satellite.yaml --validate-only
@@ -247,6 +294,13 @@ python run_simulation.py --config agents/examples/public_agent_rendezvous_lqr.ya
 python run_simulation.py --config agents/examples/public_agent_ground_access.yaml --validate-only
 python run_simulation.py --config agents/examples/public_agent_attitude_hold.yaml --validate-only
 ```
+
+These examples enable standard review output. After running one, inspect
+`outputs/agents/<scenario_name>/review/run.sqlite` with `python -m sim.review`
+and cite the query used for any important metric.
+
+For a repeatable evaluation set around these examples, use the task cards in
+`docs/agent-task-cards.md`.
 
 ## Explanation Rules
 
@@ -256,6 +310,25 @@ python run_simulation.py --config agents/examples/public_agent_attitude_hold.yam
 - Do not claim validation beyond the artifacts and tests that actually exist.
 - When a result matters, point the user to the generated output file and the
   command that produced it.
+
+## Agent Feedback Loop
+
+Agents may help users submit public-safe feedback about OEL itself when a
+workflow problem appears during normal use. Feedback-worthy issues include
+missing examples, confusing validation messages, docs gaps, review-store
+limitations, insufficient output artifacts, or conflicts in agent guidance.
+
+Follow `docs/agent-feedback-loop.md`:
+
+- prepare a short public-safe feedback draft,
+- show the user what would be sent,
+- ask for explicit approval,
+- submit only after approval using the GitHub Agent Feedback issue template,
+- link the issue back to the user.
+
+Do not use public feedback for vulnerabilities, secrets, customer data, CUI,
+export-controlled data, classified information, private configs, or private
+generated report packets. Use the private `SECURITY.md` process instead.
 
 ## Safety And IP Guidance
 

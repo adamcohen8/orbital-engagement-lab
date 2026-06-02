@@ -1,0 +1,48 @@
+name: Feature or workflow request
+description: Suggest a public-core feature, workflow, example, or documentation improvement.
+title: "[Request]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for non-sensitive public-core requests. Do not include
+        customer data, export-controlled data, classified information, or private
+        generated report packets.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Scenario YAML / examples
+        - CLI / Python API
+        - Agents workflow
+        - Review store / output inspection
+        - Dynamics / force models
+        - Controllers / mission logic
+        - Game / trainer
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: use_case
+    attributes:
+      label: Use case
+      description: What are you trying to accomplish?
+    validations:
+      required: true
+  - type: textarea
+    id: current_gap
+    attributes:
+      label: Current gap
+      description: What is hard, missing, or confusing today?
+    validations:
+      required: true
+  - type: textarea
+    id: desired
+    attributes:
+      label: Desired behavior
+      description: What would a good solution look like?
+    validations:
+      required: true

@@ -6,7 +6,8 @@ security, legal, export-control, or mission-assurance process.
 
 ## Supported Versions
 
-- Public releases: security fixes target the current public release line.
+- Public releases: security fixes target the current public release line,
+  currently `v0.10.0`.
 - Private/Pro releases: security fixes target the active customer-supported
   release line or pilot branch named in the agreement.
 - Python compatibility target: Python 3.10 through 3.12. Blocking CI currently

@@ -1,0 +1,97 @@
+name: Bug report
+description: Report a non-security bug in Orbital Engagement Lab.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve Orbital Engagement Lab.
+
+        Use this form for non-security bugs. Do not include secrets, API keys,
+        customer data, CUI, export-controlled data, classified information, or
+        private generated report packets. For vulnerabilities or sensitive data
+        exposure, use the private process in SECURITY.md instead.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - Scenario YAML / config validation
+        - CLI / run_simulation.py
+        - Python API
+        - Simulation dynamics or model correctness
+        - Controller / mission behavior
+        - Output artifacts / review store / plots
+        - Game / trainer
+        - Install / dependency / packaging
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: OEL version, branch, or commit
+      description: Include the release version or commit SHA if known.
+      placeholder: "v0.10.x, main, or commit SHA"
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Include OS, Python version, and install profile.
+      placeholder: "macOS 14, Python 3.11, pip install .[dev]"
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command or workflow
+      description: Paste the exact command, API call, game step, or workflow that triggered the bug.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Minimal reproduction steps
+      description: Provide the smallest scenario/config snippet or steps that reproduce the issue.
+      placeholder: |
+        1. Run ...
+        2. Open ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect OEL to do?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead? Include traceback, log excerpt, or artifact paths when useful.
+    validations:
+      required: true
+  - type: textarea
+    id: model_claim
+    attributes:
+      label: Simulation/model correctness details, if applicable
+      description: For physics/model concerns, include the claim, reference source, tolerance, and generated evidence.
+      placeholder: "Leave blank if this is not a model-correctness issue."
+    validations:
+      required: false
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Public issue safety check
+      options:
+        - label: I have not included secrets, API keys, customer data, CUI, export-controlled data, classified information, or private generated report packets.
+          required: true
+        - label: This is not a suspected vulnerability or sensitive-data exposure. If it is, I will use the private SECURITY.md process instead.
+          required: true

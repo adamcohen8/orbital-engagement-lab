@@ -41,11 +41,13 @@ def test_plot_outputs_uses_target_reference_orbit_for_ric_multi(monkeypatch, tmp
         frame: str,
         jd_utc_start: float | None = None,
         reference_truth_hist: np.ndarray | None = None,
+        reference_label: str | None = None,
         mode: str = "interactive",
         out_path: str | None = None,
     ) -> None:
         captured["frame"] = frame
         captured["keys"] = sorted(truth_hist_by_object.keys())
+        captured["reference_label"] = reference_label
         captured["reference_truth_hist"] = (
             None if reference_truth_hist is None else np.array(reference_truth_hist, dtype=float)
         )
@@ -123,6 +125,7 @@ def test_plot_outputs_uses_target_reference_orbit_for_ric_multi(monkeypatch, tmp
     assert out["trajectory_ric_rect_multi"].endswith("trajectory_ric_rect_multi.png")
     assert captured["frame"] == "ric_rect"
     assert captured["keys"] == ["chaser", "target"]
+    assert captured["reference_label"] is None
     assert np.allclose(captured["reference_truth_hist"], target_reference_orbit_truth)
 
 
