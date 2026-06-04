@@ -14,6 +14,7 @@ __all__ = [
     "plot_reentry_summary",
     "plot_reentry_thermal",
     "plot_rendezvous_summary",
+    "plot_rendezvous_summary_curvilinear",
     "plot_run_dashboard",
     "plot_sensor_access",
     "OEL_STYLE_DARK",

@@ -6,6 +6,31 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.10.1 - 2026-06-04
+
+Release thesis: `v0.10.1` adds the first web-hosted RPO Trainer Preview path
+and tightens the public/private release workflow around Pro-only covariance
+analysis tests.
+
+### Added
+
+- Added `web/rpo-trainer-preview/`, a static browser-native RPO Trainer Preview
+  with Level 0-style tutorial gates, sandbox presets, RI/RC plots, HCW coast
+  projection, keyboard/touch controls, and a full-OEL download call to action.
+- Added a GitHub Pages Actions workflow that publishes
+  `web/rpo-trainer-preview/` as a static site when changes land on `main`.
+- Added curvilinear rendezvous summary plotting and RIC 2D target-burn marker
+  plot variants for richer public-safe rendezvous visualizations.
+
+### Fixed
+
+- Excluded the Pro covariance analysis regression test from generated public
+  exports so public-export CI does not run a Pro-only workflow against public
+  stubs.
+- Fixed plotting test import ordering for Ruff.
+- Improved dark-style Earth rendering and run-dashboard trajectory framing for
+  public plotting artifacts.
+
 ## 0.10.0 - 2026-06-02
 
 Release thesis: `v0.10.0` introduces **OEL Agents v0**, a tested public

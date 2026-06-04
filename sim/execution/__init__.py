@@ -18,6 +18,7 @@ _PRIVATE_EXPORTS = {
     "run_sensitivity_runs": ("sim.execution.sensitivity", "run_sensitivity_runs"),
     "prepare_batch_run_configs": ("sim.execution.validation", "prepare_batch_run_configs"),
     "validate_generated_batch_configs": ("sim.execution.validation", "validate_generated_batch_configs"),
+    "run_covariance_analysis": ("sim.execution.covariance", "run_covariance_analysis"),
 }
 
 __all__ = [
@@ -29,6 +30,7 @@ __all__ = [
     "prepare_batch_run_configs",
     "prepare_sensitivity_runs",
     "run_config_campaign",
+    "run_covariance_analysis",
     "run_monte_carlo_campaign",
     "run_monte_carlo_runs",
     "run_serial_monte_carlo_runs",

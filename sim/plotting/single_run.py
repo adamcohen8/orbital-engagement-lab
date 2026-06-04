@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -9,14 +9,16 @@ import numpy as np
 from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2, EARTH_RADIUS_KM
 from sim.plotting.style import role_color, show_save_close_oel
 from sim.utils.figure_size import cap_figsize
-from sim.utils.frames import ric_dcm_ir_from_rv
+from sim.utils.frames import ric_dcm_ir_from_rv, ric_rect_to_curv
 from sim.utils.ground_track import ground_track_from_eci_history, split_ground_track_dateline
+from sim.utils.plot_windows import RIC_FOLLOW_MARGIN, windows_from_points
 from sim.utils.plotting import _draw_earth_sphere_3d
 from sim.utils.plotting_capabilities import _setup_ground_track_axes
 from sim.utils.quaternion import quaternion_to_dcm_bn
 
 ArrayMap = dict[str, np.ndarray]
 NestedArrayMap = dict[str, dict[str, np.ndarray]]
+RICSummaryFrame = Literal["rectangular", "curvilinear"]
 
 ORBITAL_ELEMENT_SPECS: dict[str, tuple[str, str]] = {
     "a": ("Semi-Major Axis", "km"),
@@ -146,16 +148,66 @@ def _choose_subject(
 
 
 def _ric_position(subject: np.ndarray, reference: np.ndarray) -> np.ndarray:
+    return _ric_relative_state(subject, reference)[:, :3]
+
+
+def _ric_relative_state(subject: np.ndarray, reference: np.ndarray) -> np.ndarray:
     n = min(subject.shape[0], reference.shape[0])
-    out = np.full((n, 3), np.nan, dtype=float)
+    out = np.full((n, 6), np.nan, dtype=float)
     for k in range(n):
         rv_ref = reference[k, :6]
         rv_sub = subject[k, :6]
         if not (np.all(np.isfinite(rv_ref)) and np.all(np.isfinite(rv_sub))):
             continue
         c_ir = ric_dcm_ir_from_rv(rv_ref[:3], rv_ref[3:6])
-        out[k, :] = c_ir.T @ (rv_sub[:3] - rv_ref[:3])
+        out[k, :3] = c_ir.T @ (rv_sub[:3] - rv_ref[:3])
+        out[k, 3:6] = c_ir.T @ (rv_sub[3:6] - rv_ref[3:6])
     return out
+
+
+def _ric_position_for_summary(subject: np.ndarray, reference: np.ndarray, *, frame: RICSummaryFrame) -> np.ndarray:
+    rect_state = _ric_relative_state(subject, reference)
+    if frame == "rectangular":
+        return rect_state[:, :3]
+    out = np.full((rect_state.shape[0], 3), np.nan, dtype=float)
+    for k in range(rect_state.shape[0]):
+        rv_ref = reference[k, :6]
+        x_rect = rect_state[k, :]
+        if not (np.all(np.isfinite(rv_ref)) and np.all(np.isfinite(x_rect))):
+            continue
+        out[k, :] = ric_rect_to_curv(x_rect, r0_km=float(np.linalg.norm(rv_ref[:3])))[:3]
+    return out
+
+
+def _ric_projection_axis_limits(
+    ric: np.ndarray,
+    *,
+    axis_indices: tuple[int, int],
+    keepout_radius_km: float | None = None,
+) -> tuple[tuple[float, float], tuple[float, float]]:
+    points: list[np.ndarray] = []
+    if ric.ndim == 2 and ric.shape[1] >= 3:
+        finite = ric[np.all(np.isfinite(ric[:, :3]), axis=1), :3]
+        points.extend(np.array(row, dtype=float) for row in finite)
+    if keepout_radius_km is not None and np.isfinite(float(keepout_radius_km)) and float(keepout_radius_km) > 0.0:
+        radius = float(keepout_radius_km)
+        for sign in (-1.0, 1.0):
+            point = np.zeros(3, dtype=float)
+            point[axis_indices[0]] = sign * radius
+            points.append(point)
+            point = np.zeros(3, dtype=float)
+            point[axis_indices[1]] = sign * radius
+            points.append(point)
+    min_span = 1.0
+    if keepout_radius_km is not None and np.isfinite(float(keepout_radius_km)) and float(keepout_radius_km) > 0.0:
+        min_span = max(min_span, 2.0 * float(keepout_radius_km))
+    xlim, ylim = windows_from_points(
+        points,
+        axis_indices=axis_indices,
+        min_span=min_span,
+        margin=RIC_FOLLOW_MARGIN,
+    )
+    return xlim, ylim
 
 
 def _finite_rows(arr: np.ndarray, cols: int = 3) -> np.ndarray:
@@ -164,7 +216,7 @@ def _finite_rows(arr: np.ndarray, cols: int = 3) -> np.ndarray:
     return np.all(np.isfinite(arr[:, :cols]), axis=1)
 
 
-def _set_equal_3d(ax: Any, points: list[np.ndarray]) -> None:
+def _set_equal_3d(ax: Any, points: list[np.ndarray], *, center_at_origin: bool = False) -> None:
     finite_parts = []
     for arr in points:
         a = np.array(arr, dtype=float)
@@ -179,11 +231,15 @@ def _set_equal_3d(ax: Any, points: list[np.ndarray]) -> None:
         ax.set_zlim(-lim, lim)
         return
     pts = np.vstack(finite_parts)
-    center = np.mean(pts, axis=0)
-    span = max(float(np.max(np.ptp(pts, axis=0))), 1.0)
-    half = 0.6 * span
-    if np.linalg.norm(center) < EARTH_RADIUS_KM * 1.1:
-        half = max(half, EARTH_RADIUS_KM * 1.15)
+    if center_at_origin:
+        center = np.zeros(3, dtype=float)
+        half = max(float(np.max(np.abs(pts[:, :3]))) * 1.08, EARTH_RADIUS_KM * 1.15, 1.0)
+    else:
+        center = np.mean(pts, axis=0)
+        span = max(float(np.max(np.ptp(pts, axis=0))), 1.0)
+        half = 0.6 * span
+        if np.linalg.norm(center) < EARTH_RADIUS_KM * 1.1:
+            half = max(half, EARTH_RADIUS_KM * 1.15)
     ax.set_xlim(center[0] - half, center[0] + half)
     ax.set_ylim(center[1] - half, center[1] + half)
     ax.set_zlim(center[2] - half, center[2] + half)
@@ -221,7 +277,7 @@ def _plot_eci_trajectories(ax: Any, truth_by_object: ArrayMap) -> None:
         ],
         dtype=float,
     )
-    _set_equal_3d(ax, plotted + [earth_extent])
+    _set_equal_3d(ax, plotted + [earth_extent], center_at_origin=True)
     ax.set_xlabel("ECI x (km)")
     ax.set_ylabel("ECI y (km)")
     ax.set_zlabel("ECI z (km)")
@@ -870,19 +926,33 @@ def plot_rendezvous_summary(
     *,
     t_s: np.ndarray | None = None,
     truth_by_object: ArrayMap | None = None,
+    thrust_by_object: ArrayMap | None = None,
     target_reference_orbit_truth: np.ndarray | None = None,
     reference_object_id: str | None = None,
     object_id: str | None = None,
     keepout_radius_km: float | None = None,
+    ric_frame: RICSummaryFrame = "rectangular",
+    combine_range_speed: bool = False,
+    include_delta_v: bool = False,
     out_path: str | Path | None = None,
     show: bool = False,
     close: bool = False,
     dpi: int = 150,
 ) -> plt.Figure:
+    frame_key = str(ric_frame or "rectangular").strip().lower()
+    if frame_key in {"rect", "rectangular", "ric_rect"}:
+        summary_frame: RICSummaryFrame = "rectangular"
+    elif frame_key in {"curv", "curvilinear", "ric_curv"}:
+        summary_frame = "curvilinear"
+    else:
+        raise ValueError("ric_frame must be one of: rectangular, curvilinear.")
+    if include_delta_v and not combine_range_speed:
+        combine_range_speed = True
     if payload is not None:
-        t_s, truth_by_object, _, _, _, target_reference_orbit_truth = _payload_arrays(payload)
+        t_s, truth_by_object, thrust_by_object, _, _, target_reference_orbit_truth = _payload_arrays(payload)
     t = np.array([] if t_s is None else t_s, dtype=float).reshape(-1)
     truth = dict(truth_by_object or {})
+    thrust = dict(thrust_by_object or {})
     ref_id, ref = _choose_reference(truth, target_reference_orbit_truth, reference_object_id)
     subj_id, subj = _choose_subject(truth, ref_id, object_id)
 
@@ -895,11 +965,11 @@ def plot_rendezvous_summary(
         return fig
 
     n = min(subj.shape[0], ref.shape[0], t.size)
-    ric = _ric_position(subj[:n, :], ref[:n, :])
     rel = subj[:n, :3] - ref[:n, :3]
     rel_v = subj[:n, 3:6] - ref[:n, 3:6]
     rng = np.linalg.norm(rel, axis=1)
     spd = np.linalg.norm(rel_v, axis=1)
+    ric = _ric_position_for_summary(subj[:n, :], ref[:n, :], frame=summary_frame)
 
     planes = ((1, 0, "I", "R"), (1, 2, "I", "C"), (2, 0, "C", "R"))
     for ax, (ix, iy, xlab, ylab) in zip(axes[0], planes):
@@ -929,32 +999,88 @@ def plot_rendezvous_summary(
         ax.set_ylabel(f"{ylab} (km)")
         ax.set_title(f"{xlab}-{ylab} Projection")
         ax.grid(True, alpha=0.3)
-        ax.axis("equal")
+        xlim, ylim = _ric_projection_axis_limits(
+            ric,
+            axis_indices=(ix, iy),
+            keepout_radius_km=keepout_radius_km,
+        )
+        ax.set_xlim(*xlim)
+        ax.set_ylim(*ylim)
 
-    axes[1, 0].plot(t[:n], rng, color=role_color("actual"))
-    axes[1, 0].set_title("Relative Range")
-    axes[1, 0].set_ylabel("km")
+    if combine_range_speed:
+        ax_range = axes[1, 0]
+        ax_speed = ax_range.twinx()
+        ax_range.plot(t[:n], rng, color=role_color("actual"), label="range")
+        ax_speed.plot(t[:n], spd, color=role_color("chaser"), label="speed")
+        ax_range.set_title("Relative Range and Speed")
+        ax_range.set_ylabel("range (km)")
+        ax_speed.set_ylabel("speed (km/s)")
+        ax_speed.grid(False)
+        handles_1, labels_1 = ax_range.get_legend_handles_labels()
+        handles_2, labels_2 = ax_speed.get_legend_handles_labels()
+        ax_range.legend(handles_1 + handles_2, labels_1 + labels_2, loc="best")
+    else:
+        axes[1, 0].plot(t[:n], rng, color=role_color("actual"))
+        axes[1, 0].set_title("Relative Range")
+        axes[1, 0].set_ylabel("km")
     axes[1, 0].set_xlabel("time (s)")
     axes[1, 0].grid(True, alpha=0.3)
 
-    axes[1, 1].plot(t[:n], spd, color=role_color("chaser"))
-    axes[1, 1].set_title("Relative Speed")
-    axes[1, 1].set_ylabel("km/s")
-    axes[1, 1].set_xlabel("time (s)")
-    axes[1, 1].grid(True, alpha=0.3)
+    component_ax = axes[1, 1] if combine_range_speed else axes[1, 2]
+    if not combine_range_speed:
+        axes[1, 1].plot(t[:n], spd, color=role_color("chaser"))
+        axes[1, 1].set_title("Relative Speed")
+        axes[1, 1].set_ylabel("km/s")
+        axes[1, 1].set_xlabel("time (s)")
+        axes[1, 1].grid(True, alpha=0.3)
 
     for i, label in enumerate(("R", "I", "C")):
-        axes[1, 2].plot(t[:n], ric[:, i], label=label)
-    axes[1, 2].set_title("RIC Components")
-    axes[1, 2].set_ylabel("km")
-    axes[1, 2].set_xlabel("time (s)")
-    axes[1, 2].grid(True, alpha=0.3)
-    axes[1, 2].legend(loc="best")
+        component_ax.plot(t[:n], ric[:, i], label=label)
+    frame_label = "Curvilinear RIC" if summary_frame == "curvilinear" else "RIC"
+    component_ax.set_title(f"{frame_label} Components")
+    component_ax.set_ylabel("km")
+    component_ax.set_xlabel("time (s)")
+    component_ax.grid(True, alpha=0.3)
+    component_ax.legend(loc="best")
 
-    fig.suptitle(f"Rendezvous Summary ({subj_id} vs {ref_id})")
+    if include_delta_v:
+        ax_dv = axes[1, 2]
+        plotted_dv = False
+        for oid in [str(subj_id or ""), str(ref_id or "")]:
+            if not oid or oid not in thrust:
+                continue
+            u = thrust.get(oid)
+            if u is None or u.ndim != 2 or u.shape[1] < 3:
+                continue
+            n_u = min(u.shape[0], t.size)
+            if n_u <= 0:
+                continue
+            ax_dv.plot(t[:n_u], _cumulative_delta_v_m_s(t[:n_u], u[:n_u, :3]), label=oid)
+            plotted_dv = True
+        if not plotted_dv:
+            ax_dv.text(0.5, 0.5, "No thrust history available", ha="center", va="center", transform=ax_dv.transAxes)
+        ax_dv.set_title("Cumulative Delta-V")
+        ax_dv.set_ylabel("m/s")
+        ax_dv.set_xlabel("time (s)")
+        ax_dv.grid(True, alpha=0.3)
+        if plotted_dv:
+            ax_dv.legend(loc="best")
+
+    title = "Curvilinear Rendezvous Summary" if summary_frame == "curvilinear" else "Rendezvous Summary"
+    fig.suptitle(f"{title} ({subj_id} vs {ref_id})")
     fig.tight_layout()
     _save_show_close(fig, out_path=out_path, show=show, close=close, dpi=dpi)
     return fig
+
+
+def plot_rendezvous_summary_curvilinear(
+    payload: dict[str, Any] | None = None,
+    **kwargs: Any,
+) -> plt.Figure:
+    kwargs.setdefault("ric_frame", "curvilinear")
+    kwargs.setdefault("combine_range_speed", True)
+    kwargs.setdefault("include_delta_v", True)
+    return plot_rendezvous_summary(payload, **kwargs)
 
 
 def plot_control_effort(

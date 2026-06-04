@@ -416,6 +416,54 @@ class SensitivitySection:
 
 
 @dataclass(frozen=True)
+class CovarianceObjectSection:
+    enabled: bool = True
+    frame: str = "eci"
+    covariance: list[list[float]] = field(default_factory=list)
+    diagonal: list[float] = field(default_factory=list)
+    position_sigma_km: float | None = None
+    velocity_sigma_km_s: float | None = None
+
+
+@dataclass(frozen=True)
+class CovarianceCollisionScreeningSection:
+    enabled: bool = False
+    hard_body_radius_km: float = 0.01
+    method: str = "small_object"
+
+
+@dataclass(frozen=True)
+class CovariancePairSection:
+    deputy_id: str
+    chief_id: str
+    collision_screening: CovarianceCollisionScreeningSection = field(
+        default_factory=CovarianceCollisionScreeningSection
+    )
+
+
+@dataclass(frozen=True)
+class CovarianceFiniteDifferenceSection:
+    position_step_km: float = 1e-3
+    velocity_step_km_s: float = 1e-6
+
+
+@dataclass(frozen=True)
+class CovarianceProcessNoiseSection:
+    enabled: bool = False
+    acceleration_sigma_km_s2: float = 0.0
+
+
+@dataclass(frozen=True)
+class CovarianceSection:
+    enabled: bool = True
+    objects: dict[str, CovarianceObjectSection] = field(default_factory=dict)
+    pairs: list[CovariancePairSection] = field(default_factory=list)
+    finite_difference: CovarianceFiniteDifferenceSection = field(default_factory=CovarianceFiniteDifferenceSection)
+    process_noise: CovarianceProcessNoiseSection = field(default_factory=CovarianceProcessNoiseSection)
+    write_review_tables: bool = True
+
+
+@dataclass(frozen=True)
 class AnalysisSection:
     enabled: bool = False
     study_type: str = "monte_carlo"
@@ -424,6 +472,7 @@ class AnalysisSection:
     baseline: AnalysisBaselineSection = field(default_factory=AnalysisBaselineSection)
     monte_carlo: AnalysisMonteCarloSection = field(default_factory=AnalysisMonteCarloSection)
     sensitivity: SensitivitySection = field(default_factory=SensitivitySection)
+    covariance: CovarianceSection = field(default_factory=CovarianceSection)
 
 
 @dataclass(frozen=True)
@@ -1260,6 +1309,153 @@ def _parse_sensitivity_section(value: Any) -> SensitivitySection:
     return out
 
 
+def _parse_covariance_matrix(value: Any, field_name: str) -> list[list[float]]:
+    if value in (None, "", []):
+        return []
+    if not isinstance(value, list) or len(value) != 6:
+        raise ValueError(f"{field_name} must be a 6x6 list.")
+    rows: list[list[float]] = []
+    for i, row_raw in enumerate(value):
+        if not isinstance(row_raw, list) or len(row_raw) != 6:
+            raise ValueError(f"{field_name}[{i}] must contain 6 values.")
+        rows.append([_parse_float(item, f"{field_name}[{i}]") for item in row_raw])
+    return rows
+
+
+def _parse_covariance_diagonal(value: Any, field_name: str) -> list[float]:
+    if value in (None, "", []):
+        return []
+    if not isinstance(value, list) or len(value) != 6:
+        raise ValueError(f"{field_name} must contain 6 values.")
+    out = [_parse_float(item, f"{field_name}[{i}]") for i, item in enumerate(value)]
+    if any(item < 0.0 for item in out):
+        raise ValueError(f"{field_name} values must be >= 0.")
+    return out
+
+
+def _parse_covariance_object_section(value: Any, path: str) -> CovarianceObjectSection:
+    d = _as_dict(value, path)
+    frame = str(d.get("frame", "eci") or "eci").strip().lower()
+    if frame != "eci":
+        raise ValueError(f"{path}.frame must be 'eci' for covariance analysis v0.")
+    matrix_raw = d.get("covariance", d.get("matrix"))
+    diagonal_raw = d.get("diagonal")
+    if isinstance(matrix_raw, dict):
+        diagonal_raw = matrix_raw.get("diagonal", diagonal_raw)
+        matrix_raw = matrix_raw.get("matrix")
+    covariance = _parse_covariance_matrix(matrix_raw, f"{path}.covariance")
+    diagonal = _parse_covariance_diagonal(diagonal_raw, f"{path}.diagonal")
+    position_sigma = _parse_optional_float(d.get("position_sigma_km"), f"{path}.position_sigma_km")
+    velocity_sigma = _parse_optional_float(d.get("velocity_sigma_km_s"), f"{path}.velocity_sigma_km_s")
+    if position_sigma is not None and position_sigma < 0.0:
+        raise ValueError(f"{path}.position_sigma_km must be >= 0.")
+    if velocity_sigma is not None and velocity_sigma < 0.0:
+        raise ValueError(f"{path}.velocity_sigma_km_s must be >= 0.")
+    enabled = _parse_bool(d.get("enabled", True), f"{path}.enabled")
+    if enabled and not covariance and not diagonal and position_sigma is None and velocity_sigma is None:
+        raise ValueError(f"{path} must define covariance, diagonal, position_sigma_km, or velocity_sigma_km_s.")
+    return CovarianceObjectSection(
+        enabled=enabled,
+        frame=frame,
+        covariance=covariance,
+        diagonal=diagonal,
+        position_sigma_km=position_sigma,
+        velocity_sigma_km_s=velocity_sigma,
+    )
+
+
+def _parse_covariance_collision_screening_section(value: Any, path: str) -> CovarianceCollisionScreeningSection:
+    if isinstance(value, bool):
+        d: dict[str, Any] = {"enabled": value}
+    else:
+        d = _as_dict(value, path)
+    enabled = _parse_bool(d.get("enabled", False), f"{path}.enabled")
+    method = str(d.get("method", "small_object") or "small_object").strip().lower()
+    if method not in {"small_object"}:
+        raise ValueError(f"{path}.method must be 'small_object'.")
+    radius_km_raw = d.get("hard_body_radius_km")
+    radius_m_raw = d.get("hard_body_radius_m")
+    if radius_km_raw is not None and radius_m_raw is not None:
+        raise ValueError(f"{path} must define only one of hard_body_radius_km or hard_body_radius_m.")
+    if radius_km_raw is not None:
+        radius_km = _parse_float(radius_km_raw, f"{path}.hard_body_radius_km")
+    elif radius_m_raw is not None:
+        radius_km = _parse_float(radius_m_raw, f"{path}.hard_body_radius_m") / 1000.0
+    else:
+        radius_km = 0.01
+    if radius_km <= 0.0:
+        raise ValueError(f"{path}.hard_body_radius must be positive.")
+    return CovarianceCollisionScreeningSection(
+        enabled=enabled,
+        hard_body_radius_km=radius_km,
+        method=method,
+    )
+
+
+def _parse_covariance_pair_section(value: Any, index: int) -> CovariancePairSection:
+    d = _as_dict(value, f"analysis.covariance.pairs[{index}]")
+    deputy = str(d.get("deputy_id", d.get("deputy", "")) or "").strip()
+    chief = str(d.get("chief_id", d.get("chief", "")) or "").strip()
+    if not deputy:
+        raise ValueError(f"analysis.covariance.pairs[{index}].deputy_id is required.")
+    if not chief:
+        raise ValueError(f"analysis.covariance.pairs[{index}].chief_id is required.")
+    if deputy == chief:
+        raise ValueError(f"analysis.covariance.pairs[{index}] deputy_id and chief_id must differ.")
+    collision = _parse_covariance_collision_screening_section(
+        d.get("collision_screening", d.get("conjunction_screening")),
+        f"analysis.covariance.pairs[{index}].collision_screening",
+    )
+    return CovariancePairSection(deputy_id=deputy, chief_id=chief, collision_screening=collision)
+
+
+def _parse_covariance_section(value: Any) -> CovarianceSection:
+    d = _as_dict(value, "analysis.covariance")
+    objects_raw = d.get("objects", {}) or {}
+    if not isinstance(objects_raw, dict):
+        raise ValueError("analysis.covariance.objects must be a mapping.")
+    pairs_raw = d.get("pairs", []) or []
+    if not isinstance(pairs_raw, list):
+        raise ValueError("analysis.covariance.pairs must be a list.")
+    fd = _as_dict(d.get("finite_difference"), "analysis.covariance.finite_difference")
+    pos_step = _parse_float(
+        fd.get("position_step_km", 1e-3),
+        "analysis.covariance.finite_difference.position_step_km",
+    )
+    vel_step = _parse_float(
+        fd.get("velocity_step_km_s", 1e-6),
+        "analysis.covariance.finite_difference.velocity_step_km_s",
+    )
+    if pos_step <= 0.0:
+        raise ValueError("analysis.covariance.finite_difference.position_step_km must be positive.")
+    if vel_step <= 0.0:
+        raise ValueError("analysis.covariance.finite_difference.velocity_step_km_s must be positive.")
+    process_noise = _as_dict(d.get("process_noise"), "analysis.covariance.process_noise")
+    accel_sigma = _parse_float(
+        process_noise.get("acceleration_sigma_km_s2", 0.0),
+        "analysis.covariance.process_noise.acceleration_sigma_km_s2",
+    )
+    if accel_sigma < 0.0:
+        raise ValueError("analysis.covariance.process_noise.acceleration_sigma_km_s2 must be >= 0.")
+    return CovarianceSection(
+        enabled=_parse_bool(d.get("enabled", True), "analysis.covariance.enabled"),
+        objects={
+            str(object_id): _parse_covariance_object_section(obj, f"analysis.covariance.objects.{object_id}")
+            for object_id, obj in objects_raw.items()
+        },
+        pairs=[_parse_covariance_pair_section(pair, idx) for idx, pair in enumerate(pairs_raw)],
+        finite_difference=CovarianceFiniteDifferenceSection(
+            position_step_km=pos_step,
+            velocity_step_km_s=vel_step,
+        ),
+        process_noise=CovarianceProcessNoiseSection(
+            enabled=_parse_bool(process_noise.get("enabled", False), "analysis.covariance.process_noise.enabled"),
+            acceleration_sigma_km_s2=accel_sigma,
+        ),
+        write_review_tables=_parse_bool(d.get("write_review_tables", True), "analysis.covariance.write_review_tables"),
+    )
+
+
 def _parse_analysis_section(value: Any, *, legacy_mc: MonteCarloSection) -> AnalysisSection:
     d = _as_dict(value, "analysis")
     metrics = d.get("metrics", []) or []
@@ -1273,9 +1469,12 @@ def _parse_analysis_section(value: Any, *, legacy_mc: MonteCarloSection) -> Anal
         baseline=_parse_analysis_baseline_section(d.get("baseline")),
         monte_carlo=_parse_analysis_monte_carlo_section(d.get("monte_carlo"), fallback=legacy_mc),
         sensitivity=_parse_sensitivity_section(d.get("sensitivity")),
+        covariance=_parse_covariance_section(d.get("covariance")),
     )
-    if out.study_type not in {"monte_carlo", "sensitivity"}:
-        raise ValueError("analysis.study_type must be one of: monte_carlo, sensitivity.")
+    if out.study_type not in {"monte_carlo", "sensitivity", "covariance"}:
+        raise ValueError("analysis.study_type must be one of: monte_carlo, sensitivity, covariance.")
+    if out.enabled and out.study_type == "covariance" and not out.covariance.objects:
+        raise ValueError("analysis.covariance.objects must define at least one object when study_type is covariance.")
     return out
 
 
@@ -1309,7 +1508,7 @@ def _normalize_analysis_and_monte_carlo(
             variations=list(analysis.monte_carlo.variations),
         )
         return normalized_mc, analysis
-    if analysis.enabled and analysis.study_type == "sensitivity":
+    if analysis.enabled and analysis.study_type in {"sensitivity", "covariance"}:
         normalized_mc = MonteCarloSection(
             enabled=False,
             iterations=max(int(legacy_mc.iterations), 1),

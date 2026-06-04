@@ -36,6 +36,7 @@ def _private_bridge_figure_ids() -> list[str]:
 AVAILABLE_FIGURE_IDS = [
     "run_dashboard",
     "rendezvous_summary",
+    "rendezvous_summary_curvilinear",
     "orbit_eci",
     "orbital_element_a",
     "orbital_element_ecc",
@@ -57,7 +58,9 @@ AVAILABLE_FIGURE_IDS = [
     "trajectory_ric_rect_multi",
     "trajectory_ric_curv_multi",
     "trajectory_ric_rect_2d_multi",
+    "trajectory_ric_rect_2d_multi_target_burns",
     "trajectory_ric_curv_2d_multi",
+    "trajectory_ric_curv_2d_multi_target_burns",
     "attitude",
     "quaternion_eci",
     "quaternion_ric",
@@ -572,6 +575,7 @@ def _plot_outputs_impl(
         for fid in (
             "run_dashboard",
             "rendezvous_summary",
+            "rendezvous_summary_curvilinear",
             "control_effort",
             "estimation_error",
             "estimation_error_components",
@@ -611,6 +615,7 @@ def _plot_outputs_impl(
             plot_reentry_summary,
             plot_reentry_thermal,
             plot_rendezvous_summary,
+            plot_rendezvous_summary_curvilinear,
             plot_run_dashboard,
             plot_sensor_access,
         )
@@ -653,6 +658,24 @@ def _plot_outputs_impl(
         )
         if save_enabled:
             out["rendezvous_summary"] = str(p)
+
+    if "rendezvous_summary_curvilinear" in figure_ids:
+        p = outdir / "rendezvous_summary_curvilinear.png"
+        keepout_radius = cfg.outputs.plots.get("keepout_radius_km")
+        plot_rendezvous_summary_curvilinear(
+            t_s=t_s,
+            truth_by_object=truth_hist,
+            thrust_by_object=thrust_hist,
+            target_reference_orbit_truth=target_reference_orbit_truth,
+            reference_object_id=reference_object_id or None,
+            keepout_radius_km=None if keepout_radius is None else float(keepout_radius),
+            out_path=p if save_enabled else None,
+            show=show,
+            close=close,
+            dpi=dpi,
+        )
+        if save_enabled:
+            out["rendezvous_summary_curvilinear"] = str(p)
 
     if "control_effort" in figure_ids:
         p = outdir / "control_effort.png"
@@ -1048,6 +1071,27 @@ def _plot_outputs_impl(
         )
         if mode in ("save", "both"):
             out["trajectory_ric_rect_2d_multi"] = str(p)
+    if "trajectory_ric_rect_2d_multi_target_burns" in figure_ids and reference_truth is not None:
+        p = outdir / "trajectory_ric_rect_2d_multi_target_burns.png"
+        burn_marker_object_ids = [
+            str(oid)
+            for oid in list(cfg.outputs.plots.get("burn_marker_object_ids", ["target"]) or ["target"])
+            if str(oid).strip()
+        ]
+        plot_multi_ric_2d_projections(
+            t_s,
+            ric_truth_hist,
+            frame="ric_rect",
+            reference_truth_hist=reference_truth,
+            reference_label=reference_object_label,
+            burn_marker_by_object=thrust_hist,
+            burn_marker_object_ids=burn_marker_object_ids,
+            planes=ric_2d_planes,
+            mode=mode,
+            out_path=str(p),
+        )
+        if mode in ("save", "both"):
+            out["trajectory_ric_rect_2d_multi_target_burns"] = str(p)
     if "trajectory_ric_curv_2d_multi" in figure_ids and reference_truth is not None:
         p = outdir / "trajectory_ric_curv_2d_multi.png"
         plot_multi_ric_2d_projections(
@@ -1062,6 +1106,27 @@ def _plot_outputs_impl(
         )
         if mode in ("save", "both"):
             out["trajectory_ric_curv_2d_multi"] = str(p)
+    if "trajectory_ric_curv_2d_multi_target_burns" in figure_ids and reference_truth is not None:
+        p = outdir / "trajectory_ric_curv_2d_multi_target_burns.png"
+        burn_marker_object_ids = [
+            str(oid)
+            for oid in list(cfg.outputs.plots.get("burn_marker_object_ids", ["target"]) or ["target"])
+            if str(oid).strip()
+        ]
+        plot_multi_ric_2d_projections(
+            t_s,
+            ric_truth_hist,
+            frame="ric_curv",
+            reference_truth_hist=reference_truth,
+            reference_label=reference_object_label,
+            burn_marker_by_object=thrust_hist,
+            burn_marker_object_ids=burn_marker_object_ids,
+            planes=ric_2d_planes,
+            mode=mode,
+            out_path=str(p),
+        )
+        if mode in ("save", "both"):
+            out["trajectory_ric_curv_2d_multi_target_burns"] = str(p)
 
     for oid, hist in truth_hist.items():
         if not np.any(np.isfinite(hist[:, 0])):
