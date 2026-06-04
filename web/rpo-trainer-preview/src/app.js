@@ -10,13 +10,20 @@ const TUTORIAL_TARGET_PATH_POINTS = 181;
 const SPEED_OPTIONS = [1, 2, 5, 10, 25, 50, 100, 200];
 const MANEUVER_CONTROL_SPEED = 10;
 const TRAIL_LIMIT = 1200;
-const BUILD_ID = "sandbox-input-2026-06-04-2";
+const MIN_PLOT_SPAN_KM = 0.005;
+const PLOT_SCALE_MARGIN = 1.2;
+const BUILD_ID = "sandbox-panel-2026-06-04";
+const MUSIC_TRACKS = {
+  tutorial: "./assets/10_training_grid_sunrise.wav",
+  sandbox: "./assets/04_docking_bay_neon.wav",
+};
 
 const el = {
   tutorialMode: document.querySelector("#tutorialMode"),
   sandboxMode: document.querySelector("#sandboxMode"),
   pauseButton: document.querySelector("#pauseButton"),
   resetButton: document.querySelector("#resetButton"),
+  musicButton: document.querySelector("#musicButton"),
   modeLabel: document.querySelector("#modeLabel"),
   objectiveTitle: document.querySelector("#objectiveTitle"),
   objectiveText: document.querySelector("#objectiveText"),
@@ -138,7 +145,35 @@ const state = {
   finalReason: "",
   lastFrameMs: 0,
   stepAccumulatorS: 0,
+  cameraRuleMode: "full_trajectory",
+  musicEnabled: true,
+  musicStartRequested: false,
 };
+
+const music = createMusicPlayer(MUSIC_TRACKS.tutorial);
+music.loop = true;
+music.volume = 0.65;
+
+function createMusicPlayer(src) {
+  if (typeof Audio === "function") {
+    return new Audio(src);
+  }
+  return {
+    currentSrc: "",
+    loop: false,
+    paused: true,
+    src: new URL(src, window.location.href).href,
+    volume: 0,
+    load() {},
+    pause() {
+      this.paused = true;
+    },
+    play() {
+      this.paused = false;
+      return Promise.resolve();
+    },
+  };
+}
 
 function makeState(seed) {
   return {
@@ -188,13 +223,14 @@ function setMode(mode) {
   state.mode = mode;
   state.running = false;
   state.speedIndex = 0;
+  state.cameraRuleMode = mode === "sandbox" ? "full_trajectory" : "default";
+  setMusicTrackForMode(mode);
   state.activeStage = 0;
   state.stageStart = null;
   state.stageDv = 0;
   state.passed = false;
   el.tutorialMode.classList.toggle("active", mode === "tutorial");
   el.sandboxMode.classList.toggle("active", mode === "sandbox");
-  el.sandboxPanel.classList.toggle("hidden", mode !== "sandbox");
   resetState(mode === "tutorial" ? presets.behind : sandboxSeed());
   updateMissionText();
 }
@@ -373,14 +409,65 @@ function updateMissionText() {
   if (state.mode === "sandbox") {
     el.levelLabel.textContent = "RPO SANDBOX";
     el.objectiveTitle.textContent = "Free Flight";
-    el.objectiveText.textContent = "Try short RIC pulses, coast, reset, and compare the RI and RC traces.";
+    if (el.objectiveText) {
+      el.objectiveText.textContent = "Try short RIC pulses, coast, reset, and compare the RI and RC traces.";
+    }
   } else {
     el.levelLabel.textContent = "LEVEL 0 - TUTORIAL";
     const stage = tutorialStages[state.activeStage] || tutorialStages[tutorialStages.length - 1];
     el.objectiveTitle.textContent = stage.title;
-    el.objectiveText.textContent = stage.text;
+    if (el.objectiveText) {
+      el.objectiveText.textContent = stage.text;
+    }
   }
   el.pauseButton.textContent = state.running ? "Pause" : "Start";
+  el.sandboxPanel.classList.toggle("hidden", state.mode !== "sandbox" || state.running);
+  syncMusicButton();
+}
+
+function syncMusicButton() {
+  el.musicButton.textContent = state.musicEnabled ? "M Music: ON" : "M Music: OFF";
+  el.musicButton.classList.toggle("active", state.musicEnabled);
+  el.musicButton.setAttribute("aria-pressed", String(state.musicEnabled));
+}
+
+function playMusicFromGesture() {
+  if (!state.musicEnabled || !music.paused) return;
+  state.musicStartRequested = true;
+  music.play().catch(() => {
+    // Browser audio policies require a click or key press; the next gesture will retry.
+  });
+}
+
+function setMusicTrackForMode(mode) {
+  const nextSrc = new URL(MUSIC_TRACKS[mode] || MUSIC_TRACKS.tutorial, window.location.href).href;
+  if (music.currentSrc === nextSrc || music.src === nextSrc) return;
+  const shouldResume = state.musicEnabled && state.musicStartRequested && !music.paused;
+  music.pause();
+  music.src = nextSrc;
+  music.load();
+  if (shouldResume) {
+    playMusicFromGesture();
+  }
+}
+
+function toggleMusic() {
+  if (state.musicEnabled && music.paused && !state.musicStartRequested) {
+    playMusicFromGesture();
+    syncMusicButton();
+    return;
+  }
+  state.musicEnabled = !state.musicEnabled;
+  if (state.musicEnabled) {
+    playMusicFromGesture();
+  } else {
+    music.pause();
+  }
+  syncMusicButton();
+}
+
+function isNativeControlTarget(target) {
+  return target instanceof Element && Boolean(target.closest("a, button, input, select, textarea"));
 }
 
 function updateGhost() {
@@ -465,6 +552,8 @@ function updateDebugState() {
     running: state.running,
     activeStage: state.activeStage,
     speedMultiple: currentSpeedMultiple(),
+    cameraRuleMode: state.cameraRuleMode,
+    musicSrc: music.currentSrc || music.src,
     controls: currentControls(),
     sim: { ...state.sim },
     livePredictionSeed: livePredictionSeed(),
@@ -499,7 +588,8 @@ function updateHud() {
 
 function currentCoachHint() {
   if (state.mode === "sandbox") {
-    return "Use small pulses, then coast and watch the target-centered RIC motion.";
+    const label = state.cameraRuleMode === "full_trajectory" ? "Full Trajectory" : "Satellites Only";
+    return `Use small pulses, then coast and watch the target-centered RIC motion. C Camera: ${label}.`;
   }
   const stage = tutorialStages[state.activeStage] || tutorialStages[tutorialStages.length - 1];
   if (stage.final) {
@@ -515,7 +605,8 @@ function currentCoachHint() {
 function commandStatusLine() {
   const u = currentControls();
   const simState = state.running ? "RUNNING" : "PAUSED";
-  return `W/S Radial +/-R  A/D In-Track +/-I  Left/Right Cross-Track +/-C  M Music   ${simState}  R=${u.r.toFixed(
+  const camera = state.mode === "sandbox" ? "  C Camera" : "";
+  return `W/S Radial +/-R  A/D In-Track +/-I  Left/Right Cross-Track +/-C${camera}  M Music   ${simState}  R=${u.r.toFixed(
     0,
   )} I=${u.i.toFixed(0)} C=${u.c.toFixed(0)} Throttle=1.00`;
 }
@@ -575,6 +666,9 @@ function fitCanvas(canvas) {
 }
 
 function cameraCenterFor(xAxis, yAxis) {
+  if (state.mode === "sandbox" && new Set([xAxis, yAxis]).has("r")) {
+    return { r: 0, i: 0, c: 0 };
+  }
   if (new Set([xAxis, yAxis]).has("c") && new Set([xAxis, yAxis]).has("r")) {
     return { r: 0, i: 0, c: 0 };
   }
@@ -586,7 +680,10 @@ function cameraCenterFor(xAxis, yAxis) {
 }
 
 function plotScale(width, height, xAxis, yAxis, cameraCenter) {
-  const values = [...state.trail, ...state.ghost, ...state.tutorialTargetPath, { r: 0, i: 0, c: 0 }];
+  const values =
+    state.mode === "sandbox" && state.cameraRuleMode === "current_pair"
+      ? [state.sim, { r: 0, i: 0, c: 0 }]
+      : [...state.trail, ...state.ghost, ...state.tutorialTargetPath, { r: 0, i: 0, c: 0 }];
   if (state.mode === "tutorial") values.push({ r: 0.25, i: 0.25, c: 0.25 });
   const span = values.reduce(
     (max, p) =>
@@ -595,9 +692,9 @@ function plotScale(width, height, xAxis, yAxis, cameraCenter) {
         Math.abs((p[xAxis] || 0) - (cameraCenter[xAxis] || 0)),
         Math.abs((p[yAxis] || 0) - (cameraCenter[yAxis] || 0)),
       ),
-    0.35,
+    MIN_PLOT_SPAN_KM,
   );
-  const padded = Math.max(span * 1.25, 0.35);
+  const padded = Math.max(span * PLOT_SCALE_MARGIN, MIN_PLOT_SPAN_KM);
   return Math.min(width, height) / (2 * padded);
 }
 
@@ -747,13 +844,28 @@ function frame(nowMs) {
   }
   updateGhost();
   draw();
-  requestAnimationFrame(frame);
+  queueFrame(frame);
+}
+
+function queueFrame(callback) {
+  if (typeof window.requestAnimationFrame === "function") {
+    window.requestAnimationFrame(callback);
+    return;
+  }
+  window.setTimeout(() => callback(Date.now()), 16);
 }
 
 function togglePause() {
   if (state.passed) return;
   state.running = !state.running;
   updateMissionText();
+}
+
+function toggleCameraRuleMode() {
+  if (state.mode !== "sandbox") return;
+  state.cameraRuleMode = state.cameraRuleMode === "full_trajectory" ? "current_pair" : "full_trajectory";
+  updateGhost();
+  draw();
 }
 
 function resetCurrent() {
@@ -770,9 +882,21 @@ function resetCurrent() {
 
 function bindEvents() {
   document.addEventListener("keydown", (event) => {
+    if (isNativeControlTarget(event.target)) return;
     const key = event.key.toLowerCase();
-    if (["w", "a", "s", "d", "arrowleft", "arrowright", "arrowup", "arrowdown", " ", "r"].includes(key)) {
+    if (["w", "a", "s", "d", "arrowleft", "arrowright", "arrowup", "arrowdown", " ", "r", "m", "c"].includes(key)) {
       event.preventDefault();
+    }
+    if (key === "m") {
+      toggleMusic();
+      return;
+    }
+    if (key === "c" && state.mode === "sandbox") {
+      playMusicFromGesture();
+      toggleCameraRuleMode();
+      return;
+    } else {
+      playMusicFromGesture();
     }
     if (key === " ") togglePause();
     else if (key === "r") resetCurrent();
@@ -789,13 +913,16 @@ function bindEvents() {
     if (key === "arrowup" || key === "arrowdown" || key === " " || key === "r") refreshInputState();
   });
   document.addEventListener("keyup", (event) => {
-    keys.delete(event.key.toLowerCase());
-    refreshInputState();
+    const key = event.key.toLowerCase();
+    if (keys.delete(key) || ["w", "a", "s", "d", "arrowleft", "arrowright"].includes(key)) {
+      refreshInputState();
+    }
   });
   document.querySelectorAll("[data-touch]").forEach((button) => {
     const value = button.dataset.touch;
     const start = (event) => {
       event.preventDefault();
+      playMusicFromGesture();
       touch.add(value);
       refreshInputState();
     };
@@ -808,16 +935,31 @@ function bindEvents() {
     button.addEventListener("pointerleave", stop);
     button.addEventListener("pointercancel", stop);
   });
-  el.pauseButton.addEventListener("click", togglePause);
-  el.resetButton.addEventListener("click", resetCurrent);
-  el.tutorialMode.addEventListener("click", () => setMode("tutorial"));
-  el.sandboxMode.addEventListener("click", () => setMode("sandbox"));
+  el.pauseButton.addEventListener("click", () => {
+    playMusicFromGesture();
+    togglePause();
+  });
+  el.resetButton.addEventListener("click", () => {
+    playMusicFromGesture();
+    resetCurrent();
+  });
+  el.tutorialMode.addEventListener("click", () => {
+    setMode("tutorial");
+    playMusicFromGesture();
+  });
+  el.sandboxMode.addEventListener("click", () => {
+    setMode("sandbox");
+    playMusicFromGesture();
+  });
+  el.musicButton.addEventListener("click", toggleMusic);
   el.applySandbox.addEventListener("click", () => {
+    playMusicFromGesture();
     resetState(sandboxSeed());
     state.running = false;
     updateMissionText();
   });
   el.randomSandbox.addEventListener("click", () => {
+    playMusicFromGesture();
     resetState(randomSandboxSeed());
     state.running = false;
     updateMissionText();
@@ -827,4 +969,4 @@ function bindEvents() {
 
 bindEvents();
 setMode("tutorial");
-requestAnimationFrame(frame);
+queueFrame(frame);

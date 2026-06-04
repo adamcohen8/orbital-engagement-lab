@@ -6,6 +6,37 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.10.2 - 2026-06-04
+
+Release thesis: `v0.10.2` polishes the web-hosted RPO Trainer Preview for
+public launch by bringing sandbox camera behavior, tutorial/sandbox music, and
+static-site smoke coverage closer to the downloaded game experience.
+
+### Added
+
+- Added browser-started tutorial and sandbox music to the web RPO Trainer
+  Preview, with `M` key and HUD button controls.
+- Added a public GitHub Pages smoke step that checks the static preview shell,
+  JavaScript, CSS, and bundled music assets before deployment.
+
+### Changed
+
+- Updated the web preview HUD so mode/start/reset controls sit with the music
+  control and the objectives area no longer repeats the coach text.
+- Tuned sandbox camera framing and zoom behavior to better match the local
+  Pygame trainer, with a sandbox-only camera rule toggle.
+- Hid sandbox setup controls while a level is running and restored them when
+  paused.
+- Excluded web-preview WAV assets from lean public exports alongside the local
+  game music files.
+
+### Fixed
+
+- Fixed web key-release handling so thrust inputs do not remain stuck after
+  focus moves through native controls.
+- Added a request-animation-frame fallback for browser shells that do not expose
+  the API during static smoke checks.
+
 ## 0.10.1 - 2026-06-04
 
 Release thesis: `v0.10.1` adds the first web-hosted RPO Trainer Preview path
