@@ -13,6 +13,7 @@ except Exception as exc:  # pragma: no cover - depends on local optional plottin
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.axes import Axes
 
 import sim.plotting.style as oel_style
 from sim.config import scenario_config_from_dict
@@ -29,10 +30,13 @@ from sim.plotting import (
     plot_orbital_elements_angles,
     plot_orbital_elements_summary,
     plot_rendezvous_summary,
+    plot_rendezvous_summary_curvilinear,
     plot_run_dashboard,
     plot_sensor_access,
 )
 from sim.plotting.style import artifact_metadata, oel_plot_context, save_oel_animation, save_oel_figure
+from sim.utils.plotting import _draw_earth_sphere_3d
+from sim.utils.plotting_capabilities import plot_multi_ric_2d_projections
 
 
 def _hist(pos: np.ndarray) -> np.ndarray:
@@ -171,11 +175,46 @@ def test_oel_animation_save_adds_public_safe_footer(tmp_path: Path) -> None:
     assert any("artifact: style_smoke_movie" in text for text in footer_texts)
 
 
+def test_dark_style_earth_sphere_uses_visible_transparent_colors() -> None:
+    calls: dict[str, dict[str, object]] = {}
+
+    class _AxesStub:
+        def plot_surface(self, *_args: object, **kwargs: object) -> None:
+            calls["surface"] = dict(kwargs)
+
+        def plot_wireframe(self, *_args: object, **kwargs: object) -> None:
+            calls["wireframe"] = dict(kwargs)
+
+    with oel_plot_context(style_name="oel_dark"):
+        _draw_earth_sphere_3d(_AxesStub())  # type: ignore[arg-type]
+
+    assert calls["surface"]["color"] == "#7DD3FC"
+    assert calls["wireframe"]["color"] == "#E0F2FE"
+    assert 0.15 < float(calls["surface"]["alpha"]) < 0.3
+    assert 0.25 < float(calls["wireframe"]["alpha"]) < 0.45
+
+
+def test_run_dashboard_trajectory_panel_keeps_earth_centered() -> None:
+    payload = _payload()
+
+    fig = plot_run_dashboard(payload, close=False)
+    ax_traj = fig.axes[0]
+    x_center = float(np.mean(ax_traj.get_xlim()))
+    y_center = float(np.mean(ax_traj.get_ylim()))
+    z_center = float(np.mean(ax_traj.get_zlim()))
+    plt.close(fig)
+
+    assert np.isclose(x_center, 0.0, atol=1e-6)
+    assert np.isclose(y_center, 0.0, atol=1e-6)
+    assert np.isclose(z_center, 0.0, atol=1e-6)
+
+
 def test_payload_plotting_api_writes_expected_artifacts(tmp_path: Path) -> None:
     payload = _payload()
     outputs = {
         "dashboard": tmp_path / "dashboard.png",
         "rendezvous": tmp_path / "rendezvous.png",
+        "rendezvous_curvilinear": tmp_path / "rendezvous_curvilinear.png",
         "control": tmp_path / "control.png",
         "estimation": tmp_path / "estimation.png",
         "estimation_components": tmp_path / "estimation_components.png",
@@ -197,6 +236,7 @@ def test_payload_plotting_api_writes_expected_artifacts(tmp_path: Path) -> None:
 
     plot_run_dashboard(payload, out_path=outputs["dashboard"], close=True)
     plot_rendezvous_summary(payload, out_path=outputs["rendezvous"], close=True)
+    plot_rendezvous_summary_curvilinear(payload, out_path=outputs["rendezvous_curvilinear"], close=True)
     plot_control_effort(payload, out_path=outputs["control"], close=True)
     plot_estimation_error(payload, out_path=outputs["estimation"], close=True)
     plot_estimation_error_components(payload, out_path=outputs["estimation_components"], close=True)
@@ -235,6 +275,73 @@ def test_payload_plotting_api_writes_expected_artifacts(tmp_path: Path) -> None:
         assert path.stat().st_size > 0
 
 
+def test_rendezvous_summary_scales_ric_projection_axes_independently() -> None:
+    payload = _payload()
+    target = np.array(payload["truth_by_object"]["target"], dtype=float)
+    chaser = target.copy()
+    chaser[:, 0] += np.array([0.0, 0.05, 0.10, 0.15], dtype=float)
+    chaser[:, 1] += np.array([0.0, 6.0, 12.0, 18.0], dtype=float)
+    payload["truth_by_object"] = {"target": target.tolist(), "chaser": chaser.tolist()}
+
+    fig = plot_rendezvous_summary(payload, close=False)
+    ax_ri = fig.axes[0]
+    x_span = float(np.diff(ax_ri.get_xlim())[0])
+    y_span = float(np.diff(ax_ri.get_ylim())[0])
+    plt.close(fig)
+
+    assert x_span > 5.0 * y_span
+
+
+def test_curvilinear_rendezvous_summary_combines_range_speed_and_delta_v() -> None:
+    payload = _payload()
+
+    fig = plot_rendezvous_summary_curvilinear(payload, close=False)
+    titles = [ax.get_title() for ax in fig.axes]
+    axes_count = len(fig.axes)
+    plt.close(fig)
+
+    assert "I-R Projection" in titles
+    assert "Relative Range and Speed" in titles
+    assert "Curvilinear RIC Components" in titles
+    assert "Cumulative Delta-V" in titles
+    assert axes_count == 7
+
+
+def test_ric_2d_projection_can_mark_target_burns(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = _payload()
+    t = np.array(payload["time_s"], dtype=float)
+    target = np.array(payload["truth_by_object"]["target"], dtype=float)
+    chaser = np.array(payload["truth_by_object"]["chaser"], dtype=float)
+    target_thrust = np.zeros((t.size, 3), dtype=float)
+    target_thrust[1:3, 0] = 1.0e-6
+    scatter_calls: list[dict[str, object]] = []
+    original_scatter = Axes.scatter
+
+    def _scatter_spy(self: Axes, *args: object, **kwargs: object) -> object:
+        scatter_calls.append(dict(kwargs))
+        return original_scatter(self, *args, **kwargs)
+
+    monkeypatch.setattr(Axes, "scatter", _scatter_spy)
+    out_path = tmp_path / "ric_burn_markers.png"
+
+    plot_multi_ric_2d_projections(
+        t,
+        {"chaser": chaser},
+        frame="ric_curv",
+        reference_truth_hist=target,
+        burn_marker_by_object={"target": target_thrust},
+        burn_marker_object_ids=["target"],
+        mode="save",
+        out_path=str(out_path),
+    )
+
+    assert out_path.exists()
+    assert any(call.get("label") == "target burn" and call.get("color") == "#F97316" for call in scatter_calls)
+
+
 def test_plot_outputs_expands_public_plot_presets(tmp_path: Path) -> None:
     assert "run_dashboard" in PLOT_PRESETS["minimal"]
     cfg = scenario_config_from_dict(
@@ -260,7 +367,10 @@ def test_plot_outputs_expands_public_plot_presets(tmp_path: Path) -> None:
                     "preset": "minimal",
                     "figure_ids": [
                         "rendezvous_summary",
+                        "rendezvous_summary_curvilinear",
                         "control_effort",
+                        "trajectory_ric_rect_2d_multi_target_burns",
+                        "trajectory_ric_curv_2d_multi_target_burns",
                         "estimation_error",
                         "estimation_error_components",
                         "knowledge_filtering",
@@ -318,7 +428,10 @@ def test_plot_outputs_expands_public_plot_presets(tmp_path: Path) -> None:
     assert set(out) >= {
         "run_dashboard",
         "rendezvous_summary",
+        "rendezvous_summary_curvilinear",
         "control_effort",
+        "trajectory_ric_rect_2d_multi_target_burns",
+        "trajectory_ric_curv_2d_multi_target_burns",
         "estimation_error",
         "estimation_error_components",
         "knowledge_filtering",

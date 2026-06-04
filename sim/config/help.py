@@ -58,8 +58,11 @@ def _figure_id_options() -> tuple[ConfigOption, ...]:
     descriptions = {
         "run_dashboard": "Single-run summary dashboard.",
         "rendezvous_summary": "Rendezvous-focused relative motion summary.",
+        "rendezvous_summary_curvilinear": "Curvilinear-RIC rendezvous summary with range/speed and delta-v.",
         "ground_track_multi": "Multi-object ground tracks.",
         "trajectory_ric_curv_2d_multi": "Multi-object curvilinear-RIC 2D relative trajectory.",
+        "trajectory_ric_rect_2d_multi_target_burns": "Rectangular-RIC 2D trajectory with target-burn markers.",
+        "trajectory_ric_curv_2d_multi_target_burns": "Curvilinear-RIC 2D trajectory with target-burn markers.",
         "relative_range": "Range between relevant objects over time.",
         "control_effort": "Control effort or delta-v usage over time.",
         "orbital_elements_summary": "Six-panel classical orbital element history.",

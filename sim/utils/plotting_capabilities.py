@@ -617,6 +617,9 @@ def plot_multi_ric_2d_projections(
     frame: Literal["ric_rect", "ric_curv"] = "ric_rect",
     reference_truth_hist: np.ndarray,
     reference_label: str | None = None,
+    burn_marker_by_object: dict[str, np.ndarray] | None = None,
+    burn_marker_object_ids: list[str] | None = None,
+    burn_marker_threshold_km_s2: float = 1.0e-12,
     planes: list[str] | None = None,
     mode: PlotMode = "interactive",
     out_path: str | None = None,
@@ -628,6 +631,13 @@ def plot_multi_ric_2d_projections(
     if len(p_list) == 1:
         axes = [axes]
     _draw_ric_reference_origin_2d(list(axes), label=reference_label)
+    burn_sources = dict(burn_marker_by_object or {})
+    burn_object_ids = (
+        [str(oid) for oid in burn_marker_object_ids]
+        if burn_marker_object_ids is not None
+        else sorted(str(oid) for oid in burn_sources.keys())
+    )
+    burn_marker_labeled: set[str] = set()
     for oid, hist in truth_hist_by_object.items():
         if hist.size == 0 or not np.any(np.isfinite(hist[:, 0])):
             continue
@@ -645,6 +655,35 @@ def plot_multi_ric_2d_projections(
                 ax.scatter([r[i0, ix]], [r[i0, iy]], color="green", s=18, zorder=5)
             if i1 is not None:
                 ax.scatter([r[i1, ix]], [r[i1, iy]], color="red", s=18, zorder=5)
+            for burn_oid in burn_object_ids:
+                if burn_oid not in burn_sources:
+                    continue
+                if burn_oid in truth_hist_by_object and burn_oid != oid:
+                    continue
+                u = np.array(burn_sources.get(burn_oid), dtype=float)
+                if u.ndim != 2 or u.shape[1] < 3:
+                    continue
+                n = min(u.shape[0], r.shape[0])
+                if n <= 0:
+                    continue
+                active = np.linalg.norm(np.nan_to_num(u[:n, :3], nan=0.0), axis=1) > float(
+                    burn_marker_threshold_km_s2
+                )
+                active &= np.all(np.isfinite(r[:n, [ix, iy]]), axis=1)
+                if not np.any(active):
+                    continue
+                label = f"{burn_oid} burn" if burn_oid not in burn_marker_labeled else None
+                ax.scatter(
+                    r[:n, ix][active],
+                    r[:n, iy][active],
+                    color="#F97316",
+                    edgecolors="#111827",
+                    linewidths=0.4,
+                    s=24,
+                    zorder=6,
+                    label=label,
+                )
+                burn_marker_labeled.add(burn_oid)
     for ax, p in zip(axes, p_list):
         _, _, xlbl, ylbl = _ric_2d_plane_axes(p)
         ax.set_xlabel(xlbl)

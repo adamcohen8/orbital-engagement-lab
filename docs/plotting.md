@@ -70,6 +70,7 @@ that config.
 
 - `run_dashboard`: one-page summary of trajectory, relative motion, thrust, delta-v, and rates
 - `rendezvous_summary`: RIC projections, range, relative speed, and RIC components
+- `rendezvous_summary_curvilinear`: curvilinear RIC projections, combined relative range/speed with two y axes, curvilinear RIC components, and cumulative target/chaser delta-v
 - `orbital_element_a`: semi-major axis over time
 - `orbital_element_ecc`: eccentricity over time
 - `orbital_element_inc`: inclination over time
@@ -102,6 +103,8 @@ that config.
 - `atmospheric_pass`: altitude, drag/lift acceleration, dynamic pressure, cross-track motion, heat load, and lift-axis alignment
 - `trajectory_eci_multi`: all-object 3D ECI trajectories
 - `trajectory_ric_curv_2d_multi`: all-object RIC curvilinear 2D projections
+- `trajectory_ric_curv_2d_multi_target_burns`: all-object RIC curvilinear 2D projections with orange dots at target-burn time samples
+- `trajectory_ric_rect_2d_multi_target_burns`: all-object rectangular-RIC 2D projections with orange dots at target-burn time samples
 - `relative_range`: pairwise relative range over time
 - `control_thrust`: per-object thrust component history
 
@@ -112,6 +115,10 @@ examples that load saved JSON/CSV artifacts and create Matplotlib figures.
 Ground-station access is also saved as payload data and summary metrics, so you
 can use the custom-analysis path when you need a station-specific or
 publication-specific variant.
+
+The target-burn RIC variants mark `target` burns by default. Set
+`outputs.plots.burn_marker_object_ids` to a list of object IDs when you want the
+same orange markers driven by a different burn source.
 
 ## Python API
 

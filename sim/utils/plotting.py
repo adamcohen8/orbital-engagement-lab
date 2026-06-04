@@ -7,7 +7,7 @@ import numpy as np
 from matplotlib.patches import Polygon, Rectangle
 
 from sim.dynamics.orbit.environment import EARTH_RADIUS_KM
-from sim.plotting.style import show_save_close_oel
+from sim.plotting.style import current_style_name, show_save_close_oel
 from sim.utils.figure_size import cap_figsize
 from sim.utils.frames import dcm_to_euler_321, ric_dcm_ir_from_rv
 from sim.utils.ground_track import split_ground_track_dateline
@@ -35,8 +35,39 @@ def _draw_earth_sphere_3d(ax: plt.Axes, radius_km: float = EARTH_RADIUS_KM) -> N
     x = radius_km * np.outer(np.cos(u), np.sin(v))
     y = radius_km * np.outer(np.sin(u), np.sin(v))
     z = radius_km * np.outer(np.ones_like(u), np.cos(v))
-    ax.plot_surface(x, y, z, rstride=1, cstride=1, color="#6EA8D9", alpha=0.18, linewidth=0.0, zorder=0)
-    ax.plot_wireframe(x, y, z, rstride=6, cstride=6, color="#5D86AA", alpha=0.15, linewidth=0.4, zorder=0)
+    style = current_style_name()
+    if style == "oel_dark":
+        surface_color = "#7DD3FC"
+        wire_color = "#E0F2FE"
+        surface_alpha = 0.22
+        wire_alpha = 0.34
+    else:
+        surface_color = "#6EA8D9"
+        wire_color = "#5D86AA"
+        surface_alpha = 0.18
+        wire_alpha = 0.15
+    ax.plot_surface(
+        x,
+        y,
+        z,
+        rstride=1,
+        cstride=1,
+        color=surface_color,
+        alpha=surface_alpha,
+        linewidth=0.0,
+        zorder=0,
+    )
+    ax.plot_wireframe(
+        x,
+        y,
+        z,
+        rstride=6,
+        cstride=6,
+        color=wire_color,
+        alpha=wire_alpha,
+        linewidth=0.4,
+        zorder=0,
+    )
 
 
 def plot_orbit_eci(truth_hist: np.ndarray, mode: PlotMode = "interactive", out_path: str | None = None) -> None:

@@ -399,24 +399,14 @@ require hosted AI accounts or API keys.
 
 ## Start Here
 
+- [Documentation Index](docs/index.md)
 - [Quickstart](docs/quickstart.md)
 - [Product Inventory](docs/product-inventory.md)
 - [Flagship RIC_PD 10 km Scenario](docs/flagship-ric-pd-10km.md)
-- [RIC_PD 10 km Validation Package](docs/validation-ric-pd-10km.md)
-- [Scenario YAML](docs/scenario-yaml.md)
-- [Python API](docs/python-api.md)
 - [OEL Agents](docs/oel-agents.md)
 - [Examples Matrix](docs/examples-matrix.md)
-- [Plotting](docs/plotting.md)
-- [Plot Gallery](docs/plot-gallery.md)
-- [Custom Analysis](docs/custom-analysis.md)
 - [Public Core And Pro Boundary](docs/public-vs-pro.md)
 - [Known Limitations](docs/known-limitations.md)
-- [ML/RL Policy Contracts](docs/ml-rl-contracts.md)
-- [Engine Contract](docs/contracts/engine-contract.md)
-- [Scenario YAML Contract](docs/contracts/scenario-yaml-contract.md)
-- [Payload And Artifact Contract](docs/contracts/payload-artifact-contract.md)
-- [Review Store Contract](docs/review-store.md)
 
 ## Curated Examples
 

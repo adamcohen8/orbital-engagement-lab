@@ -82,8 +82,8 @@ Analysis sections:
 
 - Public core accepts deterministic single-run scenarios.
 - Pro/private workspaces support `monte_carlo` and `analysis` workflows.
-- Generated public entrypoints should reject enabled Monte Carlo or sensitivity
-  analysis with a clear Pro-boundary message.
+- Generated public entrypoints should reject enabled Monte Carlo, sensitivity,
+  covariance, or other Pro analysis with a clear Pro-boundary message.
 
 
 ## Strict Types
@@ -352,6 +352,7 @@ Pro/private scenarios may additionally use:
 
 - `monte_carlo.enabled: true`,
 - `analysis.enabled: true`,
+- `analysis.study_type: covariance`,
 - controller-benchmark configs,
 - AI report settings,
 - validation harness configs,

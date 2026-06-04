@@ -2,6 +2,10 @@
 
 Orbital Engagement Lab is organized as an open-core project.
 
+This is the public-facing boundary summary. In the private source-of-truth
+workspace, `docs/public-private-boundary.md` carries the operational export
+rules and private-only path guidance.
+
 The public repository contains the simulation foundation: dynamics, controllers,
 estimators, actuators, sensors, mission modules, scenario YAML, API workflows,
 examples, validation helpers, and lightweight extension surfaces.
@@ -41,6 +45,7 @@ The pro layer includes:
 - optimization and gain tuning
 - Monte Carlo campaign orchestration
 - sensitivity studies
+- covariance propagation and encounter uncertainty screening
 - campaign dashboards and baselines
 - AI-assisted campaign reports from Monte Carlo and sensitivity outputs
 - report cost estimation before hosted LLM calls

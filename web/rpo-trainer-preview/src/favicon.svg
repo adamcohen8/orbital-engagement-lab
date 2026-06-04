@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="10" fill="#091016"/>
+  <path d="M10 34c10-17 27-23 39-16 7 4 7 13 0 18-11 8-30 5-36-5" fill="none" stroke="#38d7ff" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="22" cy="31" r="4" fill="#ff5f6d"/>
+  <circle cx="45" cy="24" r="4" fill="#ffde6a"/>
+  <text x="32" y="51" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="700" fill="#edf7fb">OEL</text>
+</svg>
