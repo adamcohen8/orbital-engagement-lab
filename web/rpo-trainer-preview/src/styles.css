@@ -59,6 +59,12 @@ button.active {
   color: rgb(255, 220, 224);
 }
 
+.music-button.active {
+  border-color: rgb(94, 190, 245);
+  background: rgb(34, 60, 76);
+  color: rgb(238, 244, 250);
+}
+
 button:focus-visible,
 select:focus-visible,
 input:focus-visible {
@@ -125,7 +131,8 @@ h1 {
 .objective-checklist {
   min-width: 0;
   display: grid;
-  grid-template-rows: 18px 17px 17px;
+  align-content: center;
+  gap: 4px;
   color: var(--metric);
   font-size: 14px;
   line-height: 17px;
@@ -137,8 +144,7 @@ h1 {
   text-transform: uppercase;
 }
 
-#objectiveTitle,
-#objectiveText {
+#objectiveTitle {
   display: block;
   min-width: 0;
   white-space: nowrap;
@@ -148,10 +154,6 @@ h1 {
 
 #objectiveTitle {
   color: rgb(150, 235, 170);
-}
-
-#objectiveText {
-  color: var(--info);
 }
 
 .game-layout {
@@ -235,7 +237,7 @@ canvas {
   position: absolute;
   left: 16px;
   top: 12px;
-  right: 130px;
+  right: 540px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -243,19 +245,22 @@ canvas {
   line-height: 22px;
 }
 
-.clip-pill {
+.hud-top-controls {
   position: absolute;
   right: 12px;
   top: 10px;
-  min-width: 86px;
-  height: 24px;
-  border: 1px solid rgb(104, 130, 156);
-  border-radius: 4px;
-  background: rgb(34, 48, 62);
-  color: rgb(220, 234, 246);
-  display: grid;
-  place-items: center;
-  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hud-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.music-button {
+  min-width: 118px;
 }
 
 .hint-line {
@@ -286,14 +291,6 @@ canvas {
   bottom: 8px;
   color: var(--footer);
   white-space: nowrap;
-}
-
-.hud-actions {
-  position: absolute;
-  right: 16px;
-  top: 36px;
-  display: flex;
-  gap: 8px;
 }
 
 .hidden-metrics {
@@ -413,10 +410,16 @@ select {
     height: 150px;
   }
 
-  .hud-actions {
+  .hud-line {
+    right: 130px;
+  }
+
+  .hud-top-controls {
     left: 16px;
     right: auto;
     top: 88px;
+    max-width: calc(100% - 32px);
+    flex-wrap: wrap;
   }
 
   .command-line {

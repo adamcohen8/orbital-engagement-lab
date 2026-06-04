@@ -15,14 +15,13 @@ Then visit:
 http://localhost:8765
 ```
 
-You can also open `index.html` directly in a browser.
-
 ## Included
 
 - Tutorial mode based on the Level 0 RIC-control lesson.
 - Curated sandbox mode with preset starts, range, drift, reset, and randomize.
 - RI and RC canvas plots.
 - Keyboard and touch controls.
+- Browser-started tutorial and sandbox music.
 - Simple debrief after tutorial success.
 - Download CTA for the full OEL trainer.
 
