@@ -39,10 +39,12 @@ jobs:
           curl -fsS http://127.0.0.1:8765/ -o /tmp/oel-preview-index.html
           curl -fsS http://127.0.0.1:8765/src/styles.css -o /tmp/oel-preview-styles.css
           curl -fsS http://127.0.0.1:8765/src/app.js -o /tmp/oel-preview-app.js
+          curl -fsS http://127.0.0.1:8765/assets/01_insert_coin_to_orbit.wav -o /tmp/oel-preview-selector-music.wav
           curl -fsS http://127.0.0.1:8765/assets/10_training_grid_sunrise.wav -o /tmp/oel-preview-tutorial-music.wav
           curl -fsS http://127.0.0.1:8765/assets/04_docking_bay_neon.wav -o /tmp/oel-preview-sandbox-music.wav
           grep -q "RPO Trainer Preview" /tmp/oel-preview-index.html
           grep -q "M Music: ON" /tmp/oel-preview-index.html
+          test -s /tmp/oel-preview-selector-music.wav
           test -s /tmp/oel-preview-tutorial-music.wav
           test -s /tmp/oel-preview-sandbox-music.wav
 
