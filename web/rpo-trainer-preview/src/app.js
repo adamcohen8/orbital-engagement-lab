@@ -12,7 +12,7 @@ const MANEUVER_CONTROL_SPEED = 10;
 const TRAIL_LIMIT = 1200;
 const MIN_PLOT_SPAN_KM = 0.005;
 const PLOT_SCALE_MARGIN = 1.2;
-const BUILD_ID = "level-return-2026-06-05";
+const BUILD_ID = "hcw-sandbox-2026-06-05";
 const PRIMER_AMPLITUDES_KM = { r: 0.65, i: 0.75, c: 0.65 };
 const MUSIC_TRACKS = {
   selector: "./assets/01_insert_coin_to_orbit.wav",
@@ -687,13 +687,14 @@ function isEditableControlTarget(target) {
 }
 
 function updateGhost() {
-  if (state.mode !== "tutorial") {
+  if (state.mode === "selector" || state.mode === "primer") {
     state.ghost = [];
     state.tutorialTargetPath = [];
     return;
   }
   state.ghost = predictGhost(livePredictionSeed(), ORBIT_PERIOD_S, MAX_GHOST_DRAW_POINTS);
   state.tutorialTargetPath = [];
+  if (state.mode !== "tutorial") return;
   const stage = tutorialStages[state.activeStage];
   if (!stage || !stage.axis || stage.final) return;
   if (!state.stageStart) state.stageStart = { ...state.sim };
