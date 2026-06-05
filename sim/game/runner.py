@@ -71,6 +71,7 @@ from sim.game.tuning import (
 from sim.presets.thrusters import resolve_thruster_max_thrust_n_from_specs
 
 FULL_ATTEMPT_RECORDING_PAD_S = 3.0
+RIC_PRIMER_STAGE_COUNT = 3
 
 
 @dataclass(frozen=True)
@@ -92,6 +93,16 @@ class GuidedTutorialRuntime:
     stage_start_mean_motion_rad_s: float | None = None
     awaiting_speed_step: bool = False
     wrong_key_active: bool = False
+
+
+@dataclass
+class RICPrimerRuntime:
+    stage_index: int = 0
+    elapsed_s: float = 0.0
+
+    def reset(self) -> None:
+        self.stage_index = 0
+        self.elapsed_s = 0.0
 
 
 @dataclass(frozen=True)
@@ -393,6 +404,17 @@ def _game_sandbox_enabled(config: SimulationConfig) -> bool:
     game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
     training_cfg = dict(game_cfg.get("training", {}) or {})
     return bool(game_cfg.get("sandbox", False) or training_cfg.get("sandbox_mode", False))
+
+
+def _ric_primer_enabled(training_cfg: RPOTrainingConfig, *, arcade_enabled: bool = False) -> bool:
+    if bool(arcade_enabled):
+        return False
+    return (
+        bool(training_cfg.enabled)
+        and str(training_cfg.scenario_id or "").strip() == "rpo_00_tutorial"
+        and bool(training_cfg.guided_tutorial_burns)
+        and not bool(getattr(training_cfg, "sandbox_mode", False))
+    )
 
 
 def _sandbox_setup_from_config(config: SimulationConfig) -> SandboxSetupValues:
@@ -1018,6 +1040,8 @@ def run_game_mode(
     command_state = KeyboardCommandState()
     command_state.use_timing_accumulator = True
     guided_tutorial = GuidedTutorialRuntime()
+    ric_primer = RICPrimerRuntime()
+    ric_primer_enabled = _ric_primer_enabled(training_cfg, arcade_enabled=arcade_enabled)
     command_state.paused = bool(training_cfg.enabled)
     phase = GamePhase.BRIEFING if training_cfg.enabled else GamePhase.PLAYING
     briefing_lines = _training_briefing_lines(config, training_cfg, difficulty=difficulty)
@@ -1142,6 +1166,8 @@ def run_game_mode(
             level_title = _game_level_title(config)
             trainer = RPOTrainingTracker(training_cfg)
             guided_tutorial = GuidedTutorialRuntime()
+            ric_primer = RICPrimerRuntime()
+            ric_primer_enabled = _ric_primer_enabled(training_cfg, arcade_enabled=arcade_enabled)
             command_state.paused = bool(training_cfg.enabled)
             phase = GamePhase.BRIEFING if training_cfg.enabled else GamePhase.PLAYING
             briefing_lines = _training_briefing_lines(config, training_cfg, difficulty=difficulty)
@@ -1253,10 +1279,66 @@ def run_game_mode(
             if briefing_open and command_state.briefing_scroll_px:
                 dashboard.scroll_briefing(command_state.briefing_scroll_px)
             if briefing_open and not command_state.paused:
-                phase = GamePhase.PLAYING
+                if ric_primer_enabled:
+                    phase = GamePhase.PRIMER
+                    ric_primer.reset()
+                    command_state.paused = True
+                    command_state.step_requested = False
+                    command_state.reset_axes()
+                else:
+                    phase = GamePhase.PLAYING
                 dashboard.reset_briefing_scroll()
                 last_step_wall = perf_counter()
                 last_input_wall = last_step_wall
+            if command_state.music_toggle_requested:
+                command_state.music_toggle_requested = False
+                audio_controller.toggle(
+                    trainer.score(),
+                    training_cfg=training_cfg,
+                    override_level_path=(
+                        _arcade_round_music_path(config, arcade_round_index) if arcade_enabled else None
+                    ),
+                )
+            if phase == GamePhase.PRIMER:
+                if command_state.restart_requested:
+                    ric_primer.reset()
+                    command_state.restart_requested = False
+                    command_state.paused = True
+                elif not command_state.paused:
+                    ric_primer.stage_index += 1
+                    ric_primer.elapsed_s = 0.0
+                    if ric_primer.stage_index >= RIC_PRIMER_STAGE_COUNT:
+                        phase = GamePhase.PLAYING
+                        command_state.paused = _guided_tutorial_current_stage(
+                            training_cfg,
+                            guided_tutorial,
+                        ) is not None
+                    else:
+                        command_state.paused = True
+                if phase == GamePhase.PRIMER:
+                    ric_primer.elapsed_s += input_elapsed_wall
+                    command_state.reset_axes()
+                    command_state.step_requested = False
+                    command_state.speed_multiplier_change = 0
+                    command_state.camera_rule_toggle_requested = False
+                    command_state.clip_record_toggle_requested = False
+                    command_state.clip_record_save_requested = False
+                    command_state.open_debrief_requested = False
+                    dashboard.draw_ric_primer(
+                        stage_index=ric_primer.stage_index,
+                        elapsed_s=ric_primer.elapsed_s,
+                        recording_status=_clip_recording_status(
+                            clip_recording_controller,
+                            started_wall_s=clip_recording_started_wall,
+                            now_wall_s=perf_counter(),
+                            status_message=clip_recording_status_message,
+                            status_until_wall_s=clip_recording_status_until,
+                        ),
+                    )
+                    recording_controller.capture(dashboard)
+                    clip_recording_controller.capture(dashboard)
+                    dashboard.tick(_dashboard_fps_for_speed(current_speed_multiple))
+                    continue
             if command_state.speed_multiplier_change:
                 previous_speed_multiple = current_speed_multiple
                 current_speed_multiple = _adjust_speed_multiple(
@@ -1304,15 +1386,6 @@ def run_game_mode(
                 wall_step_s = _wall_step_s(dt_s, current_speed_multiple)
                 last_step_wall = perf_counter()
                 last_input_wall = last_step_wall
-            if command_state.music_toggle_requested:
-                command_state.music_toggle_requested = False
-                audio_controller.toggle(
-                    trainer.score(),
-                    training_cfg=training_cfg,
-                    override_level_path=(
-                        _arcade_round_music_path(config, arcade_round_index) if arcade_enabled else None
-                    ),
-                )
             if command_state.clip_record_toggle_requested:
                 command_state.clip_record_toggle_requested = False
                 if clip_recording_controller.recording:
@@ -1381,6 +1454,8 @@ def run_game_mode(
                     )
                     trainer = RPOTrainingTracker(training_cfg)
                     guided_tutorial = GuidedTutorialRuntime()
+                    ric_primer = RICPrimerRuntime()
+                    ric_primer_enabled = _ric_primer_enabled(training_cfg, arcade_enabled=arcade_enabled)
                 recording_controller.restart()
                 recording_attempt = recording_controller.attempt_index
                 recording_path = None
@@ -1405,6 +1480,8 @@ def run_game_mode(
                 )
                 trainer.clear()
                 guided_tutorial = GuidedTutorialRuntime()
+                ric_primer = RICPrimerRuntime()
+                ric_primer_enabled = _ric_primer_enabled(training_cfg, arcade_enabled=arcade_enabled)
                 dashboard.clear()
                 _sync_dashboard_training_config(dashboard, training_cfg)
                 _sync_dashboard_round_config(dashboard, attempt_config)
@@ -1600,6 +1677,8 @@ def run_game_mode(
                 )
                 trainer = RPOTrainingTracker(training_cfg)
                 guided_tutorial = GuidedTutorialRuntime()
+                ric_primer = RICPrimerRuntime()
+                ric_primer_enabled = _ric_primer_enabled(training_cfg, arcade_enabled=arcade_enabled)
                 session, _, snapshot = _start_game_attempt(
                     attempt_config,
                     command_state=command_state,

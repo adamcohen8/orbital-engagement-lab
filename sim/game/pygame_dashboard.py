@@ -27,6 +27,78 @@ ELLIPTIC_PREDICTION_COAST_UPDATE_INTERVAL_S = 30.0
 ELLIPTIC_PREDICTION_BURN_UPDATE_INTERVAL_S = 0.0
 ELLIPTIC_REFERENCE_CACHE_POSITION_TOL_KM = 1.0e-3
 ELLIPTIC_REFERENCE_CACHE_VELOCITY_TOL_KM_S = 5.0e-6
+RIC_PRIMER_STAGES: tuple[dict[str, Any], ...] = (
+    {
+        "id": "radial",
+        "axis_index": 0,
+        "title": "Radial Axis",
+        "text": "Away from Earth through the target.",
+        "hint": "Higher or lower circular orbits map to up/down motion on R.",
+        "local_subtitle": "Radial offset in RI",
+        "eci_subtitle": "Orbit radius changes",
+        "eci_plane": "RC",
+        "amplitude_km": 0.65,
+    },
+    {
+        "id": "in_track",
+        "axis_index": 1,
+        "title": "In-Track Axis",
+        "text": "Forward and backward along the target orbit.",
+        "hint": "Ahead or behind the target maps to left/right motion on I.",
+        "local_subtitle": "Phase offset in RI",
+        "eci_subtitle": "Same orbit, phase changes",
+        "eci_plane": "RC",
+        "amplitude_km": 0.65,
+    },
+    {
+        "id": "cross_track",
+        "axis_index": 2,
+        "title": "Cross-Track Axis",
+        "text": "Out of the target orbital plane.",
+        "hint": "Inclination offset maps to left/right motion on C.",
+        "local_subtitle": "Plane offset in RC",
+        "eci_subtitle": "Inclination side view",
+        "eci_plane": "RI",
+        "amplitude_km": 0.65,
+    },
+)
+
+
+def _ric_primer_stage(stage_index: int) -> dict[str, Any]:
+    idx = int(np.clip(int(stage_index), 0, len(RIC_PRIMER_STAGES) - 1))
+    return dict(RIC_PRIMER_STAGES[idx])
+
+
+def _point_on_circle(center: tuple[int, int], radius: float, theta_rad: float) -> tuple[int, int]:
+    return (
+        int(round(float(center[0]) + float(radius) * float(np.cos(theta_rad)))),
+        int(round(float(center[1]) + float(radius) * float(np.sin(theta_rad)))),
+    )
+
+
+def _line_segment(
+    center: tuple[int, int],
+    half_span_px: float,
+    slope: float,
+) -> tuple[tuple[int, int], tuple[int, int]]:
+    span = float(max(half_span_px, 1.0))
+    dx = span / float(np.sqrt(1.0 + float(slope) * float(slope)))
+    dy = float(slope) * dx
+    return (
+        (int(round(float(center[0]) - dx)), int(round(float(center[1]) - dy))),
+        (int(round(float(center[0]) + dx)), int(round(float(center[1]) + dy))),
+    )
+
+
+def _point_along_line(
+    line: tuple[tuple[int, int], tuple[int, int]],
+    fraction: float,
+) -> tuple[int, int]:
+    frac = float(np.clip(fraction, 0.0, 1.0))
+    return (
+        int(round(float(line[0][0]) + (float(line[1][0]) - float(line[0][0])) * frac)),
+        int(round(float(line[0][1]) + (float(line[1][1]) - float(line[0][1])) * frac)),
+    )
 
 
 @dataclass
@@ -250,8 +322,263 @@ class PygameRPODashboard:
             )
         pygame.display.flip()
 
+    def draw_ric_primer(self, *, stage_index: int, elapsed_s: float, recording_status: str = "") -> None:
+        pygame = self.pygame
+        if self.closed:
+            return
+        width, height = self.screen.get_size()
+        stage = _ric_primer_stage(stage_index)
+        self.screen.fill((12, 16, 22))
+        top = pygame.Rect(36, 18, width - 72, 104)
+        panel_y = top.bottom + 24
+        left = pygame.Rect(36, panel_y, max((width - 108) // 2, 200), max(height - panel_y - 130, 250))
+        right = pygame.Rect(left.right + 36, left.y, left.width, left.height)
+        hud = pygame.Rect(36, height - 112, width - 72, 86)
+        self._draw_ric_primer_top_bar(
+            top,
+            stage=stage,
+            stage_index=stage_index,
+        )
+        if stage["eci_plane"] == "RI":
+            self._draw_ric_primer_eci_panel(left, stage=stage, elapsed_s=elapsed_s)
+            self._draw_ric_primer_local_panel(right, stage=stage, elapsed_s=elapsed_s, plane="RC")
+        else:
+            self._draw_ric_primer_local_panel(left, stage=stage, elapsed_s=elapsed_s, plane="RI")
+            self._draw_ric_primer_eci_panel(right, stage=stage, elapsed_s=elapsed_s)
+        self._draw_ric_primer_hud(
+            hud,
+            stage=stage,
+            stage_index=stage_index,
+            recording_status=recording_status,
+        )
+        pygame.display.flip()
+
     def tick(self, fps: float = 60.0) -> None:
         self.clock.tick(float(max(fps, 1.0)))
+
+    def _draw_ric_primer_top_bar(self, rect: Any, *, stage: dict[str, Any], stage_index: int) -> None:
+        pygame = self.pygame
+        pygame.draw.rect(self.screen, (18, 24, 32), rect, border_radius=10)
+        pygame.draw.rect(self.screen, (82, 96, 118), rect, width=2, border_radius=10)
+        right_width = min(420, max(280, rect.width // 3))
+        left_width = max(rect.width - right_width - 34, 160)
+        title = self._fit_text_px("RIC FRAME PRIMER", self.large_font, left_width)
+        self._text(title, (rect.x + 16, rect.y + 9), self.large_font, (230, 235, 242))
+        meta = f"INFO Step {stage_index + 1}/3    INFO {stage['title']}"
+        self._text(
+            self._fit_text_px(meta, self.small_font, left_width),
+            (rect.x + 16, rect.y + 54),
+            self.small_font,
+            (222, 230, 238),
+        )
+        x = rect.right - right_width - 16
+        self._text("OBJECTIVES", (x, rect.y + 12), self.small_font, (170, 184, 204))
+        self._text(
+            self._fit_text_px(str(stage["title"]), self.small_font, right_width),
+            (x, rect.y + 35),
+            self.small_font,
+            (150, 235, 170),
+        )
+        self._text(
+            self._fit_text_px(str(stage["text"]), self.small_font, right_width),
+            (x, rect.y + 58),
+            self.small_font,
+            (150, 205, 245),
+        )
+
+    def _draw_ric_primer_local_panel(self, rect: Any, *, stage: dict[str, Any], elapsed_s: float, plane: str) -> None:
+        pygame = self.pygame
+        title = "RI Plane" if plane == "RI" else "RC Plane"
+        pygame.draw.rect(self.screen, (20, 27, 36), rect, border_radius=10)
+        pygame.draw.rect(self.screen, (80, 92, 110), rect, width=1, border_radius=10)
+        subtitle_width = min(240, max(rect.width // 2 - 20, 80))
+        subtitle = self._fit_text_px(str(stage["local_subtitle"]), self.small_font, subtitle_width)
+        title_width = max(rect.width - subtitle_width - 48, 80)
+        self._text(
+            self._fit_text_px(title, self.font, title_width),
+            (rect.x + 14, rect.y + 10),
+            self.font,
+            (230, 235, 242),
+        )
+        self._text(subtitle, (rect.right - subtitle_width - 14, rect.y + 13), self.small_font, (170, 184, 204))
+        plot = rect.inflate(-48, -72)
+        plot.y += 28
+        pygame.draw.rect(self.screen, (8, 11, 16), plot)
+        pygame.draw.rect(self.screen, (72, 84, 102), plot, width=1)
+        scale = min(plot.width, plot.height) / 2.5
+        self._draw_grid(plot, scale=scale)
+        x_axis = 1 if plane == "RI" else 2
+        y_axis = 0
+        self._draw_ric_primer_axes(plot, x_axis=x_axis, y_axis=y_axis, active_axis=int(stage["axis_index"]))
+        point = np.zeros(3, dtype=float)
+        point[int(stage["axis_index"])] = float(stage["amplitude_km"]) * float(np.sin(float(elapsed_s) * 1.05))
+
+        def to_px(pos: np.ndarray) -> tuple[int, int]:
+            x = float(pos[x_axis])
+            y = float(pos[y_axis])
+            return plot.centerx + int(round(x * scale)), plot.centery - int(round(y * scale))
+
+        target = to_px(np.zeros(3, dtype=float))
+        chaser = to_px(point)
+        pygame.draw.circle(self.screen, (245, 205, 92), target, 6)
+        pygame.draw.circle(self.screen, (245, 92, 92), chaser, 7)
+        pygame.draw.ellipse(
+            self.screen,
+            (84, 92, 40),
+            pygame.Rect(
+                target[0] - int(0.25 * scale),
+                target[1] - int(0.25 * scale),
+                int(0.5 * scale),
+                int(0.5 * scale),
+            ),
+            width=1,
+        )
+        self._text("Target", (target[0] + 10, target[1] - 10), self.small_font, (245, 205, 92))
+        self._text("Chaser", (chaser[0] + 10, chaser[1] + 14), self.small_font, (245, 92, 92))
+
+    def _draw_ric_primer_axes(self, plot: Any, *, x_axis: int, y_axis: int, active_axis: int) -> None:
+        pygame = self.pygame
+        colors = {
+            0: (150, 235, 170),
+            1: (245, 205, 92),
+            2: (96, 190, 245),
+        }
+        x_color = colors.get(x_axis, (90, 104, 124)) if active_axis == x_axis else (90, 104, 124)
+        y_color = colors.get(y_axis, (90, 104, 124)) if active_axis == y_axis else (90, 104, 124)
+        pygame.draw.line(self.screen, x_color, (plot.left + 36, plot.centery), (plot.right - 36, plot.centery), width=2)
+        pygame.draw.line(self.screen, y_color, (plot.centerx, plot.bottom - 32), (plot.centerx, plot.top + 32), width=2)
+        self._draw_vector((plot.right - 54, plot.centery), np.array([24.0, 0.0]), color=x_color, scale=1.0)
+        self._draw_vector((plot.centerx, plot.top + 56), np.array([0.0, 24.0]), color=y_color, scale=1.0)
+        x_label = "+I" if x_axis == 1 else "+C"
+        y_label = "+R"
+        self._text(x_label, (plot.right - 74, plot.centery - 18), self.small_font, x_color)
+        self._text(y_label, (plot.centerx + 10, plot.top + 34), self.small_font, y_color)
+
+    def _draw_ric_primer_eci_panel(self, rect: Any, *, stage: dict[str, Any], elapsed_s: float) -> None:
+        pygame = self.pygame
+        pygame.draw.rect(self.screen, (20, 27, 36), rect, border_radius=10)
+        pygame.draw.rect(self.screen, (80, 92, 110), rect, width=1, border_radius=10)
+        subtitle_width = min(250, max(rect.width // 2 - 20, 80))
+        subtitle = self._fit_text_px(str(stage["eci_subtitle"]), self.small_font, subtitle_width)
+        title_width = max(rect.width - subtitle_width - 48, 80)
+        self._text(
+            self._fit_text_px("ECI Orbit", self.font, title_width),
+            (rect.x + 14, rect.y + 10),
+            self.font,
+            (230, 235, 242),
+        )
+        self._text(subtitle, (rect.right - subtitle_width - 14, rect.y + 13), self.small_font, (170, 184, 204))
+        plot = rect.inflate(-48, -72)
+        plot.y += 28
+        pygame.draw.rect(self.screen, (8, 11, 16), plot)
+        pygame.draw.rect(self.screen, (72, 84, 102), plot, width=1)
+        if stage["id"] == "cross_track":
+            self._draw_ric_primer_cross_track_side_view(plot, elapsed_s=elapsed_s)
+        else:
+            self._draw_ric_primer_eci_circles(plot, stage=stage, elapsed_s=elapsed_s)
+
+    def _draw_ric_primer_eci_circles(self, plot: Any, *, stage: dict[str, Any], elapsed_s: float) -> None:
+        pygame = self.pygame
+        center = plot.center
+        radius = min(plot.width, plot.height) * 0.34
+        phase = float(np.sin(float(elapsed_s) * 1.05))
+        target_theta = -0.35
+        radius_offset = 0.14 * phase if stage["id"] == "radial" else 0.0
+        phase_offset = 0.34 * phase if stage["id"] == "in_track" else 0.0
+        pygame.draw.circle(self.screen, (42, 92, 130), center, int(round(radius)), width=2)
+        chaser_radius = radius * (1.0 + radius_offset)
+        pygame.draw.circle(
+            self.screen,
+            (170, 68, 74) if stage["id"] == "radial" else (110, 60, 66),
+            center,
+            int(round(chaser_radius)),
+            width=2,
+        )
+        self._draw_primer_earth(center, int(round(radius * 0.16)))
+        target = _point_on_circle(center, radius, target_theta)
+        chaser = _point_on_circle(center, chaser_radius, target_theta + phase_offset)
+        pygame.draw.circle(self.screen, (245, 205, 92), target, 7)
+        pygame.draw.circle(self.screen, (245, 92, 92), chaser, 7)
+        self._text("Target", (target[0] - 62, target[1] + 18), self.small_font, (230, 235, 242))
+        self._text("Chaser", (chaser[0] + 10, chaser[1] - 16), self.small_font, (230, 235, 242))
+        if stage["id"] == "radial":
+            self._text(
+                f"Chaser radius {1.0 + radius_offset:.2f}x target orbit",
+                (plot.x + 18, plot.bottom - 26),
+                self.small_font,
+                (170, 184, 204),
+            )
+
+    def _draw_ric_primer_cross_track_side_view(self, plot: Any, *, elapsed_s: float) -> None:
+        pygame = self.pygame
+        center = plot.center
+        half_span = min(plot.width, plot.height) * 0.36
+        inclination_deg = 10.0 * float(np.sin(float(elapsed_s) * 1.05))
+        target_line = _line_segment(center, half_span, -0.5)
+        chaser_line = _line_segment(center, half_span, -0.5 - inclination_deg / 22.0)
+        self._draw_primer_earth(center, max(24, int(round(min(plot.width, plot.height) * 0.07))))
+        pygame.draw.line(self.screen, (96, 174, 224), target_line[0], target_line[1], width=3)
+        pygame.draw.line(self.screen, (245, 92, 92), chaser_line[0], chaser_line[1], width=3)
+        target = _point_along_line(target_line, 0.86)
+        chaser = _point_along_line(chaser_line, 0.86)
+        pygame.draw.circle(self.screen, (245, 205, 92), target, 7)
+        pygame.draw.circle(self.screen, (245, 92, 92), chaser, 7)
+        self._text("Target", (target[0] - 62, target[1] + 18), self.small_font, (230, 235, 242))
+        self._text("Chaser", (chaser[0] + 10, chaser[1] - 16), self.small_font, (230, 235, 242))
+        self._text(
+            f"Side view: chaser inclination {inclination_deg:.1f} deg",
+            (plot.x + 18, plot.bottom - 26),
+            self.small_font,
+            (170, 184, 204),
+        )
+
+    def _draw_primer_earth(self, center: tuple[int, int], radius: int) -> None:
+        pygame = self.pygame
+        radius = max(int(radius), 18)
+        pygame.draw.circle(self.screen, (34, 92, 142), center, radius)
+        pygame.draw.circle(self.screen, (220, 240, 255), center, radius, width=1)
+
+    def _draw_ric_primer_hud(
+        self,
+        rect: Any,
+        *,
+        stage: dict[str, Any],
+        stage_index: int,
+        recording_status: str = "",
+    ) -> None:
+        pygame = self.pygame
+        pygame.draw.rect(self.screen, (18, 24, 32), rect, border_radius=10)
+        pygame.draw.rect(self.screen, (82, 96, 118), rect, width=1, border_radius=10)
+        status_text = str(recording_status or "G Clip").strip()
+        pill_width = min(max(self._text_width(self.small_font, status_text) + 22, 86), max(rect.width // 2, 86))
+        pill = pygame.Rect(rect.right - pill_width - 12, rect.y + 10, pill_width, 24)
+        pygame.draw.rect(self.screen, (34, 48, 62), pill, border_radius=4)
+        pygame.draw.rect(self.screen, (104, 130, 156), pill, width=1, border_radius=4)
+        self._text(
+            self._fit_text_px(status_text, self.small_font, pill.width - 16),
+            (pill.x + 8, pill.y + 5),
+            self.small_font,
+            (220, 234, 246),
+        )
+        text_width = max(pill.x - rect.x - 32, 120)
+        self._text(
+            self._fit_text_px(f"Step {stage_index + 1}/3  {stage['title']}", self.font, text_width),
+            (rect.x + 16, rect.y + 12),
+            self.font,
+            (235, 240, 245),
+        )
+        self._text(
+            self._fit_text_px(str(stage["hint"]), self.small_font, rect.width - 32),
+            (rect.x + 16, rect.y + 38),
+            self.small_font,
+            (245, 210, 110),
+        )
+        self._text(
+            self._fit_text_px("Space Next   R Replay   Esc Quit", self.small_font, rect.width - 32),
+            (rect.x + 16, rect.y + 60),
+            self.small_font,
+            (195, 205, 220),
+        )
 
     def _draw_panel(self, rect: Any, title: str, x_axis: int, y_axis: int) -> None:
         pygame = self.pygame

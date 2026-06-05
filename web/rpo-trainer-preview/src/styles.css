@@ -87,6 +87,183 @@ p {
   background: var(--screen);
 }
 
+.selector-mode .top-bar,
+.selector-mode .game-layout,
+.selector-mode .hud-panel,
+.selector-mode .touch-controls {
+  display: none;
+}
+
+.level-selector {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-rows: 124px minmax(0, 1fr) 76px;
+  background: var(--screen);
+  padding: 0 42px;
+}
+
+.trainer-shell:not(.selector-mode) .level-selector {
+  display: none;
+}
+
+.launcher-header {
+  position: relative;
+  padding-top: 32px;
+}
+
+.launcher-header h1 {
+  font-size: 30px;
+  line-height: 36px;
+  text-transform: none;
+}
+
+.launcher-header p {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 22px;
+}
+
+.launcher-music {
+  position: absolute;
+  right: 336px;
+  top: 36px;
+  width: 144px;
+  min-height: 30px;
+  background: rgb(34, 60, 76);
+  border-color: rgb(94, 190, 245);
+}
+
+.launcher-music.active,
+.launcher-music:hover {
+  background: rgb(34, 60, 76);
+  border-color: rgb(94, 190, 245);
+  color: rgb(238, 244, 250);
+}
+
+.launcher-assists {
+  position: absolute;
+  right: 16px;
+  top: 86px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.launcher-assists button {
+  width: 76px;
+  min-height: 26px;
+  background: rgb(36, 72, 52);
+  border-color: rgb(108, 232, 142);
+  color: rgb(230, 238, 245);
+}
+
+.launcher-body {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 424px minmax(420px, 1fr);
+  gap: 24px;
+}
+
+.launcher-list,
+.launcher-preview {
+  border: 1px solid rgb(70, 82, 100);
+  border-radius: 8px;
+  background: var(--hud);
+}
+
+.launcher-list {
+  padding: 12px;
+  display: grid;
+  align-content: start;
+  gap: 14px;
+}
+
+.launcher-option {
+  width: 100%;
+  min-height: 64px;
+  display: grid;
+  align-content: center;
+  gap: 5px;
+  padding: 10px 18px;
+  text-align: left;
+  border-radius: 8px;
+  border-color: rgb(48, 60, 76);
+  background: var(--panel);
+}
+
+.launcher-option.active,
+.launcher-option:focus-visible {
+  background: rgb(28, 48, 66);
+  border-color: rgb(96, 174, 224);
+  color: rgb(238, 244, 250);
+}
+
+.launcher-option span {
+  font-size: 18px;
+  line-height: 22px;
+  color: rgb(238, 244, 250);
+}
+
+.launcher-option small {
+  color: rgb(162, 178, 198);
+  font-size: 14px;
+  line-height: 17px;
+}
+
+.launcher-preview {
+  min-width: 0;
+  overflow: auto;
+  padding: 20px;
+}
+
+.launcher-preview h2 {
+  margin: 0 0 14px;
+  font-size: 18px;
+  line-height: 24px;
+  color: rgb(238, 244, 250);
+}
+
+.launcher-budget {
+  margin: 0 0 22px;
+  color: rgb(162, 178, 198);
+  font-size: 14px;
+  line-height: 18px;
+}
+
+.launcher-preview section {
+  margin-top: 10px;
+}
+
+.launcher-preview h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  line-height: 18px;
+  color: rgb(238, 244, 250);
+}
+
+.launcher-preview p,
+.launcher-preview li {
+  color: rgb(182, 194, 210);
+  font-size: 14px;
+  line-height: 18px;
+}
+
+.launcher-preview ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.launcher-footer {
+  align-self: center;
+  color: var(--footer);
+  font-size: 14px;
+  line-height: 18px;
+}
+
 .top-bar {
   position: absolute;
   left: 36px;
@@ -100,6 +277,12 @@ p {
   grid-template-columns: minmax(0, 1fr) 300px;
   gap: 16px;
   padding: 9px 16px;
+}
+
+.primer-mode .top-bar {
+  height: 96px;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 780px);
+  padding: 10px 16px;
 }
 
 .top-left {
@@ -128,14 +311,18 @@ h1 {
   white-space: nowrap;
 }
 
+.top-metrics span:empty {
+  display: none;
+}
+
 .objective-checklist {
   min-width: 0;
   display: grid;
   align-content: center;
-  gap: 4px;
+  gap: 3px;
   color: var(--metric);
   font-size: 14px;
-  line-height: 17px;
+  line-height: 16px;
 }
 
 .objective-heading {
@@ -156,12 +343,29 @@ h1 {
   color: rgb(150, 235, 170);
 }
 
+#objectiveText {
+  display: block;
+  min-width: 0;
+  color: var(--info);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#objectiveText:empty {
+  display: none;
+}
+
 .game-layout {
   position: absolute;
   left: 36px;
   right: 36px;
   top: 124px;
   bottom: 112px;
+}
+
+.primer-mode .game-layout {
+  top: 136px;
 }
 
 .plot-stack {
@@ -237,7 +441,7 @@ canvas {
   position: absolute;
   left: 16px;
   top: 12px;
-  right: 540px;
+  right: 620px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -291,6 +495,24 @@ canvas {
   bottom: 8px;
   color: var(--footer);
   white-space: nowrap;
+}
+
+.primer-mode .hud-line {
+  right: 700px;
+}
+
+.primer-mode .hint-line {
+  right: 16px;
+}
+
+.primer-mode .command-line {
+  display: none;
+}
+
+.primer-mode .footer-line {
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .hidden-metrics {
@@ -383,7 +605,8 @@ select {
 
   .top-bar,
   .game-layout,
-  .hud-panel {
+  .hud-panel,
+  .level-selector {
     position: relative;
     inset: auto;
     left: auto;
@@ -391,6 +614,40 @@ select {
     top: auto;
     bottom: auto;
     width: auto;
+  }
+
+  .level-selector {
+    min-height: 100vh;
+    padding: 10px;
+    grid-template-rows: auto auto auto;
+    gap: 12px;
+  }
+
+  .launcher-header {
+    padding-top: 0;
+  }
+
+  .launcher-header h1 {
+    font-size: 26px;
+    line-height: 32px;
+  }
+
+  .launcher-music,
+  .launcher-assists {
+    position: static;
+    margin-top: 10px;
+  }
+
+  .launcher-body {
+    grid-template-columns: 1fr;
+  }
+
+  .launcher-list {
+    gap: 8px;
+  }
+
+  .launcher-preview {
+    max-height: none;
   }
 
   .top-bar {

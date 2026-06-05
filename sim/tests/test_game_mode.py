@@ -95,6 +95,7 @@ from sim.game.pygame_dashboard import (
     _coast_prediction_model_key,
     _cw_coast_state,
     _elliptic_linear_coast_states,
+    _ric_primer_stage,
     _sample_rows,
     _should_draw_nominal_nmt,
     _true_anomaly_deg_from_state,
@@ -156,6 +157,7 @@ from sim.game.runner import (
     _poll_pygame_input,
     _realtime_steps_due,
     _reset_guided_tutorial_stage_attempt,
+    _ric_primer_enabled,
     _run_sandbox_setup_form,
     _safe_capture_recording_frame,
     _sandbox_coast_prediction_model,
@@ -2902,6 +2904,23 @@ def test_training_tracker_requires_tutorial_coast_after_burn() -> None:
     assert score.level_passed is True
     assert score.coast_after_burn_satisfied is True
     assert score.coast_after_burn_s == pytest.approx(10.0)
+
+
+def test_ric_primer_only_enables_for_level_zero_guided_tutorial() -> None:
+    burn = GuidedTutorialBurnConfig(name="plus_i", axis="in_track", sign=1, delta_v_m_s=0.25)
+    tutorial = RPOTrainingConfig(
+        enabled=True,
+        scenario_id="rpo_00_tutorial",
+        guided_tutorial_burns=(burn,),
+    )
+
+    assert _ric_primer_enabled(tutorial) is True
+    assert _ric_primer_enabled(replace(tutorial, scenario_id="rpo_01_coast_relative_motion")) is False
+    assert _ric_primer_enabled(replace(tutorial, sandbox_mode=True)) is False
+    assert _ric_primer_enabled(tutorial, arcade_enabled=True) is False
+    assert _ric_primer_stage(0)["id"] == "radial"
+    assert _ric_primer_stage(1)["id"] == "in_track"
+    assert _ric_primer_stage(2)["id"] == "cross_track"
 
 
 def test_guided_tutorial_input_matches_only_requested_axis() -> None:

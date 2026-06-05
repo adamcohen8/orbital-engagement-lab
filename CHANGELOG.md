@@ -6,6 +6,40 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.10.3 - 2026-06-05
+
+Release thesis: `v0.10.3` improves the RPO Trainer onboarding path by adding a
+RIC frame primer to the downloaded tutorial, making the web preview open on the
+existing level selector experience, and tightening web/full-game control
+parity.
+
+### Added
+
+- Added a three-step RIC frame primer to the local Pygame tutorial, with
+  synchronized RI/RC and ECI-style animations before the guided burn stages.
+- Added the existing level selector-style landing screen to the web RPO Trainer
+  Preview, limited to Tutorial and Sandbox entries for the hosted preview.
+- Added a web preview level-selector music track and an in-game Level Select
+  return control so browser users are not dependent on Esc.
+
+### Changed
+
+- Updated the web RPO Trainer Preview tutorial flow to start with the RIC frame
+  primer before entering the existing guided Level 0 tutorial.
+- Matched the web selector and sandbox metadata more closely to the downloaded
+  game, including hiding progress/high-score fields for Sandbox.
+- Improved primer and gameplay HUD layout so objective text and control lines
+  avoid clipping across the preview and local game surfaces.
+
+### Fixed
+
+- Fixed web Esc handling so it returns to the level selector even when focus is
+  inside a sandbox form control.
+- Fixed local primer input handling so speed, camera, clip, and maneuver
+  inputs do not leak into the guided tutorial while primer screens are active.
+- Fixed RIC primer visual issues, including impossible ECI orbit sketches,
+  cross-track inclination depiction, and an artifact inside the Earth render.
+
 ## 0.10.2 - 2026-06-04
 
 Release thesis: `v0.10.2` polishes the web-hosted RPO Trainer Preview for

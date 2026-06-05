@@ -10,10 +10,56 @@
     />
     <title>Orbital Engagement Lab RPO Trainer Preview</title>
     <link rel="icon" href="./src/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="./src/styles.css?v=sandbox-panel-2026-06-04" />
+    <link rel="stylesheet" href="./src/styles.css?v=level-return-2026-06-05" />
   </head>
   <body>
-    <main class="trainer-shell">
+    <main class="trainer-shell selector-mode">
+      <section class="level-selector" id="levelSelector" aria-label="Level selector">
+        <header class="launcher-header">
+          <h1>Orbital Engagement Lab</h1>
+          <button class="launcher-music active" id="selectorMusicButton" type="button">Music: ON</button>
+          <p>Select RPO Training Level</p>
+          <div class="launcher-assists" aria-label="Assists">
+            <span>Assists</span>
+            <button class="active" type="button">Easy</button>
+          </div>
+        </header>
+
+        <div class="launcher-body">
+          <nav class="launcher-list" aria-label="Available levels">
+            <button class="launcher-option active" data-level-option="tutorial" type="button">
+              <span>Level 0 - Tutorial</span>
+            </button>
+            <button class="launcher-option" data-level-option="sandbox" type="button">
+              <span>Sandbox</span>
+            </button>
+          </nav>
+
+          <article class="launcher-preview" aria-live="polite">
+            <h2 id="selectorPreviewTitle">Level 0 - Tutorial</h2>
+            <p class="launcher-budget" id="selectorPreviewBudget">Time: 18000s   Chaser dV: 12.000 m/s   Speed Gate: 0.300 m/s</p>
+            <section>
+              <h3>Objective</h3>
+              <p id="selectorPreviewObjective"></p>
+            </section>
+            <section>
+              <h3>Brief</h3>
+              <p id="selectorPreviewBrief"></p>
+            </section>
+            <section>
+              <h3>Pass Criteria</h3>
+              <ul id="selectorPreviewCriteria"></ul>
+            </section>
+            <section>
+              <h3>Instructor Notes</h3>
+              <ul id="selectorPreviewNotes"></ul>
+            </section>
+          </article>
+        </div>
+
+        <footer class="launcher-footer">Up/Down Select   M Music   Enter Launch</footer>
+      </section>
+
       <header class="top-bar">
         <div class="top-left">
           <h1 id="levelLabel">LEVEL 0 - TUTORIAL</h1>
@@ -26,6 +72,7 @@
         <div class="objective-checklist" aria-live="polite">
           <span class="objective-heading">OBJECTIVES</span>
           <span id="objectiveTitle">Pulse +I</span>
+          <span id="objectiveText"></span>
         </div>
       </header>
 
@@ -33,15 +80,15 @@
         <div class="plot-stack">
           <section class="plot-panel" aria-label="RI plane plot">
             <div class="plot-title">
-              <span>RI Plane</span>
-              <small>In-track vs radial</small>
+              <span id="riTitle">RI Plane</span>
+              <small id="riSubtitle">In-track vs radial</small>
             </div>
             <canvas id="riCanvas"></canvas>
           </section>
           <section class="plot-panel" aria-label="RC plane plot">
             <div class="plot-title">
-              <span>RC Plane</span>
-              <small>Cross-track vs radial</small>
+              <span id="rcTitle">RC Plane</span>
+              <small id="rcSubtitle">Cross-track vs radial</small>
             </div>
             <canvas id="rcCanvas"></canvas>
           </section>
@@ -78,6 +125,7 @@
           <div class="hud-actions">
             <button id="pauseButton" type="button">Start</button>
             <button id="resetButton" type="button">Reset</button>
+            <button id="levelSelectButton" type="button">Level Select</button>
             <button class="tab-button active" id="tutorialMode" type="button">Tutorial</button>
             <button class="tab-button" id="sandboxMode" type="button">Sandbox</button>
           </div>
@@ -85,7 +133,7 @@
         </div>
         <div class="hint-line" id="coachHint">Hold D for +I. The green path shows the orbit created by a 0.25 m/s forward in-track burn.</div>
         <div class="command-line" id="commandLine">W/S Radial +/-R  A/D In-Track +/-I  Left/Right Cross-Track +/-C</div>
-        <div class="footer-line" id="footerLine">Speed 1x   Up/Down Speed   Space Pause   . Step   R Reset   Esc Quit</div>
+        <div class="footer-line" id="footerLine">Speed 1x   Up/Down Speed   Space Pause   . Step   R Reset   Esc Level Select</div>
 
         <div class="hidden-metrics" aria-hidden="true">
           <span id="modeLabel">Tutorial</span>
@@ -119,6 +167,6 @@
       </section>
     </main>
 
-    <script src="./src/app.js?v=sandbox-panel-2026-06-04" type="module"></script>
+    <script src="./src/app.js?v=level-return-2026-06-05" type="module"></script>
   </body>
 </html>

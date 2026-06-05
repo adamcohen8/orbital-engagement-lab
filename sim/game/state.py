@@ -6,6 +6,7 @@ from typing import Any
 
 class GamePhase(str, Enum):
     BRIEFING = "briefing"
+    PRIMER = "primer"
     PLAYING = "playing"
     PAUSED = "paused"
     PASSED = "passed"
