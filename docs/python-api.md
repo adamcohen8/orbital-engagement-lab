@@ -27,6 +27,135 @@ The private Pro distribution adds controller-bench, campaign, and saved-output
 report workflows on top of this facade. Public-core Python workflows are
 limited to deterministic single-run scenarios.
 
+## Scenario Artifacts
+
+Use `ScenarioArtifact` when Python, notebooks, apps, or agents need to assemble
+or mutate a scenario while keeping YAML as the durable review artifact.
+
+```python
+from sim import ScenarioArtifact, SimulationWorkspace
+
+workspace = SimulationWorkspace()
+
+artifact = ScenarioArtifact.from_dict({
+    "scenario_name": "api_artifact_demo",
+    "objects": {
+        "target": {
+            "enabled": True,
+            "kind": "satellite",
+            "specs": {"mass_kg": 100.0},
+            "initial_state": {
+                "position_eci_km": [7000.0, 0.0, 0.0],
+                "velocity_eci_km_s": [0.0, 7.5, 0.0],
+            },
+        }
+    },
+    "simulator": {
+        "duration_s": 120.0,
+        "dt_s": 10.0,
+        "dynamics": {"attitude": {"enabled": False}},
+    },
+    "outputs": {
+        "output_dir": "outputs/api_artifact_demo",
+        "mode": "save",
+        "review": {"enabled": True, "detail": "standard"},
+        "plots": {"enabled": False},
+        "animations": {"enabled": False},
+    },
+})
+
+report = artifact.validate_report(workspace)
+if not report.ok:
+    raise RuntimeError([issue.to_dict() for issue in report.errors])
+
+workspace.save_config(artifact, "configs/generated/api_artifact_demo.yaml")
+result = artifact.run(workspace)
+manifest = result.evidence_manifest()
+review = result.review()
+
+print(manifest["review"]["db_path"])
+print(review.query("SELECT scenario_name, samples FROM run_metadata").rows)
+```
+
+`ScenarioArtifact.to_yaml_text()` and `ScenarioArtifact.write(...)` use the same
+schema-backed normalization path as ordinary config loading, then render a
+clean artifact shape that omits compatibility/default noise such as disabled
+legacy object stubs. The written YAML is intended to be inspected, committed,
+diffed, and rerun through the CLI.
+
+Use `ScenarioArtifact.to_dict()` when you need the fully normalized engine
+configuration. Use `ScenarioArtifact.to_artifact_dict()` when you need the
+reviewable YAML artifact shape.
+
+`SimulationWorkspace.validate(...)` still returns the legacy dictionary shape.
+Use `SimulationWorkspace.validate_report(...)` or
+`ScenarioArtifact.validate_report(...)` when callers need structured
+`ValidationIssue` objects for agent repair loops or UI display.
+
+These authoring helpers live in `sim.scenarios` and are re-exported from
+`sim` and `sim.api` for compatibility.
+
+For repair loops on invalid draft dictionaries, call
+`SimulationWorkspace.validate_report(...)` before creating a `ScenarioArtifact`.
+`ScenarioArtifact.from_dict(...)` normalizes through the schema immediately and
+may raise for invalid drafts.
+
+```python
+draft = artifact.to_dict()
+draft["outputs"]["review"]["detail"] = "verbose"
+
+report = workspace.validate_report(draft)
+for issue in report.errors:
+    print(issue.path)
+    print(issue.message)
+    print(issue.hint)
+    print(issue.allowed_values)
+```
+
+Common validation issues include structured paths for timing fields,
+`outputs.mode`, `outputs.review.detail`, ground-station fields, relative RIC
+initial states, and plugin pointers.
+
+## Scenario Builder
+
+Use `ScenarioBuilder` for common authoring flows where a domain-facing Python
+helper is clearer than assembling raw dictionaries. The builder remains
+artifact-first: `artifact()` normalizes through the scenario YAML parser and
+returns a `ScenarioArtifact`.
+
+```python
+from sim import ScenarioBuilder
+
+artifact = (
+    ScenarioBuilder("builder_rpo_demo")
+    .duration(7200.0, dt_s=10.0)
+    .target_satellite(
+        mass_kg=100.0,
+        position_eci_km=[7000.0, 0.0, 0.0],
+        velocity_eci_km_s=[0.0, 7.5, 0.0],
+    )
+    .chaser_relative_ric(
+        [0.0, -5.0, 0.0, 0.0, 0.0, 0.0],
+        mass_kg=50.0,
+        frame="rect",
+    )
+    .outputs("outputs/builder_rpo_demo")
+    .review(detail="standard")
+    .artifact()
+)
+
+artifact.write("configs/generated/builder_rpo_demo.yaml")
+result = artifact.run()
+print(result.primary_pair)
+```
+
+The first builder surface is intentionally small. It supports single-satellite
+propagation and basic target/chaser RIC setup through helpers such as
+`duration(...)`, `outputs(...)`, `review(...)`, `satellite(...)`,
+`target_satellite(...)`, `chaser_relative_ric(...)`, and `ground_station(...)`.
+For advanced scenario features, use `ScenarioArtifact.from_dict(...)` or
+ordinary YAML until a domain-facing helper exists.
+
 ## Custom Metrics
 
 `SimulationResult` exposes helpers for custom analysis that is too specific for

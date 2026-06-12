@@ -93,6 +93,27 @@ class DefensiveRICAxisMissionTests(unittest.TestCase):
         self.assertEqual(out["mission_mode"]["phase"], "burn")
         self.assertEqual(np.array(out["desired_attitude_quat_bn"], dtype=float).shape, (4,))
 
+    def test_single_burn_module_can_use_own_state_as_reference(self) -> None:
+        m = SingleRICAxisBurnMissionModule(
+            target_id="self",
+            axis_mode="+C",
+            axis_kind="force",
+            burn_accel_km_s2=4e-6,
+            burn_start_s=0.0,
+            burn_duration_s=10.0,
+        )
+        out = m.update(
+            object_id="target",
+            truth=_truth(),
+            own_knowledge={},
+            t_s=0.0,
+            dt_s=1.0,
+        )
+        thrust = np.array(out["fallback_thrust_eci_km_s2"], dtype=float)
+        self.assertAlmostEqual(float(np.linalg.norm(thrust)), 4e-6, places=12)
+        self.assertGreater(float(thrust[2]), 0.0)
+        self.assertEqual(out["mission_mode"]["phase"], "burn")
+
     def test_single_burn_module_commands_slew_before_burn(self) -> None:
         m = SingleRICAxisBurnMissionModule(
             target_id="target",

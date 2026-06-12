@@ -73,7 +73,7 @@ def test_single_run_review_store_writes_queryable_sqlite(tmp_path: Path) -> None
     assert db_path.is_file()
     assert schema_path.is_file()
     assert db_path.parent == tmp_path / "review"
-    assert json.loads(schema_path.read_text(encoding="utf-8"))["schema_version"] == "0.1"
+    assert json.loads(schema_path.read_text(encoding="utf-8"))["schema_version"] == "0.3"
 
     with sqlite3.connect(db_path) as conn:
         scenario_name = conn.execute("SELECT scenario_name FROM run_metadata").fetchone()[0]
@@ -105,6 +105,60 @@ def test_review_store_config_defaults_disabled_and_validates_detail(tmp_path: Pa
     raw["outputs"]["review"]["detail"] = "dense"
     with pytest.raises(ValueError, match="outputs.review.detail"):
         scenario_config_from_dict(raw)
+
+
+def test_review_store_writes_mission_recovery_tables(tmp_path: Path) -> None:
+    raw = _review_store_config(tmp_path)
+    raw["target"]["specs"]["isp_s"] = 220.0
+    raw["analysis"] = {
+        "mission_recovery": {
+            "enabled": True,
+            "object_id": "target",
+            "goal": "orbit_shape",
+            "element_tolerances": {"a_km": 1.0, "ecc": 0.01},
+            "planner": {
+                "enabled": True,
+                "modes": ["min_delta_v", "min_time", "constrained"],
+                "candidate_count": 4,
+                "max_recovery_time_s": 7200.0,
+                "max_recovery_delta_v_m_s": 20.0,
+            },
+        }
+    }
+    result = SimulationSession.from_config(SimulationConfig.from_dict(raw)).run()
+    db_path = Path(result.summary["review_outputs"]["sqlite"])
+
+    with sqlite3.connect(db_path) as conn:
+        summary_rows = conn.execute(
+            "SELECT object_id, goal, method, recovery_delta_v_m_s FROM mission_recovery_summary"
+        ).fetchall()
+        element_rows = conn.execute(
+            "SELECT state_label, a_km, ecc FROM mission_recovery_elements ORDER BY state_label"
+        ).fetchall()
+        metric_rows = conn.execute(
+            "SELECT metric_name, units FROM metrics WHERE metric_name = 'recovery_delta_v_m_s'"
+        ).fetchall()
+        candidate_rows = conn.execute(
+            "SELECT candidate_id, source, feasible, verified FROM mission_recovery_candidates"
+        ).fetchall()
+        burn_rows = conn.execute(
+            "SELECT candidate_id, burn_index, delta_v_m_s FROM mission_recovery_burns"
+        ).fetchall()
+        candidate_element_rows = conn.execute(
+            "SELECT candidate_id, a_km, ecc FROM mission_recovery_candidate_elements"
+        ).fetchall()
+
+    assert len(summary_rows) == 1
+    assert summary_rows[0][0] == "target"
+    assert summary_rows[0][1] == "orbit_shape"
+    assert summary_rows[0][2] in {"sim_state_inferred_intrack_impulse", "local_orbit_shape_velocity_match"}
+    assert summary_rows[0][3] is not None
+    assert [row[0] for row in element_rows] == ["final", "initial"]
+    assert metric_rows == [("recovery_delta_v_m_s", "m/s")]
+    assert candidate_rows
+    assert burn_rows
+    assert candidate_element_rows
+    assert all(row[2] in (0, 1) for row in candidate_rows)
 
 
 def test_review_workspace_query_api_allows_safe_selects(tmp_path: Path) -> None:

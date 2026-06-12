@@ -15,6 +15,11 @@ arrow keys and Enter to choose. In non-interactive shells, it falls back to
 numbered choices. After each result, you can calculate another value and return
 to the same category menu.
 
+For simulator-backed mission recovery after an actual OEL run, configure
+`analysis.mission_recovery` in scenario YAML. That workflow compares the
+simulated assessment-state orbit against the initial orbit and can write
+`mission_recovery_summary` / `mission_recovery_elements` review-store tables.
+
 ## Categories
 
 ### Circular Orbits
@@ -50,6 +55,7 @@ to the same category menu.
 - Plane change delta-v
 - Inclination change cost from circular altitude
 - Combined speed and plane change delta-v
+- Mission recovery from in-track impulse
 
 ### Sun-Synchronous
 
@@ -120,6 +126,23 @@ orbits. Phase angle is reported as the target's angle ahead of the chaser in
 the prograde direction at transfer departure. The wait-time helper advances
 that phase angle using the circular mean-motion difference only.
 
+The mission-recovery calculator assumes an initially circular orbit and an
+instantaneous in-track impulse. Positive disturbance delta-v is `+I`/prograde;
+negative disturbance delta-v is `-I`/retrograde. It reports:
+
+- the disturbed phasing orbit created by the impulse,
+- the equal-and-opposite same-apsis recovery burn needed to restore the
+  original circular orbit shape,
+- ideal propellant use from the rocket equation,
+- a continuous mean-motion slot-lap estimate, and
+- the first discrete same-apsis recovery opportunity that returns to the
+  original slot within a user-provided angular tolerance.
+
+This is a mission-recovery intuition check, not an operational maneuver plan.
+It does not model detection latency, finite burns, thrust pointing limits,
+covariance, drag, J2, conjunction constraints, maneuver windows, or command and
+control delays.
+
 The phasing calculator reports the approximate along-track drift from changing
 the circular-orbit altitude. Positive drift means the phasing orbit moves ahead
 of the reference orbit in the two-body mean-motion estimate.
@@ -184,11 +207,21 @@ configuration.
 The same formulas are available from Python:
 
 ```python
-from sim.orbital_calculator import circular_orbit_from_altitude
+from sim.orbital_calculator import circular_orbit_from_altitude, mission_recovery_from_intrack_impulse
 
 result = circular_orbit_from_altitude(400.0)
 print(result.velocity_km_s)
 print(result.period_min)
+
+recovery = mission_recovery_from_intrack_impulse(
+    reference_altitude_km=400.0,
+    disturbance_delta_v_m_s=-5.0,
+    spacecraft_mass_kg=100.0,
+    isp_s=220.0,
+)
+print(recovery.recovery_delta_v_m_s)
+print(recovery.recovery_propellant_kg)
+print(recovery.slot_recovery_time_hr)
 ```
 
 ## Example

@@ -5,6 +5,7 @@ __pycache__/
 
 # Local virtual env
 .venv/
+.venv_temp/
 
 # Tool/runtime caches
 .pytest_cache/

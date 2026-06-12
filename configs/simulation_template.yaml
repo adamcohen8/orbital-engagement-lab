@@ -688,6 +688,8 @@ simulator:
   plugin_validation:
     # Strict validation catches missing modules/classes before long runs.
     strict: true
+    # Raise runtime plugin/bridge exceptions instead of recording them as events.
+    strict_runtime: false
   # Termination criteria.
   termination:
     # Stop the run if a participating object intersects Earth.
@@ -715,11 +717,13 @@ outputs:
     save_csv: false
     # Write master_run_log.json with time histories for custom analysis.
     save_full_log: true
+    # Write master_run_history.npz for scalable NumPy-based history analysis.
+    save_history_npz: false
   # Static plot settings.
   plots:
     # Enable static figure generation.
     enabled: true
-    # Optional presets: minimal, orbit, rendezvous, attitude, estimation, access, rocket, debug.
+    # Optional presets: minimal, orbit, rendezvous, attitude, estimation, access, rocket, mission_recovery, debug.
     preset: "rendezvous"
     # Reference object for relative/RIC plots.
     reference_object_id: "target"
@@ -761,6 +765,8 @@ outputs:
       - "control_thrust"
       # Multi-object thrust command history.
       - "control_thrust_multi"
+      # Mission reconstitution planner time/delta-v trade space.
+      - "mission_recovery_trade_space"
     # Figure resolution for saved PNGs.
     dpi: 160
   # Animation settings.

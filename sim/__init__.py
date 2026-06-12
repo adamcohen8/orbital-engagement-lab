@@ -5,11 +5,15 @@ from typing import Any
 
 _API_EXPORTS = [
     "MetricStudyResult",
+    "ScenarioArtifact",
+    "ScenarioBuilder",
     "SimulationConfig",
     "SimulationResult",
     "SimulationSession",
     "SimulationSnapshot",
     "SimulationWorkspace",
+    "ValidationIssue",
+    "ValidationReport",
 ]
 
 _ACTUATOR_EXPORTS = [

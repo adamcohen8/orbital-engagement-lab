@@ -34,6 +34,7 @@ from sim.orbital_calculator.core import (
     inclination_change_from_altitude,
     j2_secular_rates_from_altitude,
     j2_secular_rates_from_elements,
+    mission_recovery_from_intrack_impulse,
     phasing_drift_from_altitude_change,
     plane_change_delta_v,
     repeat_ground_track_approximation,
@@ -263,6 +264,47 @@ def test_rocket_equation_delta_v_and_mass_ratio_are_inverses() -> None:
     assert ratio.propellant_fraction == pytest.approx(0.6)
 
 
+def test_mission_recovery_from_retrograde_intrack_impulse_reports_recovery_cost() -> None:
+    result = mission_recovery_from_intrack_impulse(
+        reference_altitude_km=400.0,
+        disturbance_delta_v_m_s=-5.0,
+        spacecraft_mass_kg=100.0,
+        isp_s=220.0,
+        slot_tolerance_deg=1.0,
+        max_phasing_orbits=100,
+    )
+
+    assert result.disturbance_apsis == "apogee"
+    assert result.disturbed_apogee_altitude_km == pytest.approx(400.0)
+    assert result.disturbed_perigee_altitude_km == pytest.approx(382.351, abs=0.001)
+    assert result.disturbed_period_min < result.reference_period_min
+    assert result.recovery_delta_v_m_s == pytest.approx(5.0)
+    assert result.recovery_propellant_kg == pytest.approx(0.231485, abs=1.0e-6)
+    assert result.total_event_delta_v_m_s == pytest.approx(10.0)
+    assert result.slot_recovery_found is True
+    assert result.slot_recovery_orbits == 1
+    assert result.slot_recovery_time_hr == pytest.approx(1.53966, abs=1.0e-5)
+    assert result.slot_recovery_phase_error_deg == pytest.approx(0.702799, abs=1.0e-6)
+
+
+def test_mission_recovery_from_prograde_intrack_impulse_reports_higher_phasing_orbit() -> None:
+    result = mission_recovery_from_intrack_impulse(
+        reference_altitude_km=400.0,
+        disturbance_delta_v_m_s=5.0,
+        spacecraft_mass_kg=100.0,
+        isp_s=220.0,
+        slot_tolerance_deg=1.0,
+        max_phasing_orbits=100,
+    )
+
+    assert result.disturbance_apsis == "perigee"
+    assert result.disturbed_perigee_altitude_km == pytest.approx(400.0)
+    assert result.disturbed_apogee_altitude_km == pytest.approx(417.707, abs=0.001)
+    assert result.disturbed_period_min > result.reference_period_min
+    assert result.recovery_delta_v_m_s == pytest.approx(5.0)
+    assert result.recovery_propellant_kg == pytest.approx(0.231485, abs=1.0e-6)
+
+
 def test_ballistic_coefficient_uses_mass_over_cd_area() -> None:
     result = ballistic_coefficient(mass_kg=100.0, drag_coefficient=2.2, drag_area_m2=4.0)
 
@@ -435,6 +477,13 @@ def test_calculator_rejects_invalid_inputs() -> None:
         phasing_drift_from_altitude_change(reference_altitude_km=5.0, phasing_altitude_change_km=-10.0)
     with pytest.raises(ValueError, match="mass_ratio"):
         rocket_equation_delta_v(isp_s=300.0, mass_ratio=0.9)
+    with pytest.raises(ValueError, match="escaping trajectory"):
+        mission_recovery_from_intrack_impulse(
+            reference_altitude_km=400.0,
+            disturbance_delta_v_m_s=11000.0,
+            spacecraft_mass_kg=100.0,
+            isp_s=220.0,
+        )
     with pytest.raises(ValueError, match="drag_area_m2"):
         ballistic_coefficient(mass_kg=100.0, drag_coefficient=2.2, drag_area_m2=0.0)
     with pytest.raises(ValueError, match="ballistic_coefficient"):
@@ -505,6 +554,7 @@ def test_interactive_menu_contains_requested_public_calculators() -> None:
     assert "Circular equatorial elements to RV" in titles
     assert "Rocket equation delta-v from mass ratio" in titles
     assert "Rocket equation mass ratio from delta-v" in titles
+    assert "Mission recovery from in-track impulse" in titles
 
 
 def test_interactive_calculators_are_grouped_by_category() -> None:
@@ -518,6 +568,7 @@ def test_interactive_calculators_are_grouped_by_category() -> None:
     assert "RV to robust element report" in grouped_titles["State / Elements Conversion"]
     assert "Circular equatorial elements to RV" in grouped_titles["State / Elements Conversion"]
     assert "Combined speed and plane change delta-v" in grouped_titles["Transfers And Delta-V"]
+    assert "Mission recovery from in-track impulse" in grouped_titles["Transfers And Delta-V"]
     assert "Sun-synchronous inclination from altitude" in grouped_titles["Sun-Synchronous"]
     assert "J2 secular rates from altitude" in grouped_titles["Sun-Synchronous"]
     assert "Phasing drift from altitude change" in grouped_titles["Phasing"]

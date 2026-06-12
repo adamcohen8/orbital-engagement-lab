@@ -12,7 +12,9 @@ const MANEUVER_CONTROL_SPEED = 10;
 const TRAIL_LIMIT = 1200;
 const MIN_PLOT_SPAN_KM = 0.005;
 const PLOT_SCALE_MARGIN = 1.2;
-const BUILD_ID = "hcw-sandbox-2026-06-05";
+const BUILD_ID = "analytics-2026-06-06";
+const ANALYTICS_SCRIPT_SRC = "https://plausible.io/js/script.js";
+const ANALYTICS_LOCAL_HOSTNAMES = new Set(["", "localhost", "127.0.0.1", "::1"]);
 const PRIMER_AMPLITUDES_KM = { r: 0.65, i: 0.75, c: 0.65 };
 const MUSIC_TRACKS = {
   selector: "./assets/01_insert_coin_to_orbit.wav",
@@ -70,6 +72,7 @@ const el = {
   debriefPanel: document.querySelector("#debriefPanel"),
   debriefTitle: document.querySelector("#debriefTitle"),
   debriefText: document.querySelector("#debriefText"),
+  downloadLink: document.querySelector("#downloadLink"),
 };
 
 const levelOptions = [
@@ -248,6 +251,63 @@ const music = createMusicPlayer(MUSIC_TRACKS.selector);
 music.loop = true;
 music.volume = 0.65;
 
+const analytics = {
+  enabled: false,
+  provider: "",
+  domain: "",
+  trackedOnce: new Set(),
+};
+
+function initAnalytics() {
+  const provider = metaContent("oel-analytics-provider").toLowerCase();
+  const domain = metaContent("oel-analytics-domain");
+  analytics.provider = provider;
+  analytics.domain = domain;
+  if (provider !== "plausible" || !domain || !analyticsAllowedOnCurrentHost()) return;
+  analytics.enabled = true;
+  window.plausible =
+    window.plausible ||
+    function plausibleQueue() {
+      window.plausible.q = window.plausible.q || [];
+      window.plausible.q.push(arguments);
+    };
+  if (document.querySelector(`script[src="${ANALYTICS_SCRIPT_SRC}"]`)) return;
+  const script = document.createElement("script");
+  script.defer = true;
+  script.dataset.domain = domain;
+  script.src = ANALYTICS_SCRIPT_SRC;
+  document.head.appendChild(script);
+}
+
+function metaContent(name) {
+  return document.querySelector(`meta[name="${name}"]`)?.content.trim() || "";
+}
+
+function analyticsAllowedOnCurrentHost() {
+  if (!["http:", "https:"].includes(window.location.protocol)) return false;
+  return !ANALYTICS_LOCAL_HOSTNAMES.has(window.location.hostname);
+}
+
+function trackEvent(name, props = {}) {
+  if (!analytics.enabled || typeof window.plausible !== "function") return;
+  window.plausible(name, { props: analyticsProps(props) });
+}
+
+function trackEventOnce(name, props = {}) {
+  if (analytics.trackedOnce.has(name)) return;
+  analytics.trackedOnce.add(name);
+  trackEvent(name, props);
+}
+
+function analyticsProps(props) {
+  const clean = {};
+  Object.entries(props).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === "") return;
+    clean[key] = String(value);
+  });
+  return clean;
+}
+
 function createMusicPlayer(src) {
   if (typeof Audio === "function") {
     return new Audio(src);
@@ -313,7 +373,8 @@ function resetState(seed = presets.behind) {
   draw();
 }
 
-function showLevelSelector() {
+function showLevelSelector(options = {}) {
+  const previousMode = state.mode;
   state.mode = "selector";
   state.running = false;
   state.passed = false;
@@ -327,6 +388,9 @@ function showLevelSelector() {
   renderLevelSelector();
   syncMusicButton();
   updateDebugState();
+  if (options.track && previousMode !== "selector") {
+    trackEvent("level_select_return", { from: previousMode, source: options.source || "unknown" });
+  }
 }
 
 function renderLevelSelector() {
@@ -359,9 +423,14 @@ function selectLevel(index) {
   renderLevelSelector();
 }
 
-function launchSelectedLevel() {
+function launchSelectedLevel(source = "selector") {
   const option = levelOptions[state.selectedLevel] || levelOptions[0];
   setMode(option.mode);
+  if (option.id === "sandbox") {
+    trackEvent("sandbox_start", { source });
+  } else {
+    trackEvent("tutorial_start", { source, entry: option.mode });
+  }
   playMusicFromGesture();
 }
 
@@ -407,6 +476,7 @@ function advancePrimer() {
     draw();
     return true;
   }
+  trackEvent("primer_complete", { step_count: primerStages.length });
   setMode("tutorial");
   return true;
 }
@@ -674,6 +744,7 @@ function toggleMusic() {
     return;
   }
   state.musicEnabled = !state.musicEnabled;
+  trackEvent("music_toggle", { enabled: state.musicEnabled, mode: state.mode });
   if (state.musicEnabled) {
     playMusicFromGesture();
   } else {
@@ -781,6 +852,11 @@ function updateDebugState() {
     speedMultiple: currentSpeedMultiple(),
     cameraRuleMode: state.cameraRuleMode,
     musicSrc: music.currentSrc || music.src,
+    analytics: {
+      enabled: analytics.enabled,
+      provider: analytics.provider,
+      domain: analytics.domain,
+    },
     controls: currentControls(),
     sim: { ...state.sim },
     livePredictionSeed: livePredictionSeed(),
@@ -1274,6 +1350,39 @@ function showDebrief(passed) {
   el.debriefText.textContent = `${state.finalReason} Closest approach ${state.closestKm.toFixed(
     3,
   )} km, delta-v ${state.sim.dv.toFixed(2)} m/s.`;
+  trackEvent(passed ? "tutorial_complete" : "tutorial_end", completionAnalyticsProps(passed));
+}
+
+function completionAnalyticsProps(passed) {
+  return {
+    result: passed ? "success" : "ended",
+    time_bucket: bucketSeconds(state.sim.t),
+    dv_bucket: bucketDvMps(state.sim.dv),
+    closest_range_bucket: bucketRangeKm(state.closestKm),
+  };
+}
+
+function bucketSeconds(value) {
+  if (value < 60) return "under_1min";
+  if (value < 300) return "1_5min";
+  if (value < 600) return "5_10min";
+  if (value < 1200) return "10_20min";
+  return "20min_plus";
+}
+
+function bucketDvMps(value) {
+  if (value < 2) return "under_2mps";
+  if (value < 5) return "2_5mps";
+  if (value < 10) return "5_10mps";
+  return "10mps_plus";
+}
+
+function bucketRangeKm(value) {
+  if (value < 0.05) return "under_50m";
+  if (value < 0.1) return "50_100m";
+  if (value < 0.25) return "100_250m";
+  if (value < 1) return "250m_1km";
+  return "1km_plus";
 }
 
 function frame(nowMs) {
@@ -1357,7 +1466,7 @@ function bindEvents() {
     const key = event.key.toLowerCase();
     if (key === "escape") {
       event.preventDefault();
-      if (state.mode !== "selector") showLevelSelector();
+      if (state.mode !== "selector") showLevelSelector({ track: true, source: "keyboard" });
       return;
     }
     if (isEditableControlTarget(event.target)) return;
@@ -1387,7 +1496,7 @@ function bindEvents() {
     if (state.mode === "selector") {
       if (key === "arrowdown" || key === "s") selectLevel(state.selectedLevel + 1);
       else if (key === "arrowup" || key === "w") selectLevel(state.selectedLevel - 1);
-      else if (key === " " || key === "enter") launchSelectedLevel();
+      else if (key === " " || key === "enter") launchSelectedLevel("keyboard");
       return;
     }
     if (state.mode === "primer") {
@@ -1450,14 +1559,16 @@ function bindEvents() {
   });
   el.levelSelectButton.addEventListener("click", () => {
     playMusicFromGesture();
-    showLevelSelector();
+    showLevelSelector({ track: true, source: "button" });
   });
   el.tutorialMode.addEventListener("click", () => {
     setMode("primer");
+    trackEvent("tutorial_start", { source: "tab", entry: "primer" });
     playMusicFromGesture();
   });
   el.sandboxMode.addEventListener("click", () => {
     setMode("sandbox");
+    trackEvent("sandbox_start", { source: "tab" });
     playMusicFromGesture();
   });
   el.musicButton.addEventListener("click", toggleMusic);
@@ -1474,8 +1585,11 @@ function bindEvents() {
     button.addEventListener("click", () => {
       const idx = levelOptions.findIndex((option) => option.id === button.dataset.levelOption);
       if (idx >= 0) selectLevel(idx);
-      launchSelectedLevel();
+      launchSelectedLevel("selector_click");
     });
+  });
+  el.downloadLink.addEventListener("click", () => {
+    trackEvent("download_click", { source: "debrief", mode: state.mode });
   });
   el.applySandbox.addEventListener("click", () => {
     playMusicFromGesture();
@@ -1493,5 +1607,7 @@ function bindEvents() {
 }
 
 bindEvents();
+initAnalytics();
+trackEventOnce("preview_view", { build: BUILD_ID });
 showLevelSelector();
 queueFrame(frame);

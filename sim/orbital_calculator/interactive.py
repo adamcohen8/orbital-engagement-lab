@@ -36,6 +36,7 @@ from sim.orbital_calculator.core import (
     inclination_change_from_altitude,
     j2_secular_rates_from_altitude,
     j2_secular_rates_from_elements,
+    mission_recovery_from_intrack_impulse,
     orbital_period_from_altitude,
     orbital_period_from_semimajor_axis,
     phasing_drift_from_altitude_change,
@@ -128,6 +129,11 @@ def _assumptions(spec: CalculatorSpec) -> str:
         return "Assumptions: coplanar circular two-body orbits and an impulsive Hohmann transfer; positive phase means target ahead of chaser."
     if spec.title == "Phasing drift from altitude change":
         return "Assumptions: two circular two-body orbits; drift from mean-motion difference; no maneuvers/J2/drag."
+    if spec.title == "Mission recovery from in-track impulse":
+        return (
+            "Assumptions: initially circular two-body orbit, impulsive in-track disturbance, same-apsis "
+            "opposite recovery burn, ideal rocket equation, no drag/J2/SRP or finite-burn effects."
+        )
     if spec.category == CATEGORY_RELATIVE:
         return "Assumptions: linear HCW/Clohessy-Wiltshire motion about a circular chief orbit; valid only for small relative states."
     if spec.category == CATEGORY_ECLIPSE:
@@ -425,6 +431,38 @@ def _format_rocket_mass_ratio(result: object) -> list[tuple[str, str]]:
         ("Delta-v", _fmt(result.delta_v_m_s, "m/s", 2)),
         ("Mass ratio", f"{result.mass_ratio:.4f}"),
         ("Propellant fraction", f"{100.0 * result.propellant_fraction:.2f}%"),
+    ]
+
+
+def _format_mission_recovery(result: object) -> list[tuple[str, str]]:
+    slot_time = "Not found" if result.slot_recovery_time_s is None else _fmt(result.slot_recovery_time_hr, "hr", 3)
+    slot_orbits = "Not found" if result.slot_recovery_orbits is None else f"{result.slot_recovery_orbits:d}"
+    slot_error = (
+        "Not found" if result.slot_recovery_phase_error_deg is None else _fmt(result.slot_recovery_phase_error_deg, "deg", 6)
+    )
+    lap_time = (
+        "Undefined"
+        if result.continuous_slot_lap_time_hr is None
+        else _fmt(result.continuous_slot_lap_time_hr, "hr", 3)
+    )
+    return [
+        ("Reference altitude", _fmt(result.reference_altitude_km, "km")),
+        ("Disturbance delta-v", _fmt(result.disturbance_delta_v_m_s, "m/s", 3)),
+        ("Disturbed apsis", result.disturbance_apsis),
+        ("Disturbed perigee", _fmt(result.disturbed_perigee_altitude_km, "km")),
+        ("Disturbed apogee", _fmt(result.disturbed_apogee_altitude_km, "km")),
+        ("Disturbed eccentricity", f"{result.disturbed_eccentricity:.8f}"),
+        ("Recovery delta-v", _fmt(result.recovery_delta_v_m_s, "m/s", 3)),
+        ("Recovery propellant", _fmt(result.recovery_propellant_kg, "kg", 6)),
+        ("Recovery prop fraction", f"{100.0 * result.recovery_propellant_fraction:.4f}%"),
+        ("Continuous slot lap", lap_time),
+        ("Discrete slot recovery", "found" if result.slot_recovery_found else "not found"),
+        ("Slot recovery orbits", slot_orbits),
+        ("Slot recovery time", slot_time),
+        ("Slot phase error", slot_error),
+        ("Best searched orbit", f"{result.best_slot_orbits:d}"),
+        ("Best searched phase error", _fmt(result.best_slot_phase_error_deg, "deg", 6)),
+        ("Note", " ".join(result.notes)),
     ]
 
 
@@ -766,6 +804,20 @@ CALCULATORS: tuple[CalculatorSpec, ...] = (
         ),
         compute=combined_speed_plane_change_delta_v,
         formatter=_format_combined_plane_change,
+    ),
+    CalculatorSpec(
+        category=CATEGORY_TRANSFERS,
+        title="Mission recovery from in-track impulse",
+        prompts=(
+            FloatPrompt("reference_altitude_km", "Reference circular altitude", "km", min_value=0.0),
+            FloatPrompt("disturbance_delta_v_m_s", "Disturbance in-track delta-v (+I prograde, -I retrograde)", "m/s"),
+            FloatPrompt("spacecraft_mass_kg", "Spacecraft mass at recovery start", "kg", min_value=1.0e-9),
+            FloatPrompt("isp_s", "Specific impulse", "s", min_value=1.0e-9),
+            FloatPrompt("slot_tolerance_deg", "Slot recovery tolerance", "deg", min_value=0.0),
+            FloatPrompt("max_phasing_orbits", "Maximum phasing-orbit search", "orbits", min_value=1.0),
+        ),
+        compute=mission_recovery_from_intrack_impulse,
+        formatter=_format_mission_recovery,
     ),
     CalculatorSpec(
         category=CATEGORY_SUN_SYNC,

@@ -398,6 +398,60 @@ class PhasingDriftResult:
 
 
 @dataclass(frozen=True)
+class MissionRecoveryIntrackImpulseResult:
+    reference_altitude_km: float
+    reference_radius_km: float
+    reference_period_s: float
+    circular_speed_km_s: float
+    disturbance_delta_v_m_s: float
+    disturbed_speed_km_s: float
+    disturbed_semi_major_axis_km: float
+    disturbed_eccentricity: float
+    disturbed_perigee_altitude_km: float
+    disturbed_apogee_altitude_km: float
+    disturbed_period_s: float
+    disturbance_apsis: str
+    recovery_delta_v_m_s: float
+    recovery_propellant_kg: float
+    recovery_propellant_fraction: float
+    total_event_delta_v_m_s: float
+    total_event_propellant_fraction: float
+    spacecraft_mass_kg: float
+    isp_s: float
+    slot_tolerance_deg: float
+    max_phasing_orbits: int
+    continuous_slot_lap_time_s: float | None
+    slot_recovery_found: bool
+    slot_recovery_orbits: int | None
+    slot_recovery_time_s: float | None
+    slot_recovery_phase_error_deg: float | None
+    best_slot_orbits: int
+    best_slot_time_s: float
+    best_slot_phase_error_deg: float
+    notes: tuple[str, ...]
+
+    @property
+    def reference_period_min(self) -> float:
+        return self.reference_period_s / 60.0
+
+    @property
+    def disturbed_period_min(self) -> float:
+        return self.disturbed_period_s / 60.0
+
+    @property
+    def continuous_slot_lap_time_hr(self) -> float | None:
+        return None if self.continuous_slot_lap_time_s is None else self.continuous_slot_lap_time_s / 3600.0
+
+    @property
+    def slot_recovery_time_hr(self) -> float | None:
+        return None if self.slot_recovery_time_s is None else self.slot_recovery_time_s / 3600.0
+
+    @property
+    def best_slot_time_hr(self) -> float:
+        return self.best_slot_time_s / 3600.0
+
+
+@dataclass(frozen=True)
 class RocketEquationDeltaVResult:
     isp_s: float
     mass_ratio: float
@@ -1475,6 +1529,139 @@ def phasing_drift_from_altitude_change(
         drift_rate_m_s=drift_rate_km_s * 1000.0,
         drift_per_reference_orbit_km=drift_rate_km_s * ref.period_s,
         lap_time_s=lap_time_s,
+    )
+
+
+def mission_recovery_from_intrack_impulse(
+    reference_altitude_km: float,
+    disturbance_delta_v_m_s: float,
+    spacecraft_mass_kg: float,
+    isp_s: float,
+    *,
+    slot_tolerance_deg: float = 1.0,
+    max_phasing_orbits: int = 5000,
+    mu_km3_s2: float = EARTH_MU_KM3_S2,
+    body_radius_km: float = EARTH_RADIUS_KM,
+    standard_gravity_m_s2: float = STANDARD_GRAVITY_M_S2,
+) -> MissionRecoveryIntrackImpulseResult:
+    altitude = _nonnegative(reference_altitude_km, "reference_altitude_km")
+    disturbance = float(disturbance_delta_v_m_s)
+    if not np.isfinite(disturbance):
+        raise ValueError("disturbance_delta_v_m_s must be finite.")
+    mass = _positive(spacecraft_mass_kg, "spacecraft_mass_kg")
+    isp = _positive(isp_s, "isp_s")
+    tolerance = _nonnegative(slot_tolerance_deg, "slot_tolerance_deg")
+    max_orbits = int(max_phasing_orbits)
+    if max_orbits < 1:
+        raise ValueError("max_phasing_orbits must be at least 1.")
+
+    reference = circular_orbit_from_altitude(altitude, mu_km3_s2=mu_km3_s2, body_radius_km=body_radius_km)
+    r0 = float(reference.radius_km)
+    v_circ = float(reference.velocity_km_s)
+    disturbed_speed = v_circ + disturbance / 1000.0
+    if disturbed_speed <= 0.0:
+        raise ValueError("disturbance_delta_v_m_s makes the disturbed orbital speed non-positive.")
+
+    energy = 0.5 * disturbed_speed * disturbed_speed - float(mu_km3_s2) / r0
+    if energy >= -ENERGY_PARABOLIC_TOL:
+        raise ValueError("disturbance_delta_v_m_s creates a parabolic or escaping trajectory.")
+    disturbed_a = -float(mu_km3_s2) / (2.0 * energy)
+    if disturbed_a <= 0.0:
+        raise ValueError("disturbed semi-major axis must be positive.")
+    if disturbance < 0.0:
+        disturbance_apsis = "apogee"
+        apogee_radius = r0
+        perigee_radius = 2.0 * disturbed_a - apogee_radius
+    elif disturbance > 0.0:
+        disturbance_apsis = "perigee"
+        perigee_radius = r0
+        apogee_radius = 2.0 * disturbed_a - perigee_radius
+    else:
+        disturbance_apsis = "circular"
+        perigee_radius = r0
+        apogee_radius = r0
+    if perigee_radius <= 0.0 or apogee_radius <= 0.0:
+        raise ValueError("disturbance_delta_v_m_s creates an invalid elliptical orbit.")
+    disturbed_ecc = (apogee_radius - perigee_radius) / (apogee_radius + perigee_radius)
+    disturbed_period = 2.0 * pi * sqrt((disturbed_a**3) / float(mu_km3_s2))
+
+    recovery_dv = abs(disturbance)
+    recovery_mass = rocket_equation_mass_ratio(
+        delta_v_m_s=recovery_dv,
+        isp_s=isp,
+        standard_gravity_m_s2=standard_gravity_m_s2,
+    )
+    total_event_mass = rocket_equation_mass_ratio(
+        delta_v_m_s=2.0 * recovery_dv,
+        isp_s=isp,
+        standard_gravity_m_s2=standard_gravity_m_s2,
+    )
+    recovery_propellant_kg = mass * recovery_mass.propellant_fraction
+
+    n_ref = float(reference.mean_motion_rad_s)
+    n_disturbed = sqrt(float(mu_km3_s2) / (disturbed_a**3))
+    delta_n = n_disturbed - n_ref
+    continuous_lap = None if abs(delta_n) < 1.0e-15 else 2.0 * pi / abs(delta_n)
+
+    best_orbits = 1
+    best_error = float("inf")
+    found_orbits: int | None = None
+    found_error: float | None = None
+    for orbit_count in range(1, max_orbits + 1):
+        reference_phase = degrees(n_ref * disturbed_period * orbit_count)
+        phase_error = abs(_wrap_signed_degrees(reference_phase))
+        if phase_error < best_error:
+            best_error = phase_error
+            best_orbits = orbit_count
+        if found_orbits is None and phase_error <= tolerance:
+            found_orbits = orbit_count
+            found_error = phase_error
+            break
+
+    notes: list[str] = [
+        "Impulsive two-body estimate from an initially circular reference orbit.",
+        "Recovery burn is the opposite in-track impulse applied at the same apsis of the disturbed phasing orbit.",
+    ]
+    perigee_altitude = perigee_radius - float(body_radius_km)
+    apogee_altitude = apogee_radius - float(body_radius_km)
+    if perigee_altitude < 0.0:
+        notes.append("Disturbed orbit intersects the central body before a full phasing orbit.")
+    if found_orbits is None:
+        notes.append("No discrete same-apsis slot recovery found within the requested tolerance and search window.")
+    elif found_orbits == 1:
+        notes.append("First same-apsis recovery opportunity is inside the requested slot tolerance.")
+
+    return MissionRecoveryIntrackImpulseResult(
+        reference_altitude_km=altitude,
+        reference_radius_km=r0,
+        reference_period_s=float(reference.period_s),
+        circular_speed_km_s=v_circ,
+        disturbance_delta_v_m_s=disturbance,
+        disturbed_speed_km_s=float(disturbed_speed),
+        disturbed_semi_major_axis_km=float(disturbed_a),
+        disturbed_eccentricity=float(disturbed_ecc),
+        disturbed_perigee_altitude_km=float(perigee_altitude),
+        disturbed_apogee_altitude_km=float(apogee_altitude),
+        disturbed_period_s=float(disturbed_period),
+        disturbance_apsis=disturbance_apsis,
+        recovery_delta_v_m_s=float(recovery_dv),
+        recovery_propellant_kg=float(recovery_propellant_kg),
+        recovery_propellant_fraction=float(recovery_mass.propellant_fraction),
+        total_event_delta_v_m_s=float(2.0 * recovery_dv),
+        total_event_propellant_fraction=float(total_event_mass.propellant_fraction),
+        spacecraft_mass_kg=mass,
+        isp_s=isp,
+        slot_tolerance_deg=float(tolerance),
+        max_phasing_orbits=max_orbits,
+        continuous_slot_lap_time_s=continuous_lap,
+        slot_recovery_found=found_orbits is not None,
+        slot_recovery_orbits=found_orbits,
+        slot_recovery_time_s=(None if found_orbits is None else float(found_orbits * disturbed_period)),
+        slot_recovery_phase_error_deg=found_error,
+        best_slot_orbits=int(best_orbits),
+        best_slot_time_s=float(best_orbits * disturbed_period),
+        best_slot_phase_error_deg=float(best_error),
+        notes=tuple(notes),
     )
 
 

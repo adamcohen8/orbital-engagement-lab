@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -27,6 +28,11 @@ class ContractRecordTimingMission:
             "thrust_eci_km_s2": np.zeros(3, dtype=float),
             "command_mode_flags": flags,
         }
+
+
+class ContractFailingBridge:
+    def step(self, event):
+        raise RuntimeError("bridge boom")
 
 
 def _contract_config(output_dir: Path) -> dict:
@@ -261,6 +267,25 @@ def test_payload_artifact_contract_exposes_stable_summary_histories_and_wrappers
     assert (tmp_path / "master_run_log.json").is_file()
 
 
+def test_single_run_can_write_binary_history_artifact(tmp_path: Path) -> None:
+    raw = _contract_config(tmp_path)
+    raw["outputs"]["stats"]["save_history_npz"] = True
+    result = SimulationSession.from_config(SimulationConfig.from_dict(raw)).run()
+
+    history_outputs = dict(result.summary["history_binary_outputs"])
+    history_path = Path(history_outputs["npz"])
+
+    assert history_path == tmp_path / "master_run_history.npz"
+    assert history_path.is_file()
+    assert history_outputs["array_count"] >= 5
+    with np.load(history_path, allow_pickle=False) as data:
+        manifest = json.loads(str(data["manifest_json"].item()))
+        assert data["time_s"].tolist() == [0.0, 1.0, 2.0]
+        assert data["truth__target"].shape == (3, 14)
+        assert data["applied_torque__target"].shape == (3, 3)
+        assert manifest["arrays"]["truth__target"]["path"] == "truth_by_object.target"
+
+
 def test_engine_can_build_run_payload_without_artifact_side_effects(tmp_path: Path) -> None:
     cfg = scenario_config_from_dict(_contract_config(tmp_path))
     engine = create_single_run_engine(cfg)
@@ -278,6 +303,40 @@ def test_engine_can_build_run_payload_without_artifact_side_effects(tmp_path: Pa
     assert not (tmp_path / "master_run_summary.json").exists()
     assert not (tmp_path / "master_run_log.json").exists()
     assert not (tmp_path / "README.md").exists()
+
+
+def test_engine_payload_parts_use_history_views_until_json_materialization(tmp_path: Path) -> None:
+    cfg = scenario_config_from_dict(_contract_config(tmp_path))
+    engine = create_single_run_engine(cfg)
+    while not engine.done:
+        engine.step()
+
+    parts = engine._build_payload_parts()
+
+    assert np.shares_memory(parts.t_s, engine.t_s)
+    assert np.shares_memory(parts.truth_hist["target"], engine.truth_hist["target"])
+    assert np.shares_memory(parts.belief_hist["target"], engine.belief_hist["target"])
+    assert np.shares_memory(parts.thrust_hist["target"], engine.thrust_hist["target"])
+    assert np.shares_memory(parts.torque_hist["target"], engine.torque_hist["target"])
+
+
+def test_bridge_runtime_errors_are_recorded_by_default_and_strict_when_requested(tmp_path: Path) -> None:
+    raw = _contract_config(tmp_path / "default")
+    raw["target"]["bridge"] = {
+        "enabled": True,
+        "module": "sim.tests.test_product_contracts",
+        "class_name": "ContractFailingBridge",
+    }
+
+    default_result = SimulationSession.from_config(SimulationConfig.from_dict(raw)).run()
+    bridge_events = default_result.payload["bridge_events_by_object"]["target"]
+    assert bridge_events[0]["bridge_error"] == "bridge boom"
+
+    strict = _contract_config(tmp_path / "strict")
+    strict["simulator"]["plugin_validation"] = {"strict_runtime": True}
+    strict["target"]["bridge"] = raw["target"]["bridge"]
+    with pytest.raises(RuntimeError, match="target bridge.step failed"):
+        SimulationSession.from_config(SimulationConfig.from_dict(strict)).run()
 
 
 def test_engine_runs_named_multi_satellite_objects_with_relative_initialization(tmp_path: Path) -> None:

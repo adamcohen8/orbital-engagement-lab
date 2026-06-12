@@ -31,13 +31,13 @@ and summarize the run from saved artifacts.
 Validate:
 
 ```bash
-python run_simulation.py --config agents/examples/public_agent_single_satellite.yaml --validate-only
+.venv/bin/python run_simulation.py --config agents/examples/public_agent_single_satellite.yaml --validate-only
 ```
 
 Run:
 
 ```bash
-python run_simulation.py --config agents/examples/public_agent_single_satellite.yaml
+.venv/bin/python run_simulation.py --config agents/examples/public_agent_single_satellite.yaml
 ```
 
 ## Required Review Queries

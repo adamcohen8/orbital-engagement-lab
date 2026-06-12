@@ -51,7 +51,7 @@ Codex, Cursor, Claude Code, Gemini CLI, and similar tools should begin with:
 4. Start from the nearest public config or example when it fits, or create a
    scoped new scenario when the user's request is different.
 5. Validate any generated or edited scenario before running it.
-6. Prefer `python -m sim.review` when the run includes `review/run.sqlite`.
+6. Prefer `.venv/bin/python -m sim.review` when the run includes `review/run.sqlite`.
 7. Summarize results only from generated artifacts.
 8. Use `agents/public/evaluation-rubric.md` to judge whether the scenario
    supports the user's goal.
@@ -76,45 +76,45 @@ add smoke coverage when they create reusable examples.
 Validate environment:
 
 ```bash
-python run_simulation.py --doctor
+.venv/bin/python run_simulation.py --doctor
 ```
 
 Validate config:
 
 ```bash
-python run_simulation.py --config <scenario.yaml> --validate-only
+.venv/bin/python run_simulation.py --config <scenario.yaml> --validate-only
 ```
 
 Run scenario:
 
 ```bash
-python run_simulation.py --config <scenario.yaml>
+.venv/bin/python run_simulation.py --config <scenario.yaml>
 ```
 
 Run public quickstart:
 
 ```bash
-python run_simulation.py --quickstart --validate-only
-python run_simulation.py --quickstart
+.venv/bin/python run_simulation.py --quickstart --validate-only
+.venv/bin/python run_simulation.py --quickstart
 ```
 
 Run smoke checks:
 
 ```bash
-python -m pytest sim/tests/test_oel_agents.py
-python -m pytest sim/tests/test_quickstart_5min.py
+.venv/bin/python -m pytest sim/tests/test_oel_agents.py
+.venv/bin/python -m pytest sim/tests/test_quickstart_5min.py
 ```
 
 Run all agent-generated example checks:
 
 ```bash
-python -m pytest sim/tests/test_oel_agents.py
+.venv/bin/python -m pytest sim/tests/test_oel_agents.py
 ```
 
 Generate public report artifacts:
 
 ```bash
-python run_simulation.py --quickstart
+.venv/bin/python run_simulation.py --quickstart
 ```
 
 The public core writes deterministic Markdown, JSON, CSV, and plot artifacts.
@@ -122,7 +122,7 @@ The public core writes deterministic Markdown, JSON, CSV, and plot artifacts.
 Inspect outputs:
 
 ```bash
-python - <<'PY'
+.venv/bin/python - <<'PY'
 import json
 from pathlib import Path
 
@@ -137,20 +137,20 @@ When the run has `outputs.review.enabled: true`, prefer the review query API
 over ad hoc parsing of large logs:
 
 ```bash
-python -m sim.review outputs/my_run --query "SELECT scenario_name, duration_s FROM run_metadata"
-python -m sim.review outputs/my_run --query "SELECT time_s, range_km FROM relative_state LIMIT 20" --json
+.venv/bin/python -m sim.review outputs/my_run --query "SELECT scenario_name, duration_s FROM run_metadata"
+.venv/bin/python -m sim.review outputs/my_run --query "SELECT time_s, range_km FROM relative_state LIMIT 20" --json
 ```
 
 Common review queries are maintained in
 [`agent-review-queries.md`](agent-review-queries.md). Agents should state the
 query used when a conclusion depends on review-store evidence.
 
-For agent review, prefer `python -m sim.review`. The Output Review Workbench is
+For agent review, prefer `.venv/bin/python -m sim.review`. The Output Review Workbench is
 an experimental preview and is not currently recommended for routine review.
 Use it only when the user explicitly asks for an interactive local workbench:
 
 ```bash
-python run_orw.py --output outputs/my_run
+.venv/bin/python run_orw.py --output outputs/my_run
 ```
 
 ## Natural Requests
@@ -208,20 +208,30 @@ evaluation fixtures for the evidence loop, not the conceptual boundary of OEL
 Agents. Each one should validate before running and summarize only from saved
 artifacts.
 
-1. Passive propagation: use
+1. Python API minimal propagation: use `ScenarioBuilder` to generate a small
+   YAML artifact, validate and run it through the CLI, then query
+   `run_metadata`.
+2. Passive propagation: use
    `agents/examples/public_agent_single_satellite.yaml` to propagate one
    satellite and inspect `object_state` evidence.
-2. Closed-loop rendezvous: use
+3. Closed-loop rendezvous: use
    `agents/examples/public_agent_rendezvous_lqr.yaml` to inspect relative
    range, closest approach, burn events, and whether the run supports a
    terminal-rendezvous claim.
-3. Ground access: use
+4. Mission recovery: use
+   `agents/examples/public_agent_mission_recovery_plus_c_burn.yaml` to inspect
+   a +C burn, final-vs-initial orbital elements, and recovery delta-v evidence.
+5. Mission reconstitution trade space: use
+   `agents/examples/public_agent_mission_reconstitution_trade_space.yaml` to
+   compare min-time, min-delta-v, and constrained planner candidates from
+   saved review evidence.
+6. Ground access: use
    `agents/examples/public_agent_ground_access.yaml` to inspect access samples
    and state that TLE input initializes an OEL numerical propagation, not SGP4.
-4. Attitude hold: use
+7. Attitude hold: use
    `agents/examples/public_agent_attitude_hold.yaml` to inspect body-rate and
    attitude-control evidence.
-5. One-variable comparison: copy a nearby example, change one parameter, run
+8. One-variable comparison: copy a nearby example, change one parameter, run
    both cases, and compare only metrics or histories present in artifacts.
 
 The maintained card set for these tasks lives in
@@ -294,10 +304,12 @@ does not match an example:
 
 | Goal | Example | Validate |
 | --- | --- | --- |
-| Passive orbit propagation | `agents/examples/public_agent_single_satellite.yaml` | `python run_simulation.py --config agents/examples/public_agent_single_satellite.yaml --validate-only` |
-| Closed-loop rendezvous | `agents/examples/public_agent_rendezvous_lqr.yaml` | `python run_simulation.py --config agents/examples/public_agent_rendezvous_lqr.yaml --validate-only` |
-| TLE ground-station access | `agents/examples/public_agent_ground_access.yaml` | `python run_simulation.py --config agents/examples/public_agent_ground_access.yaml --validate-only` |
-| Attitude hold | `agents/examples/public_agent_attitude_hold.yaml` | `python run_simulation.py --config agents/examples/public_agent_attitude_hold.yaml --validate-only` |
+| Passive orbit propagation | `agents/examples/public_agent_single_satellite.yaml` | `.venv/bin/python run_simulation.py --config agents/examples/public_agent_single_satellite.yaml --validate-only` |
+| Closed-loop rendezvous | `agents/examples/public_agent_rendezvous_lqr.yaml` | `.venv/bin/python run_simulation.py --config agents/examples/public_agent_rendezvous_lqr.yaml --validate-only` |
+| Mission recovery +C burn | `agents/examples/public_agent_mission_recovery_plus_c_burn.yaml` | `.venv/bin/python run_simulation.py --config agents/examples/public_agent_mission_recovery_plus_c_burn.yaml --validate-only` |
+| Mission reconstitution trade space | `agents/examples/public_agent_mission_reconstitution_trade_space.yaml` | `.venv/bin/python run_simulation.py --config agents/examples/public_agent_mission_reconstitution_trade_space.yaml --validate-only` |
+| TLE ground-station access | `agents/examples/public_agent_ground_access.yaml` | `.venv/bin/python run_simulation.py --config agents/examples/public_agent_ground_access.yaml --validate-only` |
+| Attitude hold | `agents/examples/public_agent_attitude_hold.yaml` | `.venv/bin/python run_simulation.py --config agents/examples/public_agent_attitude_hold.yaml --validate-only` |
 
 These examples enable standard review output so agents can practice querying
 `review/run.sqlite` after a successful run.
@@ -366,8 +378,8 @@ Example request:
 Example commands:
 
 ```bash
-python run_simulation.py --config agents/examples/public_agent_single_satellite.yaml --validate-only
-python run_simulation.py --config agents/examples/public_agent_single_satellite.yaml
+.venv/bin/python run_simulation.py --config agents/examples/public_agent_single_satellite.yaml --validate-only
+.venv/bin/python run_simulation.py --config agents/examples/public_agent_single_satellite.yaml
 ```
 
 ## Safety And IP Guidance

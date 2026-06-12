@@ -36,13 +36,13 @@ compare final range, closest approach, burn activity, and limitations.
 Validate the baseline:
 
 ```bash
-python run_simulation.py --config agents/examples/public_agent_rendezvous_lqr.yaml --validate-only
+.venv/bin/python run_simulation.py --config agents/examples/public_agent_rendezvous_lqr.yaml --validate-only
 ```
 
 Run the baseline:
 
 ```bash
-python run_simulation.py --config agents/examples/public_agent_rendezvous_lqr.yaml
+.venv/bin/python run_simulation.py --config agents/examples/public_agent_rendezvous_lqr.yaml
 ```
 
 ## Required Review Queries

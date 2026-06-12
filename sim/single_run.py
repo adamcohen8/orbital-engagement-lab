@@ -712,6 +712,8 @@ class _SingleRunEngine:
                         if ret is not None:
                             evt["bridge"] = ret
                     except Exception as ex:
+                        if bool(getattr(self.cfg.simulator.plugin_validation, "strict_runtime", False)):
+                            raise RuntimeError(f"{aid} bridge.step failed at t={t_next:.6g} s") from ex
                         evt["bridge_error"] = str(ex)
                 self.bridge_hist[aid].append(evt)
 
@@ -762,38 +764,38 @@ class _SingleRunEngine:
 
     def _build_payload_parts(self) -> _SingleRunPayloadParts:
         n_used = self.current_index + 1
-        t_out = self.t_s[:n_used].copy()
-        truth_out = {k: v[:n_used, :].copy() for k, v in self.truth_hist.items()}
+        t_out = self.t_s[:n_used]
+        truth_out = {k: v[:n_used, :] for k, v in self.truth_hist.items()}
         target_reference_orbit_out = (
-            None if self.target_reference_orbit_hist is None else self.target_reference_orbit_hist[:n_used, :].copy()
+            None if self.target_reference_orbit_hist is None else self.target_reference_orbit_hist[:n_used, :]
         )
-        belief_out = {k: v[:n_used, :].copy() for k, v in self.belief_hist.items()}
-        thrust_out = {k: v[:n_used, :].copy() for k, v in self.thrust_hist.items()}
-        torque_out = {k: v[:n_used, :].copy() for k, v in self.torque_hist.items()}
-        desired_attitude_out = {k: v[:n_used, :].copy() for k, v in self.desired_attitude_hist.items()}
+        belief_out = {k: v[:n_used, :] for k, v in self.belief_hist.items()}
+        thrust_out = {k: v[:n_used, :] for k, v in self.thrust_hist.items()}
+        torque_out = {k: v[:n_used, :] for k, v in self.torque_hist.items()}
+        desired_attitude_out = {k: v[:n_used, :] for k, v in self.desired_attitude_hist.items()}
         knowledge_out = {
-            obs: {tgt: arr[:n_used, :].copy() for tgt, arr in by_tgt.items()}
+            obs: {tgt: arr[:n_used, :] for tgt, arr in by_tgt.items()}
             for obs, by_tgt in self.knowledge_hist.items()
         }
         knowledge_measurements_out = {
-            obs: {tgt: arr[:n_used, :].copy() for tgt, arr in by_tgt.items()}
+            obs: {tgt: arr[:n_used, :] for tgt, arr in by_tgt.items()}
             for obs, by_tgt in getattr(self, "knowledge_measurement_hist", {}).items()
         }
         rocket_metrics_out: dict[str, np.ndarray] = {}
         if self.rocket is not None:
             rocket_object_id = str(getattr(self.rocket, "object_id", "rocket") or "rocket")
             if self.rocket_stage_hist is not None:
-                rocket_metrics_out["stage_index"] = self.rocket_stage_hist[:n_used].copy()
+                rocket_metrics_out["stage_index"] = self.rocket_stage_hist[:n_used]
             if self.rocket_q_dyn_hist is not None:
-                rocket_metrics_out["q_dyn_pa"] = self.rocket_q_dyn_hist[:n_used].copy()
+                rocket_metrics_out["q_dyn_pa"] = self.rocket_q_dyn_hist[:n_used]
             if self.rocket_mach_hist is not None:
-                rocket_metrics_out["mach"] = self.rocket_mach_hist[:n_used].copy()
+                rocket_metrics_out["mach"] = self.rocket_mach_hist[:n_used]
             if rocket_object_id in self.throttle_hist:
-                rocket_metrics_out["throttle_cmd"] = self.throttle_hist[rocket_object_id][:n_used].copy()
+                rocket_metrics_out["throttle_cmd"] = self.throttle_hist[rocket_object_id][:n_used]
             for metric_key, metric_hist in getattr(self, "rocket_metric_hists", {}).items():
-                rocket_metrics_out[metric_key] = metric_hist[:n_used].copy()
+                rocket_metrics_out[metric_key] = metric_hist[:n_used]
         reentry_metrics_out = {
-            oid: {key: hist[:n_used].copy() for key, hist in metrics.items()}
+            oid: {key: hist[:n_used] for key, hist in metrics.items()}
             for oid, metrics in getattr(self, "reentry_metric_hists", {}).items()
         }
 
@@ -884,6 +886,7 @@ class _SingleRunEngine:
                 target_reference_orbit_truth=parts.target_reference_orbit_truth,
                 belief_hist=parts.belief_hist,
                 thrust_hist=parts.thrust_hist,
+                torque_hist=parts.torque_hist,
                 desired_attitude_hist=parts.desired_attitude_hist,
                 knowledge_hist=parts.knowledge_hist,
                 knowledge_measurement_hist=parts.knowledge_measurement_hist,

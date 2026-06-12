@@ -2451,8 +2451,17 @@ class SingleRICAxisBurnMissionModule:
     def _reference_state(
         self,
         *,
+        object_id: str | None,
+        truth: StateTruth,
         own_knowledge: dict[str, StateBelief],
     ) -> tuple[np.ndarray, np.ndarray] | None:
+        target_token = str(self.target_id or "").strip().lower()
+        object_token = str(object_id or "").strip().lower()
+        if target_token in {"", "self", "ownship"} or (object_token and target_token == object_token):
+            return (
+                np.array(truth.position_eci_km, dtype=float).reshape(3),
+                np.array(truth.velocity_eci_km_s, dtype=float).reshape(3),
+            )
         ref = _resolve_target_state(
             target_id=self.target_id,
             use_knowledge_for_targeting=bool(self.use_knowledge_for_targeting),
@@ -2475,10 +2484,11 @@ class SingleRICAxisBurnMissionModule:
         own_knowledge: dict[str, StateBelief],
         t_s: float,
         dt_s: float,
+        object_id: str | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         out: dict[str, Any] = {}
-        ref = self._reference_state(own_knowledge=own_knowledge)
+        ref = self._reference_state(object_id=object_id, truth=truth, own_knowledge=own_knowledge)
         burn_start_s = float(self.burn_start_s)
         burn_duration_s = float(max(self.burn_duration_s, 0.0))
         slew_lead_time_s = float(max(self.slew_lead_time_s, 0.0))

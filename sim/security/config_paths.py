@@ -18,6 +18,10 @@ def _truthy_env(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _sealed_mode_env() -> bool:
+    return _truthy_env("OEL_SEALED_MODE")
+
+
 def _as_resolved_roots(paths: Iterable[str | Path | None]) -> tuple[Path, ...]:
     roots: list[Path] = []
     for raw in paths:
@@ -72,16 +76,29 @@ class ConfigPathPolicy:
         if cfg_dir is not None:
             default_read_roots.append(cfg_dir)
             default_write_roots.append(cfg_dir)
+        env_allows_external_paths = _truthy_env("OEL_ALLOW_EXTERNAL_CONFIG_PATHS")
+        env_allows_external_ai_prompts = _truthy_env("OEL_ALLOW_EXTERNAL_AI_PROMPT_FILES")
+        if _sealed_mode_env():
+            if env_allows_external_paths and not allow_external_config_paths:
+                raise ConfigPathSecurityError(
+                    "OEL_SEALED_MODE blocks OEL_ALLOW_EXTERNAL_CONFIG_PATHS. "
+                    "Pass allow_external_config_paths=True only for an explicitly trusted sealed-mode run."
+                )
+            if env_allows_external_ai_prompts and not allow_external_ai_prompt_files:
+                raise ConfigPathSecurityError(
+                    "OEL_SEALED_MODE blocks OEL_ALLOW_EXTERNAL_AI_PROMPT_FILES. "
+                    "Pass allow_external_ai_prompt_files=True only for an explicitly trusted sealed-mode run."
+                )
         return cls(
             config_path=cfg_path,
             workspace_root=workspace,
             read_roots=_as_resolved_roots([*default_read_roots, *read_roots]),
             write_roots=_as_resolved_roots([*default_write_roots, *write_roots]),
             allow_external_config_paths=bool(
-                allow_external_config_paths or _truthy_env("OEL_ALLOW_EXTERNAL_CONFIG_PATHS")
+                allow_external_config_paths or env_allows_external_paths
             ),
             allow_external_ai_prompt_files=bool(
-                allow_external_ai_prompt_files or _truthy_env("OEL_ALLOW_EXTERNAL_AI_PROMPT_FILES")
+                allow_external_ai_prompt_files or env_allows_external_ai_prompts
             ),
         )
 

@@ -6,6 +6,59 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.10.4 - 2026-06-12
+
+Release thesis: `v0.10.4` strengthens OEL Agents as a public, evidence-backed
+workflow by adding artifact-first Python scenario authoring, richer review-store
+queries, and mission-recovery/reconstitution examples that remain tied to the
+deterministic simulator and documented review evidence.
+
+### Added
+
+- Added `ScenarioArtifact`, `ScenarioBuilder`, structured validation reports,
+  saved-config helpers, review accessors, and evidence manifests to the public
+  Python API so agents, notebooks, and apps can create durable scenario YAML
+  artifacts before validation and execution.
+- Added public mission-recovery analysis through `analysis.mission_recovery`,
+  including final-vs-initial orbital-element comparison, delta-v/propellant
+  estimates, optional same-apsis slot search, deterministic planner trade-space
+  candidates, and the `mission_recovery_trade_space` plot.
+- Added review-store tables and saved queries for mission recovery and mission
+  reconstitution evidence: `mission_recovery_summary`,
+  `mission_recovery_elements`, `mission_recovery_candidates`,
+  `mission_recovery_burns`, and `mission_recovery_candidate_elements`.
+- Added public agent task cards, answer examples, and YAML fixtures for Python
+  API minimal propagation, mission recovery after a +C burn, and mission
+  reconstitution trade-space comparison.
+- Added `outputs.stats.save_history_npz` to write compressed
+  `master_run_history.npz` files with a manifest for scalable downstream Python
+  analysis of long histories.
+
+### Changed
+
+- Updated OEL Agent instructions and public docs to prefer `.venv/bin/python`
+  commands, inspect review-store schemas before custom SQL, and cite saved
+  review queries or SQL when summarizing run evidence.
+- Expanded scenario YAML, review-store, Python API, payload-artifact, and
+  orbital-calculator docs for scenario artifacts, mission recovery, mission
+  reconstitution evidence, and binary history outputs.
+- Updated the validation harness to preserve the latest generated benchmark
+  config, record benchmark runtime artifacts, and prune stale Monte Carlo run
+  directories from prior harness runs.
+- Bumped the review-store schema version to `0.3` for the new mission-recovery
+  tables and review metadata.
+
+### Fixed
+
+- Fixed disabled plot and animation output paths so single-run artifact writing
+  returns early when those output families are off.
+- Tightened JSON output writing so NumPy/scalar values and non-finite floats are
+  converted to JSON-safe representations before serialization.
+- Added strict runtime plugin-validation behavior for bridge step failures when
+  `simulator.plugin_validation.strict_runtime` is enabled.
+- Updated public export ignore rules to keep temporary `.venv_temp/` runtime
+  folders out of generated public exports.
+
 ## 0.10.3 - 2026-06-05
 
 Release thesis: `v0.10.3` improves the RPO Trainer onboarding path by adding a

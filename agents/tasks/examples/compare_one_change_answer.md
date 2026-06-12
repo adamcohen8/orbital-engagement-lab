@@ -5,10 +5,10 @@ after changing exactly one initial-separation parameter.
 
 Commands:
 
-- `python run_simulation.py --config agents/examples/public_agent_rendezvous_lqr.yaml --validate-only`
-- `python run_simulation.py --config agents/examples/public_agent_rendezvous_lqr.yaml`
-- `python run_simulation.py --config <modified_config>.yaml --validate-only`
-- `python run_simulation.py --config <modified_config>.yaml`
+- `.venv/bin/python run_simulation.py --config agents/examples/public_agent_rendezvous_lqr.yaml --validate-only`
+- `.venv/bin/python run_simulation.py --config agents/examples/public_agent_rendezvous_lqr.yaml`
+- `.venv/bin/python run_simulation.py --config <modified_config>.yaml --validate-only`
+- `.venv/bin/python run_simulation.py --config <modified_config>.yaml`
 
 Review queries:
 
