@@ -27,7 +27,7 @@ runs, review queries, artifacts, tests, and honest limits.
 4. Run the scenario through `run_simulation.py`.
 5. Inspect generated `index.md`, `master_run_summary.json`, CSV, and plot
    artifacts.
-6. Use `python -m sim.review` when a run includes `review/run.sqlite`.
+6. Use `.venv/bin/python -m sim.review` when a run includes `review/run.sqlite`.
 7. Evaluate the run with `agents/public/evaluation-rubric.md`.
 8. Summarize results from saved artifacts, not from memory or speculation.
 9. Add tests or smoke checks for new agent-facing examples.
@@ -53,37 +53,37 @@ boundary of what agents can help users do.
 Validate environment:
 
 ```bash
-python run_simulation.py --doctor
+.venv/bin/python run_simulation.py --doctor
 ```
 
 Validate config:
 
 ```bash
-python run_simulation.py --config configs/automation_smoke.yaml --validate-only
+.venv/bin/python run_simulation.py --config configs/automation_smoke.yaml --validate-only
 ```
 
 Run scenario:
 
 ```bash
-python run_simulation.py --config configs/automation_smoke.yaml
+.venv/bin/python run_simulation.py --config configs/automation_smoke.yaml
 ```
 
 Run smoke test:
 
 ```bash
-python -m pytest sim/tests/test_oel_agents.py
+.venv/bin/python -m pytest sim/tests/test_oel_agents.py
 ```
 
 Generate a report-like public artifact set:
 
 ```bash
-python run_simulation.py --quickstart
+.venv/bin/python run_simulation.py --quickstart
 ```
 
 Inspect outputs:
 
 ```bash
-python - <<'PY'
+.venv/bin/python - <<'PY'
 import json
 from pathlib import Path
 
@@ -99,13 +99,20 @@ debriefs as report artifacts.
 Inspect review stores when enabled:
 
 ```bash
-python -m sim.review outputs/my_run --query "SELECT scenario_name, duration_s FROM run_metadata"
-python -m sim.review outputs/my_run --query "SELECT time_s, range_km FROM relative_state LIMIT 20" --json
+.venv/bin/python -m sim.review outputs/my_run --query "SELECT scenario_name, duration_s FROM run_metadata"
+.venv/bin/python -m sim.review outputs/my_run --query "SELECT time_s, range_km FROM relative_state LIMIT 20" --json
 ```
 
 When using the review store, cite the SQL query or saved view that supports the
 answer. Keep queries read-only, prefer `SELECT`/`WITH`, and inspect table names
-with the Python API if needed:
+or sample rows before writing custom SQL against an unfamiliar table:
+
+```bash
+.venv/bin/python -m sim.review outputs/my_run --query "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name" --json
+.venv/bin/python -m sim.review outputs/my_run --query "SELECT * FROM object_state LIMIT 1" --json
+```
+
+You can also inspect table names with the Python API:
 
 ```python
 from sim.review import ReviewWorkspace
@@ -121,11 +128,11 @@ is missing, fall back to `index.md`, `master_run_summary.json`, CSV histories,
 and plots without claiming structured review evidence exists.
 
 The Output Review Workbench is an experimental preview and is not currently
-recommended for routine agent review. Prefer `python -m sim.review`. Use ORW
+recommended for routine agent review. Prefer `.venv/bin/python -m sim.review`. Use ORW
 only when the user explicitly asks for the interactive local workbench:
 
 ```bash
-python run_orw.py --output outputs/my_run
+.venv/bin/python run_orw.py --output outputs/my_run
 ```
 
 ## Scenario Generation Rules
@@ -177,7 +184,7 @@ examples:
 3. Keep only the complexity required by the user's goal.
 4. Validate the generated config before execution.
 5. Run the deterministic simulator and inspect saved artifacts.
-6. Use `python -m sim.review` when a review store exists.
+6. Use `.venv/bin/python -m sim.review` when a review store exists.
 7. State assumptions, missing evidence, and model limits in the answer.
 
 If no public-core workflow can answer the request, say so and point to the
@@ -230,8 +237,8 @@ Request:
 Use:
 
 ```bash
-python run_simulation.py --config agents/examples/public_agent_single_satellite.yaml --validate-only
-python run_simulation.py --config agents/examples/public_agent_single_satellite.yaml
+.venv/bin/python run_simulation.py --config agents/examples/public_agent_single_satellite.yaml --validate-only
+.venv/bin/python run_simulation.py --config agents/examples/public_agent_single_satellite.yaml
 ```
 
 Request:
@@ -241,8 +248,8 @@ Request:
 Use:
 
 ```bash
-python run_simulation.py --config examples/configs/public_closed_loop_rendezvous_lqr.yaml --validate-only
-python run_simulation.py --config examples/configs/public_closed_loop_rendezvous_lqr.yaml
+.venv/bin/python run_simulation.py --config examples/configs/public_closed_loop_rendezvous_lqr.yaml --validate-only
+.venv/bin/python run_simulation.py --config examples/configs/public_closed_loop_rendezvous_lqr.yaml
 ```
 
 Request:
@@ -252,7 +259,7 @@ Request:
 Use:
 
 ```bash
-python run_game.py examples/configs/public_manual_rpo_training.yaml
+.venv/bin/python run_game.py examples/configs/public_manual_rpo_training.yaml
 ```
 
 ## Natural User Requests
@@ -289,15 +296,18 @@ run, and inspect them quickly. They are useful starting points and regression
 fixtures, not a complete list of supported agent workflows:
 
 ```bash
-python run_simulation.py --config agents/examples/public_agent_single_satellite.yaml --validate-only
-python run_simulation.py --config agents/examples/public_agent_rendezvous_lqr.yaml --validate-only
-python run_simulation.py --config agents/examples/public_agent_ground_access.yaml --validate-only
-python run_simulation.py --config agents/examples/public_agent_attitude_hold.yaml --validate-only
+.venv/bin/python run_simulation.py --config agents/examples/public_agent_single_satellite.yaml --validate-only
+.venv/bin/python run_simulation.py --config agents/examples/public_agent_rendezvous_lqr.yaml --validate-only
+.venv/bin/python run_simulation.py --config agents/examples/public_agent_mission_recovery_plus_c_burn.yaml --validate-only
+.venv/bin/python run_simulation.py --config agents/examples/public_agent_mission_reconstitution_trade_space.yaml --validate-only
+.venv/bin/python run_simulation.py --config agents/examples/public_agent_ground_access.yaml --validate-only
+.venv/bin/python run_simulation.py --config agents/examples/public_agent_attitude_hold.yaml --validate-only
 ```
 
 These examples enable standard review output. After running one, inspect
-`outputs/agents/<scenario_name>/review/run.sqlite` with `python -m sim.review`
-and cite the query used for any important metric.
+the configured output directory's `review/run.sqlite` with
+`.venv/bin/python -m sim.review` and cite the query used for any important
+metric.
 
 For a repeatable evaluation set around these examples, use the task cards in
 `docs/agent-task-cards.md`.

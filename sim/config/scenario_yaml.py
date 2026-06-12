@@ -139,11 +139,15 @@ class SimulatorEnvironmentSection(_TypedConfigDict):
 
 
 class SimulatorPluginValidationSection(_TypedConfigDict):
-    _defaults = {"strict": True}
+    _defaults = {"strict": True, "strict_runtime": False}
 
     @property
     def strict(self) -> bool:
         return bool(self.get("strict", True))
+
+    @property
+    def strict_runtime(self) -> bool:
+        return bool(self.get("strict_runtime", False))
 
 
 class SimulatorTerminationSection(_TypedConfigDict):
@@ -171,6 +175,7 @@ class OutputStatsSection(_TypedConfigDict):
         "print_summary": True,
         "save_json": True,
         "save_full_log": True,
+        "save_history_npz": False,
     }
 
     @property
@@ -184,6 +189,10 @@ class OutputStatsSection(_TypedConfigDict):
     @property
     def save_full_log(self) -> bool:
         return bool(self.get("save_full_log", True))
+
+    @property
+    def save_history_npz(self) -> bool:
+        return bool(self.get("save_history_npz", False))
 
 
 class OutputPlotsSection(_TypedConfigDict):
@@ -464,6 +473,19 @@ class CovarianceSection:
 
 
 @dataclass(frozen=True)
+class MissionRecoverySection:
+    enabled: bool = False
+    object_id: str = ""
+    goal: str = "orbit_shape"
+    assessment_time_s: float | str = "final"
+    slot_tolerance_deg: float = 1.0
+    max_phasing_orbits: int = 5000
+    planner: dict[str, Any] = field(default_factory=dict)
+    propulsion: dict[str, Any] = field(default_factory=dict)
+    element_tolerances: dict[str, float] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class AnalysisSection:
     enabled: bool = False
     study_type: str = "monte_carlo"
@@ -473,6 +495,7 @@ class AnalysisSection:
     monte_carlo: AnalysisMonteCarloSection = field(default_factory=AnalysisMonteCarloSection)
     sensitivity: SensitivitySection = field(default_factory=SensitivitySection)
     covariance: CovarianceSection = field(default_factory=CovarianceSection)
+    mission_recovery: MissionRecoverySection = field(default_factory=MissionRecoverySection)
 
 
 @dataclass(frozen=True)
@@ -1114,6 +1137,9 @@ def _parse_simulator_section(value: Any) -> SimulatorSection:
     plugin_validation["strict"] = _parse_bool(
         plugin_validation.get("strict", True), "simulator.plugin_validation.strict"
     )
+    plugin_validation["strict_runtime"] = _parse_bool(
+        plugin_validation.get("strict_runtime", False), "simulator.plugin_validation.strict_runtime"
+    )
     termination = _normalize_simulator_termination_block(
         termination,
         "simulator.termination",
@@ -1456,6 +1482,114 @@ def _parse_covariance_section(value: Any) -> CovarianceSection:
     )
 
 
+def _parse_mission_recovery_section(value: Any) -> MissionRecoverySection:
+    d = _as_dict(value, "analysis.mission_recovery")
+    goal = str(d.get("goal", d.get("recovery_goal", "orbit_shape")) or "orbit_shape").strip().lower()
+    if goal not in {"orbit_shape", "orbit_slot"}:
+        raise ValueError("analysis.mission_recovery.goal must be one of: orbit_shape, orbit_slot.")
+    assessment_raw = d.get("assessment_time_s", "final")
+    if isinstance(assessment_raw, str):
+        assessment: float | str = assessment_raw.strip().lower()
+        if assessment != "final":
+            assessment = _parse_float(assessment_raw, "analysis.mission_recovery.assessment_time_s")
+    else:
+        assessment = _parse_float(assessment_raw, "analysis.mission_recovery.assessment_time_s")
+    slot_tolerance = _parse_float(
+        d.get("slot_tolerance_deg", 1.0),
+        "analysis.mission_recovery.slot_tolerance_deg",
+    )
+    if slot_tolerance < 0.0:
+        raise ValueError("analysis.mission_recovery.slot_tolerance_deg must be >= 0.")
+    max_phasing_orbits = int(d.get("max_phasing_orbits", 5000))
+    if max_phasing_orbits < 1:
+        raise ValueError("analysis.mission_recovery.max_phasing_orbits must be at least 1.")
+    planner = _parse_mission_recovery_planner_section(d.get("planner"))
+    propulsion = dict(d.get("propulsion", {}) or {})
+    if propulsion.get("isp_s") is not None and _parse_float(propulsion.get("isp_s"), "analysis.mission_recovery.propulsion.isp_s") <= 0.0:
+        raise ValueError("analysis.mission_recovery.propulsion.isp_s must be positive.")
+    if propulsion.get("spacecraft_mass_kg") is not None and _parse_float(
+        propulsion.get("spacecraft_mass_kg"),
+        "analysis.mission_recovery.propulsion.spacecraft_mass_kg",
+    ) <= 0.0:
+        raise ValueError("analysis.mission_recovery.propulsion.spacecraft_mass_kg must be positive.")
+    if propulsion.get("max_thrust_n") is not None and _parse_float(
+        propulsion.get("max_thrust_n"),
+        "analysis.mission_recovery.propulsion.max_thrust_n",
+    ) <= 0.0:
+        raise ValueError("analysis.mission_recovery.propulsion.max_thrust_n must be positive.")
+    tolerances_raw = d.get("element_tolerances", {}) or {}
+    if not isinstance(tolerances_raw, dict):
+        raise ValueError("analysis.mission_recovery.element_tolerances must be a mapping.")
+    tolerances = {
+        str(key): _parse_float(value, f"analysis.mission_recovery.element_tolerances.{key}")
+        for key, value in tolerances_raw.items()
+    }
+    if any(value < 0.0 for value in tolerances.values()):
+        raise ValueError("analysis.mission_recovery.element_tolerances values must be >= 0.")
+    return MissionRecoverySection(
+        enabled=_parse_bool(d.get("enabled", False), "analysis.mission_recovery.enabled"),
+        object_id=str(d.get("object_id", "") or "").strip(),
+        goal=goal,
+        assessment_time_s=assessment,
+        slot_tolerance_deg=slot_tolerance,
+        max_phasing_orbits=max_phasing_orbits,
+        planner=planner,
+        propulsion=propulsion,
+        element_tolerances=tolerances,
+    )
+
+
+def _parse_mission_recovery_planner_section(value: Any) -> dict[str, Any]:
+    d = _as_dict(value, "analysis.mission_recovery.planner")
+    enabled = _parse_bool(d.get("enabled", False), "analysis.mission_recovery.planner.enabled")
+    raw_modes = d.get("modes", d.get("mode", ["min_delta_v", "min_time", "constrained"]))
+    if isinstance(raw_modes, str):
+        modes = [raw_modes]
+    else:
+        modes = list(raw_modes or [])
+    modes = [str(mode).strip().lower() for mode in modes if str(mode).strip()]
+    if not modes:
+        modes = ["min_delta_v", "min_time", "constrained"]
+    allowed_modes = {"min_delta_v", "min_time", "constrained"}
+    invalid = [mode for mode in modes if mode not in allowed_modes]
+    if invalid:
+        raise ValueError(
+            "analysis.mission_recovery.planner.modes must contain only: constrained, min_delta_v, min_time."
+        )
+    max_recovery_time_s = _parse_float(
+        d.get("max_recovery_time_s", 86400.0),
+        "analysis.mission_recovery.planner.max_recovery_time_s",
+    )
+    if max_recovery_time_s < 0.0:
+        raise ValueError("analysis.mission_recovery.planner.max_recovery_time_s must be >= 0.")
+    max_recovery_delta_v_m_s = d.get("max_recovery_delta_v_m_s")
+    max_recovery_delta_v = (
+        None
+        if max_recovery_delta_v_m_s in (None, "")
+        else _parse_float(
+            max_recovery_delta_v_m_s,
+            "analysis.mission_recovery.planner.max_recovery_delta_v_m_s",
+        )
+    )
+    if max_recovery_delta_v is not None and max_recovery_delta_v < 0.0:
+        raise ValueError("analysis.mission_recovery.planner.max_recovery_delta_v_m_s must be >= 0.")
+    candidate_count = int(d.get("candidate_count", 12))
+    if candidate_count < 1:
+        raise ValueError("analysis.mission_recovery.planner.candidate_count must be at least 1.")
+    simulate_candidates = _parse_bool(
+        d.get("simulate_candidates", True),
+        "analysis.mission_recovery.planner.simulate_candidates",
+    )
+    return {
+        "enabled": enabled,
+        "modes": modes,
+        "max_recovery_time_s": max_recovery_time_s,
+        "max_recovery_delta_v_m_s": max_recovery_delta_v,
+        "candidate_count": candidate_count,
+        "simulate_candidates": simulate_candidates,
+    }
+
+
 def _parse_analysis_section(value: Any, *, legacy_mc: MonteCarloSection) -> AnalysisSection:
     d = _as_dict(value, "analysis")
     metrics = d.get("metrics", []) or []
@@ -1470,6 +1604,7 @@ def _parse_analysis_section(value: Any, *, legacy_mc: MonteCarloSection) -> Anal
         monte_carlo=_parse_analysis_monte_carlo_section(d.get("monte_carlo"), fallback=legacy_mc),
         sensitivity=_parse_sensitivity_section(d.get("sensitivity")),
         covariance=_parse_covariance_section(d.get("covariance")),
+        mission_recovery=_parse_mission_recovery_section(d.get("mission_recovery")),
     )
     if out.study_type not in {"monte_carlo", "sensitivity", "covariance"}:
         raise ValueError("analysis.study_type must be one of: monte_carlo, sensitivity, covariance.")

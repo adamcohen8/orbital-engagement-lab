@@ -25,6 +25,24 @@ http://localhost:8765
 - Simple debrief after tutorial success.
 - Download CTA for the full OEL trainer.
 
+## Lightweight Analytics
+
+The hosted preview can send privacy-focused Plausible events for product-funnel
+questions: preview views, tutorial starts, primer completion, tutorial
+completion, sandbox starts, download clicks, music toggles, and returns to the
+level selector.
+
+Analytics are disabled for `file://`, `localhost`, and `127.0.0.1` runs. The
+static page reads its Plausible site domain from:
+
+```html
+<meta name="oel-analytics-domain" content="adamcohen8.github.io" />
+```
+
+Completion events use coarse buckets for time, delta-v, and closest range. The
+preview does not send raw trajectories, per-frame controls, names, emails, or a
+player identifier.
+
 ## Not Included
 
 This preview intentionally does not include the full OEL Python simulator,

@@ -95,6 +95,7 @@ AVAILABLE_FIGURE_IDS = [
     "atmospheric_pass",
     "satellite_delta_v_remaining",
     "thrust_alignment_error",
+    "mission_recovery_trade_space",
 ] + _private_bridge_figure_ids()
 
 PLOT_PRESETS = {
@@ -130,6 +131,7 @@ PLOT_PRESETS = {
     ],
     "reentry": ["reentry_summary", "reentry_aero", "reentry_thermal"],
     "aero_assist": ["atmospheric_pass", "reentry_aero", "reentry_thermal", "trajectory_eci_multi"],
+    "mission_recovery": ["mission_recovery_trade_space"],
     "debug": list(AVAILABLE_FIGURE_IDS),
 }
 
@@ -489,6 +491,8 @@ def plot_outputs(
     bridge_hist: dict[str, list[dict[str, Any]]] | None = None,
     reentry_metrics: dict[str, dict[str, np.ndarray]] | None = None,
 ) -> dict[str, str]:
+    if not bool(cfg.outputs.plots.get("enabled", True)):
+        return {}
     metadata = artifact_metadata(scenario_name=str(cfg.scenario_name or ""))
     style_name = style_name_from_config(dict(cfg.outputs.plots or {}))
     with oel_plot_context(style_name=style_name, metadata=metadata):
@@ -1897,8 +1901,10 @@ def animate_outputs(
     outdir: Path,
     resolve_satellite_isp_s: Callable[[dict[str, Any]], float],
 ) -> dict[str, str]:
-    plot_style_name = style_name_from_config(dict(cfg.outputs.plots or {}))
     anim_cfg = dict(cfg.outputs.animations or {})
+    if not bool(anim_cfg.get("enabled", False)):
+        return {}
+    plot_style_name = style_name_from_config(dict(cfg.outputs.plots or {}))
     style_name = str(anim_cfg.get("style", plot_style_name) or plot_style_name).strip().lower()
     metadata = artifact_metadata(scenario_name=str(getattr(cfg, "scenario_name", "") or ""))
     with oel_plot_context(style_name=style_name, metadata=metadata):

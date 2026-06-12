@@ -3,8 +3,8 @@ Status: validated and ran.
 
 Commands:
 
-- `python run_simulation.py --config agents/examples/public_agent_rendezvous_lqr.yaml --validate-only`
-- `python run_simulation.py --config agents/examples/public_agent_rendezvous_lqr.yaml`
+- `.venv/bin/python run_simulation.py --config agents/examples/public_agent_rendezvous_lqr.yaml --validate-only`
+- `.venv/bin/python run_simulation.py --config agents/examples/public_agent_rendezvous_lqr.yaml`
 
 Review queries:
 

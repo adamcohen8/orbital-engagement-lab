@@ -13,7 +13,7 @@ from sim.config import iter_object_sections
 from sim.plotting.style import get_oel_version
 from sim.utils.frames import eci_relative_to_ric_rect
 
-REVIEW_SCHEMA_VERSION = "0.1"
+REVIEW_SCHEMA_VERSION = "0.3"
 
 
 def write_single_run_review_store(
@@ -56,6 +56,7 @@ def write_single_run_review_store(
             _insert_thrust(conn, t_s=t_s, thrust_hist=thrust_hist)
             _insert_ground_access(conn, t_s=t_s, payload=payload)
             _insert_events(conn, t_s=t_s, summary=summary, thrust_hist=thrust_hist)
+            _insert_mission_recovery(conn, summary=summary)
             _insert_metrics(conn, summary=summary)
             _insert_artifacts(conn, artifacts=artifacts, outdir=outdir, generated_utc=generated_utc)
             conn.commit()
@@ -193,6 +194,86 @@ def _create_schema(conn: sqlite3.Connection) -> None:
             value REAL,
             units TEXT,
             source TEXT
+        );
+
+        CREATE TABLE mission_recovery_summary (
+            object_id TEXT,
+            goal TEXT,
+            method TEXT,
+            assessment_time_s REAL,
+            assessment_sample_index INTEGER,
+            recovery_available INTEGER,
+            recovery_delta_v_m_s REAL,
+            recovery_time_s REAL,
+            recovery_time_basis TEXT,
+            propellant_kg REAL,
+            propellant_fraction REAL,
+            disturbance_delta_v_m_s REAL,
+            disturbance_apsis TEXT,
+            slot_recovery_found INTEGER,
+            slot_recovery_orbits INTEGER,
+            slot_recovery_time_s REAL,
+            slot_recovery_phase_error_deg REAL,
+            best_slot_orbits INTEGER,
+            best_slot_time_s REAL,
+            best_slot_phase_error_deg REAL,
+            local_orbit_shape_delta_v_m_s REAL,
+            local_orbit_shape_position_error_km REAL,
+            notes_json TEXT
+        );
+
+        CREATE TABLE mission_recovery_elements (
+            object_id TEXT,
+            state_label TEXT,
+            a_km REAL,
+            ecc REAL,
+            inc_deg REAL,
+            raan_deg REAL,
+            argp_deg REAL,
+            true_anomaly_deg REAL
+        );
+
+        CREATE TABLE mission_recovery_candidates (
+            candidate_id TEXT,
+            object_id TEXT,
+            goal TEXT,
+            source TEXT,
+            description TEXT,
+            planned_delta_v_m_s REAL,
+            simulated_delta_v_m_s REAL,
+            planned_time_s REAL,
+            simulated_recovery_time_s REAL,
+            propellant_kg REAL,
+            propellant_fraction REAL,
+            feasible INTEGER,
+            verified INTEGER,
+            within_tolerances INTEGER,
+            score REAL,
+            recommended_modes_json TEXT,
+            notes_json TEXT
+        );
+
+        CREATE TABLE mission_recovery_burns (
+            candidate_id TEXT,
+            burn_index INTEGER,
+            start_time_s REAL,
+            duration_s REAL,
+            frame TEXT,
+            axis TEXT,
+            delta_v_m_s REAL,
+            delta_v_eci_m_s_json TEXT
+        );
+
+        CREATE TABLE mission_recovery_candidate_elements (
+            candidate_id TEXT,
+            object_id TEXT,
+            a_km REAL,
+            ecc REAL,
+            inc_deg REAL,
+            raan_deg REAL,
+            argp_deg REAL,
+            true_anomaly_deg REAL,
+            element_errors_json TEXT
         );
 
         CREATE TABLE artifacts (
@@ -469,6 +550,143 @@ def _insert_events(
     conn.executemany("INSERT INTO events VALUES (?, ?, ?, ?, ?, ?, ?, ?)", rows)
 
 
+def _insert_mission_recovery(conn: sqlite3.Connection, *, summary: dict[str, Any]) -> None:
+    recovery = dict(summary.get("mission_recovery", {}) or {})
+    if not recovery:
+        return
+    estimate = dict(recovery.get("recovery_estimate", {}) or {})
+    conn.execute(
+        """
+        INSERT INTO mission_recovery_summary VALUES (
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        )
+        """,
+        (
+            _none_or_str(recovery.get("object_id")),
+            _none_or_str(recovery.get("goal")),
+            _none_or_str(estimate.get("method")),
+            _float_or_none(recovery.get("assessment_time_s")),
+            _int_or_none(recovery.get("assessment_sample_index")),
+            _bool_int(estimate.get("available")),
+            _float_or_none(estimate.get("recovery_delta_v_m_s")),
+            _float_or_none(estimate.get("recovery_time_s")),
+            _none_or_str(estimate.get("recovery_time_basis")),
+            _float_or_none(estimate.get("propellant_kg")),
+            _float_or_none(estimate.get("propellant_fraction")),
+            _float_or_none(estimate.get("disturbance_delta_v_m_s")),
+            _none_or_str(estimate.get("disturbance_apsis")),
+            _bool_int(estimate.get("slot_recovery_found")),
+            _int_or_none(estimate.get("slot_recovery_orbits")),
+            _float_or_none(estimate.get("slot_recovery_time_s")),
+            _float_or_none(estimate.get("slot_recovery_phase_error_deg")),
+            _int_or_none(estimate.get("best_slot_orbits")),
+            _float_or_none(estimate.get("best_slot_time_s")),
+            _float_or_none(estimate.get("best_slot_phase_error_deg")),
+            _float_or_none(estimate.get("local_orbit_shape_delta_v_m_s")),
+            _float_or_none(estimate.get("local_orbit_shape_position_error_km")),
+            json.dumps(list(estimate.get("notes", []) or []), sort_keys=True),
+        ),
+    )
+    rows = []
+    object_id = _none_or_str(recovery.get("object_id"))
+    for label in ("initial", "final"):
+        elements = dict(recovery.get(f"{label}_elements", {}) or {})
+        if elements:
+            rows.append(
+                (
+                    object_id,
+                    label,
+                    _float_or_none(elements.get("a_km")),
+                    _float_or_none(elements.get("ecc")),
+                    _float_or_none(elements.get("inc_deg")),
+                    _float_or_none(elements.get("raan_deg")),
+                    _float_or_none(elements.get("argp_deg")),
+                    _float_or_none(elements.get("true_anomaly_deg")),
+                )
+            )
+    conn.executemany("INSERT INTO mission_recovery_elements VALUES (?, ?, ?, ?, ?, ?, ?, ?)", rows)
+    _insert_mission_recovery_planner(conn, recovery=recovery)
+
+
+def _insert_mission_recovery_planner(conn: sqlite3.Connection, *, recovery: dict[str, Any]) -> None:
+    planner = dict(recovery.get("planner", {}) or {})
+    if not planner:
+        return
+    object_id = _none_or_str(recovery.get("object_id"))
+    recommended = dict(planner.get("recommended", {}) or {})
+    recommended_by_candidate: dict[str, list[str]] = {}
+    for mode, candidate_id in recommended.items():
+        if candidate_id:
+            recommended_by_candidate.setdefault(str(candidate_id), []).append(str(mode))
+    candidate_rows = []
+    burn_rows = []
+    element_rows = []
+    for candidate_raw in list(planner.get("candidates", []) or []):
+        candidate = dict(candidate_raw or {})
+        candidate_id = _none_or_str(candidate.get("candidate_id"))
+        if not candidate_id:
+            continue
+        candidate_rows.append(
+            (
+                candidate_id,
+                object_id,
+                _none_or_str(candidate.get("goal", recovery.get("goal"))),
+                _none_or_str(candidate.get("source")),
+                _none_or_str(candidate.get("description")),
+                _float_or_none(candidate.get("planned_delta_v_m_s")),
+                _float_or_none(candidate.get("simulated_delta_v_m_s")),
+                _float_or_none(candidate.get("planned_time_s")),
+                _float_or_none(candidate.get("simulated_recovery_time_s")),
+                _float_or_none(candidate.get("propellant_kg")),
+                _float_or_none(candidate.get("propellant_fraction")),
+                _bool_int(candidate.get("feasible")),
+                _bool_int(candidate.get("verified")),
+                _bool_int(candidate.get("within_tolerances")),
+                _float_or_none(candidate.get("score")),
+                json.dumps(recommended_by_candidate.get(candidate_id, []), sort_keys=True),
+                json.dumps(list(candidate.get("notes", []) or []), sort_keys=True),
+            )
+        )
+        for burn_raw in list(candidate.get("burn_sequence", []) or []):
+            burn = dict(burn_raw or {})
+            burn_rows.append(
+                (
+                    candidate_id,
+                    _int_or_none(burn.get("burn_index")),
+                    _float_or_none(burn.get("start_time_s")),
+                    _float_or_none(burn.get("duration_s")),
+                    _none_or_str(burn.get("frame")),
+                    _none_or_str(burn.get("axis")),
+                    _float_or_none(burn.get("delta_v_m_s")),
+                    json.dumps(list(burn.get("delta_v_eci_m_s", []) or []), sort_keys=True),
+                )
+            )
+        elements = dict(candidate.get("expected_final_elements", {}) or {})
+        if elements:
+            element_rows.append(
+                (
+                    candidate_id,
+                    object_id,
+                    _float_or_none(elements.get("a_km")),
+                    _float_or_none(elements.get("ecc")),
+                    _float_or_none(elements.get("inc_deg")),
+                    _float_or_none(elements.get("raan_deg")),
+                    _float_or_none(elements.get("argp_deg")),
+                    _float_or_none(elements.get("true_anomaly_deg")),
+                    json.dumps(dict(candidate.get("expected_element_errors", {}) or {}), sort_keys=True),
+                )
+            )
+    conn.executemany(
+        "INSERT INTO mission_recovery_candidates VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        candidate_rows,
+    )
+    conn.executemany("INSERT INTO mission_recovery_burns VALUES (?, ?, ?, ?, ?, ?, ?, ?)", burn_rows)
+    conn.executemany(
+        "INSERT INTO mission_recovery_candidate_elements VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        element_rows,
+    )
+
+
 def _insert_metrics(conn: sqlite3.Connection, *, summary: dict[str, Any]) -> None:
     rows = []
     pair = [str(item) for item in list(summary.get("primary_object_pair", []) or [])]
@@ -494,6 +712,18 @@ def _insert_metrics(conn: sqlite3.Connection, *, summary: dict[str, Any]) -> Non
             if name in stats:
                 metric_id = f"{object_id}:{name}"
                 rows.append((metric_id, name, str(object_id), None, None, _float_or_none(stats.get(name)), units, "summary"))
+    recovery = dict(summary.get("mission_recovery", {}) or {})
+    estimate = dict(recovery.get("recovery_estimate", {}) or {})
+    object_id = str(recovery.get("object_id", "") or "")
+    for name, units in (
+        ("recovery_delta_v_m_s", "m/s"),
+        ("recovery_time_s", "s"),
+        ("propellant_kg", "kg"),
+        ("local_orbit_shape_position_error_km", "km"),
+    ):
+        if name in estimate:
+            metric_id = f"{object_id}:mission_recovery:{name}" if object_id else f"mission_recovery:{name}"
+            rows.append((metric_id, name, object_id or None, None, None, _float_or_none(estimate.get(name)), units, "summary"))
     conn.executemany("INSERT INTO metrics VALUES (?, ?, ?, ?, ?, ?, ?, ?)", rows)
 
 
@@ -536,6 +766,21 @@ def _write_schema_json(path: Path, *, generated_utc: str) -> None:
             "ground_access": {"description": "Ground station access histories."},
             "events": {"description": "Termination and review-derived event rows."},
             "metrics": {"description": "Scalar summary and review metrics."},
+            "mission_recovery_summary": {
+                "description": "Configured mission-recovery estimate from initial and assessment-state orbit comparison."
+            },
+            "mission_recovery_elements": {
+                "description": "Initial and assessment classical orbital elements used by mission recovery."
+            },
+            "mission_recovery_candidates": {
+                "description": "Planner candidate trade-space rows for configured mission reconstitution."
+            },
+            "mission_recovery_burns": {
+                "description": "Burn sequence rows for mission-recovery planner candidates."
+            },
+            "mission_recovery_candidate_elements": {
+                "description": "Expected candidate final elements and element-error JSON."
+            },
             "artifacts": {"description": "Known artifacts in the output folder."},
         },
     }

@@ -112,3 +112,27 @@ def test_write_output_index_does_not_recommend_missing_single_run_plots(tmp_path
     assert "Open [`master_run_summary.json`](master_run_summary.json)" in text
     assert "Inspect generated plot or animation artifacts listed below." not in text
     assert "No plot or animation artifacts were generated for this run" in text
+
+
+def test_write_output_index_uses_review_query_as_next_command_when_review_exists(tmp_path: Path) -> None:
+    review_dir = tmp_path / "review"
+    review_dir.mkdir()
+    (review_dir / "run.sqlite").write_text("", encoding="utf-8")
+
+    index_path = write_output_index(
+        outdir=tmp_path,
+        workflow="single_run",
+        title="demo",
+        summary={
+            "scenario_name": "demo",
+            "review_sqlite_path": str(review_dir / "run.sqlite"),
+            "plot_outputs": {},
+            "animation_outputs": {},
+        },
+        artifacts={"summary_json": str(tmp_path / "master_run_summary.json")},
+    )
+
+    text = index_path.read_text(encoding="utf-8")
+
+    assert ".venv/bin/python -m sim.review" in text
+    assert "--saved-query run_metadata" in text

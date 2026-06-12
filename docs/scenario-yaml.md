@@ -521,6 +521,66 @@ spherical_harmonics:
 The private validation tree may contain HPOP reference data, but those files are
 not bundled with the public core.
 
+## Mission Recovery Analysis
+
+Mission recovery is an optional single-run analysis that compares an object's
+assessment-state orbit against its initial orbit and estimates the delta-v,
+propellant, and time needed to reconstitute the original orbit. It is intended
+for simulator-backed questions such as "after this burn, how hard is it to get
+back?" rather than for replacing the deterministic propagation itself.
+
+Use `goal: orbit_shape` to estimate restoring the original orbit shape, or
+`goal: orbit_slot` to search same-apsis phasing opportunities that recover the
+original slot within the configured tolerance. These are the supported YAML
+terms; do not use `shaper` or `slot` aliases.
+
+```yaml
+analysis:
+  mission_recovery:
+    enabled: true
+    object_id: "target"
+    goal: "orbit_shape"  # or "orbit_slot"
+    assessment_time_s: "final"
+    slot_tolerance_deg: 1.0
+    max_phasing_orbits: 5000
+    planner:
+      enabled: true
+      modes: [min_delta_v, min_time, constrained]
+      max_recovery_time_s: 86400.0
+      max_recovery_delta_v_m_s: 25.0
+      candidate_count: 12
+      simulate_candidates: true
+    propulsion:
+      spacecraft_mass_kg: 100.0
+      isp_s: 220.0
+      max_thrust_n: 20.0  # optional; used to estimate burn duration_s
+    element_tolerances:
+      a_km: 1.0
+      ecc: 0.001
+```
+
+When `outputs.review.enabled: true`, the run writes
+`mission_recovery_summary` and `mission_recovery_elements` tables in
+`review/run.sqlite`, plus scalar mission-recovery metrics in `metrics`.
+When `planner.enabled: true`, it also writes candidate trade-space rows in
+`mission_recovery_candidates`, burn rows in `mission_recovery_burns`, and
+expected candidate elements in `mission_recovery_candidate_elements`. Planner
+candidates are deterministic two-body estimates for comparing time/fuel trade
+options. If `max_thrust_n` and mass are available, candidate burn rows include
+an impulsive-equivalent burn duration. Planner rows are not operational flight
+plans without separate validation for
+the requested fidelity and constraints.
+
+To save a planner trade-space PNG, enable static plots and request the figure
+ID:
+
+```yaml
+outputs:
+  plots:
+    enabled: true
+    figure_ids: [mission_recovery_trade_space]
+```
+
 ## Outputs
 
 ```yaml
@@ -530,6 +590,9 @@ outputs:
   stats:
     enabled: true
     save_json: true
+    save_full_log: true
+    # Optional binary NumPy archive for scalable history analysis.
+    save_history_npz: false
   plots:
     enabled: true
     preset: "minimal"
@@ -568,6 +631,11 @@ Set `outputs.review.enabled: true` to write a durable SQLite review store under
 state, primary-pair relative state, thrust, ground-access, metric, event, and
 artifact tables. See [Review Store Contract](review-store.md) for the current
 schema and Output Review Workbench direction.
+
+Set `outputs.stats.save_history_npz: true` to write
+`master_run_history.npz`, a compressed NumPy archive containing time histories
+and an embedded manifest. This is useful for long runs where downstream Python
+analysis should avoid parsing `master_run_log.json` history lists.
 
 Before allocating dense in-memory histories, single-run execution estimates the
 history arrays required by `duration_s`, `dt_s`, active objects, rocket metrics,

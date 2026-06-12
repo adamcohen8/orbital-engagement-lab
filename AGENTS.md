@@ -28,7 +28,7 @@ read `docs/agent-capability-routing.md`.
   plots, animations, or campaign machinery.
 - Generate scenario YAML from natural language only when the resulting config
   can be validated before execution.
-- Run `python run_simulation.py --config <path> --validate-only` before running
+- Run `.venv/bin/python run_simulation.py --config <path> --validate-only` before running
   a new or edited scenario.
 - Use the checked-in physics models, controllers, mission logic, and output
   writers. Do not invent shortcut physics in agent scripts or reports.
@@ -116,15 +116,15 @@ outputs:
 Then validate and run through the simulator:
 
 ```bash
-python run_simulation.py --config <path> --validate-only
-python run_simulation.py --config <path>
+.venv/bin/python run_simulation.py --config <path> --validate-only
+.venv/bin/python run_simulation.py --config <path>
 ```
 
 After the run, query the saved review DB:
 
 ```bash
-python -m sim.review outputs/<scenario_name> --query "SELECT scenario_name, duration_s, samples FROM run_metadata"
-python -m sim.review outputs/<scenario_name> --query "SELECT time_s, range_km FROM relative_state ORDER BY time_s LIMIT 20" --json
+.venv/bin/python -m sim.review outputs/<scenario_name> --query "SELECT scenario_name, duration_s, samples FROM run_metadata"
+.venv/bin/python -m sim.review outputs/<scenario_name> --query "SELECT time_s, range_km FROM relative_state ORDER BY time_s LIMIT 20" --json
 ```
 
 Rules for agents:
@@ -134,6 +134,10 @@ Rules for agents:
 - Query tables such as `run_metadata`, `objects`, `time_samples`,
   `object_state`, `relative_state`, `thrust`, `ground_access`, `events`,
   `metrics`, and `artifacts` when present.
+- Do not guess column names. Use `docs/agent-review-queries.md`,
+  `review/schema.json`, or a small discovery query such as
+  `SELECT * FROM object_state LIMIT 1` before writing custom SQL against an
+  unfamiliar table.
 - State the query used when summarizing a result so the user can reproduce the
   evidence.
 - If `review/run.sqlite` is missing, fall back to `index.md`,
@@ -141,7 +145,7 @@ Rules for agents:
   store exists.
 - Do not recommend ORW for routine agent analysis. `run_orw.py` is an
   experimental preview and should only be used when the user explicitly asks
-  for the interactive local workbench. Prefer `python -m sim.review`.
+  for the interactive local workbench. Prefer `.venv/bin/python -m sim.review`.
 
 ## Agent Feedback Loop
 
@@ -164,20 +168,20 @@ Rules:
 ## Public Commands
 
 ```bash
-python run_simulation.py --doctor
-python run_simulation.py --quickstart --validate-only
-python run_simulation.py --quickstart
-python run_simulation.py --config configs/automation_smoke.yaml --validate-only
-python run_simulation.py --config configs/automation_smoke.yaml
-python -m sim.review outputs/<scenario_name> --query "SELECT scenario_name FROM run_metadata"
-python run_game.py
+.venv/bin/python run_simulation.py --doctor
+.venv/bin/python run_simulation.py --quickstart --validate-only
+.venv/bin/python run_simulation.py --quickstart
+.venv/bin/python run_simulation.py --config configs/automation_smoke.yaml --validate-only
+.venv/bin/python run_simulation.py --config configs/automation_smoke.yaml
+.venv/bin/python -m sim.review outputs/<scenario_name> --query "SELECT scenario_name FROM run_metadata"
+.venv/bin/python run_game.py
 ```
 
 For generated examples and evaluation fixtures:
 
 ```bash
-python run_simulation.py --config agents/examples/public_agent_single_satellite.yaml --validate-only
-python run_simulation.py --config agents/examples/public_agent_single_satellite.yaml
+.venv/bin/python run_simulation.py --config agents/examples/public_agent_single_satellite.yaml --validate-only
+.venv/bin/python run_simulation.py --config agents/examples/public_agent_single_satellite.yaml
 ```
 
 For repeatable public agent task checks, use `docs/agent-task-cards.md`.

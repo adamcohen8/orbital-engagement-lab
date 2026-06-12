@@ -20,6 +20,16 @@ from sim.core.models import Command, StateBelief
 from sim.execution import create_single_run_engine, run_simulation_scenario
 from sim.execution.study import analysis_study_type
 from sim.execution.validation import validate_generated_batch_configs
+from sim.scenarios import (
+    ScenarioArtifact,
+    ValidationReport,
+)
+from sim.scenarios import (
+    ScenarioBuilder as ScenarioBuilder,
+)
+from sim.scenarios import (
+    ValidationIssue as ValidationIssue,
+)
 from sim.security import ConfigPathPolicy
 
 MetricCallback = Callable[["SimulationResult"], Union[Mapping[str, Any], Any]]
@@ -201,6 +211,18 @@ def _numeric_metric_value(row: Mapping[str, Any], metric: str) -> float:
         return float(row.get(metric))
     except (TypeError, ValueError):
         return float("nan")
+
+
+def _artifact_paths(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {str(key): _artifact_paths(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_artifact_paths(item) for item in value]
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
 
 
 def _compatible_call(fn: Callable[..., Any], kwargs: dict[str, Any], fallback_kwargs: dict[str, Any]) -> Any:
@@ -414,7 +436,6 @@ class SimulationConfig:
             source_path=self.source_path,
         )
 
-
 @dataclass(frozen=True)
 class SimulationSnapshot:
     step_index: int
@@ -508,6 +529,49 @@ class SimulationResult:
         return {
             "plots": dict(summary.get("plot_outputs", {}) or {}),
             "animations": dict(summary.get("animation_outputs", {}) or {}),
+        }
+
+    @property
+    def output_dir(self) -> Path:
+        return Path(self.config.scenario.outputs.output_dir)
+
+    def review(self) -> Any:
+        from sim.review import ReviewWorkspace
+
+        return ReviewWorkspace.open(self.output_dir)
+
+    def evidence_manifest(self) -> dict[str, Any]:
+        from sim.plotting.style import get_oel_version
+
+        output_dir = self.output_dir
+        review_db = output_dir / "review" / "run.sqlite"
+        review_schema = output_dir / "review" / "schema.json"
+        review_saved_views = output_dir / "review" / "saved_views.json"
+        return {
+            "schema_version": 1,
+            "scenario_name": self.config.scenario_name,
+            "scenario_description": self.config.scenario.scenario_description,
+            "study_type": self.analysis_study_type,
+            "oel_version": get_oel_version(),
+            "config": {
+                "source_path": str(self.config.source_path) if self.config.source_path is not None else None,
+                "output_dir": str(output_dir),
+                "duration_s": float(self.config.scenario.simulator.duration_s),
+                "dt_s": float(self.config.scenario.simulator.dt_s),
+            },
+            "summary": dict(self.summary),
+            "metrics": dict(self.metrics),
+            "artifacts": _artifact_paths(self.artifacts),
+            "review": {
+                "enabled": bool(self.config.scenario.outputs.review.enabled),
+                "detail": str(self.config.scenario.outputs.review.detail),
+                "db_path": str(review_db),
+                "db_exists": review_db.is_file(),
+                "schema_path": str(review_schema),
+                "schema_exists": review_schema.is_file(),
+                "saved_views_path": str(review_saved_views),
+                "saved_views_exists": review_saved_views.is_file(),
+            },
         }
 
     @property
@@ -840,7 +904,7 @@ class SimulationResult:
 
 
 class SimulationSession:
-    def __init__(self, config: SimulationConfig | SimulationScenarioConfig | dict[str, Any]):
+    def __init__(self, config: ScenarioArtifact | SimulationConfig | SimulationScenarioConfig | dict[str, Any]):
         self._base_config = self._coerce_config(config)
         self._active_config = self._base_config
         self._result: SimulationResult | None = None
@@ -854,7 +918,10 @@ class SimulationSession:
         self._mission_originals: dict[tuple[str, str], Any] = {}
 
     @classmethod
-    def from_config(cls, config: SimulationConfig | SimulationScenarioConfig | dict[str, Any]) -> SimulationSession:
+    def from_config(
+        cls,
+        config: ScenarioArtifact | SimulationConfig | SimulationScenarioConfig | dict[str, Any],
+    ) -> SimulationSession:
         return cls(config)
 
     @classmethod
@@ -862,7 +929,11 @@ class SimulationSession:
         return cls(SimulationConfig.from_yaml(path))
 
     @staticmethod
-    def _coerce_config(config: SimulationConfig | SimulationScenarioConfig | dict[str, Any]) -> SimulationConfig:
+    def _coerce_config(
+        config: ScenarioArtifact | SimulationConfig | SimulationScenarioConfig | dict[str, Any],
+    ) -> SimulationConfig:
+        if isinstance(config, ScenarioArtifact):
+            return config.to_config()
         if isinstance(config, SimulationConfig):
             return config
         if isinstance(config, SimulationScenarioConfig):
@@ -1157,12 +1228,41 @@ class SimulationWorkspace:
     def from_dict(self, data: dict[str, Any]) -> SimulationConfig:
         return SimulationConfig.from_dict(data)
 
-    def session(self, config: str | Path | SimulationConfig | SimulationScenarioConfig | dict[str, Any]) -> SimulationSession:
+    def session(
+        self,
+        config: str | Path | ScenarioArtifact | SimulationConfig | SimulationScenarioConfig | dict[str, Any],
+    ) -> SimulationSession:
         return SimulationSession.from_config(self._coerce_config(config))
+
+    def artifact(
+        self,
+        config: str | Path | ScenarioArtifact | SimulationConfig | SimulationScenarioConfig | dict[str, Any],
+    ) -> ScenarioArtifact:
+        if isinstance(config, ScenarioArtifact):
+            return config
+        if isinstance(config, (str, Path)):
+            return ScenarioArtifact(self.load(config))
+        return ScenarioArtifact.from_config(config)
+
+    def save_config(
+        self,
+        config: str | Path | ScenarioArtifact | SimulationConfig | SimulationScenarioConfig | dict[str, Any],
+        path: str | Path,
+        *,
+        validate: bool = True,
+    ) -> Path:
+        artifact = self.artifact(config)
+        if validate:
+            report = self.validate(artifact)
+            if not bool(report.get("ok", False)):
+                errors = [str(item) for item in list(report.get("errors", []) or [])]
+                detail = "\n- " + "\n- ".join(errors) if errors else ""
+                raise ValueError(f"Cannot save invalid scenario artifact.{detail}")
+        return artifact.write(path)
 
     def run(
         self,
-        config: str | Path | SimulationConfig | SimulationScenarioConfig | dict[str, Any],
+        config: str | Path | ScenarioArtifact | SimulationConfig | SimulationScenarioConfig | dict[str, Any],
         *,
         step_callback: Any | None = None,
     ) -> SimulationResult:
@@ -1170,7 +1270,7 @@ class SimulationWorkspace:
 
     def run_payload(
         self,
-        config: str | Path | SimulationConfig | SimulationScenarioConfig | dict[str, Any],
+        config: str | Path | ScenarioArtifact | SimulationConfig | SimulationScenarioConfig | dict[str, Any],
         *,
         step_callback: Any | None = None,
     ) -> dict[str, Any]:
@@ -1178,7 +1278,7 @@ class SimulationWorkspace:
 
     def evaluate_metrics(
         self,
-        config: str | Path | SimulationConfig | SimulationScenarioConfig | dict[str, Any],
+        config: str | Path | ScenarioArtifact | SimulationConfig | SimulationScenarioConfig | dict[str, Any],
         metrics: Mapping[str, MetricCallback] | list[MetricCallback] | tuple[MetricCallback, ...],
         *,
         step_callback: Any | None = None,
@@ -1187,7 +1287,7 @@ class SimulationWorkspace:
 
     def run_monte_carlo_metrics(
         self,
-        config: str | Path | SimulationConfig | SimulationScenarioConfig | dict[str, Any],
+        config: str | Path | ScenarioArtifact | SimulationConfig | SimulationScenarioConfig | dict[str, Any],
         metrics: Mapping[str, MetricCallback] | list[MetricCallback] | tuple[MetricCallback, ...],
         *,
         step_callback: Any | None = None,
@@ -1239,7 +1339,7 @@ class SimulationWorkspace:
 
     def sweep(
         self,
-        config: str | Path | SimulationConfig | SimulationScenarioConfig | dict[str, Any],
+        config: str | Path | ScenarioArtifact | SimulationConfig | SimulationScenarioConfig | dict[str, Any],
         *,
         parameter: str,
         values: list[Any] | tuple[Any, ...],
@@ -1281,7 +1381,7 @@ class SimulationWorkspace:
 
     def validate(
         self,
-        config: str | Path | SimulationConfig | SimulationScenarioConfig | dict[str, Any],
+        config: str | Path | ScenarioArtifact | SimulationConfig | SimulationScenarioConfig | dict[str, Any],
     ) -> dict[str, Any]:
         try:
             sim_config = self._coerce_config(config)
@@ -1325,6 +1425,12 @@ class SimulationWorkspace:
             "generated": generated,
             "errors": errors,
         }
+
+    def validate_report(
+        self,
+        config: str | Path | ScenarioArtifact | SimulationConfig | SimulationScenarioConfig | dict[str, Any],
+    ) -> ValidationReport:
+        return ValidationReport.from_validation_dict(self.validate(config))
 
     def validate_controller_bench(
         self,
@@ -1442,12 +1548,16 @@ class SimulationWorkspace:
     def _config_path_text(config: Any) -> str | None:
         if isinstance(config, (str, Path)):
             return str(Path(config).expanduser())
+        if isinstance(config, ScenarioArtifact) and config.source_path is not None:
+            return str(config.source_path)
         return None
 
     def _coerce_config(
         self,
-        config: str | Path | SimulationConfig | SimulationScenarioConfig | dict[str, Any],
+        config: str | Path | ScenarioArtifact | SimulationConfig | SimulationScenarioConfig | dict[str, Any],
     ) -> SimulationConfig:
+        if isinstance(config, ScenarioArtifact):
+            return config.to_config()
         if isinstance(config, (str, Path)):
             return SimulationConfig.from_yaml(config, path_policy=self._path_policy_for(config))
         return SimulationSession._coerce_config(config)

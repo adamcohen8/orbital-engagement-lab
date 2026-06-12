@@ -82,6 +82,41 @@ SAVED_REVIEW_QUERIES: dict[str, SavedReviewQuery] = {
             "WHERE event_type IN ('burn_start', 'burn_end') ORDER BY time_s, event_id"
         ),
     ),
+    "mission_recovery_summary": SavedReviewQuery(
+        name="mission_recovery_summary",
+        description="Mission-recovery delta-v, time, propellant, and method for configured recovery analysis.",
+        sql=(
+            "SELECT object_id, goal, method, recovery_available, recovery_delta_v_m_s, "
+            "recovery_time_s, recovery_time_basis, propellant_kg, disturbance_delta_v_m_s, "
+            "slot_recovery_found, slot_recovery_time_s, best_slot_time_s "
+            "FROM mission_recovery_summary"
+        ),
+    ),
+    "mission_recovery_elements": SavedReviewQuery(
+        name="mission_recovery_elements",
+        description="Initial and final orbital elements used by configured mission-recovery analysis.",
+        sql=(
+            "SELECT object_id, state_label, a_km, ecc, inc_deg, raan_deg, argp_deg, "
+            "true_anomaly_deg FROM mission_recovery_elements ORDER BY object_id, state_label"
+        ),
+    ),
+    "mission_recovery_candidates": SavedReviewQuery(
+        name="mission_recovery_candidates",
+        description="Mission-reconstitution planner candidates ranked by feasibility, delta-v, and time.",
+        sql=(
+            "SELECT candidate_id, object_id, goal, source, planned_delta_v_m_s, planned_time_s, "
+            "propellant_kg, feasible, verified, recommended_modes_json "
+            "FROM mission_recovery_candidates ORDER BY feasible DESC, planned_delta_v_m_s, planned_time_s"
+        ),
+    ),
+    "mission_recovery_burns": SavedReviewQuery(
+        name="mission_recovery_burns",
+        description="Burn sequence rows for mission-reconstitution planner candidates.",
+        sql=(
+            "SELECT candidate_id, burn_index, start_time_s, duration_s, frame, axis, delta_v_m_s "
+            "FROM mission_recovery_burns ORDER BY candidate_id, burn_index"
+        ),
+    ),
     "ground_access_summary": SavedReviewQuery(
         name="ground_access_summary",
         description="Access sample counts, minimum range, and maximum elevation by station/object.",

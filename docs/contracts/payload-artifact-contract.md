@@ -242,6 +242,9 @@ Stats artifacts:
   and artifact inventory.
 - `master_run_summary.json` is written when `outputs.stats.save_json` is true.
 - `master_run_log.json` is written when `outputs.stats.save_full_log` is true.
+- `master_run_history.npz` is written when `outputs.stats.save_history_npz` is
+  true. It contains NumPy history arrays plus a `manifest_json` entry that maps
+  archive keys back to payload paths.
 - `review/run.sqlite` and `review/schema.json` are written when
   `outputs.review.enabled` is true.
 
@@ -283,7 +286,10 @@ Output directories:
 - `knowledge`
 - `ground_station_access`
 - `artifacts`
+- `output_dir`
 - `metrics`
+- `review()`
+- `evidence_manifest()`
 - `snapshot(step_index)`
 - `relative_state(...)`
 - `range_between(...)`
@@ -294,7 +300,25 @@ Output directories:
 - `to_records(...)`
 - `to_dataframe(...)`
 - `SimulationWorkspace.validate(...)`
+- `SimulationWorkspace.validate_report(...)`
 - `SimulationWorkspace.run(...)`
+- `SimulationWorkspace.save_config(...)`
+
+`ScenarioArtifact` is the public API wrapper for YAML-as-artifact workflows. It
+supports `from_dict(...)`, `from_yaml(...)`, `to_yaml_text()`, `write(...)`,
+`to_artifact_dict()`, `validate(...)`, `validate_report(...)`, and `run(...)`.
+`to_dict()` returns the normalized engine config; `to_artifact_dict()` and
+`write(...)` render a cleaner review artifact that omits compatibility/default
+noise while preserving reload/run behavior. The artifact path is intended for
+agent, notebook, and app authoring flows that still need a durable YAML scenario
+record.
+
+`ScenarioBuilder` is the small public authoring helper for common
+single-satellite, basic target/chaser relative-state, and ground-station
+scenarios. Builder methods should remain domain-facing and should emit
+`ScenarioArtifact` rather than bypassing scenario YAML normalization. The
+authoring helpers live in `sim.scenarios` and are re-exported through `sim` and
+`sim.api`.
 
 These wrappers are part of the intended public API. If payload keys change,
 wrappers should either preserve compatibility or receive release-note coverage

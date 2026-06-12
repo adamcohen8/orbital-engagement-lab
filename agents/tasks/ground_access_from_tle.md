@@ -30,13 +30,13 @@ and summarize access windows. Be explicit about whether this is SGP4.
 Validate:
 
 ```bash
-python run_simulation.py --config agents/examples/public_agent_ground_access.yaml --validate-only
+.venv/bin/python run_simulation.py --config agents/examples/public_agent_ground_access.yaml --validate-only
 ```
 
 Run:
 
 ```bash
-python run_simulation.py --config agents/examples/public_agent_ground_access.yaml
+.venv/bin/python run_simulation.py --config agents/examples/public_agent_ground_access.yaml
 ```
 
 ## Required Review Queries

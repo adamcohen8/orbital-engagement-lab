@@ -112,6 +112,27 @@ Rules:
 The review store should be treated as derived evidence. The authoritative
 simulation is still the scenario config plus deterministic simulator behavior.
 
+## Query And Schema Discovery
+
+Use `python -m sim.review` for routine agent and scripted inspection. Keep
+queries read-only and use only `SELECT` or `WITH` statements:
+
+```bash
+python -m sim.review outputs/my_run --query "SELECT scenario_name, duration_s, samples FROM run_metadata"
+```
+
+Before writing custom queries against an unfamiliar table, inspect the run's
+schema or sample one row instead of guessing column names:
+
+```bash
+python -m sim.review outputs/my_run --query "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name" --json
+python -m sim.review outputs/my_run --query "SELECT * FROM object_state LIMIT 1" --json
+```
+
+The saved `review/schema.json` lists the tables available for that run. Common
+agent query recipes and column names are maintained in
+[`agent-review-queries.md`](agent-review-queries.md).
+
 ## Initial Schema
 
 The initial single-run schema should include the following tables.
@@ -295,6 +316,111 @@ Recommended columns:
 
 Examples include closest approach, final range, total delta-v, peak pointing
 error, access duration, and termination time.
+
+### `mission_recovery_summary`
+
+One row for a configured `analysis.mission_recovery` post-run estimate.
+
+Recommended columns:
+
+- `object_id`
+- `goal`
+- `method`
+- `assessment_time_s`
+- `assessment_sample_index`
+- `recovery_available`
+- `recovery_delta_v_m_s`
+- `recovery_time_s`
+- `recovery_time_basis`
+- `propellant_kg`
+- `propellant_fraction`
+- `disturbance_delta_v_m_s`
+- `disturbance_apsis`
+- `slot_recovery_found`
+- `slot_recovery_orbits`
+- `slot_recovery_time_s`
+- `slot_recovery_phase_error_deg`
+- `best_slot_orbits`
+- `best_slot_time_s`
+- `best_slot_phase_error_deg`
+- `local_orbit_shape_delta_v_m_s`
+- `local_orbit_shape_position_error_km`
+- `notes_json`
+
+### `mission_recovery_elements`
+
+Initial and assessment-state classical orbital elements used by the mission
+recovery estimate.
+
+Recommended columns:
+
+- `object_id`
+- `state_label`
+- `a_km`
+- `ecc`
+- `inc_deg`
+- `raan_deg`
+- `argp_deg`
+- `true_anomaly_deg`
+
+### `mission_recovery_candidates`
+
+Planner candidate rows for configured mission reconstitution trade-space
+analysis.
+
+Recommended columns:
+
+- `candidate_id`
+- `object_id`
+- `goal`
+- `source`
+- `description`
+- `planned_delta_v_m_s`
+- `simulated_delta_v_m_s`
+- `planned_time_s`
+- `simulated_recovery_time_s`
+- `propellant_kg`
+- `propellant_fraction`
+- `feasible`
+- `verified`
+- `within_tolerances`
+- `score`
+- `recommended_modes_json`
+- `notes_json`
+
+### `mission_recovery_burns`
+
+Burn sequence rows for each planner candidate.
+
+Recommended columns:
+
+- `candidate_id`
+- `burn_index`
+- `start_time_s`
+- `duration_s`
+- `frame`
+- `axis`
+- `delta_v_m_s`
+- `delta_v_eci_m_s_json`
+
+### `mission_recovery_candidate_elements`
+
+Expected candidate final classical orbital elements and element-error JSON. For
+`orbit_slot` planner candidates, `element_errors_json` includes
+`slot_phase_deg`, the direct position-angle phase error used for slot
+verification.
+
+Recommended columns:
+
+- `candidate_id`
+- `object_id`
+- `a_km`
+- `ecc`
+- `inc_deg`
+- `raan_deg`
+- `argp_deg`
+- `true_anomaly_deg`
+- `element_errors_json`
 
 ### `artifacts`
 

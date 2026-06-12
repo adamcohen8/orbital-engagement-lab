@@ -1,0 +1,37 @@
+scenario_name: public_agent_python_api_minimal_propagation
+scenario_description: Expected artifact shape for the Python API minimal propagation task card.
+objects:
+  target:
+    kind: satellite
+    role: target
+    specs:
+      mass_kg: 300.0
+    initial_state:
+      position_eci_km:
+      - 7000.0
+      - 0.0
+      - 0.0
+      velocity_eci_km_s:
+      - 0.0
+      - 7.5
+      - 0.0
+simulator:
+  duration_s: 120.0
+  dt_s: 10.0
+  dynamics:
+    attitude:
+      enabled: false
+outputs:
+  output_dir: outputs/agents/public_agent_python_api_minimal_propagation
+  mode: save
+  stats:
+    print_summary: false
+    save_json: true
+    save_full_log: false
+  plots:
+    enabled: false
+  animations:
+    enabled: false
+  review:
+    enabled: true
+    detail: standard

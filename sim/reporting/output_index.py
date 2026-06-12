@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -252,12 +253,14 @@ def _single_run_total_dv(summary: dict[str, Any]) -> float:
 
 
 def _single_run_next_command(summary: dict[str, Any]) -> str:
-    scenario_name = str(summary.get("scenario_name", "") or "").strip()
-    if scenario_name == "quickstart_5min":
-        return "python run_simulation.py --config configs/ric_pd_10km_experiment.yaml"
-    if scenario_name == "ric_pd_10km_experiment":
-        return "python run_simulation.py --config examples/configs/public_closed_loop_rendezvous_lqr.yaml --validate-only"
-    return "python run_simulation.py --doctor"
+    review_db = str(summary.get("review_sqlite_path", "") or "").strip()
+    if review_db:
+        review_root = Path(review_db).parent.parent
+        return f".venv/bin/python -m sim.review {shlex.quote(str(review_root))} --saved-query run_metadata"
+    config_source_path = str(summary.get("config_source_path", "") or "").strip()
+    if config_source_path:
+        return f".venv/bin/python run_simulation.py --config {shlex.quote(config_source_path)} --validate-only"
+    return ""
 
 
 def _single_run_metrics(summary: dict[str, Any]) -> list[str]:

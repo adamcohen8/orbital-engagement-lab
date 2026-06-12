@@ -16,8 +16,11 @@ from tools.prepare_agent_feedback import build_agent_feedback_issue
 
 ROOT = Path(__file__).resolve().parents[2]
 AGENT_EXAMPLES = [
+    ROOT / "agents" / "examples" / "public_agent_python_api_minimal_propagation.yaml",
     ROOT / "agents" / "examples" / "public_agent_single_satellite.yaml",
     ROOT / "agents" / "examples" / "public_agent_rendezvous_lqr.yaml",
+    ROOT / "agents" / "examples" / "public_agent_mission_recovery_plus_c_burn.yaml",
+    ROOT / "agents" / "examples" / "public_agent_mission_reconstitution_trade_space.yaml",
     ROOT / "agents" / "examples" / "public_agent_ground_access.yaml",
     ROOT / "agents" / "examples" / "public_agent_attitude_hold.yaml",
 ]
@@ -68,13 +71,13 @@ def test_public_agent_docs_define_boundaries_and_commands() -> None:
     task_cards = (ROOT / "docs" / "agent-task-cards.md").read_text(encoding="utf-8")
 
     assert "orchestrate documented workflows" in root_agents
-    assert "python run_simulation.py --config <path> --validate-only" in root_agents
+    assert ".venv/bin/python run_simulation.py --config <path> --validate-only" in root_agents
     assert "Scenario Generation Rules" in public_agents
     assert "ordinary-language request -> scenario YAML -> validate -> run" in public_agents
     assert "Natural User Requests" in public_agents
     assert "Agent Scenario Evaluation Rubric" in rubric
     assert "review/run.sqlite" in rubric
-    assert "python run_simulation.py --config <scenario.yaml> --validate-only" in docs
+    assert ".venv/bin/python run_simulation.py --config <scenario.yaml> --validate-only" in docs
     assert "Natural Requests" in docs
     assert "When The User Asks Something New" in root_agents
     assert "When The User Asks Something New" in public_agents
@@ -148,7 +151,10 @@ def test_public_agent_task_cards_define_checked_workflows() -> None:
         "closed_loop_rendezvous",
         "compare_one_change",
         "ground_access_from_tle",
+        "mission_reconstitution_trade_space",
+        "mission_recovery_plus_c_burn",
         "passive_propagation",
+        "python_api_minimal_propagation",
     }
 
     for card_path in AGENT_TASK_CARDS:
@@ -265,6 +271,7 @@ def test_public_agent_saved_review_queries_execute(example_path: Path, tmp_path:
     run_simulation_config_file(cfg_path)
 
     query_names_by_example = {
+        "public_agent_python_api_minimal_propagation": ["run_metadata", "objects", "artifacts", "passive_final_state"],
         "public_agent_single_satellite": ["run_metadata", "objects", "artifacts", "passive_final_state"],
         "public_agent_rendezvous_lqr": [
             "run_metadata",
@@ -273,6 +280,22 @@ def test_public_agent_saved_review_queries_execute(example_path: Path, tmp_path:
             "relative_final_state",
             "burn_activity",
             "burn_events",
+        ],
+        "public_agent_mission_recovery_plus_c_burn": [
+            "run_metadata",
+            "burn_activity",
+            "mission_recovery_summary",
+            "mission_recovery_elements",
+            "mission_recovery_candidates",
+            "mission_recovery_burns",
+        ],
+        "public_agent_mission_reconstitution_trade_space": [
+            "run_metadata",
+            "burn_activity",
+            "mission_recovery_summary",
+            "mission_recovery_elements",
+            "mission_recovery_candidates",
+            "mission_recovery_burns",
         ],
         "public_agent_ground_access": ["run_metadata", "ground_access_summary", "ground_access_no_access_reasons"],
         "public_agent_attitude_hold": [

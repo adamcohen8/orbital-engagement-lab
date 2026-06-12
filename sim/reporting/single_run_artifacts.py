@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import importlib
+import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -8,9 +10,11 @@ from typing import Any
 import numpy as np
 
 from sim.config import SimulationScenarioConfig
+from sim.master_outputs import _expanded_figure_ids as _expanded_plot_figure_ids
 from sim.master_outputs import animate_outputs as _animate_outputs_impl
 from sim.master_outputs import plot_outputs as _plot_outputs_impl
 from sim.reporting.ground_station_access_reports import write_ground_station_access_reports
+from sim.reporting.mission_recovery import build_mission_recovery_summary, write_mission_recovery_trade_space_plot
 from sim.reporting.output_index import write_output_index
 from sim.reporting.review_store import write_single_run_review_store
 from sim.runtime_support import _resolve_rocket_stack, _resolve_satellite_isp_s
@@ -26,6 +30,7 @@ class SingleRunArtifactContext:
     target_reference_orbit_truth: np.ndarray | None
     belief_hist: dict[str, np.ndarray]
     thrust_hist: dict[str, np.ndarray]
+    torque_hist: dict[str, np.ndarray]
     desired_attitude_hist: dict[str, np.ndarray]
     knowledge_hist: dict[str, dict[str, np.ndarray]]
     knowledge_measurement_hist: dict[str, dict[str, np.ndarray]]
@@ -85,6 +90,34 @@ def format_single_run_summary(summary: dict[str, Any]) -> str:
                 f"{float(stats.get('max_accel_km_s2', 0.0)):>24.3e}"
                 f"{float(stats.get('total_dv_m_s', 0.0)):>18.3f}"
             )
+    mission_recovery = dict(summary.get("mission_recovery", {}) or {})
+    if mission_recovery:
+        estimate = dict(mission_recovery.get("recovery_estimate", {}) or {})
+        lines.append("-" * 72)
+        lines.append(
+            "Mission Recovery: "
+            f"{mission_recovery.get('object_id', '')} {mission_recovery.get('goal', '')} "
+            f"dV={_fmt_optional_float(estimate.get('recovery_delta_v_m_s'), 3)} m/s "
+            f"time={_fmt_optional_float(estimate.get('recovery_time_s'), 1)} s "
+            f"method={estimate.get('method', '')}"
+        )
+        planner = dict(mission_recovery.get("planner", {}) or {})
+        recommendations = dict(planner.get("recommended", {}) or {})
+        candidates = {
+            str(candidate.get("candidate_id")): dict(candidate or {})
+            for candidate in list(planner.get("candidates", []) or [])
+        }
+        for mode in ("min_time", "min_delta_v", "constrained"):
+            candidate_id = recommendations.get(mode)
+            candidate = candidates.get(str(candidate_id))
+            if not candidate:
+                continue
+            lines.append(
+                f"  {mode:<13}: "
+                f"{_fmt_optional_float(candidate.get('planned_delta_v_m_s'), 3)} m/s, "
+                f"{_fmt_optional_float(candidate.get('planned_time_s'), 1)} s, "
+                f"verified={bool(candidate.get('verified', False))}"
+            )
     plot_outputs = dict(summary.get("plot_outputs", {}) or {})
     anim_outputs = dict(summary.get("animation_outputs", {}) or {})
     guardrails = dict(summary.get("attitude_guardrail_stats", {}) or {})
@@ -100,7 +133,17 @@ def write_single_run_artifacts(
     context: SingleRunArtifactContext,
 ) -> dict[str, Any]:
     summary = payload.setdefault("summary", {})
+    source_path = getattr(context.cfg, "source_path", None)
+    if source_path is not None:
+        summary["config_source_path"] = str(Path(source_path).resolve())
     _add_relative_range_summary(summary=summary, context=context)
+    mission_recovery = build_mission_recovery_summary(
+        cfg=context.cfg,
+        t_s=context.t_s,
+        truth_hist=context.truth_hist,
+    )
+    if mission_recovery:
+        summary["mission_recovery"] = mission_recovery
     plot_outputs = _plot_outputs(
         cfg=context.cfg,
         t_s=context.t_s,
@@ -116,6 +159,14 @@ def write_single_run_artifacts(
         bridge_hist=context.bridge_hist,
         outdir=context.outdir,
     )
+    mission_recovery_plot = _write_mission_recovery_trade_space_plot(
+        cfg=context.cfg,
+        mission_recovery=mission_recovery,
+        outdir=context.outdir,
+    )
+    if mission_recovery_plot:
+        plot_outputs = dict(plot_outputs)
+        plot_outputs["mission_recovery_trade_space"] = mission_recovery_plot
     animation_outputs = _animate_outputs(
         cfg=context.cfg,
         t_s=context.t_s,
@@ -144,6 +195,12 @@ def write_single_run_artifacts(
         summary["bridge_extension_summary"] = bridge_summary
 
     artifacts: dict[str, Any] = {}
+    if bool(context.cfg.outputs.stats.get("save_history_npz", False)):
+        history_outputs = _write_history_npz(context=context)
+        if history_outputs:
+            summary["history_binary_outputs"] = history_outputs
+            payload["history_binary_outputs"] = history_outputs
+            artifacts["history_npz"] = str(history_outputs["npz"])
     if bool(context.cfg.outputs.stats.get("save_json", True)):
         artifacts["summary_json"] = str(context.outdir / "master_run_summary.json")
     if bool(context.cfg.outputs.stats.get("save_full_log", True)):
@@ -159,6 +216,7 @@ def write_single_run_artifacts(
     review_outputs = _write_review_store(payload=payload, context=context, artifacts=artifacts)
     if review_outputs:
         summary["review_outputs"] = review_outputs
+        summary["review_sqlite_path"] = str(review_outputs.get("sqlite") or "")
         payload["review_outputs"] = review_outputs
         artifacts["review_store"] = review_outputs
     index_path = write_output_index(
@@ -179,6 +237,109 @@ def write_single_run_artifacts(
     return payload
 
 
+def _write_history_npz(*, context: SingleRunArtifactContext) -> dict[str, Any]:
+    path = context.outdir / "master_run_history.npz"
+    arrays: dict[str, np.ndarray] = {"time_s": np.asarray(context.t_s, dtype=float)}
+    manifest: dict[str, Any] = {
+        "format": "oel.single_run_history_npz",
+        "version": 1,
+        "arrays": {"time_s": {"kind": "time", "path": "time_s"}},
+    }
+
+    def add_array(key: str, arr: np.ndarray, *, kind: str, path_label: str) -> None:
+        arrays[key] = np.asarray(arr)
+        manifest["arrays"][key] = {"kind": kind, "path": path_label}
+
+    for object_id, arr in sorted(context.truth_hist.items()):
+        add_array(
+            _history_npz_key("truth", object_id),
+            arr,
+            kind="truth",
+            path_label=f"truth_by_object.{object_id}",
+        )
+    if context.target_reference_orbit_truth is not None:
+        add_array(
+            "target_reference_orbit_truth",
+            context.target_reference_orbit_truth,
+            kind="target_reference_orbit_truth",
+            path_label="target_reference_orbit_truth",
+        )
+    for object_id, arr in sorted(context.belief_hist.items()):
+        add_array(
+            _history_npz_key("belief", object_id),
+            arr,
+            kind="belief",
+            path_label=f"belief_by_object.{object_id}",
+        )
+    for object_id, arr in sorted(context.thrust_hist.items()):
+        add_array(
+            _history_npz_key("applied_thrust", object_id),
+            arr,
+            kind="applied_thrust",
+            path_label=f"applied_thrust_by_object.{object_id}",
+        )
+    for object_id, arr in sorted(context.torque_hist.items()):
+        add_array(
+            _history_npz_key("applied_torque", object_id),
+            arr,
+            kind="applied_torque",
+            path_label=f"applied_torque_by_object.{object_id}",
+        )
+    for object_id, arr in sorted(context.desired_attitude_hist.items()):
+        add_array(
+            _history_npz_key("desired_attitude", object_id),
+            arr,
+            kind="desired_attitude",
+            path_label=f"desired_attitude_by_object.{object_id}",
+        )
+    for observer_id, by_target in sorted(context.knowledge_hist.items()):
+        for target_id, arr in sorted(by_target.items()):
+            add_array(
+                _history_npz_key("knowledge", observer_id, target_id),
+                arr,
+                kind="knowledge",
+                path_label=f"knowledge_by_observer.{observer_id}.{target_id}",
+            )
+    for observer_id, by_target in sorted(context.knowledge_measurement_hist.items()):
+        for target_id, arr in sorted(by_target.items()):
+            add_array(
+                _history_npz_key("knowledge_measurement", observer_id, target_id),
+                arr,
+                kind="knowledge_measurement",
+                path_label=f"knowledge_measurements_by_observer.{observer_id}.{target_id}",
+            )
+    for metric_name, arr in sorted(context.rocket_metrics.items()):
+        add_array(
+            _history_npz_key("rocket_metric", metric_name),
+            arr,
+            kind="rocket_metric",
+            path_label=f"rocket_metrics.{metric_name}",
+        )
+    for object_id, metrics in sorted(context.reentry_metrics.items()):
+        for metric_name, arr in sorted(metrics.items()):
+            add_array(
+                _history_npz_key("reentry_metric", object_id, metric_name),
+                arr,
+                kind="reentry_metric",
+                path_label=f"reentry_metrics_by_object.{object_id}.{metric_name}",
+            )
+
+    manifest_json = json.dumps(manifest, sort_keys=True)
+    arrays["manifest_json"] = np.asarray(manifest_json)
+    np.savez_compressed(path, **arrays)
+    return {
+        "npz": str(path),
+        "format": manifest["format"],
+        "version": manifest["version"],
+        "array_count": len(manifest["arrays"]),
+    }
+
+
+def _history_npz_key(prefix: str, *parts: str) -> str:
+    raw = "__".join([prefix, *[str(part) for part in parts]])
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", raw)
+
+
 def _write_review_store(
     *,
     payload: dict[str, Any],
@@ -196,6 +357,25 @@ def _write_review_store(
         status = f"failed:{type(exc).__name__}: {exc}"
         payload.setdefault("summary", {})["review_store_status"] = status
         return {}
+
+
+def _write_mission_recovery_trade_space_plot(
+    *,
+    cfg: SimulationScenarioConfig,
+    mission_recovery: dict[str, Any],
+    outdir: Path,
+) -> str | None:
+    if not mission_recovery or not bool(cfg.outputs.plots.get("enabled", True)):
+        return None
+    figure_ids = _expanded_plot_figure_ids(dict(cfg.outputs.plots or {}))
+    if "mission_recovery_trade_space" not in figure_ids:
+        return None
+    return write_mission_recovery_trade_space_plot(
+        mission_recovery=mission_recovery,
+        outdir=outdir,
+        mode=str(cfg.outputs.mode or "save"),
+        dpi=int(cfg.outputs.plots.get("dpi", 150)),
+    )
 
 
 def _write_private_bridge_artifacts(
@@ -304,3 +484,9 @@ def _animate_outputs(
 
 def _fmt_float(x: float, digits: int = 3) -> str:
     return f"{float(x):.{digits}f}"
+
+
+def _fmt_optional_float(x: Any, digits: int = 3) -> str:
+    if x is None:
+        return "n/a"
+    return _fmt_float(float(x), digits)

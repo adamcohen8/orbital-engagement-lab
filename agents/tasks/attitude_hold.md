@@ -29,13 +29,13 @@ what evidence supports the attitude-control result.
 Validate:
 
 ```bash
-python run_simulation.py --config agents/examples/public_agent_attitude_hold.yaml --validate-only
+.venv/bin/python run_simulation.py --config agents/examples/public_agent_attitude_hold.yaml --validate-only
 ```
 
 Run:
 
 ```bash
-python run_simulation.py --config agents/examples/public_agent_attitude_hold.yaml
+.venv/bin/python run_simulation.py --config agents/examples/public_agent_attitude_hold.yaml
 ```
 
 ## Required Review Queries
