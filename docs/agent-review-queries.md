@@ -28,8 +28,32 @@ Use only `SELECT` or `WITH` queries. If `review/run.sqlite` is missing, inspect
 `index.md`, `master_run_summary.json`, CSV histories, and plots instead. Do not
 claim structured review evidence exists when the review store was not written.
 
+For completed Monte Carlo, controller-bench, sensitivity, and validation
+workflows, inspect the common workflow manifest first:
+
+```bash
+.venv/bin/python -m sim.review outputs/<workflow_output> --manifest
+.venv/bin/python -m sim.review outputs/<workflow_output> --list-artifacts
+.venv/bin/python -m sim.review outputs/<workflow_output> --saved-query workflow_metadata
+```
+
+When a workflow writes table-backed review evidence, use the workflow saved
+queries before parsing JSON/CSV artifacts by hand:
+
+```bash
+.venv/bin/python -m sim.review outputs/<controller_bench_output> --saved-query controller_bench_runs
+.venv/bin/python -m sim.review outputs/<sensitivity_output> --saved-query sensitivity_rankings
+.venv/bin/python -m sim.review outputs/<monte_carlo_output> --saved-query campaign_runs
+.venv/bin/python -m sim.review outputs/<validation_output> --saved-query validation_benchmarks
+```
+
 Saved query names are conveniences for common public agent tasks. When a result
 matters, state either the saved query name or the SQL query used.
+
+For first-run propagation, rendezvous, and mission-recovery workflows, start
+with [`agent-golden-paths.md`](agent-golden-paths.md). It names the exact
+configs, output directories, and saved queries that should be run before an
+agent writes a custom SQL query.
 
 ## Common Review Columns
 
@@ -52,6 +76,16 @@ missing, the scenario did not record that evidence path.
 | `mission_recovery_candidates` | `candidate_id`, `object_id`, `goal`, `source`, `planned_delta_v_m_s`, `planned_time_s`, `feasible`, `verified` |
 | `mission_recovery_burns` | `candidate_id`, `burn_index`, `start_time_s`, `frame`, `axis`, `delta_v_m_s` |
 | `artifacts` | `artifact_type`, `artifact_id`, `path` |
+| `workflow_metadata` | `workflow_type`, `scenario_name`, `title`, `status`, `generated_utc`, `review_schema_version`, `source_config` |
+| `workflow_artifacts` | `artifact_key`, `artifact_type`, `path` |
+| `bench_runs` | `variant_name`, `case_name`, `passed`, `failure_count`, `output_dir` |
+| `bench_leaderboard` | `kind`, `objective`, `metric`, `rank`, `variant_name`, `value`, `samples` |
+| `bench_failures` | `variant_name`, `case_name`, `objective`, `metric`, `reason`, `failure_mode`, `suggestion` |
+| `sensitivity_runs` | `run_id`, `status`, `parameter_path`, `parameter_value`, `output_dir` |
+| `sensitivity_rankings` | `rank`, `parameter_path`, `metric_path`, `method`, `effect_size` |
+| `campaign_runs` | `iteration`, `passed`, `closest_approach_km`, `duration_s`, `total_dv_m_s`, `output_dir` |
+| `campaign_metrics` | `iteration`, `metric_name`, `metric_value` |
+| `validation_benchmarks` | `benchmark_name`, `kind`, `passed`, `duration_s`, `output_dir` |
 
 ## Schema Discovery
 

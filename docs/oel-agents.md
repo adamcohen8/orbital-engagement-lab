@@ -59,6 +59,10 @@ Codex, Cursor, Claude Code, Gemini CLI, and similar tools should begin with:
 For evaluator-facing trials, use
 [`agent-evaluation-packet.md`](agent-evaluation-packet.md). For evidence-backed
 output inspection, use [`agent-review-queries.md`](agent-review-queries.md).
+For the shortest reproducible adoption workflows, use
+[`agent-golden-paths.md`](agent-golden-paths.md).
+For a machine-readable validate/run/inspect fast lane that writes reusable
+evidence packets, use [`agent-task-runner.md`](agent-task-runner.md).
 For mapping broad user intents to workflows, starting docs, evidence, and
 public-core limits, use
 [`agent-capability-routing.md`](agent-capability-routing.md).
@@ -145,13 +149,41 @@ Common review queries are maintained in
 [`agent-review-queries.md`](agent-review-queries.md). Agents should state the
 query used when a conclusion depends on review-store evidence.
 
-For agent review, prefer `.venv/bin/python -m sim.review`. The Output Review Workbench is
-an experimental preview and is not currently recommended for routine review.
-Use it only when the user explicitly asks for an interactive local workbench:
+For agent review, prefer `.venv/bin/python -m sim.review`. The Output Review
+Workbench is an experimental dynamic plot creator for completed runs. Use it
+only when the user explicitly asks for interactive local plotting:
 
 ```bash
 .venv/bin/python run_orw.py --output outputs/my_run
 ```
+
+For repeatable agent handoffs, `sim.agent_task` can prepare review-enabled
+scenario copies, validate/run bundled recipes, inspect completed outputs,
+compare two configs, create standard review plots, and write
+`agent_evidence_packet.json`:
+
+```bash
+.venv/bin/python -m sim.agent_task list
+.venv/bin/python -m sim.agent_task run quickstart_review --output-root outputs/agent_tasks --json
+.venv/bin/python -m sim.agent_task inspect outputs/quickstart_5min --query run_metadata --json
+```
+
+Treat this as an orchestration helper around documented workflows, not as a
+replacement for scenario YAML, deterministic execution, or review-store
+evidence.
+
+## Output Freshness
+
+Generated `outputs/` folders are derived evidence, not source of truth. Before
+citing a completed run, prefer evidence from the run you just validated and
+executed, or from a current task-runner `agent_evidence_packet.json`.
+
+For checked-in public agent examples, use the canonical output roots under
+`outputs/agents/<scenario_name>/`. Older local folders such as
+`outputs/public_agent_*`, previous validation harness runs, or ad hoc
+experiment folders may contain stale indexes, strict-JSON issues, or old
+next-command hints. If a folder's freshness is unclear, rerun the source config
+or inspect a freshly generated review store before drawing conclusions.
 
 ## Natural Requests
 
@@ -236,6 +268,9 @@ artifacts.
 
 The maintained card set for these tasks lives in
 [`agent-task-cards.md`](agent-task-cards.md).
+The first-run golden paths for minimal propagation, closed-loop rendezvous, and
+mission recovery/reconstitution live in
+[`agent-golden-paths.md`](agent-golden-paths.md).
 
 The agent should choose simple public defaults when the request is
 underspecified, write those defaults into the generated YAML, validate before

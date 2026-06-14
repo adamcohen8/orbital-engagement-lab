@@ -6,7 +6,7 @@ back-of-the-napkin orbital mechanics answers.
 Run it from the repository root:
 
 ```bash
-python orbital_calculator.py
+.venv/bin/python orbital_calculator.py
 ```
 
 The calculator opens an interactive terminal menu. First choose a category,

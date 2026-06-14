@@ -12,6 +12,7 @@ from sim.review import (
     ReviewWorkspace,
     get_saved_review_query,
     list_saved_review_queries,
+    load_workflow_manifest,
 )
 
 
@@ -21,6 +22,8 @@ def main(argv: list[str] | None = None) -> int:
     query_group = parser.add_mutually_exclusive_group()
     query_group.add_argument("--query", "-q", help="Read-only SELECT query to run.")
     query_group.add_argument("--saved-query", help="Named built-in review query to run.")
+    query_group.add_argument("--manifest", action="store_true", help="Print workflow review manifest summary.")
+    query_group.add_argument("--list-artifacts", action="store_true", help="List workflow review artifacts.")
     parser.add_argument("--list-saved-queries", action="store_true", help="List built-in saved review queries and exit.")
     parser.add_argument("--max-rows", type=int, default=50, help="Maximum rows to print.")
     parser.add_argument("--max-vm-steps", type=int, default=250_000, help="SQLite virtual-machine step budget.")
@@ -30,6 +33,25 @@ def main(argv: list[str] | None = None) -> int:
     if args.list_saved_queries:
         for item in list_saved_review_queries():
             print(f"{item.name}: {item.description}")
+        return 0
+
+    if args.manifest or args.list_artifacts:
+        if not args.output_dir:
+            parser.error("output_dir is required when reading workflow review metadata")
+        try:
+            manifest = load_workflow_manifest(Path(args.output_dir))
+        except (FileNotFoundError, json.JSONDecodeError) as exc:
+            print(f"review manifest failed: {exc}", file=sys.stderr)
+            return 2
+        if args.json:
+            if args.list_artifacts:
+                print(json.dumps({"artifacts": list(manifest.get("artifacts", []) or [])}, indent=2))
+            else:
+                print(json.dumps(manifest, indent=2))
+        elif args.list_artifacts:
+            _print_artifacts(list(manifest.get("artifacts", []) or []))
+        else:
+            _print_manifest(manifest)
         return 0
 
     sql = args.query
@@ -87,6 +109,31 @@ def _print_table(columns: list[str], rows: list[dict[str, Any]], *, truncated: b
         print("  ".join(_fmt(row.get(col))[: widths[col]].ljust(widths[col]) for col in columns))
     if truncated:
         print("(truncated)")
+
+
+def _print_manifest(manifest: dict[str, Any]) -> None:
+    print(f"workflow_type: {manifest.get('workflow_type', '')}")
+    print(f"scenario_name: {manifest.get('scenario_name', '')}")
+    print(f"status: {manifest.get('status', '')}")
+    print(f"generated_utc: {manifest.get('generated_utc', '')}")
+    sqlite = str(manifest.get("sqlite", "") or "")
+    if sqlite:
+        print(f"sqlite: {sqlite}")
+    queries = list(manifest.get("recommended_queries", []) or [])
+    if queries:
+        print("recommended_queries:")
+        for item in queries:
+            row = dict(item or {})
+            print(f"- {row.get('name', '')}: {row.get('description', '')}")
+
+
+def _print_artifacts(artifacts: list[Any]) -> None:
+    if not artifacts:
+        print("(no artifacts)")
+        return
+    for item in artifacts:
+        row = dict(item or {})
+        print(f"{row.get('artifact_key', '')}\t{row.get('artifact_type', '')}\t{row.get('path', '')}")
 
 
 def _fmt(value: Any) -> str:

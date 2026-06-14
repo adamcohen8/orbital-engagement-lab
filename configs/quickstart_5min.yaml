@@ -3,7 +3,7 @@ scenario_description: 'Five-minute public quickstart: deterministic two-satellit
   rendezvous run with headless-safe outputs.'
 metadata:
   owner: public
-  notes: Run with `python run_simulation.py --config configs/quickstart_5min.yaml`,
+  notes: Run with `.venv/bin/python run_simulation.py --config configs/quickstart_5min.yaml`,
     then open outputs/quickstart_5min/index.md.
 objects:
   rocket:
@@ -249,3 +249,6 @@ outputs:
   animations:
     enabled: false
     types: []
+  review:
+    enabled: true
+    detail: standard

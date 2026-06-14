@@ -18,7 +18,7 @@ metadata:
       learning_goal: Learn what R, I, and C mean by creating six small target
         orbits, then use short pulse-and-coast translations to settle near a
         passive target.
-      player_brief: The red satellite is you. R is radial, toward or away from
+      player_brief: The yellow satellite is you. R is radial, toward or away from
         Earth through the target. I is in-track, forward or backward along the
         target's orbit. C is cross-track, out of the target's orbital plane. For
         each guided stage, the simulation pauses until you hold the requested
@@ -43,7 +43,7 @@ metadata:
         cross_track: Cross-track C moves out of the target's orbital plane.
       tutorial_stage_hints:
         radial: Stage 1 - Radial R points toward or away from Earth through the
-          target. Tap W or S, then watch the red satellite move up/down in both
+          target. Tap W or S, then watch the yellow satellite move up/down in both
           plots.
         in_track: Stage 2 - In-track I is forward/back along the orbit. Tap A or
           D, then coast and watch the delayed radial response in the RI plot.

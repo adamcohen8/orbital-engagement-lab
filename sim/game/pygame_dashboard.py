@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -23,10 +24,22 @@ MAX_TRAIL_DRAW_POINTS = 260
 MAX_GHOST_DRAW_POINTS = 120
 TEXT_CACHE_LIMIT = 512
 BRIEFING_LINE_HEIGHT_PX = 24
+SATELLITE_SPRITE_DIAMETER_KM = 0.006
+SATELLITE_DOT_THRESHOLD_PX = 4
+SATELLITE_ICON_THRESHOLD_PX = 18
+SATELLITE_ICON_SIZE_PX = 20
+SATELLITE_MAX_SIZE_PX = 72
 ELLIPTIC_PREDICTION_COAST_UPDATE_INTERVAL_S = 30.0
 ELLIPTIC_PREDICTION_BURN_UPDATE_INTERVAL_S = 0.0
 ELLIPTIC_REFERENCE_CACHE_POSITION_TOL_KM = 1.0e-3
 ELLIPTIC_REFERENCE_CACHE_VELOCITY_TOL_KM_S = 5.0e-6
+GAME_ASSET_DIR = Path(__file__).resolve().parent / "assets"
+TARGET_SPRITE_PATH = GAME_ASSET_DIR / "rpo_target_sprite.png"
+CHASER_SPRITE_PATH = GAME_ASSET_DIR / "rpo_chaser_sprite.png"
+TARGET_MARKER_COLOR = (245, 92, 92)
+CHASER_MARKER_COLOR = (245, 205, 92)
+TARGET_TRAIL_COLOR = (215, 86, 86)
+CHASER_TRAIL_COLOR = (245, 205, 92)
 RIC_PRIMER_STAGES: tuple[dict[str, Any], ...] = (
     {
         "id": "radial",
@@ -143,6 +156,8 @@ class PygameRPODashboard:
     camera_mode: str = "reference"
     camera_rule_mode: str = "default"
     tutorial_target_path_ric: np.ndarray = field(default_factory=lambda: np.empty((0, 6), dtype=float))
+    live_prediction_accel_ric_km_s2: np.ndarray = field(default_factory=lambda: np.zeros(3, dtype=float))
+    live_prediction_elapsed_s: float = 0.0
 
     def __post_init__(self) -> None:
         try:
@@ -179,6 +194,9 @@ class PygameRPODashboard:
         self._prediction_cache: dict[str, dict[str, Any]] = {}
         self._briefing_layout_cache: dict[str, Any] = {}
         self._text_cache: dict[tuple[int, str, tuple[int, int, int]], Any] = {}
+        self._target_sprite = self._load_marker_sprite(TARGET_SPRITE_PATH)
+        self._chaser_sprite = self._load_marker_sprite(CHASER_SPRITE_PATH)
+        self._sprite_scale_cache: dict[tuple[str, int], Any] = {}
 
     def close(self) -> None:
         self.closed = True
@@ -207,6 +225,72 @@ class PygameRPODashboard:
         self._prediction_cache = {}
         self.briefing_scroll_px = 0
         self.tutorial_target_path_ric = np.empty((0, 6), dtype=float)
+        self.live_prediction_accel_ric_km_s2 = np.zeros(3, dtype=float)
+        self.live_prediction_elapsed_s = 0.0
+
+    def set_live_prediction_burn(self, accel_ric_km_s2: np.ndarray, elapsed_s: float) -> None:
+        accel = np.array(accel_ric_km_s2, dtype=float).reshape(3)
+        elapsed = float(max(elapsed_s, 0.0))
+        if not np.all(np.isfinite(accel)):
+            accel = np.zeros(3, dtype=float)
+        if not np.isfinite(elapsed):
+            elapsed = 0.0
+        previous_accel = np.array(getattr(self, "live_prediction_accel_ric_km_s2", np.zeros(3)), dtype=float).reshape(3)
+        previous_elapsed = float(getattr(self, "live_prediction_elapsed_s", 0.0))
+        if not np.allclose(previous_accel, accel, rtol=0.0, atol=1.0e-14) or not np.isclose(
+            previous_elapsed,
+            elapsed,
+            rtol=0.0,
+            atol=1.0e-6,
+        ):
+            self._frame_cache_dirty = True
+        self.live_prediction_accel_ric_km_s2 = accel
+        self.live_prediction_elapsed_s = elapsed
+
+    def _load_marker_sprite(self, path: Path) -> Any | None:
+        try:
+            return self.pygame.image.load(str(path)).convert_alpha()
+        except Exception:
+            return None
+
+    def _draw_satellite_marker(
+        self,
+        center: tuple[int, int],
+        *,
+        role: str,
+        scale_x: float,
+        scale_y: float,
+        fallback_radius_px: int,
+        force_icon: bool = False,
+    ) -> None:
+        pygame = self.pygame
+        role_key = str(role).strip().lower()
+        if role_key == "target":
+            sprite = getattr(self, "_target_sprite", None)
+            color = TARGET_MARKER_COLOR
+            cache_key = "target"
+        else:
+            sprite = getattr(self, "_chaser_sprite", None)
+            color = CHASER_MARKER_COLOR
+            cache_key = "chaser"
+
+        sprite_size = SATELLITE_ICON_SIZE_PX if force_icon else _satellite_marker_size_px(scale_x, scale_y)
+        if sprite is None or sprite_size <= 0:
+            pygame.draw.circle(self.screen, color, center, int(fallback_radius_px))
+            return
+
+        cache = getattr(self, "_sprite_scale_cache", {})
+        self._sprite_scale_cache = cache
+        cache_id = (cache_key, int(sprite_size))
+        scaled = cache.get(cache_id)
+        if scaled is None:
+            scaled = pygame.transform.smoothscale(sprite, (int(sprite_size), int(sprite_size)))
+            cache[cache_id] = scaled
+        rect = scaled.get_rect(center=center)
+        self.screen.blit(scaled, rect)
+        dot_radius = 2 if int(sprite_size) < 30 else 3
+        pygame.draw.circle(self.screen, (235, 248, 255), center, dot_radius)
+        pygame.draw.circle(self.screen, color, center, dot_radius + 2, width=1)
 
     def reset_briefing_scroll(self) -> None:
         self.briefing_scroll_px = 0
@@ -420,11 +504,18 @@ class PygameRPODashboard:
 
         target = to_px(np.zeros(3, dtype=float))
         chaser = to_px(point)
-        pygame.draw.circle(self.screen, (245, 205, 92), target, 6)
-        pygame.draw.circle(self.screen, (245, 92, 92), chaser, 7)
+        self._draw_satellite_marker(target, role="target", scale_x=scale, scale_y=scale, fallback_radius_px=6, force_icon=True)
+        self._draw_satellite_marker(
+            chaser,
+            role="chaser",
+            scale_x=scale,
+            scale_y=scale,
+            fallback_radius_px=7,
+            force_icon=True,
+        )
         pygame.draw.ellipse(
             self.screen,
-            (84, 92, 40),
+            (92, 42, 50),
             pygame.Rect(
                 target[0] - int(0.25 * scale),
                 target[1] - int(0.25 * scale),
@@ -433,8 +524,8 @@ class PygameRPODashboard:
             ),
             width=1,
         )
-        self._text("Target", (target[0] + 10, target[1] - 10), self.small_font, (245, 205, 92))
-        self._text("Chaser", (chaser[0] + 10, chaser[1] + 14), self.small_font, (245, 92, 92))
+        self._text("Target", (target[0] + 10, target[1] - 10), self.small_font, TARGET_MARKER_COLOR)
+        self._text("Chaser", (chaser[0] + 10, chaser[1] + 14), self.small_font, CHASER_MARKER_COLOR)
 
     def _draw_ric_primer_axes(self, plot: Any, *, x_axis: int, y_axis: int, active_axis: int) -> None:
         pygame = self.pygame
@@ -497,8 +588,15 @@ class PygameRPODashboard:
         self._draw_primer_earth(center, int(round(radius * 0.16)))
         target = _point_on_circle(center, radius, target_theta)
         chaser = _point_on_circle(center, chaser_radius, target_theta + phase_offset)
-        pygame.draw.circle(self.screen, (245, 205, 92), target, 7)
-        pygame.draw.circle(self.screen, (245, 92, 92), chaser, 7)
+        self._draw_satellite_marker(target, role="target", scale_x=radius, scale_y=radius, fallback_radius_px=7, force_icon=True)
+        self._draw_satellite_marker(
+            chaser,
+            role="chaser",
+            scale_x=radius,
+            scale_y=radius,
+            fallback_radius_px=7,
+            force_icon=True,
+        )
         self._text("Target", (target[0] - 62, target[1] + 18), self.small_font, (230, 235, 242))
         self._text("Chaser", (chaser[0] + 10, chaser[1] - 16), self.small_font, (230, 235, 242))
         if stage["id"] == "radial":
@@ -518,11 +616,18 @@ class PygameRPODashboard:
         chaser_line = _line_segment(center, half_span, -0.5 - inclination_deg / 22.0)
         self._draw_primer_earth(center, max(24, int(round(min(plot.width, plot.height) * 0.07))))
         pygame.draw.line(self.screen, (96, 174, 224), target_line[0], target_line[1], width=3)
-        pygame.draw.line(self.screen, (245, 92, 92), chaser_line[0], chaser_line[1], width=3)
+        pygame.draw.line(self.screen, CHASER_MARKER_COLOR, chaser_line[0], chaser_line[1], width=3)
         target = _point_along_line(target_line, 0.86)
         chaser = _point_along_line(chaser_line, 0.86)
-        pygame.draw.circle(self.screen, (245, 205, 92), target, 7)
-        pygame.draw.circle(self.screen, (245, 92, 92), chaser, 7)
+        self._draw_satellite_marker(target, role="target", scale_x=half_span, scale_y=half_span, fallback_radius_px=7, force_icon=True)
+        self._draw_satellite_marker(
+            chaser,
+            role="chaser",
+            scale_x=half_span,
+            scale_y=half_span,
+            fallback_radius_px=7,
+            force_icon=True,
+        )
         self._text("Target", (target[0] - 62, target[1] + 18), self.small_font, (230, 235, 242))
         self._text("Chaser", (chaser[0] + 10, chaser[1] - 16), self.small_font, (230, 235, 242))
         self._text(
@@ -735,8 +840,14 @@ class PygameRPODashboard:
         target_trail_rows = self._frame_cache.get("target_trail", target_rel[-self.max_history :])
         if target_trail_rows.size and len(target_trail_rows) >= 2:
             target_trail = rows_to_px(target_trail_rows)
-            pygame.draw.lines(self.screen, (245, 205, 92), False, target_trail, width=2)
-        pygame.draw.circle(self.screen, (245, 205, 92), target_px, 6)
+            pygame.draw.lines(self.screen, TARGET_TRAIL_COLOR, False, target_trail, width=2)
+        self._draw_satellite_marker(
+            target_px,
+            role="target",
+            scale_x=scale_x,
+            scale_y=scale_y,
+            fallback_radius_px=6,
+        )
 
         trail_rows = self._frame_cache.get("rel_trail", rel[-self.max_history :])
         trail = rows_to_px(trail_rows)
@@ -745,17 +856,23 @@ class PygameRPODashboard:
             ghost_pts = rows_to_px(ghost_sample)
             self._draw_polyline_dashed(ghost_pts, color=(135, 150, 172), dash_px=8, gap_px=8, width=2)
         if len(trail) >= 2:
-            pygame.draw.lines(self.screen, (215, 86, 86), False, trail, width=2)
+            pygame.draw.lines(self.screen, CHASER_TRAIL_COLOR, False, trail, width=2)
         self._draw_burn_markers(rel=rel, to_px=to_px, marker_rows=self._frame_cache.get("burn_marker_rel"))
         chaser = trail[-1]
-        pygame.draw.circle(self.screen, (245, 92, 92), chaser, 7)
+        self._draw_satellite_marker(
+            chaser,
+            role="chaser",
+            scale_x=scale_x,
+            scale_y=scale_y,
+            fallback_radius_px=7,
+        )
 
         if rel.shape[1] >= 6:
             v = np.zeros(3, dtype=float)
             v[[x_axis, y_axis]] = rel[-1, [x_axis + 3, y_axis + 3]]
             v_px = np.array([v[x_axis] * 120.0 * scale_x, v[y_axis] * 120.0 * scale_y], dtype=float)
             self._draw_vector(
-                to_px(rel[-1]), v_px, color=(245, 205, 92), scale=1.0, label="Vrel"
+                to_px(rel[-1]), v_px, color=CHASER_MARKER_COLOR, scale=1.0, label="Vrel"
             )
         if self.thrust_ric_hist:
             thrust_ric = self.thrust_ric_hist[-1]
@@ -787,10 +904,15 @@ class PygameRPODashboard:
             width=6,
         )
         latest_thrust = self.thrust_ric_hist[-1] if self.thrust_ric_hist else np.zeros(3, dtype=float)
-        active_burn = bool(np.linalg.norm(latest_thrust) > float(self.burn_marker_threshold_km_s2))
+        live_accel = np.array(getattr(self, "live_prediction_accel_ric_km_s2", np.zeros(3)), dtype=float).reshape(3)
+        active_burn = bool(
+            np.linalg.norm(latest_thrust) > float(self.burn_marker_threshold_km_s2)
+            or np.linalg.norm(live_accel) > float(self.burn_marker_threshold_km_s2)
+        )
         thrust = _dashboard_history_array(self, "_thrust_ric_array", self.thrust_ric_hist[-rel.shape[0] :], width=3)
         target_ghost = self._target_coast_prediction(target_rel)
-        ghost = self._coast_prediction_from_cached("chaser", rel[-1], active_burn=active_burn)
+        ghost_seed = self._live_prediction_seed(rel[-1])
+        ghost = self._coast_prediction_from_cached("chaser", ghost_seed, active_burn=active_burn)
         burn_marker_rel = self._burn_marker_rows(rel=rel, thrust=thrust)
         self._frame_cache = {
             "rel": rel,
@@ -807,6 +929,22 @@ class PygameRPODashboard:
             "nmt_bounds": self._nmt_boundary_points(),
         }
         self._frame_cache_dirty = False
+
+    def _live_prediction_seed(self, rel0: np.ndarray) -> np.ndarray:
+        seed = np.array(rel0, dtype=float).reshape(6)
+        accel = np.array(getattr(self, "live_prediction_accel_ric_km_s2", np.zeros(3)), dtype=float).reshape(3)
+        elapsed = float(getattr(self, "live_prediction_elapsed_s", 0.0))
+        n = getattr(self, "mean_motion_rad_s", None)
+        if (
+            elapsed <= 0.0
+            or n is None
+            or not np.isfinite(float(n))
+            or float(n) <= 0.0
+            or not np.all(np.isfinite(accel))
+            or float(np.linalg.norm(accel)) <= float(self.burn_marker_threshold_km_s2)
+        ):
+            return seed
+        return _cw_forced_state(seed, accel, elapsed, float(n))
 
     def _draw_grid(
         self,
@@ -1094,14 +1232,24 @@ class PygameRPODashboard:
             self.small_font,
             (255, 190, 198) if hint_is_alert else (245, 210, 110),
         )
-        footer = f"Speed {float(speed_multiple):.0f}x   Up/Down Speed   Space Pause   . Step   R Reset   Esc Quit"
-        footer_text = self._fit_text_px(footer, self.small_font, min(rect.width - 24, 690))
+        footer = f"Speed {float(speed_multiple):.0f}x  Up/Down Speed  Space Pause  R Reset  Esc Level Select"
+        footer_text = self._fit_text_px(
+            footer,
+            self.small_font,
+            min(rect.width - 24, 690),
+            preserve_spaces=True,
+        )
         footer_width = self._text_width(self.small_font, footer_text)
         footer_x = rect.right - footer_width - 16
         command_line = command_status.splitlines()[0] if command_status else ""
         command_max_width = max(0, footer_x - (rect.x + 16) - 12)
         if command_line and command_max_width > 48:
-            command_text = self._fit_text_px(command_line, self.small_font, command_max_width)
+            command_text = self._fit_text_px(
+                command_line,
+                self.small_font,
+                command_max_width,
+                preserve_spaces=True,
+            )
             self._text(command_text, (rect.x + 16, rect.y + 60), self.small_font, (195, 205, 220))
         self._text(
             footer_text,
@@ -1898,8 +2046,8 @@ class PygameRPODashboard:
             lines.append(current)
         return lines or [""]
 
-    def _fit_text_px(self, value: str, font: Any, width_px: int) -> str:
-        text = " ".join(str(value or "").split())
+    def _fit_text_px(self, value: str, font: Any, width_px: int, *, preserve_spaces: bool = False) -> str:
+        text = str(value or "") if preserve_spaces else " ".join(str(value or "").split())
         if self._text_width(font, text) <= width_px:
             return text
         ellipsis = "..."
@@ -2087,6 +2235,56 @@ def _cw_coast_state(x0: np.ndarray, t_s: float, mean_motion_rad_s: float) -> np.
     ydp = -6.0 * n * (1.0 - c) * x - 2.0 * s * xd + (4.0 * c - 3.0) * yd
     zdp = -n * s * z + c * zd
     return np.array([xp, yp, zp, xdp, ydp, zdp], dtype=float)
+
+
+def _satellite_marker_size_px(
+    scale_x_px_per_km: float,
+    scale_y_px_per_km: float,
+    *,
+    diameter_km: float = SATELLITE_SPRITE_DIAMETER_KM,
+) -> int:
+    raw_px = float(max(abs(float(scale_x_px_per_km)), abs(float(scale_y_px_per_km)))) * float(max(diameter_km, 0.0))
+    if not np.isfinite(raw_px) or raw_px < float(SATELLITE_DOT_THRESHOLD_PX):
+        return 0
+    if raw_px < float(SATELLITE_ICON_THRESHOLD_PX):
+        return int(SATELLITE_ICON_SIZE_PX)
+    return int(round(np.clip(raw_px, SATELLITE_ICON_SIZE_PX, SATELLITE_MAX_SIZE_PX)))
+
+
+def _cw_forced_state(
+    x0: np.ndarray,
+    accel_ric_km_s2: np.ndarray,
+    t_s: float,
+    mean_motion_rad_s: float,
+    *,
+    substep_s: float = 0.1,
+) -> np.ndarray:
+    state = np.array(x0, dtype=float).reshape(6).copy()
+    accel = np.array(accel_ric_km_s2, dtype=float).reshape(3)
+    duration = float(max(t_s, 0.0))
+    n = float(mean_motion_rad_s)
+    if duration <= 0.0 or not np.all(np.isfinite(state)) or not np.all(np.isfinite(accel)):
+        return state
+    if not np.isfinite(n) or n <= 0.0:
+        state[:3] += state[3:6] * duration + 0.5 * accel * duration * duration
+        state[3:6] += accel * duration
+        return state
+    step = float(max(substep_s, 1.0e-6))
+    elapsed = 0.0
+    while elapsed < duration - 1.0e-12:
+        dt = min(step, duration - elapsed)
+        r, i, c, rd, idot, cd = state
+        rdd = 3.0 * n * n * r + 2.0 * n * idot + accel[0]
+        idd = -2.0 * n * rd + accel[1]
+        cdd = -n * n * c + accel[2]
+        state[3] = rd + rdd * dt
+        state[4] = idot + idd * dt
+        state[5] = cd + cdd * dt
+        state[0] = r + state[3] * dt
+        state[1] = i + state[4] * dt
+        state[2] = c + state[5] * dt
+        elapsed += dt
+    return state
 
 
 def _coast_prediction_model_key(value: str) -> str:

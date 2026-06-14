@@ -28,7 +28,8 @@ The public core includes:
 - adversarial and engagement-style simulation primitives, including generic
   chaser/target knowledge, pursuit, evade, and defensive behaviors
 - reusable object preset YAML files
-- Python API, CLI, and GUI entrypoints
+- primary CLI, scenario YAML, Python API, and review query workflows
+- experimental desktop GUI and Output Review Workbench dynamic plot creator
 - examples and starter validation workflows
 - public use-case configs under `examples/configs/public_*.yaml`
 - lightweight educational rocket/ascent primitives, without tuned orbital

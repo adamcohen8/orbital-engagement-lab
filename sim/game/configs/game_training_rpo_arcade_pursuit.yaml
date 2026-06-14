@@ -98,7 +98,7 @@ metadata:
         5 km, sample dC within +/-1 m/s, set dR to zero, and solve dI for equal
         target/chaser orbital energy.
       - Round score is weighted by round number and added to the run total.
-      - The yellow target motion is shown relative to the target reference orbit.
+      - The red target motion is shown relative to the target reference orbit.
       - Target defensive maneuvering is capped at 0.1 m/s total delta-v through
         round 20, then increases by 0.01 m/s per round.
       target_object_id: target

@@ -13,7 +13,9 @@ Codex, Cursor, Claude Code, Gemini CLI, and Grok Build work with the
 open-source OEL core.
 For the fuller public agent playbook, read `agents/public/AGENTS.md` and
 `docs/oel-agents.md`. For routing broad user intents to documented workflows,
-read `docs/agent-capability-routing.md`.
+read `docs/agent-capability-routing.md`. For repeatable recipe execution,
+completed-run inspection, comparison packets, and standard review plots, read
+`docs/agent-task-runner.md`.
 
 ## Default Agent Posture
 
@@ -34,6 +36,9 @@ read `docs/agent-capability-routing.md`.
   writers. Do not invent shortcut physics in agent scripts or reports.
 - Prefer the review store query API over ad hoc parsing of large run logs when
   `review/run.sqlite` is available.
+- Use `.venv/bin/python -m sim.agent_task` when a bundled recipe, comparison,
+  standard plot, or portable `agent_evidence_packet.json` would make the
+  workflow more reproducible.
 - Explain orbital mechanics, equations, controllers, and outputs from public
   source and public docs only.
 - Call out uncertainty, missing validation evidence, and model limits plainly.
@@ -125,6 +130,15 @@ After the run, query the saved review DB:
 ```bash
 .venv/bin/python -m sim.review outputs/<scenario_name> --query "SELECT scenario_name, duration_s, samples FROM run_metadata"
 .venv/bin/python -m sim.review outputs/<scenario_name> --query "SELECT time_s, range_km FROM relative_state ORDER BY time_s LIMIT 20" --json
+```
+
+For a machine-readable evidence packet around common recipes or completed
+outputs, use:
+
+```bash
+.venv/bin/python -m sim.agent_task list
+.venv/bin/python -m sim.agent_task run quickstart_review --output-root outputs/agent_tasks
+.venv/bin/python -m sim.agent_task inspect outputs/<scenario_name> --query run_metadata --json
 ```
 
 Rules for agents:

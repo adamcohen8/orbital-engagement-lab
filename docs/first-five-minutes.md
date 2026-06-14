@@ -1,7 +1,7 @@
 # First Five Minutes
 
-This path proves the public core works before you try plots, GUI extras, or
-larger scenarios.
+This path proves the public core works through the primary CLI/YAML workflow
+before you try plots, experimental desktop surfaces, or larger scenarios.
 
 ## 1. Install
 
@@ -26,8 +26,8 @@ The commands below use `.venv/bin/python` so they work even on systems where
 .venv/bin/python run_simulation.py --doctor
 ```
 
-`WARN` entries for plotting, GUI, or game dependencies are okay for the first
-run. Fix any `FAIL` entries before continuing.
+`WARN` entries for plotting, experimental GUI, or game dependencies are okay
+for the first run. Fix any `FAIL` entries before continuing.
 
 ## 3. Run The Quickstart
 
@@ -84,11 +84,7 @@ For a shorter plotting demo:
 .venv/bin/python run_simulation.py --config configs/plotting_rendezvous_demo.yaml
 ```
 
-Or open the GUI:
-
-```bash
-.venv/bin/python -m pip install ".[gui]"
-.venv/bin/python run_gui.py
-```
-
-In the GUI, use **Open Quickstart** or **Run Quickstart** from the top bar.
+For output inspection, prefer the generated `index.md`, JSON artifacts, plots,
+and review-store CLI when a run enables `outputs.review.enabled: true`. The
+desktop GUI and Output Review Workbench dynamic plot creator are experimental
+desktop surfaces, not the first-five-minute path.

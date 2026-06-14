@@ -49,7 +49,8 @@ def test_quickstart_5min_runs_headlessly_and_writes_start_here_artifacts(tmp_pat
     assert "## What Happened" in index_text
     assert "Open [`master_run_summary.json`](master_run_summary.json)" in index_text
     assert "Closest approach:" in index_text
-    assert "No default next command is defined for this workflow." in index_text
+    assert ".venv/bin/python -m sim.review" in index_text
+    assert (outdir / "review" / "run.sqlite").is_file()
     assert "Inspect generated plot or animation artifacts listed below." not in index_text
 
     summary = json.loads((outdir / "master_run_summary.json").read_text(encoding="utf-8"))

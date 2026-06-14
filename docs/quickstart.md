@@ -26,8 +26,8 @@ The commands below use `.venv/bin/python` so they work even on systems where
 .venv/bin/python run_simulation.py --doctor
 ```
 
-Warnings for optional plotting, GUI, or game packages do not block the
-headless quickstart path.
+Warnings for optional plotting, experimental GUI, or game packages do not block
+the headless quickstart path.
 
 Only run scenario YAML files from sources you trust. Scenario configs can point
 at importable Python modules/classes for controllers, guidance, mission
@@ -76,7 +76,12 @@ knowledge updates, then writes summary artifacts under
 the run summary, review order, and artifact inventory.
 
 Plots are disabled in this first path to keep the first run fast, headless, and
-focused on the generated summary artifacts.
+focused on the generated summary artifacts. The quickstart does write
+`review/run.sqlite`, so you can inspect the completed run with the review CLI:
+
+```bash
+.venv/bin/python -m sim.review outputs/quickstart_5min --saved-query run_metadata
+```
 
 To open the output folder automatically after the run:
 
@@ -198,7 +203,10 @@ interactive plotting demo:
 ```
 
 The base package already installs NumPy and Matplotlib for simulation and
-plotting support. The GUI profile enables `.venv/bin/python run_gui.py`. The ML profile
+plotting support. The GUI profile enables experimental desktop surfaces,
+including the Output Review Workbench dynamic plot creator for completed runs.
+The recommended public onboarding path remains CLI/YAML/Python API, and the
+scripted review path remains `.venv/bin/python -m sim.review`. The ML profile
 enables the bundled Gymnasium-style environments.
 
 ## Gravity Coefficient Files

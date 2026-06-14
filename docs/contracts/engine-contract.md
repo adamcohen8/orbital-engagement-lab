@@ -46,7 +46,7 @@ Still maturing:
 
 Preferred public entrypoints:
 
-- CLI: `python run_simulation.py --config <path>`
+- CLI: `.venv/bin/python run_simulation.py --config <path>`
 - API: `SimulationConfig.from_yaml(...)` and `SimulationSession`
 - Execution service: `sim.execution.run_simulation_config_file(...)`
 

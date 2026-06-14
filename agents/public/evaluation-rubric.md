@@ -14,7 +14,7 @@ its limits.
 - The config passes:
 
 ```bash
-python run_simulation.py --config <scenario.yaml> --validate-only
+.venv/bin/python run_simulation.py --config <scenario.yaml> --validate-only
 ```
 
 ## 2. Execution Evidence
@@ -24,7 +24,7 @@ python run_simulation.py --config <scenario.yaml> --validate-only
 - `index.md` exists when the output writer creates one.
 - `master_run_summary.json` exists for single-run review.
 - `review/run.sqlite` exists when `outputs.review.enabled: true`.
-- The agent uses `python -m sim.review` for review-store evidence when the
+- The agent uses `.venv/bin/python -m sim.review` for review-store evidence when the
   review store exists.
 - `master_run_log.json` exists only when detailed time-history output was
   requested with `outputs.stats.save_full_log: true`.

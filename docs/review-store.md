@@ -1,19 +1,23 @@
 # Review Store Contract
 
-Status: initial implementation contract for the review-store data layer.
+Status: implementation contract for the single-run review store and common
+workflow review evidence layer.
 
-Current recommendation: use the `sim.review` Python/CLI query API for agent and
-scripted review. The desktop Output Review Workbench is an experimental preview
-and is not currently recommended for routine review workflows.
+Current recommendation: use the `sim.review` Python/CLI query API for agent,
+scripted, and routine human review. The desktop Output Review Workbench is an
+experimental dynamic plot creator for completed runs: load review-store data,
+choose a query/table, map columns to a plot, toggle OEL light/dark styling, and
+save custom figures with provenance.
 
-The review store is the durable data layer for inspecting completed OEL
-single-run outputs. It is intended to make simulation outputs queryable after a
-run finishes, without requiring the simulator to keep full in-memory state
-alive.
+The review store is the durable data layer for inspecting completed OEL outputs.
+It is intended to make simulation outputs queryable after a run finishes,
+without requiring the simulator to keep full in-memory state alive.
 
-The initial implementation writes an opt-in SQLite store for single-run
-outputs. Campaign, controller-benchmark, sensitivity, and cross-run review
-stores can build on the same conventions later.
+Single-run scenarios can opt into a detailed SQLite review store. Workflow
+outputs for Monte Carlo campaigns, controller bench, sensitivity, and
+validation now write a common `review/workflow_manifest.json`; the supported
+workflow reporters also write table-backed `review/run.sqlite` stores for
+run-level review evidence.
 
 ## Product Goal
 
@@ -29,6 +33,17 @@ OEL should support this workflow:
 
 The review store is not a replacement for the physics engine. It is a
 post-processing and review surface over saved simulation evidence.
+
+## Review Evidence Tiers
+
+OEL uses three review evidence tiers:
+
+- `single_run_review`: opt-in detailed SQLite evidence for a deterministic
+  single-run scenario.
+- `workflow_review_manifest`: a common manifest doorway for completed workflow
+  outputs, including Monte Carlo, controller bench, sensitivity, and validation.
+- `workflow_review_tables`: normalized workflow-specific SQLite tables when a
+  workflow has run-level evidence worth querying.
 
 ## Output Layout
 
@@ -47,7 +62,22 @@ outputs/<scenario_name>/
     figures/
 ```
 
-Required paths for the first implementation:
+Supported workflow outputs include:
+
+```text
+outputs/<workflow_output>/
+  index.md
+  <workflow summary artifacts>
+  review/
+    workflow_manifest.json
+    run.sqlite
+    schema.json
+    saved_views.json
+    generated_artifacts.json
+    figures/
+```
+
+Required review paths:
 
 - `review/run.sqlite`: SQLite database with normalized run data.
 - `review/schema.json`: schema version, table inventory, units, and column
@@ -55,6 +85,8 @@ Required paths for the first implementation:
 
 Optional paths:
 
+- `review/workflow_manifest.json`: common workflow review doorway for campaign,
+  controller-bench, sensitivity, and validation outputs.
 - `review/saved_views.json`: named queries, filters, and chart definitions.
 - `review/generated_artifacts.json`: custom figures/tables saved from the
   workbench or agent review API.
@@ -85,8 +117,8 @@ Recommended detail levels:
   engineering review but may be large.
 
 The current default is disabled so existing quickstart and smoke-test runs do
-not grow extra artifacts unless a scenario opts in. When enabled, the initial
-writer accepts `compact`, `standard`, and `full`; the first table set focuses on
+not grow extra artifacts unless a scenario opts in. When enabled, the writer
+accepts `compact`, `standard`, and `full`; the core table set focuses on
 standard single-run review data.
 
 ## Database Rules
@@ -114,24 +146,35 @@ simulation is still the scenario config plus deterministic simulator behavior.
 
 ## Query And Schema Discovery
 
-Use `python -m sim.review` for routine agent and scripted inspection. Keep
+Use `.venv/bin/python -m sim.review` for routine agent and scripted inspection. Keep
 queries read-only and use only `SELECT` or `WITH` statements:
 
 ```bash
-python -m sim.review outputs/my_run --query "SELECT scenario_name, duration_s, samples FROM run_metadata"
+.venv/bin/python -m sim.review outputs/my_run --query "SELECT scenario_name, duration_s, samples FROM run_metadata"
+.venv/bin/python -m sim.review outputs/my_workflow --manifest
+.venv/bin/python -m sim.review outputs/my_workflow --list-artifacts
 ```
 
 Before writing custom queries against an unfamiliar table, inspect the run's
 schema or sample one row instead of guessing column names:
 
 ```bash
-python -m sim.review outputs/my_run --query "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name" --json
-python -m sim.review outputs/my_run --query "SELECT * FROM object_state LIMIT 1" --json
+.venv/bin/python -m sim.review outputs/my_run --query "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name" --json
+.venv/bin/python -m sim.review outputs/my_run --query "SELECT * FROM object_state LIMIT 1" --json
 ```
 
 The saved `review/schema.json` lists the tables available for that run. Common
 agent query recipes and column names are maintained in
 [`agent-review-queries.md`](agent-review-queries.md).
+
+Workflow review stores expose common tables such as `workflow_metadata`,
+`workflow_summary`, and `workflow_artifacts`, plus workflow-specific tables:
+
+- controller bench: `bench_runs`, `bench_variant_summaries`,
+  `bench_leaderboard`, and `bench_failures`,
+- sensitivity: `sensitivity_runs` and `sensitivity_rankings`,
+- Monte Carlo: `campaign_runs` and `campaign_metrics`,
+- validation: `validation_benchmarks` and `validation_artifacts`.
 
 ## Initial Schema
 
@@ -456,15 +499,16 @@ The same safe query surface is available from the CLI for smoke checks and
 agent workflows:
 
 ```bash
-python -m sim.review outputs/my_run --query "SELECT time_s, range_km FROM relative_state LIMIT 10"
-python -m sim.review outputs/my_run --query "SELECT scenario_name FROM run_metadata" --json
+.venv/bin/python -m sim.review outputs/my_run --query "SELECT time_s, range_km FROM relative_state LIMIT 10"
+.venv/bin/python -m sim.review outputs/my_run --query "SELECT scenario_name FROM run_metadata" --json
 ```
 
-The experimental ORW preview can open a completed run directly, but it is not
-currently recommended for routine review. Prefer `python -m sim.review`:
+The experimental ORW preview can open a completed run directly and build custom
+figures from review-store queries. Prefer `.venv/bin/python -m sim.review` when you only
+need scripted or agent-friendly tabular inspection:
 
 ```bash
-python run_orw.py --output outputs/my_run
+.venv/bin/python run_orw.py --output outputs/my_run
 ```
 
 Safety requirements:
@@ -512,9 +556,11 @@ Custom figures should use the OEL plotting style helpers so workbench-generated
 figures visually match simulator-generated artifacts.
 
 The experimental ORW preview supports saving a query result as an OEL-styled
-figure when the result contains at least two numeric columns. Saved figures are
-written under `review/figures/`, and provenance for ORW-generated figures is
-appended to `review/generated_artifacts.json`.
+figure when the result contains plottable columns. Users can choose line,
+scatter, or bar plots; x/y/group columns; light or dark OEL style; titles and
+axis labels; and PNG/SVG/PDF output. Saved figures are written under
+`review/figures/`, and provenance for ORW-generated figures is appended to
+`review/generated_artifacts.json`.
 
 ## Built-In Insight Recipes
 

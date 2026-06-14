@@ -94,9 +94,11 @@ from sim.game.pygame_dashboard import (
     PygameRPODashboard,
     _coast_prediction_model_key,
     _cw_coast_state,
+    _cw_forced_state,
     _elliptic_linear_coast_states,
     _ric_primer_stage,
     _sample_rows,
+    _satellite_marker_size_px,
     _should_draw_nominal_nmt,
     _true_anomaly_deg_from_state,
     _two_body_coast_state,
@@ -151,6 +153,8 @@ from sim.game.runner import (
     _guided_tutorial_target_path,
     _guided_tutorial_update_dashboard_path,
     _guided_tutorial_wrong_input_active,
+    _live_prediction_accel_ric,
+    _live_prediction_burn,
     _mission_checklist,
     _mission_metrics,
     _opposing_key_axis,
@@ -764,14 +768,16 @@ def test_choose_game_launch_can_skip_start_screen(monkeypatch) -> None:
     assert calls == [False]
 
 
-def test_start_screen_artwork_rect_covers_screen_without_distortion() -> None:
+def test_start_screen_artwork_rect_fits_screen_without_distortion() -> None:
     rect = _start_artwork_rect((1672, 941), (1040, 680))
     x, y, width, height = rect
 
-    assert x <= 0
-    assert y <= 0
-    assert width >= 1040
-    assert height >= 680
+    assert x >= 0
+    assert y >= 0
+    assert width <= 1040
+    assert height <= 680
+    assert width == 1040
+    assert height < 680
     assert width / height == pytest.approx(1672 / 941, rel=0.02)
 
 
@@ -4603,7 +4609,7 @@ def test_pygame_input_mapping_sets_ric_axes_and_quit() -> None:
 
     assert state.quit_requested is True
 
-    class PauseStepPygame(FakePygame):
+    class PauseSpeedPygame(FakePygame):
         class event:
             @staticmethod
             def get():
@@ -4621,10 +4627,10 @@ def test_pygame_input_mapping_sets_ric_axes_and_quit() -> None:
 
     state = KeyboardCommandState()
 
-    _poll_pygame_input(PauseStepPygame, state, control_mode="ric_translation")
+    _poll_pygame_input(PauseSpeedPygame, state, control_mode="ric_translation")
 
     assert state.paused is True
-    assert state.step_requested is True
+    assert not hasattr(state, "step_requested")
     assert state.speed_multiplier_change == 1
     assert state.restart_requested is True
     assert state.music_toggle_requested is True
@@ -4735,9 +4741,10 @@ def test_command_status_uses_capitalized_indicators() -> None:
     ric_status = _command_status(KeyboardCommandState(paused=True, yaw=1.0), control_mode="ric_translation")
     attitude_status = _command_status(KeyboardCommandState(firing=False), control_mode="attitude_thrust")
 
-    assert "W/S Radial" in ric_status
+    assert ric_status == "W/S R  A/D I  Left/Right C  C Camera  M Music"
     assert "M Music" in ric_status
-    assert "Throttle=" in ric_status
+    assert "PAUSED" not in ric_status
+    assert "Throttle=" not in ric_status
     assert "W/S Pitch" in attitude_status
     assert "Space Fire" in attitude_status
     assert "Thrust=Coast" in attitude_status
@@ -4897,6 +4904,80 @@ def test_cw_coast_state_zero_time_returns_initial_state() -> None:
     assert np.allclose(out, x0)
 
 
+def test_cw_forced_state_advances_short_visual_burn() -> None:
+    x0 = np.zeros(6, dtype=float)
+    accel = np.array([1.0e-5, 0.0, 0.0], dtype=float)
+
+    out = _cw_forced_state(x0, accel, 0.5, 0.001)
+
+    assert out[0] > 0.0
+    assert out[3] == pytest.approx(5.0e-6, rel=1.0e-3)
+
+
+def test_live_prediction_accel_ric_matches_manual_translation_scaling() -> None:
+    state = KeyboardCommandState(pitch=1.0, yaw=1.0, roll=0.0, throttle=0.5)
+
+    accel = _live_prediction_accel_ric(
+        state,
+        control_mode="ric_translation",
+        max_accel_km_s2=2.0e-5,
+    )
+
+    assert np.linalg.norm(accel) == pytest.approx(1.0e-5)
+    assert accel[0] == pytest.approx(accel[1])
+
+
+def test_live_prediction_accel_ric_clears_when_paused() -> None:
+    state = KeyboardCommandState(pitch=1.0, yaw=0.0, roll=0.0, throttle=1.0, paused=True)
+
+    accel = _live_prediction_accel_ric(
+        state,
+        control_mode="ric_translation",
+        max_accel_km_s2=2.0e-5,
+    )
+
+    assert np.allclose(accel, np.zeros(3, dtype=float))
+
+
+def test_live_prediction_burn_uses_pending_timed_input_residual() -> None:
+    state = KeyboardCommandState(throttle=1.0)
+    state.use_timing_accumulator = True
+    state.pitch_sim_s = 0.25
+    state.yaw_sim_s = 0.10
+
+    accel, elapsed = _live_prediction_burn(
+        state,
+        control_mode="ric_translation",
+        max_accel_km_s2=2.0e-5,
+        elapsed_wall_s=0.75,
+        speed_multiple=10.0,
+        dt_s=1.0,
+    )
+
+    assert elapsed == pytest.approx(0.25)
+    expected = np.array([1.0, 0.4, 0.0], dtype=float)
+    expected = expected / np.linalg.norm(expected) * 2.0e-5
+    np.testing.assert_allclose(accel, expected)
+    assert accel[2] == pytest.approx(0.0)
+
+
+def test_live_prediction_burn_falls_back_to_wall_elapsed_without_accumulator() -> None:
+    state = KeyboardCommandState(pitch=1.0, throttle=1.0)
+
+    accel, elapsed = _live_prediction_burn(
+        state,
+        control_mode="ric_translation",
+        max_accel_km_s2=2.0e-5,
+        elapsed_wall_s=0.2,
+        speed_multiple=3.0,
+        dt_s=1.0,
+    )
+
+    assert elapsed == pytest.approx(0.6)
+    assert accel[0] == pytest.approx(2.0e-5)
+    assert accel[1] == pytest.approx(0.0)
+
+
 def test_coast_prediction_model_aliases_support_elliptic_levels() -> None:
     assert _coast_prediction_model_key("HCW") == "hcw"
     assert _coast_prediction_model_key("elliptic") == "elliptic_linear"
@@ -5025,6 +5106,13 @@ def test_dashboard_samples_long_polylines_for_drawing() -> None:
     assert np.allclose(sampled[-1], rows[-1])
 
 
+def test_satellite_marker_size_uses_dots_icons_and_scale() -> None:
+    assert _satellite_marker_size_px(100.0, 100.0) == 0
+    assert _satellite_marker_size_px(1000.0, 1000.0) == 20
+    assert _satellite_marker_size_px(5000.0, 5000.0) == 30
+    assert _satellite_marker_size_px(100000.0, 100000.0) == 72
+
+
 def test_dashboard_frame_cache_samples_shared_draw_rows_once() -> None:
     dashboard = object.__new__(PygameRPODashboard)
     rows = 500
@@ -5063,6 +5151,54 @@ def test_dashboard_frame_cache_samples_shared_draw_rows_once() -> None:
     assert dashboard._frame_cache["burn_marker_rel"].shape[0] <= 80
     assert np.allclose(dashboard._frame_cache["rel_trail"][0], rel[0])
     assert np.allclose(dashboard._frame_cache["rel_trail"][-1], rel[-1])
+
+
+def test_dashboard_live_prediction_seed_moves_ghost_without_moving_truth() -> None:
+    dashboard = object.__new__(PygameRPODashboard)
+    rel = np.zeros((1, 6), dtype=float)
+    target_rel = np.zeros((1, 6), dtype=float)
+    thrust = np.zeros((1, 3), dtype=float)
+    dashboard.rel_hist = [rel[0]]
+    dashboard.target_rel_hist = [target_rel[0]]
+    dashboard.thrust_ric_hist = [thrust[0]]
+    dashboard._rel_array = rel
+    dashboard._target_rel_array = target_rel
+    dashboard._thrust_ric_array = thrust
+    dashboard.max_history = 900
+    dashboard.burn_marker_threshold_km_s2 = 1.0e-12
+    dashboard.mean_motion_rad_s = 0.001
+    dashboard.live_prediction_accel_ric_km_s2 = np.array([0.0, 1.0e-5, 0.0], dtype=float)
+    dashboard.live_prediction_elapsed_s = 0.5
+    dashboard._frame_cache = {}
+    dashboard._frame_cache_dirty = True
+    seeds = []
+
+    def fake_prediction(cache_name, rel0, *, active_burn):
+        seeds.append((cache_name, np.array(rel0, dtype=float), active_burn))
+        return np.zeros((2, 6), dtype=float)
+
+    dashboard._coast_prediction_from_cached = fake_prediction
+    dashboard._target_coast_prediction = lambda *_: np.empty((0, 6), dtype=float)
+    dashboard._nmt_points = lambda: np.empty((0, 3), dtype=float)
+    dashboard._nmt_boundary_points = lambda: ()
+
+    dashboard._prepare_frame_cache()
+
+    assert np.allclose(dashboard._frame_cache["rel"][-1], rel[-1])
+    assert seeds[0][0] == "chaser"
+    assert seeds[0][1][4] > 0.0
+    assert seeds[0][2] is True
+
+
+def test_set_live_prediction_burn_marks_frame_cache_dirty() -> None:
+    dashboard = object.__new__(PygameRPODashboard)
+    dashboard._frame_cache_dirty = False
+    dashboard.live_prediction_accel_ric_km_s2 = np.zeros(3, dtype=float)
+    dashboard.live_prediction_elapsed_s = 0.0
+
+    dashboard.set_live_prediction_burn(np.array([1.0e-5, 0.0, 0.0], dtype=float), 0.25)
+
+    assert dashboard._frame_cache_dirty is True
 
 
 def test_coast_prediction_caps_draw_points() -> None:

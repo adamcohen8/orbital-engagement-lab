@@ -35,7 +35,7 @@ metadata:
       - Stay under the chaser delta-v budget.
       instructor_notes:
       - This is a bridge toward defensive target behavior and future PvP.
-      - The yellow target motion is shown relative to the target reference orbit.
+      - The red target motion is shown relative to the target reference orbit.
       - Target defensive maneuvering is capped at 0.1 m/s total delta-v.
       target_object_id: target
       chaser_object_id: chaser

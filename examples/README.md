@@ -4,8 +4,8 @@ The product-facing examples are YAML scenario configs. They are meant to be
 validated and run through the standard CLI:
 
 ```bash
-python run_simulation.py --config examples/configs/public_tle_2hr_propagation.yaml --validate-only
-python run_simulation.py --config examples/configs/public_tle_2hr_propagation.yaml
+.venv/bin/python run_simulation.py --config examples/configs/public_tle_2hr_propagation.yaml --validate-only
+.venv/bin/python run_simulation.py --config examples/configs/public_tle_2hr_propagation.yaml
 ```
 
 ## Public Configs
@@ -33,9 +33,9 @@ After the quickstart, the recommended public review path is the built-in RIC_PD
 10 km scenario:
 
 ```bash
-python run_simulation.py --config configs/ric_pd_10km_experiment.yaml --validate-only
-python run_simulation.py --config configs/ric_pd_10km_experiment.yaml
-python examples/python/flagship_analysis.py
+.venv/bin/python run_simulation.py --config configs/ric_pd_10km_experiment.yaml --validate-only
+.venv/bin/python run_simulation.py --config configs/ric_pd_10km_experiment.yaml
+.venv/bin/python examples/python/flagship_analysis.py
 ```
 
 Open `outputs/flagship_ric_pd_10km/index.md` first, then inspect the custom

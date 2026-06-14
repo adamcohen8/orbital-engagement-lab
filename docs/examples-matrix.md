@@ -6,13 +6,13 @@ to be validated and run through the standard CLI.
 Run validation first:
 
 ```bash
-python run_simulation.py --config examples/configs/public_tle_2hr_propagation.yaml --validate-only
+.venv/bin/python run_simulation.py --config examples/configs/public_tle_2hr_propagation.yaml --validate-only
 ```
 
 Then run the scenario:
 
 ```bash
-python run_simulation.py --config examples/configs/public_tle_2hr_propagation.yaml
+.venv/bin/python run_simulation.py --config examples/configs/public_tle_2hr_propagation.yaml
 ```
 
 TLE examples use the TLE only to initialize an ECI state. OEL does not run
@@ -37,11 +37,11 @@ integrates the configured OEL force model.
 
 | Config | Purpose | Normal Command |
 | --- | --- | --- |
-| `configs/quickstart_5min.yaml` | Fast first-run smoke scenario | `python run_simulation.py --quickstart` |
-| `configs/ric_pd_10km_experiment.yaml` | Flagship 10 km RIC_PD RPO review scenario with attitude-gated thrust | `python run_simulation.py --config configs/ric_pd_10km_experiment.yaml` |
-| `configs/automation_smoke.yaml` | Small headless validation config | `python run_simulation.py --config configs/automation_smoke.yaml --validate-only` |
-| `configs/plotting_rendezvous_demo.yaml` | Standalone rendezvous plotting demo | `python run_simulation.py --config configs/plotting_rendezvous_demo.yaml` |
-| `configs/reentry_smoke.yaml` | Short atmospheric re-entry diagnostics and plot smoke case | `python run_simulation.py --config configs/reentry_smoke.yaml` |
+| `configs/quickstart_5min.yaml` | Fast first-run smoke scenario | `.venv/bin/python run_simulation.py --quickstart` |
+| `configs/ric_pd_10km_experiment.yaml` | Flagship 10 km RIC_PD RPO review scenario with attitude-gated thrust | `.venv/bin/python run_simulation.py --config configs/ric_pd_10km_experiment.yaml` |
+| `configs/automation_smoke.yaml` | Small headless validation config | `.venv/bin/python run_simulation.py --config configs/automation_smoke.yaml --validate-only` |
+| `configs/plotting_rendezvous_demo.yaml` | Standalone rendezvous plotting demo | `.venv/bin/python run_simulation.py --config configs/plotting_rendezvous_demo.yaml` |
+| `configs/reentry_smoke.yaml` | Short atmospheric re-entry diagnostics and plot smoke case | `.venv/bin/python run_simulation.py --config configs/reentry_smoke.yaml` |
 
 ## Game Levels
 
@@ -56,15 +56,15 @@ Markdown debrief reports with JSON summaries and matplotlib plots under
 are open-ended/replayable modes.
 
 ```bash
-python -m pip install ".[game]"
-python run_game.py
+.venv/bin/python -m pip install ".[game]"
+.venv/bin/python run_game.py
 ```
 
 Running `run_game.py` without a config opens the level selector. Direct launch
 also works:
 
 ```bash
-python run_game.py sim/game/configs/game_training_rpo_04_rendezvous.yaml
+.venv/bin/python run_game.py sim/game/configs/game_training_rpo_04_rendezvous.yaml
 ```
 
 ## Choosing A Starting Point

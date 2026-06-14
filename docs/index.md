@@ -33,11 +33,13 @@ Start here if you want an AI coding assistant to create, validate, run, or
 inspect OEL scenarios.
 
 1. [OEL Agents](oel-agents.md)
-2. [Agent Capability Routing](agent-capability-routing.md)
-3. [Agent Task Cards](agent-task-cards.md)
-4. [Agent Review Query Recipes](agent-review-queries.md)
-5. [Agent Feedback Loop](agent-feedback-loop.md)
-6. [Agent Evaluation Packet](agent-evaluation-packet.md)
+2. [Agent Golden Paths](agent-golden-paths.md)
+3. [Agent Task Runner](agent-task-runner.md)
+4. [Agent Capability Routing](agent-capability-routing.md)
+5. [Agent Task Cards](agent-task-cards.md)
+6. [Agent Review Query Recipes](agent-review-queries.md)
+7. [Agent Feedback Loop](agent-feedback-loop.md)
+8. [Agent Evaluation Packet](agent-evaluation-packet.md)
 
 The root `AGENTS.md` and `agents/public/AGENTS.md` are the agent playbooks.
 The docs above explain the supporting workflow, evidence, evaluation, and

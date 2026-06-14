@@ -158,6 +158,80 @@ SAVED_REVIEW_QUERIES: dict[str, SavedReviewQuery] = {
             "AND s.sample_index IN (b.first_i, b.last_i) ORDER BY s.object_id, s.sample_index"
         ),
     ),
+    "workflow_metadata": SavedReviewQuery(
+        name="workflow_metadata",
+        description="Workflow review type, scenario, status, generation time, schema version, and source config.",
+        sql=(
+            "SELECT workflow_type, scenario_name, title, status, generated_utc, "
+            "review_schema_version, source_config FROM workflow_metadata"
+        ),
+    ),
+    "workflow_artifacts": SavedReviewQuery(
+        name="workflow_artifacts",
+        description="Workflow review artifact inventory.",
+        sql="SELECT artifact_key, artifact_type, path FROM workflow_artifacts ORDER BY artifact_type, artifact_key",
+    ),
+    "controller_bench_runs": SavedReviewQuery(
+        name="controller_bench_runs",
+        description="Controller-bench run pass/fail rows and output directories.",
+        sql=(
+            "SELECT variant_name, case_name, passed, failure_count, output_dir "
+            "FROM bench_runs ORDER BY variant_name, case_name"
+        ),
+    ),
+    "controller_bench_leaderboard": SavedReviewQuery(
+        name="controller_bench_leaderboard",
+        description="Controller-bench leaderboard rows by objective and metric.",
+        sql=(
+            "SELECT kind, objective, metric, rank, variant_name, value, samples "
+            "FROM bench_leaderboard ORDER BY kind, objective, metric, rank"
+        ),
+    ),
+    "controller_bench_failures": SavedReviewQuery(
+        name="controller_bench_failures",
+        description="Controller-bench objective failures and suggestions.",
+        sql=(
+            "SELECT variant_name, case_name, objective, metric, reason, failure_mode, suggestion "
+            "FROM bench_failures ORDER BY variant_name, case_name, objective"
+        ),
+    ),
+    "sensitivity_rankings": SavedReviewQuery(
+        name="sensitivity_rankings",
+        description="Sensitivity parameters ranked by effect size.",
+        sql=(
+            "SELECT parameter_path, metric_path, method, effect_size, rank "
+            "FROM sensitivity_rankings ORDER BY rank, parameter_path, metric_path"
+        ),
+    ),
+    "sensitivity_runs": SavedReviewQuery(
+        name="sensitivity_runs",
+        description="Sensitivity generated-run status and changed parameter rows.",
+        sql=(
+            "SELECT run_id, status, parameter_path, parameter_value, output_dir "
+            "FROM sensitivity_runs ORDER BY run_id"
+        ),
+    ),
+    "campaign_runs": SavedReviewQuery(
+        name="campaign_runs",
+        description="Monte Carlo campaign runs with pass/fail and key metrics.",
+        sql=(
+            "SELECT iteration, passed, closest_approach_km, duration_s, total_dv_m_s, output_dir "
+            "FROM campaign_runs ORDER BY iteration"
+        ),
+    ),
+    "campaign_metrics": SavedReviewQuery(
+        name="campaign_metrics",
+        description="Flattened Monte Carlo campaign metrics by iteration.",
+        sql="SELECT iteration, metric_name, metric_value FROM campaign_metrics ORDER BY iteration, metric_name",
+    ),
+    "validation_benchmarks": SavedReviewQuery(
+        name="validation_benchmarks",
+        description="Validation benchmark pass/fail rows.",
+        sql=(
+            "SELECT benchmark_name, kind, passed, duration_s, output_dir "
+            "FROM validation_benchmarks ORDER BY benchmark_name"
+        ),
+    ),
 }
 
 

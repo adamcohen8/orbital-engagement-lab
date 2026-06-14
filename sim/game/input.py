@@ -40,8 +40,6 @@ def poll_pygame_input(
             state.briefing_scroll_px = -1000000
         elif briefing_open and event.type == pygame.KEYDOWN and event.key == getattr(pygame, "K_END", object()):
             state.briefing_scroll_px = 1000000
-        elif event.type == pygame.KEYDOWN and event.key == pygame.K_PERIOD:
-            state.step_requested = True
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_m:
             state.music_toggle_requested = True
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_d:

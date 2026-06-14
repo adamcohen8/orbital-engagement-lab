@@ -87,7 +87,7 @@ user.
 Agents can prepare a local draft without submitting anything:
 
 ```bash
-python tools/prepare_agent_feedback.py \
+.venv/bin/python tools/prepare_agent_feedback.py \
   --agent-tool Codex \
   --workflow-stage "Review-store query" \
   --user-goal "Summarize a public rendezvous run from saved evidence." \

@@ -38,7 +38,7 @@ Start from a clean checkout with dependencies installed. Ask the agent to read:
 Then ask it to run the environment check:
 
 ```bash
-python run_simulation.py --doctor
+.venv/bin/python run_simulation.py --doctor
 ```
 
 ## Copy/Paste Evaluation Prompts

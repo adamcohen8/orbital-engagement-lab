@@ -27,6 +27,41 @@ AGENT_EXAMPLES = [
 AGENT_EXAMPLE_IDS = [path.stem for path in AGENT_EXAMPLES]
 AGENT_TASK_CARDS = sorted((ROOT / "agents" / "tasks").glob("*.md"))
 AGENT_TASK_CARD_IDS = [path.stem for path in AGENT_TASK_CARDS]
+GOLDEN_PATHS = {
+    "minimal_propagation": {
+        "configs": [
+            "agents/examples/public_agent_single_satellite.yaml",
+            "agents/examples/public_agent_python_api_minimal_propagation.yaml",
+        ],
+        "queries": ["run_metadata", "objects", "passive_final_state", "artifacts"],
+    },
+    "closed_loop_rendezvous": {
+        "configs": ["agents/examples/public_agent_rendezvous_lqr.yaml"],
+        "queries": [
+            "run_metadata",
+            "rendezvous_metrics",
+            "rendezvous_closest_approach",
+            "relative_final_state",
+            "burn_activity",
+            "burn_events",
+        ],
+    },
+    "mission_recovery_reconstitution": {
+        "configs": [
+            "agents/examples/public_agent_mission_recovery_plus_c_burn.yaml",
+            "agents/examples/public_agent_mission_reconstitution_trade_space.yaml",
+        ],
+        "queries": [
+            "run_metadata",
+            "burn_activity",
+            "mission_recovery_summary",
+            "mission_recovery_elements",
+            "mission_recovery_candidates",
+            "mission_recovery_burns",
+        ],
+    },
+}
+SAVED_QUERIES_ALLOWED_TO_BE_EMPTY = {"burn_events"}
 ANSWER_EXAMPLE_REQUIRED_SECTIONS = [
     "Status:",
     "Commands:",
@@ -65,6 +100,7 @@ def test_public_agent_docs_define_boundaries_and_commands() -> None:
     rubric = (ROOT / "agents" / "public" / "evaluation-rubric.md").read_text(encoding="utf-8")
     docs = (ROOT / "docs" / "oel-agents.md").read_text(encoding="utf-8")
     eval_packet = (ROOT / "docs" / "agent-evaluation-packet.md").read_text(encoding="utf-8")
+    golden_paths = (ROOT / "docs" / "agent-golden-paths.md").read_text(encoding="utf-8")
     capability_routing = (ROOT / "docs" / "agent-capability-routing.md").read_text(encoding="utf-8")
     review_queries = (ROOT / "docs" / "agent-review-queries.md").read_text(encoding="utf-8")
     feedback_loop = (ROOT / "docs" / "agent-feedback-loop.md").read_text(encoding="utf-8")
@@ -102,6 +138,13 @@ def test_public_agent_docs_define_boundaries_and_commands() -> None:
     assert "agent-task-cards.md" in root_agents
     assert "agent-task-cards.md" in public_agents
     assert "agent-task-cards.md" in docs
+    assert "agent-golden-paths.md" in agents_readme
+    assert "agent-golden-paths.md" in public_agents
+    assert "agent-golden-paths.md" in docs
+    assert "Agent Golden Paths" in golden_paths
+    assert "Minimal propagation" in golden_paths
+    assert "Closed-loop rendezvous" in golden_paths
+    assert "Mission recovery and reconstitution" in golden_paths
     assert "agent-capability-routing.md" in root_agents
     assert "agent-capability-routing.md" in public_agents
     assert "agent-capability-routing.md" in docs
@@ -123,6 +166,7 @@ def test_public_agent_docs_define_boundaries_and_commands() -> None:
         "agents/public/evaluation-rubric.md": rubric,
         "docs/oel-agents.md": docs,
         "docs/agent-evaluation-packet.md": eval_packet,
+        "docs/agent-golden-paths.md": golden_paths,
         "docs/agent-capability-routing.md": capability_routing,
         "docs/agent-review-queries.md": review_queries,
         "docs/agent-feedback-loop.md": feedback_loop,
@@ -179,6 +223,24 @@ def test_public_agent_task_cards_define_checked_workflows() -> None:
         answer = answer_path.read_text(encoding="utf-8")
         for section in ANSWER_EXAMPLE_REQUIRED_SECTIONS:
             assert section in answer, answer_path
+
+
+def test_public_agent_golden_paths_reference_real_fixtures_and_saved_queries() -> None:
+    text = (ROOT / "docs" / "agent-golden-paths.md").read_text(encoding="utf-8")
+
+    for path_id, spec in GOLDEN_PATHS.items():
+        for config_ref in spec["configs"]:
+            assert config_ref in text, (path_id, config_ref)
+            config_path = ROOT / config_ref
+            assert config_path.is_file(), config_ref
+            config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+            assert config["outputs"]["review"]["enabled"] is True, config_ref
+            assert str(config["outputs"]["output_dir"]).startswith("outputs/agents/"), config_ref
+
+        for query_name in spec["queries"]:
+            assert f"`{query_name}`" in text or f"--saved-query {query_name}" in text, (path_id, query_name)
+            assert query_name in SAVED_REVIEW_QUERIES, (path_id, query_name)
+            assert SAVED_REVIEW_QUERIES[query_name].sql.upper().startswith(("SELECT", "WITH"))
 
 
 @pytest.mark.parametrize("example_path", AGENT_EXAMPLES, ids=AGENT_EXAMPLE_IDS)
@@ -308,8 +370,10 @@ def test_public_agent_saved_review_queries_execute(example_path: Path, tmp_path:
     with sqlite3.connect(outdir / "review" / "run.sqlite") as conn:
         for query_name in query_names_by_example[example_path.stem]:
             cursor = conn.execute(SAVED_REVIEW_QUERIES[query_name].sql)
-            cursor.fetchall()
+            rows = cursor.fetchall()
             assert cursor.description is not None
+            if query_name not in SAVED_QUERIES_ALLOWED_TO_BE_EMPTY:
+                assert rows, (example_path.stem, query_name)
 
 
 def test_public_agent_saved_review_query_cli_lists_queries() -> None:
@@ -379,7 +443,7 @@ def test_prepare_agent_feedback_builds_public_safe_draft() -> None:
         user_goal="Summarize a public rendezvous run.",
         issue_summary="The agent could not find a saved query for the needed metric.",
         expected="The agent should be able to query the metric directly.",
-        evidence="python -m sim.review outputs/example --saved-query rendezvous_metrics",
+        evidence=".venv/bin/python -m sim.review outputs/example --saved-query rendezvous_metrics",
         suggestion="Add or document the saved query.",
     )
 

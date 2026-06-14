@@ -2,7 +2,7 @@ scenario_name: ric_pd_10km_experiment
 scenario_description: Public flagship RIC_PD 10 km RPO review scenario with attitude-coupled burn gating, deterministic two-body dynamics, and report-ready rendezvous artifacts.
 metadata:
   owner: public
-  notes: Run after the quickstart with `python run_simulation.py --config configs/ric_pd_10km_experiment.yaml`, then open outputs/flagship_ric_pd_10km/index.md.
+  notes: Run after the quickstart with `.venv/bin/python run_simulation.py --config configs/ric_pd_10km_experiment.yaml`, then open outputs/flagship_ric_pd_10km/index.md.
   intent: Demonstrate an RIC_PD transfer controller closing a 10 km-class relative-motion case by acquiring a low-energy coast arc before terminal cleanup while the chaser must satisfy attitude alignment before thrust is applied.
   evidence_role: Public golden-path artifact for single-run closed-loop RPO behavior; not a mission qualification or high-fidelity validation claim.
   recommended_review:
@@ -247,3 +247,6 @@ outputs:
   animations:
     enabled: false
     types: []
+  review:
+    enabled: true
+    detail: standard
