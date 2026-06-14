@@ -10,8 +10,10 @@ not flight-qualified or operational decision-grade software.
 - Monte Carlo, sensitivity studies, controller benchmarking, optimization,
   campaign dashboards, AI-assisted reporting, and custom flight-software workflows are Pro
   surfaces and are not included in the public export.
-- The GUI is intended for scenario editing, single-run execution, and artifact
-  inspection. It does not expose every lower-level config option.
+- The primary public surfaces are the CLI, scenario YAML, Python API, review
+  query CLI/API, and RPO trainer. The desktop GUI is experimental. The Output
+  Review Workbench is an experimental dynamic plot creator for completed runs,
+  not a first-run path or a replacement for scripted review queries.
 - Payload and artifact shapes are documented, but some non-contract fields may
   evolve while the project is pre-1.0.
 

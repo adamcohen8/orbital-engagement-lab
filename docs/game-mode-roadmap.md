@@ -126,7 +126,6 @@ Default trainer controls should be RIC translation:
 - A/D: in-track +/-I
 - Left/Right arrows: cross-track +/-C
 - Space: pause/resume
-- Period: single-step while paused
 - R: reset the current attempt
 - D: open the debrief folder from the pass/fail screen, when available
 - Up/Down: adjust runtime speed
@@ -231,7 +230,7 @@ scoped to the final free-maneuver phase.
 - Done: single-window scenario selection when launching `run_game.py` without a
   config path.
 - Done: scenario reset control.
-- Done: pause, single-step, and runtime speed controls.
+- Done: pause/resume and runtime speed controls.
 - Done: level-selector video toggle with per-attempt MP4 recording saved on
   pass/fail, padded with three seconds of briefing/result screen context, and
   discarded on restart or early quit.
@@ -266,8 +265,7 @@ Current implementation:
   as a reliable level-exit path. Selector-launched runs return to the level
   selector; direct config launches exit the game process.
 - The live trainer has a ghost coast trajectory, burn markers, labeled
-  relative-velocity and thrust vectors, pause/resume, single-step, and scenario
-  reset.
+  relative-velocity and thrust vectors, pause/resume, and scenario reset.
 - Coast-prediction assistance is difficulty-scaled: easy shows one full target
   orbit, medium shows half an orbit, hard shows a quarter orbit, and extreme
   hides the projection.

@@ -6,6 +6,66 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.11.0 - 2026-06-13
+
+Release thesis: `v0.11.0` turns review evidence into the common inspection
+surface for both humans and agents. It adds a repeatable agent-task runner,
+golden-path adoption workflows, workflow-level review manifests and SQLite
+tables for major analysis outputs, and a clearer post-run plotting role for
+the experimental Output Review Workbench. The release also polishes the RPO
+Trainer experience for public education demos.
+
+### Added
+
+- Added `python -m sim.agent_task`, a machine-readable agent workflow runner
+  with bundled public recipes, semantic review metric definitions, standard
+  review plot recipes, config comparison packets, structured failure hints, and
+  `agent_evidence_packet.json` output for repeatable agent handoffs.
+- Added `docs/agent-golden-paths.md`, a public-safe first-run guide with exact
+  validate/run/query loops for minimal propagation, closed-loop rendezvous, and
+  mission recovery/reconstitution workflows.
+- Added a review-store plotting service and upgraded ORW into an experimental
+  dynamic plot creator for completed runs, with saved-query/table loading,
+  x/y/group column mapping, line/scatter/bar plots, OEL light/dark styling,
+  PNG/SVG/PDF export, and provenance recorded in
+  `review/generated_artifacts.json`.
+- Added a common workflow review evidence layer for Monte Carlo, controller
+  bench, sensitivity, and validation outputs. Supported workflow reporters now
+  write `review/workflow_manifest.json`, table-backed `review/run.sqlite`
+  evidence, schema/saved-view metadata, and workflow-aware `sim.review` query
+  recipes.
+- Added reproducible RPO Trainer visual assets and screenshots, including
+  red/yellow satellite sprites and an instructor-facing one-pager with landing,
+  level-selector, level 3, and level 5 imagery.
+
+### Changed
+
+- Linked the golden paths from the agent docs, public agent playbook, agent
+  task-card index, review-query recipes, and documentation index so first-time
+  agent users can start from reproducible adoption workflows.
+- Extended OEL Agent regression coverage so golden-path configs, review output
+  settings, saved-query names, and non-empty evidence rows stay aligned.
+- Overhauled the public README source around a single fast proof path, tighter
+  workflow routing, shorter AI-agent and RPO trainer sections, and consolidated
+  trust/safety guidance.
+- Clarified the public product posture: CLI/YAML/Python API plus the review
+  query API are the primary simulation and review surfaces, the RPO trainer is
+  the polished interactive surface, and the desktop GUI remains outside the
+  first-run path while ORW is positioned as a post-run custom plotting preview.
+- Taught `python -m sim.review` to inspect workflow review manifests and
+  artifact inventories, and taught ORW to surface workflow-manifest context
+  while preferring workflow tables when opening table-backed review outputs.
+- Updated the downloadable and web RPO Trainer UI around sprite-based vehicle
+  markers, smoother live HCW projection during burns, compact command legends,
+  matched start-screen panel styling, and cleaner start-screen scaling.
+
+### Fixed
+
+- Removed the paused single-step shortcut from the RPO Trainer controls and UI
+  so the downloadable and web experiences match the intended start/pause flow.
+- Fixed a sandboxed multiprocessing test so the private merge gate can verify
+  parallel-campaign fallback behavior without relying on host IPC availability.
+
 ## 0.10.4 - 2026-06-12
 
 Release thesis: `v0.10.4` strengthens OEL Agents as a public, evidence-backed

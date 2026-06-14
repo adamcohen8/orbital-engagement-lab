@@ -14,7 +14,7 @@ scenario_description: "Public example: initialize from a TLE and compute passive
 
 metadata:
   owner: "public"
-  notes: "Run with `python run_simulation.py --config examples/configs/public_ground_station_access_from_tle.yaml`. This is not SGP4/general-perturbations propagation; OEL initializes from the TLE and numerically integrates its configured force model."
+  notes: "Run with `.venv/bin/python run_simulation.py --config examples/configs/public_ground_station_access_from_tle.yaml`. This is not SGP4/general-perturbations propagation; OEL initializes from the TLE and numerically integrates its configured force model."
 
 objects:
   iss:

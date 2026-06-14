@@ -511,7 +511,7 @@ simulator:
   # Timing grid rules:
   # - duration_s must be an integer multiple of dt_s.
   # - optional orbit/attitude substeps must be positive, <= dt_s, and divide dt_s.
-  # - run `python run_simulation.py --config <path> --validate-only` before long runs.
+  # - run `.venv/bin/python run_simulation.py --config <path> --validate-only` before long runs.
   # Total requested simulation duration in seconds.
   duration_s: 7200.0
   # Primary simulation output/control step in seconds.

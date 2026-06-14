@@ -47,7 +47,7 @@ workflows.
 For the flagship plotting scenario used by the checked-in gallery:
 
 ```bash
-python run_simulation.py --config configs/ric_pd_10km_experiment.yaml
+.venv/bin/python run_simulation.py --config configs/ric_pd_10km_experiment.yaml
 ```
 
 See the [plot gallery](plot-gallery.md) for checked-in examples generated from

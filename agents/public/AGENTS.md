@@ -40,9 +40,13 @@ ordinary-language request -> scenario YAML -> validate -> run
 ```
 
 Use `docs/agent-evaluation-packet.md` to evaluate whether an agent follows this
-loop. Use `docs/agent-capability-routing.md` to map broad user intents to
-workflows, starting docs, evidence, and public-core limits. Use
-`docs/agent-review-queries.md` for reusable review-store SQL. Use
+loop. Use `docs/agent-golden-paths.md` for the shortest reproducible
+propagation, rendezvous, and mission-recovery workflows. Use
+`docs/agent-capability-routing.md` to map broad user intents to workflows,
+starting docs, evidence, and public-core limits. Use
+`docs/agent-task-runner.md` when a repeatable recipe, comparison, plot, or
+portable `agent_evidence_packet.json` would help another agent inspect the same
+evidence. Use `docs/agent-review-queries.md` for reusable review-store SQL. Use
 `docs/agent-feedback-loop.md` when an agent finds public-safe workflow feedback
 worth sending upstream. Use `docs/agent-task-cards.md` for the repeatable
 public agent task-card set; task cards are evaluation fixtures, not the
@@ -103,6 +107,14 @@ Inspect review stores when enabled:
 .venv/bin/python -m sim.review outputs/my_run --query "SELECT time_s, range_km FROM relative_state LIMIT 20" --json
 ```
 
+Package a repeatable recipe or completed-run inspection:
+
+```bash
+.venv/bin/python -m sim.agent_task list
+.venv/bin/python -m sim.agent_task run quickstart_review --output-root outputs/agent_tasks
+.venv/bin/python -m sim.agent_task inspect outputs/my_run --query run_metadata --json
+```
+
 When using the review store, cite the SQL query or saved view that supports the
 answer. Keep queries read-only, prefer `SELECT`/`WITH`, and inspect table names
 or sample rows before writing custom SQL against an unfamiliar table:
@@ -127,9 +139,10 @@ ground-access checks, metrics, and artifact inventories. If `review/run.sqlite`
 is missing, fall back to `index.md`, `master_run_summary.json`, CSV histories,
 and plots without claiming structured review evidence exists.
 
-The Output Review Workbench is an experimental preview and is not currently
-recommended for routine agent review. Prefer `.venv/bin/python -m sim.review`. Use ORW
-only when the user explicitly asks for the interactive local workbench:
+The Output Review Workbench is an experimental dynamic plot creator for
+completed runs. Prefer `.venv/bin/python -m sim.review` for routine agent
+review. Use ORW only when the user explicitly asks for interactive local
+plotting:
 
 ```bash
 .venv/bin/python run_orw.py --output outputs/my_run
@@ -195,6 +208,8 @@ For common routing decisions, use `docs/agent-capability-routing.md` before
 choosing an example. It lists workflow evidence and clarifying-question
 triggers for propagation, TLEs, rendezvous, access, attitude, plotting, game
 training, comparison, validation, sealed mode, and public-core boundaries.
+For first-run adoption workflows, use `docs/agent-golden-paths.md` before
+customizing a scenario.
 
 ## Rendezvous Evaluation Notes
 

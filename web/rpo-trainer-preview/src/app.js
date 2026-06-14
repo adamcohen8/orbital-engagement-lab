@@ -12,7 +12,14 @@ const MANEUVER_CONTROL_SPEED = 10;
 const TRAIL_LIMIT = 1200;
 const MIN_PLOT_SPAN_KM = 0.005;
 const PLOT_SCALE_MARGIN = 1.2;
-const BUILD_ID = "analytics-2026-06-06";
+const SATELLITE_SPRITE_DIAMETER_KM = 0.006;
+const SATELLITE_DOT_THRESHOLD_PX = 4;
+const SATELLITE_ICON_THRESHOLD_PX = 18;
+const SATELLITE_ICON_SIZE_PX = 20;
+const SATELLITE_MAX_SIZE_PX = 72;
+const TARGET_MARKER = "#f55c5c";
+const CHASER_MARKER = "#f5cd5c";
+const BUILD_ID = "spaced-footer-legend-2026-06-13";
 const ANALYTICS_SCRIPT_SRC = "https://plausible.io/js/script.js";
 const ANALYTICS_LOCAL_HOSTNAMES = new Set(["", "localhost", "127.0.0.1", "::1"]);
 const PRIMER_AMPLITUDES_KM = { r: 0.65, i: 0.75, c: 0.65 };
@@ -84,7 +91,7 @@ const levelOptions = [
     objective:
       "Learn what R, I, and C mean by creating six small target orbits, then use short pulse-and-coast translations to settle near a passive target.",
     brief:
-      "The red satellite is you. R is radial, I is in-track, and C is cross-track. The simulation pauses for each guided stage until you hold the requested control.",
+      "The yellow satellite is you. R is radial, I is in-track, and C is cross-track. The simulation pauses for each guided stage until you hold the requested control.",
     criteria: [
       "Complete the +I and -I guided orbit demonstrations.",
       "After +I, increase the speed multiple to 10x.",
@@ -904,7 +911,7 @@ function updateHud() {
   el.commandLine.textContent = commandStatusLine();
   el.footerLine.textContent = `Speed ${SPEED_OPTIONS[state.speedIndex].toFixed(
     0,
-  )}x   Up/Down Speed   Space Pause   . Step   R Reset   Esc Level Select`;
+  )}x  Up/Down Speed  Space Pause  R Reset  Esc Level Select`;
   el.speedMultiple.textContent = `${SPEED_OPTIONS[state.speedIndex]}x`;
   const u = currentControls();
   el.rMeter.value = u.r;
@@ -936,12 +943,7 @@ function commandStatusLine() {
   if (state.mode === "primer") {
     return "";
   }
-  const u = currentControls();
-  const simState = state.running ? "RUNNING" : "PAUSED";
-  const camera = state.mode === "sandbox" ? "  C Camera" : "";
-  return `W/S Radial +/-R  A/D In-Track +/-I  Left/Right Cross-Track +/-C${camera}  M Music   ${simState}  R=${u.r.toFixed(
-    0,
-  )} I=${u.i.toFixed(0)} C=${u.c.toFixed(0)} Throttle=1.00`;
+  return "W/S R  A/D I  Left/Right C  C Camera  M Music";
 }
 
 function drawPlot(canvas, xAxis, yAxis, plane) {
@@ -968,23 +970,14 @@ function drawPlot(canvas, xAxis, yAxis, plane) {
   drawRings(ctx, toPx, scale, xAxis, yAxis);
   drawPath(ctx, state.tutorialTargetPath, toPx, "rgba(92, 240, 132, 0.92)", true, 3);
   drawPath(ctx, state.ghost, toPx, "rgba(135, 150, 172, 0.95)", true, 2);
-  drawPath(ctx, state.trail, toPx, "rgba(215, 86, 86, 0.95)", false);
+  drawPath(ctx, state.trail, toPx, "rgba(245, 205, 92, 0.95)", false);
 
   const target = toPx({ r: 0, i: 0, c: 0 });
   const chaser = toPx(state.sim);
   drawVector(ctx, chaser, state.sim, xAxis, yAxis, "velocity");
   drawThrustVector(ctx, chaser, xAxis, yAxis);
-  ctx.fillStyle = "#f5cd5c";
-  ctx.beginPath();
-  ctx.arc(target.x, target.y, 6, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = "#f55c5c";
-  ctx.beginPath();
-  ctx.arc(chaser.x, chaser.y, 7, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = "rgba(245, 235, 242, 0.6)";
-  ctx.lineWidth = 1;
-  ctx.stroke();
+  drawSpacecraftMarker(ctx, target, "target", { scale, fallbackRadius: 6 });
+  drawSpacecraftMarker(ctx, chaser, "chaser", { scale, fallbackRadius: 7 });
   ctx.fillStyle = "rgba(170, 180, 195, 0.92)";
   ctx.font = "12px Menlo, Consolas, monospace";
   ctx.fillText(`${axisLabel(xAxis)} km`, width - 58, height / 2 + 22);
@@ -1012,22 +1005,13 @@ function drawPrimerRic(ctx, width, height, xAxis, yAxis, stage) {
   ctx.arc(target.x, target.y, 0.25 * scale, 0, Math.PI * 2);
   ctx.stroke();
 
-  ctx.fillStyle = "#f5cd5c";
-  ctx.beginPath();
-  ctx.arc(target.x, target.y, 6, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = "#f55c5c";
-  ctx.beginPath();
-  ctx.arc(chaser.x, chaser.y, 7, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = "rgba(245, 235, 242, 0.72)";
-  ctx.lineWidth = 1;
-  ctx.stroke();
+  drawSpacecraftMarker(ctx, target, "target", { scale, fallbackRadius: 6, forceIcon: true });
+  drawSpacecraftMarker(ctx, chaser, "chaser", { scale, fallbackRadius: 7, forceIcon: true });
 
-  ctx.fillStyle = "rgba(245, 205, 92, 0.92)";
+  ctx.fillStyle = "rgba(245, 92, 92, 0.95)";
   ctx.font = "12px Menlo, Consolas, monospace";
   ctx.fillText("Target", target.x + 10, target.y - 10);
-  ctx.fillStyle = "rgba(245, 92, 92, 0.95)";
+  ctx.fillStyle = "rgba(245, 205, 92, 0.95)";
   ctx.fillText("Chaser", chaser.x + 10, chaser.y + 18);
 }
 
@@ -1071,14 +1055,14 @@ function drawPrimerEci(ctx, width, height, stage) {
   const chaserRadius = 1 + radialOffset;
   const chaserTheta = targetTheta + phaseOffset;
   if (stage.id === "radial") {
-    drawEciCircle(ctx, center, orbitScale * chaserRadius, "rgba(245, 92, 92, 0.66)");
+    drawEciCircle(ctx, center, orbitScale * chaserRadius, "rgba(245, 205, 92, 0.66)");
   } else {
-    drawEciCircle(ctx, center, orbitScale, "rgba(245, 92, 92, 0.34)", true);
+    drawEciCircle(ctx, center, orbitScale, "rgba(245, 205, 92, 0.34)", true);
   }
   const target = projectEciCircular(1, targetTheta, center, orbitScale);
   const chaser = projectEciCircular(chaserRadius, chaserTheta, center, orbitScale);
-  drawSatellite(ctx, target, "#f5cd5c", "Target", -56, 22);
-  drawSatellite(ctx, chaser, "#f55c5c", "Chaser", 10, -14);
+  drawSatellite(ctx, target, "target", "Target", -56, 22);
+  drawSatellite(ctx, chaser, "chaser", "Chaser", 10, -14);
 
   if (stage.id === "radial") {
     ctx.fillStyle = "rgba(170, 184, 204, 0.92)";
@@ -1118,9 +1102,9 @@ function drawCrossTrackSideView(ctx, width, height, inclinationDeg) {
 
   drawEarth(ctx, center, earthRadius / 0.16);
   drawOrbitLine(ctx, targetLine, "rgba(96, 174, 224, 0.72)");
-  drawOrbitLine(ctx, chaserLine, "rgba(245, 92, 92, 0.78)");
-  drawSatellite(ctx, target, "#f5cd5c", "Target", -60, 24);
-  drawSatellite(ctx, chaser, "#f55c5c", "Chaser", 12, -12);
+  drawOrbitLine(ctx, chaserLine, "rgba(245, 205, 92, 0.78)");
+  drawSatellite(ctx, target, "target", "Target", -60, 24);
+  drawSatellite(ctx, chaser, "chaser", "Chaser", 12, -12);
 
   ctx.fillStyle = "rgba(170, 184, 204, 0.92)";
   ctx.font = "12px Menlo, Consolas, monospace";
@@ -1169,17 +1153,144 @@ function drawEarth(ctx, center, orbitScale) {
   ctx.stroke();
 }
 
-function drawSatellite(ctx, point, color, label, labelOffsetX, labelOffsetY) {
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.arc(point.x, point.y, 7, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = "rgba(245, 235, 242, 0.78)";
-  ctx.lineWidth = 1;
-  ctx.stroke();
+function drawSatellite(ctx, point, role, label, labelOffsetX, labelOffsetY) {
+  drawSpacecraftMarker(ctx, point, role, { scale: 1, fallbackRadius: 7, forceIcon: true });
   ctx.fillStyle = "rgba(230, 235, 242, 0.95)";
   ctx.font = "12px Menlo, Consolas, monospace";
   ctx.fillText(label, point.x + labelOffsetX, point.y + labelOffsetY);
+}
+
+function satelliteMarkerSizePx(scalePxPerKm) {
+  const rawPx = Math.abs(Number(scalePxPerKm || 0)) * SATELLITE_SPRITE_DIAMETER_KM;
+  if (!Number.isFinite(rawPx) || rawPx < SATELLITE_DOT_THRESHOLD_PX) return 0;
+  if (rawPx < SATELLITE_ICON_THRESHOLD_PX) return SATELLITE_ICON_SIZE_PX;
+  return Math.round(Math.max(SATELLITE_ICON_SIZE_PX, Math.min(rawPx, SATELLITE_MAX_SIZE_PX)));
+}
+
+function drawSpacecraftMarker(ctx, point, role, options = {}) {
+  const color = role === "target" ? TARGET_MARKER : CHASER_MARKER;
+  const fallbackRadius = options.fallbackRadius || 7;
+  const size = options.forceIcon ? SATELLITE_ICON_SIZE_PX : satelliteMarkerSizePx(options.scale);
+  if (size <= 0) {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, fallbackRadius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(245, 235, 242, 0.64)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    return;
+  }
+
+  ctx.save();
+  ctx.translate(point.x, point.y);
+  const s = size / 128;
+  ctx.scale(s, s);
+  ctx.translate(-64, -64);
+  drawSpacecraftSprite(ctx, color);
+  ctx.restore();
+
+  const dotRadius = size < 30 ? 2 : 3;
+  ctx.fillStyle = "rgba(235, 248, 255, 0.96)";
+  ctx.beginPath();
+  ctx.arc(point.x, point.y, dotRadius, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.arc(point.x, point.y, dotRadius + 2, 0, Math.PI * 2);
+  ctx.stroke();
+}
+
+function drawSpacecraftSprite(ctx, accent) {
+  ctx.save();
+  ctx.shadowColor = accent;
+  ctx.shadowBlur = 10;
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(7, 91);
+  ctx.lineTo(50, 72);
+  ctx.moveTo(78, 56);
+  ctx.lineTo(122, 41);
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  drawPanel(ctx, [
+    [18, 38],
+    [48, 51],
+    [44, 78],
+    [14, 65],
+  ]);
+  drawPanel(ctx, [
+    [80, 51],
+    [112, 64],
+    [106, 91],
+    [76, 78],
+  ]);
+
+  ctx.fillStyle = "rgba(8, 18, 26, 0.92)";
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = 2;
+  roundRectPath(ctx, 49, 48, 30, 32, 8);
+  ctx.fill();
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(64, 64, 10, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.strokeStyle = "rgba(220, 242, 250, 0.82)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.arc(64, 64, 7, 0.2 * Math.PI, 1.8 * Math.PI);
+  ctx.stroke();
+  ctx.strokeStyle = "rgba(80, 110, 130, 0.72)";
+  ctx.beginPath();
+  ctx.moveTo(49, 58);
+  ctx.lineTo(79, 58);
+  ctx.moveTo(49, 69);
+  ctx.lineTo(79, 69);
+  ctx.stroke();
+  ctx.fillStyle = "rgba(235, 248, 255, 0.94)";
+  ctx.beginPath();
+  ctx.arc(64, 64, 3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = accent;
+  ctx.beginPath();
+  ctx.moveTo(64, 56);
+  ctx.lineTo(64, 72);
+  ctx.moveTo(56, 64);
+  ctx.lineTo(72, 64);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawPanel(ctx, points) {
+  ctx.fillStyle = "rgba(8, 30, 42, 0.76)";
+  ctx.strokeStyle = "rgba(70, 190, 245, 0.82)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  points.forEach(([x, y], idx) => {
+    if (idx === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+}
+
+function roundRectPath(ctx, x, y, width, height, radius) {
+  const r = Math.min(radius, width / 2, height / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + width - r, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+  ctx.lineTo(x + width, y + height - r);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+  ctx.lineTo(x + r, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
 }
 
 function fitCanvas(canvas) {
@@ -1461,6 +1572,23 @@ function resetCurrent() {
   updateMissionText();
 }
 
+function bindCommandButton(button, handler) {
+  let suppressClickUntil = 0;
+  button.addEventListener("pointerdown", (event) => {
+    if (typeof event.button === "number" && event.button !== 0) return;
+    event.preventDefault();
+    suppressClickUntil = Date.now() + 500;
+    handler();
+  });
+  button.addEventListener("click", (event) => {
+    if (Date.now() < suppressClickUntil) {
+      event.preventDefault();
+      return;
+    }
+    handler();
+  });
+}
+
 function bindEvents() {
   document.addEventListener("keydown", (event) => {
     const key = event.key.toLowerCase();
@@ -1549,30 +1677,30 @@ function bindEvents() {
     button.addEventListener("pointerleave", stop);
     button.addEventListener("pointercancel", stop);
   });
-  el.pauseButton.addEventListener("click", () => {
+  bindCommandButton(el.pauseButton, () => {
     playMusicFromGesture();
     togglePause();
   });
-  el.resetButton.addEventListener("click", () => {
+  bindCommandButton(el.resetButton, () => {
     playMusicFromGesture();
     resetCurrent();
   });
-  el.levelSelectButton.addEventListener("click", () => {
+  bindCommandButton(el.levelSelectButton, () => {
     playMusicFromGesture();
     showLevelSelector({ track: true, source: "button" });
   });
-  el.tutorialMode.addEventListener("click", () => {
+  bindCommandButton(el.tutorialMode, () => {
     setMode("primer");
     trackEvent("tutorial_start", { source: "tab", entry: "primer" });
     playMusicFromGesture();
   });
-  el.sandboxMode.addEventListener("click", () => {
+  bindCommandButton(el.sandboxMode, () => {
     setMode("sandbox");
     trackEvent("sandbox_start", { source: "tab" });
     playMusicFromGesture();
   });
-  el.musicButton.addEventListener("click", toggleMusic);
-  el.selectorMusicButton.addEventListener("click", toggleMusic);
+  bindCommandButton(el.musicButton, toggleMusic);
+  bindCommandButton(el.selectorMusicButton, toggleMusic);
   document.querySelectorAll("[data-level-option]").forEach((button) => {
     button.addEventListener("pointerenter", () => {
       const idx = levelOptions.findIndex((option) => option.id === button.dataset.levelOption);

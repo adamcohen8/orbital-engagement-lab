@@ -969,18 +969,107 @@ def _realtime_steps_due(
 
 def _command_status(state: KeyboardCommandState, *, control_mode: str = "attitude_thrust") -> str:
     if control_mode in {"ric", "ric_translation", "translation"}:
-        sim_state = "PAUSED" if state.paused else "RUNNING"
-        return (
-            "W/S Radial +/-R  A/D In-Track +/-I  Left/Right Cross-Track +/-C  M Music\n"
-            "Use small pulses, then coast and watch the target-centered RIC motion.\n"
-            f"{sim_state}  R={state.pitch:+.0f} I={state.yaw:+.0f} C={state.roll:+.0f} Throttle={state.throttle:.2f}"
-        )
+        return "W/S R  A/D I  Left/Right C  C Camera  M Music"
     burn = "FIRE" if state.firing else "Coast"
     return (
         "W/S Pitch  A/D Yaw  Left/Right Roll  Space Fire  M Music  R Reset  Esc Quit\n"
         "Keys work in the figure window or this terminal; terminal input is pulse/repeat based.\n"
         f"Pitch={state.pitch:+.0f} Yaw={state.yaw:+.0f} Roll={state.roll:+.0f} Thrust={burn}"
     )
+
+
+def _live_prediction_accel_ric(
+    state: KeyboardCommandState,
+    *,
+    control_mode: str,
+    max_accel_km_s2: float,
+) -> np.ndarray:
+    if bool(state.paused) or control_mode not in {"ric", "ric_translation", "translation"}:
+        return np.zeros(3, dtype=float)
+    if float(state.throttle) <= 0.0:
+        return np.zeros(3, dtype=float)
+    accel = np.array(
+        [
+            float(np.clip(state.pitch, -1.0, 1.0)),
+            float(np.clip(state.yaw, -1.0, 1.0)),
+            float(np.clip(state.roll, -1.0, 1.0)),
+        ],
+        dtype=float,
+    )
+    nrm = float(np.linalg.norm(accel))
+    if nrm > 1.0:
+        accel /= nrm
+    return accel * float(max(max_accel_km_s2, 0.0)) * float(np.clip(state.throttle, 0.0, 1.0))
+
+
+def _live_prediction_burn(
+    state: KeyboardCommandState,
+    *,
+    control_mode: str,
+    max_accel_km_s2: float,
+    elapsed_wall_s: float,
+    speed_multiple: float,
+    dt_s: float,
+) -> tuple[np.ndarray, float]:
+    mode = str(control_mode or "").strip().lower()
+    if bool(state.paused) or mode not in {"ric", "ric_translation", "translation"}:
+        return np.zeros(3, dtype=float), 0.0
+    if float(state.throttle) <= 0.0:
+        return np.zeros(3, dtype=float), 0.0
+    if bool(getattr(state, "use_timing_accumulator", False)):
+        pending = np.array(
+            [
+                float(getattr(state, "pitch_sim_s", 0.0)),
+                float(getattr(state, "yaw_sim_s", 0.0)),
+                float(getattr(state, "roll_sim_s", 0.0)),
+            ],
+            dtype=float,
+        )
+        duration = min(float(np.max(np.abs(pending))), max(float(dt_s), 0.0))
+        if duration <= 0.0 or not np.all(np.isfinite(pending)):
+            return np.zeros(3, dtype=float), 0.0
+        duty = pending / max(duration, 1.0e-9)
+        nrm = float(np.linalg.norm(duty))
+        if nrm > 1.0:
+            duty /= nrm
+        accel = duty * float(max(max_accel_km_s2, 0.0)) * float(np.clip(state.throttle, 0.0, 1.0))
+        return accel, duration
+
+    accel = _live_prediction_accel_ric(
+        state,
+        control_mode=control_mode,
+        max_accel_km_s2=max_accel_km_s2,
+    )
+    elapsed = 0.0
+    if float(np.linalg.norm(accel)) > 0.0:
+        elapsed = min(
+            max(float(elapsed_wall_s), 0.0) * max(float(speed_multiple), 0.0),
+            max(float(dt_s), 0.0),
+        )
+    return accel, elapsed
+
+
+def _sync_live_prediction_burn(
+    dashboard: Any,
+    state: KeyboardCommandState,
+    *,
+    control_mode: str,
+    max_accel_km_s2: float,
+    elapsed_wall_s: float,
+    speed_multiple: float,
+    dt_s: float,
+) -> None:
+    if not hasattr(dashboard, "set_live_prediction_burn"):
+        return
+    accel, elapsed = _live_prediction_burn(
+        state,
+        control_mode=control_mode,
+        max_accel_km_s2=max_accel_km_s2,
+        elapsed_wall_s=elapsed_wall_s,
+        speed_multiple=speed_multiple,
+        dt_s=dt_s,
+    )
+    dashboard.set_live_prediction_burn(accel, elapsed)
 
 
 def run_game_mode(
@@ -1039,6 +1128,7 @@ def run_game_mode(
     trainer = RPOTrainingTracker(training_cfg)
     command_state = KeyboardCommandState()
     command_state.use_timing_accumulator = True
+    player_max_accel_km_s2 = _max_accel_from_config(attempt_config, controlled_object_id)
     guided_tutorial = GuidedTutorialRuntime()
     ric_primer = RICPrimerRuntime()
     ric_primer_enabled = _ric_primer_enabled(training_cfg, arcade_enabled=arcade_enabled)
@@ -1162,6 +1252,7 @@ def run_game_mode(
                     else None
                 ),
             )
+            player_max_accel_km_s2 = _max_accel_from_config(attempt_config, controlled_object_id)
             ric_reference_object_id = _game_ric_reference_object_id(config, training_cfg.target_object_id)
             level_title = _game_level_title(config)
             trainer = RPOTrainingTracker(training_cfg)
@@ -1217,6 +1308,15 @@ def run_game_mode(
         _guided_tutorial_update_dashboard_path(dashboard, trainer, training_cfg, guided_tutorial)
         score = trainer.score()
         phase = phase_from_score(score, briefing_open=phase_shows_briefing(phase), paused=command_state.paused)
+        _sync_live_prediction_burn(
+            dashboard,
+            command_state,
+            control_mode=control_mode,
+            max_accel_km_s2=player_max_accel_km_s2,
+            elapsed_wall_s=0.0,
+            speed_multiple=current_speed_multiple,
+            dt_s=float(attempt_config.scenario.simulator.dt_s),
+        )
         dashboard.draw(
             command_status=_command_status(command_state, control_mode=control_mode),
             coach_hint=_coach_hint_with_camera_rule(
@@ -1283,7 +1383,6 @@ def run_game_mode(
                     phase = GamePhase.PRIMER
                     ric_primer.reset()
                     command_state.paused = True
-                    command_state.step_requested = False
                     command_state.reset_axes()
                 else:
                     phase = GamePhase.PLAYING
@@ -1318,7 +1417,6 @@ def run_game_mode(
                 if phase == GamePhase.PRIMER:
                     ric_primer.elapsed_s += input_elapsed_wall
                     command_state.reset_axes()
-                    command_state.step_requested = False
                     command_state.speed_multiplier_change = 0
                     command_state.camera_rule_toggle_requested = False
                     command_state.clip_record_toggle_requested = False
@@ -1372,7 +1470,6 @@ def run_game_mode(
                     ric_reference_object_id=ric_reference_object_id,
                 )
                 command_state.paused = _guided_tutorial_current_stage(training_cfg, guided_tutorial) is not None
-                command_state.step_requested = False
                 _guided_tutorial_update_dashboard_path(dashboard, trainer, training_cfg, guided_tutorial)
                 last_step_wall = perf_counter()
                 last_input_wall = last_step_wall
@@ -1452,6 +1549,7 @@ def run_game_mode(
                             else None
                         ),
                     )
+                    player_max_accel_km_s2 = _max_accel_from_config(attempt_config, controlled_object_id)
                     trainer = RPOTrainingTracker(training_cfg)
                     guided_tutorial = GuidedTutorialRuntime()
                     ric_primer = RICPrimerRuntime()
@@ -1489,7 +1587,6 @@ def run_game_mode(
                 trainer.record(snapshot)
                 _guided_tutorial_update_dashboard_path(dashboard, trainer, training_cfg, guided_tutorial)
                 command_state.restart_requested = False
-                command_state.step_requested = False
                 command_state.speed_multiplier_change = 0
                 command_state.camera_rule_toggle_requested = False
                 command_state.music_toggle_requested = False
@@ -1525,13 +1622,10 @@ def run_game_mode(
                 guided_input_ok = _guided_tutorial_input_matches(command_state, guided_stage)
                 guided_tutorial.wrong_key_active = _guided_tutorial_wrong_input_active(command_state, guided_stage)
                 command_state.paused = not guided_input_ok
-                if not guided_input_ok:
-                    command_state.step_requested = False
             elif guided_tutorial.awaiting_speed_step and not briefing_open and not mission_decided:
                 guided_tutorial.wrong_key_active = False
                 command_state.reset_axes()
                 command_state.paused = True
-                command_state.step_requested = False
             else:
                 guided_tutorial.wrong_key_active = False
             if (
@@ -1545,25 +1639,21 @@ def run_game_mode(
                     speed_multiple=current_speed_multiple,
                     control_mode=control_mode,
                 )
-            elif command_state.paused and not command_state.step_requested:
+            elif command_state.paused:
                 command_state.clear_timed_input()
-            if command_state.paused and not command_state.step_requested:
+            if command_state.paused:
                 last_step_wall = now
             steps_to_run = 0
-            if not mission_decided and not session.done:
-                if command_state.step_requested:
+            if not mission_decided and not session.done and not command_state.paused:
+                if realtime:
+                    steps_to_run, last_step_wall = _realtime_steps_due(
+                        now_s=now,
+                        last_step_wall_s=last_step_wall,
+                        wall_step_s=wall_step_s,
+                    )
+                else:
                     steps_to_run = 1
                     last_step_wall = now
-                elif not command_state.paused:
-                    if realtime:
-                        steps_to_run, last_step_wall = _realtime_steps_due(
-                            now_s=now,
-                            last_step_wall_s=last_step_wall,
-                            wall_step_s=wall_step_s,
-                        )
-                    else:
-                        steps_to_run = 1
-                        last_step_wall = now
             score = _step_game_attempt(
                 session=session,
                 dashboard=dashboard,
@@ -1605,7 +1695,6 @@ def run_game_mode(
                     )
                     command_state.reset_axes()
                     command_state.paused = True
-                    command_state.step_requested = False
                     _guided_tutorial_update_dashboard_path(dashboard, trainer, training_cfg, guided_tutorial)
                     score = trainer.score()
                     last_step_wall = perf_counter()
@@ -1624,12 +1713,10 @@ def run_game_mode(
                     )
                     command_state.paused = _guided_tutorial_current_stage(training_cfg, guided_tutorial) is not None
                     guided_tutorial.wrong_key_active = False
-                    command_state.step_requested = False
                     _guided_tutorial_update_dashboard_path(dashboard, trainer, training_cfg, guided_tutorial)
                     score = trainer.score()
                     last_step_wall = perf_counter()
                     last_input_wall = last_step_wall
-            command_state.step_requested = False
             if score.level_passed or score.level_failed:
                 command_state.paused = True
                 phase = phase_from_score(score, paused=True)
@@ -1675,6 +1762,7 @@ def run_game_mode(
                     round_index=arcade_round_index,
                     rng=_arcade_round_initial_state_rng(int(arcade_seed_value), arcade_round_index),
                 )
+                player_max_accel_km_s2 = _max_accel_from_config(attempt_config, controlled_object_id)
                 trainer = RPOTrainingTracker(training_cfg)
                 guided_tutorial = GuidedTutorialRuntime()
                 ric_primer = RICPrimerRuntime()
@@ -1712,7 +1800,6 @@ def run_game_mode(
                     next_is_boss=_arcade_round_is_boss(config, arcade_round_index),
                 )
                 command_state.paused = True
-                command_state.step_requested = False
                 command_state.restart_requested = False
                 command_state.speed_multiplier_change = 0
                 command_state.music_toggle_requested = False
@@ -1734,6 +1821,15 @@ def run_game_mode(
                 paused=command_state.paused,
             )
             _guided_tutorial_update_dashboard_path(dashboard, trainer, training_cfg, guided_tutorial)
+            _sync_live_prediction_burn(
+                dashboard,
+                command_state,
+                control_mode=control_mode,
+                max_accel_km_s2=player_max_accel_km_s2,
+                elapsed_wall_s=max(float(now) - float(last_step_wall), 0.0),
+                speed_multiple=current_speed_multiple,
+                dt_s=dt_s,
+            )
             dashboard.draw(
                 command_status=_command_status(command_state, control_mode=control_mode),
                 coach_hint=_coach_hint_with_camera_rule(

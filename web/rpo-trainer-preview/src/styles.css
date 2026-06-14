@@ -453,6 +453,7 @@ canvas {
   position: absolute;
   right: 12px;
   top: 10px;
+  z-index: 2;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -484,9 +485,9 @@ canvas {
   bottom: 8px;
   max-width: calc(100% - 650px);
   color: rgb(195, 205, 220);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.25;
+  white-space: pre-wrap;
+  overflow: visible;
 }
 
 .footer-line {
@@ -494,7 +495,14 @@ canvas {
   right: 16px;
   bottom: 8px;
   color: var(--footer);
-  white-space: nowrap;
+  white-space: pre;
+}
+
+.hud-line,
+.hint-line,
+.command-line,
+.footer-line {
+  pointer-events: none;
 }
 
 .primer-mode .hud-line {

@@ -258,7 +258,7 @@ result = workspace.run(fast)
 For a complete public script using this API surface, run:
 
 ```bash
-python examples/python/flagship_analysis.py
+.venv/bin/python examples/python/flagship_analysis.py
 ```
 
 It runs `configs/ric_pd_10km_experiment.yaml` and writes a custom metrics JSON

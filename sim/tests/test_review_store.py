@@ -13,7 +13,15 @@ from sim import ReviewWorkspace as TopLevelReviewWorkspace
 from sim import SimulationConfig, SimulationSession
 from sim.config import scenario_config_from_dict
 from sim.execution import run_simulation_config_file
-from sim.review import ReviewQueryError, ReviewWorkspace
+from sim.review import (
+    ReviewPlotSpec,
+    ReviewQueryError,
+    ReviewWorkspace,
+    load_workflow_manifest,
+    numeric_columns,
+    save_review_plot,
+    write_workflow_review,
+)
 
 
 def _review_store_config(output_dir: Path) -> dict:
@@ -225,6 +233,65 @@ def test_review_workspace_rejects_expensive_queries(tmp_path: Path) -> None:
         )
 
 
+def test_review_plot_creator_saves_styled_figure_with_provenance(tmp_path: Path) -> None:
+    SimulationSession.from_config(SimulationConfig.from_dict(_review_store_config(tmp_path))).run()
+    workspace = ReviewWorkspace.open(tmp_path)
+    result = workspace.query("SELECT time_s, range_km FROM relative_state ORDER BY time_s")
+
+    assert numeric_columns(result) == ["time_s", "range_km"]
+
+    artifact = save_review_plot(
+        workspace,
+        ReviewPlotSpec(
+            sql="SELECT time_s, range_km FROM relative_state ORDER BY time_s",
+            x_column="time_s",
+            y_columns=["range_km"],
+            plot_type="line",
+            style_name="oel_light",
+            title="Range Over Time",
+            x_label="Time (s)",
+            y_label="Range (km)",
+            artifact_id="range_over_time",
+        ),
+    )
+
+    assert artifact.path.is_file()
+    assert artifact.relative_path == "review/figures/range_over_time.png"
+
+    manifest = json.loads((tmp_path / "review" / "generated_artifacts.json").read_text(encoding="utf-8"))
+    row = manifest["artifacts"][-1]
+    assert row["artifact_id"] == "range_over_time"
+    assert row["source"] == "output_review_workbench"
+    assert row["plot_type"] == "line"
+    assert row["style_name"] == "oel_light"
+    assert row["x_column"] == "time_s"
+    assert row["y_columns"] == ["range_km"]
+    assert "FROM relative_state" in row["source_query"]
+
+
+def test_review_plot_preview_can_skip_provenance_manifest(tmp_path: Path) -> None:
+    SimulationSession.from_config(SimulationConfig.from_dict(_review_store_config(tmp_path))).run()
+    workspace = ReviewWorkspace.open(tmp_path)
+    preview_path = tmp_path / "preview.png"
+
+    artifact = save_review_plot(
+        workspace,
+        ReviewPlotSpec(
+            sql="SELECT time_s, range_km FROM relative_state ORDER BY time_s",
+            x_column="time_s",
+            y_columns=["range_km"],
+            plot_type="scatter",
+            style_name="oel_dark",
+        ),
+        path=preview_path,
+        record=False,
+    )
+
+    assert artifact.path == preview_path
+    assert preview_path.is_file()
+    assert not (tmp_path / "review" / "generated_artifacts.json").exists()
+
+
 def test_review_cli_queries_output_folder(tmp_path: Path) -> None:
     SimulationSession.from_config(SimulationConfig.from_dict(_review_store_config(tmp_path))).run()
 
@@ -256,6 +323,52 @@ def test_review_cli_queries_output_folder(tmp_path: Path) -> None:
 
     assert unsafe.returncode == 2
     assert "must start with SELECT or WITH" in unsafe.stderr
+
+
+def test_workflow_review_manifest_writes_queryable_tables_and_cli_summary(tmp_path: Path) -> None:
+    outputs = write_workflow_review(
+        output_dir=tmp_path,
+        workflow_type="controller_bench",
+        title="Demo Bench",
+        scenario_name="demo_bench",
+        status="complete",
+        summary={"run_count": 2, "passed_runs": 1},
+        artifacts={"summary_json": str(tmp_path / "controller_bench_summary.json")},
+        recommended_queries=[
+            {
+                "name": "controller_bench_runs",
+                "description": "Run rows.",
+                "sql": "SELECT variant_name, case_name, passed FROM bench_runs",
+            }
+        ],
+        recommended_review_order=["Query bench_runs."],
+        source_config="bench.yaml",
+        tables={
+            "bench_runs": [
+                {"variant_name": "a", "case_name": "nominal", "passed": True, "failure_count": 0},
+                {"variant_name": "b", "case_name": "nominal", "passed": False, "failure_count": 1},
+            ]
+        },
+    )
+
+    assert Path(outputs["workflow_manifest_json"]).is_file()
+    assert Path(outputs["sqlite"]).is_file()
+    assert load_workflow_manifest(tmp_path)["workflow_type"] == "controller_bench"
+
+    workspace = ReviewWorkspace.open(tmp_path)
+    assert "bench_runs" in workspace.tables()
+    query = workspace.query("SELECT variant_name, passed FROM bench_runs ORDER BY variant_name")
+    assert query.rows == [{"variant_name": "a", "passed": 1}, {"variant_name": "b", "passed": 0}]
+
+    proc = subprocess.run(
+        [sys.executable, "-m", "sim.review", str(tmp_path), "--manifest"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert "workflow_type: controller_bench" in proc.stdout
 
 
 def test_quickstart_config_can_emit_review_store_tables(tmp_path: Path) -> None:

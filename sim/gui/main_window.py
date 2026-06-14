@@ -3,8 +3,8 @@ from __future__ import annotations
 import copy
 import json
 import tempfile
-from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import yaml
 from PySide6.QtCore import QEvent, QObject, Qt, QThread, QUrl, Signal
@@ -72,8 +72,16 @@ from sim.gui.sections import (
     build_scenario_tab,
     build_yaml_tab,
 )
-from sim.plotting.style import artifact_metadata, save_oel_figure
-from sim.review import ReviewQueryError, ReviewWorkspace
+from sim.review import (
+    ReviewPlotSpec,
+    ReviewQueryError,
+    ReviewWorkspace,
+    default_plot_spec,
+    list_saved_review_queries,
+    load_workflow_manifest,
+    numeric_columns,
+    save_review_plot,
+)
 
 GUI_CAPABILITIES = get_gui_capabilities()
 OUTPUT_MODES = GUI_CAPABILITIES.output_modes
@@ -150,6 +158,8 @@ class MainWindow(QMainWindow):
         self.preview_temp_dir: tempfile.TemporaryDirectory[str] | None = None
         self.review_workspace: ReviewWorkspace | None = None
         self.review_query_result = None
+        self.review_plot_preview_path: Path | None = None
+        self._suppress_review_source_changes = False
         self.rocket_guidance_modifiers_config: list[dict] = []
         self._yaml_has_unapplied_changes = False
         self.output_modes = OUTPUT_MODES
@@ -369,7 +379,7 @@ class MainWindow(QMainWindow):
             self.tabs.setTabVisible(index, index == 6)
         self.tabs.setCurrentIndex(6)
         if hasattr(self, "results_tabs"):
-            self.results_tabs.setCurrentIndex(0)
+            self.results_tabs.setCurrentIndex(3)
 
     def _build_navigation_tree(self) -> QTreeWidget:
         tree = QTreeWidget()
@@ -1859,6 +1869,14 @@ class MainWindow(QMainWindow):
                 text.append(self._format_json_summary("Analysis Summary", data))
             except Exception as exc:
                 text.append(f"Failed to read {analysis_summary_path.name}: {exc}")
+        workflow_manifest_path = output_dir / "review" / "workflow_manifest.json"
+        workflow_manifest: dict[str, Any] | None = None
+        if workflow_manifest_path.exists():
+            try:
+                workflow_manifest = load_workflow_manifest(output_dir)
+                text.append(self._format_workflow_manifest_summary(workflow_manifest))
+            except Exception as exc:
+                text.append(f"Failed to read workflow_manifest.json: {exc}")
         if not text:
             png_count = sum(1 for p in files if p.suffix.lower() in {".png", ".jpg", ".jpeg"})
             json_count = sum(1 for p in files if p.suffix.lower() == ".json")
@@ -1875,7 +1893,14 @@ class MainWindow(QMainWindow):
                 "Output Review Store\n"
                 "===================\n"
                 f"SQLite: {review_db}\n"
-                "Use the Query tab to inspect structured run evidence."
+                "Use the Plot Builder tab to inspect structured review evidence."
+            )
+        elif workflow_manifest is not None:
+            text.append(
+                "Output Review Store\n"
+                "===================\n"
+                "Workflow manifest found, but no review/run.sqlite table store is available. "
+                "Artifact preview remains available."
             )
         else:
             text.append(
@@ -1895,14 +1920,43 @@ class MainWindow(QMainWindow):
             self.review_query_status.setText(f"Review store loaded: {workspace.db_path}\nTables: {tables}")
             self.review_query_run_button.setEnabled(True)
             self.review_query_save_figure_button.setEnabled(False)
+            self.review_plot_preview_button.setEnabled(False)
+            self._populate_review_query_sources()
         except Exception:
             self.review_workspace = None
             self.review_query_status.setText("No review/run.sqlite store found for this output folder.")
             self.review_query_run_button.setEnabled(False)
+            self.review_plot_preview_button.setEnabled(False)
             self.review_query_save_figure_button.setEnabled(False)
+            self.review_query_source_combo.clear()
+            self._clear_review_plot_controls()
             self.review_query_table.clear()
             self.review_query_table.setRowCount(0)
             self.review_query_table.setColumnCount(0)
+
+    def _format_workflow_manifest_summary(self, manifest: dict[str, Any]) -> str:
+        lines = [
+            "Workflow Review Manifest",
+            "========================",
+            f"workflow_type: {manifest.get('workflow_type', '')}",
+            f"scenario_name: {manifest.get('scenario_name', '')}",
+            f"status: {manifest.get('status', '')}",
+            f"generated_utc: {manifest.get('generated_utc', '')}",
+        ]
+        queries = list(manifest.get("recommended_queries", []) or [])
+        if queries:
+            lines.append("")
+            lines.append("recommended_queries:")
+            for item in queries[:8]:
+                row = dict(item or {})
+                lines.append(f"- {row.get('name', '')}: {row.get('description', '')}")
+        order = list(manifest.get("recommended_review_order", []) or [])
+        if order:
+            lines.append("")
+            lines.append("recommended_review_order:")
+            for item in order[:8]:
+                lines.append(f"- {item}")
+        return "\n".join(lines)
 
     def _format_json_summary(self, title: str, data: dict) -> str:
         lines = [title, "=" * len(title)]
@@ -1933,6 +1987,102 @@ class MainWindow(QMainWindow):
             lines.append(json.dumps(remaining, indent=2)[:4000])
         return "\n".join(lines)
 
+    def _populate_review_query_sources(self) -> None:
+        if self.review_workspace is None:
+            return
+        self._suppress_review_source_changes = True
+        self.review_query_source_combo.clear()
+        for table in self.review_workspace.tables():
+            sql = f'SELECT * FROM "{table}" LIMIT 500'
+            self.review_query_source_combo.addItem(f"Table: {table}", ("table", table, sql))
+        for query in list_saved_review_queries():
+            self.review_query_source_combo.addItem(f"Saved: {query.name}", ("saved", query.name, query.sql))
+        self._suppress_review_source_changes = False
+        default_index = self.review_query_source_combo.findText("Table: relative_state")
+        if default_index < 0:
+            default_index = self.review_query_source_combo.findText("Table: object_state")
+        if default_index < 0:
+            default_index = self.review_query_source_combo.findText("Table: workflow_metadata")
+        if default_index < 0:
+            default_index = self.review_query_source_combo.findText("Table: workflow_summary")
+        if default_index < 0:
+            for table in ("bench_runs", "sensitivity_rankings", "campaign_runs", "validation_benchmarks"):
+                default_index = self.review_query_source_combo.findText(f"Table: {table}")
+                if default_index >= 0:
+                    break
+        if default_index < 0:
+            default_index = self.review_query_source_combo.findText("Saved: run_metadata")
+        if default_index >= 0:
+            self.review_query_source_combo.setCurrentIndex(default_index)
+        self._on_review_query_source_changed()
+
+    def _on_review_query_source_changed(self, *_args) -> None:
+        if getattr(self, "_suppress_review_source_changes", False):
+            return
+        data = self.review_query_source_combo.currentData()
+        if isinstance(data, tuple) and len(data) >= 3:
+            self.review_query_editor.setPlainText(str(data[2]))
+            self.review_query_result = None
+            self.review_query_save_figure_button.setEnabled(False)
+            self.review_plot_preview_button.setEnabled(False)
+            self._clear_review_plot_controls()
+
+    def _clear_review_plot_controls(self) -> None:
+        for combo in (
+            getattr(self, "review_plot_x_combo", None),
+            getattr(self, "review_plot_y_combo", None),
+            getattr(self, "review_plot_group_combo", None),
+        ):
+            if combo is not None:
+                combo.clear()
+        if hasattr(self, "review_plot_title_edit"):
+            self.review_plot_title_edit.clear()
+            self.review_plot_x_label_edit.clear()
+            self.review_plot_y_label_edit.clear()
+
+    def _populate_review_plot_controls(self) -> None:
+        if self.review_query_result is None:
+            self._clear_review_plot_controls()
+            return
+        result = self.review_query_result
+        numeric = numeric_columns(result)
+        x_default = "time_s" if "time_s" in result.columns else (result.columns[0] if result.columns else "")
+        y_default = next((column for column in numeric if column != x_default), numeric[0] if numeric else "")
+        for combo in (self.review_plot_x_combo, self.review_plot_y_combo, self.review_plot_group_combo):
+            combo.blockSignals(True)
+            combo.clear()
+        self.review_plot_x_combo.addItems(result.columns)
+        self.review_plot_y_combo.addItems(numeric)
+        self.review_plot_group_combo.addItem("(none)", "")
+        for column in result.columns:
+            self.review_plot_group_combo.addItem(column, column)
+        if x_default:
+            idx = self.review_plot_x_combo.findText(x_default)
+            if idx >= 0:
+                self.review_plot_x_combo.setCurrentIndex(idx)
+        if y_default:
+            idx = self.review_plot_y_combo.findText(y_default)
+            if idx >= 0:
+                self.review_plot_y_combo.setCurrentIndex(idx)
+        for combo in (self.review_plot_x_combo, self.review_plot_y_combo, self.review_plot_group_combo):
+            combo.blockSignals(False)
+        spec = default_plot_spec(self.review_query_editor.toPlainText(), result)
+        self.review_plot_title_edit.setText(spec.title)
+        self.review_plot_x_label_edit.setText(spec.x_column)
+        self.review_plot_y_label_edit.setText(spec.y_columns[0] if spec.y_columns else "")
+
+    def _on_review_plot_controls_changed(self, *_args) -> None:
+        enabled = (
+            self.review_query_result is not None
+            and bool(self.review_query_result.rows)
+            and bool(self.review_plot_x_combo.currentText().strip())
+            and bool(self.review_plot_y_combo.currentText().strip())
+        )
+        if hasattr(self, "review_plot_preview_button"):
+            self.review_plot_preview_button.setEnabled(enabled)
+        if hasattr(self, "review_query_save_figure_button"):
+            self.review_query_save_figure_button.setEnabled(enabled)
+
     def _run_review_query(self) -> None:
         if self.review_workspace is None:
             self._show_error("Review Store Missing", "Open an output folder with review/run.sqlite first.")
@@ -1944,6 +2094,7 @@ class MainWindow(QMainWindow):
         except ReviewQueryError as exc:
             self.review_query_status.setText(f"Query failed: {exc}")
             self.review_query_save_figure_button.setEnabled(False)
+            self.review_plot_preview_button.setEnabled(False)
             return
         self.review_query_result = result
         self.review_query_table.clear()
@@ -1958,113 +2109,69 @@ class MainWindow(QMainWindow):
         self.review_query_table.resizeColumnsToContents()
         suffix = " (truncated)" if result.truncated else ""
         self.review_query_status.setText(f"Query returned {result.row_count} row(s){suffix}.")
-        self.review_query_save_figure_button.setEnabled(bool(result.rows))
+        self._populate_review_plot_controls()
+        self._on_review_plot_controls_changed()
+
+    def _review_plot_spec_from_controls(self, *, force_png: bool = False) -> ReviewPlotSpec:
+        if self.review_query_result is None:
+            raise ValueError("Run a review query before plotting.")
+        x_column = self.review_plot_x_combo.currentText().strip()
+        y_column = self.review_plot_y_combo.currentText().strip()
+        group_column = str(self.review_plot_group_combo.currentData() or "").strip()
+        style_name = str(self.review_plot_style_combo.currentData() or "oel_dark")
+        file_format = "png" if force_png else self.review_plot_format_combo.currentText().strip().lower()
+        return ReviewPlotSpec(
+            sql=self.review_query_editor.toPlainText(),
+            x_column=x_column,
+            y_columns=[y_column] if y_column else [],
+            group_column=group_column,
+            plot_type=self.review_plot_type_combo.currentText().strip().lower(),
+            style_name=style_name,
+            title=self.review_plot_title_edit.text().strip(),
+            x_label=self.review_plot_x_label_edit.text().strip(),
+            y_label=self.review_plot_y_label_edit.text().strip(),
+            artifact_id=self.review_plot_artifact_id_edit.text().strip(),
+            file_format=file_format,
+        )
+
+    def _preview_review_query_figure(self) -> None:
+        if self.review_workspace is None or self.review_query_result is None:
+            self._show_error("No Query Result", "Run a review query before previewing a figure.")
+            return
+        try:
+            spec = self._review_plot_spec_from_controls(force_png=True)
+            preview_dir = Path(tempfile.gettempdir()) / "oel_orw_previews"
+            preview_dir.mkdir(parents=True, exist_ok=True)
+            preview_path = preview_dir / "orw_preview.png"
+            artifact = save_review_plot(self.review_workspace, spec, path=preview_path, record=False)
+        except Exception as exc:
+            self._show_error("Preview Failed", str(exc))
+            return
+        self.review_plot_preview_path = artifact.path
+        self.preview_title.setText("Plot Builder Preview")
+        self.preview_stack.setCurrentIndex(0)
+        self.preview_text.clear()
+        self.preview_image_path = artifact.path
+        self.preview_zoom_factor = 1.0
+        self.preview_fit_to_window = True
+        self._update_image_preview()
+        if hasattr(self, "results_tabs"):
+            self.results_tabs.setCurrentIndex(2)
+        self.review_query_status.setText(f"Previewed {artifact.row_count} row(s).")
 
     def _save_review_query_figure(self) -> None:
         if self.review_workspace is None or self.review_query_result is None:
             self._show_error("No Query Result", "Run a review query before saving a figure.")
             return
-        numeric_columns = self._numeric_query_columns(self.review_query_result.rows, self.review_query_result.columns)
-        if len(numeric_columns) < 2:
-            self._show_error("Cannot Save Figure", "The current query result needs at least two numeric columns.")
+        try:
+            spec = self._review_plot_spec_from_controls()
+            artifact = save_review_plot(self.review_workspace, spec)
+        except Exception as exc:
+            self._show_error("Cannot Save Figure", str(exc))
             return
-        x_col, y_col = numeric_columns[0], numeric_columns[1]
-        pairs = [
-            (float(row[x_col]), float(row[y_col]))
-            for row in self.review_query_result.rows
-            if row.get(x_col) is not None and row.get(y_col) is not None
-        ]
-        if not pairs:
-            self._show_error("Cannot Save Figure", "The current query result does not contain plottable values.")
-            return
-        import matplotlib.pyplot as plt
-
-        figures_dir = self.review_workspace.output_dir / "review" / "figures"
-        figures_dir.mkdir(parents=True, exist_ok=True)
-        artifact_id = f"query_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
-        path = figures_dir / f"{artifact_id}.png"
-        fig, ax = plt.subplots(figsize=(8, 4.5))
-        x_vals = [item[0] for item in pairs]
-        y_vals = [item[1] for item in pairs]
-        ax.plot(x_vals, y_vals, marker="o", markersize=3)
-        ax.set_title(f"{y_col} vs {x_col}")
-        ax.set_xlabel(x_col)
-        ax.set_ylabel(y_col)
-        ax.grid(True, alpha=0.35)
-        save_oel_figure(
-            fig,
-            path,
-            dpi=150,
-            metadata=artifact_metadata(
-                scenario_name=self._review_scenario_name(),
-                artifact_id=artifact_id,
-            ),
-            artifact_id=artifact_id,
-            style_name="oel_dark",
-            bbox_inches="tight",
-        )
-        plt.close(fig)
-        self._record_generated_review_artifact(path=path, artifact_id=artifact_id, x_col=x_col, y_col=y_col)
         self._refresh_output_files()
-        self.statusBar().showMessage(f"Saved figure {path}", 5000)
-
-    def _numeric_query_columns(self, rows, columns: list[str]) -> list[str]:
-        numeric = []
-        for column in columns:
-            saw_value = False
-            for row in rows:
-                value = row.get(column)
-                if value is None:
-                    continue
-                try:
-                    float(value)
-                except (TypeError, ValueError):
-                    break
-                saw_value = True
-            else:
-                if saw_value:
-                    numeric.append(column)
-        return numeric
-
-    def _review_scenario_name(self) -> str:
-        if self.review_workspace is None:
-            return ""
-        try:
-            result = self.review_workspace.query("SELECT scenario_name FROM run_metadata", max_rows=1)
-            if result.rows:
-                return str(result.rows[0].get("scenario_name") or "")
-        except Exception:
-            return ""
-        return ""
-
-    def _record_generated_review_artifact(self, *, path: Path, artifact_id: str, x_col: str, y_col: str) -> None:
-        if self.review_workspace is None:
-            return
-        index_path = self.review_workspace.output_dir / "review" / "generated_artifacts.json"
-        existing = []
-        if index_path.exists():
-            try:
-                data = json.loads(index_path.read_text(encoding="utf-8"))
-                existing = list(data.get("artifacts", []) if isinstance(data, dict) else [])
-            except Exception:
-                existing = []
-        try:
-            rel_path = path.relative_to(self.review_workspace.output_dir).as_posix()
-        except ValueError:
-            rel_path = str(path)
-        existing.append(
-            {
-                "artifact_id": artifact_id,
-                "artifact_type": "figure",
-                "path": rel_path,
-                "created_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "source": "output_review_workbench",
-                "x_column": x_col,
-                "y_column": y_col,
-                "query": self.review_query_editor.toPlainText(),
-            }
-        )
-        index_path.write_text(json.dumps({"artifacts": existing}, indent=2) + "\n", encoding="utf-8")
+        self.statusBar().showMessage(f"Saved figure {artifact.path}", 5000)
+        self.review_query_status.setText(f"Saved {artifact.relative_path} with provenance.")
 
     def _on_output_file_selected(self, _text: str) -> None:
         item = self.output_files.currentItem()
@@ -2255,7 +2362,7 @@ class MainWindow(QMainWindow):
         self._refresh_output_files()
         self.tabs.setCurrentIndex(6)
         if hasattr(self, "results_tabs"):
-            self.results_tabs.setCurrentIndex(0)
+            self.results_tabs.setCurrentIndex(3 if getattr(self, "review_only_mode", False) else 0)
         self.statusBar().showMessage(f"Opened output review: {self.results_output_dir}", 5000)
 
     def _on_open_quickstart(self) -> None:

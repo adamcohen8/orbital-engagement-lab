@@ -11,7 +11,7 @@ scenario_description: "Public example: closed-loop chaser/target rendezvous usin
 
 metadata:
   owner: "public"
-  notes: "Run with `python run_simulation.py --config examples/configs/public_closed_loop_rendezvous_lqr.yaml`."
+  notes: "Run with `.venv/bin/python run_simulation.py --config examples/configs/public_closed_loop_rendezvous_lqr.yaml`."
 
 objects:
   target:

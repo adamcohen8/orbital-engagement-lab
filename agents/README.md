@@ -9,6 +9,8 @@ using Orbital Engagement Lab with AI coding assistants.
 - `examples/` contains small scenario YAML examples that agents can copy from
   when they fit, use as scaffolds, or validate in smoke tests. They are not a
   complete catalog of supported agent workflows.
+- `../docs/agent-golden-paths.md` gives the shortest reproducible adoption
+  workflows for propagation, rendezvous, and mission recovery/reconstitution.
 - `../docs/agent-capability-routing.md` maps broad user intents to public
   workflows, starting docs, evidence to inspect, clarifying-question triggers,
   and limits agents should not overclaim.

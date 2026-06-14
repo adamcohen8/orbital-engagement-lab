@@ -11,7 +11,7 @@ scenario_description: "Public example: manual chaser control against a passive/d
 
 metadata:
   owner: "public"
-  notes: "Run interactively with `python run_game.py examples/configs/public_manual_rpo_training.yaml`."
+  notes: "Run interactively with `.venv/bin/python run_game.py examples/configs/public_manual_rpo_training.yaml`."
   game:
     # Use direct RIC translation controls for the public game-style trainer.
     control_mode: "ric_translation"

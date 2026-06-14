@@ -20,7 +20,6 @@ class KeyboardCommandState:
     reset_requested: bool = False
     restart_requested: bool = False
     paused: bool = False
-    step_requested: bool = False
     speed_multiplier_change: int = 0
     camera_rule_toggle_requested: bool = False
     music_toggle_requested: bool = False

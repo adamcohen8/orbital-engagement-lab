@@ -1,6 +1,6 @@
 # Agent Task Cards
 
-Agent task cards are the public OEL Agents v0 evaluation set. They are
+Agent task cards are the public OEL Agents evaluation set. They are
 fixtures for testing whether an agent follows the evidence loop; they are not
 the boundary of what OEL Agents can help users do.
 
@@ -10,6 +10,11 @@ The general workflow remains:
 natural-language request -> scenario YAML -> validation -> deterministic run
 -> review-store query -> artifact-supported explanation
 ```
+
+For the shortest first-run adoption paths across propagation, rendezvous, and
+mission recovery/reconstitution, use
+[`agent-golden-paths.md`](agent-golden-paths.md) before reaching for the full
+card set.
 
 Each card includes a user prompt, assumptions, an example config, validation and
 run commands, required review queries, expected answer shape, pass criteria, and

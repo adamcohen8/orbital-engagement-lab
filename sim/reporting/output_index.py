@@ -130,6 +130,9 @@ def _linked_nested_artifact_name(
 
 def _default_next_steps(*, workflow: str, artifacts: dict[str, Any], base_dir: Path) -> list[str]:
     steps: list[str] = []
+    if "workflow_manifest_json" in artifacts:
+        name = _linked_artifact_name(artifacts, "workflow_manifest_json", "review/workflow_manifest.json", base_dir=base_dir)
+        steps.append(f"Open {name} for the common workflow review manifest.")
     if workflow == "single_run":
         if _nested_artifact_path(artifacts, "plots", "run_dashboard"):
             name = _linked_nested_artifact_name(

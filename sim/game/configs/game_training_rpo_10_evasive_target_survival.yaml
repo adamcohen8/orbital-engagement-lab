@@ -19,7 +19,7 @@ metadata:
       scenario_id: rpo_10_evasive_target_survival
       learning_goal: Fly the target vehicle and evade an autonomous RIC_PD chaser
         until the timer expires.
-      player_brief: You are the target. The red chaser is using the RIC_PD controller
+      player_brief: You are the target. The yellow chaser is using the RIC_PD controller
         from the 10 km rendezvous experiment to close on you. Use small R/I/C pulses
         to keep at least 100 m of separation until time expires.
       pass_criteria:
@@ -30,7 +30,7 @@ metadata:
       - This is the reverse of level 9: the player flies the target, not the chaser.
       - The chaser uses sim.control.orbit.ric_pd.RICPDTransferController with the 10 km experiment guidance settings.
       - The camera follows the target/chaser pair so evasive motion stays visible.
-      - The yellow dashed curve is the target vehicle's current HCW coast path.
+      - The red dashed curve is the target vehicle's current HCW coast path.
       - If the chaser uses its full delta-v budget, it coasts for the rest of the attempt.
       target_object_id: target
       chaser_object_id: chaser

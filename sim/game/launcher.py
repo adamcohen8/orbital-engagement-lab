@@ -575,7 +575,7 @@ def _start_artwork_rect(
     screen_w, screen_h = screen_size
     if image_w <= 0 or image_h <= 0 or screen_w <= 0 or screen_h <= 0:
         return (0, 0, 0, 0)
-    scale = max(screen_w / float(image_w), screen_h / float(image_h))
+    scale = min(screen_w / float(image_w), screen_h / float(image_h))
     width = max(int(round(image_w * scale)), 1)
     height = max(int(round(image_h * scale)), 1)
     x = int((screen_w - width) // 2)

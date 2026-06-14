@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import os
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -17,6 +19,25 @@ QMessageBox = QtWidgets.QMessageBox
 from sim.app.services import dump_config_text, validate_config  # noqa: E402
 from sim.config.object_refs import configured_objects  # noqa: E402
 from sim.gui.main_window import MainWindow  # noqa: E402
+
+
+def _write_minimal_review_store(output_dir: Path) -> None:
+    review_dir = output_dir / "review"
+    review_dir.mkdir(parents=True)
+    (output_dir / "index.md").write_text("# Review Output\n", encoding="utf-8")
+    with sqlite3.connect(review_dir / "run.sqlite") as conn:
+        conn.execute(
+            "CREATE TABLE run_metadata (scenario_name TEXT, duration_s REAL, dt_s REAL, samples INTEGER, "
+            "oel_version TEXT, review_schema_version TEXT)"
+        )
+        conn.execute("INSERT INTO run_metadata VALUES ('gui_orw_smoke', 2.0, 1.0, 3, 'test', '0.3')")
+        conn.execute("CREATE TABLE relative_state (time_s REAL, deputy_id TEXT, chief_id TEXT, range_km REAL)")
+        conn.executemany(
+            "INSERT INTO relative_state VALUES (?, 'chaser', 'target', ?)",
+            [(0.0, 1.0), (1.0, 0.6), (2.0, 0.25)],
+        )
+        conn.execute("CREATE TABLE artifacts (artifact_type TEXT, artifact_id TEXT, path TEXT)")
+        conn.execute("INSERT INTO artifacts VALUES ('summary', 'index', 'index.md')")
 
 
 @pytest.fixture(scope="module")
@@ -125,3 +146,41 @@ def test_results_tab_selects_start_here_first(main_window: MainWindow, tmp_path:
 
     assert main_window.output_files.currentItem().text() == "Start Here (md)"
     assert "Open index.md first" in main_window.results_summary.toPlainText()
+
+
+def test_orw_plot_builder_saves_custom_figure_with_provenance(main_window: MainWindow, tmp_path: Path) -> None:
+    output_dir = tmp_path / "review_output"
+    _write_minimal_review_store(output_dir)
+
+    main_window.open_output_review(output_dir)
+    main_window.review_query_editor.setPlainText("SELECT time_s, range_km FROM relative_state ORDER BY time_s")
+    main_window._run_review_query()
+
+    assert main_window.review_query_table.rowCount() == 3
+    assert main_window.review_plot_x_combo.currentText() == "time_s"
+    assert main_window.review_plot_y_combo.currentText() == "range_km"
+    assert main_window.review_plot_preview_button.isEnabled()
+    assert main_window.review_query_save_figure_button.isEnabled()
+
+    main_window.review_plot_style_combo.setCurrentIndex(1)
+    main_window.review_plot_artifact_id_edit.setText("gui_custom_range")
+    main_window._save_review_query_figure()
+
+    figure_path = output_dir / "review" / "figures" / "gui_custom_range.png"
+    manifest_path = output_dir / "review" / "generated_artifacts.json"
+    assert figure_path.is_file()
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["artifacts"][-1]["artifact_id"] == "gui_custom_range"
+    assert manifest["artifacts"][-1]["style_name"] == "oel_light"
+
+
+def test_orw_review_only_mode_opens_plot_builder(qt_app: QApplication, tmp_path: Path) -> None:
+    output_dir = tmp_path / "review_output"
+    _write_minimal_review_store(output_dir)
+    window = MainWindow(output_dir=output_dir)
+    try:
+        assert window.review_only_mode is True
+        assert window.results_tabs.tabText(window.results_tabs.currentIndex()) == "Plot Builder"
+        assert window.review_query_run_button.isEnabled()
+    finally:
+        window.deleteLater()

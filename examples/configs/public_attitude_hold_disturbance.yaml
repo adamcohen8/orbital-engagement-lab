@@ -11,7 +11,7 @@ scenario_description: "Public example: reaction-wheel attitude hold with initial
 
 metadata:
   owner: "public"
-  notes: "Run with `python run_simulation.py --config examples/configs/public_attitude_hold_disturbance.yaml`."
+  notes: "Run with `.venv/bin/python run_simulation.py --config examples/configs/public_attitude_hold_disturbance.yaml`."
 
 objects:
   bus:

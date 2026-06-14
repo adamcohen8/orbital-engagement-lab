@@ -15,7 +15,7 @@ scenario_description: "Public example: initialize one satellite from a TLE, prop
 
 metadata:
   owner: "public"
-  notes: "Run with `python run_simulation.py --config examples/configs/public_tle_2hr_propagation.yaml`. This is not SGP4/general-perturbations propagation; OEL initializes from the TLE and numerically integrates its configured special-perturbations force model."
+  notes: "Run with `.venv/bin/python run_simulation.py --config examples/configs/public_tle_2hr_propagation.yaml`. This is not SGP4/general-perturbations propagation; OEL initializes from the TLE and numerically integrates its configured special-perturbations force model."
 
 objects:
   iss:
