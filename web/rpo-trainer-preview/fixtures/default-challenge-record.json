@@ -1,0 +1,99 @@
+{
+  "challenge_id": "rpo_arcade_pursuit",
+  "physics_version": "web-two-body-v1",
+  "scoring_version": "pursuit-v1",
+  "config_hash": "ec95df5e",
+  "config": {
+    "arcade": {
+      "boss": {
+        "bonus_time_s": 5000,
+        "eccentricity_max": 0.2,
+        "eccentricity_start": 0.05,
+        "eccentricity_step": 0.05,
+        "score_multiplier": 2,
+        "target_coes": {
+          "a_km": 9000,
+          "argp_deg": 0,
+          "ecc": 0.05,
+          "inc_deg": 45,
+          "raan_deg": 0,
+          "true_anomaly_deg": 0
+        },
+        "true_anomaly_range_deg": [
+          0,
+          360
+        ]
+      },
+      "boss_round_interval": 5,
+      "delta_v_bonus_time_per_m_s": 1000,
+      "goal_range_step_km": 0.005,
+      "initial_time_s": 12000,
+      "min_goal_range_km": 0.005,
+      "random_initial_state": {
+        "cross_track_range_km": [
+          -1,
+          1
+        ],
+        "cross_track_rate_range_km_s": [
+          -0.001,
+          0.001
+        ],
+        "enabled": true,
+        "in_track_range_km": [
+          -10,
+          10
+        ],
+        "min_range_km": 5,
+        "radial_range_km": [
+          -1,
+          1
+        ]
+      },
+      "round_bonus_time_s": 0
+    },
+    "challenge_id": "rpo_arcade_pursuit",
+    "chaser_initial_ric": {
+      "c_km": 0,
+      "cd_km_s": 0,
+      "i_km": -1.8,
+      "id_km_s": 0,
+      "r_km": 0,
+      "rd_km_s": 0
+    },
+    "difficulty": "easy",
+    "dt_s": 1,
+    "goal_range_km": 0.1,
+    "goal_speed_km_s": null,
+    "max_delta_v_m_s": 3,
+    "max_player_accel_km_s2": 0.000015,
+    "max_target_delta_v_m_s": 0.1,
+    "max_time_s": 12000,
+    "mu_km3_s2": 398600.4418,
+    "physics_version": "web-two-body-v1",
+    "scoring": {
+      "difficulty_multiplier": 1
+    },
+    "scoring_version": "pursuit-v1",
+    "target_coes": {
+      "a_km": 7000,
+      "argp_deg": 0,
+      "ecc": 0,
+      "inc_deg": 45,
+      "raan_deg": 0,
+      "true_anomaly_deg": 0
+    },
+    "target_defense": {
+      "cross_track_bias": 0.65,
+      "delta_v_ramp_after_round": 20,
+      "delta_v_ramp_step_m_s": 0.01,
+      "enabled": true,
+      "keepout_radius_km": 0.1,
+      "max_accel_km_s2": 0.0000075,
+      "max_delta_v_m_s": 0.1,
+      "pulse_period_s": 120,
+      "trigger_closing_speed_km_s": 0.00025,
+      "trigger_range_km": 1.2
+    },
+    "title": "Pursuit Arcade"
+  }
+}

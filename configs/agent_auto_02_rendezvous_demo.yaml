@@ -1,0 +1,123 @@
+# Agent auto demo 02: public-core closed-loop rendezvous evidence.
+#
+# Natural-language source:
+# "Can an OEL agent build a short public-core rendezvous check where a small
+# chaser starts 3 km behind a passive target with a 200 m cross-track offset,
+# uses the public HCW LQR controller with noisy measurements, and tells me
+# whether it closes inside 250 m within about 20 minutes?"
+#
+# Assumption boundary: this is a deterministic public-core controller demo, not
+# an operational rendezvous design, flight qualification, or robustness study.
+
+scenario_name: "agent_auto_02_rendezvous_demo"
+scenario_description: "Agent-generated public demo: short HCW LQR rendezvous check with review evidence and plots."
+
+metadata:
+  owner: "public-oel-agents"
+  notes: "Generated for the weekly OEL agentic workflow post. Uses public two-body dynamics, a public HCW LQR controller, and queryable review evidence."
+
+objects:
+  target:
+    kind: "satellite"
+    enabled: true
+    role: "target"
+    specs:
+      preset_satellite: "BASIC_SATELLITE"
+      dry_mass_kg: 360.0
+      fuel_mass_kg: 0.0
+    initial_state:
+      coes:
+        a_km: 7000.0
+        ecc: 0.0
+        inc_deg: 45.0
+        raan_deg: 0.0
+        argp_deg: 0.0
+        true_anomaly_deg: 0.0
+    orbit_control:
+      kind: "python"
+      module: "sim.control.orbit.zero_controller"
+      class_name: "ZeroController"
+      params: {}
+
+  chaser:
+    kind: "satellite"
+    enabled: true
+    role: "chaser"
+    specs:
+      preset_satellite: "BASIC_SATELLITE"
+      dry_mass_kg: 180.0
+      fuel_mass_kg: 20.0
+      thruster: "BASIC_CHEMICAL_Z_BOTTOM"
+    initial_state:
+      relative_to: "target"
+      relative_to_target_ric:
+        frame: "curv"
+        state: [0.0, -3.0, 0.2, 0.0, 0.0002, 0.0]
+    orbit_control:
+      kind: "python"
+      module: "sim.control.orbit.lqr"
+      class_name: "HCWLQRController"
+      params:
+        mean_motion_rad_s: 0.001078
+        max_accel_km_s2: 2.0e-5
+        design_dt_s: 5.0
+        ric_curv_state_slice: [0, 6]
+        chief_eci_state_slice: [6, 12]
+    knowledge:
+      refresh_rate_s: 5.0
+      targets: ["target"]
+      conditions:
+        require_line_of_sight: false
+        max_range_km: 10000.0
+      sensor_error:
+        pos_sigma_km: [0.005, 0.005, 0.005]
+        vel_sigma_km_s: [0.00005, 0.00005, 0.00005]
+      estimation:
+        type: "ekf"
+
+simulator:
+  scenario_type: "auto"
+  duration_s: 1200.0
+  dt_s: 5.0
+  dynamics:
+    orbit:
+      model: "two_body"
+      orbit_substep_s: 5.0
+      j2: false
+      j3: false
+      j4: false
+      drag: false
+      srp: false
+    attitude:
+      enabled: false
+    rocket:
+      enabled: false
+  environment:
+    ephemeris_mode: "analytic_simple"
+    atmosphere_env: {}
+  plugin_validation:
+    strict: true
+  termination:
+    earth_impact_enabled: false
+
+outputs:
+  output_dir: "outputs/agent_auto_02_rendezvous_demo"
+  mode: "save"
+  stats:
+    print_summary: true
+    save_json: true
+    save_csv: false
+    save_full_log: false
+  review:
+    enabled: true
+    detail: "standard"
+  plots:
+    enabled: true
+    preset: "rendezvous"
+    reference_object_id: "target"
+    style: "oel_dark"
+    dpi: 140
+    figure_ids: []
+  animations:
+    enabled: false
+    types: []

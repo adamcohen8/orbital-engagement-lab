@@ -19,6 +19,7 @@ from sim.dynamics.orbit.accelerations import (
     accel_two_body,
 )
 from sim.dynamics.orbit.atmosphere import density_from_model
+from sim.dynamics.orbit.cr3bp import cr3bp_system, propagate_cr3bp_state
 from sim.dynamics.orbit.eclipse import resolve_srp_geometry, srp_shadow_factor
 from sim.dynamics.orbit.environment import (
     EARTH_RADIUS_KM,
@@ -264,6 +265,8 @@ def third_body_planets_plugin(t_s: float, x_eci: np.ndarray, env: dict, ctx: Orb
 
 @dataclass
 class OrbitPropagator:
+    model: str = "two_body"
+    cr3bp_system_name: str = "earth_moon"
     integrator: str = "rk4"
     plugins: list[AccelerationPlugin] = field(default_factory=list)
     adaptive_atol: float = 1e-9
@@ -286,6 +289,15 @@ class OrbitPropagator:
         env: dict,
         ctx: OrbitContext,
     ) -> np.ndarray:
+        if str(self.model or "two_body").strip().lower() == "cr3bp":
+            return propagate_cr3bp_state(
+                x_eci,
+                dt_s,
+                t_s,
+                command_accel_eci_km_s2,
+                system=cr3bp_system(self.cr3bp_system_name),
+            )
+
         fast_flags = self._zonal_rk4_fast_path_flags()
         if self._acceleration_enabled() and fast_flags is not None:
             include_j2, include_j3, include_j4 = fast_flags

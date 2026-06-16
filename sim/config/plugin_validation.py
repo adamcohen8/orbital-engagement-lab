@@ -188,6 +188,11 @@ def _validate_initial_state(initial_state: dict[str, Any], path: str) -> list[st
             frame = str(rel.get("frame", "rect") or "").strip().lower()
             if frame not in {"rect", "curv"}:
                 errs.append(f"{path}.relative_to_target_ric.frame: must be 'rect' or 'curv'.")
+            reference_frame = str(rel.get("reference_frame", rel.get("origin", "target")) or "").strip().lower()
+            if reference_frame.replace("-", "_") not in {"target", "moon", "moon_ric", "lunar", "lunar_ric"}:
+                errs.append(
+                    f"{path}.relative_to_target_ric.reference_frame: must be 'target', 'moon', or 'moon_ric'."
+                )
             if "state" not in rel:
                 errs.append(f"{path}.relative_to_target_ric.state: must be a length-6 finite numeric list.")
             else:
@@ -202,6 +207,34 @@ def _validate_initial_state(initial_state: dict[str, Any], path: str) -> list[st
         errs.extend(_validate_numeric_sequence(raw.get("relative_ric_rect"), f"{path}.relative_ric_rect", length=6))
     if "relative_ric_curv" in raw:
         errs.extend(_validate_numeric_sequence(raw.get("relative_ric_curv"), f"{path}.relative_ric_curv", length=6))
+    rel_cislunar = raw.get("relative_to_target_cislunar")
+    if rel_cislunar is not None:
+        if not isinstance(rel_cislunar, dict):
+            errs.append(f"{path}.relative_to_target_cislunar: must be a mapping/object.")
+        elif "state" not in rel_cislunar:
+            errs.append(f"{path}.relative_to_target_cislunar.state: must be a length-6 finite numeric list.")
+        else:
+            errs.extend(
+                _validate_numeric_sequence(
+                    rel_cislunar.get("state"),
+                    f"{path}.relative_to_target_cislunar.state",
+                    length=6,
+                )
+            )
+    if "relative_cislunar" in raw:
+        errs.extend(_validate_numeric_sequence(raw.get("relative_cislunar"), f"{path}.relative_cislunar", length=6))
+    cr3bp_rotating = raw.get("cr3bp_rotating")
+    if cr3bp_rotating is not None:
+        if not isinstance(cr3bp_rotating, dict):
+            errs.append(f"{path}.cr3bp_rotating: must be a mapping/object.")
+        else:
+            errs.extend(
+                _validate_numeric_sequence(
+                    cr3bp_rotating.get("state_km_s", cr3bp_rotating.get("state")),
+                    f"{path}.cr3bp_rotating.state_km_s",
+                    length=6,
+                )
+            )
     return errs
 
 

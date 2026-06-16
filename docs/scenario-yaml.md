@@ -630,7 +630,7 @@ Set `outputs.review.enabled: true` to write a durable SQLite review store under
 `review/run.sqlite` and `review/schema.json` with normalized metadata, object
 state, primary-pair relative state, thrust, ground-access, metric, event, and
 artifact tables. See [Review Store Contract](review-store.md) for the current
-schema and Output Review Workbench direction.
+schema and OEL Evidence Studio direction.
 
 Set `outputs.stats.save_history_npz: true` to write
 `master_run_history.npz`, a compressed NumPy archive containing time histories

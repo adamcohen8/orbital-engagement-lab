@@ -86,5 +86,5 @@ For a shorter plotting demo:
 
 For output inspection, prefer the generated `index.md`, JSON artifacts, plots,
 and review-store CLI when a run enables `outputs.review.enabled: true`. The
-desktop GUI and Output Review Workbench dynamic plot creator are experimental
-desktop surfaces, not the first-five-minute path.
+desktop GUI and OEL Evidence Studio viewer/workbench are experimental desktop
+surfaces, not the first-five-minute path.

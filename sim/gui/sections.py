@@ -4,6 +4,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QButtonGroup,
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
@@ -822,13 +823,41 @@ def build_results_tab(owner) -> QWidget:
 
     artifacts_tab = QWidget()
     artifacts_layout = QGridLayout(artifacts_tab)
+    owner.evidence_left_panel = QWidget()
+    evidence_left_layout = QVBoxLayout(owner.evidence_left_panel)
+    evidence_left_layout.setContentsMargins(0, 0, 0, 0)
+    evidence_left_layout.setSpacing(8)
     owner.output_files = QListWidget()
     owner.output_files.currentTextChanged.connect(owner._on_output_file_selected)
-    artifacts_layout.addWidget(QLabel("Output Files"), 0, 0)
-    artifacts_layout.addWidget(owner.output_files, 1, 0)
+    owner.evidence_explorer_label = QLabel("Output Files")
+    evidence_left_layout.addWidget(owner.evidence_explorer_label)
+    evidence_left_layout.addWidget(owner.output_files, 2)
+
+    owner.evidence_agent_box = QGroupBox("Custom Evidence Plots")
+    evidence_agent_layout = QVBoxLayout(owner.evidence_agent_box)
+    owner.evidence_agent_status = QLabel(
+        "Use Advanced Query or the sim.review EvidencePlotter API to create OEL-styled custom figures."
+    )
+    owner.evidence_agent_status.setWordWrap(True)
+    evidence_agent_layout.addWidget(owner.evidence_agent_status)
+    evidence_agent_actions = QHBoxLayout()
+    owner.evidence_plot_builder_button = QPushButton("Open Plot Builder")
+    owner.evidence_plot_builder_button.clicked.connect(owner._open_evidence_plot_builder)
+    evidence_agent_actions.addWidget(owner.evidence_plot_builder_button)
+    owner.evidence_refresh_generated_button = QPushButton("Refresh Outputs")
+    owner.evidence_refresh_generated_button.clicked.connect(owner._refresh_output_files)
+    evidence_agent_actions.addWidget(owner.evidence_refresh_generated_button)
+    evidence_agent_layout.addLayout(evidence_agent_actions)
+    evidence_left_layout.addWidget(owner.evidence_agent_box, 0)
+    artifacts_layout.addWidget(owner.evidence_left_panel, 0, 0, 2, 1)
+
+    owner.evidence_viewer_panel = QWidget()
+    evidence_viewer_layout = QVBoxLayout(owner.evidence_viewer_panel)
+    evidence_viewer_layout.setContentsMargins(0, 0, 0, 0)
+    evidence_viewer_layout.setSpacing(6)
 
     owner.preview_title = QLabel("Select an artifact to preview.")
-    artifacts_layout.addWidget(owner.preview_title, 0, 1)
+    evidence_viewer_layout.addWidget(owner.preview_title)
 
     owner.preview_stack = QTabWidget()
     owner.preview_image = QLabel("No image selected.")
@@ -865,10 +894,38 @@ def build_results_tab(owner) -> QWidget:
     image_layout.addWidget(owner.preview_scroll, 1)
     owner.preview_stack.addTab(image_tab, "Image")
     owner.preview_stack.addTab(owner.preview_text, "Text")
-    artifacts_layout.addWidget(owner.preview_stack, 1, 1)
+    evidence_viewer_layout.addWidget(owner.preview_stack, 1)
+
+    output_controls = QWidget()
+    output_controls_layout = QHBoxLayout(output_controls)
+    output_controls_layout.setContentsMargins(0, 0, 0, 0)
+    output_controls_layout.setSpacing(4)
+    output_controls_layout.addStretch(1)
+    owner.evidence_dark_button = QPushButton("Dark")
+    owner.evidence_dark_button.setCheckable(True)
+    owner.evidence_dark_button.setChecked(True)
+    owner.evidence_light_button = QPushButton("Light")
+    owner.evidence_light_button.setCheckable(True)
+    owner.evidence_style_button_group = QButtonGroup(output_controls)
+    owner.evidence_style_button_group.setExclusive(True)
+    owner.evidence_style_button_group.addButton(owner.evidence_dark_button)
+    owner.evidence_style_button_group.addButton(owner.evidence_light_button)
+    output_controls_layout.addWidget(owner.evidence_dark_button)
+    output_controls_layout.addWidget(owner.evidence_light_button)
+    owner.evidence_format_combo = QComboBox()
+    owner.evidence_format_combo.addItems(["png", "svg", "pdf"])
+    output_controls_layout.addWidget(owner.evidence_format_combo)
+    owner.evidence_regenerate_button = QPushButton("Plot Builder")
+    owner.evidence_regenerate_button.clicked.connect(owner._open_evidence_plot_builder)
+    output_controls_layout.addWidget(owner.evidence_regenerate_button)
+    owner.evidence_fullscreen_button = QPushButton("Fullscreen")
+    owner.evidence_fullscreen_button.clicked.connect(owner._toggle_evidence_viewer_fullscreen)
+    output_controls_layout.addWidget(owner.evidence_fullscreen_button)
+    evidence_viewer_layout.addWidget(output_controls)
+    artifacts_layout.addWidget(owner.evidence_viewer_panel, 0, 1, 2, 1)
     artifacts_layout.setColumnStretch(0, 2)
-    artifacts_layout.setColumnStretch(1, 3)
-    owner.results_tabs.addTab(artifacts_tab, "Artifacts")
+    artifacts_layout.setColumnStretch(1, 5)
+    owner.results_tabs.addTab(artifacts_tab, "Evidence Studio")
 
     query_tab = QWidget()
     query_layout = QVBoxLayout(query_tab)
@@ -947,6 +1004,6 @@ def build_results_tab(owner) -> QWidget:
     owner.review_query_table = QTableWidget()
     owner.review_query_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
     query_layout.addWidget(owner.review_query_table, 1)
-    owner.results_tabs.addTab(query_tab, "Plot Builder")
+    owner.results_tabs.addTab(query_tab, "Advanced Query")
     owner.preview_image.setPixmap(QPixmap())
     return tab

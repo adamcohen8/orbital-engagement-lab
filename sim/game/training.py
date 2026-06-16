@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 
 from sim.api import SimulationSnapshot
+from sim.dynamics.orbit.cr3bp import EARTH_MOON_MEAN_MOTION_RAD_S, cr3bp_moon_state_km_s, cr3bp_relative_state
 from sim.game.formatting import format_distance_km, format_speed_km_s, format_speed_m_s
 from sim.utils.frames import eci_relative_to_ric_rect, ric_dcm_ir_from_rv
 
@@ -266,6 +267,7 @@ class RPOTrainingConfig:
     enabled: bool = False
     scenario_id: str = ""
     learning_goal: str = ""
+    relative_frame: str = "ric"
     target_object_id: str = "target"
     chaser_object_id: str = "chaser"
     keepout_radius_km: float | None = None
@@ -321,6 +323,9 @@ class RPOTrainingConfig:
             enabled=bool(raw.get("enabled", True)),
             scenario_id=str(raw.get("scenario_id", "") or ""),
             learning_goal=str(raw.get("learning_goal", "") or ""),
+            relative_frame=str(raw.get("relative_frame", game_cfg.get("relative_frame", "ric")) or "ric")
+            .strip()
+            .lower(),
             target_object_id=str(raw.get("target_object_id", game_cfg.get("target_object_id", "target")) or "target"),
             chaser_object_id=str(raw.get("chaser_object_id", game_cfg.get("chaser_object_id", "chaser")) or "chaser"),
             keepout_radius_km=_optional_float(raw.get("keepout_radius_km")),
@@ -495,12 +500,21 @@ class RPOTrainingTracker:
         chaser = snapshot.truth.get(self.config.chaser_object_id)
         if target is None or chaser is None:
             return
-        rel = relative_ric_state_from_arrays(target, chaser)
+        rel = relative_state_from_arrays(target, chaser, frame=self.config.relative_frame)
         self.t_s.append(float(snapshot.time_s))
         self.rel_ric_hist.append(rel)
         target_arr = np.array(target, dtype=float).reshape(-1)
         n = float("nan")
-        if target_arr.size >= 3:
+        frame_key = _relative_frame_key(self.config.relative_frame)
+        if frame_key == "cislunar":
+            n = EARTH_MOON_MEAN_MOTION_RAD_S
+        elif frame_key == "moon_ric" and target_arr.size >= 6:
+            target_moon = target_arr[:6] - cr3bp_moon_state_km_s()
+            r_norm = float(np.linalg.norm(target_moon[:3]))
+            h_norm = float(np.linalg.norm(np.cross(target_moon[:3], target_moon[3:6])))
+            if np.isfinite(r_norm) and r_norm > 0.0:
+                n = h_norm / (r_norm**2)
+        elif target_arr.size >= 3:
             r_norm = float(np.linalg.norm(target_arr[:3]))
             if np.isfinite(r_norm) and r_norm > 0.0:
                 n = float(np.sqrt(EARTH_MU_KM3_S2 / (r_norm**3)))
@@ -508,7 +522,13 @@ class RPOTrainingTracker:
         thrust = snapshot.applied_thrust.get(self.config.chaser_object_id, np.zeros(3, dtype=float))
         thrust_eci = np.array(thrust, dtype=float).reshape(3)
         self.thrust_hist.append(thrust_eci)
-        if target_arr.size >= 6:
+        if frame_key == "cislunar":
+            self.thrust_ric_hist.append(thrust_eci)
+        elif frame_key == "moon_ric" and target_arr.size >= 6:
+            target_moon = target_arr[:6] - cr3bp_moon_state_km_s()
+            c_ir = ric_dcm_ir_from_rv(target_moon[:3], target_moon[3:6])
+            self.thrust_ric_hist.append(c_ir.T @ thrust_eci)
+        elif target_arr.size >= 6:
             c_ir = ric_dcm_ir_from_rv(target_arr[:3], target_arr[3:6])
             self.thrust_ric_hist.append(c_ir.T @ thrust_eci)
         else:
@@ -1391,6 +1411,37 @@ def relative_ric_state_from_arrays(target_truth: np.ndarray, chaser_truth: np.nd
     if target.size < 6 or chaser.size < 6:
         return np.full(6, np.nan, dtype=float)
     return eci_relative_to_ric_rect(chaser[:6], target[:6])
+
+
+def relative_moon_ric_state_from_arrays(target_truth: np.ndarray, chaser_truth: np.ndarray) -> np.ndarray:
+    target = np.array(target_truth, dtype=float).reshape(-1)
+    chaser = np.array(chaser_truth, dtype=float).reshape(-1)
+    if target.size < 6 or chaser.size < 6:
+        return np.full(6, np.nan, dtype=float)
+    moon = cr3bp_moon_state_km_s()
+    return eci_relative_to_ric_rect(chaser[:6] - moon, target[:6] - moon)
+
+
+def relative_state_from_arrays(target_truth: np.ndarray, chaser_truth: np.ndarray, *, frame: str = "ric") -> np.ndarray:
+    frame_key = _relative_frame_key(frame)
+    if frame_key == "cislunar":
+        target = np.array(target_truth, dtype=float).reshape(-1)
+        chaser = np.array(chaser_truth, dtype=float).reshape(-1)
+        if target.size < 6 or chaser.size < 6:
+            return np.full(6, np.nan, dtype=float)
+        return cr3bp_relative_state(chaser[:6], target[:6])
+    if frame_key == "moon_ric":
+        return relative_moon_ric_state_from_arrays(target_truth, chaser_truth)
+    return relative_ric_state_from_arrays(target_truth, chaser_truth)
+
+
+def _relative_frame_key(frame: str) -> str:
+    key = str(frame or "ric").strip().lower().replace("-", "_")
+    if key in {"cislunar", "cislunar_l1", "earth_moon_rotating", "cr3bp", "cr3bp_rotating"}:
+        return "cislunar"
+    if key in {"moon_ric", "lunar_ric", "target_moon_ric", "target_lunar_ric"}:
+        return "moon_ric"
+    return "ric"
 
 
 def nmt_position_error_km(

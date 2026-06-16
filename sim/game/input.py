@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sim.game.manual import KeyboardCommandState
+from sim.game.manual import TRANSLATION_CONTROL_MODES, KeyboardCommandState
 from sim.game.tuning import BRIEFING_SCROLL_STEP_PX
 
 
@@ -13,7 +13,7 @@ def poll_pygame_input(
     control_mode: str = "attitude_thrust",
     briefing_open: bool = False,
 ) -> None:
-    ric_mode = str(control_mode or "").strip().lower() in {"ric", "ric_translation", "translation"}
+    ric_mode = str(control_mode or "").strip().lower() in TRANSLATION_CONTROL_MODES
     state.briefing_scroll_px = 0
     state.open_debrief_requested = False
     state.clip_record_toggle_requested = False

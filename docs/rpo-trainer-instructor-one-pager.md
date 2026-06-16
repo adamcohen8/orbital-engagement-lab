@@ -177,9 +177,14 @@ feedback would include:
 
 ## Try It Locally
 
-Install the game dependencies, then launch the level selector:
+Clone the public repository, install the game dependencies, then launch the
+level selector:
 
 ```bash
+git clone https://github.com/adamcohen8/orbital-engagement-lab.git
+cd orbital-engagement-lab
+python -m venv .venv
+source .venv/bin/activate
 .venv/bin/python -m pip install ".[game]"
 .venv/bin/python run_game.py
 ```

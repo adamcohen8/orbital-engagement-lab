@@ -303,6 +303,7 @@ _ROCKET_EXPORTS = [
 ]
 
 _REVIEW_EXPORTS = [
+    "EvidencePlotter",
     "ReviewQueryError",
     "ReviewQueryResult",
     "ReviewStoreNotFoundError",

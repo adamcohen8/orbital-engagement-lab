@@ -143,7 +143,7 @@ Current bundled plot recipes include:
 - `sensitivity_effects`
 
 Plot recipes run read-only review SQL and call the same review plotting service
-used by the Output Review Workbench. Generated plot provenance is recorded in
+used by OEL Evidence Studio. Generated plot provenance is recorded in
 `review/generated_artifacts.json`.
 
 ## Failure Hints

@@ -11,7 +11,7 @@ from sim.gui.main_window import MainWindow
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Launch the Orbital Engagement Lab GUI.")
-    parser.add_argument("--output", help="Open an existing output folder in Output Review Workbench mode.")
+    parser.add_argument("--output", help="Open an existing output folder in OEL Evidence Studio mode.")
     args, qt_args = parser.parse_known_args(sys.argv[1:])
     app = QApplication([sys.argv[0], *qt_args])
     window = MainWindow(output_dir=Path(args.output).expanduser() if args.output else None)

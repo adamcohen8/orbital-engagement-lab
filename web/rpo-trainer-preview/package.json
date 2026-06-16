@@ -1,0 +1,9 @@
+{
+  "name": "oel-rpo-trainer-preview",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:competition": "node --test tests/competition-engine.test.mjs",
+    "validate:attempt": "node tools/validate-attempt.mjs"
+  }
+}

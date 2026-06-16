@@ -1,0 +1,85 @@
+scenario_name: "agent_auto_03_reconstitution_demo"
+scenario_description: >
+  Public automation demo: a single spacecraft receives a small in-track
+  disturbance, then OEL's simulator-backed mission recovery analysis compares
+  deterministic mission-reconstitution candidates for recovering the original
+  orbital slot.
+
+objects:
+  target:
+    enabled: true
+    role: target
+    kind: satellite
+    specs:
+      mass_kg: 120.0
+      isp_s: 220.0
+    initial_state:
+      coes:
+        a_km: 6878.137
+        ecc: 0.001
+        inc_deg: 51.6
+        raan_deg: 20.0
+        argp_deg: 0.0
+        true_anomaly_deg: 15.0
+      attitude_quat_bn: [1.0, 0.0, 0.0, 0.0]
+      angular_rate_body_rad_s: [0.0, 0.0, 0.0]
+    orbit_control:
+      module: sim.control.orbit.zero_controller
+      class_name: ZeroController
+    attitude_control:
+      module: sim.control.attitude.zero_torque
+      class_name: ZeroTorqueController
+    mission_execution:
+      module: sim.mission.modules
+      class_name: ControllerPointingExecution
+      params:
+        require_attitude_alignment: false
+        use_strategy_fallback_thrust: true
+    mission_objectives:
+      - module: sim.mission.modules
+        class_name: SingleRICAxisBurnMissionModule
+        params:
+          target_id: self
+          axis_mode: "+I"
+          axis_kind: force
+          burn_accel_km_s2: 0.003
+          burn_start_s: 60.0
+          burn_duration_s: 1.0
+          require_finite_reference: true
+
+simulator:
+  scenario_type: auto
+  duration_s: 600.0
+  dt_s: 2.0
+  dynamics:
+    orbit:
+      model: two_body
+      orbit_substep_s: 2.0
+      j2: false
+      j3: false
+      j4: false
+      drag: false
+      srp: false
+    attitude:
+      enabled: false
+  termination:
+    earth_impact_enabled: false
+
+outputs:
+  output_dir: "outputs/agent_auto_03_reconstitution_demo"
+  mode: save
+  stats:
+    enabled: true
+    print_summary: true
+    save_json: true
+    save_full_log: false
+  plots:
+    enabled: true
+    style: oel_dark
+    figure_ids: [mission_recovery_trade_space]
+  animations:
+    enabled: false
+    types: []
+  review:
+    enabled: true
+    detail: standard

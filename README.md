@@ -82,10 +82,10 @@ For a guided walkthrough, see [First Five Minutes](docs/first-five-minutes.md).
   assistants.
 
 The primary public surfaces are the CLI, scenario YAML, Python API, review
-query CLI/API, and the RPO trainer. The desktop GUI remains experimental. The
-Output Review Workbench is an experimental dynamic plot creator for completed
-runs; use it after a simulation writes `review/run.sqlite`, not as the
-first-run path.
+query CLI/API, custom review plotting API, and the RPO trainer. The desktop GUI
+remains experimental. OEL Evidence Studio is an experimental viewer/workbench
+for completed runs; use it after a simulation writes `review/run.sqlite`, not
+as the first-run path.
 
 ## Choose A Workflow
 
@@ -230,8 +230,8 @@ accounts or API keys.
 .venv/bin/python -m pip install ".[full]"
 ```
 
-The `gui` extra is for experimental desktop surfaces, including the Output
-Review Workbench dynamic plot creator. Public onboarding should start with the
+The `gui` extra is for experimental desktop surfaces, including OEL Evidence
+Studio. Public onboarding should start with the
 CLI/YAML/Python API path above. For scripted output inspection, prefer
 `.venv/bin/python -m sim.review`.
 
