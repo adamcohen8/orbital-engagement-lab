@@ -6,6 +6,42 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.12.1 - 2026-06-16
+
+Release thesis: `v0.12.1` is a web-preview patch that makes Pursuit Arcade
+more usable as a public, mobile-first first impression and prepares the hosted
+leaderboard flow for small classroom or outreach competitions.
+
+### Added
+
+- Added a unified desktop/mobile web preview route with automatic view
+  detection, explicit view toggles, and a compatibility redirect from the old
+  mobile arcade page.
+- Added mobile Pursuit Arcade controls for RIC burns, speed-multiple buttons,
+  tap-to-toggle camera behavior on the plot panels, and a dedicated landscape
+  mobile layout.
+- Added leaderboard helper modules for username reservation, email verification
+  ownership checks, and promotion of verified attempts onto the leaderboard.
+
+### Changed
+
+- Updated the web preview HUD, level selector, debriefs, and arcade text to use
+  engineering-style distance and speed units that match the downloadable game.
+- Updated the mobile web preview so Tutorial, Sandbox, Pursuit Arcade, music,
+  and level selection share the same implementation path as the desktop
+  preview.
+- Updated leaderboard docs and deployment notes for optional email ownership
+  and username reservation behavior.
+
+### Fixed
+
+- Fixed mobile landscape layouts where the plots could collapse to only a few
+  pixels tall.
+- Fixed browser compatibility hazards around blocked `localStorage` and older
+  Safari media-query listeners.
+- Fixed mobile arcade HUD copy so the music button no longer shows redundant
+  keyboard-prefix text.
+
 ## 0.12.0 - 2026-06-16
 
 Release thesis: `v0.12.0` expands the RPO Trainer into a more complete

@@ -43,7 +43,7 @@ export async function sendScoreVerificationEmail({ email, username, score, round
   }
 
   const from = String(process.env.OEL_ARCADE_EMAIL_FROM || "");
-  const subject = `Verify your Pursuit Arcade score: ${Number(score || 0).toLocaleString()}`;
+  const subject = `Verify your Pursuit Arcade username: ${username}`;
   const text = [
     `Nice flying, ${username}.`,
     "",
@@ -51,7 +51,7 @@ export async function sendScoreVerificationEmail({ email, username, score, round
     `Rounds cleared: ${Number(roundsCleared || 0)}`,
     `Attempt ID: ${attemptId}`,
     "",
-    "Verify this email address so you can prove ownership of the score:",
+    "Verify this email address so you can reserve this username and prove ownership of the score:",
     verifyUrl,
     "",
     "This link expires in 7 days.",
@@ -63,7 +63,7 @@ export async function sendScoreVerificationEmail({ email, username, score, round
       <p>Your score was <strong>${Number(score || 0).toLocaleString()}</strong>.</p>
       <p>Rounds cleared: <strong>${Number(roundsCleared || 0)}</strong></p>
       <p>Attempt ID: <code>${escapeHtml(attemptId)}</code></p>
-      <p><a href="${escapeHtml(verifyUrl)}">Verify this email address</a> so you can prove ownership of the score.</p>
+      <p><a href="${escapeHtml(verifyUrl)}">Verify this email address</a> so you can reserve this username and prove ownership of the score.</p>
       <p style="color: #475569; font-size: 13px;">This link expires in 7 days.</p>
     </div>
   `;

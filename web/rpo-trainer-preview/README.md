@@ -39,9 +39,11 @@ static page reads its Plausible site domain from:
 <meta name="oel-analytics-domain" content="adamcohen8.github.io" />
 ```
 
-Completion events use coarse buckets for time, delta-v, and closest range. The
-preview does not send raw trajectories, per-frame controls, names, emails, or a
-player identifier.
+Completion events use coarse buckets for time, delta-v, and closest range.
+Plausible analytics does not send raw trajectories, per-frame controls, names,
+emails, or a player identifier. Pursuit Arcade leaderboard submissions are a
+separate explicit form submit that sends the username, optional email, and
+attempt packet to the hosted validation API.
 
 ## Not Included
 

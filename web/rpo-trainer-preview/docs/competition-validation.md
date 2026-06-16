@@ -46,10 +46,8 @@ Implemented arcade-round parity:
 
 Remaining beta/parity work:
 
-- Hosted leaderboard submission endpoint, ownership proof, and admin
-  moderation.
-- Deployment wiring that runs the committed validator in a serverless function
-  before inserting leaderboard rows.
+- Admin moderation for hiding attempts and resolving username disputes.
+- Monthly challenge rotation and operational tooling.
 
 The current implementation lives in:
 
@@ -171,17 +169,15 @@ The tests cover:
 - fixture validation,
 - static SVG plot generation with burn markers.
 
-## Hosted Pieces Still Needed
+## Hosted Pieces
 
 These require accounts/credentials and are not committed here:
 
 1. Static hosting for `web/rpo-trainer-preview`.
 2. A database project, such as Supabase.
 3. Tables from `supabase/schema.sql`.
-4. A serverless API endpoint that imports `src/competition/arcade-engine.js`,
-   calls `validateAttemptPacket`, and inserts accepted attempts.
-5. Optional email provider credentials for proof-of-ownership links.
-6. Admin controls for creating monthly challenges and hiding attempts.
+4. Optional email provider credentials for proof-of-ownership links.
+5. Admin controls for creating monthly challenges and hiding attempts.
 
 ## Completed Local Pieces
 
@@ -193,11 +189,12 @@ These require accounts/credentials and are not committed here:
 5. Multi-round arcade play and boss rounds are available locally.
 6. Multi-round arcade attempt packets replay through the deterministic
    validator, including score, time, and round transition checks.
+7. The hosted API validates submissions before inserting attempts, stores
+   canonical plot SVGs, serves public leaderboard rows, and supports verified
+   email username locking.
 
 ## Suggested Next Implementation Steps
 
-1. Add a polished attempt submission form with anonymous username and optional
-   email.
-2. Add a local mock leaderboard backed by `localStorage`.
-3. Replace the mock leaderboard with a hosted API once the database is ready.
-4. Add server-generated/stored RI and RC plot artifacts for valid attempts.
+1. Add admin tooling to hide attempts and resolve username disputes.
+2. Add monthly challenge rotation.
+3. Add a replay/debrief viewer for stored high-score plots.

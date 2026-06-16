@@ -10,6 +10,8 @@ import {
   verificationExpiryIso,
   verificationUrl,
 } from "./_email.mjs";
+import { isLeaderboardEligibleStatus, upsertLeaderboardIfBetter } from "./_leaderboard.mjs";
+import { decideOwnership } from "./_ownership.mjs";
 import {
   normalizeEmail,
   normalizedUsernameKey,
@@ -20,7 +22,6 @@ import {
 } from "./_supabase.mjs";
 
 const CHALLENGE_RECORD = buildChallengeRecord(DEFAULT_PURSUIT_CHALLENGE);
-const VALID_LEADERBOARD_STATUSES = new Set(["valid", "suspicious"]);
 
 export default async function handler(req, res) {
   if (req.method === "OPTIONS") {
@@ -42,12 +43,19 @@ export default async function handler(req, res) {
     });
 
     await upsertChallenge(CHALLENGE_RECORD);
-    const player = await findOrCreatePlayer(username, email);
+    const player = await findOrCreatePlayer(username);
+    const ownership = decideOwnership({ player, email });
     const attemptRow = await insertAttempt(player.id, { ...attempt, username, email }, validation);
-    const accepted = VALID_LEADERBOARD_STATUSES.has(validation.status);
+    const accepted = isLeaderboardEligibleStatus(validation.status);
     let leaderboardUpdated = false;
-    if (accepted) {
-      leaderboardUpdated = await upsertLeaderboard(player.id, attemptRow.id, validation);
+    if (accepted && ownership.leaderboard_allowed) {
+      leaderboardUpdated = await upsertLeaderboardIfBetter({
+        challengeId: CHALLENGE_RECORD.challenge_id,
+        playerId: player.id,
+        attemptId: attemptRow.id,
+        score: validation.canonical_score ?? 0,
+        metrics: validation.canonical_metrics ?? {},
+      });
     }
     const emailResult = await maybeSendVerificationEmail({
       req,
@@ -57,6 +65,7 @@ export default async function handler(req, res) {
       username,
       validation,
       accepted,
+      ownership,
     });
 
     sendJson(res, accepted ? 200 : 422, {
@@ -66,6 +75,7 @@ export default async function handler(req, res) {
       score: validation.canonical_score ?? 0,
       metrics: validation.canonical_metrics ?? {},
       attempt_id: attemptRow.id,
+      ownership_status: ownership.status,
       leaderboard_updated: leaderboardUpdated,
       email_status: emailResult.status,
       email_error: emailResult.error,
@@ -93,21 +103,15 @@ async function upsertChallenge(record) {
   });
 }
 
-async function findOrCreatePlayer(username, email) {
+async function findOrCreatePlayer(username) {
   const key = normalizedUsernameKey(username);
   const selectQuery = new URLSearchParams({
     username_normalized: `eq.${key}`,
-    select: "id,username,email",
+    select: "id,username,email,email_verified_at,username_locked_at",
     limit: "1",
   });
   const existing = await supabaseRest(`players?${selectQuery.toString()}`);
   if (existing?.[0]) {
-    if (email && existing[0].email !== email) {
-      await supabaseRest(`players?id=eq.${existing[0].id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ email }),
-      });
-    }
     return existing[0];
   }
 
@@ -115,7 +119,7 @@ async function findOrCreatePlayer(username, email) {
     const inserted = await supabaseRest("players", {
       method: "POST",
       headers: { Prefer: "return=representation" },
-      body: JSON.stringify([{ username, email: email || null }]),
+      body: JSON.stringify([{ username }]),
     });
     return inserted[0];
   } catch (error) {
@@ -134,7 +138,7 @@ async function insertAttempt(playerId, attempt, validation) {
         round_attempts: validation.replay.round_attempts || [],
       }
     : null;
-  const accepted = VALID_LEADERBOARD_STATUSES.has(validation.status);
+  const accepted = isLeaderboardEligibleStatus(validation.status);
   const inserted = await supabaseRest("attempts", {
     method: "POST",
     headers: { Prefer: "return=representation" },
@@ -160,35 +164,8 @@ async function insertAttempt(playerId, attempt, validation) {
   return inserted[0];
 }
 
-async function upsertLeaderboard(playerId, attemptId, validation) {
-  const currentQuery = new URLSearchParams({
-    challenge_id: `eq.${CHALLENGE_RECORD.challenge_id}`,
-    player_id: `eq.${playerId}`,
-    select: "score",
-    limit: "1",
-  });
-  const current = await supabaseRest(`leaderboard_entries?${currentQuery.toString()}`);
-  if (current?.[0] && Number(current[0].score || 0) >= Number(validation.canonical_score || 0)) return false;
-
-  await supabaseRest("leaderboard_entries?on_conflict=challenge_id,player_id", {
-    method: "POST",
-    headers: { Prefer: "resolution=merge-duplicates" },
-    body: JSON.stringify([
-      {
-        challenge_id: CHALLENGE_RECORD.challenge_id,
-        player_id: playerId,
-        attempt_id: attemptId,
-        score: validation.canonical_score ?? 0,
-        metrics: validation.canonical_metrics ?? {},
-        updated_at: new Date().toISOString(),
-      },
-    ]),
-  });
-  return true;
-}
-
-async function maybeSendVerificationEmail({ req, player, attemptRow, email, username, validation, accepted }) {
-  if (!accepted || !email) return { status: "skipped" };
+async function maybeSendVerificationEmail({ req, player, attemptRow, email, username, validation, accepted, ownership }) {
+  if (!accepted || !email || !ownership.verification_allowed) return { status: "skipped" };
   const tokenRecord = createVerificationToken();
   await supabaseRest("email_verifications", {
     method: "POST",

@@ -27,7 +27,7 @@ const SATELLITE_ICON_SIZE_PX = 20;
 const SATELLITE_MAX_SIZE_PX = 72;
 const TARGET_MARKER = "#f55c5c";
 const CHASER_MARKER = "#f5cd5c";
-const BUILD_ID = "spaced-footer-legend-2026-06-13";
+const BUILD_ID = "unified-mobile-shell-2026-06-16j";
 const ARCADE_BUILD_ID = `${BUILD_ID}-competition-local`;
 const ARCADE_CHALLENGE_RECORD = buildChallengeRecord(DEFAULT_PURSUIT_CHALLENGE);
 const LEADERBOARD_REFRESH_MS = 30000;
@@ -47,6 +47,7 @@ const el = {
   shell: document.querySelector(".trainer-shell"),
   levelSelector: document.querySelector("#levelSelector"),
   selectorMusicButton: document.querySelector("#selectorMusicButton"),
+  selectorViewButton: document.querySelector("#selectorViewButton"),
   selectorPreviewTitle: document.querySelector("#selectorPreviewTitle"),
   selectorPreviewBudget: document.querySelector("#selectorPreviewBudget"),
   selectorPreviewObjective: document.querySelector("#selectorPreviewObjective"),
@@ -61,6 +62,7 @@ const el = {
   resetButton: document.querySelector("#resetButton"),
   levelSelectButton: document.querySelector("#levelSelectButton"),
   musicButton: document.querySelector("#musicButton"),
+  viewButton: document.querySelector("#viewButton"),
   modeLabel: document.querySelector("#modeLabel"),
   objectiveTitle: document.querySelector("#objectiveTitle"),
   objectiveText: document.querySelector("#objectiveText"),
@@ -68,6 +70,8 @@ const el = {
   riSubtitle: document.querySelector("#riSubtitle"),
   rcTitle: document.querySelector("#rcTitle"),
   rcSubtitle: document.querySelector("#rcSubtitle"),
+  riPanel: document.querySelector("#riPanel"),
+  rcPanel: document.querySelector("#rcPanel"),
   riCanvas: document.querySelector("#riCanvas"),
   rcCanvas: document.querySelector("#rcCanvas"),
   rangeMetric: document.querySelector("#rangeMetric"),
@@ -101,6 +105,7 @@ const el = {
   leaderboardSubmit: document.querySelector("#leaderboardSubmit"),
   leaderboardStatus: document.querySelector("#leaderboardStatus"),
   downloadLink: document.querySelector("#downloadLink"),
+  mobileSpeedButtons: Array.from(document.querySelectorAll("[data-mobile-speed]")),
 };
 
 const levelOptions = [
@@ -108,7 +113,7 @@ const levelOptions = [
     id: "tutorial",
     mode: "primer",
     title: "Level 0 - Tutorial",
-    budget: "Time: 18000s   Chaser dV: 12.000 m/s   Speed Gate: 0.300 m/s",
+    budget: `Time: 18000s   Chaser dV: ${formatSpeedMS(12.0)}   Speed Gate: ${formatSpeedMS(0.3)}`,
     objective:
       "Learn what R, I, and C mean by creating six small target orbits, then use short pulse-and-coast translations to settle near a passive target.",
     brief:
@@ -118,7 +123,7 @@ const levelOptions = [
       "After +I, increase the speed multiple to 10x.",
       "Complete the +R and -R guided orbit demonstrations.",
       "Complete the +C and -C guided orbit demonstrations.",
-      "Get within 250 m of the passive target below 0.3 m/s.",
+      `Get within ${formatDistanceKm(0.25)} of the passive target below ${formatSpeedMS(0.3)}.`,
     ],
     notes: [
       "This level teaches the controls before introducing natural-motion matching, keepout constraints, or target evasion.",
@@ -144,14 +149,14 @@ const levelOptions = [
     id: "pursuitArcade",
     mode: "arcade",
     title: "Pursuit Arcade",
-    budget: "Time: 12000s   Chaser dV: 3.000 m/s   Goal: 100 m",
+    budget: `Time: 12000s   Chaser dV: ${formatSpeedMS(3.0)}   Goal: ${formatDistanceKm(0.1)}`,
     objective: "Chase an evading target using RIC translation controls in a browser-native two-body arcade model.",
     brief:
       "The arcade mode propagates target and chaser in ECI under central Earth gravity, maps your RIC commands into the target frame, records inputs by simulation tick, and validates the replay locally.",
     criteria: [
-      "Reach the 100 m goal circle.",
+      `Reach the ${formatDistanceKm(0.1)} goal circle.`,
       "Clear as many pursuit rounds as possible.",
-      "Stay inside the 3.000 m/s chaser delta-v budget.",
+      `Stay inside the ${formatSpeedMS(3.0)} chaser delta-v budget.`,
     ],
     notes: [
       "Beta competition prototype: browser play uses a deterministic two-body engine, not the full downloadable OEL engine.",
@@ -219,7 +224,7 @@ const tutorialStages = [
   {
     id: "final",
     title: "Final Approach",
-    text: "Use small pulses and coast into the green 250 m circle below 0.3 m/s.",
+    text: `Use small pulses and coast into the green ${formatDistanceKm(0.25)} circle below ${formatSpeedMS(0.3)}.`,
     final: true,
   },
 ];
@@ -306,6 +311,8 @@ const state = {
   leaderboardLoading: false,
   targetTrail: [],
   targetGhost: [],
+  viewPreference: "auto",
+  activeView: "desktop",
 };
 
 const music = createMusicPlayer(MUSIC_TRACKS.selector);
@@ -358,6 +365,88 @@ function trackEventOnce(name, props = {}) {
   if (analytics.trackedOnce.has(name)) return;
   analytics.trackedOnce.add(name);
   trackEvent(name, props);
+}
+
+function initializeViewPreference() {
+  const params = new URLSearchParams(window.location.search);
+  const requested = params.get("view");
+  const saved = readLocalPreference("oelPreviewViewPreference");
+  state.viewPreference = normalizeViewPreference(requested || saved || "auto");
+  applyViewPreference();
+}
+
+function readLocalPreference(key) {
+  try {
+    return window.localStorage?.getItem(key) || "";
+  } catch {
+    return "";
+  }
+}
+
+function writeLocalPreference(key, value) {
+  try {
+    window.localStorage?.setItem(key, value);
+  } catch {
+    // Private/restricted browser contexts can block localStorage.
+  }
+}
+
+function normalizeViewPreference(value) {
+  return ["auto", "mobile", "desktop"].includes(value) ? value : "auto";
+}
+
+function detectedView() {
+  const narrow = window.matchMedia("(max-width: 760px), (max-height: 620px)").matches;
+  const coarse = window.matchMedia("(pointer: coarse)").matches;
+  return narrow || coarse ? "mobile" : "desktop";
+}
+
+function applyViewPreference() {
+  const activeView = state.viewPreference === "auto" ? detectedView() : state.viewPreference;
+  state.activeView = activeView;
+  document.body.classList.toggle("mobile-view", activeView === "mobile");
+  document.body.classList.toggle("desktop-view", activeView === "desktop");
+  el.shell.classList.toggle("mobile-view", activeView === "mobile");
+  el.shell.classList.toggle("desktop-view", activeView === "desktop");
+  syncViewButtons();
+  syncMusicButton();
+  updateDebugState();
+  draw();
+}
+
+function syncViewButtons() {
+  const label = `View: ${state.viewPreference[0].toUpperCase()}${state.viewPreference.slice(1)}`;
+  [el.viewButton, el.selectorViewButton].forEach((button) => {
+    if (!button) return;
+    button.textContent = label;
+    button.setAttribute("aria-label", `${label}. Active layout ${state.activeView}.`);
+  });
+}
+
+function cycleViewPreference() {
+  const next = state.viewPreference === "auto" ? "mobile" : state.viewPreference === "mobile" ? "desktop" : "auto";
+  state.viewPreference = next;
+  writeLocalPreference("oelPreviewViewPreference", next);
+  const url = new URL(window.location.href);
+  if (next === "auto") url.searchParams.delete("view");
+  else url.searchParams.set("view", next);
+  window.history.replaceState(null, "", url);
+  applyViewPreference();
+  trackEvent("view_toggle", { preference: next, active_view: state.activeView });
+}
+
+function launchInitialLevelFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const requested = params.get("level") || params.get("mode");
+  if (!requested) return false;
+  const normalized = requested.toLowerCase();
+  const idx = levelOptions.findIndex(
+    (option) => option.id.toLowerCase() === normalized || option.mode.toLowerCase() === normalized,
+  );
+  if (idx < 0) return false;
+  selectLevel(idx);
+  launchSelectedLevel("url");
+  return true;
 }
 
 function analyticsProps(props) {
@@ -966,7 +1055,7 @@ function updateMissionText() {
     const roundLabel = snap?.is_boss_round ? `Boss Round ${snap.round_index}` : `Round ${snap?.round_index || 1}`;
     el.objectiveTitle.textContent = roundLabel;
     if (el.objectiveText) {
-      el.objectiveText.textContent = `Reach ${formatRangeMeters(currentArcadeGoalRangeKm())}. Total score ${snap?.total_score || 0}.`;
+      el.objectiveText.textContent = `Reach ${formatDistanceKm(currentArcadeGoalRangeKm())}. Total score ${snap?.total_score || 0}.`;
     }
   } else {
     el.levelLabel.textContent = "LEVEL 0 - TUTORIAL";
@@ -1010,7 +1099,8 @@ function updatePlotTitles() {
 }
 
 function syncMusicButton() {
-  el.musicButton.textContent = state.musicEnabled ? "M Music: ON" : "M Music: OFF";
+  const musicPrefix = state.activeView === "mobile" ? "" : "M ";
+  el.musicButton.textContent = state.musicEnabled ? `${musicPrefix}Music: ON` : `${musicPrefix}Music: OFF`;
   el.musicButton.classList.toggle("active", state.musicEnabled);
   el.musicButton.setAttribute("aria-pressed", String(state.musicEnabled));
   el.selectorMusicButton.textContent = state.musicEnabled ? "Music: ON" : "Music: OFF";
@@ -1227,6 +1317,8 @@ function updateDebugState() {
     activeStage: state.activeStage,
     primerStage: state.primerStage,
     selectedLevel: state.selectedLevel,
+    viewPreference: state.viewPreference,
+    activeView: state.activeView,
     speedMultiple: currentSpeedMultiple(),
     cameraRuleMode: state.cameraRuleMode,
     musicSrc: music.currentSrc || music.src,
@@ -1269,16 +1361,17 @@ function updateHud() {
     el.commandLine.textContent = "";
     el.footerLine.textContent = `${primerAdvanceLabel()} to continue   Esc Level Select`;
     el.speedMultiple.textContent = "1x";
+    syncMobileSpeedButtons();
     el.rMeter.value = 0;
     el.iMeter.value = 0;
     el.cMeter.value = 0;
     updateMissionText();
     return;
   }
-  const rangeText = `${rangeKm().toFixed(3)} km`;
-  const speedText = `${(relativeSpeedKmS() * 1000).toFixed(3)} m/s`;
-  const dvText = `${state.sim.dv.toFixed(2)} m/s`;
-  const targetDvText = `${Number(state.arcadeSnapshot?.target_delta_v_m_s || 0).toFixed(2)} m/s`;
+  const rangeText = formatDistanceKm(rangeKm());
+  const speedText = formatSpeedKmS(relativeSpeedKmS());
+  const dvText = formatSpeedMS(state.sim.dv);
+  const targetDvText = formatSpeedMS(Number(state.arcadeSnapshot?.target_delta_v_m_s || 0));
   const timeText = `${Math.round(state.sim.t)} s`;
   const scoreText = state.mode === "arcade" ? `   Score=${state.arcadeSnapshot?.score || 0}` : "";
   el.rangeMetric.textContent = rangeText;
@@ -1299,6 +1392,7 @@ function updateHud() {
     0,
   )}x  Up/Down Speed  ${spaceAction}  R Reset  Esc Level Select`;
   el.speedMultiple.textContent = `${SPEED_OPTIONS[state.speedIndex]}x`;
+  syncMobileSpeedButtons();
   const u = currentControls();
   el.rMeter.value = u.r;
   el.iMeter.value = u.i;
@@ -1328,13 +1422,13 @@ function currentCoachHint() {
   }
   const stage = tutorialStages[state.activeStage] || tutorialStages[tutorialStages.length - 1];
   if (stage.final) {
-    return "Guided burns complete. Settle gently into the green 250 m circle. Keep pulses short.";
+    return `Guided burns complete. Settle gently into the green ${formatDistanceKm(0.25)} circle. Keep pulses short.`;
   }
   if (stage.speedTarget) {
     return `Want to go faster? Hit the up arrow key to increase the speed multiple. Current speed: ${SPEED_OPTIONS[state.speedIndex]}x.`;
   }
   const progress = Math.min(state.stageDv, stage.targetDv || 0);
-  return `${stage.text} Burn progress: ${progress.toFixed(2)}/${(stage.targetDv || 0).toFixed(2)} m/s.`;
+  return `${stage.text} Burn progress: ${formatSpeedMS(progress)}/${formatSpeedMS(stage.targetDv || 0)}.`;
 }
 
 function commandStatusLine() {
@@ -1343,6 +1437,14 @@ function commandStatusLine() {
   }
   if (state.mode === "arcade") return "W/S R  A/D I  Left/Right C  Space Start  R Reset";
   return "W/S R  A/D I  Left/Right C  C Camera  M Music";
+}
+
+function syncMobileSpeedButtons() {
+  el.mobileSpeedButtons.forEach((button) => {
+    const active = Number(button.dataset.mobileSpeed || 0) === currentSpeedMultiple();
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
 }
 
 function drawPlot(canvas, xAxis, yAxis, plane) {
@@ -1879,20 +1981,46 @@ function axisLabel(axis) {
   return "C";
 }
 
-function formatRangeMeters(km) {
-  const meters = Number(km || 0) * 1000;
-  if (meters >= 1000) return `${(meters / 1000).toFixed(2)} km`;
-  if (meters >= 10) return `${meters.toFixed(0)} m`;
-  return `${meters.toFixed(1)} m`;
+function formatDistanceKm(valueKm, sigFigs = 4) {
+  const value = Number(valueKm);
+  if (!Number.isFinite(value)) return "--";
+  const magnitude = Math.abs(value);
+  if (magnitude >= 1.0) return `${formatSigFig(value, sigFigs)} km`;
+  if (magnitude >= 1.0e-3) return `${formatSigFig(value * 1000.0, sigFigs)} m`;
+  return `${formatSigFig(value * 1.0e6, sigFigs)} mm`;
+}
+
+function formatSpeedKmS(valueKmS, sigFigs = 4) {
+  const value = Number(valueKmS);
+  if (!Number.isFinite(value)) return "--";
+  return formatSpeedMS(value * 1000.0, sigFigs);
+}
+
+function formatSpeedMS(valueMS, sigFigs = 4) {
+  const value = Number(valueMS);
+  if (!Number.isFinite(value)) return "--";
+  const magnitude = Math.abs(value);
+  if (magnitude >= 1000.0) return `${formatSigFig(value / 1000.0, sigFigs)} km/s`;
+  if (magnitude >= 1.0) return `${formatSigFig(value, sigFigs)} m/s`;
+  return `${formatSigFig(value * 1000.0, sigFigs)} mm/s`;
+}
+
+function formatSigFig(value, sigFigs = 4) {
+  const normalizedSigFigs = Math.max(Math.floor(Number(sigFigs) || 4), 1);
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "--";
+  if (numeric === 0) return "0";
+  const decimals = Math.max(normalizedSigFigs - Math.floor(Math.log10(Math.abs(numeric))) - 1, 0);
+  return numeric.toFixed(decimals);
 }
 
 function showDebrief(passed) {
   setLeaderboardFormVisible(false);
   el.debriefPanel.classList.remove("hidden");
   el.debriefTitle.textContent = passed ? "Tutorial complete." : "Attempt ended.";
-  el.debriefText.textContent = `${state.finalReason} Closest approach ${state.closestKm.toFixed(
-    3,
-  )} km, delta-v ${state.sim.dv.toFixed(2)} m/s.`;
+  el.debriefText.textContent = `${state.finalReason} Closest approach ${formatDistanceKm(
+    state.closestKm,
+  )}, delta-v ${formatSpeedMS(state.sim.dv)}.`;
   trackEvent(passed ? "tutorial_complete" : "tutorial_end", completionAnalyticsProps(passed));
 }
 
@@ -1913,11 +2041,9 @@ function showArcadeDebrief() {
     el.debriefTitle.textContent = "Arcade run ended.";
     el.debriefText.textContent = `${snap.terminal_reason || "Attempt complete."} Total score ${Number(
       snap.score || 0,
-    ).toLocaleString()} after ${(snap.round_summaries || []).length} cleared rounds. Final range ${Number(snap.range_km || 0).toFixed(
-      3,
-    )} km, chaser delta-v ${Number(snap.player_delta_v_m_s || 0).toFixed(2)} m/s. Local validation: ${
-      validation.status
-    }.`;
+    ).toLocaleString()} after ${(snap.round_summaries || []).length} cleared rounds. Final range ${formatDistanceKm(
+      Number(snap.range_km || 0),
+    )}, chaser delta-v ${formatSpeedMS(Number(snap.player_delta_v_m_s || 0))}. Local validation: ${validation.status}.`;
     trackEvent("arcade_attempt_complete", {
       result: "ended",
       validation: validation.status,
@@ -1930,11 +2056,11 @@ function showArcadeDebrief() {
   el.debriefTitle.textContent = snap.passed ? "Arcade rendezvous complete." : "Arcade attempt ended.";
   el.debriefText.textContent = `${snap.terminal_reason || "Attempt complete."} Local validation: ${
     validation.status
-  }. Score ${validation.canonical_score || 0}, closest ${Number(
+  }. Score ${validation.canonical_score || 0}, closest ${formatDistanceKm(
     validation.canonical_metrics?.closest_range_km || snap.closest_range_km || 0,
-  ).toFixed(3)} km, delta-v ${Number(validation.canonical_metrics?.player_delta_v_m_s || snap.player_delta_v_m_s || 0).toFixed(
-    2,
-  )} m/s.${valid ? "" : ` ${validation.errors.join(" ")}`}`;
+  )}, delta-v ${formatSpeedMS(
+    Number(validation.canonical_metrics?.player_delta_v_m_s || snap.player_delta_v_m_s || 0),
+  )}.${valid ? "" : ` ${validation.errors.join(" ")}`}`;
   trackEvent("arcade_attempt_complete", {
     result: snap.passed ? "success" : "ended",
     validation: validation.status,
@@ -1989,10 +2115,18 @@ async function submitLeaderboardAttempt(event) {
           : email && payload.email_status === "failed"
             ? ` Email failed: ${payload.email_error || "provider error"}.`
             : "";
+    const ownershipNote =
+      payload.ownership_status === "pending_verification"
+        ? " Verify your email to reserve this username."
+        : payload.ownership_status === "verified_owner"
+          ? " Username verified."
+          : payload.ownership_status === "locked"
+            ? " Username reserved; attempt saved but leaderboard not updated."
+            : "";
     el.leaderboardStatus.textContent = payload.leaderboard_updated
       ? `Submitted. Score ${Number(payload.score || 0).toLocaleString()} is on the leaderboard.`
       : `Submitted. Score ${Number(payload.score || 0).toLocaleString()} did not beat your best.`;
-    el.leaderboardStatus.textContent += emailNote;
+    el.leaderboardStatus.textContent += emailNote + ownershipNote;
     refreshLeaderboard({ force: true });
     trackEvent("arcade_leaderboard_submit", { result: "accepted", status: payload.status || "valid" });
   } catch (error) {
@@ -2013,7 +2147,7 @@ function showArcadeRoundTransition() {
     tr.bonus_time_s,
   )} s. Round ${tr.next_round_index}${tr.next_is_boss ? " is a boss round" : ""} starts with ${Math.round(
     tr.next_time_budget_s,
-  )} s and a ${formatRangeMeters(tr.next_goal_range_km)} goal.`;
+  )} s and a ${formatDistanceKm(tr.next_goal_range_km)} goal.`;
 }
 
 function completionAnalyticsProps(passed) {
@@ -2183,9 +2317,14 @@ function bindEvents() {
         "r",
         "m",
         "c",
+        "v",
       ].includes(key)
     ) {
       event.preventDefault();
+    }
+    if (key === "v") {
+      cycleViewPreference();
+      return;
     }
     if (key === "m") {
       toggleMusic();
@@ -2261,6 +2400,44 @@ function bindEvents() {
   });
   bindCommandButton(el.musicButton, toggleMusic);
   bindCommandButton(el.selectorMusicButton, toggleMusic);
+  bindCommandButton(el.viewButton, cycleViewPreference);
+  bindCommandButton(el.selectorViewButton, cycleViewPreference);
+  [el.riPanel, el.rcPanel, el.riCanvas, el.rcCanvas].forEach((panel) => {
+    if (!panel) return;
+    let suppressClickUntil = 0;
+    const toggle = (event) => {
+      if (state.mode !== "sandbox" && state.mode !== "arcade") return;
+      event.preventDefault();
+      event.stopPropagation();
+      playMusicFromGesture();
+      toggleCameraRuleMode();
+    };
+    panel.addEventListener("pointerdown", (event) => {
+      if (typeof event.button === "number" && event.button !== 0) return;
+      suppressClickUntil = Date.now() + 500;
+      toggle(event);
+    });
+    panel.addEventListener("mousedown", (event) => {
+      if (typeof event.button === "number" && event.button !== 0) return;
+      suppressClickUntil = Date.now() + 500;
+      toggle(event);
+    });
+    panel.addEventListener("click", (event) => {
+      if (Date.now() < suppressClickUntil) {
+        event.preventDefault();
+        return;
+      }
+      toggle(event);
+    });
+  });
+  el.mobileSpeedButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      playMusicFromGesture();
+      state.speedIndex = speedOptionIndex(Number(button.dataset.mobileSpeed || currentSpeedMultiple()));
+      maybeCompleteSpeedStage();
+      refreshInputState();
+    });
+  });
   document.querySelectorAll("[data-level-option]").forEach((button) => {
     button.addEventListener("pointerenter", () => {
       const idx = levelOptions.findIndex((option) => option.id === button.dataset.levelOption);
@@ -2294,10 +2471,17 @@ function bindEvents() {
     updateMissionText();
   });
   window.addEventListener("resize", draw);
+  const viewQuery = window.matchMedia("(max-width: 760px), (max-height: 620px)");
+  const handleViewQueryChange = () => {
+    if (state.viewPreference === "auto") applyViewPreference();
+  };
+  if (viewQuery.addEventListener) viewQuery.addEventListener("change", handleViewQueryChange);
+  else if (viewQuery.addListener) viewQuery.addListener(handleViewQueryChange);
 }
 
 bindEvents();
+initializeViewPreference();
 initAnalytics();
 trackEventOnce("preview_view", { build: BUILD_ID });
-showLevelSelector();
+if (!launchInitialLevelFromUrl()) showLevelSelector();
 queueFrame(frame);

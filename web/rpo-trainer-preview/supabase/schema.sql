@@ -7,9 +7,13 @@ create table if not exists players (
   username_normalized text generated always as (lower(regexp_replace(trim(username), '\s+', '', 'g'))) stored,
   email text,
   email_verified_at timestamptz,
+  username_locked_at timestamptz,
   created_at timestamptz not null default now(),
   unique (username_normalized)
 );
+
+alter table if exists players
+  add column if not exists username_locked_at timestamptz;
 
 create table if not exists challenges (
   id text primary key,

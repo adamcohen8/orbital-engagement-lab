@@ -8,11 +8,12 @@
       name="description"
       content="Orbital Engagement Lab RPO Trainer Preview: a browser-native tutorial and sandbox for learning RIC orbital motion."
     />
+    <meta name="supported-views" content="auto,mobile,desktop" />
     <meta name="oel-analytics-provider" content="plausible" />
     <meta name="oel-analytics-domain" content="adamcohen8.github.io" />
     <title>Orbital Engagement Lab RPO Trainer Preview</title>
     <link rel="icon" href="./src/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="./src/styles.css?v=spaced-footer-legend-2026-06-13" />
+    <link rel="stylesheet" href="./src/styles.css?v=unified-mobile-shell-2026-06-16j" />
   </head>
   <body>
     <main class="trainer-shell selector-mode">
@@ -20,6 +21,7 @@
         <header class="launcher-header">
           <h1>Orbital Engagement Lab</h1>
           <button class="launcher-music active" id="selectorMusicButton" type="button">Music: ON</button>
+          <button class="launcher-view" id="selectorViewButton" type="button">View: Auto</button>
           <p>Select RPO Training Level</p>
           <div class="launcher-assists" aria-label="Assists">
             <span>Assists</span>
@@ -70,7 +72,7 @@
           </article>
         </div>
 
-        <footer class="launcher-footer">Up/Down Select   M Music   Enter Launch</footer>
+        <footer class="launcher-footer">Up/Down Select   M Music   V View   Enter Launch</footer>
       </section>
 
       <header class="top-bar">
@@ -91,14 +93,14 @@
 
       <section class="game-layout">
         <div class="plot-stack">
-          <section class="plot-panel" aria-label="RI plane plot">
+          <section class="plot-panel" id="riPanel" aria-label="RI plane plot">
             <div class="plot-title">
               <span id="riTitle">RI Plane</span>
               <small id="riSubtitle">In-track vs radial</small>
             </div>
             <canvas id="riCanvas"></canvas>
           </section>
-          <section class="plot-panel" aria-label="RC plane plot">
+          <section class="plot-panel" id="rcPanel" aria-label="RC plane plot">
             <div class="plot-title">
               <span id="rcTitle">RC Plane</span>
               <small id="rcSubtitle">Cross-track vs radial</small>
@@ -139,8 +141,9 @@
             <button id="pauseButton" type="button">Start</button>
             <button id="resetButton" type="button">Reset</button>
             <button id="levelSelectButton" type="button">Level Select</button>
+            <button class="music-button active" id="musicButton" type="button" aria-pressed="true">M Music: ON</button>
+            <button id="viewButton" type="button">View: Auto</button>
           </div>
-          <button class="music-button active" id="musicButton" type="button" aria-pressed="true">M Music: ON</button>
         </div>
         <div class="hint-line" id="coachHint">Hold D for +I. The green path shows the orbit created by a 0.25 m/s forward in-track burn.</div>
         <div class="command-line" id="commandLine">W/S R  A/D I  Left/Right C  C Camera  M Music</div>
@@ -181,15 +184,22 @@
       </aside>
 
       <section class="touch-controls" aria-label="Touch controls">
-        <button data-touch="rPlus" type="button">+R</button>
-        <button data-touch="rMinus" type="button">-R</button>
         <button data-touch="iMinus" type="button">-I</button>
+        <button data-touch="rPlus" type="button">+R</button>
         <button data-touch="iPlus" type="button">+I</button>
         <button data-touch="cMinus" type="button">-C</button>
+        <button data-touch="rMinus" type="button">-R</button>
         <button data-touch="cPlus" type="button">+C</button>
+      </section>
+
+      <section class="mobile-speed-controls" aria-label="Speed multiple">
+        <button data-mobile-speed="1" type="button">1x</button>
+        <button data-mobile-speed="10" type="button">10x</button>
+        <button data-mobile-speed="50" type="button">50x</button>
+        <button data-mobile-speed="200" type="button">200x</button>
       </section>
     </main>
 
-    <script src="./src/app.js?v=spaced-footer-legend-2026-06-13" type="module"></script>
+    <script src="./src/app.js?v=unified-mobile-shell-2026-06-16j" type="module"></script>
   </body>
 </html>
