@@ -20,6 +20,8 @@ import {
   validateAttemptPacket,
 } from "../src/competition/arcade-engine.js";
 import { hashVerificationToken, verificationExpiryIso, verificationUrl } from "../api/_email.mjs";
+import { isLeaderboardEligibleStatus, shouldReplaceLeaderboardScore } from "../api/_leaderboard.mjs";
+import { canVerifyUsernameForEmail, decideOwnership, OWNERSHIP_STATUS } from "../api/_ownership.mjs";
 
 test("canonical JSON and hash are stable across object key order", () => {
   const a = { b: 2, a: { d: 4, c: 3 } };
@@ -38,6 +40,52 @@ test("email verification helpers hash tokens and build public links", () => {
     "https://example.test/api/verify-email?token=token%20with%20spaces",
   );
   assert.equal(verificationExpiryIso(new Date("2026-01-01T00:00:00.000Z")), "2026-01-08T00:00:00.000Z");
+});
+
+test("username ownership decisions support verified email locking", () => {
+  assert.deepEqual(decideOwnership({ player: {}, email: "" }), {
+    status: OWNERSHIP_STATUS.UNCLAIMED,
+    leaderboard_allowed: true,
+    verification_allowed: false,
+  });
+  assert.deepEqual(decideOwnership({ player: {}, email: "ace@example.edu" }), {
+    status: OWNERSHIP_STATUS.PENDING_VERIFICATION,
+    leaderboard_allowed: true,
+    verification_allowed: true,
+  });
+  const lockedPlayer = {
+    email: "ace@example.edu",
+    email_verified_at: "2026-01-01T00:00:00.000Z",
+    username_locked_at: "2026-01-01T00:00:00.000Z",
+  };
+  assert.deepEqual(decideOwnership({ player: lockedPlayer, email: "ace@example.edu" }), {
+    status: OWNERSHIP_STATUS.VERIFIED_OWNER,
+    leaderboard_allowed: true,
+    verification_allowed: true,
+  });
+  assert.deepEqual(decideOwnership({ player: lockedPlayer, email: "" }), {
+    status: OWNERSHIP_STATUS.LOCKED,
+    leaderboard_allowed: false,
+    verification_allowed: false,
+  });
+  assert.deepEqual(decideOwnership({ player: lockedPlayer, email: "other@example.edu" }), {
+    status: OWNERSHIP_STATUS.LOCKED,
+    leaderboard_allowed: false,
+    verification_allowed: false,
+  });
+  assert.equal(canVerifyUsernameForEmail({ player: {}, email: "ace@example.edu" }), true);
+  assert.equal(canVerifyUsernameForEmail({ player: lockedPlayer, email: "ACE@example.edu" }), true);
+  assert.equal(canVerifyUsernameForEmail({ player: lockedPlayer, email: "other@example.edu" }), false);
+});
+
+test("leaderboard promotion keeps only eligible better scores", () => {
+  assert.equal(isLeaderboardEligibleStatus("valid"), true);
+  assert.equal(isLeaderboardEligibleStatus("suspicious"), true);
+  assert.equal(isLeaderboardEligibleStatus("invalid"), false);
+  assert.equal(shouldReplaceLeaderboardScore(null, 10), true);
+  assert.equal(shouldReplaceLeaderboardScore(10, 11), true);
+  assert.equal(shouldReplaceLeaderboardScore(10, 10), false);
+  assert.equal(shouldReplaceLeaderboardScore(10, 9), false);
 });
 
 test("RIC conversion round trips rotating-frame relative position and velocity", () => {

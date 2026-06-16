@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Cache-Control" content="no-store" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Opening OEL Mobile Pursuit Arcade</title>
+    <script>
+      const target = new URL("./index.html", window.location.href);
+      const current = new URL(window.location.href);
+      target.searchParams.set("view", "mobile");
+      target.searchParams.set("level", "pursuitArcade");
+      ["boss", "round"].forEach((name) => {
+        if (current.searchParams.has(name)) target.searchParams.set(name, current.searchParams.get(name));
+      });
+      window.location.replace(target);
+    </script>
+  </head>
+  <body>
+    <p>
+      Opening
+      <a href="./index.html?view=mobile&amp;level=pursuitArcade">OEL Mobile Pursuit Arcade</a>.
+    </p>
+  </body>
+</html>

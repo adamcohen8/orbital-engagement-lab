@@ -90,7 +90,8 @@ p {
 .selector-mode .top-bar,
 .selector-mode .game-layout,
 .selector-mode .hud-panel,
-.selector-mode .touch-controls {
+.selector-mode .touch-controls,
+.selector-mode .mobile-speed-controls {
   display: none;
 }
 
@@ -133,6 +134,15 @@ p {
   min-height: 30px;
   background: rgb(34, 60, 76);
   border-color: rgb(94, 190, 245);
+}
+
+.launcher-view {
+  position: absolute;
+  right: 184px;
+  top: 36px;
+  width: 132px;
+  min-height: 30px;
+  background: rgb(34, 48, 62);
 }
 
 .launcher-music.active,
@@ -716,6 +726,10 @@ select {
   display: none;
 }
 
+.mobile-speed-controls {
+  display: none;
+}
+
 @media (max-width: 900px), (max-height: 620px) {
   body {
     overflow: auto;
@@ -765,6 +779,7 @@ select {
   }
 
   .launcher-music,
+  .launcher-view,
   .launcher-assists {
     position: static;
     margin-top: 10px;
@@ -829,5 +844,619 @@ select {
     position: sticky;
     bottom: 10px;
     z-index: 5;
+  }
+}
+
+body.mobile-view {
+  overflow: hidden;
+  touch-action: manipulation;
+}
+
+body.mobile-view .trainer-shell {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto auto auto;
+  gap: 8px;
+  width: min(100vw, 520px);
+  height: 100dvh;
+  min-width: 0;
+  min-height: 0;
+  margin: 0 auto;
+  padding: max(8px, env(safe-area-inset-top)) 8px max(8px, env(safe-area-inset-bottom));
+  overflow: hidden;
+}
+
+body.mobile-view .trainer-shell.selector-mode {
+  display: block;
+}
+
+body.mobile-view .level-selector {
+  position: relative;
+  inset: auto;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 8px;
+  min-height: 0;
+  height: 100%;
+  padding: 0;
+  overflow: hidden;
+}
+
+body.mobile-view .launcher-header {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 3px;
+  padding-top: 0;
+}
+
+body.mobile-view .launcher-header h1 {
+  grid-column: 1 / -1;
+  font-size: 22px;
+  line-height: 25px;
+}
+
+body.mobile-view .launcher-header p {
+  grid-column: 1 / -1;
+  margin-top: 2px;
+  font-size: 13px;
+  line-height: 17px;
+}
+
+body.mobile-view .launcher-music,
+body.mobile-view .launcher-view,
+body.mobile-view .launcher-assists {
+  position: relative;
+  right: auto;
+  top: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 32px;
+  margin: 0;
+  font-size: 12px;
+}
+
+body.mobile-view .launcher-assists {
+  display: none;
+}
+
+body.mobile-view .launcher-body {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+body.mobile-view .launcher-list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 8px;
+}
+
+body.mobile-view .launcher-option {
+  min-height: 48px;
+  padding: 8px 10px;
+}
+
+body.mobile-view .launcher-option span {
+  font-size: 15px;
+  line-height: 19px;
+}
+
+body.mobile-view .launcher-preview {
+  min-height: 0;
+  max-height: none;
+  padding: 12px;
+  overflow: auto;
+  border-radius: 8px;
+}
+
+body.mobile-view .launcher-preview h2 {
+  margin-bottom: 8px;
+  font-size: 17px;
+  line-height: 21px;
+}
+
+body.mobile-view .launcher-budget {
+  margin-bottom: 12px;
+  font-size: 11px;
+  line-height: 15px;
+}
+
+body.mobile-view .launcher-preview p,
+body.mobile-view .launcher-preview li {
+  font-size: 12px;
+  line-height: 16px;
+}
+
+body.mobile-view .launcher-preview section {
+  margin-top: 9px;
+}
+
+body.mobile-view .launcher-preview h3 {
+  margin-bottom: 5px;
+  font-size: 12px;
+  line-height: 15px;
+}
+
+body.mobile-view .launcher-footer {
+  display: none;
+}
+
+body.mobile-view .top-bar {
+  position: relative;
+  inset: auto;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 4px;
+  height: auto;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+body.mobile-view h1 {
+  font-size: 20px;
+  line-height: 23px;
+}
+
+body.mobile-view .top-metrics {
+  gap: 8px;
+  font-size: 11px;
+  line-height: 14px;
+}
+
+body.mobile-view .objective-checklist {
+  border: 1px solid var(--stroke-hud);
+  border-radius: 8px;
+  background: var(--hud);
+  padding: 7px 8px;
+  font-size: 12px;
+  line-height: 15px;
+}
+
+body.mobile-view #objectiveText {
+  white-space: normal;
+}
+
+body.mobile-view .game-layout {
+  position: relative;
+  inset: auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+body.mobile-view .plot-stack {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+}
+
+body.mobile-view .plot-panel {
+  min-width: 0;
+  min-height: 0;
+  border-radius: 8px;
+}
+
+body.mobile-view .plot-title {
+  left: 10px;
+  right: 10px;
+  top: 7px;
+  height: 20px;
+}
+
+body.mobile-view .plot-title span {
+  font-size: 13px;
+}
+
+body.mobile-view .plot-title small {
+  font-size: 10px;
+}
+
+body.mobile-view canvas {
+  left: 12px;
+  right: 12px;
+  top: 34px;
+  bottom: 10px;
+  width: calc(100% - 24px);
+  height: calc(100% - 44px);
+}
+
+body.mobile-view .hud-panel {
+  position: relative;
+  inset: auto;
+  display: grid;
+  gap: 6px;
+  height: auto;
+  min-height: 0;
+  padding: 8px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 15px;
+}
+
+body.mobile-view .hud-line,
+body.mobile-view .hint-line,
+body.mobile-view .command-line,
+body.mobile-view .footer-line,
+body.mobile-view .hud-top-controls {
+  position: static;
+  max-width: none;
+  width: auto;
+  white-space: normal;
+}
+
+body.mobile-view .hud-line {
+  font-size: 12px;
+  line-height: 15px;
+}
+
+body.mobile-view .hud-top-controls {
+  order: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+body.mobile-view .hud-actions {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+  width: 100%;
+}
+
+body.mobile-view .hud-actions button,
+body.mobile-view .music-button {
+  min-width: 0;
+  min-height: 34px;
+  padding: 4px 5px;
+  font-size: 11px;
+}
+
+body.mobile-view .music-button {
+  width: 100%;
+}
+
+body.mobile-view .hint-line {
+  color: var(--hint);
+  font-size: 11px;
+  line-height: 14px;
+}
+
+body.mobile-view .command-line,
+body.mobile-view .footer-line {
+  display: none;
+}
+
+body.mobile-view .sandbox-panel {
+  left: 8px;
+  right: 8px;
+  top: 8px;
+  width: auto;
+  padding: 10px;
+  gap: 8px;
+  font-size: 12px;
+}
+
+body.mobile-view .touch-controls,
+body.mobile-view .mobile-speed-controls {
+  display: grid;
+  gap: 6px;
+}
+
+body.mobile-view .trainer-shell.selector-mode .touch-controls,
+body.mobile-view .trainer-shell.selector-mode .mobile-speed-controls {
+  display: none;
+}
+
+body.mobile-view .trainer-shell.selector-mode .top-bar,
+body.mobile-view .trainer-shell.selector-mode .game-layout,
+body.mobile-view .trainer-shell.selector-mode .hud-panel {
+  display: none;
+}
+
+body.mobile-view .mobile-speed-controls {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+body.mobile-view .touch-controls {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+body.mobile-view .touch-controls button,
+body.mobile-view .mobile-speed-controls button {
+  min-width: 0;
+  min-height: 38px;
+  padding: 5px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+body.mobile-view .mobile-speed-controls button.active {
+  border-color: rgb(96, 174, 224);
+  background: rgb(28, 48, 66);
+  color: rgb(238, 244, 250);
+}
+
+body.mobile-view .debrief-panel {
+  width: calc(100vw - 20px);
+  max-height: calc(100dvh - 20px);
+  padding: 14px;
+  overflow: auto;
+}
+
+body.mobile-view .leaderboard-form {
+  grid-template-columns: 1fr;
+}
+
+@media (max-height: 740px) {
+  body.mobile-view .trainer-shell {
+    gap: 6px;
+    padding-top: max(6px, env(safe-area-inset-top));
+    padding-bottom: max(6px, env(safe-area-inset-bottom));
+  }
+
+  body.mobile-view h1 {
+    font-size: 18px;
+    line-height: 21px;
+  }
+
+  body.mobile-view .objective-checklist,
+  body.mobile-view .hud-panel {
+    padding: 6px;
+  }
+
+  body.mobile-view .touch-controls button,
+  body.mobile-view .mobile-speed-controls button {
+    min-height: 34px;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 520px) {
+  body.mobile-view .trainer-shell.selector-mode {
+    width: 100vw;
+    height: 100dvh;
+    max-width: none;
+    padding: max(6px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) max(
+        6px,
+        env(safe-area-inset-bottom)
+      )
+      max(8px, env(safe-area-inset-left));
+  }
+
+  body.mobile-view .level-selector {
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 6px;
+    width: 100%;
+    height: 100%;
+  }
+
+  body.mobile-view .launcher-header {
+    grid-template-columns: minmax(0, 1fr) 140px 140px;
+    column-gap: 8px;
+    row-gap: 0;
+  }
+
+  body.mobile-view .launcher-header h1 {
+    grid-column: auto;
+    font-size: 18px;
+    line-height: 22px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  body.mobile-view .launcher-header p {
+    grid-column: 1 / -1;
+    font-size: 11px;
+    line-height: 13px;
+  }
+
+  body.mobile-view .launcher-music,
+  body.mobile-view .launcher-view {
+    min-height: 30px;
+    font-size: 11px;
+  }
+
+  body.mobile-view .launcher-body {
+    grid-template-columns: minmax(210px, 0.34fr) minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  body.mobile-view .launcher-list,
+  body.mobile-view .launcher-preview {
+    min-height: 0;
+    height: 100%;
+  }
+
+  body.mobile-view .launcher-list {
+    align-content: start;
+    padding: 8px;
+  }
+
+  body.mobile-view .launcher-option {
+    min-height: 54px;
+  }
+
+  body.mobile-view .launcher-preview {
+    padding: 10px;
+  }
+
+  body.mobile-view .launcher-preview h2 {
+    margin-bottom: 6px;
+    font-size: 16px;
+    line-height: 20px;
+  }
+
+  body.mobile-view .trainer-shell:not(.selector-mode) {
+    width: 100vw;
+    height: 100dvh;
+    max-width: none;
+    grid-template-columns: minmax(0, 1fr) clamp(236px, 31vw, 292px);
+    grid-template-rows: auto minmax(0, 1fr) auto auto;
+    grid-template-areas:
+      "top top"
+      "game hud"
+      "game controls"
+      "game speeds";
+    gap: 6px;
+    padding: max(6px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) max(
+        6px,
+        env(safe-area-inset-bottom)
+      )
+      max(8px, env(safe-area-inset-left));
+  }
+
+  body.mobile-view .top-bar {
+    grid-area: top;
+    grid-template-columns: auto minmax(0, 1fr) minmax(190px, 0.55fr);
+    align-items: center;
+    gap: 8px;
+  }
+
+  body.mobile-view .top-left {
+    min-width: 0;
+  }
+
+  body.mobile-view h1 {
+    font-size: 16px;
+    line-height: 18px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  body.mobile-view .top-metrics {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 6px;
+    font-size: 10px;
+    line-height: 12px;
+    overflow: hidden;
+  }
+
+  body.mobile-view .top-metrics span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  body.mobile-view .objective-checklist {
+    min-width: 0;
+    padding: 5px 7px;
+    font-size: 10px;
+    line-height: 12px;
+  }
+
+  body.mobile-view .objective-heading {
+    display: none;
+  }
+
+  body.mobile-view #objectiveTitle,
+  body.mobile-view #objectiveText {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  body.mobile-view .game-layout {
+    grid-area: game;
+  }
+
+  body.mobile-view .plot-stack {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: minmax(0, 1fr);
+    gap: 6px;
+  }
+
+  body.mobile-view .plot-title {
+    left: 8px;
+    right: 8px;
+    top: 6px;
+    height: 18px;
+    gap: 6px;
+  }
+
+  body.mobile-view .plot-title span {
+    font-size: 12px;
+  }
+
+  body.mobile-view .plot-title small {
+    font-size: 9px;
+  }
+
+  body.mobile-view canvas {
+    left: 8px;
+    right: 8px;
+    top: 30px;
+    bottom: 8px;
+    width: calc(100% - 16px);
+    height: calc(100% - 38px);
+  }
+
+  body.mobile-view .hud-panel {
+    grid-area: hud;
+    align-self: stretch;
+    gap: 5px;
+    padding: 6px;
+    font-size: 10px;
+    line-height: 13px;
+    overflow: hidden;
+  }
+
+  body.mobile-view .hud-line {
+    font-size: 10px;
+    line-height: 13px;
+  }
+
+  body.mobile-view .hud-top-controls {
+    gap: 4px;
+  }
+
+  body.mobile-view .hud-actions {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 4px;
+  }
+
+  body.mobile-view .hud-actions button,
+  body.mobile-view .music-button {
+    min-height: 30px;
+    padding: 3px 4px;
+    font-size: 9px;
+    line-height: 11px;
+  }
+
+  body.mobile-view .hint-line {
+    font-size: 10px;
+    line-height: 13px;
+  }
+
+  body.mobile-view .touch-controls {
+    grid-area: controls;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 5px;
+  }
+
+  body.mobile-view .mobile-speed-controls {
+    grid-area: speeds;
+    gap: 5px;
+  }
+
+  body.mobile-view .touch-controls button,
+  body.mobile-view .mobile-speed-controls button {
+    min-height: 32px;
+    padding: 4px;
+    font-size: 13px;
   }
 }

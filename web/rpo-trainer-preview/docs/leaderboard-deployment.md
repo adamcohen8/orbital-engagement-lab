@@ -19,6 +19,8 @@ inserting rows.
 1. Create a Supabase project.
 2. Open the SQL editor.
 3. Run `web/rpo-trainer-preview/supabase/schema.sql`.
+   - Existing projects should run it again after this update; the script
+     idempotently adds `players.username_locked_at`.
 4. Copy these values from Project Settings:
    - Project URL
    - Service role key
@@ -77,8 +79,33 @@ the submitted attempt packet, and server-generated RI/RC plot SVGs.
 
 If an accepted submission includes an email address, the API stores a hashed
 verification token in Supabase and sends a verification link. Visiting the link
-updates `players.email_verified_at`; public leaderboard reads expose only the
-boolean `email_verified`, never the email address.
+updates `players.email`, `players.email_verified_at`, and
+`players.username_locked_at`; public leaderboard reads expose only the boolean
+`email_verified`, never the email address.
+
+## Username Ownership Policy
+
+Emails are optional. Anonymous usernames can still submit and score, but a
+username becomes reserved after a player verifies an email link for that
+username.
+
+| Username state | Submission email | Attempt saved | Leaderboard update |
+| --- | --- | --- | --- |
+| Unclaimed | none | yes | yes |
+| Unclaimed | email provided | yes | yes, verification pending |
+| Verified owner | same email | yes | yes |
+| Verified owner | none | yes | no |
+| Verified owner | different email | yes | no |
+
+Typed emails are not trusted as ownership by themselves. A typed email creates
+an `email_verifications` row, and `players.email` becomes authoritative only
+after the verification link is opened. If the linked attempt beats the current
+leaderboard score, the verification endpoint promotes it with the canonical
+score and metrics.
+
+This is still a lightweight bragging-rights system, not a full account system.
+If a player loses email access or a username dispute arises, resolve it
+manually in Supabase.
 
 ## First Production Check
 
@@ -91,5 +118,9 @@ After deployment:
 5. If email is configured, confirm the submit response includes
    `email_status: "sent"` and the verification link updates
    `email_verified` on `/api/leaderboard`.
-6. Try changing `claimed_score` in a copied packet and confirm the endpoint
+6. Submit the verified username with no email or a different email and confirm
+   the API returns `ownership_status: "locked"` with no leaderboard update.
+7. Submit the verified username with the same email and confirm the leaderboard
+   can update if the score improves.
+8. Try changing `claimed_score` in a copied packet and confirm the endpoint
    returns `invalid`.
