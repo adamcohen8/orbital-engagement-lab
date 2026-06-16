@@ -863,17 +863,6 @@ body.mobile-view .trainer-shell {
   margin: 0 auto;
   padding: max(8px, env(safe-area-inset-top)) 8px max(8px, env(safe-area-inset-bottom));
   overflow: hidden;
-  -webkit-touch-callout: none;
-  -webkit-user-select: none;
-  user-select: none;
-}
-
-body.mobile-view input,
-body.mobile-view select,
-body.mobile-view textarea {
-  -webkit-touch-callout: default;
-  -webkit-user-select: text;
-  user-select: text;
 }
 
 body.mobile-view .trainer-shell.selector-mode {
