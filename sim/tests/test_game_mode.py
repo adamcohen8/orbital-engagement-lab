@@ -18,6 +18,16 @@ import sim.game.training as game_training
 from sim.acceleration.settings import ACCELERATION_ENV, acceleration_settings_from_config
 from sim.api import SimulationConfig, SimulationSession
 from sim.core.models import Command, StateBelief, StateTruth
+from sim.dynamics.orbit.cr3bp import (
+    EARTH_MOON_MEAN_MOTION_RAD_S,
+    cr3bp_derivative_physical,
+    cr3bp_halo_seed_state_km_s,
+    cr3bp_jacobian_physical,
+    cr3bp_l1_state_km_s,
+    cr3bp_moon_state_km_s,
+    propagate_cr3bp_reference_stm,
+    propagate_cr3bp_state,
+)
 from sim.dynamics.orbit.elements import coes_mapping_to_rv_eci
 from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2
 from sim.game.arcade import (
@@ -90,15 +100,23 @@ from sim.game.launcher import (
 )
 from sim.game.manual import KeyboardCommandState, ManualGameCommandProvider
 from sim.game.pygame_dashboard import (
+    MOON_RADIUS_KM,
     PLOT_OVERLAY_MARGIN,
     PygameRPODashboard,
     _coast_prediction_model_key,
+    _cr3bp_projection_mode_key,
+    _cr3bp_state_to_moon_ric_rect,
     _cw_coast_state,
     _cw_forced_state,
     _elliptic_linear_coast_states,
+    _linearized_cr3bp_moon_ric_coast_prediction,
+    _moon_ric_rect_state_to_cr3bp,
+    _nonlinear_cr3bp_moon_ric_coast_prediction,
     _ric_primer_stage,
     _sample_rows,
     _satellite_marker_size_px,
+    _scaled_body_rect_tuple,
+    _should_draw_cislunar_moon_background,
     _should_draw_nominal_nmt,
     _true_anomaly_deg_from_state,
     _two_body_coast_state,
@@ -123,11 +141,19 @@ from sim.game.runner import (
     _finish_game_recording,
     _game_camera_mode,
     _game_camera_rule_mode,
+    _game_camera_rule_toggle_enabled,
+    _game_chaser_sprite_diameter_km,
+    _game_chaser_sprite_max_size_px,
+    _game_chaser_sprite_path,
     _game_coast_chaser_after_delta_v_budget,
     _game_coast_prediction_model,
     _game_control_mode,
     _game_controlled_object_id,
+    _game_cr3bp_coast_prediction_dt_s,
+    _game_cr3bp_coast_prediction_horizon_s,
+    _game_cr3bp_projection_mode,
     _game_debrief_enabled,
+    _game_initial_speed_multiple,
     _game_level_title,
     _game_loop_should_exit,
     _game_plot_axis_scale,
@@ -135,14 +161,22 @@ from sim.game.runner import (
     _game_plot_fixed_axis_half_span_km,
     _game_plot_overlays_in_zoom,
     _game_plot_overlays_in_zoom_by_plane,
+    _game_plot_prediction_full_trajectory_only,
     _game_plot_prediction_in_zoom,
     _game_plot_prediction_zoom_max_span_km,
     _game_proximity_ring_plot_planes,
+    _game_relative_frame,
     _game_ric_reference_object_id,
     _game_sandbox_enabled,
     _game_show_target_hcw_path,
+    _game_speed_multiplier_options,
     _game_target_centered_plot_axes,
     _game_target_centered_plot_planes,
+    _game_target_coast_prediction_dt_s,
+    _game_target_coast_prediction_horizon_s,
+    _game_target_sprite_diameter_km,
+    _game_target_sprite_max_size_px,
+    _game_target_sprite_path,
     _guided_tutorial_delta_v_m_s,
     _guided_tutorial_expected_key,
     _guided_tutorial_input_matches,
@@ -155,6 +189,7 @@ from sim.game.runner import (
     _guided_tutorial_wrong_input_active,
     _live_prediction_accel_ric,
     _live_prediction_burn,
+    _max_accel_from_config,
     _mission_checklist,
     _mission_metrics,
     _opposing_key_axis,
@@ -192,6 +227,7 @@ from sim.game.training import (
     nmt_element_errors,
     nmt_position_error_km,
     nmt_velocity_error_km_s,
+    relative_moon_ric_state_from_arrays,
 )
 from sim.utils.frames import ric_dcm_ir_from_rv, ric_rect_state_to_eci
 
@@ -230,6 +266,7 @@ def test_game_launcher_discovers_ordered_training_levels() -> None:
         "rpo_09_defensive_target_demo",
         "rpo_10_evasive_target_survival",
         "rpo_arcade_pursuit",
+        "rpo_bonus_cislunar_rendezvous",
         "rpo_sandbox",
     ]
     assert options[0].title == "Level 0 - Tutorial"
@@ -258,10 +295,157 @@ def test_game_launcher_discovers_ordered_training_levels() -> None:
     assert options[11].title == "Pursuit Arcade"
     assert options[11].time_budget_s == pytest.approx(12000.0)
     assert options[11].delta_v_budget_m_s == pytest.approx(3.0)
-    assert options[12].title == "Sandbox"
-    assert options[12].path.name == "game_training_rpo_sandbox.yaml"
-    assert options[12].time_budget_s == pytest.approx(20000.0)
-    assert options[12].delta_v_budget_m_s is None
+    assert options[12].title == "Bonus Level - Cislunar Rendezvous (Beta)"
+    assert options[12].path.name == "game_training_rpo_bonus_cislunar_rendezvous.yaml"
+    assert options[12].time_budget_s == pytest.approx(259200.0)
+    assert options[12].delta_v_budget_m_s == pytest.approx(75.0)
+    assert options[13].title == "Sandbox"
+    assert options[13].path.name == "game_training_rpo_sandbox.yaml"
+    assert options[13].time_budget_s == pytest.approx(20000.0)
+    assert options[13].delta_v_budget_m_s is None
+
+
+def test_bonus_cislunar_rendezvous_uses_cr3bp_frame() -> None:
+    path = (
+        Path(__file__).resolve().parents[2]
+        / "sim"
+        / "game"
+        / "configs"
+        / "game_training_rpo_bonus_cislunar_rendezvous.yaml"
+    )
+    config = SimulationConfig.from_yaml(path)
+
+    assert _game_control_mode(config) == "moon_ric_translation"
+    assert _game_relative_frame(config) == "moon_ric"
+    assert _game_coast_prediction_model(config) == "cr3bp"
+    assert _game_cr3bp_projection_mode(config) == "linearized"
+    assert _game_camera_mode(config) == "rule_toggle_pair"
+    assert _game_camera_rule_mode(config) == "current_pair"
+    assert _game_camera_rule_toggle_enabled(config) is True
+    assert _game_chaser_sprite_path(config) == Path("cislunar_chaser_sprite.png")
+    assert _game_target_sprite_path(config) == Path("cislunar_target_sprite.png")
+    assert (Path(__file__).resolve().parents[1] / "game" / "assets" / _game_chaser_sprite_path(config)).is_file()
+    assert (Path(__file__).resolve().parents[1] / "game" / "assets" / _game_target_sprite_path(config)).is_file()
+    assert _game_chaser_sprite_diameter_km(config) == pytest.approx(0.05)
+    assert _game_target_sprite_diameter_km(config) == pytest.approx(0.12)
+    assert _game_chaser_sprite_max_size_px(config) == 72
+    assert _game_target_sprite_max_size_px(config) == 128
+    assert _game_target_centered_plot_planes(config) == ("RI", "RC")
+    assert _game_target_centered_plot_axes(config) == {}
+    assert _game_plot_prediction_full_trajectory_only(config) is True
+    assert _game_initial_speed_multiple(config, None) == pytest.approx(10.0)
+    assert _game_initial_speed_multiple(config, 1.0) == pytest.approx(10.0)
+    speed_options = _game_speed_multiplier_options(config)
+    assert speed_options[:2] == pytest.approx((10.0, 25.0))
+    assert 1.0 not in speed_options
+    assert 2.0 not in speed_options
+    assert 5.0 not in speed_options
+    assert speed_options[-3:] == pytest.approx((500.0, 1000.0, 2000.0))
+    assert _adjust_speed_multiple(200.0, 1, options=speed_options) == pytest.approx(500.0)
+    assert _adjust_speed_multiple(500.0, 1, options=speed_options) == pytest.approx(1000.0)
+    assert _adjust_speed_multiple(1000.0, 1, options=speed_options) == pytest.approx(2000.0)
+    assert _adjust_speed_multiple(2000.0, 1, options=speed_options) == pytest.approx(2000.0)
+    assert _game_cr3bp_coast_prediction_horizon_s(config) == pytest.approx(259200.0)
+    assert _game_cr3bp_coast_prediction_dt_s(config) == pytest.approx(1800.0)
+    assert _game_show_target_hcw_path(config) is False
+    assert _game_target_coast_prediction_horizon_s(config) == pytest.approx(1127210.360660)
+    assert _game_target_coast_prediction_dt_s(config) == pytest.approx(3600.0)
+    assert _max_accel_from_config(config, "chaser") == pytest.approx(1.25e-6)
+    assert config.scenario.simulator.dt_s == pytest.approx(10.0)
+    assert config.scenario.simulator.dynamics["orbit"]["model"] == "cr3bp"
+    assert config.scenario.simulator.dynamics["orbit"]["orbit_substep_s"] == pytest.approx(10.0)
+    assert config.scenario.objects["target"].initial_state["cr3bp_halo"]["family"] == "l2_nrho_southern"
+    assert RPOTrainingConfig.from_metadata(dict(config.scenario.metadata or {})).relative_frame == "moon_ric"
+    chaser_initial = config.scenario.objects["chaser"].initial_state["relative_to_target_ric"]
+    assert chaser_initial["reference_frame"] == "moon_ric"
+
+    session = SimulationSession.from_config(config)
+    snapshot = session.reset()
+    assert snapshot is not None
+    chaser0 = np.array(snapshot.truth["chaser"], dtype=float).reshape(-1)[:6]
+    target0 = np.array(snapshot.truth["target"], dtype=float).reshape(-1)[:6]
+    rel0 = relative_moon_ric_state_from_arrays(target0, chaser0)
+    assert target0 - cr3bp_l1_state_km_s() == pytest.approx(
+        [70894.61952879478, 0.0, -69817.0344, 0.0, -0.1042749723224868, 0.0]
+    )
+    assert rel0 == pytest.approx([-3.0, -4.0, 0.5, 0.0, 0.0, 1.0e-5])
+    assert np.linalg.norm(rel0[:3]) == pytest.approx(5.024937810560445)
+
+    stepped = session.step()
+    target_motion = np.linalg.norm(
+        np.array(stepped.truth["target"], dtype=float).reshape(-1)[:3]
+        - np.array(snapshot.truth["target"], dtype=float).reshape(-1)[:3]
+    )
+    assert target_motion > 0.0
+
+
+def test_cr3bp_large_l1_halo_seed_is_available_for_cislunar_game() -> None:
+    state = cr3bp_halo_seed_state_km_s(family="l1_northern_large")
+
+    assert state - cr3bp_l1_state_km_s() == pytest.approx(
+        [-4288.472449806286, 0.0, 30752.0, 0.0, 0.198451917044, 0.0]
+    )
+
+
+def test_cr3bp_l2_nrho_seed_is_available_for_cislunar_game() -> None:
+    state = cr3bp_halo_seed_state_km_s(family="l2_nrho_southern")
+
+    assert state - cr3bp_l1_state_km_s() == pytest.approx(
+        [70894.61952879478, 0.0, -69817.0344, 0.0, -0.1042749723224868, 0.0]
+    )
+
+
+def test_cr3bp_moon_ric_transform_round_trips_for_nrho_target() -> None:
+    target = cr3bp_halo_seed_state_km_s(family="l2_nrho_southern")
+    rel = np.array([5.0, -20.0, -5.0, 0.001, -0.002, 0.003], dtype=float)
+    chaser = _moon_ric_rect_state_to_cr3bp(rel, target)
+
+    assert _cr3bp_state_to_moon_ric_rect(chaser, target) == pytest.approx(rel)
+
+
+def test_cr3bp_physical_jacobian_matches_force_finite_difference() -> None:
+    state = cr3bp_halo_seed_state_km_s(family="l2_nrho_southern") + np.array(
+        [100.0, -50.0, 20.0, 1.0e-4, -2.0e-4, 1.5e-4],
+        dtype=float,
+    )
+    analytic = cr3bp_jacobian_physical(state)
+    finite_difference = np.zeros((6, 6), dtype=float)
+    perturbations = np.array([1.0e-2, 1.0e-2, 1.0e-2, 1.0e-8, 1.0e-8, 1.0e-8], dtype=float)
+
+    for idx, step in enumerate(perturbations):
+        delta = np.zeros(6, dtype=float)
+        delta[idx] = step
+        finite_difference[:, idx] = (
+            cr3bp_derivative_physical(state + delta) - cr3bp_derivative_physical(state - delta)
+        ) / (2.0 * step)
+
+    assert analytic == pytest.approx(finite_difference, abs=1.0e-9)
+
+
+def test_cr3bp_reference_stm_matches_propagated_finite_difference() -> None:
+    reference0 = cr3bp_halo_seed_state_km_s(family="l2_nrho_southern") + np.array(
+        [100.0, -50.0, 20.0, 1.0e-4, -2.0e-4, 1.5e-4],
+        dtype=float,
+    )
+    delta0 = np.array([1.0e-3, -2.0e-3, 5.0e-4, 1.0e-8, -2.0e-8, 1.5e-8], dtype=float)
+
+    reference, stm = propagate_cr3bp_reference_stm(reference0, np.eye(6, dtype=float), 600.0, 0.0)
+    deputy = propagate_cr3bp_state(reference0 + delta0, 600.0, 0.0)
+
+    assert deputy - reference == pytest.approx(stm @ delta0, abs=1.0e-10)
+
+
+def test_linearized_cr3bp_moon_ric_projection_tracks_nonlinear_for_small_offsets() -> None:
+    target = cr3bp_halo_seed_state_km_s(family="l2_nrho_southern")
+    rel0 = np.array([0.1, -0.2, 0.05, 1.0e-5, -2.0e-5, 1.5e-5], dtype=float)
+    times = np.linspace(0.0, 600.0, 7, dtype=float)
+
+    nonlinear = _nonlinear_cr3bp_moon_ric_coast_prediction(rel0, target_state=target, times=times, current_t_s=0.0)
+    linearized = _linearized_cr3bp_moon_ric_coast_prediction(rel0, target_state=target, times=times, current_t_s=0.0)
+
+    assert linearized.shape == nonlinear.shape
+    assert linearized[0] == pytest.approx(rel0)
+    assert linearized == pytest.approx(nonlinear, abs=2.0e-4)
 
 
 def test_game_configs_and_music_assets_are_packaged() -> None:
@@ -2573,6 +2757,38 @@ def test_ric_translation_provider_commands_direct_ric_thrust() -> None:
 
     assert out["command_mode_flags"]["player_control_mode"] == "ric_translation"
     assert np.allclose(out["thrust_eci_km_s2"], np.array([2.0e-5, 0.0, 0.0]), atol=1e-12)
+
+
+def test_moon_ric_translation_provider_commands_target_about_moon_frame() -> None:
+    state = KeyboardCommandState(pitch=1.0, yaw=0.0, roll=0.0)
+    provider = ManualGameCommandProvider(
+        command_state=state,
+        max_accel_km_s2=2.5e-4,
+        control_mode="moon_ric_translation",
+        reference_object_id="target",
+    )
+    target_state = cr3bp_halo_seed_state_km_s(family="l2_nrho_southern")
+    target = StateTruth(
+        position_eci_km=target_state[:3],
+        velocity_eci_km_s=target_state[3:],
+        attitude_quat_bn=np.array([1.0, 0.0, 0.0, 0.0], dtype=float),
+        angular_rate_body_rad_s=np.zeros(3, dtype=float),
+        mass_kg=100.0,
+        t_s=0.0,
+    )
+
+    out = provider(
+        truth=target,
+        t_s=0.0,
+        dt_s=1.0,
+        object_id="chaser",
+        own_knowledge={"target": _knowledge_from_state6(target_state)},
+    )
+
+    target_moon = target_state - cr3bp_moon_state_km_s()
+    expected = ric_dcm_ir_from_rv(target_moon[:3], target_moon[3:]) @ np.array([2.5e-4, 0.0, 0.0])
+    assert out["command_mode_flags"]["player_control_mode"] == "moon_ric_translation"
+    assert np.allclose(out["thrust_eci_km_s2"], expected, atol=1e-12)
 
 
 def test_ric_translation_provider_uses_timed_input_duty_cycle() -> None:
@@ -4982,6 +5198,9 @@ def test_coast_prediction_model_aliases_support_elliptic_levels() -> None:
     assert _coast_prediction_model_key("HCW") == "hcw"
     assert _coast_prediction_model_key("elliptic") == "elliptic_linear"
     assert _coast_prediction_model_key("Tschauner-Hempel") == "tschauner_hempel"
+    assert _cr3bp_projection_mode_key("STM") == "linearized"
+    assert _cr3bp_projection_mode_key("linearized") == "linearized"
+    assert _cr3bp_projection_mode_key("nonlinear") == "nonlinear"
 
 
 def test_elliptic_dashboard_true_anomaly_indicator_uses_target_state() -> None:
@@ -5048,6 +5267,150 @@ def test_hcw_dashboard_does_not_compute_true_anomaly(monkeypatch: pytest.MonkeyP
     assert dashboard.target_true_anomaly_deg is None
 
 
+def test_cislunar_dashboard_accepts_full_truth_arrays() -> None:
+    dashboard = object.__new__(PygameRPODashboard)
+    dashboard.target_object_id = "target"
+    dashboard.chaser_object_id = "chaser"
+    dashboard.reference_object_id = "target"
+    dashboard.relative_frame = "cislunar_l1"
+    dashboard.coast_prediction_model = "cr3bp"
+    dashboard.max_history = 10
+    dashboard.t_s = []
+    dashboard.rel_hist = []
+    dashboard.target_rel_hist = []
+    dashboard.thrust_hist = []
+    dashboard.thrust_ric_hist = []
+    dashboard._rel_array = np.zeros((0, 6), dtype=float)
+    dashboard._target_rel_array = np.zeros((0, 6), dtype=float)
+    dashboard._thrust_ric_array = np.zeros((0, 3), dtype=float)
+    dashboard.target_true_anomaly_deg = None
+    origin = cr3bp_l1_state_km_s()
+    target_state6 = origin + np.array([1.0, 2.0, 3.0, 0.001, 0.002, 0.003], dtype=float)
+    chaser_state6 = target_state6 + np.array([0.0, -25.0, 10.0, 0.0, 0.0, 0.0], dtype=float)
+    target_truth14 = np.hstack((target_state6, [1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [1800.0]))
+    chaser_truth14 = np.hstack((chaser_state6, [1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [200.0]))
+    snapshot = type(
+        "Snapshot",
+        (),
+        {
+            "time_s": 0.0,
+            "truth": {"target": target_truth14, "chaser": chaser_truth14},
+            "applied_thrust": {"chaser": np.array([0.0, 1.0e-9, 0.0], dtype=float)},
+        },
+    )()
+
+    dashboard.push_snapshot(snapshot)
+
+    assert dashboard.target_rel_hist[-1] == pytest.approx(target_state6 - origin)
+    assert dashboard.rel_hist[-1] == pytest.approx(chaser_state6 - origin)
+    assert dashboard.thrust_ric_hist[-1] == pytest.approx([0.0, 1.0e-9, 0.0])
+
+
+def test_cislunar_bonus_uses_target_centered_moon_ric_panels() -> None:
+    path = (
+        Path(__file__).resolve().parents[2]
+        / "sim"
+        / "game"
+        / "configs"
+        / "game_training_rpo_bonus_cislunar_rendezvous.yaml"
+    )
+    config = SimulationConfig.from_yaml(path)
+    dashboard = object.__new__(PygameRPODashboard)
+    dashboard.camera_mode = _game_camera_mode(config)
+    dashboard.camera_rule_mode = _game_camera_rule_mode(config)
+    dashboard.relative_frame = _game_relative_frame(config)
+    dashboard.target_centered_plot_planes = _game_target_centered_plot_planes(config)
+    dashboard.target_centered_plot_axes = _game_target_centered_plot_axes(config)
+    chaser_current = np.array([-3.0, -4.0, 0.5], dtype=float)
+    target_current = np.zeros(3, dtype=float)
+    left_panel, right_panel = dashboard._plot_panel_specs()
+
+    ri_center = dashboard._camera_center_ric(
+        chaser_current=chaser_current,
+        target_current=target_current,
+        x_axis=left_panel[1],
+        y_axis=left_panel[2],
+    )
+    right_center = dashboard._camera_center_ric(
+        chaser_current=chaser_current,
+        target_current=target_current,
+        x_axis=right_panel[1],
+        y_axis=right_panel[2],
+    )
+
+    assert dashboard.camera_mode == "rule_toggle_pair"
+    assert dashboard.target_centered_plot_planes == ("RI", "RC")
+    assert left_panel == ("RI Plane: In-Track Vs Radial", 1, 0)
+    assert right_panel == ("RC Plane: Cross-Track Vs Radial", 2, 0)
+    assert dashboard._axis_label_for_plot(0) == "R km"
+    assert dashboard._axis_label_for_plot(1) == "I km"
+    assert dashboard._axis_label_for_plot(2) == "C km"
+    assert ri_center == pytest.approx(np.zeros(3, dtype=float))
+    assert right_center == pytest.approx(np.zeros(3, dtype=float))
+
+    dashboard.toggle_camera_rule_mode()
+
+    assert dashboard._camera_rule_mode_key() == "full_trajectory"
+    assert dashboard._camera_center_ric(
+        chaser_current=chaser_current,
+        target_current=target_current,
+        x_axis=left_panel[1],
+        y_axis=left_panel[2],
+    ) == pytest.approx(np.zeros(3, dtype=float))
+
+
+def test_cislunar_moon_background_is_right_plot_only_and_to_scale() -> None:
+    assert _should_draw_cislunar_moon_background(relative_frame="cislunar_l1", x_axis=1, y_axis=2) is True
+    assert _should_draw_cislunar_moon_background(relative_frame="cislunar_l1", x_axis=1, y_axis=0) is False
+    assert _should_draw_cislunar_moon_background(relative_frame="ric", x_axis=1, y_axis=2) is False
+
+    rect = _scaled_body_rect_tuple(
+        center_px=(100, 200),
+        radius_km=MOON_RADIUS_KM,
+        scale_x=0.01,
+        scale_y=0.02,
+    )
+
+    assert rect == (
+        100 - round(MOON_RADIUS_KM * 0.01),
+        200 - round(MOON_RADIUS_KM * 0.02),
+        2 * round(MOON_RADIUS_KM * 0.01),
+        2 * round(MOON_RADIUS_KM * 0.02),
+    )
+
+
+def test_cislunar_dashboard_uses_bounded_cached_cr3bp_prediction(monkeypatch: pytest.MonkeyPatch) -> None:
+    dashboard = object.__new__(PygameRPODashboard)
+    dashboard.coast_prediction_model = "cr3bp"
+    dashboard.coast_prediction_orbit_fraction = 1.0
+    dashboard.coast_prediction_horizon_s = 300.0
+    dashboard.coast_prediction_dt_s = 10.0
+    dashboard.cr3bp_coast_prediction_horizon_s = 21600.0
+    dashboard.cr3bp_coast_prediction_dt_s = 300.0
+    dashboard.mean_motion_rad_s = EARTH_MOON_MEAN_MOTION_RAD_S
+    dashboard.t_s = [0.0]
+    dashboard.reference_state_eci = cr3bp_l1_state_km_s()
+    dashboard._prediction_cache = {}
+
+    calls = 0
+    original = PygameRPODashboard._coast_prediction_from
+
+    def counted(self: PygameRPODashboard, rel0: np.ndarray, **kwargs: float | None) -> np.ndarray:
+        nonlocal calls
+        calls += 1
+        return original(self, rel0, **kwargs)
+
+    monkeypatch.setattr(PygameRPODashboard, "_coast_prediction_from", counted)
+    rel0 = np.array([1.0, 2.0, 3.0, 1.0e-3, 2.0e-3, 3.0e-3], dtype=float)
+
+    first = dashboard._coast_prediction_from_cached("chaser", rel0, active_burn=False)
+    second = dashboard._coast_prediction_from_cached("chaser", rel0, active_burn=False)
+
+    assert calls == 1
+    assert first.shape == (73, 6)
+    assert second == pytest.approx(first)
+
+
 def test_briefing_body_wraps_all_lines_for_scrollable_card() -> None:
     class FakeFont:
         def size(self, text):
@@ -5111,6 +5474,9 @@ def test_satellite_marker_size_uses_dots_icons_and_scale() -> None:
     assert _satellite_marker_size_px(1000.0, 1000.0) == 20
     assert _satellite_marker_size_px(5000.0, 5000.0) == 30
     assert _satellite_marker_size_px(100000.0, 100000.0) == 72
+    assert _satellite_marker_size_px(100000.0, 100000.0, max_size_px=128) == 128
+    assert _satellite_marker_size_px(100.0, 100.0, diameter_km=0.05) == 20
+    assert _satellite_marker_size_px(100.0, 100.0, diameter_km=0.12) == 20
 
 
 def test_dashboard_frame_cache_samples_shared_draw_rows_once() -> None:
@@ -5302,6 +5668,27 @@ def test_target_hcw_path_uses_target_relative_state_when_enabled() -> None:
     assert np.allclose(prediction[0], target_rel[0])
 
 
+def test_cislunar_target_path_uses_target_specific_full_horizon() -> None:
+    dashboard = object.__new__(PygameRPODashboard)
+    dashboard.coast_prediction_model = "cr3bp"
+    dashboard.coast_prediction_orbit_fraction = 1.0
+    dashboard.coast_prediction_horizon_s = 300.0
+    dashboard.coast_prediction_dt_s = 10.0
+    dashboard.cr3bp_coast_prediction_horizon_s = 21600.0
+    dashboard.cr3bp_coast_prediction_dt_s = 300.0
+    dashboard.target_coast_prediction_horizon_s = 172800.0
+    dashboard.target_coast_prediction_dt_s = 1800.0
+    dashboard.show_target_coast_prediction = True
+    dashboard.mean_motion_rad_s = EARTH_MOON_MEAN_MOTION_RAD_S
+    dashboard.t_s = [0.0]
+    target_rel = np.array([[100.0, 0.0, 50.0, 0.0, 0.01, 0.0]], dtype=float)
+
+    prediction = dashboard._target_coast_prediction(target_rel)
+
+    assert prediction.shape == (97, 6)
+    assert prediction[0] == pytest.approx(target_rel[0])
+
+
 def test_target_hcw_path_is_disabled_by_default() -> None:
     dashboard = object.__new__(PygameRPODashboard)
     dashboard.show_target_coast_prediction = False
@@ -5362,19 +5749,26 @@ def test_camera_rule_toggle_switches_between_current_pair_and_full_trajectory_sc
         ],
         dtype=float,
     )
+    target_ghost = np.array(
+        [
+            [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            [0.0, 12.0, 0.0, 0.0, 0.0, 0.0],
+        ],
+        dtype=float,
+    )
 
     assert dashboard._camera_rule_mode_key() == "current_pair"
-    assert (
-        dashboard._camera_rule_scale_points(
-            rel=rel,
-            target_rel=target_rel,
-            ghost=ghost,
-            x_axis=1,
-            y_axis=0,
-            camera_center=np.zeros(3, dtype=float),
-        )
-        == []
+    current_points = dashboard._camera_rule_scale_points(
+        rel=rel,
+        target_rel=target_rel,
+        ghost=ghost,
+        target_ghost=target_ghost,
+        x_axis=1,
+        y_axis=0,
+        camera_center=np.zeros(3, dtype=float),
     )
+    assert len(current_points) == 1
+    assert np.max(np.abs(np.vstack(current_points))) == pytest.approx(8.0)
     assert dashboard.toggle_camera_rule_mode() == "full_trajectory"
     assert dashboard._frame_cache_dirty is True
 
@@ -5382,14 +5776,15 @@ def test_camera_rule_toggle_switches_between_current_pair_and_full_trajectory_sc
         rel=rel,
         target_rel=target_rel,
         ghost=ghost,
+        target_ghost=target_ghost,
         x_axis=1,
         y_axis=0,
         camera_center=np.zeros(3, dtype=float),
     )
 
     assert dashboard._camera_rule_mode_key() == "full_trajectory"
-    assert len(points) == 3
-    assert np.max(np.abs(np.vstack(points))) == pytest.approx(8.0)
+    assert len(points) == 4
+    assert np.max(np.abs(np.vstack(points))) == pytest.approx(12.0)
     assert dashboard.toggle_camera_rule_mode() == "current_pair"
 
 
@@ -5418,6 +5813,19 @@ def test_default_camera_rule_preserves_prediction_zoom_scaling() -> None:
     assert dashboard._camera_rule_mode_key() == "default"
     assert len(points) == 1
     assert np.max(np.abs(points[0])) == pytest.approx(5.0)
+
+
+def test_full_trajectory_only_prediction_scales_only_in_full_trajectory_camera() -> None:
+    dashboard = object.__new__(PygameRPODashboard)
+    dashboard.camera_mode = "rule_toggle_pair"
+    dashboard.camera_rule_mode = "current_pair"
+    dashboard.plot_prediction_full_trajectory_only = True
+
+    assert dashboard._prediction_scales_current_camera() is False
+
+    dashboard.camera_rule_mode = "full_trajectory"
+
+    assert dashboard._prediction_scales_current_camera() is True
 
 
 def test_target_pair_camera_centers_ri_between_current_satellites() -> None:
@@ -5450,6 +5858,31 @@ def test_target_pair_camera_keeps_reference_centered_for_rc() -> None:
     )
 
     assert np.allclose(center, np.zeros(3, dtype=float))
+
+
+def test_rule_toggle_pair_camera_switches_between_midpoint_and_reference() -> None:
+    dashboard = object.__new__(PygameRPODashboard)
+    dashboard.camera_mode = "rule_toggle_pair"
+    dashboard.camera_rule_mode = "current_pair"
+    chaser = np.array([0.2, -1.0, 0.4], dtype=float)
+    target = np.array([-0.4, 0.5, -0.2], dtype=float)
+
+    current_center = dashboard._camera_center_ric(
+        chaser_current=chaser,
+        target_current=target,
+        x_axis=2,
+        y_axis=0,
+    )
+    dashboard.camera_rule_mode = "full_trajectory"
+    full_center = dashboard._camera_center_ric(
+        chaser_current=chaser,
+        target_current=target,
+        x_axis=2,
+        y_axis=0,
+    )
+
+    assert current_center == pytest.approx(np.array([-0.1, 0.0, 0.1], dtype=float))
+    assert full_center == pytest.approx(np.zeros(3, dtype=float))
 
 
 def test_target_centered_plane_override_keeps_ri_on_target() -> None:

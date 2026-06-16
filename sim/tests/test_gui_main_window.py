@@ -30,7 +30,7 @@ def _write_minimal_review_store(output_dir: Path) -> None:
             "CREATE TABLE run_metadata (scenario_name TEXT, duration_s REAL, dt_s REAL, samples INTEGER, "
             "oel_version TEXT, review_schema_version TEXT)"
         )
-        conn.execute("INSERT INTO run_metadata VALUES ('gui_orw_smoke', 2.0, 1.0, 3, 'test', '0.3')")
+        conn.execute("INSERT INTO run_metadata VALUES ('gui_evidence_studio_smoke', 2.0, 1.0, 3, 'test', '0.3')")
         conn.execute("CREATE TABLE relative_state (time_s REAL, deputy_id TEXT, chief_id TEXT, range_km REAL)")
         conn.executemany(
             "INSERT INTO relative_state VALUES (?, 'chaser', 'target', ?)",
@@ -148,7 +148,9 @@ def test_results_tab_selects_start_here_first(main_window: MainWindow, tmp_path:
     assert "Open index.md first" in main_window.results_summary.toPlainText()
 
 
-def test_orw_plot_builder_saves_custom_figure_with_provenance(main_window: MainWindow, tmp_path: Path) -> None:
+def test_evidence_studio_advanced_query_saves_custom_figure_with_provenance(
+    main_window: MainWindow, tmp_path: Path
+) -> None:
     output_dir = tmp_path / "review_output"
     _write_minimal_review_store(output_dir)
 
@@ -174,13 +176,59 @@ def test_orw_plot_builder_saves_custom_figure_with_provenance(main_window: MainW
     assert manifest["artifacts"][-1]["style_name"] == "oel_light"
 
 
-def test_orw_review_only_mode_opens_plot_builder(qt_app: QApplication, tmp_path: Path) -> None:
+def test_evidence_studio_review_only_mode_opens_studio(qt_app: QApplication, tmp_path: Path) -> None:
     output_dir = tmp_path / "review_output"
     _write_minimal_review_store(output_dir)
     window = MainWindow(output_dir=output_dir)
     try:
         assert window.review_only_mode is True
-        assert window.results_tabs.tabText(window.results_tabs.currentIndex()) == "Plot Builder"
+        assert window.windowTitle().endswith(" - OEL Evidence Studio")
+        assert window.results_tabs.tabText(window.results_tabs.currentIndex()) == "Evidence Studio"
         assert window.review_query_run_button.isEnabled()
+        assert not (output_dir / "evidence_studio_workspace").exists()
+        explorer_items = [window.output_files.item(row).text() for row in range(window.output_files.count())]
+        assert "Table: relative_state" in explorer_items
+        assert any(item.startswith("Plot Recipe: Relative range") for item in explorer_items)
+        assert window.evidence_agent_box.title() == "Custom Evidence Plots"
+    finally:
+        window.deleteLater()
+
+
+def test_evidence_studio_plot_builder_button_and_fullscreen(
+    qt_app: QApplication, tmp_path: Path
+) -> None:
+    output_dir = tmp_path / "review_output"
+    _write_minimal_review_store(output_dir)
+    window = MainWindow(output_dir=output_dir)
+    try:
+        window._open_evidence_plot_builder()
+
+        assert window.results_tabs.tabText(window.results_tabs.currentIndex()) == "Advanced Query"
+        assert "Advanced Query" in window.evidence_agent_status.text()
+
+        window._toggle_evidence_viewer_fullscreen()
+
+        assert not window.evidence_left_panel.isVisible()
+        assert window.evidence_fullscreen_button.text() == "Exit Fullscreen"
+    finally:
+        window.deleteLater()
+
+
+def test_evidence_studio_refresh_shows_api_generated_artifact(qt_app: QApplication, tmp_path: Path) -> None:
+    output_dir = tmp_path / "review_output"
+    _write_minimal_review_store(output_dir)
+    window = MainWindow(output_dir=output_dir)
+    try:
+        figure_dir = output_dir / "review" / "figures"
+        figure_dir.mkdir(parents=True)
+        figure_path = figure_dir / "api_custom_note.md"
+        figure_path.write_text("# API Output\n", encoding="utf-8")
+
+        window._refresh_output_files()
+
+        explorer_items = [window.output_files.item(row).text() for row in range(window.output_files.count())]
+        assert "Api Custom Note (md)" in explorer_items
+        window._select_output_path(figure_path)
+        assert "API Output" in window.preview_text.toPlainText()
     finally:
         window.deleteLater()

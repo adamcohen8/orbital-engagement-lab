@@ -6,6 +6,52 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.12.0 - 2026-06-16
+
+Release thesis: `v0.12.0` expands the RPO Trainer into a more complete
+classroom and web-preview experience. It adds the local Pursuit Arcade browser
+prototype, beta cislunar rendezvous training, custom review evidence plotting,
+and a clearer Evidence Studio identity for completed-run inspection.
+
+### Added
+
+- Added a browser-native Pursuit Arcade prototype to the web RPO Trainer
+  Preview, including deterministic two-body replay validation, multi-round
+  local play, boss-round elliptic projections, static replay plot generation,
+  and local competition fixtures/tests.
+- Added the beta `Bonus Level - Cislunar Rendezvous` trainer mission with an
+  opt-in Earth-Moon CR3BP propagator, an L2 NRHO target seed, Moon-centered
+  target RIC controls, linearized CR3BP trajectory projection, custom
+  Artemis-inspired sprites, and high-speed cislunar time scaling.
+- Added CR3BP support for the game/training path, including physical
+  Earth-Moon rotating-frame propagation, deterministic halo/NRHO seed states,
+  Moon-RIC transforms, and STM-based projection support.
+- Added `sim.review.EvidencePlotter`, `python -m sim.review plot`, and OEL
+  Evidence Studio support for generating OEL-styled custom figures from
+  completed review-store evidence.
+
+### Changed
+
+- Renamed the experimental Output Review Workbench surface to OEL Evidence
+  Studio across docs and GUI copy, while keeping scripted review inspection
+  centered on `python -m sim.review`.
+- Updated the downloadable and web RPO Trainer arcade flow with round
+  transitions, camera toggles, defensive target behavior, arcade/boss music,
+  HUD layout fixes, and pause restrictions during arcade attempts.
+- Updated agent and review docs to prefer the custom review plotting API for
+  brief-ready figures and to reserve Evidence Studio for interactive local
+  exploration.
+
+### Fixed
+
+- Fixed `run_game.py --speed-multiple` so omitted values fall back to each
+  level's configured default instead of raising on `None`.
+- Fixed cislunar dashboard handling for full truth arrays, target-centered
+  Moon-RIC plotting, larger level-specific sprites, and bounded cached CR3BP
+  projections.
+- Tightened the public web-preview deployment smoke checks so Pursuit Arcade
+  module and music assets are included in the static Pages artifact.
+
 ## 0.11.0 - 2026-06-13
 
 Release thesis: `v0.11.0` turns review evidence into the common inspection

@@ -9,9 +9,9 @@ from pathlib import Path
 def main(argv: list[str] | None = None, *, importer=import_module) -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Open an OEL output folder in the experimental Output Review Workbench "
-            "dynamic plot creator. Use it to explore review-store data, build "
-            "custom plots, and save styled figures with provenance."
+            "Open an OEL output folder in OEL Evidence Studio, formerly the "
+            "experimental Output Review Workbench. Use it to explore review-store "
+            "data, ask for brief-ready plots, and save styled figures with provenance."
         )
     )
     parser.add_argument("--output", required=True, help="Completed OEL output folder to review.")
@@ -23,7 +23,7 @@ def main(argv: list[str] | None = None, *, importer=import_module) -> int:
     except ModuleNotFoundError as exc:
         if str(getattr(exc, "name", "") or "").split(".", 1)[0] == "PySide6":
             raise SystemExit(
-                'PySide6 is not installed. Install ORW dependencies with `python -m pip install ".[gui]"`.'
+                'PySide6 is not installed. Install Evidence Studio dependencies with `python -m pip install ".[gui]"`.'
             ) from exc
         raise
 

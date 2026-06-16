@@ -82,6 +82,10 @@ from sim.review import (
     numeric_columns,
     save_review_plot,
 )
+from sim.review.evidence_studio import (
+    EVIDENCE_AGENT_WORKSPACE_DIRNAME,
+    list_evidence_plot_recipes,
+)
 
 GUI_CAPABILITIES = get_gui_capabilities()
 OUTPUT_MODES = GUI_CAPABILITIES.output_modes
@@ -159,6 +163,7 @@ class MainWindow(QMainWindow):
         self.review_workspace: ReviewWorkspace | None = None
         self.review_query_result = None
         self.review_plot_preview_path: Path | None = None
+        self.evidence_viewer_fullscreen = False
         self._suppress_review_source_changes = False
         self.rocket_guidance_modifiers_config: list[dict] = []
         self._yaml_has_unapplied_changes = False
@@ -233,7 +238,7 @@ class MainWindow(QMainWindow):
         top_bar = QHBoxLayout()
         top_bar.setContentsMargins(0, 0, 0, 0)
         top_bar.setSpacing(4)
-        self.review_mode_label = QLabel("Output Review Workbench")
+        self.review_mode_label = QLabel("OEL Evidence Studio")
         self.review_mode_label.setStyleSheet("font-weight: 700; font-size: 15px;")
         self.review_mode_label.hide()
         top_bar.addWidget(self.review_mode_label)
@@ -359,8 +364,9 @@ class MainWindow(QMainWindow):
         status.showMessage("Ready.")
 
     def _apply_output_review_mode_ui(self) -> None:
-        self.setWindowTitle("Orbital Engagement Lab - Output Review Workbench")
+        self.setWindowTitle("Orbital Engagement Lab - OEL Evidence Studio")
         self.review_mode_label.show()
+        self.review_mode_label.setText("OEL Evidence Studio")
         self.base_config_label.hide()
         self.config_selector.hide()
         for widget in (
@@ -379,7 +385,7 @@ class MainWindow(QMainWindow):
             self.tabs.setTabVisible(index, index == 6)
         self.tabs.setCurrentIndex(6)
         if hasattr(self, "results_tabs"):
-            self.results_tabs.setCurrentIndex(3)
+            self.results_tabs.setCurrentIndex(2)
 
     def _build_navigation_tree(self) -> QTreeWidget:
         tree = QTreeWidget()
@@ -1791,6 +1797,10 @@ class MainWindow(QMainWindow):
 
     def _refresh_output_files(self) -> None:
         self.output_files.clear()
+        if hasattr(self, "evidence_explorer_label"):
+            self.evidence_explorer_label.setText(
+                "Evidence Explorer" if getattr(self, "review_only_mode", False) else "Output Files"
+            )
         self.preview_image_path = None
         self.preview_title.setText("Select an artifact to preview.")
         self.preview_image.setText("No image selected.")
@@ -1810,12 +1820,17 @@ class MainWindow(QMainWindow):
                 cfg = validate_config(self._collect_config_from_widgets())
                 output_dir = self._resolve_output_dir(cfg.outputs.output_dir)
                 used_temp_dir = False
-            files = sorted(get_output_files(output_dir), key=self._artifact_priority)
+            files = sorted(
+                (path for path in get_output_files(output_dir) if self._should_show_output_artifact(path)),
+                key=self._artifact_priority,
+            )
             for path in files:
                 label = self._artifact_label(path)
                 item_text = label
                 self.output_files.addItem(item_text)
-                self.output_files.item(self.output_files.count() - 1).setData(Qt.UserRole, str(path))
+                self.output_files.item(self.output_files.count() - 1).setData(
+                    Qt.UserRole, {"kind": "file", "path": str(path), "label": label}
+                )
             self._refresh_results_summary(output_dir, files, used_temp_dir=used_temp_dir)
             self._refresh_review_workspace(output_dir)
             if self.output_files.count() > 0:
@@ -1831,6 +1846,22 @@ class MainWindow(QMainWindow):
             return True
         except ValueError:
             return False
+
+    def _should_show_output_artifact(self, path: Path) -> bool:
+        if self.results_output_dir is None:
+            return True
+        try:
+            rel = path.resolve().relative_to(self.results_output_dir.resolve())
+        except ValueError:
+            return True
+        parts = rel.parts
+        if not parts or parts[0] != EVIDENCE_AGENT_WORKSPACE_DIRNAME:
+            return True
+        if len(parts) == 1:
+            return False
+        if parts[1] == "data" or parts[1] == "tools":
+            return False
+        return True
 
     def _refresh_results_summary(self, output_dir: Path, files: list[Path], *, used_temp_dir: bool) -> None:
         summary_path = output_dir / "master_run_summary.json"
@@ -1922,6 +1953,7 @@ class MainWindow(QMainWindow):
             self.review_query_save_figure_button.setEnabled(False)
             self.review_plot_preview_button.setEnabled(False)
             self._populate_review_query_sources()
+            self._append_review_evidence_sources()
         except Exception:
             self.review_workspace = None
             self.review_query_status.setText("No review/run.sqlite store found for this output folder.")
@@ -1933,6 +1965,8 @@ class MainWindow(QMainWindow):
             self.review_query_table.clear()
             self.review_query_table.setRowCount(0)
             self.review_query_table.setColumnCount(0)
+            if hasattr(self, "evidence_agent_status"):
+                self.evidence_agent_status.setText("No review store found; existing artifacts are still available.")
 
     def _format_workflow_manifest_summary(self, manifest: dict[str, Any]) -> str:
         lines = [
@@ -2015,6 +2049,57 @@ class MainWindow(QMainWindow):
         if default_index >= 0:
             self.review_query_source_combo.setCurrentIndex(default_index)
         self._on_review_query_source_changed()
+
+    def _add_evidence_item(self, label: str, payload: dict[str, str]) -> None:
+        self.output_files.addItem(label)
+        self.output_files.item(self.output_files.count() - 1).setData(Qt.UserRole, payload)
+
+    def _append_review_evidence_sources(self) -> None:
+        if self.review_workspace is None or not getattr(self, "review_only_mode", False):
+            return
+        for table in self.review_workspace.tables():
+            self._add_evidence_item(
+                f"Table: {table}",
+                {"kind": "table", "table": table, "label": f"Table: {table}"},
+            )
+        for query in list_saved_review_queries():
+            self._add_evidence_item(
+                f"Saved Query: {query.name}",
+                {
+                    "kind": "saved_query",
+                    "saved_query": query.name,
+                    "sql": query.sql,
+                    "label": f"Saved Query: {query.name}",
+                },
+            )
+        for recipe in list_evidence_plot_recipes():
+            recipe_id = str(recipe.get("recipe_id", ""))
+            self._add_evidence_item(
+                f"Plot Recipe: {recipe.get('title', recipe_id)}",
+                {
+                    "kind": "plot_recipe",
+                    "recipe_id": recipe_id,
+                    "label": str(recipe.get("title", recipe_id)),
+                },
+            )
+        generated_path = self.review_workspace.output_dir / "review" / "generated_artifacts.json"
+        if not generated_path.is_file():
+            return
+        try:
+            data = json.loads(generated_path.read_text(encoding="utf-8"))
+        except Exception:
+            return
+        for item in list(dict(data or {}).get("artifacts", []) or []):
+            if not isinstance(item, dict):
+                continue
+            rel_path = str(item.get("path", "") or "")
+            artifact_id = str(item.get("artifact_id", "") or rel_path)
+            if rel_path:
+                path = self.review_workspace.output_dir / rel_path
+                self._add_evidence_item(
+                    f"Generated: {artifact_id}",
+                    {"kind": "file", "path": str(path), "label": f"Generated: {artifact_id}"},
+                )
 
     def _on_review_query_source_changed(self, *_args) -> None:
         if getattr(self, "_suppress_review_source_changes", False):
@@ -2140,9 +2225,9 @@ class MainWindow(QMainWindow):
             return
         try:
             spec = self._review_plot_spec_from_controls(force_png=True)
-            preview_dir = Path(tempfile.gettempdir()) / "oel_orw_previews"
+            preview_dir = Path(tempfile.gettempdir()) / "oel_evidence_studio_previews"
             preview_dir.mkdir(parents=True, exist_ok=True)
-            preview_path = preview_dir / "orw_preview.png"
+            preview_path = preview_dir / "evidence_studio_preview.png"
             artifact = save_review_plot(self.review_workspace, spec, path=preview_path, record=False)
         except Exception as exc:
             self._show_error("Preview Failed", str(exc))
@@ -2180,7 +2265,23 @@ class MainWindow(QMainWindow):
         path_data = item.data(Qt.UserRole)
         if not path_data:
             return
-        path = Path(str(path_data))
+        if isinstance(path_data, dict):
+            kind = str(path_data.get("kind", "") or "")
+            if kind == "table":
+                self._preview_review_table(str(path_data.get("table", "") or ""))
+                return
+            if kind == "saved_query":
+                self._preview_saved_review_query(path_data)
+                return
+            if kind == "plot_recipe":
+                self._preview_plot_recipe(path_data)
+                return
+            path_value = str(path_data.get("path", "") or "")
+        else:
+            path_value = str(path_data)
+        if not path_value:
+            return
+        path = Path(path_value)
         self.preview_title.setText(self._artifact_label(path))
         suffix = path.suffix.lower()
         if suffix in {".png", ".jpg", ".jpeg", ".bmp"}:
@@ -2206,6 +2307,94 @@ class MainWindow(QMainWindow):
             self.preview_text.setPlainText(path.read_text(encoding="utf-8")[:20000])
         except Exception as exc:
             self.preview_text.setPlainText(f"Preview not available: {exc}")
+
+    def _preview_review_table(self, table: str) -> None:
+        self.preview_title.setText(f"Table: {table}")
+        self.preview_stack.setCurrentIndex(1)
+        self.preview_image_path = None
+        self.preview_image.setText("Preview available in Text tab.")
+        self.preview_image.setPixmap(QPixmap())
+        if self.review_workspace is None:
+            self.preview_text.setPlainText("No review store loaded.")
+            return
+        try:
+            result = self.review_workspace.query(f"SELECT * FROM {self._quote_sql_identifier(table)} LIMIT 20", max_rows=20)
+            self.preview_text.setPlainText(json.dumps({"columns": result.columns, "rows": result.rows}, indent=2))
+        except Exception as exc:
+            self.preview_text.setPlainText(f"Could not preview table: {exc}")
+
+    def _preview_saved_review_query(self, payload: dict[str, str]) -> None:
+        name = str(payload.get("saved_query", "") or "")
+        sql = str(payload.get("sql", "") or "")
+        self.preview_title.setText(f"Saved Query: {name}")
+        self.preview_stack.setCurrentIndex(1)
+        self.preview_image_path = None
+        self.preview_image.setText("Preview available in Text tab.")
+        self.preview_image.setPixmap(QPixmap())
+        self.preview_text.setPlainText(sql)
+
+    def _preview_plot_recipe(self, payload: dict[str, str]) -> None:
+        recipe_id = str(payload.get("recipe_id", "") or "")
+        label = str(payload.get("label", "") or recipe_id)
+        self.preview_title.setText(f"Plot Recipe: {label}")
+        self.preview_stack.setCurrentIndex(1)
+        self.preview_image_path = None
+        self.preview_image.setText("Preview available in Text tab.")
+        self.preview_image.setPixmap(QPixmap())
+        self.preview_text.setPlainText(
+            "Use this recipe as context for an agent request, or create a plot from the Advanced Query tab.\n"
+            f"recipe_id: {recipe_id}"
+        )
+
+    def _evidence_style_name(self) -> str:
+        if getattr(self, "evidence_light_button", None) is not None and self.evidence_light_button.isChecked():
+            return "oel_light"
+        return "oel_dark"
+
+    def _evidence_file_format(self) -> str:
+        if getattr(self, "evidence_format_combo", None) is None:
+            return "png"
+        return self.evidence_format_combo.currentText().strip().lower() or "png"
+
+    def _sync_manual_plot_controls_from_evidence(self) -> None:
+        style_name = self._evidence_style_name()
+        style_index = self.review_plot_style_combo.findData(style_name)
+        if style_index >= 0:
+            self.review_plot_style_combo.setCurrentIndex(style_index)
+        format_text = self._evidence_file_format()
+        format_index = self.review_plot_format_combo.findText(format_text)
+        if format_index >= 0:
+            self.review_plot_format_combo.setCurrentIndex(format_index)
+
+    def _open_evidence_plot_builder(self) -> None:
+        if hasattr(self, "results_tabs") and self.results_tabs.count() > 3:
+            self.results_tabs.setCurrentIndex(3)
+        if hasattr(self, "evidence_agent_status"):
+            self.evidence_agent_status.setText("Use Advanced Query to create a custom OEL-styled figure.")
+
+    def _select_output_path(self, path: Path) -> None:
+        target = str(path.resolve())
+        for row in range(self.output_files.count()):
+            item = self.output_files.item(row)
+            data = item.data(Qt.UserRole)
+            candidate = ""
+            if isinstance(data, dict):
+                candidate = str(data.get("path", "") or "")
+            elif data:
+                candidate = str(data)
+            if candidate and str(Path(candidate).resolve()) == target:
+                self.output_files.setCurrentRow(row)
+                return
+
+    def _toggle_evidence_viewer_fullscreen(self) -> None:
+        self.evidence_viewer_fullscreen = not bool(getattr(self, "evidence_viewer_fullscreen", False))
+        self.evidence_left_panel.setVisible(not self.evidence_viewer_fullscreen)
+        self.evidence_fullscreen_button.setText("Exit Fullscreen" if self.evidence_viewer_fullscreen else "Fullscreen")
+        if self.preview_image_path is not None:
+            self._update_image_preview()
+
+    def _quote_sql_identifier(self, value: str) -> str:
+        return '"' + str(value).replace('"', '""') + '"'
 
     def _update_image_preview(self) -> None:
         if self.preview_image_path is None or not self.preview_image_path.exists():
@@ -2253,6 +2442,23 @@ class MainWindow(QMainWindow):
             return str(path)
 
     def _artifact_label(self, path: Path) -> str:
+        if self.results_output_dir is not None:
+            try:
+                rel = path.resolve().relative_to(self.results_output_dir.resolve())
+                parts = rel.parts
+                if parts and parts[0] == EVIDENCE_AGENT_WORKSPACE_DIRNAME:
+                    if len(parts) >= 3 and parts[1] == "generated":
+                        return f"Generated: {self._artifact_label(Path(*parts[2:]))}"
+                    if path.name == "AGENTS.md":
+                        return "Agent Workspace: AGENTS (md)"
+                    if path.name == "README.md":
+                        return "Agent Workspace: README (md)"
+                    if path.name == "task_packet.json":
+                        return "Agent Workspace: Task Packet (json)"
+                    if path.name == "evidence_manifest.json":
+                        return "Agent Workspace: Evidence Manifest (json)"
+            except ValueError:
+                pass
         known = {
             "index.md": "Start Here",
             "master_run_summary.json": "Run Summary",
@@ -2362,7 +2568,7 @@ class MainWindow(QMainWindow):
         self._refresh_output_files()
         self.tabs.setCurrentIndex(6)
         if hasattr(self, "results_tabs"):
-            self.results_tabs.setCurrentIndex(3 if getattr(self, "review_only_mode", False) else 0)
+            self.results_tabs.setCurrentIndex(2 if getattr(self, "review_only_mode", False) else 0)
         self.statusBar().showMessage(f"Opened output review: {self.results_output_dir}", 5000)
 
     def _on_open_quickstart(self) -> None:
@@ -2538,8 +2744,8 @@ class MainWindow(QMainWindow):
         if self.results_output_dir is not None:
             answer = QMessageBox.question(
                 self,
-                "Open Output Review Workbench?",
-                "Simulation finished. Open the Output Review Workbench for this output folder?",
+                "Open OEL Evidence Studio?",
+                "Simulation finished. Open OEL Evidence Studio for this output folder?",
                 QMessageBox.Yes | QMessageBox.No,
                 QMessageBox.Yes,
             )
@@ -2662,7 +2868,7 @@ class MainWindow(QMainWindow):
         marker = "*" if self.is_dirty else ""
         if getattr(self, "review_only_mode", False):
             output_name = self.results_output_dir.name if self.results_output_dir is not None else "Output"
-            self.setWindowTitle(f"{marker}{output_name} - OEL Output Review Workbench")
+            self.setWindowTitle(f"{marker}{output_name} - OEL Evidence Studio")
             return
         self.setWindowTitle(f"{marker}{self.loaded_config_path.name} - Orbital Engagement Lab Operator Console")
 

@@ -5,6 +5,9 @@ from sim.review.manifest import (
     write_workflow_review,
 )
 from sim.review.plotting import (
+    EVIDENCE_PLOT_RECIPES,
+    EvidencePlotRecipe,
+    EvidencePlotter,
     ReviewPlotArtifact,
     ReviewPlotSpec,
     categorical_columns,
@@ -32,6 +35,9 @@ __all__ = [
     "ReviewWorkspace",
     "SAVED_REVIEW_QUERIES",
     "WORKFLOW_REVIEW_SCHEMA_VERSION",
+    "EVIDENCE_PLOT_RECIPES",
+    "EvidencePlotRecipe",
+    "EvidencePlotter",
     "ReviewPlotArtifact",
     "ReviewPlotSpec",
     "SavedReviewQuery",

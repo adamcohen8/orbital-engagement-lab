@@ -149,13 +149,18 @@ Common review queries are maintained in
 [`agent-review-queries.md`](agent-review-queries.md). Agents should state the
 query used when a conclusion depends on review-store evidence.
 
-For agent review, prefer `.venv/bin/python -m sim.review`. The Output Review
-Workbench is an experimental dynamic plot creator for completed runs. Use it
-only when the user explicitly asks for interactive local plotting:
+For table review, prefer `.venv/bin/python -m sim.review`. For custom brief or
+report figures, use the OEL-styled review plotting API described in
+[`agent-custom-plots.md`](agent-custom-plots.md):
 
 ```bash
-.venv/bin/python run_orw.py --output outputs/my_run
+.venv/bin/python -m sim.review plot outputs/my_run --recipe relative_velocity_components --style light
+.venv/bin/python -m sim.review.plot outputs/my_run --sql "SELECT time_s, range_km FROM relative_state ORDER BY time_s" --x time_s --y range_km
+.venv/bin/python run_evidence_studio.py --output outputs/my_run
 ```
+
+Evidence Studio is an experimental local viewer/workbench for completed outputs;
+do not treat it as the primary agent interface.
 
 For repeatable agent handoffs, `sim.agent_task` can prepare review-enabled
 scenario copies, validate/run bundled recipes, inspect completed outputs,

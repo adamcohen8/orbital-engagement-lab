@@ -59,7 +59,9 @@ def relative_reference_for_object(cfg: SimulationScenarioConfig, object_id: str)
     explicit = str(initial_state.get("relative_to", "") or "").strip()
     if explicit:
         return explicit
-    if "relative_to_target_ric" in initial_state and "target" in configured_objects(cfg):
+    if (
+        "relative_to_target_ric" in initial_state or "relative_to_target_cislunar" in initial_state
+    ) and "target" in configured_objects(cfg):
         return "target"
     if object_id == "chaser" and "target" in configured_objects(cfg):
         return "target"

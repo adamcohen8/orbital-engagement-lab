@@ -102,7 +102,7 @@ def test_agent_task_inspects_completed_run_and_creates_plot(tmp_path: Path) -> N
     assert plot["status"] == "ok"
     assert Path(plot["path"]).is_file()
     generated = json.loads((outdir / "review" / "generated_artifacts.json").read_text(encoding="utf-8"))
-    assert generated["artifacts"][-1]["source"] == "output_review_workbench"
+    assert generated["artifacts"][-1]["source"] == "oel_review_plot_api"
 
 
 def test_agent_task_compare_configs_writes_metric_deltas(tmp_path: Path) -> None:

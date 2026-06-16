@@ -118,6 +118,15 @@ Arcade variant:
   target defensive delta-v budget holds at 0.1 m/s through round 20 before
   increasing by 0.01 m/s per round.
 
+Beta bonus level:
+
+- `rpo_bonus_cislunar_rendezvous`
+  Complete a close rendezvous with a target initialized on a corrected
+  Earth-Moon L2 NRHO seed. The beta mission uses the opt-in CR3BP rotating-frame
+  propagator, target-centered Moon-RIC controls, custom cislunar sprites, and a
+  linearized CR3BP coast-prediction overlay. This is an experimental teaching
+  level, not an operational mission-design model.
+
 ## Controls
 
 Default trainer controls should be RIC translation:
@@ -218,6 +227,7 @@ scoped to the final free-maneuver phase.
 - Done: `rpo_08_elliptic_rendezvous`.
 - Done: `rpo_09_defensive_target_demo`.
 - Done: `rpo_10_evasive_target_survival`.
+- Beta: `rpo_bonus_cislunar_rendezvous`.
 - Done: add instructor notes for each scenario.
 - Done for implemented levels: add success thresholds and scorecards.
 - Done for implemented levels: treat each mission as a pass/fail level.
@@ -317,6 +327,8 @@ Implemented levels:
   evasion directions, tightening goal radius, randomized energy-matched starts,
   elliptical boss rounds, round-weighted scoring, conserved-delta-v time
   rewards, ramping boss eccentricity, and a late-round target delta-v ramp.
+- `rpo_bonus_cislunar_rendezvous`: beta rendezvous near an Earth-Moon L2 NRHO
+  seed using Moon-centered RIC controls and a CR3BP trainer projection overlay.
 
 Next focus:
 

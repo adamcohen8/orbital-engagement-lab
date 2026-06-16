@@ -44,7 +44,13 @@ from sim.game.debrief import (
 )
 from sim.game.defensive_target import DefensiveTargetIntentProvider
 from sim.game.formatting import format_distance_km, format_speed_km_s, format_speed_m_s
-from sim.game.manual import KeyboardCommandState, ManualGameCommandProvider
+from sim.game.manual import (
+    CISLUNAR_TRANSLATION_MODES,
+    MOON_RIC_TRANSLATION_MODES,
+    TRANSLATION_CONTROL_MODES,
+    KeyboardCommandState,
+    ManualGameCommandProvider,
+)
 from sim.game.recording_controller import GameClipRecordingController, GameRecordingController
 from sim.game.session import (
     _attempt_config_for_training_clock,
@@ -181,6 +187,43 @@ def _game_control_mode(config: SimulationConfig) -> str:
     return str(game_cfg.get("control_mode", default) or default).strip().lower()
 
 
+def _game_relative_frame(config: SimulationConfig) -> str:
+    game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
+    return str(game_cfg.get("relative_frame", "ric") or "ric").strip().lower()
+
+
+def _game_target_sprite_path(config: SimulationConfig) -> Path | None:
+    game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
+    raw = str(game_cfg.get("target_sprite_path", "") or "").strip()
+    return Path(raw) if raw else None
+
+
+def _game_chaser_sprite_path(config: SimulationConfig) -> Path | None:
+    game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
+    raw = str(game_cfg.get("chaser_sprite_path", "") or "").strip()
+    return Path(raw) if raw else None
+
+
+def _game_target_sprite_diameter_km(config: SimulationConfig) -> float:
+    game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
+    return float(game_cfg.get("target_sprite_diameter_km", 0.006) or 0.006)
+
+
+def _game_chaser_sprite_diameter_km(config: SimulationConfig) -> float:
+    game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
+    return float(game_cfg.get("chaser_sprite_diameter_km", 0.006) or 0.006)
+
+
+def _game_target_sprite_max_size_px(config: SimulationConfig) -> int:
+    game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
+    return max(int(game_cfg.get("target_sprite_max_size_px", 72) or 72), 20)
+
+
+def _game_chaser_sprite_max_size_px(config: SimulationConfig) -> int:
+    game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
+    return max(int(game_cfg.get("chaser_sprite_max_size_px", 72) or 72), 20)
+
+
 def _game_controlled_object_id(config: SimulationConfig, default: str = "chaser") -> str:
     game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
     return str(game_cfg.get("controlled_object_id", default) or default)
@@ -217,6 +260,39 @@ def _game_plot_prediction_in_zoom(config: SimulationConfig) -> bool:
 def _game_plot_prediction_zoom_max_span_km(config: SimulationConfig) -> float | None:
     game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
     return _positive_float_or_none(game_cfg.get("plot_prediction_zoom_max_span_km"))
+
+
+def _game_plot_prediction_full_trajectory_only(config: SimulationConfig) -> bool:
+    game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
+    return bool(game_cfg.get("plot_prediction_full_trajectory_only", False))
+
+
+def _game_cr3bp_coast_prediction_horizon_s(config: SimulationConfig) -> float | None:
+    game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
+    return _positive_float_or_none(game_cfg.get("cr3bp_coast_prediction_horizon_s"))
+
+
+def _game_cr3bp_coast_prediction_dt_s(config: SimulationConfig) -> float | None:
+    game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
+    return _positive_float_or_none(game_cfg.get("cr3bp_coast_prediction_dt_s"))
+
+
+def _game_cr3bp_projection_mode(config: SimulationConfig) -> str:
+    game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
+    value = str(game_cfg.get("cr3bp_projection_mode", "nonlinear") or "nonlinear").strip().lower().replace("-", "_")
+    if value in {"linear", "linearized", "stm", "variational"}:
+        return "linearized"
+    return "nonlinear"
+
+
+def _game_target_coast_prediction_horizon_s(config: SimulationConfig) -> float | None:
+    game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
+    return _positive_float_or_none(game_cfg.get("target_coast_prediction_horizon_s"))
+
+
+def _game_target_coast_prediction_dt_s(config: SimulationConfig) -> float | None:
+    game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
+    return _positive_float_or_none(game_cfg.get("target_coast_prediction_dt_s"))
 
 
 def _positive_float_or_none(value: Any) -> float | None:
@@ -377,6 +453,11 @@ def _game_camera_rule_mode(config: SimulationConfig) -> str:
     return "default"
 
 
+def _game_camera_rule_toggle_enabled(config: SimulationConfig) -> bool:
+    game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
+    return bool(game_cfg.get("camera_rule_toggle_enabled", False))
+
+
 def _game_level_title(config: SimulationConfig) -> str:
     game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
     title = str(game_cfg.get("level_name", "") or "").strip()
@@ -398,6 +479,37 @@ def _game_show_target_hcw_path(config: SimulationConfig) -> bool:
 def _game_coast_prediction_model(config: SimulationConfig) -> str:
     game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
     return str(game_cfg.get("coast_prediction_model", "hcw") or "hcw").strip().lower()
+
+
+def _game_initial_speed_multiple(config: SimulationConfig, requested_speed_multiple: float | None) -> float:
+    options = _game_speed_multiplier_options(config)
+    if requested_speed_multiple is not None:
+        return _coerce_speed_multiple(float(requested_speed_multiple), options=options)
+    game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
+    configured = _positive_float_or_none(game_cfg.get("initial_speed_multiple"))
+    return _coerce_speed_multiple(1.0 if configured is None else configured, options=options)
+
+
+def _game_speed_multiplier_options(config: SimulationConfig) -> tuple[float, ...]:
+    game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
+    raw = game_cfg.get("speed_multiplier_options")
+    if raw is None:
+        return SPEED_MULTIPLIER_OPTIONS
+    if isinstance(raw, (str, bytes)):
+        values = [raw]
+    else:
+        try:
+            values = list(raw)
+        except TypeError:
+            return SPEED_MULTIPLIER_OPTIONS
+    parsed: list[float] = []
+    for value in values:
+        numeric = _positive_float_or_none(value)
+        if numeric is not None and not any(np.isclose(numeric, existing) for existing in parsed):
+            parsed.append(float(numeric))
+    if not parsed:
+        return SPEED_MULTIPLIER_OPTIONS
+    return tuple(sorted(parsed))
 
 
 def _game_sandbox_enabled(config: SimulationConfig) -> bool:
@@ -540,21 +652,28 @@ def _wall_step_s(dt_s: float, speed_multiple: float) -> float:
     return float(dt_s) / max(float(speed_multiple), 1.0e-9)
 
 
-def _coerce_speed_multiple(speed_multiple: float) -> float:
+def _coerce_speed_multiple(speed_multiple: float, *, options: tuple[float, ...] | None = None) -> float:
     value = float(speed_multiple)
-    return min(SPEED_MULTIPLIER_OPTIONS, key=lambda option: abs(option - value))
+    choices = tuple(options or SPEED_MULTIPLIER_OPTIONS)
+    return min(choices, key=lambda option: abs(option - value))
 
 
-def _adjust_speed_multiple(speed_multiple: float, change: int) -> float:
-    current = _coerce_speed_multiple(speed_multiple)
-    idx = SPEED_MULTIPLIER_OPTIONS.index(current)
-    idx = int(np.clip(idx + int(change), 0, len(SPEED_MULTIPLIER_OPTIONS) - 1))
-    return SPEED_MULTIPLIER_OPTIONS[idx]
+def _adjust_speed_multiple(
+    speed_multiple: float,
+    change: int,
+    *,
+    options: tuple[float, ...] | None = None,
+) -> float:
+    choices = tuple(options or SPEED_MULTIPLIER_OPTIONS)
+    current = _coerce_speed_multiple(speed_multiple, options=choices)
+    idx = choices.index(current)
+    idx = int(np.clip(idx + int(change), 0, len(choices) - 1))
+    return choices[idx]
 
 
 def _has_maneuver_input(state: KeyboardCommandState, *, control_mode: str = "attitude_thrust") -> bool:
     axes_active = any(abs(float(value)) > 1.0e-9 for value in (state.pitch, state.yaw, state.roll))
-    if str(control_mode or "").strip().lower() in {"ric", "ric_translation", "translation"}:
+    if str(control_mode or "").strip().lower() in TRANSLATION_CONTROL_MODES:
         return bool(axes_active and float(state.throttle) > 0.0)
     return bool(axes_active or (state.firing and float(state.throttle) > 0.0))
 
@@ -564,10 +683,11 @@ def _speed_after_maneuver_input(
     state: KeyboardCommandState,
     *,
     control_mode: str = "attitude_thrust",
+    options: tuple[float, ...] | None = None,
 ) -> float:
-    speed = _coerce_speed_multiple(speed_multiple)
+    speed = _coerce_speed_multiple(speed_multiple, options=options)
     if speed > MANEUVER_CONTROL_SPEED and _has_maneuver_input(state, control_mode=control_mode):
-        return MANEUVER_CONTROL_SPEED
+        return _coerce_speed_multiple(MANEUVER_CONTROL_SPEED, options=options)
     return speed
 
 
@@ -897,8 +1017,14 @@ def _run_sandbox_setup_form(
     return None
 
 
+def _camera_rule_toggle_enabled_for_dashboard(dashboard: Any, training_cfg: RPOTrainingConfig) -> bool:
+    return bool(getattr(training_cfg, "sandbox_mode", False)) or bool(
+        getattr(dashboard, "camera_rule_toggle_enabled", False)
+    )
+
+
 def _camera_rule_status(dashboard: Any, training_cfg: RPOTrainingConfig) -> str:
-    if not bool(getattr(training_cfg, "sandbox_mode", False)):
+    if not _camera_rule_toggle_enabled_for_dashboard(dashboard, training_cfg):
         return ""
     mode = str(getattr(dashboard, "_camera_rule_mode_key", lambda: "current_pair")())
     label = "Full Trajectory" if mode == "full_trajectory" else "Satellites Only"
@@ -968,7 +1094,12 @@ def _realtime_steps_due(
 
 
 def _command_status(state: KeyboardCommandState, *, control_mode: str = "attitude_thrust") -> str:
-    if control_mode in {"ric", "ric_translation", "translation"}:
+    mode = str(control_mode or "").strip().lower()
+    if mode in CISLUNAR_TRANSLATION_MODES:
+        return "W/S Earth-Moon Y  A/D Tangential X  Left/Right Normal Z  C Camera  M Music"
+    if mode in MOON_RIC_TRANSLATION_MODES:
+        return "W/S R about Moon  A/D I about Moon  Left/Right C about Moon  C Camera  M Music"
+    if mode in TRANSLATION_CONTROL_MODES:
         return "W/S R  A/D I  Left/Right C  C Camera  M Music"
     burn = "FIRE" if state.firing else "Coast"
     return (
@@ -984,7 +1115,7 @@ def _live_prediction_accel_ric(
     control_mode: str,
     max_accel_km_s2: float,
 ) -> np.ndarray:
-    if bool(state.paused) or control_mode not in {"ric", "ric_translation", "translation"}:
+    if bool(state.paused) or str(control_mode or "").strip().lower() not in TRANSLATION_CONTROL_MODES:
         return np.zeros(3, dtype=float)
     if float(state.throttle) <= 0.0:
         return np.zeros(3, dtype=float)
@@ -1012,7 +1143,7 @@ def _live_prediction_burn(
     dt_s: float,
 ) -> tuple[np.ndarray, float]:
     mode = str(control_mode or "").strip().lower()
-    if bool(state.paused) or mode not in {"ric", "ric_translation", "translation"}:
+    if bool(state.paused) or mode not in TRANSLATION_CONTROL_MODES:
         return np.zeros(3, dtype=float), 0.0
     if float(state.throttle) <= 0.0:
         return np.zeros(3, dtype=float), 0.0
@@ -1078,7 +1209,7 @@ def run_game_mode(
     controlled_object_id: str | None = None,
     attitude_rate_deg_s: float = 45.0,
     realtime: bool = True,
-    speed_multiple: float = 1.0,
+    speed_multiple: float | None = None,
     difficulty_override: str | None = None,
     music_enabled: bool = True,
     record_video: bool = False,
@@ -1124,7 +1255,8 @@ def run_game_mode(
     )
     ric_reference_object_id = _game_ric_reference_object_id(config, training_cfg.target_object_id)
     level_title = _game_level_title(config)
-    current_speed_multiple = _coerce_speed_multiple(speed_multiple)
+    speed_multiplier_options = _game_speed_multiplier_options(config)
+    current_speed_multiple = _game_initial_speed_multiple(config, speed_multiple)
     trainer = RPOTrainingTracker(training_cfg)
     command_state = KeyboardCommandState()
     command_state.use_timing_accumulator = True
@@ -1160,6 +1292,7 @@ def run_game_mode(
         target_object_id=dashboard_target_id,
         chaser_object_id=dashboard_chaser_id,
         reference_object_id=ric_reference_object_id,
+        relative_frame=_game_relative_frame(config),
         keepout_radius_km=training_cfg.keepout_radius_km,
         goal_range_km=training_cfg.goal_range_km,
         goal_range_tolerance_km=training_cfg.goal_range_tolerance_km,
@@ -1174,6 +1307,11 @@ def run_game_mode(
         goal_nmt_element_tolerance_km=training_cfg.goal_nmt_element_tolerance_km,
         coast_prediction_orbit_fraction=_coast_prediction_orbit_fraction(difficulty),
         coast_prediction_model=_game_coast_prediction_model(attempt_config),
+        cr3bp_projection_mode=_game_cr3bp_projection_mode(config),
+        cr3bp_coast_prediction_horizon_s=_game_cr3bp_coast_prediction_horizon_s(config) or 21600.0,
+        cr3bp_coast_prediction_dt_s=_game_cr3bp_coast_prediction_dt_s(config) or 300.0,
+        target_coast_prediction_horizon_s=_game_target_coast_prediction_horizon_s(config),
+        target_coast_prediction_dt_s=_game_target_coast_prediction_dt_s(config),
         forbidden_regions=training_cfg.forbidden_regions,
         approach_gates=training_cfg.approach_gates,
         inspection_gates=training_cfg.inspection_gates,
@@ -1181,6 +1319,7 @@ def run_game_mode(
         plot_overlays_in_zoom_by_plane=_game_plot_overlays_in_zoom_by_plane(config),
         plot_prediction_in_zoom=_game_plot_prediction_in_zoom(config),
         plot_prediction_zoom_max_span_km=_game_plot_prediction_zoom_max_span_km(config),
+        plot_prediction_full_trajectory_only=_game_plot_prediction_full_trajectory_only(config),
         plot_axis_scale=_game_plot_axis_scale(config),
         plot_fixed_axis_half_span_km=_game_plot_fixed_axis_half_span_km(config),
         plot_equal_axis_scale_planes=_game_plot_equal_axis_scale_planes(config),
@@ -1189,6 +1328,13 @@ def run_game_mode(
         proximity_ring_plot_planes=_game_proximity_ring_plot_planes(config),
         camera_mode=_game_camera_mode(config),
         camera_rule_mode=_game_camera_rule_mode(config),
+        camera_rule_toggle_enabled=_game_camera_rule_toggle_enabled(config),
+        target_sprite_path=_game_target_sprite_path(config),
+        chaser_sprite_path=_game_chaser_sprite_path(config),
+        target_sprite_diameter_km=_game_target_sprite_diameter_km(config),
+        chaser_sprite_diameter_km=_game_chaser_sprite_diameter_km(config),
+        target_sprite_max_size_px=_game_target_sprite_max_size_px(config),
+        chaser_sprite_max_size_px=_game_chaser_sprite_max_size_px(config),
         show_target_coast_prediction=_game_show_target_hcw_path(config),
         fullscreen=True,
     )
@@ -1254,6 +1400,7 @@ def run_game_mode(
             )
             player_max_accel_km_s2 = _max_accel_from_config(attempt_config, controlled_object_id)
             ric_reference_object_id = _game_ric_reference_object_id(config, training_cfg.target_object_id)
+            speed_multiplier_options = _game_speed_multiplier_options(config)
             level_title = _game_level_title(config)
             trainer = RPOTrainingTracker(training_cfg)
             guided_tutorial = GuidedTutorialRuntime()
@@ -1440,7 +1587,9 @@ def run_game_mode(
             if command_state.speed_multiplier_change:
                 previous_speed_multiple = current_speed_multiple
                 current_speed_multiple = _adjust_speed_multiple(
-                    current_speed_multiple, command_state.speed_multiplier_change
+                    current_speed_multiple,
+                    command_state.speed_multiplier_change,
+                    options=speed_multiplier_options,
                 )
                 if not np.isclose(current_speed_multiple, previous_speed_multiple):
                     trainer.record_speed_multiplier_change()
@@ -1449,7 +1598,9 @@ def run_game_mode(
                 last_step_wall = perf_counter()
                 last_input_wall = last_step_wall
             if command_state.camera_rule_toggle_requested:
-                if bool(getattr(training_cfg, "sandbox_mode", False)) and hasattr(dashboard, "toggle_camera_rule_mode"):
+                if _camera_rule_toggle_enabled_for_dashboard(dashboard, training_cfg) and hasattr(
+                    dashboard, "toggle_camera_rule_mode"
+                ):
                     dashboard.toggle_camera_rule_mode()
                 command_state.camera_rule_toggle_requested = False
             if guided_tutorial.awaiting_speed_step and _guided_tutorial_speed_step_reached(
@@ -1477,6 +1628,7 @@ def run_game_mode(
                 current_speed_multiple,
                 command_state,
                 control_mode=control_mode,
+                options=speed_multiplier_options,
             )
             if not np.isclose(maneuver_speed_multiple, current_speed_multiple):
                 current_speed_multiple = maneuver_speed_multiple
@@ -2046,7 +2198,21 @@ def _sync_dashboard_training_config(dashboard: Any, training_cfg: RPOTrainingCon
 
 def _sync_dashboard_round_config(dashboard: Any, config: SimulationConfig) -> None:
     dashboard.coast_prediction_model = _game_coast_prediction_model(config)
+    dashboard.cr3bp_projection_mode = _game_cr3bp_projection_mode(config)
+    dashboard.relative_frame = _game_relative_frame(config)
     dashboard.camera_rule_mode = _game_camera_rule_mode(config)
+    dashboard.camera_rule_toggle_enabled = _game_camera_rule_toggle_enabled(config)
+    dashboard.plot_prediction_full_trajectory_only = _game_plot_prediction_full_trajectory_only(config)
+    cr3bp_horizon_s = _game_cr3bp_coast_prediction_horizon_s(config)
+    if cr3bp_horizon_s is not None:
+        dashboard.cr3bp_coast_prediction_horizon_s = cr3bp_horizon_s
+    cr3bp_dt_s = _game_cr3bp_coast_prediction_dt_s(config)
+    if cr3bp_dt_s is not None:
+        dashboard.cr3bp_coast_prediction_dt_s = cr3bp_dt_s
+    target_horizon_s = _game_target_coast_prediction_horizon_s(config)
+    dashboard.target_coast_prediction_horizon_s = target_horizon_s
+    target_dt_s = _game_target_coast_prediction_dt_s(config)
+    dashboard.target_coast_prediction_dt_s = target_dt_s
     if hasattr(dashboard, "_prediction_cache"):
         dashboard._prediction_cache = {}
     if hasattr(dashboard, "_frame_cache_dirty"):

@@ -14,6 +14,7 @@ from sim import SimulationConfig, SimulationSession
 from sim.config import scenario_config_from_dict
 from sim.execution import run_simulation_config_file
 from sim.review import (
+    EvidencePlotter,
     ReviewPlotSpec,
     ReviewQueryError,
     ReviewWorkspace,
@@ -261,12 +262,79 @@ def test_review_plot_creator_saves_styled_figure_with_provenance(tmp_path: Path)
     manifest = json.loads((tmp_path / "review" / "generated_artifacts.json").read_text(encoding="utf-8"))
     row = manifest["artifacts"][-1]
     assert row["artifact_id"] == "range_over_time"
-    assert row["source"] == "output_review_workbench"
+    assert row["source"] == "oel_review_plot_api"
     assert row["plot_type"] == "line"
     assert row["style_name"] == "oel_light"
     assert row["x_column"] == "time_s"
     assert row["y_columns"] == ["range_km"]
     assert "FROM relative_state" in row["source_query"]
+
+
+def test_evidence_plotter_api_creates_multi_series_recipe_and_custom_plots(tmp_path: Path) -> None:
+    SimulationSession.from_config(SimulationConfig.from_dict(_review_store_config(tmp_path))).run()
+    workspace = ReviewWorkspace.open(tmp_path)
+    plotter = EvidencePlotter(workspace)
+
+    range_artifact = plotter.line(
+        sql="SELECT time_s, range_km, range_rate_km_s FROM relative_state ORDER BY time_s",
+        x="time_s",
+        y=["range_km", "range_rate_km_s"],
+        title="Range and rate",
+        y_label="Value",
+        artifact_id="api_range_and_rate",
+        style="light",
+    )
+
+    assert range_artifact.relative_path == "review/figures/api_range_and_rate.png"
+    assert range_artifact.path.is_file()
+
+    recipe_artifact = plotter.relative_range_rate(artifact_id="api_range_rate_recipe")
+    assert recipe_artifact.relative_path == "review/figures/api_range_rate_recipe.png"
+
+    manifest = json.loads((tmp_path / "review" / "generated_artifacts.json").read_text(encoding="utf-8"))
+    assert manifest["artifacts"][-2]["source"] == "oel_review_plot_api"
+    assert manifest["artifacts"][-2]["style_name"] == "oel_light"
+    assert manifest["artifacts"][-2]["y_columns"] == ["range_km", "range_rate_km_s"]
+    assert manifest["artifacts"][-1]["extra"]["recipe_id"] == "relative_range_rate"
+
+
+def test_evidence_plotter_histogram_heatmap_and_helpful_errors(tmp_path: Path) -> None:
+    review_dir = tmp_path / "review"
+    review_dir.mkdir(parents=True)
+    with sqlite3.connect(review_dir / "run.sqlite") as conn:
+        conn.execute(
+            "CREATE TABLE sample_grid (region TEXT, bucket TEXT, value REAL, label TEXT)"
+        )
+        conn.executemany(
+            "INSERT INTO sample_grid VALUES (?, ?, ?, ?)",
+            [
+                ("A", "early", 1.0, "one"),
+                ("A", "late", 2.0, "two"),
+                ("B", "early", 3.0, "three"),
+                ("B", "late", 4.0, "four"),
+            ],
+        )
+
+    plotter = EvidencePlotter(tmp_path)
+    hist = plotter.histogram(
+        sql="SELECT value FROM sample_grid",
+        y="value",
+        artifact_id="api_value_hist",
+    )
+    heatmap = plotter.heatmap(
+        sql="SELECT bucket, region, value FROM sample_grid ORDER BY region, bucket",
+        x="bucket",
+        y="region",
+        value="value",
+        artifact_id="api_value_heatmap",
+    )
+
+    assert hist.path.is_file()
+    assert heatmap.path.is_file()
+    with pytest.raises(ValueError, match="Available columns"):
+        plotter.line(sql="SELECT value FROM sample_grid", x="time_s", y="value")
+    with pytest.raises(ValueError, match="Numeric columns"):
+        plotter.line(sql="SELECT bucket, label FROM sample_grid", x="bucket", y="label")
 
 
 def test_review_plot_preview_can_skip_provenance_manifest(tmp_path: Path) -> None:
@@ -323,6 +391,69 @@ def test_review_cli_queries_output_folder(tmp_path: Path) -> None:
 
     assert unsafe.returncode == 2
     assert "must start with SELECT or WITH" in unsafe.stderr
+
+
+def test_review_plot_cli_dry_run_and_creates_artifact(tmp_path: Path) -> None:
+    SimulationSession.from_config(SimulationConfig.from_dict(_review_store_config(tmp_path))).run()
+
+    dry_run = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "sim.review.plot",
+            str(tmp_path),
+            "--sql",
+            "SELECT time_s, range_km FROM relative_state ORDER BY time_s",
+            "--x",
+            "time_s",
+            "--y",
+            "range_km",
+            "--title",
+            "CLI range",
+            "--artifact-id",
+            "cli_range",
+            "--dry-run",
+            "--json",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert dry_run.returncode == 0, dry_run.stderr
+    dry_payload = json.loads(dry_run.stdout)
+    assert dry_payload["spec"]["artifact_id"] == "cli_range"
+    assert dry_payload["row_count"] == 3
+    assert not (tmp_path / "review" / "figures" / "cli_range.png").exists()
+
+    created = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "sim.review",
+            "plot",
+            str(tmp_path),
+            "--recipe",
+            "relative_range",
+            "--artifact-id",
+            "cli_recipe_range",
+            "--style",
+            "light",
+            "--json",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert created.returncode == 0, created.stderr
+    payload = json.loads(created.stdout)
+    assert payload["relative_path"] == "review/figures/cli_recipe_range.png"
+    assert Path(payload["path"]).is_file()
+    manifest = json.loads((tmp_path / "review" / "generated_artifacts.json").read_text(encoding="utf-8"))
+    row = manifest["artifacts"][-1]
+    assert row["source"] == "oel_review_plot_cli"
+    assert row["extra"]["recipe_id"] == "relative_range"
 
 
 def test_workflow_review_manifest_writes_queryable_tables_and_cli_summary(tmp_path: Path) -> None:

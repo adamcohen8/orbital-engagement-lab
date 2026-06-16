@@ -6,8 +6,13 @@ from typing import Any
 import numpy as np
 
 from sim.core.models import StateBelief, StateTruth
+from sim.dynamics.orbit.cr3bp import cr3bp_moon_state_km_s
 from sim.utils.frames import ric_dcm_ir_from_rv
 from sim.utils.quaternion import normalize_quaternion, quaternion_delta_from_body_rate, quaternion_multiply
+
+CISLUNAR_TRANSLATION_MODES = {"cislunar", "cislunar_translation", "cr3bp", "cr3bp_translation"}
+MOON_RIC_TRANSLATION_MODES = {"moon_ric", "moon_ric_translation", "lunar_ric", "lunar_ric_translation"}
+TRANSLATION_CONTROL_MODES = {"ric", "ric_translation", "translation", *CISLUNAR_TRANSLATION_MODES, *MOON_RIC_TRANSLATION_MODES}
 
 
 @dataclass
@@ -60,7 +65,7 @@ class KeyboardCommandState:
         if elapsed_sim_s <= 0.0:
             return
         mode = str(control_mode or "").strip().lower()
-        if mode in {"ric", "ric_translation", "translation"}:
+        if mode in TRANSLATION_CONTROL_MODES:
             if float(self.throttle) <= 0.0:
                 return
             self.pitch_sim_s += float(np.clip(self.pitch, -1.0, 1.0)) * elapsed_sim_s
@@ -166,31 +171,40 @@ class ManualGameCommandProvider:
         if object_id is not None and str(object_id) != str(self.controlled_object_id):
             return {}
         mode = str(self.control_mode or "attitude_thrust").strip().lower()
-        if mode in {"ric", "ric_translation", "translation"}:
+        if mode in TRANSLATION_CONTROL_MODES:
             throttle = float(np.clip(self.command_state.throttle, 0.0, 1.0))
             accel_ric = self.command_state.consume_ric_duty_cycle(float(dt_s))
             nrm = float(np.linalg.norm(accel_ric))
             if nrm > 1.0:
                 accel_ric /= nrm
             accel_ric *= float(max(self.max_accel_km_s2, 0.0)) * throttle
-            ref_state = _reference_state6(
-                reference_object_id=self.reference_object_id,
-                own_knowledge=own_knowledge,
-            )
-            if ref_state is not None:
-                c_ir = ric_dcm_ir_from_rv(ref_state[:3], ref_state[3:6])
-                thrust_eci = c_ir @ accel_ric
-            else:
+            if mode in CISLUNAR_TRANSLATION_MODES:
                 thrust_eci = accel_ric
+                strategy = "manual_cislunar_translation"
+                player_control_mode = "cislunar_translation"
+            else:
+                ref_state = _reference_state6(
+                    reference_object_id=self.reference_object_id,
+                    own_knowledge=own_knowledge,
+                )
+                if ref_state is not None:
+                    if mode in MOON_RIC_TRANSLATION_MODES:
+                        ref_state = ref_state - cr3bp_moon_state_km_s()
+                    c_ir = ric_dcm_ir_from_rv(ref_state[:3], ref_state[3:6])
+                    thrust_eci = c_ir @ accel_ric
+                else:
+                    thrust_eci = accel_ric
+                strategy = "manual_moon_ric_translation" if mode in MOON_RIC_TRANSLATION_MODES else "manual_ric_translation"
+                player_control_mode = "moon_ric_translation" if mode in MOON_RIC_TRANSLATION_MODES else "ric_translation"
             return {
                 "thrust_eci_km_s2": thrust_eci,
                 "mission_mode": {
-                    "strategy": "manual_ric_translation",
+                    "strategy": strategy,
                     "throttle": throttle,
                 },
                 "command_mode_flags": {
                     "player_controlled": True,
-                    "player_control_mode": "ric_translation",
+                    "player_control_mode": player_control_mode,
                     "player_throttle": throttle,
                     "player_accel_ric_km_s2": accel_ric.tolist(),
                 },

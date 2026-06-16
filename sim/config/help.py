@@ -142,10 +142,11 @@ CONFIG_HELP_ENTRIES: tuple[ConfigHelpEntry, ...] = (
     ConfigHelpEntry(
         path="simulator.dynamics.orbit.model",
         title="Orbit Base Model",
-        description="Names the base orbit propagation model. Current scenario execution starts from two-body dynamics and adds perturbations through adjacent toggles.",
+        description="Names the base orbit propagation model. Two-body is the default; CR3BP is an opt-in rotating-frame model for cislunar teaching cases.",
         aliases=("orbit model", "dynamics model", "propagation model"),
         options=(
             _option("two_body", "Central-body Keplerian gravity baseline. Add j2, drag, SRP, or spherical_harmonics for higher fidelity."),
+            _option("cr3bp", "Circular restricted three-body propagation in a configured rotating-frame system such as earth_moon."),
         ),
         example='simulator:\n  dynamics:\n    orbit:\n      model: "two_body"\n      j2: true\n      drag: false',
     ),

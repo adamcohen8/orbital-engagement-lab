@@ -16,6 +16,18 @@ from sim.dynamics.orbit.atmosphere import (
     density_nrlmsise00,
     density_ussa1976,
 )
+from sim.dynamics.orbit.cr3bp import (
+    EARTH_MOON_CR3BP,
+    EARTH_MOON_DISTANCE_KM,
+    EARTH_MOON_MEAN_MOTION_RAD_S,
+    EARTH_MOON_MU,
+    CR3BPSystem,
+    cr3bp_halo_seed_state_km_s,
+    cr3bp_l1_position_km,
+    cr3bp_l1_state_km_s,
+    cr3bp_system,
+    propagate_cr3bp_state,
+)
 from sim.dynamics.orbit.eclipse import srp_shadow_factor
 from sim.dynamics.orbit.elements import (
     ClassicalOrbitalElements,
@@ -69,6 +81,11 @@ __all__ = [
     "EARTH_J2",
     "EARTH_J3",
     "EARTH_J4",
+    "CR3BPSystem",
+    "EARTH_MOON_CR3BP",
+    "EARTH_MOON_DISTANCE_KM",
+    "EARTH_MOON_MEAN_MOTION_RAD_S",
+    "EARTH_MOON_MU",
     "ClassicalOrbitalElements",
     "OrbitalElementFeedbackResult",
     "coe_to_rv_eci",
@@ -77,6 +94,11 @@ __all__ = [
     "coes_target_state_at_current_true_anomaly",
     "orbital_element_feedback_accel",
     "rv_to_coe_eci",
+    "cr3bp_system",
+    "cr3bp_l1_position_km",
+    "cr3bp_l1_state_km_s",
+    "cr3bp_halo_seed_state_km_s",
+    "propagate_cr3bp_state",
     "resolve_body_position_eci_km",
     "datetime_to_julian_date",
     "julian_date_to_datetime",

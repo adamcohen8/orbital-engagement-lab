@@ -157,9 +157,17 @@ Rules for agents:
 - If `review/run.sqlite` is missing, fall back to `index.md`,
   `master_run_summary.json`, CSV histories, and plots. Do not pretend a review
   store exists.
-- Do not recommend ORW for routine agent analysis. `run_orw.py` is an
-  experimental preview and should only be used when the user explicitly asks
-  for the interactive local workbench. Prefer `.venv/bin/python -m sim.review`.
+- Use `sim.review.EvidencePlotter` or `.venv/bin/python -m sim.review plot`
+  for custom OEL-styled plots from completed review evidence. See
+  `docs/agent-custom-plots.md`.
+- Before handing off a generated plot, visually inspect it and fix obvious
+  presentation defects such as legends covering data, overlapping labels,
+  clipped text, unreadable tick labels, blank figures, or missing expected
+  series.
+- Do not recommend OEL Evidence Studio for routine agent analysis. Use
+  `.venv/bin/python -m sim.review` for table inspection and the custom plotting
+  API for brief/report figures. `run_evidence_studio.py` and the legacy
+  `run_orw.py` launcher are experimental local viewers/workbenches.
 
 ## Agent Feedback Loop
 

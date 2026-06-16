@@ -35,6 +35,9 @@
             <button class="launcher-option" data-level-option="sandbox" type="button">
               <span>Sandbox</span>
             </button>
+            <button class="launcher-option" data-level-option="pursuitArcade" type="button">
+              <span>Pursuit Arcade</span>
+            </button>
           </nav>
 
           <article class="launcher-preview" aria-live="polite">
@@ -128,8 +131,6 @@
             <button id="pauseButton" type="button">Start</button>
             <button id="resetButton" type="button">Reset</button>
             <button id="levelSelectButton" type="button">Level Select</button>
-            <button class="tab-button active" id="tutorialMode" type="button">Tutorial</button>
-            <button class="tab-button" id="sandboxMode" type="button">Sandbox</button>
           </div>
           <button class="music-button active" id="musicButton" type="button" aria-pressed="true">M Music: ON</button>
         </div>
@@ -153,6 +154,18 @@
           <span class="eyebrow">Preview Debrief</span>
           <h3 id="debriefTitle">Nice approach.</h3>
           <p id="debriefText">You reached the goal circle with controlled relative speed.</p>
+          <form class="leaderboard-form hidden" id="leaderboardForm">
+            <label>
+              <span>Callsign</span>
+              <input id="leaderboardUsername" name="username" type="text" maxlength="24" autocomplete="nickname" value="LOCAL_PLAYER" />
+            </label>
+            <label>
+              <span>Email optional</span>
+              <input id="leaderboardEmail" name="email" type="email" maxlength="254" autocomplete="email" />
+            </label>
+            <button id="leaderboardSubmit" type="submit">Submit Score</button>
+            <p id="leaderboardStatus" role="status"></p>
+          </form>
           <a id="downloadLink" href="https://github.com/adamcohen8/orbital-engagement-lab" target="_blank" rel="noreferrer">
             Play the full OEL trainer
           </a>

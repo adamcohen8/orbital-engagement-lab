@@ -1,3 +1,11 @@
+import {
+  buildChallengeRecord,
+  createPursuitArcadeSession,
+  DEFAULT_PURSUIT_CHALLENGE,
+  ellipticLinearCoastStates,
+  validateAttemptPacket,
+} from "./competition/arcade-engine.js";
+
 const MU = 398600.4418;
 const TARGET_A_KM = 7000;
 const MEAN_MOTION = Math.sqrt(MU / TARGET_A_KM ** 3);
@@ -20,13 +28,18 @@ const SATELLITE_MAX_SIZE_PX = 72;
 const TARGET_MARKER = "#f55c5c";
 const CHASER_MARKER = "#f5cd5c";
 const BUILD_ID = "spaced-footer-legend-2026-06-13";
+const ARCADE_BUILD_ID = `${BUILD_ID}-competition-local`;
+const ARCADE_CHALLENGE_RECORD = buildChallengeRecord(DEFAULT_PURSUIT_CHALLENGE);
 const ANALYTICS_SCRIPT_SRC = "https://plausible.io/js/script.js";
 const ANALYTICS_LOCAL_HOSTNAMES = new Set(["", "localhost", "127.0.0.1", "::1"]);
+const PREVIEW_DEV_HOSTNAMES = new Set(["", "localhost", "127.0.0.1", "::1"]);
 const PRIMER_AMPLITUDES_KM = { r: 0.65, i: 0.75, c: 0.65 };
 const MUSIC_TRACKS = {
   selector: "./assets/01_insert_coin_to_orbit.wav",
   tutorial: "./assets/10_training_grid_sunrise.wav",
   sandbox: "./assets/04_docking_bay_neon.wav",
+  arcade: "./assets/21_pursuit_arcade_overdrive_no_siren_demo.wav",
+  arcadeBoss: "./assets/28_high_shred_boss_riff.wav",
 };
 
 const el = {
@@ -39,8 +52,6 @@ const el = {
   selectorPreviewBrief: document.querySelector("#selectorPreviewBrief"),
   selectorPreviewCriteria: document.querySelector("#selectorPreviewCriteria"),
   selectorPreviewNotes: document.querySelector("#selectorPreviewNotes"),
-  tutorialMode: document.querySelector("#tutorialMode"),
-  sandboxMode: document.querySelector("#sandboxMode"),
   pauseButton: document.querySelector("#pauseButton"),
   resetButton: document.querySelector("#resetButton"),
   levelSelectButton: document.querySelector("#levelSelectButton"),
@@ -79,6 +90,11 @@ const el = {
   debriefPanel: document.querySelector("#debriefPanel"),
   debriefTitle: document.querySelector("#debriefTitle"),
   debriefText: document.querySelector("#debriefText"),
+  leaderboardForm: document.querySelector("#leaderboardForm"),
+  leaderboardUsername: document.querySelector("#leaderboardUsername"),
+  leaderboardEmail: document.querySelector("#leaderboardEmail"),
+  leaderboardSubmit: document.querySelector("#leaderboardSubmit"),
+  leaderboardStatus: document.querySelector("#leaderboardStatus"),
   downloadLink: document.querySelector("#downloadLink"),
 };
 
@@ -117,6 +133,25 @@ const levelOptions = [
     notes: [
       "Use this mode to demonstrate how initial relative state changes relative motion.",
       "Circular-orbit HCW prediction is shown for the browser preview.",
+    ],
+  },
+  {
+    id: "pursuitArcade",
+    mode: "arcade",
+    title: "Pursuit Arcade",
+    budget: "Time: 12000s   Chaser dV: 3.000 m/s   Goal: 100 m",
+    objective: "Chase an evading target using RIC translation controls in a browser-native two-body arcade model.",
+    brief:
+      "The arcade mode propagates target and chaser in ECI under central Earth gravity, maps your RIC commands into the target frame, records inputs by simulation tick, and validates the replay locally.",
+    criteria: [
+      "Reach the 100 m goal circle.",
+      "Clear as many pursuit rounds as possible.",
+      "Stay inside the 3.000 m/s chaser delta-v budget.",
+    ],
+    notes: [
+      "Beta competition prototype: browser play uses a deterministic two-body engine, not the full downloadable OEL engine.",
+      "Standalone and multi-round arcade attempts can be replay-validated locally; hosted leaderboard submission is still pending.",
+      "Static RI and RC plots can be generated from recomputed replay history.",
     ],
   },
 ];
@@ -252,6 +287,17 @@ const state = {
   selectedLevel: 0,
   musicEnabled: true,
   musicStartRequested: false,
+  arcadeSession: null,
+  arcadeSnapshot: null,
+  arcadeValidation: null,
+  arcadeAttemptPacket: null,
+  arcadeSeed: 4242,
+  arcadeTransition: null,
+  arcadeReferenceStateEci: null,
+  arcadeTargetRel: { r: 0, i: 0, c: 0, rd: 0, id: 0, cd: 0, t: 0 },
+  arcadeChaserTargetRel: { r: 0, i: 0, c: 0, rd: 0, id: 0, cd: 0, t: 0 },
+  targetTrail: [],
+  targetGhost: [],
 };
 
 const music = createMusicPlayer(MUSIC_TRACKS.selector);
@@ -369,6 +415,8 @@ function axisValue(plusKey, minusKey, plusTouch, minusTouch) {
 function resetState(seed = presets.behind) {
   state.sim = makeState(seed);
   state.trail = [samplePoint()];
+  state.targetTrail = [];
+  state.targetGhost = [];
   state.stageStart = { ...state.sim };
   state.closestKm = rangeKm();
   state.stageDv = 0;
@@ -376,6 +424,7 @@ function resetState(seed = presets.behind) {
   state.finalReason = "";
   state.stepAccumulatorS = 0;
   el.debriefPanel.classList.add("hidden");
+  setLeaderboardFormVisible(false);
   updateGhost();
   draw();
 }
@@ -389,6 +438,7 @@ function showLevelSelector(options = {}) {
   keys.clear();
   touch.clear();
   el.debriefPanel.classList.add("hidden");
+  setLeaderboardFormVisible(false);
   el.shell.classList.add("selector-mode");
   el.shell.classList.remove("primer-mode");
   setMusicTrackForMode("selector");
@@ -435,6 +485,8 @@ function launchSelectedLevel(source = "selector") {
   setMode(option.mode);
   if (option.id === "sandbox") {
     trackEvent("sandbox_start", { source });
+  } else if (option.id === "pursuitArcade") {
+    trackEvent("arcade_start", { source });
   } else {
     trackEvent("tutorial_start", { source, entry: option.mode });
   }
@@ -446,18 +498,23 @@ function setMode(mode) {
   el.shell.classList.remove("selector-mode");
   state.running = false;
   state.speedIndex = 0;
-  state.cameraRuleMode = mode === "sandbox" ? "full_trajectory" : "default";
-  setMusicTrackForMode(mode === "sandbox" ? "sandbox" : "tutorial");
+  state.cameraRuleMode = mode === "sandbox" || mode === "arcade" ? "full_trajectory" : "default";
+  setMusicTrackForMode(initialMusicTrackForMode(mode));
   state.activeStage = 0;
   state.stageStart = null;
   state.stageDv = 0;
   state.passed = false;
   state.primerTimeS = 0;
   if (mode === "primer") state.primerStage = 0;
-  el.tutorialMode.classList.toggle("active", mode === "tutorial" || mode === "primer");
-  el.sandboxMode.classList.toggle("active", mode === "sandbox");
-  const seed = mode === "sandbox" ? sandboxSeed() : mode === "primer" ? primerSample() : presets.behind;
-  resetState(seed);
+  if (mode === "arcade") {
+    startArcadeSession();
+  } else {
+    state.arcadeSession = null;
+    state.arcadeSnapshot = null;
+    state.arcadeValidation = null;
+    const seed = mode === "sandbox" ? sandboxSeed() : mode === "primer" ? primerSample() : presets.behind;
+    resetState(seed);
+  }
   updateMissionText();
 }
 
@@ -515,7 +572,121 @@ function randomSandboxSeed() {
   };
 }
 
+function startArcadeSession() {
+  state.arcadeSeed = (state.arcadeSeed + 101) % 4294967296;
+  state.arcadeSession = createPursuitArcadeSession(ARCADE_CHALLENGE_RECORD.config, {
+    seed: state.arcadeSeed,
+    ...arcadeDevStartOptions(),
+  });
+  state.arcadeValidation = null;
+  state.arcadeAttemptPacket = null;
+  state.arcadeTransition = null;
+  state.passed = false;
+  state.finalReason = "";
+  state.stepAccumulatorS = 0;
+  el.debriefPanel.classList.add("hidden");
+  setLeaderboardFormVisible(false);
+  syncArcadeSnapshot();
+}
+
+function arcadeDevStartOptions() {
+  if (!previewDevParamsAllowed()) return {};
+  const params = new URLSearchParams(window.location.search);
+  const firstBossRound = Math.max(Math.floor(Number(ARCADE_CHALLENGE_RECORD.config.arcade?.boss_round_interval || 0)), 1);
+  const requestedRound = params.has("boss") ? firstBossRound : Math.floor(Number(params.get("round") || 1));
+  if (!Number.isFinite(requestedRound) || requestedRound <= 1) return {};
+  return { startRoundIndex: requestedRound };
+}
+
+function previewDevParamsAllowed() {
+  return window.location.protocol === "file:" || PREVIEW_DEV_HOSTNAMES.has(window.location.hostname);
+}
+
+function syncArcadeSnapshot() {
+  if (!state.arcadeSession) return;
+  state.arcadeSnapshot = state.arcadeSession.snapshot();
+  state.arcadeTransition = state.arcadeSnapshot.round_transition || null;
+  state.arcadeReferenceStateEci = arcadeEciBlockToState(state.arcadeSnapshot.target_reference_state_eci);
+  state.arcadeChaserTargetRel = arcadeRicBlockToSim(state.arcadeSnapshot.relative_ric, state.arcadeSnapshot.time_s);
+  state.arcadeTargetRel = arcadeRicBlockToSim(
+    lastArcadeHistoryBlock(state.arcadeSnapshot.history, "target_reference_ric"),
+    state.arcadeSnapshot.time_s,
+  );
+  const chaserReference = lastArcadeHistoryBlock(state.arcadeSnapshot.history, "chaser_reference_ric");
+  state.sim = arcadeRicBlockToSim(chaserReference || state.arcadeSnapshot.relative_ric, state.arcadeSnapshot.time_s);
+  state.closestKm = Number(state.arcadeSnapshot.closest_range_km || state.arcadeSnapshot.range_km || Infinity);
+  state.trail = arcadeHistoryToTrail(state.arcadeSnapshot.history || [], "chaser_reference_ric");
+  state.targetTrail = arcadeHistoryToTrail(state.arcadeSnapshot.history || [], "target_reference_ric");
+  state.passed = Boolean(state.arcadeSnapshot.terminal);
+  if (state.arcadeTransition) {
+    state.running = false;
+  }
+  if (state.arcadeSnapshot.terminal) {
+    state.running = false;
+    state.finalReason = state.arcadeSnapshot.terminal_reason || "";
+  }
+  setMusicTrackForMode(arcadeMusicTrackKey());
+}
+
+function lastArcadeHistoryBlock(history, key) {
+  if (!Array.isArray(history) || history.length === 0) return null;
+  return history[history.length - 1]?.[key] || null;
+}
+
+function arcadeRicBlockToSim(rel, timeS = 0) {
+  rel = rel || {};
+  return {
+    r: Number(rel.r_km || 0),
+    i: Number(rel.i_km || 0),
+    c: Number(rel.c_km || 0),
+    rd: Number(rel.rd_km_s || 0),
+    id: Number(rel.id_km_s || 0),
+    cd: Number(rel.cd_km_s || 0),
+    t: Number(timeS || 0),
+    dv: Number(state.arcadeSnapshot?.player_delta_v_m_s || 0),
+  };
+}
+
+function arcadeEciBlockToState(block) {
+  if (!block || !Array.isArray(block.r_km) || !Array.isArray(block.v_km_s)) return null;
+  return {
+    r: block.r_km.map(Number),
+    v: block.v_km_s.map(Number),
+  };
+}
+
+function arcadeHistoryToTrail(history, key = "relative_ric") {
+  return history.slice(-TRAIL_LIMIT).map((sample) => {
+    const rel = sample[key] || sample.relative_ric || {};
+    return {
+      r: Number(rel.r_km || 0),
+      i: Number(rel.i_km || 0),
+      c: Number(rel.c_km || 0),
+      rd: Number(rel.rd_km_s || 0),
+      id: Number(rel.id_km_s || 0),
+      cd: Number(rel.cd_km_s || 0),
+      t: Number(sample.time_s || 0),
+    };
+  });
+}
+
+function arcadeStep() {
+  if (!state.arcadeSession || !state.running || state.passed) return;
+  state.arcadeSession.setControls(currentControls());
+  state.arcadeSession.step(1);
+  syncArcadeSnapshot();
+  if (state.arcadeTransition) {
+    showArcadeRoundTransition();
+  } else if (state.arcadeSnapshot?.terminal) {
+    showArcadeDebrief();
+  }
+}
+
 function step(dt, forceRun = false) {
+  if (state.mode === "arcade") {
+    arcadeStep();
+    return;
+  }
   if ((!state.running && !forceRun) || state.passed) return;
   const u = currentControls();
   const ar = u.r * MAX_ACCEL_KM_S2;
@@ -586,7 +757,13 @@ function tutorialInputMatches(stage = activeTutorialStage(), controls = currentC
 
 function simulationShouldRun() {
   if (state.mode === "primer") return false;
+  if (state.mode === "arcade") return state.running;
   return state.running || tutorialInputMatches();
+}
+
+function currentStepDtS() {
+  if (state.mode === "arcade") return ARCADE_CHALLENGE_RECORD.config.dt_s;
+  return FIXED_DT_S;
 }
 
 function currentSpeedMultiple() {
@@ -619,6 +796,10 @@ function applyManeuverSpeedLimit(controls = currentControls()) {
 }
 
 function refreshInputState() {
+  if (state.mode === "arcade" && state.arcadeSession && !state.arcadeSnapshot?.terminal) {
+    state.arcadeSession.setControls(currentControls());
+    syncArcadeSnapshot();
+  }
   applyManeuverSpeedLimit();
   updateGhost();
   draw();
@@ -651,10 +832,24 @@ function samplePoint() {
 }
 
 function rangeKm() {
+  if (state.mode === "arcade" && state.arcadeSnapshot) {
+    return Number(state.arcadeSnapshot.range_km || 0);
+  }
   return Math.hypot(state.sim.r, state.sim.i, state.sim.c);
 }
 
+function currentArcadeGoalRangeKm() {
+  return Number(
+    state.arcadeSnapshot?.goal_range_km ||
+      state.arcadeSession?.config?.goal_range_km ||
+      ARCADE_CHALLENGE_RECORD.config.goal_range_km,
+  );
+}
+
 function relativeSpeedKmS() {
+  if (state.mode === "arcade" && state.arcadeSnapshot) {
+    return Number(state.arcadeSnapshot.relative_speed_km_s || 0);
+  }
   return Math.hypot(state.sim.rd, state.sim.id, state.sim.cd);
 }
 
@@ -680,6 +875,14 @@ function updateMissionText() {
     if (el.objectiveText) {
       el.objectiveText.textContent = "";
     }
+  } else if (state.mode === "arcade") {
+    el.levelLabel.textContent = "PURSUIT ARCADE";
+    const snap = state.arcadeSnapshot;
+    const roundLabel = snap?.is_boss_round ? `Boss Round ${snap.round_index}` : `Round ${snap?.round_index || 1}`;
+    el.objectiveTitle.textContent = roundLabel;
+    if (el.objectiveText) {
+      el.objectiveText.textContent = `Reach ${formatRangeMeters(currentArcadeGoalRangeKm())}. Total score ${snap?.total_score || 0}.`;
+    }
   } else {
     el.levelLabel.textContent = "LEVEL 0 - TUTORIAL";
     const stage = tutorialStages[state.activeStage] || tutorialStages[tutorialStages.length - 1];
@@ -688,7 +891,13 @@ function updateMissionText() {
       el.objectiveText.textContent = "";
     }
   }
-  el.pauseButton.textContent = state.mode === "primer" ? primerAdvanceLabel() : state.running ? "Pause" : "Start";
+  el.pauseButton.disabled = false;
+  if (state.mode === "arcade") {
+    el.pauseButton.textContent = state.arcadeTransition ? "Next Round" : state.running ? "Running" : "Start";
+    el.pauseButton.disabled = Boolean(state.running && !state.arcadeTransition);
+  } else {
+    el.pauseButton.textContent = state.mode === "primer" ? primerAdvanceLabel() : state.running ? "Pause" : "Start";
+  }
   el.resetButton.textContent = state.mode === "primer" ? "Replay" : "Reset";
   el.sandboxPanel.classList.toggle("hidden", state.mode !== "sandbox" || state.running);
   updatePlotTitles();
@@ -710,9 +919,9 @@ function updatePlotTitles() {
     return;
   }
   el.riTitle.textContent = "RI Plane";
-  el.riSubtitle.textContent = "In-track vs radial";
+  el.riSubtitle.textContent = state.mode === "arcade" ? "Validated two-body replay frame" : "In-track vs radial";
   el.rcTitle.textContent = "RC Plane";
-  el.rcSubtitle.textContent = "Cross-track vs radial";
+  el.rcSubtitle.textContent = state.mode === "arcade" ? "Target-centered RIC" : "Cross-track vs radial";
 }
 
 function syncMusicButton() {
@@ -744,6 +953,16 @@ function setMusicTrackForMode(mode) {
   }
 }
 
+function initialMusicTrackForMode(mode) {
+  if (mode === "sandbox") return "sandbox";
+  if (mode === "arcade") return "arcade";
+  return "tutorial";
+}
+
+function arcadeMusicTrackKey() {
+  return state.arcadeSnapshot?.is_boss_round ? "arcadeBoss" : "arcade";
+}
+
 function toggleMusic() {
   if (state.musicEnabled && music.paused && !state.musicStartRequested) {
     playMusicFromGesture();
@@ -770,6 +989,11 @@ function updateGhost() {
     state.tutorialTargetPath = [];
     return;
   }
+  if (state.mode === "arcade") {
+    updateArcadeGhosts();
+    state.tutorialTargetPath = [];
+    return;
+  }
   state.ghost = predictGhost(livePredictionSeed(), ORBIT_PERIOD_S, MAX_GHOST_DRAW_POINTS);
   state.tutorialTargetPath = [];
   if (state.mode !== "tutorial") return;
@@ -784,6 +1008,68 @@ function updateGhost() {
 
 function livePredictionSeed() {
   return { ...state.sim };
+}
+
+function updateArcadeGhosts() {
+  const targetSeed = { ...state.arcadeTargetRel };
+  const chaserTargetSeed = { ...state.arcadeChaserTargetRel };
+  if (state.arcadeSnapshot?.is_boss_round && state.arcadeReferenceStateEci) {
+    const times = ghostTimes(arcadeProjectionHorizonS(), MAX_GHOST_DRAW_POINTS);
+    state.targetGhost = ellipticLinearCoastStates(simToArcadeRicBlock(targetSeed), times, state.arcadeReferenceStateEci, MU)
+      .map(arcadeCoastPointToSim);
+    state.ghost = ellipticLinearCoastStates(simToArcadeRicBlock(state.sim), times, state.arcadeReferenceStateEci, MU)
+      .map(arcadeCoastPointToSim);
+    return;
+  }
+  state.targetGhost = predictGhost(targetSeed, ORBIT_PERIOD_S, MAX_GHOST_DRAW_POINTS);
+  const relativeGhost = predictGhost(chaserTargetSeed, ORBIT_PERIOD_S, MAX_GHOST_DRAW_POINTS);
+  state.ghost = relativeGhost.map((point, idx) => addRicPoint(point, state.targetGhost[idx] || targetSeed));
+}
+
+function arcadeProjectionHorizonS() {
+  const aKm = Number(state.arcadeSession?.config?.target_coes?.a_km || TARGET_A_KM);
+  const mu = Number(state.arcadeSession?.config?.mu_km3_s2 || MU);
+  return (2 * Math.PI) * Math.sqrt(Math.max(aKm, 1) ** 3 / mu);
+}
+
+function ghostTimes(horizonS, samples) {
+  const count = Math.max(Math.floor(samples), 2);
+  return Array.from({ length: count }, (_, idx) => (horizonS * idx) / (count - 1));
+}
+
+function simToArcadeRicBlock(seed) {
+  return {
+    r_km: Number(seed?.r || 0),
+    i_km: Number(seed?.i || 0),
+    c_km: Number(seed?.c || 0),
+    rd_km_s: Number(seed?.rd || 0),
+    id_km_s: Number(seed?.id || 0),
+    cd_km_s: Number(seed?.cd || 0),
+  };
+}
+
+function arcadeCoastPointToSim(point) {
+  return {
+    r: Number(point?.r || 0),
+    i: Number(point?.i || 0),
+    c: Number(point?.c || 0),
+    rd: Number(point?.rd || 0),
+    id: Number(point?.id || 0),
+    cd: Number(point?.cd || 0),
+    t: Number(point?.t || 0),
+  };
+}
+
+function addRicPoint(a, b) {
+  return {
+    r: Number(a.r || 0) + Number(b.r || 0),
+    i: Number(a.i || 0) + Number(b.i || 0),
+    c: Number(a.c || 0) + Number(b.c || 0),
+    rd: Number(a.rd || 0) + Number(b.rd || 0),
+    id: Number(a.id || 0) + Number(b.id || 0),
+    cd: Number(a.cd || 0) + Number(b.cd || 0),
+    t: Number(a.t || 0),
+  };
 }
 
 function predictGhost(seed, horizonS, samples) {
@@ -866,6 +1152,15 @@ function updateDebugState() {
     },
     controls: currentControls(),
     sim: { ...state.sim },
+    arcade: state.arcadeSnapshot
+      ? {
+          score: state.arcadeSnapshot.score,
+          terminal: state.arcadeSnapshot.terminal,
+          inputEventCount: state.arcadeSnapshot.input_events.length,
+          validation: state.arcadeValidation?.status || "",
+          challengeHash: ARCADE_CHALLENGE_RECORD.config_hash,
+        }
+      : null,
     livePredictionSeed: livePredictionSeed(),
     ghostHead: state.ghost.slice(0, 8).map((point) => ({ ...point })),
     tutorialTargetHead: state.tutorialTargetPath.slice(0, 8).map((point) => ({ ...point })),
@@ -898,20 +1193,26 @@ function updateHud() {
   const rangeText = `${rangeKm().toFixed(3)} km`;
   const speedText = `${(relativeSpeedKmS() * 1000).toFixed(3)} m/s`;
   const dvText = `${state.sim.dv.toFixed(2)} m/s`;
+  const targetDvText = `${Number(state.arcadeSnapshot?.target_delta_v_m_s || 0).toFixed(2)} m/s`;
   const timeText = `${Math.round(state.sim.t)} s`;
+  const scoreText = state.mode === "arcade" ? `   Score=${state.arcadeSnapshot?.score || 0}` : "";
   el.rangeMetric.textContent = rangeText;
   el.speedMetric.textContent = speedText;
   el.dvMetric.textContent = dvText;
   el.timeMetric.textContent = timeText;
   el.topRangeMetric.textContent = `INFO Range ${rangeText}`;
   el.topSpeedMetric.textContent = `INFO Rel Speed ${speedText}`;
-  el.topDvMetric.textContent = `INFO Delta-v ${dvText}`;
-  el.hudLine.textContent = `T=${state.sim.t.toFixed(1).padStart(7, " ")}s   Range=${rangeText}   Rel Speed=${speedText}`;
+  el.topDvMetric.textContent =
+    state.mode === "arcade"
+      ? `INFO Score ${state.arcadeSnapshot?.score || 0}   Chaser dV ${dvText}   Target dV ${targetDvText}`
+      : `INFO Delta-v ${dvText}`;
+  el.hudLine.textContent = `T=${state.sim.t.toFixed(1).padStart(7, " ")}s   Range=${rangeText}   Rel Speed=${speedText}${scoreText}`;
   el.coachHint.textContent = currentCoachHint();
   el.commandLine.textContent = commandStatusLine();
+  const spaceAction = state.mode === "arcade" ? "Space Start" : "Space Pause";
   el.footerLine.textContent = `Speed ${SPEED_OPTIONS[state.speedIndex].toFixed(
     0,
-  )}x  Up/Down Speed  Space Pause  R Reset  Esc Level Select`;
+  )}x  Up/Down Speed  ${spaceAction}  R Reset  Esc Level Select`;
   el.speedMultiple.textContent = `${SPEED_OPTIONS[state.speedIndex]}x`;
   const u = currentControls();
   el.rMeter.value = u.r;
@@ -928,6 +1229,18 @@ function currentCoachHint() {
     const label = state.cameraRuleMode === "full_trajectory" ? "Full Trajectory" : "Satellites Only";
     return `Use small pulses, then coast and watch the target-centered RIC motion. C Camera: ${label}.`;
   }
+  if (state.mode === "arcade") {
+    const snap = state.arcadeSnapshot;
+    const label = state.cameraRuleMode === "full_trajectory" ? "Full Trajectory" : "Satellites Only";
+    if (state.arcadeTransition) {
+      const tr = state.arcadeTransition;
+      return `Round ${tr.cleared_round_index} clear. +${tr.round_score.toLocaleString()} points, ${Math.round(
+        tr.next_time_budget_s,
+      )} s for round ${tr.next_round_index}.`;
+    }
+    if (snap?.terminal) return `${snap.terminal_reason} Local validator score: ${snap.score}.`;
+    return `${snap?.is_boss_round ? "Boss round. " : ""}Clear rounds to tighten the goal and grow the score. C Camera: ${label}.`;
+  }
   const stage = tutorialStages[state.activeStage] || tutorialStages[tutorialStages.length - 1];
   if (stage.final) {
     return "Guided burns complete. Settle gently into the green 250 m circle. Keep pulses short.";
@@ -943,6 +1256,7 @@ function commandStatusLine() {
   if (state.mode === "primer") {
     return "";
   }
+  if (state.mode === "arcade") return "W/S R  A/D I  Left/Right C  Space Start  R Reset";
   return "W/S R  A/D I  Left/Right C  C Camera  M Music";
 }
 
@@ -966,13 +1280,18 @@ function drawPlot(canvas, xAxis, yAxis, plane) {
     y: height / 2 - (p[yAxis] - cameraCenter[yAxis]) * scale,
   });
 
+  const targetState = state.mode === "arcade" ? state.arcadeTargetRel : { r: 0, i: 0, c: 0 };
   drawGrid(ctx, width, height, scale);
-  drawRings(ctx, toPx, scale, xAxis, yAxis);
+  drawRings(ctx, toPx, scale, xAxis, yAxis, targetState);
   drawPath(ctx, state.tutorialTargetPath, toPx, "rgba(92, 240, 132, 0.92)", true, 3);
+  if (state.mode === "arcade") {
+    drawPath(ctx, state.targetGhost, toPx, "rgba(245, 92, 92, 0.55)", true, 2);
+    drawPath(ctx, state.targetTrail, toPx, "rgba(245, 92, 92, 0.9)", false, 2);
+  }
   drawPath(ctx, state.ghost, toPx, "rgba(135, 150, 172, 0.95)", true, 2);
   drawPath(ctx, state.trail, toPx, "rgba(245, 205, 92, 0.95)", false);
 
-  const target = toPx({ r: 0, i: 0, c: 0 });
+  const target = toPx(targetState);
   const chaser = toPx(state.sim);
   drawVector(ctx, chaser, state.sim, xAxis, yAxis, "velocity");
   drawThrustVector(ctx, chaser, xAxis, yAxis);
@@ -1308,6 +1627,14 @@ function fitCanvas(canvas) {
 }
 
 function cameraCenterFor(xAxis, yAxis) {
+  if (state.mode === "arcade") {
+    if (state.cameraRuleMode === "full_trajectory") return { r: 0, i: 0, c: 0 };
+    return {
+      r: (Number(state.sim.r || 0) + Number(state.arcadeTargetRel.r || 0)) / 2,
+      i: (Number(state.sim.i || 0) + Number(state.arcadeTargetRel.i || 0)) / 2,
+      c: (Number(state.sim.c || 0) + Number(state.arcadeTargetRel.c || 0)) / 2,
+    };
+  }
   if (state.mode === "sandbox" && new Set([xAxis, yAxis]).has("r")) {
     return { r: 0, i: 0, c: 0 };
   }
@@ -1322,10 +1649,21 @@ function cameraCenterFor(xAxis, yAxis) {
 }
 
 function plotScale(width, height, xAxis, yAxis, cameraCenter) {
-  const values =
-    state.mode === "sandbox" && state.cameraRuleMode === "current_pair"
-      ? [state.sim, { r: 0, i: 0, c: 0 }]
-      : [...state.trail, ...state.ghost, ...state.tutorialTargetPath, { r: 0, i: 0, c: 0 }];
+  let values;
+  if (state.mode === "arcade" && state.cameraRuleMode === "current_pair") {
+    values = [state.sim, state.arcadeTargetRel];
+  } else if (state.mode === "sandbox" && state.cameraRuleMode === "current_pair") {
+    values = [state.sim, { r: 0, i: 0, c: 0 }];
+  } else {
+    values = [...state.trail, ...state.ghost, ...state.tutorialTargetPath, { r: 0, i: 0, c: 0 }];
+  }
+  if (state.mode === "arcade") {
+    if (state.cameraRuleMode === "current_pair") {
+      values.push(state.arcadeTargetRel);
+    } else {
+      values.push(...state.targetTrail, ...state.targetGhost, state.arcadeTargetRel);
+    }
+  }
   if (state.mode === "tutorial") values.push({ r: 0.25, i: 0.25, c: 0.25 });
   const span = values.reduce(
     (max, p) =>
@@ -1379,18 +1717,19 @@ function niceStep(raw) {
   return 5;
 }
 
-function drawRings(ctx, toPx, scale, xAxis, yAxis) {
-  const target = toPx({ r: 0, i: 0, c: 0 });
+function drawRings(ctx, toPx, scale, xAxis, yAxis, targetState = { r: 0, i: 0, c: 0 }) {
+  const target = toPx(targetState);
   ctx.strokeStyle = "rgba(190, 68, 68, 0.72)";
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.arc(target.x, target.y, 0.025 * scale, 0, Math.PI * 2);
   ctx.stroke();
-  if (state.mode === "tutorial") {
+  if (state.mode === "tutorial" || state.mode === "arcade") {
+    const goalRange = state.mode === "arcade" ? currentArcadeGoalRangeKm() : 0.25;
     ctx.strokeStyle = "rgba(78, 178, 112, 0.86)";
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.arc(target.x, target.y, 0.25 * scale, 0, Math.PI * 2);
+    ctx.arc(target.x, target.y, goalRange * scale, 0, Math.PI * 2);
     ctx.stroke();
   }
   if (xAxis === "i" && yAxis === "r") {
@@ -1455,13 +1794,131 @@ function axisLabel(axis) {
   return "C";
 }
 
+function formatRangeMeters(km) {
+  const meters = Number(km || 0) * 1000;
+  if (meters >= 1000) return `${(meters / 1000).toFixed(2)} km`;
+  if (meters >= 10) return `${meters.toFixed(0)} m`;
+  return `${meters.toFixed(1)} m`;
+}
+
 function showDebrief(passed) {
+  setLeaderboardFormVisible(false);
   el.debriefPanel.classList.remove("hidden");
   el.debriefTitle.textContent = passed ? "Tutorial complete." : "Attempt ended.";
   el.debriefText.textContent = `${state.finalReason} Closest approach ${state.closestKm.toFixed(
     3,
   )} km, delta-v ${state.sim.dv.toFixed(2)} m/s.`;
   trackEvent(passed ? "tutorial_complete" : "tutorial_end", completionAnalyticsProps(passed));
+}
+
+function showArcadeDebrief() {
+  if (!state.arcadeSession) return;
+  const snap = state.arcadeSnapshot || state.arcadeSession.snapshot();
+  const attempt = state.arcadeSession.attemptPacket({
+    challengeRecord: ARCADE_CHALLENGE_RECORD,
+    username: "LOCAL_PLAYER",
+    client_build_hash: ARCADE_BUILD_ID,
+  });
+  const validation = validateAttemptPacket(attempt, ARCADE_CHALLENGE_RECORD);
+  state.arcadeValidation = validation;
+  state.arcadeAttemptPacket = attempt;
+  prepareLeaderboardSubmission(validation);
+  if ((snap.round_summaries || []).length > 0) {
+    el.debriefPanel.classList.remove("hidden");
+    el.debriefTitle.textContent = "Arcade run ended.";
+    el.debriefText.textContent = `${snap.terminal_reason || "Attempt complete."} Total score ${Number(
+      snap.score || 0,
+    ).toLocaleString()} after ${(snap.round_summaries || []).length} cleared rounds. Final range ${Number(snap.range_km || 0).toFixed(
+      3,
+    )} km, chaser delta-v ${Number(snap.player_delta_v_m_s || 0).toFixed(2)} m/s. Local validation: ${
+      validation.status
+    }.`;
+    trackEvent("arcade_attempt_complete", {
+      result: "ended",
+      validation: validation.status,
+      score_bucket: snap.score > 0 ? "positive" : "zero",
+    });
+    return;
+  }
+  el.debriefPanel.classList.remove("hidden");
+  const valid = validation.status === "valid";
+  el.debriefTitle.textContent = snap.passed ? "Arcade rendezvous complete." : "Arcade attempt ended.";
+  el.debriefText.textContent = `${snap.terminal_reason || "Attempt complete."} Local validation: ${
+    validation.status
+  }. Score ${validation.canonical_score || 0}, closest ${Number(
+    validation.canonical_metrics?.closest_range_km || snap.closest_range_km || 0,
+  ).toFixed(3)} km, delta-v ${Number(validation.canonical_metrics?.player_delta_v_m_s || snap.player_delta_v_m_s || 0).toFixed(
+    2,
+  )} m/s.${valid ? "" : ` ${validation.errors.join(" ")}`}`;
+  trackEvent("arcade_attempt_complete", {
+    result: snap.passed ? "success" : "ended",
+    validation: validation.status,
+    score_bucket: validation.canonical_score > 0 ? "positive" : "zero",
+  });
+}
+
+function setLeaderboardFormVisible(visible, statusText = "") {
+  if (!el.leaderboardForm) return;
+  el.leaderboardForm.classList.toggle("hidden", !visible);
+  el.leaderboardStatus.textContent = statusText;
+  el.leaderboardSubmit.disabled = false;
+}
+
+function prepareLeaderboardSubmission(validation) {
+  const canSubmit = ["valid", "suspicious"].includes(validation.status);
+  setLeaderboardFormVisible(state.mode === "arcade", canSubmit ? "" : "This attempt cannot be submitted.");
+  el.leaderboardSubmit.disabled = !canSubmit;
+}
+
+async function submitLeaderboardAttempt(event) {
+  event.preventDefault();
+  if (!state.arcadeAttemptPacket || !state.arcadeValidation) return;
+  if (!["http:", "https:"].includes(window.location.protocol)) {
+    el.leaderboardStatus.textContent = "Leaderboard submission is available after the hosted deploy.";
+    return;
+  }
+  const username = String(el.leaderboardUsername.value || "LOCAL_PLAYER").trim() || "LOCAL_PLAYER";
+  const email = String(el.leaderboardEmail.value || "").trim();
+  const attempt = { ...state.arcadeAttemptPacket, username, email };
+  el.leaderboardSubmit.disabled = true;
+  el.leaderboardStatus.textContent = "Submitting...";
+  try {
+    const response = await fetch("/api/submit-attempt", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, email, attempt }),
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      el.leaderboardStatus.textContent = payload.status
+        ? `Rejected: ${payload.status}. ${(payload.errors || []).join(" ")}`
+        : `Submission failed: ${payload.error || response.statusText}`;
+      trackEvent("arcade_leaderboard_submit", { result: "rejected", status: payload.status || response.status });
+      return;
+    }
+    el.leaderboardStatus.textContent = payload.leaderboard_updated
+      ? `Submitted. Score ${Number(payload.score || 0).toLocaleString()} is on the leaderboard.`
+      : `Submitted. Score ${Number(payload.score || 0).toLocaleString()} did not beat your best.`;
+    trackEvent("arcade_leaderboard_submit", { result: "accepted", status: payload.status || "valid" });
+  } catch (error) {
+    el.leaderboardStatus.textContent = `Submission failed: ${error instanceof Error ? error.message : String(error)}`;
+    trackEvent("arcade_leaderboard_submit", { result: "error" });
+  } finally {
+    el.leaderboardSubmit.disabled = false;
+  }
+}
+
+function showArcadeRoundTransition() {
+  const tr = state.arcadeTransition;
+  if (!tr) return;
+  setLeaderboardFormVisible(false);
+  el.debriefPanel.classList.remove("hidden");
+  el.debriefTitle.textContent = `Round ${tr.cleared_round_index} cleared.`;
+  el.debriefText.textContent = `Round score ${tr.round_score.toLocaleString()}. Total score ${tr.total_score.toLocaleString()}. Bonus time ${Math.round(
+    tr.bonus_time_s,
+  )} s. Round ${tr.next_round_index}${tr.next_is_boss ? " is a boss round" : ""} starts with ${Math.round(
+    tr.next_time_budget_s,
+  )} s and a ${formatRangeMeters(tr.next_goal_range_km)} goal.`;
 }
 
 function completionAnalyticsProps(passed) {
@@ -1521,9 +1978,10 @@ function frame(nowMs) {
     state.stepAccumulatorS = 0;
   }
   let steps = 0;
-  while (state.stepAccumulatorS >= FIXED_DT_S && steps < MAX_STEPS_PER_FRAME) {
-    step(FIXED_DT_S, shouldRun);
-    state.stepAccumulatorS -= FIXED_DT_S;
+  const stepDtS = currentStepDtS();
+  while (state.stepAccumulatorS >= stepDtS && steps < MAX_STEPS_PER_FRAME) {
+    step(stepDtS, shouldRun);
+    state.stepAccumulatorS -= stepDtS;
     steps += 1;
   }
   if (steps >= MAX_STEPS_PER_FRAME) {
@@ -1545,12 +2003,26 @@ function queueFrame(callback) {
 function togglePause() {
   if (advancePrimer()) return;
   if (state.passed) return;
+  if (state.mode === "arcade" && state.arcadeTransition && state.arcadeSession) {
+    state.arcadeSession.continueNextRound();
+    state.arcadeTransition = null;
+    el.debriefPanel.classList.add("hidden");
+    syncArcadeSnapshot();
+    state.running = true;
+    updateMissionText();
+    return;
+  }
+  if (state.mode === "arcade") {
+    if (!state.running) state.running = true;
+    updateMissionText();
+    return;
+  }
   state.running = !state.running;
   updateMissionText();
 }
 
 function toggleCameraRuleMode() {
-  if (state.mode !== "sandbox") return;
+  if (state.mode !== "sandbox" && state.mode !== "arcade") return;
   state.cameraRuleMode = state.cameraRuleMode === "full_trajectory" ? "current_pair" : "full_trajectory";
   updateGhost();
   draw();
@@ -1565,6 +2037,8 @@ function resetCurrent() {
     state.activeStage = 0;
     state.speedIndex = 0;
     resetState(presets.behind);
+  } else if (state.mode === "arcade") {
+    startArcadeSession();
   } else {
     resetState(sandboxSeed());
   }
@@ -1573,6 +2047,7 @@ function resetCurrent() {
 }
 
 function bindCommandButton(button, handler) {
+  if (!button) return;
   let suppressClickUntil = 0;
   button.addEventListener("pointerdown", (event) => {
     if (typeof event.button === "number" && event.button !== 0) return;
@@ -1633,7 +2108,7 @@ function bindEvents() {
       else if (key === "r") resetCurrent();
       return;
     }
-    if (key === "c" && state.mode === "sandbox") {
+    if (key === "c" && (state.mode === "sandbox" || state.mode === "arcade")) {
       playMusicFromGesture();
       toggleCameraRuleMode();
       return;
@@ -1689,16 +2164,6 @@ function bindEvents() {
     playMusicFromGesture();
     showLevelSelector({ track: true, source: "button" });
   });
-  bindCommandButton(el.tutorialMode, () => {
-    setMode("primer");
-    trackEvent("tutorial_start", { source: "tab", entry: "primer" });
-    playMusicFromGesture();
-  });
-  bindCommandButton(el.sandboxMode, () => {
-    setMode("sandbox");
-    trackEvent("sandbox_start", { source: "tab" });
-    playMusicFromGesture();
-  });
   bindCommandButton(el.musicButton, toggleMusic);
   bindCommandButton(el.selectorMusicButton, toggleMusic);
   document.querySelectorAll("[data-level-option]").forEach((button) => {
@@ -1719,6 +2184,7 @@ function bindEvents() {
   el.downloadLink.addEventListener("click", () => {
     trackEvent("download_click", { source: "debrief", mode: state.mode });
   });
+  el.leaderboardForm.addEventListener("submit", submitLeaderboardAttempt);
   el.applySandbox.addEventListener("click", () => {
     playMusicFromGesture();
     resetState(sandboxSeed());

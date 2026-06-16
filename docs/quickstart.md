@@ -204,7 +204,7 @@ interactive plotting demo:
 
 The base package already installs NumPy and Matplotlib for simulation and
 plotting support. The GUI profile enables experimental desktop surfaces,
-including the Output Review Workbench dynamic plot creator for completed runs.
+including OEL Evidence Studio for completed-run review and brief support.
 The recommended public onboarding path remains CLI/YAML/Python API, and the
 scripted review path remains `.venv/bin/python -m sim.review`. The ML profile
 enables the bundled Gymnasium-style environments.

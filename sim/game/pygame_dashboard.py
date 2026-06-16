@@ -7,15 +7,23 @@ from typing import Any
 import numpy as np
 
 from sim.api import SimulationSnapshot
+from sim.dynamics.orbit.cr3bp import (
+    EARTH_MOON_MEAN_MOTION_RAD_S,
+    cr3bp_l1_state_km_s,
+    cr3bp_moon_state_km_s,
+    propagate_cr3bp_reference_stm,
+    propagate_cr3bp_state,
+)
 from sim.dynamics.orbit.elements import rv_to_coe_eci
 from sim.game.formatting import format_distance_km, format_speed_km_s
 from sim.game.training import (
     ApproachGateConfig,
     ForbiddenRegionConfig,
     InspectionGateConfig,
+    relative_moon_ric_state_from_arrays,
     relative_ric_state_from_arrays,
 )
-from sim.utils.frames import ric_dcm_ir_from_rv
+from sim.utils.frames import eci_relative_to_ric_rect, ric_dcm_ir_from_rv, ric_rect_state_to_eci
 
 EARTH_MU_KM3_S2 = 398600.4418
 PLOT_OVERLAY_MARGIN = 1.18
@@ -29,10 +37,17 @@ SATELLITE_DOT_THRESHOLD_PX = 4
 SATELLITE_ICON_THRESHOLD_PX = 18
 SATELLITE_ICON_SIZE_PX = 20
 SATELLITE_MAX_SIZE_PX = 72
+MOON_RADIUS_KM = 1737.4
 ELLIPTIC_PREDICTION_COAST_UPDATE_INTERVAL_S = 30.0
 ELLIPTIC_PREDICTION_BURN_UPDATE_INTERVAL_S = 0.0
 ELLIPTIC_REFERENCE_CACHE_POSITION_TOL_KM = 1.0e-3
 ELLIPTIC_REFERENCE_CACHE_VELOCITY_TOL_KM_S = 5.0e-6
+CR3BP_PREDICTION_COAST_UPDATE_INTERVAL_S = 30.0
+CR3BP_PREDICTION_BURN_UPDATE_INTERVAL_S = 5.0
+CR3BP_REFERENCE_CACHE_POSITION_TOL_KM = 1.0e-3
+CR3BP_REFERENCE_CACHE_VELOCITY_TOL_KM_S = 5.0e-6
+CR3BP_RELATIVE_CACHE_POSITION_TOL_KM = 1.0e-3
+CR3BP_RELATIVE_CACHE_VELOCITY_TOL_KM_S = 5.0e-6
 GAME_ASSET_DIR = Path(__file__).resolve().parent / "assets"
 TARGET_SPRITE_PATH = GAME_ASSET_DIR / "rpo_target_sprite.png"
 CHASER_SPRITE_PATH = GAME_ASSET_DIR / "rpo_chaser_sprite.png"
@@ -114,11 +129,26 @@ def _point_along_line(
     )
 
 
+def _game_asset_path_or_default(value: Path | str | None, default: Path) -> Path:
+    if value is None:
+        return default
+    raw = str(value or "").strip()
+    if not raw:
+        return default
+    path = Path(raw)
+    if path.is_absolute():
+        return path
+    if path.exists():
+        return path
+    return GAME_ASSET_DIR / path
+
+
 @dataclass
 class PygameRPODashboard:
     target_object_id: str = "target"
     chaser_object_id: str = "chaser"
     reference_object_id: str | None = None
+    relative_frame: str = "ric"
     keepout_radius_km: float | None = None
     goal_range_km: float | None = None
     goal_range_tolerance_km: float | None = None
@@ -138,6 +168,11 @@ class PygameRPODashboard:
     coast_prediction_orbit_fraction: float | None = 1.0
     coast_prediction_dt_s: float = 10.0
     coast_prediction_model: str = "hcw"
+    cr3bp_projection_mode: str = "nonlinear"
+    cr3bp_coast_prediction_horizon_s: float = 21600.0
+    cr3bp_coast_prediction_dt_s: float = 300.0
+    target_coast_prediction_horizon_s: float | None = None
+    target_coast_prediction_dt_s: float | None = None
     show_target_coast_prediction: bool = False
     burn_marker_threshold_km_s2: float = 1.0e-12
     forbidden_regions: tuple[ForbiddenRegionConfig, ...] = ()
@@ -147,6 +182,7 @@ class PygameRPODashboard:
     plot_overlays_in_zoom_by_plane: dict[str, bool] = field(default_factory=dict)
     plot_prediction_in_zoom: bool = False
     plot_prediction_zoom_max_span_km: float | None = None
+    plot_prediction_full_trajectory_only: bool = False
     plot_axis_scale: dict[str, tuple[float, float]] = field(default_factory=dict)
     plot_fixed_axis_half_span_km: dict[str, tuple[float | None, float | None]] = field(default_factory=dict)
     plot_equal_axis_scale_planes: tuple[str, ...] = ()
@@ -155,6 +191,13 @@ class PygameRPODashboard:
     proximity_ring_plot_planes: tuple[str, ...] = ("RI", "RC", "IC")
     camera_mode: str = "reference"
     camera_rule_mode: str = "default"
+    camera_rule_toggle_enabled: bool = False
+    target_sprite_path: Path | str | None = None
+    chaser_sprite_path: Path | str | None = None
+    target_sprite_diameter_km: float = SATELLITE_SPRITE_DIAMETER_KM
+    chaser_sprite_diameter_km: float = SATELLITE_SPRITE_DIAMETER_KM
+    target_sprite_max_size_px: int = SATELLITE_MAX_SIZE_PX
+    chaser_sprite_max_size_px: int = SATELLITE_MAX_SIZE_PX
     tutorial_target_path_ric: np.ndarray = field(default_factory=lambda: np.empty((0, 6), dtype=float))
     live_prediction_accel_ric_km_s2: np.ndarray = field(default_factory=lambda: np.zeros(3, dtype=float))
     live_prediction_elapsed_s: float = 0.0
@@ -194,8 +237,10 @@ class PygameRPODashboard:
         self._prediction_cache: dict[str, dict[str, Any]] = {}
         self._briefing_layout_cache: dict[str, Any] = {}
         self._text_cache: dict[tuple[int, str, tuple[int, int, int]], Any] = {}
-        self._target_sprite = self._load_marker_sprite(TARGET_SPRITE_PATH)
-        self._chaser_sprite = self._load_marker_sprite(CHASER_SPRITE_PATH)
+        target_sprite_path = _game_asset_path_or_default(self.target_sprite_path, TARGET_SPRITE_PATH)
+        chaser_sprite_path = _game_asset_path_or_default(self.chaser_sprite_path, CHASER_SPRITE_PATH)
+        self._target_sprite = self._load_marker_sprite(target_sprite_path)
+        self._chaser_sprite = self._load_marker_sprite(chaser_sprite_path)
         self._sprite_scale_cache: dict[tuple[str, int], Any] = {}
 
     def close(self) -> None:
@@ -269,12 +314,20 @@ class PygameRPODashboard:
             sprite = getattr(self, "_target_sprite", None)
             color = TARGET_MARKER_COLOR
             cache_key = "target"
+            diameter_km = float(getattr(self, "target_sprite_diameter_km", SATELLITE_SPRITE_DIAMETER_KM))
+            max_size_px = int(getattr(self, "target_sprite_max_size_px", SATELLITE_MAX_SIZE_PX))
         else:
             sprite = getattr(self, "_chaser_sprite", None)
             color = CHASER_MARKER_COLOR
             cache_key = "chaser"
+            diameter_km = float(getattr(self, "chaser_sprite_diameter_km", SATELLITE_SPRITE_DIAMETER_KM))
+            max_size_px = int(getattr(self, "chaser_sprite_max_size_px", SATELLITE_MAX_SIZE_PX))
 
-        sprite_size = SATELLITE_ICON_SIZE_PX if force_icon else _satellite_marker_size_px(scale_x, scale_y)
+        sprite_size = (
+            SATELLITE_ICON_SIZE_PX
+            if force_icon
+            else _satellite_marker_size_px(scale_x, scale_y, diameter_km=diameter_km, max_size_px=max_size_px)
+        )
         if sprite is None or sprite_size <= 0:
             pygame.draw.circle(self.screen, color, center, int(fallback_radius_px))
             return
@@ -307,13 +360,32 @@ class PygameRPODashboard:
             reference = target
         if target is None or chaser is None or reference is None:
             return
-        rel = relative_ric_state_from_arrays(reference, chaser)
-        target_rel = relative_ric_state_from_arrays(reference, target)
+        frame_key = _relative_frame_key(getattr(self, "relative_frame", "ric"))
+        if frame_key == "cislunar_l1":
+            origin = cr3bp_l1_state_km_s()
+            rel = np.array(chaser, dtype=float).reshape(-1)[:6] - origin
+            target_rel = np.array(target, dtype=float).reshape(-1)[:6] - origin
+        elif frame_key == "moon_ric":
+            rel = relative_moon_ric_state_from_arrays(target, chaser)
+            target_rel = np.zeros(6, dtype=float)
+        else:
+            rel = relative_ric_state_from_arrays(reference, chaser)
+            target_rel = relative_ric_state_from_arrays(reference, target)
         self.target_true_anomaly_deg = (
             _true_anomaly_deg_from_state(target) if self._uses_elliptic_prediction_model() else None
         )
         reference_arr = np.array(reference, dtype=float).reshape(-1)
-        if reference_arr.size >= 6:
+        if frame_key == "cislunar_l1":
+            self.reference_state_eci = cr3bp_l1_state_km_s()
+            self.mean_motion_rad_s = EARTH_MOON_MEAN_MOTION_RAD_S
+        elif frame_key == "moon_ric" and reference_arr.size >= 6:
+            self.reference_state_eci = reference_arr[:6].astype(float)
+            target_moon = self.reference_state_eci - cr3bp_moon_state_km_s()
+            r_norm = float(np.linalg.norm(target_moon[:3]))
+            h_norm = float(np.linalg.norm(np.cross(target_moon[:3], target_moon[3:6])))
+            if r_norm > 0.0 and np.isfinite(r_norm):
+                self.mean_motion_rad_s = h_norm / (r_norm**2)
+        elif reference_arr.size >= 6:
             self.reference_state_eci = reference_arr[:6].astype(float)
             r_norm = float(np.linalg.norm(reference_arr[:3]))
             if r_norm > 0.0 and np.isfinite(r_norm):
@@ -324,7 +396,13 @@ class PygameRPODashboard:
         thrust_eci = np.array(thrust, dtype=float).reshape(3)
         self.thrust_hist.append(thrust_eci)
         self.target_rel_hist.append(target_rel)
-        if reference_arr.size >= 6:
+        if frame_key == "cislunar_l1":
+            thrust_ric = thrust_eci
+        elif frame_key == "moon_ric" and reference_arr.size >= 6:
+            target_moon = reference_arr[:6].astype(float) - cr3bp_moon_state_km_s()
+            c_ir = ric_dcm_ir_from_rv(target_moon[:3], target_moon[3:6])
+            thrust_ric = c_ir.T @ thrust_eci
+        elif reference_arr.size >= 6:
             c_ir = ric_dcm_ir_from_rv(reference_arr[:3], reference_arr[3:6])
             thrust_ric = c_ir.T @ thrust_eci
         else:
@@ -387,8 +465,9 @@ class PygameRPODashboard:
             mission_metrics=mission_metrics,
             objective_checklist=objective_checklist,
         )
-        self._draw_panel(left, "RI Plane: In-Track Vs Radial", x_axis=1, y_axis=0)
-        self._draw_panel(right, "RC Plane: Cross-Track Vs Radial", x_axis=2, y_axis=0)
+        left_panel, right_panel = self._plot_panel_specs()
+        self._draw_panel(left, left_panel[0], x_axis=left_panel[1], y_axis=left_panel[2])
+        self._draw_panel(right, right_panel[0], x_axis=right_panel[1], y_axis=right_panel[2])
         self._draw_hud(
             hud,
             command_status=command_status,
@@ -716,6 +795,9 @@ class PygameRPODashboard:
         target_ghost = self._frame_cache.get("target_ghost")
         if target_ghost is None:
             target_ghost = self._target_coast_prediction(target_rel)
+        prediction_scales_camera = self._prediction_scales_current_camera()
+        scale_ghost = ghost if prediction_scales_camera else np.empty((0, 6), dtype=float)
+        scale_target_ghost = target_ghost if prediction_scales_camera else np.empty((0, 6), dtype=float)
         goal = np.array(self.goal_relative_ric_km, dtype=float).reshape(-1)
         nmt = self._frame_cache.get("nmt")
         if nmt is None:
@@ -738,7 +820,8 @@ class PygameRPODashboard:
             self._camera_rule_scale_points(
                 rel=rel,
                 target_rel=target_rel,
-                ghost=ghost,
+                ghost=scale_ghost,
+                target_ghost=scale_target_ghost,
                 x_axis=x_axis,
                 y_axis=y_axis,
                 camera_center=camera_center,
@@ -784,6 +867,14 @@ class PygameRPODashboard:
 
         previous_clip = self.screen.get_clip()
         self.screen.set_clip(plot)
+        self._draw_cislunar_moon_background(
+            plot,
+            x_axis=x_axis,
+            y_axis=y_axis,
+            to_px=to_px,
+            scale_x=scale_x,
+            scale_y=scale_y,
+        )
         self._draw_grid(plot, scale_x=scale_x, scale_y=scale_y)
         self._draw_forbidden_regions(plot, x_axis=x_axis, y_axis=y_axis, to_px=to_px, offset=target_current)
         self._draw_inspection_gates(plot, x_axis=x_axis, y_axis=y_axis, to_px=to_px, offset=target_current)
@@ -884,10 +975,83 @@ class PygameRPODashboard:
                 self._draw_vector(chaser, vec, color=(92, 220, 160), scale=1.0, label="Thrust")
         self.screen.set_clip(previous_clip)
 
-        xlbl = "I km" if x_axis == 1 else "C km"
-        ylbl = "R km"
+        xlbl = self._axis_label_for_plot(int(x_axis))
+        ylbl = self._axis_label_for_plot(int(y_axis))
         self._text(xlbl, (plot.right - 56, plot.centery + 8), self.small_font, (170, 180, 195))
         self._text(ylbl, (plot.centerx + 8, plot.top + 8), self.small_font, (170, 180, 195))
+
+    def _plot_panel_specs(self) -> tuple[tuple[str, int, int], tuple[str, int, int]]:
+        if _relative_frame_key(getattr(self, "relative_frame", "ric")) == "cislunar_l1":
+            return (
+                ("Cislunar XY: Tangential Vs Earth-Moon", 1, 0),
+                ("Cislunar YZ: Tangential Vs Out-of-Plane", 1, 2),
+            )
+        return (
+            ("RI Plane: In-Track Vs Radial", 1, 0),
+            ("RC Plane: Cross-Track Vs Radial", 2, 0),
+        )
+
+    def _axis_label_for_plot(self, axis: int) -> str:
+        if _relative_frame_key(getattr(self, "relative_frame", "ric")) == "cislunar_l1":
+            labels = {
+                0: "EM km",
+                1: "T km",
+                2: "N km",
+            }
+        else:
+            labels = {0: "R km", 1: "I km", 2: "C km"}
+        return labels.get(int(axis), "km")
+
+    def _draw_cislunar_moon_background(
+        self,
+        plot: Any,
+        *,
+        x_axis: int,
+        y_axis: int,
+        to_px: Any,
+        scale_x: float,
+        scale_y: float,
+    ) -> None:
+        if not _should_draw_cislunar_moon_background(
+            relative_frame=getattr(self, "relative_frame", "ric"),
+            x_axis=int(x_axis),
+            y_axis=int(y_axis),
+        ):
+            return
+        rect_tuple = _scaled_body_rect_tuple(
+            center_px=to_px(np.zeros(3, dtype=float)),
+            radius_km=MOON_RADIUS_KM,
+            scale_x=scale_x,
+            scale_y=scale_y,
+        )
+        pygame = self.pygame
+        rect = pygame.Rect(*rect_tuple)
+        clipped = rect.clip(plot)
+        if clipped.width <= 0 or clipped.height <= 0:
+            return
+        fill = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
+        fill.fill((0, 0, 0, 0))
+        local_rect = pygame.Rect(0, 0, rect.width, rect.height)
+        pygame.draw.ellipse(fill, (150, 158, 166, 42), local_rect)
+        pygame.draw.ellipse(fill, (210, 218, 226, 86), local_rect, width=1)
+        # A tiny limb and crater pattern gives the disk lunar character while
+        # preserving the exact radius set by local_rect.
+        if rect.width >= 18 and rect.height >= 18:
+            shade = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
+            shade.fill((0, 0, 0, 0))
+            pygame.draw.ellipse(shade, (54, 60, 68, 38), pygame.Rect(rect.width // 3, 0, rect.width, rect.height))
+            fill.blit(shade, (0, 0))
+            for frac_x, frac_y, frac_r, alpha in (
+                (0.34, 0.42, 0.035, 30),
+                (0.58, 0.32, 0.028, 24),
+                (0.64, 0.62, 0.045, 28),
+                (0.44, 0.68, 0.024, 22),
+            ):
+                crater = pygame.Rect(0, 0, max(2, int(rect.width * frac_r)), max(2, int(rect.height * frac_r)))
+                crater.center = (int(rect.width * frac_x), int(rect.height * frac_y))
+                pygame.draw.ellipse(fill, (72, 78, 86, alpha), crater, width=1)
+        source = pygame.Rect(clipped.x - rect.x, clipped.y - rect.y, clipped.width, clipped.height)
+        self.screen.blit(fill, (clipped.x, clipped.y), source)
 
     def _prepare_frame_cache(self) -> None:
         if not self.rel_hist:
@@ -934,6 +1098,14 @@ class PygameRPODashboard:
         seed = np.array(rel0, dtype=float).reshape(6)
         accel = np.array(getattr(self, "live_prediction_accel_ric_km_s2", np.zeros(3)), dtype=float).reshape(3)
         elapsed = float(getattr(self, "live_prediction_elapsed_s", 0.0))
+        if self._uses_cr3bp_prediction_model():
+            if (
+                elapsed > 0.0
+                and np.all(np.isfinite(accel))
+                and float(np.linalg.norm(accel)) > float(self.burn_marker_threshold_km_s2)
+            ):
+                seed[3:6] += accel * elapsed
+            return seed
         n = getattr(self, "mean_motion_rad_s", None)
         if (
             elapsed <= 0.0
@@ -1556,12 +1728,46 @@ class PygameRPODashboard:
             rel0 = np.array(self.target_rel_hist[-1], dtype=float).reshape(6)
         else:
             rel0 = rel.reshape(-1, 6)[-1]
-        return self._coast_prediction_from(rel0)
+        return self._coast_prediction_from(
+            rel0,
+            cr3bp_horizon_s=getattr(self, "target_coast_prediction_horizon_s", None),
+            cr3bp_dt_s=getattr(self, "target_coast_prediction_dt_s", None),
+        )
 
     def _coast_prediction_from_cached(self, cache_name: str, rel0: np.ndarray, *, active_burn: bool) -> np.ndarray:
         rel0 = np.array(rel0, dtype=float).reshape(6)
         prediction_cache = getattr(self, "_prediction_cache", {})
         self._prediction_cache = prediction_cache
+        if self._uses_cr3bp_prediction_model():
+            interval_s = (
+                CR3BP_PREDICTION_BURN_UPDATE_INTERVAL_S
+                if bool(active_burn)
+                else CR3BP_PREDICTION_COAST_UPDATE_INTERVAL_S
+            )
+            now_s = self._current_time_s()
+            reference = self._reference_cache_state()
+            cached = prediction_cache.get(str(cache_name))
+            if cached is not None and interval_s > 0.0:
+                age_s = now_s - float(cached.get("time_s", -np.inf))
+                if (
+                    age_s >= 0.0
+                    and age_s < float(interval_s)
+                    and _cr3bp_relative_cache_valid(cached.get("rel0"), rel0)
+                    and _cr3bp_reference_cache_valid(cached.get("reference"), reference)
+                ):
+                    prediction = cached.get("prediction")
+                    if prediction is not None:
+                        return np.array(prediction, dtype=float)
+
+            prediction = self._coast_prediction_from(rel0)
+            prediction_cache[str(cache_name)] = {
+                "time_s": now_s,
+                "rel0": rel0.copy(),
+                "prediction": prediction,
+                "reference": reference,
+            }
+            return prediction
+
         if not self._uses_elliptic_prediction_model():
             prediction = self._coast_prediction_from(rel0)
             prediction_cache[str(cache_name)] = {
@@ -1607,6 +1813,13 @@ class PygameRPODashboard:
             "ts",
         }
 
+    def _uses_cr3bp_prediction_model(self) -> bool:
+        return _coast_prediction_model_key(getattr(self, "coast_prediction_model", "hcw")) in {
+            "cr3bp",
+            "cislunar",
+            "cislunar_l1",
+        }
+
     def _true_anomaly_indicator_text(self) -> str:
         if not self._uses_elliptic_prediction_model():
             return ""
@@ -1647,7 +1860,13 @@ class PygameRPODashboard:
         cap_value = float(cap)
         return np.clip(shifted, -cap_value, cap_value)
 
-    def _coast_prediction_from(self, rel0: np.ndarray) -> np.ndarray:
+    def _coast_prediction_from(
+        self,
+        rel0: np.ndarray,
+        *,
+        cr3bp_horizon_s: float | None = None,
+        cr3bp_dt_s: float | None = None,
+    ) -> np.ndarray:
         rel0 = np.array(rel0, dtype=float).reshape(6)
         n = self.mean_motion_rad_s
         if n is None or not np.isfinite(float(n)) or float(n) <= 0.0:
@@ -1655,6 +1874,53 @@ class PygameRPODashboard:
         horizon = self._coast_prediction_horizon_s(float(n))
         if horizon <= 0.0:
             return np.empty((0, 6), dtype=float)
+        if self._uses_cr3bp_prediction_model():
+            cr3bp_horizon = _positive_float_or_none(cr3bp_horizon_s)
+            if cr3bp_horizon is None:
+                cr3bp_horizon = _positive_float_or_none(getattr(self, "cr3bp_coast_prediction_horizon_s", None))
+            if cr3bp_horizon is not None:
+                horizon = min(float(horizon), float(cr3bp_horizon))
+            cr3bp_dt = _positive_float_or_none(cr3bp_dt_s)
+            if cr3bp_dt is None:
+                cr3bp_dt = _positive_float_or_none(getattr(self, "cr3bp_coast_prediction_dt_s", None))
+            dt = max(
+                float(getattr(self, "coast_prediction_dt_s", 10.0)),
+                300.0 if cr3bp_dt is None else float(cr3bp_dt),
+                1.0e-6,
+            )
+            count = min(int(np.floor(horizon / dt)) + 1, MAX_GHOST_DRAW_POINTS)
+            times = np.linspace(0.0, horizon, max(count, 2), dtype=float)
+            if _relative_frame_key(getattr(self, "relative_frame", "ric")) == "moon_ric":
+                target_state = getattr(self, "reference_state_eci", None)
+                if target_state is None:
+                    return np.empty((0, 6), dtype=float)
+                target_state = np.array(target_state, dtype=float).reshape(6)
+                if _cr3bp_projection_mode_key(getattr(self, "cr3bp_projection_mode", "nonlinear")) == "linearized":
+                    return _linearized_cr3bp_moon_ric_coast_prediction(
+                        rel0,
+                        target_state=target_state,
+                        times=times,
+                        current_t_s=self._current_time_s(),
+                    )
+                return _nonlinear_cr3bp_moon_ric_coast_prediction(
+                    rel0,
+                    target_state=target_state,
+                    times=times,
+                    current_t_s=self._current_time_s(),
+                )
+            origin = cr3bp_l1_state_km_s()
+            state = origin + rel0
+            rows: list[np.ndarray] = []
+            current_t = self._current_time_s()
+            previous_t = 0.0
+            for target_t in times:
+                step_s = float(target_t - previous_t)
+                if step_s > 0.0:
+                    state = propagate_cr3bp_state(state, step_s, current_t)
+                    current_t += step_s
+                rows.append(state - origin)
+                previous_t = float(target_t)
+            return np.vstack(rows)
         dt = float(max(self.coast_prediction_dt_s, 1.0e-6))
         count = min(int(np.floor(horizon / dt)) + 1, MAX_GHOST_DRAW_POINTS)
         times = np.linspace(0.0, horizon, max(count, 2), dtype=float)
@@ -1850,6 +2116,14 @@ class PygameRPODashboard:
             return "current_pair"
         return "default"
 
+    def _prediction_scales_current_camera(self) -> bool:
+        if not bool(getattr(self, "plot_prediction_full_trajectory_only", False)):
+            return True
+        mode = str(getattr(self, "camera_mode", "reference") or "reference").strip().lower()
+        if mode in {"rule_toggle_pair", "camera_rule_pair", "toggle_pair"}:
+            return self._camera_rule_mode_key() == "full_trajectory"
+        return True
+
     def toggle_camera_rule_mode(self) -> str:
         next_mode = "current_pair" if self._camera_rule_mode_key() == "full_trajectory" else "full_trajectory"
         self.camera_rule_mode = next_mode
@@ -1863,6 +2137,7 @@ class PygameRPODashboard:
         rel: np.ndarray,
         target_rel: np.ndarray,
         ghost: np.ndarray,
+        target_ghost: np.ndarray,
         x_axis: int,
         y_axis: int,
         camera_center: np.ndarray,
@@ -1878,6 +2153,9 @@ class PygameRPODashboard:
         ghost_arr = np.array(ghost, dtype=float)
         if ghost_arr.ndim == 2 and ghost_arr.shape[1] >= 3:
             points.append((ghost_arr[:, :3] - center)[:, [int(x_axis), int(y_axis)]])
+        target_ghost_arr = np.array(target_ghost, dtype=float)
+        if target_ghost_arr.ndim == 2 and target_ghost_arr.shape[1] >= 3:
+            points.append((target_ghost_arr[:, :3] - center)[:, [int(x_axis), int(y_axis)]])
         return points
 
     def _camera_rule_scale_points(
@@ -1886,6 +2164,7 @@ class PygameRPODashboard:
         rel: np.ndarray,
         target_rel: np.ndarray,
         ghost: np.ndarray,
+        target_ghost: np.ndarray | None = None,
         x_axis: int,
         y_axis: int,
         camera_center: np.ndarray,
@@ -1896,12 +2175,11 @@ class PygameRPODashboard:
                 rel=rel,
                 target_rel=target_rel,
                 ghost=ghost,
+                target_ghost=np.empty((0, 6), dtype=float) if target_ghost is None else target_ghost,
                 x_axis=x_axis,
                 y_axis=y_axis,
                 camera_center=camera_center,
             )
-        if mode == "current_pair":
-            return []
         if bool(getattr(self, "plot_prediction_in_zoom", False)) and np.array(ghost, dtype=float).size:
             capped = self._capped_projection_points_for_zoom(
                 ghost,
@@ -1911,6 +2189,8 @@ class PygameRPODashboard:
             )
             if capped.size:
                 return [capped]
+        if mode == "current_pair":
+            return []
         return []
 
     def _camera_center_ric(
@@ -1922,26 +2202,43 @@ class PygameRPODashboard:
         y_axis: int | None = None,
     ) -> np.ndarray:
         mode = str(getattr(self, "camera_mode", "reference") or "reference").strip().lower()
+        target = np.array(target_current, dtype=float).reshape(-1)
+        chaser = np.array(chaser_current, dtype=float).reshape(-1)
+        if mode in {"rule_toggle_pair", "camera_rule_pair", "toggle_pair"}:
+            if self._camera_rule_mode_key() == "full_trajectory":
+                return np.zeros(3, dtype=float)
+            plane = (
+                _plane_key_for_axes(x_axis=int(x_axis), y_axis=int(y_axis))
+                if x_axis is not None and y_axis is not None
+                else ""
+            )
+            if plane in tuple(str(value or "").strip().upper() for value in getattr(self, "target_centered_plot_planes", ())):
+                if target.size >= 3 and np.all(np.isfinite(target[:3])):
+                    return target[:3].astype(float)
+                return np.zeros(3, dtype=float)
+            return _satellite_pair_camera_center(
+                chaser=chaser,
+                target=target,
+                x_axis=x_axis,
+                y_axis=y_axis,
+                keep_rc_reference_centered=False,
+            )
         if mode not in {"target_pair", "satellite_pair", "pair"}:
             return np.zeros(3, dtype=float)
         plane = _plane_key_for_axes(x_axis=int(x_axis), y_axis=int(y_axis)) if x_axis is not None and y_axis is not None else ""
-        target = np.array(target_current, dtype=float).reshape(-1)
         if plane in tuple(str(value or "").strip().upper() for value in getattr(self, "target_centered_plot_planes", ())):
             if target.size >= 3 and np.all(np.isfinite(target[:3])):
                 return target[:3].astype(float)
             return np.zeros(3, dtype=float)
         if {x_axis, y_axis} == {0, 2}:
             return np.zeros(3, dtype=float)
-        chaser = np.array(chaser_current, dtype=float).reshape(-1)
-        if chaser.size < 3 or target.size < 3:
-            return np.zeros(3, dtype=float)
-        pair = np.vstack((chaser[:3], target[:3]))
-        if not np.all(np.isfinite(pair)):
-            return np.zeros(3, dtype=float)
-        center = np.zeros(3, dtype=float)
-        axes = (0, 1) if x_axis is None or y_axis is None else (int(x_axis), int(y_axis))
-        for axis in axes:
-            center[axis] = float(np.mean(pair[:, axis]))
+        center = _satellite_pair_camera_center(
+            chaser=chaser,
+            target=target,
+            x_axis=x_axis,
+            y_axis=y_axis,
+            keep_rc_reference_centered=True,
+        )
         axis_overrides = getattr(self, "target_centered_plot_axes", {}) or {}
         raw_override_axes = axis_overrides.get(plane, ())
         override_axes = tuple(str(value or "").strip().lower() for value in raw_override_axes)
@@ -2242,13 +2539,15 @@ def _satellite_marker_size_px(
     scale_y_px_per_km: float,
     *,
     diameter_km: float = SATELLITE_SPRITE_DIAMETER_KM,
+    max_size_px: int = SATELLITE_MAX_SIZE_PX,
 ) -> int:
     raw_px = float(max(abs(float(scale_x_px_per_km)), abs(float(scale_y_px_per_km)))) * float(max(diameter_km, 0.0))
+    max_px = max(int(max_size_px), int(SATELLITE_ICON_SIZE_PX))
     if not np.isfinite(raw_px) or raw_px < float(SATELLITE_DOT_THRESHOLD_PX):
         return 0
     if raw_px < float(SATELLITE_ICON_THRESHOLD_PX):
         return int(SATELLITE_ICON_SIZE_PX)
-    return int(round(np.clip(raw_px, SATELLITE_ICON_SIZE_PX, SATELLITE_MAX_SIZE_PX)))
+    return int(round(np.clip(raw_px, SATELLITE_ICON_SIZE_PX, max_px)))
 
 
 def _cw_forced_state(
@@ -2291,6 +2590,10 @@ def _coast_prediction_model_key(value: str) -> str:
     key = str(value or "hcw").strip().lower().replace("-", "_")
     aliases = {
         "cw": "hcw",
+        "cislunar": "cislunar",
+        "cislunar_l1": "cislunar_l1",
+        "cr3bp": "cr3bp",
+        "cr3bp_rotating": "cr3bp",
         "tschauner_hempel": "tschauner_hempel",
         "th": "tschauner_hempel",
         "ts": "ts",
@@ -2299,6 +2602,130 @@ def _coast_prediction_model_key(value: str) -> str:
         "elliptic_linear": "elliptic_linear",
     }
     return aliases.get(key, key or "hcw")
+
+
+def _cr3bp_projection_mode_key(value: str) -> str:
+    key = str(value or "nonlinear").strip().lower().replace("-", "_")
+    if key in {"linear", "linearized", "stm", "variational"}:
+        return "linearized"
+    return "nonlinear"
+
+
+def _relative_frame_key(value: str) -> str:
+    key = str(value or "ric").strip().lower().replace("-", "_")
+    if key in {"cislunar", "cislunar_l1", "earth_moon_rotating", "cr3bp", "cr3bp_rotating"}:
+        return "cislunar_l1"
+    if key in {"moon_ric", "lunar_ric", "target_moon_ric", "target_lunar_ric"}:
+        return "moon_ric"
+    return "ric"
+
+
+def _cr3bp_state_to_moon_ric_rect(deputy_state: np.ndarray, chief_state: np.ndarray) -> np.ndarray:
+    moon = cr3bp_moon_state_km_s()
+    deputy = np.array(deputy_state, dtype=float).reshape(6) - moon
+    chief = np.array(chief_state, dtype=float).reshape(6) - moon
+    return eci_relative_to_ric_rect(deputy, chief)
+
+
+def _moon_ric_rect_state_to_cr3bp(rel_moon_ric: np.ndarray, chief_state: np.ndarray) -> np.ndarray:
+    moon = cr3bp_moon_state_km_s()
+    chief_abs = np.array(chief_state, dtype=float).reshape(6)
+    chief_moon = chief_abs - moon
+    deputy_moon = ric_rect_state_to_eci(
+        np.array(rel_moon_ric, dtype=float).reshape(6),
+        chief_moon[:3],
+        chief_moon[3:],
+    )
+    return deputy_moon + moon
+
+
+def _nonlinear_cr3bp_moon_ric_coast_prediction(
+    rel0: np.ndarray,
+    *,
+    target_state: np.ndarray,
+    times: np.ndarray,
+    current_t_s: float,
+) -> np.ndarray:
+    reference = np.array(target_state, dtype=float).reshape(6)
+    deputy = _moon_ric_rect_state_to_cr3bp(rel0, reference)
+    rows: list[np.ndarray] = []
+    current_t = float(current_t_s)
+    previous_t = 0.0
+    for target_t in np.array(times, dtype=float).reshape(-1):
+        step_s = float(target_t - previous_t)
+        if step_s > 0.0:
+            deputy = propagate_cr3bp_state(deputy, step_s, current_t)
+            reference = propagate_cr3bp_state(reference, step_s, current_t)
+            current_t += step_s
+        rows.append(_cr3bp_state_to_moon_ric_rect(deputy, reference))
+        previous_t = float(target_t)
+    return np.vstack(rows) if rows else np.empty((0, 6), dtype=float)
+
+
+def _linearized_cr3bp_moon_ric_coast_prediction(
+    rel0: np.ndarray,
+    *,
+    target_state: np.ndarray,
+    times: np.ndarray,
+    current_t_s: float,
+) -> np.ndarray:
+    reference = np.array(target_state, dtype=float).reshape(6)
+    deputy0 = _moon_ric_rect_state_to_cr3bp(rel0, reference)
+    delta0 = deputy0 - reference
+    stm = np.eye(6, dtype=float)
+    rows: list[np.ndarray] = []
+    current_t = float(current_t_s)
+    previous_t = 0.0
+    for target_t in np.array(times, dtype=float).reshape(-1):
+        step_s = float(target_t - previous_t)
+        if step_s > 0.0:
+            reference, stm = propagate_cr3bp_reference_stm(reference, stm, step_s, current_t)
+            current_t += step_s
+        deputy_linear = reference + stm @ delta0
+        rows.append(_cr3bp_state_to_moon_ric_rect(deputy_linear, reference))
+        previous_t = float(target_t)
+    return np.vstack(rows) if rows else np.empty((0, 6), dtype=float)
+
+
+def _satellite_pair_camera_center(
+    *,
+    chaser: np.ndarray,
+    target: np.ndarray,
+    x_axis: int | None,
+    y_axis: int | None,
+    keep_rc_reference_centered: bool,
+) -> np.ndarray:
+    if keep_rc_reference_centered and {x_axis, y_axis} == {0, 2}:
+        return np.zeros(3, dtype=float)
+    chaser_arr = np.array(chaser, dtype=float).reshape(-1)
+    target_arr = np.array(target, dtype=float).reshape(-1)
+    if chaser_arr.size < 3 or target_arr.size < 3:
+        return np.zeros(3, dtype=float)
+    pair = np.vstack((chaser_arr[:3], target_arr[:3]))
+    if not np.all(np.isfinite(pair)):
+        return np.zeros(3, dtype=float)
+    center = np.zeros(3, dtype=float)
+    axes = (0, 1) if x_axis is None or y_axis is None else (int(x_axis), int(y_axis))
+    for axis in axes:
+        center[axis] = float(np.mean(pair[:, axis]))
+    return center
+
+
+def _should_draw_cislunar_moon_background(*, relative_frame: str, x_axis: int, y_axis: int) -> bool:
+    return _relative_frame_key(relative_frame) == "cislunar_l1" and {int(x_axis), int(y_axis)} == {1, 2}
+
+
+def _scaled_body_rect_tuple(
+    *,
+    center_px: tuple[int, int],
+    radius_km: float,
+    scale_x: float,
+    scale_y: float,
+) -> tuple[int, int, int, int]:
+    rx = max(1, int(round(float(radius_km) * float(scale_x))))
+    ry = max(1, int(round(float(radius_km) * float(scale_y))))
+    cx, cy = int(center_px[0]), int(center_px[1])
+    return (cx - rx, cy - ry, rx * 2, ry * 2)
 
 
 def _should_draw_nominal_nmt(nmt: np.ndarray, nmt_bounds: tuple[np.ndarray, ...]) -> bool:
@@ -2406,6 +2833,40 @@ def _elliptic_reference_cache_valid(
     return bool(
         pos_error_km <= ELLIPTIC_REFERENCE_CACHE_POSITION_TOL_KM
         and vel_error_km_s <= ELLIPTIC_REFERENCE_CACHE_VELOCITY_TOL_KM_S
+    )
+
+
+def _cr3bp_reference_cache_valid(cached_reference: Any, current_reference: Any) -> bool:
+    if cached_reference is None or current_reference is None:
+        return cached_reference is None and current_reference is None
+    try:
+        cached = np.array(cached_reference, dtype=float).reshape(6)
+        current = np.array(current_reference, dtype=float).reshape(6)
+    except (TypeError, ValueError):
+        return False
+    if not np.all(np.isfinite(cached)) or not np.all(np.isfinite(current)):
+        return False
+    pos_error_km = float(np.linalg.norm(current[:3] - cached[:3]))
+    vel_error_km_s = float(np.linalg.norm(current[3:6] - cached[3:6]))
+    return bool(
+        pos_error_km <= CR3BP_REFERENCE_CACHE_POSITION_TOL_KM
+        and vel_error_km_s <= CR3BP_REFERENCE_CACHE_VELOCITY_TOL_KM_S
+    )
+
+
+def _cr3bp_relative_cache_valid(cached_rel0: Any, current_rel0: np.ndarray) -> bool:
+    try:
+        cached = np.array(cached_rel0, dtype=float).reshape(6)
+        current = np.array(current_rel0, dtype=float).reshape(6)
+    except (TypeError, ValueError):
+        return False
+    if not np.all(np.isfinite(cached)) or not np.all(np.isfinite(current)):
+        return False
+    pos_error_km = float(np.linalg.norm(current[:3] - cached[:3]))
+    vel_error_km_s = float(np.linalg.norm(current[3:6] - cached[3:6]))
+    return bool(
+        pos_error_km <= CR3BP_RELATIVE_CACHE_POSITION_TOL_KM
+        and vel_error_km_s <= CR3BP_RELATIVE_CACHE_VELOCITY_TOL_KM_S
     )
 
 

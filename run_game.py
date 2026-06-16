@@ -27,8 +27,11 @@ def main() -> None:
     parser.add_argument(
         "--speed-multiple",
         type=float,
-        default=1.0,
-        help="Realtime playback speed. For example, 10 means 10 seconds of sim time per 1 second of real time.",
+        default=None,
+        help=(
+            "Realtime playback speed. For example, 10 means 10 seconds of sim time per 1 second of real time. "
+            "Defaults to the level's configured value, or 1x."
+        ),
     )
     args = parser.parse_args()
     if args.config:
@@ -37,7 +40,7 @@ def main() -> None:
             controlled_object_id=None if args.controlled_object is None else str(args.controlled_object),
             attitude_rate_deg_s=float(args.attitude_rate_deg_s),
             realtime=not bool(args.fast),
-            speed_multiple=float(args.speed_multiple),
+            speed_multiple=args.speed_multiple,
         )
         if result.level_passed or result.arcade_score > 0:
             record_game_progress(
@@ -59,7 +62,7 @@ def main() -> None:
             controlled_object_id=None if args.controlled_object is None else str(args.controlled_object),
             attitude_rate_deg_s=float(args.attitude_rate_deg_s),
             realtime=not bool(args.fast),
-            speed_multiple=float(args.speed_multiple),
+            speed_multiple=args.speed_multiple,
             difficulty_override=selection.difficulty,
             music_enabled=selection.music_enabled,
             record_video=selection.record_video,

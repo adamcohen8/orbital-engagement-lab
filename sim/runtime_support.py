@@ -33,6 +33,7 @@ from sim.control.orbit.zero_controller import ZeroController
 from sim.core.models import Command, StateBelief, StateTruth
 from sim.dynamics.attitude.disturbances import DisturbanceTorqueConfig, DisturbanceTorqueModel
 from sim.dynamics.model import OrbitalAttitudeDynamics
+from sim.dynamics.orbit.cr3bp import cr3bp_halo_seed_state_km_s, cr3bp_moon_state_km_s, cr3bp_system
 from sim.dynamics.orbit.elements import coe_to_rv_eci as _coe_to_rv_eci
 from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2, EARTH_RADIUS_KM
 from sim.dynamics.orbit.frames import eci_to_ecef
@@ -337,6 +338,23 @@ def _relative_orbit_state12(
 
 
 def _rv_from_initial_state(s0: dict[str, Any], *, target_jd_utc: float | None = None) -> tuple[np.ndarray, np.ndarray]:
+    cr3bp_state = s0.get("cr3bp_rotating")
+    if isinstance(cr3bp_state, dict):
+        raw_state = cr3bp_state.get("state_km_s", cr3bp_state.get("state"))
+        if raw_state is None:
+            raise ValueError("initial_state.cr3bp_rotating.state_km_s must be a length-6 list.")
+        state = np.array(raw_state, dtype=float).reshape(-1)
+        if state.size != 6:
+            raise ValueError("initial_state.cr3bp_rotating.state_km_s must be length-6.")
+        return state[:3], state[3:]
+
+    halo = s0.get("cr3bp_halo")
+    if isinstance(halo, dict):
+        system = cr3bp_system(str(halo.get("system", "earth_moon") or "earth_moon"))
+        family = str(halo.get("family", "l1_northern") or "l1_northern")
+        state = cr3bp_halo_seed_state_km_s(system=system, family=family)
+        return state[:3], state[3:]
+
     if "position_eci_km" in s0:
         pos = np.array(s0.get("position_eci_km", [7000.0, 0.0, 0.0]), dtype=float)
         if "velocity_eci_km_s" in s0:
@@ -661,27 +679,44 @@ def _apply_thruster_mount_defaults(module_obj: Any | None, pointer: Any | None, 
     return module_obj
 
 
-def _resolve_chaser_relative_ric_init(initial_state: dict[str, Any]) -> tuple[np.ndarray, str] | None:
+def _resolve_chaser_relative_ric_init(initial_state: dict[str, Any]) -> tuple[np.ndarray, str, str] | None:
     s0 = dict(initial_state or {})
     rel_block = s0.get("relative_to_target_ric")
     if isinstance(rel_block, dict):
         frame = str(rel_block.get("frame", "rect")).strip().lower()
+        reference_frame = str(rel_block.get("reference_frame", rel_block.get("origin", "target"))).strip().lower()
         state = np.array(rel_block.get("state", []), dtype=float).reshape(-1)
         if state.size != 6:
             raise ValueError("chaser.initial_state.relative_to_target_ric.state must be length-6.")
         if frame not in ("rect", "curv"):
             raise ValueError("chaser.initial_state.relative_to_target_ric.frame must be 'rect' or 'curv'.")
-        return state, frame
+        return state, frame, reference_frame
     if "relative_ric_rect" in s0:
         state = np.array(s0.get("relative_ric_rect"), dtype=float).reshape(-1)
         if state.size != 6:
             raise ValueError("chaser.initial_state.relative_ric_rect must be length-6.")
-        return state, "rect"
+        return state, "rect", "target"
     if "relative_ric_curv" in s0:
         state = np.array(s0.get("relative_ric_curv"), dtype=float).reshape(-1)
         if state.size != 6:
             raise ValueError("chaser.initial_state.relative_ric_curv must be length-6.")
-        return state, "curv"
+        return state, "curv", "target"
+    return None
+
+
+def _resolve_relative_cislunar_init(initial_state: dict[str, Any]) -> np.ndarray | None:
+    s0 = dict(initial_state or {})
+    rel_block = s0.get("relative_to_target_cislunar")
+    if isinstance(rel_block, dict):
+        state = np.array(rel_block.get("state", []), dtype=float).reshape(-1)
+        if state.size != 6:
+            raise ValueError("chaser.initial_state.relative_to_target_cislunar.state must be length-6.")
+        return state
+    if "relative_cislunar" in s0:
+        state = np.array(s0.get("relative_cislunar"), dtype=float).reshape(-1)
+        if state.size != 6:
+            raise ValueError("chaser.initial_state.relative_cislunar must be length-6.")
+        return state
     return None
 
 
@@ -752,16 +787,40 @@ def _apply_relative_init_from_reference(
     rel = _resolve_chaser_relative_ric_init(initial_state)
     if rel is None or agent.truth is None or reference.truth is None:
         return
-    x_rel, frame = rel
-    r_t = np.array(reference.truth.position_eci_km, dtype=float)
-    v_t = np.array(reference.truth.velocity_eci_km_s, dtype=float)
+    x_rel, frame, reference_frame = rel
+    moon_state = cr3bp_moon_state_km_s()
+    use_moon_ric = reference_frame.replace("-", "_") in {"moon", "moon_ric", "lunar", "lunar_ric"}
+    origin_r = moon_state[:3] if use_moon_ric else np.zeros(3, dtype=float)
+    origin_v = moon_state[3:] if use_moon_ric else np.zeros(3, dtype=float)
+    r_t_abs = np.array(reference.truth.position_eci_km, dtype=float)
+    v_t_abs = np.array(reference.truth.velocity_eci_km_s, dtype=float)
+    r_t = r_t_abs - origin_r
+    v_t = v_t_abs - origin_v
     r0 = float(np.linalg.norm(r_t))
     if r0 <= 0.0:
         return
     x_rel_rect = ric_curv_to_rect(x_rel, r0_km=r0) if frame == "curv" else np.array(x_rel, dtype=float).reshape(6)
     x_agent_eci = ric_rect_state_to_eci(x_rel_rect, r_t, v_t)
-    agent.truth.position_eci_km = x_agent_eci[:3]
-    agent.truth.velocity_eci_km_s = x_agent_eci[3:]
+    agent.truth.position_eci_km = x_agent_eci[:3] + origin_r
+    agent.truth.velocity_eci_km_s = x_agent_eci[3:] + origin_v
+    if agent.belief is not None and agent.belief.state.size >= 6:
+        agent.belief.state[:3] = agent.truth.position_eci_km
+        agent.belief.state[3:6] = agent.truth.velocity_eci_km_s
+
+
+def _apply_relative_cislunar_init_from_reference(
+    *,
+    agent: AgentRuntime,
+    reference: AgentRuntime,
+    initial_state: dict[str, Any],
+) -> None:
+    rel = _resolve_relative_cislunar_init(initial_state)
+    if rel is None or agent.truth is None or reference.truth is None:
+        return
+    ref_state = np.hstack((reference.truth.position_eci_km, reference.truth.velocity_eci_km_s))
+    state = ref_state + np.array(rel, dtype=float).reshape(6)
+    agent.truth.position_eci_km = state[:3]
+    agent.truth.velocity_eci_km_s = state[3:]
     if agent.belief is not None and agent.belief.state.size >= 6:
         agent.belief.state[:3] = agent.truth.position_eci_km
         agent.belief.state[3:6] = agent.truth.velocity_eci_km_s
@@ -774,6 +833,7 @@ def _apply_chaser_relative_init_from_target(
     initial_state: dict[str, Any],
 ) -> None:
     _apply_relative_init_from_reference(agent=chaser, reference=target, initial_state=initial_state)
+    _apply_relative_cislunar_init_from_reference(agent=chaser, reference=target, initial_state=initial_state)
 
 
 def _build_orbit_propagator(cfg: SimulationScenarioConfig) -> OrbitPropagator:
@@ -799,6 +859,8 @@ def _build_orbit_propagator(cfg: SimulationScenarioConfig) -> OrbitPropagator:
     if bool(orbit.get("third_body_moon", False)):
         plugins.append(third_body_moon_plugin)
     return OrbitPropagator(
+        model=str(orbit.get("model", "two_body") or "two_body"),
+        cr3bp_system_name=str(orbit.get("cr3bp_system", "earth_moon") or "earth_moon"),
         integrator=str(orbit.get("integrator", "rk4")),
         plugins=plugins,
         adaptive_atol=float(orbit.get("adaptive_atol", 1e-9)),

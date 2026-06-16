@@ -3,11 +3,12 @@
 Status: implementation contract for the single-run review store and common
 workflow review evidence layer.
 
-Current recommendation: use the `sim.review` Python/CLI query API for agent,
-scripted, and routine human review. The desktop Output Review Workbench is an
-experimental dynamic plot creator for completed runs: load review-store data,
-choose a query/table, map columns to a plot, toggle OEL light/dark styling, and
-save custom figures with provenance.
+Current recommendation: use the `sim.review` Python/CLI query API for plain
+scripted and routine table review, and use `sim.review.EvidencePlotter` or
+`.venv/bin/python -m sim.review plot` for custom OEL-styled figures from
+completed runs. OEL Evidence Studio, formerly the Output Review Workbench, is
+the experimental interactive viewer/workbench for completed-run artifacts and
+manual plot-builder workflows.
 
 The review store is the durable data layer for inspecting completed OEL outputs.
 It is intended to make simulation outputs queryable after a run finishes,
@@ -503,13 +504,42 @@ agent workflows:
 .venv/bin/python -m sim.review outputs/my_run --query "SELECT scenario_name FROM run_metadata" --json
 ```
 
-The experimental ORW preview can open a completed run directly and build custom
-figures from review-store queries. Prefer `.venv/bin/python -m sim.review` when you only
-need scripted or agent-friendly tabular inspection:
+Use the custom review plotting API when a completed output folder has the
+review evidence needed for a plot that was not generated during the simulation:
 
 ```bash
-.venv/bin/python run_orw.py --output outputs/my_run
+.venv/bin/python -m sim.review plot outputs/my_run --recipe relative_velocity_components --style light
+.venv/bin/python -m sim.review.plot outputs/my_run \
+  --sql "SELECT time_s, range_km FROM relative_state ORDER BY time_s" \
+  --x time_s --y range_km \
+  --title "Relative range over time" \
+  --dry-run --json
 ```
+
+Python callers use the same implementation:
+
+```python
+from sim.review import EvidencePlotter, ReviewWorkspace
+
+plotter = EvidencePlotter(ReviewWorkspace.open("outputs/my_run"))
+plotter.line(
+    sql="SELECT time_s, range_km FROM relative_state ORDER BY time_s",
+    x="time_s",
+    y="range_km",
+    title="Relative range over time",
+)
+```
+
+The optional PySide viewer opens the same completed-run evidence in an
+interactive local window:
+
+```bash
+.venv/bin/python run_evidence_studio.py --output outputs/my_run
+```
+
+Prefer `.venv/bin/python -m sim.review` when you only need scripted or
+agent-friendly tabular inspection. See `docs/agent-custom-plots.md` for custom
+plot examples and agent rules.
 
 Safety requirements:
 
@@ -520,10 +550,12 @@ Safety requirements:
   attaches/detaches, transactions, and extension loading even if a query passes
   the first-token check.
 - Queries have a configurable row limit.
-- Query errors should be returned as review-friendly messages, not raw ORW
-  crashes.
+- Query errors should be returned as review-friendly messages, not raw Evidence
+  Studio crashes.
 - SQL must not be able to write files, mutate tables, attach external
   databases, or load extensions.
+- Custom plot creation must go through the review plotting API so SQL remains
+  read-only, generated figures retain OEL style, and provenance is recorded.
 
 Agents should use this API instead of ad hoc parsing of large JSON logs when a
 review store is present.
@@ -555,12 +587,12 @@ A generated artifact should record:
 Custom figures should use the OEL plotting style helpers so workbench-generated
 figures visually match simulator-generated artifacts.
 
-The experimental ORW preview supports saving a query result as an OEL-styled
-figure when the result contains plottable columns. Users can choose line,
-scatter, or bar plots; x/y/group columns; light or dark OEL style; titles and
-axis labels; and PNG/SVG/PDF output. Saved figures are written under
-`review/figures/`, and provenance for ORW-generated figures is appended to
-`review/generated_artifacts.json`.
+OEL Evidence Studio supports saving an agent-generated or manually configured
+query result as an OEL-styled figure when the result contains plottable columns.
+Users can choose line, scatter, or bar plots; x/y/group columns; light or dark
+OEL style; titles and axis labels; and PNG/SVG/PDF output. Saved figures are
+written under `review/figures/`, and provenance for Evidence Studio generated
+figures is appended to `review/generated_artifacts.json`.
 
 ## Built-In Insight Recipes
 

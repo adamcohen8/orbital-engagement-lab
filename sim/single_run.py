@@ -40,6 +40,7 @@ from sim.resource_limits import (
 from sim.rocket.navigation import build_rocket_nav_state
 from sim.runtime_support import (
     AgentRuntime,
+    _apply_relative_cislunar_init_from_reference,
     _apply_relative_init_from_reference,
     _build_knowledge_base,
     _create_rocket_runtime,
@@ -170,6 +171,11 @@ class _SingleRunEngine:
             reference = self.agents.get(reference_id) if reference_id else None
             if reference is not None:
                 _apply_relative_init_from_reference(agent=agent, reference=reference, initial_state=initial_state)
+                _apply_relative_cislunar_init_from_reference(
+                    agent=agent,
+                    reference=reference,
+                    initial_state=initial_state,
+                )
 
         target_reference_id = default_reference_object_id(cfg, available_ids=self.agents.keys()) or "target"
         target_reference_section = self.object_configs.get(target_reference_id)

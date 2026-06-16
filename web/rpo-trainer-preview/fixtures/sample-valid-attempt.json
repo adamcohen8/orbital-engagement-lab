@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "challenge_id": "rpo_arcade_pursuit",
+  "username": "ORBITACE",
+  "email": "",
+  "client_build_hash": "fixture",
+  "physics_version": "web-two-body-v1",
+  "scoring_version": "pursuit-v1",
+  "config_hash": "ec95df5e",
+  "seed": 4242,
+  "input_events": [
+    {
+      "tick": 5,
+      "control": "iPlus",
+      "state": "down"
+    },
+    {
+      "tick": 45,
+      "control": "iPlus",
+      "state": "up"
+    },
+    {
+      "tick": 260,
+      "control": "rMinus",
+      "state": "down"
+    },
+    {
+      "tick": 285,
+      "control": "rMinus",
+      "state": "up"
+    },
+    {
+      "tick": 520,
+      "control": "iMinus",
+      "state": "down"
+    },
+    {
+      "tick": 545,
+      "control": "iMinus",
+      "state": "up"
+    }
+  ],
+  "claimed_score": 0,
+  "claimed_metrics": {
+    "achieved_time_s": null,
+    "elapsed_s": 12000,
+    "closest_range_km": 1.51006009283,
+    "final_range_km": 12.1948387779,
+    "final_relative_speed_km_s": 0.00034567243709,
+    "player_delta_v_m_s": 1.35,
+    "target_delta_v_m_s": 0.1
+  }
+}

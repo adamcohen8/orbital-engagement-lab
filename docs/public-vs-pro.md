@@ -29,7 +29,7 @@ The public core includes:
   chaser/target knowledge, pursuit, evade, and defensive behaviors
 - reusable object preset YAML files
 - primary CLI, scenario YAML, Python API, and review query workflows
-- experimental desktop GUI and Output Review Workbench dynamic plot creator
+- experimental desktop GUI and OEL Evidence Studio viewer/workbench
 - examples and starter validation workflows
 - public use-case configs under `examples/configs/public_*.yaml`
 - lightweight educational rocket/ascent primitives, without tuned orbital
