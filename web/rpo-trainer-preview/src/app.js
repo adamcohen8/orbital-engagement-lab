@@ -30,6 +30,7 @@ const CHASER_MARKER = "#f5cd5c";
 const BUILD_ID = "spaced-footer-legend-2026-06-13";
 const ARCADE_BUILD_ID = `${BUILD_ID}-competition-local`;
 const ARCADE_CHALLENGE_RECORD = buildChallengeRecord(DEFAULT_PURSUIT_CHALLENGE);
+const LEADERBOARD_REFRESH_MS = 30000;
 const ANALYTICS_SCRIPT_SRC = "https://plausible.io/js/script.js";
 const ANALYTICS_LOCAL_HOSTNAMES = new Set(["", "localhost", "127.0.0.1", "::1"]);
 const PREVIEW_DEV_HOSTNAMES = new Set(["", "localhost", "127.0.0.1", "::1"]);
@@ -52,6 +53,10 @@ const el = {
   selectorPreviewBrief: document.querySelector("#selectorPreviewBrief"),
   selectorPreviewCriteria: document.querySelector("#selectorPreviewCriteria"),
   selectorPreviewNotes: document.querySelector("#selectorPreviewNotes"),
+  leaderboardPanel: document.querySelector("#leaderboardPanel"),
+  leaderboardList: document.querySelector("#leaderboardList"),
+  leaderboardMeta: document.querySelector("#leaderboardMeta"),
+  leaderboardRefresh: document.querySelector("#leaderboardRefresh"),
   pauseButton: document.querySelector("#pauseButton"),
   resetButton: document.querySelector("#resetButton"),
   levelSelectButton: document.querySelector("#levelSelectButton"),
@@ -296,6 +301,9 @@ const state = {
   arcadeReferenceStateEci: null,
   arcadeTargetRel: { r: 0, i: 0, c: 0, rd: 0, id: 0, cd: 0, t: 0 },
   arcadeChaserTargetRel: { r: 0, i: 0, c: 0, rd: 0, id: 0, cd: 0, t: 0 },
+  leaderboardEntries: [],
+  leaderboardLastFetchMs: 0,
+  leaderboardLoading: false,
   targetTrail: [],
   targetGhost: [],
 };
@@ -464,6 +472,9 @@ function renderLevelSelector() {
   el.selectorPreviewBrief.textContent = option.brief;
   replaceList(el.selectorPreviewCriteria, option.criteria);
   replaceList(el.selectorPreviewNotes, option.notes);
+  const showLeaderboard = option.id === "pursuitArcade";
+  el.leaderboardPanel.classList.toggle("hidden", !showLeaderboard);
+  if (showLeaderboard) refreshLeaderboard();
 }
 
 function replaceList(listEl, items) {
@@ -473,6 +484,80 @@ function replaceList(listEl, items) {
     li.textContent = item;
     listEl.appendChild(li);
   });
+}
+
+function refreshLeaderboard(options = {}) {
+  if (!el.leaderboardPanel || state.leaderboardLoading) return;
+  const force = Boolean(options.force);
+  const now = Date.now();
+  if (!force && state.leaderboardLastFetchMs && now - state.leaderboardLastFetchMs < LEADERBOARD_REFRESH_MS) {
+    renderLeaderboard();
+    return;
+  }
+  if (!["http:", "https:"].includes(window.location.protocol) || PREVIEW_DEV_HOSTNAMES.has(window.location.hostname)) {
+    state.leaderboardEntries = [];
+    renderLeaderboard("Leaderboard appears on the hosted site.");
+    return;
+  }
+  state.leaderboardLoading = true;
+  renderLeaderboard("Loading scores...");
+  fetch(`/api/leaderboard?challenge=${encodeURIComponent(ARCADE_CHALLENGE_RECORD.challenge_id)}&limit=10`)
+    .then((response) => {
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return response.json();
+    })
+    .then((payload) => {
+      state.leaderboardEntries = Array.isArray(payload.entries) ? payload.entries : [];
+      state.leaderboardLastFetchMs = Date.now();
+      renderLeaderboard();
+      trackEvent("arcade_leaderboard_view", { entries: state.leaderboardEntries.length });
+    })
+    .catch((error) => {
+      renderLeaderboard(`Leaderboard unavailable: ${error instanceof Error ? error.message : String(error)}`);
+    })
+    .finally(() => {
+      state.leaderboardLoading = false;
+    });
+}
+
+function renderLeaderboard(message = "") {
+  if (!el.leaderboardList || !el.leaderboardMeta) return;
+  el.leaderboardList.replaceChildren();
+  if (state.leaderboardEntries.length <= 0) {
+    const li = document.createElement("li");
+    li.className = "leaderboard-empty";
+    li.textContent = "No scores yet.";
+    el.leaderboardList.appendChild(li);
+  } else {
+    state.leaderboardEntries.forEach((entry, idx) => {
+      const li = document.createElement("li");
+      li.className = "leaderboard-row";
+      const rank = document.createElement("span");
+      rank.className = "leaderboard-rank";
+      rank.textContent = String(idx + 1).padStart(2, "0");
+      const name = document.createElement("span");
+      name.className = "leaderboard-name";
+      name.textContent = String(entry.username || "anonymous");
+      const score = document.createElement("span");
+      score.className = "leaderboard-score";
+      score.textContent = Number(entry.score || 0).toLocaleString();
+      const rounds = document.createElement("span");
+      rounds.className = "leaderboard-rounds";
+      rounds.textContent = `${Number(entry.metrics?.rounds_cleared || 0)} rd`;
+      li.append(rank, name, score, rounds);
+      el.leaderboardList.appendChild(li);
+    });
+  }
+  if (message) {
+    el.leaderboardMeta.textContent = message;
+  } else if (state.leaderboardLastFetchMs) {
+    el.leaderboardMeta.textContent = `Updated ${new Date(state.leaderboardLastFetchMs).toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    })}`;
+  } else {
+    el.leaderboardMeta.textContent = "";
+  }
 }
 
 function selectLevel(index) {
@@ -1899,6 +1984,7 @@ async function submitLeaderboardAttempt(event) {
     el.leaderboardStatus.textContent = payload.leaderboard_updated
       ? `Submitted. Score ${Number(payload.score || 0).toLocaleString()} is on the leaderboard.`
       : `Submitted. Score ${Number(payload.score || 0).toLocaleString()} did not beat your best.`;
+    refreshLeaderboard({ force: true });
     trackEvent("arcade_leaderboard_submit", { result: "accepted", status: payload.status || "valid" });
   } catch (error) {
     el.leaderboardStatus.textContent = `Submission failed: ${error instanceof Error ? error.message : String(error)}`;
@@ -2185,6 +2271,7 @@ function bindEvents() {
     trackEvent("download_click", { source: "debrief", mode: state.mode });
   });
   el.leaderboardForm.addEventListener("submit", submitLeaderboardAttempt);
+  el.leaderboardRefresh.addEventListener("click", () => refreshLeaderboard({ force: true }));
   el.applySandbox.addEventListener("click", () => {
     playMusicFromGesture();
     resetState(sandboxSeed());
