@@ -257,6 +257,85 @@ p {
   padding-left: 18px;
 }
 
+.leaderboard-panel {
+  margin-top: 18px;
+  border-top: 1px solid rgb(70, 82, 100);
+  padding-top: 14px;
+}
+
+.leaderboard-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.leaderboard-head h3 {
+  margin: 0;
+}
+
+.leaderboard-head button {
+  min-height: 28px;
+  color: rgb(220, 234, 246);
+}
+
+.leaderboard-list {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.leaderboard-row {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) max-content 58px;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  border: 1px solid rgb(48, 60, 76);
+  border-radius: 6px;
+  background: rgb(15, 24, 34);
+  color: rgb(226, 235, 244);
+  padding: 6px 10px;
+}
+
+.leaderboard-rank {
+  color: rgb(96, 174, 224);
+}
+
+.leaderboard-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.leaderboard-score {
+  color: rgb(245, 210, 110);
+  text-align: right;
+}
+
+.leaderboard-rounds {
+  color: rgb(170, 184, 204);
+  text-align: right;
+}
+
+.leaderboard-empty,
+.leaderboard-meta {
+  color: rgb(162, 178, 198);
+  font-size: 13px;
+  line-height: 17px;
+}
+
+.leaderboard-empty {
+  padding: 4px 0;
+}
+
+.leaderboard-meta {
+  margin: 8px 0 0;
+}
+
 .launcher-footer {
   align-self: center;
   color: var(--footer);

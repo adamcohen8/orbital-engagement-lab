@@ -19,12 +19,25 @@ import {
   trajectoryPlotSvg,
   validateAttemptPacket,
 } from "../src/competition/arcade-engine.js";
+import { hashVerificationToken, verificationExpiryIso, verificationUrl } from "../api/_email.mjs";
 
 test("canonical JSON and hash are stable across object key order", () => {
   const a = { b: 2, a: { d: 4, c: 3 } };
   const b = { a: { c: 3, d: 4 }, b: 2 };
   assert.equal(canonicalJson(a), canonicalJson(b));
   assert.equal(hashCanonicalJson(a), hashCanonicalJson(b));
+});
+
+test("email verification helpers hash tokens and build public links", () => {
+  const hash = hashVerificationToken("abc123");
+  assert.equal(hash, hashVerificationToken("abc123"));
+  assert.notEqual(hash, hashVerificationToken("abc124"));
+  assert.match(hash, /^[a-f0-9]{64}$/);
+  assert.equal(
+    verificationUrl({ headers: { host: "example.test", "x-forwarded-proto": "https" } }, "token with spaces"),
+    "https://example.test/api/verify-email?token=token%20with%20spaces",
+  );
+  assert.equal(verificationExpiryIso(new Date("2026-01-01T00:00:00.000Z")), "2026-01-08T00:00:00.000Z");
 });
 
 test("RIC conversion round trips rotating-frame relative position and velocity", () => {
