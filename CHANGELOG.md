@@ -37,6 +37,8 @@ leaderboard flow for small classroom or outreach competitions.
 
 - Fixed mobile landscape layouts where the plots could collapse to only a few
   pixels tall.
+- Fixed mobile long-press behavior so holding burn controls no longer triggers
+  browser text selection or callouts.
 - Fixed browser compatibility hazards around blocked `localStorage` and older
   Safari media-query listeners.
 - Fixed mobile arcade HUD copy so the music button no longer shows redundant
