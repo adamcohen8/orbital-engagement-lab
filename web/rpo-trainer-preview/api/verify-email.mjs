@@ -1,0 +1,81 @@
+import { escapeHtml, hashVerificationToken, publicOrigin } from "./_email.mjs";
+import { supabaseRest } from "./_supabase.mjs";
+
+export default async function handler(req, res) {
+  if (req.method !== "GET") {
+    sendHtml(res, 405, "Use GET for email verification.");
+    return;
+  }
+
+  try {
+    const url = new URL(req.url || "/api/verify-email", publicOrigin(req));
+    const token = url.searchParams.get("token") || "";
+    if (!token) {
+      sendHtml(res, 400, "The verification link is missing its token.");
+      return;
+    }
+
+    const query = new URLSearchParams({
+      token_hash: `eq.${hashVerificationToken(token)}`,
+      select: "id,player_id,email,expires_at,verified_at",
+      limit: "1",
+    });
+    const rows = await supabaseRest(`email_verifications?${query.toString()}`);
+    const verification = rows?.[0];
+    if (!verification) {
+      sendHtml(res, 404, "This verification link was not found.");
+      return;
+    }
+    if (verification.verified_at) {
+      sendSuccess(res, "This score email was already verified.");
+      return;
+    }
+    if (new Date(verification.expires_at).getTime() < Date.now()) {
+      sendHtml(res, 410, "This verification link has expired.");
+      return;
+    }
+
+    const verifiedAt = new Date().toISOString();
+    await supabaseRest(`email_verifications?id=eq.${verification.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ verified_at: verifiedAt }),
+    });
+    await supabaseRest(`players?id=eq.${verification.player_id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ email_verified_at: verifiedAt }),
+    });
+    sendSuccess(res, "Email verified. Your leaderboard score can now be tied back to this address.");
+  } catch (error) {
+    sendHtml(res, 500, error instanceof Error ? error.message : String(error));
+  }
+}
+
+function sendSuccess(res, message) {
+  sendHtml(res, 200, message, true);
+}
+
+function sendHtml(res, statusCode, message, ok = false) {
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.status(statusCode).send(`<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OEL Email Verification</title>
+    <style>
+      body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #0d141f; color: #e8eef8; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      main { max-width: 560px; padding: 32px; border: 2px solid #53657e; background: #111a26; }
+      h1 { margin: 0 0 16px; font-size: 24px; }
+      p { margin: 0 0 24px; color: #b7c4d7; }
+      a { color: #8fd3ff; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>${ok ? "Verified" : "Verification issue"}</h1>
+      <p>${escapeHtml(message)}</p>
+      <a href="/">Return to Pursuit Arcade</a>
+    </main>
+  </body>
+</html>`);
+}

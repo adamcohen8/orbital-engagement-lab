@@ -5,6 +5,12 @@ import {
   validateAttemptPacket,
 } from "../src/competition/arcade-engine.js";
 import {
+  createVerificationToken,
+  sendScoreVerificationEmail,
+  verificationExpiryIso,
+  verificationUrl,
+} from "./_email.mjs";
+import {
   normalizeEmail,
   normalizedUsernameKey,
   normalizeUsername,
@@ -43,6 +49,15 @@ export default async function handler(req, res) {
     if (accepted) {
       leaderboardUpdated = await upsertLeaderboard(player.id, attemptRow.id, validation);
     }
+    const emailResult = await maybeSendVerificationEmail({
+      req,
+      player,
+      attemptRow,
+      email,
+      username,
+      validation,
+      accepted,
+    });
 
     sendJson(res, accepted ? 200 : 422, {
       status: validation.status,
@@ -52,6 +67,8 @@ export default async function handler(req, res) {
       metrics: validation.canonical_metrics ?? {},
       attempt_id: attemptRow.id,
       leaderboard_updated: leaderboardUpdated,
+      email_status: emailResult.status,
+      email_error: emailResult.error,
     });
   } catch (error) {
     sendJson(res, 500, { error: error instanceof Error ? error.message : String(error) });
@@ -168,4 +185,34 @@ async function upsertLeaderboard(playerId, attemptId, validation) {
     ]),
   });
   return true;
+}
+
+async function maybeSendVerificationEmail({ req, player, attemptRow, email, username, validation, accepted }) {
+  if (!accepted || !email) return { status: "skipped" };
+  const tokenRecord = createVerificationToken();
+  await supabaseRest("email_verifications", {
+    method: "POST",
+    body: JSON.stringify([
+      {
+        player_id: player.id,
+        attempt_id: attemptRow.id,
+        email,
+        token_hash: tokenRecord.token_hash,
+        expires_at: verificationExpiryIso(),
+      },
+    ]),
+  });
+
+  try {
+    return await sendScoreVerificationEmail({
+      email,
+      username,
+      score: validation.canonical_score ?? 0,
+      roundsCleared: validation.canonical_metrics?.rounds_cleared || validation.replay?.rounds_cleared || 0,
+      attemptId: attemptRow.id,
+      verifyUrl: verificationUrl(req, tokenRecord.token),
+    });
+  } catch (error) {
+    return { status: "failed", error: error instanceof Error ? error.message : String(error) };
+  }
 }
