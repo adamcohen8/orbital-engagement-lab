@@ -238,6 +238,38 @@ test("arcade run clears rounds, awards score, and tightens the next goal", () =>
   assert.equal(next.total_score, transition.total_score);
 });
 
+test("default arcade rounds visibly tighten the goal circle", () => {
+  const record = buildChallengeRecord(DEFAULT_PURSUIT_CHALLENGE);
+  const session = createPursuitArcadeSession(record.config, { seed: 777, startRoundIndex: 2 });
+  assert.ok(Math.abs(session.snapshot().goal_range_km - 0.095) < 1.0e-12);
+});
+
+test("arcade clear bonus includes 75 percent target period, lower dV bonus, and boss bonus", () => {
+  const record = buildChallengeRecord({
+    ...DEFAULT_PURSUIT_CHALLENGE,
+    goal_range_km: 20.0,
+    arcade: {
+      ...DEFAULT_PURSUIT_CHALLENGE.arcade,
+      boss_round_interval: 2,
+      goal_range_step_km: 0.0,
+      min_goal_range_km: 20.0,
+    },
+  });
+  const session = createPursuitArcadeSession(record.config, { seed: 444 });
+  session.step(1);
+  const firstTransition = session.snapshot().round_transition;
+  assert.ok(firstTransition);
+  const circularPeriodS = 2 * Math.PI * Math.sqrt((record.config.target_coes.a_km ** 3) / record.config.mu_km3_s2);
+  assert.equal(firstTransition.bonus_time_s, Number((0.75 * circularPeriodS + 300).toPrecision(12)));
+
+  session.continueNextRound();
+  session.step(1);
+  const bossTransition = session.snapshot().round_transition;
+  assert.ok(bossTransition);
+  const bossPeriodS = 2 * Math.PI * Math.sqrt((record.config.arcade.boss.target_coes.a_km ** 3) / record.config.mu_km3_s2);
+  assert.equal(bossTransition.bonus_time_s, Number((0.75 * bossPeriodS + 300 + 2000).toPrecision(12)));
+});
+
 test("arcade multi-round attempt packet validates from recorded round inputs", () => {
   const record = buildChallengeRecord({
     ...DEFAULT_PURSUIT_CHALLENGE,

@@ -6,6 +6,27 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.12.4 - 2026-06-17
+
+Release thesis: `v0.12.4` tunes the web Pursuit Arcade scoring loop and fixes
+the 2D goal-ring display so the browser preview is fairer for leaderboard
+play.
+
+### Changed
+
+- Updated web Pursuit Arcade round transitions so clears award 75% of the
+  target orbital period, unused chaser delta-v is worth 100 seconds per m/s,
+  boss clears add a 2000 second bonus, and new rounds restart at 1x playback
+  speed with full-trajectory camera framing.
+- Added end-of-run submission copy explaining that optional email verification
+  reserves the username for future Pursuit Arcade scores.
+
+### Fixed
+
+- Fixed the web arcade goal-ring projection so the green circles reflect the
+  true 3D rendezvous range instead of overstating clearance on the 2D RI/RC
+  views.
+
 ## 0.12.3 - 2026-06-17
 
 Release thesis: `v0.12.3` graduates the cislunar rendezvous trainer from beta
