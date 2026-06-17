@@ -272,6 +272,8 @@ export function createPursuitSession(config = DEFAULT_PURSUIT_CHALLENGE, options
         relative_speed_km_s: roundMetric(relSpeedKmS),
         player_delta_v_m_s: roundMetric(sim.player_delta_v_m_s),
         target_delta_v_m_s: roundMetric(sim.target_delta_v_m_s),
+        max_delta_v_m_s: roundMetric(cfg.max_delta_v_m_s),
+        max_target_delta_v_m_s: roundMetric(cfg.max_target_delta_v_m_s ?? cfg.target_defense?.max_delta_v_m_s ?? 0),
         closest_range_km: roundMetric(closestRangeKm),
         passed,
         failed,

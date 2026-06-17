@@ -200,9 +200,10 @@ the Python package:
 https://adamcohen8.github.io/orbital-engagement-lab/
 ```
 
-The web preview includes the tutorial and sandbox-style RIC controls. The full
-local trainer includes the complete level set, scenario YAML support,
-recordings, and structured debrief reports.
+The web preview includes the tutorial, sandbox-style RIC controls, and the beta
+Pursuit Arcade with browser-native replay validation and hosted leaderboard
+hooks. The full local trainer includes the complete downloadable level set,
+scenario YAML support, recordings, and structured debrief reports.
 
 To run the same preview locally:
 

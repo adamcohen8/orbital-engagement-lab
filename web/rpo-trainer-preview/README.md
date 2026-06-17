@@ -1,7 +1,8 @@
 # Orbital Engagement Lab RPO Trainer Preview
 
-This is a browser-native version 1 of the OEL RPO Trainer Preview. It is a
-static web app intended for social-media clickthroughs and quick demos.
+This is the browser-native OEL RPO Trainer Preview. It is a lightweight web app
+intended for social-media clickthroughs, quick demos, and small beta Pursuit
+Arcade competitions.
 
 Open locally:
 
@@ -17,13 +18,19 @@ http://localhost:8765
 
 ## Included
 
+- Unified level selector for Tutorial, Sandbox, and Pursuit Arcade.
+- Automatic mobile/computer layout detection with manual view switching.
 - Tutorial mode based on the Level 0 RIC-control lesson.
 - Curated sandbox mode with preset starts, range, drift, reset, and randomize.
-- RI and RC canvas plots.
-- Keyboard and touch controls.
-- Browser-started tutorial and sandbox music.
-- Simple debrief after tutorial success.
-- Download CTA for the full OEL trainer.
+- Pursuit Arcade multi-round browser gameplay with deterministic replay
+  validation.
+- RI and RC canvas plots with HCW-style projection for tutorial/sandbox and
+  browser-native arcade projections for Pursuit Arcade.
+- Keyboard controls for computer users and touch controls for mobile users.
+- Browser-started music matched to each mode.
+- Hosted leaderboard submission hooks with optional email ownership
+  verification.
+- Debrief and repository links for follow-up.
 
 ## Lightweight Analytics
 
@@ -48,5 +55,8 @@ attempt packet to the hosted validation API.
 ## Not Included
 
 This preview intentionally does not include the full OEL Python simulator,
-scenario YAML support, all trainer levels, recordings, or full debrief reports.
-See `docs/physics-contract.md` for the model boundary.
+scenario YAML support, all downloadable trainer levels, downloadable-game
+recordings, or full debrief reports. Pursuit Arcade leaderboard attempts are
+validated by replaying the browser-native deterministic arcade engine, not by
+trusting client-submitted scores. See `docs/physics-contract.md` for the model
+boundary.

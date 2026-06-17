@@ -27,7 +27,7 @@ const SATELLITE_ICON_SIZE_PX = 20;
 const SATELLITE_MAX_SIZE_PX = 72;
 const TARGET_MARKER = "#f55c5c";
 const CHASER_MARKER = "#f5cd5c";
-const BUILD_ID = "unified-mobile-shell-2026-06-16j";
+const BUILD_ID = "unified-mobile-shell-2026-06-16ao";
 const ARCADE_BUILD_ID = `${BUILD_ID}-competition-local`;
 const ARCADE_CHALLENGE_RECORD = buildChallengeRecord(DEFAULT_PURSUIT_CHALLENGE);
 const LEADERBOARD_REFRESH_MS = 30000;
@@ -160,7 +160,7 @@ const levelOptions = [
     ],
     notes: [
       "Beta competition prototype: browser play uses a deterministic two-body engine, not the full downloadable OEL engine.",
-      "Standalone and multi-round arcade attempts can be replay-validated locally; hosted leaderboard submission is still pending.",
+      "Standalone and multi-round arcade attempts can be replay-validated locally; hosted leaderboard submissions are validated before scoring.",
       "Static RI and RC plots can be generated from recomputed replay history.",
     ],
   },
@@ -415,12 +415,21 @@ function applyViewPreference() {
 }
 
 function syncViewButtons() {
-  const label = `View: ${state.viewPreference[0].toUpperCase()}${state.viewPreference.slice(1)}`;
-  [el.viewButton, el.selectorViewButton].forEach((button) => {
-    if (!button) return;
-    button.textContent = label;
-    button.setAttribute("aria-label", `${label}. Active layout ${state.activeView}.`);
-  });
+  const viewLabel = state.viewPreference === "desktop" ? "Computer" : state.viewPreference[0].toUpperCase() + state.viewPreference.slice(1);
+  const label = `View: ${viewLabel}`;
+  if (el.viewButton) {
+    const mobileCameraButton = state.activeView === "mobile";
+    el.viewButton.textContent = mobileCameraButton ? "Toggle Camera" : label;
+    el.viewButton.disabled = mobileCameraButton && state.mode !== "sandbox" && state.mode !== "arcade";
+    el.viewButton.setAttribute(
+      "aria-label",
+      mobileCameraButton ? "Toggle camera framing." : `${label}. Active layout ${state.activeView}.`,
+    );
+  }
+  if (el.selectorViewButton) {
+    el.selectorViewButton.textContent = label;
+    el.selectorViewButton.setAttribute("aria-label", `${label}. Active layout ${state.activeView}.`);
+  }
 }
 
 function cycleViewPreference() {
@@ -1030,11 +1039,14 @@ function relativeSpeedKmS() {
 function updateMissionText() {
   if (state.mode === "selector") {
     el.shell.classList.add("selector-mode");
+    el.shell.classList.remove("mode-arcade", "mode-sandbox", "primer-mode");
     renderLevelSelector();
     return;
   }
   el.shell.classList.remove("selector-mode");
   el.shell.classList.toggle("primer-mode", state.mode === "primer");
+  el.shell.classList.toggle("mode-arcade", state.mode === "arcade");
+  el.shell.classList.toggle("mode-sandbox", state.mode === "sandbox");
   el.modeLabel.textContent = state.mode === "sandbox" ? "Sandbox" : "Tutorial";
   if (state.mode === "primer") {
     const stage = activePrimerStage();
@@ -1055,7 +1067,7 @@ function updateMissionText() {
     const roundLabel = snap?.is_boss_round ? `Boss Round ${snap.round_index}` : `Round ${snap?.round_index || 1}`;
     el.objectiveTitle.textContent = roundLabel;
     if (el.objectiveText) {
-      el.objectiveText.textContent = `Reach ${formatDistanceKm(currentArcadeGoalRangeKm())}. Total score ${snap?.total_score || 0}.`;
+      el.objectiveText.textContent = `Reach ${formatDistanceKm(currentArcadeGoalRangeKm())}`;
     }
   } else {
     el.levelLabel.textContent = "LEVEL 0 - TUTORIAL";
@@ -1075,6 +1087,7 @@ function updateMissionText() {
   el.resetButton.textContent = state.mode === "primer" ? "Replay" : "Reset";
   el.sandboxPanel.classList.toggle("hidden", state.mode !== "sandbox" || state.running);
   updatePlotTitles();
+  syncViewButtons();
   syncMusicButton();
 }
 
@@ -1093,9 +1106,9 @@ function updatePlotTitles() {
     return;
   }
   el.riTitle.textContent = "RI Plane";
-  el.riSubtitle.textContent = "In-track vs radial";
+  el.riSubtitle.textContent = "In-Track vs Radial";
   el.rcTitle.textContent = "RC Plane";
-  el.rcSubtitle.textContent = state.mode === "arcade" ? "Target-centered RIC" : "Cross-track vs radial";
+  el.rcSubtitle.textContent = "Cross-Track vs Radial";
 }
 
 function syncMusicButton() {
@@ -1370,21 +1383,37 @@ function updateHud() {
   }
   const rangeText = formatDistanceKm(rangeKm());
   const speedText = formatSpeedKmS(relativeSpeedKmS());
-  const dvText = formatSpeedMS(state.sim.dv);
-  const targetDvText = formatSpeedMS(Number(state.arcadeSnapshot?.target_delta_v_m_s || 0));
+  const arcadePlayerDvUsed = Number(state.arcadeSnapshot?.player_delta_v_m_s || state.sim.dv || 0);
+  const arcadeTargetDvUsed = Number(state.arcadeSnapshot?.target_delta_v_m_s || 0);
+  const arcadePlayerDvBudget = Number(state.arcadeSnapshot?.max_delta_v_m_s ?? DEFAULT_PURSUIT_CHALLENGE.max_delta_v_m_s ?? 0);
+  const arcadeTargetDvBudget = Number(
+    state.arcadeSnapshot?.max_target_delta_v_m_s ?? DEFAULT_PURSUIT_CHALLENGE.max_target_delta_v_m_s ?? 0,
+  );
+  const arcadePlayerDvRemaining = Math.max(arcadePlayerDvBudget - arcadePlayerDvUsed, 0);
+  const arcadeTargetDvRemaining = Math.max(arcadeTargetDvBudget - arcadeTargetDvUsed, 0);
+  const arcadeTimeRemainingS = Math.max(
+    Number(state.arcadeSnapshot?.remaining_time_s || 0) - Number(state.arcadeSnapshot?.time_s || 0),
+    0,
+  );
+  const dvText = state.mode === "arcade" ? formatSpeedMS(arcadePlayerDvRemaining) : formatSpeedMS(state.sim.dv);
+  const targetDvText = formatSpeedMS(arcadeTargetDvRemaining);
+  const arcadeTimeText = formatClockTime(arcadeTimeRemainingS);
   const timeText = `${Math.round(state.sim.t)} s`;
-  const scoreText = state.mode === "arcade" ? `   Score=${state.arcadeSnapshot?.score || 0}` : "";
   el.rangeMetric.textContent = rangeText;
   el.speedMetric.textContent = speedText;
   el.dvMetric.textContent = dvText;
   el.timeMetric.textContent = timeText;
-  el.topRangeMetric.textContent = `INFO Range ${rangeText}`;
-  el.topSpeedMetric.textContent = `INFO Rel Speed ${speedText}`;
-  el.topDvMetric.textContent =
-    state.mode === "arcade"
-      ? `INFO Score ${state.arcadeSnapshot?.score || 0}   Chaser dV ${dvText}   Target dV ${targetDvText}`
-      : `INFO Delta-v ${dvText}`;
-  el.hudLine.textContent = `T=${state.sim.t.toFixed(1).padStart(7, " ")}s   Range=${rangeText}   Rel Speed=${speedText}${scoreText}`;
+  if (state.mode === "arcade") {
+    const metricGap = "\u00a0".repeat(6);
+    el.topRangeMetric.textContent = `Score ${state.arcadeSnapshot?.score || 0}${metricGap}Time Remaining ${arcadeTimeText}`;
+    el.topSpeedMetric.textContent = `dV Remaining: Target ${targetDvText}${metricGap}Chaser ${dvText}`;
+    el.topDvMetric.textContent = "";
+  } else {
+    el.topRangeMetric.textContent = `INFO Range ${rangeText}`;
+    el.topSpeedMetric.textContent = `INFO Rel Speed ${speedText}`;
+    el.topDvMetric.textContent = `INFO Delta-v ${dvText}`;
+  }
+  el.hudLine.textContent = `T=${state.sim.t.toFixed(1).padStart(7, " ")}s   Range=${rangeText}   Rel Speed=${speedText}`;
   el.coachHint.textContent = currentCoachHint();
   el.commandLine.textContent = commandStatusLine();
   const spaceAction = state.mode === "arcade" ? "Space Start" : "Space Pause";
@@ -1406,7 +1435,8 @@ function currentCoachHint() {
   }
   if (state.mode === "sandbox") {
     const label = state.cameraRuleMode === "full_trajectory" ? "Full Trajectory" : "Satellites Only";
-    return `Use small pulses, then coast and watch the target-centered RIC motion. C Camera: ${label}.`;
+    const cameraLabel = state.activeView === "mobile" ? "Camera" : "C Camera";
+    return `Use small pulses, then coast and watch the target-centered RIC motion. ${cameraLabel}: ${label}.`;
   }
   if (state.mode === "arcade") {
     const snap = state.arcadeSnapshot;
@@ -1418,7 +1448,8 @@ function currentCoachHint() {
       )} s for round ${tr.next_round_index}.`;
     }
     if (snap?.terminal) return `${snap.terminal_reason} Local validator score: ${snap.score}.`;
-    return `${snap?.is_boss_round ? "Boss round. " : ""}Clear rounds to tighten the goal and grow the score. C Camera: ${label}.`;
+    const cameraLabel = state.activeView === "mobile" ? "Camera" : "C Camera";
+    return `${snap?.is_boss_round ? "Boss round. " : ""}Clear rounds to tighten the goal and grow the score. ${cameraLabel}: ${label}.`;
   }
   const stage = tutorialStages[state.activeStage] || tutorialStages[tutorialStages.length - 1];
   if (stage.final) {
@@ -2005,6 +2036,17 @@ function formatSpeedMS(valueMS, sigFigs = 4) {
   return `${formatSigFig(value * 1000.0, sigFigs)} mm/s`;
 }
 
+function formatClockTime(valueS) {
+  const totalSeconds = Math.max(Math.ceil(Number(valueS) || 0), 0);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  }
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
 function formatSigFig(value, sigFigs = 4) {
   const normalizedSigFigs = Math.max(Math.floor(Number(sigFigs) || 4), 1);
   const numeric = Number(value);
@@ -2293,7 +2335,33 @@ function bindCommandButton(button, handler) {
   });
 }
 
+function suppressMobileSelectionEvents() {
+  const protectedSelectors = [
+    ".touch-controls",
+    ".mobile-speed-controls",
+    ".hud-actions",
+    ".plot-panel",
+    "canvas",
+  ].join(",");
+  const shouldSuppress = (event) => {
+    if (state.activeView !== "mobile") return false;
+    if (isEditableControlTarget(event.target)) return false;
+    return Boolean(event.target?.closest?.(protectedSelectors));
+  };
+  ["selectstart", "dragstart", "contextmenu"].forEach((type) => {
+    document.addEventListener(
+      type,
+      (event) => {
+        if (!shouldSuppress(event)) return;
+        event.preventDefault();
+      },
+      { capture: true },
+    );
+  });
+}
+
 function bindEvents() {
+  suppressMobileSelectionEvents();
   document.addEventListener("keydown", (event) => {
     const key = event.key.toLowerCase();
     if (key === "escape") {
@@ -2382,9 +2450,12 @@ function bindEvents() {
       refreshInputState();
     };
     button.addEventListener("pointerdown", start);
+    button.addEventListener("touchstart", start, { passive: false });
     button.addEventListener("pointerup", stop);
     button.addEventListener("pointerleave", stop);
     button.addEventListener("pointercancel", stop);
+    button.addEventListener("touchend", stop);
+    button.addEventListener("touchcancel", stop);
   });
   bindCommandButton(el.pauseButton, () => {
     playMusicFromGesture();
@@ -2400,31 +2471,47 @@ function bindEvents() {
   });
   bindCommandButton(el.musicButton, toggleMusic);
   bindCommandButton(el.selectorMusicButton, toggleMusic);
-  bindCommandButton(el.viewButton, cycleViewPreference);
+  bindCommandButton(el.viewButton, () => {
+    if (state.activeView === "mobile") {
+      playMusicFromGesture();
+      toggleCameraRuleMode();
+      return;
+    }
+    cycleViewPreference();
+  });
   bindCommandButton(el.selectorViewButton, cycleViewPreference);
-  [el.riPanel, el.rcPanel, el.riCanvas, el.rcCanvas].forEach((panel) => {
+  [el.riPanel, el.rcPanel].forEach((panel) => {
     if (!panel) return;
     let suppressClickUntil = 0;
     const toggle = (event) => {
       if (state.mode !== "sandbox" && state.mode !== "arcade") return;
+      if (state.activeView === "mobile") return;
       event.preventDefault();
       event.stopPropagation();
       playMusicFromGesture();
       toggleCameraRuleMode();
     };
+    const suppressFollowUp = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    };
     panel.addEventListener("pointerdown", (event) => {
       if (typeof event.button === "number" && event.button !== 0) return;
-      suppressClickUntil = Date.now() + 500;
+      suppressClickUntil = Date.now() + 700;
       toggle(event);
     });
     panel.addEventListener("mousedown", (event) => {
       if (typeof event.button === "number" && event.button !== 0) return;
-      suppressClickUntil = Date.now() + 500;
+      if (Date.now() < suppressClickUntil) {
+        suppressFollowUp(event);
+        return;
+      }
+      suppressClickUntil = Date.now() + 700;
       toggle(event);
     });
     panel.addEventListener("click", (event) => {
       if (Date.now() < suppressClickUntil) {
-        event.preventDefault();
+        suppressFollowUp(event);
         return;
       }
       toggle(event);

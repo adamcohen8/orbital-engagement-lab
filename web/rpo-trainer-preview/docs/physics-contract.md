@@ -6,16 +6,18 @@ validated replacement for `run_game.py`.
 
 ## Purpose
 
-The preview teaches the first RPO control intuition:
+The preview teaches the first RPO control intuition and provides a lightweight
+browser arcade competition surface:
 
 - RIC axes,
 - pulse-and-coast translation,
 - curved relative motion after simple burns,
 - gentle final approach under a relative-speed limit.
+- deterministic browser replay validation for Pursuit Arcade attempts.
 
-## Preview Model
+## Tutorial And Sandbox Model
 
-Version 1 uses a deterministic circular-reference Hill-frame model:
+Tutorial and Sandbox use a deterministic circular-reference Hill-frame model:
 
 ```text
 R_ddot = 3 n^2 R + 2 n I_dot + a_R
@@ -27,6 +29,17 @@ The reference orbit uses `a = 7000 km` and Earth `mu = 398600.4418 km^3/s^2`.
 Manual inputs produce bounded RIC accelerations and the browser integrates the
 state with a fixed-step semi-implicit Euler update.
 
+## Pursuit Arcade Model
+
+Pursuit Arcade uses a separate deterministic browser-native competition engine.
+It propagates target and chaser ECI states under central Earth two-body gravity,
+maps player commands from target RIC into ECI acceleration, records inputs by
+simulation tick, and validates submitted scores by replaying the attempt packet.
+
+This supports the browser arcade and leaderboard beta without running the full
+Python game server-side. It is still not the downloadable trainer physics
+stack.
+
 ## Boundary
 
 The preview does not include:
@@ -37,7 +50,7 @@ The preview does not include:
 - sensor or estimator behavior,
 - controller benchmarking,
 - full debrief artifact generation,
-- Pygame parity,
+- full Pygame parity,
 - the ten-level training pack.
 
 ## Product Language
@@ -45,7 +58,8 @@ The preview does not include:
 Use language like:
 
 > The RPO Trainer Preview teaches the core control intuition in your browser.
-> The full OEL trainer runs simulator-backed scenarios locally.
+> Pursuit Arcade attempts are replay-validated by the browser competition
+> engine. The full OEL trainer runs simulator-backed scenarios locally.
 
 Avoid language like:
 
