@@ -35,12 +35,17 @@ Implemented arcade-round parity:
 
 - Multi-round reset/continuation after a cleared round.
 - Round score weighted by round number.
-- Remaining-time update with unused-chaser-delta-v bonus.
+- Remaining-time update with 75% target-orbital-period bonus plus
+  unused-chaser-delta-v bonus at 100 seconds per unused m/s.
 - Goal tightening by 5 m per cleared round, down to a 5 m floor.
 - Round 2+ randomized initial states with energy-matched in-track velocity.
 - Every fifth boss round with randomized elliptical target true anomaly.
-- Boss round score multiplier and bonus time transition.
+- Boss round score multiplier, 2000 second flat bonus, and bonus time
+  transition.
 - Target defensive delta-v budget ramp after round 20.
+- New rounds restart at 1x speed and full-trajectory camera framing.
+- Web RI/RC goal rings project the true 3D goal sphere onto each 2D plot so
+  plotted clearance matches the validated range gate.
 - Tschauner-Hempel-style elliptic linear coast projection for boss-round
   trajectory previews.
 - Speed-dependent game tick helper matching the downloadable trainer policy

@@ -27,7 +27,8 @@ http://localhost:8765
 - Mobile-friendly portrait and landscape controls with compact speed-multiple
   buttons, explicit camera toggling, and long-press selection suppression.
 - RI and RC canvas plots with HCW-style projection for tutorial/sandbox and
-  browser-native arcade projections for Pursuit Arcade.
+  browser-native arcade projections for Pursuit Arcade, including goal rings
+  projected from the true 3D rendezvous range.
 - Keyboard controls for computer users and touch controls for mobile users.
 - Browser-started music matched to each mode.
 - Hosted leaderboard submission hooks with optional email ownership

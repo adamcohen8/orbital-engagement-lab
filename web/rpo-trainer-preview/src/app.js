@@ -1076,8 +1076,8 @@ function rangeKm() {
 
 function currentArcadeGoalRangeKm() {
   return Number(
-    state.arcadeSnapshot?.goal_range_km ||
-      state.arcadeSession?.config?.goal_range_km ||
+    state.arcadeSnapshot?.goal_range_km ??
+      state.arcadeSession?.config?.goal_range_km ??
       ARCADE_CHALLENGE_RECORD.config.goal_range_km,
   );
 }
@@ -1399,6 +1399,8 @@ function updateDebugState() {
     arcade: state.arcadeSnapshot
       ? {
           score: state.arcadeSnapshot.score,
+          goalRangeKm: state.arcadeSnapshot.goal_range_km,
+          roundIndex: state.arcadeSnapshot.round_index,
           terminal: state.arcadeSnapshot.terminal,
           inputEventCount: state.arcadeSnapshot.input_events.length,
           validation: state.arcadeValidation?.status || "",
@@ -2022,7 +2024,9 @@ function drawRings(ctx, toPx, scale, xAxis, yAxis, targetState = { r: 0, i: 0, c
   ctx.arc(target.x, target.y, 0.025 * scale, 0, Math.PI * 2);
   ctx.stroke();
   if (state.mode === "tutorial" || state.mode === "arcade") {
-    const goalRange = state.mode === "arcade" ? currentArcadeGoalRangeKm() : 0.25;
+    const rawGoalRange = state.mode === "arcade" ? currentArcadeGoalRangeKm() : 0.25;
+    const goalRange =
+      state.mode === "arcade" ? projectedArcadeGoalRadiusKm(rawGoalRange, xAxis, yAxis, targetState) : rawGoalRange;
     ctx.strokeStyle = "rgba(78, 178, 112, 0.86)";
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -2034,6 +2038,14 @@ function drawRings(ctx, toPx, scale, xAxis, yAxis, targetState = { r: 0, i: 0, c
     ctx.font = "12px Menlo, Consolas, monospace";
     ctx.fillText("Target", target.x + 10, target.y - 10);
   }
+}
+
+function projectedArcadeGoalRadiusKm(goalRangeKm, xAxis, yAxis, targetState) {
+  const hiddenAxis = ["r", "i", "c"].find((axis) => axis !== xAxis && axis !== yAxis);
+  if (!hiddenAxis) return goalRangeKm;
+  const hiddenDeltaKm = Number(state.sim?.[hiddenAxis] || 0) - Number(targetState?.[hiddenAxis] || 0);
+  const visibleRadiusSquared = goalRangeKm * goalRangeKm - hiddenDeltaKm * hiddenDeltaKm;
+  return visibleRadiusSquared > 0 ? Math.sqrt(visibleRadiusSquared) : 0;
 }
 
 function drawPath(ctx, points, toPx, color, dashed, width = 2) {
@@ -2355,6 +2367,9 @@ function togglePause() {
   if (state.passed) return;
   if (state.mode === "arcade" && state.arcadeTransition && state.arcadeSession) {
     state.arcadeSession.continueNextRound();
+    state.speedIndex = speedOptionIndex(1);
+    state.cameraRuleMode = "full_trajectory";
+    state.stepAccumulatorS = 0;
     state.arcadeTransition = null;
     el.debriefPanel.classList.add("hidden");
     syncArcadeSnapshot();

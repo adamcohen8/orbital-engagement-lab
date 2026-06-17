@@ -55,7 +55,7 @@ export const DEFAULT_PURSUIT_CHALLENGE = Object.freeze({
   arcade: {
     initial_time_s: 12000.0,
     round_bonus_time_s: 0.0,
-    delta_v_bonus_time_per_m_s: 1000.0,
+    delta_v_bonus_time_per_m_s: 100.0,
     goal_range_step_km: 0.005,
     min_goal_range_km: 0.005,
     boss_round_interval: 5,
@@ -73,7 +73,7 @@ export const DEFAULT_PURSUIT_CHALLENGE = Object.freeze({
       },
       true_anomaly_range_deg: [0.0, 360.0],
       score_multiplier: 2.0,
-      bonus_time_s: 5000.0,
+      bonus_time_s: 2000.0,
     },
     random_initial_state: {
       enabled: true,
@@ -1077,11 +1077,19 @@ function arcadeRoundWeightedScore(roundConfig, result, roundIndex) {
 }
 
 function arcadeRoundTimeBonus(baseConfig, roundConfig, result, roundIndex) {
+  const orbitalPeriodBonusS = 0.75 * targetOrbitalPeriodS(roundConfig);
   const baseline =
     Number(baseConfig.arcade?.round_bonus_time_s || 0) +
+    orbitalPeriodBonusS +
     (arcadeRoundIsBoss(baseConfig, roundIndex) ? Number(baseConfig.arcade?.boss?.bonus_time_s || 0) : 0);
   const remainingDv = Math.max(Number(roundConfig.max_delta_v_m_s || 0) - Number(result.metrics?.player_delta_v_m_s || 0), 0);
   return baseline + remainingDv * Number(baseConfig.arcade?.delta_v_bonus_time_per_m_s || 0);
+}
+
+function targetOrbitalPeriodS(config) {
+  const mu = positiveNumber(config?.mu_km3_s2 ?? DEFAULT_PURSUIT_CHALLENGE.mu_km3_s2, "mu_km3_s2");
+  const aKm = positiveNumber(config?.target_coes?.a_km ?? DEFAULT_PURSUIT_CHALLENGE.target_coes.a_km, "target_coes.a_km");
+  return 2 * Math.PI * Math.sqrt((aKm ** 3) / mu);
 }
 
 function arcadeTargetDeltaVBudget(baseConfig, roundIndex) {
