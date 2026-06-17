@@ -110,26 +110,35 @@ p {
 
 .launcher-header {
   position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 144px 156px 148px;
+  grid-template-rows: auto auto;
+  align-items: start;
+  column-gap: 12px;
+  row-gap: 6px;
   padding-top: 32px;
 }
 
 .launcher-header h1 {
+  grid-column: 1;
+  grid-row: 1;
   font-size: 30px;
   line-height: 36px;
   text-transform: none;
 }
 
 .launcher-header p {
-  margin-top: 6px;
+  grid-column: 1;
+  grid-row: 2;
+  margin-top: 0;
   color: var(--muted);
   font-size: 18px;
   line-height: 22px;
 }
 
 .launcher-music {
-  position: absolute;
-  right: 336px;
-  top: 36px;
+  grid-column: 2;
+  grid-row: 1;
   width: 144px;
   min-height: 30px;
   background: rgb(34, 60, 76);
@@ -137,12 +146,37 @@ p {
 }
 
 .launcher-view {
-  position: absolute;
-  right: 184px;
-  top: 36px;
-  width: 132px;
+  grid-column: 3;
+  grid-row: 1;
+  width: 156px;
   min-height: 30px;
   background: rgb(34, 48, 62);
+}
+
+.launcher-repo {
+  grid-column: 4;
+  grid-row: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 148px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0 10px;
+  background: rgb(34, 48, 62);
+  border: 1px solid rgb(104, 130, 156);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 0.88rem;
+  line-height: 1;
+  text-align: center;
+  text-decoration: none;
+}
+
+.launcher-repo:hover,
+.launcher-repo:focus-visible {
+  border-color: rgb(94, 190, 245);
+  color: rgb(238, 244, 250);
 }
 
 .launcher-music.active,
@@ -150,25 +184,6 @@ p {
   background: rgb(34, 60, 76);
   border-color: rgb(94, 190, 245);
   color: rgb(238, 244, 250);
-}
-
-.launcher-assists {
-  position: absolute;
-  right: 16px;
-  top: 86px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  color: var(--muted);
-  font-size: 14px;
-}
-
-.launcher-assists button {
-  width: 76px;
-  min-height: 26px;
-  background: rgb(36, 72, 52);
-  border-color: rgb(108, 232, 142);
-  color: rgb(230, 238, 245);
 }
 
 .launcher-body {
@@ -780,7 +795,7 @@ select {
 
   .launcher-music,
   .launcher-view,
-  .launcher-assists {
+  .launcher-repo {
     position: static;
     margin-top: 10px;
   }
@@ -863,6 +878,35 @@ body.mobile-view .trainer-shell {
   margin: 0 auto;
   padding: max(8px, env(safe-area-inset-top)) 8px max(8px, env(safe-area-inset-bottom));
   overflow: hidden;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+body.mobile-view button,
+body.mobile-view canvas,
+body.mobile-view .plot-panel,
+body.mobile-view .touch-controls,
+body.mobile-view .mobile-speed-controls,
+body.mobile-view .hud-actions {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+body.mobile-view .touch-controls button,
+body.mobile-view .mobile-speed-controls button,
+body.mobile-view .hud-actions button {
+  touch-action: none;
+}
+
+body.mobile-view input,
+body.mobile-view select,
+body.mobile-view textarea {
+  -webkit-touch-callout: default;
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 body.mobile-view .trainer-shell.selector-mode {
@@ -883,7 +927,8 @@ body.mobile-view .level-selector {
 
 body.mobile-view .launcher-header {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: auto auto auto;
   align-items: center;
   column-gap: 8px;
   row-gap: 3px;
@@ -898,14 +943,30 @@ body.mobile-view .launcher-header h1 {
 
 body.mobile-view .launcher-header p {
   grid-column: 1 / -1;
+  grid-row: 3;
   margin-top: 2px;
   font-size: 13px;
   line-height: 17px;
 }
 
+body.mobile-view .launcher-music {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+body.mobile-view .launcher-view {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+body.mobile-view .launcher-repo {
+  grid-column: 3;
+  grid-row: 2;
+}
+
 body.mobile-view .launcher-music,
 body.mobile-view .launcher-view,
-body.mobile-view .launcher-assists {
+body.mobile-view .launcher-repo {
   position: relative;
   right: auto;
   top: auto;
@@ -916,10 +977,6 @@ body.mobile-view .launcher-assists {
   min-height: 32px;
   margin: 0;
   font-size: 12px;
-}
-
-body.mobile-view .launcher-assists {
-  display: none;
 }
 
 body.mobile-view .launcher-body {
@@ -996,9 +1053,10 @@ body.mobile-view .top-bar {
   gap: 4px;
   height: auto;
   min-height: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
+  padding: 8px 10px;
+  border: 2px solid var(--stroke-hud);
+  border-radius: 10px;
+  background: var(--hud);
 }
 
 body.mobile-view h1 {
@@ -1012,11 +1070,16 @@ body.mobile-view .top-metrics {
   line-height: 14px;
 }
 
+body.mobile-view #topRangeMetric,
+body.mobile-view #topSpeedMetric {
+  display: none;
+}
+
 body.mobile-view .objective-checklist {
-  border: 1px solid var(--stroke-hud);
-  border-radius: 8px;
-  background: var(--hud);
-  padding: 7px 8px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
   font-size: 12px;
   line-height: 15px;
 }
@@ -1172,12 +1235,19 @@ body.mobile-view .touch-controls {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-body.mobile-view .touch-controls button,
-body.mobile-view .mobile-speed-controls button {
+body.mobile-view .touch-controls button {
   min-width: 0;
   min-height: 38px;
   padding: 5px;
   font-size: 14px;
+  font-weight: 700;
+}
+
+body.mobile-view .mobile-speed-controls button {
+  min-width: 0;
+  min-height: 32px;
+  padding: 3px 5px;
+  font-size: 13px;
   font-weight: 700;
 }
 
@@ -1215,9 +1285,12 @@ body.mobile-view .leaderboard-form {
     padding: 6px;
   }
 
-  body.mobile-view .touch-controls button,
-  body.mobile-view .mobile-speed-controls button {
+  body.mobile-view .touch-controls button {
     min-height: 34px;
+  }
+
+  body.mobile-view .mobile-speed-controls button {
+    min-height: 30px;
   }
 }
 
@@ -1241,13 +1314,14 @@ body.mobile-view .leaderboard-form {
   }
 
   body.mobile-view .launcher-header {
-    grid-template-columns: minmax(0, 1fr) 140px 140px;
+    grid-template-columns: minmax(0, 1fr) 118px 118px 118px;
     column-gap: 8px;
     row-gap: 0;
   }
 
   body.mobile-view .launcher-header h1 {
-    grid-column: auto;
+    grid-column: 1;
+    grid-row: 1;
     font-size: 18px;
     line-height: 22px;
     white-space: nowrap;
@@ -1262,9 +1336,23 @@ body.mobile-view .leaderboard-form {
   }
 
   body.mobile-view .launcher-music,
-  body.mobile-view .launcher-view {
+  body.mobile-view .launcher-view,
+  body.mobile-view .launcher-repo {
+    grid-row: 1;
     min-height: 30px;
     font-size: 11px;
+  }
+
+  body.mobile-view .launcher-music {
+    grid-column: 2;
+  }
+
+  body.mobile-view .launcher-view {
+    grid-column: 3;
+  }
+
+  body.mobile-view .launcher-repo {
+    grid-column: 4;
   }
 
   body.mobile-view .launcher-body {
@@ -1301,13 +1389,13 @@ body.mobile-view .leaderboard-form {
     width: 100vw;
     height: 100dvh;
     max-width: none;
-    grid-template-columns: minmax(0, 1fr) clamp(236px, 31vw, 292px);
-    grid-template-rows: auto minmax(0, 1fr) auto auto;
+    grid-template-columns: minmax(0, 1fr) clamp(280px, 36vw, 360px);
+    grid-template-rows: auto minmax(92px, 1fr) auto auto;
     grid-template-areas:
       "top top"
-      "game hud"
-      "game controls"
-      "game speeds";
+      "game game"
+      "hud controls"
+      "speeds controls";
     gap: 6px;
     padding: max(6px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) max(
         6px,
@@ -1318,9 +1406,14 @@ body.mobile-view .leaderboard-form {
 
   body.mobile-view .top-bar {
     grid-area: top;
-    grid-template-columns: auto minmax(0, 1fr) minmax(190px, 0.55fr);
-    align-items: center;
-    gap: 8px;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+    gap: 3px;
+    min-height: 62px;
+    padding: 5px 10px;
+    border: 2px solid var(--stroke-hud);
+    border-radius: 10px;
+    background: var(--hud);
   }
 
   body.mobile-view .top-left {
@@ -1328,8 +1421,8 @@ body.mobile-view .leaderboard-form {
   }
 
   body.mobile-view h1 {
-    font-size: 16px;
-    line-height: 18px;
+    font-size: 15px;
+    line-height: 16px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1352,14 +1445,25 @@ body.mobile-view .leaderboard-form {
   }
 
   body.mobile-view .objective-checklist {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-content: start;
+    gap: 1px;
     min-width: 0;
-    padding: 5px 7px;
-    font-size: 10px;
-    line-height: 12px;
+    min-height: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    font-size: 9px;
+    line-height: 11px;
   }
 
   body.mobile-view .objective-heading {
-    display: none;
+    display: block;
+    color: var(--muted);
+    font-size: 9px;
+    line-height: 10px;
+    text-transform: uppercase;
   }
 
   body.mobile-view #objectiveTitle,
@@ -1367,7 +1471,14 @@ body.mobile-view .leaderboard-form {
     display: block;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  body.mobile-view #objectiveTitle {
     white-space: nowrap;
+  }
+
+  body.mobile-view #objectiveText {
+    white-space: normal;
   }
 
   body.mobile-view .game-layout {
@@ -1408,55 +1519,102 @@ body.mobile-view .leaderboard-form {
   body.mobile-view .hud-panel {
     grid-area: hud;
     align-self: stretch;
-    gap: 5px;
-    padding: 6px;
+    display: grid;
+    grid-template-columns: minmax(150px, 0.9fr) minmax(260px, 1.4fr);
+    grid-template-rows: auto auto;
+    column-gap: 8px;
+    row-gap: 4px;
+    align-items: start;
+    padding: 5px;
     font-size: 10px;
     line-height: 13px;
     overflow: hidden;
   }
 
   body.mobile-view .hud-line {
+    grid-column: 1;
     font-size: 10px;
     line-height: 13px;
   }
 
   body.mobile-view .hud-top-controls {
-    gap: 4px;
+    grid-column: 1 / -1;
+    grid-row: 2;
+    gap: 3px;
   }
 
   body.mobile-view .hud-actions {
     grid-template-columns: repeat(5, minmax(0, 1fr));
-    gap: 4px;
+    gap: 3px;
   }
 
   body.mobile-view .hud-actions button,
   body.mobile-view .music-button {
-    min-height: 30px;
-    padding: 3px 4px;
+    min-height: 26px;
+    padding: 2px 3px;
     font-size: 9px;
-    line-height: 11px;
+    line-height: 10px;
   }
 
   body.mobile-view .hint-line {
+    grid-column: 2;
+    grid-row: 1;
     font-size: 10px;
     line-height: 13px;
   }
 
   body.mobile-view .touch-controls {
     grid-area: controls;
+    position: static;
+    align-self: stretch;
+    height: 100%;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 5px;
+    gap: 4px;
   }
 
   body.mobile-view .mobile-speed-controls {
     grid-area: speeds;
-    gap: 5px;
+    align-self: stretch;
+    gap: 4px;
   }
 
   body.mobile-view .touch-controls button,
   body.mobile-view .mobile-speed-controls button {
-    min-height: 32px;
-    padding: 4px;
+    min-height: 28px;
+    padding: 3px;
     font-size: 13px;
   }
+}
+
+body.mobile-view .trainer-shell.mode-arcade .top-bar,
+body.mobile-view .trainer-shell.mode-sandbox .top-bar {
+  grid-template-columns: minmax(0, 1fr) minmax(118px, 0.48fr);
+  align-items: start;
+  column-gap: 10px;
+}
+
+body.mobile-view .trainer-shell.mode-arcade .top-metrics,
+body.mobile-view .trainer-shell.mode-sandbox .top-metrics {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1px;
+  margin-top: 4px;
+}
+
+body.mobile-view .trainer-shell.mode-arcade #topRangeMetric,
+body.mobile-view .trainer-shell.mode-arcade #topSpeedMetric,
+body.mobile-view .trainer-shell.mode-arcade #topDvMetric {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.mobile-view .trainer-shell.mode-arcade .objective-checklist,
+body.mobile-view .trainer-shell.mode-sandbox .objective-checklist {
+  align-self: stretch;
+  min-width: 0;
+  padding-left: 10px;
+  border-left: 1px solid rgb(72, 84, 102);
 }

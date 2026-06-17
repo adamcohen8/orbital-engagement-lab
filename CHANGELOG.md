@@ -6,6 +6,49 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.12.2 - 2026-06-17
+
+Release thesis: `v0.12.2` is a web-preview polish release for the mobile-first
+Pursuit Arcade and hosted leaderboard experience. It keeps the browser preview
+lightweight while making the selector, HUD, camera controls, and release docs
+clearer for social-media and classroom users.
+
+### Added
+
+- Added an `OEL GitHub` link to the web preview level selector so mobile,
+  computer, and landscape users can reach the public repository before
+  launching a level.
+- Added a live `Time Remaining` readout and a combined `dV Remaining` arcade
+  HUD line that reports target and chaser budgets from the validated arcade
+  session state.
+
+### Changed
+
+- Updated the mobile web preview controls so the game action button becomes an
+  explicit `Toggle Camera` control on mobile, while computer layouts keep the
+  view selector.
+- Reworked mobile landscape play into a wider plot-first layout with a lower
+  control dock: status/actions/speed controls on the left and RIC burn controls
+  on the right.
+- Standardized mobile top bars for Sandbox and Pursuit Arcade with mission
+  info on the left and objectives on the right.
+- Updated selector copy from `Desktop` to `Computer`, removed the unused
+  `Assists Easy` selector badge, and tightened selector button alignment across
+  computer, portrait mobile, and landscape mobile views.
+- Updated web-preview docs to describe the unified tutorial, sandbox, Pursuit
+  Arcade, and hosted leaderboard beta paths.
+
+### Fixed
+
+- Fixed mobile plot taps changing the camera only while a finger was held down;
+  mobile camera changes now use the explicit button instead.
+- Fixed duplicate arcade score text beside relative speed and removed duplicate
+  total-score text from the objective box.
+- Fixed mobile long-press selection/callout behavior on burn and control
+  buttons.
+- Fixed landscape mobile selector and game layout issues where controls could
+  overlap text or consume too much plot height.
+
 ## 0.12.1 - 2026-06-16
 
 Release thesis: `v0.12.1` is a web-preview patch that makes Pursuit Arcade

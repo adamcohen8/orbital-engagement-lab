@@ -13,7 +13,7 @@
     <meta name="oel-analytics-domain" content="adamcohen8.github.io" />
     <title>Orbital Engagement Lab RPO Trainer Preview</title>
     <link rel="icon" href="./src/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="./src/styles.css?v=unified-mobile-shell-2026-06-16j" />
+    <link rel="stylesheet" href="./src/styles.css?v=unified-mobile-shell-2026-06-16ao" />
   </head>
   <body>
     <main class="trainer-shell selector-mode">
@@ -22,11 +22,10 @@
           <h1>Orbital Engagement Lab</h1>
           <button class="launcher-music active" id="selectorMusicButton" type="button">Music: ON</button>
           <button class="launcher-view" id="selectorViewButton" type="button">View: Auto</button>
+          <a class="launcher-repo" href="https://github.com/adamcohen8/orbital-engagement-lab" target="_blank" rel="noreferrer">
+            OEL GitHub
+          </a>
           <p>Select RPO Training Level</p>
-          <div class="launcher-assists" aria-label="Assists">
-            <span>Assists</span>
-            <button class="active" type="button">Easy</button>
-          </div>
         </header>
 
         <div class="launcher-body">
@@ -96,14 +95,14 @@
           <section class="plot-panel" id="riPanel" aria-label="RI plane plot">
             <div class="plot-title">
               <span id="riTitle">RI Plane</span>
-              <small id="riSubtitle">In-track vs radial</small>
+              <small id="riSubtitle">In-Track vs Radial</small>
             </div>
             <canvas id="riCanvas"></canvas>
           </section>
           <section class="plot-panel" id="rcPanel" aria-label="RC plane plot">
             <div class="plot-title">
               <span id="rcTitle">RC Plane</span>
-              <small id="rcSubtitle">Cross-track vs radial</small>
+              <small id="rcSubtitle">Cross-Track vs Radial</small>
             </div>
             <canvas id="rcCanvas"></canvas>
           </section>
@@ -200,6 +199,6 @@
       </section>
     </main>
 
-    <script src="./src/app.js?v=unified-mobile-shell-2026-06-16j" type="module"></script>
+    <script src="./src/app.js?v=unified-mobile-shell-2026-06-16ao" type="module"></script>
   </body>
 </html>

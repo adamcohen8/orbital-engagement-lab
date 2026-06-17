@@ -12,8 +12,8 @@ browser:
 - The web arcade owns a deterministic, browser-native implementation of the
   Pursuit Arcade competition model.
 - The downloadable OEL trainer remains the canonical high-fidelity/local tool.
-- The intended hosted leaderboard validation will replay inputs instead of
-  trusting client-submitted states or scores.
+- Hosted leaderboard validation replays inputs instead of trusting
+  client-submitted states or scores.
 
 The current browser-native challenge is aligned with
 `sim/game/configs/game_training_rpo_arcade_pursuit.yaml` for the first-round
@@ -48,6 +48,8 @@ Remaining beta/parity work:
 
 - Admin moderation for hiding attempts and resolving username disputes.
 - Monthly challenge rotation and operational tooling.
+- Stored high-score replay/debrief browsing beyond the static RI/RC plot
+  artifacts.
 
 The current implementation lives in:
 
