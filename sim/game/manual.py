@@ -27,6 +27,8 @@ class KeyboardCommandState:
     paused: bool = False
     speed_multiplier_change: int = 0
     camera_rule_toggle_requested: bool = False
+    eci_ri_plot_toggle_requested: bool = False
+    eci_rc_plot_toggle_requested: bool = False
     music_toggle_requested: bool = False
     clip_record_toggle_requested: bool = False
     clip_record_save_requested: bool = False

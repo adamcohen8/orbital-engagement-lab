@@ -1,8 +1,8 @@
 # Orbital Engagement Lab RPO Trainer Preview
 
 This is the browser-native OEL RPO Trainer Preview. It is a lightweight web app
-intended for social-media clickthroughs, quick demos, and small beta Pursuit
-Arcade competitions.
+intended for social-media clickthroughs, quick demos, and small Pursuit Arcade
+competitions.
 
 Open locally:
 
@@ -24,6 +24,8 @@ http://localhost:8765
 - Curated sandbox mode with preset starts, range, drift, reset, and randomize.
 - Pursuit Arcade multi-round browser gameplay with deterministic replay
   validation.
+- Mobile-friendly portrait and landscape controls with compact speed-multiple
+  buttons, explicit camera toggling, and long-press selection suppression.
 - RI and RC canvas plots with HCW-style projection for tutorial/sandbox and
   browser-native arcade projections for Pursuit Arcade.
 - Keyboard controls for computer users and touch controls for mobile users.
@@ -34,23 +36,28 @@ http://localhost:8765
 
 ## Lightweight Analytics
 
-The hosted preview can send privacy-focused Plausible events for product-funnel
-questions: preview views, tutorial starts, primer completion, tutorial
-completion, sandbox starts, download clicks, music toggles, and returns to the
-level selector.
+The hosted preview can send privacy-focused Plausible and Vercel Web Analytics
+events for product-funnel questions: preview views, tutorial starts, primer
+completion, tutorial completion, sandbox starts, download clicks, music
+toggles, and returns to the level selector.
 
 Analytics are disabled for `file://`, `localhost`, and `127.0.0.1` runs. The
-static page reads its Plausible site domain from:
+static page reads its analytics configuration from:
 
 ```html
+<meta name="oel-analytics-provider" content="plausible,vercel" />
 <meta name="oel-analytics-domain" content="adamcohen8.github.io" />
+<meta name="oel-vercel-analytics-script" content="/_vercel/insights/script.js" />
+<meta name="oel-vercel-analytics-hosts" content=".vercel.app,orbital-engagement-lab.vercel.app" />
 ```
 
 Completion events use coarse buckets for time, delta-v, and closest range.
-Plausible analytics does not send raw trajectories, per-frame controls, names,
-emails, or a player identifier. Pursuit Arcade leaderboard submissions are a
-separate explicit form submit that sends the username, optional email, and
-attempt packet to the hosted validation API.
+Browser analytics does not send raw trajectories, per-frame controls, names,
+emails, or a player identifier. Vercel Analytics is only loaded on configured
+Vercel-hosted domains so GitHub Pages and local runs do not request the Vercel
+insights script. Pursuit Arcade leaderboard submissions are a separate explicit
+form submit that sends the username, optional email, and attempt packet to the
+hosted validation API.
 
 ## Not Included
 

@@ -118,14 +118,14 @@ Arcade variant:
   target defensive delta-v budget holds at 0.1 m/s through round 20 before
   increasing by 0.01 m/s per round.
 
-Beta bonus level:
+Bonus level:
 
 - `rpo_bonus_cislunar_rendezvous`
   Complete a close rendezvous with a target initialized on a corrected
-  Earth-Moon L2 NRHO seed. The beta mission uses the opt-in CR3BP rotating-frame
-  propagator, target-centered Moon-RIC controls, custom cislunar sprites, and a
-  linearized CR3BP coast-prediction overlay. This is an experimental teaching
-  level, not an operational mission-design model.
+  Earth-Moon L2 NRHO seed. The mission uses the opt-in CR3BP rotating-frame
+  propagator, target-centered Moon-RIC controls, custom cislunar sprites, and
+  Moon-centered orbit-plane visualization for the target NRHO. This is an
+  educational cislunar teaching level, not an operational mission-design model.
 
 ## Controls
 
@@ -138,6 +138,7 @@ Default trainer controls should be RIC translation:
 - R: reset the current attempt
 - D: open the debrief folder from the pass/fail screen, when available
 - Up/Down: adjust runtime speed
+- O/P: swap the RI or RC plot panel into an orbit-plane view when supported
 - Esc: leave the active level; when launched from the selector, this returns to
   level selection.
 
@@ -227,13 +228,14 @@ scoped to the final free-maneuver phase.
 - Done: `rpo_08_elliptic_rendezvous`.
 - Done: `rpo_09_defensive_target_demo`.
 - Done: `rpo_10_evasive_target_survival`.
-- Beta: `rpo_bonus_cislunar_rendezvous`.
+- Done: `rpo_bonus_cislunar_rendezvous`.
 - Done: add instructor notes for each scenario.
 - Done for implemented levels: add success thresholds and scorecards.
 - Done for implemented levels: treat each mission as a pass/fail level.
 - Done for implemented levels: verify each scenario can run without local
   artifacts.
-- Done: add `rpo_arcade_pursuit` as a replayable arcade pursuit variant.
+- Done: add `rpo_arcade_pursuit` as a replayable arcade pursuit variant after
+  the cislunar bonus level in the selector.
 
 ### Phase 4 - Instructor Workflow
 
@@ -279,8 +281,9 @@ Current implementation:
 - Coast-prediction assistance is difficulty-scaled: easy shows one full target
   orbit, medium shows half an orbit, hard shows a quarter orbit, and extreme
   hides the projection.
-- Runtime speed is adjustable in-game with Up/Down across 1x, 2x, 5x, 10x,
-  25x, 50x, and 100x.
+- Runtime speed is adjustable in-game with Up/Down. Most LEO trainer levels use
+  1x through 200x; the cislunar level starts at 10x and extends to 2000x with a
+  shared speed-dependent game tick schedule for smoother low-speed playback.
 - Live mission metrics show time, delta-v, NMT element errors, point-goal
   error, keepout margin, and relative-speed thresholds as appropriate.
 - Level pass/fail freezes the simulation and displays a mission banner.
@@ -323,12 +326,13 @@ Implemented levels:
 - `rpo_10_evasive_target_survival`: fly the target vehicle, evade an autonomous
   RIC_PD chaser, preserve at least 100 meters of separation, and survive until
   the timer expires under the target delta-v budget.
+- `rpo_bonus_cislunar_rendezvous`: rendezvous near an Earth-Moon L2 NRHO seed
+  using Moon-centered RIC controls, CR3BP propagation, high-speed cislunar time
+  scaling, and a Moon-centered orbit view of the target NRHO.
 - `rpo_arcade_pursuit`: clear repeated pursuit rounds against randomized target
   evasion directions, tightening goal radius, randomized energy-matched starts,
   elliptical boss rounds, round-weighted scoring, conserved-delta-v time
   rewards, ramping boss eccentricity, and a late-round target delta-v ramp.
-- `rpo_bonus_cislunar_rendezvous`: beta rendezvous near an Earth-Moon L2 NRHO
-  seed using Moon-centered RIC controls and a CR3BP trainer projection overlay.
 
 Next focus:
 

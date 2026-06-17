@@ -101,6 +101,8 @@ lesson.
   controls.
 - Ten structured RPO levels covering passive motion, V-bar/R-bar approaches,
   terminal rendezvous, eccentric-orbit cases, and defensive-target examples.
+- A cislunar rendezvous bonus level with Moon-centered RIC controls around an
+  Earth-Moon L2 NRHO target.
 - Sandbox mode for open-ended exploration.
 - Arcade pursuit mode for replayable practice.
 - Markdown/JSON debriefs and optional attempt recordings for structured
@@ -200,10 +202,11 @@ the Python package:
 https://adamcohen8.github.io/orbital-engagement-lab/
 ```
 
-The web preview includes the tutorial, sandbox-style RIC controls, and the beta
-Pursuit Arcade with browser-native replay validation and hosted leaderboard
-hooks. The full local trainer includes the complete downloadable level set,
-scenario YAML support, recordings, and structured debrief reports.
+The web preview includes the tutorial, sandbox-style RIC controls, and Pursuit
+Arcade with browser-native replay validation and hosted leaderboard hooks. The
+full local trainer includes the complete downloadable level set, cislunar
+rendezvous mode, scenario YAML support, recordings, and structured debrief
+reports.
 
 To run the same preview locally:
 

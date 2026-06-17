@@ -993,12 +993,15 @@ class SimulationSession:
         self._done = True
         return self._result
 
-    def step(self) -> SimulationSnapshot:
+    def step(self, dt_s: float | None = None) -> SimulationSnapshot:
         if self._is_batch_analysis(self._active_config.scenario):
             raise RuntimeError("SimulationSession.step() is only available for single-run scenarios.")
         self._ensure_engine()
         assert self._engine is not None
-        snap = self._engine.step()
+        if dt_s is None:
+            snap = self._engine.step()
+        else:
+            snap = self._engine.step(dt_s=float(dt_s))
         self._step_index = int(snap["step_index"])
         self._done = bool(self._engine.done)
         return SimulationSnapshot(

@@ -652,6 +652,7 @@ class _SatelliteStepper:
     ) -> _SatelliteStepResult:
         e = self.engine
         t_inner = float(t_s)
+        interval_s = max(float(t_next) - float(t_s), 1.0e-12)
         tr_inner = initial_truth
         accel_time_integral = e.zero3.copy()
         torque_time_integral = e.zero3.copy()
@@ -753,8 +754,8 @@ class _SatelliteStepper:
 
         return _SatelliteStepResult(
             truth=tr_inner,
-            average_thrust_eci_km_s2=accel_time_integral / e.dt,
-            average_torque_body_nm=e.zero3 if not e.attitude_enabled else (torque_time_integral / e.dt),
+            average_thrust_eci_km_s2=accel_time_integral / interval_s,
+            average_torque_body_nm=e.zero3 if not e.attitude_enabled else (torque_time_integral / interval_s),
             delta_v_m_s=step_delta_v_m_s,
             max_accel_km_s2=step_max_accel_km_s2,
             burned=burned_this_step,

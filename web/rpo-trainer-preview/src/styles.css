@@ -385,7 +385,7 @@ p {
 
 .primer-mode .top-bar {
   height: 96px;
-  grid-template-columns: minmax(0, 1fr) minmax(360px, 780px);
+  grid-template-columns: minmax(0, 1fr) 300px;
   padding: 10px 16px;
 }
 
@@ -1088,6 +1088,15 @@ body.mobile-view #objectiveText {
   white-space: normal;
 }
 
+body.mobile-view .trainer-shell.primer-mode .top-bar {
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 0;
+}
+
+body.mobile-view .trainer-shell.primer-mode .objective-checklist {
+  display: none;
+}
+
 body.mobile-view .game-layout {
   position: relative;
   inset: auto;
@@ -1563,6 +1572,12 @@ body.mobile-view .leaderboard-form {
     line-height: 13px;
   }
 
+  body.mobile-view .trainer-shell.mode-arcade .hud-panel,
+  body.mobile-view .trainer-shell.mode-tutorial .hud-panel,
+  body.mobile-view .trainer-shell.mode-sandbox .hud-panel {
+    grid-template-columns: minmax(275px, 1.7fr) minmax(160px, 1fr);
+  }
+
   body.mobile-view .touch-controls {
     grid-area: controls;
     position: static;
@@ -1587,6 +1602,7 @@ body.mobile-view .leaderboard-form {
 }
 
 body.mobile-view .trainer-shell.mode-arcade .top-bar,
+body.mobile-view .trainer-shell.mode-tutorial .top-bar,
 body.mobile-view .trainer-shell.mode-sandbox .top-bar {
   grid-template-columns: minmax(0, 1fr) minmax(118px, 0.48fr);
   align-items: start;
@@ -1594,6 +1610,7 @@ body.mobile-view .trainer-shell.mode-sandbox .top-bar {
 }
 
 body.mobile-view .trainer-shell.mode-arcade .top-metrics,
+body.mobile-view .trainer-shell.mode-tutorial .top-metrics,
 body.mobile-view .trainer-shell.mode-sandbox .top-metrics {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -1612,9 +1629,40 @@ body.mobile-view .trainer-shell.mode-arcade #topDvMetric {
 }
 
 body.mobile-view .trainer-shell.mode-arcade .objective-checklist,
+body.mobile-view .trainer-shell.mode-tutorial .objective-checklist,
 body.mobile-view .trainer-shell.mode-sandbox .objective-checklist {
   align-self: stretch;
   min-width: 0;
   padding-left: 10px;
   border-left: 1px solid rgb(72, 84, 102);
+}
+
+@media (orientation: landscape) and (max-height: 520px) {
+  body.mobile-view .trainer-shell.mode-tutorial .top-bar {
+    min-height: 0;
+  }
+
+  body.mobile-view .trainer-shell.mode-sandbox .top-bar {
+    min-height: 0;
+  }
+
+  body.mobile-view .trainer-shell.mode-tutorial .objective-checklist,
+  body.mobile-view .trainer-shell.mode-sandbox .objective-checklist {
+    align-self: start;
+  }
+
+  body.mobile-view .trainer-shell.mode-arcade .top-bar {
+    min-height: 50px;
+  }
+
+  body.mobile-view .trainer-shell.mode-arcade .top-metrics {
+    grid-template-columns: max-content max-content max-content;
+    align-items: baseline;
+    column-gap: 14px;
+    row-gap: 0;
+  }
+
+  body.mobile-view .trainer-shell.mode-arcade #topRangeMetric {
+    grid-column: auto;
+  }
 }

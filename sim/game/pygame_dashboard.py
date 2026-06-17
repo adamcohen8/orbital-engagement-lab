@@ -26,9 +26,11 @@ from sim.game.training import (
 from sim.utils.frames import eci_relative_to_ric_rect, ric_dcm_ir_from_rv, ric_rect_state_to_eci
 
 EARTH_MU_KM3_S2 = 398600.4418
+EARTH_RADIUS_KM = 6378.137
 PLOT_OVERLAY_MARGIN = 1.18
 MIN_PLOT_SPAN_KM = 0.005
 MAX_TRAIL_DRAW_POINTS = 260
+MAX_TARGET_ORBIT_DRAW_POINTS = 1200
 MAX_GHOST_DRAW_POINTS = 120
 TEXT_CACHE_LIMIT = 512
 BRIEFING_LINE_HEIGHT_PX = 24
@@ -48,6 +50,8 @@ CR3BP_REFERENCE_CACHE_POSITION_TOL_KM = 1.0e-3
 CR3BP_REFERENCE_CACHE_VELOCITY_TOL_KM_S = 5.0e-6
 CR3BP_RELATIVE_CACHE_POSITION_TOL_KM = 1.0e-3
 CR3BP_RELATIVE_CACHE_VELOCITY_TOL_KM_S = 5.0e-6
+CR3BP_TARGET_ORBIT_INTERNAL_STEP_S = 120.0
+CR3BP_TARGET_ORBIT_MAX_POINTS = 2400
 GAME_ASSET_DIR = Path(__file__).resolve().parent / "assets"
 TARGET_SPRITE_PATH = GAME_ASSET_DIR / "rpo_target_sprite.png"
 CHASER_SPRITE_PATH = GAME_ASSET_DIR / "rpo_chaser_sprite.png"
@@ -201,6 +205,7 @@ class PygameRPODashboard:
     tutorial_target_path_ric: np.ndarray = field(default_factory=lambda: np.empty((0, 6), dtype=float))
     live_prediction_accel_ric_km_s2: np.ndarray = field(default_factory=lambda: np.zeros(3, dtype=float))
     live_prediction_elapsed_s: float = 0.0
+    plot_view_modes: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         try:
@@ -223,13 +228,18 @@ class PygameRPODashboard:
         self.t_s: list[float] = []
         self.rel_hist: list[np.ndarray] = []
         self.target_rel_hist: list[np.ndarray] = []
+        self.target_eci_hist: list[np.ndarray] = []
+        self.chaser_eci_hist: list[np.ndarray] = []
         self.thrust_hist: list[np.ndarray] = []
         self.thrust_ric_hist: list[np.ndarray] = []
         self._rel_array = np.zeros((0, 6), dtype=float)
         self._target_rel_array = np.zeros((0, 6), dtype=float)
+        self._target_eci_array = np.zeros((0, 6), dtype=float)
+        self._chaser_eci_array = np.zeros((0, 6), dtype=float)
         self._thrust_ric_array = np.zeros((0, 3), dtype=float)
         self.mean_motion_rad_s: float | None = None
         self.reference_state_eci: np.ndarray | None = None
+        self.target_orbit_reference_state_eci: np.ndarray | None = None
         self.target_true_anomaly_deg: float | None = None
         self.briefing_scroll_px = 0
         self._frame_cache: dict[str, np.ndarray] = {}
@@ -257,13 +267,24 @@ class PygameRPODashboard:
         self.t_s.clear()
         self.rel_hist.clear()
         self.target_rel_hist.clear()
+        if hasattr(self, "target_eci_hist"):
+            self.target_eci_hist.clear()
+        else:
+            self.target_eci_hist = []
+        if hasattr(self, "chaser_eci_hist"):
+            self.chaser_eci_hist.clear()
+        else:
+            self.chaser_eci_hist = []
         self.thrust_hist.clear()
         self.thrust_ric_hist.clear()
         self._rel_array = np.zeros((0, 6), dtype=float)
         self._target_rel_array = np.zeros((0, 6), dtype=float)
+        self._target_eci_array = np.zeros((0, 6), dtype=float)
+        self._chaser_eci_array = np.zeros((0, 6), dtype=float)
         self._thrust_ric_array = np.zeros((0, 3), dtype=float)
         self.mean_motion_rad_s = None
         self.reference_state_eci = None
+        self.target_orbit_reference_state_eci = None
         self.target_true_anomaly_deg = None
         self._frame_cache = {}
         self._frame_cache_dirty = True
@@ -360,11 +381,13 @@ class PygameRPODashboard:
             reference = target
         if target is None or chaser is None or reference is None:
             return
+        target_state_eci = np.array(target, dtype=float).reshape(-1)[:6]
+        chaser_state_eci = np.array(chaser, dtype=float).reshape(-1)[:6]
         frame_key = _relative_frame_key(getattr(self, "relative_frame", "ric"))
         if frame_key == "cislunar_l1":
             origin = cr3bp_l1_state_km_s()
-            rel = np.array(chaser, dtype=float).reshape(-1)[:6] - origin
-            target_rel = np.array(target, dtype=float).reshape(-1)[:6] - origin
+            rel = chaser_state_eci - origin
+            target_rel = target_state_eci - origin
         elif frame_key == "moon_ric":
             rel = relative_moon_ric_state_from_arrays(target, chaser)
             target_rel = np.zeros(6, dtype=float)
@@ -380,6 +403,8 @@ class PygameRPODashboard:
             self.mean_motion_rad_s = EARTH_MOON_MEAN_MOTION_RAD_S
         elif frame_key == "moon_ric" and reference_arr.size >= 6:
             self.reference_state_eci = reference_arr[:6].astype(float)
+            if getattr(self, "target_orbit_reference_state_eci", None) is None:
+                self.target_orbit_reference_state_eci = self.reference_state_eci.copy()
             target_moon = self.reference_state_eci - cr3bp_moon_state_km_s()
             r_norm = float(np.linalg.norm(target_moon[:3]))
             h_norm = float(np.linalg.norm(np.cross(target_moon[:3], target_moon[3:6])))
@@ -392,6 +417,16 @@ class PygameRPODashboard:
                 self.mean_motion_rad_s = float(np.sqrt(EARTH_MU_KM3_S2 / (r_norm**3)))
         self.t_s.append(float(snapshot.time_s))
         self.rel_hist.append(rel)
+        if not hasattr(self, "target_eci_hist"):
+            self.target_eci_hist = []
+        if not hasattr(self, "chaser_eci_hist"):
+            self.chaser_eci_hist = []
+        if not hasattr(self, "_target_eci_array"):
+            self._target_eci_array = np.zeros((0, 6), dtype=float)
+        if not hasattr(self, "_chaser_eci_array"):
+            self._chaser_eci_array = np.zeros((0, 6), dtype=float)
+        self.target_eci_hist.append(target_state_eci.astype(float))
+        self.chaser_eci_hist.append(chaser_state_eci.astype(float))
         thrust = snapshot.applied_thrust.get(self.chaser_object_id, np.zeros(3, dtype=float))
         thrust_eci = np.array(thrust, dtype=float).reshape(3)
         self.thrust_hist.append(thrust_eci)
@@ -411,6 +446,10 @@ class PygameRPODashboard:
         while len(self.t_s) > int(max(self.max_history, 2)):
             self.t_s.pop(0)
             self.rel_hist.pop(0)
+            if self.target_eci_hist:
+                self.target_eci_hist.pop(0)
+            if self.chaser_eci_hist:
+                self.chaser_eci_hist.pop(0)
             if self.target_rel_hist:
                 self.target_rel_hist.pop(0)
             if self.thrust_hist:
@@ -421,6 +460,18 @@ class PygameRPODashboard:
         self._target_rel_array = _history_array_tail(
             self._target_rel_array,
             target_rel,
+            width=6,
+            max_rows=int(max(self.max_history, 2)),
+        )
+        self._target_eci_array = _history_array_tail(
+            self._target_eci_array,
+            target_state_eci,
+            width=6,
+            max_rows=int(max(self.max_history, 2)),
+        )
+        self._chaser_eci_array = _history_array_tail(
+            self._chaser_eci_array,
+            chaser_state_eci,
             width=6,
             max_rows=int(max(self.max_history, 2)),
         )
@@ -773,6 +824,9 @@ class PygameRPODashboard:
         plot.y += 28
         pygame.draw.rect(self.screen, (8, 11, 16), plot)
         pygame.draw.rect(self.screen, (72, 84, 102), plot, width=1)
+        if self._plot_view_mode_for_axes(x_axis=x_axis, y_axis=y_axis) == "eci":
+            self._draw_eci_orbit_plane_panel(plot)
+            return
         if not self.rel_hist:
             return
         rel = self._frame_cache.get("rel")
@@ -980,6 +1034,234 @@ class PygameRPODashboard:
         self._text(xlbl, (plot.right - 56, plot.centery + 8), self.small_font, (170, 180, 195))
         self._text(ylbl, (plot.centerx + 8, plot.top + 8), self.small_font, (170, 180, 195))
 
+    def _draw_eci_orbit_plane_panel(self, plot: Any) -> None:
+        target_eci = _dashboard_history_array(
+            self,
+            "_target_eci_array",
+            getattr(self, "target_eci_hist", ()),
+            width=6,
+        )
+        chaser_eci = _dashboard_history_array(
+            self,
+            "_chaser_eci_array",
+            getattr(self, "chaser_eci_hist", ()),
+            width=6,
+        )
+        if target_eci.size == 0 or chaser_eci.size == 0:
+            return
+        frame_key = _relative_frame_key(getattr(self, "relative_frame", "ric"))
+        center_state = cr3bp_moon_state_km_s() if frame_key == "moon_ric" else np.zeros(6, dtype=float)
+        center_radius_km = MOON_RADIUS_KM if frame_key == "moon_ric" else EARTH_RADIUS_KM
+        center_fill = (88, 92, 102) if frame_key == "moon_ric" else (30, 74, 126)
+        center_outline = (174, 180, 192) if frame_key == "moon_ric" else (72, 138, 202)
+        draw_history_trails = frame_key != "moon_ric"
+        panel_label = "Moon-centered target orbit" if frame_key == "moon_ric" else "Earth-centered ECI plane"
+        target_centered = target_eci - center_state
+        chaser_centered = chaser_eci - center_state
+        if frame_key == "moon_ric":
+            target_xy = _project_moon_rotating_yz_to_plane(target_centered[:, :3])
+            chaser_xy = _project_moon_rotating_yz_to_plane(chaser_centered[:, :3])
+        else:
+            basis = self._eci_target_plane_basis(target_centered[-1])
+            if basis is None:
+                self._text("Orbit-plane view unavailable", (plot.x + 16, plot.y + 16), self.small_font, (232, 194, 74))
+                return
+            i_hat, r_hat, _c_hat = basis
+            target_xy = _project_eci_positions_to_plane(target_centered[:, :3], x_hat=i_hat, y_hat=r_hat)
+            chaser_xy = _project_eci_positions_to_plane(chaser_centered[:, :3], x_hat=i_hat, y_hat=r_hat)
+        if target_xy.size == 0 or chaser_xy.size == 0:
+            return
+        target_orbit_xy = np.empty((0, 2), dtype=float)
+        if frame_key == "moon_ric":
+            target_orbit = self._cr3bp_target_orbit_prediction()
+            if target_orbit.size:
+                target_orbit_centered = np.array(target_orbit, dtype=float).reshape(-1, 6) - center_state
+                target_orbit_xy = _project_moon_rotating_yz_to_plane(target_orbit_centered[:, :3])
+        target_radius_km = float(np.linalg.norm(target_centered[-1, :3]))
+        half_span_km = max(target_radius_km * 1.18, center_radius_km * 1.25, 1.0)
+        target_scale_xy = target_xy if draw_history_trails else target_xy[-1:].copy()
+        chaser_scale_xy = chaser_xy if draw_history_trails else chaser_xy[-1:].copy()
+        all_xy_rows = [target_scale_xy, chaser_scale_xy, np.array([[0.0, 0.0]], dtype=float)]
+        if target_orbit_xy.size and frame_key != "moon_ric":
+            all_xy_rows.append(target_orbit_xy)
+        all_xy = np.vstack(all_xy_rows)
+        max_abs = float(np.nanmax(np.abs(all_xy))) if all_xy.size else 0.0
+        if np.isfinite(max_abs):
+            half_span_km = max(half_span_km, max_abs * 1.18)
+        scale = min(plot.width, plot.height) * 0.5 / half_span_km
+
+        def to_px_xy(xy: np.ndarray) -> tuple[int, int]:
+            vec = np.array(xy, dtype=float).reshape(2)
+            return (
+                plot.centerx + int(round(float(vec[0]) * scale)),
+                plot.centery - int(round(float(vec[1]) * scale)),
+            )
+
+        def rows_to_px(rows: np.ndarray) -> list[tuple[int, int]]:
+            arr = np.array(rows, dtype=float).reshape(-1, 2)
+            px = np.rint(plot.centerx + arr[:, 0] * scale).astype(int)
+            py = np.rint(plot.centery - arr[:, 1] * scale).astype(int)
+            return list(zip(px.tolist(), py.tolist()))
+
+        pygame = self.pygame
+        previous_clip = self.screen.get_clip()
+        self.screen.set_clip(plot)
+        self._draw_grid(plot, scale_x=scale, scale_y=scale)
+        if target_orbit_xy.size:
+            target_orbit_trail = rows_to_px(_sample_rows(target_orbit_xy, MAX_TARGET_ORBIT_DRAW_POINTS))
+            if len(target_orbit_trail) >= 2:
+                pygame.draw.lines(self.screen, (66, 76, 92), False, target_orbit_trail, width=1)
+        else:
+            orbit_radius_px = max(2, int(round(target_radius_km * scale)))
+            orbit_rect = pygame.Rect(0, 0, orbit_radius_px * 2, orbit_radius_px * 2)
+            orbit_rect.center = plot.center
+            pygame.draw.ellipse(self.screen, (66, 76, 92), orbit_rect, width=1)
+        pygame.draw.line(self.screen, (90, 104, 124), (plot.left, plot.centery), (plot.right, plot.centery), width=1)
+        pygame.draw.line(self.screen, (90, 104, 124), (plot.centerx, plot.top), (plot.centerx, plot.bottom), width=1)
+        center_radius_px = max(2, int(round(center_radius_km * scale)))
+        pygame.draw.circle(self.screen, center_fill, plot.center, center_radius_px)
+        pygame.draw.circle(self.screen, center_outline, plot.center, center_radius_px, width=2)
+
+        if draw_history_trails:
+            target_trail = rows_to_px(_sample_rows(target_xy, MAX_TRAIL_DRAW_POINTS))
+            chaser_trail = rows_to_px(_sample_rows(chaser_xy, MAX_TRAIL_DRAW_POINTS))
+            if len(target_trail) >= 2:
+                pygame.draw.lines(self.screen, TARGET_TRAIL_COLOR, False, target_trail, width=2)
+            if len(chaser_trail) >= 2:
+                pygame.draw.lines(self.screen, CHASER_TRAIL_COLOR, False, chaser_trail, width=2)
+        target_px = to_px_xy(target_xy[-1])
+        chaser_px = to_px_xy(chaser_xy[-1])
+        self._draw_satellite_marker(
+            target_px,
+            role="target",
+            scale_x=scale,
+            scale_y=scale,
+            fallback_radius_px=6,
+        )
+        self._draw_satellite_marker(
+            chaser_px,
+            role="chaser",
+            scale_x=scale,
+            scale_y=scale,
+            fallback_radius_px=7,
+        )
+        self.screen.set_clip(previous_clip)
+        x_label = "T" if frame_key == "moon_ric" else "I"
+        y_label = "N" if frame_key == "moon_ric" else "R"
+        self._text(x_label, (plot.right - 34, plot.centery + 8), self.small_font, (170, 180, 195))
+        self._text(y_label, (plot.centerx + 8, plot.top + 8), self.small_font, (170, 180, 195))
+        self._text(panel_label, (plot.x + 14, plot.bottom - 24), self.small_font, (150, 160, 176))
+
+    def _cr3bp_target_orbit_prediction(self) -> np.ndarray:
+        if _relative_frame_key(getattr(self, "relative_frame", "ric")) != "moon_ric":
+            return np.empty((0, 6), dtype=float)
+        if not self._uses_cr3bp_prediction_model():
+            return np.empty((0, 6), dtype=float)
+        reference = self._target_orbit_reference_state()
+        if reference is None:
+            return np.empty((0, 6), dtype=float)
+        horizon = _positive_float_or_none(getattr(self, "target_coast_prediction_horizon_s", None))
+        if horizon is None:
+            horizon = _positive_float_or_none(getattr(self, "cr3bp_coast_prediction_horizon_s", None))
+        if horizon is None:
+            n = getattr(self, "mean_motion_rad_s", None)
+            if n is None:
+                return np.empty((0, 6), dtype=float)
+            horizon = self._coast_prediction_horizon_s(float(n))
+        if horizon is None or float(horizon) <= 0.0:
+            return np.empty((0, 6), dtype=float)
+        dt = _positive_float_or_none(getattr(self, "target_coast_prediction_dt_s", None))
+        if dt is None:
+            dt = _positive_float_or_none(getattr(self, "cr3bp_coast_prediction_dt_s", None))
+        if dt is None:
+            dt = 3600.0
+        dt = max(float(dt), 1.0e-6)
+        horizon = float(horizon)
+        max_points = CR3BP_TARGET_ORBIT_MAX_POINTS
+        count = min(int(np.floor(horizon / dt)) + 1, max_points)
+        times = np.linspace(0.0, horizon, max(count, 2), dtype=float)
+        cache_key = "target_absolute_cr3bp_orbit"
+        prediction_cache = getattr(self, "_prediction_cache", {})
+        self._prediction_cache = prediction_cache
+        now_s = self._current_time_s()
+        cached = prediction_cache.get(cache_key)
+        if cached is not None:
+            if (
+                _cr3bp_reference_cache_valid(cached.get("reference"), reference)
+                and float(cached.get("horizon_s", np.nan)) == horizon
+                and float(cached.get("dt_s", np.nan)) == dt
+            ):
+                prediction = cached.get("prediction")
+                if prediction is not None:
+                    return np.array(prediction, dtype=float)
+
+        state = reference.copy()
+        rows: list[np.ndarray] = []
+        current_t = 0.0
+        previous_t = 0.0
+        for target_t in times:
+            step_s = float(target_t - previous_t)
+            if step_s > 0.0:
+                remaining_s = step_s
+                while remaining_s > 1.0e-9:
+                    substep_s = min(float(CR3BP_TARGET_ORBIT_INTERNAL_STEP_S), remaining_s)
+                    state = propagate_cr3bp_state(state, substep_s, current_t)
+                    current_t += substep_s
+                    remaining_s -= substep_s
+            rows.append(state.copy())
+            previous_t = float(target_t)
+        prediction = np.vstack(rows) if rows else np.empty((0, 6), dtype=float)
+        prediction_cache[cache_key] = {
+            "time_s": now_s,
+            "prediction": prediction,
+            "reference": reference.copy(),
+            "horizon_s": horizon,
+            "dt_s": dt,
+        }
+        return prediction
+
+    def _target_orbit_reference_state(self) -> np.ndarray | None:
+        reference = getattr(self, "target_orbit_reference_state_eci", None)
+        if reference is not None:
+            return np.array(reference, dtype=float).reshape(6).copy()
+        target_eci = _dashboard_history_array(
+            self,
+            "_target_eci_array",
+            getattr(self, "target_eci_hist", ()),
+            width=6,
+        )
+        if target_eci.size:
+            reference = np.array(target_eci[0], dtype=float).reshape(6).copy()
+            self.target_orbit_reference_state_eci = reference.copy()
+            return reference
+        reference = self._reference_cache_state()
+        if reference is None:
+            return None
+        reference = np.array(reference, dtype=float).reshape(6).copy()
+        self.target_orbit_reference_state_eci = reference.copy()
+        return reference
+
+    @staticmethod
+    def _eci_target_plane_basis(target_state_eci: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+        state = np.array(target_state_eci, dtype=float).reshape(-1)
+        if state.size < 6:
+            return None
+        r_vec = state[:3]
+        v_vec = state[3:6]
+        r_norm = float(np.linalg.norm(r_vec))
+        h_vec = np.cross(r_vec, v_vec)
+        h_norm = float(np.linalg.norm(h_vec))
+        if r_norm <= 0.0 or h_norm <= 0.0 or not np.isfinite(r_norm) or not np.isfinite(h_norm):
+            return None
+        r_hat = r_vec / r_norm
+        c_hat = h_vec / h_norm
+        i_hat = np.cross(c_hat, r_hat)
+        i_norm = float(np.linalg.norm(i_hat))
+        if i_norm <= 0.0 or not np.isfinite(i_norm):
+            return None
+        i_hat = i_hat / i_norm
+        return i_hat.astype(float), r_hat.astype(float), c_hat.astype(float)
+
     def _plot_panel_specs(self) -> tuple[tuple[str, int, int], tuple[str, int, int]]:
         if _relative_frame_key(getattr(self, "relative_frame", "ric")) == "cislunar_l1":
             return (
@@ -987,9 +1269,37 @@ class PygameRPODashboard:
                 ("Cislunar YZ: Tangential Vs Out-of-Plane", 1, 2),
             )
         return (
-            ("RI Plane: In-Track Vs Radial", 1, 0),
-            ("RC Plane: Cross-Track Vs Radial", 2, 0),
+            (self._panel_title_for_axes("RI Plane: In-Track Vs Radial", x_axis=1, y_axis=0), 1, 0),
+            (self._panel_title_for_axes("RC Plane: Cross-Track Vs Radial", x_axis=2, y_axis=0), 2, 0),
         )
+
+    def _panel_title_for_axes(self, default_title: str, *, x_axis: int, y_axis: int) -> str:
+        if self._plot_view_mode_for_axes(x_axis=x_axis, y_axis=y_axis) != "eci":
+            return default_title
+        plane = _plane_key_for_axes(x_axis=x_axis, y_axis=y_axis) or "RIC"
+        if _relative_frame_key(getattr(self, "relative_frame", "ric")) == "moon_ric":
+            return f"Moon View ({plane} Swap): Tangential Vs Normal"
+        return f"ECI View ({plane} Swap): In-Track Vs Radial"
+
+    def _plot_view_mode_for_axes(self, *, x_axis: int, y_axis: int) -> str:
+        if _relative_frame_key(getattr(self, "relative_frame", "ric")) == "cislunar_l1":
+            return "ric"
+        plane = _plane_key_for_axes(x_axis=x_axis, y_axis=y_axis)
+        modes = getattr(self, "plot_view_modes", {}) or {}
+        mode = str(modes.get(plane, "ric") or "ric").strip().lower()
+        return "eci" if mode == "eci" else "ric"
+
+    def toggle_eci_plot(self, plane: str) -> str:
+        key = str(plane or "").strip().upper()
+        if key not in {"RI", "RC"}:
+            return "ric"
+        modes = dict(getattr(self, "plot_view_modes", {}) or {})
+        next_mode = "ric" if str(modes.get(key, "ric")).strip().lower() == "eci" else "eci"
+        modes[key] = next_mode
+        self.plot_view_modes = modes
+        if hasattr(self, "_frame_cache_dirty"):
+            self._frame_cache_dirty = True
+        return next_mode
 
     def _axis_label_for_plot(self, axis: int) -> str:
         if _relative_frame_key(getattr(self, "relative_frame", "ric")) == "cislunar_l1":
@@ -1753,7 +2063,7 @@ class PygameRPODashboard:
                     age_s >= 0.0
                     and age_s < float(interval_s)
                     and _cr3bp_relative_cache_valid(cached.get("rel0"), rel0)
-                    and _cr3bp_reference_cache_valid(cached.get("reference"), reference)
+                    and _cr3bp_reference_cache_valid(cached.get("reference"), reference, elapsed_s=age_s)
                 ):
                     prediction = cached.get("prediction")
                     if prediction is not None:
@@ -2489,6 +2799,28 @@ def _region_visible_on_plane(region: ForbiddenRegionConfig, *, x_axis: int, y_ax
     return plane in planes
 
 
+def _project_eci_positions_to_plane(positions_eci_km: np.ndarray, *, x_hat: np.ndarray, y_hat: np.ndarray) -> np.ndarray:
+    positions = np.array(positions_eci_km, dtype=float)
+    if positions.size == 0:
+        return np.empty((0, 2), dtype=float)
+    positions = positions.reshape(-1, positions.shape[-1])
+    if positions.shape[1] < 3:
+        return np.empty((0, 2), dtype=float)
+    x_axis = np.array(x_hat, dtype=float).reshape(3)
+    y_axis = np.array(y_hat, dtype=float).reshape(3)
+    return np.column_stack((positions[:, :3] @ x_axis, positions[:, :3] @ y_axis)).astype(float)
+
+
+def _project_moon_rotating_yz_to_plane(moon_centered_positions_km: np.ndarray) -> np.ndarray:
+    positions = np.array(moon_centered_positions_km, dtype=float)
+    if positions.size == 0:
+        return np.empty((0, 2), dtype=float)
+    positions = positions.reshape(-1, positions.shape[-1])
+    if positions.shape[1] < 3:
+        return np.empty((0, 2), dtype=float)
+    return positions[:, [1, 2]].astype(float)
+
+
 def _approach_gate_projected_bounds(
     gate: ApproachGateConfig, *, x_axis: int, y_axis: int
 ) -> tuple[np.ndarray, np.ndarray] | None:
@@ -2836,7 +3168,7 @@ def _elliptic_reference_cache_valid(
     )
 
 
-def _cr3bp_reference_cache_valid(cached_reference: Any, current_reference: Any) -> bool:
+def _cr3bp_reference_cache_valid(cached_reference: Any, current_reference: Any, *, elapsed_s: float = 0.0) -> bool:
     if cached_reference is None or current_reference is None:
         return cached_reference is None and current_reference is None
     try:
@@ -2846,8 +3178,14 @@ def _cr3bp_reference_cache_valid(cached_reference: Any, current_reference: Any) 
         return False
     if not np.all(np.isfinite(cached)) or not np.all(np.isfinite(current)):
         return False
-    pos_error_km = float(np.linalg.norm(current[:3] - cached[:3]))
-    vel_error_km_s = float(np.linalg.norm(current[3:6] - cached[3:6]))
+    expected = cached
+    if float(elapsed_s) > 0.0:
+        try:
+            expected = propagate_cr3bp_state(cached, float(elapsed_s), 0.0)
+        except Exception:
+            expected = cached
+    pos_error_km = float(np.linalg.norm(current[:3] - expected[:3]))
+    vel_error_km_s = float(np.linalg.norm(current[3:6] - expected[3:6]))
     return bool(
         pos_error_km <= CR3BP_REFERENCE_CACHE_POSITION_TOL_KM
         and vel_error_km_s <= CR3BP_REFERENCE_CACHE_VELOCITY_TOL_KM_S

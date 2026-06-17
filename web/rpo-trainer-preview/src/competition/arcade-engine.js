@@ -3,6 +3,12 @@ const HASH_OFFSET = 2166136261;
 const HASH_PRIME = 16777619;
 
 export const CONTROL_IDS = Object.freeze(["rPlus", "rMinus", "iPlus", "iMinus", "cPlus", "cMinus"]);
+export const DEFAULT_SPEED_DT_SCHEDULE = Object.freeze([
+  [10.0, 2.0],
+  [25.0, 2.0],
+  [50.0, 5.0],
+  [100.0, 10.0],
+]);
 
 export const DEFAULT_PURSUIT_CHALLENGE = Object.freeze({
   challenge_id: "rpo_arcade_pursuit",
@@ -82,6 +88,21 @@ export const DEFAULT_PURSUIT_CHALLENGE = Object.freeze({
     difficulty_multiplier: 1,
   },
 });
+
+export function gameTickDtS({ baseDtS, speedMultiple, speedDtSchedule = DEFAULT_SPEED_DT_SCHEDULE } = {}) {
+  const base = positiveNumber(baseDtS, "baseDtS");
+  const speed = positiveNumber(speedMultiple ?? 1.0, "speedMultiple");
+  const schedule = Array.isArray(speedDtSchedule) ? speedDtSchedule : DEFAULT_SPEED_DT_SCHEDULE;
+  let chosen = base;
+  for (const row of schedule) {
+    const thresholdSpeed = Number(Array.isArray(row) ? row[0] : row?.speed);
+    const dtS = Number(Array.isArray(row) ? row[1] : row?.dt_s);
+    if (Number.isFinite(thresholdSpeed) && thresholdSpeed > 0 && Number.isFinite(dtS) && dtS > 0) {
+      if (speed >= thresholdSpeed - 1.0e-9) chosen = dtS;
+    }
+  }
+  return Math.max(Math.min(chosen, base), DEFAULT_EPSILON);
+}
 
 export function buildChallengeRecord(config = DEFAULT_PURSUIT_CHALLENGE) {
   const canonical = normalizeChallengeConfig(config);

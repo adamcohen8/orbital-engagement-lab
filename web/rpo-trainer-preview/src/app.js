@@ -3,6 +3,7 @@ import {
   createPursuitArcadeSession,
   DEFAULT_PURSUIT_CHALLENGE,
   ellipticLinearCoastStates,
+  gameTickDtS,
   validateAttemptPacket,
 } from "./competition/arcade-engine.js";
 
@@ -27,11 +28,12 @@ const SATELLITE_ICON_SIZE_PX = 20;
 const SATELLITE_MAX_SIZE_PX = 72;
 const TARGET_MARKER = "#f55c5c";
 const CHASER_MARKER = "#f5cd5c";
-const BUILD_ID = "unified-mobile-shell-2026-06-16ao";
+const BUILD_ID = "unified-mobile-shell-2026-06-17m";
 const ARCADE_BUILD_ID = `${BUILD_ID}-competition-local`;
 const ARCADE_CHALLENGE_RECORD = buildChallengeRecord(DEFAULT_PURSUIT_CHALLENGE);
 const LEADERBOARD_REFRESH_MS = 30000;
-const ANALYTICS_SCRIPT_SRC = "https://plausible.io/js/script.js";
+const PLAUSIBLE_ANALYTICS_SCRIPT_SRC = "https://plausible.io/js/script.js";
+const VERCEL_ANALYTICS_SCRIPT_SRC = "/_vercel/insights/script.js";
 const ANALYTICS_LOCAL_HOSTNAMES = new Set(["", "localhost", "127.0.0.1", "::1"]);
 const PREVIEW_DEV_HOSTNAMES = new Set(["", "localhost", "127.0.0.1", "::1"]);
 const PRIMER_AMPLITUDES_KM = { r: 0.65, i: 0.75, c: 0.65 };
@@ -321,6 +323,8 @@ music.volume = 0.65;
 
 const analytics = {
   enabled: false,
+  plausibleEnabled: false,
+  vercelEnabled: false,
   provider: "",
   domain: "",
   trackedOnce: new Set(),
@@ -329,21 +333,49 @@ const analytics = {
 function initAnalytics() {
   const provider = metaContent("oel-analytics-provider").toLowerCase();
   const domain = metaContent("oel-analytics-domain");
+  const providers = new Set(
+    provider
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean),
+  );
   analytics.provider = provider;
   analytics.domain = domain;
-  if (provider !== "plausible" || !domain || !analyticsAllowedOnCurrentHost()) return;
-  analytics.enabled = true;
+  if (!analyticsAllowedOnCurrentHost()) return;
+  if (providers.has("plausible") && domain) initPlausibleAnalytics(domain);
+  if (providers.has("vercel") && vercelAnalyticsAllowedOnCurrentHost()) initVercelAnalytics();
+  analytics.enabled = analytics.plausibleEnabled || analytics.vercelEnabled;
+}
+
+function initPlausibleAnalytics(domain) {
+  analytics.plausibleEnabled = true;
   window.plausible =
     window.plausible ||
     function plausibleQueue() {
       window.plausible.q = window.plausible.q || [];
       window.plausible.q.push(arguments);
     };
-  if (document.querySelector(`script[src="${ANALYTICS_SCRIPT_SRC}"]`)) return;
+  if (document.querySelector(`script[src="${PLAUSIBLE_ANALYTICS_SCRIPT_SRC}"]`)) return;
   const script = document.createElement("script");
   script.defer = true;
   script.dataset.domain = domain;
-  script.src = ANALYTICS_SCRIPT_SRC;
+  script.src = PLAUSIBLE_ANALYTICS_SCRIPT_SRC;
+  document.head.appendChild(script);
+}
+
+function initVercelAnalytics() {
+  analytics.vercelEnabled = true;
+  window.va =
+    window.va ||
+    function vercelAnalyticsQueue() {
+      window.vaq = window.vaq || [];
+      window.vaq.push(arguments);
+    };
+  const scriptSrc = metaContent("oel-vercel-analytics-script") || VERCEL_ANALYTICS_SCRIPT_SRC;
+  if (document.querySelector(`script[src="${scriptSrc}"]`)) return;
+  const script = document.createElement("script");
+  script.defer = true;
+  script.src = scriptSrc;
   document.head.appendChild(script);
 }
 
@@ -356,9 +388,30 @@ function analyticsAllowedOnCurrentHost() {
   return !ANALYTICS_LOCAL_HOSTNAMES.has(window.location.hostname);
 }
 
+function vercelAnalyticsAllowedOnCurrentHost() {
+  const hostname = window.location.hostname;
+  const hostRules = metaContent("oel-vercel-analytics-hosts")
+    .split(",")
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+  if (hostRules.length <= 0) return hostname.endsWith(".vercel.app");
+  const normalizedHost = hostname.toLowerCase();
+  return hostRules.some((rule) => {
+    if (rule === "*") return true;
+    if (rule.startsWith(".")) return normalizedHost.endsWith(rule);
+    return normalizedHost === rule;
+  });
+}
+
 function trackEvent(name, props = {}) {
-  if (!analytics.enabled || typeof window.plausible !== "function") return;
-  window.plausible(name, { props: analyticsProps(props) });
+  if (!analytics.enabled) return;
+  const cleanProps = analyticsProps(props);
+  if (analytics.plausibleEnabled && typeof window.plausible === "function") {
+    window.plausible(name, { props: cleanProps });
+  }
+  if (analytics.vercelEnabled && typeof window.va === "function") {
+    window.va("event", { name, data: cleanProps });
+  }
 }
 
 function trackEventOnce(name, props = {}) {
@@ -945,8 +998,8 @@ function simulationShouldRun() {
 }
 
 function currentStepDtS() {
-  if (state.mode === "arcade") return ARCADE_CHALLENGE_RECORD.config.dt_s;
-  return FIXED_DT_S;
+  const baseDtS = state.mode === "arcade" ? ARCADE_CHALLENGE_RECORD.config.dt_s : FIXED_DT_S;
+  return gameTickDtS({ baseDtS, speedMultiple: currentSpeedMultiple() });
 }
 
 function currentSpeedMultiple() {
@@ -1039,7 +1092,7 @@ function relativeSpeedKmS() {
 function updateMissionText() {
   if (state.mode === "selector") {
     el.shell.classList.add("selector-mode");
-    el.shell.classList.remove("mode-arcade", "mode-sandbox", "primer-mode");
+    el.shell.classList.remove("mode-arcade", "mode-sandbox", "mode-tutorial", "primer-mode");
     renderLevelSelector();
     return;
   }
@@ -1047,6 +1100,7 @@ function updateMissionText() {
   el.shell.classList.toggle("primer-mode", state.mode === "primer");
   el.shell.classList.toggle("mode-arcade", state.mode === "arcade");
   el.shell.classList.toggle("mode-sandbox", state.mode === "sandbox");
+  el.shell.classList.toggle("mode-tutorial", state.mode === "tutorial");
   el.modeLabel.textContent = state.mode === "sandbox" ? "Sandbox" : "Tutorial";
   if (state.mode === "primer") {
     const stage = activePrimerStage();
@@ -1404,10 +1458,11 @@ function updateHud() {
   el.dvMetric.textContent = dvText;
   el.timeMetric.textContent = timeText;
   if (state.mode === "arcade") {
-    const metricGap = "\u00a0".repeat(6);
-    el.topRangeMetric.textContent = `Score ${state.arcadeSnapshot?.score || 0}${metricGap}Time Remaining ${arcadeTimeText}`;
-    el.topSpeedMetric.textContent = `dV Remaining: Target ${targetDvText}${metricGap}Chaser ${dvText}`;
-    el.topDvMetric.textContent = "";
+    const metricGap = "\u00a0".repeat(state.activeView === "mobile" ? 3 : 6);
+    const timeLabel = state.activeView === "mobile" ? "Time" : "Time Remaining";
+    el.topRangeMetric.textContent = `Score ${state.arcadeSnapshot?.score || 0}${metricGap}${timeLabel} ${arcadeTimeText}`;
+    el.topSpeedMetric.textContent = `Target dV ${targetDvText}`;
+    el.topDvMetric.textContent = `Chaser dV ${dvText}`;
   } else {
     el.topRangeMetric.textContent = `INFO Range ${rangeText}`;
     el.topSpeedMetric.textContent = `INFO Rel Speed ${speedText}`;
@@ -1436,6 +1491,7 @@ function currentCoachHint() {
   if (state.mode === "sandbox") {
     const label = state.cameraRuleMode === "full_trajectory" ? "Full Trajectory" : "Satellites Only";
     const cameraLabel = state.activeView === "mobile" ? "Camera" : "C Camera";
+    if (state.activeView === "mobile") return `${cameraLabel}: ${label}.`;
     return `Use small pulses, then coast and watch the target-centered RIC motion. ${cameraLabel}: ${label}.`;
   }
   if (state.mode === "arcade") {
@@ -1449,6 +1505,7 @@ function currentCoachHint() {
     }
     if (snap?.terminal) return `${snap.terminal_reason} Local validator score: ${snap.score}.`;
     const cameraLabel = state.activeView === "mobile" ? "Camera" : "C Camera";
+    if (state.activeView === "mobile") return `${cameraLabel}: ${label}.`;
     return `${snap?.is_boss_round ? "Boss round. " : ""}Clear rounds to tighten the goal and grow the score. ${cameraLabel}: ${label}.`;
   }
   const stage = tutorialStages[state.activeStage] || tutorialStages[tutorialStages.length - 1];
@@ -1456,10 +1513,16 @@ function currentCoachHint() {
     return `Guided burns complete. Settle gently into the green ${formatDistanceKm(0.25)} circle. Keep pulses short.`;
   }
   if (stage.speedTarget) {
+    if (state.activeView === "mobile") {
+      return `Want to go faster? Tap ${stage.speedTarget}x in the speed row. Current speed: ${SPEED_OPTIONS[state.speedIndex]}x.`;
+    }
     return `Want to go faster? Hit the up arrow key to increase the speed multiple. Current speed: ${SPEED_OPTIONS[state.speedIndex]}x.`;
   }
   const progress = Math.min(state.stageDv, stage.targetDv || 0);
-  return `${stage.text} Burn progress: ${formatSpeedMS(progress)}/${formatSpeedMS(stage.targetDv || 0)}.`;
+  if (state.activeView === "mobile") {
+    return `${tutorialStageInstruction(stage)} Burn ${formatBurnProgressMS(progress, stage.targetDv || 0)}.`;
+  }
+  return `${tutorialStageInstruction(stage)} Burn progress: ${formatSpeedMS(progress)}/${formatSpeedMS(stage.targetDv || 0)}.`;
 }
 
 function commandStatusLine() {
@@ -1468,6 +1531,22 @@ function commandStatusLine() {
   }
   if (state.mode === "arcade") return "W/S R  A/D I  Left/Right C  Space Start  R Reset";
   return "W/S R  A/D I  Left/Right C  C Camera  M Music";
+}
+
+function tutorialStageInstruction(stage) {
+  if (state.activeView !== "mobile") return stage.text;
+  const label = `${stage.sign > 0 ? "+" : "-"}${String(stage.axis || "").toUpperCase()}`;
+  if (stage.id === "plusI") return `Hold ${label}, then coast.`;
+  if (stage.id === "minusI") return `Hold ${label}, then coast.`;
+  if (stage.id === "plusR") return `Hold ${label}, then coast.`;
+  if (stage.id === "minusR") return `Hold ${label}, then coast.`;
+  if (stage.id === "plusC") return `Hold ${label}, then coast.`;
+  if (stage.id === "minusC") return `Hold ${label}, then coast.`;
+  return stage.text;
+}
+
+function formatBurnProgressMS(progressMps, targetMps) {
+  return `${Math.round(progressMps * 1000)}/${Math.round(targetMps * 1000)} mm/s`;
 }
 
 function syncMobileSpeedButtons() {

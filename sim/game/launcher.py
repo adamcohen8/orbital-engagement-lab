@@ -75,7 +75,7 @@ def discover_game_scenarios(config_dir: Path | None = None) -> tuple[GameScenari
         with path.open("r", encoding="utf-8") as f:
             raw = yaml.safe_load(f) or {}
         options.append(_scenario_option_from_yaml(path, raw, progress_by_scenario=progress))
-    return tuple(sorted(options, key=lambda option: (option.level_number, option.scenario_id)))
+    return tuple(sorted(options, key=_scenario_sort_key))
 
 
 def choose_game_scenario(config_dir: Path | None = None) -> Path | None:
@@ -230,6 +230,16 @@ def _level_number_from_scenario_id(scenario_id: str) -> int:
         if part.isdigit():
             return int(part)
     return 999
+
+
+def _scenario_sort_key(option: GameScenarioOption) -> tuple[int, str]:
+    if option.scenario_id == "rpo_bonus_cislunar_rendezvous":
+        return (11, option.scenario_id)
+    if option.scenario_id == "rpo_arcade_pursuit":
+        return (12, option.scenario_id)
+    if option.scenario_id == "rpo_sandbox":
+        return (13, option.scenario_id)
+    return (option.level_number, option.scenario_id)
 
 
 def _title_from_scenario_id(scenario_id: str, *, level_number: int) -> str:

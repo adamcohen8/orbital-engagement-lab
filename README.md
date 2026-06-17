@@ -148,7 +148,7 @@ and ask before submitting feedback upstream.
 The bundled Pygame trainer turns RPO intuition into a playable progression:
 tutorial, coast-relative motion, V-bar and R-bar approaches, close rendezvous,
 passively safe inspection, eccentric-orbit lessons, defensive-target tracking,
-evasive-target survival, sandbox, and arcade pursuit.
+evasive-target survival, cislunar rendezvous, arcade pursuit, and sandbox.
 
 Install the game extra and launch the level selector:
 
@@ -162,6 +162,10 @@ Space to launch, and Escape to return to the selector. Training runs can also
 write debriefs and recordings under `outputs/`; see
 [Video Game Mode Roadmap](docs/game-mode-roadmap.md) for controls, debriefs,
 recording, and level-design notes.
+
+During supported RPO levels, `O` and `P` swap the RI or RC plot into an
+orbit-plane view. In `Bonus Level - Cislunar Rendezvous`, that swapped view is
+Moon-centered and shows the target NRHO with the chaser's current position.
 
 ## Trust, Limits, And Safety
 

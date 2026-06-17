@@ -18,6 +18,8 @@ def poll_pygame_input(
     state.open_debrief_requested = False
     state.clip_record_toggle_requested = False
     state.clip_record_save_requested = False
+    state.eci_ri_plot_toggle_requested = False
+    state.eci_rc_plot_toggle_requested = False
     focus_lost = False
     for event in pygame.event.get():
         if pygame_focus_lost(pygame, event):
@@ -57,6 +59,10 @@ def poll_pygame_input(
             state.clip_record_save_requested = True
         elif event.type == pygame.KEYDOWN and event.key == getattr(pygame, "K_c", object()):
             state.camera_rule_toggle_requested = True
+        elif event.type == pygame.KEYDOWN and event.key == getattr(pygame, "K_o", object()):
+            state.eci_ri_plot_toggle_requested = True
+        elif event.type == pygame.KEYDOWN and event.key == getattr(pygame, "K_p", object()):
+            state.eci_rc_plot_toggle_requested = True
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_UP:
             state.speed_multiplier_change += 1
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_DOWN:

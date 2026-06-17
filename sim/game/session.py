@@ -100,3 +100,21 @@ def _install_chaser_delta_v_limiter(
             current._last_cmd = Command.zero()
     else:
         agent.orbit_controller = limited
+
+
+def _set_chaser_delta_v_limiter_dt(
+    session: SimulationSession,
+    *,
+    training_cfg: RPOTrainingConfig,
+    dt_s: float,
+) -> None:
+    engine = getattr(session, "_engine", None)
+    agent = getattr(engine, "agents", {}).get(str(training_cfg.chaser_object_id)) if engine is not None else None
+    if agent is None:
+        return
+    current = getattr(agent, "orbit_controller", None)
+    candidates = [current, getattr(current, "base", None)]
+    for candidate in candidates:
+        if isinstance(candidate, _DeltaVLimitedOrbitController):
+            candidate.dt_s = float(max(dt_s, 0.0))
+            return
