@@ -6,7 +6,7 @@ metadata:
   notes: Run with `python run_game.py sim/game/configs/game_training_rpo_bonus_cislunar_rendezvous.yaml
     --speed-multiple 25`.
   game:
-    level_name: Bonus Level - Cislunar Rendezvous (Beta)
+    level_name: Bonus Level - Cislunar Rendezvous
     control_mode: moon_ric_translation
     relative_frame: moon_ric
     coast_prediction_model: cr3bp
@@ -15,6 +15,7 @@ metadata:
     - RI
     - RC
     initial_speed_multiple: 10.0
+    maneuver_control_speed_multiple: 100.0
     speed_multiplier_options:
     - 10.0
     - 25.0
@@ -28,12 +29,13 @@ metadata:
     cr3bp_coast_prediction_dt_s: 1800.0
     show_target_hcw_path: false
     target_coast_prediction_horizon_s: 1127210.360660
-    target_coast_prediction_dt_s: 3600.0
+    target_coast_prediction_dt_s: 600.0
     camera_mode: rule_toggle_pair
     camera_rule_mode: current_pair
     camera_rule_toggle_enabled: true
     target_sprite_path: cislunar_target_sprite.png
     chaser_sprite_path: cislunar_chaser_sprite.png
+    dashboard_fps_cap: 30.0
     target_sprite_diameter_km: 0.12
     chaser_sprite_diameter_km: 0.05
     target_sprite_max_size_px: 128
@@ -47,30 +49,29 @@ metadata:
       enabled: true
       scenario_id: rpo_bonus_cislunar_rendezvous
       relative_frame: moon_ric
-      learning_goal: Complete a beta close-rendezvous scenario with a target on a corrected
+      learning_goal: Complete a close-rendezvous scenario with a target on a corrected
         Earth-Moon L2 NRHO while using target-centered RIC axes built from the
         target's motion about the Moon.
-      player_brief: Beta mission. You begin below and behind a target moving on a corrected
-        southern L2 near-rectilinear halo orbit, with a small cross-track plane
-        mismatch to clean up on approach. The display is target-centered. R points
-        from the Moon through the target, I follows the target's instantaneous
-        motion about the Moon, and C completes the local frame. Use small burns
-        to null range and relative speed near the NRHO target.
+      player_brief: You begin below and behind a target approaching perilune on
+        a corrected southern L2 near-rectilinear halo orbit, with a small
+        cross-track plane mismatch to clean up on approach. The display is
+        target-centered. R points from the Moon through the target, I follows
+        the target's instantaneous motion about the Moon, and C completes the
+        local frame. Use small burns to null range and relative speed near the
+        NRHO target.
       pass_criteria:
       - Get within 50 meters of the NRHO target.
-      - Keep relative speed below 0.2 meters per second.
-      - Do not enter the 100 meter proximity zone faster than 0.2 meters per
+      - Keep relative speed below 0.1 meters per second.
+      - Do not enter the 100 meter proximity zone faster than 0.1 meters per
         second.
       - Stay under the close-approach time and delta-v budgets.
       instructor_notes:
-      - Beta level - keep using the LEO trainer levels for primary instruction
-        until this cislunar mission has more classroom playtest evidence.
-      - This is an experimental cislunar teaching mission using an opt-in CR3BP
+      - This is a cislunar teaching mission using an opt-in CR3BP
         rotating-frame propagator.
       - The CR3BP state is in physical km and km/s; the integrator nondimensionalizes
         internally.
       - The target uses a deterministic corrected southern L2 NRHO initial condition
-        in the Earth-Moon CR3BP.
+        phased 30 minutes before perilune in the Earth-Moon CR3BP.
       - Discuss how Moon-centered RIC makes the local rendezvous task readable
         even though the NRHO does not obey circular-orbit HCW intuition.
       target_object_id: target
@@ -80,9 +81,9 @@ metadata:
       - 0.0
       - 0.0
       goal_radius_km: 0.05
-      max_goal_speed_km_s: 0.0002
+      max_goal_speed_km_s: 0.0001
       hard_speed_limit_radius_km: 0.1
-      hard_speed_limit_km_s: 0.0002
+      hard_speed_limit_km_s: 0.0001
       max_time_s: 259200.0
       max_delta_v_m_s: 75.0
 objects:
@@ -101,11 +102,11 @@ objects:
         reference_frame: moon_ric
         state:
         - -3.0
-        - -4.0
+        - 4.0
         - 0.5
         - 0.0
         - 0.0
-        - 1.0e-05
+        - 2.0e-06
       attitude_quat_bn:
       - 1.0
       - 0.0
@@ -159,6 +160,8 @@ objects:
       cr3bp_halo:
         system: earth_moon
         family: l2_nrho_southern
+        phase_time_s: 843600.0
+        phase_substep_s: 120.0
       attitude_quat_bn:
       - 1.0
       - 0.0

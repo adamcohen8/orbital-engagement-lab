@@ -454,7 +454,13 @@ class _SingleRunEngine:
 
     @property
     def done(self) -> bool:
-        return bool(self.terminated_early or self.current_index >= max(self.n - 1, 0))
+        current_time_s = 0.0
+        if hasattr(self, "t_s") and self.t_s.size:
+            current_time_s = float(self.t_s[min(int(self.current_index), self.t_s.size - 1)])
+        return bool(
+            self.terminated_early
+            or current_time_s >= float(self.cfg.simulator.duration_s) - max(1.0e-9, 1.0e-9 * abs(float(self.cfg.simulator.duration_s)))
+        )
 
     def _emit_step_callback(self, step: int) -> None:
         if self.active_step_callback is None:
@@ -485,6 +491,53 @@ class _SingleRunEngine:
         if hist.shape[1] > 0:
             expanded[:, : hist.shape[1]] = hist
         self.belief_hist[aid] = expanded
+
+    def _grow_axis0(self, arr: np.ndarray | None, rows: int, *, fill: float = np.nan) -> np.ndarray | None:
+        if arr is None:
+            return None
+        if arr.shape[0] >= int(rows):
+            return arr
+        shape = (int(rows), *arr.shape[1:])
+        expanded = np.full(shape, fill, dtype=arr.dtype)
+        expanded[: arr.shape[0], ...] = arr
+        return expanded
+
+    def _ensure_sample_capacity(self, sample_index: int) -> None:
+        needed = int(sample_index) + 1
+        if needed <= self.n:
+            return
+        grow_to = max(needed, int(max(self.n * 2, self.n + 1)))
+        self.n = grow_to
+        self.t_s = self._grow_axis0(self.t_s, grow_to)
+        self.target_reference_orbit_hist = self._grow_axis0(self.target_reference_orbit_hist, grow_to)
+        self.truth_hist = {aid: self._grow_axis0(hist, grow_to) for aid, hist in self.truth_hist.items()}
+        self.belief_hist = {aid: self._grow_axis0(hist, grow_to) for aid, hist in self.belief_hist.items()}
+        self.thrust_hist = {aid: self._grow_axis0(hist, grow_to) for aid, hist in self.thrust_hist.items()}
+        self.torque_hist = {aid: self._grow_axis0(hist, grow_to) for aid, hist in self.torque_hist.items()}
+        self.desired_attitude_hist = {
+            aid: self._grow_axis0(hist, grow_to) for aid, hist in self.desired_attitude_hist.items()
+        }
+        self.throttle_hist = {aid: self._grow_axis0(hist, grow_to) for aid, hist in self.throttle_hist.items()}
+        self.rocket_stage_hist = self._grow_axis0(self.rocket_stage_hist, grow_to)
+        self.rocket_q_dyn_hist = self._grow_axis0(self.rocket_q_dyn_hist, grow_to)
+        self.rocket_mach_hist = self._grow_axis0(self.rocket_mach_hist, grow_to)
+        self.rocket_metric_hists = {
+            key: self._grow_axis0(hist, grow_to) for key, hist in self.rocket_metric_hists.items()
+        }
+        self.reentry_metric_hists = {
+            aid: {key: self._grow_axis0(hist, grow_to) for key, hist in metrics.items()}
+            for aid, metrics in self.reentry_metric_hists.items()
+        }
+        self.knowledge_hist = {
+            obs: {tgt: self._grow_axis0(hist, grow_to) for tgt, hist in by_tgt.items()}
+            for obs, by_tgt in self.knowledge_hist.items()
+        }
+        self.knowledge_measurement_hist = {
+            obs: {tgt: self._grow_axis0(hist, grow_to) for tgt, hist in by_tgt.items()}
+            for obs, by_tgt in self.knowledge_measurement_hist.items()
+        }
+        self.history_memory_estimate = self._estimate_history_memory()
+        enforce_history_memory_budget(self.history_memory_estimate)
 
     def snapshot(self, step_index: int | None = None) -> dict[str, Any]:
         idx = self.current_index if step_index is None else int(step_index)
@@ -611,12 +664,12 @@ class _SingleRunEngine:
         )
         return mission_out
 
-    def step(self) -> dict[str, Any]:
+    def step(self, dt_s: float | None = None) -> dict[str, Any]:
         if not bool(getattr(self, "_acceleration_context_active", False)):
             with acceleration_context_from_config(self.cfg):
                 self._acceleration_context_active = True
                 try:
-                    return self.step()
+                    return self.step(dt_s=dt_s)
                 finally:
                     self._acceleration_context_active = False
         if self.done:
@@ -624,7 +677,16 @@ class _SingleRunEngine:
 
         k = int(self.current_index)
         t = float(self.t_s[k])
-        t_next = float(self.t_s[k + 1])
+        step_dt = self.dt if dt_s is None else float(dt_s)
+        if not np.isfinite(step_dt) or step_dt <= 0.0:
+            raise ValueError("step dt_s must be positive.")
+        remaining_s = max(float(self.cfg.simulator.duration_s) - t, 0.0)
+        step_dt = min(step_dt, remaining_s)
+        if step_dt <= 0.0:
+            return self.snapshot()
+        self._ensure_sample_capacity(k + 1)
+        t_next = float(t + step_dt)
+        self.t_s[k + 1] = t_next
 
         if self.rocket is not None:
             for agent in self.agents.values():
@@ -647,7 +709,7 @@ class _SingleRunEngine:
                 state=self.target_reference_truth,
                 command=Command.zero(),
                 env=env_ref,
-                dt_s=self.dt,
+                dt_s=step_dt,
             )
             assert self.target_reference_orbit_hist is not None
             self.target_reference_orbit_hist[k + 1, 0:3] = self.target_reference_truth.position_eci_km
@@ -745,7 +807,7 @@ class _SingleRunEngine:
             if agent.belief is not None:
                 self._ensure_belief_hist_width(aid, agent.belief.state.size)
                 self.belief_hist[aid][k + 1, : agent.belief.state.size] = agent.belief.state
-            self._record_reentry_metrics(aid=aid, truth=truth, sample_index=k + 1, dt_s=self.dt)
+            self._record_reentry_metrics(aid=aid, truth=truth, sample_index=k + 1, dt_s=step_dt)
 
         self.current_index = k + 1
         self._emit_step_callback(self.current_index)

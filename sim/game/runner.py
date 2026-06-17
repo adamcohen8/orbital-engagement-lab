@@ -55,6 +55,7 @@ from sim.game.recording_controller import GameClipRecordingController, GameRecor
 from sim.game.session import (
     _attempt_config_for_training_clock,
     _install_chaser_delta_v_limiter,
+    _set_chaser_delta_v_limiter_dt,
 )
 from sim.game.state import (
     GamePhase,
@@ -72,6 +73,7 @@ from sim.game.tuning import (
     MANEUVER_CONTROL_SPEED,
     MAX_REALTIME_STEPS_PER_FRAME,
     MEDIUM_HIGH_SPEED_DASHBOARD_FPS,
+    SPEED_DT_SCHEDULE,
     SPEED_MULTIPLIER_OPTIONS,
 )
 from sim.presets.thrusters import resolve_thruster_max_thrust_n_from_specs
@@ -295,6 +297,45 @@ def _game_target_coast_prediction_dt_s(config: SimulationConfig) -> float | None
     return _positive_float_or_none(game_cfg.get("target_coast_prediction_dt_s"))
 
 
+def _game_dashboard_fps_cap(config: SimulationConfig) -> float | None:
+    game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
+    return _positive_float_or_none(game_cfg.get("dashboard_fps_cap"))
+
+
+def _game_speed_dt_schedule(config: SimulationConfig) -> tuple[tuple[float, float], ...]:
+    game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
+    if "speed_dt_s" not in game_cfg:
+        return tuple(SPEED_DT_SCHEDULE)
+    raw = game_cfg.get("speed_dt_s")
+    if raw is None or raw is False:
+        return ()
+    if not isinstance(raw, dict):
+        return tuple(SPEED_DT_SCHEDULE)
+    rows: list[tuple[float, float]] = []
+    for speed, dt_s in raw.items():
+        try:
+            speed_value = float(speed)
+        except (TypeError, ValueError):
+            continue
+        dt_value = _positive_float_or_none(dt_s)
+        if np.isfinite(speed_value) and speed_value > 0.0 and dt_value is not None:
+            rows.append((speed_value, dt_value))
+    return tuple(sorted(rows, key=lambda item: item[0]))
+
+
+def _game_tick_dt_s(config: SimulationConfig, speed_multiple: float) -> float:
+    base_dt_s = float(config.scenario.simulator.dt_s)
+    schedule = _game_speed_dt_schedule(config)
+    if not schedule:
+        return base_dt_s
+    current_speed = float(speed_multiple)
+    chosen = base_dt_s
+    for threshold_speed, dt_s in schedule:
+        if current_speed >= threshold_speed - 1.0e-9:
+            chosen = float(dt_s)
+    return float(max(min(chosen, base_dt_s), 1.0e-9))
+
+
 def _positive_float_or_none(value: Any) -> float | None:
     if value is None:
         return None
@@ -488,6 +529,11 @@ def _game_initial_speed_multiple(config: SimulationConfig, requested_speed_multi
     game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
     configured = _positive_float_or_none(game_cfg.get("initial_speed_multiple"))
     return _coerce_speed_multiple(1.0 if configured is None else configured, options=options)
+
+
+def _game_maneuver_control_speed_multiple(config: SimulationConfig) -> float | None:
+    game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
+    return _positive_float_or_none(game_cfg.get("maneuver_control_speed_multiple"))
 
 
 def _game_speed_multiplier_options(config: SimulationConfig) -> tuple[float, ...]:
@@ -684,10 +730,14 @@ def _speed_after_maneuver_input(
     *,
     control_mode: str = "attitude_thrust",
     options: tuple[float, ...] | None = None,
+    maneuver_control_speed_multiple: float | None = None,
 ) -> float:
     speed = _coerce_speed_multiple(speed_multiple, options=options)
-    if speed > MANEUVER_CONTROL_SPEED and _has_maneuver_input(state, control_mode=control_mode):
-        return _coerce_speed_multiple(MANEUVER_CONTROL_SPEED, options=options)
+    if _has_maneuver_input(state, control_mode=control_mode):
+        configured_control_speed = _positive_float_or_none(maneuver_control_speed_multiple)
+        control_speed = MANEUVER_CONTROL_SPEED if configured_control_speed is None else configured_control_speed
+        if speed > control_speed:
+            return _coerce_speed_multiple(control_speed, options=options)
     return speed
 
 
@@ -1046,14 +1096,20 @@ def _dashboard_fps_for_speed(
     *,
     recording: bool = False,
     recording_fps: float = GAME_RECORDING_FPS,
+    fps_cap: float | None = None,
 ) -> float:
     if bool(recording):
         return float(max(recording_fps, 1.0))
+    cap = _positive_float_or_none(fps_cap)
     if float(speed_multiple) >= 100.0:
-        return HIGH_SPEED_DASHBOARD_FPS
-    if float(speed_multiple) >= 50.0:
-        return MEDIUM_HIGH_SPEED_DASHBOARD_FPS
-    return DASHBOARD_FPS
+        fps = HIGH_SPEED_DASHBOARD_FPS
+    elif float(speed_multiple) >= 50.0:
+        fps = MEDIUM_HIGH_SPEED_DASHBOARD_FPS
+    else:
+        fps = DASHBOARD_FPS
+    if cap is not None:
+        fps = min(float(fps), float(cap))
+    return float(max(fps, 1.0))
 
 
 def _clip_recording_status(
@@ -1098,9 +1154,9 @@ def _command_status(state: KeyboardCommandState, *, control_mode: str = "attitud
     if mode in CISLUNAR_TRANSLATION_MODES:
         return "W/S Earth-Moon Y  A/D Tangential X  Left/Right Normal Z  C Camera  M Music"
     if mode in MOON_RIC_TRANSLATION_MODES:
-        return "W/S R about Moon  A/D I about Moon  Left/Right C about Moon  C Camera  M Music"
+        return "W/S R about Moon  A/D I about Moon  Left/Right C about Moon  C Camera  O/P ECI  M Music"
     if mode in TRANSLATION_CONTROL_MODES:
-        return "W/S R  A/D I  Left/Right C  C Camera  M Music"
+        return "W/S R  A/D I  Left/Right C  C Camera  O/P ECI  M Music"
     burn = "FIRE" if state.firing else "Coast"
     return (
         "W/S Pitch  A/D Yaw  Left/Right Roll  Space Fire  M Music  R Reset  Esc Quit\n"
@@ -1257,6 +1313,7 @@ def run_game_mode(
     level_title = _game_level_title(config)
     speed_multiplier_options = _game_speed_multiplier_options(config)
     current_speed_multiple = _game_initial_speed_multiple(config, speed_multiple)
+    maneuver_control_speed_multiple = _game_maneuver_control_speed_multiple(config)
     trainer = RPOTrainingTracker(training_cfg)
     command_state = KeyboardCommandState()
     command_state.use_timing_accumulator = True
@@ -1508,7 +1565,8 @@ def run_game_mode(
             training_cfg=training_cfg,
             override_level_path=_arcade_round_music_path(config, arcade_round_index) if arcade_enabled else None,
         )
-        dt_s = float(config.scenario.simulator.dt_s)
+        dashboard_fps_cap = _game_dashboard_fps_cap(config)
+        dt_s = _game_tick_dt_s(config, current_speed_multiple)
         wall_step_s = _wall_step_s(dt_s, current_speed_multiple)
         last_step_wall = perf_counter()
         last_input_wall = last_step_wall
@@ -1566,6 +1624,8 @@ def run_game_mode(
                     command_state.reset_axes()
                     command_state.speed_multiplier_change = 0
                     command_state.camera_rule_toggle_requested = False
+                    command_state.eci_ri_plot_toggle_requested = False
+                    command_state.eci_rc_plot_toggle_requested = False
                     command_state.clip_record_toggle_requested = False
                     command_state.clip_record_save_requested = False
                     command_state.open_debrief_requested = False
@@ -1582,7 +1642,7 @@ def run_game_mode(
                     )
                     recording_controller.capture(dashboard)
                     clip_recording_controller.capture(dashboard)
-                    dashboard.tick(_dashboard_fps_for_speed(current_speed_multiple))
+                    dashboard.tick(_dashboard_fps_for_speed(current_speed_multiple, fps_cap=dashboard_fps_cap))
                     continue
             if command_state.speed_multiplier_change:
                 previous_speed_multiple = current_speed_multiple
@@ -1593,6 +1653,7 @@ def run_game_mode(
                 )
                 if not np.isclose(current_speed_multiple, previous_speed_multiple):
                     trainer.record_speed_multiplier_change()
+                dt_s = _game_tick_dt_s(config, current_speed_multiple)
                 wall_step_s = _wall_step_s(dt_s, current_speed_multiple)
                 command_state.speed_multiplier_change = 0
                 last_step_wall = perf_counter()
@@ -1603,6 +1664,14 @@ def run_game_mode(
                 ):
                     dashboard.toggle_camera_rule_mode()
                 command_state.camera_rule_toggle_requested = False
+            if command_state.eci_ri_plot_toggle_requested:
+                if hasattr(dashboard, "toggle_eci_plot"):
+                    dashboard.toggle_eci_plot("RI")
+                command_state.eci_ri_plot_toggle_requested = False
+            if command_state.eci_rc_plot_toggle_requested:
+                if hasattr(dashboard, "toggle_eci_plot"):
+                    dashboard.toggle_eci_plot("RC")
+                command_state.eci_rc_plot_toggle_requested = False
             if guided_tutorial.awaiting_speed_step and _guided_tutorial_speed_step_reached(
                 training_cfg,
                 current_speed_multiple,
@@ -1629,9 +1698,11 @@ def run_game_mode(
                 command_state,
                 control_mode=control_mode,
                 options=speed_multiplier_options,
+                maneuver_control_speed_multiple=maneuver_control_speed_multiple,
             )
             if not np.isclose(maneuver_speed_multiple, current_speed_multiple):
                 current_speed_multiple = maneuver_speed_multiple
+                dt_s = _game_tick_dt_s(config, current_speed_multiple)
                 wall_step_s = _wall_step_s(dt_s, current_speed_multiple)
                 last_step_wall = perf_counter()
                 last_input_wall = last_step_wall
@@ -1741,6 +1812,8 @@ def run_game_mode(
                 command_state.restart_requested = False
                 command_state.speed_multiplier_change = 0
                 command_state.camera_rule_toggle_requested = False
+                command_state.eci_ri_plot_toggle_requested = False
+                command_state.eci_rc_plot_toggle_requested = False
                 command_state.music_toggle_requested = False
                 command_state.clip_record_toggle_requested = False
                 command_state.clip_record_save_requested = False
@@ -1748,7 +1821,7 @@ def run_game_mode(
                 command_state.paused = bool(training_cfg.enabled)
                 phase = GamePhase.BRIEFING if training_cfg.enabled else GamePhase.PLAYING
                 dashboard.reset_briefing_scroll()
-                dt_s = float(config.scenario.simulator.dt_s)
+                dt_s = _game_tick_dt_s(config, current_speed_multiple)
                 wall_step_s = _wall_step_s(dt_s, current_speed_multiple)
                 last_step_wall = perf_counter()
                 last_input_wall = last_step_wall
@@ -1812,6 +1885,7 @@ def run_game_mode(
                 trainer=trainer,
                 steps_to_run=steps_to_run,
                 initial_score=pre_score,
+                dt_s=dt_s,
             )
             guided_stage_completed = False
             completed_guided_stage: Any | None = None
@@ -2066,6 +2140,7 @@ def run_game_mode(
                     current_speed_multiple,
                     recording=recording_controller.recorder is not None or clip_recording_controller.recording,
                     recording_fps=recording_fps,
+                    fps_cap=dashboard_fps_cap,
                 )
             )
     finally:
@@ -2234,12 +2309,17 @@ def _step_game_attempt(
     trainer: RPOTrainingTracker,
     steps_to_run: int,
     initial_score: Any | None = None,
+    dt_s: float | None = None,
 ) -> Any:
     score = trainer.score() if initial_score is None else initial_score
     for _ in range(max(int(steps_to_run), 0)):
         if session.done:
             break
-        snapshot = session.step()
+        if dt_s is not None:
+            training_cfg = getattr(trainer, "config", None)
+            if training_cfg is not None:
+                _set_chaser_delta_v_limiter_dt(session, training_cfg=training_cfg, dt_s=float(dt_s))
+        snapshot = session.step() if dt_s is None else session.step(dt_s=dt_s)
         dashboard.push_snapshot(snapshot)
         trainer.record(snapshot)
         score = trainer.score()

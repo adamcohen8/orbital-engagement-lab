@@ -47,8 +47,10 @@ integrates the configured OEL force model.
 
 The optional Pygame trainer includes packaged levels under `sim/game/configs/`.
 The launcher progression starts with `rpo_00_tutorial`, then runs through
-Levels 1-10 and a replayable `rpo_arcade_pursuit` variant. Levels 6-8 use an
-elliptical coast-projection model for eccentric-orbit RPO lessons; Pursuit
+Levels 1-10, `rpo_bonus_cislunar_rendezvous`, and the replayable
+`rpo_arcade_pursuit` variant. Levels 6-8 use an elliptical coast-projection
+model for eccentric-orbit RPO lessons; the cislunar bonus level uses CR3BP
+propagation and Moon-centered RIC controls around an L2 NRHO target; Pursuit
 Arcade adds tightening goals, randomized later-round starts, and every-fifth
 round elliptical boss encounters. Completed structured training levels save
 Markdown debrief reports with JSON summaries and matplotlib plots under

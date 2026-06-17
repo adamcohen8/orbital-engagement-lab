@@ -36,8 +36,13 @@ It propagates target and chaser ECI states under central Earth two-body gravity,
 maps player commands from target RIC into ECI acceleration, records inputs by
 simulation tick, and validates submitted scores by replaying the attempt packet.
 
-This supports the browser arcade and leaderboard beta without running the full
-Python game server-side. It is still not the downloadable trainer physics
+The canonical arcade replay step remains the challenge `dt_s` value, currently
+1 second. The preview UI has a speed-dependent tick helper for parity with the
+downloadable trainer policy, but the helper clamps to the browser challenge's
+base step so leaderboard attempts continue to validate from canonical ticks.
+
+This supports the browser arcade and hosted leaderboard without running the
+full Python game server-side. It is still not the downloadable trainer physics
 stack.
 
 ## Boundary

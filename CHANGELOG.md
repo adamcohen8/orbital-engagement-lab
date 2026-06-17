@@ -6,6 +6,45 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.12.3 - 2026-06-17
+
+Release thesis: `v0.12.3` graduates the cislunar rendezvous trainer from beta
+copy, improves high-speed game smoothness with a shared variable-step game
+engine path, and adds orbit-plane plot swaps for richer spatial intuition.
+
+### Added
+
+- Added downloadable-game O/P plot swaps: `O` swaps the RI panel into an
+  orbit-plane view and `P` swaps the RC panel into an orbit-plane view. In the
+  cislunar Moon-RIC level, the swapped panel shows the Moon-centered target
+  NRHO and the chaser's instantaneous position.
+- Added shared speed-dependent game tick sizing for the Pygame trainer and the
+  web preview helper, allowing large-base-step levels to remain visually
+  smoother at lower playback speeds while preserving existing smaller-step
+  behavior.
+- Added optional Vercel Web Analytics support for Vercel-hosted preview
+  deployments while keeping Plausible support and local/file analytics
+  suppression.
+
+### Changed
+
+- Removed the beta tag from `Bonus Level - Cislunar Rendezvous` and moved it
+  ahead of Pursuit Arcade in the downloadable level selector.
+- Updated the cislunar trainer to use the corrected NRHO target near perilune,
+  Moon-centered RIC controls, a 0.1 m/s close-approach speed limit, a
+  100x high-speed maneuver cap, and a 30 FPS dashboard cap for better thermal
+  behavior.
+- Updated the cislunar target-orbit display to use a pre-propagated target
+  orbit for the Moon view instead of a live projection tied to the current
+  target state.
+
+### Fixed
+
+- Fixed cislunar CR3BP projection caching so reference-state cache validation
+  accounts for the propagated reference motion over elapsed time.
+- Fixed variable-step game stepping so thrust, torque, delta-v limiter timing,
+  and saved histories use the actual per-step interval.
+
 ## 0.12.2 - 2026-06-17
 
 Release thesis: `v0.12.2` is a web-preview polish release for the mobile-first
@@ -36,7 +75,7 @@ clearer for social-media and classroom users.
   `Assists Easy` selector badge, and tightened selector button alignment across
   computer, portrait mobile, and landscape mobile views.
 - Updated web-preview docs to describe the unified tutorial, sandbox, Pursuit
-  Arcade, and hosted leaderboard beta paths.
+  Arcade, and hosted leaderboard paths.
 
 ### Fixed
 
@@ -91,7 +130,7 @@ leaderboard flow for small classroom or outreach competitions.
 
 Release thesis: `v0.12.0` expands the RPO Trainer into a more complete
 classroom and web-preview experience. It adds the local Pursuit Arcade browser
-prototype, beta cislunar rendezvous training, custom review evidence plotting,
+prototype, cislunar rendezvous training, custom review evidence plotting,
 and a clearer Evidence Studio identity for completed-run inspection.
 
 ### Added
@@ -100,7 +139,7 @@ and a clearer Evidence Studio identity for completed-run inspection.
   Preview, including deterministic two-body replay validation, multi-round
   local play, boss-round elliptic projections, static replay plot generation,
   and local competition fixtures/tests.
-- Added the beta `Bonus Level - Cislunar Rendezvous` trainer mission with an
+- Added the `Bonus Level - Cislunar Rendezvous` trainer mission with an
   opt-in Earth-Moon CR3BP propagator, an L2 NRHO target seed, Moon-centered
   target RIC controls, linearized CR3BP trajectory projection, custom
   Artemis-inspired sprites, and high-speed cislunar time scaling.

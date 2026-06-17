@@ -1,13 +1,13 @@
 # Browser Arcade Competition Validation
 
-This document captures the beta implementation path for a hosted Pursuit Arcade
-leaderboard without running the downloadable Python/OEL engine in the cloud.
+This document captures the hosted Pursuit Arcade leaderboard validation path
+without running the downloadable Python/OEL engine in the cloud.
 
 ## Scope
 
-The browser competition path is a beta browser-native port of the downloadable
-Pursuit Arcade rules. It does not execute Python `run_game.py` inside the
-browser:
+The browser competition path is a browser-native implementation of the
+downloadable Pursuit Arcade rules. It does not execute Python `run_game.py`
+inside the browser:
 
 - The web arcade owns a deterministic, browser-native implementation of the
   Pursuit Arcade competition model.
@@ -43,8 +43,10 @@ Implemented arcade-round parity:
 - Target defensive delta-v budget ramp after round 20.
 - Tschauner-Hempel-style elliptic linear coast projection for boss-round
   trajectory previews.
+- Speed-dependent game tick helper matching the downloadable trainer policy
+  while clamping to the browser challenge's canonical base step.
 
-Remaining beta/parity work:
+Remaining operational/parity work:
 
 - Admin moderation for hiding attempts and resolving username disputes.
 - Monthly challenge rotation and operational tooling.
@@ -163,6 +165,7 @@ node --test tests/competition-engine.test.mjs
 The tests cover:
 
 - stable canonical config hashing,
+- speed-dependent game tick policy,
 - RIC/ECI conversion round trip,
 - deterministic replay,
 - valid attempt acceptance,

@@ -8,7 +8,9 @@ import {
   createPursuitArcadeSession,
   createPursuitSession,
   DEFAULT_PURSUIT_CHALLENGE,
+  DEFAULT_SPEED_DT_SCHEDULE,
   ellipticLinearCoastStates,
+  gameTickDtS,
   hashCanonicalJson,
   keplerianToEci,
   makeAttemptPacket,
@@ -86,6 +88,20 @@ test("leaderboard promotion keeps only eligible better scores", () => {
   assert.equal(shouldReplaceLeaderboardScore(10, 11), true);
   assert.equal(shouldReplaceLeaderboardScore(10, 10), false);
   assert.equal(shouldReplaceLeaderboardScore(10, 9), false);
+});
+
+test("game tick schedule matches desktop policy while clamping to web base dt", () => {
+  assert.deepEqual(DEFAULT_SPEED_DT_SCHEDULE, [
+    [10, 2],
+    [25, 2],
+    [50, 5],
+    [100, 10],
+  ]);
+  assert.equal(gameTickDtS({ baseDtS: 0.1, speedMultiple: 200 }), 0.1);
+  assert.equal(gameTickDtS({ baseDtS: DEFAULT_PURSUIT_CHALLENGE.dt_s, speedMultiple: 10 }), 1.0);
+  assert.equal(gameTickDtS({ baseDtS: 10.0, speedMultiple: 10 }), 2.0);
+  assert.equal(gameTickDtS({ baseDtS: 10.0, speedMultiple: 50 }), 5.0);
+  assert.equal(gameTickDtS({ baseDtS: 10.0, speedMultiple: 200 }), 10.0);
 });
 
 test("RIC conversion round trips rotating-frame relative position and velocity", () => {

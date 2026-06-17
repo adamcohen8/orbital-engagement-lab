@@ -1,7 +1,7 @@
 # Pursuit Arcade Leaderboard Deployment
 
-This is the small-hosting path for a beta leaderboard with roughly 100 users per
-week.
+This is the small-hosting path for a Pursuit Arcade leaderboard with roughly
+100 users per week.
 
 ## Recommended Stack
 

@@ -33,7 +33,12 @@ from sim.control.orbit.zero_controller import ZeroController
 from sim.core.models import Command, StateBelief, StateTruth
 from sim.dynamics.attitude.disturbances import DisturbanceTorqueConfig, DisturbanceTorqueModel
 from sim.dynamics.model import OrbitalAttitudeDynamics
-from sim.dynamics.orbit.cr3bp import cr3bp_halo_seed_state_km_s, cr3bp_moon_state_km_s, cr3bp_system
+from sim.dynamics.orbit.cr3bp import (
+    cr3bp_halo_seed_state_km_s,
+    cr3bp_moon_state_km_s,
+    cr3bp_system,
+    propagate_cr3bp_state,
+)
 from sim.dynamics.orbit.elements import coe_to_rv_eci as _coe_to_rv_eci
 from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2, EARTH_RADIUS_KM
 from sim.dynamics.orbit.frames import eci_to_ecef
@@ -353,6 +358,20 @@ def _rv_from_initial_state(s0: dict[str, Any], *, target_jd_utc: float | None = 
         system = cr3bp_system(str(halo.get("system", "earth_moon") or "earth_moon"))
         family = str(halo.get("family", "l1_northern") or "l1_northern")
         state = cr3bp_halo_seed_state_km_s(system=system, family=family)
+        phase_time_s = float(halo.get("phase_time_s", 0.0) or 0.0)
+        if not np.isfinite(phase_time_s) or phase_time_s < 0.0:
+            raise ValueError("initial_state.cr3bp_halo.phase_time_s must be a nonnegative finite number.")
+        if phase_time_s > 0.0:
+            remaining_s = phase_time_s
+            current_t_s = 0.0
+            substep_s = float(halo.get("phase_substep_s", 120.0) or 120.0)
+            if not np.isfinite(substep_s) or substep_s <= 0.0:
+                raise ValueError("initial_state.cr3bp_halo.phase_substep_s must be a positive finite number.")
+            while remaining_s > 1.0e-9:
+                dt_s = min(substep_s, remaining_s)
+                state = propagate_cr3bp_state(state, dt_s, current_t_s, system=system)
+                current_t_s += dt_s
+                remaining_s -= dt_s
         return state[:3], state[3:]
 
     if "position_eci_km" in s0:
