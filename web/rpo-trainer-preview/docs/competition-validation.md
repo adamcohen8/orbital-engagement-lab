@@ -44,8 +44,9 @@ Implemented arcade-round parity:
   transition.
 - Target defensive delta-v budget ramp after round 20.
 - New rounds restart at 1x speed and full-trajectory camera framing.
-- Web RI/RC goal rings project the true 3D goal sphere onto each 2D plot so
-  plotted clearance matches the validated range gate.
+- Round transitions and replay summaries carry exact pass-tick clear range and
+  speed values, while web RI/RC goal rings remain stable projected range
+  references.
 - Tschauner-Hempel-style elliptic linear coast projection for boss-round
   trajectory previews.
 - Speed-dependent game tick helper matching the downloadable trainer policy

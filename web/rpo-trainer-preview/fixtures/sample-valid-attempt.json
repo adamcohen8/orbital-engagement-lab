@@ -43,6 +43,8 @@
   "claimed_score": 0,
   "claimed_metrics": {
     "achieved_time_s": null,
+    "achieved_range_km": null,
+    "achieved_relative_speed_km_s": null,
     "elapsed_s": 12000,
     "closest_range_km": 1.51006009283,
     "final_range_km": 12.1948387779,

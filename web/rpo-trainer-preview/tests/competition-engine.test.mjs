@@ -231,6 +231,7 @@ test("arcade run clears rounds, awards score, and tightens the next goal", () =>
   assert.equal(transition.next_round_index, 2);
   assert.ok(transition.round_score > 0);
   assert.equal(transition.next_goal_range_km, 1.75);
+  assert.ok(transition.clear_range_km <= transition.goal_range_km);
   session.continueNextRound();
   const next = session.snapshot();
   assert.equal(next.round_index, 2);
@@ -259,6 +260,7 @@ test("arcade clear bonus includes 75 percent target period, lower dV bonus, and 
   session.step(1);
   const firstTransition = session.snapshot().round_transition;
   assert.ok(firstTransition);
+  assert.ok(firstTransition.clear_range_km <= firstTransition.goal_range_km);
   const circularPeriodS = 2 * Math.PI * Math.sqrt((record.config.target_coes.a_km ** 3) / record.config.mu_km3_s2);
   assert.equal(firstTransition.bonus_time_s, Number((0.75 * circularPeriodS + 300).toPrecision(12)));
 
@@ -294,6 +296,9 @@ test("arcade multi-round attempt packet validates from recorded round inputs", (
     round_attempts: attempt.round_attempts,
   });
   assert.equal(replay.round_summaries.length, 2);
+  replay.round_summaries.forEach((summary) => {
+    assert.ok(summary.clear_range_km <= summary.goal_range_km);
+  });
 
   const validation = validateAttemptPacket(attempt, record);
   assert.equal(validation.status, "valid");
