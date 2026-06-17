@@ -1068,6 +1068,9 @@ function samplePoint() {
 }
 
 function rangeKm() {
+  if (state.mode === "arcade" && state.arcadeTransition?.clear_range_km !== undefined) {
+    return Number(state.arcadeTransition.clear_range_km || 0);
+  }
   if (state.mode === "arcade" && state.arcadeSnapshot) {
     return Number(state.arcadeSnapshot.range_km || 0);
   }
@@ -2024,9 +2027,7 @@ function drawRings(ctx, toPx, scale, xAxis, yAxis, targetState = { r: 0, i: 0, c
   ctx.arc(target.x, target.y, 0.025 * scale, 0, Math.PI * 2);
   ctx.stroke();
   if (state.mode === "tutorial" || state.mode === "arcade") {
-    const rawGoalRange = state.mode === "arcade" ? currentArcadeGoalRangeKm() : 0.25;
-    const goalRange =
-      state.mode === "arcade" ? projectedArcadeGoalRadiusKm(rawGoalRange, xAxis, yAxis, targetState) : rawGoalRange;
+    const goalRange = state.mode === "arcade" ? currentArcadeGoalRangeKm() : 0.25;
     ctx.strokeStyle = "rgba(78, 178, 112, 0.86)";
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -2038,14 +2039,6 @@ function drawRings(ctx, toPx, scale, xAxis, yAxis, targetState = { r: 0, i: 0, c
     ctx.font = "12px Menlo, Consolas, monospace";
     ctx.fillText("Target", target.x + 10, target.y - 10);
   }
-}
-
-function projectedArcadeGoalRadiusKm(goalRangeKm, xAxis, yAxis, targetState) {
-  const hiddenAxis = ["r", "i", "c"].find((axis) => axis !== xAxis && axis !== yAxis);
-  if (!hiddenAxis) return goalRangeKm;
-  const hiddenDeltaKm = Number(state.sim?.[hiddenAxis] || 0) - Number(targetState?.[hiddenAxis] || 0);
-  const visibleRadiusSquared = goalRangeKm * goalRangeKm - hiddenDeltaKm * hiddenDeltaKm;
-  return visibleRadiusSquared > 0 ? Math.sqrt(visibleRadiusSquared) : 0;
 }
 
 function drawPath(ctx, points, toPx, color, dashed, width = 2) {
@@ -2278,7 +2271,9 @@ function showArcadeRoundTransition() {
   el.debriefTitle.textContent = `Round ${tr.cleared_round_index} cleared.`;
   el.debriefText.textContent = `Round score ${tr.round_score.toLocaleString()}. Total score ${tr.total_score.toLocaleString()}. Bonus time ${Math.round(
     tr.bonus_time_s,
-  )} s. Round ${tr.next_round_index}${tr.next_is_boss ? " is a boss round" : ""} starts with ${Math.round(
+  )} s. Clear range ${formatDistanceKm(Number(tr.clear_range_km || 0))} against a ${formatDistanceKm(
+    Number(tr.goal_range_km || 0),
+  )} goal. Round ${tr.next_round_index}${tr.next_is_boss ? " is a boss round" : ""} starts with ${Math.round(
     tr.next_time_budget_s,
   )} s and a ${formatDistanceKm(tr.next_goal_range_km)} goal.`;
 }

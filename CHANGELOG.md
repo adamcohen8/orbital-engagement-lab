@@ -9,8 +9,7 @@ migration-sensitive behavior explicitly.
 ## 0.12.4 - 2026-06-17
 
 Release thesis: `v0.12.4` tunes the web Pursuit Arcade scoring loop and fixes
-the 2D goal-ring display so the browser preview is fairer for leaderboard
-play.
+round-clear reporting so the browser preview is fairer for leaderboard play.
 
 ### Changed
 
@@ -23,9 +22,9 @@ play.
 
 ### Fixed
 
-- Fixed the web arcade goal-ring projection so the green circles reflect the
-  true 3D rendezvous range instead of overstating clearance on the 2D RI/RC
-  views.
+- Fixed web arcade round-clear reporting so transition and HUD range values use
+  the exact pass tick, while RI/RC goal rings remain stable projected range
+  references.
 
 ## 0.12.3 - 2026-06-17
 

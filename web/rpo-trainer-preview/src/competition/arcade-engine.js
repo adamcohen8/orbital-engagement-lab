@@ -200,6 +200,8 @@ export function createPursuitSession(config = DEFAULT_PURSUIT_CHALLENGE, options
   let passed = false;
   let failed = false;
   let achievedTimeS = null;
+  let achievedRangeKm = null;
+  let achievedRelSpeedKmS = null;
   let terminalReason = "";
 
   const capture = () => {
@@ -211,6 +213,8 @@ export function createPursuitSession(config = DEFAULT_PURSUIT_CHALLENGE, options
     if (!passed && !failed && rangeKm <= cfg.goal_range_km && speedOk) {
       passed = true;
       achievedTimeS = sim.time_s;
+      achievedRangeKm = rangeKm;
+      achievedRelSpeedKmS = relSpeedKmS;
       terminalReason = "Goal reached under the speed limit.";
     }
     if (!passed && !failed && sim.player_delta_v_m_s > cfg.max_delta_v_m_s + 1.0e-9) {
@@ -296,6 +300,8 @@ export function createPursuitSession(config = DEFAULT_PURSUIT_CHALLENGE, options
         max_delta_v_m_s: roundMetric(cfg.max_delta_v_m_s),
         max_target_delta_v_m_s: roundMetric(cfg.max_target_delta_v_m_s ?? cfg.target_defense?.max_delta_v_m_s ?? 0),
         closest_range_km: roundMetric(closestRangeKm),
+        achieved_range_km: achievedRangeKm === null ? null : roundMetric(achievedRangeKm),
+        achieved_relative_speed_km_s: achievedRelSpeedKmS === null ? null : roundMetric(achievedRelSpeedKmS),
         passed,
         failed,
         terminal: passed || failed,
@@ -318,6 +324,8 @@ export function createPursuitSession(config = DEFAULT_PURSUIT_CHALLENGE, options
         elapsed_s: sim.time_s,
         metrics: {
           achieved_time_s: achievedTimeS,
+          achieved_range_km: achievedRangeKm === null ? null : roundMetric(achievedRangeKm),
+          achieved_relative_speed_km_s: achievedRelSpeedKmS === null ? null : roundMetric(achievedRelSpeedKmS),
           elapsed_s: roundMetric(sim.time_s),
           closest_range_km: roundMetric(closestRangeKm),
           final_range_km: snap.range_km,
@@ -393,6 +401,9 @@ export function createPursuitArcadeSession(config = DEFAULT_PURSUIT_CHALLENGE, o
       remaining_time_s: roundMetric(remainingTimeS),
       boss: arcadeRoundIsBoss(baseConfig, clearedRound),
       goal_range_km: roundConfig.goal_range_km,
+      clear_range_km:
+        result.metrics.achieved_range_km ?? result.metrics.closest_range_km ?? result.metrics.final_range_km,
+      clear_relative_speed_km_s: result.metrics.achieved_relative_speed_km_s ?? result.metrics.final_relative_speed_km_s,
     });
     roundAttempts.push(attempt);
     roundIndex += 1;
@@ -406,6 +417,13 @@ export function createPursuitArcadeSession(config = DEFAULT_PURSUIT_CHALLENGE, o
       next_time_budget_s: roundMetric(remainingTimeS),
       next_goal_range_km: arcadeRoundGoalRange(baseConfig, roundIndex),
       next_is_boss: arcadeRoundIsBoss(baseConfig, roundIndex),
+      goal_range_km: roundMetric(roundConfig.goal_range_km),
+      clear_range_km: roundMetric(
+        result.metrics.achieved_range_km ?? result.metrics.closest_range_km ?? result.metrics.final_range_km,
+      ),
+      clear_relative_speed_km_s: roundMetric(
+        result.metrics.achieved_relative_speed_km_s ?? result.metrics.final_relative_speed_km_s,
+      ),
     };
   }
 
@@ -620,6 +638,8 @@ export function runPursuitReplay(config = DEFAULT_PURSUIT_CHALLENGE, replay = {}
   let passed = false;
   let failed = false;
   let achievedTimeS = null;
+  let achievedRangeKm = null;
+  let achievedRelSpeedKmS = null;
   let closestRangeKm = Infinity;
   let finalRelativeSpeedKmS = Infinity;
   let burnMarkers = [];
@@ -638,6 +658,8 @@ export function runPursuitReplay(config = DEFAULT_PURSUIT_CHALLENGE, replay = {}
     if (rangeKm <= cfg.goal_range_km && speedOk) {
       passed = true;
       achievedTimeS = sim.time_s;
+      achievedRangeKm = rangeKm;
+      achievedRelSpeedKmS = relSpeedKmS;
       break;
     }
     if (sim.player_delta_v_m_s > cfg.max_delta_v_m_s + 1.0e-9) {
@@ -669,6 +691,8 @@ export function runPursuitReplay(config = DEFAULT_PURSUIT_CHALLENGE, replay = {}
     elapsed_s: sim.time_s,
     metrics: {
       achieved_time_s: achievedTimeS,
+      achieved_range_km: achievedRangeKm === null ? null : roundMetric(achievedRangeKm),
+      achieved_relative_speed_km_s: achievedRelSpeedKmS === null ? null : roundMetric(achievedRelSpeedKmS),
       elapsed_s: sim.time_s,
       closest_range_km: roundMetric(closestRangeKm),
       final_range_km: roundMetric(rangeFromRelativeSample(history[history.length - 1])),
@@ -738,6 +762,10 @@ export function runPursuitArcadeReplay(config = DEFAULT_PURSUIT_CHALLENGE, repla
       remaining_time_s: roundMetric(remainingTimeS),
       boss: arcadeRoundIsBoss(baseConfig, roundIndex),
       goal_range_km: roundConfig.goal_range_km,
+      clear_range_km:
+        roundReplay.metrics.achieved_range_km ?? roundReplay.metrics.closest_range_km ?? roundReplay.metrics.final_range_km,
+      clear_relative_speed_km_s:
+        roundReplay.metrics.achieved_relative_speed_km_s ?? roundReplay.metrics.final_relative_speed_km_s,
     });
   });
 
