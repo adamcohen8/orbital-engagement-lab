@@ -132,7 +132,9 @@ CONFIG_HELP_ENTRIES: tuple[ConfigHelpEntry, ...] = (
         aliases=("ephemeris model", "emphemeris model", "sun moon model", "environment ephemeris"),
         options=(
             _option("analytic_enhanced", "Default low-cost analytic Sun/Moon model with improved approximations."),
-            _option("analytic_simple", "Older lightweight analytic Sun/Moon model; useful for repeatable legacy cases."),
+            _option(
+                "analytic_simple", "Older lightweight analytic Sun/Moon model; useful for repeatable legacy cases."
+            ),
             _option("external", "Use env['ephemeris_callable'] supplied by Python code."),
             _option("spice", "Use spiceypy and configured SPICE kernels, or env['spice_ephemeris_callable']."),
         ),
@@ -145,8 +147,14 @@ CONFIG_HELP_ENTRIES: tuple[ConfigHelpEntry, ...] = (
         description="Names the base orbit propagation model. Two-body is the default; CR3BP is an opt-in rotating-frame model for cislunar teaching cases.",
         aliases=("orbit model", "dynamics model", "propagation model"),
         options=(
-            _option("two_body", "Central-body Keplerian gravity baseline. Add j2, drag, SRP, or spherical_harmonics for higher fidelity."),
-            _option("cr3bp", "Circular restricted three-body propagation in a configured rotating-frame system such as earth_moon."),
+            _option(
+                "two_body",
+                "Central-body Keplerian gravity baseline. Add j2, drag, SRP, or spherical_harmonics for higher fidelity.",
+            ),
+            _option(
+                "cr3bp",
+                "Circular restricted three-body propagation in a configured rotating-frame system such as earth_moon.",
+            ),
         ),
         example='simulator:\n  dynamics:\n    orbit:\n      model: "two_body"\n      j2: true\n      drag: false',
     ),
@@ -171,8 +179,30 @@ CONFIG_HELP_ENTRIES: tuple[ConfigHelpEntry, ...] = (
         options=(
             _option("exponential", "Simple exponential atmosphere; cheapest and most robust."),
             _option("ussa1976", "U.S. Standard Atmosphere 1976 table-style model; default for rocket aero configs."),
-            _option("nrlmsise00", "NRLMSISE-00 via optional package or env-provided callable."),
-            _option("jb2008", "JB2008 via an externally supplied backend callable."),
+            _option(
+                "msis86",
+                "Local MSIS-86 backend copied from MATLAB HPOP; supports direct env inputs or HPOP-style SW-All table input.",
+            ),
+            _option(
+                "nrlmsise00",
+                "Local NRLMSISE-00 backend copied from MATLAB HPOP; supports env-provided inputs or callable override.",
+            ),
+            _option(
+                "jacchia70",
+                "Local Jacchia-70 backend copied from MATLAB HPOP; supports direct env inputs and HPOP-style solar tables.",
+            ),
+            _option(
+                "jb2006",
+                "Local Jacchia-Bowman 2006 backend copied from MATLAB HPOP; supports HPOP-style SOL and geomagnetic inputs.",
+            ),
+            _option(
+                "jb2008",
+                "Local Jacchia-Bowman 2008 backend copied from MATLAB HPOP; supports HPOP-style SOL and DTC inputs.",
+            ),
+            _option(
+                "harris_priester",
+                "Local Harris-Priester backend using the bundled HPOP coefficient table.",
+            ),
         ),
         example="simulator:\n  dynamics:\n    rocket:\n      atmosphere_model: ussa1976",
     ),
@@ -357,9 +387,7 @@ def load_config_help_context(path: str | Path) -> dict[str, Any]:
     try:
         import yaml  # type: ignore
     except Exception as exc:
-        raise RuntimeError(
-            "PyYAML is required to inspect config files. Install with `pip install pyyaml`."
-        ) from exc
+        raise RuntimeError("PyYAML is required to inspect config files. Install with `pip install pyyaml`.") from exc
 
     config_path = Path(path)
     with config_path.open("r", encoding="utf-8") as f:
@@ -425,10 +453,7 @@ def format_config_help(
 ) -> str:
     matches = find_config_help(query, limit=5, scope=scope)
     if not matches:
-        return (
-            f"No config help match for {query!r}.\n\n"
-            "Run `python config_help.py --list` to see known help topics."
-        )
+        return f"No config help match for {query!r}.\n\nRun `python config_help.py --list` to see known help topics."
 
     score, entry = matches[0]
     lines = [
@@ -460,7 +485,9 @@ def format_config_help(
             for continuation in wrapped[1:]:
                 lines.append(f"  {'':<{width}}  {continuation}")
         if len(options) > max_options:
-            lines.append(f"  ... {len(options) - max_options} more options hidden; refine the query for a narrower list.")
+            lines.append(
+                f"  ... {len(options) - max_options} more options hidden; refine the query for a narrower list."
+            )
     if entry.notes:
         lines.extend(["", "Notes:"])
         for note in entry.notes:

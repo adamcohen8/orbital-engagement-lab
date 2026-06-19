@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 import yaml
@@ -68,6 +69,37 @@ def test_reentry_metrics_activate_and_summarize(tmp_path: Path) -> None:
     assert np.nanmax(np.array(metrics["dynamic_pressure_pa"], dtype=float)) > 0.0
     assert np.nanmax(np.array(metrics["heat_rate_w_m2"], dtype=float)) > 0.0
     assert np.nanmax(np.array(metrics["heat_load_j_m2"], dtype=float)) > 0.0
+
+
+def test_reentry_relative_speed_uses_configured_drag_frame() -> None:
+    cfg = ReentryConfig(enabled=True, begin_altitude_km=300.0, atmosphere_model="ussa1976")
+    props = ReentryObjectProperties(mass_kg=100.0, drag_area_m2=2.0, cd=2.2, nose_radius_m=0.5)
+
+    with patch(
+        "sim.dynamics.reentry.atmosphere_relative_velocity_eci_km_s",
+        return_value=np.array([1.0, 2.0, 2.0], dtype=float),
+    ) as rel_vel:
+        out = reentry_metrics_for_state(
+            r_eci_km=np.array([6378.137 + 250.0, 0.0, 0.0]),
+            v_eci_km_s=np.array([0.0, 7.8, 0.0]),
+            t_s=42.0,
+            dt_s=1.0,
+            cfg=cfg,
+            props=props,
+            env={
+                "density_kg_m3": 1.0e-9,
+                "drag_frame_model": "hpop_like",
+                "jd_utc_start": 2460310.5,
+                "drag_eop_path": "validation/EOP-All.txt",
+            },
+            active=True,
+        )
+
+    assert out["relative_speed_m_s"] == 3000.0
+    kwargs = rel_vel.call_args.kwargs
+    assert kwargs["frame_model"] == "hpop_like"
+    assert kwargs["jd_utc_start"] == 2460310.5
+    assert kwargs["eop_path"] == "validation/EOP-All.txt"
 
 
 def test_reentry_heat_rate_can_terminate_run(tmp_path: Path) -> None:

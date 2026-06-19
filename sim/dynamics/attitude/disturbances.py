@@ -95,15 +95,19 @@ class DisturbanceTorqueModel:
             v_rel_eci_m_s = np.asarray(env["drag_v_rel_eci_m_s"], dtype=float)
             v_norm = float(env.get("drag_v_rel_norm_m_s", np.linalg.norm(v_rel_eci_m_s)))
         else:
-            v_atm_eci_km_s = np.array(
-                [
-                    -EARTH_ROT_RATE_RAD_S * float(state.position_eci_km[1]),
-                    EARTH_ROT_RATE_RAD_S * float(state.position_eci_km[0]),
-                    0.0,
-                ],
-                dtype=float,
+            omega_raw = env.get("drag_earth_rotation_rad_s", EARTH_ROT_RATE_RAD_S)
+            from sim.aero.core import atmosphere_relative_velocity_eci_km_s
+
+            v_rel_eci_km_s = atmosphere_relative_velocity_eci_km_s(
+                state.position_eci_km,
+                state.velocity_eci_km_s,
+                t_s=float(state.t_s),
+                earth_rotation_rad_s=float(EARTH_ROT_RATE_RAD_S if omega_raw is None else omega_raw),
+                frame_model=str(env.get("drag_frame_model", "inertial_z")),
+                jd_utc_start=env.get("jd_utc_start"),
+                eop_path=env.get("drag_eop_path"),
             )
-            v_rel_eci_m_s = (state.velocity_eci_km_s - v_atm_eci_km_s) * 1e3
+            v_rel_eci_m_s = v_rel_eci_km_s * 1e3
             v_norm = np.linalg.norm(v_rel_eci_m_s)
         if v_norm == 0.0 or rho <= 0.0:
             return np.zeros(3)

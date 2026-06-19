@@ -6,6 +6,7 @@ from typing import Any
 import numpy as np
 
 from sim.dynamics.orbit.environment import EARTH_ROT_RATE_RAD_S
+from sim.dynamics.orbit.frames import eci_to_ecef_rotation, eci_to_ecef_rotation_hpop_like
 
 
 @dataclass(frozen=True)
@@ -154,10 +155,39 @@ def atmosphere_relative_velocity_eci_km_s(
     r_eci_km: np.ndarray,
     v_eci_km_s: np.ndarray,
     *,
+    t_s: float = 0.0,
     earth_rotation_rad_s: float = EARTH_ROT_RATE_RAD_S,
+    frame_model: str = "inertial_z",
+    jd_utc_start: float | None = None,
+    eop_path: str | None = None,
 ) -> np.ndarray:
     r = np.array(r_eci_km, dtype=float).reshape(3)
     v = np.array(v_eci_km_s, dtype=float).reshape(3)
+    model = str(frame_model or "inertial_z").strip().lower()
+    if model in {"simple", "hpop_like"}:
+        if model == "hpop_like":
+            rot = eci_to_ecef_rotation_hpop_like(
+                float(t_s),
+                jd_utc_start=None if jd_utc_start is None else float(jd_utc_start),
+                eop_path=None if eop_path is None else str(eop_path),
+            )
+        else:
+            rot = eci_to_ecef_rotation(
+                float(t_s),
+                jd_utc_start=None if jd_utc_start is None else float(jd_utc_start),
+            )
+        r_frame = rot @ r
+        v_frame = rot @ v
+        v_atm_frame_km_s = np.array(
+            [
+                -float(earth_rotation_rad_s) * float(r_frame[1]),
+                float(earth_rotation_rad_s) * float(r_frame[0]),
+                0.0,
+            ],
+            dtype=float,
+        )
+        return rot.T @ (v_frame - v_atm_frame_km_s)
+
     v_atm_eci_km_s = np.array(
         [
             -float(earth_rotation_rad_s) * float(r[1]),

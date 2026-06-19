@@ -126,15 +126,19 @@ class OrbitalAttitudeDynamics(DynamicsModel):
                         midpoint_truth.t_s,
                         env=env_local,
                     )
-                v_atm_eci_km_s = np.array(
-                    [
-                        -EARTH_ROT_RATE_RAD_S * float(midpoint_truth.position_eci_km[1]),
-                        EARTH_ROT_RATE_RAD_S * float(midpoint_truth.position_eci_km[0]),
-                        0.0,
-                    ],
-                    dtype=float,
+                omega_raw = env_local.get("drag_earth_rotation_rad_s", EARTH_ROT_RATE_RAD_S)
+                from sim.aero.core import atmosphere_relative_velocity_eci_km_s
+
+                v_rel_eci_km_s = atmosphere_relative_velocity_eci_km_s(
+                    midpoint_truth.position_eci_km,
+                    midpoint_truth.velocity_eci_km_s,
+                    t_s=float(midpoint_truth.t_s),
+                    earth_rotation_rad_s=float(EARTH_ROT_RATE_RAD_S if omega_raw is None else omega_raw),
+                    frame_model=str(env_local.get("drag_frame_model", "inertial_z")),
+                    jd_utc_start=env_local.get("jd_utc_start"),
+                    eop_path=env_local.get("drag_eop_path"),
                 )
-                v_rel_eci_m_s = (midpoint_truth.velocity_eci_km_s - v_atm_eci_km_s) * 1e3
+                v_rel_eci_m_s = v_rel_eci_km_s * 1e3
                 env_local["drag_v_rel_eci_m_s"] = v_rel_eci_m_s
                 env_local["drag_v_rel_norm_m_s"] = float(np.linalg.norm(v_rel_eci_m_s))
 

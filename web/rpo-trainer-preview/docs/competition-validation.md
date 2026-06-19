@@ -186,7 +186,8 @@ These require accounts/credentials and are not committed here:
 
 1. Static hosting for `web/rpo-trainer-preview`.
 2. A database project, such as Supabase.
-3. Tables from `supabase/schema.sql`.
+3. Private tables plus the denormalized public leaderboard table from
+   `supabase/schema.sql`.
 4. Optional email provider credentials for proof-of-ownership links.
 5. Admin controls for creating monthly challenges and hiding attempts.
 
@@ -201,8 +202,8 @@ These require accounts/credentials and are not committed here:
 6. Multi-round arcade attempt packets replay through the deterministic
    validator, including score, time, and round transition checks.
 7. The hosted API validates submissions before inserting attempts, stores
-   canonical plot SVGs, serves public leaderboard rows, and supports verified
-   email username locking.
+   canonical plot SVGs, maintains denormalized public leaderboard rows, and
+   supports verified email username locking.
 
 ## Suggested Next Implementation Steps
 

@@ -45,6 +45,36 @@ def _load_de440_coeff_matrix(path_str: str) -> np.ndarray:
     return arr
 
 
+@lru_cache(maxsize=2)
+def _load_de440_light(path_str: str) -> dict[str, object]:
+    path = Path(path_str).expanduser().resolve()
+    with np.load(path, allow_pickle=False) as data:
+        fmt = str(np.asarray(data["format_version"]).item())
+        if fmt != "oel_de440_light_v1":
+            raise ValueError(f"Unsupported OEL DE440 light format '{fmt}': {path}")
+        bodies = tuple(str(v) for v in np.asarray(data["bodies"]).tolist())
+        out: dict[str, object] = {
+            "path": str(path),
+            "format_version": fmt,
+            "source": str(np.asarray(data["source"]).item()) if "source" in data else "",
+            "row_start_jd_tdb": np.asarray(data["row_start_jd_tdb"], dtype=float),
+            "row_end_jd_tdb": np.asarray(data["row_end_jd_tdb"], dtype=float),
+            "bodies": bodies,
+        }
+        for body in bodies:
+            key = str(body)
+            out[f"{key}_coeffs"] = int(np.asarray(data[f"{key}_coeffs"]).item())
+            out[f"{key}_segments"] = int(np.asarray(data[f"{key}_segments"]).item())
+            out[f"{key}_span_days"] = float(np.asarray(data[f"{key}_span_days"]).item())
+            if f"{key}_start_jd_tdb" in data and f"{key}_end_jd_tdb" in data:
+                out[f"{key}_start_jd_tdb"] = np.asarray(data[f"{key}_start_jd_tdb"], dtype=float)
+                out[f"{key}_end_jd_tdb"] = np.asarray(data[f"{key}_end_jd_tdb"], dtype=float)
+            out[f"{key}_x"] = np.asarray(data[f"{key}_x"], dtype=float)
+            out[f"{key}_y"] = np.asarray(data[f"{key}_y"], dtype=float)
+            out[f"{key}_z"] = np.asarray(data[f"{key}_z"], dtype=float)
+        return out
+
+
 def _cheb3d(t: float, n: int, ta: float, tb: float, cx: np.ndarray, cy: np.ndarray, cz: np.ndarray) -> np.ndarray:
     if t < ta or t > tb:
         raise ValueError("Time out of range in _cheb3d")
@@ -108,6 +138,53 @@ def _eval_body(row: np.ndarray, jd_tdb: float, body_name: str) -> np.ndarray:
     return 1e3 * _cheb3d(jd_tdb, coeff_count, ta, tb, x_all[i0:i1], y_all[i0:i1], z_all[i0:i1])
 
 
+def _find_light_row(light: dict[str, object], jd_tdb: float) -> int:
+    starts = np.asarray(light["row_start_jd_tdb"], dtype=float)
+    ends = np.asarray(light["row_end_jd_tdb"], dtype=float)
+    mask = (starts <= float(jd_tdb)) & (float(jd_tdb) <= ends)
+    idx = np.flatnonzero(mask)
+    if idx.size == 0:
+        raise ValueError(f"JD_TDB {jd_tdb} is outside OEL DE440 light coverage.")
+    return int(idx[0])
+
+
+def _find_light_body_row(light: dict[str, object], jd_tdb: float, body: str) -> int:
+    start_key = f"{body}_start_jd_tdb"
+    end_key = f"{body}_end_jd_tdb"
+    if start_key in light and end_key in light:
+        starts = np.asarray(light[start_key], dtype=float)
+        ends = np.asarray(light[end_key], dtype=float)
+        mask = (starts <= float(jd_tdb)) & (float(jd_tdb) <= ends)
+        idx = np.flatnonzero(mask)
+        if idx.size == 0:
+            raise ValueError(f"JD_TDB {jd_tdb} is outside OEL DE440 light coverage for body '{body}'.")
+        return int(idx[0])
+    return _find_light_row(light, jd_tdb)
+
+
+def _eval_light_body(light: dict[str, object], jd_tdb: float, body_name: str) -> np.ndarray:
+    body = str(body_name).strip().lower()
+    bodies = tuple(str(v) for v in light["bodies"])  # type: ignore[index]
+    if body not in bodies:
+        raise RuntimeError(f"Body '{body_name}' is not available in OEL DE440 light file.")
+    row_index = _find_light_body_row(light, jd_tdb, body)
+    coeff_count = int(light[f"{body}_coeffs"])
+    segments = int(light[f"{body}_segments"])
+    span_days = float(light[f"{body}_span_days"])
+    start_key = f"{body}_start_jd_tdb"
+    if start_key in light:
+        t1 = float(np.asarray(light[start_key], dtype=float)[row_index])
+    else:
+        t1 = float(np.asarray(light["row_start_jd_tdb"], dtype=float)[row_index])
+    idx, ta, tb = _subinterval_state(jd_tdb, t1, span_days, segments)
+    i0 = idx * coeff_count
+    i1 = i0 + coeff_count
+    x_all = np.asarray(light[f"{body}_x"], dtype=float)[row_index, :]
+    y_all = np.asarray(light[f"{body}_y"], dtype=float)[row_index, :]
+    z_all = np.asarray(light[f"{body}_z"], dtype=float)[row_index, :]
+    return 1e3 * _cheb3d(jd_tdb, coeff_count, ta, tb, x_all[i0:i1], y_all[i0:i1], z_all[i0:i1])
+
+
 def _find_coeff_row(pc: np.ndarray, jd_tdb: float) -> np.ndarray:
     mask = (pc[:, 0] <= jd_tdb) & (jd_tdb <= pc[:, 1])
     idx = np.flatnonzero(mask)
@@ -149,6 +226,29 @@ def jd_utc_to_jd_tdb(jd_utc: float, eop_path: str | None = None, tai_utc_s: floa
 
 def hpop_de440_positions_m(jd_tdb: float, coeff_path: str | Path | None = None) -> dict[str, np.ndarray]:
     path = default_de440_coeff_path() if coeff_path is None else Path(coeff_path).expanduser().resolve()
+    if path.suffix.lower() == ".npz":
+        light = _load_de440_light(str(path))
+        bodies = tuple(str(v) for v in light["bodies"])  # type: ignore[index]
+        if not {"earthmoon", "moon", "sun"}.issubset(set(bodies)):
+            raise RuntimeError("OEL DE440 light file must include earthmoon, moon, and sun for geocentric ephemerides.")
+
+        r_earthmoon = _eval_light_body(light, jd_tdb, "earthmoon")
+        r_moon = _eval_light_body(light, jd_tdb, "moon")
+        r_sun = _eval_light_body(light, jd_tdb, "sun")
+        emrat1 = 1.0 / (1.0 + _EMRAT)
+        r_earth = r_earthmoon - emrat1 * r_moon
+        out = {
+            "earth": r_earth,
+            "sun_ssb": r_sun.copy(),
+            "sun": -r_earth + r_sun,
+            "moon": r_moon,
+        }
+        for body in bodies:
+            if body in {"earthmoon", "moon", "sun"}:
+                continue
+            out[body] = -r_earth + _eval_light_body(light, jd_tdb, body)
+        return out
+
     pc = _load_de440_coeff_matrix(str(path))
     row = _find_coeff_row(pc, float(jd_tdb))
 

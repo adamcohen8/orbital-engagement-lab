@@ -21,7 +21,8 @@ The public core includes:
 - deterministic single-run simulation
 - orbit and attitude dynamics
 - reference orbit and attitude controllers
-- sensing and estimation primitives
+- sensing and runtime state-estimation primitives used by closed-loop
+  simulations
 - passive ground-station access tracking
 - actuator models and mass depletion
 - YAML scenario loading
@@ -47,6 +48,9 @@ The pro layer includes:
 - Monte Carlo campaign orchestration
 - sensitivity studies
 - covariance propagation and encounter uncertainty screening
+- orbit determination against external observations or precise-orbit products
+- batch nonlinear least squares and estimated-parameter workflows
+- data ingestion, observation normalization, and mission-input packet creation
 - campaign dashboards and baselines
 - AI-assisted campaign reports from Monte Carlo and sensitivity outputs
 - report cost estimation before hosted LLM calls

@@ -1,17 +1,24 @@
 from __future__ import annotations
 
+import math
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 import numpy as np
 
 from sim.dynamics.orbit.environment import EARTH_RADIUS_KM
-from sim.dynamics.orbit.epoch import julian_date_to_datetime
-from sim.dynamics.orbit.frames import eci_to_ecef
-from sim.dynamics.orbit.jb2008_backend import jb2008_density
+from sim.dynamics.orbit.epoch import datetime_to_julian_date, julian_date_to_datetime
+from sim.dynamics.orbit.frames import apparent_sidereal_time_hpop_like, eci_to_ecef_harmonic
+from sim.dynamics.orbit.harris_priester_backend import harris_priester_density
+from sim.dynamics.orbit.jacchia70_backend import jacchia70_density
+from sim.dynamics.orbit.jb2008_backend import jb2006_density, jb2008_density
+from sim.dynamics.orbit.msis86_backend import msis86_density as msis86_local_density
+from sim.dynamics.orbit.nrlmsise00_backend import nrlmsise00_density as nrlmsise00_local_density
 from sim.utils.geodesy import ecef_to_geodetic_deg_km
 
-AtmosphereModelName = Literal["exponential", "ussa1976", "nrlmsise00", "jb2008"]
+AtmosphereModelName = Literal[
+    "exponential", "ussa1976", "msis86", "nrlmsise00", "jacchia70", "jb2006", "jb2008", "harris_priester"
+]
 
 
 def _radial_altitude_km_from_eci(r_eci_km: np.ndarray) -> float:
@@ -22,9 +29,21 @@ def _radial_altitude_km_from_eci(r_eci_km: np.ndarray) -> float:
     return float(max(0.0, np.sqrt(r2) - EARTH_RADIUS_KM))
 
 
+def _ecef_from_eci_for_atmosphere(r_eci_km: np.ndarray, t_s: float, env: dict) -> np.ndarray:
+    frame_model = str(env.get("density_frame_model", env.get("drag_frame_model", "simple"))).strip().lower()
+    eop_path = env.get("density_eop_path", env.get("drag_eop_path"))
+    return eci_to_ecef_harmonic(
+        np.array(r_eci_km, dtype=float),
+        float(t_s),
+        jd_utc_start=env.get("jd_utc_start"),
+        frame_model=frame_model,
+        eop_path=None if eop_path is None else str(eop_path),
+    )
+
+
 def _altitude_km_from_eci(r_eci_km: np.ndarray, t_s: float, env: dict | None = None) -> float:
     env = {} if env is None else env
-    r_ecef_km = eci_to_ecef(np.array(r_eci_km, dtype=float), float(t_s), jd_utc_start=env.get("jd_utc_start"))
+    r_ecef_km = _ecef_from_eci_for_atmosphere(r_eci_km, t_s, env)
     if str(env.get("geodetic_model", "")).lower() == "wgs84":
         _, _, alt_km = ecef_to_geodetic_deg_km(r_ecef_km)
         return float(max(alt_km, 0.0))
@@ -33,7 +52,7 @@ def _altitude_km_from_eci(r_eci_km: np.ndarray, t_s: float, env: dict | None = N
 
 def _spherical_lat_lon_deg_from_eci(r_eci_km: np.ndarray, t_s: float, env: dict | None = None) -> tuple[float, float]:
     env = {} if env is None else env
-    r_ecef_km = eci_to_ecef(np.array(r_eci_km, dtype=float), float(t_s), jd_utc_start=env.get("jd_utc_start"))
+    r_ecef_km = _ecef_from_eci_for_atmosphere(r_eci_km, t_s, env)
     if str(env.get("geodetic_model", "")).lower() == "wgs84":
         lat, lon, _ = ecef_to_geodetic_deg_km(r_ecef_km)
         return float(lat), float(lon)
@@ -181,11 +200,11 @@ def _temperature_from_altitude_k_approx(alt_km: float) -> float:
 
 def density_nrlmsise00(r_eci_km: np.ndarray, t_s: float, env: dict | None = None) -> float:
     """
-    NRLMSISE-00 density model via optional external dependency.
+    Local NRLMSISE-00 density model copied from the MATLAB HPOP implementation.
 
     Supported backends:
     - env-provided callable: env["nrlmsise00_density_callable"](alt_km, lat_deg, lon_deg, dt_utc, env) -> kg/m^3
-    - python package `nrlmsise00` with `msise_model`.
+    - source-local OEL backend with direct env f107/f107a/ap inputs, or optional HPOP-style SW-All table input.
     """
     env = {} if env is None else dict(env)
     alt_km = _altitude_km_from_eci(r_eci_km, t_s, env=env)
@@ -206,24 +225,51 @@ def density_nrlmsise00(r_eci_km: np.ndarray, t_s: float, env: dict | None = None
     custom_fn = env.get("nrlmsise00_density_callable", None)
     if callable(custom_fn):
         return float(max(0.0, custom_fn(alt_km, lat_deg, lon_deg, dt_utc, env)))
+    if env.get("nrlmsise00_lst_hr") is None:
+        frame_model = str(env.get("density_frame_model", env.get("drag_frame_model", ""))).strip().lower()
+        if frame_model == "hpop_like":
+            eop_path = env.get("density_eop_path", env.get("drag_eop_path"))
+            sidereal = apparent_sidereal_time_hpop_like(datetime_to_julian_date(dt_utc), None if eop_path is None else str(eop_path))
+            env["nrlmsise00_lst_hr"] = ((math.radians(float(lon_deg)) + sidereal) % (2.0 * math.pi)) * 24.0 / (
+                2.0 * math.pi
+            )
 
-    f107a = float(env.get("f107a", 150.0))
-    f107 = float(env.get("f107", 150.0))
-    ap = float(env.get("ap", 4.0))
+    return float(max(0.0, nrlmsise00_local_density(alt_km, lat_deg, lon_deg, dt_utc, env)))
 
-    try:
-        from nrlmsise00 import msise_model  # type: ignore
-    except Exception as exc:
-        raise RuntimeError(
-            "NRLMSISE-00 model requested but backend is unavailable. "
-            "Install `nrlmsise00` or provide env['nrlmsise00_density_callable']."
-        ) from exc
 
-    out = msise_model(dt_utc, float(alt_km), float(lat_deg), float(lon_deg), float(f107a), float(f107), float(ap))
-    # nrlmsise00 backends vary in return shape (flat vector vs tuple(dens,temp)).
-    rho_g_cm3 = _extract_nrlmsise00_total_density_g_cm3(out)
-    rho_kg_m3 = rho_g_cm3 * 1000.0
-    return float(max(rho_kg_m3, 0.0))
+def density_msis86(r_eci_km: np.ndarray, t_s: float, env: dict | None = None) -> float:
+    env = {} if env is None else dict(env)
+    alt_km = _altitude_km_from_eci(r_eci_km, t_s, env=env)
+    lat_deg, lon_deg = _spherical_lat_lon_deg_from_eci(r_eci_km, t_s, env=env)
+
+    jd_utc = env.get("jd_utc")
+    if jd_utc is not None:
+        dt_utc = julian_date_to_datetime(float(jd_utc))
+    else:
+        base_epoch = env.get("atmo_epoch_utc", datetime(2020, 1, 1, tzinfo=timezone.utc))
+        if isinstance(base_epoch, datetime):
+            if base_epoch.tzinfo is None:
+                base_epoch = base_epoch.replace(tzinfo=timezone.utc)
+            dt_utc = base_epoch + timedelta(seconds=float(t_s))
+        else:
+            dt_utc = datetime(2020, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=float(t_s))
+
+    custom_fn = env.get("msis86_density_callable", None)
+    if callable(custom_fn):
+        return float(max(0.0, custom_fn(alt_km, lat_deg, lon_deg, dt_utc, env)))
+    if bool(env.get("msis86_hpop_angle_compat", True)):
+        if env.get("msis86_lst_hr") is None:
+            frame_model = str(env.get("density_frame_model", env.get("drag_frame_model", ""))).strip().lower()
+            eop_path = env.get("density_eop_path", env.get("drag_eop_path")) if frame_model == "hpop_like" else None
+            sidereal = apparent_sidereal_time_hpop_like(datetime_to_julian_date(dt_utc), None if eop_path is None else str(eop_path))
+            env["msis86_lst_hr"] = (
+                ((math.radians(float(lon_deg)) + sidereal) % (2.0 * math.pi))
+                * 24.0
+                / (2.0 * math.pi)
+            )
+        lat_deg = math.radians(lat_deg)
+        lon_deg = math.radians(lon_deg)
+    return float(max(0.0, msis86_local_density(alt_km, lat_deg, lon_deg, dt_utc, env)))
 
 
 def density_jb2008(r_eci_km: np.ndarray, t_s: float, env: dict | None = None) -> float:
@@ -253,6 +299,56 @@ def density_jb2008(r_eci_km: np.ndarray, t_s: float, env: dict | None = None) ->
     if callable(custom_fn):
         return float(max(0.0, custom_fn(alt_km, lat_deg, lon_deg, dt_utc, env)))
     return float(max(0.0, jb2008_density(alt_km, lat_deg, lon_deg, dt_utc, env)))
+
+
+def density_jb2006(r_eci_km: np.ndarray, t_s: float, env: dict | None = None) -> float:
+    env = {} if env is None else dict(env)
+    alt_km = _altitude_km_from_eci(r_eci_km, t_s, env=env)
+    lat_deg, lon_deg = _spherical_lat_lon_deg_from_eci(r_eci_km, t_s, env=env)
+
+    jd_utc = env.get("jd_utc")
+    if jd_utc is not None:
+        dt_utc = julian_date_to_datetime(float(jd_utc))
+    else:
+        base_epoch = env.get("atmo_epoch_utc", datetime(2020, 1, 1, tzinfo=timezone.utc))
+        if isinstance(base_epoch, datetime):
+            if base_epoch.tzinfo is None:
+                base_epoch = base_epoch.replace(tzinfo=timezone.utc)
+            dt_utc = base_epoch + timedelta(seconds=float(t_s))
+        else:
+            dt_utc = datetime(2020, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=float(t_s))
+
+    custom_fn = env.get("jb2006_density_callable", None)
+    if callable(custom_fn):
+        return float(max(0.0, custom_fn(alt_km, lat_deg, lon_deg, dt_utc, env)))
+    return float(max(0.0, jb2006_density(alt_km, lat_deg, lon_deg, dt_utc, env)))
+
+
+def density_jacchia70(r_eci_km: np.ndarray, t_s: float, env: dict | None = None) -> float:
+    env = {} if env is None else dict(env)
+    alt_km = _altitude_km_from_eci(r_eci_km, t_s, env=env)
+    lat_deg, lon_deg = _spherical_lat_lon_deg_from_eci(r_eci_km, t_s, env=env)
+
+    jd_utc = env.get("jd_utc")
+    if jd_utc is not None:
+        dt_utc = julian_date_to_datetime(float(jd_utc))
+    else:
+        base_epoch = env.get("atmo_epoch_utc", datetime(2020, 1, 1, tzinfo=timezone.utc))
+        if isinstance(base_epoch, datetime):
+            if base_epoch.tzinfo is None:
+                base_epoch = base_epoch.replace(tzinfo=timezone.utc)
+            dt_utc = base_epoch + timedelta(seconds=float(t_s))
+        else:
+            dt_utc = datetime(2020, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=float(t_s))
+
+    custom_fn = env.get("jacchia70_density_callable", None)
+    if callable(custom_fn):
+        return float(max(0.0, custom_fn(alt_km, lat_deg, lon_deg, dt_utc, env)))
+    return float(max(0.0, jacchia70_density(alt_km, lat_deg, lon_deg, dt_utc, env)))
+
+
+def density_harris_priester(r_eci_km: np.ndarray, t_s: float, env: dict | None = None) -> float:
+    return harris_priester_density(r_eci_km, t_s, env=env)
 
 
 def atmosphere_state_from_model(
@@ -290,6 +386,12 @@ def atmosphere_state_from_model(
     cb = None
     if m == "nrlmsise00":
         cb = env_local.get("nrlmsise00_density_callable", None)
+    elif m in {"msis86", "msis-86", "hpop_msis86"}:
+        cb = env_local.get("msis86_density_callable", None)
+    elif m in {"jacchia70", "jacchia-70", "hpop_jacchia70"}:
+        cb = env_local.get("jacchia70_density_callable", None)
+    elif m == "jb2006":
+        cb = env_local.get("jb2006_density_callable", None)
     elif m == "jb2008":
         cb = env_local.get("jb2008_density_callable", None)
 
@@ -329,40 +431,6 @@ def atmosphere_state_from_model(
     }
 
 
-def _extract_nrlmsise00_total_density_g_cm3(out: object) -> float:
-    # Common case: flat array-like where index 5 is total mass density [g/cm^3].
-    try:
-        arr = np.asarray(out, dtype=float)
-        if arr.ndim == 1 and arr.size >= 6:
-            return float(arr[5])
-    except Exception:
-        pass
-
-    # Common alternative: tuple/list where first element is density vector.
-    if isinstance(out, (tuple, list)) and len(out) > 0:
-        first = out[0]
-        try:
-            dens = np.asarray(first, dtype=float).reshape(-1)
-            if dens.size >= 6:
-                return float(dens[5])
-        except Exception:
-            pass
-
-        # Fallback: first element in container that looks like a density vector.
-        for item in out:
-            try:
-                cand = np.asarray(item, dtype=float).reshape(-1)
-                if cand.size >= 6:
-                    return float(cand[5])
-            except Exception:
-                continue
-
-    raise RuntimeError(
-        "Unable to extract NRLMSISE-00 total mass density from backend output. "
-        "Provide env['nrlmsise00_density_callable'] for explicit control."
-    )
-
-
 def density_from_model(
     model: AtmosphereModelName,
     r_eci_km: np.ndarray,
@@ -376,6 +444,14 @@ def density_from_model(
         return density_ussa1976(r_eci_km, t_s)
     if m == "nrlmsise00":
         return density_nrlmsise00(r_eci_km, t_s, env=env)
+    if m in {"msis86", "msis-86", "hpop_msis86"}:
+        return density_msis86(r_eci_km, t_s, env=env)
+    if m in {"jacchia70", "jacchia-70", "hpop_jacchia70"}:
+        return density_jacchia70(r_eci_km, t_s, env=env)
+    if m == "jb2006":
+        return density_jb2006(r_eci_km, t_s, env=env)
     if m == "jb2008":
         return density_jb2008(r_eci_km, t_s, env=env)
+    if m in {"harris_priester", "harris-priester", "hp", "hpop_harris_priester"}:
+        return density_harris_priester(r_eci_km, t_s, env=env)
     raise ValueError(f"Unknown atmosphere model '{model}'.")

@@ -41,6 +41,12 @@ def _is_relative_to(path: Path, root: Path) -> bool:
         return False
 
 
+def _default_output_root(workspace: Path, repo: Path) -> Path:
+    if _is_relative_to(workspace, repo):
+        return repo / "outputs"
+    return workspace / "outputs"
+
+
 @dataclass(frozen=True)
 class ConfigPathPolicy:
     """Filesystem trust policy for paths supplied by scenario configs.
@@ -72,10 +78,11 @@ class ConfigPathPolicy:
         cfg_dir = None if cfg_path is None else cfg_path.parent
         workspace = Path(workspace_root).expanduser().resolve() if workspace_root is not None else repo
         default_read_roots = [workspace, repo]
-        default_write_roots = [workspace, repo / "outputs"]
+        default_write_roots = [_default_output_root(workspace, repo)]
         if cfg_dir is not None:
             default_read_roots.append(cfg_dir)
-            default_write_roots.append(cfg_dir)
+            if not _is_relative_to(cfg_dir, repo):
+                default_write_roots.append(cfg_dir)
         env_allows_external_paths = _truthy_env("OEL_ALLOW_EXTERNAL_CONFIG_PATHS")
         env_allows_external_ai_prompts = _truthy_env("OEL_ALLOW_EXTERNAL_AI_PROMPT_FILES")
         if _sealed_mode_env():

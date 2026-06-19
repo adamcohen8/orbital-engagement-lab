@@ -886,10 +886,27 @@ def _normalize_reentry_section(dynamics: dict[str, Any]) -> dict[str, Any]:
     atmosphere_model = normalized.get("atmosphere_model")
     if atmosphere_model is not None:
         atmosphere_model = str(atmosphere_model).strip().lower()
-        if atmosphere_model not in {"", "exponential", "ussa1976", "nrlmsise00", "jb2008"}:
+        if atmosphere_model not in {
+            "",
+            "exponential",
+            "ussa1976",
+            "msis86",
+            "msis-86",
+            "hpop_msis86",
+            "nrlmsise00",
+            "jacchia70",
+            "jacchia-70",
+            "hpop_jacchia70",
+            "jb2006",
+            "jb2008",
+            "harris_priester",
+            "harris-priester",
+            "hp",
+            "hpop_harris_priester",
+        }:
             raise ValueError(
                 "simulator.dynamics.reentry.atmosphere_model must be one of: "
-                "exponential, ussa1976, nrlmsise00, jb2008."
+                "exponential, ussa1976, msis86, nrlmsise00, jacchia70, jb2006, jb2008, harris_priester."
             )
         normalized["atmosphere_model"] = atmosphere_model
     termination = dict(normalized.get("termination", {}) or {})

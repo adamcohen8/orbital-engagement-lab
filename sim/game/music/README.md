@@ -4,10 +4,11 @@ Original, synthetic arcade-style cues for the Pygame RPO trainer. They were
 generated from scratch with procedural oscillators, noise, and plucked-string
 synthesis; no external samples or third-party music assets were used.
 
-The WAV files are optional runtime assets, but they are included in the default
-public distribution so the RPO trainer has music out of the box. Lean/no-music
-exports and sparse checkouts can run without them; missing files simply disable
-music or sound effects.
+The WAV files are optional runtime assets. They are included in the default
+public source/export distribution so the RPO trainer has music out of the box
+from a normal clone, but they are intentionally omitted from Python wheels to
+keep the core install small. Lean/no-music exports, wheels, and sparse checkouts
+can run without them; missing files simply disable music or sound effects.
 
 Default public/runtime tracks:
 
@@ -40,6 +41,8 @@ Default public/runtime tracks:
   and a rising final-burn escalation.
 - `28_high_shred_boss_riff.wav`: high-energy boss-round guitar-riff cue with a
   higher-pitched shred-style solo overlay.
+- `30_far_side_navigation_demo.wav`: cislunar rendezvous cue with cold
+  navigation pings, wide lunar pads, and a slower far-side cockpit feel.
 
 Additional experimental or alternate WAVs may exist in private/local workspaces,
 but they are not included in the default public distribution unless the game

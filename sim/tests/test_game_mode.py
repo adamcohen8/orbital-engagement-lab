@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import re
 from copy import deepcopy
 from dataclasses import replace
 from datetime import datetime
@@ -9,6 +8,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import tomllib
 import yaml
 
 import sim.game.launcher as game_launcher
@@ -476,7 +476,7 @@ def test_linearized_cr3bp_moon_ric_projection_tracks_nonlinear_for_small_offsets
     assert linearized == pytest.approx(nonlinear, abs=2.0e-4)
 
 
-def test_game_configs_and_music_assets_are_packaged() -> None:
+def test_game_configs_and_optional_music_packaging_contract() -> None:
     def music_tracks(value: object) -> set[str]:
         if isinstance(value, dict):
             tracks = {str(track) for key, track in value.items() if key == "music_track" and track}
@@ -492,6 +492,10 @@ def test_game_configs_and_music_assets_are_packaged() -> None:
 
     root = Path(__file__).resolve().parents[2]
     text = (root / "pyproject.toml").read_text(encoding="utf-8")
+    pyproject = tomllib.loads(text)
+    setuptools_cfg = pyproject["tool"]["setuptools"]
+    package_data = set(setuptools_cfg["package-data"]["sim"])
+    exclude_package_data = set(setuptools_cfg["exclude-package-data"]["sim"])
     expected_music = {path.name for path in LEVEL_MUSIC_PATHS.values()}
     expected_music.update(
         {
@@ -504,13 +508,15 @@ def test_game_configs_and_music_assets_are_packaged() -> None:
     for config_path in (root / "sim/game/configs").glob("*.yaml"):
         cfg = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
         expected_music.update(music_tracks(cfg))
-    package_music = set(re.findall(r'"game/music/([^"]+\.wav)"', text))
+    package_music = {Path(pattern).name for pattern in package_data if pattern.startswith("game/music/") and pattern.endswith(".wav")}
 
     assert '"game/configs/*.yaml"' in text
     assert '"game/assets/*.png"' in text
     assert '"game/music/*.md"' in text
-    assert '"game/music/*.wav"' not in text
-    assert package_music == expected_music
+    assert "include-package-data = false" in text
+    assert "game/music/*.wav" not in package_data
+    assert "game/music/*.wav" in exclude_package_data
+    assert package_music == set()
     try:
         from tools.export_public import DEFAULT_GAME_MUSIC_FILES
     except ModuleNotFoundError:
@@ -2564,6 +2570,7 @@ def test_level_music_maps_rendezvous_vector_to_level_2() -> None:
     level8 = RPOTrainingConfig(enabled=True, scenario_id="rpo_08_elliptic_rendezvous")
     level9 = RPOTrainingConfig(enabled=True, scenario_id="rpo_09_defensive_target_demo")
     level10 = RPOTrainingConfig(enabled=True, scenario_id="rpo_10_evasive_target_survival")
+    cislunar = RPOTrainingConfig(enabled=True, scenario_id="rpo_bonus_cislunar_rendezvous")
     arcade = RPOTrainingConfig(enabled=True, scenario_id="rpo_arcade_pursuit")
     unmapped = RPOTrainingConfig(enabled=True, scenario_id="rpo_11_unmapped")
 
@@ -2589,6 +2596,8 @@ def test_level_music_maps_rendezvous_vector_to_level_2() -> None:
     assert _level_music_path(level9).name == "17_orbital_boss_metal.wav"
     assert _level_music_path(level10) == LEVEL_MUSIC_PATHS["rpo_10_evasive_target_survival"]
     assert _level_music_path(level10).name == "09_defender_boss_vector.wav"
+    assert _level_music_path(cislunar) == LEVEL_MUSIC_PATHS["rpo_bonus_cislunar_rendezvous"]
+    assert _level_music_path(cislunar).name == "30_far_side_navigation_demo.wav"
     assert _level_music_path(arcade) == LEVEL_MUSIC_PATHS["rpo_arcade_pursuit"]
     assert _level_music_path(arcade).name == "21_pursuit_arcade_overdrive_no_siren_demo.wav"
     assert _level_music_path(unmapped) is None

@@ -12,7 +12,9 @@ This is the small-hosting path for a Pursuit Arcade leaderboard with roughly
 
 The browser never writes directly to Supabase. Attempts go through
 `api/submit-attempt.mjs`, which runs the deterministic validator before
-inserting rows.
+inserting rows. Public leaderboard reads use a denormalized
+`public_leaderboard` table containing only public fields; private player,
+attempt, and verification tables stay service-role only.
 
 ## Supabase Setup
 
@@ -68,20 +70,23 @@ Content-Type: application/json
 }
 ```
 
-Read leaderboard rows:
+Read public leaderboard rows:
 
 ```http
 GET /api/leaderboard?challenge=rpo_arcade_pursuit&limit=25
 ```
 
 Accepted submissions store the canonical score, metrics, validation warnings,
-the submitted attempt packet, and server-generated RI/RC plot SVGs.
+the submitted attempt packet, and server-generated RI/RC plot SVGs. When an
+attempt improves the player's best eligible score, the service-role API updates
+both the private `leaderboard_entries` bookkeeping table and the public
+`public_leaderboard` table.
 
 If an accepted submission includes an email address, the API stores a hashed
 verification token in Supabase and sends a verification link. Visiting the link
 updates `players.email`, `players.email_verified_at`, and
-`players.username_locked_at`; public leaderboard reads expose only the boolean
-`email_verified`, never the email address.
+`players.username_locked_at`; public leaderboard reads expose only the
+denormalized boolean `email_verified`, never the email address.
 
 ## Username Ownership Policy
 

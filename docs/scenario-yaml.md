@@ -361,6 +361,7 @@ simulator:
   dynamics:
     orbit:
       drag: true
+      atmosphere_model: "harris_priester"
     reentry:
       enabled: true
       begin_altitude_km: 300.0
@@ -378,6 +379,21 @@ simulator:
           chaser:
             max_g_load: 12.0
 ```
+
+`simulator.dynamics.orbit.atmosphere_model` and
+`simulator.dynamics.reentry.atmosphere_model` can select deterministic local
+models such as `exponential`, `ussa1976`, `msis86`, `nrlmsise00`, `jacchia70`,
+`jb2006`, `jb2008`, and `harris_priester`. `msis86` and `nrlmsise00` are
+source-local backends copied from MATLAB HPOP and can run without external files
+by setting `f107`, `f107a`, and `ap` in the atmosphere environment. `msis86`
+also accepts model-specific `msis86_f107`, `msis86_f107a`, `msis86_ap`,
+`msis86_ap_a`, and optional HPOP-style `msis86_sw_path` inputs. `jacchia70` can
+similarly run without external files by setting `jacchia70_f10`,
+`jacchia70_f10b`, and `jacchia70_ap`. `jb2006` and
+`jb2008` use local Jacchia-Bowman backends with local HPOP-style space-weather
+table inputs. `harris_priester` uses the HPOP Harris-Priester coefficient table
+copied into OEL source and supports MC variation through `simulator.environment`,
+for example `harris_priester_f107`/`solar_flux_f107` and `harris_priester_n`.
 
 Set each vehicle's re-entry nose geometry on its object specs with
 `nose_radius_m` or `reentry_nose_radius_m`. Leave `object_ids` empty to track all
