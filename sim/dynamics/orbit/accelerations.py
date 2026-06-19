@@ -14,9 +14,6 @@ from sim.dynamics.orbit.environment import (
     EARTH_ROT_RATE_RAD_S,
     SOLAR_PRESSURE_N_M2,
 )
-from sim.dynamics.orbit.frames import eci_to_ecef_rotation, eci_to_ecef_rotation_hpop_like
-
-_OMEGA_EARTH_RAD_S = np.array([0.0, 0.0, EARTH_ROT_RATE_RAD_S], dtype=float)
 
 
 @dataclass(frozen=True)
@@ -73,9 +70,9 @@ def accel_j3(
     s2 = s * s
     s4 = s2 * s2
 
-    # a_xy = mu*J3*Re^3 * x(y) / r^6 * [ (7/2) s (5 s^2 - 3) ]
+    # a_xy = mu*J3*Re^3 * x(y) / r^6 * [ (5/2) s (7 s^2 - 3) ]
     axy_scale = mu_km3_s2 * j3 * (re_km**3) / (r**6)
-    axy_factor = 3.5 * s * (5.0 * s2 - 3.0)
+    axy_factor = 2.5 * s * (7.0 * s2 - 3.0)
 
     # a_z = mu*J3*Re^3 / r^5 * [ (1/2) (35 s^4 - 30 s^2 + 3) ]
     az_scale = mu_km3_s2 * j3 * (re_km**3) / (r**5)
@@ -144,40 +141,17 @@ def accel_drag(
     drag_eop_path = env.get("drag_eop_path")
     omega_raw = env.get("drag_earth_rotation_rad_s", EARTH_ROT_RATE_RAD_S)
     omega_earth_rad_s = float(EARTH_ROT_RATE_RAD_S if omega_raw is None else omega_raw)
-    if drag_frame_model in {"hpop_like", "simple"}:
-        if drag_frame_model == "hpop_like":
-            rot = eci_to_ecef_rotation_hpop_like(
-                float(t_s),
-                jd_utc_start=None if jd_utc_start is None else float(jd_utc_start),
-                eop_path=None if drag_eop_path is None else str(drag_eop_path),
-            )
-        else:
-            rot = eci_to_ecef_rotation(
-                float(t_s),
-                jd_utc_start=None if jd_utc_start is None else float(jd_utc_start),
-            )
-        r_frame_km = rot @ np.array(r_eci_km, dtype=float)
-        v_frame_km_s = rot @ np.array(v_eci_km_s, dtype=float)
-        v_atm_frame_km_s = np.array(
-            [
-                -omega_earth_rad_s * float(r_frame_km[1]),
-                omega_earth_rad_s * float(r_frame_km[0]),
-                0.0,
-            ],
-            dtype=float,
-        )
-        v_rel_eci_km_s = rot.T @ (v_frame_km_s - v_atm_frame_km_s)
-    else:
-        # Atmosphere assumed corotating with Earth about inertial z-axis.
-        v_atm_eci_km_s = np.array(
-            [
-                -omega_earth_rad_s * float(r_eci_km[1]),
-                omega_earth_rad_s * float(r_eci_km[0]),
-                0.0,
-            ],
-            dtype=float,
-        )
-        v_rel_eci_km_s = v_eci_km_s - v_atm_eci_km_s
+    from sim.aero.core import atmosphere_relative_velocity_eci_km_s
+
+    v_rel_eci_km_s = atmosphere_relative_velocity_eci_km_s(
+        r_eci_km,
+        v_eci_km_s,
+        t_s=float(t_s),
+        earth_rotation_rad_s=omega_earth_rad_s,
+        frame_model=drag_frame_model,
+        jd_utc_start=None if jd_utc_start is None else float(jd_utc_start),
+        eop_path=None if drag_eop_path is None else str(drag_eop_path),
+    )
     v_rel_m_s = v_rel_eci_km_s * 1e3
     v_norm2 = float(np.dot(v_rel_m_s, v_rel_m_s))
     if v_norm2 == 0.0:
@@ -203,17 +177,22 @@ def accel_lift(
     area_eff_m2 = float(env.get("lift_area_m2", area_m2))
     if area_eff_m2 <= 0.0 or float(cl) == 0.0:
         return np.zeros(3)
+    drag_frame_model = str(env.get("drag_frame_model", "inertial_z")).strip().lower()
+    jd_utc_start = env.get("jd_utc_start")
+    drag_eop_path = env.get("drag_eop_path")
     omega_raw = env.get("drag_earth_rotation_rad_s", EARTH_ROT_RATE_RAD_S)
     omega_earth_rad_s = float(EARTH_ROT_RATE_RAD_S if omega_raw is None else omega_raw)
-    v_atm_eci_km_s = np.array(
-        [
-            -omega_earth_rad_s * float(r_eci_km[1]),
-            omega_earth_rad_s * float(r_eci_km[0]),
-            0.0,
-        ],
-        dtype=float,
+    from sim.aero.core import atmosphere_relative_velocity_eci_km_s
+
+    v_rel_eci_km_s = atmosphere_relative_velocity_eci_km_s(
+        r_eci_km,
+        v_eci_km_s,
+        t_s=float(t_s),
+        earth_rotation_rad_s=omega_earth_rad_s,
+        frame_model=drag_frame_model,
+        jd_utc_start=None if jd_utc_start is None else float(jd_utc_start),
+        eop_path=None if drag_eop_path is None else str(drag_eop_path),
     )
-    v_rel_eci_km_s = np.array(v_eci_km_s, dtype=float).reshape(3) - v_atm_eci_km_s
     v_rel_m_s = v_rel_eci_km_s * 1e3
     speed_m_s = float(np.linalg.norm(v_rel_m_s))
     if speed_m_s <= 0.0:

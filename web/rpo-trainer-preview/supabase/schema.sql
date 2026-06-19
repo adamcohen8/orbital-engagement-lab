@@ -87,7 +87,45 @@ create table if not exists validator_runs (
   created_at timestamptz not null default now()
 );
 
-create or replace view public_leaderboard as
+do $$
+begin
+  if exists (
+    select 1
+    from pg_class c
+    join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'public'
+      and c.relname = 'public_leaderboard'
+      and c.relkind = 'v'
+  ) then
+    drop view public.public_leaderboard;
+  end if;
+end $$;
+
+create table if not exists public_leaderboard (
+  challenge_id text not null references challenges(id) on delete cascade,
+  username text not null,
+  score integer not null default 0,
+  metrics jsonb not null default '{}'::jsonb,
+  attempt_id uuid not null references attempts(id) on delete cascade,
+  submitted_at timestamptz not null,
+  email_verified boolean not null default false,
+  updated_at timestamptz not null default now(),
+  primary key (challenge_id, username)
+);
+
+create index if not exists public_leaderboard_rank_idx
+  on public_leaderboard(challenge_id, score desc, submitted_at asc);
+
+insert into public_leaderboard (
+  challenge_id,
+  username,
+  score,
+  metrics,
+  attempt_id,
+  submitted_at,
+  email_verified,
+  updated_at
+)
 select
   le.challenge_id,
   p.username,
@@ -95,13 +133,51 @@ select
   le.metrics,
   a.id as attempt_id,
   a.submitted_at,
-  p.email_verified_at is not null as email_verified
+  p.email_verified_at is not null as email_verified,
+  le.updated_at
 from leaderboard_entries le
 join players p on p.id = le.player_id
 join attempts a on a.id = le.attempt_id
-where a.status in ('valid', 'suspicious');
+where a.status in ('valid', 'suspicious')
+on conflict (challenge_id, username) do update set
+  score = excluded.score,
+  metrics = excluded.metrics,
+  attempt_id = excluded.attempt_id,
+  submitted_at = excluded.submitted_at,
+  email_verified = excluded.email_verified,
+  updated_at = excluded.updated_at;
+
+alter table public_leaderboard enable row level security;
+alter table players enable row level security;
+alter table challenges enable row level security;
+alter table attempts enable row level security;
+alter table leaderboard_entries enable row level security;
+alter table email_verifications enable row level security;
+alter table validator_runs enable row level security;
+
+drop policy if exists "Public leaderboard is readable." on public_leaderboard;
+create policy "Public leaderboard is readable."
+  on public_leaderboard for select
+  to anon, authenticated
+  using (true);
+
+drop policy if exists "Active challenges are readable." on challenges;
+create policy "Active challenges are readable."
+  on challenges for select
+  to anon, authenticated
+  using (active);
+
+grant select on public_leaderboard to anon, authenticated;
+grant select on challenges to anon, authenticated;
+
+revoke all on players from anon, authenticated;
+revoke all on attempts from anon, authenticated;
+revoke all on leaderboard_entries from anon, authenticated;
+revoke all on email_verifications from anon, authenticated;
+revoke all on validator_runs from anon, authenticated;
 
 -- Suggested RLS posture once Supabase auth/API keys are wired:
--- 1. Public read access only to public_leaderboard and active challenges.
--- 2. Attempt inserts go through a service-role API endpoint, not direct browser writes.
--- 3. Email fields are never exposed through public policies or views.
+-- 1. Public read access is limited to denormalized public_leaderboard rows.
+-- 2. Attempt inserts and leaderboard promotion go through a service-role API
+--    endpoint, not direct browser writes.
+-- 3. Email fields are never exposed through public policies or public tables.

@@ -271,6 +271,12 @@ artifacts.
 8. One-variable comparison: copy a nearby example, change one parameter, run
    both cases, and compare only metrics or histories present in artifacts.
 
+Mission-input ingestion, external observation normalization, batch orbit
+determination, and estimated-parameter fitting are not included in the public
+core. Public agents should use explicit scenario YAML, checked-in examples, or
+simulator artifacts rather than `sim.ingestion`, `sim.observations`, or batch
+OD helpers.
+
 The maintained card set for these tasks lives in
 [`agent-task-cards.md`](agent-task-cards.md).
 The first-run golden paths for minimal propagation, closed-loop rendezvous, and

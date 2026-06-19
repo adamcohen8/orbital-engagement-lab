@@ -67,7 +67,7 @@ def j3_accel_eci(
     s2 = s * s
     s4 = s2 * s2
     axy_scale = mu_km3_s2 * j3 * (re_km**3) / (r**6)
-    axy_factor = 3.5 * s * (5.0 * s2 - 3.0)
+    axy_factor = 2.5 * s * (7.0 * s2 - 3.0)
     az_scale = mu_km3_s2 * j3 * (re_km**3) / (r**5)
     az_factor = 0.5 * (35.0 * s4 - 30.0 * s2 + 3.0)
     out[0] = axy_scale * x * axy_factor

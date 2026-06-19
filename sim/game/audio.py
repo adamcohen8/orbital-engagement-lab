@@ -20,6 +20,7 @@ LEVEL_MUSIC_PATHS: dict[str, Path] = {
     "rpo_08_elliptic_rendezvous": GAME_MUSIC_DIR / "23_elliptic_final_burn_cinematic.wav",
     "rpo_09_defensive_target_demo": GAME_MUSIC_DIR / "17_orbital_boss_metal.wav",
     "rpo_10_evasive_target_survival": GAME_MUSIC_DIR / "09_defender_boss_vector.wav",
+    "rpo_bonus_cislunar_rendezvous": GAME_MUSIC_DIR / "30_far_side_navigation_demo.wav",
     "rpo_arcade_pursuit": GAME_MUSIC_DIR / "21_pursuit_arcade_overdrive_no_siren_demo.wav",
 }
 MISSION_SUCCESS_MUSIC_PATH = GAME_MUSIC_DIR / "05_final_burn_victory_loop.wav"

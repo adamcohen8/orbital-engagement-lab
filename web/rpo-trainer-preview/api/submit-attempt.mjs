@@ -55,6 +55,9 @@ export default async function handler(req, res) {
         attemptId: attemptRow.id,
         score: validation.canonical_score ?? 0,
         metrics: validation.canonical_metrics ?? {},
+        username: player.username || username,
+        submittedAt: attemptRow.submitted_at,
+        emailVerified: Boolean(player.email_verified_at),
       });
     }
     const emailResult = await maybeSendVerificationEmail({

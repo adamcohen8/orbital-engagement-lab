@@ -14,6 +14,7 @@ class AgentTaskRecipe:
     title: str
     description: str
     config_path: str
+    workflow: str = "scenario_run"
     query_names: tuple[str, ...] = ()
     plot_recipe_ids: tuple[str, ...] = ()
     semantic_metric_names: tuple[str, ...] = ()

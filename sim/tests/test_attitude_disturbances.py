@@ -176,6 +176,55 @@ class TestAttitudeDisturbances(unittest.TestCase):
 
         self.assertEqual(density_mock.call_count, 1)
 
+    def test_drag_relative_velocity_cached_with_configured_frame(self):
+        inertia = np.diag([120.0, 100.0, 80.0])
+        state = StateTruth(
+            position_eci_km=np.array([6778.0, 0.0, 0.0]),
+            velocity_eci_km_s=np.array([0.0, 7.67, 0.0]),
+            attitude_quat_bn=np.array([1.0, 0.0, 0.0, 0.0]),
+            angular_rate_body_rad_s=np.array([0.0, 0.0, 0.0]),
+            mass_kg=300.0,
+            t_s=0.0,
+        )
+        dyn = OrbitalAttitudeDynamics(
+            mu_km3_s2=398600.4418,
+            inertia_kg_m2=inertia,
+            disturbance_model=DisturbanceTorqueModel(
+                mu_km3_s2=398600.4418,
+                inertia_kg_m2=inertia,
+                config=DisturbanceTorqueConfig(
+                    use_gravity_gradient=False,
+                    use_magnetic=False,
+                    use_drag=True,
+                    use_srp=False,
+                ),
+            ),
+            orbit_substep_s=1.0,
+            attitude_substep_s=0.1,
+        )
+
+        with patch(
+            "sim.aero.core.atmosphere_relative_velocity_eci_km_s",
+            return_value=np.array([0.0, 7.0, 0.0], dtype=float),
+        ) as rel_vel_mock:
+            dyn.step(
+                state.copy(),
+                Command.zero(),
+                env={
+                    "density_kg_m3": 1.0e-12,
+                    "drag_frame_model": "hpop_like",
+                    "jd_utc_start": 2460310.5,
+                    "drag_eop_path": "validation/EOP-All.txt",
+                },
+                dt_s=1.0,
+            )
+
+        self.assertEqual(rel_vel_mock.call_count, 1)
+        kwargs = rel_vel_mock.call_args.kwargs
+        self.assertEqual(kwargs["frame_model"], "hpop_like")
+        self.assertEqual(kwargs["jd_utc_start"], 2460310.5)
+        self.assertEqual(kwargs["eop_path"], "validation/EOP-All.txt")
+
     def test_attitude_substeps_use_midpoint_translational_state(self):
         inertia = np.diag([120.0, 100.0, 80.0])
         state = StateTruth(

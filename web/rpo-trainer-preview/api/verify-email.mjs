@@ -35,7 +35,7 @@ export default async function handler(req, res) {
 
     const playerQuery = new URLSearchParams({
       id: `eq.${verification.player_id}`,
-      select: "id,email,email_verified_at,username_locked_at",
+      select: "id,username,email,email_verified_at,username_locked_at",
       limit: "1",
     });
     const players = await supabaseRest(`players?${playerQuery.toString()}`);
@@ -64,7 +64,7 @@ export default async function handler(req, res) {
         username_locked_at: player.username_locked_at || verifiedAt,
       }),
     });
-    const promoted = await promoteVerifiedAttempt(verification);
+    const promoted = await promoteVerifiedAttempt(verification, player);
     sendSuccess(
       res,
       promoted
@@ -76,11 +76,11 @@ export default async function handler(req, res) {
   }
 }
 
-async function promoteVerifiedAttempt(verification) {
+async function promoteVerifiedAttempt(verification, player) {
   if (!verification.attempt_id) return false;
   const attemptQuery = new URLSearchParams({
     id: `eq.${verification.attempt_id}`,
-    select: "id,player_id,challenge_id,status,score,metrics",
+    select: "id,player_id,challenge_id,status,score,metrics,submitted_at",
     limit: "1",
   });
   const attempts = await supabaseRest(`attempts?${attemptQuery.toString()}`);
@@ -94,6 +94,9 @@ async function promoteVerifiedAttempt(verification) {
     attemptId: attempt.id,
     score: attempt.score,
     metrics: attempt.metrics || {},
+    username: player.username,
+    submittedAt: attempt.submitted_at,
+    emailVerified: true,
   });
 }
 

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import math
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
 
-from sim.dynamics.orbit.epoch import datetime_to_julian_date, sun_position_eci_km_enhanced
+from sim.dynamics.orbit.epoch import datetime_to_julian_date, sun_position_eci_km_enhanced, sun_position_eci_km_simple
 from sim.dynamics.orbit.frames import eci_to_ecef_rotation_hpop_like
 from sim.utils.geodesy import WGS84_E2, geodetic_to_ecef_km
 
@@ -23,6 +23,13 @@ def _default_jb2008_dtc_path() -> Path:
     return (
         Path(__file__).resolve().parents[3]
         / "validation/High Precision Orbit Propagator_4-2/High Precision Orbit Propagator_4.2.2/DTCFILE.txt"
+    )
+
+
+def _default_jb2006_ap_path() -> Path:
+    return (
+        Path(__file__).resolve().parents[3]
+        / "validation/High Precision Orbit Propagator_4-2/High Precision Orbit Propagator_4.2.2/SOLRESAP.txt"
     )
 
 
@@ -42,6 +49,14 @@ def _load_dtcdata(path: str) -> np.ndarray:
     return arr.T
 
 
+@lru_cache(maxsize=4)
+def _load_apdata(path: str) -> np.ndarray:
+    arr = np.loadtxt(str(Path(path).expanduser().resolve()), dtype=float)
+    if arr.ndim != 2 or arr.shape[1] != 12:
+        raise ValueError(f"Unexpected SOLRESAP shape {arr.shape} from {path}")
+    return arr.T
+
+
 def _resolve_table_path(raw: str | None, default: Path) -> str:
     p = default if raw in (None, "") else Path(str(raw)).expanduser()
     if not p.is_absolute():
@@ -56,6 +71,16 @@ def _day_of_year(dt_utc: datetime) -> float:
 
 def _gd2gc_rad(lat_gd_rad: float) -> float:
     return float(math.atan((1.0 - WGS84_E2) * math.tan(float(lat_gd_rad))))
+
+
+def _sun_position_from_env(jd_utc: float, env: dict) -> np.ndarray:
+    r_sun = env.get("sun_pos_eci_km")
+    if r_sun is not None:
+        return np.asarray(r_sun, dtype=float).reshape(3)
+    sun_model = str(env.get("atmosphere_sun_model", env.get("sun_model", ""))).strip().lower()
+    if sun_model in {"hpop_simple", "hpop_validation_simple", "validation_simple", "simple"}:
+        return sun_position_eci_km_simple(float(jd_utc))
+    return sun_position_eci_km_enhanced(float(jd_utc))
 
 
 def _position_eci_from_geodetic(lat_deg: float, lon_deg: float, alt_km: float, jd_utc: float, env: dict) -> np.ndarray:
@@ -377,6 +402,304 @@ def _semian08(day: float, ht_km: float, f10b: float, s10b: float, xm10b: float) 
     return float(fzz), float(gtz), float(fzz * gtz)
 
 
+def _semian06(day: float, ht_km: float, f10bar: float) -> tuple[float, float, float]:
+    twopi = 2.0 * math.pi
+    fzm = np.array([0.111613, -0.159000e-2, 0.126190e-1, -0.100064e-1, -0.237509e-4, 0.260759e-4])
+    gtm = np.array(
+        [
+            -0.833646,
+            -0.265450,
+            0.467603,
+            -0.299906,
+            -0.105451,
+            -0.165537e-1,
+            -0.380037e-1,
+            -0.150991e-1,
+            -0.541280e-1,
+            0.119554e-1,
+            0.437544e-2,
+            -0.369016e-2,
+            0.206763e-2,
+            -0.142888e-2,
+            -0.867124e-5,
+            0.189032e-4,
+            0.156988e-3,
+            0.491286e-3,
+            -0.391484e-4,
+            -0.126854e-4,
+            0.134078e-4,
+            -0.614176e-5,
+            0.343423e-5,
+        ],
+        dtype=float,
+    )
+    f10b = float(f10bar)
+    fb2 = f10b * f10b
+    htz = float(ht_km) / 1000.0
+    fzz = fzm[0] + fzm[1] * f10b + fzm[2] * f10b * htz + fzm[3] * f10b * htz**2
+    fzz += fzm[4] * f10b**2 * htz + fzm[5] * f10b**2 * htz**2
+
+    tau = (float(day) - 1.0) / 365.0
+    sin1p = math.sin(twopi * tau)
+    cos1p = math.cos(twopi * tau)
+    sin2p = math.sin(2.0 * twopi * tau)
+    cos2p = math.cos(2.0 * twopi * tau)
+    sin3p = math.sin(3.0 * twopi * tau)
+    cos3p = math.cos(3.0 * twopi * tau)
+    sin4p = math.sin(4.0 * twopi * tau)
+    cos4p = math.cos(4.0 * twopi * tau)
+
+    gtz = (
+        gtm[0]
+        + gtm[1] * sin1p
+        + gtm[2] * cos1p
+        + gtm[3] * sin2p
+        + gtm[4] * cos2p
+        + gtm[5] * sin3p
+        + gtm[6] * cos3p
+        + gtm[7] * sin4p
+        + gtm[8] * cos4p
+        + gtm[9] * f10b
+        + gtm[10] * f10b * sin1p
+        + gtm[11] * f10b * cos1p
+        + gtm[12] * f10b * sin2p
+        + gtm[13] * f10b * cos2p
+        + gtm[14] * f10b * sin3p
+        + gtm[15] * f10b * cos3p
+        + gtm[16] * f10b * sin4p
+        + gtm[17] * f10b * cos4p
+        + gtm[18] * fb2
+        + gtm[19] * fb2 * sin1p
+        + gtm[20] * fb2 * cos1p
+        + gtm[21] * fb2 * sin2p
+        + gtm[22] * fb2 * cos2p
+    )
+    if fzz < 1e-6:
+        fzz = 1e-6
+    return float(fzz), float(gtz), float(fzz * gtz)
+
+
+def jb2006_density(alt_km: float, lat_deg: float, lon_deg: float, dt_utc: datetime, env: dict | None = None) -> float:
+    env = {} if env is None else dict(env)
+    if dt_utc.tzinfo is None:
+        dt_utc = dt_utc.replace(tzinfo=timezone.utc)
+    dt_utc = dt_utc.astimezone(timezone.utc)
+    jd_utc = datetime_to_julian_date(dt_utc)
+    mjd_utc = jd_utc - 2400000.5
+
+    sol = _load_soldata(
+        _resolve_table_path(env.get("jb2006_sol_path", env.get("jb2008_sol_path")), _default_jb2008_sol_path())
+    )
+    apdata = _load_apdata(_resolve_table_path(env.get("jb2006_ap_path"), _default_jb2006_ap_path()))
+
+    jd_floor = math.floor(mjd_utc + 2400000.5)
+    idx = np.where(sol[2, :] == jd_floor)[0]
+    if idx.size == 0:
+        raise RuntimeError(f"JB2006 SOL data missing day {jd_floor}")
+    i = int(idx[0])
+    f10b = float(sol[4, i])
+    s10b = float(sol[6, i])
+    xm10 = float(sol[7, i])
+    f10 = float(sol[3, max(i - 1, 0)])
+    s10 = float(sol[5, max(i - 1, 0)])
+    xm10b = float(sol[8, max(i - 5, 0)])
+
+    ap_dt = dt_utc - timedelta(hours=6.7)
+    ap_doy = _day_of_year(ap_dt)
+    idx_ap = np.where((apdata[0, :] == ap_dt.year) & (apdata[1, :] == math.floor(ap_doy)))[0]
+    if idx_ap.size == 0:
+        raise RuntimeError(f"JB2006 AP data missing day {ap_dt.year}-{math.floor(ap_doy)}")
+    ap_slot = max(0, min(int(math.floor(ap_dt.hour / 3.0)), 7))
+    ap = float(apdata[4 + ap_slot, int(idx_ap[0])])
+
+    r_sat_eci_km = _position_eci_from_geodetic(float(lat_deg), float(lon_deg), float(alt_km), jd_utc, env)
+    ra_sat = math.atan2(float(r_sat_eci_km[1]), float(r_sat_eci_km[0])) % (2.0 * math.pi)
+    latgc = _gd2gc_rad(math.radians(float(lat_deg)))
+    sat = np.array([ra_sat, latgc, float(alt_km)], dtype=float)
+
+    r_sun = _sun_position_from_env(jd_utc, env)
+    ra_sun = math.atan2(float(r_sun[1]), float(r_sun[0])) % (2.0 * math.pi)
+    dec_sun = math.atan2(float(r_sun[2]), math.hypot(float(r_sun[0]), float(r_sun[1])))
+    sun = np.array([ra_sun, dec_sun], dtype=float)
+
+    alpha = np.array([0.0, 0.0, 0.0, 0.0, -0.38], dtype=float)
+    al10 = math.log(10.0)
+    amw = np.array([28.0134, 31.9988, 15.9994, 39.9480, 4.0026, 1.00797], dtype=float)
+    avogad = 6.02257e26
+    twopi = 2.0 * math.pi
+    piov2 = 0.5 * math.pi
+    frac = np.array([0.78110, 0.20955, 9.3400e-3, 1.2890e-5], dtype=float)
+    rstar = 8314.32
+    r1, r2, r3 = 0.010, 0.025, 0.075
+    wt = np.array(
+        [0.311111111111111, 1.422222222222222, 0.533333333333333, 1.422222222222222, 0.311111111111111],
+        dtype=float,
+    )
+    cht = np.array([0.22, -0.20e-2, 0.115e-2, -0.211e-5], dtype=float)
+
+    tsubc = 379.0 + 3.353 * f10b + 0.358 * (f10 - f10b) + 2.094 * (s10 - s10b) + 0.343 * (xm10 - xm10b)
+
+    eta = 0.5 * abs(sat[1] - sun[1])
+    theta = 0.5 * abs(sat[1] + sun[1])
+    h = sat[0] - sun[0]
+    tau = h - 0.64577182 + 0.10471976 * math.sin(h + 0.75049158)
+    glat = sat[1]
+    zht = sat[2]
+    glst = h + math.pi
+    glsthr = (glst * 24.0 / twopi) % 24.0
+    c = math.cos(eta) ** 2.5
+    s = math.sin(theta) ** 2.5
+    df = s + (c - s) * abs(math.cos(0.5 * tau)) ** 3
+    tsubl = tsubc * (1.0 + 0.31 * df)
+    dtg = ap + 100.0 * (1.0 - math.exp(-0.08 * ap))
+    dtclst = _dtsub(f10, glsthr, glat, zht)
+    tinf = tsubl + dtg + dtclst
+    tsubx = 444.3807 + 0.02385 * tinf - 392.8292 * math.exp(-0.0021357 * tinf)
+    gsubx = 0.054285714 * (tsubx - 183.0)
+    tc = np.array([tsubx, gsubx, (tinf - tsubx) / piov2, gsubx / ((tinf - tsubx) / piov2)], dtype=float)
+
+    z1 = 90.0
+    z2 = min(zht, 105.0)
+    al = math.log(z2 / z1)
+    n = int(math.floor(al / r1) + 1)
+    zr = math.exp(al / n)
+    ambar1 = _xambar(z1)
+    tloc1 = _xlocal(z1, tc)
+    zend = z1
+    sum2 = 0.0
+    ain = ambar1 * _xgrav(z1) / tloc1
+    ambar2 = ambar1
+    tloc2 = tloc1
+    gravl = _xgrav(z1)
+    for _ in range(n):
+        z = zend
+        zend = zr * z
+        dz = 0.25 * (zend - z)
+        sum1 = wt[0] * ain
+        for j in range(1, 5):
+            z = z + dz
+            ambar2 = _xambar(z)
+            tloc2 = _xlocal(z, tc)
+            gravl = _xgrav(z)
+            ain = ambar2 * gravl / tloc2
+            sum1 += wt[j] * ain
+        sum2 += dz * sum1
+
+    fact1 = 1000.0 / rstar
+    rho = 3.46e-6 * ambar2 * tloc1 * math.exp(-fact1 * sum2) / ambar1 / tloc2
+    anm = avogad * rho
+    an = anm / ambar2
+    fact2 = anm / 28.960
+    aln = np.zeros(6, dtype=float)
+    aln[0] = math.log(frac[0] * fact2)
+    aln[3] = math.log(frac[2] * fact2)
+    aln[4] = math.log(frac[3] * fact2)
+    aln[1] = math.log(fact2 * (1.0 + frac[1]) - an)
+    aln[2] = math.log(2.0 * (an - fact2))
+
+    doy = _day_of_year(dt_utc)
+
+    def _apply_corrections(
+        rho_in: float, zht_in: float, sat_lat_rad: float, aln_in: np.ndarray, temp2: float, z_for_check: float
+    ) -> float:
+        trash = (mjd_utc - 36204.0) / 365.2422
+        capphi = trash % 1.0
+        dlrsl = (
+            0.02
+            * (zht_in - 90.0)
+            * math.exp(-0.045 * (zht_in - 90.0))
+            * math.copysign(1.0, sat_lat_rad)
+            * math.sin(twopi * capphi + 1.72)
+            * math.sin(sat_lat_rad) ** 2
+        )
+        dlrsa = 0.0
+        if z_for_check < 2000.0:
+            fzz, _, dlrsa = _semian06(doy, zht_in, f10b)
+            if fzz < 0.0:
+                dlrsa = 0.0
+        dlr = al10 * (dlrsl + dlrsa)
+        aln_work = aln_in + dlr
+        sumnm = 0.0
+        for idx in range(6):
+            an_local = math.exp(aln_work[idx])
+            sumnm += an_local * amw[idx]
+        rho_out = sumnm / avogad
+        fex = 1.0
+        if 1000.0 <= zht_in < 1500.0:
+            zeta = (zht_in - 1000.0) * 0.002
+            zeta2 = zeta * zeta
+            zeta3 = zeta * zeta2
+            f15c = cht[0] + cht[1] * f10b + cht[2] * 1500.0 + cht[3] * f10b * 1500.0
+            f15c_zeta = (cht[2] + cht[3] * f10b) * 500.0
+            fex2 = 3.0 * f15c - f15c_zeta - 3.0
+            fex3 = f15c_zeta - 2.0 * f15c + 2.0
+            fex = 1.0 + fex2 * zeta2 + fex3 * zeta3
+        elif zht_in >= 1500.0:
+            fex = cht[0] + cht[1] * f10b + cht[2] * zht_in + cht[3] * f10b * zht_in
+        return float(fex * rho_out)
+
+    if zht <= 105.0:
+        aln[5] = aln[4] - 25.0
+        return _apply_corrections(rho, zht, sat[1], aln, tloc2, zht)
+
+    z3 = min(zht, 500.0)
+    al = math.log(z3 / z)
+    n = int(math.floor(al / r2) + 1)
+    zr = math.exp(al / n)
+    sum2b = 0.0
+    ain = gravl / tloc2
+    for _ in range(n):
+        z = zend
+        zend = zr * z
+        dz = 0.25 * (zend - z)
+        sum1 = wt[0] * ain
+        for j in range(1, 5):
+            z = z + dz
+            tloc3 = _xlocal(z, tc)
+            gravl = _xgrav(z)
+            ain = gravl / tloc3
+            sum1 += wt[j] * ain
+        sum2b += dz * sum1
+
+    z4 = max(zht, 500.0)
+    al = math.log(z4 / z)
+    r_step = r3 if zht > 500.0 else r2
+    n = int(math.floor(al / r_step) + 1)
+    zr = math.exp(al / n)
+    sum3 = 0.0
+    tloc4 = tloc3
+    for _ in range(n):
+        z = zend
+        zend = zr * z
+        dz = 0.25 * (zend - z)
+        sum1 = wt[0] * ain
+        for j in range(1, 5):
+            z = z + dz
+            tloc4 = _xlocal(z, tc)
+            gravl = _xgrav(z)
+            ain = gravl / tloc4
+            sum1 += wt[j] * ain
+        sum3 += dz * sum1
+
+    if zht > 500.0:
+        temp2 = tloc4
+        altr = math.log(tloc4 / tloc2)
+        fact2 = fact1 * (sum2b + sum3)
+        hsign = -1.0
+    else:
+        temp2 = tloc3
+        altr = math.log(tloc3 / tloc2)
+        fact2 = fact1 * sum2b
+        hsign = 1.0
+
+    for idx in range(5):
+        aln[idx] = aln[idx] - (1.0 + alpha[idx]) * altr - fact2 * amw[idx]
+    al10t5 = math.log10(tinf)
+    alnh5 = (5.5 * al10t5 - 39.40) * al10t5 + 73.13
+    aln[5] = al10 * (alnh5 + 6.0) + hsign * (math.log(tloc4 / tloc3) + fact1 * sum3 * amw[5])
+    return _apply_corrections(rho, zht, sat[1], aln, temp2, z)
+
+
 def jb2008_density(alt_km: float, lat_deg: float, lon_deg: float, dt_utc: datetime, env: dict | None = None) -> float:
     env = {} if env is None else dict(env)
     if dt_utc.tzinfo is None:
@@ -410,7 +733,7 @@ def jb2008_density(alt_km: float, lat_deg: float, lon_deg: float, dt_utc: dateti
     latgc = _gd2gc_rad(math.radians(float(lat_deg)))
     sat = np.array([ra_sat, latgc, float(alt_km)], dtype=float)
 
-    r_sun = sun_position_eci_km_enhanced(jd_utc)
+    r_sun = _sun_position_from_env(jd_utc, env)
     ra_sun = math.atan2(float(r_sun[1]), float(r_sun[0])) % (2.0 * math.pi)
     dec_sun = math.atan2(float(r_sun[2]), math.hypot(float(r_sun[0]), float(r_sun[1])))
     sun = np.array([ra_sun, dec_sun], dtype=float)

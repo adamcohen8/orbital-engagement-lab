@@ -201,6 +201,9 @@ def lift_plugin(t_s: float, x_eci: np.ndarray, env: dict, ctx: OrbitContext) -> 
         {
             "density_kg_m3": density,
             "lift_area_m2": env.get("lift_area_m2", env.get("drag_area_m2", ctx.area_m2)),
+            "jd_utc_start": env.get("jd_utc_start"),
+            "drag_frame_model": env.get("drag_frame_model", "inertial_z"),
+            "drag_eop_path": env.get("drag_eop_path"),
             "drag_earth_rotation_rad_s": env.get("drag_earth_rotation_rad_s"),
         },
     )

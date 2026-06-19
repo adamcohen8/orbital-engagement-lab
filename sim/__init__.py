@@ -179,8 +179,12 @@ _ORBIT_DYNAMICS_EXPORTS = [
     "OrbitPropagator",
     "density_exponential",
     "density_ussa1976",
+    "density_msis86",
     "density_nrlmsise00",
+    "density_jacchia70",
+    "density_jb2006",
     "density_jb2008",
+    "density_harris_priester",
     "density_from_model",
     "parse_spherical_harmonic_terms",
     "accel_spherical_harmonics_terms",
@@ -205,6 +209,10 @@ _ESTIMATION_EXPORTS = [
     "JointStateEKFEstimator",
     "JointStateEstimator",
     "AoITrackingEstimator",
+    "build_dynamics_od_quality_gates",
+    "build_orbit_od_parameter_set",
+    "selected_orbit_od_parameters",
+    "solve_dynamics_orbit_determination",
 ]
 
 _METRIC_EXPORTS = [
@@ -310,6 +318,34 @@ _REVIEW_EXPORTS = [
     "ReviewWorkspace",
 ]
 
+_INGESTION_EXPORTS = [
+    "MissionInputPacket",
+    "build_basic_propagation_scenario",
+    "build_basic_rpo_scenario",
+    "ingest_coes",
+    "ingest_ephemeris_object_set",
+    "ingest_ephemeris_samples",
+    "ingest_relative_ric_state",
+    "ingest_satellite_card",
+    "ingest_state_vector",
+    "ingest_tle",
+    "inspect_packet",
+    "load_packet",
+    "merge_packets",
+    "packet_from_dict",
+    "render_ingestion_summary",
+]
+
+_OBSERVATION_EXPORTS = [
+    "ObservationPacket",
+    "fit_state_from_position_observations",
+    "ingest_observations",
+    "inspect_observation_packet",
+    "kalman_filter_position_observations",
+    "load_observation_packet",
+    "observation_packet_from_dict",
+]
+
 __all__ = [
     *_ACTUATOR_EXPORTS,
     *_ACTUATOR_PRESET_EXPORTS,
@@ -330,6 +366,8 @@ __all__ = [
     "run_master_simulation",
     *_ROCKET_EXPORTS,
     *_REVIEW_EXPORTS,
+    *_INGESTION_EXPORTS,
+    *_OBSERVATION_EXPORTS,
 ]
 
 _LAZY_IMPORTS: dict[str, tuple[str, str]] = {}
@@ -358,6 +396,8 @@ _register(_SENSOR_EXPORTS, "sim.sensors")
 _register(_UTIL_EXPORTS, "sim.utils")
 _register(_ROCKET_EXPORTS, "sim.rocket")
 _register(_REVIEW_EXPORTS, "sim.review")
+_register(_INGESTION_EXPORTS, "sim.ingestion")
+_register(_OBSERVATION_EXPORTS, "sim.observations")
 _LAZY_IMPORTS["run_master_simulation"] = ("sim.master_simulator", "run_master_simulation")
 
 

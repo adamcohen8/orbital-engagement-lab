@@ -6,6 +6,43 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.13.0 - 2026-06-19
+
+Release thesis: `v0.13.0` adds the private mission-input and orbit-determination
+wedge, strengthens high-fidelity atmosphere/ephemeris validation paths, and
+polishes the RPO trainer's cislunar and web-preview music experience while
+preserving the public-core boundary.
+
+### Added
+
+- Added Pro/private mission-input ingestion, observation normalization,
+  dynamics orbit-determination, estimated-parameter, fit/holdout evidence, and
+  synthetic OD smoke workflows with contracts, docs, tests, and agent-task
+  packet support.
+- Added additional atmosphere model backends and data support for
+  Harris-Priester, Jacchia 70, MSIS-86, and NRLMSISE-00 style validation and
+  comparison work, plus precise-orbit and DE440-light validation utilities.
+- Added a reproducible procedural lunar-mission music generator and wired the
+  selected `30_far_side_navigation_demo.wav` cue to the downloadable cislunar
+  rendezvous bonus level and the default public game-music export allowlist.
+
+### Changed
+
+- Updated the public/private export boundary so Pro ingestion, observation,
+  batch OD, validation, and pilot-evidence materials stay excluded or stubbed
+  from the public core, with stronger public-export rule checks.
+- Updated the web RPO Trainer Preview sandbox music to use
+  `06_casting_the_orbit_line.wav`, matching the broader heroic rendezvous tone
+  intended for the v0.13.0 release path.
+- Omitted optional WAV music assets from Python wheels while keeping the default
+  public source/export distribution fully playable with runtime music.
+
+### Fixed
+
+- Updated resource-profile validate-only handling so validation can apply a
+  requested profile without writing temporary profiled configs into scenario
+  output trees.
+
 ## 0.12.4 - 2026-06-17
 
 Release thesis: `v0.12.4` tunes the web Pursuit Arcade scoring loop and fixes

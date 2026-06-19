@@ -192,10 +192,15 @@ def reentry_metrics_for_state(
         rho = float(max(atmosphere.get("density_kg_m3", 0.0), 0.0))
     else:
         rho = float(max(float(density_override), 0.0))
+    omega_raw = env.get("drag_earth_rotation_rad_s", EARTH_ROT_RATE_RAD_S)
     v_rel = atmosphere_relative_velocity_eci_km_s(
         r_eci_km,
         v_eci_km_s,
-        earth_rotation_rad_s=float(env.get("drag_earth_rotation_rad_s", EARTH_ROT_RATE_RAD_S)),
+        t_s=float(t_s),
+        earth_rotation_rad_s=float(EARTH_ROT_RATE_RAD_S if omega_raw is None else omega_raw),
+        frame_model=str(env.get("drag_frame_model", "inertial_z")),
+        jd_utc_start=env.get("jd_utc_start"),
+        eop_path=env.get("drag_eop_path"),
     )
     v_rel_m_s = v_rel * 1000.0
     speed_m_s = float(np.linalg.norm(v_rel_m_s))

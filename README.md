@@ -93,8 +93,8 @@ as the first-run path.
 | --- | --- |
 | First successful run | `.venv/bin/python run_simulation.py --quickstart` |
 | Flagship RPO artifact review | `.venv/bin/python run_simulation.py --config configs/ric_pd_10km_experiment.yaml` |
-| TLE-initialized propagation | `.venv/bin/python run_simulation.py --config examples/configs/public_tle_2hr_propagation.yaml` |
-| Ground-station access from a TLE | `.venv/bin/python run_simulation.py --config examples/configs/public_ground_station_access_from_tle.yaml` |
+| Approximate TLE-initialized OEL propagation | `.venv/bin/python run_simulation.py --config examples/configs/public_tle_2hr_propagation.yaml` |
+| Geometric ground-station access from a TLE-initialized OEL run | `.venv/bin/python run_simulation.py --config examples/configs/public_ground_station_access_from_tle.yaml` |
 | Closed-loop public rendezvous | `.venv/bin/python run_simulation.py --config examples/configs/public_closed_loop_rendezvous_lqr.yaml` |
 | Mission-recovery smoke case | `.venv/bin/python run_simulation.py --config agents/examples/public_agent_mission_recovery_plus_c_burn.yaml` |
 | Mission-reconstitution trade space | `.venv/bin/python run_simulation.py --config agents/examples/public_agent_mission_reconstitution_trade_space.yaml` |

@@ -28,7 +28,7 @@ const SATELLITE_ICON_SIZE_PX = 20;
 const SATELLITE_MAX_SIZE_PX = 72;
 const TARGET_MARKER = "#f55c5c";
 const CHASER_MARKER = "#f5cd5c";
-const BUILD_ID = "unified-mobile-shell-2026-06-17m";
+const BUILD_ID = "sandbox-music-2026-06-19";
 const ARCADE_BUILD_ID = `${BUILD_ID}-competition-local`;
 const ARCADE_CHALLENGE_RECORD = buildChallengeRecord(DEFAULT_PURSUIT_CHALLENGE);
 const LEADERBOARD_REFRESH_MS = 30000;
@@ -40,7 +40,7 @@ const PRIMER_AMPLITUDES_KM = { r: 0.65, i: 0.75, c: 0.65 };
 const MUSIC_TRACKS = {
   selector: "./assets/01_insert_coin_to_orbit.wav",
   tutorial: "./assets/10_training_grid_sunrise.wav",
-  sandbox: "./assets/04_docking_bay_neon.wav",
+  sandbox: "./assets/06_casting_the_orbit_line.wav",
   arcade: "./assets/21_pursuit_arcade_overdrive_no_siren_demo.wav",
   arcadeBoss: "./assets/28_high_shred_boss_riff.wav",
 };
