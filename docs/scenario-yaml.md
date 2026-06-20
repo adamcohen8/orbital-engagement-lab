@@ -148,6 +148,54 @@ If a scenario overrides with `specs.mass_kg` and does not provide
 `dry_mass_kg` or `fuel_mass_kg`, preset dry/fuel masses are ignored for that
 agent so the explicit total mass is honored.
 
+## Mass Properties
+
+Satellite and rocket objects can define simulator-ready mass properties under
+`specs.mass_properties`. OEL uses `inertia_kg_m2` for coupled attitude dynamics,
+and retains source metadata for twin-building and review workflows:
+
+```yaml
+objects:
+  chaser:
+    kind: "satellite"
+    enabled: true
+    specs:
+      mass_kg: 200.0
+      mass_properties:
+        mass_kg: 200.0
+        center_of_mass_body_m: [0.0, 0.0, 0.0]
+        inertia_kg_m2:
+          - [12.0, 0.1, 0.0]
+          - [0.1, 10.0, 0.0]
+          - [0.0, 0.0, 8.0]
+        inertia_reference_point: center_of_mass
+        frame: body
+        source: user_supplied
+        confidence: high
+```
+
+Strict validation checks that inertia matrices are finite, symmetric,
+positive-definite, and satisfy principal-moment triangle inequalities. It also
+validates center-of-mass vectors and the source/confidence vocabulary. If no
+inertia is supplied, OEL keeps the existing default inertia behavior for
+backward compatibility; if an invalid inertia is supplied explicitly, validation
+and runtime reject it instead of silently falling back.
+
+To convert a simple CAD-exported mass-property JSON/YAML file into an OEL
+snippet and audit report:
+
+```bash
+.venv/bin/python tools/import_mass_properties.py cad_mass_properties.json \
+  --output assets/twins/my_sat/mass_properties.yaml \
+  --report outputs/my_sat_mass_properties_report.md \
+  --summary
+```
+
+For a reusable object-level bundle, collect geometry profiles, mass properties,
+source evidence, assumptions, and generated validation output in a spacecraft
+twin package. See `docs/spacecraft-twin-packages.md` and
+`examples/twins/demo_sat/twin.yaml`.
+
 ## Actuator Presets
 
 Satellite specs can opt into the public actuator stack with
@@ -453,6 +501,46 @@ objects:
         reference_length_m: 1.0
         cp_offset_body_m: [0.0, 0.0, 0.0]
 ```
+
+For attitude-dependent drag/SRP area without running a full mesh force model,
+generate a local geometry profile from a body-frame STL mesh and reference the
+resulting JSON in satellite specs:
+
+```bash
+.venv/bin/python tools/build_geometry_profile.py spacecraft_bus.stl \
+  --output assets/geometry/spacecraft_area_profile.json \
+  --samples 642 \
+  --summary
+```
+
+```yaml
+objects:
+  chaser:
+    specs:
+      geometry:
+        profile_path: assets/geometry/spacecraft_area_profile.json
+      cr: 1.2
+      aero:
+        cd: 2.2
+```
+
+The profile stores body-frame incoming directions, projected area, and
+projected-area-weighted center of pressure. During propagation, OEL uses the
+current attitude to look up `drag_area_m2` and `srp_area_m2` for the existing
+drag/SRP models, and disturbance torques use the same profile center of
+pressure when drag/SRP torque is enabled. The first implementation is a local,
+offline STL facet projection: it does not ray-trace self-shadowing, articulating
+solar arrays, material coefficients, or full mesh-level force distribution.
+
+Geometry profiles can also support attitude-aware drag calibration in the
+dynamics orbit-determination workflow. `sim.observations fit-orbit` accepts
+`--estimate state,cd_scale` with `--drag`, object `--mass-kg`, baseline `--cd`,
+`--geometry-profile-path`, and an attitude source. Use
+`--attitude-source observed-history` when observation rows include
+`attitude_quat_bn`; use `--attitude-source modeled-inline --attitude-mode
+sun_track` when the spacecraft attitude should be generated from OEL's mission
+attitude stack during each OD candidate propagation. The fitted Cd is
+conditional on those attitude, geometry, atmosphere, and mass assumptions.
 
 Rocket objects can use the same object-level block for the common geometry and
 baseline drag terms:

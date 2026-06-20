@@ -75,6 +75,15 @@ class TestHCWInTrackCrossTrackMPCController(unittest.TestCase):
         self.assertTrue(np.allclose(ctrl.control_signs, np.array([-1.0, 1.0])))
         self.assertTrue(np.allclose(ctrl._control_to_ric(np.array([2.0e-6, 3.0e-6])), np.array([0.0, -2.0e-6, 3.0e-6])))
 
+    def test_control_signs_are_reflected_in_prediction_matrix(self):
+        ctrl = HCWInTrackCrossTrackMPCController(max_accel_km_s2=1e-4, control_signs=np.array([-1.0, 1.0]))
+        bd_full = np.arange(18, dtype=float).reshape(6, 3)
+
+        bd_ctrl = ctrl._control_input_matrix(bd_full)
+
+        self.assertTrue(np.allclose(bd_ctrl[:, 0], -bd_full[:, 1]))
+        self.assertTrue(np.allclose(bd_ctrl[:, 1], bd_full[:, 2]))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -8,7 +8,7 @@ import pytest
 import yaml
 
 from sim import SimulationConfig, SimulationResult, SimulationSession
-from sim.config import AlgorithmPointer, load_simulation_yaml, scenario_config_from_dict
+from sim.config import AlgorithmPointer, load_simulation_yaml, scenario_config_from_dict, validate_scenario_plugins
 from sim.execution import create_single_run_engine
 from sim.execution import service as execution_service
 from sim.execution.metrics import closest_approach_from_run_payload
@@ -69,6 +69,40 @@ def _contract_config(output_dir: Path) -> dict:
         "monte_carlo": {"enabled": False},
         "metadata": {"seed": 123},
     }
+
+
+def test_validate_scenario_rejects_nonpositive_mass() -> None:
+    cfg = scenario_config_from_dict(
+        {
+            "rocket": {"enabled": False},
+            "target": {"enabled": True, "specs": {"mass_kg": 0.0}},
+            "chaser": {"enabled": False},
+            "simulator": {"duration_s": 1.0, "dt_s": 1.0},
+        }
+    )
+
+    errs = validate_scenario_plugins(cfg)
+
+    assert any("mass_kg" in err and "> 0" in err for err in errs)
+
+
+def test_validate_scenario_rejects_zero_absolute_eci_position() -> None:
+    cfg = scenario_config_from_dict(
+        {
+            "rocket": {"enabled": False},
+            "target": {
+                "enabled": True,
+                "specs": {"mass_kg": 100.0},
+                "initial_state": {"position_eci_km": [0.0, 0.0, 0.0]},
+            },
+            "chaser": {"enabled": False},
+            "simulator": {"duration_s": 1.0, "dt_s": 1.0},
+        }
+    )
+
+    errs = validate_scenario_plugins(cfg)
+
+    assert any("position_eci_km" in err and "nonzero" in err for err in errs)
 
 
 def test_engine_contract_keeps_deterministic_time_grid_and_step_snapshots(tmp_path: Path) -> None:

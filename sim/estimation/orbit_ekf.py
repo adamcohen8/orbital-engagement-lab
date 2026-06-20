@@ -45,33 +45,35 @@ class OrbitEKFEstimator(Estimator):
         self._acceleration_enabled_value = bool(acceleration_settings_from_mode(self.acceleration_mode).enabled)
 
     def update(self, belief: StateBelief, measurement: Measurement | None, t_s: float) -> StateBelief:
-        x_prev = belief.state
-        p_prev = belief.covariance
-        dt_s = max(float(t_s) - float(belief.last_update_t_s), 0.0)
+        output_t_s = float(t_s)
+        meas_t_s = output_t_s
+        if measurement is not None:
+            meas_t_s = float(np.clip(float(measurement.t_s), float(belief.last_update_t_s), output_t_s))
 
-        x_pred = self._propagate_state(x_prev, dt_s=dt_s)
-        f = self._numerical_jacobian(x_prev, base=x_pred, dt_s=dt_s)
-        q_scale = dt_s / self.dt_s if self.dt_s > 0.0 else 1.0
-        p_pred = f @ p_prev @ f.T + self._q * max(q_scale, 0.0)
+        x_pred, p_pred = self._predict(belief.state, belief.covariance, from_t_s=belief.last_update_t_s, to_t_s=meas_t_s)
 
         if measurement is None:
+            if meas_t_s < output_t_s:
+                x_pred, p_pred = self._predict(x_pred, p_pred, from_t_s=meas_t_s, to_t_s=output_t_s)
             self.last_update_diagnostics = OrbitEKFUpdateDiagnostics(
                 measurement_available=False,
                 update_applied=False,
                 predicted_cov_trace=float(np.trace(p_pred)),
                 posterior_cov_trace=float(np.trace(p_pred)),
             )
-            return StateBelief(state=x_pred, covariance=p_pred, last_update_t_s=t_s)
+            return StateBelief(state=x_pred, covariance=p_pred, last_update_t_s=output_t_s)
 
         z = np.asarray(measurement.vector, dtype=float).reshape(-1)
         if z.size < 6:
+            if meas_t_s < output_t_s:
+                x_pred, p_pred = self._predict(x_pred, p_pred, from_t_s=meas_t_s, to_t_s=output_t_s)
             self.last_update_diagnostics = OrbitEKFUpdateDiagnostics(
                 measurement_available=True,
                 update_applied=False,
                 predicted_cov_trace=float(np.trace(p_pred)),
                 posterior_cov_trace=float(np.trace(p_pred)),
             )
-            return StateBelief(state=x_pred, covariance=p_pred, last_update_t_s=t_s)
+            return StateBelief(state=x_pred, covariance=p_pred, last_update_t_s=output_t_s)
         z = z[:6]
         y = z - x_pred
         s = self._h @ p_pred @ self._h.T + self._r
@@ -97,7 +99,24 @@ class OrbitEKFEstimator(Estimator):
             predicted_cov_trace=float(np.trace(p_pred)),
             posterior_cov_trace=float(np.trace(p_upd)),
         )
-        return StateBelief(state=x_upd, covariance=p_upd, last_update_t_s=t_s)
+        if meas_t_s < output_t_s:
+            x_upd, p_upd = self._predict(x_upd, p_upd, from_t_s=meas_t_s, to_t_s=output_t_s)
+        return StateBelief(state=x_upd, covariance=p_upd, last_update_t_s=output_t_s)
+
+    def _predict(
+        self,
+        x_prev: np.ndarray,
+        p_prev: np.ndarray,
+        *,
+        from_t_s: float,
+        to_t_s: float,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        dt_s = max(float(to_t_s) - float(from_t_s), 0.0)
+        x_pred = self._propagate_state(x_prev, dt_s=dt_s)
+        f = self._numerical_jacobian(x_prev, base=x_pred, dt_s=dt_s)
+        q_scale = dt_s / self.dt_s if self.dt_s > 0.0 else 1.0
+        p_pred = f @ p_prev @ f.T + self._q * max(q_scale, 0.0)
+        return x_pred, 0.5 * (p_pred + p_pred.T)
 
     def _acceleration_enabled(self) -> bool:
         return self._acceleration_enabled_value

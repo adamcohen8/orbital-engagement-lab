@@ -369,11 +369,7 @@ class OrbitalActuator(Actuator):
                     forces[idx] = 0.0
         force_body_n = np.sum(np.array(force_dirs).T * forces.reshape(1, -1), axis=1)
         rcs_torque_body_nm = np.sum(np.array(torque_dirs).T * forces.reshape(1, -1), axis=1)
-        torque_body_nm = (
-            desired_torque_body_nm + rcs_torque_body_nm
-            if cluster.allocation_mode == "force_only"
-            else rcs_torque_body_nm
-        )
+        torque_body_nm = rcs_torque_body_nm
         force_eci_n = c_bn.T @ force_body_n
         accel_eci_km_s2 = force_eci_n / current_mass_kg / 1e3
         g0_m_s2 = 9.80665

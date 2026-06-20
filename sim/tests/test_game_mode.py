@@ -346,6 +346,7 @@ def test_bonus_cislunar_rendezvous_uses_cr3bp_frame() -> None:
     assert _game_maneuver_control_speed_multiple(config) == pytest.approx(100.0)
     assert _game_speed_dt_schedule(config) == ((10.0, 2.0), (25.0, 2.0), (50.0, 5.0), (100.0, 10.0))
     assert _game_tick_dt_s(config, 10.0) == pytest.approx(2.0)
+    assert _game_tick_dt_s(config, 25.0) == pytest.approx(2.0)
     assert _game_tick_dt_s(config, 50.0) == pytest.approx(5.0)
     assert _game_tick_dt_s(config, 1000.0) == pytest.approx(10.0)
     speed_options = _game_speed_multiplier_options(config)
@@ -2372,7 +2373,12 @@ def test_dashboard_goal_overlay_syncs_with_arcade_round_range() -> None:
     config = SimulationConfig.from_yaml(config_path)
     base_cfg = RPOTrainingConfig.from_metadata(dict(config.scenario.metadata or {}))
     round2 = _arcade_round_training_config(config, base_cfg, round_index=2, max_time_s=11900.0)
-    round2 = replace(round2, hard_speed_limit_radius_km=0.025, hard_speed_limit_km_s=0.00005)
+    round2 = replace(
+        round2,
+        hard_speed_limit_radius_km=0.025,
+        hard_speed_limit_km_s=0.00005,
+        max_target_reference_range_km=1.0,
+    )
     dashboard = type("Dashboard", (), {"goal_range_km": base_cfg.goal_range_km, "_frame_cache_dirty": False})()
 
     _sync_dashboard_training_config(dashboard, round2)
@@ -2380,6 +2386,8 @@ def test_dashboard_goal_overlay_syncs_with_arcade_round_range() -> None:
     assert dashboard.goal_range_km == pytest.approx(0.095)
     assert dashboard.hard_speed_limit_radius_km == pytest.approx(0.025)
     assert dashboard.hard_speed_limit_km_s == pytest.approx(0.00005)
+    assert dashboard.max_target_reference_range_km == pytest.approx(1.0)
+    assert dashboard.target_reference_object_id == "target_reference"
     assert dashboard._frame_cache_dirty is True
 
 
@@ -2459,17 +2467,28 @@ def test_level_ten_is_player_target_survival_against_ric_pd_chaser() -> None:
 
     assert _game_controlled_object_id(config) == "target"
     assert _game_control_mode(config) == "ric_translation"
-    assert _game_camera_mode(config) == "target_pair"
+    assert _game_camera_mode(config) == "rule_toggle_pair"
+    assert _game_camera_rule_mode(config) == "current_pair"
+    assert _game_camera_rule_toggle_enabled(config) is True
     assert _game_show_target_hcw_path(config) is True
+    assert np.array(_game_speed_dt_schedule(config), dtype=float) == pytest.approx(
+        np.array(((1.0, 0.25), (10.0, 0.5), (25.0, 1.0), (50.0, 5.0), (100.0, 10.0)), dtype=float)
+    )
+    assert _game_tick_dt_s(config, 1.0) == pytest.approx(0.25)
+    assert _game_tick_dt_s(config, 5.0) == pytest.approx(0.25)
+    assert _game_tick_dt_s(config, 10.0) == pytest.approx(0.5)
+    assert _game_tick_dt_s(config, 25.0) == pytest.approx(1.0)
     assert training_cfg.scenario_id == "rpo_10_evasive_target_survival"
     assert training_cfg.survival_goal is True
     assert training_cfg.keepout_radius_km == pytest.approx(0.1)
     assert training_cfg.goal_range_km is None
     assert training_cfg.max_goal_speed_km_s is None
-    assert training_cfg.max_time_s == pytest.approx(6000.0)
+    assert training_cfg.max_time_s == pytest.approx(9000.0)
+    assert training_cfg.target_reference_object_id == "target_reference"
+    assert training_cfg.max_target_reference_range_km == pytest.approx(1.0)
     assert training_cfg.max_target_delta_v_m_s == pytest.approx(1.0)
     assert training_cfg.max_delta_v_m_s == pytest.approx(25.0)
-    assert config.scenario.simulator.duration_s == pytest.approx(6000.0)
+    assert config.scenario.simulator.duration_s == pytest.approx(9000.0)
     assert training_cfg.fail_on_delta_v_budget is False
     assert _game_coast_chaser_after_delta_v_budget(training_cfg) is True
     assert chaser.orbit_control.module == "sim.control.orbit.ric_pd"
@@ -2477,8 +2496,12 @@ def test_level_ten_is_player_target_survival_against_ric_pd_chaser() -> None:
     assert chaser.orbit_control.module == source_control["module"]
     assert chaser.orbit_control.class_name == source_control["class_name"]
     assert chaser.orbit_control.params == source_control["params"]
+    assert chaser.attitude_control.module == "sim.control.attitude.zero_torque"
+    assert chaser.attitude_control.class_name == "ZeroTorqueController"
+    assert chaser.mission_execution is None
+    assert config.scenario.simulator.dynamics["attitude"] == {"enabled": False}
     assert chaser_initial["frame"] == "curv"
-    assert np.allclose(chaser_initial["state"], np.array([0.0, -10.0, 0.0, 0.0, 0.0, 0.001]))
+    assert np.allclose(chaser_initial["state"], np.array([0.0, -5.0, 0.0, 0.0, 0.0, 0.001]))
 
 
 def test_level_ten_player_controls_target_while_chaser_controller_runs() -> None:
@@ -4507,6 +4530,153 @@ def test_training_tracker_survival_goal_enforces_target_delta_v_budget() -> None
     assert any("Target delta-v budget exceeded" in reason for reason in score.pass_fail_reasons)
 
 
+def test_training_tracker_survival_goal_enforces_target_reference_range() -> None:
+    cfg = RPOTrainingConfig(
+        enabled=True,
+        scenario_id="unit-survival-target-reference-range",
+        keepout_radius_km=0.1,
+        survival_goal=True,
+        max_time_s=10.0,
+        target_reference_object_id="target_reference",
+        max_target_reference_range_km=1.0,
+    )
+    tracker = RPOTrainingTracker(cfg)
+    reference_state = np.array([7000.0, 0.0, 0.0, 0.0, 7.54605329, 0.0], dtype=float)
+    reference = np.hstack((reference_state, np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0])))
+    target_rel_ric = np.array([0.0, 1.1, 0.0, 0.0, 0.0, 0.0], dtype=float)
+    target_state = ric_rect_state_to_eci(target_rel_ric, reference_state[:3], reference_state[3:])
+    target = np.hstack((target_state, np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0])))
+    chaser_rel_ric = np.array([0.0, -0.2, 0.0, 0.0, 0.0, 0.0], dtype=float)
+    chaser_state = ric_rect_state_to_eci(chaser_rel_ric, target_state[:3], target_state[3:])
+    chaser = np.hstack((chaser_state, np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0])))
+
+    for t_s in (0.0, 10.0):
+        tracker.record(
+            snapshot=type(
+                "Snapshot",
+                (),
+                {
+                    "time_s": t_s,
+                    "truth": {"target_reference": reference, "target": target, "chaser": chaser},
+                    "applied_thrust": {"target": np.zeros(3, dtype=float), "chaser": np.zeros(3, dtype=float)},
+                },
+            )()
+        )
+
+    score = tracker.score()
+
+    assert score.final_target_reference_range_km == pytest.approx(1.1)
+    assert score.target_reference_range_violation is True
+    assert score.level_passed is False
+    assert score.level_failed is True
+    assert any("Mission-capable radius exceeded" in reason for reason in score.pass_fail_reasons)
+
+
+def test_training_tracker_target_reference_range_is_three_dimensional() -> None:
+    cfg = RPOTrainingConfig(
+        enabled=True,
+        scenario_id="unit-survival-target-reference-range-3d",
+        keepout_radius_km=0.1,
+        survival_goal=True,
+        max_time_s=10.0,
+        target_reference_object_id="target_reference",
+        max_target_reference_range_km=1.0,
+    )
+    tracker = RPOTrainingTracker(cfg)
+    reference_state = np.array([7000.0, 0.0, 0.0, 0.0, 7.54605329, 0.0], dtype=float)
+    reference = np.hstack((reference_state, np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0])))
+    target_rel_ric = np.array([0.0, 0.8, 0.8, 0.0, 0.0, 0.0], dtype=float)
+    target_state = ric_rect_state_to_eci(target_rel_ric, reference_state[:3], reference_state[3:])
+    target = np.hstack((target_state, np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0])))
+    chaser_rel_ric = np.array([0.0, -0.2, 0.0, 0.0, 0.0, 0.0], dtype=float)
+    chaser_state = ric_rect_state_to_eci(chaser_rel_ric, target_state[:3], target_state[3:])
+    chaser = np.hstack((chaser_state, np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0])))
+
+    tracker.record(
+        snapshot=type(
+            "Snapshot",
+            (),
+            {
+                "time_s": 10.0,
+                "truth": {"target_reference": reference, "target": target, "chaser": chaser},
+                "applied_thrust": {"target": np.zeros(3, dtype=float), "chaser": np.zeros(3, dtype=float)},
+            },
+        )()
+    )
+
+    score = tracker.score()
+
+    assert np.linalg.norm(target_rel_ric[[0, 1]]) < 1.0
+    assert np.linalg.norm(target_rel_ric[[0, 2]]) < 1.0
+    assert score.final_target_reference_range_km == pytest.approx(np.sqrt(0.8**2 + 0.8**2))
+    assert score.target_reference_range_violation is True
+
+
+def test_dashboard_tracks_mission_capable_reference_separately_from_camera_reference() -> None:
+    dashboard = object.__new__(PygameRPODashboard)
+    dashboard.target_object_id = "target"
+    dashboard.chaser_object_id = "chaser"
+    dashboard.reference_object_id = "camera_reference"
+    dashboard.target_reference_object_id = "target_reference"
+    dashboard.relative_frame = "ric"
+    dashboard.coast_prediction_model = "hcw"
+    dashboard.max_history = 10
+    dashboard.t_s = []
+    dashboard.rel_hist = []
+    dashboard.target_rel_hist = []
+    dashboard.target_reference_rel_hist = []
+    dashboard.thrust_hist = []
+    dashboard.thrust_ric_hist = []
+    dashboard._rel_array = np.zeros((0, 6), dtype=float)
+    dashboard._target_rel_array = np.zeros((0, 6), dtype=float)
+    dashboard._target_reference_rel_array = np.zeros((0, 6), dtype=float)
+    dashboard._thrust_ric_array = np.zeros((0, 3), dtype=float)
+    dashboard.target_true_anomaly_deg = None
+    camera_reference_state = np.array([7000.0, 0.0, 0.0, 0.0, 7.54605329, 0.0], dtype=float)
+    camera_reference = np.hstack(
+        (camera_reference_state, np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0]))
+    )
+    target_reference_rel_ric = np.array([0.0, 0.4, 0.3, 0.0, 0.0, 0.0], dtype=float)
+    target_reference_state = ric_rect_state_to_eci(
+        target_reference_rel_ric,
+        camera_reference_state[:3],
+        camera_reference_state[3:],
+    )
+    target_reference = np.hstack(
+        (target_reference_state, np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0]))
+    )
+    target_rel_to_reference = np.array([0.0, 0.8, 0.0, 0.0, 0.0, 0.0], dtype=float)
+    target_state = ric_rect_state_to_eci(
+        target_rel_to_reference,
+        target_reference_state[:3],
+        target_reference_state[3:],
+    )
+    target = np.hstack((target_state, np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0])))
+    chaser_rel_to_target = np.array([0.0, -0.2, 0.0, 0.0, 0.0, 0.0], dtype=float)
+    chaser_state = ric_rect_state_to_eci(chaser_rel_to_target, target_state[:3], target_state[3:])
+    chaser = np.hstack((chaser_state, np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0])))
+
+    dashboard.push_snapshot(
+        type(
+            "Snapshot",
+            (),
+            {
+                "time_s": 0.0,
+                "truth": {
+                    "camera_reference": camera_reference,
+                    "target_reference": target_reference,
+                    "target": target,
+                    "chaser": chaser,
+                },
+                "applied_thrust": {"chaser": np.zeros(3, dtype=float)},
+            },
+        )()
+    )
+
+    assert dashboard.target_reference_rel_hist[-1][:3] == pytest.approx(target_reference_rel_ric[:3])
+    assert not np.allclose(dashboard.target_rel_hist[-1][:3], target_reference_rel_ric[:3])
+
+
 def test_training_tracker_survival_goal_can_ignore_chaser_delta_v_budget_failure() -> None:
     cfg = RPOTrainingConfig(
         enabled=True,
@@ -4989,8 +5159,16 @@ def test_shared_game_tick_schedule_clamps_to_level_base_dt(tmp_path: Path) -> No
     leo_like["simulator"]["dt_s"] = 1.0
     leo_cfg = SimulationConfig.from_dict(leo_like)
 
-    assert _game_speed_dt_schedule(leo_cfg) == ((10.0, 2.0), (25.0, 2.0), (50.0, 5.0), (100.0, 10.0))
-    assert _game_tick_dt_s(leo_cfg, 10.0) == pytest.approx(1.0)
+    assert _game_speed_dt_schedule(leo_cfg) == (
+        (1.0, 0.25),
+        (10.0, 0.5),
+        (25.0, 1.0),
+        (50.0, 5.0),
+        (100.0, 10.0),
+    )
+    assert _game_tick_dt_s(leo_cfg, 1.0) == pytest.approx(0.25)
+    assert _game_tick_dt_s(leo_cfg, 10.0) == pytest.approx(0.5)
+    assert _game_tick_dt_s(leo_cfg, 25.0) == pytest.approx(1.0)
     assert _game_tick_dt_s(leo_cfg, 200.0) == pytest.approx(1.0)
 
     cislunar_like = deepcopy(_game_config(tmp_path / "cislunar_like"))
@@ -4998,7 +5176,9 @@ def test_shared_game_tick_schedule_clamps_to_level_base_dt(tmp_path: Path) -> No
     cislunar_like["simulator"]["dt_s"] = 10.0
     cislunar_cfg = SimulationConfig.from_dict(cislunar_like)
 
-    assert _game_tick_dt_s(cislunar_cfg, 10.0) == pytest.approx(2.0)
+    assert _game_tick_dt_s(cislunar_cfg, 1.0) == pytest.approx(0.25)
+    assert _game_tick_dt_s(cislunar_cfg, 10.0) == pytest.approx(0.5)
+    assert _game_tick_dt_s(cislunar_cfg, 25.0) == pytest.approx(1.0)
     assert _game_tick_dt_s(cislunar_cfg, 50.0) == pytest.approx(5.0)
     assert _game_tick_dt_s(cislunar_cfg, 200.0) == pytest.approx(10.0)
 
@@ -5714,6 +5894,67 @@ def test_satellite_marker_size_uses_dots_icons_and_scale() -> None:
     assert _satellite_marker_size_px(100.0, 100.0, diameter_km=0.12) == 20
 
 
+def test_dashboard_vectors_match_web_preview_scaling() -> None:
+    rel = np.array([0.0, -5.0, 0.0, 0.001, -0.002, 0.003], dtype=float)
+    thrust = np.array([0.0, 3.0e-5, 4.0e-5], dtype=float)
+
+    velocity_px = PygameRPODashboard._web_velocity_vector_px(rel, x_axis=1, y_axis=0)
+    thrust_px = PygameRPODashboard._web_thrust_vector_px(thrust, x_axis=1, y_axis=2)
+    hidden_axis_thrust_px = PygameRPODashboard._web_thrust_vector_px(thrust, x_axis=1, y_axis=0)
+
+    assert velocity_px == pytest.approx([-150.0, 75.0])
+    assert thrust_px == pytest.approx([25.2, 33.6])
+    assert np.linalg.norm(thrust_px) == pytest.approx(42.0)
+    assert hidden_axis_thrust_px == pytest.approx([25.2, 0.0])
+    assert PygameRPODashboard._web_thrust_vector_px(thrust, x_axis=1, y_axis=2, threshold=1.0e-4) == pytest.approx(
+        [0.0, 0.0]
+    )
+
+
+def test_dashboard_visual_extrapolation_advances_latest_row_only() -> None:
+    dashboard = object.__new__(PygameRPODashboard)
+    dashboard.visual_extrapolation_enabled = True
+    dashboard.visual_extrapolation_max_sim_s = 1.0
+    dashboard._render_motion_enabled = True
+    dashboard._render_speed_multiple = 1.0
+    dashboard._render_wall_time_s = 10.5
+    dashboard.sample_wall_s = [9.0, 10.0]
+    dashboard.t_s = [0.0, 1.0]
+    rows = np.array(
+        [
+            [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            [1.0, 2.0, 3.0, 0.2, -0.4, 0.6],
+        ],
+        dtype=float,
+    )
+
+    visual = dashboard._visual_state_rows(rows)
+
+    assert visual[0] == pytest.approx(rows[0])
+    assert visual[1, :3] == pytest.approx([1.1, 1.8, 3.3])
+    assert visual[1, 3:6] == pytest.approx(rows[1, 3:6])
+    assert rows[1, :3] == pytest.approx([1.0, 2.0, 3.0])
+
+
+def test_dashboard_visual_extrapolation_can_be_disabled_and_is_capped() -> None:
+    dashboard = object.__new__(PygameRPODashboard)
+    dashboard.visual_extrapolation_enabled = True
+    dashboard.visual_extrapolation_max_sim_s = 5.0
+    dashboard._render_motion_enabled = True
+    dashboard._render_speed_multiple = 10.0
+    dashboard._render_wall_time_s = 12.0
+    dashboard.sample_wall_s = [10.0]
+    dashboard.t_s = [0.0]
+    rows = np.array([[1.0, 2.0, 3.0, 0.2, 0.0, 0.0]], dtype=float)
+
+    visual = dashboard._visual_state_rows(rows)
+    dashboard.visual_extrapolation_enabled = False
+    disabled = dashboard._visual_state_rows(rows)
+
+    assert visual[0, :3] == pytest.approx([2.0, 2.0, 3.0])
+    assert disabled[0, :3] == pytest.approx([1.0, 2.0, 3.0])
+
+
 def test_dashboard_frame_cache_samples_shared_draw_rows_once() -> None:
     dashboard = object.__new__(PygameRPODashboard)
     rows = 500
@@ -5752,6 +5993,76 @@ def test_dashboard_frame_cache_samples_shared_draw_rows_once() -> None:
     assert dashboard._frame_cache["burn_marker_rel"].shape[0] <= 80
     assert np.allclose(dashboard._frame_cache["rel_trail"][0], rel[0])
     assert np.allclose(dashboard._frame_cache["rel_trail"][-1], rel[-1])
+
+
+def test_dashboard_frame_cache_reuses_raw_predictions_between_visual_frames() -> None:
+    dashboard = object.__new__(PygameRPODashboard)
+    rel = np.array(
+        [
+            [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            [1.0, 2.0, 3.0, 0.2, -0.4, 0.6],
+        ],
+        dtype=float,
+    )
+    target_rel = np.zeros((2, 6), dtype=float)
+    target_reference_rel = np.zeros((2, 6), dtype=float)
+    thrust = np.zeros((2, 3), dtype=float)
+    ghost = np.zeros((2, 6), dtype=float)
+    target_ghost = np.ones((2, 6), dtype=float)
+    dashboard.rel_hist = [row for row in rel]
+    dashboard.target_rel_hist = [row for row in target_rel]
+    dashboard.target_reference_rel_hist = [row for row in target_reference_rel]
+    dashboard.thrust_ric_hist = [row for row in thrust]
+    dashboard._rel_array = rel
+    dashboard._target_rel_array = target_rel
+    dashboard._target_reference_rel_array = target_reference_rel
+    dashboard._thrust_ric_array = thrust
+    dashboard.max_history = 900
+    dashboard.burn_marker_threshold_km_s2 = 1.0e-12
+    dashboard.visual_extrapolation_enabled = True
+    dashboard.visual_extrapolation_max_sim_s = 1.0
+    dashboard._render_motion_enabled = True
+    dashboard._render_speed_multiple = 1.0
+    dashboard.sample_wall_s = [9.0, 10.0]
+    dashboard.t_s = [0.0, 1.0]
+    dashboard.live_prediction_accel_ric_km_s2 = np.zeros(3, dtype=float)
+    dashboard.live_prediction_elapsed_s = 0.0
+    dashboard._frame_cache = {}
+    dashboard._raw_frame_cache = {}
+    dashboard._frame_cache_dirty = True
+    calls = {"target_ghost": 0, "nmt": 0, "nmt_bounds": 0, "ghost": 0}
+
+    def fake_ghost(*_, **__):
+        calls["ghost"] += 1
+        return ghost
+
+    def fake_target_ghost(*_):
+        calls["target_ghost"] += 1
+        return target_ghost
+
+    def fake_nmt():
+        calls["nmt"] += 1
+        return np.empty((0, 3), dtype=float)
+
+    def fake_nmt_bounds():
+        calls["nmt_bounds"] += 1
+        return ()
+
+    dashboard._coast_prediction_from_cached = fake_ghost
+    dashboard._target_coast_prediction = fake_target_ghost
+    dashboard._nmt_points = fake_nmt
+    dashboard._nmt_boundary_points = fake_nmt_bounds
+
+    dashboard._render_wall_time_s = 10.25
+    dashboard._prepare_frame_cache()
+    first_latest = dashboard._frame_cache["rel"][-1, :3].copy()
+    dashboard._render_wall_time_s = 10.75
+    dashboard._prepare_frame_cache()
+
+    assert calls == {"target_ghost": 1, "nmt": 1, "nmt_bounds": 1, "ghost": 2}
+    assert first_latest == pytest.approx([1.05, 1.9, 3.15])
+    assert dashboard._frame_cache["rel"][-1, :3] == pytest.approx([1.15, 1.7, 3.45])
+    assert dashboard._raw_frame_cache["raw_rel"][-1, :3] == pytest.approx([1.0, 2.0, 3.0])
 
 
 def test_dashboard_live_prediction_seed_moves_ghost_without_moving_truth() -> None:

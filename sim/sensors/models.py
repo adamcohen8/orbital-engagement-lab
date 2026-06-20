@@ -22,7 +22,7 @@ class OwnStateSensor(SensorModel):
     noise: SensorNoiseConfig
     rng: np.random.Generator
     access_model: AccessModel | None = None
-    _latency_queue: list[tuple[float, np.ndarray]] = field(default_factory=list)
+    _latency_queue: list[tuple[float, float, np.ndarray]] = field(default_factory=list)
 
     def measure(self, truth: StateTruth, env: dict, t_s: float) -> Measurement | None:
         if self.access_model is not None and not self.access_model.can_update(
@@ -40,12 +40,13 @@ class OwnStateSensor(SensorModel):
         if self.noise.latency_s <= 0.0:
             return Measurement(vector=z, t_s=t_s)
 
-        release_t = t_s + self.noise.latency_s
-        self._latency_queue.append((release_t, z))
-        for i, (ready_t, vec) in enumerate(self._latency_queue):
+        acquisition_t = float(t_s)
+        release_t = acquisition_t + self.noise.latency_s
+        self._latency_queue.append((release_t, acquisition_t, z))
+        for i, (ready_t, sample_t, vec) in enumerate(self._latency_queue):
             if ready_t <= t_s:
                 self._latency_queue.pop(i)
-                return Measurement(vector=vec, t_s=t_s)
+                return Measurement(vector=vec, t_s=sample_t)
         return None
 
     def _sigma(self, n: int) -> np.ndarray:

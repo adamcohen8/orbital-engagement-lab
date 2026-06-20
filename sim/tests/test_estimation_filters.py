@@ -14,6 +14,18 @@ from sim.estimation.orbit_ukf import OrbitUKFEstimator
 from sim.utils.quaternion import normalize_quaternion
 
 
+class _RecordingPropagator(OrbitPropagator):
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls: list[float] = []
+
+    def propagate(self, x_eci, dt_s, t_s, command_accel_eci_km_s2, env, ctx):
+        self.calls.append(float(dt_s))
+        out = np.array(x_eci, dtype=float).copy()
+        out[:3] = out[:3] + out[3:] * float(dt_s)
+        return out
+
+
 def test_orbit_ekf_ignores_partial_measurements_instead_of_zero_padding() -> None:
     estimator = OrbitEKFEstimator(
         mu_km3_s2=398600.4418,
@@ -172,3 +184,25 @@ def test_orbit_ukf_update_avoids_np_inv_and_preserves_symmetric_covariance() -> 
 
     assert np.allclose(updated.covariance, updated.covariance.T, atol=1e-12)
     assert np.all(np.linalg.eigvalsh(updated.covariance) >= -1e-12)
+
+
+def test_orbit_ukf_propagates_by_elapsed_belief_time() -> None:
+    propagator = _RecordingPropagator()
+    estimator = OrbitUKFEstimator(
+        propagator=propagator,
+        context=OrbitContext(mu_km3_s2=398600.4418, mass_kg=100.0),
+        dt_s=1.0,
+        process_noise_diag=np.ones(6) * 1e-10,
+        meas_noise_diag=np.ones(6) * 1e-6,
+    )
+    belief = StateBelief(
+        state=np.array([7000.0, 0.0, 0.0, 0.0, 7.5, 0.0], dtype=float),
+        covariance=np.eye(6) * 1e-3,
+        last_update_t_s=10.0,
+    )
+
+    updated = estimator.update(belief, None, 12.5)
+
+    assert propagator.calls
+    assert all(np.isclose(dt, 2.5) for dt in propagator.calls)
+    assert np.isclose(updated.last_update_t_s, 12.5)

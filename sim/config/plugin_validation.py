@@ -8,6 +8,7 @@ from typing import Any
 
 from sim.actuators.presets import available_actuator_preset_names, resolve_actuator_specs_from_satellite_specs
 from sim.config.object_refs import configured_objects, object_parameter_prefix
+from sim.digital_twin.mass_properties import validate_mass_properties
 
 
 @dataclass(frozen=True)
@@ -106,6 +107,7 @@ def validate_scenario_plugins(cfg: Any, *, import_plugins: bool = True) -> list[
         if not getattr(agent, "enabled", False):
             continue
         path = object_parameter_prefix(str(object_id))
+        errs.extend(_validate_object_mass_properties(getattr(agent, "specs", {}) or {}, f"{path}.specs"))
         errs.extend(_validate_initial_state(getattr(agent, "initial_state", {}) or {}, f"{path}.initial_state"))
         if str(getattr(agent, "kind", "satellite")).strip().lower() == "rocket":
             errs.extend(
@@ -176,6 +178,28 @@ def validate_scenario_plugins(cfg: Any, *, import_plugins: bool = True) -> list[
     return errs
 
 
+def _validate_object_mass_properties(specs: dict[str, Any], path: str) -> list[str]:
+    raw = dict(specs or {})
+    errs: list[str] = []
+    if ("dry_mass_kg" in raw) or ("fuel_mass_kg" in raw):
+        dry = _parse_finite_float(raw.get("dry_mass_kg", 0.0), f"{path}.dry_mass_kg", errs)
+        fuel = _parse_finite_float(raw.get("fuel_mass_kg", 0.0), f"{path}.fuel_mass_kg", errs)
+        if dry is not None and fuel is not None:
+            if dry < 0.0:
+                errs.append(f"{path}.dry_mass_kg: must be >= 0.")
+            if fuel < 0.0:
+                errs.append(f"{path}.fuel_mass_kg: must be >= 0.")
+            if dry + fuel <= 0.0:
+                errs.append(f"{path}: dry_mass_kg + fuel_mass_kg must be > 0.")
+    elif "mass_kg" in raw:
+        mass = _parse_finite_float(raw.get("mass_kg"), f"{path}.mass_kg", errs)
+        if mass is not None and mass <= 0.0:
+            errs.append(f"{path}.mass_kg: must be > 0.")
+    result = validate_mass_properties(raw, path=f"{path}.mass_properties")
+    errs.extend(result.errors)
+    return errs
+
+
 def _validate_initial_state(initial_state: dict[str, Any], path: str) -> list[str]:
     errs: list[str] = []
     raw = dict(initial_state or {})
@@ -223,6 +247,17 @@ def _validate_initial_state(initial_state: dict[str, Any], path: str) -> list[st
             )
     if "relative_cislunar" in raw:
         errs.extend(_validate_numeric_sequence(raw.get("relative_cislunar"), f"{path}.relative_cislunar", length=6))
+    if "position_eci_km" in raw:
+        errs.extend(_validate_numeric_sequence(raw.get("position_eci_km"), f"{path}.position_eci_km", length=3))
+        try:
+            pos = [float(x) for x in list(raw.get("position_eci_km"))]
+        except (TypeError, ValueError):
+            pos = []
+        if len(pos) == 3 and all(math.isfinite(x) for x in pos):
+            if math.sqrt(sum(x * x for x in pos)) <= 0.0:
+                errs.append(f"{path}.position_eci_km: must be nonzero.")
+    if "velocity_eci_km_s" in raw:
+        errs.extend(_validate_numeric_sequence(raw.get("velocity_eci_km_s"), f"{path}.velocity_eci_km_s", length=3))
     cr3bp_rotating = raw.get("cr3bp_rotating")
     if cr3bp_rotating is not None:
         if not isinstance(cr3bp_rotating, dict):
@@ -236,6 +271,18 @@ def _validate_initial_state(initial_state: dict[str, Any], path: str) -> list[st
                 )
             )
     return errs
+
+
+def _parse_finite_float(value: Any, path: str, errs: list[str]) -> float | None:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        errs.append(f"{path}: must be a finite number.")
+        return None
+    if not math.isfinite(parsed):
+        errs.append(f"{path}: must be a finite number.")
+        return None
+    return parsed
 
 
 def _validate_numeric_sequence(value: Any, path: str, *, length: int) -> list[str]:

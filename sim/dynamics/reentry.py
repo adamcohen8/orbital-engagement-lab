@@ -11,7 +11,7 @@ from sim.aero import (
     dynamic_pressure_pa,
     sutton_graves_heat_rate_w_m2,
 )
-from sim.dynamics.orbit.atmosphere import atmosphere_state_from_model
+from sim.dynamics.orbit.atmosphere import altitude_km_from_eci, atmosphere_state_from_model
 from sim.dynamics.orbit.environment import EARTH_RADIUS_KM, EARTH_ROT_RATE_RAD_S
 
 REENTRY_METRIC_KEYS = (
@@ -176,7 +176,7 @@ def reentry_metrics_for_state(
     active: bool,
     previous_heat_load_j_m2: float = 0.0,
 ) -> dict[str, float]:
-    altitude_km = radial_altitude_km(r_eci_km)
+    altitude_km = altitude_km_from_eci(r_eci_km, t_s, env=env)
     out = {key: float("nan") for key in REENTRY_METRIC_KEYS}
     out["active"] = 1.0 if active else 0.0
     out["altitude_km"] = float(altitude_km)

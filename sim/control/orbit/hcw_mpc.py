@@ -181,7 +181,7 @@ class HCWRelativeOrbitMPCController(Controller):
 
         c_ir = ric_dcm_ir_from_rv(r_tgt, v_tgt)
         x_rel_rect = ric_curv_to_rect(x_rel_curv, r0_km=r0)
-        x_rel_err = self.state_signs * x_rel_rect - self.target_rel_ric_rect
+        x_rel_err = self.state_signs * (x_rel_rect - self.target_rel_ric_rect)
         u_seed = self._seed_control(x_rel_err)
         a_seed_ric = self._control_to_ric(u_seed)
 
@@ -404,7 +404,7 @@ class HCWRelativeOrbitMPCController(Controller):
         for k in range(h_steps):
             u = u_seq[k]
             x = self._ad @ x + self._bd @ u
-            err = self.state_signs * x - self.target_rel_ric_rect
+            err = self.state_signs * (x - self.target_rel_ric_rect)
             du = u - u_prev
             j += float(np.sum(self.q_weights * err * err))
             j += float(np.sum(self.r_weights * u * u))
@@ -475,7 +475,7 @@ class HCWInTrackCrossTrackMPCController(HCWRelativeOrbitMPCController):
 
     def _control_input_matrix(self, bd_full: np.ndarray) -> np.ndarray:
         bd = np.array(bd_full, dtype=float)
-        return bd[:, 1:3]
+        return bd[:, 1:3] @ np.diag(self.control_signs)
 
     def _control_to_ric(self, u_ctrl: np.ndarray) -> np.ndarray:
         u = self.control_signs * np.array(u_ctrl, dtype=float).reshape(2)

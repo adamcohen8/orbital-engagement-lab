@@ -91,8 +91,9 @@ public/private packaging.
 3. [Payload And Artifact Contract](contracts/payload-artifact-contract.md)
 4. [Review Store Contract](review-store.md)
 5. [Controller Naming Conventions](project/controller_naming_conventions.md)
-6. [Data Handling And Boundary Statement](security/data-handling.md)
-7. [Security Incident Process](security/incident-response.md)
+6. [Reference GNC Library Roadmap](project/reference_gnc_library_roadmap.md)
+7. [Data Handling And Boundary Statement](security/data-handling.md)
+8. [Security Incident Process](security/incident-response.md)
 
 Private release/export operating notes live under `docs/operations/` in the
 full workspace and are intentionally excluded from the public export.

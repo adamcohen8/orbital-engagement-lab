@@ -4,16 +4,17 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+import sim.aero.core as aero_core
 from sim.core.interfaces import DynamicsModel
 from sim.core.models import Command, StateTruth
 from sim.dynamics.attitude.disturbances import DisturbanceTorqueModel
 from sim.dynamics.attitude.rigid_body import propagate_attitude_exponential_map
 from sim.dynamics.orbit.accelerations import OrbitContext
 from sim.dynamics.orbit.atmosphere import density_from_model
-from sim.dynamics.orbit.eclipse import srp_shadow_factor
+from sim.dynamics.orbit.eclipse import resolve_srp_geometry, srp_shadow_factor
 from sim.dynamics.orbit.environment import EARTH_ROT_RATE_RAD_S
 from sim.dynamics.orbit.propagator import OrbitPropagator
-from sim.dynamics.spacecraft_geometry import RectangularPrismGeometry
+from sim.dynamics.spacecraft_geometry import GeometryAreaProfile, RectangularPrismGeometry
 from sim.utils.quaternion import normalize_quaternion, quaternion_to_dcm_bn
 
 
@@ -32,6 +33,7 @@ class OrbitalAttitudeDynamics(DynamicsModel):
     srp_area_m2: float | None = None
     use_rectangular_prism_for_aero_srp: bool = False
     rectangular_prism_dims_m: tuple[float, float, float] | None = None
+    geometry_area_profile: GeometryAreaProfile | None = None
     orbit_substep_s: float | None = None
     attitude_substep_s: float | None = None
     propagate_attitude: bool = True
@@ -39,6 +41,8 @@ class OrbitalAttitudeDynamics(DynamicsModel):
     acceleration_mode: str = "off"
 
     def __post_init__(self) -> None:
+        if self.geometry_area_profile is not None and self.use_rectangular_prism_for_aero_srp:
+            raise ValueError("Use either geometry_area_profile or rectangular prism aero/SRP mode, not both.")
         if self.use_rectangular_prism_for_aero_srp:
             if self.rectangular_prism_dims_m is None:
                 raise ValueError(
@@ -65,25 +69,47 @@ class OrbitalAttitudeDynamics(DynamicsModel):
                 env_local["lift_direction_eci"] = c_bn.T @ (lift_axis_body / axis_norm)
         if self.srp_area_m2 is not None:
             env_local["srp_area_m2"] = float(self.srp_area_m2)
+        area_profile = self.geometry_area_profile
         geom = self._rectangular_prism_geometry()
-        if self.use_rectangular_prism_for_aero_srp and geom is not None and self.disturbance_model is not None:
+        if area_profile is not None:
             c_bn = quaternion_to_dcm_bn(state.attitude_quat_bn)
-            v_atm_eci_km_s = np.array(
-                [
-                    -EARTH_ROT_RATE_RAD_S * float(state.position_eci_km[1]),
-                    EARTH_ROT_RATE_RAD_S * float(state.position_eci_km[0]),
-                    0.0,
-                ],
-                dtype=float,
+            omega_raw = env_local.get("drag_earth_rotation_rad_s", EARTH_ROT_RATE_RAD_S)
+            v_rel_eci_km_s = aero_core.atmosphere_relative_velocity_eci_km_s(
+                state.position_eci_km,
+                state.velocity_eci_km_s,
+                t_s=float(state.t_s),
+                earth_rotation_rad_s=float(EARTH_ROT_RATE_RAD_S if omega_raw is None else omega_raw),
+                frame_model=str(env_local.get("drag_frame_model", "inertial_z")),
+                jd_utc_start=env_local.get("jd_utc_start"),
+                eop_path=env_local.get("drag_eop_path"),
             )
-            v_rel_eci_km_s = state.velocity_eci_km_s - v_atm_eci_km_s
+            v_rel_body = c_bn @ v_rel_eci_km_s
+            env_local["drag_area_m2"] = area_profile.projected_area_for_direction_m2(-v_rel_body)
+
+            srp_geometry = resolve_srp_geometry(state.position_eci_km, state.t_s, env_local)
+            sun_dir_eci = np.array(srp_geometry["sun_dir_sc_eci"], dtype=float)
+            if float(np.linalg.norm(sun_dir_eci)) > 0.0:
+                sun_dir_body = c_bn @ sun_dir_eci
+                env_local["srp_area_m2"] = area_profile.projected_area_for_direction_m2(-sun_dir_body)
+        elif self.use_rectangular_prism_for_aero_srp and geom is not None and self.disturbance_model is not None:
+            c_bn = quaternion_to_dcm_bn(state.attitude_quat_bn)
+            omega_raw = env_local.get("drag_earth_rotation_rad_s", EARTH_ROT_RATE_RAD_S)
+            v_rel_eci_km_s = aero_core.atmosphere_relative_velocity_eci_km_s(
+                state.position_eci_km,
+                state.velocity_eci_km_s,
+                t_s=float(state.t_s),
+                earth_rotation_rad_s=float(EARTH_ROT_RATE_RAD_S if omega_raw is None else omega_raw),
+                frame_model=str(env_local.get("drag_frame_model", "inertial_z")),
+                jd_utc_start=env_local.get("jd_utc_start"),
+                eop_path=env_local.get("drag_eop_path"),
+            )
             v_rel_body = c_bn @ v_rel_eci_km_s
             env_local["drag_area_m2"] = geom.projected_area_m2(-v_rel_body)
 
-            sun_dir_eci = np.array(env_local.get("sun_dir_eci", np.array([1.0, 0.0, 0.0])), dtype=float)
-            s_norm = float(np.linalg.norm(sun_dir_eci))
-            if s_norm > 0.0:
-                sun_dir_body = c_bn @ (sun_dir_eci / s_norm)
+            srp_geometry = resolve_srp_geometry(state.position_eci_km, state.t_s, env_local)
+            sun_dir_eci = np.array(srp_geometry["sun_dir_sc_eci"], dtype=float)
+            if float(np.linalg.norm(sun_dir_eci)) > 0.0:
+                sun_dir_body = c_bn @ sun_dir_eci
                 env_local["srp_area_m2"] = geom.projected_area_m2(-sun_dir_body)
 
         x_orbit = np.hstack((state.position_eci_km, state.velocity_eci_km_s))
@@ -127,9 +153,7 @@ class OrbitalAttitudeDynamics(DynamicsModel):
                         env=env_local,
                     )
                 omega_raw = env_local.get("drag_earth_rotation_rad_s", EARTH_ROT_RATE_RAD_S)
-                from sim.aero.core import atmosphere_relative_velocity_eci_km_s
-
-                v_rel_eci_km_s = atmosphere_relative_velocity_eci_km_s(
+                v_rel_eci_km_s = aero_core.atmosphere_relative_velocity_eci_km_s(
                     midpoint_truth.position_eci_km,
                     midpoint_truth.velocity_eci_km_s,
                     t_s=float(midpoint_truth.t_s),
@@ -143,16 +167,14 @@ class OrbitalAttitudeDynamics(DynamicsModel):
                 env_local["drag_v_rel_norm_m_s"] = float(np.linalg.norm(v_rel_eci_m_s))
 
             if self.disturbance_model is not None and bool(getattr(disturbance_cfg, "use_srp", False)):
-                sun_dir_eci = env_local.get("sun_dir_eci")
-                if sun_dir_eci is not None:
-                    sun_dir_eci = np.asarray(sun_dir_eci, dtype=float).reshape(3)
-                    sun_norm = float(np.linalg.norm(sun_dir_eci))
-                    if sun_norm > 0.0:
-                        env_local["sun_dir_eci_unit"] = sun_dir_eci / sun_norm
+                srp_geometry = resolve_srp_geometry(midpoint_truth.position_eci_km, midpoint_truth.t_s, env_local)
+                env_local["sun_dir_eci_unit"] = np.asarray(srp_geometry["sun_dir_sc_eci"], dtype=float)
+                env_local["srp_distance_scale"] = float(srp_geometry["distance_scale"])
                 env_local["srp_shadow_factor"] = srp_shadow_factor(
                     r_sc_eci_km=midpoint_truth.position_eci_km,
                     t_s=midpoint_truth.t_s,
                     env=env_local,
+                    srp_geometry=srp_geometry,
                 )
             att_dt = self._effective_substep(self.attitude_substep_s, dt_s)
             t_att = state.t_s

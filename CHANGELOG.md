@@ -6,6 +6,45 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.13.1 - 2026-06-20
+
+Release thesis: `v0.13.1` is a physics-correctness and release-readiness patch
+that tightens atmosphere frame handling, sensor timestamp semantics, actuator
+telemetry, rocket aero telemetry, and spacecraft twin/mass-property validation
+ahead of the public export.
+
+### Added
+
+- Added spacecraft twin package helpers, geometry area-profile generation, mass
+  property import/audit tooling, and documentation for simulator-ready
+  body-frame geometry and inertia assumptions.
+- Added regression coverage for attitude-dependent drag/SRP geometry,
+  orbit-determination attitude/Cd fitting, mass-property validation, composite
+  sensor timing, rocket aero telemetry, reaction-wheel telemetry, and re-entry
+  frame plumbing.
+
+### Changed
+
+- Updated orbit-determination and atmosphere utilities to carry elapsed
+  `jd_utc_start` timing, HPOP-like drag/density frame settings, attitude-aware
+  geometry profiles, holdout metrics, and covariance diagnostics more
+  consistently through validation and review evidence.
+- Updated RPO trainer tuning, dashboard behavior, cislunar level config, and
+  game-mode tests for the current training experience.
+
+### Fixed
+
+- Fixed spherical harmonics/zonal force double counting, attitude-coupled
+  drag/SRP area resolution, reaction-wheel torque sign/telemetry, magnetic
+  dipole scaling, MPC sign conventions, keepout crossing checks, delayed
+  sensor timestamps, EKF/UKF elapsed-time prediction, stale measurement
+  handling, RCS force-only torque passthrough, rocket q/Mach/aero telemetry,
+  re-entry altitude/frame consistency, and validation of nonphysical mass or
+  ECI initial-state inputs.
+- Restored density-frame fallback to configured drag-frame settings so HPOP-like
+  validation configs evaluate density and drag in the same Earth-fixed frame
+  unless a separate density frame is explicitly requested.
+
 ## 0.13.0 - 2026-06-19
 
 Release thesis: `v0.13.0` adds the private mission-input and orbit-determination

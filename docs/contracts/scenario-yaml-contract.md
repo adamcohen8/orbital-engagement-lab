@@ -190,6 +190,12 @@ Preset merge contract:
 - If a local override provides `specs.mass_kg` without `dry_mass_kg` or
   `fuel_mass_kg`, preset dry/fuel masses are ignored for that object so the
   explicit total mass is honored.
+- Objects may define `specs.mass_properties.inertia_kg_m2` as a finite 3x3
+  body-frame inertia matrix in kg m^2. Strict validation rejects explicitly
+  supplied inertia matrices that are non-symmetric, not positive definite, or
+  fail principal-moment triangle inequalities. Optional audit metadata includes
+  `center_of_mass_body_m`, `inertia_reference_point`, `frame`, `source`, and
+  `confidence`.
 
 Preset resolution order:
 

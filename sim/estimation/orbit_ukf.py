@@ -22,40 +22,28 @@ class OrbitUKFEstimator(Estimator):
     kappa: float = 0.0
 
     def update(self, belief: StateBelief, measurement: Measurement | None, t_s: float) -> StateBelief:
-        n = belief.state.size
-        lam = self.alpha**2 * (n + self.kappa) - n
-        wm = np.full(2 * n + 1, 1.0 / (2.0 * (n + lam)))
-        wc = wm.copy()
-        wm[0] = lam / (n + lam)
-        wc[0] = wm[0] + (1.0 - self.alpha**2 + self.beta)
-
-        sigma = self._sigma_points(belief.state, belief.covariance, lam)
-        sigma_pred = np.array(
-            [
-                self.propagator.propagate(
-                    x_eci=s,
-                    dt_s=self.dt_s,
-                    t_s=belief.last_update_t_s,
-                    command_accel_eci_km_s2=np.zeros(3),
-                    env={},
-                    ctx=self.context,
-                )
-                for s in sigma
-            ]
+        output_t_s = float(t_s)
+        meas_t_s = output_t_s
+        if measurement is not None:
+            meas_t_s = float(np.clip(float(measurement.t_s), float(belief.last_update_t_s), output_t_s))
+        x_pred, p_pred, sigma_pred, wm, wc = self._predict(
+            belief.state,
+            belief.covariance,
+            from_t_s=float(belief.last_update_t_s),
+            to_t_s=meas_t_s,
         )
 
-        x_pred = np.sum(wm[:, None] * sigma_pred, axis=0)
-        p_pred = np.diag(self.process_noise_diag)
-        for i in range(2 * n + 1):
-            dx = sigma_pred[i] - x_pred
-            p_pred += wc[i] * np.outer(dx, dx)
-
         if measurement is None:
-            return StateBelief(state=x_pred, covariance=p_pred, last_update_t_s=t_s)
+            if meas_t_s < output_t_s:
+                x_pred, p_pred, _, _, _ = self._predict(x_pred, p_pred, from_t_s=meas_t_s, to_t_s=output_t_s)
+            return StateBelief(state=x_pred, covariance=p_pred, last_update_t_s=output_t_s)
         z = np.asarray(measurement.vector, dtype=float).reshape(-1)
-        if z.size < n:
-            return StateBelief(state=x_pred, covariance=p_pred, last_update_t_s=t_s)
+        if z.size < x_pred.size:
+            if meas_t_s < output_t_s:
+                x_pred, p_pred, _, _, _ = self._predict(x_pred, p_pred, from_t_s=meas_t_s, to_t_s=output_t_s)
+            return StateBelief(state=x_pred, covariance=p_pred, last_update_t_s=output_t_s)
 
+        n = x_pred.size
         h_sigma = sigma_pred
         z_pred = np.sum(wm[:, None] * h_sigma, axis=0)
         r = np.diag(self.meas_noise_diag)
@@ -76,7 +64,48 @@ class OrbitUKFEstimator(Estimator):
         i_kh = np.eye(n) - k_gain
         p_upd = i_kh @ p_pred @ i_kh.T + k_gain @ r @ k_gain.T
         p_upd = 0.5 * (p_upd + p_upd.T)
-        return StateBelief(state=x_upd, covariance=p_upd, last_update_t_s=t_s)
+        if meas_t_s < output_t_s:
+            x_upd, p_upd, _, _, _ = self._predict(x_upd, p_upd, from_t_s=meas_t_s, to_t_s=output_t_s)
+        return StateBelief(state=x_upd, covariance=p_upd, last_update_t_s=output_t_s)
+
+    def _predict(
+        self,
+        state: np.ndarray,
+        covariance: np.ndarray,
+        *,
+        from_t_s: float,
+        to_t_s: float,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        n = np.asarray(state, dtype=float).reshape(-1).size
+        lam = self.alpha**2 * (n + self.kappa) - n
+        wm = np.full(2 * n + 1, 1.0 / (2.0 * (n + lam)))
+        wc = wm.copy()
+        wm[0] = lam / (n + lam)
+        wc[0] = wm[0] + (1.0 - self.alpha**2 + self.beta)
+
+        sigma = self._sigma_points(state, covariance, lam)
+        dt_s = max(float(to_t_s) - float(from_t_s), 0.0)
+        sigma_pred = np.array(
+            [
+                self.propagator.propagate(
+                    x_eci=s,
+                    dt_s=dt_s,
+                    t_s=float(from_t_s),
+                    command_accel_eci_km_s2=np.zeros(3),
+                    env={},
+                    ctx=self.context,
+                )
+                for s in sigma
+            ]
+        )
+
+        x_pred = np.sum(wm[:, None] * sigma_pred, axis=0)
+        q_scale = dt_s / self.dt_s if self.dt_s > 0.0 else 1.0
+        p_pred = np.diag(self.process_noise_diag) * max(q_scale, 0.0)
+        for i in range(2 * n + 1):
+            dx = sigma_pred[i] - x_pred
+            p_pred += wc[i] * np.outer(dx, dx)
+        return x_pred, 0.5 * (p_pred + p_pred.T), sigma_pred, wm, wc
 
     def _sigma_points(self, x: np.ndarray, p: np.ndarray, lam: float) -> np.ndarray:
         n = x.size

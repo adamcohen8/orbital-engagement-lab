@@ -22,6 +22,7 @@ from sim.dynamics.orbit.eclipse import resolve_srp_geometry, srp_shadow_factor
 from sim.dynamics.orbit.environment import EARTH_ROT_RATE_RAD_S
 from sim.dynamics.orbit.epoch import AU_KM, datetime_to_julian_date, gmst_angle_rad_from_jd
 from sim.dynamics.orbit.msis86_backend import msis86_density as msis86_backend_density
+from sim.utils.geodesy import geodetic_to_ecef_km
 
 
 class TestOrbitAtmosphereModels(unittest.TestCase):
@@ -82,6 +83,16 @@ class TestOrbitAtmosphereModels(unittest.TestCase):
         self.assertGreater(rho, 1.0)
         self.assertLess(rho, 1.4)
 
+    def test_ussa1976_honors_wgs84_altitude_env(self):
+        r = geodetic_to_ecef_km(lat_deg=45.0, lon_deg=0.0, alt_km=50.0)
+
+        rho_wgs84 = density_from_model("ussa1976", r, 0.0, env={"geodetic_model": "wgs84"})
+        rho_spherical = density_from_model("ussa1976", r, 0.0, env={})
+
+        self.assertGreater(rho_wgs84, 0.0)
+        self.assertGreater(rho_spherical, 0.0)
+        self.assertNotAlmostEqual(rho_wgs84, rho_spherical)
+
     def test_density_models_selectable(self):
         r = np.array([6778.137, 0.0, 0.0], dtype=float)
         rho_exp = density_from_model("exponential", r, 0.0, env={})
@@ -117,6 +128,48 @@ class TestOrbitAtmosphereModels(unittest.TestCase):
         rho = density_from_model("nrlmsise00", r, t_s=60.0, env=env)
         self.assertAlmostEqual(rho, 1.23e-11)
         self.assertEqual(len(calls), 1)
+
+    def test_density_callable_uses_jd_utc_start_plus_elapsed_time(self):
+        calls = []
+
+        def _fn(alt_km, lat_deg, lon_deg, dt_utc, env):
+            calls.append(dt_utc)
+            return 1.0e-11
+
+        start = datetime(2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+        r = np.array([7000.0, 0.0, 0.0], dtype=float)
+        rho = density_from_model(
+            "nrlmsise00",
+            r,
+            t_s=3600.0,
+            env={"jd_utc_start": datetime_to_julian_date(start), "nrlmsise00_density_callable": _fn},
+        )
+
+        self.assertAlmostEqual(rho, 1.0e-11)
+        self.assertAlmostEqual(
+            calls[0].timestamp(),
+            datetime(2024, 1, 1, 1, 0, 0, tzinfo=timezone.utc).timestamp(),
+            places=3,
+        )
+
+    def test_density_ecef_conversion_falls_back_to_drag_frame_settings(self):
+        r = np.array([7000.0, 0.0, 0.0], dtype=float)
+        with patch(
+            "sim.dynamics.orbit.atmosphere.eci_to_ecef_harmonic",
+            return_value=np.array([7000.0, 0.0, 0.0], dtype=float),
+        ) as rot:
+            _spherical_lat_lon_deg_from_eci(
+                r,
+                12.0,
+                env={
+                    "drag_frame_model": "hpop_like",
+                    "drag_eop_path": "validation/EOP-All.txt",
+                    "jd_utc_start": 2460310.5,
+                },
+            )
+
+        self.assertEqual(rot.call_args.kwargs["frame_model"], "hpop_like")
+        self.assertEqual(rot.call_args.kwargs["eop_path"], "validation/EOP-All.txt")
 
     def test_density_nrlmsise00_builtin_backend_returns_finite_density(self):
         r = np.array([6378.137 + 400.0, 0.0, 0.0], dtype=float)

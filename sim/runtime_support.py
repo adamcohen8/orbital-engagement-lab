@@ -4,6 +4,7 @@ import importlib
 import inspect
 import logging
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable
 
 import numpy as np
@@ -31,6 +32,7 @@ from sim.config import SimulationScenarioConfig
 from sim.control.attitude.zero_torque import ZeroTorqueController
 from sim.control.orbit.zero_controller import ZeroController
 from sim.core.models import Command, StateBelief, StateTruth
+from sim.digital_twin.mass_properties import resolve_inertia_kg_m2
 from sim.dynamics.attitude.disturbances import DisturbanceTorqueConfig, DisturbanceTorqueModel
 from sim.dynamics.model import OrbitalAttitudeDynamics
 from sim.dynamics.orbit.cr3bp import (
@@ -55,6 +57,7 @@ from sim.dynamics.orbit.propagator import (
     third_body_sun_plugin,
 )
 from sim.dynamics.orbit.tle import tle_block_to_rv_eci
+from sim.dynamics.spacecraft_geometry import GeometryAreaProfile
 from sim.estimation.joint_state import JointStateEstimator
 from sim.estimation.orbit_ekf import OrbitEKFEstimator
 from sim.knowledge.object_tracking import (
@@ -89,6 +92,34 @@ from sim.utils.geodesy import ecef_to_geodetic_deg_km
 from sim.utils.quaternion import quaternion_to_dcm_bn
 
 logger = logging.getLogger(__name__)
+
+
+def _geometry_profile_path_from_specs(specs: dict[str, Any]) -> str | None:
+    raw = dict(specs or {})
+    for key in ("geometry_profile_path", "area_profile_path", "attitude_area_profile_path"):
+        value = raw.get(key)
+        if value not in (None, ""):
+            return str(value)
+    geometry = raw.get("geometry")
+    if isinstance(geometry, dict):
+        for key in ("profile_path", "area_profile_path", "attitude_area_profile_path"):
+            value = geometry.get(key)
+            if value not in (None, ""):
+                return str(value)
+    aero = raw.get("aero")
+    if isinstance(aero, dict):
+        for key in ("geometry_profile_path", "area_profile_path"):
+            value = aero.get(key)
+            if value not in (None, ""):
+                return str(value)
+    return None
+
+
+def _load_geometry_area_profile_from_specs(specs: dict[str, Any]) -> GeometryAreaProfile | None:
+    path_text = _geometry_profile_path_from_specs(specs)
+    if path_text is None:
+        return None
+    return GeometryAreaProfile.load(Path(path_text))
 
 
 def _earth_impact_policy_for_object(termination: Any, object_id: str) -> dict[str, Any]:
@@ -415,6 +446,8 @@ def _default_truth_from_agent(agent_cfg: Any, t_s: float = 0.0, target_jd_utc: f
         mass_kg = dry_mass_kg + fuel_mass_kg
     else:
         mass_kg = float(specs.get("mass_kg", 300.0))
+    if not np.isfinite(mass_kg) or mass_kg <= 0.0:
+        raise ValueError("Object mass must be a positive finite value.")
     pos, vel = _rv_from_initial_state(s0, target_jd_utc=target_jd_utc)
     return StateTruth(
         position_eci_km=pos,
@@ -438,12 +471,7 @@ def _resolve_satellite_isp_s(specs: dict[str, Any]) -> float:
 
 
 def _resolve_satellite_inertia_kg_m2(specs: dict[str, Any]) -> np.ndarray:
-    mp = dict(specs.get("mass_properties", {}) or {})
-    if "inertia_kg_m2" in mp:
-        inertia = np.array(mp.get("inertia_kg_m2"), dtype=float)
-        if inertia.shape == (3, 3) and np.all(np.isfinite(inertia)):
-            return inertia
-    return np.diag([120.0, 100.0, 80.0])
+    return resolve_inertia_kg_m2(specs, default=np.diag([120.0, 100.0, 80.0]))
 
 
 def _satellite_spec_float(
@@ -775,6 +803,7 @@ class AgentRuntime:
     actuator: Any | None = None
     actuator_limits: dict[str, Any] = field(default_factory=dict)
     use_actuator_stack: bool = False
+    mass_properties: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -859,14 +888,15 @@ def _build_orbit_propagator(cfg: SimulationScenarioConfig) -> OrbitPropagator:
     orbit = dict(cfg.simulator.dynamics.get("orbit", {}) or {})
     acceleration = dict(getattr(cfg.simulator, "acceleration", {}) or {})
     sh = dict(orbit.get("spherical_harmonics", {}) or {})
+    sh_enabled = bool(sh.get("enabled", False))
     plugins = []
-    if bool(orbit.get("j2", False)):
+    if bool(orbit.get("j2", False)) and not sh_enabled:
         plugins.append(j2_plugin)
-    if bool(orbit.get("j3", False)):
+    if bool(orbit.get("j3", False)) and not sh_enabled:
         plugins.append(j3_plugin)
-    if bool(orbit.get("j4", False)):
+    if bool(orbit.get("j4", False)) and not sh_enabled:
         plugins.append(j4_plugin)
-    if bool(sh.get("enabled", False)):
+    if sh_enabled:
         plugins.append(spherical_harmonics_plugin)
     if bool(orbit.get("drag", False)):
         plugins.append(drag_plugin)
@@ -921,6 +951,7 @@ def _create_satellite_runtime(
     cd = aero_props.cd
     cd_specified = aero_spec_get(specs, ("cd", "drag_cd")) is not None
     cr, cr_specified = _satellite_spec_float(specs, ("cr", "srp_cr"), default=1.2)
+    geometry_area_profile = _load_geometry_area_profile_from_specs(specs)
     noise = dict((agent_cfg.knowledge or {}).get("sensor_error", {}) or {})
     pos_sigma = float(np.array(noise.get("pos_sigma_km", [0.001])).reshape(-1)[0])
     vel_sigma = float(np.array(noise.get("vel_sigma_km_s", [1e-5])).reshape(-1)[0])
@@ -1000,6 +1031,8 @@ def _create_satellite_runtime(
         disturbance_config_kwargs["srp_area_m2"] = srp_area_m2
     if cr_specified:
         disturbance_config_kwargs["srp_cr"] = cr
+    if geometry_area_profile is not None:
+        disturbance_config_kwargs["geometry_area_profile"] = geometry_area_profile
     disturbance_model = DisturbanceTorqueModel(
         mu_km3_s2=EARTH_MU_KM3_S2,
         inertia_kg_m2=inertia_kg_m2,
@@ -1017,6 +1050,7 @@ def _create_satellite_runtime(
         lift_coefficient=lift_coefficient,
         lift_axis_body=lift_axis_body,
         srp_area_m2=srp_area_m2 if srp_area_specified else None,
+        geometry_area_profile=geometry_area_profile,
         orbit_substep_s=float(orbit_cfg["orbit_substep_s"]) if orbit_cfg.get("orbit_substep_s") is not None else None,
         attitude_substep_s=float(att_cfg["attitude_substep_s"])
         if att_cfg.get("attitude_substep_s") is not None
@@ -1086,6 +1120,7 @@ def _create_satellite_runtime(
         actuator=actuator,
         actuator_limits=actuator_limits,
         use_actuator_stack=use_actuator_stack,
+        mass_properties=dict(specs.get("mass_properties", {}) or {}),
     )
 
 
@@ -1164,6 +1199,10 @@ def _create_rocket_runtime(
         alpha_limit_deg=float(aero_dyn.get("alpha_limit_deg", 20.0)),
         beta_limit_deg=float(aero_dyn.get("beta_limit_deg", 20.0)),
     )
+    rocket_inertia_kg_m2 = resolve_inertia_kg_m2(
+        r_specs,
+        default=np.array([[8.0e5, 0.0, 0.0], [0.0, 8.0e5, 0.0], [0.0, 0.0, 2.0e4]], dtype=float),
+    )
     sim_cfg = RocketSimConfig(
         dt_s=float(cfg.simulator.dt_s),
         max_time_s=float(cfg.simulator.duration_s),
@@ -1191,13 +1230,7 @@ def _create_rocket_runtime(
         atmosphere_env=atmosphere_env,
         use_wgs84_geodesy=bool(rocket_dyn.get("use_wgs84_geodesy", True)),
         wind_enu_m_s=np.array(rocket_dyn.get("wind_enu_m_s", [0.0, 0.0, 0.0]), dtype=float),
-        inertia_kg_m2=np.array(
-            (r_specs.get("mass_properties", {}) or {}).get(
-                "inertia_kg_m2",
-                [[8.0e5, 0.0, 0.0], [0.0, 8.0e5, 0.0], [0.0, 0.0, 2.0e4]],
-            ),
-            dtype=float,
-        ),
+        inertia_kg_m2=rocket_inertia_kg_m2,
         attitude_substep_s=float(rocket_dyn.get("attitude_substep_s", att_dyn.get("attitude_substep_s", 0.02)) or 0.02),
         attitude_mode=str(rocket_dyn.get("attitude_mode", "dynamic")),
         tvc_time_constant_s=float(rocket_dyn.get("tvc_time_constant_s", 0.1)),
@@ -1277,6 +1310,7 @@ def _create_rocket_runtime(
         orbital_max_thrust_n=None,
         thruster_direction_body=None,
         thruster_position_body_m=None,
+        mass_properties=dict(r_specs.get("mass_properties", {}) or {}),
     )
 
 

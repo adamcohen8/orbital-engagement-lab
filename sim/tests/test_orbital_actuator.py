@@ -181,6 +181,34 @@ class TestOrbitalActuator(unittest.TestCase):
         self.assertTrue(np.linalg.norm(out.thrust_eci_km_s2) > 0.0)
         self.assertTrue(np.linalg.norm(out.torque_body_nm) > 0.0)
 
+    def test_rcs_force_only_does_not_pass_unallocated_torque(self):
+        actuator = OrbitalActuator()
+        cluster = RcsClusterLimits(
+            thrusters=(
+                RcsThruster(
+                    name="plus-x",
+                    position_body_m=np.zeros(3, dtype=float),
+                    force_direction_body=np.array([1.0, 0.0, 0.0], dtype=float),
+                    max_thrust_n=2.0,
+                    isp_s=230.0,
+                ),
+            ),
+            allocation_mode="force_only",
+        )
+        limits = {"orbital": OrbitalActuatorLimits(max_accel_km_s2=1.0, rcs_cluster=cluster)}
+        command = Command(
+            thrust_eci_km_s2=np.array([1e-6, 0.0, 0.0], dtype=float),
+            torque_body_nm=np.array([0.1, -0.2, 0.3], dtype=float),
+            mode_flags={
+                "current_mass_kg": 1000.0,
+                "current_attitude_quat_bn": np.array([1.0, 0.0, 0.0, 0.0], dtype=float),
+            },
+        )
+
+        out = actuator.apply(command, limits, dt_s=1.0)
+
+        self.assertTrue(np.allclose(out.torque_body_nm, np.zeros(3)))
+
     def test_basic_rcs_6dof_preset_has_full_force_and_torque_authority(self):
         thrusters = BASIC_RCS_6DOF["orbital"]["rcs_cluster"]["thrusters"]
         columns = []

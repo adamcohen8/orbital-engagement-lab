@@ -90,7 +90,6 @@ def test_reentry_relative_speed_uses_configured_drag_frame() -> None:
                 "density_kg_m3": 1.0e-9,
                 "drag_frame_model": "hpop_like",
                 "jd_utc_start": 2460310.5,
-                "drag_eop_path": "validation/EOP-All.txt",
             },
             active=True,
         )
@@ -99,7 +98,7 @@ def test_reentry_relative_speed_uses_configured_drag_frame() -> None:
     kwargs = rel_vel.call_args.kwargs
     assert kwargs["frame_model"] == "hpop_like"
     assert kwargs["jd_utc_start"] == 2460310.5
-    assert kwargs["eop_path"] == "validation/EOP-All.txt"
+    assert kwargs["eop_path"] is None
 
 
 def test_reentry_heat_rate_can_terminate_run(tmp_path: Path) -> None:

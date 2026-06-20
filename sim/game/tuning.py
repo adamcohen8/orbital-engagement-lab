@@ -6,7 +6,13 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class GameTuning:
     speed_multiplier_options: tuple[float, ...] = (1.0, 2.0, 5.0, 10.0, 25.0, 50.0, 100.0, 200.0)
-    speed_dt_schedule: tuple[tuple[float, float], ...] = ((10.0, 2.0), (25.0, 2.0), (50.0, 5.0), (100.0, 10.0))
+    speed_dt_schedule: tuple[tuple[float, float], ...] = (
+        (1.0, 0.25),
+        (10.0, 0.5),
+        (25.0, 1.0),
+        (50.0, 5.0),
+        (100.0, 10.0),
+    )
     max_realtime_steps_per_frame: int = 12
     dashboard_fps: float = 60.0
     game_recording_fps: float = 30.0

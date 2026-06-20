@@ -7,9 +7,10 @@ from unittest.mock import patch
 import numpy as np
 
 import sim.dynamics.orbit.spherical_harmonics as spherical_harmonics
+from sim.config import scenario_config_from_dict
 from sim.dynamics.orbit.accelerations import accel_j2
 from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2
-from sim.dynamics.orbit.propagator import spherical_harmonics_plugin
+from sim.dynamics.orbit.propagator import j2_plugin, j3_plugin, j4_plugin, spherical_harmonics_plugin
 from sim.dynamics.orbit.spherical_harmonics import (
     GravityModelDownload,
     SphericalHarmonicTerm,
@@ -18,6 +19,7 @@ from sim.dynamics.orbit.spherical_harmonics import (
     load_icgem_gfc_terms,
     parse_spherical_harmonic_terms,
 )
+from sim.runtime_support import _build_orbit_propagator
 
 
 class TestOrbitSphericalHarmonics(unittest.TestCase):
@@ -108,6 +110,34 @@ class TestOrbitSphericalHarmonics(unittest.TestCase):
             )
         a_j2 = accel_j2(r, EARTH_MU_KM3_S2, j2=0.0010826355254902923, re_km=6378.1363)
         self.assertLess(float(np.linalg.norm(a - a_j2)), 1e-10)
+
+    def test_spherical_harmonics_replaces_explicit_zonals_in_runtime_plugins(self):
+        cfg = scenario_config_from_dict(
+            {
+                "rocket": {"enabled": False},
+                "target": {"enabled": True, "specs": {"mass_kg": 100.0}},
+                "chaser": {"enabled": False},
+                "simulator": {
+                    "duration_s": 1.0,
+                    "dt_s": 1.0,
+                    "dynamics": {
+                        "orbit": {
+                            "j2": True,
+                            "j3": True,
+                            "j4": True,
+                            "spherical_harmonics": {"enabled": True, "terms": [{"n": 2, "m": 0, "c_nm": -1e-3}]},
+                        }
+                    },
+                },
+            }
+        )
+
+        propagator = _build_orbit_propagator(cfg)
+
+        self.assertIn(spherical_harmonics_plugin, propagator.plugins)
+        self.assertNotIn(j2_plugin, propagator.plugins)
+        self.assertNotIn(j3_plugin, propagator.plugins)
+        self.assertNotIn(j4_plugin, propagator.plugins)
 
     def test_load_icgem_gfc_terms_normalized_flag(self):
         gfc_txt = "\n".join(
