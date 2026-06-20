@@ -139,7 +139,7 @@ class RelativeOrbitMPCController(Controller):
         x_rel_rect = ric_curv_to_rect(x_rel_curv, r0_km=r0)
         x_chaser0 = ric_rect_state_to_eci(x_rel_rect, r_tgt, v_tgt)
 
-        x_rel_err = self.state_signs * x_rel_rect - self.target_rel_ric_rect
+        x_rel_err = self.state_signs * (x_rel_rect - self.target_rel_ric_rect)
         a_seed_ric = -(self.seed_kp_pos * x_rel_err[:3] + self.seed_kd_vel * x_rel_err[3:])
         a_seed_eci = c_ir @ self._project_accel(a_seed_ric)
 
@@ -325,7 +325,7 @@ class RelativeOrbitMPCController(Controller):
                 accel_cmd_eci_km_s2=u,
             )
             x_rel_rect = self._relative_rect_ric(x_chaser=x_c, x_target=x_t)
-            err = self.state_signs * x_rel_rect - self.target_rel_ric_rect
+            err = self.state_signs * (x_rel_rect - self.target_rel_ric_rect)
             du = u - u_prev
             j += float(np.sum(self.q_weights * err * err))
             j += float(np.sum(self.r_weights * u * u))

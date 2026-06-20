@@ -261,7 +261,7 @@ class _RocketStepper:
             truth=agent.truth,
             throttle=throttle,
             thrust_eci_km_s2=accel,
-            torque_body_nm=e.zero3.copy(),
+            torque_body_nm=np.array(getattr(agent.rocket_state, "_last_step_torque_body_nm", e.zero3), dtype=float).reshape(3),
             delta_v_m_s=accel_mag * e.dt * 1e3,
             max_accel_km_s2=accel_mag,
             burned=bool(accel_mag > 1e-15),

@@ -1,0 +1,25 @@
+schema: oel.spacecraft_twin.v0
+object_id: demo_sat
+display_name: Demo Synthetic Satellite Twin
+version: 0.1.0
+
+object:
+  path: object.yaml
+
+geometry:
+  area_profile_path: geometry_area_profile.json
+  source_mesh_path: source/demo_sat_box.stl
+  confidence: medium
+
+mass_properties:
+  path: mass_properties.yaml
+  confidence: high
+
+source_evidence:
+  path: source_evidence.yaml
+
+assumptions:
+  path: assumptions.yaml
+
+validation:
+  report_path: validation_report.md

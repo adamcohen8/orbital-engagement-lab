@@ -10,7 +10,9 @@ metadata:
     control_mode: ric_translation
     controlled_object_id: target
     ric_reference_object_id: target_reference
-    camera_mode: target_pair
+    camera_mode: rule_toggle_pair
+    camera_rule_mode: current_pair
+    camera_rule_toggle_enabled: true
     show_target_hcw_path: true
     difficulty: hard
     player_max_accel_km_s2: 1.5e-05
@@ -24,11 +26,12 @@ metadata:
         to keep at least 100 m of separation until time expires.
       pass_criteria:
       - Maintain at least 100 m separation from the chaser.
+      - Stay within 1 km of the target reference orbit to remain mission capable.
       - Survive until the timer expires.
       - Stay under the target delta-v budget.
       instructor_notes:
       - This is the reverse of level 9: the player flies the target, not the chaser.
-      - The chaser uses sim.control.orbit.ric_pd.RICPDTransferController with the 10 km experiment guidance settings.
+      - The chaser uses the public flagship 10 km RIC_PD orbital guidance without attitude gating.
       - The camera follows the target/chaser pair so evasive motion stays visible.
       - The red dashed curve is the target vehicle's current HCW coast path.
       - If the chaser uses its full delta-v budget, it coasts for the rest of the attempt.
@@ -36,7 +39,8 @@ metadata:
       chaser_object_id: chaser
       keepout_radius_km: 0.1
       survival_goal: true
-      max_time_s: 6000.0
+      max_time_s: 9000.0
+      max_target_reference_range_km: 1.0
       max_target_delta_v_m_s: 1.0
       max_delta_v_m_s: 25.0
       fail_on_delta_v_budget: false
@@ -56,7 +60,7 @@ objects:
         frame: curv
         state:
         - 0.0
-        - -10.0
+        - -5.0
         - 0.0
         - 0.0
         - 0.0
@@ -212,7 +216,7 @@ objects:
     kind: satellite
 simulator:
   scenario_type: auto
-  duration_s: 6000.0
+  duration_s: 9000.0
   dt_s: 1.0
   dynamics:
     orbit:

@@ -1,0 +1,12 @@
+mass_kg: 42.0
+mass_properties:
+  mass_kg: 42.0
+  center_of_mass_body_m: [0.0, 0.0, 0.0]
+  inertia_kg_m2:
+    - [4.0, 0.0, 0.0]
+    - [0.0, 5.0, 0.0]
+    - [0.0, 0.0, 6.0]
+  inertia_reference_point: center_of_mass
+  frame: body
+  source: cad_export
+  confidence: high

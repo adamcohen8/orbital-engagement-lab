@@ -18,6 +18,22 @@ _BURN_AXIS_SHORT_LABEL = {"radial": "R", "in_track": "I", "cross_track": "C"}
 _BURN_AXIS_MIN_COMPONENT_FRACTION = 0.75
 
 
+def _segment_crosses_sphere_km(positions_km: np.ndarray, radius_km: float) -> bool:
+    pos = np.asarray(positions_km, dtype=float)
+    if pos.ndim != 2 or pos.shape[0] < 2 or pos.shape[1] < 3:
+        return False
+    r2 = float(radius_km) ** 2
+    p0 = pos[:-1, :3]
+    p1 = pos[1:, :3]
+    d = p1 - p0
+    denom = np.sum(d * d, axis=1)
+    u = np.zeros_like(denom)
+    moving = denom > 0.0
+    u[moving] = np.clip(-np.sum(p0[moving] * d[moving], axis=1) / denom[moving], 0.0, 1.0)
+    closest = p0 + u[:, None] * d
+    return bool(np.any(np.sum(closest * closest, axis=1) < r2))
+
+
 @dataclass(frozen=True)
 class ForbiddenRegionConfig:
     name: str
@@ -270,6 +286,7 @@ class RPOTrainingConfig:
     relative_frame: str = "ric"
     target_object_id: str = "target"
     chaser_object_id: str = "chaser"
+    target_reference_object_id: str = "target_reference"
     keepout_radius_km: float | None = None
     goal_range_km: float | None = None
     goal_range_tolerance_km: float | None = None
@@ -292,6 +309,7 @@ class RPOTrainingConfig:
     hard_speed_limit_km_s: float | None = None
     max_delta_v_m_s: float | None = None
     max_target_delta_v_m_s: float | None = None
+    max_target_reference_range_km: float | None = None
     fail_on_delta_v_budget: bool = True
     coast_chaser_after_delta_v_budget: bool = False
     survival_goal: bool = False
@@ -328,6 +346,10 @@ class RPOTrainingConfig:
             .lower(),
             target_object_id=str(raw.get("target_object_id", game_cfg.get("target_object_id", "target")) or "target"),
             chaser_object_id=str(raw.get("chaser_object_id", game_cfg.get("chaser_object_id", "chaser")) or "chaser"),
+            target_reference_object_id=str(
+                raw.get("target_reference_object_id", game_cfg.get("ric_reference_object_id", "target_reference"))
+                or "target_reference"
+            ),
             keepout_radius_km=_optional_float(raw.get("keepout_radius_km")),
             goal_range_km=_optional_float(raw.get("goal_range_km")),
             goal_range_tolerance_km=_optional_float(raw.get("goal_range_tolerance_km")),
@@ -352,6 +374,7 @@ class RPOTrainingConfig:
             hard_speed_limit_km_s=_optional_float(raw.get("hard_speed_limit_km_s")),
             max_delta_v_m_s=_optional_float(raw.get("max_delta_v_m_s")),
             max_target_delta_v_m_s=_optional_float(raw.get("max_target_delta_v_m_s")),
+            max_target_reference_range_km=_optional_float(raw.get("max_target_reference_range_km")),
             fail_on_delta_v_budget=bool(raw.get("fail_on_delta_v_budget", True)),
             coast_chaser_after_delta_v_budget=bool(raw.get("coast_chaser_after_delta_v_budget", False)),
             survival_goal=bool(raw.get("survival_goal", False)),
@@ -420,6 +443,9 @@ class RPOTrainingScore:
     inspection_gates_total: int
     inspection_gate_names: tuple[str, ...]
     hints: tuple[str, ...]
+    final_target_reference_range_km: float = float("nan")
+    max_target_reference_range_km: float | None = None
+    target_reference_range_violation: bool = False
 
 
 class RPOTrainingTracker:
@@ -430,6 +456,7 @@ class RPOTrainingTracker:
         self.thrust_hist: list[np.ndarray] = []
         self.thrust_ric_hist: list[np.ndarray] = []
         self.target_thrust_hist: list[np.ndarray] = []
+        self.target_reference_rel_hist: list[np.ndarray] = []
         self.mean_motion_hist: list[float] = []
         self._speed_multiplier_changed = False
         self._speed_multiplier_change_sample_idx: int | None = None
@@ -461,6 +488,7 @@ class RPOTrainingTracker:
         self.thrust_hist.clear()
         self.thrust_ric_hist.clear()
         self.target_thrust_hist.clear()
+        self.target_reference_rel_hist.clear()
         self.mean_motion_hist.clear()
         self._speed_multiplier_changed = False
         self._speed_multiplier_change_sample_idx = None
@@ -503,6 +531,12 @@ class RPOTrainingTracker:
         rel = relative_state_from_arrays(target, chaser, frame=self.config.relative_frame)
         self.t_s.append(float(snapshot.time_s))
         self.rel_ric_hist.append(rel)
+        reference = snapshot.truth.get(self.config.target_reference_object_id)
+        if reference is not None:
+            target_reference_rel = relative_state_from_arrays(reference, target, frame=self.config.relative_frame)
+        else:
+            target_reference_rel = np.full(6, np.nan, dtype=float)
+        self.target_reference_rel_hist.append(target_reference_rel)
         target_arr = np.array(target, dtype=float).reshape(-1)
         n = float("nan")
         frame_key = _relative_frame_key(self.config.relative_frame)
@@ -1087,7 +1121,10 @@ class RPOTrainingTracker:
         keepout_violation = False
         if self.config.keepout_radius_km is not None:
             inside = ranges < float(self.config.keepout_radius_km)
-            keepout_violation = bool(np.any(inside))
+            keepout_violation = bool(np.any(inside)) or _segment_crosses_sphere_km(
+                rel[:, :3],
+                float(self.config.keepout_radius_km),
+            )
             keepout_time = _sampled_dwell_time_s(inside, t)
         hard_speed_limit_violation = False
         if self.config.hard_speed_limit_radius_km is not None and self.config.hard_speed_limit_km_s is not None:
@@ -1097,6 +1134,26 @@ class RPOTrainingTracker:
             if bool(np.any(region.contains_positions(rel[:, :3]))):
                 forbidden_region_names.append(region.name)
         forbidden_region_violation = bool(forbidden_region_names)
+        target_reference_range_violation = False
+        final_target_reference_range_km = float("nan")
+        if self.config.max_target_reference_range_km is not None:
+            target_reference_rel = (
+                np.vstack(self.target_reference_rel_hist)
+                if self.target_reference_rel_hist
+                else np.zeros((0, 6), dtype=float)
+            )
+            if target_reference_rel.size:
+                target_reference_ranges = np.linalg.norm(target_reference_rel[:, :3], axis=1)
+                finite_target_reference_ranges = target_reference_ranges[np.isfinite(target_reference_ranges)]
+                if finite_target_reference_ranges.size:
+                    final_target_reference_range_km = float(finite_target_reference_ranges[-1])
+                    target_reference_range_violation = bool(
+                        np.any(finite_target_reference_ranges > float(self.config.max_target_reference_range_km))
+                    )
+                else:
+                    target_reference_range_violation = True
+            else:
+                target_reference_range_violation = True
         dv_m_s = _integrated_delta_v_m_s(thrust, t)
         target_dv_m_s = _integrated_delta_v_m_s(target_thrust, t)
         inspection_gate_status = self._inspection_gate_status()
@@ -1224,6 +1281,12 @@ class RPOTrainingTracker:
             regions = ", ".join(forbidden_region_names[:3])
             suffix = "..." if len(forbidden_region_names) > 3 else ""
             reasons.append(f"Forbidden region violated: {regions}{suffix}.")
+        if target_reference_range_violation:
+            budget_ok = False
+            reasons.append(
+                "Mission-capable radius exceeded "
+                f"({_format_distance_text(float(self.config.max_target_reference_range_km))})."
+            )
         approach_gate_warnings = list(gate_status["required_violated"])
         approach_gate_names: list[str] = []
         if achieved_time_s is not None:
@@ -1276,6 +1339,7 @@ class RPOTrainingTracker:
                     keepout_violation
                     or hard_speed_limit_violation
                     or forbidden_region_violation
+                    or target_reference_range_violation
                     or approach_gate_violation
                     or dv_failed
                     or target_dv_failed
@@ -1338,6 +1402,9 @@ class RPOTrainingTracker:
             inspection_gates_total=len(self.config.inspection_gates),
             inspection_gate_names=tuple(inspection_gate_status["satisfied"]),
             hints=hints,
+            final_target_reference_range_km=float(final_target_reference_range_km),
+            max_target_reference_range_km=self.config.max_target_reference_range_km,
+            target_reference_range_violation=bool(target_reference_range_violation),
         )
         self._score_cache = score
         return score

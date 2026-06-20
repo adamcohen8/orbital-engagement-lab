@@ -1,0 +1,9 @@
+assumptions:
+  - id: demo_area_profile
+    field: geometry.area_profile_path
+    text: Synthetic unit-area profile; not a flight article geometry.
+    confidence: medium
+  - id: demo_actuators
+    field: specs.actuator_preset
+    text: Uses the built-in BASIC_RCS_6DOF preset to exercise object readiness checks.
+    confidence: assumed

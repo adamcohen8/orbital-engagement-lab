@@ -8,11 +8,11 @@ from sim.core.models import StateTruth
 from sim.dynamics.orbit.atmosphere import density_from_model
 from sim.dynamics.orbit.eclipse import srp_shadow_factor
 from sim.dynamics.orbit.environment import EARTH_ROT_RATE_RAD_S
-from sim.dynamics.spacecraft_geometry import RectangularPrismGeometry
+from sim.dynamics.spacecraft_geometry import GeometryAreaProfile, RectangularPrismGeometry
 from sim.utils.quaternion import quaternion_to_dcm_bn
 
+# Earth dipole field parameter in T*m^3 for a simple centered dipole model.
 EARTH_MAGNETIC_DIPOLE_T_M3 = 7.94e15
-MU_0_4PI = 1e-7
 SOLAR_PRESSURE_N_M2 = 4.56e-6
 
 
@@ -32,6 +32,7 @@ class DisturbanceTorqueConfig:
     sun_dir_eci: np.ndarray = field(default_factory=lambda: np.array([1.0, 0.0, 0.0]))
     use_rectangular_prism_faces: bool = False
     rectangular_prism_dims_m: tuple[float, float, float] | None = None
+    geometry_area_profile: GeometryAreaProfile | None = None
 
 
 @dataclass(frozen=True)
@@ -77,7 +78,7 @@ class DisturbanceTorqueModel:
 
         m_eci = np.array([0.0, 0.0, EARTH_MAGNETIC_DIPOLE_T_M3])
         r_hat = r_i_m / r_norm_m
-        b_eci = MU_0_4PI * (3.0 * r_hat * np.dot(m_eci, r_hat) - m_eci) / (r_norm_m**3)
+        b_eci = (3.0 * r_hat * np.dot(m_eci, r_hat) - m_eci) / (r_norm_m**3)
         b_body = c_bn @ b_eci
         return np.cross(self.config.magnetic_dipole_body_a_m2, b_body)
 
@@ -113,6 +114,9 @@ class DisturbanceTorqueModel:
             return np.zeros(3)
 
         v_rel_body = c_bn @ v_rel_eci_m_s
+        if self.config.geometry_area_profile is not None:
+            q_dyn = 0.5 * rho * (v_norm**2) * self.config.drag_cd
+            return self.config.geometry_area_profile.pressure_torque_sum_body_nm(-v_rel_body, q_dyn)
         if self._rect_prism_geometry is not None and self.config.use_rectangular_prism_faces:
             q_dyn = 0.5 * rho * (v_norm**2) * self.config.drag_cd
             return self._rect_prism_geometry.face_torque_sum_body_nm(-v_rel_body, q_dyn)
@@ -138,11 +142,15 @@ class DisturbanceTorqueModel:
             return np.zeros(3)
 
         sun_dir_body = c_bn @ sun_dir_eci
+        distance_scale = float(env.get("srp_distance_scale", 1.0))
+        if self.config.geometry_area_profile is not None:
+            p_srp = SOLAR_PRESSURE_N_M2 * distance_scale * self.config.srp_cr * shadow
+            return self.config.geometry_area_profile.pressure_torque_sum_body_nm(-sun_dir_body, p_srp)
         if self._rect_prism_geometry is not None and self.config.use_rectangular_prism_faces:
-            p_srp = SOLAR_PRESSURE_N_M2 * self.config.srp_cr * shadow
+            p_srp = SOLAR_PRESSURE_N_M2 * distance_scale * self.config.srp_cr * shadow
             return self._rect_prism_geometry.face_torque_sum_body_nm(-sun_dir_body, p_srp)
 
-        force_mag = SOLAR_PRESSURE_N_M2 * self.config.srp_cr * self.config.srp_area_m2 * shadow
+        force_mag = SOLAR_PRESSURE_N_M2 * distance_scale * self.config.srp_cr * self.config.srp_area_m2 * shadow
         f_srp_body = -force_mag * sun_dir_body
         return np.cross(self.config.srp_cp_offset_body_m, f_srp_body)
 

@@ -1,0 +1,14 @@
+kind: satellite
+enabled: true
+role: chaser
+specs:
+  mass_kg: 42.0
+  aero:
+    cd: 2.2
+  cr: 1.2
+  actuator_preset: BASIC_RCS_6DOF
+  thruster: BASIC_CHEMICAL_BOTTOM_Z
+  max_thrust_n: 4.0
+  isp_s: 220.0
+  sensors:
+    source: synthetic_placeholder

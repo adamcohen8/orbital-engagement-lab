@@ -1348,6 +1348,7 @@ def run_game_mode(
     dashboard = PygameRPODashboard(
         target_object_id=dashboard_target_id,
         chaser_object_id=dashboard_chaser_id,
+        controlled_object_id=controlled_object_id,
         reference_object_id=ric_reference_object_id,
         relative_frame=_game_relative_frame(config),
         keepout_radius_km=training_cfg.keepout_radius_km,
@@ -1383,6 +1384,7 @@ def run_game_mode(
         target_centered_plot_planes=_game_target_centered_plot_planes(config),
         target_centered_plot_axes=_game_target_centered_plot_axes(config),
         proximity_ring_plot_planes=_game_proximity_ring_plot_planes(config),
+        target_reference_object_id=training_cfg.target_reference_object_id,
         camera_mode=_game_camera_mode(config),
         camera_rule_mode=_game_camera_rule_mode(config),
         camera_rule_toggle_enabled=_game_camera_rule_toggle_enabled(config),
@@ -1552,6 +1554,7 @@ def run_game_mode(
             briefing_lines=briefing_lines if phase_shows_briefing(phase) else (),
             debrief_lines=_score_debrief_lines(score, config=training_cfg, difficulty=difficulty),
             debrief_available=debrief_enabled,
+            render_motion=not command_state.paused and not phase_shows_briefing(phase) and not phase_is_terminal(phase),
         )
         recording_controller.capture(dashboard)
         if phase_shows_briefing(phase):
@@ -2092,6 +2095,9 @@ def run_game_mode(
                 briefing_lines=briefing_lines if phase_shows_briefing(phase) else (),
                 debrief_lines=_score_debrief_lines(score, config=training_cfg, difficulty=difficulty),
                 debrief_available=debrief_enabled,
+                render_motion=not command_state.paused
+                and not phase_shows_briefing(phase)
+                and not phase_is_terminal(phase),
             )
             recording_controller.capture(dashboard)
             clip_recording_controller.capture(dashboard)
@@ -2261,6 +2267,8 @@ def _sync_dashboard_training_config(dashboard: Any, training_cfg: RPOTrainingCon
     dashboard.goal_radius_km = training_cfg.goal_radius_km
     dashboard.hard_speed_limit_radius_km = training_cfg.hard_speed_limit_radius_km
     dashboard.hard_speed_limit_km_s = training_cfg.hard_speed_limit_km_s
+    dashboard.max_target_reference_range_km = training_cfg.max_target_reference_range_km
+    dashboard.target_reference_object_id = training_cfg.target_reference_object_id
     dashboard.goal_relative_ric_km = training_cfg.goal_relative_ric_km
     dashboard.goal_nmt_radial_amplitude_km = training_cfg.goal_nmt_radial_amplitude_km
     dashboard.goal_nmt_cross_track_amplitude_km = training_cfg.goal_nmt_cross_track_amplitude_km
@@ -2432,6 +2440,11 @@ def _mission_metrics(config: RPOTrainingConfig, score: Any) -> tuple[str, ...]:
         remain = max(float(config.max_target_delta_v_m_s) - float(getattr(score, "target_delta_v_m_s", 0.0)), 0.0)
         ratio = remain / max(float(config.max_target_delta_v_m_s), 1.0e-9)
         metrics.append(f"{_status_tag(remain > 0.0, ratio > 0.2)} Target dV {format_speed_m_s(remain)}")
+    if config.max_target_reference_range_km is not None:
+        limit = float(config.max_target_reference_range_km)
+        current = float(getattr(score, "final_target_reference_range_km", float("nan")))
+        margin = limit - current
+        metrics.append(f"{_status_tag(margin >= 0.0, margin > 0.1)} Mission {_fmt_distance(margin)}")
     if config.required_burn_axes:
         satisfied = set(getattr(score, "burn_axes_satisfied", ()))
         parts = [
@@ -2586,6 +2599,9 @@ def _mission_checklist(config: RPOTrainingConfig, score: Any) -> tuple[str, ...]
     if config.max_target_delta_v_m_s is not None:
         used = float(getattr(score, "target_delta_v_m_s", 0.0))
         checklist.append(f"{'OK' if used <= float(config.max_target_delta_v_m_s) else 'FAIL'} Target dV")
+    if config.max_target_reference_range_km is not None:
+        clear = not bool(getattr(score, "target_reference_range_violation", False))
+        checklist.append(f"{'OK' if clear else 'FAIL'} Mission capable")
     return tuple(checklist[:5])
 
 

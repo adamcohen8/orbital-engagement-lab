@@ -19,6 +19,7 @@ from sim.config import (
 )
 from sim.core.models import Command, StateTruth
 from sim.dynamics.attitude.rigid_body import get_attitude_guardrail_stats, reset_attitude_guardrail_stats
+from sim.dynamics.orbit.atmosphere import altitude_km_from_eci
 from sim.dynamics.orbit.spherical_harmonics import configure_spherical_harmonics_env
 from sim.dynamics.reentry import (
     REENTRY_METRIC_KEYS,
@@ -379,7 +380,7 @@ class _SingleRunEngine:
     def _record_reentry_metrics(self, *, aid: str, truth: StateTruth, sample_index: int, dt_s: float) -> None:
         if aid not in self.reentry_metric_hists:
             return
-        altitude_km = float(np.linalg.norm(truth.position_eci_km) - 6378.137)
+        altitude_km = altitude_km_from_eci(truth.position_eci_km, truth.t_s, env=self.base_environment)
         active = bool(altitude_km <= self.reentry_cfg.begin_altitude_km)
         self.reentry_active_by_object[aid] = bool(self.reentry_active_by_object.get(aid, False) or active)
         prev_heat = 0.0

@@ -25,6 +25,11 @@ metadata:
     - 500.0
     - 1000.0
     - 2000.0
+    speed_dt_s:
+      10.0: 2.0
+      25.0: 2.0
+      50.0: 5.0
+      100.0: 10.0
     cr3bp_coast_prediction_horizon_s: 259200.0
     cr3bp_coast_prediction_dt_s: 1800.0
     show_target_hcw_path: false

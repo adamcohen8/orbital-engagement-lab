@@ -11,13 +11,19 @@ from sim.core.models import Measurement, StateTruth
 @dataclass
 class CompositeSensorModel(SensorModel):
     sensors: list[SensorModel]
+    time_tolerance_s: float = 1e-9
 
     def measure(self, truth: StateTruth, env: dict, t_s: float) -> Measurement | None:
         parts = []
+        sample_times = []
         for sensor in self.sensors:
             m = sensor.measure(truth, env, t_s)
             if m is not None:
                 parts.append(m.vector)
+                sample_times.append(float(m.t_s))
         if not parts:
             return None
-        return Measurement(vector=np.concatenate(parts), t_s=t_s)
+        sample_time = sample_times[0]
+        if any(abs(sample_t - sample_time) > self.time_tolerance_s for sample_t in sample_times[1:]):
+            return None
+        return Measurement(vector=np.concatenate(parts), t_s=sample_time)

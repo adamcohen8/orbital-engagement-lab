@@ -184,9 +184,9 @@ class AttitudeActuator(Actuator):
         if wheel_torque_mode_flag is not None:
             tau_cmd = np.array(wheel_torque_mode_flag, dtype=float).reshape(-1)
             if tau_cmd.size != n_wheels:
-                tau_cmd = np.linalg.pinv(g) @ np.array(torque_body_cmd_nm, dtype=float).reshape(3)
+                tau_cmd = -np.linalg.pinv(g) @ np.array(torque_body_cmd_nm, dtype=float).reshape(3)
         else:
-            tau_cmd = np.linalg.pinv(g) @ np.array(torque_body_cmd_nm, dtype=float).reshape(3)
+            tau_cmd = -np.linalg.pinv(g) @ np.array(torque_body_cmd_nm, dtype=float).reshape(3)
         tau_cmd = np.clip(tau_cmd, -max_torque_nm, max_torque_nm)
 
         # First-order wheel motor torque lag.
@@ -227,11 +227,14 @@ class AttitudeActuator(Actuator):
         self.wheel_momentum_wheels_nms = h_next
         self.wheel_momentum_nms = g @ h_next
 
-        torque_body_nm = g @ tau_motor_eff
+        torque_body_nm = -(g @ tau_net)
         diag = {
             "rw_num_wheels": int(n_wheels),
             "rw_torque_cmd_nm": tau_cmd.tolist(),
+            "rw_motor_torque_nm": tau_motor_eff.tolist(),
             "rw_torque_applied_nm": tau_motor_eff.tolist(),
+            "rw_net_wheel_torque_nm": tau_net.tolist(),
+            "rw_body_torque_applied_nm": torque_body_nm.tolist(),
             "rw_speed_rad_s": omega_next.tolist(),
             "rw_momentum_wheels_nms": h_next.tolist(),
             "rw_momentum_body_nms": self.wheel_momentum_nms.tolist(),

@@ -42,7 +42,7 @@ from sim.dynamics.orbit import (
     third_body_moon_plugin,
     third_body_sun_plugin,
 )
-from sim.dynamics.spacecraft_geometry import RectangularPrismGeometry
+from sim.dynamics.spacecraft_geometry import GeometryAreaProfile, GeometryProfileLookup, RectangularPrismGeometry
 
 __all__ = [
     "OrbitalAttitudeDynamics",
@@ -58,6 +58,8 @@ __all__ = [
     "EARTH_MOON_MU",
     "AtmosphereModelName",
     "SphericalHarmonicTerm",
+    "GeometryAreaProfile",
+    "GeometryProfileLookup",
     "RectangularPrismGeometry",
     "OrbitContext",
     "OrbitPropagator",

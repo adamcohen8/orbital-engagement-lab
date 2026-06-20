@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from sim.core.models import StateTruth
+from sim.core.models import Measurement, StateTruth
 from sim.knowledge.object_tracking import (
     KnowledgeConditionConfig,
     KnowledgeEKFConfig,
@@ -11,6 +11,7 @@ from sim.knowledge.object_tracking import (
     TrackedObjectConfig,
 )
 from sim.sensors.access import AccessConfig, AccessModel
+from sim.sensors.composite import CompositeSensorModel
 from sim.sensors.joint_state import JointStateSensor
 from sim.sensors.models import OwnStateSensor, RelativeSensor, SensorNoiseConfig
 from sim.sensors.noisy_own_state import NoisyOwnStateSensor
@@ -44,6 +45,58 @@ def test_own_state_sensor_zero_noise_returns_truth_state() -> None:
     assert meas is not None
     assert np.allclose(meas.vector, np.hstack((truth.position_eci_km, truth.velocity_eci_km_s)))
     assert meas.t_s == truth.t_s
+
+
+def test_own_state_sensor_latency_preserves_acquisition_time() -> None:
+    sensor = OwnStateSensor(
+        noise=SensorNoiseConfig(sigma=np.zeros(6), bias=np.zeros(6), latency_s=2.0),
+        rng=np.random.default_rng(11),
+    )
+
+    first = sensor.measure(_truth(t_s=0.0), env={}, t_s=0.0)
+    second = sensor.measure(_truth(position=np.array([7002.0, 0.0, 0.0]), t_s=2.0), env={}, t_s=2.0)
+
+    assert first is None
+    assert second is not None
+    assert np.isclose(second.t_s, 0.0)
+    assert np.allclose(second.vector[:3], np.array([7000.0, 0.0, 0.0]))
+
+
+class _FixedSensor:
+    def __init__(self, vector: list[float], sample_t_s: float) -> None:
+        self.vector = np.array(vector, dtype=float)
+        self.sample_t_s = float(sample_t_s)
+
+    def measure(self, truth: StateTruth, env: dict, t_s: float) -> Measurement:
+        return Measurement(vector=self.vector, t_s=self.sample_t_s)
+
+
+def test_composite_sensor_rejects_mixed_acquisition_times() -> None:
+    sensor = CompositeSensorModel(
+        sensors=[
+            _FixedSensor([1.0, 2.0, 3.0], sample_t_s=8.0),
+            _FixedSensor([4.0, 5.0, 6.0], sample_t_s=10.0),
+        ]
+    )
+
+    meas = sensor.measure(_truth(t_s=10.0), env={}, t_s=10.0)
+
+    assert meas is None
+
+
+def test_composite_sensor_concatenates_synchronized_measurements() -> None:
+    sensor = CompositeSensorModel(
+        sensors=[
+            _FixedSensor([1.0, 2.0, 3.0], sample_t_s=8.0),
+            _FixedSensor([4.0, 5.0, 6.0], sample_t_s=8.0),
+        ]
+    )
+
+    meas = sensor.measure(_truth(t_s=10.0), env={}, t_s=10.0)
+
+    assert meas is not None
+    assert np.isclose(meas.t_s, 8.0)
+    assert np.allclose(meas.vector, np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]))
 
 
 def test_relative_sensor_range_rate_matches_truth_geometry() -> None:

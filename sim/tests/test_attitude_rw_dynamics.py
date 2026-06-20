@@ -22,9 +22,13 @@ class TestReactionWheelDynamics(unittest.TestCase):
 
         # First-order lag: alpha=dt/tau=0.2, so applied torque is 0.04 N*m.
         self.assertAlmostEqual(float(out.torque_body_nm[0]), 0.04, places=6)
-        # Wheel acceleration: wdot=tau/J=0.4 rad/s^2 over 0.1s => 0.04 rad/s.
-        self.assertAlmostEqual(float(act.wheel_speed_rad_s[0]), 0.04, places=6)
-        self.assertAlmostEqual(float(act.wheel_momentum_wheels_nms[0]), 0.004, places=6)
+        self.assertEqual(len(out.mode_flags["rw_torque_applied_nm"]), 3)
+        self.assertEqual(len(out.mode_flags["rw_body_torque_applied_nm"]), 3)
+        self.assertAlmostEqual(float(out.mode_flags["rw_torque_applied_nm"][0]), -0.04, places=6)
+        self.assertAlmostEqual(float(out.mode_flags["rw_body_torque_applied_nm"][0]), 0.04, places=6)
+        # Wheel momentum changes opposite the body torque it applies.
+        self.assertAlmostEqual(float(act.wheel_speed_rad_s[0]), -0.04, places=6)
+        self.assertAlmostEqual(float(act.wheel_momentum_wheels_nms[0]), -0.004, places=6)
 
     def test_reaction_wheel_momentum_and_speed_saturation(self):
         act = AttitudeActuator(

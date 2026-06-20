@@ -11,6 +11,8 @@ Use this page with:
 - [Controller Bench](controller-bench.md) for comparative evaluation workflows.
 - [Controller Naming Conventions](project/controller_naming_conventions.md) for
   naming rules when adding or renaming controllers.
+- [Reference GNC Library Roadmap](project/reference_gnc_library_roadmap.md) for
+  controller and command-module promotion planning.
 - [Public Core And Pro Boundary](public-vs-pro.md) for public/pro packaging
   posture.
 
@@ -192,9 +194,12 @@ items.
 When adding a new controller or mission behavior:
 
 1. Follow [Controller Naming Conventions](project/controller_naming_conventions.md).
-2. Add or update at least one runnable YAML example when the behavior is
+2. Check the [Reference GNC Library Roadmap](project/reference_gnc_library_roadmap.md)
+   to decide whether the behavior is Reference, Workbench, Experimental,
+   Compatibility, or Internal/Hook.
+3. Add or update at least one runnable YAML example when the behavior is
    product-facing.
-3. Update this inventory if users should know the feature ships with the
+4. Update this inventory if users should know the feature ships with the
    product.
-4. If it should be selectable in the desktop GUI, add it to the backend
+5. If it should be selectable in the desktop GUI, add it to the backend
    capability catalog in `sim/app/services.py`.

@@ -1,5 +1,6 @@
 import unittest
 import warnings
+from unittest.mock import patch
 
 import numpy as np
 
@@ -8,8 +9,10 @@ from sim.presets.rockets import RocketStackPreset, RocketStagePreset
 from sim.rocket import (
     GuidanceCommand,
     HoldAttitudeGuidance,
+    RocketAeroConfig,
     RocketAscentSimulator,
     RocketSimConfig,
+    RocketState,
     RocketVehicleConfig,
 )
 
@@ -82,6 +85,67 @@ class TestRocketAscentEngine(unittest.TestCase):
         self.assertEqual(out.longitude_deg.shape, (n,))
         self.assertEqual(out.wind_body_m_s.shape, (n, 3))
         self.assertEqual(out.tvc_gimbal_deg.shape, (n,))
+
+    def test_generic_drag_step_reports_dynamic_pressure_and_mach(self):
+        sim_cfg = RocketSimConfig(
+            dt_s=1.0,
+            max_time_s=1.0,
+            enable_drag=False,
+            enable_j2=False,
+            enable_j3=False,
+            enable_j4=False,
+            aero=RocketAeroConfig(enabled=True),
+            atmosphere_env={
+                "drag_frame_model": "hpop_like",
+                "jd_utc_start": 2460310.5,
+            },
+        )
+        vehicle_cfg = RocketVehicleConfig(stack=self._tiny_stack(), payload_mass_kg=0.0)
+        sim = RocketAscentSimulator(
+            sim_cfg=sim_cfg, vehicle_cfg=vehicle_cfg, guidance=HoldAttitudeGuidance(throttle=0.0)
+        )
+        state = RocketState(
+            t_s=0.0,
+            position_eci_km=np.array([EARTH_RADIUS_KM + 50.0, 0.0, 0.0], dtype=float),
+            velocity_eci_km_s=np.array([0.0, 7.0, 0.0], dtype=float),
+            attitude_quat_bn=np.array([1.0, 0.0, 0.0, 0.0], dtype=float),
+            angular_rate_body_rad_s=np.zeros(3),
+            mass_kg=300.0,
+            active_stage_index=0,
+            stage_prop_remaining_kg=np.array([200.0, 80.0], dtype=float),
+        )
+
+        with patch(
+            "sim.rocket.engine.atmosphere_relative_velocity_eci_km_s",
+            return_value=np.array([0.0, 2.0, 0.0], dtype=float),
+        ) as rel_vel:
+            out = sim.step(state, GuidanceCommand(throttle=0.0), dt_s=1.0)
+
+        self.assertGreater(float(out._last_step_q_dyn_pa), 0.0)
+        self.assertGreater(float(out._last_step_mach), 0.0)
+        self.assertEqual(rel_vel.call_args.kwargs["frame_model"], "hpop_like")
+        self.assertIsNone(rel_vel.call_args.kwargs["eop_path"])
+
+    def test_rocket_step_reports_tvc_torque_telemetry(self):
+        sim_cfg = RocketSimConfig(
+            dt_s=1.0,
+            max_time_s=1.0,
+            enable_drag=False,
+            enable_j2=False,
+            enable_j3=False,
+            enable_j4=False,
+            aero=RocketAeroConfig(enabled=False),
+            tvc_pivot_offset_body_m=np.array([0.0, 1.0, 0.0], dtype=float),
+        )
+        vehicle_cfg = RocketVehicleConfig(stack=self._tiny_stack(), payload_mass_kg=0.0)
+        sim = RocketAscentSimulator(
+            sim_cfg=sim_cfg, vehicle_cfg=vehicle_cfg, guidance=HoldAttitudeGuidance(throttle=1.0)
+        )
+        state = sim.initial_state()
+
+        out = sim.step(state, GuidanceCommand(throttle=1.0), dt_s=1.0)
+
+        self.assertGreater(float(np.linalg.norm(out._last_step_torque_body_nm)), 0.0)
 
     def test_stagewise_aero_geometry_updates_with_stage(self):
         sim_cfg = RocketSimConfig(
@@ -165,7 +229,7 @@ class TestRocketAscentEngine(unittest.TestCase):
             sim_cfg=sim_cfg, vehicle_cfg=vehicle_cfg, guidance=HoldAttitudeGuidance(throttle=0.0)
         )
         out = sim.run()
-        self.assertGreater(np.linalg.norm(out.wind_body_m_s[0]), 1.0)
+        self.assertGreater(np.linalg.norm(out.wind_body_m_s[1]), 1.0)
 
     def test_tvc_command_lags_and_generates_gimbal_angle(self):
         class _TvcGuidance:
@@ -192,8 +256,8 @@ class TestRocketAscentEngine(unittest.TestCase):
         vehicle_cfg = RocketVehicleConfig(stack=self._tiny_stack(), payload_mass_kg=0.0)
         sim = RocketAscentSimulator(sim_cfg=sim_cfg, vehicle_cfg=vehicle_cfg, guidance=_TvcGuidance())
         out = sim.run()
-        self.assertGreater(out.tvc_gimbal_deg[0], 0.0)
-        self.assertLessEqual(out.tvc_gimbal_deg[0], 1.1)
+        self.assertGreater(out.tvc_gimbal_deg[1], 0.0)
+        self.assertLessEqual(out.tvc_gimbal_deg[1], 1.1)
 
     def test_engine_performance_increases_toward_vacuum(self):
         stage = RocketStagePreset(

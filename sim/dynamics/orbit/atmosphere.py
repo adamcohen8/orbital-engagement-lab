@@ -74,14 +74,33 @@ def density_exponential(r_eci_km: np.ndarray, t_s: float, env: dict | None = Non
     return float(rho0 * np.exp(-alt_km / h))
 
 
-def density_ussa1976(r_eci_km: np.ndarray, t_s: float) -> float:
+def altitude_km_from_eci(r_eci_km: np.ndarray, t_s: float, env: dict | None = None) -> float:
+    return _altitude_km_from_eci(r_eci_km, t_s, env=env)
+
+
+def _datetime_from_env_t_s(env: dict, t_s: float) -> datetime:
+    jd_utc = env.get("jd_utc")
+    if jd_utc is not None:
+        return julian_date_to_datetime(float(jd_utc))
+    jd_utc_start = env.get("jd_utc_start")
+    if jd_utc_start is not None:
+        return julian_date_to_datetime(float(jd_utc_start) + float(t_s) / 86400.0)
+    base_epoch = env.get("atmo_epoch_utc", datetime(2020, 1, 1, tzinfo=timezone.utc))
+    if isinstance(base_epoch, datetime):
+        if base_epoch.tzinfo is None:
+            base_epoch = base_epoch.replace(tzinfo=timezone.utc)
+        return base_epoch + timedelta(seconds=float(t_s))
+    return datetime(2020, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=float(t_s))
+
+
+def density_ussa1976(r_eci_km: np.ndarray, t_s: float, env: dict | None = None) -> float:
     """
     Approximate US Standard Atmosphere 1976 density profile.
 
     - 0..86 km: standard lapse-rate layers via geopotential-altitude equations.
     - 86..1000 km: log-linear interpolation on tabulated USSA-1976 reference densities.
     """
-    alt_km = _altitude_km_from_eci(r_eci_km, t_s)
+    alt_km = _altitude_km_from_eci(r_eci_km, t_s, env=env)
 
     if alt_km <= 86.0:
         # 1976 standard atmosphere layers (0-86 km).
@@ -210,17 +229,7 @@ def density_nrlmsise00(r_eci_km: np.ndarray, t_s: float, env: dict | None = None
     alt_km = _altitude_km_from_eci(r_eci_km, t_s, env=env)
     lat_deg, lon_deg = _spherical_lat_lon_deg_from_eci(r_eci_km, t_s, env=env)
 
-    jd_utc = env.get("jd_utc")
-    if jd_utc is not None:
-        dt_utc = julian_date_to_datetime(float(jd_utc))
-    else:
-        base_epoch = env.get("atmo_epoch_utc", datetime(2020, 1, 1, tzinfo=timezone.utc))
-        if isinstance(base_epoch, datetime):
-            if base_epoch.tzinfo is None:
-                base_epoch = base_epoch.replace(tzinfo=timezone.utc)
-            dt_utc = base_epoch + timedelta(seconds=float(t_s))
-        else:
-            dt_utc = datetime(2020, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=float(t_s))
+    dt_utc = _datetime_from_env_t_s(env, t_s)
 
     custom_fn = env.get("nrlmsise00_density_callable", None)
     if callable(custom_fn):
@@ -242,17 +251,7 @@ def density_msis86(r_eci_km: np.ndarray, t_s: float, env: dict | None = None) ->
     alt_km = _altitude_km_from_eci(r_eci_km, t_s, env=env)
     lat_deg, lon_deg = _spherical_lat_lon_deg_from_eci(r_eci_km, t_s, env=env)
 
-    jd_utc = env.get("jd_utc")
-    if jd_utc is not None:
-        dt_utc = julian_date_to_datetime(float(jd_utc))
-    else:
-        base_epoch = env.get("atmo_epoch_utc", datetime(2020, 1, 1, tzinfo=timezone.utc))
-        if isinstance(base_epoch, datetime):
-            if base_epoch.tzinfo is None:
-                base_epoch = base_epoch.replace(tzinfo=timezone.utc)
-            dt_utc = base_epoch + timedelta(seconds=float(t_s))
-        else:
-            dt_utc = datetime(2020, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=float(t_s))
+    dt_utc = _datetime_from_env_t_s(env, t_s)
 
     custom_fn = env.get("msis86_density_callable", None)
     if callable(custom_fn):
@@ -283,17 +282,7 @@ def density_jb2008(r_eci_km: np.ndarray, t_s: float, env: dict | None = None) ->
     alt_km = _altitude_km_from_eci(r_eci_km, t_s, env=env)
     lat_deg, lon_deg = _spherical_lat_lon_deg_from_eci(r_eci_km, t_s, env=env)
 
-    jd_utc = env.get("jd_utc")
-    if jd_utc is not None:
-        dt_utc = julian_date_to_datetime(float(jd_utc))
-    else:
-        base_epoch = env.get("atmo_epoch_utc", datetime(2020, 1, 1, tzinfo=timezone.utc))
-        if isinstance(base_epoch, datetime):
-            if base_epoch.tzinfo is None:
-                base_epoch = base_epoch.replace(tzinfo=timezone.utc)
-            dt_utc = base_epoch + timedelta(seconds=float(t_s))
-        else:
-            dt_utc = datetime(2020, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=float(t_s))
+    dt_utc = _datetime_from_env_t_s(env, t_s)
 
     custom_fn = env.get("jb2008_density_callable", None)
     if callable(custom_fn):
@@ -306,17 +295,7 @@ def density_jb2006(r_eci_km: np.ndarray, t_s: float, env: dict | None = None) ->
     alt_km = _altitude_km_from_eci(r_eci_km, t_s, env=env)
     lat_deg, lon_deg = _spherical_lat_lon_deg_from_eci(r_eci_km, t_s, env=env)
 
-    jd_utc = env.get("jd_utc")
-    if jd_utc is not None:
-        dt_utc = julian_date_to_datetime(float(jd_utc))
-    else:
-        base_epoch = env.get("atmo_epoch_utc", datetime(2020, 1, 1, tzinfo=timezone.utc))
-        if isinstance(base_epoch, datetime):
-            if base_epoch.tzinfo is None:
-                base_epoch = base_epoch.replace(tzinfo=timezone.utc)
-            dt_utc = base_epoch + timedelta(seconds=float(t_s))
-        else:
-            dt_utc = datetime(2020, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=float(t_s))
+    dt_utc = _datetime_from_env_t_s(env, t_s)
 
     custom_fn = env.get("jb2006_density_callable", None)
     if callable(custom_fn):
@@ -329,17 +308,7 @@ def density_jacchia70(r_eci_km: np.ndarray, t_s: float, env: dict | None = None)
     alt_km = _altitude_km_from_eci(r_eci_km, t_s, env=env)
     lat_deg, lon_deg = _spherical_lat_lon_deg_from_eci(r_eci_km, t_s, env=env)
 
-    jd_utc = env.get("jd_utc")
-    if jd_utc is not None:
-        dt_utc = julian_date_to_datetime(float(jd_utc))
-    else:
-        base_epoch = env.get("atmo_epoch_utc", datetime(2020, 1, 1, tzinfo=timezone.utc))
-        if isinstance(base_epoch, datetime):
-            if base_epoch.tzinfo is None:
-                base_epoch = base_epoch.replace(tzinfo=timezone.utc)
-            dt_utc = base_epoch + timedelta(seconds=float(t_s))
-        else:
-            dt_utc = datetime(2020, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=float(t_s))
+    dt_utc = _datetime_from_env_t_s(env, t_s)
 
     custom_fn = env.get("jacchia70_density_callable", None)
     if callable(custom_fn):
@@ -370,17 +339,7 @@ def atmosphere_state_from_model(
     r_air = float(env_local.get("air_gas_constant_j_kg_k", 287.05287))
     gamma = float(env_local.get("air_gamma", 1.4))
 
-    jd_utc = env_local.get("jd_utc")
-    if jd_utc is not None:
-        dt_utc = julian_date_to_datetime(float(jd_utc))
-    else:
-        base_epoch = env_local.get("atmo_epoch_utc", datetime(2020, 1, 1, tzinfo=timezone.utc))
-        if isinstance(base_epoch, datetime):
-            if base_epoch.tzinfo is None:
-                base_epoch = base_epoch.replace(tzinfo=timezone.utc)
-            dt_utc = base_epoch + timedelta(seconds=float(t_s))
-        else:
-            dt_utc = datetime(2020, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=float(t_s))
+    dt_utc = _datetime_from_env_t_s(env_local, t_s)
 
     m = str(model).lower()
     cb = None
@@ -441,7 +400,7 @@ def density_from_model(
     if m == "exponential":
         return density_exponential(r_eci_km, t_s, env=env)
     if m == "ussa1976":
-        return density_ussa1976(r_eci_km, t_s)
+        return density_ussa1976(r_eci_km, t_s, env=env)
     if m == "nrlmsise00":
         return density_nrlmsise00(r_eci_km, t_s, env=env)
     if m in {"msis86", "msis-86", "hpop_msis86"}:

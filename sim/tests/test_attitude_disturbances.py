@@ -52,6 +52,33 @@ class TestAttitudeDisturbances(unittest.TestCase):
         tau = model.total_torque_body_nm(state)
         self.assertGreater(np.linalg.norm(tau), 0.0)
 
+    def test_magnetic_dipole_field_has_leo_order_of_magnitude(self):
+        inertia = np.diag([120.0, 100.0, 80.0])
+        state = StateTruth(
+            position_eci_km=np.array([6378.137, 0.0, 0.0]),
+            velocity_eci_km_s=np.array([0.0, 0.0, 0.0]),
+            attitude_quat_bn=np.array([1.0, 0.0, 0.0, 0.0]),
+            angular_rate_body_rad_s=np.zeros(3),
+            mass_kg=300.0,
+            t_s=0.0,
+        )
+        model = DisturbanceTorqueModel(
+            mu_km3_s2=398600.4418,
+            inertia_kg_m2=inertia,
+            config=DisturbanceTorqueConfig(
+                use_gravity_gradient=False,
+                use_magnetic=True,
+                use_drag=False,
+                use_srp=False,
+                magnetic_dipole_body_a_m2=np.array([1.0, 0.0, 0.0]),
+            ),
+        )
+
+        tau = model.total_torque_body_nm(state)
+
+        self.assertGreater(float(np.linalg.norm(tau)), 1e-5)
+        self.assertLess(float(np.linalg.norm(tau)), 1e-4)
+
     def test_dynamics_with_disturbances_changes_angular_rate(self):
         inertia = np.diag([120.0, 100.0, 80.0])
         state = StateTruth(

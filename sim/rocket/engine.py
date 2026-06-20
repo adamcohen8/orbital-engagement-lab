@@ -4,10 +4,11 @@ from dataclasses import dataclass, replace
 
 import numpy as np
 
+from sim.aero.core import atmosphere_relative_velocity_eci_km_s
 from sim.dynamics.attitude.rigid_body import propagate_attitude_exponential_map
 from sim.dynamics.orbit.accelerations import OrbitContext
 from sim.dynamics.orbit.atmosphere import atmosphere_state_from_model
-from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2, EARTH_RADIUS_KM
+from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2, EARTH_RADIUS_KM, EARTH_ROT_RATE_RAD_S
 from sim.dynamics.orbit.frames import ecef_to_eci, eci_to_ecef_rotation
 from sim.dynamics.orbit.propagator import OrbitPropagator, drag_plugin, j2_plugin, j3_plugin, j4_plugin, srp_plugin
 from sim.rocket.aero import RocketAeroConfig, compute_aero_loads, compute_aero_state
@@ -322,19 +323,20 @@ class RocketAscentSimulator:
 
             cmd = self.guidance.command(state, self.sim_cfg, self.vehicle_cfg)
             throttle = _clamp(float(cmd.throttle), 0.0, 1.0)
-            thr_cmd[k] = throttle
             state = self._step_once(state, cmd, throttle, dt)
             _record_sample(k + 1, state)
-            thrust_n[k] = float(state._last_step_thrust_n) if hasattr(state, "_last_step_thrust_n") else 0.0
-            q_dyn[k] = float(getattr(state, "_last_step_q_dyn_pa", 0.0))
-            mach[k] = float(getattr(state, "_last_step_mach", 0.0))
-            wind_body_m_s[k, :] = np.array(getattr(state, "_last_step_wind_body_m_s", np.zeros(3)), dtype=float)
-            tvc_gimbal_deg[k] = float(getattr(state, "_last_step_tvc_gimbal_deg", 0.0))
-            alpha_deg[k] = float(getattr(state, "_last_step_alpha_deg", 0.0))
-            beta_deg[k] = float(getattr(state, "_last_step_beta_deg", 0.0))
-            cd[k] = float(getattr(state, "_last_step_cd", 0.0))
-            aero_force_n[k] = float(getattr(state, "_last_step_aero_force_n", 0.0))
-            aero_moment_nm[k] = float(getattr(state, "_last_step_aero_moment_nm", 0.0))
+            sample_idx = k + 1
+            thr_cmd[sample_idx] = throttle
+            thrust_n[sample_idx] = float(state._last_step_thrust_n) if hasattr(state, "_last_step_thrust_n") else 0.0
+            q_dyn[sample_idx] = float(getattr(state, "_last_step_q_dyn_pa", 0.0))
+            mach[sample_idx] = float(getattr(state, "_last_step_mach", 0.0))
+            wind_body_m_s[sample_idx, :] = np.array(getattr(state, "_last_step_wind_body_m_s", np.zeros(3)), dtype=float)
+            tvc_gimbal_deg[sample_idx] = float(getattr(state, "_last_step_tvc_gimbal_deg", 0.0))
+            alpha_deg[sample_idx] = float(getattr(state, "_last_step_alpha_deg", 0.0))
+            beta_deg[sample_idx] = float(getattr(state, "_last_step_beta_deg", 0.0))
+            cd[sample_idx] = float(getattr(state, "_last_step_cd", 0.0))
+            aero_force_n[sample_idx] = float(getattr(state, "_last_step_aero_force_n", 0.0))
+            aero_moment_nm[sample_idx] = float(getattr(state, "_last_step_aero_moment_nm", 0.0))
 
             if self.sim_cfg.terminate_on_earth_impact:
                 impact = float(np.linalg.norm(state.position_eci_km)) <= float(self.sim_cfg.earth_impact_radius_km)
@@ -545,14 +547,28 @@ class RocketAscentSimulator:
         last_cd = 0.0
         last_aero_force_n = 0.0
         last_aero_moment_nm = 0.0
+        wind_eci_m_s = _resolve_wind_eci_m_s(
+            position_eci_km=s.position_eci_km, t_s=s.t_s, sim_cfg=self.sim_cfg, state=s
+        )
+        omega_raw = env.get("drag_earth_rotation_rad_s", EARTH_ROT_RATE_RAD_S)
+        v_rel_eci_km_s = atmosphere_relative_velocity_eci_km_s(
+            s.position_eci_km,
+            s.velocity_eci_km_s,
+            t_s=float(s.t_s),
+            earth_rotation_rad_s=float(EARTH_ROT_RATE_RAD_S if omega_raw is None else omega_raw),
+            frame_model=str(env.get("drag_frame_model", "simple")),
+            jd_utc_start=env.get("jd_utc_start"),
+            eop_path=env.get("drag_eop_path"),
+        )
+        v_rel_eci_m_s = v_rel_eci_km_s * 1e3 - wind_eci_m_s
+        v_rel_body_m_s = c_bn @ v_rel_eci_m_s
+        if self.sim_cfg.enable_drag or self.sim_cfg.aero.enabled:
+            speed_m_s = float(np.linalg.norm(v_rel_eci_m_s))
+            last_q_dyn = 0.5 * float(atmos["density_kg_m3"]) * speed_m_s * speed_m_s
+            sound_speed_m_s = float(max(float(atmos.get("sound_speed_m_s", 0.0)), 1e-9))
+            last_mach = speed_m_s / sound_speed_m_s
+            last_wind_body_m_s = c_bn @ wind_eci_m_s
         if self.sim_cfg.aero.enabled:
-            omega_earth = np.array([0.0, 0.0, 7.2921159e-5], dtype=float)
-            v_atm_eci_km_s = np.cross(omega_earth, s.position_eci_km)
-            wind_eci_m_s = _resolve_wind_eci_m_s(
-                position_eci_km=s.position_eci_km, t_s=s.t_s, sim_cfg=self.sim_cfg, state=s
-            )
-            v_rel_eci_m_s = (s.velocity_eci_km_s - v_atm_eci_km_s) * 1e3 - wind_eci_m_s
-            v_rel_body_m_s = c_bn @ v_rel_eci_m_s
             aero_state = compute_aero_state(
                 rho_kg_m3=float(atmos["density_kg_m3"]),
                 pressure_pa=ambient_pressure_pa,
@@ -639,4 +655,7 @@ class RocketAscentSimulator:
         s._last_step_cd = last_cd
         s._last_step_aero_force_n = last_aero_force_n
         s._last_step_aero_moment_nm = last_aero_moment_nm
+        s._last_step_torque_body_nm = (
+            np.zeros(3, dtype=float) if mode == "cheater" else np.array(torque_cmd, dtype=float).reshape(3)
+        )
         return s

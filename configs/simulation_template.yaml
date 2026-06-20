@@ -177,8 +177,23 @@ objects:
     specs:
       # Total mass in kilograms. Use dry/fuel mass fields instead when modeling fuel depletion in more detail.
       mass_kg: 200.0
+      # Optional attitude-dynamics mass properties. Invalid explicit inertia is rejected by strict validation.
+      mass_properties:
+        mass_kg: 200.0
+        center_of_mass_body_m: [0.0, 0.0, 0.0]
+        inertia_kg_m2:
+          - [120.0, 0.0, 0.0]
+          - [0.0, 100.0, 0.0]
+          - [0.0, 0.0, 80.0]
+        inertia_reference_point: center_of_mass
+        frame: body
+        source: user_supplied
+        confidence: assumed
       # Shared object-level aerodynamics. Keep vehicle physical/aero properties here.
       # Flat aliases like cl/lift_area_m2 remain accepted for compatibility.
+      # Optional geometry-derived area profile built from a body-frame STL with tools/build_geometry_profile.py.
+      geometry:
+        profile_path: null
       aero:
         reference_area_m2: 1.0
         drag_area_m2: 1.0

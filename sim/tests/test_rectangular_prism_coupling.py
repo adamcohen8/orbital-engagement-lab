@@ -1,11 +1,36 @@
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import numpy as np
 
+from sim.config.scenario_yaml import scenario_config_from_dict
 from sim.core.models import StateTruth
 from sim.dynamics.attitude.disturbances import DisturbanceTorqueConfig, DisturbanceTorqueModel
-from sim.dynamics.spacecraft_geometry import RectangularPrismGeometry
+from sim.dynamics.spacecraft_geometry import GeometryAreaProfile, RectangularPrismGeometry
 from sim.presets import build_sim_object_from_presets
+from sim.runtime_support import _create_satellite_runtime
+
+
+def _box_mesh(lx_m: float, ly_m: float, lz_m: float) -> tuple[np.ndarray, np.ndarray]:
+    hx = 0.5 * lx_m
+    hy = 0.5 * ly_m
+    hz = 0.5 * lz_m
+    faces = [
+        (np.array([1.0, 0.0, 0.0]), [(hx, -hy, -hz), (hx, hy, -hz), (hx, hy, hz), (hx, -hy, hz)]),
+        (np.array([-1.0, 0.0, 0.0]), [(-hx, -hy, -hz), (-hx, -hy, hz), (-hx, hy, hz), (-hx, hy, -hz)]),
+        (np.array([0.0, 1.0, 0.0]), [(-hx, hy, -hz), (-hx, hy, hz), (hx, hy, hz), (hx, hy, -hz)]),
+        (np.array([0.0, -1.0, 0.0]), [(-hx, -hy, -hz), (hx, -hy, -hz), (hx, -hy, hz), (-hx, -hy, hz)]),
+        (np.array([0.0, 0.0, 1.0]), [(-hx, -hy, hz), (hx, -hy, hz), (hx, hy, hz), (-hx, hy, hz)]),
+        (np.array([0.0, 0.0, -1.0]), [(-hx, -hy, -hz), (-hx, hy, -hz), (hx, hy, -hz), (hx, -hy, -hz)]),
+    ]
+    triangles = []
+    normals = []
+    for normal, verts in faces:
+        quad = [np.array(v, dtype=float) for v in verts]
+        triangles.extend([[quad[0], quad[1], quad[2]], [quad[0], quad[2], quad[3]]])
+        normals.extend([normal, normal])
+    return np.asarray(triangles, dtype=float), np.asarray(normals, dtype=float)
 
 
 class TestRectangularPrismCoupling(unittest.TestCase):
@@ -18,6 +43,42 @@ class TestRectangularPrismCoupling(unittest.TestCase):
         u = np.array([1.0, 1.0, 0.0], dtype=float) / np.sqrt(2.0)
         expected = (12.0 + 8.0) / np.sqrt(2.0)
         self.assertAlmostEqual(g.projected_area_m2(u), expected, places=12)
+
+    def test_geometry_area_profile_from_box_mesh_matches_prism_axes(self):
+        directions = np.array(
+            [
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0],
+                [1.0, 1.0, 0.0],
+            ],
+            dtype=float,
+        )
+        triangles, normals = _box_mesh(2.0, 3.0, 4.0)
+        profile = GeometryAreaProfile.from_triangles(triangles, normals, directions_body=directions)
+        prism = RectangularPrismGeometry(lx_m=2.0, ly_m=3.0, lz_m=4.0)
+
+        for direction in directions:
+            self.assertAlmostEqual(
+                profile.projected_area_for_direction_m2(direction),
+                prism.projected_area_m2(direction),
+                places=12,
+            )
+
+    def test_geometry_area_profile_round_trips_json(self):
+        triangles, normals = _box_mesh(1.0, 2.0, 3.0)
+        profile = GeometryAreaProfile.from_triangles(
+            triangles,
+            normals,
+            directions_body=np.array([[1.0, 0.0, 0.0]], dtype=float),
+            metadata={"name": "unit-test-box"},
+        )
+        with TemporaryDirectory() as td:
+            path = Path(td) / "profile.json"
+            profile.save(path)
+            loaded = GeometryAreaProfile.load(path)
+        self.assertEqual(loaded.metadata["name"], "unit-test-box")
+        self.assertAlmostEqual(loaded.projected_area_for_direction_m2(np.array([1.0, 0.0, 0.0])), 6.0)
 
     def test_face_torque_symmetric_axis_flow_is_zero(self):
         g = RectangularPrismGeometry(lx_m=1.2, ly_m=1.0, lz_m=0.8)
@@ -58,6 +119,36 @@ class TestRectangularPrismCoupling(unittest.TestCase):
         )
         self.assertTrue(np.allclose(tau, expected))
 
+    def test_geometry_profile_srp_torque_uses_profile_center_of_pressure(self):
+        profile = GeometryAreaProfile(
+            directions_body=np.array([[-1.0, 0.0, 0.0]], dtype=float),
+            projected_area_m2=np.array([2.0], dtype=float),
+            center_of_pressure_body_m=np.array([[0.0, 1.0, 0.0]], dtype=float),
+            metadata={"name": "offset plate"},
+        )
+        cfg = DisturbanceTorqueConfig(
+            use_gravity_gradient=False,
+            use_magnetic=False,
+            use_drag=False,
+            use_srp=True,
+            srp_cr=1.0,
+            geometry_area_profile=profile,
+        )
+        model = DisturbanceTorqueModel(mu_km3_s2=398600.4418, inertia_kg_m2=np.eye(3), config=cfg)
+        truth = StateTruth(
+            position_eci_km=np.array([7000.0, 0.0, 0.0], dtype=float),
+            velocity_eci_km_s=np.array([0.0, 7.5, 0.0], dtype=float),
+            attitude_quat_bn=np.array([1.0, 0.0, 0.0, 0.0], dtype=float),
+            angular_rate_body_rad_s=np.zeros(3),
+            mass_kg=100.0,
+            t_s=0.0,
+        )
+        tau = model.total_torque_body_nm(
+            truth,
+            env={"sun_dir_eci": np.array([1.0, 0.0, 0.0]), "srp_shadow_model": "none"},
+        )
+        self.assertTrue(np.allclose(tau, np.array([0.0, 0.0, 2.0 * 4.56e-6])))
+
     def test_prism_mode_requires_disturbance_enabled(self):
         with self.assertRaises(ValueError):
             build_sim_object_from_presets(
@@ -82,6 +173,68 @@ class TestRectangularPrismCoupling(unittest.TestCase):
         cfg = sat.dynamics.disturbance_model.config
         self.assertTrue(cfg.use_rectangular_prism_faces)
         self.assertEqual(tuple(float(v) for v in cfg.rectangular_prism_dims_m), (1.4, 1.1, 0.9))
+
+    def test_scenario_config_resolves_geometry_profile_path(self):
+        profile = GeometryAreaProfile(
+            directions_body=np.array([[1.0, 0.0, 0.0]], dtype=float),
+            projected_area_m2=np.array([1.0], dtype=float),
+            center_of_pressure_body_m=np.zeros((1, 3)),
+        )
+        with TemporaryDirectory() as td:
+            root = Path(td)
+            profile_path = root / "sat_profile.json"
+            config_path = root / "scenario.yaml"
+            profile.save(profile_path)
+            cfg = scenario_config_from_dict(
+                {
+                    "scenario_name": "geometry_profile_path_test",
+                    "chaser": {
+                        "enabled": True,
+                        "kind": "satellite",
+                        "specs": {"geometry": {"profile_path": "sat_profile.json"}},
+                    },
+                    "target": {"enabled": False},
+                    "outputs": {"output_dir": str(root / "outputs")},
+                },
+                source_path=config_path,
+            )
+        self.assertEqual(cfg.chaser.specs["geometry"]["profile_path"], str(profile_path.resolve()))
+
+    def test_satellite_runtime_loads_geometry_profile(self):
+        profile = GeometryAreaProfile(
+            directions_body=np.array([[1.0, 0.0, 0.0]], dtype=float),
+            projected_area_m2=np.array([1.0], dtype=float),
+            center_of_pressure_body_m=np.zeros((1, 3)),
+        )
+        with TemporaryDirectory() as td:
+            root = Path(td)
+            profile_path = root / "sat_profile.json"
+            config_path = root / "scenario.yaml"
+            profile.save(profile_path)
+            cfg = scenario_config_from_dict(
+                {
+                    "scenario_name": "geometry_profile_runtime_test",
+                    "chaser": {
+                        "enabled": True,
+                        "kind": "satellite",
+                        "specs": {"geometry": {"profile_path": "sat_profile.json"}},
+                    },
+                    "target": {"enabled": False},
+                    "simulator": {
+                        "dynamics": {
+                            "attitude": {
+                                "enabled": True,
+                                "disturbance_torques": {"srp": True},
+                            }
+                        }
+                    },
+                    "outputs": {"output_dir": str(root / "outputs")},
+                },
+                source_path=config_path,
+            )
+            runtime = _create_satellite_runtime("chaser", cfg.chaser, cfg, np.random.default_rng(1))
+        self.assertIsNotNone(runtime.dynamics.geometry_area_profile)
+        self.assertIs(runtime.dynamics.disturbance_model.config.geometry_area_profile, runtime.dynamics.geometry_area_profile)
 
 
 if __name__ == "__main__":
