@@ -126,6 +126,29 @@ def test_attitude_ekf_propagates_by_elapsed_belief_time() -> None:
     assert np.isclose(updated.last_update_t_s, 0.25)
 
 
+def test_attitude_ekf_updates_at_measurement_epoch_then_propagates_to_output_time() -> None:
+    estimator = AttitudeEKFEstimator(
+        dt_s=1.0,
+        inertia_kg_m2=np.diag([10.0, 12.0, 8.0]),
+        process_noise_diag=np.ones(7) * 1e-12,
+        meas_noise_diag=np.ones(7) * 1e-14,
+    )
+    belief = StateBelief(
+        state=np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=float),
+        covariance=np.eye(7) * 1e-9,
+        last_update_t_s=0.0,
+    )
+    z = np.array([1.0, 0.0, 0.0, 0.0, 0.05, 0.0, 0.0], dtype=float)
+    measurement = Measurement(vector=z, t_s=1.0)
+
+    updated = estimator.update(belief, measurement, 3.0)
+    expected = estimator._propagate_state(z, dt_s=2.0)
+
+    assert updated.last_update_t_s == 3.0
+    assert np.linalg.norm(updated.state[:4] - z[:4]) > 1e-4
+    assert np.linalg.norm(updated.state - expected) < 1e-3
+
+
 def test_joint_state_estimator_uses_attitude_ekf_measurement_update() -> None:
     orbit_estimator = OrbitEKFEstimator(
         mu_km3_s2=398600.4418,

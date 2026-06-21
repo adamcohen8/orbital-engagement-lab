@@ -268,6 +268,33 @@ def test_reentry_metrics_remain_inactive_above_threshold() -> None:
     assert np.isnan(out["heat_rate_w_m2"])
 
 
+def test_reentry_g_load_includes_lift_acceleration() -> None:
+    cfg = ReentryConfig(enabled=True, begin_altitude_km=300.0, atmosphere_model="ussa1976")
+    props = ReentryObjectProperties(
+        mass_kg=100.0,
+        drag_area_m2=2.0,
+        cd=0.0,
+        lift_area_m2=2.0,
+        cl=1.0,
+        nose_radius_m=0.5,
+    )
+
+    out = reentry_metrics_for_state(
+        r_eci_km=np.array([6378.137 + 90.0, 0.0, 0.0]),
+        v_eci_km_s=np.array([0.0, 7.8, 0.0]),
+        t_s=0.0,
+        dt_s=1.0,
+        cfg=cfg,
+        props=props,
+        env={},
+        active=True,
+    )
+
+    assert out["drag_decel_m_s2"] == 0.0
+    assert out["lift_accel_m_s2"] > 0.0
+    assert out["g_load"] > 0.0
+
+
 def test_reentry_current_active_can_exit_while_heat_load_is_preserved() -> None:
     cfg = ReentryConfig(enabled=True, begin_altitude_km=300.0, atmosphere_model="ussa1976")
     props = ReentryObjectProperties(mass_kg=100.0, drag_area_m2=2.0, cd=2.2, nose_radius_m=0.5)

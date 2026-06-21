@@ -160,7 +160,7 @@ def propagate_attitude_exponential_map_kernel(
 
     omega_dot = np.zeros(3, dtype=np.float64)
     det = _det3(inertia)
-    if not np.isfinite(det) or abs(det) <= 1e-18:
+    if not np.isfinite(det) or det == 0.0:
         stats[STAT_SINGULAR_INERTIA] += 1
     else:
         omega_dot = np.linalg.solve(inertia, rhs)

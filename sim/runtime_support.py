@@ -32,7 +32,7 @@ from sim.config import SimulationScenarioConfig
 from sim.control.attitude.zero_torque import ZeroTorqueController
 from sim.control.orbit.zero_controller import ZeroController
 from sim.core.models import Command, StateBelief, StateTruth
-from sim.digital_twin.mass_properties import resolve_inertia_kg_m2
+from sim.digital_twin.mass_properties import resolve_center_of_mass_body_m, resolve_inertia_kg_m2
 from sim.dynamics.attitude.disturbances import DisturbanceTorqueConfig, DisturbanceTorqueModel
 from sim.dynamics.model import OrbitalAttitudeDynamics
 from sim.dynamics.orbit.cr3bp import (
@@ -928,6 +928,7 @@ def _create_satellite_runtime(
     truth = _default_truth_from_agent(agent_cfg, t_s=0.0, target_jd_utc=cfg.simulator.initial_jd_utc)
     specs = dict(agent_cfg.specs or {})
     inertia_kg_m2 = _resolve_satellite_inertia_kg_m2(specs)
+    center_of_mass_body_m = resolve_center_of_mass_body_m(specs)
     aero_props = resolve_vehicle_aero_properties(
         specs,
         default_reference_area_m2=1.0,
@@ -1020,6 +1021,7 @@ def _create_satellite_runtime(
         "use_magnetic": bool(dist_cfg.get("magnetic", False)),
         "use_drag": bool(dist_cfg.get("drag", False)),
         "use_srp": bool(dist_cfg.get("srp", False)),
+        "center_of_mass_body_m": center_of_mass_body_m,
     }
     if drag_area_specified or area_specified:
         disturbance_config_kwargs["drag_area_m2"] = drag_area_m2
@@ -1332,6 +1334,7 @@ def _build_knowledge_base(
     noise = dict(knowledge.get("sensor_error", {}) or {})
     estimation = dict(knowledge.get("estimation", {}) or {})
     ekf_cfg = dict(estimation.get("ekf", knowledge.get("ekf", {})) or {})
+    initial_track_state = ekf_cfg.get("initial_state_eci_km_s", estimation.get("initial_state_eci_km_s"))
     tracked: list[TrackedObjectConfig] = []
     for target_id in targets:
         tracked.append(
@@ -1380,6 +1383,11 @@ def _build_knowledge_base(
                     init_cov_diag=_knowledge_ekf_diag(
                         ekf_cfg.get("init_cov_diag"),
                         [1.0, 1.0, 1.0, 1e-2, 1e-2, 1e-2],
+                    ),
+                    initial_state_eci_km_s=(
+                        None
+                        if initial_track_state is None
+                        else np.array(initial_track_state, dtype=float).reshape(6)
                     ),
                 ),
             )

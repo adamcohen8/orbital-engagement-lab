@@ -33,6 +33,7 @@ class DisturbanceTorqueConfig:
     use_rectangular_prism_faces: bool = False
     rectangular_prism_dims_m: tuple[float, float, float] | None = None
     geometry_area_profile: GeometryAreaProfile | None = None
+    center_of_mass_body_m: np.ndarray = field(default_factory=lambda: np.zeros(3))
 
 
 @dataclass(frozen=True)
@@ -116,10 +117,18 @@ class DisturbanceTorqueModel:
         v_rel_body = c_bn @ v_rel_eci_m_s
         if self.config.geometry_area_profile is not None:
             q_dyn = 0.5 * rho * (v_norm**2) * self.config.drag_cd
-            return self.config.geometry_area_profile.pressure_torque_sum_body_nm(-v_rel_body, q_dyn)
+            return self.config.geometry_area_profile.pressure_torque_sum_body_nm(
+                -v_rel_body,
+                q_dyn,
+                moment_origin_body_m=self.config.center_of_mass_body_m,
+            )
         if self._rect_prism_geometry is not None and self.config.use_rectangular_prism_faces:
             q_dyn = 0.5 * rho * (v_norm**2) * self.config.drag_cd
-            return self._rect_prism_geometry.face_torque_sum_body_nm(-v_rel_body, q_dyn)
+            return self._rect_prism_geometry.face_torque_sum_body_nm(
+                -v_rel_body,
+                q_dyn,
+                moment_origin_body_m=self.config.center_of_mass_body_m,
+            )
 
         f_drag_mag = 0.5 * rho * (v_norm**2) * self.config.drag_cd * self.config.drag_area_m2
         f_drag_body = -f_drag_mag * (v_rel_body / v_norm)
@@ -145,10 +154,18 @@ class DisturbanceTorqueModel:
         distance_scale = float(env.get("srp_distance_scale", 1.0))
         if self.config.geometry_area_profile is not None:
             p_srp = SOLAR_PRESSURE_N_M2 * distance_scale * self.config.srp_cr * shadow
-            return self.config.geometry_area_profile.pressure_torque_sum_body_nm(-sun_dir_body, p_srp)
+            return self.config.geometry_area_profile.pressure_torque_sum_body_nm(
+                -sun_dir_body,
+                p_srp,
+                moment_origin_body_m=self.config.center_of_mass_body_m,
+            )
         if self._rect_prism_geometry is not None and self.config.use_rectangular_prism_faces:
             p_srp = SOLAR_PRESSURE_N_M2 * distance_scale * self.config.srp_cr * shadow
-            return self._rect_prism_geometry.face_torque_sum_body_nm(-sun_dir_body, p_srp)
+            return self._rect_prism_geometry.face_torque_sum_body_nm(
+                -sun_dir_body,
+                p_srp,
+                moment_origin_body_m=self.config.center_of_mass_body_m,
+            )
 
         force_mag = SOLAR_PRESSURE_N_M2 * distance_scale * self.config.srp_cr * self.config.srp_area_m2 * shadow
         f_srp_body = -force_mag * sun_dir_body

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, Callable
 
@@ -20,6 +20,7 @@ from sim.config import (
 from sim.core.models import Command, StateTruth
 from sim.dynamics.attitude.rigid_body import get_attitude_guardrail_stats, reset_attitude_guardrail_stats
 from sim.dynamics.orbit.atmosphere import altitude_km_from_eci
+from sim.dynamics.orbit.sgp4 import SGP4EphemerisProvider
 from sim.dynamics.orbit.spherical_harmonics import configure_spherical_harmonics_env
 from sim.dynamics.reentry import (
     REENTRY_METRIC_KEYS,
@@ -63,6 +64,12 @@ from sim.single_run_support import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _effective_propagation_method(cfg: SimulationScenarioConfig, agent_cfg: Any) -> str:
+    orbit = dict((cfg.simulator.dynamics or {}).get("orbit", {}) or {})
+    default_method = str(orbit.get("propagation_method", "special") or "special").strip().lower()
+    return str(getattr(agent_cfg, "propagation_method", "") or default_method or "special").strip().lower()
 
 
 def _state_truth_to_array(truth: StateTruth) -> np.ndarray:
@@ -115,6 +122,9 @@ class _SingleRunEngine:
         orbit_cfg = dict(dynamics_cfg.get("orbit", {}) or {})
         att_cfg = dict(dynamics_cfg.get("attitude", {}) or {})
         self.base_environment = configure_spherical_harmonics_env(dict(cfg.simulator.environment or {}), orbit_cfg)
+        atmosphere_env = self.base_environment.pop("atmosphere_env", None)
+        if isinstance(atmosphere_env, dict):
+            self.base_environment = {**dict(atmosphere_env), **self.base_environment}
         if orbit_cfg.get("atmosphere_model") not in (None, "") and "atmosphere_model" not in self.base_environment:
             self.base_environment["atmosphere_model"] = str(orbit_cfg.get("atmosphere_model")).strip().lower()
         if cfg.simulator.initial_jd_utc is not None and "jd_utc_start" not in self.base_environment:
@@ -157,6 +167,35 @@ class _SingleRunEngine:
             if agent.kind == "satellite" and agent.deploy_source in {"rocket_deployment", "rocket_insertion"}:
                 agent.active = False
 
+        self.general_propagation: dict[str, SGP4EphemerisProvider] = {}
+        for aid, agent in self.agents.items():
+            agent_cfg = self.object_configs.get(aid)
+            if agent.kind != "satellite" or agent_cfg is None:
+                continue
+            if _effective_propagation_method(cfg, agent_cfg) != "general":
+                continue
+            initial_state = dict(getattr(agent_cfg, "initial_state", {}) or {})
+            general = dict(getattr(agent_cfg, "general", {}) or {})
+            if str(general.get("model", "") or "").strip().lower() != "sgp4":
+                continue
+            if agent.truth is None:
+                continue
+            provider = SGP4EphemerisProvider.from_tle_block(
+                dict(initial_state.get("tle", {}) or {}),
+                mass_kg=float(agent.truth.mass_kg),
+                start_jd_utc=cfg.simulator.initial_jd_utc,
+                duration_s=float(cfg.simulator.duration_s),
+                output_frame=str(general.get("output_frame", "eci") or "eci"),
+                frame_transform=str(general.get("frame_transform", "teme_as_eci") or "teme_as_eci"),
+                attitude_quat_bn=agent.truth.attitude_quat_bn,
+                angular_rate_body_rad_s=agent.truth.angular_rate_body_rad_s,
+            )
+            self.general_propagation[aid] = provider
+            agent.truth = provider.state_at(0.0)
+            if agent.belief is not None and agent.belief.state.size >= 6:
+                agent.belief.state[:6] = np.hstack((agent.truth.position_eci_km, agent.truth.velocity_eci_km_s))
+                agent.belief.last_update_t_s = 0.0
+
         self.rocket = self.agents.get("rocket") or next((a for a in self.agents.values() if a.kind == "rocket"), None)
         self.chaser = self.agents.get("chaser")
         self.target = self.agents.get("target")
@@ -165,6 +204,8 @@ class _SingleRunEngine:
 
         for aid, agent in self.agents.items():
             if agent.kind != "satellite" or agent.deploy_source in {"rocket_deployment", "rocket_insertion"}:
+                continue
+            if aid in self.general_propagation:
                 continue
             agent_cfg = self.object_configs.get(aid)
             initial_state = dict(getattr(agent_cfg, "initial_state", {}) or {})
@@ -751,24 +792,33 @@ class _SingleRunEngine:
                     if metric_key in self.rocket_metric_hists:
                         self.rocket_metric_hists[metric_key][k + 1] = float(metric_value)
             else:
-                sat_result = self.satellite_stepper.step(
-                    aid=aid,
-                    agent=agent,
-                    initial_truth=tr_now,
-                    world_truth_decision=world_truth_decision,
-                    t_s=t,
-                    t_next=t_next,
-                    sample_index=k,
-                )
-                agent.truth = sat_result.truth
-                self.thrust_hist[aid][k + 1, :] = sat_result.average_thrust_eci_km_s2
-                self.torque_hist[aid][k + 1, :] = sat_result.average_torque_body_nm
-                self.total_dv_m_s_by_object[aid] += sat_result.delta_v_m_s
-                self.max_accel_km_s2_by_object[aid] = max(
-                    self.max_accel_km_s2_by_object[aid], sat_result.max_accel_km_s2
-                )
-                if sat_result.burned:
-                    self.burn_samples_by_object[aid] += 1
+                provider = self.general_propagation.get(aid)
+                if provider is not None:
+                    agent.truth = provider.state_at(t_next)
+                    if agent.belief is not None and agent.belief.state.size >= 6:
+                        agent.belief.state[:6] = np.hstack((agent.truth.position_eci_km, agent.truth.velocity_eci_km_s))
+                        agent.belief.last_update_t_s = t_next
+                    self.thrust_hist[aid][k + 1, :] = self.zero3
+                    self.torque_hist[aid][k + 1, :] = self.zero3
+                else:
+                    sat_result = self.satellite_stepper.step(
+                        aid=aid,
+                        agent=agent,
+                        initial_truth=tr_now,
+                        world_truth_decision=world_truth_decision,
+                        t_s=t,
+                        t_next=t_next,
+                        sample_index=k,
+                    )
+                    agent.truth = sat_result.truth
+                    self.thrust_hist[aid][k + 1, :] = sat_result.average_thrust_eci_km_s2
+                    self.torque_hist[aid][k + 1, :] = sat_result.average_torque_body_nm
+                    self.total_dv_m_s_by_object[aid] += sat_result.delta_v_m_s
+                    self.max_accel_km_s2_by_object[aid] = max(
+                        self.max_accel_km_s2_by_object[aid], sat_result.max_accel_km_s2
+                    )
+                    if sat_result.burned:
+                        self.burn_samples_by_object[aid] += 1
 
             world_truth_live[aid] = (
                 agent.truth if agent.kind == "satellite" else _rocket_state_to_truth(agent.rocket_state)
@@ -913,6 +963,9 @@ class _SingleRunEngine:
                 rocket_metrics=parts.rocket_metrics,
                 reentry_metrics=parts.reentry_metrics,
                 thrust_stats=parts.thrust_stats,
+                object_propagation={
+                    oid: asdict(provider.metadata()) for oid, provider in self.general_propagation.items()
+                },
                 attitude_guardrail_stats=get_attitude_guardrail_stats(),
                 knowledge_detection_by_observer={
                     aid: agent.knowledge_base.detection_summary()

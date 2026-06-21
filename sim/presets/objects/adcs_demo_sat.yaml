@@ -11,5 +11,7 @@ specs:
       - [14.0, 0.0, 0.0]
       - [0.0, 12.0, 0.0]
       - [0.0, 0.0, 10.0]
+    inertia_reference_point: center_of_mass
+    frame: body
   actuator_preset: "BASIC_MAGNETORQUER_TRIAD"
   attitude_system: "BASIC_REACTION_WHEELS_3AXIS"

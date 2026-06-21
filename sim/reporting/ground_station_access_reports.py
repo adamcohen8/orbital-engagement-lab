@@ -139,12 +139,39 @@ def _fmt_metric(value: Any, *, precision: int = 3) -> str:
     return "" if x is None else f"{x:.{precision}f}"
 
 
+def _summary_values_from_windows(
+    summary: dict[str, Any],
+    windows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if not windows:
+        return {
+            "access_duration_s": summary.get("access_duration_s"),
+            "first_access_utc": summary.get("first_access_utc"),
+            "last_los_utc": summary.get("last_access_utc"),
+            "max_elevation_deg": summary.get("max_elevation_deg"),
+            "min_range_km": summary.get("min_range_km"),
+        }
+
+    durations = [_json_float(window.get("duration_s")) for window in windows]
+    duration_values = [value for value in durations if value is not None]
+    max_elevation_deg = _finite_stat([window.get("max_elevation_deg") for window in windows], op="max")
+    min_range_km = _finite_stat([window.get("min_range_km") for window in windows], op="min")
+    return {
+        "access_duration_s": sum(duration_values) if duration_values else summary.get("access_duration_s"),
+        "first_access_utc": windows[0].get("aos_utc") or summary.get("first_access_utc"),
+        "last_los_utc": windows[-1].get("los_utc") or summary.get("last_access_utc"),
+        "max_elevation_deg": max_elevation_deg if max_elevation_deg is not None else summary.get("max_elevation_deg"),
+        "min_range_km": min_range_km if min_range_km is not None else summary.get("min_range_km"),
+    }
+
+
 def _summary_table_row(name: str, summary: dict[str, Any], windows: list[dict[str, Any]]) -> str:
+    values = _summary_values_from_windows(summary, windows)
     return (
-        f"| `{name}` | {len(windows)} | {_fmt_duration(summary.get('access_duration_s'))} | "
-        f"{summary.get('first_access_utc') or ''} | {summary.get('last_access_utc') or ''} | "
-        f"{_fmt_metric(summary.get('max_elevation_deg'), precision=2)} | "
-        f"{_fmt_metric(summary.get('min_range_km'), precision=3)} |"
+        f"| `{name}` | {len(windows)} | {_fmt_duration(values.get('access_duration_s'))} | "
+        f"{values.get('first_access_utc') or ''} | {values.get('last_los_utc') or ''} | "
+        f"{_fmt_metric(values.get('max_elevation_deg'), precision=2)} | "
+        f"{_fmt_metric(values.get('min_range_km'), precision=3)} |"
     )
 
 
@@ -179,7 +206,7 @@ def render_satellite_access_report(views: dict[str, Any]) -> str:
             [
                 f"## {sat_id}",
                 "",
-                "| Ground Station | Windows | Access Duration (s) | First AOS UTC | Last Access UTC | Max Elevation (deg) | Min Range (km) |",
+                "| Ground Station | Windows | Access Duration (s) | First AOS UTC | Last LOS UTC | Max Elevation (deg) | Min Range (km) |",
                 "|---|---:|---:|---|---|---:|---:|",
             ]
         )
@@ -225,7 +252,7 @@ def render_ground_station_access_report(views: dict[str, Any]) -> str:
             [
                 f"## {station_id}",
                 "",
-                "| Satellite | Windows | Access Duration (s) | First AOS UTC | Last Access UTC | Max Elevation (deg) | Min Range (km) |",
+                "| Satellite | Windows | Access Duration (s) | First AOS UTC | Last LOS UTC | Max Elevation (deg) | Min Range (km) |",
                 "|---|---:|---:|---|---|---:|---:|",
             ]
         )

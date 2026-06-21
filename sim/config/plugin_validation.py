@@ -103,12 +103,19 @@ def _class_has_callable(cls: type, method_name: str) -> bool:
 
 def validate_scenario_plugins(cfg: Any, *, import_plugins: bool = True) -> list[str]:
     errs: list[str] = []
+    orbit_cfg = dict(getattr(getattr(getattr(cfg, "simulator", None), "dynamics", {}), "orbit", {}) or {})
+    default_propagation_method = str(orbit_cfg.get("propagation_method", "special") or "special").strip().lower()
     for object_id, agent in configured_objects(cfg).items():
         if not getattr(agent, "enabled", False):
             continue
         path = object_parameter_prefix(str(object_id))
+        propagation_method = str(
+            getattr(agent, "propagation_method", "") or default_propagation_method or "special"
+        ).strip().lower()
+        errs.extend(_validate_object_propagation(agent, propagation_method, path))
         errs.extend(_validate_object_mass_properties(getattr(agent, "specs", {}) or {}, f"{path}.specs"))
         errs.extend(_validate_initial_state(getattr(agent, "initial_state", {}) or {}, f"{path}.initial_state"))
+        errs.extend(_validate_object_knowledge(getattr(agent, "knowledge", {}) or {}, f"{path}.knowledge"))
         if str(getattr(agent, "kind", "satellite")).strip().lower() == "rocket":
             errs.extend(
                 _validate_pointer(
@@ -178,6 +185,65 @@ def validate_scenario_plugins(cfg: Any, *, import_plugins: bool = True) -> list[
     return errs
 
 
+def _validate_object_propagation(agent: Any, propagation_method: str, path: str) -> list[str]:
+    errs: list[str] = []
+    method = str(propagation_method or "special").strip().lower()
+    if method not in {"special", "general"}:
+        return [f"{path}.propagation_method: must be one of: special, general."]
+    if method != "general":
+        return errs
+
+    kind = str(getattr(agent, "kind", "satellite") or "satellite").strip().lower()
+    if kind != "satellite":
+        errs.append(f"{path}.propagation_method=general is only supported for satellite objects.")
+    general = dict(getattr(agent, "general", {}) or {})
+    model = str(general.get("model", "") or "").strip().lower()
+    if model != "sgp4":
+        errs.append(f"{path}.general.model must be 'sgp4' when propagation_method=general.")
+    initial_state = dict(getattr(agent, "initial_state", {}) or {})
+    if not isinstance(initial_state.get("tle"), dict):
+        errs.append(f"{path}.propagation_method=general with general.model=sgp4 requires initial_state.tle.")
+    unsupported_initial_forms = [key for key in initial_state if str(key) != "tle"]
+    if unsupported_initial_forms:
+        errs.append(
+            f"{path}.propagation_method=general with general.model=sgp4 does not support initial_state field(s): "
+            + ", ".join(sorted(unsupported_initial_forms))
+            + ". Use initial_state.tle."
+        )
+    if getattr(agent, "orbit_control", None) is not None:
+        errs.append(f"{path}.orbit_control is not supported for passive general-propagation SGP4 objects.")
+    if getattr(agent, "attitude_control", None) is not None:
+        errs.append(f"{path}.attitude_control is not supported for passive general-propagation SGP4 objects.")
+    if getattr(agent, "mission_strategy", None) is not None or getattr(agent, "mission_execution", None) is not None:
+        errs.append(f"{path}.mission_strategy/mission_execution are not supported for passive general-propagation SGP4 objects.")
+    if list(getattr(agent, "mission_objectives", []) or []):
+        errs.append(f"{path}.mission_objectives are not supported for passive general-propagation SGP4 objects.")
+    allowed_general_keys = {"model", "output_frame", "frame_transform", "max_tle_age_days_warning"}
+    unknown_general_keys = sorted(str(key) for key in general if str(key) not in allowed_general_keys)
+    if unknown_general_keys:
+        errs.append(f"{path}.general has unsupported field(s): {', '.join(unknown_general_keys)}.")
+    output_frame = str(general.get("output_frame", "eci") or "eci").strip().lower()
+    if output_frame not in {"eci"}:
+        errs.append(f"{path}.general.output_frame must be 'eci' for SGP4 v1.")
+    frame_transform = str(general.get("frame_transform", "teme_as_eci") or "teme_as_eci").strip().lower()
+    if frame_transform != "teme_as_eci":
+        errs.append(f"{path}.general.frame_transform must be 'teme_as_eci' for SGP4 v1.")
+    return errs
+
+
+def _validate_object_knowledge(knowledge: dict[str, Any], path: str) -> list[str]:
+    raw = dict(knowledge or {})
+    if "sensor" not in raw:
+        return []
+    return [
+        (
+            f"{path}.sensor: unsupported modeled-sensor configuration block. "
+            "Use knowledge.sensor_error for measurement error assumptions and knowledge.estimation for estimator "
+            "settings; optical/radar camera hardware fields are not modeled through this config path."
+        )
+    ]
+
+
 def _validate_object_mass_properties(specs: dict[str, Any], path: str) -> list[str]:
     raw = dict(specs or {})
     errs: list[str] = []
@@ -203,6 +269,25 @@ def _validate_object_mass_properties(specs: dict[str, Any], path: str) -> list[s
 def _validate_initial_state(initial_state: dict[str, Any], path: str) -> list[str]:
     errs: list[str] = []
     raw = dict(initial_state or {})
+    tle = raw.get("tle")
+    if tle is not None:
+        if not isinstance(tle, dict):
+            errs.append(f"{path}.tle: must be a mapping/object.")
+        else:
+            allowed_tle_keys = {
+                "line1",
+                "line2",
+                "lines",
+                "require_checksum",
+                "propagate_to_initial_epoch",
+            }
+            unknown_tle_keys = sorted(str(key) for key in tle if str(key) not in allowed_tle_keys)
+            if unknown_tle_keys:
+                errs.append(
+                    f"{path}.tle has unsupported field(s): {', '.join(unknown_tle_keys)}. "
+                    "TLE initial states normally initialize OEL numerical propagation; use object-level "
+                    "propagation_method: general with general.model: sgp4 for passive SGP4 propagation."
+                )
     rel_block = raw.get("relative_to_target_ric")
     if rel_block is not None:
         if not isinstance(rel_block, dict):

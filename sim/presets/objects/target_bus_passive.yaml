@@ -11,4 +11,6 @@ specs:
       - [260.0, 0.0, 0.0]
       - [0.0, 220.0, 0.0]
       - [0.0, 0.0, 180.0]
+    inertia_reference_point: center_of_mass
+    frame: body
   attitude_system: "PASSIVE"

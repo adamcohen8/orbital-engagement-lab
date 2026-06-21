@@ -277,6 +277,34 @@ uses the configured OEL numerical special-perturbations force model. It does
 not perform SGP4/general-perturbations propagation or reuse TLE-specific
 drag/perturbation terms.
 
+For passive catalog-style propagation from TLEs, set the object propagation
+family to general perturbations and choose SGP4:
+
+```yaml
+objects:
+  catalog_object:
+    kind: satellite
+    enabled: true
+    propagation_method: general
+    general:
+      model: sgp4
+      output_frame: eci
+      frame_transform: teme_as_eci
+    initial_state:
+      tle:
+        line1: "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9005"
+        line2: "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1000"
+```
+
+SGP4 objects are passive in the initial implementation. They can participate in
+truth histories, review-store queries, ground access, plots, and relative-state
+analysis, but they do not accept OEL thrust, orbit controllers, maneuver
+objectives, or special-perturbations force flags as trajectory modifiers.
+The v1 output writes OEL ECI state fields using the propagated TEME state as an
+ECI-like state (`frame_transform: teme_as_eci`); it does not perform an
+EOP-backed TEME-to-ECI frame reduction. Review output records per-object
+propagation provenance in `object_propagation`.
+
 ## Ground Stations
 
 Ground stations are passive scene observers. They are useful when you want to

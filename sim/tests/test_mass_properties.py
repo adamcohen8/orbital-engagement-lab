@@ -77,6 +77,18 @@ class TestMassProperties(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "principal moments"):
             resolve_inertia_kg_m2(specs)
 
+    def test_explicit_inertia_with_unknown_reference_is_rejected_at_runtime(self):
+        specs = {
+            "mass_properties": {
+                "inertia_kg_m2": [[4.0, 0.0, 0.0], [0.0, 5.0, 0.0], [0.0, 0.0, 6.0]],
+                "inertia_reference_point": "unknown",
+                "frame": "body",
+            }
+        }
+
+        with self.assertRaisesRegex(ValueError, "center_of_mass"):
+            resolve_inertia_kg_m2(specs)
+
     def test_missing_inertia_keeps_default_compatibility(self):
         inertia = resolve_inertia_kg_m2({"mass_kg": 200.0})
 

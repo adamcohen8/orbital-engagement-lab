@@ -258,10 +258,10 @@ class AttitudeActuator(Actuator):
                 c_bn = quaternion_to_dcm_bn(np.array(q, dtype=float).reshape(4))
                 b_body = c_bn @ np.array(mode_flags["magnetic_field_eci_t"], dtype=float).reshape(3)
         if b_body is None:
-            proxy = np.clip(torque_body_cmd_nm, -max_dipole, max_dipole)
-            return proxy, {
-                "magnetorquer_mode": "dipole_proxy_no_b_field",
-                "magnetorquer_dipole_cmd_a_m2": np.clip(torque_body_cmd_nm, -max_dipole, max_dipole).tolist(),
+            return np.zeros(3, dtype=float), {
+                "magnetorquer_mode": "no_b_field_zero_torque",
+                "magnetorquer_dipole_cmd_a_m2": np.zeros(3, dtype=float).tolist(),
+                "magnetorquer_torque_body_nm": np.zeros(3, dtype=float).tolist(),
             }
 
         b = np.array(b_body, dtype=float).reshape(3)
@@ -288,7 +288,10 @@ class AttitudeActuator(Actuator):
         max_torque = self._as_vector(cmg.max_torque_nm, 3, default=0.0)
         momentum = self._as_vector(cmg.momentum_nms, 3, default=0.0)
         rate_limit = self._as_vector(cmg.gimbal_rate_limit_rad_s, 3, default=np.inf)
-        gimbal_torque_cap = np.abs(momentum * rate_limit)
+        gimbal_torque_cap = np.zeros(3, dtype=float)
+        finite_rate = np.isfinite(rate_limit)
+        gimbal_torque_cap[finite_rate] = np.abs(momentum[finite_rate] * rate_limit[finite_rate])
+        gimbal_torque_cap[~finite_rate & (np.abs(momentum) > 0.0)] = np.inf
         cap = np.minimum(np.abs(max_torque), gimbal_torque_cap)
         target = np.clip(np.array(torque_body_cmd_nm, dtype=float).reshape(3), -cap, cap)
         tau_s = float(max(cmg.torque_time_constant_s, 0.0))

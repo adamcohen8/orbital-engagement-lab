@@ -13,7 +13,7 @@ from sim.config import iter_object_sections
 from sim.plotting.style import get_oel_version
 from sim.utils.frames import eci_relative_to_ric_rect
 
-REVIEW_SCHEMA_VERSION = "0.3"
+REVIEW_SCHEMA_VERSION = "0.4"
 
 
 def write_single_run_review_store(
@@ -50,6 +50,7 @@ def write_single_run_review_store(
             _create_schema(conn)
             _insert_run_metadata(conn, cfg=cfg, summary=summary, outdir=outdir, generated_utc=generated_utc)
             _insert_objects(conn, cfg=cfg, summary=summary)
+            _insert_object_propagation(conn, payload=payload)
             _insert_time_samples(conn, t_s=t_s)
             _insert_object_state(conn, t_s=t_s, truth_hist=truth_hist)
             _insert_relative_state(conn, t_s=t_s, truth_hist=truth_hist, summary=summary)
@@ -97,6 +98,18 @@ def _create_schema(conn: sqlite3.Connection) -> None:
             enabled INTEGER,
             mass_initial_kg REAL,
             role TEXT
+        );
+
+        CREATE TABLE object_propagation (
+            object_id TEXT PRIMARY KEY,
+            propagation_method TEXT,
+            general_model TEXT,
+            native_frame TEXT,
+            output_frame TEXT,
+            frame_transform TEXT,
+            tle_epoch_jd_utc REAL,
+            tle_age_start_days REAL,
+            tle_age_end_days REAL
         );
 
         CREATE TABLE time_samples (
@@ -335,6 +348,26 @@ def _insert_objects(conn: sqlite3.Connection, *, cfg: Any, summary: dict[str, An
             )
         )
     conn.executemany("INSERT INTO objects VALUES (?, ?, ?, ?, ?)", rows)
+
+
+def _insert_object_propagation(conn: sqlite3.Connection, *, payload: dict[str, Any]) -> None:
+    rows = []
+    for object_id, metadata_raw in sorted(dict(payload.get("object_propagation", {}) or {}).items()):
+        metadata = dict(metadata_raw or {})
+        rows.append(
+            (
+                str(object_id),
+                str(metadata.get("propagation_method", "") or ""),
+                str(metadata.get("general_model", "") or ""),
+                str(metadata.get("native_frame", "") or ""),
+                str(metadata.get("output_frame", "") or ""),
+                str(metadata.get("frame_transform", "") or ""),
+                _float_or_none(metadata.get("tle_epoch_jd_utc")),
+                _float_or_none(metadata.get("tle_age_start_days")),
+                _float_or_none(metadata.get("tle_age_end_days")),
+            )
+        )
+    conn.executemany("INSERT INTO object_propagation VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
 
 
 def _insert_time_samples(conn: sqlite3.Connection, *, t_s: np.ndarray) -> None:
@@ -758,6 +791,7 @@ def _write_schema_json(path: Path, *, generated_utc: str) -> None:
         "tables": {
             "run_metadata": {"description": "One row describing the run and review schema."},
             "objects": {"description": "Active simulation objects."},
+            "object_propagation": {"description": "Per-object propagation-family provenance for GP/SP workflows."},
             "time_samples": {"description": "Retained sample times."},
             "object_state": {"description": "ECI truth state histories by object."},
             "relative_state": {"description": "RIC relative state for the primary object pair."},

@@ -90,7 +90,7 @@ class AtmosphericLiftAxisController(Controller):
         desired_ric = np.array(self.desired_lift_ric, dtype=float)
         if self.flip_lift_after_s is not None and float(t_s) >= float(self.flip_lift_after_s):
             desired_ric = -desired_ric
-        desired_lift_eci = ric_dcm_ir_from_rv(r_eci, v_eci).T @ desired_ric
+        desired_lift_eci = ric_dcm_ir_from_rv(r_eci, v_eci) @ desired_ric
         desired_lift_eci = _unit3(desired_lift_eci, field_name="desired_lift_eci")
 
         c_nb_des = _rotation_between_unit_vectors(self.lift_axis_body, desired_lift_eci)

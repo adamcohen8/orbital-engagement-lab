@@ -93,7 +93,8 @@ Expected agent behavior:
 
 - state that OEL uses the TLE to initialize an ECI state and then numerically
   integrates the configured force model,
-- avoid claiming SGP4/general-perturbations propagation,
+- avoid claiming SGP4/general-perturbations propagation for this initializer-only
+  task,
 - use the `ground_access` review table when present,
 - report access duration, sample count, ranges, elevations, or no-access
   evidence from saved artifacts.
@@ -155,7 +156,8 @@ The evaluation should fail or be marked partial when the agent:
 - invents physics or metrics outside OEL artifacts,
 - silently enables high-fidelity force models, sensing, estimation, campaigns,
   plots, or animations that the user did not request,
-- claims SGP4 propagation from a TLE-initialized OEL run,
+- claims SGP4 propagation from a TLE-initialized OEL run that does not
+  explicitly set `propagation_method: general` and `general.model: sgp4`,
 - claims terminal rendezvous from partial closure,
 - summarizes a completed run without inspecting saved artifacts,
 - claims `review/run.sqlite` exists when the run did not create it,

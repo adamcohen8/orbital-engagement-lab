@@ -101,11 +101,9 @@ def validate_mass_properties(
             )
     if inertia is not None and "center_of_mass_body_m" not in mp:
         warnings.append(f"{path}.center_of_mass_body_m is not set; inertia reference is harder to audit.")
-    if inertia is not None and inertia_reference == "unknown":
-        warnings.append(f"{path}.inertia_reference_point is unknown.")
-    if inertia is not None and inertia_reference not in {"center_of_mass", "unknown"}:
+    if inertia is not None and inertia_reference != "center_of_mass":
         errors.append(f"{path}.inertia_reference_point: runtime inertia must be referenced to center_of_mass.")
-    if inertia is not None and frame not in {"body", "body_frame", "unknown"}:
+    if inertia is not None and frame not in {"body", "body_frame"}:
         errors.append(f"{path}.frame: runtime inertia must be expressed in the body frame.")
 
     return MassPropertyValidationResult(errors=errors, warnings=warnings)
@@ -123,6 +121,20 @@ def resolve_inertia_kg_m2(specs: dict[str, Any], *, default: np.ndarray | None =
         return np.array(DEFAULT_SATELLITE_INERTIA_KG_M2 if default is None else default, dtype=float)
     inertia = np.array(mp.get("inertia_kg_m2"), dtype=float).reshape(3, 3)
     return 0.5 * (inertia + inertia.T)
+
+
+def resolve_center_of_mass_body_m(specs: dict[str, Any], *, default: np.ndarray | None = None) -> np.ndarray:
+    raw_mp = specs.get("mass_properties")
+    fallback = np.zeros(3, dtype=float) if default is None else np.array(default, dtype=float).reshape(3)
+    if raw_mp in (None, ""):
+        return fallback
+    result = validate_mass_properties(specs)
+    if result.errors:
+        raise ValueError("; ".join(result.errors))
+    mp = dict(raw_mp)
+    if "center_of_mass_body_m" not in mp:
+        return fallback
+    return _vector3(mp.get("center_of_mass_body_m"))
 
 
 def audit_mass_properties(specs: dict[str, Any]) -> MassPropertyAudit:

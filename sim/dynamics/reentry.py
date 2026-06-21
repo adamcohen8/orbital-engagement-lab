@@ -239,7 +239,7 @@ def reentry_metrics_for_state(
             "drag_decel_m_s2": drag_decel_m_s2,
             "lift_accel_m_s2": lift_accel_m_s2,
             "lift_to_drag": lift_to_drag,
-            "g_load": drag_decel_m_s2 / G0_M_S2,
+            "g_load": float(np.hypot(drag_decel_m_s2, lift_accel_m_s2)) / G0_M_S2,
             "heat_rate_w_m2": heat_rate_w_m2,
             "heat_load_j_m2": heat_load_j_m2,
         }

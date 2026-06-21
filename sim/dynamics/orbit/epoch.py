@@ -255,7 +255,11 @@ def resolve_sun_moon_positions(env: dict, t_s: float) -> tuple[np.ndarray, np.nd
         return spice_sun_moon_positions_eci_km(jd, env)
     if mode in ("analytic_simple", "simple"):
         return sun_position_eci_km_simple(jd), moon_position_eci_km_simple(jd)
-    return sun_position_eci_km_enhanced(jd), moon_position_eci_km_enhanced(jd)
+    if mode in ("analytic_enhanced", "enhanced", ""):
+        return sun_position_eci_km_enhanced(jd), moon_position_eci_km_enhanced(jd)
+    raise ValueError(
+        "ephemeris_mode must be one of: analytic_enhanced, analytic_simple, de440, hpop_de440, de440_hpop, spice, spiceypy."
+    )
 
 
 def resolve_body_position_eci_km(body_name: str, env: dict, t_s: float) -> np.ndarray:

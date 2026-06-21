@@ -6,6 +6,48 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.14.0 - 2026-06-21
+
+Release thesis: `v0.14.0` adds a public passive SGP4/general-perturbations
+propagation path, tightens agent-facing config validation and release evidence,
+and extends OD validation toward maneuver-aware residual analysis while keeping
+the public/pro boundary explicit.
+
+### Added
+
+- Added passive catalog-object propagation with object-level
+  `propagation_method: general` and `general.model: sgp4`, including TLE
+  parsing fields, SGP4 propagation metadata in review stores, a public ISS
+  example, and MATLAB SGP4 comparison harness wiring for local validation.
+- Added OD maneuver-detection evidence paths for both structured mission-input
+  fitting and precise-orbit validation comparison, with scheduled vector-burn
+  materialization, conservative gates, candidate artifacts, and documentation.
+- Added stronger config-help and agent-repair guidance for observations,
+  ground access, covariance, force-model/runtime settings, and strict plugin
+  validation errors.
+
+### Changed
+
+- Updated public agent docs, examples, and release/export checks so TLE
+  ingestion distinguishes numerical OEL propagation from explicit passive SGP4
+  propagation.
+- Expanded validation-plan recommendations, private merge evidence, and public
+  export checks to include Ruff, config schema/help, controller-bench, reentry,
+  and MATLAB SGP4 boundary coverage.
+- Tightened physics/runtime behavior around attitude actuator telemetry,
+  reaction-wheel sign conventions, RCS body-frame allocation, mass-property
+  center-of-mass use, atmosphere local-solar-time handling, rocket aero/stage
+  mass timing, and reentry g-load accounting.
+
+### Fixed
+
+- Fixed the agent capability-routing release coverage for
+  SGP4/general-perturbations propagation so the public agent docs and tests
+  agree.
+- Fixed several strict-validation gaps for unsupported YAML aliases,
+  object-level central-body overrides, ground-station schema drift, covariance
+  pair coverage, and passive SGP4 object constraints.
+
 ## 0.13.1 - 2026-06-20
 
 Release thesis: `v0.13.1` is a physics-correctness and release-readiness patch

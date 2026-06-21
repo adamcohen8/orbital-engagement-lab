@@ -479,7 +479,9 @@ class RocketAscentSimulator:
         dm_prop = 0.0
         mass_start_kg = float(s.mass_kg)
         mass_for_thrust_kg = max(mass_start_kg, 1e-9)
+        mass_for_forces_kg = max(mass_start_kg, 1e-9)
         stage_separated = False
+        pending_stage_separation = False
         env = {"atmosphere_model": self.sim_cfg.atmosphere_model, **dict(self.sim_cfg.atmosphere_env)}
         if self.sim_cfg.use_wgs84_geodesy:
             env["geodetic_model"] = "wgs84"
@@ -506,11 +508,12 @@ class RocketAscentSimulator:
                 s.stage_prop_remaining_kg[stage_i] = prop_left - dm_prop
                 s.mass_kg = max(0.0, s.mass_kg - dm_prop)
 
-            # stage separation when prop hits empty.
+            mass_for_forces_kg = max(s.mass_kg, 1e-9)
+            # Defer the dry-mass drop until after this interval's old-stage
+            # aero/orbit propagation, so old-stage geometry is not combined
+            # with post-separation mass.
             if s.stage_prop_remaining_kg[stage_i] <= 1e-9:
-                s.mass_kg = max(0.0, s.mass_kg - self._stage_dry[stage_i])
-                s.active_stage_index += 1
-                stage_separated = True
+                pending_stage_separation = True
 
         if cmd.attitude_quat_bn_cmd is not None:
             s.attitude_quat_bn = normalize_quaternion(np.array(cmd.attitude_quat_bn_cmd, dtype=float))
@@ -581,7 +584,7 @@ class RocketAscentSimulator:
             aero_cfg = self._resolve_aero_config_for_stage(stage_i=stage_i)
             loads = compute_aero_loads(v_rel_body_m_s=v_rel_body_m_s, atmos=aero_state, cfg=aero_cfg)
             f_aero_eci_n = c_bn.T @ loads.force_body_n
-            accel_aero_eci_km_s2 = f_aero_eci_n / max(s.mass_kg, 1e-9) / 1e3
+            accel_aero_eci_km_s2 = f_aero_eci_n / max(mass_for_forces_kg, 1e-9) / 1e3
             torque_aero_body_nm = loads.moment_body_nm
             last_q_dyn = float(loads.state.dynamic_pressure_pa)
             last_mach = float(loads.state.mach)
@@ -595,7 +598,7 @@ class RocketAscentSimulator:
         x_orbit = np.hstack((s.position_eci_km, s.velocity_eci_km_s))
         ctx = OrbitContext(
             mu_km3_s2=EARTH_MU_KM3_S2,
-            mass_kg=s.mass_kg,
+            mass_kg=mass_for_forces_kg,
             area_m2=self._area_ref_m2,
             cd=self.sim_cfg.cd,
             cr=self.sim_cfg.cr,
@@ -641,9 +644,14 @@ class RocketAscentSimulator:
         s.attitude_quat_bn = qn
         s.angular_rate_body_rad_s = wn
         s.t_s = s.t_s + dt_s
+        if pending_stage_separation and stage_i < len(self._stage_dry):
+            s.mass_kg = max(0.0, s.mass_kg - self._stage_dry[stage_i])
+            s.active_stage_index += 1
+            stage_separated = True
         # attach last-step telemetry attribute for logging convenience.
         s._last_step_thrust_n = thrust_n
         s._last_step_stage_sep = stage_separated
+        s._last_step_force_mass_kg = mass_for_forces_kg
         s._last_step_thrust_axis_eci = thrust_axis_eci.copy()
         s._last_step_thrust_accel_eci_km_s2 = accel_thrust_eci_km_s2.copy()
         s._last_step_q_dyn_pa = last_q_dyn

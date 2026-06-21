@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from sim.core.models import Measurement, StateTruth
 from sim.knowledge.object_tracking import (
@@ -218,3 +219,25 @@ def test_object_knowledge_base_exposes_raw_state_measurement_snapshot() -> None:
     assert "target" in beliefs
     assert "target" in measurements
     assert np.allclose(measurements["target"], target_state)
+
+
+def test_relative_knowledge_requires_explicit_initial_state_prior() -> None:
+    observer = _truth(position=np.array([7000.0, 0.0, 0.0]), velocity=np.array([0.0, 7.5, 0.0]))
+    target = _truth(position=np.array([7001.0, 2.0, 3.0]), velocity=np.array([0.01, 7.49, -0.02]))
+    knowledge = ObjectKnowledgeBase(
+        observer_id="chaser",
+        tracked_objects=[
+            TrackedObjectConfig(
+                target_id="target",
+                conditions=KnowledgeConditionConfig(refresh_rate_s=1.0),
+                sensor_noise=KnowledgeNoiseConfig(range_sigma_km=0.0, range_rate_sigma_km_s=0.0),
+                measurement_model="relative_range_rate",
+                ekf=KnowledgeEKFConfig(init_cov_diag=np.ones(6)),
+            )
+        ],
+        dt_s=1.0,
+        rng=np.random.default_rng(5),
+    )
+
+    with pytest.raises(ValueError, match="initial_state_eci_km_s"):
+        knowledge.update(observer, {"target": target}, t_s=0.0)

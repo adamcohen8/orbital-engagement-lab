@@ -33,22 +33,23 @@ class AttitudeEKFEstimator(Estimator):
         return self._acceleration_enabled_value
 
     def update(self, belief: StateBelief, measurement: Measurement | None, t_s: float) -> StateBelief:
-        x_prev = belief.state
-        p_prev = belief.covariance
-        dt_s = max(float(t_s) - float(belief.last_update_t_s), 0.0)
+        output_t_s = float(t_s)
+        meas_t_s = output_t_s
+        if measurement is not None:
+            meas_t_s = float(np.clip(float(measurement.t_s), float(belief.last_update_t_s), output_t_s))
 
-        x_pred = self._propagate_state(x_prev, dt_s=dt_s)
-        f = self._numerical_jacobian(x_prev, dt_s=dt_s)
-        q_scale = dt_s / self.dt_s if self.dt_s > 0.0 else 1.0
-        q = np.diag(self.process_noise_diag) * max(q_scale, 0.0)
-        p_pred = f @ p_prev @ f.T + q
+        x_pred, p_pred = self._predict(belief.state, belief.covariance, from_t_s=belief.last_update_t_s, to_t_s=meas_t_s)
 
         if measurement is None:
-            return StateBelief(state=x_pred, covariance=p_pred, last_update_t_s=t_s)
+            if meas_t_s < output_t_s:
+                x_pred, p_pred = self._predict(x_pred, p_pred, from_t_s=meas_t_s, to_t_s=output_t_s)
+            return StateBelief(state=x_pred, covariance=p_pred, last_update_t_s=output_t_s)
 
         z = np.asarray(measurement.vector, dtype=float).reshape(-1)
         if z.size < 7:
-            return StateBelief(state=x_pred, covariance=p_pred, last_update_t_s=t_s)
+            if meas_t_s < output_t_s:
+                x_pred, p_pred = self._predict(x_pred, p_pred, from_t_s=meas_t_s, to_t_s=output_t_s)
+            return StateBelief(state=x_pred, covariance=p_pred, last_update_t_s=output_t_s)
         z = z[:7].copy()
         z[:4] = normalize_quaternion(z[:4])
         if np.dot(z[:4], x_pred[:4]) < 0.0:
@@ -68,7 +69,25 @@ class AttitudeEKFEstimator(Estimator):
         i_kh = np.eye(7) - k @ h
         p_upd = i_kh @ p_pred @ i_kh.T + k @ r @ k.T
         p_upd = 0.5 * (p_upd + p_upd.T)
-        return StateBelief(state=x_upd, covariance=p_upd, last_update_t_s=t_s)
+        if meas_t_s < output_t_s:
+            x_upd, p_upd = self._predict(x_upd, p_upd, from_t_s=meas_t_s, to_t_s=output_t_s)
+        return StateBelief(state=x_upd, covariance=p_upd, last_update_t_s=output_t_s)
+
+    def _predict(
+        self,
+        x_prev: np.ndarray,
+        p_prev: np.ndarray,
+        *,
+        from_t_s: float,
+        to_t_s: float,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        dt_s = max(float(to_t_s) - float(from_t_s), 0.0)
+        x_pred = self._propagate_state(x_prev, dt_s=dt_s)
+        f = self._numerical_jacobian(x_prev, dt_s=dt_s)
+        q_scale = dt_s / self.dt_s if self.dt_s > 0.0 else 1.0
+        q = np.diag(self.process_noise_diag) * max(q_scale, 0.0)
+        p_pred = f @ p_prev @ f.T + q
+        return x_pred, p_pred
 
     def _propagate_state(self, x: np.ndarray, *, dt_s: float | None = None) -> np.ndarray:
         step_dt_s = self.dt_s if dt_s is None else float(dt_s)

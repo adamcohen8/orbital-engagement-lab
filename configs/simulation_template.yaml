@@ -227,7 +227,8 @@ objects:
       # relative_to_target_ric:
       #   frame: "rect"   # "rect" | "curv"
       #   state: [2.0, -8.0, 1.2, 0.0008, -0.0012, 0.0004]  # [R,I,C,dR,dI,dC] (km, km/s)
-      # Optional alternative: initialize from a TLE. This is not SGP4; if
+      # Optional alternative: initialize from a TLE. This is not SGP4 unless
+      # the object explicitly sets propagation_method: general and general.model: sgp4; if
       # simulator.initial_jd_utc is set, the TLE mean anomaly is advanced to
       # that epoch with a two-body approximation before OEL numerical propagation.
       # tle:
@@ -403,8 +404,9 @@ objects:
         # True anomaly in degrees.
         true_anomaly_deg: 0.0
       # Optional alternative: initialize from a TLE instead of coes. This is
-      # not SGP4; OEL converts the TLE to an initial ECI state before numerical
-      # propagation.
+      # not SGP4 unless the object explicitly sets propagation_method: general
+      # and general.model: sgp4; otherwise OEL converts the TLE to an initial
+      # ECI state before numerical propagation.
       # tle:
       #   lines:
       #     - "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9005"

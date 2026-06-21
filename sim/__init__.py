@@ -344,6 +344,7 @@ _OBSERVATION_EXPORTS = [
     "kalman_filter_position_observations",
     "load_observation_packet",
     "observation_packet_from_dict",
+    "sample_sgp4_observations_from_tle",
 ]
 
 __all__ = [

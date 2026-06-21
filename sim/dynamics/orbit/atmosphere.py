@@ -7,7 +7,7 @@ from typing import Literal
 import numpy as np
 
 from sim.dynamics.orbit.environment import EARTH_RADIUS_KM
-from sim.dynamics.orbit.epoch import datetime_to_julian_date, julian_date_to_datetime
+from sim.dynamics.orbit.epoch import datetime_to_julian_date, julian_date_to_datetime, sun_position_eci_km_enhanced
 from sim.dynamics.orbit.frames import apparent_sidereal_time_hpop_like, eci_to_ecef_harmonic
 from sim.dynamics.orbit.harris_priester_backend import harris_priester_density
 from sim.dynamics.orbit.jacchia70_backend import jacchia70_density
@@ -91,6 +91,17 @@ def _datetime_from_env_t_s(env: dict, t_s: float) -> datetime:
             base_epoch = base_epoch.replace(tzinfo=timezone.utc)
         return base_epoch + timedelta(seconds=float(t_s))
     return datetime(2020, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=float(t_s))
+
+
+def _local_solar_time_hr(lon_deg: float, dt_utc: datetime, env: dict) -> float:
+    jd = datetime_to_julian_date(dt_utc)
+    frame_model = str(env.get("density_frame_model", env.get("drag_frame_model", ""))).strip().lower()
+    eop_path = env.get("density_eop_path", env.get("drag_eop_path")) if frame_model == "hpop_like" else None
+    sidereal = apparent_sidereal_time_hpop_like(jd, None if eop_path is None else str(eop_path))
+    sun_eci = sun_position_eci_km_enhanced(jd)
+    sun_ra = math.atan2(float(sun_eci[1]), float(sun_eci[0]))
+    hour_angle = (sidereal + math.radians(float(lon_deg)) - sun_ra + math.pi) % (2.0 * math.pi) - math.pi
+    return float((12.0 + hour_angle * 12.0 / math.pi) % 24.0)
 
 
 def density_ussa1976(r_eci_km: np.ndarray, t_s: float, env: dict | None = None) -> float:
@@ -237,11 +248,7 @@ def density_nrlmsise00(r_eci_km: np.ndarray, t_s: float, env: dict | None = None
     if env.get("nrlmsise00_lst_hr") is None:
         frame_model = str(env.get("density_frame_model", env.get("drag_frame_model", ""))).strip().lower()
         if frame_model == "hpop_like":
-            eop_path = env.get("density_eop_path", env.get("drag_eop_path"))
-            sidereal = apparent_sidereal_time_hpop_like(datetime_to_julian_date(dt_utc), None if eop_path is None else str(eop_path))
-            env["nrlmsise00_lst_hr"] = ((math.radians(float(lon_deg)) + sidereal) % (2.0 * math.pi)) * 24.0 / (
-                2.0 * math.pi
-            )
+            env["nrlmsise00_lst_hr"] = _local_solar_time_hr(lon_deg, dt_utc, env)
 
     return float(max(0.0, nrlmsise00_local_density(alt_km, lat_deg, lon_deg, dt_utc, env)))
 
@@ -259,13 +266,16 @@ def density_msis86(r_eci_km: np.ndarray, t_s: float, env: dict | None = None) ->
     if bool(env.get("msis86_hpop_angle_compat", True)):
         if env.get("msis86_lst_hr") is None:
             frame_model = str(env.get("density_frame_model", env.get("drag_frame_model", ""))).strip().lower()
-            eop_path = env.get("density_eop_path", env.get("drag_eop_path")) if frame_model == "hpop_like" else None
-            sidereal = apparent_sidereal_time_hpop_like(datetime_to_julian_date(dt_utc), None if eop_path is None else str(eop_path))
-            env["msis86_lst_hr"] = (
-                ((math.radians(float(lon_deg)) + sidereal) % (2.0 * math.pi))
-                * 24.0
-                / (2.0 * math.pi)
-            )
+            if frame_model == "hpop_like":
+                env["msis86_lst_hr"] = _local_solar_time_hr(lon_deg, dt_utc, env)
+            else:
+                eop_path = None
+                sidereal = apparent_sidereal_time_hpop_like(datetime_to_julian_date(dt_utc), eop_path)
+                env["msis86_lst_hr"] = (
+                    ((math.radians(float(lon_deg)) + sidereal) % (2.0 * math.pi))
+                    * 24.0
+                    / (2.0 * math.pi)
+                )
         lat_deg = math.radians(lat_deg)
         lon_deg = math.radians(lon_deg)
     return float(max(0.0, msis86_local_density(alt_km, lat_deg, lon_deg, dt_utc, env)))

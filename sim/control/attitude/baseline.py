@@ -129,17 +129,17 @@ class ReactionWheelPDController(Controller):
         w_err = w - w_des
         torque_body_cmd = -(self._kp * q_err[1:4]) - (self._kd * w_err)
 
-        wheel_torque_cmd = self._allocation @ torque_body_cmd
+        wheel_torque_cmd = -(self._allocation @ torque_body_cmd)
         wheel_torque_cmd = np.clip(wheel_torque_cmd, -self._wheel_limits_nm, self._wheel_limits_nm)
-        torque = self._wheel_axes_3xn @ wheel_torque_cmd
+        torque = -(self._wheel_axes_3xn @ wheel_torque_cmd)
 
         if self.max_body_torque_nm is not None and self.max_body_torque_nm > 0.0:
             n = float(np.linalg.norm(torque))
             if n > self.max_body_torque_nm:
                 torque *= self.max_body_torque_nm / n
-                wheel_torque_cmd = self._allocation @ torque
+                wheel_torque_cmd = -(self._allocation @ torque)
                 wheel_torque_cmd = np.clip(wheel_torque_cmd, -self._wheel_limits_nm, self._wheel_limits_nm)
-                torque = self._wheel_axes_3xn @ wheel_torque_cmd
+                torque = -(self._wheel_axes_3xn @ wheel_torque_cmd)
 
         angle_deg = float(np.degrees(2.0 * np.arccos(np.clip(float(q_err[0]), -1.0, 1.0))))
         return Command(
@@ -219,28 +219,28 @@ class ReactionWheelPIDController(ReactionWheelPDController):
                 candidate_i = np.clip(candidate_i, -self._integral_limit, self._integral_limit)
 
         torque_body_cmd = -(self._kp * q_err[1:4]) - (self._kd * w_err) - (self._ki * candidate_i)
-        wheel_torque_unsat = self._allocation @ torque_body_cmd
+        wheel_torque_unsat = -(self._allocation @ torque_body_cmd)
         saturated = bool(np.any(np.abs(wheel_torque_unsat) > self._wheel_limits_nm + 1e-12))
 
         if saturated and dt > 0.0:
             # Conditional integration anti-windup: skip I-term update while saturated.
             candidate_i = self._integral_error.copy()
             torque_body_cmd = -(self._kp * q_err[1:4]) - (self._kd * w_err) - (self._ki * candidate_i)
-            wheel_torque_unsat = self._allocation @ torque_body_cmd
+            wheel_torque_unsat = -(self._allocation @ torque_body_cmd)
 
         self._integral_error = candidate_i
         self._last_t_s = float(t_s)
 
         wheel_torque_cmd = np.clip(wheel_torque_unsat, -self._wheel_limits_nm, self._wheel_limits_nm)
-        torque = self._wheel_axes_3xn @ wheel_torque_cmd
+        torque = -(self._wheel_axes_3xn @ wheel_torque_cmd)
 
         if self.max_body_torque_nm is not None and self.max_body_torque_nm > 0.0:
             n = float(np.linalg.norm(torque))
             if n > self.max_body_torque_nm:
                 torque *= self.max_body_torque_nm / n
-                wheel_torque_cmd = self._allocation @ torque
+                wheel_torque_cmd = -(self._allocation @ torque)
                 wheel_torque_cmd = np.clip(wheel_torque_cmd, -self._wheel_limits_nm, self._wheel_limits_nm)
-                torque = self._wheel_axes_3xn @ wheel_torque_cmd
+                torque = -(self._wheel_axes_3xn @ wheel_torque_cmd)
 
         angle_deg = float(np.degrees(2.0 * np.arccos(np.clip(float(q_err[0]), -1.0, 1.0))))
         return Command(
@@ -380,22 +380,22 @@ class SmallAngleLQRController(Controller):
         if self.capture_enabled and angle_deg > self.capture_angle_deg:
             # Large-angle capture mode: nonlinear quaternion PD in body torque space.
             torque_body_cmd = -self.capture_kp * q_err[1:4] - self.capture_kd * w_err
-            wheel_torque_cmd = self._allocation @ torque_body_cmd
+            wheel_torque_cmd = -(self._allocation @ torque_body_cmd)
             mode = "lqr_capture"
         else:
-            wheel_torque_cmd = -self._k_gain @ x
+            wheel_torque_cmd = self._k_gain @ x
             mode = "lqr_track"
 
         wheel_torque_cmd = np.clip(wheel_torque_cmd, -self._wheel_limits_nm, self._wheel_limits_nm)
-        torque = self._wheel_axes_3xn @ wheel_torque_cmd
+        torque = -(self._wheel_axes_3xn @ wheel_torque_cmd)
 
         if self.max_body_torque_nm is not None and self.max_body_torque_nm > 0.0:
             n = float(np.linalg.norm(torque))
             if n > self.max_body_torque_nm:
                 torque *= self.max_body_torque_nm / n
-                wheel_torque_cmd = self._allocation @ torque
+                wheel_torque_cmd = -(self._allocation @ torque)
                 wheel_torque_cmd = np.clip(wheel_torque_cmd, -self._wheel_limits_nm, self._wheel_limits_nm)
-                torque = self._wheel_axes_3xn @ wheel_torque_cmd
+                torque = -(self._wheel_axes_3xn @ wheel_torque_cmd)
 
         return Command(
             thrust_eci_km_s2=np.zeros(3),

@@ -11,4 +11,6 @@ specs:
       - [0.05, 0.0, 0.0]
       - [0.0, 0.10, 0.0]
       - [0.0, 0.0, 0.13]
+    inertia_reference_point: center_of_mass
+    frame: body
   attitude_system: "BASIC_REACTION_WHEELS_3AXIS"

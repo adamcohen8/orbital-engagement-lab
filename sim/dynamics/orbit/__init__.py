@@ -69,6 +69,7 @@ from sim.dynamics.orbit.propagator import (
     third_body_planets_plugin,
     third_body_sun_plugin,
 )
+from sim.dynamics.orbit.sgp4 import SGP4EphemerisProvider, SGP4State, sgp4_propagate_teme
 from sim.dynamics.orbit.spherical_harmonics import (
     SphericalHarmonicTerm,
     accel_spherical_harmonics_terms,
@@ -131,6 +132,9 @@ __all__ = [
     "load_hpop_ggm03_terms",
     "load_icgem_gfc_terms",
     "load_real_earth_gravity_terms",
+    "SGP4EphemerisProvider",
+    "SGP4State",
+    "sgp4_propagate_teme",
     "density_exponential",
     "density_ussa1976",
     "density_msis86",

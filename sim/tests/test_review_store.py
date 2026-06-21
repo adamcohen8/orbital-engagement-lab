@@ -24,6 +24,9 @@ from sim.review import (
     write_workflow_review,
 )
 
+ISS_LINE1 = "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9005"
+ISS_LINE2 = "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1000"
+
 
 def _review_store_config(output_dir: Path) -> dict:
     return {
@@ -82,7 +85,7 @@ def test_single_run_review_store_writes_queryable_sqlite(tmp_path: Path) -> None
     assert db_path.is_file()
     assert schema_path.is_file()
     assert db_path.parent == tmp_path / "review"
-    assert json.loads(schema_path.read_text(encoding="utf-8"))["schema_version"] == "0.3"
+    assert json.loads(schema_path.read_text(encoding="utf-8"))["schema_version"] == "0.4"
 
     with sqlite3.connect(db_path) as conn:
         scenario_name = conn.execute("SELECT scenario_name FROM run_metadata").fetchone()[0]
@@ -101,6 +104,27 @@ def test_single_run_review_store_writes_queryable_sqlite(tmp_path: Path) -> None
     assert min_range == pytest.approx(result.min_range("chaser", "target"))
     assert "master_run_summary.json" in artifact_paths
     assert "master_run_log.json" in artifact_paths
+
+
+def test_review_store_writes_object_propagation_metadata_for_sgp4(tmp_path: Path) -> None:
+    raw = _review_store_config(tmp_path)
+    raw["chaser"]["enabled"] = False
+    raw["target"]["propagation_method"] = "general"
+    raw["target"]["general"] = {"model": "sgp4", "output_frame": "eci", "frame_transform": "teme_as_eci"}
+    raw["target"]["initial_state"] = {"tle": {"line1": ISS_LINE1, "line2": ISS_LINE2}}
+    raw["simulator"]["initial_jd_utc"] = 2460310.5
+    result = SimulationSession.from_config(SimulationConfig.from_dict(raw)).run()
+
+    db_path = Path(dict(result.summary.get("review_outputs", {}) or {})["sqlite"])
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT object_id, propagation_method, general_model, native_frame, output_frame, frame_transform
+            FROM object_propagation
+            """
+        ).fetchone()
+
+    assert row == ("target", "general", "sgp4", "teme", "eci", "teme_as_eci")
 
 
 def test_review_store_config_defaults_disabled_and_validates_detail(tmp_path: Path) -> None:

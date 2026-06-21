@@ -20,7 +20,7 @@ and summarize access windows. Be explicit about whether this is SGP4.
 
 - Use the checked-in public ground-access example unless the user supplies a
   different public TLE or station.
-- State that OEL uses the TLE to initialize an ECI state and then numerically
+- State that this task uses the TLE to initialize an ECI state and then numerically
   integrates the configured OEL force model.
 - Do not describe the run as SGP4/general-perturbations propagation.
 - Inspect `ground_access` evidence.
@@ -58,7 +58,7 @@ SELECT station_id, object_id, reason, COUNT(*) AS samples FROM ground_access WHE
 - Status: validated and ran, or explain the failure.
 - Station ID, object ID, sample count, access sample count, min range, and max
   elevation.
-- Explicit TLE assumption boundary: initializer only, not SGP4 propagation.
+- Explicit TLE assumption boundary for this task: initializer only, not SGP4 propagation.
 - Access/no-access interpretation from review evidence.
 - Limitations: geometric access only, no RF link budget, scheduling, weather,
   or operational contact planning.
@@ -68,10 +68,10 @@ SELECT station_id, object_id, reason, COUNT(*) AS samples FROM ground_access WHE
 - Config validates.
 - Scenario runs headlessly.
 - Review store contains ground-access rows.
-- Agent avoids SGP4 claims.
+- Agent avoids SGP4 claims for this initializer-only task.
 
 ## Red Flags
 
-- Calls the result SGP4.
+- Calls this initializer-only result SGP4.
 - Infers access windows without inspecting artifacts.
 - Treats geometric visibility as communications availability.

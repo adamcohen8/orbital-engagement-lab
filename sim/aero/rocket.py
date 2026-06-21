@@ -114,7 +114,7 @@ def compute_aero_loads(
 
     cd = _cd_model(atmos.mach, atmos.alpha_rad, cfg)
     cl = float(cfg.cl_alpha_per_rad) * atmos.alpha_rad
-    cy = float(cfg.cy_beta_per_rad) * atmos.beta_rad
+    cy = -float(cfg.cy_beta_per_rad) * atmos.beta_rad
     c_force = np.array([-cd, cy, -cl], dtype=float)
     f_body = q * float(cfg.reference_area_m2) * c_force
 

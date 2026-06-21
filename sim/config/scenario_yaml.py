@@ -35,6 +35,8 @@ class AgentSection:
     kind: str = "satellite"
     enabled: bool = True
     role: str = "agent"
+    propagation_method: str = ""
+    general: dict[str, Any] = field(default_factory=dict)
     specs: dict[str, Any] = field(default_factory=dict)
     initial_state: dict[str, Any] = field(default_factory=dict)
     reference_orbit: dict[str, Any] = field(default_factory=dict)
@@ -537,12 +539,48 @@ def _as_dict(value: Any, section_name: str) -> dict[str, Any]:
     return dict(value)
 
 
+_UnsupportedAliasMap = dict[str, tuple[str, str]]
+
+
+def _reject_unsupported_aliases(
+    d: dict[str, Any],
+    section_path: str,
+    aliases: _UnsupportedAliasMap,
+) -> None:
+    for unsupported_key, (canonical_key, guidance) in aliases.items():
+        if unsupported_key not in d:
+            continue
+        unsupported_path = f"{section_path}.{unsupported_key}" if section_path else unsupported_key
+        canonical_path = f"{section_path}.{canonical_key}" if section_path else canonical_key
+        raise ValueError(f"{unsupported_path} is unsupported. Use {canonical_path}{guidance}.")
+
+
+_ROOT_UNSUPPORTED_ALIASES: _UnsupportedAliasMap = {
+    "ground_station": ("ground_stations", " as a list or mapping"),
+}
+
+_OUTPUTS_UNSUPPORTED_ALIASES: _UnsupportedAliasMap = {
+    "plot": ("plots", " for plot configuration"),
+    "animation": ("animations", " for animation configuration"),
+}
+
+_OUTPUT_PLOTS_UNSUPPORTED_ALIASES: _UnsupportedAliasMap = {
+    "figure_id": ("figure_ids", " as a list"),
+}
+
+_OUTPUT_ANIMATIONS_UNSUPPORTED_ALIASES: _UnsupportedAliasMap = {
+    "type": ("types", " as a list"),
+}
+
+
 _AGENT_PRESET_KEYS = ("preset", "preset_yaml", "preset_path")
 _AGENT_FRAGMENT_KEYS = {
     "object_id",
     "kind",
     "enabled",
     "role",
+    "propagation_method",
+    "general",
     "specs",
     "initial_state",
     "reference_orbit",
@@ -975,6 +1013,7 @@ def _parse_agent_section(
     default_kind: str | None = None,
 ) -> AgentSection:
     d = _as_dict(value, role)
+    _reject_unsupported_agent_body_overrides(d, role)
     objectives = d.get("mission_objectives", []) or []
     if not isinstance(objectives, list):
         raise ValueError(f"Section '{role}.mission_objectives' must be a list.")
@@ -991,6 +1030,10 @@ def _parse_agent_section(
     )
     if resolved_kind not in {"satellite", "rocket"}:
         raise ValueError(f"Section '{role}.kind' must be one of: satellite, rocket.")
+    propagation_method = str(d.get("propagation_method", d.get("propagation_family", "")) or "").strip().lower()
+    if propagation_method and propagation_method not in {"special", "general"}:
+        raise ValueError(f"Section '{role}.propagation_method' must be one of: special, general.")
+    general = _as_dict(d.get("general"), f"{role}.general")
     if resolved_kind != "rocket" and d.get("guidance") is not None:
         raise ValueError(
             f"Section '{role}.guidance' is no longer supported. "
@@ -1008,6 +1051,8 @@ def _parse_agent_section(
         kind=resolved_kind,
         enabled=_parse_bool(d.get("enabled", resolved_default_enabled), f"{role}.enabled"),
         role=resolved_role,
+        propagation_method=propagation_method,
+        general=general,
         specs=dict(d.get("specs", {}) or {}),
         initial_state=dict(d.get("initial_state", {}) or {}),
         reference_orbit=dict(d.get("reference_orbit", {}) or {}),
@@ -1024,8 +1069,55 @@ def _parse_agent_section(
     )
 
 
+def _reject_unsupported_agent_body_overrides(d: dict[str, Any], role: str) -> None:
+    unsupported_root_keys = {
+        "central_body",
+        "primary_body",
+        "body",
+        "mu_km3_s2",
+        "gravitational_parameter_km3_s2",
+    }
+    root_hits = sorted(str(key) for key in d if str(key) in unsupported_root_keys)
+    if root_hits:
+        raise ValueError(
+            f"Section '{role}' has unsupported central-body field(s): {', '.join(root_hits)}. "
+            "Object-level central-body overrides are not supported; public OEL orbit scenarios are "
+            "Earth-centered except for documented CR3BP/cislunar modes."
+        )
+
+    orbit = d.get("orbit")
+    if orbit is None:
+        return
+    if not isinstance(orbit, dict):
+        raise ValueError(f"Section '{role}.orbit' must be a mapping/object when provided.")
+    unsupported_orbit_keys = sorted(str(key) for key in orbit if str(key) in unsupported_root_keys)
+    if unsupported_orbit_keys:
+        raise ValueError(
+            f"Section '{role}.orbit' has unsupported central-body field(s): "
+            f"{', '.join(unsupported_orbit_keys)}. Object-level central-body overrides are not supported; "
+            "public OEL orbit scenarios are Earth-centered except for documented CR3BP/cislunar modes."
+        )
+
+
 def _parse_ground_station_section(value: Any, index: int) -> GroundStationSection:
     d = _as_dict(value, f"ground_stations[{index}]")
+    allowed_keys = {
+        "id",
+        "name",
+        "lat_deg",
+        "lon_deg",
+        "alt_km",
+        "altitude_km",
+        "min_elevation_deg",
+        "max_range_km",
+        "enabled",
+    }
+    unknown_keys = sorted(str(key) for key in d if str(key) not in allowed_keys)
+    if unknown_keys:
+        raise ValueError(
+            f"ground_stations[{index}] has unsupported field(s): {', '.join(unknown_keys)}. "
+            "Ground stations are fixed geometric access sites; RF links or moving platforms are not modeled here."
+        )
     raw_id = d.get("id", d.get("name", f"ground_station_{index + 1}"))
     station_id = str(raw_id or "").strip()
     if not station_id:
@@ -1480,13 +1572,24 @@ def _parse_covariance_section(value: Any) -> CovarianceSection:
     )
     if accel_sigma < 0.0:
         raise ValueError("analysis.covariance.process_noise.acceleration_sigma_km_s2 must be >= 0.")
+    objects = {
+        str(object_id): _parse_covariance_object_section(obj, f"analysis.covariance.objects.{object_id}")
+        for object_id, obj in objects_raw.items()
+    }
+    pairs = [_parse_covariance_pair_section(pair, idx) for idx, pair in enumerate(pairs_raw)]
+    object_ids = set(objects)
+    for pair in pairs:
+        missing = [object_id for object_id in (pair.deputy_id, pair.chief_id) if object_id not in object_ids]
+        if missing:
+            raise ValueError(
+                "analysis.covariance.pairs "
+                f"{pair.deputy_id}:{pair.chief_id} requires covariance objects for both participants; "
+                f"missing: {', '.join(missing)}."
+            )
     return CovarianceSection(
         enabled=_parse_bool(d.get("enabled", True), "analysis.covariance.enabled"),
-        objects={
-            str(object_id): _parse_covariance_object_section(obj, f"analysis.covariance.objects.{object_id}")
-            for object_id, obj in objects_raw.items()
-        },
-        pairs=[_parse_covariance_pair_section(pair, idx) for idx, pair in enumerate(pairs_raw)],
+        objects=objects,
+        pairs=pairs,
         finite_difference=CovarianceFiniteDifferenceSection(
             position_step_km=pos_step,
             velocity_step_km_s=vel_step,
@@ -1677,12 +1780,17 @@ def _normalize_analysis_and_monte_carlo(
 
 def _parse_outputs_section(value: Any, path_policy: ConfigPathPolicy | None = None) -> OutputsSection:
     d = _as_dict(value, "outputs")
+    _reject_unsupported_aliases(d, "outputs", _OUTPUTS_UNSUPPORTED_ALIASES)
+    plots = _as_dict(d.get("plots"), "outputs.plots")
+    animations = _as_dict(d.get("animations"), "outputs.animations")
+    _reject_unsupported_aliases(plots, "outputs.plots", _OUTPUT_PLOTS_UNSUPPORTED_ALIASES)
+    _reject_unsupported_aliases(animations, "outputs.animations", _OUTPUT_ANIMATIONS_UNSUPPORTED_ALIASES)
     out = OutputsSection(
         output_dir=str(d.get("output_dir", "outputs")),
         mode=str(d.get("mode", "interactive")),
         stats=dict(d.get("stats", {}) or {}),
-        plots=dict(d.get("plots", {}) or {}),
-        animations=dict(d.get("animations", {}) or {}),
+        plots=plots,
+        animations=animations,
         monte_carlo=dict(d.get("monte_carlo", {}) or {}),
         ai_report=dict(d.get("ai_report", {}) or {}),
         ai_config=dict(d.get("ai_config", {}) or {}),
@@ -1701,6 +1809,62 @@ def _parse_outputs_section(value: Any, path_policy: ConfigPathPolicy | None = No
     if path_policy is not None:
         path_policy.resolve_output_dir(out.output_dir, purpose="outputs.output_dir")
     return out
+
+
+def _validate_physics_runtime_settings(cfg: SimulationScenarioConfig) -> None:
+    orbit = dict((cfg.simulator.dynamics or {}).get("orbit", {}) or {})
+    propagation_method = str(orbit.get("propagation_method", "special") or "special").strip().lower()
+    if propagation_method not in {"special", "general"}:
+        raise ValueError("simulator.dynamics.orbit.propagation_method must be one of: special, general.")
+    integrator = str(orbit.get("integrator", "rk4") or "rk4").strip().lower()
+    if integrator not in {"rk4", "rkf78", "dopri5", "adaptive"}:
+        raise ValueError("simulator.dynamics.orbit.integrator must be one of: adaptive, dopri5, rk4, rkf78.")
+
+    env = dict(cfg.simulator.environment or {})
+    ephemeris_mode = env.get("ephemeris_mode")
+    if ephemeris_mode not in (None, ""):
+        mode = str(ephemeris_mode).strip().lower()
+        if mode not in {
+            "analytic_enhanced",
+            "enhanced",
+            "analytic_simple",
+            "simple",
+            "de440",
+            "hpop_de440",
+            "de440_hpop",
+            "spice",
+            "spiceypy",
+        }:
+            raise ValueError(
+                "simulator.environment.ephemeris_mode must be one of: analytic_enhanced, analytic_simple, "
+                "de440, hpop_de440, de440_hpop, spice, spiceypy."
+            )
+
+    model = str(orbit.get("model", "two_body") or "two_body").strip().lower()
+    if model == "cr3bp":
+        unsupported = []
+        for key in ("j2", "j3", "j4", "drag", "srp", "third_body_sun", "third_body_moon", "lift"):
+            if _parse_bool(orbit.get(key, False), f"simulator.dynamics.orbit.{key}"):
+                unsupported.append(key)
+        if unsupported:
+            raise ValueError(
+                "simulator.dynamics.orbit.model=cr3bp does not support two-body perturbation flags: "
+                + ", ".join(sorted(unsupported))
+                + "."
+            )
+
+    sh = dict(orbit.get("spherical_harmonics", {}) or {})
+    if _parse_bool(sh.get("enabled", False), "simulator.dynamics.orbit.spherical_harmonics.enabled"):
+        degree = int(sh.get("degree", 0) or 0)
+        source = str(sh.get("source", sh.get("model", "")) or "").strip().lower()
+        has_terms = sh.get("terms") not in (None, "")
+        has_path = sh.get("coeff_path") not in (None, "") or sh.get("source_path") not in (None, "")
+        has_explicit_zonal = any(key in sh for key in ("j2", "j3", "j4"))
+        if degree < 2 and not (has_terms or has_path or has_explicit_zonal or source in {"hpop", "hpop_ggm03", "ggm03"}):
+            raise ValueError(
+                "simulator.dynamics.orbit.spherical_harmonics.enabled requires degree >= 2, terms, "
+                "a coefficient/source path, or explicit zonal coefficients."
+            )
 
 
 def _validate_config_read_paths(root: dict[str, Any], path_policy: ConfigPathPolicy | None) -> None:
@@ -1805,6 +1969,7 @@ def scenario_config_from_dict(
     path_policy: ConfigPathPolicy | None = None,
 ) -> SimulationScenarioConfig:
     root = _as_dict(data, "root")
+    _reject_unsupported_aliases(root, "", _ROOT_UNSUPPORTED_ALIASES)
     base_dir = None if source_path is None else Path(source_path).expanduser().resolve().parent
     if path_policy is None and source_path is not None:
         path_policy = ConfigPathPolicy.default(config_path=source_path)
@@ -1852,6 +2017,7 @@ def scenario_config_from_dict(
     for object_id, section in dict(cfg.objects or {}).items():
         if bool(dict(section.reference_orbit or {}).get("enabled", False)) and (not bool(section.enabled)):
             raise ValueError(f"{object_id}.reference_orbit.enabled requires {object_id}.enabled to be true.")
+    _validate_physics_runtime_settings(cfg)
     return cfg
 
 

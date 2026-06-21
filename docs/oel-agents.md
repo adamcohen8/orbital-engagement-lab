@@ -204,8 +204,8 @@ Example user requests:
 
 For TLE requests, say explicitly that OEL uses TLE lines to initialize an ECI
 state and then runs configured OEL numerical propagation. Do not describe the
-result as SGP4/general-perturbations propagation unless an SGP4 workflow is
-actually added.
+result as SGP4/general-perturbations propagation unless the scenario explicitly
+uses `propagation_method: general` with `general.model: sgp4`.
 - "Build an attitude-hold scenario with an initial pointing error."
 - "Evaluate the run in this output folder and tell me whether it supports my
   goal."
@@ -264,7 +264,8 @@ artifacts.
    saved review evidence.
 6. Ground access: use
    `agents/examples/public_agent_ground_access.yaml` to inspect access samples
-   and state that TLE input initializes an OEL numerical propagation, not SGP4.
+   and state that this TLE input initializes an OEL numerical propagation, not
+   SGP4.
 7. Attitude hold: use
    `agents/examples/public_agent_attitude_hold.yaml` to inspect body-rate and
    attitude-control evidence.

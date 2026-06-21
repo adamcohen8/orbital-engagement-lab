@@ -61,6 +61,7 @@ class KnowledgeEKFConfig:
     process_noise_diag: np.ndarray = field(default_factory=lambda: np.array([1e-8, 1e-8, 1e-8, 1e-10, 1e-10, 1e-10]))
     meas_noise_diag: np.ndarray = field(default_factory=lambda: np.array([1e-6, 1e-6, 1e-6, 1e-10, 1e-10, 1e-10]))
     init_cov_diag: np.ndarray = field(default_factory=lambda: np.array([1.0, 1.0, 1.0, 1e-2, 1e-2, 1e-2]))
+    initial_state_eci_km_s: np.ndarray | None = None
 
     def __post_init__(self) -> None:
         if np.array(self.process_noise_diag, dtype=float).reshape(-1).size != 6:
@@ -69,6 +70,10 @@ class KnowledgeEKFConfig:
             raise ValueError("meas_noise_diag must be length-6.")
         if np.array(self.init_cov_diag, dtype=float).reshape(-1).size != 6:
             raise ValueError("init_cov_diag must be length-6.")
+        if self.initial_state_eci_km_s is not None and np.array(
+            self.initial_state_eci_km_s, dtype=float
+        ).reshape(-1).size != 6:
+            raise ValueError("initial_state_eci_km_s must be length-6.")
 
 
 @dataclass(frozen=True)
@@ -170,6 +175,7 @@ class _Track:
     estimator: OrbitEKFEstimator
     measurement_model: str
     init_cov_diag: np.ndarray
+    initial_state_eci_km_s: np.ndarray | None = None
     belief: StateBelief | None = None
     step_count: int = 0
     initialization_count: int = 0
@@ -222,7 +228,13 @@ class _Track:
             if _normalize_measurement_model(self.measurement_model) == "state":
                 init_state = meas.vector.copy()
             else:
-                init_state = np.hstack((target_truth.position_eci_km, target_truth.velocity_eci_km_s))
+                if self.initial_state_eci_km_s is None:
+                    raise ValueError(
+                        f"tracked target {self.target_id!r} uses measurement_model={self.measurement_model!r}; "
+                        "relative-only tracking requires ekf.initial_state_eci_km_s or "
+                        "estimation.initial_state_eci_km_s instead of truth-seeded initialization."
+                    )
+                init_state = np.array(self.initial_state_eci_km_s, dtype=float).reshape(6)
             self.belief = StateBelief(state=init_state, covariance=np.diag(self.init_cov_diag), last_update_t_s=t_s)
             self.initialization_count += 1
             self._record_consistency(target_truth, None, t_s)
@@ -382,6 +394,11 @@ class ObjectKnowledgeBase:
                 estimator=ekf,
                 measurement_model=_normalize_measurement_model(cfg.measurement_model),
                 init_cov_diag=np.array(cfg.ekf.init_cov_diag, dtype=float),
+                initial_state_eci_km_s=(
+                    None
+                    if cfg.ekf.initial_state_eci_km_s is None
+                    else np.array(cfg.ekf.initial_state_eci_km_s, dtype=float).reshape(6)
+                ),
             )
 
     def target_ids(self) -> list[str]:
