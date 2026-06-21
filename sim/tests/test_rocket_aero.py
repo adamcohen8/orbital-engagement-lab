@@ -190,6 +190,34 @@ class TestRocketAero(unittest.TestCase):
         self.assertTrue(np.allclose(loads.force_body_n, np.zeros(3)))
         self.assertTrue(np.allclose(loads.moment_body_nm, np.zeros(3)))
 
+    def test_sideslip_force_opposes_lateral_relative_velocity(self):
+        cfg = RocketAeroConfig(
+            enabled=True,
+            reference_area_m2=1.0,
+            reference_length_m=1.0,
+            cd_base=0.0,
+            cd_alpha2=0.0,
+            cd_supersonic=0.0,
+            transonic_peak_cd=0.0,
+            cl_alpha_per_rad=0.0,
+            cy_beta_per_rad=1.0,
+            cm_alpha_per_rad=0.0,
+            cn_beta_per_rad=0.0,
+            cl_roll_per_rad=0.0,
+        )
+        s = compute_aero_state(
+            rho_kg_m3=1.0,
+            pressure_pa=101325.0,
+            temperature_k=288.0,
+            sound_speed_m_s=340.0,
+            v_rel_body_m_s=np.array([100.0, 10.0, 0.0]),
+            alpha_limit_deg=20.0,
+            beta_limit_deg=20.0,
+        )
+        loads = compute_aero_loads(np.array([100.0, 10.0, 0.0]), s, cfg)
+
+        self.assertLess(float(loads.force_body_n[1]), 0.0)
+
     def test_drag_and_cp_offset_moment(self):
         cfg = RocketAeroConfig(
             enabled=True,

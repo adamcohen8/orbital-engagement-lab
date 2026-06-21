@@ -25,6 +25,7 @@ objects:
           - [12.0, 0.0, 0.0]
           - [0.0, 10.0, 0.0]
           - [0.0, 0.0, 8.0]
+        inertia_reference_point: center_of_mass
     initial_state:
       position_eci_km: [7000.0, 0.0, 0.0]
       velocity_eci_km_s: [0.0, 7.5, 0.0]
@@ -92,4 +93,3 @@ outputs:
 
 monte_carlo:
   enabled: false
-

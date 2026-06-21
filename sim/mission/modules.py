@@ -2554,6 +2554,115 @@ class SingleRICAxisBurnMissionModule:
 
 
 @dataclass
+class ScheduledVectorBurnMissionModule:
+    """Apply one scheduled vector burn through the normal mission fallback path."""
+
+    target_id: str = "self"
+    frame: str = "ric"  # ric|eci
+    delta_v_m_s: np.ndarray = field(default_factory=lambda: np.zeros(3, dtype=float))
+    burn_start_s: float = 0.0
+    burn_duration_s: float = 1.0
+    thruster_direction_body: np.ndarray = field(default_factory=lambda: np.array([0.0, 0.0, 1.0], dtype=float))
+    require_finite_reference: bool = True
+
+    def _reference_state(
+        self,
+        *,
+        object_id: str | None,
+        truth: StateTruth,
+        own_knowledge: dict[str, StateBelief],
+    ) -> tuple[np.ndarray, np.ndarray] | None:
+        target_token = str(self.target_id or "").strip().lower()
+        object_token = str(object_id or "").strip().lower()
+        if target_token in {"", "self", "ownship"} or (object_token and target_token == object_token):
+            return (
+                np.array(truth.position_eci_km, dtype=float).reshape(3),
+                np.array(truth.velocity_eci_km_s, dtype=float).reshape(3),
+            )
+        ref = _resolve_target_state(
+            target_id=self.target_id,
+            use_knowledge_for_targeting=True,
+            own_knowledge=own_knowledge,
+        )
+        if ref is None:
+            return None
+        r_ref = np.array(ref[0], dtype=float).reshape(3)
+        v_ref = np.array(ref[1], dtype=float).reshape(3)
+        if self.require_finite_reference and not (np.all(np.isfinite(r_ref)) and np.all(np.isfinite(v_ref))):
+            return None
+        return r_ref, v_ref
+
+    def update(
+        self,
+        *,
+        truth: StateTruth,
+        own_knowledge: dict[str, StateBelief],
+        t_s: float,
+        dt_s: float,
+        object_id: str | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        start = float(self.burn_start_s)
+        duration = float(max(self.burn_duration_s, dt_s, 1.0e-12))
+        active = bool(float(t_s) >= start and float(t_s) < start + duration)
+        frame = str(self.frame or "ric").strip().lower()
+        if frame not in {"ric", "eci"}:
+            raise ValueError("ScheduledVectorBurnMissionModule frame must be 'ric' or 'eci'.")
+        delta_v_m_s = np.array(self.delta_v_m_s, dtype=float).reshape(3)
+        if not active or float(np.linalg.norm(delta_v_m_s)) <= 0.0:
+            return {
+                "fallback_thrust_eci_km_s2": np.zeros(3, dtype=float),
+                "mission_mode": {
+                    "type": "scheduled_vector_burn",
+                    "phase": "coast",
+                    "frame": frame,
+                    "burn_active": False,
+                    "burn_start_s": start,
+                    "burn_duration_s": duration,
+                },
+            }
+        if frame == "ric":
+            ref = self._reference_state(object_id=object_id, truth=truth, own_knowledge=own_knowledge)
+            if ref is None:
+                return {
+                    "fallback_thrust_eci_km_s2": np.zeros(3, dtype=float),
+                    "mission_mode": {
+                        "type": "scheduled_vector_burn",
+                        "phase": "hold_no_reference",
+                        "frame": frame,
+                        "burn_active": False,
+                        "burn_start_s": start,
+                        "burn_duration_s": duration,
+                    },
+                }
+            r_ref, v_ref = ref
+            delta_v_eci_m_s = ric_dcm_ir_from_rv(r_ref, v_ref) @ delta_v_m_s
+        else:
+            delta_v_eci_m_s = delta_v_m_s
+        thrust_cmd = (delta_v_eci_m_s / 1000.0) / duration
+        required_q = _desired_attitude_for_thrust(
+            truth=truth,
+            thrust_eci_km_s2=thrust_cmd,
+            thruster_direction_body=np.array(self.thruster_direction_body, dtype=float),
+        )
+        return {
+            "desired_attitude_quat_bn": np.array(required_q, dtype=float),
+            "fallback_thrust_eci_km_s2": np.array(thrust_cmd, dtype=float),
+            "align_to_thrust": True,
+            "mission_mode": {
+                "type": "scheduled_vector_burn",
+                "phase": "burn",
+                "frame": frame,
+                "burn_active": True,
+                "burn_start_s": start,
+                "burn_duration_s": duration,
+                "delta_v_m_s": delta_v_m_s.tolist(),
+                "delta_v_norm_m_s": float(np.linalg.norm(delta_v_m_s)),
+            },
+        }
+
+
+@dataclass
 class RocketMissionModule:
     launch_mode: str = "go_now"  # go_now|go_when_possible|wait_optimal_window
     orbital_goal: str = "pursuit"  # pursuit|predefined_orbit

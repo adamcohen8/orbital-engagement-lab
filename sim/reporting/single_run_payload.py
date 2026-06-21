@@ -29,6 +29,7 @@ class SingleRunPayloadContext:
     rocket_metrics: dict[str, np.ndarray]
     reentry_metrics: dict[str, dict[str, np.ndarray]]
     thrust_stats: dict[str, dict[str, Any]]
+    object_propagation: dict[str, dict[str, Any]]
     attitude_guardrail_stats: dict[str, int]
     knowledge_detection_by_observer: dict[str, Any]
     knowledge_consistency_by_observer: dict[str, Any]
@@ -189,6 +190,7 @@ def build_single_run_payload(context: SingleRunPayloadContext) -> dict[str, Any]
         "knowledge_detection_by_observer": context.knowledge_detection_by_observer,
         "knowledge_consistency_by_observer": context.knowledge_consistency_by_observer,
         "ground_station_access_summary": ground_station_access_summary,
+        "object_propagation": dict(context.object_propagation),
         "actuator_diagnostics_summary": _summarize_actuator_diagnostics(context.controller_debug_hist),
         "plot_outputs": {},
         "animation_outputs": {},
@@ -249,6 +251,7 @@ def build_single_run_payload(context: SingleRunPayloadContext) -> dict[str, Any]
         "knowledge_consistency_by_observer": dict(context.knowledge_consistency_by_observer),
         "ground_station_access": ground_station_access,
         "ground_station_access_summary": ground_station_access_summary,
+        "object_propagation": dict(context.object_propagation),
         "bridge_events_by_object": context.bridge_hist,
         "controller_debug_by_object": context.controller_debug_hist,
         "rocket_throttle_cmd": context.rocket_throttle_cmd.tolist(),

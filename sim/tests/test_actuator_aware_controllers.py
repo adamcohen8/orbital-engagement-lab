@@ -20,12 +20,12 @@ class _ConstantController:
         return Command(thrust_eci_km_s2=self.thrust.copy(), torque_body_nm=self.torque.copy(), mode_flags={"mode": "base"})
 
 
-def _joint_belief(*, omega=(0.0, 0.0, 0.0), extra=()) -> StateBelief:
+def _joint_belief(*, omega=(0.0, 0.0, 0.0), quat=(1.0, 0.0, 0.0, 0.0), extra=()) -> StateBelief:
     state = np.hstack(
         (
             np.array([7000.0, 0.0, 0.0], dtype=float),
             np.array([0.0, 7.5, 0.0], dtype=float),
-            np.array([1.0, 0.0, 0.0, 0.0], dtype=float),
+            np.array(quat, dtype=float),
             np.array(omega, dtype=float),
             np.array(extra, dtype=float),
         )
@@ -81,6 +81,27 @@ def test_rcs_allocation_controller_outputs_achievable_acceleration() -> None:
     assert cmd.mode_flags["mode"] == "rcs_allocation_aware"
     assert np.allclose(cmd.thrust_eci_km_s2, np.array([5.0e-7, 0.0, 0.0]))
     assert cmd.mode_flags["rcs_thruster_forces_n"] == [0.5]
+
+
+def test_rcs_allocation_controller_allocates_eci_force_in_body_frame() -> None:
+    ctrl = RCSAllocationAwareController(
+        base_controller=_ConstantController(thrust=[1.0e-6, 0.0, 0.0]),
+        mass_kg=1000.0,
+        thrusters=[
+            {
+                "name": "body_y",
+                "position_body_m": [0.0, 0.0, 0.0],
+                "force_direction_body": [0.0, 1.0, 0.0],
+                "max_thrust_n": 2.0,
+            }
+        ],
+    )
+    q_90_deg_body_from_inertial = (np.sqrt(0.5), 0.0, 0.0, -np.sqrt(0.5))
+
+    cmd = ctrl.act(_joint_belief(quat=q_90_deg_body_from_inertial), t_s=0.0, budget_ms=1.0)
+
+    assert np.allclose(cmd.mode_flags["rcs_thruster_forces_n"], [1.0])
+    assert np.allclose(cmd.thrust_eci_km_s2, np.array([1.0e-6, 0.0, 0.0]), atol=1e-12)
 
 
 def test_electric_propulsion_controller_caps_power_limited_thrust() -> None:

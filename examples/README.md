@@ -11,6 +11,7 @@ validated and run through the standard CLI:
 ## Public Configs
 
 - `public_tle_2hr_propagation.yaml`: initialize from TLE lines, then predict a two-hour state history with OEL numerical propagation.
+- `public_sgp4_passive_propagation.yaml`: propagate a passive catalog-style object from TLE lines with `propagation_method: general` and `general.model: sgp4`.
 - `public_ground_station_access_from_tle.yaml`: initialize from a TLE, then compute ground-station access windows with OEL numerical propagation.
 - `public_closed_loop_rendezvous_lqr.yaml`: run a closed-loop chaser/target rendezvous with HCW LQR.
 - `public_orbit_environment_stack.yaml`: inspect perturbation/environment toggles in deterministic propagation.
@@ -22,10 +23,11 @@ validated and run through the standard CLI:
 Public configs use the canonical `objects` map. Conventional object IDs such as
 `chaser` and `target` are example names, not required engine slots.
 
-TLE examples are not SGP4/general-perturbations workflows. OEL converts the TLE
+The standard TLE examples are initializer-only workflows: OEL converts the TLE
 to an initial ECI state, optionally advances mean anomaly to
 `simulator.initial_jd_utc` with a two-body approximation, then integrates the
-configured OEL force model.
+configured OEL force model. The explicit `public_sgp4_passive_propagation.yaml`
+example is the catalog-style SGP4 exception and is passive by design.
 
 ## Flagship Built-In Scenario
 

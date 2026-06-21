@@ -144,8 +144,24 @@ CONFIG_HELP_ENTRIES: tuple[ConfigHelpEntry, ...] = (
     ConfigHelpEntry(
         path="simulator.dynamics.orbit.model",
         title="Orbit Base Model",
-        description="Names the base orbit propagation model. Two-body is the default; CR3BP is an opt-in rotating-frame model for cislunar teaching cases.",
-        aliases=("orbit model", "dynamics model", "propagation model"),
+        description=(
+            "Names the base orbit propagation model. Two-body is the default Earth-centered model; "
+            "CR3BP is an opt-in rotating-frame model for cislunar teaching cases. Object-level "
+            "central-body overrides such as Mars `mu` are not supported."
+        ),
+        aliases=(
+            "orbit model",
+            "dynamics model",
+            "propagation model",
+            "central body",
+            "central-body",
+            "primary body",
+            "non earth orbit",
+            "non-earth orbit",
+            "mars orbit",
+            "cislunar",
+            "cr3bp",
+        ),
         options=(
             _option(
                 "two_body",
@@ -157,6 +173,47 @@ CONFIG_HELP_ENTRIES: tuple[ConfigHelpEntry, ...] = (
             ),
         ),
         example='simulator:\n  dynamics:\n    orbit:\n      model: "two_body"\n      j2: true\n      drag: false',
+        notes=(
+            "Use two_body for Earth-centered public-core propagation.",
+            "Use model: cr3bp only for documented rotating-frame cislunar teaching cases.",
+            "Do not set object-level central_body, primary_body, or mu_km3_s2 fields; validation rejects them.",
+        ),
+    ),
+    ConfigHelpEntry(
+        path="objects.<id>.propagation_method",
+        title="Propagation Method",
+        description=(
+            "Selects an object's propagation family. Special perturbations use OEL numerical dynamics; "
+            "general perturbations currently support passive SGP4 propagation from TLEs."
+        ),
+        aliases=(
+            "sgp4",
+            "general perturbations",
+            "special perturbations",
+            "catalog propagation",
+            "tle propagation",
+            "propagation method",
+        ),
+        options=(
+            _option("special", "Default OEL numerical propagation with configured force models and controls."),
+            _option("general", "Passive catalog-style propagation; v1 supports general.model: sgp4 with TLE input."),
+        ),
+        example=(
+            "objects:\n"
+            "  catalog_object:\n"
+            "    propagation_method: general\n"
+            "    general:\n"
+            "      model: sgp4\n"
+            "    initial_state:\n"
+            "      tle:\n"
+            "        line1: \"1 ...\"\n"
+            "        line2: \"2 ...\""
+        ),
+        notes=(
+            "SGP4 objects are passive in v1: no orbit_control, attitude_control, thrust, mission objectives, or maneuvers.",
+            "SGP4 v1 records frame_transform: teme_as_eci; it does not perform an EOP-backed TEME-to-ECI reduction.",
+            "Use the existing special propagation path for controlled spacecraft and OEL force-model studies.",
+        ),
     ),
     ConfigHelpEntry(
         path="simulator.dynamics.orbit.integrator",
@@ -205,6 +262,84 @@ CONFIG_HELP_ENTRIES: tuple[ConfigHelpEntry, ...] = (
             ),
         ),
         example="simulator:\n  dynamics:\n    rocket:\n      atmosphere_model: ussa1976",
+    ),
+    ConfigHelpEntry(
+        path="simulator.dynamics.rocket.wind_enu_m_s",
+        title="Rocket Wind Vector",
+        description=(
+            "Steady wind vector for rocket/ascent aerodynamics, expressed in local ENU axes "
+            "as meters per second. Use this for simple crosswind stress cases; it is not a "
+            "weather forecast, wind-shear profile, or time-varying atmospheric model."
+        ),
+        aliases=(
+            "wind_enu_m_s",
+            "wind",
+            "crosswind",
+            "rocket wind",
+            "wind shear",
+            "weather",
+            "launch weather",
+        ),
+        options=(
+            _option("east", "East component of steady wind in meters per second."),
+            _option("north", "North component of steady wind in meters per second."),
+            _option("up", "Up component of steady wind in meters per second."),
+        ),
+        example=(
+            "simulator:\n"
+            "  dynamics:\n"
+            "    rocket:\n"
+            "      atmosphere_model: ussa1976\n"
+            "      wind_enu_m_s: [0.0, 5.0, 0.0]"
+        ),
+        notes=(
+            "See configs/controller_bench_rocket_case_wind.yaml for a maintained mild-crosswind example.",
+            "For drag-sensitive orbital studies, use atmosphere_env and the documented atmosphere models instead.",
+        ),
+    ),
+    ConfigHelpEntry(
+        path="simulator.dynamics.reentry",
+        title="Re-Entry Diagnostics",
+        description=(
+            "Enables atmospheric re-entry diagnostics such as dynamic pressure, drag deceleration, "
+            "g-load, heat rate, heat load, and termination thresholds. This is an engineering "
+            "diagnostic path, not a breakup, ablation, plasma, or certification model."
+        ),
+        aliases=(
+            "reentry",
+            "re-entry",
+            "deorbit",
+            "deorbit lifetime",
+            "orbital decay",
+            "decay",
+            "reentry breakup",
+            "breakup",
+            "ablation",
+        ),
+        options=(
+            _option("enabled", "Turn re-entry diagnostics on for configured objects."),
+            _option("begin_altitude_km", "Altitude threshold below which re-entry metrics become active."),
+            _option("object_ids", "Object id or list of ids to track; omit to track all active objects."),
+            _option("atmosphere_model", "Atmosphere model used for diagnostics, such as exponential or ussa1976."),
+            _option("termination", "Optional min-altitude, max-g, heat-load, and dynamic-pressure stop limits."),
+        ),
+        example=(
+            "simulator:\n"
+            "  dynamics:\n"
+            "    orbit:\n"
+            "      drag: true\n"
+            "    reentry:\n"
+            "      enabled: true\n"
+            "      begin_altitude_km: 300.0\n"
+            "outputs:\n"
+            "  plots:\n"
+            "    preset: reentry"
+        ),
+        notes=(
+            "Start with configs/reentry_smoke.yaml or examples/configs/public_reentry_interactive_demo.yaml.",
+            "For deorbit lifetime studies, use the documented drag/re-entry workflow and state fidelity limits clearly.",
+            "OEL does not model breakup debris, ablation, plasma, plume heating, or operational re-entry safety certification.",
+        ),
     ),
     ConfigHelpEntry(
         path="simulator.dynamics.orbit.srp_shadow_model",
@@ -294,6 +429,110 @@ CONFIG_HELP_ENTRIES: tuple[ConfigHelpEntry, ...] = (
         example='outputs:\n  review:\n    enabled: true\n    detail: "standard"',
     ),
     ConfigHelpEntry(
+        path="controller_bench",
+        title="Controller Bench Workflow",
+        description=(
+            "Defines repeatable controller benchmark suites run through the simulator's "
+            "`--controller-bench <suite.yaml>` workflow. Use validate-only before executing "
+            "a suite, especially when editing cases, controllers, or optimization settings."
+        ),
+        aliases=(
+            "controller bench",
+            "controller benchmark",
+            "controller benchmarks",
+            "bench suite",
+            "benchmark suite",
+            "controller-bench",
+        ),
+        options=(
+            _option("suite_id", "Stable suite identifier reported in validation and outputs."),
+            _option("description", "Human-readable summary of what the suite exercises."),
+            _option("output_dir", "Workspace-relative directory for benchmark outputs."),
+            _option("cases", "Benchmark cases, each referencing a scenario config and optional case settings."),
+            _option("controllers", "Controller variants or plugin specs compared across cases."),
+            _option("optimization", "Optional optimizer configuration, such as PSO tuning settings."),
+        ),
+        example=(
+            "# Validate a maintained suite before running it:\n"
+            ".venv/bin/python run_simulation.py --controller-bench "
+            "configs/controller_bench_rendezvous.yaml --validate-only"
+        ),
+        notes=("See docs/controller-bench.md for the complete suite schema and workflow.",),
+    ),
+    ConfigHelpEntry(
+        path="ground_stations",
+        title="Ground Stations",
+        description=(
+            "Defines passive ground sites used to compute geometric access, elevation, range, "
+            "and access-window review evidence for active objects."
+        ),
+        aliases=(
+            "ground access",
+            "ground station access",
+            "ground stations",
+            "station access",
+            "access windows",
+        ),
+        options=(
+            _option("id", "Unique station identifier used in review tables and reports."),
+            _option("lat_deg", "Geodetic station latitude in degrees."),
+            _option("lon_deg", "Geodetic station longitude in degrees."),
+            _option("alt_km", "Station altitude above the reference ellipsoid in kilometers."),
+            _option("min_elevation_deg", "Minimum elevation angle required for access."),
+            _option("max_range_km", "Optional maximum slant range for access."),
+        ),
+        example=(
+            "ground_stations:\n"
+            "  - id: colorado_springs\n"
+            "    lat_deg: 38.803\n"
+            "    lon_deg: -104.526\n"
+            "    alt_km: 1.9\n"
+            "    min_elevation_deg: 10.0"
+        ),
+    ),
+    ConfigHelpEntry(
+        path="objects.<id>.knowledge.sensor_error",
+        title="Knowledge Sensor Error",
+        description=(
+            "Defines measurement-error assumptions for object knowledge and estimation updates. "
+            "This is not an optical/radar camera hardware model; modeled sensor hardware blocks "
+            "such as knowledge.sensor are rejected."
+        ),
+        aliases=(
+            "sensor error",
+            "sensor_error",
+            "measurement error",
+            "measurement noise",
+            "optical camera",
+            "radar",
+            "radar tracking",
+            "optical sensor",
+            "modeled sensor",
+            "knowledge sensor",
+        ),
+        options=(
+            _option("pos_sigma_km", "Position 1-sigma measurement error by axis, in kilometers."),
+            _option("vel_sigma_km_s", "Velocity 1-sigma measurement error by axis, in kilometers per second."),
+            _option("estimation.type", "Estimator choice, such as ekf, under knowledge.estimation."),
+            _option("conditions", "Optional access constraints such as require_line_of_sight and max_range_km."),
+        ),
+        example=(
+            "objects:\n"
+            "  chaser:\n"
+            "    knowledge:\n"
+            "      targets: [target]\n"
+            "      sensor_error:\n"
+            "        pos_sigma_km: [0.01, 0.01, 0.01]\n"
+            "        vel_sigma_km_s: [0.0001, 0.0001, 0.0001]\n"
+            "      estimation:\n"
+            "        type: ekf"
+        ),
+        notes=(
+            "For geometric ground access, use ground_stations rather than a modeled RF or optical sensor.",
+            "OEL public configs model knowledge error/estimation here, not camera aperture, limiting magnitude, or RF link budgets.",
+        ),
+    ),
+    ConfigHelpEntry(
         path="objects.<id>.kind",
         title="Object Kind",
         description="Declares the runtime object family for a configured object.",
@@ -303,6 +542,40 @@ CONFIG_HELP_ENTRIES: tuple[ConfigHelpEntry, ...] = (
             _option("rocket", "Launch/ascent vehicle using rocket-specific dynamics and guidance."),
         ),
         example="objects:\n  chaser:\n    kind: satellite",
+    ),
+    ConfigHelpEntry(
+        path="objects.<id>.specs.mass_properties",
+        title="Mass Properties",
+        description=(
+            "Optional rigid-body mass-property block for attitude dynamics and runtime inertia. "
+            "When inertia is supplied for runtime use, reference it to the center of mass."
+        ),
+        aliases=(
+            "mass properties",
+            "inertia",
+            "center of mass",
+            "centre of mass",
+            "inertia reference",
+            "runtime inertia",
+        ),
+        options=(
+            _option("mass_kg", "Object mass in kilograms when not supplied by another specs field."),
+            _option("center_of_mass_body_m", "Center of mass in body-frame meters."),
+            _option("inertia_kg_m2", "3x3 inertia matrix in kg m^2."),
+            _option("inertia_reference_point", "Use `center_of_mass` for runtime inertia."),
+        ),
+        example=(
+            "objects:\n"
+            "  target:\n"
+            "    specs:\n"
+            "      mass_properties:\n"
+            "        center_of_mass_body_m: [0.0, 0.0, 0.0]\n"
+            "        inertia_reference_point: center_of_mass\n"
+            "        inertia_kg_m2:\n"
+            "          - [12.0, 0.0, 0.0]\n"
+            "          - [0.0, 10.0, 0.0]\n"
+            "          - [0.0, 0.0, 8.0]"
+        ),
     ),
     ConfigHelpEntry(
         path="objects.<id>.specs.preset_satellite",
@@ -352,11 +625,14 @@ def _score(query: str, entry: ConfigHelpEntry) -> float:
         return 0.0
     best = 0.0
     q_tokens = set(q.split())
+    domain_tokens = {"sensitivity", "covariance", "monte", "carlo", "analysis"}
     for term_raw in entry.search_terms():
         term = _normalize(term_raw)
         if not term:
             continue
         term_tokens = set(term.split())
+        if q_tokens & domain_tokens and not (q_tokens & domain_tokens & term_tokens):
+            continue
         if q == term:
             return 1.0
         if q in term or term in q:
@@ -443,6 +719,14 @@ def _context_label(config_path: str | Path | None) -> str:
     return f"Current Config ({config_path})"
 
 
+def _entry_config_values(config_data: dict[str, Any], entry: ConfigHelpEntry) -> list[tuple[str, Any]]:
+    values = _resolve_config_values(config_data, entry.path.split("."))
+    if values or not entry.path.startswith("objects.<id>."):
+        return values
+    compatibility_path = entry.path.removeprefix("objects.")
+    return _resolve_config_values(config_data, compatibility_path.split("."))
+
+
 def format_config_help(
     query: str,
     *,
@@ -465,7 +749,7 @@ def format_config_help(
     ]
     if config_data is not None:
         lines.append(_context_label(config_path))
-        values = _resolve_config_values(config_data, entry.path.split("."))
+        values = _entry_config_values(config_data, entry)
         if values:
             for actual_path, value in values:
                 lines.append(f"  {actual_path}: {_format_config_value(value)}")

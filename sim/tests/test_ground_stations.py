@@ -13,6 +13,8 @@ from sim.reporting.ground_station_access_reports import (
     DEFAULT_ACCESS_REPORT_EPOCH_UTC,
     build_ground_station_access_report_views,
     extract_access_windows,
+    render_ground_station_access_report,
+    render_satellite_access_report,
 )
 
 
@@ -84,6 +86,15 @@ def test_ground_station_yaml_rejects_invalid_values(tmp_path: Path) -> None:
     cfg = _ground_station_config(tmp_path)
     cfg["ground_stations"][0]["max_range_km"] = -1.0
     with pytest.raises(ValueError, match="max_range_km must be positive"):
+        scenario_config_from_dict(cfg)
+
+
+def test_ground_station_yaml_rejects_unsupported_fields(tmp_path: Path) -> None:
+    cfg = _ground_station_config(tmp_path)
+    cfg["ground_stations"][0]["velocity_ned_m_s"] = [0.0, 12.0, 0.0]
+    cfg["ground_stations"][0]["frequency_hz"] = 2.2e9
+
+    with pytest.raises(ValueError, match="unsupported field"):
         scenario_config_from_dict(cfg)
 
 
@@ -218,3 +229,42 @@ def test_ground_station_access_report_views_support_both_orientations() -> None:
     assert "sat_1" in views["by_ground_station"]["site_a"]["satellites"]
     station_summary = views["by_ground_station"]["site_a"]["satellites"]["sat_1"]["summary"]
     assert station_summary["first_access_utc"] == "2026-01-01T00:00:00Z"
+
+
+def test_ground_station_access_report_summary_uses_window_los_time() -> None:
+    views = build_ground_station_access_report_views(
+        ground_station_access={
+            "site_a": {
+                "station": {"id": "site_a"},
+                "targets": {
+                    "sat_1": {
+                        "access": [True, True, False],
+                        "range_km": [700.0, 800.0, 900.0],
+                        "elevation_deg": [30.0, 20.0, 5.0],
+                    }
+                },
+            }
+        },
+        ground_station_access_summary={
+            "site_a": {
+                "sat_1": {
+                    "access_duration_s": 240.0,
+                    "first_access_time_s": 0.0,
+                    "last_access_time_s": 120.0,
+                    "min_range_km": 700.0,
+                    "max_elevation_deg": 30.0,
+                }
+            }
+        },
+        t_s=np.array([0.0, 120.0, 240.0]),
+        initial_jd_utc=None,
+    )
+
+    by_station = render_ground_station_access_report(views)
+    by_satellite = render_satellite_access_report(views)
+
+    assert "Last LOS UTC" in by_station
+    assert "Last Access UTC" not in by_station
+    assert "| `sat_1` | 1 | 240.0 | 2026-01-01T00:00:00Z | 2026-01-01T00:04:00Z |" in by_station
+    assert "| 2026-01-01T00:00:00Z | 2026-01-01T00:04:00Z | 240.0 |" in by_station
+    assert "| `site_a` | 1 | 240.0 | 2026-01-01T00:00:00Z | 2026-01-01T00:04:00Z |" in by_satellite

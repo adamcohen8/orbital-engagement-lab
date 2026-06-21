@@ -85,6 +85,16 @@ class TestRectangularPrismCoupling(unittest.TestCase):
         tau = g.face_torque_sum_body_nm(np.array([1.0, 0.0, 0.0]), pressure_n_m2=2.0)
         self.assertTrue(np.linalg.norm(tau) < 1e-12)
 
+    def test_face_torque_uses_center_of_mass_as_moment_origin(self):
+        g = RectangularPrismGeometry(lx_m=1.0, ly_m=2.0, lz_m=2.0)
+        tau = g.face_torque_sum_body_nm(
+            np.array([-1.0, 0.0, 0.0]),
+            pressure_n_m2=2.0,
+            moment_origin_body_m=np.array([0.0, 0.5, 0.0], dtype=float),
+        )
+
+        self.assertTrue(np.allclose(tau, np.array([0.0, 0.0, -4.0])))
+
     def test_face_force_follows_incoming_flux_direction(self):
         g = RectangularPrismGeometry(lx_m=2.0, ly_m=3.0, lz_m=4.0)
         incoming = np.array([-1.0, 0.0, 0.0], dtype=float)
@@ -148,6 +158,17 @@ class TestRectangularPrismCoupling(unittest.TestCase):
             env={"sun_dir_eci": np.array([1.0, 0.0, 0.0]), "srp_shadow_model": "none"},
         )
         self.assertTrue(np.allclose(tau, np.array([0.0, 0.0, 2.0 * 4.56e-6])))
+
+    def test_geometry_profile_lookup_preserves_area_weighted_center_of_pressure(self):
+        profile = GeometryAreaProfile(
+            directions_body=np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=float),
+            projected_area_m2=np.array([100.0, 1.0], dtype=float),
+            center_of_pressure_body_m=np.array([[0.0, 0.0, 0.0], [10.0, 0.0, 0.0]], dtype=float),
+        )
+
+        lookup = profile.lookup(np.array([1.0, 1.0, 0.0], dtype=float), nearest_neighbors=2)
+
+        self.assertLess(float(lookup.center_of_pressure_body_m[0]), 0.2)
 
     def test_prism_mode_requires_disturbance_enabled(self):
         with self.assertRaises(ValueError):

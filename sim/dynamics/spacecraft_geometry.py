@@ -76,8 +76,16 @@ class RectangularPrismGeometry:
         # Lumped absorber-model force follows the incoming momentum flux direction.
         return mags[:, None] * u[None, :]
 
-    def face_torque_sum_body_nm(self, incident_dir_body: np.ndarray, pressure_n_m2: float) -> np.ndarray:
+    def face_torque_sum_body_nm(
+        self,
+        incident_dir_body: np.ndarray,
+        pressure_n_m2: float,
+        *,
+        moment_origin_body_m: np.ndarray | None = None,
+    ) -> np.ndarray:
         r_faces = self.face_centers_body_m()
+        if moment_origin_body_m is not None:
+            r_faces = r_faces - np.array(moment_origin_body_m, dtype=float).reshape(3)
         f_faces = self.face_forces_body_n(incident_dir_body, pressure_n_m2)
         tau_faces = np.cross(r_faces, f_faces)
         return np.sum(tau_faces, axis=0)
@@ -276,14 +284,24 @@ class GeometryAreaProfile:
         chord = np.linalg.norm(self.directions_body[idx] - u[None, :], axis=1)
         weights = 1.0 / np.maximum(chord, 1e-12) ** float(max(distance_power, 1e-9))
         weights = weights / np.sum(weights)
-        area = float(np.sum(self.projected_area_m2[idx] * weights))
-        cp = np.sum(self.center_of_pressure_body_m[idx] * weights[:, None], axis=0)
+        weighted_areas = self.projected_area_m2[idx] * weights
+        area = float(np.sum(weighted_areas))
+        if area > 0.0:
+            cp = np.sum(self.center_of_pressure_body_m[idx] * weighted_areas[:, None], axis=0) / area
+        else:
+            cp = np.sum(self.center_of_pressure_body_m[idx] * weights[:, None], axis=0)
         return GeometryProfileLookup(projected_area_m2=area, center_of_pressure_body_m=cp)
 
     def projected_area_for_direction_m2(self, incident_dir_body: np.ndarray) -> float:
         return float(self.lookup(incident_dir_body).projected_area_m2)
 
-    def pressure_torque_sum_body_nm(self, incident_dir_body: np.ndarray, pressure_n_m2: float) -> np.ndarray:
+    def pressure_torque_sum_body_nm(
+        self,
+        incident_dir_body: np.ndarray,
+        pressure_n_m2: float,
+        *,
+        moment_origin_body_m: np.ndarray | None = None,
+    ) -> np.ndarray:
         if pressure_n_m2 <= 0.0:
             return np.zeros(3)
         lookup = self.lookup(incident_dir_body)
@@ -294,7 +312,10 @@ class GeometryAreaProfile:
         if n <= 0.0:
             return np.zeros(3)
         force_body_n = float(pressure_n_m2) * lookup.projected_area_m2 * (u / n)
-        return np.cross(lookup.center_of_pressure_body_m, force_body_n)
+        arm_body_m = np.array(lookup.center_of_pressure_body_m, dtype=float)
+        if moment_origin_body_m is not None:
+            arm_body_m = arm_body_m - np.array(moment_origin_body_m, dtype=float).reshape(3)
+        return np.cross(arm_body_m, force_body_n)
 
 
 def fibonacci_sphere_directions(sample_count: int, *, include_body_axes: bool = True) -> np.ndarray:

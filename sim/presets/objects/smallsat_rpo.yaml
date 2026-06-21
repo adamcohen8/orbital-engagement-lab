@@ -11,5 +11,7 @@ specs:
       - [20.0, 0.0, 0.0]
       - [0.0, 18.0, 0.0]
       - [0.0, 0.0, 15.0]
+    inertia_reference_point: center_of_mass
+    frame: body
   actuator_preset: "BASIC_RCS_6DOF"
   attitude_system: "BASIC_REACTION_WHEELS_3AXIS"

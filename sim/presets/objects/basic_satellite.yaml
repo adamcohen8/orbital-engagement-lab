@@ -11,6 +11,8 @@ specs:
       - [120.0, 0.0, 0.0]
       - [0.0, 100.0, 0.0]
       - [0.0, 0.0, 80.0]
+    inertia_reference_point: center_of_mass
+    frame: body
   thruster: "BASIC_CHEMICAL_BOTTOM_Z"
   max_thrust_n: 35.0
   isp_s: 220.0

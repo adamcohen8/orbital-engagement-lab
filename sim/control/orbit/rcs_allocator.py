@@ -8,6 +8,7 @@ import numpy as np
 
 from sim.core.interfaces import Controller
 from sim.core.models import Command, StateBelief
+from sim.utils.quaternion import quaternion_to_dcm_bn
 
 
 def _construct_controller(spec: Any) -> Controller:
@@ -73,6 +74,10 @@ class RCSAllocationAwareController(Controller):
     def act(self, belief: StateBelief, t_s: float, budget_ms: float) -> Command:
         base = self.base_controller.act(belief, t_s, budget_ms)
         desired_force_n = np.array(base.thrust_eci_km_s2, dtype=float).reshape(3) * float(max(self.mass_kg, 0.0)) * 1e3
+        c_bn = np.eye(3)
+        if belief.state.size >= 10:
+            c_bn = quaternion_to_dcm_bn(np.array(belief.state[6:10], dtype=float).reshape(4))
+        desired_force_body_n = c_bn @ desired_force_n
         desired_torque = (
             np.array(base.torque_body_nm, dtype=float).reshape(3)
             if self.torque_body_nm is None
@@ -96,14 +101,15 @@ class RCSAllocationAwareController(Controller):
             target = desired_torque
         elif self.allocation_mode == "force_torque":
             allocation = np.vstack((np.column_stack(force_dirs), np.column_stack(torque_dirs)))
-            target = np.hstack((desired_force_n, desired_torque))
+            target = np.hstack((desired_force_body_n, desired_torque))
         else:
             allocation = np.column_stack(force_dirs)
-            target = desired_force_n
+            target = desired_force_body_n
         forces = _bounded_nonnegative_lstsq(allocation, target, np.array(max_forces, dtype=float))
         achieved_force = np.sum(np.array(force_dirs).T * forces.reshape(1, -1), axis=1)
         achieved_torque = np.sum(np.array(torque_dirs).T * forces.reshape(1, -1), axis=1)
-        accel = achieved_force / max(float(self.mass_kg), 1e-12) / 1e3
+        achieved_force_eci = c_bn.T @ achieved_force
+        accel = achieved_force_eci / max(float(self.mass_kg), 1e-12) / 1e3
         mode_flags = dict(base.mode_flags or {})
         mode_flags.update(
             {
@@ -111,7 +117,9 @@ class RCSAllocationAwareController(Controller):
                 "rcs_base_mode": mode_flags.get("mode"),
                 "rcs_thruster_names": names,
                 "rcs_thruster_forces_n": forces.tolist(),
-                "rcs_force_error_n": (desired_force_n - achieved_force).tolist(),
+                "rcs_force_body_n": achieved_force.tolist(),
+                "rcs_force_eci_n": achieved_force_eci.tolist(),
+                "rcs_force_error_n": (desired_force_body_n - achieved_force).tolist(),
                 "rcs_torque_error_nm": (desired_torque - achieved_torque).tolist(),
             }
         )

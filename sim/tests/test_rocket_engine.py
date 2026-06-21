@@ -353,6 +353,8 @@ class TestRocketAscentEngine(unittest.TestCase):
         self.assertAlmostEqual(next_state._last_step_thrust_n, expected_average_thrust_n, places=6)
         self.assertEqual(next_state.active_stage_index, 1)
         self.assertAlmostEqual(next_state.stage_prop_remaining_kg[0], 0.0, places=12)
+        self.assertGreater(next_state._last_step_force_mass_kg, next_state.mass_kg)
+        self.assertAlmostEqual(next_state._last_step_force_mass_kg, 110.0, places=12)
 
 
 if __name__ == "__main__":

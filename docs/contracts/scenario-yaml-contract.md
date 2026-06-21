@@ -180,7 +180,8 @@ epoch instead of advancing mean anomaly to `simulator.initial_jd_utc`.
 The TLE initializer converts mean elements to an ECI state with a two-body
 Keplerian approximation. Subsequent propagation uses the configured OEL
 numerical special-perturbations force model; SGP4/general-perturbations
-propagation is not part of this contract.
+propagation requires object-level `propagation_method: general` with
+`general.model: sgp4`.
 
 Preset merge contract:
 

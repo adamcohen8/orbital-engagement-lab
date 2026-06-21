@@ -10,6 +10,7 @@ from sim.aero.core import atmosphere_relative_velocity_eci_km_s
 from sim.dynamics.orbit.accelerations import accel_drag, accel_lift, accel_srp
 from sim.dynamics.orbit.atmosphere import (
     _altitude_km_from_eci,
+    _local_solar_time_hr,
     _spherical_lat_lon_deg_from_eci,
     density_exponential,
     density_from_model,
@@ -20,7 +21,13 @@ from sim.dynamics.orbit.atmosphere import (
 )
 from sim.dynamics.orbit.eclipse import resolve_srp_geometry, srp_shadow_factor
 from sim.dynamics.orbit.environment import EARTH_ROT_RATE_RAD_S
-from sim.dynamics.orbit.epoch import AU_KM, datetime_to_julian_date, gmst_angle_rad_from_jd
+from sim.dynamics.orbit.epoch import (
+    AU_KM,
+    datetime_to_julian_date,
+    gmst_angle_rad_from_jd,
+    sun_position_eci_km_enhanced,
+)
+from sim.dynamics.orbit.frames import apparent_sidereal_time_hpop_like
 from sim.dynamics.orbit.msis86_backend import msis86_density as msis86_backend_density
 from sim.utils.geodesy import geodetic_to_ecef_km
 
@@ -34,6 +41,20 @@ class TestOrbitAtmosphereModels(unittest.TestCase):
         dtc_row = [float(dt_utc.year), float(day_of_year)] + [0.0] * 24
         np.savetxt(sol_path, np.array([sol_row, sol_row], dtype=float), fmt="%.6f")
         np.savetxt(dtc_path, np.array([dtc_row, dtc_row], dtype=float), fmt="%.6f")
+
+    def test_hpop_like_local_solar_time_tracks_subsolar_longitude(self):
+        dt_utc = datetime(2020, 3, 20, 12, 0, 0, tzinfo=timezone.utc)
+        jd = datetime_to_julian_date(dt_utc)
+        sun = sun_position_eci_km_enhanced(jd)
+        sun_ra = np.arctan2(float(sun[1]), float(sun[0]))
+        sidereal = apparent_sidereal_time_hpop_like(jd, None)
+        subsolar_lon_deg = np.degrees((sun_ra - sidereal + np.pi) % (2.0 * np.pi) - np.pi)
+
+        noon = _local_solar_time_hr(subsolar_lon_deg, dt_utc, {"drag_frame_model": "hpop_like"})
+        midnight = _local_solar_time_hr(subsolar_lon_deg + 180.0, dt_utc, {"drag_frame_model": "hpop_like"})
+
+        self.assertAlmostEqual(noon, 12.0, places=9)
+        self.assertTrue(min(midnight, 24.0 - midnight) < 1e-9)
 
     @staticmethod
     def _write_minimal_jb2006_tables(sol_path: Path, ap_path: Path, dt_utc: datetime) -> None:

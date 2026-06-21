@@ -15,15 +15,17 @@ Then run the scenario:
 .venv/bin/python run_simulation.py --config examples/configs/public_tle_2hr_propagation.yaml
 ```
 
-TLE examples use the TLE only to initialize an ECI state. OEL does not run
-SGP4/general-perturbations propagation; after initialization it numerically
-integrates the configured OEL force model.
+Most TLE examples use the TLE only to initialize an ECI state, then numerically
+integrate the configured OEL force model. The explicit
+`public_sgp4_passive_propagation.yaml` example uses passive SGP4 general
+perturbations.
 
 ## Public Examples
 
 | Config | What It Demonstrates | Main Outputs | Notes |
 | --- | --- | --- | --- |
 | `public_tle_2hr_propagation.yaml` | Approximate TLE-to-ECI initialization followed by two-hour OEL numerical propagation with configured force-model toggles | summary JSON, trajectory histories | Not SGP4/general perturbations: OEL initializes from the TLE, then numerically integrates its configured special-perturbations force model. Treat the initial state as approximate. |
+| `public_sgp4_passive_propagation.yaml` | Passive TLE catalog-object propagation with `propagation_method: general` and `general.model: sgp4` | summary JSON, review store, `object_propagation`, trajectory histories | SGP4 object is passive: no thrust, controllers, or OEL force-model modifiers apply to that object's trajectory. v1 records `frame_transform: teme_as_eci`. |
 | `public_ground_station_access_from_tle.yaml` | Passive station access from an approximate TLE-initialized object | access summary, access/elevation/range plot, and map-backed ground track | Not SGP4/general perturbations: uses the same TLE-to-ECI initializer, then OEL numerical propagation with J2 enabled for a quick access screen. |
 | `public_closed_loop_rendezvous_lqr.yaml` | Compact closed-loop chaser/target rendezvous with HCW LQR | run summary and rendezvous metrics | Fastest controller example for reading the YAML shape. |
 | `public_rendezvous_closed_loop.yaml` | Broader rendezvous with attitude pointing, sensing, EKF knowledge, and plots | dashboard, rendezvous, control, estimation, sensor-access, and ground-track plots | Best public example for end-to-end closed-loop artifact review. |

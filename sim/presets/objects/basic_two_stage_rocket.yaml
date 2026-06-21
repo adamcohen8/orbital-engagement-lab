@@ -10,3 +10,5 @@ specs:
       - [800000.0, 0.0, 0.0]
       - [0.0, 800000.0, 0.0]
       - [0.0, 0.0, 20000.0]
+    inertia_reference_point: center_of_mass
+    frame: body

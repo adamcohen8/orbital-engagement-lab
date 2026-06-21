@@ -7,6 +7,179 @@ from sim.config import scenario_config_from_dict, validate_scenario_plugins
 
 
 class TestPluginValidation(unittest.TestCase):
+    def test_general_sgp4_tle_object_passes_validation(self):
+        cfg = scenario_config_from_dict(
+            {
+                "rocket": {"enabled": False},
+                "chaser": {"enabled": False},
+                "target": {
+                    "enabled": True,
+                    "propagation_method": "general",
+                    "general": {"model": "sgp4"},
+                    "specs": {"mass_kg": 420.0},
+                    "initial_state": {
+                        "tle": {
+                            "line1": "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9005",
+                            "line2": "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1000",
+                        }
+                    },
+                },
+                "simulator": {"duration_s": 20.0, "dt_s": 1.0},
+            }
+        )
+
+        self.assertEqual(validate_scenario_plugins(cfg), [])
+
+    def test_general_sgp4_rejects_active_control(self):
+        cfg = scenario_config_from_dict(
+            {
+                "rocket": {"enabled": False},
+                "chaser": {"enabled": False},
+                "target": {
+                    "enabled": True,
+                    "propagation_method": "general",
+                    "general": {"model": "sgp4"},
+                    "specs": {"mass_kg": 420.0},
+                    "initial_state": {
+                        "tle": {
+                            "line1": "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9005",
+                            "line2": "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1000",
+                        }
+                    },
+                    "orbit_control": {"module": "sim.control.orbit.zero_controller", "class_name": "ZeroController"},
+                },
+                "simulator": {"duration_s": 20.0, "dt_s": 1.0},
+            }
+        )
+
+        errs = validate_scenario_plugins(cfg)
+
+        self.assertTrue(any("orbit_control is not supported" in err for err in errs))
+
+    def test_general_sgp4_rejects_attitude_control(self):
+        cfg = scenario_config_from_dict(
+            {
+                "rocket": {"enabled": False},
+                "chaser": {"enabled": False},
+                "target": {
+                    "enabled": True,
+                    "propagation_method": "general",
+                    "general": {"model": "sgp4"},
+                    "specs": {"mass_kg": 420.0},
+                    "initial_state": {
+                        "tle": {
+                            "line1": "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9005",
+                            "line2": "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1000",
+                        }
+                    },
+                    "attitude_control": {"module": "sim.control.attitude.zero_torque", "class_name": "ZeroTorqueController"},
+                },
+                "simulator": {"duration_s": 20.0, "dt_s": 1.0},
+            }
+        )
+
+        errs = validate_scenario_plugins(cfg)
+
+        self.assertTrue(any("attitude_control is not supported" in err for err in errs))
+
+    def test_general_sgp4_rejects_non_tle_initializers(self):
+        cfg = scenario_config_from_dict(
+            {
+                "rocket": {"enabled": False},
+                "chaser": {"enabled": False},
+                "target": {
+                    "enabled": True,
+                    "propagation_method": "general",
+                    "general": {"model": "sgp4"},
+                    "specs": {"mass_kg": 420.0},
+                    "initial_state": {
+                        "tle": {
+                            "line1": "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9005",
+                            "line2": "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1000",
+                        },
+                        "relative_ric_rect": [0, 0, 0, 0, 0, 0],
+                    },
+                },
+                "simulator": {"duration_s": 20.0, "dt_s": 1.0},
+            }
+        )
+
+        errs = validate_scenario_plugins(cfg)
+
+        self.assertTrue(any("relative_ric_rect" in err and "Use initial_state.tle" in err for err in errs))
+
+    def test_tle_rejects_unsupported_sgp4_propagator_field(self):
+        cfg = scenario_config_from_dict(
+            {
+                "rocket": {"enabled": False},
+                "chaser": {"enabled": False},
+                "target": {
+                    "enabled": True,
+                    "specs": {"mass_kg": 420.0},
+                    "initial_state": {
+                        "tle": {
+                            "line1": "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9005",
+                            "line2": "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1000",
+                            "propagator": "sgp4",
+                        }
+                    },
+                },
+                "simulator": {"duration_s": 20.0, "dt_s": 1.0},
+            }
+        )
+
+        errs = validate_scenario_plugins(cfg)
+
+        self.assertTrue(any("propagation_method: general" in err and "general.model: sgp4" in err for err in errs))
+
+    def test_knowledge_sensor_block_is_rejected_as_unsupported_modeled_sensor(self):
+        cfg = scenario_config_from_dict(
+            {
+                "rocket": {"enabled": False},
+                "chaser": {"enabled": False},
+                "target": {
+                    "enabled": True,
+                    "specs": {"mass_kg": 420.0},
+                    "knowledge": {
+                        "sensor": {
+                            "type": "optical_camera",
+                            "aperture_m": 0.2,
+                            "limiting_magnitude": 12.0,
+                        }
+                    },
+                },
+                "simulator": {"duration_s": 20.0, "dt_s": 1.0},
+            }
+        )
+
+        errs = validate_scenario_plugins(cfg)
+
+        self.assertTrue(any("unsupported modeled-sensor configuration block" in err for err in errs))
+
+    def test_knowledge_sensor_error_and_estimation_pass_validation(self):
+        cfg = scenario_config_from_dict(
+            {
+                "rocket": {"enabled": False},
+                "chaser": {"enabled": False},
+                "target": {
+                    "enabled": True,
+                    "specs": {"mass_kg": 420.0},
+                    "knowledge": {
+                        "refresh_rate_s": 2.0,
+                        "targets": ["chaser"],
+                        "sensor_error": {
+                            "pos_sigma_km": [0.01, 0.01, 0.01],
+                            "vel_sigma_km_s": [0.0001, 0.0001, 0.0001],
+                        },
+                        "estimation": {"type": "ekf"},
+                    },
+                },
+                "simulator": {"duration_s": 20.0, "dt_s": 1.0},
+            }
+        )
+
+        self.assertEqual(validate_scenario_plugins(cfg), [])
+
     def test_valid_plugins_pass(self):
         cfg = scenario_config_from_dict(
             {

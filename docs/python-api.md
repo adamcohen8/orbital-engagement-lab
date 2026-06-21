@@ -327,7 +327,8 @@ histories.
 
 The public TLE access example initializes the object from TLE lines, then runs
 OEL numerical propagation. It is not an SGP4/general-perturbations access
-workflow.
+workflow; use an object with `propagation_method: general` and
+`general.model: sgp4` for passive SGP4 propagation.
 
 ```python
 cfg = SimulationConfig.from_yaml(

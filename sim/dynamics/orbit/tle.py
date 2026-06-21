@@ -15,13 +15,23 @@ from sim.dynamics.orbit.epoch import datetime_to_julian_date
 class TLEElements:
     line1: str
     line2: str
+    norad_number: str
+    classification: str
+    international_designator: str
+    epoch_text: str
     epoch_jd_utc: float
+    mean_motion_derivative_rev_per_day2: float
+    mean_motion_second_derivative_rev_per_day3: float
+    bstar: float
+    ephemeris_type: str
+    element_number: int
     inclination_deg: float
     raan_deg: float
     eccentricity: float
     argp_deg: float
     mean_anomaly_deg: float
     mean_motion_rev_per_day: float
+    revolution_number: int
 
 
 def tle_epoch_to_julian_date(epoch_text: str) -> float:
@@ -51,6 +61,42 @@ def _checksum_ok(line: str) -> bool:
     return total % 10 == int(line[68])
 
 
+def _parse_tle_float(text: str, *, default: float = 0.0) -> float:
+    raw = str(text or "").strip()
+    if not raw:
+        return float(default)
+    return float(raw)
+
+
+def _parse_tle_int(text: str, *, default: int = 0) -> int:
+    raw = str(text or "").strip()
+    if not raw:
+        return int(default)
+    return int(raw)
+
+
+def _parse_tle_compact_exponential(text: str) -> float:
+    raw = str(text or "").strip()
+    if not raw:
+        return 0.0
+    raw = raw.replace(" ", "")
+    if "e" in raw.lower():
+        return float(raw)
+    if len(raw) < 3:
+        return float(raw)
+    mantissa_text = raw[:-2]
+    exponent_text = raw[-2:]
+    if mantissa_text in {"", "+", "-"}:
+        return 0.0
+    sign = -1.0 if mantissa_text.startswith("-") else 1.0
+    mantissa_digits = mantissa_text.lstrip("+-")
+    if "." in mantissa_digits:
+        mantissa = float(mantissa_text)
+    else:
+        mantissa = sign * float(f"0.{mantissa_digits}")
+    return float(mantissa * (10.0 ** int(exponent_text)))
+
+
 def parse_tle_lines(line1: str, line2: str, *, require_checksum: bool = False) -> TLEElements:
     l1 = str(line1 or "").rstrip("\n")
     l2 = str(line2 or "").rstrip("\n")
@@ -68,13 +114,23 @@ def parse_tle_lines(line1: str, line2: str, *, require_checksum: bool = False) -
     return TLEElements(
         line1=l1,
         line2=l2,
+        norad_number=l1[2:7].strip(),
+        classification=l1[7:8].strip(),
+        international_designator=l1[9:17].strip(),
+        epoch_text=l1[18:32].strip(),
         epoch_jd_utc=tle_epoch_to_julian_date(l1[18:32]),
+        mean_motion_derivative_rev_per_day2=_parse_tle_float(l1[33:43]),
+        mean_motion_second_derivative_rev_per_day3=_parse_tle_compact_exponential(l1[44:52]),
+        bstar=_parse_tle_compact_exponential(l1[53:61]),
+        ephemeris_type=l1[62:63].strip(),
+        element_number=_parse_tle_int(l1[64:68]),
         inclination_deg=float(l2[8:16]),
         raan_deg=float(l2[17:25]),
         eccentricity=float(f"0.{ecc_text}"),
         argp_deg=float(l2[34:42]),
         mean_anomaly_deg=float(l2[43:51]),
         mean_motion_rev_per_day=float(l2[52:63]),
+        revolution_number=_parse_tle_int(l2[63:68]),
     )
 
 

@@ -293,8 +293,8 @@ Examples of acceptable user requests:
 
 For TLE requests, say explicitly that OEL uses TLE lines to initialize an ECI
 state and then runs configured OEL numerical propagation. Do not describe the
-result as SGP4/general-perturbations propagation unless an SGP4 workflow is
-actually added.
+result as SGP4/general-perturbations propagation unless the scenario explicitly
+uses `propagation_method: general` with `general.model: sgp4`.
 - "Build an attitude-hold scenario with an initial pointing error."
 - "Evaluate the run in this output folder and tell me whether it supports my
   goal."

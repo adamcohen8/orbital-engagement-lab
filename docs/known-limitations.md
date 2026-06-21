@@ -51,7 +51,14 @@ Python 3.10 or newer.
 
 - TLE initialization uses a dependency-free Keplerian/two-body approximation.
   Subsequent propagation uses the configured OEL numerical special-perturbations
-  force model; it does not perform SGP4/general-perturbations propagation.
+  force model; it does not perform SGP4/general-perturbations propagation unless
+  the object explicitly uses `propagation_method: general` with
+  `general.model: sgp4`.
+- SGP4 general-perturbations objects are passive catalog-style objects in the
+  initial implementation. They do not accept thrust, orbit controllers,
+  maneuvers, covariance, or deep-space SDP4 claims. The v1 output records
+  `frame_transform: teme_as_eci`; it does not perform an EOP-backed
+  TEME-to-ECI reduction.
 - Ground-station access is passive and geometric. It tracks line of sight,
   elevation, and range; it does not model RF link budgets, weather, scheduling,
   or command/telemetry behavior.

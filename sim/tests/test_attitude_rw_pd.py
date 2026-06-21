@@ -2,6 +2,7 @@ import unittest
 
 import numpy as np
 
+from sim.actuators.attitude import AttitudeActuator, ReactionWheelLimits
 from sim.control.attitude import ReactionWheelPDController
 from sim.core.models import StateBelief
 
@@ -49,6 +50,30 @@ class TestReactionWheelPDController(unittest.TestCase):
         self.assertTrue(np.all(np.abs(wheel_cmd) <= limits + 1e-12))
         self.assertEqual(cmd.torque_body_nm.shape, (3,))
         self.assertTrue(np.all(np.isfinite(cmd.torque_body_nm)))
+
+    def test_wheel_mode_flag_applies_body_torque_with_controller_sign(self):
+        ctrl = ReactionWheelPDController(
+            wheel_axes_body=np.eye(3),
+            wheel_torque_limits_nm=np.array([0.1, 0.1, 0.1]),
+            kp=np.array([0.2, 0.2, 0.2]),
+            kd=np.array([0.0, 0.0, 0.0]),
+        )
+        state = np.zeros(13)
+        state[6:10] = np.array([0.999, 0.05, 0.0, 0.0])
+        belief = StateBelief(state=state, covariance=np.eye(13), last_update_t_s=0.0)
+        cmd = ctrl.act(belief, t_s=0.0, budget_ms=1.0)
+        actuator = AttitudeActuator(
+            reaction_wheels=ReactionWheelLimits(
+                max_torque_nm=np.array([0.1, 0.1, 0.1]),
+                max_momentum_nms=np.array([10.0, 10.0, 10.0]),
+                wheel_axes_body=np.eye(3),
+            )
+        )
+
+        applied = actuator.apply(cmd, limits={}, dt_s=1.0)
+
+        self.assertGreater(float(np.dot(cmd.torque_body_nm, applied.torque_body_nm)), 0.0)
+        self.assertTrue(np.allclose(applied.torque_body_nm, cmd.torque_body_nm, atol=1e-12))
 
 
 if __name__ == "__main__":
