@@ -1,6 +1,6 @@
 scenario_name: game_training_rpo_06_elliptic_burn_then_approach
-scenario_description: RPO trainer scenario for testing burns around an eccentric
-  target orbit, then completing a slow approach to a hold circle.
+scenario_description: RPO trainer scenario for testing burns around an eccentric target
+  orbit, then completing a slow approach to a hold circle.
 metadata:
   owner: codex
   notes: Run with `python run_game.py sim/game/configs/game_training_rpo_06_elliptic_burn_then_approach.yaml
@@ -19,12 +19,12 @@ metadata:
     training:
       enabled: true
       scenario_id: rpo_06_elliptic_burn_then_approach
-      learning_goal: Test radial and in-track burns around an eccentric-orbit
-        target, then use the elliptical coast predictor to complete a slow
-        approach to the hold circle.
-      player_brief: The target is not in a circular orbit. Watch the dashed
-        prediction bend as orbital rate changes. First test radial and in-track
-        burns, then settle into the green hold circle behind the target.
+      learning_goal: Test radial and in-track burns around an eccentric-orbit target,
+        then use the elliptical coast predictor to complete a slow approach to the
+        hold circle.
+      player_brief: The target is not in a circular orbit. Watch the dashed prediction
+        bend as orbital rate changes. First test radial and in-track burns, then settle
+        into the green hold circle behind the target.
       pass_criteria:
       - Perform at least one radial burn.
       - Perform at least one in-track burn.
@@ -34,14 +34,14 @@ metadata:
       - Change the speed multiplier at least once.
       - Stay under the time and delta-v budgets.
       instructor_notes:
-      - This level intentionally combines play-and-observe familiarization with
-        a concrete terminal approach objective.
+      - This level intentionally combines play-and-observe familiarization with a
+        concrete terminal approach objective.
       - The coast predictor uses a Tschauner-Hempel-style elliptical linear model
         rather than the circular-orbit HCW projection.
-      - Ask students how the RI trace changes as the target orbital rate
-        increases away from apogee.
-      - The correct behavior is short prediction-informed pulses, long coasts,
-        and patient braking before the final hold circle.
+      - Ask students how the RI trace changes as the target orbital rate increases
+        away from apogee.
+      - The correct behavior is short prediction-informed pulses, long coasts, and
+        patient braking before the final hold circle.
       target_object_id: target
       chaser_object_id: chaser
       keepout_radius_km: 0.25
@@ -176,7 +176,6 @@ objects:
         type: ekf
     kind: satellite
 simulator:
-  scenario_type: auto
   duration_s: 9000.0
   dt_s: 1.0
   dynamics:
@@ -233,7 +232,3 @@ outputs:
     fps: 30
     speed_multiple: 1.0
     frame_stride: 1
-monte_carlo:
-  enabled: false
-  iterations: 1
-  base_seed: 123

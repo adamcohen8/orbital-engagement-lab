@@ -35,4 +35,7 @@ def json_safe(value: Any) -> Any:
 def write_json(path: str, payload: dict[str, Any]) -> None:
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(json_safe(payload), indent=2, allow_nan=False), encoding="utf-8")
+    rendered = json.dumps(json_safe(payload), indent=2, allow_nan=False)
+    tmp = out.with_name(out.name + ".tmp")
+    tmp.write_text(rendered, encoding="utf-8")
+    tmp.replace(out)

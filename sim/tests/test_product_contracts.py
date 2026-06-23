@@ -8,7 +8,7 @@ import pytest
 import yaml
 
 from sim import SimulationConfig, SimulationResult, SimulationSession
-from sim.config import AlgorithmPointer, load_simulation_yaml, scenario_config_from_dict, validate_scenario_plugins
+from sim.config import AlgorithmPointer, load_simulation_yaml, validate_scenario_plugins
 from sim.execution import create_single_run_engine
 from sim.execution import service as execution_service
 from sim.execution.metrics import closest_approach_from_run_payload
@@ -35,20 +35,24 @@ class ContractFailingBridge:
         raise RuntimeError("bridge boom")
 
 
+def scenario_config_from_dict(data: dict):
+    return SimulationConfig.from_dict(data).to_scenario_config()
+
+
 def _contract_config(output_dir: Path) -> dict:
     return {
         "scenario_name": "contract_smoke",
         "scenario_description": "Contract smoke test scenario",
-        "rocket": {"enabled": False},
-        "target": {
-            "enabled": True,
-            "specs": {"mass_kg": 100.0},
-            "initial_state": {
-                "position_eci_km": [7000.0, 0.0, 0.0],
-                "velocity_eci_km_s": [0.0, 7.5, 0.0],
+        "objects": {
+            "target": {
+                "enabled": True,
+                "specs": {"mass_kg": 100.0},
+                "initial_state": {
+                    "position_eci_km": [7000.0, 0.0, 0.0],
+                    "velocity_eci_km_s": [0.0, 7.5, 0.0],
+                },
             },
         },
-        "chaser": {"enabled": False},
         "simulator": {
             "duration_s": 2.0,
             "dt_s": 1.0,
@@ -66,7 +70,6 @@ def _contract_config(output_dir: Path) -> dict:
             "plots": {"enabled": False, "figure_ids": []},
             "animations": {"enabled": False, "types": []},
         },
-        "monte_carlo": {"enabled": False},
         "metadata": {"seed": 123},
     }
 
@@ -155,19 +158,19 @@ def test_scenario_yaml_contract_validates_stable_schema_boundaries(tmp_path: Pat
             {
                 "scenario_name": "yaml_contract",
                 "metadata": {"owner": "tests"},
-                "rocket": {"enabled": False},
-                "target": {
-                    "enabled": True,
-                    "preset": "presets/target.yaml",
-                    "specs": {"mass_kg": 95.0},
-                    "orbit_control": {
-                        "kind": "python",
-                        "module": "sim.control.orbit.zero_controller",
-                        "class_name": "ZeroController",
-                        "params": {},
+                "objects": {
+                    "target": {
+                        "enabled": True,
+                        "preset": "presets/target.yaml",
+                        "specs": {"mass_kg": 95.0},
+                        "orbit_control": {
+                            "kind": "python",
+                            "module": "sim.control.orbit.zero_controller",
+                            "class_name": "ZeroController",
+                            "params": {},
+                        },
                     },
                 },
-                "chaser": {"enabled": False},
                 "simulator": {
                     "duration_s": 4.0,
                     "dt_s": 1.0,
@@ -177,7 +180,6 @@ def test_scenario_yaml_contract_validates_stable_schema_boundaries(tmp_path: Pat
                     },
                 },
                 "outputs": {"output_dir": str(tmp_path / "out"), "mode": "save"},
-                "monte_carlo": {"enabled": False},
             },
             sort_keys=False,
         ),
@@ -188,14 +190,14 @@ def test_scenario_yaml_contract_validates_stable_schema_boundaries(tmp_path: Pat
 
     assert cfg.scenario_name == "yaml_contract"
     assert cfg.metadata == {"owner": "tests"}
-    assert cfg.rocket.enabled is False
-    assert cfg.target.enabled is True
-    assert cfg.target.specs["mass_kg"] == 95.0
-    assert "dry_mass_kg" not in cfg.target.specs
-    assert "fuel_mass_kg" not in cfg.target.specs
-    assert cfg.target.specs["max_thrust_n"] == 15.0
-    assert cfg.target.knowledge["refresh_rate_s"] == 5.0
-    assert cfg.target.orbit_control == AlgorithmPointer(
+    target = cfg.objects["target"]
+    assert target.enabled is True
+    assert target.specs["mass_kg"] == 95.0
+    assert "dry_mass_kg" not in target.specs
+    assert "fuel_mass_kg" not in target.specs
+    assert target.specs["max_thrust_n"] == 15.0
+    assert target.knowledge["refresh_rate_s"] == 5.0
+    assert target.orbit_control == AlgorithmPointer(
         kind="python",
         module="sim.control.orbit.zero_controller",
         class_name="ZeroController",
@@ -356,7 +358,7 @@ def test_engine_payload_parts_use_history_views_until_json_materialization(tmp_p
 
 def test_bridge_runtime_errors_are_recorded_by_default_and_strict_when_requested(tmp_path: Path) -> None:
     raw = _contract_config(tmp_path / "default")
-    raw["target"]["bridge"] = {
+    raw["objects"]["target"]["bridge"] = {
         "enabled": True,
         "module": "sim.tests.test_product_contracts",
         "class_name": "ContractFailingBridge",
@@ -368,16 +370,13 @@ def test_bridge_runtime_errors_are_recorded_by_default_and_strict_when_requested
 
     strict = _contract_config(tmp_path / "strict")
     strict["simulator"]["plugin_validation"] = {"strict_runtime": True}
-    strict["target"]["bridge"] = raw["target"]["bridge"]
+    strict["objects"]["target"]["bridge"] = raw["objects"]["target"]["bridge"]
     with pytest.raises(RuntimeError, match="target bridge.step failed"):
         SimulationSession.from_config(SimulationConfig.from_dict(strict)).run()
 
 
 def test_engine_runs_named_multi_satellite_objects_with_relative_initialization(tmp_path: Path) -> None:
     raw = _contract_config(tmp_path)
-    raw.pop("target", None)
-    raw.pop("chaser", None)
-    raw.pop("rocket", None)
     raw["objects"] = {
         "red_asset": {
             "kind": "satellite",

@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import unittest
 
-from sim.config import scenario_config_from_dict
+from sim import SimulationConfig
 from sim.rocket.guidance import MaxQThrottleLimiterGuidance, OpenLoopPitchProgramGuidance, OrbitInsertionCutoffGuidance
 from sim.runtime_support import _create_rocket_runtime
+
+
+def scenario_config_from_dict(data: dict):
+    return SimulationConfig.from_dict(data).to_scenario_config()
 
 
 class TestRocketGuidanceStack(unittest.TestCase):
@@ -36,7 +40,7 @@ class TestRocketGuidanceStack(unittest.TestCase):
                 "simulator": {"duration_s": 10.0, "dt_s": 1.0},
             }
         )
-        runtime = _create_rocket_runtime(cfg)
+        runtime = _create_rocket_runtime(cfg, agent_cfg=cfg.objects["rocket"])
         self.assertIsInstance(runtime.rocket_guidance, MaxQThrottleLimiterGuidance)
         self.assertIsInstance(runtime.rocket_guidance.base_guidance, OrbitInsertionCutoffGuidance)
         self.assertIsInstance(runtime.rocket_guidance.base_guidance.base_guidance, OpenLoopPitchProgramGuidance)

@@ -166,6 +166,48 @@ class TestAttitudeDisturbances(unittest.TestCase):
 
         self.assertEqual(shadow_mock.call_count, 1)
 
+    def test_explicit_srp_shadow_factor_is_preserved(self):
+        inertia = np.diag([120.0, 100.0, 80.0])
+        state = StateTruth(
+            position_eci_km=np.array([6778.0, 0.0, 0.0]),
+            velocity_eci_km_s=np.array([0.0, 7.67, 0.0]),
+            attitude_quat_bn=np.array([1.0, 0.0, 0.0, 0.0]),
+            angular_rate_body_rad_s=np.array([0.0, 0.0, 0.0]),
+            mass_kg=300.0,
+            t_s=0.0,
+        )
+        dyn = OrbitalAttitudeDynamics(
+            mu_km3_s2=398600.4418,
+            inertia_kg_m2=inertia,
+            disturbance_model=DisturbanceTorqueModel(
+                mu_km3_s2=398600.4418,
+                inertia_kg_m2=inertia,
+                config=DisturbanceTorqueConfig(
+                    use_gravity_gradient=False,
+                    use_magnetic=False,
+                    use_drag=False,
+                    use_srp=True,
+                ),
+            ),
+            orbit_substep_s=1.0,
+            attitude_substep_s=0.1,
+        )
+
+        with patch("sim.dynamics.model.srp_shadow_factor", return_value=1.0) as shadow_mock:
+            out = dyn.step(
+                state.copy(),
+                Command.zero(),
+                env={
+                    "sun_dir_eci": np.array([1.0, 0.0, 0.0]),
+                    "srp_shadow_model": "none",
+                    "srp_shadow_factor": 0.0,
+                },
+                dt_s=1.0,
+            )
+
+        self.assertEqual(shadow_mock.call_count, 0)
+        self.assertTrue(np.allclose(out.angular_rate_body_rad_s, np.zeros(3)))
+
     def test_drag_density_cached_across_attitude_substeps(self):
         inertia = np.diag([120.0, 100.0, 80.0])
         state = StateTruth(

@@ -1,5 +1,6 @@
 scenario_name: public_agent_python_api_minimal_propagation
-scenario_description: Expected artifact shape for the Python API minimal propagation task card.
+scenario_description: Expected artifact shape for the Python API minimal propagation
+  task card.
 objects:
   target:
     kind: satellite

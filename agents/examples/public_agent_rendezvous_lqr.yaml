@@ -1,18 +1,9 @@
-# Agent example: closed-loop rendezvous with public HCW LQR control.
-#
-# Natural-language source:
-# "Create a short, headless two-satellite rendezvous scenario. Put a chaser
-# 5 km behind a passive target with a small cross-track offset, use the public
-# HCW LQR controller, validate before running, and save queryable review
-# outputs."
-
 scenario_name: public_agent_rendezvous_lqr
-scenario_description: "Agent-generated public rendezvous smoke scenario using HCW LQR."
-
+scenario_description: Agent-generated public rendezvous smoke scenario using HCW LQR.
 metadata:
   owner: public-oel-agents
-  notes: "Headless agent example for config creation, validation, execution, review-store querying, and output inspection."
-
+  notes: Headless agent example for config creation, validation, execution, review-store
+    querying, and output inspection.
 objects:
   target:
     kind: satellite
@@ -48,31 +39,46 @@ objects:
       relative_to: target
       relative_to_target_ric:
         frame: curv
-        state: [0.0, -5.0, 0.2, 0.0, 0.0002, 0.0]
+        state:
+        - 0.0
+        - -5.0
+        - 0.2
+        - 0.0
+        - 0.0002
+        - 0.0
     orbit_control:
       kind: python
       module: sim.control.orbit.lqr
       class_name: HCWLQRController
       params:
         mean_motion_rad_s: 0.001078
-        max_accel_km_s2: 2.0e-5
+        max_accel_km_s2: 2.0e-05
         design_dt_s: 5.0
-        ric_curv_state_slice: [0, 6]
-        chief_eci_state_slice: [6, 12]
+        ric_curv_state_slice:
+        - 0
+        - 6
+        chief_eci_state_slice:
+        - 6
+        - 12
     knowledge:
       refresh_rate_s: 5.0
-      targets: [target]
+      targets:
+      - target
       conditions:
         require_line_of_sight: true
         max_range_km: 10000.0
       sensor_error:
-        pos_sigma_km: [0.005, 0.005, 0.005]
-        vel_sigma_km_s: [0.00005, 0.00005, 0.00005]
+        pos_sigma_km:
+        - 0.005
+        - 0.005
+        - 0.005
+        vel_sigma_km_s:
+        - 5.0e-05
+        - 5.0e-05
+        - 5.0e-05
       estimation:
         type: ekf
-
 simulator:
-  scenario_type: auto
   duration_s: 1000.0
   dt_s: 5.0
   dynamics:
@@ -93,7 +99,6 @@ simulator:
     strict: true
   termination:
     earth_impact_enabled: false
-
 outputs:
   output_dir: outputs/agents/public_agent_rendezvous_lqr
   mode: save
@@ -111,6 +116,3 @@ outputs:
   animations:
     enabled: false
     types: []
-
-monte_carlo:
-  enabled: false

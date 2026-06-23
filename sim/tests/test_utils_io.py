@@ -31,6 +31,24 @@ def test_write_json_replaces_non_finite_numbers_with_null(tmp_path: Path) -> Non
     assert loaded["path"] == str(tmp_path / "artifact.txt")
 
 
+def test_write_json_preserves_existing_file_when_serialization_fails(tmp_path: Path) -> None:
+    out = tmp_path / "payload.json"
+    out.write_text('{"status": "old"}', encoding="utf-8")
+
+    class NotJsonSerializable:
+        pass
+
+    try:
+        write_json(str(out), {"bad": NotJsonSerializable()})
+    except TypeError:
+        pass
+    else:  # pragma: no cover - defensive assertion branch
+        raise AssertionError("write_json should reject non-serializable payloads")
+
+    assert json.loads(out.read_text(encoding="utf-8")) == {"status": "old"}
+    assert not (tmp_path / "payload.json.tmp").exists()
+
+
 def test_json_safe_handles_numpy_scalars_and_paths(tmp_path: Path) -> None:
     cleaned = json_safe(
         {

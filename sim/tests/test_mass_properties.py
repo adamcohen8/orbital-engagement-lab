@@ -47,15 +47,16 @@ class TestMassProperties(unittest.TestCase):
     def test_invalid_mass_properties_fail_strict_validation(self):
         cfg = scenario_config_from_dict(
             {
-                "rocket": {"enabled": False},
-                "target": {
-                    "enabled": True,
-                    "specs": {
-                        "mass_kg": 200.0,
-                        "mass_properties": {
-                            "inertia_kg_m2": [[1.0, 4.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
-                            "source": "cad_export",
-                            "confidence": "high",
+                "objects": {
+                    "target": {
+                        "enabled": True,
+                        "specs": {
+                            "mass_kg": 200.0,
+                            "mass_properties": {
+                                "inertia_kg_m2": [[1.0, 4.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+                                "source": "cad_export",
+                                "confidence": "high",
+                            },
                         },
                     },
                 },
@@ -103,26 +104,27 @@ class TestMassProperties(unittest.TestCase):
     def test_runtime_retains_mass_properties_block(self):
         cfg = scenario_config_from_dict(
             {
-                "chaser": {
-                    "enabled": True,
-                    "kind": "satellite",
-                    "specs": {
-                        "mass_kg": 200.0,
-                        "mass_properties": {
-                            "center_of_mass_body_m": [0.1, 0.0, 0.0],
-                            "inertia_kg_m2": [[12.0, 0.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 8.0]],
-                            "inertia_reference_point": "center_of_mass",
-                            "source": "user_supplied",
-                            "confidence": "medium",
+                "objects": {
+                    "chaser": {
+                        "enabled": True,
+                        "kind": "satellite",
+                        "specs": {
+                            "mass_kg": 200.0,
+                            "mass_properties": {
+                                "center_of_mass_body_m": [0.1, 0.0, 0.0],
+                                "inertia_kg_m2": [[12.0, 0.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 8.0]],
+                                "inertia_reference_point": "center_of_mass",
+                                "source": "user_supplied",
+                                "confidence": "medium",
+                            },
                         },
                     },
                 },
-                "target": {"enabled": False},
                 "simulator": {"duration_s": 1.0, "dt_s": 1.0},
             }
         )
 
-        runtime = _create_satellite_runtime("chaser", cfg.chaser, cfg, np.random.default_rng(1))
+        runtime = _create_satellite_runtime("chaser", cfg.objects["chaser"], cfg, np.random.default_rng(1))
 
         self.assertEqual(runtime.mass_properties["center_of_mass_body_m"], [0.1, 0.0, 0.0])
         self.assertTrue(np.allclose(runtime.dynamics.inertia_kg_m2, np.diag([12.0, 10.0, 8.0])))

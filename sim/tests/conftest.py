@@ -6,9 +6,8 @@ import pytest
 
 SMOKE_TEST_FILES = {
     "test_api_plugin_validation.py",
-    "test_app_io.py",
-    "test_optional_dependencies.py",
     "test_public_imports.py",
+    "test_public_export_check.py",
     "test_quickstart_5min.py",
     "test_orbit_integrators.py",
     "test_sensor_measurements.py",
@@ -17,11 +16,11 @@ SMOKE_TEST_FILES = {
 
 PRODUCT_TEST_FILES = {
     "test_api.py",
-    "test_app_services.py",
     "test_game_mode.py",
     "test_output_index.py",
     "test_plotting_public.py",
     "test_product_contracts.py",
+    "test_public_export_check.py",
     "test_public_imports.py",
     "test_quickstart_5min.py",
     "test_scenario_yaml_config.py",
@@ -56,7 +55,6 @@ SLOW_TEST_FILES = {
 
 EXTERNAL_TEST_FILES = {
     "test_" + "c" + "f" + "s" + "_sil.py",
-    "test_optional_dependencies.py",
 }
 
 

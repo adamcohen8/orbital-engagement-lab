@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import pytest
+
+from sim.api import SimulationSession, SimulationWorkspace
 from sim.config import scenario_config_from_dict
 from sim.security.sealed_mode import SealedModePolicy, validate_sealed_mode
 
@@ -87,7 +90,6 @@ def test_sealed_mode_allows_ai_config_dry_run_without_hosted_ai_opt_in() -> None
 
 def test_sealed_mode_blocks_non_loopback_sil_networking() -> None:
     root = _base_config()
-    root["simulator"]["scenario_type"] = "_".join(["cfs", "sil"])
     root["objects"]["target"]["bridge"] = {
         "enabled": True,
         "module": "sim.bridge.local",
@@ -124,3 +126,31 @@ def test_sealed_mode_blocks_high_detail_retention() -> None:
     assert any("save_raw_runs" in err for err in errors)
     assert any("outputs.ai_report.data_scope" in err for err in errors)
     assert _sealed_errors(root, SealedModePolicy(allow_high_detail_outputs=True)) == []
+
+
+def test_simulation_session_enforces_sealed_mode_from_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    root = _base_config()
+    root["objects"]["target"]["orbit_control"]["module"] = "custom_plugins.controller"
+    monkeypatch.setenv("OEL_SEALED_MODE", "1")
+
+    with pytest.raises(ValueError, match="Sealed mode validation failed"):
+        SimulationSession.from_config(root)
+
+
+def test_simulation_session_blocks_runtime_overrides_in_sealed_mode() -> None:
+    session = SimulationSession.from_config(_base_config(), sealed_mode=True)
+
+    with pytest.raises(PermissionError, match="controller overrides"):
+        session.set_orbit_controller("target", object())
+
+    with pytest.raises(PermissionError, match="external intent providers"):
+        session.set_external_intent_provider("target", lambda **_: None)
+
+
+def test_simulation_workspace_enforces_explicit_sealed_mode() -> None:
+    root = _base_config()
+    root["outputs"]["stats"]["save_full_log"] = True
+    workspace = SimulationWorkspace(sealed_mode=True)
+
+    with pytest.raises(ValueError, match="save_full_log"):
+        workspace.from_dict(root)

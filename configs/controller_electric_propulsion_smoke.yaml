@@ -1,58 +1,72 @@
-scenario_name: "controller_electric_propulsion_smoke"
-scenario_description: "Local smoke scenario for the public ElectricPropulsionController."
-
-rocket:
-  enabled: false
-
-chaser:
-  enabled: false
-
-target:
-  enabled: true
-  specs:
-    mass_kg: 500.0
-    actuators:
-      enabled: true
-      orbital:
-        electric_propulsion:
-          max_thrust_n: 0.5
-          isp_s: 1600.0
-          max_power_w: 100.0
-          power_per_newton_w: 200.0
-  initial_state:
-    position_eci_km: [7000.0, 0.0, 0.0]
-    velocity_eci_km_s: [0.0, 7.5, 0.0]
-    attitude_quat_bn: [1.0, 0.0, 0.0, 0.0]
-    angular_rate_body_rad_s: [0.0, 0.0, 0.0]
-  orbit_control:
-    kind: "python"
-    module: "sim.control.orbit.electric_propulsion"
-    class_name: "ElectricPropulsionController"
-    params:
+scenario_name: controller_electric_propulsion_smoke
+scenario_description: Local smoke scenario for the public ElectricPropulsionController.
+objects:
+  target:
+    enabled: true
+    specs:
       mass_kg: 500.0
-      max_thrust_n: 0.5
-      max_power_w: 100.0
-      power_per_newton_w: 200.0
-      base_controller:
-        module: "sim.control.orbit.baseline"
-        class_name: "StationkeepingController"
-        params:
-          target_state: [7001.0, 0.0, 0.0, 0.0, 7.5, 0.0]
-          kp_pos: 1.0e-3
-          kd_vel: 0.0
-          max_accel_km_s2: 1.0e-3
-  attitude_control:
-    kind: "python"
-    module: "sim.control.attitude.zero_torque"
-    class_name: "ZeroTorqueController"
-    params: {}
-
+      actuators:
+        enabled: true
+        orbital:
+          electric_propulsion:
+            max_thrust_n: 0.5
+            isp_s: 1600.0
+            max_power_w: 100.0
+            power_per_newton_w: 200.0
+    initial_state:
+      position_eci_km:
+      - 7000.0
+      - 0.0
+      - 0.0
+      velocity_eci_km_s:
+      - 0.0
+      - 7.5
+      - 0.0
+      attitude_quat_bn:
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      angular_rate_body_rad_s:
+      - 0.0
+      - 0.0
+      - 0.0
+    orbit_control:
+      kind: python
+      module: sim.control.orbit.electric_propulsion
+      class_name: ElectricPropulsionController
+      params:
+        mass_kg: 500.0
+        max_thrust_n: 0.5
+        max_power_w: 100.0
+        power_per_newton_w: 200.0
+        base_controller:
+          module: sim.control.orbit.baseline
+          class_name: StationkeepingController
+          params:
+            target_state:
+            - 7001.0
+            - 0.0
+            - 0.0
+            - 0.0
+            - 7.5
+            - 0.0
+            kp_pos: 0.001
+            kd_vel: 0.0
+            max_accel_km_s2: 0.001
+    attitude_control:
+      kind: python
+      module: sim.control.attitude.zero_torque
+      class_name: ZeroTorqueController
+      params: {}
+    role: target
+    kind: satellite
 simulator:
   duration_s: 5.0
   dt_s: 1.0
   dynamics:
     orbit:
-      model: "two_body"
+      model: two_body
       orbit_substep_s: 1.0
     attitude:
       enabled: false
@@ -60,10 +74,9 @@ simulator:
     strict: true
   termination:
     earth_impact_enabled: false
-
 outputs:
-  output_dir: "outputs/controller_smokes/electric_propulsion"
-  mode: "save"
+  output_dir: outputs/controller_smokes/electric_propulsion
+  mode: save
   stats:
     print_summary: false
     save_json: true

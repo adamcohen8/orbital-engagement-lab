@@ -1,8 +1,10 @@
 scenario_name: game_training_rpo_sandbox
-scenario_description: Open RPO sandbox for experimenting with target-centered relative motion.
+scenario_description: Open RPO sandbox for experimenting with target-centered relative
+  motion.
 metadata:
   owner: codex
-  notes: Run with `python run_game.py sim/game/configs/game_training_rpo_sandbox.yaml --fast`.
+  notes: Run with `python run_game.py sim/game/configs/game_training_rpo_sandbox.yaml
+    --fast`.
   game:
     level_name: Sandbox
     control_mode: ric_translation
@@ -21,13 +23,18 @@ metadata:
       enabled: true
       sandbox_mode: true
       scenario_id: rpo_sandbox
-      learning_goal: Experiment with RIC translation controls and relative orbital motion without pass/fail goals.
-      player_brief: Edit the starting RIC state and target orbit in the setup panel, then maneuver freely. Delta-v used remains visible, but there is no delta-v budget.
+      learning_goal: Experiment with RIC translation controls and relative orbital
+        motion without pass/fail goals.
+      player_brief: Edit the starting RIC state and target orbit in the setup panel,
+        then maneuver freely. Delta-v used remains visible, but there is no delta-v
+        budget.
       pass_criteria:
       - No pass/fail objective; experiment freely.
       instructor_notes:
-      - Use this mode to demonstrate how initial relative state and target eccentricity change relative motion.
-      - Set eccentricity to zero for HCW-style circular-orbit intuition, or nonzero for elliptical prediction.
+      - Use this mode to demonstrate how initial relative state and target eccentricity
+        change relative motion.
+      - Set eccentricity to zero for HCW-style circular-orbit intuition, or nonzero
+        for elliptical prediction.
       target_object_id: target
       chaser_object_id: chaser
       max_time_s: 20000.0
@@ -150,7 +157,6 @@ objects:
         type: ekf
     kind: satellite
 simulator:
-  scenario_type: auto
   duration_s: 20000.0
   dt_s: 1.0
   dynamics:

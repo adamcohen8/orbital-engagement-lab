@@ -6,9 +6,7 @@ workflow review evidence layer.
 Current recommendation: use the `sim.review` Python/CLI query API for plain
 scripted and routine table review, and use `sim.review.EvidencePlotter` or
 `.venv/bin/python -m sim.review plot` for custom OEL-styled figures from
-completed runs. OEL Evidence Studio, formerly the Output Review Workbench, is
-the experimental interactive viewer/workbench for completed-run artifacts and
-manual plot-builder workflows.
+completed runs.
 
 The review store is the durable data layer for inspecting completed OEL outputs.
 It is intended to make simulation outputs queryable after a run finishes,
@@ -198,6 +196,8 @@ Recommended columns:
 - `samples`
 - `output_dir`
 - `config_path`
+- `config_sha256`
+- `config_json`
 - `summary_json_path`
 - `run_log_json_path`
 
@@ -530,13 +530,6 @@ plotter.line(
 )
 ```
 
-The optional PySide viewer opens the same completed-run evidence in an
-interactive local window:
-
-```bash
-.venv/bin/python run_evidence_studio.py --output outputs/my_run
-```
-
 Prefer `.venv/bin/python -m sim.review` when you only need scripted or
 agent-friendly tabular inspection. See `docs/agent-custom-plots.md` for custom
 plot examples and agent rules.
@@ -550,8 +543,7 @@ Safety requirements:
   attaches/detaches, transactions, and extension loading even if a query passes
   the first-token check.
 - Queries have a configurable row limit.
-- Query errors should be returned as review-friendly messages, not raw Evidence
-  Studio crashes.
+- Query errors should be returned as review-friendly messages.
 - SQL must not be able to write files, mutate tables, attach external
   databases, or load extensions.
 - Custom plot creation must go through the review plotting API so SQL remains
@@ -584,20 +576,14 @@ A generated artifact should record:
 - review schema version
 - style name
 
-Custom figures should use the OEL plotting style helpers so workbench-generated
-figures visually match simulator-generated artifacts.
-
-OEL Evidence Studio supports saving an agent-generated or manually configured
-query result as an OEL-styled figure when the result contains plottable columns.
-Users can choose line, scatter, or bar plots; x/y/group columns; light or dark
-OEL style; titles and axis labels; and PNG/SVG/PDF output. Saved figures are
-written under `review/figures/`, and provenance for Evidence Studio generated
-figures is appended to `review/generated_artifacts.json`.
+Custom figures should use the OEL plotting style helpers so generated figures
+visually match simulator-generated artifacts. Saved figures are written under
+`review/figures/`, and generated-figure provenance is appended to
+`review/generated_artifacts.json`.
 
 ## Built-In Insight Recipes
 
-The first workbench should include named recipes that compile to SQL or review
-API calls:
+Built-in recipes compile to SQL or review API calls:
 
 - closest approach
 - first range threshold crossing
@@ -625,8 +611,12 @@ Compatibility rules:
 - If the review store fails to write, normal simulation artifacts should still
   be preserved unless strict review output is explicitly requested.
 - Legacy folders without a review store open in limited mode.
-- The review schema version should increment when tables or semantics change in
-  a compatibility-sensitive way.
+- `review/schema.json` includes a `compatibility` block. The current policy is
+  `pre_1_0_additive`: stable core tables should remain queryable, new tables or
+  nullable columns may be added, and compatibility-sensitive table/semantic
+  changes require a schema-version bump.
+- Stable core tables are `run_metadata`, `objects`, `time_samples`,
+  `object_state`, `relative_state`, `thrust`, `metrics`, and `artifacts`.
 
 ## Public And Pro Boundary
 

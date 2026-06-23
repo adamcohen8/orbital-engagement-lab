@@ -12,7 +12,7 @@ from sim.dynamics.orbit.environment import (
     EARTH_J4,
     EARTH_RADIUS_KM,
     EARTH_ROT_RATE_RAD_S,
-    SOLAR_PRESSURE_N_M2,
+    srp_pressure_n_m2,
 )
 
 
@@ -249,7 +249,7 @@ def accel_srp(
         sun_dir_eci = sun_dir_eci / float(np.sqrt(n2))
 
     distance_scale = float(env.get("srp_distance_scale", srp_geometry.get("distance_scale", 1.0)))
-    force_n = SOLAR_PRESSURE_N_M2 * distance_scale * cr * area_eff_m2
+    force_n = srp_pressure_n_m2(env) * distance_scale * cr * area_eff_m2
     a_m_s2 = force_n / mass_kg
     return -(a_m_s2 / 1e3) * shadow * sun_dir_eci
 

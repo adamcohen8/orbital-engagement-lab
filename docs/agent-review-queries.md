@@ -49,6 +49,14 @@ queries before parsing JSON/CSV artifacts by hand:
 
 Saved query names are conveniences for common public agent tasks. When a result
 matters, state either the saved query name or the SQL query used.
+Each saved query carries machine-readable metadata in `sim.review.queries`:
+
+- `source_tables`: the review tables the query reads,
+- `maturity`: `supported`, `prototype`, or `experimental`,
+- `allow_empty`: whether zero rows can be normal for that query.
+
+Treat zero rows from a query with `allow_empty: false` as evidence to investigate
+the scenario or review store before making a claim.
 
 For first-run propagation, rendezvous, and mission-recovery workflows, start
 with [`agent-golden-paths.md`](agent-golden-paths.md). It names the exact

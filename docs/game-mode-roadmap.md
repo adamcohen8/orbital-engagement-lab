@@ -110,11 +110,11 @@ Arcade variant:
   the goal radius by 5 meters down to a 5 meter floor, and rolls the weighted
   round score into the run total. The chaser has a 3 m/s round delta-v budget;
   cleared rounds award 75% of the target orbital period plus conserved chaser
-  delta-v at 100 seconds per unused m/s. Round 1 preserves the Level 9 start;
+  delta-v at 1000 seconds per unused m/s. Round 1 preserves the Level 9 start;
   later rounds randomize the chaser's RIC state while matching target/chaser
   orbital energy. Every fifth round becomes a boss round with an elliptical
   target orbit, randomized target true anomaly, TH projection, boss scoring,
-  boss music, and an additional 2000 second flat time bonus. Boss eccentricity
+  boss music, and an additional 5000 second flat time bonus. Boss eccentricity
   ramps from 0.05 to 0.20, and the target defensive delta-v budget holds at
   0.1 m/s through round 20 before increasing by 0.01 m/s per round. Each new
   round resets playback to 1x speed and full-trajectory camera framing.

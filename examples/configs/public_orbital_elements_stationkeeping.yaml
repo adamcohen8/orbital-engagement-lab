@@ -1,0 +1,125 @@
+scenario_name: public_orbital_elements_stationkeeping
+scenario_description: Public single-satellite orbital-elements stationkeeping example using mission strategy plus controller execution.
+metadata:
+  owner: public
+  seed: 123
+  notes: Demonstrates current objects-based YAML for non-rendezvous orbit control.
+objects:
+  target:
+    enabled: true
+    role: target
+    kind: satellite
+    specs:
+      preset_satellite: BASIC_SATELLITE
+      dry_mass_kg: 180.0
+      fuel_mass_kg: 20.0
+      thruster: BASIC_CHEMICAL_Z_BOTTOM
+      attitude_system: BASIC_REACTION_WHEELS_3AXIS
+    initial_state:
+      coes:
+        a_km: 7050.0
+        ecc: 0.01
+        inc_deg: 42.0
+        raan_deg: 11.0
+        argp_deg: 25.0
+        true_anomaly_deg: 33.0
+      attitude_quat_bn:
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      angular_rate_body_rad_s:
+      - 0.0
+      - 0.0
+      - 0.0
+    orbit_control:
+      kind: python
+      module: sim.control.orbit.baseline
+      class_name: StationkeepingController
+      params:
+        target_state:
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        kp_pos: 1.0e-06
+        kd_vel: 0.002
+        max_accel_km_s2: 5.0e-06
+    attitude_control:
+      kind: python
+      module: sim.control.attitude.zero_torque
+      class_name: ZeroTorqueController
+      params: {}
+    mission_strategy:
+      kind: python
+      module: sim.mission.modules
+      class_name: OrbitalElementsStationKeepMissionStrategy
+      params:
+        target_coes:
+          a_km: 7000.0
+          ecc: 0.001
+          inc_deg: 45.0
+          raan_deg: 12.0
+          argp_deg: 10.0
+        kp_pos: 1.0e-06
+        kd_vel: 0.002
+        max_accel_km_s2: 5.0e-06
+        align_to_thrust: true
+    mission_execution:
+      kind: python
+      module: sim.mission.modules
+      class_name: ControllerPointingExecution
+      params:
+        require_attitude_alignment: false
+        alignment_tolerance_deg: 180.0
+    mission_objectives: []
+simulator:
+  duration_s: 600.0
+  dt_s: 5.0
+  dynamics:
+    orbit:
+      model: two_body
+      orbit_substep_s: 5.0
+      j2: false
+      j3: false
+      j4: false
+      drag: false
+      srp: false
+    attitude:
+      enabled: true
+      attitude_substep_s: 0.1
+      disturbance_torques:
+        gravity_gradient: false
+        magnetic: false
+        drag: false
+        srp: false
+    rocket:
+      enabled: false
+  environment:
+    ephemeris_mode: analytic_simple
+    atmosphere_env: {}
+  plugin_validation:
+    strict: true
+  termination:
+    earth_impact_enabled: true
+    earth_radius_km: 6378.137
+outputs:
+  output_dir: outputs/examples/public_orbital_elements_stationkeeping
+  mode: save
+  stats:
+    enabled: true
+    print_summary: true
+    save_json: true
+    save_csv: false
+    save_full_log: false
+  plots:
+    enabled: false
+    figure_ids: []
+  animations:
+    enabled: false
+    types: []
+  review:
+    enabled: true
+    detail: standard

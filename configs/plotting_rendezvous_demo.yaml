@@ -4,13 +4,6 @@ scenario_description: Public 6000-second rendezvous demo that generates dashboar
 metadata:
   owner: public
   notes: Deterministic plotting demo for README and docs gallery artifacts.
-ground_stations:
-- id: colorado_springs
-  lat_deg: 38.803
-  lon_deg: -104.526
-  alt_km: 1.9
-  min_elevation_deg: 10.0
-  max_range_km: 2500.0
 objects:
   rocket:
     enabled: false
@@ -107,8 +100,14 @@ objects:
       estimation:
         type: ekf
     kind: satellite
+ground_stations:
+- id: colorado_springs
+  lat_deg: 38.803
+  lon_deg: -104.526
+  alt_km: 1.9
+  min_elevation_deg: 10.0
+  max_range_km: 2500.0
 simulator:
-  scenario_type: auto
   duration_s: 6000.0
   dt_s: 1.0
   dynamics:

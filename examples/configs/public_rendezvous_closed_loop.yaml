@@ -202,7 +202,6 @@ objects:
         type: ekf
     kind: satellite
 simulator:
-  scenario_type: auto
   duration_s: 300.0
   dt_s: 5.0
   dynamics:
@@ -254,8 +253,3 @@ outputs:
   animations:
     enabled: false
     types: []
-monte_carlo:
-  enabled: false
-  iterations: 1
-  base_seed: 123
-  variations: []

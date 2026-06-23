@@ -1,27 +1,16 @@
-# Use case: "Where will this satellite be two hours from its TLE epoch?"
-#
-# Key parameters to vary:
-# - simulator.duration_s: prediction horizon in seconds. 7200 = two hours.
-# - simulator.dt_s: output cadence and integration step. Use smaller values for denser output.
-# - objects.iss.initial_state.tle: replace line1/line2 with your trusted TLE.
-# - simulator.dynamics.orbit perturbation flags: this example enables J2/J3/J4,
-#   drag, SRP, and Sun/Moon third-body effects for a richer engineering screen.
-#   It does not use an SGP4/general-perturbations propagator; OEL initializes
-#   from the TLE, then numerically integrates its configured special-perturbations
-#   force model.
-
-scenario_name: "public_tle_2hr_propagation"
-scenario_description: "Public example: initialize one satellite from a TLE, propagate for two hours with OEL numerical perturbations, and save the predicted state history."
-
+scenario_name: public_tle_2hr_propagation
+scenario_description: 'Public example: initialize one satellite from a TLE, propagate
+  for two hours with OEL numerical perturbations, and save the predicted state history.'
 metadata:
-  owner: "public"
-  notes: "Run with `.venv/bin/python run_simulation.py --config examples/configs/public_tle_2hr_propagation.yaml`. This is not SGP4/general-perturbations propagation; OEL initializes from the TLE and numerically integrates its configured special-perturbations force model."
-
+  owner: public
+  notes: Run with `.venv/bin/python run_simulation.py --config examples/configs/public_tle_2hr_propagation.yaml`.
+    This is not SGP4/general-perturbations propagation; OEL initializes from the TLE
+    and numerically integrates its configured special-perturbations force model.
 objects:
   iss:
-    kind: "satellite"
+    kind: satellite
     enabled: true
-    role: "tracked_satellite"
+    role: tracked_satellite
     specs:
       mass_kg: 420000.0
       aero:
@@ -30,34 +19,23 @@ objects:
       cr: 1.2
     initial_state:
       tle:
-        # Example ISS-like TLE lines for demonstration. Replace these with current
-        # lines for a real analysis run.
-        line1: "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9005"
-        line2: "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1000"
-        # Set true if you want checksum enforcement for operationally sourced TLEs.
+        line1: 1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9005
+        line2: 2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1000
         require_checksum: false
-        # When simulator.initial_jd_utc is set, true advances the TLE mean anomaly
-        # to that epoch before propagation starts.
         propagate_to_initial_epoch: true
     orbit_control:
-      kind: "python"
-      module: "sim.control.orbit.zero_controller"
-      class_name: "ZeroController"
+      kind: python
+      module: sim.control.orbit.zero_controller
+      class_name: ZeroController
       params: {}
-
 simulator:
-  scenario_type: "auto"
-  # Key knob: 2 hours. Change to 600, 86400, etc. for another prediction horizon.
   duration_s: 7200.0
-  # Key knob: output cadence / integration step in seconds.
   dt_s: 60.0
   initial_jd_utc: 2460310.75
   dynamics:
     orbit:
-      model: "two_body"
+      model: two_body
       orbit_substep_s: 60.0
-      # High-fidelity screen: keep the base central-body model and turn on
-      # OEL's configured numerical perturbation terms.
       j2: true
       j3: true
       j4: true
@@ -70,27 +48,25 @@ simulator:
     rocket:
       enabled: false
   environment:
-    ephemeris_mode: "analytic_simple"
+    ephemeris_mode: analytic_simple
     atmosphere_env: {}
   plugin_validation:
     strict: true
   termination:
     earth_impact_enabled: true
     earth_radius_km: 6378.137
-
 outputs:
-  output_dir: "outputs/examples/public_tle_2hr_propagation"
-  mode: "save"
+  output_dir: outputs/examples/public_tle_2hr_propagation
+  mode: save
   stats:
     print_summary: true
     save_json: true
     save_full_log: true
   plots:
     enabled: true
-    figure_ids: ["orbit_eci", "ground_track"]
+    figure_ids:
+    - orbit_eci
+    - ground_track
   animations:
     enabled: false
     types: []
-
-monte_carlo:
-  enabled: false

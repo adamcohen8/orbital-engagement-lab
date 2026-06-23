@@ -13,16 +13,15 @@ metadata:
     training:
       enabled: true
       scenario_id: rpo_03_rbar_approach
-      learning_goal: "Learn the R-bar approach rhythm: pulse toward the target,
-        coast, brake in stages, and arrive at the standoff range with low relative
-        speed."
-      player_brief: Start below the target on the R-bar. Tap W briefly to build
-        upward closure, coast most of the time, tap S periodically to slow down,
-        and use A/D or Left/Right only for small centering corrections.
+      learning_goal: 'Learn the R-bar approach rhythm: pulse toward the target, coast,
+        brake in stages, and arrive at the standoff range with low relative speed.'
+      player_brief: Start below the target on the R-bar. Tap W briefly to build upward
+        closure, coast most of the time, tap S periodically to slow down, and use
+        A/D or Left/Right only for small centering corrections.
       pass_criteria:
-      - "Controls: W moves up the R-bar, S brakes downward, A/D and Left/Right
-        should be tiny centering taps only."
-      - "Playbook: pulse W briefly, coast, tap S in stages, repeat."
+      - 'Controls: W moves up the R-bar, S brakes downward, A/D and Left/Right should
+        be tiny centering taps only.'
+      - 'Playbook: pulse W briefly, coast, tap S in stages, repeat.'
       - Enter the green standoff range circle.
       - Keep relative speed below the goal threshold.
       - Stay inside the broad R-bar safety envelope.
@@ -30,10 +29,10 @@ metadata:
       - Do not enter keepout.
       instructor_notes:
       - Use this level to compare intuition from R-bar versus V-bar approaches.
-      - Have cadets explain why radial motion creates along-track drift and why
-        staged braking is safer than one continuous closure.
-      - A first successful run should use short W pulses, long coasts, and short
-        S braking pulses before entering the standoff range.
+      - Have cadets explain why radial motion creates along-track drift and why staged
+        braking is safer than one continuous closure.
+      - A first successful run should use short W pulses, long coasts, and short S
+        braking pulses before entering the standoff range.
       target_object_id: target
       chaser_object_id: chaser
       keepout_radius_km: 0.25
@@ -189,7 +188,6 @@ objects:
         type: ekf
     kind: satellite
 simulator:
-  scenario_type: auto
   duration_s: 12000.0
   dt_s: 1.0
   dynamics:
@@ -246,7 +244,3 @@ outputs:
     fps: 30
     speed_multiple: 1.0
     frame_stride: 1
-monte_carlo:
-  enabled: false
-  iterations: 1
-  base_seed: 123

@@ -170,12 +170,13 @@ class OrbitalAttitudeDynamics(DynamicsModel):
                 srp_geometry = resolve_srp_geometry(midpoint_truth.position_eci_km, midpoint_truth.t_s, env_local)
                 env_local["sun_dir_eci_unit"] = np.asarray(srp_geometry["sun_dir_sc_eci"], dtype=float)
                 env_local["srp_distance_scale"] = float(srp_geometry["distance_scale"])
-                env_local["srp_shadow_factor"] = srp_shadow_factor(
-                    r_sc_eci_km=midpoint_truth.position_eci_km,
-                    t_s=midpoint_truth.t_s,
-                    env=env_local,
-                    srp_geometry=srp_geometry,
-                )
+                if "srp_shadow_factor" not in env_local:
+                    env_local["srp_shadow_factor"] = srp_shadow_factor(
+                        r_sc_eci_km=midpoint_truth.position_eci_km,
+                        t_s=midpoint_truth.t_s,
+                        env=env_local,
+                        srp_geometry=srp_geometry,
+                    )
             att_dt = self._effective_substep(self.attitude_substep_s, dt_s)
             t_att = state.t_s
             for h in self._substep_sequence(dt_s, att_dt):

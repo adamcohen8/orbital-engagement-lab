@@ -28,34 +28,35 @@ class ExternalBridgeIntegratedCommandMission:
 def _actuator_config(tmp_path: Path) -> dict:
     return {
         "scenario_name": "actuator_runtime_integration",
-        "rocket": {"enabled": False},
-        "target": {
-            "enabled": True,
-            "specs": {
-                "mass_kg": 500.0,
-                "actuators": {
-                    "enabled": True,
-                    "orbital": {
-                        "electric_propulsion": {
-                            "max_thrust_n": 0.5,
-                            "isp_s": 1600.0,
-                            "max_power_w": 100.0,
-                            "power_per_newton_w": 200.0,
-                        }
+        "objects": {
+            "target": {
+                "enabled": True,
+                "specs": {
+                    "mass_kg": 500.0,
+                    "actuators": {
+                        "enabled": True,
+                        "orbital": {
+                            "electric_propulsion": {
+                                "max_thrust_n": 0.5,
+                                "isp_s": 1600.0,
+                                "max_power_w": 100.0,
+                                "power_per_newton_w": 200.0,
+                            }
+                        },
                     },
                 },
-            },
-            "initial_state": {
-                "position_eci_km": [7000.0, 0.0, 0.0],
-                "velocity_eci_km_s": [0.0, 7.5, 0.0],
-            },
-            "mission_objectives": [
-                {
-                    "module": "sim.tests.test_actuator_runtime_integration",
-                    "class_name": "ExternalBridgeIntegratedCommandMission",
-                    "params": {"thrust_eci_km_s2": [1.0e-3, 0.0, 0.0]},
-                }
-            ],
+                "initial_state": {
+                    "position_eci_km": [7000.0, 0.0, 0.0],
+                    "velocity_eci_km_s": [0.0, 7.5, 0.0],
+                },
+                "mission_objectives": [
+                    {
+                        "module": "sim.tests.test_actuator_runtime_integration",
+                        "class_name": "ExternalBridgeIntegratedCommandMission",
+                        "params": {"thrust_eci_km_s2": [1.0e-3, 0.0, 0.0]},
+                    }
+                ],
+            }
         },
         "simulator": {
             "duration_s": 2.0,
@@ -70,7 +71,6 @@ def _actuator_config(tmp_path: Path) -> dict:
             "plots": {"enabled": False, "figure_ids": []},
             "animations": {"enabled": False, "types": []},
         },
-        "monte_carlo": {"enabled": False},
     }
 
 
@@ -90,7 +90,7 @@ def test_configured_actuator_stack_processes_external_integrated_command(tmp_pat
 
 def test_actuator_preset_configures_runtime_stack(tmp_path: Path) -> None:
     config = _actuator_config(tmp_path)
-    config["target"]["specs"] = {
+    config["objects"]["target"]["specs"] = {
         "mass_kg": 500.0,
         "actuator_preset": "BASIC_ELECTRIC_PROPULSION",
     }

@@ -96,7 +96,6 @@ class SimulatorAccelerationSection(_TypedConfigDict):
 
 @dataclass(frozen=True)
 class SimulatorSection:
-    scenario_type: str = "auto"
     duration_s: float = 3600.0
     dt_s: float = 1.0
     initial_jd_utc: float | None = None
@@ -516,7 +515,10 @@ class SimulationScenarioConfig:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        return _plain_config_data(self)
+        data = _plain_config_data(self)
+        for legacy_key in ("rocket", "chaser", "target", "monte_carlo"):
+            data.pop(legacy_key, None)
+        return data
 
 
 def _plain_config_data(value: Any) -> Any:
@@ -557,6 +559,17 @@ def _reject_unsupported_aliases(
 
 _ROOT_UNSUPPORTED_ALIASES: _UnsupportedAliasMap = {
     "ground_station": ("ground_stations", " as a list or mapping"),
+    "rocket": ("objects.rocket", " under the canonical objects map"),
+    "chaser": ("objects.chaser", " under the canonical objects map"),
+    "target": ("objects.target", " under the canonical objects map"),
+    "monte_carlo": ("analysis", " with analysis.enabled: true and analysis.study_type: monte_carlo"),
+}
+
+_SIMULATOR_UNSUPPORTED_ALIASES: _UnsupportedAliasMap = {
+    "scenario_type": (
+        "objects / simulator.dynamics / analysis",
+        "; scenario behavior is inferred from object kind, dynamics, bridges, and analysis settings",
+    ),
 }
 
 _OUTPUTS_UNSUPPORTED_ALIASES: _UnsupportedAliasMap = {
@@ -714,14 +727,6 @@ def _resolve_agent_presets(
     path_policy: ConfigPathPolicy | None = None,
 ) -> dict[str, Any]:
     resolved = dict(root)
-    for role in ("rocket", "chaser", "target"):
-        if role in resolved:
-            resolved[role] = _resolve_agent_preset(
-                resolved.get(role),
-                role=role,
-                base_dir=base_dir,
-                path_policy=path_policy,
-            )
     objects_raw = resolved.get("objects")
     if isinstance(objects_raw, dict):
         resolved_objects = {}
@@ -755,6 +760,11 @@ def _is_bool_like_key(key: str) -> bool:
         "third_body_moon",
         "third_body_sun",
         "parallel_enabled",
+        "gravity_gradient",
+        "magnetic",
+        "magnetic_dipole",
+        "aerodynamic_drag",
+        "solar_radiation_pressure",
     }:
         return True
     return normalized.startswith(
@@ -1151,10 +1161,6 @@ def _parse_ground_station_section(value: Any, index: int) -> GroundStationSectio
 
 def _parse_objects_section(
     value: Any,
-    *,
-    legacy_agents: dict[str, AgentSection],
-    has_objects_section: bool,
-    legacy_keys_present: set[str],
 ) -> dict[str, AgentSection]:
     objects: dict[str, AgentSection] = {}
     if value is not None:
@@ -1173,16 +1179,6 @@ def _parse_objects_section(
             if agent.object_id != oid:
                 raise ValueError(f"objects.{oid}.object_id must match its object id key.")
             objects[oid] = agent
-
-    for legacy_id, legacy_agent in legacy_agents.items():
-        if legacy_id in objects:
-            continue
-        if legacy_id in legacy_keys_present:
-            objects[legacy_id] = legacy_agent
-        elif not has_objects_section and legacy_id == "target":
-            objects[legacy_id] = legacy_agent
-        elif not has_objects_section and bool(legacy_agent.enabled):
-            objects[legacy_id] = legacy_agent
 
     return objects
 
@@ -1237,6 +1233,7 @@ def _normalize_simulator_termination_block(
 
 def _parse_simulator_section(value: Any) -> SimulatorSection:
     d = _as_dict(value, "simulator")
+    _reject_unsupported_aliases(d, "simulator", _SIMULATOR_UNSUPPORTED_ALIASES)
     plugin_validation = {"strict": True}
     plugin_validation.update(dict(d.get("plugin_validation", {}) or {}))
     termination_raw = dict(d.get("termination", {}) or {})
@@ -1267,7 +1264,6 @@ def _parse_simulator_section(value: Any) -> SimulatorSection:
             )
         termination["by_object"] = by_object
     out = SimulatorSection(
-        scenario_type=str(d.get("scenario_type", "auto")),
         duration_s=_parse_float(d.get("duration_s", 3600.0), "simulator.duration_s"),
         dt_s=_parse_float(d.get("dt_s", 1.0), "simulator.dt_s"),
         initial_jd_utc=_parse_optional_float(d.get("initial_jd_utc"), "simulator.initial_jd_utc"),
@@ -1279,8 +1275,6 @@ def _parse_simulator_section(value: Any) -> SimulatorSection:
         termination=termination,
     )
     _validate_sim_timing(out)
-    if not out.scenario_type.strip():
-        raise ValueError("simulator.scenario_type must be non-empty.")
     return out
 
 
@@ -1322,38 +1316,14 @@ def _parse_mc_variation(value: Any) -> MonteCarloVariation:
     )
 
 
-def _parse_monte_carlo_section(value: Any) -> MonteCarloSection:
-    d = _as_dict(value, "monte_carlo")
-    vars_raw = d.get("variations", []) or []
-    if not isinstance(vars_raw, list):
-        raise ValueError("monte_carlo.variations must be a list.")
-    out = MonteCarloSection(
-        enabled=_parse_bool(d.get("enabled", False), "monte_carlo.enabled"),
-        iterations=int(d.get("iterations", 1)),
-        base_seed=int(d.get("base_seed", 0)),
-        parallel_enabled=_parse_bool(d.get("parallel_enabled", False), "monte_carlo.parallel_enabled"),
-        parallel_workers=int(d.get("parallel_workers", 0)),
-        variations=[_parse_mc_variation(v) for v in vars_raw],
-    )
-    if out.iterations <= 0:
-        raise ValueError("monte_carlo.iterations must be positive.")
-    if out.parallel_workers < 0:
-        raise ValueError("monte_carlo.parallel_workers must be >= 0.")
-    return out
-
-
-def _parse_analysis_execution_section(
-    value: Any, *, fallback: MonteCarloSection | None = None
-) -> AnalysisExecutionSection:
+def _parse_analysis_execution_section(value: Any) -> AnalysisExecutionSection:
     d = _as_dict(value, "analysis.execution")
-    default_parallel_enabled = bool(fallback.parallel_enabled) if fallback is not None else False
-    default_parallel_workers = int(fallback.parallel_workers) if fallback is not None else 0
     out = AnalysisExecutionSection(
         parallel_enabled=_parse_bool(
-            d.get("parallel_enabled", default_parallel_enabled),
+            d.get("parallel_enabled", False),
             "analysis.execution.parallel_enabled",
         ),
-        parallel_workers=int(d.get("parallel_workers", default_parallel_workers)),
+        parallel_workers=int(d.get("parallel_workers", 0)),
         failure_policy=str(d.get("failure_policy", "fail_fast") or "fail_fast").strip().lower(),
     )
     if out.parallel_workers < 0:
@@ -1381,22 +1351,18 @@ def _parse_analysis_baseline_section(value: Any) -> AnalysisBaselineSection:
     )
 
 
-def _parse_analysis_monte_carlo_section(
-    value: Any, *, fallback: MonteCarloSection | None = None
-) -> AnalysisMonteCarloSection:
+def _parse_analysis_monte_carlo_section(value: Any) -> AnalysisMonteCarloSection:
     d = _as_dict(value, "analysis.monte_carlo")
     vars_raw = d.get("variations")
     if vars_raw is None:
-        variations = list(fallback.variations) if fallback is not None else []
+        variations = []
     else:
         if not isinstance(vars_raw, list):
             raise ValueError("analysis.monte_carlo.variations must be a list.")
         variations = [_parse_mc_variation(v) for v in vars_raw]
-    default_iterations = int(fallback.iterations) if fallback is not None else 1
-    default_base_seed = int(fallback.base_seed) if fallback is not None else 0
     out = AnalysisMonteCarloSection(
-        iterations=int(d.get("iterations", default_iterations)),
-        base_seed=int(d.get("base_seed", default_base_seed)),
+        iterations=int(d.get("iterations", 1)),
+        base_seed=int(d.get("base_seed", 0)),
         variations=variations,
     )
     if out.iterations <= 0:
@@ -1710,7 +1676,7 @@ def _parse_mission_recovery_planner_section(value: Any) -> dict[str, Any]:
     }
 
 
-def _parse_analysis_section(value: Any, *, legacy_mc: MonteCarloSection) -> AnalysisSection:
+def _parse_analysis_section(value: Any) -> AnalysisSection:
     d = _as_dict(value, "analysis")
     metrics = d.get("metrics", []) or []
     if not isinstance(metrics, list):
@@ -1718,10 +1684,10 @@ def _parse_analysis_section(value: Any, *, legacy_mc: MonteCarloSection) -> Anal
     out = AnalysisSection(
         enabled=_parse_bool(d.get("enabled", False), "analysis.enabled"),
         study_type=str(d.get("study_type", "monte_carlo")).strip().lower(),
-        execution=_parse_analysis_execution_section(d.get("execution"), fallback=legacy_mc),
+        execution=_parse_analysis_execution_section(d.get("execution")),
         metrics=list(metrics),
         baseline=_parse_analysis_baseline_section(d.get("baseline")),
-        monte_carlo=_parse_analysis_monte_carlo_section(d.get("monte_carlo"), fallback=legacy_mc),
+        monte_carlo=_parse_analysis_monte_carlo_section(d.get("monte_carlo")),
         sensitivity=_parse_sensitivity_section(d.get("sensitivity")),
         covariance=_parse_covariance_section(d.get("covariance")),
         mission_recovery=_parse_mission_recovery_section(d.get("mission_recovery")),
@@ -1733,28 +1699,9 @@ def _parse_analysis_section(value: Any, *, legacy_mc: MonteCarloSection) -> Anal
     return out
 
 
-def _analysis_from_legacy_monte_carlo(mc: MonteCarloSection) -> AnalysisSection:
-    return AnalysisSection(
-        enabled=bool(mc.enabled),
-        study_type="monte_carlo",
-        execution=AnalysisExecutionSection(
-            parallel_enabled=bool(mc.parallel_enabled),
-            parallel_workers=int(mc.parallel_workers),
-        ),
-        monte_carlo=AnalysisMonteCarloSection(
-            iterations=int(mc.iterations),
-            base_seed=int(mc.base_seed),
-            variations=list(mc.variations),
-        ),
-    )
-
-
-def _normalize_analysis_and_monte_carlo(
-    legacy_mc: MonteCarloSection,
-    analysis: AnalysisSection,
-) -> tuple[MonteCarloSection, AnalysisSection]:
+def _monte_carlo_from_analysis(analysis: AnalysisSection) -> MonteCarloSection:
     if analysis.enabled and analysis.study_type == "monte_carlo":
-        normalized_mc = MonteCarloSection(
+        return MonteCarloSection(
             enabled=True,
             iterations=int(analysis.monte_carlo.iterations),
             base_seed=int(analysis.monte_carlo.base_seed),
@@ -1762,20 +1709,7 @@ def _normalize_analysis_and_monte_carlo(
             parallel_workers=int(analysis.execution.parallel_workers),
             variations=list(analysis.monte_carlo.variations),
         )
-        return normalized_mc, analysis
-    if analysis.enabled and analysis.study_type in {"sensitivity", "covariance"}:
-        normalized_mc = MonteCarloSection(
-            enabled=False,
-            iterations=max(int(legacy_mc.iterations), 1),
-            base_seed=int(legacy_mc.base_seed),
-            parallel_enabled=False,
-            parallel_workers=0,
-            variations=[],
-        )
-        return normalized_mc, analysis
-    if legacy_mc.enabled:
-        return legacy_mc, _analysis_from_legacy_monte_carlo(legacy_mc)
-    return legacy_mc, analysis
+    return MonteCarloSection()
 
 
 def _parse_outputs_section(value: Any, path_policy: ConfigPathPolicy | None = None) -> OutputsSection:
@@ -1841,6 +1775,8 @@ def _validate_physics_runtime_settings(cfg: SimulationScenarioConfig) -> None:
             )
 
     model = str(orbit.get("model", "two_body") or "two_body").strip().lower()
+    if model not in {"two_body", "cr3bp"}:
+        raise ValueError("simulator.dynamics.orbit.model must be one of: cr3bp, two_body.")
     if model == "cr3bp":
         unsupported = []
         for key in ("j2", "j3", "j4", "drag", "srp", "third_body_sun", "third_body_moon", "lift"):
@@ -1904,15 +1840,6 @@ def _validate_config_read_paths(root: dict[str, Any], path_policy: ConfigPathPol
 
 
 def _resolve_geometry_profile_paths(root: dict[str, Any], path_policy: ConfigPathPolicy) -> None:
-    for role in ("rocket", "chaser", "target"):
-        section = root.get(role)
-        if isinstance(section, dict):
-            _resolve_geometry_profile_path_in_specs(
-                dict(section.get("specs", {}) or {}),
-                section,
-                path_policy,
-                f"{role}.specs",
-            )
     objects = root.get("objects")
     if isinstance(objects, dict):
         for object_id, section in objects.items():
@@ -1976,27 +1903,23 @@ def scenario_config_from_dict(
     root = _resolve_agent_presets(root, base_dir=base_dir, path_policy=path_policy)
     _validate_config_read_paths(root, path_policy)
     _enforce_strict_booleans(root)
-    legacy_mc = _parse_monte_carlo_section(root.get("monte_carlo"))
-    analysis = _parse_analysis_section(root.get("analysis"), legacy_mc=legacy_mc)
-    normalized_mc, normalized_analysis = _normalize_analysis_and_monte_carlo(legacy_mc, analysis)
-    legacy_keys_present = {key for key in ("rocket", "chaser", "target") if key in root}
-    has_objects_section = "objects" in root
-    rocket = _parse_agent_section(root.get("rocket"), role="rocket", object_id="rocket", default_kind="rocket")
-    chaser = _parse_agent_section(root.get("chaser"), role="chaser", object_id="chaser", default_kind="satellite")
-    target = _parse_agent_section(
-        root.get("target"),
-        role="target",
-        object_id="target",
-        default_kind="satellite",
-        default_enabled=(False if has_objects_section and "target" not in legacy_keys_present else None),
+    analysis = _parse_analysis_section(root.get("analysis"))
+    normalized_mc = _monte_carlo_from_analysis(analysis)
+    objects = _parse_objects_section(root.get("objects"))
+    rocket = objects.get("rocket", _parse_agent_section(None, role="rocket", object_id="rocket", default_kind="rocket"))
+    chaser = objects.get("chaser", _parse_agent_section(None, role="chaser", object_id="chaser", default_kind="satellite"))
+    target = objects.get(
+        "target",
+        _parse_agent_section(
+            None,
+            role="target",
+            object_id="target",
+            default_kind="satellite",
+            default_enabled=False if objects else None,
+        ),
     )
-    legacy_agents = {"rocket": rocket, "chaser": chaser, "target": target}
-    objects = _parse_objects_section(
-        root.get("objects"),
-        legacy_agents=legacy_agents,
-        has_objects_section=has_objects_section,
-        legacy_keys_present=legacy_keys_present,
-    )
+    if not objects and target.enabled:
+        objects = {"target": target}
     rocket = objects.get("rocket", rocket)
     chaser = objects.get("chaser", chaser)
     target = objects.get("target", target)
@@ -2011,7 +1934,7 @@ def scenario_config_from_dict(
         simulator=_parse_simulator_section(root.get("simulator")),
         outputs=_parse_outputs_section(root.get("outputs"), path_policy=path_policy),
         monte_carlo=normalized_mc,
-        analysis=normalized_analysis,
+        analysis=analysis,
         metadata=dict(root.get("metadata", {}) or {}),
     )
     for object_id, section in dict(cfg.objects or {}).items():

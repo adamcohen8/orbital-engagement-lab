@@ -1,47 +1,67 @@
-scenario_name: "controller_wheel_desaturation_smoke"
-scenario_description: "Local smoke scenario for the public WheelDesaturationController."
-
-rocket:
-  enabled: false
-
-chaser:
-  enabled: false
-
-target:
-  enabled: true
-  specs:
-    mass_kg: 120.0
-    mass_properties:
-      inertia_kg_m2:
-        - [12.0, 0.0, 0.0]
-        - [0.0, 10.0, 0.0]
-        - [0.0, 0.0, 8.0]
-    actuators:
-      enabled: true
-      attitude:
-        magnetorquers:
-          max_dipole_a_m2: [20.0, 20.0, 20.0]
-  initial_state:
-    position_eci_km: [7000.0, 0.0, 0.0]
-    velocity_eci_km_s: [0.0, 7.5, 0.0]
-    attitude_quat_bn: [1.0, 0.0, 0.0, 0.0]
-    angular_rate_body_rad_s: [0.0, 0.0, 0.0]
-  attitude_control:
-    kind: "python"
-    module: "sim.control.attitude.wheel_desaturation"
-    class_name: "WheelDesaturationController"
-    params:
-      wheel_momentum_body_nms: [0.5, 0.0, 0.0]
-      momentum_threshold_nms: 0.1
-      unload_gain_s_inv: 0.1
-      max_unload_torque_nm: 0.01
-
+scenario_name: controller_wheel_desaturation_smoke
+scenario_description: Local smoke scenario for the public WheelDesaturationController.
+objects:
+  target:
+    enabled: true
+    specs:
+      mass_kg: 120.0
+      mass_properties:
+        inertia_kg_m2:
+        - - 12.0
+          - 0.0
+          - 0.0
+        - - 0.0
+          - 10.0
+          - 0.0
+        - - 0.0
+          - 0.0
+          - 8.0
+      actuators:
+        enabled: true
+        attitude:
+          magnetorquers:
+            max_dipole_a_m2:
+            - 20.0
+            - 20.0
+            - 20.0
+    initial_state:
+      position_eci_km:
+      - 7000.0
+      - 0.0
+      - 0.0
+      velocity_eci_km_s:
+      - 0.0
+      - 7.5
+      - 0.0
+      attitude_quat_bn:
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      angular_rate_body_rad_s:
+      - 0.0
+      - 0.0
+      - 0.0
+    attitude_control:
+      kind: python
+      module: sim.control.attitude.wheel_desaturation
+      class_name: WheelDesaturationController
+      params:
+        wheel_momentum_body_nms:
+        - 0.5
+        - 0.0
+        - 0.0
+        momentum_threshold_nms: 0.1
+        unload_gain_s_inv: 0.1
+        max_unload_torque_nm: 0.01
+    role: target
+    kind: satellite
 simulator:
   duration_s: 5.0
   dt_s: 1.0
   dynamics:
     orbit:
-      model: "two_body"
+      model: two_body
       orbit_substep_s: 1.0
     attitude:
       enabled: true
@@ -55,10 +75,9 @@ simulator:
     strict: true
   termination:
     earth_impact_enabled: false
-
 outputs:
-  output_dir: "outputs/controller_smokes/wheel_desaturation"
-  mode: "save"
+  output_dir: outputs/controller_smokes/wheel_desaturation
+  mode: save
   stats:
     print_summary: false
     save_json: true

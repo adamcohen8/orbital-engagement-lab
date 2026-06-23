@@ -66,7 +66,6 @@ class TestRocketNavigation(unittest.TestCase):
                     }
                 },
                 "simulator": {
-                    "scenario_type": "rocket_ascent",
                     "duration_s": 3.0,
                     "dt_s": 1.0,
                     "dynamics": {
@@ -82,7 +81,6 @@ class TestRocketNavigation(unittest.TestCase):
                     "plots": {"enabled": False},
                     "animations": {"enabled": False},
                 },
-                "monte_carlo": {"enabled": False},
             }
         )
 

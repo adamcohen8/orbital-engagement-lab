@@ -1,7 +1,8 @@
 scenario_name: orbital_elements_stationkeep_raise_sma_circularize
 metadata:
   owner: validation
-  notes: Inspect COE stationkeeping while raising semi-major axis and circularizing one satellite from apogee.
+  notes: Inspect COE stationkeeping while raising semi-major axis and circularizing
+    one satellite from apogee.
 objects:
   rocket:
     enabled: false
@@ -45,9 +46,9 @@ objects:
       params:
         target_a_km: 7000.0
         target_ecc: 0.0
-        energy_gain_per_s: 1.0e-3
-        eccentricity_gain_per_s: 5.0e-4
-        max_accel_km_s2: 5.0e-5
+        energy_gain_per_s: 0.001
+        eccentricity_gain_per_s: 0.0005
+        max_accel_km_s2: 5.0e-05
     attitude_control:
       kind: python
       module: sim.control.attitude.baseline
@@ -71,7 +72,6 @@ objects:
         alignment_tolerance_deg: 180.0
     mission_objectives: []
 simulator:
-  scenario_type: auto
   duration_s: 18000.0
   dt_s: 1.0
   dynamics:

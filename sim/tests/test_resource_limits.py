@@ -20,16 +20,16 @@ from sim.resource_limits import (
 def _single_target_config(output_dir: Path, *, duration_s: float = 1000.0) -> dict:
     return {
         "scenario_name": "memory_guard_test",
-        "rocket": {"enabled": False},
-        "target": {
-            "enabled": True,
-            "specs": {"mass_kg": 100.0},
-            "initial_state": {
-                "position_eci_km": [7000.0, 0.0, 0.0],
-                "velocity_eci_km_s": [0.0, 7.5, 0.0],
+        "objects": {
+            "target": {
+                "enabled": True,
+                "specs": {"mass_kg": 100.0},
+                "initial_state": {
+                    "position_eci_km": [7000.0, 0.0, 0.0],
+                    "velocity_eci_km_s": [0.0, 7.5, 0.0],
+                },
             },
         },
-        "chaser": {"enabled": False},
         "simulator": {
             "duration_s": duration_s,
             "dt_s": 1.0,
@@ -83,19 +83,18 @@ def test_history_memory_guard_allows_run_under_budget(tmp_path: Path) -> None:
 
 def test_laptop_safe_profile_rewrites_batch_config(tmp_path: Path) -> None:
     root = _single_target_config(tmp_path / "mc", duration_s=10.0)
-    root["monte_carlo"] = {
+    root["analysis"] = {
         "enabled": True,
-        "iterations": 4,
-        "parallel_enabled": True,
-        "parallel_workers": 8,
-        "variations": [],
+        "study_type": "monte_carlo",
+        "execution": {"parallel_enabled": True, "parallel_workers": 8},
+        "monte_carlo": {"iterations": 4, "variations": []},
     }
     root["outputs"]["plots"] = {"enabled": True}
 
     profiled = apply_resource_profile_to_config_dict(root, "laptop-safe")
 
-    assert profiled["monte_carlo"]["parallel_enabled"] is False
-    assert profiled["monte_carlo"]["parallel_workers"] == 1
+    assert profiled["analysis"]["execution"]["parallel_enabled"] is False
+    assert profiled["analysis"]["execution"]["parallel_workers"] == 1
     assert profiled["outputs"]["plots"]["enabled"] is False
     assert profiled["outputs"]["monte_carlo"]["checkpoint_enabled"] is True
     assert profiled["simulator"]["resource_profile"] == "laptop-safe"
@@ -103,12 +102,11 @@ def test_laptop_safe_profile_rewrites_batch_config(tmp_path: Path) -> None:
 
 def test_resource_estimate_reports_effective_batch_shape(tmp_path: Path) -> None:
     root = _single_target_config(tmp_path / "mc", duration_s=12.0)
-    root["monte_carlo"] = {
+    root["analysis"] = {
         "enabled": True,
-        "iterations": 3,
-        "parallel_enabled": True,
-        "parallel_workers": 2,
-        "variations": [],
+        "study_type": "monte_carlo",
+        "execution": {"parallel_enabled": True, "parallel_workers": 2},
+        "monte_carlo": {"iterations": 3, "variations": []},
     }
     cfg = scenario_config_from_dict(root)
 
@@ -129,8 +127,8 @@ def test_resource_estimate_reports_sensitivity_shape(tmp_path: Path) -> None:
         "sensitivity": {
             "method": "two_parameter_grid",
             "parameters": [
-                {"parameter_path": "target.specs.mass_kg", "values": [90.0, 100.0]},
-                {"parameter_path": "target.specs.drag_area_m2", "values": [0.8, 1.0, 1.2]},
+                {"parameter_path": "objects.target.specs.mass_kg", "values": [90.0, 100.0]},
+                {"parameter_path": "objects.target.specs.drag_area_m2", "values": [0.8, 1.0, 1.2]},
             ],
         },
     }

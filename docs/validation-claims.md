@@ -14,6 +14,10 @@ The public repository supports these claims:
   estimation, and control examples are covered by unit and regression tests.
 - Curated public scenarios produce reproducible JSON, CSV, Markdown, and PNG
   artifacts when run in a supported local Python environment.
+- The public model-reference docs describe the configured physics equations,
+  assumptions, implementation locations, evidence hooks, and limitations needed
+  to interpret validation results; see
+  [Physics Model Reference](physics-models.md).
 - The flagship RIC_PD 10 km scenario demonstrates a closed-loop RPO workflow
   with tuned public controller gains and attitude-gated thrust application under
   the assumptions written in `configs/ric_pd_10km_experiment.yaml`.
@@ -23,6 +27,11 @@ The public repository supports these claims:
   manifests live in the Pro/private workspace.
 - The public payload and artifact surfaces are documented in the engine,
   scenario YAML, and payload contracts.
+- Selected external-reference validation evidence should be public when the
+  reference material, commands, tolerances, and artifacts are redistributable.
+  HPOP/MATLAB orbit comparisons and Basilisk attitude dynamics/actuator
+  comparisons are the strongest trust signals for OEL, but they support only
+  the specific tested cases and not general mission-assurance claims.
 
 ## Explicit Non-Claims
 
@@ -57,10 +66,16 @@ Review:
 For the focused validation claim and gates, see
 [RIC_PD 10 km Validation Package](validation-ric-pd-10km.md).
 
-Private validation harnesses, HPOP comparison workflows, and evidence manifests
-exist in the Pro/private workspace. Those artifacts are useful for engineering
-review, but they still require independent interpretation, traceability, and
-mission-envelope qualification before they can support decision-grade use.
+Some external-reference harnesses, HPOP comparison workflows, Basilisk attitude
+reference sweeps, and evidence manifests currently exist in the Pro/private
+workspace. Public-safe slices of that evidence should be promoted into the
+public trust baseline as they are redacted, reproduced, and tied to bounded
+claims. Larger automation, private release evidence, proprietary reference
+data, and customer-specific validation packages remain Pro/private.
+
+Model-reference pages are part of that traceability chain. They document what
+equations and assumptions a validation result exercised, but they do not replace
+tests, external-reference comparisons, or scenario-specific evidence.
 
 ## User Responsibility
 

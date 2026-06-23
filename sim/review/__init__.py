@@ -16,6 +16,7 @@ from sim.review.plotting import (
     save_review_plot,
 )
 from sim.review.queries import (
+    SAVED_QUERY_MATURITY_LEVELS,
     SAVED_REVIEW_QUERIES,
     SavedReviewQuery,
     get_saved_review_query,
@@ -34,6 +35,7 @@ __all__ = [
     "ReviewStoreNotFoundError",
     "ReviewWorkspace",
     "SAVED_REVIEW_QUERIES",
+    "SAVED_QUERY_MATURITY_LEVELS",
     "WORKFLOW_REVIEW_SCHEMA_VERSION",
     "EVIDENCE_PLOT_RECIPES",
     "EvidencePlotRecipe",

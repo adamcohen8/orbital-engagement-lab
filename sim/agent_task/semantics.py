@@ -104,3 +104,27 @@ def semantic_metric_dicts(names: list[str] | tuple[str, ...]) -> list[dict[str, 
         seen.add(metric.name)
         out.append(metric.to_dict())
     return out
+
+
+def semantic_metric_request_rows(names: list[str] | tuple[str, ...]) -> list[dict[str, object]]:
+    out: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for raw_name in names:
+        name = str(raw_name or "").strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        metric = get_semantic_metric(name)
+        row: dict[str, object] = {"name": name, "known": metric is not None}
+        if metric is not None:
+            row.update(
+                {
+                    "maturity": metric.maturity,
+                    "source_tables": list(metric.source_tables),
+                    "saved_query": metric.saved_query,
+                }
+            )
+        else:
+            row["reason"] = "unknown_semantic_metric"
+        out.append(row)
+    return out

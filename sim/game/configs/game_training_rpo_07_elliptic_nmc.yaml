@@ -1,6 +1,6 @@
 scenario_name: game_training_rpo_07_elliptic_nmc
-scenario_description: RPO trainer scenario for entering a natural-motion
-  circumnavigation about an eccentric-orbit target.
+scenario_description: RPO trainer scenario for entering a natural-motion circumnavigation
+  about an eccentric-orbit target.
 metadata:
   owner: codex
   notes: Run with `python run_game.py sim/game/configs/game_training_rpo_07_elliptic_nmc.yaml
@@ -22,14 +22,13 @@ metadata:
     training:
       enabled: true
       scenario_id: rpo_07_elliptic_nmc
-      learning_goal: Enter a bounded natural-motion circumnavigation around an
-        eccentric-orbit target and compare its changing local dynamics with the
-        circular-orbit NMT from Level 1.
-      player_brief: Shape the red trajectory into the green natural-motion
-        circumnavigation. Use the elliptical dashed coast projection to choose
-        burn timing; the target's orbital rate is changing, so do not force the
-        circular-orbit rhythm. Make the cross-track burn near the top or bottom
-        of the RI ellipse.
+      learning_goal: Enter a bounded natural-motion circumnavigation around an eccentric-orbit
+        target and compare its changing local dynamics with the circular-orbit NMT
+        from Level 1.
+      player_brief: Shape the red trajectory into the green natural-motion circumnavigation.
+        Use the elliptical dashed coast projection to choose burn timing; the target's
+        orbital rate is changing, so do not force the circular-orbit rhythm. Make
+        the cross-track burn near the top or bottom of the RI ellipse.
       pass_criteria:
       - Match the target radial and cross-track NMC amplitudes within tolerance.
       - Make the cross-track burn near the top or bottom of the RI ellipse.
@@ -37,12 +36,11 @@ metadata:
       - Do not enter keepout.
       - Stay under the time and delta-v budgets.
       instructor_notes:
-      - This level is the eccentric-orbit companion to Level 1's circular NMT
-        objective.
-      - The green curve is still drawn as a local target-centered natural-motion
-        shape, but the dashed coast predictor uses the elliptical model.
-      - Ask students to explain why the same burn geometry does not feel
-        identical near different true anomalies.
+      - This level is the eccentric-orbit companion to Level 1's circular NMT objective.
+      - The green curve is still drawn as a local target-centered natural-motion shape,
+        but the dashed coast predictor uses the elliptical model.
+      - Ask students to explain why the same burn geometry does not feel identical
+        near different true anomalies.
       target_object_id: target
       chaser_object_id: chaser
       keepout_radius_km: 0.25
@@ -182,7 +180,6 @@ objects:
         type: ekf
     kind: satellite
 simulator:
-  scenario_type: auto
   duration_s: 10800.0
   dt_s: 1.0
   dynamics:
@@ -239,7 +236,3 @@ outputs:
     fps: 30
     speed_multiple: 1.0
     frame_stride: 1
-monte_carlo:
-  enabled: false
-  iterations: 1
-  base_seed: 123

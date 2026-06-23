@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 import subprocess
@@ -13,11 +14,19 @@ from sim import ReviewWorkspace as TopLevelReviewWorkspace
 from sim import SimulationConfig, SimulationSession
 from sim.config import scenario_config_from_dict
 from sim.execution import run_simulation_config_file
+from sim.reporting.review_store import (
+    REVIEW_SCHEMA_COMPATIBILITY_POLICY,
+    REVIEW_SCHEMA_STABLE_TABLES,
+    REVIEW_SCHEMA_VERSION,
+)
 from sim.review import (
+    SAVED_QUERY_MATURITY_LEVELS,
+    SAVED_REVIEW_QUERIES,
     EvidencePlotter,
     ReviewPlotSpec,
     ReviewQueryError,
     ReviewWorkspace,
+    SavedReviewQuery,
     load_workflow_manifest,
     numeric_columns,
     save_review_plot,
@@ -32,25 +41,26 @@ def _review_store_config(output_dir: Path) -> dict:
     return {
         "scenario_name": "review_store_smoke",
         "scenario_description": "Review store smoke test",
-        "rocket": {"enabled": False},
-        "target": {
-            "enabled": True,
-            "specs": {"mass_kg": 100.0},
-            "initial_state": {
-                "position_eci_km": [7000.0, 0.0, 0.0],
-                "velocity_eci_km_s": [0.0, 7.5, 0.0],
+        "objects": {
+            "target": {
+                "enabled": True,
+                "specs": {"mass_kg": 100.0},
+                "initial_state": {
+                    "position_eci_km": [7000.0, 0.0, 0.0],
+                    "velocity_eci_km_s": [0.0, 7.5, 0.0],
+                },
             },
-        },
-        "chaser": {
-            "enabled": True,
-            "specs": {"mass_kg": 100.0},
-            "initial_state": {
-                "relative_to": "target",
-                "relative_ric_rect": [1.0, 0.0, 0.0, -0.001, 0.0, 0.0],
-            },
-            "orbit_control": {
-                "module": "sim.control.orbit.zero_controller",
-                "class_name": "ZeroController",
+            "chaser": {
+                "enabled": True,
+                "specs": {"mass_kg": 100.0},
+                "initial_state": {
+                    "relative_to": "target",
+                    "relative_ric_rect": [1.0, 0.0, 0.0, -0.001, 0.0, 0.0],
+                },
+                "orbit_control": {
+                    "module": "sim.control.orbit.zero_controller",
+                    "class_name": "ZeroController",
+                },
             },
         },
         "simulator": {
@@ -71,7 +81,6 @@ def _review_store_config(output_dir: Path) -> dict:
             "animations": {"enabled": False, "types": []},
             "review": {"enabled": True, "detail": "standard"},
         },
-        "monte_carlo": {"enabled": False},
     }
 
 
@@ -85,10 +94,23 @@ def test_single_run_review_store_writes_queryable_sqlite(tmp_path: Path) -> None
     assert db_path.is_file()
     assert schema_path.is_file()
     assert db_path.parent == tmp_path / "review"
-    assert json.loads(schema_path.read_text(encoding="utf-8"))["schema_version"] == "0.4"
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    assert schema["schema_version"] == REVIEW_SCHEMA_VERSION
+    assert schema["compatibility"]["policy"] == REVIEW_SCHEMA_COMPATIBILITY_POLICY
+    assert schema["compatibility"]["breaking_change_requires_schema_version_bump"] is True
+    assert tuple(schema["compatibility"]["stable_tables"]) == REVIEW_SCHEMA_STABLE_TABLES
+    assert set(REVIEW_SCHEMA_STABLE_TABLES).issubset(schema["tables"])
 
     with sqlite3.connect(db_path) as conn:
-        scenario_name = conn.execute("SELECT scenario_name FROM run_metadata").fetchone()[0]
+        scenario_name, config_sha256, config_json = conn.execute(
+            "SELECT scenario_name, config_sha256, config_json FROM run_metadata"
+        ).fetchone()
+        table_names = {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+            )
+        }
         object_count = conn.execute("SELECT COUNT(*) FROM objects").fetchone()[0]
         sample_count = conn.execute("SELECT COUNT(*) FROM time_samples").fetchone()[0]
         state_count = conn.execute("SELECT COUNT(*) FROM object_state").fetchone()[0]
@@ -97,6 +119,9 @@ def test_single_run_review_store_writes_queryable_sqlite(tmp_path: Path) -> None
         artifact_paths = [row[0] for row in conn.execute("SELECT path FROM artifacts ORDER BY artifact_id")]
 
     assert scenario_name == "review_store_smoke"
+    assert set(REVIEW_SCHEMA_STABLE_TABLES).issubset(table_names)
+    assert config_sha256 == hashlib.sha256(config_json.encode("utf-8")).hexdigest()
+    assert json.loads(config_json)["objects"]["target"]["enabled"] is True
     assert object_count == 2
     assert sample_count == 3
     assert state_count == 6
@@ -106,12 +131,53 @@ def test_single_run_review_store_writes_queryable_sqlite(tmp_path: Path) -> None
     assert "master_run_log.json" in artifact_paths
 
 
+def test_saved_review_queries_have_machine_readable_contract() -> None:
+    assert SAVED_REVIEW_QUERIES
+    for key, query in SAVED_REVIEW_QUERIES.items():
+        assert key == query.name
+        assert query.description
+        assert query.sql.lstrip().upper().startswith(("SELECT", "WITH"))
+        assert query.source_tables, key
+        assert query.maturity in SAVED_QUERY_MATURITY_LEVELS
+
+    assert SAVED_REVIEW_QUERIES["burn_events"].allow_empty is True
+    try:
+        SavedReviewQuery(name="bad", description="bad", sql="DELETE FROM metrics")
+    except ValueError as exc:
+        assert "read-only SELECT/WITH" in str(exc)
+    else:  # pragma: no cover - defensive assertion branch
+        raise AssertionError("SavedReviewQuery accepted mutating SQL")
+
+
+def test_saved_review_query_source_tables_match_review_schema(tmp_path: Path) -> None:
+    SimulationSession.from_config(SimulationConfig.from_dict(_review_store_config(tmp_path))).run()
+    workspace = ReviewWorkspace.open(tmp_path)
+    available_tables = set(workspace.tables())
+    single_run_queries = [
+        "run_metadata",
+        "objects",
+        "artifacts",
+        "passive_final_state",
+        "rendezvous_metrics",
+        "rendezvous_closest_approach",
+        "relative_final_state",
+        "burn_activity",
+        "burn_events",
+        "attitude_rates_first_last",
+        "attitude_state_first_last",
+    ]
+
+    for query_name in single_run_queries:
+        query = SAVED_REVIEW_QUERIES[query_name]
+        assert set(query.source_tables).issubset(available_tables), query_name
+
+
 def test_review_store_writes_object_propagation_metadata_for_sgp4(tmp_path: Path) -> None:
     raw = _review_store_config(tmp_path)
-    raw["chaser"]["enabled"] = False
-    raw["target"]["propagation_method"] = "general"
-    raw["target"]["general"] = {"model": "sgp4", "output_frame": "eci", "frame_transform": "teme_as_eci"}
-    raw["target"]["initial_state"] = {"tle": {"line1": ISS_LINE1, "line2": ISS_LINE2}}
+    raw["objects"]["chaser"]["enabled"] = False
+    raw["objects"]["target"]["propagation_method"] = "general"
+    raw["objects"]["target"]["general"] = {"model": "sgp4", "output_frame": "eci", "frame_transform": "teme_as_eci"}
+    raw["objects"]["target"]["initial_state"] = {"tle": {"line1": ISS_LINE1, "line2": ISS_LINE2}}
     raw["simulator"]["initial_jd_utc"] = 2460310.5
     result = SimulationSession.from_config(SimulationConfig.from_dict(raw)).run()
 
@@ -125,6 +191,29 @@ def test_review_store_writes_object_propagation_metadata_for_sgp4(tmp_path: Path
         ).fetchone()
 
     assert row == ("target", "general", "sgp4", "teme", "eci", "teme_as_eci")
+
+
+def test_review_store_records_native_teme_state_frame_for_sgp4(tmp_path: Path) -> None:
+    raw = _review_store_config(tmp_path)
+    raw["objects"]["chaser"]["enabled"] = False
+    raw["objects"]["target"]["propagation_method"] = "general"
+    raw["objects"]["target"]["general"] = {"model": "sgp4", "output_frame": "teme"}
+    raw["objects"]["target"]["initial_state"] = {"tle": {"line1": ISS_LINE1, "line2": ISS_LINE2}}
+    raw["simulator"]["initial_jd_utc"] = 2460310.5
+    result = SimulationSession.from_config(SimulationConfig.from_dict(raw)).run()
+
+    assert result.payload["object_state_frames"]["target"] == "teme"
+    db_path = Path(dict(result.summary.get("review_outputs", {}) or {})["sqlite"])
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT p.output_frame, p.frame_transform, f.state_frame
+            FROM object_propagation p
+            JOIN object_state_frame f USING (object_id)
+            """
+        ).fetchone()
+
+    assert row == ("teme", "native", "teme")
 
 
 def test_review_store_config_defaults_disabled_and_validates_detail(tmp_path: Path) -> None:
@@ -142,7 +231,7 @@ def test_review_store_config_defaults_disabled_and_validates_detail(tmp_path: Pa
 
 def test_review_store_writes_mission_recovery_tables(tmp_path: Path) -> None:
     raw = _review_store_config(tmp_path)
-    raw["target"]["specs"]["isp_s"] = 220.0
+    raw["objects"]["target"]["specs"]["isp_s"] = 220.0
     raw["analysis"] = {
         "mission_recovery": {
             "enabled": True,

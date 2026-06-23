@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from copy import deepcopy
 from dataclasses import replace
@@ -2293,6 +2294,57 @@ def test_pursuit_arcade_boss_round_music_and_bonuses() -> None:
         round_index=5,
         arcade_config=config,
     ) == 124000
+
+
+def test_web_pursuit_arcade_default_record_matches_desktop_scoring_policy() -> None:
+    root = Path(__file__).resolve().parents[2]
+    config = SimulationConfig.from_yaml(root / "sim" / "game" / "configs" / "game_training_rpo_arcade_pursuit.yaml")
+    web_record = json.loads(
+        (root / "web" / "rpo-trainer-preview" / "fixtures" / "default-challenge-record.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    desktop_arcade = config.scenario.metadata["game"]["arcade"]
+    web_arcade = web_record["config"]["arcade"]
+    desktop_boss = desktop_arcade["boss"]
+    web_boss = web_arcade["boss"]
+
+    assert web_record["challenge_id"] == "rpo_arcade_pursuit"
+    assert web_arcade["initial_time_s"] == pytest.approx(desktop_arcade["initial_time_s"])
+    assert web_arcade["delta_v_bonus_time_per_m_s"] == pytest.approx(desktop_arcade["delta_v_bonus_time_per_m_s"])
+    assert web_arcade["goal_range_step_km"] == pytest.approx(desktop_arcade["goal_range_step_km"])
+    assert web_arcade["min_goal_range_km"] == pytest.approx(desktop_arcade["min_goal_range_km"])
+    assert web_arcade["boss_round_interval"] == desktop_arcade["boss_round_interval"]
+    assert web_boss["bonus_time_s"] == pytest.approx(desktop_boss["bonus_time_s"])
+    assert web_boss["score_multiplier"] == pytest.approx(desktop_boss["score_multiplier"])
+    assert web_boss["coast_prediction_model"] == desktop_boss["coast_prediction_model"]
+    assert web_boss["music_track"] == desktop_boss["music_track"]
+    assert web_boss["target_coes"] == desktop_boss["target_coes"]
+
+
+def test_web_preview_assets_byte_match_source_game_assets() -> None:
+    root = Path(__file__).resolve().parents[2]
+    source_asset_dir = root / "sim" / "game" / "assets"
+    web_sprite_dir = root / "web" / "rpo-trainer-preview" / "assets" / "sprites"
+
+    if web_sprite_dir.exists():
+        sprite_assets = sorted(web_sprite_dir.iterdir())
+    else:
+        sprite_assets = []
+    for web_asset in sprite_assets:
+        if not web_asset.is_file():
+            continue
+        source_asset = source_asset_dir / web_asset.name
+        assert source_asset.is_file(), web_asset.name
+        assert web_asset.read_bytes() == source_asset.read_bytes(), web_asset.name
+
+    source_music_dir = root / "sim" / "game" / "music"
+    web_music_dir = root / "web" / "rpo-trainer-preview" / "assets"
+    for web_music in sorted(web_music_dir.glob("*.wav")):
+        source_music = source_music_dir / web_music.name
+        assert source_music.is_file(), web_music.name
+        assert web_music.read_bytes() == source_music.read_bytes(), web_music.name
 
 
 def test_pursuit_arcade_keeps_round_one_initial_state() -> None:

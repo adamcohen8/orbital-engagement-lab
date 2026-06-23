@@ -1,11 +1,10 @@
 scenario_name: rmoe_if_then_nmc_demo
-scenario_description: Rule-based RMOE controller demo that arrests in-track
-  drift near a passive target and builds cross-track NMC amplitude for passive
-  safety.
+scenario_description: Rule-based RMOE controller demo that arrests in-track drift
+  near a passive target and builds cross-track NMC amplitude for passive safety.
 metadata:
   owner: codex
-  notes: Demonstrates RMOEIfThenController close-zone drift arrest and C=0
-    cross-track amplitude burns under two-body dynamics.
+  notes: Demonstrates RMOEIfThenController close-zone drift arrest and C=0 cross-track
+    amplitude burns under two-body dynamics.
 objects:
   rocket:
     enabled: false
@@ -102,7 +101,6 @@ objects:
       params: {}
     kind: satellite
 simulator:
-  scenario_type: auto
   duration_s: 24000.0
   dt_s: 1.0
   dynamics:

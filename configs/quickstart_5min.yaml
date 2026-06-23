@@ -203,7 +203,6 @@ objects:
         type: ekf
     kind: satellite
 simulator:
-  scenario_type: auto
   duration_s: 180.0
   dt_s: 5.0
   dynamics:

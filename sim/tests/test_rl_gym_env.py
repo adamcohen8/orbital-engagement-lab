@@ -34,33 +34,34 @@ from sim.config import MonteCarloVariation
 def _base_scenario() -> dict:
     return {
         "scenario_name": "rl_gym_env_test",
-        "rocket": {"enabled": False},
-        "target": {
-            "enabled": True,
-            "specs": {"mass_kg": 100.0},
-            "initial_state": {
-                "position_eci_km": [7000.0, 0.0, 0.0],
-                "velocity_eci_km_s": [0.0, 7.5, 0.0],
+        "objects": {
+            "target": {
+                "enabled": True,
+                "specs": {"mass_kg": 100.0},
+                "initial_state": {
+                    "position_eci_km": [7000.0, 0.0, 0.0],
+                    "velocity_eci_km_s": [0.0, 7.5, 0.0],
+                },
             },
-        },
-        "chaser": {
-            "enabled": True,
-            "specs": {"mass_kg": 100.0},
-            "initial_state": {
-                "relative_to_target_ric": {"frame": "rect", "state": [1.0, -2.0, 0.0, 0.0, 0.0, 0.0]},
-                "attitude_quat_bn": [1.0, 0.0, 0.0, 0.0],
-            },
-            "mission_execution": {
-                "module": "sim.mission.modules",
-                "class_name": "ControllerPointingExecution",
-                "params": {"alignment_tolerance_deg": 180.0},
-            },
-            "attitude_control": {
-                "module": "sim.control.attitude.baseline",
-                "class_name": "ReactionWheelPDController",
-                "params": {
-                    "kp": [0.1, 0.1, 0.1],
-                    "kd": [0.2, 0.2, 0.2],
+            "chaser": {
+                "enabled": True,
+                "specs": {"mass_kg": 100.0},
+                "initial_state": {
+                    "relative_to_target_ric": {"frame": "rect", "state": [1.0, -2.0, 0.0, 0.0, 0.0, 0.0]},
+                    "attitude_quat_bn": [1.0, 0.0, 0.0, 0.0],
+                },
+                "mission_execution": {
+                    "module": "sim.mission.modules",
+                    "class_name": "ControllerPointingExecution",
+                    "params": {"alignment_tolerance_deg": 180.0},
+                },
+                "attitude_control": {
+                    "module": "sim.control.attitude.baseline",
+                    "class_name": "ReactionWheelPDController",
+                    "params": {
+                        "kp": [0.1, 0.1, 0.1],
+                        "kd": [0.2, 0.2, 0.2],
+                    },
                 },
             },
         },
@@ -129,7 +130,7 @@ class TestGymSimulationEnv(unittest.TestCase):
                 action_fields=(),
                 episode_variations=(
                     MonteCarloVariation(
-                        parameter_path="chaser.initial_state.relative_to_target_ric.state[0]",
+                        parameter_path="objects.chaser.initial_state.relative_to_target_ric.state[0]",
                         mode="choice",
                         options=[0.5],
                     ),
@@ -138,11 +139,11 @@ class TestGymSimulationEnv(unittest.TestCase):
         )
         _, info = env.reset(seed=4)
         sampled = dict(info["sampled_parameters"])
-        self.assertEqual(sampled["chaser.initial_state.relative_to_target_ric.state[0]"], 0.5)
+        self.assertEqual(sampled["objects.chaser.initial_state.relative_to_target_ric.state[0]"], 0.5)
 
     def test_knowledge_observation_fields_use_schema_defaults_before_track_exists(self):
         scenario = _base_scenario()
-        scenario["chaser"]["knowledge"] = {"targets": ["target"]}
+        scenario["objects"]["chaser"]["knowledge"] = {"targets": ["target"]}
         env = GymSimulationEnv(
             GymEnvConfig(
                 scenario=scenario,
@@ -200,7 +201,7 @@ class TestGymSimulationEnv(unittest.TestCase):
 
     def test_invalid_observation_path_for_disabled_agent_fails_fast(self):
         scenario = _base_scenario()
-        scenario["target"]["enabled"] = False
+        scenario["objects"]["target"]["enabled"] = False
 
         with self.assertRaisesRegex(ValueError, "truth.target.position_eci_km"):
             GymSimulationEnv(

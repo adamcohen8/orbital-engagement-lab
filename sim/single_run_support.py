@@ -901,7 +901,13 @@ class _TerminationMonitor:
                 e.rocket_insertion_time_s = float(t_s)
         else:
             e.rocket_insertion_hold_s = 0.0
-        if e.rocket_inserted and str(e.cfg.simulator.scenario_type).strip().lower() == "rocket_ascent":
+        has_rocket_inserted_satellite = any(
+            bool(getattr(agent_cfg, "enabled", False))
+            and str(dict(getattr(agent_cfg, "initial_state", {}) or {}).get("source", "") or "").strip().lower()
+            == "rocket_insertion"
+            for agent_cfg in getattr(e.cfg, "objects", {}).values()
+        )
+        if e.rocket_inserted and not has_rocket_inserted_satellite:
             e.terminated_early = True
             e.termination_reason = "rocket_orbit_insertion"
             e.termination_time_s = float(e.rocket_insertion_time_s if e.rocket_insertion_time_s is not None else t_s)

@@ -230,9 +230,14 @@ def build_single_run_payload(context: SingleRunPayloadContext) -> dict[str, Any]
             "max_aero_moment_nm": _max_finite("aero_moment_nm"),
         }
         summary["rocket_metrics_summary"] = rocket_summary
+    object_state_frames = {
+        str(object_id): str(dict(context.object_propagation.get(object_id, {}) or {}).get("output_frame", "eci") or "eci")
+        for object_id in context.object_ids
+    }
     return {
         "summary": summary,
         "time_s": context.t_s.tolist(),
+        "object_state_frames": object_state_frames,
         "truth_by_object": {k: v.tolist() for k, v in context.truth_hist.items()},
         "target_reference_orbit_truth": (
             [] if context.target_reference_orbit_truth is None else context.target_reference_orbit_truth.tolist()

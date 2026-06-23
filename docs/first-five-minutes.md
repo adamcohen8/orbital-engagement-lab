@@ -26,8 +26,8 @@ The commands below use `.venv/bin/python` so they work even on systems where
 .venv/bin/python run_simulation.py --doctor
 ```
 
-`WARN` entries for plotting, experimental GUI, or game dependencies are okay
-for the first run. Fix any `FAIL` entries before continuing.
+`WARN` entries for plotting or game dependencies are okay for the first run.
+Fix any `FAIL` entries before continuing.
 
 ## 3. Run The Quickstart
 
@@ -85,6 +85,4 @@ For a shorter plotting demo:
 ```
 
 For output inspection, prefer the generated `index.md`, JSON artifacts, plots,
-and review-store CLI when a run enables `outputs.review.enabled: true`. The
-desktop GUI and OEL Evidence Studio viewer/workbench are experimental desktop
-surfaces, not the first-five-minute path.
+and review-store CLI when a run enables `outputs.review.enabled: true`.

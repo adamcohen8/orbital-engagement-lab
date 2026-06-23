@@ -162,7 +162,6 @@ objects:
         type: ekf
     kind: satellite
 simulator:
-  scenario_type: auto
   duration_s: 14400.0
   dt_s: 1.0
   dynamics:
@@ -219,7 +218,3 @@ outputs:
     fps: 30
     speed_multiple: 1.0
     frame_stride: 1
-monte_carlo:
-  enabled: false
-  iterations: 1
-  base_seed: 123

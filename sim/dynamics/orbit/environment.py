@@ -8,7 +8,9 @@ EARTH_J3 = -2.53215306e-6
 EARTH_J4 = -1.61098761e-6
 EARTH_ROT_RATE_RAD_S = 7.2921159e-5
 SUN_MU_KM3_S2 = 132712440041.279419
-SOLAR_PRESSURE_N_M2 = 4.56e-6
+SPEED_OF_LIGHT_M_S = 299792458.0
+SOLAR_IRRADIANCE_W_M2 = 1361.0
+SOLAR_PRESSURE_N_M2 = SOLAR_IRRADIANCE_W_M2 / SPEED_OF_LIGHT_M_S
 SUN_RADIUS_KM = 695700.0
 
 # Planetary gravitational parameters (km^3/s^2), matched to HPOP SAT_Const.m.
@@ -21,3 +23,14 @@ SATURN_MU_KM3_S2 = 37940584.8418
 URANUS_MU_KM3_S2 = 5794556.4
 NEPTUNE_MU_KM3_S2 = 6836527.10058
 PLUTO_MU_KM3_S2 = 975.5
+
+
+def srp_pressure_n_m2(env: dict | None = None) -> float:
+    """Return SRP pressure at 1 AU, allowing validation-specific overrides."""
+
+    env = env or {}
+    if env.get("srp_pressure_n_m2") is not None:
+        return float(env["srp_pressure_n_m2"])
+    if env.get("solar_irradiance_w_m2") is not None:
+        return float(env["solar_irradiance_w_m2"]) / SPEED_OF_LIGHT_M_S
+    return SOLAR_PRESSURE_N_M2

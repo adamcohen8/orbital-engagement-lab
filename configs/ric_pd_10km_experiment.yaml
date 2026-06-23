@@ -1,16 +1,21 @@
 scenario_name: ric_pd_10km_experiment
-scenario_description: Public flagship RIC_PD 10 km RPO review scenario with attitude-coupled burn gating, deterministic two-body dynamics, and report-ready rendezvous artifacts.
+scenario_description: Public flagship RIC_PD 10 km RPO review scenario with attitude-coupled
+  burn gating, deterministic two-body dynamics, and report-ready rendezvous artifacts.
 metadata:
   owner: public
-  notes: Run after the quickstart with `.venv/bin/python run_simulation.py --config configs/ric_pd_10km_experiment.yaml`, then open outputs/flagship_ric_pd_10km/index.md.
-  intent: Demonstrate an RIC_PD transfer controller closing a 10 km-class relative-motion case by acquiring a low-energy coast arc before terminal cleanup while the chaser must satisfy attitude alignment before thrust is applied.
-  evidence_role: Public golden-path artifact for single-run closed-loop RPO behavior; not a mission qualification or high-fidelity validation claim.
+  notes: Run after the quickstart with `.venv/bin/python run_simulation.py --config
+    configs/ric_pd_10km_experiment.yaml`, then open outputs/flagship_ric_pd_10km/index.md.
+  intent: Demonstrate an RIC_PD transfer controller closing a 10 km-class relative-motion
+    case by acquiring a low-energy coast arc before terminal cleanup while the chaser
+    must satisfy attitude alignment before thrust is applied.
+  evidence_role: Public golden-path artifact for single-run closed-loop RPO behavior;
+    not a mission qualification or high-fidelity validation claim.
   recommended_review:
-    - outputs/flagship_ric_pd_10km/index.md
-    - outputs/flagship_ric_pd_10km/master_run_summary.json
-    - outputs/flagship_ric_pd_10km/rendezvous_summary.png
-    - outputs/flagship_ric_pd_10km/control_effort.png
-    - outputs/flagship_ric_pd_10km/chaser_thrust_alignment_error.png
+  - outputs/flagship_ric_pd_10km/index.md
+  - outputs/flagship_ric_pd_10km/master_run_summary.json
+  - outputs/flagship_ric_pd_10km/rendezvous_summary.png
+  - outputs/flagship_ric_pd_10km/control_effort.png
+  - outputs/flagship_ric_pd_10km/chaser_thrust_alignment_error.png
 objects:
   rocket:
     enabled: false
@@ -29,28 +34,28 @@ objects:
       relative_to_target_ric:
         frame: curv
         state:
-          - 0.0
-          - -10.0
-          - 0.0
-          - 0.0
-          - 0.0
-          - 0.001
+        - 0.0
+        - -10.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.001
       relative_to: target
       attitude_quat_bn:
-        - 1.0
-        - 0.0
-        - 0.0
-        - 0.0
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
       angular_rate_body_rad_s:
-        - 0.0
-        - 0.0
-        - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
     orbit_control:
       kind: python
       module: sim.control.orbit.ric_pd
       class_name: RICPDTransferController
       params:
-        max_accel_km_s2: 6.0e-5
+        max_accel_km_s2: 6.0e-05
         mean_motion_rad_s: 0.001078
         transfer_time_s: 4800.0
         burn_time_constant_s: 35.0
@@ -60,63 +65,81 @@ objects:
         terminal_start_s: 900.0
         terminal_range_km: 0.15
         terminal_kp:
-          - [2.5e-6, 0.0, 0.0]
-          - [0.0, 2.5e-6, 0.0]
-          - [0.0, 0.0, 2.5e-6]
+        - - 2.5e-06
+          - 0.0
+          - 0.0
+        - - 0.0
+          - 2.5e-06
+          - 0.0
+        - - 0.0
+          - 0.0
+          - 2.5e-06
         terminal_kd:
-          - [0.0035, 0.0, 0.0]
-          - [0.0, 0.0035, 0.0]
-          - [0.0, 0.0, 0.0035]
+        - - 0.0035
+          - 0.0
+          - 0.0
+        - - 0.0
+          - 0.0035
+          - 0.0
+        - - 0.0
+          - 0.0
+          - 0.0035
         desired_state_ric:
-          - 0.0
-          - 0.0
-          - 0.0
-          - 0.0
-          - 0.0
-          - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
         ric_curv_state_slice:
-          - 0
-          - 6
+        - 0
+        - 6
         chief_eci_state_slice:
-          - 6
-          - 12
+        - 6
+        - 12
         state_signs:
-          - 1.0
-          - 1.0
-          - 1.0
-          - 1.0
-          - 1.0
-          - 1.0
+        - 1.0
+        - 1.0
+        - 1.0
+        - 1.0
+        - 1.0
+        - 1.0
     attitude_control:
       kind: python
       module: sim.control.attitude.baseline
       class_name: ReactionWheelPDController
       params:
         wheel_axes_body:
-          - [1.0, 0.0, 0.0]
-          - [0.0, 1.0, 0.0]
-          - [0.0, 0.0, 1.0]
-        wheel_torque_limits_nm:
-          - 0.05
-          - 0.05
-          - 0.05
-        desired_attitude_quat_bn:
+        - - 1.0
+          - 0.0
+          - 0.0
+        - - 0.0
           - 1.0
           - 0.0
+        - - 0.0
           - 0.0
-          - 0.0
+          - 1.0
+        wheel_torque_limits_nm:
+        - 0.05
+        - 0.05
+        - 0.05
+        desired_attitude_quat_bn:
+        - 1.0
+        - 0.0
+        - 0.0
+        - 0.0
         desired_rate_body_rad_s:
-          - 0.0
-          - 0.0
-          - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
         kp:
-          - 0.32
-          - 0.32
-          - 0.32
+        - 0.32
+        - 0.32
+        - 0.32
         kd:
-          - 3.5
-          - 3.5
-          - 3.5
+        - 3.5
+        - 3.5
+        - 3.5
     mission_execution:
       kind: python
       module: sim.mission.modules
@@ -124,9 +147,9 @@ objects:
       params:
         require_attitude_alignment: true
         thruster_direction_body:
-          - 0.0
-          - 0.0
-          - 1.0
+        - 0.0
+        - 0.0
+        - 1.0
         alignment_tolerance_deg: 15.0
         min_burn_accel_km_s2: 1.0e-10
         orbit_controller_budget_ms: 40.0
@@ -134,19 +157,19 @@ objects:
     knowledge:
       refresh_rate_s: 1.0
       targets:
-        - target
+      - target
       conditions:
         require_line_of_sight: false
         max_range_km: 10000.0
       sensor_error:
         pos_sigma_km:
-          - 0.0
-          - 0.0
-          - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
         vel_sigma_km_s:
-          - 0.0
-          - 0.0
-          - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
       estimation:
         type: ekf
     kind: satellite
@@ -167,14 +190,14 @@ objects:
         argp_deg: 0.0
         true_anomaly_deg: 0.0
       attitude_quat_bn:
-        - 1.0
-        - 0.0
-        - 0.0
-        - 0.0
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
       angular_rate_body_rad_s:
-        - 0.0
-        - 0.0
-        - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
     orbit_control:
       kind: python
       module: sim.control.orbit.zero_controller
@@ -187,7 +210,6 @@ objects:
       params: {}
     kind: satellite
 simulator:
-  scenario_type: auto
   duration_s: 12000.0
   dt_s: 1.0
   resource_profile: laptop-safe
@@ -237,12 +259,12 @@ outputs:
     reference_object_id: target
     style: oel_dark
     figure_ids:
-      - attitude
-      - attitude_control_summary
-      - quaternion_error
-      - control_thrust_ric
-      - trajectory_ric_rect_2d_multi
-      - thrust_alignment_error
+    - attitude
+    - attitude_control_summary
+    - quaternion_error
+    - control_thrust_ric
+    - trajectory_ric_rect_2d_multi
+    - thrust_alignment_error
     dpi: 160
   animations:
     enabled: false

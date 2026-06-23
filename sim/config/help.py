@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import re
 import textwrap
 from dataclasses import dataclass
@@ -106,9 +107,13 @@ def _profile_options() -> tuple[ConfigOption, ...]:
     return tuple(_option(name, descriptions.get(name, "Simulation fidelity profile.")) for name in profile_choices())
 
 
-def _satellite_preset_options() -> tuple[ConfigOption, ...]:
-    from sim.app.services import _discover_named_presets
+def _discover_named_presets(module_name: str, type_name: str) -> list[str]:
+    module = importlib.import_module(module_name)
+    preset_type = getattr(module, type_name)
+    return sorted(name for name, value in vars(module).items() if name.isupper() and isinstance(value, preset_type))
 
+
+def _satellite_preset_options() -> tuple[ConfigOption, ...]:
     return tuple(
         _option(name, "Reusable satellite hardware preset.")
         for name in _discover_named_presets("sim.presets.satellites", "SatellitePreset")
@@ -116,8 +121,6 @@ def _satellite_preset_options() -> tuple[ConfigOption, ...]:
 
 
 def _rocket_preset_options() -> tuple[ConfigOption, ...]:
-    from sim.app.services import _discover_named_presets
-
     return tuple(
         _option(name, "Reusable rocket stack preset.")
         for name in _discover_named_presets("sim.presets.rockets", "RocketStackPreset")
@@ -211,7 +214,10 @@ CONFIG_HELP_ENTRIES: tuple[ConfigHelpEntry, ...] = (
         ),
         notes=(
             "SGP4 objects are passive in v1: no orbit_control, attitude_control, thrust, mission objectives, or maneuvers.",
-            "SGP4 v1 records frame_transform: teme_as_eci; it does not perform an EOP-backed TEME-to-ECI reduction.",
+            "TLEs with orbital period >= 225 minutes require deep-space SDP4/resonance handling and are rejected.",
+            "Set general.output_frame: teme for native TEME state rows, or use the default ECI-compatible teme_as_eci approximation.",
+            "Use frame_transform: teme_to_eci_iau80 for the opt-in Vallado IAU-80 TEME-to-ECI reduction.",
+            "The IAU-80 transform uses fixed time-scale defaults and zero EOP nutation corrections in current scenario config.",
             "Use the existing special propagation path for controlled spacecraft and OEL force-model studies.",
         ),
     ),
@@ -418,9 +424,9 @@ CONFIG_HELP_ENTRIES: tuple[ConfigHelpEntry, ...] = (
         title="Output Review Store",
         description=(
             "Enables the durable SQLite review store for completed single-run outputs. "
-            "This is the planned data layer for the Output Review Workbench."
+            "Use it with the sim.review CLI/API and custom review plotting tools."
         ),
-        aliases=("review store", "output review", "orw", "sqlite review", "outputs review"),
+        aliases=("review store", "output review", "sqlite review", "outputs review"),
         options=(
             _option("enabled", "Write review/run.sqlite and review/schema.json beside normal artifacts."),
             _option("detail", "compact, standard, or full. Initial tables focus on standard single-run review."),

@@ -6,7 +6,11 @@ from dataclasses import dataclass
 import numpy as np
 
 from sim.core.models import StateTruth
+from sim.dynamics.orbit.frames import teme_to_eci_vallado_iau80
 from sim.dynamics.orbit.tle import TLEElements, parse_tle_lines
+
+SGP4_DEEP_SPACE_PERIOD_THRESHOLD_MIN = 225.0
+SGP4_DEEP_SPACE_MEAN_MOTION_THRESHOLD_REV_DAY = 1440.0 / SGP4_DEEP_SPACE_PERIOD_THRESHOLD_MIN
 
 
 @dataclass(frozen=True)
@@ -39,6 +43,14 @@ class SGP4EphemerisProvider:
     attitude_quat_bn: np.ndarray | None = None
     angular_rate_body_rad_s: np.ndarray | None = None
 
+    def __post_init__(self) -> None:
+        frame = str(self.output_frame or "eci").strip().lower()
+        transform = str(self.frame_transform or "").strip().lower()
+        if frame == "teme" and not transform:
+            object.__setattr__(self, "frame_transform", "native")
+        if frame == "eci" and not transform:
+            object.__setattr__(self, "frame_transform", "teme_as_eci")
+
     @classmethod
     def from_tle_block(
         cls,
@@ -48,7 +60,7 @@ class SGP4EphemerisProvider:
         start_jd_utc: float | None,
         duration_s: float,
         output_frame: str = "eci",
-        frame_transform: str = "teme_as_eci",
+        frame_transform: str | None = None,
         attitude_quat_bn: np.ndarray | None = None,
         angular_rate_body_rad_s: np.ndarray | None = None,
     ) -> SGP4EphemerisProvider:
@@ -61,14 +73,21 @@ class SGP4EphemerisProvider:
             line1 = str(block.get("line1", "") or "")
             line2 = str(block.get("line2", "") or "")
         elements = parse_tle_lines(line1, line2, require_checksum=bool(block.get("require_checksum", False)))
+        error = sgp4_unsupported_reason(elements)
+        if error:
+            raise ValueError(error)
         resolved_start = float(elements.epoch_jd_utc if start_jd_utc is None else start_jd_utc)
+        resolved_output_frame = str(output_frame or "eci").strip().lower()
+        resolved_frame_transform = str(frame_transform or "").strip().lower()
+        if not resolved_frame_transform:
+            resolved_frame_transform = "native" if resolved_output_frame == "teme" else "teme_as_eci"
         return cls(
             elements=elements,
             mass_kg=float(mass_kg),
             start_jd_utc=resolved_start,
             duration_s=float(duration_s),
-            output_frame=str(output_frame or "eci").strip().lower(),
-            frame_transform=str(frame_transform or "teme_as_eci").strip().lower(),
+            output_frame=resolved_output_frame,
+            frame_transform=resolved_frame_transform,
             attitude_quat_bn=attitude_quat_bn,
             angular_rate_body_rad_s=angular_rate_body_rad_s,
         )
@@ -119,6 +138,24 @@ class SGP4EphemerisProvider:
         )
 
 
+def sgp4_orbital_period_min(elements: TLEElements) -> float:
+    mean_motion = float(elements.mean_motion_rev_per_day)
+    if mean_motion <= 0.0:
+        return math.inf
+    return 1440.0 / mean_motion
+
+
+def sgp4_unsupported_reason(elements: TLEElements) -> str | None:
+    period_min = sgp4_orbital_period_min(elements)
+    if period_min >= SGP4_DEEP_SPACE_PERIOD_THRESHOLD_MIN:
+        return (
+            "OEL SGP4 supports near-Earth SGP4 only; deep-space SDP4/resonance TLEs "
+            f"with orbital period >= {SGP4_DEEP_SPACE_PERIOD_THRESHOLD_MIN:.0f} min are not supported "
+            f"(period={period_min:.3f} min, mean_motion={float(elements.mean_motion_rev_per_day):.8f} rev/day)."
+        )
+    return None
+
+
 def _actan(y: float, x: float) -> float:
     return float(math.atan2(y, x) % (2.0 * math.pi))
 
@@ -159,6 +196,9 @@ def sgp4_propagate_teme(elements: TLEElements, tsince_min: float) -> SGP4State:
     ck2 = 1.0826158e-3 / 2.0
     ck4 = -3.0 * -1.65597e-6 / 8.0
 
+    unsupported = sgp4_unsupported_reason(elements)
+    if unsupported:
+        return SGP4State(np.zeros(3), np.zeros(3), unsupported)
     if satdata["xno"] <= 0.0:
         return SGP4State(np.zeros(3), np.zeros(3), "SGP4 mean motion must be positive.")
     if satdata["eo"] < 0.0 or satdata["eo"] >= 1.0:
@@ -357,15 +397,24 @@ def transform_teme_to_output_frame(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return the v1 OEL output-frame view of a propagated TEME state.
 
-    v1 intentionally exposes only a transparent TEME-as-ECI approximation. A
-    full TEME-to-ECI reduction needs EOP/nutation handling and is outside the
-    initial public SGP4 scope.
+    v1 supports native TEME output, the legacy transparent TEME-as-ECI
+    approximation, and an explicit Vallado IAU-80 TEME-to-ECI reduction.
     """
     frame = str(output_frame or "eci").strip().lower()
-    transform = str(frame_transform or "teme_as_eci").strip().lower()
+    transform = str(frame_transform or ("native" if frame == "teme" else "teme_as_eci")).strip().lower()
+    if frame == "teme":
+        if transform not in {"native", "none", "identity", "teme"}:
+            raise ValueError("SGP4 output_frame='teme' requires frame_transform='native'.")
+        _ = float(jd_utc)
+        return np.array(position_teme_km, dtype=float), np.array(velocity_teme_km_s, dtype=float)
     if frame != "eci":
-        raise ValueError("SGP4 v1 only supports output_frame='eci'.")
+        raise ValueError("SGP4 v1 only supports output_frame='eci' or output_frame='teme'.")
+    if transform == "teme_to_eci_iau80":
+        return teme_to_eci_vallado_iau80(position_teme_km, velocity_teme_km_s, jd_utc=float(jd_utc))
     if transform != "teme_as_eci":
-        raise ValueError("SGP4 frame_transform must be 'teme_as_eci' for v1.")
+        raise ValueError(
+            "SGP4 output_frame='eci' requires frame_transform='teme_as_eci' or "
+            "'teme_to_eci_iau80' for v1."
+        )
     _ = float(jd_utc)
     return np.array(position_teme_km, dtype=float), np.array(velocity_teme_km_s, dtype=float)

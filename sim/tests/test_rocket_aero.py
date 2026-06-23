@@ -2,11 +2,15 @@ import unittest
 
 import numpy as np
 
+from sim import SimulationConfig
 from sim.aero import RocketAeroConfig as SharedRocketAeroConfig
 from sim.aero import resolve_vehicle_aero_properties
-from sim.config import scenario_config_from_dict
 from sim.rocket.aero import RocketAeroConfig, compute_aero_loads, compute_aero_state
 from sim.runtime_support import _create_rocket_runtime, _create_satellite_runtime
+
+
+def scenario_config_from_dict(data: dict):
+    return SimulationConfig.from_dict(data).to_scenario_config()
 
 
 class TestRocketAero(unittest.TestCase):
@@ -42,7 +46,7 @@ class TestRocketAero(unittest.TestCase):
                 },
             }
         )
-        runtime = _create_rocket_runtime(cfg)
+        runtime = _create_rocket_runtime(cfg, agent_cfg=cfg.objects["rocket"])
         aero = runtime.rocket_sim.sim_cfg.aero
 
         self.assertAlmostEqual(aero.reference_area_m2, 3.5)
@@ -76,7 +80,7 @@ class TestRocketAero(unittest.TestCase):
                 },
             }
         )
-        runtime = _create_rocket_runtime(cfg)
+        runtime = _create_rocket_runtime(cfg, agent_cfg=cfg.objects["rocket"])
         sim = runtime.rocket_sim
 
         self.assertAlmostEqual(sim.sim_cfg.area_ref_m2, 3.5)
@@ -137,7 +141,7 @@ class TestRocketAero(unittest.TestCase):
                 },
             }
         )
-        runtime = _create_satellite_runtime("chaser", cfg.chaser, cfg, np.random.default_rng(123))
+        runtime = _create_satellite_runtime("chaser", cfg.objects["chaser"], cfg, np.random.default_rng(123))
         disturbance_cfg = runtime.dynamics.disturbance_model.config
 
         self.assertAlmostEqual(disturbance_cfg.drag_area_m2, 2.0)

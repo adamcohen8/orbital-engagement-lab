@@ -8,6 +8,7 @@ RECIPES: dict[str, AgentTaskRecipe] = {
         title="Quickstart Review Evidence",
         description="Validate and run the five-minute public quickstart, then package review-store evidence.",
         config_path="configs/quickstart_5min.yaml",
+        maturity="supported",
         query_names=(
             "run_metadata",
             "objects",
@@ -32,6 +33,7 @@ RECIPES: dict[str, AgentTaskRecipe] = {
         title="Flagship RIC PD Review Evidence",
         description="Run the flagship 10 km RIC PD rendezvous scenario and inspect review evidence.",
         config_path="configs/ric_pd_10km_experiment.yaml",
+        maturity="supported",
         query_names=(
             "run_metadata",
             "rendezvous_metrics",
@@ -55,6 +57,7 @@ RECIPES: dict[str, AgentTaskRecipe] = {
         title="Mission Reconstitution Review Evidence",
         description="Run the public mission-reconstitution trade-space example and inspect planner evidence.",
         config_path="agents/examples/public_agent_mission_reconstitution_trade_space.yaml",
+        maturity="supported",
         query_names=(
             "run_metadata",
             "mission_recovery_summary",
@@ -70,6 +73,7 @@ RECIPES: dict[str, AgentTaskRecipe] = {
         title="Ground Access Review Evidence",
         description="Run the public ground-access example and package station/object access evidence.",
         config_path="agents/examples/public_agent_ground_access.yaml",
+        maturity="supported",
         query_names=("run_metadata", "objects", "ground_access_summary", "ground_access_no_access_reasons", "artifacts"),
         semantic_metric_names=("ground_access",),
         tags=("public", "agent_example", "ground_access"),

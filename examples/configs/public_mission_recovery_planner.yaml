@@ -1,0 +1,113 @@
+scenario_name: public_mission_recovery_planner
+scenario_description: 'Public mission-recovery planner example: a satellite receives a small in-track burn, then OEL compares the final orbit against the starting orbit and recommends recovery options.'
+metadata:
+  owner: public
+  seed: 123
+  notes: Educational mission-recovery planning example with bounded deterministic inputs.
+objects:
+  target:
+    enabled: true
+    role: target
+    kind: satellite
+    specs:
+      mass_kg: 100.0
+      isp_s: 220.0
+    initial_state:
+      coes:
+        a_km: 6778.137
+        ecc: 0.0
+        inc_deg: 45.0
+        raan_deg: 0.0
+        argp_deg: 0.0
+        true_anomaly_deg: 0.0
+      attitude_quat_bn:
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      angular_rate_body_rad_s:
+      - 0.0
+      - 0.0
+      - 0.0
+    orbit_control:
+      module: sim.control.orbit.zero_controller
+      class_name: ZeroController
+    attitude_control:
+      module: sim.control.attitude.zero_torque
+      class_name: ZeroTorqueController
+    mission_execution:
+      module: sim.mission.modules
+      class_name: ControllerPointingExecution
+      params:
+        require_attitude_alignment: false
+        use_strategy_fallback_thrust: true
+    mission_objectives:
+    - module: sim.mission.modules
+      class_name: SingleRICAxisBurnMissionModule
+      params:
+        target_id: self
+        axis_mode: +I
+        axis_kind: force
+        burn_accel_km_s2: 0.005
+        burn_start_s: 0.0
+        burn_duration_s: 1.0
+        require_finite_reference: true
+simulator:
+  duration_s: 120.0
+  dt_s: 1.0
+  dynamics:
+    orbit:
+      model: two_body
+      orbit_substep_s: 1.0
+      j2: false
+      j3: false
+      j4: false
+      drag: false
+      srp: false
+    attitude:
+      enabled: false
+  termination:
+    earth_impact_enabled: false
+outputs:
+  output_dir: outputs/examples/public_mission_recovery_planner
+  mode: save
+  stats:
+    enabled: true
+    print_summary: true
+    save_json: true
+    save_full_log: false
+  plots:
+    enabled: true
+    figure_ids:
+    - mission_recovery_trade_space
+  animations:
+    enabled: false
+    types: []
+  review:
+    enabled: true
+    detail: standard
+analysis:
+  mission_recovery:
+    enabled: true
+    object_id: target
+    goal: orbit_slot
+    assessment_time_s: final
+    slot_tolerance_deg: 1.0
+    max_phasing_orbits: 25
+    planner:
+      enabled: true
+      modes:
+      - min_delta_v
+      - min_time
+      - constrained
+      max_recovery_time_s: 86400.0
+      max_recovery_delta_v_m_s: 15.0
+      candidate_count: 8
+      simulate_candidates: true
+    propulsion:
+      spacecraft_mass_kg: 100.0
+      isp_s: 220.0
+      max_thrust_n: 20.0
+    element_tolerances:
+      a_km: 1.0
+      ecc: 0.001

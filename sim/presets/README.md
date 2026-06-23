@@ -55,22 +55,24 @@ In scenario YAML, point an agent at a preset file and override only the fields
 that differ from the baseline:
 
 ```yaml
-chaser:
-  enabled: true
-  preset: "../sim/presets/objects/basic_satellite.yaml"
-  specs:
-    dry_mass_kg: 180.0
-    fuel_mass_kg: 25.0
+objects:
+  chaser:
+    enabled: true
+    preset: "../sim/presets/objects/basic_satellite.yaml"
+    specs:
+      dry_mass_kg: 180.0
+      fuel_mass_kg: 25.0
 ```
 
 Attach a public actuator preset:
 
 ```yaml
-chaser:
-  enabled: true
-  specs:
-    mass_kg: 250.0
-    actuator_preset: BASIC_RCS_6DOF
+objects:
+  chaser:
+    enabled: true
+    specs:
+      mass_kg: 250.0
+      actuator_preset: BASIC_RCS_6DOF
 ```
 
 `BASIC_RCS_6DOF` is the reusable six-axis RCS cluster preset. Its thruster

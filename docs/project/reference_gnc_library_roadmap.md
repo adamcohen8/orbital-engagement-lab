@@ -31,7 +31,7 @@ Keep the mental model simple:
   impulse, torque, mode transition, safe hold, or abort.
 - **The deterministic engine** decides what actually happens.
 
-This split should stay visible in docs, YAML examples, GUI labels, benchmark
+This split should stay visible in docs, YAML examples, local UI labels, benchmark
 suites, and reports. It lets users replace one layer without rewriting the
 whole stack.
 
@@ -63,14 +63,14 @@ A controller or command module should not become Reference unless it has:
 6. Parameter guidance: expected units, rough tuning range, and model limits.
 7. A controller-bench case when performance comparison or tuning is part of
    the user story.
-8. GUI catalog exposure when non-developer users should select it.
+8. local UI catalog exposure when non-developer users should select it.
 
 Flagship status additionally requires a maintained scenario, review artifacts,
 and a validation/evidence note.
 
 ## Current Assessment
 
-This assessment is based on source inspection, docs/config usage, GUI exposure,
+This assessment is based on source inspection, docs/config usage, local UI exposure,
 and focused controller/mission regression tests. It is a product-readiness
 assessment, not a full mission qualification claim.
 
@@ -137,7 +137,7 @@ surfaces until the listed gaps close.
 | Surface | Current issue | Recommended action |
 | --- | --- | --- |
 | `HCWPDController` | Works, but naming conflicts with product-facing RIC_PD guidance. | Reframe as `RICPDHoldController` or keep as compatibility/workbench. |
-| `CurvilinearRICPDController` | Useful, but not exposed in GUI and needs stronger examples. | Add scenario, docs, and bench coverage if promoted. |
+| `CurvilinearRICPDController` | Useful, but not exposed in local UI and needs stronger examples. | Add scenario, docs, and bench coverage if promoted. |
 | `RelativeOrbitMPCController` | Real nonlinear MPC, but convergence/tuning evidence is thin. | Keep Experimental; add benchmark envelopes and budget behavior tests. |
 | `HCWRelativeOrbitMPCController` | Real implementation, but still specialist-tuned. | Keep Experimental; add maintained benchmark suite and tuning notes. |
 | `HCWInTrackCrossTrackMPCController` | Good constrained variant, but lacks config/example footprint. | Add example and compare against no-radial LQR. |
@@ -231,14 +231,14 @@ a long list of loosely related classes.
 
 ### Phase 1: Curate And Clean Up
 
-1. Mark compatibility/internal surfaces in docs and GUI catalogs.
+1. Mark compatibility/internal surfaces in docs and local UI catalogs.
 2. Add direct tests for simple but under-tested controllers:
    `QuaternionPDController`, detumble controllers, `SurrogateSnapRICController`,
    `EvadeMissionStrategy`, and `InspectMissionStrategy`.
 3. Add one small validation config for each promoted Reference primitive.
 4. Align naming for `HCWPDController`; either migrate to a RIC-facing name or
    explicitly mark it compatibility/workbench.
-5. Add a table of promoted Reference GNC surfaces to the GUI capability catalog.
+5. Add a table of promoted Reference GNC surfaces to the local UI capability catalog.
 
 ### Phase 2: Build Missing Reference Primitives
 
@@ -288,7 +288,7 @@ When adding a controller or command module:
 3. Add a focused test.
 4. Add one runnable config if users should select it.
 5. Add docs and expected mode flags.
-6. Add GUI exposure only after the docs and config exist.
+6. Add local UI exposure only after the docs and config exist.
 7. Add controller-bench coverage before using performance claims.
 
 Avoid expanding the inventory with clever one-offs. New built-ins should either

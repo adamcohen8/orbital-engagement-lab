@@ -1,66 +1,94 @@
-# Agent auto demo 04: public-core attitude-hold evidence.
-#
-# Natural-language source:
-# "Can an OEL agent build a short public-core attitude-control check for a
-# small spacecraft that starts with a 50 degree pointing error and a light body
-# tumble, uses the public reaction-wheel PD controller, and tells me whether it
-# damps toward the commanded inertial hold within three minutes?"
-#
-# Assumption boundary: this is a deterministic public-core attitude-control
-# demonstration, not flight-qualified ADCS design, actuator sizing, or a
-# robustness study.
-
-scenario_name: "agent_auto_04_attitude_demo"
-scenario_description: "Agent-generated public demo: reaction-wheel attitude hold from an initial pointing and rate error."
-
+scenario_name: agent_auto_04_attitude_demo
+scenario_description: 'Agent-generated public demo: reaction-wheel attitude hold from
+  an initial pointing and rate error.'
 metadata:
-  owner: "public-oel-agents"
-  notes: "Generated for the weekly OEL agentic workflow post. Uses public attitude dynamics/control, gravity-gradient disturbance torque, plots, and queryable review evidence."
-
+  owner: public-oel-agents
+  notes: Generated for the weekly OEL agentic workflow post. Uses public attitude
+    dynamics/control, gravity-gradient disturbance torque, plots, and queryable review
+    evidence.
 objects:
   bus:
-    kind: "satellite"
+    kind: satellite
     enabled: true
-    role: "attitude_test_article"
+    role: attitude_test_article
     specs:
       mass_kg: 120.0
       mass_properties:
         inertia_kg_m2:
-          - [12.0, 0.0, 0.0]
-          - [0.0, 10.0, 0.0]
-          - [0.0, 0.0, 8.0]
+        - - 12.0
+          - 0.0
+          - 0.0
+        - - 0.0
+          - 10.0
+          - 0.0
+        - - 0.0
+          - 0.0
+          - 8.0
     initial_state:
-      position_eci_km: [7000.0, 0.0, 0.0]
-      velocity_eci_km_s: [0.0, 7.5, 0.0]
-      attitude_quat_bn: [0.9063078, 0.0, 0.4226183, 0.0]
-      angular_rate_body_rad_s: [0.02, -0.015, 0.01]
+      position_eci_km:
+      - 7000.0
+      - 0.0
+      - 0.0
+      velocity_eci_km_s:
+      - 0.0
+      - 7.5
+      - 0.0
+      attitude_quat_bn:
+      - 0.9063078
+      - 0.0
+      - 0.4226183
+      - 0.0
+      angular_rate_body_rad_s:
+      - 0.02
+      - -0.015
+      - 0.01
     orbit_control:
-      kind: "python"
-      module: "sim.control.orbit.zero_controller"
-      class_name: "ZeroController"
+      kind: python
+      module: sim.control.orbit.zero_controller
+      class_name: ZeroController
       params: {}
     attitude_control:
-      kind: "python"
-      module: "sim.control.attitude.baseline"
-      class_name: "ReactionWheelPDController"
+      kind: python
+      module: sim.control.attitude.baseline
+      class_name: ReactionWheelPDController
       params:
         wheel_axes_body:
-          - [1.0, 0.0, 0.0]
-          - [0.0, 1.0, 0.0]
-          - [0.0, 0.0, 1.0]
-        wheel_torque_limits_nm: [0.05, 0.05, 0.05]
-        desired_attitude_quat_bn: [1.0, 0.0, 0.0, 0.0]
-        desired_rate_body_rad_s: [0.0, 0.0, 0.0]
-        kp: [0.32, 0.32, 0.32]
-        kd: [3.5, 3.5, 3.5]
-
+        - - 1.0
+          - 0.0
+          - 0.0
+        - - 0.0
+          - 1.0
+          - 0.0
+        - - 0.0
+          - 0.0
+          - 1.0
+        wheel_torque_limits_nm:
+        - 0.05
+        - 0.05
+        - 0.05
+        desired_attitude_quat_bn:
+        - 1.0
+        - 0.0
+        - 0.0
+        - 0.0
+        desired_rate_body_rad_s:
+        - 0.0
+        - 0.0
+        - 0.0
+        kp:
+        - 0.32
+        - 0.32
+        - 0.32
+        kd:
+        - 3.5
+        - 3.5
+        - 3.5
 simulator:
-  scenario_type: "auto"
   duration_s: 180.0
   dt_s: 1.0
   dynamics:
     orbit:
-      model: "two_body"
+      model: two_body
       orbit_substep_s: 1.0
       j2: false
       j3: false
@@ -78,16 +106,15 @@ simulator:
     rocket:
       enabled: false
   environment:
-    ephemeris_mode: "analytic_simple"
+    ephemeris_mode: analytic_simple
     atmosphere_env: {}
   plugin_validation:
     strict: true
   termination:
     earth_impact_enabled: false
-
 outputs:
-  output_dir: "outputs/agent_auto_04_attitude_demo"
-  mode: "save"
+  output_dir: outputs/agent_auto_04_attitude_demo
+  mode: save
   stats:
     print_summary: true
     save_json: true
@@ -95,12 +122,16 @@ outputs:
     save_full_log: false
   review:
     enabled: true
-    detail: "standard"
+    detail: standard
   plots:
     enabled: true
-    style: "oel_dark"
+    style: oel_dark
     dpi: 140
-    figure_ids: ["attitude", "quaternion_error", "rates_eci", "control_effort"]
+    figure_ids:
+    - attitude
+    - quaternion_error
+    - rates_eci
+    - control_effort
   animations:
     enabled: false
     types: []

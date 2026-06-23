@@ -1,0 +1,79 @@
+scenario_name: rocket_tvc_tracking_smoke
+scenario_description: Short rocket ascent case exercising TVC steering and GNC telemetry.
+metadata:
+  owner: public
+  seed: 123
+objects:
+  rocket:
+    enabled: true
+    role: rocket
+    kind: rocket
+    specs:
+      preset_stack: BASIC_TWO_STAGE_STACK
+      payload_mass_kg: 150.0
+      thrust_axis_body:
+      - 1.0
+      - 0.0
+      - 0.0
+    initial_state:
+      launch_lat_deg: 28.5
+      launch_lon_deg: -80.6
+      launch_alt_km: 0.1
+      launch_azimuth_deg: 90.0
+    base_guidance:
+      kind: python
+      module: sim.rocket.guidance
+      class_name: OpenLoopPitchProgramGuidance
+      params:
+        vertical_hold_s: 2.0
+        pitch_start_s: 2.0
+        pitch_end_s: 35.0
+        pitch_final_deg: 45.0
+        max_throttle: 0.8
+simulator:
+  duration_s: 45.0
+  dt_s: 0.5
+  dynamics:
+    orbit:
+      j2: false
+      j3: false
+      j4: false
+      drag: false
+      srp: false
+    rocket:
+      atmosphere_model: ussa1976
+      aero_model_enabled: true
+      use_wgs84_geodesy: true
+      attitude_mode: dynamic
+      attitude_substep_s: 0.05
+      tvc_steering_enabled: true
+      tvc_pass_through_attitude: false
+      tvc_time_constant_s: 0.15
+      tvc_max_gimbal_deg: 6.0
+      tvc_rate_limit_deg_s: 20.0
+      tvc_pivot_offset_body_m:
+      - -3.0
+      - 0.0
+      - 0.0
+      wind_enu_m_s:
+      - 15.0
+      - 0.0
+      - 0.0
+  environment:
+    atmosphere_env: {}
+  termination:
+    earth_impact_enabled: false
+outputs:
+  output_dir: outputs/rocket_tvc_tracking_smoke
+  mode: save
+  stats:
+    enabled: true
+    print_summary: true
+    save_json: true
+    save_csv: false
+    save_full_log: false
+  plots:
+    enabled: true
+    figure_ids:
+    - rocket_ascent_diagnostics
+    - rocket_gnc_diagnostics

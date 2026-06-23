@@ -246,10 +246,14 @@ def _assign_path(root: dict[str, Any], path: str, value: Any) -> None:
 
 def _enabled_satellite_ids_from_scenario_dict(scenario_dict: dict[str, Any]) -> tuple[str, ...]:
     enabled: list[str] = []
-    for agent_id in ("chaser", "target"):
-        agent_cfg = dict(scenario_dict.get(agent_id, {}) or {})
+    objects = dict(scenario_dict.get("objects", {}) or {})
+    candidate_ids = list(objects) if objects else ["chaser", "target"]
+    for agent_id in candidate_ids:
+        agent_cfg = dict((objects.get(agent_id) if objects else scenario_dict.get(agent_id, {})) or {})
         if bool(agent_cfg.get("enabled", False)):
-            enabled.append(agent_id)
+            kind = str(agent_cfg.get("kind", "satellite") or "satellite").strip().lower()
+            if kind != "rocket":
+                enabled.append(str(agent_id))
     return tuple(enabled)
 
 
@@ -274,8 +278,9 @@ def _observation_probe_from_scenario_dict(scenario_dict: dict[str, Any]) -> dict
         for agent_id in enabled_ids
     }
     knowledge: dict[str, dict[str, dict[str, Any]]] = {}
+    objects = dict(scenario_dict.get("objects", {}) or {})
     for observer_id in enabled_ids:
-        agent_cfg = dict(scenario_dict.get(observer_id, {}) or {})
+        agent_cfg = dict((objects.get(observer_id) if objects else scenario_dict.get(observer_id, {})) or {})
         knowledge_cfg = dict(agent_cfg.get("knowledge", {}) or {})
         targets = []
         for target_id in list(knowledge_cfg.get("targets", []) or []):

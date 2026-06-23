@@ -6,7 +6,7 @@
   "client_build_hash": "fixture",
   "physics_version": "web-two-body-v1",
   "scoring_version": "pursuit-v1",
-  "config_hash": "0273ff33",
+  "config_hash": "df8443be",
   "seed": 4242,
   "input_events": [
     {

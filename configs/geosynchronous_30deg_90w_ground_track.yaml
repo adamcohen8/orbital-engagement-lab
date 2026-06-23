@@ -1,11 +1,13 @@
 scenario_name: geosynchronous_30deg_90w_ground_track
-scenario_description: Single-satellite inclined geosynchronous ground-track review case.
+scenario_description: Single-satellite inclined geosynchronous ground-track review
+  case.
 metadata:
   owner: public
-  notes: >
-    Passive geosynchronous satellite initialized over 90 deg W longitude with
-    30 deg inclination. Interactive output mode is enabled for review before
-    saving artifacts.
+  notes: 'Passive geosynchronous satellite initialized over 90 deg W longitude with
+    30 deg inclination. Interactive output mode is enabled for review before saving
+    artifacts.
+
+    '
 objects:
   rocket:
     enabled: false
@@ -25,12 +27,9 @@ objects:
       fuel_mass_kg: 0.0
     initial_state:
       coes:
-        # Geosynchronous radius from project Earth GM and rotation rate.
         a_km: 42164.169451
         ecc: 0.0
         inc_deg: 30.0
-        # With the default t=0 Earth-rotation convention, 270 deg places the
-        # ascending-node longitude at 90 deg W.
         raan_deg: 270.0
         argp_deg: 0.0
         true_anomaly_deg: 0.0
@@ -40,7 +39,6 @@ objects:
       class_name: ZeroController
       params: {}
 simulator:
-  scenario_type: auto
   duration_s: 86160.0
   dt_s: 10.0
   dynamics:

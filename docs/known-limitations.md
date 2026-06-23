@@ -11,9 +11,7 @@ not flight-qualified or operational decision-grade software.
   campaign dashboards, AI-assisted reporting, and custom flight-software workflows are Pro
   surfaces and are not included in the public export.
 - The primary public surfaces are the CLI, scenario YAML, Python API, review
-  query CLI/API, and RPO trainer. The desktop GUI is experimental. The Output
-  Review Workbench is an experimental dynamic plot creator for completed runs,
-  not a first-run path or a replacement for scripted review queries.
+  query CLI/API, custom review plotting, and RPO trainer.
 - Payload and artifact shapes are documented, but some non-contract fields may
   evolve while the project is pre-1.0.
 
@@ -23,8 +21,13 @@ not flight-qualified or operational decision-grade software.
   scenarios.
 - The engine has contract docs for scenario YAML, payload artifacts, and
   single-run behavior.
-- External high-fidelity reference data and validation harness evidence are
-  private/product surfaces and are not bundled in the public repo.
+- The [Physics Model Reference](physics-models.md) documents model equations,
+  assumptions, config knobs, implementation locations, evidence hooks, and
+  limits so validation evidence can be interpreted in context.
+- Public-safe external-reference validation evidence should be bundled when it
+  is redistributable and tied to a specific claim. Proprietary reference data,
+  customer-specific evidence, and large automated validation workflows remain
+  private/product surfaces.
 - Users should independently validate behavior for their mission envelope,
   force models, time spans, controller assumptions, and numerical tolerances.
 - Public scenarios such as `configs/ric_pd_10km_experiment.yaml` are review
@@ -56,9 +59,15 @@ Python 3.10 or newer.
   `general.model: sgp4`.
 - SGP4 general-perturbations objects are passive catalog-style objects in the
   initial implementation. They do not accept thrust, orbit controllers,
-  maneuvers, covariance, or deep-space SDP4 claims. The v1 output records
-  `frame_transform: teme_as_eci`; it does not perform an EOP-backed
-  TEME-to-ECI reduction.
+  maneuvers, or covariance. TLEs with orbital period at or above 225 minutes
+  require deep-space SDP4/resonance handling and are rejected explicitly instead
+  of being treated as near-Earth SGP4. The v1 output can preserve
+  native TEME state rows with `output_frame: teme`, or expose the legacy
+  ECI-compatible approximation with `frame_transform: teme_as_eci`. An opt-in
+  Vallado IAU-76/FK5 + IAU-80 TEME-to-ECI transform is available as
+  `frame_transform: teme_to_eci_iau80`; it currently uses fixed time-scale
+  defaults and zero EOP nutation corrections, so it is not yet a fully
+  EOP-driven operational frame service.
 - Ground-station access is passive and geometric. It tracks line of sight,
   elevation, and range; it does not model RF link budgets, weather, scheduling,
   or command/telemetry behavior.

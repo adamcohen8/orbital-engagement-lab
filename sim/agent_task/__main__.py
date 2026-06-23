@@ -130,12 +130,16 @@ def _print(payload: dict[str, Any], *, json_mode: bool) -> None:
         return
     if "items" in payload:
         for item in payload["items"]:
-            print(f"{item.get('recipe_id')}: {item.get('title')}")
+            maturity = f" [{item.get('maturity')}]" if item.get("maturity") else ""
+            print(f"{item.get('recipe_id')}: {item.get('title')}{maturity}")
         return
     if "metrics" in payload:
         for item in payload["metrics"]:
             units = f" ({item.get('units')})" if item.get("units") else ""
-            print(f"{item.get('name')}{units}: {item.get('description')}")
+            maturity = f" [{item.get('maturity')}]" if item.get("maturity") else ""
+            tables = ", ".join(item.get("source_tables") or ())
+            source = f" tables={tables}" if tables else ""
+            print(f"{item.get('name')}{units}{maturity}{source}: {item.get('description')}")
         return
     print(json.dumps(payload, indent=2))
 

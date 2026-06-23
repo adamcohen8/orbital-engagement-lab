@@ -185,11 +185,9 @@ Mission logic is split into three related surfaces:
 
 ## Maintainer Notes
 
-The GUI capability catalog in `sim/app/services.py` is a practical product
-surface, but it is not the whole runtime inventory. Runtime exports in
-`sim/control/orbit/__init__.py`, `sim/control/attitude/__init__.py`, and
-`sim/mission/__init__.py` may include additional workbench or compatibility
-items.
+Runtime exports in `sim/control/orbit/__init__.py`,
+`sim/control/attitude/__init__.py`, and `sim/mission/__init__.py` may include
+additional workbench or compatibility items beyond the product-facing inventory.
 
 When adding a new controller or mission behavior:
 
@@ -201,5 +199,4 @@ When adding a new controller or mission behavior:
    product-facing.
 4. Update this inventory if users should know the feature ships with the
    product.
-5. If it should be selectable in the desktop GUI, add it to the backend
-   capability catalog in `sim/app/services.py`.
+5. Add focused tests for any promoted user-facing behavior.
