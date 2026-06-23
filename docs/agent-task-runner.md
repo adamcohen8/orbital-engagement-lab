@@ -25,6 +25,18 @@ scenario that answers the user's question, validate it, run it, then inspect
 the generated evidence. The task runner is a shortcut for common inspection and
 handoff patterns, not a reason to force a user request into a canned example.
 
+Bundled recipes carry a machine-readable maturity label:
+
+| Maturity | Meaning |
+| --- | --- |
+| `supported` | A maintained product workflow with documented commands, evidence packet shape, and regression coverage. Agents may use it as a default path when it matches the user's actual task. |
+| `prototype` | A useful repeatable workflow or smoke check whose outputs need analyst interpretation before being treated as product evidence. |
+| `experimental` | A discoverable recipe for exploration only; do not present it as a supported analysis workflow. |
+
+Public-tagged bundled recipes must be `supported`. Pro/private recipes may be
+`supported`, `prototype`, or `experimental`, but the answer should name that
+maturity when the evidence depends on the recipe.
+
 ## Commands
 
 List bundled recipes:
@@ -85,6 +97,13 @@ Compare two configs through common review metrics:
   --json
 ```
 
+Comparison packets include the requested metric names, extracted values for
+each side, numeric deltas where both values are available, and a
+`metric_status` row for each requested metric. Check `metric_status` before
+citing a delta; it records whether the base and candidate evidence both
+contained the metric and whether the metric resolved to a known semantic
+definition.
+
 Create a standard plot from a completed review store:
 
 ```bash
@@ -105,46 +124,106 @@ Each run, inspect, or compare command writes:
 The packet includes:
 
 - task id, status, generated UTC timestamp, and packet schema version;
+- top-level evidence summary status;
 - recipe metadata when a bundled recipe was used;
 - prepared scenario config paths and output directories;
 - validation reports;
 - run summaries when execution occurred;
 - review-store table/schema metadata;
-- saved review queries, SQL, columns, row samples, and truncation status;
-- semantic metric definitions used by the task;
-- generated plot/artifact paths;
+- saved review query summary status;
+- saved review query request status, maturity, source tables, SQL, columns,
+  row samples, empty-result policy, empty-result status, and truncation status;
+- requested semantic metric names, including unknown-name status;
+- resolved semantic metric definitions used by the task;
+- generated artifact summary status;
+- generated plot/artifact paths and artifact path-existence status;
+- generated plot summary status;
 - structured failure hints when validation, review queries, or artifact
   inspection fail.
 
 Agents should cite the packet path and the query name or SQL used when a claim
 depends on run evidence.
 
+Packets include `evidence_summary`, a top-level rollup of validation,
+review-query, artifact, plot, failure-hint, and caveat status. Treat
+`evidence_summary.ready_to_cite: false` as a cue to inspect the component
+summary fields before relying on the packet.
+
+Review blocks include `query_summary`, which counts successful, failed,
+unknown, unexpected-empty, and truncated query rows. Treat
+`query_summary.evidence_complete: false` as a signal to inspect the named query
+lists before relying on the packet's conclusions. Failed, unknown,
+unexpected-empty, or truncated query rows make the summary incomplete.
+
+Saved query rows include `known`. Unknown saved query names are marked
+`known: false`, `status: unknown_query`, and `reason: unknown_saved_query`.
+Rows for known queries include `empty_result`, `empty_result_allowed`, and
+`empty_result_unexpected`. Treat `empty_result_unexpected: true` as a weak or
+missing evidence signal even when the SQL executed successfully.
+
+Artifact sections include `artifact_summary`, which counts existing, missing,
+and unknown-status artifact paths. Treat `artifact_summary.artifacts_complete:
+false` as a signal to inspect `missing_artifacts` and
+`path_status_unknown_artifacts` before citing generated files.
+
+Plot sections include `plot_summary`, which counts successful, failed, missing,
+and truncated generated plots. Treat `plot_summary.plots_complete: false` as a
+signal to inspect `failed_plots`, `missing_plots`, and `truncated_plots` before
+citing figures.
+
+## Semantic Metrics
+
+Semantic metrics are named review-store quantities that agents may cite in
+answers, comparisons, and standard plot provenance. Each definition carries:
+
+- a stable metric name, description, units, and interpretation guidance;
+- a maturity label using the same `supported`, `prototype`, or `experimental`
+  vocabulary as task and plot recipes;
+- the review source tables that support the metric;
+- an optional saved review query and read-only SQL snippet;
+- caveats that must travel with the metric when they affect interpretation.
+
+Supported semantic metrics must resolve to registered saved queries when they
+name one, and any SQL definition must be `SELECT`/`WITH` only. The evidence
+packet records the semantic metric definitions used by a task so downstream
+agents can distinguish an observed number from the review evidence contract
+that made it citeable.
+
+Packets also include `semantic_metric_requests`, a request audit trail that
+lists every requested metric name once. Known rows include maturity, source
+tables, and saved query; unknown rows are marked `known: false` with
+`reason: unknown_semantic_metric` so a typo or unsupported metric is visible
+instead of silently disappearing from `semantic_metrics`.
+
 ## Bundled Recipes
 
 Current bundled task recipes include:
 
 - `quickstart_review`: public quickstart scenario with rendezvous metrics,
-  closest approach, burn activity, and artifact inventory.
+  closest approach, burn activity, and artifact inventory. Maturity:
+  `supported`.
 - `flagship_ric_pd_review`: flagship 10 km RIC PD scenario with terminal
-  relative-state and burn evidence.
+  relative-state and burn evidence. Maturity: `supported`.
 - `mission_reconstitution_review`: public mission-reconstitution trade-space
   example with recovery summary, candidates, and burn sequence evidence.
+  Maturity: `supported`.
 - `ground_access_review`: public ground-access example with station/object
-  access summaries and no-access reason counts.
+  access summaries and no-access reason counts. Maturity: `supported`.
 
 ## Plot Recipes
 
 Current bundled plot recipes include:
 
-- `relative_range`
-- `relative_range_rate`
-- `burn_activity`
-- `campaign_closest_approach`
-- `sensitivity_effects`
+- `relative_range`: maturity `supported`, table `relative_state`
+- `relative_range_rate`: maturity `supported`, table `relative_state`
+- `burn_activity`: maturity `supported`, table `thrust`
+- `campaign_closest_approach`: maturity `supported`, table `campaign_runs`
+- `sensitivity_effects`: maturity `supported`, table `sensitivity_rankings`
 
-Plot recipes run read-only review SQL and call the same review plotting service
-used by OEL Evidence Studio. Generated plot provenance is recorded in
-`review/generated_artifacts.json`.
+Plot recipes run read-only review SQL and call the review plotting service.
+Generated plot provenance is recorded in `review/generated_artifacts.json`.
+Agent-task plot artifacts also include the recipe maturity, source tables, and
+semantic metric names so figures can be cited with their evidence contract.
 
 ## Failure Hints
 

@@ -16,7 +16,7 @@ import numpy as np
 from matplotlib.axes import Axes
 
 import sim.plotting.style as oel_style
-from sim.config import scenario_config_from_dict
+from sim import SimulationConfig
 from sim.master_outputs import PLOT_PRESETS, plot_outputs
 from sim.plotting import (
     plot_attitude_control_summary,
@@ -37,6 +37,10 @@ from sim.plotting import (
 from sim.plotting.style import artifact_metadata, oel_plot_context, save_oel_animation, save_oel_figure
 from sim.utils.plotting import _draw_earth_sphere_3d
 from sim.utils.plotting_capabilities import plot_multi_ric_2d_projections
+
+
+def scenario_config_from_dict(data: dict):
+    return SimulationConfig.from_dict(data).to_scenario_config()
 
 
 def _hist(pos: np.ndarray) -> np.ndarray:

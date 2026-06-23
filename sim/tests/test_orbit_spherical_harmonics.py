@@ -7,7 +7,7 @@ from unittest.mock import patch
 import numpy as np
 
 import sim.dynamics.orbit.spherical_harmonics as spherical_harmonics
-from sim.config import scenario_config_from_dict
+from sim import SimulationConfig
 from sim.dynamics.orbit.accelerations import accel_j2
 from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2
 from sim.dynamics.orbit.propagator import j2_plugin, j3_plugin, j4_plugin, spherical_harmonics_plugin
@@ -20,6 +20,10 @@ from sim.dynamics.orbit.spherical_harmonics import (
     parse_spherical_harmonic_terms,
 )
 from sim.runtime_support import _build_orbit_propagator
+
+
+def scenario_config_from_dict(data: dict):
+    return SimulationConfig.from_dict(data).to_scenario_config()
 
 
 class TestOrbitSphericalHarmonics(unittest.TestCase):

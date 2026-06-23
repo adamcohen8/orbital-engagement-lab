@@ -164,10 +164,9 @@ Rules for agents:
   presentation defects such as legends covering data, overlapping labels,
   clipped text, unreadable tick labels, blank figures, or missing expected
   series.
-- Do not recommend OEL Evidence Studio for routine agent analysis. Use
-  `.venv/bin/python -m sim.review` for table inspection and the custom plotting
-  API for brief/report figures. `run_evidence_studio.py` and the legacy
-  `run_orw.py` launcher are experimental local viewers/workbenches.
+- Use `.venv/bin/python -m sim.review` for table inspection and the custom
+  plotting API for brief/report figures. Experimental review viewers and
+  desktop workbenches are local-only until they are product-ready.
 
 ## Agent Feedback Loop
 

@@ -1,0 +1,78 @@
+scenario_name: rocket_ascent_smoke
+scenario_description: Deterministic rocket ascent smoke case with rocket GNC diagnostics
+  enabled.
+metadata:
+  owner: public
+  seed: 123
+objects:
+  rocket:
+    enabled: true
+    role: rocket
+    kind: rocket
+    specs:
+      preset_stack: BASIC_TWO_STAGE_STACK
+      payload_mass_kg: 150.0
+      thrust_axis_body:
+      - 1.0
+      - 0.0
+      - 0.0
+    initial_state:
+      launch_lat_deg: 28.5
+      launch_lon_deg: -80.6
+      launch_alt_km: 0.1
+      launch_azimuth_deg: 90.0
+    base_guidance:
+      kind: python
+      module: sim.rocket.guidance
+      class_name: OpenLoopPitchProgramGuidance
+      params:
+        vertical_hold_s: 3.0
+        pitch_start_s: 3.0
+        pitch_end_s: 90.0
+        pitch_final_deg: 65.0
+        max_throttle: 0.85
+    guidance_modifiers:
+    - kind: python
+      module: sim.rocket.guidance
+      class_name: MaxQThrottleLimiterGuidance
+      params:
+        max_q_pa: 45000.0
+        min_throttle: 0.35
+simulator:
+  duration_s: 120.0
+  dt_s: 1.0
+  dynamics:
+    orbit:
+      j2: false
+      j3: false
+      j4: false
+      drag: false
+      srp: false
+    rocket:
+      atmosphere_model: ussa1976
+      aero_model_enabled: true
+      use_wgs84_geodesy: true
+      target_altitude_km: 400.0
+      target_altitude_tolerance_km: 25.0
+      target_eccentricity_max: 0.02
+      attitude_mode: cheater
+      max_q_limiter_enabled: false
+  environment:
+    atmosphere_env: {}
+  termination:
+    earth_impact_enabled: true
+outputs:
+  output_dir: outputs/rocket_ascent_smoke
+  mode: save
+  stats:
+    enabled: true
+    print_summary: true
+    save_json: true
+    save_csv: false
+    save_full_log: false
+  plots:
+    enabled: true
+    figure_ids:
+    - rocket_ascent_diagnostics
+    - rocket_gnc_diagnostics
+    - rocket_orbital_elements

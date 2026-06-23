@@ -82,11 +82,9 @@ target a specific phase yet. See
 example.
 
 New configs should define scene participants under `objects`, keyed by object
-ID. The conventional IDs `rocket`, `chaser`, and `target` still work, but they
-are names rather than fixed engine slots. Legacy top-level `rocket`, `chaser`,
-and `target` sections remain accepted for compatibility. If both a canonical
-`objects.<id>` entry and a matching legacy alias appear, the `objects.<id>`
-entry is the source of truth.
+ID. The conventional IDs `rocket`, `chaser`, and `target` are names rather than
+fixed engine slots. Legacy top-level `rocket`, `chaser`, and `target` sections
+are no longer accepted; use `objects.<id>` entries instead.
 
 Passive ground stations can be defined at the top level. They do not control or
 estimate spacecraft state; they only record access to active scene objects.
@@ -191,10 +189,8 @@ snippet and audit report:
   --summary
 ```
 
-For a reusable object-level bundle, collect geometry profiles, mass properties,
-source evidence, assumptions, and generated validation output in a spacecraft
-twin package. See `docs/spacecraft-twin-packages.md` and
-`examples/twins/demo_sat/twin.yaml`.
+Advanced reusable object-level packaging, source-evidence bundles, and package
+assembly workflows belong to OEL Pro.
 
 ## Actuator Presets
 
@@ -288,8 +284,7 @@ objects:
     propagation_method: general
     general:
       model: sgp4
-      output_frame: eci
-      frame_transform: teme_as_eci
+      output_frame: teme
     initial_state:
       tle:
         line1: "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9005"
@@ -300,10 +295,19 @@ SGP4 objects are passive in the initial implementation. They can participate in
 truth histories, review-store queries, ground access, plots, and relative-state
 analysis, but they do not accept OEL thrust, orbit controllers, maneuver
 objectives, or special-perturbations force flags as trajectory modifiers.
-The v1 output writes OEL ECI state fields using the propagated TEME state as an
-ECI-like state (`frame_transform: teme_as_eci`); it does not perform an
-EOP-backed TEME-to-ECI frame reduction. Review output records per-object
-propagation provenance in `object_propagation`.
+They are limited to near-Earth SGP4; TLEs with orbital period at or above 225
+minutes are rejected as unsupported deep-space SDP4/resonance cases.
+With `output_frame: teme`, v1 stores the propagated native TEME state in the
+normal state-history slots and labels the object frame as `teme` in payload and
+review metadata. For legacy ECI-compatible workflows, use `output_frame: eci`
+with `frame_transform: teme_as_eci`; this is an approximation, not an
+actual frame reduction. To request an explicit Vallado IAU-76/FK5 + IAU-80
+TEME-to-ECI reduction, use `output_frame: eci` with
+`frame_transform: teme_to_eci_iau80`. That transform is deterministic and
+matches the MATLAB SGP4 package equations, with fixed TT-UTC defaults and zero
+EOP nutation corrections unless a future caller passes them explicitly. Review
+output records per-object propagation provenance in `object_propagation` and
+per-object state frame labels in `object_state_frames` / `object_state_frame`.
 
 ## Ground Stations
 
@@ -500,6 +504,12 @@ simulator:
 
 This lets a launch vehicle, disposed stage, or atmospheric test article coexist
 with satellites whose mission should continue.
+
+SRP uses OEL's default solar radiation pressure at 1 AU unless a scenario needs
+to match a specific reference source. Set `simulator.environment.srp_pressure_n_m2`
+directly, or set `simulator.environment.solar_irradiance_w_m2` and OEL will
+divide by the speed of light. Source-matched validation cases should specify
+one of these fields explicitly instead of relying on the general default.
 
 Vehicle aerodynamics use a shared object-level vocabulary under `specs.aero`.
 Keep physical vehicle properties there; use `simulator.dynamics.orbit.drag` to
@@ -762,7 +772,7 @@ Set `outputs.review.enabled: true` to write a durable SQLite review store under
 `review/run.sqlite` and `review/schema.json` with normalized metadata, object
 state, primary-pair relative state, thrust, ground-access, metric, event, and
 artifact tables. See [Review Store Contract](review-store.md) for the current
-schema and OEL Evidence Studio direction.
+schema and review CLI/API direction.
 
 Set `outputs.stats.save_history_npz: true` to write
 `master_run_history.npz`, a compressed NumPy archive containing time histories

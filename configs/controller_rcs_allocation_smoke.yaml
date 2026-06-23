@@ -1,64 +1,90 @@
-scenario_name: "controller_rcs_allocation_smoke"
-scenario_description: "Local smoke scenario for the public RCSAllocationAwareController."
-
-rocket:
-  enabled: false
-
-chaser:
-  enabled: false
-
-target:
-  enabled: true
-  specs:
-    mass_kg: 1000.0
-    actuators:
-      enabled: true
-      orbital:
-        rcs_cluster:
-          allocation_mode: "force_only"
-          thrusters:
-            - name: "rcs-plus-x"
-              position_body_m: [0.0, 0.0, 0.0]
-              force_direction_body: [1.0, 0.0, 0.0]
+scenario_name: controller_rcs_allocation_smoke
+scenario_description: Local smoke scenario for the public RCSAllocationAwareController.
+objects:
+  target:
+    enabled: true
+    specs:
+      mass_kg: 1000.0
+      actuators:
+        enabled: true
+        orbital:
+          rcs_cluster:
+            allocation_mode: force_only
+            thrusters:
+            - name: rcs-plus-x
+              position_body_m:
+              - 0.0
+              - 0.0
+              - 0.0
+              force_direction_body:
+              - 1.0
+              - 0.0
+              - 0.0
               max_thrust_n: 0.5
               isp_s: 230.0
-  initial_state:
-    position_eci_km: [7000.0, 0.0, 0.0]
-    velocity_eci_km_s: [0.0, 7.5, 0.0]
-    attitude_quat_bn: [1.0, 0.0, 0.0, 0.0]
-    angular_rate_body_rad_s: [0.0, 0.0, 0.0]
-  orbit_control:
-    kind: "python"
-    module: "sim.control.orbit.rcs_allocator"
-    class_name: "RCSAllocationAwareController"
-    params:
-      mass_kg: 1000.0
-      allocation_mode: "force_only"
-      thrusters:
-        - name: "rcs-plus-x"
-          position_body_m: [0.0, 0.0, 0.0]
-          force_direction_body: [1.0, 0.0, 0.0]
+    initial_state:
+      position_eci_km:
+      - 7000.0
+      - 0.0
+      - 0.0
+      velocity_eci_km_s:
+      - 0.0
+      - 7.5
+      - 0.0
+      attitude_quat_bn:
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      angular_rate_body_rad_s:
+      - 0.0
+      - 0.0
+      - 0.0
+    orbit_control:
+      kind: python
+      module: sim.control.orbit.rcs_allocator
+      class_name: RCSAllocationAwareController
+      params:
+        mass_kg: 1000.0
+        allocation_mode: force_only
+        thrusters:
+        - name: rcs-plus-x
+          position_body_m:
+          - 0.0
+          - 0.0
+          - 0.0
+          force_direction_body:
+          - 1.0
+          - 0.0
+          - 0.0
           max_thrust_n: 0.5
-      base_controller:
-        module: "sim.control.orbit.baseline"
-        class_name: "StationkeepingController"
-        params:
-          target_state: [7001.0, 0.0, 0.0, 0.0, 7.5, 0.0]
-          kp_pos: 1.0e-3
-          kd_vel: 0.0
-          max_accel_km_s2: 1.0e-3
-  attitude_control:
-    kind: "python"
-    module: "sim.control.attitude.zero_torque"
-    class_name: "ZeroTorqueController"
-    params: {}
-
+        base_controller:
+          module: sim.control.orbit.baseline
+          class_name: StationkeepingController
+          params:
+            target_state:
+            - 7001.0
+            - 0.0
+            - 0.0
+            - 0.0
+            - 7.5
+            - 0.0
+            kp_pos: 0.001
+            kd_vel: 0.0
+            max_accel_km_s2: 0.001
+    attitude_control:
+      kind: python
+      module: sim.control.attitude.zero_torque
+      class_name: ZeroTorqueController
+      params: {}
+    role: target
+    kind: satellite
 simulator:
   duration_s: 5.0
   dt_s: 1.0
   dynamics:
     orbit:
-      model: "two_body"
+      model: two_body
       orbit_substep_s: 1.0
     attitude:
       enabled: false
@@ -66,10 +92,9 @@ simulator:
     strict: true
   termination:
     earth_impact_enabled: false
-
 outputs:
-  output_dir: "outputs/controller_smokes/rcs_allocation"
-  mode: "save"
+  output_dir: outputs/controller_smokes/rcs_allocation
+  mode: save
   stats:
     print_summary: false
     save_json: true

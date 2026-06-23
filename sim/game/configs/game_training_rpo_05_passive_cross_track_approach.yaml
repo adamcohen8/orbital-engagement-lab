@@ -1,7 +1,7 @@
 scenario_name: game_training_rpo_05_passive_cross_track_approach
 scenario_description: RPO trainer scenario for building a passively safe cross-track
-  orbit from in front of the target, then drifting backward through inspection
-  gates aligned with a natural-motion RC circle.
+  orbit from in front of the target, then drifting backward through inspection gates
+  aligned with a natural-motion RC circle.
 metadata:
   owner: codex
   notes: Run with `python run_game.py sim/game/configs/game_training_rpo_05_passive_cross_track_approach.yaml
@@ -14,9 +14,9 @@ metadata:
     training:
       enabled: true
       scenario_id: rpo_05_passive_cross_track_approach
-      learning_goal: Build a passively safe cross-track orbit from in front of
-        the target, then initiate a slow backward in-track inspection drift that
-        carries the chaser around a safe RC circle outside the forbidden cylinder.
+      learning_goal: Build a passively safe cross-track orbit from in front of the
+        target, then initiate a slow backward in-track inspection drift that carries
+        the chaser around a safe RC circle outside the forbidden cylinder.
       player_brief: The direct corridor through the target is forbidden. First build
         separation outside the red cylinder while in front of the target, then drift
         backward through the four green inspection gates around the safe RC circle.
@@ -28,8 +28,8 @@ metadata:
       - The red region is a cylinder about the in-track axis, not a sphere.
       - A safe solution establishes more than 0.5 km of cross-track separation before
         crossing the target's in-track station.
-      - The player should create the passive-safe geometry first, then let the
-        relative orbit drift backward through the RC inspection gates.
+      - The player should create the passive-safe geometry first, then let the relative
+        orbit drift backward through the RC inspection gates.
       - This level is about geometry and patience, not a time crunch.
       target_object_id: target
       chaser_object_id: chaser
@@ -204,7 +204,6 @@ objects:
         type: ekf
     kind: satellite
 simulator:
-  scenario_type: auto
   duration_s: 28800.0
   dt_s: 1.0
   dynamics:
@@ -261,7 +260,3 @@ outputs:
     fps: 30
     speed_multiple: 1.0
     frame_stride: 1
-monte_carlo:
-  enabled: false
-  iterations: 1
-  base_seed: 123

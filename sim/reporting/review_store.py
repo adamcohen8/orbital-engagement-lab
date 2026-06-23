@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import sqlite3
@@ -13,7 +14,18 @@ from sim.config import iter_object_sections
 from sim.plotting.style import get_oel_version
 from sim.utils.frames import eci_relative_to_ric_rect
 
-REVIEW_SCHEMA_VERSION = "0.4"
+REVIEW_SCHEMA_VERSION = "0.5"
+REVIEW_SCHEMA_COMPATIBILITY_POLICY = "pre_1_0_additive"
+REVIEW_SCHEMA_STABLE_TABLES = (
+    "run_metadata",
+    "objects",
+    "time_samples",
+    "object_state",
+    "relative_state",
+    "thrust",
+    "metrics",
+    "artifacts",
+)
 
 
 def write_single_run_review_store(
@@ -51,6 +63,7 @@ def write_single_run_review_store(
             _insert_run_metadata(conn, cfg=cfg, summary=summary, outdir=outdir, generated_utc=generated_utc)
             _insert_objects(conn, cfg=cfg, summary=summary)
             _insert_object_propagation(conn, payload=payload)
+            _insert_object_state_frame(conn, payload=payload)
             _insert_time_samples(conn, t_s=t_s)
             _insert_object_state(conn, t_s=t_s, truth_hist=truth_hist)
             _insert_relative_state(conn, t_s=t_s, truth_hist=truth_hist, summary=summary)
@@ -88,6 +101,8 @@ def _create_schema(conn: sqlite3.Connection) -> None:
             samples INTEGER,
             output_dir TEXT,
             config_path TEXT,
+            config_sha256 TEXT,
+            config_json TEXT,
             summary_json_path TEXT,
             run_log_json_path TEXT
         );
@@ -110,6 +125,11 @@ def _create_schema(conn: sqlite3.Connection) -> None:
             tle_epoch_jd_utc REAL,
             tle_age_start_days REAL,
             tle_age_end_days REAL
+        );
+
+        CREATE TABLE object_state_frame (
+            object_id TEXT PRIMARY KEY,
+            state_frame TEXT NOT NULL
         );
 
         CREATE TABLE time_samples (
@@ -309,9 +329,10 @@ def _insert_run_metadata(
     outdir: Path,
     generated_utc: str,
 ) -> None:
+    config_json, config_sha256 = _config_json_and_sha256(cfg)
     conn.execute(
         """
-        INSERT INTO run_metadata VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO run_metadata VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             str(summary.get("scenario_name") or cfg.scenario_name or "single_run"),
@@ -325,10 +346,21 @@ def _insert_run_metadata(
             _int_or_none(summary.get("samples")),
             str(outdir),
             "",
+            config_sha256,
+            config_json,
             str(outdir / "master_run_summary.json"),
             str(outdir / "master_run_log.json"),
         ),
     )
+
+
+def _config_json_and_sha256(cfg: Any) -> tuple[str, str]:
+    if hasattr(cfg, "to_dict"):
+        data = cfg.to_dict()
+    else:
+        data = {}
+    config_json = json.dumps(data, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return config_json, hashlib.sha256(config_json.encode("utf-8")).hexdigest()
 
 
 def _insert_objects(conn: sqlite3.Connection, *, cfg: Any, summary: dict[str, Any]) -> None:
@@ -368,6 +400,19 @@ def _insert_object_propagation(conn: sqlite3.Connection, *, payload: dict[str, A
             )
         )
     conn.executemany("INSERT INTO object_propagation VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
+
+
+def _insert_object_state_frame(conn: sqlite3.Connection, *, payload: dict[str, Any]) -> None:
+    explicit = dict(payload.get("object_state_frames", {}) or {})
+    propagation = dict(payload.get("object_propagation", {}) or {})
+    object_ids = sorted(set(str(key) for key in explicit) | set(str(key) for key in propagation))
+    rows = []
+    for object_id in object_ids:
+        frame = explicit.get(object_id)
+        if frame is None:
+            frame = dict(propagation.get(object_id, {}) or {}).get("output_frame", "eci")
+        rows.append((object_id, str(frame or "eci").strip().lower()))
+    conn.executemany("INSERT OR REPLACE INTO object_state_frame VALUES (?, ?)", rows)
 
 
 def _insert_time_samples(conn: sqlite3.Connection, *, t_s: np.ndarray) -> None:
@@ -788,12 +833,22 @@ def _write_schema_json(path: Path, *, generated_utc: str) -> None:
         "generated_utc": generated_utc,
         "format": "sqlite",
         "database": "run.sqlite",
+        "compatibility": {
+            "policy": REVIEW_SCHEMA_COMPATIBILITY_POLICY,
+            "stable_tables": list(REVIEW_SCHEMA_STABLE_TABLES),
+            "breaking_change_requires_schema_version_bump": True,
+            "reader_guidance": (
+                "Prefer table/column discovery through this schema and ReviewWorkspace.schema(); "
+                "new tables or nullable columns may be added before 1.0."
+            ),
+        },
         "tables": {
             "run_metadata": {"description": "One row describing the run and review schema."},
             "objects": {"description": "Active simulation objects."},
             "object_propagation": {"description": "Per-object propagation-family provenance for GP/SP workflows."},
+            "object_state_frame": {"description": "Frame label for each object's state rows, e.g. eci or teme."},
             "time_samples": {"description": "Retained sample times."},
-            "object_state": {"description": "ECI truth state histories by object."},
+            "object_state": {"description": "Truth state histories by object; join object_state_frame for frame labels."},
             "relative_state": {"description": "RIC relative state for the primary object pair."},
             "thrust": {"description": "Applied acceleration histories by object."},
             "attitude_error": {"description": "Reserved for attitude error histories."},
@@ -818,7 +873,9 @@ def _write_schema_json(path: Path, *, generated_utc: str) -> None:
             "artifacts": {"description": "Known artifacts in the output folder."},
         },
     }
-    path.write_text(json.dumps(schema, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    tmp_path.write_text(json.dumps(schema, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    tmp_path.replace(path)
 
 
 def _iter_artifact_paths(artifacts: dict[str, Any], prefix: str = ""):

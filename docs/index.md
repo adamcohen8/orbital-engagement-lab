@@ -22,10 +22,12 @@ education, engineering prototyping, or Pro workflow evaluation.
 
 1. [Product Inventory](product-inventory.md)
 2. [Flagship RIC_PD 10 km Scenario](flagship-ric-pd-10km.md)
-3. [Validation Claims](validation-claims.md)
-4. [RIC_PD 10 km Validation Package](validation-ric-pd-10km.md)
-5. [Public Core And Pro Boundary](public-vs-pro.md)
-6. [Security And Procurement](security/supply-chain.md)
+3. [Physics Model Reference](physics-models.md)
+4. [Validation Claims](validation-claims.md)
+5. [RIC_PD 10 km Validation Package](validation-ric-pd-10km.md)
+6. [Orbital Engagement Pro](pro.md)
+7. [Public Core And Pro Boundary](public-vs-pro.md)
+8. [Security And Procurement](security/supply-chain.md)
 
 ## Agent User
 
@@ -56,6 +58,7 @@ Start here when you already know the kind of work you want to run.
 | Make custom tables or plots from a run | [Custom Analysis](custom-analysis.md) |
 | Configure built-in figures | [Plotting](plotting.md) |
 | View maintained plot examples | [Plot Gallery](plot-gallery.md) |
+| Understand physics model assumptions | [Physics Model Reference](physics-models.md) |
 | Explore actuator models | [Actuators](actuators.md) |
 | Use the orbital calculator | [Orbital Calculator](orbital-calculator.md) |
 | Use game/training mode | [Video Game Mode Roadmap](game-mode-roadmap.md) |

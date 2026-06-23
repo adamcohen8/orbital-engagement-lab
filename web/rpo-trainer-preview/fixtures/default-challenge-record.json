@@ -2,14 +2,16 @@
   "challenge_id": "rpo_arcade_pursuit",
   "physics_version": "web-two-body-v1",
   "scoring_version": "pursuit-v1",
-  "config_hash": "0273ff33",
+  "config_hash": "df8443be",
   "config": {
     "arcade": {
       "boss": {
-        "bonus_time_s": 2000,
+        "bonus_time_s": 5000,
+        "coast_prediction_model": "tschauner_hempel",
         "eccentricity_max": 0.2,
         "eccentricity_start": 0.05,
         "eccentricity_step": 0.05,
+        "music_track": "28_high_shred_boss_riff.wav",
         "score_multiplier": 2,
         "target_coes": {
           "a_km": 9000,
@@ -25,7 +27,7 @@
         ]
       },
       "boss_round_interval": 5,
-      "delta_v_bonus_time_per_m_s": 100,
+      "delta_v_bonus_time_per_m_s": 1000,
       "goal_range_step_km": 0.005,
       "initial_time_s": 12000,
       "min_goal_range_km": 0.005,

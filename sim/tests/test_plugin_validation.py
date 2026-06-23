@@ -3,7 +3,22 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from sim.config import scenario_config_from_dict, validate_scenario_plugins
+from sim.config import scenario_config_from_dict as _parse_scenario_config_dict
+from sim.config import validate_scenario_plugins
+
+DEEP_SPACE_LINE1 = "1 90003U 24003A   24001.00000000  .00000000  00000+0  00000+0 0    10"
+DEEP_SPACE_LINE2 = "2 90003  10.0000  20.0000 0100000  30.0000  40.0000  4.00000000    10"
+
+
+def scenario_config_from_dict(data: dict):
+    root = dict(data)
+    objects = dict(root.get("objects", {}) or {})
+    for object_id in ("rocket", "chaser", "target"):
+        if object_id in root:
+            objects.setdefault(object_id, root.pop(object_id))
+    if objects:
+        root["objects"] = objects
+    return _parse_scenario_config_dict(root)
 
 
 class TestPluginValidation(unittest.TestCase):
@@ -29,6 +44,104 @@ class TestPluginValidation(unittest.TestCase):
         )
 
         self.assertEqual(validate_scenario_plugins(cfg), [])
+
+    def test_general_sgp4_tle_object_accepts_native_teme_output(self):
+        cfg = scenario_config_from_dict(
+            {
+                "rocket": {"enabled": False},
+                "chaser": {"enabled": False},
+                "target": {
+                    "enabled": True,
+                    "propagation_method": "general",
+                    "general": {"model": "sgp4", "output_frame": "teme"},
+                    "specs": {"mass_kg": 420.0},
+                    "initial_state": {
+                        "tle": {
+                            "line1": "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9005",
+                            "line2": "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1000",
+                        }
+                    },
+                },
+                "simulator": {"duration_s": 20.0, "dt_s": 1.0},
+            }
+        )
+
+        self.assertEqual(validate_scenario_plugins(cfg), [])
+
+    def test_general_sgp4_tle_object_accepts_vallado_iau80_eci_transform(self):
+        cfg = scenario_config_from_dict(
+            {
+                "rocket": {"enabled": False},
+                "chaser": {"enabled": False},
+                "target": {
+                    "enabled": True,
+                    "propagation_method": "general",
+                    "general": {"model": "sgp4", "output_frame": "eci", "frame_transform": "teme_to_eci_iau80"},
+                    "specs": {"mass_kg": 420.0},
+                    "initial_state": {
+                        "tle": {
+                            "line1": "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9005",
+                            "line2": "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1000",
+                        }
+                    },
+                },
+                "simulator": {"duration_s": 20.0, "dt_s": 1.0},
+            }
+        )
+
+        self.assertEqual(validate_scenario_plugins(cfg), [])
+
+    def test_general_sgp4_teme_output_rejects_teme_as_eci_transform(self):
+        cfg = scenario_config_from_dict(
+            {
+                "rocket": {"enabled": False},
+                "chaser": {"enabled": False},
+                "target": {
+                    "enabled": True,
+                    "propagation_method": "general",
+                    "general": {"model": "sgp4", "output_frame": "teme", "frame_transform": "teme_as_eci"},
+                    "specs": {"mass_kg": 420.0},
+                    "initial_state": {
+                        "tle": {
+                            "line1": "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9005",
+                            "line2": "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1000",
+                        }
+                    },
+                },
+                "simulator": {"duration_s": 20.0, "dt_s": 1.0},
+            }
+        )
+
+        errs = validate_scenario_plugins(cfg)
+
+        self.assertTrue(any("frame_transform must be 'native'" in err for err in errs))
+
+    def test_general_sgp4_rejects_deep_space_sdp4_tle(self):
+        cfg = scenario_config_from_dict(
+            {
+                "rocket": {"enabled": False},
+                "chaser": {"enabled": False},
+                "target": {
+                    "enabled": True,
+                    "propagation_method": "general",
+                    "general": {"model": "sgp4"},
+                    "specs": {"mass_kg": 420.0},
+                    "initial_state": {
+                        "tle": {
+                            "line1": DEEP_SPACE_LINE1,
+                            "line2": DEEP_SPACE_LINE2,
+                            "require_checksum": True,
+                        }
+                    },
+                },
+                "simulator": {"duration_s": 20.0, "dt_s": 1.0},
+            }
+        )
+
+        errs = validate_scenario_plugins(cfg)
+
+        self.assertTrue(any("deep-space SDP4/resonance TLEs" in err for err in errs))
+        self.assertTrue(any("period >= 225 min" in err for err in errs))
 
     def test_general_sgp4_rejects_active_control(self):
         cfg = scenario_config_from_dict(

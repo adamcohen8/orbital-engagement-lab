@@ -1,6 +1,6 @@
 scenario_name: game_training_rpo_bonus_cislunar_rendezvous
-scenario_description: Bonus RPO trainer mission for completing a rendezvous near
-  an Earth-Moon L2 NRHO target with Moon-centered local RIC controls.
+scenario_description: Bonus RPO trainer mission for completing a rendezvous near an
+  Earth-Moon L2 NRHO target with Moon-centered local RIC controls.
 metadata:
   owner: codex
   notes: Run with `python run_game.py sim/game/configs/game_training_rpo_bonus_cislunar_rendezvous.yaml
@@ -33,7 +33,7 @@ metadata:
     cr3bp_coast_prediction_horizon_s: 259200.0
     cr3bp_coast_prediction_dt_s: 1800.0
     show_target_hcw_path: false
-    target_coast_prediction_horizon_s: 1127210.360660
+    target_coast_prediction_horizon_s: 1127210.36066
     target_coast_prediction_dt_s: 600.0
     camera_mode: rule_toggle_pair
     camera_rule_mode: current_pair
@@ -55,30 +55,27 @@ metadata:
       scenario_id: rpo_bonus_cislunar_rendezvous
       relative_frame: moon_ric
       learning_goal: Complete a close-rendezvous scenario with a target on a corrected
-        Earth-Moon L2 NRHO while using target-centered RIC axes built from the
-        target's motion about the Moon.
-      player_brief: You begin below and behind a target approaching perilune on
-        a corrected southern L2 near-rectilinear halo orbit, with a small
-        cross-track plane mismatch to clean up on approach. The display is
-        target-centered. R points from the Moon through the target, I follows
-        the target's instantaneous motion about the Moon, and C completes the
-        local frame. Use small burns to null range and relative speed near the
-        NRHO target.
+        Earth-Moon L2 NRHO while using target-centered RIC axes built from the target's
+        motion about the Moon.
+      player_brief: You begin below and behind a target approaching perilune on a
+        corrected southern L2 near-rectilinear halo orbit, with a small cross-track
+        plane mismatch to clean up on approach. The display is target-centered. R
+        points from the Moon through the target, I follows the target's instantaneous
+        motion about the Moon, and C completes the local frame. Use small burns to
+        null range and relative speed near the NRHO target.
       pass_criteria:
       - Get within 50 meters of the NRHO target.
       - Keep relative speed below 0.1 meters per second.
-      - Do not enter the 100 meter proximity zone faster than 0.1 meters per
-        second.
+      - Do not enter the 100 meter proximity zone faster than 0.1 meters per second.
       - Stay under the close-approach time and delta-v budgets.
       instructor_notes:
-      - This is a cislunar teaching mission using an opt-in CR3BP
-        rotating-frame propagator.
+      - This is a cislunar teaching mission using an opt-in CR3BP rotating-frame propagator.
       - The CR3BP state is in physical km and km/s; the integrator nondimensionalizes
         internally.
       - The target uses a deterministic corrected southern L2 NRHO initial condition
         phased 30 minutes before perilune in the Earth-Moon CR3BP.
-      - Discuss how Moon-centered RIC makes the local rendezvous task readable
-        even though the NRHO does not obey circular-orbit HCW intuition.
+      - Discuss how Moon-centered RIC makes the local rendezvous task readable even
+        though the NRHO does not obey circular-orbit HCW intuition.
       target_object_id: target
       chaser_object_id: chaser
       goal_relative_ric_km:
@@ -209,7 +206,6 @@ objects:
         type: ekf
     kind: satellite
 simulator:
-  scenario_type: auto
   duration_s: 259200.0
   dt_s: 10.0
   dynamics:
@@ -267,7 +263,3 @@ outputs:
     fps: 30
     speed_multiple: 1.0
     frame_stride: 1
-monte_carlo:
-  enabled: false
-  iterations: 1
-  base_seed: 123

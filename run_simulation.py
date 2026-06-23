@@ -65,7 +65,6 @@ def _print_doctor_report() -> bool:
         ("yaml", True),
         ("numpy", True),
         ("matplotlib", False),
-        ("PySide6", False),
         ("pygame", False),
     ):
         ok, detail = _check_import(module_name)
@@ -104,7 +103,7 @@ def _print_doctor_report() -> bool:
     )
     if not overall_ok:
         print("For Python FAIL, rerun with Python 3.10+ or the project virtual environment.")
-    print("Optional plotting/ORW/game dependencies may show WARN and are not required for quickstart.")
+    print("Optional plotting/game dependencies may show WARN and are not required for quickstart.")
     print("=" * 72)
     return overall_ok
 

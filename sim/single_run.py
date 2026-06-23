@@ -186,7 +186,7 @@ class _SingleRunEngine:
                 start_jd_utc=cfg.simulator.initial_jd_utc,
                 duration_s=float(cfg.simulator.duration_s),
                 output_frame=str(general.get("output_frame", "eci") or "eci"),
-                frame_transform=str(general.get("frame_transform", "teme_as_eci") or "teme_as_eci"),
+                frame_transform=general.get("frame_transform"),
                 attitude_quat_bn=agent.truth.attitude_quat_bn,
                 angular_rate_body_rad_s=agent.truth.angular_rate_body_rad_s,
             )

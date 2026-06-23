@@ -16,8 +16,8 @@ metadata:
       learning_goal: Observe natural RIC drift, then use small R/I/C pulses to approach
         a passive 3D NMT with a 2:1 RI ellipse and circular RC phasing.
       player_brief: Use small pulses and long coast arcs to shape the relative orbit
-        into the green 3D NMT. Burn cross-track near the top or bottom of the RI
-        ellipse so the RC plot becomes a circle.
+        into the green 3D NMT. Burn cross-track near the top or bottom of the RI ellipse
+        so the RC plot becomes a circle.
       pass_criteria:
       - Match the target radial and cross-track NMT amplitudes within tolerance.
       - Make the cross-track burn near the top or bottom of the RI ellipse.
@@ -166,7 +166,6 @@ objects:
         type: ekf
     kind: satellite
 simulator:
-  scenario_type: auto
   duration_s: 6000.0
   dt_s: 1.0
   dynamics:
@@ -223,7 +222,3 @@ outputs:
     fps: 30
     speed_multiple: 1.0
     frame_stride: 1
-monte_carlo:
-  enabled: false
-  iterations: 1
-  base_seed: 123

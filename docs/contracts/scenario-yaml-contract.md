@@ -2,8 +2,7 @@
 
 This document defines the 0.4 compatibility contract for scenario YAML files.
 It complements the user-facing guide in `docs/scenario-yaml.md` by stating what
-scenario authors, examples, GUI workflows, tests, and migration tools may rely
-on.
+scenario authors, examples, tests, agents, and migration tools may rely on.
 
 The contract applies to public-core single-run scenarios and to Pro/private
 analysis scenarios unless a Pro-only field is explicitly called out.
@@ -32,7 +31,6 @@ Stable enough to rely on:
 Still maturing:
 
 - formal schema version field,
-- complete GUI coverage of advanced YAML fields,
 - migration tooling for all historical config shapes,
 - exhaustive invalid-combination diagnostics.
 
@@ -45,13 +43,9 @@ Recognized top-level sections:
 - `scenario_description`
 - `metadata`
 - `objects`
-- `rocket`
-- `chaser`
-- `target`
 - `ground_stations`
 - `simulator`
 - `outputs`
-- `monte_carlo`
 - `analysis`
 
 Object sections:
@@ -59,10 +53,8 @@ Object sections:
 - `objects` is the canonical object map for new configs.
 - Object IDs are user-facing names. Conventional IDs such as `rocket`,
   `chaser`, and `target` are supported but are not the only valid IDs.
-- Top-level `rocket`, `chaser`, and `target` sections are accepted as a legacy
-  compatibility layer. When both `objects.<id>` and a matching legacy alias are
-  present, `objects.<id>` is authoritative; loaders keep the legacy dataclass
-  aliases synchronized for compatibility.
+- Top-level `rocket`, `chaser`, and `target` sections are no longer accepted in
+  scenario YAML. Use `objects.<id>` for every participant.
 - Disabled objects may be omitted or set with `enabled: false`.
 - Enabled object entries participate in runtime creation, validation, and
   output histories.
@@ -81,7 +73,7 @@ Ground station sections:
 Analysis sections:
 
 - Public core accepts deterministic single-run scenarios.
-- Pro/private workspaces support `monte_carlo` and `analysis` workflows.
+- Pro/private workspaces support `analysis` workflows.
 - Generated public entrypoints should reject enabled Monte Carlo, sensitivity,
   covariance, or other Pro analysis with a clear Pro-boundary message.
 
@@ -248,10 +240,9 @@ Common fields:
 - `plugin_validation`
 - `termination`
 
-`scenario_type` is a legacy dispatch hint and should be omitted from ordinary
-configs. The loader defaults it internally for compatibility; new user-facing
-configs should express behavior through object roles, dynamics, controllers,
-mission modules, and analysis sections instead.
+Scenario behavior is expressed through object roles, object kinds, dynamics,
+controllers, mission modules, bridges, and analysis sections. `scenario_type`
+is no longer accepted in scenario YAML.
 
 Dynamics contract:
 
@@ -320,7 +311,7 @@ Common fields:
 Output modes:
 
 - `save` is the preferred headless/CI mode.
-- `interactive` may open windows or require GUI-capable environments.
+- `interactive` may open plot windows or require display-capable environments.
 - In automation contexts, interactive mode may be coerced to save mode.
 
 Stats contract:
@@ -357,8 +348,8 @@ Public-core scenarios should use:
 
 Pro/private scenarios may additionally use:
 
-- `monte_carlo.enabled: true`,
 - `analysis.enabled: true`,
+- `analysis.study_type: monte_carlo`,
 - `analysis.study_type: covariance`,
 - controller-benchmark configs,
 - AI report settings,
@@ -388,6 +379,5 @@ controller behavior, or output semantics without tests and release notes.
 
 - No formal `schema_version` field is enforced yet.
 - Not every supported field has a generated machine-readable schema.
-- GUI editing does not yet expose every advanced config combination.
 - Public/Pro field boundaries are enforced mostly through export stubs, docs,
   config curation, and runtime checks rather than a standalone schema compiler.

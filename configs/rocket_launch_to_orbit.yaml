@@ -1,0 +1,131 @@
+scenario_name: rocket_launch_to_orbit
+scenario_description: Tuned rocket ascent benchmark that reaches a low-Earth insertion
+  orbit with GNC diagnostics.
+metadata:
+  owner: public
+  seed: 123
+  notes: This is a current-generation rocket GNC benchmark, not a validated launch
+    vehicle design.
+objects:
+  rocket:
+    enabled: true
+    role: rocket
+    kind: rocket
+    specs:
+      preset_stack: BASIC_TWO_STAGE_STACK
+      payload_mass_kg: 18000.0
+      thrust_axis_body:
+      - 1.0
+      - 0.0
+      - 0.0
+    initial_state:
+      launch_lat_deg: 28.5
+      launch_lon_deg: -80.6
+      launch_alt_km: 0.0
+      launch_azimuth_deg: 90.0
+    base_guidance:
+      kind: python
+      module: sim.rocket.guidance
+      class_name: OpenLoopPitchProgramGuidance
+      params:
+        vertical_hold_s: 8.0
+        pitch_start_s: 8.0
+        pitch_end_s: 220.0
+        pitch_final_deg: 90.0
+        max_throttle: 1.0
+    guidance_modifiers:
+    - kind: python
+      module: sim.rocket.guidance
+      class_name: MaxQThrottleLimiterGuidance
+      params:
+        max_q_pa: 55000.0
+        min_throttle: 0.4
+simulator:
+  duration_s: 1900.0
+  dt_s: 1.0
+  dynamics:
+    orbit:
+      model: two_body
+      orbit_substep_s: 1.0
+      j2: false
+      j3: false
+      j4: false
+      drag: true
+      srp: false
+      third_body_sun: false
+      third_body_moon: false
+    attitude:
+      enabled: true
+      attitude_substep_s: 1.0
+    rocket:
+      atmosphere_model: ussa1976
+      aero_model_enabled: true
+      use_stagewise_aero_geometry: false
+      area_ref_m2: 10.0
+      use_wgs84_geodesy: true
+      target_altitude_km: 350.0
+      target_altitude_tolerance_km: 40.0
+      target_eccentricity_max: 0.05
+      insertion_hold_time_s: 5.0
+      attitude_mode: cheater
+      tvc_steering_enabled: true
+      tvc_pass_through_attitude: true
+      tvc_time_constant_s: 0.2
+      tvc_max_gimbal_deg: 5.0
+      tvc_rate_limit_deg_s: 8.0
+      tvc_pivot_offset_body_m:
+      - -6.0
+      - 0.0
+      - 0.0
+      aero:
+        reference_area_m2: 10.0
+        reference_length_m: 35.0
+        cp_offset_body_m:
+        - -2.5
+        - 0.0
+        - 0.0
+        cd_base: 0.18
+        cd_alpha2: 0.08
+        cd_supersonic: 0.28
+        transonic_peak_cd: 0.25
+        transonic_mach: 1.0
+        transonic_width: 0.2
+        cl_alpha_per_rad: 0.12
+        cy_beta_per_rad: 0.12
+        cm_alpha_per_rad: -0.02
+        cn_beta_per_rad: -0.02
+  environment:
+    atmosphere_env: {}
+  termination:
+    earth_impact_enabled: true
+outputs:
+  output_dir: outputs/rocket_launch_to_orbit
+  mode: save
+  stats:
+    enabled: true
+    print_summary: true
+    save_json: true
+    save_csv: false
+    save_full_log: false
+  plots:
+    enabled: true
+    draw_earth_map: true
+    orbital_elements_object_id: rocket
+    figure_ids:
+    - run_dashboard
+    - rocket_ascent_diagnostics
+    - rocket_gnc_diagnostics
+    - rocket_orbital_elements
+    - rocket_fuel_remaining
+    - rocket_mission_timeline
+    - rocket_downrange_altitude
+    - rocket_maxq_throttle
+    - rocket_tvc_aero_authority
+    - rocket_insertion_scorecard
+    - orbital_elements_summary
+    - orbital_elements_angles
+    - trajectory_eci_multi
+    - ground_track
+  animations:
+    enabled: false
+    types: []

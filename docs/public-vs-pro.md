@@ -14,6 +14,9 @@ Orbital Engagement Pro builds on the same foundation with higher-level analysis
 workflows for teams that need repeatability, search, campaign management, and
 review-ready outputs.
 
+For the evaluator-facing overview of what Pro adds, see
+[Orbital Engagement Pro](pro.md).
+
 ## Public Core
 
 The public core includes:
@@ -29,12 +32,15 @@ The public core includes:
 - adversarial and engagement-style simulation primitives, including generic
   chaser/target knowledge, pursuit, evade, and defensive behaviors
 - reusable object preset YAML files
-- primary CLI, scenario YAML, Python API, and review query workflows
-- experimental desktop GUI and OEL Evidence Studio viewer/workbench
+- primary CLI, scenario YAML, Python API, review query, and custom review
+  plotting workflows
 - examples and starter validation workflows
+- public-safe external-reference validation claims, commands, summaries, and
+  artifacts for selected HPOP/MATLAB orbit and Basilisk attitude comparisons
+  when the underlying reference material is redistributable
 - public use-case configs under `examples/configs/public_*.yaml`
-- lightweight educational rocket/ascent primitives, without tuned orbital
-  insertion scenarios or launch-vehicle design workflows
+- rocket/ascent simulation primitives, educational launch-to-orbit scenarios,
+  TVC/ascent diagnostics, and public rocket GNC contracts
 
 The public core should be useful for research, education, prototyping, and
 inspectable engineering experiments.
@@ -49,22 +55,26 @@ The pro layer includes:
 - sensitivity studies
 - covariance propagation and encounter uncertainty screening
 - orbit determination against external observations or precise-orbit products
+- SGP4 mean-element OD, residual-based maneuver screening, and burn
+  investigation workflows
 - batch nonlinear least squares and estimated-parameter workflows
 - data ingestion, observation normalization, and mission-input packet creation
 - campaign dashboards and baselines
 - AI-assisted campaign reports from Monte Carlo and sensitivity outputs
 - report cost estimation before hosted LLM calls
-- curated validation and mission-assurance scenario packs
+- curated validation and mission-assurance scenario packs beyond the public
+  trust baseline
+- validation automation, release evidence packaging, and customer-specific
+  comparison reports
 - rocket insertion engagement scenarios and deeper adversarial campaign packs
 - custom and program-specific flight-software integration workflows
 - Pro workflow configs under `examples/configs/pro_*.yaml`
-- tuned rocket launch-to-orbit scenarios, TVC/ascent GNC benchmarks,
-  insertion contracts, payload-margin studies, and rocket guidance comparison
-  workflows
+- rocket/ascent benchmarking, optimization, payload-margin campaigns, and
+  rocket guidance comparison workflows
 
-Those workflows are intentionally not part of the public export. Public modules
-that would otherwise expose those surfaces raise clear import errors explaining
-the boundary.
+Those workflow accelerators are intentionally not part of the public export.
+Public modules that would otherwise expose those surfaces raise clear import
+errors explaining the boundary.
 
 AI report provider adapters, prompt templates, cost-estimation helpers, hosted
 LLM smoke configs, and generated AI report artifacts belong to the Pro layer.

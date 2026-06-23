@@ -26,8 +26,8 @@ The commands below use `.venv/bin/python` so they work even on systems where
 .venv/bin/python run_simulation.py --doctor
 ```
 
-Warnings for optional plotting, experimental GUI, or game packages do not block
-the headless quickstart path.
+Warnings for optional plotting or game packages do not block the headless
+quickstart path.
 
 Only run scenario YAML files from sources you trust. Scenario configs can point
 at importable Python modules/classes for controllers, guidance, mission
@@ -197,17 +197,15 @@ interactive plotting demo:
 ## Optional Profiles
 
 ```bash
-.venv/bin/python -m pip install ".[gui]"
 .venv/bin/python -m pip install ".[ml]"
 .venv/bin/python -m pip install ".[full]"
 ```
 
 The base package already installs NumPy and Matplotlib for simulation and
-plotting support. The GUI profile enables experimental desktop surfaces,
-including OEL Evidence Studio for completed-run review and brief support.
-The recommended public onboarding path remains CLI/YAML/Python API, and the
-scripted review path remains `.venv/bin/python -m sim.review`. The ML profile
-enables the bundled Gymnasium-style environments.
+plotting support. The recommended public onboarding path remains
+CLI/YAML/Python API, and the scripted review path remains
+`.venv/bin/python -m sim.review`. The ML profile enables the bundled
+Gymnasium-style environments.
 
 ## Gravity Coefficient Files
 

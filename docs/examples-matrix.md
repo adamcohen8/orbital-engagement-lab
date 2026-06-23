@@ -25,13 +25,18 @@ perturbations.
 | Config | What It Demonstrates | Main Outputs | Notes |
 | --- | --- | --- | --- |
 | `public_tle_2hr_propagation.yaml` | Approximate TLE-to-ECI initialization followed by two-hour OEL numerical propagation with configured force-model toggles | summary JSON, trajectory histories | Not SGP4/general perturbations: OEL initializes from the TLE, then numerically integrates its configured special-perturbations force model. Treat the initial state as approximate. |
-| `public_sgp4_passive_propagation.yaml` | Passive TLE catalog-object propagation with `propagation_method: general` and `general.model: sgp4` | summary JSON, review store, `object_propagation`, trajectory histories | SGP4 object is passive: no thrust, controllers, or OEL force-model modifiers apply to that object's trajectory. v1 records `frame_transform: teme_as_eci`. |
+| `public_sgp4_passive_propagation.yaml` | Passive TLE catalog-object propagation with `propagation_method: general` and `general.model: sgp4` | summary JSON, review store, `object_propagation`, `object_state_frame`, trajectory histories | SGP4 object is passive: no thrust, controllers, or OEL force-model modifiers apply to that object's trajectory. Use `output_frame: teme` for native TEME rows, or `output_frame: eci` plus `frame_transform: teme_as_eci` for the legacy ECI-compatible approximation. |
+| `public_sgp4_passive_eci_transform.yaml` | Passive TLE catalog-object propagation with opt-in Vallado IAU-80 TEME-to-ECI output | summary JSON, review store, `object_propagation`, `object_state_frame`, trajectory histories | Uses `output_frame: eci` and `frame_transform: teme_to_eci_iau80`. This is deterministic frame-reduction plumbing for validation and review workflows, not an EOP-driven operational frame service. |
 | `public_ground_station_access_from_tle.yaml` | Passive station access from an approximate TLE-initialized object | access summary, access/elevation/range plot, and map-backed ground track | Not SGP4/general perturbations: uses the same TLE-to-ECI initializer, then OEL numerical propagation with J2 enabled for a quick access screen. |
 | `public_closed_loop_rendezvous_lqr.yaml` | Compact closed-loop chaser/target rendezvous with HCW LQR | run summary and rendezvous metrics | Fastest controller example for reading the YAML shape. |
 | `public_rendezvous_closed_loop.yaml` | Broader rendezvous with attitude pointing, sensing, EKF knowledge, and plots | dashboard, rendezvous, control, estimation, sensor-access, and ground-track plots | Best public example for end-to-end closed-loop artifact review. |
 | `public_orbit_environment_stack.yaml` | Perturbation and environment toggles | summary JSON and optional plots | Use to inspect deterministic force-model configuration. |
 | `public_reentry_interactive_demo.yaml` | 10-day atmospheric re-entry diagnostics with conservative kill thresholds | interactive re-entry summary, aero, and thermal plots plus JSON artifacts | Starts at the 300 km entry threshold with drag and re-entry termination enabled. |
-| `public_attitude_hold_disturbance.yaml` | Attitude hold under initial error and disturbance torque | attitude histories and control artifacts | Requires no GUI; useful for attitude-control sanity checks. |
+| `public_rocket_launch_to_orbit.yaml` | Educational rocket ascent to a low-Earth insertion orbit with GNC, max-Q, TVC, fuel, and orbital-element diagnostics | rocket ascent, GNC, fuel, mission timeline, scorecard, ground-track, and orbital-element plots | Public rocket/ascent example, not a validated launch-vehicle design or operational launch analysis. |
+| `public_attitude_hold_disturbance.yaml` | Attitude hold under initial error and disturbance torque | attitude histories and control artifacts | Headless-safe and useful for attitude-control sanity checks. |
+| `public_actuator_presets_smoke.yaml` | Satellite actuator vocabulary for RCS, electric propulsion, and CMG attitude steering | summary JSON and validated object/control wiring | Trimmed from the local actuator lab so the example stays readable. |
+| `public_orbital_elements_stationkeeping.yaml` | Single-satellite orbital-elements stationkeeping using mission strategy and controller execution | summary JSON and review store | Useful non-rendezvous control example for the current `objects` architecture. |
+| `public_mission_recovery_planner.yaml` | Mission-recovery planner recommendations after a small in-track perturbing burn | recovery trade-space plot, summary JSON, and review store | Demonstrates the public mission recovery/reconstitution workflow without campaign machinery. |
 | `public_manual_rpo_training.yaml` | Manual/game-style RPO scenario wiring | game/manual-control-compatible config | Can be launched with `run_game.py` when the `game` extra is installed. |
 | `public_manual_engagement.yaml` | Manual engagement-style scenario with knowledge and defensive behavior | run outputs or game-mode behavior depending on entrypoint | More advanced than the first manual training config. |
 
@@ -80,6 +85,10 @@ also works:
 - Ground-station access: start with `public_ground_station_access_from_tle.yaml`.
 - Atmospheric re-entry: start with `configs/reentry_smoke.yaml`, then use
   `public_reentry_interactive_demo.yaml` for the longer interactive plot view.
+- Rocket/ascent dynamics: start with `public_rocket_launch_to_orbit.yaml`.
+- Actuator vocabulary: start with `public_actuator_presets_smoke.yaml`.
+- Orbital-elements control: start with `public_orbital_elements_stationkeeping.yaml`.
+- Mission recovery planning: start with `public_mission_recovery_planner.yaml`.
 - Closed-loop control: start with `public_closed_loop_rendezvous_lqr.yaml`.
 - Plot/artifact review: start with `configs/ric_pd_10km_experiment.yaml`.
 - Guided RPO trainer: start with `run_game.py`.

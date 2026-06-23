@@ -9,11 +9,6 @@ from sim.digital_twin.mass_properties import (
     resolve_inertia_kg_m2,
     validate_mass_properties,
 )
-from sim.digital_twin.package import (
-    SpacecraftTwinPackage,
-    TwinGeometrySummary,
-    TwinValidationResult,
-)
 
 __all__ = [
     "MassPropertyAudit",
@@ -25,7 +20,4 @@ __all__ = [
     "normalized_mass_property_snippet",
     "resolve_inertia_kg_m2",
     "validate_mass_properties",
-    "SpacecraftTwinPackage",
-    "TwinGeometrySummary",
-    "TwinValidationResult",
 ]

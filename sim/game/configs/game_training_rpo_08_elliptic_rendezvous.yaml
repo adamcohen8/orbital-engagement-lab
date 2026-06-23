@@ -18,24 +18,24 @@ metadata:
       enabled: true
       scenario_id: rpo_08_elliptic_rendezvous
       learning_goal: Complete the final rendezvous with an eccentric-orbit target
-        by reducing range below 10 meters while keeping relative speed below
-        0.1 meters per second.
+        by reducing range below 10 meters while keeping relative speed below 0.1 meters
+        per second.
       player_brief: This is the Level 4 rendezvous problem in the eccentric-orbit
-        environment. Use the elliptical coast predictor to manage the changing
-        local dynamics, enter the 25 meter proximity zone below 0.1 m/s, then
-        settle inside the final 10 meter goal.
+        environment. Use the elliptical coast predictor to manage the changing local
+        dynamics, enter the 25 meter proximity zone below 0.1 m/s, then settle inside
+        the final 10 meter goal.
       pass_criteria:
       - Get within 10 meters of the target.
       - Keep relative speed below 0.1 meters per second.
       - Do not enter the 25 meter proximity zone faster than 0.1 meters per second.
       - Stay under the time and delta-v budgets.
       instructor_notes:
-      - This level repeats the Level 4 terminal-rendezvous objective after the
-        eccentric-orbit approach and NMC lessons.
-      - This level intentionally has no keepout hard fail because rendezvous
-        requires final closure.
-      - Use the close zoom to discuss why speed matters as much as range when
-        the local orbital rate is changing.
+      - This level repeats the Level 4 terminal-rendezvous objective after the eccentric-orbit
+        approach and NMC lessons.
+      - This level intentionally has no keepout hard fail because rendezvous requires
+        final closure.
+      - Use the close zoom to discuss why speed matters as much as range when the
+        local orbital rate is changing.
       - The coast predictor uses a Tschauner-Hempel-style elliptical linear model
         rather than the circular-orbit HCW projection.
       target_object_id: target
@@ -169,7 +169,6 @@ objects:
         type: ekf
     kind: satellite
 simulator:
-  scenario_type: auto
   duration_s: 7200.0
   dt_s: 1.0
   dynamics:
@@ -226,7 +225,3 @@ outputs:
     fps: 30
     speed_multiple: 1.0
     frame_stride: 1
-monte_carlo:
-  enabled: false
-  iterations: 1
-  base_seed: 123

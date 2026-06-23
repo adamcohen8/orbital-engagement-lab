@@ -21,16 +21,16 @@ from sim.reporting.ground_station_access_reports import (
 def _ground_station_config(output_dir: Path) -> dict:
     return {
         "scenario_name": "ground_station_access_smoke",
-        "rocket": {"enabled": False},
-        "target": {
-            "enabled": True,
-            "specs": {"mass_kg": 100.0},
-            "initial_state": {
-                "position_eci_km": [7000.0, 0.0, 0.0],
-                "velocity_eci_km_s": [0.0, 7.5, 0.0],
+        "objects": {
+            "target": {
+                "enabled": True,
+                "specs": {"mass_kg": 100.0},
+                "initial_state": {
+                    "position_eci_km": [7000.0, 0.0, 0.0],
+                    "velocity_eci_km_s": [0.0, 7.5, 0.0],
+                },
             },
         },
-        "chaser": {"enabled": False},
         "ground_stations": [
             {
                 "id": "equator_prime",

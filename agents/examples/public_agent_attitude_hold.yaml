@@ -1,17 +1,8 @@
-# Agent example: reaction-wheel attitude hold from an initial pointing error.
-#
-# Natural-language source:
-# "Create a short public attitude-control scenario. Start one satellite with a
-# pointing error and body rates, use the public reaction-wheel PD controller,
-# keep plots off, and save JSON summary plus queryable review outputs."
-
 scenario_name: public_agent_attitude_hold
-scenario_description: "Agent-generated public attitude-hold smoke scenario."
-
+scenario_description: Agent-generated public attitude-hold smoke scenario.
 metadata:
   owner: public-oel-agents
-  notes: "Headless agent example for attitude-control scenario generation."
-
+  notes: Headless agent example for attitude-control scenario generation.
 objects:
   bus:
     kind: satellite
@@ -21,16 +12,35 @@ objects:
       mass_kg: 120.0
       mass_properties:
         inertia_kg_m2:
-          - [12.0, 0.0, 0.0]
-          - [0.0, 10.0, 0.0]
-          - [0.0, 0.0, 8.0]
+        - - 12.0
+          - 0.0
+          - 0.0
+        - - 0.0
+          - 10.0
+          - 0.0
+        - - 0.0
+          - 0.0
+          - 8.0
         inertia_reference_point: center_of_mass
         frame: body
     initial_state:
-      position_eci_km: [7000.0, 0.0, 0.0]
-      velocity_eci_km_s: [0.0, 7.5, 0.0]
-      attitude_quat_bn: [0.9063078, 0.0, 0.4226183, 0.0]
-      angular_rate_body_rad_s: [0.02, -0.015, 0.01]
+      position_eci_km:
+      - 7000.0
+      - 0.0
+      - 0.0
+      velocity_eci_km_s:
+      - 0.0
+      - 7.5
+      - 0.0
+      attitude_quat_bn:
+      - 0.9063078
+      - 0.0
+      - 0.4226183
+      - 0.0
+      angular_rate_body_rad_s:
+      - 0.02
+      - -0.015
+      - 0.01
     orbit_control:
       kind: python
       module: sim.control.orbit.zero_controller
@@ -42,17 +52,37 @@ objects:
       class_name: ReactionWheelPDController
       params:
         wheel_axes_body:
-          - [1.0, 0.0, 0.0]
-          - [0.0, 1.0, 0.0]
-          - [0.0, 0.0, 1.0]
-        wheel_torque_limits_nm: [0.05, 0.05, 0.05]
-        desired_attitude_quat_bn: [1.0, 0.0, 0.0, 0.0]
-        desired_rate_body_rad_s: [0.0, 0.0, 0.0]
-        kp: [0.32, 0.32, 0.32]
-        kd: [3.5, 3.5, 3.5]
-
+        - - 1.0
+          - 0.0
+          - 0.0
+        - - 0.0
+          - 1.0
+          - 0.0
+        - - 0.0
+          - 0.0
+          - 1.0
+        wheel_torque_limits_nm:
+        - 0.05
+        - 0.05
+        - 0.05
+        desired_attitude_quat_bn:
+        - 1.0
+        - 0.0
+        - 0.0
+        - 0.0
+        desired_rate_body_rad_s:
+        - 0.0
+        - 0.0
+        - 0.0
+        kp:
+        - 0.32
+        - 0.32
+        - 0.32
+        kd:
+        - 3.5
+        - 3.5
+        - 3.5
 simulator:
-  scenario_type: auto
   duration_s: 60.0
   dt_s: 1.0
   dynamics:
@@ -72,7 +102,6 @@ simulator:
     strict: true
   termination:
     earth_impact_enabled: false
-
 outputs:
   output_dir: outputs/agents/public_agent_attitude_hold
   mode: save
@@ -90,6 +119,3 @@ outputs:
   animations:
     enabled: false
     types: []
-
-monte_carlo:
-  enabled: false

@@ -1,9 +1,10 @@
 scenario_name: public_agent_single_satellite
 metadata:
   owner: public-oel-agents
-  notes: >
-    Minimal AI-agent-generated public scenario. Propagates one passive
-    satellite with two-body orbit dynamics and zero control.
+  notes: 'Minimal AI-agent-generated public scenario. Propagates one passive satellite
+    with two-body orbit dynamics and zero control.
+
+    '
 objects:
   target:
     enabled: true
@@ -20,14 +21,14 @@ objects:
         argp_deg: 0.0
         true_anomaly_deg: 0.0
       attitude_quat_bn:
-        - 1.0
-        - 0.0
-        - 0.0
-        - 0.0
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
       angular_rate_body_rad_s:
-        - 0.0
-        - 0.0
-        - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
     orbit_control:
       kind: python
       module: sim.control.orbit.zero_controller
@@ -40,7 +41,6 @@ objects:
       params: {}
     mission_objectives: []
 simulator:
-  scenario_type: auto
   duration_s: 60.0
   dt_s: 1.0
   dynamics:
@@ -88,8 +88,3 @@ outputs:
   animations:
     enabled: false
     types: []
-monte_carlo:
-  enabled: false
-  iterations: 1
-  base_seed: 123
-  variations: []

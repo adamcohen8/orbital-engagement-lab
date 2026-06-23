@@ -32,6 +32,11 @@ test("canonical JSON and hash are stable across object key order", () => {
   assert.equal(hashCanonicalJson(a), hashCanonicalJson(b));
 });
 
+test("checked-in default challenge record matches the canonical builder", () => {
+  const fixture = JSON.parse(readFileSync(new URL("../fixtures/default-challenge-record.json", import.meta.url), "utf8"));
+  assert.deepEqual(fixture, buildChallengeRecord(DEFAULT_PURSUIT_CHALLENGE));
+});
+
 test("email verification helpers hash tokens and build public links", () => {
   const hash = hashVerificationToken("abc123");
   assert.equal(hash, hashVerificationToken("abc123"));
@@ -245,7 +250,7 @@ test("default arcade rounds visibly tighten the goal circle", () => {
   assert.ok(Math.abs(session.snapshot().goal_range_km - 0.095) < 1.0e-12);
 });
 
-test("arcade clear bonus includes 75 percent target period, lower dV bonus, and boss bonus", () => {
+test("arcade clear bonus matches desktop dV and boss bonus policy", () => {
   const record = buildChallengeRecord({
     ...DEFAULT_PURSUIT_CHALLENGE,
     goal_range_km: 20.0,
@@ -262,14 +267,18 @@ test("arcade clear bonus includes 75 percent target period, lower dV bonus, and 
   assert.ok(firstTransition);
   assert.ok(firstTransition.clear_range_km <= firstTransition.goal_range_km);
   const circularPeriodS = 2 * Math.PI * Math.sqrt((record.config.target_coes.a_km ** 3) / record.config.mu_km3_s2);
-  assert.equal(firstTransition.bonus_time_s, Number((0.75 * circularPeriodS + 300).toPrecision(12)));
+  assert.equal(record.config.arcade.delta_v_bonus_time_per_m_s, 1000);
+  assert.equal(record.config.arcade.boss.bonus_time_s, 5000);
+  assert.equal(record.config.arcade.boss.coast_prediction_model, "tschauner_hempel");
+  assert.equal(record.config.arcade.boss.music_track, "28_high_shred_boss_riff.wav");
+  assert.equal(firstTransition.bonus_time_s, Number((0.75 * circularPeriodS + 3000).toPrecision(12)));
 
   session.continueNextRound();
   session.step(1);
   const bossTransition = session.snapshot().round_transition;
   assert.ok(bossTransition);
   const bossPeriodS = 2 * Math.PI * Math.sqrt((record.config.arcade.boss.target_coes.a_km ** 3) / record.config.mu_km3_s2);
-  assert.equal(bossTransition.bonus_time_s, Number((0.75 * bossPeriodS + 300 + 2000).toPrecision(12)));
+  assert.equal(bossTransition.bonus_time_s, Number((0.75 * bossPeriodS + 3000 + 5000).toPrecision(12)));
 });
 
 test("arcade multi-round attempt packet validates from recorded round inputs", () => {

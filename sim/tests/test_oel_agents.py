@@ -61,7 +61,6 @@ GOLDEN_PATHS = {
         ],
     },
 }
-SAVED_QUERIES_ALLOWED_TO_BE_EMPTY = {"burn_events"}
 ANSWER_EXAMPLE_REQUIRED_SECTIONS = [
     "Status:",
     "Commands:",
@@ -372,7 +371,7 @@ def test_public_agent_saved_review_queries_execute(example_path: Path, tmp_path:
             cursor = conn.execute(SAVED_REVIEW_QUERIES[query_name].sql)
             rows = cursor.fetchall()
             assert cursor.description is not None
-            if query_name not in SAVED_QUERIES_ALLOWED_TO_BE_EMPTY:
+            if not SAVED_REVIEW_QUERIES[query_name].allow_empty:
                 assert rows, (example_path.stem, query_name)
 
 
@@ -389,6 +388,7 @@ def test_public_agent_saved_review_query_cli_lists_queries() -> None:
     assert "rendezvous_metrics:" in proc.stdout
     assert "ground_access_summary:" in proc.stdout
     assert "attitude_state_first_last:" in proc.stdout
+    assert "[supported; tables=" in proc.stdout
 
 
 def test_public_agent_relative_state_shape_fails_validate_only(tmp_path: Path) -> None:

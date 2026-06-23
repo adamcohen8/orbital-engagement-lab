@@ -10,7 +10,6 @@ The contract applies to:
 
 - public CLI single-run execution,
 - `SimulationSession` and public API single-run execution,
-- GUI-backed single-run execution,
 - deterministic single-run scenarios used by validation and examples.
 
 Batch workflows such as Monte Carlo, sensitivity, and controller benchmarking
@@ -39,7 +38,6 @@ Still maturing:
 - exact payload field stability beyond documented summary fields,
 - batch-analysis orchestration semantics,
 - controller-benchmark and campaign artifact schemas,
-- GUI coverage of every advanced YAML feature.
 
 
 ## Canonical Entrypoints
@@ -358,6 +356,5 @@ release notes and accompanied by focused tests.
 - Batch workflow contracts are not yet fully documented.
 - Campaign and benchmark contracts are not yet as complete as the single-run,
   scenario YAML, payload/artifact, sensitivity, and AI-report contracts.
-- Public GUI workflows do not yet expose every advanced YAML capability.
 - Release-grade validation packages are still private maturity work, not a
   completed public-core contract.

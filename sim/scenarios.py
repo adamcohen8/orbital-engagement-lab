@@ -82,8 +82,6 @@ def _clean_simulator(value: Mapping[str, Any]) -> dict[str, Any]:
     raw = dict(value)
     out: dict[str, Any] = {}
     for key, item in raw.items():
-        if key == "scenario_type" and item == "auto":
-            continue
         if key == "acceleration" and isinstance(item, Mapping):
             cleaned = _drop_section_defaults(item, {"mode": "off", "warmup": False, "env_override": True})
         elif key == "plugin_validation" and isinstance(item, Mapping):
@@ -503,7 +501,6 @@ class ScenarioBuilder:
                 "plots": {"enabled": False, "figure_ids": []},
                 "animations": {"enabled": False, "types": []},
             },
-            "monte_carlo": {"enabled": False, "iterations": 1},
         }
 
     @property
@@ -533,9 +530,13 @@ class ScenarioBuilder:
         if initial_jd_utc is not None:
             simulator["initial_jd_utc"] = float(initial_jd_utc)
         if orbit_substep_s is not None:
-            simulator["orbit_substep_s"] = float(orbit_substep_s)
+            dynamics = simulator.setdefault("dynamics", {})
+            orbit = dynamics.setdefault("orbit", {})
+            orbit["orbit_substep_s"] = float(orbit_substep_s)
         if attitude_substep_s is not None:
-            simulator["attitude_substep_s"] = float(attitude_substep_s)
+            dynamics = simulator.setdefault("dynamics", {})
+            attitude = dynamics.setdefault("attitude", {})
+            attitude["attitude_substep_s"] = float(attitude_substep_s)
         return self
 
     def outputs(

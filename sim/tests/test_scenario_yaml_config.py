@@ -11,15 +11,17 @@ class TestScenarioYamlConfig(unittest.TestCase):
             {
                 "scenario_name": "unit_test",
                 "scenario_description": "Unit test scenario",
-                "rocket": {
-                    "enabled": True,
-                    "base_guidance": {"module": "sim.rocket.guidance", "class_name": "OpenLoopPitchProgramGuidance"},
-                    "guidance_modifiers": [
-                        {"module": "sim.rocket.guidance", "class_name": "MaxQThrottleLimiterGuidance"}
-                    ],
+                "objects": {
+                    "rocket": {
+                        "enabled": True,
+                        "base_guidance": {"module": "sim.rocket.guidance", "class_name": "OpenLoopPitchProgramGuidance"},
+                        "guidance_modifiers": [
+                            {"module": "sim.rocket.guidance", "class_name": "MaxQThrottleLimiterGuidance"}
+                        ],
+                    },
+                    "chaser": {"enabled": False},
+                    "target": {"enabled": True},
                 },
-                "chaser": {"enabled": False},
-                "target": {"enabled": True},
                 "simulator": {"duration_s": 120.0, "dt_s": 0.5},
                 "outputs": {"output_dir": "outputs/test", "mode": "both", "plots": {"enabled": True}},
             }
@@ -49,7 +51,7 @@ class TestScenarioYamlConfig(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "target.enabled"):
             scenario_config_from_dict(
                 {
-                    "target": {"enabled": "false"},
+                    "objects": {"target": {"enabled": "false"}},
                     "simulator": {"duration_s": 10.0, "dt_s": 1.0},
                 }
             )
@@ -112,12 +114,13 @@ specs:
             scenario_path = base / "scenario.yaml"
             scenario_path.write_text(
                 """
-target:
-  enabled: true
-  preset: "presets/satellite.yaml"
-  specs:
-    dry_mass_kg: 180.0
-    max_thrust_n: 12.0
+objects:
+  target:
+    enabled: true
+    preset: "presets/satellite.yaml"
+    specs:
+      dry_mass_kg: 180.0
+      max_thrust_n: 12.0
 simulator:
   duration_s: 10.0
   dt_s: 1.0

@@ -20,7 +20,7 @@ from sim.dynamics.orbit.atmosphere import (
     density_ussa1976,
 )
 from sim.dynamics.orbit.eclipse import resolve_srp_geometry, srp_shadow_factor
-from sim.dynamics.orbit.environment import EARTH_ROT_RATE_RAD_S
+from sim.dynamics.orbit.environment import EARTH_ROT_RATE_RAD_S, SOLAR_PRESSURE_N_M2
 from sim.dynamics.orbit.epoch import (
     AU_KM,
     datetime_to_julian_date,
@@ -630,6 +630,28 @@ class TestOrbitAtmosphereModels(unittest.TestCase):
             },
         )
         np.testing.assert_allclose(a_cached, a_direct, rtol=0.0, atol=1e-15)
+
+    def test_srp_accel_accepts_source_pressure_override(self):
+        r = np.array([6878.137, 0.0, 0.0], dtype=float)
+        base_env = {"sun_pos_eci_km": np.array([AU_KM, 0.0, 0.0]), "srp_shadow_model": "none"}
+        a_default = accel_srp(
+            r_eci_km=r,
+            mass_kg=100.0,
+            area_m2=1.0,
+            cr=1.0,
+            t_s=0.0,
+            env=base_env,
+        )
+        a_override = accel_srp(
+            r_eci_km=r,
+            mass_kg=100.0,
+            area_m2=1.0,
+            cr=1.0,
+            t_s=0.0,
+            env={**base_env, "srp_pressure_n_m2": 2.0 * SOLAR_PRESSURE_N_M2},
+        )
+
+        np.testing.assert_allclose(a_override, 2.0 * a_default, rtol=1e-12, atol=0.0)
 
 
 if __name__ == "__main__":

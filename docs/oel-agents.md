@@ -156,11 +156,7 @@ report figures, use the OEL-styled review plotting API described in
 ```bash
 .venv/bin/python -m sim.review plot outputs/my_run --recipe relative_velocity_components --style light
 .venv/bin/python -m sim.review.plot outputs/my_run --sql "SELECT time_s, range_km FROM relative_state ORDER BY time_s" --x time_s --y range_km
-.venv/bin/python run_evidence_studio.py --output outputs/my_run
 ```
-
-Evidence Studio is an experimental local viewer/workbench for completed outputs;
-do not treat it as the primary agent interface.
 
 For repeatable agent handoffs, `sim.agent_task` can prepare review-enabled
 scenario copies, validate/run bundled recipes, inspect completed outputs,
@@ -437,8 +433,8 @@ mission execution, and other extension points.
 
 Public agent instructions and examples should stay educational, inspectable,
 and reproducible. Keep tuned parameters, optimizer traces, customer data,
-generated validation evidence, API keys, and AI report packets out of public
-commits.
+unredacted private validation evidence, API keys, and AI report packets out of
+public commits.
 
 ## Public Placement
 

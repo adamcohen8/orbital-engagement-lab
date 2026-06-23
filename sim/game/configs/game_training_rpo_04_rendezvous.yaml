@@ -15,13 +15,12 @@ metadata:
       learning_goal: Complete the final rendezvous by reducing range below 10 meters
         while keeping relative speed below 50 millimeters per second.
       player_brief: Complete final approach from the hold point. Close gently enough
-        to enter the 25 meter proximity zone below 50 mm/s, then settle inside
-        the final 10 meter goal.
+        to enter the 25 meter proximity zone below 50 mm/s, then settle inside the
+        final 10 meter goal.
       pass_criteria:
       - Get within 10 meters of the target.
       - Keep relative speed below 50 millimeters per second.
-      - Do not enter the 25 meter proximity zone faster than 50 millimeters per
-        second.
+      - Do not enter the 25 meter proximity zone faster than 50 millimeters per second.
       - Stay under the time and delta-v budgets.
       instructor_notes:
       - This level intentionally has no keepout hard fail because rendezvous requires
@@ -158,7 +157,6 @@ objects:
         type: ekf
     kind: satellite
 simulator:
-  scenario_type: auto
   duration_s: 7200.0
   dt_s: 1.0
   dynamics:
@@ -215,7 +213,3 @@ outputs:
     fps: 30
     speed_multiple: 1.0
     frame_stride: 1
-monte_carlo:
-  enabled: false
-  iterations: 1
-  base_seed: 123

@@ -9,6 +9,8 @@ from typing import Any
 from sim.actuators.presets import available_actuator_preset_names, resolve_actuator_specs_from_satellite_specs
 from sim.config.object_refs import configured_objects, object_parameter_prefix
 from sim.digital_twin.mass_properties import validate_mass_properties
+from sim.dynamics.orbit.sgp4 import sgp4_unsupported_reason
+from sim.dynamics.orbit.tle import parse_tle_lines
 
 
 @dataclass(frozen=True)
@@ -176,6 +178,8 @@ def validate_scenario_plugins(cfg: Any, *, import_plugins: bool = True) -> list[
         bridge = getattr(agent, "bridge", None)
         if bridge is not None and getattr(bridge, "enabled", False):
             errs.extend(_validate_pointer(bridge, _CONTRACTS["bridge"], f"{path}.bridge", import_plugins=import_plugins))
+            if _is_cfs_sil_bridge(bridge):
+                errs.extend(_validate_cfs_sil_timing(cfg, f"{path}.bridge"))
         for i, p in enumerate(getattr(agent, "mission_objectives", []) or []):
             errs.extend(
                 _validate_pointer(
@@ -201,8 +205,24 @@ def _validate_object_propagation(agent: Any, propagation_method: str, path: str)
     if model != "sgp4":
         errs.append(f"{path}.general.model must be 'sgp4' when propagation_method=general.")
     initial_state = dict(getattr(agent, "initial_state", {}) or {})
-    if not isinstance(initial_state.get("tle"), dict):
+    tle_block = initial_state.get("tle")
+    if not isinstance(tle_block, dict):
         errs.append(f"{path}.propagation_method=general with general.model=sgp4 requires initial_state.tle.")
+    else:
+        try:
+            lines = tle_block.get("lines")
+            if isinstance(lines, (list, tuple)) and len(lines) >= 2:
+                line1 = str(lines[0])
+                line2 = str(lines[1])
+            else:
+                line1 = str(tle_block.get("line1", "") or "")
+                line2 = str(tle_block.get("line2", "") or "")
+            elements = parse_tle_lines(line1, line2, require_checksum=bool(tle_block.get("require_checksum", False)))
+            unsupported = sgp4_unsupported_reason(elements)
+            if unsupported:
+                errs.append(f"{path}.initial_state.tle: {unsupported}")
+        except Exception as ex:
+            errs.append(f"{path}.initial_state.tle: invalid TLE for SGP4 propagation: {ex}")
     unsupported_initial_forms = [key for key in initial_state if str(key) != "tle"]
     if unsupported_initial_forms:
         errs.append(
@@ -223,11 +243,17 @@ def _validate_object_propagation(agent: Any, propagation_method: str, path: str)
     if unknown_general_keys:
         errs.append(f"{path}.general has unsupported field(s): {', '.join(unknown_general_keys)}.")
     output_frame = str(general.get("output_frame", "eci") or "eci").strip().lower()
-    if output_frame not in {"eci"}:
-        errs.append(f"{path}.general.output_frame must be 'eci' for SGP4 v1.")
-    frame_transform = str(general.get("frame_transform", "teme_as_eci") or "teme_as_eci").strip().lower()
-    if frame_transform != "teme_as_eci":
-        errs.append(f"{path}.general.frame_transform must be 'teme_as_eci' for SGP4 v1.")
+    if output_frame not in {"eci", "teme"}:
+        errs.append(f"{path}.general.output_frame must be 'eci' or 'teme' for SGP4 v1.")
+    default_transform = "native" if output_frame == "teme" else "teme_as_eci"
+    frame_transform = str(general.get("frame_transform", default_transform) or default_transform).strip().lower()
+    if output_frame == "eci" and frame_transform not in {"teme_as_eci", "teme_to_eci_iau80"}:
+        errs.append(
+            f"{path}.general.frame_transform must be 'teme_as_eci' or 'teme_to_eci_iau80' "
+            "when output_frame is 'eci'."
+        )
+    if output_frame == "teme" and frame_transform not in {"native", "none", "identity", "teme"}:
+        errs.append(f"{path}.general.frame_transform must be 'native' when output_frame is 'teme'.")
     return errs
 
 
@@ -385,6 +411,14 @@ def _validate_numeric_sequence(value: Any, path: str, *, length: int) -> list[st
         if not math.isfinite(numeric):
             errs.append(f"{path}[{i}]: must be a finite number.")
     return errs
+
+
+def _is_cfs_sil_bridge(pointer: Any) -> bool:
+    return False
+
+
+def _validate_cfs_sil_timing(cfg: Any, path: str) -> list[str]:
+    return []
 
 
 def _validate_satellite_actuator_specs(specs: dict[str, Any], path: str) -> list[str]:

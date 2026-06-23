@@ -5,9 +5,13 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from sim.config import scenario_config_from_dict
+from sim import SimulationConfig
 from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2, EARTH_RADIUS_KM
 from sim.reporting.mission_recovery import build_mission_recovery_summary, write_mission_recovery_trade_space_plot
+
+
+def scenario_config_from_dict(data: dict):
+    return SimulationConfig.from_dict(data).to_scenario_config()
 
 
 def test_mission_recovery_infers_retrograde_intrack_impulse_from_simulated_state() -> None:

@@ -46,7 +46,6 @@ objects:
     mission_objectives: []
     kind: satellite
 simulator:
-  scenario_type: auto
   duration_s: 120.0
   dt_s: 1.0
   dynamics:

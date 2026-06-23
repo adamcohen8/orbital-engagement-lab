@@ -38,7 +38,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.list_saved_queries:
         for item in list_saved_review_queries():
-            print(f"{item.name}: {item.description}")
+            tables = ",".join(item.source_tables)
+            print(f"{item.name}: {item.description} [{item.maturity}; tables={tables}]")
         return 0
 
     if args.manifest or args.list_artifacts:

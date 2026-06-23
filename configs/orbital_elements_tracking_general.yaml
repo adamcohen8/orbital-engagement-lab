@@ -1,7 +1,8 @@
 scenario_name: orbital_elements_tracking_general
 metadata:
   owner: validation
-  notes: General COE tracking loop using energy/eccentricity-vector/angular-momentum feedback.
+  notes: General COE tracking loop using energy/eccentricity-vector/angular-momentum
+    feedback.
 objects:
   rocket:
     enabled: false
@@ -73,10 +74,10 @@ objects:
         - inc
         - raan
         - argp
-        energy_gain_per_s: 1.0e-3
-        eccentricity_gain_per_s: 5.0e-4
-        plane_gain_per_s: 5.0e-4
-        max_accel_km_s2: 5.0e-5
+        energy_gain_per_s: 0.001
+        eccentricity_gain_per_s: 0.0005
+        plane_gain_per_s: 0.0005
+        max_accel_km_s2: 5.0e-05
         align_to_thrust: true
     mission_execution:
       kind: python
@@ -87,7 +88,6 @@ objects:
         alignment_tolerance_deg: 60.0
     mission_objectives: []
 simulator:
-  scenario_type: auto
   duration_s: 12000.0
   dt_s: 1.0
   dynamics:

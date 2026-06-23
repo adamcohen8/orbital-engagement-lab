@@ -57,6 +57,7 @@ from sim.dynamics.orbit.epoch import (
     sun_position_eci_km_enhanced,
     sun_position_eci_km_simple,
 )
+from sim.dynamics.orbit.frames import teme_to_eci_matrix_vallado_iau80, teme_to_eci_vallado_iau80
 from sim.dynamics.orbit.propagator import (
     OrbitPropagator,
     drag_plugin,
@@ -115,6 +116,8 @@ __all__ = [
     "resolved_jd_utc",
     "resolve_sun_moon_positions",
     "resolve_time_dependent_env",
+    "teme_to_eci_matrix_vallado_iau80",
+    "teme_to_eci_vallado_iau80",
     "srp_shadow_factor",
     "spice_sun_moon_positions_eci_km",
     "spice_supported_body_names",

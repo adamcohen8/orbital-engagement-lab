@@ -139,15 +139,6 @@ ground-access checks, metrics, and artifact inventories. If `review/run.sqlite`
 is missing, fall back to `index.md`, `master_run_summary.json`, CSV histories,
 and plots without claiming structured review evidence exists.
 
-The Output Review Workbench is an experimental dynamic plot creator for
-completed runs. Prefer `.venv/bin/python -m sim.review` for routine agent
-review. Use ORW only when the user explicitly asks for interactive local
-plotting:
-
-```bash
-.venv/bin/python run_orw.py --output outputs/my_run
-```
-
 ## Scenario Generation Rules
 
 - Start with the simplest deterministic scenario that can answer the user's

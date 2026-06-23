@@ -81,7 +81,6 @@ objects:
       params: {}
     kind: satellite
 simulator:
-  scenario_type: auto
   duration_s: 6000.0
   dt_s: 1.0
   dynamics:

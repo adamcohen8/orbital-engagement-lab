@@ -31,6 +31,7 @@ from sim.scenarios import (
     ValidationIssue as ValidationIssue,
 )
 from sim.security import ConfigPathPolicy
+from sim.security.sealed_mode import SealedModePolicy, sealed_mode_enabled, validate_sealed_mode
 
 MetricCallback = Callable[["SimulationResult"], Union[Mapping[str, Any], Any]]
 ControllerFactory = Callable[[], Any]
@@ -51,6 +52,62 @@ _STATE_COLUMNS = [
     "wz_body_rad_s",
     "mass_kg",
 ]
+
+
+def _canonicalize_api_config_dict(data: dict[str, Any]) -> dict[str, Any]:
+    """Normalize legacy Python API dict conveniences without relaxing YAML parsing."""
+    root = dict(data)
+    objects = dict(root.get("objects", {}) or {})
+    for object_id in ("rocket", "chaser", "target"):
+        if object_id in root:
+            objects.setdefault(object_id, root.pop(object_id))
+    if objects:
+        root["objects"] = objects
+
+    legacy_mc = root.pop("monte_carlo", None)
+    if isinstance(legacy_mc, dict) and bool(legacy_mc.get("enabled", False)):
+        variations = list(legacy_mc.get("variations", []) or [])
+        for variation in variations:
+            if not isinstance(variation, dict):
+                continue
+            path = str(variation.get("parameter_path", "") or "")
+            for object_id in ("rocket", "chaser", "target"):
+                prefix = f"{object_id}."
+                if path.startswith(prefix):
+                    variation["parameter_path"] = f"objects.{object_id}.{path[len(prefix):]}"
+                    break
+        analysis = dict(root.get("analysis", {}) or {})
+        analysis.setdefault("enabled", True)
+        analysis.setdefault("study_type", "monte_carlo")
+        analysis.setdefault(
+            "execution",
+            {
+                "parallel_enabled": bool(legacy_mc.get("parallel_enabled", False)),
+                "parallel_workers": int(legacy_mc.get("parallel_workers", 0) or 0),
+            },
+        )
+        analysis.setdefault(
+            "monte_carlo",
+            {
+                "iterations": int(legacy_mc.get("iterations", 1) or 1),
+                "base_seed": int(legacy_mc.get("base_seed", 0) or 0),
+                "variations": variations,
+            },
+        )
+        root["analysis"] = analysis
+    return root
+
+
+def _api_sealed_policy(
+    *,
+    sealed_mode: bool = False,
+    sealed_policy: SealedModePolicy | None = None,
+) -> SealedModePolicy | None:
+    if sealed_policy is not None:
+        return sealed_policy
+    if sealed_mode_enabled(bool(sealed_mode)):
+        return SealedModePolicy()
+    return None
 _RIC_STATE_COLUMNS = [
     "r_km",
     "i_km",
@@ -398,7 +455,7 @@ class SimulationConfig:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> SimulationConfig:
-        return cls(scenario=scenario_config_from_dict(dict(data)))
+        return cls(scenario=scenario_config_from_dict(_canonicalize_api_config_dict(dict(data))))
 
     @property
     def scenario_name(self) -> str:
@@ -904,8 +961,16 @@ class SimulationResult:
 
 
 class SimulationSession:
-    def __init__(self, config: ScenarioArtifact | SimulationConfig | SimulationScenarioConfig | dict[str, Any]):
+    def __init__(
+        self,
+        config: ScenarioArtifact | SimulationConfig | SimulationScenarioConfig | dict[str, Any],
+        *,
+        sealed_mode: bool = False,
+        sealed_policy: SealedModePolicy | None = None,
+    ):
+        self._sealed_policy = _api_sealed_policy(sealed_mode=sealed_mode, sealed_policy=sealed_policy)
         self._base_config = self._coerce_config(config)
+        self._enforce_sealed_mode(self._base_config)
         self._active_config = self._base_config
         self._result: SimulationResult | None = None
         self._step_index = 0
@@ -921,12 +986,21 @@ class SimulationSession:
     def from_config(
         cls,
         config: ScenarioArtifact | SimulationConfig | SimulationScenarioConfig | dict[str, Any],
+        *,
+        sealed_mode: bool = False,
+        sealed_policy: SealedModePolicy | None = None,
     ) -> SimulationSession:
-        return cls(config)
+        return cls(config, sealed_mode=sealed_mode, sealed_policy=sealed_policy)
 
     @classmethod
-    def from_yaml(cls, path: str | Path) -> SimulationSession:
-        return cls(SimulationConfig.from_yaml(path))
+    def from_yaml(
+        cls,
+        path: str | Path,
+        *,
+        sealed_mode: bool = False,
+        sealed_policy: SealedModePolicy | None = None,
+    ) -> SimulationSession:
+        return cls(SimulationConfig.from_yaml(path), sealed_mode=sealed_mode, sealed_policy=sealed_policy)
 
     @staticmethod
     def _coerce_config(
@@ -958,6 +1032,7 @@ class SimulationSession:
 
     def reset(self, seed: int | None = None) -> SimulationSnapshot | None:
         self._active_config = self._base_config.with_seed(seed) if seed is not None else self._base_config
+        self._enforce_sealed_mode(self._active_config)
         self._result = None
         self._step_index = 0
         self._done = False
@@ -1022,6 +1097,7 @@ class SimulationSession:
         if provider is None:
             self._external_intent_providers.pop(oid, None)
         else:
+            self._ensure_runtime_override_allowed("external intent providers")
             self._external_intent_providers[oid] = provider
         if self._engine is not None and hasattr(self._engine, "set_external_intent_provider"):
             self._engine.set_external_intent_provider(oid, provider)
@@ -1072,6 +1148,7 @@ class SimulationSession:
         elif not callable(factory):
             raise TypeError("Controller factory must be callable.")
         else:
+            self._ensure_runtime_override_allowed("controller overrides")
             self._controller_overrides[key] = factory
         if self._engine is not None:
             self._apply_single_controller_override(kind, oid, factory)
@@ -1090,6 +1167,7 @@ class SimulationSession:
         elif not callable(factory):
             raise TypeError("Mission factory must be callable.")
         else:
+            self._ensure_runtime_override_allowed("mission overrides")
             self._mission_overrides[key] = factory
         if self._engine is not None:
             self._apply_single_mission_override(kind, oid, factory)
@@ -1103,6 +1181,7 @@ class SimulationSession:
                     emit(getattr(self._engine, "current_index", 0))
             return
         scenario = self._active_config.to_scenario_config()
+        self._enforce_sealed_mode(self._active_config)
         self._validate_plugins_if_strict(scenario)
         self._engine = create_single_run_engine(scenario, step_callback=step_callback)
         self._controller_originals.clear()
@@ -1196,6 +1275,17 @@ class SimulationSession:
     def _run_batch_analysis(config: SimulationConfig) -> dict[str, Any]:
         return run_simulation_scenario(config.to_scenario_config(), source_path=config.source_path)
 
+    def _enforce_sealed_mode(self, config: SimulationConfig) -> None:
+        if self._sealed_policy is None:
+            return
+        errors = validate_sealed_mode(config.to_scenario_config(), self._sealed_policy)
+        if errors:
+            raise ValueError("Sealed mode validation failed:\n- " + "\n- ".join(errors))
+
+    def _ensure_runtime_override_allowed(self, surface: str) -> None:
+        if self._sealed_policy is not None:
+            raise PermissionError(f"Sealed mode blocks Python API {surface}; express trusted behavior in scenario YAML.")
+
 
 class SimulationWorkspace:
     """Higher-level programmatic facade for CLI-equivalent workflows."""
@@ -1205,6 +1295,8 @@ class SimulationWorkspace:
         *,
         allow_external_config_paths: bool = False,
         allow_external_ai_prompt_files: bool = False,
+        sealed_mode: bool = False,
+        sealed_policy: SealedModePolicy | None = None,
         read_roots: Iterable[str | Path] = (),
         write_roots: Iterable[str | Path] = (),
         workspace_root: str | Path | None = None,
@@ -1214,6 +1306,7 @@ class SimulationWorkspace:
         self.read_roots = tuple(read_roots)
         self.write_roots = tuple(write_roots)
         self.workspace_root = workspace_root
+        self._sealed_policy = _api_sealed_policy(sealed_mode=sealed_mode, sealed_policy=sealed_policy)
 
     def _path_policy_for(self, path: str | Path) -> ConfigPathPolicy:
         return ConfigPathPolicy.default(
@@ -1226,16 +1319,20 @@ class SimulationWorkspace:
         )
 
     def load(self, path: str | Path) -> SimulationConfig:
-        return SimulationConfig.from_yaml(path, path_policy=self._path_policy_for(path))
+        config = SimulationConfig.from_yaml(path, path_policy=self._path_policy_for(path))
+        self._enforce_sealed_mode(config)
+        return config
 
     def from_dict(self, data: dict[str, Any]) -> SimulationConfig:
-        return SimulationConfig.from_dict(data)
+        config = SimulationConfig.from_dict(data)
+        self._enforce_sealed_mode(config)
+        return config
 
     def session(
         self,
         config: str | Path | ScenarioArtifact | SimulationConfig | SimulationScenarioConfig | dict[str, Any],
     ) -> SimulationSession:
-        return SimulationSession.from_config(self._coerce_config(config))
+        return SimulationSession.from_config(self._coerce_config(config), sealed_policy=self._sealed_policy)
 
     def artifact(
         self,
@@ -1311,7 +1408,6 @@ class SimulationWorkspace:
         for done, item in enumerate(prepared, start=1):
             iteration = int(item["iteration"])
             config_dict = dict(item["config_dict"])
-            config_dict.setdefault("monte_carlo", {})["enabled"] = False
             config_dict.setdefault("analysis", {})["enabled"] = False
             run_cfg = scenario_config_from_dict(config_dict)
             if strict_plugins:
@@ -1560,7 +1656,17 @@ class SimulationWorkspace:
         config: str | Path | ScenarioArtifact | SimulationConfig | SimulationScenarioConfig | dict[str, Any],
     ) -> SimulationConfig:
         if isinstance(config, ScenarioArtifact):
-            return config.to_config()
-        if isinstance(config, (str, Path)):
-            return SimulationConfig.from_yaml(config, path_policy=self._path_policy_for(config))
-        return SimulationSession._coerce_config(config)
+            coerced = config.to_config()
+        elif isinstance(config, (str, Path)):
+            coerced = SimulationConfig.from_yaml(config, path_policy=self._path_policy_for(config))
+        else:
+            coerced = SimulationSession._coerce_config(config)
+        self._enforce_sealed_mode(coerced)
+        return coerced
+
+    def _enforce_sealed_mode(self, config: SimulationConfig) -> None:
+        if self._sealed_policy is None:
+            return
+        errors = validate_sealed_mode(config.to_scenario_config(), self._sealed_policy)
+        if errors:
+            raise ValueError("Sealed mode validation failed:\n- " + "\n- ".join(errors))

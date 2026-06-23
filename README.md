@@ -82,10 +82,7 @@ For a guided walkthrough, see [First Five Minutes](docs/first-five-minutes.md).
   assistants.
 
 The primary public surfaces are the CLI, scenario YAML, Python API, review
-query CLI/API, custom review plotting API, and the RPO trainer. The desktop GUI
-remains experimental. OEL Evidence Studio is an experimental viewer/workbench
-for completed runs; use it after a simulation writes `review/run.sqlite`, not
-as the first-run path.
+query CLI/API, custom review plotting API, and the RPO trainer.
 
 ## Choose A Workflow
 
@@ -208,8 +205,9 @@ analysis at scale: controller benchmarks, optimization and gain tuning,
 Monte Carlo and sensitivity campaigns, curated validation packs, AI-assisted
 reports, custom GNC workbench scaffolding, and program-specific integrations.
 
-See [Public Core And Pro Boundary](docs/public-vs-pro.md) for what belongs in
-the public core versus the Pro layer. Public examples do not require hosted AI
+See [Orbital Engagement Pro](docs/pro.md) for the Pro overview and
+[Public Core And Pro Boundary](docs/public-vs-pro.md) for what belongs in the
+public core versus the Pro layer. Public examples do not require hosted AI
 accounts or API keys.
 
 ## Documentation
@@ -219,6 +217,7 @@ accounts or API keys.
 - [First Five Minutes](docs/first-five-minutes.md)
 - [Scenario YAML](docs/scenario-yaml.md)
 - [Python API](docs/python-api.md)
+- [Orbital Engagement Pro](docs/pro.md)
 - [Product Inventory](docs/product-inventory.md)
 - [Flagship RIC_PD 10 km Scenario](docs/flagship-ric-pd-10km.md)
 - [Review Store](docs/review-store.md)
@@ -232,13 +231,11 @@ accounts or API keys.
 .venv/bin/python -m pip install ".[dev]"
 .venv/bin/python -m pip install ".[game]"
 .venv/bin/python -m pip install ".[ml]"
-.venv/bin/python -m pip install ".[gui]"
 .venv/bin/python -m pip install ".[full]"
 ```
 
-The `gui` extra is for experimental desktop surfaces, including OEL Evidence
-Studio. Public onboarding should start with the
-CLI/YAML/Python API path above. For scripted output inspection, prefer
+Public onboarding should start with the CLI/YAML/Python API path above. For
+scripted output inspection, prefer
 `.venv/bin/python -m sim.review`.
 
 ## Bug Reports

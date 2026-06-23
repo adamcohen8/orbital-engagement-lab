@@ -1,14 +1,17 @@
-scenario_name: "aero_assisted_plane_change_demo"
-scenario_description: "Atmospheric pass demo: lift-axis steering creates cross-track authority before a prograde raise burn."
-
+scenario_name: aero_assisted_plane_change_demo
+scenario_description: 'Atmospheric pass demo: lift-axis steering creates cross-track
+  authority before a prograde raise burn.'
 metadata:
-  owner: "examples"
-  tags: ["aero_assist", "atmospheric_pass", "reentry", "rpo_heritage"]
-
+  owner: examples
+  tags:
+  - aero_assist
+  - atmospheric_pass
+  - reentry
+  - rpo_heritage
 objects:
   chaser:
-    kind: "satellite"
-    role: "aero_assist_vehicle"
+    kind: satellite
+    role: aero_assist_vehicle
     specs:
       mass_kg: 200.0
       aero:
@@ -16,60 +19,95 @@ objects:
         cd: 0.2
         cl: 1.2
         lift_area_m2: 20.0
-        lift_axis_body: [0.0, 0.0, 1.0]
+        lift_axis_body:
+        - 0.0
+        - 0.0
+        - 1.0
         nose_radius_m: 0.5
     initial_state:
-      position_eci_km: [6670.0, 0.0, 0.0]
-      velocity_eci_km_s: [0.0, 7.733, 0.0]
-      attitude_quat_bn: [1.0, 0.0, 0.0, 0.0]
-      angular_rate_body_rad_s: [0.0, 0.0, 0.0]
+      position_eci_km:
+      - 6670.0
+      - 0.0
+      - 0.0
+      velocity_eci_km_s:
+      - 0.0
+      - 7.733
+      - 0.0
+      attitude_quat_bn:
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      angular_rate_body_rad_s:
+      - 0.0
+      - 0.0
+      - 0.0
     orbit_control:
-      module: "sim.control.orbit.aero_assist"
-      class_name: "AtmosphericPassController"
+      module: sim.control.orbit.aero_assist
+      class_name: AtmosphericPassController
       params:
         raise_start_s: 240.0
         raise_end_s: 740.0
         prograde_accel_km_s2: 0.0003
         min_raise_altitude_km: 250.0
     attitude_control:
-      module: "sim.control.attitude.aero_assist"
-      class_name: "AtmosphericLiftAxisController"
+      module: sim.control.attitude.aero_assist
+      class_name: AtmosphericLiftAxisController
       params:
-        lift_axis_body: [0.0, 0.0, 1.0]
-        desired_lift_ric: [0.0, 0.0, 1.0]
+        lift_axis_body:
+        - 0.0
+        - 0.0
+        - 1.0
+        desired_lift_ric:
+        - 0.0
+        - 0.0
+        - 1.0
         pd:
-          kp: [0.8, 0.8, 0.8]
-          kd: [8.0, 8.0, 8.0]
-          wheel_torque_limits_nm: [0.4, 0.4, 0.4]
+          kp:
+          - 0.8
+          - 0.8
+          - 0.8
+          kd:
+          - 8.0
+          - 8.0
+          - 8.0
+          wheel_torque_limits_nm:
+          - 0.4
+          - 0.4
+          - 0.4
           max_body_torque_nm: 0.4
-
   target:
-    kind: "satellite"
-    role: "reference_vehicle"
+    kind: satellite
+    role: reference_vehicle
     specs:
       mass_kg: 300.0
       aero:
         drag_area_m2: 2.0
         cd: 2.2
     initial_state:
-      position_eci_km: [6728.137, 0.0, 0.0]
-      velocity_eci_km_s: [0.0, 7.697, 0.0]
+      position_eci_km:
+      - 6728.137
+      - 0.0
+      - 0.0
+      velocity_eci_km_s:
+      - 0.0
+      - 7.697
+      - 0.0
     orbit_control:
-      module: "sim.control.orbit.zero_controller"
-      class_name: "ZeroController"
+      module: sim.control.orbit.zero_controller
+      class_name: ZeroController
     attitude_control:
-      module: "sim.control.attitude.zero_torque"
-      class_name: "ZeroTorqueController"
-
+      module: sim.control.attitude.zero_torque
+      class_name: ZeroTorqueController
 simulator:
   duration_s: 1200.0
   dt_s: 5.0
-  resource_profile: "laptop-safe"
+  resource_profile: laptop-safe
   environment:
-    density_kg_m3: 3.0e-8
+    density_kg_m3: 3.0e-08
   dynamics:
     orbit:
-      model: "two_body"
+      model: two_body
       drag: true
       orbit_substep_s: 5.0
     attitude:
@@ -78,24 +116,24 @@ simulator:
     reentry:
       enabled: true
       begin_altitude_km: 330.0
-      object_ids: ["chaser"]
+      object_ids:
+      - chaser
   termination:
     earth_impact_enabled: false
-
 outputs:
-  output_dir: "outputs/aero_assisted_plane_change_demo"
-  mode: "save"
+  output_dir: outputs/aero_assisted_plane_change_demo
+  mode: save
   stats:
     print_summary: true
     save_json: true
     save_full_log: true
   plots:
     enabled: true
-    preset: "aero_assist"
+    preset: aero_assist
     figure_ids:
-      - "attitude_control_summary"
-      - "control_thrust"
-    reference_object_id: "target"
+    - attitude_control_summary
+    - control_thrust
+    reference_object_id: target
     dpi: 150
   animations:
     enabled: false

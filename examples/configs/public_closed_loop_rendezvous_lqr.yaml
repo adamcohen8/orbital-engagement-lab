@@ -1,25 +1,16 @@
-# Use case: "Can a chaser close on a target from a specified relative orbit?"
-#
-# Key parameters to vary:
-# - objects.chaser.initial_state.relative_to_target_ric.state: initial RIC offset.
-# - objects.chaser.orbit_control.params.max_accel_km_s2: control authority.
-# - simulator.duration_s and dt_s: maneuver time horizon and control cadence.
-# - outputs.plots.figure_ids: add/remove review figures.
-
-scenario_name: "public_closed_loop_rendezvous_lqr"
-scenario_description: "Public example: closed-loop chaser/target rendezvous using HCW LQR and relative RIC initialization."
-
+scenario_name: public_closed_loop_rendezvous_lqr
+scenario_description: 'Public example: closed-loop chaser/target rendezvous using
+  HCW LQR and relative RIC initialization.'
 metadata:
-  owner: "public"
-  notes: "Run with `.venv/bin/python run_simulation.py --config examples/configs/public_closed_loop_rendezvous_lqr.yaml`."
-
+  owner: public
+  notes: Run with `.venv/bin/python run_simulation.py --config examples/configs/public_closed_loop_rendezvous_lqr.yaml`.
 objects:
   target:
-    kind: "satellite"
+    kind: satellite
     enabled: true
-    role: "target"
+    role: target
     specs:
-      preset_satellite: "BASIC_SATELLITE"
+      preset_satellite: BASIC_SATELLITE
       dry_mass_kg: 360.0
       fuel_mass_kg: 0.0
     initial_state:
@@ -31,57 +22,68 @@ objects:
         argp_deg: 0.0
         true_anomaly_deg: 0.0
     orbit_control:
-      kind: "python"
-      module: "sim.control.orbit.zero_controller"
-      class_name: "ZeroController"
+      kind: python
+      module: sim.control.orbit.zero_controller
+      class_name: ZeroController
       params: {}
   chaser:
-    kind: "satellite"
+    kind: satellite
     enabled: true
-    role: "chaser"
+    role: chaser
     specs:
-      preset_satellite: "BASIC_SATELLITE"
+      preset_satellite: BASIC_SATELLITE
       dry_mass_kg: 180.0
       fuel_mass_kg: 20.0
-      thruster: "BASIC_CHEMICAL_Z_BOTTOM"
+      thruster: BASIC_CHEMICAL_Z_BOTTOM
     initial_state:
-      relative_to: "target"
+      relative_to: target
       relative_to_target_ric:
-        frame: "curv"
-        # Key knob: [R, I, C, dR, dI, dC] in km and km/s.
-        state: [0.0, -5.0, 0.2, 0.0, 0.0002, 0.0]
+        frame: curv
+        state:
+        - 0.0
+        - -5.0
+        - 0.2
+        - 0.0
+        - 0.0002
+        - 0.0
     orbit_control:
-      kind: "python"
-      module: "sim.control.orbit.lqr"
-      class_name: "HCWLQRController"
+      kind: python
+      module: sim.control.orbit.lqr
+      class_name: HCWLQRController
       params:
         mean_motion_rad_s: 0.001078
-        # Key knob: increase for faster closure, decrease for fuel-limited cases.
-        max_accel_km_s2: 2.0e-5
+        max_accel_km_s2: 2.0e-05
         design_dt_s: 5.0
-        ric_curv_state_slice: [0, 6]
-        chief_eci_state_slice: [6, 12]
+        ric_curv_state_slice:
+        - 0
+        - 6
+        chief_eci_state_slice:
+        - 6
+        - 12
     knowledge:
       refresh_rate_s: 5.0
-      targets: ["target"]
+      targets:
+      - target
       conditions:
         require_line_of_sight: true
         max_range_km: 10000.0
       sensor_error:
-        pos_sigma_km: [0.005, 0.005, 0.005]
-        vel_sigma_km_s: [0.00005, 0.00005, 0.00005]
+        pos_sigma_km:
+        - 0.005
+        - 0.005
+        - 0.005
+        vel_sigma_km_s:
+        - 5.0e-05
+        - 5.0e-05
+        - 5.0e-05
       estimation:
-        type: "ekf"
-
+        type: ekf
 simulator:
-  scenario_type: "auto"
-  # Key knob: rendezvous time horizon.
   duration_s: 900.0
-  # Key knob: simulation and control cadence.
   dt_s: 5.0
   dynamics:
     orbit:
-      model: "two_body"
+      model: two_body
       orbit_substep_s: 5.0
       j2: false
       drag: false
@@ -91,27 +93,26 @@ simulator:
     rocket:
       enabled: false
   environment:
-    ephemeris_mode: "analytic_simple"
+    ephemeris_mode: analytic_simple
     atmosphere_env: {}
   plugin_validation:
     strict: true
   termination:
     earth_impact_enabled: false
-
 outputs:
-  output_dir: "outputs/examples/public_closed_loop_rendezvous_lqr"
-  mode: "save"
+  output_dir: outputs/examples/public_closed_loop_rendezvous_lqr
+  mode: save
   stats:
     print_summary: true
     save_json: true
     save_full_log: true
   plots:
     enabled: true
-    figure_ids: ["rendezvous_summary", "trajectory_ric_curv_2d_multi", "relative_range", "control_effort"]
+    figure_ids:
+    - rendezvous_summary
+    - trajectory_ric_curv_2d_multi
+    - relative_range
+    - control_effort
   animations:
     enabled: false
     types: []
-
-monte_carlo:
-  enabled: false
-

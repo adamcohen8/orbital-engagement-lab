@@ -1104,7 +1104,7 @@ function updateMissionText() {
   el.shell.classList.toggle("mode-arcade", state.mode === "arcade");
   el.shell.classList.toggle("mode-sandbox", state.mode === "sandbox");
   el.shell.classList.toggle("mode-tutorial", state.mode === "tutorial");
-  el.modeLabel.textContent = state.mode === "sandbox" ? "Sandbox" : "Tutorial";
+  el.modeLabel.textContent = state.mode === "sandbox" ? "Sandbox" : state.mode === "arcade" ? "Arcade" : "Tutorial";
   if (state.mode === "primer") {
     const stage = activePrimerStage();
     el.levelLabel.textContent = "RIC FRAME PRIMER";
@@ -1791,7 +1791,7 @@ function satelliteMarkerSizePx(scalePxPerKm) {
 function drawSpacecraftMarker(ctx, point, role, options = {}) {
   const color = role === "target" ? TARGET_MARKER : CHASER_MARKER;
   const fallbackRadius = options.fallbackRadius || 7;
-  const size = options.forceIcon ? SATELLITE_ICON_SIZE_PX : satelliteMarkerSizePx(options.scale);
+  const size = options.forceIcon ? options.iconSize || SATELLITE_ICON_SIZE_PX : satelliteMarkerSizePx(options.scale);
   if (size <= 0) {
     ctx.fillStyle = color;
     ctx.beginPath();
@@ -2385,6 +2385,7 @@ function toggleCameraRuleMode() {
   if (state.mode !== "sandbox" && state.mode !== "arcade") return;
   state.cameraRuleMode = state.cameraRuleMode === "full_trajectory" ? "current_pair" : "full_trajectory";
   updateGhost();
+  syncViewButtons();
   draw();
 }
 

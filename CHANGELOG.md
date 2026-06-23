@@ -6,12 +6,83 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.15.0 - 2026-06-23
+
+Release thesis: this release consolidates OEL's validation and trust posture
+after `v0.14.0`: it expands external-reference attitude and SGP4 evidence,
+hardens agent/release evidence packets, makes canonical scenario YAML the
+primary authored form, and removes unfinished desktop review surfaces from the
+supported local workflow.
+
+### Added
+
+- Added first-pass attitude external-reference validation workflows, including
+  analytic attitude reference cases, optional Basilisk comparison and
+  step-size sweep runners, attitude-reference configs, harness integration,
+  and private spike notes that document current limits and evidence.
+- Added SGP4 reference-vector validation and SGP4 orbit-determination evidence
+  suites with checked-in reference cases, harness specs, validation-plan
+  routing, and model-validation documentation for what the evidence does and
+  does not prove.
+- Added model documentation under `docs/models/` plus a top-level physics
+  model index so orbit, relative-motion, attitude, actuator, and environment
+  assumptions are easier to inspect.
+- Added public examples for actuator presets, mission recovery planning,
+  orbital-elements stationkeeping, rocket launch-to-orbit, and explicit
+  SGP4 passive TEME/ECI transform behavior.
+- Added commercial-readiness and public-push guard tooling to make release,
+  export, and public-repo operations harder to perform out of order.
+
+### Changed
+
+- Canonical scenario YAML now centers authored object definitions under
+  `objects` and campaign configuration under `analysis`; legacy top-level
+  `rocket`, `chaser`, `target`, `simulator.scenario_type`, and
+  `monte_carlo` YAML aliases are no longer accepted by the strict scenario
+  parser.
+- Updated curated configs, docs, examples, prompts, and tests to use canonical
+  `objects` / `analysis` YAML, while keeping Python API helpers able to
+  normalize legacy dict conveniences where appropriate.
+- Expanded review-store and agent-task evidence packets with schema
+  compatibility metadata, config hashes, semantic metric request audits,
+  saved-query completeness summaries, artifact/plot path status, and top-level
+  `evidence_summary` readiness signals.
+- Strengthened public export and release tooling with required public-surface
+  checks, stronger private/pro boundary scans, release-readiness reports,
+  retention guidance, source-clean status, and generated-public test patching
+  for private-only agent-task recipes.
+- Reframed the supported local review path around `python -m sim.review` and
+  custom review plotting APIs instead of unfinished desktop workbenches.
+- Updated package data and public export rules for SGP4 nutation data, public
+  docs, and private validation/release artifacts.
+
+### Fixed
+
+- Fixed stale docs, prompts, and tests that still taught or exercised legacy
+  YAML shapes after the parser moved to canonical `objects` / `analysis`
+  authoring.
+- Fixed public export drift around private SGP4 orbit-determination validation,
+  Basilisk spike material, commercial-readiness tooling, and private-only
+  agent-task test expectations.
+- Fixed review evidence ambiguity by marking unknown or empty saved-query
+  results, truncated rows, missing artifacts, and missing plots explicitly in
+  machine-readable packets.
+- Fixed generated public agent-task tests so public plot-summary coverage is
+  preserved while private `dynamics_od_smoke` recipe assertions are removed.
+
+### Removed
+
+- Removed the unfinished PySide GUI, local app service layer, Evidence Studio,
+  and legacy `run_gui.py`, `run_orw.py`, and `run_evidence_studio.py`
+  launchers from the active codebase.
+- Removed stale GUI/app/Evidence Studio tests and optional PySide dependency
+  declarations that no longer matched the supported workflow.
+
 ## 0.14.0 - 2026-06-21
 
 Release thesis: `v0.14.0` adds a public passive SGP4/general-perturbations
 propagation path, tightens agent-facing config validation and release evidence,
-and extends OD validation toward maneuver-aware residual analysis while keeping
-the public/pro boundary explicit.
+and keeps orbit-determination evidence work behind the Pro/public boundary.
 
 ### Added
 
@@ -19,9 +90,9 @@ the public/pro boundary explicit.
   `propagation_method: general` and `general.model: sgp4`, including TLE
   parsing fields, SGP4 propagation metadata in review stores, a public ISS
   example, and MATLAB SGP4 comparison harness wiring for local validation.
-- Added OD maneuver-detection evidence paths for both structured mission-input
-  fitting and precise-orbit validation comparison, with scheduled vector-burn
-  materialization, conservative gates, candidate artifacts, and documentation.
+- Added Pro/private orbit-determination evidence paths for structured
+  mission-input fitting and precise-orbit validation comparison, while keeping
+  those workflows excluded or stubbed from the public core.
 - Added stronger config-help and agent-repair guidance for observations,
   ground access, covariance, force-model/runtime settings, and strict plugin
   validation errors.
@@ -52,14 +123,11 @@ the public/pro boundary explicit.
 
 Release thesis: `v0.13.1` is a physics-correctness and release-readiness patch
 that tightens atmosphere frame handling, sensor timestamp semantics, actuator
-telemetry, rocket aero telemetry, and spacecraft twin/mass-property validation
+telemetry, rocket aero telemetry, and mass-property validation
 ahead of the public export.
 
 ### Added
 
-- Added spacecraft twin package helpers, geometry area-profile generation, mass
-  property import/audit tooling, and documentation for simulator-ready
-  body-frame geometry and inertia assumptions.
 - Added regression coverage for attitude-dependent drag/SRP geometry,
   orbit-determination attitude/Cd fitting, mass-property validation, composite
   sensor timing, rocket aero telemetry, reaction-wheel telemetry, and re-entry
@@ -269,7 +337,7 @@ leaderboard flow for small classroom or outreach competitions.
 Release thesis: `v0.12.0` expands the RPO Trainer into a more complete
 classroom and web-preview experience. It adds the local Pursuit Arcade browser
 prototype, cislunar rendezvous training, custom review evidence plotting,
-and a clearer Evidence Studio identity for completed-run inspection.
+and clearer local review exploration for completed-run inspection.
 
 ### Added
 
@@ -284,20 +352,19 @@ and a clearer Evidence Studio identity for completed-run inspection.
 - Added CR3BP support for the game/training path, including physical
   Earth-Moon rotating-frame propagation, deterministic halo/NRHO seed states,
   Moon-RIC transforms, and STM-based projection support.
-- Added `sim.review.EvidencePlotter`, `python -m sim.review plot`, and OEL
-  Evidence Studio support for generating OEL-styled custom figures from
-  completed review-store evidence.
+- Added `sim.review.EvidencePlotter` and `python -m sim.review plot` support
+  for generating OEL-styled custom figures from completed review-store
+  evidence.
 
 ### Changed
 
-- Renamed the experimental Output Review Workbench surface to OEL Evidence
-  Studio across docs and GUI copy, while keeping scripted review inspection
-  centered on `python -m sim.review`.
+- Kept scripted review inspection centered on `python -m sim.review` while
+  continuing local exploration of interactive review tooling.
 - Updated the downloadable and web RPO Trainer arcade flow with round
   transitions, camera toggles, defensive target behavior, arcade/boss music,
   HUD layout fixes, and pause restrictions during arcade attempts.
 - Updated agent and review docs to prefer the custom review plotting API for
-  brief-ready figures and to reserve Evidence Studio for interactive local
+  brief-ready figures and to reserve interactive review tooling for local
   exploration.
 
 ### Fixed
@@ -316,7 +383,7 @@ Release thesis: `v0.11.0` turns review evidence into the common inspection
 surface for both humans and agents. It adds a repeatable agent-task runner,
 golden-path adoption workflows, workflow-level review manifests and SQLite
 tables for major analysis outputs, and a clearer post-run plotting role for
-the experimental Output Review Workbench. The release also polishes the RPO
+the experimental local review plotting tools. The release also polishes the RPO
 Trainer experience for public education demos.
 
 ### Added
@@ -328,8 +395,8 @@ Trainer experience for public education demos.
 - Added `docs/agent-golden-paths.md`, a public-safe first-run guide with exact
   validate/run/query loops for minimal propagation, closed-loop rendezvous, and
   mission recovery/reconstitution workflows.
-- Added a review-store plotting service and upgraded ORW into an experimental
-  dynamic plot creator for completed runs, with saved-query/table loading,
+- Added a review-store plotting service and experimental dynamic plot creation
+  for completed runs, with saved-query/table loading,
   x/y/group column mapping, line/scatter/bar plots, OEL light/dark styling,
   PNG/SVG/PDF export, and provenance recorded in
   `review/generated_artifacts.json`.
@@ -354,11 +421,11 @@ Trainer experience for public education demos.
   trust/safety guidance.
 - Clarified the public product posture: CLI/YAML/Python API plus the review
   query API are the primary simulation and review surfaces, the RPO trainer is
-  the polished interactive surface, and the desktop GUI remains outside the
-  first-run path while ORW is positioned as a post-run custom plotting preview.
+  the polished interactive surface, and local desktop tools remain outside the
+  first-run path.
 - Taught `python -m sim.review` to inspect workflow review manifests and
-  artifact inventories, and taught ORW to surface workflow-manifest context
-  while preferring workflow tables when opening table-backed review outputs.
+  artifact inventories while preferring workflow tables when opening
+  table-backed review outputs.
 - Updated the downloadable and web RPO Trainer UI around sprite-based vehicle
   markers, smoother live HCW projection during burns, compact command legends,
   matched start-screen panel styling, and cleaner start-screen scaling.
@@ -655,9 +722,9 @@ engine.
   metadata, object-state, relative-state, thrust, ground-access, event, metric,
   and artifact tables for future review/query workflows.
 - Added the `sim.review` SELECT-only query API and `python -m sim.review` smoke
-  CLI as the recommended review path for agents/scripts, plus an experimental
-  `run_orw.py --output <folder>` Output Review Workbench preview that is not
-  currently recommended for routine review workflows.
+  CLI as the recommended review path for agents/scripts, plus local-only
+  experimental review plotting work that is not recommended for routine review
+  workflows.
 
 ### Changed
 
@@ -880,8 +947,8 @@ support.
   no-music public export option for smaller downloads.
 - Added looped level music muxing for saved game recordings, while preserving a
   silent-recording fallback if audio processing fails.
-- Added a rule-based RMOE if-then orbit controller, GUI controller registration,
-  and a demo config/test path for RMOE-driven natural-motion targeting.
+- Added a rule-based RMOE if-then orbit controller and a demo config/test path
+  for RMOE-driven natural-motion targeting.
 - Added initial game-module architecture boundaries for input polling, audio,
   recording, mission phase state, and tuning constants.
 
@@ -999,7 +1066,7 @@ Rocket insertion, access reporting, and release-readiness update.
 - Added satellite physical-spec propagation for drag/SRP area and coefficient
   settings.
 - Added commercial-readiness gates and expanded product maturity subcategory
-  scoring for release, validation, GUI, game, RL/ML, rocket GNC, simulator, and
+  scoring for release, validation, game, RL/ML, rocket GNC, simulator, and
   public/private workflow planning.
 
 ### Changed
@@ -1067,8 +1134,8 @@ Rocket GNC, controller-bench, and public/private boundary release.
   GNC configs, including nominal, heavy-payload, wind, and PSO tuning cases.
 - Added rocket navigation, orbital insertion scoring, ascent summary metrics,
   and controller-bench reporting for rocket GNC design workflows.
-- Added GUI and output-index support for rocket-aware run summaries, artifacts,
-  and controller-bench result inspection.
+- Added output-index support for rocket-aware run summaries, artifacts, and
+  controller-bench result inspection.
 
 ### Fixed
 
@@ -1231,8 +1298,7 @@ Guided configuration and TLE initialization release.
   `--open-output`, and a first-five-minutes guide for the public onboarding
   path.
 - Added TLE-based satellite initialization support for scenario YAML configs.
-- Added GUI support for a guided config-building workflow before running a
-  simulation.
+- Explored local guided config-building workflows before simulation execution.
 - Expanded config adapter coverage for generated YAML workflows.
 
 ### Reporting
@@ -1325,8 +1391,8 @@ Initial public-core maturity release.
 ### Public Core
 
 - Added a curated public-core workflow around deterministic single-run
-  scenarios, the CLI, the Python API, the desktop GUI, plotting, object presets,
-  and YAML-backed scenario configuration.
+  scenarios, the CLI, the Python API, plotting, object presets, and YAML-backed
+  scenario configuration.
 - Added generated public export tooling and boundary checks so the public
   repository contains the intended open-core surface.
 - Curated public examples under `examples/configs/` for rendezvous,
@@ -1346,13 +1412,13 @@ Initial public-core maturity release.
 ### Verification
 
 - Expanded regression coverage across simulation, dynamics, controls,
-  estimation, mission behavior, app/GUI services, public export checks,
+  estimation, mission behavior, public export checks,
   controller benchmarking, campaign reporting, and validation harness behavior.
 - Aligned private CI with default pytest collection rather than a narrow
   hand-picked subset.
 - Added generated-public CI checks for public export integrity, public package
-  installation, public tests, curated config validation, representative example
-  execution, and GUI startup smoke testing where Qt is available.
+  installation, public tests, curated config validation, and representative
+  example execution.
 
 ### Validation
 

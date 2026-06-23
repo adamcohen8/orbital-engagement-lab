@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
+
+SAVED_QUERY_MATURITY_LEVELS = frozenset({"supported", "prototype", "experimental"})
 
 
 @dataclass(frozen=True)
@@ -8,6 +11,31 @@ class SavedReviewQuery:
     name: str
     description: str
     sql: str
+    source_tables: tuple[str, ...] = ()
+    maturity: str = "supported"
+    allow_empty: bool = False
+
+    def __post_init__(self) -> None:
+        if self.maturity not in SAVED_QUERY_MATURITY_LEVELS:
+            allowed = ", ".join(sorted(SAVED_QUERY_MATURITY_LEVELS))
+            raise ValueError(f"Unknown saved review query maturity {self.maturity!r}; expected one of: {allowed}")
+        if not self.sql.lstrip().upper().startswith(("SELECT", "WITH")):
+            raise ValueError(f"Saved review query {self.name!r} must be read-only SELECT/WITH SQL.")
+        if not self.source_tables:
+            object.__setattr__(self, "source_tables", _infer_source_tables(self.sql))
+
+
+def _infer_source_tables(sql: str) -> tuple[str, ...]:
+    cte_names = {
+        match.group(1)
+        for match in re.finditer(r"(?:\bWITH|,)\s+([A-Za-z_][A-Za-z0-9_]*)\s+AS\s*\(", sql, flags=re.IGNORECASE)
+    }
+    names = {
+        match.group(1)
+        for match in re.finditer(r"\b(?:FROM|JOIN)\s+([A-Za-z_][A-Za-z0-9_]*)\b", sql, flags=re.IGNORECASE)
+        if match.group(1).lower() not in {"select"} and match.group(1) not in cte_names
+    }
+    return tuple(sorted(names))
 
 
 SAVED_REVIEW_QUERIES: dict[str, SavedReviewQuery] = {
@@ -81,6 +109,7 @@ SAVED_REVIEW_QUERIES: dict[str, SavedReviewQuery] = {
             "SELECT time_s, object_id, event_type, message FROM events "
             "WHERE event_type IN ('burn_start', 'burn_end') ORDER BY time_s, event_id"
         ),
+        allow_empty=True,
     ),
     "mission_recovery_summary": SavedReviewQuery(
         name="mission_recovery_summary",

@@ -135,7 +135,6 @@ def _validate_sil_networking(cfg: Any, policy: SealedModePolicy) -> list[str]:
     if policy.allow_non_loopback_sil:
         return []
     errors: list[str] = []
-    scenario_type = str(getattr(getattr(cfg, "simulator", None), "scenario_type", "") or "").strip().lower()
     for object_id, agent in configured_objects(cfg).items():
         if not getattr(agent, "enabled", False):
             continue
@@ -144,7 +143,7 @@ def _validate_sil_networking(cfg: Any, policy: SealedModePolicy) -> list[str]:
             continue
         module = str(getattr(bridge, "module", "") or "")
         class_name = str(getattr(bridge, "class_name", "") or "")
-        if scenario_type != "cfs_sil" and not module.startswith("integrations.cfs_sil.") and not class_name.startswith("CfsSil"):
+        if not module.startswith("integrations.cfs_sil.") and not class_name.startswith("CfsSil"):
             continue
         params = dict(getattr(bridge, "params", {}) or {})
         bind_host = str(params.get("bind_host", "127.0.0.1") or "127.0.0.1")

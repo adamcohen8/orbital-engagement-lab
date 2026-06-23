@@ -1,8 +1,9 @@
 scenario_name: public_agent_mission_recovery_plus_c_burn
-scenario_description: >
-  Public agent example: apply a simple +C cross-track burn to one satellite,
-  then use simulator-backed mission recovery to compare the final orbit with
-  the initial orbit.
+scenario_description: 'Public agent example: apply a simple +C cross-track burn to
+  one satellite, then use simulator-backed mission recovery to compare the final orbit
+  with the initial orbit.
+
+  '
 objects:
   target:
     enabled: true
@@ -19,8 +20,15 @@ objects:
         raan_deg: 0.0
         argp_deg: 0.0
         true_anomaly_deg: 0.0
-      attitude_quat_bn: [1.0, 0.0, 0.0, 0.0]
-      angular_rate_body_rad_s: [0.0, 0.0, 0.0]
+      attitude_quat_bn:
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      angular_rate_body_rad_s:
+      - 0.0
+      - 0.0
+      - 0.0
     orbit_control:
       module: sim.control.orbit.zero_controller
       class_name: ZeroController
@@ -34,18 +42,17 @@ objects:
         require_attitude_alignment: false
         use_strategy_fallback_thrust: true
     mission_objectives:
-      - module: sim.mission.modules
-        class_name: SingleRICAxisBurnMissionModule
-        params:
-          target_id: self
-          axis_mode: "+C"
-          axis_kind: force
-          burn_accel_km_s2: 0.005
-          burn_start_s: 0.0
-          burn_duration_s: 1.0
-          require_finite_reference: true
+    - module: sim.mission.modules
+      class_name: SingleRICAxisBurnMissionModule
+      params:
+        target_id: self
+        axis_mode: +C
+        axis_kind: force
+        burn_accel_km_s2: 0.005
+        burn_start_s: 0.0
+        burn_duration_s: 1.0
+        require_finite_reference: true
 simulator:
-  scenario_type: auto
   duration_s: 120.0
   dt_s: 1.0
   dynamics:
@@ -61,26 +68,6 @@ simulator:
       enabled: false
   termination:
     earth_impact_enabled: false
-analysis:
-  mission_recovery:
-    enabled: true
-    object_id: target
-    goal: orbit_shape
-    assessment_time_s: final
-    planner:
-      enabled: true
-      modes: [min_delta_v, min_time, constrained]
-      max_recovery_time_s: 7200.0
-      max_recovery_delta_v_m_s: 20.0
-      candidate_count: 6
-      simulate_candidates: true
-    propulsion:
-      spacecraft_mass_kg: 100.0
-      isp_s: 220.0
-      max_thrust_n: 20.0
-    element_tolerances:
-      inc_deg: 0.01
-      raan_deg: 0.01
 outputs:
   output_dir: outputs/agents/public_agent_mission_recovery_plus_c_burn
   mode: save
@@ -98,5 +85,26 @@ outputs:
   review:
     enabled: true
     detail: standard
-monte_carlo:
-  enabled: false
+analysis:
+  mission_recovery:
+    enabled: true
+    object_id: target
+    goal: orbit_shape
+    assessment_time_s: final
+    planner:
+      enabled: true
+      modes:
+      - min_delta_v
+      - min_time
+      - constrained
+      max_recovery_time_s: 7200.0
+      max_recovery_delta_v_m_s: 20.0
+      candidate_count: 6
+      simulate_candidates: true
+    propulsion:
+      spacecraft_mass_kg: 100.0
+      isp_s: 220.0
+      max_thrust_n: 20.0
+    element_tolerances:
+      inc_deg: 0.01
+      raan_deg: 0.01
