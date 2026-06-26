@@ -1,6 +1,8 @@
 scenario_name: validation_integrated_lqr_single
 metadata:
-  owner: validation
+  owner: public
+  public_surface: public-validation
+  support_level: demonstration
   notes: Headless integrated rendezvous benchmark with EKF-fed pursuit using HCW LQR.
 objects:
   chaser:

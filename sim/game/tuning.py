@@ -7,7 +7,7 @@ from dataclasses import dataclass
 class GameTuning:
     speed_multiplier_options: tuple[float, ...] = (1.0, 2.0, 5.0, 10.0, 25.0, 50.0, 100.0, 200.0)
     speed_dt_schedule: tuple[tuple[float, float], ...] = (
-        (1.0, 0.25),
+        (1.0, 0.1),
         (10.0, 0.5),
         (25.0, 1.0),
         (50.0, 5.0),

@@ -229,16 +229,23 @@ def _level_number_from_scenario_id(scenario_id: str) -> int:
     for part in parts:
         if part.isdigit():
             return int(part)
+        digits = ""
+        for char in part:
+            if not char.isdigit():
+                break
+            digits += char
+        if digits:
+            return int(digits)
     return 999
 
 
 def _scenario_sort_key(option: GameScenarioOption) -> tuple[int, str]:
     if option.scenario_id == "rpo_bonus_cislunar_rendezvous":
-        return (11, option.scenario_id)
-    if option.scenario_id == "rpo_arcade_pursuit":
         return (12, option.scenario_id)
-    if option.scenario_id == "rpo_sandbox":
+    if option.scenario_id == "rpo_arcade_pursuit":
         return (13, option.scenario_id)
+    if option.scenario_id == "rpo_sandbox":
+        return (14, option.scenario_id)
     return (option.level_number, option.scenario_id)
 
 

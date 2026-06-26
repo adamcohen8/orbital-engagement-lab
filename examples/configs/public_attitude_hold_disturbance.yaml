@@ -3,6 +3,8 @@ scenario_description: 'Public example: reaction-wheel attitude hold with initial
   error and optional disturbances.'
 metadata:
   owner: public
+  public_surface: public-example
+  support_level: supported
   notes: Run with `.venv/bin/python run_simulation.py --config examples/configs/public_attitude_hold_disturbance.yaml`.
 objects:
   bus:

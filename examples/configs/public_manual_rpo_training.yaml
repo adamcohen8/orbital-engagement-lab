@@ -3,6 +3,8 @@ scenario_description: 'Public example: manual chaser control against a passive/d
   target.'
 metadata:
   owner: public
+  public_surface: public-example
+  support_level: supported
   notes: Run interactively with `.venv/bin/python run_game.py examples/configs/public_manual_rpo_training.yaml`.
   game:
     control_mode: ric_translation

@@ -3,6 +3,8 @@ scenario_description: Single-satellite inclined geosynchronous ground-track revi
   case.
 metadata:
   owner: public
+  public_surface: public-config
+  support_level: demonstration
   notes: 'Passive geosynchronous satellite initialized over 90 deg W longitude with
     30 deg inclination. Interactive output mode is enabled for review before saving
     artifacts.

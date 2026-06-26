@@ -1,52 +1,84 @@
-scenario_name: game_training_rpo_10_evasive_target_survival
-scenario_description: RPO trainer scenario where the player flies the target while
-  an RIC_PD chaser attempts rendezvous.
+scenario_name: game_training_rpo_07_elliptic_burn_then_approach
+scenario_description: RPO trainer scenario for testing burns around an eccentric target
+  orbit, then completing a slow approach to a hold circle.
 metadata:
   owner: codex
-  notes: Run with `python run_game.py sim/game/configs/game_training_rpo_10_evasive_target_survival.yaml
+  notes: Run with `python run_game.py sim/game/configs/game_training_rpo_07_elliptic_burn_then_approach.yaml
     --speed-multiple 10`.
   game:
-    level_name: Level 10 - Evasion
+    level_name: Level 7 - Elliptical Approach
     control_mode: ric_translation
-    controlled_object_id: target
-    ric_reference_object_id: target_reference
     camera_mode: rule_toggle_pair
     camera_rule_mode: current_pair
     camera_rule_toggle_enabled: true
-    show_target_hcw_path: true
-    difficulty: hard
+    coast_prediction_model: tschauner_hempel
+    target_centered_plot_planes:
+    - RI
+    plot_prediction_in_zoom: true
+    plot_prediction_zoom_max_span_km: 8.0
+    plot_prediction_full_trajectory_only: true
+    difficulty: medium
+    initial_speed_multiple: 10.0
+    speed_multiplier_options:
+    - 1.0
+    - 2.0
+    - 5.0
+    - 10.0
+    - 25.0
+    - 50.0
+    - 100.0
+    - 200.0
+    - 500.0
+    - 1000.0
+    speed_dt_s:
+      1.0: 0.1
+      10.0: 0.5
+      25.0: 1.0
+      50.0: 5.0
+      100.0: 10.0
+    two_rail_speed_control: true
     player_max_accel_km_s2: 1.5e-05
     training:
       enabled: true
-      scenario_id: rpo_10_evasive_target_survival
-      learning_goal: Fly the target vehicle and evade an autonomous RIC_PD chaser
-        until the timer expires.
-      player_brief: You are the target. The yellow chaser is using the RIC_PD controller
-        from the 10 km rendezvous experiment to close on you. Use small R/I/C pulses
-        to keep at least 100 m of separation until time expires.
+      scenario_id: rpo_07_elliptic_burn_then_approach
+      learning_goal: Test radial and in-track burns around an eccentric-orbit target,
+        then use the elliptical coast predictor to complete a slow approach to the
+        hold circle.
+      player_brief: The target is not in a circular orbit. Watch the dashed prediction
+        bend as orbital rate changes. First test radial and in-track burns, then settle
+        into the green hold circle behind the target.
       pass_criteria:
-      - Maintain at least 100 m separation from the chaser.
-      - Stay within 1 km of the target reference orbit to remain mission capable.
-      - Survive until the timer expires.
-      - Stay under the target delta-v budget.
+      - Perform at least one radial burn.
+      - Perform at least one in-track burn.
+      - Enter the in-track hold circle behind the target.
+      - Keep relative speed below the goal threshold.
+      - Do not enter the 250 m keepout zone.
+      - Change the speed multiplier at least once.
+      - Stay under the time and delta-v budgets.
       instructor_notes:
-      - This is the reverse of level 9: the player flies the target, not the chaser.
-      - The chaser uses the public flagship 10 km RIC_PD orbital guidance without
-        attitude gating.
-      - The camera follows the target/chaser pair so evasive motion stays visible.
-      - The red dashed curve is the target vehicle's current HCW coast path.
-      - If the chaser uses its full delta-v budget, it coasts for the rest of the
-        attempt.
+      - This level intentionally combines play-and-observe familiarization with a
+        concrete terminal approach objective.
+      - The coast predictor uses a Tschauner-Hempel-style elliptical linear model
+        rather than the circular-orbit HCW projection.
+      - Ask students how the RI trace changes as the target orbital rate increases
+        away from apogee.
+      - The correct behavior is short prediction-informed pulses, long coasts, and
+        patient braking before the final hold circle.
       target_object_id: target
       chaser_object_id: chaser
-      keepout_radius_km: 0.1
-      survival_goal: true
+      keepout_radius_km: 0.25
+      goal_relative_ric_km:
+      - 0.0
+      - -0.75
+      - 0.0
+      goal_radius_km: 0.18
+      max_goal_speed_km_s: 0.00035
       max_time_s: 9000.0
-      max_target_reference_range_km: 1.0
-      max_target_delta_v_m_s: 1.0
-      max_delta_v_m_s: 25.0
-      fail_on_delta_v_budget: false
-      coast_chaser_after_delta_v_budget: true
+      max_delta_v_m_s: 8.0
+      required_burn_axes:
+      - radial
+      - in_track
+      require_speed_multiplier_change: true
 objects:
   rocket:
     enabled: false
@@ -59,14 +91,14 @@ objects:
       mass_kg: 200.0
     initial_state:
       relative_to_target_ric:
-        frame: curv
+        frame: rect
         state:
         - 0.0
-        - -5.0
+        - -4.5
+        - 0.2
         - 0.0
+        - -0.0007
         - 0.0
-        - 0.0
-        - 0.001
       attitude_quat_bn:
       - 1.0
       - 0.0
@@ -79,58 +111,9 @@ objects:
       relative_to: target
     orbit_control:
       kind: python
-      module: sim.control.orbit.ric_pd
-      class_name: RICPDTransferController
-      params:
-        max_accel_km_s2: 6.0e-05
-        mean_motion_rad_s: 0.001078
-        transfer_time_s: 4800.0
-        burn_time_constant_s: 35.0
-        correction_interval_s: 300.0
-        velocity_deadband_m_s: 0.03
-        final_brake_start_s: 0.0
-        terminal_start_s: 900.0
-        terminal_range_km: 0.15
-        terminal_kp:
-        - - 2.5e-06
-          - 0.0
-          - 0.0
-        - - 0.0
-          - 2.5e-06
-          - 0.0
-        - - 0.0
-          - 0.0
-          - 2.5e-06
-        terminal_kd:
-        - - 0.0035
-          - 0.0
-          - 0.0
-        - - 0.0
-          - 0.0035
-          - 0.0
-        - - 0.0
-          - 0.0
-          - 0.0035
-        desired_state_ric:
-        - 0.0
-        - 0.0
-        - 0.0
-        - 0.0
-        - 0.0
-        - 0.0
-        ric_curv_state_slice:
-        - 0
-        - 6
-        chief_eci_state_slice:
-        - 6
-        - 12
-        state_signs:
-        - 1.0
-        - 1.0
-        - 1.0
-        - 1.0
-        - 1.0
-        - 1.0
+      module: sim.control.orbit.zero_controller
+      class_name: ZeroController
+      params: {}
     attitude_control:
       kind: python
       module: sim.control.attitude.zero_torque
@@ -143,7 +126,6 @@ objects:
       refresh_rate_s: 1.0
       targets:
       - target
-      - target_reference
       conditions:
         require_line_of_sight: false
         max_range_km: 10000.0
@@ -168,12 +150,12 @@ objects:
       mass_kg: 1800.0
     initial_state:
       coes:
-        a_km: 7000.0
-        ecc: 0.0
+        a_km: 9000.0
+        ecc: 0.25
         inc_deg: 45.0
         raan_deg: 0.0
         argp_deg: 0.0
-        true_anomaly_deg: 0.0
+        true_anomaly_deg: 60.0
       attitude_quat_bn:
       - 1.0
       - 0.0
@@ -200,7 +182,6 @@ objects:
       refresh_rate_s: 1.0
       targets:
       - chaser
-      - target_reference
       conditions:
         require_line_of_sight: false
         max_range_km: 10000.0
@@ -243,7 +224,7 @@ simulator:
     earth_impact_enabled: false
     earth_radius_km: 6378.137
 outputs:
-  output_dir: outputs/game_training_rpo_10
+  output_dir: outputs/game_training_rpo_07
   mode: save
   stats:
     enabled: true

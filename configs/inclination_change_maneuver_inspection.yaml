@@ -1,6 +1,8 @@
 scenario_name: inclination_change_maneuver_inspection
 metadata:
-  owner: validation
+  owner: public
+  public_surface: public-config
+  support_level: demonstration
   notes: Single-satellite fixed-axis normal burn inspection case for increasing inclination
     near the ascending node.
 objects:

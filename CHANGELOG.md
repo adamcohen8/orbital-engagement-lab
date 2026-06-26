@@ -6,6 +6,54 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.16.0 - 2026-06-26
+
+Release thesis: `v0.16.0` expands the public RPO trainer and public-export
+governance while keeping the new catalog-scale screening work private/Pro-only.
+It adds a Sun-angle inspection training level, hardens live-game runtime
+behavior for long and high-speed attempts, introduces allowlist-first public
+surface checks, and seeds the private OEL Scale workflow.
+
+### Added
+
+- Added the Level 6 Sun-angle inspection scenario, with Sun-angle constraint
+  parsing, scoring, dashboard overlays, mission hints, debrief metrics, a new
+  procedural music cue, and renumbered later RPO training levels.
+- Added dynamic history mode for step-driven game sessions so long live
+  attempts retain a bounded sample window while offline runs continue to use
+  full-history payloads.
+- Added measured-state object tracking as a lightweight estimator mode for
+  state-measurement workflows that should trust the latest sensor state.
+- Added public-surface manifest governance, including controlled namespace
+  ownership checks, public config metadata requirements, and a private
+  promotion checklist.
+- Added private OEL Scale catalog-store, TLE ingest, SGP4 propagation,
+  sampled pair-screening, refinement, handoff, CLI, docs, and tests; these
+  paths are explicitly excluded from the generated public export.
+
+### Changed
+
+- Updated public and example configs with explicit public ownership,
+  public-surface, and support-level metadata for release/export checks.
+- Updated the RPO trainer input loop, two-rail speed behavior, cislunar CR3BP
+  prediction sampling/cache behavior, mission terminal banner scrolling, and
+  physical spacecraft marker scaling.
+- Updated the web RPO trainer preview and arcade replay engine to preserve
+  same-tick tap burns, show effective burn speed separately from coast speed,
+  and use physical plot-scale spacecraft markers.
+- Updated public/private boundary docs to describe the allowlist-governed
+  public export model.
+
+### Fixed
+
+- Fixed scale pair screening so it only consumes current propagation products
+  matching the active config's object set, propagation windows, model, backend,
+  and output frame.
+- Fixed ignored RPO trainer sprite max-size configuration by removing the stale
+  parameter path and relying on physical marker sizing.
+- Fixed manual game command latching for live player burns and preserved
+  tracker replay evidence from game-owned history streams.
+
 ## 0.15.0 - 2026-06-23
 
 Release thesis: this release consolidates OEL's validation and trust posture

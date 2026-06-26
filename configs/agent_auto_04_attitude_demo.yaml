@@ -2,7 +2,9 @@ scenario_name: agent_auto_04_attitude_demo
 scenario_description: 'Agent-generated public demo: reaction-wheel attitude hold from
   an initial pointing and rate error.'
 metadata:
-  owner: public-oel-agents
+  owner: public
+  public_surface: public-agent-workflow
+  support_level: supported
   notes: Generated for the weekly OEL agentic workflow post. Uses public attitude
     dynamics/control, gravity-gradient disturbance torque, plots, and queryable review
     evidence.

@@ -3,6 +3,8 @@ scenario_description: 'Public example: manual/game-mode chaser control with atti
   stabilization, knowledge, target defensive logic, and dashboard-ready outputs.'
 metadata:
   owner: public
+  public_surface: public-example
+  support_level: supported
   notes: Run interactively with `.venv/bin/python run_game.py examples/configs/public_manual_engagement.yaml`.
   game:
     player_max_accel_km_s2: 0.00018

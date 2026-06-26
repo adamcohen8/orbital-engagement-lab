@@ -36,13 +36,15 @@ Default public/runtime tracks:
   same arrangement as track 20, minus the radar-siren layer.
 - `22_arcade_round_clear_flyover.wav`: short arcade flyover sound effect for
   cleared Pursuit Arcade rounds.
-- `23_elliptic_final_burn_cinematic.wav`: original Level 8 elliptical-rendezvous
+- `23_elliptic_final_burn_cinematic.wav`: original Level 9 elliptical-rendezvous
   cue with urgent propulsion hits, organ-like synth pressure, warning tones,
   and a rising final-burn escalation.
 - `28_high_shred_boss_riff.wav`: high-energy boss-round guitar-riff cue with a
   higher-pitched shred-style solo overlay.
 - `30_far_side_navigation_demo.wav`: cislunar rendezvous cue with cold
   navigation pings, wide lunar pads, and a slower far-side cockpit feel.
+- `33_amber_terminator_demo.wav`: warm amber-cone cue for the GEO Sun-angle
+  inspection lesson.
 
 Additional experimental or alternate WAVs may exist in private/local workspaces,
 but they are not included in the default public distribution unless the game

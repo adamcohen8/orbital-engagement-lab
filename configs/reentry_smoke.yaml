@@ -1,4 +1,8 @@
 scenario_name: reentry_smoke
+metadata:
+  owner: public
+  public_surface: public-reentry
+  support_level: demonstration
 scenario_description: Short atmospheric re-entry diagnostics smoke case.
 objects:
   capsule:

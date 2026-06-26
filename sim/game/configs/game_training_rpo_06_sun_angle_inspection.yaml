@@ -1,22 +1,15 @@
-scenario_name: game_training_rpo_sandbox
-scenario_description: Open RPO sandbox for experimenting with target-centered relative
-  motion.
+scenario_name: game_training_rpo_06_sun_angle_inspection
+scenario_description: GEO RPO trainer demo for teaching Sun-angle inspection
+  constraints while flying a passively safe inspection pattern.
 metadata:
   owner: codex
-  notes: Run with `python run_game.py sim/game/configs/game_training_rpo_sandbox.yaml
-    --fast`.
+  notes: Run with `python run_game.py sim/game/configs/game_training_rpo_06_sun_angle_inspection.yaml
+    --speed-multiple 10`.
   game:
-    level_name: Sandbox
+    level_name: Level 6 - Sun-Angle Inspection
     control_mode: ric_translation
     camera_mode: target_pair
-    camera_rule_mode: full_trajectory
-    plot_overlays_in_zoom: false
-    plot_prediction_in_zoom: true
-    target_centered_plot_planes:
-    - RI
-    - RC
-    coast_prediction_model: hcw
-    difficulty: easy
+    difficulty: medium
     initial_speed_multiple: 10.0
     speed_multiplier_options:
     - 1.0
@@ -36,27 +29,94 @@ metadata:
       50.0: 5.0
       100.0: 10.0
     two_rail_speed_control: true
-    sandbox: true
-    player_max_accel_km_s2: 2.0e-05
+    player_max_accel_km_s2: 1.0e-05
+    target_centered_plot_planes:
+    - RI
+    - RC
+    plot_overlays_in_zoom: true
+    plot_equal_axis_scale_planes:
+    - RI
+    - RC
+    proximity_ring_plot_planes:
+    - RI
+    - RC
     training:
       enabled: true
-      sandbox_mode: true
-      scenario_id: rpo_sandbox
-      learning_goal: Experiment with RIC translation controls and relative orbital
-        motion without pass/fail goals.
-      player_brief: Edit the starting RIC state and target orbit in the setup panel,
-        then maneuver freely. Delta-v used remains visible, but there is no delta-v
-        budget.
+      scenario_id: rpo_06_sun_angle_inspection
+      learning_goal: Fly a GEO inspection pattern while keeping the chaser inside
+        the target-centered Sun-angle inspection beam.
+      player_brief: This GEO lesson adds lighting geometry to the safe-inspection
+        problem. The amber beam marks where the lighting geometry is acceptable.
+        Gates only count while you are inside the beam. Avoid the red proximity
+        sphere and pass through each green inspection gate. This scenario uses
+        a non-eclipse GEO epoch, so Earth shadow is not part of the lesson.
       pass_criteria:
-      - No pass/fail objective; experiment freely.
+      - Pass through both inspection gates inside the amber Sun-angle beam.
+      - Be inside the amber Sun-angle beam when crossing each inspection gate.
+      - Never enter the red forbidden sphere.
+      - Stay under the time and delta-v budgets.
       instructor_notes:
-      - Use this mode to demonstrate how initial relative state and target eccentricity
-        change relative motion.
-      - Set eccentricity to zero for HCW-style circular-orbit intuition, or nonzero
-        for elliptical prediction.
+      - The target-to-Sun direction is resolved from the configured epoch and moves
+        through the target-centered RIC frame over the GEO day.
+      - The allowed inspection corridor is the amber cone centered anti-Sun from
+        the target.
+      - This is a geometry lesson first; GEO is used to slow the motion down and
+        make the Sun-angle constraint legible.
+      - The configured January GEO epoch avoids Earth eclipse season; the level
+        does not model Earth shadow blocking the Sun-angle corridor.
       target_object_id: target
       chaser_object_id: chaser
-      max_time_s: 20000.0
+      inspection_gates:
+      - name: upper RC inspection gate
+        center_ric_km:
+        - 0.75
+        - 0.0
+        - 0.0
+        half_width_ric_km:
+        - 0.25
+        - 0.75
+        - 0.75
+      - name: lower RC inspection gate
+        center_ric_km:
+        - -0.75
+        - 0.0
+        - 0.0
+        half_width_ric_km:
+        - 0.25
+        - 0.75
+        - 0.75
+      sun_angle_constraints:
+      - name: GEO anti-Sun inspection beam
+        sun_direction_ric:
+        - 0.0
+        - 1.0
+        - 0.0
+        allowed_center_ric:
+        - 0.0
+        - -1.0
+        - 0.0
+        dynamic_sun: true
+        allowed_center_mode: anti_sun
+        allowed_half_angle_deg: 32.0
+        min_range_km: 0.5
+        max_range_km: 4.0
+        beam_radius_km: 12.0
+        plot_planes:
+        - RI
+        - RC
+      forbidden_regions:
+      - name: forbidden proximity sphere
+        kind: sphere
+        plot_planes:
+        - RI
+        - RC
+        center_ric_km:
+        - 0.0
+        - 0.0
+        - 0.0
+        radius_km: 0.5
+      max_time_s: 86400.0
+      max_delta_v_m_s: 4.0
 objects:
   rocket:
     enabled: false
@@ -72,7 +132,7 @@ objects:
         frame: rect
         state:
         - 0.0
-        - -3.0
+        - 3.0
         - 0.0
         - 0.0
         - 0.0
@@ -101,7 +161,7 @@ objects:
     mission_execution: null
     mission_objectives: []
     knowledge:
-      refresh_rate_s: 1.0
+      refresh_rate_s: 10.0
       targets:
       - target
       conditions:
@@ -128,12 +188,12 @@ objects:
       mass_kg: 1800.0
     initial_state:
       coes:
-        a_km: 7000.0
+        a_km: 42164.169451
         ecc: 0.0
-        inc_deg: 45.0
+        inc_deg: 0.0
         raan_deg: 0.0
         argp_deg: 0.0
-        true_anomaly_deg: 0.0
+        true_anomaly_deg: -40.0
       attitude_quat_bn:
       - 1.0
       - 0.0
@@ -157,7 +217,7 @@ objects:
     mission_execution: null
     mission_objectives: []
     knowledge:
-      refresh_rate_s: 1.0
+      refresh_rate_s: 10.0
       targets:
       - chaser
       conditions:
@@ -176,8 +236,9 @@ objects:
         type: ekf
     kind: satellite
 simulator:
-  duration_s: 20000.0
+  duration_s: 86400.0
   dt_s: 1.0
+  initial_jd_utc: 2460310.4166666665
   dynamics:
     orbit:
       model: two_body
@@ -202,7 +263,7 @@ simulator:
     earth_impact_enabled: false
     earth_radius_km: 6378.137
 outputs:
-  output_dir: outputs/game_training_rpo_sandbox
+  output_dir: outputs/game_training_rpo_06
   mode: save
   stats:
     enabled: true
@@ -216,15 +277,6 @@ outputs:
   animations:
     enabled: false
     types: []
-    battlespace_dashboard_target_object_id: target
-    battlespace_dashboard_chaser_object_id: chaser
-    battlespace_dashboard_show_trajectory: true
-    battlespace_dashboard_attitude_dims_m:
-      target:
-      - 2.0
-      - 1.5
-      - 1.5
-      chaser:
-      - 1.0
-      - 0.8
-      - 0.8
+    fps: 30
+    speed_multiple: 1.0
+    frame_stride: 1

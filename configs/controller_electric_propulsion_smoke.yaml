@@ -1,4 +1,8 @@
 scenario_name: controller_electric_propulsion_smoke
+metadata:
+  owner: public
+  public_surface: public-actuator
+  support_level: demonstration
 scenario_description: Local smoke scenario for the public ElectricPropulsionController.
 objects:
   target:

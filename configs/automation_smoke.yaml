@@ -1,6 +1,8 @@
 scenario_name: automation_smoke
 metadata:
-  owner: ci
+  owner: public
+  public_surface: public-validation
+  support_level: supported
   notes: Headless-friendly smoke config for automation and CI.
 objects:
   rocket:

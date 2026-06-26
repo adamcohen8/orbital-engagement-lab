@@ -97,7 +97,7 @@ The validator accepts standalone single-round packets shaped like:
   "username": "ORBITACE",
   "email": "optional@example.edu",
   "client_build_hash": "web-build-id",
-  "physics_version": "web-two-body-v1",
+  "physics_version": "web-two-body-v2",
   "scoring_version": "pursuit-v1",
   "config_hash": "613a0af6",
   "seed": 4242,

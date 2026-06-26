@@ -172,7 +172,8 @@ class _OtherObjectStateSensor:
 class _Track:
     target_id: str
     sensor: _OtherObjectStateSensor
-    estimator: OrbitEKFEstimator
+    estimator: OrbitEKFEstimator | None
+    estimator_type: str
     measurement_model: str
     init_cov_diag: np.ndarray
     initial_state_eci_km_s: np.ndarray | None = None
@@ -222,6 +223,21 @@ class _Track:
             self.max_consecutive_missed_steps = max(self.max_consecutive_missed_steps, self.consecutive_missed_steps)
             if self.last_measurement_t_s is not None:
                 self.time_since_last_detection_s_values.append(float(t_s - self.last_measurement_t_s))
+        if self.estimator_type == "measured_state":
+            if _normalize_measurement_model(self.measurement_model) != "state":
+                raise ValueError("measured_state estimator requires measurement_model='state'.")
+            if meas is None:
+                return self.belief
+            self.belief = StateBelief(
+                state=np.array(meas.vector, dtype=float).reshape(6).copy(),
+                covariance=_state_measurement_covariance(self.sensor.noise),
+                last_update_t_s=float(t_s),
+            )
+            if self.initialization_count <= 0:
+                self.initialization_count += 1
+            self.update_count += 1
+            self._record_consistency(target_truth, None, t_s)
+            return self.belief
         if self.belief is None:
             if meas is None:
                 return None
@@ -233,12 +249,13 @@ class _Track:
                         f"tracked target {self.target_id!r} uses measurement_model={self.measurement_model!r}; "
                         "relative-only tracking requires ekf.initial_state_eci_km_s or "
                         "estimation.initial_state_eci_km_s instead of truth-seeded initialization."
-                    )
+                )
                 init_state = np.array(self.initial_state_eci_km_s, dtype=float).reshape(6)
             self.belief = StateBelief(state=init_state, covariance=np.diag(self.init_cov_diag), last_update_t_s=t_s)
             self.initialization_count += 1
             self._record_consistency(target_truth, None, t_s)
             return self.belief
+        assert self.estimator is not None
         if _normalize_measurement_model(self.measurement_model) == "state":
             self.belief = self.estimator.update(self.belief, meas, t_s)
         else:
@@ -256,6 +273,7 @@ class _Track:
         observer_truth: StateTruth,
         t_s: float,
     ) -> StateBelief:
+        assert self.estimator is not None
         predicted = self.estimator.update(belief, None, t_s)
         if measurement is None:
             return predicted
@@ -378,21 +396,33 @@ class ObjectKnowledgeBase:
         for i, cfg in enumerate(tracked_objects):
             if cfg.target_id == observer_id:
                 continue
-            if cfg.estimator.lower() != "ekf":
+            estimator_type = _normalize_estimator_type(cfg.estimator)
+            measurement_model = _normalize_measurement_model(cfg.measurement_model)
+            if estimator_type not in {"ekf", "measured_state"}:
                 raise ValueError(f"Unsupported estimator '{cfg.estimator}' for target '{cfg.target_id}'.")
+            if estimator_type == "measured_state" and measurement_model != "state":
+                raise ValueError(
+                    f"tracked target {cfg.target_id!r} uses estimator='measured_state'; "
+                    "measured_state requires measurement_model='state'."
+                )
             trng = np.random.default_rng(int(self._rng.integers(0, 2**31 - 1)) + i)
             sensor = _OtherObjectStateSensor(cfg.conditions, cfg.sensor_noise, trng)
-            ekf = OrbitEKFEstimator(
-                mu_km3_s2=mu_km3_s2,
-                dt_s=dt_s,
-                process_noise_diag=np.array(cfg.ekf.process_noise_diag, dtype=float),
-                meas_noise_diag=np.array(cfg.ekf.meas_noise_diag, dtype=float),
+            ekf = (
+                OrbitEKFEstimator(
+                    mu_km3_s2=mu_km3_s2,
+                    dt_s=dt_s,
+                    process_noise_diag=np.array(cfg.ekf.process_noise_diag, dtype=float),
+                    meas_noise_diag=np.array(cfg.ekf.meas_noise_diag, dtype=float),
+                )
+                if estimator_type == "ekf"
+                else None
             )
             self._tracks[cfg.target_id] = _Track(
                 target_id=cfg.target_id,
                 sensor=sensor,
                 estimator=ekf,
-                measurement_model=_normalize_measurement_model(cfg.measurement_model),
+                estimator_type=estimator_type,
+                measurement_model=measurement_model,
                 init_cov_diag=np.array(cfg.ekf.init_cov_diag, dtype=float),
                 initial_state_eci_km_s=(
                     None
@@ -445,6 +475,23 @@ def _expand3(v: np.ndarray) -> np.ndarray:
     if a.size == 3:
         return a
     raise ValueError("Expected scalar or length-3 array.")
+
+
+def _normalize_estimator_type(value: str) -> str:
+    raw = str(value or "ekf").strip().lower().replace("-", "_")
+    aliases = {
+        "measured": "measured_state",
+        "sensor": "measured_state",
+        "sensor_state": "measured_state",
+        "trust_sensors": "measured_state",
+    }
+    return aliases.get(raw, raw)
+
+
+def _state_measurement_covariance(noise: KnowledgeNoiseConfig) -> np.ndarray:
+    sigmas = np.hstack((_expand3(noise.pos_sigma_km), _expand3(noise.vel_sigma_km_s)))
+    variances = np.maximum(sigmas.astype(float) ** 2, 1.0e-18)
+    return np.diag(variances)
 
 
 def _normalize_measurement_model(model: str) -> str:

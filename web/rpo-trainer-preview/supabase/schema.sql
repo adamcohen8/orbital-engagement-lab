@@ -39,7 +39,7 @@ create table if not exists attempts (
   config_hash text not null,
   physics_version text not null,
   scoring_version text not null,
-  validator_version text not null default 'web-two-body-v1',
+  validator_version text not null default 'web-two-body-v2',
   validation_errors text[] not null default '{}',
   validation_warnings text[] not null default '{}',
   ri_plot_svg text,

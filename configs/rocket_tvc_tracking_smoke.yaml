@@ -2,6 +2,8 @@ scenario_name: rocket_tvc_tracking_smoke
 scenario_description: Short rocket ascent case exercising TVC steering and GNC telemetry.
 metadata:
   owner: public
+  public_surface: public-rocket
+  support_level: demonstration
   seed: 123
 objects:
   rocket:

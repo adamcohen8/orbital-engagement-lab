@@ -3,6 +3,8 @@ scenario_description: Public flagship RIC_PD 10 km RPO review scenario with atti
   burn gating, deterministic two-body dynamics, and report-ready rendezvous artifacts.
 metadata:
   owner: public
+  public_surface: public-flagship
+  support_level: supported
   notes: Run after the quickstart with `.venv/bin/python run_simulation.py --config
     configs/ric_pd_10km_experiment.yaml`, then open outputs/flagship_ric_pd_10km/index.md.
   intent: Demonstrate an RIC_PD transfer controller closing a 10 km-class relative-motion

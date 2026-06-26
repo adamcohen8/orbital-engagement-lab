@@ -3,6 +3,8 @@ scenario_description: 'Public example: closed-loop chaser/target rendezvous usin
   HCW LQR and relative RIC initialization.'
 metadata:
   owner: public
+  public_surface: public-example
+  support_level: supported
   notes: Run with `.venv/bin/python run_simulation.py --config examples/configs/public_closed_loop_rendezvous_lqr.yaml`.
 objects:
   target:

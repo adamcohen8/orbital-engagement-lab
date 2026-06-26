@@ -454,14 +454,21 @@ class _SatelliteCommandBuilder:
             if "torque_body_nm" in mission_out:
                 cmd.torque_body_nm = np.array(mission_out["torque_body_nm"], dtype=float).reshape(3)
 
+        bypass_orbital_command_latch = bool(mission_out.get("mission_bypass_orbital_command_latch", False))
         orbital_command_due = (
             e._last_orbital_command_eval_t_s[aid] is None
             or float(t_s) - float(e._last_orbital_command_eval_t_s[aid]) >= e.orbit_command_period_s - 1e-12
         )
-        if orbital_command_due:
+        if bool(bypass_orbital_command_latch):
             e._last_orbital_command_eval_t_s[aid] = float(t_s)
             e._latched_orbital_thrust_cmd_by_object[aid] = np.array(cmd.thrust_eci_km_s2, dtype=float).reshape(3)
-        latched_thrust_cmd = np.array(e._latched_orbital_thrust_cmd_by_object[aid], dtype=float).reshape(3)
+            latched_thrust_cmd = np.array(cmd.thrust_eci_km_s2, dtype=float).reshape(3)
+        elif orbital_command_due:
+            e._last_orbital_command_eval_t_s[aid] = float(t_s)
+            e._latched_orbital_thrust_cmd_by_object[aid] = np.array(cmd.thrust_eci_km_s2, dtype=float).reshape(3)
+            latched_thrust_cmd = np.array(e._latched_orbital_thrust_cmd_by_object[aid], dtype=float).reshape(3)
+        else:
+            latched_thrust_cmd = np.array(e._latched_orbital_thrust_cmd_by_object[aid], dtype=float).reshape(3)
 
         if not e.attitude_enabled:
             cmd.torque_body_nm = e.zero3
@@ -470,7 +477,8 @@ class _SatelliteCommandBuilder:
             torque_body_nm=(e.zero3.copy() if not e.attitude_enabled else np.array(cmd.torque_body_nm, dtype=float)),
             mode_flags=dict(cmd.mode_flags or {}),
         )
-        cmd_step.mode_flags["orbital_command_updated"] = bool(orbital_command_due)
+        cmd_step.mode_flags["orbital_command_updated"] = bool(orbital_command_due or bypass_orbital_command_latch)
+        cmd_step.mode_flags["orbital_command_latch_bypassed"] = bool(bypass_orbital_command_latch)
         if e._last_orbital_command_eval_t_s[aid] is not None:
             cmd_step.mode_flags["orbital_command_sample_t_s"] = float(e._last_orbital_command_eval_t_s[aid])
         cmd_step.mode_flags["current_attitude_quat_bn"] = np.array(truth.attitude_quat_bn, dtype=float)

@@ -4,10 +4,11 @@
   "username": "ORBITACE",
   "email": "",
   "client_build_hash": "fixture",
-  "physics_version": "web-two-body-v1",
+  "physics_version": "web-two-body-v2",
   "scoring_version": "pursuit-v1",
-  "config_hash": "df8443be",
+  "config_hash": "8f4352c7",
   "seed": 4242,
+  "final_tick": 12000,
   "input_events": [
     {
       "tick": 5,

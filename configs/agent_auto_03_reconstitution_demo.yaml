@@ -1,4 +1,8 @@
 scenario_name: agent_auto_03_reconstitution_demo
+metadata:
+  owner: public
+  public_surface: public-agent-workflow
+  support_level: supported
 scenario_description: 'Public automation demo: a single spacecraft receives a small
   in-track disturbance, then OEL''s simulator-backed mission recovery analysis compares
   deterministic mission-reconstitution candidates for recovering the original orbital

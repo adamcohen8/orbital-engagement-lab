@@ -9,6 +9,25 @@ metadata:
     level_name: Level 1 - Relative Orbit
     control_mode: ric_translation
     difficulty: easy
+    initial_speed_multiple: 10.0
+    speed_multiplier_options:
+    - 1.0
+    - 2.0
+    - 5.0
+    - 10.0
+    - 25.0
+    - 50.0
+    - 100.0
+    - 200.0
+    - 500.0
+    - 1000.0
+    speed_dt_s:
+      1.0: 0.1
+      10.0: 0.5
+      25.0: 1.0
+      50.0: 5.0
+      100.0: 10.0
+    two_rail_speed_control: true
     player_max_accel_km_s2: 2.0e-05
     training:
       enabled: true
@@ -45,7 +64,7 @@ metadata:
         radial_abs_km: 1.5
         radial_tolerance_km: 0.25
         max_abs_intrack_km: 0.5
-      max_time_s: 3600.0
+      max_time_s: 9000.0
       max_delta_v_m_s: 8.0
 objects:
   rocket:

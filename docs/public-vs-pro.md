@@ -10,6 +10,12 @@ The public repository contains the simulation foundation: dynamics, controllers,
 estimators, actuators, sensors, mission modules, scenario YAML, API workflows,
 examples, validation helpers, and lightweight extension surfaces.
 
+The public repository is a curated product surface, not everything that happens
+to be redistributable from the private workspace. Public examples, docs, and
+workflows are intentionally promoted; private experiments, Pro workflow
+accelerators, customer-specific material, and local release evidence stay out
+of the public export by default.
+
 Orbital Engagement Pro builds on the same foundation with higher-level analysis
 workflows for teams that need repeatability, search, campaign management, and
 review-ready outputs.

@@ -1,6 +1,8 @@
 scenario_name: validation_knowledge_filtering_single
 metadata:
-  owner: validation
+  owner: public
+  public_surface: public-validation
+  support_level: demonstration
   notes: Noisy state-vector knowledge benchmark for truth/measurement/estimate evidence.
 objects:
   chaser:

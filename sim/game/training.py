@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from typing import Any
 
@@ -8,6 +8,7 @@ import numpy as np
 
 from sim.api import SimulationSnapshot
 from sim.dynamics.orbit.cr3bp import EARTH_MOON_MEAN_MOTION_RAD_S, cr3bp_moon_state_km_s, cr3bp_relative_state
+from sim.dynamics.orbit.epoch import resolve_sun_moon_positions
 from sim.game.formatting import format_distance_km, format_speed_km_s, format_speed_m_s
 from sim.utils.frames import eci_relative_to_ric_rect, ric_dcm_ir_from_rv
 
@@ -84,6 +85,8 @@ class ForbiddenRegionConfig:
             return self._contains_annular_sector(pos)
         if self.kind == "cylinder":
             return self._contains_cylinder(pos)
+        if self.kind == "sphere":
+            return self._contains_sphere(pos)
         lower = np.array(self.min_ric_km, dtype=float).reshape(1, 3)
         upper = np.array(self.max_ric_km, dtype=float).reshape(1, 3)
         return np.all((pos[:, :3] >= lower) & (pos[:, :3] <= upper), axis=1)
@@ -135,6 +138,12 @@ class ForbiddenRegionConfig:
         cross_radius = np.linalg.norm(delta[:, cross_axes], axis=1)
         half_height = float(self.height_km) / 2.0
         return (cross_radius <= float(self.radius_km)) & (np.abs(delta[:, axis]) <= half_height)
+
+    def _contains_sphere(self, pos: np.ndarray) -> np.ndarray:
+        if self.radius_km is None:
+            return np.zeros(pos.shape[0], dtype=bool)
+        delta = pos[:, :3] - np.array(self.center_ric_km, dtype=float).reshape(1, 3)
+        return np.linalg.norm(delta, axis=1) <= float(self.radius_km)
 
 
 @dataclass(frozen=True)
@@ -238,6 +247,112 @@ class InspectionGateConfig:
 
 
 @dataclass(frozen=True)
+class SunAngleConstraintConfig:
+    name: str
+    sun_direction_ric: np.ndarray
+    allowed_center_ric: np.ndarray
+    allowed_half_angle_deg: float
+    dynamic_sun: bool = False
+    allowed_center_mode: str = "configured"
+    sun_environment: dict[str, Any] = field(default_factory=dict)
+    min_range_km: float | None = None
+    max_range_km: float | None = None
+    plot_planes: tuple[str, ...] = ("RI", "RC")
+    beam_radius_km: float | None = None
+
+    @classmethod
+    def from_mapping(cls, raw: dict[str, Any], *, index: int) -> SunAngleConstraintConfig:
+        return cls(
+            name=str(raw.get("name", f"sun_angle_constraint_{index}") or f"sun_angle_constraint_{index}"),
+            sun_direction_ric=_unit_ric_array(
+                raw.get("sun_direction_ric", raw.get("sun_vector_ric", [0.0, 1.0, 0.0])),
+                field_name="sun_direction_ric",
+            ),
+            allowed_center_ric=_unit_ric_array(
+                raw.get("allowed_center_ric", raw.get("beam_center_ric", [0.0, -1.0, 0.0])),
+                field_name="allowed_center_ric",
+            ),
+            allowed_half_angle_deg=float(raw.get("allowed_half_angle_deg", raw.get("half_angle_deg", 35.0)) or 35.0),
+            dynamic_sun=bool(raw.get("dynamic_sun", False)),
+            allowed_center_mode=str(raw.get("allowed_center_mode", "configured") or "configured").strip().lower(),
+            min_range_km=_optional_float(raw.get("min_range_km")),
+            max_range_km=_optional_float(raw.get("max_range_km")),
+            plot_planes=_plot_planes_from_metadata(raw.get("plot_planes")) or ("RI", "RC"),
+            beam_radius_km=_optional_float(raw.get("beam_radius_km")),
+        )
+
+    def with_sun_environment(self, env: dict[str, Any]) -> SunAngleConstraintConfig:
+        return replace(self, sun_environment=dict(env or {}))
+
+    def sun_direction_at_ric(self, *, target_state_eci: np.ndarray | None = None, time_s: float | None = None) -> np.ndarray:
+        if not self.dynamic_sun or target_state_eci is None:
+            return np.array(self.sun_direction_ric, dtype=float).reshape(3)
+        target = np.array(target_state_eci, dtype=float).reshape(-1)
+        if target.size < 6:
+            return np.array(self.sun_direction_ric, dtype=float).reshape(3)
+        try:
+            sun_pos, _ = resolve_sun_moon_positions(dict(self.sun_environment or {}), 0.0 if time_s is None else float(time_s))
+        except Exception:
+            return np.array(self.sun_direction_ric, dtype=float).reshape(3)
+        sun_vec_eci = np.array(sun_pos, dtype=float).reshape(3) - target[:3]
+        norm = float(np.linalg.norm(sun_vec_eci))
+        if not np.isfinite(norm) or norm <= 0.0:
+            return np.array(self.sun_direction_ric, dtype=float).reshape(3)
+        c_ir = ric_dcm_ir_from_rv(target[:3], target[3:6])
+        sun_ric = c_ir.T @ (sun_vec_eci / norm)
+        sun_norm = float(np.linalg.norm(sun_ric))
+        if not np.isfinite(sun_norm) or sun_norm <= 0.0:
+            return np.array(self.sun_direction_ric, dtype=float).reshape(3)
+        return sun_ric / sun_norm
+
+    def allowed_center_at_ric(
+        self, *, target_state_eci: np.ndarray | None = None, time_s: float | None = None
+    ) -> np.ndarray:
+        if self.allowed_center_mode in {"anti_sun", "antisun", "opposite_sun"}:
+            return -self.sun_direction_at_ric(target_state_eci=target_state_eci, time_s=time_s)
+        if self.allowed_center_mode in {"sun", "toward_sun"}:
+            return self.sun_direction_at_ric(target_state_eci=target_state_eci, time_s=time_s)
+        return np.array(self.allowed_center_ric, dtype=float).reshape(3)
+
+    def sun_angles_deg(
+        self,
+        relative_ric_positions_km: np.ndarray,
+        *,
+        target_state_eci: np.ndarray | None = None,
+        time_s: float | None = None,
+    ) -> np.ndarray:
+        dirs, valid = _unit_direction_rows(relative_ric_positions_km)
+        sun_dir = self.sun_direction_at_ric(target_state_eci=target_state_eci, time_s=time_s)
+        dots = np.clip(dirs @ sun_dir.reshape(3), -1.0, 1.0)
+        angles = np.rad2deg(np.arccos(dots))
+        angles[~valid] = np.nan
+        return angles
+
+    def samples_satisfying_constraint(
+        self,
+        relative_ric_positions_km: np.ndarray,
+        *,
+        target_state_eci: np.ndarray | None = None,
+        time_s: float | None = None,
+    ) -> np.ndarray:
+        pos = np.array(relative_ric_positions_km, dtype=float)
+        if pos.ndim == 1:
+            pos = pos.reshape(1, -1)
+        if pos.shape[1] < 3:
+            raise ValueError("relative_ric_positions_km must contain R, I, and C components.")
+        dirs, valid = _unit_direction_rows(pos[:, :3])
+        center = self.allowed_center_at_ric(target_state_eci=target_state_eci, time_s=time_s)
+        off_axis_deg = np.rad2deg(np.arccos(np.clip(dirs @ center, -1.0, 1.0)))
+        ok = valid & (off_axis_deg <= float(self.allowed_half_angle_deg))
+        ranges = np.linalg.norm(pos[:, :3], axis=1)
+        if self.min_range_km is not None:
+            ok &= ranges >= float(self.min_range_km)
+        if self.max_range_km is not None:
+            ok &= ranges <= float(self.max_range_km)
+        return ok
+
+
+@dataclass(frozen=True)
 class RequiredPhaseBurnConfig:
     name: str
     axis: str
@@ -303,6 +418,7 @@ class RPOTrainingConfig:
     forbidden_regions: tuple[ForbiddenRegionConfig, ...] = ()
     approach_gates: tuple[ApproachGateConfig, ...] = ()
     inspection_gates: tuple[InspectionGateConfig, ...] = ()
+    sun_angle_constraints: tuple[SunAngleConstraintConfig, ...] = ()
     max_time_s: float | None = None
     max_goal_speed_km_s: float | None = None
     hard_speed_limit_radius_km: float | None = None
@@ -368,6 +484,7 @@ class RPOTrainingConfig:
             forbidden_regions=_forbidden_regions_from_metadata(raw.get("forbidden_regions")),
             approach_gates=_approach_gates_from_metadata(raw.get("approach_gates")),
             inspection_gates=_inspection_gates_from_metadata(raw.get("inspection_gates")),
+            sun_angle_constraints=_sun_angle_constraints_from_metadata(raw.get("sun_angle_constraints")),
             max_time_s=_optional_float(raw.get("max_time_s")),
             max_goal_speed_km_s=_optional_float(raw.get("max_goal_speed_km_s")),
             hard_speed_limit_radius_km=_optional_float(raw.get("hard_speed_limit_radius_km")),
@@ -446,6 +563,11 @@ class RPOTrainingScore:
     final_target_reference_range_km: float = float("nan")
     max_target_reference_range_km: float | None = None
     target_reference_range_violation: bool = False
+    sun_angle_violation: bool = False
+    sun_angle_constraint_names: tuple[str, ...] = ()
+    sun_angle_violation_time_s: float = 0.0
+    min_sun_angle_deg: float = float("nan")
+    final_sun_angle_deg: float = float("nan")
 
 
 class RPOTrainingTracker:
@@ -468,11 +590,14 @@ class RPOTrainingTracker:
         self._phase_burn_first_indices: dict[str, int] = {}
         self._guided_tutorial_burn_names: list[str] = []
         self._guided_tutorial_speed_complete = False
+        self._sun_angle_ok_by_constraint: dict[str, list[bool]] = {}
+        self._sun_angle_deg_by_constraint: dict[str, list[float]] = {}
         self._history_capacity = 0
         self._history_count = 0
         self._t_array = np.zeros(0, dtype=float)
         self._rel_array = np.zeros((0, 6), dtype=float)
         self._thrust_array = np.zeros((0, 3), dtype=float)
+        self._thrust_ric_array = np.zeros((0, 3), dtype=float)
         self._target_thrust_array = np.zeros((0, 3), dtype=float)
         self._mean_motion_array = np.zeros(0, dtype=float)
         self._nmt_radial_amplitude_array = np.zeros(0, dtype=float)
@@ -501,6 +626,8 @@ class RPOTrainingTracker:
         if reset_guided_tutorial_progress:
             self._guided_tutorial_burn_names.clear()
             self._guided_tutorial_speed_complete = False
+        self._sun_angle_ok_by_constraint.clear()
+        self._sun_angle_deg_by_constraint.clear()
         self._history_count = 0
 
     def mark_guided_tutorial_burn_complete(self, name: str) -> None:
@@ -574,6 +701,7 @@ class RPOTrainingTracker:
             t_s=float(snapshot.time_s),
             rel=rel,
             thrust=thrust_eci,
+            thrust_ric=self.thrust_ric_hist[-1],
             target_thrust=target_thrust_eci,
             mean_motion_rad_s=n,
             target_state=target_arr,
@@ -581,7 +709,8 @@ class RPOTrainingTracker:
         )
         self._record_burn_requirement_sample(rel, self.thrust_ric_hist[-1])
         self._record_hard_speed_limit_sample(rel)
-        self._record_inspection_gate_sample(rel)
+        self._record_sun_angle_sample(rel, target_arr, float(snapshot.time_s))
+        self._record_inspection_gate_sample(rel, target_arr, float(snapshot.time_s))
         self._score_cache = None
 
     def record_speed_multiplier_change(self) -> None:
@@ -661,6 +790,7 @@ class RPOTrainingTracker:
         t_s: float,
         rel: np.ndarray,
         thrust: np.ndarray,
+        thrust_ric: np.ndarray,
         target_thrust: np.ndarray,
         mean_motion_rad_s: float,
         target_state: np.ndarray | None = None,
@@ -672,6 +802,7 @@ class RPOTrainingTracker:
         self._t_array[idx] = float(t_s)
         self._rel_array[idx, :] = np.array(rel, dtype=float).reshape(6)
         self._thrust_array[idx, :] = np.array(thrust, dtype=float).reshape(3)
+        self._thrust_ric_array[idx, :] = np.array(thrust_ric, dtype=float).reshape(3)
         self._target_thrust_array[idx, :] = np.array(target_thrust, dtype=float).reshape(3)
         self._mean_motion_array[idx] = float(mean_motion_rad_s)
         self._append_nmt_element_arrays(
@@ -702,6 +833,7 @@ class RPOTrainingTracker:
         self._t_array = grow_1d(self._t_array)
         self._rel_array = grow_2d(self._rel_array, 6)
         self._thrust_array = grow_2d(self._thrust_array, 3)
+        self._thrust_ric_array = grow_2d(self._thrust_ric_array, 3)
         self._target_thrust_array = grow_2d(self._target_thrust_array, 3)
         self._mean_motion_array = grow_1d(self._mean_motion_array)
         self._nmt_radial_amplitude_array = grow_1d(self._nmt_radial_amplitude_array, fill_value=float("nan"))
@@ -809,6 +941,32 @@ class RPOTrainingTracker:
         n_hist = np.array(self.mean_motion_hist, dtype=float).reshape(-1)
         return rel, t, thrust, target_thrust, n_hist
 
+    def replay_history(self) -> dict[str, np.ndarray]:
+        if int(self._history_count) > 0:
+            count = int(self._history_count)
+            rel = self._rel_array[:count, :]
+            t = self._t_array[:count]
+            thrust_ric = self._thrust_ric_array[:count, :]
+            target_thrust = self._target_thrust_array[:count, :]
+        else:
+            rel = np.vstack(self.rel_ric_hist) if self.rel_ric_hist else np.zeros((0, 6), dtype=float)
+            t = np.array(self.t_s, dtype=float).reshape(-1)
+            thrust_ric = (
+                np.vstack(self.thrust_ric_hist) if self.thrust_ric_hist else np.zeros((rel.shape[0], 3), dtype=float)
+            )
+            target_thrust = (
+                np.vstack(self.target_thrust_hist)
+                if self.target_thrust_hist
+                else np.zeros((rel.shape[0], 3), dtype=float)
+            )
+            count = int(min(rel.shape[0], t.size, thrust_ric.shape[0], target_thrust.shape[0]))
+        return {
+            "time_s": t[:count].copy(),
+            "relative_ric": rel[:count, :].copy(),
+            "chaser_thrust_ric_km_s2": thrust_ric.copy(),
+            "target_thrust_eci_km_s2": target_thrust[:count, :].copy(),
+        }
+
     def _missing_tutorial_requirements(self) -> tuple[str, ...]:
         missing: list[str] = []
         satisfied = set(self._burn_axes_satisfied())
@@ -860,9 +1018,16 @@ class RPOTrainingTracker:
                 return True, idx + 1, best_s
         return False, None, best_s
 
-    def _record_inspection_gate_sample(self, rel: np.ndarray) -> None:
+    def _record_inspection_gate_sample(
+        self,
+        rel: np.ndarray,
+        target_state_eci: np.ndarray | None = None,
+        time_s: float | None = None,
+    ) -> None:
         gates = self.config.inspection_gates
         if not gates or len(self._inspection_gate_names) >= len(gates):
+            return
+        if not self._sun_constraints_satisfied_at(rel[:3], target_state_eci=target_state_eci, time_s=time_s):
             return
         sample_idx = len(self.rel_ric_hist) - 1
         previous = self.rel_ric_hist[sample_idx - 1] if sample_idx > 0 else None
@@ -879,11 +1044,69 @@ class RPOTrainingTracker:
                     self._inspection_gate_completed_idx = sample_idx
                     break
 
+    def _sun_constraints_satisfied_at(
+        self,
+        position_ric_km: np.ndarray,
+        *,
+        target_state_eci: np.ndarray | None = None,
+        time_s: float | None = None,
+    ) -> bool:
+        if not self.config.sun_angle_constraints:
+            return True
+        position = np.array(position_ric_km, dtype=float).reshape(1, 3)
+        for constraint in self.config.sun_angle_constraints:
+            if not bool(
+                constraint.samples_satisfying_constraint(
+                    position,
+                    target_state_eci=target_state_eci,
+                    time_s=time_s,
+                )[0]
+            ):
+                return False
+        return True
+
     def _inspection_gate_status(self) -> dict[str, Any]:
         return {
             "satisfied": tuple(self._inspection_gate_names),
             "completed_idx": self._inspection_gate_completed_idx,
         }
+
+    def _record_sun_angle_sample(self, rel: np.ndarray, target_state_eci: np.ndarray, time_s: float) -> None:
+        if not self.config.sun_angle_constraints:
+            return
+        position = np.array(rel, dtype=float).reshape(6)[:3].reshape(1, 3)
+        for constraint in self.config.sun_angle_constraints:
+            ok = bool(
+                constraint.samples_satisfying_constraint(
+                    position,
+                    target_state_eci=target_state_eci,
+                    time_s=float(time_s),
+                )[0]
+            )
+            angle = float(
+                constraint.sun_angles_deg(
+                    position,
+                    target_state_eci=target_state_eci,
+                    time_s=float(time_s),
+                )[0]
+            )
+            self._sun_angle_ok_by_constraint.setdefault(constraint.name, []).append(ok)
+            self._sun_angle_deg_by_constraint.setdefault(constraint.name, []).append(angle)
+
+    def _sun_angle_status_arrays(self, rel: np.ndarray) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
+        ok_by_name: dict[str, np.ndarray] = {}
+        angle_by_name: dict[str, np.ndarray] = {}
+        count = int(rel.shape[0])
+        for constraint in self.config.sun_angle_constraints:
+            ok_hist = self._sun_angle_ok_by_constraint.get(constraint.name, [])
+            angle_hist = self._sun_angle_deg_by_constraint.get(constraint.name, [])
+            if len(ok_hist) == count and len(angle_hist) == count:
+                ok_by_name[constraint.name] = np.array(ok_hist, dtype=bool)
+                angle_by_name[constraint.name] = np.array(angle_hist, dtype=float)
+            else:
+                ok_by_name[constraint.name] = constraint.samples_satisfying_constraint(rel[:, :3])
+                angle_by_name[constraint.name] = constraint.sun_angles_deg(rel[:, :3])
+        return ok_by_name, angle_by_name
 
     def current_hint(self) -> str:
         return self._current_hint()
@@ -903,6 +1126,18 @@ class RPOTrainingTracker:
             return "Inside keepout: arrest closing motion and translate away from the target."
         if self.config.sandbox_mode:
             return "Sandbox: Maneuver freely, coast, and watch the relative orbit respond."
+        if self.config.sun_angle_constraints:
+            for constraint in self.config.sun_angle_constraints:
+                ok_hist = self._sun_angle_ok_by_constraint.get(constraint.name, [])
+                angle_hist = self._sun_angle_deg_by_constraint.get(constraint.name, [])
+                if ok_hist and angle_hist:
+                    ok = bool(ok_hist[-1])
+                    sun_angle = float(angle_hist[-1])
+                else:
+                    ok = bool(constraint.samples_satisfying_constraint(r.reshape(1, 3))[0])
+                    sun_angle = float(constraint.sun_angles_deg(r.reshape(1, 3))[0])
+                if not ok:
+                    return f"Outside Sun-angle beam: reenter the amber region before crossing the next gate. Current Sun angle {sun_angle:.0f} deg."
         if self.config.inspection_gates:
             gate_status = self._inspection_gate_status()
             satisfied_names = set(gate_status["satisfied"])
@@ -1067,6 +1302,11 @@ class RPOTrainingTracker:
                 hard_speed_limit_violation=False,
                 forbidden_region_violation=False,
                 forbidden_region_names=(),
+                sun_angle_violation=False,
+                sun_angle_constraint_names=(),
+                sun_angle_violation_time_s=0.0,
+                min_sun_angle_deg=float("nan"),
+                final_sun_angle_deg=float("nan"),
                 approach_gate_violation=False,
                 approach_gate_names=(),
                 approach_gates_satisfied=0,
@@ -1134,6 +1374,25 @@ class RPOTrainingTracker:
             if bool(np.any(region.contains_positions(rel[:, :3]))):
                 forbidden_region_names.append(region.name)
         forbidden_region_violation = bool(forbidden_region_names)
+        sun_angle_constraint_names: list[str] = []
+        sun_angle_all_ok = np.ones(rel.shape[0], dtype=bool)
+        ok_by_name, angle_by_name = self._sun_angle_status_arrays(rel)
+        for constraint_name in [constraint.name for constraint in self.config.sun_angle_constraints]:
+            ok = ok_by_name.get(constraint_name, np.ones(rel.shape[0], dtype=bool))
+            sun_angle_all_ok &= ok
+            if not bool(np.all(ok)):
+                sun_angle_constraint_names.append(constraint_name)
+        sun_angle_violation = bool(sun_angle_constraint_names)
+        sun_angle_violation_time_s = _sampled_dwell_time_s(~sun_angle_all_ok, t) if angle_by_name else 0.0
+        if angle_by_name:
+            sun_angles = np.vstack([angle_by_name[name] for name in angle_by_name])
+            finite_angles = sun_angles[np.isfinite(sun_angles)]
+            min_sun_angle_deg = float(np.min(finite_angles)) if finite_angles.size else float("nan")
+            first_angles = sun_angles[0]
+            final_sun_angle_deg = float(first_angles[-1]) if first_angles.size else float("nan")
+        else:
+            min_sun_angle_deg = float("nan")
+            final_sun_angle_deg = float("nan")
         target_reference_range_violation = False
         final_target_reference_range_km = float("nan")
         if self.config.max_target_reference_range_km is not None:
@@ -1394,6 +1653,11 @@ class RPOTrainingTracker:
             hard_speed_limit_violation=bool(hard_speed_limit_violation),
             forbidden_region_violation=bool(forbidden_region_violation),
             forbidden_region_names=tuple(forbidden_region_names),
+            sun_angle_violation=bool(sun_angle_violation),
+            sun_angle_constraint_names=tuple(sun_angle_constraint_names),
+            sun_angle_violation_time_s=float(sun_angle_violation_time_s),
+            min_sun_angle_deg=float(min_sun_angle_deg),
+            final_sun_angle_deg=float(final_sun_angle_deg),
             approach_gate_violation=bool(approach_gate_violation),
             approach_gate_names=tuple(approach_gate_names),
             approach_gates_satisfied=len(gate_status["satisfied"]),
@@ -1439,6 +1703,12 @@ class RPOTrainingTracker:
         )
         if score.forbidden_region_violation:
             lines.append(f"Forbidden Reg : {', '.join(score.forbidden_region_names)}")
+        if self.config.sun_angle_constraints:
+            lines.append(f"Min Sun Angle : {score.min_sun_angle_deg:.1f} deg")
+            lines.append(f"Final Sun Ang : {score.final_sun_angle_deg:.1f} deg")
+            lines.append(f"Sun Viol Time : {score.sun_angle_violation_time_s:.1f} s")
+        if score.sun_angle_violation:
+            lines.append(f"Sun Region Out: {', '.join(score.sun_angle_constraint_names)}")
         if score.approach_gates_total:
             lines.append(f"R-Bar Gates   : {score.approach_gates_satisfied}/{score.approach_gates_total}")
         if score.inspection_gates_total:
@@ -1963,6 +2233,8 @@ def _forbidden_regions_from_metadata(value: Any) -> tuple[ForbiddenRegionConfig,
             _validate_annular_sector_region(region)
         elif region.kind == "cylinder":
             _validate_cylinder_region(region)
+        elif region.kind == "sphere":
+            _validate_sphere_region(region)
         elif region.kind != "box":
             raise ValueError(f"Forbidden region '{region.name}' has unknown kind '{region.kind}'.")
         regions.append(region)
@@ -1999,6 +2271,36 @@ def _inspection_gates_from_metadata(value: Any) -> tuple[InspectionGateConfig, .
             raise ValueError(f"Inspection gate '{gate.name}' half_width_ric_km values must be positive.")
         gates.append(gate)
     return tuple(gates)
+
+
+def _sun_angle_constraints_from_metadata(value: Any) -> tuple[SunAngleConstraintConfig, ...]:
+    if value is None or value is False:
+        return ()
+    if not isinstance(value, list):
+        raise ValueError("metadata.game.training.sun_angle_constraints must be a list.")
+    constraints: list[SunAngleConstraintConfig] = []
+    for idx, item in enumerate(value, start=1):
+        if not isinstance(item, dict):
+            raise ValueError("Each sun angle constraint must be a mapping.")
+        constraint = SunAngleConstraintConfig.from_mapping(item, index=idx)
+        if float(constraint.allowed_half_angle_deg) <= 0.0 or float(constraint.allowed_half_angle_deg) >= 180.0:
+            raise ValueError(f"Sun angle constraint '{constraint.name}' allowed_half_angle_deg must be between 0 and 180.")
+        if constraint.allowed_center_mode not in {"configured", "anti_sun", "antisun", "opposite_sun", "sun", "toward_sun"}:
+            raise ValueError(
+                f"Sun angle constraint '{constraint.name}' allowed_center_mode must be configured, anti_sun, or sun."
+            )
+        if constraint.min_range_km is not None and float(constraint.min_range_km) < 0.0:
+            raise ValueError(f"Sun angle constraint '{constraint.name}' min_range_km must be nonnegative.")
+        if constraint.max_range_km is not None and float(constraint.max_range_km) <= 0.0:
+            raise ValueError(f"Sun angle constraint '{constraint.name}' max_range_km must be positive.")
+        if (
+            constraint.min_range_km is not None
+            and constraint.max_range_km is not None
+            and float(constraint.min_range_km) >= float(constraint.max_range_km)
+        ):
+            raise ValueError(f"Sun angle constraint '{constraint.name}' min_range_km must be less than max_range_km.")
+        constraints.append(constraint)
+    return tuple(constraints)
 
 
 def _approach_gate_status(gates: tuple[ApproachGateConfig, ...], relative_ric_state: np.ndarray) -> dict[str, tuple[str, ...]]:
@@ -2191,6 +2493,29 @@ def _ric_bound_array(value: Any, *, default: float, field_name: str) -> np.ndarr
     return np.array(vals, dtype=float).reshape(3)
 
 
+def _unit_ric_array(value: Any, *, field_name: str) -> np.ndarray:
+    if not isinstance(value, (list, tuple)) or len(value) != 3:
+        raise ValueError(f"Sun angle constraint {field_name} must be a length-3 list.")
+    vec = np.array(value, dtype=float).reshape(3)
+    norm = float(np.linalg.norm(vec))
+    if not np.isfinite(norm) or norm <= 0.0:
+        raise ValueError(f"Sun angle constraint {field_name} must be nonzero.")
+    return vec / norm
+
+
+def _unit_direction_rows(value: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    pos = np.array(value, dtype=float)
+    if pos.ndim == 1:
+        pos = pos.reshape(1, -1)
+    dirs = np.zeros((pos.shape[0], 3), dtype=float)
+    if pos.shape[1] < 3:
+        return dirs, np.zeros(pos.shape[0], dtype=bool)
+    norm = np.linalg.norm(pos[:, :3], axis=1)
+    valid = np.isfinite(norm) & (norm > 0.0)
+    dirs[valid, :] = pos[valid, :3] / norm[valid].reshape(-1, 1)
+    return dirs, valid
+
+
 def _validate_annular_sector_region(region: ForbiddenRegionConfig) -> None:
     _plane_axes(region.plane)
     if region.inner_radius_km is None or region.outer_radius_km is None:
@@ -2211,6 +2536,13 @@ def _validate_cylinder_region(region: ForbiddenRegionConfig) -> None:
         raise ValueError(f"Forbidden region '{region.name}' radius_km must be positive.")
     if float(region.height_km) <= 0.0:
         raise ValueError(f"Forbidden region '{region.name}' height_km must be positive.")
+
+
+def _validate_sphere_region(region: ForbiddenRegionConfig) -> None:
+    if region.radius_km is None:
+        raise ValueError(f"Forbidden region '{region.name}' sphere requires radius_km.")
+    if float(region.radius_km) <= 0.0:
+        raise ValueError(f"Forbidden region '{region.name}' radius_km must be positive.")
 
 
 def _axis_index(axis: str) -> int:

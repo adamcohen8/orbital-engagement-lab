@@ -1,4 +1,8 @@
 scenario_name: public_sgp4_passive_eci_transform
+metadata:
+  owner: public
+  public_surface: public-example
+  support_level: supported
 scenario_description: Passive public TLE propagation from SGP4 TEME states transformed
   to ECI with the opt-in Vallado IAU-80 reduction.
 objects:

@@ -1,6 +1,8 @@
 scenario_name: orbital_elements_stationkeep_raise_sma_circularize
 metadata:
-  owner: validation
+  owner: public
+  public_surface: public-config
+  support_level: demonstration
   notes: Inspect COE stationkeeping while raising semi-major axis and circularizing
     one satellite from apogee.
 objects:
