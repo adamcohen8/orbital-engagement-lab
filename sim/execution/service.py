@@ -41,9 +41,18 @@ class SimulationExecutionService:
         cfg: SimulationScenarioConfig,
         *,
         step_callback: StepCallback | None = None,
+        history_mode: str = "full",
+        initial_history_capacity: int = 4096,
+        max_history_samples: int = 4096,
     ) -> _SingleRunEngine:
         self._reject_batch_analysis(cfg)
-        return _SingleRunEngine(cfg, step_callback=step_callback)
+        return _SingleRunEngine(
+            cfg,
+            step_callback=step_callback,
+            history_mode=history_mode,
+            initial_history_capacity=initial_history_capacity,
+            max_history_samples=max_history_samples,
+        )
 
     def run_single(
         self,
@@ -145,8 +154,17 @@ def create_single_run_engine(
     cfg: SimulationScenarioConfig,
     *,
     step_callback: StepCallback | None = None,
+    history_mode: str = "full",
+    initial_history_capacity: int = 4096,
+    max_history_samples: int = 4096,
 ) -> _SingleRunEngine:
-    return _DEFAULT_SERVICE.create_engine(cfg, step_callback=step_callback)
+    return _DEFAULT_SERVICE.create_engine(
+        cfg,
+        step_callback=step_callback,
+        history_mode=history_mode,
+        initial_history_capacity=initial_history_capacity,
+        max_history_samples=max_history_samples,
+    )
 
 
 def run_simulation_scenario(

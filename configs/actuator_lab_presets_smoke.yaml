@@ -1,4 +1,8 @@
 scenario_name: actuator_lab_presets_smoke
+metadata:
+  owner: public
+  public_surface: public-actuator
+  support_level: demonstration
 scenario_description: Local actuator preset lab covering public RCS, electric propulsion,
   gimbaled thruster, magnetorquer, and CMG presets.
 objects:

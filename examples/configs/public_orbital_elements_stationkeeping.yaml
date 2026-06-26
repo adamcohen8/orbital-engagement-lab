@@ -2,6 +2,8 @@ scenario_name: public_orbital_elements_stationkeeping
 scenario_description: Public single-satellite orbital-elements stationkeeping example using mission strategy plus controller execution.
 metadata:
   owner: public
+  public_surface: public-example
+  support_level: supported
   seed: 123
   notes: Demonstrates current objects-based YAML for non-rendezvous orbit control.
 objects:

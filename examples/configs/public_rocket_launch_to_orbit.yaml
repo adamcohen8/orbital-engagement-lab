@@ -2,6 +2,8 @@ scenario_name: public_rocket_launch_to_orbit
 scenario_description: Public rocket ascent benchmark that reaches a low-Earth insertion orbit with GNC diagnostics.
 metadata:
   owner: public
+  public_surface: public-rocket
+  support_level: supported
   seed: 123
   notes: This is an educational rocket GNC benchmark, not a validated launch vehicle design.
 objects:

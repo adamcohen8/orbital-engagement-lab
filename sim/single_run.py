@@ -107,13 +107,25 @@ class _SingleRunEngine:
         cfg: SimulationScenarioConfig,
         *,
         step_callback: Callable[[int, int], None] | None = None,
+        history_mode: str = "full",
+        initial_history_capacity: int = 4096,
+        max_history_samples: int = 4096,
     ) -> None:
         self.cfg = cfg
         self.active_step_callback = step_callback
+        self.history_mode = str(history_mode or "full").strip().lower()
+        if self.history_mode not in {"full", "dynamic"}:
+            raise ValueError("history_mode must be 'full' or 'dynamic'.")
         reset_attitude_guardrail_stats()
 
         self.dt = float(cfg.simulator.dt_s)
-        self.n = int(np.floor(float(cfg.simulator.duration_s) / self.dt)) + 1
+        self.planned_samples = int(np.floor(float(cfg.simulator.duration_s) / self.dt)) + 1
+        self.sample_offset = 0
+        self.max_history_samples = int(max(2, max_history_samples))
+        if self.history_mode == "dynamic":
+            self.n = int(max(2, min(self.planned_samples, self.max_history_samples, int(initial_history_capacity))))
+        else:
+            self.n = self.planned_samples
         self.outdir = Path(cfg.outputs.output_dir)
 
         seed = int(cfg.metadata.get("seed", 123))
@@ -492,7 +504,23 @@ class _SingleRunEngine:
 
     @property
     def total_steps(self) -> int:
-        return max(self.n - 1, 0)
+        return max(self.planned_samples - 1, 0)
+
+    @property
+    def retained_start_step(self) -> int:
+        return int(self.sample_offset)
+
+    @property
+    def retained_end_step(self) -> int:
+        return int(self.sample_offset + int(self.current_index))
+
+    @property
+    def retained_sample_count(self) -> int:
+        return int(self.current_index + 1)
+
+    @property
+    def allocated_history_samples(self) -> int:
+        return int(self.n)
 
     @property
     def done(self) -> bool:
@@ -508,7 +536,7 @@ class _SingleRunEngine:
         if self.active_step_callback is None:
             return
         try:
-            self.active_step_callback(int(step), self.total_steps)
+            self.active_step_callback(int(self.sample_offset + int(step)), self.total_steps)
         except (TypeError, ValueError) as exc:
             logger.warning("Disabling step callback after runtime error: %s", exc)
             self.active_step_callback = None
@@ -544,11 +572,109 @@ class _SingleRunEngine:
         expanded[: arr.shape[0], ...] = arr
         return expanded
 
+    def _compact_axis0_latest(
+        self,
+        arr: np.ndarray | None,
+        *,
+        start: int,
+        count: int,
+        fill: float = np.nan,
+    ) -> np.ndarray | None:
+        if arr is None:
+            return None
+        retained = arr[int(start) : int(start) + int(count), ...].copy()
+        arr[...] = fill
+        arr[: int(count), ...] = retained
+        return arr
+
+    def _compact_event_history_latest(self, rows: list[dict[str, Any]], *, retained_start_time_s: float) -> list[dict[str, Any]]:
+        threshold = float(retained_start_time_s) - 1.0e-9
+        retained: list[dict[str, Any]] = []
+        for row in rows:
+            event_t = row.get("interval_end_t_s", row.get("t_s")) if isinstance(row, dict) else None
+            try:
+                t_s = float(event_t)
+            except (TypeError, ValueError):
+                retained.append(row)
+                continue
+            if t_s >= threshold:
+                retained.append(row)
+        return retained
+
+    def _compact_dynamic_history_if_needed(self, *, keep_latest: int | None = None) -> None:
+        if self.history_mode != "dynamic" or self.current_index < self.n - 1:
+            return
+        if self.n < self.max_history_samples:
+            return
+        if keep_latest is None:
+            keep_latest = max(1, (int(self.n) * 3) // 4)
+        keep = int(max(1, min(int(keep_latest), self.current_index + 1)))
+        start = int(self.current_index - keep + 1)
+        retained_start_time_s = float(self.t_s[start])
+        self.t_s = self._compact_axis0_latest(self.t_s, start=start, count=keep)
+        self.target_reference_orbit_hist = self._compact_axis0_latest(
+            self.target_reference_orbit_hist,
+            start=start,
+            count=keep,
+        )
+        self.truth_hist = {
+            aid: self._compact_axis0_latest(hist, start=start, count=keep) for aid, hist in self.truth_hist.items()
+        }
+        self.belief_hist = {
+            aid: self._compact_axis0_latest(hist, start=start, count=keep) for aid, hist in self.belief_hist.items()
+        }
+        self.thrust_hist = {
+            aid: self._compact_axis0_latest(hist, start=start, count=keep) for aid, hist in self.thrust_hist.items()
+        }
+        self.torque_hist = {
+            aid: self._compact_axis0_latest(hist, start=start, count=keep) for aid, hist in self.torque_hist.items()
+        }
+        self.desired_attitude_hist = {
+            aid: self._compact_axis0_latest(hist, start=start, count=keep)
+            for aid, hist in self.desired_attitude_hist.items()
+        }
+        self.throttle_hist = {
+            aid: self._compact_axis0_latest(hist, start=start, count=keep) for aid, hist in self.throttle_hist.items()
+        }
+        self.rocket_stage_hist = self._compact_axis0_latest(self.rocket_stage_hist, start=start, count=keep)
+        self.rocket_q_dyn_hist = self._compact_axis0_latest(self.rocket_q_dyn_hist, start=start, count=keep)
+        self.rocket_mach_hist = self._compact_axis0_latest(self.rocket_mach_hist, start=start, count=keep)
+        self.rocket_metric_hists = {
+            key: self._compact_axis0_latest(hist, start=start, count=keep)
+            for key, hist in self.rocket_metric_hists.items()
+        }
+        self.reentry_metric_hists = {
+            aid: {key: self._compact_axis0_latest(hist, start=start, count=keep) for key, hist in metrics.items()}
+            for aid, metrics in self.reentry_metric_hists.items()
+        }
+        self.knowledge_hist = {
+            obs: {tgt: self._compact_axis0_latest(hist, start=start, count=keep) for tgt, hist in by_tgt.items()}
+            for obs, by_tgt in self.knowledge_hist.items()
+        }
+        self.knowledge_measurement_hist = {
+            obs: {tgt: self._compact_axis0_latest(hist, start=start, count=keep) for tgt, hist in by_tgt.items()}
+            for obs, by_tgt in self.knowledge_measurement_hist.items()
+        }
+        self.controller_debug_hist = {
+            aid: self._compact_event_history_latest(rows, retained_start_time_s=retained_start_time_s)
+            for aid, rows in self.controller_debug_hist.items()
+        }
+        self.bridge_hist = {
+            aid: self._compact_event_history_latest(rows, retained_start_time_s=retained_start_time_s)
+            for aid, rows in self.bridge_hist.items()
+        }
+        self.sample_offset += start
+        self.current_index = keep - 1
+
     def _ensure_sample_capacity(self, sample_index: int) -> None:
         needed = int(sample_index) + 1
         if needed <= self.n:
             return
         grow_to = max(needed, int(max(self.n * 2, self.n + 1)))
+        if self.history_mode == "dynamic":
+            grow_to = min(grow_to, self.max_history_samples)
+            if needed > grow_to:
+                raise RuntimeError("dynamic history compaction did not free space for the next sample.")
         self.n = grow_to
         self.t_s = self._grow_axis0(self.t_s, grow_to)
         self.target_reference_orbit_hist = self._grow_axis0(self.target_reference_orbit_hist, grow_to)
@@ -582,9 +708,17 @@ class _SingleRunEngine:
         enforce_history_memory_budget(self.history_memory_estimate)
 
     def snapshot(self, step_index: int | None = None) -> dict[str, Any]:
-        idx = self.current_index if step_index is None else int(step_index)
-        if idx < 0 or idx >= self.n:
-            raise IndexError(f"step_index {idx} is out of range for {self.n} samples.")
+        if step_index is None:
+            idx = self.current_index
+        elif self.history_mode == "dynamic":
+            idx = int(step_index) - int(self.sample_offset)
+        else:
+            idx = int(step_index)
+        if idx < 0 or idx > int(self.current_index) or idx >= self.n:
+            raise IndexError(
+                f"step_index {step_index} is outside retained steps "
+                f"{self.retained_start_step}..{self.retained_end_step}."
+            )
         truth = {oid: np.array(hist[idx], dtype=float) for oid, hist in self.truth_hist.items()}
         if self.target_reference_orbit_hist is not None:
             ref_state = np.array(self.target_reference_orbit_hist[idx], dtype=float).reshape(-1)
@@ -600,7 +734,7 @@ class _SingleRunEngine:
                     )
                 )
         return {
-            "step_index": idx,
+            "step_index": int(self.sample_offset + idx),
             "time_s": float(self.t_s[idx]),
             "truth": truth,
             "belief": {oid: np.array(hist[idx], dtype=float) for oid, hist in self.belief_hist.items()},
@@ -717,6 +851,7 @@ class _SingleRunEngine:
         if self.done:
             return self.snapshot()
 
+        self._compact_dynamic_history_if_needed()
         k = int(self.current_index)
         t = float(self.t_s[k])
         step_dt = self.dt if dt_s is None else float(dt_s)
@@ -870,6 +1005,7 @@ class _SingleRunEngine:
         return self.snapshot()
 
     def run(self) -> dict[str, Any]:
+        self._ensure_full_history_payload_allowed()
         if not bool(getattr(self, "_acceleration_context_active", False)):
             with acceleration_context_from_config(self.cfg):
                 self._acceleration_context_active = True
@@ -992,9 +1128,14 @@ class _SingleRunEngine:
         rocket_object_id = str(getattr(self.rocket, "object_id", "rocket") or "rocket")
         return self.throttle_hist.get(rocket_object_id, np.array([]))
 
+    def _ensure_full_history_payload_allowed(self) -> None:
+        if self.history_mode == "dynamic":
+            raise RuntimeError("Dynamic history mode is only supported for step-driven game sessions.")
+
     def build_run_payload(self) -> dict[str, Any]:
         """Build the in-memory run payload without rendering or writing artifacts."""
 
+        self._ensure_full_history_payload_allowed()
         return self._payload_from_parts(self._build_payload_parts())
 
     def _write_artifacts(self, payload: dict[str, Any], parts: _SingleRunPayloadParts) -> dict[str, Any]:
@@ -1019,6 +1160,7 @@ class _SingleRunEngine:
         )
 
     def build_payload(self) -> dict[str, Any]:
+        self._ensure_full_history_payload_allowed()
         if not bool(getattr(self, "_acceleration_context_active", False)):
             with acceleration_context_from_config(self.cfg):
                 self._acceleration_context_active = True

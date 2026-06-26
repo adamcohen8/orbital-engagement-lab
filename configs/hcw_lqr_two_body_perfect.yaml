@@ -1,6 +1,8 @@
 scenario_name: hcw_lqr_two_body_perfect
 metadata:
-  owner: controller_lab
+  owner: public
+  public_surface: public-config
+  support_level: demonstration
   notes: Baseline HCW LQR rendezvous case with two-body dynamics, direct orbit control,
     and explicit zero-error target knowledge for controller-frame construction.
 objects:

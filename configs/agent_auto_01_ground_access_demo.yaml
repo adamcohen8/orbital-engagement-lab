@@ -2,7 +2,9 @@ scenario_name: agent_auto_01_ground_access_demo
 scenario_description: 'Agent-generated public demo: TLE-initialized propagation with
   geometric Colorado Springs access evidence.'
 metadata:
-  owner: public-oel-agents
+  owner: public
+  public_surface: public-agent-workflow
+  support_level: supported
   notes: Generated for the weekly OEL agentic workflow post. This is a geometric access
     screen, not an RF link or scheduling analysis.
 objects:

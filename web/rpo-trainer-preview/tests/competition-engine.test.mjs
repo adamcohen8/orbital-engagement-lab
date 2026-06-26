@@ -186,6 +186,30 @@ test("validator accepts a canonical attempt and rejects a tampered score", () =>
   assert.equal(validateAttemptPacket({ ...attempt, claimed_score: attempt.claimed_score + 1 }, record).status, "invalid");
 });
 
+test("replay preserves same-tick tap burns", () => {
+  const record = buildChallengeRecord();
+  const held = runPursuitReplay(record.config, {
+    seed: 7,
+    input_events: [
+      { tick: 3, control: "iPlus", state: "down" },
+      { tick: 4, control: "iPlus", state: "up" },
+    ],
+    final_tick: 5,
+  });
+  const tapped = runPursuitReplay(record.config, {
+    seed: 7,
+    input_events: [
+      { tick: 3, control: "iPlus", state: "down" },
+      { tick: 3, control: "iPlus", state: "up" },
+    ],
+    final_tick: 5,
+  });
+  assert.equal(tapped.burn_markers.length > 0, true);
+  assert.equal(tapped.burn_markers[0].tick, 3);
+  assert.equal(tapped.burn_markers[0].controls.i, 1);
+  assert.equal(tapped.metrics.player_delta_v_m_s, held.metrics.player_delta_v_m_s);
+});
+
 test("interactive session records tick inputs and validates its attempt packet", () => {
   const record = buildChallengeRecord();
   const session = createPursuitSession(record.config, { seed: 123 });
@@ -199,6 +223,20 @@ test("interactive session records tick inputs and validates its attempt packet",
   assert.equal(snapshot.input_events[1].tick, 8);
   const attempt = session.attemptPacket({ challengeRecord: record, username: "SESSION" });
   assert.equal(validateAttemptPacket(attempt, record).status, "valid");
+});
+
+test("interactive session preserves same-tick tap burns", () => {
+  const record = buildChallengeRecord();
+  const session = createPursuitSession(record.config, { seed: 123 });
+  session.setControl("iPlus", true);
+  session.setControl("iPlus", false);
+  session.step(1);
+  const snapshot = session.snapshot();
+  assert.equal(snapshot.input_events.length, 2);
+  assert.equal(snapshot.input_events[0].tick, 0);
+  assert.equal(snapshot.input_events[1].tick, 0);
+  assert.ok(snapshot.player_delta_v_m_s > 0);
+  assert.equal(validateAttemptPacket(session.attemptPacket({ challengeRecord: record, username: "TAP" }), record).status, "valid");
 });
 
 test("target defensive maneuver is visible relative to target reference", () => {

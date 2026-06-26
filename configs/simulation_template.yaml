@@ -1,6 +1,8 @@
 scenario_name: everything_on_template
 metadata:
-  owner: team
+  owner: public
+  public_surface: public-template
+  support_level: supported
   notes: Full-feature baseline with rocket + target + chaser, broad dynamics, mission
     hooks, plots, and animations enabled.
 objects:

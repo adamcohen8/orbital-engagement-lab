@@ -1,6 +1,8 @@
 scenario_name: orbital_elements_tracking_general
 metadata:
-  owner: validation
+  owner: public
+  public_surface: public-config
+  support_level: demonstration
   notes: General COE tracking loop using energy/eccentricity-vector/angular-momentum
     feedback.
 objects:

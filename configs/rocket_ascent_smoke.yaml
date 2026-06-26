@@ -3,6 +3,8 @@ scenario_description: Deterministic rocket ascent smoke case with rocket GNC dia
   enabled.
 metadata:
   owner: public
+  public_surface: public-rocket
+  support_level: demonstration
   seed: 123
 objects:
   rocket:

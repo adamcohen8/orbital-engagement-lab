@@ -3,6 +3,8 @@ scenario_description: Tuned rocket ascent benchmark that reaches a low-Earth ins
   orbit with GNC diagnostics.
 metadata:
   owner: public
+  public_surface: public-rocket
+  support_level: demonstration
   seed: 123
   notes: This is a current-generation rocket GNC benchmark, not a validated launch
     vehicle design.

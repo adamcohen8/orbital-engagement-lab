@@ -76,27 +76,33 @@ Bundled training scenarios:
    Build a passively safe cross-track orbit and drift through inspection gates
    without entering the in-track forbidden cylinder.
 
-6. `rpo_06_elliptic_burn_then_approach`
+6. `rpo_06_sun_angle_inspection`
+   Fly a GEO safe-inspection pattern while keeping the chaser inside an
+   allowed target-centered Sun-angle inspection beam. Pass by visiting the
+   inspection gates while inside the amber lighting corridor, avoiding the
+   forbidden proximity sphere, and staying under the time and delta-v budgets.
+
+7. `rpo_07_elliptic_burn_then_approach`
    Learn the new eccentric-orbit behavior by testing radial and in-track burns,
    then complete a slow approach to an in-track hold circle using the elliptical
    coast predictor.
 
-7. `rpo_07_elliptic_nmc`
+8. `rpo_08_elliptic_nmc`
    Enter a natural-motion circumnavigation about the eccentric-orbit target.
    Pass by matching the target radial/cross-track amplitudes and local passive
    drift relationship under the time and delta-v budgets.
 
-8. `rpo_08_elliptic_rendezvous`
+9. `rpo_09_elliptic_rendezvous`
    Repeat the Level 4 terminal rendezvous in the eccentric-orbit environment.
    Pass by getting within 10 meters of the target with less than 0.1 meters per
    second of relative velocity while using the elliptical coast predictor.
 
-9. `rpo_09_defensive_target_demo`
+10. `rpo_10_defensive_target_demo`
    Later single-player bridge toward PvP: target uses a simple defensive policy.
    Pass by tracking the maneuvering target and closing within 100 meters while
    staying under the chaser delta-v budget.
 
-10. `rpo_10_evasive_target_survival`
+11. `rpo_11_evasive_target_survival`
    Reverse the roles: the player flies the target while an autonomous RIC_PD
    chaser attempts rendezvous. Pass by maintaining at least 100 meters of
    separation until the timer expires while staying under the target delta-v
@@ -105,7 +111,7 @@ Bundled training scenarios:
 Arcade variant:
 
 - `rpo_arcade_pursuit`
-  Repeat the Level 9 pursuit problem across randomized target-evasion rounds.
+  Repeat the Level 10 pursuit problem across randomized target-evasion rounds.
   Each cleared round resets fuel, changes the target evasion direction, tightens
   the goal radius by 5 meters down to a 5 meter floor, and rolls the weighted
   round score into the run total. The chaser has a 3 m/s round delta-v budget;
@@ -217,18 +223,19 @@ scoped to the final free-maneuver phase.
 
 ### Phase 3 - Scenario Pack
 
-- Done: build the tutorial plus ten numbered cadet scenarios.
+- Done: build the tutorial plus eleven numbered cadet scenarios.
 - Done: `rpo_00_tutorial`.
 - Done: `rpo_01_coast_relative_motion`.
 - Done: `rpo_02_vbar_approach`.
 - Done: `rpo_03_rbar_approach`.
 - Done: `rpo_04_rendezvous`.
 - Done: `rpo_05_passive_cross_track_approach`.
-- Done: `rpo_06_elliptic_burn_then_approach`.
-- Done: `rpo_07_elliptic_nmc`.
-- Done: `rpo_08_elliptic_rendezvous`.
-- Done: `rpo_09_defensive_target_demo`.
-- Done: `rpo_10_evasive_target_survival`.
+- Demo: `rpo_06_sun_angle_inspection`.
+- Done: `rpo_07_elliptic_burn_then_approach`.
+- Done: `rpo_08_elliptic_nmc`.
+- Done: `rpo_09_elliptic_rendezvous`.
+- Done: `rpo_10_defensive_target_demo`.
+- Done: `rpo_11_evasive_target_survival`.
 - Done: `rpo_bonus_cislunar_rendezvous`.
 - Done: add instructor notes for each scenario.
 - Done for implemented levels: add success thresholds and scorecards.
@@ -313,18 +320,20 @@ Implemented levels:
 - `rpo_05_passive_cross_track_approach`: build a passively safe cross-track
   orbit and drift through the RC inspection gates without entering the in-track
   forbidden cylinder.
-- `rpo_06_elliptic_burn_then_approach`: test radial and in-track burns around
+- `rpo_06_sun_angle_inspection`: fly a GEO inspection pattern while satisfying
+  the target-centered Sun-angle beam and avoiding the forbidden proximity sphere.
+- `rpo_07_elliptic_burn_then_approach`: test radial and in-track burns around
   an eccentric-orbit target, then enter the hold circle behind the target.
-- `rpo_07_elliptic_nmc`: enter an eccentric-orbit natural-motion
+- `rpo_08_elliptic_nmc`: enter an eccentric-orbit natural-motion
   circumnavigation using the elliptical coast predictor.
-- `rpo_08_elliptic_rendezvous`: repeat the close Level 4 rendezvous against
+- `rpo_09_elliptic_rendezvous`: repeat the close Level 4 rendezvous against
   the eccentric-orbit target, using the elliptical coast predictor to control
   closure into the 25 meter proximity zone and final 10 meter goal.
-- `rpo_09_defensive_target_demo`: track a target with simple defensive pulses,
+- `rpo_10_defensive_target_demo`: track a target with simple defensive pulses,
   close within 100 meters, and stay under the chaser delta-v budget. This level
   uses the target reference orbit as the RIC display/control frame so the
   target maneuver is visible, and caps target defensive delta-v at 0.1 m/s.
-- `rpo_10_evasive_target_survival`: fly the target vehicle, evade an autonomous
+- `rpo_11_evasive_target_survival`: fly the target vehicle, evade an autonomous
   RIC_PD chaser, preserve at least 100 meters of separation, and survive until
   the timer expires under the target delta-v budget.
 - `rpo_bonus_cislunar_rendezvous`: rendezvous near an Earth-Moon L2 NRHO seed

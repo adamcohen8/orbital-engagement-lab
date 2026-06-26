@@ -152,6 +152,9 @@ def game_debrief_payload(
             "time_inside_keepout_s": _float_or_none(getattr(score, "time_inside_keepout_s", None)),
             "approximate_delta_v_m_s": _float_or_none(getattr(score, "approximate_delta_v_m_s", None)),
             "target_delta_v_m_s": _float_or_none(getattr(score, "target_delta_v_m_s", None)),
+            "min_sun_angle_deg": _float_or_none(getattr(score, "min_sun_angle_deg", None)),
+            "final_sun_angle_deg": _float_or_none(getattr(score, "final_sun_angle_deg", None)),
+            "sun_angle_violation_time_s": _float_or_none(getattr(score, "sun_angle_violation_time_s", None)),
             "min_goal_error_km": _float_or_none(getattr(score, "min_goal_error_km", None)),
             "initial_range_km": replay_metrics["initial_range_km"],
             "max_relative_speed_km_s": replay_metrics["max_relative_speed_km_s"],
@@ -171,6 +174,8 @@ def game_debrief_payload(
             "hard_speed_limit": bool(getattr(score, "hard_speed_limit_violation", False)),
             "forbidden_region": bool(getattr(score, "forbidden_region_violation", False)),
             "forbidden_region_names": list(getattr(score, "forbidden_region_names", ()) or ()),
+            "sun_angle": bool(getattr(score, "sun_angle_violation", False)),
+            "sun_angle_constraint_names": list(getattr(score, "sun_angle_constraint_names", ()) or ()),
             "approach_gate": bool(getattr(score, "approach_gate_violation", False)),
             "approach_gate_names": list(getattr(score, "approach_gate_names", ()) or ()),
         },
@@ -195,6 +200,14 @@ def game_debrief_payload(
 
 
 def tracker_replay_history(tracker: Any) -> dict[str, Any]:
+    replay = tracker.replay_history() if hasattr(tracker, "replay_history") else {}
+    if replay:
+        return {
+            "time_s": _array_list(replay.get("time_s", [])),
+            "relative_ric": _array_list(replay.get("relative_ric", [])),
+            "chaser_thrust_ric_km_s2": _array_list(replay.get("chaser_thrust_ric_km_s2", [])),
+            "target_thrust_eci_km_s2": _array_list(replay.get("target_thrust_eci_km_s2", [])),
+        }
     return {
         "time_s": _array_list(getattr(tracker, "t_s", [])),
         "relative_ric": _array_list(getattr(tracker, "rel_ric_hist", [])),

@@ -13,11 +13,12 @@ import tomllib
 import yaml
 
 import sim.game.launcher as game_launcher
+import sim.game.pygame_dashboard as game_pygame_dashboard
 import sim.game.recording_controller as game_recording_controller
 import sim.game.runner as game_runner
 import sim.game.training as game_training
 from sim.acceleration.settings import ACCELERATION_ENV, acceleration_settings_from_config
-from sim.api import SimulationConfig, SimulationSession
+from sim.api import SimulationConfig, SimulationSession, SimulationSnapshot
 from sim.core.models import Command, StateBelief, StateTruth
 from sim.dynamics.orbit.cr3bp import (
     EARTH_MOON_MEAN_MOTION_RAD_S,
@@ -31,6 +32,7 @@ from sim.dynamics.orbit.cr3bp import (
 )
 from sim.dynamics.orbit.elements import coes_mapping_to_rv_eci
 from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2
+from sim.dynamics.orbit.two_body import propagate_two_body_rk4
 from sim.game.arcade import (
     _arcade_round_briefing_lines,
     _arcade_round_coast_prediction_model,
@@ -101,6 +103,8 @@ from sim.game.launcher import (
 )
 from sim.game.manual import KeyboardCommandState, ManualGameCommandProvider
 from sim.game.pygame_dashboard import (
+    MAX_ACTIVE_CR3BP_GHOST_DRAW_POINTS,
+    MIN_PLOT_SPAN_KM,
     MOON_RADIUS_KM,
     PLOT_OVERLAY_MARGIN,
     PygameRPODashboard,
@@ -108,9 +112,12 @@ from sim.game.pygame_dashboard import (
     _cr3bp_projection_mode_key,
     _cr3bp_reference_cache_valid,
     _cr3bp_state_to_moon_ric_rect,
+    _cr3bp_states_to_moon_ric_rect_rows,
     _cw_coast_state,
+    _cw_coast_states,
     _cw_forced_state,
     _elliptic_linear_coast_states,
+    _front_loaded_prediction_times,
     _linearized_cr3bp_moon_ric_coast_prediction,
     _moon_ric_rect_state_to_cr3bp,
     _nonlinear_cr3bp_moon_ric_coast_prediction,
@@ -136,32 +143,42 @@ from sim.game.runner import (
     _add_level_music_to_recording,
     _adjust_speed_multiple,
     _apply_sandbox_setup_to_config,
+    _clear_two_rail_released_maneuver_input,
     _clip_recording_status,
     _coast_prediction_orbit_fraction,
     _coerce_speed_multiple,
     _command_status,
     _dashboard_fps_for_speed,
     _dashboard_object_ids,
+    _effective_speed_multiple_for_control,
     _finish_game_recording,
+    _game_active_tick_dt_s,
     _game_camera_mode,
     _game_camera_rule_mode,
     _game_camera_rule_toggle_enabled,
     _game_chaser_sprite_diameter_km,
-    _game_chaser_sprite_max_size_px,
     _game_chaser_sprite_path,
     _game_coast_chaser_after_delta_v_budget,
     _game_coast_prediction_model,
+    _game_coast_speed_dt_schedule,
+    _game_coast_tick_dt_s,
     _game_control_mode,
     _game_controlled_object_id,
+    _game_cr3bp_active_prediction_horizon_s,
     _game_cr3bp_coast_prediction_dt_s,
+    _game_cr3bp_coast_prediction_horizon_mode,
     _game_cr3bp_coast_prediction_horizon_s,
+    _game_cr3bp_prediction_coast_update_interval_s,
     _game_cr3bp_projection_mode,
     _game_dashboard_fps_cap,
+    _game_dashboard_high_speed_fps,
+    _game_dashboard_high_speed_fps_max_multiple,
     _game_debrief_enabled,
     _game_initial_speed_multiple,
     _game_level_title,
     _game_loop_should_exit,
     _game_maneuver_control_speed_multiple,
+    _game_max_autonomy_step_s,
     _game_plot_axis_scale,
     _game_plot_equal_axis_scale_planes,
     _game_plot_fixed_axis_half_span_km,
@@ -172,6 +189,7 @@ from sim.game.runner import (
     _game_plot_prediction_zoom_max_span_km,
     _game_proximity_ring_plot_planes,
     _game_relative_frame,
+    _game_retained_history_samples,
     _game_ric_reference_object_id,
     _game_sandbox_enabled,
     _game_show_target_hcw_path,
@@ -182,9 +200,9 @@ from sim.game.runner import (
     _game_target_coast_prediction_dt_s,
     _game_target_coast_prediction_horizon_s,
     _game_target_sprite_diameter_km,
-    _game_target_sprite_max_size_px,
     _game_target_sprite_path,
     _game_tick_dt_s,
+    _game_two_rail_speed_control_enabled,
     _guided_tutorial_delta_v_m_s,
     _guided_tutorial_expected_key,
     _guided_tutorial_input_matches,
@@ -213,15 +231,17 @@ from sim.game.runner import (
     _sandbox_setup_from_text_values,
     _score_debrief_lines,
     _speed_after_maneuver_input,
+    _split_game_step_dt,
     _start_game_attempt,
     _start_game_clip_recorder,
     _start_game_recorder,
     _step_game_attempt,
     _sync_dashboard_training_config,
+    _timed_maneuver_pending_sim_s,
     _training_briefing_lines,
     _wall_step_s,
 )
-from sim.game.session import _attempt_config_for_training_clock, _DeltaVLimitedOrbitController
+from sim.game.session import GamePhysicsSession, _attempt_config_for_training_clock, _DeltaVLimitedOrbitController
 from sim.game.training import (
     ApproachGateConfig,
     ForbiddenRegionConfig,
@@ -237,6 +257,8 @@ from sim.game.training import (
     nmt_velocity_error_km_s,
     relative_moon_ric_state_from_arrays,
 )
+from sim.game.tuning import SPEED_DT_SCHEDULE
+from sim.resource_limits import SimulationMemoryBudgetError
 from sim.utils.frames import ric_dcm_ir_from_rv, ric_rect_state_to_eci
 
 
@@ -268,11 +290,12 @@ def test_game_launcher_discovers_ordered_training_levels() -> None:
         "rpo_03_rbar_approach",
         "rpo_04_rendezvous",
         "rpo_05_passive_cross_track_approach",
-        "rpo_06_elliptic_burn_then_approach",
-        "rpo_07_elliptic_nmc",
-        "rpo_08_elliptic_rendezvous",
-        "rpo_09_defensive_target_demo",
-        "rpo_10_evasive_target_survival",
+        "rpo_06_sun_angle_inspection",
+        "rpo_07_elliptic_burn_then_approach",
+        "rpo_08_elliptic_nmc",
+        "rpo_09_elliptic_rendezvous",
+        "rpo_10_defensive_target_demo",
+        "rpo_11_evasive_target_survival",
         "rpo_bonus_cislunar_rendezvous",
         "rpo_arcade_pursuit",
         "rpo_sandbox",
@@ -287,30 +310,32 @@ def test_game_launcher_discovers_ordered_training_levels() -> None:
     assert options[0].delta_v_budget_m_s == pytest.approx(12.0)
     assert options[0].path.name == "game_training_rpo_00_tutorial.yaml"
     assert options[5].path.name == "game_training_rpo_05_passive_cross_track_approach.yaml"
-    assert options[6].path.name == "game_training_rpo_06_elliptic_burn_then_approach.yaml"
-    assert options[6].title == "Level 6 - Elliptical Approach"
-    assert options[7].path.name == "game_training_rpo_07_elliptic_nmc.yaml"
-    assert options[7].title == "Level 7 - Elliptical NMC"
-    assert options[8].path.name == "game_training_rpo_08_elliptic_rendezvous.yaml"
-    assert options[8].title == "Level 8 - Elliptical Rendezvous"
-    assert options[9].path.name == "game_training_rpo_09_defensive_target_demo.yaml"
-    assert options[9].title == "Level 9 - Pursuit"
-    assert options[10].path.name == "game_training_rpo_10_evasive_target_survival.yaml"
-    assert options[10].title == "Level 10 - Evasion"
-    assert options[10].delta_v_budget_m_s == pytest.approx(25.0)
-    assert options[10].target_delta_v_budget_m_s == pytest.approx(1.0)
-    assert options[9].target_delta_v_budget_m_s == pytest.approx(0.1)
-    assert options[11].title == "Bonus Level - Cislunar Rendezvous"
-    assert options[11].path.name == "game_training_rpo_bonus_cislunar_rendezvous.yaml"
-    assert options[11].time_budget_s == pytest.approx(259200.0)
-    assert options[11].delta_v_budget_m_s == pytest.approx(75.0)
-    assert options[12].title == "Pursuit Arcade"
-    assert options[12].time_budget_s == pytest.approx(12000.0)
-    assert options[12].delta_v_budget_m_s == pytest.approx(3.0)
-    assert options[13].title == "Sandbox"
-    assert options[13].path.name == "game_training_rpo_sandbox.yaml"
-    assert options[13].time_budget_s == pytest.approx(20000.0)
-    assert options[13].delta_v_budget_m_s is None
+    assert options[6].path.name == "game_training_rpo_06_sun_angle_inspection.yaml"
+    assert options[6].title == "Level 6 - Sun-Angle Inspection"
+    assert options[7].path.name == "game_training_rpo_07_elliptic_burn_then_approach.yaml"
+    assert options[7].title == "Level 7 - Elliptical Approach"
+    assert options[8].path.name == "game_training_rpo_08_elliptic_nmc.yaml"
+    assert options[8].title == "Level 8 - Elliptical NMC"
+    assert options[9].path.name == "game_training_rpo_09_elliptic_rendezvous.yaml"
+    assert options[9].title == "Level 9 - Elliptical Rendezvous"
+    assert options[10].path.name == "game_training_rpo_10_defensive_target_demo.yaml"
+    assert options[10].title == "Level 10 - Pursuit"
+    assert options[11].path.name == "game_training_rpo_11_evasive_target_survival.yaml"
+    assert options[11].title == "Level 11 - Evasion"
+    assert options[11].delta_v_budget_m_s == pytest.approx(25.0)
+    assert options[11].target_delta_v_budget_m_s == pytest.approx(1.0)
+    assert options[10].target_delta_v_budget_m_s == pytest.approx(0.1)
+    assert options[12].title == "Bonus Level - Cislunar Rendezvous"
+    assert options[12].path.name == "game_training_rpo_bonus_cislunar_rendezvous.yaml"
+    assert options[12].time_budget_s == pytest.approx(259200.0)
+    assert options[12].delta_v_budget_m_s == pytest.approx(75.0)
+    assert options[13].title == "Pursuit Arcade"
+    assert options[13].time_budget_s == pytest.approx(12000.0)
+    assert options[13].delta_v_budget_m_s == pytest.approx(3.0)
+    assert options[14].title == "Sandbox"
+    assert options[14].path.name == "game_training_rpo_sandbox.yaml"
+    assert options[14].time_budget_s == pytest.approx(20000.0)
+    assert options[14].delta_v_budget_m_s is None
 
 
 def test_bonus_cislunar_rendezvous_uses_cr3bp_frame() -> None:
@@ -336,20 +361,48 @@ def test_bonus_cislunar_rendezvous_uses_cr3bp_frame() -> None:
     assert (Path(__file__).resolve().parents[1] / "game" / "assets" / _game_target_sprite_path(config)).is_file()
     assert _game_chaser_sprite_diameter_km(config) == pytest.approx(0.05)
     assert _game_target_sprite_diameter_km(config) == pytest.approx(0.12)
-    assert _game_chaser_sprite_max_size_px(config) == 72
-    assert _game_target_sprite_max_size_px(config) == 128
-    assert _game_dashboard_fps_cap(config) == pytest.approx(30.0)
+    assert _game_dashboard_fps_cap(config) == pytest.approx(60.0)
+    assert _game_dashboard_high_speed_fps(config) == pytest.approx(60.0)
+    assert _game_dashboard_high_speed_fps_max_multiple(config) == pytest.approx(100.0)
+    assert _dashboard_fps_for_speed(
+        100.0,
+        fps_cap=_game_dashboard_fps_cap(config),
+        high_speed_fps=_game_dashboard_high_speed_fps(config),
+        high_speed_fps_max_multiple=_game_dashboard_high_speed_fps_max_multiple(config),
+    ) == pytest.approx(60.0)
+    assert _dashboard_fps_for_speed(
+        2000.0,
+        fps_cap=_game_dashboard_fps_cap(config),
+        high_speed_fps=_game_dashboard_high_speed_fps(config),
+        high_speed_fps_max_multiple=_game_dashboard_high_speed_fps_max_multiple(config),
+    ) == pytest.approx(30.0)
     assert _game_target_centered_plot_planes(config) == ("RI", "RC")
     assert _game_target_centered_plot_axes(config) == {}
     assert _game_plot_prediction_full_trajectory_only(config) is True
     assert _game_initial_speed_multiple(config, None) == pytest.approx(10.0)
     assert _game_initial_speed_multiple(config, 1.0) == pytest.approx(10.0)
     assert _game_maneuver_control_speed_multiple(config) == pytest.approx(100.0)
-    assert _game_speed_dt_schedule(config) == ((10.0, 2.0), (25.0, 2.0), (50.0, 5.0), (100.0, 10.0))
-    assert _game_tick_dt_s(config, 10.0) == pytest.approx(2.0)
-    assert _game_tick_dt_s(config, 25.0) == pytest.approx(2.0)
-    assert _game_tick_dt_s(config, 50.0) == pytest.approx(5.0)
-    assert _game_tick_dt_s(config, 1000.0) == pytest.approx(10.0)
+    assert _game_two_rail_speed_control_enabled(config) is True
+    assert _game_speed_dt_schedule(config) == ((10.0, 0.5), (25.0, 1.0), (50.0, 1.0), (100.0, 1.0))
+    assert _game_coast_speed_dt_schedule(config) == (
+        (10.0, 0.5),
+        (25.0, 1.0),
+        (50.0, 2.0),
+        (100.0, 2.0),
+        (200.0, 10.0),
+        (500.0, 25.0),
+        (1000.0, 50.0),
+        (2000.0, 100.0),
+    )
+    assert _game_tick_dt_s(config, 10.0) == pytest.approx(0.5)
+    assert _game_tick_dt_s(config, 25.0) == pytest.approx(1.0)
+    assert _game_tick_dt_s(config, 50.0) == pytest.approx(1.0)
+    assert _game_tick_dt_s(config, 100.0) == pytest.approx(1.0)
+    assert _game_tick_dt_s(config, 1000.0) == pytest.approx(1.0)
+    assert _game_coast_tick_dt_s(config, 100.0) == pytest.approx(2.0)
+    assert _game_coast_tick_dt_s(config, 200.0) == pytest.approx(10.0)
+    assert _game_coast_tick_dt_s(config, 1000.0) == pytest.approx(50.0)
+    assert _game_coast_tick_dt_s(config, 2000.0) == pytest.approx(100.0)
     speed_options = _game_speed_multiplier_options(config)
     assert speed_options[:2] == pytest.approx((10.0, 25.0))
     assert 1.0 not in speed_options
@@ -358,10 +411,41 @@ def test_bonus_cislunar_rendezvous_uses_cr3bp_frame() -> None:
     assert speed_options[-3:] == pytest.approx((500.0, 1000.0, 2000.0))
     assert _adjust_speed_multiple(200.0, 1, options=speed_options) == pytest.approx(500.0)
     assert _adjust_speed_multiple(500.0, 1, options=speed_options) == pytest.approx(1000.0)
+    coast_state = KeyboardCommandState()
+    burn_state = KeyboardCommandState(pitch=1.0)
+    assert _effective_speed_multiple_for_control(
+        config,
+        1000.0,
+        coast_state,
+        control_mode="moon_ric_translation",
+        options=speed_options,
+    ) == pytest.approx(1000.0)
+    assert _effective_speed_multiple_for_control(
+        config,
+        1000.0,
+        burn_state,
+        control_mode="moon_ric_translation",
+        options=speed_options,
+    ) == pytest.approx(100.0)
+    assert _game_active_tick_dt_s(config, 1000.0, maneuver_active=False) == pytest.approx(50.0)
+    assert _game_active_tick_dt_s(
+        config,
+        _effective_speed_multiple_for_control(
+            config,
+            1000.0,
+            burn_state,
+            control_mode="moon_ric_translation",
+            options=speed_options,
+        ),
+        maneuver_active=True,
+    ) == pytest.approx(1.0)
     assert _adjust_speed_multiple(1000.0, 1, options=speed_options) == pytest.approx(2000.0)
     assert _adjust_speed_multiple(2000.0, 1, options=speed_options) == pytest.approx(2000.0)
-    assert _game_cr3bp_coast_prediction_horizon_s(config) == pytest.approx(259200.0)
-    assert _game_cr3bp_coast_prediction_dt_s(config) == pytest.approx(1800.0)
+    assert _game_cr3bp_coast_prediction_horizon_s(config) == pytest.approx(21600.0)
+    assert _game_cr3bp_active_prediction_horizon_s(config) is None
+    assert _game_cr3bp_coast_prediction_horizon_mode(config) == "default"
+    assert _game_cr3bp_coast_prediction_dt_s(config) == pytest.approx(1.0)
+    assert _game_cr3bp_prediction_coast_update_interval_s(config) == pytest.approx(300.0)
     assert _game_show_target_hcw_path(config) is False
     assert _game_target_coast_prediction_horizon_s(config) == pytest.approx(1127210.360660)
     assert _game_target_coast_prediction_dt_s(config) == pytest.approx(600.0)
@@ -431,6 +515,35 @@ def test_cr3bp_moon_ric_transform_round_trips_for_nrho_target() -> None:
     chaser = _moon_ric_rect_state_to_cr3bp(rel, target)
 
     assert _cr3bp_state_to_moon_ric_rect(chaser, target) == pytest.approx(rel)
+
+
+def test_cr3bp_moon_ric_batched_transform_matches_scalar_rows() -> None:
+    target0 = cr3bp_halo_seed_state_km_s(family="l2_nrho_southern")
+    references = np.vstack(
+        [
+            target0,
+            propagate_cr3bp_state(target0, 600.0, 0.0),
+            propagate_cr3bp_state(target0, 3600.0, 0.0),
+        ]
+    )
+    rel_rows = np.array(
+        [
+            [5.0, -20.0, -5.0, 0.001, -0.002, 0.003],
+            [4.0, -18.0, -4.0, 0.0008, -0.0015, 0.0025],
+            [2.0, -12.0, -3.0, 0.0004, -0.0007, 0.0010],
+        ],
+        dtype=float,
+    )
+    deputies = np.vstack(
+        [_moon_ric_rect_state_to_cr3bp(rel, reference) for rel, reference in zip(rel_rows, references)]
+    )
+    scalar = np.vstack(
+        [_cr3bp_state_to_moon_ric_rect(deputy, reference) for deputy, reference in zip(deputies, references)]
+    )
+
+    batched = _cr3bp_states_to_moon_ric_rect_rows(deputies, references)
+
+    np.testing.assert_allclose(batched, scalar, rtol=1.0e-12, atol=1.0e-12)
 
 
 def test_cr3bp_physical_jacobian_matches_force_finite_difference() -> None:
@@ -799,6 +912,7 @@ def test_sandbox_setup_form_supports_briefing_scroll() -> None:
     class FakePygame:
         QUIT = "quit"
         KEYDOWN = "keydown"
+        KEYUP = "keyup"
         MOUSEWHEEL = "mousewheel"
         K_ESCAPE = "escape"
         K_RETURN = "return"
@@ -1188,6 +1302,46 @@ def test_game_debrief_writer_exports_summary_and_replay(tmp_path: Path) -> None:
     assert payload["replay"]["relative_ric"][0][:3] == pytest.approx([0.0, -0.2, 0.0])
 
 
+def test_tracker_replay_history_uses_array_backed_replay_stream() -> None:
+    cfg = RPOTrainingConfig(
+        enabled=True,
+        scenario_id="unit-replay",
+        learning_goal="test",
+        goal_range_km=0.25,
+    )
+    tracker = RPOTrainingTracker(cfg)
+    target_state = np.array([7000.0, 0.0, 0.0, 0.0, 7.54605329, 0.0], dtype=float)
+    rel_ric = np.array([0.0, -0.2, 0.1, 0.0, 0.0, 0.0], dtype=float)
+    chaser_state = ric_rect_state_to_eci(rel_ric, target_state[:3], target_state[3:])
+    tracker.record(
+        snapshot=type(
+            "Snapshot",
+            (),
+            {
+                "time_s": 12.0,
+                "truth": {"target": target_state, "chaser": chaser_state},
+                "applied_thrust": {
+                    "chaser": np.array([0.0, 1.0e-6, 0.0], dtype=float),
+                    "target": np.array([0.0, 0.0, 2.0e-6], dtype=float),
+                },
+            },
+        )()
+    )
+
+    expected = tracker_replay_history(tracker)
+    tracker.t_s.clear()
+    tracker.rel_ric_hist.clear()
+    tracker.thrust_hist.clear()
+    tracker.thrust_ric_hist.clear()
+    tracker.target_thrust_hist.clear()
+    replay = tracker_replay_history(tracker)
+
+    assert replay["time_s"] == expected["time_s"] == [12.0]
+    np.testing.assert_allclose(replay["relative_ric"], expected["relative_ric"])
+    np.testing.assert_allclose(replay["chaser_thrust_ric_km_s2"], expected["chaser_thrust_ric_km_s2"])
+    np.testing.assert_allclose(replay["target_thrust_eci_km_s2"], [[0.0, 0.0, 2.0e-6]])
+
+
 def test_game_debrief_attempt_index_counts_level_folders(tmp_path: Path) -> None:
     first = game_debrief_path(
         scenario_id="Unit Debrief",
@@ -1228,11 +1382,12 @@ def test_game_debrief_is_disabled_for_sandbox_and_arcade_modes() -> None:
         ("game_training_rpo_03_rbar_approach.yaml", True),
         ("game_training_rpo_04_rendezvous.yaml", True),
         ("game_training_rpo_05_passive_cross_track_approach.yaml", True),
-        ("game_training_rpo_06_elliptic_burn_then_approach.yaml", True),
-        ("game_training_rpo_07_elliptic_nmc.yaml", True),
-        ("game_training_rpo_08_elliptic_rendezvous.yaml", True),
-        ("game_training_rpo_09_defensive_target_demo.yaml", True),
-        ("game_training_rpo_10_evasive_target_survival.yaml", True),
+        ("game_training_rpo_06_sun_angle_inspection.yaml", True),
+        ("game_training_rpo_07_elliptic_burn_then_approach.yaml", True),
+        ("game_training_rpo_08_elliptic_nmc.yaml", True),
+        ("game_training_rpo_09_elliptic_rendezvous.yaml", True),
+        ("game_training_rpo_10_defensive_target_demo.yaml", True),
+        ("game_training_rpo_11_evasive_target_survival.yaml", True),
         ("game_training_rpo_arcade_pursuit.yaml", False),
         ("game_training_rpo_sandbox.yaml", False),
     ],
@@ -1858,7 +2013,7 @@ def test_defensive_target_provider_charges_first_timed_pulse() -> None:
 
 def test_level_nine_uses_target_reference_for_game_ric_frame() -> None:
     config_path = (
-        Path(__file__).resolve().parents[1] / "game" / "configs" / "game_training_rpo_09_defensive_target_demo.yaml"
+        Path(__file__).resolve().parents[1] / "game" / "configs" / "game_training_rpo_10_defensive_target_demo.yaml"
     )
     config = SimulationConfig.from_yaml(config_path)
     session = SimulationSession.from_config(config)
@@ -1872,7 +2027,7 @@ def test_level_nine_uses_target_reference_for_game_ric_frame() -> None:
 
 def test_level_nine_ric_translation_commands_use_target_reference_frame() -> None:
     config_path = (
-        Path(__file__).resolve().parents[1] / "game" / "configs" / "game_training_rpo_09_defensive_target_demo.yaml"
+        Path(__file__).resolve().parents[1] / "game" / "configs" / "game_training_rpo_10_defensive_target_demo.yaml"
     )
     config = SimulationConfig.from_yaml(config_path)
     training_cfg = RPOTrainingConfig.from_metadata(dict(config.scenario.metadata or {}))
@@ -1918,9 +2073,121 @@ def test_game_attempt_forces_acceleration_off(monkeypatch: pytest.MonkeyPatch) -
     assert acceleration_settings_from_config(session.config.scenario).enabled is False
 
 
+def test_level_eleven_game_attempt_uses_dynamic_history() -> None:
+    config_path = (
+        Path(__file__).resolve().parents[1] / "game" / "configs" / "game_training_rpo_06_sun_angle_inspection.yaml"
+    )
+    config = SimulationConfig.from_yaml(config_path)
+    training_cfg = RPOTrainingConfig.from_metadata(dict(config.scenario.metadata or {}))
+
+    session, _, snapshot = _start_game_attempt(
+        config,
+        command_state=KeyboardCommandState(),
+        training_cfg=training_cfg,
+        controlled_object_id="chaser",
+        attitude_rate_deg_s=45.0,
+        control_mode="ric_translation",
+        ric_reference_object_id="target",
+    )
+
+    engine = session._engine
+    assert snapshot is not None
+    assert isinstance(session, GamePhysicsSession)
+    assert engine is not None
+    assert engine.history_mode == "dynamic"
+    assert engine.planned_samples == 86401
+    assert engine.n < engine.planned_samples
+    assert engine.allocated_history_samples == 4096
+    assert engine.retained_start_step == 0
+    assert engine.retained_end_step == 0
+    assert engine.truth_hist["chaser"].shape[0] == engine.n
+    assert engine.history_memory_estimate.estimated_peak_mb < 1024.0
+    with pytest.raises(RuntimeError, match="Dynamic history mode"):
+        session._session.run()
+
+    for _ in range(engine.n + 5):
+        snapshot = session.step(dt_s=1.0)
+
+    assert snapshot.step_index == engine.n + 5
+    assert snapshot.time_s == pytest.approx(float(engine.n + 5))
+    assert engine.history_mode == "dynamic"
+    assert engine.n < engine.planned_samples
+    assert engine.sample_offset > 0
+    assert engine.current_index < engine.n
+    assert engine.retained_start_step > 0
+    assert engine.retained_end_step == snapshot.step_index
+    assert engine.retained_sample_count >= (engine.allocated_history_samples * 3) // 4
+    assert engine.truth_hist["chaser"].shape[0] == engine.n
+    assert engine.history_memory_estimate.estimated_peak_mb < 1024.0
+    assert engine.snapshot(snapshot.step_index)["time_s"] == pytest.approx(snapshot.time_s)
+    with pytest.raises(IndexError):
+        engine.snapshot(0)
+
+
+def test_game_attempt_dynamic_history_avoids_full_history_memory_budget() -> None:
+    config_path = (
+        Path(__file__).resolve().parents[1] / "game" / "configs" / "game_training_rpo_06_sun_angle_inspection.yaml"
+    )
+    config = (
+        SimulationConfig.from_yaml(config_path)
+        .with_value("simulator.dynamics.orbit.orbit_substep_s", 0.1)
+        .with_value("simulator.dt_s", 0.1)
+        .with_value("outputs.resource_limits.max_history_memory_mb", 128.0)
+    )
+    training_cfg = RPOTrainingConfig.from_metadata(dict(config.scenario.metadata or {}))
+
+    with pytest.raises(SimulationMemoryBudgetError):
+        SimulationSession.from_config(config).reset()
+
+    session, _, snapshot = _start_game_attempt(
+        config,
+        command_state=KeyboardCommandState(),
+        training_cfg=training_cfg,
+        controlled_object_id="chaser",
+        attitude_rate_deg_s=45.0,
+        control_mode="ric_translation",
+        ric_reference_object_id="target",
+    )
+
+    engine = session._engine
+    assert snapshot is not None
+    assert engine is not None
+    assert engine.history_mode == "dynamic"
+    assert engine.planned_samples == 864001
+    assert engine.allocated_history_samples == 4096
+    assert engine.history_memory_estimate.estimated_peak_mb < 128.0
+
+
+def test_game_attempt_uses_configured_retained_history_samples(tmp_path: Path) -> None:
+    cfg = _game_config(tmp_path)
+    cfg["simulator"]["duration_s"] = 20.0
+    game_meta = cfg.setdefault("metadata", {}).setdefault("game", {})
+    game_meta["retained_history_samples"] = 8
+    config = SimulationConfig.from_dict(cfg)
+    training_cfg = RPOTrainingConfig.from_metadata(dict(config.scenario.metadata or {}))
+
+    session, _, snapshot = _start_game_attempt(
+        config,
+        command_state=KeyboardCommandState(),
+        training_cfg=training_cfg,
+        controlled_object_id="chaser",
+        attitude_rate_deg_s=45.0,
+        control_mode="ric_translation",
+        ric_reference_object_id="target",
+    )
+
+    engine = session._engine
+    assert snapshot is not None
+    assert _game_retained_history_samples(config) == 8
+    assert engine is not None
+    assert engine.history_mode == "dynamic"
+    assert engine.planned_samples > 8
+    assert engine.allocated_history_samples == 8
+
+
 def test_level_nine_restart_gets_fresh_defensive_target_provider() -> None:
     config_path = (
-        Path(__file__).resolve().parents[1] / "game" / "configs" / "game_training_rpo_09_defensive_target_demo.yaml"
+        Path(__file__).resolve().parents[1] / "game" / "configs" / "game_training_rpo_10_defensive_target_demo.yaml"
     )
     config = SimulationConfig.from_yaml(config_path)
     training_cfg = RPOTrainingConfig.from_metadata(dict(config.scenario.metadata or {}))
@@ -1953,7 +2220,7 @@ def test_level_nine_restart_gets_fresh_defensive_target_provider() -> None:
 
 def test_level_nine_goal_is_100_meter_close_approach() -> None:
     config_path = (
-        Path(__file__).resolve().parents[1] / "game" / "configs" / "game_training_rpo_09_defensive_target_demo.yaml"
+        Path(__file__).resolve().parents[1] / "game" / "configs" / "game_training_rpo_10_defensive_target_demo.yaml"
     )
     config = SimulationConfig.from_yaml(config_path)
     training_cfg = RPOTrainingConfig.from_metadata(dict(config.scenario.metadata or {}))
@@ -2047,17 +2314,21 @@ def test_level_six_combines_elliptic_burn_familiarization_and_approach() -> None
         Path(__file__).resolve().parents[1]
         / "game"
         / "configs"
-        / "game_training_rpo_06_elliptic_burn_then_approach.yaml"
+        / "game_training_rpo_07_elliptic_burn_then_approach.yaml"
     )
     config = SimulationConfig.from_yaml(config_path)
     training_cfg = RPOTrainingConfig.from_metadata(dict(config.scenario.metadata or {}))
     target_coes = config.scenario.objects["target"].initial_state["coes"]
 
-    assert training_cfg.scenario_id == "rpo_06_elliptic_burn_then_approach"
-    assert config.scenario.metadata["game"]["level_name"] == "Level 6 - Elliptical Approach"
+    assert training_cfg.scenario_id == "rpo_07_elliptic_burn_then_approach"
+    assert config.scenario.metadata["game"]["level_name"] == "Level 7 - Elliptical Approach"
     assert _game_control_mode(config) == "ric_translation"
     assert _game_coast_prediction_model(config) == "tschauner_hempel"
+    assert _game_camera_mode(config) == "rule_toggle_pair"
+    assert _game_camera_rule_mode(config) == "current_pair"
+    assert _game_camera_rule_toggle_enabled(config) is True
     assert _game_target_centered_plot_planes(config) == ("RI",)
+    assert _game_plot_prediction_full_trajectory_only(config) is True
     assert training_cfg.survival_goal is False
     assert training_cfg.goal_radius_km == pytest.approx(0.18)
     assert np.allclose(training_cfg.goal_relative_ric_km, np.array([0.0, -0.75, 0.0]))
@@ -2077,14 +2348,14 @@ def test_level_seven_is_elliptic_nmc_lesson() -> None:
         Path(__file__).resolve().parents[1]
         / "game"
         / "configs"
-        / "game_training_rpo_07_elliptic_nmc.yaml"
+        / "game_training_rpo_08_elliptic_nmc.yaml"
     )
     config = SimulationConfig.from_yaml(config_path)
     training_cfg = RPOTrainingConfig.from_metadata(dict(config.scenario.metadata or {}))
     target_coes = config.scenario.objects["target"].initial_state["coes"]
 
-    assert training_cfg.scenario_id == "rpo_07_elliptic_nmc"
-    assert config.scenario.metadata["game"]["level_name"] == "Level 7 - Elliptical NMC"
+    assert training_cfg.scenario_id == "rpo_08_elliptic_nmc"
+    assert config.scenario.metadata["game"]["level_name"] == "Level 8 - Elliptical NMC"
     assert _game_control_mode(config) == "ric_translation"
     assert _game_coast_prediction_model(config) == "tschauner_hempel"
     assert _game_target_centered_plot_planes(config) == ("RI",)
@@ -2113,14 +2384,14 @@ def test_level_eight_is_elliptic_rendezvous() -> None:
         Path(__file__).resolve().parents[1]
         / "game"
         / "configs"
-        / "game_training_rpo_08_elliptic_rendezvous.yaml"
+        / "game_training_rpo_09_elliptic_rendezvous.yaml"
     )
     config = SimulationConfig.from_yaml(config_path)
     training_cfg = RPOTrainingConfig.from_metadata(dict(config.scenario.metadata or {}))
     target_coes = config.scenario.objects["target"].initial_state["coes"]
 
-    assert training_cfg.scenario_id == "rpo_08_elliptic_rendezvous"
-    assert config.scenario.metadata["game"]["level_name"] == "Level 8 - Elliptical Rendezvous"
+    assert training_cfg.scenario_id == "rpo_09_elliptic_rendezvous"
+    assert config.scenario.metadata["game"]["level_name"] == "Level 9 - Elliptical Rendezvous"
     assert _game_control_mode(config) == "ric_translation"
     assert _game_camera_mode(config) == "target_pair"
     assert _game_coast_prediction_model(config) == "tschauner_hempel"
@@ -2504,11 +2775,12 @@ def test_level_ten_is_player_target_survival_against_ric_pd_chaser() -> None:
         Path(__file__).resolve().parents[1]
         / "game"
         / "configs"
-        / "game_training_rpo_10_evasive_target_survival.yaml"
+        / "game_training_rpo_11_evasive_target_survival.yaml"
     )
     config = SimulationConfig.from_yaml(config_path)
     training_cfg = RPOTrainingConfig.from_metadata(dict(config.scenario.metadata or {}))
     chaser = config.scenario.objects["chaser"]
+    target = config.scenario.objects["target"]
     chaser_initial = chaser.initial_state["relative_to_target_ric"]
     source_config = yaml.safe_load(
         (Path(__file__).resolve().parents[2] / "configs" / "ric_pd_10km_experiment.yaml").read_text(
@@ -2523,14 +2795,18 @@ def test_level_ten_is_player_target_survival_against_ric_pd_chaser() -> None:
     assert _game_camera_rule_mode(config) == "current_pair"
     assert _game_camera_rule_toggle_enabled(config) is True
     assert _game_show_target_hcw_path(config) is True
+    assert _game_speed_multiplier_options(config) == pytest.approx((1.0, 2.0, 5.0, 10.0, 25.0, 50.0, 100.0, 200.0))
     assert np.array(_game_speed_dt_schedule(config), dtype=float) == pytest.approx(
-        np.array(((1.0, 0.25), (10.0, 0.5), (25.0, 1.0), (50.0, 5.0), (100.0, 10.0)), dtype=float)
+        np.array(((1.0, 0.1), (10.0, 0.5), (25.0, 1.0), (50.0, 5.0), (100.0, 10.0)), dtype=float)
     )
-    assert _game_tick_dt_s(config, 1.0) == pytest.approx(0.25)
-    assert _game_tick_dt_s(config, 5.0) == pytest.approx(0.25)
+    assert _game_tick_dt_s(config, 1.0) == pytest.approx(0.1)
+    assert _game_tick_dt_s(config, 5.0) == pytest.approx(0.1)
     assert _game_tick_dt_s(config, 10.0) == pytest.approx(0.5)
     assert _game_tick_dt_s(config, 25.0) == pytest.approx(1.0)
-    assert training_cfg.scenario_id == "rpo_10_evasive_target_survival"
+    assert _game_tick_dt_s(config, 100.0) == pytest.approx(1.0)
+    assert _game_active_tick_dt_s(config, 100.0, maneuver_active=False) == pytest.approx(10.0)
+    assert _game_max_autonomy_step_s(config) == pytest.approx(1.0)
+    assert training_cfg.scenario_id == "rpo_11_evasive_target_survival"
     assert training_cfg.survival_goal is True
     assert training_cfg.keepout_radius_km == pytest.approx(0.1)
     assert training_cfg.goal_range_km is None
@@ -2550,6 +2826,8 @@ def test_level_ten_is_player_target_survival_against_ric_pd_chaser() -> None:
     assert chaser.orbit_control.params == source_control["params"]
     assert chaser.attitude_control.module == "sim.control.attitude.zero_torque"
     assert chaser.attitude_control.class_name == "ZeroTorqueController"
+    assert chaser.knowledge["estimation"]["type"] == "measured_state"
+    assert target.knowledge["estimation"]["type"] == "measured_state"
     assert chaser.mission_execution is None
     assert config.scenario.simulator.dynamics["attitude"] == {"enabled": False}
     assert chaser_initial["frame"] == "curv"
@@ -2561,7 +2839,7 @@ def test_level_ten_player_controls_target_while_chaser_controller_runs() -> None
         Path(__file__).resolve().parents[1]
         / "game"
         / "configs"
-        / "game_training_rpo_10_evasive_target_survival.yaml"
+        / "game_training_rpo_11_evasive_target_survival.yaml"
     )
     config = SimulationConfig.from_yaml(config_path)
     training_cfg = RPOTrainingConfig.from_metadata(dict(config.scenario.metadata or {}))
@@ -2640,11 +2918,12 @@ def test_level_music_maps_rendezvous_vector_to_level_2() -> None:
     level3 = RPOTrainingConfig(enabled=True, scenario_id="rpo_03_rbar_approach")
     level4 = RPOTrainingConfig(enabled=True, scenario_id="rpo_04_rendezvous")
     level5 = RPOTrainingConfig(enabled=True, scenario_id="rpo_05_passive_cross_track_approach")
-    level6 = RPOTrainingConfig(enabled=True, scenario_id="rpo_06_elliptic_burn_then_approach")
-    level7 = RPOTrainingConfig(enabled=True, scenario_id="rpo_07_elliptic_nmc")
-    level8 = RPOTrainingConfig(enabled=True, scenario_id="rpo_08_elliptic_rendezvous")
-    level9 = RPOTrainingConfig(enabled=True, scenario_id="rpo_09_defensive_target_demo")
-    level10 = RPOTrainingConfig(enabled=True, scenario_id="rpo_10_evasive_target_survival")
+    level6 = RPOTrainingConfig(enabled=True, scenario_id="rpo_06_sun_angle_inspection")
+    level7 = RPOTrainingConfig(enabled=True, scenario_id="rpo_07_elliptic_burn_then_approach")
+    level8 = RPOTrainingConfig(enabled=True, scenario_id="rpo_08_elliptic_nmc")
+    level9 = RPOTrainingConfig(enabled=True, scenario_id="rpo_09_elliptic_rendezvous")
+    level10 = RPOTrainingConfig(enabled=True, scenario_id="rpo_10_defensive_target_demo")
+    level11 = RPOTrainingConfig(enabled=True, scenario_id="rpo_11_evasive_target_survival")
     cislunar = RPOTrainingConfig(enabled=True, scenario_id="rpo_bonus_cislunar_rendezvous")
     arcade = RPOTrainingConfig(enabled=True, scenario_id="rpo_arcade_pursuit")
     unmapped = RPOTrainingConfig(enabled=True, scenario_id="rpo_11_unmapped")
@@ -2661,16 +2940,18 @@ def test_level_music_maps_rendezvous_vector_to_level_2() -> None:
     assert _level_music_path(level4).name == "06_casting_the_orbit_line.wav"
     assert _level_music_path(level5) == LEVEL_MUSIC_PATHS["rpo_05_passive_cross_track_approach"]
     assert _level_music_path(level5).name == "19_cross_track_ghost_orbit.wav"
-    assert _level_music_path(level6) == LEVEL_MUSIC_PATHS["rpo_06_elliptic_burn_then_approach"]
-    assert _level_music_path(level6).name == "08_silent_running_radar.wav"
-    assert _level_music_path(level7) == LEVEL_MUSIC_PATHS["rpo_07_elliptic_nmc"]
-    assert _level_music_path(level7).name == "04_docking_bay_neon.wav"
-    assert _level_music_path(level8) == LEVEL_MUSIC_PATHS["rpo_08_elliptic_rendezvous"]
-    assert _level_music_path(level8).name == "23_elliptic_final_burn_cinematic.wav"
-    assert _level_music_path(level9) == LEVEL_MUSIC_PATHS["rpo_09_defensive_target_demo"]
-    assert _level_music_path(level9).name == "17_orbital_boss_metal.wav"
-    assert _level_music_path(level10) == LEVEL_MUSIC_PATHS["rpo_10_evasive_target_survival"]
-    assert _level_music_path(level10).name == "09_defender_boss_vector.wav"
+    assert _level_music_path(level6) == LEVEL_MUSIC_PATHS["rpo_06_sun_angle_inspection"]
+    assert _level_music_path(level6).name == "33_amber_terminator_demo.wav"
+    assert _level_music_path(level7) == LEVEL_MUSIC_PATHS["rpo_07_elliptic_burn_then_approach"]
+    assert _level_music_path(level7).name == "08_silent_running_radar.wav"
+    assert _level_music_path(level8) == LEVEL_MUSIC_PATHS["rpo_08_elliptic_nmc"]
+    assert _level_music_path(level8).name == "04_docking_bay_neon.wav"
+    assert _level_music_path(level9) == LEVEL_MUSIC_PATHS["rpo_09_elliptic_rendezvous"]
+    assert _level_music_path(level9).name == "23_elliptic_final_burn_cinematic.wav"
+    assert _level_music_path(level10) == LEVEL_MUSIC_PATHS["rpo_10_defensive_target_demo"]
+    assert _level_music_path(level10).name == "17_orbital_boss_metal.wav"
+    assert _level_music_path(level11) == LEVEL_MUSIC_PATHS["rpo_11_evasive_target_survival"]
+    assert _level_music_path(level11).name == "09_defender_boss_vector.wav"
     assert _level_music_path(cislunar) == LEVEL_MUSIC_PATHS["rpo_bonus_cislunar_rendezvous"]
     assert _level_music_path(cislunar).name == "30_far_side_navigation_demo.wav"
     assert _level_music_path(arcade) == LEVEL_MUSIC_PATHS["rpo_arcade_pursuit"]
@@ -2871,6 +3152,27 @@ def test_ric_translation_provider_commands_direct_ric_thrust() -> None:
     assert np.allclose(out["thrust_eci_km_s2"], np.array([2.0e-5, 0.0, 0.0]), atol=1e-12)
 
 
+def test_manual_translation_bypasses_orbital_command_latch_for_tap_burns(tmp_path: Path) -> None:
+    state = KeyboardCommandState(yaw=-1.0, use_timing_accumulator=True)
+    provider = ManualGameCommandProvider(
+        command_state=state,
+        max_accel_km_s2=2.0e-5,
+        control_mode="ric_translation",
+        reference_object_id="target",
+    )
+    session = SimulationSession.from_config(SimulationConfig.from_dict(_game_config(tmp_path)))
+    session.set_external_intent_provider("chaser", provider)
+    session.reset()
+    state.accumulate_timed_input(0.02, speed_multiple=2.0, control_mode="ric_translation")
+    state.yaw = 0.0
+
+    burn = session.step(dt_s=0.04)
+    coast = session.step(dt_s=0.04)
+
+    assert np.linalg.norm(burn.applied_thrust["chaser"]) == pytest.approx(2.0e-5)
+    assert np.linalg.norm(coast.applied_thrust["chaser"]) == pytest.approx(0.0)
+
+
 def test_moon_ric_translation_provider_commands_target_about_moon_frame() -> None:
     state = KeyboardCommandState(pitch=1.0, yaw=0.0, roll=0.0)
     provider = ManualGameCommandProvider(
@@ -2940,6 +3242,34 @@ def test_ric_translation_provider_uses_timed_input_duty_cycle() -> None:
     assert np.allclose(empty["thrust_eci_km_s2"], np.zeros(3, dtype=float), atol=1e-15)
 
 
+def test_timed_translation_input_caps_pending_burn_to_one_step() -> None:
+    state = KeyboardCommandState(yaw=1.0, use_timing_accumulator=True)
+    state.accumulate_timed_input(
+        1.0,
+        speed_multiple=10.0,
+        control_mode="ric_translation",
+        max_pending_sim_s=2.0,
+    )
+
+    first = state.consume_ric_duty_cycle(2.0)
+    second = state.consume_ric_duty_cycle(2.0)
+
+    np.testing.assert_allclose(first, np.array([0.0, 1.0, 0.0], dtype=float))
+    np.testing.assert_allclose(second, np.zeros(3, dtype=float))
+
+
+def test_timed_translation_tap_exposes_pending_step_duration() -> None:
+    state = KeyboardCommandState(yaw=1.0, use_timing_accumulator=True)
+    state.accumulate_timed_input(
+        0.008,
+        speed_multiple=5.0,
+        control_mode="ric_translation",
+        max_pending_sim_s=0.1,
+    )
+
+    assert _timed_maneuver_pending_sim_s(state, control_mode="ric_translation") == pytest.approx(0.04)
+
+
 def test_attitude_thrust_provider_uses_timed_firing_duty_cycle() -> None:
     state = KeyboardCommandState(firing=True, use_timing_accumulator=True)
     provider = ManualGameCommandProvider(
@@ -2964,6 +3294,22 @@ def test_attitude_thrust_provider_uses_timed_firing_duty_cycle() -> None:
     assert np.allclose(out["thrust_eci_km_s2"], np.array([5.0e-6, 0.0, 0.0]), atol=1e-12)
     assert empty["mission_mode"]["firing_duty_cycle"] == pytest.approx(0.0)
     assert np.allclose(empty["thrust_eci_km_s2"], np.zeros(3, dtype=float), atol=1e-15)
+
+
+def test_timed_firing_input_caps_pending_burn_to_one_step() -> None:
+    state = KeyboardCommandState(firing=True, use_timing_accumulator=True)
+    state.accumulate_timed_input(
+        1.0,
+        speed_multiple=10.0,
+        control_mode="attitude_thrust",
+        max_pending_sim_s=2.0,
+    )
+
+    first = state.consume_firing_duty_cycle(2.0)
+    second = state.consume_firing_duty_cycle(2.0)
+
+    assert first == pytest.approx(1.0)
+    assert second == pytest.approx(0.0)
 
 
 def test_training_tracker_scores_keepout_and_goal() -> None:
@@ -3560,7 +3906,7 @@ def test_training_tracker_drift_metric_is_constant_without_burns_for_nmt_levels(
     root = Path(__file__).resolve().parents[1] / "game" / "configs"
     level_configs = (
         "game_training_rpo_01_coast_relative_motion.yaml",
-        "game_training_rpo_07_elliptic_nmc.yaml",
+        "game_training_rpo_08_elliptic_nmc.yaml",
     )
 
     for level_config in level_configs:
@@ -3918,6 +4264,262 @@ def test_passive_cross_track_level_uses_intrack_cylinder_forbidden_region() -> N
     assert bool(cylinder.contains_positions(np.array([[0.6, 0.0, 0.0]], dtype=float))[0]) is False
     assert bool(cylinder.contains_positions(np.array([[0.0, -0.75, 0.6]], dtype=float))[0]) is False
     assert bool(cylinder.contains_positions(np.array([[0.0, -0.75, 0.5]], dtype=float))[0]) is True
+
+
+@pytest.mark.parametrize(
+    "config_filename",
+    [
+        "game_training_rpo_01_coast_relative_motion.yaml",
+        "game_training_rpo_02_vbar_approach.yaml",
+        "game_training_rpo_03_rbar_approach.yaml",
+        "game_training_rpo_04_rendezvous.yaml",
+        "game_training_rpo_05_passive_cross_track_approach.yaml",
+        "game_training_rpo_06_sun_angle_inspection.yaml",
+        "game_training_rpo_07_elliptic_burn_then_approach.yaml",
+        "game_training_rpo_08_elliptic_nmc.yaml",
+        "game_training_rpo_09_elliptic_rendezvous.yaml",
+        "game_training_rpo_10_defensive_target_demo.yaml",
+        "game_training_rpo_11_evasive_target_survival.yaml",
+        "game_training_rpo_sandbox.yaml",
+        "game_training_rpo_arcade_pursuit.yaml",
+    ],
+)
+def test_leo_training_sandbox_and_arcade_use_two_rail_timing(config_filename: str) -> None:
+    root = Path(__file__).resolve().parents[1] / "game" / "configs"
+    sim_cfg = SimulationConfig.from_yaml(root / config_filename)
+    speed_options = _game_speed_multiplier_options(sim_cfg)
+    burn_state = KeyboardCommandState(pitch=1.0)
+    burn_speed = _effective_speed_multiple_for_control(
+        sim_cfg,
+        1000.0,
+        burn_state,
+        control_mode=_game_control_mode(sim_cfg),
+        options=speed_options,
+    )
+
+    assert _game_initial_speed_multiple(sim_cfg, None) == pytest.approx(10.0)
+    expected_speed_options = (
+        (1.0, 2.0, 5.0, 10.0, 25.0, 50.0, 100.0, 200.0)
+        if config_filename == "game_training_rpo_11_evasive_target_survival.yaml"
+        else (1.0, 2.0, 5.0, 10.0, 25.0, 50.0, 100.0, 200.0, 500.0, 1000.0)
+    )
+    assert speed_options == pytest.approx(expected_speed_options)
+    assert _game_maneuver_control_speed_multiple(sim_cfg) is None
+    assert _game_speed_dt_schedule(sim_cfg) == SPEED_DT_SCHEDULE
+    assert _game_coast_speed_dt_schedule(sim_cfg) == SPEED_DT_SCHEDULE
+    assert _game_two_rail_speed_control_enabled(sim_cfg) is True
+    assert _game_tick_dt_s(sim_cfg, 10.0) == pytest.approx(0.5)
+    assert _game_tick_dt_s(sim_cfg, 5.0) == pytest.approx(0.1)
+    assert _game_tick_dt_s(sim_cfg, 1000.0) == pytest.approx(1.0)
+    assert _game_coast_tick_dt_s(sim_cfg, 1000.0) == pytest.approx(10.0)
+    assert burn_speed == pytest.approx(10.0)
+    assert _game_active_tick_dt_s(sim_cfg, burn_speed, maneuver_active=True) == pytest.approx(0.5)
+
+
+def test_two_rail_release_clears_pending_burn_before_coast() -> None:
+    root = Path(__file__).resolve().parents[1] / "game" / "configs"
+    sim_cfg = SimulationConfig.from_yaml(root / "game_training_rpo_06_sun_angle_inspection.yaml")
+    state = KeyboardCommandState(pitch=1.0, use_timing_accumulator=True)
+    state.accumulate_timed_input(0.04, speed_multiple=10.0, control_mode="ric_translation")
+
+    assert state.pitch_sim_s > 0.0
+    assert _effective_speed_multiple_for_control(
+        sim_cfg,
+        1000.0,
+        state,
+        control_mode="ric_translation",
+        options=_game_speed_multiplier_options(sim_cfg),
+    ) == pytest.approx(10.0)
+
+    state.pitch = 0.0
+
+    assert _clear_two_rail_released_maneuver_input(sim_cfg, state, control_mode="ric_translation") is True
+    assert state.pitch_sim_s == pytest.approx(0.0)
+    assert state.yaw_sim_s == pytest.approx(0.0)
+    assert state.roll_sim_s == pytest.approx(0.0)
+    assert _effective_speed_multiple_for_control(
+        sim_cfg,
+        1000.0,
+        state,
+        control_mode="ric_translation",
+        options=_game_speed_multiplier_options(sim_cfg),
+    ) == pytest.approx(1000.0)
+    np.testing.assert_allclose(state.consume_ric_duty_cycle(10.0), np.zeros(3, dtype=float))
+
+
+def test_two_rail_release_clear_is_opt_in() -> None:
+    cfg = SimulationConfig.from_dict(_game_config(Path("/tmp")))
+    state = KeyboardCommandState(use_timing_accumulator=True)
+    state.pitch_sim_s = 0.25
+
+    assert _clear_two_rail_released_maneuver_input(cfg, state, control_mode="ric_translation") is False
+    assert state.pitch_sim_s == pytest.approx(0.25)
+
+
+def test_sun_angle_inspection_level_uses_geo_beam_constraint() -> None:
+    root = Path(__file__).resolve().parents[1] / "game" / "configs"
+    sim_cfg = SimulationConfig.from_yaml(root / "game_training_rpo_06_sun_angle_inspection.yaml")
+    cfg = RPOTrainingConfig.from_metadata(dict(sim_cfg.scenario.metadata or {}))
+    safe_sim_cfg = SimulationConfig.from_yaml(root / "game_training_rpo_05_passive_cross_track_approach.yaml")
+    safe_cfg = RPOTrainingConfig.from_metadata(dict(safe_sim_cfg.scenario.metadata or {}))
+
+    assert cfg.scenario_id == "rpo_06_sun_angle_inspection"
+    assert sim_cfg.scenario.objects["target"].initial_state["coes"]["a_km"] == pytest.approx(42164.169451)
+    assert sim_cfg.scenario.simulator.duration_s == pytest.approx(86400.0)
+    assert sim_cfg.scenario.simulator.dt_s == pytest.approx(1.0)
+    assert sim_cfg.scenario.simulator.dynamics["orbit"]["orbit_substep_s"] == pytest.approx(1.0)
+    assert _max_accel_from_config(sim_cfg, "chaser") == pytest.approx(1.0e-5)
+    assert _game_initial_speed_multiple(sim_cfg, None) == pytest.approx(10.0)
+    assert _game_speed_multiplier_options(sim_cfg) == pytest.approx(
+        (1.0, 2.0, 5.0, 10.0, 25.0, 50.0, 100.0, 200.0, 500.0, 1000.0)
+    )
+    assert _game_maneuver_control_speed_multiple(sim_cfg) is None
+    assert _game_speed_dt_schedule(sim_cfg) == SPEED_DT_SCHEDULE
+    assert _game_coast_speed_dt_schedule(sim_cfg) == SPEED_DT_SCHEDULE
+    assert _game_two_rail_speed_control_enabled(sim_cfg) is True
+    assert _game_tick_dt_s(sim_cfg, 10.0) == pytest.approx(0.5)
+    assert _game_tick_dt_s(sim_cfg, 1000.0) == pytest.approx(1.0)
+    assert _game_coast_tick_dt_s(sim_cfg, 1000.0) == pytest.approx(10.0)
+    burn_state = KeyboardCommandState(pitch=1.0)
+    assert _effective_speed_multiple_for_control(
+        sim_cfg,
+        1000.0,
+        burn_state,
+        control_mode="ric_translation",
+        options=_game_speed_multiplier_options(sim_cfg),
+    ) == pytest.approx(10.0)
+    assert _game_active_tick_dt_s(
+        sim_cfg,
+        _effective_speed_multiple_for_control(
+            sim_cfg,
+            1000.0,
+            burn_state,
+            control_mode="ric_translation",
+            options=_game_speed_multiplier_options(sim_cfg),
+        ),
+        maneuver_active=True,
+    ) == pytest.approx(0.5)
+    assert _game_dashboard_fps_cap(sim_cfg) is None
+    assert _dashboard_fps_for_speed(10.0, fps_cap=_game_dashboard_fps_cap(sim_cfg)) == pytest.approx(60.0)
+    assert [gate.name for gate in cfg.inspection_gates] == [
+        "upper RC inspection gate",
+        "lower RC inspection gate",
+    ]
+    assert np.allclose(cfg.inspection_gates[0].center_ric_km, np.array([0.75, 0.0, 0.0], dtype=float))
+    assert np.allclose(cfg.inspection_gates[0].half_width_ric_km, np.array([0.25, 0.75, 0.75], dtype=float))
+    assert np.allclose(cfg.inspection_gates[1].center_ric_km, np.array([-0.75, 0.0, 0.0], dtype=float))
+    assert np.allclose(cfg.inspection_gates[1].half_width_ric_km, np.array([0.25, 0.75, 0.75], dtype=float))
+    assert len(cfg.forbidden_regions) == 1
+    assert len(safe_cfg.forbidden_regions) == 1
+    sphere = cfg.forbidden_regions[0]
+    assert sphere.name == "forbidden proximity sphere"
+    assert sphere.kind == "sphere"
+    assert sphere.radius_km == pytest.approx(safe_cfg.forbidden_regions[0].radius_km)
+    assert sphere.height_km is None
+    assert bool(sphere.contains_positions(np.array([[0.25, 0.0, 0.25]], dtype=float))[0]) is True
+    assert bool(sphere.contains_positions(np.array([[0.0, 0.75, 0.0]], dtype=float))[0]) is False
+    assert bool(sphere.contains_positions(np.array([[0.0, -0.75, 0.0]], dtype=float))[0]) is False
+    assert bool(sphere.contains_positions(np.array([[0.0, 0.0, 0.5]], dtype=float))[0]) is True
+    assert np.allclose(
+        sim_cfg.scenario.objects["chaser"].initial_state["relative_to_target_ric"]["state"],
+        safe_sim_cfg.scenario.objects["chaser"].initial_state["relative_to_target_ric"]["state"],
+    )
+    assert len(cfg.sun_angle_constraints) == 1
+    beam = cfg.sun_angle_constraints[0]
+    assert beam.name == "GEO anti-Sun inspection beam"
+    assert beam.dynamic_sun is True
+    assert beam.allowed_center_mode == "anti_sun"
+    assert beam.allowed_half_angle_deg == pytest.approx(32.0)
+    assert beam.min_range_km == pytest.approx(0.5)
+    assert beam.max_range_km == pytest.approx(4.0)
+    assert beam.beam_radius_km == pytest.approx(12.0)
+    assert bool(beam.samples_satisfying_constraint(np.array([[0.0, -4.0, 0.0]], dtype=float))[0]) is True
+    assert bool(beam.samples_satisfying_constraint(np.array([[0.0, 4.0, 0.0]], dtype=float))[0]) is False
+    assert float(beam.sun_angles_deg(np.array([[0.0, -4.0, 0.0]], dtype=float))[0]) == pytest.approx(180.0)
+
+
+def test_sun_angle_inspection_gates_overlap_sun_corridor_during_level_day() -> None:
+    root = Path(__file__).resolve().parents[1] / "game" / "configs"
+    sim_cfg = SimulationConfig.from_yaml(root / "game_training_rpo_06_sun_angle_inspection.yaml")
+    cfg = RPOTrainingConfig.from_metadata(dict(sim_cfg.scenario.metadata or {}))
+    constraint = cfg.sun_angle_constraints[0].with_sun_environment(
+        {
+            **dict(sim_cfg.scenario.simulator.environment or {}),
+            "jd_utc_start": sim_cfg.scenario.simulator.initial_jd_utc,
+        }
+    )
+    r_eci_km, v_eci_km_s = coes_mapping_to_rv_eci(sim_cfg.scenario.objects["target"].initial_state["coes"])
+    target_state = np.hstack([r_eci_km, v_eci_km_s])
+    target_states: list[tuple[float, np.ndarray]] = []
+    for time_s in range(0, int(sim_cfg.scenario.simulator.duration_s) + 1, 600):
+        target_states.append((float(time_s), target_state.copy()))
+        target_state = propagate_two_body_rk4(target_state, 600.0, EARTH_MU_KM3_S2, np.zeros(3, dtype=float))
+
+    for gate in cfg.inspection_gates:
+        axes = [
+            np.linspace(center - half_width, center + half_width, 5)
+            for center, half_width in zip(gate.center_ric_km, gate.half_width_ric_km)
+        ]
+        samples = np.array(np.meshgrid(*axes, indexing="ij"), dtype=float).reshape(3, -1).T
+        assert any(
+            bool(
+                np.any(
+                    constraint.samples_satisfying_constraint(
+                        samples,
+                        target_state_eci=state,
+                        time_s=time_s,
+                    )
+                )
+            )
+            for time_s, state in target_states
+        ), gate.name
+
+
+def test_training_tracker_requires_sun_angle_for_gate_completion() -> None:
+    root = Path(__file__).resolve().parents[1] / "game" / "configs"
+    base = RPOTrainingConfig.from_metadata(
+        dict(SimulationConfig.from_yaml(root / "game_training_rpo_06_sun_angle_inspection.yaml").scenario.metadata or {})
+    )
+    cfg = replace(
+        base,
+        inspection_gates=(
+            game_training.InspectionGateConfig(
+                name="sun gate",
+                center_ric_km=np.array([0.0, 5.0, 0.0], dtype=float),
+                half_width_ric_km=np.array([0.5, 0.5, 0.5], dtype=float),
+            ),
+        ),
+        sun_angle_constraints=(
+            game_training.SunAngleConstraintConfig(
+                name="static anti-sun beam",
+                sun_direction_ric=np.array([0.0, 1.0, 0.0], dtype=float),
+                allowed_center_ric=np.array([0.0, -1.0, 0.0], dtype=float),
+                allowed_half_angle_deg=20.0,
+            ),
+        ),
+        goal_radius_km=None,
+        max_time_s=100.0,
+        max_delta_v_m_s=None,
+    )
+    tracker = RPOTrainingTracker(cfg)
+    tracker.t_s = [0.0, 10.0]
+    tracker.rel_ric_hist = [
+        np.array([0.0, -5.0, 0.0, 0.0, 0.0, 0.0], dtype=float),
+        np.array([0.0, 5.0, 0.0, 0.0, 0.0, 0.0], dtype=float),
+    ]
+    tracker.thrust_hist = [np.zeros(3, dtype=float), np.zeros(3, dtype=float)]
+    tracker.target_thrust_hist = [np.zeros(3, dtype=float), np.zeros(3, dtype=float)]
+    tracker.mean_motion_hist = [1.0e-4, 1.0e-4]
+    tracker._record_inspection_gate_sample(np.array([0.0, 5.0, 0.0, 0.0, 0.0, 0.0], dtype=float))
+
+    score = tracker.score()
+
+    assert score.sun_angle_violation is True
+    assert score.sun_angle_constraint_names == ("static anti-sun beam",)
+    assert score.inspection_gates_satisfied == 0
+    assert score.level_failed is False
+    assert score.level_passed is False
+    assert score.min_sun_angle_deg == pytest.approx(0.0)
 
 
 def test_passive_cross_track_level_passes_after_ordered_inspection_gates() -> None:
@@ -4980,6 +5582,38 @@ def test_score_debrief_lines_show_after_terminal_mission_state() -> None:
     assert any(line.startswith("Final Speed") for line in debrief)
 
 
+def test_score_debrief_lines_preserve_terminal_failure_details() -> None:
+    cfg = RPOTrainingConfig(enabled=True, scenario_id="unit-failure")
+    score = type(
+        "Score",
+        (),
+        {
+            "level_passed": False,
+            "level_failed": True,
+            "scenario_id": "unit-failure",
+            "elapsed_s": 42.0,
+            "final_range_km": 5.0,
+            "final_goal_error_km": 4.0,
+            "final_relative_speed_km_s": 0.002,
+            "approximate_delta_v_m_s": 0.5,
+            "pass_fail_reasons": (
+                "Forbidden region violated: upper radial rail of V-bar U, lower radial floor in RC.",
+                "Delta-v budget exceeded (1.0 m/s).",
+                "Time budget exceeded (18000 s).",
+            ),
+        },
+    )()
+
+    debrief = _score_debrief_lines(score, config=cfg, difficulty="medium")
+
+    assert any("Closest App" in line for line in debrief)
+    assert any("Keepout Time" in line for line in debrief)
+    assert any("Target dV" in line for line in debrief)
+    assert any("upper radial rail" in line for line in debrief)
+    assert any("Delta-v budget exceeded" in line for line in debrief)
+    assert any("Time budget exceeded" in line for line in debrief)
+
+
 def test_training_tracker_hard_fails_on_keepout_or_expired_time() -> None:
     cfg = RPOTrainingConfig(
         enabled=True,
@@ -5020,9 +5654,11 @@ def test_training_tracker_hard_fails_on_keepout_or_expired_time() -> None:
 
 def test_pygame_input_mapping_sets_ric_axes_and_quit() -> None:
     class FakeEvent:
-        def __init__(self, type_value, key=None):
+        def __init__(self, type_value, key=None, *, unicode="", repeat=False):
             self.type = type_value
             self.key = key
+            self.unicode = unicode
+            self.repeat = repeat
 
     class FakeKeys:
         def __getitem__(self, key):
@@ -5031,6 +5667,7 @@ def test_pygame_input_mapping_sets_ric_axes_and_quit() -> None:
     class FakePygame:
         QUIT = "quit"
         KEYDOWN = "keydown"
+        KEYUP = "keyup"
         MOUSEWHEEL = "mousewheel"
         K_ESCAPE = "escape"
         K_r = "r"
@@ -5055,6 +5692,11 @@ def test_pygame_input_mapping_sets_ric_axes_and_quit() -> None:
         K_LEFT = "left"
         K_UP = "up"
         K_DOWN = "down"
+        K_PLUS = "plus"
+        K_EQUALS = "equals"
+        K_MINUS = "minus"
+        K_KP_PLUS = "kp_plus"
+        K_KP_MINUS = "kp_minus"
         K_SPACE = "space"
 
         class event:
@@ -5132,6 +5774,97 @@ def test_pygame_input_mapping_sets_ric_axes_and_quit() -> None:
 
     assert state.speed_multiplier_change == -1
 
+    class PlusMinusPygame(FakePygame):
+        class event:
+            @staticmethod
+            def get():
+                return [
+                    FakeEvent(FakePygame.KEYDOWN, FakePygame.K_EQUALS, unicode="+"),
+                    FakeEvent(FakePygame.KEYDOWN, FakePygame.K_PLUS, repeat=True),
+                ]
+
+    state = KeyboardCommandState()
+
+    _poll_pygame_input(PlusMinusPygame, state, control_mode="ric_translation")
+
+    assert state.speed_multiplier_change == 1
+
+    class ReleasedPlusPygame(FakePygame):
+        class event:
+            @staticmethod
+            def get():
+                return [
+                    FakeEvent(FakePygame.KEYUP, FakePygame.K_EQUALS, unicode="+"),
+                    FakeEvent(FakePygame.KEYDOWN, FakePygame.K_KP_PLUS),
+                ]
+
+    _poll_pygame_input(ReleasedPlusPygame, state, control_mode="ric_translation")
+
+    assert state.speed_multiplier_change == 1
+
+    class RepeatedMinusPygame(FakePygame):
+        class event:
+            @staticmethod
+            def get():
+                return [
+                    FakeEvent(FakePygame.KEYDOWN, FakePygame.K_MINUS, unicode="-"),
+                    FakeEvent(FakePygame.KEYDOWN, FakePygame.K_KP_MINUS, repeat=True),
+                ]
+
+    state = KeyboardCommandState()
+
+    _poll_pygame_input(RepeatedMinusPygame, state, control_mode="ric_translation")
+
+    assert state.speed_multiplier_change == -1
+
+    class BurstPlusPygame(FakePygame):
+        class event:
+            @staticmethod
+            def get():
+                return [
+                    FakeEvent(FakePygame.KEYDOWN, FakePygame.K_EQUALS, unicode="+"),
+                    FakeEvent(FakePygame.KEYUP, FakePygame.K_EQUALS, unicode="+"),
+                    FakeEvent(FakePygame.KEYDOWN, FakePygame.K_EQUALS, unicode="+"),
+                    FakeEvent(FakePygame.KEYUP, FakePygame.K_EQUALS, unicode="+"),
+                    FakeEvent(FakePygame.KEYDOWN, FakePygame.K_EQUALS, unicode="+"),
+                ]
+
+    state = KeyboardCommandState()
+
+    _poll_pygame_input(BurstPlusPygame, state, control_mode="ric_translation")
+
+    assert state.speed_multiplier_change == 1
+
+    class NoHeldKeys:
+        def __getitem__(self, key):
+            return False
+
+    class QuickBurnTapPygame(FakePygame):
+        class event:
+            @staticmethod
+            def get():
+                return [
+                    FakeEvent(FakePygame.KEYDOWN, FakePygame.K_d),
+                    FakeEvent(FakePygame.KEYUP, FakePygame.K_d),
+                ]
+
+        class key:
+            @staticmethod
+            def get_pressed():
+                return NoHeldKeys()
+
+    state = KeyboardCommandState()
+
+    _poll_pygame_input(QuickBurnTapPygame, state, control_mode="ric_translation")
+
+    assert state.pitch == 0.0
+    assert state.yaw == 1.0
+    assert state.roll == 0.0
+    assert state.yaw_event_pulse is True
+    state.clear_event_pulses()
+    assert state.yaw == 0.0
+    assert state.yaw_event_pulse is False
+
     class BriefingScrollPygame(FakePygame):
         class event:
             @staticmethod
@@ -5148,6 +5881,13 @@ def test_pygame_input_mapping_sets_ric_axes_and_quit() -> None:
 
     assert state.briefing_scroll_px == 288
     assert state.clip_record_save_requested is False
+
+    terminal_state = KeyboardCommandState()
+
+    _poll_pygame_input(BriefingScrollPygame, terminal_state, control_mode="ric_translation", terminal_open=True)
+
+    assert terminal_state.briefing_scroll_px == 288
+    assert terminal_state.clip_record_save_requested is False
 
 
 def test_pygame_focus_loss_clears_live_axes() -> None:
@@ -5212,13 +5952,14 @@ def test_shared_game_tick_schedule_clamps_to_level_base_dt(tmp_path: Path) -> No
     leo_cfg = SimulationConfig.from_dict(leo_like)
 
     assert _game_speed_dt_schedule(leo_cfg) == (
-        (1.0, 0.25),
+        (1.0, 0.1),
         (10.0, 0.5),
         (25.0, 1.0),
         (50.0, 5.0),
         (100.0, 10.0),
     )
-    assert _game_tick_dt_s(leo_cfg, 1.0) == pytest.approx(0.25)
+    assert _game_tick_dt_s(leo_cfg, 1.0) == pytest.approx(0.1)
+    assert _game_tick_dt_s(leo_cfg, 5.0) == pytest.approx(0.1)
     assert _game_tick_dt_s(leo_cfg, 10.0) == pytest.approx(0.5)
     assert _game_tick_dt_s(leo_cfg, 25.0) == pytest.approx(1.0)
     assert _game_tick_dt_s(leo_cfg, 200.0) == pytest.approx(1.0)
@@ -5228,7 +5969,8 @@ def test_shared_game_tick_schedule_clamps_to_level_base_dt(tmp_path: Path) -> No
     cislunar_like["simulator"]["dt_s"] = 10.0
     cislunar_cfg = SimulationConfig.from_dict(cislunar_like)
 
-    assert _game_tick_dt_s(cislunar_cfg, 1.0) == pytest.approx(0.25)
+    assert _game_tick_dt_s(cislunar_cfg, 1.0) == pytest.approx(0.1)
+    assert _game_tick_dt_s(cislunar_cfg, 5.0) == pytest.approx(0.1)
     assert _game_tick_dt_s(cislunar_cfg, 10.0) == pytest.approx(0.5)
     assert _game_tick_dt_s(cislunar_cfg, 25.0) == pytest.approx(1.0)
     assert _game_tick_dt_s(cislunar_cfg, 50.0) == pytest.approx(5.0)
@@ -5295,6 +6037,18 @@ def test_maneuver_input_above_control_speed_drops_to_control_speed() -> None:
     assert _speed_after_maneuver_input(200.0, no_throttle_state, control_mode="ric_translation") == 200.0
 
 
+def test_maneuver_control_speed_cap_uses_current_selected_speed() -> None:
+    selected_speed = 100.0
+    active_state = KeyboardCommandState(pitch=1.0)
+    released_state = KeyboardCommandState()
+
+    capped = _speed_after_maneuver_input(selected_speed, active_state, control_mode="ric_translation")
+    unchanged = _speed_after_maneuver_input(capped, released_state, control_mode="ric_translation")
+
+    assert capped == pytest.approx(10.0)
+    assert unchanged == pytest.approx(10.0)
+
+
 def test_maneuver_input_can_use_configured_control_speed_cap() -> None:
     ric_state = KeyboardCommandState(pitch=1.0)
     options = (10.0, 25.0, 50.0, 100.0, 200.0, 500.0)
@@ -5351,6 +6105,10 @@ def test_dashboard_fps_drops_at_high_speed_unless_recording() -> None:
     assert _dashboard_fps_for_speed(50.0) == 45.0
     assert _dashboard_fps_for_speed(100.0) == 30.0
     assert _dashboard_fps_for_speed(200.0) == 30.0
+    assert _dashboard_fps_for_speed(100.0, high_speed_fps=60.0) == 60.0
+    assert _dashboard_fps_for_speed(100.0, high_speed_fps=60.0, high_speed_fps_max_multiple=100.0) == 60.0
+    assert _dashboard_fps_for_speed(200.0, high_speed_fps=60.0, high_speed_fps_max_multiple=100.0) == 30.0
+    assert _dashboard_fps_for_speed(100.0, fps_cap=45.0, high_speed_fps=60.0) == 45.0
     assert _dashboard_fps_for_speed(200.0, recording=True) == game_runner.GAME_RECORDING_FPS
     assert _dashboard_fps_for_speed(10.0, recording=True, fps_cap=20.0) == game_runner.GAME_RECORDING_FPS
     assert _dashboard_fps_for_speed(200.0, recording=True, recording_fps=24.0) == 24.0
@@ -5445,6 +6203,60 @@ def test_step_game_attempt_stops_on_first_terminal_score() -> None:
     assert trainer.snapshots == ["first"]
 
 
+def test_step_game_attempt_splits_large_autonomy_tick() -> None:
+    active = type("Score", (), {"level_passed": False, "level_failed": False})()
+
+    class FakeSession:
+        done = False
+
+        def __init__(self) -> None:
+            self.step_dts: list[float] = []
+
+        def step(self, *, dt_s: float) -> str:
+            self.step_dts.append(float(dt_s))
+            return f"snapshot-{len(self.step_dts)}"
+
+    class FakeDashboard:
+        def __init__(self) -> None:
+            self.snapshots: list[str] = []
+
+        def push_snapshot(self, snapshot: str) -> None:
+            self.snapshots.append(snapshot)
+
+    class FakeTrainer:
+        config = RPOTrainingConfig(enabled=True)
+
+        def __init__(self) -> None:
+            self.snapshots: list[str] = []
+
+        def record(self, snapshot: str) -> None:
+            self.snapshots.append(snapshot)
+
+        def score(self):
+            return active
+
+    session = FakeSession()
+    dashboard = FakeDashboard()
+    trainer = FakeTrainer()
+
+    score = _step_game_attempt(
+        session=session,
+        dashboard=dashboard,
+        trainer=trainer,
+        steps_to_run=1,
+        initial_score=active,
+        dt_s=3.25,
+        max_step_dt_s=1.0,
+    )
+
+    assert score is active
+    assert session.step_dts == pytest.approx([1.0, 1.0, 1.0, 0.25])
+    assert dashboard.snapshots == ["snapshot-1", "snapshot-2", "snapshot-3", "snapshot-4"]
+    assert trainer.snapshots == dashboard.snapshots
+    assert _split_game_step_dt(0.75, max_step_dt_s=1.0) == pytest.approx((0.75,))
+    assert _split_game_step_dt(2.5, max_step_dt_s=1.0) == pytest.approx((1.0, 1.0, 0.5))
+
+
 def test_realtime_steps_due_supports_multi_step_catchup_for_100x() -> None:
     steps, next_wall = _realtime_steps_due(now_s=10.016, last_step_wall_s=10.0, wall_step_s=0.01)
 
@@ -5470,6 +6282,16 @@ def test_cw_coast_state_zero_time_returns_initial_state() -> None:
     out = _cw_coast_state(x0, 0.0, 0.001)
 
     assert np.allclose(out, x0)
+
+
+def test_cw_coast_states_matches_scalar_propagation() -> None:
+    x0 = np.array([0.1, -1.0, 0.2, 0.0002, 0.001, -0.001], dtype=float)
+    times = np.linspace(0.0, 120.0, 25)
+    expected = np.vstack([_cw_coast_state(x0, float(t), 0.001) for t in times])
+
+    out = _cw_coast_states(x0, times, 0.001)
+
+    np.testing.assert_allclose(out, expected)
 
 
 def test_cw_forced_state_advances_short_visual_burn() -> None:
@@ -5507,7 +6329,46 @@ def test_live_prediction_accel_ric_clears_when_paused() -> None:
     assert np.allclose(accel, np.zeros(3, dtype=float))
 
 
-def test_live_prediction_burn_uses_pending_timed_input_residual() -> None:
+def test_live_prediction_burn_uses_current_timed_input() -> None:
+    state = KeyboardCommandState(pitch=1.0, yaw=1.0, throttle=1.0)
+    state.use_timing_accumulator = True
+    state.pitch_sim_s = 0.25
+    state.yaw_sim_s = 0.10
+
+    accel, elapsed = _live_prediction_burn(
+        state,
+        control_mode="ric_translation",
+        max_accel_km_s2=2.0e-5,
+        elapsed_wall_s=0.75,
+        speed_multiple=10.0,
+        dt_s=1.0,
+    )
+
+    assert elapsed == pytest.approx(1.0)
+    expected = np.array([1.0, 1.0, 0.0], dtype=float)
+    expected = expected / np.linalg.norm(expected) * 2.0e-5
+    np.testing.assert_allclose(accel, expected)
+    assert accel[2] == pytest.approx(0.0)
+
+
+def test_live_prediction_burn_uses_current_input_before_timed_residual_accumulates() -> None:
+    state = KeyboardCommandState(pitch=1.0, throttle=1.0)
+    state.use_timing_accumulator = True
+
+    accel, elapsed = _live_prediction_burn(
+        state,
+        control_mode="ric_translation",
+        max_accel_km_s2=2.0e-5,
+        elapsed_wall_s=0.02,
+        speed_multiple=10.0,
+        dt_s=1.0,
+    )
+
+    np.testing.assert_allclose(accel, np.array([2.0e-5, 0.0, 0.0], dtype=float))
+    assert elapsed == pytest.approx(0.2)
+
+
+def test_live_prediction_burn_ignores_pending_residual_after_key_release() -> None:
     state = KeyboardCommandState(throttle=1.0)
     state.use_timing_accumulator = True
     state.pitch_sim_s = 0.25
@@ -5522,11 +6383,29 @@ def test_live_prediction_burn_uses_pending_timed_input_residual() -> None:
         dt_s=1.0,
     )
 
-    assert elapsed == pytest.approx(0.25)
-    expected = np.array([1.0, 0.4, 0.0], dtype=float)
-    expected = expected / np.linalg.norm(expected) * 2.0e-5
-    np.testing.assert_allclose(accel, expected)
-    assert accel[2] == pytest.approx(0.0)
+    np.testing.assert_allclose(accel, np.zeros(3, dtype=float))
+    assert elapsed == pytest.approx(0.0)
+
+
+def test_live_prediction_burn_matches_manual_duty_cycle_shape() -> None:
+    state = KeyboardCommandState(pitch=1.0, yaw=1.0, throttle=1.0)
+    state.use_timing_accumulator = True
+    state.pitch_sim_s = 2.0
+    state.yaw_sim_s = 1.0
+
+    accel, elapsed = _live_prediction_burn(
+        state,
+        control_mode="ric_translation",
+        max_accel_km_s2=2.0e-5,
+        elapsed_wall_s=0.0,
+        speed_multiple=10.0,
+        dt_s=1.0,
+    )
+
+    expected_duty = np.array([1.0, 1.0, 0.0], dtype=float)
+    expected_duty /= np.linalg.norm(expected_duty)
+    assert elapsed == pytest.approx(0.0)
+    np.testing.assert_allclose(accel, expected_duty * 2.0e-5)
 
 
 def test_live_prediction_burn_falls_back_to_wall_elapsed_without_accumulator() -> None:
@@ -5763,6 +6642,267 @@ def test_cislunar_dashboard_uses_bounded_cached_cr3bp_prediction(monkeypatch: py
     assert second == pytest.approx(first)
 
 
+def test_cr3bp_coast_prediction_cache_uses_configured_update_interval(monkeypatch: pytest.MonkeyPatch) -> None:
+    dashboard = object.__new__(PygameRPODashboard)
+    dashboard.coast_prediction_model = "cr3bp"
+    dashboard.cr3bp_prediction_coast_update_interval_s = 300.0
+    dashboard.t_s = [0.0]
+    dashboard.reference_state_eci = cr3bp_l1_state_km_s()
+    dashboard._prediction_cache = {}
+    calls = []
+
+    def fake_prediction(self: PygameRPODashboard, rel0: np.ndarray, **kwargs: float | None) -> np.ndarray:
+        calls.append(np.array(rel0, dtype=float).copy())
+        return np.full((2, 6), float(len(calls)), dtype=float)
+
+    monkeypatch.setattr(PygameRPODashboard, "_coast_prediction_from", fake_prediction)
+    rel0 = np.array([1.0, 2.0, 3.0, 1.0e-3, 2.0e-3, 3.0e-3], dtype=float)
+
+    first = dashboard._coast_prediction_from_cached("chaser", rel0, active_burn=False)
+    dashboard.t_s = [100.0]
+    second = dashboard._coast_prediction_from_cached("chaser", rel0, active_burn=False)
+    dashboard.t_s = [301.0]
+    third = dashboard._coast_prediction_from_cached("chaser", rel0, active_burn=False)
+
+    assert len(calls) == 2
+    assert np.all(first == 1.0)
+    assert np.all(second == 1.0)
+    assert np.all(third == 2.0)
+
+
+def test_cr3bp_prediction_cache_refreshes_active_burns(monkeypatch: pytest.MonkeyPatch) -> None:
+    dashboard = object.__new__(PygameRPODashboard)
+    dashboard.coast_prediction_model = "cr3bp"
+    dashboard.t_s = [0.0]
+    dashboard.reference_state_eci = cr3bp_l1_state_km_s()
+    dashboard._prediction_cache = {}
+    calls = []
+
+    def fake_prediction(self: PygameRPODashboard, rel0: np.ndarray, **kwargs: float | None) -> np.ndarray:
+        calls.append(np.array(rel0, dtype=float).copy())
+        return np.full((2, 6), float(len(calls)), dtype=float)
+
+    monkeypatch.setattr(PygameRPODashboard, "_coast_prediction_from", fake_prediction)
+    rel0 = np.array([1.0, 2.0, 3.0, 1.0e-3, 2.0e-3, 3.0e-3], dtype=float)
+
+    first = dashboard._coast_prediction_from_cached("chaser", rel0, active_burn=True)
+    second = dashboard._coast_prediction_from_cached("chaser", rel0, active_burn=True)
+
+    assert len(calls) == 2
+    assert np.all(first == 1.0)
+    assert np.all(second == 2.0)
+
+
+def test_cr3bp_active_burn_projection_uses_smaller_point_budget() -> None:
+    dashboard = object.__new__(PygameRPODashboard)
+    dashboard.coast_prediction_model = "cr3bp"
+    dashboard.cr3bp_projection_mode = "linearized"
+    dashboard.relative_frame = "moon_ric"
+    dashboard.coast_prediction_orbit_fraction = None
+    dashboard.coast_prediction_horizon_s = 604800.0
+    dashboard.cr3bp_coast_prediction_horizon_s = 604800.0
+    dashboard.cr3bp_coast_prediction_dt_s = 1.0
+    dashboard.coast_prediction_dt_s = 10.0
+    dashboard.mean_motion_rad_s = EARTH_MOON_MEAN_MOTION_RAD_S
+    dashboard.t_s = [0.0]
+    dashboard.reference_state_eci = cr3bp_halo_seed_state_km_s(family="l2_nrho_southern")
+    dashboard._prediction_cache = {}
+    rel0 = np.array([-3.0, 4.0, 0.5, 0.0, 0.0, 2.0e-6], dtype=float)
+
+    active = dashboard._coast_prediction_from_cached("chaser", rel0, active_burn=True)
+    dashboard._prediction_cache = {}
+    coast = dashboard._coast_prediction_from_cached("chaser", rel0, active_burn=False)
+
+    assert active.shape[0] == MAX_ACTIVE_CR3BP_GHOST_DRAW_POINTS
+    assert coast.shape[0] == 120
+    np.testing.assert_allclose(active[:6, 0], coast[:6, 0])
+
+
+def test_cr3bp_time_remaining_horizon_overrides_local_orbit_fraction(monkeypatch: pytest.MonkeyPatch) -> None:
+    dashboard = object.__new__(PygameRPODashboard)
+    dashboard.coast_prediction_model = "cr3bp"
+    dashboard.cr3bp_projection_mode = "linearized"
+    dashboard.relative_frame = "moon_ric"
+    dashboard.coast_prediction_orbit_fraction = 1.0
+    dashboard.mean_motion_rad_s = 2.0 * np.pi / 1000.0
+    dashboard.coast_prediction_horizon_s = 1000.0
+    dashboard.cr3bp_coast_prediction_horizon_s = 604800.0
+    dashboard.cr3bp_coast_prediction_horizon_mode = "time_remaining"
+    dashboard.cr3bp_coast_prediction_dt_s = 1.0
+    dashboard.coast_prediction_dt_s = 10.0
+    dashboard.mission_time_budget_s = 259200.0
+    dashboard.t_s = [1000.0, 87400.0]
+    dashboard.reference_state_eci = cr3bp_halo_seed_state_km_s(family="l2_nrho_southern")
+    captured: dict[str, np.ndarray] = {}
+
+    def fake_projection(
+        self: PygameRPODashboard,
+        rel0: np.ndarray,
+        *,
+        target_state: np.ndarray,
+        times: np.ndarray,
+        current_t_s: float,
+    ) -> np.ndarray:
+        captured["times"] = np.array(times, dtype=float).copy()
+        return np.zeros((len(times), 6), dtype=float)
+
+    monkeypatch.setattr(PygameRPODashboard, "_linearized_cr3bp_moon_ric_coast_prediction_cached", fake_projection)
+
+    prediction = dashboard._coast_prediction_from(np.zeros(6, dtype=float))
+
+    assert prediction.shape[0] == 120
+    assert captured["times"][-1] == pytest.approx(172800.0)
+
+
+def test_cr3bp_configured_horizon_overrides_local_orbit_fraction(monkeypatch: pytest.MonkeyPatch) -> None:
+    dashboard = object.__new__(PygameRPODashboard)
+    dashboard.coast_prediction_model = "cr3bp"
+    dashboard.cr3bp_projection_mode = "linearized"
+    dashboard.relative_frame = "moon_ric"
+    dashboard.coast_prediction_orbit_fraction = 1.0
+    dashboard.mean_motion_rad_s = 2.0 * np.pi / 1000.0
+    dashboard.coast_prediction_horizon_s = 1000.0
+    dashboard.cr3bp_coast_prediction_horizon_s = 21600.0
+    dashboard.cr3bp_coast_prediction_horizon_mode = "default"
+    dashboard.cr3bp_coast_prediction_dt_s = 1.0
+    dashboard.coast_prediction_dt_s = 10.0
+    dashboard.t_s = [0.0]
+    dashboard.reference_state_eci = cr3bp_halo_seed_state_km_s(family="l2_nrho_southern")
+    captured: dict[str, np.ndarray] = {}
+
+    def fake_projection(
+        self: PygameRPODashboard,
+        rel0: np.ndarray,
+        *,
+        target_state: np.ndarray,
+        times: np.ndarray,
+        current_t_s: float,
+    ) -> np.ndarray:
+        captured["times"] = np.array(times, dtype=float).copy()
+        return np.zeros((len(times), 6), dtype=float)
+
+    monkeypatch.setattr(PygameRPODashboard, "_linearized_cr3bp_moon_ric_coast_prediction_cached", fake_projection)
+
+    prediction = dashboard._coast_prediction_from(np.zeros(6, dtype=float))
+
+    assert prediction.shape[0] == 120
+    assert captured["times"][-1] == pytest.approx(21600.0)
+
+
+def test_cr3bp_active_prediction_horizon_can_cap_live_burn_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    dashboard = object.__new__(PygameRPODashboard)
+    dashboard.coast_prediction_model = "cr3bp"
+    dashboard.cr3bp_projection_mode = "linearized"
+    dashboard.relative_frame = "moon_ric"
+    dashboard.coast_prediction_orbit_fraction = 1.0
+    dashboard.mean_motion_rad_s = 2.0 * np.pi / 1000.0
+    dashboard.coast_prediction_horizon_s = 1000.0
+    dashboard.cr3bp_coast_prediction_horizon_s = 604800.0
+    dashboard.cr3bp_active_prediction_horizon_s = 21600.0
+    dashboard.cr3bp_coast_prediction_horizon_mode = "time_remaining"
+    dashboard.cr3bp_coast_prediction_dt_s = 1.0
+    dashboard.coast_prediction_dt_s = 10.0
+    dashboard.cr3bp_prediction_coast_update_interval_s = 300.0
+    dashboard.mission_time_budget_s = 259200.0
+    dashboard.t_s = [0.0]
+    dashboard.reference_state_eci = cr3bp_halo_seed_state_km_s(family="l2_nrho_southern")
+    dashboard._prediction_cache = {}
+    captured: list[np.ndarray] = []
+
+    def fake_projection(
+        self: PygameRPODashboard,
+        rel0: np.ndarray,
+        *,
+        target_state: np.ndarray,
+        times: np.ndarray,
+        current_t_s: float,
+    ) -> np.ndarray:
+        captured.append(np.array(times, dtype=float).copy())
+        return np.zeros((len(times), 6), dtype=float)
+
+    monkeypatch.setattr(PygameRPODashboard, "_linearized_cr3bp_moon_ric_coast_prediction_cached", fake_projection)
+
+    active = dashboard._coast_prediction_from_cached("active", np.zeros(6, dtype=float), active_burn=True)
+    coast = dashboard._coast_prediction_from_cached("coast", np.zeros(6, dtype=float), active_burn=False)
+
+    assert active.shape[0] == MAX_ACTIVE_CR3BP_GHOST_DRAW_POINTS
+    assert coast.shape[0] == 120
+    assert captured[0][-1] == pytest.approx(21600.0)
+    assert captured[1][-1] == pytest.approx(259200.0)
+
+
+def test_linearized_cr3bp_stm_table_reuses_for_new_live_seed(monkeypatch: pytest.MonkeyPatch) -> None:
+    dashboard = object.__new__(PygameRPODashboard)
+    dashboard.coast_prediction_model = "cr3bp"
+    dashboard.cr3bp_projection_mode = "linearized"
+    dashboard.relative_frame = "moon_ric"
+    dashboard.coast_prediction_orbit_fraction = None
+    dashboard.coast_prediction_horizon_s = 604800.0
+    dashboard.cr3bp_coast_prediction_horizon_s = 604800.0
+    dashboard.cr3bp_coast_prediction_dt_s = 1.0
+    dashboard.coast_prediction_dt_s = 10.0
+    dashboard.mean_motion_rad_s = EARTH_MOON_MEAN_MOTION_RAD_S
+    dashboard.t_s = [0.0]
+    dashboard.reference_state_eci = cr3bp_halo_seed_state_km_s(family="l2_nrho_southern")
+    dashboard._prediction_cache = {}
+    calls = 0
+    original = game_pygame_dashboard.propagate_cr3bp_reference_stm
+
+    def counted(reference_state, stm, dt_s, t_s, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original(reference_state, stm, dt_s, t_s, **kwargs)
+
+    monkeypatch.setattr(game_pygame_dashboard, "propagate_cr3bp_reference_stm", counted)
+    rel0 = np.array([-3.0, 4.0, 0.5, 0.0, 0.0, 2.0e-6], dtype=float)
+    rel1 = rel0.copy()
+    rel1[4] += 1.0e-5
+
+    first = dashboard._coast_prediction_from_cached("chaser", rel0, active_burn=True)
+    first_calls = calls
+    second = dashboard._coast_prediction_from_cached("chaser", rel1, active_burn=True)
+
+    assert first_calls > 0
+    assert calls == first_calls
+    assert first.shape == second.shape == (MAX_ACTIVE_CR3BP_GHOST_DRAW_POINTS, 6)
+    assert not np.allclose(first, second)
+
+
+def test_linearized_cr3bp_stm_table_invalidates_when_reference_changes(monkeypatch: pytest.MonkeyPatch) -> None:
+    dashboard = object.__new__(PygameRPODashboard)
+    dashboard.coast_prediction_model = "cr3bp"
+    dashboard.cr3bp_projection_mode = "linearized"
+    dashboard.relative_frame = "moon_ric"
+    dashboard.coast_prediction_orbit_fraction = None
+    dashboard.coast_prediction_horizon_s = 120.0
+    dashboard.cr3bp_coast_prediction_horizon_s = 120.0
+    dashboard.cr3bp_coast_prediction_dt_s = 1.0
+    dashboard.coast_prediction_dt_s = 10.0
+    dashboard.mean_motion_rad_s = EARTH_MOON_MEAN_MOTION_RAD_S
+    dashboard.t_s = [0.0]
+    dashboard.reference_state_eci = cr3bp_halo_seed_state_km_s(family="l2_nrho_southern")
+    dashboard._prediction_cache = {}
+    calls = 0
+    original = game_pygame_dashboard.propagate_cr3bp_reference_stm
+
+    def counted(reference_state, stm, dt_s, t_s, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original(reference_state, stm, dt_s, t_s, **kwargs)
+
+    monkeypatch.setattr(game_pygame_dashboard, "propagate_cr3bp_reference_stm", counted)
+    rel0 = np.array([-3.0, 4.0, 0.5, 0.0, 0.0, 2.0e-6], dtype=float)
+
+    dashboard._coast_prediction_from_cached("chaser", rel0, active_burn=True)
+    first_calls = calls
+    dashboard.reference_state_eci = dashboard.reference_state_eci.copy()
+    dashboard.reference_state_eci[0] += 0.01
+    dashboard._coast_prediction_from_cached("chaser", rel0, active_burn=True)
+
+    assert first_calls > 0
+    assert calls > first_calls
+
+
 def test_briefing_body_wraps_all_lines_for_scrollable_card() -> None:
     class FakeFont:
         def size(self, text):
@@ -5778,6 +6918,35 @@ def test_briefing_body_wraps_all_lines_for_scrollable_card() -> None:
     assert any("Instruction 11" in line for line in wrapped)
     assert len(wrapped) > len(lines)
     assert PygameRPODashboard._briefing_footer_text(scrollable=True).startswith("Scroll To Read.")
+
+
+def test_mission_banner_wraps_long_failure_lines_inside_fixed_box() -> None:
+    class FakeFont:
+        def size(self, text):
+            return (len(str(text)) * 8, 18)
+
+    dashboard = object.__new__(PygameRPODashboard)
+    dashboard.font = FakeFont()
+    dashboard._mission_banner_layout_cache = {}
+
+    lines = (
+        "Result        Forbidden region violated: lower radial rail of V-bar U, lower radial floor in RC.",
+    )
+
+    wrapped = dashboard._mission_banner_body_lines(lines, width_px=360)
+
+    assert len(wrapped) > 1
+    assert wrapped[0].startswith("Result")
+    assert all(FakeFont().size(line)[0] <= 360 for line in wrapped)
+    assert any(line.startswith("              ") for line in wrapped[1:])
+
+
+def test_mission_banner_scroll_footer_stays_compact() -> None:
+    footer = PygameRPODashboard._mission_banner_footer_text("D Debrief  R Retry  Esc Quit", scrollable=True)
+
+    assert footer == "Scroll/Page  D Debrief  R Retry  Esc Quit"
+    assert "Press" not in footer
+    assert len(footer) < 48
 
 
 def test_elliptic_linear_coast_matches_hcw_for_circular_chief() -> None:
@@ -5884,6 +7053,44 @@ def test_dashboard_moon_ric_swap_uses_real_cr3bp_target_orbit() -> None:
     assert float(np.min(np.linalg.norm(moon_view_xy, axis=1))) > MOON_RADIUS_KM
 
 
+def test_dashboard_target_orbit_render_path_uses_cache_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    dashboard = object.__new__(PygameRPODashboard)
+    dashboard.relative_frame = "moon_ric"
+    dashboard.coast_prediction_model = "cr3bp"
+    reference = cr3bp_halo_seed_state_km_s(family="l2_nrho_southern")
+    dashboard.reference_state_eci = reference.copy()
+    dashboard.target_orbit_reference_state_eci = reference.copy()
+    dashboard.target_coast_prediction_horizon_s = 86400.0
+    dashboard.target_coast_prediction_dt_s = 21600.0
+    dashboard.cr3bp_coast_prediction_horizon_s = 86400.0
+    dashboard.cr3bp_coast_prediction_dt_s = 21600.0
+    dashboard.coast_prediction_orbit_fraction = None
+    dashboard.coast_prediction_horizon_s = 86400.0
+    dashboard._prediction_cache = {}
+    dashboard.t_s = [0.0]
+
+    def fail_propagation(*args, **kwargs):
+        raise AssertionError("render path must not build target CR3BP orbit")
+
+    monkeypatch.setattr(game_pygame_dashboard, "propagate_cr3bp_state", fail_propagation)
+
+    assert dashboard._cr3bp_target_orbit_prediction(allow_build=False).size == 0
+
+    cached_prediction = np.vstack([reference, reference + np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0])])
+    dashboard._prediction_cache["target_absolute_cr3bp_orbit"] = {
+        "time_s": 0.0,
+        "prediction": cached_prediction,
+        "reference": reference.copy(),
+        "horizon_s": 86400.0,
+        "dt_s": 21600.0,
+    }
+
+    np.testing.assert_allclose(
+        dashboard._cr3bp_target_orbit_prediction(allow_build=False),
+        cached_prediction,
+    )
+
+
 def test_dashboard_moon_ric_target_orbit_is_prepropagated_from_initial_state() -> None:
     dashboard = object.__new__(PygameRPODashboard)
     dashboard.relative_frame = "moon_ric"
@@ -5907,6 +7114,64 @@ def test_dashboard_moon_ric_target_orbit_is_prepropagated_from_initial_state() -
     orbit_after_current_state_changes = dashboard._cr3bp_target_orbit_prediction()
 
     np.testing.assert_allclose(orbit_after_current_state_changes, orbit_from_initial)
+
+
+def test_dashboard_push_snapshot_prewarms_cr3bp_target_orbit() -> None:
+    dashboard = object.__new__(PygameRPODashboard)
+    dashboard.target_object_id = "target"
+    dashboard.chaser_object_id = "chaser"
+    dashboard.reference_object_id = "target"
+    dashboard.target_reference_object_id = None
+    dashboard.relative_frame = "moon_ric"
+    dashboard.coast_prediction_model = "cr3bp"
+    dashboard.target_coast_prediction_horizon_s = 600.0
+    dashboard.target_coast_prediction_dt_s = 300.0
+    dashboard.cr3bp_coast_prediction_horizon_s = 600.0
+    dashboard.cr3bp_coast_prediction_dt_s = 300.0
+    dashboard.coast_prediction_orbit_fraction = None
+    dashboard.coast_prediction_horizon_s = 600.0
+    dashboard.max_history = 10
+    dashboard.t_s = []
+    dashboard.sample_wall_s = []
+    dashboard.rel_hist = []
+    dashboard.target_rel_hist = []
+    dashboard.target_reference_rel_hist = []
+    dashboard.target_eci_hist = []
+    dashboard.chaser_eci_hist = []
+    dashboard.thrust_hist = []
+    dashboard.thrust_ric_hist = []
+    dashboard._rel_array = np.zeros((0, 6), dtype=float)
+    dashboard._target_rel_array = np.zeros((0, 6), dtype=float)
+    dashboard._target_reference_rel_array = np.zeros((0, 6), dtype=float)
+    dashboard._target_eci_array = np.zeros((0, 6), dtype=float)
+    dashboard._chaser_eci_array = np.zeros((0, 6), dtype=float)
+    dashboard._thrust_ric_array = np.zeros((0, 3), dtype=float)
+    dashboard.target_orbit_reference_state_eci = None
+    dashboard.target_true_anomaly_deg = None
+    dashboard._prediction_cache = {}
+    target = cr3bp_halo_seed_state_km_s(family="l2_nrho_southern")
+    chaser = _moon_ric_rect_state_to_cr3bp(
+        np.array([-1.0, 2.0, 0.5, 0.0, 0.0, 1.0e-6], dtype=float),
+        target,
+    )
+    snapshot = SimulationSnapshot(
+        step_index=0,
+        time_s=0.0,
+        truth={"target": target, "chaser": chaser},
+        belief={},
+        applied_thrust={"chaser": np.zeros(3, dtype=float)},
+        applied_torque={},
+    )
+
+    dashboard.push_snapshot(snapshot)
+
+    cached = dashboard._prediction_cache.get("target_absolute_cr3bp_orbit")
+    assert cached is not None
+    assert np.array(cached["prediction"], dtype=float).shape == (3, 6)
+    np.testing.assert_allclose(
+        dashboard._cr3bp_target_orbit_prediction(allow_build=False),
+        cached["prediction"],
+    )
 
 
 def test_cr3bp_reference_cache_accepts_propagated_reference_motion() -> None:
@@ -5936,14 +7201,13 @@ def test_dashboard_eci_projection_uses_target_orbit_plane() -> None:
     np.testing.assert_allclose(projected, np.array([[0.0, 7000.0], [1.0, 7000.0]], dtype=float))
 
 
-def test_satellite_marker_size_uses_dots_icons_and_scale() -> None:
-    assert _satellite_marker_size_px(100.0, 100.0) == 0
-    assert _satellite_marker_size_px(1000.0, 1000.0) == 20
+def test_satellite_marker_size_uses_physical_plot_scale() -> None:
+    assert _satellite_marker_size_px(100.0, 100.0) == 1
+    assert _satellite_marker_size_px(1000.0, 1000.0) == 6
     assert _satellite_marker_size_px(5000.0, 5000.0) == 30
-    assert _satellite_marker_size_px(100000.0, 100000.0) == 72
-    assert _satellite_marker_size_px(100000.0, 100000.0, max_size_px=128) == 128
-    assert _satellite_marker_size_px(100.0, 100.0, diameter_km=0.05) == 20
-    assert _satellite_marker_size_px(100.0, 100.0, diameter_km=0.12) == 20
+    assert _satellite_marker_size_px(100000.0, 100000.0) == 600
+    assert _satellite_marker_size_px(100.0, 100.0, diameter_km=0.05) == 5
+    assert _satellite_marker_size_px(100.0, 100.0, diameter_km=0.12) == 12
 
 
 def test_dashboard_vectors_match_web_preview_scaling() -> None:
@@ -6152,6 +7416,138 @@ def test_dashboard_live_prediction_seed_moves_ghost_without_moving_truth() -> No
     assert seeds[0][0] == "chaser"
     assert seeds[0][1][4] > 0.0
     assert seeds[0][2] is True
+    assert dashboard._frame_cache["ghost_active_burn"] is True
+
+
+def test_dashboard_cr3bp_live_prediction_seed_moves_with_partial_burn() -> None:
+    dashboard = object.__new__(PygameRPODashboard)
+    dashboard.coast_prediction_model = "cr3bp"
+    dashboard.relative_frame = "moon_ric"
+    dashboard.rel_hist = [np.zeros(6, dtype=float)]
+    dashboard.target_rel_hist = [np.zeros(6, dtype=float)]
+    dashboard.thrust_ric_hist = [np.zeros(3, dtype=float)]
+    dashboard._rel_array = np.zeros((1, 6), dtype=float)
+    dashboard._target_rel_array = np.zeros((1, 6), dtype=float)
+    dashboard._thrust_ric_array = np.zeros((1, 3), dtype=float)
+    dashboard.max_history = 900
+    dashboard.burn_marker_threshold_km_s2 = 1.0e-12
+    dashboard.mean_motion_rad_s = EARTH_MOON_MEAN_MOTION_RAD_S
+    dashboard.reference_state_eci = cr3bp_halo_seed_state_km_s(family="l2_nrho_southern")
+    dashboard.live_prediction_accel_ric_km_s2 = np.array([0.0, 1.0e-5, 0.0], dtype=float)
+    dashboard.live_prediction_elapsed_s = 0.5
+    dashboard._frame_cache = {}
+    dashboard._raw_frame_cache = {}
+    dashboard._frame_cache_dirty = True
+    seeds = []
+
+    def fake_prediction(cache_name, rel0, *, active_burn):
+        seeds.append((cache_name, np.array(rel0, dtype=float), active_burn))
+        return np.zeros((2, 6), dtype=float)
+
+    dashboard._coast_prediction_from_cached = fake_prediction
+    dashboard._target_coast_prediction = lambda *_: np.empty((0, 6), dtype=float)
+    dashboard._nmt_points = lambda: np.empty((0, 3), dtype=float)
+    dashboard._nmt_boundary_points = lambda: ()
+
+    dashboard._prepare_frame_cache()
+
+    assert seeds[0][2] is True
+    assert seeds[0][1][1] == pytest.approx(0.5 * 1.0e-5 * 0.5 * 0.5)
+    assert seeds[0][1][4] == pytest.approx(1.0e-5 * 0.5)
+
+
+def test_dashboard_stale_snapshot_thrust_does_not_keep_live_burn_active() -> None:
+    dashboard = object.__new__(PygameRPODashboard)
+    rel = np.zeros((1, 6), dtype=float)
+    target_rel = np.zeros((1, 6), dtype=float)
+    thrust = np.array([[0.0, 1.0e-5, 0.0]], dtype=float)
+    dashboard.rel_hist = [rel[0]]
+    dashboard.target_rel_hist = [target_rel[0]]
+    dashboard.thrust_ric_hist = [thrust[0]]
+    dashboard._rel_array = rel
+    dashboard._target_rel_array = target_rel
+    dashboard._thrust_ric_array = thrust
+    dashboard.max_history = 900
+    dashboard.burn_marker_threshold_km_s2 = 1.0e-12
+    dashboard.mean_motion_rad_s = 0.001
+    dashboard.live_prediction_accel_ric_km_s2 = np.zeros(3, dtype=float)
+    dashboard.live_prediction_elapsed_s = 0.0
+    dashboard._frame_cache = {}
+    dashboard._raw_frame_cache = {}
+    dashboard._frame_cache_dirty = True
+    calls = []
+
+    def fake_prediction(cache_name, rel0, *, active_burn):
+        calls.append((cache_name, np.array(rel0, dtype=float), active_burn))
+        return np.zeros((2, 6), dtype=float)
+
+    dashboard._coast_prediction_from_cached = fake_prediction
+    dashboard._target_coast_prediction = lambda *_: np.empty((0, 6), dtype=float)
+    dashboard._nmt_points = lambda: np.empty((0, 3), dtype=float)
+    dashboard._nmt_boundary_points = lambda: ()
+
+    dashboard._prepare_frame_cache()
+
+    assert calls[0][2] is False
+    assert dashboard._frame_cache["ghost_active_burn"] is False
+
+
+def test_dashboard_live_prediction_seed_anchors_to_committed_sample() -> None:
+    dashboard = object.__new__(PygameRPODashboard)
+    rel = np.array([[1.0, 2.0, 3.0, 0.2, -0.4, 0.6]], dtype=float)
+    target_rel = np.zeros((1, 6), dtype=float)
+    thrust = np.zeros((1, 3), dtype=float)
+    dashboard.rel_hist = [rel[0]]
+    dashboard.target_rel_hist = [target_rel[0]]
+    dashboard.thrust_ric_hist = [thrust[0]]
+    dashboard._rel_array = rel
+    dashboard._target_rel_array = target_rel
+    dashboard._thrust_ric_array = thrust
+    dashboard.max_history = 900
+    dashboard.burn_marker_threshold_km_s2 = 1.0e-12
+    dashboard.mean_motion_rad_s = 0.001
+    dashboard.live_prediction_accel_ric_km_s2 = np.array([0.0, 1.0e-5, 0.0], dtype=float)
+    dashboard.live_prediction_elapsed_s = 0.5
+    dashboard.visual_extrapolation_enabled = True
+    dashboard.visual_extrapolation_max_sim_s = 1.0
+    dashboard._render_motion_enabled = True
+    dashboard._render_speed_multiple = 1.0
+    dashboard.sample_wall_s = [10.0]
+    dashboard.t_s = [0.0]
+    dashboard._render_wall_time_s = 10.75
+    dashboard._frame_cache = {}
+    dashboard._raw_frame_cache = {}
+    dashboard._frame_cache_dirty = True
+    seeds = []
+
+    def fake_prediction(cache_name, rel0, *, active_burn):
+        seeds.append((cache_name, np.array(rel0, dtype=float), active_burn))
+        return np.zeros((2, 6), dtype=float)
+
+    dashboard._coast_prediction_from_cached = fake_prediction
+    dashboard._target_coast_prediction = lambda *_: np.empty((0, 6), dtype=float)
+    dashboard._nmt_points = lambda: np.empty((0, 3), dtype=float)
+    dashboard._nmt_boundary_points = lambda: ()
+
+    dashboard._prepare_frame_cache()
+
+    visual_latest = dashboard._frame_cache["rel"][-1]
+    expected_seed = _cw_forced_state(
+        rel[0],
+        dashboard.live_prediction_accel_ric_km_s2,
+        dashboard.live_prediction_elapsed_s,
+        dashboard.mean_motion_rad_s,
+    )
+
+    assert visual_latest[:3] == pytest.approx([1.15, 1.7, 3.45])
+    assert seeds[0][1] == pytest.approx(expected_seed)
+    visual_seed = _cw_forced_state(
+        visual_latest,
+        dashboard.live_prediction_accel_ric_km_s2,
+        dashboard.live_prediction_elapsed_s,
+        dashboard.mean_motion_rad_s,
+    )
+    assert float(np.linalg.norm(seeds[0][1] - visual_seed)) > 1.0e-6
 
 
 def test_set_live_prediction_burn_marks_frame_cache_dirty() -> None:
@@ -6161,6 +7557,17 @@ def test_set_live_prediction_burn_marks_frame_cache_dirty() -> None:
     dashboard.live_prediction_elapsed_s = 0.0
 
     dashboard.set_live_prediction_burn(np.array([1.0e-5, 0.0, 0.0], dtype=float), 0.25)
+
+    assert dashboard._frame_cache_dirty is True
+
+
+def test_set_live_prediction_burn_marks_frame_cache_dirty_on_elapsed_change() -> None:
+    dashboard = object.__new__(PygameRPODashboard)
+    dashboard._frame_cache_dirty = False
+    dashboard.live_prediction_accel_ric_km_s2 = np.array([1.0e-5, 0.0, 0.0], dtype=float)
+    dashboard.live_prediction_elapsed_s = 0.25
+
+    dashboard.set_live_prediction_burn(np.array([1.0e-5, 0.0, 0.0], dtype=float), 0.5)
 
     assert dashboard._frame_cache_dirty is True
 
@@ -6175,6 +7582,25 @@ def test_coast_prediction_caps_draw_points() -> None:
     prediction = dashboard._coast_prediction_from(np.array([0.1, -1.0, 0.2, 0.0, 0.001, -0.001], dtype=float))
 
     assert 2 <= prediction.shape[0] <= 120
+
+
+def test_front_loaded_prediction_times_preserve_near_term_resolution() -> None:
+    times = _front_loaded_prediction_times(259200.0, 1.0, max_points=120)
+
+    assert times.shape == (120,)
+    np.testing.assert_allclose(times[:6], np.array([0.0, 1.0, 2.0, 3.0, 4.0, 5.0], dtype=float))
+    assert times[-1] == pytest.approx(259200.0)
+    assert np.all(np.diff(times) > 0.0)
+    assert np.max(np.diff(times[:80])) == pytest.approx(1.0)
+
+
+def test_front_loaded_prediction_times_support_long_cislunar_horizon() -> None:
+    times = _front_loaded_prediction_times(604800.0, 1.0, max_points=120)
+
+    assert times.shape == (120,)
+    np.testing.assert_allclose(times[:6], np.array([0.0, 1.0, 2.0, 3.0, 4.0, 5.0], dtype=float))
+    assert times[-1] == pytest.approx(604800.0)
+    assert np.max(np.diff(times[:80])) == pytest.approx(1.0)
 
 
 def test_dashboard_uses_elliptic_prediction_model_when_configured() -> None:
@@ -6573,7 +7999,7 @@ def test_level5_plot_scale_keeps_forbidden_region_and_gates_visible() -> None:
 
 def test_level6_plot_scale_includes_capped_projection() -> None:
     root = Path(__file__).resolve().parents[1] / "game" / "configs"
-    sim_cfg = SimulationConfig.from_yaml(root / "game_training_rpo_06_elliptic_burn_then_approach.yaml")
+    sim_cfg = SimulationConfig.from_yaml(root / "game_training_rpo_07_elliptic_burn_then_approach.yaml")
     dashboard = object.__new__(PygameRPODashboard)
     dashboard.plot_prediction_zoom_max_span_km = _game_plot_prediction_zoom_max_span_km(sim_cfg)
     projection = np.array(
@@ -6605,7 +8031,7 @@ def test_level6_plot_scale_includes_capped_projection() -> None:
 
 def test_level7_plot_scale_keeps_goal_nmc_visible() -> None:
     root = Path(__file__).resolve().parents[1] / "game" / "configs"
-    sim_cfg = SimulationConfig.from_yaml(root / "game_training_rpo_07_elliptic_nmc.yaml")
+    sim_cfg = SimulationConfig.from_yaml(root / "game_training_rpo_08_elliptic_nmc.yaml")
     cfg = RPOTrainingConfig.from_metadata(dict(sim_cfg.scenario.metadata or {}))
     dashboard = object.__new__(PygameRPODashboard)
     dashboard.goal_nmt_radial_amplitude_km = cfg.goal_nmt_radial_amplitude_km
@@ -6625,6 +8051,28 @@ def test_level7_plot_scale_keeps_goal_nmc_visible() -> None:
     assert _game_plot_overlays_in_zoom(sim_cfg) is True
     assert ri_min_span == pytest.approx(2.8 * PLOT_OVERLAY_MARGIN)
     assert rc_min_span == pytest.approx(1.4 * PLOT_OVERLAY_MARGIN)
+
+
+def test_sun_angle_beam_does_not_drive_plot_zoom() -> None:
+    dashboard = object.__new__(PygameRPODashboard)
+    dashboard.forbidden_regions = ()
+    dashboard.approach_gates = ()
+    dashboard.inspection_gates = ()
+    dashboard.sun_angle_constraints = (
+        game_training.SunAngleConstraintConfig(
+            name="wide beam",
+            sun_direction_ric=np.array([0.0, 1.0, 0.0], dtype=float),
+            allowed_center_ric=np.array([0.0, -1.0, 0.0], dtype=float),
+            allowed_half_angle_deg=45.0,
+            beam_radius_km=100.0,
+        ),
+    )
+    dashboard.plot_overlays_in_zoom = True
+    dashboard.plot_overlays_in_zoom_by_plane = {}
+
+    min_span = dashboard._minimum_plot_span_km(x_axis=1, y_axis=0, offset=np.zeros(3, dtype=float))
+
+    assert min_span == pytest.approx(MIN_PLOT_SPAN_KM)
 
 
 def test_nmc_overlay_boundaries_use_element_tolerance() -> None:

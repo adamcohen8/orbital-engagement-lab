@@ -22,10 +22,7 @@ const TRAIL_LIMIT = 1200;
 const MIN_PLOT_SPAN_KM = 0.005;
 const PLOT_SCALE_MARGIN = 1.2;
 const SATELLITE_SPRITE_DIAMETER_KM = 0.006;
-const SATELLITE_DOT_THRESHOLD_PX = 4;
-const SATELLITE_ICON_THRESHOLD_PX = 18;
 const SATELLITE_ICON_SIZE_PX = 20;
-const SATELLITE_MAX_SIZE_PX = 72;
 const TARGET_MARKER = "#f55c5c";
 const CHASER_MARKER = "#f5cd5c";
 const BUILD_ID = "sandbox-music-2026-06-19";
@@ -276,6 +273,8 @@ const presets = {
 
 const keys = new Set();
 const touch = new Set();
+const keyPulses = new Set();
+const touchPulses = new Set();
 
 const state = {
   mode: "selector",
@@ -566,12 +565,22 @@ function currentControls() {
 }
 
 function axisValue(plusKey, minusKey, plusTouch, minusTouch) {
-  const plus = keys.has(plusKey) || touch.has(plusTouch);
-  const minus = keys.has(minusKey) || touch.has(minusTouch);
+  const plus = keys.has(plusKey) || touch.has(plusTouch) || keyPulses.has(plusKey) || touchPulses.has(plusTouch);
+  const minus = keys.has(minusKey) || touch.has(minusTouch) || keyPulses.has(minusKey) || touchPulses.has(minusTouch);
   return Number(plus) - Number(minus);
 }
 
+function hasPendingControlPulse() {
+  return keyPulses.size > 0 || touchPulses.size > 0;
+}
+
+function clearControlPulses() {
+  keyPulses.clear();
+  touchPulses.clear();
+}
+
 function resetState(seed = presets.behind) {
+  clearControlPulses();
   state.sim = makeState(seed);
   state.trail = [samplePoint()];
   state.targetTrail = [];
@@ -596,6 +605,7 @@ function showLevelSelector(options = {}) {
   state.stepAccumulatorS = 0;
   keys.clear();
   touch.clear();
+  clearControlPulses();
   el.debriefPanel.classList.add("hidden");
   setLeaderboardFormVisible(false);
   el.shell.classList.add("selector-mode");
@@ -906,10 +916,10 @@ function arcadeHistoryToTrail(history, key = "relative_ric") {
   });
 }
 
-function arcadeStep() {
+function arcadeStep(ticks = 1) {
   if (!state.arcadeSession || !state.running || state.passed) return;
   state.arcadeSession.setControls(currentControls());
-  state.arcadeSession.step(1);
+  state.arcadeSession.step(Math.max(1, Math.floor(Number(ticks) || 1)));
   syncArcadeSnapshot();
   if (state.arcadeTransition) {
     showArcadeRoundTransition();
@@ -920,7 +930,9 @@ function arcadeStep() {
 
 function step(dt, forceRun = false) {
   if (state.mode === "arcade") {
-    arcadeStep();
+    const baseDtS = ARCADE_CHALLENGE_RECORD.config.dt_s;
+    const tickCount = Math.max(1, Math.round(Number(dt || baseDtS) / Math.max(Number(baseDtS || 1), 1.0e-9)));
+    arcadeStep(tickCount);
     return;
   }
   if ((!state.running && !forceRun) || state.passed) return;
@@ -997,9 +1009,9 @@ function simulationShouldRun() {
   return state.running || tutorialInputMatches();
 }
 
-function currentStepDtS() {
+function currentStepDtS(controls = currentControls()) {
   const baseDtS = state.mode === "arcade" ? ARCADE_CHALLENGE_RECORD.config.dt_s : FIXED_DT_S;
-  return gameTickDtS({ baseDtS, speedMultiple: currentSpeedMultiple() });
+  return gameTickDtS({ baseDtS, speedMultiple: effectiveSpeedMultiple(controls) });
 }
 
 function currentSpeedMultiple() {
@@ -1023,12 +1035,21 @@ function hasManeuverInput(controls = currentControls()) {
   return Math.hypot(controls.r, controls.i, controls.c) > 1.0e-9;
 }
 
-function applyManeuverSpeedLimit(controls = currentControls()) {
-  if (currentSpeedMultiple() <= MANEUVER_CONTROL_SPEED || !hasManeuverInput(controls)) return false;
-  state.speedIndex = speedOptionIndex(MANEUVER_CONTROL_SPEED);
-  state.stepAccumulatorS = 0;
-  updateMissionText();
-  return true;
+function effectiveSpeedMultiple(controls = currentControls()) {
+  if (currentSpeedMultiple() <= MANEUVER_CONTROL_SPEED || !hasManeuverInput(controls)) return currentSpeedMultiple();
+  return MANEUVER_CONTROL_SPEED;
+}
+
+function speedBadgeText(controls = currentControls()) {
+  const selected = currentSpeedMultiple();
+  const effective = effectiveSpeedMultiple(controls);
+  return effective === selected ? `${selected}x` : `${effective}x burn`;
+}
+
+function speedFooterText(controls = currentControls()) {
+  const selected = currentSpeedMultiple();
+  const effective = effectiveSpeedMultiple(controls);
+  return effective === selected ? `${selected.toFixed(0)}x` : `${effective.toFixed(0)}x Burn (${selected.toFixed(0)}x Coast)`;
 }
 
 function refreshInputState() {
@@ -1036,7 +1057,6 @@ function refreshInputState() {
     state.arcadeSession.setControls(currentControls());
     syncArcadeSnapshot();
   }
-  applyManeuverSpeedLimit();
   updateGhost();
   draw();
 }
@@ -1390,6 +1410,7 @@ function updateDebugState() {
     viewPreference: state.viewPreference,
     activeView: state.activeView,
     speedMultiple: currentSpeedMultiple(),
+    effectiveSpeedMultiple: effectiveSpeedMultiple(),
     cameraRuleMode: state.cameraRuleMode,
     musicSrc: music.currentSrc || music.src,
     analytics: {
@@ -1440,6 +1461,7 @@ function updateHud() {
     updateMissionText();
     return;
   }
+  const u = currentControls();
   const rangeText = formatDistanceKm(rangeKm());
   const speedText = formatSpeedKmS(relativeSpeedKmS());
   const arcadePlayerDvUsed = Number(state.arcadeSnapshot?.player_delta_v_m_s || state.sim.dv || 0);
@@ -1477,12 +1499,9 @@ function updateHud() {
   el.coachHint.textContent = currentCoachHint();
   el.commandLine.textContent = commandStatusLine();
   const spaceAction = state.mode === "arcade" ? "Space Start" : "Space Pause";
-  el.footerLine.textContent = `Speed ${SPEED_OPTIONS[state.speedIndex].toFixed(
-    0,
-  )}x  Up/Down Speed  ${spaceAction}  R Reset  Esc Level Select`;
-  el.speedMultiple.textContent = `${SPEED_OPTIONS[state.speedIndex]}x`;
+  el.footerLine.textContent = `Speed ${speedFooterText(u)}  Up/Down Speed  ${spaceAction}  R Reset  Esc Level Select`;
+  el.speedMultiple.textContent = speedBadgeText(u);
   syncMobileSpeedButtons();
-  const u = currentControls();
   el.rMeter.value = u.r;
   el.iMeter.value = u.i;
   el.cMeter.value = u.c;
@@ -1783,9 +1802,8 @@ function drawSatellite(ctx, point, role, label, labelOffsetX, labelOffsetY) {
 
 function satelliteMarkerSizePx(scalePxPerKm) {
   const rawPx = Math.abs(Number(scalePxPerKm || 0)) * SATELLITE_SPRITE_DIAMETER_KM;
-  if (!Number.isFinite(rawPx) || rawPx < SATELLITE_DOT_THRESHOLD_PX) return 0;
-  if (rawPx < SATELLITE_ICON_THRESHOLD_PX) return SATELLITE_ICON_SIZE_PX;
-  return Math.round(Math.max(SATELLITE_ICON_SIZE_PX, Math.min(rawPx, SATELLITE_MAX_SIZE_PX)));
+  if (!Number.isFinite(rawPx) || rawPx <= 0) return 0;
+  return Math.max(1, Math.round(rawPx));
 }
 
 function drawSpacecraftMarker(ctx, point, role, options = {}) {
@@ -2327,15 +2345,18 @@ function frame(nowMs) {
     return;
   }
   const controls = currentControls();
-  applyManeuverSpeedLimit(controls);
+  const pendingPulse = hasPendingControlPulse();
   const shouldRun = simulationShouldRun();
   if (shouldRun && !state.passed) {
-    state.stepAccumulatorS += elapsedS * currentSpeedMultiple();
+    state.stepAccumulatorS += elapsedS * effectiveSpeedMultiple(controls);
   } else {
     state.stepAccumulatorS = 0;
   }
   let steps = 0;
-  const stepDtS = currentStepDtS();
+  const stepDtS = currentStepDtS(controls);
+  if (shouldRun && pendingPulse && hasManeuverInput(controls) && state.stepAccumulatorS < stepDtS) {
+    state.stepAccumulatorS = stepDtS;
+  }
   while (state.stepAccumulatorS >= stepDtS && steps < MAX_STEPS_PER_FRAME) {
     step(stepDtS, shouldRun);
     state.stepAccumulatorS -= stepDtS;
@@ -2344,6 +2365,7 @@ function frame(nowMs) {
   if (steps >= MAX_STEPS_PER_FRAME) {
     state.stepAccumulatorS = 0;
   }
+  if (steps > 0 || pendingPulse) clearControlPulses();
   updateGhost();
   draw();
   queueFrame(frame);
@@ -2517,6 +2539,7 @@ function bindEvents() {
       maybeCompleteSpeedStage();
     } else {
       keys.add(key);
+      keyPulses.add(key);
       refreshInputState();
     }
     if (key === "arrowup" || key === "arrowdown" || key === " " || key === "r") refreshInputState();
@@ -2533,6 +2556,7 @@ function bindEvents() {
       event.preventDefault();
       playMusicFromGesture();
       touch.add(value);
+      touchPulses.add(value);
       refreshInputState();
     };
     const stop = () => {

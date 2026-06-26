@@ -3,6 +3,8 @@ scenario_description: Public 6000-second rendezvous demo that generates dashboar
   control, sensor, estimation, ground-track, access, and orbital-element plots.
 metadata:
   owner: public
+  public_surface: public-plotting
+  support_level: demonstration
   notes: Deterministic plotting demo for README and docs gallery artifacts.
 objects:
   rocket:

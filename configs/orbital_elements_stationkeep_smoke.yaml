@@ -1,6 +1,8 @@
 scenario_name: orbital_elements_stationkeep_smoke
 metadata:
-  owner: validation
+  owner: public
+  public_surface: public-validation
+  support_level: demonstration
   notes: Single-satellite COE stationkeeping smoke case with an initial orbit offset
     from the desired orbit.
 objects:

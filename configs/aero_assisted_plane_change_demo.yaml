@@ -2,7 +2,9 @@ scenario_name: aero_assisted_plane_change_demo
 scenario_description: 'Atmospheric pass demo: lift-axis steering creates cross-track
   authority before a prograde raise burn.'
 metadata:
-  owner: examples
+  owner: public
+  public_surface: public-config
+  support_level: demonstration
   tags:
   - aero_assist
   - atmospheric_pass

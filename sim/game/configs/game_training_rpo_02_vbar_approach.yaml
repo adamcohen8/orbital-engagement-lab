@@ -9,6 +9,25 @@ metadata:
     control_mode: ric_translation
     camera_mode: target_pair
     difficulty: easy
+    initial_speed_multiple: 10.0
+    speed_multiplier_options:
+    - 1.0
+    - 2.0
+    - 5.0
+    - 10.0
+    - 25.0
+    - 50.0
+    - 100.0
+    - 200.0
+    - 500.0
+    - 1000.0
+    speed_dt_s:
+      1.0: 0.1
+      10.0: 0.5
+      25.0: 1.0
+      50.0: 5.0
+      100.0: 10.0
+    two_rail_speed_control: true
     plot_overlays_in_zoom: false
     plot_overlays_in_zoom_by_plane:
       RC: true

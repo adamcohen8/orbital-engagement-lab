@@ -35,6 +35,12 @@ class KeyboardCommandState:
     open_debrief_requested: bool = False
     briefing_scroll_px: int = 0
     quit_requested: bool = False
+    speed_increase_held: bool = False
+    speed_decrease_held: bool = False
+    pitch_event_pulse: bool = False
+    yaw_event_pulse: bool = False
+    roll_event_pulse: bool = False
+    firing_event_pulse: bool = False
     use_timing_accumulator: bool = False
     pitch_sim_s: float = 0.0
     yaw_sim_s: float = 0.0
@@ -46,7 +52,24 @@ class KeyboardCommandState:
         self.yaw = 0.0
         self.roll = 0.0
         self.firing = False
+        self.speed_increase_held = False
+        self.speed_decrease_held = False
+        self.clear_event_pulses()
         self.clear_timed_input()
+
+    def clear_event_pulses(self) -> None:
+        if bool(self.pitch_event_pulse):
+            self.pitch = 0.0
+        if bool(self.yaw_event_pulse):
+            self.yaw = 0.0
+        if bool(self.roll_event_pulse):
+            self.roll = 0.0
+        if bool(self.firing_event_pulse):
+            self.firing = False
+        self.pitch_event_pulse = False
+        self.yaw_event_pulse = False
+        self.roll_event_pulse = False
+        self.firing_event_pulse = False
 
     def clear_timed_input(self) -> None:
         self.pitch_sim_s = 0.0
@@ -60,6 +83,7 @@ class KeyboardCommandState:
         *,
         speed_multiple: float,
         control_mode: str = "attitude_thrust",
+        max_pending_sim_s: float | None = None,
     ) -> None:
         if not bool(self.use_timing_accumulator):
             return
@@ -73,8 +97,16 @@ class KeyboardCommandState:
             self.pitch_sim_s += float(np.clip(self.pitch, -1.0, 1.0)) * elapsed_sim_s
             self.yaw_sim_s += float(np.clip(self.yaw, -1.0, 1.0)) * elapsed_sim_s
             self.roll_sim_s += float(np.clip(self.roll, -1.0, 1.0)) * elapsed_sim_s
+            cap = _positive_float_or_none(max_pending_sim_s)
+            if cap is not None:
+                self.pitch_sim_s = float(np.clip(self.pitch_sim_s, -cap, cap))
+                self.yaw_sim_s = float(np.clip(self.yaw_sim_s, -cap, cap))
+                self.roll_sim_s = float(np.clip(self.roll_sim_s, -cap, cap))
         elif bool(self.firing):
             self.firing_sim_s += elapsed_sim_s
+            cap = _positive_float_or_none(max_pending_sim_s)
+            if cap is not None:
+                self.firing_sim_s = min(max(float(self.firing_sim_s), 0.0), cap)
 
     def consume_ric_duty_cycle(self, dt_s: float) -> np.ndarray:
         if not bool(self.use_timing_accumulator):
@@ -204,6 +236,7 @@ class ManualGameCommandProvider:
                     "strategy": strategy,
                     "throttle": throttle,
                 },
+                "mission_bypass_orbital_command_latch": True,
                 "command_mode_flags": {
                     "player_controlled": True,
                     "player_control_mode": player_control_mode,
@@ -226,6 +259,7 @@ class ManualGameCommandProvider:
                 "throttle": throttle,
                 "firing_duty_cycle": firing_duty,
             },
+            "mission_bypass_orbital_command_latch": True,
             "command_mode_flags": {
                 "player_controlled": True,
                 "player_firing": bool(self.command_state.firing),
@@ -245,3 +279,15 @@ def _reference_state6(
     if ref is not None and getattr(ref, "state", np.array([])).size >= 6:
         return np.array(ref.state[:6], dtype=float)
     return None
+
+
+def _positive_float_or_none(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(result) or result <= 0.0:
+        return None
+    return result

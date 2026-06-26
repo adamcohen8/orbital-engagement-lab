@@ -1,62 +1,85 @@
-scenario_name: game_training_rpo_06_elliptic_burn_then_approach
-scenario_description: RPO trainer scenario for testing burns around an eccentric target
-  orbit, then completing a slow approach to a hold circle.
+scenario_name: game_training_rpo_08_elliptic_nmc
+scenario_description: RPO trainer scenario for entering a natural-motion circumnavigation
+  about an eccentric-orbit target.
 metadata:
   owner: codex
-  notes: Run with `python run_game.py sim/game/configs/game_training_rpo_06_elliptic_burn_then_approach.yaml
+  notes: Run with `python run_game.py sim/game/configs/game_training_rpo_08_elliptic_nmc.yaml
     --speed-multiple 10`.
   game:
-    level_name: Level 6 - Elliptical Approach
+    level_name: Level 8 - Elliptical NMC
     control_mode: ric_translation
     camera_mode: target_pair
     coast_prediction_model: tschauner_hempel
     target_centered_plot_planes:
     - RI
-    plot_prediction_in_zoom: true
-    plot_prediction_zoom_max_span_km: 8.0
-    difficulty: medium
+    plot_fixed_axis_half_span_km:
+      RI:
+      - 3.25
+      - 1.6
+    plot_overlays_in_zoom: true
+    difficulty: hard
+    initial_speed_multiple: 10.0
+    speed_multiplier_options:
+    - 1.0
+    - 2.0
+    - 5.0
+    - 10.0
+    - 25.0
+    - 50.0
+    - 100.0
+    - 200.0
+    - 500.0
+    - 1000.0
+    speed_dt_s:
+      1.0: 0.1
+      10.0: 0.5
+      25.0: 1.0
+      50.0: 5.0
+      100.0: 10.0
+    two_rail_speed_control: true
     player_max_accel_km_s2: 1.5e-05
     training:
       enabled: true
-      scenario_id: rpo_06_elliptic_burn_then_approach
-      learning_goal: Test radial and in-track burns around an eccentric-orbit target,
-        then use the elliptical coast predictor to complete a slow approach to the
-        hold circle.
-      player_brief: The target is not in a circular orbit. Watch the dashed prediction
-        bend as orbital rate changes. First test radial and in-track burns, then settle
-        into the green hold circle behind the target.
+      scenario_id: rpo_08_elliptic_nmc
+      learning_goal: Enter a bounded natural-motion circumnavigation around an eccentric-orbit
+        target and compare its changing local dynamics with the circular-orbit NMT
+        from Level 1.
+      player_brief: Shape the red trajectory into the green natural-motion circumnavigation.
+        Use the elliptical dashed coast projection to choose burn timing; the target's
+        orbital rate is changing, so do not force the circular-orbit rhythm. Make
+        the cross-track burn near the top or bottom of the RI ellipse.
       pass_criteria:
-      - Perform at least one radial burn.
-      - Perform at least one in-track burn.
-      - Enter the in-track hold circle behind the target.
-      - Keep relative speed below the goal threshold.
-      - Do not enter the 250 m keepout zone.
-      - Change the speed multiplier at least once.
+      - Match the target radial and cross-track NMC amplitudes within tolerance.
+      - Make the cross-track burn near the top or bottom of the RI ellipse.
+      - Satisfy the local passive drift relationship.
+      - Do not enter keepout.
       - Stay under the time and delta-v budgets.
       instructor_notes:
-      - This level intentionally combines play-and-observe familiarization with a
-        concrete terminal approach objective.
-      - The coast predictor uses a Tschauner-Hempel-style elliptical linear model
-        rather than the circular-orbit HCW projection.
-      - Ask students how the RI trace changes as the target orbital rate increases
-        away from apogee.
-      - The correct behavior is short prediction-informed pulses, long coasts, and
-        patient braking before the final hold circle.
+      - This level is the eccentric-orbit companion to Level 1's circular NMT objective.
+      - The green curve is still drawn as a local target-centered natural-motion shape,
+        but the dashed coast predictor uses the elliptical model.
+      - Ask students to explain why the same burn geometry does not feel identical
+        near different true anomalies.
       target_object_id: target
       chaser_object_id: chaser
       keepout_radius_km: 0.25
-      goal_relative_ric_km:
+      goal_nmt_center_ric_km:
       - 0.0
-      - -0.75
       - 0.0
-      goal_radius_km: 0.18
-      max_goal_speed_km_s: 0.00035
-      max_time_s: 9000.0
-      max_delta_v_m_s: 8.0
-      required_burn_axes:
-      - radial
-      - in_track
-      require_speed_multiplier_change: true
+      - 0.0
+      goal_nmt_radial_amplitude_km: 1.2
+      goal_nmt_cross_track_amplitude_km: 0.8
+      goal_nmt_cross_track_phase_deg: 90.0
+      goal_nmt_element_tolerance_km: 0.2
+      goal_nmt_velocity_tolerance_km_s: 0.0008
+      required_phase_burns:
+      - name: Cross-track phase burn
+        axis: cross_track
+        radial_abs_km: 1.2
+        radial_tolerance_km: 0.25
+        max_abs_intrack_km: 0.5
+      max_time_s: 10800.0
+      max_delta_v_m_s: 10.0
 objects:
   rocket:
     enabled: false
@@ -72,10 +95,10 @@ objects:
         frame: rect
         state:
         - 0.0
-        - -4.5
-        - 0.2
+        - -3.0
         - 0.0
-        - -0.0007
+        - 0.0
+        - -0.0001
         - 0.0
       attitude_quat_bn:
       - 1.0
@@ -133,7 +156,7 @@ objects:
         inc_deg: 45.0
         raan_deg: 0.0
         argp_deg: 0.0
-        true_anomaly_deg: 60.0
+        true_anomaly_deg: 140.0
       attitude_quat_bn:
       - 1.0
       - 0.0
@@ -176,7 +199,7 @@ objects:
         type: ekf
     kind: satellite
 simulator:
-  duration_s: 9000.0
+  duration_s: 10800.0
   dt_s: 1.0
   dynamics:
     orbit:
@@ -202,7 +225,7 @@ simulator:
     earth_impact_enabled: false
     earth_radius_km: 6378.137
 outputs:
-  output_dir: outputs/game_training_rpo_06
+  output_dir: outputs/game_training_rpo_08
   mode: save
   stats:
     enabled: true

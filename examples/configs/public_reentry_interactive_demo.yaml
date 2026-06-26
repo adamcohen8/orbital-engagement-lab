@@ -1,4 +1,8 @@
 scenario_name: public_reentry_interactive_demo
+metadata:
+  owner: public
+  public_surface: public-reentry
+  support_level: supported
 scenario_description: Interactive 10-day atmospheric re-entry diagnostics demo starting
   at the entry threshold.
 objects:

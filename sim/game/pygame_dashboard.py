@@ -21,6 +21,7 @@ from sim.game.training import (
     ApproachGateConfig,
     ForbiddenRegionConfig,
     InspectionGateConfig,
+    SunAngleConstraintConfig,
     relative_moon_ric_state_from_arrays,
     relative_ric_state_from_arrays,
 )
@@ -33,26 +34,26 @@ MIN_PLOT_SPAN_KM = 0.005
 MAX_TRAIL_DRAW_POINTS = 260
 MAX_TARGET_ORBIT_DRAW_POINTS = 1200
 MAX_GHOST_DRAW_POINTS = 120
+MAX_ACTIVE_CR3BP_GHOST_DRAW_POINTS = 60
 TEXT_CACHE_LIMIT = 512
 BRIEFING_LINE_HEIGHT_PX = 24
+MISSION_BANNER_LINE_HEIGHT_PX = 24
 SATELLITE_SPRITE_DIAMETER_KM = 0.006
-SATELLITE_DOT_THRESHOLD_PX = 4
-SATELLITE_ICON_THRESHOLD_PX = 18
 SATELLITE_ICON_SIZE_PX = 20
-SATELLITE_MAX_SIZE_PX = 72
 MOON_RADIUS_KM = 1737.4
 ELLIPTIC_PREDICTION_COAST_UPDATE_INTERVAL_S = 30.0
 ELLIPTIC_PREDICTION_BURN_UPDATE_INTERVAL_S = 0.0
 ELLIPTIC_REFERENCE_CACHE_POSITION_TOL_KM = 1.0e-3
 ELLIPTIC_REFERENCE_CACHE_VELOCITY_TOL_KM_S = 5.0e-6
 CR3BP_PREDICTION_COAST_UPDATE_INTERVAL_S = 30.0
-CR3BP_PREDICTION_BURN_UPDATE_INTERVAL_S = 5.0
+CR3BP_PREDICTION_BURN_UPDATE_INTERVAL_S = 0.0
 CR3BP_REFERENCE_CACHE_POSITION_TOL_KM = 1.0e-3
 CR3BP_REFERENCE_CACHE_VELOCITY_TOL_KM_S = 5.0e-6
 CR3BP_RELATIVE_CACHE_POSITION_TOL_KM = 1.0e-3
 CR3BP_RELATIVE_CACHE_VELOCITY_TOL_KM_S = 5.0e-6
 CR3BP_TARGET_ORBIT_INTERNAL_STEP_S = 120.0
 CR3BP_TARGET_ORBIT_MAX_POINTS = 2400
+PREDICTION_DENSE_POINT_FRACTION = 2.0 / 3.0
 GAME_ASSET_DIR = Path(__file__).resolve().parent / "assets"
 TARGET_SPRITE_PATH = GAME_ASSET_DIR / "rpo_target_sprite.png"
 CHASER_SPRITE_PATH = GAME_ASSET_DIR / "rpo_chaser_sprite.png"
@@ -60,6 +61,9 @@ TARGET_MARKER_COLOR = (245, 92, 92)
 CHASER_MARKER_COLOR = (245, 205, 92)
 TARGET_TRAIL_COLOR = (215, 86, 86)
 CHASER_TRAIL_COLOR = (245, 205, 92)
+VELOCITY_VECTOR_COLOR = (106, 155, 210)
+COAST_PREDICTION_COLOR = (135, 150, 172)
+LIVE_BURN_COLOR = (92, 220, 160)
 WEB_VECTOR_VREL_SCALE_PX_PER_KM_S = 75000.0
 WEB_VECTOR_THRUST_SCALE_PX = 42.0
 WEB_VECTOR_ARROW_HEAD_PX = 8.0
@@ -139,6 +143,29 @@ def _point_along_line(
     )
 
 
+def _front_loaded_prediction_times(
+    horizon_s: float,
+    dt_s: float,
+    *,
+    max_points: int,
+) -> np.ndarray:
+    horizon = float(max(horizon_s, 0.0))
+    dt = float(max(dt_s, 1.0e-6))
+    limit = max(int(max_points), 2)
+    dense_count = int(np.floor(horizon / dt)) + 1
+    if dense_count <= limit:
+        return np.linspace(0.0, horizon, max(dense_count, 2), dtype=float)
+
+    near_count = int(np.clip(round(float(limit) * PREDICTION_DENSE_POINT_FRACTION), 2, limit - 1))
+    near_horizon = min(horizon, dt * float(near_count - 1))
+    near = np.linspace(0.0, near_horizon, near_count, dtype=float)
+    far_count = limit - near_count
+    if far_count <= 0 or horizon <= near_horizon:
+        return near
+    far = np.linspace(near_horizon, horizon, far_count + 1, dtype=float)[1:]
+    return np.concatenate((near, far))
+
+
 def _game_asset_path_or_default(value: Path | str | None, default: Path) -> Path:
     if value is None:
         return default
@@ -181,7 +208,10 @@ class PygameRPODashboard:
     coast_prediction_model: str = "hcw"
     cr3bp_projection_mode: str = "nonlinear"
     cr3bp_coast_prediction_horizon_s: float = 21600.0
+    cr3bp_active_prediction_horizon_s: float | None = None
+    cr3bp_coast_prediction_horizon_mode: str = "default"
     cr3bp_coast_prediction_dt_s: float = 300.0
+    cr3bp_prediction_coast_update_interval_s: float = CR3BP_PREDICTION_COAST_UPDATE_INTERVAL_S
     target_coast_prediction_horizon_s: float | None = None
     target_coast_prediction_dt_s: float | None = None
     show_target_coast_prediction: bool = False
@@ -189,6 +219,7 @@ class PygameRPODashboard:
     forbidden_regions: tuple[ForbiddenRegionConfig, ...] = ()
     approach_gates: tuple[ApproachGateConfig, ...] = ()
     inspection_gates: tuple[InspectionGateConfig, ...] = ()
+    sun_angle_constraints: tuple[SunAngleConstraintConfig, ...] = ()
     plot_overlays_in_zoom: bool = True
     plot_overlays_in_zoom_by_plane: dict[str, bool] = field(default_factory=dict)
     plot_prediction_in_zoom: bool = False
@@ -211,12 +242,11 @@ class PygameRPODashboard:
     chaser_sprite_path: Path | str | None = None
     target_sprite_diameter_km: float = SATELLITE_SPRITE_DIAMETER_KM
     chaser_sprite_diameter_km: float = SATELLITE_SPRITE_DIAMETER_KM
-    target_sprite_max_size_px: int = SATELLITE_MAX_SIZE_PX
-    chaser_sprite_max_size_px: int = SATELLITE_MAX_SIZE_PX
     tutorial_target_path_ric: np.ndarray = field(default_factory=lambda: np.empty((0, 6), dtype=float))
     live_prediction_accel_ric_km_s2: np.ndarray = field(default_factory=lambda: np.zeros(3, dtype=float))
     live_prediction_elapsed_s: float = 0.0
     plot_view_modes: dict[str, str] = field(default_factory=dict)
+    mission_time_budget_s: float | None = None
 
     def __post_init__(self) -> None:
         try:
@@ -256,6 +286,7 @@ class PygameRPODashboard:
         self.target_orbit_reference_state_eci: np.ndarray | None = None
         self.target_true_anomaly_deg: float | None = None
         self.briefing_scroll_px = 0
+        self.mission_banner_scroll_px = 0
         self._frame_cache: dict[str, np.ndarray] = {}
         self._raw_frame_cache: dict[str, Any] = {}
         self._frame_cache_dirty = True
@@ -264,6 +295,7 @@ class PygameRPODashboard:
         self._render_speed_multiple = 1.0
         self._prediction_cache: dict[str, dict[str, Any]] = {}
         self._briefing_layout_cache: dict[str, Any] = {}
+        self._mission_banner_layout_cache: dict[str, Any] = {}
         self._text_cache: dict[tuple[int, str, tuple[int, int, int]], Any] = {}
         target_sprite_path = _game_asset_path_or_default(self.target_sprite_path, TARGET_SPRITE_PATH)
         chaser_sprite_path = _game_asset_path_or_default(self.chaser_sprite_path, CHASER_SPRITE_PATH)
@@ -319,6 +351,8 @@ class PygameRPODashboard:
         self._render_motion_enabled = False
         self._prediction_cache = {}
         self.briefing_scroll_px = 0
+        self.mission_banner_scroll_px = 0
+        self._mission_banner_layout_cache = {}
         self.tutorial_target_path_ric = np.empty((0, 6), dtype=float)
         self.live_prediction_accel_ric_km_s2 = np.zeros(3, dtype=float)
         self.live_prediction_elapsed_s = 0.0
@@ -331,7 +365,13 @@ class PygameRPODashboard:
         if not np.isfinite(elapsed):
             elapsed = 0.0
         previous_accel = np.array(getattr(self, "live_prediction_accel_ric_km_s2", np.zeros(3)), dtype=float).reshape(3)
-        if not np.allclose(previous_accel, accel, rtol=0.0, atol=1.0e-14):
+        previous_elapsed = float(getattr(self, "live_prediction_elapsed_s", 0.0))
+        if not np.allclose(previous_accel, accel, rtol=0.0, atol=1.0e-14) or not np.isclose(
+            previous_elapsed,
+            elapsed,
+            rtol=0.0,
+            atol=1.0e-9,
+        ):
             self._frame_cache_dirty = True
         self.live_prediction_accel_ric_km_s2 = accel
         self.live_prediction_elapsed_s = elapsed
@@ -359,18 +399,16 @@ class PygameRPODashboard:
             color = TARGET_MARKER_COLOR
             cache_key = "target"
             diameter_km = float(getattr(self, "target_sprite_diameter_km", SATELLITE_SPRITE_DIAMETER_KM))
-            max_size_px = int(getattr(self, "target_sprite_max_size_px", SATELLITE_MAX_SIZE_PX))
         else:
             sprite = getattr(self, "_chaser_sprite", None)
             color = CHASER_MARKER_COLOR
             cache_key = "chaser"
             diameter_km = float(getattr(self, "chaser_sprite_diameter_km", SATELLITE_SPRITE_DIAMETER_KM))
-            max_size_px = int(getattr(self, "chaser_sprite_max_size_px", SATELLITE_MAX_SIZE_PX))
 
         sprite_size = (
             SATELLITE_ICON_SIZE_PX
             if force_icon
-            else _satellite_marker_size_px(scale_x, scale_y, diameter_km=diameter_km, max_size_px=max_size_px)
+            else _satellite_marker_size_px(scale_x, scale_y, diameter_km=diameter_km)
         )
         if sprite is None or sprite_size <= 0:
             pygame.draw.circle(self.screen, color, center, int(fallback_radius_px))
@@ -394,6 +432,12 @@ class PygameRPODashboard:
 
     def scroll_briefing(self, delta_px: int) -> None:
         self.briefing_scroll_px = max(0, int(self.briefing_scroll_px) + int(delta_px))
+
+    def reset_mission_banner_scroll(self) -> None:
+        self.mission_banner_scroll_px = 0
+
+    def scroll_mission_banner(self, delta_px: int) -> None:
+        self.mission_banner_scroll_px = max(0, int(self.mission_banner_scroll_px) + int(delta_px))
 
     def push_snapshot(self, snapshot: SimulationSnapshot) -> None:
         target = snapshot.truth.get(self.target_object_id)
@@ -528,6 +572,8 @@ class PygameRPODashboard:
             width=3,
             max_rows=int(max(self.max_history, 2)),
         )
+        if frame_key == "moon_ric" and self._uses_cr3bp_prediction_model():
+            self._prepare_cr3bp_target_orbit_prediction()
         self._frame_cache_dirty = True
 
     def draw(
@@ -540,6 +586,7 @@ class PygameRPODashboard:
         mission_metrics: tuple[str, ...] = (),
         objective_checklist: tuple[str, ...] = (),
         speed_multiple: float = 1.0,
+        selected_speed_multiple: float | None = None,
         recording_status: str = "",
         briefing_lines: tuple[str, ...] = (),
         debrief_lines: tuple[str, ...] = (),
@@ -575,6 +622,7 @@ class PygameRPODashboard:
             command_status=command_status,
             coach_hint=coach_hint,
             speed_multiple=speed_multiple,
+            selected_speed_multiple=selected_speed_multiple,
             recording_status=recording_status,
         )
         if briefing_lines:
@@ -899,6 +947,8 @@ class PygameRPODashboard:
                 width=6,
             )
         target_current = target_rel[-1, :3] if target_rel.size else np.zeros(3, dtype=float)
+        target_state_for_sun = self._current_target_state_eci_for_sun()
+        current_time_s = self._current_time_s()
         target_reference_current = (
             target_reference_rel[-1, :3] if target_reference_rel.size else np.zeros(3, dtype=float)
         )
@@ -990,6 +1040,15 @@ class PygameRPODashboard:
             scale_y=scale_y,
         )
         self._draw_grid(plot, scale_x=scale_x, scale_y=scale_y)
+        self._draw_sun_angle_constraints(
+            plot,
+            x_axis=x_axis,
+            y_axis=y_axis,
+            to_px=to_px,
+            offset=target_current,
+            target_state_eci=target_state_for_sun,
+            time_s=current_time_s,
+        )
         self._draw_forbidden_regions(plot, x_axis=x_axis, y_axis=y_axis, to_px=to_px, offset=target_current)
         self._draw_inspection_gates(plot, x_axis=x_axis, y_axis=y_axis, to_px=to_px, offset=target_current)
         self._draw_approach_gates(plot, x_axis=x_axis, y_axis=y_axis, to_px=to_px, offset=target_current)
@@ -1051,7 +1110,7 @@ class PygameRPODashboard:
         target_ghost_sample = self._frame_cache.get("target_ghost_sample", target_ghost)
         if bool(getattr(self, "show_target_coast_prediction", False)) and target_ghost_sample.size:
             target_ghost_pts = rows_to_px(target_ghost_sample)
-            self._draw_polyline_dashed(target_ghost_pts, color=(135, 150, 172), dash_px=10, gap_px=7, width=2)
+            self._draw_polyline_dashed(target_ghost_pts, color=COAST_PREDICTION_COLOR, dash_px=10, gap_px=7, width=2)
         target_trail_rows = self._frame_cache.get("target_trail", target_rel[-self.max_history :])
         if target_trail_rows.size and len(target_trail_rows) >= 2:
             target_trail = rows_to_px(target_trail_rows)
@@ -1063,7 +1122,12 @@ class PygameRPODashboard:
         ghost_sample = self._frame_cache.get("ghost_sample", ghost)
         if ghost_sample.size:
             ghost_pts = rows_to_px(ghost_sample)
-            self._draw_polyline_dashed(ghost_pts, color=(135, 150, 172), dash_px=8, gap_px=8, width=2)
+            ghost_color = (
+                LIVE_BURN_COLOR
+                if bool(self._frame_cache.get("ghost_active_burn", False))
+                else COAST_PREDICTION_COLOR
+            )
+            self._draw_polyline_dashed(ghost_pts, color=ghost_color, dash_px=8, gap_px=8, width=2)
         if len(trail) >= 2:
             pygame.draw.lines(self.screen, CHASER_TRAIL_COLOR, False, trail, width=2)
         self._draw_burn_markers(rel=rel, to_px=to_px, marker_rows=self._frame_cache.get("burn_marker_rel"))
@@ -1078,7 +1142,7 @@ class PygameRPODashboard:
 
         if rel.shape[1] >= 6:
             v_px = self._web_velocity_vector_px(rel[-1], x_axis=x_axis, y_axis=y_axis)
-            self._draw_vector(to_px(rel[-1]), v_px, color=CHASER_MARKER_COLOR, scale=1.0)
+            self._draw_vector(to_px(rel[-1]), v_px, color=VELOCITY_VECTOR_COLOR, scale=1.0)
         live_accel_ric = np.array(
             getattr(self, "live_prediction_accel_ric_km_s2", np.zeros(3, dtype=float)), dtype=float
         ).reshape(3)
@@ -1093,15 +1157,7 @@ class PygameRPODashboard:
             controlled_id = str(getattr(self, "controlled_object_id", "") or "")
             target_id = str(getattr(self, "target_object_id", "target") or "target")
             origin = target_px if controlled_id == target_id else chaser
-            self._draw_vector(origin, thrust_vec, color=(92, 220, 160), scale=1.0)
-        elif self.thrust_ric_hist:
-            thrust_vec = self._web_thrust_vector_px(
-                self.thrust_ric_hist[-1],
-                x_axis=x_axis,
-                y_axis=y_axis,
-                threshold=threshold,
-            )
-            self._draw_vector(chaser, thrust_vec, color=(92, 220, 160), scale=1.0)
+            self._draw_vector(origin, thrust_vec, color=LIVE_BURN_COLOR, scale=1.0)
         self.screen.set_clip(previous_clip)
 
         xlbl = self._axis_label_for_plot(int(x_axis))
@@ -1148,7 +1204,7 @@ class PygameRPODashboard:
             return
         target_orbit_xy = np.empty((0, 2), dtype=float)
         if frame_key == "moon_ric":
-            target_orbit = self._cr3bp_target_orbit_prediction()
+            target_orbit = self._cr3bp_target_orbit_prediction(allow_build=False)
             if target_orbit.size:
                 target_orbit_centered = np.array(target_orbit, dtype=float).reshape(-1, 6) - center_state
                 target_orbit_xy = _project_moon_rotating_yz_to_plane(target_orbit_centered[:, :3])
@@ -1227,7 +1283,17 @@ class PygameRPODashboard:
         self._text(y_label, (plot.centerx + 8, plot.top + 8), self.small_font, (170, 180, 195))
         self._text(panel_label, (plot.x + 14, plot.bottom - 24), self.small_font, (150, 160, 176))
 
-    def _cr3bp_target_orbit_prediction(self) -> np.ndarray:
+    def _prepare_cr3bp_target_orbit_prediction(self) -> None:
+        if _relative_frame_key(getattr(self, "relative_frame", "ric")) != "moon_ric":
+            return
+        if not self._uses_cr3bp_prediction_model():
+            return
+        prediction_cache = getattr(self, "_prediction_cache", {})
+        if "target_absolute_cr3bp_orbit" in prediction_cache:
+            return
+        self._cr3bp_target_orbit_prediction(allow_build=True)
+
+    def _cr3bp_target_orbit_prediction(self, *, allow_build: bool = True) -> np.ndarray:
         if _relative_frame_key(getattr(self, "relative_frame", "ric")) != "moon_ric":
             return np.empty((0, 6), dtype=float)
         if not self._uses_cr3bp_prediction_model():
@@ -1269,6 +1335,8 @@ class PygameRPODashboard:
                 prediction = cached.get("prediction")
                 if prediction is not None:
                     return np.array(prediction, dtype=float)
+        if not bool(allow_build):
+            return np.empty((0, 6), dtype=float)
 
         state = reference.copy()
         rows: list[np.ndarray] = []
@@ -1315,6 +1383,20 @@ class PygameRPODashboard:
         reference = np.array(reference, dtype=float).reshape(6).copy()
         self.target_orbit_reference_state_eci = reference.copy()
         return reference
+
+    def _current_target_state_eci_for_sun(self) -> np.ndarray | None:
+        target_eci = _dashboard_history_array(
+            self,
+            "_target_eci_array",
+            getattr(self, "target_eci_hist", ()),
+            width=6,
+        )
+        if target_eci.size:
+            return np.array(target_eci[-1], dtype=float).reshape(6).copy()
+        reference = self._reference_cache_state()
+        if reference is None:
+            return None
+        return np.array(reference, dtype=float).reshape(6).copy()
 
     @staticmethod
     def _eci_target_plane_basis(target_state_eci: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
@@ -1482,14 +1564,10 @@ class PygameRPODashboard:
         rel = self._visual_state_rows(raw_rel)
         target_rel = self._visual_state_rows(raw_target_rel)
         target_reference_rel = self._visual_state_rows(raw_target_reference_rel)
-        latest_thrust = self.thrust_ric_hist[-1] if self.thrust_ric_hist else np.zeros(3, dtype=float)
         live_accel = np.array(getattr(self, "live_prediction_accel_ric_km_s2", np.zeros(3)), dtype=float).reshape(3)
-        active_burn = bool(
-            np.linalg.norm(latest_thrust) > float(self.burn_marker_threshold_km_s2)
-            or np.linalg.norm(live_accel) > float(self.burn_marker_threshold_km_s2)
-        )
+        active_burn = bool(np.linalg.norm(live_accel) > float(self.burn_marker_threshold_km_s2))
         target_ghost = np.array(raw_cache.get("target_ghost", np.empty((0, 6))), dtype=float)
-        ghost_seed = self._live_prediction_seed(rel[-1])
+        ghost_seed = self._live_prediction_seed(raw_rel[-1])
         ghost = self._coast_prediction_from_cached("chaser", ghost_seed, active_burn=active_burn)
         burn_marker_rel = self._burn_marker_rows(rel=rel, thrust=thrust)
         self._frame_cache = {
@@ -1499,6 +1577,7 @@ class PygameRPODashboard:
             "thrust": thrust,
             "ghost": ghost,
             "ghost_sample": _sample_rows(ghost, MAX_GHOST_DRAW_POINTS),
+            "ghost_active_burn": active_burn,
             "target_ghost": target_ghost,
             "target_ghost_sample": _sample_rows(target_ghost, MAX_GHOST_DRAW_POINTS),
             "rel_trail": _sample_rows(rel[-self.max_history :], MAX_TRAIL_DRAW_POINTS),
@@ -1552,6 +1631,7 @@ class PygameRPODashboard:
                 and np.all(np.isfinite(accel))
                 and float(np.linalg.norm(accel)) > float(self.burn_marker_threshold_km_s2)
             ):
+                seed[:3] += seed[3:6] * elapsed + 0.5 * accel * elapsed * elapsed
                 seed[3:6] += accel * elapsed
             return seed
         n = getattr(self, "mean_motion_rad_s", None)
@@ -1617,6 +1697,76 @@ class PygameRPODashboard:
             )
         ]
 
+    def _sun_angle_projection_points(
+        self, *, x_axis: int, y_axis: int, offset: np.ndarray
+    ) -> list[np.ndarray]:
+        constraints = tuple(getattr(self, "sun_angle_constraints", ()) or ())
+        if not constraints:
+            return []
+        pts: list[np.ndarray] = []
+        target_state_eci = self._current_target_state_eci_for_sun()
+        time_s = self._current_time_s()
+        for constraint in constraints:
+            polygon = _sun_angle_sector_polygon_ric(
+                constraint,
+                x_axis=x_axis,
+                y_axis=y_axis,
+                target_state_eci=target_state_eci,
+                time_s=time_s,
+            )
+            if polygon.size:
+                polygon = polygon.copy()
+                polygon[:, :3] += np.array(offset, dtype=float).reshape(1, 3)
+                pts.append(polygon[:, [x_axis, y_axis]])
+        return pts
+
+    def _draw_sun_angle_constraints(
+        self,
+        plot: Any,
+        *,
+        x_axis: int,
+        y_axis: int,
+        to_px: Any,
+        offset: np.ndarray,
+        target_state_eci: np.ndarray | None = None,
+        time_s: float | None = None,
+    ) -> None:
+        constraints = tuple(getattr(self, "sun_angle_constraints", ()) or ())
+        if not constraints:
+            return
+        pygame = self.pygame
+        for constraint in constraints:
+            if not _constraint_visible_on_plane(constraint, x_axis=x_axis, y_axis=y_axis):
+                continue
+            polygon = _sun_angle_sector_polygon_ric(
+                constraint,
+                x_axis=x_axis,
+                y_axis=y_axis,
+                target_state_eci=target_state_eci,
+                time_s=time_s,
+            )
+            if not polygon.size:
+                continue
+            polygon = polygon.copy()
+            polygon[:, :3] += np.array(offset, dtype=float).reshape(1, 3)
+            points = [to_px(row) for row in polygon]
+            if len(points) >= 3:
+                self._draw_translucent_polygon(plot, points, color=(235, 188, 74, 46))
+                pygame.draw.lines(self.screen, (247, 207, 101), True, points, width=1)
+            centerline = _sun_angle_centerline_points_ric(
+                constraint,
+                x_axis=x_axis,
+                y_axis=y_axis,
+                target_state_eci=target_state_eci,
+                time_s=time_s,
+            )
+            if centerline.size:
+                centerline = centerline.copy()
+                centerline[:, :3] += np.array(offset, dtype=float).reshape(1, 3)
+                line = [to_px(row) for row in centerline]
+                if len(line) >= 2:
+                    pygame.draw.line(self.screen, (255, 231, 153), line[0], line[1], width=2)
+
     def _forbidden_region_projection_points(
         self, *, x_axis: int, y_axis: int, offset: np.ndarray
     ) -> list[np.ndarray]:
@@ -1633,6 +1783,13 @@ class PygameRPODashboard:
                 continue
             if region.kind == "cylinder":
                 polygon = _cylinder_projection_polygon_ric(region, x_axis=x_axis, y_axis=y_axis)
+                if polygon.size:
+                    polygon = polygon.copy()
+                    polygon[:, :3] += np.array(offset, dtype=float).reshape(1, 3)
+                    pts.append(polygon[:, [x_axis, y_axis]])
+                continue
+            if region.kind == "sphere":
+                polygon = _sphere_projection_polygon_ric(region, x_axis=x_axis, y_axis=y_axis)
                 if polygon.size:
                     polygon = polygon.copy()
                     polygon[:, :3] += np.array(offset, dtype=float).reshape(1, 3)
@@ -1675,6 +1832,17 @@ class PygameRPODashboard:
                 continue
             if region.kind == "cylinder":
                 polygon = _cylinder_projection_polygon_ric(region, x_axis=x_axis, y_axis=y_axis)
+                if not polygon.size:
+                    continue
+                polygon = polygon.copy()
+                polygon[:, :3] += np.array(offset, dtype=float).reshape(1, 3)
+                points = [to_px(row) for row in polygon]
+                if len(points) >= 3:
+                    self._draw_translucent_polygon(plot, points, color=(168, 44, 54, 58))
+                    pygame.draw.lines(self.screen, (230, 80, 92), True, points, width=1)
+                continue
+            if region.kind == "sphere":
+                polygon = _sphere_projection_polygon_ric(region, x_axis=x_axis, y_axis=y_axis)
                 if not polygon.size:
                     continue
                 polygon = polygon.copy()
@@ -1809,6 +1977,7 @@ class PygameRPODashboard:
         command_status: str,
         coach_hint: str,
         speed_multiple: float,
+        selected_speed_multiple: float | None = None,
         recording_status: str = "",
     ) -> None:
         pygame = self.pygame
@@ -1852,7 +2021,13 @@ class PygameRPODashboard:
             self.small_font,
             (255, 190, 198) if hint_is_alert else (245, 210, 110),
         )
-        footer = f"Speed {float(speed_multiple):.0f}x  Up/Down Speed  Space Pause  R Reset  Esc Level Select"
+        selected_speed = None if selected_speed_multiple is None else float(selected_speed_multiple)
+        active_speed = float(speed_multiple)
+        if selected_speed is not None and not np.isclose(selected_speed, active_speed):
+            speed_label = f"Active {active_speed:.0f}x  Coast {selected_speed:.0f}x"
+        else:
+            speed_label = f"Speed {active_speed:.0f}x"
+        footer = f"{speed_label}  Up/Down Speed  Space Pause  R Reset  Esc Level Select"
         footer_text = self._fit_text_px(
             footer,
             self.small_font,
@@ -2023,7 +2198,7 @@ class PygameRPODashboard:
         *,
         debrief_lines: tuple[str, ...] = (),
         debrief_available: bool = True,
-    ) -> None:
+        ) -> None:
         pygame = self.pygame
         width, height = self.screen.get_size()
         rect = pygame.Rect(width // 2 - 360, height // 2 - 190, 720, 380)
@@ -2031,33 +2206,92 @@ class PygameRPODashboard:
             fill = (24, 86, 48)
             stroke = (108, 232, 142)
             text = "MISSION PASSED"
-            sub = (
-                "Press D to Open Debrief. Press R To Replay Or Esc To Quit"
+            base_sub = (
+                "D Debrief  R Replay  Esc Quit"
                 if debrief_available
-                else "Press R To Replay Or Esc To Quit"
+                else "R Replay  Esc Quit"
             )
             color = (210, 255, 220)
         else:
             fill = (90, 30, 36)
             stroke = (244, 102, 102)
             text = "MISSION FAILED"
-            sub = (
-                "Press D to Open Debrief. Press R To Retry Or Esc To Quit"
+            base_sub = (
+                "D Debrief  R Retry  Esc Quit"
                 if debrief_available
-                else "Press R To Retry Or Esc To Quit"
+                else "R Retry  Esc Quit"
             )
             color = (255, 220, 220)
         pygame.draw.rect(self.screen, fill, rect, border_radius=10)
         pygame.draw.rect(self.screen, stroke, rect, width=3, border_radius=10)
         title = self.large_font.render(text, True, color)
         self.screen.blit(title, (rect.centerx - title.get_width() // 2, rect.y + 22))
-        y = rect.y + 74
-        for line in debrief_lines[:12]:
-            surf = self.font.render(str(line), True, color)
-            self.screen.blit(surf, (rect.x + 36, y))
-            y += 24
+        content_rect = pygame.Rect(rect.x + 36, rect.y + 70, rect.width - 78, rect.height - 136)
+        body_lines = self._mission_banner_body_lines(debrief_lines, content_rect.width)
+        content_height = len(body_lines) * MISSION_BANNER_LINE_HEIGHT_PX
+        max_scroll = max(content_height - content_rect.height, 0)
+        self.mission_banner_scroll_px = min(max(int(getattr(self, "mission_banner_scroll_px", 0)), 0), max_scroll)
+
+        previous_clip = self.screen.get_clip()
+        self.screen.set_clip(content_rect)
+        y = content_rect.y - self.mission_banner_scroll_px
+        for line in body_lines:
+            if y + MISSION_BANNER_LINE_HEIGHT_PX >= content_rect.y and y <= content_rect.bottom:
+                self._text(str(line), (content_rect.x, y), self.font, color)
+            y += MISSION_BANNER_LINE_HEIGHT_PX
+        self.screen.set_clip(previous_clip)
+
+        if max_scroll > 0:
+            self._draw_mission_banner_scrollbar(rect, content_rect, max_scroll)
+        sub = self._fit_text_px(
+            self._mission_banner_footer_text(base_sub, max_scroll > 0),
+            self.font,
+            rect.width - 72,
+            preserve_spaces=True,
+        )
         subtitle = self.font.render(sub, True, color)
         self.screen.blit(subtitle, (rect.centerx - subtitle.get_width() // 2, rect.bottom - 42))
+
+    def _mission_banner_body_lines(self, lines: tuple[str, ...], width_px: int) -> list[str]:
+        cache_key = (tuple(str(line) for line in lines), int(width_px), id(self.font))
+        layout_cache = getattr(self, "_mission_banner_layout_cache", {})
+        if layout_cache.get("key") == cache_key:
+            return list(layout_cache.get("lines", [""]))
+        wrapped: list[str] = []
+        for raw in lines:
+            wrapped.extend(self._wrap_mission_banner_line(str(raw), width_px))
+        body = wrapped or [""]
+        self._mission_banner_layout_cache = {"key": cache_key, "lines": tuple(body)}
+        return list(body)
+
+    def _wrap_mission_banner_line(self, value: str, width_px: int) -> list[str]:
+        text = str(value or "")
+        if self._text_width(self.font, text) <= width_px:
+            return [text]
+        label_width_chars = 14
+        if len(text) > label_width_chars and text[:label_width_chars].strip():
+            label = text[:label_width_chars]
+            body = text[label_width_chars:].strip()
+            body_width = max(width_px - self._text_width(self.font, label), 80)
+            wrapped_body = self._wrap_text_px(body, self.font, body_width)
+            if wrapped_body:
+                return [label + wrapped_body[0], *(" " * label_width_chars + line for line in wrapped_body[1:])]
+        return self._wrap_text_px(text, self.font, width_px)
+
+    def _draw_mission_banner_scrollbar(self, rect: Any, content_rect: Any, max_scroll: int) -> None:
+        pygame = self.pygame
+        track = pygame.Rect(rect.right - 28, content_rect.y, 5, content_rect.height)
+        pygame.draw.rect(self.screen, (112, 50, 56), track, border_radius=3)
+        thumb_h = max(int(track.height * content_rect.height / (content_rect.height + max_scroll)), 28)
+        thumb_y = track.y + int((track.height - thumb_h) * (self.mission_banner_scroll_px / max_scroll))
+        thumb = pygame.Rect(track.x, thumb_y, track.width, thumb_h)
+        pygame.draw.rect(self.screen, (255, 172, 172), thumb, border_radius=3)
+
+    @staticmethod
+    def _mission_banner_footer_text(base_text: str, scrollable: bool) -> str:
+        if scrollable:
+            return "Scroll/Page  " + str(base_text)
+        return str(base_text)
 
     def _draw_vector(
         self,
@@ -2231,8 +2465,8 @@ class PygameRPODashboard:
     def _coast_prediction(self) -> np.ndarray:
         if not self.rel_hist:
             return np.empty((0, 6), dtype=float)
-        latest_thrust = self.thrust_ric_hist[-1] if self.thrust_ric_hist else np.zeros(3, dtype=float)
-        active_burn = bool(np.linalg.norm(latest_thrust) > float(self.burn_marker_threshold_km_s2))
+        live_accel = np.array(getattr(self, "live_prediction_accel_ric_km_s2", np.zeros(3)), dtype=float).reshape(3)
+        active_burn = bool(np.linalg.norm(live_accel) > float(self.burn_marker_threshold_km_s2))
         return self._coast_prediction_from_cached(
             "chaser",
             np.array(self.rel_hist[-1], dtype=float).reshape(6),
@@ -2263,7 +2497,10 @@ class PygameRPODashboard:
             interval_s = (
                 CR3BP_PREDICTION_BURN_UPDATE_INTERVAL_S
                 if bool(active_burn)
-                else CR3BP_PREDICTION_COAST_UPDATE_INTERVAL_S
+                else (
+                    _positive_float_or_none(getattr(self, "cr3bp_prediction_coast_update_interval_s", None))
+                    or CR3BP_PREDICTION_COAST_UPDATE_INTERVAL_S
+                )
             )
             now_s = self._current_time_s()
             reference = self._reference_cache_state()
@@ -2280,7 +2517,15 @@ class PygameRPODashboard:
                     if prediction is not None:
                         return np.array(prediction, dtype=float)
 
-            prediction = self._coast_prediction_from(rel0)
+            prediction = self._coast_prediction_from(
+                rel0,
+                cr3bp_horizon_s=(
+                    _positive_float_or_none(getattr(self, "cr3bp_active_prediction_horizon_s", None))
+                    if bool(active_burn)
+                    else None
+                ),
+                max_draw_points=MAX_ACTIVE_CR3BP_GHOST_DRAW_POINTS if bool(active_burn) else None,
+            )
             prediction_cache[str(cache_name)] = {
                 "time_s": now_s,
                 "rel0": rel0.copy(),
@@ -2355,11 +2600,82 @@ class PygameRPODashboard:
     def _current_time_s(self) -> float:
         return float(self.t_s[-1]) if self.t_s else 0.0
 
+    def _mission_time_remaining_s(self) -> float | None:
+        budget = _positive_float_or_none(getattr(self, "mission_time_budget_s", None))
+        if budget is None:
+            return None
+        start_s = float(self.t_s[0]) if self.t_s else 0.0
+        elapsed_s = max(self._current_time_s() - start_s, 0.0)
+        return max(float(budget) - elapsed_s, 0.0)
+
     def _reference_cache_state(self) -> np.ndarray | None:
         reference_state = getattr(self, "reference_state_eci", None)
         if reference_state is None:
             return None
         return np.array(reference_state, dtype=float).reshape(6).copy()
+
+    def _linearized_cr3bp_moon_ric_coast_prediction_cached(
+        self,
+        rel0: np.ndarray,
+        *,
+        target_state: np.ndarray,
+        times: np.ndarray,
+        current_t_s: float,
+    ) -> np.ndarray:
+        prediction_cache = getattr(self, "_prediction_cache", {})
+        self._prediction_cache = prediction_cache
+        cache_key = "_linearized_cr3bp_moon_ric_stm_table"
+        target = np.array(target_state, dtype=float).reshape(6)
+        time_grid = np.array(times, dtype=float).reshape(-1)
+        cached = prediction_cache.get(cache_key)
+        references: np.ndarray | None = None
+        stms: np.ndarray | None = None
+        basis_axes: np.ndarray | None = None
+        basis_omega: np.ndarray | None = None
+        if isinstance(cached, dict):
+            cached_times = np.array(cached.get("times", np.empty(0)), dtype=float).reshape(-1)
+            if (
+                cached_times.shape == time_grid.shape
+                and np.allclose(cached_times, time_grid, rtol=0.0, atol=1.0e-9)
+                and _cr3bp_reference_cache_valid(cached.get("target_state"), target)
+            ):
+                references = np.array(cached.get("references", np.empty((0, 6))), dtype=float)
+                stms = np.array(cached.get("stms", np.empty((0, 6, 6))), dtype=float)
+                basis_axes = np.array(cached.get("basis_axes", np.empty((0, 3, 3))), dtype=float)
+                basis_omega = np.array(cached.get("basis_omega", np.empty((0, 3))), dtype=float)
+        if references is None or stms is None or references.shape[0] != time_grid.size or stms.shape[0] != time_grid.size:
+            references, stms = _linearized_cr3bp_moon_ric_stm_table(
+                target_state=target,
+                times=time_grid,
+                current_t_s=float(current_t_s),
+            )
+            basis_axes, basis_omega = _moon_ric_basis_rows(references)
+            prediction_cache[cache_key] = {
+                "target_state": target.copy(),
+                "times": time_grid.copy(),
+                "references": references,
+                "stms": stms,
+                "basis_axes": basis_axes,
+                "basis_omega": basis_omega,
+            }
+        elif (
+            basis_axes is None
+            or basis_omega is None
+            or basis_axes.shape != (time_grid.size, 3, 3)
+            or basis_omega.shape != (time_grid.size, 3)
+        ):
+            basis_axes, basis_omega = _moon_ric_basis_rows(references)
+            if isinstance(cached, dict):
+                cached["basis_axes"] = basis_axes
+                cached["basis_omega"] = basis_omega
+        return _linearized_cr3bp_moon_ric_projection_from_stm_table(
+            rel0,
+            target_state=target,
+            references=references,
+            stms=stms,
+            basis_axes=basis_axes,
+            basis_omega=basis_omega,
+        )
 
     def _capped_projection_points_for_zoom(
         self,
@@ -2387,6 +2703,7 @@ class PygameRPODashboard:
         *,
         cr3bp_horizon_s: float | None = None,
         cr3bp_dt_s: float | None = None,
+        max_draw_points: int | None = None,
     ) -> np.ndarray:
         rel0 = np.array(rel0, dtype=float).reshape(6)
         n = self.mean_motion_rad_s
@@ -2399,8 +2716,21 @@ class PygameRPODashboard:
             cr3bp_horizon = _positive_float_or_none(cr3bp_horizon_s)
             if cr3bp_horizon is None:
                 cr3bp_horizon = _positive_float_or_none(getattr(self, "cr3bp_coast_prediction_horizon_s", None))
-            if cr3bp_horizon is not None:
-                horizon = min(float(horizon), float(cr3bp_horizon))
+            horizon_mode = _cr3bp_coast_prediction_horizon_mode_key(
+                getattr(self, "cr3bp_coast_prediction_horizon_mode", "default")
+            )
+            if horizon_mode == "time_remaining":
+                remaining_horizon = self._mission_time_remaining_s()
+                if remaining_horizon is not None:
+                    horizon = float(remaining_horizon)
+                elif cr3bp_horizon is not None:
+                    horizon = float(cr3bp_horizon)
+                if cr3bp_horizon is not None:
+                    horizon = min(float(horizon), float(cr3bp_horizon))
+            elif cr3bp_horizon is not None:
+                horizon = float(cr3bp_horizon)
+            if horizon <= 0.0:
+                return np.empty((0, 6), dtype=float)
             cr3bp_dt = _positive_float_or_none(cr3bp_dt_s)
             if cr3bp_dt is None:
                 cr3bp_dt = _positive_float_or_none(getattr(self, "cr3bp_coast_prediction_dt_s", None))
@@ -2409,15 +2739,15 @@ class PygameRPODashboard:
                 300.0 if cr3bp_dt is None else float(cr3bp_dt),
                 1.0e-6,
             )
-            count = min(int(np.floor(horizon / dt)) + 1, MAX_GHOST_DRAW_POINTS)
-            times = np.linspace(0.0, horizon, max(count, 2), dtype=float)
+            point_cap = max(int(max_draw_points or MAX_GHOST_DRAW_POINTS), 2)
+            times = _front_loaded_prediction_times(horizon, dt, max_points=point_cap)
             if _relative_frame_key(getattr(self, "relative_frame", "ric")) == "moon_ric":
                 target_state = getattr(self, "reference_state_eci", None)
                 if target_state is None:
                     return np.empty((0, 6), dtype=float)
                 target_state = np.array(target_state, dtype=float).reshape(6)
                 if _cr3bp_projection_mode_key(getattr(self, "cr3bp_projection_mode", "nonlinear")) == "linearized":
-                    return _linearized_cr3bp_moon_ric_coast_prediction(
+                    return self._linearized_cr3bp_moon_ric_coast_prediction_cached(
                         rel0,
                         target_state=target_state,
                         times=times,
@@ -2443,8 +2773,8 @@ class PygameRPODashboard:
                 previous_t = float(target_t)
             return np.vstack(rows)
         dt = float(max(self.coast_prediction_dt_s, 1.0e-6))
-        count = min(int(np.floor(horizon / dt)) + 1, MAX_GHOST_DRAW_POINTS)
-        times = np.linspace(0.0, horizon, max(count, 2), dtype=float)
+        point_cap = max(int(max_draw_points or MAX_GHOST_DRAW_POINTS), 2)
+        times = _front_loaded_prediction_times(horizon, dt, max_points=point_cap)
         if _coast_prediction_model_key(getattr(self, "coast_prediction_model", "hcw")) in {
             "elliptic_linear",
             "tschauner_hempel",
@@ -2453,7 +2783,7 @@ class PygameRPODashboard:
             reference_state = getattr(self, "reference_state_eci", None)
             if reference_state is not None:
                 return _elliptic_linear_coast_states(rel0, times, np.array(reference_state, dtype=float).reshape(6))
-        return np.vstack([_cw_coast_state(rel0, float(t), float(n)) for t in times])
+        return _cw_coast_states(rel0, times, float(n))
 
     def _coast_prediction_horizon_s(self, mean_motion_rad_s: float) -> float:
         fraction = self.coast_prediction_orbit_fraction
@@ -2966,6 +3296,96 @@ def _cylinder_projection_is_cross_section(region: ForbiddenRegionConfig, *, x_ax
     return projected_axes == cross_axes
 
 
+def _sphere_projection_polygon_ric(
+    region: ForbiddenRegionConfig, *, x_axis: int, y_axis: int, samples: int = 72
+) -> np.ndarray:
+    if region.radius_km is None:
+        return np.zeros((0, 3), dtype=float)
+    center = np.array(region.center_ric_km, dtype=float).reshape(3)
+    radius = float(region.radius_km)
+    theta = np.linspace(0.0, 2.0 * np.pi, max(int(samples), 12), endpoint=True)
+    pts = np.tile(center.reshape(1, 3), (theta.size, 1))
+    pts[:, int(x_axis)] += radius * np.cos(theta)
+    pts[:, int(y_axis)] += radius * np.sin(theta)
+    return pts
+
+
+def _sun_angle_sector_polygon_ric(
+    constraint: SunAngleConstraintConfig,
+    *,
+    x_axis: int,
+    y_axis: int,
+    samples: int = 72,
+    target_state_eci: np.ndarray | None = None,
+    time_s: float | None = None,
+) -> np.ndarray:
+    if not _constraint_visible_on_plane(constraint, x_axis=x_axis, y_axis=y_axis):
+        return np.zeros((0, 3), dtype=float)
+    center = constraint.allowed_center_at_ric(target_state_eci=target_state_eci, time_s=time_s)
+    projected = center[[int(x_axis), int(y_axis)]]
+    norm = float(np.linalg.norm(projected))
+    if not np.isfinite(norm) or norm <= 1.0e-12:
+        return np.zeros((0, 3), dtype=float)
+    theta_center = float(np.arctan2(projected[1], projected[0]))
+    half = np.deg2rad(float(constraint.allowed_half_angle_deg))
+    outer = constraint.beam_radius_km
+    if outer is None:
+        outer = constraint.max_range_km
+    if outer is None:
+        outer = 8.0
+    inner = 0.0 if constraint.min_range_km is None else max(float(constraint.min_range_km), 0.0)
+    outer = max(float(outer), inner + 1.0e-6)
+    angles = np.linspace(theta_center - half, theta_center + half, max(int(samples), 12))
+    pts: list[np.ndarray] = []
+    for radius, seq in ((outer, angles), (inner, angles[::-1])):
+        for theta in seq:
+            row = np.zeros(3, dtype=float)
+            row[int(x_axis)] = radius * float(np.cos(theta))
+            row[int(y_axis)] = radius * float(np.sin(theta))
+            pts.append(row)
+    return np.vstack(pts) if pts else np.zeros((0, 3), dtype=float)
+
+
+def _sun_angle_centerline_points_ric(
+    constraint: SunAngleConstraintConfig,
+    *,
+    x_axis: int,
+    y_axis: int,
+    target_state_eci: np.ndarray | None = None,
+    time_s: float | None = None,
+) -> np.ndarray:
+    if not _constraint_visible_on_plane(constraint, x_axis=x_axis, y_axis=y_axis):
+        return np.zeros((0, 3), dtype=float)
+    center = constraint.allowed_center_at_ric(target_state_eci=target_state_eci, time_s=time_s)
+    projected = center[[int(x_axis), int(y_axis)]]
+    norm = float(np.linalg.norm(projected))
+    if not np.isfinite(norm) or norm <= 1.0e-12:
+        return np.zeros((0, 3), dtype=float)
+    direction = projected / norm
+    outer = constraint.beam_radius_km
+    if outer is None:
+        outer = constraint.max_range_km
+    if outer is None:
+        outer = 8.0
+    inner = 0.0 if constraint.min_range_km is None else max(float(constraint.min_range_km), 0.0)
+    rows = np.zeros((2, 3), dtype=float)
+    rows[0, int(x_axis)] = inner * float(direction[0])
+    rows[0, int(y_axis)] = inner * float(direction[1])
+    rows[1, int(x_axis)] = float(outer) * float(direction[0])
+    rows[1, int(y_axis)] = float(outer) * float(direction[1])
+    return rows
+
+
+def _constraint_visible_on_plane(constraint: SunAngleConstraintConfig, *, x_axis: int, y_axis: int) -> bool:
+    planes = tuple(constraint.plot_planes or ())
+    if not planes:
+        return True
+    plane = _plane_key_for_axes(x_axis=x_axis, y_axis=y_axis)
+    if not plane:
+        return False
+    return plane in planes
+
+
 def _region_axis_index(axis: str) -> int:
     key = str(axis or "").strip().upper()
     if key == "R":
@@ -3077,20 +3497,45 @@ def _cw_coast_state(x0: np.ndarray, t_s: float, mean_motion_rad_s: float) -> np.
     return np.array([xp, yp, zp, xdp, ydp, zdp], dtype=float)
 
 
+def _cw_coast_states(x0: np.ndarray, times_s: np.ndarray, mean_motion_rad_s: float) -> np.ndarray:
+    x, y, z, xd, yd, zd = np.array(x0, dtype=float).reshape(6)
+    times = np.array(times_s, dtype=float).reshape(-1)
+    if times.size == 0:
+        return np.empty((0, 6), dtype=float)
+    n = float(mean_motion_rad_s)
+    if abs(n) <= 1.0e-12:
+        out = np.empty((times.size, 6), dtype=float)
+        out[:, 0] = x + xd * times
+        out[:, 1] = y + yd * times
+        out[:, 2] = z + zd * times
+        out[:, 3] = xd
+        out[:, 4] = yd
+        out[:, 5] = zd
+        return out
+    nt = n * times
+    c = np.cos(nt)
+    s = np.sin(nt)
+    one_minus_c = 1.0 - c
+    out = np.empty((times.size, 6), dtype=float)
+    out[:, 0] = (4.0 - 3.0 * c) * x + (s / n) * xd + (2.0 * one_minus_c / n) * yd
+    out[:, 1] = 6.0 * (s - nt) * x + y - (2.0 * one_minus_c / n) * xd + ((4.0 * s - 3.0 * nt) / n) * yd
+    out[:, 2] = c * z + (s / n) * zd
+    out[:, 3] = 3.0 * n * s * x + c * xd + 2.0 * s * yd
+    out[:, 4] = -6.0 * n * one_minus_c * x - 2.0 * s * xd + (4.0 * c - 3.0) * yd
+    out[:, 5] = -n * s * z + c * zd
+    return out
+
+
 def _satellite_marker_size_px(
     scale_x_px_per_km: float,
     scale_y_px_per_km: float,
     *,
     diameter_km: float = SATELLITE_SPRITE_DIAMETER_KM,
-    max_size_px: int = SATELLITE_MAX_SIZE_PX,
 ) -> int:
     raw_px = float(max(abs(float(scale_x_px_per_km)), abs(float(scale_y_px_per_km)))) * float(max(diameter_km, 0.0))
-    max_px = max(int(max_size_px), int(SATELLITE_ICON_SIZE_PX))
-    if not np.isfinite(raw_px) or raw_px < float(SATELLITE_DOT_THRESHOLD_PX):
+    if not np.isfinite(raw_px) or raw_px <= 0.0:
         return 0
-    if raw_px < float(SATELLITE_ICON_THRESHOLD_PX):
-        return int(SATELLITE_ICON_SIZE_PX)
-    return int(round(np.clip(raw_px, SATELLITE_ICON_SIZE_PX, max_px)))
+    return max(int(round(raw_px)), 1)
 
 
 def _cw_forced_state(
@@ -3154,6 +3599,13 @@ def _cr3bp_projection_mode_key(value: str) -> str:
     return "nonlinear"
 
 
+def _cr3bp_coast_prediction_horizon_mode_key(value: str) -> str:
+    key = str(value or "default").strip().lower().replace("-", "_")
+    if key in {"time_remaining", "remaining_time", "mission_remaining", "mission_time_remaining"}:
+        return "time_remaining"
+    return "default"
+
+
 def _relative_frame_key(value: str) -> str:
     key = str(value or "ric").strip().lower().replace("-", "_")
     if key in {"cislunar", "cislunar_l1", "earth_moon_rotating", "cr3bp", "cr3bp_rotating"}:
@@ -3168,6 +3620,49 @@ def _cr3bp_state_to_moon_ric_rect(deputy_state: np.ndarray, chief_state: np.ndar
     deputy = np.array(deputy_state, dtype=float).reshape(6) - moon
     chief = np.array(chief_state, dtype=float).reshape(6) - moon
     return eci_relative_to_ric_rect(deputy, chief)
+
+
+def _moon_ric_basis_rows(chief_states: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    moon = cr3bp_moon_state_km_s()
+    chief_rows = np.array(chief_states, dtype=float).reshape(-1, 6) - moon
+    r = chief_rows[:, :3]
+    v = chief_rows[:, 3:]
+    r_norm = np.maximum(np.linalg.norm(r, axis=1), 1.0e-12)
+    r_hat = r / r_norm[:, None]
+    h = np.cross(r, v)
+    h_norm = np.maximum(np.linalg.norm(h, axis=1), 1.0e-12)
+    c_hat = h / h_norm[:, None]
+    i_hat = np.cross(c_hat, r_hat)
+    i_norm = np.maximum(np.linalg.norm(i_hat, axis=1), 1.0e-12)
+    i_hat = i_hat / i_norm[:, None]
+    axes = np.stack((r_hat, i_hat, c_hat), axis=2)
+    omega = h / np.maximum(np.sum(r * r, axis=1), 1.0e-12)[:, None]
+    return axes, omega
+
+
+def _cr3bp_states_to_moon_ric_rect_rows(
+    deputy_states: np.ndarray,
+    chief_states: np.ndarray,
+    *,
+    basis_axes: np.ndarray | None = None,
+    basis_omega: np.ndarray | None = None,
+) -> np.ndarray:
+    deputy_rows = np.array(deputy_states, dtype=float).reshape(-1, 6)
+    chief_rows = np.array(chief_states, dtype=float).reshape(-1, 6)
+    if deputy_rows.shape[0] != chief_rows.shape[0]:
+        raise ValueError("deputy_states and chief_states must have matching row counts")
+    if deputy_rows.size == 0:
+        return np.empty((0, 6), dtype=float)
+    axes = None if basis_axes is None else np.array(basis_axes, dtype=float).reshape(-1, 3, 3)
+    omega = None if basis_omega is None else np.array(basis_omega, dtype=float).reshape(-1, 3)
+    if axes is None or omega is None or axes.shape[0] != chief_rows.shape[0] or omega.shape[0] != chief_rows.shape[0]:
+        axes, omega = _moon_ric_basis_rows(chief_rows)
+    dr_eci = deputy_rows[:, :3] - chief_rows[:, :3]
+    dv_eci = deputy_rows[:, 3:] - chief_rows[:, 3:]
+    omega_cross_dr = np.cross(omega, dr_eci)
+    dr_ric = np.einsum("nji,nj->ni", axes, dr_eci)
+    dv_ric = np.einsum("nji,nj->ni", axes, dv_eci - omega_cross_dr)
+    return np.hstack((dr_ric, dv_ric))
 
 
 def _moon_ric_rect_state_to_cr3bp(rel_moon_ric: np.ndarray, chief_state: np.ndarray) -> np.ndarray:
@@ -3228,6 +3723,56 @@ def _linearized_cr3bp_moon_ric_coast_prediction(
         rows.append(_cr3bp_state_to_moon_ric_rect(deputy_linear, reference))
         previous_t = float(target_t)
     return np.vstack(rows) if rows else np.empty((0, 6), dtype=float)
+
+
+def _linearized_cr3bp_moon_ric_stm_table(
+    *,
+    target_state: np.ndarray,
+    times: np.ndarray,
+    current_t_s: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    reference = np.array(target_state, dtype=float).reshape(6)
+    stm = np.eye(6, dtype=float)
+    references: list[np.ndarray] = []
+    stms: list[np.ndarray] = []
+    current_t = float(current_t_s)
+    previous_t = 0.0
+    for target_t in np.array(times, dtype=float).reshape(-1):
+        step_s = float(target_t - previous_t)
+        if step_s > 0.0:
+            reference, stm = propagate_cr3bp_reference_stm(reference, stm, step_s, current_t)
+            current_t += step_s
+        references.append(reference.copy())
+        stms.append(stm.copy())
+        previous_t = float(target_t)
+    if not references:
+        return np.empty((0, 6), dtype=float), np.empty((0, 6, 6), dtype=float)
+    return np.vstack(references), np.stack(stms, axis=0)
+
+
+def _linearized_cr3bp_moon_ric_projection_from_stm_table(
+    rel0: np.ndarray,
+    *,
+    target_state: np.ndarray,
+    references: np.ndarray,
+    stms: np.ndarray,
+    basis_axes: np.ndarray | None = None,
+    basis_omega: np.ndarray | None = None,
+) -> np.ndarray:
+    reference0 = np.array(target_state, dtype=float).reshape(6)
+    reference_rows = np.array(references, dtype=float).reshape(-1, 6)
+    stm_rows = np.array(stms, dtype=float).reshape(-1, 6, 6)
+    if reference_rows.size == 0 or stm_rows.size == 0:
+        return np.empty((0, 6), dtype=float)
+    deputy0 = _moon_ric_rect_state_to_cr3bp(rel0, reference0)
+    delta0 = deputy0 - reference0
+    deputy_rows = reference_rows + np.einsum("nij,j->ni", stm_rows, delta0)
+    return _cr3bp_states_to_moon_ric_rect_rows(
+        deputy_rows,
+        reference_rows,
+        basis_axes=basis_axes,
+        basis_omega=basis_omega,
+    )
 
 
 def _satellite_pair_camera_center(

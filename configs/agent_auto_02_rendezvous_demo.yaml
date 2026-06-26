@@ -2,7 +2,9 @@ scenario_name: agent_auto_02_rendezvous_demo
 scenario_description: 'Agent-generated public demo: short HCW LQR rendezvous check
   with review evidence and plots.'
 metadata:
-  owner: public-oel-agents
+  owner: public
+  public_surface: public-agent-workflow
+  support_level: supported
   notes: Generated for the weekly OEL agentic workflow post. Uses public two-body
     dynamics, a public HCW LQR controller, and queryable review evidence.
 objects:

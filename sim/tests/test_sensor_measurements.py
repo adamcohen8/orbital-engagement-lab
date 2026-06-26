@@ -221,6 +221,52 @@ def test_object_knowledge_base_exposes_raw_state_measurement_snapshot() -> None:
     assert np.allclose(measurements["target"], target_state)
 
 
+def test_measured_state_estimator_trusts_latest_state_measurement() -> None:
+    observer = _truth(position=np.array([7000.0, 0.0, 0.0]), velocity=np.array([0.0, 7.5, 0.0]))
+    target0 = _truth(position=np.array([7001.0, 2.0, 3.0]), velocity=np.array([0.01, 7.49, -0.02]))
+    target1 = _truth(position=np.array([7002.0, 2.5, 3.5]), velocity=np.array([0.02, 7.48, -0.01]))
+    knowledge = ObjectKnowledgeBase(
+        observer_id="chaser",
+        tracked_objects=[
+            TrackedObjectConfig(
+                target_id="target",
+                conditions=KnowledgeConditionConfig(refresh_rate_s=1.0),
+                sensor_noise=KnowledgeNoiseConfig(
+                    pos_sigma_km=np.zeros(3),
+                    vel_sigma_km_s=np.zeros(3),
+                ),
+                estimator="measured_state",
+            )
+        ],
+        dt_s=1.0,
+        rng=np.random.default_rng(5),
+    )
+
+    first = knowledge.update(observer, {"target": target0}, t_s=0.0)["target"]
+    second = knowledge.update(observer, {"target": target1}, t_s=1.0)["target"]
+
+    np.testing.assert_allclose(first.state, np.hstack((target0.position_eci_km, target0.velocity_eci_km_s)))
+    np.testing.assert_allclose(second.state, np.hstack((target1.position_eci_km, target1.velocity_eci_km_s)))
+    assert np.all(np.diag(second.covariance) > 0.0)
+    assert knowledge.consistency_summary()["target"]["update_count"] == 2
+
+
+def test_measured_state_estimator_requires_state_measurement_model() -> None:
+    with pytest.raises(ValueError, match="measured_state requires measurement_model='state'"):
+        ObjectKnowledgeBase(
+            observer_id="chaser",
+            tracked_objects=[
+                TrackedObjectConfig(
+                    target_id="target",
+                    estimator="measured_state",
+                    measurement_model="relative_range_rate",
+                )
+            ],
+            dt_s=1.0,
+            rng=np.random.default_rng(5),
+        )
+
+
 def test_relative_knowledge_requires_explicit_initial_state_prior() -> None:
     observer = _truth(position=np.array([7000.0, 0.0, 0.0]), velocity=np.array([0.0, 7.5, 0.0]))
     target = _truth(position=np.array([7001.0, 2.0, 3.0]), velocity=np.array([0.01, 7.49, -0.02]))

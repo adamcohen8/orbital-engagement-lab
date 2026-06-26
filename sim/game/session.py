@@ -10,6 +10,49 @@ from sim.core.models import Command, StateBelief
 from sim.game.training import RPOTrainingConfig
 
 
+class GamePhysicsSession:
+    """Game-facing OEL physics session with lightweight history retention."""
+
+    def __init__(
+        self,
+        config: SimulationConfig,
+        *,
+        retained_history_samples: int = 4096,
+    ):
+        retained = int(max(2, retained_history_samples))
+        self._session = SimulationSession.from_config(
+            config,
+            history_mode="dynamic",
+            initial_history_capacity=retained,
+            max_history_samples=retained,
+        )
+
+    @property
+    def config(self) -> SimulationConfig:
+        return self._session.config
+
+    @property
+    def done(self) -> bool:
+        return self._session.done
+
+    @property
+    def _engine(self) -> Any | None:
+        return self._session._engine
+
+    @property
+    def _external_intent_providers(self) -> dict[str, Any]:
+        return self._session._external_intent_providers
+
+    def reset(self, seed: int | None = None) -> Any:
+        return self._session.reset(seed=seed)
+
+    def step(self, dt_s: float | None = None) -> Any:
+        return self._session.step(dt_s=dt_s)
+
+    def set_external_intent_provider(self, object_id: str, provider: Any | None) -> None:
+        self._session.set_external_intent_provider(object_id, provider)
+
+
 @dataclass
 class _DeltaVLimitedOrbitController:
     base: Any

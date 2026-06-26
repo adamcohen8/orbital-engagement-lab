@@ -1,4 +1,8 @@
 scenario_name: mission_reconstitution_planner_demo
+metadata:
+  owner: public
+  public_surface: public-config
+  support_level: demonstration
 scenario_description: 'Demonstrates mission reconstitution planning: a satellite receives
   a simple +I in-track burn, then OEL compares the final orbit with the initial orbit
   and produces min-delta-v, min-time, and constrained recovery recommendations.

@@ -2,6 +2,8 @@ scenario_name: public_actuator_presets_smoke
 scenario_description: Public actuator preset smoke example covering RCS, electric propulsion, and CMG attitude steering vocabulary.
 metadata:
   owner: public
+  public_surface: public-actuator
+  support_level: supported
   seed: 123
   notes: Trimmed actuator vocabulary example for reading and validating object specs.
 objects:

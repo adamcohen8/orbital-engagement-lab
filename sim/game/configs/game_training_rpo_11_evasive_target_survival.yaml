@@ -1,47 +1,70 @@
-scenario_name: game_training_rpo_09_defensive_target_demo
-scenario_description: RPO trainer scenario introducing a simple defensive target response
-  during proximity operations.
+scenario_name: game_training_rpo_11_evasive_target_survival
+scenario_description: RPO trainer scenario where the player flies the target while
+  an RIC_PD chaser attempts rendezvous.
 metadata:
   owner: codex
-  notes: Run with `python run_game.py sim/game/configs/game_training_rpo_09_defensive_target_demo.yaml
+  notes: Run with `python run_game.py sim/game/configs/game_training_rpo_11_evasive_target_survival.yaml
     --speed-multiple 10`.
   game:
-    level_name: Level 9 - Pursuit
+    level_name: Level 11 - Evasion
     control_mode: ric_translation
+    controlled_object_id: target
     ric_reference_object_id: target_reference
-    camera_mode: target_pair
-    difficulty: easy
+    camera_mode: rule_toggle_pair
+    camera_rule_mode: current_pair
+    camera_rule_toggle_enabled: true
+    show_target_hcw_path: true
+    difficulty: hard
+    initial_speed_multiple: 10.0
+    speed_multiplier_options:
+    - 1.0
+    - 2.0
+    - 5.0
+    - 10.0
+    - 25.0
+    - 50.0
+    - 100.0
+    - 200.0
+    speed_dt_s:
+      1.0: 0.1
+      10.0: 0.5
+      25.0: 1.0
+      50.0: 5.0
+      100.0: 10.0
+    max_autonomy_step_s: 1.0
+    two_rail_speed_control: true
     player_max_accel_km_s2: 1.5e-05
-    defensive_target:
-      enabled: true
-      chaser_object_id: chaser
-      trigger_range_km: 1.2
-      trigger_closing_speed_km_s: 0.00025
-      keepout_radius_km: 0.1
-      max_accel_km_s2: 7.5e-06
-      max_delta_v_m_s: 0.1
-      cross_track_bias: 0.65
-      pulse_period_s: 120.0
     training:
       enabled: true
-      scenario_id: rpo_09_defensive_target_demo
-      learning_goal: Track a target that performs small defensive pulses when closure
-        becomes unsafe; close to within 100 m.
-      player_brief: The target may maneuver when your closure becomes unsafe. Track
-        the actual target motion relative to its reference orbit, correct the miss,
-        and finish inside 100 m.
+      scenario_id: rpo_11_evasive_target_survival
+      learning_goal: Fly the target vehicle and evade an autonomous RIC_PD chaser
+        until the timer expires.
+      player_brief: You are the target. The yellow chaser is using the RIC_PD controller
+        from the 10 km rendezvous experiment to close on you. Use small R/I/C pulses
+        to keep at least 100 m of separation until time expires.
       pass_criteria:
-      - Get within 100 m of the maneuvering target.
-      - Stay under the chaser delta-v budget.
+      - Maintain at least 100 m separation from the chaser.
+      - Stay within 1 km of the target reference orbit to remain mission capable.
+      - Survive until the timer expires.
+      - Stay under the target delta-v budget.
       instructor_notes:
-      - This is a bridge toward defensive target behavior and future PvP.
-      - The red target motion is shown relative to the target reference orbit.
-      - Target defensive maneuvering is capped at 0.1 m/s total delta-v.
+      - This is the reverse of level 10: the player flies the target, not the chaser.
+      - The chaser uses the public flagship 10 km RIC_PD orbital guidance without
+        attitude gating.
+      - The camera follows the target/chaser pair so evasive motion stays visible.
+      - The red dashed curve is the target vehicle's current HCW coast path.
+      - If the chaser uses its full delta-v budget, it coasts for the rest of the
+        attempt.
       target_object_id: target
       chaser_object_id: chaser
-      goal_range_km: 0.1
-      max_time_s: 14400.0
-      max_delta_v_m_s: 8.0
+      keepout_radius_km: 0.1
+      survival_goal: true
+      max_time_s: 9000.0
+      max_target_reference_range_km: 1.0
+      max_target_delta_v_m_s: 1.0
+      max_delta_v_m_s: 25.0
+      fail_on_delta_v_budget: false
+      coast_chaser_after_delta_v_budget: true
 objects:
   rocket:
     enabled: false
@@ -54,14 +77,14 @@ objects:
       mass_kg: 200.0
     initial_state:
       relative_to_target_ric:
-        frame: rect
+        frame: curv
         state:
         - 0.0
-        - -1.8
+        - -5.0
         - 0.0
         - 0.0
         - 0.0
-        - 0.0
+        - 0.001
       attitude_quat_bn:
       - 1.0
       - 0.0
@@ -74,9 +97,58 @@ objects:
       relative_to: target
     orbit_control:
       kind: python
-      module: sim.control.orbit.zero_controller
-      class_name: ZeroController
-      params: {}
+      module: sim.control.orbit.ric_pd
+      class_name: RICPDTransferController
+      params:
+        max_accel_km_s2: 6.0e-05
+        mean_motion_rad_s: 0.001078
+        transfer_time_s: 4800.0
+        burn_time_constant_s: 35.0
+        correction_interval_s: 300.0
+        velocity_deadband_m_s: 0.03
+        final_brake_start_s: 0.0
+        terminal_start_s: 900.0
+        terminal_range_km: 0.15
+        terminal_kp:
+        - - 2.5e-06
+          - 0.0
+          - 0.0
+        - - 0.0
+          - 2.5e-06
+          - 0.0
+        - - 0.0
+          - 0.0
+          - 2.5e-06
+        terminal_kd:
+        - - 0.0035
+          - 0.0
+          - 0.0
+        - - 0.0
+          - 0.0035
+          - 0.0
+        - - 0.0
+          - 0.0
+          - 0.0035
+        desired_state_ric:
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        ric_curv_state_slice:
+        - 0
+        - 6
+        chief_eci_state_slice:
+        - 6
+        - 12
+        state_signs:
+        - 1.0
+        - 1.0
+        - 1.0
+        - 1.0
+        - 1.0
+        - 1.0
     attitude_control:
       kind: python
       module: sim.control.attitude.zero_torque
@@ -103,7 +175,7 @@ objects:
         - 0.0
         - 0.0
       estimation:
-        type: ekf
+        type: measured_state
     kind: satellite
   target:
     enabled: true
@@ -146,6 +218,7 @@ objects:
       refresh_rate_s: 1.0
       targets:
       - chaser
+      - target_reference
       conditions:
         require_line_of_sight: false
         max_range_km: 10000.0
@@ -159,10 +232,10 @@ objects:
         - 0.0
         - 0.0
       estimation:
-        type: ekf
+        type: measured_state
     kind: satellite
 simulator:
-  duration_s: 14400.0
+  duration_s: 9000.0
   dt_s: 1.0
   dynamics:
     orbit:
@@ -188,7 +261,7 @@ simulator:
     earth_impact_enabled: false
     earth_radius_km: 6378.137
 outputs:
-  output_dir: outputs/game_training_rpo_09
+  output_dir: outputs/game_training_rpo_11
   mode: save
   stats:
     enabled: true

@@ -1,6 +1,8 @@
 scenario_name: hcw_lqr_two_body_ic_closing_velocity
 metadata:
-  owner: controller_lab
+  owner: public
+  public_surface: public-config
+  support_level: demonstration
   notes: Two-body HCW LQR rendezvous case with initial relative velocity.
 objects:
   rocket:

@@ -3,6 +3,8 @@ scenario_description: 'Public example: closed-loop rendezvous with orbit control
   attitude pointing, sensing, EKF knowledge, and standard plots.'
 metadata:
   owner: public
+  public_surface: public-example
+  support_level: supported
   notes: Run with `.venv/bin/python run_simulation.py --config examples/configs/public_rendezvous_closed_loop.yaml`.
 objects:
   rocket:

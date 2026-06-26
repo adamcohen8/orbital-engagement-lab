@@ -13,7 +13,7 @@ export const DEFAULT_SPEED_DT_SCHEDULE = Object.freeze([
 export const DEFAULT_PURSUIT_CHALLENGE = Object.freeze({
   challenge_id: "rpo_arcade_pursuit",
   title: "Pursuit Arcade",
-  physics_version: "web-two-body-v1",
+  physics_version: "web-two-body-v2",
   scoring_version: "pursuit-v1",
   mu_km3_s2: 398600.4418,
   dt_s: 1.0,
@@ -183,6 +183,8 @@ export function createPursuitSession(config = DEFAULT_PURSUIT_CHALLENGE, options
   const prng = mulberry32(seed);
   const initial = initialArcadeState(cfg);
   const activeControls = new Set();
+  const pulseControls = new Set();
+  const downTickByControl = new Map();
   const inputEvents = [];
   const history = [];
   const burnMarkers = [];
@@ -227,7 +229,7 @@ export function createPursuitSession(config = DEFAULT_PURSUIT_CHALLENGE, options
       failed = true;
       terminalReason = "Time expired.";
     }
-    const sample = historySample(sim, rel, activeControls);
+    const sample = historySample(sim, rel, activeControls, pulseControls);
     const last = history[history.length - 1];
     if (!last || last.tick !== sample.tick) history.push(sample);
     return { rel, rangeKm, relSpeedKmS };
@@ -243,8 +245,14 @@ export function createPursuitSession(config = DEFAULT_PURSUIT_CHALLENGE, options
       const shouldBeActive = Boolean(active);
       const isActive = activeControls.has(control);
       if (shouldBeActive === isActive) return;
-      if (shouldBeActive) activeControls.add(control);
-      else activeControls.delete(control);
+      if (shouldBeActive) {
+        activeControls.add(control);
+        downTickByControl.set(control, sim.tick);
+      } else {
+        if (downTickByControl.get(control) === sim.tick) pulseControls.add(control);
+        activeControls.delete(control);
+        downTickByControl.delete(control);
+      }
       inputEvents.push({ tick: sim.tick, control, state: shouldBeActive ? "down" : "up" });
     },
     setControls(controls) {
@@ -261,7 +269,7 @@ export function createPursuitSession(config = DEFAULT_PURSUIT_CHALLENGE, options
       for (let idx = 0; idx < steps; idx += 1) {
         const current = capture();
         if (passed || failed) break;
-        const controls = controlsFromActive(activeControls);
+        const controls = controlsFromActive(activeControls, pulseControls);
         if (Math.hypot(controls.r, controls.i, controls.c) > 0) {
           burnMarkers.push({
             tick: sim.tick,
@@ -271,6 +279,7 @@ export function createPursuitSession(config = DEFAULT_PURSUIT_CHALLENGE, options
           });
         }
         sim = stepArcadeState(sim, cfg, controls, cfg.dt_s, prng);
+        pulseControls.clear();
       }
       capture();
       return this.snapshot();
@@ -309,7 +318,7 @@ export function createPursuitSession(config = DEFAULT_PURSUIT_CHALLENGE, options
         terminal: passed || failed,
         terminal_reason: terminalReason,
         score,
-        active_controls: controlsFromActive(activeControls),
+        active_controls: controlsFromActive(activeControls, pulseControls),
         input_events: inputEvents.map((event) => ({ ...event })),
         target_reference_state_eci: eciStateBlock(sim.target_reference || sim.target),
         history: history.map((sample) => ({ ...sample, relative_ric: { ...sample.relative_ric } })),
@@ -647,14 +656,14 @@ export function runPursuitReplay(config = DEFAULT_PURSUIT_CHALLENGE, replay = {}
   let burnMarkers = [];
 
   for (let tick = 0; tick <= maxTicks; tick += 1) {
-    applyTickEvents(activeControls, eventMap.get(tick) || []);
+    const pulseControls = applyTickEvents(activeControls, eventMap.get(tick) || []);
     const rel = relativeRicState(sim.target, sim.chaser);
     const rangeKm = Math.hypot(rel.r_km, rel.i_km, rel.c_km);
     const relSpeedKmS = Math.hypot(rel.rd_km_s, rel.id_km_s, rel.cd_km_s);
     closestRangeKm = Math.min(closestRangeKm, rangeKm);
     finalRelativeSpeedKmS = relSpeedKmS;
     if (tick % sampleStrideTicks === 0 || tick === maxTicks) {
-      history.push(historySample(sim, rel, activeControls));
+      history.push(historySample(sim, rel, activeControls, pulseControls));
     }
     const speedOk = cfg.goal_speed_km_s === null || cfg.goal_speed_km_s === undefined || relSpeedKmS <= cfg.goal_speed_km_s;
     if (rangeKm <= cfg.goal_range_km && speedOk) {
@@ -669,7 +678,7 @@ export function runPursuitReplay(config = DEFAULT_PURSUIT_CHALLENGE, replay = {}
       break;
     }
     if (tick >= maxTicks) break;
-    const controls = controlsFromActive(activeControls);
+    const controls = controlsFromActive(activeControls, pulseControls);
     const controlMagnitude = Math.hypot(controls.r, controls.i, controls.c);
     if (controlMagnitude > 0) {
       burnMarkers.push({ tick, time_s: sim.time_s, controls: { ...controls }, relative_ric: { ...rel } });
@@ -1384,16 +1393,26 @@ function eventsByTick(events) {
 }
 
 function applyTickEvents(activeControls, events) {
+  const downThisTick = new Set();
+  const pulseControls = new Set();
   events.forEach((event) => {
-    if (event.state === "down") activeControls.add(event.control);
-    if (event.state === "up") activeControls.delete(event.control);
+    if (event.state === "down") {
+      activeControls.add(event.control);
+      downThisTick.add(event.control);
+    }
+    if (event.state === "up") {
+      if (downThisTick.has(event.control)) pulseControls.add(event.control);
+      activeControls.delete(event.control);
+    }
   });
+  return pulseControls;
 }
 
-function controlsFromActive(activeControls) {
-  const r = Number(activeControls.has("rPlus")) - Number(activeControls.has("rMinus"));
-  const i = Number(activeControls.has("iPlus")) - Number(activeControls.has("iMinus"));
-  const c = Number(activeControls.has("cPlus")) - Number(activeControls.has("cMinus"));
+function controlsFromActive(activeControls, pulseControls = new Set()) {
+  const isActive = (control) => activeControls.has(control) || pulseControls.has(control);
+  const r = Number(isActive("rPlus")) - Number(isActive("rMinus"));
+  const i = Number(isActive("iPlus")) - Number(isActive("iMinus"));
+  const c = Number(isActive("cPlus")) - Number(isActive("cMinus"));
   return clampControls({ r, i, c });
 }
 
@@ -1406,7 +1425,7 @@ function clampControls(controls) {
   return { r: r / mag, i: i / mag, c: c / mag };
 }
 
-function historySample(sim, rel, activeControls) {
+function historySample(sim, rel, activeControls, pulseControls = new Set()) {
   const reference = sim.target_reference || sim.target;
   const targetReferenceRel = relativeRicState(reference, sim.target);
   const chaserReferenceRel = relativeRicState(reference, sim.chaser);
@@ -1438,7 +1457,7 @@ function historySample(sim, rel, activeControls) {
       cd_km_s: roundMetric(chaserReferenceRel.cd_km_s),
     },
     target_reference_state_eci: eciStateBlock(reference),
-    controls: controlsFromActive(activeControls),
+    controls: controlsFromActive(activeControls, pulseControls),
     player_delta_v_m_s: roundMetric(sim.player_delta_v_m_s),
     target_delta_v_m_s: roundMetric(sim.target_delta_v_m_s),
   };

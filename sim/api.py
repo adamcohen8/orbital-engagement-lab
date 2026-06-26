@@ -967,11 +967,17 @@ class SimulationSession:
         *,
         sealed_mode: bool = False,
         sealed_policy: SealedModePolicy | None = None,
+        history_mode: str = "full",
+        initial_history_capacity: int = 4096,
+        max_history_samples: int = 4096,
     ):
         self._sealed_policy = _api_sealed_policy(sealed_mode=sealed_mode, sealed_policy=sealed_policy)
         self._base_config = self._coerce_config(config)
         self._enforce_sealed_mode(self._base_config)
         self._active_config = self._base_config
+        self._history_mode = str(history_mode or "full").strip().lower()
+        self._initial_history_capacity = int(max(2, initial_history_capacity))
+        self._max_history_samples = int(max(2, max_history_samples))
         self._result: SimulationResult | None = None
         self._step_index = 0
         self._done = False
@@ -989,8 +995,18 @@ class SimulationSession:
         *,
         sealed_mode: bool = False,
         sealed_policy: SealedModePolicy | None = None,
+        history_mode: str = "full",
+        initial_history_capacity: int = 4096,
+        max_history_samples: int = 4096,
     ) -> SimulationSession:
-        return cls(config, sealed_mode=sealed_mode, sealed_policy=sealed_policy)
+        return cls(
+            config,
+            sealed_mode=sealed_mode,
+            sealed_policy=sealed_policy,
+            history_mode=history_mode,
+            initial_history_capacity=initial_history_capacity,
+            max_history_samples=max_history_samples,
+        )
 
     @classmethod
     def from_yaml(
@@ -999,8 +1015,18 @@ class SimulationSession:
         *,
         sealed_mode: bool = False,
         sealed_policy: SealedModePolicy | None = None,
+        history_mode: str = "full",
+        initial_history_capacity: int = 4096,
+        max_history_samples: int = 4096,
     ) -> SimulationSession:
-        return cls(SimulationConfig.from_yaml(path), sealed_mode=sealed_mode, sealed_policy=sealed_policy)
+        return cls(
+            SimulationConfig.from_yaml(path),
+            sealed_mode=sealed_mode,
+            sealed_policy=sealed_policy,
+            history_mode=history_mode,
+            initial_history_capacity=initial_history_capacity,
+            max_history_samples=max_history_samples,
+        )
 
     @staticmethod
     def _coerce_config(
@@ -1183,7 +1209,13 @@ class SimulationSession:
         scenario = self._active_config.to_scenario_config()
         self._enforce_sealed_mode(self._active_config)
         self._validate_plugins_if_strict(scenario)
-        self._engine = create_single_run_engine(scenario, step_callback=step_callback)
+        self._engine = create_single_run_engine(
+            scenario,
+            step_callback=step_callback,
+            history_mode=self._history_mode,
+            initial_history_capacity=self._initial_history_capacity,
+            max_history_samples=self._max_history_samples,
+        )
         self._controller_originals.clear()
         self._mission_originals.clear()
         if hasattr(self._engine, "set_external_intent_provider"):

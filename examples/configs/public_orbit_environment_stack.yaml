@@ -3,6 +3,8 @@ scenario_description: 'Public example: deterministic high-fidelity orbit/environ
   propagation with perturbations, attitude dynamics, knowledge, and plot outputs.'
 metadata:
   owner: public
+  public_surface: public-example
+  support_level: supported
   notes: Shows J2/J3/J4, drag, SRP, Sun/Moon third-body perturbations, analytic ephemerides,
     and EKF-backed object knowledge.
 objects:

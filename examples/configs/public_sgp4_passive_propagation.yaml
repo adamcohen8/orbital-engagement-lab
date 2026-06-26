@@ -1,4 +1,8 @@
 scenario_name: public_sgp4_passive_propagation
+metadata:
+  owner: public
+  public_surface: public-example
+  support_level: supported
 scenario_description: Passive catalog-object propagation from a public TLE using OEL
   general perturbations SGP4 mode.
 objects:

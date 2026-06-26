@@ -2,6 +2,8 @@ scenario_name: public_mission_recovery_planner
 scenario_description: 'Public mission-recovery planner example: a satellite receives a small in-track burn, then OEL compares the final orbit against the starting orbit and recommends recovery options.'
 metadata:
   owner: public
+  public_surface: public-example
+  support_level: supported
   seed: 123
   notes: Educational mission-recovery planning example with bounded deterministic inputs.
 objects:

@@ -519,7 +519,7 @@ CONFIG_HELP_ENTRIES: tuple[ConfigHelpEntry, ...] = (
         options=(
             _option("pos_sigma_km", "Position 1-sigma measurement error by axis, in kilometers."),
             _option("vel_sigma_km_s", "Velocity 1-sigma measurement error by axis, in kilometers per second."),
-            _option("estimation.type", "Estimator choice, such as ekf, under knowledge.estimation."),
+            _option("estimation.type", "Estimator choice, such as ekf or measured_state, under knowledge.estimation."),
             _option("conditions", "Optional access constraints such as require_line_of_sight and max_range_km."),
         ),
         example=(

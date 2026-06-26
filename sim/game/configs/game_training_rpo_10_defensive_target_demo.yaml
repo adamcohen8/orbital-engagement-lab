@@ -1,55 +1,66 @@
-scenario_name: game_training_rpo_08_elliptic_rendezvous
-scenario_description: RPO trainer scenario for completing a close rendezvous with
-  an eccentric-orbit target.
+scenario_name: game_training_rpo_10_defensive_target_demo
+scenario_description: RPO trainer scenario introducing a simple defensive target response
+  during proximity operations.
 metadata:
   owner: codex
-  notes: Run with `python run_game.py sim/game/configs/game_training_rpo_08_elliptic_rendezvous.yaml
+  notes: Run with `python run_game.py sim/game/configs/game_training_rpo_10_defensive_target_demo.yaml
     --speed-multiple 10`.
   game:
-    level_name: Level 8 - Elliptical Rendezvous
+    level_name: Level 10 - Pursuit
     control_mode: ric_translation
+    ric_reference_object_id: target_reference
     camera_mode: target_pair
-    coast_prediction_model: tschauner_hempel
-    target_centered_plot_planes:
-    - RI
-    difficulty: hard
+    difficulty: easy
+    initial_speed_multiple: 10.0
+    speed_multiplier_options:
+    - 1.0
+    - 2.0
+    - 5.0
+    - 10.0
+    - 25.0
+    - 50.0
+    - 100.0
+    - 200.0
+    - 500.0
+    - 1000.0
+    speed_dt_s:
+      1.0: 0.1
+      10.0: 0.5
+      25.0: 1.0
+      50.0: 5.0
+      100.0: 10.0
+    two_rail_speed_control: true
     player_max_accel_km_s2: 1.5e-05
+    defensive_target:
+      enabled: true
+      chaser_object_id: chaser
+      trigger_range_km: 1.2
+      trigger_closing_speed_km_s: 0.00025
+      keepout_radius_km: 0.1
+      max_accel_km_s2: 7.5e-06
+      max_delta_v_m_s: 0.1
+      cross_track_bias: 0.65
+      pulse_period_s: 120.0
     training:
       enabled: true
-      scenario_id: rpo_08_elliptic_rendezvous
-      learning_goal: Complete the final rendezvous with an eccentric-orbit target
-        by reducing range below 10 meters while keeping relative speed below 0.1 meters
-        per second.
-      player_brief: This is the Level 4 rendezvous problem in the eccentric-orbit
-        environment. Use the elliptical coast predictor to manage the changing local
-        dynamics, enter the 25 meter proximity zone below 0.1 m/s, then settle inside
-        the final 10 meter goal.
+      scenario_id: rpo_10_defensive_target_demo
+      learning_goal: Track a target that performs small defensive pulses when closure
+        becomes unsafe; close to within 100 m.
+      player_brief: The target may maneuver when your closure becomes unsafe. Track
+        the actual target motion relative to its reference orbit, correct the miss,
+        and finish inside 100 m.
       pass_criteria:
-      - Get within 10 meters of the target.
-      - Keep relative speed below 0.1 meters per second.
-      - Do not enter the 25 meter proximity zone faster than 0.1 meters per second.
-      - Stay under the time and delta-v budgets.
+      - Get within 100 m of the maneuvering target.
+      - Stay under the chaser delta-v budget.
       instructor_notes:
-      - This level repeats the Level 4 terminal-rendezvous objective after the eccentric-orbit
-        approach and NMC lessons.
-      - This level intentionally has no keepout hard fail because rendezvous requires
-        final closure.
-      - Use the close zoom to discuss why speed matters as much as range when the
-        local orbital rate is changing.
-      - The coast predictor uses a Tschauner-Hempel-style elliptical linear model
-        rather than the circular-orbit HCW projection.
+      - This is a bridge toward defensive target behavior and future PvP.
+      - The red target motion is shown relative to the target reference orbit.
+      - Target defensive maneuvering is capped at 0.1 m/s total delta-v.
       target_object_id: target
       chaser_object_id: chaser
-      goal_relative_ric_km:
-      - 0.0
-      - 0.0
-      - 0.0
-      goal_radius_km: 0.01
-      max_goal_speed_km_s: 0.0001
-      hard_speed_limit_radius_km: 0.025
-      hard_speed_limit_km_s: 0.0001
+      goal_range_km: 0.1
       max_time_s: 14400.0
-      max_delta_v_m_s: 3.0
+      max_delta_v_m_s: 8.0
 objects:
   rocket:
     enabled: false
@@ -65,11 +76,11 @@ objects:
         frame: rect
         state:
         - 0.0
-        - -0.75
+        - -1.8
         - 0.0
         - 0.0
         - 0.0
-        - 0.0001
+        - 0.0
       attitude_quat_bn:
       - 1.0
       - 0.0
@@ -97,6 +108,7 @@ objects:
       refresh_rate_s: 1.0
       targets:
       - target
+      - target_reference
       conditions:
         require_line_of_sight: false
         max_range_km: 10000.0
@@ -121,12 +133,12 @@ objects:
       mass_kg: 1800.0
     initial_state:
       coes:
-        a_km: 9000.0
-        ecc: 0.25
+        a_km: 7000.0
+        ecc: 0.0
         inc_deg: 45.0
         raan_deg: 0.0
         argp_deg: 0.0
-        true_anomaly_deg: 100.0
+        true_anomaly_deg: 0.0
       attitude_quat_bn:
       - 1.0
       - 0.0
@@ -169,7 +181,7 @@ objects:
         type: ekf
     kind: satellite
 simulator:
-  duration_s: 7200.0
+  duration_s: 14400.0
   dt_s: 1.0
   dynamics:
     orbit:
@@ -195,7 +207,7 @@ simulator:
     earth_impact_enabled: false
     earth_radius_km: 6378.137
 outputs:
-  output_dir: outputs/game_training_rpo_08
+  output_dir: outputs/game_training_rpo_10
   mode: save
   stats:
     enabled: true

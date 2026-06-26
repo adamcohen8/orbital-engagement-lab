@@ -1,66 +1,74 @@
-scenario_name: game_training_rpo_07_elliptic_nmc
-scenario_description: RPO trainer scenario for entering a natural-motion circumnavigation
-  about an eccentric-orbit target.
+scenario_name: game_training_rpo_09_elliptic_rendezvous
+scenario_description: RPO trainer scenario for completing a close rendezvous with
+  an eccentric-orbit target.
 metadata:
   owner: codex
-  notes: Run with `python run_game.py sim/game/configs/game_training_rpo_07_elliptic_nmc.yaml
+  notes: Run with `python run_game.py sim/game/configs/game_training_rpo_09_elliptic_rendezvous.yaml
     --speed-multiple 10`.
   game:
-    level_name: Level 7 - Elliptical NMC
+    level_name: Level 9 - Elliptical Rendezvous
     control_mode: ric_translation
     camera_mode: target_pair
     coast_prediction_model: tschauner_hempel
     target_centered_plot_planes:
     - RI
-    plot_fixed_axis_half_span_km:
-      RI:
-      - 3.25
-      - 1.6
-    plot_overlays_in_zoom: true
     difficulty: hard
+    initial_speed_multiple: 10.0
+    speed_multiplier_options:
+    - 1.0
+    - 2.0
+    - 5.0
+    - 10.0
+    - 25.0
+    - 50.0
+    - 100.0
+    - 200.0
+    - 500.0
+    - 1000.0
+    speed_dt_s:
+      1.0: 0.1
+      10.0: 0.5
+      25.0: 1.0
+      50.0: 5.0
+      100.0: 10.0
+    two_rail_speed_control: true
     player_max_accel_km_s2: 1.5e-05
     training:
       enabled: true
-      scenario_id: rpo_07_elliptic_nmc
-      learning_goal: Enter a bounded natural-motion circumnavigation around an eccentric-orbit
-        target and compare its changing local dynamics with the circular-orbit NMT
-        from Level 1.
-      player_brief: Shape the red trajectory into the green natural-motion circumnavigation.
-        Use the elliptical dashed coast projection to choose burn timing; the target's
-        orbital rate is changing, so do not force the circular-orbit rhythm. Make
-        the cross-track burn near the top or bottom of the RI ellipse.
+      scenario_id: rpo_09_elliptic_rendezvous
+      learning_goal: Complete the final rendezvous with an eccentric-orbit target
+        by reducing range below 10 meters while keeping relative speed below 0.1 meters
+        per second.
+      player_brief: This is the Level 4 rendezvous problem in the eccentric-orbit
+        environment. Use the elliptical coast predictor to manage the changing local
+        dynamics, enter the 25 meter proximity zone below 0.1 m/s, then settle inside
+        the final 10 meter goal.
       pass_criteria:
-      - Match the target radial and cross-track NMC amplitudes within tolerance.
-      - Make the cross-track burn near the top or bottom of the RI ellipse.
-      - Satisfy the local passive drift relationship.
-      - Do not enter keepout.
+      - Get within 10 meters of the target.
+      - Keep relative speed below 0.1 meters per second.
+      - Do not enter the 25 meter proximity zone faster than 0.1 meters per second.
       - Stay under the time and delta-v budgets.
       instructor_notes:
-      - This level is the eccentric-orbit companion to Level 1's circular NMT objective.
-      - The green curve is still drawn as a local target-centered natural-motion shape,
-        but the dashed coast predictor uses the elliptical model.
-      - Ask students to explain why the same burn geometry does not feel identical
-        near different true anomalies.
+      - This level repeats the Level 4 terminal-rendezvous objective after the eccentric-orbit
+        approach and NMC lessons.
+      - This level intentionally has no keepout hard fail because rendezvous requires
+        final closure.
+      - Use the close zoom to discuss why speed matters as much as range when the
+        local orbital rate is changing.
+      - The coast predictor uses a Tschauner-Hempel-style elliptical linear model
+        rather than the circular-orbit HCW projection.
       target_object_id: target
       chaser_object_id: chaser
-      keepout_radius_km: 0.25
-      goal_nmt_center_ric_km:
+      goal_relative_ric_km:
       - 0.0
       - 0.0
       - 0.0
-      goal_nmt_radial_amplitude_km: 1.2
-      goal_nmt_cross_track_amplitude_km: 0.8
-      goal_nmt_cross_track_phase_deg: 90.0
-      goal_nmt_element_tolerance_km: 0.2
-      goal_nmt_velocity_tolerance_km_s: 0.0008
-      required_phase_burns:
-      - name: Cross-track phase burn
-        axis: cross_track
-        radial_abs_km: 1.2
-        radial_tolerance_km: 0.25
-        max_abs_intrack_km: 0.5
-      max_time_s: 10800.0
-      max_delta_v_m_s: 10.0
+      goal_radius_km: 0.01
+      max_goal_speed_km_s: 0.0001
+      hard_speed_limit_radius_km: 0.025
+      hard_speed_limit_km_s: 0.0001
+      max_time_s: 14400.0
+      max_delta_v_m_s: 3.0
 objects:
   rocket:
     enabled: false
@@ -76,11 +84,11 @@ objects:
         frame: rect
         state:
         - 0.0
-        - -3.0
+        - -0.75
         - 0.0
         - 0.0
-        - -0.0001
         - 0.0
+        - 0.0001
       attitude_quat_bn:
       - 1.0
       - 0.0
@@ -137,7 +145,7 @@ objects:
         inc_deg: 45.0
         raan_deg: 0.0
         argp_deg: 0.0
-        true_anomaly_deg: 140.0
+        true_anomaly_deg: 100.0
       attitude_quat_bn:
       - 1.0
       - 0.0
@@ -180,7 +188,7 @@ objects:
         type: ekf
     kind: satellite
 simulator:
-  duration_s: 10800.0
+  duration_s: 7200.0
   dt_s: 1.0
   dynamics:
     orbit:
@@ -206,7 +214,7 @@ simulator:
     earth_impact_enabled: false
     earth_radius_km: 6378.137
 outputs:
-  output_dir: outputs/game_training_rpo_07
+  output_dir: outputs/game_training_rpo_09
   mode: save
   stats:
     enabled: true
