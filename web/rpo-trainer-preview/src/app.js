@@ -25,7 +25,7 @@ const SATELLITE_SPRITE_DIAMETER_KM = 0.006;
 const SATELLITE_ICON_SIZE_PX = 20;
 const TARGET_MARKER = "#f55c5c";
 const CHASER_MARKER = "#f5cd5c";
-const BUILD_ID = "sandbox-music-2026-06-19";
+const BUILD_ID = "mobile-selector-play-2026-06-26";
 const ARCADE_BUILD_ID = `${BUILD_ID}-competition-local`;
 const ARCADE_CHALLENGE_RECORD = buildChallengeRecord(DEFAULT_PURSUIT_CHALLENGE);
 const LEADERBOARD_REFRESH_MS = 30000;
@@ -53,6 +53,7 @@ const el = {
   selectorPreviewBrief: document.querySelector("#selectorPreviewBrief"),
   selectorPreviewCriteria: document.querySelector("#selectorPreviewCriteria"),
   selectorPreviewNotes: document.querySelector("#selectorPreviewNotes"),
+  selectorPlayButton: document.querySelector("#selectorPlayButton"),
   leaderboardPanel: document.querySelector("#leaderboardPanel"),
   leaderboardList: document.querySelector("#leaderboardList"),
   leaderboardMeta: document.querySelector("#leaderboardMeta"),
@@ -627,6 +628,10 @@ function renderLevelSelector() {
     button.setAttribute("aria-current", active ? "true" : "false");
   });
   const option = levelOptions[state.selectedLevel] || levelOptions[0];
+  if (el.selectorPlayButton) {
+    el.selectorPlayButton.textContent = "Play Level";
+    el.selectorPlayButton.setAttribute("aria-label", `Play ${option.title}.`);
+  }
   el.selectorPreviewTitle.textContent = option.title;
   el.selectorPreviewBudget.textContent = option.budget;
   el.selectorPreviewObjective.textContent = option.objective;
@@ -724,6 +729,7 @@ function renderLeaderboard(message = "") {
 function selectLevel(index) {
   state.selectedLevel = Math.max(0, Math.min(index, levelOptions.length - 1));
   renderLevelSelector();
+  updateDebugState();
 }
 
 function launchSelectedLevel(source = "selector") {
@@ -2585,6 +2591,9 @@ function bindEvents() {
   });
   bindCommandButton(el.musicButton, toggleMusic);
   bindCommandButton(el.selectorMusicButton, toggleMusic);
+  bindCommandButton(el.selectorPlayButton, () => {
+    launchSelectedLevel("selector_play_button");
+  });
   bindCommandButton(el.viewButton, () => {
     if (state.activeView === "mobile") {
       playMusicFromGesture();
@@ -2651,6 +2660,7 @@ function bindEvents() {
     button.addEventListener("click", () => {
       const idx = levelOptions.findIndex((option) => option.id === button.dataset.levelOption);
       if (idx >= 0) selectLevel(idx);
+      if (state.activeView === "mobile") return;
       launchSelectedLevel("selector_click");
     });
   });

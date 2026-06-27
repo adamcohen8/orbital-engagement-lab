@@ -15,7 +15,7 @@
     <meta name="oel-vercel-analytics-hosts" content=".vercel.app,orbital-engagement-lab.vercel.app" />
     <title>Orbital Engagement Lab RPO Trainer Preview</title>
     <link rel="icon" href="./src/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="./src/styles.css?v=unified-mobile-shell-2026-06-17m" />
+    <link rel="stylesheet" href="./src/styles.css?v=mobile-selector-play-2026-06-26" />
   </head>
   <body>
     <main class="trainer-shell selector-mode">
@@ -44,7 +44,10 @@
           </nav>
 
           <article class="launcher-preview" aria-live="polite">
-            <h2 id="selectorPreviewTitle">Level 0 - Tutorial</h2>
+            <div class="launcher-preview-head">
+              <h2 id="selectorPreviewTitle">Level 0 - Tutorial</h2>
+              <button class="launcher-play-level" id="selectorPlayButton" type="button">Play Level</button>
+            </div>
             <p class="launcher-budget" id="selectorPreviewBudget">Time: 18000s   Chaser dV: 12.000 m/s   Speed Gate: 0.300 m/s</p>
             <section class="leaderboard-panel hidden" id="leaderboardPanel" aria-label="Pursuit Arcade leaderboard">
               <div class="leaderboard-head">
@@ -202,6 +205,6 @@
       </section>
     </main>
 
-    <script src="./src/app.js?v=unified-mobile-shell-2026-06-17m" type="module"></script>
+    <script src="./src/app.js?v=mobile-selector-play-2026-06-26" type="module"></script>
   </body>
 </html>
