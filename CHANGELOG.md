@@ -6,6 +6,30 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.16.1 - 2026-06-27
+
+Release thesis: `v0.16.1` is a narrow generated-public release. The public
+product change is limited to a mobile RPO Trainer preview selector improvement,
+with release metadata and boundary tooling updated to keep private/prototype
+surfaces out of the generated public repository.
+
+### Added
+
+- No new public runtime APIs or scenario workflows.
+
+### Changed
+
+- Updated the RPO Trainer web preview so mobile users select a level first and
+  launch it with an explicit `Play Level` button.
+- Tightened public export rules so new private/prototype source, docs, configs,
+  and tests stay out of the generated public repository.
+
+### Fixed
+
+- Fixed public export drift by stripping private helper APIs and tests from
+  generated public-owned files when those helpers support private-only
+  workflows.
+
 ## 0.16.0 - 2026-06-26
 
 Release thesis: `v0.16.0` expands the public RPO trainer and public-export

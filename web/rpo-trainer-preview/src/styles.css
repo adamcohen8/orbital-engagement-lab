@@ -245,6 +245,14 @@ p {
   padding: 20px;
 }
 
+.launcher-preview-head {
+  display: block;
+}
+
+.launcher-play-level {
+  display: none;
+}
+
 .launcher-preview h2 {
   margin: 0 0 14px;
   font-size: 18px;
@@ -1042,6 +1050,29 @@ body.mobile-view .launcher-preview {
   border-radius: 8px;
 }
 
+body.mobile-view .launcher-preview-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+}
+
+body.mobile-view .launcher-play-level {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transform: translateY(-4px);
+  min-width: 92px;
+  min-height: 32px;
+  padding: 0 10px;
+  border-color: rgb(94, 190, 245);
+  background: rgb(34, 60, 76);
+  color: rgb(238, 244, 250);
+  font-size: 12px;
+  line-height: 14px;
+  white-space: nowrap;
+}
+
 body.mobile-view .launcher-preview h2 {
   margin-bottom: 8px;
   font-size: 17px;
@@ -1415,6 +1446,12 @@ body.mobile-view .leaderboard-form {
 
   body.mobile-view .launcher-preview {
     padding: 10px;
+  }
+
+  body.mobile-view .launcher-play-level {
+    min-width: 86px;
+    min-height: 30px;
+    font-size: 11px;
   }
 
   body.mobile-view .launcher-preview h2 {
