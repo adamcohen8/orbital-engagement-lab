@@ -69,6 +69,12 @@ Ground station sections:
   `alt_km`, `min_elevation_deg`, and `max_range_km`.
 - Access is defined as geometric line of sight, elevation at least
   `min_elevation_deg`, and range no greater than `max_range_km` when configured.
+- Ground stations may opt into synthetic measurement rows with a
+  `measurements` mapping. Supported v0 measurement types are `az_el_range` and
+  `az_el_range_rate`, with optional `update_cadence_s`, deterministic `seed`,
+  and scalar range/range-rate/angle noise sigmas.
+- Ground-station measurements are generated evidence and do not modify
+  dynamics, control, estimation, knowledge, termination, or truth histories.
 
 Analysis sections:
 
@@ -171,7 +177,7 @@ Optional `tle.propagate_to_initial_epoch: false` keeps the state at the TLE
 epoch instead of advancing mean anomaly to `simulator.initial_jd_utc`.
 The TLE initializer converts mean elements to an ECI state with a two-body
 Keplerian approximation. Subsequent propagation uses the configured OEL
-numerical special-perturbations force model; SGP4/general-perturbations
+numerical special-perturbations force model; OGP-SGP4/general-perturbations
 propagation requires object-level `propagation_method: general` with
 `general.model: sgp4`.
 

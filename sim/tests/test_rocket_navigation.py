@@ -102,6 +102,83 @@ class TestRocketNavigation(unittest.TestCase):
         self.assertIn("final_apoapsis_alt_km", summary)
         self.assertIn("max_dynamic_pressure_pa", summary)
 
+    def test_process_pool_rocket_step_updates_parent_runtime_state(self):
+        base = {
+            "scenario_name": "rocket_process_pool_parent_state",
+            "objects": {
+                "rocket": {
+                    "enabled": True,
+                    "role": "rocket",
+                    "kind": "rocket",
+                    "specs": {
+                        "preset_stack": "BASIC_TWO_STAGE_STACK",
+                        "payload_mass_kg": 150.0,
+                        "thrust_axis_body": [1.0, 0.0, 0.0],
+                    },
+                    "initial_state": {
+                        "launch_lat_deg": 28.5,
+                        "launch_lon_deg": -80.6,
+                        "launch_alt_km": 0.1,
+                        "launch_azimuth_deg": 90.0,
+                    },
+                },
+                "target": {
+                    "enabled": True,
+                    "kind": "satellite",
+                    "role": "target",
+                    "specs": {"mass_kg": 100.0},
+                    "initial_state": {
+                        "position_eci_km": [7000.0, 0.0, 0.0],
+                        "velocity_eci_km_s": [0.0, 7.546, 0.0],
+                    },
+                },
+            },
+            "simulator": {
+                "duration_s": 3.0,
+                "dt_s": 1.0,
+                "resource_profile": "off",
+                "dynamics": {
+                    "orbit": {"j2": False, "j3": False, "j4": False, "drag": False, "srp": False},
+                    "attitude": {"enabled": False},
+                    "rocket": {"aero_model_enabled": False, "attitude_mode": "cheater"},
+                },
+                "termination": {"earth_impact_enabled": False},
+            },
+            "outputs": {
+                "mode": "interactive",
+                "stats": {"save_json": False, "save_full_log": False},
+                "plots": {"enabled": False, "figure_ids": []},
+                "animations": {"enabled": False, "types": []},
+            },
+        }
+        serial_root = dict(base)
+        serial_root["simulator"] = dict(base["simulator"])
+        serial_root["simulator"]["execution"] = {"object_parallelism": {"enabled": False, "backend": "serial"}}
+        serial_payload = _SingleRunEngine(scenario_config_from_dict(serial_root)).run()
+
+        process_root = dict(base)
+        process_root["simulator"] = dict(base["simulator"])
+        process_root["simulator"]["execution"] = {
+            "object_parallelism": {
+                "enabled": True,
+                "backend": "process_pool",
+                "workers": 2,
+                "min_objects": 2,
+            }
+        }
+        try:
+            process_payload = _SingleRunEngine(scenario_config_from_dict(process_root)).run()
+        except RuntimeError as exc:
+            if "ProcessPoolObjectStepExecutor is unavailable" in str(exc):
+                self.skipTest(str(exc))
+            raise
+
+        serial_rocket = np.asarray(serial_payload["truth_by_object"]["rocket"], dtype=float)
+        process_rocket = np.asarray(process_payload["truth_by_object"]["rocket"], dtype=float)
+        self.assertEqual(process_payload["summary"]["runtime_profile"]["executor"]["object_step_backend"], "process_pool")
+        self.assertGreater(float(np.linalg.norm(serial_rocket[-1, :3] - serial_rocket[0, :3])), 0.0)
+        self.assertTrue(np.allclose(process_rocket[-1, :6], serial_rocket[-1, :6], rtol=0.0, atol=1e-9))
+
 
 if __name__ == "__main__":
     unittest.main()

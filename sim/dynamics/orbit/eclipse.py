@@ -82,10 +82,17 @@ def srp_shadow_factor(
     if rho_norm <= 0.0:
         return 1.0
 
-    if model in ("cylindrical", "cylinder"):
-        r_sun = np.asarray(geometry["sun_pos_eci_km"], dtype=float)
-        sun_norm = max(float(geometry["sun_pos_norm_km"]), 1e-12)
+    r_sun = np.asarray(geometry["sun_pos_eci_km"], dtype=float)
+    sun_norm = float(geometry["sun_pos_norm_km"])
+    s_hat = None
+    if sun_norm > 0.0:
         s_hat = r_sun / sun_norm
+        if float(np.dot(r_sc, s_hat)) >= 0.0:
+            return 1.0
+
+    if model in ("cylindrical", "cylinder"):
+        if s_hat is None:
+            s_hat = r_sun / max(sun_norm, 1e-12)
         r_sc_along_sun = float(np.dot(r_sc, s_hat))
         if r_sc_along_sun >= 0.0:
             return 1.0

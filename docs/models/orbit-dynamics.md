@@ -38,6 +38,18 @@ OEL may add optional perturbation accelerations when the scenario enables them:
 - Sun and Moon third-body accelerations,
 - CR3BP propagation for the explicitly selected `model: "cr3bp"` path.
 
+Product terminology:
+
+- **OGP**, the **OEL General Propagator**, is OEL's catalog-style
+  general-perturbations family for TLE/mean-element products. **OGP-SGP4** is
+  the near-Earth SGP4 path, and **OGP-SDP4** is the deep-space/resonance path
+  for TLEs at or above the 225-minute period threshold.
+- **ONP**, the **OEL Numerical Propagator**, is OEL's native numerical
+  propagation path with the selected force-model profile.
+
+ONP should not be described as HPOP; HPOP refers to external
+reference/validation tooling when those assets are available.
+
 When `model: "cr3bp"` is selected, the scenario validator rejects the
 two-body perturbation flags that belong to the Earth-centered special
 perturbations path.
@@ -103,10 +115,10 @@ configures the corresponding frame model and data paths.
 
 TLE initialization is separate from propagation. By default, a TLE is converted
 to an initial ECI state with a dependency-free Keplerian/two-body
-approximation; subsequent propagation uses the configured OEL numerical force
-model. Passive catalog-style SGP4 propagation is available only for objects
-that explicitly set `propagation_method: general` and `general.model: sgp4`,
-with the limitations documented in `docs/scenario-yaml.md` and
+approximation; subsequent propagation uses the configured ONP force model.
+Passive catalog-style OGP-SGP4 propagation is available only for objects that
+explicitly set `propagation_method: general` and `general.model: sgp4`, with
+the limitations documented in `docs/scenario-yaml.md` and
 `docs/known-limitations.md`.
 
 ## Configuration Surface
@@ -253,10 +265,10 @@ Specific model limits:
 - Public spherical-harmonic scenarios need inline terms or an explicit
   coefficient file. HPOP/GGM03 reference data is not bundled with the public
   core.
-- SGP4 general-perturbations objects are passive catalog-style objects in the
-  current implementation and do not accept OEL thrust or controllers.
-- Near-Earth SGP4 support rejects TLEs with orbital period at or above 225
-  minutes because those cases require deep-space SDP4/resonance handling.
+- OGP-SGP4 objects are passive catalog-style objects in the current
+  implementation and do not accept OEL thrust or controllers.
+- OGP-SGP4 support rejects TLEs with orbital period at or above 225 minutes
+  because those cases require OGP-SDP4/deep-space/resonance handling.
 - The optional acceleration path is a performance optimization for supported
   kernels; it does not change the validation envelope.
 - Review-store evidence records what a completed run produced. It does not

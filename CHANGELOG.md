@@ -6,6 +6,44 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.17.0 - 2026-06-28
+
+Release thesis: `v0.17.0` expands the public OGP/ONP propagation and evidence
+surface while keeping orbit-determination and OEL Scale operational workflows
+private/Pro-only. It updates public agent/docs language around OGP and ONP,
+adds passive catalog-propagation and validation maturity work, introduces
+opt-in object-step process-pool parity support, and tightens the public export
+boundary for local development tools, configs, and Pro OD workflows.
+
+### Added
+
+- Added OGP/ONP-facing propagation, validation, and documentation updates for
+  public catalog-style propagation workflows.
+- Added scenario-YAML support for ground-station measurement metadata and
+  opt-in object-level execution settings used for process-pool parity and
+  profiling runs.
+- Added private/Pro Scale and orbit-determination workflow scaffolding,
+  synthetic measurement/OD paths, and related operational-store contract
+  updates behind the public export boundary.
+
+### Changed
+
+- Renamed public-facing propagation language so OGP refers to the OEL General
+  Propagator family and ONP refers to the OEL Numerical Propagator, while
+  reserving HPOP for external reference and validation workflows.
+- Updated validation governance, evidence-matrix, and model-validation docs
+  for the current propagation and reference-comparison posture.
+- Tightened public export rules so local development assets and OD-related
+  implementation paths remain private/Pro-only.
+
+### Fixed
+
+- Fixed persistent `process_pool` object stepping so worker-mutated agent
+  runtime state is returned to the parent simulator process before the next
+  timeline step.
+- Fixed public/pro documentation drift around ground-station observations and
+  orbit-determination availability.
+
 ## 0.16.1 - 2026-06-27
 
 Release thesis: `v0.16.1` is a narrow generated-public release. The public

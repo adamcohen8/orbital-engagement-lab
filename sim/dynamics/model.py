@@ -112,7 +112,9 @@ class OrbitalAttitudeDynamics(DynamicsModel):
                 sun_dir_body = c_bn @ sun_dir_eci
                 env_local["srp_area_m2"] = geom.projected_area_m2(-sun_dir_body)
 
-        x_orbit = np.hstack((state.position_eci_km, state.velocity_eci_km_s))
+        x_orbit = np.empty(6, dtype=float)
+        x_orbit[:3] = state.position_eci_km
+        x_orbit[3:] = state.velocity_eci_km_s
         orbit_ctx = OrbitContext(
             mu_km3_s2=self.mu_km3_s2,
             mass_kg=state.mass_kg,
@@ -179,15 +181,17 @@ class OrbitalAttitudeDynamics(DynamicsModel):
                     )
             att_dt = self._effective_substep(self.attitude_substep_s, dt_s)
             t_att = state.t_s
+            att_state = StateTruth(
+                position_eci_km=np.array(midpoint_truth.position_eci_km, dtype=float),
+                velocity_eci_km_s=np.array(midpoint_truth.velocity_eci_km_s, dtype=float),
+                attitude_quat_bn=np.array(q_next, dtype=float),
+                angular_rate_body_rad_s=np.array(w_next, dtype=float),
+                mass_kg=float(state.mass_kg),
+                t_s=float(midpoint_truth.t_s),
+            )
             for h in self._substep_sequence(dt_s, att_dt):
-                att_state = StateTruth(
-                    position_eci_km=np.array(midpoint_truth.position_eci_km, dtype=float),
-                    velocity_eci_km_s=np.array(midpoint_truth.velocity_eci_km_s, dtype=float),
-                    attitude_quat_bn=np.array(q_next, dtype=float),
-                    angular_rate_body_rad_s=np.array(w_next, dtype=float),
-                    mass_kg=float(state.mass_kg),
-                    t_s=float(midpoint_truth.t_s),
-                )
+                att_state.attitude_quat_bn = q_next
+                att_state.angular_rate_body_rad_s = w_next
                 disturbance_torque = (
                     np.zeros(3)
                     if self.disturbance_model is None
@@ -255,8 +259,10 @@ class OrbitalAttitudeDynamics(DynamicsModel):
 
     @staticmethod
     def _midpoint_translational_truth(state: StateTruth, x_orbit_next: np.ndarray, dt_s: float) -> StateTruth:
-        x_orbit_now = np.hstack((state.position_eci_km, state.velocity_eci_km_s))
-        x_mid = 0.5 * (np.array(x_orbit_now, dtype=float) + np.array(x_orbit_next, dtype=float).reshape(6))
+        x_orbit_now = np.empty(6, dtype=float)
+        x_orbit_now[:3] = state.position_eci_km
+        x_orbit_now[3:] = state.velocity_eci_km_s
+        x_mid = 0.5 * (x_orbit_now + np.array(x_orbit_next, dtype=float).reshape(6))
         return StateTruth(
             position_eci_km=np.array(x_mid[:3], dtype=float),
             velocity_eci_km_s=np.array(x_mid[3:], dtype=float),

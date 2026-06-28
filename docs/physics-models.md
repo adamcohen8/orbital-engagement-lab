@@ -66,7 +66,7 @@ scenario YAML
 
 For example, a TLE-initialized numerical propagation scenario should identify
 whether the TLE is only used to initialize state or whether the object uses the
-passive SGP4 general-perturbations path. A rendezvous scenario should identify
+passive OGP-SGP4 general-perturbations path. A rendezvous scenario should identify
 whether relative states are represented in rectangular or curvilinear RIC and
 whether the controller assumes linearized relative motion. A high-fidelity
 orbit validation case should state which gravity, atmosphere, solar-radiation,

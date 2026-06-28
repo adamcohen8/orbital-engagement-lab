@@ -269,12 +269,14 @@ invalid checksum digits.
 
 The built-in TLE initializer is dependency-free and converts TLE mean elements
 to an ECI state with a Keplerian/two-body approximation. Subsequent propagation
-uses the configured OEL numerical special-perturbations force model. It does
-not perform SGP4/general-perturbations propagation or reuse TLE-specific
-drag/perturbation terms.
+uses the configured ONP force model. It does not perform
+OGP-SGP4/general-perturbations propagation or reuse TLE-specific drag/perturbation
+terms.
 
-For passive catalog-style propagation from TLEs, set the object propagation
-family to general perturbations and choose SGP4:
+For passive catalog-style propagation from TLEs, use **OGP**, the OEL General
+Propagator family. The current supported OGP model is **OGP-SGP4**, configured
+with the compatibility surface `propagation_method: general` and
+`general.model: sgp4`:
 
 ```yaml
 objects:
@@ -291,12 +293,12 @@ objects:
         line2: "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1000"
 ```
 
-SGP4 objects are passive in the initial implementation. They can participate in
-truth histories, review-store queries, ground access, plots, and relative-state
-analysis, but they do not accept OEL thrust, orbit controllers, maneuver
-objectives, or special-perturbations force flags as trajectory modifiers.
-They are limited to near-Earth SGP4; TLEs with orbital period at or above 225
-minutes are rejected as unsupported deep-space SDP4/resonance cases.
+OGP objects are passive in the initial implementation. They can
+participate in truth histories, review-store queries, ground access, plots, and
+relative-state analysis, but they do not accept OEL thrust, orbit controllers,
+maneuver objectives, or special-perturbations force flags as trajectory
+modifiers. TLEs with orbital period at or above 225 minutes dispatch to
+OGP-SDP4/deep-space/resonance handling.
 With `output_frame: teme`, v1 stores the propagated native TEME state in the
 normal state-history slots and labels the object frame as `teme` in payload and
 review metadata. For legacy ECI-compatible workflows, use `output_frame: eci`
@@ -420,6 +422,32 @@ available optional numeric acceleration for supported kernels, or `numba` to
 request the Numba backend explicitly. Unsupported dynamics combinations fall
 back to the standard Python path. Set `acceleration.warmup: true` to compile
 supported kernels before the run starts.
+
+Single-run object stepping is serial by default. Experimental within-scenario
+object workers can be enabled for parity and profiling runs:
+
+```yaml
+simulator:
+  resource_profile: off
+  execution:
+    object_parallelism:
+      enabled: true
+      backend: process_pool
+      workers: 6
+      reserve_workers: 2
+      min_objects: 3
+```
+
+`backend: process_pool` uses persistent subprocess workers for object-step work
+while the main simulator process remains the timeline orchestrator. The current
+persistent backend expects at least one worker per active object; if a resource
+profile caps workers below the active object count, OEL falls back to serial
+object stepping. For example, `laptop-safe` forces the object-step backend back
+to serial. The process-pool backend is intended as an opt-in parity/profiling
+path, not as a default efficiency path. Current measured evidence on a
+5-chaser high-fidelity RPO profile showed exact final-state parity with serial
+ONP but slower wall-clock time because worker startup, CPU contention,
+subprocess messaging, and synchronization overhead dominated.
 
 ### Atmospheric Passes And Re-Entry
 

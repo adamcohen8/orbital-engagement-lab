@@ -21,6 +21,18 @@ completed-run inspection, comparison packets, and standard review plots, read
 
 - Treat scenario YAML, CLI commands, Python APIs, tests, docs, and generated
   artifacts as the supported interface.
+- Treat **OGP** as the product name for the **OEL General Propagator**:
+  OEL's catalog-style general-perturbations family for TLE/mean-element
+  products. **OGP-SGP4** is the supported near-Earth SGP4 path today.
+  **OGP-SDP4** is planned for future deep-space/resonance support and should
+  not be claimed as available yet.
+- Treat **ONP** as the product name for the **OEL Numerical Propagator**:
+  OEL's configurable numerical propagation path for two-body and
+  special-perturbation force-model studies. Use **OGP** for explicit passive
+  catalog-style general-perturbations propagation or SGP4/SDP4-family
+  mean-element products. Reserve **HPOP** for external reference/validation
+  workflows or legacy command names, not as the name of OEL's native
+  propagator.
 - Interpret the user's intent first. Choose a nearby example only when it
   genuinely fits; otherwise create the minimum viable validated scenario that
   answers the request.
@@ -71,9 +83,9 @@ Default quietly when the detail is incidental:
   closed-loop knowledge is needed,
 - no Monte Carlo, sensitivity, campaign, optimizer, or report workflow unless
   requested,
-- simple dynamics first. Do not enable J2, J3, J4, drag, SRP, third bodies, or
-  high-fidelity propagation unless the user asks for them or the stated study
-  requires them.
+- simple ONP dynamics first. Do not enable J2, J3, J4, drag, SRP, third
+  bodies, spherical harmonics, or high-fidelity ONP propagation unless the user
+  asks for them or the stated study requires them.
 
 Examples:
 

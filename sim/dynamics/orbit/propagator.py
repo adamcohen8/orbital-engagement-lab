@@ -9,12 +9,12 @@ from sim.acceleration.kernels.orbit import rk4_zonal_step_state
 from sim.acceleration.settings import acceleration_settings_from_mode
 from sim.dynamics.orbit.accelerations import (
     OrbitContext,
-    accel_drag,
+    accel_drag_resolved,
     accel_j2,
     accel_j3,
     accel_j4,
     accel_lift,
-    accel_srp,
+    accel_srp_resolved,
     accel_third_body,
     accel_two_body,
 )
@@ -23,6 +23,7 @@ from sim.dynamics.orbit.cr3bp import cr3bp_system, propagate_cr3bp_state
 from sim.dynamics.orbit.eclipse import resolve_srp_geometry, srp_shadow_factor
 from sim.dynamics.orbit.environment import (
     EARTH_RADIUS_KM,
+    EARTH_ROT_RATE_RAD_S,
     JUPITER_MU_KM3_S2,
     MARS_MU_KM3_S2,
     MERCURY_MU_KM3_S2,
@@ -33,8 +34,13 @@ from sim.dynamics.orbit.environment import (
     SUN_MU_KM3_S2,
     URANUS_MU_KM3_S2,
     VENUS_MU_KM3_S2,
+    srp_pressure_n_m2,
 )
-from sim.dynamics.orbit.epoch import resolve_body_position_eci_km, resolve_sun_moon_positions
+from sim.dynamics.orbit.epoch import (
+    resolve_body_position_eci_km,
+    resolve_sun_moon_positions,
+    resolve_time_dependent_env,
+)
 from sim.dynamics.orbit.integrators import (
     AdaptiveStepInfo,
     combine_adaptive_step_info,
@@ -43,6 +49,7 @@ from sim.dynamics.orbit.integrators import (
 )
 from sim.dynamics.orbit.spherical_harmonics import (
     accel_spherical_harmonics_terms,
+    compile_spherical_harmonic_terms,
     load_real_earth_gravity_terms,
     parse_spherical_harmonic_terms,
 )
@@ -128,6 +135,11 @@ def spherical_harmonics_plugin(t_s: float, x_eci: np.ndarray, env: dict, ctx: Or
             terms = cached_terms[1]
     if not terms:
         return np.zeros(3)
+    compiled = env.get("_compiled_spherical_harmonics_terms")
+    if compiled is None:
+        compiled = compile_spherical_harmonic_terms(terms)
+        if compiled is not None:
+            env["_compiled_spherical_harmonics_terms"] = compiled
     fd_step_km = float(env.get("spherical_harmonics_fd_step_km", 1e-3))
     jd_utc_start = env.get("jd_utc_start")
     re_km = float(env.get("spherical_harmonics_reference_radius_km", EARTH_RADIUS_KM))
@@ -145,6 +157,7 @@ def spherical_harmonics_plugin(t_s: float, x_eci: np.ndarray, env: dict, ctx: Or
         jd_utc_start=None if jd_utc_start is None else float(jd_utc_start),
         frame_model=frame_model,
         eop_path=None if eop_path is None else str(eop_path),
+        compiled=compiled,
     )
 
 
@@ -158,21 +171,19 @@ def drag_plugin(t_s: float, x_eci: np.ndarray, env: dict, ctx: OrbitContext) -> 
             t_s,
             env=env,
         )
-    return accel_drag(
-        x_eci[:3],
-        x_eci[3:],
-        t_s,
-        ctx.mass_kg,
-        ctx.area_m2,
-        ctx.cd,
-        {
-            "density_kg_m3": density,
-            "drag_area_m2": env.get("drag_area_m2", ctx.area_m2),
-            "jd_utc_start": env.get("jd_utc_start"),
-            "drag_frame_model": env.get("drag_frame_model", "simple"),
-            "drag_eop_path": env.get("drag_eop_path"),
-            "drag_earth_rotation_rad_s": env.get("drag_earth_rotation_rad_s"),
-        },
+    omega_raw = env.get("drag_earth_rotation_rad_s")
+    return accel_drag_resolved(
+        r_eci_km=x_eci[:3],
+        v_eci_km_s=x_eci[3:],
+        t_s=t_s,
+        mass_kg=ctx.mass_kg,
+        cd=ctx.cd,
+        density_kg_m3=float(density),
+        area_eff_m2=float(env.get("drag_area_m2", ctx.area_m2)),
+        drag_frame_model=str(env.get("drag_frame_model", "simple")).strip().lower(),
+        jd_utc_start=(None if env.get("jd_utc_start") is None else float(env.get("jd_utc_start"))),
+        drag_eop_path=(None if env.get("drag_eop_path") is None else str(env.get("drag_eop_path"))),
+        omega_earth_rad_s=float(EARTH_ROT_RATE_RAD_S if omega_raw is None else omega_raw),
     )
 
 
@@ -211,25 +222,20 @@ def lift_plugin(t_s: float, x_eci: np.ndarray, env: dict, ctx: OrbitContext) -> 
 
 def srp_plugin(t_s: float, x_eci: np.ndarray, env: dict, ctx: OrbitContext) -> np.ndarray:
     srp_geometry = resolve_srp_geometry(x_eci[:3], t_s, env)
-    return accel_srp(
-        x_eci[:3],
-        ctx.mass_kg,
-        ctx.area_m2,
-        ctx.cr,
-        t_s,
-        {
-            "srp_geometry": srp_geometry,
-            "srp_sun_dir_eci": srp_geometry["sun_dir_sc_eci"],
-            "srp_distance_scale": srp_geometry["distance_scale"],
-            "srp_shadow_factor": srp_shadow_factor(
-                r_sc_eci_km=x_eci[:3],
-                t_s=t_s,
-                env=env,
-                srp_geometry=srp_geometry,
-            ),
-            "srp_area_m2": env.get("srp_area_m2", ctx.area_m2),
-            "srp_shadow_model": env.get("srp_shadow_model", "conical"),
-        },
+    shadow = srp_shadow_factor(
+        r_sc_eci_km=x_eci[:3],
+        t_s=t_s,
+        env=env,
+        srp_geometry=srp_geometry,
+    )
+    return accel_srp_resolved(
+        sun_dir_eci=srp_geometry["sun_dir_sc_eci"],
+        mass_kg=ctx.mass_kg,
+        area_eff_m2=float(env.get("srp_area_m2", ctx.area_m2)),
+        cr=ctx.cr,
+        distance_scale=float(srp_geometry["distance_scale"]),
+        shadow_factor=shadow,
+        pressure_n_m2=srp_pressure_n_m2(env),
     )
 
 
@@ -280,6 +286,15 @@ class OrbitPropagator:
     _acceleration_enabled_cache: bool | None = field(default=None, init=False, repr=False)
     _zonal_rk4_fast_path_checked: bool = field(default=False, init=False, repr=False)
     _zonal_rk4_fast_path_flags_cache: tuple[bool, bool, bool] | None = field(default=None, init=False, repr=False)
+    _builtin_rk4_fast_path_checked: bool = field(default=False, init=False, repr=False)
+    _builtin_rk4_fast_path_enabled_cache: bool = field(default=False, init=False, repr=False)
+    _builtin_needs_time_env_cache: bool = field(default=False, init=False, repr=False)
+    _builtin_rk4_k1: np.ndarray = field(default_factory=lambda: np.empty(6, dtype=float), init=False, repr=False)
+    _builtin_rk4_k2: np.ndarray = field(default_factory=lambda: np.empty(6, dtype=float), init=False, repr=False)
+    _builtin_rk4_k3: np.ndarray = field(default_factory=lambda: np.empty(6, dtype=float), init=False, repr=False)
+    _builtin_rk4_k4: np.ndarray = field(default_factory=lambda: np.empty(6, dtype=float), init=False, repr=False)
+    _builtin_rk4_stage: np.ndarray = field(default_factory=lambda: np.empty(6, dtype=float), init=False, repr=False)
+    _builtin_rk4_accel: np.ndarray = field(default_factory=lambda: np.empty(3, dtype=float), init=False, repr=False)
     last_adaptive_step_info: AdaptiveStepInfo | None = field(default=None, init=False, repr=False)
     adaptive_step_info: AdaptiveStepInfo | None = field(default=None, init=False, repr=False)
 
@@ -312,6 +327,15 @@ class OrbitPropagator:
                 include_j2,
                 include_j3,
                 include_j4,
+            )
+        if self._builtin_rk4_fast_path_enabled():
+            return self._propagate_builtin_rk4(
+                x_eci=x_eci,
+                dt_s=dt_s,
+                t_s=t_s,
+                command_accel_eci_km_s2=command_accel_eci_km_s2,
+                env=env,
+                ctx=ctx,
             )
 
         def deriv(t_local: float, x_local: np.ndarray) -> np.ndarray:
@@ -366,3 +390,96 @@ class OrbitPropagator:
             j4_plugin in self.plugins,
         )
         return self._zonal_rk4_fast_path_flags_cache
+
+    def _builtin_rk4_fast_path_enabled(self) -> bool:
+        if self._builtin_rk4_fast_path_checked:
+            return bool(self._builtin_rk4_fast_path_enabled_cache)
+        self._builtin_rk4_fast_path_checked = True
+        if str(self.integrator).strip().lower() != "rk4":
+            self._builtin_rk4_fast_path_enabled_cache = False
+            return False
+        supported = {
+            j2_plugin,
+            j3_plugin,
+            j4_plugin,
+            spherical_harmonics_plugin,
+            drag_plugin,
+            lift_plugin,
+            srp_plugin,
+            third_body_moon_plugin,
+            third_body_sun_plugin,
+            third_body_planets_plugin,
+        }
+        if any(plugin not in supported for plugin in self.plugins):
+            self._builtin_rk4_fast_path_enabled_cache = False
+            return False
+        time_env_plugins = {
+            srp_plugin,
+            third_body_moon_plugin,
+            third_body_sun_plugin,
+            third_body_planets_plugin,
+        }
+        self._builtin_needs_time_env_cache = any(plugin in time_env_plugins for plugin in self.plugins)
+        self._builtin_rk4_fast_path_enabled_cache = True
+        return True
+
+    def _propagate_builtin_rk4(
+        self,
+        *,
+        x_eci: np.ndarray,
+        dt_s: float,
+        t_s: float,
+        command_accel_eci_km_s2: np.ndarray,
+        env: dict,
+        ctx: OrbitContext,
+    ) -> np.ndarray:
+        x0 = np.asarray(x_eci, dtype=float).reshape(6)
+        h = float(dt_s)
+        t0 = float(t_s)
+        command_accel = np.asarray(command_accel_eci_km_s2, dtype=float).reshape(3)
+        stage_env_cache: dict[float, dict] = {}
+        k1 = self._builtin_rk4_k1
+        k2 = self._builtin_rk4_k2
+        k3 = self._builtin_rk4_k3
+        k4 = self._builtin_rk4_k4
+        x_stage = self._builtin_rk4_stage
+
+        self._builtin_deriv_into(t0, x0, env, stage_env_cache, ctx, command_accel, k1)
+        np.multiply(k1, 0.5 * h, out=x_stage)
+        x_stage += x0
+        self._builtin_deriv_into(t0 + 0.5 * h, x_stage, env, stage_env_cache, ctx, command_accel, k2)
+        np.multiply(k2, 0.5 * h, out=x_stage)
+        x_stage += x0
+        self._builtin_deriv_into(t0 + 0.5 * h, x_stage, env, stage_env_cache, ctx, command_accel, k3)
+        np.multiply(k3, h, out=x_stage)
+        x_stage += x0
+        self._builtin_deriv_into(t0 + h, x_stage, env, stage_env_cache, ctx, command_accel, k4)
+        return x0 + (h / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
+
+    def _builtin_deriv_into(
+        self,
+        t_local: float,
+        x_local: np.ndarray,
+        env: dict,
+        stage_env_cache: dict[float, dict],
+        ctx: OrbitContext,
+        command_accel: np.ndarray,
+        out: np.ndarray,
+    ) -> None:
+        stage_env = self._builtin_stage_env(env, t_local, stage_env_cache)
+        out[:3] = x_local[3:]
+        a = self._builtin_rk4_accel
+        np.add(accel_two_body(x_local[:3], ctx.mu_km3_s2), command_accel, out=a)
+        for plugin in self.plugins:
+            a += plugin(t_local, x_local, stage_env, ctx)
+        out[3:] = a
+
+    def _builtin_stage_env(self, env: dict, t_s: float, cache: dict[float, dict]) -> dict:
+        if not self._builtin_needs_time_env_cache:
+            return env
+        key = float(t_s)
+        stage_env = cache.get(key)
+        if stage_env is None:
+            stage_env = resolve_time_dependent_env(env, key)
+            cache[key] = stage_env
+        return stage_env

@@ -33,7 +33,7 @@ Evidence:
 Conclusion:
 
 The run supports a geometric access-window smoke assessment for the configured
-station and object. It should not be described as SGP4/general-perturbations
+station and object. It should not be described as OGP-SGP4/general-perturbations
 propagation.
 
 Limitations:

@@ -61,6 +61,7 @@ class GroundStationSection:
     min_elevation_deg: float = 0.0
     max_range_km: float | None = None
     enabled: bool = True
+    measurements: dict[str, Any] = field(default_factory=dict)
 
 
 class _TypedConfigDict(dict):
@@ -94,6 +95,29 @@ class SimulatorAccelerationSection(_TypedConfigDict):
         return bool(self.get("env_override", True))
 
 
+class SimulatorExecutionSection(_TypedConfigDict):
+    _defaults = {
+        "object_parallelism": {
+            "enabled": False,
+            "backend": "serial",
+            "workers": 0,
+            "reserve_workers": 1,
+            "min_objects": 3,
+        },
+        "runtime_profiler": {
+            "enabled": True,
+        },
+    }
+
+    @property
+    def object_parallelism(self) -> dict[str, Any]:
+        return dict(self.get("object_parallelism", {}) or {})
+
+    @property
+    def runtime_profiler(self) -> dict[str, Any]:
+        return dict(self.get("runtime_profiler", {}) or {})
+
+
 @dataclass(frozen=True)
 class SimulatorSection:
     duration_s: float = 3600.0
@@ -101,6 +125,7 @@ class SimulatorSection:
     initial_jd_utc: float | None = None
     resource_profile: str | None = None
     acceleration: SimulatorAccelerationSection = field(default_factory=lambda: SimulatorAccelerationSection())
+    execution: SimulatorExecutionSection = field(default_factory=lambda: SimulatorExecutionSection())
     dynamics: SimulatorDynamicsSection = field(default_factory=lambda: SimulatorDynamicsSection())
     environment: SimulatorEnvironmentSection = field(default_factory=lambda: SimulatorEnvironmentSection())
     plugin_validation: SimulatorPluginValidationSection = field(
@@ -110,6 +135,7 @@ class SimulatorSection:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "acceleration", SimulatorAccelerationSection(self.acceleration))
+        object.__setattr__(self, "execution", SimulatorExecutionSection(self.execution))
         object.__setattr__(self, "dynamics", SimulatorDynamicsSection(self.dynamics))
         object.__setattr__(self, "environment", SimulatorEnvironmentSection(self.environment))
         object.__setattr__(self, "plugin_validation", SimulatorPluginValidationSection(self.plugin_validation))
@@ -177,6 +203,7 @@ class OutputStatsSection(_TypedConfigDict):
         "save_json": True,
         "save_full_log": True,
         "save_history_npz": False,
+        "controller_debug": True,
     }
 
     @property
@@ -194,6 +221,10 @@ class OutputStatsSection(_TypedConfigDict):
     @property
     def save_history_npz(self) -> bool:
         return bool(self.get("save_history_npz", False))
+
+    @property
+    def controller_debug(self) -> bool:
+        return bool(self.get("controller_debug", True))
 
 
 class OutputPlotsSection(_TypedConfigDict):
@@ -1121,6 +1152,7 @@ def _parse_ground_station_section(value: Any, index: int) -> GroundStationSectio
         "min_elevation_deg",
         "max_range_km",
         "enabled",
+        "measurements",
     }
     unknown_keys = sorted(str(key) for key in d if str(key) not in allowed_keys)
     if unknown_keys:
@@ -1148,6 +1180,7 @@ def _parse_ground_station_section(value: Any, index: int) -> GroundStationSectio
         raise ValueError(f"ground_stations[{index}].lat_deg must be between -90 and 90.")
     if max_range_km is not None and max_range_km <= 0.0:
         raise ValueError(f"ground_stations[{index}].max_range_km must be positive when provided.")
+    measurements = _parse_ground_station_measurements(d.get("measurements", {}), index)
     return GroundStationSection(
         id=station_id,
         lat_deg=lat_deg,
@@ -1156,7 +1189,70 @@ def _parse_ground_station_section(value: Any, index: int) -> GroundStationSectio
         min_elevation_deg=min_elevation_deg,
         max_range_km=max_range_km,
         enabled=_parse_bool(d.get("enabled", True), f"ground_stations[{index}].enabled"),
+        measurements=measurements,
     )
+
+
+def _parse_ground_station_measurements(value: Any, index: int) -> dict[str, Any]:
+    if value in (None, False) or value == {}:
+        return {}
+    if value is True:
+        return {"enabled": True}
+    d = _as_dict(value, f"ground_stations[{index}].measurements")
+    allowed_keys = {
+        "enabled",
+        "measurement_type",
+        "update_cadence_s",
+        "seed",
+        "range_sigma_km",
+        "range_rate_sigma_km_s",
+        "angle_sigma_deg",
+        "noise",
+    }
+    unknown_keys = sorted(str(key) for key in d if str(key) not in allowed_keys)
+    if unknown_keys:
+        raise ValueError(
+            f"ground_stations[{index}].measurements has unsupported field(s): {', '.join(unknown_keys)}."
+        )
+    out = dict(d)
+    out["enabled"] = _parse_bool(out.get("enabled", True), f"ground_stations[{index}].measurements.enabled")
+    if "update_cadence_s" in out:
+        cadence = _parse_float(out.get("update_cadence_s"), f"ground_stations[{index}].measurements.update_cadence_s")
+        if cadence <= 0.0:
+            raise ValueError(f"ground_stations[{index}].measurements.update_cadence_s must be positive.")
+        out["update_cadence_s"] = cadence
+    if "seed" in out:
+        out["seed"] = int(_parse_float(out.get("seed"), f"ground_stations[{index}].measurements.seed"))
+    for key in ("range_sigma_km", "range_rate_sigma_km_s", "angle_sigma_deg"):
+        if key in out:
+            sigma = _parse_float(out.get(key), f"ground_stations[{index}].measurements.{key}")
+            if sigma < 0.0:
+                raise ValueError(f"ground_stations[{index}].measurements.{key} must be non-negative.")
+            out[key] = sigma
+    if "noise" in out:
+        noise = _as_dict(out["noise"], f"ground_stations[{index}].measurements.noise")
+        noise_allowed = {"range_sigma_km", "range_rate_sigma_km_s", "angle_sigma_deg"}
+        noise_unknown = sorted(str(key) for key in noise if str(key) not in noise_allowed)
+        if noise_unknown:
+            raise ValueError(
+                f"ground_stations[{index}].measurements.noise has unsupported field(s): {', '.join(noise_unknown)}."
+            )
+        out["noise"] = {
+            key: _parse_float(value, f"ground_stations[{index}].measurements.noise.{key}")
+            for key, value in noise.items()
+        }
+        for key, sigma in out["noise"].items():
+            if sigma < 0.0:
+                raise ValueError(f"ground_stations[{index}].measurements.noise.{key} must be non-negative.")
+    if "measurement_type" in out:
+        measurement_type = str(out["measurement_type"] or "").strip().lower()
+        if measurement_type not in {"az_el_range", "az_el_range_rate"}:
+            raise ValueError(
+                f"ground_stations[{index}].measurements.measurement_type must be "
+                "'az_el_range' or 'az_el_range_rate'."
+            )
+        out["measurement_type"] = measurement_type
+    return out
 
 
 def _parse_objects_section(
@@ -1269,6 +1365,7 @@ def _parse_simulator_section(value: Any) -> SimulatorSection:
         initial_jd_utc=_parse_optional_float(d.get("initial_jd_utc"), "simulator.initial_jd_utc"),
         resource_profile=_parse_resource_profile(d.get("resource_profile"), "simulator.resource_profile"),
         acceleration=_parse_acceleration_section(d.get("acceleration")),
+        execution=_parse_simulator_execution_section(d.get("execution")),
         dynamics=_normalize_reentry_section(dict(d.get("dynamics", {}) or {})),
         environment=dict(d.get("environment", {}) or {}),
         plugin_validation=plugin_validation,
@@ -1297,6 +1394,45 @@ def _parse_acceleration_section(value: Any) -> dict[str, Any]:
         "mode": mode,
         "warmup": _parse_bool(d.get("warmup", False), "simulator.acceleration.warmup"),
         "env_override": _parse_bool(d.get("env_override", True), "simulator.acceleration.env_override"),
+    }
+
+
+def _parse_simulator_execution_section(value: Any) -> dict[str, Any]:
+    d = _as_dict(value, "simulator.execution")
+    object_parallelism = _as_dict(d.get("object_parallelism"), "simulator.execution.object_parallelism")
+    runtime_profiler = _as_dict(d.get("runtime_profiler"), "simulator.execution.runtime_profiler")
+    backend = str(object_parallelism.get("backend", "serial") or "serial").strip().lower()
+    if backend not in {"serial", "process_pool"}:
+        raise ValueError("simulator.execution.object_parallelism.backend must be one of: serial, process_pool.")
+    workers = int(object_parallelism.get("workers", 0) or 0)
+    reserve_workers = int(object_parallelism.get("reserve_workers", 1) or 0)
+    min_objects = int(object_parallelism.get("min_objects", 3) or 0)
+    if workers < 0:
+        raise ValueError("simulator.execution.object_parallelism.workers must be >= 0.")
+    if reserve_workers < 0:
+        raise ValueError("simulator.execution.object_parallelism.reserve_workers must be >= 0.")
+    if min_objects < 1:
+        raise ValueError("simulator.execution.object_parallelism.min_objects must be >= 1.")
+    return {
+        **d,
+        "object_parallelism": {
+            **object_parallelism,
+            "enabled": _parse_bool(
+                object_parallelism.get("enabled", False),
+                "simulator.execution.object_parallelism.enabled",
+            ),
+            "backend": backend,
+            "workers": workers,
+            "reserve_workers": reserve_workers,
+            "min_objects": min_objects,
+        },
+        "runtime_profiler": {
+            **runtime_profiler,
+            "enabled": _parse_bool(
+                runtime_profiler.get("enabled", True),
+                "simulator.execution.runtime_profiler.enabled",
+            ),
+        },
     }
 
 

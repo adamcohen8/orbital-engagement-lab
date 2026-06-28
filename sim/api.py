@@ -579,6 +579,10 @@ class SimulationResult:
         return dict(self.payload.get("ground_station_access", {}) or {})
 
     @property
+    def ground_station_measurements(self) -> dict[str, Any]:
+        return dict(self.payload.get("ground_station_measurements", {}) or {})
+
+    @property
     def artifacts(self) -> dict[str, Any]:
         if self.is_batch_analysis:
             return dict(self.payload.get("artifacts", {}) or {})

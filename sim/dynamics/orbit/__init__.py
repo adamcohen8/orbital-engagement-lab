@@ -58,6 +58,14 @@ from sim.dynamics.orbit.epoch import (
     sun_position_eci_km_simple,
 )
 from sim.dynamics.orbit.frames import teme_to_eci_matrix_vallado_iau80, teme_to_eci_vallado_iau80
+from sim.dynamics.orbit.ogp import (
+    OGP_DEEP_SPACE_PERIOD_THRESHOLD_MIN,
+    ogp_propagate_teme,
+    ogp_propagate_teme_batch_accelerated,
+    ogp_propagate_teme_batch_reference,
+    ogp_propagator_name_for_elements,
+    ogp_regime_for_elements,
+)
 from sim.dynamics.orbit.propagator import (
     OrbitPropagator,
     drag_plugin,
@@ -70,7 +78,16 @@ from sim.dynamics.orbit.propagator import (
     third_body_planets_plugin,
     third_body_sun_plugin,
 )
-from sim.dynamics.orbit.sgp4 import SGP4EphemerisProvider, SGP4State, sgp4_propagate_teme
+from sim.dynamics.orbit.sdp4 import SDP4Context, sdp4_initialize, sdp4_propagate_teme_from_context
+from sim.dynamics.orbit.sgp4 import (
+    SGP4_DEEP_SPACE_PERIOD_THRESHOLD_MIN,
+    SGP4BatchResult,
+    SGP4EphemerisProvider,
+    SGP4State,
+    sgp4_propagate_teme,
+    sgp4_propagate_teme_batch_numba,
+    sgp4_propagate_teme_batch_reference,
+)
 from sim.dynamics.orbit.spherical_harmonics import (
     SphericalHarmonicTerm,
     accel_spherical_harmonics_terms,
@@ -118,6 +135,12 @@ __all__ = [
     "resolve_time_dependent_env",
     "teme_to_eci_matrix_vallado_iau80",
     "teme_to_eci_vallado_iau80",
+    "OGP_DEEP_SPACE_PERIOD_THRESHOLD_MIN",
+    "ogp_propagate_teme",
+    "ogp_propagate_teme_batch_accelerated",
+    "ogp_propagate_teme_batch_reference",
+    "ogp_propagator_name_for_elements",
+    "ogp_regime_for_elements",
     "srp_shadow_factor",
     "spice_sun_moon_positions_eci_km",
     "spice_supported_body_names",
@@ -136,8 +159,15 @@ __all__ = [
     "load_icgem_gfc_terms",
     "load_real_earth_gravity_terms",
     "SGP4EphemerisProvider",
+    "SGP4BatchResult",
     "SGP4State",
+    "SGP4_DEEP_SPACE_PERIOD_THRESHOLD_MIN",
+    "SDP4Context",
     "sgp4_propagate_teme",
+    "sgp4_propagate_teme_batch_numba",
+    "sgp4_propagate_teme_batch_reference",
+    "sdp4_initialize",
+    "sdp4_propagate_teme_from_context",
     "density_exponential",
     "density_ussa1976",
     "density_msis86",

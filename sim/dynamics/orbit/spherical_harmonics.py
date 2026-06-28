@@ -51,6 +51,70 @@ class GravityModelDownload:
     size_bytes: int | None = None
 
 
+@dataclass(frozen=True)
+class CompiledSphericalHarmonics:
+    terms: tuple[SphericalHarmonicTerm, ...]
+    n_max: int
+    m_max: int
+    c_nm: np.ndarray
+    s_nm: np.ndarray
+    all_normalized: bool
+    legendre_diag_scale: np.ndarray
+    legendre_subdiag_scale: np.ndarray
+    legendre_recur_a: np.ndarray
+    legendre_recur_b: np.ndarray
+    legendre_recur_c: np.ndarray
+    legendre_pnm_scratch: np.ndarray
+    legendre_dpnm_scratch: np.ndarray
+
+
+def compile_spherical_harmonic_terms(terms: list[SphericalHarmonicTerm]) -> CompiledSphericalHarmonics | None:
+    if not terms:
+        return None
+    term_tuple = tuple(terms)
+    n_max = max(term.n for term in term_tuple)
+    m_max = max(term.m for term in term_tuple)
+    c_nm = np.zeros((n_max + 1, m_max + 1), dtype=float)
+    s_nm = np.zeros((n_max + 1, m_max + 1), dtype=float)
+    c_nm[0, 0] = 1.0
+    for term in term_tuple:
+        c_nm[term.n, term.m] = float(term.c_nm)
+        s_nm[term.n, term.m] = float(term.s_nm)
+    diag_scale = np.zeros(n_max + 1, dtype=float)
+    for i in range(2, n_max + 1):
+        diag_scale[i] = math.sqrt((2.0 * i + 1.0) / (2.0 * i))
+    subdiag_scale = np.zeros(n_max + 1, dtype=float)
+    for i in range(1, n_max + 1):
+        subdiag_scale[i] = math.sqrt(2.0 * i + 1.0)
+    recur_a = np.zeros((n_max + 1, m_max + 1), dtype=float)
+    recur_b = np.zeros((n_max + 1, m_max + 1), dtype=float)
+    recur_c = np.zeros((n_max + 1, m_max + 1), dtype=float)
+    j = 0
+    k = 2
+    while j <= m_max:
+        for i in range(k, n_max + 1):
+            recur_a[i, j] = math.sqrt((2.0 * i + 1.0) / ((i - j) * (i + j)))
+            recur_b[i, j] = math.sqrt(2.0 * i - 1.0)
+            recur_c[i, j] = math.sqrt(((i + j - 1.0) * (i - j - 1.0)) / (2.0 * i - 3.0))
+        j += 1
+        k += 1
+    return CompiledSphericalHarmonics(
+        terms=term_tuple,
+        n_max=n_max,
+        m_max=m_max,
+        c_nm=c_nm,
+        s_nm=s_nm,
+        all_normalized=all(bool(term.normalized) for term in term_tuple),
+        legendre_diag_scale=diag_scale,
+        legendre_subdiag_scale=subdiag_scale,
+        legendre_recur_a=recur_a,
+        legendre_recur_b=recur_b,
+        legendre_recur_c=recur_c,
+        legendre_pnm_scratch=np.empty((n_max + 1, m_max + 1), dtype=float),
+        legendre_dpnm_scratch=np.empty((n_max + 1, m_max + 1), dtype=float),
+    )
+
+
 def _double_factorial(k: int) -> float:
     if k <= 0:
         return 1.0
@@ -101,9 +165,24 @@ def _term_potential_ecef_km2_s2(
     return float(mu_km3_s2 / r * (re_km / r) ** term.n * p_nm * amp)
 
 
-def _legendre_normalized_hpop(n_max: int, m_max: int, lat_gc_rad: float) -> tuple[np.ndarray, np.ndarray]:
-    pnm = np.zeros((n_max + 1, m_max + 1), dtype=float)
-    dpnm = np.zeros((n_max + 1, m_max + 1), dtype=float)
+def _legendre_normalized_hpop(
+    n_max: int,
+    m_max: int,
+    lat_gc_rad: float,
+    compiled: CompiledSphericalHarmonics | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    if (
+        compiled is not None
+        and compiled.legendre_pnm_scratch.shape == (n_max + 1, m_max + 1)
+        and compiled.legendre_dpnm_scratch.shape == (n_max + 1, m_max + 1)
+    ):
+        pnm = compiled.legendre_pnm_scratch
+        dpnm = compiled.legendre_dpnm_scratch
+        pnm.fill(0.0)
+        dpnm.fill(0.0)
+    else:
+        pnm = np.zeros((n_max + 1, m_max + 1), dtype=float)
+        dpnm = np.zeros((n_max + 1, m_max + 1), dtype=float)
 
     sin_f = float(np.sin(lat_gc_rad))
     cos_f = float(np.cos(lat_gc_rad))
@@ -115,14 +194,18 @@ def _legendre_normalized_hpop(n_max: int, m_max: int, lat_gc_rad: float) -> tupl
 
     for i in range(2, n_max + 1):
         if i <= m_max:
-            scale = math.sqrt((2.0 * i + 1.0) / (2.0 * i))
+            scale = (
+                float(compiled.legendre_diag_scale[i])
+                if compiled is not None
+                else math.sqrt((2.0 * i + 1.0) / (2.0 * i))
+            )
             pnm[i, i] = scale * cos_f * pnm[i - 1, i - 1]
             dpnm[i, i] = scale * (cos_f * dpnm[i - 1, i - 1] - sin_f * pnm[i - 1, i - 1])
 
     for i in range(1, n_max + 1):
         m = i - 1
         if m <= m_max:
-            scale = math.sqrt(2.0 * i + 1.0)
+            scale = float(compiled.legendre_subdiag_scale[i]) if compiled is not None else math.sqrt(2.0 * i + 1.0)
             pnm[i, m] = scale * sin_f * pnm[i - 1, m]
             dpnm[i, m] = scale * (cos_f * pnm[i - 1, m] + sin_f * dpnm[i - 1, m])
 
@@ -130,13 +213,20 @@ def _legendre_normalized_hpop(n_max: int, m_max: int, lat_gc_rad: float) -> tupl
     k = 2
     while j <= m_max:
         for i in range(k, n_max + 1):
-            a = math.sqrt((2.0 * i + 1.0) / ((i - j) * (i + j)))
-            b = math.sqrt(2.0 * i - 1.0) * sin_f * pnm[i - 1, j]
-            c = math.sqrt(((i + j - 1.0) * (i - j - 1.0)) / (2.0 * i - 3.0)) * pnm[i - 2, j]
+            if compiled is not None:
+                a = float(compiled.legendre_recur_a[i, j])
+                b_scale = float(compiled.legendre_recur_b[i, j])
+                c_scale = float(compiled.legendre_recur_c[i, j])
+            else:
+                a = math.sqrt((2.0 * i + 1.0) / ((i - j) * (i + j)))
+                b_scale = math.sqrt(2.0 * i - 1.0)
+                c_scale = math.sqrt(((i + j - 1.0) * (i - j - 1.0)) / (2.0 * i - 3.0))
+            b = b_scale * sin_f * pnm[i - 1, j]
+            c = c_scale * pnm[i - 2, j]
             pnm[i, j] = a * (b - c)
-            db = math.sqrt(2.0 * i - 1.0) * sin_f * dpnm[i - 1, j]
-            dc = math.sqrt(2.0 * i - 1.0) * cos_f * pnm[i - 1, j]
-            dd = math.sqrt(((i + j - 1.0) * (i - j - 1.0)) / (2.0 * i - 3.0)) * dpnm[i - 2, j]
+            db = b_scale * sin_f * dpnm[i - 1, j]
+            dc = b_scale * cos_f * pnm[i - 1, j]
+            dd = c_scale * dpnm[i - 2, j]
             dpnm[i, j] = a * (db + dc - dd)
         j += 1
         k += 1
@@ -173,15 +263,15 @@ def _analytic_harmonic_accel_hpop_eci_km_s2(
     jd_utc_start: float | None,
     frame_model: str,
     eop_path: str | None,
+    compiled: CompiledSphericalHarmonics | None = None,
 ) -> np.ndarray:
-    n_max = max(term.n for term in terms)
-    m_max = max(term.m for term in terms)
-    c_nm = np.zeros((n_max + 1, m_max + 1), dtype=float)
-    s_nm = np.zeros((n_max + 1, m_max + 1), dtype=float)
-    c_nm[0, 0] = 1.0
-    for term in terms:
-        c_nm[term.n, term.m] = float(term.c_nm)
-        s_nm[term.n, term.m] = float(term.s_nm)
+    compiled_terms = compiled if compiled is not None else compile_spherical_harmonic_terms(terms)
+    if compiled_terms is None:
+        return np.zeros(3, dtype=float)
+    n_max = compiled_terms.n_max
+    m_max = compiled_terms.m_max
+    c_nm = compiled_terms.c_nm
+    s_nm = compiled_terms.s_nm
 
     e_mat = _harmonic_rotation_matrix(
         t_s=float(t_s),
@@ -196,7 +286,14 @@ def _analytic_harmonic_accel_hpop_eci_km_s2(
         return np.zeros(3, dtype=float)
     lat_gc = math.asin(float(r_bf[2]) / d)
     lon = math.atan2(float(r_bf[1]), float(r_bf[0]))
-    pnm, dpnm = _legendre_normalized_hpop(n_max=n_max, m_max=m_max, lat_gc_rad=lat_gc)
+    pnm, dpnm = _legendre_normalized_hpop(
+        n_max=n_max,
+        m_max=m_max,
+        lat_gc_rad=lat_gc,
+        compiled=compiled_terms,
+    )
+    cos_mlon = tuple(math.cos(m * lon) for m in range(m_max + 1))
+    sin_mlon = tuple(math.sin(m * lon) for m in range(m_max + 1))
 
     dUdr = 0.0
     dUdlatgc = 0.0
@@ -209,8 +306,8 @@ def _analytic_harmonic_accel_hpop_eci_km_s2(
         q2 = 0.0
         q3 = 0.0
         for m in range(0, min(m_max, n) + 1):
-            cos_ml = math.cos(m * lon)
-            sin_ml = math.sin(m * lon)
+            cos_ml = cos_mlon[m]
+            sin_ml = sin_mlon[m]
             amp = c_nm[n, m] * cos_ml + s_nm[n, m] * sin_ml
             q1 += pnm[n, m] * amp
             q2 += dpnm[n, m] * amp
@@ -242,6 +339,7 @@ def accel_spherical_harmonics_terms(
     jd_utc_start: float | None = None,
     frame_model: str = "simple",
     eop_path: str | None = None,
+    compiled: CompiledSphericalHarmonics | None = None,
 ) -> np.ndarray:
     """
     Acceleration in ECI from arbitrary spherical-harmonic terms (n,m).
@@ -250,7 +348,8 @@ def accel_spherical_harmonics_terms(
     """
     if not terms:
         return np.zeros(3)
-    if all(bool(term.normalized) for term in terms):
+    compiled_terms = compiled if compiled is not None else compile_spherical_harmonic_terms(terms)
+    if compiled_terms is not None and compiled_terms.all_normalized:
         return _analytic_harmonic_accel_hpop_eci_km_s2(
             r_eci_km=r_eci_km,
             t_s=t_s,
@@ -260,6 +359,7 @@ def accel_spherical_harmonics_terms(
             jd_utc_start=jd_utc_start,
             frame_model=frame_model,
             eop_path=eop_path,
+            compiled=compiled_terms,
         )
     r_ecef = eci_to_ecef_harmonic(
         np.array(r_eci_km, dtype=float),
@@ -352,6 +452,10 @@ def configure_spherical_harmonics_env(base_env: dict | None, orbit_cfg: dict | N
             normalized=bool(sh.get("normalized", True)),
         )
         env["spherical_harmonics_terms"] = terms
+        env["_parsed_spherical_harmonics_terms"] = terms
+        compiled = compile_spherical_harmonic_terms(terms)
+        if compiled is not None:
+            env["_compiled_spherical_harmonics_terms"] = compiled
         env["spherical_harmonics_source"] = str(coeff_path.resolve())
         env["spherical_harmonics_reference_radius_km"] = float(sh.get("reference_radius_km", 6378.1363))
         env["spherical_harmonics_frame_model"] = str(sh.get("frame_model", "hpop_like"))
@@ -364,7 +468,12 @@ def configure_spherical_harmonics_env(base_env: dict | None, orbit_cfg: dict | N
             eop_path = Path(__file__).resolve().parents[3] / eop_path
         env["spherical_harmonics_eop_path"] = str(eop_path.resolve())
     elif "terms" in sh:
-        env["spherical_harmonics_terms"] = parse_spherical_harmonic_terms(sh.get("terms"))
+        terms = parse_spherical_harmonic_terms(sh.get("terms"))
+        env["spherical_harmonics_terms"] = terms
+        env["_parsed_spherical_harmonics_terms"] = terms
+        compiled = compile_spherical_harmonic_terms(terms)
+        if compiled is not None:
+            env["_compiled_spherical_harmonics_terms"] = compiled
         if sh.get("reference_radius_km") is not None:
             env["spherical_harmonics_reference_radius_km"] = float(sh["reference_radius_km"])
         if sh.get("frame_model") is not None:

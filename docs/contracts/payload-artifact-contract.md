@@ -213,7 +213,10 @@ Ground-station fields:
 
 - `ground_station_access`
 - `ground_station_access_summary`
+- `ground_station_measurements`
+- `ground_station_measurement_summary`
 - `summary.ground_station_access_summary`
+- `summary.ground_station_measurement_summary`
 - `summary.ground_station_access_report_outputs`
 
 Conventions:
@@ -229,8 +232,15 @@ Conventions:
 - Access report AOS/LOS rows use UTC. The report epoch is
   `simulator.initial_jd_utc` when supplied, otherwise
   `2026-01-01T00:00:00Z`.
+- When enabled, measurement histories are station-indexed, then target-indexed.
+  V0 measurement rows include `time_s`, optional `jd_utc`, `azimuth_deg`,
+  `elevation_deg`, `range_km`, optional `range_rate_km_s`, component names,
+  configured sigmas, and matching truth geometry fields for validation.
 - Ground-station access does not modify truth, belief, knowledge, control, or
   termination behavior.
+- Ground-station measurements are synthetic observation evidence. They do not
+  model RF link budgets, weather, scheduling, calibration, association, or real
+  sensor processing.
 
 
 ## Artifacts On Disk

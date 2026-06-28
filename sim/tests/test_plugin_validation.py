@@ -116,7 +116,7 @@ class TestPluginValidation(unittest.TestCase):
 
         self.assertTrue(any("frame_transform must be 'native'" in err for err in errs))
 
-    def test_general_sgp4_rejects_deep_space_sdp4_tle(self):
+    def test_general_sgp4_accepts_deep_space_ogp_sdp4_tle(self):
         cfg = scenario_config_from_dict(
             {
                 "rocket": {"enabled": False},
@@ -140,8 +140,7 @@ class TestPluginValidation(unittest.TestCase):
 
         errs = validate_scenario_plugins(cfg)
 
-        self.assertTrue(any("deep-space SDP4/resonance TLEs" in err for err in errs))
-        self.assertTrue(any("period >= 225 min" in err for err in errs))
+        self.assertEqual(errs, [])
 
     def test_general_sgp4_rejects_active_control(self):
         cfg = scenario_config_from_dict(

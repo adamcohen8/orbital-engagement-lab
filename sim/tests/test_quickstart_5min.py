@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import io
 import json
+import sqlite3
 import subprocess
 import sys
 from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
+import numpy as np
+import pytest
 import yaml
 
 import run_simulation
@@ -58,6 +61,97 @@ def test_quickstart_5min_runs_headlessly_and_writes_start_here_artifacts(tmp_pat
     assert summary["objects"] == ["chaser", "target"]
     assert summary["relative_range_summary"]["object_pair"] == ["chaser", "target"]
     assert "rocket" not in summary["objects"]
+    profile = summary["runtime_profile"]
+    assert profile["completed_steps"] > 0
+    assert profile["object_count"] == 2
+    assert profile["total_step_wall_s"] >= 0.0
+    assert profile["executor"]["object_step_backend"] == "serial"
+    assert profile["executor"]["object_step_workers"] == 1
+    assert profile["stage_totals"]["object_step"]["count"] > 0
+    assert set(profile["object_totals"]) == {"chaser", "target"}
+    assert profile["object_totals"]["chaser"]["total_s"] >= 0.0
+    assert profile["object_totals"]["chaser"]["nested_stage_total_s"] >= 0.0
+    assert "satellite_step" in profile["object_totals"]["chaser"]["stages"]
+    assert profile["slowest_objects"]
+
+
+def test_quickstart_process_pool_object_executor_smoke(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[2]
+    source_cfg = root / "configs" / "quickstart_5min.yaml"
+    config = yaml.safe_load(source_cfg.read_text(encoding="utf-8"))
+    config["simulator"]["duration_s"] = 10.0
+    config["simulator"]["resource_profile"] = "off"
+    config["outputs"]["plots"]["enabled"] = False
+    config["outputs"]["plots"]["figure_ids"] = []
+    config["outputs"]["animations"]["enabled"] = False
+    config["outputs"]["animations"]["types"] = []
+
+    serial_config = yaml.safe_load(yaml.safe_dump(config, sort_keys=False))
+    serial_outdir = tmp_path / "quickstart_serial"
+    serial_config["simulator"]["execution"] = {
+        "object_parallelism": {
+            "enabled": False,
+            "backend": "serial",
+        }
+    }
+    serial_config["outputs"]["output_dir"] = str(serial_outdir)
+    serial_cfg_path = tmp_path / "quickstart_serial.yaml"
+    serial_cfg_path.write_text(yaml.safe_dump(serial_config, sort_keys=False), encoding="utf-8")
+    run_simulation_config_file(serial_cfg_path)
+
+    outdir = tmp_path / "quickstart_process_pool"
+    config["simulator"]["execution"] = {
+        "object_parallelism": {
+            "enabled": True,
+            "backend": "process_pool",
+            "workers": 2,
+            "min_objects": 2,
+        }
+    }
+    config["outputs"]["output_dir"] = str(outdir)
+
+    cfg_path = tmp_path / "quickstart_process_pool.yaml"
+    cfg_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+
+    try:
+        run_simulation_config_file(cfg_path)
+    except RuntimeError as exc:
+        if "ProcessPoolObjectStepExecutor is unavailable" in str(exc):
+            pytest.skip(str(exc))
+        raise
+
+    summary = json.loads((outdir / "master_run_summary.json").read_text(encoding="utf-8"))
+    profile = summary["runtime_profile"]
+    assert profile["executor"]["object_step_backend"] == "process_pool"
+    assert profile["executor"]["object_step_workers"] == 2
+    assert profile["stage_totals"]["object_step"]["count"] > 0
+    assert set(profile["object_totals"]) == {"chaser", "target"}
+    state_columns = (
+        "pos_x_eci_km, pos_y_eci_km, pos_z_eci_km, "
+        "vel_x_eci_km_s, vel_y_eci_km_s, vel_z_eci_km_s"
+    )
+    serial_db = sqlite3.connect(serial_outdir / "review" / "run.sqlite")
+    process_db = sqlite3.connect(outdir / "review" / "run.sqlite")
+    try:
+        for object_id in summary["objects"]:
+            serial_state = np.array(
+                serial_db.execute(
+                    f"SELECT {state_columns} FROM object_state WHERE object_id = ? ORDER BY time_s DESC LIMIT 1",
+                    (object_id,),
+                ).fetchone(),
+                dtype=float,
+            )
+            process_state = np.array(
+                process_db.execute(
+                    f"SELECT {state_columns} FROM object_state WHERE object_id = ? ORDER BY time_s DESC LIMIT 1",
+                    (object_id,),
+                ).fetchone(),
+                dtype=float,
+            )
+            assert np.allclose(process_state, serial_state, rtol=0.0, atol=1e-9)
+    finally:
+        serial_db.close()
+        process_db.close()
 
 
 def test_quickstart_cli_shortcut_validates() -> None:

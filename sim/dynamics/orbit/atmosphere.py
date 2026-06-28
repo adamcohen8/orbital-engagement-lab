@@ -20,6 +20,80 @@ AtmosphereModelName = Literal[
     "exponential", "ussa1976", "msis86", "nrlmsise00", "jacchia70", "jb2006", "jb2008", "harris_priester"
 ]
 
+_USSA1976_G0_M_S2 = 9.80665
+_USSA1976_R_AIR_J_KG_K = 287.05287
+_USSA1976_HB_M = np.array([0.0, 11.0, 20.0, 32.0, 47.0, 51.0, 71.0, 86.0], dtype=float) * 1e3
+_USSA1976_LB_K_M = np.array([-0.0065, 0.0, 0.0010, 0.0028, 0.0, -0.0028, -0.0020], dtype=float)
+_USSA1976_TB_K = np.array([288.15, 216.65, 216.65, 228.65, 270.65, 270.65, 214.65], dtype=float)
+_USSA1976_PB_PA = np.empty(_USSA1976_LB_K_M.size + 1, dtype=float)
+_USSA1976_PB_PA[0] = 101325.0
+for _USSA1976_LAYER_INDEX in range(_USSA1976_LB_K_M.size):
+    _h0 = float(_USSA1976_HB_M[_USSA1976_LAYER_INDEX])
+    _h1 = float(_USSA1976_HB_M[_USSA1976_LAYER_INDEX + 1])
+    _lapse = float(_USSA1976_LB_K_M[_USSA1976_LAYER_INDEX])
+    _t0 = float(_USSA1976_TB_K[_USSA1976_LAYER_INDEX])
+    _p0 = float(_USSA1976_PB_PA[_USSA1976_LAYER_INDEX])
+    if abs(_lapse) < 1e-12:
+        _p1 = _p0 * np.exp(-_USSA1976_G0_M_S2 * (_h1 - _h0) / (_USSA1976_R_AIR_J_KG_K * _t0))
+    else:
+        _t1 = _t0 + _lapse * (_h1 - _h0)
+        _p1 = _p0 * (_t1 / _t0) ** (-_USSA1976_G0_M_S2 / (_USSA1976_R_AIR_J_KG_K * _lapse))
+    _USSA1976_PB_PA[_USSA1976_LAYER_INDEX + 1] = _p1
+del _USSA1976_LAYER_INDEX, _h0, _h1, _lapse, _t0, _p0, _p1
+
+_USSA1976_HIGH_ALT_KM = np.array(
+    [
+        86.0,
+        100.0,
+        110.0,
+        120.0,
+        130.0,
+        140.0,
+        150.0,
+        180.0,
+        200.0,
+        250.0,
+        300.0,
+        350.0,
+        400.0,
+        450.0,
+        500.0,
+        600.0,
+        700.0,
+        800.0,
+        900.0,
+        1000.0,
+    ],
+    dtype=float,
+)
+_USSA1976_HIGH_LOG_RHO = np.log(
+    np.array(
+        [
+            6.958e-6,
+            5.604e-7,
+            9.708e-8,
+            2.222e-8,
+            8.152e-9,
+            3.831e-9,
+            2.076e-9,
+            5.464e-10,
+            2.789e-10,
+            7.248e-11,
+            2.418e-11,
+            9.518e-12,
+            3.725e-12,
+            1.585e-12,
+            6.967e-13,
+            1.454e-13,
+            3.614e-14,
+            1.170e-14,
+            5.245e-15,
+            3.019e-15,
+        ],
+        dtype=float,
+    )
+)
+
 
 def _radial_altitude_km_from_eci(r_eci_km: np.ndarray) -> float:
     r_vec = np.asarray(r_eci_km, dtype=float).reshape(3)
@@ -111,101 +185,32 @@ def density_ussa1976(r_eci_km: np.ndarray, t_s: float, env: dict | None = None) 
     - 0..86 km: standard lapse-rate layers via geopotential-altitude equations.
     - 86..1000 km: log-linear interpolation on tabulated USSA-1976 reference densities.
     """
-    alt_km = _altitude_km_from_eci(r_eci_km, t_s, env=env)
+    if env is not None and str(env.get("geodetic_model", "")).lower() == "wgs84":
+        alt_km = _altitude_km_from_eci(r_eci_km, t_s, env=env)
+    else:
+        alt_km = _radial_altitude_km_from_eci(r_eci_km)
 
     if alt_km <= 86.0:
-        # 1976 standard atmosphere layers (0-86 km).
-        g0 = 9.80665
-        r_air = 287.05287
-        hb = np.array([0.0, 11.0, 20.0, 32.0, 47.0, 51.0, 71.0, 86.0], dtype=float) * 1e3
-        lb = np.array([-0.0065, 0.0, 0.0010, 0.0028, 0.0, -0.0028, -0.0020], dtype=float)
-        tb = np.array([288.15, 216.65, 216.65, 228.65, 270.65, 270.65, 214.65], dtype=float)
-        pb = np.array([101325.0], dtype=float)
-        # Build base pressures recursively.
-        for i in range(lb.size):
-            h0 = hb[i]
-            h1 = hb[i + 1]
-            lapse = lb[i]
-            t0 = tb[i]
-            p0 = pb[-1]
-            if abs(lapse) < 1e-12:
-                p1 = p0 * np.exp(-g0 * (h1 - h0) / (r_air * t0))
-            else:
-                t1 = t0 + lapse * (h1 - h0)
-                p1 = p0 * (t1 / t0) ** (-g0 / (r_air * lapse))
-            pb = np.append(pb, p1)
-
         h = alt_km * 1e3
-        i = int(np.searchsorted(hb, h, side="right") - 1)
-        i = max(0, min(i, lb.size - 1))
-        h0 = hb[i]
-        lapse = lb[i]
-        t0 = tb[i]
-        p0 = pb[i]
+        i = int(np.searchsorted(_USSA1976_HB_M, h, side="right") - 1)
+        i = max(0, min(i, _USSA1976_LB_K_M.size - 1))
+        h0 = float(_USSA1976_HB_M[i])
+        lapse = float(_USSA1976_LB_K_M[i])
+        t0 = float(_USSA1976_TB_K[i])
+        p0 = float(_USSA1976_PB_PA[i])
         if abs(lapse) < 1e-12:
             t = t0
-            p = p0 * np.exp(-g0 * (h - h0) / (r_air * t))
+            p = p0 * np.exp(-_USSA1976_G0_M_S2 * (h - h0) / (_USSA1976_R_AIR_J_KG_K * t))
         else:
             t = t0 + lapse * (h - h0)
-            p = p0 * (t / t0) ** (-g0 / (r_air * lapse))
-        rho = p / (r_air * t)
+            p = p0 * (t / t0) ** (-_USSA1976_G0_M_S2 / (_USSA1976_R_AIR_J_KG_K * lapse))
+        rho = p / (_USSA1976_R_AIR_J_KG_K * t)
         return float(max(rho, 0.0))
 
     if alt_km > 1000.0:
         return 0.0
 
-    # USSA-1976 high-altitude reference density table (kg/m^3), log-space interpolated.
-    table_alt_km = np.array(
-        [
-            86.0,
-            100.0,
-            110.0,
-            120.0,
-            130.0,
-            140.0,
-            150.0,
-            180.0,
-            200.0,
-            250.0,
-            300.0,
-            350.0,
-            400.0,
-            450.0,
-            500.0,
-            600.0,
-            700.0,
-            800.0,
-            900.0,
-            1000.0,
-        ],
-        dtype=float,
-    )
-    table_rho = np.array(
-        [
-            6.958e-6,
-            5.604e-7,
-            9.708e-8,
-            2.222e-8,
-            8.152e-9,
-            3.831e-9,
-            2.076e-9,
-            5.464e-10,
-            2.789e-10,
-            7.248e-11,
-            2.418e-11,
-            9.518e-12,
-            3.725e-12,
-            1.585e-12,
-            6.967e-13,
-            1.454e-13,
-            3.614e-14,
-            1.170e-14,
-            5.245e-15,
-            3.019e-15,
-        ],
-        dtype=float,
-    )
-    lrho = np.interp(float(alt_km), table_alt_km, np.log(table_rho))
+    lrho = np.interp(float(alt_km), _USSA1976_HIGH_ALT_KM, _USSA1976_HIGH_LOG_RHO)
     return float(np.exp(lrho))
 
 

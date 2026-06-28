@@ -321,8 +321,9 @@ def eci_to_ecef_rotation_hpop_like(
     mjd_utc = jd_utc - _MJD0
     xp_arcsec, yp_arcsec, dut1_s, dat_s = _interp_eop(mjd_utc, eop_path)
     jd_tt = jd_utc + (dat_s + 32.184) / _DAYSEC
-    rbpn, _dpsi, _true_obliquity = _precession_nutation_matrix_approx(jd_tt)
-    gast = apparent_sidereal_time_hpop_like(jd_utc, eop_path)
+    rbpn, dpsi, true_obliquity = _precession_nutation_matrix_approx(jd_tt)
+    jd_ut1 = jd_utc + dut1_s / _DAYSEC
+    gast = float((gmst_angle_rad_from_jd(jd_ut1) + dpsi * math.cos(true_obliquity)) % (2.0 * math.pi))
     sp = -47.0e-6 * ((jd_tt - _J2000) / _JULIAN_CENTURY_DAYS) * _ARCSEC_TO_RAD
     return _polar_motion_matrix(xp_arcsec * _ARCSEC_TO_RAD, yp_arcsec * _ARCSEC_TO_RAD, sp) @ _rz(gast) @ rbpn
 

@@ -8,7 +8,10 @@ import pytest
 from sim import SimulationConfig, SimulationSession
 from sim.config import GroundStationSection, scenario_config_from_dict
 from sim.dynamics.orbit.epoch import datetime_to_julian_date
-from sim.ground_stations import evaluate_ground_station_access
+from sim.ground_stations import (
+    evaluate_ground_station_access,
+    evaluate_ground_station_measurements,
+)
 from sim.reporting.ground_station_access_reports import (
     DEFAULT_ACCESS_REPORT_EPOCH_UTC,
     build_ground_station_access_report_views,
@@ -62,6 +65,7 @@ def test_ground_station_yaml_parses_list_and_mapping_forms(tmp_path: Path) -> No
     assert len(cfg.ground_stations) == 1
     assert cfg.ground_stations[0].id == "equator_prime"
     assert cfg.ground_stations[0].max_range_km == 1000.0
+    assert cfg.ground_stations[0].measurements == {}
 
     mapped = _ground_station_config(tmp_path)
     mapped["ground_stations"] = {
@@ -76,6 +80,17 @@ def test_ground_station_yaml_parses_list_and_mapping_forms(tmp_path: Path) -> No
     assert cfg2.ground_stations[0].id == "hawaii"
     assert cfg2.ground_stations[0].alt_km == 4.2
 
+    measured = _ground_station_config(tmp_path)
+    measured["ground_stations"][0]["measurements"] = {
+        "enabled": True,
+        "measurement_type": "az_el_range_rate",
+        "update_cadence_s": 60.0,
+        "noise": {"range_sigma_km": 0.01, "range_rate_sigma_km_s": 1.0e-5, "angle_sigma_deg": 0.02},
+    }
+    cfg3 = scenario_config_from_dict(measured)
+    assert cfg3.ground_stations[0].measurements["enabled"] is True
+    assert cfg3.ground_stations[0].measurements["noise"]["range_sigma_km"] == 0.01
+
 
 def test_ground_station_yaml_rejects_invalid_values(tmp_path: Path) -> None:
     cfg = _ground_station_config(tmp_path)
@@ -86,6 +101,11 @@ def test_ground_station_yaml_rejects_invalid_values(tmp_path: Path) -> None:
     cfg = _ground_station_config(tmp_path)
     cfg["ground_stations"][0]["max_range_km"] = -1.0
     with pytest.raises(ValueError, match="max_range_km must be positive"):
+        scenario_config_from_dict(cfg)
+
+    cfg = _ground_station_config(tmp_path)
+    cfg["ground_stations"][0]["measurements"] = {"enabled": True, "range_sigma_km": -0.1}
+    with pytest.raises(ValueError, match="range_sigma_km must be non-negative"):
         scenario_config_from_dict(cfg)
 
 
@@ -143,6 +163,50 @@ def test_ground_station_access_geometry_applies_los_elevation_and_range() -> Non
     assert range_hist["equator_prime"]["targets"]["sat"]["reason"] == ["range"]
 
 
+def test_ground_station_measurements_emit_access_limited_sensor_rows() -> None:
+    station = GroundStationSection(
+        id="equator_prime",
+        lat_deg=0.0,
+        lon_deg=0.0,
+        alt_km=0.0,
+        min_elevation_deg=10.0,
+        max_range_km=5000.0,
+        measurements={
+            "enabled": True,
+            "measurement_type": "az_el_range_rate",
+            "update_cadence_s": 60.0,
+            "range_sigma_km": 0.0,
+            "range_rate_sigma_km_s": 0.0,
+            "angle_sigma_deg": 0.0,
+        },
+    )
+    t_s = np.array([0.0, 30.0, 60.0])
+    truth = {
+        "sat": np.array(
+            [
+                [7000.0, 0.0, 0.0, 0.0, 7.5, 0.0],
+                [7000.0, 225.0, 0.0, 0.0, 7.5, 0.0],
+                [7000.0, 450.0, 0.0, 0.0, 7.5, 0.0],
+            ]
+        )
+    }
+
+    measurements = evaluate_ground_station_measurements(
+        ground_stations=[station],
+        t_s=t_s,
+        truth_hist=truth,
+    )
+
+    target = measurements["equator_prime"]["targets"]["sat"]
+    assert target["measurement_count"] == 2
+    assert target["skipped"]["cadence"] == 1
+    first = target["measurements"][0]
+    assert first["components"] == ["azimuth_deg", "elevation_deg", "range_km", "range_rate_km_s"]
+    assert first["range_km"] == pytest.approx(621.863, rel=1.0e-4)
+    assert first["elevation_deg"] == pytest.approx(90.0)
+    assert first["range_rate_km_s"] == pytest.approx(0.0, abs=1.0e-8)
+
+
 def test_single_run_records_ground_station_access_payload(tmp_path: Path) -> None:
     result = SimulationSession.from_config(SimulationConfig.from_dict(_ground_station_config(tmp_path))).run()
 
@@ -166,6 +230,26 @@ def test_single_run_records_ground_station_access_payload(tmp_path: Path) -> Non
     assert by_station.exists()
     assert "2026-01-01T00:00:00Z" in by_satellite.read_text(encoding="utf-8")
     assert "equator_prime -> target" in by_station.read_text(encoding="utf-8")
+
+
+def test_single_run_records_ground_station_measurement_payload(tmp_path: Path) -> None:
+    raw = _ground_station_config(tmp_path)
+    raw["simulator"]["duration_s"] = 120.0
+    raw["simulator"]["dt_s"] = 60.0
+    raw["ground_stations"][0]["max_range_km"] = 5000.0
+    raw["ground_stations"][0]["measurements"] = {
+        "enabled": True,
+        "measurement_type": "az_el_range_rate",
+        "update_cadence_s": 60.0,
+    }
+
+    result = SimulationSession.from_config(SimulationConfig.from_dict(raw)).run()
+
+    measurements = result.ground_station_measurements
+    target = measurements["equator_prime"]["targets"]["target"]
+    assert target["measurement_count"] >= 1
+    summary = result.summary["ground_station_measurement_summary"]["equator_prime"]
+    assert summary["measurement_count"] == target["measurement_count"]
 
 
 def test_ground_station_access_reports_use_configured_utc_epoch() -> None:

@@ -9,7 +9,6 @@ from typing import Any
 from sim.actuators.presets import available_actuator_preset_names, resolve_actuator_specs_from_satellite_specs
 from sim.config.object_refs import configured_objects, object_parameter_prefix
 from sim.digital_twin.mass_properties import validate_mass_properties
-from sim.dynamics.orbit.sgp4 import sgp4_unsupported_reason
 from sim.dynamics.orbit.tle import parse_tle_lines
 
 
@@ -218,11 +217,12 @@ def _validate_object_propagation(agent: Any, propagation_method: str, path: str)
                 line1 = str(tle_block.get("line1", "") or "")
                 line2 = str(tle_block.get("line2", "") or "")
             elements = parse_tle_lines(line1, line2, require_checksum=bool(tle_block.get("require_checksum", False)))
-            unsupported = sgp4_unsupported_reason(elements)
-            if unsupported:
-                errs.append(f"{path}.initial_state.tle: {unsupported}")
+            if float(elements.mean_motion_rev_per_day) <= 0.0:
+                errs.append(f"{path}.initial_state.tle: OGP mean motion must be positive.")
+            if float(elements.eccentricity) < 0.0 or float(elements.eccentricity) >= 1.0:
+                errs.append(f"{path}.initial_state.tle: OGP eccentricity must be in [0, 1).")
         except Exception as ex:
-            errs.append(f"{path}.initial_state.tle: invalid TLE for SGP4 propagation: {ex}")
+            errs.append(f"{path}.initial_state.tle: invalid TLE for OGP propagation: {ex}")
     unsupported_initial_forms = [key for key in initial_state if str(key) != "tle"]
     if unsupported_initial_forms:
         errs.append(

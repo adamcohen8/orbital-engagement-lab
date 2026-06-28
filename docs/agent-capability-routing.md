@@ -7,6 +7,16 @@ evidence, and state limits.
 
 Examples and task cards are useful rails. They are not the full capability map.
 
+Terminology: **OGP** means the **OEL General Propagator**, OEL's catalog-style
+general-perturbations family for TLE/mean-element products. **OGP-SGP4** is the
+supported near-Earth SGP4 path; **OGP-SDP4** is the supported deep-space
+SDP4/resonance path. **ONP** means the **OEL Numerical Propagator**, OEL's configurable
+numerical propagation path for two-body and special-perturbation force-model
+studies. **HPOP** should be reserved for external reference/validation
+workflows, not used as the name of OEL's native propagator.
+When older agent checks say **SGP4/general-perturbations propagation**, route
+that to OGP-SGP4 unless the request clearly needs deep-space OGP-SDP4.
+
 ## How To Route A Request
 
 1. Identify the user's intent: propagation, rendezvous, access, attitude,
@@ -29,7 +39,7 @@ Examples and task cards are useful rails. They are not the full capability map.
 | User intent | Public workflow | Start here | Evidence to inspect | Ask before proceeding when | Do not claim |
 | --- | --- | --- | --- | --- | --- |
 | Propagate a satellite | Single-run scenario YAML with simple dynamics first | `configs/quickstart_5min.yaml`, `agents/examples/public_agent_single_satellite.yaml`, `docs/scenario-yaml.md` | `run_metadata`, `objects`, `object_state`, `master_run_summary.json` | Duration, initial orbit/TLE/altitude, or fidelity changes the answer | Operational ephemeris accuracy or mission validation |
-| Use a TLE | TLE initializes ECI state, then OEL numerically propagates configured dynamics; explicit SGP4/general-perturbations propagation uses passive `propagation_method: general` | `examples/configs/public_tle_2hr_propagation.yaml`, `examples/configs/public_sgp4_passive_propagation.yaml`, `examples/configs/public_ground_station_access_from_tle.yaml` | Initial-state notes, force-model config or `object_propagation`, `object_state`, plots or CSV when enabled | User expects catalog-scale screening, current catalog freshness, deep-space SDP4, or realistic force modeling | SGP4 unless the scenario explicitly uses `propagation_method: general` and `general.model: sgp4` |
+| Use a TLE | TLE initializes ECI state, then ONP propagates configured dynamics; explicit OGP propagation uses passive `propagation_method: general` | `examples/configs/public_tle_2hr_propagation.yaml`, `examples/configs/public_sgp4_passive_propagation.yaml`, `examples/configs/public_ground_station_access_from_tle.yaml` | Initial-state notes, force-model config or `object_propagation`, `object_state`, plots or CSV when enabled | User expects catalog-scale screening, current catalog freshness, covariance, or realistic force modeling | OGP behavior unless the scenario explicitly uses `propagation_method: general` and `general.model: sgp4` |
 | Rendezvous or relative motion | Single-run RPO scenario with public controllers or passive relative motion | `examples/configs/public_closed_loop_rendezvous_lqr.yaml`, `agents/examples/public_agent_rendezvous_lqr.yaml` | `relative_state`, `metrics`, `thrust`, `events`, range/range-rate plots when enabled | Terminal success threshold, safety constraints, control posture, sensing/estimation assumptions | Terminal rendezvous success without thresholds and evidence |
 | Mission recovery from a simple burn | Use `analysis.mission_recovery` in scenario YAML for simulator-backed final-vs-initial orbit comparison and optional planner trade-space candidates; use the orbital calculator for quick standalone estimates | `agents/examples/public_agent_mission_recovery_plus_c_burn.yaml`, `agents/examples/public_agent_mission_reconstitution_trade_space.yaml`, `docs/scenario-yaml.md`, `docs/orbital-calculator.md`, `sim.orbital_calculator.mission_recovery_from_intrack_impulse` | `mission_recovery_summary`, `mission_recovery_elements`, `mission_recovery_candidates`, `mission_recovery_burns`, recovery delta-v, propellant estimate, slot-recovery time/tolerance | User needs finite-burn optimization, non-impulsive planning, realistic ops constraints, covariance, or validated mission planning | That a two-body recovery estimate is an operational recovery plan |
 | Ground-station access | Geometric access workflow from propagated states | `agents/examples/public_agent_ground_access.yaml`, `examples/configs/public_ground_station_access_from_tle.yaml` | `ground_access`, access samples, range/elevation histories, no-access reasons | Station, min elevation, duration, TLE, or force model is unspecified | RF link availability, scheduling, weather, or comms success |

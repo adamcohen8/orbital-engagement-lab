@@ -5,7 +5,21 @@ import pytest
 
 from sim import SimulationConfig, SimulationSession
 from sim.dynamics.orbit.frames import teme_to_eci_matrix_vallado_iau80
-from sim.dynamics.orbit.sgp4 import SGP4EphemerisProvider, sgp4_orbital_period_min, sgp4_propagate_teme
+from sim.dynamics.orbit.ogp import (
+    ogp_propagate_teme,
+    ogp_propagate_teme_batch_accelerated,
+    ogp_propagate_teme_batch_reference,
+    ogp_propagator_name_for_elements,
+    ogp_regime_for_elements,
+)
+from sim.dynamics.orbit.sdp4 import sdp4_initialize, sdp4_propagate_teme, sdp4_propagate_teme_from_context
+from sim.dynamics.orbit.sgp4 import (
+    SGP4EphemerisProvider,
+    sgp4_orbital_period_min,
+    sgp4_propagate_teme,
+    sgp4_propagate_teme_batch_numba,
+    sgp4_propagate_teme_batch_reference,
+)
 from sim.dynamics.orbit.tle import parse_tle_lines, tle_to_rv_eci
 
 ISS_LINE1 = "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9005"
@@ -111,19 +125,214 @@ def test_sgp4_rejects_deep_space_sdp4_tle_boundary() -> None:
     assert sgp4_orbital_period_min(elements) == 360.0
     assert state.error is not None
     assert "deep-space SDP4/resonance TLEs" in state.error
-    assert "period >= 225 min" in state.error
 
 
-def test_sgp4_provider_rejects_deep_space_sdp4_tle_boundary() -> None:
+def test_ogp_dispatches_near_earth_and_deep_space_regimes() -> None:
+    near_earth = parse_tle_lines(ISS_LINE1, ISS_LINE2)
+    deep_space = parse_tle_lines(DEEP_SPACE_LINE1, DEEP_SPACE_LINE2, require_checksum=True)
+
+    assert ogp_regime_for_elements(near_earth) == "sgp4"
+    assert ogp_propagator_name_for_elements(near_earth) == "OGP-SGP4"
+    assert ogp_propagate_teme(near_earth, 0.0).error is None
+
+    assert ogp_regime_for_elements(deep_space) == "sdp4"
+    assert ogp_propagator_name_for_elements(deep_space) == "OGP-SDP4"
+    deep_state = ogp_propagate_teme(deep_space, 0.0)
+    assert deep_state.error is None
+    assert np.linalg.norm(deep_state.position_teme_km) > 10000.0
+
+
+def test_ogp_batch_reference_supports_mixed_sgp4_sdp4_regimes() -> None:
+    near_earth = parse_tle_lines(ISS_LINE1, ISS_LINE2)
+    deep_space = parse_tle_lines(DEEP_SPACE_LINE1, DEEP_SPACE_LINE2, require_checksum=True)
+    offsets_min = np.array([0.0, 60.0], dtype=float)
+
+    batch = ogp_propagate_teme_batch_reference([near_earth, deep_space], offsets_min)
+
+    assert batch.backend == "ogp_scalar_reference"
+    assert batch.object_count == 2
+    assert batch.sample_count == 2
+    assert np.all(batch.success)
+    np.testing.assert_allclose(batch.tsince_min[0], offsets_min)
+    np.testing.assert_allclose(batch.tsince_min[1], offsets_min)
+    near_scalar = ogp_propagate_teme(near_earth, 60.0)
+    deep_scalar = ogp_propagate_teme(deep_space, 60.0)
+    np.testing.assert_allclose(batch.position_teme_km[0, 1], near_scalar.position_teme_km, rtol=0.0, atol=1e-12)
+    np.testing.assert_allclose(batch.position_teme_km[1, 1], deep_scalar.position_teme_km, rtol=0.0, atol=1e-12)
+
+
+def test_ogp_batch_accelerated_matches_reference_for_mixed_regimes() -> None:
+    near_earth = parse_tle_lines(ISS_LINE1, ISS_LINE2)
+    deep_space = parse_tle_lines(DEEP_SPACE_LINE1, DEEP_SPACE_LINE2, require_checksum=True)
+    offsets_min = np.array([[0.0, 2.0, 60.0], [0.0, 60.0, 1440.0]], dtype=float)
+
+    reference = ogp_propagate_teme_batch_reference([near_earth, deep_space], offsets_min)
+    accelerated = ogp_propagate_teme_batch_accelerated([near_earth, deep_space], offsets_min)
+
+    assert accelerated.backend.startswith("ogp_mixed")
+    assert np.all(accelerated.success)
+    np.testing.assert_allclose(accelerated.tsince_min, reference.tsince_min)
+    np.testing.assert_allclose(accelerated.position_teme_km, reference.position_teme_km, rtol=0.0, atol=1e-9)
+    np.testing.assert_allclose(accelerated.velocity_teme_km_s, reference.velocity_teme_km_s, rtol=0.0, atol=1e-12)
+
+
+def test_sdp4_context_matches_scalar_and_supports_nonmonotonic_calls() -> None:
+    deep_space = parse_tle_lines(DEEP_SPACE_LINE1, DEEP_SPACE_LINE2, require_checksum=True)
+    context = sdp4_initialize(deep_space)
+
+    assert context.period_min == pytest.approx(360.0)
+    for offset_min in [1440.0, 0.0, 60.0, 720.0]:
+        contextual = sdp4_propagate_teme_from_context(context, offset_min)
+        scalar = sdp4_propagate_teme(deep_space, offset_min)
+        assert contextual.error is None
+        assert scalar.error is None
+        np.testing.assert_allclose(contextual.position_teme_km, scalar.position_teme_km, rtol=0.0, atol=1e-9)
+        np.testing.assert_allclose(contextual.velocity_teme_km_s, scalar.velocity_teme_km_s, rtol=0.0, atol=1e-12)
+
+
+def test_sgp4_batch_reference_matches_scalar_common_time_grid() -> None:
+    elements = parse_tle_lines(ISS_LINE1, ISS_LINE2)
+    offsets_min = np.array([0.0, 2.0, 60.0], dtype=float)
+
+    batch = sgp4_propagate_teme_batch_reference([elements, elements], offsets_min)
+
+    assert batch.backend == "scalar_reference"
+    assert batch.object_count == 2
+    assert batch.sample_count == 3
+    assert batch.position_teme_km.shape == (2, 3, 3)
+    assert batch.velocity_teme_km_s.shape == (2, 3, 3)
+    assert batch.errors.shape == (2, 3)
+    assert np.all(batch.success)
+    np.testing.assert_allclose(batch.tsince_min[0], offsets_min)
+    np.testing.assert_allclose(batch.tsince_min[1], offsets_min)
+    for object_index in range(2):
+        for sample_index, offset_min in enumerate(offsets_min):
+            scalar = sgp4_propagate_teme(elements, float(offset_min))
+            assert scalar.error is None
+            np.testing.assert_allclose(
+                batch.position_teme_km[object_index, sample_index],
+                scalar.position_teme_km,
+                rtol=0.0,
+                atol=0.0,
+            )
+            np.testing.assert_allclose(
+                batch.velocity_teme_km_s[object_index, sample_index],
+                scalar.velocity_teme_km_s,
+                rtol=0.0,
+                atol=0.0,
+            )
+
+
+def test_sgp4_batch_reference_supports_per_object_time_grid() -> None:
+    elements = parse_tle_lines(ISS_LINE1, ISS_LINE2)
+    offsets_min = np.array([[0.0, 2.0], [30.0, 60.0]], dtype=float)
+
+    batch = sgp4_propagate_teme_batch_reference([elements, elements], offsets_min)
+
+    assert batch.position_teme_km.shape == (2, 2, 3)
+    np.testing.assert_allclose(batch.tsince_min, offsets_min)
+    for object_index in range(2):
+        for sample_index in range(2):
+            scalar = sgp4_propagate_teme(elements, float(offsets_min[object_index, sample_index]))
+            assert scalar.error is None
+            np.testing.assert_allclose(
+                batch.position_teme_km[object_index, sample_index],
+                scalar.position_teme_km,
+                rtol=0.0,
+                atol=0.0,
+            )
+
+
+def test_sgp4_batch_reference_records_per_sample_errors() -> None:
+    near_earth = parse_tle_lines(ISS_LINE1, ISS_LINE2)
+    deep_space = parse_tle_lines(DEEP_SPACE_LINE1, DEEP_SPACE_LINE2, require_checksum=True)
+
+    batch = sgp4_propagate_teme_batch_reference([near_earth, deep_space], [0.0, 10.0])
+
+    assert np.all(batch.success[0])
+    assert not np.any(batch.success[1])
+    assert batch.errors[0, 0] == ""
+    assert "deep-space SDP4/resonance TLEs" in batch.errors[1, 0]
+    assert "deep-space SDP4/resonance TLEs" in batch.errors[1, 1]
+    np.testing.assert_allclose(batch.position_teme_km[1], np.zeros((2, 3)))
+    np.testing.assert_allclose(batch.velocity_teme_km_s[1], np.zeros((2, 3)))
+
+
+def test_sgp4_batch_reference_validates_shape_and_values() -> None:
+    elements = parse_tle_lines(ISS_LINE1, ISS_LINE2)
+
+    with pytest.raises(ValueError, match="at least one element"):
+        sgp4_propagate_teme_batch_reference([], [0.0])
+    with pytest.raises(ValueError, match="at least one time sample"):
+        sgp4_propagate_teme_batch_reference([elements], [])
+    with pytest.raises(ValueError, match="per-object time grid"):
+        sgp4_propagate_teme_batch_reference([elements, elements], np.zeros((1, 2)))
+    with pytest.raises(ValueError, match="finite"):
+        sgp4_propagate_teme_batch_reference([elements], [0.0, np.nan])
+
+
+def test_sgp4_batch_numba_matches_scalar_reference_common_time_grid() -> None:
+    pytest.importorskip("numba")
+    elements = parse_tle_lines(ISS_LINE1, ISS_LINE2)
+    offsets_min = np.array([0.0, 2.0, 60.0, 1440.0], dtype=float)
+
+    reference = sgp4_propagate_teme_batch_reference([elements, elements], offsets_min)
+    accelerated = sgp4_propagate_teme_batch_numba([elements, elements], offsets_min)
+
+    assert accelerated.backend == "numba_cpu"
+    assert accelerated.object_count == 2
+    assert accelerated.sample_count == 4
+    assert np.all(accelerated.success)
+    np.testing.assert_allclose(accelerated.tsince_min, reference.tsince_min, rtol=0.0, atol=0.0)
+    np.testing.assert_allclose(accelerated.position_teme_km, reference.position_teme_km, rtol=0.0, atol=1e-9)
+    np.testing.assert_allclose(accelerated.velocity_teme_km_s, reference.velocity_teme_km_s, rtol=0.0, atol=1e-12)
+
+
+def test_sgp4_batch_numba_matches_scalar_reference_per_object_time_grid() -> None:
+    pytest.importorskip("numba")
+    elements = parse_tle_lines(ISS_LINE1, ISS_LINE2)
+    offsets_min = np.array([[0.0, 2.0, 30.0], [15.0, 60.0, 120.0]], dtype=float)
+
+    reference = sgp4_propagate_teme_batch_reference([elements, elements], offsets_min)
+    accelerated = sgp4_propagate_teme_batch_numba([elements, elements], offsets_min)
+
+    np.testing.assert_allclose(accelerated.position_teme_km, reference.position_teme_km, rtol=0.0, atol=1e-9)
+    np.testing.assert_allclose(accelerated.velocity_teme_km_s, reference.velocity_teme_km_s, rtol=0.0, atol=1e-12)
+
+
+def test_sgp4_batch_numba_records_per_sample_errors() -> None:
+    pytest.importorskip("numba")
+    near_earth = parse_tle_lines(ISS_LINE1, ISS_LINE2)
+    deep_space = parse_tle_lines(DEEP_SPACE_LINE1, DEEP_SPACE_LINE2, require_checksum=True)
+
+    accelerated = sgp4_propagate_teme_batch_numba([near_earth, deep_space], [0.0, 10.0])
+
+    assert np.all(accelerated.success[0])
+    assert not np.any(accelerated.success[1])
+    assert accelerated.errors[0, 0] == ""
+    assert "deep-space SDP4/resonance TLEs" in accelerated.errors[1, 0]
+    assert "deep-space SDP4/resonance TLEs" in accelerated.errors[1, 1]
+    np.testing.assert_allclose(accelerated.position_teme_km[1], np.zeros((2, 3)))
+    np.testing.assert_allclose(accelerated.velocity_teme_km_s[1], np.zeros((2, 3)))
+
+
+def test_sgp4_provider_dispatches_deep_space_tle_to_ogp_sdp4() -> None:
     elements = parse_tle_lines(DEEP_SPACE_LINE1, DEEP_SPACE_LINE2, require_checksum=True)
 
-    with pytest.raises(ValueError, match="deep-space SDP4/resonance TLEs"):
-        SGP4EphemerisProvider.from_tle_block(
-            {"line1": DEEP_SPACE_LINE1, "line2": DEEP_SPACE_LINE2, "require_checksum": True},
-            mass_kg=420.0,
-            start_jd_utc=elements.epoch_jd_utc,
-            duration_s=7200.0,
-        )
+    provider = SGP4EphemerisProvider.from_tle_block(
+        {"line1": DEEP_SPACE_LINE1, "line2": DEEP_SPACE_LINE2, "require_checksum": True},
+        mass_kg=420.0,
+        start_jd_utc=elements.epoch_jd_utc,
+        duration_s=7200.0,
+        output_frame="teme",
+    )
+    metadata = provider.metadata()
+
+    assert metadata.propagator_family == "OGP"
+    assert metadata.propagator_name == "OGP-SDP4"
+    assert metadata.output_frame == "teme"
+    truth = provider.state_at(0.0)
+    assert np.linalg.norm(truth.position_eci_km) > 10000.0
 
 
 def test_satellite_initial_state_accepts_tle_lines() -> None:

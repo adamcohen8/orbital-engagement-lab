@@ -15,6 +15,17 @@ from sim.dynamics.orbit.environment import (
     srp_pressure_n_m2,
 )
 
+_ATMOSPHERE_RELATIVE_VELOCITY_ECI_KM_S = None
+
+
+def _atmosphere_relative_velocity_eci_km_s(*args, **kwargs) -> np.ndarray:
+    global _ATMOSPHERE_RELATIVE_VELOCITY_ECI_KM_S
+    if _ATMOSPHERE_RELATIVE_VELOCITY_ECI_KM_S is None:
+        from sim.aero.core import atmosphere_relative_velocity_eci_km_s
+
+        _ATMOSPHERE_RELATIVE_VELOCITY_ECI_KM_S = atmosphere_relative_velocity_eci_km_s
+    return _ATMOSPHERE_RELATIVE_VELOCITY_ECI_KM_S(*args, **kwargs)
+
 
 @dataclass(frozen=True)
 class OrbitContext:
@@ -131,26 +142,54 @@ def accel_drag(
     env: dict,
 ) -> np.ndarray:
     rho = float(env.get("density_kg_m3", 0.0))
-    if rho <= 0.0 or mass_kg <= 0.0:
-        return np.zeros(3)
     area_eff_m2 = float(env.get("drag_area_m2", area_m2))
-    if area_eff_m2 <= 0.0:
-        return np.zeros(3)
     drag_frame_model = str(env.get("drag_frame_model", "simple")).strip().lower()
     jd_utc_start = env.get("jd_utc_start")
     drag_eop_path = env.get("drag_eop_path")
     omega_raw = env.get("drag_earth_rotation_rad_s", EARTH_ROT_RATE_RAD_S)
-    omega_earth_rad_s = float(EARTH_ROT_RATE_RAD_S if omega_raw is None else omega_raw)
-    from sim.aero.core import atmosphere_relative_velocity_eci_km_s
+    return accel_drag_resolved(
+        r_eci_km=r_eci_km,
+        v_eci_km_s=v_eci_km_s,
+        t_s=t_s,
+        mass_kg=mass_kg,
+        cd=cd,
+        density_kg_m3=rho,
+        area_eff_m2=area_eff_m2,
+        drag_frame_model=drag_frame_model,
+        jd_utc_start=None if jd_utc_start is None else float(jd_utc_start),
+        drag_eop_path=None if drag_eop_path is None else str(drag_eop_path),
+        omega_earth_rad_s=float(EARTH_ROT_RATE_RAD_S if omega_raw is None else omega_raw),
+    )
 
-    v_rel_eci_km_s = atmosphere_relative_velocity_eci_km_s(
+
+def accel_drag_resolved(
+    *,
+    r_eci_km: np.ndarray,
+    v_eci_km_s: np.ndarray,
+    t_s: float,
+    mass_kg: float,
+    cd: float,
+    density_kg_m3: float,
+    area_eff_m2: float,
+    drag_frame_model: str,
+    jd_utc_start: float | None,
+    drag_eop_path: str | None,
+    omega_earth_rad_s: float,
+) -> np.ndarray:
+    rho = float(density_kg_m3)
+    if rho <= 0.0 or mass_kg <= 0.0:
+        return np.zeros(3)
+    area_eff_m2 = float(area_eff_m2)
+    if area_eff_m2 <= 0.0:
+        return np.zeros(3)
+    v_rel_eci_km_s = _atmosphere_relative_velocity_eci_km_s(
         r_eci_km,
         v_eci_km_s,
         t_s=float(t_s),
-        earth_rotation_rad_s=omega_earth_rad_s,
-        frame_model=drag_frame_model,
-        jd_utc_start=None if jd_utc_start is None else float(jd_utc_start),
-        eop_path=None if drag_eop_path is None else str(drag_eop_path),
+        earth_rotation_rad_s=float(omega_earth_rad_s),
+        frame_model=str(drag_frame_model).strip().lower(),
+        jd_utc_start=jd_utc_start,
+        eop_path=drag_eop_path,
     )
     v_rel_m_s = v_rel_eci_km_s * 1e3
     v_norm2 = float(np.dot(v_rel_m_s, v_rel_m_s))
@@ -182,9 +221,7 @@ def accel_lift(
     drag_eop_path = env.get("drag_eop_path")
     omega_raw = env.get("drag_earth_rotation_rad_s", EARTH_ROT_RATE_RAD_S)
     omega_earth_rad_s = float(EARTH_ROT_RATE_RAD_S if omega_raw is None else omega_raw)
-    from sim.aero.core import atmosphere_relative_velocity_eci_km_s
-
-    v_rel_eci_km_s = atmosphere_relative_velocity_eci_km_s(
+    v_rel_eci_km_s = _atmosphere_relative_velocity_eci_km_s(
         r_eci_km,
         v_eci_km_s,
         t_s=float(t_s),
@@ -238,18 +275,46 @@ def accel_srp(
     shadow = env.get("srp_shadow_factor")
     if shadow is None:
         shadow = srp_shadow_factor(r_sc_eci_km=r_eci_km, t_s=t_s, env=env, srp_geometry=srp_geometry)
-    shadow = float(shadow)
+
+    distance_scale = float(env.get("srp_distance_scale", srp_geometry.get("distance_scale", 1.0)))
+    return accel_srp_resolved(
+        sun_dir_eci=sun_dir_eci,
+        mass_kg=mass_kg,
+        area_eff_m2=area_eff_m2,
+        cr=cr,
+        distance_scale=distance_scale,
+        shadow_factor=float(shadow),
+        pressure_n_m2=srp_pressure_n_m2(env),
+    )
+
+
+def accel_srp_resolved(
+    *,
+    sun_dir_eci: np.ndarray,
+    mass_kg: float,
+    area_eff_m2: float,
+    cr: float,
+    distance_scale: float,
+    shadow_factor: float,
+    pressure_n_m2: float,
+) -> np.ndarray:
+    if mass_kg <= 0.0:
+        return np.zeros(3)
+    area_eff_m2 = float(area_eff_m2)
+    if area_eff_m2 <= 0.0:
+        return np.zeros(3)
+    shadow = float(shadow_factor)
     if shadow <= 0.0:
         return np.zeros(3)
 
+    sun_dir_eci = np.asarray(sun_dir_eci, dtype=float).reshape(3)
     n2 = float(np.dot(sun_dir_eci, sun_dir_eci))
     if n2 <= 0.0:
         return np.zeros(3)
     if abs(n2 - 1.0) > 1e-12:
         sun_dir_eci = sun_dir_eci / float(np.sqrt(n2))
 
-    distance_scale = float(env.get("srp_distance_scale", srp_geometry.get("distance_scale", 1.0)))
-    force_n = srp_pressure_n_m2(env) * distance_scale * cr * area_eff_m2
+    force_n = float(pressure_n_m2) * float(distance_scale) * cr * area_eff_m2
     a_m_s2 = force_n / mass_kg
     return -(a_m_s2 / 1e3) * shadow * sun_dir_eci
 

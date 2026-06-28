@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "orbital-engagement-lab"
-version = "0.16.1"
+version = "0.17.0"
 description = "Integrated spacecraft simulation and analysis platform for rendezvous, control, validation, and mission prototyping."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -39,6 +39,9 @@ accel = [
   "numba>=0.59",
   "scipy>=1.13",
 ]
+validation = [
+  "sgp4==2.23",
+]
 full = [
   "pytest>=9.0.3",
   "ruff==0.15.14",
@@ -51,6 +54,7 @@ full = [
   "filelock>=3.20.3",
   "numba>=0.59",
   "scipy>=1.13",
+  "sgp4==2.23",
 ]
 
 [tool.setuptools]
@@ -107,6 +111,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "machine_learning/gym_env.py" = ["E402"]
+"sim/dynamics/orbit/_sdp4_equations.py" = ["E101", "E702", "E703", "I001", "UP030", "UP032"]
 "validation/*.py" = ["E402"]
 
 [tool.pytest.ini_options]
