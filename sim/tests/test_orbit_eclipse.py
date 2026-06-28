@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
@@ -12,6 +13,13 @@ class OrbitEclipseTests(unittest.TestCase):
         r = np.array([6878.137, 0.0, 0.0])  # day side
         f = srp_shadow_factor(r_sc_eci_km=r, t_s=0.0, env=env)
         self.assertGreater(f, 0.999)
+
+    def test_day_side_conical_shadow_fast_path_skips_angular_disk_math(self):
+        env = {"sun_pos_eci_km": np.array([AU_KM, 0.0, 0.0]), "srp_shadow_model": "conical"}
+        r = np.array([6878.137, 0.0, 0.0])
+        with patch("numpy.arccos", side_effect=AssertionError("dayside should not need angular disk math")):
+            f = srp_shadow_factor(r_sc_eci_km=r, t_s=0.0, env=env)
+        self.assertAlmostEqual(f, 1.0)
 
     def test_night_side_umbra(self):
         env = {"sun_pos_eci_km": np.array([AU_KM, 0.0, 0.0])}

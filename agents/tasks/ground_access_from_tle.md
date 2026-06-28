@@ -22,7 +22,7 @@ and summarize access windows. Be explicit about whether this is SGP4.
   different public TLE or station.
 - State that this task uses the TLE to initialize an ECI state and then numerically
   integrates the configured OEL force model.
-- Do not describe the run as SGP4/general-perturbations propagation.
+- Do not describe the run as OGP-SGP4/general-perturbations propagation.
 - Inspect `ground_access` evidence.
 
 ## Commands

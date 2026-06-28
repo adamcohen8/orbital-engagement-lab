@@ -15,6 +15,7 @@ from sim.actuators.orbital import (
 from sim.config.object_refs import relative_reference_for_object
 from sim.core.models import Command, StateBelief, StateTruth
 from sim.dynamics.orbit.environment import EARTH_RADIUS_KM
+from sim.dynamics.orbit.epoch import TIME_DEPENDENT_ENV_CACHE_KEY
 from sim.dynamics.reentry import evaluate_reentry_termination
 from sim.rocket.navigation import build_rocket_nav_state
 from sim.runtime_support import (
@@ -613,6 +614,8 @@ class _ControllerDebugRecorder:
         interval_end_t_s: float,
         dt_s: float,
     ) -> None:
+        if not bool(getattr(self.engine, "controller_debug_enabled", True)):
+            return
         cmd_step = command_result.command_applied
         self.engine.controller_debug_hist[aid].append(
             {
@@ -673,6 +676,7 @@ class _SatelliteStepper:
             "world_truth": world_truth_inner,
             "attitude_disabled": (not e.attitude_enabled),
             "orbit_command_period_s": float(e.orbit_command_period_s),
+            TIME_DEPENDENT_ENV_CACHE_KEY: getattr(e, "_time_dependent_env_cache", {}),
         }
 
         while t_inner < t_next - 1e-12:
@@ -680,12 +684,14 @@ class _SatelliteStepper:
             t_decision = float(t_inner)
             t_eval = t_inner + h
             world_truth_inner[aid] = tr_inner
+            belief_t0 = perf_counter()
             belief_ctx = self.belief_adapter.prepare(
                 aid=aid,
                 agent=agent,
                 truth=tr_inner,
                 t_s=t_decision,
             )
+            e.runtime_profiler.record_object(aid, "belief_prepare", perf_counter() - belief_t0)
             orb_belief = belief_ctx.orbit_belief
             att_belief = belief_ctx.attitude_belief
             control_available_time_s = agent.control_available_time_s
@@ -693,6 +699,7 @@ class _SatelliteStepper:
                 control_available_time_s is None or t_decision >= float(control_available_time_s) - 1e-12
             )
             if control_available:
+                decision_t0 = perf_counter()
                 mission_out = e._run_agent_decision(
                     e.decision_contexts.satellite_context(
                         agent=agent,
@@ -703,6 +710,8 @@ class _SatelliteStepper:
                         att_belief=att_belief,
                     ),
                 )
+                e.runtime_profiler.record_object(aid, "decision", perf_counter() - decision_t0)
+                command_t0 = perf_counter()
                 command_result = self.command_builder.build(
                     aid=aid,
                     agent=agent,
@@ -714,6 +723,7 @@ class _SatelliteStepper:
                     dt_s=h,
                     sample_index=sample_index,
                 )
+                e.runtime_profiler.record_object(aid, "command_build", perf_counter() - command_t0)
             else:
                 cmd_zero = Command.zero()
                 cmd_zero.mode_flags.update(
@@ -732,6 +742,7 @@ class _SatelliteStepper:
                     attitude_runtime_ms=0.0,
                 )
             cmd_step = command_result.command_applied
+            debug_t0 = perf_counter()
             self.debug_recorder.record(
                 aid=aid,
                 agent=agent,
@@ -742,14 +753,19 @@ class _SatelliteStepper:
                 interval_end_t_s=t_eval,
                 dt_s=h,
             )
+            e.runtime_profiler.record_object(aid, "debug_record", perf_counter() - debug_t0)
+            dynamics_t0 = perf_counter()
             tr_inner = agent.dynamics.step(state=tr_inner, command=cmd_step, env=env_inner, dt_s=h)
+            e.runtime_profiler.record_object(aid, "dynamics_step", perf_counter() - dynamics_t0)
             world_truth_inner[aid] = tr_inner
+            estimator_t0 = perf_counter()
             self.estimator_updater.update(
                 agent=agent,
                 truth=tr_inner,
                 world_truth=world_truth_inner,
                 t_s=t_eval,
             )
+            e.runtime_profiler.record_object(aid, "estimator_update", perf_counter() - estimator_t0)
             applied_thrust = np.array(cmd_step.thrust_eci_km_s2, dtype=float)
             applied_torque = np.array(cmd_step.torque_body_nm, dtype=float)
             accel_time_integral += applied_thrust * h

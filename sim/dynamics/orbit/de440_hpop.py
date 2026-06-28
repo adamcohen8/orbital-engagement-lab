@@ -106,9 +106,9 @@ def _extract_axis(row: np.ndarray, starts_1b: tuple[int, ...], coeff_count: int)
 
 
 _BODY_SPECS: dict[str, dict[str, object]] = {
-    "mercury": {"starts": (3, 17, 31, 45), "coeffs": 14, "segments": 4, "span_days": 32.0},
-    "venus": {"starts": (171, 181), "coeffs": 10, "segments": 2, "span_days": 32.0},
-    "earthmoon": {"starts": (231, 244), "coeffs": 13, "segments": 2, "span_days": 32.0},
+    "mercury": {"starts": (3, 45, 87, 129), "coeffs": 14, "segments": 4, "span_days": 32.0},
+    "venus": {"starts": (171, 201), "coeffs": 10, "segments": 2, "span_days": 32.0},
+    "earthmoon": {"starts": (231, 270), "coeffs": 13, "segments": 2, "span_days": 32.0},
     "mars": {"starts": (309,), "coeffs": 11, "segments": 1, "span_days": 32.0},
     "jupiter": {"starts": (342,), "coeffs": 8, "segments": 1, "span_days": 32.0},
     "saturn": {"starts": (366,), "coeffs": 7, "segments": 1, "span_days": 32.0},

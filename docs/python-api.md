@@ -326,9 +326,9 @@ When a scenario defines `ground_stations`, the result exposes passive access
 histories.
 
 The public TLE access example initializes the object from TLE lines, then runs
-OEL numerical propagation. It is not an SGP4/general-perturbations access
-workflow; use an object with `propagation_method: general` and
-`general.model: sgp4` for passive SGP4 propagation.
+ONP, the OEL Numerical Propagator. It is not an OGP-SGP4/general-perturbations
+access workflow; use an object with `propagation_method: general` and
+`general.model: sgp4` for passive OGP-SGP4 propagation.
 
 ```python
 cfg = SimulationConfig.from_yaml(

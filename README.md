@@ -91,7 +91,7 @@ query CLI/API, custom review plotting API, and the RPO trainer.
 | First successful run | `.venv/bin/python run_simulation.py --quickstart` |
 | Flagship RPO artifact review | `.venv/bin/python run_simulation.py --config configs/ric_pd_10km_experiment.yaml` |
 | Approximate TLE-initialized OEL propagation | `.venv/bin/python run_simulation.py --config examples/configs/public_tle_2hr_propagation.yaml` |
-| Passive SGP4 general-perturbations propagation | `.venv/bin/python run_simulation.py --config examples/configs/public_sgp4_passive_propagation.yaml` |
+| Passive OGP-SGP4 general-perturbations propagation | `.venv/bin/python run_simulation.py --config examples/configs/public_sgp4_passive_propagation.yaml` |
 | Geometric ground-station access from a TLE-initialized OEL run | `.venv/bin/python run_simulation.py --config examples/configs/public_ground_station_access_from_tle.yaml` |
 | Closed-loop public rendezvous | `.venv/bin/python run_simulation.py --config examples/configs/public_closed_loop_rendezvous_lqr.yaml` |
 | Mission-recovery smoke case | `.venv/bin/python run_simulation.py --config agents/examples/public_agent_mission_recovery_plus_c_burn.yaml` |
@@ -103,8 +103,9 @@ query CLI/API, custom review plotting API, and the RPO trainer.
 
 Most TLE examples use TLE lines to initialize an ECI state, then OEL
 numerically integrates the configured force model. Treat only scenarios with
-`propagation_method: general` and `general.model: sgp4` as SGP4
-general-perturbations runs.
+`propagation_method: general` and `general.model: sgp4` as OGP
+general-perturbations runs. OGP-SDP4/deep-space propagation is available for
+passive deep-space/resonance TLEs.
 
 ## Use OEL With AI Coding Agents
 

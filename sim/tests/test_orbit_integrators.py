@@ -88,6 +88,73 @@ class TestOrbitIntegrators(unittest.TestCase):
         self.assertAlmostEqual(prop.adaptive_atol, 1e-12)
         self.assertAlmostEqual(prop.adaptive_rtol, 1e-10)
 
+    def test_drag_only_orbit_propagator_skips_lift_plugin(self):
+        cfg = scenario_config_from_dict(
+            {
+                "scenario_name": "drag_only_builder",
+                "objects": {
+                    "sat": {
+                        "kind": "satellite",
+                        "specs": {
+                            "drag_area_m2": 2.0,
+                            "cd": 2.2,
+                        },
+                    }
+                },
+                "simulator": {
+                    "duration_s": 1.0,
+                    "dt_s": 1.0,
+                    "dynamics": {
+                        "orbit": {
+                            "drag": True,
+                        }
+                    },
+                },
+            }
+        )
+
+        prop = _build_orbit_propagator(cfg)
+        plugin_names = [plugin.__name__ for plugin in prop.plugins]
+
+        self.assertIn("drag_plugin", plugin_names)
+        self.assertNotIn("lift_plugin", plugin_names)
+
+    def test_aero_lift_orbit_propagator_keeps_lift_plugin(self):
+        cfg = scenario_config_from_dict(
+            {
+                "scenario_name": "aero_lift_builder",
+                "objects": {
+                    "sat": {
+                        "kind": "satellite",
+                        "specs": {
+                            "aero": {
+                                "drag_area_m2": 2.0,
+                                "cd": 0.2,
+                                "cl": 1.2,
+                                "lift_area_m2": 20.0,
+                                "lift_axis_body": [0.0, 0.0, 1.0],
+                            }
+                        },
+                    }
+                },
+                "simulator": {
+                    "duration_s": 1.0,
+                    "dt_s": 1.0,
+                    "dynamics": {
+                        "orbit": {
+                            "drag": True,
+                        }
+                    },
+                },
+            }
+        )
+
+        prop = _build_orbit_propagator(cfg)
+        plugin_names = [plugin.__name__ for plugin in prop.plugins]
+
+        self.assertIn("drag_plugin", plugin_names)
+        self.assertIn("lift_plugin", plugin_names)
+
     def test_orbit_propagator_exposes_adaptive_step_accounting(self):
         cfg = scenario_config_from_dict(
             {

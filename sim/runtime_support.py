@@ -822,8 +822,17 @@ class _RateLimitedController:
             self._last_eval_t_s = float(t_s)
         return self._last_cmd
 
+    def __getstate__(self) -> dict[str, Any]:
+        return dict(self.__dict__)
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        self.__dict__.update(dict(state))
+
     def __getattr__(self, item: str) -> Any:
-        return getattr(self.base, item)
+        base = self.__dict__.get("base")
+        if base is None:
+            raise AttributeError(item)
+        return getattr(base, item)
 
 
 def _apply_relative_init_from_reference(
@@ -884,6 +893,19 @@ def _apply_chaser_relative_init_from_target(
     _apply_relative_cislunar_init_from_reference(agent=chaser, reference=target, initial_state=initial_state)
 
 
+def _scenario_uses_aerodynamic_lift(cfg: SimulationScenarioConfig) -> bool:
+    for agent_cfg in cfg.objects.values():
+        if not bool(getattr(agent_cfg, "enabled", True)):
+            continue
+        if str(getattr(agent_cfg, "kind", "") or "").strip().lower() != "satellite":
+            continue
+        specs = dict(getattr(agent_cfg, "specs", {}) or {})
+        props = resolve_vehicle_aero_properties(specs)
+        if props.lift_axis_body is not None and float(props.cl) != 0.0:
+            return True
+    return False
+
+
 def _build_orbit_propagator(cfg: SimulationScenarioConfig) -> OrbitPropagator:
     orbit = dict(cfg.simulator.dynamics.get("orbit", {}) or {})
     acceleration = dict(getattr(cfg.simulator, "acceleration", {}) or {})
@@ -900,7 +922,8 @@ def _build_orbit_propagator(cfg: SimulationScenarioConfig) -> OrbitPropagator:
         plugins.append(spherical_harmonics_plugin)
     if bool(orbit.get("drag", False)):
         plugins.append(drag_plugin)
-        plugins.append(lift_plugin)
+        if _scenario_uses_aerodynamic_lift(cfg):
+            plugins.append(lift_plugin)
     if bool(orbit.get("srp", False)):
         plugins.append(srp_plugin)
     if bool(orbit.get("third_body_sun", False)):

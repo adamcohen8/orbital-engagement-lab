@@ -19,6 +19,14 @@ but do not reduce OEL Agents to a fixed example catalog. The durable agent
 interface is the documented workflow: scenario YAML, validation, deterministic
 runs, review queries, artifacts, tests, and honest limits.
 
+Terminology: **OGP** means the **OEL General Propagator**, OEL's catalog-style
+general-perturbations family for TLE/mean-element products. **OGP-SGP4** is the
+supported near-Earth SGP4 path; **OGP-SDP4** is the supported deep-space
+SDP4/resonance path. **ONP** means the **OEL Numerical Propagator**, OEL's configurable
+numerical propagation path for two-body and special-perturbation force-model
+studies. Do not call ONP HPOP; reserve HPOP for external
+reference/validation workflows.
+
 ## Supported Workflows
 
 1. Read the relevant docs and examples.
@@ -153,10 +161,10 @@ and plots without claiming structured review evidence exists.
   `_km_s`, `_kg`, `_n`, and similar suffixes.
 - Keep first drafts short, headless, and deterministic: plots off, animations
   off, modest duration, and public controllers.
-- Use simple dynamics first. Do not enable J2, J3, J4, drag, SRP, third bodies,
-  high-fidelity propagation, sensing, estimation, Monte Carlo, sensitivity, or
-  reports unless the user asks for them or they are necessary for the stated
-  study.
+- Use simple ONP dynamics first. Do not enable J2, J3, J4, drag, SRP, third
+  bodies, high-fidelity ONP propagation, sensing, estimation, Monte Carlo,
+  sensitivity, or reports unless the user asks for them or they are necessary
+  for the stated study.
 - For JSON outputs, use `outputs.stats.save_json: true` for the compact
   `master_run_summary.json`. Set `outputs.stats.save_full_log: true` only when
   the user needs detailed time-history review in `master_run_log.json`.
@@ -283,9 +291,9 @@ Examples of acceptable user requests:
 - "Can you check when this TLE is visible from Colorado Springs?"
 
 For TLE requests, say explicitly that OEL uses TLE lines to initialize an ECI
-state and then runs configured OEL numerical propagation. Do not describe the
-result as SGP4/general-perturbations propagation unless the scenario explicitly
-uses `propagation_method: general` with `general.model: sgp4`.
+state and then runs configured ONP propagation. Do not describe the result as
+OGP-SGP4/general-perturbations propagation unless the scenario explicitly uses
+`propagation_method: general` with `general.model: sgp4`.
 - "Build an attitude-hold scenario with an initial pointing error."
 - "Evaluate the run in this output folder and tell me whether it supports my
   goal."

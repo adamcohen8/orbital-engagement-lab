@@ -6,7 +6,7 @@ from typing import Any
 import numpy as np
 
 from sim.config import SimulationScenarioConfig, default_pair_object_ids, default_reference_object_id
-from sim.ground_stations import evaluate_ground_station_access
+from sim.ground_stations import evaluate_ground_station_access, evaluate_ground_station_measurements
 
 
 @dataclass(frozen=True)
@@ -29,6 +29,7 @@ class SingleRunPayloadContext:
     rocket_metrics: dict[str, np.ndarray]
     reentry_metrics: dict[str, dict[str, np.ndarray]]
     thrust_stats: dict[str, dict[str, Any]]
+    runtime_profile: dict[str, Any]
     object_propagation: dict[str, dict[str, Any]]
     attitude_guardrail_stats: dict[str, int]
     knowledge_detection_by_observer: dict[str, Any]
@@ -90,6 +91,29 @@ def _summarize_actuator_diagnostics(controller_debug_hist: dict[str, list[dict[s
                 )
         if any(float(v) > 0.0 for v in object_summary.values()):
             summary[str(oid)] = object_summary
+    return summary
+
+
+def _summarize_ground_station_measurements(measurements: dict[str, Any]) -> dict[str, Any]:
+    summary: dict[str, Any] = {}
+    for station_id, station_payload_raw in sorted(dict(measurements or {}).items()):
+        station_payload = dict(station_payload_raw or {})
+        targets = dict(station_payload.get("targets", {}) or {})
+        station_summary: dict[str, Any] = {
+            "measurement_type": station_payload.get("measurement_type", ""),
+            "target_count": len(targets),
+            "measurement_count": 0,
+            "targets": {},
+        }
+        for object_id, target_payload_raw in sorted(targets.items()):
+            target_payload = dict(target_payload_raw or {})
+            count = int(target_payload.get("measurement_count", 0) or 0)
+            station_summary["measurement_count"] += count
+            station_summary["targets"][str(object_id)] = {
+                "measurement_count": count,
+                "skipped": dict(target_payload.get("skipped", {}) or {}),
+            }
+        summary[str(station_id)] = station_summary
     return summary
 
 
@@ -167,6 +191,12 @@ def build_single_run_payload(context: SingleRunPayloadContext) -> dict[str, Any]
         truth_hist=context.truth_hist,
         jd_utc_start=context.cfg.simulator.initial_jd_utc,
     )
+    ground_station_measurements = evaluate_ground_station_measurements(
+        ground_stations=list(context.cfg.ground_stations),
+        t_s=context.t_s,
+        truth_hist=context.truth_hist,
+        jd_utc_start=context.cfg.simulator.initial_jd_utc,
+    )
     reference_object_id = default_reference_object_id(context.cfg, available_ids=context.object_ids)
     primary_pair = default_pair_object_ids(context.cfg, available_ids=context.object_ids)
     summary = {
@@ -186,10 +216,12 @@ def build_single_run_payload(context: SingleRunPayloadContext) -> dict[str, Any]
         "reference_object_id": reference_object_id,
         "primary_object_pair": list(primary_pair) if primary_pair is not None else [],
         "thrust_stats": context.thrust_stats,
+        "runtime_profile": dict(context.runtime_profile or {}),
         "attitude_guardrail_stats": context.attitude_guardrail_stats,
         "knowledge_detection_by_observer": context.knowledge_detection_by_observer,
         "knowledge_consistency_by_observer": context.knowledge_consistency_by_observer,
         "ground_station_access_summary": ground_station_access_summary,
+        "ground_station_measurement_summary": _summarize_ground_station_measurements(ground_station_measurements),
         "object_propagation": dict(context.object_propagation),
         "actuator_diagnostics_summary": _summarize_actuator_diagnostics(context.controller_debug_hist),
         "plot_outputs": {},
@@ -256,6 +288,7 @@ def build_single_run_payload(context: SingleRunPayloadContext) -> dict[str, Any]
         "knowledge_consistency_by_observer": dict(context.knowledge_consistency_by_observer),
         "ground_station_access": ground_station_access,
         "ground_station_access_summary": ground_station_access_summary,
+        "ground_station_measurements": ground_station_measurements,
         "object_propagation": dict(context.object_propagation),
         "bridge_events_by_object": context.bridge_hist,
         "controller_debug_by_object": context.controller_debug_hist,

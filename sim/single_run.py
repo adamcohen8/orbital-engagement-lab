@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import asdict, dataclass, replace
+from concurrent.futures import ProcessPoolExecutor
+from copy import copy
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
-from typing import Any, Callable
+from time import perf_counter
+from typing import Any, Callable, Protocol
 
 import numpy as np
 
@@ -17,9 +20,10 @@ from sim.config import (
     relative_reference_for_object,
     scenario_config_from_dict,
 )
-from sim.core.models import Command, StateTruth
+from sim.core.models import Command, StateBelief, StateTruth
 from sim.dynamics.attitude.rigid_body import get_attitude_guardrail_stats, reset_attitude_guardrail_stats
 from sim.dynamics.orbit.atmosphere import altitude_km_from_eci
+from sim.dynamics.orbit.epoch import TIME_DEPENDENT_ENV_CACHE_KEY
 from sim.dynamics.orbit.sgp4 import SGP4EphemerisProvider
 from sim.dynamics.orbit.spherical_harmonics import configure_spherical_harmonics_env
 from sim.dynamics.reentry import (
@@ -38,6 +42,7 @@ from sim.resource_limits import (
     bytes_from_mb,
     configured_history_memory_limit_mb,
     enforce_history_memory_budget,
+    resource_profile,
 )
 from sim.rocket.navigation import build_rocket_nav_state
 from sim.runtime_support import (
@@ -101,6 +106,376 @@ class _SingleRunPayloadParts:
     thrust_stats: dict[str, dict[str, Any]]
 
 
+@dataclass(frozen=True)
+class ObjectStepInput:
+    object_id: str
+    agent: AgentRuntime
+    initial_truth: StateTruth
+    world_truth_decision: dict[str, StateTruth]
+    t_s: float
+    t_next: float
+    sample_index: int
+
+
+@dataclass(frozen=True)
+class ObjectStepMessage:
+    object_id: str
+    initial_truth: StateTruth
+    world_truth_decision: dict[str, StateTruth]
+    t_s: float
+    t_next: float
+    sample_index: int
+
+
+@dataclass(frozen=True)
+class ObjectKnowledgeSyncResult:
+    object_id: str
+    knowledge_snapshot: dict[str, StateBelief] = field(default_factory=dict)
+    measurement_snapshot: dict[str, np.ndarray] = field(default_factory=dict)
+    detection_summary: dict[str, Any] = field(default_factory=dict)
+    consistency_summary: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class ObjectStepResult:
+    object_id: str
+    stage: str
+    elapsed_s: float
+    truth: StateTruth
+    thrust_eci_km_s2: np.ndarray
+    torque_body_nm: np.ndarray
+    delta_v_m_s: float = 0.0
+    max_accel_km_s2: float = 0.0
+    burned: bool = False
+    throttle: float | None = None
+    stage_index: float | None = None
+    q_dyn_pa: float | None = None
+    mach: float | None = None
+    metrics: dict[str, Any] = field(default_factory=dict)
+    bridge_events: list[dict[str, Any]] = field(default_factory=list)
+    bridge_elapsed_s: float = 0.0
+    updated_agent: AgentRuntime | None = None
+    controller_debug_events: list[dict[str, Any]] = field(default_factory=list)
+    profile_stage_seconds: dict[str, float] = field(default_factory=dict)
+    profile_stage_counts: dict[str, int] = field(default_factory=dict)
+    last_orbital_command_eval_t_s: float | None = None
+    latched_orbital_thrust_cmd: np.ndarray | None = None
+    desired_attitude_quat_bn: np.ndarray | None = None
+    belief_state: np.ndarray | None = None
+    belief_covariance: np.ndarray | None = None
+    belief_last_update_t_s: float | None = None
+
+
+class ObjectStepExecutor(Protocol):
+    backend_name: str
+
+    def step_objects(self, inputs: list[ObjectStepInput]) -> list[ObjectStepResult]:
+        """Advance one timestep for each object input and return ordered results."""
+
+    def shutdown(self) -> None:
+        """Release executor resources."""
+
+    def sync_after_step(
+        self,
+        *,
+        world_truth: dict[str, StateTruth],
+        sample_index: int,
+        t_s: float,
+    ) -> list[ObjectKnowledgeSyncResult] | None:
+        """Synchronize worker knowledge after the orchestrator has the step truth."""
+
+
+class SerialObjectStepExecutor:
+    backend_name = "serial"
+    max_workers = 1
+
+    def __init__(self, engine: _SingleRunEngine) -> None:
+        self.engine = engine
+
+    def step_objects(self, inputs: list[ObjectStepInput]) -> list[ObjectStepResult]:
+        return [self.engine._step_object_serial(item) for item in inputs]
+
+    def shutdown(self) -> None:
+        return None
+
+    def sync_after_step(
+        self,
+        *,
+        world_truth: dict[str, StateTruth],
+        sample_index: int,
+        t_s: float,
+    ) -> list[ObjectKnowledgeSyncResult] | None:
+        return None
+
+
+class ProcessPoolObjectStepExecutor:
+    backend_name = "process_pool"
+
+    def __init__(self, engine: _SingleRunEngine, *, max_workers: int) -> None:
+        self.engine = engine
+        self.max_workers = int(max(1, max_workers))
+        self._executors: dict[str, ProcessPoolExecutor] = {}
+        self._initialized: set[str] = set()
+        active_ids = [str(aid) for aid, agent in engine.agents.items() if agent.active]
+        if self.max_workers < len(active_ids):
+            raise RuntimeError(
+                "Persistent process_pool object parallelism requires at least one worker per active object. "
+                f"active_objects={len(active_ids)}, workers={self.max_workers}."
+            )
+        try:
+            for aid in active_ids:
+                self._executors[aid] = ProcessPoolExecutor(max_workers=1)
+        except Exception as exc:
+            self.shutdown()
+            raise RuntimeError(
+                "ProcessPoolObjectStepExecutor is unavailable in this environment. "
+                "Use simulator.execution.object_parallelism.backend=serial or disable object_parallelism."
+            ) from exc
+
+    def step_objects(self, inputs: list[ObjectStepInput]) -> list[ObjectStepResult]:
+        if len(inputs) <= 1:
+            return [self.engine._step_object_serial(item) for item in inputs]
+        futures = []
+        for item in inputs:
+            aid = item.object_id
+            executor = self._executors[aid]
+            if aid not in self._initialized:
+                executor.submit(
+                    _persistent_object_worker_init,
+                    self.engine._process_worker_engine_snapshot(item),
+                    aid,
+                ).result()
+                self._initialized.add(aid)
+            futures.append(
+                executor.submit(
+                    _persistent_object_step_worker,
+                    ObjectStepMessage(
+                        object_id=aid,
+                        initial_truth=item.initial_truth,
+                        world_truth_decision=item.world_truth_decision,
+                        t_s=item.t_s,
+                        t_next=item.t_next,
+                        sample_index=item.sample_index,
+                    ),
+                )
+            )
+        return [future.result() for future in futures]
+
+    def sync_after_step(
+        self,
+        *,
+        world_truth: dict[str, StateTruth],
+        sample_index: int,
+        t_s: float,
+    ) -> list[ObjectKnowledgeSyncResult] | None:
+        futures = [
+            executor.submit(
+                _persistent_object_knowledge_sync_worker,
+                world_truth,
+                int(sample_index),
+                float(t_s),
+            )
+            for aid, executor in self._executors.items()
+            if aid in self._initialized
+        ]
+        return [future.result() for future in futures]
+
+    def shutdown(self) -> None:
+        for executor in self._executors.values():
+            executor.shutdown(wait=True, cancel_futures=True)
+        self._executors.clear()
+        self._initialized.clear()
+
+
+_PERSISTENT_OBJECT_WORKER_ENGINE: _SingleRunEngine | None = None
+_PERSISTENT_OBJECT_WORKER_ID: str | None = None
+
+
+def _persistent_object_worker_init(engine: _SingleRunEngine, object_id: str) -> str:
+    global _PERSISTENT_OBJECT_WORKER_ENGINE, _PERSISTENT_OBJECT_WORKER_ID
+    _PERSISTENT_OBJECT_WORKER_ENGINE = engine
+    _PERSISTENT_OBJECT_WORKER_ID = str(object_id)
+    return str(object_id)
+
+
+def _persistent_object_step_worker(message: ObjectStepMessage) -> ObjectStepResult:
+    engine = _PERSISTENT_OBJECT_WORKER_ENGINE
+    aid = str(message.object_id)
+    if engine is None or _PERSISTENT_OBJECT_WORKER_ID != aid:
+        raise RuntimeError(f"Persistent object worker for {aid!r} has not been initialized.")
+    agent = engine.agents[aid]
+    profiler_enabled = bool(getattr(engine.runtime_profiler, "enabled", True))
+    engine.runtime_profiler = _RuntimeProfiler(object_ids=[aid], enabled=profiler_enabled)
+    engine.controller_debug_hist = {aid: []}
+    engine.desired_attitude_hist = {aid: np.full((int(message.sample_index) + 2, 4), np.nan)}
+    item = ObjectStepInput(
+        object_id=aid,
+        agent=agent,
+        initial_truth=message.initial_truth,
+        world_truth_decision=message.world_truth_decision,
+        t_s=message.t_s,
+        t_next=message.t_next,
+        sample_index=message.sample_index,
+    )
+    with acceleration_context_from_config(engine.cfg):
+        result = engine._step_object_serial(item)
+    belief = agent.belief
+    return replace(
+        result,
+        updated_agent=agent,
+        controller_debug_events=list(engine.controller_debug_hist.get(aid, [])),
+        profile_stage_seconds=dict(engine.runtime_profiler.object_stage_seconds.get(aid, {})),
+        profile_stage_counts=dict(engine.runtime_profiler.object_stage_counts.get(aid, {})),
+        last_orbital_command_eval_t_s=engine._last_orbital_command_eval_t_s.get(aid),
+        latched_orbital_thrust_cmd=np.array(
+            engine._latched_orbital_thrust_cmd_by_object.get(aid, engine.zero3),
+            dtype=float,
+        ),
+        desired_attitude_quat_bn=np.array(
+            engine.desired_attitude_hist[aid][item.sample_index + 1, :],
+            dtype=float,
+        )
+        if aid in engine.desired_attitude_hist
+        else None,
+        belief_state=(None if belief is None else np.array(belief.state, dtype=float)),
+        belief_covariance=(None if belief is None else np.array(belief.covariance, dtype=float)),
+        belief_last_update_t_s=(None if belief is None else float(belief.last_update_t_s)),
+    )
+
+
+def _persistent_object_knowledge_sync_worker(
+    world_truth: dict[str, StateTruth],
+    sample_index: int,
+    t_s: float,
+) -> ObjectKnowledgeSyncResult:
+    engine = _PERSISTENT_OBJECT_WORKER_ENGINE
+    aid = _PERSISTENT_OBJECT_WORKER_ID
+    if engine is None or aid is None:
+        raise RuntimeError("Persistent object worker has not been initialized.")
+    agent = engine.agents[aid]
+    if not agent.active or agent.knowledge_base is None:
+        return ObjectKnowledgeSyncResult(object_id=aid)
+    observer_truth = world_truth.get(aid)
+    if observer_truth is None:
+        return ObjectKnowledgeSyncResult(object_id=aid)
+    agent.knowledge_base.update(observer_truth=observer_truth, world_truth=world_truth, t_s=float(t_s))
+    return ObjectKnowledgeSyncResult(
+        object_id=aid,
+        knowledge_snapshot=agent.knowledge_base.snapshot(),
+        measurement_snapshot=agent.knowledge_base.measurement_snapshot(),
+        detection_summary=agent.knowledge_base.detection_summary(),
+        consistency_summary=agent.knowledge_base.consistency_summary(),
+    )
+
+
+class _RuntimeProfiler:
+    _OBJECT_WALL_STAGES = frozenset(
+        {
+            "rocket_step",
+            "general_propagation_step",
+            "satellite_step",
+            "bridge_step",
+        }
+    )
+
+    def __init__(self, *, object_ids: list[str], enabled: bool = True) -> None:
+        self.enabled = bool(enabled)
+        self.stage_seconds: dict[str, float] = {}
+        self.stage_counts: dict[str, int] = {}
+        self.object_stage_seconds: dict[str, dict[str, float]] = {str(oid): {} for oid in object_ids}
+        self.object_stage_counts: dict[str, dict[str, int]] = {str(oid): {} for oid in object_ids}
+
+    def record_stage(self, stage: str, elapsed_s: float) -> None:
+        if not self.enabled:
+            return
+        elapsed = float(elapsed_s)
+        if elapsed < 0.0:
+            return
+        key = str(stage)
+        self.stage_seconds[key] = float(self.stage_seconds.get(key, 0.0) + elapsed)
+        self.stage_counts[key] = int(self.stage_counts.get(key, 0) + 1)
+
+    def record_object(self, object_id: str, stage: str, elapsed_s: float) -> None:
+        if not self.enabled:
+            return
+        elapsed = float(elapsed_s)
+        if elapsed < 0.0:
+            return
+        oid = str(object_id)
+        key = str(stage)
+        by_stage = self.object_stage_seconds.setdefault(oid, {})
+        by_stage[key] = float(by_stage.get(key, 0.0) + elapsed)
+        by_count = self.object_stage_counts.setdefault(oid, {})
+        by_count[key] = int(by_count.get(key, 0) + 1)
+
+    def payload(self, *, completed_steps: int, object_count: int) -> dict[str, Any]:
+        steps = int(max(completed_steps, 0))
+        total_step_wall_s = float(self.stage_seconds.get("step_wall", 0.0))
+        stage_totals = {
+            key: {
+                "total_s": float(value),
+                "count": int(self.stage_counts.get(key, 0)),
+                "mean_ms": _mean_ms(value, self.stage_counts.get(key, 0)),
+                "share_of_step_wall": _safe_share(value, total_step_wall_s),
+            }
+            for key, value in sorted(self.stage_seconds.items())
+        }
+        object_totals: dict[str, Any] = {}
+        for oid, by_stage in sorted(self.object_stage_seconds.items()):
+            wall_total = float(
+                sum(value for key, value in by_stage.items() if key in self._OBJECT_WALL_STAGES)
+            )
+            nested_total = float(
+                sum(value for key, value in by_stage.items() if key not in self._OBJECT_WALL_STAGES)
+            )
+            object_totals[oid] = {
+                "total_s": wall_total,
+                "mean_ms_per_completed_step": _mean_ms(wall_total, steps),
+                "nested_stage_total_s": nested_total,
+                "stages": {
+                    key: {
+                        "total_s": float(value),
+                        "count": int(self.object_stage_counts.get(oid, {}).get(key, 0)),
+                        "mean_ms": _mean_ms(value, self.object_stage_counts.get(oid, {}).get(key, 0)),
+                    }
+                    for key, value in sorted(by_stage.items())
+                },
+            }
+        slowest = sorted(
+            (
+                {"object_id": oid, "total_s": float(data["total_s"])}
+                for oid, data in object_totals.items()
+                if float(data["total_s"]) > 0.0
+            ),
+            key=lambda item: (-float(item["total_s"]), str(item["object_id"])),
+        )[:10]
+        return {
+            "schema_version": 1,
+            "enabled": bool(self.enabled),
+            "completed_steps": steps,
+            "object_count": int(object_count),
+            "total_step_wall_s": total_step_wall_s,
+            "mean_step_wall_ms": _mean_ms(total_step_wall_s, steps),
+            "stage_totals": stage_totals,
+            "object_totals": object_totals,
+            "slowest_objects": slowest,
+            "notes": [
+                "Profiler timings use wall-clock perf_counter measurements inside the single-run engine.",
+                "Object total_s is the non-overlapping object wall time; nested_stage_total_s is diagnostic detail.",
+            ],
+        }
+
+
+def _mean_ms(total_s: float, count: int | None) -> float:
+    n = int(count or 0)
+    return 0.0 if n <= 0 else float(total_s) * 1000.0 / float(n)
+
+
+def _safe_share(value: float, total: float) -> float:
+    denom = float(total)
+    return 0.0 if denom <= 0.0 else float(value) / denom
+
+
 class _SingleRunEngine:
     def __init__(
         self,
@@ -141,6 +516,7 @@ class _SingleRunEngine:
             self.base_environment["atmosphere_model"] = str(orbit_cfg.get("atmosphere_model")).strip().lower()
         if cfg.simulator.initial_jd_utc is not None and "jd_utc_start" not in self.base_environment:
             self.base_environment["jd_utc_start"] = float(cfg.simulator.initial_jd_utc)
+        self._time_dependent_env_cache: dict[tuple, dict[str, np.ndarray]] = {}
         self.reentry_cfg = reentry_config_from_dynamics(dynamics_cfg)
         self.attitude_enabled = bool(att_cfg.get("enabled", True))
         orbit_substep_s = float(max(float(orbit_cfg.get("orbit_substep_s", self.dt) or self.dt), 1e-9))
@@ -211,6 +587,14 @@ class _SingleRunEngine:
         self.rocket = self.agents.get("rocket") or next((a for a in self.agents.values() if a.kind == "rocket"), None)
         self.chaser = self.agents.get("chaser")
         self.target = self.agents.get("target")
+        execution_cfg = dict(getattr(cfg.simulator, "execution", {}) or {})
+        runtime_profiler_cfg = dict(execution_cfg.get("runtime_profiler", {}) or {})
+        self.runtime_profiler = _RuntimeProfiler(
+            object_ids=list(self.agents.keys()),
+            enabled=bool(runtime_profiler_cfg.get("enabled", True)),
+        )
+        self.controller_debug_enabled = bool(getattr(cfg.outputs.stats, "controller_debug", True))
+        self.object_step_executor: ObjectStepExecutor = SerialObjectStepExecutor(self)
         self.reentry_object_ids = self._resolve_reentry_object_ids()
         self.reentry_active_by_object = {aid: False for aid in self.reentry_object_ids}
 
@@ -333,6 +717,8 @@ class _SingleRunEngine:
                     self.knowledge_measurement_hist[aid][tid] = np.full((self.n, 6), np.nan)
         self.knowledge_sync = _KnowledgeSynchronizer(self)
         self.knowledge_sync.initialize()
+        self.worker_knowledge_detection_by_observer: dict[str, Any] | None = None
+        self.worker_knowledge_consistency_by_observer: dict[str, Any] | None = None
 
         self.terminated_early = False
         self.termination_reason: str | None = None
@@ -392,6 +778,46 @@ class _SingleRunEngine:
 
         self.termination_monitor.check_reentry(t_s=float(self.t_s[0]))
         self._emit_step_callback(0)
+        self.object_step_executor = self._build_object_step_executor()
+
+    def _build_object_step_executor(self) -> ObjectStepExecutor:
+        execution_cfg = dict(getattr(self.cfg.simulator, "execution", {}) or {})
+        object_parallelism = dict(execution_cfg.get("object_parallelism", {}) or {})
+        enabled = bool(object_parallelism.get("enabled", False))
+        backend = str(object_parallelism.get("backend", "serial") or "serial").strip().lower()
+        if not enabled or backend == "serial":
+            return SerialObjectStepExecutor(self)
+
+        profile = resource_profile(getattr(self.cfg.simulator, "resource_profile", None))
+        if bool(profile.force_serial):
+            return SerialObjectStepExecutor(self)
+
+        active_objects = sum(1 for agent in self.agents.values() if agent.active)
+        min_objects = int(object_parallelism.get("min_objects", 3) or 3)
+        if active_objects < max(1, min_objects):
+            return SerialObjectStepExecutor(self)
+
+        if backend != "process_pool":
+            raise ValueError(f"Unsupported object step executor backend: {backend!r}.")
+
+        workers = int(object_parallelism.get("workers", 0) or 0)
+        if workers <= 0:
+            reserve_workers = int(object_parallelism.get("reserve_workers", 1) or 0)
+            workers = max(1, int(os.cpu_count() or 1) - max(0, reserve_workers))
+        workers = max(1, min(workers, active_objects))
+        if profile.max_parallel_workers is not None:
+            workers = max(1, min(workers, int(profile.max_parallel_workers)))
+        if workers <= 1:
+            return SerialObjectStepExecutor(self)
+        if workers < active_objects:
+            logger.warning(
+                "Falling back to serial object stepping because persistent process_pool requires one worker per active "
+                "object: workers=%s active_objects=%s",
+                workers,
+                active_objects,
+            )
+            return SerialObjectStepExecutor(self)
+        return ProcessPoolObjectStepExecutor(self, max_workers=workers)
 
     def _resolve_reentry_object_ids(self) -> list[str]:
         if not bool(self.reentry_cfg.enabled):
@@ -840,6 +1266,286 @@ class _SingleRunEngine:
         )
         return mission_out
 
+    def _build_object_step_inputs(
+        self,
+        *,
+        world_truth_start: dict[str, StateTruth],
+        t_s: float,
+        t_next: float,
+        sample_index: int,
+    ) -> list[ObjectStepInput]:
+        inputs: list[ObjectStepInput] = []
+        for aid, agent in self.agents.items():
+            if not agent.active:
+                continue
+            inputs.append(
+                ObjectStepInput(
+                    object_id=aid,
+                    agent=agent,
+                    initial_truth=world_truth_start[aid],
+                    world_truth_decision=dict(world_truth_start),
+                    t_s=float(t_s),
+                    t_next=float(t_next),
+                    sample_index=int(sample_index),
+                )
+            )
+        return inputs
+
+    def _step_object_serial(self, item: ObjectStepInput) -> ObjectStepResult:
+        aid = item.object_id
+        agent = item.agent
+        object_t0 = perf_counter()
+
+        if agent.kind == "rocket":
+            rocket_result = self.rocket_stepper.step(
+                agent=agent,
+                world_truth_decision=item.world_truth_decision,
+                t_s=item.t_s,
+                t_next=item.t_next,
+            )
+            agent.truth = rocket_result.truth
+            result = ObjectStepResult(
+                object_id=aid,
+                stage="rocket_step",
+                elapsed_s=perf_counter() - object_t0,
+                truth=rocket_result.truth,
+                thrust_eci_km_s2=np.array(rocket_result.thrust_eci_km_s2, dtype=float),
+                torque_body_nm=np.array(rocket_result.torque_body_nm, dtype=float),
+                delta_v_m_s=float(rocket_result.delta_v_m_s),
+                max_accel_km_s2=float(rocket_result.max_accel_km_s2),
+                burned=bool(rocket_result.burned),
+                throttle=rocket_result.throttle,
+                stage_index=rocket_result.stage_index,
+                q_dyn_pa=rocket_result.q_dyn_pa,
+                mach=rocket_result.mach,
+                metrics=dict(rocket_result.metrics or {}),
+            )
+        else:
+            provider = self.general_propagation.get(aid)
+            if provider is not None:
+                agent.truth = provider.state_at(item.t_next)
+                if agent.belief is not None and agent.belief.state.size >= 6:
+                    agent.belief.state[:6] = np.hstack((agent.truth.position_eci_km, agent.truth.velocity_eci_km_s))
+                    agent.belief.last_update_t_s = item.t_next
+                result = ObjectStepResult(
+                    object_id=aid,
+                    stage="general_propagation_step",
+                    elapsed_s=perf_counter() - object_t0,
+                    truth=agent.truth,
+                    thrust_eci_km_s2=self.zero3.copy(),
+                    torque_body_nm=self.zero3.copy(),
+                )
+            else:
+                sat_result = self.satellite_stepper.step(
+                    aid=aid,
+                    agent=agent,
+                    initial_truth=item.initial_truth,
+                    world_truth_decision=item.world_truth_decision,
+                    t_s=item.t_s,
+                    t_next=item.t_next,
+                    sample_index=item.sample_index,
+                )
+                agent.truth = sat_result.truth
+                result = ObjectStepResult(
+                    object_id=aid,
+                    stage="satellite_step",
+                    elapsed_s=perf_counter() - object_t0,
+                    truth=sat_result.truth,
+                    thrust_eci_km_s2=np.array(sat_result.average_thrust_eci_km_s2, dtype=float),
+                    torque_body_nm=np.array(sat_result.average_torque_body_nm, dtype=float),
+                    delta_v_m_s=float(sat_result.delta_v_m_s),
+                    max_accel_km_s2=float(sat_result.max_accel_km_s2),
+                    burned=bool(sat_result.burned),
+                )
+
+        bridge_events: list[dict[str, Any]] = []
+        bridge_elapsed = 0.0
+        if agent.bridge is not None:
+            bridge_t0 = perf_counter()
+            evt = {"t_s": float(item.t_next), "object_id": aid}
+            if hasattr(agent.bridge, "step"):
+                try:
+                    ret = agent.bridge.step(evt)
+                    if ret is not None:
+                        evt["bridge"] = ret
+                except Exception as ex:
+                    if bool(getattr(self.cfg.simulator.plugin_validation, "strict_runtime", False)):
+                        raise RuntimeError(f"{aid} bridge.step failed at t={float(item.t_next):.6g} s") from ex
+                    evt["bridge_error"] = str(ex)
+            bridge_events.append(evt)
+            bridge_elapsed = perf_counter() - bridge_t0
+
+        return replace(result, bridge_events=bridge_events, bridge_elapsed_s=bridge_elapsed)
+
+    def _apply_object_step_result(self, result: ObjectStepResult, *, sample_index: int) -> None:
+        aid = result.object_id
+        if result.updated_agent is not None:
+            self.agents[aid] = result.updated_agent
+            self._refresh_agent_role_pointers(aid, result.updated_agent)
+        agent = self.agents[aid]
+        agent.truth = result.truth
+        if result.belief_state is not None:
+            agent.belief = StateBelief(
+                state=np.array(result.belief_state, dtype=float),
+                covariance=(
+                    self.eye6.copy()
+                    if result.belief_covariance is None
+                    else np.array(result.belief_covariance, dtype=float)
+                ),
+                last_update_t_s=(
+                    float(result.belief_last_update_t_s)
+                    if result.belief_last_update_t_s is not None
+                    else float(result.truth.t_s)
+                ),
+            )
+        k = int(sample_index)
+
+        if result.stage == "rocket_step":
+            if aid in self.throttle_hist and result.throttle is not None:
+                self.throttle_hist[aid][k] = float(result.throttle)
+            if self.rocket_stage_hist is not None and result.stage_index is not None:
+                self.rocket_stage_hist[k + 1] = float(result.stage_index)
+            if self.rocket_q_dyn_hist is not None and result.q_dyn_pa is not None:
+                self.rocket_q_dyn_hist[k + 1] = float(result.q_dyn_pa)
+            if self.rocket_mach_hist is not None and result.mach is not None:
+                self.rocket_mach_hist[k + 1] = float(result.mach)
+            for metric_key, metric_value in dict(result.metrics or {}).items():
+                if metric_key in self.rocket_metric_hists:
+                    self.rocket_metric_hists[metric_key][k + 1] = float(metric_value)
+
+        self.thrust_hist[aid][k + 1, :] = result.thrust_eci_km_s2
+        self.torque_hist[aid][k + 1, :] = result.torque_body_nm
+        if result.desired_attitude_quat_bn is not None and aid in self.desired_attitude_hist:
+            self.desired_attitude_hist[aid][k + 1, :] = np.array(result.desired_attitude_quat_bn, dtype=float)
+        self.total_dv_m_s_by_object[aid] += float(result.delta_v_m_s)
+        self.max_accel_km_s2_by_object[aid] = max(
+            self.max_accel_km_s2_by_object[aid],
+            float(result.max_accel_km_s2),
+        )
+        if result.burned:
+            self.burn_samples_by_object[aid] += 1
+
+        self.runtime_profiler.record_object(aid, result.stage, float(result.elapsed_s))
+        self.runtime_profiler.record_stage("object_step", float(result.elapsed_s))
+        if self.runtime_profiler.enabled:
+            for stage, elapsed_s in dict(result.profile_stage_seconds).items():
+                count = int(dict(result.profile_stage_counts).get(stage, 0))
+                if count <= 0:
+                    continue
+                self.runtime_profiler.object_stage_seconds.setdefault(aid, {})[str(stage)] = float(
+                    self.runtime_profiler.object_stage_seconds.setdefault(aid, {}).get(str(stage), 0.0)
+                    + float(elapsed_s)
+                )
+                self.runtime_profiler.object_stage_counts.setdefault(aid, {})[str(stage)] = int(
+                    self.runtime_profiler.object_stage_counts.setdefault(aid, {}).get(str(stage), 0) + count
+                )
+        if result.controller_debug_events:
+            self.controller_debug_hist[aid].extend(result.controller_debug_events)
+        if result.updated_agent is not None or result.last_orbital_command_eval_t_s is not None:
+            self._last_orbital_command_eval_t_s[aid] = result.last_orbital_command_eval_t_s
+        if result.latched_orbital_thrust_cmd is not None:
+            self._latched_orbital_thrust_cmd_by_object[aid] = np.array(
+                result.latched_orbital_thrust_cmd,
+                dtype=float,
+            )
+        if result.bridge_events:
+            self.bridge_hist[aid].extend(result.bridge_events)
+            self.runtime_profiler.record_object(aid, "bridge_step", float(result.bridge_elapsed_s))
+            self.runtime_profiler.record_stage("bridge_step", float(result.bridge_elapsed_s))
+
+    def _refresh_agent_role_pointers(self, aid: str, agent: AgentRuntime) -> None:
+        if aid == "rocket" or agent.kind == "rocket":
+            self.rocket = agent
+        if aid == "chaser":
+            self.chaser = agent
+        if aid == "target":
+            self.target = agent
+
+    def _apply_worker_knowledge_sync_results(
+        self,
+        results: list[ObjectKnowledgeSyncResult],
+        *,
+        sample_index: int,
+    ) -> None:
+        detection: dict[str, Any] = {}
+        consistency: dict[str, Any] = {}
+        for result in results:
+            aid = str(result.object_id)
+            if result.detection_summary:
+                detection[aid] = dict(result.detection_summary)
+            if result.consistency_summary:
+                consistency[aid] = dict(result.consistency_summary)
+            snapshot = dict(result.knowledge_snapshot)
+            for tid, hist in self.knowledge_hist.get(aid, {}).items():
+                if tid not in snapshot and sample_index > 0:
+                    hist[sample_index, :] = hist[sample_index - 1, :]
+            for tid, belief in dict(result.knowledge_snapshot).items():
+                hist = self.knowledge_hist.get(aid, {}).get(tid)
+                if hist is None:
+                    continue
+                hist[sample_index, :] = np.array(belief.state, dtype=float).reshape(-1)[:6]
+            for tid, meas in dict(result.measurement_snapshot).items():
+                measurement_hist = self.knowledge_measurement_hist.get(aid, {}).get(tid)
+                if measurement_hist is None:
+                    continue
+                arr = np.array(meas, dtype=float).reshape(-1)
+                n = min(int(arr.size), int(measurement_hist.shape[1]))
+                measurement_hist[sample_index, :n] = arr[:n]
+        if detection:
+            self.worker_knowledge_detection_by_observer = detection
+        if consistency:
+            self.worker_knowledge_consistency_by_observer = consistency
+
+    def _process_worker_engine_snapshot(self, item: ObjectStepInput) -> _SingleRunEngine:
+        aid = item.object_id
+        worker = copy(self)
+        worker.active_step_callback = None
+        worker.agents = {aid: item.agent}
+        worker.rocket = worker.agents.get(aid) if item.agent.kind == "rocket" else None
+        worker.chaser = worker.agents.get(aid) if aid == "chaser" else None
+        worker.target = worker.agents.get(aid) if aid == "target" else None
+        worker.general_propagation = {
+            oid: provider for oid, provider in self.general_propagation.items() if oid == aid
+        }
+        worker.controller_debug_hist = {aid: []}
+        worker.bridge_hist = {aid: []}
+        worker.runtime_profiler = _RuntimeProfiler(
+            object_ids=[aid],
+            enabled=bool(getattr(self.runtime_profiler, "enabled", True)),
+        )
+        worker.object_step_executor = SerialObjectStepExecutor(worker)
+        worker.rocket_stepper = _RocketStepper(worker)
+        worker.satellite_stepper = _SatelliteStepper(worker)
+        worker.termination_monitor = _TerminationMonitor(worker)
+        worker.knowledge_sync = None
+        worker.truth_hist = {}
+        worker.belief_hist = {}
+        worker.thrust_hist = {}
+        worker.torque_hist = {}
+        worker.desired_attitude_hist = {aid: np.full((int(item.sample_index) + 2, 4), np.nan)}
+        worker.knowledge_hist = {}
+        worker.knowledge_measurement_hist = {}
+        worker._last_orbital_command_eval_t_s = {
+            aid: self._last_orbital_command_eval_t_s.get(aid)
+        }
+        worker._latched_orbital_thrust_cmd_by_object = {
+            aid: np.array(self._latched_orbital_thrust_cmd_by_object.get(aid, self.zero3), dtype=float)
+        }
+        return worker
+
+    @staticmethod
+    def _validate_object_step_results(
+        inputs: list[ObjectStepInput],
+        results: list[ObjectStepResult],
+    ) -> None:
+        input_ids = [item.object_id for item in inputs]
+        result_ids = [item.object_id for item in results]
+        if result_ids != input_ids:
+            raise RuntimeError(
+                "Object step executor must return exactly one result per input in input order. "
+                f"expected={input_ids!r}, received={result_ids!r}"
+            )
+
     def step(self, dt_s: float | None = None) -> dict[str, Any]:
         if not bool(getattr(self, "_acceleration_context_active", False)):
             with acceleration_context_from_config(self.cfg):
@@ -851,7 +1557,10 @@ class _SingleRunEngine:
         if self.done:
             return self.snapshot()
 
+        step_wall_t0 = perf_counter()
+        compact_t0 = perf_counter()
         self._compact_dynamic_history_if_needed()
+        self.runtime_profiler.record_stage("dynamic_history_compaction", perf_counter() - compact_t0)
         k = int(self.current_index)
         t = float(self.t_s[k])
         step_dt = self.dt if dt_s is None else float(dt_s)
@@ -861,9 +1570,12 @@ class _SingleRunEngine:
         step_dt = min(step_dt, remaining_s)
         if step_dt <= 0.0:
             return self.snapshot()
+        capacity_t0 = perf_counter()
         self._ensure_sample_capacity(k + 1)
+        self.runtime_profiler.record_stage("history_capacity", perf_counter() - capacity_t0)
         t_next = float(t + step_dt)
         self.t_s[k + 1] = t_next
+        self._time_dependent_env_cache = {}
 
         if self.rocket is not None:
             for agent in self.agents.values():
@@ -871,6 +1583,7 @@ class _SingleRunEngine:
                     if agent.deploy_time_s is not None and t_next >= float(agent.deploy_time_s):
                         _deploy_from_rocket(agent, self.rocket, t_next)
 
+        snapshot_t0 = perf_counter()
         world_truth_start = {
             aid: (agent.truth if agent.kind == "satellite" else _rocket_state_to_truth(agent.rocket_state))
             for aid, agent in self.agents.items()
@@ -879,9 +1592,16 @@ class _SingleRunEngine:
         if self.target_reference_truth is not None:
             world_truth_start["target_reference"] = self.target_reference_truth.copy()
         world_truth_live = dict(world_truth_start)
+        self.runtime_profiler.record_stage("world_snapshot", perf_counter() - snapshot_t0)
 
         if self.target_reference_truth is not None and self.target_reference_dynamics is not None:
-            env_ref = {**self.base_environment, "world_truth": world_truth_live, "attitude_disabled": True}
+            target_ref_t0 = perf_counter()
+            env_ref = {
+                **self.base_environment,
+                "world_truth": world_truth_live,
+                "attitude_disabled": True,
+                TIME_DEPENDENT_ENV_CACHE_KEY: self._time_dependent_env_cache,
+            }
             self.target_reference_truth = self.target_reference_dynamics.step(
                 state=self.target_reference_truth,
                 command=Command.zero(),
@@ -892,85 +1612,24 @@ class _SingleRunEngine:
             self.target_reference_orbit_hist[k + 1, 0:3] = self.target_reference_truth.position_eci_km
             self.target_reference_orbit_hist[k + 1, 3:6] = self.target_reference_truth.velocity_eci_km_s
             world_truth_live["target_reference"] = self.target_reference_truth.copy()
+            self.runtime_profiler.record_stage("target_reference_step", perf_counter() - target_ref_t0)
 
-        for aid, agent in self.agents.items():
-            if not agent.active:
-                continue
-            tr_now = world_truth_start[aid]
-            world_truth_decision = dict(world_truth_start)
-
-            if agent.kind == "rocket":
-                rocket_result = self.rocket_stepper.step(
-                    agent=agent,
-                    world_truth_decision=world_truth_decision,
-                    t_s=t,
-                    t_next=t_next,
-                )
-                agent.truth = rocket_result.truth
-                if aid in self.throttle_hist:
-                    self.throttle_hist[aid][k] = rocket_result.throttle
-                self.thrust_hist[aid][k + 1, :] = rocket_result.thrust_eci_km_s2
-                self.torque_hist[aid][k + 1, :] = rocket_result.torque_body_nm
-                self.total_dv_m_s_by_object[aid] += rocket_result.delta_v_m_s
-                self.max_accel_km_s2_by_object[aid] = max(
-                    self.max_accel_km_s2_by_object[aid], rocket_result.max_accel_km_s2
-                )
-                if rocket_result.burned:
-                    self.burn_samples_by_object[aid] += 1
-                if self.rocket_stage_hist is not None and rocket_result.stage_index is not None:
-                    self.rocket_stage_hist[k + 1] = rocket_result.stage_index
-                if self.rocket_q_dyn_hist is not None and rocket_result.q_dyn_pa is not None:
-                    self.rocket_q_dyn_hist[k + 1] = rocket_result.q_dyn_pa
-                if self.rocket_mach_hist is not None and rocket_result.mach is not None:
-                    self.rocket_mach_hist[k + 1] = rocket_result.mach
-                for metric_key, metric_value in dict(rocket_result.metrics or {}).items():
-                    if metric_key in self.rocket_metric_hists:
-                        self.rocket_metric_hists[metric_key][k + 1] = float(metric_value)
-            else:
-                provider = self.general_propagation.get(aid)
-                if provider is not None:
-                    agent.truth = provider.state_at(t_next)
-                    if agent.belief is not None and agent.belief.state.size >= 6:
-                        agent.belief.state[:6] = np.hstack((agent.truth.position_eci_km, agent.truth.velocity_eci_km_s))
-                        agent.belief.last_update_t_s = t_next
-                    self.thrust_hist[aid][k + 1, :] = self.zero3
-                    self.torque_hist[aid][k + 1, :] = self.zero3
-                else:
-                    sat_result = self.satellite_stepper.step(
-                        aid=aid,
-                        agent=agent,
-                        initial_truth=tr_now,
-                        world_truth_decision=world_truth_decision,
-                        t_s=t,
-                        t_next=t_next,
-                        sample_index=k,
-                    )
-                    agent.truth = sat_result.truth
-                    self.thrust_hist[aid][k + 1, :] = sat_result.average_thrust_eci_km_s2
-                    self.torque_hist[aid][k + 1, :] = sat_result.average_torque_body_nm
-                    self.total_dv_m_s_by_object[aid] += sat_result.delta_v_m_s
-                    self.max_accel_km_s2_by_object[aid] = max(
-                        self.max_accel_km_s2_by_object[aid], sat_result.max_accel_km_s2
-                    )
-                    if sat_result.burned:
-                        self.burn_samples_by_object[aid] += 1
-
-            world_truth_live[aid] = (
+        object_inputs = self._build_object_step_inputs(
+            world_truth_start=world_truth_start,
+            t_s=t,
+            t_next=t_next,
+            sample_index=k,
+        )
+        object_results = self.object_step_executor.step_objects(object_inputs)
+        self._validate_object_step_results(object_inputs, object_results)
+        for result in object_results:
+            self._apply_object_step_result(result, sample_index=k)
+            agent = self.agents[result.object_id]
+            world_truth_live[result.object_id] = (
                 agent.truth if agent.kind == "satellite" else _rocket_state_to_truth(agent.rocket_state)
             )
-            if agent.bridge is not None:
-                evt = {"t_s": t_next, "object_id": aid}
-                if hasattr(agent.bridge, "step"):
-                    try:
-                        ret = agent.bridge.step(evt)
-                        if ret is not None:
-                            evt["bridge"] = ret
-                    except Exception as ex:
-                        if bool(getattr(self.cfg.simulator.plugin_validation, "strict_runtime", False)):
-                            raise RuntimeError(f"{aid} bridge.step failed at t={t_next:.6g} s") from ex
-                        evt["bridge_error"] = str(ex)
-                self.bridge_hist[aid].append(evt)
 
+        termination_update_t0 = perf_counter()
         self.termination_monitor.update_rocket_insertion(t_s=t_next)
         if self.rocket is not None and self.rocket_inserted:
             for aid, agent in self.agents.items():
@@ -978,13 +1637,28 @@ class _SingleRunEngine:
                     _deploy_from_rocket(agent, self.rocket, t_next)
                     if agent.active and agent.truth is not None:
                         world_truth_live[aid] = agent.truth
+        self.runtime_profiler.record_stage("termination_update", perf_counter() - termination_update_t0)
 
-        self.knowledge_sync.update_after_step(
+        knowledge_t0 = perf_counter()
+        worker_knowledge_results = self.object_step_executor.sync_after_step(
             world_truth=world_truth_live,
             sample_index=k + 1,
             t_s=t_next,
         )
+        if worker_knowledge_results is None:
+            self.knowledge_sync.update_after_step(
+                world_truth=world_truth_live,
+                sample_index=k + 1,
+                t_s=t_next,
+            )
+        else:
+            self._apply_worker_knowledge_sync_results(
+                worker_knowledge_results,
+                sample_index=k + 1,
+            )
+        self.runtime_profiler.record_stage("knowledge_sync", perf_counter() - knowledge_t0)
 
+        history_t0 = perf_counter()
         for aid, agent in self.agents.items():
             if not agent.active:
                 continue
@@ -994,14 +1668,22 @@ class _SingleRunEngine:
                 self._ensure_belief_hist_width(aid, agent.belief.state.size)
                 self.belief_hist[aid][k + 1, : agent.belief.state.size] = agent.belief.state
             self._record_reentry_metrics(aid=aid, truth=truth, sample_index=k + 1, dt_s=step_dt)
+        self.runtime_profiler.record_stage("history_write", perf_counter() - history_t0)
 
         self.current_index = k + 1
         self._emit_step_callback(self.current_index)
 
+        termination_check_t0 = perf_counter()
         if self.termination_monitor.check_reentry(t_s=t_next):
+            self.runtime_profiler.record_stage("termination_check", perf_counter() - termination_check_t0)
+            self.runtime_profiler.record_stage("step_wall", perf_counter() - step_wall_t0)
             return self.snapshot()
         if self.termination_monitor.check_earth_impact(t_s=t_next):
+            self.runtime_profiler.record_stage("termination_check", perf_counter() - termination_check_t0)
+            self.runtime_profiler.record_stage("step_wall", perf_counter() - step_wall_t0)
             return self.snapshot()
+        self.runtime_profiler.record_stage("termination_check", perf_counter() - termination_check_t0)
+        self.runtime_profiler.record_stage("step_wall", perf_counter() - step_wall_t0)
         return self.snapshot()
 
     def run(self) -> dict[str, Any]:
@@ -1013,9 +1695,12 @@ class _SingleRunEngine:
                     return self.run()
                 finally:
                     self._acceleration_context_active = False
-        while not self.done:
-            self.step()
-        return self.build_payload()
+        try:
+            while not self.done:
+                self.step()
+            return self.build_payload()
+        finally:
+            self.object_step_executor.shutdown()
 
     def _build_payload_parts(self) -> _SingleRunPayloadParts:
         n_used = self.current_index + 1
@@ -1079,6 +1764,14 @@ class _SingleRunEngine:
         )
 
     def _payload_from_parts(self, parts: _SingleRunPayloadParts) -> dict[str, Any]:
+        runtime_profile = self.runtime_profiler.payload(
+            completed_steps=int(max(parts.n_used - 1, 0)),
+            object_count=len(self.agents),
+        )
+        runtime_profile["executor"] = {
+            "object_step_backend": str(getattr(self.object_step_executor, "backend_name", "unknown")),
+            "object_step_workers": int(getattr(self.object_step_executor, "max_workers", 1) or 1),
+        }
         return build_single_run_payload(
             SingleRunPayloadContext(
                 cfg=self.cfg,
@@ -1099,6 +1792,7 @@ class _SingleRunEngine:
                 rocket_metrics=parts.rocket_metrics,
                 reentry_metrics=parts.reentry_metrics,
                 thrust_stats=parts.thrust_stats,
+                runtime_profile=runtime_profile,
                 object_propagation={
                     oid: asdict(provider.metadata()) for oid, provider in self.general_propagation.items()
                 },
@@ -1107,12 +1801,16 @@ class _SingleRunEngine:
                     aid: agent.knowledge_base.detection_summary()
                     for aid, agent in self.agents.items()
                     if agent.knowledge_base is not None
-                },
+                }
+                if self.worker_knowledge_detection_by_observer is None
+                else dict(self.worker_knowledge_detection_by_observer),
                 knowledge_consistency_by_observer={
                     aid: agent.knowledge_base.consistency_summary()
                     for aid, agent in self.agents.items()
                     if agent.knowledge_base is not None
-                },
+                }
+                if self.worker_knowledge_consistency_by_observer is None
+                else dict(self.worker_knowledge_consistency_by_observer),
                 terminated_early=self.terminated_early,
                 termination_reason=self.termination_reason,
                 termination_time_s=self.termination_time_s,

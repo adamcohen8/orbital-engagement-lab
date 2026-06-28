@@ -93,7 +93,7 @@ Expected agent behavior:
 
 - state that OEL uses the TLE to initialize an ECI state and then numerically
   integrates the configured force model,
-- avoid claiming SGP4/general-perturbations propagation for this initializer-only
+- avoid claiming OGP-SGP4/general-perturbations propagation for this initializer-only
   task,
 - use the `ground_access` review table when present,
 - report access duration, sample count, ranges, elevations, or no-access

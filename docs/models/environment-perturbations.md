@@ -324,9 +324,8 @@ For completed runs, prefer structured artifacts:
 - Public scenarios and tests provide reproducibility evidence for configured
   cases. They do not claim flight qualification, operational decision
   authority, or validated performance for arbitrary mission envelopes.
-- TLE initialization and OEL numerical propagation are not SGP4/general
-  perturbations unless an object explicitly uses the SGP4 general propagation
-  path.
+- TLE initialization and ONP propagation are not OGP-SGP4/general perturbations
+  unless an object explicitly uses the OGP-SGP4 general propagation path.
 - Spherical harmonics need explicit terms or accessible coefficient files.
   Public distributions should not assume private HPOP/GGM03 files exist.
 - Atmospheric models depend on the configured density backend, epoch,

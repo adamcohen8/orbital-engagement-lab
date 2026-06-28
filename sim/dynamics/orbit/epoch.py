@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import numpy as np
 
 AU_KM = 149597870.7
+TIME_DEPENDENT_ENV_CACHE_KEY = "_time_dependent_env_cache"
 
 
 def datetime_to_julian_date(dt: datetime) -> float:
@@ -319,15 +320,46 @@ def resolve_time_dependent_env(env: dict, t_s: float) -> dict:
     out["jd_utc"] = float(jd)
 
     mode = str(out.get("ephemeris_mode", "analytic_enhanced")).lower()
+    cache = out.get(TIME_DEPENDENT_ENV_CACHE_KEY)
+    cacheable_analytic = (
+        isinstance(cache, dict)
+        and mode in ("analytic", "analytic_simple", "analytic_enhanced", "enhanced", "simple", "")
+        and "ephemeris_callable" not in out
+        and "sun_ephemeris_time_s" not in out
+        and "moon_ephemeris_time_s" not in out
+        and "sun_pos_eci_km" not in out
+        and "moon_pos_eci_km" not in out
+        and "sun_dir_eci" not in out
+    )
+    cache_key = None
+    additions = None
+    if cacheable_analytic:
+        cache_key = (mode, float(jd))
+        additions = cache.get(cache_key)
+        if isinstance(additions, dict):
+            if "sun_pos_eci_km" not in out and "sun_pos_eci_km" in additions:
+                out["sun_pos_eci_km"] = additions["sun_pos_eci_km"]
+            if "moon_pos_eci_km" not in out and "moon_pos_eci_km" in additions:
+                out["moon_pos_eci_km"] = additions["moon_pos_eci_km"]
+            if "sun_dir_eci" not in out and "sun_dir_eci" in additions:
+                out["sun_dir_eci"] = additions["sun_dir_eci"]
+            return out
+
     if mode in ("analytic", "analytic_simple", "analytic_enhanced", "enhanced", "simple", "spice", "spiceypy"):
         sun, moon = resolve_sun_moon_positions(out, t_s)
+        computed_additions: dict[str, np.ndarray] = {}
         if "sun_pos_eci_km" not in out:
             out["sun_pos_eci_km"] = sun
+            computed_additions["sun_pos_eci_km"] = sun
         if "moon_pos_eci_km" not in out:
             out["moon_pos_eci_km"] = moon
+            computed_additions["moon_pos_eci_km"] = moon
         s_norm = float(np.linalg.norm(sun))
         if s_norm > 0.0 and "sun_dir_eci" not in out:
             out["sun_dir_eci"] = sun / s_norm
+            computed_additions["sun_dir_eci"] = out["sun_dir_eci"]
+        if cacheable_analytic and cache_key is not None:
+            cache[cache_key] = computed_additions
     elif mode in ("external", "callable"):
         sun, moon = resolve_sun_moon_positions(out, t_s)
         if "sun_pos_eci_km" not in out:

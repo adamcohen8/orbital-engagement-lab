@@ -52,16 +52,23 @@ Python 3.10 or newer.
 
 ## Modeling Limits
 
+- **OGP** means the **OEL General Propagator**: OEL's catalog-style
+  general-perturbations family for TLE/mean-element products. The current OGP
+  implementation supports **OGP-SGP4** for near-Earth SGP4 and **OGP-SDP4**
+  for deep-space/resonance TLEs at or above the 225-minute period threshold.
+- **ONP** means the **OEL Numerical Propagator**: OEL's configurable numerical
+  propagation path for two-body and special-perturbation force-model studies.
+  ONP is distinct from passive catalog-style OGP propagation. HPOP names
+  external reference/validation workflows, not the native OEL propagator.
 - TLE initialization uses a dependency-free Keplerian/two-body approximation.
-  Subsequent propagation uses the configured OEL numerical special-perturbations
-  force model; it does not perform SGP4/general-perturbations propagation unless
-  the object explicitly uses `propagation_method: general` with
+  Subsequent propagation uses the configured ONP force model; it does not
+  perform OGP-SGP4/general-perturbations propagation unless the object explicitly
+  uses `propagation_method: general` with
   `general.model: sgp4`.
-- SGP4 general-perturbations objects are passive catalog-style objects in the
-  initial implementation. They do not accept thrust, orbit controllers,
-  maneuvers, or covariance. TLEs with orbital period at or above 225 minutes
-  require deep-space SDP4/resonance handling and are rejected explicitly instead
-  of being treated as near-Earth SGP4. The v1 output can preserve
+- OGP objects are passive catalog-style objects in the initial
+  implementation. They do not accept thrust, orbit controllers, maneuvers, or
+  covariance. TLEs with orbital period at or above 225 minutes dispatch to
+  OGP-SDP4 instead of being treated as near-Earth SGP4. The v1 output can preserve
   native TEME state rows with `output_frame: teme`, or expose the legacy
   ECI-compatible approximation with `frame_transform: teme_as_eci`. An opt-in
   Vallado IAU-76/FK5 + IAU-80 TEME-to-ECI transform is available as
@@ -71,6 +78,11 @@ Python 3.10 or newer.
 - Ground-station access is passive and geometric. It tracks line of sight,
   elevation, and range; it does not model RF link budgets, weather, scheduling,
   or command/telemetry behavior.
+- Opt-in ground-station measurements are synthetic geometric rows. The v0
+  public core preserves simulator-generated azimuth/elevation/range-style
+  evidence for inspection, but calibrated sensor processing, association,
+  bias estimation, orbit determination, and covariance-derived tracking
+  evidence are Pro/private workflows.
 - Spherical-harmonic gravity can use inline terms or user-provided coefficient
   files. HPOP/GGM03 reference data is not distributed with the public core.
 - Atmospheric re-entry diagnostics are first-pass aero/thermal estimates. They

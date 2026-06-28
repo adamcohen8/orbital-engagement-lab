@@ -33,6 +33,24 @@ def test_eval_body_constant_segment_returns_scaled_constant():
     assert np.allclose(out, np.array([1000.0, 2000.0, 3000.0]))
 
 
+def test_eval_body_earthmoon_uses_matlab_segment_columns():
+    row = np.zeros(1000, dtype=float)
+    row[0] = 0.0
+    row[1] = 32.0
+    row[230] = 1.0
+    row[243] = 2.0
+    row[256] = 3.0
+    row[269] = 4.0
+    row[282] = 5.0
+    row[295] = 6.0
+
+    first = _eval_body(row, 1.0, "earthmoon")
+    second = _eval_body(row, 17.0, "earthmoon")
+
+    assert np.allclose(first, np.array([1000.0, 2000.0, 3000.0]))
+    assert np.allclose(second, np.array([4000.0, 5000.0, 6000.0]))
+
+
 def test_mjd_tt_to_tdb_is_close():
     out = mjd_tt_to_mjd_tdb(51544.5)
     assert abs(out - 51544.5) < 1e-4
