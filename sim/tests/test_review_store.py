@@ -193,6 +193,47 @@ def test_review_store_writes_object_propagation_metadata_for_sgp4(tmp_path: Path
     assert row == ("target", "general", "sgp4", "teme", "eci", "teme_as_eci")
 
 
+def test_review_store_writes_frame_provenance(tmp_path: Path) -> None:
+    raw = _review_store_config(tmp_path)
+    raw["simulator"]["frames"] = {"model": "simple_gmst"}
+    result = SimulationSession.from_config(SimulationConfig.from_dict(raw)).run()
+
+    db_path = Path(dict(result.summary.get("review_outputs", {}) or {})["sqlite"])
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT scope, model, legacy_frame_model, time_scale_model,
+                   polar_motion_applied, nutation_corrections_applied
+            FROM frame_provenance
+            """
+        ).fetchone()
+
+    assert row == ("scenario", "simple_gmst", "simple", "utc_only", 0, 0)
+    assert result.payload["frame_provenance"]["model"] == "simple_gmst"
+
+
+def test_review_store_writes_tle_initialization_metadata_for_special_propagation(tmp_path: Path) -> None:
+    raw = _review_store_config(tmp_path)
+    raw["objects"]["chaser"]["enabled"] = False
+    raw["objects"]["target"]["initial_state"] = {"tle": {"line1": ISS_LINE1, "line2": ISS_LINE2}}
+    raw["simulator"]["initial_jd_utc"] = 2460310.75
+    result = SimulationSession.from_config(SimulationConfig.from_dict(raw)).run()
+
+    db_path = Path(dict(result.summary.get("review_outputs", {}) or {})["sqlite"])
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT object_id, source, initialization_model, initialization_propagator_name,
+                   handoff_propagation_method, native_frame, output_frame, frame_transform,
+                   tle_age_initialization_days
+            FROM object_initialization
+            """
+        ).fetchone()
+
+    assert row[:8] == ("target", "tle", "ogp", "OGP-SGP4", "special", "teme", "eci", "teme_as_eci")
+    assert row[8] == pytest.approx(0.25)
+
+
 def test_review_store_records_native_teme_state_frame_for_sgp4(tmp_path: Path) -> None:
     raw = _review_store_config(tmp_path)
     raw["objects"]["chaser"]["enabled"] = False

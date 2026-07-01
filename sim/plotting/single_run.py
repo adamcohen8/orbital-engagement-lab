@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2, EARTH_RADIUS_KM
+from sim.dynamics.orbit.frames import frame_context_from_mapping
 from sim.plotting.style import role_color, show_save_close_oel
 from sim.utils.figure_size import cap_figsize
 from sim.utils.frames import ric_dcm_ir_from_rv, ric_rect_to_curv
@@ -1511,6 +1512,13 @@ def plot_ground_track_from_payload(
 ) -> plt.Figure:
     if payload is not None:
         t_s, truth_by_object, _, _, _, _ = _payload_arrays(payload)
+        frame_context = frame_context_from_mapping(
+            dict(payload.get("frame_provenance", {}) or {}),
+            jd_utc_start=jd_utc_start,
+            source="payload",
+        )
+    else:
+        frame_context = frame_context_from_mapping({}, jd_utc_start=jd_utc_start, source="plot")
     t = np.array([] if t_s is None else t_s, dtype=float).reshape(-1)
     truth = dict(truth_by_object or {})
     ids = [object_id] if object_id and object_id in truth else sorted(truth.keys())
@@ -1520,7 +1528,12 @@ def plot_ground_track_from_payload(
         if hist is None or hist.shape[1] < 3:
             continue
         n = min(hist.shape[0], t.size)
-        lat, lon, _ = ground_track_from_eci_history(hist[:n, :3], t_s=t[:n], jd_utc_start=jd_utc_start)
+        lat, lon, _ = ground_track_from_eci_history(
+            hist[:n, :3],
+            t_s=t[:n],
+            jd_utc_start=jd_utc_start,
+            frame_context=frame_context,
+        )
         lon_p, lat_p = split_ground_track_dateline(lon_deg=lon, lat_deg=lat, jump_threshold_deg=180.0)
         if is_cartopy:
             import cartopy.crs as ccrs  # type: ignore

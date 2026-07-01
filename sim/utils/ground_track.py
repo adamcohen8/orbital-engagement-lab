@@ -3,13 +3,14 @@ from __future__ import annotations
 import numpy as np
 
 from sim.dynamics.orbit.environment import EARTH_RADIUS_KM
-from sim.dynamics.orbit.frames import eci_to_ecef
+from sim.dynamics.orbit.frames import FrameContext, frame_context_from_mapping, transform_position
 
 
 def ground_track_from_eci_history(
     r_eci_hist_km: np.ndarray,
     t_s: np.ndarray,
     jd_utc_start: float | None = None,
+    frame_context: FrameContext | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Convert ECI position history into geocentric latitude/longitude ground track.
@@ -30,8 +31,9 @@ def ground_track_from_eci_history(
     lat = np.zeros(n)
     lon = np.zeros(n)
     alt = np.zeros(n)
+    frame_ctx = frame_context or frame_context_from_mapping({}, jd_utc_start=jd_utc_start, source="ground_track")
     for k in range(n):
-        r_ecef = eci_to_ecef(r_hist[k, :], tt[k], jd_utc_start=jd_utc_start)
+        r_ecef = transform_position(r_hist[k, :], "eci", "ecef", t_s=float(tt[k]), context=frame_ctx)
         r_norm = float(np.linalg.norm(r_ecef))
         if r_norm <= 0.0:
             lat[k] = 0.0

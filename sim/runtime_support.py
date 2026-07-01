@@ -43,7 +43,7 @@ from sim.dynamics.orbit.cr3bp import (
 )
 from sim.dynamics.orbit.elements import coe_to_rv_eci as _coe_to_rv_eci
 from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2, EARTH_RADIUS_KM
-from sim.dynamics.orbit.frames import eci_to_ecef
+from sim.dynamics.orbit.frames import frame_context_from_environment, transform_position
 from sim.dynamics.orbit.propagator import (
     OrbitPropagator,
     drag_plugin,
@@ -59,6 +59,7 @@ from sim.dynamics.orbit.propagator import (
 from sim.dynamics.orbit.tle import tle_block_to_rv_eci
 from sim.dynamics.spacecraft_geometry import GeometryAreaProfile
 from sim.estimation.joint_state import JointStateEstimator
+from sim.estimation.maneuver_detection import EKFManeuverDetectionConfig
 from sim.estimation.orbit_ekf import OrbitEKFEstimator
 from sim.knowledge.object_tracking import (
     KnowledgeConditionConfig,
@@ -1346,6 +1347,20 @@ def _knowledge_ekf_diag(value: Any, default: list[float]) -> np.ndarray:
     return arr
 
 
+def _knowledge_maneuver_detection_config(value: Any) -> EKFManeuverDetectionConfig:
+    raw = dict(value or {})
+    return EKFManeuverDetectionConfig(
+        enabled=bool(raw.get("enabled", False)),
+        warning_probability=float(raw.get("warning_probability", 0.99)),
+        detection_probability=float(raw.get("detection_probability", 0.999)),
+        window_size=int(raw.get("window_size", 5)),
+        warning_count=int(raw.get("warning_count", 3)),
+        detection_count=int(raw.get("detection_count", 3)),
+        min_updates=int(raw.get("min_updates", 3)),
+        cooldown_updates=int(raw.get("cooldown_updates", 0)),
+    )
+
+
 def _build_knowledge_base(
     observer_id: str, agent_cfg: Any, dt_s: float, rng: np.random.Generator
 ) -> ObjectKnowledgeBase | None:
@@ -1357,6 +1372,9 @@ def _build_knowledge_base(
     noise = dict(knowledge.get("sensor_error", {}) or {})
     estimation = dict(knowledge.get("estimation", {}) or {})
     ekf_cfg = dict(estimation.get("ekf", knowledge.get("ekf", {})) or {})
+    maneuver_detection_cfg = dict(
+        estimation.get("maneuver_detection", ekf_cfg.get("maneuver_detection", knowledge.get("maneuver_detection", {}))) or {}
+    )
     initial_track_state = ekf_cfg.get("initial_state_eci_km_s", estimation.get("initial_state_eci_km_s"))
     tracked: list[TrackedObjectConfig] = []
     for target_id in targets:
@@ -1412,7 +1430,20 @@ def _build_knowledge_base(
                         if initial_track_state is None
                         else np.array(initial_track_state, dtype=float).reshape(6)
                     ),
+                    initial_state_ric=(
+                        None
+                        if ekf_cfg.get("initial_state_ric", estimation.get("initial_state_ric")) is None
+                        else np.array(ekf_cfg.get("initial_state_ric", estimation.get("initial_state_ric")), dtype=float).reshape(6)
+                    ),
+                    mean_motion_rad_s=(
+                        None
+                        if ekf_cfg.get("mean_motion_rad_s", estimation.get("mean_motion_rad_s")) is None
+                        else float(ekf_cfg.get("mean_motion_rad_s", estimation.get("mean_motion_rad_s")))
+                    ),
+                    measurement_origin=str(ekf_cfg.get("measurement_origin", estimation.get("measurement_origin", "deputy"))),
+                    integration_substep_s=float(ekf_cfg.get("integration_substep_s", 10.0)),
                 ),
+                maneuver_detection=_knowledge_maneuver_detection_config(maneuver_detection_cfg),
             )
         )
     return ObjectKnowledgeBase(
@@ -1610,11 +1641,8 @@ def _run_mission_execution(
 def _rocket_altitude_km(r_eci_km: np.ndarray, t_s: float, sim_cfg: RocketSimConfig) -> float:
     if not bool(getattr(sim_cfg, "use_wgs84_geodesy", False)):
         return float(np.linalg.norm(r_eci_km) - EARTH_RADIUS_KM)
-    r_ecef = eci_to_ecef(
-        np.array(r_eci_km, dtype=float),
-        float(t_s),
-        jd_utc_start=(dict(getattr(sim_cfg, "atmosphere_env", {}) or {}).get("jd_utc_start")),
-    )
+    frame_context = frame_context_from_environment(dict(getattr(sim_cfg, "atmosphere_env", {}) or {}))
+    r_ecef = transform_position(np.array(r_eci_km, dtype=float), "eci", "ecef", t_s=float(t_s), context=frame_context)
     _, _, alt_km = ecef_to_geodetic_deg_km(r_ecef)
     return float(alt_km)
 

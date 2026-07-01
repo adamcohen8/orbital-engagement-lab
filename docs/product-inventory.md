@@ -50,6 +50,21 @@ forces, `simulator.dynamics.reentry` for diagnostics and limits, and
 refinements. Flat aliases such as `specs.drag_area_m2`, `specs.cd`, and
 `specs.nose_radius_m` remain compatibility inputs.
 
+## Estimation And Knowledge
+
+These surfaces feed closed-loop object knowledge during simulation or support
+estimation-oriented validation fixtures. Batch OD workflows are covered in the
+OD contract and may be Pro/private depending on packaging.
+
+| Product surface | Config/API surface | Status | Primary use |
+| --- | --- | --- | --- |
+| ECI State EKF Knowledge | `knowledge.estimation.type: ekf` | Reference | Live target-state belief from noisy ECI state or relative measurements. |
+| EKF Maneuver Detection | `knowledge.estimation.maneuver_detection` / `EKFManeuverDetector` | Reference | Innovation/NIS persistence gate for EKF knowledge tracks; reports suspect/confirmed maneuver evidence in knowledge consistency summaries. |
+| Measured State Knowledge | `knowledge.estimation.type: measured_state` | Reference | Trust the latest full-state measurement while publishing a `StateBelief`. |
+| HCW Relative EKF Knowledge | `knowledge.estimation.type: relative_hcw_ekf` / `HCWRelativeEKFEstimator` | Reference | Live rectangular-RIC relative-state estimation for circular-chief, small-separation RPO scenarios; public validation covers full relative-state and az/el/range/range-rate measurement cases. |
+| TH Relative EKF Knowledge | `knowledge.estimation.type: relative_th_ekf` / `THRelativeEKFEstimator` | Reference | Live rectangular-RIC relative-state estimation for eccentric two-body-chief, small-separation RPO scenarios using numerically integrated TH linear dynamics; public validation covers full relative-state and az/el/range/range-rate measurement cases. |
+| YA STM Relative EKF Knowledge | `knowledge.estimation.type: relative_ya_ekf` / `YARelativeEKFEstimator` | Reference | Live rectangular-RIC relative-state estimation for eccentric two-body-chief RPO using the closed-form Yamanaka-Ankersen anomaly-domain STM mapped into OEL's km/km/s RIC state; public validation compares it against HCW, TH-integrated, and ECI EKF rows. |
+
 ## Orbital Controllers
 
 Orbital controllers are configured through `orbit_control` pointers in scenario
@@ -70,6 +85,7 @@ orbit/attitude command execution.
 | HCW Relative MPC | `HCWRelativeOrbitMPCController` | `sim.control.orbit.hcw_mpc` | Experimental | HCW-based MPC studies over a finite horizon. |
 | HCW Relative MPC, In/Cross Track | `HCWInTrackCrossTrackMPCController` | `sim.control.orbit.hcw_mpc` | Experimental | MPC variant constrained to in-track and cross-track control axes. |
 | RMOE If-Then | `RMOEIfThenController` | `sim.control.orbit.rmoe` | Workbench | Rule-based relative mean orbital-element/NMC targeting with priority logic and drift limiting. |
+| Scheduled Impulse | `ScheduledImpulseController` | `sim.control.orbit.scheduled_impulse` | Reference | Deterministic delayed finite-duration impulse for validation and maneuver-detection proof scenarios. |
 | Atmospheric Pass | `AtmosphericPassController` | `sim.control.orbit.aero_assist` | Workbench | Timed coast/raise-burn controller for aero-assisted atmospheric-pass demos. |
 | Stationkeeping | `StationkeepingController` | `sim.control.orbit.baseline` | Reference | ECI state-hold or simple target-state feedback. |
 | SMA/Ecc Feedback | `SemiMajorAxisEccentricityController` | `sim.control.orbit.baseline` | Reference | Low-thrust semi-major-axis and eccentricity regulation. |

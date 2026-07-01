@@ -8,7 +8,12 @@ import numpy as np
 
 from sim.dynamics.orbit.environment import EARTH_RADIUS_KM
 from sim.dynamics.orbit.epoch import datetime_to_julian_date, julian_date_to_datetime, sun_position_eci_km_enhanced
-from sim.dynamics.orbit.frames import apparent_sidereal_time_hpop_like, eci_to_ecef_harmonic
+from sim.dynamics.orbit.frames import (
+    FRAME_MODEL_IAU76_80_EOP,
+    apparent_sidereal_time_hpop_like,
+    eci_to_ecef_harmonic,
+    normalize_frame_model,
+)
 from sim.dynamics.orbit.harris_priester_backend import harris_priester_density
 from sim.dynamics.orbit.jacchia70_backend import jacchia70_density
 from sim.dynamics.orbit.jb2008_backend import jb2006_density, jb2008_density
@@ -112,7 +117,21 @@ def _ecef_from_eci_for_atmosphere(r_eci_km: np.ndarray, t_s: float, env: dict) -
         jd_utc_start=env.get("jd_utc_start"),
         frame_model=frame_model,
         eop_path=None if eop_path is None else str(eop_path),
+        dut1_s=None if env.get("dut1_s") is None else float(env["dut1_s"]),
+        xp_arcsec=None if env.get("xp_arcsec") is None else float(env["xp_arcsec"]),
+        yp_arcsec=None if env.get("yp_arcsec") is None else float(env["yp_arcsec"]),
+        dat_s=None if env.get("dat_s") is None else float(env["dat_s"]),
+        tt_minus_utc_s=None if env.get("tt_minus_utc_s") is None else float(env["tt_minus_utc_s"]),
+        ddpsi_rad=float(env.get("ddpsi_rad", 0.0) or 0.0),
+        ddeps_rad=float(env.get("ddeps_rad", 0.0) or 0.0),
     )
+
+
+def _is_eop_frame_model(frame_model: str) -> bool:
+    try:
+        return normalize_frame_model(frame_model) == FRAME_MODEL_IAU76_80_EOP
+    except ValueError:
+        return False
 
 
 def _altitude_km_from_eci(r_eci_km: np.ndarray, t_s: float, env: dict | None = None) -> float:
@@ -170,8 +189,16 @@ def _datetime_from_env_t_s(env: dict, t_s: float) -> datetime:
 def _local_solar_time_hr(lon_deg: float, dt_utc: datetime, env: dict) -> float:
     jd = datetime_to_julian_date(dt_utc)
     frame_model = str(env.get("density_frame_model", env.get("drag_frame_model", ""))).strip().lower()
-    eop_path = env.get("density_eop_path", env.get("drag_eop_path")) if frame_model == "hpop_like" else None
-    sidereal = apparent_sidereal_time_hpop_like(jd, None if eop_path is None else str(eop_path))
+    eop_path = env.get("density_eop_path", env.get("drag_eop_path")) if _is_eop_frame_model(frame_model) else None
+    sidereal = apparent_sidereal_time_hpop_like(
+        jd,
+        None if eop_path is None else str(eop_path),
+        dut1_s=None if env.get("dut1_s") is None else float(env["dut1_s"]),
+        dat_s=None if env.get("dat_s") is None else float(env["dat_s"]),
+        tt_minus_utc_s=None if env.get("tt_minus_utc_s") is None else float(env["tt_minus_utc_s"]),
+        ddpsi_rad=float(env.get("ddpsi_rad", 0.0) or 0.0),
+        ddeps_rad=float(env.get("ddeps_rad", 0.0) or 0.0),
+    )
     sun_eci = sun_position_eci_km_enhanced(jd)
     sun_ra = math.atan2(float(sun_eci[1]), float(sun_eci[0]))
     hour_angle = (sidereal + math.radians(float(lon_deg)) - sun_ra + math.pi) % (2.0 * math.pi) - math.pi
@@ -252,7 +279,7 @@ def density_nrlmsise00(r_eci_km: np.ndarray, t_s: float, env: dict | None = None
         return float(max(0.0, custom_fn(alt_km, lat_deg, lon_deg, dt_utc, env)))
     if env.get("nrlmsise00_lst_hr") is None:
         frame_model = str(env.get("density_frame_model", env.get("drag_frame_model", ""))).strip().lower()
-        if frame_model == "hpop_like":
+        if _is_eop_frame_model(frame_model):
             env["nrlmsise00_lst_hr"] = _local_solar_time_hr(lon_deg, dt_utc, env)
 
     return float(max(0.0, nrlmsise00_local_density(alt_km, lat_deg, lon_deg, dt_utc, env)))
@@ -271,7 +298,7 @@ def density_msis86(r_eci_km: np.ndarray, t_s: float, env: dict | None = None) ->
     if bool(env.get("msis86_hpop_angle_compat", True)):
         if env.get("msis86_lst_hr") is None:
             frame_model = str(env.get("density_frame_model", env.get("drag_frame_model", ""))).strip().lower()
-            if frame_model == "hpop_like":
+            if _is_eop_frame_model(frame_model):
                 env["msis86_lst_hr"] = _local_solar_time_hr(lon_deg, dt_utc, env)
             else:
                 eop_path = None

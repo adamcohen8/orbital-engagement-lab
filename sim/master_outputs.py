@@ -14,6 +14,7 @@ from sim.config import (
     iter_object_sections,
 )
 from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2, EARTH_RADIUS_KM
+from sim.dynamics.orbit.frames import frame_context_from_mapping
 from sim.ground_stations import evaluate_ground_station_access
 from sim.plotting.style import artifact_metadata, oel_plot_context, save_oel_figure, style_name_from_config
 from sim.presets.rockets import RocketStackPreset
@@ -539,6 +540,11 @@ def _plot_outputs_impl(
     mode = cfg.outputs.mode
     figure_ids = _expanded_figure_ids(dict(cfg.outputs.plots or {}))
     ric_2d_planes = list(cfg.outputs.plots.get("ric_2d_planes", ["ri", "ic", "rc"]) or ["ri", "ic", "rc"])
+    frame_context = frame_context_from_mapping(
+        dict(getattr(cfg.simulator, "frames", {}) or {}),
+        jd_utc_start=cfg.simulator.initial_jd_utc,
+        source="scenario",
+    )
     reference_object_id = str(cfg.outputs.plots.get("reference_object_id", "")).strip()
     reference_object_label = str(cfg.outputs.plots.get("reference_object_label", "")).strip() or None
     reference_truth_override = None
@@ -757,6 +763,7 @@ def _plot_outputs_impl(
             t_s=t_s,
             truth_hist=truth_hist,
             jd_utc_start=cfg.simulator.initial_jd_utc,
+            frame_context=frame_context,
         )
         p = outdir / "ground_station_access.png"
         plot_ground_station_access(
@@ -1032,7 +1039,14 @@ def _plot_outputs_impl(
             out["trajectory_eci_multi"] = str(p)
     if "trajectory_ecef_multi" in figure_ids:
         p = outdir / "trajectory_ecef_multi.png"
-        plot_multi_trajectory_frame(t_s, truth_hist, frame="ecef", mode=mode, out_path=str(p))
+        plot_multi_trajectory_frame(
+            t_s,
+            truth_hist,
+            frame="ecef",
+            mode=mode,
+            out_path=str(p),
+            frame_context=frame_context,
+        )
         if mode in ("save", "both"):
             out["trajectory_ecef_multi"] = str(p)
     if "trajectory_ric_rect_multi" in figure_ids and reference_truth is not None:
@@ -1157,7 +1171,7 @@ def _plot_outputs_impl(
                 out[f"{oid}_rates_ric"] = str(p)
         if "trajectory_ecef" in figure_ids:
             p = outdir / f"{oid}_traj_ecef.png"
-            plot_trajectory_frame(t_s, hist, frame="ecef", mode=mode, out_path=str(p))
+            plot_trajectory_frame(t_s, hist, frame="ecef", mode=mode, out_path=str(p), frame_context=frame_context)
             if mode in ("save", "both"):
                 out[f"{oid}_traj_ecef"] = str(p)
         if "trajectory_ric_rect" in figure_ids and reference_truth is not None and oid != reference_object_id:
@@ -1474,6 +1488,7 @@ def _plot_outputs_impl(
             x[:, 0:3],
             t_s=t_s[: x.shape[0]],
             jd_utc_start=cfg.simulator.initial_jd_utc,
+            frame_context=frame_context,
         )
         if launch_site is None:
             lat0, lon0 = float(lat[0]), float(lon[0])
@@ -1942,6 +1957,11 @@ def _animate_outputs_impl(
     types = list(anim_cfg.get("types", []) or [])
     if not types:
         return out
+    frame_context = frame_context_from_mapping(
+        dict(getattr(cfg.simulator, "frames", {}) or {}),
+        jd_utc_start=cfg.simulator.initial_jd_utc,
+        source="scenario",
+    )
     plot_fns = _load_plotting_functions()
     animate_battlespace_dashboard = plot_fns["animate_battlespace_dashboard"]
     animate_rectangular_prism_attitude = plot_fns["animate_rectangular_prism_attitude"]
@@ -2024,6 +2044,7 @@ def _animate_outputs_impl(
             speed_multiple=speed_multiple,
             draw_earth_map=draw_earth_map,
             frame_stride=frame_stride,
+            frame_context=frame_context,
         )
         if mode in ("save", "both"):
             out["ground_track_multi"] = str(p)
@@ -2036,6 +2057,7 @@ def _animate_outputs_impl(
                 hist[:, :3],
                 t_s=t_s,
                 jd_utc_start=cfg.simulator.initial_jd_utc,
+                frame_context=frame_context,
             )
             p = outdir / f"{oid}_ground_track.mp4"
             animate_ground_track(

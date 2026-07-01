@@ -77,6 +77,7 @@ from sim.game.tuning import (
     MEDIUM_HIGH_SPEED_DASHBOARD_FPS,
     SPEED_DT_SCHEDULE,
     SPEED_MULTIPLIER_OPTIONS,
+    STATIC_DASHBOARD_FPS,
 )
 from sim.presets.thrusters import resolve_thruster_max_thrust_n_from_specs
 
@@ -1279,6 +1280,7 @@ def _dashboard_fps_for_speed(
     speed_multiple: float,
     *,
     recording: bool = False,
+    static_screen: bool = False,
     recording_fps: float = GAME_RECORDING_FPS,
     fps_cap: float | None = None,
     high_speed_fps: float | None = None,
@@ -1298,6 +1300,8 @@ def _dashboard_fps_for_speed(
         fps = MEDIUM_HIGH_SPEED_DASHBOARD_FPS
     else:
         fps = DASHBOARD_FPS
+    if bool(static_screen):
+        fps = min(float(fps), float(STATIC_DASHBOARD_FPS))
     if cap is not None:
         fps = min(float(fps), float(cap))
     return float(max(fps, 1.0))
@@ -1319,6 +1323,18 @@ def _clip_recording_status(
     if status_message and float(now_wall_s) < float(status_until_wall_s):
         return status_message
     return ""
+
+
+def _pause_teaching_overlay_enabled(
+    phase: GamePhase,
+    training_cfg: RPOTrainingConfig,
+    guided_tutorial: GuidedTutorialRuntime,
+) -> bool:
+    return bool(
+        phase == GamePhase.PAUSED
+        and _guided_tutorial_current_stage(training_cfg, guided_tutorial) is None
+        and not bool(guided_tutorial.awaiting_speed_step)
+    )
 
 
 def _realtime_steps_due(
@@ -1757,6 +1773,7 @@ def run_game_mode(
             debrief_lines=_score_debrief_lines(score, config=training_cfg, difficulty=difficulty),
             debrief_available=debrief_enabled,
             render_motion=not command_state.paused and not phase_shows_briefing(phase) and not phase_is_terminal(phase),
+            pause_overlay=False,
         )
         recording_controller.capture(dashboard)
         if phase_shows_briefing(phase):
@@ -2438,6 +2455,7 @@ def run_game_mode(
                 render_motion=not command_state.paused
                 and not phase_shows_briefing(phase)
                 and not phase_is_terminal(phase),
+                pause_overlay=_pause_teaching_overlay_enabled(phase, training_cfg, guided_tutorial),
             )
             recording_controller.capture(dashboard)
             clip_recording_controller.capture(dashboard)
@@ -2484,6 +2502,11 @@ def run_game_mode(
             dashboard.tick(
                 _dashboard_fps_for_speed(
                     effective_speed_multiple,
+                    static_screen=(
+                        command_state.paused
+                        or phase_shows_briefing(phase)
+                        or phase_is_terminal(phase)
+                    ),
                     recording=recording_controller.recorder is not None or clip_recording_controller.recording,
                     recording_fps=recording_fps,
                     fps_cap=dashboard_fps_cap,

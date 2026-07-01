@@ -262,7 +262,8 @@ artifacts.
    saved review evidence.
 6. Ground access: use
    `agents/examples/public_agent_ground_access.yaml` to inspect access samples
-   and state that this TLE input initializes ONP propagation, not SGP4.
+   and state that this TLE input uses OGP-backed initialization before ONP
+   propagation, not continuous catalog-style propagation.
 7. Attitude hold: use
    `agents/examples/public_agent_attitude_hold.yaml` to inspect body-rate and
    attitude-control evidence.

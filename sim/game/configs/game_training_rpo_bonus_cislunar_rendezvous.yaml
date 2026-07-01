@@ -51,8 +51,8 @@ metadata:
     camera_rule_toggle_enabled: true
     target_sprite_path: cislunar_target_sprite.png
     chaser_sprite_path: cislunar_chaser_sprite.png
-    dashboard_fps_cap: 60.0
-    dashboard_high_speed_fps: 60.0
+    dashboard_fps_cap: 45.0
+    dashboard_high_speed_fps: 45.0
     dashboard_high_speed_fps_max_multiple: 100.0
     target_sprite_diameter_km: 0.12
     chaser_sprite_diameter_km: 0.05

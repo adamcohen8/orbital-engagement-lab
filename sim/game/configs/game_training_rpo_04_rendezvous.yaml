@@ -7,6 +7,7 @@ metadata:
     --speed-multiple 10`.
   game:
     control_mode: ric_translation
+    level_name: Level 4 - Rendezvous
     difficulty: easy
     initial_speed_multiple: 10.0
     speed_multiplier_options:

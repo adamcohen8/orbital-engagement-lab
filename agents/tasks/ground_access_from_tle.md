@@ -58,7 +58,8 @@ SELECT station_id, object_id, reason, COUNT(*) AS samples FROM ground_access WHE
 - Status: validated and ran, or explain the failure.
 - Station ID, object ID, sample count, access sample count, min range, and max
   elevation.
-- Explicit TLE assumption boundary for this task: initializer only, not SGP4 propagation.
+- Explicit TLE assumption boundary for this task: OGP-backed initializer only,
+  not continuous catalog-style propagation.
 - Access/no-access interpretation from review evidence.
 - Limitations: geometric access only, no RF link budget, scheduling, weather,
   or operational contact planning.

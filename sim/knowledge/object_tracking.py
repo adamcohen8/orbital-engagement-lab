@@ -1,14 +1,26 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 import numpy as np
 
 from sim.core.models import Measurement, StateBelief, StateTruth
 from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2, EARTH_RADIUS_KM
+from sim.estimation.maneuver_detection import EKFManeuverDetectionConfig, EKFManeuverDetector
 from sim.estimation.orbit_ekf import OrbitEKFEstimator, OrbitEKFUpdateDiagnostics
+from sim.estimation.relative_hcw_ekf import (
+    HCWRelativeEKFEstimator,
+    hcw_measurement_dimension,
+    hcw_measurement_vector,
+    normalize_hcw_measurement_model,
+)
+from sim.estimation.relative_th_ekf import THRelativeEKFEstimator, YARelativeEKFEstimator
 from sim.sensors.access import AccessConfig, AccessModel
+from sim.utils.frames import eci_relative_to_ric_rect, ric_rect_state_to_eci
 from sim.utils.quaternion import quaternion_to_dcm_bn
+
+KnowledgeSummaryValue = Any
 
 
 def _line_of_sight_clear(observer_eci_km: np.ndarray, target_eci_km: np.ndarray) -> bool:
@@ -62,6 +74,10 @@ class KnowledgeEKFConfig:
     meas_noise_diag: np.ndarray = field(default_factory=lambda: np.array([1e-6, 1e-6, 1e-6, 1e-10, 1e-10, 1e-10]))
     init_cov_diag: np.ndarray = field(default_factory=lambda: np.array([1.0, 1.0, 1.0, 1e-2, 1e-2, 1e-2]))
     initial_state_eci_km_s: np.ndarray | None = None
+    initial_state_ric: np.ndarray | None = None
+    mean_motion_rad_s: float | None = None
+    measurement_origin: str = "deputy"
+    integration_substep_s: float = 10.0
 
     def __post_init__(self) -> None:
         if np.array(self.process_noise_diag, dtype=float).reshape(-1).size != 6:
@@ -74,6 +90,12 @@ class KnowledgeEKFConfig:
             self.initial_state_eci_km_s, dtype=float
         ).reshape(-1).size != 6:
             raise ValueError("initial_state_eci_km_s must be length-6.")
+        if self.initial_state_ric is not None and np.array(self.initial_state_ric, dtype=float).reshape(-1).size != 6:
+            raise ValueError("initial_state_ric must be length-6.")
+        if self.mean_motion_rad_s is not None and float(self.mean_motion_rad_s) <= 0.0:
+            raise ValueError("mean_motion_rad_s must be positive when provided.")
+        if float(self.integration_substep_s) <= 0.0:
+            raise ValueError("integration_substep_s must be positive.")
 
 
 @dataclass(frozen=True)
@@ -84,6 +106,7 @@ class TrackedObjectConfig:
     estimator: str = "ekf"
     measurement_model: str = "state"
     ekf: KnowledgeEKFConfig = KnowledgeEKFConfig()
+    maneuver_detection: EKFManeuverDetectionConfig = EKFManeuverDetectionConfig()
 
 
 class _OtherObjectStateSensor:
@@ -172,12 +195,20 @@ class _OtherObjectStateSensor:
 class _Track:
     target_id: str
     sensor: _OtherObjectStateSensor
-    estimator: OrbitEKFEstimator | None
+    estimator: OrbitEKFEstimator | HCWRelativeEKFEstimator | THRelativeEKFEstimator | YARelativeEKFEstimator | None
     estimator_type: str
     measurement_model: str
     init_cov_diag: np.ndarray
+    process_noise_diag: np.ndarray
+    estimator_dt_s: float
     initial_state_eci_km_s: np.ndarray | None = None
+    initial_state_ric: np.ndarray | None = None
+    hcw_mean_motion_rad_s: float | None = None
+    hcw_measurement_origin: str = "deputy"
+    th_integration_substep_s: float = 10.0
+    maneuver_detector: EKFManeuverDetector = field(default_factory=EKFManeuverDetector)
     belief: StateBelief | None = None
+    relative_belief: StateBelief | None = None
     step_count: int = 0
     initialization_count: int = 0
     measurement_count: int = 0
@@ -202,6 +233,8 @@ class _Track:
     def step(self, observer_truth: StateTruth, target_truth: StateTruth, t_s: float) -> StateBelief | None:
         self.step_count += 1
         self.last_measurement_vector = None
+        if self.estimator_type in {"relative_hcw_ekf", "relative_th_ekf", "relative_ya_ekf"}:
+            return self._step_relative_hcw(observer_truth, target_truth, t_s)
         meas = self.sensor.measure_relative(observer_truth, target_truth, t_s, self.measurement_model)
         detect_status = str(self.sensor.last_detection_status or "unknown")
         self.detection_status_counts[detect_status] = int(self.detection_status_counts.get(detect_status, 0)) + 1
@@ -265,6 +298,182 @@ class _Track:
             self.update_count += 1
         self._record_consistency(target_truth, diag, t_s)
         return self.belief
+
+    def _step_relative_hcw(
+        self,
+        observer_truth: StateTruth,
+        target_truth: StateTruth,
+        t_s: float,
+    ) -> StateBelief | None:
+        meas = self._measure_hcw(observer_truth, target_truth, t_s)
+        if self.relative_belief is None:
+            if meas is None:
+                return self.belief
+            init_state = self._initial_hcw_state_from_measurement_or_config(meas)
+            self.relative_belief = StateBelief(
+                state=init_state,
+                covariance=np.diag(self.init_cov_diag),
+                last_update_t_s=float(t_s),
+            )
+            self.initialization_count += 1
+            self.belief = self._target_belief_from_relative(observer_truth)
+            if self.belief is not None:
+                self._ensure_relative_estimator(self.belief.state, t_s)
+            self._record_consistency(target_truth, None, t_s)
+            return self.belief
+
+        reference_belief = self.belief if self.belief is not None else self._target_belief_from_relative(observer_truth)
+        if reference_belief is None:
+            return None
+        reference_state = reference_belief.state
+        self._ensure_relative_estimator(reference_state, t_s)
+        assert isinstance(self.estimator, (HCWRelativeEKFEstimator, THRelativeEKFEstimator, YARelativeEKFEstimator))
+        self.relative_belief = self.estimator.update(self.relative_belief, meas, t_s)
+        diag = self.estimator.last_update_diagnostics
+        if diag is not None and diag.update_applied:
+            self.update_count += 1
+        self.belief = self._target_belief_from_relative(observer_truth)
+        if isinstance(self.estimator, THRelativeEKFEstimator) and self.belief is not None:
+            self.estimator.set_reference_state(np.array(self.belief.state, dtype=float).reshape(6), float(t_s))
+        self._record_consistency(target_truth, diag, t_s)
+        return self.belief
+
+    def _ensure_relative_estimator(self, reference_state_eci_km_s: np.ndarray, t_s: float) -> None:
+        if self.estimator is not None:
+            return
+        reference_state = np.array(reference_state_eci_km_s, dtype=float).reshape(6)
+        if self.estimator_type == "relative_ya_ekf":
+            self.estimator = YARelativeEKFEstimator(
+                chief_state_eci_km_s=reference_state,
+                chief_epoch_t_s=float(t_s),
+                dt_s=self.estimator_dt_s,
+                process_noise_diag=np.array(self.process_noise_diag, dtype=float),
+                meas_noise_diag=self._hcw_meas_noise_diag(),
+                measurement_model=self.measurement_model,
+                measurement_origin=self.hcw_measurement_origin,
+                integration_substep_s=float(self.th_integration_substep_s),
+            )
+        elif self.estimator_type == "relative_th_ekf":
+            self.estimator = THRelativeEKFEstimator(
+                chief_state_eci_km_s=reference_state,
+                chief_epoch_t_s=float(t_s),
+                dt_s=self.estimator_dt_s,
+                process_noise_diag=np.array(self.process_noise_diag, dtype=float),
+                meas_noise_diag=self._hcw_meas_noise_diag(),
+                measurement_model=self.measurement_model,
+                measurement_origin=self.hcw_measurement_origin,
+                integration_substep_s=float(self.th_integration_substep_s),
+            )
+        else:
+            self.estimator = HCWRelativeEKFEstimator(
+                mean_motion_rad_s=self._hcw_mean_motion(reference_state),
+                dt_s=self.estimator_dt_s,
+                process_noise_diag=np.array(self.process_noise_diag, dtype=float),
+                meas_noise_diag=self._hcw_meas_noise_diag(),
+                measurement_model=self.measurement_model,
+                measurement_origin=self.hcw_measurement_origin,
+            )
+
+    def _measure_hcw(
+        self,
+        observer_truth: StateTruth,
+        target_truth: StateTruth,
+        t_s: float,
+    ) -> Measurement | None:
+        gate = self.sensor.measure(observer_truth, target_truth, t_s)
+        detect_status = str(self.sensor.last_detection_status or "unknown")
+        self.detection_status_counts[detect_status] = int(self.detection_status_counts.get(detect_status, 0)) + 1
+        if gate is None:
+            if self.last_detected:
+                self.loss_of_detection_count += 1
+            self.last_detected = False
+            self.consecutive_missed_steps += 1
+            self.max_consecutive_missed_steps = max(self.max_consecutive_missed_steps, self.consecutive_missed_steps)
+            if self.last_measurement_t_s is not None:
+                self.time_since_last_detection_s_values.append(float(t_s - self.last_measurement_t_s))
+            return None
+
+        native_truth = _observer_relative_to_target_ric(observer_truth, target_truth)
+        ideal = hcw_measurement_vector(
+            self.measurement_model,
+            native_truth,
+            measurement_origin=self.hcw_measurement_origin,
+        )
+        sigma = self._hcw_measurement_sigma()
+        bias = self._hcw_measurement_bias()
+        measurement = ideal + bias + self.sensor.rng.normal(0.0, sigma, size=ideal.size)
+        self.last_measurement_vector = np.array(measurement, dtype=float).reshape(-1)
+        self.measurement_count += 1
+        self.last_measurement_t_s = float(t_s)
+        self.detected_count += 1
+        if not self.last_detected and (self.detected_count > 1):
+            self.reacquisition_count += 1
+        self.last_detected = True
+        self.consecutive_missed_steps = 0
+        self.time_since_last_detection_s_values.append(0.0)
+        return Measurement(vector=measurement, t_s=t_s)
+
+    def _initial_hcw_state_from_measurement_or_config(self, measurement: Measurement) -> np.ndarray:
+        if self.initial_state_ric is not None:
+            return np.array(self.initial_state_ric, dtype=float).reshape(6)
+        model = normalize_hcw_measurement_model(self.measurement_model)
+        if model == "relative_state":
+            sign = -1.0 if self.hcw_measurement_origin == "deputy" else 1.0
+            return sign * np.array(measurement.vector, dtype=float).reshape(6)
+        raise ValueError(
+            f"tracked target {self.target_id!r} uses estimator={self.estimator_type!r} with "
+            f"measurement_model={self.measurement_model!r}; relative-only RPO tracking requires "
+            "ekf.initial_state_ric or estimation.initial_state_ric."
+        )
+
+    def _target_belief_from_relative(self, observer_truth: StateTruth) -> StateBelief | None:
+        if self.relative_belief is None:
+            return None
+        # Publish an approximate target ECI belief for existing consumers. The
+        # relative RIC state remains the authoritative estimator state; this
+        # conversion uses the observer local RIC frame and is valid for small RPO
+        # separations.
+        observer_state = np.hstack((observer_truth.position_eci_km, observer_truth.velocity_eci_km_s))
+        relative_state = np.array(self.relative_belief.state, dtype=float).reshape(6)
+        target_from_observer_ric = -relative_state
+        target_state = ric_rect_state_to_eci(target_from_observer_ric, observer_state[:3], observer_state[3:])
+        covariance = _relative_covariance_to_published_eci(
+            relative_state,
+            np.array(self.relative_belief.covariance, dtype=float),
+            observer_state,
+        )
+        return StateBelief(
+            state=target_state,
+            covariance=covariance,
+            last_update_t_s=float(self.relative_belief.last_update_t_s),
+        )
+
+    def _hcw_mean_motion(self, reference_state_eci_km_s: np.ndarray) -> float:
+        if self.hcw_mean_motion_rad_s is not None:
+            return float(self.hcw_mean_motion_rad_s)
+        r = float(np.linalg.norm(np.array(reference_state_eci_km_s, dtype=float).reshape(6)[:3]))
+        if r <= 0.0:
+            raise ValueError("Cannot derive HCW mean motion from zero reference radius.")
+        return float(np.sqrt(EARTH_MU_KM3_S2 / (r * r * r)))
+
+    def _hcw_measurement_sigma(self) -> np.ndarray:
+        model = normalize_hcw_measurement_model(self.measurement_model)
+        if model == "relative_state":
+            return np.hstack((_expand3(self.sensor.noise.pos_sigma_km), _expand3(self.sensor.noise.vel_sigma_km_s)))
+        return _relative_measurement_sigma(model, self.sensor.noise)
+
+    def _hcw_measurement_bias(self) -> np.ndarray:
+        model = normalize_hcw_measurement_model(self.measurement_model)
+        if model == "relative_state":
+            return np.hstack((_expand3(self.sensor.noise.pos_bias_km), _expand3(self.sensor.noise.vel_bias_km_s)))
+        return _relative_measurement_bias(model, self.sensor.noise)
+
+    def _hcw_meas_noise_diag(self) -> np.ndarray:
+        sigma = self._hcw_measurement_sigma()
+        expected = hcw_measurement_dimension(self.measurement_model)
+        if sigma.size != expected:
+            raise ValueError(f"HCW measurement noise shape mismatch: expected {expected}, got {sigma.size}.")
+        return np.maximum(sigma**2, 1e-18)
 
     def _relative_ekf_update(
         self,
@@ -339,11 +548,12 @@ class _Track:
             innovation_norm = float(np.linalg.norm(innovation))
             if np.isfinite(innovation_norm):
                 self.innovation_norm_values.append(innovation_norm)
+        self.maneuver_detector.update(diag, t_s=float(t_s))
 
-    def consistency_summary(self) -> dict[str, float | int | None]:
+    def consistency_summary(self) -> dict[str, KnowledgeSummaryValue]:
         update_rate = float(self.update_count / max(self.step_count, 1))
         measurement_rate = float(self.measurement_count / max(self.step_count, 1))
-        return {
+        summary: dict[str, KnowledgeSummaryValue] = {
             "step_count": int(self.step_count),
             "initialization_count": int(self.initialization_count),
             "measurement_count": int(self.measurement_count),
@@ -361,6 +571,22 @@ class _Track:
             "track_age_s_mean": _safe_stat_mean(self.track_age_s_values),
             "track_age_s_p95": _safe_stat_percentile(self.track_age_s_values, 95.0),
         }
+        maneuver = self.maneuver_detector.summary()
+        summary.update(
+            {
+                "maneuver_detection_enabled": bool(maneuver.get("enabled", False)),
+                "maneuver_detection_status": str(maneuver.get("status", "disabled")),
+                "maneuver_detection_sample_count": int(maneuver.get("sample_count", 0) or 0),
+                "maneuver_warning_sample_count": int(maneuver.get("warning_sample_count", 0) or 0),
+                "maneuver_detection_sample_count_above_threshold": int(maneuver.get("detection_sample_count", 0) or 0),
+                "maneuver_suspect_event_count": int(maneuver.get("suspect_event_count", 0) or 0),
+                "maneuver_confirmed_event_count": int(maneuver.get("confirmed_event_count", 0) or 0),
+                "maneuver_first_suspect_t_s": maneuver.get("first_suspect_t_s"),
+                "maneuver_first_confirmed_t_s": maneuver.get("first_confirmed_t_s"),
+                "maneuver_max_nis": maneuver.get("max_nis"),
+            }
+        )
+        return summary
 
     def detection_summary(self) -> dict[str, float | int | dict[str, int] | None]:
         detection_rate = float(self.detected_count / max(self.step_count, 1))
@@ -397,8 +623,12 @@ class ObjectKnowledgeBase:
             if cfg.target_id == observer_id:
                 continue
             estimator_type = _normalize_estimator_type(cfg.estimator)
-            measurement_model = _normalize_measurement_model(cfg.measurement_model)
-            if estimator_type not in {"ekf", "measured_state"}:
+            measurement_model = (
+                normalize_hcw_measurement_model(cfg.measurement_model)
+                if estimator_type in {"relative_hcw_ekf", "relative_th_ekf", "relative_ya_ekf"}
+                else _normalize_measurement_model(cfg.measurement_model)
+            )
+            if estimator_type not in {"ekf", "measured_state", "relative_hcw_ekf", "relative_th_ekf", "relative_ya_ekf"}:
                 raise ValueError(f"Unsupported estimator '{cfg.estimator}' for target '{cfg.target_id}'.")
             if estimator_type == "measured_state" and measurement_model != "state":
                 raise ValueError(
@@ -424,11 +654,20 @@ class ObjectKnowledgeBase:
                 estimator_type=estimator_type,
                 measurement_model=measurement_model,
                 init_cov_diag=np.array(cfg.ekf.init_cov_diag, dtype=float),
+                process_noise_diag=np.array(cfg.ekf.process_noise_diag, dtype=float),
+                estimator_dt_s=float(dt_s),
                 initial_state_eci_km_s=(
                     None
                     if cfg.ekf.initial_state_eci_km_s is None
                     else np.array(cfg.ekf.initial_state_eci_km_s, dtype=float).reshape(6)
                 ),
+                initial_state_ric=(
+                    None if cfg.ekf.initial_state_ric is None else np.array(cfg.ekf.initial_state_ric, dtype=float).reshape(6)
+                ),
+                hcw_mean_motion_rad_s=cfg.ekf.mean_motion_rad_s,
+                hcw_measurement_origin=str(cfg.ekf.measurement_origin),
+                th_integration_substep_s=float(cfg.ekf.integration_substep_s),
+                maneuver_detector=EKFManeuverDetector(cfg.maneuver_detection),
             )
 
     def target_ids(self) -> list[str]:
@@ -461,7 +700,7 @@ class ObjectKnowledgeBase:
                 out[target_id] = np.array(track.last_measurement_vector, dtype=float).reshape(-1)
         return out
 
-    def consistency_summary(self) -> dict[str, dict[str, float | int | None]]:
+    def consistency_summary(self) -> dict[str, dict[str, KnowledgeSummaryValue]]:
         return {str(target_id): track.consistency_summary() for target_id, track in sorted(self._tracks.items())}
 
     def detection_summary(self) -> dict[str, dict[str, float | int | dict[str, int] | None]]:
@@ -477,6 +716,36 @@ def _expand3(v: np.ndarray) -> np.ndarray:
     raise ValueError("Expected scalar or length-3 array.")
 
 
+def _observer_relative_to_target_ric(observer_truth: StateTruth, target_truth: StateTruth) -> np.ndarray:
+    observer_state = np.hstack((observer_truth.position_eci_km, observer_truth.velocity_eci_km_s))
+    target_state = np.hstack((target_truth.position_eci_km, target_truth.velocity_eci_km_s))
+    return eci_relative_to_ric_rect(observer_state, target_state)
+
+
+def _relative_covariance_to_published_eci(
+    relative_state_ric: np.ndarray,
+    covariance_ric: np.ndarray,
+    observer_state_eci_km_s: np.ndarray,
+) -> np.ndarray:
+    rel = np.asarray(relative_state_ric, dtype=float).reshape(6)
+    cov = np.asarray(covariance_ric, dtype=float).reshape(6, 6)
+    observer = np.asarray(observer_state_eci_km_s, dtype=float).reshape(6)
+    eps = np.array([1.0e-5, 1.0e-5, 1.0e-5, 1.0e-8, 1.0e-8, 1.0e-8], dtype=float)
+
+    def publish_state(state_ric: np.ndarray) -> np.ndarray:
+        return ric_rect_state_to_eci(-state_ric, observer[:3], observer[3:])
+
+    jac = np.zeros((6, 6), dtype=float)
+    for idx, step in enumerate(eps):
+        plus = rel.copy()
+        minus = rel.copy()
+        plus[idx] += step
+        minus[idx] -= step
+        jac[:, idx] = (publish_state(plus) - publish_state(minus)) / (2.0 * step)
+    out = jac @ cov @ jac.T
+    return 0.5 * (out + out.T)
+
+
 def _normalize_estimator_type(value: str) -> str:
     raw = str(value or "ekf").strip().lower().replace("-", "_")
     aliases = {
@@ -484,6 +753,19 @@ def _normalize_estimator_type(value: str) -> str:
         "sensor": "measured_state",
         "sensor_state": "measured_state",
         "trust_sensors": "measured_state",
+        "hcw": "relative_hcw_ekf",
+        "hcw_ekf": "relative_hcw_ekf",
+        "relative_hcw": "relative_hcw_ekf",
+        "relative_hcw_filter": "relative_hcw_ekf",
+        "th": "relative_th_ekf",
+        "relative_th": "relative_th_ekf",
+        "relative_th_filter": "relative_th_ekf",
+        "tschauner_hempel": "relative_th_ekf",
+        "ya": "relative_ya_ekf",
+        "ya_ekf": "relative_ya_ekf",
+        "relative_ya": "relative_ya_ekf",
+        "relative_ya_filter": "relative_ya_ekf",
+        "yamanaka_ankersen": "relative_ya_ekf",
     }
     return aliases.get(raw, raw)
 

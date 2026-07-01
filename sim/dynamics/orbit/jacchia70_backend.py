@@ -112,7 +112,7 @@ def _jgauss(z1: float, z2: float, nmin: int, tx: float, t1: float, t3: float, t4
             continue
         half_width = 0.5 * (d - a)
         rr = 0.0
-        for weight, abscissa in zip(_GAUSS_W[ngauss], _GAUSS_X[ngauss], strict=True):
+        for weight, abscissa in zip(_GAUSS_W[ngauss], _GAUSS_X[ngauss]):
             z = half_width * (float(abscissa) + 1.0) + a
             rr += float(weight) * _jmweight(z) * _jgrav(z) / _jtemp(z, tx, t1, t3, t4, a2)
         total += half_width * rr

@@ -12,7 +12,7 @@ from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
 from sim.dynamics.orbit.environment import EARTH_RADIUS_KM
 from sim.dynamics.orbit.epoch import julian_date_to_datetime
-from sim.dynamics.orbit.frames import eci_to_ecef
+from sim.dynamics.orbit.frames import FrameContext, frame_context_from_mapping, transform_position
 from sim.plotting.style import (
     OEL_DARK_PALETTE,
     OEL_LIGHT_PALETTE,
@@ -359,15 +359,21 @@ def _trajectory_in_frame(
     *,
     frame: FrameName,
     jd_utc_start: float | None = None,
+    frame_context: FrameContext | None = None,
     reference_truth_hist: np.ndarray | None = None,
 ) -> np.ndarray:
     r_eci = np.array(truth_hist[:, 0:3], dtype=float)
     if frame == "eci":
         return r_eci
     if frame == "ecef":
+        frame_ctx = frame_context or frame_context_from_mapping(
+            {},
+            jd_utc_start=jd_utc_start,
+            source="plot",
+        )
         out = np.zeros_like(r_eci)
         for k in range(r_eci.shape[0]):
-            out[k, :] = eci_to_ecef(r_eci[k, :], float(t_s[k]), jd_utc_start=jd_utc_start)
+            out[k, :] = transform_position(r_eci[k, :], "eci", "ecef", t_s=float(t_s[k]), context=frame_ctx)
         return out
     if reference_truth_hist is None:
         raise ValueError("reference_truth_hist is required for RIC frame plots.")
@@ -472,6 +478,7 @@ def plot_trajectory_frame(
     *,
     frame: FrameName = "eci",
     jd_utc_start: float | None = None,
+    frame_context: FrameContext | None = None,
     reference_truth_hist: np.ndarray | None = None,
     reference_label: str | None = None,
     mode: PlotMode = "interactive",
@@ -482,6 +489,7 @@ def plot_trajectory_frame(
         truth_hist=truth_hist,
         frame=frame,
         jd_utc_start=jd_utc_start,
+        frame_context=frame_context,
         reference_truth_hist=reference_truth_hist,
     )
     fig = plt.figure(figsize=cap_figsize(8, 6))
@@ -515,6 +523,7 @@ def plot_multi_trajectory_frame(
     *,
     frame: FrameName = "eci",
     jd_utc_start: float | None = None,
+    frame_context: FrameContext | None = None,
     reference_truth_hist: np.ndarray | None = None,
     reference_label: str | None = None,
     mode: PlotMode = "interactive",
@@ -541,6 +550,7 @@ def plot_multi_trajectory_frame(
             truth_hist=hist,
             frame=frame,
             jd_utc_start=jd_utc_start,
+            frame_context=frame_context,
             reference_truth_hist=reference_truth_hist,
         )
         ax.plot(r[:, ix], r[:, iy], r[:, iz], linewidth=1.4, label=oid)
@@ -1411,6 +1421,7 @@ def animate_trajectory_frame(
     *,
     frame: FrameName = "eci",
     jd_utc_start: float | None = None,
+    frame_context: FrameContext | None = None,
     reference_truth_hist: np.ndarray | None = None,
     mode: PlotMode = "interactive",
     out_path: str | None = None,
@@ -1422,6 +1433,7 @@ def animate_trajectory_frame(
         truth_hist=truth_hist,
         frame=frame,
         jd_utc_start=jd_utc_start,
+        frame_context=frame_context,
         reference_truth_hist=reference_truth_hist,
     )
     lim = _symmetric_limit_from_arrays([r[:, 0], r[:, 1], r[:, 2]], min_lim=1.0, margin=1.0)
@@ -1484,6 +1496,7 @@ def animate_multi_trajectory_frame(
     *,
     frame: FrameName = "eci",
     jd_utc_start: float | None = None,
+    frame_context: FrameContext | None = None,
     reference_truth_hist: np.ndarray | None = None,
     mode: PlotMode = "interactive",
     out_path: str | None = None,
@@ -1502,6 +1515,7 @@ def animate_multi_trajectory_frame(
             truth_hist=arr,
             frame=frame,
             jd_utc_start=jd_utc_start,
+            frame_context=frame_context,
             reference_truth_hist=reference_truth_hist,
         )
     if not trajectories:
@@ -1703,6 +1717,7 @@ def animate_multi_ground_track(
     speed_multiple: float = 10.0,
     draw_earth_map: bool = True,
     frame_stride: int = 1,
+    frame_context: FrameContext | None = None,
 ) -> None:
     tracks: dict[str, tuple[np.ndarray, np.ndarray]] = {}
     tracks_t: dict[str, np.ndarray] = {}
@@ -1714,7 +1729,12 @@ def animate_multi_ground_track(
         mask = np.isfinite(arr[:, 0])
         if not np.any(mask):
             continue
-        lat, lon, _ = ground_track_from_eci_history(arr[:, :3], t_s=t_s, jd_utc_start=jd_utc_start)
+        lat, lon, _ = ground_track_from_eci_history(
+            arr[:, :3],
+            t_s=t_s,
+            jd_utc_start=jd_utc_start,
+            frame_context=frame_context,
+        )
         lon_p, lat_p = split_ground_track_dateline(lon_deg=lon, lat_deg=lat, jump_threshold_deg=180.0)
         tracks[oid] = (lon_p, lat_p)
         t_local = np.array(t_s, dtype=float).reshape(-1)

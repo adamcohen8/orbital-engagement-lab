@@ -8,7 +8,7 @@ import numpy as np
 
 from sim.config import GroundStationSection
 from sim.dynamics.orbit.environment import EARTH_RADIUS_KM, EARTH_ROT_RATE_RAD_S
-from sim.dynamics.orbit.frames import ecef_to_eci, eci_to_ecef
+from sim.dynamics.orbit.frames import FrameContext, frame_context_from_mapping, transform_position
 from sim.observations import ObservationPacket, ingest_observations
 from sim.utils.geodesy import ecef_to_enu_rotation, enu_to_ecef_rotation, geodetic_to_ecef_km
 
@@ -45,6 +45,7 @@ def evaluate_ground_station_access(
     t_s: np.ndarray,
     truth_hist: dict[str, np.ndarray],
     jd_utc_start: float | None = None,
+    frame_context: FrameContext | None = None,
 ) -> tuple[dict[str, dict[str, dict[str, Any]]], dict[str, dict[str, dict[str, Any]]]]:
     """
     Evaluate passive ground-station access to each simulated object.
@@ -57,6 +58,7 @@ def evaluate_ground_station_access(
     tt = np.array(t_s, dtype=float).reshape(-1)
     if not stations or tt.size == 0:
         return {}, {}
+    frame_ctx = frame_context or frame_context_from_mapping({}, jd_utc_start=jd_utc_start, source="ground_station")
 
     histories: dict[str, dict[str, dict[str, Any]]] = {}
     summaries: dict[str, dict[str, dict[str, Any]]] = {}
@@ -86,8 +88,8 @@ def evaluate_ground_station_access(
                     continue
                 t = float(tt[k])
                 target_eci = np.array(state[:3], dtype=float)
-                station_eci = ecef_to_eci(station_ecef, t, jd_utc_start=jd_utc_start)
-                target_ecef = eci_to_ecef(target_eci, t, jd_utc_start=jd_utc_start)
+                station_eci = transform_position(station_ecef, "ecef", "eci", t_s=t, context=frame_ctx)
+                target_ecef = transform_position(target_eci, "eci", "ecef", t_s=t, context=frame_ctx)
                 rho_ecef = target_ecef - station_ecef
                 rng = float(np.linalg.norm(rho_ecef))
                 range_km[k] = rng
@@ -150,6 +152,7 @@ def evaluate_ground_station_measurements(
     t_s: np.ndarray,
     truth_hist: dict[str, np.ndarray],
     jd_utc_start: float | None = None,
+    frame_context: FrameContext | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Emit opt-in ground-station sensor measurements for visible targets.
 
@@ -163,6 +166,7 @@ def evaluate_ground_station_measurements(
     tt = np.array(t_s, dtype=float).reshape(-1)
     if not stations or tt.size == 0:
         return {}
+    frame_ctx = frame_context or frame_context_from_mapping({}, jd_utc_start=jd_utc_start, source="ground_station")
 
     output: dict[str, dict[str, Any]] = {}
     for station in stations:
@@ -202,6 +206,7 @@ def evaluate_ground_station_measurements(
                     target_state_eci=np.array(state[:6], dtype=float),
                     t_s=t,
                     jd_utc_start=jd_utc_start,
+                    frame_context=frame_ctx,
                 )
                 reason = _access_reason(
                     station=station,
@@ -260,6 +265,7 @@ def ground_station_measurements_to_observation_packet(
     object_id: str,
     source_label: str = "ground_station_measurements",
     jd_utc_start: float | None = None,
+    frame_context: FrameContext | None = None,
 ) -> ObservationPacket:
     """Convert az/el/range ground measurements into ECI position observations."""
 
@@ -277,6 +283,11 @@ def ground_station_measurements_to_observation_packet(
         float(station.get("alt_km", 0.0) or 0.0),
     )
     enu_to_ecef = enu_to_ecef_rotation(float(station["lat_deg"]), float(station["lon_deg"]))
+    frame_ctx = frame_context or frame_context_from_mapping(
+        {},
+        jd_utc_start=jd_utc_start,
+        source="ground_station_observation_packet",
+    )
     obs_rows: list[dict[str, Any]] = []
     for row in rows:
         t = float(row["time_s"])
@@ -288,7 +299,7 @@ def ground_station_measurements_to_observation_packet(
         rng = float(row["range_km"])
         enu = rng * np.array([np.cos(el) * np.sin(az), np.cos(el) * np.cos(az), np.sin(el)], dtype=float)
         target_ecef = station_ecef + enu_to_ecef @ enu
-        target_eci = ecef_to_eci(target_ecef, t, jd_utc_start=jd_utc_start)
+        target_eci = transform_position(target_ecef, "ecef", "eci", t_s=t, context=frame_ctx)
         sigma = _position_sigma_from_measurement(row)
         obs: dict[str, Any] = {
             "time_s": t,
@@ -323,12 +334,14 @@ def _ground_measurement_geometry(
     target_state_eci: np.ndarray,
     t_s: float,
     jd_utc_start: float | None,
+    frame_context: FrameContext | None = None,
 ) -> dict[str, float | bool]:
+    frame_ctx = frame_context or frame_context_from_mapping({}, jd_utc_start=jd_utc_start, source="ground_station")
     target_eci = np.array(target_state_eci[:3], dtype=float)
     target_vel_eci = np.array(target_state_eci[3:6], dtype=float)
-    station_eci = ecef_to_eci(station_ecef_km, t_s, jd_utc_start=jd_utc_start)
+    station_eci = transform_position(station_ecef_km, "ecef", "eci", t_s=t_s, context=frame_ctx)
     station_vel_eci = np.cross(np.array([0.0, 0.0, EARTH_ROT_RATE_RAD_S], dtype=float), station_eci)
-    target_ecef = eci_to_ecef(target_eci, t_s, jd_utc_start=jd_utc_start)
+    target_ecef = transform_position(target_eci, "eci", "ecef", t_s=t_s, context=frame_ctx)
     rho_ecef = target_ecef - station_ecef_km
     rng = float(np.linalg.norm(rho_ecef))
     enu = ecef_to_enu @ rho_ecef

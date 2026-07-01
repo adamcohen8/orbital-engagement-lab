@@ -6,8 +6,8 @@ metadata:
   public_surface: public-example
   support_level: supported
   notes: Run with `.venv/bin/python run_simulation.py --config examples/configs/public_tle_2hr_propagation.yaml`.
-    This is not SGP4/general-perturbations propagation; OEL initializes from the TLE
-    and numerically integrates its configured special-perturbations force model.
+    This is not continuous OGP catalog propagation; OEL uses OGP to recover the
+    TLE initial state and then numerically integrates its configured ONP force model.
 objects:
   iss:
     kind: satellite

@@ -132,6 +132,7 @@ def game_debrief_payload(
     return {
         "schema_version": 1,
         "scenario_id": str(config.scenario_id or getattr(score, "scenario_id", "") or ""),
+        "display_title": _debrief_display_title(config=config, score=score),
         "learning_goal": str(config.learning_goal or getattr(score, "learning_goal", "") or ""),
         "difficulty": str(difficulty or "easy"),
         "level_passed": bool(getattr(score, "level_passed", False)),
@@ -264,7 +265,7 @@ def write_game_debrief_plots(
     if timeline_path is not None:
         paths["mission_timeline"] = timeline_path
 
-    fig, axes = plt.subplots(1, 3, figsize=(15, 5.4), constrained_layout=False)
+    fig, axes = plt.subplots(1, 3, figsize=(15.5, 5.6), constrained_layout=False)
     for ax, plane in zip(axes, ("RI", "RC", "IC")):
         x_idx, y_idx, x_label, y_label = _plane_axes(plane)
         ax.plot(rel[:, x_idx], rel[:, y_idx], color=plot_style["trajectory"], linewidth=1.8, label="Trajectory")
@@ -302,7 +303,7 @@ def write_game_debrief_plots(
             columnspacing=1.1,
         )
     fig.suptitle("2D RIC Trajectory", y=0.98)
-    fig.subplots_adjust(top=0.85, bottom=0.18, wspace=0.28)
+    fig.subplots_adjust(left=0.055, right=0.985, top=0.84, bottom=0.24, wspace=0.20)
     paths["ric_2d"] = output / "ric_2d_plots.png"
     save_oel_figure(
         fig,
@@ -311,7 +312,6 @@ def write_game_debrief_plots(
         metadata=metadata,
         artifact_id=paths["ric_2d"].stem,
         style_name="oel_dark",
-        bbox_inches="tight",
     )
     plt.close(fig)
 
@@ -390,7 +390,9 @@ def _markdown_report(
     plot_paths: dict[str, Path],
     report_path: Path,
 ) -> str:
-    scenario_id = str(payload.get("scenario_id") or "Game Debrief")
+    display_title = str(payload.get("display_title") or "").strip()
+    if not display_title:
+        display_title = _debrief_title_from_scenario_id(str(payload.get("scenario_id") or "Game Debrief"))
     passed = bool(payload.get("level_passed"))
     failed = bool(payload.get("level_failed"))
     outcome = "PASS" if passed else "FAIL" if failed else "INCOMPLETE"
@@ -430,7 +432,7 @@ def _markdown_report(
     failure_reason = "None" if passed else "; ".join(str(reason) for reason in reasons[:3]) or "Not recorded"
     reason_lines = _md_bullets(reasons, empty="None recorded.")
     checklist_lines = _md_bullets(checklist, empty="None recorded.")
-    return f"""# {_md_text(scenario_id)} Debrief
+    return f"""# {_md_text(display_title)}
 
 Generated: {generated}<br>
 Difficulty: {_md_text(str(payload.get("difficulty", "")))}<br>
@@ -654,7 +656,7 @@ def _save_time_plot(
     ylabel: str,
     metadata: OELArtifactMetadata | None = None,
 ) -> Path:
-    fig, ax = plt.subplots(figsize=(10, 4.5), constrained_layout=True)
+    fig, ax = plt.subplots(figsize=(10, 4.5), constrained_layout=False)
     for values, label, color in series:
         ax.plot(t_s, np.array(values, dtype=float), label=label, color=color, linewidth=1.6)
     ax.set_title(title)
@@ -663,6 +665,7 @@ def _save_time_plot(
     ax.grid(True, alpha=0.28)
     if len(series) > 1:
         ax.legend(loc="best")
+    fig.subplots_adjust(left=0.11, right=0.975, top=0.86, bottom=0.24)
     save_oel_figure(
         fig,
         path,
@@ -670,7 +673,6 @@ def _save_time_plot(
         metadata=metadata,
         artifact_id=path.stem,
         style_name="oel_dark",
-        bbox_inches="tight",
     )
     plt.close(fig)
     return path
@@ -684,6 +686,8 @@ def _save_event_timeline_plot(
     elapsed_s: float,
     metadata: OELArtifactMetadata | None = None,
 ) -> Path | None:
+    from matplotlib.lines import Line2D
+
     finite_events = [
         {
             "time_s": float(event.get("time_s")),
@@ -705,10 +709,11 @@ def _save_event_timeline_plot(
     )
     point_events = [event for event in finite_events if event["kind"] != "interval"]
     interval_events = [event for event in finite_events if event["kind"] == "interval"]
-    lanes = np.array([0.0 if idx % 2 == 0 else 1.0 for idx in range(len(point_events))], dtype=float)
-    fig_height = max(2.8, min(6.0, 1.2 + 0.34 * len(finite_events)))
-    fig, ax = plt.subplots(figsize=(10, fig_height), constrained_layout=True)
-    ax.hlines(0.5, 0.0, max_time, color="#9ca3af", linewidth=2.0, zorder=1)
+    fig_height = max(3.6, min(5.4, 2.6 + 0.16 * len(point_events)))
+    fig, ax = plt.subplots(figsize=(11, fig_height), constrained_layout=False)
+    timeline_y = 0.0
+    interval_y = -0.18
+    ax.hlines(timeline_y, 0.0, max_time, color="#CBD5E1", linewidth=2.4, zorder=1)
     for event in interval_events:
         start_t = float(event["start_time_s"] if event.get("start_time_s") is not None else event["time_s"])
         end_t = float(event["end_time_s"] if event.get("end_time_s") is not None else event["time_s"])
@@ -719,51 +724,59 @@ def _save_event_timeline_plot(
             continue
         ax.broken_barh(
             [(max(start_t, 0.0), width)],
-            (0.42, 0.16),
+            (interval_y - 0.055, 0.11),
             facecolors="#ff7f0e",
             edgecolors="#bf5b13",
-            alpha=0.78,
+            alpha=0.86,
             linewidth=0.8,
             zorder=3,
         )
-        mid_t = start_t + 0.5 * (end_t - start_t)
-        ax.text(
-            mid_t,
-            0.63,
-            f"Burn\n{start_t:.0f}-{end_t:.0f}s",
-            ha="center",
-            va="bottom",
-            fontsize=8,
-            color="#7c2d12",
-            zorder=4,
-        )
     for idx, event in enumerate(point_events):
         time_s = float(event["time_s"])
-        lane_y = float(lanes[idx])
+        lane_y = 0.46 if idx % 2 == 0 else 0.78
         marker_color = "#2ca02c" if "satisfied" in event["label"].lower() or "criteria" in event["label"].lower() else "#1f77b4"
-        ax.vlines(time_s, 0.5, lane_y, color=marker_color, linewidth=1.2, alpha=0.75, zorder=2)
-        ax.scatter([time_s], [0.5], color=marker_color, s=32, zorder=3)
-        va = "bottom" if lane_y >= 0.5 else "top"
-        text_y = lane_y + (0.04 if lane_y >= 0.5 else -0.04)
+        ax.vlines(time_s, timeline_y, lane_y - 0.06, color=marker_color, linewidth=1.2, alpha=0.8, zorder=2)
+        ax.scatter([time_s], [timeline_y], color=marker_color, s=34, zorder=3)
         label = _timeline_label(event["label"])
-        ax.text(
-            time_s,
-            text_y,
+        if time_s > max_time * 0.88:
+            ha = "right"
+            x_offset = -8
+        elif time_s < max_time * 0.12:
+            ha = "left"
+            x_offset = 8
+        else:
+            ha = "center"
+            x_offset = 0
+        ax.annotate(
             f"{time_s:.0f}s\n{label}",
-            ha="center",
-            va=va,
+            xy=(time_s, lane_y),
+            xytext=(x_offset, 0),
+            textcoords="offset points",
+            ha=ha,
+            va="bottom",
             fontsize=8,
-            color="#111827",
+            color="#E5E7EB",
             rotation=0,
+            clip_on=False,
         )
     ax.set_title("Mission Timeline")
     ax.set_xlabel("Time (s)")
-    ax.set_ylim(-0.25, 1.25)
+    ax.set_ylim(-0.42, 1.05)
     ax.set_yticks([])
-    ax.set_xlim(-0.03 * max_time, 1.03 * max_time)
+    ax.set_xlim(-0.02 * max_time, 1.08 * max_time)
     ax.grid(True, axis="x", alpha=0.25)
     for spine in ("left", "right", "top"):
         ax.spines[spine].set_visible(False)
+    if interval_events:
+        ax.legend(
+            handles=[
+                Line2D([0], [0], color="#ff7f0e", linewidth=4, label="Control input intervals"),
+                Line2D([0], [0], marker="o", color="none", markerfacecolor="#1f77b4", markersize=6, label="Mission events"),
+            ],
+            loc="upper left",
+            frameon=False,
+        )
+    fig.subplots_adjust(left=0.055, right=0.97, top=0.82, bottom=0.24)
     save_oel_figure(
         fig,
         path,
@@ -771,7 +784,6 @@ def _save_event_timeline_plot(
         metadata=metadata,
         artifact_id=path.stem,
         style_name="oel_dark",
-        bbox_inches="tight",
     )
     plt.close(fig)
     return path
@@ -870,6 +882,20 @@ def _plot_title(key: str) -> str:
         "cumulative_delta_v": "Cumulative Delta V vs Time",
         "control_commands": "Control Commands vs Time",
     }.get(str(key), str(key).replace("_", " ").title())
+
+
+def _debrief_display_title(*, config: RPOTrainingConfig, score: Any) -> str:
+    level_name = str(getattr(config, "level_name", "") or "").strip()
+    if level_name:
+        return f"RPO Trainer {level_name} Debrief"
+    scenario_id = str(getattr(config, "scenario_id", "") or getattr(score, "scenario_id", "") or "").strip()
+    return _debrief_title_from_scenario_id(scenario_id or "Game Debrief")
+
+
+def _debrief_title_from_scenario_id(scenario_id: str) -> str:
+    text = str(scenario_id or "Game Debrief").strip().replace("-", " ").replace("_", " ")
+    title = " ".join(part for part in text.split() if part).title() or "Game Debrief"
+    return title if title.lower().endswith("debrief") else f"{title} Debrief"
 
 
 def _md_text(value: Any) -> str:

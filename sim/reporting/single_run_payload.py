@@ -6,6 +6,7 @@ from typing import Any
 import numpy as np
 
 from sim.config import SimulationScenarioConfig, default_pair_object_ids, default_reference_object_id
+from sim.dynamics.orbit.frames import frame_context_from_mapping
 from sim.ground_stations import evaluate_ground_station_access, evaluate_ground_station_measurements
 
 
@@ -30,6 +31,7 @@ class SingleRunPayloadContext:
     reentry_metrics: dict[str, dict[str, np.ndarray]]
     thrust_stats: dict[str, dict[str, Any]]
     runtime_profile: dict[str, Any]
+    object_initialization: dict[str, dict[str, Any]]
     object_propagation: dict[str, dict[str, Any]]
     attitude_guardrail_stats: dict[str, int]
     knowledge_detection_by_observer: dict[str, Any]
@@ -185,17 +187,24 @@ def _summarize_reentry_metrics(
 
 
 def build_single_run_payload(context: SingleRunPayloadContext) -> dict[str, Any]:
+    frame_context = frame_context_from_mapping(
+        dict(getattr(context.cfg.simulator, "frames", {}) or {}),
+        jd_utc_start=context.cfg.simulator.initial_jd_utc,
+        source="scenario",
+    )
     ground_station_access, ground_station_access_summary = evaluate_ground_station_access(
         ground_stations=list(context.cfg.ground_stations),
         t_s=context.t_s,
         truth_hist=context.truth_hist,
         jd_utc_start=context.cfg.simulator.initial_jd_utc,
+        frame_context=frame_context,
     )
     ground_station_measurements = evaluate_ground_station_measurements(
         ground_stations=list(context.cfg.ground_stations),
         t_s=context.t_s,
         truth_hist=context.truth_hist,
         jd_utc_start=context.cfg.simulator.initial_jd_utc,
+        frame_context=frame_context,
     )
     reference_object_id = default_reference_object_id(context.cfg, available_ids=context.object_ids)
     primary_pair = default_pair_object_ids(context.cfg, available_ids=context.object_ids)
@@ -217,11 +226,13 @@ def build_single_run_payload(context: SingleRunPayloadContext) -> dict[str, Any]
         "primary_object_pair": list(primary_pair) if primary_pair is not None else [],
         "thrust_stats": context.thrust_stats,
         "runtime_profile": dict(context.runtime_profile or {}),
+        "frame_provenance": frame_context.metadata(),
         "attitude_guardrail_stats": context.attitude_guardrail_stats,
         "knowledge_detection_by_observer": context.knowledge_detection_by_observer,
         "knowledge_consistency_by_observer": context.knowledge_consistency_by_observer,
         "ground_station_access_summary": ground_station_access_summary,
         "ground_station_measurement_summary": _summarize_ground_station_measurements(ground_station_measurements),
+        "object_initialization": dict(context.object_initialization),
         "object_propagation": dict(context.object_propagation),
         "actuator_diagnostics_summary": _summarize_actuator_diagnostics(context.controller_debug_hist),
         "plot_outputs": {},
@@ -269,6 +280,7 @@ def build_single_run_payload(context: SingleRunPayloadContext) -> dict[str, Any]
     return {
         "summary": summary,
         "time_s": context.t_s.tolist(),
+        "frame_provenance": frame_context.metadata(),
         "object_state_frames": object_state_frames,
         "truth_by_object": {k: v.tolist() for k, v in context.truth_hist.items()},
         "target_reference_orbit_truth": (
@@ -289,6 +301,7 @@ def build_single_run_payload(context: SingleRunPayloadContext) -> dict[str, Any]
         "ground_station_access": ground_station_access,
         "ground_station_access_summary": ground_station_access_summary,
         "ground_station_measurements": ground_station_measurements,
+        "object_initialization": dict(context.object_initialization),
         "object_propagation": dict(context.object_propagation),
         "bridge_events_by_object": context.bridge_hist,
         "controller_debug_by_object": context.controller_debug_hist,

@@ -357,6 +357,16 @@ def apply_oel_style_to_figure(fig: Any, *, style_name: str | None = None) -> Non
             legend.get_frame().set_edgecolor(palette["edge"])
             for text in legend.get_texts():
                 text.set_color(palette["text"])
+    for legend in getattr(fig, "legends", []) or []:
+        legend.get_frame().set_facecolor(palette["panel_alt"])
+        legend.get_frame().set_edgecolor(palette["edge"])
+        for text in legend.get_texts():
+            text.set_color(palette["text"])
+    for text in getattr(fig, "texts", []) or []:
+        if str(getattr(text, "get_gid", lambda: "")() or "") == "oel_artifact_footer":
+            continue
+        if hasattr(text, "set_color"):
+            text.set_color(palette["text"])
 
 
 def save_oel_figure(

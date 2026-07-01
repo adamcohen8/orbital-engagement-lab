@@ -20,7 +20,7 @@ from sim.dynamics.orbit.sgp4 import (
     sgp4_propagate_teme_batch_numba,
     sgp4_propagate_teme_batch_reference,
 )
-from sim.dynamics.orbit.tle import parse_tle_lines, tle_to_rv_eci
+from sim.dynamics.orbit.tle import parse_tle_lines, tle_block_to_rv_eci, tle_to_rv_eci, tle_to_rv_eci_ogp
 
 ISS_LINE1 = "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9005"
 ISS_LINE2 = "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1000"
@@ -337,7 +337,7 @@ def test_sgp4_provider_dispatches_deep_space_tle_to_ogp_sdp4() -> None:
 
 def test_satellite_initial_state_accepts_tle_lines() -> None:
     elements = parse_tle_lines(ISS_LINE1, ISS_LINE2)
-    expected_pos, expected_vel = tle_to_rv_eci(elements)
+    expected_pos, expected_vel = tle_to_rv_eci_ogp(elements)
     session = SimulationSession.from_config(SimulationConfig.from_dict(_tle_config()))
 
     result = session.run()
@@ -345,12 +345,33 @@ def test_satellite_initial_state_accepts_tle_lines() -> None:
 
     np.testing.assert_allclose(truth0[0:3], expected_pos, rtol=0.0, atol=1e-9)
     np.testing.assert_allclose(truth0[3:6], expected_vel, rtol=0.0, atol=1e-12)
+    assert result.payload["object_initialization"]["target"]["initialization_model"] == "ogp"
+    assert result.payload["object_initialization"]["target"]["initialization_propagator_name"] == "OGP-SGP4"
+    assert result.payload["object_initialization"]["target"]["handoff_propagation_method"] == "special"
+
+
+def test_tle_initial_state_legacy_keplerian_path_requires_explicit_model() -> None:
+    elements = parse_tle_lines(ISS_LINE1, ISS_LINE2)
+    expected_pos, expected_vel = tle_to_rv_eci(elements)
+    cfg = _tle_config()
+    cfg["target"]["initial_state"]["tle"]["initialization_model"] = "keplerian_mean_elements"
+    session = SimulationSession.from_config(SimulationConfig.from_dict(cfg))
+
+    result = session.run()
+    truth0 = result.truth["target"][0]
+
+    np.testing.assert_allclose(truth0[0:3], expected_pos, rtol=0.0, atol=1e-9)
+    np.testing.assert_allclose(truth0[3:6], expected_vel, rtol=0.0, atol=1e-12)
+    assert (
+        result.payload["object_initialization"]["target"]["initialization_model"]
+        == "keplerian_mean_elements"
+    )
 
 
 def test_tle_initial_state_propagates_to_simulator_initial_jd() -> None:
     elements = parse_tle_lines(ISS_LINE1, ISS_LINE2)
     target_jd = elements.epoch_jd_utc + 0.25
-    expected_pos, expected_vel = tle_to_rv_eci(elements, target_jd_utc=target_jd)
+    expected_pos, expected_vel = tle_to_rv_eci_ogp(elements, target_jd_utc=target_jd)
     session = SimulationSession.from_config(SimulationConfig.from_dict(_tle_config(initial_jd_utc=target_jd)))
 
     result = session.run()
@@ -358,6 +379,22 @@ def test_tle_initial_state_propagates_to_simulator_initial_jd() -> None:
 
     np.testing.assert_allclose(truth0[0:3], expected_pos, rtol=0.0, atol=1e-9)
     np.testing.assert_allclose(truth0[3:6], expected_vel, rtol=0.0, atol=1e-12)
+    assert result.payload["object_initialization"]["target"]["tle_age_initialization_days"] == pytest.approx(
+        0.25
+    )
+
+
+def test_tle_block_initialization_defaults_to_ogp_not_keplerian() -> None:
+    elements = parse_tle_lines(ISS_LINE1, ISS_LINE2)
+
+    default_pos, default_vel = tle_block_to_rv_eci({"line1": ISS_LINE1, "line2": ISS_LINE2})
+    ogp_pos, ogp_vel = tle_to_rv_eci_ogp(elements)
+    legacy_pos, legacy_vel = tle_to_rv_eci(elements)
+
+    np.testing.assert_allclose(default_pos, ogp_pos, rtol=0.0, atol=1e-9)
+    np.testing.assert_allclose(default_vel, ogp_vel, rtol=0.0, atol=1e-12)
+    assert np.linalg.norm(default_pos - legacy_pos) > 1.0
+    assert np.linalg.norm(default_vel - legacy_vel) > 1.0e-3
 
 
 def test_general_sgp4_object_samples_truth_history() -> None:

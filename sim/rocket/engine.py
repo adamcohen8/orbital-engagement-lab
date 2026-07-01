@@ -9,7 +9,7 @@ from sim.dynamics.attitude.rigid_body import propagate_attitude_exponential_map
 from sim.dynamics.orbit.accelerations import OrbitContext
 from sim.dynamics.orbit.atmosphere import atmosphere_state_from_model
 from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2, EARTH_RADIUS_KM, EARTH_ROT_RATE_RAD_S
-from sim.dynamics.orbit.frames import ecef_to_eci, eci_to_ecef_rotation
+from sim.dynamics.orbit.frames import frame_context_from_environment, rotation_between, transform_position
 from sim.dynamics.orbit.propagator import OrbitPropagator, drag_plugin, j2_plugin, j3_plugin, j4_plugin, srp_plugin
 from sim.rocket.aero import RocketAeroConfig, compute_aero_loads, compute_aero_state
 from sim.rocket.models import (
@@ -42,7 +42,8 @@ def _launch_position_velocity_eci(
     lat_deg: float, lon_deg: float, alt_km: float, t_s: float
 ) -> tuple[np.ndarray, np.ndarray]:
     r_ecef = geodetic_to_ecef_km(lat_deg=lat_deg, lon_deg=lon_deg, alt_km=alt_km)
-    r_eci = ecef_to_eci(r_ecef, t_s)
+    frame_context = frame_context_from_environment({})
+    r_eci = transform_position(r_ecef, "ecef", "eci", t_s=t_s, context=frame_context)
     # Stationary on launch pad in rotating Earth frame.
     omega = np.array([0.0, 0.0, 7.2921159e-5], dtype=float)
     v_eci = np.cross(omega, r_eci)
@@ -50,9 +51,19 @@ def _launch_position_velocity_eci(
 
 
 def _geodetic_state_from_eci(
-    r_eci_km: np.ndarray, t_s: float, jd_utc_start: float | None = None
+    r_eci_km: np.ndarray,
+    t_s: float,
+    jd_utc_start: float | None = None,
+    frame_context=None,
 ) -> tuple[float, float, float]:
-    r_ecef = eci_to_ecef_rotation(t_s, jd_utc_start=jd_utc_start) @ np.array(r_eci_km, dtype=float).reshape(3)
+    frame_context = frame_context or frame_context_from_environment({"jd_utc_start": jd_utc_start})
+    r_ecef = transform_position(
+        np.array(r_eci_km, dtype=float).reshape(3),
+        "eci",
+        "ecef",
+        t_s=t_s,
+        context=frame_context,
+    )
     return ecef_to_geodetic_deg_km(r_ecef)
 
 
@@ -63,17 +74,19 @@ def _resolve_wind_eci_m_s(
     sim_cfg: RocketSimConfig,
     state: RocketState | None = None,
 ) -> np.ndarray:
+    frame_context = frame_context_from_environment(dict(getattr(sim_cfg, "atmosphere_env", {}) or {}))
     lat_deg, lon_deg, alt_km = _geodetic_state_from_eci(
         position_eci_km,
         t_s,
         jd_utc_start=sim_cfg.atmosphere_env.get("jd_utc_start"),
+        frame_context=frame_context,
     )
     wind_enu = np.array(sim_cfg.wind_enu_m_s, dtype=float).reshape(3)
     wind_cb = sim_cfg.wind_enu_callable
     if callable(wind_cb):
         wind_enu = wind_enu + np.array(wind_cb(alt_km, lat_deg, lon_deg, t_s, state, sim_cfg), dtype=float).reshape(3)
     wind_ecef = enu_to_ecef_rotation(lat_deg, lon_deg) @ wind_enu
-    wind_eci = eci_to_ecef_rotation(t_s, jd_utc_start=sim_cfg.atmosphere_env.get("jd_utc_start")).T @ (wind_ecef / 1e3)
+    wind_eci = rotation_between("ecef", "eci", t_s=t_s, context=frame_context) @ (wind_ecef / 1e3)
     return wind_eci * 1e3
 
 

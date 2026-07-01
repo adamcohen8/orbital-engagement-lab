@@ -13,10 +13,12 @@ import numpy as np
 
 from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2, EARTH_RADIUS_KM
 from sim.dynamics.orbit.frames import (
+    FRAME_MODEL_IAU76_80_EOP,
     ecef_to_eci_harmonic,
     eci_to_ecef_harmonic,
     eci_to_ecef_rotation,
     eci_to_ecef_rotation_hpop_like,
+    normalize_frame_model,
 )
 
 
@@ -246,10 +248,28 @@ def _harmonic_rotation_matrix(
     jd_utc_start: float | None,
     frame_model: str,
     eop_path: str | None,
+    dut1_s: float | None = None,
+    xp_arcsec: float | None = None,
+    yp_arcsec: float | None = None,
+    dat_s: float | None = None,
+    tt_minus_utc_s: float | None = None,
+    ddpsi_rad: float = 0.0,
+    ddeps_rad: float = 0.0,
 ) -> np.ndarray:
-    model = str(frame_model).strip().lower()
-    if model == "hpop_like":
-        return eci_to_ecef_rotation_hpop_like(t_s, jd_utc_start=jd_utc_start, eop_path=eop_path)
+    model = normalize_frame_model(frame_model)
+    if model == FRAME_MODEL_IAU76_80_EOP:
+        return eci_to_ecef_rotation_hpop_like(
+            t_s,
+            jd_utc_start=jd_utc_start,
+            eop_path=eop_path,
+            dut1_s=dut1_s,
+            xp_arcsec=xp_arcsec,
+            yp_arcsec=yp_arcsec,
+            dat_s=dat_s,
+            tt_minus_utc_s=tt_minus_utc_s,
+            ddpsi_rad=ddpsi_rad,
+            ddeps_rad=ddeps_rad,
+        )
     return eci_to_ecef_rotation(t_s, jd_utc_start=jd_utc_start)
 
 
@@ -263,6 +283,13 @@ def _analytic_harmonic_accel_hpop_eci_km_s2(
     jd_utc_start: float | None,
     frame_model: str,
     eop_path: str | None,
+    dut1_s: float | None = None,
+    xp_arcsec: float | None = None,
+    yp_arcsec: float | None = None,
+    dat_s: float | None = None,
+    tt_minus_utc_s: float | None = None,
+    ddpsi_rad: float = 0.0,
+    ddeps_rad: float = 0.0,
     compiled: CompiledSphericalHarmonics | None = None,
 ) -> np.ndarray:
     compiled_terms = compiled if compiled is not None else compile_spherical_harmonic_terms(terms)
@@ -278,6 +305,13 @@ def _analytic_harmonic_accel_hpop_eci_km_s2(
         jd_utc_start=jd_utc_start,
         frame_model=frame_model,
         eop_path=eop_path,
+        dut1_s=dut1_s,
+        xp_arcsec=xp_arcsec,
+        yp_arcsec=yp_arcsec,
+        dat_s=dat_s,
+        tt_minus_utc_s=tt_minus_utc_s,
+        ddpsi_rad=ddpsi_rad,
+        ddeps_rad=ddeps_rad,
     )
     r_eci = np.array(r_eci_km, dtype=float).reshape(3)
     r_bf = e_mat @ r_eci
@@ -339,6 +373,13 @@ def accel_spherical_harmonics_terms(
     jd_utc_start: float | None = None,
     frame_model: str = "simple",
     eop_path: str | None = None,
+    dut1_s: float | None = None,
+    xp_arcsec: float | None = None,
+    yp_arcsec: float | None = None,
+    dat_s: float | None = None,
+    tt_minus_utc_s: float | None = None,
+    ddpsi_rad: float = 0.0,
+    ddeps_rad: float = 0.0,
     compiled: CompiledSphericalHarmonics | None = None,
 ) -> np.ndarray:
     """
@@ -359,6 +400,13 @@ def accel_spherical_harmonics_terms(
             jd_utc_start=jd_utc_start,
             frame_model=frame_model,
             eop_path=eop_path,
+            dut1_s=dut1_s,
+            xp_arcsec=xp_arcsec,
+            yp_arcsec=yp_arcsec,
+            dat_s=dat_s,
+            tt_minus_utc_s=tt_minus_utc_s,
+            ddpsi_rad=ddpsi_rad,
+            ddeps_rad=ddeps_rad,
             compiled=compiled_terms,
         )
     r_ecef = eci_to_ecef_harmonic(
@@ -367,6 +415,13 @@ def accel_spherical_harmonics_terms(
         jd_utc_start=jd_utc_start,
         frame_model=frame_model,
         eop_path=eop_path,
+        dut1_s=dut1_s,
+        xp_arcsec=xp_arcsec,
+        yp_arcsec=yp_arcsec,
+        dat_s=dat_s,
+        tt_minus_utc_s=tt_minus_utc_s,
+        ddpsi_rad=ddpsi_rad,
+        ddeps_rad=ddeps_rad,
     )
 
     if fd_step_km <= 0.0:
@@ -394,6 +449,13 @@ def accel_spherical_harmonics_terms(
         jd_utc_start=jd_utc_start,
         frame_model=frame_model,
         eop_path=eop_path,
+        dut1_s=dut1_s,
+        xp_arcsec=xp_arcsec,
+        yp_arcsec=yp_arcsec,
+        dat_s=dat_s,
+        tt_minus_utc_s=tt_minus_utc_s,
+        ddpsi_rad=ddpsi_rad,
+        ddeps_rad=ddeps_rad,
     )
 
 

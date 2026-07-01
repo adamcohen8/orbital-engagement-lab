@@ -7,6 +7,7 @@ metadata:
     --speed-multiple 10`.
   game:
     control_mode: ric_translation
+    level_name: Level 2 - V-Bar Approach
     camera_mode: target_pair
     difficulty: easy
     initial_speed_multiple: 10.0
