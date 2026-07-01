@@ -10,6 +10,27 @@ import numpy as np
 from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2
 from sim.dynamics.orbit.epoch import datetime_to_julian_date
 
+TLE_INITIALIZATION_MODEL_OGP = "ogp"
+TLE_INITIALIZATION_MODEL_KEPLERIAN = "keplerian_mean_elements"
+
+_OGP_INITIALIZATION_ALIASES = {
+    "ogp",
+    "general",
+    "general_perturbations",
+    "gp",
+    "sgp4",
+    "sdp4",
+    "ogp_sgp4",
+    "ogp_sdp4",
+}
+_KEPLERIAN_INITIALIZATION_ALIASES = {
+    "keplerian",
+    "keplerian_mean_elements",
+    "mean_elements",
+    "two_body",
+    "legacy",
+}
+
 
 @dataclass(frozen=True)
 class TLEElements:
@@ -215,17 +236,111 @@ def tle_to_rv_eci(
     )
 
 
+def _normalise_initialization_model(raw: Any) -> str:
+    key = str(raw or TLE_INITIALIZATION_MODEL_OGP).strip().lower().replace("-", "_")
+    if key in _OGP_INITIALIZATION_ALIASES:
+        return TLE_INITIALIZATION_MODEL_OGP
+    if key in _KEPLERIAN_INITIALIZATION_ALIASES:
+        return TLE_INITIALIZATION_MODEL_KEPLERIAN
+    aliases = sorted(_OGP_INITIALIZATION_ALIASES | _KEPLERIAN_INITIALIZATION_ALIASES)
+    raise ValueError(f"Unsupported TLE initialization_model {raw!r}; expected one of: {', '.join(aliases)}.")
+
+
+def _tle_lines_from_block(tle_block: dict[str, Any]) -> tuple[str, str]:
+    block = dict(tle_block or {})
+    lines = block.get("lines")
+    if isinstance(lines, (list, tuple)) and len(lines) >= 2:
+        return str(lines[0]), str(lines[1])
+    return str(block.get("line1", "") or ""), str(block.get("line2", "") or "")
+
+
+def tle_to_rv_eci_ogp(
+    elements: TLEElements,
+    *,
+    target_jd_utc: float | None = None,
+    frame_transform: str = "teme_as_eci",
+) -> tuple[np.ndarray, np.ndarray]:
+    transform = str(frame_transform or "teme_as_eci").strip().lower()
+    if transform not in {"teme_as_eci", "teme_to_eci_iau80"}:
+        raise ValueError(
+            "TLE OGP initialization supports initialization_frame_transform values "
+            "'teme_as_eci' and 'teme_to_eci_iau80'."
+        )
+    jd_utc = float(elements.epoch_jd_utc if target_jd_utc is None else target_jd_utc)
+    tsince_min = (jd_utc - float(elements.epoch_jd_utc)) * 1440.0
+    from sim.dynamics.orbit.ogp import ogp_propagate_teme
+    from sim.dynamics.orbit.sgp4 import transform_teme_to_output_frame
+
+    state = ogp_propagate_teme(elements, tsince_min)
+    if state.error:
+        raise ValueError(state.error)
+    return transform_teme_to_output_frame(
+        state.position_teme_km,
+        state.velocity_teme_km_s,
+        jd_utc=jd_utc,
+        output_frame="eci",
+        frame_transform=transform,
+    )
+
+
 def tle_block_to_rv_eci(
     tle_block: dict[str, Any], *, target_jd_utc: float | None = None
 ) -> tuple[np.ndarray, np.ndarray]:
     block = dict(tle_block or {})
-    lines = block.get("lines")
-    if isinstance(lines, (list, tuple)) and len(lines) >= 2:
-        line1 = str(lines[0])
-        line2 = str(lines[1])
-    else:
-        line1 = str(block.get("line1", "") or "")
-        line2 = str(block.get("line2", "") or "")
+    line1, line2 = _tle_lines_from_block(block)
     elements = parse_tle_lines(line1, line2, require_checksum=bool(block.get("require_checksum", False)))
     propagate = bool(block.get("propagate_to_initial_epoch", True))
-    return tle_to_rv_eci(elements, target_jd_utc=target_jd_utc if propagate else None)
+    effective_jd = target_jd_utc if propagate else None
+    model = _normalise_initialization_model(block.get("initialization_model"))
+    if model == TLE_INITIALIZATION_MODEL_KEPLERIAN:
+        return tle_to_rv_eci(elements, target_jd_utc=effective_jd)
+    return tle_to_rv_eci_ogp(
+        elements,
+        target_jd_utc=effective_jd,
+        frame_transform=str(block.get("initialization_frame_transform", "teme_as_eci") or "teme_as_eci"),
+    )
+
+
+def tle_block_initialization_metadata(
+    tle_block: dict[str, Any],
+    *,
+    target_jd_utc: float | None = None,
+    duration_s: float = 0.0,
+) -> dict[str, Any]:
+    block = dict(tle_block or {})
+    line1, line2 = _tle_lines_from_block(block)
+    elements = parse_tle_lines(line1, line2, require_checksum=bool(block.get("require_checksum", False)))
+    propagate = bool(block.get("propagate_to_initial_epoch", True))
+    effective_jd = float(target_jd_utc if propagate and target_jd_utc is not None else elements.epoch_jd_utc)
+    model = _normalise_initialization_model(block.get("initialization_model"))
+    if model == TLE_INITIALIZATION_MODEL_OGP:
+        from sim.dynamics.orbit.ogp import ogp_propagator_name_for_elements
+
+        native_frame = "teme"
+        frame_transform = (
+            str(block.get("initialization_frame_transform", "teme_as_eci") or "teme_as_eci").strip().lower()
+        )
+        propagator_family = "OGP"
+        propagator_name = ogp_propagator_name_for_elements(elements)
+    else:
+        native_frame = "eci"
+        frame_transform = "keplerian_mean_elements"
+        propagator_family = "two_body"
+        propagator_name = "Keplerian mean-elements conversion"
+    age_days = float(effective_jd - float(elements.epoch_jd_utc))
+    return {
+        "source": "tle",
+        "initialization_model": model,
+        "initialization_propagator_family": propagator_family,
+        "initialization_propagator_name": propagator_name,
+        "handoff_propagation_method": "special",
+        "native_frame": native_frame,
+        "output_frame": "eci",
+        "frame_transform": frame_transform,
+        "tle_epoch_jd_utc": float(elements.epoch_jd_utc),
+        "initial_jd_utc": float(effective_jd),
+        "tle_age_initialization_days": age_days,
+        "propagate_to_initial_epoch": bool(propagate),
+        "simulation_duration_s": float(duration_s),
+        "note": "TLE recovered the initial state only; subsequent trajectory uses configured ONP dynamics.",
+    }

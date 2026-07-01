@@ -60,11 +60,11 @@ Python 3.10 or newer.
   propagation path for two-body and special-perturbation force-model studies.
   ONP is distinct from passive catalog-style OGP propagation. HPOP names
   external reference/validation workflows, not the native OEL propagator.
-- TLE initialization uses a dependency-free Keplerian/two-body approximation.
+- TLE initialization samples OGP into an ECI-compatible initial state.
   Subsequent propagation uses the configured ONP force model; it does not
-  perform OGP-SGP4/general-perturbations propagation unless the object explicitly
-  uses `propagation_method: general` with
-  `general.model: sgp4`.
+  continue as catalog-style OGP propagation unless the object explicitly uses
+  `propagation_method: general` with `general.model: sgp4`. The legacy
+  Keplerian mean-element initializer is available only as an explicit opt-in.
 - OGP objects are passive catalog-style objects in the initial
   implementation. They do not accept thrust, orbit controllers, maneuvers, or
   covariance. TLEs with orbital period at or above 225 minutes dispatch to
@@ -73,8 +73,11 @@ Python 3.10 or newer.
   ECI-compatible approximation with `frame_transform: teme_as_eci`. An opt-in
   Vallado IAU-76/FK5 + IAU-80 TEME-to-ECI transform is available as
   `frame_transform: teme_to_eci_iau80`; it currently uses fixed time-scale
-  defaults and zero EOP nutation corrections, so it is not yet a fully
-  EOP-driven operational frame service.
+  defaults and zero EOP nutation corrections unless callers pass explicit
+  corrections. Scenario-level Earth-fixed transforms can use
+  `simulator.frames.model: iau76_80_eop` with an EOP file and are recorded in
+  `frame_provenance`, but this remains a validation/parity surface rather than
+  an operational frame service.
 - Ground-station access is passive and geometric. It tracks line of sight,
   elevation, and range; it does not model RF link budgets, weather, scheduling,
   or command/telemetry behavior.

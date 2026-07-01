@@ -16,6 +16,7 @@ from sim.sensors.composite import CompositeSensorModel
 from sim.sensors.joint_state import JointStateSensor
 from sim.sensors.models import OwnStateSensor, RelativeSensor, SensorNoiseConfig
 from sim.sensors.noisy_own_state import NoisyOwnStateSensor
+from sim.utils.frames import ric_rect_state_to_eci
 
 
 def _truth(
@@ -287,3 +288,206 @@ def test_relative_knowledge_requires_explicit_initial_state_prior() -> None:
 
     with pytest.raises(ValueError, match="initial_state_eci_km_s"):
         knowledge.update(observer, {"target": target}, t_s=0.0)
+
+
+def test_relative_hcw_knowledge_estimator_tracks_target_from_relative_state_measurement() -> None:
+    target = _truth(position=np.array([7000.0, 0.0, 0.0]), velocity=np.array([0.0, 7.546, 0.0]))
+    chaser_rel_ric = np.array([0.1, -0.2, 0.05, 0.00001, -0.00002, 0.00003], dtype=float)
+    chaser_state = ric_rect_state_to_eci(
+        chaser_rel_ric,
+        target.position_eci_km,
+        target.velocity_eci_km_s,
+    )
+    observer = _truth(position=chaser_state[:3], velocity=chaser_state[3:])
+    knowledge = ObjectKnowledgeBase(
+        observer_id="chaser",
+        tracked_objects=[
+            TrackedObjectConfig(
+                target_id="target",
+                conditions=KnowledgeConditionConfig(refresh_rate_s=1.0),
+                sensor_noise=KnowledgeNoiseConfig(
+                    pos_sigma_km=np.zeros(3),
+                    vel_sigma_km_s=np.zeros(3),
+                ),
+                estimator="relative_hcw_ekf",
+                measurement_model="relative_state",
+                ekf=KnowledgeEKFConfig(
+                    process_noise_diag=np.ones(6) * 1e-12,
+                    meas_noise_diag=np.ones(6) * 1e-12,
+                    init_cov_diag=np.ones(6) * 1e-6,
+                ),
+            )
+        ],
+        dt_s=1.0,
+        rng=np.random.default_rng(5),
+    )
+
+    belief = knowledge.update(observer, {"target": target}, t_s=0.0)["target"]
+
+    assert np.allclose(knowledge.measurement_snapshot()["target"], -chaser_rel_ric, atol=1e-10)
+    assert np.linalg.norm(belief.state[:3] - target.position_eci_km) < 1e-3
+    assert np.linalg.norm(belief.state[3:6] - target.velocity_eci_km_s) < 1e-5
+    assert np.allclose(belief.covariance, belief.covariance.T, atol=1e-14)
+    assert np.max(np.abs(belief.covariance - np.diag(np.diag(belief.covariance)))) > 1e-12
+    assert knowledge.consistency_summary()["target"]["initialization_count"] == 1
+
+
+def test_relative_hcw_knowledge_estimator_updates_from_angles_range_rate_measurement() -> None:
+    target = _truth(position=np.array([7000.0, 0.0, 0.0]), velocity=np.array([0.0, 7.546, 0.0]))
+    chaser_rel_ric = np.array([0.1, -0.2, 0.05, 0.00001, -0.00002, 0.00003], dtype=float)
+    prior_rel_ric = chaser_rel_ric + np.array([0.02, -0.01, 0.01, 0.00001, -0.00001, 0.0], dtype=float)
+    chaser_state = ric_rect_state_to_eci(
+        chaser_rel_ric,
+        target.position_eci_km,
+        target.velocity_eci_km_s,
+    )
+    observer = _truth(position=chaser_state[:3], velocity=chaser_state[3:])
+    knowledge = ObjectKnowledgeBase(
+        observer_id="chaser",
+        tracked_objects=[
+            TrackedObjectConfig(
+                target_id="target",
+                conditions=KnowledgeConditionConfig(refresh_rate_s=1.0),
+                sensor_noise=KnowledgeNoiseConfig(
+                    angle_sigma_rad=0.0,
+                    range_sigma_km=0.0,
+                    range_rate_sigma_km_s=0.0,
+                ),
+                estimator="relative_hcw_ekf",
+                measurement_model="relative_angles_range_rate",
+                ekf=KnowledgeEKFConfig(
+                    process_noise_diag=np.ones(6) * 1e-12,
+                    init_cov_diag=np.array([1e-2, 1e-2, 1e-2, 1e-6, 1e-6, 1e-6], dtype=float),
+                    initial_state_ric=prior_rel_ric,
+                ),
+            )
+        ],
+        dt_s=1.0,
+        rng=np.random.default_rng(5),
+    )
+
+    prior_belief = knowledge.update(observer, {"target": target}, t_s=0.0)["target"]
+    updated = knowledge.update(observer, {"target": target}, t_s=1.0)["target"]
+
+    assert knowledge.measurement_snapshot()["target"].shape == (4,)
+    assert np.linalg.norm(updated.state[:3] - target.position_eci_km) < np.linalg.norm(
+        prior_belief.state[:3] - target.position_eci_km
+    )
+    assert knowledge.consistency_summary()["target"]["update_count"] == 1
+
+
+def test_relative_hcw_knowledge_range_rate_requires_relative_prior() -> None:
+    observer = _truth(position=np.array([7000.1, 0.0, 0.0]), velocity=np.array([0.0, 7.5, 0.0]))
+    target = _truth(position=np.array([7000.0, 0.0, 0.0]), velocity=np.array([0.0, 7.5001, 0.0]))
+    knowledge = ObjectKnowledgeBase(
+        observer_id="chaser",
+        tracked_objects=[
+            TrackedObjectConfig(
+                target_id="target",
+                conditions=KnowledgeConditionConfig(refresh_rate_s=1.0),
+                sensor_noise=KnowledgeNoiseConfig(range_sigma_km=0.0, range_rate_sigma_km_s=0.0),
+                estimator="relative_hcw_ekf",
+                measurement_model="relative_range_rate",
+                ekf=KnowledgeEKFConfig(init_cov_diag=np.ones(6)),
+            )
+        ],
+        dt_s=1.0,
+        rng=np.random.default_rng(5),
+    )
+
+    with pytest.raises(ValueError, match="initial_state_ric"):
+        knowledge.update(observer, {"target": target}, t_s=0.0)
+
+
+def test_relative_th_knowledge_estimator_updates_from_angles_range_rate_measurement() -> None:
+    target = _truth(position=np.array([6650.0, 0.0, 0.0]), velocity=np.array([0.0, 8.1, 0.5]))
+    chaser_rel_ric = np.array([0.04, -0.06, 0.025, 0.000005, -0.000003, 0.000002], dtype=float)
+    prior_rel_ric = chaser_rel_ric + np.array([0.01, -0.008, 0.006, 0.000004, -0.000002, 0.000001], dtype=float)
+    chaser_state = ric_rect_state_to_eci(
+        chaser_rel_ric,
+        target.position_eci_km,
+        target.velocity_eci_km_s,
+    )
+    observer = _truth(position=chaser_state[:3], velocity=chaser_state[3:])
+    knowledge = ObjectKnowledgeBase(
+        observer_id="chaser",
+        tracked_objects=[
+            TrackedObjectConfig(
+                target_id="target",
+                conditions=KnowledgeConditionConfig(refresh_rate_s=1.0),
+                sensor_noise=KnowledgeNoiseConfig(
+                    angle_sigma_rad=0.0,
+                    range_sigma_km=0.0,
+                    range_rate_sigma_km_s=0.0,
+                ),
+                estimator="relative_th_ekf",
+                measurement_model="relative_angles_range_rate",
+                ekf=KnowledgeEKFConfig(
+                    process_noise_diag=np.ones(6) * 1e-12,
+                    init_cov_diag=np.array([1e-2, 1e-2, 1e-2, 1e-6, 1e-6, 1e-6], dtype=float),
+                    initial_state_ric=prior_rel_ric,
+                    integration_substep_s=1.0,
+                ),
+            )
+        ],
+        dt_s=1.0,
+        rng=np.random.default_rng(5),
+    )
+
+    prior_belief = knowledge.update(observer, {"target": target}, t_s=0.0)["target"]
+    track = knowledge._tracks["target"]
+    assert track.estimator is not None
+    np.testing.assert_allclose(track.estimator.chief_state_eci_km_s, prior_belief.state)
+    assert np.linalg.norm(track.estimator.chief_state_eci_km_s[:3] - target.position_eci_km) > 1e-3
+    updated = knowledge.update(observer, {"target": target}, t_s=1.0)["target"]
+
+    assert knowledge.measurement_snapshot()["target"].shape == (4,)
+    assert np.linalg.norm(updated.state[:3] - target.position_eci_km) < np.linalg.norm(
+        prior_belief.state[:3] - target.position_eci_km
+    )
+    assert knowledge.consistency_summary()["target"]["update_count"] == 1
+
+
+def test_relative_ya_knowledge_estimator_updates_from_angles_range_rate_measurement() -> None:
+    target = _truth(position=np.array([6650.0, 0.0, 0.0]), velocity=np.array([0.0, 8.1, 0.5]))
+    chaser_rel_ric = np.array([0.04, -0.06, 0.025, 0.000005, -0.000003, 0.000002], dtype=float)
+    prior_rel_ric = chaser_rel_ric + np.array([0.01, -0.008, 0.006, 0.000004, -0.000002, 0.000001], dtype=float)
+    chaser_state = ric_rect_state_to_eci(
+        chaser_rel_ric,
+        target.position_eci_km,
+        target.velocity_eci_km_s,
+    )
+    observer = _truth(position=chaser_state[:3], velocity=chaser_state[3:])
+    knowledge = ObjectKnowledgeBase(
+        observer_id="chaser",
+        tracked_objects=[
+            TrackedObjectConfig(
+                target_id="target",
+                conditions=KnowledgeConditionConfig(refresh_rate_s=1.0),
+                sensor_noise=KnowledgeNoiseConfig(
+                    angle_sigma_rad=0.0,
+                    range_sigma_km=0.0,
+                    range_rate_sigma_km_s=0.0,
+                ),
+                estimator="relative_ya_ekf",
+                measurement_model="relative_angles_range_rate",
+                ekf=KnowledgeEKFConfig(
+                    process_noise_diag=np.ones(6) * 1e-12,
+                    init_cov_diag=np.array([1e-2, 1e-2, 1e-2, 1e-6, 1e-6, 1e-6], dtype=float),
+                    initial_state_ric=prior_rel_ric,
+                    integration_substep_s=1.0,
+                ),
+            )
+        ],
+        dt_s=1.0,
+        rng=np.random.default_rng(5),
+    )
+
+    prior_belief = knowledge.update(observer, {"target": target}, t_s=0.0)["target"]
+    updated = knowledge.update(observer, {"target": target}, t_s=1.0)["target"]
+
+    assert knowledge.measurement_snapshot()["target"].shape == (4,)
+    assert np.linalg.norm(updated.state[:3] - target.position_eci_km) < np.linalg.norm(
+        prior_belief.state[:3] - target.position_eci_km
+    )
+    assert knowledge.consistency_summary()["target"]["update_count"] == 1

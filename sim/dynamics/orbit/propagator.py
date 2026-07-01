@@ -145,6 +145,13 @@ def spherical_harmonics_plugin(t_s: float, x_eci: np.ndarray, env: dict, ctx: Or
     re_km = float(env.get("spherical_harmonics_reference_radius_km", EARTH_RADIUS_KM))
     frame_model = str(env.get("spherical_harmonics_frame_model", "simple"))
     eop_path = env.get("spherical_harmonics_eop_path")
+    dut1_s = env.get("dut1_s")
+    xp_arcsec = env.get("xp_arcsec")
+    yp_arcsec = env.get("yp_arcsec")
+    dat_s = env.get("dat_s")
+    tt_minus_utc_s = env.get("tt_minus_utc_s")
+    ddpsi_rad = float(env.get("ddpsi_rad", 0.0) or 0.0)
+    ddeps_rad = float(env.get("ddeps_rad", 0.0) or 0.0)
     if jd_utc_start is None and "jd_utc" in env:
         jd_utc_start = float(env["jd_utc"]) - float(t_s) / 86400.0
     return accel_spherical_harmonics_terms(
@@ -157,6 +164,13 @@ def spherical_harmonics_plugin(t_s: float, x_eci: np.ndarray, env: dict, ctx: Or
         jd_utc_start=None if jd_utc_start is None else float(jd_utc_start),
         frame_model=frame_model,
         eop_path=None if eop_path is None else str(eop_path),
+        dut1_s=None if dut1_s is None else float(dut1_s),
+        xp_arcsec=None if xp_arcsec is None else float(xp_arcsec),
+        yp_arcsec=None if yp_arcsec is None else float(yp_arcsec),
+        dat_s=None if dat_s is None else float(dat_s),
+        tt_minus_utc_s=None if tt_minus_utc_s is None else float(tt_minus_utc_s),
+        ddpsi_rad=ddpsi_rad,
+        ddeps_rad=ddeps_rad,
         compiled=compiled,
     )
 

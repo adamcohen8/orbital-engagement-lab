@@ -7,6 +7,7 @@ from typing import Any
 
 import yaml
 
+from sim.game.fonts import game_font
 from sim.game.formatting import format_speed_km_s, format_speed_m_s
 
 GAME_CONFIG_DIR = Path(__file__).resolve().parent / "configs"
@@ -270,10 +271,10 @@ def _run_launcher(options: tuple[GameScenarioOption, ...], *, show_start_screen:
     pygame.event.set_grab(False)
     pygame.mouse.set_visible(True)
     clock = pygame.time.Clock()
-    font = pygame.font.SysFont("Menlo", 18) or pygame.font.Font(None, 18)
-    small_font = pygame.font.SysFont("Menlo", 14) or pygame.font.Font(None, 14)
-    title_font = pygame.font.SysFont("Menlo", 30) or pygame.font.Font(None, 30)
-    hero_font = pygame.font.SysFont("Menlo", 44) or pygame.font.Font(None, 44)
+    font = game_font(pygame, 19)
+    small_font = game_font(pygame, 15)
+    title_font = game_font(pygame, 32)
+    hero_font = game_font(pygame, 46)
     selected = 0
     scroll_offset = 0
     preview_scroll_px = 0

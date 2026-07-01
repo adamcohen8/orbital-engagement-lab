@@ -397,6 +397,7 @@ class GuidedTutorialSpeedStepConfig:
 class RPOTrainingConfig:
     enabled: bool = False
     scenario_id: str = ""
+    level_name: str = ""
     learning_goal: str = ""
     relative_frame: str = "ric"
     target_object_id: str = "target"
@@ -456,6 +457,7 @@ class RPOTrainingConfig:
         return cls(
             enabled=bool(raw.get("enabled", True)),
             scenario_id=str(raw.get("scenario_id", "") or ""),
+            level_name=str(game_cfg.get("level_name", "") or ""),
             learning_goal=str(raw.get("learning_goal", "") or ""),
             relative_frame=str(raw.get("relative_frame", game_cfg.get("relative_frame", "ric")) or "ric")
             .strip()

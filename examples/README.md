@@ -23,11 +23,11 @@ validated and run through the standard CLI:
 Public configs use the canonical `objects` map. Conventional object IDs such as
 `chaser` and `target` are example names, not required engine slots.
 
-The standard TLE examples are initializer-only workflows: OEL converts the TLE
-to an initial ECI state, optionally advances mean anomaly to
-`simulator.initial_jd_utc` with a two-body approximation, then integrates the
-configured OEL force model. The explicit `public_sgp4_passive_propagation.yaml`
-example is the catalog-style SGP4 exception and is passive by design.
+The standard TLE examples are initializer-only workflows: OEL samples OGP to
+recover an ECI-compatible initial state at `simulator.initial_jd_utc`, then
+integrates the configured OEL force model. The explicit
+`public_sgp4_passive_propagation.yaml` example is the continuous catalog-style
+OGP exception and is passive by design.
 
 ## Flagship Built-In Scenario
 

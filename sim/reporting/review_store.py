@@ -62,6 +62,8 @@ def write_single_run_review_store(
             _create_schema(conn)
             _insert_run_metadata(conn, cfg=cfg, summary=summary, outdir=outdir, generated_utc=generated_utc)
             _insert_objects(conn, cfg=cfg, summary=summary)
+            _insert_frame_provenance(conn, payload=payload)
+            _insert_object_initialization(conn, payload=payload)
             _insert_object_propagation(conn, payload=payload)
             _insert_object_state_frame(conn, payload=payload)
             _insert_time_samples(conn, t_s=t_s)
@@ -115,6 +117,24 @@ def _create_schema(conn: sqlite3.Connection) -> None:
             role TEXT
         );
 
+        CREATE TABLE frame_provenance (
+            scope TEXT PRIMARY KEY,
+            model TEXT,
+            legacy_frame_model TEXT,
+            time_scale_model TEXT,
+            eop_path TEXT,
+            tt_minus_utc_s REAL,
+            dut1_s REAL,
+            xp_arcsec REAL,
+            yp_arcsec REAL,
+            dat_s REAL,
+            ddpsi_rad REAL,
+            ddeps_rad REAL,
+            polar_motion_applied INTEGER,
+            nutation_corrections_applied INTEGER,
+            sample_t_s REAL
+        );
+
         CREATE TABLE object_propagation (
             object_id TEXT PRIMARY KEY,
             propagation_method TEXT,
@@ -125,6 +145,24 @@ def _create_schema(conn: sqlite3.Connection) -> None:
             tle_epoch_jd_utc REAL,
             tle_age_start_days REAL,
             tle_age_end_days REAL
+        );
+
+        CREATE TABLE object_initialization (
+            object_id TEXT PRIMARY KEY,
+            source TEXT,
+            initialization_model TEXT,
+            initialization_propagator_family TEXT,
+            initialization_propagator_name TEXT,
+            handoff_propagation_method TEXT,
+            native_frame TEXT,
+            output_frame TEXT,
+            frame_transform TEXT,
+            tle_epoch_jd_utc REAL,
+            initial_jd_utc REAL,
+            tle_age_initialization_days REAL,
+            propagate_to_initial_epoch INTEGER,
+            simulation_duration_s REAL,
+            note TEXT
         );
 
         CREATE TABLE object_state_frame (
@@ -380,6 +418,60 @@ def _insert_objects(conn: sqlite3.Connection, *, cfg: Any, summary: dict[str, An
             )
         )
     conn.executemany("INSERT INTO objects VALUES (?, ?, ?, ?, ?)", rows)
+
+
+def _insert_frame_provenance(conn: sqlite3.Connection, *, payload: dict[str, Any]) -> None:
+    frame = dict(payload.get("frame_provenance", {}) or {})
+    if not frame:
+        frame = dict(dict(payload.get("summary", {}) or {}).get("frame_provenance", {}) or {})
+    if not frame:
+        return
+    row = (
+        "scenario",
+        str(frame.get("model", "") or ""),
+        str(frame.get("legacy_frame_model", "") or ""),
+        str(frame.get("time_scale_model", "") or ""),
+        str(frame.get("eop_path", "") or ""),
+        _float_or_none(frame.get("tt_minus_utc_s")),
+        _float_or_none(frame.get("dut1_s")),
+        _float_or_none(frame.get("xp_arcsec")),
+        _float_or_none(frame.get("yp_arcsec")),
+        _float_or_none(frame.get("dat_s")),
+        _float_or_none(frame.get("ddpsi_rad")),
+        _float_or_none(frame.get("ddeps_rad")),
+        1 if bool(frame.get("polar_motion_applied", False)) else 0,
+        1 if bool(frame.get("nutation_corrections_applied", False)) else 0,
+        _float_or_none(frame.get("sample_t_s")),
+    )
+    conn.execute("INSERT INTO frame_provenance VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", row)
+
+
+def _insert_object_initialization(conn: sqlite3.Connection, *, payload: dict[str, Any]) -> None:
+    rows = []
+    for object_id, metadata_raw in sorted(dict(payload.get("object_initialization", {}) or {}).items()):
+        metadata = dict(metadata_raw or {})
+        rows.append(
+            (
+                str(object_id),
+                str(metadata.get("source", "") or ""),
+                str(metadata.get("initialization_model", "") or ""),
+                str(metadata.get("initialization_propagator_family", "") or ""),
+                str(metadata.get("initialization_propagator_name", "") or ""),
+                str(metadata.get("handoff_propagation_method", "") or ""),
+                str(metadata.get("native_frame", "") or ""),
+                str(metadata.get("output_frame", "") or ""),
+                str(metadata.get("frame_transform", "") or ""),
+                _float_or_none(metadata.get("tle_epoch_jd_utc")),
+                _float_or_none(metadata.get("initial_jd_utc")),
+                _float_or_none(metadata.get("tle_age_initialization_days")),
+                1 if bool(metadata.get("propagate_to_initial_epoch", False)) else 0,
+                _float_or_none(metadata.get("simulation_duration_s")),
+                str(metadata.get("note", "") or ""),
+            )
+        )
+    conn.executemany(
+        "INSERT INTO object_initialization VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows
+    )
 
 
 def _insert_object_propagation(conn: sqlite3.Connection, *, payload: dict[str, Any]) -> None:
@@ -845,6 +937,10 @@ def _write_schema_json(path: Path, *, generated_utc: str) -> None:
         "tables": {
             "run_metadata": {"description": "One row describing the run and review schema."},
             "objects": {"description": "Active simulation objects."},
+            "frame_provenance": {"description": "Scenario-level frame, EOP, and time-scale provenance."},
+            "object_initialization": {
+                "description": "Per-object initial-state provenance, including TLE recovery handoffs."
+            },
             "object_propagation": {"description": "Per-object propagation-family provenance for GP/SP workflows."},
             "object_state_frame": {"description": "Frame label for each object's state rows, e.g. eci or teme."},
             "time_samples": {"description": "Retained sample times."},

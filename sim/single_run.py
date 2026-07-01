@@ -24,8 +24,10 @@ from sim.core.models import Command, StateBelief, StateTruth
 from sim.dynamics.attitude.rigid_body import get_attitude_guardrail_stats, reset_attitude_guardrail_stats
 from sim.dynamics.orbit.atmosphere import altitude_km_from_eci
 from sim.dynamics.orbit.epoch import TIME_DEPENDENT_ENV_CACHE_KEY
+from sim.dynamics.orbit.frames import FrameContext, frame_context_from_mapping
 from sim.dynamics.orbit.sgp4 import SGP4EphemerisProvider
 from sim.dynamics.orbit.spherical_harmonics import configure_spherical_harmonics_env
+from sim.dynamics.orbit.tle import tle_block_initialization_metadata
 from sim.dynamics.reentry import (
     REENTRY_METRIC_KEYS,
     ReentryObjectProperties,
@@ -75,6 +77,68 @@ def _effective_propagation_method(cfg: SimulationScenarioConfig, agent_cfg: Any)
     orbit = dict((cfg.simulator.dynamics or {}).get("orbit", {}) or {})
     default_method = str(orbit.get("propagation_method", "special") or "special").strip().lower()
     return str(getattr(agent_cfg, "propagation_method", "") or default_method or "special").strip().lower()
+
+
+def _object_initialization_metadata(
+    cfg: SimulationScenarioConfig, object_configs: dict[str, Any]
+) -> dict[str, dict[str, Any]]:
+    metadata: dict[str, dict[str, Any]] = {}
+    for object_id, agent_cfg in sorted(dict(object_configs or {}).items()):
+        if _effective_propagation_method(cfg, agent_cfg) == "general":
+            continue
+        initial_state = dict(getattr(agent_cfg, "initial_state", {}) or {})
+        tle = initial_state.get("tle")
+        if not isinstance(tle, dict):
+            continue
+        metadata[str(object_id)] = tle_block_initialization_metadata(
+            tle,
+            target_jd_utc=getattr(cfg.simulator, "initial_jd_utc", None),
+            duration_s=float(getattr(cfg.simulator, "duration_s", 0.0) or 0.0),
+        )
+    return metadata
+
+
+def _apply_frame_context_to_environment(
+    env: dict[str, Any],
+    *,
+    frame_context: FrameContext,
+    orbit_cfg: dict[str, Any],
+) -> dict[str, Any]:
+    out = dict(env or {})
+    out["frame_context"] = frame_context
+    out["frame_model"] = frame_context.legacy_frame_model
+    out["frame_model_canonical"] = frame_context.model
+    out["frame_provenance"] = frame_context.metadata()
+    out["time_scale_model"] = frame_context.time_scale_model
+    out["tt_minus_utc_s"] = float(frame_context.tt_minus_utc_s)
+    if frame_context.eop_path is not None:
+        out["eop_path"] = frame_context.eop_path
+    if frame_context.dut1_s is not None:
+        out["dut1_s"] = float(frame_context.dut1_s)
+    if frame_context.xp_arcsec is not None:
+        out["xp_arcsec"] = float(frame_context.xp_arcsec)
+    if frame_context.yp_arcsec is not None:
+        out["yp_arcsec"] = float(frame_context.yp_arcsec)
+    if frame_context.dat_s is not None:
+        out["dat_s"] = float(frame_context.dat_s)
+    out["ddpsi_rad"] = float(frame_context.ddpsi_rad)
+    out["ddeps_rad"] = float(frame_context.ddeps_rad)
+
+    legacy_model = frame_context.legacy_frame_model
+    if "drag_frame_model" not in out and orbit_cfg.get("drag_frame_model") is None:
+        out["drag_frame_model"] = legacy_model
+    if "density_frame_model" not in out:
+        out["density_frame_model"] = str(out.get("drag_frame_model", legacy_model))
+    if frame_context.eop_path is not None:
+        if "drag_eop_path" not in out and orbit_cfg.get("drag_eop_path") is None:
+            out["drag_eop_path"] = frame_context.eop_path
+        if "density_eop_path" not in out:
+            out["density_eop_path"] = str(out.get("drag_eop_path", frame_context.eop_path))
+        if "spherical_harmonics_eop_path" not in out:
+            out["spherical_harmonics_eop_path"] = frame_context.eop_path
+    if "spherical_harmonics_frame_model" not in out:
+        out["spherical_harmonics_frame_model"] = legacy_model
+    return out
 
 
 def _state_truth_to_array(truth: StateTruth) -> np.ndarray:
@@ -508,6 +572,10 @@ class _SingleRunEngine:
         dynamics_cfg = dict(cfg.simulator.dynamics or {})
         orbit_cfg = dict(dynamics_cfg.get("orbit", {}) or {})
         att_cfg = dict(dynamics_cfg.get("attitude", {}) or {})
+        self.frame_context = frame_context_from_mapping(
+            dict(getattr(cfg.simulator, "frames", {}) or {}),
+            jd_utc_start=cfg.simulator.initial_jd_utc,
+        )
         self.base_environment = configure_spherical_harmonics_env(dict(cfg.simulator.environment or {}), orbit_cfg)
         atmosphere_env = self.base_environment.pop("atmosphere_env", None)
         if isinstance(atmosphere_env, dict):
@@ -516,6 +584,11 @@ class _SingleRunEngine:
             self.base_environment["atmosphere_model"] = str(orbit_cfg.get("atmosphere_model")).strip().lower()
         if cfg.simulator.initial_jd_utc is not None and "jd_utc_start" not in self.base_environment:
             self.base_environment["jd_utc_start"] = float(cfg.simulator.initial_jd_utc)
+        self.base_environment = _apply_frame_context_to_environment(
+            self.base_environment,
+            frame_context=self.frame_context,
+            orbit_cfg=orbit_cfg,
+        )
         self._time_dependent_env_cache: dict[tuple, dict[str, np.ndarray]] = {}
         self.reentry_cfg = reentry_config_from_dynamics(dynamics_cfg)
         self.attitude_enabled = bool(att_cfg.get("enabled", True))
@@ -1793,6 +1866,7 @@ class _SingleRunEngine:
                 reentry_metrics=parts.reentry_metrics,
                 thrust_stats=parts.thrust_stats,
                 runtime_profile=runtime_profile,
+                object_initialization=_object_initialization_metadata(self.cfg, self.object_configs),
                 object_propagation={
                     oid: asdict(provider.metadata()) for oid, provider in self.general_propagation.items()
                 },

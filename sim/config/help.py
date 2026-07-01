@@ -145,6 +145,41 @@ CONFIG_HELP_ENTRIES: tuple[ConfigHelpEntry, ...] = (
         notes=("Aliases accepted by lower-level code include simple/enhanced and spiceypy/callable forms.",),
     ),
     ConfigHelpEntry(
+        path="simulator.frames.model",
+        title="Frame Model",
+        description=(
+            "Selects the scenario-level Earth-fixed frame policy used by frame-sensitive geometry, "
+            "ground access, plotting, drag density rotation, and spherical harmonics defaults."
+        ),
+        aliases=(
+            "frame model",
+            "earth fixed frame",
+            "eci ecef",
+            "teme",
+            "eop",
+            "hpop frame",
+            "itrf",
+            "gcrf",
+        ),
+        options=(
+            _option("simple_gmst", "Default GMST/simple Earth-rotation model for lightweight deterministic runs."),
+            _option(
+                "iau76_80_eop",
+                "IAU-76/FK5 plus IAU-80 nutation and EOP-backed polar motion for HPOP-parity validation cases.",
+            ),
+        ),
+        example=(
+            "simulator:\n"
+            "  frames:\n"
+            "    model: iau76_80_eop\n"
+            "    eop_path: validation/resources/hpop/eop19620101.txt"
+        ),
+        notes=(
+            "The run payload and review store record frame_provenance for auditability.",
+            "Legacy per-force frame_model/eop_path settings remain accepted but scenario-level frames are preferred.",
+        ),
+    ),
+    ConfigHelpEntry(
         path="simulator.dynamics.orbit.model",
         title="Orbit Base Model",
         description=(
@@ -214,10 +249,10 @@ CONFIG_HELP_ENTRIES: tuple[ConfigHelpEntry, ...] = (
         ),
         notes=(
             "SGP4 objects are passive in v1: no orbit_control, attitude_control, thrust, mission objectives, or maneuvers.",
-            "TLEs with orbital period >= 225 minutes require deep-space SDP4/resonance handling and are rejected.",
+            "TLEs with orbital period >= 225 minutes route through the supported OGP-SDP4 deep-space/resonance path.",
             "Set general.output_frame: teme for native TEME state rows, or use the default ECI-compatible teme_as_eci approximation.",
             "Use frame_transform: teme_to_eci_iau80 for the opt-in Vallado IAU-80 TEME-to-ECI reduction.",
-            "The IAU-80 transform uses fixed time-scale defaults and zero EOP nutation corrections in current scenario config.",
+            "Scenario-level simulator.frames can supply EOP files or manual EOP/time-scale corrections for Earth-fixed transforms.",
             "Use the existing special propagation path for controlled spacecraft and OEL force-model studies.",
         ),
     ),
@@ -520,6 +555,10 @@ CONFIG_HELP_ENTRIES: tuple[ConfigHelpEntry, ...] = (
             _option("pos_sigma_km", "Position 1-sigma measurement error by axis, in kilometers."),
             _option("vel_sigma_km_s", "Velocity 1-sigma measurement error by axis, in kilometers per second."),
             _option("estimation.type", "Estimator choice, such as ekf or measured_state, under knowledge.estimation."),
+            _option(
+                "estimation.maneuver_detection",
+                "Optional EKF innovation/NIS maneuver detector with rolling persistence gates.",
+            ),
             _option("conditions", "Optional access constraints such as require_line_of_sight and max_range_km."),
         ),
         example=(
@@ -531,7 +570,11 @@ CONFIG_HELP_ENTRIES: tuple[ConfigHelpEntry, ...] = (
             "        pos_sigma_km: [0.01, 0.01, 0.01]\n"
             "        vel_sigma_km_s: [0.0001, 0.0001, 0.0001]\n"
             "      estimation:\n"
-            "        type: ekf"
+            "        type: ekf\n"
+            "        maneuver_detection:\n"
+            "          enabled: true\n"
+            "          window_size: 5\n"
+            "          detection_count: 3"
         ),
         notes=(
             "For geometric ground access, use ground_stations rather than a modeled RF or optical sensor.",

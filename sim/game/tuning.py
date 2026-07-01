@@ -15,6 +15,7 @@ class GameTuning:
     )
     max_realtime_steps_per_frame: int = 12
     dashboard_fps: float = 60.0
+    static_dashboard_fps: float = 15.0
     game_recording_fps: float = 30.0
     high_speed_dashboard_fps: float = 30.0
     medium_high_speed_dashboard_fps: float = 45.0
@@ -28,6 +29,7 @@ SPEED_MULTIPLIER_OPTIONS = DEFAULT_GAME_TUNING.speed_multiplier_options
 SPEED_DT_SCHEDULE = DEFAULT_GAME_TUNING.speed_dt_schedule
 MAX_REALTIME_STEPS_PER_FRAME = DEFAULT_GAME_TUNING.max_realtime_steps_per_frame
 DASHBOARD_FPS = DEFAULT_GAME_TUNING.dashboard_fps
+STATIC_DASHBOARD_FPS = DEFAULT_GAME_TUNING.static_dashboard_fps
 GAME_RECORDING_FPS = DEFAULT_GAME_TUNING.game_recording_fps
 HIGH_SPEED_DASHBOARD_FPS = DEFAULT_GAME_TUNING.high_speed_dashboard_fps
 MEDIUM_HIGH_SPEED_DASHBOARD_FPS = DEFAULT_GAME_TUNING.medium_high_speed_dashboard_fps

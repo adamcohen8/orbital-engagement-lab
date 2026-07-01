@@ -16,6 +16,7 @@ from sim.dynamics.orbit.cr3bp import (
     propagate_cr3bp_state,
 )
 from sim.dynamics.orbit.elements import rv_to_coe_eci
+from sim.game.fonts import game_font
 from sim.game.formatting import format_distance_km, format_speed_km_s
 from sim.game.training import (
     ApproachGateConfig,
@@ -25,7 +26,11 @@ from sim.game.training import (
     relative_moon_ric_state_from_arrays,
     relative_ric_state_from_arrays,
 )
-from sim.utils.frames import eci_relative_to_ric_rect, ric_dcm_ir_from_rv, ric_rect_state_to_eci
+from sim.utils.frames import (
+    eci_relative_to_ric_rect,
+    ric_dcm_ir_from_rv,
+    ric_rect_state_to_eci,
+)
 
 EARTH_MU_KM3_S2 = 398600.4418
 EARTH_RADIUS_KM = 6378.137
@@ -181,6 +186,52 @@ def _game_asset_path_or_default(value: Path | str | None, default: Path) -> Path
 
 
 @dataclass
+class _HistoryRingBuffer:
+    width: int
+    max_rows: int
+    data: np.ndarray = field(init=False, repr=False)
+    start: int = 0
+    count: int = 0
+
+    def __post_init__(self) -> None:
+        self.width = int(max(self.width, 1))
+        self.max_rows = int(max(self.max_rows, 1))
+        self.data = np.zeros((self.max_rows, self.width), dtype=float)
+
+    @classmethod
+    def from_rows(cls, rows: Any, *, width: int, max_rows: int) -> _HistoryRingBuffer:
+        ring = cls(width=int(width), max_rows=int(max(max_rows, 1)))
+        arr = np.asarray(rows, dtype=float).reshape(-1, int(width))
+        if arr.size:
+            tail = arr[-ring.max_rows :]
+            ring.data[: tail.shape[0], :] = tail
+            ring.count = int(tail.shape[0])
+        return ring
+
+    def append(self, row: Any) -> None:
+        row_arr = np.asarray(row, dtype=float).reshape(self.width)
+        if self.count < self.max_rows:
+            idx = (self.start + self.count) % self.max_rows
+            self.count += 1
+        else:
+            idx = self.start
+            self.start = (self.start + 1) % self.max_rows
+        self.data[idx, :] = row_arr
+
+    def rows(self) -> np.ndarray:
+        if self.count <= 0:
+            return np.zeros((0, self.width), dtype=float)
+        end = self.start + self.count
+        if end <= self.max_rows:
+            return self.data[self.start : end, :]
+        return np.concatenate((self.data[self.start :, :], self.data[: end % self.max_rows, :]), axis=0)
+
+
+def _new_history_ring(width: int, max_rows: int) -> _HistoryRingBuffer:
+    return _HistoryRingBuffer(width=int(width), max_rows=int(max(max_rows, 1)))
+
+
+@dataclass
 class PygameRPODashboard:
     target_object_id: str = "target"
     chaser_object_id: str = "chaser"
@@ -262,9 +313,9 @@ class PygameRPODashboard:
         pygame.event.set_grab(True)
         pygame.mouse.set_visible(False)
         self.clock = pygame.time.Clock()
-        self.font = pygame.font.SysFont("Menlo", 18) or pygame.font.Font(None, 18)
-        self.small_font = pygame.font.SysFont("Menlo", 14) or pygame.font.Font(None, 14)
-        self.large_font = pygame.font.SysFont("Menlo", 26) or pygame.font.Font(None, 26)
+        self.font = game_font(pygame, 19)
+        self.small_font = game_font(pygame, 15)
+        self.large_font = game_font(pygame, 28)
         self.closed = False
         self.t_s: list[float] = []
         self.sample_wall_s: list[float] = []
@@ -275,12 +326,13 @@ class PygameRPODashboard:
         self.chaser_eci_hist: list[np.ndarray] = []
         self.thrust_hist: list[np.ndarray] = []
         self.thrust_ric_hist: list[np.ndarray] = []
-        self._rel_array = np.zeros((0, 6), dtype=float)
-        self._target_rel_array = np.zeros((0, 6), dtype=float)
-        self._target_reference_rel_array = np.zeros((0, 6), dtype=float)
-        self._target_eci_array = np.zeros((0, 6), dtype=float)
-        self._chaser_eci_array = np.zeros((0, 6), dtype=float)
-        self._thrust_ric_array = np.zeros((0, 3), dtype=float)
+        max_rows = int(max(self.max_history, 2))
+        self._rel_array = _new_history_ring(6, max_rows)
+        self._target_rel_array = _new_history_ring(6, max_rows)
+        self._target_reference_rel_array = _new_history_ring(6, max_rows)
+        self._target_eci_array = _new_history_ring(6, max_rows)
+        self._chaser_eci_array = _new_history_ring(6, max_rows)
+        self._thrust_ric_array = _new_history_ring(3, max_rows)
         self.mean_motion_rad_s: float | None = None
         self.reference_state_eci: np.ndarray | None = None
         self.target_orbit_reference_state_eci: np.ndarray | None = None
@@ -335,12 +387,13 @@ class PygameRPODashboard:
             self.chaser_eci_hist = []
         self.thrust_hist.clear()
         self.thrust_ric_hist.clear()
-        self._rel_array = np.zeros((0, 6), dtype=float)
-        self._target_rel_array = np.zeros((0, 6), dtype=float)
-        self._target_reference_rel_array = np.zeros((0, 6), dtype=float)
-        self._target_eci_array = np.zeros((0, 6), dtype=float)
-        self._chaser_eci_array = np.zeros((0, 6), dtype=float)
-        self._thrust_ric_array = np.zeros((0, 3), dtype=float)
+        max_rows = int(max(self.max_history, 2))
+        self._rel_array = _new_history_ring(6, max_rows)
+        self._target_rel_array = _new_history_ring(6, max_rows)
+        self._target_reference_rel_array = _new_history_ring(6, max_rows)
+        self._target_eci_array = _new_history_ring(6, max_rows)
+        self._chaser_eci_array = _new_history_ring(6, max_rows)
+        self._thrust_ric_array = _new_history_ring(3, max_rows)
         self.mean_motion_rad_s = None
         self.reference_state_eci = None
         self.target_orbit_reference_state_eci = None
@@ -423,9 +476,10 @@ class PygameRPODashboard:
             cache[cache_id] = scaled
         rect = scaled.get_rect(center=center)
         self.screen.blit(scaled, rect)
-        dot_radius = 2 if int(sprite_size) < 30 else 3
-        pygame.draw.circle(self.screen, (235, 248, 255), center, dot_radius)
-        pygame.draw.circle(self.screen, color, center, dot_radius + 2, width=1)
+        dot_radius, ring_radius = _satellite_marker_reticle_radii_px(int(sprite_size))
+        if dot_radius > 0 and ring_radius > 0:
+            pygame.draw.circle(self.screen, (235, 248, 255), center, dot_radius)
+            pygame.draw.circle(self.screen, color, center, ring_radius, width=1)
 
     def reset_briefing_scroll(self) -> None:
         self.briefing_scroll_px = 0
@@ -500,9 +554,9 @@ class PygameRPODashboard:
         if not hasattr(self, "chaser_eci_hist"):
             self.chaser_eci_hist = []
         if not hasattr(self, "_target_eci_array"):
-            self._target_eci_array = np.zeros((0, 6), dtype=float)
+            self._target_eci_array = _new_history_ring(6, int(max(self.max_history, 2)))
         if not hasattr(self, "_chaser_eci_array"):
-            self._chaser_eci_array = np.zeros((0, 6), dtype=float)
+            self._chaser_eci_array = _new_history_ring(6, int(max(self.max_history, 2)))
         self.target_eci_hist.append(target_state_eci.astype(float))
         self.chaser_eci_hist.append(chaser_state_eci.astype(float))
         thrust = snapshot.applied_thrust.get(self.chaser_object_id, np.zeros(3, dtype=float))
@@ -549,7 +603,7 @@ class PygameRPODashboard:
             max_rows=int(max(self.max_history, 2)),
         )
         self._target_reference_rel_array = _history_array_tail(
-            getattr(self, "_target_reference_rel_array", np.zeros((0, 6), dtype=float)),
+            getattr(self, "_target_reference_rel_array", _new_history_ring(6, int(max(self.max_history, 2)))),
             target_reference_rel,
             width=6,
             max_rows=int(max(self.max_history, 2)),
@@ -592,6 +646,7 @@ class PygameRPODashboard:
         debrief_lines: tuple[str, ...] = (),
         debrief_available: bool = True,
         render_motion: bool = False,
+        pause_overlay: bool = False,
     ) -> None:
         pygame = self.pygame
         if self.closed:
@@ -627,6 +682,8 @@ class PygameRPODashboard:
         )
         if briefing_lines:
             self._draw_briefing(briefing_lines)
+        elif bool(pause_overlay) and mission_state == "active":
+            self._draw_pause_overlay()
         if mission_state in {"passed", "failed"}:
             self._draw_mission_banner(
                 mission_state,
@@ -955,7 +1012,7 @@ class PygameRPODashboard:
         ghost = self._frame_cache.get("ghost")
         if ghost is None:
             ghost = self._coast_prediction()
-        tutorial_path = np.array(getattr(self, "tutorial_target_path_ric", np.empty((0, 6))), dtype=float)
+        tutorial_path = np.asarray(self._frame_cache.get("tutorial_path_sample", np.empty((0, 6))), dtype=float)
         if tutorial_path.ndim != 2 or tutorial_path.shape[1] < 3:
             tutorial_path = np.empty((0, 6), dtype=float)
         target_ghost = self._frame_cache.get("target_ghost")
@@ -1007,6 +1064,17 @@ class PygameRPODashboard:
             x_axis=x_axis,
             y_axis=y_axis,
         )
+        pixel_cache = self._frame_cache.setdefault("pixel_polyline_cache", {})
+        transform_key = (
+            int(x_axis),
+            int(y_axis),
+            int(plot.centerx),
+            int(plot.centery),
+            round(float(scale_x), 12),
+            round(float(scale_y), 12),
+            tuple(round(float(value), 12) for value in camera_center.reshape(3)),
+        )
+
         def to_px(point: np.ndarray) -> tuple[int, int]:
             shifted = np.array(point, dtype=float).reshape(-1)[:3] - camera_center
             x = float(shifted[x_axis])
@@ -1015,14 +1083,23 @@ class PygameRPODashboard:
             py = plot.centery - int(round(y * scale_y))
             return px, py
 
-        def rows_to_px(rows: np.ndarray) -> list[tuple[int, int]]:
-            arr = np.array(rows, dtype=float).reshape(-1, rows.shape[-1] if hasattr(rows, "shape") else 3)
+        def rows_to_px(rows: np.ndarray, cache_key: str = "") -> list[tuple[int, int]]:
+            arr = np.asarray(rows, dtype=float).reshape(-1, rows.shape[-1] if hasattr(rows, "shape") else 3)
             if arr.shape[1] < 3:
                 return []
+            key = None
+            if cache_key:
+                key = (cache_key, transform_key, id(rows), arr.shape)
+                cached_points = pixel_cache.get(key)
+                if cached_points is not None:
+                    return cached_points
             shifted = arr[:, :3] - camera_center.reshape(1, 3)
             px = np.rint(plot.centerx + shifted[:, int(x_axis)] * scale_x).astype(int)
             py = np.rint(plot.centery - shifted[:, int(y_axis)] * scale_y).astype(int)
-            return list(zip(px.tolist(), py.tolist()))
+            points = list(zip(px.tolist(), py.tolist()))
+            if key is not None:
+                pixel_cache[key] = points
+            return points
 
         def circle_rect(center: tuple[int, int], radius_km: float) -> Any:
             rx = max(1, int(round(float(radius_km) * scale_x)))
@@ -1092,16 +1169,16 @@ class PygameRPODashboard:
                     circle_rect(center, float(self.hard_speed_limit_radius_km)),
                     width=2,
                 )
-        for boundary in nmt_bounds:
+        for boundary_index, boundary in enumerate(nmt_bounds):
             if boundary.size:
-                boundary_pts = rows_to_px(boundary)
+                boundary_pts = rows_to_px(boundary, cache_key=f"nmt_boundary:{boundary_index}")
                 if len(boundary_pts) >= 2:
                     pygame.draw.lines(self.screen, (78, 178, 112), True, boundary_pts, width=2)
         if _should_draw_nominal_nmt(nmt, nmt_bounds):
-            nmt_pts = rows_to_px(nmt)
+            nmt_pts = rows_to_px(nmt, cache_key="nmt")
             self._draw_polyline_dashed(nmt_pts, color=(120, 236, 154), dash_px=18, gap_px=14, width=2)
         if tutorial_path.size:
-            tutorial_pts = rows_to_px(_sample_rows(tutorial_path, MAX_GHOST_DRAW_POINTS))
+            tutorial_pts = rows_to_px(tutorial_path, cache_key="tutorial_path")
             self._draw_polyline_dashed(tutorial_pts, color=(92, 240, 132), dash_px=16, gap_px=8, width=3)
         pygame.draw.line(self.screen, (90, 104, 124), (plot.left, plot.centery), (plot.right, plot.centery), width=1)
         pygame.draw.line(self.screen, (90, 104, 124), (plot.centerx, plot.top), (plot.centerx, plot.bottom), width=1)
@@ -1109,19 +1186,19 @@ class PygameRPODashboard:
         target_px = to_px(target_current)
         target_ghost_sample = self._frame_cache.get("target_ghost_sample", target_ghost)
         if bool(getattr(self, "show_target_coast_prediction", False)) and target_ghost_sample.size:
-            target_ghost_pts = rows_to_px(target_ghost_sample)
+            target_ghost_pts = rows_to_px(target_ghost_sample, cache_key="target_ghost")
             self._draw_polyline_dashed(target_ghost_pts, color=COAST_PREDICTION_COLOR, dash_px=10, gap_px=7, width=2)
         target_trail_rows = self._frame_cache.get("target_trail", target_rel[-self.max_history :])
         if target_trail_rows.size and len(target_trail_rows) >= 2:
-            target_trail = rows_to_px(target_trail_rows)
+            target_trail = rows_to_px(target_trail_rows, cache_key="target_trail")
             pygame.draw.lines(self.screen, TARGET_TRAIL_COLOR, False, target_trail, width=2)
         self._draw_satellite_marker(target_px, role="target", scale_x=scale_x, scale_y=scale_y, fallback_radius_px=6)
 
         trail_rows = self._frame_cache.get("rel_trail", rel[-self.max_history :])
-        trail = rows_to_px(trail_rows)
+        trail = rows_to_px(trail_rows, cache_key="rel_trail")
         ghost_sample = self._frame_cache.get("ghost_sample", ghost)
         if ghost_sample.size:
-            ghost_pts = rows_to_px(ghost_sample)
+            ghost_pts = rows_to_px(ghost_sample, cache_key="ghost")
             ghost_color = (
                 LIVE_BURN_COLOR
                 if bool(self._frame_cache.get("ghost_active_burn", False))
@@ -1526,6 +1603,12 @@ class PygameRPODashboard:
             self._raw_frame_cache = {}
             self._frame_cache_dirty = False
             return
+        if (
+            not bool(getattr(self, "_frame_cache_dirty", True))
+            and getattr(self, "_frame_cache", None)
+            and not bool(getattr(self, "_render_motion_enabled", False))
+        ):
+            return
         raw_cache = getattr(self, "_raw_frame_cache", {})
         if getattr(self, "_frame_cache_dirty", True) or not raw_cache:
             raw_rel = _dashboard_history_array(self, "_rel_array", self.rel_hist, width=6)
@@ -1557,10 +1640,10 @@ class PygameRPODashboard:
                 "nmt_bounds": self._nmt_boundary_points(),
             }
             self._raw_frame_cache = raw_cache
-        raw_rel = np.array(raw_cache["raw_rel"], dtype=float)
-        raw_target_rel = np.array(raw_cache["raw_target_rel"], dtype=float)
-        raw_target_reference_rel = np.array(raw_cache["raw_target_reference_rel"], dtype=float)
-        thrust = np.array(raw_cache["thrust"], dtype=float)
+        raw_rel = np.asarray(raw_cache["raw_rel"], dtype=float)
+        raw_target_rel = np.asarray(raw_cache["raw_target_rel"], dtype=float)
+        raw_target_reference_rel = np.asarray(raw_cache["raw_target_reference_rel"], dtype=float)
+        thrust = np.asarray(raw_cache["thrust"], dtype=float)
         rel = self._visual_state_rows(raw_rel)
         target_rel = self._visual_state_rows(raw_target_rel)
         target_reference_rel = self._visual_state_rows(raw_target_reference_rel)
@@ -1570,6 +1653,11 @@ class PygameRPODashboard:
         ghost_seed = self._live_prediction_seed(raw_rel[-1])
         ghost = self._coast_prediction_from_cached("chaser", ghost_seed, active_burn=active_burn)
         burn_marker_rel = self._burn_marker_rows(rel=rel, thrust=thrust)
+        tutorial_path = np.asarray(getattr(self, "tutorial_target_path_ric", np.empty((0, 6))), dtype=float)
+        if tutorial_path.ndim != 2 or tutorial_path.shape[1] < 3:
+            tutorial_path_sample = np.empty((0, 6), dtype=float)
+        else:
+            tutorial_path_sample = _sample_rows(tutorial_path, MAX_GHOST_DRAW_POINTS)
         self._frame_cache = {
             "rel": rel,
             "target_rel": target_rel,
@@ -1582,14 +1670,16 @@ class PygameRPODashboard:
             "target_ghost_sample": _sample_rows(target_ghost, MAX_GHOST_DRAW_POINTS),
             "rel_trail": _sample_rows(rel[-self.max_history :], MAX_TRAIL_DRAW_POINTS),
             "target_trail": _sample_rows(target_rel[-self.max_history :], MAX_TRAIL_DRAW_POINTS),
+            "tutorial_path_sample": tutorial_path_sample,
             "burn_marker_rel": burn_marker_rel,
             "nmt": np.array(raw_cache.get("nmt", np.empty((0, 3))), dtype=float),
             "nmt_bounds": tuple(np.array(row, dtype=float) for row in raw_cache.get("nmt_bounds", ())),
+            "pixel_polyline_cache": {},
         }
         self._frame_cache_dirty = False
 
     def _visual_state_rows(self, rows: np.ndarray) -> np.ndarray:
-        arr = np.array(rows, dtype=float, copy=True)
+        arr = np.asarray(rows, dtype=float)
         if arr.ndim != 2 or arr.shape[0] == 0 or arr.shape[1] < 6:
             return arr
         if not bool(getattr(self, "visual_extrapolation_enabled", True)):
@@ -1599,6 +1689,7 @@ class PygameRPODashboard:
         elapsed_sim_s = self._visual_extrapolation_elapsed_sim_s()
         if elapsed_sim_s <= 0.0:
             return arr
+        arr = arr.copy()
         arr[-1, :3] = arr[-1, :3] + arr[-1, 3:6] * elapsed_sim_s
         return arr
 
@@ -2027,7 +2118,7 @@ class PygameRPODashboard:
             speed_label = f"Active {active_speed:.0f}x  Coast {selected_speed:.0f}x"
         else:
             speed_label = f"Speed {active_speed:.0f}x"
-        footer = f"{speed_label}  Up/Down Speed  Space Pause  R Reset  Esc Level Select"
+        footer = f"{speed_label}  Up/Down  Space Pause  R Reset  Esc Select"
         footer_text = self._fit_text_px(
             footer,
             self.small_font,
@@ -2292,6 +2383,166 @@ class PygameRPODashboard:
         if scrollable:
             return "Scroll/Page  " + str(base_text)
         return str(base_text)
+
+    def _draw_pause_overlay(self) -> None:
+        pygame = self.pygame
+        width, height = self.screen.get_size()
+        rect_w = min(900, max(width - 128, 560))
+        rect_h = min(430, max(height - 152, 340))
+        rect = pygame.Rect(width // 2 - rect_w // 2, height // 2 - rect_h // 2, rect_w, rect_h)
+        pygame.draw.rect(self.screen, (13, 22, 32), rect, border_radius=10)
+        pygame.draw.rect(self.screen, (116, 194, 238), rect, width=2, border_radius=10)
+
+        self._text("PAUSED - RIC MOTION CARD", (rect.x + 28, rect.y + 22), self.large_font, (238, 244, 250))
+        self._text(
+            "Circular-chief HCW intuition for the local RIC frame.",
+            (rect.x + 30, rect.y + 58),
+            self.small_font,
+            (170, 205, 230),
+        )
+
+        column_gap = 28
+        left_w = max((rect.width - 76 - column_gap) // 2, 240)
+        left_x = rect.x + 30
+        right_x = left_x + left_w + column_gap
+        section_y = rect.y + 94
+
+        self._draw_pause_text_section(
+            "HCW Equations",
+            self._pause_overlay_equation_lines(),
+            x=left_x,
+            y=section_y,
+            width_px=left_w,
+        )
+        takeaway_y = section_y + 138
+        self._draw_pause_text_section(
+            "Useful Intuition",
+            self._pause_overlay_takeaway_lines(),
+            x=left_x,
+            y=takeaway_y,
+            width_px=left_w,
+        )
+
+        diagram = pygame.Rect(right_x, section_y, rect.right - right_x - 30, rect.height - 154)
+        self._draw_pause_ric_diagram(diagram)
+        footer = "Space Resume   Up/Down Speed   R Reset   Esc Level Select"
+        self._text(
+            self._fit_text_px(footer, self.font, rect.width - 60, preserve_spaces=True),
+            (rect.x + 30, rect.bottom - 44),
+            self.font,
+            (220, 160, 160),
+        )
+
+    @staticmethod
+    def _pause_overlay_equation_lines() -> tuple[str, ...]:
+        return (
+            "R'' = 3 n² R + 2 n I' + a_R",
+            "I'' = -2 n R' + a_I",
+            "C'' = -n² C + a_C",
+        )
+
+    @staticmethod
+    def _pause_overlay_takeaway_lines() -> tuple[str, ...]:
+        return (
+            "R is radial: up/down from the target orbit.",
+            "I is in-track: ahead/behind along the orbit.",
+            "C is cross-track: out of the orbital plane.",
+            "Burn, then coast. The curve is the lesson.",
+        )
+
+    def _draw_pause_text_section(
+        self,
+        title: str,
+        lines: tuple[str, ...],
+        *,
+        x: int,
+        y: int,
+        width_px: int,
+    ) -> None:
+        self._text(str(title).upper(), (x, y), self.small_font, (150, 205, 245))
+        cursor_y = y + 24
+        for line in lines:
+            for wrapped in self._wrap_text_px(str(line), self.small_font, width_px):
+                self._text(wrapped, (x, cursor_y), self.small_font, (222, 230, 238))
+                cursor_y += 19
+
+    def _draw_pause_ric_diagram(self, rect: Any) -> None:
+        pygame = self.pygame
+        pygame.draw.rect(self.screen, (8, 13, 19), rect, border_radius=8)
+        pygame.draw.rect(self.screen, (72, 92, 116), rect, width=1, border_radius=8)
+        title = self._fit_text_px("Target-Centered RIC Frame", self.small_font, rect.width - 28)
+        self._text(title, (rect.x + 14, rect.y + 14), self.small_font, (170, 184, 204))
+
+        origin = (rect.centerx, rect.centery + 28)
+        axis_len = max(min(rect.width, rect.height) // 4, 58)
+        self._draw_pause_axis(origin, (0, -axis_len), "R", (150, 235, 170), "radial")
+        self._draw_pause_axis(origin, (axis_len + 16, 0), "I", (245, 210, 110), "in-track")
+        self._draw_pause_axis(origin, (-axis_len // 2, axis_len // 2), "C", (150, 205, 245), "cross-track")
+
+        self._draw_satellite_marker(
+            origin,
+            role="target",
+            scale_x=2000.0,
+            scale_y=2000.0,
+            fallback_radius_px=7,
+            force_icon=True,
+        )
+        chaser = (origin[0] - axis_len // 3, origin[1] - axis_len // 3)
+        self._draw_satellite_marker(
+            chaser,
+            role="chaser",
+            scale_x=2000.0,
+            scale_y=2000.0,
+            fallback_radius_px=7,
+            force_icon=True,
+        )
+        pygame.draw.arc(
+            self.screen,
+            (100, 120, 145),
+            pygame.Rect(origin[0] - axis_len, origin[1] - axis_len // 2, axis_len * 2, axis_len),
+            0.2,
+            2.9,
+            width=1,
+        )
+        note = self._fit_text_px(
+            "Target-relative, not straight-line flight.",
+            self.small_font,
+            rect.width - 28,
+        )
+        self._text(note, (rect.x + 14, rect.bottom - 34), self.small_font, (170, 184, 204))
+
+    def _draw_pause_axis(
+        self,
+        origin: tuple[int, int],
+        delta: tuple[int, int],
+        label: str,
+        color: tuple[int, int, int],
+        description: str,
+    ) -> None:
+        pygame = self.pygame
+        end = (int(origin[0] + delta[0]), int(origin[1] + delta[1]))
+        pygame.draw.line(self.screen, color, origin, end, width=3)
+        angle = float(np.arctan2(float(end[1] - origin[1]), float(end[0] - origin[0])))
+        head = 10.0
+        spread = 0.45
+        pygame.draw.polygon(
+            self.screen,
+            color,
+            [
+                end,
+                (
+                    int(round(float(end[0]) - head * np.cos(angle - spread))),
+                    int(round(float(end[1]) - head * np.sin(angle - spread))),
+                ),
+                (
+                    int(round(float(end[0]) - head * np.cos(angle + spread))),
+                    int(round(float(end[1]) - head * np.sin(angle + spread))),
+                ),
+            ],
+        )
+        label_pos = (end[0] + 8, end[1] - 8)
+        self._text(str(label), label_pos, self.font, color)
+        self._text(str(description), (label_pos[0] + 24, label_pos[1] + 2), self.small_font, (205, 216, 230))
 
     def _draw_vector(
         self,
@@ -3538,6 +3789,17 @@ def _satellite_marker_size_px(
     return max(int(round(raw_px)), 1)
 
 
+def _satellite_marker_reticle_radii_px(sprite_size_px: int) -> tuple[int, int]:
+    size = int(max(sprite_size_px, 0))
+    if size <= 0:
+        return 0, 0
+    if size < 24:
+        return 2, 4
+    dot_radius = max(2, min(3, int(round(size * 0.08))))
+    ring_radius = max(dot_radius + 2, min(6, int(round(size * 0.18))))
+    return dot_radius, ring_radius
+
+
 def _cw_forced_state(
     x0: np.ndarray,
     accel_ric_km_s2: np.ndarray,
@@ -3830,20 +4092,15 @@ def _true_anomaly_deg_from_state(state: np.ndarray) -> float | None:
         return None
 
 
-def _history_array_tail(array: np.ndarray, row: np.ndarray, *, width: int, max_rows: int) -> np.ndarray:
+def _history_array_tail(array: Any, row: np.ndarray, *, width: int, max_rows: int) -> Any:
     rows = int(max(max_rows, 1))
-    row_arr = np.asarray(row, dtype=float).reshape(int(width))
-    current = np.asarray(array, dtype=float).reshape(-1, int(width))
-    if current.size == 0:
-        return row_arr.reshape(1, int(width)).copy()
-    if current.shape[0] < rows:
-        return np.concatenate((current, row_arr.reshape(1, int(width))), axis=0)
-    if current.shape[0] > rows:
-        current = current[-rows:, :].copy()
-    if rows > 1:
-        current[:-1, :] = current[1:, :]
-    current[-1, :] = row_arr
-    return current
+    if isinstance(array, _HistoryRingBuffer) and array.width == int(width) and array.max_rows == rows:
+        ring = array
+    else:
+        source = array.rows() if isinstance(array, _HistoryRingBuffer) else array
+        ring = _HistoryRingBuffer.from_rows(source, width=int(width), max_rows=rows)
+    ring.append(row)
+    return ring
 
 
 def _dashboard_history_array(
@@ -3854,6 +4111,8 @@ def _dashboard_history_array(
     width: int,
 ) -> np.ndarray:
     cached = getattr(dashboard, attr_name, None)
+    if isinstance(cached, _HistoryRingBuffer) and cached.width == int(width):
+        return cached.rows()
     if isinstance(cached, np.ndarray) and cached.ndim == 2 and cached.shape[1] == int(width) and cached.size:
         return cached
     if fallback_rows:

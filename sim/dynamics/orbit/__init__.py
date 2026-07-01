@@ -57,7 +57,19 @@ from sim.dynamics.orbit.epoch import (
     sun_position_eci_km_enhanced,
     sun_position_eci_km_simple,
 )
-from sim.dynamics.orbit.frames import teme_to_eci_matrix_vallado_iau80, teme_to_eci_vallado_iau80
+from sim.dynamics.orbit.frames import (
+    FRAME_MODEL_IAU76_80_EOP,
+    FRAME_MODEL_SIMPLE_GMST,
+    FrameContext,
+    frame_context_from_environment,
+    frame_context_from_mapping,
+    normalize_frame_model,
+    rotation_between,
+    teme_to_eci_matrix_vallado_iau80,
+    teme_to_eci_vallado_iau80,
+    transform_position,
+    transform_state,
+)
 from sim.dynamics.orbit.ogp import (
     OGP_DEEP_SPACE_PERIOD_THRESHOLD_MIN,
     ogp_propagate_teme,
@@ -133,6 +145,15 @@ __all__ = [
     "resolved_jd_utc",
     "resolve_sun_moon_positions",
     "resolve_time_dependent_env",
+    "FRAME_MODEL_IAU76_80_EOP",
+    "FRAME_MODEL_SIMPLE_GMST",
+    "FrameContext",
+    "frame_context_from_environment",
+    "frame_context_from_mapping",
+    "normalize_frame_model",
+    "rotation_between",
+    "transform_position",
+    "transform_state",
     "teme_to_eci_matrix_vallado_iau80",
     "teme_to_eci_vallado_iau80",
     "OGP_DEEP_SPACE_PERIOD_THRESHOLD_MIN",

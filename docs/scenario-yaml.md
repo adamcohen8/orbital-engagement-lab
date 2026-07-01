@@ -238,8 +238,7 @@ TLE example:
 
 ```yaml
 simulator:
-  # Optional. When set, TLE mean anomaly is advanced from the TLE epoch to this
-  # Julian date using two-body mean motion.
+  # Optional. When set, TLE initialization samples OGP at this Julian date.
   initial_jd_utc: 2460310.75
 
 objects:
@@ -267,11 +266,15 @@ that initial epoch. Set `propagate_to_initial_epoch: false` under `tle` to use
 the TLE epoch directly. Set `require_checksum: true` to reject TLE lines with
 invalid checksum digits.
 
-The built-in TLE initializer is dependency-free and converts TLE mean elements
-to an ECI state with a Keplerian/two-body approximation. Subsequent propagation
-uses the configured ONP force model. It does not perform
-OGP-SGP4/general-perturbations propagation or reuse TLE-specific drag/perturbation
-terms.
+The built-in TLE initializer samples OGP (`OGP-SGP4` or `OGP-SDP4`, depending
+on the TLE period) to recover an ECI-compatible initial state. Subsequent
+propagation uses the configured ONP force model; it does not continue as
+catalog-style OGP propagation or reuse TLE-specific drag/perturbation terms.
+The legacy two-body mean-element conversion remains available only by setting
+`initialization_model: keplerian_mean_elements` under `tle`. OGP initialization
+uses `initialization_frame_transform: teme_as_eci` by default; set
+`initialization_frame_transform: teme_to_eci_iau80` to request the deterministic
+Vallado IAU-80 TEME-to-ECI transform for the initial state handoff.
 
 For passive catalog-style propagation from TLEs, use **OGP**, the OEL General
 Propagator family. The current supported OGP model is **OGP-SGP4**, configured
@@ -400,6 +403,8 @@ simulator:
   acceleration:
     mode: "off"
     warmup: false
+  frames:
+    model: "simple_gmst"
   dynamics:
     orbit:
       model: "two_body"
@@ -422,6 +427,29 @@ available optional numeric acceleration for supported kernels, or `numba` to
 request the Numba backend explicitly. Unsupported dynamics combinations fall
 back to the standard Python path. Set `acceleration.warmup: true` to compile
 supported kernels before the run starts.
+
+`simulator.frames` is the scenario-level frame policy for Earth-fixed
+transforms used by ONP force models, ground-station geometry, ground tracks,
+and frame provenance. The default `model: simple_gmst` is the legacy simple
+GMST/Earth-rotation path. For HPOP/MATLAB-style parity studies with local EOP
+data, use:
+
+```yaml
+simulator:
+  frames:
+    model: iau76_80_eop
+    eop_path: validation/High Precision Orbit Propagator_4-2/High Precision Orbit Propagator_4.2.2/EOP-All.txt
+```
+
+Manual `dut1_s`, `xp_arcsec`, `yp_arcsec`, `dat_s`, `ddpsi_rad`, and
+`ddeps_rad` values can be supplied instead of an EOP file for deterministic
+fixtures; any EOP-backed or manual EOP frame setting requires
+`simulator.initial_jd_utc`.
+
+The legacy per-force settings `drag_frame_model`, `drag_eop_path`, and
+`spherical_harmonics.frame_model/eop_path` remain accepted and override the
+scenario-level default for that subsystem. Payload and review output record the
+resolved model, EOP path, and time-scale assumptions in `frame_provenance`.
 
 Single-run object stepping is serial by default. Experimental within-scenario
 object workers can be enabled for parity and profiling runs:

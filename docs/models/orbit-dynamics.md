@@ -107,19 +107,21 @@ the configured Sun geometry and shadow factor; the implementation applies the
 sign convention in `accel_srp` rather than exposing a separate user-facing
 force direction switch.
 
-Frame conversion helpers live in `sim/dynamics/orbit/frames.py`. Some
-perturbation paths can use a simple Earth-rotation model or an HPOP-like frame
-model when epoch and EOP inputs are provided. Public docs should not claim an
-EOP-backed high-precision frame reduction unless the scenario explicitly
-configures the corresponding frame model and data paths.
+Frame conversion helpers live in `sim/dynamics/orbit/frames.py`. Scenario
+YAML can set `simulator.frames.model` to the default `simple_gmst` path or to
+`iau76_80_eop` with an EOP file for HPOP/MATLAB-style parity studies. OEL
+records the resolved model, EOP path, and time-scale assumptions in
+`frame_provenance`; public docs should not claim an EOP-backed high-precision
+frame reduction unless that provenance shows the corresponding frame model and
+data paths.
 
-TLE initialization is separate from propagation. By default, a TLE is converted
-to an initial ECI state with a dependency-free Keplerian/two-body
-approximation; subsequent propagation uses the configured ONP force model.
-Passive catalog-style OGP-SGP4 propagation is available only for objects that
-explicitly set `propagation_method: general` and `general.model: sgp4`, with
-the limitations documented in `docs/scenario-yaml.md` and
-`docs/known-limitations.md`.
+TLE initialization is separate from propagation. By default, OEL samples OGP
+(`OGP-SGP4` or `OGP-SDP4`, depending on the TLE period) to recover an
+ECI-compatible initial state; subsequent propagation uses the configured ONP
+force model. Passive catalog-style OGP propagation is available only for
+objects that explicitly set `propagation_method: general` and
+`general.model: sgp4`, with the limitations documented in
+`docs/scenario-yaml.md` and `docs/known-limitations.md`.
 
 ## Configuration Surface
 

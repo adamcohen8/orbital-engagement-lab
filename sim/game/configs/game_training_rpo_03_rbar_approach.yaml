@@ -7,6 +7,7 @@ metadata:
     --speed-multiple 10`.
   game:
     control_mode: ric_translation
+    level_name: Level 3 - R-Bar Approach
     difficulty: easy
     initial_speed_multiple: 10.0
     speed_multiplier_options:
@@ -28,6 +29,8 @@ metadata:
       100.0: 10.0
     two_rail_speed_control: true
     plot_overlays_in_zoom: false
+    target_sprite_path: rpo_iss_target_sprite.png
+    target_sprite_diameter_km: 0.11
     player_max_accel_km_s2: 1.0e-05
     training:
       enabled: true
@@ -54,7 +57,7 @@ metadata:
         braking pulses before entering the standoff range.
       target_object_id: target
       chaser_object_id: chaser
-      keepout_radius_km: 0.25
+      keepout_radius_km: 0.15
       goal_range_km: 0.75
       max_goal_speed_km_s: 0.0003
       forbidden_regions:
@@ -102,11 +105,11 @@ objects:
       relative_to_target_ric:
         frame: rect
         state:
-        - -7.0
-        - -10.0
+        - -7.5
+        - -15.0
         - 1.0
         - 0.0
-        - 0.013
+        - 0.011
         - 0.0
       attitude_quat_bn:
       - 1.0

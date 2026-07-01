@@ -6,7 +6,7 @@ import numpy as np
 
 from sim.core.models import StateTruth
 from sim.dynamics.orbit.environment import EARTH_RADIUS_KM
-from sim.dynamics.orbit.frames import ecef_to_eci
+from sim.dynamics.orbit.frames import FrameContext, frame_context_from_mapping, transform_position
 from sim.utils.frames import ric_dcm_ir_from_rv
 from sim.utils.quaternion import dcm_to_quaternion_bn, quaternion_to_dcm_bn
 
@@ -117,6 +117,7 @@ class PoseCommandGenerator:
         altitude_km: float = 0.0,
         boresight_body: np.ndarray | None = None,
         up_body: np.ndarray | None = None,
+        frame_context: FrameContext | None = None,
     ) -> np.ndarray:
         """
         Return q_bn that points a boresight to an Earth-fixed lat/lon target.
@@ -132,7 +133,8 @@ class PoseCommandGenerator:
             ],
             dtype=float,
         )
-        r_target_eci = ecef_to_eci(r_ecef, truth.t_s)
+        frame_ctx = frame_context or frame_context_from_mapping({}, source="attitude_pose")
+        r_target_eci = transform_position(r_ecef, "ecef", "eci", t_s=truth.t_s, context=frame_ctx)
         los_eci = r_target_eci - np.array(truth.position_eci_km, dtype=float)
         return _attitude_quat_align_primary(
             truth=truth,

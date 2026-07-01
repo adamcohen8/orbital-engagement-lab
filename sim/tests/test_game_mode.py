@@ -68,6 +68,7 @@ from sim.game.audio import (
 from sim.game.debrief import (
     _active_segments,
     _cumulative_delta_v_m_s,
+    _debrief_display_title,
     _event_timeline,
     _plane_axes,
     game_debrief_path,
@@ -116,8 +117,10 @@ from sim.game.pygame_dashboard import (
     _cw_coast_state,
     _cw_coast_states,
     _cw_forced_state,
+    _dashboard_history_array,
     _elliptic_linear_coast_states,
     _front_loaded_prediction_times,
+    _history_array_tail,
     _linearized_cr3bp_moon_ric_coast_prediction,
     _moon_ric_rect_state_to_cr3bp,
     _nonlinear_cr3bp_moon_ric_coast_prediction,
@@ -125,6 +128,7 @@ from sim.game.pygame_dashboard import (
     _project_moon_rotating_yz_to_plane,
     _ric_primer_stage,
     _sample_rows,
+    _satellite_marker_reticle_radii_px,
     _satellite_marker_size_px,
     _scaled_body_rect_tuple,
     _should_draw_cislunar_moon_background,
@@ -219,6 +223,7 @@ from sim.game.runner import (
     _mission_checklist,
     _mission_metrics,
     _opposing_key_axis,
+    _pause_teaching_overlay_enabled,
     _poll_pygame_input,
     _realtime_steps_due,
     _reset_guided_tutorial_stage_attempt,
@@ -302,6 +307,9 @@ def test_game_launcher_discovers_ordered_training_levels() -> None:
     ]
     assert options[0].title == "Level 0 - Tutorial"
     assert options[1].title == "Level 1 - Relative Orbit"
+    assert options[2].title == "Level 2 - V-Bar Approach"
+    assert options[3].title == "Level 3 - R-Bar Approach"
+    assert options[4].title == "Level 4 - Rendezvous"
     assert options[5].title == "Level 5 - Safe Inspection"
     assert options[0].player_brief
     assert options[0].pass_criteria
@@ -338,6 +346,21 @@ def test_game_launcher_discovers_ordered_training_levels() -> None:
     assert options[14].delta_v_budget_m_s is None
 
 
+@pytest.mark.parametrize(
+    ("config_name", "expected_title"),
+    [
+        ("game_training_rpo_02_vbar_approach.yaml", "RPO Trainer Level 2 - V-Bar Approach Debrief"),
+        ("game_training_rpo_03_rbar_approach.yaml", "RPO Trainer Level 3 - R-Bar Approach Debrief"),
+        ("game_training_rpo_04_rendezvous.yaml", "RPO Trainer Level 4 - Rendezvous Debrief"),
+    ],
+)
+def test_game_debrief_titles_use_level_names_for_levels_2_to_4(config_name: str, expected_title: str) -> None:
+    sim_cfg = SimulationConfig.from_yaml(Path(__file__).resolve().parents[1] / "game" / "configs" / config_name)
+    training_cfg = RPOTrainingConfig.from_metadata(dict(sim_cfg.scenario.metadata or {}))
+
+    assert _debrief_display_title(config=training_cfg, score=object()) == expected_title
+
+
 def test_bonus_cislunar_rendezvous_uses_cr3bp_frame() -> None:
     path = (
         Path(__file__).resolve().parents[2]
@@ -361,15 +384,15 @@ def test_bonus_cislunar_rendezvous_uses_cr3bp_frame() -> None:
     assert (Path(__file__).resolve().parents[1] / "game" / "assets" / _game_target_sprite_path(config)).is_file()
     assert _game_chaser_sprite_diameter_km(config) == pytest.approx(0.05)
     assert _game_target_sprite_diameter_km(config) == pytest.approx(0.12)
-    assert _game_dashboard_fps_cap(config) == pytest.approx(60.0)
-    assert _game_dashboard_high_speed_fps(config) == pytest.approx(60.0)
+    assert _game_dashboard_fps_cap(config) == pytest.approx(45.0)
+    assert _game_dashboard_high_speed_fps(config) == pytest.approx(45.0)
     assert _game_dashboard_high_speed_fps_max_multiple(config) == pytest.approx(100.0)
     assert _dashboard_fps_for_speed(
         100.0,
         fps_cap=_game_dashboard_fps_cap(config),
         high_speed_fps=_game_dashboard_high_speed_fps(config),
         high_speed_fps_max_multiple=_game_dashboard_high_speed_fps_max_multiple(config),
-    ) == pytest.approx(60.0)
+    ) == pytest.approx(45.0)
     assert _dashboard_fps_for_speed(
         2000.0,
         fps_cap=_game_dashboard_fps_cap(config),
@@ -491,6 +514,23 @@ def test_bonus_cislunar_rendezvous_uses_cr3bp_frame() -> None:
         - np.array(snapshot.truth["target"], dtype=float).reshape(-1)[:3]
     )
     assert target_motion > 0.0
+
+
+def test_level3_rbar_approach_uses_iss_target_sprite() -> None:
+    path = (
+        Path(__file__).resolve().parents[2]
+        / "sim"
+        / "game"
+        / "configs"
+        / "game_training_rpo_03_rbar_approach.yaml"
+    )
+    config = SimulationConfig.from_yaml(path)
+    sprite_path = _game_target_sprite_path(config)
+
+    assert sprite_path == Path("rpo_iss_target_sprite.png")
+    assert (Path(__file__).resolve().parents[1] / "game" / "assets" / sprite_path).is_file()
+    assert _game_target_sprite_diameter_km(config) == pytest.approx(0.11)
+    assert RPOTrainingConfig.from_metadata(dict(config.scenario.metadata or {})).keepout_radius_km == pytest.approx(0.15)
 
 
 def test_cr3bp_large_l1_halo_seed_is_available_for_cislunar_game() -> None:
@@ -1295,11 +1335,61 @@ def test_game_debrief_writer_exports_summary_and_replay(tmp_path: Path) -> None:
     assert (out.parent / "plots" / "ric_2d_plots.png").exists()
     assert (out.parent / "plots" / "mission_timeline.png").exists()
     assert "Pass/Failure" in out.read_text(encoding="utf-8")
+    assert "# Unit Debrief" in out.read_text(encoding="utf-8")
     assert "## Event Timeline" not in out.read_text(encoding="utf-8")
     assert "![Mission Timeline](plots/mission_timeline.png)" in out.read_text(encoding="utf-8")
     assert "![2D RIC Plots](plots/ric_2d_plots.png)" in out.read_text(encoding="utf-8")
     assert payload["replay"]["time_s"] == [0.0]
     assert payload["replay"]["relative_ric"][0][:3] == pytest.approx([0.0, -0.2, 0.0])
+
+
+def test_game_debrief_header_uses_rpo_trainer_level_name(tmp_path: Path) -> None:
+    sim_cfg = SimulationConfig.from_yaml(
+        Path(__file__).resolve().parents[1] / "game" / "configs" / "game_training_rpo_06_sun_angle_inspection.yaml"
+    )
+    cfg = RPOTrainingConfig.from_metadata(dict(sim_cfg.scenario.metadata or {}))
+    score = type(
+        "Score",
+        (),
+        {
+            "scenario_id": cfg.scenario_id,
+            "learning_goal": cfg.learning_goal,
+            "samples": 1,
+            "elapsed_s": 0.0,
+            "closest_approach_km": 1.0,
+            "final_range_km": 1.0,
+            "final_goal_error_km": 1.0,
+            "final_relative_speed_km_s": 0.0,
+            "time_inside_keepout_s": 0.0,
+            "approximate_delta_v_m_s": 0.0,
+            "level_passed": True,
+            "level_failed": False,
+            "pass_fail_reasons": ("All pass criteria satisfied.",),
+        },
+    )()
+    out = write_game_debrief(
+        game_debrief_path(
+            scenario_id=cfg.scenario_id,
+            difficulty="easy",
+            attempt_index=1,
+            output_dir=tmp_path,
+            timestamp=datetime(2026, 5, 22, 12, 0, 0),
+        ),
+        config=cfg,
+        score=score,
+        difficulty="easy",
+        objective_checklist=(),
+        replay_history={
+            "time_s": [0.0],
+            "relative_ric": [[0.0, 0.0, 0.0, 0.0, 0.0, 0.0]],
+            "chaser_thrust_ric_km_s2": [[0.0, 0.0, 0.0]],
+        },
+    )
+    payload = yaml.safe_load((out.parent / "summary.json").read_text(encoding="utf-8"))
+
+    assert cfg.level_name == "Level 6 - Sun-Angle Inspection"
+    assert payload["display_title"] == "RPO Trainer Level 6 - Sun-Angle Inspection Debrief"
+    assert out.read_text(encoding="utf-8").startswith("# RPO Trainer Level 6 - Sun-Angle Inspection Debrief\n")
 
 
 def test_tracker_replay_history_uses_array_backed_replay_stream() -> None:
@@ -6102,6 +6192,8 @@ def test_attitude_or_thrust_input_above_control_speed_drops_to_control_speed() -
 def test_dashboard_fps_drops_at_high_speed_unless_recording() -> None:
     assert _dashboard_fps_for_speed(10.0) == 60.0
     assert _dashboard_fps_for_speed(10.0, fps_cap=30.0) == 30.0
+    assert _dashboard_fps_for_speed(10.0, static_screen=True) == game_runner.STATIC_DASHBOARD_FPS
+    assert _dashboard_fps_for_speed(100.0, static_screen=True, high_speed_fps=60.0) == game_runner.STATIC_DASHBOARD_FPS
     assert _dashboard_fps_for_speed(50.0) == 45.0
     assert _dashboard_fps_for_speed(100.0) == 30.0
     assert _dashboard_fps_for_speed(200.0) == 30.0
@@ -6949,6 +7041,42 @@ def test_mission_banner_scroll_footer_stays_compact() -> None:
     assert len(footer) < 48
 
 
+def test_pause_overlay_teaches_hcw_and_ric_frame() -> None:
+    equations = PygameRPODashboard._pause_overlay_equation_lines()
+    takeaways = PygameRPODashboard._pause_overlay_takeaway_lines()
+
+    assert "R'' = 3 n² R + 2 n I' + a_R" in equations
+    assert "I'' = -2 n R' + a_I" in equations
+    assert "C'' = -n² C + a_C" in equations
+    assert any("R is radial" in line for line in takeaways)
+    assert any("I is in-track" in line for line in takeaways)
+    assert any("C is cross-track" in line for line in takeaways)
+
+
+def test_pause_teaching_overlay_skips_guided_tutorial_prompts() -> None:
+    training_cfg = RPOTrainingConfig(
+        enabled=True,
+        scenario_id="rpo_00_tutorial",
+        guided_tutorial_burns=(
+            GuidedTutorialBurnConfig(name="radial", axis="radial", sign=1, delta_v_m_s=0.01),
+        ),
+    )
+    runtime = game_runner.GuidedTutorialRuntime()
+
+    assert _pause_teaching_overlay_enabled(game_runner.GamePhase.PAUSED, training_cfg, runtime) is False
+    assert _pause_teaching_overlay_enabled(
+        game_runner.GamePhase.PAUSED,
+        replace(training_cfg, guided_tutorial_burns=()),
+        runtime,
+    )
+    runtime.awaiting_speed_step = True
+    assert _pause_teaching_overlay_enabled(
+        game_runner.GamePhase.PAUSED,
+        replace(training_cfg, guided_tutorial_burns=()),
+        runtime,
+    ) is False
+
+
 def test_elliptic_linear_coast_matches_hcw_for_circular_chief() -> None:
     rel0 = np.array([0.1, -1.0, 0.2, 0.0, 0.001, -0.001], dtype=float)
     chief = np.array([7000.0, 0.0, 0.0, 0.0, np.sqrt(398600.4418 / 7000.0), 0.0], dtype=float)
@@ -7207,7 +7335,16 @@ def test_satellite_marker_size_uses_physical_plot_scale() -> None:
     assert _satellite_marker_size_px(5000.0, 5000.0) == 30
     assert _satellite_marker_size_px(100000.0, 100000.0) == 600
     assert _satellite_marker_size_px(100.0, 100.0, diameter_km=0.05) == 5
+    assert _satellite_marker_size_px(100.0, 100.0, diameter_km=0.11) == 11
     assert _satellite_marker_size_px(100.0, 100.0, diameter_km=0.12) == 12
+
+
+def test_satellite_marker_reticle_scales_with_sprite_size() -> None:
+    assert _satellite_marker_reticle_radii_px(0) == (0, 0)
+    assert _satellite_marker_reticle_radii_px(5) == (2, 4)
+    assert _satellite_marker_reticle_radii_px(11) == (2, 4)
+    assert _satellite_marker_reticle_radii_px(20) == (2, 4)
+    assert _satellite_marker_reticle_radii_px(60) == (3, 6)
 
 
 def test_dashboard_vectors_match_web_preview_scaling() -> None:
@@ -7379,6 +7516,61 @@ def test_dashboard_frame_cache_reuses_raw_predictions_between_visual_frames() ->
     assert first_latest == pytest.approx([1.05, 1.9, 3.15])
     assert dashboard._frame_cache["rel"][-1, :3] == pytest.approx([1.15, 1.7, 3.45])
     assert dashboard._raw_frame_cache["raw_rel"][-1, :3] == pytest.approx([1.0, 2.0, 3.0])
+
+
+def test_dashboard_frame_cache_reuses_prepared_static_frame() -> None:
+    dashboard = object.__new__(PygameRPODashboard)
+    rel = np.array([[1.0, 2.0, 3.0, 0.2, -0.4, 0.6]], dtype=float)
+    target_rel = np.zeros((1, 6), dtype=float)
+    target_reference_rel = np.zeros((1, 6), dtype=float)
+    thrust = np.zeros((1, 3), dtype=float)
+    dashboard.rel_hist = [rel[0]]
+    dashboard.target_rel_hist = [target_rel[0]]
+    dashboard.target_reference_rel_hist = [target_reference_rel[0]]
+    dashboard.thrust_ric_hist = [thrust[0]]
+    dashboard._rel_array = rel
+    dashboard._target_rel_array = target_rel
+    dashboard._target_reference_rel_array = target_reference_rel
+    dashboard._thrust_ric_array = thrust
+    dashboard.max_history = 900
+    dashboard.burn_marker_threshold_km_s2 = 1.0e-12
+    dashboard._render_motion_enabled = False
+    dashboard.live_prediction_accel_ric_km_s2 = np.zeros(3, dtype=float)
+    dashboard.live_prediction_elapsed_s = 0.0
+    dashboard._frame_cache = {}
+    dashboard._raw_frame_cache = {}
+    dashboard._frame_cache_dirty = True
+    calls = {"ghost": 0}
+
+    def fake_ghost(*_, **__):
+        calls["ghost"] += 1
+        return np.zeros((2, 6), dtype=float)
+
+    dashboard._coast_prediction_from_cached = fake_ghost
+    dashboard._target_coast_prediction = lambda *_: np.empty((0, 6), dtype=float)
+    dashboard._nmt_points = lambda: np.empty((0, 3), dtype=float)
+    dashboard._nmt_boundary_points = lambda: ()
+
+    dashboard._prepare_frame_cache()
+    first_cache = dashboard._frame_cache
+    dashboard._prepare_frame_cache()
+
+    assert calls == {"ghost": 1}
+    assert dashboard._frame_cache is first_cache
+
+
+def test_dashboard_history_array_tail_keeps_chronological_ring_tail() -> None:
+    dashboard = object.__new__(PygameRPODashboard)
+    history: object = np.zeros((0, 6), dtype=float)
+    for idx in range(5):
+        row = np.full(6, float(idx), dtype=float)
+        history = _history_array_tail(history, row, width=6, max_rows=3)
+    dashboard._rel_array = history
+
+    rows = _dashboard_history_array(dashboard, "_rel_array", [], width=6)
+
+    assert rows.shape == (3, 6)
+    assert rows[:, 0].tolist() == [2.0, 3.0, 4.0]
 
 
 def test_dashboard_live_prediction_seed_moves_ghost_without_moving_truth() -> None:

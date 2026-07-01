@@ -43,6 +43,7 @@ from sim.control.orbit.rcs_allocator import RCSAllocationAwareController
 from sim.control.orbit.relative_mpc import RelativeOrbitMPCController
 from sim.control.orbit.ric_pd import RICPDTransferController
 from sim.control.orbit.rmoe import RMOEIfThenController, estimate_rmoes_from_rect_ric
+from sim.control.orbit.scheduled_impulse import ScheduledImpulseController
 from sim.control.orbit.zero_controller import ZeroController
 
 __all__ = [
@@ -90,4 +91,5 @@ __all__ = [
     "RiskThresholdController",
     "RobustMPCController",
     "StochasticPolicyController",
+    "ScheduledImpulseController",
 ]

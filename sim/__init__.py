@@ -74,6 +74,7 @@ _CONTROL_EXPORTS = [
     "SafetyBarrierController",
     "RiskThresholdController",
     "RobustMPCController",
+    "ScheduledImpulseController",
     "StochasticPolicyController",
     "ZeroTorqueController",
     "PoseCommandGenerator",
@@ -203,16 +204,26 @@ _ORBIT_DYNAMICS_EXPORTS = [
 ]
 
 _ESTIMATION_EXPORTS = [
+    "EKFManeuverDetectionConfig",
+    "EKFManeuverDetectionUpdate",
+    "EKFManeuverDetector",
     "OrbitEKFEstimator",
     "OrbitUKFEstimator",
+    "HCWRelativeEKFEstimator",
+    "THRelativeEKFEstimator",
+    "YARelativeEKFEstimator",
     "AttitudeEKFEstimator",
     "JointStateEKFEstimator",
     "JointStateEstimator",
     "AoITrackingEstimator",
     "build_dynamics_od_quality_gates",
     "build_orbit_od_parameter_set",
+    "chi_square_threshold",
     "selected_orbit_od_parameters",
     "solve_dynamics_orbit_determination",
+    "ya_closed_form_propagate_relative_state_and_stm",
+    "ya_closed_form_transition_matrix",
+    "ya_normalized_state_transition_matrix",
 ]
 
 _METRIC_EXPORTS = [

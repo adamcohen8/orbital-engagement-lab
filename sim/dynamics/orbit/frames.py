@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import math
+from dataclasses import asdict, dataclass
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -15,6 +17,174 @@ _J2000 = 2451545.0
 _DAYSEC = 86400.0
 _JULIAN_CENTURY_DAYS = 36525.0
 _DEFAULT_TT_MINUS_UTC_S = 69.184
+
+FRAME_MODEL_SIMPLE_GMST = "simple_gmst"
+FRAME_MODEL_IAU76_80_EOP = "iau76_80_eop"
+
+_FRAME_MODEL_ALIASES = {
+    "": FRAME_MODEL_SIMPLE_GMST,
+    "simple": FRAME_MODEL_SIMPLE_GMST,
+    "simple_gmst": FRAME_MODEL_SIMPLE_GMST,
+    "simple_earth_rotation": FRAME_MODEL_SIMPLE_GMST,
+    "gmst": FRAME_MODEL_SIMPLE_GMST,
+    "inertial_z": FRAME_MODEL_SIMPLE_GMST,
+    "hpop_like": FRAME_MODEL_IAU76_80_EOP,
+    "hpop": FRAME_MODEL_IAU76_80_EOP,
+    "iau76_80_eop": FRAME_MODEL_IAU76_80_EOP,
+    "iau76_fk5_iau80_eop": FRAME_MODEL_IAU76_80_EOP,
+}
+
+
+@dataclass(frozen=True)
+class FrameContext:
+    """Scenario-level frame and time-scale provenance for Earth-fixed transforms."""
+
+    model: str = FRAME_MODEL_SIMPLE_GMST
+    jd_utc_start: float | None = None
+    eop_path: str | None = None
+    time_scale_model: str = "utc_only"
+    tt_minus_utc_s: float = _DEFAULT_TT_MINUS_UTC_S
+    dut1_s: float | None = None
+    xp_arcsec: float | None = None
+    yp_arcsec: float | None = None
+    dat_s: float | None = None
+    ddpsi_rad: float = 0.0
+    ddeps_rad: float = 0.0
+    source: str = "scenario"
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "model", normalize_frame_model(self.model))
+        if self.eop_path in ("",):
+            object.__setattr__(self, "eop_path", None)
+
+    @property
+    def legacy_frame_model(self) -> str:
+        return "hpop_like" if self.model == FRAME_MODEL_IAU76_80_EOP else "simple"
+
+    @property
+    def eop_rotation_available(self) -> bool:
+        return bool(
+            self.model == FRAME_MODEL_IAU76_80_EOP
+            and self.jd_utc_start is not None
+            and (self.eop_path or self.has_manual_eop)
+        )
+
+    @property
+    def has_manual_eop(self) -> bool:
+        return bool(
+            self.dut1_s is not None
+            or self.xp_arcsec is not None
+            or self.yp_arcsec is not None
+            or self.dat_s is not None
+            or float(self.ddpsi_rad) != 0.0
+            or float(self.ddeps_rad) != 0.0
+        )
+
+    def at(self, t_s: float) -> FrameContext:
+        if self.jd_utc_start is None or self.model != FRAME_MODEL_IAU76_80_EOP or not self.eop_path:
+            return self
+        jd_utc = float(self.jd_utc_start) + float(t_s) / _DAYSEC
+        xp_arcsec, yp_arcsec, dut1_s, dat_s = _interp_eop(jd_utc - _MJD0, self.eop_path)
+        return FrameContext(
+            model=self.model,
+            jd_utc_start=self.jd_utc_start,
+            eop_path=self.eop_path,
+            time_scale_model="eop_utc_ut1_tt",
+            tt_minus_utc_s=float(dat_s) + 32.184,
+            dut1_s=float(dut1_s),
+            xp_arcsec=float(xp_arcsec),
+            yp_arcsec=float(yp_arcsec),
+            dat_s=float(dat_s),
+            ddpsi_rad=self.ddpsi_rad,
+            ddeps_rad=self.ddeps_rad,
+            source=self.source,
+        )
+
+    def metadata(self, *, sample_t_s: float = 0.0) -> dict[str, Any]:
+        sampled = self.at(sample_t_s)
+        data = asdict(sampled)
+        data["legacy_frame_model"] = sampled.legacy_frame_model
+        data["sample_t_s"] = float(sample_t_s)
+        data["polar_motion_applied"] = sampled.eop_rotation_available
+        data["nutation_corrections_applied"] = bool(
+            sampled.eop_rotation_available and (float(sampled.ddpsi_rad) != 0.0 or float(sampled.ddeps_rad) != 0.0)
+        )
+        return data
+
+
+def normalize_frame_model(model: Any) -> str:
+    key = str(model or "").strip().lower().replace("-", "_")
+    if key in _FRAME_MODEL_ALIASES:
+        return _FRAME_MODEL_ALIASES[key]
+    choices = ", ".join(sorted(set(_FRAME_MODEL_ALIASES) - {""}))
+    raise ValueError(f"Unsupported frame model {model!r}; expected one of: {choices}.")
+
+
+def _resolve_frame_path(raw_path: Any) -> str | None:
+    if raw_path in (None, ""):
+        return None
+    path = Path(str(raw_path)).expanduser()
+    if not path.is_absolute():
+        path = Path(__file__).resolve().parents[3] / path
+    return str(path.resolve())
+
+
+def frame_context_from_mapping(
+    frames: dict[str, Any] | None,
+    *,
+    jd_utc_start: float | None = None,
+    source: str = "scenario",
+) -> FrameContext:
+    data = dict(frames or {})
+    if jd_utc_start is None and data.get("jd_utc_start") is not None:
+        jd_utc_start = float(data["jd_utc_start"])
+    model = normalize_frame_model(data.get("model", data.get("frame_model", FRAME_MODEL_SIMPLE_GMST)))
+    eop_path = _resolve_frame_path(data.get("eop_path"))
+    tt_minus_raw = data.get("tt_minus_utc_s", _DEFAULT_TT_MINUS_UTC_S)
+    tt_minus_utc_s = _DEFAULT_TT_MINUS_UTC_S if tt_minus_raw is None else float(tt_minus_raw)
+    if data.get("dat_s") is not None:
+        tt_minus_utc_s = float(data["dat_s"]) + 32.184
+    return FrameContext(
+        model=model,
+        jd_utc_start=jd_utc_start,
+        eop_path=eop_path,
+        time_scale_model=str(
+            data.get(
+                "time_scale_model",
+                "eop_utc_ut1_tt" if model == FRAME_MODEL_IAU76_80_EOP and eop_path else "utc_only",
+            )
+        ),
+        tt_minus_utc_s=tt_minus_utc_s,
+        dut1_s=None if data.get("dut1_s") is None else float(data["dut1_s"]),
+        xp_arcsec=None if data.get("xp_arcsec") is None else float(data["xp_arcsec"]),
+        yp_arcsec=None if data.get("yp_arcsec") is None else float(data["yp_arcsec"]),
+        dat_s=None if data.get("dat_s") is None else float(data["dat_s"]),
+        ddpsi_rad=float(data.get("ddpsi_rad", 0.0) or 0.0),
+        ddeps_rad=float(data.get("ddeps_rad", 0.0) or 0.0),
+        source=source,
+    )
+
+
+def frame_context_from_environment(env: dict[str, Any] | None) -> FrameContext:
+    data = dict(env or {})
+    model = data.get("frame_model", data.get("spherical_harmonics_frame_model", data.get("drag_frame_model", "simple")))
+    eop_path = data.get("eop_path", data.get("spherical_harmonics_eop_path", data.get("drag_eop_path")))
+    frames = {
+        "model": model,
+        "eop_path": eop_path,
+        "tt_minus_utc_s": data.get("tt_minus_utc_s", _DEFAULT_TT_MINUS_UTC_S),
+        "dut1_s": data.get("dut1_s"),
+        "xp_arcsec": data.get("xp_arcsec"),
+        "yp_arcsec": data.get("yp_arcsec"),
+        "dat_s": data.get("dat_s"),
+        "ddpsi_rad": data.get("ddpsi_rad", 0.0),
+        "ddeps_rad": data.get("ddeps_rad", 0.0),
+    }
+    return frame_context_from_mapping(
+        frames,
+        jd_utc_start=None if data.get("jd_utc_start") is None else float(data["jd_utc_start"]),
+        source="environment",
+    )
 
 
 def eci_to_ecef_rotation(t_s: float, jd_utc_start: float | None = None) -> np.ndarray:
@@ -155,8 +325,16 @@ def _precession_iau1976_vallado_matrix(jd_tt: float) -> np.ndarray:
     sinz = math.sin(z)
     return np.array(
         [
-            [coszeta * costheta * cosz - sinzeta * sinz, coszeta * costheta * sinz + sinzeta * cosz, coszeta * sintheta],
-            [-sinzeta * costheta * cosz - coszeta * sinz, -sinzeta * costheta * sinz + coszeta * cosz, -sinzeta * sintheta],
+            [
+                coszeta * costheta * cosz - sinzeta * sinz,
+                coszeta * costheta * sinz + sinzeta * cosz,
+                coszeta * sintheta,
+            ],
+            [
+                -sinzeta * costheta * cosz - coszeta * sinz,
+                -sinzeta * costheta * sinz + coszeta * cosz,
+                -sinzeta * sintheta,
+            ],
             [-sintheta * cosz, -sintheta * sinz, costheta],
         ],
         dtype=float,
@@ -193,8 +371,16 @@ def _nutation_iau1980_vallado_matrix(
     nut = np.array(
         [
             [cospsi, costrueeps * sinpsi, sintrueeps * sinpsi],
-            [-coseps * sinpsi, costrueeps * coseps * cospsi + sintrueeps * sineps, sintrueeps * coseps * cospsi - sineps * costrueeps],
-            [-sineps * sinpsi, costrueeps * sineps * cospsi - sintrueeps * coseps, sintrueeps * sineps * cospsi + costrueeps * coseps],
+            [
+                -coseps * sinpsi,
+                costrueeps * coseps * cospsi + sintrueeps * sineps,
+                sintrueeps * coseps * cospsi - sineps * costrueeps,
+            ],
+            [
+                -sineps * sinpsi,
+                costrueeps * sineps * cospsi - sintrueeps * coseps,
+                sintrueeps * sineps * cospsi + costrueeps * coseps,
+            ],
         ],
         dtype=float,
     )
@@ -271,22 +457,52 @@ def _short_nutation_1980_rad(jd_tt: float) -> tuple[float, float]:
     return float(dpsi_arcsec * _ARCSEC_TO_RAD), float(deps_arcsec * _ARCSEC_TO_RAD)
 
 
-def _precession_nutation_matrix_approx(jd_tt: float) -> tuple[np.ndarray, float, float]:
+def _precession_nutation_matrix_approx(
+    jd_tt: float,
+    *,
+    ddpsi_rad: float = 0.0,
+    ddeps_rad: float = 0.0,
+) -> tuple[np.ndarray, float, float]:
     eps = _mean_obliquity_iau1980_rad(jd_tt)
     dpsi, deps = _short_nutation_1980_rad(jd_tt)
+    dpsi += float(ddpsi_rad)
+    deps += float(ddeps_rad)
     precession = _precession_iau1976_matrix(jd_tt)
     nutation = _rx(-(eps + deps)) @ _rz(-dpsi) @ _rx(eps)
     return nutation @ precession, dpsi, eps + deps
 
 
-def apparent_sidereal_time_hpop_like(jd_utc: float, eop_path: str | None = None) -> float:
-    if not eop_path:
+def apparent_sidereal_time_hpop_like(
+    jd_utc: float,
+    eop_path: str | None = None,
+    *,
+    dut1_s: float | None = None,
+    dat_s: float | None = None,
+    tt_minus_utc_s: float | None = None,
+    ddpsi_rad: float = 0.0,
+    ddeps_rad: float = 0.0,
+) -> float:
+    has_manual_eop = any(value is not None for value in (dut1_s, dat_s, tt_minus_utc_s)) or (
+        float(ddpsi_rad) != 0.0 or float(ddeps_rad) != 0.0
+    )
+    if not eop_path and not has_manual_eop:
         return gmst_angle_rad_from_jd(float(jd_utc))
-    mjd_utc = float(jd_utc) - _MJD0
-    _xp_arcsec, _yp_arcsec, dut1_s, dat_s = _interp_eop(mjd_utc, eop_path)
-    jd_ut1 = float(jd_utc) + dut1_s / _DAYSEC
-    jd_tt = float(jd_utc) + (dat_s + 32.184) / _DAYSEC
-    _rbpn, dpsi, true_obliquity = _precession_nutation_matrix_approx(jd_tt)
+    if eop_path:
+        mjd_utc = float(jd_utc) - _MJD0
+        _xp_arcsec, _yp_arcsec, dut1_s, dat_s = _interp_eop(mjd_utc, eop_path)
+    else:
+        dut1_s = 0.0 if dut1_s is None else float(dut1_s)
+        if dat_s is None:
+            dat_s = (float(tt_minus_utc_s) if tt_minus_utc_s is not None else _DEFAULT_TT_MINUS_UTC_S) - 32.184
+        else:
+            dat_s = float(dat_s)
+    jd_ut1 = float(jd_utc) + float(dut1_s) / _DAYSEC
+    jd_tt = float(jd_utc) + (float(dat_s) + 32.184) / _DAYSEC
+    _rbpn, dpsi, true_obliquity = _precession_nutation_matrix_approx(
+        jd_tt,
+        ddpsi_rad=ddpsi_rad,
+        ddeps_rad=ddeps_rad,
+    )
     return float((gmst_angle_rad_from_jd(jd_ut1) + dpsi * math.cos(true_obliquity)) % (2.0 * math.pi))
 
 
@@ -294,6 +510,9 @@ def precession_nutation_rotation_hpop_like(
     t_s: float,
     jd_utc_start: float | None = None,
     eop_path: str | None = None,
+    *,
+    ddpsi_rad: float = 0.0,
+    ddeps_rad: float = 0.0,
 ) -> np.ndarray:
     if jd_utc_start is None or not eop_path:
         return np.eye(3, dtype=float)
@@ -301,7 +520,11 @@ def precession_nutation_rotation_hpop_like(
     mjd_utc = jd_utc - _MJD0
     _xp_arcsec, _yp_arcsec, _dut1_s, dat_s = _interp_eop(mjd_utc, eop_path)
     jd_tt = jd_utc + (dat_s + 32.184) / _DAYSEC
-    rbpn, _dpsi, _true_obliquity = _precession_nutation_matrix_approx(jd_tt)
+    rbpn, _dpsi, _true_obliquity = _precession_nutation_matrix_approx(
+        jd_tt,
+        ddpsi_rad=ddpsi_rad,
+        ddeps_rad=ddeps_rad,
+    )
     return rbpn
 
 
@@ -313,19 +536,130 @@ def eci_to_ecef_rotation_hpop_like(
     t_s: float,
     jd_utc_start: float | None = None,
     eop_path: str | None = None,
+    *,
+    dut1_s: float | None = None,
+    xp_arcsec: float | None = None,
+    yp_arcsec: float | None = None,
+    dat_s: float | None = None,
+    tt_minus_utc_s: float | None = None,
+    ddpsi_rad: float = 0.0,
+    ddeps_rad: float = 0.0,
 ) -> np.ndarray:
-    if jd_utc_start is None or not eop_path:
+    has_manual_eop = any(value is not None for value in (dut1_s, xp_arcsec, yp_arcsec, dat_s)) or (
+        float(ddpsi_rad) != 0.0 or float(ddeps_rad) != 0.0
+    )
+    if jd_utc_start is None or (not eop_path and not has_manual_eop):
         return eci_to_ecef_rotation(t_s, jd_utc_start=jd_utc_start)
 
     jd_utc = float(jd_utc_start) + float(t_s) / 86400.0
-    mjd_utc = jd_utc - _MJD0
-    xp_arcsec, yp_arcsec, dut1_s, dat_s = _interp_eop(mjd_utc, eop_path)
-    jd_tt = jd_utc + (dat_s + 32.184) / _DAYSEC
-    rbpn, dpsi, true_obliquity = _precession_nutation_matrix_approx(jd_tt)
-    jd_ut1 = jd_utc + dut1_s / _DAYSEC
+    if eop_path:
+        mjd_utc = jd_utc - _MJD0
+        xp_arcsec, yp_arcsec, dut1_s, dat_s = _interp_eop(mjd_utc, eop_path)
+    else:
+        xp_arcsec = 0.0 if xp_arcsec is None else float(xp_arcsec)
+        yp_arcsec = 0.0 if yp_arcsec is None else float(yp_arcsec)
+        dut1_s = 0.0 if dut1_s is None else float(dut1_s)
+        if dat_s is None:
+            dat_s = (float(tt_minus_utc_s) if tt_minus_utc_s is not None else _DEFAULT_TT_MINUS_UTC_S) - 32.184
+        else:
+            dat_s = float(dat_s)
+    jd_tt = jd_utc + (float(dat_s) + 32.184) / _DAYSEC
+    rbpn, dpsi, true_obliquity = _precession_nutation_matrix_approx(
+        jd_tt,
+        ddpsi_rad=ddpsi_rad,
+        ddeps_rad=ddeps_rad,
+    )
+    jd_ut1 = jd_utc + float(dut1_s) / _DAYSEC
     gast = float((gmst_angle_rad_from_jd(jd_ut1) + dpsi * math.cos(true_obliquity)) % (2.0 * math.pi))
     sp = -47.0e-6 * ((jd_tt - _J2000) / _JULIAN_CENTURY_DAYS) * _ARCSEC_TO_RAD
-    return _polar_motion_matrix(xp_arcsec * _ARCSEC_TO_RAD, yp_arcsec * _ARCSEC_TO_RAD, sp) @ _rz(gast) @ rbpn
+    return _polar_motion_matrix(float(xp_arcsec) * _ARCSEC_TO_RAD, float(yp_arcsec) * _ARCSEC_TO_RAD, sp) @ _rz(gast) @ rbpn
+
+
+def eci_to_ecef_rotation_context(t_s: float, context: FrameContext) -> np.ndarray:
+    ctx = context.at(t_s)
+    if ctx.model == FRAME_MODEL_IAU76_80_EOP:
+        if ctx.eop_path and ctx.jd_utc_start is None:
+            raise ValueError("IAU76/80 EOP frame rotation requires simulator.initial_jd_utc when eop_path is set.")
+        if ctx.has_manual_eop and ctx.jd_utc_start is None:
+            raise ValueError("IAU76/80 manual EOP frame rotation requires simulator.initial_jd_utc.")
+        return eci_to_ecef_rotation_hpop_like(
+            t_s,
+            jd_utc_start=ctx.jd_utc_start,
+            eop_path=ctx.eop_path,
+            dut1_s=ctx.dut1_s,
+            xp_arcsec=ctx.xp_arcsec,
+            yp_arcsec=ctx.yp_arcsec,
+            dat_s=ctx.dat_s,
+            tt_minus_utc_s=ctx.tt_minus_utc_s,
+            ddpsi_rad=ctx.ddpsi_rad,
+            ddeps_rad=ctx.ddeps_rad,
+        )
+    return eci_to_ecef_rotation(t_s, jd_utc_start=ctx.jd_utc_start)
+
+
+def rotation_between(
+    source_frame: str,
+    target_frame: str,
+    *,
+    t_s: float,
+    context: FrameContext,
+) -> np.ndarray:
+    source = str(source_frame or "").strip().lower()
+    target = str(target_frame or "").strip().lower()
+    if source == target:
+        return np.eye(3, dtype=float)
+    if source == "eci" and target in {"ecef", "itrf"}:
+        return eci_to_ecef_rotation_context(t_s, context)
+    if source in {"ecef", "itrf"} and target == "eci":
+        return eci_to_ecef_rotation_context(t_s, context).T
+    raise ValueError(f"Unsupported frame rotation {source_frame!r} -> {target_frame!r}.")
+
+
+def transform_position(
+    position_km: np.ndarray,
+    source_frame: str,
+    target_frame: str,
+    *,
+    t_s: float,
+    context: FrameContext,
+) -> np.ndarray:
+    return rotation_between(source_frame, target_frame, t_s=t_s, context=context) @ np.array(position_km, dtype=float)
+
+
+def transform_state(
+    position_km: np.ndarray,
+    velocity_km_s: np.ndarray,
+    source_frame: str,
+    target_frame: str,
+    *,
+    t_s: float,
+    context: FrameContext,
+) -> tuple[np.ndarray, np.ndarray]:
+    source = str(source_frame or "").strip().lower()
+    target = str(target_frame or "").strip().lower()
+    pos = np.array(position_km, dtype=float).reshape(3)
+    vel = np.array(velocity_km_s, dtype=float).reshape(3)
+    if source == target:
+        return pos.copy(), vel.copy()
+    if source == "eci" and target in {"ecef", "itrf"}:
+        rot = eci_to_ecef_rotation_context(t_s, context)
+        rot_dot = _eci_to_ecef_rotation_derivative_context(t_s, context)
+        return rot @ pos, rot @ vel + rot_dot @ pos
+    if source in {"ecef", "itrf"} and target == "eci":
+        rot = eci_to_ecef_rotation_context(t_s, context)
+        rot_dot = _eci_to_ecef_rotation_derivative_context(t_s, context)
+        pos_eci = rot.T @ pos
+        vel_eci = rot.T @ (vel - rot_dot @ pos_eci)
+        return pos_eci, vel_eci
+    raise ValueError(f"Unsupported frame state transform {source_frame!r} -> {target_frame!r}.")
+
+
+def _eci_to_ecef_rotation_derivative_context(t_s: float, context: FrameContext) -> np.ndarray:
+    step_s = 0.01
+    t = float(t_s)
+    return (eci_to_ecef_rotation_context(t + step_s, context) - eci_to_ecef_rotation_context(t - step_s, context)) / (
+        2.0 * step_s
+    )
 
 
 def eci_to_ecef_harmonic(
@@ -334,10 +668,28 @@ def eci_to_ecef_harmonic(
     jd_utc_start: float | None = None,
     frame_model: str = "simple",
     eop_path: str | None = None,
+    dut1_s: float | None = None,
+    xp_arcsec: float | None = None,
+    yp_arcsec: float | None = None,
+    dat_s: float | None = None,
+    tt_minus_utc_s: float | None = None,
+    ddpsi_rad: float = 0.0,
+    ddeps_rad: float = 0.0,
 ) -> np.ndarray:
-    model = str(frame_model).strip().lower()
-    if model == "hpop_like":
-        rot = eci_to_ecef_rotation_hpop_like(t_s, jd_utc_start=jd_utc_start, eop_path=eop_path)
+    model = normalize_frame_model(frame_model)
+    if model == FRAME_MODEL_IAU76_80_EOP:
+        rot = eci_to_ecef_rotation_hpop_like(
+            t_s,
+            jd_utc_start=jd_utc_start,
+            eop_path=eop_path,
+            dut1_s=dut1_s,
+            xp_arcsec=xp_arcsec,
+            yp_arcsec=yp_arcsec,
+            dat_s=dat_s,
+            tt_minus_utc_s=tt_minus_utc_s,
+            ddpsi_rad=ddpsi_rad,
+            ddeps_rad=ddeps_rad,
+        )
         return rot @ np.array(r_eci_km, dtype=float)
     return eci_to_ecef(np.array(r_eci_km, dtype=float), t_s, jd_utc_start=jd_utc_start)
 
@@ -348,9 +700,27 @@ def ecef_to_eci_harmonic(
     jd_utc_start: float | None = None,
     frame_model: str = "simple",
     eop_path: str | None = None,
+    dut1_s: float | None = None,
+    xp_arcsec: float | None = None,
+    yp_arcsec: float | None = None,
+    dat_s: float | None = None,
+    tt_minus_utc_s: float | None = None,
+    ddpsi_rad: float = 0.0,
+    ddeps_rad: float = 0.0,
 ) -> np.ndarray:
-    model = str(frame_model).strip().lower()
-    if model == "hpop_like":
-        rot = eci_to_ecef_rotation_hpop_like(t_s, jd_utc_start=jd_utc_start, eop_path=eop_path)
+    model = normalize_frame_model(frame_model)
+    if model == FRAME_MODEL_IAU76_80_EOP:
+        rot = eci_to_ecef_rotation_hpop_like(
+            t_s,
+            jd_utc_start=jd_utc_start,
+            eop_path=eop_path,
+            dut1_s=dut1_s,
+            xp_arcsec=xp_arcsec,
+            yp_arcsec=yp_arcsec,
+            dat_s=dat_s,
+            tt_minus_utc_s=tt_minus_utc_s,
+            ddpsi_rad=ddpsi_rad,
+            ddeps_rad=ddeps_rad,
+        )
         return rot.T @ np.array(r_ecef_km, dtype=float)
     return ecef_to_eci(np.array(r_ecef_km, dtype=float), t_s, jd_utc_start=jd_utc_start)

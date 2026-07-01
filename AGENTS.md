@@ -23,9 +23,8 @@ completed-run inspection, comparison packets, and standard review plots, read
   artifacts as the supported interface.
 - Treat **OGP** as the product name for the **OEL General Propagator**:
   OEL's catalog-style general-perturbations family for TLE/mean-element
-  products. **OGP-SGP4** is the supported near-Earth SGP4 path today.
-  **OGP-SDP4** is planned for future deep-space/resonance support and should
-  not be claimed as available yet.
+  products. **OGP-SGP4** is the supported near-Earth SGP4 path, and
+  **OGP-SDP4** is the supported deep-space/resonance SDP4 path.
 - Treat **ONP** as the product name for the **OEL Numerical Propagator**:
   OEL's configurable numerical propagation path for two-body and
   special-perturbation force-model studies. Use **OGP** for explicit passive

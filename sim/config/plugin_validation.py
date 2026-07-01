@@ -306,14 +306,46 @@ def _validate_initial_state(initial_state: dict[str, Any], path: str) -> list[st
                 "lines",
                 "require_checksum",
                 "propagate_to_initial_epoch",
+                "initialization_model",
+                "initialization_frame_transform",
             }
             unknown_tle_keys = sorted(str(key) for key in tle if str(key) not in allowed_tle_keys)
             if unknown_tle_keys:
                 errs.append(
                     f"{path}.tle has unsupported field(s): {', '.join(unknown_tle_keys)}. "
                     "TLE initial states normally initialize OEL numerical propagation; use object-level "
-                    "propagation_method: general with general.model: sgp4 for passive SGP4 propagation."
+                    "propagation_method: general with general.model: sgp4 for passive OGP propagation."
                 )
+            init_model = tle.get("initialization_model")
+            if init_model is not None:
+                init_model_key = str(init_model or "").strip().lower().replace("-", "_")
+                if init_model_key not in {
+                    "ogp",
+                    "general",
+                    "general_perturbations",
+                    "gp",
+                    "sgp4",
+                    "sdp4",
+                    "ogp_sgp4",
+                    "ogp_sdp4",
+                    "keplerian",
+                    "keplerian_mean_elements",
+                    "mean_elements",
+                    "two_body",
+                    "legacy",
+                }:
+                    errs.append(
+                        f"{path}.tle.initialization_model: must be ogp or keplerian_mean_elements "
+                        f"(got {init_model!r})."
+                    )
+            init_transform = tle.get("initialization_frame_transform")
+            if init_transform is not None:
+                init_transform_key = str(init_transform or "").strip().lower()
+                if init_transform_key not in {"teme_as_eci", "teme_to_eci_iau80"}:
+                    errs.append(
+                        f"{path}.tle.initialization_frame_transform: must be teme_as_eci or "
+                        f"teme_to_eci_iau80 (got {init_transform!r})."
+                    )
     rel_block = raw.get("relative_to_target_ric")
     if rel_block is not None:
         if not isinstance(rel_block, dict):

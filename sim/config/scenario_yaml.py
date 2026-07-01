@@ -118,6 +118,30 @@ class SimulatorExecutionSection(_TypedConfigDict):
         return dict(self.get("runtime_profiler", {}) or {})
 
 
+class SimulatorFramesSection(_TypedConfigDict):
+    _defaults: dict[str, Any] = {
+        "model": "simple_gmst",
+        "eop_path": None,
+        "time_scale_model": "utc_only",
+        "tt_minus_utc_s": None,
+        "dut1_s": None,
+        "xp_arcsec": None,
+        "yp_arcsec": None,
+        "dat_s": None,
+        "ddpsi_rad": 0.0,
+        "ddeps_rad": 0.0,
+    }
+
+    @property
+    def model(self) -> str:
+        return str(self.get("model", "simple_gmst") or "simple_gmst")
+
+    @property
+    def eop_path(self) -> str | None:
+        value = self.get("eop_path")
+        return None if value in (None, "") else str(value)
+
+
 @dataclass(frozen=True)
 class SimulatorSection:
     duration_s: float = 3600.0
@@ -126,6 +150,7 @@ class SimulatorSection:
     resource_profile: str | None = None
     acceleration: SimulatorAccelerationSection = field(default_factory=lambda: SimulatorAccelerationSection())
     execution: SimulatorExecutionSection = field(default_factory=lambda: SimulatorExecutionSection())
+    frames: SimulatorFramesSection = field(default_factory=lambda: SimulatorFramesSection())
     dynamics: SimulatorDynamicsSection = field(default_factory=lambda: SimulatorDynamicsSection())
     environment: SimulatorEnvironmentSection = field(default_factory=lambda: SimulatorEnvironmentSection())
     plugin_validation: SimulatorPluginValidationSection = field(
@@ -136,6 +161,7 @@ class SimulatorSection:
     def __post_init__(self) -> None:
         object.__setattr__(self, "acceleration", SimulatorAccelerationSection(self.acceleration))
         object.__setattr__(self, "execution", SimulatorExecutionSection(self.execution))
+        object.__setattr__(self, "frames", SimulatorFramesSection(self.frames))
         object.__setattr__(self, "dynamics", SimulatorDynamicsSection(self.dynamics))
         object.__setattr__(self, "environment", SimulatorEnvironmentSection(self.environment))
         object.__setattr__(self, "plugin_validation", SimulatorPluginValidationSection(self.plugin_validation))
@@ -1366,12 +1392,48 @@ def _parse_simulator_section(value: Any) -> SimulatorSection:
         resource_profile=_parse_resource_profile(d.get("resource_profile"), "simulator.resource_profile"),
         acceleration=_parse_acceleration_section(d.get("acceleration")),
         execution=_parse_simulator_execution_section(d.get("execution")),
+        frames=_parse_simulator_frames_section(d.get("frames")),
         dynamics=_normalize_reentry_section(dict(d.get("dynamics", {}) or {})),
         environment=dict(d.get("environment", {}) or {}),
         plugin_validation=plugin_validation,
         termination=termination,
     )
+    if str(out.frames.model).strip().lower() in {"iau76_80_eop", "iau76_fk5_iau80_eop", "hpop_like", "hpop"}:
+        manual_eop_keys = ("dut1_s", "xp_arcsec", "yp_arcsec", "dat_s", "ddpsi_rad", "ddeps_rad")
+        has_manual_eop = any(out.frames.get(key) is not None for key in manual_eop_keys)
+        if (out.frames.eop_path is not None or has_manual_eop) and out.initial_jd_utc is None:
+            raise ValueError("simulator.frames EOP settings require simulator.initial_jd_utc for frame rotation.")
     _validate_sim_timing(out)
+    return out
+
+
+def _parse_simulator_frames_section(value: Any) -> dict[str, Any]:
+    raw = _as_dict(value, "simulator.frames")
+    out = dict(raw)
+    model = str(out.get("model", out.get("frame_model", "simple_gmst")) or "simple_gmst").strip().lower()
+    allowed = {
+        "simple",
+        "simple_gmst",
+        "simple_earth_rotation",
+        "gmst",
+        "hpop_like",
+        "hpop",
+        "iau76_80_eop",
+        "iau76_fk5_iau80_eop",
+    }
+    if model not in allowed:
+        raise ValueError(
+            "simulator.frames.model must be one of: simple_gmst, simple_earth_rotation, "
+            "hpop_like, iau76_80_eop."
+        )
+    out["model"] = model
+    for key in ("tt_minus_utc_s", "dut1_s", "xp_arcsec", "yp_arcsec", "dat_s", "ddpsi_rad", "ddeps_rad"):
+        if out.get(key) is not None:
+            out[key] = _parse_float(out.get(key), f"simulator.frames.{key}")
+    if out.get("eop_path") in ("",):
+        out["eop_path"] = None
+    if out.get("time_scale_model") is not None:
+        out["time_scale_model"] = str(out.get("time_scale_model"))
     return out
 
 
