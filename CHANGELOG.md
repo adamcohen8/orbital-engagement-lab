@@ -6,6 +6,49 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.18.0 - 2026-07-01
+
+Release thesis: `v0.18.0` improves the public RPO Trainer classroom-readiness
+surface while expanding public frame, TLE/OGP, RPO estimation, and review-store
+foundations. It keeps batch relative orbit determination, advanced OD, and
+other Pro workflow layers private, with export checks tightened around that
+boundary.
+
+### Added
+
+- Added public RPO estimation comparison material for HCW, numerically
+  integrated TH, closed-form YA STM, and ECI EKF tracks, including validation
+  configs and tests.
+- Added EKF maneuver-detection support and validation coverage for delayed
+  impulse detection.
+- Added public frame-context, EOP-aware orbit-frame, and review-store support
+  needed for stronger propagation, plotting, and evidence workflows.
+- Added RPO Trainer UI support for an in-level pause reference screen,
+  shared game fonts, an ISS-style target sprite, and additional public game
+  training polish.
+
+### Changed
+
+- Updated public OGP/TLE initialization and ground-access examples, docs, and
+  scenario help for the current catalog-style propagation posture.
+- Improved RPO Trainer downloadable-game text rendering, debrief plot layout,
+  RIC plot presentation, level geometry, and target-scaling behavior.
+- Refined Level 3/4 training entries and RPO approach tuning while preserving
+  public-safe game assets and configs.
+- Updated supply-chain/security release posture to `v0.18.0`.
+
+### Fixed
+
+- Fixed debrief report presentation issues including RIC legend contrast,
+  excess plot whitespace, timeline plotting, and watermark/axis-label overlap.
+- Fixed target-reference curvilinear animation handling for generated output
+  tests.
+- Fixed public export drift so relative OD and its docs/tests/configs remain
+  private while public relative EKF estimation remains exported.
+- Fixed private fallback batch least-squares convergence when SciPy is absent
+  by scaling the fallback residual-evaluation budget for finite-difference
+  Jacobians.
+
 ## 0.17.0 - 2026-06-28
 
 Release thesis: `v0.17.0` expands the public OGP/ONP propagation and evidence
