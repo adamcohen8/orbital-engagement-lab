@@ -6,6 +6,32 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.19.1 - 2026-07-05
+
+Release thesis: `v0.19.1` is a focused RPO Trainer polish release for the
+Operator Mode and web-preview paths introduced in `v0.19.0`. It keeps the
+release narrow: more reliable operator playback recording, more predictable
+high-speed burn visualization, and a closer browser preview of the downloadable
+script-planning experience.
+
+### Added
+
+- Added a three-second static Operator Mode script-screen lead-in to full
+  attempt MP4 recordings when recording is enabled before launching the level.
+- Added web-preview operator script plot overlays for planned trajectories,
+  orange burn markers, post-burn velocity vectors, trajectory probing, and
+  cyan time/state readouts.
+
+### Fixed
+
+- Fixed high-speed Operator Mode burn slowdown arming so 500x/1000x playback
+  accounts for the full sim time a rendered frame may consume before crossing
+  a scripted burn.
+- Fixed web-preview operator sandbox script plots to remain target-centered and
+  fixed burn-table editing so a clicked input stays focused while typing.
+- Fixed stale web-preview shell mode classes after returning from gameplay to
+  the level selector.
+
 ## 0.19.0 - 2026-07-05
 
 Release thesis: `v0.19.0` prepares the downloadable RPO Trainer for a more

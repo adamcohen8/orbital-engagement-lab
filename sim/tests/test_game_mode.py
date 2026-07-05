@@ -7187,6 +7187,26 @@ def test_operator_burn_cinematic_arms_near_next_burn_and_caps_speed() -> None:
     assert _operator_burn_cinematic_speed_multiple(5.0, runtime) == pytest.approx(5.0)
 
 
+def test_operator_burn_cinematic_arms_for_high_speed_frame_horizon() -> None:
+    runtime = OperatorBurnCinematicRuntime()
+    provider = type("Provider", (), {"next_burn_time_s": lambda self: 125.0})()
+
+    assert _operator_burn_cinematic_should_arm(provider, current_sim_time_s=100.0, dt_s=10.0) is False
+    _update_operator_burn_cinematic(
+        runtime,
+        provider,
+        now_wall_s=10.0,
+        current_sim_time_s=100.0,
+        dt_s=10.0,
+        frame_horizon_s=30.0,
+    )
+
+    assert runtime.active is True
+    assert _operator_burn_cinematic_speed_multiple(1000.0, runtime, options=(1.0, 10.0, 1000.0)) == pytest.approx(
+        10.0
+    )
+
+
 def test_operator_burn_visual_duration_scales_with_delta_v() -> None:
     assert _operator_burn_visual_duration_s(0.0) == pytest.approx(1.0)
     assert _operator_burn_visual_duration_s(0.5) == pytest.approx(1.1)
