@@ -114,6 +114,13 @@ class DisturbanceTorqueModel:
                 frame_model=str(env.get("drag_frame_model", "inertial_z")),
                 jd_utc_start=env.get("jd_utc_start"),
                 eop_path=env.get("drag_eop_path"),
+                dut1_s=env.get("dut1_s"),
+                xp_arcsec=env.get("xp_arcsec"),
+                yp_arcsec=env.get("yp_arcsec"),
+                dat_s=env.get("dat_s"),
+                tt_minus_utc_s=env.get("tt_minus_utc_s"),
+                ddpsi_rad=float(env.get("ddpsi_rad", 0.0) or 0.0),
+                ddeps_rad=float(env.get("ddeps_rad", 0.0) or 0.0),
             )
             v_rel_eci_m_s = v_rel_eci_km_s * 1e3
             v_norm = np.linalg.norm(v_rel_eci_m_s)

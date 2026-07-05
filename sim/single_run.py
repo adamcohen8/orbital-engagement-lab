@@ -1965,4 +1965,4 @@ def _coerce_noninteractive_for_automation(cfg: SimulationScenarioConfig) -> Simu
     mode = str(outputs.get("mode", "interactive")).strip().lower()
     if mode == "interactive":
         outputs["mode"] = "save"
-    return scenario_config_from_dict(root)
+    return scenario_config_from_dict(root, source_path=getattr(cfg, "source_path", None))

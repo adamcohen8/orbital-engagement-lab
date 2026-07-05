@@ -10,7 +10,7 @@ from typing import Any
 
 import numpy as np
 
-from sim.config import iter_object_sections
+from sim.config import iter_object_sections, relative_reference_for_object
 from sim.plotting.style import get_oel_version
 from sim.utils.frames import eci_relative_to_ric_rect
 
@@ -68,7 +68,7 @@ def write_single_run_review_store(
             _insert_object_state_frame(conn, payload=payload)
             _insert_time_samples(conn, t_s=t_s)
             _insert_object_state(conn, t_s=t_s, truth_hist=truth_hist)
-            _insert_relative_state(conn, t_s=t_s, truth_hist=truth_hist, summary=summary)
+            _insert_relative_state(conn, t_s=t_s, truth_hist=truth_hist, summary=summary, cfg=cfg)
             _insert_thrust(conn, t_s=t_s, thrust_hist=thrust_hist)
             _insert_ground_access(conn, t_s=t_s, payload=payload)
             _insert_events(conn, t_s=t_s, summary=summary, thrust_hist=thrust_hist)
@@ -383,7 +383,7 @@ def _insert_run_metadata(
             _float_or_none(summary.get("dt_s")),
             _int_or_none(summary.get("samples")),
             str(outdir),
-            "",
+            str(summary.get("config_source_path") or ""),
             config_sha256,
             config_json,
             str(outdir / "master_run_summary.json"),
@@ -559,38 +559,63 @@ def _insert_relative_state(
     t_s: np.ndarray,
     truth_hist: dict[str, np.ndarray],
     summary: dict[str, Any],
+    cfg: Any,
 ) -> None:
-    pair = [str(item) for item in list(summary.get("primary_object_pair", []) or [])]
-    if len(pair) != 2:
-        return
-    deputy_id, chief_id = pair
-    deputy = truth_hist.get(deputy_id)
-    chief = truth_hist.get(chief_id)
-    if deputy is None or chief is None or deputy.shape[1] < 6 or chief.shape[1] < 6:
-        return
-    n = int(min(t_s.size, deputy.shape[0], chief.shape[0]))
     rows = []
-    for i in range(n):
-        rel = eci_relative_to_ric_rect(deputy[i, :6], chief[i, :6])
-        rng = float(np.linalg.norm(rel[:3]))
-        range_rate = float(np.dot(rel[:3], rel[3:]) / rng) if rng > 1e-12 else 0.0
-        rows.append(
-            (
-                i,
-                _finite_float(t_s[i]),
-                deputy_id,
-                chief_id,
-                _finite_float(rel[0]),
-                _finite_float(rel[1]),
-                _finite_float(rel[2]),
-                _finite_float(rel[3]),
-                _finite_float(rel[4]),
-                _finite_float(rel[5]),
-                _finite_float(rng),
-                _finite_float(range_rate),
+    for deputy_id, chief_id in _relative_review_pairs(cfg=cfg, truth_hist=truth_hist, summary=summary):
+        deputy = truth_hist.get(deputy_id)
+        chief = truth_hist.get(chief_id)
+        if deputy is None or chief is None or deputy.shape[1] < 6 or chief.shape[1] < 6:
+            continue
+        n = int(min(t_s.size, deputy.shape[0], chief.shape[0]))
+        for i in range(n):
+            rel = eci_relative_to_ric_rect(deputy[i, :6], chief[i, :6])
+            rng = float(np.linalg.norm(rel[:3]))
+            range_rate = float(np.dot(rel[:3], rel[3:]) / rng) if rng > 1e-12 else 0.0
+            rows.append(
+                (
+                    i,
+                    _finite_float(t_s[i]),
+                    deputy_id,
+                    chief_id,
+                    _finite_float(rel[0]),
+                    _finite_float(rel[1]),
+                    _finite_float(rel[2]),
+                    _finite_float(rel[3]),
+                    _finite_float(rel[4]),
+                    _finite_float(rel[5]),
+                    _finite_float(rng),
+                    _finite_float(range_rate),
+                )
             )
-        )
     conn.executemany("INSERT INTO relative_state VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
+
+
+def _relative_review_pairs(
+    *,
+    cfg: Any,
+    truth_hist: dict[str, np.ndarray],
+    summary: dict[str, Any],
+) -> list[tuple[str, str]]:
+    pairs: list[tuple[str, str]] = []
+
+    def add_pair(deputy_id: str, chief_id: str) -> None:
+        pair = (str(deputy_id), str(chief_id))
+        if pair[0] == pair[1] or pair[0] not in truth_hist or pair[1] not in truth_hist:
+            return
+        if pair not in pairs:
+            pairs.append(pair)
+
+    primary = [str(item) for item in list(summary.get("primary_object_pair", []) or [])]
+    if len(primary) == 2:
+        add_pair(primary[0], primary[1])
+
+    for object_id, _section in iter_object_sections(cfg, enabled_only=True):
+        reference_id = relative_reference_for_object(cfg, object_id)
+        if reference_id:
+            add_pair(object_id, reference_id)
+
+    return pairs
 
 
 def _insert_thrust(conn: sqlite3.Connection, *, t_s: np.ndarray, thrust_hist: dict[str, np.ndarray]) -> None:
@@ -945,7 +970,9 @@ def _write_schema_json(path: Path, *, generated_utc: str) -> None:
             "object_state_frame": {"description": "Frame label for each object's state rows, e.g. eci or teme."},
             "time_samples": {"description": "Retained sample times."},
             "object_state": {"description": "Truth state histories by object; join object_state_frame for frame labels."},
-            "relative_state": {"description": "RIC relative state for the primary object pair."},
+            "relative_state": {
+                "description": "RIC relative state for configured/default review object pairs."
+            },
             "thrust": {"description": "Applied acceleration histories by object."},
             "attitude_error": {"description": "Reserved for attitude error histories."},
             "ground_access": {"description": "Ground station access histories."},

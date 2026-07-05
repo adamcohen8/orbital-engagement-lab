@@ -213,12 +213,20 @@ def write_single_run_artifacts(
         artifacts["ground_station_access_reports"] = access_report_paths
     if bridge_outputs:
         artifacts["bridge_extensions"] = bridge_outputs
+    artifacts["output_index_md"] = str(context.outdir / "index.md")
+    if bool(context.cfg.outputs.review.enabled):
+        artifacts["review_store"] = {
+            "sqlite": str(context.outdir / "review" / "run.sqlite"),
+            "schema_json": str(context.outdir / "review" / "schema.json"),
+        }
     review_outputs = _write_review_store(payload=payload, context=context, artifacts=artifacts)
     if review_outputs:
         summary["review_outputs"] = review_outputs
         summary["review_sqlite_path"] = str(review_outputs.get("sqlite") or "")
         payload["review_outputs"] = review_outputs
         artifacts["review_store"] = review_outputs
+    else:
+        artifacts.pop("review_store", None)
     index_path = write_output_index(
         outdir=context.outdir,
         workflow="single_run",
@@ -228,6 +236,7 @@ def write_single_run_artifacts(
     )
     summary["output_index_md"] = str(index_path)
     payload["output_index_md"] = str(index_path)
+    artifacts["output_index_md"] = str(index_path)
     if bool(context.cfg.outputs.stats.get("save_json", True)):
         write_json(str(context.outdir / "master_run_summary.json"), summary)
     if bool(context.cfg.outputs.stats.get("save_full_log", True)):

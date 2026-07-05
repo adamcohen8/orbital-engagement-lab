@@ -21,11 +21,18 @@ const MANEUVER_CONTROL_SPEED = 10;
 const TRAIL_LIMIT = 1200;
 const MIN_PLOT_SPAN_KM = 0.005;
 const PLOT_SCALE_MARGIN = 1.2;
+const OPERATOR_BURN_MAX_DV_M_S = 5;
+const OPERATOR_BURN_SPACING_S = 10;
+const OPERATOR_PREVIEW_POINTS = 240;
+const OPERATOR_TUTORIAL_PLAYBACK_SPEED_MULTIPLE = 200;
+const OPERATOR_TUTORIAL_STAGE_DURATION_S = 3000;
+const OPERATOR_TUTORIAL_BURN_TIME_S = 50;
+const OPERATOR_TUTORIAL_BURN_DELTA_V_M_S = 0.25;
 const SATELLITE_SPRITE_DIAMETER_KM = 0.006;
 const SATELLITE_ICON_SIZE_PX = 20;
 const TARGET_MARKER = "#f55c5c";
 const CHASER_MARKER = "#f5cd5c";
-const BUILD_ID = "mobile-selector-play-2026-06-26";
+const BUILD_ID = "web-preview-review-fixes-2026-07-04";
 const ARCADE_BUILD_ID = `${BUILD_ID}-competition-local`;
 const ARCADE_CHALLENGE_RECORD = buildChallengeRecord(DEFAULT_PURSUIT_CHALLENGE);
 const LEADERBOARD_REFRESH_MS = 30000;
@@ -41,12 +48,18 @@ const MUSIC_TRACKS = {
   arcade: "./assets/21_pursuit_arcade_overdrive_no_siren_demo.wav",
   arcadeBoss: "./assets/28_high_shred_boss_riff.wav",
 };
+const PLAY_MODE_KEY = "oelPreviewPlayMode";
+const FRAME_CONVENTION_KEY = "oelPreviewFrameConvention";
+const PLAY_MODES = ["pilot", "operator"];
+const FRAME_CONVENTIONS = ["oel_default", "space_force"];
 
 const el = {
   shell: document.querySelector(".trainer-shell"),
   levelSelector: document.querySelector("#levelSelector"),
   selectorMusicButton: document.querySelector("#selectorMusicButton"),
   selectorViewButton: document.querySelector("#selectorViewButton"),
+  selectorModeButton: document.querySelector("#selectorModeButton"),
+  selectorFrameButton: document.querySelector("#selectorFrameButton"),
   selectorPreviewTitle: document.querySelector("#selectorPreviewTitle"),
   selectorPreviewBudget: document.querySelector("#selectorPreviewBudget"),
   selectorPreviewObjective: document.querySelector("#selectorPreviewObjective"),
@@ -91,6 +104,14 @@ const el = {
   iMeter: document.querySelector("#iMeter"),
   cMeter: document.querySelector("#cMeter"),
   sandboxPanel: document.querySelector("#sandboxPanel"),
+  operatorPanel: document.querySelector("#operatorPanel"),
+  operatorBurnRows: document.querySelector("#operatorBurnRows"),
+  operatorAddBurn: document.querySelector("#operatorAddBurn"),
+  operatorStatus: document.querySelector("#operatorStatus"),
+  operatorError: document.querySelector("#operatorError"),
+  equationSheet: document.querySelector("#equationSheet"),
+  equationSheetButton: document.querySelector("#equationSheetButton"),
+  equationSheetClose: document.querySelector("#equationSheetClose"),
   presetSelect: document.querySelector("#presetSelect"),
   rangeSlider: document.querySelector("#rangeSlider"),
   driftSlider: document.querySelector("#driftSlider"),
@@ -112,12 +133,18 @@ const levelOptions = [
   {
     id: "tutorial",
     mode: "primer",
-    title: "Level 0 - Tutorial",
+    title: "Level 0 - Pilot Tutorial",
+    operatorTitle: "Level 0 - Operator Tutorial",
     budget: `Time: 18000s   Chaser dV: ${formatSpeedMS(12.0)}   Speed Gate: ${formatSpeedMS(0.3)}`,
+    operatorBudget: `Time: 18000s   Max burn: ${formatSpeedMS(OPERATOR_BURN_MAX_DV_M_S)}   Scripted playback`,
     objective:
       "Learn what R, I, and C mean by creating six small target orbits, then use short pulse-and-coast translations to settle near a passive target.",
+    operatorObjective:
+      "Learn the RIC frame primer, then script impulsive RIC burns and watch the HCW projection execute without live thrust controls.",
     brief:
       "The yellow satellite is you. R is radial, I is in-track, and C is cross-track. The simulation pauses for each guided stage until you hold the requested control.",
+    operatorBrief:
+      "The yellow satellite is you. R is radial, I is in-track, and C is cross-track. After the primer, enter burns by time and R/I/C delta-v, then launch the script.",
     criteria: [
       "Complete the +I and -I guided orbit demonstrations.",
       "After +I, increase the speed multiple to 10x.",
@@ -130,19 +157,44 @@ const levelOptions = [
       "Use short pulses followed by coasting rather than continuous thrust.",
       "RI shows in-track versus radial motion; RC shows cross-track versus radial motion.",
     ],
+    operatorCriteria: [
+      "Complete the RIC frame primer.",
+      `Script burns no larger than ${formatSpeedMS(OPERATOR_BURN_MAX_DV_M_S)} each.`,
+      `Separate burn times by at least ${OPERATOR_BURN_SPACING_S} seconds.`,
+      "Launch the script and compare the playback against the projected path.",
+    ],
+    operatorNotes: [
+      "Operator mode is view-only during playback: plan first, then observe the natural response.",
+      "The preview path is a circular HCW approximation for the browser version.",
+    ],
   },
   {
     id: "sandbox",
     mode: "sandbox",
     title: "Sandbox",
+    operatorTitle: "Operator Sandbox",
     budget: "Time: 20000s",
+    operatorBudget: `Time: 20000s   Max burn: ${formatSpeedMS(OPERATOR_BURN_MAX_DV_M_S)}   Scripted playback`,
     objective: "Experiment with RIC translation controls and relative orbital motion without pass/fail goals.",
+    operatorObjective:
+      "Script impulsive burns from a configurable starting RIC state, then watch the predicted and executed trajectory.",
     brief:
       "Edit the starting RIC state in the setup panel, then maneuver freely. Delta-v used remains visible, but there is no delta-v budget.",
+    operatorBrief:
+      "Edit the starting RIC state in the setup panel before launching operator mode, then build a time-ordered burn script and observe the result.",
     criteria: ["No pass/fail objective; experiment freely."],
+    operatorCriteria: [
+      "No pass/fail objective; experiment freely.",
+      `Each burn must be ${formatSpeedMS(OPERATOR_BURN_MAX_DV_M_S)} or less.`,
+      `Burns must be at least ${OPERATOR_BURN_SPACING_S} seconds apart.`,
+    ],
     notes: [
       "Use this mode to demonstrate how initial relative state changes relative motion.",
       "Circular-orbit HCW prediction is shown for the browser preview.",
+    ],
+    operatorNotes: [
+      "The ghost path updates as the script changes.",
+      "Use Reset during playback to return to the script screen.",
     ],
   },
   {
@@ -229,6 +281,15 @@ const tutorialStages = [
   },
 ];
 
+const operatorTutorialStages = [
+  { id: "plusInTrack", displayLabel: "+I Burn", axis: "i", sign: 1 },
+  { id: "minusInTrack", displayLabel: "-I Burn", axis: "i", sign: -1 },
+  { id: "plusRadial", displayLabel: "+R Burn", axis: "r", sign: 1 },
+  { id: "minusRadial", displayLabel: "-R Burn", axis: "r", sign: -1 },
+  { id: "plusCrossTrack", displayLabel: "+C Burn", axis: "c", sign: 1 },
+  { id: "minusCrossTrack", displayLabel: "-C Burn", axis: "c", sign: -1 },
+];
+
 const primerStages = [
   {
     id: "radial",
@@ -297,6 +358,19 @@ const state = {
   primerStage: 0,
   primerTimeS: 0,
   selectedLevel: 0,
+  playMode: normalizePlayMode(readLocalPreference(PLAY_MODE_KEY) || "pilot"),
+  activePlayMode: "pilot",
+  activeLevelId: "",
+  frameConvention: normalizeFrameConvention(readLocalPreference(FRAME_CONVENTION_KEY) || "oel_default"),
+  operatorBurnRows: [],
+  operatorPlan: [],
+  operatorPlanPath: [],
+  operatorBurnIndex: 0,
+  operatorPlanError: "",
+  operatorPanelSignature: "",
+  operatorTutorialStage: 0,
+  operatorTutorialStageStartS: 0,
+  equationSheetVisible: false,
   musicEnabled: true,
   musicStartRequested: false,
   arcadeSession: null,
@@ -444,6 +518,89 @@ function writeLocalPreference(key, value) {
   }
 }
 
+function normalizePlayMode(value) {
+  return PLAY_MODES.includes(value) ? value : "pilot";
+}
+
+function normalizeFrameConvention(value) {
+  return FRAME_CONVENTIONS.includes(value) ? value : "oel_default";
+}
+
+function levelSupportsOperator(option) {
+  return option?.id === "tutorial" || option?.id === "sandbox";
+}
+
+function operatorPreviewAvailable(option = selectedLevelOption()) {
+  return state.activeView === "desktop" && levelSupportsOperator(option);
+}
+
+function selectedLevelOption() {
+  return levelOptions[state.selectedLevel] || levelOptions[0];
+}
+
+function selectorOperatorModeRequested() {
+  return state.playMode === "operator" && state.activeView === "desktop";
+}
+
+function levelVisibleInSelector(option) {
+  return !selectorOperatorModeRequested() || levelSupportsOperator(option);
+}
+
+function visibleLevelIndex(index, direction = 1) {
+  const count = levelOptions.length;
+  if (count <= 0) return 0;
+  const step = direction >= 0 ? 1 : -1;
+  let idx = ((Math.floor(index) % count) + count) % count;
+  for (let checked = 0; checked < count; checked += 1) {
+    if (levelVisibleInSelector(levelOptions[idx])) return idx;
+    idx = (idx + step + count) % count;
+  }
+  return 0;
+}
+
+function selectedPlayModeFor(option = selectedLevelOption()) {
+  if (!operatorPreviewAvailable(option)) return "pilot";
+  return state.playMode;
+}
+
+function selectorPlayModeLabel() {
+  if (state.activeView !== "desktop") return "Pilot Only";
+  return state.playMode === "operator" ? "Operator Mode" : "Pilot Mode";
+}
+
+function operatorModeActive() {
+  return state.activePlayMode === "operator" && (state.mode === "operatorTutorial" || state.mode === "operatorSandbox");
+}
+
+function operatorScriptModeActive() {
+  return (
+    state.activePlayMode === "operator" &&
+    (state.mode === "operatorScriptSandbox" || state.mode === "operatorScriptTutorial")
+  );
+}
+
+function operatorExperienceActive() {
+  return operatorModeActive() || operatorScriptModeActive();
+}
+
+function displayAxisSign(axis) {
+  if (state.frameConvention === "space_force" && axis === "i") return -1;
+  return 1;
+}
+
+function frameConventionLabel() {
+  return state.frameConvention === "space_force" ? "Frame: Space Force" : "Frame: OEL";
+}
+
+function displayTitleForOption(option = selectedLevelOption()) {
+  return selectedPlayModeFor(option) === "operator" && option.operatorTitle ? option.operatorTitle : option.title;
+}
+
+function modeSpecificField(option, field) {
+  const operatorField = `operator${field[0].toUpperCase()}${field.slice(1)}`;
+  return selectedPlayModeFor(option) === "operator" && option[operatorField] ? option[operatorField] : option[field];
+}
+
 function normalizeViewPreference(value) {
   return ["auto", "mobile", "desktop"].includes(value) ? value : "auto";
 }
@@ -461,8 +618,12 @@ function applyViewPreference() {
   document.body.classList.toggle("desktop-view", activeView === "desktop");
   el.shell.classList.toggle("mobile-view", activeView === "mobile");
   el.shell.classList.toggle("desktop-view", activeView === "desktop");
+  if (activeView !== "desktop" && operatorExperienceActive()) {
+    showLevelSelector({ track: true, source: "view_change" });
+  }
   syncViewButtons();
   syncMusicButton();
+  renderLevelSelector();
   updateDebugState();
   draw();
 }
@@ -473,7 +634,8 @@ function syncViewButtons() {
   if (el.viewButton) {
     const mobileCameraButton = state.activeView === "mobile";
     el.viewButton.textContent = mobileCameraButton ? "Toggle Camera" : label;
-    el.viewButton.disabled = mobileCameraButton && state.mode !== "sandbox" && state.mode !== "arcade";
+    el.viewButton.disabled =
+      mobileCameraButton && state.mode !== "sandbox" && state.mode !== "operatorSandbox" && state.mode !== "arcade";
     el.viewButton.setAttribute(
       "aria-label",
       mobileCameraButton ? "Toggle camera framing." : `${label}. Active layout ${state.activeView}.`,
@@ -495,6 +657,25 @@ function cycleViewPreference() {
   window.history.replaceState(null, "", url);
   applyViewPreference();
   trackEvent("view_toggle", { preference: next, active_view: state.activeView });
+}
+
+function toggleSelectorPlayMode() {
+  if (state.activeView !== "desktop") return;
+  state.playMode = state.playMode === "operator" ? "pilot" : "operator";
+  state.selectedLevel = visibleLevelIndex(state.selectedLevel, -1);
+  writeLocalPreference(PLAY_MODE_KEY, state.playMode);
+  renderLevelSelector();
+  updateDebugState();
+  trackEvent("preview_play_mode_toggle", { play_mode: state.playMode });
+}
+
+function toggleFrameConvention() {
+  state.frameConvention = state.frameConvention === "space_force" ? "oel_default" : "space_force";
+  writeLocalPreference(FRAME_CONVENTION_KEY, state.frameConvention);
+  renderLevelSelector();
+  updateGhost();
+  draw();
+  trackEvent("frame_convention_toggle", { frame_convention: state.frameConvention });
 }
 
 function launchInitialLevelFromUrl() {
@@ -555,6 +736,7 @@ function makeState(seed) {
 }
 
 function currentControls() {
+  if (operatorExperienceActive()) return { r: 0, i: 0, c: 0 };
   const r = axisValue("w", "s", "rPlus", "rMinus");
   const i = axisValue("d", "a", "iPlus", "iMinus");
   const c = axisValue("arrowright", "arrowleft", "cPlus", "cMinus");
@@ -592,6 +774,7 @@ function resetState(seed = presets.behind) {
   state.passed = false;
   state.finalReason = "";
   state.stepAccumulatorS = 0;
+  state.operatorBurnIndex = 0;
   el.debriefPanel.classList.add("hidden");
   setLeaderboardFormVisible(false);
   updateGhost();
@@ -621,23 +804,45 @@ function showLevelSelector(options = {}) {
 }
 
 function renderLevelSelector() {
+  state.selectedLevel = visibleLevelIndex(state.selectedLevel, 1);
   document.querySelectorAll("[data-level-option]").forEach((button) => {
     const idx = levelOptions.findIndex((option) => option.id === button.dataset.levelOption);
     const active = idx === state.selectedLevel;
+    const visible = idx >= 0 && levelVisibleInSelector(levelOptions[idx]);
+    button.hidden = !visible;
     button.classList.toggle("active", active);
+    button.setAttribute("aria-hidden", String(!visible));
     button.setAttribute("aria-current", active ? "true" : "false");
   });
-  const option = levelOptions[state.selectedLevel] || levelOptions[0];
+  const option = selectedLevelOption();
+  const selectorPlayMode = selectedPlayModeFor(option);
+  const selectorOperatorMode = selectorPlayMode === "operator";
+  el.shell.classList.toggle("selector-operator-mode", selectorOperatorMode);
+  el.shell.classList.toggle("selector-pilot-mode", !selectorOperatorMode);
+  el.levelSelector.classList.toggle("operator-mode", selectorOperatorMode);
+  el.levelSelector.classList.toggle("pilot-mode", !selectorOperatorMode);
+  if (el.selectorModeButton) {
+    const availableOperator = state.activeView === "desktop";
+    el.selectorModeButton.textContent = selectorPlayModeLabel();
+    el.selectorModeButton.disabled = !availableOperator;
+    el.selectorModeButton.classList.toggle("active", availableOperator && state.playMode === "operator");
+    el.selectorModeButton.setAttribute("aria-pressed", String(availableOperator && state.playMode === "operator"));
+  }
+  if (el.selectorFrameButton) {
+    el.selectorFrameButton.textContent = frameConventionLabel();
+    el.selectorFrameButton.classList.toggle("active", state.frameConvention === "space_force");
+    el.selectorFrameButton.setAttribute("aria-pressed", String(state.frameConvention === "space_force"));
+  }
   if (el.selectorPlayButton) {
     el.selectorPlayButton.textContent = "Play Level";
-    el.selectorPlayButton.setAttribute("aria-label", `Play ${option.title}.`);
+    el.selectorPlayButton.setAttribute("aria-label", `Play ${displayTitleForOption(option)}.`);
   }
-  el.selectorPreviewTitle.textContent = option.title;
-  el.selectorPreviewBudget.textContent = option.budget;
-  el.selectorPreviewObjective.textContent = option.objective;
-  el.selectorPreviewBrief.textContent = option.brief;
-  replaceList(el.selectorPreviewCriteria, option.criteria);
-  replaceList(el.selectorPreviewNotes, option.notes);
+  el.selectorPreviewTitle.textContent = displayTitleForOption(option);
+  el.selectorPreviewBudget.textContent = modeSpecificField(option, "budget");
+  el.selectorPreviewObjective.textContent = modeSpecificField(option, "objective");
+  el.selectorPreviewBrief.textContent = modeSpecificField(option, "brief");
+  replaceList(el.selectorPreviewCriteria, modeSpecificField(option, "criteria"));
+  replaceList(el.selectorPreviewNotes, modeSpecificField(option, "notes"));
   const showLeaderboard = option.id === "pursuitArcade";
   el.leaderboardPanel.classList.toggle("hidden", !showLeaderboard);
   if (showLeaderboard) refreshLeaderboard();
@@ -727,20 +932,35 @@ function renderLeaderboard(message = "") {
 }
 
 function selectLevel(index) {
-  state.selectedLevel = Math.max(0, Math.min(index, levelOptions.length - 1));
+  const direction = index >= state.selectedLevel ? 1 : -1;
+  state.selectedLevel = visibleLevelIndex(index, direction);
   renderLevelSelector();
   updateDebugState();
 }
 
 function launchSelectedLevel(source = "selector") {
-  const option = levelOptions[state.selectedLevel] || levelOptions[0];
-  setMode(option.mode);
+  const option = selectedLevelOption();
+  state.activePlayMode = selectedPlayModeFor(option);
+  state.activeLevelId = option.id;
+  if (state.activePlayMode === "operator" && (option.id === "tutorial" || option.id === "sandbox")) {
+    state.operatorTutorialStage = 0;
+    state.operatorTutorialStageStartS = 0;
+    state.operatorBurnRows = [];
+    state.operatorPanelSignature = "";
+  }
+  const mode =
+    state.activePlayMode === "operator" && option.id === "sandbox"
+      ? "operatorScriptSandbox"
+      : state.activePlayMode === "operator" && option.id === "tutorial"
+        ? "primer"
+        : option.mode;
+  setMode(mode);
   if (option.id === "sandbox") {
-    trackEvent("sandbox_start", { source });
+    trackEvent("sandbox_start", { source, play_mode: state.activePlayMode });
   } else if (option.id === "pursuitArcade") {
     trackEvent("arcade_start", { source });
   } else {
-    trackEvent("tutorial_start", { source, entry: option.mode });
+    trackEvent("tutorial_start", { source, entry: option.mode, play_mode: state.activePlayMode });
   }
   playMusicFromGesture();
 }
@@ -750,7 +970,10 @@ function setMode(mode) {
   el.shell.classList.remove("selector-mode");
   state.running = false;
   state.speedIndex = 0;
-  state.cameraRuleMode = mode === "sandbox" || mode === "arcade" ? "full_trajectory" : "default";
+  state.cameraRuleMode =
+    mode === "sandbox" || mode === "operatorSandbox" || operatorScriptModeActive() || mode === "arcade"
+      ? "full_trajectory"
+      : "default";
   setMusicTrackForMode(initialMusicTrackForMode(mode));
   state.activeStage = 0;
   state.stageStart = null;
@@ -764,8 +987,35 @@ function setMode(mode) {
     state.arcadeSession = null;
     state.arcadeSnapshot = null;
     state.arcadeValidation = null;
-    const seed = mode === "sandbox" ? sandboxSeed() : mode === "primer" ? primerSample() : presets.behind;
+    const seed =
+      mode === "sandbox" || mode === "operatorSandbox" || mode === "operatorScriptSandbox"
+        ? sandboxSeed()
+        : mode === "operatorScriptTutorial" || mode === "operatorTutorial"
+          ? presets.behind
+        : mode === "primer"
+          ? primerSample()
+          : presets.behind;
     resetState(seed);
+    if (operatorExperienceActive()) {
+      ensureOperatorRows(mode);
+      updateOperatorPlan();
+    }
+  }
+  updateMissionText();
+}
+
+function launchOperatorPlayback() {
+  updateOperatorPlan();
+  if (state.operatorPlanError) {
+    renderOperatorPlanStatus();
+    return;
+  }
+  const nextMode = state.mode === "operatorScriptTutorial" ? "operatorTutorial" : "operatorSandbox";
+  setMode(nextMode);
+  state.running = true;
+  if (nextMode === "operatorTutorial") {
+    state.speedIndex = speedOptionIndex(OPERATOR_TUTORIAL_PLAYBACK_SPEED_MULTIPLE);
+    state.operatorTutorialStageStartS = state.sim.t;
   }
   updateMissionText();
 }
@@ -793,7 +1043,7 @@ function advancePrimer() {
     return true;
   }
   trackEvent("primer_complete", { step_count: primerStages.length });
-  setMode("tutorial");
+  setMode(state.activePlayMode === "operator" ? "operatorScriptTutorial" : "tutorial");
   return true;
 }
 
@@ -941,6 +1191,10 @@ function step(dt, forceRun = false) {
     arcadeStep(tickCount);
     return;
   }
+  if (operatorModeActive()) {
+    stepOperator(dt, forceRun);
+    return;
+  }
   if ((!state.running && !forceRun) || state.passed) return;
   const u = currentControls();
   const ar = u.r * MAX_ACCEL_KM_S2;
@@ -962,6 +1216,55 @@ function step(dt, forceRun = false) {
   state.trail.push(samplePoint());
   if (state.trail.length > TRAIL_LIMIT) state.trail.shift();
   updateTutorial(dt, u);
+}
+
+function stepOperator(dt, forceRun = false) {
+  if ((!state.running && !forceRun) || state.passed) return;
+  const targetTimeS = state.sim.t + dt;
+  while (targetTimeS - state.sim.t > 1.0e-9) {
+    const nextBurn = state.operatorPlan[state.operatorBurnIndex];
+    const nextStopS = nextBurn ? Math.min(targetTimeS, nextBurn.timeS) : targetTimeS;
+    const coastDt = Math.max(nextStopS - state.sim.t, 0);
+    if (coastDt > 1.0e-9) {
+      const nextState = cwCoastPoint(state.sim, coastDt);
+      state.sim.r = nextState.r;
+      state.sim.i = nextState.i;
+      state.sim.c = nextState.c;
+      state.sim.rd = nextState.rd;
+      state.sim.id = nextState.id;
+      state.sim.cd = nextState.cd;
+      state.sim.t = nextState.t;
+    }
+    if (nextBurn && Math.abs(state.sim.t - nextBurn.timeS) <= 1.0e-6) {
+      state.sim.rd += nextBurn.rMps / 1000;
+      state.sim.id += nextBurn.iMps / 1000;
+      state.sim.cd += nextBurn.cMps / 1000;
+      state.sim.dv += nextBurn.dvMps;
+      state.operatorBurnIndex += 1;
+    } else {
+      break;
+    }
+  }
+  state.closestKm = Math.min(state.closestKm, rangeKm());
+  state.trail.push(samplePoint());
+  if (state.trail.length > TRAIL_LIMIT) state.trail.shift();
+  if (state.mode === "operatorTutorial") {
+    const stageStartS = Number(state.operatorTutorialStageStartS || 0);
+    if (state.sim.t - stageStartS >= OPERATOR_TUTORIAL_STAGE_DURATION_S) {
+      state.operatorTutorialStage += 1;
+      state.operatorTutorialStageStartS = 0;
+      state.running = false;
+      if (state.operatorTutorialStage >= operatorTutorialStages.length) {
+        state.passed = true;
+        state.finalReason = "Operator tutorial complete.";
+        showDebrief(true);
+      } else {
+        state.operatorBurnRows = [];
+        state.operatorPanelSignature = "";
+        setMode("operatorScriptTutorial");
+      }
+    }
+  }
 }
 
 function updateTutorial(dt, u) {
@@ -1011,6 +1314,8 @@ function tutorialInputMatches(stage = activeTutorialStage(), controls = currentC
 
 function simulationShouldRun() {
   if (state.mode === "primer") return false;
+  if (operatorScriptModeActive()) return false;
+  if (operatorModeActive()) return state.running;
   if (state.mode === "arcade") return state.running;
   return state.running || tutorialInputMatches();
 }
@@ -1121,22 +1426,51 @@ function relativeSpeedKmS() {
 function updateMissionText() {
   if (state.mode === "selector") {
     el.shell.classList.add("selector-mode");
-    el.shell.classList.remove("mode-arcade", "mode-sandbox", "mode-tutorial", "primer-mode");
+    el.shell.classList.remove("mode-arcade", "mode-sandbox", "mode-tutorial", "mode-operator", "mode-operator-script", "primer-mode");
     renderLevelSelector();
     return;
   }
   el.shell.classList.remove("selector-mode");
   el.shell.classList.toggle("primer-mode", state.mode === "primer");
   el.shell.classList.toggle("mode-arcade", state.mode === "arcade");
-  el.shell.classList.toggle("mode-sandbox", state.mode === "sandbox");
-  el.shell.classList.toggle("mode-tutorial", state.mode === "tutorial");
-  el.modeLabel.textContent = state.mode === "sandbox" ? "Sandbox" : state.mode === "arcade" ? "Arcade" : "Tutorial";
+  el.shell.classList.toggle(
+    "mode-sandbox",
+    state.mode === "sandbox" || state.mode === "operatorSandbox" || operatorScriptModeActive(),
+  );
+  el.shell.classList.toggle("mode-tutorial", state.mode === "tutorial" || state.mode === "operatorTutorial");
+  el.shell.classList.toggle("mode-operator", operatorModeActive());
+  el.shell.classList.toggle("mode-operator-script", operatorScriptModeActive());
+  el.modeLabel.textContent = operatorModeActive()
+    ? "Operator Mode"
+    : operatorScriptModeActive()
+      ? "Operator Script"
+    : state.mode === "sandbox"
+      ? "Sandbox"
+      : state.mode === "arcade"
+        ? "Arcade"
+        : "Tutorial";
   if (state.mode === "primer") {
     const stage = activePrimerStage();
-    el.levelLabel.textContent = "RIC FRAME PRIMER";
+    el.levelLabel.textContent = state.activePlayMode === "operator" ? "OPERATOR RIC FRAME PRIMER" : "RIC FRAME PRIMER";
     el.objectiveTitle.textContent = stage.title;
     if (el.objectiveText) {
       el.objectiveText.textContent = stage.text;
+    }
+  } else if (operatorScriptModeActive()) {
+    el.levelLabel.textContent =
+      state.mode === "operatorScriptTutorial" ? `Operator Mode   ${operatorTutorialDemoTitle()}` : "Operator Mode   Sandbox";
+    el.objectiveTitle.textContent = state.mode === "operatorScriptTutorial" ? "Launch Demo" : "Script Burns";
+    if (el.objectiveText) {
+      el.objectiveText.textContent =
+        state.mode === "operatorScriptTutorial"
+          ? operatorTutorialStatusText()
+          : "Build a burn script, preview the projected path, then launch playback.";
+    }
+  } else if (state.mode === "operatorSandbox") {
+    el.levelLabel.textContent = "OPERATOR SANDBOX";
+    el.objectiveTitle.textContent = "Playback";
+    if (el.objectiveText) {
+      el.objectiveText.textContent = nextOperatorBurnText();
     }
   } else if (state.mode === "sandbox") {
     el.levelLabel.textContent = "RPO SANDBOX";
@@ -1152,6 +1486,12 @@ function updateMissionText() {
     if (el.objectiveText) {
       el.objectiveText.textContent = `Reach ${formatDistanceKm(currentArcadeGoalRangeKm())}`;
     }
+  } else if (state.mode === "operatorTutorial") {
+    el.levelLabel.textContent = "LEVEL 0 - OPERATOR TUTORIAL";
+    el.objectiveTitle.textContent = operatorTutorialDemoTitle();
+    if (el.objectiveText) {
+      el.objectiveText.textContent = state.running ? nextOperatorBurnText() : operatorTutorialStatusText();
+    }
   } else {
     el.levelLabel.textContent = "LEVEL 0 - TUTORIAL";
     const stage = tutorialStages[state.activeStage] || tutorialStages[tutorialStages.length - 1];
@@ -1164,18 +1504,40 @@ function updateMissionText() {
   if (state.mode === "arcade") {
     el.pauseButton.textContent = state.arcadeTransition ? "Next Round" : state.running ? "Running" : "Start";
     el.pauseButton.disabled = Boolean(state.running && !state.arcadeTransition);
+  } else if (operatorScriptModeActive()) {
+    el.pauseButton.textContent = state.mode === "operatorScriptTutorial" ? "Launch Demo" : "Launch";
+    el.pauseButton.disabled = Boolean(state.operatorPlanError);
+  } else if (operatorModeActive()) {
+    el.pauseButton.textContent = state.running ? "Pause" : state.sim.t > 0 ? "Resume" : "Launch";
+    el.pauseButton.disabled = Boolean(!state.running && state.operatorPlanError);
   } else {
     el.pauseButton.textContent = state.mode === "primer" ? primerAdvanceLabel() : state.running ? "Pause" : "Start";
   }
-  el.resetButton.textContent = state.mode === "primer" ? "Replay" : "Reset";
+  el.resetButton.textContent =
+    state.mode === "primer"
+      ? "Replay"
+      : state.mode === "operatorScriptTutorial"
+        ? "Level Select"
+        : operatorScriptModeActive()
+          ? "Cancel"
+          : operatorModeActive()
+            ? "Script"
+            : "Reset";
   el.sandboxPanel.classList.toggle("hidden", state.mode !== "sandbox" || state.running);
+  if (!operatorScriptModeActive()) state.equationSheetVisible = false;
+  renderOperatorPanel();
+  syncEquationSheet();
   updatePlotTitles();
   syncViewButtons();
   syncMusicButton();
 }
 
 function primerAdvanceLabel() {
-  return state.primerStage >= primerStages.length - 1 ? "Start Tutorial" : "Next";
+  return state.primerStage >= primerStages.length - 1
+    ? state.activePlayMode === "operator"
+      ? "Script Burns"
+      : "Start Tutorial"
+    : "Next";
 }
 
 function updatePlotTitles() {
@@ -1188,6 +1550,13 @@ function updatePlotTitles() {
     el.rcSubtitle.textContent = riIsEci ? stage.localSubtitle : stage.eciSubtitle;
     return;
   }
+  if (operatorScriptModeActive()) {
+    el.riTitle.textContent = "Initial RI";
+    el.riSubtitle.textContent = "";
+    el.rcTitle.textContent = "Initial RC";
+    el.rcSubtitle.textContent = "";
+    return;
+  }
   el.riTitle.textContent = "RI Plane";
   el.riSubtitle.textContent = "In-Track vs Radial";
   el.rcTitle.textContent = "RC Plane";
@@ -1197,10 +1566,10 @@ function updatePlotTitles() {
 function syncMusicButton() {
   const musicPrefix = state.activeView === "mobile" ? "" : "M ";
   el.musicButton.textContent = state.musicEnabled ? `${musicPrefix}Music: ON` : `${musicPrefix}Music: OFF`;
-  el.musicButton.classList.toggle("active", state.musicEnabled);
+  el.musicButton.classList.remove("active");
   el.musicButton.setAttribute("aria-pressed", String(state.musicEnabled));
   el.selectorMusicButton.textContent = state.musicEnabled ? "Music: ON" : "Music: OFF";
-  el.selectorMusicButton.classList.toggle("active", state.musicEnabled);
+  el.selectorMusicButton.classList.remove("active");
   el.selectorMusicButton.setAttribute("aria-pressed", String(state.musicEnabled));
 }
 
@@ -1225,7 +1594,7 @@ function setMusicTrackForMode(mode) {
 }
 
 function initialMusicTrackForMode(mode) {
-  if (mode === "sandbox") return "sandbox";
+  if (mode === "sandbox" || mode === "operatorSandbox" || mode === "operatorScriptSandbox") return "sandbox";
   if (mode === "arcade") return "arcade";
   return "tutorial";
 }
@@ -1257,6 +1626,11 @@ function isEditableControlTarget(target) {
 function updateGhost() {
   if (state.mode === "selector" || state.mode === "primer") {
     state.ghost = [];
+    state.tutorialTargetPath = [];
+    return;
+  }
+  if (operatorExperienceActive()) {
+    state.ghost = state.operatorPlanPath;
     state.tutorialTargetPath = [];
     return;
   }
@@ -1343,6 +1717,248 @@ function addRicPoint(a, b) {
   };
 }
 
+function ensureOperatorRows(mode = state.mode) {
+  if (mode === "operatorScriptTutorial" || mode === "operatorTutorial") {
+    state.operatorBurnRows = operatorTutorialRowsForStage();
+    return;
+  }
+  if (state.operatorBurnRows.length > 0) return;
+  state.operatorBurnRows =
+    [{ t: "0", r: "0", i: "0.1", c: "0" }];
+}
+
+function activeOperatorTutorialStage() {
+  return operatorTutorialStages[state.operatorTutorialStage] || null;
+}
+
+function operatorTutorialRowsForStage() {
+  const stage = activeOperatorTutorialStage() || operatorTutorialStages[0];
+  const row = { t: String(OPERATOR_TUTORIAL_BURN_TIME_S), r: "0", i: "0", c: "0" };
+  if (stage?.axis) {
+    row[stage.axis] = formatOperatorTutorialBurnComponent(stage.sign * OPERATOR_TUTORIAL_BURN_DELTA_V_M_S);
+  }
+  return [row];
+}
+
+function formatOperatorTutorialBurnComponent(value) {
+  return Number(value).toFixed(2).replace(/\.?0+$/, "") || "0";
+}
+
+function operatorTutorialDemoTitle() {
+  const stage = activeOperatorTutorialStage();
+  if (!stage) return "Operator Tutorial";
+  return `Demo ${state.operatorTutorialStage + 1}/${operatorTutorialStages.length}: ${stage.displayLabel}`;
+}
+
+function operatorTutorialStatusText() {
+  const stage = activeOperatorTutorialStage();
+  if (!stage) return "Operator tutorial complete.";
+  return `${operatorTutorialDemoTitle()}. Observe ${OPERATOR_TUTORIAL_STAGE_DURATION_S}s at ${OPERATOR_TUTORIAL_PLAYBACK_SPEED_MULTIPLE}x, then the next scripted burn will load.`;
+}
+
+function renderOperatorPanel() {
+  if (!el.operatorPanel || !el.operatorBurnRows) return;
+  const visible = operatorScriptModeActive();
+  el.operatorPanel.classList.toggle("hidden", !visible);
+  if (!visible) return;
+  ensureOperatorRows();
+  const readOnly = state.mode === "operatorScriptTutorial";
+  if (el.operatorAddBurn) el.operatorAddBurn.classList.toggle("hidden", readOnly);
+  const signature = `${state.mode}:${readOnly ? "read-only" : "editable"}:${JSON.stringify(state.operatorBurnRows)}`;
+  if (state.operatorPanelSignature === signature && el.operatorBurnRows.children.length > 0) {
+    renderOperatorPlanStatus();
+    return;
+  }
+  el.operatorBurnRows.replaceChildren();
+  el.operatorBurnRows.append(operatorHeaderRow());
+  state.operatorBurnRows.forEach((row, idx) => {
+    const rowEl = document.createElement("div");
+    rowEl.className = "operator-row";
+    rowEl.append(operatorRowLabel(idx));
+    ["t", "r", "i", "c"].forEach((field) => {
+      const input = document.createElement("input");
+      input.type = "number";
+      input.step = field === "t" ? "1" : "0.01";
+      input.value = row[field] ?? "";
+      input.dataset.operatorField = field;
+      input.dataset.operatorIndex = String(idx);
+      input.disabled = readOnly;
+      input.setAttribute("aria-label", operatorInputLabel(field, idx));
+      input.addEventListener("input", () => {
+        if (readOnly) return;
+        state.operatorBurnRows[idx][field] = input.value;
+        state.operatorPanelSignature = "";
+        updateOperatorPlan();
+      });
+      rowEl.append(input);
+    });
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.textContent = "x";
+    remove.disabled = readOnly;
+    remove.classList.toggle("hidden", readOnly);
+    remove.setAttribute("aria-label", `Remove burn ${idx + 1}`);
+    remove.addEventListener("click", () => {
+      if (readOnly) return;
+      state.operatorBurnRows.splice(idx, 1);
+      if (state.operatorBurnRows.length <= 0) state.operatorBurnRows.push({ t: "", r: "", i: "", c: "" });
+      state.operatorPanelSignature = "";
+      updateOperatorPlan();
+      renderOperatorPanel();
+    });
+    rowEl.append(remove);
+    el.operatorBurnRows.append(rowEl);
+  });
+  state.operatorPanelSignature = signature;
+  renderOperatorPlanStatus();
+}
+
+function operatorHeaderRow() {
+  const rowEl = document.createElement("div");
+  rowEl.className = "operator-row operator-header";
+  ["#", "T (s)", "R (m/s)", "I (m/s)", "C (m/s)", ""].forEach((text) => {
+    const label = document.createElement("span");
+    label.textContent = text;
+    rowEl.append(label);
+  });
+  return rowEl;
+}
+
+function operatorRowLabel(idx) {
+  const label = document.createElement("span");
+  label.textContent = String(idx + 1);
+  return label;
+}
+
+function operatorInputLabel(field, idx) {
+  const labels = { t: "time seconds", r: "radial meters per second", i: "in-track meters per second", c: "cross-track meters per second" };
+  return `Burn ${idx + 1} ${labels[field]}`;
+}
+
+function addOperatorBurnRow() {
+  if (state.mode === "operatorScriptTutorial") return;
+  ensureOperatorRows();
+  const lastTime = Math.max(
+    0,
+    ...state.operatorBurnRows.map((row) => Number(row.t)).filter((value) => Number.isFinite(value)),
+  );
+  state.operatorBurnRows.push({ t: String(lastTime + 600), r: "0", i: "0", c: "0" });
+  state.operatorPanelSignature = "";
+  updateOperatorPlan();
+  renderOperatorPanel();
+}
+
+function updateOperatorPlan() {
+  const { burns, error } = parseOperatorBurns();
+  state.operatorPlan = burns;
+  state.operatorPlanError = error;
+  state.operatorPlanPath = buildOperatorPreviewPath(operatorInitialSeed(), burns);
+  state.ghost = state.operatorPlanPath;
+  state.tutorialTargetPath = [];
+  renderOperatorPlanStatus();
+  draw();
+}
+
+function renderOperatorPlanStatus() {
+  if (!el.operatorStatus || !el.operatorError) return;
+  const plannedDv = state.operatorPlan.reduce((sum, burn) => sum + burn.dvMps, 0);
+  if (state.mode === "operatorScriptTutorial") {
+    el.operatorStatus.textContent = `${operatorTutorialDemoTitle()} | ${formatSpeedMS(plannedDv)} planned`;
+    el.operatorError.textContent = state.operatorPlanError || "Read-only tutorial script. Press Launch Demo to observe the burn.";
+    return;
+  }
+  el.operatorStatus.textContent = `${state.operatorPlan.length} burns | ${formatSpeedMS(plannedDv)} planned`;
+  el.operatorError.textContent =
+    state.operatorPlanError || `Max ${formatSpeedMS(OPERATOR_BURN_MAX_DV_M_S)} per burn | ${OPERATOR_BURN_SPACING_S}s minimum spacing`;
+}
+
+function syncEquationSheet() {
+  const visible = operatorScriptModeActive() && state.equationSheetVisible;
+  if (el.equationSheet) el.equationSheet.classList.toggle("hidden", !visible);
+  if (el.equationSheetButton) {
+    el.equationSheetButton.textContent = visible ? "Hide Equation Sheet" : "Show Equation Sheet";
+    el.equationSheetButton.setAttribute("aria-pressed", String(visible));
+  }
+}
+
+function toggleEquationSheet() {
+  if (!operatorScriptModeActive()) return;
+  state.equationSheetVisible = !state.equationSheetVisible;
+  syncEquationSheet();
+}
+
+function parseOperatorBurns() {
+  const errors = [];
+  const burns = [];
+  state.operatorBurnRows.forEach((row, idx) => {
+    const values = {
+      t: String(row.t ?? "").trim(),
+      r: String(row.r ?? "").trim(),
+      i: String(row.i ?? "").trim(),
+      c: String(row.c ?? "").trim(),
+    };
+    if (!values.t && !values.r && !values.i && !values.c) return;
+    const timeS = Number(values.t);
+    const rMps = Number(values.r || 0);
+    const iMps = Number(values.i || 0);
+    const cMps = Number(values.c || 0);
+    if (!Number.isFinite(timeS) || timeS < 0) errors.push(`Burn ${idx + 1}: enter a time >= 0.`);
+    if (![rMps, iMps, cMps].every(Number.isFinite)) errors.push(`Burn ${idx + 1}: enter numeric R/I/C values.`);
+    const dvMps = Math.hypot(rMps, iMps, cMps);
+    if (dvMps > OPERATOR_BURN_MAX_DV_M_S + 1.0e-9) {
+      errors.push(`Burn ${idx + 1}: ${formatSpeedMS(dvMps)} exceeds ${formatSpeedMS(OPERATOR_BURN_MAX_DV_M_S)}.`);
+    }
+    if (errors.length <= 0 || Number.isFinite(timeS)) {
+      burns.push({ timeS, rMps, iMps, cMps, dvMps });
+    }
+  });
+  burns.sort((a, b) => a.timeS - b.timeS);
+  for (let idx = 1; idx < burns.length; idx += 1) {
+    if (burns[idx].timeS - burns[idx - 1].timeS < OPERATOR_BURN_SPACING_S) {
+      errors.push(`Burns ${idx} and ${idx + 1}: separate by at least ${OPERATOR_BURN_SPACING_S}s.`);
+      break;
+    }
+  }
+  return { burns: errors.length > 0 ? [] : burns, error: errors[0] || "" };
+}
+
+function operatorInitialSeed() {
+  if (operatorExperienceActive()) return state.stageStart ? { ...state.stageStart, t: 0, dv: 0 } : { ...state.sim, t: 0, dv: 0 };
+  return { ...state.sim };
+}
+
+function buildOperatorPreviewPath(seed, burns) {
+  if (!operatorExperienceActive()) return [];
+  const validBurns = Array.isArray(burns) ? burns : [];
+  const horizonS = operatorPlaybackEndS(validBurns);
+  const sampleCount = Math.max(2, OPERATOR_PREVIEW_POINTS);
+  const path = [];
+  let segmentSeed = { ...seed, t: 0 };
+  let segmentStartS = 0;
+  let burnIdx = 0;
+  for (let idx = 0; idx < sampleCount; idx += 1) {
+    const absoluteTimeS = (horizonS * idx) / (sampleCount - 1);
+    while (burnIdx < validBurns.length && validBurns[burnIdx].timeS <= absoluteTimeS) {
+      segmentSeed = cwCoastPoint(segmentSeed, validBurns[burnIdx].timeS - segmentStartS);
+      segmentSeed.rd += validBurns[burnIdx].rMps / 1000;
+      segmentSeed.id += validBurns[burnIdx].iMps / 1000;
+      segmentSeed.cd += validBurns[burnIdx].cMps / 1000;
+      segmentSeed.t = validBurns[burnIdx].timeS;
+      segmentStartS = validBurns[burnIdx].timeS;
+      burnIdx += 1;
+    }
+    const point = cwCoastPoint(segmentSeed, absoluteTimeS - segmentStartS);
+    point.t = absoluteTimeS;
+    path.push(point);
+  }
+  return path;
+}
+
+function operatorPlaybackEndS(burns = state.operatorPlan) {
+  const lastBurnS = burns.length > 0 ? Math.max(...burns.map((burn) => burn.timeS)) : 0;
+  return Math.max(lastBurnS + ORBIT_PERIOD_S, ORBIT_PERIOD_S);
+}
+
 function predictGhost(seed, horizonS, samples) {
   const ghost = [];
   const count = Math.max(Math.floor(samples), 2);
@@ -1362,8 +1978,9 @@ function cwCoastPoint(seed, tS) {
   const zd = seed.cd;
   const n = MEAN_MOTION;
   const t = Number(tS);
+  const absoluteTimeS = Number(seed.t || 0) + t;
   if (Math.abs(n) <= 1.0e-12) {
-    return { r: x + xd * t, i: y + yd * t, c: z + zd * t, rd: xd, id: yd, cd: zd };
+    return { r: x + xd * t, i: y + yd * t, c: z + zd * t, rd: xd, id: yd, cd: zd, t: absoluteTimeS };
   }
   const nt = n * t;
   const cosNt = Math.cos(nt);
@@ -1375,6 +1992,7 @@ function cwCoastPoint(seed, tS) {
     rd: 3 * n * sinNt * x + cosNt * xd + 2 * sinNt * yd,
     id: -6 * n * (1 - cosNt) * x - 2 * sinNt * xd + (4 * cosNt - 3) * yd,
     cd: -n * sinNt * z + cosNt * zd,
+    t: absoluteTimeS,
   };
 }
 
@@ -1413,6 +2031,10 @@ function updateDebugState() {
     activeStage: state.activeStage,
     primerStage: state.primerStage,
     selectedLevel: state.selectedLevel,
+    playMode: state.playMode,
+    activePlayMode: state.activePlayMode,
+    activeLevelId: state.activeLevelId,
+    frameConvention: state.frameConvention,
     viewPreference: state.viewPreference,
     activeView: state.activeView,
     speedMultiple: currentSpeedMultiple(),
@@ -1438,6 +2060,8 @@ function updateDebugState() {
         }
       : null,
     livePredictionSeed: livePredictionSeed(),
+    operatorPlan: state.operatorPlan.map((burn) => ({ ...burn })),
+    operatorPlanError: state.operatorPlanError,
     ghostHead: state.ghost.slice(0, 8).map((point) => ({ ...point })),
     tutorialTargetHead: state.tutorialTargetPath.slice(0, 8).map((point) => ({ ...point })),
   };
@@ -1496,6 +2120,10 @@ function updateHud() {
     el.topRangeMetric.textContent = `Score ${state.arcadeSnapshot?.score || 0}${metricGap}${timeLabel} ${arcadeTimeText}`;
     el.topSpeedMetric.textContent = `Target dV ${targetDvText}`;
     el.topDvMetric.textContent = `Chaser dV ${dvText}`;
+  } else if (operatorExperienceActive()) {
+    el.topRangeMetric.textContent = `OPERATOR Range ${rangeText}`;
+    el.topSpeedMetric.textContent = `OPERATOR Rel Speed ${speedText}`;
+    el.topDvMetric.textContent = `OPERATOR Delta-v ${dvText}`;
   } else {
     el.topRangeMetric.textContent = `INFO Range ${rangeText}`;
     el.topSpeedMetric.textContent = `INFO Rel Speed ${speedText}`;
@@ -1504,7 +2132,8 @@ function updateHud() {
   el.hudLine.textContent = `T=${state.sim.t.toFixed(1).padStart(7, " ")}s   Range=${rangeText}   Rel Speed=${speedText}`;
   el.coachHint.textContent = currentCoachHint();
   el.commandLine.textContent = commandStatusLine();
-  const spaceAction = state.mode === "arcade" ? "Space Start" : "Space Pause";
+  const spaceAction =
+    state.mode === "arcade" ? "Space Start" : operatorScriptModeActive() ? "Space Launch" : operatorModeActive() ? "Space Pause" : "Space Pause";
   el.footerLine.textContent = `Speed ${speedFooterText(u)}  Up/Down Speed  ${spaceAction}  R Reset  Esc Level Select`;
   el.speedMultiple.textContent = speedBadgeText(u);
   syncMobileSpeedButtons();
@@ -1523,6 +2152,13 @@ function currentCoachHint() {
     const cameraLabel = state.activeView === "mobile" ? "Camera" : "C Camera";
     if (state.activeView === "mobile") return `${cameraLabel}: ${label}.`;
     return `Use small pulses, then coast and watch the target-centered RIC motion. ${cameraLabel}: ${label}.`;
+  }
+  if (operatorScriptModeActive()) {
+    if (state.mode === "operatorScriptTutorial") return operatorTutorialStatusText();
+    return "Build a time-ordered burn script. The dashed path previews the planned trajectory.";
+  }
+  if (operatorModeActive()) {
+    return nextOperatorBurnText();
   }
   if (state.mode === "arcade") {
     const snap = state.arcadeSnapshot;
@@ -1559,8 +2195,20 @@ function commandStatusLine() {
   if (state.mode === "primer") {
     return "";
   }
+  if (operatorScriptModeActive()) return state.mode === "operatorScriptTutorial" ? "Review the scripted burn, then press Launch Demo." : "Script RIC burns, then press Launch.";
+  if (operatorModeActive()) return "";
   if (state.mode === "arcade") return "W/S R  A/D I  Left/Right C  Space Start  R Reset";
   return "W/S R  A/D I  Left/Right C  C Camera  M Music";
+}
+
+function nextOperatorBurnText() {
+  const nextBurn = state.operatorPlan[state.operatorBurnIndex];
+  if (!nextBurn) {
+    return state.running ? "Next Burn: none scheduled. Coasting through preview horizon." : "Next Burn: script is ready.";
+  }
+  const remainingS = Math.max(nextBurn.timeS - state.sim.t, 0);
+  const components = [`R ${formatSpeedMS(nextBurn.rMps)}`, `I ${formatSpeedMS(nextBurn.iMps)}`, `C ${formatSpeedMS(nextBurn.cMps)}`];
+  return `Next Burn T=${Math.round(nextBurn.timeS)}s (${Math.round(remainingS)}s): ${components.join("  ")}`;
 }
 
 function tutorialStageInstruction(stage) {
@@ -1602,9 +2250,11 @@ function drawPlot(canvas, xAxis, yAxis, plane) {
   }
   const cameraCenter = cameraCenterFor(xAxis, yAxis);
   const scale = plotScale(width, height, xAxis, yAxis, cameraCenter);
+  const xSign = displayAxisSign(xAxis);
+  const ySign = displayAxisSign(yAxis);
   const toPx = (p) => ({
-    x: width / 2 + (p[xAxis] - cameraCenter[xAxis]) * scale,
-    y: height / 2 - (p[yAxis] - cameraCenter[yAxis]) * scale,
+    x: width / 2 + ((p[xAxis] - cameraCenter[xAxis]) * xSign) * scale,
+    y: height / 2 - ((p[yAxis] - cameraCenter[yAxis]) * ySign) * scale,
   });
 
   const targetState = state.mode === "arcade" ? state.arcadeTargetRel : { r: 0, i: 0, c: 0 };
@@ -1626,18 +2276,30 @@ function drawPlot(canvas, xAxis, yAxis, plane) {
   drawSpacecraftMarker(ctx, chaser, "chaser", { scale, fallbackRadius: 7 });
   ctx.fillStyle = "rgba(170, 180, 195, 0.92)";
   ctx.font = "12px Menlo, Consolas, monospace";
-  ctx.fillText(`${axisLabel(xAxis)} km`, width - 58, height / 2 + 22);
+  drawAxisDirectionLabels(ctx, width, height, xAxis, yAxis);
+}
+
+function drawAxisDirectionLabels(ctx, width, height, xAxis, yAxis) {
+  const xPositiveRight = displayAxisSign(xAxis) > 0;
+  const yPositiveUp = displayAxisSign(yAxis) > 0;
+  ctx.fillStyle = "rgba(170, 180, 195, 0.92)";
+  ctx.font = "12px Menlo, Consolas, monospace";
+  ctx.fillText(`${xPositiveRight ? "+" : "-"}${axisLabel(xAxis)}`, width - 36, height / 2 + 22);
+  ctx.fillText(`${xPositiveRight ? "-" : "+"}${axisLabel(xAxis)}`, 12, height / 2 + 22);
   ctx.save();
-  ctx.fillText(`${axisLabel(yAxis)} km`, width / 2 + 8, 24);
+  ctx.fillText(`${yPositiveUp ? "+" : "-"}${axisLabel(yAxis)}`, width / 2 + 8, 24);
+  ctx.fillText(`${yPositiveUp ? "-" : "+"}${axisLabel(yAxis)}`, width / 2 + 8, height - 12);
   ctx.restore();
 }
 
 function drawPrimerRic(ctx, width, height, xAxis, yAxis, stage) {
   const sample = primerSample();
   const scale = Math.min(width, height) / 2.5;
+  const xSign = displayAxisSign(xAxis);
+  const ySign = displayAxisSign(yAxis);
   const toPx = (p) => ({
-    x: width / 2 + (p[xAxis] || 0) * scale,
-    y: height / 2 - (p[yAxis] || 0) * scale,
+    x: width / 2 + ((p[xAxis] || 0) * xSign) * scale,
+    y: height / 2 - ((p[yAxis] || 0) * ySign) * scale,
   });
 
   drawGrid(ctx, width, height, scale);
@@ -1671,13 +2333,15 @@ function drawPrimerAxis(ctx, width, height, xAxis, yAxis, activeAxis) {
   const yColor = activeAxis === yAxis ? axisColors[yAxis] : "rgba(90, 104, 124, 0.95)";
   ctx.save();
   ctx.lineWidth = 2;
-  drawArrow(ctx, 36, height / 2, width - 36, height / 2, xColor);
-  drawArrow(ctx, width / 2, height - 32, width / 2, 32, yColor);
+  if (displayAxisSign(xAxis) > 0) drawArrow(ctx, 36, height / 2, width - 36, height / 2, xColor);
+  else drawArrow(ctx, width - 36, height / 2, 36, height / 2, xColor);
+  if (displayAxisSign(yAxis) > 0) drawArrow(ctx, width / 2, height - 32, width / 2, 32, yColor);
+  else drawArrow(ctx, width / 2, 32, width / 2, height - 32, yColor);
   ctx.font = "13px Menlo, Consolas, monospace";
   ctx.fillStyle = xColor;
-  ctx.fillText(`+${axisLabel(xAxis)}`, width - 54, height / 2 - 10);
+  ctx.fillText(`+${axisLabel(xAxis)}`, displayAxisSign(xAxis) > 0 ? width - 54 : 24, height / 2 - 10);
   ctx.fillStyle = yColor;
-  ctx.fillText(`+${axisLabel(yAxis)}`, width / 2 + 10, 42);
+  ctx.fillText(`+${axisLabel(yAxis)}`, width / 2 + 10, displayAxisSign(yAxis) > 0 ? 42 : height - 42);
   ctx.restore();
 }
 
@@ -1953,6 +2617,9 @@ function fitCanvas(canvas) {
 }
 
 function cameraCenterFor(xAxis, yAxis) {
+  if (state.mode === "primer" || state.mode === "tutorial" || state.mode === "operatorScriptTutorial" || state.mode === "operatorTutorial") {
+    return { r: 0, i: 0, c: 0 };
+  }
   if (state.mode === "arcade") {
     if (state.cameraRuleMode === "full_trajectory") return { r: 0, i: 0, c: 0 };
     return {
@@ -2083,16 +2750,16 @@ function drawPath(ctx, points, toPx, color, dashed, width = 2) {
 
 function drawVector(ctx, origin, sim, xAxis, yAxis, kind) {
   const scale = kind === "velocity" ? 75000 : 1;
-  const vx = sim[`${xAxis}d`] * scale;
-  const vy = sim[`${yAxis}d`] * scale;
+  const vx = sim[`${xAxis}d`] * scale * displayAxisSign(xAxis);
+  const vy = sim[`${yAxis}d`] * scale * displayAxisSign(yAxis);
   drawArrow(ctx, origin.x, origin.y, origin.x + vx, origin.y - vy, "rgba(245, 205, 92, 0.9)");
 }
 
 function drawThrustVector(ctx, origin, xAxis, yAxis) {
   const u = currentControls();
   const scale = 42;
-  const vx = u[xAxis] * scale;
-  const vy = u[yAxis] * scale;
+  const vx = u[xAxis] * scale * displayAxisSign(xAxis);
+  const vy = u[yAxis] * scale * displayAxisSign(yAxis);
   if (Math.hypot(vx, vy) < 1) return;
   drawArrow(ctx, origin.x, origin.y, origin.x + vx, origin.y - vy, "rgba(92, 220, 160, 0.95)");
 }
@@ -2405,12 +3072,25 @@ function togglePause() {
     updateMissionText();
     return;
   }
+  if (operatorScriptModeActive()) {
+    launchOperatorPlayback();
+    return;
+  }
+  if (operatorModeActive()) {
+    if (!state.running && state.operatorPlanError) {
+      renderOperatorPlanStatus();
+      return;
+    }
+    state.running = !state.running;
+    updateMissionText();
+    return;
+  }
   state.running = !state.running;
   updateMissionText();
 }
 
 function toggleCameraRuleMode() {
-  if (state.mode !== "sandbox" && state.mode !== "arcade") return;
+  if (state.mode !== "sandbox" && state.mode !== "operatorSandbox" && state.mode !== "arcade") return;
   state.cameraRuleMode = state.cameraRuleMode === "full_trajectory" ? "current_pair" : "full_trajectory";
   updateGhost();
   syncViewButtons();
@@ -2426,6 +3106,19 @@ function resetCurrent() {
     state.activeStage = 0;
     state.speedIndex = 0;
     resetState(presets.behind);
+  } else if (state.mode === "operatorTutorial") {
+    state.speedIndex = 0;
+    setMode("operatorScriptTutorial");
+    return;
+  } else if (state.mode === "operatorSandbox") {
+    setMode("operatorScriptSandbox");
+    return;
+  } else if (state.mode === "operatorScriptTutorial") {
+    showLevelSelector({ track: true, source: "operator_tutorial_script_cancel" });
+    return;
+  } else if (state.mode === "operatorScriptSandbox") {
+    showLevelSelector({ track: true, source: "operator_script_cancel" });
+    return;
   } else if (state.mode === "arcade") {
     startArcadeSession();
   } else {
@@ -2528,7 +3221,12 @@ function bindEvents() {
       else if (key === "r") resetCurrent();
       return;
     }
-    if (key === "c" && (state.mode === "sandbox" || state.mode === "arcade")) {
+    if (operatorScriptModeActive() && key === "enter") {
+      playMusicFromGesture();
+      launchOperatorPlayback();
+      return;
+    }
+    if (key === "c" && (state.mode === "sandbox" || state.mode === "operatorSandbox" || state.mode === "arcade")) {
       playMusicFromGesture();
       toggleCameraRuleMode();
       return;
@@ -2594,6 +3292,11 @@ function bindEvents() {
   bindCommandButton(el.selectorPlayButton, () => {
     launchSelectedLevel("selector_play_button");
   });
+  bindCommandButton(el.selectorModeButton, toggleSelectorPlayMode);
+  bindCommandButton(el.selectorFrameButton, toggleFrameConvention);
+  bindCommandButton(el.operatorAddBurn, addOperatorBurnRow);
+  bindCommandButton(el.equationSheetButton, toggleEquationSheet);
+  bindCommandButton(el.equationSheetClose, toggleEquationSheet);
   bindCommandButton(el.viewButton, () => {
     if (state.activeView === "mobile") {
       playMusicFromGesture();
@@ -2650,14 +3353,17 @@ function bindEvents() {
   });
   document.querySelectorAll("[data-level-option]").forEach((button) => {
     button.addEventListener("pointerenter", () => {
+      if (button.hidden) return;
       const idx = levelOptions.findIndex((option) => option.id === button.dataset.levelOption);
       if (idx >= 0) selectLevel(idx);
     });
     button.addEventListener("focus", () => {
+      if (button.hidden) return;
       const idx = levelOptions.findIndex((option) => option.id === button.dataset.levelOption);
       if (idx >= 0) selectLevel(idx);
     });
     button.addEventListener("click", () => {
+      if (button.hidden) return;
       const idx = levelOptions.findIndex((option) => option.id === button.dataset.levelOption);
       if (idx >= 0) selectLevel(idx);
       if (state.activeView === "mobile") return;

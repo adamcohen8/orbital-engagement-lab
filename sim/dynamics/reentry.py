@@ -201,6 +201,13 @@ def reentry_metrics_for_state(
         frame_model=str(env.get("drag_frame_model", "inertial_z")),
         jd_utc_start=env.get("jd_utc_start"),
         eop_path=env.get("drag_eop_path"),
+        dut1_s=env.get("dut1_s"),
+        xp_arcsec=env.get("xp_arcsec"),
+        yp_arcsec=env.get("yp_arcsec"),
+        dat_s=env.get("dat_s"),
+        tt_minus_utc_s=env.get("tt_minus_utc_s"),
+        ddpsi_rad=float(env.get("ddpsi_rad", 0.0) or 0.0),
+        ddeps_rad=float(env.get("ddeps_rad", 0.0) or 0.0),
     )
     v_rel_m_s = v_rel * 1000.0
     speed_m_s = float(np.linalg.norm(v_rel_m_s))

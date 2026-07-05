@@ -6,9 +6,13 @@ metadata:
   notes: Run with `python run_game.py sim/game/configs/game_training_rpo_00_tutorial.yaml
     --fast`.
   game:
-    level_name: Level 0 - Tutorial
+    level_name: Level 0 - Pilot Tutorial
     control_mode: ric_translation
     camera_mode: target_pair
+    target_centered_plot_planes:
+    - RI
+    - RC
+    - IC
     plot_overlays_in_zoom: false
     difficulty: easy
     player_max_accel_km_s2: 1.0e-05

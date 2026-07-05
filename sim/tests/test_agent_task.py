@@ -18,6 +18,7 @@ from sim.agent_task.models import (
     EvidencePacket,
     SemanticMetric,
 )
+from sim.agent_task.plot_recipes import get_plot_recipe
 from sim.agent_task.recipes import list_recipes
 from sim.agent_task.semantics import list_semantic_metrics
 from sim.execution import run_simulation_config_file
@@ -96,6 +97,7 @@ def test_agent_task_recipe_dry_run_writes_evidence_packet(tmp_path: Path) -> Non
         "review_evidence_complete": None,
         "artifacts_complete": None,
         "plots_complete": None,
+        "comparison_complete": None,
         "failure_hint_count": 0,
         "caveat_count": 1,
         "ready_to_cite": True,
@@ -125,6 +127,7 @@ def test_agent_task_recipe_with_plots_writes_plot_summary(tmp_path: Path) -> Non
         "review_evidence_complete": True,
         "artifacts_complete": True,
         "plots_complete": True,
+        "comparison_complete": None,
         "failure_hint_count": 0,
         "caveat_count": 0,
         "ready_to_cite": True,
@@ -190,9 +193,16 @@ def test_agent_task_inspects_completed_run_and_creates_plot(tmp_path: Path) -> N
     assert artifact_by_id["summary_json"]["path"] == "master_run_summary.json"
     assert artifact_by_id["summary_json"]["path_exists"] is True
     assert Path(artifact_by_id["summary_json"]["resolved_path"]).is_file()
+    assert artifact_by_id["run_log_json"]["path_exists"] is True
+    assert artifact_by_id["output_index_md"]["path"] == "index.md"
+    assert artifact_by_id["output_index_md"]["path_exists"] is True
+    assert artifact_by_id["review_store:sqlite"]["path"] == "review/run.sqlite"
+    assert artifact_by_id["review_store:sqlite"]["path_exists"] is True
+    assert artifact_by_id["review_store:schema_json"]["path"] == "review/schema.json"
+    assert artifact_by_id["review_store:schema_json"]["path_exists"] is True
     assert payload["artifact_summary"] == {
-        "total": 2,
-        "existing": 2,
+        "total": 5,
+        "existing": 5,
         "missing": 0,
         "path_status_unknown": 0,
         "missing_artifacts": [],
@@ -224,6 +234,21 @@ def test_agent_task_compare_configs_writes_metric_deltas(tmp_path: Path) -> None
     )
 
     assert payload["status"] == "completed"
+    assert payload["evidence_summary"]["comparison_complete"] is False
+    assert payload["evidence_summary"]["ready_to_cite"] is False
+    assert payload["comparison"]["summary"] == {
+        "total": 2,
+        "unknown_metrics": ["not_recorded_metric"],
+        "missing_value_metrics": [],
+        "missing_delta_metrics": [],
+        "partial_inspections": [],
+        "complete": False,
+    }
+    assert payload["comparison"]["query_names"] == [
+        "run_metadata",
+        "artifacts",
+        "rendezvous_closest_approach",
+    ]
     assert payload["comparison"]["metrics"]["base"]["closest_approach_km"] is not None
     assert payload["comparison"]["metrics"]["candidate"]["closest_approach_km"] is not None
     assert "closest_approach_time_s" not in payload["comparison"]["metrics"]["base"]
@@ -240,6 +265,7 @@ def test_agent_task_compare_configs_writes_metric_deltas(tmp_path: Path) -> None
         "maturity": "supported",
         "source_tables": ["metrics", "relative_state"],
         "saved_query": "rendezvous_closest_approach",
+        "query_status_by_label": {"base": "ok", "candidate": "ok"},
     }
     assert status_by_name["not_recorded_metric"] == {
         "name": "not_recorded_metric",
@@ -257,6 +283,91 @@ def test_agent_task_compare_configs_writes_metric_deltas(tmp_path: Path) -> None
         "reason": "unknown_semantic_metric",
     }
     assert (tmp_path / "compare" / "agent_evidence_packet.json").is_file()
+
+
+def test_agent_task_compare_runs_requested_semantic_query_but_flags_non_scalar_metric(tmp_path: Path) -> None:
+    base_cfg = _write_config(tmp_path / "base.yaml", tmp_path / "base_source")
+    candidate_cfg = _write_config(tmp_path / "candidate.yaml", tmp_path / "candidate_source")
+
+    payload = compare_configs(
+        base_cfg,
+        candidate_cfg,
+        output_dir=tmp_path / "compare",
+        metric_names=("burn_activity",),
+    )
+
+    assert payload["status"] == "completed"
+    assert payload["evidence_summary"]["comparison_complete"] is False
+    assert payload["evidence_summary"]["ready_to_cite"] is False
+    assert "burn_activity" in payload["comparison"]["query_names"]
+    assert [query["name"] for query in payload["review"]["base"]["queries"]] == [
+        "run_metadata",
+        "artifacts",
+        "burn_activity",
+    ]
+    status = payload["comparison"]["metric_status"][0]
+    assert status["name"] == "burn_activity"
+    assert status["semantic_metric_known"] is True
+    assert status["query_status_by_label"] == {"base": "ok", "candidate": "ok"}
+    assert status["base_available"] is False
+    assert status["candidate_available"] is False
+    assert status["delta_available"] is False
+    assert status["reason"] == "no_scalar_reducer"
+    assert payload["comparison"]["summary"] == {
+        "total": 1,
+        "unknown_metrics": [],
+        "missing_value_metrics": ["burn_activity"],
+        "missing_delta_metrics": [],
+        "partial_inspections": [],
+        "complete": False,
+    }
+
+
+def test_agent_task_compare_propagates_partial_inspection(monkeypatch, tmp_path: Path) -> None:
+    base_cfg = _write_config(tmp_path / "base.yaml", tmp_path / "base_source")
+    candidate_cfg = _write_config(tmp_path / "candidate.yaml", tmp_path / "candidate_source")
+
+    monkeypatch.setattr(
+        agent_task_runner,
+        "run_simulation_config_file",
+        lambda _path: {"summary": {"scenario_name": "stub"}},
+    )
+
+    def fake_inspect(output_dir: Path, **_kwargs) -> dict:
+        label = Path(output_dir).name
+        if label == "candidate":
+            return {
+                "status": "partial",
+                "review": {"output_dir": str(output_dir), "error": "Review store not found"},
+                "artifacts": [],
+                "artifact_summary": {"artifacts_complete": True},
+                "failure_hints": [{"code": "review_store_missing", "next_step": "rerun with review"}],
+            }
+        return {
+            "status": "completed",
+            "review": {"query_summary": {"evidence_complete": True}, "queries": []},
+            "artifacts": [],
+            "artifact_summary": {"artifacts_complete": True},
+            "failure_hints": [],
+        }
+
+    monkeypatch.setattr(agent_task_runner, "inspect_output", fake_inspect)
+
+    payload = agent_task_runner.compare_configs(
+        base_cfg,
+        candidate_cfg,
+        output_dir=tmp_path / "compare",
+        metric_names=("closest_approach_km",),
+    )
+
+    assert payload["status"] == "partial"
+    assert payload["failure_hints"] == [
+        {"label": "candidate", "code": "review_store_missing", "next_step": "rerun with review"}
+    ]
+    assert payload["comparison"]["inspection_statuses"] == {"base": "completed", "candidate": "partial"}
+    assert payload["comparison"]["summary"]["partial_inspections"] == ["candidate"]
+    assert payload["evidence_summary"]["comparison_complete"] is False
+    assert payload["evidence_summary"]["ready_to_cite"] is False
 
 
 def test_saved_query_rows_flag_empty_result_policy(monkeypatch) -> None:
@@ -443,6 +554,7 @@ def test_packet_evidence_summary_flags_incomplete_components() -> None:
         "review_evidence_complete": False,
         "artifacts_complete": False,
         "plots_complete": False,
+        "comparison_complete": None,
         "failure_hint_count": 1,
         "caveat_count": 1,
         "ready_to_cite": False,
@@ -511,6 +623,11 @@ def test_agent_plot_recipe_maturity_policy_is_explicit() -> None:
     assert all(recipe.maturity == "supported" for recipe in plot_recipes)
     assert all(recipe.supported_tables for recipe in plot_recipes)
     assert all(recipe.sql.lstrip().upper().startswith(("SELECT", "WITH")) for recipe in plot_recipes)
+    for recipe_id in ("relative_range", "relative_range_rate"):
+        recipe = get_plot_recipe(recipe_id)
+        assert recipe is not None
+        assert recipe.group_column == "pair_id"
+        assert "pair_id" in recipe.sql
 
 
 def test_agent_plot_recipe_rejects_unknown_maturity_or_missing_tables() -> None:

@@ -19,6 +19,11 @@ http://localhost:8765
 ## Included
 
 - Unified level selector for Tutorial, Sandbox, and Pursuit Arcade.
+- Computer-preview Pilot/Operator mode selector for Tutorial and Sandbox.
+  Operator mode scripts impulsive RIC burns and shows the planned HCW preview
+  before playback.
+- Coordinate-frame convention toggle for OEL Default and Space Force-style
+  positive in-track display, persisted in local browser storage.
 - Automatic mobile/computer layout detection with manual view switching.
 - Tutorial mode based on the Level 0 RIC-control lesson.
 - Curated sandbox mode with preset starts, range, drift, reset, and randomize.

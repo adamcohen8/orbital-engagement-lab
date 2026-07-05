@@ -67,9 +67,13 @@ EVIDENCE_PLOT_RECIPES: dict[str, EvidencePlotRecipe] = {
         recipe_id="relative_range",
         title="Relative range over time",
         description="Deputy-chief range from the relative_state review table.",
-        sql="SELECT time_s, deputy_id, chief_id, range_km FROM relative_state ORDER BY time_s",
+        sql=(
+            "SELECT time_s, deputy_id, chief_id, deputy_id || ':' || chief_id AS pair_id, range_km "
+            "FROM relative_state ORDER BY pair_id, time_s"
+        ),
         x_column="time_s",
         y_columns=("range_km",),
+        group_column="pair_id",
         x_label="Time (s)",
         y_label="Range (km)",
         artifact_id="evidence_relative_range",
@@ -79,9 +83,13 @@ EVIDENCE_PLOT_RECIPES: dict[str, EvidencePlotRecipe] = {
         recipe_id="relative_range_rate",
         title="Relative range rate over time",
         description="Relative range rate from the relative_state review table.",
-        sql="SELECT time_s, range_rate_km_s FROM relative_state ORDER BY time_s",
+        sql=(
+            "SELECT time_s, deputy_id, chief_id, deputy_id || ':' || chief_id AS pair_id, range_rate_km_s "
+            "FROM relative_state ORDER BY pair_id, time_s"
+        ),
         x_column="time_s",
         y_columns=("range_rate_km_s",),
+        group_column="pair_id",
         x_label="Time (s)",
         y_label="Range rate (km/s)",
         artifact_id="evidence_relative_range_rate",

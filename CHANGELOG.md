@@ -6,6 +6,61 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.19.0 - 2026-07-05
+
+Release thesis: `v0.19.0` prepares the downloadable RPO Trainer for a more
+classroom-ready USAFA/OTC review by adding Operator Mode, persistent frame
+convention settings, and a deeper level-selector/script-planning workflow. It
+keeps the changes focused on training-game usability, astrodynamics teaching
+clarity, and performance polish for the `v0.19.0` private/public release line.
+
+### Added
+
+- Added RPO Trainer Operator Mode, where players script time-tagged impulsive
+  R/I/C burns before launch and then watch the spacecraft execute the plan.
+- Added separate Pilot/Operator progress, persistent last-selected game mode,
+  saved per-level operator burn scripts, and an operator-specific tutorial flow.
+- Added operator script-screen mission briefs, numeric objectives, an equation
+  sheet, full RI/RC preview plots, burn velocity vectors, trajectory probing
+  with time/state readout, and a 10 second minimum spacing rule between scripted
+  burns.
+- Added frame-convention settings for OEL Default and Space Force-style display
+  presets, including a first-run dialog, persistent local settings, and a
+  selector settings button.
+- Added signed RIC axis labels and frame-convention-aware plot display mapping
+  while preserving the physical RIC dynamics behind the plots.
+
+### Changed
+
+- Reworked the downloadable trainer level selector for Pilot/Operator mode
+  switching, wrapped level-description text, mode-colored selector controls,
+  and circular keyboard navigation through levels and difficulty settings.
+- Updated Operator Mode difficulty semantics so difficulty controls actuator
+  execution error while operator playback always shows the full coast
+  projection.
+- Replaced the live elliptical coast projection path with a YA closed-form STM
+  projection for both Pilot and Operator gameplay, with the previous numerical
+  TH-style path retained as fallback.
+- Refined operator burn visualization so projection transitions scale from
+  1.0 to 2.0 seconds with burn magnitude and temporarily cap playback speed
+  during the burn animation.
+- Moved Pursuit Arcade out of the downloadable level list so leaderboard-style
+  arcade play remains web-preview-oriented, while keeping the implementation
+  available for future reintroduction.
+
+### Fixed
+
+- Fixed operator script-screen RI/RC previews so they match the first in-level
+  game frame, keep initial RIC state readouts, and preserve target-centered
+  camera behavior across levels.
+- Fixed Level 0 naming so Pilot and Operator tutorials present distinct mode
+  labels, with the operator tutorial using the same RIC primer animations before
+  scripted burn demonstrations.
+- Fixed operator playback inefficiencies by skipping guided-tutorial path
+  updates, live pilot-burn prediction syncing, and manual maneuver bookkeeping
+  during view-only operator levels.
+- Fixed cislunar operator scripted burns to use the Moon-RIC frame path.
+
 ## 0.18.0 - 2026-07-01
 
 Release thesis: `v0.18.0` improves the public RPO Trainer classroom-readiness

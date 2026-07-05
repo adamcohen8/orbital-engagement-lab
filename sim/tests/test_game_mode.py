@@ -6,6 +6,7 @@ from copy import deepcopy
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -79,30 +80,84 @@ from sim.game.debrief import (
 )
 from sim.game.defensive_target import DefensiveTargetIntentProvider
 from sim.game.formatting import format_distance_km, format_speed_km_s, format_speed_m_s
+from sim.game.frame_convention import (
+    FRAME_CONVENTION_PRESET_SPACE_FORCE,
+    FrameConvention,
+    frame_convention_display_axis_sign,
+    frame_convention_from_preset,
+)
 from sim.game.launcher import (
     GameScenarioOption,
+    GameSettings,
+    OperatorTrajectoryProbe,
+    _advance_launcher_selection,
+    _clamp_operator_objectives_scroll_px,
     _clamp_preview_scroll_px,
     _clear_progress_at_pos,
     _difficulty_at_pos,
     _difficulty_index,
     _fit_text_px,
+    _frame_convention_dialog_action,
+    _frame_convention_dialog_checkbox_rect,
+    _frame_convention_dialog_choice_rects,
+    _frame_convention_dialog_continue_rect,
+    _frame_convention_dialog_settings,
     _game_progress_path,
+    _game_settings_path,
+    _load_game_settings,
+    _load_saved_operator_burn_plan,
     _music_at_pos,
+    _operator_burn_table_rect,
+    _operator_camera_center_ric,
+    _operator_delete_row_at_pos,
+    _operator_equation_sheet_button_rect,
+    _operator_forbidden_region_projection_points,
+    _operator_game_plot_panel_rects,
+    _operator_initial_relative_ric_state,
+    _operator_minimum_plot_span_km,
+    _operator_objective_numeric_targets,
+    _operator_objectives_button_rect,
+    _operator_objectives_content_height,
+    _operator_objectives_content_rect,
+    _operator_objectives_overlay_rect,
+    _operator_plan_from_rows,
+    _operator_planned_trajectory,
+    _operator_plot_context,
+    _operator_plot_transform_to_px,
+    _operator_probe_time_label,
+    _operator_rows_from_plan,
+    _operator_scroll_for_active_row,
+    _operator_signed_axis_label,
+    _operator_table_visible_rows,
+    _operator_trajectory_probe_from_click,
+    _operator_velocity_vector_endpoint,
     _option_index_at_pos,
     _preview_bounds,
     _preview_content_height,
     _progress_stars,
     _record_video_at_pos,
+    _save_game_settings,
+    _save_operator_burn_plan,
     _scroll_for_selection,
+    _settings_button_at_pos,
     _show_progress_text,
     _start_artwork_rect,
     _start_screen_event_action,
     _wrap_text_px,
+    _wrapped_budget_lines,
     clear_game_progress,
     discover_game_scenarios,
+    discover_game_scenarios_for_mode,
     record_game_progress,
 )
 from sim.game.manual import KeyboardCommandState, ManualGameCommandProvider
+from sim.game.operator import (
+    OperatorBurn,
+    OperatorBurnCommandProvider,
+    OperatorBurnPlan,
+    parse_operator_burn_plan,
+    validate_operator_burn_plan,
+)
 from sim.game.pygame_dashboard import (
     MAX_ACTIVE_CR3BP_GHOST_DRAW_POINTS,
     MIN_PLOT_SPAN_KM,
@@ -143,10 +198,16 @@ from sim.game.recording import (
     game_recording_path,
 )
 from sim.game.runner import (
+    OPERATOR_TUTORIAL_BURN_DELTA_V_M_S,
+    OPERATOR_TUTORIAL_BURN_TIME_S,
+    OperatorBurnCinematicRuntime,
+    OperatorTutorialRuntime,
     SandboxSetupValues,
     _add_level_music_to_recording,
     _adjust_speed_multiple,
     _apply_sandbox_setup_to_config,
+    _clear_dashboard_tutorial_path,
+    _clear_live_prediction_burn,
     _clear_two_rail_released_maneuver_input,
     _clip_recording_status,
     _coast_prediction_orbit_fraction,
@@ -155,6 +216,7 @@ from sim.game.runner import (
     _dashboard_fps_for_speed,
     _dashboard_object_ids,
     _effective_speed_multiple_for_control,
+    _effective_speed_multiple_for_mode,
     _finish_game_recording,
     _game_active_tick_dt_s,
     _game_camera_mode,
@@ -166,6 +228,7 @@ from sim.game.runner import (
     _game_coast_prediction_model,
     _game_coast_speed_dt_schedule,
     _game_coast_tick_dt_s,
+    _game_command_status,
     _game_control_mode,
     _game_controlled_object_id,
     _game_cr3bp_active_prediction_horizon_s,
@@ -219,11 +282,24 @@ from sim.game.runner import (
     _guided_tutorial_wrong_input_active,
     _live_prediction_accel_ric,
     _live_prediction_burn,
+    _manual_maneuver_active_for_mode,
     _max_accel_from_config,
     _mission_checklist,
     _mission_metrics,
+    _operator_actuator_error_fraction,
+    _operator_burn_cinematic_hold_for_animation,
+    _operator_burn_cinematic_should_arm,
+    _operator_burn_cinematic_speed_multiple,
+    _operator_burn_visual_duration_s,
+    _operator_coast_prediction_orbit_fraction,
+    _operator_next_burn_status,
+    _operator_tutorial_demo_title,
+    _operator_tutorial_enabled,
+    _operator_tutorial_stages,
     _opposing_key_axis,
     _pause_teaching_overlay_enabled,
+    _pending_maneuver_sim_s_for_mode,
+    _phase_from_score_with_operator_animation,
     _poll_pygame_input,
     _realtime_steps_due,
     _reset_guided_tutorial_stage_attempt,
@@ -242,8 +318,12 @@ from sim.game.runner import (
     _start_game_recorder,
     _step_game_attempt,
     _sync_dashboard_training_config,
+    _sync_guided_tutorial_path_for_mode,
+    _sync_live_prediction_burn_for_mode,
     _timed_maneuver_pending_sim_s,
     _training_briefing_lines,
+    _trigger_operator_projection_transition,
+    _update_operator_burn_cinematic,
     _wall_step_s,
 )
 from sim.game.session import GamePhysicsSession, _attempt_config_for_training_clock, _DeltaVLimitedOrbitController
@@ -261,6 +341,7 @@ from sim.game.training import (
     nmt_position_error_km,
     nmt_velocity_error_km_s,
     relative_moon_ric_state_from_arrays,
+    training_config_for_game_mode,
 )
 from sim.game.tuning import SPEED_DT_SCHEDULE
 from sim.resource_limits import SimulationMemoryBudgetError
@@ -286,7 +367,8 @@ def _game_config(tmp_path: Path) -> dict:
 
 
 def test_game_launcher_discovers_ordered_training_levels() -> None:
-    options = discover_game_scenarios(Path(__file__).resolve().parents[1] / "game" / "configs")
+    config_dir = Path(__file__).resolve().parents[1] / "game" / "configs"
+    options = discover_game_scenarios(config_dir)
 
     assert [option.scenario_id for option in options] == [
         "rpo_00_tutorial",
@@ -299,13 +381,12 @@ def test_game_launcher_discovers_ordered_training_levels() -> None:
         "rpo_07_elliptic_burn_then_approach",
         "rpo_08_elliptic_nmc",
         "rpo_09_elliptic_rendezvous",
-        "rpo_10_defensive_target_demo",
         "rpo_11_evasive_target_survival",
+        "rpo_10_defensive_target_demo",
         "rpo_bonus_cislunar_rendezvous",
-        "rpo_arcade_pursuit",
         "rpo_sandbox",
     ]
-    assert options[0].title == "Level 0 - Tutorial"
+    assert options[0].title == "Level 0 - Pilot Tutorial"
     assert options[1].title == "Level 1 - Relative Orbit"
     assert options[2].title == "Level 2 - V-Bar Approach"
     assert options[3].title == "Level 3 - R-Bar Approach"
@@ -324,26 +405,30 @@ def test_game_launcher_discovers_ordered_training_levels() -> None:
     assert options[7].title == "Level 7 - Elliptical Approach"
     assert options[8].path.name == "game_training_rpo_08_elliptic_nmc.yaml"
     assert options[8].title == "Level 8 - Elliptical NMC"
+    operator_options = discover_game_scenarios_for_mode(config_dir, mode="operator")
+    assert operator_options[0].title == "Level 0 - Operator Tutorial"
+    operator_ids = {option.scenario_id for option in operator_options}
+    assert "rpo_10_defensive_target_demo" not in operator_ids
+    assert "rpo_arcade_pursuit" not in operator_ids
+    assert "rpo_11_evasive_target_survival" in operator_ids
     assert options[9].path.name == "game_training_rpo_09_elliptic_rendezvous.yaml"
     assert options[9].title == "Level 9 - Elliptical Rendezvous"
-    assert options[10].path.name == "game_training_rpo_10_defensive_target_demo.yaml"
-    assert options[10].title == "Level 10 - Pursuit"
-    assert options[11].path.name == "game_training_rpo_11_evasive_target_survival.yaml"
-    assert options[11].title == "Level 11 - Evasion"
-    assert options[11].delta_v_budget_m_s == pytest.approx(25.0)
-    assert options[11].target_delta_v_budget_m_s == pytest.approx(1.0)
-    assert options[10].target_delta_v_budget_m_s == pytest.approx(0.1)
+    assert options[10].path.name == "game_training_rpo_11_evasive_target_survival.yaml"
+    assert options[10].title == "Level 10 - Evasion"
+    assert options[11].path.name == "game_training_rpo_10_defensive_target_demo.yaml"
+    assert options[11].title == "Level 11 - Pursuit"
+    assert options[10].delta_v_budget_m_s == pytest.approx(25.0)
+    assert options[10].target_delta_v_budget_m_s == pytest.approx(1.0)
+    assert options[11].target_delta_v_budget_m_s == pytest.approx(0.1)
     assert options[12].title == "Bonus Level - Cislunar Rendezvous"
     assert options[12].path.name == "game_training_rpo_bonus_cislunar_rendezvous.yaml"
+    assert options[13].scenario_id == "rpo_sandbox"
     assert options[12].time_budget_s == pytest.approx(259200.0)
     assert options[12].delta_v_budget_m_s == pytest.approx(75.0)
-    assert options[13].title == "Pursuit Arcade"
-    assert options[13].time_budget_s == pytest.approx(12000.0)
-    assert options[13].delta_v_budget_m_s == pytest.approx(3.0)
-    assert options[14].title == "Sandbox"
-    assert options[14].path.name == "game_training_rpo_sandbox.yaml"
-    assert options[14].time_budget_s == pytest.approx(20000.0)
-    assert options[14].delta_v_budget_m_s is None
+    assert options[13].title == "Sandbox"
+    assert options[13].path.name == "game_training_rpo_sandbox.yaml"
+    assert options[13].time_budget_s == pytest.approx(20000.0)
+    assert options[13].delta_v_budget_m_s is None
 
 
 @pytest.mark.parametrize(
@@ -1023,6 +1108,16 @@ def test_launcher_scroll_tracks_keyboard_selection() -> None:
     assert _scroll_for_selection(4, 6, count=12, screen_height=680) == 4
 
 
+def test_launcher_keyboard_selection_wraps_at_edges() -> None:
+    assert _advance_launcher_selection(0, -1, count=12) == 11
+    assert _advance_launcher_selection(11, 1, count=12) == 0
+    assert _advance_launcher_selection(4, 1, count=12) == 5
+    assert _advance_launcher_selection(4, -1, count=12) == 3
+    assert _advance_launcher_selection(0, -1, count=4) == 3
+    assert _advance_launcher_selection(3, 1, count=4) == 0
+    assert _advance_launcher_selection(0, -1, count=0) == 0
+
+
 def test_launcher_difficulty_helpers_support_picker() -> None:
     assert _difficulty_index("easy") == 0
     assert _difficulty_index("normal") == 1
@@ -1074,6 +1169,172 @@ def test_launcher_progress_helpers_persist_user_state_without_mutating_yaml(tmp_
     assert _progress_stars(options[0].completed_difficulties) == "☆☆☆☆"
 
 
+def test_launcher_progress_is_separate_for_operator_mode(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("OEL_GAME_PROGRESS_PATH", str(tmp_path / "progress.yaml"))
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    path = config_dir / "game_training_rpo_02_demo.yaml"
+    cfg = _game_config(tmp_path)
+    cfg["metadata"]["game"]["training"] = {"scenario_id": "rpo_02_demo"}
+    path.write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
+
+    record_game_progress(path, "hard", score=100, mode="pilot")
+    record_game_progress(path, "easy", score=700, mode="operator")
+    pilot = discover_game_scenarios_for_mode(config_dir, mode="pilot")[0]
+    operator = discover_game_scenarios_for_mode(config_dir, mode="operator")[0]
+
+    assert pilot.completed_difficulties == ("hard",)
+    assert pilot.high_score == 100
+    assert operator.completed_difficulties == ("easy",)
+    assert operator.high_score == 700
+
+
+def test_launcher_settings_persist_frame_convention(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("OEL_GAME_SETTINGS_PATH", str(tmp_path / "settings.yaml"))
+    plan = parse_operator_burn_plan("T= 50 s, 2.0 m/s R, 1.0 m/s I, 0.2 m/s C")
+
+    _save_game_settings(
+        GameSettings(
+            frame_convention=FrameConvention(
+                positive_in_track="left",
+                positive_cross_track="clockwise",
+            ),
+            ask_frame_convention_on_launch=False,
+            last_game_mode="operator",
+            operator_burn_scripts={"rpo_01_relative_orbit": plan},
+        )
+    )
+    loaded = _load_game_settings()
+
+    assert _game_settings_path().exists()
+    assert loaded.frame_convention == FrameConvention(
+        positive_in_track="left",
+        positive_cross_track="clockwise",
+    )
+    assert loaded.ask_frame_convention_on_launch is False
+    assert loaded.last_game_mode == "operator"
+    assert loaded.operator_burn_scripts["rpo_01_relative_orbit"].burns == plan.burns
+
+
+def test_frame_convention_dialog_settings_preserve_saved_operator_scripts() -> None:
+    plan = parse_operator_burn_plan("T= 50 s, 2.0 m/s R")
+    settings = GameSettings(
+        frame_convention=FrameConvention(),
+        operator_burn_scripts={"rpo_01_relative_orbit": plan},
+    )
+
+    updated = _frame_convention_dialog_settings(
+        settings,
+        frame_convention=frame_convention_from_preset(FRAME_CONVENTION_PRESET_SPACE_FORCE),
+        dont_ask_again=True,
+        selected_mode="operator",
+    )
+
+    assert updated.ask_frame_convention_on_launch is False
+    assert updated.last_game_mode == "operator"
+    assert updated.operator_burn_scripts["rpo_01_relative_orbit"].burns == plan.burns
+
+
+def test_operator_burn_scripts_are_saved_by_scenario_id(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("OEL_GAME_SETTINGS_PATH", str(tmp_path / "settings.yaml"))
+    plan = parse_operator_burn_plan("T= 10 s, 0.5 m/s R\nT= 40 s, -0.2 m/s I, 0.1 m/s C")
+
+    assert _load_saved_operator_burn_plan("rpo_02_vbar_approach") is None
+
+    _save_operator_burn_plan("rpo_02_vbar_approach", plan)
+    loaded = _load_saved_operator_burn_plan("rpo_02_vbar_approach")
+
+    assert loaded is not None
+    assert loaded.burns == plan.burns
+
+    _save_operator_burn_plan("rpo_02_vbar_approach", OperatorBurnPlan())
+
+    assert _load_saved_operator_burn_plan("rpo_02_vbar_approach") == OperatorBurnPlan()
+
+
+def test_launcher_settings_persist_frame_convention_preset(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("OEL_GAME_SETTINGS_PATH", str(tmp_path / "settings.yaml"))
+    settings_path = _game_settings_path()
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text(
+        "frame_convention:\n"
+        f"  preset: {FRAME_CONVENTION_PRESET_SPACE_FORCE}\n"
+        "ask_frame_convention_on_launch: false\n",
+        encoding="utf-8",
+    )
+
+    loaded = _load_game_settings()
+
+    assert loaded.frame_convention == FrameConvention(
+        positive_in_track="left",
+        positive_cross_track="clockwise",
+    )
+    assert loaded.ask_frame_convention_on_launch is False
+    assert loaded.last_game_mode is None
+
+
+def test_space_force_frame_mirrors_only_display_in_track_axis() -> None:
+    convention = frame_convention_from_preset(FRAME_CONVENTION_PRESET_SPACE_FORCE)
+
+    assert frame_convention_display_axis_sign(convention, 0) == pytest.approx(1.0)
+    assert frame_convention_display_axis_sign(convention, 1) == pytest.approx(-1.0)
+    assert frame_convention_display_axis_sign(convention, 2) == pytest.approx(1.0)
+
+
+def test_dashboard_frame_convention_does_not_flip_cislunar_axes() -> None:
+    dashboard = object.__new__(PygameRPODashboard)
+    dashboard.frame_convention = frame_convention_from_preset(FRAME_CONVENTION_PRESET_SPACE_FORCE)
+    dashboard.relative_frame = "ric"
+
+    assert dashboard._axis_display_sign(1) == pytest.approx(-1.0)
+
+    dashboard.relative_frame = "cislunar_l1"
+
+    assert dashboard._axis_display_sign(1) == pytest.approx(1.0)
+
+
+def test_dashboard_signed_axis_labels_include_positive_and_negative_directions() -> None:
+    dashboard = object.__new__(PygameRPODashboard)
+    dashboard.relative_frame = "ric"
+
+    assert dashboard._signed_axis_label_for_plot(0, 1) == "+R"
+    assert dashboard._signed_axis_label_for_plot(0, -1) == "-R"
+    assert dashboard._signed_axis_label_for_plot(1, 1) == "+I"
+    assert dashboard._signed_axis_label_for_plot(2, -1) == "-C"
+
+
+def test_operator_preview_signed_axis_labels_include_positive_and_negative_directions() -> None:
+    assert _operator_signed_axis_label(0, 1) == "+R"
+    assert _operator_signed_axis_label(1, -1) == "-I"
+    assert _operator_signed_axis_label(2, 1) == "+C"
+
+
+def test_frame_convention_dialog_hit_testing() -> None:
+    choices = _frame_convention_dialog_choice_rects(1040, 680)
+    checkbox = _frame_convention_dialog_checkbox_rect(1040, 680)
+    continue_rect = _frame_convention_dialog_continue_rect(1040, 680)
+
+    assert (
+        _frame_convention_dialog_action(
+            (choices["oel_default"][0] + 2, choices["oel_default"][1] + 2),
+            width=1040,
+            height=680,
+        )
+        == "oel_default"
+    )
+    assert (
+        _frame_convention_dialog_action(
+            (choices["space_force"][0] + 2, choices["space_force"][1] + 2),
+            width=1040,
+            height=680,
+        )
+        == "space_force"
+    )
+    assert _frame_convention_dialog_action((checkbox[0] + 3, checkbox[1] + 3), width=1040, height=680) == "dont_ask_again"
+    assert _frame_convention_dialog_action((continue_rect[0] + 3, continue_rect[1] + 3), width=1040, height=680) == "continue"
+    assert _frame_convention_dialog_action((10, 10), width=1040, height=680) is None
+
+
 def test_clear_progress_suppresses_legacy_yaml_progress_without_mutating_yaml(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("OEL_GAME_PROGRESS_PATH", str(tmp_path / "progress.yaml"))
     config_dir = tmp_path / "configs"
@@ -1109,6 +1370,11 @@ def test_music_button_hit_test() -> None:
     assert _music_at_pos((500, 44)) is False
 
 
+def test_settings_button_hit_test() -> None:
+    assert _settings_button_at_pos((980, 642), width=1040, height=680) is True
+    assert _settings_button_at_pos((1008, 642), width=1040, height=680) is False
+
+
 def test_start_screen_event_action_begins_on_any_non_escape_key() -> None:
     class FakePygame:
         QUIT = "quit"
@@ -1129,9 +1395,10 @@ def test_start_screen_event_action_begins_on_any_non_escape_key() -> None:
 def test_choose_game_launch_can_skip_start_screen(monkeypatch) -> None:
     calls: list[bool] = []
 
-    monkeypatch.setattr(game_launcher, "discover_game_scenarios", lambda config_dir=None: ("option",))
+    monkeypatch.setattr(game_launcher, "_load_game_settings", lambda: GameSettings())
+    monkeypatch.setattr(game_launcher, "discover_game_scenarios_for_mode", lambda config_dir=None, *, mode="pilot": ("option",))
 
-    def fake_run_launcher(options, *, show_start_screen=True):
+    def fake_run_launcher(options, *, show_start_screen=True, initial_mode="pilot"):
         calls.append(bool(show_start_screen))
         return None
 
@@ -1140,6 +1407,91 @@ def test_choose_game_launch_can_skip_start_screen(monkeypatch) -> None:
     game_launcher.choose_game_launch(show_start_screen=False)
 
     assert calls == [False]
+
+
+def test_choose_game_launch_opens_in_initial_mode(monkeypatch) -> None:
+    calls: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(game_launcher, "_load_game_settings", lambda: GameSettings())
+
+    def fake_discover(config_dir=None, *, mode="pilot"):
+        calls.append(("discover", mode))
+        return ("option",)
+
+    def fake_run_launcher(options, *, show_start_screen=True, initial_mode="pilot"):
+        calls.append(("run", initial_mode))
+        return None
+
+    monkeypatch.setattr(game_launcher, "discover_game_scenarios_for_mode", fake_discover)
+    monkeypatch.setattr(game_launcher, "_run_launcher", fake_run_launcher)
+
+    game_launcher.choose_game_launch(show_start_screen=False, initial_mode="operator")
+
+    assert calls == [("discover", "operator"), ("run", "operator")]
+
+
+def test_choose_game_launch_prefers_saved_last_mode(monkeypatch) -> None:
+    calls: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(game_launcher, "_load_game_settings", lambda: GameSettings(last_game_mode="operator"))
+
+    def fake_discover(config_dir=None, *, mode="pilot"):
+        calls.append(("discover", mode))
+        return ("option",)
+
+    def fake_run_launcher(options, *, show_start_screen=True, initial_mode="pilot"):
+        calls.append(("run", initial_mode))
+        return None
+
+    monkeypatch.setattr(game_launcher, "discover_game_scenarios_for_mode", fake_discover)
+    monkeypatch.setattr(game_launcher, "_run_launcher", fake_run_launcher)
+
+    game_launcher.choose_game_launch(show_start_screen=False, initial_mode="pilot")
+
+    assert calls == [("discover", "operator"), ("run", "operator")]
+
+
+def test_operator_selection_defers_script_screen_to_gameplay(monkeypatch) -> None:
+    config_dir = Path(__file__).resolve().parents[1] / "game" / "configs"
+    option = next(
+        option for option in discover_game_scenarios_for_mode(config_dir, mode="operator")
+        if option.scenario_id == "rpo_01_coast_relative_motion"
+    )
+    calls: list[str] = []
+
+    class FakePygame:
+        pass
+
+    def fail_prebrief(*_args, **_kwargs):
+        raise AssertionError("operator launch should not show the prebrief screen")
+
+    def fail_plan_screen(*_args, **_kwargs):
+        calls.append("plan")
+        raise AssertionError("operator launch should defer the script screen to gameplay")
+
+    monkeypatch.setattr(game_launcher, "_enter_operator_fullscreen", lambda pygame, screen: None)
+    monkeypatch.setattr(game_launcher, "_run_operator_prebrief_screen", fail_prebrief)
+    monkeypatch.setattr(game_launcher, "_run_operator_plan_screen", fail_plan_screen)
+
+    selection = game_launcher._selection_for_launch(
+        FakePygame(),
+        object(),
+        object(),
+        option=option,
+        difficulty="easy",
+        music_enabled=False,
+        record_video=False,
+        mode="operator",
+        frame_convention=FrameConvention(),
+        font=_FixedWidthFont(),
+        small_font=_FixedWidthFont(),
+        title_font=_FixedWidthFont(),
+    )
+
+    assert calls == []
+    assert selection is not None
+    assert selection.operator_burn_plan is None
+    assert selection.skip_initial_briefing is True
 
 
 def test_start_screen_artwork_rect_fits_screen_without_distortion() -> None:
@@ -1186,7 +1538,7 @@ def _launcher_option_with_long_preview() -> GameScenarioOption:
 
 def test_launcher_hides_tutorial_progress_text() -> None:
     option = _launcher_option_with_long_preview()
-    tutorial = replace(option, scenario_id="rpo_00_tutorial", title="Level 0 - Tutorial", level_number=0)
+    tutorial = replace(option, scenario_id="rpo_00_tutorial", title="Level 0 - Pilot Tutorial", level_number=0)
 
     assert _show_progress_text(tutorial) is False
     assert _show_progress_text(option) is True
@@ -1202,6 +1554,23 @@ def test_launcher_preview_wraps_text_to_pixel_width() -> None:
 
     assert len(lines) > 1
     assert all(font.size(line)[0] <= 160 for line in lines)
+
+
+def test_launcher_preview_wraps_long_budget_line() -> None:
+    font = _FixedWidthFont()
+    option = replace(
+        _launcher_option_with_long_preview(),
+        time_budget_s=7200.0,
+        delta_v_budget_m_s=1.0,
+        goal_speed_km_s=0.00005,
+        target_delta_v_budget_m_s=2.0,
+    )
+
+    lines = _wrapped_budget_lines(option, font, 300)
+
+    assert len(lines) > 1
+    assert all(font.size(line)[0] <= 300 for line in lines)
+    assert not lines[-1].endswith("...")
 
 
 def test_launcher_preview_truncates_long_unbroken_words_to_pixel_width() -> None:
@@ -2365,9 +2734,10 @@ def test_level_zero_tutorial_is_passive_close_range_intro() -> None:
     chaser_initial = config.scenario.objects["chaser"].initial_state["relative_to_target_ric"]
 
     assert training_cfg.scenario_id == "rpo_00_tutorial"
-    assert config.scenario.metadata["game"]["level_name"] == "Level 0 - Tutorial"
+    assert config.scenario.metadata["game"]["level_name"] == "Level 0 - Pilot Tutorial"
     assert _game_control_mode(config) == "ric_translation"
     assert _game_camera_mode(config) == "target_pair"
+    assert _game_target_centered_plot_planes(config) == ("RI", "RC", "IC")
     assert _game_plot_overlays_in_zoom(config) is False
     assert training_cfg.goal_range_km == pytest.approx(0.25)
     assert training_cfg.goal_radius_km is None
@@ -2417,7 +2787,7 @@ def test_level_six_combines_elliptic_burn_familiarization_and_approach() -> None
     assert _game_camera_mode(config) == "rule_toggle_pair"
     assert _game_camera_rule_mode(config) == "current_pair"
     assert _game_camera_rule_toggle_enabled(config) is True
-    assert _game_target_centered_plot_planes(config) == ("RI",)
+    assert _game_target_centered_plot_planes(config) == ("RI", "RC")
     assert _game_plot_prediction_full_trajectory_only(config) is True
     assert training_cfg.survival_goal is False
     assert training_cfg.goal_radius_km == pytest.approx(0.18)
@@ -2431,6 +2801,71 @@ def test_level_six_combines_elliptic_burn_familiarization_and_approach() -> None
     assert training_cfg.require_speed_multiplier_change is True
     assert target_coes["ecc"] == pytest.approx(0.25)
     assert target_coes["true_anomaly_deg"] == pytest.approx(60.0)
+
+
+def test_level_seven_rule_toggle_keeps_ri_and_rc_target_centered() -> None:
+    config_path = (
+        Path(__file__).resolve().parents[1]
+        / "game"
+        / "configs"
+        / "game_training_rpo_07_elliptic_burn_then_approach.yaml"
+    )
+    config = SimulationConfig.from_yaml(config_path)
+    dashboard = object.__new__(PygameRPODashboard)
+    dashboard.camera_mode = _game_camera_mode(config)
+    dashboard.camera_rule_mode = _game_camera_rule_mode(config)
+    dashboard.target_centered_plot_planes = _game_target_centered_plot_planes(config)
+    dashboard.target_centered_plot_axes = _game_target_centered_plot_axes(config)
+    chaser_current = np.array([0.0, -4.5, 0.2], dtype=float)
+    target_current = np.zeros(3, dtype=float)
+
+    ri_center = dashboard._camera_center_ric(
+        chaser_current=chaser_current,
+        target_current=target_current,
+        x_axis=1,
+        y_axis=0,
+    )
+    rc_center = dashboard._camera_center_ric(
+        chaser_current=chaser_current,
+        target_current=target_current,
+        x_axis=2,
+        y_axis=0,
+    )
+
+    assert dashboard.camera_mode == "rule_toggle_pair"
+    assert dashboard._camera_rule_mode_key() == "current_pair"
+    assert dashboard.target_centered_plot_planes == ("RI", "RC")
+    assert ri_center == pytest.approx(target_current)
+    assert rc_center == pytest.approx(target_current)
+
+
+def test_level_seven_operator_mode_relaxes_required_burn_axes() -> None:
+    config_path = (
+        Path(__file__).resolve().parents[1]
+        / "game"
+        / "configs"
+        / "game_training_rpo_07_elliptic_burn_then_approach.yaml"
+    )
+    config = SimulationConfig.from_yaml(config_path)
+    training_cfg = RPOTrainingConfig.from_metadata(dict(config.scenario.metadata or {}))
+
+    assert training_config_for_game_mode(training_cfg, game_mode="pilot").required_burn_axes == (
+        "radial",
+        "in_track",
+    )
+    assert training_config_for_game_mode(training_cfg, game_mode="operator").required_burn_axes == ()
+
+
+def test_operator_level_seven_brief_omits_required_burn_axis_criteria() -> None:
+    config_dir = Path(__file__).resolve().parents[1] / "game" / "configs"
+    option = next(
+        option for option in discover_game_scenarios_for_mode(config_dir, mode="operator")
+        if option.scenario_id == "rpo_07_elliptic_burn_then_approach"
+    )
+
+    assert not any("radial burn" in criterion.lower() for criterion in option.pass_criteria)
+    assert not any("in-track burn" in criterion.lower() for criterion in option.pass_criteria)
+    assert "First test radial and in-track burns" not in option.player_brief
 
 
 def test_level_seven_is_elliptic_nmc_lesson() -> None:
@@ -3242,6 +3677,600 @@ def test_ric_translation_provider_commands_direct_ric_thrust() -> None:
     assert np.allclose(out["thrust_eci_km_s2"], np.array([2.0e-5, 0.0, 0.0]), atol=1e-12)
 
 
+def test_operator_burn_plan_parser_and_validation() -> None:
+    plan = parse_operator_burn_plan("T= 50 s, 2.0 m/s R, 1.0 m/s I, 0.2 m/s C")
+
+    assert len(plan.burns) == 1
+    assert plan.burns[0].time_s == pytest.approx(50.0)
+    assert plan.burns[0].delta_v_ric_m_s == pytest.approx((2.0, 1.0, 0.2))
+    assert validate_operator_burn_plan(plan, total_delta_v_budget_m_s=5.0) == ()
+
+    too_large = parse_operator_burn_plan("T= 1 s, 6.0 m/s R")
+
+    assert validate_operator_burn_plan(too_large, total_delta_v_budget_m_s=20.0) == (
+        "Burn 1: delta-v exceeds 5.0 m/s.",
+    )
+
+    too_close = parse_operator_burn_plan("T=1 s, 0.5 m/s R\nT=10.5 s, 0.5 m/s I")
+
+    assert validate_operator_burn_plan(too_close, total_delta_v_budget_m_s=20.0) == (
+        "Burn 2: time must be at least 10 seconds after Burn 1.",
+    )
+
+    exactly_spaced = parse_operator_burn_plan("T=1 s, 0.5 m/s R\nT=11 s, 0.5 m/s I")
+
+    assert validate_operator_burn_plan(exactly_spaced, total_delta_v_budget_m_s=20.0) == ()
+
+
+def test_operator_burn_rows_build_plan_with_blank_components(tmp_path: Path) -> None:
+    option = GameScenarioOption(
+        path=tmp_path / "game_training_rpo_01_demo.yaml",
+        scenario_id="rpo_01_demo",
+        title="Demo",
+        description="",
+        learning_goal="",
+        player_brief="",
+        pass_criteria=(),
+        instructor_notes=(),
+        difficulty="easy",
+        time_budget_s=100.0,
+        delta_v_budget_m_s=5.0,
+        goal_speed_km_s=None,
+        target_delta_v_budget_m_s=None,
+        completed_difficulties=(),
+        high_score=0,
+        level_number=1,
+    )
+
+    plan, errors = _operator_plan_from_rows([["50", "2", "", "0.2"], ["", "", "", ""]], option=option)
+
+    assert errors == ()
+    assert len(plan.burns) == 1
+    assert plan.burns[0].time_s == pytest.approx(50.0)
+    assert plan.burns[0].delta_v_ric_m_s == pytest.approx((2.0, 0.0, 0.2))
+
+
+def test_operator_burn_rows_use_target_budget_when_target_controlled(tmp_path: Path) -> None:
+    option = GameScenarioOption(
+        path=tmp_path / "game_training_rpo_11_demo.yaml",
+        scenario_id="rpo_11_demo",
+        title="Demo",
+        description="",
+        learning_goal="",
+        player_brief="",
+        pass_criteria=(),
+        instructor_notes=(),
+        difficulty="easy",
+        time_budget_s=100.0,
+        delta_v_budget_m_s=25.0,
+        goal_speed_km_s=None,
+        target_delta_v_budget_m_s=1.0,
+        completed_difficulties=(),
+        high_score=0,
+        level_number=10,
+        controlled_object_id="target",
+        target_object_id="target",
+    )
+
+    _plan, errors = _operator_plan_from_rows([["50", "2", "", "0"]], option=option)
+
+    assert errors == ("Plan total delta-v exceeds 1.0 m/s budget.",)
+
+
+def test_operator_burn_rows_prefill_from_existing_plan() -> None:
+    plan = OperatorBurnPlan(
+        burns=(
+            OperatorBurn(time_s=50.0, delta_v_ric_m_s=(2.0, 1.0, 0.2)),
+            OperatorBurn(time_s=120.0, delta_v_ric_m_s=(-0.5, 0.0, 0.0)),
+        )
+    )
+
+    assert _operator_rows_from_plan(plan) == [["50", "2", "1", "0.2"], ["120", "-0.5", "0", "0"]]
+
+
+def test_operator_tutorial_scripts_six_locked_burn_demos() -> None:
+    config_path = (
+        Path(__file__).resolve().parents[1] / "game" / "configs" / "game_training_rpo_00_tutorial.yaml"
+    )
+    training_cfg = RPOTrainingConfig.from_metadata(dict(SimulationConfig.from_yaml(config_path).scenario.metadata or {}))
+    stages = _operator_tutorial_stages()
+
+    assert _operator_tutorial_enabled("operator", training_cfg)
+    assert not _operator_tutorial_enabled("pilot", training_cfg)
+    assert [stage.display_label for stage in stages] == [
+        "+I Burn",
+        "-I Burn",
+        "+R Burn",
+        "-R Burn",
+        "+C Burn",
+        "-C Burn",
+    ]
+    assert _operator_tutorial_demo_title(OperatorTutorialRuntime(stage_index=2)) == "Demo 3/6: +R Burn"
+
+    expected = (
+        (1, 1),
+        (1, -1),
+        (0, 1),
+        (0, -1),
+        (2, 1),
+        (2, -1),
+    )
+    for stage, (axis_index, sign) in zip(stages, expected, strict=True):
+        assert len(stage.plan.burns) == 1
+        burn = stage.plan.burns[0]
+        expected_delta_v = np.zeros(3, dtype=float)
+        expected_delta_v[axis_index] = sign * OPERATOR_TUTORIAL_BURN_DELTA_V_M_S
+        assert burn.time_s == pytest.approx(OPERATOR_TUTORIAL_BURN_TIME_S)
+        assert burn.delta_v_ric_m_s == pytest.approx(tuple(expected_delta_v))
+
+
+def test_operator_tutorial_uses_no_helper_trajectory() -> None:
+    dashboard = type(
+        "Dashboard",
+        (),
+        {
+            "tutorial_target_path_ric": np.ones((3, 6), dtype=float),
+            "_frame_cache_dirty": False,
+        },
+    )()
+
+    _clear_dashboard_tutorial_path(dashboard)
+
+    assert dashboard.tutorial_target_path_ric.shape == (0, 6)
+    assert dashboard._frame_cache_dirty is True
+
+
+def test_operator_plan_layout_uses_game_plot_positions_and_scrollable_burn_table() -> None:
+    left, right = _operator_game_plot_panel_rects(1280, 720)
+    table = _operator_burn_table_rect(1280, 720)
+
+    assert (left.x, left.y, left.width, left.height) == (36, 88, 586, 464)
+    assert (right.x, right.y, right.width, right.height) == (658, 88, 586, 464)
+    assert table[0] == left.x
+    assert table[1] > left.bottom
+    assert table[2] > 800
+    assert _operator_table_visible_rows(table) == 2
+    assert _operator_table_visible_rows(table) < 6
+    assert _operator_scroll_for_active_row(5, 0, row_count=8, table_rect=table) > 0
+
+
+def test_operator_objectives_button_and_overlay_cover_plot_area() -> None:
+    button = _operator_objectives_button_rect(1280, 720)
+    equation_button = _operator_equation_sheet_button_rect(1280, 720)
+    overlay = _operator_objectives_overlay_rect(1280, 720)
+    left, right = _operator_game_plot_panel_rects(1280, 720)
+    table = _operator_burn_table_rect(1280, 720)
+
+    assert button[0] + button[2] == 1228
+    assert button[1] == 34
+    assert equation_button == (972, 604, 256, 36)
+    assert overlay[0] > left.x
+    assert overlay[1] > left.y
+    assert overlay[0] + overlay[2] < right.right
+    assert overlay[1] + overlay[3] < table[1]
+
+
+def test_operator_objectives_numeric_targets_include_level_thresholds() -> None:
+    config_dir = Path(__file__).resolve().parents[1] / "game" / "configs"
+    option = next(
+        option for option in discover_game_scenarios_for_mode(config_dir, mode="operator")
+        if option.scenario_id == "rpo_01_coast_relative_motion"
+    )
+    plot_context = _operator_plot_context(option.path)
+
+    targets = _operator_objective_numeric_targets(option, plot_context.training_config)
+
+    assert "Desired radial amplitude: 1.500 km" in targets
+    assert "Desired cross-track amplitude: 1.500 km" in targets
+    assert "NMT amplitude tolerance: 150.0 m" in targets
+    assert "Chaser delta-v budget: 8.000 m/s" in targets
+
+
+def test_operator_objectives_scroll_clamps_to_overflow_content() -> None:
+    config_dir = Path(__file__).resolve().parents[1] / "game" / "configs"
+    option = next(
+        option for option in discover_game_scenarios_for_mode(config_dir, mode="operator")
+        if option.scenario_id == "rpo_01_coast_relative_motion"
+    )
+    plot_context = _operator_plot_context(option.path)
+    overlay = _operator_objectives_overlay_rect(1280, 720)
+    content_rect = _operator_objectives_content_rect(overlay)
+    content_height = _operator_objectives_content_height(
+        option,
+        plot_context.training_config,
+        font=_FixedWidthFont(),
+        width_px=content_rect[2],
+    )
+
+    assert content_height > content_rect[3]
+    assert _clamp_operator_objectives_scroll_px(
+        9999,
+        content_height=content_height,
+        viewport_height=content_rect[3],
+    ) == content_height - content_rect[3]
+
+
+def test_operator_plan_delete_row_hit_testing_is_table_scoped() -> None:
+    rect = type("Rect", (), {})
+    first = rect()
+    first.x, first.y, first.w, first.h = 900, 600, 22, 22
+    second = rect()
+    second.x, second.y, second.w, second.h = 900, 636, 22, 22
+
+    assert _operator_delete_row_at_pos((905, 605), [first, second], table_rect=(36, 548, 912, 172)) == 0
+    assert _operator_delete_row_at_pos((905, 641), [first, second], table_rect=(36, 548, 912, 172)) == 1
+    assert _operator_delete_row_at_pos((905, 605), [first, second], table_rect=(36, 650, 912, 120)) is None
+
+
+def test_operator_initial_relative_state_reads_level_yaml(tmp_path: Path) -> None:
+    path = tmp_path / "game_training_rpo_01_demo.yaml"
+    cfg = _game_config(tmp_path)
+    cfg["metadata"]["game"]["training"] = {"scenario_id": "rpo_01_demo", "chaser_object_id": "chaser"}
+    cfg["objects"]["chaser"]["initial_state"]["relative_to_target_ric"] = {
+        "frame": "rect",
+        "state": [-7.5, -15.0, 1.0, 0.0, 0.011, 0.0],
+    }
+    path.write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
+
+    assert _operator_initial_relative_ric_state(path) == pytest.approx((-7.5, -15.0, 1.0))
+
+
+def test_operator_plot_context_uses_initial_coast_not_goal_nmt_for_level_one() -> None:
+    path = Path("sim/game/configs/game_training_rpo_01_coast_relative_motion.yaml")
+
+    context = _operator_plot_context(path)
+    coast = np.array(context.initial_coast_ric_km_s, dtype=float).reshape(-1, 6)
+
+    assert coast.shape[0] > 10
+    assert coast[:, 0] == pytest.approx(0.0)
+    assert coast[:, 1] == pytest.approx(-3.0)
+    assert coast[:, 2] == pytest.approx(0.0)
+
+
+def test_operator_planned_trajectory_applies_burns_and_extends_one_orbit() -> None:
+    path = Path("sim/game/configs/game_training_rpo_01_coast_relative_motion.yaml")
+    context = _operator_plot_context(path)
+    assert context.mean_motion_rad_s is not None
+    plan = OperatorBurnPlan(
+        burns=(
+            OperatorBurn(time_s=0.0, delta_v_ric_m_s=(0.0, 0.1, 0.0)),
+            OperatorBurn(time_s=2000.0, delta_v_ric_m_s=(0.0, -0.1, 0.0)),
+        )
+    )
+
+    trajectory, markers = _operator_planned_trajectory(context, plan)
+    period_s = 2.0 * np.pi / float(context.mean_motion_rad_s)
+    initial = np.asarray(context.initial_relative_ric_km_s, dtype=float)
+
+    assert trajectory.shape[0] > 200
+    assert markers.shape == (2, 6)
+    assert trajectory[0] == pytest.approx(initial)
+    assert markers[0, 3:6] == pytest.approx(initial[3:6] + np.array([0.0, 0.0001, 0.0]))
+    expected_second_pre_burn = _cw_coast_states(markers[0], np.array([2000.0]), float(context.mean_motion_rad_s))[0]
+    assert markers[1, :3] == pytest.approx(expected_second_pre_burn[:3], abs=1.0e-9)
+    assert markers[1, 3:6] == pytest.approx(expected_second_pre_burn[3:6] + np.array([0.0, -0.0001, 0.0]))
+    expected_final = _cw_coast_states(
+        markers[-1],
+        np.array([period_s]),
+        float(context.mean_motion_rad_s),
+    )[0]
+    assert trajectory[-1] == pytest.approx(expected_final, abs=1.0e-9)
+
+
+def test_operator_burn_velocity_vector_uses_post_burn_velocity_direction() -> None:
+    path = Path("sim/game/configs/game_training_rpo_01_coast_relative_motion.yaml")
+    context = _operator_plot_context(path)
+    plan = OperatorBurnPlan(burns=(OperatorBurn(time_s=0.0, delta_v_ric_m_s=(0.0, 0.1, 0.0)),))
+
+    _trajectory, markers = _operator_planned_trajectory(context, plan)
+    endpoint = _operator_velocity_vector_endpoint(
+        (100, 100),
+        markers[0, 3:6],
+        x_axis=1,
+        y_axis=0,
+        length_px=30.0,
+    )
+
+    assert markers[0, 3:6] == pytest.approx(np.array(context.initial_relative_ric_km_s[3:6]) + np.array([0.0, 0.0001, 0.0]))
+    assert endpoint == (130, 100)
+
+
+def test_operator_trajectory_probe_click_selects_and_clears_state() -> None:
+    path = Path("sim/game/configs/game_training_rpo_01_coast_relative_motion.yaml")
+    context = _operator_plot_context(path)
+    plan = OperatorBurnPlan(burns=(OperatorBurn(time_s=0.0, delta_v_ric_m_s=(0.0, 0.1, 0.0)),))
+    trajectory, _markers = _operator_planned_trajectory(context, plan)
+    transform = {
+        "plot": (0, 0, 500, 400),
+        "camera_center": (0.0, 0.0, 0.0),
+        "scale_x": 50.0,
+        "scale_y": 50.0,
+        "x_display_sign": 1.0,
+        "y_display_sign": 1.0,
+    }
+    dashboard = type(
+        "Dashboard",
+        (),
+        {"_frame_cache": {"plot_transforms": {(1, 0): transform}}},
+    )()
+    object.__setattr__(context, "_preview_dashboard", dashboard)
+    target_state = np.asarray(trajectory[12], dtype=float).reshape(6)
+    click_pos = _operator_plot_transform_to_px(transform, target_state[:3], x_axis=1, y_axis=0)
+    assert click_pos is not None
+
+    handled, selected_state, selected_time_s = _operator_trajectory_probe_from_click(context, plan, click_pos)
+
+    assert handled is True
+    assert selected_state is not None
+    selected_px = _operator_plot_transform_to_px(transform, selected_state[:3], x_axis=1, y_axis=0)
+    assert selected_px is not None
+    assert np.linalg.norm(np.array(selected_px, dtype=float) - np.array(click_pos, dtype=float)) <= 10.0
+    assert any(np.allclose(selected_state, row) for row in trajectory)
+    assert selected_time_s is not None
+    assert _operator_probe_time_label(selected_time_s).startswith("T=")
+    assert _operator_probe_time_label(selected_time_s).endswith("s")
+
+    selected_probe = OperatorTrajectoryProbe(
+        state_ric_km_s=tuple(float(value) for value in selected_state),
+        time_s=float(selected_time_s),
+        plan_key=("test",),
+    )
+    handled, selected_state, selected_time_s = _operator_trajectory_probe_from_click(
+        context,
+        plan,
+        click_pos,
+        selected_probe=selected_probe,
+    )
+
+    assert handled is True
+    assert selected_state is None
+    assert selected_time_s is None
+
+
+def test_operator_planned_trajectory_uses_ya_for_elliptic_levels(monkeypatch: pytest.MonkeyPatch) -> None:
+    path = Path("sim/game/configs/game_training_rpo_07_elliptic_burn_then_approach.yaml")
+    context = _operator_plot_context(path)
+    assert _coast_prediction_model_key(context.coast_prediction_model) == "tschauner_hempel"
+    assert context.reference_state_eci_km_s is not None
+    calls: list[float] = []
+    original = game_launcher.ya_closed_form_transition_matrix
+
+    def spy_ya(dt_s: float, chief_start_eci_km_s: np.ndarray, chief_end_eci_km_s: np.ndarray, **kwargs: Any) -> Any:
+        calls.append(float(dt_s))
+        return original(dt_s, chief_start_eci_km_s, chief_end_eci_km_s, **kwargs)
+
+    monkeypatch.setattr(game_launcher, "ya_closed_form_transition_matrix", spy_ya)
+    plan = OperatorBurnPlan(burns=(OperatorBurn(time_s=0.0, delta_v_ric_m_s=(0.0, 0.1, 0.0)),))
+
+    trajectory, markers = _operator_planned_trajectory(context, plan)
+
+    assert calls
+    assert max(calls) > 1000.0
+    assert trajectory.shape[0] > 100
+    assert markers.shape == (1, 6)
+
+
+def test_operator_vbar_script_preview_uses_live_level_camera_and_forbidden_regions() -> None:
+    path = Path("sim/game/configs/game_training_rpo_02_vbar_approach.yaml")
+    context = _operator_plot_context(path)
+    training_cfg = context.training_config
+    assert training_cfg is not None
+    rel = np.array(context.initial_relative_ric_km_s[:3], dtype=float)
+    target = np.zeros(3, dtype=float)
+
+    ri_center = _operator_camera_center_ric(context, chaser_current=rel, target_current=target, x_axis=1, y_axis=0)
+    rc_center = _operator_camera_center_ric(context, chaser_current=rel, target_current=target, x_axis=2, y_axis=0)
+    ri_fr = _operator_forbidden_region_projection_points(training_cfg, x_axis=1, y_axis=0, offset=target)
+    rc_fr = _operator_forbidden_region_projection_points(training_cfg, x_axis=2, y_axis=0, offset=target)
+
+    assert context.camera_mode == "target_pair"
+    assert context.target_centered_plot_axes == {"RI": ("y",)}
+    assert context.plot_overlays_in_zoom is False
+    assert context.plot_overlays_in_zoom_by_plane == {"RC": True}
+    assert context.proximity_ring_plot_planes == ("RI",)
+    assert ri_center == pytest.approx(np.array([0.0, -2.5, 0.0]))
+    assert rc_center == pytest.approx(np.zeros(3, dtype=float))
+    assert len(ri_fr) == 3
+    assert len(rc_fr) == 2
+    assert _operator_minimum_plot_span_km(
+        context,
+        x_axis=1,
+        y_axis=0,
+        target_current=target,
+        nmt=np.empty((0, 3), dtype=float),
+        nmt_bounds=(),
+    ) == pytest.approx(MIN_PLOT_SPAN_KM)
+    assert _operator_minimum_plot_span_km(
+        context,
+        x_axis=2,
+        y_axis=0,
+        target_current=target,
+        nmt=np.empty((0, 3), dtype=float),
+        nmt_bounds=(),
+    ) == pytest.approx(5.8 * PLOT_OVERLAY_MARGIN)
+
+
+def test_operator_rbar_script_preview_stays_target_centered_without_fixed_spans() -> None:
+    path = Path("sim/game/configs/game_training_rpo_03_rbar_approach.yaml")
+    context = _operator_plot_context(path)
+    training_cfg = context.training_config
+    assert training_cfg is not None
+    rel = np.array(context.initial_relative_ric_km_s[:3], dtype=float)
+    target = np.zeros(3, dtype=float)
+
+    ri_center = _operator_camera_center_ric(context, chaser_current=rel, target_current=target, x_axis=1, y_axis=0)
+    rc_center = _operator_camera_center_ric(context, chaser_current=rel, target_current=target, x_axis=2, y_axis=0)
+
+    assert context.camera_mode == "target_pair"
+    assert context.target_centered_plot_planes == ("RI", "RC")
+    assert context.plot_overlays_in_zoom is False
+    assert context.plot_fixed_axis_half_span_km == {}
+    assert ri_center == pytest.approx(np.zeros(3, dtype=float))
+    assert rc_center == pytest.approx(np.zeros(3, dtype=float))
+    assert len(_operator_forbidden_region_projection_points(training_cfg, x_axis=1, y_axis=0, offset=target)) == 1
+    assert len(_operator_forbidden_region_projection_points(training_cfg, x_axis=2, y_axis=0, offset=target)) == 1
+
+
+def test_operator_burn_provider_executes_single_ric_impulse() -> None:
+    plan = parse_operator_burn_plan("T= 10 s, 2.0 m/s R, 1.0 m/s I, 0.2 m/s C")
+    provider = OperatorBurnCommandProvider(
+        plan,
+        controlled_object_id="chaser",
+        reference_object_id="target",
+    )
+    target = StateTruth(
+        position_eci_km=np.array([7000.0, 0.0, 0.0], dtype=float),
+        velocity_eci_km_s=np.array([0.0, 7.5, 0.0], dtype=float),
+        attitude_quat_bn=np.array([1.0, 0.0, 0.0, 0.0], dtype=float),
+        angular_rate_body_rad_s=np.zeros(3, dtype=float),
+        mass_kg=100.0,
+        t_s=0.0,
+    )
+    own_knowledge = {"target": _knowledge_from_state6(np.hstack((target.position_eci_km, target.velocity_eci_km_s)))}
+
+    before = provider(
+        truth=target,
+        t_s=8.0,
+        dt_s=1.0,
+        object_id="chaser",
+        own_knowledge=own_knowledge,
+    )
+    burn = provider(
+        truth=target,
+        t_s=9.5,
+        dt_s=1.0,
+        object_id="chaser",
+        own_knowledge=own_knowledge,
+    )
+    burn_delta_v_ric = provider.last_executed_delta_v_ric_m_s
+    after = provider(
+        truth=target,
+        t_s=10.5,
+        dt_s=1.0,
+        object_id="chaser",
+        own_knowledge=own_knowledge,
+    )
+
+    assert np.allclose(before["thrust_eci_km_s2"], np.zeros(3), atol=1e-15)
+    assert np.allclose(burn["thrust_eci_km_s2"], np.array([0.002, 0.001, 0.0002]), atol=1e-12)
+    assert burn["command_mode_flags"]["operator_burn_index"] == 1
+    assert burn_delta_v_ric == pytest.approx((2.0, 1.0, 0.2))
+    assert provider.executed_delta_v_m_s == pytest.approx(np.sqrt(2.0**2 + 1.0**2 + 0.2**2))
+    assert np.allclose(after["thrust_eci_km_s2"], np.zeros(3), atol=1e-15)
+    assert provider.last_executed_delta_v_ric_m_s is None
+
+
+def test_operator_burn_provider_uses_moon_ric_frame_for_cislunar_impulse() -> None:
+    plan = parse_operator_burn_plan("T= 0 s, 1.0 m/s R")
+    provider = OperatorBurnCommandProvider(
+        plan,
+        controlled_object_id="chaser",
+        reference_object_id="target",
+        control_mode="moon_ric_translation",
+        relative_frame="moon_ric",
+    )
+    moon = cr3bp_moon_state_km_s()
+    target_state = moon + np.array([1000.0, 0.0, 0.0, 0.0, 1.0, 0.0], dtype=float)
+    target = StateTruth(
+        position_eci_km=target_state[:3],
+        velocity_eci_km_s=target_state[3:],
+        attitude_quat_bn=np.array([1.0, 0.0, 0.0, 0.0], dtype=float),
+        angular_rate_body_rad_s=np.zeros(3, dtype=float),
+        mass_kg=100.0,
+        t_s=0.0,
+    )
+    own_knowledge = {"target": _knowledge_from_state6(target_state)}
+
+    burn = provider(
+        truth=target,
+        t_s=0.0,
+        dt_s=1.0,
+        object_id="chaser",
+        own_knowledge=own_knowledge,
+    )
+
+    assert np.allclose(burn["thrust_eci_km_s2"], np.array([0.001, 0.0, 0.0]), atol=1e-12)
+    assert burn["command_mode_flags"]["operator_burn_delta_v_ric_m_s"] == pytest.approx((1.0, 0.0, 0.0))
+
+
+def test_operator_burn_provider_applies_actuator_error_to_impulse() -> None:
+    plan = parse_operator_burn_plan("T= 10 s, 2.0 m/s R, 1.0 m/s I, 0.2 m/s C")
+    provider = OperatorBurnCommandProvider(
+        plan,
+        controlled_object_id="chaser",
+        reference_object_id="target",
+        actuator_error_fraction=0.025,
+    )
+    target = StateTruth(
+        position_eci_km=np.array([7000.0, 0.0, 0.0], dtype=float),
+        velocity_eci_km_s=np.array([0.0, 7.5, 0.0], dtype=float),
+        attitude_quat_bn=np.array([1.0, 0.0, 0.0, 0.0], dtype=float),
+        angular_rate_body_rad_s=np.zeros(3, dtype=float),
+        mass_kg=100.0,
+        t_s=0.0,
+    )
+    own_knowledge = {"target": _knowledge_from_state6(np.hstack((target.position_eci_km, target.velocity_eci_km_s)))}
+
+    burn = provider(
+        truth=target,
+        t_s=9.5,
+        dt_s=1.0,
+        object_id="chaser",
+        own_knowledge=own_knowledge,
+    )
+
+    expected_delta_v_ric_m_s = np.array([2.0, 1.0, 0.2], dtype=float) * 1.025
+    assert burn["command_mode_flags"]["operator_burn_planned_delta_v_ric_m_s"] == pytest.approx((2.0, 1.0, 0.2))
+    assert burn["command_mode_flags"]["operator_burn_delta_v_ric_m_s"] == pytest.approx(expected_delta_v_ric_m_s)
+    assert burn["command_mode_flags"]["operator_actuator_error_fraction"] == pytest.approx(0.025)
+    assert provider.last_executed_delta_v_ric_m_s == pytest.approx(expected_delta_v_ric_m_s)
+    assert provider.executed_delta_v_m_s == pytest.approx(np.linalg.norm(expected_delta_v_ric_m_s))
+
+
+def test_operator_projection_transition_uses_pre_and_post_burn_ric_velocity() -> None:
+    class FakeDashboard:
+        def __init__(self) -> None:
+            self.rel_hist = [
+                np.array([1.0, -2.0, 0.5, 0.010, -0.020, 0.003], dtype=float),
+            ]
+            self.transitions: list[tuple[np.ndarray, np.ndarray, float]] = []
+
+        def set_operator_projection_transition(
+            self,
+            pre_burn_rel: np.ndarray,
+            post_burn_rel: np.ndarray,
+            *,
+            duration_s: float | None = None,
+        ) -> None:
+            self.transitions.append(
+                (
+                    np.array(pre_burn_rel, dtype=float),
+                    np.array(post_burn_rel, dtype=float),
+                    float(duration_s or 0.0),
+                )
+            )
+
+    provider = type(
+        "Provider",
+        (),
+        {
+            "last_executed_burn": object(),
+            "last_executed_delta_v_ric_m_s": (2.0, -1.0, 0.5),
+        },
+    )()
+    dashboard = FakeDashboard()
+
+    duration_s = _trigger_operator_projection_transition(dashboard, provider)
+
+    assert len(dashboard.transitions) == 1
+    pre_burn, post_burn, transition_duration_s = dashboard.transitions[0]
+    assert np.allclose(post_burn, dashboard.rel_hist[-1])
+    assert np.allclose(pre_burn[:3], post_burn[:3])
+    assert np.allclose(pre_burn[3:6], post_burn[3:6] - np.array([0.002, -0.001, 0.0005]))
+    assert duration_s == pytest.approx(_operator_burn_visual_duration_s(np.linalg.norm([2.0, -1.0, 0.5])))
+    assert transition_duration_s == pytest.approx(duration_s)
+
+
 def test_manual_translation_bypasses_orbital_command_latch_for_tap_burns(tmp_path: Path) -> None:
     state = KeyboardCommandState(yaw=-1.0, use_timing_accumulator=True)
     provider = ManualGameCommandProvider(
@@ -3747,6 +4776,49 @@ def test_guided_tutorial_dashboard_path_uses_tracker_history() -> None:
     dashboard = type("Dashboard", (), {"tutorial_target_path_ric": np.empty((0, 6)), "_frame_cache_dirty": False})()
 
     _guided_tutorial_update_dashboard_path(dashboard, tracker, cfg, runtime)
+
+    assert dashboard.tutorial_target_path_ric.shape[1] == 6
+    assert dashboard.tutorial_target_path_ric[0, 4] == pytest.approx(0.00025)
+    assert dashboard._frame_cache_dirty is True
+
+
+def test_operator_mode_skips_guided_tutorial_path_sync() -> None:
+    cfg = RPOTrainingConfig(
+        enabled=True,
+        scenario_id="tutorial-guided",
+        guided_tutorial_burns=(
+            GuidedTutorialBurnConfig(name="plus_i", axis="in_track", sign=1, delta_v_m_s=0.25),
+        ),
+    )
+    tracker = RPOTrainingTracker(cfg)
+    tracker.rel_ric_hist.append(np.array([0.0, -0.8, 0.0, 0.0, 0.0, 0.0], dtype=float))
+    tracker.mean_motion_hist.append(0.001)
+    runtime = game_runner.GuidedTutorialRuntime()
+    initial_path = np.ones((3, 6), dtype=float)
+    dashboard = type(
+        "Dashboard",
+        (),
+        {"tutorial_target_path_ric": initial_path.copy(), "_frame_cache_dirty": False},
+    )()
+
+    _sync_guided_tutorial_path_for_mode(
+        dashboard,
+        tracker,
+        cfg,
+        runtime,
+        game_mode="operator",
+    )
+
+    assert np.array_equal(dashboard.tutorial_target_path_ric, initial_path)
+    assert dashboard._frame_cache_dirty is False
+
+    _sync_guided_tutorial_path_for_mode(
+        dashboard,
+        tracker,
+        cfg,
+        runtime,
+        game_mode="pilot",
+    )
 
     assert dashboard.tutorial_target_path_ric.shape[1] == 6
     assert dashboard.tutorial_target_path_ric[0, 4] == pytest.approx(0.00025)
@@ -4310,7 +5382,10 @@ def test_training_configs_load_forbidden_regions_for_bar_approaches() -> None:
     vbar_initial_dc = vbar_sim_cfg.scenario.objects["chaser"].initial_state["relative_to_target_ric"]["state"][5]
     assert 0.0 < vbar_initial_dc <= 0.001
     assert rbar.approach_gates == ()
+    assert _game_camera_mode(rbar_sim_cfg) == "target_pair"
+    assert _game_target_centered_plot_planes(rbar_sim_cfg) == ("RI", "RC")
     assert _game_plot_overlays_in_zoom(rbar_sim_cfg) is False
+    assert _game_plot_fixed_axis_half_span_km(rbar_sim_cfg) == {}
 
 
 def test_passive_cross_track_level_uses_intrack_cylinder_forbidden_region() -> None:
@@ -6099,6 +7174,70 @@ def test_speed_multiple_adjustment_uses_allowed_options() -> None:
     assert _adjust_speed_multiple(50.0, -2) == 10.0
 
 
+def test_operator_burn_cinematic_arms_near_next_burn_and_caps_speed() -> None:
+    runtime = OperatorBurnCinematicRuntime()
+    provider = type("Provider", (), {"next_burn_time_s": lambda self: 103.0})()
+
+    assert _operator_burn_cinematic_should_arm(provider, current_sim_time_s=97.0, dt_s=1.0) is False
+    _update_operator_burn_cinematic(runtime, provider, now_wall_s=10.0, current_sim_time_s=99.0, dt_s=1.0)
+
+    assert runtime.active is True
+    assert runtime.hold_until_wall_s is None
+    assert _operator_burn_cinematic_speed_multiple(100.0, runtime) == pytest.approx(10.0)
+    assert _operator_burn_cinematic_speed_multiple(5.0, runtime) == pytest.approx(5.0)
+
+
+def test_operator_burn_visual_duration_scales_with_delta_v() -> None:
+    assert _operator_burn_visual_duration_s(0.0) == pytest.approx(1.0)
+    assert _operator_burn_visual_duration_s(0.5) == pytest.approx(1.1)
+    assert _operator_burn_visual_duration_s(2.0) == pytest.approx(1.4)
+    assert _operator_burn_visual_duration_s(5.0) == pytest.approx(2.0)
+    assert _operator_burn_visual_duration_s(20.0) == pytest.approx(2.0)
+
+
+def test_operator_burn_cinematic_holds_until_animation_finishes() -> None:
+    runtime = OperatorBurnCinematicRuntime(active=True)
+    provider = type("Provider", (), {"next_burn_time_s": lambda self: None})()
+
+    _operator_burn_cinematic_hold_for_animation(runtime, now_wall_s=20.0, duration_s=1.15)
+    _update_operator_burn_cinematic(runtime, provider, now_wall_s=21.0, current_sim_time_s=110.0, dt_s=1.0)
+
+    assert runtime.active is True
+    assert _operator_burn_cinematic_speed_multiple(50.0, runtime) == pytest.approx(10.0)
+
+    _update_operator_burn_cinematic(runtime, provider, now_wall_s=21.16, current_sim_time_s=110.0, dt_s=1.0)
+
+    assert runtime.active is False
+    assert _operator_burn_cinematic_speed_multiple(50.0, runtime) == pytest.approx(50.0)
+
+
+def test_operator_terminal_phase_waits_for_burn_animation() -> None:
+    score = type("Score", (), {"level_passed": True, "level_failed": False})()
+    runtime = OperatorBurnCinematicRuntime(active=True)
+
+    assert (
+        _phase_from_score_with_operator_animation(
+            score,
+            paused=True,
+            game_mode="operator",
+            operator_burn_cinematic=runtime,
+        )
+        == game_runner.GamePhase.PLAYING
+    )
+
+    runtime.reset()
+
+    assert (
+        _phase_from_score_with_operator_animation(
+            score,
+            paused=True,
+            game_mode="operator",
+            operator_burn_cinematic=runtime,
+        )
+        == game_runner.GamePhase.PASSED
+    )
+
+
 def test_command_status_uses_capitalized_indicators() -> None:
     ric_status = _command_status(KeyboardCommandState(paused=True, yaw=1.0), control_mode="ric_translation")
     attitude_status = _command_status(KeyboardCommandState(firing=False), control_mode="attitude_thrust")
@@ -6110,6 +7249,103 @@ def test_command_status_uses_capitalized_indicators() -> None:
     assert "W/S Pitch" in attitude_status
     assert "Space Fire" in attitude_status
     assert "Thrust=Coast" in attitude_status
+
+
+def test_operator_command_status_shows_next_burn_instead_of_keyboard_controls() -> None:
+    provider = OperatorBurnCommandProvider(
+        parse_operator_burn_plan("T= 50 s, 2.0 m/s R, 1.0 m/s I, 0.2 m/s C"),
+        controlled_object_id="chaser",
+        reference_object_id="target",
+    )
+
+    status = _operator_next_burn_status(provider)
+    operator_status = _game_command_status(
+        KeyboardCommandState(),
+        control_mode="ric_translation",
+        game_mode="operator",
+        command_provider=provider,
+    )
+    pilot_status = _game_command_status(
+        KeyboardCommandState(),
+        control_mode="ric_translation",
+        game_mode="pilot",
+        command_provider=provider,
+    )
+
+    assert status == "Next Burn: T+50s | 2 m/s R, 1 m/s I, 0.2 m/s C"
+    assert operator_status == status
+    assert "W/S R" not in operator_status
+    assert "W/S R" in pilot_status
+
+
+def test_operator_command_status_shows_none_after_final_burn() -> None:
+    provider = OperatorBurnCommandProvider(
+        parse_operator_burn_plan("T= 0 s, 1.0 m/s R"),
+        controlled_object_id="chaser",
+        reference_object_id="target",
+    )
+    target_state = np.array([7000.0, 0.0, 0.0, 0.0, 7.5, 0.0], dtype=float)
+    target = StateTruth(
+        position_eci_km=target_state[:3],
+        velocity_eci_km_s=target_state[3:],
+        attitude_quat_bn=np.array([1.0, 0.0, 0.0, 0.0], dtype=float),
+        angular_rate_body_rad_s=np.zeros(3, dtype=float),
+        mass_kg=100.0,
+        t_s=0.0,
+    )
+
+    provider(
+        truth=target,
+        t_s=0.0,
+        dt_s=1.0,
+        object_id="chaser",
+        own_knowledge={"target": _knowledge_from_state6(target_state)},
+    )
+
+    assert _operator_next_burn_status(provider) == "Next Burn: None"
+
+
+def test_operator_mode_clears_and_skips_pilot_live_prediction_sync() -> None:
+    class FakeDashboard:
+        def __init__(self) -> None:
+            self.calls: list[tuple[np.ndarray, float]] = []
+
+        def set_live_prediction_burn(self, accel_ric_km_s2: np.ndarray, elapsed_s: float) -> None:
+            self.calls.append((np.array(accel_ric_km_s2, dtype=float), float(elapsed_s)))
+
+    dashboard = FakeDashboard()
+    active_state = KeyboardCommandState(pitch=1.0)
+
+    _clear_live_prediction_burn(dashboard)
+    _sync_live_prediction_burn_for_mode(
+        dashboard,
+        active_state,
+        game_mode="operator",
+        control_mode="ric_translation",
+        max_accel_km_s2=1.0e-6,
+        elapsed_wall_s=1.0,
+        speed_multiple=10.0,
+        dt_s=10.0,
+    )
+
+    assert len(dashboard.calls) == 1
+    assert dashboard.calls[0][0] == pytest.approx(np.zeros(3, dtype=float))
+    assert dashboard.calls[0][1] == pytest.approx(0.0)
+
+    _sync_live_prediction_burn_for_mode(
+        dashboard,
+        active_state,
+        game_mode="pilot",
+        control_mode="ric_translation",
+        max_accel_km_s2=1.0e-6,
+        elapsed_wall_s=1.0,
+        speed_multiple=10.0,
+        dt_s=10.0,
+    )
+
+    assert len(dashboard.calls) == 2
+    assert dashboard.calls[1][0] == pytest.approx(np.array([1.0e-6, 0.0, 0.0], dtype=float))
+    assert dashboard.calls[1][1] == pytest.approx(10.0)
 
 
 def test_maneuver_input_above_control_speed_drops_to_control_speed() -> None:
@@ -6125,6 +7361,42 @@ def test_maneuver_input_above_control_speed_drops_to_control_speed() -> None:
     assert _speed_after_maneuver_input(5.0, ric_state, control_mode="ric_translation") == 5.0
     assert _speed_after_maneuver_input(200.0, coasting_state, control_mode="ric_translation") == 200.0
     assert _speed_after_maneuver_input(200.0, no_throttle_state, control_mode="ric_translation") == 200.0
+
+
+def test_operator_mode_bypasses_manual_maneuver_speed_bookkeeping(tmp_path: Path) -> None:
+    cfg_dict = _game_config(tmp_path)
+    cfg_dict["metadata"]["game"]["two_rail_speed_control"] = True
+    config = SimulationConfig.from_dict(cfg_dict)
+    active_state = KeyboardCommandState(pitch=1.0, use_timing_accumulator=True)
+    active_state.accumulate_timed_input(0.5, speed_multiple=100.0, control_mode="ric_translation")
+
+    assert _manual_maneuver_active_for_mode("operator", active_state, control_mode="ric_translation") is False
+    assert _pending_maneuver_sim_s_for_mode("operator", active_state, control_mode="ric_translation") == pytest.approx(
+        0.0
+    )
+    assert (
+        _effective_speed_multiple_for_mode(
+            config,
+            100.0,
+            active_state,
+            game_mode="operator",
+            control_mode="ric_translation",
+        )
+        == pytest.approx(100.0)
+    )
+
+    assert _manual_maneuver_active_for_mode("pilot", active_state, control_mode="ric_translation") is True
+    assert _pending_maneuver_sim_s_for_mode("pilot", active_state, control_mode="ric_translation") > 0.0
+    assert (
+        _effective_speed_multiple_for_mode(
+            config,
+            100.0,
+            active_state,
+            game_mode="pilot",
+            control_mode="ric_translation",
+        )
+        == pytest.approx(10.0)
+    )
 
 
 def test_maneuver_control_speed_cap_uses_current_selected_speed() -> None:
@@ -7096,6 +8368,15 @@ def test_coast_prediction_difficulty_maps_to_orbit_fraction() -> None:
     assert _coast_prediction_orbit_fraction("extreme") == 0.0
 
 
+def test_operator_difficulty_maps_to_actuator_error_and_full_projection() -> None:
+    assert _operator_actuator_error_fraction("easy") == pytest.approx(0.0)
+    assert _operator_actuator_error_fraction("medium") == pytest.approx(0.01)
+    assert _operator_actuator_error_fraction("hard") == pytest.approx(0.025)
+    assert _operator_actuator_error_fraction("extreme") == pytest.approx(0.05)
+    assert _operator_coast_prediction_orbit_fraction("operator", "extreme") == pytest.approx(1.0)
+    assert _operator_coast_prediction_orbit_fraction("pilot", "extreme") == pytest.approx(0.0)
+
+
 def test_coast_prediction_horizon_uses_orbital_period() -> None:
     n = 0.001
     dashboard = object.__new__(PygameRPODashboard)
@@ -7795,7 +9076,7 @@ def test_front_loaded_prediction_times_support_long_cislunar_horizon() -> None:
     assert np.max(np.diff(times[:80])) == pytest.approx(1.0)
 
 
-def test_dashboard_uses_elliptic_prediction_model_when_configured() -> None:
+def test_dashboard_uses_elliptic_prediction_model_when_configured(monkeypatch: pytest.MonkeyPatch) -> None:
     dashboard = object.__new__(PygameRPODashboard)
     dashboard.mean_motion_rad_s = 0.001
     dashboard.reference_state_eci = np.array([9000.0, 0.0, 0.0, 0.0, 6.0, 0.0], dtype=float)
@@ -7804,9 +9085,18 @@ def test_dashboard_uses_elliptic_prediction_model_when_configured() -> None:
     dashboard.coast_prediction_dt_s = 60.0
     dashboard.coast_prediction_model = "tschauner_hempel"
     rel0 = np.array([0.1, -1.0, 0.2, 0.0, 0.001, -0.001], dtype=float)
+    calls: list[float] = []
+    original = game_pygame_dashboard.ya_closed_form_transition_matrix
+
+    def spy_ya(dt_s: float, chief_start_eci_km_s: np.ndarray, chief_end_eci_km_s: np.ndarray, **kwargs: Any) -> Any:
+        calls.append(float(dt_s))
+        return original(dt_s, chief_start_eci_km_s, chief_end_eci_km_s, **kwargs)
+
+    monkeypatch.setattr(game_pygame_dashboard, "ya_closed_form_transition_matrix", spy_ya)
 
     prediction = dashboard._coast_prediction_from(rel0)
 
+    assert calls == pytest.approx([0.0, 60.0, 120.0])
     assert prediction.shape == (3, 6)
     assert np.allclose(prediction[0], rel0)
     assert not np.allclose(prediction[-1], _cw_coast_state(rel0, 120.0, 0.001))
@@ -8058,6 +9348,35 @@ def test_target_pair_camera_centers_ri_between_current_satellites() -> None:
     )
 
     assert np.allclose(center, np.array([-0.1, -0.25, 0.0], dtype=float))
+
+
+def test_level_zero_target_pair_camera_keeps_target_centered() -> None:
+    config_path = (
+        Path(__file__).resolve().parents[1] / "game" / "configs" / "game_training_rpo_00_tutorial.yaml"
+    )
+    config = SimulationConfig.from_yaml(config_path)
+    dashboard = object.__new__(PygameRPODashboard)
+    dashboard.camera_mode = _game_camera_mode(config)
+    dashboard.target_centered_plot_planes = _game_target_centered_plot_planes(config)
+    dashboard.target_centered_plot_axes = _game_target_centered_plot_axes(config)
+    chaser = np.array([0.2, -1.0, 0.4], dtype=float)
+    target = np.array([-0.4, 0.5, -0.2], dtype=float)
+
+    ri_center = dashboard._camera_center_ric(
+        chaser_current=chaser,
+        target_current=target,
+        x_axis=1,
+        y_axis=0,
+    )
+    rc_center = dashboard._camera_center_ric(
+        chaser_current=chaser,
+        target_current=target,
+        x_axis=2,
+        y_axis=0,
+    )
+
+    assert ri_center == pytest.approx(target)
+    assert rc_center == pytest.approx(target)
 
 
 def test_target_pair_camera_keeps_reference_centered_for_rc() -> None:

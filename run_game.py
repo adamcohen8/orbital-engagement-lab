@@ -48,15 +48,18 @@ def main() -> None:
                 result.difficulty,
                 score=result.arcade_score,
                 completed=result.level_passed,
+                mode=result.mode,
             )
         return
 
     show_start_screen = True
+    selector_mode = "pilot"
     while True:
-        selection = choose_game_launch(show_start_screen=show_start_screen)
+        selection = choose_game_launch(show_start_screen=show_start_screen, initial_mode=selector_mode)
         if selection is None:
             return
         show_start_screen = False
+        selector_mode = selection.mode
         result = run_game_mode(
             selection.path,
             controlled_object_id=None if args.controlled_object is None else str(args.controlled_object),
@@ -66,6 +69,10 @@ def main() -> None:
             difficulty_override=selection.difficulty,
             music_enabled=selection.music_enabled,
             record_video=selection.record_video,
+            game_mode=selection.mode,
+            frame_convention=selection.frame_convention,
+            operator_burn_plan=selection.operator_burn_plan,
+            skip_initial_briefing=selection.skip_initial_briefing,
         )
         if result.level_passed or result.arcade_score > 0:
             record_game_progress(
@@ -73,7 +80,9 @@ def main() -> None:
                 result.difficulty,
                 score=result.arcade_score,
                 completed=result.level_passed,
+                mode=result.mode,
             )
+        selector_mode = result.mode
 
 
 if __name__ == "__main__":

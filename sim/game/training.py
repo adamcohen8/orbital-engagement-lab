@@ -17,6 +17,11 @@ _BURN_AXIS_INDEX = {"radial": 0, "in_track": 1, "cross_track": 2}
 _BURN_AXIS_LABEL = {"radial": "Radial", "in_track": "In-track", "cross_track": "Cross-track"}
 _BURN_AXIS_SHORT_LABEL = {"radial": "R", "in_track": "I", "cross_track": "C"}
 _BURN_AXIS_MIN_COMPONENT_FRACTION = 0.75
+OPERATOR_RELAXED_REQUIRED_BURN_AXIS_SCENARIO_IDS = frozenset(
+    {
+        "rpo_07_elliptic_burn_then_approach",
+    }
+)
 
 
 def _segment_crosses_sphere_km(positions_km: np.ndarray, radius_km: float) -> bool:
@@ -515,6 +520,14 @@ class RPOTrainingConfig:
                 raw.get("guided_tutorial_speed_step")
             ),
         )
+
+
+def training_config_for_game_mode(config: RPOTrainingConfig, *, game_mode: str) -> RPOTrainingConfig:
+    if str(game_mode or "").strip().lower() != "operator":
+        return config
+    if config.scenario_id in OPERATOR_RELAXED_REQUIRED_BURN_AXIS_SCENARIO_IDS:
+        return replace(config, required_burn_axes=())
+    return config
 
 
 @dataclass(frozen=True)

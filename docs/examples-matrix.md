@@ -53,16 +53,18 @@ perturbations.
 ## Game Levels
 
 The optional Pygame trainer includes packaged levels under `sim/game/configs/`.
-The launcher progression starts with `rpo_00_tutorial`, then runs through
-Levels 1-10, `rpo_bonus_cislunar_rendezvous`, and the replayable
-`rpo_arcade_pursuit` variant. Levels 6-8 use an elliptical coast-projection
-model for eccentric-orbit RPO lessons; the cislunar bonus level uses CR3BP
-propagation and Moon-centered RIC controls around an L2 NRHO target; Pursuit
-Arcade adds tightening goals, randomized later-round starts, and every-fifth
-round elliptical boss encounters. Completed structured training levels save
-Markdown debrief reports with JSON summaries and matplotlib plots under
-`outputs/game_debriefs/`; Sandbox and Pursuit Arcade skip reports because they
-are open-ended/replayable modes.
+The launcher progression starts with a mode-specific Level 0 Pilot/Operator
+Tutorial, then runs through structured classroom levels, the cislunar bonus
+level, and sandbox exploration. Pilot Mode uses live R/I/C controls; Operator
+Mode scripts time-tagged impulsive burns, previews the planned trajectory, and
+plays the level back with actuator-error difficulty settings. Levels 7-9 use an
+elliptical coast-projection model for eccentric-orbit RPO lessons, and the live
+trainer uses a YA closed-form STM path for that projection with a numerical
+TH-style fallback. The cislunar bonus level uses CR3BP propagation and
+Moon-centered RIC controls around an L2 NRHO target. Completed structured
+training levels save Markdown debrief reports with JSON summaries and
+matplotlib plots under `outputs/game_debriefs/`; Sandbox and web Pursuit Arcade
+skip reports because they are open-ended/replayable modes.
 
 ```bash
 .venv/bin/python -m pip install ".[game]"

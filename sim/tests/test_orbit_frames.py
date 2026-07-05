@@ -17,6 +17,7 @@ from sim.dynamics.orbit.frames import (
     transform_position,
     transform_state,
 )
+from sim.dynamics.orbit.propagator import drag_plugin
 
 
 def _write_minimal_eop(path: Path) -> None:
@@ -148,6 +149,19 @@ def test_scenario_frames_manual_eop_requires_initial_epoch() -> None:
         )
 
 
+def test_scenario_iau_frame_model_without_eop_does_not_require_initial_epoch() -> None:
+    cfg = scenario_config_from_dict(
+        {
+            "scenario_name": "iau_frame_no_eop",
+            "simulator": {"frames": {"model": "iau76_80_eop"}},
+            "objects": {},
+        }
+    )
+
+    assert cfg.simulator.frames.model == "iau76_80_eop"
+    assert cfg.simulator.initial_jd_utc is None
+
+
 def test_frame_context_nutation_corrections_affect_rotation_and_provenance(tmp_path: Path) -> None:
     eop_path = tmp_path / "EOP-All.txt"
     _write_minimal_eop(eop_path)
@@ -202,3 +216,31 @@ def test_transform_state_applies_rotating_frame_velocity_term() -> None:
     np.testing.assert_allclose(v_ecef, expected_v_ecef, rtol=0.0, atol=1e-9)
     np.testing.assert_allclose(roundtrip_r, r_eci, rtol=0.0, atol=1e-12)
     np.testing.assert_allclose(roundtrip_v, v_eci, rtol=0.0, atol=1e-9)
+
+
+def test_manual_eop_fields_propagate_to_drag_relative_velocity() -> None:
+    class _Ctx:
+        mass_kg = 100.0
+        cd = 2.2
+        area_m2 = 1.0
+
+    x_eci = np.array([7000.0, 120.0, 30.0, 0.0, 7.5, 0.0], dtype=float)
+    base_env = {
+        "density_kg_m3": 1.0e-12,
+        "drag_frame_model": "hpop_like",
+        "jd_utc_start": 2460310.5,
+    }
+    manual_env = {
+        **base_env,
+        "dut1_s": 30.0,
+        "xp_arcsec": 100.0,
+        "yp_arcsec": 200.0,
+        "dat_s": 37.0,
+        "ddpsi_rad": 1.0e-3,
+        "ddeps_rad": -2.0e-3,
+    }
+
+    base_drag = drag_plugin(120.0, x_eci, base_env, _Ctx())
+    manual_drag = drag_plugin(120.0, x_eci, manual_env, _Ctx())
+
+    assert np.linalg.norm(manual_drag - base_drag) > 1.0e-14
