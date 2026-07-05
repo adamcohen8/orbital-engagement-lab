@@ -15,13 +15,16 @@
     <meta name="oel-vercel-analytics-hosts" content=".vercel.app,orbital-engagement-lab.vercel.app" />
     <title>Orbital Engagement Lab RPO Trainer Preview</title>
     <link rel="icon" href="./src/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="./src/styles.css?v=web-preview-review-fixes-2026-07-04" />
+    <link rel="stylesheet" href="./src/styles.css?v=web-preview-mobile-frame-header-2026-07-05" />
   </head>
   <body>
     <main class="trainer-shell selector-mode">
       <section class="level-selector" id="levelSelector" aria-label="Level selector">
         <header class="launcher-header">
           <h1>Orbital Engagement Lab</h1>
+          <button class="launcher-frame launcher-frame-mobile" id="selectorFrameButtonMobile" data-selector-frame-button type="button">
+            Frame: OEL
+          </button>
           <button class="launcher-music" id="selectorMusicButton" type="button">Music: ON</button>
           <button class="launcher-view" id="selectorViewButton" type="button">View: Auto</button>
           <a class="launcher-repo" href="https://github.com/adamcohen8/orbital-engagement-lab" target="_blank" rel="noreferrer">
@@ -80,7 +83,7 @@
           <span>Up/Down Select   M Music   V View   Enter Launch</span>
           <div class="launcher-footer-controls" aria-label="Selector options">
             <button class="launcher-mode" id="selectorModeButton" type="button">Pilot Mode</button>
-            <button class="launcher-frame" id="selectorFrameButton" type="button">Frame: OEL</button>
+            <button class="launcher-frame" id="selectorFrameButton" data-selector-frame-button type="button">Frame: OEL</button>
           </div>
         </footer>
       </section>
@@ -250,6 +253,6 @@
       </section>
     </main>
 
-    <script src="./src/app.js?v=web-preview-review-fixes-2026-07-04" type="module"></script>
+    <script src="./src/app.js?v=web-preview-mobile-frame-header-2026-07-05" type="module"></script>
   </body>
 </html>
