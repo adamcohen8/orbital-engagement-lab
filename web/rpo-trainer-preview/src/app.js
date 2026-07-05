@@ -32,7 +32,12 @@ const SATELLITE_SPRITE_DIAMETER_KM = 0.006;
 const SATELLITE_ICON_SIZE_PX = 20;
 const TARGET_MARKER = "#f55c5c";
 const CHASER_MARKER = "#f5cd5c";
-const BUILD_ID = "web-preview-review-fixes-2026-07-04";
+const OPERATOR_PROJECTION_COLOR = "rgba(238, 184, 92, 0.95)";
+const OPERATOR_PROJECTION_HIGHLIGHT = "rgba(255, 224, 142, 0.9)";
+const OPERATOR_BURN_MARKER_COLOR = "rgba(255, 146, 67, 0.96)";
+const OPERATOR_PROBE_COLOR = "rgba(86, 202, 245, 0.96)";
+const OPERATOR_PROBE_PICK_RADIUS_PX = 10;
+const BUILD_ID = "web-preview-operator-script-plots-2026-07-04";
 const ARCADE_BUILD_ID = `${BUILD_ID}-competition-local`;
 const ARCADE_CHALLENGE_RECORD = buildChallengeRecord(DEFAULT_PURSUIT_CHALLENGE);
 const LEADERBOARD_REFRESH_MS = 30000;
@@ -365,6 +370,9 @@ const state = {
   operatorBurnRows: [],
   operatorPlan: [],
   operatorPlanPath: [],
+  operatorBurnMarkers: [],
+  operatorPlanKey: "",
+  operatorTrajectoryProbe: null,
   operatorBurnIndex: 0,
   operatorPlanError: "",
   operatorPanelSignature: "",
@@ -394,6 +402,15 @@ const state = {
 const music = createMusicPlayer(MUSIC_TRACKS.selector);
 music.loop = true;
 music.volume = 0.65;
+
+const SHELL_GAME_MODE_CLASSES = [
+  "mode-arcade",
+  "mode-sandbox",
+  "mode-tutorial",
+  "mode-operator",
+  "mode-operator-script",
+  "primer-mode",
+];
 
 const analytics = {
   enabled: false,
@@ -793,7 +810,7 @@ function showLevelSelector(options = {}) {
   el.debriefPanel.classList.add("hidden");
   setLeaderboardFormVisible(false);
   el.shell.classList.add("selector-mode");
-  el.shell.classList.remove("primer-mode");
+  el.shell.classList.remove(...SHELL_GAME_MODE_CLASSES);
   setMusicTrackForMode("selector");
   renderLevelSelector();
   syncMusicButton();
@@ -946,6 +963,10 @@ function launchSelectedLevel(source = "selector") {
     state.operatorTutorialStage = 0;
     state.operatorTutorialStageStartS = 0;
     state.operatorBurnRows = [];
+    state.operatorPlanPath = [];
+    state.operatorBurnMarkers = [];
+    state.operatorPlanKey = "";
+    state.operatorTrajectoryProbe = null;
     state.operatorPanelSignature = "";
   }
   const mode =
@@ -1426,7 +1447,7 @@ function relativeSpeedKmS() {
 function updateMissionText() {
   if (state.mode === "selector") {
     el.shell.classList.add("selector-mode");
-    el.shell.classList.remove("mode-arcade", "mode-sandbox", "mode-tutorial", "mode-operator", "mode-operator-script", "primer-mode");
+    el.shell.classList.remove(...SHELL_GAME_MODE_CLASSES);
     renderLevelSelector();
     return;
   }
@@ -1764,7 +1785,7 @@ function renderOperatorPanel() {
   ensureOperatorRows();
   const readOnly = state.mode === "operatorScriptTutorial";
   if (el.operatorAddBurn) el.operatorAddBurn.classList.toggle("hidden", readOnly);
-  const signature = `${state.mode}:${readOnly ? "read-only" : "editable"}:${JSON.stringify(state.operatorBurnRows)}`;
+  const signature = operatorPanelSignature(readOnly);
   if (state.operatorPanelSignature === signature && el.operatorBurnRows.children.length > 0) {
     renderOperatorPlanStatus();
     return;
@@ -1787,7 +1808,7 @@ function renderOperatorPanel() {
       input.addEventListener("input", () => {
         if (readOnly) return;
         state.operatorBurnRows[idx][field] = input.value;
-        state.operatorPanelSignature = "";
+        state.operatorPanelSignature = operatorPanelSignature(readOnly);
         updateOperatorPlan();
       });
       rowEl.append(input);
@@ -1811,6 +1832,10 @@ function renderOperatorPanel() {
   });
   state.operatorPanelSignature = signature;
   renderOperatorPlanStatus();
+}
+
+function operatorPanelSignature(readOnly = state.mode === "operatorScriptTutorial") {
+  return `${state.mode}:${readOnly ? "read-only" : "editable"}:${JSON.stringify(state.operatorBurnRows)}`;
 }
 
 function operatorHeaderRow() {
@@ -1850,13 +1875,33 @@ function addOperatorBurnRow() {
 
 function updateOperatorPlan() {
   const { burns, error } = parseOperatorBurns();
+  const planKey = operatorPlanKey(burns);
   state.operatorPlan = burns;
   state.operatorPlanError = error;
-  state.operatorPlanPath = buildOperatorPreviewPath(operatorInitialSeed(), burns);
+  if (state.operatorPlanKey !== planKey) {
+    state.operatorTrajectoryProbe = null;
+    state.operatorPlanKey = planKey;
+  }
+  const preview = buildOperatorPreviewArtifacts(operatorInitialSeed(), burns);
+  state.operatorPlanPath = preview.path;
+  state.operatorBurnMarkers = preview.markers;
   state.ghost = state.operatorPlanPath;
   state.tutorialTargetPath = [];
   renderOperatorPlanStatus();
   draw();
+}
+
+function operatorPlanKey(burns) {
+  return (Array.isArray(burns) ? burns : [])
+    .map((burn) =>
+      [
+        Number(burn.timeS || 0).toFixed(3),
+        Number(burn.rMps || 0).toFixed(6),
+        Number(burn.iMps || 0).toFixed(6),
+        Number(burn.cMps || 0).toFixed(6),
+      ].join(","),
+    )
+    .join("|");
 }
 
 function renderOperatorPlanStatus() {
@@ -1927,31 +1972,34 @@ function operatorInitialSeed() {
   return { ...state.sim };
 }
 
-function buildOperatorPreviewPath(seed, burns) {
-  if (!operatorExperienceActive()) return [];
+function buildOperatorPreviewArtifacts(seed, burns) {
+  if (!operatorExperienceActive()) return { path: [], markers: [] };
   const validBurns = Array.isArray(burns) ? burns : [];
   const horizonS = operatorPlaybackEndS(validBurns);
   const sampleCount = Math.max(2, OPERATOR_PREVIEW_POINTS);
   const path = [];
+  const markers = [];
   let segmentSeed = { ...seed, t: 0 };
   let segmentStartS = 0;
   let burnIdx = 0;
   for (let idx = 0; idx < sampleCount; idx += 1) {
     const absoluteTimeS = (horizonS * idx) / (sampleCount - 1);
     while (burnIdx < validBurns.length && validBurns[burnIdx].timeS <= absoluteTimeS) {
-      segmentSeed = cwCoastPoint(segmentSeed, validBurns[burnIdx].timeS - segmentStartS);
-      segmentSeed.rd += validBurns[burnIdx].rMps / 1000;
-      segmentSeed.id += validBurns[burnIdx].iMps / 1000;
-      segmentSeed.cd += validBurns[burnIdx].cMps / 1000;
-      segmentSeed.t = validBurns[burnIdx].timeS;
-      segmentStartS = validBurns[burnIdx].timeS;
+      const burn = validBurns[burnIdx];
+      segmentSeed = cwCoastPoint(segmentSeed, burn.timeS - segmentStartS);
+      segmentSeed.rd += burn.rMps / 1000;
+      segmentSeed.id += burn.iMps / 1000;
+      segmentSeed.cd += burn.cMps / 1000;
+      segmentSeed.t = burn.timeS;
+      markers.push({ ...segmentSeed, burnIndex: burnIdx + 1, timeS: burn.timeS });
+      segmentStartS = burn.timeS;
       burnIdx += 1;
     }
     const point = cwCoastPoint(segmentSeed, absoluteTimeS - segmentStartS);
     point.t = absoluteTimeS;
     path.push(point);
   }
-  return path;
+  return { path, markers };
 }
 
 function operatorPlaybackEndS(burns = state.operatorPlan) {
@@ -2062,6 +2110,10 @@ function updateDebugState() {
     livePredictionSeed: livePredictionSeed(),
     operatorPlan: state.operatorPlan.map((burn) => ({ ...burn })),
     operatorPlanError: state.operatorPlanError,
+    operatorBurnMarkers: state.operatorBurnMarkers.map((marker) => ({ ...marker })),
+    operatorTrajectoryProbe: state.operatorTrajectoryProbe
+      ? { timeS: state.operatorTrajectoryProbe.timeS, state: { ...state.operatorTrajectoryProbe.state } }
+      : null,
     ghostHead: state.ghost.slice(0, 8).map((point) => ({ ...point })),
     tutorialTargetHead: state.tutorialTargetPath.slice(0, 8).map((point) => ({ ...point })),
   };
@@ -2265,7 +2317,11 @@ function drawPlot(canvas, xAxis, yAxis, plane) {
     drawPath(ctx, state.targetGhost, toPx, "rgba(245, 92, 92, 0.55)", true, 2);
     drawPath(ctx, state.targetTrail, toPx, "rgba(245, 92, 92, 0.9)", false, 2);
   }
-  drawPath(ctx, state.ghost, toPx, "rgba(135, 150, 172, 0.95)", true, 2);
+  if (operatorScriptModeActive()) {
+    drawOperatorScriptPlotOverlays(ctx, width, height, xAxis, yAxis, toPx);
+  } else {
+    drawPath(ctx, state.ghost, toPx, "rgba(135, 150, 172, 0.95)", true, 2);
+  }
   drawPath(ctx, state.trail, toPx, "rgba(245, 205, 92, 0.95)", false);
 
   const target = toPx(targetState);
@@ -2277,6 +2333,139 @@ function drawPlot(canvas, xAxis, yAxis, plane) {
   ctx.fillStyle = "rgba(170, 180, 195, 0.92)";
   ctx.font = "12px Menlo, Consolas, monospace";
   drawAxisDirectionLabels(ctx, width, height, xAxis, yAxis);
+}
+
+function drawOperatorScriptPlotOverlays(ctx, width, height, xAxis, yAxis, toPx) {
+  drawPath(ctx, state.operatorPlanPath, toPx, OPERATOR_PROJECTION_COLOR, false, 2);
+  drawPath(ctx, state.operatorPlanPath, toPx, OPERATOR_PROJECTION_HIGHLIGHT, true, 1);
+  state.operatorBurnMarkers.forEach((marker) => {
+    const markerPx = toPx(marker);
+    drawVelocityVector(ctx, markerPx, marker, xAxis, yAxis, {
+      color: OPERATOR_PROBE_COLOR,
+      lengthPx: 30,
+      unitLength: true,
+    });
+    ctx.save();
+    ctx.fillStyle = OPERATOR_BURN_MARKER_COLOR;
+    ctx.strokeStyle = "rgba(8, 11, 16, 0.95)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(markerPx.x, markerPx.y, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.font = "12px Menlo, Consolas, monospace";
+    ctx.fillText(String(marker.burnIndex || ""), markerPx.x + 7, markerPx.y - 14);
+    ctx.restore();
+  });
+  if (state.operatorTrajectoryProbe) {
+    drawOperatorProbe(ctx, toPx(state.operatorTrajectoryProbe.state), state.operatorTrajectoryProbe.timeS);
+  }
+  drawOperatorStateReadout(ctx, width, height, xAxis, yAxis);
+}
+
+function drawOperatorProbe(ctx, center, timeS) {
+  ctx.save();
+  ctx.fillStyle = OPERATOR_PROBE_COLOR;
+  ctx.strokeStyle = "rgba(8, 11, 16, 0.95)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.arc(center.x, center.y, 6, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.font = "12px Menlo, Consolas, monospace";
+  ctx.fillText(operatorProbeTimeLabel(timeS), center.x + 9, center.y - 18);
+  ctx.restore();
+}
+
+function drawOperatorStateReadout(ctx, width, height, xAxis, yAxis) {
+  const stateForReadout = state.operatorTrajectoryProbe?.state || operatorInitialSeed();
+  const velocityReadout = xAxis === "c" && yAxis === "r";
+  const labels = velocityReadout ? ["dR", "dI", "dC"] : ["R", "I", "C"];
+  const values = velocityReadout
+    ? [stateForReadout.rd * 1000, stateForReadout.id * 1000, stateForReadout.cd * 1000]
+    : [stateForReadout.r, stateForReadout.i, stateForReadout.c];
+  const unit = velocityReadout ? "m/s" : "km";
+  ctx.save();
+  ctx.fillStyle = state.operatorTrajectoryProbe ? OPERATOR_PROBE_COLOR : "rgba(162, 178, 198, 0.96)";
+  ctx.font = "12px Menlo, Consolas, monospace";
+  ctx.fillText(
+    `${labels[0]} ${values[0].toFixed(2)} ${unit}   ${labels[1]} ${values[1].toFixed(2)} ${unit}   ${labels[2]} ${values[2].toFixed(2)} ${unit}`,
+    12,
+    height - 12,
+  );
+  ctx.restore();
+}
+
+function operatorProbeTimeLabel(timeS) {
+  const value = Number.isFinite(Number(timeS)) ? Math.max(Number(timeS), 0) : 0;
+  return `T=${value.toFixed(0)}s`;
+}
+
+function handleOperatorTrajectoryProbeClick(event, plane) {
+  if (!operatorScriptModeActive()) return false;
+  const canvas = plane === "ri" ? el.riCanvas : el.rcCanvas;
+  if (!canvas) return false;
+  const rect = canvas.getBoundingClientRect();
+  if (
+    event.clientX < rect.left ||
+    event.clientX > rect.right ||
+    event.clientY < rect.top ||
+    event.clientY > rect.bottom
+  ) {
+    return true;
+  }
+  const xAxis = plane === "ri" ? "i" : "c";
+  const yAxis = "r";
+  const { width, height } = fitCanvas(canvas);
+  const click = {
+    x: event.clientX - rect.left,
+    y: event.clientY - rect.top,
+  };
+  const toPx = operatorPlotTransform(width, height, xAxis, yAxis);
+  if (state.operatorTrajectoryProbe) {
+    const selectedPx = toPx(state.operatorTrajectoryProbe.state);
+    if (distancePx(click, selectedPx) <= OPERATOR_PROBE_PICK_RADIUS_PX) {
+      state.operatorTrajectoryProbe = null;
+      draw();
+      updateDebugState();
+      return true;
+    }
+  }
+  const nearest = nearestOperatorTrajectoryPoint(click, toPx);
+  if (nearest && nearest.distancePx <= OPERATOR_PROBE_PICK_RADIUS_PX) {
+    state.operatorTrajectoryProbe = {
+      state: { ...nearest.point },
+      timeS: Number(nearest.point.t || nearest.point.timeS || 0),
+    };
+    draw();
+    updateDebugState();
+  }
+  return true;
+}
+
+function operatorPlotTransform(width, height, xAxis, yAxis) {
+  const cameraCenter = cameraCenterFor(xAxis, yAxis);
+  const scale = plotScale(width, height, xAxis, yAxis, cameraCenter);
+  const xSign = displayAxisSign(xAxis);
+  const ySign = displayAxisSign(yAxis);
+  return (p) => ({
+    x: width / 2 + ((Number(p[xAxis] || 0) - cameraCenter[xAxis]) * xSign) * scale,
+    y: height / 2 - ((Number(p[yAxis] || 0) - cameraCenter[yAxis]) * ySign) * scale,
+  });
+}
+
+function nearestOperatorTrajectoryPoint(click, toPx) {
+  let nearest = null;
+  state.operatorPlanPath.forEach((point) => {
+    const px = toPx(point);
+    const d = distancePx(click, px);
+    if (!nearest || d < nearest.distancePx) nearest = { point, distancePx: d };
+  });
+  return nearest;
+}
+
+function distancePx(a, b) {
+  return Math.hypot(Number(a.x || 0) - Number(b.x || 0), Number(a.y || 0) - Number(b.y || 0));
 }
 
 function drawAxisDirectionLabels(ctx, width, height, xAxis, yAxis) {
@@ -2617,7 +2806,7 @@ function fitCanvas(canvas) {
 }
 
 function cameraCenterFor(xAxis, yAxis) {
-  if (state.mode === "primer" || state.mode === "tutorial" || state.mode === "operatorScriptTutorial" || state.mode === "operatorTutorial") {
+  if (state.mode === "primer" || state.mode === "tutorial" || operatorScriptModeActive() || state.mode === "operatorTutorial") {
     return { r: 0, i: 0, c: 0 };
   }
   if (state.mode === "arcade") {
@@ -2753,6 +2942,27 @@ function drawVector(ctx, origin, sim, xAxis, yAxis, kind) {
   const vx = sim[`${xAxis}d`] * scale * displayAxisSign(xAxis);
   const vy = sim[`${yAxis}d`] * scale * displayAxisSign(yAxis);
   drawArrow(ctx, origin.x, origin.y, origin.x + vx, origin.y - vy, "rgba(245, 205, 92, 0.9)");
+}
+
+function drawVelocityVector(ctx, origin, sim, xAxis, yAxis, options = {}) {
+  const color = options.color || "rgba(245, 205, 92, 0.9)";
+  const rawX = Number(sim[`${xAxis}d`] || 0) * displayAxisSign(xAxis);
+  const rawY = Number(sim[`${yAxis}d`] || 0) * displayAxisSign(yAxis);
+  let vx = rawX;
+  let vy = rawY;
+  if (options.unitLength) {
+    const norm = Math.hypot(vx, vy);
+    if (!Number.isFinite(norm) || norm <= 1.0e-12) return;
+    const lengthPx = Number(options.lengthPx || 30);
+    vx = (vx / norm) * lengthPx;
+    vy = (vy / norm) * lengthPx;
+  } else {
+    const scale = Number(options.scale || 75000);
+    vx *= scale;
+    vy *= scale;
+  }
+  if (Math.hypot(vx, vy) < 1) return;
+  drawArrow(ctx, origin.x, origin.y, origin.x + vx, origin.y - vy, color);
 }
 
 function drawThrustVector(ctx, origin, xAxis, yAxis) {
@@ -3310,6 +3520,12 @@ function bindEvents() {
     if (!panel) return;
     let suppressClickUntil = 0;
     const toggle = (event) => {
+      if (operatorScriptModeActive()) {
+        event.preventDefault();
+        event.stopPropagation();
+        handleOperatorTrajectoryProbeClick(event, panel === el.riPanel ? "ri" : "rc");
+        return;
+      }
       if (state.mode !== "sandbox" && state.mode !== "arcade") return;
       if (state.activeView === "mobile") return;
       event.preventDefault();

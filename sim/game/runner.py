@@ -85,6 +85,7 @@ from sim.game.tuning import (
 from sim.presets.thrusters import resolve_thruster_max_thrust_n_from_specs
 
 FULL_ATTEMPT_RECORDING_PAD_S = 3.0
+OPERATOR_SCRIPT_RECORDING_HOLD_S = 3.0
 RIC_PRIMER_STAGE_COUNT = 3
 GAME_BURN_TRACE_ENV = "OEL_GAME_BURN_TRACE"
 OPERATOR_BURN_CINEMATIC_SPEED_MULTIPLE = 10.0
@@ -1082,6 +1083,7 @@ def _operator_burn_cinematic_should_arm(
     *,
     current_sim_time_s: float,
     dt_s: float,
+    frame_horizon_s: float | None = None,
     lookahead_s: float = OPERATOR_BURN_CINEMATIC_LOOKAHEAD_S,
 ) -> bool:
     if provider is None or not hasattr(provider, "next_burn_time_s"):
@@ -1090,7 +1092,11 @@ def _operator_burn_cinematic_should_arm(
     if next_burn_time_s is None:
         return False
     time_to_burn_s = float(next_burn_time_s) - float(current_sim_time_s)
-    trigger_window_s = max(float(lookahead_s), 2.0 * max(float(dt_s), 0.0))
+    step_window_s = 2.0 * max(float(dt_s), 0.0)
+    frame_window_s = 0.0
+    if frame_horizon_s is not None:
+        frame_window_s = max(float(frame_horizon_s), 0.0) + max(float(lookahead_s), 0.0)
+    trigger_window_s = max(float(lookahead_s), step_window_s, frame_window_s)
     return bool(time_to_burn_s >= -1.0e-9 and time_to_burn_s <= trigger_window_s + 1.0e-9)
 
 
@@ -1101,12 +1107,18 @@ def _update_operator_burn_cinematic(
     now_wall_s: float,
     current_sim_time_s: float,
     dt_s: float,
+    frame_horizon_s: float | None = None,
 ) -> None:
     if runtime.active and runtime.hold_until_wall_s is not None and float(now_wall_s) > float(runtime.hold_until_wall_s):
         runtime.reset()
     if runtime.active:
         return
-    if _operator_burn_cinematic_should_arm(provider, current_sim_time_s=current_sim_time_s, dt_s=dt_s):
+    if _operator_burn_cinematic_should_arm(
+        provider,
+        current_sim_time_s=current_sim_time_s,
+        dt_s=dt_s,
+        frame_horizon_s=frame_horizon_s,
+    ):
         runtime.active = True
         runtime.hold_until_wall_s = None
 
@@ -2181,6 +2193,9 @@ def run_game_mode(
                     arcade_score=0,
                     arcade_seed=arcade_seed_value if arcade_enabled else None,
                 )
+            if record_video:
+                recording_controller.start()
+                recording_controller.capture_hold(dashboard, duration_s=OPERATOR_SCRIPT_RECORDING_HOLD_S)
             restart_attempt_for_operator_plan(selected_plan)
             command_state.reset_axes()
             command_state.paused = False
@@ -2277,14 +2292,17 @@ def run_game_mode(
             _sync_dashboard_training_config(dashboard, training_cfg)
             _sync_dashboard_round_config(dashboard, attempt_config)
             dashboard.camera_rule_mode = _game_camera_rule_mode(config)
-            recording_controller = GameRecordingController(
-                enabled=record_video,
-                config=config,
-                difficulty=difficulty,
-                attempt_index=recording_attempt,
-                output_dir=recording_output_dir,
-                fps=recording_fps,
-            )
+            if recording_controller.recorder is None:
+                recording_controller = GameRecordingController(
+                    enabled=record_video,
+                    config=config,
+                    difficulty=difficulty,
+                    attempt_index=recording_attempt,
+                    output_dir=recording_output_dir,
+                    fps=recording_fps,
+                )
+            else:
+                recording_controller.config = config
             clip_recording_controller = GameClipRecordingController(
                 config=config,
                 difficulty=difficulty,
@@ -2294,7 +2312,8 @@ def run_game_mode(
             clip_recording_started_wall = None
             clip_recording_status_message = ""
             clip_recording_status_until = 0.0
-        recording_controller.start()
+        if recording_controller.recorder is None:
+            recording_controller.start()
         if not initial_snapshot_recorded:
             dashboard.push_snapshot(snapshot)
             trainer.record(snapshot)
@@ -2867,6 +2886,15 @@ def run_game_mode(
                 base_next_effective_speed_multiple,
                 maneuver_active=maneuver_active,
             )
+            base_frame_horizon_s = base_next_dt_s
+            if realtime:
+                base_wall_step_s = _wall_step_s(base_next_dt_s, base_next_effective_speed_multiple)
+                base_steps_due, _ = _realtime_steps_due(
+                    now_s=now,
+                    last_step_wall_s=last_step_wall,
+                    wall_step_s=base_wall_step_s,
+                )
+                base_frame_horizon_s = base_next_dt_s * max(int(base_steps_due), 1)
             if game_mode == "operator":
                 _update_operator_burn_cinematic(
                     operator_burn_cinematic,
@@ -2874,6 +2902,7 @@ def run_game_mode(
                     now_wall_s=now,
                     current_sim_time_s=float(dashboard.t_s[-1]) if getattr(dashboard, "t_s", ()) else 0.0,
                     dt_s=base_next_dt_s,
+                    frame_horizon_s=base_frame_horizon_s,
                 )
             next_effective_speed_multiple = (
                 _operator_burn_cinematic_speed_multiple(
