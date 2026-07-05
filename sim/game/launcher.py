@@ -1486,7 +1486,7 @@ def _run_operator_plan_screen(
                     and len(rows) < OPERATOR_BURN_MAX_ROWS
                     and not read_only
                 ):
-                    rows.append(["", "", "", ""])
+                    rows.append(_operator_new_burn_row_from_probe(trajectory_probe))
                     trajectory_probe = None
                     active_cell = (len(rows) - 1, 0)
                     table_scroll_row = _operator_scroll_for_active_row(
@@ -1706,6 +1706,12 @@ def _operator_rows_from_plan(plan: OperatorBurnPlan | None) -> list[list[str]]:
             f"{float(c):g}",
         ])
     return rows or [["", "", "", ""]]
+
+
+def _operator_new_burn_row_from_probe(trajectory_probe: OperatorTrajectoryProbe | None = None) -> list[str]:
+    if trajectory_probe is None:
+        return ["", "", "", ""]
+    return [f"{max(float(trajectory_probe.time_s), 0.0):g}", "", "", ""]
 
 
 def _operator_plan_status(plan: OperatorBurnPlan, *, option: GameScenarioOption) -> str:

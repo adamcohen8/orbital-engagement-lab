@@ -6,6 +6,33 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.19.2 - 2026-07-05
+
+Release thesis: `v0.19.2` tightens the RPO Trainer web-preview and Operator
+Mode polish after the `v0.19.1` recording/playback release. It focuses on
+mobile selector parity, script-screen ergonomics, and matching the browser
+operator sandbox more closely to the downloadable trainer.
+
+### Added
+
+- Added mobile web-preview frame-convention controls so phone/tablet players
+  can switch between OEL and Space Force display conventions from the level
+  selector.
+- Added script-screen burn insertion from a selected trajectory probe point in
+  both the downloadable trainer and web preview, pre-populating the new burn
+  time from the cyan trajectory marker.
+
+### Fixed
+
+- Fixed mobile web-preview selector layout so the OEL GitHub button remains
+  inline with the other header controls in landscape mode and the frame button
+  stacks correctly in portrait mode.
+- Fixed web-preview operator sandbox playback to keep the in-level HCW
+  projection one orbital period ahead after launch while preserving
+  target-centered camera toggles.
+- Fixed web-preview operator burn playback to use the downloadable game's burn
+  slowdown and visual animation behavior during scripted execution.
+
 ## 0.19.1 - 2026-07-05
 
 Release thesis: `v0.19.1` is a focused RPO Trainer polish release for the

@@ -28,6 +28,12 @@ const OPERATOR_TUTORIAL_PLAYBACK_SPEED_MULTIPLE = 200;
 const OPERATOR_TUTORIAL_STAGE_DURATION_S = 3000;
 const OPERATOR_TUTORIAL_BURN_TIME_S = 50;
 const OPERATOR_TUTORIAL_BURN_DELTA_V_M_S = 0.25;
+const OPERATOR_BURN_CINEMATIC_SPEED_MULTIPLE = 10;
+const OPERATOR_BURN_CINEMATIC_LOOKAHEAD_S = 5;
+const OPERATOR_BURN_VISUAL_DURATION_BASE_S = 1.0;
+const OPERATOR_BURN_VISUAL_DURATION_PER_M_S = 0.2;
+const OPERATOR_BURN_VISUAL_DURATION_MIN_S = 1.0;
+const OPERATOR_BURN_VISUAL_DURATION_MAX_S = 2.0;
 const SATELLITE_SPRITE_DIAMETER_KM = 0.006;
 const SATELLITE_ICON_SIZE_PX = 20;
 const TARGET_MARKER = "#f55c5c";
@@ -65,6 +71,7 @@ const el = {
   selectorViewButton: document.querySelector("#selectorViewButton"),
   selectorModeButton: document.querySelector("#selectorModeButton"),
   selectorFrameButton: document.querySelector("#selectorFrameButton"),
+  selectorFrameButtons: Array.from(document.querySelectorAll("[data-selector-frame-button]")),
   selectorPreviewTitle: document.querySelector("#selectorPreviewTitle"),
   selectorPreviewBudget: document.querySelector("#selectorPreviewBudget"),
   selectorPreviewObjective: document.querySelector("#selectorPreviewObjective"),
@@ -378,6 +385,9 @@ const state = {
   operatorPanelSignature: "",
   operatorTutorialStage: 0,
   operatorTutorialStageStartS: 0,
+  operatorBurnCinematicActive: false,
+  operatorBurnCinematicHoldUntilMs: 0,
+  operatorBurnAnimation: null,
   equationSheetVisible: false,
   musicEnabled: true,
   musicStartRequested: false,
@@ -781,6 +791,7 @@ function clearControlPulses() {
 
 function resetState(seed = presets.behind) {
   clearControlPulses();
+  clearOperatorBurnCinematic();
   state.sim = makeState(seed);
   state.trail = [samplePoint()];
   state.targetTrail = [];
@@ -796,6 +807,12 @@ function resetState(seed = presets.behind) {
   setLeaderboardFormVisible(false);
   updateGhost();
   draw();
+}
+
+function clearOperatorBurnCinematic() {
+  state.operatorBurnCinematicActive = false;
+  state.operatorBurnCinematicHoldUntilMs = 0;
+  state.operatorBurnAnimation = null;
 }
 
 function showLevelSelector(options = {}) {
@@ -845,11 +862,11 @@ function renderLevelSelector() {
     el.selectorModeButton.classList.toggle("active", availableOperator && state.playMode === "operator");
     el.selectorModeButton.setAttribute("aria-pressed", String(availableOperator && state.playMode === "operator"));
   }
-  if (el.selectorFrameButton) {
-    el.selectorFrameButton.textContent = frameConventionLabel();
-    el.selectorFrameButton.classList.toggle("active", state.frameConvention === "space_force");
-    el.selectorFrameButton.setAttribute("aria-pressed", String(state.frameConvention === "space_force"));
-  }
+  el.selectorFrameButtons.forEach((button) => {
+    button.textContent = frameConventionLabel();
+    button.classList.toggle("active", state.frameConvention === "space_force");
+    button.setAttribute("aria-pressed", String(state.frameConvention === "space_force"));
+  });
   if (el.selectorPlayButton) {
     el.selectorPlayButton.textContent = "Play Level";
     el.selectorPlayButton.setAttribute("aria-label", `Play ${displayTitleForOption(option)}.`);
@@ -1239,9 +1256,69 @@ function step(dt, forceRun = false) {
   updateTutorial(dt, u);
 }
 
+function operatorBurnVisualDurationS(deltaVMps) {
+  const magnitude = Number.isFinite(Number(deltaVMps)) ? Math.max(Number(deltaVMps), 0) : 0;
+  const duration = OPERATOR_BURN_VISUAL_DURATION_BASE_S + OPERATOR_BURN_VISUAL_DURATION_PER_M_S * magnitude;
+  return Math.min(Math.max(duration, OPERATOR_BURN_VISUAL_DURATION_MIN_S), OPERATOR_BURN_VISUAL_DURATION_MAX_S);
+}
+
+function updateOperatorBurnCinematic(nowMs, frameHorizonS = 0) {
+  if (!operatorModeActive()) {
+    clearOperatorBurnCinematic();
+    return;
+  }
+  if (
+    state.operatorBurnCinematicActive &&
+    state.operatorBurnCinematicHoldUntilMs > 0 &&
+    nowMs > state.operatorBurnCinematicHoldUntilMs
+  ) {
+    clearOperatorBurnCinematic();
+  }
+  if (state.operatorBurnCinematicActive) return;
+  const nextBurn = state.operatorPlan[state.operatorBurnIndex];
+  if (!nextBurn) return;
+  const timeToBurnS = Number(nextBurn.timeS || 0) - Number(state.sim.t || 0);
+  const triggerWindowS = Math.max(OPERATOR_BURN_CINEMATIC_LOOKAHEAD_S, Number(frameHorizonS || 0));
+  if (timeToBurnS >= -1.0e-9 && timeToBurnS <= triggerWindowS + 1.0e-9) {
+    state.operatorBurnCinematicActive = true;
+    state.operatorBurnCinematicHoldUntilMs = 0;
+  }
+}
+
+function beginOperatorBurnAnimation(preBurnState, postBurnState, burn, nowMs) {
+  const durationS = operatorBurnVisualDurationS(burn?.dvMps || 0);
+  state.operatorBurnAnimation = {
+    pre: { ...preBurnState },
+    post: { ...postBurnState },
+    startMs: Number(nowMs || performance.now()),
+    durationMs: durationS * 1000,
+  };
+  state.operatorBurnCinematicActive = true;
+  state.operatorBurnCinematicHoldUntilMs = Number(nowMs || performance.now()) + durationS * 1000;
+}
+
+function operatorBurnProjectionSeed(nowMs = performance.now()) {
+  const animation = state.operatorBurnAnimation;
+  if (!animation) return { ...state.sim };
+  const durationMs = Math.max(Number(animation.durationMs || 0), 1);
+  const alpha = Math.min(Math.max((Number(nowMs) - Number(animation.startMs || 0)) / durationMs, 0), 1);
+  if (alpha >= 1 && (!state.operatorBurnCinematicActive || state.operatorBurnCinematicHoldUntilMs <= 0)) {
+    state.operatorBurnAnimation = null;
+    return { ...state.sim };
+  }
+  const blended = {};
+  ["r", "i", "c", "rd", "id", "cd"].forEach((key) => {
+    blended[key] = Number(animation.pre[key] || 0) + (Number(animation.post[key] || 0) - Number(animation.pre[key] || 0)) * alpha;
+  });
+  blended.t = Number(state.sim.t || 0);
+  blended.dv = Number(state.sim.dv || 0);
+  return blended;
+}
+
 function stepOperator(dt, forceRun = false) {
   if ((!state.running && !forceRun) || state.passed) return;
   const targetTimeS = state.sim.t + dt;
+  const nowMs = performance.now();
   while (targetTimeS - state.sim.t > 1.0e-9) {
     const nextBurn = state.operatorPlan[state.operatorBurnIndex];
     const nextStopS = nextBurn ? Math.min(targetTimeS, nextBurn.timeS) : targetTimeS;
@@ -1257,10 +1334,12 @@ function stepOperator(dt, forceRun = false) {
       state.sim.t = nextState.t;
     }
     if (nextBurn && Math.abs(state.sim.t - nextBurn.timeS) <= 1.0e-6) {
+      const preBurnState = { ...state.sim };
       state.sim.rd += nextBurn.rMps / 1000;
       state.sim.id += nextBurn.iMps / 1000;
       state.sim.cd += nextBurn.cMps / 1000;
       state.sim.dv += nextBurn.dvMps;
+      beginOperatorBurnAnimation(preBurnState, { ...state.sim }, nextBurn, nowMs);
       state.operatorBurnIndex += 1;
     } else {
       break;
@@ -1367,7 +1446,14 @@ function hasManeuverInput(controls = currentControls()) {
   return Math.hypot(controls.r, controls.i, controls.c) > 1.0e-9;
 }
 
+function operatorBurnCinematicShouldClamp() {
+  return operatorModeActive() && state.operatorBurnCinematicActive;
+}
+
 function effectiveSpeedMultiple(controls = currentControls()) {
+  if (operatorBurnCinematicShouldClamp()) {
+    return Math.min(currentSpeedMultiple(), OPERATOR_BURN_CINEMATIC_SPEED_MULTIPLE);
+  }
   if (currentSpeedMultiple() <= MANEUVER_CONTROL_SPEED || !hasManeuverInput(controls)) return currentSpeedMultiple();
   return MANEUVER_CONTROL_SPEED;
 }
@@ -1650,8 +1736,13 @@ function updateGhost() {
     state.tutorialTargetPath = [];
     return;
   }
-  if (operatorExperienceActive()) {
+  if (operatorScriptModeActive()) {
     state.ghost = state.operatorPlanPath;
+    state.tutorialTargetPath = [];
+    return;
+  }
+  if (operatorModeActive()) {
+    state.ghost = predictGhost(operatorBurnProjectionSeed(), ORBIT_PERIOD_S, MAX_GHOST_DRAW_POINTS);
     state.tutorialTargetPath = [];
     return;
   }
@@ -1860,14 +1951,23 @@ function operatorInputLabel(field, idx) {
   return `Burn ${idx + 1} ${labels[field]}`;
 }
 
+function operatorBurnTimeInputValue(timeS) {
+  const value = Math.max(Number(timeS || 0), 0);
+  if (!Number.isFinite(value)) return "";
+  if (Math.abs(value - Math.round(value)) < 1.0e-9) return String(Math.round(value));
+  return value.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
+}
+
 function addOperatorBurnRow() {
   if (state.mode === "operatorScriptTutorial") return;
   ensureOperatorRows();
+  const probeTime = state.operatorTrajectoryProbe ? operatorBurnTimeInputValue(state.operatorTrajectoryProbe.timeS) : "";
   const lastTime = Math.max(
     0,
     ...state.operatorBurnRows.map((row) => Number(row.t)).filter((value) => Number.isFinite(value)),
   );
-  state.operatorBurnRows.push({ t: String(lastTime + 600), r: "0", i: "0", c: "0" });
+  state.operatorBurnRows.push({ t: probeTime || String(lastTime + 600), r: "0", i: "0", c: "0" });
+  state.operatorTrajectoryProbe = null;
   state.operatorPanelSignature = "";
   updateOperatorPlan();
   renderOperatorPanel();
@@ -2809,6 +2909,9 @@ function cameraCenterFor(xAxis, yAxis) {
   if (state.mode === "primer" || state.mode === "tutorial" || operatorScriptModeActive() || state.mode === "operatorTutorial") {
     return { r: 0, i: 0, c: 0 };
   }
+  if (state.mode === "operatorSandbox") {
+    return { r: 0, i: 0, c: 0 };
+  }
   if (state.mode === "arcade") {
     if (state.cameraRuleMode === "full_trajectory") return { r: 0, i: 0, c: 0 };
     return {
@@ -2834,7 +2937,7 @@ function plotScale(width, height, xAxis, yAxis, cameraCenter) {
   let values;
   if (state.mode === "arcade" && state.cameraRuleMode === "current_pair") {
     values = [state.sim, state.arcadeTargetRel];
-  } else if (state.mode === "sandbox" && state.cameraRuleMode === "current_pair") {
+  } else if ((state.mode === "sandbox" || state.mode === "operatorSandbox") && state.cameraRuleMode === "current_pair") {
     values = [state.sim, { r: 0, i: 0, c: 0 }];
   } else {
     values = [...state.trail, ...state.ghost, ...state.tutorialTargetPath, { r: 0, i: 0, c: 0 }];
@@ -3230,6 +3333,9 @@ function frame(nowMs) {
   const controls = currentControls();
   const pendingPulse = hasPendingControlPulse();
   const shouldRun = simulationShouldRun();
+  if (operatorModeActive() && !state.passed) {
+    updateOperatorBurnCinematic(nowMs, shouldRun ? elapsedS * currentSpeedMultiple() : 0);
+  }
   if (shouldRun && !state.passed) {
     state.stepAccumulatorS += elapsedS * effectiveSpeedMultiple(controls);
   } else {
@@ -3503,7 +3609,7 @@ function bindEvents() {
     launchSelectedLevel("selector_play_button");
   });
   bindCommandButton(el.selectorModeButton, toggleSelectorPlayMode);
-  bindCommandButton(el.selectorFrameButton, toggleFrameConvention);
+  el.selectorFrameButtons.forEach((button) => bindCommandButton(button, toggleFrameConvention));
   bindCommandButton(el.operatorAddBurn, addOperatorBurnRow);
   bindCommandButton(el.equationSheetButton, toggleEquationSheet);
   bindCommandButton(el.equationSheetClose, toggleEquationSheet);
@@ -3526,7 +3632,7 @@ function bindEvents() {
         handleOperatorTrajectoryProbeClick(event, panel === el.riPanel ? "ri" : "rc");
         return;
       }
-      if (state.mode !== "sandbox" && state.mode !== "arcade") return;
+      if (state.mode !== "sandbox" && state.mode !== "operatorSandbox" && state.mode !== "arcade") return;
       if (state.activeView === "mobile") return;
       event.preventDefault();
       event.stopPropagation();

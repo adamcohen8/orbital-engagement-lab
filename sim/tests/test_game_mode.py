@@ -115,6 +115,7 @@ from sim.game.launcher import (
     _operator_game_plot_panel_rects,
     _operator_initial_relative_ric_state,
     _operator_minimum_plot_span_km,
+    _operator_new_burn_row_from_probe,
     _operator_objective_numeric_targets,
     _operator_objectives_button_rect,
     _operator_objectives_content_height,
@@ -4025,6 +4026,17 @@ def test_operator_trajectory_probe_click_selects_and_clears_state() -> None:
     assert handled is True
     assert selected_state is None
     assert selected_time_s is None
+
+
+def test_operator_add_burn_row_uses_selected_probe_time() -> None:
+    probe = OperatorTrajectoryProbe(
+        state_ric_km_s=(0.0, 1.0, 0.0, 0.0, 0.0001, 0.0),
+        time_s=1234.5,
+        plan_key=("test",),
+    )
+
+    assert _operator_new_burn_row_from_probe(probe) == ["1234.5", "", "", ""]
+    assert _operator_new_burn_row_from_probe(None) == ["", "", "", ""]
 
 
 def test_operator_planned_trajectory_uses_ya_for_elliptic_levels(monkeypatch: pytest.MonkeyPatch) -> None:
