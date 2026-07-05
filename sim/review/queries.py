@@ -90,7 +90,8 @@ SAVED_REVIEW_QUERIES: dict[str, SavedReviewQuery] = {
         sql=(
             "SELECT time_s, deputy_id, chief_id, r_radial_km, i_intrack_km, "
             "c_crosstrack_km, range_km, range_rate_km_s FROM relative_state "
-            "ORDER BY time_s DESC LIMIT 1"
+            "WHERE sample_index = (SELECT MAX(sample_index) FROM relative_state) "
+            "ORDER BY deputy_id, chief_id"
         ),
     ),
     "burn_activity": SavedReviewQuery(

@@ -6,7 +6,7 @@ metadata:
   notes: Run with `python run_game.py sim/game/configs/game_training_rpo_10_defensive_target_demo.yaml
     --speed-multiple 10`.
   game:
-    level_name: Level 10 - Pursuit
+    level_name: Level 11 - Pursuit
     control_mode: ric_translation
     ric_reference_object_id: target_reference
     camera_mode: target_pair

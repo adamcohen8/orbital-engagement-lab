@@ -1399,8 +1399,10 @@ def _parse_simulator_section(value: Any) -> SimulatorSection:
         termination=termination,
     )
     if str(out.frames.model).strip().lower() in {"iau76_80_eop", "iau76_fk5_iau80_eop", "hpop_like", "hpop"}:
-        manual_eop_keys = ("dut1_s", "xp_arcsec", "yp_arcsec", "dat_s", "ddpsi_rad", "ddeps_rad")
-        has_manual_eop = any(out.frames.get(key) is not None for key in manual_eop_keys)
+        has_manual_eop = any(out.frames.get(key) is not None for key in ("dut1_s", "xp_arcsec", "yp_arcsec", "dat_s"))
+        has_manual_eop = has_manual_eop or any(
+            float(out.frames.get(key, 0.0) or 0.0) != 0.0 for key in ("ddpsi_rad", "ddeps_rad")
+        )
         if (out.frames.eop_path is not None or has_manual_eop) and out.initial_jd_utc is None:
             raise ValueError("simulator.frames EOP settings require simulator.initial_jd_utc for frame rotation.")
     _validate_sim_timing(out)
@@ -2005,6 +2007,14 @@ def _validate_config_read_paths(root: dict[str, Any], path_policy: ConfigPathPol
     if path_policy is None:
         return
     simulator = _as_dict(root.get("simulator"), "simulator")
+    frames = _as_dict(simulator.get("frames"), "simulator.frames")
+    if frames.get("eop_path") not in (None, ""):
+        path_policy.resolve_input_file(
+            str(frames["eop_path"]),
+            purpose="simulator.frames.eop_path",
+            base_dir=path_policy.workspace_root,
+            must_exist=False,
+        )
     dynamics = _as_dict(simulator.get("dynamics"), "simulator.dynamics")
     orbit = _as_dict(dynamics.get("orbit"), "simulator.dynamics.orbit")
     path_fields = (
@@ -2135,6 +2145,8 @@ def scenario_config_from_dict(
         analysis=analysis,
         metadata=dict(root.get("metadata", {}) or {}),
     )
+    if source_path is not None:
+        object.__setattr__(cfg, "source_path", Path(source_path).expanduser().resolve())
     for object_id, section in dict(cfg.objects or {}).items():
         if bool(dict(section.reference_orbit or {}).get("enabled", False)) and (not bool(section.enabled)):
             raise ValueError(f"{object_id}.reference_orbit.enabled requires {object_id}.enabled to be true.")

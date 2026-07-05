@@ -8,6 +8,10 @@ metadata:
   game:
     control_mode: ric_translation
     level_name: Level 3 - R-Bar Approach
+    camera_mode: target_pair
+    target_centered_plot_planes:
+    - RI
+    - RC
     difficulty: easy
     initial_speed_multiple: 10.0
     speed_multiplier_options:

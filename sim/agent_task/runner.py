@@ -204,13 +204,14 @@ def compare_configs(
 
     runs: dict[str, Any] = {}
     inspections: dict[str, Any] = {}
+    comparison_query_names = _comparison_query_names(metrics)
     for item in configs:
         label = str(item["label"])
         try:
             runs[label] = _run_summary(run_simulation_config_file(item["config_path"]))
             inspections[label] = inspect_output(
                 item["output_dir"],
-                query_names=("run_metadata", "rendezvous_metrics", "rendezvous_closest_approach", "artifacts"),
+                query_names=comparison_query_names,
                 max_rows=max_rows,
                 semantic_metric_names=metrics,
                 write_packet=False,
@@ -224,6 +225,12 @@ def compare_configs(
             return _write_packet(packet, outdir)
 
     metric_table = {label: _extract_metric_values(data, metrics) for label, data in inspections.items()}
+    inspection_statuses = {label: str(data.get("status") or "") for label, data in inspections.items()}
+    for label, inspection in inspections.items():
+        if inspection_statuses.get(label) != "completed" and packet.status == "completed":
+            packet.status = "partial"
+        for hint in list(inspection.get("failure_hints", []) or []):
+            packet.failure_hints.append({"label": label, **dict(hint)})
     packet.run = runs
     packet.review = {"base": inspections.get("base", {}).get("review", {}), "candidate": inspections.get("candidate", {}).get("review", {})}
     packet.artifacts = [
@@ -232,11 +239,16 @@ def compare_configs(
         for artifact in list(inspection.get("artifacts", []) or [])
     ]
     packet.artifact_summary = _summarize_artifacts(packet.artifacts)
+    deltas = _metric_deltas(metric_table.get("base", {}), metric_table.get("candidate", {}))
+    metric_status = _comparison_metric_status(metrics, metric_table, deltas, inspections)
     packet.comparison = {
         "metric_names": list(metrics),
+        "query_names": list(comparison_query_names),
         "metrics": metric_table,
-        "deltas": _metric_deltas(metric_table.get("base", {}), metric_table.get("candidate", {})),
-        "metric_status": _comparison_metric_status(metrics, metric_table),
+        "deltas": deltas,
+        "metric_status": metric_status,
+        "inspection_statuses": inspection_statuses,
+        "summary": _summarize_comparison(metric_status, inspection_statuses=inspection_statuses),
     }
     return _write_packet(packet, outdir)
 
@@ -331,6 +343,16 @@ def _run_saved_queries(workspace: ReviewWorkspace, query_names: tuple[str, ...],
     return rows
 
 
+def _comparison_query_names(metric_names: tuple[str, ...]) -> tuple[str, ...]:
+    names = ["run_metadata", "artifacts"]
+    for metric_name in metric_names:
+        metric = get_semantic_metric(metric_name)
+        saved_query = str(getattr(metric, "saved_query", "") or "") if metric is not None else ""
+        if saved_query and saved_query not in names:
+            names.append(saved_query)
+    return tuple(names)
+
+
 def _summarize_query_rows(query_rows: list[dict[str, Any]]) -> dict[str, Any]:
     failed = [str(row.get("name")) for row in query_rows if row.get("status") == "failed"]
     unknown = [str(row.get("name")) for row in query_rows if row.get("status") == "unknown_query"]
@@ -394,7 +416,12 @@ def _metric_deltas(base: dict[str, Any], candidate: dict[str, Any]) -> dict[str,
     return deltas
 
 
-def _comparison_metric_status(metric_names: tuple[str, ...], metric_table: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+def _comparison_metric_status(
+    metric_names: tuple[str, ...],
+    metric_table: dict[str, dict[str, Any]],
+    deltas: dict[str, Any],
+    inspections: dict[str, Any],
+) -> list[dict[str, Any]]:
     base = metric_table.get("base", {})
     candidate = metric_table.get("candidate", {})
     status_rows: list[dict[str, Any]] = []
@@ -406,21 +433,82 @@ def _comparison_metric_status(metric_names: tuple[str, ...], metric_table: dict[
             "name": name,
             "base_available": base_available,
             "candidate_available": candidate_available,
-            "delta_available": base_available and candidate_available,
+            "delta_available": name in deltas,
             "semantic_metric_known": metric is not None,
         }
         if metric is not None:
+            query_status_by_label = _saved_query_statuses(inspections, metric.saved_query)
             row.update(
                 {
                     "maturity": metric.maturity,
                     "source_tables": list(metric.source_tables),
                     "saved_query": metric.saved_query,
+                    "query_status_by_label": query_status_by_label,
                 }
             )
+            if not base_available or not candidate_available:
+                if metric.saved_query and query_status_by_label and all(
+                    status == "ok" for status in query_status_by_label.values()
+                ):
+                    row["reason"] = "no_scalar_reducer"
+                else:
+                    row["reason"] = "metric_unavailable"
+            elif name not in deltas:
+                row["reason"] = "non_numeric_delta"
         else:
             row["reason"] = "unknown_semantic_metric"
         status_rows.append(row)
     return status_rows
+
+
+def _saved_query_statuses(inspections: dict[str, Any], query_name: str) -> dict[str, str]:
+    if not query_name:
+        return {}
+    out: dict[str, str] = {}
+    for label, inspection in inspections.items():
+        queries = {
+            str(query.get("name") or ""): dict(query)
+            for query in list(dict(inspection.get("review", {}) or {}).get("queries", []) or [])
+            if isinstance(query, dict)
+        }
+        query = queries.get(str(query_name))
+        out[str(label)] = str(query.get("status") or "missing") if query is not None else "missing"
+    return out
+
+
+def _summarize_comparison(
+    metric_status: list[dict[str, Any]],
+    *,
+    inspection_statuses: dict[str, str],
+) -> dict[str, Any]:
+    unknown = [str(row.get("name")) for row in metric_status if not bool(row.get("semantic_metric_known"))]
+    missing_values = [
+        str(row.get("name"))
+        for row in metric_status
+        if bool(row.get("semantic_metric_known"))
+        and (not bool(row.get("base_available")) or not bool(row.get("candidate_available")))
+    ]
+    missing_deltas = [
+        str(row.get("name"))
+        for row in metric_status
+        if bool(row.get("semantic_metric_known"))
+        and bool(row.get("base_available"))
+        and bool(row.get("candidate_available"))
+        and not bool(row.get("delta_available"))
+    ]
+    partial_inspections = [
+        str(label)
+        for label, status in sorted(inspection_statuses.items())
+        if status and status != "completed"
+    ]
+    return {
+        "total": len(metric_status),
+        "unknown_metrics": unknown,
+        "missing_value_metrics": missing_values,
+        "missing_delta_metrics": missing_deltas,
+        "partial_inspections": partial_inspections,
+        "complete": not unknown and not missing_values and not missing_deltas and not partial_inspections,
+    }
 
 
 def _artifact_rows(query_rows: list[dict[str, Any]], *, output_dir: Path) -> list[dict[str, Any]]:
@@ -543,6 +631,7 @@ def _summarize_packet_evidence(packet: EvidencePacket) -> dict[str, Any]:
     review_complete = _review_evidence_complete(packet.review)
     artifacts_complete = _optional_complete(packet.artifact_summary, "artifacts_complete")
     plots_complete = _optional_complete(packet.plot_summary, "plots_complete")
+    comparison_complete = _comparison_complete(packet.comparison)
     failure_hint_count = len(packet.failure_hints)
     ready = (
         packet.status in {"completed", "validated"}
@@ -550,6 +639,7 @@ def _summarize_packet_evidence(packet: EvidencePacket) -> dict[str, Any]:
         and review_complete is not False
         and artifacts_complete is not False
         and plots_complete is not False
+        and comparison_complete is not False
         and failure_hint_count == 0
     )
     return {
@@ -558,6 +648,7 @@ def _summarize_packet_evidence(packet: EvidencePacket) -> dict[str, Any]:
         "review_evidence_complete": review_complete,
         "artifacts_complete": artifacts_complete,
         "plots_complete": plots_complete,
+        "comparison_complete": comparison_complete,
         "failure_hint_count": failure_hint_count,
         "caveat_count": len(packet.caveats),
         "ready_to_cite": ready,
@@ -602,6 +693,15 @@ def _optional_complete(summary: dict[str, Any], key: str) -> bool | None:
     if key not in summary:
         return None
     return bool(summary.get(key))
+
+
+def _comparison_complete(comparison: dict[str, Any]) -> bool | None:
+    if not comparison:
+        return None
+    summary = comparison.get("summary")
+    if not isinstance(summary, dict) or "complete" not in summary:
+        return None
+    return bool(summary.get("complete"))
 
 
 def _write_packet(packet: EvidencePacket, output_dir: str | Path) -> dict[str, Any]:

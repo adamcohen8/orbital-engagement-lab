@@ -82,6 +82,13 @@ class OrbitalAttitudeDynamics(DynamicsModel):
                 frame_model=str(env_local.get("drag_frame_model", "inertial_z")),
                 jd_utc_start=env_local.get("jd_utc_start"),
                 eop_path=env_local.get("drag_eop_path"),
+                dut1_s=env_local.get("dut1_s"),
+                xp_arcsec=env_local.get("xp_arcsec"),
+                yp_arcsec=env_local.get("yp_arcsec"),
+                dat_s=env_local.get("dat_s"),
+                tt_minus_utc_s=env_local.get("tt_minus_utc_s"),
+                ddpsi_rad=float(env_local.get("ddpsi_rad", 0.0) or 0.0),
+                ddeps_rad=float(env_local.get("ddeps_rad", 0.0) or 0.0),
             )
             v_rel_body = c_bn @ v_rel_eci_km_s
             env_local["drag_area_m2"] = area_profile.projected_area_for_direction_m2(-v_rel_body)
@@ -102,6 +109,13 @@ class OrbitalAttitudeDynamics(DynamicsModel):
                 frame_model=str(env_local.get("drag_frame_model", "inertial_z")),
                 jd_utc_start=env_local.get("jd_utc_start"),
                 eop_path=env_local.get("drag_eop_path"),
+                dut1_s=env_local.get("dut1_s"),
+                xp_arcsec=env_local.get("xp_arcsec"),
+                yp_arcsec=env_local.get("yp_arcsec"),
+                dat_s=env_local.get("dat_s"),
+                tt_minus_utc_s=env_local.get("tt_minus_utc_s"),
+                ddpsi_rad=float(env_local.get("ddpsi_rad", 0.0) or 0.0),
+                ddeps_rad=float(env_local.get("ddeps_rad", 0.0) or 0.0),
             )
             v_rel_body = c_bn @ v_rel_eci_km_s
             env_local["drag_area_m2"] = geom.projected_area_m2(-v_rel_body)
@@ -163,6 +177,13 @@ class OrbitalAttitudeDynamics(DynamicsModel):
                     frame_model=str(env_local.get("drag_frame_model", "inertial_z")),
                     jd_utc_start=env_local.get("jd_utc_start"),
                     eop_path=env_local.get("drag_eop_path"),
+                    dut1_s=env_local.get("dut1_s"),
+                    xp_arcsec=env_local.get("xp_arcsec"),
+                    yp_arcsec=env_local.get("yp_arcsec"),
+                    dat_s=env_local.get("dat_s"),
+                    tt_minus_utc_s=env_local.get("tt_minus_utc_s"),
+                    ddpsi_rad=float(env_local.get("ddpsi_rad", 0.0) or 0.0),
+                    ddeps_rad=float(env_local.get("ddeps_rad", 0.0) or 0.0),
                 )
                 v_rel_eci_m_s = v_rel_eci_km_s * 1e3
                 env_local["drag_v_rel_eci_m_s"] = v_rel_eci_m_s

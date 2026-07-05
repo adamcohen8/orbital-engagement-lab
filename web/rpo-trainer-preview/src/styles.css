@@ -60,9 +60,9 @@ button.active {
 }
 
 .music-button.active {
-  border-color: rgb(94, 190, 245);
-  background: rgb(34, 60, 76);
-  color: rgb(238, 244, 250);
+  border-color: rgb(104, 130, 156);
+  background: rgb(34, 48, 62);
+  color: rgb(220, 234, 246);
 }
 
 button:focus-visible,
@@ -102,10 +102,34 @@ p {
   grid-template-rows: 124px minmax(0, 1fr) 76px;
   background: var(--screen);
   padding: 0 42px;
+  --selector-accent-bg: rgb(28, 48, 66);
+  --selector-accent-border: rgb(96, 174, 224);
+  --selector-accent-text: rgb(238, 244, 250);
+  --selector-control-bg: rgb(34, 60, 76);
 }
 
 .trainer-shell:not(.selector-mode) .level-selector {
   display: none;
+}
+
+.selector-operator-mode .level-selector,
+.level-selector.operator-mode {
+  --selector-accent-bg: rgb(74, 56, 24);
+  --selector-accent-border: rgb(245, 210, 110);
+  --selector-accent-text: rgb(255, 236, 174);
+  --selector-control-bg: rgb(58, 45, 24);
+}
+
+.selector-pilot-mode .level-selector,
+.level-selector.pilot-mode {
+  --selector-inactive-border: rgb(48, 60, 76);
+  --selector-inactive-bg: var(--panel);
+}
+
+.selector-operator-mode .level-selector,
+.level-selector.operator-mode {
+  --selector-inactive-border: rgb(48, 60, 76);
+  --selector-inactive-bg: var(--panel);
 }
 
 .launcher-header {
@@ -141,8 +165,9 @@ p {
   grid-row: 1;
   width: 144px;
   min-height: 30px;
-  background: rgb(34, 60, 76);
-  border-color: rgb(94, 190, 245);
+  background: var(--selector-control-bg);
+  border-color: var(--selector-accent-border);
+  color: var(--selector-accent-text);
 }
 
 .launcher-view {
@@ -150,7 +175,25 @@ p {
   grid-row: 1;
   width: 156px;
   min-height: 30px;
-  background: rgb(34, 48, 62);
+  background: var(--selector-control-bg);
+  border-color: var(--selector-accent-border);
+  color: var(--selector-accent-text);
+}
+
+.launcher-mode {
+  width: 132px;
+  min-height: 30px;
+  background: var(--selector-control-bg);
+  border-color: var(--selector-accent-border);
+  color: var(--selector-accent-text);
+}
+
+.launcher-frame {
+  width: 172px;
+  min-height: 30px;
+  background: var(--selector-control-bg);
+  border-color: var(--selector-accent-border);
+  color: var(--selector-accent-text);
 }
 
 .launcher-repo {
@@ -163,10 +206,10 @@ p {
   height: 30px;
   min-height: 30px;
   padding: 0 10px;
-  background: rgb(34, 48, 62);
-  border: 1px solid rgb(104, 130, 156);
+  background: var(--selector-control-bg);
+  border: 1px solid var(--selector-accent-border);
   border-radius: 4px;
-  color: var(--text);
+  color: var(--selector-accent-text);
   font-size: 0.88rem;
   line-height: 1;
   text-align: center;
@@ -175,15 +218,19 @@ p {
 
 .launcher-repo:hover,
 .launcher-repo:focus-visible {
-  border-color: rgb(94, 190, 245);
-  color: rgb(238, 244, 250);
+  border-color: var(--selector-accent-border);
+  color: var(--selector-accent-text);
 }
 
-.launcher-music.active,
-.launcher-music:hover {
-  background: rgb(34, 60, 76);
-  border-color: rgb(94, 190, 245);
-  color: rgb(238, 244, 250);
+.launcher-music:hover,
+.launcher-view:hover,
+.launcher-mode:hover,
+.launcher-mode.active,
+.launcher-frame:hover,
+.launcher-frame.active {
+  background: var(--selector-control-bg);
+  border-color: var(--selector-accent-border);
+  color: var(--selector-accent-text);
 }
 
 .launcher-body {
@@ -216,15 +263,19 @@ p {
   padding: 10px 18px;
   text-align: left;
   border-radius: 8px;
-  border-color: rgb(48, 60, 76);
-  background: var(--panel);
+  border-color: var(--selector-inactive-border, rgb(48, 60, 76));
+  background: var(--selector-inactive-bg, var(--panel));
+}
+
+.launcher-option[hidden] {
+  display: none;
 }
 
 .launcher-option.active,
 .launcher-option:focus-visible {
-  background: rgb(28, 48, 66);
-  border-color: rgb(96, 174, 224);
-  color: rgb(238, 244, 250);
+  background: var(--selector-accent-bg);
+  border-color: var(--selector-accent-border);
+  color: var(--selector-accent-text);
 }
 
 .launcher-option span {
@@ -371,9 +422,20 @@ p {
 
 .launcher-footer {
   align-self: center;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
   color: var(--footer);
   font-size: 14px;
   line-height: 18px;
+}
+
+.launcher-footer-controls {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  min-width: 0;
 }
 
 .top-bar {
@@ -622,6 +684,10 @@ canvas {
   right: 700px;
 }
 
+.mode-operator .hud-line {
+  right: 360px;
+}
+
 .primer-mode .hint-line {
   right: 16px;
 }
@@ -634,6 +700,280 @@ canvas {
   max-width: 360px;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.mode-operator-script .top-bar {
+  left: 52px;
+  top: 40px;
+  right: 52px;
+  min-height: 44px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  display: block;
+  padding: 0;
+}
+
+.mode-operator-script .top-left {
+  display: flex;
+  align-items: baseline;
+  gap: 26px;
+}
+
+.mode-operator-script #levelLabel {
+  margin: 0;
+  font-size: 28px;
+  line-height: 34px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.mode-operator-script .top-metrics,
+.mode-operator-script .objective-checklist {
+  display: none;
+}
+
+.mode-operator-script .game-layout {
+  left: 40px;
+  right: 40px;
+  top: 106px;
+  bottom: 104px;
+}
+
+.mode-operator-script .plot-stack {
+  bottom: 202px;
+  gap: 30px;
+}
+
+.mode-operator-script .plot-panel {
+  border-radius: 8px;
+}
+
+.mode-operator-script canvas {
+  top: 64px;
+  bottom: 20px;
+}
+
+.mode-operator-script .operator-panel {
+  left: 0;
+  bottom: 0;
+  width: calc(100% - 340px);
+  max-height: 178px;
+  border-width: 2px;
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.mode-operator-script .operator-table {
+  max-height: 104px;
+}
+
+.mode-operator-script .hud-panel {
+  left: auto;
+  right: 40px;
+  bottom: 104px;
+  width: 300px;
+  height: 88px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.mode-operator-script .hud-line,
+.mode-operator-script .hint-line,
+.mode-operator-script .command-line,
+.mode-operator-script .footer-line,
+.mode-operator-script #levelSelectButton,
+.mode-operator-script .music-button,
+.mode-operator-script #viewButton {
+  display: none;
+}
+
+.mode-operator-script .hud-top-controls {
+  position: static;
+  display: block;
+}
+
+.mode-operator-script .hud-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.mode-operator-script .equation-sheet-button {
+  display: inline-flex;
+  grid-column: 1 / -1;
+  width: 100%;
+  min-height: 32px;
+  align-items: center;
+  justify-content: center;
+  border-color: rgb(104, 130, 156);
+  background: rgb(34, 48, 62);
+  color: rgb(220, 234, 246);
+}
+
+.mode-operator-script .equation-sheet-button:hover,
+.mode-operator-script .equation-sheet-button:focus-visible,
+.mode-operator-script .equation-sheet-button[aria-pressed="true"] {
+  border-color: rgb(245, 210, 110);
+  background: rgb(58, 45, 24);
+  color: rgb(255, 236, 174);
+}
+
+.mode-operator-script #resetButton {
+  order: 1;
+}
+
+.mode-operator-script #pauseButton {
+  order: 2;
+  border-color: rgb(95, 185, 116);
+  background: rgb(35, 90, 50);
+}
+
+.mode-operator-script #pauseButton:hover,
+.mode-operator-script #pauseButton:focus-visible {
+  border-color: rgb(115, 215, 138);
+  background: rgb(44, 112, 62);
+  color: rgb(238, 244, 250);
+}
+
+.mode-operator-script #resetButton,
+.mode-operator-script #pauseButton {
+  width: 100%;
+  min-height: 32px;
+  font-size: 14px;
+}
+
+.equation-sheet {
+  position: absolute;
+  left: 22px;
+  right: 22px;
+  top: 28px;
+  bottom: 202px;
+  z-index: 8;
+  border: 2px solid rgb(245, 210, 110);
+  border-radius: 10px;
+  background: rgba(15, 24, 34, 0.98);
+  padding: 18px 22px;
+  color: var(--text);
+  box-shadow: 0 18px 45px rgba(0, 0, 0, 0.35);
+}
+
+.equation-sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.equation-sheet h2 {
+  margin: 0;
+  font-size: 22px;
+  line-height: 28px;
+  text-transform: none;
+}
+
+.equation-sheet h3 {
+  margin: 0 0 12px;
+  font-size: 15px;
+  line-height: 19px;
+  color: rgb(238, 244, 250);
+}
+
+.equation-sheet-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 28px;
+  margin-top: 20px;
+}
+
+.equation {
+  margin: 10px 0;
+  color: rgb(238, 244, 250);
+  font-size: 22px;
+  line-height: 30px;
+}
+
+.equation-note {
+  margin: 16px 0 0;
+  color: rgb(170, 184, 204);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.ric-frame-diagram {
+  position: relative;
+  height: 210px;
+  border: 1px solid rgb(70, 82, 100);
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, transparent 49.5%, rgba(150, 170, 195, 0.38) 49.5%, rgba(150, 170, 195, 0.38) 50.5%, transparent 50.5%),
+    linear-gradient(0deg, transparent 49.5%, rgba(150, 170, 195, 0.38) 49.5%, rgba(150, 170, 195, 0.38) 50.5%, transparent 50.5%),
+    rgb(8, 11, 16);
+}
+
+.ric-frame-diagram::before,
+.ric-frame-diagram::after {
+  content: "";
+  position: absolute;
+  background: rgb(245, 210, 110);
+}
+
+.ric-frame-diagram::before {
+  left: 50%;
+  top: 50%;
+  width: 94px;
+  height: 2px;
+  transform: translateY(-50%);
+}
+
+.ric-frame-diagram::after {
+  left: 50%;
+  bottom: 50%;
+  width: 2px;
+  height: 74px;
+  transform: translateX(-50%);
+}
+
+.ric-target {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: rgb(245, 210, 110);
+  color: transparent;
+}
+
+.ric-axis {
+  position: absolute;
+  color: rgb(170, 184, 204);
+  font-size: 14px;
+  line-height: 18px;
+}
+
+.ric-r {
+  left: calc(50% + 10px);
+  top: 22px;
+}
+
+.ric-i {
+  right: 34px;
+  top: calc(50% + 8px);
+}
+
+.ric-c {
+  left: 28px;
+  top: calc(50% + 8px);
+  color: rgb(150, 235, 170);
+}
+
+.equation-sheet-button {
+  display: none;
 }
 
 .hidden-metrics {
@@ -654,6 +994,101 @@ canvas {
   gap: 12px;
   color: var(--text);
   font-size: 14px;
+}
+
+.operator-panel {
+  position: absolute;
+  left: 18px;
+  bottom: 18px;
+  z-index: 4;
+  width: min(660px, calc(100% - 36px));
+  max-height: 190px;
+  border: 2px solid rgb(245, 210, 110);
+  border-radius: 10px;
+  background: rgb(15, 24, 34);
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.operator-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.operator-panel-head div {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+}
+
+.operator-panel-head span,
+#operatorError {
+  color: var(--muted);
+}
+
+#operatorAddBurn {
+  width: 32px;
+  min-height: 28px;
+  padding: 0;
+}
+
+.operator-table {
+  display: grid;
+  gap: 6px;
+  max-height: 100px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.operator-row {
+  display: grid;
+  grid-template-columns: 42px repeat(4, minmax(70px, 1fr)) 32px;
+  gap: 6px;
+  align-items: end;
+}
+
+.operator-row span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.operator-header {
+  align-items: center;
+}
+
+.operator-header span {
+  font-weight: 700;
+}
+
+.operator-row input {
+  min-width: 0;
+  height: 28px;
+  border: 1px solid rgb(80, 92, 110);
+  border-radius: 4px;
+  background: rgb(8, 11, 16);
+  color: var(--text);
+  padding: 0 7px;
+}
+
+.operator-row button {
+  min-height: 28px;
+  padding: 0;
+}
+
+#operatorError {
+  min-height: 16px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 label {
@@ -832,6 +1267,8 @@ select {
 
   .launcher-music,
   .launcher-view,
+  .launcher-mode,
+  .launcher-frame,
   .launcher-repo {
     position: static;
     margin-top: 10px;
@@ -964,8 +1401,8 @@ body.mobile-view .level-selector {
 
 body.mobile-view .launcher-header {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  grid-template-rows: auto auto auto;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto auto auto auto auto;
   align-items: center;
   column-gap: 8px;
   row-gap: 3px;
@@ -980,10 +1417,14 @@ body.mobile-view .launcher-header h1 {
 
 body.mobile-view .launcher-header p {
   grid-column: 1 / -1;
-  grid-row: 3;
+  grid-row: 6;
   margin-top: 2px;
   font-size: 13px;
   line-height: 17px;
+}
+
+body.mobile-view .launcher-mode {
+  display: none;
 }
 
 body.mobile-view .launcher-music {
@@ -992,17 +1433,23 @@ body.mobile-view .launcher-music {
 }
 
 body.mobile-view .launcher-view {
-  grid-column: 2;
-  grid-row: 2;
+  grid-column: 1;
+  grid-row: 3;
+}
+
+body.mobile-view .launcher-frame {
+  grid-column: 1 / -1;
+  grid-row: 4;
 }
 
 body.mobile-view .launcher-repo {
-  grid-column: 3;
-  grid-row: 2;
+  grid-column: 1 / -1;
+  grid-row: 5;
 }
 
 body.mobile-view .launcher-music,
 body.mobile-view .launcher-view,
+body.mobile-view .launcher-frame,
 body.mobile-view .launcher-repo {
   position: relative;
   right: auto;
@@ -1384,6 +1831,7 @@ body.mobile-view .leaderboard-form {
 
   body.mobile-view .launcher-header {
     grid-template-columns: minmax(0, 1fr) 118px 118px 118px;
+    grid-template-rows: auto auto;
     column-gap: 8px;
     row-gap: 0;
   }
@@ -1399,29 +1847,38 @@ body.mobile-view .leaderboard-form {
   }
 
   body.mobile-view .launcher-header p {
-    grid-column: 1 / -1;
+    grid-column: 1;
+    grid-row: 2;
     font-size: 11px;
     line-height: 13px;
   }
 
   body.mobile-view .launcher-music,
   body.mobile-view .launcher-view,
+  body.mobile-view .launcher-frame,
   body.mobile-view .launcher-repo {
-    grid-row: 1;
     min-height: 30px;
     font-size: 11px;
   }
 
   body.mobile-view .launcher-music {
     grid-column: 2;
+    grid-row: 1;
   }
 
   body.mobile-view .launcher-view {
     grid-column: 3;
+    grid-row: 1;
+  }
+
+  body.mobile-view .launcher-frame {
+    grid-column: 4;
+    grid-row: 1;
   }
 
   body.mobile-view .launcher-repo {
-    grid-column: 4;
+    grid-column: 2 / 5;
+    grid-row: 2;
   }
 
   body.mobile-view .launcher-body {

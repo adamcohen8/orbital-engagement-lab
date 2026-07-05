@@ -90,9 +90,14 @@ def write_workflow_review(
         schema = _schema_from_db(db_path, workflow_type=str(workflow_type or "workflow"))
         schema_path.write_text(json.dumps(schema, indent=2, sort_keys=True), encoding="utf-8")
         outputs.update({"sqlite": str(db_path), "schema_json": str(schema_path)})
+    else:
+        _unlink_if_exists(db_path)
+        _unlink_if_exists(schema_path)
     if query_rows:
         saved_views_path.write_text(json.dumps({"views": query_rows}, indent=2, sort_keys=True), encoding="utf-8")
         outputs["saved_views_json"] = str(saved_views_path)
+    else:
+        _unlink_if_exists(saved_views_path)
     return outputs
 
 
@@ -215,6 +220,13 @@ def _write_workflow_sqlite(
         for name, rows in tables.items():
             _write_dynamic_table(conn, name, rows)
         conn.commit()
+
+
+def _unlink_if_exists(path: Path) -> None:
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return
 
 
 def _write_dynamic_table(conn: sqlite3.Connection, name: str, rows: list[dict[str, Any]]) -> None:

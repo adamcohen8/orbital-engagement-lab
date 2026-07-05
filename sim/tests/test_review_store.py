@@ -20,11 +20,13 @@ from sim.reporting.review_store import (
     REVIEW_SCHEMA_VERSION,
 )
 from sim.review import (
+    EVIDENCE_PLOT_RECIPES,
     SAVED_QUERY_MATURITY_LEVELS,
     SAVED_REVIEW_QUERIES,
     EvidencePlotter,
     ReviewPlotSpec,
     ReviewQueryError,
+    ReviewStoreNotFoundError,
     ReviewWorkspace,
     SavedReviewQuery,
     load_workflow_manifest,
@@ -127,8 +129,51 @@ def test_single_run_review_store_writes_queryable_sqlite(tmp_path: Path) -> None
     assert state_count == 6
     assert relative_count == 3
     assert min_range == pytest.approx(result.min_range("chaser", "target"))
-    assert "master_run_summary.json" in artifact_paths
-    assert "master_run_log.json" in artifact_paths
+    assert {
+        "index.md",
+        "master_run_log.json",
+        "master_run_summary.json",
+        "review/run.sqlite",
+        "review/schema.json",
+    }.issubset(set(artifact_paths))
+
+
+def test_single_run_review_store_writes_all_configured_relative_pairs(tmp_path: Path) -> None:
+    raw = _review_store_config(tmp_path)
+    raw["scenario_name"] = "review_store_multi_pair"
+    raw["simulator"]["duration_s"] = 1.0
+    raw["objects"]["chaser_a"] = raw["objects"].pop("chaser")
+    raw["objects"]["chaser_b"] = {
+        "enabled": True,
+        "specs": {"mass_kg": 100.0},
+        "initial_state": {
+            "relative_to": "target",
+            "relative_ric_rect": [2.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        },
+    }
+
+    result = SimulationSession.from_config(SimulationConfig.from_dict(raw)).run()
+    db_path = Path(result.summary["review_outputs"]["sqlite"])
+
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT deputy_id, chief_id, COUNT(*)
+            FROM relative_state
+            GROUP BY deputy_id, chief_id
+            ORDER BY deputy_id, chief_id
+            """
+        ).fetchall()
+        final_rows = conn.execute(SAVED_REVIEW_QUERIES["relative_final_state"].sql).fetchall()
+
+    assert rows == [
+        ("chaser_a", "target", 2),
+        ("chaser_b", "target", 2),
+    ]
+    assert [(row[1], row[2]) for row in final_rows] == [
+        ("chaser_a", "target"),
+        ("chaser_b", "target"),
+    ]
 
 
 def test_saved_review_queries_have_machine_readable_contract() -> None:
@@ -147,6 +192,13 @@ def test_saved_review_queries_have_machine_readable_contract() -> None:
         assert "read-only SELECT/WITH" in str(exc)
     else:  # pragma: no cover - defensive assertion branch
         raise AssertionError("SavedReviewQuery accepted mutating SQL")
+
+
+def test_relative_evidence_plot_recipes_group_by_pair_id() -> None:
+    for recipe_id in ("relative_range", "relative_range_rate"):
+        recipe = EVIDENCE_PLOT_RECIPES[recipe_id]
+        assert recipe.group_column == "pair_id"
+        assert "pair_id" in recipe.sql
 
 
 def test_saved_review_query_source_tables_match_review_schema(tmp_path: Path) -> None:
@@ -656,6 +708,44 @@ def test_workflow_review_manifest_writes_queryable_tables_and_cli_summary(tmp_pa
     assert "workflow_type: controller_bench" in proc.stdout
 
 
+def test_workflow_review_manifest_removes_stale_store_when_tables_are_absent(tmp_path: Path) -> None:
+    write_workflow_review(
+        output_dir=tmp_path,
+        workflow_type="validation",
+        tables={
+            "validation_benchmarks": [
+                {
+                    "benchmark_name": "old",
+                    "kind": "smoke",
+                    "passed": True,
+                    "duration_s": 1.0,
+                    "output_dir": "old",
+                }
+            ]
+        },
+        recommended_queries=[{"name": "old", "sql": "SELECT benchmark_name FROM validation_benchmarks"}],
+    )
+
+    outputs = write_workflow_review(
+        output_dir=tmp_path,
+        workflow_type="validation",
+        artifacts={"summary_json": str(tmp_path / "summary.json")},
+        tables={},
+        recommended_queries=[],
+    )
+    manifest = load_workflow_manifest(tmp_path)
+
+    assert "sqlite" not in outputs
+    assert manifest["sqlite"] == ""
+    assert manifest["schema_json"] == ""
+    assert manifest["saved_views_json"] == ""
+    assert not (tmp_path / "review" / "run.sqlite").exists()
+    assert not (tmp_path / "review" / "schema.json").exists()
+    assert not (tmp_path / "review" / "saved_views.json").exists()
+    with pytest.raises(ReviewStoreNotFoundError):
+        ReviewWorkspace.open(tmp_path)
+
+
 def test_quickstart_config_can_emit_review_store_tables(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[2]
     config = yaml.safe_load((root / "configs" / "quickstart_5min.yaml").read_text(encoding="utf-8"))
@@ -685,7 +775,14 @@ def test_quickstart_config_can_emit_review_store_tables(tmp_path: Path) -> None:
     assert counts["artifacts"] >= 1
     with sqlite3.connect(db_path) as conn:
         artifact_paths = [row[0] for row in conn.execute("SELECT path FROM artifacts ORDER BY artifact_id")]
-    assert "master_run_summary.json" in artifact_paths
+        config_path = conn.execute("SELECT config_path FROM run_metadata").fetchone()[0]
+    assert {
+        "index.md",
+        "master_run_summary.json",
+        "review/run.sqlite",
+        "review/schema.json",
+    }.issubset(set(artifact_paths))
+    assert config_path == str(cfg_path.resolve())
 
 
 def test_plotting_config_review_store_indexes_plot_artifacts(tmp_path: Path) -> None:

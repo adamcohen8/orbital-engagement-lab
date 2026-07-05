@@ -94,7 +94,7 @@ metadata:
         range by 5 m down to a 5 m minimum, and adds 1000 seconds per unused m/s of
         chaser delta-v to your remaining clock. Every fifth boss round also adds a
         flat 5000 second bonus. Boss target eccentricity starts at 0.05 and increases
-        by 0.05 each boss round up to 0.20. Round 1 starts from the level 10 setup;
+        by 0.05 each boss round up to 0.20. Round 1 starts from the level 11 setup;
         later rounds randomize the chaser's RIC state outside 5 km while keeping its
         semimajor axis matched to the target. The target's defensive delta-v budget
         is fixed through round 20, then increases by 0.01 m/s each round. Every fifth
@@ -105,13 +105,13 @@ metadata:
         by 5 m after each cleared round.
       - Keep clearing rounds until you run out of time or chaser delta-v.
       instructor_notes:
-      - This is an arcade variant of level 10.
+      - This is an arcade variant of level 11.
       - Each round uses one random fixed target burn direction.
       - The pursuit goal tightens by 5 m each round and floors at 5 m.
       - Every fifth round changes the target orbit to an elliptical boss setup, raises
         boss eccentricity by 0.05 up to 0.20, randomizes target true anomaly, switches
         to the TH coast projection, and uses the boss music cue.
-      - Round 1 preserves the configured level 10 initial state. Rounds 2+ sample R
+      - Round 1 preserves the configured level 11 initial state. Rounds 2+ sample R
         within +/-1 km, I within +/-10 km, C within +/-1 km, reject starts inside
         5 km, sample dC within +/-1 m/s, set dR to zero, and solve dI for equal target/chaser
         orbital energy.

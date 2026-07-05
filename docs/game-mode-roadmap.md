@@ -12,6 +12,7 @@ relative orbital motion legible through safe, repeatable interaction.
 Game mode should become an RPO intuition trainer:
 
 - cadets command simple maneuvers,
+- cadets can also script planned impulsive burns before a level,
 - the simulator shows the resulting Hill-frame/RIC motion,
 - mistakes are visible and safe,
 - each run produces a short debrief,
@@ -28,12 +29,13 @@ Status: implemented as the current single-player Pygame trainer.
 Target outcome:
 
 A cadet can launch a curated scenario, command radial/in-track/cross-track
-thrust, see relative motion in RIC, avoid keepout violations, and receive a
-small after-action summary.
+thrust or scripted impulsive burns, see relative motion in RIC, avoid keepout
+violations, and receive a small after-action summary.
 
 Minimum features:
 
 - direct RIC translation control mode,
+- operator burn scripting and view-only playback,
 - RIC trajectory visualization,
 - relative range and speed display,
 - keepout and goal-region overlays,
@@ -44,10 +46,11 @@ Minimum features:
 
 Bundled training scenarios:
 
-0. `rpo_00_tutorial`
+0. Pilot Tutorial / Operator Tutorial
    Learn the RIC translation controls, pulse-and-coast rhythm, RI/RC plot
-   layout, and speed controls before introducing natural-motion matching,
-   keepout constraints, or defensive behavior.
+   layout, speed controls, and, in Operator Mode, scripted burn planning before
+   introducing natural-motion matching, keepout constraints, or defensive
+   behavior.
 
 1. `rpo_01_coast_relative_motion`
    Learn that an offset chaser drifts naturally and that a passive 3D natural
@@ -97,18 +100,18 @@ Bundled training scenarios:
    Pass by getting within 10 meters of the target with less than 0.1 meters per
    second of relative velocity while using the elliptical coast predictor.
 
-10. `rpo_10_defensive_target_demo`
-   Later single-player bridge toward PvP: target uses a simple defensive policy.
-   Pass by tracking the maneuvering target and closing within 100 meters while
-   staying under the chaser delta-v budget.
-
-11. `rpo_11_evasive_target_survival`
+10. Level 10 - Evasion
    Reverse the roles: the player flies the target while an autonomous RIC_PD
    chaser attempts rendezvous. Pass by maintaining at least 100 meters of
    separation until the timer expires while staying under the target delta-v
    budget.
 
-Arcade variant:
+11. Level 11 - Pursuit
+   Later single-player bridge toward PvP: target uses a simple defensive policy.
+   Pass by tracking the maneuvering target and closing within 100 meters while
+   staying under the chaser delta-v budget.
+
+Web-preview arcade variant:
 
 - `rpo_arcade_pursuit`
   Repeat the Level 10 pursuit problem across randomized target-evasion rounds.
@@ -119,11 +122,13 @@ Arcade variant:
   delta-v at 1000 seconds per unused m/s. Round 1 preserves the Level 9 start;
   later rounds randomize the chaser's RIC state while matching target/chaser
   orbital energy. Every fifth round becomes a boss round with an elliptical
-  target orbit, randomized target true anomaly, TH projection, boss scoring,
-  boss music, and an additional 5000 second flat time bonus. Boss eccentricity
-  ramps from 0.05 to 0.20, and the target defensive delta-v budget holds at
-  0.1 m/s through round 20 before increasing by 0.01 m/s per round. Each new
-  round resets playback to 1x speed and full-trajectory camera framing.
+  target orbit, randomized target true anomaly, elliptical coast projection,
+  boss scoring, boss music, and an additional 5000 second flat time bonus. Boss
+  eccentricity ramps from 0.05 to 0.20, and the target defensive delta-v budget
+  holds at 0.1 m/s through round 20 before increasing by 0.01 m/s per round.
+  Each new round resets playback to 1x speed and full-trajectory camera framing.
+  This mode is intended for the browser preview and hosted-score workflow
+  rather than the downloadable classroom level list.
 
 Bonus level:
 
@@ -153,6 +158,11 @@ The older attitude-plus-thruster mode remains useful for advanced spacecraft
 attitude/thruster coupling lessons, but it should not be the default RPO
 intuition trainer.
 
+Operator Mode uses the same R/I/C frame language but changes the interaction:
+players enter time-tagged burn rows, launch view-only playback, and inspect the
+trajectory preview, mission brief, equation sheet, and next-burn status instead
+of flying continuous keyboard inputs.
+
 ## Visualization Priorities
 
 The dashboard should emphasize:
@@ -169,6 +179,11 @@ Implemented teaching overlays include ghost "coast from here" prediction, burn
 markers, relative-velocity/thrust vectors, keepout/goal overlays, forbidden
 regions, approach gates, inspection gates, objective checklists, and terminal
 mission banners.
+
+The local trainer also supports configurable RIC display conventions. OEL
+Default keeps positive in-track visually to the right; the Space Force preset
+can flip the display mapping while the underlying physical RIC dynamics remain
+unchanged.
 
 Future additions:
 
@@ -207,6 +222,7 @@ scoped to the final free-maneuver phase.
 ### Phase 1 - RPO Trainer Foundation
 
 - Done: direct RIC translation control mode.
+- Done: operator burn scripting and playback mode.
 - Done: training scenario metadata.
 - Done: keepout/goal scoring.
 - Done: terminal pass/fail summary at run end.
@@ -220,11 +236,14 @@ scoped to the final free-maneuver phase.
 - Done: burn markers.
 - Done: close-rendezvous zoom behavior for final approach.
 - Done: keepout-margin metric for recovery and approach levels.
+- Done: signed +R/-R, +I/-I, and +C/-C plot labels.
+- Done: OEL Default / Space Force display-convention selector.
+- Done: in-level pause/equation-sheet reference overlays.
 
 ### Phase 3 - Scenario Pack
 
 - Done: build the tutorial plus eleven numbered cadet scenarios.
-- Done: `rpo_00_tutorial`.
+- Done: mode-specific Pilot and Operator tutorials.
 - Done: `rpo_01_coast_relative_motion`.
 - Done: `rpo_02_vbar_approach`.
 - Done: `rpo_03_rbar_approach`.
@@ -234,16 +253,16 @@ scoped to the final free-maneuver phase.
 - Done: `rpo_07_elliptic_burn_then_approach`.
 - Done: `rpo_08_elliptic_nmc`.
 - Done: `rpo_09_elliptic_rendezvous`.
-- Done: `rpo_10_defensive_target_demo`.
-- Done: `rpo_11_evasive_target_survival`.
+- Done: Level 10 Evasion.
+- Done: Level 11 Pursuit.
 - Done: `rpo_bonus_cislunar_rendezvous`.
 - Done: add instructor notes for each scenario.
 - Done for implemented levels: add success thresholds and scorecards.
 - Done for implemented levels: treat each mission as a pass/fail level.
 - Done for implemented levels: verify each scenario can run without local
   artifacts.
-- Done: add `rpo_arcade_pursuit` as a replayable arcade pursuit variant after
-  the cislunar bonus level in the selector.
+- Done: keep `rpo_arcade_pursuit` as a replayable web-preview arcade variant
+  rather than a downloadable classroom level.
 
 ### Phase 4 - Instructor Workflow
 
@@ -259,6 +278,11 @@ scoped to the final free-maneuver phase.
   outputs under `outputs/game_recordings/clips/`.
 - Done: Markdown debrief reports with JSON summaries and matplotlib plots for
   structured terminal attempts.
+- Done: level-selector Pilot/Operator mode toggle, persistent last mode,
+  separate progress records, and saved per-level operator scripts.
+- Done: operator script screen with mission brief, numeric objectives, equation
+  sheet, burn-table scrolling, trajectory preview, velocity vectors, and
+  trajectory probe readouts.
 - Later: add replay controls.
 - Provide classroom guidance.
 
@@ -279,16 +303,19 @@ Current implementation:
 - Running `run_game.py` without a config opens the level selector.
 - `control_mode: ric_translation` is available in game metadata.
 - `coast_prediction_model: tschauner_hempel` enables the elliptical linearized
-  coast-projection overlay used by the eccentric-orbit levels; older circular
-  levels keep the HCW projection by default.
+  coast-projection overlay used by the eccentric-orbit levels. The live trainer
+  now uses a YA closed-form STM projection for this path, with the previous
+  numerical TH-style projection retained as fallback; older circular levels
+  keep the HCW projection by default.
 - The Pygame view launches fullscreen, grabs input through SDL, and uses Escape
   as a reliable level-exit path. Selector-launched runs return to the level
   selector; direct config launches exit the game process.
 - The live trainer has a ghost coast trajectory, burn markers, labeled
   relative-velocity and thrust vectors, pause/resume, and scenario reset.
-- Coast-prediction assistance is difficulty-scaled: easy shows one full target
-  orbit, medium shows half an orbit, hard shows a quarter orbit, and extreme
-  hides the projection.
+- Coast-prediction assistance is difficulty-scaled in Pilot Mode: easy shows
+  one full target orbit, medium shows half an orbit, hard shows a quarter orbit,
+  and extreme hides the projection. Operator Mode always shows the full
+  projection, and difficulty instead maps to actuator execution error.
 - Runtime speed is adjustable in-game with Up/Down. Most LEO trainer levels use
   1x through 200x; the cislunar level starts at 10x and extends to 2000x with a
   shared speed-dependent game tick schedule for smoother low-speed playback.
@@ -302,11 +329,17 @@ Current implementation:
   Enter/Return for social/demo use.
 - Close rendezvous levels zoom around the current state and goal so meter-scale
   criteria stay visible.
+- Operator Mode burn animations temporarily cap playback speed and scale the
+  projection-transition duration with burn magnitude.
+- The level selector remembers the last selected mode and frame-convention
+  choice locally.
 
 Implemented levels:
 
-- `rpo_00_tutorial`: introduce RIC pulse controls, RI/RC views, speed controls,
-  and a generous 250 meter approach objective.
+- Level 0 Pilot Tutorial: introduce RIC pulse controls, RI/RC views, speed
+  controls, and a generous 250 meter approach objective.
+- Level 0 Operator Tutorial: reuse the RIC primer, then demonstrate each burn
+  direction as a prefilled script that the student launches and observes.
 - `rpo_01_coast_relative_motion`: match a 3D NMT with radial/cross-track
   amplitude tolerances, passive velocity consistency, time and delta-v budgets,
   and keepout avoidance.
@@ -329,19 +362,19 @@ Implemented levels:
 - `rpo_09_elliptic_rendezvous`: repeat the close Level 4 rendezvous against
   the eccentric-orbit target, using the elliptical coast predictor to control
   closure into the 25 meter proximity zone and final 10 meter goal.
-- `rpo_10_defensive_target_demo`: track a target with simple defensive pulses,
-  close within 100 meters, and stay under the chaser delta-v budget. This level
-  uses the target reference orbit as the RIC display/control frame so the
-  target maneuver is visible, and caps target defensive delta-v at 0.1 m/s.
-- `rpo_11_evasive_target_survival`: fly the target vehicle, evade an autonomous
+- Level 10 Evasion: fly the target vehicle, evade an autonomous
   RIC_PD chaser, preserve at least 100 meters of separation, and survive until
   the timer expires under the target delta-v budget.
+- Level 11 Pursuit: track a target with simple defensive pulses, close within
+  100 meters, and stay under the chaser delta-v budget. This level uses the
+  target reference orbit as the RIC display/control frame so the target maneuver
+  is visible, and caps target defensive delta-v at 0.1 m/s.
 - `rpo_bonus_cislunar_rendezvous`: rendezvous near an Earth-Moon L2 NRHO seed
   using Moon-centered RIC controls, CR3BP propagation, high-speed cislunar time
   scaling, and a Moon-centered orbit view of the target NRHO.
-- `rpo_arcade_pursuit`: clear repeated pursuit rounds against randomized target
-  evasion directions, tightening goal radius, randomized energy-matched starts,
-  elliptical boss rounds, round-weighted scoring, conserved-delta-v time
+- Web preview Pursuit Arcade: clear repeated pursuit rounds against randomized
+  target evasion directions, tightening goal radius, randomized energy-matched
+  starts, elliptical boss rounds, round-weighted scoring, conserved-delta-v time
   rewards, ramping boss eccentricity, and a late-round target delta-v ramp.
 
 Next focus:
@@ -350,6 +383,8 @@ Next focus:
   budgets, and instructor notes.
 - Done: add a tutorial level, eccentric-orbit approach/NMC levels,
   evasive-target survival level, and pursuit arcade variant.
+- Done: add Operator Mode, frame-convention settings, script previews, and
+  mode-specific tutorials.
 - Later: add level-locking or course-progress behavior if the training flow
   needs it.
 - Add classroom guidance and one-page instructor lesson cards for the

@@ -6,9 +6,10 @@ operations education.
 ## What It Is
 
 The Orbital Engagement Lab RPO Trainer is a public, open-source educational
-tool that lets cadets manually command radial, in-track, and cross-track
-maneuvers, observe the resulting relative orbital motion, and review structured
-after-action debriefs tied to specific learning objectives.
+tool that lets cadets either manually command radial, in-track, and cross-track
+maneuvers in Pilot Mode or script impulsive burns in Operator Mode, observe the
+resulting relative orbital motion, and review structured after-action debriefs
+tied to specific learning objectives.
 
 It is not a replacement for classroom theory. It is a hands-on bridge between
 relative-motion equations, instructor explanation, and the physical intuition
@@ -25,7 +26,7 @@ those instincts.
 The RPO Trainer gives cadets a safe, repeatable feedback loop:
 
 - predict what a maneuver should do;
-- command radial, in-track, or cross-track inputs;
+- command radial, in-track, or cross-track inputs directly or as a burn script;
 - observe the resulting RIC-frame motion;
 - compare the outcome against pass/fail criteria and debrief metrics;
 - try again with better intuition.
@@ -45,6 +46,7 @@ operations courses:
 - V-bar and R-bar approach logic;
 - delta-v management;
 - passive safety and keepout awareness.
+- scripted maneuver planning and actuator-error sensitivity.
 
 ## Visual Preview
 
@@ -79,6 +81,7 @@ Cadets can use the trainer to practice:
 - Keepout-zone and goal-region awareness.
 - Terminal rendezvous with range and range-rate constraints.
 - Delta-v budgeting and after-action review.
+- Burn timing, coast planning, and execution-error effects in Operator Mode.
 
 ## Suggested Classroom Use
 
@@ -97,16 +100,23 @@ lesson.
 
 ## Included Training Modes
 
-- Guided tutorial for controls, RIC plots, pulse-and-coast behavior, and speed
-  controls.
-- Ten structured RPO levels covering passive motion, V-bar/R-bar approaches,
-  terminal rendezvous, eccentric-orbit cases, and defensive-target examples.
+- Pilot Mode for live R/I/C pulse control, RIC plots, pulse-and-coast behavior,
+  runtime speed controls, and structured debriefs.
+- Operator Mode for scripting impulsive R/I/C burns, previewing the planned
+  trajectory, reviewing mission briefs/equations before launch, and watching
+  actuator-error-sensitive playback.
+- Mode-specific Level 0 tutorials: Pilot Tutorial for direct controls and
+  Operator Tutorial for scripted burn demonstrations after the RIC primer.
+- Structured RPO levels covering passive motion, V-bar/R-bar approaches,
+  terminal rendezvous, eccentric-orbit cases, evasive-target survival, and
+  defensive-target pursuit examples.
 - A cislunar rendezvous bonus level with Moon-centered RIC controls around an
   Earth-Moon L2 NRHO target.
 - Sandbox mode for open-ended exploration.
-- Arcade pursuit mode for replayable practice.
 - Markdown/JSON debriefs and optional attempt recordings for structured
   training levels.
+- A lightweight web preview with Pursuit Arcade for replayable leaderboard-style
+  practice outside the downloadable trainer.
 
 ## Example First Lab
 
@@ -204,8 +214,9 @@ https://adamcohen8.github.io/orbital-engagement-lab/
 
 The web preview includes the tutorial, sandbox-style RIC controls, and Pursuit
 Arcade with browser-native replay validation and hosted leaderboard hooks. The
-full local trainer includes the complete downloadable level set, cislunar
-rendezvous mode, scenario YAML support, recordings, and structured debrief
+full local trainer includes the complete downloadable Pilot/Operator level set,
+cislunar rendezvous mode, scenario YAML support, recordings, saved operator
+burn scripts, configurable RIC display conventions, and structured debrief
 reports.
 
 To run the same preview locally:

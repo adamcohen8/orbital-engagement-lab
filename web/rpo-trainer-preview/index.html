@@ -15,14 +15,14 @@
     <meta name="oel-vercel-analytics-hosts" content=".vercel.app,orbital-engagement-lab.vercel.app" />
     <title>Orbital Engagement Lab RPO Trainer Preview</title>
     <link rel="icon" href="./src/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="./src/styles.css?v=mobile-selector-play-2026-06-26" />
+    <link rel="stylesheet" href="./src/styles.css?v=web-preview-review-fixes-2026-07-04" />
   </head>
   <body>
     <main class="trainer-shell selector-mode">
       <section class="level-selector" id="levelSelector" aria-label="Level selector">
         <header class="launcher-header">
           <h1>Orbital Engagement Lab</h1>
-          <button class="launcher-music active" id="selectorMusicButton" type="button">Music: ON</button>
+          <button class="launcher-music" id="selectorMusicButton" type="button">Music: ON</button>
           <button class="launcher-view" id="selectorViewButton" type="button">View: Auto</button>
           <a class="launcher-repo" href="https://github.com/adamcohen8/orbital-engagement-lab" target="_blank" rel="noreferrer">
             OEL GitHub
@@ -76,7 +76,13 @@
           </article>
         </div>
 
-        <footer class="launcher-footer">Up/Down Select   M Music   V View   Enter Launch</footer>
+        <footer class="launcher-footer">
+          <span>Up/Down Select   M Music   V View   Enter Launch</span>
+          <div class="launcher-footer-controls" aria-label="Selector options">
+            <button class="launcher-mode" id="selectorModeButton" type="button">Pilot Mode</button>
+            <button class="launcher-frame" id="selectorFrameButton" type="button">Frame: OEL</button>
+          </div>
+        </footer>
       </section>
 
       <header class="top-bar">
@@ -136,16 +142,55 @@
             <button id="randomSandbox" type="button">Randomize</button>
           </div>
         </section>
+
+        <section class="operator-panel hidden" id="operatorPanel" aria-label="Operator burn script">
+          <div class="operator-panel-head">
+            <div>
+              <strong>Script RIC Burns</strong>
+              <span id="operatorStatus">0 burns planned</span>
+            </div>
+            <button id="operatorAddBurn" type="button" aria-label="Add burn">+</button>
+          </div>
+          <div class="operator-table" id="operatorBurnRows" aria-label="Burn rows"></div>
+          <p id="operatorError" role="status"></p>
+        </section>
+
+        <section class="equation-sheet hidden" id="equationSheet" aria-label="Equation sheet">
+          <div class="equation-sheet-head">
+            <h2>Equation Sheet</h2>
+            <button id="equationSheetClose" type="button" aria-label="Hide equation sheet">Hide</button>
+          </div>
+          <div class="equation-sheet-body">
+            <section>
+              <h3>HCW Equations</h3>
+              <p class="equation">R&#776; - 2n I&#775; - 3n<sup>2</sup> R = a<sub>R</sub></p>
+              <p class="equation">I&#776; + 2n R&#775; = a<sub>I</sub></p>
+              <p class="equation">C&#776; + n<sup>2</sup> C = a<sub>C</sub></p>
+              <p class="equation-note">R is radial, I is in-track, C is cross-track, and n is the target mean motion.</p>
+            </section>
+            <section>
+              <h3>RIC Frame</h3>
+              <div class="ric-frame-diagram" aria-hidden="true">
+                <span class="ric-target">Target</span>
+                <span class="ric-axis ric-r">+R</span>
+                <span class="ric-axis ric-i">+I</span>
+                <span class="ric-axis ric-c">+C</span>
+              </div>
+              <p class="equation-note">+R points radially outward, +I follows the target orbit, and +C completes the local frame.</p>
+            </section>
+          </div>
+        </section>
       </section>
 
       <aside class="hud-panel">
         <div class="hud-line" id="hudLine">T=    0.0s   Range=1.200 km   Rel Speed=0.000 m/s</div>
         <div class="hud-top-controls">
           <div class="hud-actions">
+            <button class="equation-sheet-button" id="equationSheetButton" type="button">Show Equation Sheet</button>
             <button id="pauseButton" type="button">Start</button>
             <button id="resetButton" type="button">Reset</button>
             <button id="levelSelectButton" type="button">Level Select</button>
-            <button class="music-button active" id="musicButton" type="button" aria-pressed="true">M Music: ON</button>
+            <button class="music-button" id="musicButton" type="button" aria-pressed="true">M Music: ON</button>
             <button id="viewButton" type="button">View: Auto</button>
           </div>
         </div>
@@ -205,6 +250,6 @@
       </section>
     </main>
 
-    <script src="./src/app.js?v=mobile-selector-play-2026-06-26" type="module"></script>
+    <script src="./src/app.js?v=web-preview-review-fixes-2026-07-04" type="module"></script>
   </body>
 </html>

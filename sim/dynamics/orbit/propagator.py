@@ -198,6 +198,13 @@ def drag_plugin(t_s: float, x_eci: np.ndarray, env: dict, ctx: OrbitContext) -> 
         jd_utc_start=(None if env.get("jd_utc_start") is None else float(env.get("jd_utc_start"))),
         drag_eop_path=(None if env.get("drag_eop_path") is None else str(env.get("drag_eop_path"))),
         omega_earth_rad_s=float(EARTH_ROT_RATE_RAD_S if omega_raw is None else omega_raw),
+        dut1_s=None if env.get("dut1_s") is None else float(env["dut1_s"]),
+        xp_arcsec=None if env.get("xp_arcsec") is None else float(env["xp_arcsec"]),
+        yp_arcsec=None if env.get("yp_arcsec") is None else float(env["yp_arcsec"]),
+        dat_s=None if env.get("dat_s") is None else float(env["dat_s"]),
+        tt_minus_utc_s=None if env.get("tt_minus_utc_s") is None else float(env["tt_minus_utc_s"]),
+        ddpsi_rad=float(env.get("ddpsi_rad", 0.0) or 0.0),
+        ddeps_rad=float(env.get("ddeps_rad", 0.0) or 0.0),
     )
 
 
@@ -230,6 +237,13 @@ def lift_plugin(t_s: float, x_eci: np.ndarray, env: dict, ctx: OrbitContext) -> 
             "drag_frame_model": env.get("drag_frame_model", "inertial_z"),
             "drag_eop_path": env.get("drag_eop_path"),
             "drag_earth_rotation_rad_s": env.get("drag_earth_rotation_rad_s"),
+            "dut1_s": env.get("dut1_s"),
+            "xp_arcsec": env.get("xp_arcsec"),
+            "yp_arcsec": env.get("yp_arcsec"),
+            "dat_s": env.get("dat_s"),
+            "tt_minus_utc_s": env.get("tt_minus_utc_s"),
+            "ddpsi_rad": env.get("ddpsi_rad"),
+            "ddeps_rad": env.get("ddeps_rad"),
         },
     )
 

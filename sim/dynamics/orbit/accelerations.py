@@ -159,6 +159,13 @@ def accel_drag(
         jd_utc_start=None if jd_utc_start is None else float(jd_utc_start),
         drag_eop_path=None if drag_eop_path is None else str(drag_eop_path),
         omega_earth_rad_s=float(EARTH_ROT_RATE_RAD_S if omega_raw is None else omega_raw),
+        dut1_s=None if env.get("dut1_s") is None else float(env["dut1_s"]),
+        xp_arcsec=None if env.get("xp_arcsec") is None else float(env["xp_arcsec"]),
+        yp_arcsec=None if env.get("yp_arcsec") is None else float(env["yp_arcsec"]),
+        dat_s=None if env.get("dat_s") is None else float(env["dat_s"]),
+        tt_minus_utc_s=None if env.get("tt_minus_utc_s") is None else float(env["tt_minus_utc_s"]),
+        ddpsi_rad=float(env.get("ddpsi_rad", 0.0) or 0.0),
+        ddeps_rad=float(env.get("ddeps_rad", 0.0) or 0.0),
     )
 
 
@@ -175,6 +182,13 @@ def accel_drag_resolved(
     jd_utc_start: float | None,
     drag_eop_path: str | None,
     omega_earth_rad_s: float,
+    dut1_s: float | None = None,
+    xp_arcsec: float | None = None,
+    yp_arcsec: float | None = None,
+    dat_s: float | None = None,
+    tt_minus_utc_s: float | None = None,
+    ddpsi_rad: float = 0.0,
+    ddeps_rad: float = 0.0,
 ) -> np.ndarray:
     rho = float(density_kg_m3)
     if rho <= 0.0 or mass_kg <= 0.0:
@@ -190,6 +204,13 @@ def accel_drag_resolved(
         frame_model=str(drag_frame_model).strip().lower(),
         jd_utc_start=jd_utc_start,
         eop_path=drag_eop_path,
+        dut1_s=dut1_s,
+        xp_arcsec=xp_arcsec,
+        yp_arcsec=yp_arcsec,
+        dat_s=dat_s,
+        tt_minus_utc_s=tt_minus_utc_s,
+        ddpsi_rad=ddpsi_rad,
+        ddeps_rad=ddeps_rad,
     )
     v_rel_m_s = v_rel_eci_km_s * 1e3
     v_norm2 = float(np.dot(v_rel_m_s, v_rel_m_s))
@@ -229,6 +250,13 @@ def accel_lift(
         frame_model=drag_frame_model,
         jd_utc_start=None if jd_utc_start is None else float(jd_utc_start),
         eop_path=None if drag_eop_path is None else str(drag_eop_path),
+        dut1_s=None if env.get("dut1_s") is None else float(env["dut1_s"]),
+        xp_arcsec=None if env.get("xp_arcsec") is None else float(env["xp_arcsec"]),
+        yp_arcsec=None if env.get("yp_arcsec") is None else float(env["yp_arcsec"]),
+        dat_s=None if env.get("dat_s") is None else float(env["dat_s"]),
+        tt_minus_utc_s=None if env.get("tt_minus_utc_s") is None else float(env["tt_minus_utc_s"]),
+        ddpsi_rad=float(env.get("ddpsi_rad", 0.0) or 0.0),
+        ddeps_rad=float(env.get("ddeps_rad", 0.0) or 0.0),
     )
     v_rel_m_s = v_rel_eci_km_s * 1e3
     speed_m_s = float(np.linalg.norm(v_rel_m_s))

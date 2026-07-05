@@ -16,8 +16,10 @@ from sim.dynamics.orbit.cr3bp import (
     propagate_cr3bp_state,
 )
 from sim.dynamics.orbit.elements import rv_to_coe_eci
+from sim.estimation.relative_th_ekf import ya_closed_form_transition_matrix
 from sim.game.fonts import game_font
 from sim.game.formatting import format_distance_km, format_speed_km_s
+from sim.game.frame_convention import FrameConvention, frame_convention_display_axis_sign, normalize_frame_convention
 from sim.game.training import (
     ApproachGateConfig,
     ForbiddenRegionConfig,
@@ -296,8 +298,10 @@ class PygameRPODashboard:
     tutorial_target_path_ric: np.ndarray = field(default_factory=lambda: np.empty((0, 6), dtype=float))
     live_prediction_accel_ric_km_s2: np.ndarray = field(default_factory=lambda: np.zeros(3, dtype=float))
     live_prediction_elapsed_s: float = 0.0
+    operator_projection_transition_duration_s: float = 1.15
     plot_view_modes: dict[str, str] = field(default_factory=dict)
     mission_time_budget_s: float | None = None
+    frame_convention: FrameConvention = FrameConvention()
 
     def __post_init__(self) -> None:
         try:
@@ -305,6 +309,7 @@ class PygameRPODashboard:
         except ImportError as exc:  # pragma: no cover - exercised only without optional dependency.
             raise RuntimeError("Pygame game backend requires `pygame`. Install with `pip install .[game]`.") from exc
         self.pygame = pygame
+        self.frame_convention = normalize_frame_convention(self.frame_convention)
         pygame.init()
         pygame.font.init()
         flags = pygame.FULLSCREEN | pygame.SCALED if self.fullscreen else pygame.RESIZABLE
@@ -349,6 +354,7 @@ class PygameRPODashboard:
         self._briefing_layout_cache: dict[str, Any] = {}
         self._mission_banner_layout_cache: dict[str, Any] = {}
         self._text_cache: dict[tuple[int, str, tuple[int, int, int]], Any] = {}
+        self._operator_projection_transition: dict[str, Any] | None = None
         target_sprite_path = _game_asset_path_or_default(self.target_sprite_path, TARGET_SPRITE_PATH)
         chaser_sprite_path = _game_asset_path_or_default(self.chaser_sprite_path, CHASER_SPRITE_PATH)
         self._target_sprite = self._load_marker_sprite(target_sprite_path)
@@ -409,6 +415,7 @@ class PygameRPODashboard:
         self.tutorial_target_path_ric = np.empty((0, 6), dtype=float)
         self.live_prediction_accel_ric_km_s2 = np.zeros(3, dtype=float)
         self.live_prediction_elapsed_s = 0.0
+        self._operator_projection_transition = None
 
     def set_live_prediction_burn(self, accel_ric_km_s2: np.ndarray, elapsed_s: float) -> None:
         accel = np.array(accel_ric_km_s2, dtype=float).reshape(3)
@@ -428,6 +435,31 @@ class PygameRPODashboard:
             self._frame_cache_dirty = True
         self.live_prediction_accel_ric_km_s2 = accel
         self.live_prediction_elapsed_s = elapsed
+
+    def set_operator_projection_transition(
+        self,
+        pre_burn_rel_ric: np.ndarray,
+        post_burn_rel_ric: np.ndarray,
+        *,
+        duration_s: float | None = None,
+    ) -> None:
+        pre = np.array(pre_burn_rel_ric, dtype=float).reshape(6)
+        post = np.array(post_burn_rel_ric, dtype=float).reshape(6)
+        if not np.all(np.isfinite(pre)) or not np.all(np.isfinite(post)):
+            return
+        duration = (
+            float(self.operator_projection_transition_duration_s)
+            if duration_s is None
+            else float(duration_s)
+        )
+        self._operator_projection_transition = {
+            "pre": pre,
+            "post": post,
+            "started_wall_s": perf_counter(),
+            "duration_s": max(duration, 0.1),
+        }
+        self._prediction_cache = {}
+        self._frame_cache_dirty = True
 
     def _load_marker_sprite(self, path: Path) -> Any | None:
         try:
@@ -655,6 +687,8 @@ class PygameRPODashboard:
         self._render_motion_enabled = bool(render_motion)
         self._render_wall_time_s = perf_counter()
         self._render_speed_multiple = float(max(speed_multiple, 0.0))
+        if self._operator_projection_transition_active():
+            self._frame_cache_dirty = True
         self._prepare_frame_cache()
         self.screen.fill((12, 16, 22))
         top = pygame.Rect(36, 18, width - 72, 84)
@@ -779,13 +813,22 @@ class PygameRPODashboard:
         self._draw_grid(plot, scale=scale)
         x_axis = 1 if plane == "RI" else 2
         y_axis = 0
-        self._draw_ric_primer_axes(plot, x_axis=x_axis, y_axis=y_axis, active_axis=int(stage["axis_index"]))
+        x_display_sign = self._axis_display_sign(x_axis)
+        y_display_sign = self._axis_display_sign(y_axis)
+        self._draw_ric_primer_axes(
+            plot,
+            x_axis=x_axis,
+            y_axis=y_axis,
+            active_axis=int(stage["axis_index"]),
+            x_display_sign=x_display_sign,
+            y_display_sign=y_display_sign,
+        )
         point = np.zeros(3, dtype=float)
         point[int(stage["axis_index"])] = float(stage["amplitude_km"]) * float(np.sin(float(elapsed_s) * 1.05))
 
         def to_px(pos: np.ndarray) -> tuple[int, int]:
-            x = float(pos[x_axis])
-            y = float(pos[y_axis])
+            x = float(pos[x_axis]) * x_display_sign
+            y = float(pos[y_axis]) * y_display_sign
             return plot.centerx + int(round(x * scale)), plot.centery - int(round(y * scale))
 
         target = to_px(np.zeros(3, dtype=float))
@@ -813,7 +856,16 @@ class PygameRPODashboard:
         self._text("Target", (target[0] + 10, target[1] - 10), self.small_font, TARGET_MARKER_COLOR)
         self._text("Chaser", (chaser[0] + 10, chaser[1] + 14), self.small_font, CHASER_MARKER_COLOR)
 
-    def _draw_ric_primer_axes(self, plot: Any, *, x_axis: int, y_axis: int, active_axis: int) -> None:
+    def _draw_ric_primer_axes(
+        self,
+        plot: Any,
+        *,
+        x_axis: int,
+        y_axis: int,
+        active_axis: int,
+        x_display_sign: float = 1.0,
+        y_display_sign: float = 1.0,
+    ) -> None:
         pygame = self.pygame
         colors = {
             0: (150, 235, 170),
@@ -824,12 +876,24 @@ class PygameRPODashboard:
         y_color = colors.get(y_axis, (90, 104, 124)) if active_axis == y_axis else (90, 104, 124)
         pygame.draw.line(self.screen, x_color, (plot.left + 36, plot.centery), (plot.right - 36, plot.centery), width=2)
         pygame.draw.line(self.screen, y_color, (plot.centerx, plot.bottom - 32), (plot.centerx, plot.top + 32), width=2)
-        self._draw_vector((plot.right - 54, plot.centery), np.array([24.0, 0.0]), color=x_color, scale=1.0)
-        self._draw_vector((plot.centerx, plot.top + 56), np.array([0.0, 24.0]), color=y_color, scale=1.0)
-        x_label = "+I" if x_axis == 1 else "+C"
-        y_label = "+R"
-        self._text(x_label, (plot.right - 74, plot.centery - 18), self.small_font, x_color)
-        self._text(y_label, (plot.centerx + 10, plot.top + 34), self.small_font, y_color)
+        x_positive_at_right = float(x_display_sign) >= 0.0
+        y_positive_at_top = float(y_display_sign) >= 0.0
+        x_arrow_origin = (plot.right - 54, plot.centery) if x_positive_at_right else (plot.left + 54, plot.centery)
+        y_arrow_origin = (plot.centerx, plot.top + 56) if y_positive_at_top else (plot.centerx, plot.bottom - 56)
+        self._draw_vector(x_arrow_origin, np.array([24.0 * float(x_display_sign), 0.0]), color=x_color, scale=1.0)
+        self._draw_vector(y_arrow_origin, np.array([0.0, 24.0 * float(y_display_sign)]), color=y_color, scale=1.0)
+        x_plus = self._signed_axis_label_for_plot(x_axis, 1)
+        x_minus = self._signed_axis_label_for_plot(x_axis, -1)
+        y_plus = self._signed_axis_label_for_plot(y_axis, 1)
+        y_minus = self._signed_axis_label_for_plot(y_axis, -1)
+        x_left_label = x_minus if x_positive_at_right else x_plus
+        x_right_label = x_plus if x_positive_at_right else x_minus
+        y_top_label = y_plus if y_positive_at_top else y_minus
+        y_bottom_label = y_minus if y_positive_at_top else y_plus
+        self._text(x_left_label, (plot.left + 42, plot.centery - 18), self.small_font, x_color)
+        self._text(x_right_label, (plot.right - 74, plot.centery - 18), self.small_font, x_color)
+        self._text(y_top_label, (plot.centerx + 10, plot.top + 34), self.small_font, y_color)
+        self._text(y_bottom_label, (plot.centerx + 10, plot.bottom - 58), self.small_font, y_color)
 
     def _draw_ric_primer_eci_panel(self, rect: Any, *, stage: dict[str, Any], elapsed_s: float) -> None:
         pygame = self.pygame
@@ -977,7 +1041,7 @@ class PygameRPODashboard:
         pygame.draw.rect(self.screen, (80, 92, 110), rect, width=1, border_radius=10)
         self._text(title, (rect.x + 14, rect.y + 10), self.font, (230, 235, 242))
         plot = rect.inflate(-48, -72)
-        plot.y += 28
+        plot.y += int(getattr(self, "_plot_panel_title_gap_px", 28))
         pygame.draw.rect(self.screen, (8, 11, 16), plot)
         pygame.draw.rect(self.screen, (72, 84, 102), plot, width=1)
         if self._plot_view_mode_for_axes(x_axis=x_axis, y_axis=y_axis) == "eci":
@@ -1065,9 +1129,13 @@ class PygameRPODashboard:
             y_axis=y_axis,
         )
         pixel_cache = self._frame_cache.setdefault("pixel_polyline_cache", {})
+        x_display_sign = self._axis_display_sign(x_axis)
+        y_display_sign = self._axis_display_sign(y_axis)
         transform_key = (
             int(x_axis),
             int(y_axis),
+            round(float(x_display_sign), 1),
+            round(float(y_display_sign), 1),
             int(plot.centerx),
             int(plot.centery),
             round(float(scale_x), 12),
@@ -1077,8 +1145,8 @@ class PygameRPODashboard:
 
         def to_px(point: np.ndarray) -> tuple[int, int]:
             shifted = np.array(point, dtype=float).reshape(-1)[:3] - camera_center
-            x = float(shifted[x_axis])
-            y = float(shifted[y_axis])
+            x = float(shifted[x_axis]) * x_display_sign
+            y = float(shifted[y_axis]) * y_display_sign
             px = plot.centerx + int(round(x * scale_x))
             py = plot.centery - int(round(y * scale_y))
             return px, py
@@ -1094,8 +1162,8 @@ class PygameRPODashboard:
                 if cached_points is not None:
                     return cached_points
             shifted = arr[:, :3] - camera_center.reshape(1, 3)
-            px = np.rint(plot.centerx + shifted[:, int(x_axis)] * scale_x).astype(int)
-            py = np.rint(plot.centery - shifted[:, int(y_axis)] * scale_y).astype(int)
+            px = np.rint(plot.centerx + shifted[:, int(x_axis)] * x_display_sign * scale_x).astype(int)
+            py = np.rint(plot.centery - shifted[:, int(y_axis)] * y_display_sign * scale_y).astype(int)
             points = list(zip(px.tolist(), py.tolist()))
             if key is not None:
                 pixel_cache[key] = points
@@ -1105,6 +1173,16 @@ class PygameRPODashboard:
             rx = max(1, int(round(float(radius_km) * scale_x)))
             ry = max(1, int(round(float(radius_km) * scale_y)))
             return self.pygame.Rect(center[0] - rx, center[1] - ry, rx * 2, ry * 2)
+
+        plot_transforms = self._frame_cache.setdefault("plot_transforms", {})
+        plot_transforms[(int(x_axis), int(y_axis))] = {
+            "plot": (int(plot.x), int(plot.y), int(plot.width), int(plot.height)),
+            "camera_center": tuple(float(value) for value in camera_center.reshape(3)),
+            "scale_x": float(scale_x),
+            "scale_y": float(scale_y),
+            "x_display_sign": float(x_display_sign),
+            "y_display_sign": float(y_display_sign),
+        }
 
         previous_clip = self.screen.get_clip()
         self.screen.set_clip(plot)
@@ -1219,6 +1297,7 @@ class PygameRPODashboard:
 
         if rel.shape[1] >= 6:
             v_px = self._web_velocity_vector_px(rel[-1], x_axis=x_axis, y_axis=y_axis)
+            v_px = v_px * np.array([x_display_sign, y_display_sign], dtype=float)
             self._draw_vector(to_px(rel[-1]), v_px, color=VELOCITY_VECTOR_COLOR, scale=1.0)
         live_accel_ric = np.array(
             getattr(self, "live_prediction_accel_ric_km_s2", np.zeros(3, dtype=float)), dtype=float
@@ -1231,16 +1310,20 @@ class PygameRPODashboard:
                 y_axis=y_axis,
                 threshold=threshold,
             )
+            thrust_vec = thrust_vec * np.array([x_display_sign, y_display_sign], dtype=float)
             controlled_id = str(getattr(self, "controlled_object_id", "") or "")
             target_id = str(getattr(self, "target_object_id", "target") or "target")
             origin = target_px if controlled_id == target_id else chaser
             self._draw_vector(origin, thrust_vec, color=LIVE_BURN_COLOR, scale=1.0)
         self.screen.set_clip(previous_clip)
 
-        xlbl = self._axis_label_for_plot(int(x_axis))
-        ylbl = self._axis_label_for_plot(int(y_axis))
-        self._text(xlbl, (plot.right - 56, plot.centery + 8), self.small_font, (170, 180, 195))
-        self._text(ylbl, (plot.centerx + 8, plot.top + 8), self.small_font, (170, 180, 195))
+        self._draw_signed_axis_labels(
+            plot,
+            x_axis=int(x_axis),
+            y_axis=int(y_axis),
+            x_display_sign=x_display_sign,
+            y_display_sign=y_display_sign,
+        )
 
     def _draw_eci_orbit_plane_panel(self, plot: Any) -> None:
         target_eci = _dashboard_history_array(
@@ -1536,15 +1619,58 @@ class PygameRPODashboard:
         return next_mode
 
     def _axis_label_for_plot(self, axis: int) -> str:
+        return f"{self._axis_symbol_for_plot(axis)} km"
+
+    def _axis_symbol_for_plot(self, axis: int) -> str:
         if _relative_frame_key(getattr(self, "relative_frame", "ric")) == "cislunar_l1":
             labels = {
-                0: "EM km",
-                1: "T km",
-                2: "N km",
+                0: "EM",
+                1: "T",
+                2: "N",
             }
         else:
-            labels = {0: "R km", 1: "I km", 2: "C km"}
-        return labels.get(int(axis), "km")
+            labels = {0: "R", 1: "I", 2: "C"}
+        return labels.get(int(axis), "")
+
+    def _signed_axis_label_for_plot(self, axis: int, sign: int) -> str:
+        symbol = self._axis_symbol_for_plot(axis)
+        if not symbol:
+            return ""
+        prefix = "+" if int(sign) >= 0 else "-"
+        return f"{prefix}{symbol}"
+
+    def _draw_signed_axis_labels(
+        self,
+        plot: Any,
+        *,
+        x_axis: int,
+        y_axis: int,
+        x_display_sign: float,
+        y_display_sign: float,
+    ) -> None:
+        color = (170, 180, 195)
+        x_plus = self._signed_axis_label_for_plot(x_axis, 1)
+        x_minus = self._signed_axis_label_for_plot(x_axis, -1)
+        y_plus = self._signed_axis_label_for_plot(y_axis, 1)
+        y_minus = self._signed_axis_label_for_plot(y_axis, -1)
+
+        x_plus_right = float(x_display_sign) >= 0.0
+        x_left_label = x_minus if x_plus_right else x_plus
+        x_right_label = x_plus if x_plus_right else x_minus
+        self._text(x_left_label, (plot.left + 10, plot.centery + 8), self.small_font, color)
+        right_x = plot.right - self._text_width(self.small_font, x_right_label) - 10
+        self._text(x_right_label, (right_x, plot.centery + 8), self.small_font, color)
+
+        y_plus_top = float(y_display_sign) >= 0.0
+        y_top_label = y_plus if y_plus_top else y_minus
+        y_bottom_label = y_minus if y_plus_top else y_plus
+        self._text(y_top_label, (plot.centerx + 8, plot.top + 8), self.small_font, color)
+        self._text(y_bottom_label, (plot.centerx + 8, plot.bottom - 24), self.small_font, color)
+
+    def _axis_display_sign(self, axis: int) -> float:
+        if _relative_frame_key(getattr(self, "relative_frame", "ric")) == "cislunar_l1":
+            return 1.0
+        return frame_convention_display_axis_sign(getattr(self, "frame_convention", FrameConvention()), int(axis))
 
     def _draw_cislunar_moon_background(
         self,
@@ -1652,6 +1778,10 @@ class PygameRPODashboard:
         target_ghost = np.array(raw_cache.get("target_ghost", np.empty((0, 6))), dtype=float)
         ghost_seed = self._live_prediction_seed(raw_rel[-1])
         ghost = self._coast_prediction_from_cached("chaser", ghost_seed, active_burn=active_burn)
+        operator_ghost, operator_transition_active = self._operator_projection_transition_ghost()
+        if operator_transition_active and operator_ghost.size:
+            ghost = operator_ghost
+            active_burn = True
         burn_marker_rel = self._burn_marker_rows(rel=rel, thrust=thrust)
         tutorial_path = np.asarray(getattr(self, "tutorial_target_path_ric", np.empty((0, 6))), dtype=float)
         if tutorial_path.ndim != 2 or tutorial_path.shape[1] < 3:
@@ -1736,6 +1866,50 @@ class PygameRPODashboard:
         ):
             return seed
         return _cw_forced_state(seed, accel, elapsed, float(n))
+
+    def _operator_projection_transition_active(self) -> bool:
+        transition = getattr(self, "_operator_projection_transition", None)
+        if not transition:
+            return False
+        started = float(transition.get("started_wall_s", 0.0))
+        duration = max(float(transition.get("duration_s", 0.0)), 0.1)
+        if perf_counter() - started <= duration:
+            return True
+        self._operator_projection_transition = None
+        self._frame_cache_dirty = True
+        return False
+
+    def _operator_projection_transition_ghost(self) -> tuple[np.ndarray, bool]:
+        transition = getattr(self, "_operator_projection_transition", None)
+        if not transition:
+            return np.empty((0, 6), dtype=float), False
+        started = float(transition.get("started_wall_s", 0.0))
+        duration = max(float(transition.get("duration_s", 0.0)), 0.1)
+        alpha = (perf_counter() - started) / duration
+        if alpha >= 1.0:
+            self._operator_projection_transition = None
+            self._frame_cache_dirty = True
+            return np.empty((0, 6), dtype=float), False
+        alpha = float(min(max(alpha, 0.0), 1.0))
+        pre_seed = np.array(transition.get("pre", np.zeros(6)), dtype=float).reshape(6)
+        post_seed = np.array(transition.get("post", np.zeros(6)), dtype=float).reshape(6)
+        pre_ghost = self._coast_prediction_from_cached(
+            "operator_transition_pre",
+            pre_seed,
+            active_burn=False,
+        )
+        post_ghost = self._coast_prediction_from_cached(
+            "operator_transition_post",
+            post_seed,
+            active_burn=False,
+        )
+        if pre_ghost.size == 0 or post_ghost.size == 0:
+            return np.empty((0, 6), dtype=float), False
+        sample_count = min(pre_ghost.shape[0], post_ghost.shape[0])
+        if sample_count <= 0:
+            return np.empty((0, 6), dtype=float), False
+        blended = pre_ghost[:sample_count] * (1.0 - alpha) + post_ghost[:sample_count] * alpha
+        return blended, True
 
     def _draw_grid(
         self,
@@ -3033,7 +3207,14 @@ class PygameRPODashboard:
         }:
             reference_state = getattr(self, "reference_state_eci", None)
             if reference_state is not None:
-                return _elliptic_linear_coast_states(rel0, times, np.array(reference_state, dtype=float).reshape(6))
+                reference = np.array(reference_state, dtype=float).reshape(6)
+                try:
+                    prediction = _elliptic_ya_coast_states(rel0, times, reference)
+                    if prediction.shape == (times.size, 6) and np.all(np.isfinite(prediction)):
+                        return prediction
+                except (ValueError, FloatingPointError, np.linalg.LinAlgError):
+                    pass
+                return _elliptic_linear_coast_states(rel0, times, reference)
         return _cw_coast_states(rel0, times, float(n))
 
     def _coast_prediction_horizon_s(self, mean_motion_rad_s: float) -> float:
@@ -4153,6 +4334,36 @@ def _elliptic_linear_coast_states(
             state = _rk4_step(_elliptic_linear_derivative, state, h, float(mu_km3_s2))
             current_t += h
         rows[order[sorted_idx]] = state[6:12]
+    return rows
+
+
+def _elliptic_ya_coast_states(
+    rel0_ric: np.ndarray,
+    times_s: np.ndarray,
+    chief_state_eci: np.ndarray,
+    *,
+    mu_km3_s2: float = EARTH_MU_KM3_S2,
+) -> np.ndarray:
+    """Propagate elliptic-chief RIC relative motion with the closed-form YA STM."""
+
+    rel = np.array(rel0_ric, dtype=float).reshape(6)
+    chief0 = np.array(chief_state_eci, dtype=float).reshape(6)
+    times = np.array(times_s, dtype=float).reshape(-1)
+    if times.size == 0:
+        return np.empty((0, 6), dtype=float)
+    order = np.argsort(times)
+    sorted_times = times[order]
+    chief = chief0.copy()
+    rows = np.zeros((times.size, 6), dtype=float)
+    current_t = 0.0
+    for sorted_idx, target_t in enumerate(sorted_times):
+        target = float(max(float(target_t), current_t))
+        duration_s = target - current_t
+        if duration_s > 0.0:
+            chief = _two_body_coast_state(chief, duration_s, mu_km3_s2=float(mu_km3_s2))
+            current_t = target
+        phi = ya_closed_form_transition_matrix(target, chief0, chief, mu_km3_s2=float(mu_km3_s2))
+        rows[order[sorted_idx]] = phi @ rel
     return rows
 
 

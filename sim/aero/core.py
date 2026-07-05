@@ -166,6 +166,13 @@ def atmosphere_relative_velocity_eci_km_s(
     frame_model: str = "inertial_z",
     jd_utc_start: float | None = None,
     eop_path: str | None = None,
+    dut1_s: float | None = None,
+    xp_arcsec: float | None = None,
+    yp_arcsec: float | None = None,
+    dat_s: float | None = None,
+    tt_minus_utc_s: float | None = None,
+    ddpsi_rad: float = 0.0,
+    ddeps_rad: float = 0.0,
 ) -> np.ndarray:
     r = np.array(r_eci_km, dtype=float).reshape(3)
     v = np.array(v_eci_km_s, dtype=float).reshape(3)
@@ -176,6 +183,13 @@ def atmosphere_relative_velocity_eci_km_s(
                 float(t_s),
                 jd_utc_start=None if jd_utc_start is None else float(jd_utc_start),
                 eop_path=None if eop_path is None else str(eop_path),
+                dut1_s=dut1_s,
+                xp_arcsec=xp_arcsec,
+                yp_arcsec=yp_arcsec,
+                dat_s=dat_s,
+                tt_minus_utc_s=tt_minus_utc_s,
+                ddpsi_rad=ddpsi_rad,
+                ddeps_rad=ddeps_rad,
             )
         else:
             rot = eci_to_ecef_rotation(
