@@ -97,6 +97,7 @@ simulator:
         cm_alpha_per_rad: -0.02
         cn_beta_per_rad: -0.02
   environment:
+    atmosphere_model: ussa1976
     atmosphere_env: {}
   termination:
     earth_impact_enabled: true

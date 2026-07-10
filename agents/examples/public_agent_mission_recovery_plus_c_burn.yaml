@@ -1,7 +1,7 @@
 scenario_name: public_agent_mission_recovery_plus_c_burn
 scenario_description: 'Public agent example: apply a simple +C cross-track burn to
   one satellite, then use simulator-backed mission recovery to compare the final orbit
-  with the initial orbit.
+  with the initial orbit after a ten-minute propagation.
 
   '
 objects:
@@ -53,7 +53,7 @@ objects:
         burn_duration_s: 1.0
         require_finite_reference: true
 simulator:
-  duration_s: 120.0
+  duration_s: 600.0
   dt_s: 1.0
   dynamics:
     orbit:

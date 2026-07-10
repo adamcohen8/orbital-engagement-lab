@@ -1,6 +1,6 @@
 scenario_name: public_attitude_hold_disturbance
-scenario_description: 'Public example: reaction-wheel attitude hold with initial attitude/rate
-  error and optional disturbances.'
+scenario_description: 'Public example: five-minute reaction-wheel attitude hold with initial attitude/rate
+  error and gravity-gradient disturbance torque.'
 metadata:
   owner: public
   public_surface: public-example
@@ -85,7 +85,7 @@ objects:
         - 3.5
         - 3.5
 simulator:
-  duration_s: 180.0
+  duration_s: 300.0
   dt_s: 1.0
   dynamics:
     orbit:
@@ -121,3 +121,6 @@ outputs:
   animations:
     enabled: false
     types: []
+  review:
+    enabled: true
+    detail: standard

@@ -1,5 +1,6 @@
 scenario_name: public_agent_attitude_hold
-scenario_description: Agent-generated public attitude-hold smoke scenario.
+scenario_description: Agent-generated public five-minute attitude-hold settling
+  scenario with review-store evidence.
 metadata:
   owner: public-oel-agents
   notes: Headless agent example for attitude-control scenario generation.
@@ -83,7 +84,7 @@ objects:
         - 3.5
         - 3.5
 simulator:
-  duration_s: 60.0
+  duration_s: 300.0
   dt_s: 1.0
   dynamics:
     orbit:

@@ -11,6 +11,7 @@ from sim.utils.frames import ric_dcm_ir_from_rv
 
 MAX_OPERATOR_BURN_DELTA_V_M_S = 5.0
 MIN_OPERATOR_BURN_SPACING_S = 10.0
+OPERATOR_IMPULSE_DURATION_S = 1.0e-3
 _TIME_RE = re.compile(r"\bT\s*=\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+))\s*(?:s|sec|secs|second|seconds)?\b", re.IGNORECASE)
 _COMPONENT_RE = re.compile(
     r"([-+]?(?:\d+(?:\.\d*)?|\.\d+))\s*(?:m\s*/\s*s|mps|m\/s)?\s*([RIC])\b",
@@ -49,6 +50,7 @@ class OperatorBurnCommandProvider:
         control_mode: str = "ric_translation",
         relative_frame: str = "ric",
         actuator_error_fraction: float = 0.0,
+        impulse_duration_s: float = OPERATOR_IMPULSE_DURATION_S,
     ) -> None:
         self.plan = plan
         self.controlled_object_id = str(controlled_object_id)
@@ -56,6 +58,7 @@ class OperatorBurnCommandProvider:
         self.control_mode = str(control_mode or "ric_translation").strip().lower()
         self.relative_frame = str(relative_frame or "ric").strip().lower()
         self.actuator_error_fraction = max(float(actuator_error_fraction), 0.0)
+        self.impulse_duration_s = max(float(impulse_duration_s), 1.0e-9)
         self._next_burn_index = 0
         self.executed_delta_v_m_s = 0.0
         self.last_executed_burn: OperatorBurn | None = None
@@ -89,11 +92,10 @@ class OperatorBurnCommandProvider:
             return self._idle_intent()
 
         step_start_s = float(t_s)
-        step_stop_s = step_start_s + max(float(dt_s), 0.0)
         due_burns: list[OperatorBurn] = []
         while self._next_burn_index < len(self.plan.burns):
             candidate = self.plan.burns[self._next_burn_index]
-            if candidate.time_s > step_stop_s + 1.0e-9:
+            if candidate.time_s > step_start_s + 1.0e-9:
                 break
             due_burns.append(candidate)
             self._next_burn_index += 1

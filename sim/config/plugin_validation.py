@@ -8,6 +8,7 @@ from typing import Any
 
 from sim.actuators.presets import available_actuator_preset_names, resolve_actuator_specs_from_satellite_specs
 from sim.config.object_refs import configured_objects, object_parameter_prefix
+from sim.config.plugin_specs import iter_nested_plugin_specs, plugin_spec_field
 from sim.digital_twin.mass_properties import validate_mass_properties
 from sim.dynamics.orbit.tle import parse_tle_lines
 
@@ -40,11 +41,12 @@ def _validate_pointer(pointer: Any, contract: PluginContract, path: str, *, impo
     errs: list[str] = []
     if pointer is None:
         return errs
-    if not getattr(pointer, "module", None):
+    module_name = str(plugin_spec_field(pointer, "module", "") or "").strip()
+    if not module_name:
         errs.append(f"{path}: missing 'module'.")
         return errs
-    class_name = getattr(pointer, "class_name", None)
-    function = getattr(pointer, "function", None)
+    class_name = plugin_spec_field(pointer, "class_name", None)
+    function = plugin_spec_field(pointer, "function", None)
     if class_name and function:
         errs.append(f"{path}: define either 'class_name' or 'function', not both.")
         return errs
@@ -58,18 +60,18 @@ def _validate_pointer(pointer: Any, contract: PluginContract, path: str, *, impo
         return errs
 
     try:
-        mod = importlib.import_module(pointer.module)
+        mod = importlib.import_module(module_name)
     except Exception as ex:
-        errs.append(f"{path}: failed to import module '{pointer.module}': {ex}")
+        errs.append(f"{path}: failed to import module '{module_name}': {ex}")
         return errs
 
     if class_name:
         if not hasattr(mod, class_name):
-            errs.append(f"{path}: class '{class_name}' not found in module '{pointer.module}'.")
+            errs.append(f"{path}: class '{class_name}' not found in module '{module_name}'.")
             return errs
         cls = getattr(mod, class_name)
         if not inspect.isclass(cls):
-            errs.append(f"{path}: '{class_name}' in module '{pointer.module}' is not a class.")
+            errs.append(f"{path}: '{class_name}' in module '{module_name}' is not a class.")
             return errs
         for m in contract.methods_all:
             if not _class_has_callable(cls, m):
@@ -81,11 +83,11 @@ def _validate_pointer(pointer: Any, contract: PluginContract, path: str, *, impo
 
     if function:
         if not hasattr(mod, function):
-            errs.append(f"{path}: function '{function}' not found in module '{pointer.module}'.")
+            errs.append(f"{path}: function '{function}' not found in module '{module_name}'.")
             return errs
         fn = getattr(mod, function)
         if not callable(fn):
-            errs.append(f"{path}: '{function}' in module '{pointer.module}' is not callable.")
+            errs.append(f"{path}: '{function}' in module '{module_name}' is not callable.")
         return errs
 
     errs.append(f"{path}: must define either 'class_name' or 'function'.")
@@ -185,7 +187,39 @@ def validate_scenario_plugins(cfg: Any, *, import_plugins: bool = True) -> list[
                     p, _CONTRACTS["mission_objective"], f"{path}.mission_objectives[{i}]", import_plugins=import_plugins
                 )
             )
+        for pointer_path, pointer in _agent_plugin_pointers(agent, path):
+            for nested_path, nested_pointer in iter_nested_plugin_specs(pointer, pointer_path):
+                errs.extend(
+                    _validate_pointer(
+                        nested_pointer,
+                        PluginContract(allow_function=True),
+                        nested_path,
+                        import_plugins=import_plugins,
+                    )
+                )
     return errs
+
+
+def _agent_plugin_pointers(agent: Any, base_path: str) -> list[tuple[str, Any]]:
+    pointers: list[tuple[str, Any]] = []
+    for field_name in (
+        "guidance",
+        "base_guidance",
+        "orbit_control",
+        "attitude_control",
+        "mission_strategy",
+        "mission_execution",
+    ):
+        pointer = getattr(agent, field_name, None)
+        if pointer is not None:
+            pointers.append((f"{base_path}.{field_name}", pointer))
+    for field_name in ("guidance_modifiers", "mission_objectives"):
+        for index, pointer in enumerate(getattr(agent, field_name, []) or []):
+            pointers.append((f"{base_path}.{field_name}[{index}]", pointer))
+    bridge = getattr(agent, "bridge", None)
+    if bridge is not None and getattr(bridge, "enabled", False):
+        pointers.append((f"{base_path}.bridge", bridge))
+    return pointers
 
 
 def _validate_object_propagation(agent: Any, propagation_method: str, path: str) -> list[str]:
@@ -216,7 +250,7 @@ def _validate_object_propagation(agent: Any, propagation_method: str, path: str)
             else:
                 line1 = str(tle_block.get("line1", "") or "")
                 line2 = str(tle_block.get("line2", "") or "")
-            elements = parse_tle_lines(line1, line2, require_checksum=bool(tle_block.get("require_checksum", False)))
+            elements = parse_tle_lines(line1, line2, require_checksum=bool(tle_block.get("require_checksum", True)))
             if float(elements.mean_motion_rev_per_day) <= 0.0:
                 errs.append(f"{path}.initial_state.tle: OGP mean motion must be positive.")
             if float(elements.eccentricity) < 0.0 or float(elements.eccentricity) >= 1.0:
@@ -242,10 +276,17 @@ def _validate_object_propagation(agent: Any, propagation_method: str, path: str)
     unknown_general_keys = sorted(str(key) for key in general if str(key) not in allowed_general_keys)
     if unknown_general_keys:
         errs.append(f"{path}.general has unsupported field(s): {', '.join(unknown_general_keys)}.")
-    output_frame = str(general.get("output_frame", "eci") or "eci").strip().lower()
+    if general.get("max_tle_age_days_warning") is not None:
+        try:
+            max_age = float(general.get("max_tle_age_days_warning"))
+            if not math.isfinite(max_age) or max_age < 0.0:
+                raise ValueError
+        except (TypeError, ValueError):
+            errs.append(f"{path}.general.max_tle_age_days_warning must be a nonnegative finite number.")
+    output_frame = str(general.get("output_frame", "teme") or "teme").strip().lower()
     if output_frame not in {"eci", "teme"}:
         errs.append(f"{path}.general.output_frame must be 'eci' or 'teme' for SGP4 v1.")
-    default_transform = "native" if output_frame == "teme" else "teme_as_eci"
+    default_transform = "native" if output_frame == "teme" else "teme_to_eci_iau80"
     frame_transform = str(general.get("frame_transform", default_transform) or default_transform).strip().lower()
     if output_frame == "eci" and frame_transform not in {"teme_as_eci", "teme_to_eci_iau80"}:
         errs.append(
@@ -588,7 +629,16 @@ def _validate_rcs_cluster(raw: Any, path: str) -> list[str]:
     if not bool(raw.get("enabled", True)):
         return []
     errs: list[str] = []
-    allowed = {"enabled", "allocation_mode", "pulse_quantum_s", "duty_cycle", "isp_s", "thrusters"}
+    allowed = {
+        "enabled",
+        "allocation_mode",
+        "pulse_quantum_s",
+        "duty_cycle",
+        "isp_s",
+        "force_weight",
+        "torque_weight",
+        "thrusters",
+    }
     errs.extend(_validate_allowed_keys(raw, allowed, path))
     mode = str(raw.get("allocation_mode", "force_torque")).strip()
     if mode not in {"force_torque", "force_only", "torque_only"}:
@@ -596,6 +646,16 @@ def _validate_rcs_cluster(raw: Any, path: str) -> list[str]:
     errs.extend(_validate_finite_float(raw.get("pulse_quantum_s"), f"{path}.pulse_quantum_s", min_value=0.0))
     errs.extend(_validate_finite_float(raw.get("duty_cycle"), f"{path}.duty_cycle", min_value=0.0, max_value=1.0))
     errs.extend(_validate_finite_float(raw.get("isp_s"), f"{path}.isp_s", min_value=0.0))
+    errs.extend(_validate_finite_float(raw.get("force_weight"), f"{path}.force_weight", min_value=0.0))
+    errs.extend(_validate_finite_float(raw.get("torque_weight"), f"{path}.torque_weight", min_value=0.0))
+    try:
+        force_weight = float(raw.get("force_weight", 1.0))
+        torque_weight = float(raw.get("torque_weight", 1.0))
+    except (TypeError, ValueError):
+        pass
+    else:
+        if mode == "force_torque" and force_weight == 0.0 and torque_weight == 0.0:
+            errs.append(f"{path}: force_weight and torque_weight cannot both be zero.")
     thrusters = raw.get("thrusters", [])
     if not isinstance(thrusters, list) or len(thrusters) == 0:
         return [*errs, f"{path}.thrusters: must be a non-empty list."]

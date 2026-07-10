@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import importlib
 from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
 
+from sim.config.plugin_specs import instantiate_plugin_spec
 from sim.control.attitude.baseline import ReactionWheelPDController
 from sim.core.interfaces import Controller
 from sim.core.models import Command, StateBelief
@@ -17,14 +17,7 @@ def _construct_pd(spec: Any) -> ReactionWheelPDController:
     if isinstance(spec, ReactionWheelPDController):
         return spec
     if isinstance(spec, dict):
-        module = spec.get("module")
-        class_name = spec.get("class_name")
-        params = dict(spec.get("params", {}) or {})
-        if not module or not class_name:
-            raise ValueError("pd spec dict must include 'module' and 'class_name'.")
-        mod = importlib.import_module(str(module))
-        cls = getattr(mod, str(class_name))
-        obj = cls(**params)
+        obj = instantiate_plugin_spec(spec, description="pd controller")
         if not isinstance(obj, ReactionWheelPDController):
             raise TypeError("pd spec must construct a ReactionWheelPDController.")
         return obj

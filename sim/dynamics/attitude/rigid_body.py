@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextvars import ContextVar
 from dataclasses import asdict, dataclass
 
 import numpy as np
@@ -25,12 +26,53 @@ class AttitudeGuardrailStats:
     non_finite_coriolis_events: int = 0
     singular_inertia_events: int = 0
     non_finite_output_events: int = 0
+    policy: str = "sanitize"
 
 
-_ATTITUDE_GUARDRAIL_STATS = AttitudeGuardrailStats()
+_ATTITUDE_GUARDRAIL_CONTEXT: ContextVar[AttitudeGuardrailStats | None] = ContextVar(
+    "oel_attitude_guardrail_stats",
+    default=None,
+)
 
 
-def reset_attitude_guardrail_stats() -> None:
+def _current_attitude_guardrail_stats() -> AttitudeGuardrailStats:
+    stats = _ATTITUDE_GUARDRAIL_CONTEXT.get()
+    if stats is None:
+        stats = AttitudeGuardrailStats()
+        _ATTITUDE_GUARDRAIL_CONTEXT.set(stats)
+    return stats
+
+
+class _GuardrailStatsProxy:
+    def __getattr__(self, name: str):
+        return getattr(_current_attitude_guardrail_stats(), name)
+
+    def __setattr__(self, name: str, value) -> None:
+        stats = _current_attitude_guardrail_stats()
+        previous = getattr(stats, name)
+        setattr(stats, name, value)
+        if name != "policy" and int(value) > int(previous) and str(stats.policy) == "error":
+            raise FloatingPointError(f"Attitude numerical guardrail triggered: {name}.")
+
+
+_ATTITUDE_GUARDRAIL_STATS = _GuardrailStatsProxy()
+
+
+def new_attitude_guardrail_stats(*, policy: str = "error") -> AttitudeGuardrailStats:
+    resolved = str(policy or "error").strip().lower()
+    if resolved not in {"error", "sanitize"}:
+        raise ValueError("Attitude guardrail policy must be 'error' or 'sanitize'.")
+    return AttitudeGuardrailStats(policy=resolved)
+
+
+def activate_attitude_guardrail_stats(stats: AttitudeGuardrailStats) -> None:
+    _ATTITUDE_GUARDRAIL_CONTEXT.set(stats)
+
+
+def reset_attitude_guardrail_stats(stats: AttitudeGuardrailStats | None = None) -> None:
+    if stats is None:
+        stats = new_attitude_guardrail_stats(policy="sanitize")
+    activate_attitude_guardrail_stats(stats)
     _ATTITUDE_GUARDRAIL_STATS.non_finite_input_events = 0
     _ATTITUDE_GUARDRAIL_STATS.rate_clamp_events = 0
     _ATTITUDE_GUARDRAIL_STATS.torque_clamp_events = 0
@@ -39,8 +81,11 @@ def reset_attitude_guardrail_stats() -> None:
     _ATTITUDE_GUARDRAIL_STATS.non_finite_output_events = 0
 
 
-def get_attitude_guardrail_stats() -> dict[str, int]:
-    return asdict(_ATTITUDE_GUARDRAIL_STATS)
+def get_attitude_guardrail_stats(stats: AttitudeGuardrailStats | None = None) -> dict[str, int | str]:
+    current = _current_attitude_guardrail_stats() if stats is None else stats
+    data = asdict(current)
+    data.pop("policy", None)
+    return data
 
 
 def _add_guardrail_counts(counts: np.ndarray) -> None:
@@ -61,7 +106,10 @@ def rigid_body_derivatives(
     inertia_kg_m2: np.ndarray,
     torque_body_nm: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray]:
-    q = normalize_quaternion(quat_bn)
+    q_raw = np.asarray(quat_bn, dtype=float).reshape(-1)
+    if q_raw.size != 4 or not np.all(np.isfinite(q_raw)) or float(np.linalg.norm(q_raw)) <= 0.0:
+        _ATTITUDE_GUARDRAIL_STATS.non_finite_input_events += 1
+    q = normalize_quaternion(q_raw)
     w = np.asarray(omega_body_rad_s, dtype=float).reshape(3)
     inertia = np.asarray(inertia_kg_m2, dtype=float).reshape(3, 3)
     tau = np.asarray(torque_body_nm, dtype=float).reshape(3)
@@ -115,7 +163,10 @@ def propagate_attitude_euler(
 ) -> tuple[np.ndarray, np.ndarray]:
     q_dot, omega_dot = rigid_body_derivatives(quat_bn, omega_body_rad_s, inertia_kg_m2, torque_body_nm)
     dt = float(max(dt_s, 0.0))
-    q_next = normalize_quaternion(np.array(quat_bn, dtype=float).reshape(4) + dt * q_dot)
+    q_candidate = np.array(quat_bn, dtype=float).reshape(4) + dt * q_dot
+    if not np.all(np.isfinite(q_candidate)) or float(np.linalg.norm(q_candidate)) <= 0.0:
+        _ATTITUDE_GUARDRAIL_STATS.non_finite_output_events += 1
+    q_next = normalize_quaternion(q_candidate)
     omega_next = np.array(omega_body_rad_s, dtype=float).reshape(3) + dt * omega_dot
     if not (np.all(np.isfinite(q_next)) and np.all(np.isfinite(omega_next))):
         _ATTITUDE_GUARDRAIL_STATS.non_finite_output_events += 1

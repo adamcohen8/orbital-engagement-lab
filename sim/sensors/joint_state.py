@@ -23,6 +23,7 @@ class JointStateSensor(SensorModel):
     def measure(self, truth: StateTruth, env: dict, t_s: float) -> Measurement | None:
         if t_s - self._last_update_t_s < self.update_cadence_s:
             return None
+        self._last_update_t_s = t_s
         if self.rng.random() < self.dropout_prob:
             return None
 
@@ -36,5 +37,4 @@ class JointStateSensor(SensorModel):
         w = truth.angular_rate_body_rad_s + self.rng.normal(0.0, self.omega_sigma_rad_s, size=3)
 
         z = np.hstack((pos, vel, q, w))
-        self._last_update_t_s = t_s
         return Measurement(vector=z, t_s=t_s)

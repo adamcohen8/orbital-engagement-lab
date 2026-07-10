@@ -24,7 +24,11 @@ def prepare_batch_run_configs(cfg: SimulationScenarioConfig) -> list[dict[str, A
     return prepare_monte_carlo_runs(cfg=cfg, root=root, outdir=outdir)
 
 
-def validate_generated_batch_configs(cfg: SimulationScenarioConfig) -> dict[str, Any]:
+def validate_generated_batch_configs(
+    cfg: SimulationScenarioConfig,
+    *,
+    import_plugins: bool = True,
+) -> dict[str, Any]:
     strict_plugins = bool(cfg.simulator.plugin_validation.get("strict", True))
     try:
         prepared = prepare_batch_run_configs(cfg)
@@ -44,7 +48,11 @@ def validate_generated_batch_configs(cfg: SimulationScenarioConfig) -> dict[str,
     if analysis_study_type(cfg) == "sensitivity":
         from sim.execution.sensitivity import validate_prepared_sensitivity_runs
 
-        return validate_prepared_sensitivity_runs(prepared=prepared, strict_plugins=strict_plugins)
+        return validate_prepared_sensitivity_runs(
+            prepared=prepared,
+            strict_plugins=strict_plugins,
+            import_plugins=import_plugins,
+        )
 
     errors: list[dict[str, Any]] = []
     for idx, item in enumerate(prepared):
@@ -63,7 +71,7 @@ def validate_generated_batch_configs(cfg: SimulationScenarioConfig) -> dict[str,
                         "parameter_value": None,
                         "error": str(err),
                     }
-                    for err in validate_scenario_plugins(run_cfg)
+                    for err in validate_scenario_plugins(run_cfg, import_plugins=import_plugins)
                 )
         except Exception as exc:
             errors.append(

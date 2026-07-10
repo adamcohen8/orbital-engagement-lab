@@ -11,10 +11,10 @@ Answer example: `agents/tasks/examples/mission_recovery_plus_c_burn_answer.md`
 ## User Prompt
 
 ```text
-Create a short public scenario that applies a simple +C cross-track burn to one
-satellite, validates and runs it, then inspects the mission-recovery evidence.
-Tell me what changed in the orbit, what recovery the artifact recommends, and
-what the result does not prove.
+Create a public scenario that applies a simple +C cross-track burn to one
+satellite, propagates for ten minutes, validates and runs it, then inspects the
+mission-recovery evidence. Tell me what changed in the orbit, what recovery the
+artifact recommends, and what the result does not prove.
 ```
 
 ## Expected Agent Assumptions

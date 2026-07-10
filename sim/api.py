@@ -454,8 +454,22 @@ class SimulationConfig:
         )
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> SimulationConfig:
-        return cls(scenario=scenario_config_from_dict(_canonicalize_api_config_dict(dict(data))))
+    def from_dict(
+        cls,
+        data: dict[str, Any],
+        *,
+        path_policy: ConfigPathPolicy | None = None,
+        source_path: str | Path | None = None,
+    ) -> SimulationConfig:
+        resolved_source = None if source_path is None else Path(source_path).expanduser().resolve()
+        return cls(
+            scenario=scenario_config_from_dict(
+                _canonicalize_api_config_dict(dict(data)),
+                source_path=resolved_source,
+                path_policy=path_policy,
+            ),
+            source_path=resolved_source,
+        )
 
     @property
     def scenario_name(self) -> str:
@@ -1323,6 +1337,39 @@ class SimulationSession:
             raise PermissionError(f"Sealed mode blocks Python API {surface}; express trusted behavior in scenario YAML.")
 
 
+TrustedSimulationSession = SimulationSession
+
+
+class HostedSimulationSession(SimulationSession):
+    """Sealed-by-construction session for hosted or untrusted callers."""
+
+    def __init__(
+        self,
+        config: ScenarioArtifact | SimulationConfig | SimulationScenarioConfig | dict[str, Any],
+        *,
+        sealed_policy: SealedModePolicy | None = None,
+        history_mode: str = "full",
+        initial_history_capacity: int = 4096,
+        max_history_samples: int = 4096,
+    ) -> None:
+        super().__init__(
+            config,
+            sealed_mode=True,
+            sealed_policy=sealed_policy,
+            history_mode=history_mode,
+            initial_history_capacity=initial_history_capacity,
+            max_history_samples=max_history_samples,
+        )
+
+    @classmethod
+    def from_config(cls, config, **kwargs) -> HostedSimulationSession:
+        return cls(config, **kwargs)
+
+    @classmethod
+    def from_yaml(cls, path: str | Path, **kwargs) -> HostedSimulationSession:
+        return cls(SimulationConfig.from_yaml(path), **kwargs)
+
+
 class SimulationWorkspace:
     """Higher-level programmatic facade for CLI-equivalent workflows."""
 
@@ -1336,15 +1383,20 @@ class SimulationWorkspace:
         read_roots: Iterable[str | Path] = (),
         write_roots: Iterable[str | Path] = (),
         workspace_root: str | Path | None = None,
+        allow_config_dir_writes: bool = True,
     ) -> None:
         self.allow_external_config_paths = bool(allow_external_config_paths)
         self.allow_external_ai_prompt_files = bool(allow_external_ai_prompt_files)
         self.read_roots = tuple(read_roots)
         self.write_roots = tuple(write_roots)
         self.workspace_root = workspace_root
+        self.allow_config_dir_writes = bool(allow_config_dir_writes)
+        self._enforce_workspace_paths = bool(
+            workspace_root is not None or self.read_roots or self.write_roots
+        )
         self._sealed_policy = _api_sealed_policy(sealed_mode=sealed_mode, sealed_policy=sealed_policy)
 
-    def _path_policy_for(self, path: str | Path) -> ConfigPathPolicy:
+    def _path_policy_for(self, path: str | Path | None = None) -> ConfigPathPolicy:
         return ConfigPathPolicy.default(
             config_path=path,
             workspace_root=self.workspace_root,
@@ -1352,6 +1404,7 @@ class SimulationWorkspace:
             write_roots=self.write_roots,
             allow_external_config_paths=self.allow_external_config_paths,
             allow_external_ai_prompt_files=self.allow_external_ai_prompt_files,
+            allow_config_dir_writes=self.allow_config_dir_writes,
         )
 
     def load(self, path: str | Path) -> SimulationConfig:
@@ -1360,7 +1413,10 @@ class SimulationWorkspace:
         return config
 
     def from_dict(self, data: dict[str, Any]) -> SimulationConfig:
-        config = SimulationConfig.from_dict(data)
+        config = SimulationConfig.from_dict(
+            data,
+            path_policy=self._path_policy_for() if self._enforce_workspace_paths else None,
+        )
         self._enforce_sealed_mode(config)
         return config
 
@@ -1394,7 +1450,13 @@ class SimulationWorkspace:
                 errors = [str(item) for item in list(report.get("errors", []) or [])]
                 detail = "\n- " + "\n- ".join(errors) if errors else ""
                 raise ValueError(f"Cannot save invalid scenario artifact.{detail}")
-        return artifact.write(path)
+        target = Path(path).expanduser()
+        if self._enforce_workspace_paths:
+            target = self._path_policy_for(self._config_path_text(config)).resolve_output_file(
+                target,
+                purpose="scenario artifact output",
+            )
+        return artifact.write(target)
 
     def run(
         self,
@@ -1517,6 +1579,8 @@ class SimulationWorkspace:
     def validate(
         self,
         config: str | Path | ScenarioArtifact | SimulationConfig | SimulationScenarioConfig | dict[str, Any],
+        *,
+        import_plugins: bool = True,
     ) -> dict[str, Any]:
         try:
             sim_config = self._coerce_config(config)
@@ -1530,11 +1594,11 @@ class SimulationWorkspace:
 
         cfg = sim_config.to_scenario_config()
         study_type = analysis_study_type(cfg)
-        plugin_errors = list(validate_scenario_plugins(cfg))
+        plugin_errors = list(validate_scenario_plugins(cfg, import_plugins=import_plugins))
         strict_plugins = bool(cfg.simulator.plugin_validation.get("strict", True))
         generated: dict[str, Any] = {"run_count": 0, "errors": []}
         if (not plugin_errors or not strict_plugins) and study_type in {"monte_carlo", "sensitivity"}:
-            generated = validate_generated_batch_configs(cfg)
+            generated = validate_generated_batch_configs(cfg, import_plugins=import_plugins)
 
         generated_errors = list(generated.get("errors", []) or [])
         errors: list[Any] = []
@@ -1560,6 +1624,14 @@ class SimulationWorkspace:
             "generated": generated,
             "errors": errors,
         }
+
+    def validate_safe(
+        self,
+        config: str | Path | ScenarioArtifact | SimulationConfig | SimulationScenarioConfig | dict[str, Any],
+    ) -> dict[str, Any]:
+        """Validate structure and plugin pointers without importing plugin modules."""
+
+        return self.validate(config, import_plugins=False)
 
     def validate_report(
         self,
@@ -1691,12 +1763,28 @@ class SimulationWorkspace:
         self,
         config: str | Path | ScenarioArtifact | SimulationConfig | SimulationScenarioConfig | dict[str, Any],
     ) -> SimulationConfig:
-        if isinstance(config, ScenarioArtifact):
-            coerced = config.to_config()
-        elif isinstance(config, (str, Path)):
+        if isinstance(config, (str, Path)):
             coerced = SimulationConfig.from_yaml(config, path_policy=self._path_policy_for(config))
-        else:
+        elif not self._enforce_workspace_paths:
             coerced = SimulationSession._coerce_config(config)
+        else:
+            source_path = self._config_path_text(config)
+            if isinstance(config, ScenarioArtifact):
+                raw = config.to_dict()
+            elif isinstance(config, SimulationConfig):
+                raw = config.to_dict()
+                source_path = str(config.source_path) if config.source_path is not None else source_path
+            elif isinstance(config, SimulationScenarioConfig):
+                raw = config.to_dict()
+            elif isinstance(config, dict):
+                raw = dict(config)
+            else:
+                raise TypeError(f"Unsupported config type: {type(config).__name__}")
+            coerced = SimulationConfig.from_dict(
+                raw,
+                source_path=source_path,
+                path_policy=self._path_policy_for(source_path),
+            )
         self._enforce_sealed_mode(coerced)
         return coerced
 
@@ -1706,3 +1794,28 @@ class SimulationWorkspace:
         errors = validate_sealed_mode(config.to_scenario_config(), self._sealed_policy)
         if errors:
             raise ValueError("Sealed mode validation failed:\n- " + "\n- ".join(errors))
+
+
+TrustedSimulationWorkspace = SimulationWorkspace
+
+
+class HostedSimulationWorkspace(SimulationWorkspace):
+    """Hosted facade with sealed mode and structural-first validation enforced."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        if kwargs.pop("sealed_mode", True) is not True:
+            raise ValueError("HostedSimulationWorkspace cannot disable sealed mode.")
+        if kwargs.pop("allow_config_dir_writes", False) is not False:
+            raise ValueError("HostedSimulationWorkspace cannot allow config-directory writes outside workspace roots.")
+        super().__init__(sealed_mode=True, allow_config_dir_writes=False, **kwargs)
+
+    def session(self, config) -> HostedSimulationSession:
+        return HostedSimulationSession.from_config(
+            self._coerce_config(config),
+            sealed_policy=self._sealed_policy,
+        )
+
+    def validate(self, config, *, import_plugins: bool = False) -> dict[str, Any]:
+        if import_plugins:
+            raise ValueError("HostedSimulationWorkspace validation cannot import plugin modules.")
+        return super().validate(config, import_plugins=False)

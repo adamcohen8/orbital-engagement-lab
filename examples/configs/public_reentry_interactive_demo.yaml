@@ -50,6 +50,7 @@ simulator:
     attitude:
       enabled: false
   environment:
+    atmosphere_model: ussa1976
     atmosphere_env: {}
   termination:
     earth_impact_enabled: true

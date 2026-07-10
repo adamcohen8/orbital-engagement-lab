@@ -35,8 +35,8 @@ from sim.review import (
     write_workflow_review,
 )
 
-ISS_LINE1 = "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9005"
-ISS_LINE2 = "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1000"
+ISS_LINE1 = "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9003"
+ISS_LINE2 = "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1004"
 
 
 def _review_store_config(output_dir: Path) -> dict:
@@ -282,11 +282,20 @@ def test_review_store_writes_tle_initialization_metadata_for_special_propagation
             """
         ).fetchone()
 
-    assert row[:8] == ("target", "tle", "ogp", "OGP-SGP4", "special", "teme", "eci", "teme_as_eci")
+    assert row[:8] == (
+        "target",
+        "tle",
+        "ogp",
+        "OGP-SGP4",
+        "special",
+        "teme",
+        "eci",
+        "teme_to_eci_iau80",
+    )
     assert row[8] == pytest.approx(0.25)
 
 
-def test_review_store_records_native_teme_state_frame_for_sgp4(tmp_path: Path) -> None:
+def test_review_store_records_canonical_eci_state_frame_for_sgp4(tmp_path: Path) -> None:
     raw = _review_store_config(tmp_path)
     raw["objects"]["chaser"]["enabled"] = False
     raw["objects"]["target"]["propagation_method"] = "general"
@@ -295,7 +304,7 @@ def test_review_store_records_native_teme_state_frame_for_sgp4(tmp_path: Path) -
     raw["simulator"]["initial_jd_utc"] = 2460310.5
     result = SimulationSession.from_config(SimulationConfig.from_dict(raw)).run()
 
-    assert result.payload["object_state_frames"]["target"] == "teme"
+    assert result.payload["object_state_frames"]["target"] == "eci"
     db_path = Path(dict(result.summary.get("review_outputs", {}) or {})["sqlite"])
     with sqlite3.connect(db_path) as conn:
         row = conn.execute(
@@ -306,7 +315,7 @@ def test_review_store_records_native_teme_state_frame_for_sgp4(tmp_path: Path) -
             """
         ).fetchone()
 
-    assert row == ("teme", "native", "teme")
+    assert row == ("teme", "native", "eci")
 
 
 def test_review_store_config_defaults_disabled_and_validates_detail(tmp_path: Path) -> None:
@@ -354,7 +363,8 @@ def test_review_store_writes_mission_recovery_tables(tmp_path: Path) -> None:
             "SELECT metric_name, units FROM metrics WHERE metric_name = 'recovery_delta_v_m_s'"
         ).fetchall()
         candidate_rows = conn.execute(
-            "SELECT candidate_id, source, feasible, verified FROM mission_recovery_candidates"
+            "SELECT candidate_id, source, source_family, target_basis, feasible, verified "
+            "FROM mission_recovery_candidates"
         ).fetchall()
         burn_rows = conn.execute(
             "SELECT candidate_id, burn_index, delta_v_m_s FROM mission_recovery_burns"
@@ -368,12 +378,15 @@ def test_review_store_writes_mission_recovery_tables(tmp_path: Path) -> None:
     assert summary_rows[0][1] == "orbit_shape"
     assert summary_rows[0][2] in {"sim_state_inferred_intrack_impulse", "local_orbit_shape_velocity_match"}
     assert summary_rows[0][3] is not None
-    assert [row[0] for row in element_rows] == ["final", "initial"]
+    assert [row[0] for row in element_rows] == ["final", "initial", "target"]
     assert metric_rows == [("recovery_delta_v_m_s", "m/s")]
     assert candidate_rows
     assert burn_rows
     assert candidate_element_rows
-    assert all(row[2] in (0, 1) for row in candidate_rows)
+    assert all(row[2] == "analytic_reconstitution" for row in candidate_rows)
+    assert all(row[3] == "initial_orbit" for row in candidate_rows)
+    assert all(row[4] in (0, 1) for row in candidate_rows)
+    assert all(row[5] in (0, 1) for row in candidate_rows)
 
 
 def test_review_workspace_query_api_allows_safe_selects(tmp_path: Path) -> None:

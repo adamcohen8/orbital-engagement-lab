@@ -1,7 +1,7 @@
 scenario_name: public_agent_mission_reconstitution_trade_space
 scenario_description: 'Public agent example: apply a simple +I in-track burn, then
   generate a simulator-backed mission reconstitution trade space with min-time, min-delta-v,
-  and constrained recovery recommendations.
+  and constrained recovery recommendations after a ten-minute propagation.
 
   '
 objects:
@@ -53,7 +53,7 @@ objects:
         burn_duration_s: 1.0
         require_finite_reference: true
 simulator:
-  duration_s: 120.0
+  duration_s: 600.0
   dt_s: 1.0
   dynamics:
     orbit:

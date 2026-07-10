@@ -132,16 +132,20 @@ SAVED_REVIEW_QUERIES: dict[str, SavedReviewQuery] = {
     ),
     "mission_recovery_candidates": SavedReviewQuery(
         name="mission_recovery_candidates",
-        description="Mission-reconstitution planner candidates ranked by feasibility, delta-v, and time.",
+        description=(
+            "Original-orbit analytical baselines and Orbit Transfer Planner candidates ranked by feasibility, "
+            "delta-v, and time."
+        ),
         sql=(
-            "SELECT candidate_id, object_id, goal, source, planned_delta_v_m_s, planned_time_s, "
-            "propellant_kg, feasible, verified, recommended_modes_json "
+            "SELECT candidate_id, object_id, goal, source, source_family, target_basis, "
+            "transfer_type, planned_delta_v_m_s, planned_time_s, departure_wait_s, "
+            "time_of_flight_s, propellant_kg, feasible, verified, recommended_modes_json "
             "FROM mission_recovery_candidates ORDER BY feasible DESC, planned_delta_v_m_s, planned_time_s"
         ),
     ),
     "mission_recovery_burns": SavedReviewQuery(
         name="mission_recovery_burns",
-        description="Burn sequence rows for mission-reconstitution planner candidates.",
+        description="Burn sequence rows for original-orbit baselines and Orbit Transfer Planner candidates.",
         sql=(
             "SELECT candidate_id, burn_index, start_time_s, duration_s, frame, axis, delta_v_m_s "
             "FROM mission_recovery_burns ORDER BY candidate_id, burn_index"

@@ -274,7 +274,9 @@ def build_single_run_payload(context: SingleRunPayloadContext) -> dict[str, Any]
         }
         summary["rocket_metrics_summary"] = rocket_summary
     object_state_frames = {
-        str(object_id): str(dict(context.object_propagation.get(object_id, {}) or {}).get("output_frame", "eci") or "eci")
+        str(object_id): str(
+            dict(context.object_propagation.get(object_id, {}) or {}).get("state_history_frame", "eci") or "eci"
+        )
         for object_id in context.object_ids
     }
     return {

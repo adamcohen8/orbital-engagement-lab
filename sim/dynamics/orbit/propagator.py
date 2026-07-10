@@ -178,7 +178,12 @@ def spherical_harmonics_plugin(t_s: float, x_eci: np.ndarray, env: dict, ctx: Or
 def drag_plugin(t_s: float, x_eci: np.ndarray, env: dict, ctx: OrbitContext) -> np.ndarray:
     density = env.get("density_kg_m3")
     if density is None:
-        atmo_model = str(env.get("atmosphere_model", "exponential")).lower()
+        if env.get("atmosphere_model") in (None, ""):
+            raise ValueError(
+                "Drag requires an explicit environment.atmosphere_model or density_kg_m3; "
+                "no orbital-decay atmosphere is selected implicitly."
+            )
+        atmo_model = str(env.get("atmosphere_model")).lower()
         density = density_from_model(
             atmo_model,
             x_eci[:3],
@@ -215,7 +220,11 @@ def lift_plugin(t_s: float, x_eci: np.ndarray, env: dict, ctx: OrbitContext) -> 
         return np.zeros(3)
     density = env.get("density_kg_m3")
     if density is None:
-        atmo_model = str(env.get("atmosphere_model", "exponential")).lower()
+        if env.get("atmosphere_model") in (None, ""):
+            raise ValueError(
+                "Lift requires an explicit environment.atmosphere_model or density_kg_m3."
+            )
+        atmo_model = str(env.get("atmosphere_model")).lower()
         density = density_from_model(
             atmo_model,
             x_eci[:3],

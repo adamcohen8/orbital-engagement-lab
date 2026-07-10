@@ -21,7 +21,11 @@ from sim.config import (
     scenario_config_from_dict,
 )
 from sim.core.models import Command, StateBelief, StateTruth
-from sim.dynamics.attitude.rigid_body import get_attitude_guardrail_stats, reset_attitude_guardrail_stats
+from sim.dynamics.attitude.rigid_body import (
+    activate_attitude_guardrail_stats,
+    get_attitude_guardrail_stats,
+    new_attitude_guardrail_stats,
+)
 from sim.dynamics.orbit.atmosphere import altitude_km_from_eci
 from sim.dynamics.orbit.epoch import TIME_DEPENDENT_ENV_CACHE_KEY
 from sim.dynamics.orbit.frames import FrameContext, frame_context_from_mapping
@@ -62,6 +66,7 @@ from sim.runtime_support import (
     _run_mission_strategy,
 )
 from sim.single_run_support import (
+    _BudgetedControllerProxy,
     _DecisionContext,
     _DecisionContextBuilder,
     _KnowledgeSynchronizer,
@@ -228,6 +233,7 @@ class ObjectStepResult:
     belief_state: np.ndarray | None = None
     belief_covariance: np.ndarray | None = None
     belief_last_update_t_s: float | None = None
+    attitude_guardrail_count_deltas: dict[str, int] = field(default_factory=dict)
 
 
 class ObjectStepExecutor(Protocol):
@@ -278,17 +284,28 @@ class ProcessPoolObjectStepExecutor:
     def __init__(self, engine: _SingleRunEngine, *, max_workers: int) -> None:
         self.engine = engine
         self.max_workers = int(max(1, max_workers))
-        self._executors: dict[str, ProcessPoolExecutor] = {}
-        self._initialized: set[str] = set()
-        active_ids = [str(aid) for aid, agent in engine.agents.items() if agent.active]
-        if self.max_workers < len(active_ids):
-            raise RuntimeError(
-                "Persistent process_pool object parallelism requires at least one worker per active object. "
-                f"active_objects={len(active_ids)}, workers={self.max_workers}."
-            )
+        self._executors: list[ProcessPoolExecutor] = []
+        self._executor_index_by_object: dict[str, int] = {}
+
+    def _initialize_workers(self, inputs: list[ObjectStepInput]) -> None:
+        worker_count = min(self.max_workers, len(inputs))
+        groups: list[list[ObjectStepInput]] = [[] for _ in range(worker_count)]
+        for index, item in enumerate(inputs):
+            groups[index % worker_count].append(item)
         try:
-            for aid in active_ids:
-                self._executors[aid] = ProcessPoolExecutor(max_workers=1)
+            for worker_index, group in enumerate(groups):
+                snapshots = {
+                    item.object_id: self.engine._process_worker_engine_snapshot(item)
+                    for item in group
+                }
+                executor = ProcessPoolExecutor(
+                    max_workers=1,
+                    initializer=_persistent_object_workers_init,
+                    initargs=(snapshots,),
+                )
+                self._executors.append(executor)
+                for item in group:
+                    self._executor_index_by_object[item.object_id] = worker_index
         except Exception as exc:
             self.shutdown()
             raise RuntimeError(
@@ -299,22 +316,18 @@ class ProcessPoolObjectStepExecutor:
     def step_objects(self, inputs: list[ObjectStepInput]) -> list[ObjectStepResult]:
         if len(inputs) <= 1:
             return [self.engine._step_object_serial(item) for item in inputs]
-        futures = []
-        for item in inputs:
-            aid = item.object_id
-            executor = self._executors[aid]
-            if aid not in self._initialized:
-                executor.submit(
-                    _persistent_object_worker_init,
-                    self.engine._process_worker_engine_snapshot(item),
-                    aid,
-                ).result()
-                self._initialized.add(aid)
-            futures.append(
-                executor.submit(
-                    _persistent_object_step_worker,
+        if not self._executors:
+            self._initialize_workers(inputs)
+        input_ids = {item.object_id for item in inputs}
+        if input_ids != set(self._executor_index_by_object):
+            raise RuntimeError("Persistent object worker membership changed after initialization.")
+        chunks: list[list[tuple[int, ObjectStepMessage]]] = [[] for _ in self._executors]
+        for index, item in enumerate(inputs):
+            chunks[self._executor_index_by_object[item.object_id]].append(
+                (
+                    index,
                     ObjectStepMessage(
-                        object_id=aid,
+                        object_id=item.object_id,
                         initial_truth=item.initial_truth,
                         world_truth_decision=item.world_truth_decision,
                         t_s=item.t_s,
@@ -323,7 +336,14 @@ class ProcessPoolObjectStepExecutor:
                     ),
                 )
             )
-        return [future.result() for future in futures]
+        futures = [
+            self._executors[index].submit(_persistent_object_step_batch_worker, chunk)
+            for index, chunk in enumerate(chunks)
+            if chunk
+        ]
+        indexed = [row for future in futures for row in future.result()]
+        indexed.sort(key=lambda row: row[0])
+        return [result for _index, result in indexed]
 
     def sync_after_step(
         self,
@@ -332,42 +352,45 @@ class ProcessPoolObjectStepExecutor:
         sample_index: int,
         t_s: float,
     ) -> list[ObjectKnowledgeSyncResult] | None:
-        futures = [
-            executor.submit(
-                _persistent_object_knowledge_sync_worker,
-                world_truth,
-                int(sample_index),
-                float(t_s),
-            )
-            for aid, executor in self._executors.items()
-            if aid in self._initialized
-        ]
-        return [future.result() for future in futures]
+        # Knowledge synchronization is intentionally centralized. It avoids a
+        # full-world broadcast to every object worker and preserves one
+        # deterministic observer/target update order.
+        return None
 
     def shutdown(self) -> None:
-        for executor in self._executors.values():
+        for executor in self._executors:
             executor.shutdown(wait=True, cancel_futures=True)
         self._executors.clear()
-        self._initialized.clear()
+        self._executor_index_by_object.clear()
 
 
-_PERSISTENT_OBJECT_WORKER_ENGINE: _SingleRunEngine | None = None
-_PERSISTENT_OBJECT_WORKER_ID: str | None = None
+_PERSISTENT_OBJECT_WORKER_ENGINES: dict[str, _SingleRunEngine] = {}
 
 
-def _persistent_object_worker_init(engine: _SingleRunEngine, object_id: str) -> str:
-    global _PERSISTENT_OBJECT_WORKER_ENGINE, _PERSISTENT_OBJECT_WORKER_ID
-    _PERSISTENT_OBJECT_WORKER_ENGINE = engine
-    _PERSISTENT_OBJECT_WORKER_ID = str(object_id)
-    return str(object_id)
+def _persistent_object_workers_init(engines: dict[str, _SingleRunEngine]) -> None:
+    global _PERSISTENT_OBJECT_WORKER_ENGINES
+    _PERSISTENT_OBJECT_WORKER_ENGINES = dict(engines)
 
 
 def _persistent_object_step_worker(message: ObjectStepMessage) -> ObjectStepResult:
-    engine = _PERSISTENT_OBJECT_WORKER_ENGINE
     aid = str(message.object_id)
-    if engine is None or _PERSISTENT_OBJECT_WORKER_ID != aid:
+    engine = _PERSISTENT_OBJECT_WORKER_ENGINES.get(aid)
+    if engine is None:
         raise RuntimeError(f"Persistent object worker for {aid!r} has not been initialized.")
+    return _run_object_step_worker(engine, message)
+
+
+def _persistent_object_step_batch_worker(
+    chunk: list[tuple[int, ObjectStepMessage]],
+) -> list[tuple[int, ObjectStepResult]]:
+    return [(index, _persistent_object_step_worker(message)) for index, message in chunk]
+
+
+def _run_object_step_worker(engine: _SingleRunEngine, message: ObjectStepMessage) -> ObjectStepResult:
+    aid = str(message.object_id)
     agent = engine.agents[aid]
+    activate_attitude_guardrail_stats(engine.attitude_guardrail_stats)
+    guardrail_counts_before = get_attitude_guardrail_stats(engine.attitude_guardrail_stats)
     profiler_enabled = bool(getattr(engine.runtime_profiler, "enabled", True))
     engine.runtime_profiler = _RuntimeProfiler(object_ids=[aid], enabled=profiler_enabled)
     engine.controller_debug_hist = {aid: []}
@@ -383,6 +406,11 @@ def _persistent_object_step_worker(message: ObjectStepMessage) -> ObjectStepResu
     )
     with acceleration_context_from_config(engine.cfg):
         result = engine._step_object_serial(item)
+    guardrail_counts_after = get_attitude_guardrail_stats(engine.attitude_guardrail_stats)
+    guardrail_count_deltas = {
+        name: int(value) - int(guardrail_counts_before.get(name, 0))
+        for name, value in guardrail_counts_after.items()
+    }
     belief = agent.belief
     return replace(
         result,
@@ -404,31 +432,7 @@ def _persistent_object_step_worker(message: ObjectStepMessage) -> ObjectStepResu
         belief_state=(None if belief is None else np.array(belief.state, dtype=float)),
         belief_covariance=(None if belief is None else np.array(belief.covariance, dtype=float)),
         belief_last_update_t_s=(None if belief is None else float(belief.last_update_t_s)),
-    )
-
-
-def _persistent_object_knowledge_sync_worker(
-    world_truth: dict[str, StateTruth],
-    sample_index: int,
-    t_s: float,
-) -> ObjectKnowledgeSyncResult:
-    engine = _PERSISTENT_OBJECT_WORKER_ENGINE
-    aid = _PERSISTENT_OBJECT_WORKER_ID
-    if engine is None or aid is None:
-        raise RuntimeError("Persistent object worker has not been initialized.")
-    agent = engine.agents[aid]
-    if not agent.active or agent.knowledge_base is None:
-        return ObjectKnowledgeSyncResult(object_id=aid)
-    observer_truth = world_truth.get(aid)
-    if observer_truth is None:
-        return ObjectKnowledgeSyncResult(object_id=aid)
-    agent.knowledge_base.update(observer_truth=observer_truth, world_truth=world_truth, t_s=float(t_s))
-    return ObjectKnowledgeSyncResult(
-        object_id=aid,
-        knowledge_snapshot=agent.knowledge_base.snapshot(),
-        measurement_snapshot=agent.knowledge_base.measurement_snapshot(),
-        detection_summary=agent.knowledge_base.detection_summary(),
-        consistency_summary=agent.knowledge_base.consistency_summary(),
+        attitude_guardrail_count_deltas=guardrail_count_deltas,
     )
 
 
@@ -555,9 +559,13 @@ class _SingleRunEngine:
         self.history_mode = str(history_mode or "full").strip().lower()
         if self.history_mode not in {"full", "dynamic"}:
             raise ValueError("history_mode must be 'full' or 'dynamic'.")
-        reset_attitude_guardrail_stats()
-
         self.dt = float(cfg.simulator.dt_s)
+        controller_execution = dict(dict(getattr(cfg.simulator, "execution", {}) or {}).get("controller", {}) or {})
+        self.orbit_controller_budget_ms = float(controller_execution.get("orbit_budget_ms", 2.0) or 2.0)
+        self.attitude_controller_budget_ms = float(controller_execution.get("attitude_budget_ms", 2.0) or 2.0)
+        self.controller_deadline_policy = str(
+            controller_execution.get("deadline_policy", "record") or "record"
+        ).strip().lower()
         self.planned_samples = int(np.floor(float(cfg.simulator.duration_s) / self.dt)) + 1
         self.sample_offset = 0
         self.max_history_samples = int(max(2, max_history_samples))
@@ -572,6 +580,10 @@ class _SingleRunEngine:
         dynamics_cfg = dict(cfg.simulator.dynamics or {})
         orbit_cfg = dict(dynamics_cfg.get("orbit", {}) or {})
         att_cfg = dict(dynamics_cfg.get("attitude", {}) or {})
+        self.attitude_guardrail_stats = new_attitude_guardrail_stats(
+            policy=str(att_cfg.get("guardrail_policy", "error") or "error")
+        )
+        activate_attitude_guardrail_stats(self.attitude_guardrail_stats)
         self.frame_context = frame_context_from_mapping(
             dict(getattr(cfg.simulator, "frames", {}) or {}),
             jd_utc_start=cfg.simulator.initial_jd_utc,
@@ -646,13 +658,18 @@ class _SingleRunEngine:
                 mass_kg=float(agent.truth.mass_kg),
                 start_jd_utc=cfg.simulator.initial_jd_utc,
                 duration_s=float(cfg.simulator.duration_s),
-                output_frame=str(general.get("output_frame", "eci") or "eci"),
+                output_frame=str(general.get("output_frame", "teme") or "teme"),
                 frame_transform=general.get("frame_transform"),
                 attitude_quat_bn=agent.truth.attitude_quat_bn,
                 angular_rate_body_rad_s=agent.truth.angular_rate_body_rad_s,
+                max_tle_age_days_warning=(
+                    None
+                    if general.get("max_tle_age_days_warning") is None
+                    else float(general.get("max_tle_age_days_warning"))
+                ),
             )
             self.general_propagation[aid] = provider
-            agent.truth = provider.state_at(0.0)
+            agent.truth = provider.canonical_state_at(0.0)
             if agent.belief is not None and agent.belief.state.size >= 6:
                 agent.belief.state[:6] = np.hstack((agent.truth.position_eci_km, agent.truth.velocity_eci_km_s))
                 agent.belief.last_update_t_s = 0.0
@@ -882,14 +899,6 @@ class _SingleRunEngine:
             workers = max(1, min(workers, int(profile.max_parallel_workers)))
         if workers <= 1:
             return SerialObjectStepExecutor(self)
-        if workers < active_objects:
-            logger.warning(
-                "Falling back to serial object stepping because persistent process_pool requires one worker per active "
-                "object: workers=%s active_objects=%s",
-                workers,
-                active_objects,
-            )
-            return SerialObjectStepExecutor(self)
         return ProcessPoolObjectStepExecutor(self, max_workers=workers)
 
     def _resolve_reentry_object_ids(self) -> list[str]:
@@ -983,7 +992,7 @@ class _SingleRunEngine:
 
         retained_python_bytes_per_sample = 0
         for agent in self.agents.values():
-            if agent.kind != "rocket":
+            if agent.kind != "rocket" and self.controller_debug_enabled:
                 retained_python_bytes_per_sample += 4096  # controller_debug_hist row estimate
             if agent.bridge is not None:
                 retained_python_bytes_per_sample += 512  # bridge event row estimate
@@ -1300,13 +1309,31 @@ class _SingleRunEngine:
 
     def _run_agent_decision(self, ctx: _DecisionContext, *, include_external_intent: bool = True) -> dict[str, Any]:
         agent = ctx.agent
+        orbit_proxy = (
+            None
+            if ctx.orbit_controller is None
+            else _BudgetedControllerProxy(
+                ctx.orbit_controller,
+                budget_ms=self.orbit_controller_budget_ms,
+                deadline_policy=self.controller_deadline_policy,
+            )
+        )
+        attitude_proxy = (
+            None
+            if ctx.attitude_controller is None
+            else _BudgetedControllerProxy(
+                ctx.attitude_controller,
+                budget_ms=self.attitude_controller_budget_ms,
+                deadline_policy=self.controller_deadline_policy,
+            )
+        )
         mission_out = _run_mission_modules(
             agent=agent,
             t_s=ctx.t_s,
             dt_s=ctx.dt_s,
             env=ctx.env,
-            orbit_controller=ctx.orbit_controller,
-            attitude_controller=ctx.attitude_controller,
+            orbit_controller=orbit_proxy,
+            attitude_controller=attitude_proxy,
             orb_belief=ctx.orb_belief,
             att_belief=ctx.att_belief,
         )
@@ -1316,8 +1343,8 @@ class _SingleRunEngine:
                 t_s=ctx.t_s,
                 dt_s=ctx.dt_s,
                 env=ctx.env,
-                orbit_controller=ctx.orbit_controller,
-                attitude_controller=ctx.attitude_controller,
+                orbit_controller=orbit_proxy,
+                attitude_controller=attitude_proxy,
                 orb_belief=ctx.orb_belief,
                 att_belief=ctx.att_belief,
             )
@@ -1331,12 +1358,18 @@ class _SingleRunEngine:
                 t_s=ctx.t_s,
                 dt_s=ctx.dt_s,
                 env=ctx.env,
-                orbit_controller=ctx.orbit_controller,
-                attitude_controller=ctx.attitude_controller,
+                orbit_controller=orbit_proxy,
+                attitude_controller=attitude_proxy,
                 orb_belief=ctx.orb_belief,
                 att_belief=ctx.att_belief,
             )
         )
+        if orbit_proxy is not None and orbit_proxy.call_count:
+            mission_out["_integrated_orbit_runtime_ms"] = float(orbit_proxy.runtime_ms)
+            mission_out["_integrated_orbit_deadline_missed"] = bool(orbit_proxy.deadline_missed)
+        if attitude_proxy is not None and attitude_proxy.call_count:
+            mission_out["_integrated_attitude_runtime_ms"] = float(attitude_proxy.runtime_ms)
+            mission_out["_integrated_attitude_deadline_missed"] = bool(attitude_proxy.deadline_missed)
         return mission_out
 
     def _build_object_step_inputs(
@@ -1356,7 +1389,10 @@ class _SingleRunEngine:
                     object_id=aid,
                     agent=agent,
                     initial_truth=world_truth_start[aid],
-                    world_truth_decision=dict(world_truth_start),
+                    # The step uses Jacobi-style immutable start-of-interval
+                    # truth. Share one mapping across inputs so process chunks
+                    # serialize it once rather than once per object.
+                    world_truth_decision=world_truth_start,
                     t_s=float(t_s),
                     t_next=float(t_next),
                     sample_index=int(sample_index),
@@ -1396,7 +1432,7 @@ class _SingleRunEngine:
         else:
             provider = self.general_propagation.get(aid)
             if provider is not None:
-                agent.truth = provider.state_at(item.t_next)
+                agent.truth = provider.canonical_state_at(item.t_next)
                 if agent.belief is not None and agent.belief.state.size >= 6:
                     agent.belief.state[:6] = np.hstack((agent.truth.position_eci_km, agent.truth.velocity_eci_km_s))
                     agent.belief.last_update_t_s = item.t_next
@@ -1457,6 +1493,13 @@ class _SingleRunEngine:
             self._refresh_agent_role_pointers(aid, result.updated_agent)
         agent = self.agents[aid]
         agent.truth = result.truth
+        for name, delta in result.attitude_guardrail_count_deltas.items():
+            if hasattr(self.attitude_guardrail_stats, name):
+                setattr(
+                    self.attitude_guardrail_stats,
+                    name,
+                    int(getattr(self.attitude_guardrail_stats, name)) + int(delta),
+                )
         if result.belief_state is not None:
             agent.belief = StateBelief(
                 state=np.array(result.belief_state, dtype=float),
@@ -1620,6 +1663,7 @@ class _SingleRunEngine:
             )
 
     def step(self, dt_s: float | None = None) -> dict[str, Any]:
+        activate_attitude_guardrail_stats(self.attitude_guardrail_stats)
         if not bool(getattr(self, "_acceleration_context_active", False)):
             with acceleration_context_from_config(self.cfg):
                 self._acceleration_context_active = True
@@ -1870,7 +1914,7 @@ class _SingleRunEngine:
                 object_propagation={
                     oid: asdict(provider.metadata()) for oid, provider in self.general_propagation.items()
                 },
-                attitude_guardrail_stats=get_attitude_guardrail_stats(),
+                attitude_guardrail_stats=get_attitude_guardrail_stats(self.attitude_guardrail_stats),
                 knowledge_detection_by_observer={
                     aid: agent.knowledge_base.detection_summary()
                     for aid, agent in self.agents.items()

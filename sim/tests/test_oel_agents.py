@@ -410,8 +410,9 @@ def test_public_agent_relative_state_shape_fails_validate_only(tmp_path: Path) -
     )
 
     assert proc.returncode == 1
-    assert "relative_to_target_ric.state" in proc.stdout
-    assert "length-6 finite numeric list" in proc.stdout
+    diagnostic = proc.stdout + proc.stderr
+    assert "relative_to_target_ric.state" in diagnostic
+    assert "length-6 finite numeric list" in diagnostic
 
 
 def test_public_agent_saved_review_query_cli_runs_query(tmp_path: Path) -> None:

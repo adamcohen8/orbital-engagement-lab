@@ -70,16 +70,32 @@ def tle_epoch_to_julian_date(epoch_text: str) -> float:
     return datetime_to_julian_date(dt)
 
 
-def _checksum_ok(line: str) -> bool:
-    if len(line) < 69 or not line[68].isdigit():
-        return False
+def tle_checksum_digit(line: str) -> int:
+    """Return the standard TLE checksum digit for columns 1 through 68."""
+
     total = 0
     for ch in line[:68]:
         if ch.isdigit():
             total += int(ch)
         elif ch == "-":
             total += 1
-    return total % 10 == int(line[68])
+    return total % 10
+
+
+def with_tle_checksum(line: str) -> str:
+    """Return a 69-column TLE line with a checksum matching its first 68 columns."""
+
+    text = str(line).rstrip("\r\n")
+    if len(text) < 68:
+        raise ValueError("TLE line must contain at least 68 columns before checksum generation.")
+    body = text[:68]
+    return f"{body}{tle_checksum_digit(body)}"
+
+
+def _checksum_ok(line: str) -> bool:
+    if len(line) < 69 or not line[68].isdigit():
+        return False
+    return tle_checksum_digit(line) == int(line[68])
 
 
 def _parse_tle_float(text: str, *, default: float = 0.0) -> float:
@@ -258,9 +274,9 @@ def tle_to_rv_eci_ogp(
     elements: TLEElements,
     *,
     target_jd_utc: float | None = None,
-    frame_transform: str = "teme_as_eci",
+    frame_transform: str = "teme_to_eci_iau80",
 ) -> tuple[np.ndarray, np.ndarray]:
-    transform = str(frame_transform or "teme_as_eci").strip().lower()
+    transform = str(frame_transform or "teme_to_eci_iau80").strip().lower()
     if transform not in {"teme_as_eci", "teme_to_eci_iau80"}:
         raise ValueError(
             "TLE OGP initialization supports initialization_frame_transform values "
@@ -288,7 +304,7 @@ def tle_block_to_rv_eci(
 ) -> tuple[np.ndarray, np.ndarray]:
     block = dict(tle_block or {})
     line1, line2 = _tle_lines_from_block(block)
-    elements = parse_tle_lines(line1, line2, require_checksum=bool(block.get("require_checksum", False)))
+    elements = parse_tle_lines(line1, line2, require_checksum=bool(block.get("require_checksum", True)))
     propagate = bool(block.get("propagate_to_initial_epoch", True))
     effective_jd = target_jd_utc if propagate else None
     model = _normalise_initialization_model(block.get("initialization_model"))
@@ -297,7 +313,9 @@ def tle_block_to_rv_eci(
     return tle_to_rv_eci_ogp(
         elements,
         target_jd_utc=effective_jd,
-        frame_transform=str(block.get("initialization_frame_transform", "teme_as_eci") or "teme_as_eci"),
+        frame_transform=str(
+            block.get("initialization_frame_transform", "teme_to_eci_iau80") or "teme_to_eci_iau80"
+        ),
     )
 
 
@@ -309,7 +327,7 @@ def tle_block_initialization_metadata(
 ) -> dict[str, Any]:
     block = dict(tle_block or {})
     line1, line2 = _tle_lines_from_block(block)
-    elements = parse_tle_lines(line1, line2, require_checksum=bool(block.get("require_checksum", False)))
+    elements = parse_tle_lines(line1, line2, require_checksum=bool(block.get("require_checksum", True)))
     propagate = bool(block.get("propagate_to_initial_epoch", True))
     effective_jd = float(target_jd_utc if propagate and target_jd_utc is not None else elements.epoch_jd_utc)
     model = _normalise_initialization_model(block.get("initialization_model"))
@@ -318,7 +336,10 @@ def tle_block_initialization_metadata(
 
         native_frame = "teme"
         frame_transform = (
-            str(block.get("initialization_frame_transform", "teme_as_eci") or "teme_as_eci").strip().lower()
+            str(
+                block.get("initialization_frame_transform", "teme_to_eci_iau80")
+                or "teme_to_eci_iau80"
+            ).strip().lower()
         )
         propagator_family = "OGP"
         propagator_name = ogp_propagator_name_for_elements(elements)

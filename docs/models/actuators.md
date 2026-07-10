@@ -66,7 +66,8 @@ Relevant config keys under `specs.actuators.orbital` include
 ## RCS Clusters
 
 RCS devices are configured under `orbital.rcs_cluster` with `thrusters`,
-`allocation_mode`, `pulse_quantum_s`, and `duty_cycle`. Each thruster has
+`allocation_mode`, `pulse_quantum_s`, `duty_cycle`, `force_weight`, and
+`torque_weight`. Each thruster has
 `name`, `position_body_m`, `force_direction_body`, `max_thrust_n`,
 `min_impulse_bit_n_s`, and `isp_s`.
 
@@ -79,8 +80,10 @@ A = [u_1 ... u_N]
 ```
 
 Depending on `allocation_mode`, the target is body force, body torque, or the
-stacked six-vector. The allocator solves a bounded nonnegative least-squares
-problem:
+stacked six-vector. The allocator uses `scipy.optimize.lsq_linear` to solve a
+bounded nonnegative least-squares problem. In combined mode, force rows are
+normalized by cluster force capacity and torque rows by cluster torque capacity
+before the optional force/torque weights are applied:
 
 ```text
 min ||A f - target|| subject to 0 <= f_i <= max_thrust_i
@@ -92,7 +95,8 @@ per-thruster `min_impulse_bit_n_s` drops pulses below the minimum impulse bit.
 RCS propellant use sums `f_i / (Isp_i g0)`.
 
 Diagnostics include `rcs_thruster_names`, `rcs_thruster_forces_n`,
-`rcs_force_body_n`, `rcs_torque_body_nm`, and `delta_mass_kg`.
+`rcs_force_body_n`, `rcs_torque_body_nm`, force/torque residual vectors, and
+`delta_mass_kg`.
 
 ## Electric Propulsion
 

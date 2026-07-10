@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 import numpy as np
+from scipy.optimize import lsq_linear
 
 from sim.core.interfaces import Actuator
 from sim.core.models import Command
@@ -107,6 +108,8 @@ class RcsClusterLimits:
     allocation_mode: Literal["force_torque", "torque_only", "force_only"] = "force_torque"
     pulse_quantum_s: float = 0.0
     duty_cycle: float = 1.0
+    force_weight: float = 1.0
+    torque_weight: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -356,7 +359,24 @@ class OrbitalActuator(Actuator):
             isps.append(float(thruster.isp_s))
             names.append(str(thruster.name))
         allocation = np.vstack((np.column_stack(force_dirs), np.column_stack(torque_dirs)))[rows, :]
-        forces = _bounded_nonnegative_lstsq(allocation, np.array(target, dtype=float).reshape(-1), np.array(max_forces))
+        solve_allocation = np.asarray(allocation, dtype=float)
+        solve_target = np.array(target, dtype=float).reshape(-1)
+        if cluster.allocation_mode == "force_torque":
+            force_scale = max(float(np.sum(max_forces)), 1e-12)
+            torque_capacity = sum(
+                max_force * float(np.linalg.norm(torque_axis))
+                for max_force, torque_axis in zip(max_forces, torque_dirs, strict=True)
+            )
+            torque_scale = max(float(torque_capacity), 1e-12)
+            row_scale = np.hstack(
+                (
+                    np.full(3, float(max(cluster.force_weight, 0.0)) / force_scale),
+                    np.full(3, float(max(cluster.torque_weight, 0.0)) / torque_scale),
+                )
+            )
+            solve_allocation = solve_allocation * row_scale[:, None]
+            solve_target = solve_target * row_scale
+        forces = _bounded_nonnegative_lstsq(solve_allocation, solve_target, np.array(max_forces))
         duty = float(np.clip(cluster.duty_cycle, 0.0, 1.0))
         forces *= duty
         if cluster.pulse_quantum_s > 0.0 and dt_s > 0.0:
@@ -381,6 +401,8 @@ class OrbitalActuator(Actuator):
         mode_flags["rcs_thruster_forces_n"] = forces.tolist()
         mode_flags["rcs_force_body_n"] = force_body_n.tolist()
         mode_flags["rcs_torque_body_nm"] = rcs_torque_body_nm.tolist()
+        mode_flags["rcs_force_residual_n"] = (desired_force_body_n - force_body_n).tolist()
+        mode_flags["rcs_torque_residual_nm"] = (desired_torque_body_nm - rcs_torque_body_nm).tolist()
         mode_flags["delta_mass_kg"] = float(mdot * max(dt_s, 0.0))
         return Command(thrust_eci_km_s2=accel_eci_km_s2, torque_body_nm=torque_body_nm, mode_flags=mode_flags)
 
@@ -421,23 +443,19 @@ def _bounded_nonnegative_lstsq(a: np.ndarray, b: np.ndarray, upper: np.ndarray) 
     matrix = np.array(a, dtype=float)
     target = np.array(b, dtype=float).reshape(matrix.shape[0])
     upper = np.array(upper, dtype=float).reshape(matrix.shape[1])
-    free = np.ones(matrix.shape[1], dtype=bool)
-    x = np.zeros(matrix.shape[1], dtype=float)
-    residual = target.copy()
-    for _ in range(matrix.shape[1] + 1):
-        if not np.any(free):
-            break
-        sol, *_ = np.linalg.lstsq(matrix[:, free], residual, rcond=None)
-        trial = np.zeros_like(x)
-        trial[free] = sol
-        too_low = trial < 0.0
-        too_high = trial > upper
-        if not np.any(too_low | too_high):
-            x[free] = trial[free]
-            break
-        newly_fixed = free & (too_low | too_high)
-        x[newly_fixed & too_low] = 0.0
-        x[newly_fixed & too_high] = upper[newly_fixed & too_high]
-        free[newly_fixed] = False
-        residual = target - matrix @ x
-    return np.clip(x, 0.0, upper)
+    if not (np.all(np.isfinite(matrix)) and np.all(np.isfinite(target)) and np.all(np.isfinite(upper))):
+        raise ValueError("RCS allocation inputs must be finite.")
+    if np.any(upper < 0.0):
+        raise ValueError("RCS allocation upper bounds must be nonnegative.")
+    result = lsq_linear(
+        matrix,
+        target,
+        bounds=(np.zeros(matrix.shape[1], dtype=float), upper),
+        method="trf",
+        tol=1e-12,
+        lsmr_tol=1e-12,
+        max_iter=max(100, 10 * matrix.shape[1]),
+    )
+    if not bool(result.success):
+        raise RuntimeError(f"RCS bounded least-squares allocation failed: {result.message}")
+    return np.clip(np.asarray(result.x, dtype=float), 0.0, upper)

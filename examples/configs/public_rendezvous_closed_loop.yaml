@@ -1,6 +1,7 @@
 scenario_name: public_rendezvous_closed_loop
-scenario_description: 'Public example: closed-loop rendezvous with orbit control,
-  attitude pointing, sensing, EKF knowledge, and standard plots.'
+scenario_description: 'Public example: end-to-end RPO artifact review with orbit control,
+  attitude pointing, sensing, EKF knowledge, and standard plots. Use public_closed_loop_rendezvous_lqr.yaml
+  for the compact terminal-closure rendezvous example.'
 metadata:
   owner: public
   public_surface: public-example
@@ -255,3 +256,6 @@ outputs:
   animations:
     enabled: false
     types: []
+  review:
+    enabled: true
+    detail: standard

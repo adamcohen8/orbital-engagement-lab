@@ -1,8 +1,10 @@
 scenario_name: public_agent_single_satellite
+scenario_description: 'Public agent example: five-minute passive two-body propagation
+  with zero control and review-store evidence.'
 metadata:
   owner: public-oel-agents
   notes: 'Minimal AI-agent-generated public scenario. Propagates one passive satellite
-    with two-body orbit dynamics and zero control.
+    for five minutes with two-body orbit dynamics and zero control.
 
     '
 objects:
@@ -41,7 +43,7 @@ objects:
       params: {}
     mission_objectives: []
 simulator:
-  duration_s: 60.0
+  duration_s: 300.0
   dt_s: 1.0
   dynamics:
     orbit:

@@ -42,6 +42,7 @@ class FrameContext:
     model: str = FRAME_MODEL_SIMPLE_GMST
     jd_utc_start: float | None = None
     eop_path: str | None = None
+    eop_extrapolation: str = "error"
     time_scale_model: str = "utc_only"
     tt_minus_utc_s: float = _DEFAULT_TT_MINUS_UTC_S
     dut1_s: float | None = None
@@ -56,6 +57,10 @@ class FrameContext:
         object.__setattr__(self, "model", normalize_frame_model(self.model))
         if self.eop_path in ("",):
             object.__setattr__(self, "eop_path", None)
+        policy = str(self.eop_extrapolation or "error").strip().lower()
+        if policy not in {"error", "hold"}:
+            raise ValueError("eop_extrapolation must be 'error' or 'hold'.")
+        object.__setattr__(self, "eop_extrapolation", policy)
 
     @property
     def legacy_frame_model(self) -> str:
@@ -84,11 +89,16 @@ class FrameContext:
         if self.jd_utc_start is None or self.model != FRAME_MODEL_IAU76_80_EOP or not self.eop_path:
             return self
         jd_utc = float(self.jd_utc_start) + float(t_s) / _DAYSEC
-        xp_arcsec, yp_arcsec, dut1_s, dat_s = _interp_eop(jd_utc - _MJD0, self.eop_path)
+        xp_arcsec, yp_arcsec, dut1_s, dat_s = _interp_eop(
+            jd_utc - _MJD0,
+            self.eop_path,
+            extrapolation=self.eop_extrapolation,
+        )
         return FrameContext(
             model=self.model,
             jd_utc_start=self.jd_utc_start,
             eop_path=self.eop_path,
+            eop_extrapolation=self.eop_extrapolation,
             time_scale_model="eop_utc_ut1_tt",
             tt_minus_utc_s=float(dat_s) + 32.184,
             dut1_s=float(dut1_s),
@@ -148,6 +158,7 @@ def frame_context_from_mapping(
         model=model,
         jd_utc_start=jd_utc_start,
         eop_path=eop_path,
+        eop_extrapolation=str(data.get("eop_extrapolation", "error") or "error"),
         time_scale_model=str(
             data.get(
                 "time_scale_model",
@@ -172,6 +183,7 @@ def frame_context_from_environment(env: dict[str, Any] | None) -> FrameContext:
     frames = {
         "model": model,
         "eop_path": eop_path,
+        "eop_extrapolation": data.get("eop_extrapolation", "error"),
         "tt_minus_utc_s": data.get("tt_minus_utc_s", _DEFAULT_TT_MINUS_UTC_S),
         "dut1_s": data.get("dut1_s"),
         "xp_arcsec": data.get("xp_arcsec"),
@@ -263,9 +275,23 @@ def _load_eop_table(eop_path: str) -> tuple[np.ndarray, np.ndarray, np.ndarray, 
     )
 
 
-def _interp_eop(mjd_utc: float, eop_path: str) -> tuple[float, float, float, float]:
+def _interp_eop(
+    mjd_utc: float,
+    eop_path: str,
+    *,
+    extrapolation: str = "error",
+) -> tuple[float, float, float, float]:
     mjd, xp_arcsec, yp_arcsec, dut1_s, dat_s = _load_eop_table(eop_path)
     x = float(mjd_utc)
+    policy = str(extrapolation or "error").strip().lower()
+    if policy not in {"error", "hold"}:
+        raise ValueError("EOP extrapolation policy must be 'error' or 'hold'.")
+    if (x < float(mjd[0]) or x > float(mjd[-1])) and policy == "error":
+        raise ValueError(
+            f"Requested MJD {x:.9f} is outside EOP coverage "
+            f"[{float(mjd[0]):.9f}, {float(mjd[-1]):.9f}] for {eop_path}. "
+            "Set eop_extrapolation='hold' only when endpoint holding is intentional."
+        )
     xp = float(np.interp(x, mjd, xp_arcsec))
     yp = float(np.interp(x, mjd, yp_arcsec))
     dut1 = float(np.interp(x, mjd, dut1_s))
@@ -457,19 +483,35 @@ def _short_nutation_1980_rad(jd_tt: float) -> tuple[float, float]:
     return float(dpsi_arcsec * _ARCSEC_TO_RAD), float(deps_arcsec * _ARCSEC_TO_RAD)
 
 
+def _precession_nutation_matrix_iau76_80(
+    jd_tt: float,
+    *,
+    ddpsi_rad: float = 0.0,
+    ddeps_rad: float = 0.0,
+) -> tuple[np.ndarray, float, float]:
+    dpsi, true_eps, mean_eps, _omega, _nut_vallado = _nutation_iau1980_vallado_matrix(
+        jd_tt,
+        ddpsi_rad=ddpsi_rad,
+        ddeps_rad=ddeps_rad,
+    )
+    precession = _precession_iau1976_matrix(jd_tt)
+    nutation = _rx(-true_eps) @ _rz(-dpsi) @ _rx(mean_eps)
+    return nutation @ precession, dpsi, true_eps
+
+
 def _precession_nutation_matrix_approx(
     jd_tt: float,
     *,
     ddpsi_rad: float = 0.0,
     ddeps_rad: float = 0.0,
 ) -> tuple[np.ndarray, float, float]:
-    eps = _mean_obliquity_iau1980_rad(jd_tt)
-    dpsi, deps = _short_nutation_1980_rad(jd_tt)
-    dpsi += float(ddpsi_rad)
-    deps += float(ddeps_rad)
-    precession = _precession_iau1976_matrix(jd_tt)
-    nutation = _rx(-(eps + deps)) @ _rz(-dpsi) @ _rx(eps)
-    return nutation @ precession, dpsi, eps + deps
+    """Compatibility alias for the full IAU-76/FK5 + IAU-80 reduction."""
+
+    return _precession_nutation_matrix_iau76_80(
+        jd_tt,
+        ddpsi_rad=ddpsi_rad,
+        ddeps_rad=ddeps_rad,
+    )
 
 
 def apparent_sidereal_time_hpop_like(
@@ -544,6 +586,7 @@ def eci_to_ecef_rotation_hpop_like(
     tt_minus_utc_s: float | None = None,
     ddpsi_rad: float = 0.0,
     ddeps_rad: float = 0.0,
+    eop_extrapolation: str = "error",
 ) -> np.ndarray:
     has_manual_eop = any(value is not None for value in (dut1_s, xp_arcsec, yp_arcsec, dat_s)) or (
         float(ddpsi_rad) != 0.0 or float(ddeps_rad) != 0.0
@@ -554,7 +597,11 @@ def eci_to_ecef_rotation_hpop_like(
     jd_utc = float(jd_utc_start) + float(t_s) / 86400.0
     if eop_path:
         mjd_utc = jd_utc - _MJD0
-        xp_arcsec, yp_arcsec, dut1_s, dat_s = _interp_eop(mjd_utc, eop_path)
+        xp_arcsec, yp_arcsec, dut1_s, dat_s = _interp_eop(
+            mjd_utc,
+            eop_path,
+            extrapolation=eop_extrapolation,
+        )
     else:
         xp_arcsec = 0.0 if xp_arcsec is None else float(xp_arcsec)
         yp_arcsec = 0.0 if yp_arcsec is None else float(yp_arcsec)
@@ -593,6 +640,7 @@ def eci_to_ecef_rotation_context(t_s: float, context: FrameContext) -> np.ndarra
             tt_minus_utc_s=ctx.tt_minus_utc_s,
             ddpsi_rad=ctx.ddpsi_rad,
             ddeps_rad=ctx.ddeps_rad,
+            eop_extrapolation=ctx.eop_extrapolation,
         )
     return eci_to_ecef_rotation(t_s, jd_utc_start=ctx.jd_utc_start)
 

@@ -10,6 +10,25 @@ YAML from sources you trust; plugin pointers can import Python modules.
 
 Use `SimulationWorkspace` when you want CLI-style workflows from Python.
 
+`SimulationWorkspace` and `SimulationSession` are trusted-local extension
+surfaces: plugin validation may import configured Python modules. Hosted or
+untrusted callers must use `HostedSimulationWorkspace` or
+`HostedSimulationSession`. Those facades enforce sealed mode and structural
+validation does not import plugin modules:
+
+```python
+from sim import HostedSimulationWorkspace
+
+workspace = HostedSimulationWorkspace(workspace_root="/srv/oel/workspace")
+report = workspace.validate(untrusted_config)
+if not report["ok"]:
+    raise ValueError(report["errors"])
+result = workspace.run(untrusted_config)
+```
+
+For a structural-only check in trusted local tooling, call
+`SimulationWorkspace.validate_safe(...)` before ordinary importing validation.
+
 ```python
 from sim import SimulationWorkspace
 

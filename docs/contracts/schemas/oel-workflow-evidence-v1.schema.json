@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orbitalengagementlab.com/schemas/oel-workflow-evidence-v1.schema.json",
+  "title": "OEL Workflow Evidence Envelope v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id", "schema_version", "workflow_id", "status", "disposition",
+    "generated_utc", "inputs", "quality_gates", "warnings", "failures",
+    "artifacts", "artifact_integrity", "provenance", "data_markings",
+    "non_claims", "domain_summary"
+  ],
+  "properties": {
+    "schema_id": {"const": "oel-workflow-evidence-v1"},
+    "schema_version": {"const": 1},
+    "workflow_id": {"type": "string", "minLength": 1},
+    "status": {"type": "string", "minLength": 1},
+    "disposition": {"type": "string", "minLength": 1},
+    "generated_utc": {"type": "string", "format": "date-time"},
+    "inputs": {"type": "array", "items": {"type": "object"}},
+    "quality_gates": {"type": "object"},
+    "warnings": {"type": "array", "items": {"type": "string"}},
+    "failures": {"type": "array", "items": {"type": "object"}},
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["artifact_id", "path", "media_type", "required", "exists", "sha256"],
+        "properties": {
+          "artifact_id": {"type": "string", "minLength": 1},
+          "path": {"type": "string", "minLength": 1},
+          "media_type": {"type": "string", "minLength": 1},
+          "required": {"type": "boolean"},
+          "exists": {"type": "boolean"},
+          "sha256": {"type": ["string", "null"], "pattern": "^[a-fA-F0-9]{64}$"}
+        }
+      }
+    },
+    "artifact_integrity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required_artifacts_present", "missing_required_artifact_ids"],
+      "properties": {
+        "required_artifacts_present": {"type": "boolean"},
+        "missing_required_artifact_ids": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "provenance": {"type": "object"},
+    "data_markings": {"type": "object"},
+    "non_claims": {"type": "array", "items": {"type": "string"}},
+    "domain_summary": {"type": "object"}
+  }
+}

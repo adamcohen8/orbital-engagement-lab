@@ -22,8 +22,8 @@ vehicle properties such as `mass_kg`, `drag_area_m2`, `srp_area_m2`, `cd`, and
   quantities, and ECEF conversions can be time dependent.
 - Environment assembly: `simulator.environment` forms the base runtime
   environment. The nested `atmosphere_env` dictionary is flattened into that
-  base, and `simulator.dynamics.orbit.atmosphere_model` may fill
-  `atmosphere_model` when no shared environment value is supplied.
+  base. Drag and lift require an explicit shared `atmosphere_model` or
+  `density_kg_m3`; OEL does not silently select an orbital atmosphere.
 - Earth constants: `sim/dynamics/orbit/environment.py` defines the central
   body gravitational parameter, equatorial radius, zonal coefficients, Earth
   rotation rate, solar pressure constants, and third-body gravitational
@@ -144,7 +144,7 @@ simulator:
     atmosphere_env: {}
 ```
 
-When no density override is supplied, the drag plugin calls
+When no density override is supplied, the explicitly selected drag model calls
 `density_from_model`. Supported model names include:
 
 - `exponential`
@@ -158,7 +158,8 @@ When no density override is supplied, the drag plugin calls
 
 `density_kg_m3` in the environment overrides model lookup for drag and
 re-entry calculations. The simple exponential model is a compact scale-height
-model and returns zero above 1000 km. The USSA-1976 path uses standard
+model and returns zero above 1000 km. It is a pedagogical scale-height fixture,
+not an LEO lifetime or decay model. The USSA-1976 path uses standard
 atmosphere layers through 86 km and log-space interpolation to 1000 km. The
 other atmosphere paths are source-local or callable-backed engineering models
 with solar/geomagnetic inputs supplied through `atmosphere_env`.

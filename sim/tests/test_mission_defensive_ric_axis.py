@@ -6,6 +6,7 @@ from sim.core.models import StateBelief, StateTruth
 from sim.mission.modules import (
     DefensiveMissionStrategy,
     DefensiveRICAxisBurnMissionModule,
+    MultiRICAxisBurnMissionModule,
     SingleRICAxisBurnMissionModule,
 )
 
@@ -140,6 +141,43 @@ class DefensiveRICAxisMissionTests(unittest.TestCase):
         self.assertEqual(out["mission_mode"]["phase"], "slew")
         self.assertTrue(bool(out["mission_mode"]["slew_active"]))
         self.assertEqual(np.array(out["desired_attitude_quat_bn"], dtype=float).shape, (4,))
+
+    def test_multi_axis_burn_module_combines_ric_components(self) -> None:
+        m = MultiRICAxisBurnMissionModule(
+            burns=[
+                {"axis_mode": "+R", "target_delta_v_m_s": 1.0},
+                {"axis_mode": "+C", "target_delta_v_m_s": 0.25},
+            ],
+            burn_start_s=0.0,
+            burn_duration_s=10.0,
+        )
+        out = m.update(truth=_truth(), own_knowledge={}, t_s=0.0, dt_s=1.0)
+        thrust = np.array(out["thrust_eci_km_s2"], dtype=float)
+        self.assertTrue(out["mission_use_integrated_command"])
+        self.assertAlmostEqual(float(thrust[0]), 1.0e-4, places=12)
+        self.assertAlmostEqual(float(thrust[1]), 0.0, places=12)
+        self.assertAlmostEqual(float(thrust[2]), 2.5e-5, places=12)
+        self.assertAlmostEqual(float(out["mission_mode"]["target_delta_v_m_s"]), float(np.hypot(1.0, 0.25)))
+        self.assertTrue(bool(out["mission_mode"]["burn_active"]))
+
+    def test_multi_axis_burn_module_coasts_outside_window(self) -> None:
+        m = MultiRICAxisBurnMissionModule(
+            burns=[{"axis_mode": "-I", "target_delta_v_m_s": 2.0}],
+            burn_start_s=5.0,
+            burn_duration_s=10.0,
+        )
+        out = m.update(truth=_truth(), own_knowledge={}, t_s=20.0, dt_s=1.0)
+        thrust = np.array(out["thrust_eci_km_s2"], dtype=float)
+        self.assertTrue(np.allclose(thrust, np.zeros(3), atol=1e-15))
+        self.assertFalse(bool(out["mission_mode"]["burn_active"]))
+
+    def test_multi_axis_burn_module_rejects_bad_burns(self) -> None:
+        with self.assertRaises(ValueError):
+            MultiRICAxisBurnMissionModule(burns=[])
+        with self.assertRaises(ValueError):
+            MultiRICAxisBurnMissionModule(burns=[{"axis_mode": "+Q", "target_delta_v_m_s": 1.0}])
+        with self.assertRaises(ValueError):
+            MultiRICAxisBurnMissionModule(burns=[{"axis_mode": "+R", "target_delta_v_m_s": -1.0}])
 
     def test_single_burn_module_coasts_after_window(self) -> None:
         m = SingleRICAxisBurnMissionModule(

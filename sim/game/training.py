@@ -96,6 +96,42 @@ class ForbiddenRegionConfig:
         upper = np.array(self.max_ric_km, dtype=float).reshape(1, 3)
         return np.all((pos[:, :3] >= lower) & (pos[:, :3] <= upper), axis=1)
 
+    def intersects_segment(self, start_ric_km: np.ndarray, end_ric_km: np.ndarray) -> bool:
+        """Return whether a straight sample-to-sample segment enters the region."""
+
+        start = np.asarray(start_ric_km, dtype=float).reshape(3)
+        end = np.asarray(end_ric_km, dtype=float).reshape(3)
+        if not np.all(np.isfinite(start)) or not np.all(np.isfinite(end)):
+            return False
+        if bool(np.any(self.contains_positions(np.vstack((start, end))))):
+            return True
+        if self.kind == "sphere":
+            if self.radius_km is None:
+                return False
+            center = np.asarray(self.center_ric_km, dtype=float).reshape(3)
+            return _position_segment_sphere_interval(
+                start - center,
+                end - center,
+                radius_km=float(self.radius_km),
+            ) is not None
+        if self.kind == "cylinder":
+            return _position_segment_intersects_cylinder(
+                start,
+                end,
+                center=np.asarray(self.center_ric_km, dtype=float).reshape(3),
+                axis=_axis_index(self.axis),
+                radius_km=self.radius_km,
+                height_km=self.height_km,
+            )
+        if self.kind == "annular_sector":
+            return _position_segment_intersects_annular_sector(start, end, region=self)
+        return _position_segment_intersects_bounds(
+            start,
+            end,
+            lower=np.asarray(self.min_ric_km, dtype=float).reshape(3),
+            upper=np.asarray(self.max_ric_km, dtype=float).reshape(3),
+        )
+
     def sector_polygon_ric(self, *, samples: int = 64) -> np.ndarray:
         if self.kind != "annular_sector" or self.inner_radius_km is None or self.outer_radius_km is None:
             return np.zeros((0, 3), dtype=float)
@@ -601,6 +637,7 @@ class RPOTrainingTracker:
         self._inspection_gate_names: list[str] = []
         self._inspection_gate_completed_idx: int | None = None
         self._hard_speed_limit_violation = False
+        self._forbidden_region_names: set[str] = set()
         self._burn_axis_first_indices: dict[str, int] = {}
         self._phase_burn_first_indices: dict[str, int] = {}
         self._guided_tutorial_burn_names: list[str] = []
@@ -636,6 +673,7 @@ class RPOTrainingTracker:
         self._inspection_gate_names.clear()
         self._inspection_gate_completed_idx = None
         self._hard_speed_limit_violation = False
+        self._forbidden_region_names.clear()
         self._burn_axis_first_indices.clear()
         self._phase_burn_first_indices.clear()
         if reset_guided_tutorial_progress:
@@ -724,6 +762,7 @@ class RPOTrainingTracker:
         )
         self._record_burn_requirement_sample(rel, self.thrust_ric_hist[-1])
         self._record_hard_speed_limit_sample(rel)
+        self._record_forbidden_region_sample(rel)
         self._record_sun_angle_sample(rel, target_arr, float(snapshot.time_s))
         self._record_inspection_gate_sample(rel, target_arr, float(snapshot.time_s))
         self._score_cache = None
@@ -798,6 +837,19 @@ class RPOTrainingTracker:
             radius_km=float(self.config.hard_speed_limit_radius_km),
             speed_limit_km_s=float(self.config.hard_speed_limit_km_s),
         )
+
+    def _record_forbidden_region_sample(self, rel: np.ndarray) -> None:
+        if len(self._forbidden_region_names) >= len(self.config.forbidden_regions):
+            return
+        current = np.asarray(rel, dtype=float).reshape(6)[:3]
+        previous = self.rel_ric_hist[-2][:3] if len(self.rel_ric_hist) >= 2 else None
+        for region in self.config.forbidden_regions:
+            if region.name in self._forbidden_region_names:
+                continue
+            current_inside = bool(region.contains_positions(current)[0])
+            segment_crossing = bool(previous is not None and region.intersects_segment(previous, current))
+            if current_inside or segment_crossing:
+                self._forbidden_region_names.add(region.name)
 
     def _append_history_arrays(
         self,
@@ -1384,10 +1436,20 @@ class RPOTrainingTracker:
         hard_speed_limit_violation = False
         if self.config.hard_speed_limit_radius_km is not None and self.config.hard_speed_limit_km_s is not None:
             hard_speed_limit_violation = bool(self._hard_speed_limit_violation)
-        forbidden_region_names: list[str] = []
-        for region in self.config.forbidden_regions:
-            if bool(np.any(region.contains_positions(rel[:, :3]))):
-                forbidden_region_names.append(region.name)
+        if self._history_arrays_available():
+            forbidden_region_names = [
+                region.name for region in self.config.forbidden_regions if region.name in self._forbidden_region_names
+            ]
+        else:
+            forbidden_region_names = []
+            for region in self.config.forbidden_regions:
+                sampled_inside = bool(np.any(region.contains_positions(rel[:, :3])))
+                segment_crossing = any(
+                    region.intersects_segment(rel[idx - 1, :3], rel[idx, :3])
+                    for idx in range(1, rel.shape[0])
+                )
+                if sampled_inside or segment_crossing:
+                    forbidden_region_names.append(region.name)
         forbidden_region_violation = bool(forbidden_region_names)
         sun_angle_constraint_names: list[str] = []
         sun_angle_all_ok = np.ones(rel.shape[0], dtype=bool)
@@ -2401,6 +2463,133 @@ def _position_segment_intersects_box(
     return True
 
 
+def _position_segment_intersects_bounds(
+    start_ric_km: np.ndarray,
+    end_ric_km: np.ndarray,
+    *,
+    lower: np.ndarray,
+    upper: np.ndarray,
+) -> bool:
+    start = np.asarray(start_ric_km, dtype=float).reshape(3)
+    end = np.asarray(end_ric_km, dtype=float).reshape(3)
+    lo = np.asarray(lower, dtype=float).reshape(3)
+    hi = np.asarray(upper, dtype=float).reshape(3)
+    delta = end - start
+    t_min = 0.0
+    t_max = 1.0
+    for axis in range(3):
+        if abs(float(delta[axis])) <= 1.0e-12:
+            if start[axis] < lo[axis] or start[axis] > hi[axis]:
+                return False
+            continue
+        if np.isfinite(lo[axis]):
+            t_min = max(t_min, float((lo[axis] - start[axis]) / delta[axis])) if delta[axis] > 0 else t_min
+            t_max = min(t_max, float((lo[axis] - start[axis]) / delta[axis])) if delta[axis] < 0 else t_max
+        if np.isfinite(hi[axis]):
+            t_max = min(t_max, float((hi[axis] - start[axis]) / delta[axis])) if delta[axis] > 0 else t_max
+            t_min = max(t_min, float((hi[axis] - start[axis]) / delta[axis])) if delta[axis] < 0 else t_min
+        if t_min > t_max:
+            return False
+    return t_max >= 0.0 and t_min <= 1.0
+
+
+def _position_segment_intersects_cylinder(
+    start_ric_km: np.ndarray,
+    end_ric_km: np.ndarray,
+    *,
+    center: np.ndarray,
+    axis: int,
+    radius_km: float | None,
+    height_km: float | None,
+) -> bool:
+    if radius_km is None or height_km is None:
+        return False
+    start = np.asarray(start_ric_km, dtype=float).reshape(3) - np.asarray(center, dtype=float).reshape(3)
+    end = np.asarray(end_ric_km, dtype=float).reshape(3) - np.asarray(center, dtype=float).reshape(3)
+    delta = end - start
+    half_height = max(float(height_km), 0.0) / 2.0
+    axial = _linear_interval_in_bounds(float(start[axis]), float(delta[axis]), -half_height, half_height)
+    if axial is None:
+        return False
+    cross_axes = tuple(idx for idx in range(3) if idx != int(axis))
+    p = start[list(cross_axes)]
+    d = delta[list(cross_axes)]
+    radial = _quadratic_radius_interval(p, d, max(float(radius_km), 0.0))
+    if radial is None:
+        return False
+    return max(axial[0], radial[0], 0.0) <= min(axial[1], radial[1], 1.0)
+
+
+def _position_segment_intersects_annular_sector(
+    start_ric_km: np.ndarray,
+    end_ric_km: np.ndarray,
+    *,
+    region: ForbiddenRegionConfig,
+) -> bool:
+    if region.inner_radius_km is None or region.outer_radius_km is None:
+        return False
+    start = np.asarray(start_ric_km, dtype=float).reshape(3)
+    end = np.asarray(end_ric_km, dtype=float).reshape(3)
+    delta = end - start
+    x_axis, y_axis, out_axis = _plane_axes(region.plane)
+    center = np.asarray(region.center_ric_km, dtype=float).reshape(3)
+    p = (start - center)[[x_axis, y_axis]]
+    d = delta[[x_axis, y_axis]]
+    candidates = {0.0, 1.0}
+    for radius in (float(region.inner_radius_km), float(region.outer_radius_km)):
+        candidates.update(_quadratic_boundary_roots(p, d, max(radius, 0.0)))
+    if region.max_abs_out_of_plane_km is not None:
+        limit = max(float(region.max_abs_out_of_plane_km), 0.0)
+        p_out = float(start[out_axis] - center[out_axis])
+        d_out = float(delta[out_axis])
+        if abs(d_out) > 1.0e-12:
+            candidates.update(((limit - p_out) / d_out, (-limit - p_out) / d_out))
+    if region.angle_min_deg is not None or region.angle_max_deg is not None:
+        start_deg = 0.0 if region.angle_min_deg is None else float(region.angle_min_deg)
+        end_deg = 360.0 if region.angle_max_deg is None else float(region.angle_max_deg)
+        for angle_deg in (start_deg, end_deg):
+            ray = np.array([np.cos(np.deg2rad(angle_deg)), np.sin(np.deg2rad(angle_deg))], dtype=float)
+            denom = float(d[0] * ray[1] - d[1] * ray[0])
+            if abs(denom) > 1.0e-12:
+                candidates.add(float((p[1] * ray[0] - p[0] * ray[1]) / denom))
+    ordered = sorted(float(value) for value in candidates if np.isfinite(value) and -1.0e-12 <= value <= 1.0 + 1.0e-12)
+    probes = ordered + [(left + right) / 2.0 for left, right in zip(ordered, ordered[1:], strict=False)]
+    points = np.vstack([start + np.clip(value, 0.0, 1.0) * delta for value in probes])
+    return bool(np.any(region.contains_positions(points)))
+
+
+def _linear_interval_in_bounds(value: float, delta: float, lower: float, upper: float) -> tuple[float, float] | None:
+    if abs(delta) <= 1.0e-12:
+        return (0.0, 1.0) if lower <= value <= upper else None
+    t0 = (lower - value) / delta
+    t1 = (upper - value) / delta
+    return (min(t0, t1), max(t0, t1))
+
+
+def _quadratic_boundary_roots(position: np.ndarray, delta: np.ndarray, radius: float) -> tuple[float, ...]:
+    a = float(np.dot(delta, delta))
+    b = 2.0 * float(np.dot(position, delta))
+    c = float(np.dot(position, position) - radius * radius)
+    if a <= 1.0e-18:
+        return ()
+    discriminant = b * b - 4.0 * a * c
+    if discriminant < 0.0:
+        return ()
+    root = float(np.sqrt(max(discriminant, 0.0)))
+    return ((-b - root) / (2.0 * a), (-b + root) / (2.0 * a))
+
+
+def _quadratic_radius_interval(
+    position: np.ndarray,
+    delta: np.ndarray,
+    radius: float,
+) -> tuple[float, float] | None:
+    roots = _quadratic_boundary_roots(position, delta, radius)
+    if roots:
+        return (min(roots), max(roots))
+    return (0.0, 1.0) if float(np.linalg.norm(position)) <= radius else None
+
+
 def _hard_speed_limit_violated(relative_ric_state: np.ndarray, *, radius_km: float, speed_limit_km_s: float) -> bool:
     rel = np.array(relative_ric_state, dtype=float)
     if rel.ndim == 1:
@@ -2624,7 +2813,8 @@ def _integrated_delta_v_m_s(thrust_km_s2: np.ndarray, time_s: np.ndarray) -> flo
     n = min(thrust.shape[0], t.size)
     if n < 2:
         return 0.0
-    accel = np.linalg.norm(thrust[: n - 1, :], axis=1)
+    # Snapshot i reports the command applied during the interval ending at t[i].
+    accel = np.linalg.norm(thrust[1:n, :], axis=1)
     dt = np.diff(t[:n])
     valid = np.isfinite(accel) & np.isfinite(dt) & (dt > 0.0)
     if not np.any(valid):

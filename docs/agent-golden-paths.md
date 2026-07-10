@@ -36,7 +36,7 @@ the same workflow.
 
 ## Minimal Propagation
 
-Study goal: propagate one passive satellite for a short duration with simple
+Study goal: propagate one passive satellite for five minutes with simple
 two-body dynamics and zero-control baselines.
 
 Validate and run:

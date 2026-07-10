@@ -70,6 +70,7 @@ from sim.dynamics.orbit.frames import (
     transform_position,
     transform_state,
 )
+from sim.dynamics.orbit.lambert import LambertSolution, solve_lambert_universal_variable
 from sim.dynamics.orbit.ogp import (
     OGP_DEEP_SPACE_PERIOD_THRESHOLD_MIN,
     ogp_propagate_teme,
@@ -157,6 +158,8 @@ __all__ = [
     "teme_to_eci_matrix_vallado_iau80",
     "teme_to_eci_vallado_iau80",
     "OGP_DEEP_SPACE_PERIOD_THRESHOLD_MIN",
+    "LambertSolution",
+    "solve_lambert_universal_variable",
     "ogp_propagate_teme",
     "ogp_propagate_teme_batch_accelerated",
     "ogp_propagate_teme_batch_reference",

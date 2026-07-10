@@ -22,8 +22,8 @@ from sim.dynamics.orbit.sgp4 import (
 )
 from sim.dynamics.orbit.tle import parse_tle_lines, tle_block_to_rv_eci, tle_to_rv_eci, tle_to_rv_eci_ogp
 
-ISS_LINE1 = "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9005"
-ISS_LINE2 = "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1000"
+ISS_LINE1 = "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9003"
+ISS_LINE2 = "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1004"
 DEEP_SPACE_LINE1 = "1 90003U 24003A   24001.00000000  .00000000  00000+0  00000+0 0    10"
 DEEP_SPACE_LINE2 = "2 90003  10.0000  20.0000 0100000  30.0000  40.0000  4.00000000    10"
 
@@ -59,6 +59,22 @@ def _tle_config(*, initial_jd_utc: float | None = None) -> dict:
             "animations": {"enabled": False, "types": []},
         },
     }
+
+
+def test_general_provider_records_and_warns_on_tle_age_threshold() -> None:
+    elements = parse_tle_lines(ISS_LINE1, ISS_LINE2, require_checksum=True)
+    with pytest.warns(RuntimeWarning, match="TLE age"):
+        provider = SGP4EphemerisProvider.from_tle_block(
+            {"line1": ISS_LINE1, "line2": ISS_LINE2},
+            mass_kg=100.0,
+            start_jd_utc=elements.epoch_jd_utc + 5.0,
+            duration_s=86400.0,
+            max_tle_age_days_warning=1.0,
+        )
+
+    metadata = provider.metadata()
+    assert metadata.tle_age_warning is True
+    assert metadata.max_tle_age_days_warning == 1.0
 
 
 def _sgp4_config(
@@ -409,7 +425,7 @@ def test_general_sgp4_object_samples_truth_history() -> None:
         mass_kg=420.0,
         start_jd_utc=elements.epoch_jd_utc,
         duration_s=1.0,
-    ).state_at(0.0)
+    ).canonical_state_at(0.0)
 
     np.testing.assert_allclose(truth0[0:3], expected0.position_eci_km, rtol=0.0, atol=1e-9)
     np.testing.assert_allclose(truth0[3:6], expected0.velocity_eci_km_s, rtol=0.0, atol=1e-12)
@@ -507,7 +523,7 @@ def test_general_sgp4_teme_object_records_state_frame_metadata() -> None:
 
     assert result.payload["object_propagation"]["target"]["output_frame"] == "teme"
     assert result.payload["object_propagation"]["target"]["frame_transform"] == "native"
-    assert result.payload["object_state_frames"]["target"] == "teme"
+    assert result.payload["object_state_frames"]["target"] == "eci"
 
 
 def test_general_sgp4_vallado_iau80_eci_object_records_state_frame_metadata() -> None:

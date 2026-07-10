@@ -420,6 +420,7 @@ simulator:
   environment:
     ephemeris_mode: analytic_simple
     use_spice: false
+    atmosphere_model: ussa1976
     atmosphere_env: {}
   plugin_validation:
     strict: true
