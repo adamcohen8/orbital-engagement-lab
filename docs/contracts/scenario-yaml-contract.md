@@ -172,12 +172,14 @@ visible to truth/knowledge/history, but its mission and controllers cannot
 command thrust or torque.
 
 The `tle` form accepts either `line1`/`line2` or `lines: [line1, line2]`.
-Optional `tle.require_checksum: true` enables TLE checksum validation.
+TLE checksum validation is enabled by default; set `tle.require_checksum: false`
+only for explicitly identified synthetic fixtures.
 Optional `tle.propagate_to_initial_epoch: false` keeps the state at the TLE
 epoch instead of advancing mean anomaly to `simulator.initial_jd_utc`.
-The TLE initializer converts mean elements to an ECI state with a two-body
-Keplerian approximation. Subsequent propagation uses the configured OEL
-numerical special-perturbations force model; OGP-SGP4/general-perturbations
+The default TLE initializer samples OGP-SGP4/SDP4 and applies the configured
+TEME-to-ECI initialization transform. The legacy two-body mean-element
+initializer requires an explicit opt-in. Subsequent propagation uses the configured OEL
+numerical special-perturbations force model; continuous OGP general-perturbations
 propagation requires object-level `propagation_method: general` with
 `general.model: sgp4`.
 

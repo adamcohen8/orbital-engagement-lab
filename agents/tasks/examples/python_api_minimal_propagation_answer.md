@@ -32,7 +32,7 @@ Outputs inspected:
 Evidence:
 
 - The run metadata identifies `public_agent_python_api_minimal_propagation`,
-  `duration_s = 120.0`, and `samples = 13`.
+  `duration_s = 300.0`, and `samples = 31`.
 - The first `object_state` row records the requested ECI initial state:
   position `[7000, 0, 0]` km and velocity `[0, 7.5, 0]` km/s.
 - The output index reports nominal completion, no plots, and no animations.

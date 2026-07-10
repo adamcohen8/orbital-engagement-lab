@@ -96,7 +96,10 @@ def test_validate_scenario_rejects_zero_absolute_eci_position() -> None:
             "target": {
                 "enabled": True,
                 "specs": {"mass_kg": 100.0},
-                "initial_state": {"position_eci_km": [0.0, 0.0, 0.0]},
+                "initial_state": {
+                    "position_eci_km": [0.0, 0.0, 0.0],
+                    "velocity_eci_km_s": [0.0, 0.0, 0.0],
+                },
             },
             "chaser": {"enabled": False},
             "simulator": {"duration_s": 1.0, "dt_s": 1.0},
@@ -475,7 +478,12 @@ def test_engine_timing_contract_does_not_expose_world_truth_to_agents(tmp_path: 
             "outputs": {
                 "output_dir": str(tmp_path),
                 "mode": "save",
-                "stats": {"print_summary": False, "save_json": False, "save_full_log": False},
+                "stats": {
+                    "print_summary": False,
+                    "save_json": False,
+                    "save_full_log": False,
+                    "controller_debug": True,
+                },
                 "plots": {"enabled": False, "figure_ids": []},
                 "animations": {"enabled": False, "types": []},
             },
@@ -524,7 +532,12 @@ def test_external_intent_provider_does_not_receive_world_truth(tmp_path: Path) -
             "outputs": {
                 "output_dir": str(tmp_path),
                 "mode": "save",
-                "stats": {"print_summary": False, "save_json": False, "save_full_log": False},
+                "stats": {
+                    "print_summary": False,
+                    "save_json": False,
+                    "save_full_log": False,
+                    "controller_debug": True,
+                },
                 "plots": {"enabled": False, "figure_ids": []},
                 "animations": {"enabled": False, "types": []},
             },
@@ -578,10 +591,15 @@ def test_engine_timing_contract_estimates_after_inner_step_propagation(tmp_path:
                     "attitude": {"enabled": True, "attitude_substep_s": 0.25},
                 },
             },
-            "outputs": {
-                "output_dir": str(tmp_path),
-                "mode": "save",
-                "stats": {"print_summary": False, "save_json": False, "save_full_log": False},
+                "outputs": {
+                    "output_dir": str(tmp_path),
+                    "mode": "save",
+                    "stats": {
+                        "print_summary": False,
+                        "save_json": False,
+                        "save_full_log": False,
+                        "controller_debug": True,
+                    },
                 "plots": {"enabled": False, "figure_ids": []},
                 "animations": {"enabled": False, "types": []},
             },

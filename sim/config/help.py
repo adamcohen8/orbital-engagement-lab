@@ -334,7 +334,7 @@ CONFIG_HELP_ENTRIES: tuple[ConfigHelpEntry, ...] = (
             "      wind_enu_m_s: [0.0, 5.0, 0.0]"
         ),
         notes=(
-            "See configs/controller_bench_rocket_case_wind.yaml for a maintained mild-crosswind example.",
+            "See configs/rocket_tvc_tracking_smoke.yaml for a maintained mild-crosswind example.",
             "For drag-sensitive orbital studies, use atmosphere_env and the documented atmosphere models instead.",
         ),
     ),

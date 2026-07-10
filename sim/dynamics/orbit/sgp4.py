@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import warnings
 from dataclasses import dataclass
 
 import numpy as np
@@ -57,10 +58,13 @@ class SGP4PropagationMetadata:
     general_model: str
     native_frame: str
     output_frame: str
+    state_history_frame: str
     frame_transform: str
     tle_epoch_jd_utc: float
     tle_age_start_days: float
     tle_age_end_days: float
+    max_tle_age_days_warning: float | None
+    tle_age_warning: bool
 
 
 @dataclass(frozen=True)
@@ -69,18 +73,38 @@ class SGP4EphemerisProvider:
     mass_kg: float
     start_jd_utc: float
     duration_s: float
-    output_frame: str = "eci"
-    frame_transform: str = "teme_as_eci"
+    output_frame: str = "teme"
+    frame_transform: str = "native"
     attitude_quat_bn: np.ndarray | None = None
     angular_rate_body_rad_s: np.ndarray | None = None
+    max_tle_age_days_warning: float | None = None
 
     def __post_init__(self) -> None:
-        frame = str(self.output_frame or "eci").strip().lower()
+        frame = str(self.output_frame or "teme").strip().lower()
         transform = str(self.frame_transform or "").strip().lower()
         if frame == "teme" and not transform:
             object.__setattr__(self, "frame_transform", "native")
         if frame == "eci" and not transform:
-            object.__setattr__(self, "frame_transform", "teme_as_eci")
+            object.__setattr__(self, "frame_transform", "teme_to_eci_iau80")
+        threshold = self.max_tle_age_days_warning
+        if threshold is not None:
+            threshold = float(threshold)
+            if not math.isfinite(threshold) or threshold < 0.0:
+                raise ValueError("max_tle_age_days_warning must be a nonnegative finite number.")
+            object.__setattr__(self, "max_tle_age_days_warning", threshold)
+            start_age = abs(float(self.start_jd_utc) - float(self.elements.epoch_jd_utc))
+            end_age = abs(
+                float(self.start_jd_utc)
+                + float(self.duration_s) / 86400.0
+                - float(self.elements.epoch_jd_utc)
+            )
+            if max(start_age, end_age) > threshold:
+                warnings.warn(
+                    f"TLE age reaches {max(start_age, end_age):.6g} days, exceeding "
+                    f"max_tle_age_days_warning={threshold:.6g}.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
 
     @classmethod
     def from_tle_block(
@@ -90,10 +114,11 @@ class SGP4EphemerisProvider:
         mass_kg: float,
         start_jd_utc: float | None,
         duration_s: float,
-        output_frame: str = "eci",
+        output_frame: str = "teme",
         frame_transform: str | None = None,
         attitude_quat_bn: np.ndarray | None = None,
         angular_rate_body_rad_s: np.ndarray | None = None,
+        max_tle_age_days_warning: float | None = None,
     ) -> SGP4EphemerisProvider:
         block = dict(tle_block or {})
         lines = block.get("lines")
@@ -103,16 +128,16 @@ class SGP4EphemerisProvider:
         else:
             line1 = str(block.get("line1", "") or "")
             line2 = str(block.get("line2", "") or "")
-        elements = parse_tle_lines(line1, line2, require_checksum=bool(block.get("require_checksum", False)))
+        elements = parse_tle_lines(line1, line2, require_checksum=bool(block.get("require_checksum", True)))
         if float(elements.mean_motion_rev_per_day) <= 0.0:
             raise ValueError("OGP mean motion must be positive.")
         if float(elements.eccentricity) < 0.0 or float(elements.eccentricity) >= 1.0:
             raise ValueError("OGP eccentricity must be in [0, 1).")
         resolved_start = float(elements.epoch_jd_utc if start_jd_utc is None else start_jd_utc)
-        resolved_output_frame = str(output_frame or "eci").strip().lower()
+        resolved_output_frame = str(output_frame or "teme").strip().lower()
         resolved_frame_transform = str(frame_transform or "").strip().lower()
         if not resolved_frame_transform:
-            resolved_frame_transform = "native" if resolved_output_frame == "teme" else "teme_as_eci"
+            resolved_frame_transform = "native" if resolved_output_frame == "teme" else "teme_to_eci_iau80"
         return cls(
             elements=elements,
             mass_kg=float(mass_kg),
@@ -122,9 +147,18 @@ class SGP4EphemerisProvider:
             frame_transform=resolved_frame_transform,
             attitude_quat_bn=attitude_quat_bn,
             angular_rate_body_rad_s=angular_rate_body_rad_s,
+            max_tle_age_days_warning=max_tle_age_days_warning,
         )
 
     def state_at(self, t_s: float) -> StateTruth:
+        return self._state_at(t_s, output_frame=self.output_frame, frame_transform=self.frame_transform)
+
+    def canonical_state_at(self, t_s: float) -> StateTruth:
+        """Return the engine's canonical ECI truth state regardless of product frame."""
+
+        return self._state_at(t_s, output_frame="eci", frame_transform="teme_to_eci_iau80")
+
+    def _state_at(self, t_s: float, *, output_frame: str, frame_transform: str) -> StateTruth:
         t_s = float(t_s)
         jd_utc = float(self.start_jd_utc) + t_s / 86400.0
         tsince_min = (float(self.start_jd_utc) - float(self.elements.epoch_jd_utc)) * 1440.0 + t_s / 60.0
@@ -140,8 +174,8 @@ class SGP4EphemerisProvider:
             native.position_teme_km,
             native.velocity_teme_km_s,
             jd_utc=jd_utc,
-            output_frame=self.output_frame,
-            frame_transform=self.frame_transform,
+            output_frame=output_frame,
+            frame_transform=frame_transform,
         )
         return StateTruth(
             position_eci_km=np.array(pos, dtype=float),
@@ -175,10 +209,16 @@ class SGP4EphemerisProvider:
             general_model="sgp4",
             native_frame="teme",
             output_frame=self.output_frame,
+            state_history_frame="eci",
             frame_transform=self.frame_transform,
             tle_epoch_jd_utc=float(self.elements.epoch_jd_utc),
             tle_age_start_days=float(start_age),
             tle_age_end_days=float(end_age),
+            max_tle_age_days_warning=self.max_tle_age_days_warning,
+            tle_age_warning=bool(
+                self.max_tle_age_days_warning is not None
+                and max(abs(start_age), abs(end_age)) > float(self.max_tle_age_days_warning)
+            ),
         )
 
 
@@ -851,16 +891,16 @@ def transform_teme_to_output_frame(
     velocity_teme_km_s: np.ndarray,
     *,
     jd_utc: float,
-    output_frame: str = "eci",
-    frame_transform: str = "teme_as_eci",
+    output_frame: str = "teme",
+    frame_transform: str = "native",
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return the v1 OEL output-frame view of a propagated TEME state.
 
     v1 supports native TEME output, the legacy transparent TEME-as-ECI
     approximation, and an explicit Vallado IAU-80 TEME-to-ECI reduction.
     """
-    frame = str(output_frame or "eci").strip().lower()
-    transform = str(frame_transform or ("native" if frame == "teme" else "teme_as_eci")).strip().lower()
+    frame = str(output_frame or "teme").strip().lower()
+    transform = str(frame_transform or ("native" if frame == "teme" else "teme_to_eci_iau80")).strip().lower()
     if frame == "teme":
         if transform not in {"native", "none", "identity", "teme"}:
             raise ValueError("SGP4 output_frame='teme' requires frame_transform='native'.")

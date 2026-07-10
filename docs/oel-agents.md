@@ -342,8 +342,8 @@ exposure.
 
 ## Agent Example Cookbook
 
-The `agents/examples/` configs are short, headless smoke scenarios designed for
-agent-assisted creation, testing, and evaluation. Use them as scaffolds and
+The `agents/examples/` configs are compact, headless evidence scenarios designed
+for agent-assisted creation, testing, and evaluation. Use them as scaffolds and
 regression fixtures; create a scoped new YAML scenario when the user's request
 does not match an example:
 

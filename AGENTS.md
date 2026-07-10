@@ -40,9 +40,14 @@ completed-run inspection, comparison packets, and standard review plots, read
   question. Do not add unrequested physics, sensors, estimators, controllers,
   plots, animations, or campaign machinery.
 - Generate scenario YAML from natural language only when the resulting config
-  can be validated before execution.
+  can be validated before execution. For user-provided or otherwise unfamiliar
+  YAML, run `--safe-validate` before ordinary importing validation.
 - Run `.venv/bin/python run_simulation.py --config <path> --validate-only` before running
   a new or edited scenario.
+- Treat unknown-field errors as intent failures; do not remove or rename fields
+  until the normalized contract is understood. Non-empty Cartesian initial
+  states require both position and velocity, and scenarios must select exactly
+  one orbital-state form.
 - Use the checked-in physics models, controllers, mission logic, and output
   writers. Do not invent shortcut physics in agent scripts or reports.
 - Prefer the review store query API over ad hoc parsing of large run logs when

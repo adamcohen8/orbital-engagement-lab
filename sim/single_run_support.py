@@ -37,6 +37,37 @@ from sim.utils.quaternion import quaternion_to_dcm_bn
 logger = logging.getLogger(__name__)
 
 
+class _BudgetedControllerProxy:
+    """Apply the configured runtime policy to controller calls made by mission code."""
+
+    def __init__(self, base: Any, *, budget_ms: float, deadline_policy: str) -> None:
+        self.base = base
+        self.budget_ms = float(budget_ms)
+        self.deadline_policy = str(deadline_policy)
+        self.runtime_ms = 0.0
+        self.deadline_missed = False
+        self.call_count = 0
+
+    def act(self, belief: StateBelief, t_s: float, budget_ms: float | None = None) -> Command:
+        started = perf_counter()
+        command = self.base.act(belief, t_s, self.budget_ms)
+        elapsed_ms = (perf_counter() - started) * 1000.0
+        self.runtime_ms += float(elapsed_ms)
+        self.call_count += 1
+        missed = elapsed_ms > self.budget_ms
+        self.deadline_missed = bool(self.deadline_missed or missed)
+        if missed and self.deadline_policy == "error":
+            raise TimeoutError(
+                f"Controller deadline missed: runtime={elapsed_ms:.6g} ms, budget={self.budget_ms:.6g} ms."
+            )
+        if missed and self.deadline_policy == "zero_command":
+            return Command.zero()
+        return command
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.base, name)
+
+
 @dataclass
 class _DecisionContext:
     agent: AgentRuntime
@@ -173,12 +204,15 @@ class _RocketStepper:
         t_next: float,
     ) -> _RocketStepResult:
         e = self.engine
+        step_dt_s = float(t_next) - float(t_s)
+        if step_dt_s <= 0.0:
+            raise ValueError("Rocket step interval must be positive.")
         mission_out = e._run_agent_decision(
             e.decision_contexts.outer_context(
                 agent=agent,
                 internal_world_truth=world_truth_decision,
                 t_s=t_s,
-                dt_s=e.dt,
+                dt_s=step_dt_s,
             ),
             include_external_intent=False,
         )
@@ -213,7 +247,7 @@ class _RocketStepper:
                 thrust_vector_body_cmd=cmd.thrust_vector_body_cmd,
             )
         throttle = float(np.clip(cmd.throttle, 0.0, 1.0))
-        agent.rocket_state = agent.rocket_sim.step(agent.rocket_state, cmd, dt_s=e.dt)
+        agent.rocket_state = agent.rocket_sim.step(agent.rocket_state, cmd, dt_s=step_dt_s)
         agent.truth = _rocket_state_to_truth(agent.rocket_state)
         if agent.belief is not None:
             agent.belief.state[:6] = _truth_state6(agent.truth, agent.belief.state[:6])
@@ -263,7 +297,7 @@ class _RocketStepper:
             throttle=throttle,
             thrust_eci_km_s2=accel,
             torque_body_nm=np.array(getattr(agent.rocket_state, "_last_step_torque_body_nm", e.zero3), dtype=float).reshape(3),
-            delta_v_m_s=accel_mag * e.dt * 1e3,
+            delta_v_m_s=accel_mag * step_dt_s * 1e3,
             max_accel_km_s2=accel_mag,
             burned=bool(accel_mag > 1e-15),
             stage_index=float(agent.rocket_state.active_stage_index),
@@ -322,7 +356,11 @@ class _SatelliteBeliefAdapter:
                 self.orbit_belief_scratch.last_update_t_s = orb_belief.last_update_t_s
                 self.orbit_belief_scratch.state = _relative_orbit_state12(
                     chief_truth=chief_truth,
-                    deputy_truth=truth,
+                    deputy_truth=_truth_from_state6(
+                        orb_belief.state[:6],
+                        t_s=orb_belief.last_update_t_s,
+                        fallback_truth=truth,
+                    ),
                     out=self.orbit_state12_scratch,
                     deputy_state6=self.deputy_state6_scratch,
                     chief_state6=self.chief_state6_scratch,
@@ -419,13 +457,18 @@ class _SatelliteCommandBuilder:
                     logger.warning("Failed to set desired_ric_euler_rad on %s controller: %s", aid, exc)
 
         use_integrated_cmd = bool(mission_out.get("mission_use_integrated_command", False))
-        orbit_runtime_ms = 0.0
-        attitude_runtime_ms = 0.0
+        orbit_runtime_ms = float(mission_out.get("_integrated_orbit_runtime_ms", 0.0) or 0.0)
+        attitude_runtime_ms = float(mission_out.get("_integrated_attitude_runtime_ms", 0.0) or 0.0)
+        orbit_deadline_missed = bool(mission_out.get("_integrated_orbit_deadline_missed", False))
+        attitude_deadline_missed = bool(mission_out.get("_integrated_attitude_deadline_missed", False))
         c_orb = Command.zero()
         if (not use_integrated_cmd) and agent.orbit_controller is not None and orb_belief is not None:
+            if hasattr(agent.orbit_controller, "set_actuation_interval"):
+                agent.orbit_controller.set_actuation_interval(float(t_s), float(t_s + dt_s))
             orbit_t0 = perf_counter()
-            c_orb = agent.orbit_controller.act(orb_belief, t_s, 2.0)
+            c_orb = agent.orbit_controller.act(orb_belief, t_s, e.orbit_controller_budget_ms)
             orbit_runtime_ms = (perf_counter() - orbit_t0) * 1000.0
+            orbit_deadline_missed = orbit_runtime_ms > e.orbit_controller_budget_ms
         c_att = Command.zero()
         if (
             e.attitude_enabled
@@ -434,8 +477,22 @@ class _SatelliteCommandBuilder:
             and att_belief is not None
         ):
             attitude_t0 = perf_counter()
-            c_att = agent.attitude_controller.act(att_belief, t_s, 2.0)
+            c_att = agent.attitude_controller.act(att_belief, t_s, e.attitude_controller_budget_ms)
             attitude_runtime_ms = (perf_counter() - attitude_t0) * 1000.0
+            attitude_deadline_missed = attitude_runtime_ms > e.attitude_controller_budget_ms
+
+        if orbit_deadline_missed or attitude_deadline_missed:
+            if e.controller_deadline_policy == "error":
+                raise TimeoutError(
+                    f"Controller deadline missed for {aid}: orbit={orbit_runtime_ms:.6g} ms "
+                    f"(budget {e.orbit_controller_budget_ms:.6g}), attitude={attitude_runtime_ms:.6g} ms "
+                    f"(budget {e.attitude_controller_budget_ms:.6g})."
+                )
+            if e.controller_deadline_policy == "zero_command":
+                if orbit_deadline_missed:
+                    c_orb = Command.zero()
+                if attitude_deadline_missed:
+                    c_att = Command.zero()
 
         if use_integrated_cmd:
             cmd = Command.zero()
@@ -448,6 +505,11 @@ class _SatelliteCommandBuilder:
             cmd.mode_flags["mode"] = "mission_integrated"
             if "mission_mode" in mission_out:
                 cmd.mode_flags["mission_mode"] = mission_out["mission_mode"]
+            if e.controller_deadline_policy == "zero_command":
+                if orbit_deadline_missed:
+                    cmd.thrust_eci_km_s2 = np.zeros(3, dtype=float)
+                if attitude_deadline_missed:
+                    cmd.torque_body_nm = np.zeros(3, dtype=float)
         else:
             cmd = _combine_commands(c_orb, c_att)
             if "thrust_eci_km_s2" in mission_out:
@@ -479,6 +541,11 @@ class _SatelliteCommandBuilder:
             mode_flags=dict(cmd.mode_flags or {}),
         )
         cmd_step.mode_flags["orbital_command_updated"] = bool(orbital_command_due or bypass_orbital_command_latch)
+        cmd_step.mode_flags["orbit_controller_budget_ms"] = float(e.orbit_controller_budget_ms)
+        cmd_step.mode_flags["attitude_controller_budget_ms"] = float(e.attitude_controller_budget_ms)
+        cmd_step.mode_flags["orbit_controller_deadline_missed"] = bool(orbit_deadline_missed)
+        cmd_step.mode_flags["attitude_controller_deadline_missed"] = bool(attitude_deadline_missed)
+        cmd_step.mode_flags["controller_deadline_policy"] = str(e.controller_deadline_policy)
         cmd_step.mode_flags["orbital_command_latch_bypassed"] = bool(bypass_orbital_command_latch)
         if e._last_orbital_command_eval_t_s[aid] is not None:
             cmd_step.mode_flags["orbital_command_sample_t_s"] = float(e._last_orbital_command_eval_t_s[aid])
@@ -862,16 +929,28 @@ class _TerminationMonitor:
                 continue
             truth = agent.truth if agent.kind == "satellite" else _rocket_state_to_truth(agent.rocket_state)
             impact = float(np.linalg.norm(truth.position_eci_km)) <= re
+            crossing_fraction: float | None = None
+            if agent.kind == "satellite" and int(getattr(e, "current_index", 0)) > 0:
+                hist = getattr(e, "truth_hist", {}).get(aid)
+                idx = int(e.current_index)
+                if hist is not None and idx < int(hist.shape[0]):
+                    r0 = np.asarray(hist[idx - 1, :3], dtype=float)
+                    r1 = np.asarray(hist[idx, :3], dtype=float)
+                    crossing_fraction = _segment_sphere_entry_fraction(r0, r1, re)
+                    impact = bool(impact or crossing_fraction is not None)
             if agent.kind == "rocket" and agent.rocket_sim is not None:
                 impact = bool(_rocket_altitude_km(truth.position_eci_km, truth.t_s, agent.rocket_sim.sim_cfg) <= 0.0)
             if impact:
                 e.terminated_early = True
                 e.termination_reason = "earth_impact"
-                e.termination_time_s = float(t_s)
+                if crossing_fraction is not None and int(e.current_index) > 0:
+                    t0 = float(e.t_s[int(e.current_index) - 1])
+                    e.termination_time_s = t0 + crossing_fraction * (float(t_s) - t0)
+                else:
+                    e.termination_time_s = float(t_s)
                 e.termination_object_id = aid
                 return True
         return False
-
     def check_reentry(self, *, t_s: float) -> bool:
         e = self.engine
         reentry_cfg = getattr(e, "reentry_cfg", None)
@@ -936,3 +1015,31 @@ class _TerminationMonitor:
             e.termination_reason = "rocket_orbit_insertion"
             e.termination_time_s = float(e.rocket_insertion_time_s if e.rocket_insertion_time_s is not None else t_s)
             e.termination_object_id = "rocket"
+
+
+def _segment_sphere_entry_fraction(r0: np.ndarray, r1: np.ndarray, radius_km: float) -> float | None:
+    """Return the first line-segment crossing of a spherical impact surface."""
+
+    start = np.asarray(r0, dtype=float).reshape(3)
+    end = np.asarray(r1, dtype=float).reshape(3)
+    if not (np.all(np.isfinite(start)) and np.all(np.isfinite(end))):
+        return None
+    radius = float(radius_km)
+    if float(np.linalg.norm(start)) <= radius:
+        return 0.0
+    delta = end - start
+    a = float(np.dot(delta, delta))
+    if a <= 0.0:
+        return None
+    b = 2.0 * float(np.dot(start, delta))
+    c = float(np.dot(start, start) - radius * radius)
+    disc = b * b - 4.0 * a * c
+    if disc < 0.0:
+        return None
+    root = float(np.sqrt(max(disc, 0.0)))
+    candidates = [
+        value
+        for value in ((-b - root) / (2.0 * a), (-b + root) / (2.0 * a))
+        if 0.0 <= value <= 1.0
+    ]
+    return None if not candidates else float(min(candidates))

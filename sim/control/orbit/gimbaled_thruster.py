@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import importlib
 from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
 
+from sim.config.plugin_specs import instantiate_plugin_spec
 from sim.core.interfaces import Controller
 from sim.core.models import Command, StateBelief
 from sim.utils.quaternion import quaternion_to_dcm_bn
@@ -15,13 +15,7 @@ def _construct_controller(spec: Any) -> Any:
     if hasattr(spec, "act"):
         return spec
     if isinstance(spec, dict):
-        module = spec.get("module")
-        class_name = spec.get("class_name")
-        params = dict(spec.get("params", {}) or {})
-        if not module or not class_name:
-            raise ValueError("controller spec dict must include 'module' and 'class_name'.")
-        mod = importlib.import_module(str(module))
-        return getattr(mod, str(class_name))(**params)
+        return instantiate_plugin_spec(spec, description="controller")
     raise TypeError("base_controller must be a controller object or constructor dict.")
 
 

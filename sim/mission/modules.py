@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import importlib
 import logging
 from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
 
+from sim.config.plugin_specs import instantiate_plugin_spec
 from sim.control.attitude.pose_commands import PoseCommandGenerator
 from sim.control.orbit.integrated import IntegratedManeuverCommand, ManeuverStrategy, OrbitalAttitudeManeuverCoordinator
 from sim.core.models import Command, StateBelief, StateTruth
@@ -166,23 +166,7 @@ def _apply_orbit_controller_intent(controller: Any | None, intent: dict[str, Any
 def _pointer_dict_to_obj(pointer: dict[str, Any] | None) -> Any | None:
     if not isinstance(pointer, dict):
         return None
-    module_name = str(pointer.get("module", "") or "").strip()
-    class_name = str(pointer.get("class_name", "") or "").strip()
-    function_name = str(pointer.get("function", "") or "").strip()
-    params = dict(pointer.get("params", {}) or {})
-    if not module_name:
-        return None
-    try:
-        mod = importlib.import_module(module_name)
-        if class_name:
-            cls = getattr(mod, class_name)
-            return cls(**params)
-        if function_name:
-            return getattr(mod, function_name)
-        return mod
-    except (ImportError, AttributeError, TypeError, ValueError) as exc:
-        logger.warning("Failed to construct nested mission pointer %r: %s", pointer, exc)
-        return None
+    return instantiate_plugin_spec(pointer, description="nested mission plugin")
 
 
 def _call_plugin_method(obj: Any | None, method_names: tuple[str, ...], kwargs: dict[str, Any]) -> dict[str, Any]:
@@ -2551,6 +2535,88 @@ class SingleRICAxisBurnMissionModule:
             "slew_lead_time_s": slew_lead_time_s,
         }
         return out
+
+
+@dataclass
+class MultiRICAxisBurnMissionModule:
+    """
+    One finite burn with multiple simultaneous components in the object's
+    instantaneous RIC frame.
+
+    Each item in `burns` should provide:
+    - `axis_mode`: +R, -R, +I, -I, +C, or -C
+    - `target_delta_v_m_s`: non-negative component delta-v in m/s
+    """
+
+    burns: tuple[dict[str, Any], ...] | list[dict[str, Any]] = ()
+    burn_start_s: float = 0.0
+    burn_duration_s: float = 60.0
+
+    def __post_init__(self) -> None:
+        self.burn_start_s = float(self.burn_start_s)
+        self.burn_duration_s = float(self.burn_duration_s)
+        if self.burn_duration_s <= 0.0:
+            raise ValueError("burn_duration_s must be positive.")
+
+        parsed: list[dict[str, Any]] = []
+        for burn in list(self.burns or []):
+            item = dict(burn or {})
+            axis_mode = str(item.get("axis_mode", "+R") or "+R").strip().upper()
+            if len(axis_mode) == 1 and axis_mode in {"R", "I", "C"}:
+                axis_mode = f"+{axis_mode}"
+            _axis_unit_ric(axis_mode)
+            target_delta_v_m_s = float(item.get("target_delta_v_m_s", 0.0))
+            if target_delta_v_m_s < 0.0:
+                raise ValueError("target_delta_v_m_s must be non-negative.")
+            parsed.append({"axis_mode": axis_mode, "target_delta_v_m_s": target_delta_v_m_s})
+        if not parsed:
+            raise ValueError("burns must include at least one RIC component.")
+        self.burns = tuple(parsed)
+
+    def _delta_v_vector_m_s(self) -> np.ndarray:
+        vec = np.zeros(3, dtype=float)
+        for burn in self.burns:
+            vec += _axis_unit_ric(str(burn["axis_mode"])) * float(burn["target_delta_v_m_s"])
+        return vec
+
+    def update(
+        self,
+        *,
+        truth: StateTruth,
+        t_s: float,
+        dt_s: float | None = None,
+        **_: Any,
+    ) -> dict[str, Any]:
+        burn_active = bool(float(self.burn_start_s) <= float(t_s) < float(self.burn_start_s + self.burn_duration_s))
+        accel_ric_km_s2 = np.zeros(3, dtype=float)
+        if burn_active:
+            accel_ric_km_s2 = (self._delta_v_vector_m_s() / 1000.0) / float(self.burn_duration_s)
+
+        c_ir = ric_dcm_ir_from_rv(
+            np.array(truth.position_eci_km, dtype=float), np.array(truth.velocity_eci_km_s, dtype=float)
+        )
+        accel_eci_km_s2 = c_ir @ accel_ric_km_s2
+        total_delta_v_m_s = float(np.linalg.norm(self._delta_v_vector_m_s()))
+        return {
+            "mission_use_integrated_command": True,
+            "thrust_eci_km_s2": accel_eci_km_s2,
+            "torque_body_nm": np.zeros(3, dtype=float),
+            "command_mode_flags": {
+                "mission": "multi_ric_axis_burn",
+                "axis_mode": "multi",
+                "target_delta_v_m_s": total_delta_v_m_s,
+                "burn_active": bool(burn_active),
+            },
+            "mission_mode": {
+                "type": "multi_ric_axis_burn",
+                "mode": "multi_ric_axis_burn",
+                "burns": [dict(burn) for burn in self.burns],
+                "target_delta_v_m_s": total_delta_v_m_s,
+                "burn_active": bool(burn_active),
+                "burn_start_s": float(self.burn_start_s),
+                "burn_duration_s": float(self.burn_duration_s),
+            },
+        }
 
 
 @dataclass

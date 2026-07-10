@@ -11,10 +11,10 @@ Answer example: `agents/tasks/examples/mission_reconstitution_trade_space_answer
 ## User Prompt
 
 ```text
-Create a short public scenario that applies a simple +I in-track burn, then
-uses the simulator-backed mission reconstitution trade space to compare min-time,
-min-delta-v, and constrained recovery options. Validate, run, inspect the
-review store, and summarize the tradeoffs.
+Create a public scenario that applies a simple +I in-track burn, propagates for
+ten minutes, then uses the simulator-backed mission reconstitution trade space to
+compare min-time, min-delta-v, and constrained recovery options. Validate, run,
+inspect the review store, and summarize the tradeoffs.
 ```
 
 ## Expected Agent Assumptions

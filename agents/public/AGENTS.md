@@ -169,7 +169,9 @@ and plots without claiming structured review evidence exists.
   `master_run_summary.json`. Set `outputs.stats.save_full_log: true` only when
   the user needs detailed time-history review in `master_run_log.json`.
 - Validate every generated config with `--validate-only`.
-- Run only trusted YAML. Scenario plugin pointers can import Python code.
+- Run only trusted YAML. Scenario plugin pointers can import Python code. Run
+  `--safe-validate` first for user-provided or unfamiliar YAML, then use
+  ordinary `--validate-only` only after plugin and path surfaces are trusted.
 
 Ask a clarifying question when a missing detail changes the study: duration,
 initial orbit/TLE/relative state, passive vs controlled behavior, success

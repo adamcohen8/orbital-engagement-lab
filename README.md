@@ -94,7 +94,7 @@ query CLI/API, custom review plotting API, and the RPO trainer.
 | Passive OGP-SGP4 general-perturbations propagation | `.venv/bin/python run_simulation.py --config examples/configs/public_sgp4_passive_propagation.yaml` |
 | Geometric ground-station access from a TLE-initialized OEL run | `.venv/bin/python run_simulation.py --config examples/configs/public_ground_station_access_from_tle.yaml` |
 | Closed-loop public rendezvous | `.venv/bin/python run_simulation.py --config examples/configs/public_closed_loop_rendezvous_lqr.yaml` |
-| Mission-recovery smoke case | `.venv/bin/python run_simulation.py --config agents/examples/public_agent_mission_recovery_plus_c_burn.yaml` |
+| Mission-recovery evidence case | `.venv/bin/python run_simulation.py --config agents/examples/public_agent_mission_recovery_plus_c_burn.yaml` |
 | Mission-reconstitution trade space | `.venv/bin/python run_simulation.py --config agents/examples/public_agent_mission_reconstitution_trade_space.yaml` |
 | Attitude hold with disturbance torque | `.venv/bin/python run_simulation.py --config examples/configs/public_attitude_hold_disturbance.yaml` |
 | Re-entry diagnostics | `.venv/bin/python run_simulation.py --config configs/reentry_smoke.yaml` |
@@ -199,10 +199,11 @@ boundaries, and incident response, start with:
 
 The public core is useful on its own: deterministic single-run simulation,
 public controllers and mission primitives, review artifacts, Python/YAML
-interfaces, examples, docs, and the RPO trainer.
+interfaces, examples, docs, the bounded two-body Lambert orbit-transfer
+planner, and the RPO trainer.
 
 The Pro layer adds workflow acceleration for teams that need repeatable
-analysis at scale: controller benchmarks, optimization and gain tuning,
+analysis at scale: controller benchmarks, general optimization and gain tuning,
 Monte Carlo and sensitivity campaigns, curated validation packs, AI-assisted
 reports, custom GNC workbench scaffolding, and program-specific integrations.
 

@@ -123,6 +123,7 @@ from sim.game.launcher import (
     _operator_objectives_overlay_rect,
     _operator_plan_from_rows,
     _operator_planned_trajectory,
+    _operator_planned_trajectory_times,
     _operator_plot_context,
     _operator_plot_transform_to_px,
     _operator_probe_time_label,
@@ -342,6 +343,7 @@ from sim.game.training import (
     nmt_position_error_km,
     nmt_velocity_error_km_s,
     relative_moon_ric_state_from_arrays,
+    relative_state_from_arrays,
     training_config_for_game_mode,
 )
 from sim.game.tuning import SPEED_DT_SCHEDULE
@@ -2035,7 +2037,50 @@ def test_game_debrief_cumulative_delta_v_matches_sampled_accel_integral() -> Non
 
     cumulative = _cumulative_delta_v_m_s(thrust_km_s2, t_s)
 
-    assert cumulative == pytest.approx([0.0, 2.0, 8.0, 8.0])
+    assert cumulative == pytest.approx([0.0, 4.0, 4.0, 13.0])
+
+
+def test_training_tracker_charges_terminal_step_burn_before_passing() -> None:
+    config = SimulationConfig.from_yaml("sim/game/configs/game_training_rpo_04_rendezvous.yaml")
+    base_training = RPOTrainingConfig.from_metadata(dict(config.scenario.metadata or {}))
+    command_state = KeyboardCommandState(pitch=1.0)
+    session, _, initial_snapshot = _start_game_attempt(
+        config,
+        command_state=command_state,
+        training_cfg=base_training,
+        controlled_object_id="chaser",
+        attitude_rate_deg_s=45.0,
+        control_mode="ric_translation",
+        ric_reference_object_id="target",
+    )
+    terminal_snapshot = session.step(dt_s=1.0)
+    initial_rel = relative_state_from_arrays(
+        initial_snapshot.truth["target"],
+        initial_snapshot.truth["chaser"],
+    )
+    terminal_rel = relative_state_from_arrays(
+        terminal_snapshot.truth["target"],
+        terminal_snapshot.truth["chaser"],
+    )
+    tracker = RPOTrainingTracker(
+        RPOTrainingConfig(
+            enabled=True,
+            scenario_id="terminal-burn-budget",
+            goal_relative_ric_km=terminal_rel[:3],
+            goal_radius_km=1.0e-9,
+            max_goal_speed_km_s=1.0,
+            max_delta_v_m_s=0.005,
+        )
+    )
+
+    tracker.record(initial_snapshot)
+    tracker.record(terminal_snapshot)
+    score = tracker.score()
+
+    assert np.linalg.norm(initial_rel[:3] - terminal_rel[:3]) > 1.0e-9
+    assert score.approximate_delta_v_m_s == pytest.approx(0.01)
+    assert score.level_passed is False
+    assert score.level_failed is True
 
 
 def test_game_debrief_timeline_uses_burn_intervals() -> None:
@@ -2101,10 +2146,10 @@ def test_game_debrief_timeline_uses_burn_intervals() -> None:
     burn_events = [event for event in events if event.get("kind") == "interval"]
 
     assert _active_segments(np.array([False, True, True, False, True])) == [(1, 2), (4, 4)]
-    assert burn_events[0]["start_time_s"] == pytest.approx(1.0)
-    assert burn_events[0]["end_time_s"] == pytest.approx(3.0)
+    assert burn_events[0]["start_time_s"] == pytest.approx(0.0)
+    assert burn_events[0]["end_time_s"] == pytest.approx(2.0)
     assert burn_events[0]["label"] == "Control input"
-    assert burn_events[1]["start_time_s"] == pytest.approx(4.0)
+    assert burn_events[1]["start_time_s"] == pytest.approx(3.0)
     assert burn_events[1]["end_time_s"] == pytest.approx(4.0)
 
 
@@ -3958,6 +4003,28 @@ def test_operator_planned_trajectory_applies_burns_and_extends_one_orbit() -> No
     assert trajectory[-1] == pytest.approx(expected_final, abs=1.0e-9)
 
 
+def test_operator_cislunar_preview_uses_configured_cr3bp_projection() -> None:
+    path = Path("sim/game/configs/game_training_rpo_bonus_cislunar_rendezvous.yaml")
+    context = _operator_plot_context(path)
+    plan = OperatorBurnPlan(burns=(OperatorBurn(time_s=0.0, delta_v_ric_m_s=(0.0, 0.0, 0.0)),))
+
+    trajectory, _ = _operator_planned_trajectory(context, plan)
+    times = _operator_planned_trajectory_times(context, plan)
+    initial = np.asarray(context.initial_relative_ric_km_s, dtype=float)
+    target = np.asarray(context.reference_state_eci_km_s, dtype=float)
+    expected = _linearized_cr3bp_moon_ric_coast_prediction(
+        initial,
+        target_state=target,
+        times=times,
+        current_t_s=0.0,
+    )
+
+    assert context.coast_prediction_model == "cr3bp"
+    assert context.cr3bp_projection_mode == "linearized"
+    assert times[-1] == pytest.approx(21600.0)
+    assert trajectory == pytest.approx(expected, abs=1.0e-9)
+
+
 def test_operator_burn_velocity_vector_uses_post_burn_velocity_direction() -> None:
     path = Path("sim/game/configs/game_training_rpo_01_coast_relative_motion.yaml")
     context = _operator_plot_context(path)
@@ -4147,9 +4214,16 @@ def test_operator_burn_provider_executes_single_ric_impulse() -> None:
         object_id="chaser",
         own_knowledge=own_knowledge,
     )
-    burn = provider(
+    not_yet = provider(
         truth=target,
         t_s=9.5,
+        dt_s=1.0,
+        object_id="chaser",
+        own_knowledge=own_knowledge,
+    )
+    burn = provider(
+        truth=target,
+        t_s=10.0,
         dt_s=1.0,
         object_id="chaser",
         own_knowledge=own_knowledge,
@@ -4164,6 +4238,7 @@ def test_operator_burn_provider_executes_single_ric_impulse() -> None:
     )
 
     assert np.allclose(before["thrust_eci_km_s2"], np.zeros(3), atol=1e-15)
+    assert np.allclose(not_yet["thrust_eci_km_s2"], np.zeros(3), atol=1e-15)
     assert np.allclose(burn["thrust_eci_km_s2"], np.array([0.002, 0.001, 0.0002]), atol=1e-12)
     assert burn["command_mode_flags"]["operator_burn_index"] == 1
     assert burn_delta_v_ric == pytest.approx((2.0, 1.0, 0.2))
@@ -4225,7 +4300,7 @@ def test_operator_burn_provider_applies_actuator_error_to_impulse() -> None:
 
     burn = provider(
         truth=target,
-        t_s=9.5,
+        t_s=10.0,
         dt_s=1.0,
         object_id="chaser",
         own_knowledge=own_knowledge,
@@ -5677,6 +5752,7 @@ def test_training_tracker_requires_sun_angle_for_gate_completion() -> None:
         goal_radius_km=None,
         max_time_s=100.0,
         max_delta_v_m_s=None,
+        forbidden_regions=(),
     )
     tracker = RPOTrainingTracker(cfg)
     tracker.t_s = [0.0, 10.0]
@@ -5754,7 +5830,7 @@ def test_passive_cross_track_level_counts_swept_gate_crossings() -> None:
             or {}
         )
     )
-    tracker = RPOTrainingTracker(cfg)
+    tracker = RPOTrainingTracker(replace(cfg, forbidden_regions=()))
     target_state = np.array([7000.0, 0.0, 0.0, 0.0, 7.54605329, 0.0], dtype=float)
     target = np.hstack((target_state, np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0])))
 
@@ -6024,6 +6100,39 @@ def test_training_tracker_hard_fails_on_forbidden_region_violation() -> None:
     assert score.forbidden_region_names == ("off-axis test region",)
     assert any("Forbidden region" in reason for reason in score.pass_fail_reasons)
     assert "FAIL FR Violated" in metrics
+
+
+def test_training_tracker_detects_forbidden_region_crossing_between_samples() -> None:
+    region = ForbiddenRegionConfig(
+        name="no-fly sphere",
+        kind="sphere",
+        center_ric_km=np.zeros(3, dtype=float),
+        radius_km=1.0,
+        min_ric_km=np.full(3, -np.inf),
+        max_ric_km=np.full(3, np.inf),
+    )
+    cfg = RPOTrainingConfig(
+        enabled=True,
+        scenario_id="unit-forbidden-crossing",
+        goal_range_km=10.0,
+        forbidden_regions=(region,),
+    )
+    tracker = RPOTrainingTracker(cfg)
+    tracker.t_s = [0.0, 10.0]
+    tracker.rel_ric_hist = [
+        np.array([-2.0, 0.0, 0.0, 0.4, 0.0, 0.0], dtype=float),
+        np.array([2.0, 0.0, 0.0, 0.4, 0.0, 0.0], dtype=float),
+    ]
+    tracker.thrust_hist = [np.zeros(3, dtype=float), np.zeros(3, dtype=float)]
+    tracker.target_thrust_hist = [np.zeros(3, dtype=float), np.zeros(3, dtype=float)]
+    tracker.mean_motion_hist = [0.001, 0.001]
+
+    score = tracker.score()
+
+    assert not np.any(region.contains_positions(np.array([[-2.0, 0.0, 0.0], [2.0, 0.0, 0.0]])))
+    assert region.intersects_segment(np.array([-2.0, 0.0, 0.0]), np.array([2.0, 0.0, 0.0]))
+    assert score.forbidden_region_violation is True
+    assert score.level_failed is True
 
 
 def test_training_tracker_enforces_rbar_approach_gates() -> None:
@@ -7651,6 +7760,22 @@ def test_step_game_attempt_splits_large_autonomy_tick() -> None:
     assert trainer.snapshots == dashboard.snapshots
     assert _split_game_step_dt(0.75, max_step_dt_s=1.0) == pytest.approx((0.75,))
     assert _split_game_step_dt(2.5, max_step_dt_s=1.0) == pytest.approx((1.0, 1.0, 0.5))
+
+
+def test_operator_step_split_starts_short_impulse_at_tag() -> None:
+    provider = OperatorBurnCommandProvider(
+        OperatorBurnPlan(burns=(OperatorBurn(time_s=10.0, delta_v_ric_m_s=(1.0, 0.0, 0.0)),)),
+        controlled_object_id="chaser",
+        reference_object_id="target",
+    )
+
+    chunks = _split_game_step_dt(
+        1.0,
+        current_time_s=9.5,
+        operator_command_provider=provider,
+    )
+
+    assert chunks == pytest.approx((0.5, provider.impulse_duration_s, 0.5 - provider.impulse_duration_s))
 
 
 def test_realtime_steps_due_supports_multi_step_catchup_for_100x() -> None:

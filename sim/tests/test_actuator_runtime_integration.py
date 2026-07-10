@@ -67,7 +67,13 @@ def _actuator_config(tmp_path: Path) -> dict:
         "outputs": {
             "output_dir": str(tmp_path),
             "mode": "save",
-            "stats": {"print_summary": False, "save_json": False, "save_csv": False, "save_full_log": False},
+            "stats": {
+                "print_summary": False,
+                "save_json": False,
+                "save_csv": False,
+                "save_full_log": False,
+                "controller_debug": True,
+            },
             "plots": {"enabled": False, "figure_ids": []},
             "animations": {"enabled": False, "types": []},
         },

@@ -6,6 +6,86 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.20.0 - 2026-07-10
+
+Release thesis: `v0.20.0` turns OEL's expanding propagation, planning, and
+evidence foundations into clearer public workflows while hardening the private
+Scale, intent-hypothesis, controller-lab, and release-governance surfaces. It
+adds a bounded public Lambert transfer planner, strengthens OGP/ONP contracts
+and provenance, and makes the public/private export boundary allowlist-first.
+
+### Added
+
+- Added a public two-body Lambert solver and grid-based Orbit Transfer Planner
+  with zero-, one-, and two-impulse candidate classification, time/delta-v
+  budgets, verification residuals, scenario configuration, review-store
+  tables, plots, and regression coverage.
+- Added a versioned workflow-evidence envelope and schema for reproducible
+  workflow inputs, derived products, artifacts, and provenance.
+- Added private OEL Scale hardening for catalog screening, propagation,
+  recomputation, refinement, sensitivity, validation, operational-store
+  provenance, and CLI workflows.
+- Added private intent-hypothesis evaluation contracts, observational and
+  synthetic evaluation packs, corpus generation, scoring workflows, and Scale
+  handoff support.
+- Added controller execution-policy support for deterministic deadline and
+  failure behavior, plus private controller-lab catalog, agent, reporting, and
+  command-line surfaces.
+- Added scheduled-impulse interval delivery and impact-crossing coverage so
+  off-grid events remain stable across integration step partitions.
+
+### Changed
+
+- Clarified OGP as the passive catalog-style SGP4/SDP4 family and ONP as the
+  numerical propagation path across agent guidance, examples, configuration,
+  API behavior, review metadata, and validation material.
+- Strengthened scenario validation around mutually exclusive orbital-state
+  forms, complete Cartesian states, plugin specifications, path policy,
+  execution limits, and normalized configuration contracts.
+- Refactored mission-recovery analysis into a public analysis module while
+  retaining compatibility through the reporting surface.
+- Improved attitude/orbit actuator handling, controller telemetry, frame
+  provenance, OGP batch propagation, review-store metadata, and single-run
+  artifact construction.
+- Expanded RPO Trainer launcher, training, operator, debrief, and playback
+  behavior while keeping synthetic video-game configurations outside the
+  sensitive operational-scenario review policy.
+- Consolidated installation metadata around `pyproject.toml`, added SciPy as a
+  core numerical dependency, and added a clean wheel-build shim to prevent
+  stale build artifacts from entering packages.
+
+### Fixed
+
+- Fixed public help text that referenced a private controller-bench scenario.
+- Fixed scheduled impulses that could be missed when their delivery interval
+  fell between integration-grid endpoints.
+- Fixed frame, TLE, review-store, campaign, covariance, and validation paths
+  that could lose provenance or accept incomplete configuration state.
+- Fixed public export drift by switching to positive manifest ownership,
+  explicitly keeping all IHE and Scale product surfaces private, and narrowing
+  high-risk analysis and evidence promotion to reviewed files.
+
+### Migration Notes
+
+- Scenario files with unknown fields, multiple orbital-state forms, or a
+  partial Cartesian position/velocity state now fail validation instead of
+  being silently normalized.
+- General optimization, campaign, Scale, IHE, controller-lab, and private
+  validation workflows remain Pro surfaces. The public Lambert planner is a
+  bounded two-body trade-space tool and is not an operational maneuver plan or
+  a general optimization API.
+- The former standalone GUI requirements file has been removed; install the
+  `game` or `full` optional dependency profile for the downloadable trainer.
+
+### Security And Supply Chain
+
+- Regenerated the local CycloneDX SBOM for the release environment. The local
+  `pip-audit` run reports CVE-2025-3000 against installed optional dependency
+  PyTorch 2.12.0 because the advisory provides no fixed-version range; the NVD
+  affected-version record is limited to PyTorch 2.6.0, so the finding is
+  documented as non-applicable to the evaluated environment. Recheck the
+  advisory in CI before release publication in case its affected range changes.
+
 ## 0.19.2 - 2026-07-05
 
 Release thesis: `v0.19.2` tightens the RPO Trainer web-preview and Operator

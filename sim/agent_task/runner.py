@@ -634,7 +634,8 @@ def _summarize_packet_evidence(packet: EvidencePacket) -> dict[str, Any]:
     comparison_complete = _comparison_complete(packet.comparison)
     failure_hint_count = len(packet.failure_hints)
     ready = (
-        packet.status in {"completed", "validated"}
+        packet.status == "completed"
+        and bool(packet.run)
         and validation_ok is not False
         and review_complete is not False
         and artifacts_complete is not False

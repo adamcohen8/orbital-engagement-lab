@@ -88,6 +88,39 @@ def write_single_run_review_store(
         raise
 
 
+def refresh_review_schema(db_path: str | Path) -> Path:
+    """Regenerate the schema sidecar after an approved transactional extension."""
+
+    database = Path(db_path).expanduser().resolve()
+    if not database.is_file():
+        raise FileNotFoundError(f"Review database not found: {database}")
+    schema_path = database.parent / "schema.json"
+    _write_schema_json(schema_path, generated_utc=_utc_stamp())
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    tables = dict(schema.get("tables", {}) or {})
+    with sqlite3.connect(database) as conn:
+        table_names = [
+            str(row[0])
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+            ).fetchall()
+        ]
+        for table_name in table_names:
+            columns = [
+                {"name": str(row[1]), "type": str(row[2] or "")}
+                for row in conn.execute(f'PRAGMA table_info("{table_name}")').fetchall()
+            ]
+            entry = dict(tables.get(table_name, {}) or {})
+            entry.setdefault("description", f"Review evidence table: {table_name}.")
+            entry["columns"] = columns
+            tables[table_name] = entry
+    schema["tables"] = tables
+    tmp = schema_path.with_name(schema_path.name + ".tmp")
+    tmp.write_text(json.dumps(schema, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    tmp.replace(schema_path)
+    return schema_path
+
+
 def _create_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(
         """
@@ -309,6 +342,8 @@ def _create_schema(conn: sqlite3.Connection) -> None:
             object_id TEXT,
             goal TEXT,
             source TEXT,
+            source_family TEXT,
+            target_basis TEXT,
             description TEXT,
             planned_delta_v_m_s REAL,
             simulated_delta_v_m_s REAL,
@@ -321,6 +356,17 @@ def _create_schema(conn: sqlite3.Connection) -> None:
             within_tolerances INTEGER,
             score REAL,
             recommended_modes_json TEXT,
+            transfer_type TEXT,
+            departure_wait_s REAL,
+            time_of_flight_s REAL,
+            arrival_time_s REAL,
+            target_phase_deg REAL,
+            lambert_short_way INTEGER,
+            lambert_revolutions INTEGER,
+            solver_iterations INTEGER,
+            solver_residual_s REAL,
+            position_residual_km REAL,
+            velocity_residual_m_s REAL,
             notes_json TEXT
         );
 
@@ -502,7 +548,7 @@ def _insert_object_state_frame(conn: sqlite3.Connection, *, payload: dict[str, A
     for object_id in object_ids:
         frame = explicit.get(object_id)
         if frame is None:
-            frame = dict(propagation.get(object_id, {}) or {}).get("output_frame", "eci")
+            frame = dict(propagation.get(object_id, {}) or {}).get("state_history_frame", "eci")
         rows.append((object_id, str(frame or "eci").strip().lower()))
     conn.executemany("INSERT OR REPLACE INTO object_state_frame VALUES (?, ?)", rows)
 
@@ -784,7 +830,7 @@ def _insert_mission_recovery(conn: sqlite3.Connection, *, summary: dict[str, Any
     )
     rows = []
     object_id = _none_or_str(recovery.get("object_id"))
-    for label in ("initial", "final"):
+    for label in ("initial", "target", "final"):
         elements = dict(recovery.get(f"{label}_elements", {}) or {})
         if elements:
             rows.append(
@@ -827,6 +873,8 @@ def _insert_mission_recovery_planner(conn: sqlite3.Connection, *, recovery: dict
                 object_id,
                 _none_or_str(candidate.get("goal", recovery.get("goal"))),
                 _none_or_str(candidate.get("source")),
+                _none_or_str(candidate.get("source_family")),
+                _none_or_str(candidate.get("target_basis")),
                 _none_or_str(candidate.get("description")),
                 _float_or_none(candidate.get("planned_delta_v_m_s")),
                 _float_or_none(candidate.get("simulated_delta_v_m_s")),
@@ -839,6 +887,17 @@ def _insert_mission_recovery_planner(conn: sqlite3.Connection, *, recovery: dict
                 _bool_int(candidate.get("within_tolerances")),
                 _float_or_none(candidate.get("score")),
                 json.dumps(recommended_by_candidate.get(candidate_id, []), sort_keys=True),
+                _none_or_str(candidate.get("transfer_type")),
+                _float_or_none(candidate.get("departure_wait_s")),
+                _float_or_none(candidate.get("time_of_flight_s")),
+                _float_or_none(candidate.get("arrival_time_s")),
+                _float_or_none(candidate.get("target_phase_deg")),
+                _bool_int(candidate.get("lambert_short_way")),
+                _int_or_none(candidate.get("lambert_revolutions")),
+                _int_or_none(candidate.get("solver_iterations")),
+                _float_or_none(candidate.get("solver_residual_s")),
+                _float_or_none(candidate.get("position_residual_km")),
+                _float_or_none(candidate.get("velocity_residual_m_s")),
                 json.dumps(list(candidate.get("notes", []) or []), sort_keys=True),
             )
         )
@@ -872,7 +931,7 @@ def _insert_mission_recovery_planner(conn: sqlite3.Connection, *, recovery: dict
                 )
             )
     conn.executemany(
-        "INSERT INTO mission_recovery_candidates VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO mission_recovery_candidates VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         candidate_rows,
     )
     conn.executemany("INSERT INTO mission_recovery_burns VALUES (?, ?, ?, ?, ?, ?, ?, ?)", burn_rows)
@@ -985,7 +1044,7 @@ def _write_schema_json(path: Path, *, generated_utc: str) -> None:
                 "description": "Initial and assessment classical orbital elements used by mission recovery."
             },
             "mission_recovery_candidates": {
-                "description": "Planner candidate trade-space rows for configured mission reconstitution."
+                "description": "Planner candidate trade-space rows for configured mission recovery and Orbit Transfer Planner analyses."
             },
             "mission_recovery_burns": {
                 "description": "Burn sequence rows for mission-recovery planner candidates."

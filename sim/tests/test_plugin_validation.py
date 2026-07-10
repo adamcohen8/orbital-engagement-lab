@@ -34,8 +34,8 @@ class TestPluginValidation(unittest.TestCase):
                     "specs": {"mass_kg": 420.0},
                     "initial_state": {
                         "tle": {
-                            "line1": "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9005",
-                            "line2": "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1000",
+                            "line1": "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9003",
+                            "line2": "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1004",
                         }
                     },
                 },
@@ -57,8 +57,8 @@ class TestPluginValidation(unittest.TestCase):
                     "specs": {"mass_kg": 420.0},
                     "initial_state": {
                         "tle": {
-                            "line1": "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9005",
-                            "line2": "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1000",
+                            "line1": "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9003",
+                            "line2": "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1004",
                         }
                     },
                 },
@@ -80,8 +80,8 @@ class TestPluginValidation(unittest.TestCase):
                     "specs": {"mass_kg": 420.0},
                     "initial_state": {
                         "tle": {
-                            "line1": "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9005",
-                            "line2": "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1000",
+                            "line1": "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9003",
+                            "line2": "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1004",
                         }
                     },
                 },
@@ -103,8 +103,8 @@ class TestPluginValidation(unittest.TestCase):
                     "specs": {"mass_kg": 420.0},
                     "initial_state": {
                         "tle": {
-                            "line1": "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9005",
-                            "line2": "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1000",
+                            "line1": "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9003",
+                            "line2": "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1004",
                         }
                     },
                 },
@@ -154,8 +154,8 @@ class TestPluginValidation(unittest.TestCase):
                     "specs": {"mass_kg": 420.0},
                     "initial_state": {
                         "tle": {
-                            "line1": "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9005",
-                            "line2": "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1000",
+                            "line1": "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9003",
+                            "line2": "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1004",
                         }
                     },
                     "orbit_control": {"module": "sim.control.orbit.zero_controller", "class_name": "ZeroController"},
@@ -180,8 +180,8 @@ class TestPluginValidation(unittest.TestCase):
                     "specs": {"mass_kg": 420.0},
                     "initial_state": {
                         "tle": {
-                            "line1": "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9005",
-                            "line2": "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1000",
+                            "line1": "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9003",
+                            "line2": "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1004",
                         }
                     },
                     "attitude_control": {"module": "sim.control.attitude.zero_torque", "class_name": "ZeroTorqueController"},
@@ -195,8 +195,9 @@ class TestPluginValidation(unittest.TestCase):
         self.assertTrue(any("attitude_control is not supported" in err for err in errs))
 
     def test_general_sgp4_rejects_non_tle_initializers(self):
-        cfg = scenario_config_from_dict(
-            {
+        with self.assertRaisesRegex(ValueError, "exactly one orbital-state form"):
+            scenario_config_from_dict(
+                {
                 "rocket": {"enabled": False},
                 "chaser": {"enabled": False},
                 "target": {
@@ -206,19 +207,15 @@ class TestPluginValidation(unittest.TestCase):
                     "specs": {"mass_kg": 420.0},
                     "initial_state": {
                         "tle": {
-                            "line1": "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9005",
-                            "line2": "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1000",
+                            "line1": "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9003",
+                            "line2": "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1004",
                         },
                         "relative_ric_rect": [0, 0, 0, 0, 0, 0],
                     },
                 },
                 "simulator": {"duration_s": 20.0, "dt_s": 1.0},
-            }
-        )
-
-        errs = validate_scenario_plugins(cfg)
-
-        self.assertTrue(any("relative_ric_rect" in err and "Use initial_state.tle" in err for err in errs))
+                }
+            )
 
     def test_tle_rejects_unsupported_sgp4_propagator_field(self):
         cfg = scenario_config_from_dict(
@@ -230,8 +227,8 @@ class TestPluginValidation(unittest.TestCase):
                     "specs": {"mass_kg": 420.0},
                     "initial_state": {
                         "tle": {
-                            "line1": "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9005",
-                            "line2": "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1000",
+                            "line1": "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9003",
+                            "line2": "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1004",
                             "propagator": "sgp4",
                         }
                     },
@@ -518,6 +515,38 @@ class TestPluginValidation(unittest.TestCase):
         self.assertTrue(any("position_body_m" in err for err in errs))
         self.assertTrue(any("force_direction_body" in err and "nonzero" in err for err in errs))
         self.assertTrue(any("max_thrust_n" in err and ">=" in err for err in errs))
+
+    def test_malformed_rcs_allocation_weight_returns_validation_error(self):
+        cfg = scenario_config_from_dict(
+            {
+                "target": {
+                    "enabled": True,
+                    "specs": {
+                        "mass_kg": 200.0,
+                        "actuators": {
+                            "enabled": True,
+                            "orbital": {
+                                "rcs_cluster": {
+                                    "force_weight": "bad",
+                                    "thrusters": [
+                                        {
+                                            "position_body_m": [0.0, 0.0, 0.0],
+                                            "force_direction_body": [1.0, 0.0, 0.0],
+                                            "max_thrust_n": 1.0,
+                                        }
+                                    ],
+                                }
+                            },
+                        },
+                    },
+                },
+                "simulator": {"duration_s": 20.0, "dt_s": 1.0},
+            }
+        )
+
+        errs = validate_scenario_plugins(cfg)
+
+        self.assertTrue(any("force_weight" in err and "number" in err for err in errs))
 
     def test_actuator_preset_with_local_overrides_passes_validation(self):
         cfg = scenario_config_from_dict(

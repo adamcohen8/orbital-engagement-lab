@@ -10,6 +10,7 @@ from sim.dynamics.orbit.environment import EARTH_ROT_RATE_RAD_S
 from sim.dynamics.orbit.frames import (
     FRAME_MODEL_IAU76_80_EOP,
     FRAME_MODEL_SIMPLE_GMST,
+    _interp_eop,
     eci_to_ecef_harmonic,
     eci_to_ecef_rotation_context,
     frame_context_from_mapping,
@@ -39,6 +40,17 @@ def test_frame_model_aliases_are_canonical() -> None:
     assert normalize_frame_model("simple_earth_rotation") == FRAME_MODEL_SIMPLE_GMST
     assert normalize_frame_model("hpop_like") == FRAME_MODEL_IAU76_80_EOP
     assert normalize_frame_model("iau76_80_eop") == FRAME_MODEL_IAU76_80_EOP
+
+
+def test_eop_out_of_range_requires_explicit_hold_policy(tmp_path: Path) -> None:
+    eop_path = tmp_path / "EOP-All.txt"
+    _write_minimal_eop(eop_path)
+
+    with pytest.raises(ValueError, match="outside EOP coverage"):
+        _interp_eop(60309.0, str(eop_path))
+
+    held = _interp_eop(60309.0, str(eop_path), extrapolation="hold")
+    assert held == pytest.approx((0.10, 0.20, 0.30, 37.0))
 
 
 def test_iau76_80_eop_alias_matches_legacy_hpop_like_rotation(tmp_path: Path) -> None:

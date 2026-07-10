@@ -58,6 +58,10 @@ def write_workflow_review(
     db_path = review_dir / "run.sqlite"
     schema_path = review_dir / "schema.json"
     saved_views_path = review_dir / "saved_views.json"
+    manifest_tmp = review_dir / "workflow_manifest.json.tmp"
+    db_tmp = review_dir / "run.sqlite.tmp"
+    schema_tmp = review_dir / "schema.json.tmp"
+    saved_views_tmp = review_dir / "saved_views.json.tmp"
 
     manifest = {
         "version": 1,
@@ -77,27 +81,44 @@ def write_workflow_review(
         "schema_json": "review/schema.json" if table_rows else "",
         "saved_views_json": "review/saved_views.json" if query_rows else "",
     }
-    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+    for tmp in (manifest_tmp, db_tmp, schema_tmp, saved_views_tmp):
+        _unlink_if_exists(tmp)
+    try:
+        if table_rows:
+            _write_workflow_sqlite(
+                db_path=db_tmp,
+                manifest=manifest,
+                artifact_rows=artifact_rows,
+                tables=table_rows,
+            )
+            schema = _schema_from_db(db_tmp, workflow_type=str(workflow_type or "workflow"))
+            schema_tmp.write_text(json.dumps(schema, indent=2, sort_keys=True), encoding="utf-8")
+        if query_rows:
+            saved_views_tmp.write_text(json.dumps({"views": query_rows}, indent=2, sort_keys=True), encoding="utf-8")
+        manifest_tmp.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+
+        if table_rows:
+            db_tmp.replace(db_path)
+            schema_tmp.replace(schema_path)
+        else:
+            _unlink_if_exists(db_path)
+            _unlink_if_exists(schema_path)
+        if query_rows:
+            saved_views_tmp.replace(saved_views_path)
+        else:
+            _unlink_if_exists(saved_views_path)
+        # Publish the manifest last so readers never observe references to an
+        # incomplete database/schema/view set.
+        manifest_tmp.replace(manifest_path)
+    finally:
+        for tmp in (manifest_tmp, db_tmp, schema_tmp, saved_views_tmp):
+            _unlink_if_exists(tmp)
 
     outputs = {"workflow_manifest_json": str(manifest_path)}
     if table_rows:
-        _write_workflow_sqlite(
-            db_path=db_path,
-            manifest=manifest,
-            artifact_rows=artifact_rows,
-            tables=table_rows,
-        )
-        schema = _schema_from_db(db_path, workflow_type=str(workflow_type or "workflow"))
-        schema_path.write_text(json.dumps(schema, indent=2, sort_keys=True), encoding="utf-8")
         outputs.update({"sqlite": str(db_path), "schema_json": str(schema_path)})
-    else:
-        _unlink_if_exists(db_path)
-        _unlink_if_exists(schema_path)
     if query_rows:
-        saved_views_path.write_text(json.dumps({"views": query_rows}, indent=2, sort_keys=True), encoding="utf-8")
         outputs["saved_views_json"] = str(saved_views_path)
-    else:
-        _unlink_if_exists(saved_views_path)
     return outputs
 
 

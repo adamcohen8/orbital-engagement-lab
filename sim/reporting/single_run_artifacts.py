@@ -9,12 +9,13 @@ from typing import Any
 
 import numpy as np
 
+from sim.analysis.mission_recovery import build_mission_recovery_summary
 from sim.config import SimulationScenarioConfig
 from sim.master_outputs import _expanded_figure_ids as _expanded_plot_figure_ids
 from sim.master_outputs import animate_outputs as _animate_outputs_impl
 from sim.master_outputs import plot_outputs as _plot_outputs_impl
 from sim.reporting.ground_station_access_reports import write_ground_station_access_reports
-from sim.reporting.mission_recovery import build_mission_recovery_summary, write_mission_recovery_trade_space_plot
+from sim.reporting.mission_recovery import write_mission_recovery_trade_space_plot
 from sim.reporting.output_index import write_output_index
 from sim.reporting.review_store import write_single_run_review_store
 from sim.runtime_support import _resolve_rocket_stack, _resolve_satellite_isp_s
@@ -95,7 +96,7 @@ def format_single_run_summary(summary: dict[str, Any]) -> str:
         estimate = dict(mission_recovery.get("recovery_estimate", {}) or {})
         lines.append("-" * 72)
         lines.append(
-            "Mission Recovery: "
+            f"{estimate.get('display_name', 'Original-Orbit Recovery Estimate')}: "
             f"{mission_recovery.get('object_id', '')} {mission_recovery.get('goal', '')} "
             f"dV={_fmt_optional_float(estimate.get('recovery_delta_v_m_s'), 3)} m/s "
             f"time={_fmt_optional_float(estimate.get('recovery_time_s'), 1)} s "
@@ -116,7 +117,9 @@ def format_single_run_summary(summary: dict[str, Any]) -> str:
                 f"  {mode:<13}: "
                 f"{_fmt_optional_float(candidate.get('planned_delta_v_m_s'), 3)} m/s, "
                 f"{_fmt_optional_float(candidate.get('planned_time_s'), 1)} s, "
-                f"verified={bool(candidate.get('verified', False))}"
+                f"verified={bool(candidate.get('verified', False))}, "
+                f"source={candidate.get('source_family', candidate.get('source', ''))}, "
+                f"target={candidate.get('target_basis', '')}"
             )
     plot_outputs = dict(summary.get("plot_outputs", {}) or {})
     anim_outputs = dict(summary.get("animation_outputs", {}) or {})

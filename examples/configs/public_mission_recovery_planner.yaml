@@ -1,5 +1,5 @@
 scenario_name: public_mission_recovery_planner
-scenario_description: 'Public mission-recovery planner example: a satellite receives a small in-track burn, then OEL compares the final orbit against the starting orbit and recommends recovery options.'
+scenario_description: 'Public mission-recovery planner example: a satellite receives a small in-track burn, coasts for ten minutes, then OEL compares the final orbit against the starting orbit and recommends recovery options.'
 metadata:
   owner: public
   public_surface: public-example
@@ -55,7 +55,7 @@ objects:
         burn_duration_s: 1.0
         require_finite_reference: true
 simulator:
-  duration_s: 120.0
+  duration_s: 600.0
   dt_s: 1.0
   dynamics:
     orbit:

@@ -407,10 +407,14 @@ Recommended columns:
 - `argp_deg`
 - `true_anomaly_deg`
 
+`state_label` is `initial`, `target`, or `final`. When no explicit target orbit
+is configured, the target row matches the initial orbit; retaining the row
+makes the comparison basis explicit for downstream review queries.
+
 ### `mission_recovery_candidates`
 
-Planner candidate rows for configured mission reconstitution trade-space
-analysis.
+Planner candidate rows for configured mission recovery and Orbit Transfer
+Planner trade-space analysis.
 
 Recommended columns:
 
@@ -418,6 +422,8 @@ Recommended columns:
 - `object_id`
 - `goal`
 - `source`
+- `source_family` (`analytic_reconstitution` or `orbit_transfer`)
+- `target_basis` (`initial_orbit` or `configured_target_orbit`)
 - `description`
 - `planned_delta_v_m_s`
 - `simulated_delta_v_m_s`
@@ -430,11 +436,27 @@ Recommended columns:
 - `within_tolerances`
 - `score`
 - `recommended_modes_json`
+- `transfer_type` (`zero_impulse`, `one_impulse_departure`,
+  `one_impulse_arrival`, or `two_impulse_lambert` for Orbit Transfer Planner
+  candidates)
+- `departure_wait_s`
+- `time_of_flight_s`
+- `arrival_time_s`
+- `target_phase_deg`
+- `lambert_short_way`
+- `lambert_revolutions`
+- `solver_iterations`
+- `solver_residual_s`
+- `position_residual_km`
+- `velocity_residual_m_s`
 - `notes_json`
 
 ### `mission_recovery_burns`
 
-Burn sequence rows for each planner candidate.
+Burn sequence rows for each planner candidate. Orbit Transfer Planner
+candidates omit Lambert impulses whose delta-v is at or below the configured
+`impulse_epsilon_m_s`, so a valid candidate can have zero, one, or two burn
+rows.
 
 Recommended columns:
 

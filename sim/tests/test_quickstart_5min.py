@@ -79,8 +79,29 @@ def test_quickstart_process_pool_object_executor_smoke(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[2]
     source_cfg = root / "configs" / "quickstart_5min.yaml"
     config = yaml.safe_load(source_cfg.read_text(encoding="utf-8"))
+    config["objects"]["observer"] = {
+        "enabled": True,
+        "kind": "satellite",
+        "specs": {
+            "mass_kg": 100.0,
+            "mass_properties": {
+                "inertia_reference_point": "center_of_mass",
+                "inertia_kg_m2": [
+                    [10.0, 0.0, 0.0],
+                    [0.0, 10.0, 0.0],
+                    [0.0, 0.0, 10.0],
+                ]
+            },
+        },
+        "initial_state": {
+            "position_eci_km": [7010.0, 0.0, 0.0],
+            "velocity_eci_km_s": [0.0, 7.49, 0.0],
+            "angular_rate_body_rad_s": [2.0e6, 0.0, 0.0],
+        },
+    }
     config["simulator"]["duration_s"] = 10.0
     config["simulator"]["resource_profile"] = "off"
+    config["simulator"]["dynamics"]["attitude"]["guardrail_policy"] = "sanitize"
     config["outputs"]["plots"]["enabled"] = False
     config["outputs"]["plots"]["figure_ids"] = []
     config["outputs"]["animations"]["enabled"] = False
@@ -105,7 +126,7 @@ def test_quickstart_process_pool_object_executor_smoke(tmp_path: Path) -> None:
             "enabled": True,
             "backend": "process_pool",
             "workers": 2,
-            "min_objects": 2,
+            "min_objects": 3,
         }
     }
     config["outputs"]["output_dir"] = str(outdir)
@@ -120,12 +141,15 @@ def test_quickstart_process_pool_object_executor_smoke(tmp_path: Path) -> None:
             pytest.skip(str(exc))
         raise
 
+    serial_summary = json.loads((serial_outdir / "master_run_summary.json").read_text(encoding="utf-8"))
     summary = json.loads((outdir / "master_run_summary.json").read_text(encoding="utf-8"))
     profile = summary["runtime_profile"]
     assert profile["executor"]["object_step_backend"] == "process_pool"
     assert profile["executor"]["object_step_workers"] == 2
     assert profile["stage_totals"]["object_step"]["count"] > 0
-    assert set(profile["object_totals"]) == {"chaser", "target"}
+    assert set(profile["object_totals"]) == {"chaser", "target", "observer"}
+    assert summary["attitude_guardrail_stats"] == serial_summary["attitude_guardrail_stats"]
+    assert summary["attitude_guardrail_stats"]["rate_clamp_events"] > 0
     state_columns = (
         "pos_x_eci_km, pos_y_eci_km, pos_z_eci_km, "
         "vel_x_eci_km_s, vel_y_eci_km_s, vel_z_eci_km_s"

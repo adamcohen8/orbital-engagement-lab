@@ -91,7 +91,7 @@ def test_config_help_routes_rocket_wind_and_weather_terms():
     wind_text = format_config_help("crosswind")
 
     assert "simulator.dynamics.rocket.wind_enu_m_s" in wind_text
-    assert "configs/controller_bench_rocket_case_wind.yaml" in wind_text
+    assert "configs/rocket_tvc_tracking_smoke.yaml" in wind_text
 
     weather_text = format_config_help("weather")
 

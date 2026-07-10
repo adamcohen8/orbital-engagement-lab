@@ -3549,7 +3549,16 @@ def _step_game_attempt(
 ) -> Any:
     score = trainer.score() if initial_score is None else initial_score
     for _ in range(max(int(steps_to_run), 0)):
-        step_dts = (None,) if dt_s is None else _split_game_step_dt(float(dt_s), max_step_dt_s=max_step_dt_s)
+        if dt_s is None:
+            step_dts: tuple[float | None, ...] = (None,)
+        else:
+            current_time_s = _game_attempt_current_time_s(session, dashboard)
+            step_dts = _split_game_step_dt(
+                float(dt_s),
+                max_step_dt_s=max_step_dt_s,
+                current_time_s=current_time_s,
+                operator_command_provider=operator_command_provider,
+            )
         for step_dt in step_dts:
             if session.done:
                 break
@@ -3571,20 +3580,58 @@ def _step_game_attempt(
     return score
 
 
-def _split_game_step_dt(dt_s: float, *, max_step_dt_s: float | None = None) -> tuple[float, ...]:
+def _split_game_step_dt(
+    dt_s: float,
+    *,
+    max_step_dt_s: float | None = None,
+    current_time_s: float | None = None,
+    operator_command_provider: Any | None = None,
+) -> tuple[float, ...]:
     dt = float(dt_s)
     if not np.isfinite(dt) or dt <= 0.0:
         return ()
     max_step = _positive_float_or_none(max_step_dt_s)
-    if max_step is None or dt <= float(max_step) + 1.0e-12:
-        return (dt,)
-    chunks: list[float] = []
-    remaining = dt
-    while remaining > 1.0e-12:
-        h = min(float(max_step), remaining)
-        chunks.append(float(h))
-        remaining -= h
-    return tuple(chunks)
+    boundaries = {0.0, dt}
+    if max_step is not None:
+        boundary = float(max_step)
+        while boundary < dt - 1.0e-12:
+            boundaries.add(boundary)
+            boundary += float(max_step)
+    if current_time_s is not None and operator_command_provider is not None:
+        plan = getattr(operator_command_provider, "plan", None)
+        burns = tuple(getattr(plan, "burns", ()) or ())
+        next_index = int(max(getattr(operator_command_provider, "_next_burn_index", 0), 0))
+        impulse_duration_s = max(float(getattr(operator_command_provider, "impulse_duration_s", 0.0)), 0.0)
+        start_t_s = float(current_time_s)
+        for burn in burns[next_index:]:
+            offset_s = float(getattr(burn, "time_s", 0.0)) - start_t_s
+            if offset_s > dt + 1.0e-9:
+                break
+            burn_start_s = float(np.clip(offset_s, 0.0, dt))
+            if 1.0e-12 < burn_start_s < dt - 1.0e-12:
+                boundaries.add(burn_start_s)
+            burn_stop_s = burn_start_s + impulse_duration_s
+            if burn_start_s < dt - 1.0e-12 and 1.0e-12 < burn_stop_s < dt - 1.0e-12:
+                boundaries.add(burn_stop_s)
+    ordered = sorted(boundaries)
+    return tuple(
+        float(stop - start)
+        for start, stop in zip(ordered, ordered[1:], strict=False)
+        if stop - start > 1.0e-12
+    )
+
+
+def _game_attempt_current_time_s(session: Any, dashboard: Any) -> float | None:
+    dashboard_times = getattr(dashboard, "t_s", None)
+    if dashboard_times:
+        return float(dashboard_times[-1])
+    engine = getattr(session, "_engine", None)
+    if engine is None:
+        return None
+    try:
+        return float(engine.t_s[int(engine.current_index)])
+    except (AttributeError, IndexError, TypeError, ValueError):
+        return None
 
 
 def _start_game_attempt(

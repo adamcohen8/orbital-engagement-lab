@@ -513,8 +513,11 @@ def _event_timeline(*, config: RPOTrainingConfig, score: Any, replay_history: di
         events.append({"time_s": float(t[0]), "label": "Attempt started."})
     active = np.linalg.norm(thrust, axis=1) > _burn_threshold_km_s2(thrust) if thrust.size else np.zeros(0, dtype=bool)
     for start_idx, end_idx in _active_segments(active)[:12]:
-        start_t = float(t[int(start_idx)])
-        end_sample_idx = min(int(end_idx) + 1, t.size - 1)
+        if int(end_idx) <= 0:
+            continue
+        start_sample_idx = max(int(start_idx) - 1, 0)
+        end_sample_idx = min(int(end_idx), t.size - 1)
+        start_t = float(t[start_sample_idx])
         end_t = float(t[end_sample_idx])
         if not np.isfinite(end_t) or end_t <= start_t:
             end_t = start_t
@@ -846,7 +849,8 @@ def _active_time_s(active: np.ndarray, t_s: np.ndarray) -> float:
         return 0.0
     dt = np.diff(t_s)
     valid = np.isfinite(dt) & (dt > 0.0)
-    return float(np.sum(dt[valid] * active[:-1][valid]))
+    # Snapshot i reports the command applied during the interval ending at t[i].
+    return float(np.sum(dt[valid] * active[1:][valid]))
 
 
 def _cumulative_delta_v_m_s(thrust_km_s2: np.ndarray, t_s: np.ndarray) -> np.ndarray:
@@ -859,8 +863,8 @@ def _cumulative_delta_v_m_s(thrust_km_s2: np.ndarray, t_s: np.ndarray) -> np.nda
     dt = np.diff(t_s)
     n = min(norms.size, t_s.size)
     increments = np.zeros(max(n - 1, 0), dtype=float)
-    valid = np.isfinite(norms[: n - 1]) & np.isfinite(dt[: n - 1]) & (dt[: n - 1] > 0.0)
-    increments[valid] = norms[: n - 1][valid] * dt[: n - 1][valid] * 1000.0
+    valid = np.isfinite(norms[1:n]) & np.isfinite(dt[: n - 1]) & (dt[: n - 1] > 0.0)
+    increments[valid] = norms[1:n][valid] * dt[: n - 1][valid] * 1000.0
     dv[1:n] = np.cumsum(increments)
     if n < dv.size:
         dv[n:] = dv[n - 1]

@@ -17,7 +17,7 @@ validated and run through the standard CLI:
 - `public_orbit_environment_stack.yaml`: inspect perturbation/environment toggles in deterministic propagation.
 - `public_attitude_hold_disturbance.yaml`: evaluate attitude hold with initial pointing error and disturbance torque.
 - `public_manual_rpo_training.yaml`: launch a manual/game-style RPO scenario with editable player authority.
-- `public_rendezvous_closed_loop.yaml`: broader closed-loop rendezvous with attitude pointing, sensing, EKF knowledge, and standard plots.
+- `public_rendezvous_closed_loop.yaml`: broader closed-loop RPO artifact review with attitude pointing, sensing, EKF knowledge, and standard plots.
 - `public_manual_engagement.yaml`: manual/game-mode engagement with stabilized attitude, object knowledge, and defensive target logic.
 
 Public configs use the canonical `objects` map. Conventional object IDs such as

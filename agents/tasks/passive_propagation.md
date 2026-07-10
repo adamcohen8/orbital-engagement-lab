@@ -12,7 +12,7 @@ Answer example: `agents/tasks/examples/passive_propagation_answer.md`
 
 ```text
 Create a simple public OEL scenario that propagates one passive satellite in a
-7000 km circular orbit for 60 seconds. Keep it headless, validate it, run it,
+7000 km circular orbit for five minutes. Keep it headless, validate it, run it,
 and summarize the run from saved artifacts.
 ```
 

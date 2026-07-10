@@ -7,9 +7,11 @@ not flight-qualified or operational decision-grade software.
 ## Public Beta Scope
 
 - The public core is optimized for deterministic single-run simulation.
-- Monte Carlo, sensitivity studies, controller benchmarking, optimization,
-  campaign dashboards, AI-assisted reporting, and custom flight-software workflows are Pro
-  surfaces and are not included in the public export.
+- The public core includes a bounded two-body Lambert solver and grid-based
+  orbit-transfer trade-space example. General optimization, gain tuning, Monte
+  Carlo, sensitivity studies, controller benchmarking, campaign dashboards,
+  AI-assisted reporting, and custom flight-software workflows are Pro surfaces
+  and are not included in the public export.
 - The primary public surfaces are the CLI, scenario YAML, Python API, review
   query CLI/API, custom review plotting, and RPO trainer.
 - Payload and artifact shapes are documented, but some non-contract fields may
@@ -68,11 +70,10 @@ Python 3.10 or newer.
 - OGP objects are passive catalog-style objects in the initial
   implementation. They do not accept thrust, orbit controllers, maneuvers, or
   covariance. TLEs with orbital period at or above 225 minutes dispatch to
-  OGP-SDP4 instead of being treated as near-Earth SGP4. The v1 output can preserve
-  native TEME state rows with `output_frame: teme`, or expose the legacy
-  ECI-compatible approximation with `frame_transform: teme_as_eci`. An opt-in
-  Vallado IAU-76/FK5 + IAU-80 TEME-to-ECI transform is available as
-  `frame_transform: teme_to_eci_iau80`; it currently uses fixed time-scale
+  OGP-SDP4 instead of being treated as near-Earth SGP4. Continuous simulation
+  histories are canonical ECI even when product metadata requests native TEME;
+  direct OGP and Scale batch interfaces expose native TEME arrays. The engine's
+  Vallado IAU-76/FK5 + IAU-80 TEME-to-ECI transform currently uses fixed time-scale
   defaults and zero EOP nutation corrections unless callers pass explicit
   corrections. Scenario-level Earth-fixed transforms can use
   `simulator.frames.model: iau76_80_eop` with an EOP file and are recorded in

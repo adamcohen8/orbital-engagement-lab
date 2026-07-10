@@ -13,7 +13,7 @@ Answer example: `agents/tasks/examples/python_api_minimal_propagation_answer.md`
 ```text
 Create a minimal single-satellite propagation scenario using the Python API,
 not by hand-writing shortcut physics. Use ScenarioBuilder if available. The
-scenario should run for 120 seconds with a 10 second step, one satellite at
+scenario should run for five minutes with a 10 second step, one satellite at
 position_eci_km [7000, 0, 0] and velocity_eci_km_s [0, 7.5, 0], review output
 enabled, plots and animations off. Validate it, write the YAML artifact, run it
 through the documented simulator CLI with --validate-only first, then run it,
@@ -41,7 +41,7 @@ from sim import ScenarioBuilder
 
 artifact = (
     ScenarioBuilder("public_agent_python_api_minimal_propagation")
-    .duration(120.0, dt_s=10.0)
+    .duration(300.0, dt_s=10.0)
     .target_satellite(
         mass_kg=300.0,
         position_eci_km=[7000.0, 0.0, 0.0],

@@ -6,6 +6,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from sim.config.object_refs import configured_objects, object_parameter_prefix
+from sim.config.plugin_specs import iter_nested_plugin_specs, plugin_spec_field
 
 _HOSTED_AI_PROVIDERS = {"anthropic", "claude", "gemini", "google", "openai"}
 _LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
@@ -69,15 +70,21 @@ def _validate_plugin_modules(cfg: Any, policy: SealedModePolicy) -> list[str]:
             continue
         base_path = object_parameter_prefix(str(object_id))
         for field_name, pointer in _plugin_pointers(agent):
-            module = str(getattr(pointer, "module", "") or "").strip()
-            if not module:
-                continue
-            if not module.startswith(policy.trusted_plugin_prefixes):
-                errors.append(
-                    f"{base_path}.{field_name}: sealed mode blocks plugin module '{module}'. "
-                    "Use built-in OEL modules or pass --allow-untrusted-plugin-imports for a trusted scenario."
-                )
+            pointer_path = f"{base_path}.{field_name}"
+            errors.extend(_validate_plugin_module(pointer, pointer_path, policy))
+            for nested_path, nested_pointer in iter_nested_plugin_specs(pointer, pointer_path):
+                errors.extend(_validate_plugin_module(nested_pointer, nested_path, policy))
     return errors
+
+
+def _validate_plugin_module(pointer: Any, path: str, policy: SealedModePolicy) -> list[str]:
+    module = str(plugin_spec_field(pointer, "module", "") or "").strip()
+    if not module or module.startswith(policy.trusted_plugin_prefixes):
+        return []
+    return [
+        f"{path}: sealed mode blocks plugin module '{module}'. "
+        "Use built-in OEL modules or pass --allow-untrusted-plugin-imports for a trusted scenario."
+    ]
 
 
 def _plugin_pointers(agent: Any) -> list[tuple[str, Any]]:

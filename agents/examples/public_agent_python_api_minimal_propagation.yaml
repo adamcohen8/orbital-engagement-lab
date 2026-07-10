@@ -1,6 +1,6 @@
 scenario_name: public_agent_python_api_minimal_propagation
 scenario_description: Expected artifact shape for the Python API minimal propagation
-  task card.
+  task card, using a five-minute deterministic propagation horizon.
 objects:
   target:
     kind: satellite
@@ -17,7 +17,7 @@ objects:
       - 7.5
       - 0.0
 simulator:
-  duration_s: 120.0
+  duration_s: 300.0
   dt_s: 10.0
   dynamics:
     attitude:

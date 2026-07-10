@@ -100,7 +100,7 @@ def test_agent_task_recipe_dry_run_writes_evidence_packet(tmp_path: Path) -> Non
         "comparison_complete": None,
         "failure_hint_count": 0,
         "caveat_count": 1,
-        "ready_to_cite": True,
+        "ready_to_cite": False,
     }
 
 

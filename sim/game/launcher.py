@@ -31,11 +31,14 @@ from sim.game.pygame_dashboard import (
     TARGET_SPRITE_PATH,
     PygameRPODashboard,
     _coast_prediction_model_key,
+    _cr3bp_projection_mode_key,
     _cw_coast_states,
     _cylinder_projection_polygon_ric,
     _finite_projected_region_bounds,
     _game_asset_path_or_default,
+    _linearized_cr3bp_moon_ric_coast_prediction,
     _new_history_ring,
+    _nonlinear_cr3bp_moon_ric_coast_prediction,
     _plane_key_for_axes,
     _region_visible_on_plane,
     _satellite_pair_camera_center,
@@ -152,6 +155,9 @@ class OperatorPlotContext:
     training_config: RPOTrainingConfig | None = None
     mean_motion_rad_s: float | None = None
     coast_prediction_model: str = "hcw"
+    cr3bp_projection_mode: str = "nonlinear"
+    cr3bp_coast_prediction_horizon_s: float | None = None
+    cr3bp_coast_prediction_dt_s: float | None = None
     reference_state_eci_km_s: tuple[float, float, float, float, float, float] | None = None
     initial_coast_ric_km_s: tuple[tuple[float, float, float, float, float, float], ...] = ()
     pilot_initial_snapshot: Any | None = None
@@ -2134,6 +2140,11 @@ def _operator_plot_context(config_path: Path, *, difficulty: str = "easy") -> Op
         "training_config": training_config,
         "camera_mode": str(game.get("camera_mode", "reference") or "reference"),
         "coast_prediction_model": str(game.get("coast_prediction_model", "hcw") or "hcw").strip().lower(),
+        "cr3bp_projection_mode": str(game.get("cr3bp_projection_mode", "nonlinear") or "nonlinear"),
+        "cr3bp_coast_prediction_horizon_s": _operator_positive_float_or_none(
+            game.get("cr3bp_coast_prediction_horizon_s")
+        ),
+        "cr3bp_coast_prediction_dt_s": _operator_positive_float_or_none(game.get("cr3bp_coast_prediction_dt_s")),
         "target_centered_plot_planes": _operator_game_plane_tuple(game.get("target_centered_plot_planes", ())),
         "target_centered_plot_axes": _operator_game_target_centered_plot_axes(game),
         "plot_overlays_in_zoom": bool(game.get("plot_overlays_in_zoom", True)),
@@ -2155,6 +2166,9 @@ def _operator_plot_context(config_path: Path, *, difficulty: str = "easy") -> Op
     if preview_dashboard_kwargs:
         common_context["coast_prediction_model"] = str(
             preview_dashboard_kwargs.get("coast_prediction_model", common_context["coast_prediction_model"])
+        )
+        common_context["cr3bp_projection_mode"] = str(
+            preview_dashboard_kwargs.get("cr3bp_projection_mode", common_context["cr3bp_projection_mode"])
         )
     reference_state = _operator_reference_state_from_preview(preview_snapshot, preview_dashboard_kwargs)
     if reference_state is not None:
@@ -2179,11 +2193,21 @@ def _operator_plot_context(config_path: Path, *, difficulty: str = "easy") -> Op
         values.append(0.0)
     rel6 = (values[0], values[1], values[2], values[3], values[4], values[5])
     mean_motion = _operator_target_mean_motion_rad_s(raw, training_config=training_config)
+    reference_state_for_coast = common_context.get("reference_state_eci_km_s")
     return OperatorPlotContext(
         **common_context,
         initial_relative_ric_km_s=rel6,
         mean_motion_rad_s=mean_motion,
-        initial_coast_ric_km_s=_operator_initial_coast_path(rel6, mean_motion_rad_s=mean_motion),
+        initial_coast_ric_km_s=_operator_initial_coast_path(
+            rel6,
+            mean_motion_rad_s=mean_motion,
+            coast_prediction_model=str(common_context["coast_prediction_model"]),
+            chief_state_eci=(
+                None if reference_state_for_coast is None else np.asarray(reference_state_for_coast, dtype=float)
+            ),
+            cr3bp_projection_mode=str(common_context["cr3bp_projection_mode"]),
+            cr3bp_horizon_s=common_context.get("cr3bp_coast_prediction_horizon_s"),
+        ),
     )
 
 
@@ -2484,13 +2508,30 @@ def _operator_initial_coast_path(
     rel6: tuple[float, float, float, float, float, float],
     *,
     mean_motion_rad_s: float,
+    coast_prediction_model: str = "hcw",
+    chief_state_eci: np.ndarray | None = None,
+    cr3bp_projection_mode: str = "nonlinear",
+    cr3bp_horizon_s: float | None = None,
 ) -> tuple[tuple[float, float, float, float, float, float], ...]:
     n = float(mean_motion_rad_s)
     if not np.isfinite(n) or n <= 0.0:
         return ()
-    period_s = 2.0 * np.pi / n
-    times = np.linspace(0.0, period_s, 241)
-    rows = _cw_coast_states(np.array(rel6, dtype=float), times, n)
+    cr3bp = _coast_prediction_model_key(coast_prediction_model) == "cr3bp" and chief_state_eci is not None
+    horizon_s = (
+        float(cr3bp_horizon_s or 21600.0)
+        if cr3bp
+        else float(2.0 * np.pi / n)
+    )
+    times = np.linspace(0.0, horizon_s, 241)
+    rows, _ = _operator_planned_coast_states(
+        np.array(rel6, dtype=float),
+        times,
+        mean_motion_rad_s=n,
+        coast_prediction_model=coast_prediction_model,
+        chief_state_eci=chief_state_eci,
+        cr3bp_projection_mode=cr3bp_projection_mode,
+        current_time_s=0.0,
+    )
     rows = rows[np.all(np.isfinite(rows), axis=1)]
     return tuple(tuple(float(value) for value in row[:6]) for row in rows)
 
@@ -2509,9 +2550,22 @@ def _operator_planned_trajectory(
     if cached is not None:
         return cached
 
-    period_s = float(2.0 * np.pi / float(n))
-    horizon_s = max(float(plan.burns[-1].time_s), 0.0) + period_s
-    sample_dt_s = max(min(period_s / 240.0, 120.0), 5.0)
+    cr3bp = _coast_prediction_model_key(plot_context.coast_prediction_model) == "cr3bp"
+    tail_horizon_s = (
+        float(plot_context.cr3bp_coast_prediction_horizon_s or 21600.0)
+        if cr3bp
+        else float(2.0 * np.pi / float(n))
+    )
+    horizon_s = max(float(plan.burns[-1].time_s), 0.0) + tail_horizon_s
+    sample_dt_s = (
+        max(
+            float(plot_context.cr3bp_coast_prediction_dt_s or 1.0),
+            horizon_s / 480.0,
+            1.0,
+        )
+        if cr3bp
+        else max(min(tail_horizon_s / 240.0, 120.0), 5.0)
+    )
     state = np.array(plot_context.initial_relative_ric_km_s, dtype=float).reshape(6)
     chief_state = (
         np.array(plot_context.reference_state_eci_km_s, dtype=float).reshape(6)
@@ -2535,6 +2589,7 @@ def _operator_planned_trajectory(
             sample_dt_s=sample_dt_s,
             mean_motion_rad_s=float(n),
             coast_prediction_model=plot_context.coast_prediction_model,
+            cr3bp_projection_mode=plot_context.cr3bp_projection_mode,
         )
         delta_v_km_s = np.asarray(burn.delta_v_ric_m_s, dtype=float).reshape(3) / 1000.0
         if np.all(np.isfinite(delta_v_km_s)):
@@ -2555,6 +2610,7 @@ def _operator_planned_trajectory(
         sample_dt_s=sample_dt_s,
         mean_motion_rad_s=float(n),
         coast_prediction_model=plot_context.coast_prediction_model,
+        cr3bp_projection_mode=plot_context.cr3bp_projection_mode,
     )
     trajectory = np.vstack(rows) if rows else np.empty((0, 6), dtype=float)
     trajectory_times = np.asarray(time_rows, dtype=float).reshape(-1)
@@ -2590,6 +2646,7 @@ def _operator_append_planned_coast(
     sample_dt_s: float,
     mean_motion_rad_s: float,
     coast_prediction_model: str,
+    cr3bp_projection_mode: str = "nonlinear",
 ) -> tuple[np.ndarray, np.ndarray | None]:
     state_arr = np.array(state, dtype=float).reshape(6)
     chief_arr = None if chief_state_eci is None else np.array(chief_state_eci, dtype=float).reshape(6)
@@ -2604,6 +2661,8 @@ def _operator_append_planned_coast(
         mean_motion_rad_s=float(mean_motion_rad_s),
         coast_prediction_model=coast_prediction_model,
         chief_state_eci=chief_arr,
+        cr3bp_projection_mode=cr3bp_projection_mode,
+        current_time_s=float(start_t_s),
     )
     for row in coast:
         rows.append(np.array(row, dtype=float).reshape(6).copy())
@@ -2621,10 +2680,35 @@ def _operator_planned_coast_states(
     mean_motion_rad_s: float,
     coast_prediction_model: str,
     chief_state_eci: np.ndarray | None,
+    cr3bp_projection_mode: str = "nonlinear",
+    current_time_s: float = 0.0,
 ) -> tuple[np.ndarray, np.ndarray]:
     times = np.asarray(times_s, dtype=float).reshape(-1)
     if times.size == 0:
         return np.empty((0, 6), dtype=float), np.empty((0, 6), dtype=float)
+    model_key = _coast_prediction_model_key(coast_prediction_model)
+    if model_key == "cr3bp" and chief_state_eci is not None:
+        chief = np.asarray(chief_state_eci, dtype=float).reshape(6)
+        if _cr3bp_projection_mode_key(cr3bp_projection_mode) == "linearized":
+            result = _linearized_cr3bp_moon_ric_coast_prediction(
+                state,
+                target_state=chief,
+                times=times,
+                current_t_s=float(current_time_s),
+            )
+        else:
+            result = _nonlinear_cr3bp_moon_ric_coast_prediction(
+                state,
+                target_state=chief,
+                times=times,
+                current_t_s=float(current_time_s),
+            )
+        chief_rows = _operator_cr3bp_reference_coast_states(
+            chief,
+            times,
+            current_time_s=float(current_time_s),
+        )
+        return result, chief_rows
     chief_rows = _operator_reference_coast_states(chief_state_eci, times)
     if _operator_uses_ya_planned_coast(coast_prediction_model) and chief_state_eci is not None:
         try:
@@ -2638,6 +2722,28 @@ def _operator_planned_coast_states(
         except (ValueError, FloatingPointError, np.linalg.LinAlgError):
             pass
     return _cw_coast_states(np.array(state, dtype=float).reshape(6), times, float(mean_motion_rad_s)), chief_rows
+
+
+def _operator_cr3bp_reference_coast_states(
+    chief_state_eci: np.ndarray,
+    times_s: np.ndarray,
+    *,
+    current_time_s: float,
+) -> np.ndarray:
+    from sim.dynamics.orbit.cr3bp import propagate_cr3bp_state
+
+    state = np.asarray(chief_state_eci, dtype=float).reshape(6).copy()
+    rows: list[np.ndarray] = []
+    elapsed_s = 0.0
+    current_t_s = float(current_time_s)
+    for target_t_s in np.asarray(times_s, dtype=float).reshape(-1):
+        step_s = max(float(target_t_s) - elapsed_s, 0.0)
+        if step_s > 0.0:
+            state = propagate_cr3bp_state(state, step_s, current_t_s)
+            current_t_s += step_s
+        rows.append(state.copy())
+        elapsed_s = max(float(target_t_s), elapsed_s)
+    return np.vstack(rows) if rows else np.empty((0, 6), dtype=float)
 
 
 def _operator_uses_ya_planned_coast(coast_prediction_model: str) -> bool:
@@ -2693,7 +2799,16 @@ def _operator_planned_trajectory_cache_key(
         )
         for burn in plan.burns
     )
-    return (initial, n, _coast_prediction_model_key(plot_context.coast_prediction_model), reference, burns)
+    return (
+        initial,
+        n,
+        _coast_prediction_model_key(plot_context.coast_prediction_model),
+        _cr3bp_projection_mode_key(plot_context.cr3bp_projection_mode),
+        plot_context.cr3bp_coast_prediction_horizon_s,
+        plot_context.cr3bp_coast_prediction_dt_s,
+        reference,
+        burns,
+    )
 
 
 def _operator_nmt_points(training_cfg: RPOTrainingConfig) -> np.ndarray:

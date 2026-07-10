@@ -54,4 +54,4 @@ real-world execution constraints.
 Next run:
 
 Ask for the real success metric, force-model fidelity, and planning constraints
-before turning this smoke case into a more specific recovery study.
+before turning this evidence case into a more specific recovery study.

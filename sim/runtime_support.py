@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import importlib
 import inspect
 import logging
 from dataclasses import dataclass, field
@@ -29,6 +28,7 @@ from sim.actuators import (
 from sim.actuators.presets import resolve_actuator_specs_from_satellite_specs
 from sim.aero import aero_spec_get, resolve_vehicle_aero_properties
 from sim.config import SimulationScenarioConfig
+from sim.config.plugin_specs import instantiate_plugin_spec
 from sim.control.attitude.zero_torque import ZeroTorqueController
 from sim.control.orbit.zero_controller import ZeroController
 from sim.core.models import Command, StateBelief, StateTruth
@@ -148,20 +148,11 @@ def _earth_impact_policy_for_object(termination: Any, object_id: str) -> dict[st
 def _module_obj(pointer, *, extra_kwargs: dict[str, Any] | None = None) -> Any | None:
     if pointer is None or pointer.module is None:
         return None
-    try:
-        mod = importlib.import_module(pointer.module)
-        if pointer.class_name:
-            cls = getattr(mod, pointer.class_name)
-            kwargs = dict(pointer.params or {})
-            if extra_kwargs:
-                kwargs.update(dict(extra_kwargs))
-            return cls(**kwargs)
-        if pointer.function:
-            return getattr(mod, pointer.function)
-        return mod
-    except (ImportError, AttributeError, TypeError, ValueError) as exc:
-        logger.warning("Failed to construct plugin pointer %r: %s", pointer, exc)
-        return None
+    if extra_kwargs:
+        from dataclasses import replace
+
+        pointer = replace(pointer, params={**dict(pointer.params or {}), **dict(extra_kwargs)})
+    return instantiate_plugin_spec(pointer)
 
 
 def _compatible_keyword_args(method: Callable[..., Any], kwargs: dict[str, Any]) -> dict[str, Any] | None:
@@ -299,7 +290,14 @@ def _decision_truth_from_belief(agent: AgentRuntime) -> StateTruth | None:
     state = np.array(belief.state, dtype=float).reshape(-1)
     q = np.array([1.0, 0.0, 0.0, 0.0], dtype=float)
     w = np.zeros(3, dtype=float)
-    mass_kg = 0.0
+    resource_truth = getattr(agent, "truth", None)
+    rocket_state = getattr(agent, "rocket_state", None)
+    if resource_truth is not None:
+        mass_kg = float(resource_truth.mass_kg)
+    elif rocket_state is not None:
+        mass_kg = float(rocket_state.mass_kg)
+    else:
+        mass_kg = 0.0
     if state.size >= 13:
         q = np.array(state[6:10], dtype=float)
         w = np.array(state[10:13], dtype=float)
@@ -375,6 +373,18 @@ def _relative_orbit_state12(
 
 
 def _rv_from_initial_state(s0: dict[str, Any], *, target_jd_utc: float | None = None) -> tuple[np.ndarray, np.ndarray]:
+    if not s0 or bool(s0.get("default_circular_earth", False)):
+        pos = np.array([7000.0, 0.0, 0.0], dtype=float)
+        spd = float(np.sqrt(EARTH_MU_KM3_S2 / np.linalg.norm(pos)))
+        return pos, np.array([0.0, spd, 0.0], dtype=float)
+
+    if any(key in s0 for key in ("relative_to_target_ric", "relative_ric_rect", "source", "launch_lat_deg")):
+        # These recognized state forms are resolved by their dedicated runtime
+        # initializers after the object graph or launch/deployment state exists.
+        pos = np.array([7000.0, 0.0, 0.0], dtype=float)
+        spd = float(np.sqrt(EARTH_MU_KM3_S2 / np.linalg.norm(pos)))
+        return pos, np.array([0.0, spd, 0.0], dtype=float)
+
     cr3bp_state = s0.get("cr3bp_rotating")
     if isinstance(cr3bp_state, dict):
         raw_state = cr3bp_state.get("state_km_s", cr3bp_state.get("state"))
@@ -407,12 +417,12 @@ def _rv_from_initial_state(s0: dict[str, Any], *, target_jd_utc: float | None = 
         return state[:3], state[3:]
 
     if "position_eci_km" in s0:
-        pos = np.array(s0.get("position_eci_km", [7000.0, 0.0, 0.0]), dtype=float)
-        if "velocity_eci_km_s" in s0:
-            vel = np.array(s0["velocity_eci_km_s"], dtype=float)
-        else:
-            spd = float(np.sqrt(EARTH_MU_KM3_S2 / max(np.linalg.norm(pos), EARTH_RADIUS_KM + 1.0)))
-            vel = np.array([0.0, spd, 0.0], dtype=float)
+        pos = np.array(s0["position_eci_km"], dtype=float).reshape(3)
+        if "velocity_eci_km_s" not in s0:
+            raise ValueError("initial_state.position_eci_km requires initial_state.velocity_eci_km_s.")
+        vel = np.array(s0["velocity_eci_km_s"], dtype=float).reshape(3)
+        if not (np.all(np.isfinite(pos)) and np.all(np.isfinite(vel))):
+            raise ValueError("Cartesian initial-state position and velocity entries must be finite.")
         return pos, vel
 
     tle = s0.get("tle")
@@ -431,9 +441,11 @@ def _rv_from_initial_state(s0: dict[str, Any], *, target_jd_utc: float | None = 
             true_anomaly_deg=float(d.get("ta_deg", d.get("true_anomaly_deg", 0.0))),
         )
 
-    pos = np.array([7000.0, 0.0, 0.0], dtype=float)
-    spd = float(np.sqrt(EARTH_MU_KM3_S2 / np.linalg.norm(pos)))
-    return pos, np.array([0.0, spd, 0.0], dtype=float)
+    raise ValueError(
+        "initial_state does not contain a supported orbital-state form. "
+        "Use Cartesian position/velocity, coes, tle, CR3BP, a relative state, "
+        "or explicit default_circular_earth: true."
+    )
 
 
 def _default_truth_from_agent(agent_cfg: Any, t_s: float = 0.0, target_jd_utc: float | None = None) -> StateTruth:
@@ -551,6 +563,8 @@ def _build_rcs_cluster(raw: Any) -> RcsClusterLimits | None:
         allocation_mode=str(raw.get("allocation_mode", "force_torque")),
         pulse_quantum_s=float(raw.get("pulse_quantum_s", 0.0)),
         duty_cycle=float(raw.get("duty_cycle", 1.0)),
+        force_weight=float(raw.get("force_weight", 1.0)),
+        torque_weight=float(raw.get("torque_weight", 1.0)),
     )
 
 
@@ -819,6 +833,8 @@ class _RateLimitedController:
 
     def act(self, belief: StateBelief, t_s: float, budget_ms: float) -> Command:
         if self._last_eval_t_s is None or float(t_s) - float(self._last_eval_t_s) >= self.period_s - 1e-12:
+            if hasattr(self.base, "set_actuation_interval"):
+                self.base.set_actuation_interval(float(t_s), float(t_s + self.period_s))
             self._last_cmd = self.base.act(belief, t_s, budget_ms)
             self._last_eval_t_s = float(t_s)
         return self._last_cmd
@@ -1023,7 +1039,12 @@ def _create_satellite_runtime(
             covariance=np.eye(6) * 1e-4,
             last_update_t_s=0.0,
         )
-        sensor = NoisyOwnStateSensor(pos_sigma_km=pos_sigma, vel_sigma_km_s=vel_sigma, rng=rng)
+        sensor = NoisyOwnStateSensor(
+            pos_sigma_km=pos_sigma,
+            vel_sigma_km_s=vel_sigma,
+            rng=rng,
+            update_cadence_s=float(cfg.simulator.dt_s),
+        )
         estimator = orbit_estimator
     dist_cfg = dict(att_cfg.get("disturbance_torques", {}) or {})
     orbit_ctrl = _RateLimitedController(

@@ -104,6 +104,7 @@ class TestOrbitIntegrators(unittest.TestCase):
                 "simulator": {
                     "duration_s": 1.0,
                     "dt_s": 1.0,
+                    "environment": {"atmosphere_model": "harris_priester"},
                     "dynamics": {
                         "orbit": {
                             "drag": True,
@@ -140,6 +141,7 @@ class TestOrbitIntegrators(unittest.TestCase):
                 "simulator": {
                     "duration_s": 1.0,
                     "dt_s": 1.0,
+                    "environment": {"atmosphere_model": "harris_priester"},
                     "dynamics": {
                         "orbit": {
                             "drag": True,

@@ -5,6 +5,10 @@ metadata:
   owner: public
   public_surface: public-example
   support_level: supported
+  export_review:
+    classification: public-educational-synthetic
+    provenance: synthetic-no-customer-data
+    approved_for_public_export: true
   notes: Run interactively with `.venv/bin/python run_game.py examples/configs/public_manual_engagement.yaml`.
   game:
     player_max_accel_km_s2: 0.00018

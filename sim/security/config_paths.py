@@ -72,6 +72,7 @@ class ConfigPathPolicy:
         write_roots: Iterable[str | Path] = (),
         allow_external_config_paths: bool = False,
         allow_external_ai_prompt_files: bool = False,
+        allow_config_dir_writes: bool = True,
     ) -> ConfigPathPolicy:
         repo = _repo_root()
         cfg_path = None if config_path is None else Path(config_path).expanduser().resolve()
@@ -81,17 +82,21 @@ class ConfigPathPolicy:
         default_write_roots = [_default_output_root(workspace, repo)]
         if cfg_dir is not None:
             default_read_roots.append(cfg_dir)
-            if not _is_relative_to(cfg_dir, repo):
+            if allow_config_dir_writes and not _is_relative_to(cfg_dir, repo):
                 default_write_roots.append(cfg_dir)
         env_allows_external_paths = _truthy_env("OEL_ALLOW_EXTERNAL_CONFIG_PATHS")
         env_allows_external_ai_prompts = _truthy_env("OEL_ALLOW_EXTERNAL_AI_PROMPT_FILES")
+        cli_allows_external_paths = _truthy_env("OEL_CLI_ALLOW_EXTERNAL_CONFIG_PATHS")
+        cli_allows_external_ai_prompts = _truthy_env("OEL_CLI_ALLOW_EXTERNAL_AI_PROMPT_FILES")
         if _sealed_mode_env():
-            if env_allows_external_paths and not allow_external_config_paths:
+            if env_allows_external_paths and not (allow_external_config_paths or cli_allows_external_paths):
                 raise ConfigPathSecurityError(
                     "OEL_SEALED_MODE blocks OEL_ALLOW_EXTERNAL_CONFIG_PATHS. "
                     "Pass allow_external_config_paths=True only for an explicitly trusted sealed-mode run."
                 )
-            if env_allows_external_ai_prompts and not allow_external_ai_prompt_files:
+            if env_allows_external_ai_prompts and not (
+                allow_external_ai_prompt_files or cli_allows_external_ai_prompts
+            ):
                 raise ConfigPathSecurityError(
                     "OEL_SEALED_MODE blocks OEL_ALLOW_EXTERNAL_AI_PROMPT_FILES. "
                     "Pass allow_external_ai_prompt_files=True only for an explicitly trusted sealed-mode run."
@@ -175,6 +180,17 @@ class ConfigPathPolicy:
         path_text: str | Path,
         *,
         purpose: str = "outputs.output_dir",
+        base_dir: str | Path | None = None,
+    ) -> Path:
+        path = self._resolve_path(path_text, base_dir=base_dir or self.workspace_root, purpose=purpose)
+        self._ensure_allowed(path, roots=self.write_roots, purpose=purpose, access="write")
+        return path
+
+    def resolve_output_file(
+        self,
+        path_text: str | Path,
+        *,
+        purpose: str,
         base_dir: str | Path | None = None,
     ) -> Path:
         path = self._resolve_path(path_text, base_dir=base_dir or self.workspace_root, purpose=purpose)

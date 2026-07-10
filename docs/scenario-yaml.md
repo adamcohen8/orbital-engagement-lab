@@ -247,8 +247,8 @@ objects:
     enabled: true
     initial_state:
       tle:
-        line1: "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9005"
-        line2: "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1000"
+        line1: "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9003"
+        line2: "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1004"
 ```
 
 Equivalent list form:
@@ -257,24 +257,26 @@ Equivalent list form:
 initial_state:
   tle:
     lines:
-      - "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9005"
-      - "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1000"
+      - "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9003"
+      - "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1004"
 ```
 
 By default, if `simulator.initial_jd_utc` is set, the TLE state is propagated to
 that initial epoch. Set `propagate_to_initial_epoch: false` under `tle` to use
-the TLE epoch directly. Set `require_checksum: true` to reject TLE lines with
-invalid checksum digits.
+the TLE epoch directly. Scenario TLE checksum validation defaults to `true`.
+Set `require_checksum: false` only for an explicitly synthetic fixture whose
+provenance is recorded in metadata.
 
 The built-in TLE initializer samples OGP (`OGP-SGP4` or `OGP-SDP4`, depending
-on the TLE period) to recover an ECI-compatible initial state. Subsequent
+on the TLE period) and applies the Vallado IAU-80 TEME-to-ECI reduction for the
+ONP initial-state handoff. Subsequent
 propagation uses the configured ONP force model; it does not continue as
 catalog-style OGP propagation or reuse TLE-specific drag/perturbation terms.
 The legacy two-body mean-element conversion remains available only by setting
 `initialization_model: keplerian_mean_elements` under `tle`. OGP initialization
-uses `initialization_frame_transform: teme_as_eci` by default; set
-`initialization_frame_transform: teme_to_eci_iau80` to request the deterministic
-Vallado IAU-80 TEME-to-ECI transform for the initial state handoff.
+uses `initialization_frame_transform: teme_to_eci_iau80` by default. The legacy
+identity approximation remains available only as the explicit
+`initialization_frame_transform: teme_as_eci` compatibility setting.
 
 For passive catalog-style propagation from TLEs, use **OGP**, the OEL General
 Propagator family. The current supported OGP model is **OGP-SGP4**, configured
@@ -292,8 +294,8 @@ objects:
       output_frame: teme
     initial_state:
       tle:
-        line1: "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9005"
-        line2: "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1000"
+        line1: "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9003"
+        line2: "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1004"
 ```
 
 OGP objects are passive in the initial implementation. They can
@@ -302,17 +304,16 @@ relative-state analysis, but they do not accept OEL thrust, orbit controllers,
 maneuver objectives, or special-perturbations force flags as trajectory
 modifiers. TLEs with orbital period at or above 225 minutes dispatch to
 OGP-SDP4/deep-space/resonance handling.
-With `output_frame: teme`, v1 stores the propagated native TEME state in the
-normal state-history slots and labels the object frame as `teme` in payload and
-review metadata. For legacy ECI-compatible workflows, use `output_frame: eci`
-with `frame_transform: teme_as_eci`; this is an approximation, not an
-actual frame reduction. To request an explicit Vallado IAU-76/FK5 + IAU-80
-TEME-to-ECI reduction, use `output_frame: eci` with
-`frame_transform: teme_to_eci_iau80`. That transform is deterministic and
+OGP product metadata defaults to `output_frame: teme`, preserving the requested
+catalog-product frame. Shared engine truth histories are always canonical ECI;
+payload and review state-frame metadata therefore report `eci`. Native TEME
+arrays remain available from the direct OGP and Scale batch interfaces. The
+engine uses the Vallado IAU-76/FK5 + IAU-80 TEME-to-ECI reduction before state
+history insertion. That transform is deterministic and
 matches the MATLAB SGP4 package equations, with fixed TT-UTC defaults and zero
 EOP nutation corrections unless a future caller passes them explicitly. Review
 output records per-object propagation provenance in `object_propagation` and
-per-object state frame labels in `object_state_frames` / `object_state_frame`.
+per-object canonical state frame labels in `object_state_frames` / `object_state_frame`.
 
 ## Ground Stations
 
@@ -446,6 +447,12 @@ Manual `dut1_s`, `xp_arcsec`, `yp_arcsec`, `dat_s`, `ddpsi_rad`, and
 fixtures; any EOP-backed or manual EOP frame setting requires
 `simulator.initial_jd_utc`.
 
+EOP requests must fall within the configured table coverage. The default
+`eop_extrapolation: error` rejects stale or future requests; endpoint holding
+requires an explicit `eop_extrapolation: hold`. The `iau76_80_eop` path uses
+the complete bundled IAU-80 nutation series rather than the former four-term
+approximation.
+
 The legacy per-force settings `drag_frame_model`, `drag_eop_path`, and
 `spherical_harmonics.frame_model/eop_path` remain accepted and override the
 scenario-level default for that subsystem. Payload and review output record the
@@ -466,16 +473,28 @@ simulator:
       min_objects: 3
 ```
 
-`backend: process_pool` uses persistent subprocess workers for object-step work
-while the main simulator process remains the timeline orchestrator. The current
-persistent backend expects at least one worker per active object; if a resource
-profile caps workers below the active object count, OEL falls back to serial
-object stepping. For example, `laptop-safe` forces the object-step backend back
-to serial. The process-pool backend is intended as an opt-in parity/profiling
-path, not as a default efficiency path. Current measured evidence on a
-5-chaser high-fidelity RPO profile showed exact final-state parity with serial
-ONP but slower wall-clock time because worker startup, CPU contention,
-subprocess messaging, and synchronization overhead dominated.
+`backend: process_pool` uses a fixed-size subprocess pool with chunked object
+work while the main simulator remains the timeline orchestrator. Worker count
+may be lower than object count. Each chunk shares one immutable start-of-step
+world snapshot, and knowledge synchronization remains centralized for
+deterministic observer ordering. It remains opt-in: measure the target workload
+because small scenarios can still be slower than serial execution.
+
+Controller timing is configured independently:
+
+```yaml
+simulator:
+  execution:
+    controller:
+      orbit_budget_ms: 2.0
+      attitude_budget_ms: 2.0
+      deadline_policy: record  # record, zero_command, or error
+```
+
+The configured values are passed to controllers. Deadline misses are recorded
+in command diagnostics and can deterministically zero the command or fail the
+run. Full controller-debug histories are opt-in with
+`outputs.stats.controller_debug: true`.
 
 ### Atmospheric Passes And Re-Entry
 
@@ -497,7 +516,6 @@ simulator:
   dynamics:
     orbit:
       drag: true
-      atmosphere_model: "harris_priester"
     reentry:
       enabled: true
       begin_altitude_km: 300.0
@@ -514,11 +532,15 @@ simulator:
             enabled: false
           chaser:
             max_g_load: 12.0
+  environment:
+    atmosphere_model: "harris_priester"
 ```
 
-`simulator.dynamics.orbit.atmosphere_model` and
-`simulator.dynamics.reentry.atmosphere_model` can select deterministic local
-models such as `exponential`, `ussa1976`, `msis86`, `nrlmsise00`, `jacchia70`,
+When orbit drag or lift is enabled, `simulator.environment.atmosphere_model`
+or an explicit `density_kg_m3` is required; no orbital atmosphere is selected
+implicitly. `simulator.dynamics.reentry.atmosphere_model` can independently
+select the diagnostic model. Supported deterministic local models include
+`exponential`, `ussa1976`, `msis86`, `nrlmsise00`, `jacchia70`,
 `jb2006`, `jb2008`, and `harris_priester`. `msis86` and `nrlmsise00` are
 source-local backends copied from MATLAB HPOP and can run without external files
 by setting `f107`, `f107a`, and `ap` in the atmosphere environment. `msis86`
@@ -730,7 +752,9 @@ back?" rather than for replacing the deterministic propagation itself.
 Use `goal: orbit_shape` to estimate restoring the original orbit shape, or
 `goal: orbit_slot` to search same-apsis phasing opportunities that recover the
 original slot within the configured tolerance. These are the supported YAML
-terms; do not use `shaper` or `slot` aliases.
+terms; do not use `shaper` or `slot` aliases. To use the Orbit Transfer Planner
+as a general orbit-change tool, provide `target_orbit` or `desired_orbit`;
+omitted target fields default to the object's initial orbit.
 
 ```yaml
 analysis:
@@ -739,15 +763,34 @@ analysis:
     object_id: "target"
     goal: "orbit_shape"  # or "orbit_slot"
     assessment_time_s: "final"
+    target_orbit:
+      coes:
+        a_km: 6878.137
+        ecc: 0.0
+        inc_deg: 45.0
+        raan_deg: 0.0
+        argp_deg: 0.0
+        true_anomaly_deg: 0.0
     slot_tolerance_deg: 1.0
     max_phasing_orbits: 5000
     planner:
       enabled: true
+      sources: [analytic_reconstitution, orbit_transfer]
       modes: [min_delta_v, min_time, constrained]
       max_recovery_time_s: 86400.0
       max_recovery_delta_v_m_s: 25.0
       candidate_count: 12
       simulate_candidates: true
+      orbit_transfer:
+        enabled: true
+        departure_samples: 9
+        time_of_flight_samples: 12
+        min_time_of_flight_s: 300.0
+        max_time_of_flight_s: 86400.0
+        short_way: true
+        long_way: false
+        target_anomaly_samples: 24
+        impulse_epsilon_m_s: 0.01
     propulsion:
       spacecraft_mass_kg: 100.0
       isp_s: 220.0
@@ -757,6 +800,21 @@ analysis:
       ecc: 0.001
 ```
 
+Planner `sources` controls where candidates come from.
+`analytic_reconstitution` provides the fast, interpretable Original-Orbit
+Recovery Estimate: local velocity-match, same-apsis recovery, and slot-phasing
+candidates referenced to the object's initial orbit. The legacy source name
+`existing` remains a compatibility alias for `analytic_reconstitution`.
+`orbit_transfer` enables the Orbit Transfer Planner, a two-body Lambert search over
+departure wait time and transfer time. For `goal: orbit_slot`, the planner
+targets the propagated reference slot at each sampled arrival time. For
+`goal: orbit_shape`, it samples target true anomalies on the desired orbit
+shape. The reported minimum delta-v is the best candidate found over the
+configured search grid, not a proof of global optimality. Lambert candidates
+are classified as `zero_impulse`, `one_impulse_departure`,
+`one_impulse_arrival`, or `two_impulse_lambert` after collapsing burn rows at
+or below `impulse_epsilon_m_s`.
+
 When `outputs.review.enabled: true`, the run writes
 `mission_recovery_summary` and `mission_recovery_elements` tables in
 `review/run.sqlite`, plus scalar mission-recovery metrics in `metrics`.
@@ -764,10 +822,23 @@ When `planner.enabled: true`, it also writes candidate trade-space rows in
 `mission_recovery_candidates`, burn rows in `mission_recovery_burns`, and
 expected candidate elements in `mission_recovery_candidate_elements`. Planner
 candidates are deterministic two-body estimates for comparing time/fuel trade
-options. If `max_thrust_n` and mass are available, candidate burn rows include
-an impulsive-equivalent burn duration. Planner rows are not operational flight
-plans without separate validation for
-the requested fidelity and constraints.
+options. Orbit Transfer Planner rows include transfer timing, classified
+transfer type, Lambert branch, solver residual, and verification residual
+metadata. Candidate rows explicitly report `source_family` and `target_basis`
+so original-orbit baselines cannot be mistaken for configured-target transfers.
+When `target_orbit` is configured and `sources` is omitted, both families run,
+but recommendations are selected only from verified/feasible Orbit Transfer
+Planner candidates; one analytical baseline is retained when the candidate
+limit allows. Without a configured target orbit, analytical reconstitution is
+the default source. If a configured-target study explicitly enables only
+`analytic_reconstitution`, its recommendation fields remain empty because an
+original-orbit baseline is not a transfer to the configured target.
+The summary preserves legacy final-vs-initial `element_errors` and also reports
+`target_element_errors` plus `within_target_element_tolerances` for the actual
+configured destination. If `max_thrust_n` and mass are available, reported candidate burn rows
+include an impulsive-equivalent burn duration. Planner rows are not operational
+flight plans without separate validation for the requested fidelity and
+constraints.
 
 To save a planner trade-space PNG, enable static plots and request the figure
 ID:
