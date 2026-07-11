@@ -9,11 +9,10 @@ Start here if you want to install OEL, run a scenario, and understand the
 public simulation core.
 
 1. [Quickstart](quickstart.md)
-2. [First Five Minutes](first-five-minutes.md)
-3. [Examples Matrix](examples-matrix.md)
-4. [Scenario YAML](scenario-yaml.md)
-5. [Python API](python-api.md)
-6. [Known Limitations](known-limitations.md)
+2. [Examples Matrix](examples-matrix.md)
+3. [Scenario YAML](scenario-yaml.md)
+4. [Python API](python-api.md)
+5. [Known Limitations](known-limitations.md)
 
 ## Evaluator Or Buyer
 
@@ -21,13 +20,11 @@ Start here if you are deciding whether OEL is credible for research,
 education, engineering prototyping, or Pro workflow evaluation.
 
 1. [Product Inventory](product-inventory.md)
-2. [Flagship RIC_PD 10 km Scenario](flagship-ric-pd-10km.md)
+2. [Flagship RIC_PD 10 km Scenario And Validation](validation-ric-pd-10km.md)
 3. [Physics Model Reference](physics-models.md)
 4. [Validation Claims](validation-claims.md)
-5. [RIC_PD 10 km Validation Package](validation-ric-pd-10km.md)
-6. [Orbital Engagement Pro](pro.md)
-7. [Public Core And Pro Boundary](public-vs-pro.md)
-8. [Security And Procurement](security/supply-chain.md)
+5. [Public Core And Pro Boundary](public-vs-pro.md)
+6. [Security And Procurement](security/supply-chain.md)
 
 ## Agent User
 
@@ -35,13 +32,12 @@ Start here if you want an AI coding assistant to create, validate, run, or
 inspect OEL scenarios.
 
 1. [OEL Agents](oel-agents.md)
-2. [Agent Golden Paths](agent-golden-paths.md)
+2. [Agent Capability Routing And Golden Paths](agent-capability-routing.md)
 3. [Agent Task Runner](agent-task-runner.md)
-4. [Agent Capability Routing](agent-capability-routing.md)
-5. [Agent Task Cards](agent-task-cards.md)
-6. [Agent Review Query Recipes](agent-review-queries.md)
-7. [Agent Feedback Loop](agent-feedback-loop.md)
-8. [Agent Evaluation Packet](agent-evaluation-packet.md)
+4. [Agent Task Cards](agent-task-cards.md)
+5. [Agent Review Query Recipes](agent-review-queries.md)
+6. [Agent Feedback Loop](agent-feedback-loop.md)
+7. [Agent Evaluation Packet](agent-evaluation-packet.md)
 
 The root `AGENTS.md` and `agents/public/AGENTS.md` are the agent playbooks.
 The docs above explain the supporting workflow, evidence, evaluation, and
@@ -78,8 +74,7 @@ processes.
 6. Pro AI Reports
 7. Pro AI Config Assistant
 8. Pro GNC Workbench
-9. Validation Setup
-10. Validation Governance
+9. Validation Operations
 
 In the Pro workspace, use the repository root README for buyer-facing Pro
 positioning and local handoff notes for project continuity.
@@ -97,6 +92,9 @@ public/private packaging.
 6. [Reference GNC Library Roadmap](project/reference_gnc_library_roadmap.md)
 7. [Data Handling And Boundary Statement](security/data-handling.md)
 8. [Security Incident Process](security/incident-response.md)
+
+Private maintainers should also use the Validation Operations and Release
+Checklist guides available in the full workspace.
 
 Private release/export operating notes live under `docs/operations/` in the
 full workspace and are intentionally excluded from the public export.

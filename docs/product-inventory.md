@@ -1,14 +1,14 @@
 # Product Inventory
 
-This inventory summarizes the built-in controller and mission surfaces that
-ship with Orbital Engagement Lab. It is meant to answer "what comes with the
-product?" before a user starts reading Python modules or reverse-engineering
-scenario YAML.
+This inventory summarizes the major workflow, controller, and mission surfaces
+across the public core and Pro workspace. It answers both "what exists?" and
+"what is actually packaged here?" before a user starts reading Python modules
+or reverse-engineering scenario YAML.
 
 Use this page with:
 
 - [Scenario YAML](scenario-yaml.md) for pointer syntax.
-- [Controller Bench](controller-bench.md) for comparative evaluation workflows.
+- the private Controller Bench guide for comparative evaluation workflows;
 - [Controller Naming Conventions](project/controller_naming_conventions.md) for
   naming rules when adding or renaming controllers.
 - [Reference GNC Library Roadmap](project/reference_gnc_library_roadmap.md) for
@@ -24,6 +24,34 @@ Inventory labels:
   scenarios.
 - **Experimental**: included for exploration; validate before relying on it.
 - **Compatibility**: retained for older configs or migration paths.
+
+Packaging and maturity are separate. **Public** means the implementation and
+documented workflow ship in the open-core export. **Pro** means the capability
+exists in the private product workspace even when a related public primitive is
+available.
+
+A working implementation remains **Experimental** until it has a documented
+interface, deterministic tests, a maintained workflow, bounded claims, and an
+explicit packaging decision.
+
+## Capability Status
+
+| Capability | Packaging | Status | Evidence entry point | Primary limit |
+| --- | --- | --- | --- | --- |
+| Scenario YAML, CLI, and Python API | Public | Flagship | [Quickstart](quickstart.md), engine and scenario contracts | Pre-1.0 non-contract fields may still evolve. |
+| ONP numerical propagation | Public | Reference | [Physics Model Reference](physics-models.md), public scenarios | Fidelity depends on the configured force models and validation envelope. |
+| OGP-SGP4/SDP4 passive propagation | Public | Reference | TLE examples, OGP reference suites, frame provenance | Passive catalog-style propagation; not an operational catalog service. |
+| Closed-loop RPO and attitude control | Public | Flagship | [RIC_PD scenario and validation](validation-ric-pd-10km.md) | Evidence is scenario-specific, not a general safety or robustness claim. |
+| Lambert orbit-transfer planning | Public | Workbench | `configs/orbit_transfer_planner_demo.yaml`, review-store candidate tables | Bounded two-body grid search, not operational or globally optimal planning. |
+| Review store, queries, and plotting | Public | Reference | [Review Store](review-store.md), [Plotting](plotting.md) | Only recorded evidence can be queried or plotted. |
+| RPO Trainer | Public | Flagship | `run_game.py`, game configs and debriefs | Educational; not operational training qualification. |
+| Rocket ascent, aero, and re-entry | Public | Workbench | public configs, rocket contract, model docs | First-pass engineering models with bounded validation evidence. |
+| ML/RL wrappers | Public | Experimental | [ML/RL Policy Contracts](ml-rl-contracts.md) | Optional dependencies and limited reproducible benchmark coverage. |
+| Campaigns, sensitivity, covariance, and controller bench | Pro | Reference | Private workflow guides and contracts | Not included as public workflow automation. |
+| Batch relative/absolute orbit determination | Pro | Reference | Private OD contract and validation workflows | Public live estimators do not imply public batch-OD packaging. |
+| OEL Scale and intent-hypothesis evaluation | Pro | Experimental | Private contracts, fixtures, and roadmaps | Phase-0 product surfaces; no operational catalog or intent claim. |
+| AI-assisted reports and config assistance | Pro | Workbench | Private staged estimate/create workflows | Requires explicit provider, data, cost, and human-review decisions. |
+| cFS/SIL and program integrations | Pro | Experimental | Private integration examples | Prototype timing, transport, and conformance envelopes. |
 
 ## Mission And Dynamics Capability Inventory
 
@@ -56,14 +84,14 @@ These surfaces feed closed-loop object knowledge during simulation or support
 estimation-oriented validation fixtures. Batch OD workflows are covered in the
 OD contract and may be Pro/private depending on packaging.
 
-| Product surface | Config/API surface | Status | Primary use |
-| --- | --- | --- | --- |
-| ECI State EKF Knowledge | `knowledge.estimation.type: ekf` | Reference | Live target-state belief from noisy ECI state or relative measurements. |
-| EKF Maneuver Detection | `knowledge.estimation.maneuver_detection` / `EKFManeuverDetector` | Reference | Innovation/NIS persistence gate for EKF knowledge tracks; reports suspect/confirmed maneuver evidence in knowledge consistency summaries. |
-| Measured State Knowledge | `knowledge.estimation.type: measured_state` | Reference | Trust the latest full-state measurement while publishing a `StateBelief`. |
-| HCW Relative EKF Knowledge | `knowledge.estimation.type: relative_hcw_ekf` / `HCWRelativeEKFEstimator` | Reference | Live rectangular-RIC relative-state estimation for circular-chief, small-separation RPO scenarios; public validation covers full relative-state and az/el/range/range-rate measurement cases. |
-| TH Relative EKF Knowledge | `knowledge.estimation.type: relative_th_ekf` / `THRelativeEKFEstimator` | Reference | Live rectangular-RIC relative-state estimation for eccentric two-body-chief, small-separation RPO scenarios using numerically integrated TH linear dynamics; public validation covers full relative-state and az/el/range/range-rate measurement cases. |
-| YA STM Relative EKF Knowledge | `knowledge.estimation.type: relative_ya_ekf` / `YARelativeEKFEstimator` | Reference | Live rectangular-RIC relative-state estimation for eccentric two-body-chief RPO using the closed-form Yamanaka-Ankersen anomaly-domain STM mapped into OEL's km/km/s RIC state; public validation compares it against HCW, TH-integrated, and ECI EKF rows. |
+| Product surface | Packaging | Config/API surface | Status | Primary use |
+| --- | --- | --- | --- | --- |
+| ECI State EKF Knowledge | Public | `knowledge.estimation.type: ekf` | Reference | Live target-state belief from noisy ECI state or relative measurements. |
+| EKF Maneuver Detection | Public | `knowledge.estimation.maneuver_detection` / `EKFManeuverDetector` | Reference | Innovation/NIS persistence gate for EKF knowledge tracks; reports suspect/confirmed maneuver evidence in knowledge consistency summaries. |
+| Measured State Knowledge | Public | `knowledge.estimation.type: measured_state` | Reference | Trust the latest full-state measurement while publishing a `StateBelief`. |
+| HCW Relative EKF Knowledge | Public | `knowledge.estimation.type: relative_hcw_ekf` / `HCWRelativeEKFEstimator` | Reference | Live rectangular-RIC relative-state estimation for circular-chief, small-separation RPO scenarios; public validation covers full relative-state and az/el/range/range-rate measurement cases. |
+| TH Relative EKF Knowledge | Public | `knowledge.estimation.type: relative_th_ekf` / `THRelativeEKFEstimator` | Reference | Live rectangular-RIC relative-state estimation for eccentric two-body-chief, small-separation RPO scenarios using numerically integrated TH linear dynamics; public validation covers full relative-state and az/el/range/range-rate measurement cases. |
+| YA STM Relative EKF Knowledge | Public | `knowledge.estimation.type: relative_ya_ekf` / `YARelativeEKFEstimator` | Reference | Live rectangular-RIC relative-state estimation for eccentric two-body-chief RPO using the closed-form Yamanaka-Ankersen anomaly-domain STM mapped into OEL's km/km/s RIC state; public validation compares it against HCW, TH-integrated, and ECI EKF rows. |
 
 ## Orbital Controllers
 

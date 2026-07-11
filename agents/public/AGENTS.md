@@ -48,10 +48,8 @@ ordinary-language request -> scenario YAML -> validate -> run
 ```
 
 Use `docs/agent-evaluation-packet.md` to evaluate whether an agent follows this
-loop. Use `docs/agent-golden-paths.md` for the shortest reproducible
-propagation, rendezvous, and mission-recovery workflows. Use
-`docs/agent-capability-routing.md` to map broad user intents to workflows,
-starting docs, evidence, and public-core limits. Use
+loop. Use `docs/agent-capability-routing.md` for first-run paths and broader
+intent routing, including evidence, questions, and public-core limits. Use
 `docs/agent-task-runner.md` when a repeatable recipe, comparison, plot, or
 portable `agent_evidence_packet.json` would help another agent inspect the same
 evidence. Use `docs/agent-review-queries.md` for reusable review-store SQL. Use
@@ -205,12 +203,10 @@ If no public-core workflow can answer the request, say so and point to the
 nearest public alternative instead of pretending an example proves more than it
 does.
 
-For common routing decisions, use `docs/agent-capability-routing.md` before
-choosing an example. It lists workflow evidence and clarifying-question
+Use `docs/agent-capability-routing.md` before choosing an example or customizing
+a first-run scenario. It covers workflow evidence and clarifying-question
 triggers for propagation, TLEs, rendezvous, access, attitude, plotting, game
 training, comparison, validation, sealed mode, and public-core boundaries.
-For first-run adoption workflows, use `docs/agent-golden-paths.md` before
-customizing a scenario.
 
 ## Rendezvous Evaluation Notes
 

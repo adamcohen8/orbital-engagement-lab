@@ -71,7 +71,7 @@ share the same product-facing stem:
 configs/ric_pd_10km_experiment.yaml
 configs/ric_pd_10km_experiment_mc.yaml
 outputs/flagship_ric_pd_10km
-docs/flagship-ric-pd-10km.md
+docs/validation-ric-pd-10km.md
 ```
 
 Display names may preserve familiar uppercase acronyms:

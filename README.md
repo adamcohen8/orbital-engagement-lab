@@ -61,7 +61,7 @@ plots under `outputs/flagship_ric_pd_10km/`. Start with
 `outputs/flagship_ric_pd_10km/index.md`, then compare against the checked-in
 [Plot Gallery](docs/plot-gallery.md).
 
-For a guided walkthrough, see [First Five Minutes](docs/first-five-minutes.md).
+For the guided first-run walkthrough, see [Quickstart](docs/quickstart.md).
 
 ## What You Can Do
 
@@ -99,7 +99,7 @@ query CLI/API, custom review plotting API, and the RPO trainer.
 | Attitude hold with disturbance torque | `.venv/bin/python run_simulation.py --config examples/configs/public_attitude_hold_disturbance.yaml` |
 | Re-entry diagnostics | `.venv/bin/python run_simulation.py --config configs/reentry_smoke.yaml` |
 | RPO trainer game | `.venv/bin/python -m pip install ".[game]"` then `.venv/bin/python run_game.py` |
-| AI-agent golden paths | [Agent Golden Paths](docs/agent-golden-paths.md) |
+| AI-agent workflows | [Capability Routing And Golden Paths](docs/agent-capability-routing.md) |
 
 Most TLE examples use TLE lines to initialize an ECI state, then OEL
 numerically integrates the configured force model. Treat only scenarios with
@@ -125,8 +125,7 @@ For the shortest reliable path, point your agent at:
 - [AGENTS.md](AGENTS.md)
 - [agents/public/AGENTS.md](agents/public/AGENTS.md)
 - [OEL Agents](docs/oel-agents.md)
-- [Agent Golden Paths](docs/agent-golden-paths.md)
-- [Agent Capability Routing](docs/agent-capability-routing.md)
+- [Agent Capability Routing And Golden Paths](docs/agent-capability-routing.md)
 
 Runs that enable `outputs.review.enabled: true` write
 `review/run.sqlite`. Use the SELECT-only review CLI/API and cite the query or
@@ -207,21 +206,18 @@ analysis at scale: controller benchmarks, general optimization and gain tuning,
 Monte Carlo and sensitivity campaigns, curated validation packs, AI-assisted
 reports, custom GNC workbench scaffolding, and program-specific integrations.
 
-See [Orbital Engagement Pro](docs/pro.md) for the Pro overview and
-[Public Core And Pro Boundary](docs/public-vs-pro.md) for what belongs in the
-public core versus the Pro layer. Public examples do not require hosted AI
-accounts or API keys.
+See [Public Core And Pro Boundary](docs/public-vs-pro.md) for the product and
+repository boundary. Public examples do not require hosted AI accounts or API
+keys.
 
 ## Documentation
 
 - [Documentation Index](docs/index.md)
 - [Quickstart](docs/quickstart.md)
-- [First Five Minutes](docs/first-five-minutes.md)
 - [Scenario YAML](docs/scenario-yaml.md)
 - [Python API](docs/python-api.md)
-- [Orbital Engagement Pro](docs/pro.md)
 - [Product Inventory](docs/product-inventory.md)
-- [Flagship RIC_PD 10 km Scenario](docs/flagship-ric-pd-10km.md)
+- [Flagship RIC_PD 10 km Scenario And Validation](docs/validation-ric-pd-10km.md)
 - [Review Store](docs/review-store.md)
 - [Examples Matrix](docs/examples-matrix.md)
 - [Known Limitations](docs/known-limitations.md)

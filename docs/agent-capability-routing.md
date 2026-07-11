@@ -34,6 +34,37 @@ that to OGP-SGP4 unless the request clearly needs deep-space OGP-SDP4.
 8. Say what the evidence supports, what is missing, and what public-core limits
    apply.
 
+## Golden Paths
+
+Use these adoption rails when they fit the request. For every path: validate,
+run, query the review store, inspect `index.md`, and state the evidence limit.
+
+| Goal | Config | Required saved queries |
+| --- | --- | --- |
+| Minimal passive propagation | `agents/examples/public_agent_single_satellite.yaml`; API-authored fixture `agents/examples/public_agent_python_api_minimal_propagation.yaml` | `run_metadata`, `objects`, `passive_final_state`, `artifacts` |
+| Closed-loop rendezvous | `agents/examples/public_agent_rendezvous_lqr.yaml` | `run_metadata`, `rendezvous_metrics`, `rendezvous_closest_approach`, `relative_final_state`, `burn_activity`, `burn_events` |
+| Mission recovery | `agents/examples/public_agent_mission_recovery_plus_c_burn.yaml` | `run_metadata`, `burn_activity`, `mission_recovery_summary`, `mission_recovery_elements` |
+| Recovery trade space | `agents/examples/public_agent_mission_reconstitution_trade_space.yaml` | recovery queries plus `mission_recovery_candidates`, `mission_recovery_burns` |
+
+Canonical loop:
+
+```bash
+.venv/bin/python run_simulation.py --config <config> --validate-only
+.venv/bin/python run_simulation.py --config <config>
+.venv/bin/python -m sim.review <output-dir> --saved-query <query>
+```
+
+For propagation, report duration, timestep, dynamics/control posture, final
+state, and artifacts. For rendezvous, report initial/final range, closest
+approach, final range rate, burn evidence, and the success threshold used. For
+recovery, report the disturbance, element changes, delta-v/time/propellant, and
+candidate rows actually recorded. None of these deterministic paths establishes
+operational ephemeris accuracy, robustness, safety, or global optimality.
+
+When maintaining a golden path, keep its config, output directory, saved
+queries, task card, and answer example aligned, then run
+`sim/tests/test_oel_agents.py`.
+
 ## Routing Table
 
 | User intent | Public workflow | Start here | Evidence to inspect | Ask before proceeding when | Do not claim |

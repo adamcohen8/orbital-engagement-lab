@@ -47,7 +47,7 @@ The detailed pages under `docs/models/` are organized by model family:
 | Attitude dynamics | [Attitude Dynamics](models/attitude-dynamics.md) | Quaternion and body-rate propagation, rigid-body torque response, attitude substepping, and disturbance coupling. |
 | Environment perturbations | [Environment Perturbations](models/environment-perturbations.md) | Gravity harmonics, atmosphere/drag, SRP, third bodies, eclipse, and re-entry diagnostics. |
 | Actuators | [Actuator Models](models/actuators.md) | Force and torque limits, allocation, propulsion devices, attitude actuators, faults, and applied-command logging. |
-| Evidence traceability | [Model Validation Map](models/model-validation-map.md) | How model specs connect to tests, validation suites, reference comparisons, review stores, and explicit non-claims. |
+| Evidence traceability | Private Model Validation Map | How model specs connect to tests, validation suites, reference comparisons, review stores, and explicit non-claims. |
 
 ## Traceability Pattern
 
@@ -85,8 +85,9 @@ workflows are useful engineering evidence for specific tested cases. They still
 require interpretation, traceability, and mission-specific qualification before
 supporting decision-grade use.
 
-See [Validation Claims](validation-claims.md), [Validation Governance](validation-governance.md),
-and [Known Limitations](known-limitations.md) for the current validation posture.
+See [Validation Claims](validation-claims.md) and
+[Known Limitations](known-limitations.md) for the public validation posture.
+Private maintainers should also use the Validation Operations guide.
 
 ## Writing Or Updating Model Docs
 

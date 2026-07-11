@@ -13,7 +13,7 @@ natural-language request -> scenario YAML -> validation -> deterministic run
 
 For the shortest first-run adoption paths across propagation, rendezvous, and
 mission recovery/reconstitution, use
-[`agent-golden-paths.md`](agent-golden-paths.md) before reaching for the full
+[`agent-capability-routing.md`](agent-capability-routing.md) before reaching for the full
 card set.
 
 Each card includes a user prompt, assumptions, an example config, validation and

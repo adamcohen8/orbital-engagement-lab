@@ -99,7 +99,7 @@ def test_public_agent_docs_define_boundaries_and_commands() -> None:
     rubric = (ROOT / "agents" / "public" / "evaluation-rubric.md").read_text(encoding="utf-8")
     docs = (ROOT / "docs" / "oel-agents.md").read_text(encoding="utf-8")
     eval_packet = (ROOT / "docs" / "agent-evaluation-packet.md").read_text(encoding="utf-8")
-    golden_paths = (ROOT / "docs" / "agent-golden-paths.md").read_text(encoding="utf-8")
+    golden_paths = (ROOT / "docs" / "agent-capability-routing.md").read_text(encoding="utf-8")
     capability_routing = (ROOT / "docs" / "agent-capability-routing.md").read_text(encoding="utf-8")
     review_queries = (ROOT / "docs" / "agent-review-queries.md").read_text(encoding="utf-8")
     feedback_loop = (ROOT / "docs" / "agent-feedback-loop.md").read_text(encoding="utf-8")
@@ -137,13 +137,13 @@ def test_public_agent_docs_define_boundaries_and_commands() -> None:
     assert "agent-task-cards.md" in root_agents
     assert "agent-task-cards.md" in public_agents
     assert "agent-task-cards.md" in docs
-    assert "agent-golden-paths.md" in agents_readme
-    assert "agent-golden-paths.md" in public_agents
-    assert "agent-golden-paths.md" in docs
-    assert "Agent Golden Paths" in golden_paths
-    assert "Minimal propagation" in golden_paths
+    assert "agent-capability-routing.md" in agents_readme
+    assert "agent-capability-routing.md" in public_agents
+    assert "agent-capability-routing.md" in docs
+    assert "## Golden Paths" in golden_paths
+    assert "Minimal passive propagation" in golden_paths
     assert "Closed-loop rendezvous" in golden_paths
-    assert "Mission recovery and reconstitution" in golden_paths
+    assert "Mission recovery" in golden_paths
     assert "agent-capability-routing.md" in root_agents
     assert "agent-capability-routing.md" in public_agents
     assert "agent-capability-routing.md" in docs
@@ -165,7 +165,6 @@ def test_public_agent_docs_define_boundaries_and_commands() -> None:
         "agents/public/evaluation-rubric.md": rubric,
         "docs/oel-agents.md": docs,
         "docs/agent-evaluation-packet.md": eval_packet,
-        "docs/agent-golden-paths.md": golden_paths,
         "docs/agent-capability-routing.md": capability_routing,
         "docs/agent-review-queries.md": review_queries,
         "docs/agent-feedback-loop.md": feedback_loop,
@@ -225,7 +224,7 @@ def test_public_agent_task_cards_define_checked_workflows() -> None:
 
 
 def test_public_agent_golden_paths_reference_real_fixtures_and_saved_queries() -> None:
-    text = (ROOT / "docs" / "agent-golden-paths.md").read_text(encoding="utf-8")
+    text = (ROOT / "docs" / "agent-capability-routing.md").read_text(encoding="utf-8")
 
     for path_id, spec in GOLDEN_PATHS.items():
         for config_ref in spec["configs"]:
