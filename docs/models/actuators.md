@@ -313,7 +313,8 @@ Useful focused tests and smokes:
 - `configs/controller_wheel_desaturation_smoke.yaml`
 - `configs/controller_cmg_steering_smoke.yaml`
 
-Validation harness routing is documented in `docs/validation-governance.md`.
+Validation harness routing is documented in the private Validation Operations
+guide.
 Actuator behavior changes normally map to `--suite orbit_actuator_coupling` for
 orbital/mount-force behavior and `--suite actuator_coupling` for attitude
 actuator behavior.

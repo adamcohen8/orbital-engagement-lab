@@ -6,6 +6,31 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.20.1 - 2026-07-11
+
+Release thesis: `v0.20.1` consolidates overlapping public documentation into
+fewer canonical guides and strengthens generated-export checks.
+
+
+### Added
+
+- Added canonical public capability-routing, quickstart, product-boundary, flagship-validation, and validation-operations guidance.
+
+### Changed
+
+- Consolidated overlapping onboarding, validation, public/private-boundary,
+  and product documentation into fewer canonical guides with repaired links
+  and export-manifest ownership.
+
+### Fixed
+
+- Fixed public-export checks and agent-documentation tests after documentation
+  consolidation removed superseded pages.
+
+### Migration Notes
+
+- Public APIs and scenario contracts are unchanged in this patch release; moved documentation now resolves through the canonical index and guides.
+
 ## 0.20.0 - 2026-07-10
 
 Release thesis: `v0.20.0` turns OEL's expanding propagation, planning, and

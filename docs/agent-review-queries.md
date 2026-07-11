@@ -59,7 +59,7 @@ Treat zero rows from a query with `allow_empty: false` as evidence to investigat
 the scenario or review store before making a claim.
 
 For first-run propagation, rendezvous, and mission-recovery workflows, start
-with [`agent-golden-paths.md`](agent-golden-paths.md). It names the exact
+with [`agent-capability-routing.md`](agent-capability-routing.md). It names the exact
 configs, output directories, and saved queries that should be run before an
 agent writes a custom SQL query.
 

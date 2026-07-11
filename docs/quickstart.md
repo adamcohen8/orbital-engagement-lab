@@ -89,8 +89,6 @@ To open the output folder automatically after the run:
 .venv/bin/python run_simulation.py --quickstart --open-output
 ```
 
-For a guided walkthrough, see [First Five Minutes](first-five-minutes.md).
-
 ## Run The Flagship Review Scenario
 
 After the quickstart succeeds, run the polished 10 km RIC_PD rendezvous
@@ -107,7 +105,7 @@ gating, then writes review artifacts under `outputs/flagship_ric_pd_10km/`.
 Open `outputs/flagship_ric_pd_10km/index.md` first.
 
 For the scenario-specific review path, see
-[Flagship RIC_PD 10 km Scenario](flagship-ric-pd-10km.md).
+[Flagship RIC_PD 10 km Scenario And Validation](validation-ric-pd-10km.md).
 
 ## Get Config Field Help
 

@@ -1,94 +1,90 @@
 # Public Core And Pro Boundary
 
-Orbital Engagement Lab is organized as an open-core project.
+Orbital Engagement Lab is an open-core project. The public repository is a
+complete, inspectable simulation foundation; the private Pro repository adds
+workflow acceleration, scale, and customer-specific engineering support.
 
-This is the public-facing boundary summary. In the private source-of-truth
-workspace, `docs/public-private-boundary.md` carries the operational export
-rules and private-only path guidance.
-
-The public repository contains the simulation foundation: dynamics, controllers,
-estimators, actuators, sensors, mission modules, scenario YAML, API workflows,
-examples, validation helpers, and lightweight extension surfaces.
-
-The public repository is a curated product surface, not everything that happens
-to be redistributable from the private workspace. Public examples, docs, and
-workflows are intentionally promoted; private experiments, Pro workflow
-accelerators, customer-specific material, and local release evidence stay out
-of the public export by default.
-
-Orbital Engagement Pro builds on the same foundation with higher-level analysis
-workflows for teams that need repeatability, search, campaign management, and
-review-ready outputs.
-
-For the evaluator-facing overview of what Pro adds, see
-[Orbital Engagement Pro](pro.md).
+This page is the authoritative product and repository boundary. When another
+document disagrees with it, this page and the checked-in public-surface manifest
+govern.
 
 ## Public Core
 
 The public core includes:
 
-- deterministic single-run simulation
-- orbit and attitude dynamics
-- reference orbit and attitude controllers
-- sensing and runtime state-estimation primitives used by closed-loop
-  simulations
-- passive ground-station access tracking
-- actuator models and mass depletion
-- YAML scenario loading
-- adversarial and engagement-style simulation primitives, including generic
-  chaser/target knowledge, pursuit, evade, and defensive behaviors
-- reusable object preset YAML files
-- primary CLI, scenario YAML, Python API, review query, and custom review
-  plotting workflows
-- examples and starter validation workflows
-- public-safe external-reference validation claims, commands, summaries, and
-  artifacts for selected HPOP/MATLAB orbit and Basilisk attitude comparisons
-  when the underlying reference material is redistributable
-- public use-case configs under `examples/configs/public_*.yaml`
-- rocket/ascent simulation primitives, educational launch-to-orbit scenarios,
-  TVC/ascent diagnostics, and public rocket GNC contracts
+- deterministic single-run orbit and attitude simulation;
+- OGP-SGP4/SDP4 passive catalog-style propagation and configurable ONP
+  numerical propagation;
+- public controllers, sensors, estimators, actuators, and mission primitives;
+- scenario YAML, CLI, Python API, review-store queries, and plotting;
+- a bounded two-body Lambert transfer planner and mission-recovery estimates;
+- public examples, the RPO Trainer, and reproducible public validation evidence;
+- educational rocket/ascent primitives and public rocket GNC contracts.
 
-The public core should be useful for research, education, prototyping, and
-inspectable engineering experiments.
+The public core is intended for research, education, prototyping, and
+inspectable engineering experiments. It is not flight-qualified or an
+operational decision system.
 
 ## Pro Layer
 
-The pro layer includes:
+Pro adds workflows whose value comes from repeatability, scale, search, or
+review-ready packaging:
 
-- controller-benchmark suites and comparison reports
-- optimization and gain tuning
-- Monte Carlo campaign orchestration
-- sensitivity studies
-- covariance propagation and encounter uncertainty screening
-- orbit determination against external observations or precise-orbit products
-- SGP4 mean-element OD, residual-based maneuver screening, and burn
-  investigation workflows
-- batch nonlinear least squares and estimated-parameter workflows
-- data ingestion, observation normalization, and mission-input packet creation
-- campaign dashboards and baselines
-- AI-assisted campaign reports from Monte Carlo and sensitivity outputs
-- report cost estimation before hosted LLM calls
-- curated validation and mission-assurance scenario packs beyond the public
-  trust baseline
-- validation automation, release evidence packaging, and customer-specific
-  comparison reports
-- rocket insertion engagement scenarios and deeper adversarial campaign packs
-- custom and program-specific flight-software integration workflows
-- Pro workflow configs under `examples/configs/pro_*.yaml`
-- rocket/ascent benchmarking, optimization, payload-margin campaigns, and
-  rocket guidance comparison workflows
+- Monte Carlo, sensitivity, covariance, and campaign orchestration;
+- controller benchmarks, comparison reports, optimization, and gain tuning;
+- OEL Scale catalog screening, refinement, operational stores, and synthetic
+  data generation;
+- intent-hypothesis evaluation and maneuver-investigation workflows;
+- orbit determination against external observations or precise products;
+- curated validation automation and private release/customer evidence;
+- AI-assisted reports and config assistance with explicit review and cost
+  gates;
+- custom GNC workbenches, spacecraft packages, cFS/SIL, and program-specific
+  integrations;
+- private `agents/pro/` instructions and capability routing for Pro workflows;
+- private onboarding, support, scenario migration, and customer deliverables.
 
-Those workflow accelerators are intentionally not part of the public export.
-Public modules that would otherwise expose those surfaces raise clear import
-errors explaining the boundary.
+The public Lambert planner is a bounded two-body trade-space tool. It does not
+make general optimization, uncertainty analysis, or operational maneuver
+planning public.
 
-AI report provider adapters, prompt templates, cost-estimation helpers, hosted
-LLM smoke configs, and generated AI report artifacts belong to the Pro layer.
-The public core may mention that Pro can add AI-assisted reporting, but public
-examples should not require API keys or hosted model accounts.
+## Promotion Rule
 
-## Design Principle
+Promote a capability when it improves adoption, inspectability, education, or
+trust in the core and can be published safely with honest limits.
 
-The public repo should feel complete as a simulation core. The pro repo should
-feel like workflow acceleration around that core, not like the place where the
-basic simulator lives.
+Keep a capability private when its primary value is expert labor reduction,
+analysis at scale, customer-specific integration, proprietary data handling, or
+packaged mission/release evidence.
+
+Public-safe validation evidence belongs public when it is reproducible,
+redistributable, and tied to a bounded claim. Customer data, proprietary
+reference material, generated private reports, and program-specific evidence do
+not.
+
+## Repository And Export Model
+
+The private repository is the source of truth. Public releases are generated,
+not hand-curated:
+
+1. Develop and validate changes privately.
+2. Deliberately promote public paths in
+   `docs/operations/public_surface_manifest.yaml`.
+3. Keep private surfaces in the defense-in-depth exclusions in
+   `docs/operations/public_export_exclude.txt`.
+4. Generate the export with `tools/export_public.py`.
+5. Run `tools/check_public_export.py` and the release gate.
+6. Review the generated public diff before opening or updating a public PR.
+
+Anything outside the positive public manifest is private by default. Never push
+the private working tree directly to the public repository.
+
+## Access Model
+
+Public examples require neither Pro nor hosted AI accounts. Early Pro access is
+handled through private engineering pilots whose scope should state supported
+workflows and versions, license terms, expected evidence, support boundaries,
+and any security, procurement, data-handling, or export constraints.
+
+For detailed private workflows, use the Pro User Guide in the full workspace.
+For public limitations, use [Known Limitations](known-limitations.md).

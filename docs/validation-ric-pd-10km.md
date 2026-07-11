@@ -1,23 +1,11 @@
-# RIC_PD 10 km Validation Package
+# Flagship RIC_PD 10 km Scenario And Validation
 
-This page defines the focused validation package for the flagship
-`configs/ric_pd_10km_experiment.yaml` scenario.
+`configs/ric_pd_10km_experiment.yaml` is the recommended engineering review
+scenario after the quickstart. It combines a tuned RIC_PD relative-orbit
+controller, two-body dynamics, reaction-wheel attitude control, and
+thrust-alignment gating in one deterministic run.
 
-## Validation Claim
-
-Under the assumptions encoded in `configs/ric_pd_10km_experiment.yaml`, the
-flagship RIC_PD 10 km RPO scenario should run deterministically to completion,
-close from a 10 km-class initial separation to a sub-10 m terminal range, keep
-terminal relative speed below 0.01 m/s, use less than 10 m/s total delta-v,
-avoid attitude guardrail events, and preserve finite chaser-target knowledge
-throughout the run.
-
-This is a scenario-level regression and evidence package. It is not a
-flight-qualification claim, external truth-model validation, or proof of
-performance outside the configured initial condition, dynamics, sensor,
-actuator, and controller assumptions.
-
-## Public Reproduction Path
+## Run And Review
 
 ```bash
 .venv/bin/python run_simulation.py --config configs/ric_pd_10km_experiment.yaml --validate-only
@@ -25,112 +13,79 @@ actuator, and controller assumptions.
 .venv/bin/python examples/python/flagship_analysis.py
 ```
 
-The public export ships the deterministic flagship scenario and the companion
-analysis script. The automated validation harness, Monte Carlo envelope,
-resource preflight, checkpointing, and evidence manifests live in the
-Pro/private workspace and are not part of the open-core checkout.
+Open `outputs/flagship_ric_pd_10km/index.md` first. It is the authoritative
+artifact inventory. Then inspect:
 
-The private validation suite performs:
+- `master_run_summary.json` for the run summary;
+- `rendezvous_summary.png`, `relative_ranges.png`, and
+  `trajectory_ric_curv_2d_multi.png` for relative motion;
+- `control_effort.png` for applied control;
+- `attitude_control_summary.png` and
+  `chaser_thrust_alignment_error.png` for orbit-attitude coupling;
+- `custom_analysis/flagship_metrics.json` for companion API metrics.
 
-- plugin validation for the flagship config,
-- one deterministic single-run simulation,
-- a three-run Monte Carlo perturbation envelope around the flagship initial
-  condition,
-- derived relative-motion checks for final range and final relative speed,
-- delta-v, burn-sample, attitude, and knowledge finite-history checks,
-- evidence-manifest generation with git, platform, dependency, and input
-  provenance.
+Selected examples also appear in the [Plot Gallery](plot-gallery.md).
 
-The deterministic single run also preserves the knowledge evidence chain:
-truth state, raw state measurements when present, and filtered knowledge
-estimates. Because the flagship config uses a deterministic near-perfect
-knowledge path, this artifact is primarily a traceability check for the
-controller validation. Noisy sensor-distribution and filter-noise-rejection
-claims belong to the `estimation_knowledge` and `sensor_measurements`
-validation suites, where nonzero sensor noise is part of the configured
+## What The Scenario Demonstrates
+
+- A chaser initialized approximately 10 km in-track from a passive target.
+- Public `RICPDTransferController` control on curvilinear RIC state.
+- Deterministic two-body dynamics with perturbations disabled.
+- Chaser attitude dynamics, reaction-wheel stabilization, and thrust gating.
+- JSON, CSV, SQLite, and PNG evidence suitable for a lightweight review.
+
+## Validation Claim
+
+Under the checked-in assumptions, the scenario should run deterministically to
+completion, close to a sub-10 m terminal range, keep terminal relative speed
+below 0.01 m/s, use less than 10 m/s total delta-v, avoid attitude guardrail
+events, and preserve finite chaser-target knowledge.
+
+This is a scenario-level regression claim. It is not flight qualification,
+external truth-model validation, operational safety evidence, or proof of
+performance outside the configured dynamics, sensing, actuator, and controller
 envelope.
 
 ## Acceptance Gates
 
-The private harness tracks these headline checks:
-
 | Gate | Threshold |
 | --- | ---: |
 | Initial range | `>= 9.0 km` |
-| Final range | `<= 0.01 km` |
-| Closest approach | `<= 0.01 km` |
+| Final range and closest approach | `<= 0.01 km` |
 | Final relative speed | `<= 0.01 m/s` |
 | Total delta-v | `<= 10.0 m/s` |
 | Chaser burn samples | `1` to `9000` |
 | Target burn samples | `0` |
 | Chaser max acceleration | `<= 6.000001e-5 km/s^2` |
 | Attitude guardrail events | `0` |
-| Chaser attitude finite fraction | `1.0` |
-| Chaser-target knowledge finite fraction | `1.0` |
+| Attitude and knowledge finite fractions | `1.0` |
 
-The private Monte Carlo envelope varies the initial in-track separation from
-`-12 km` to `-8 km`, initial radial velocity from `-0.25 m/s` to `+0.25 m/s`,
-and initial cross-track velocity from `0.7 m/s` to `1.3 m/s`. Each run must
-satisfy:
+The private three-run perturbation envelope varies initial in-track separation
+from `-12 km` to `-8 km`, radial velocity from `-0.25 m/s` to `+0.25 m/s`, and
+cross-track velocity from `0.7 m/s` to `1.3 m/s`. Each run must finish within
+`0.05 km` and `0.05 m/s`, remain below `12 m/s` delta-v and `11000` chaser
+burn samples, keep the target passive, and record no attitude guardrail events.
 
-| Monte Carlo per-run gate | Threshold |
-| --- | ---: |
-| Final range | `<= 0.05 km` |
-| Final relative speed | `<= 0.05 m/s` |
-| Total delta-v | `<= 12.0 m/s` |
-| Chaser burn samples | `<= 11000` |
-| Target burn samples | `0` |
-| Attitude guardrail events | `0` |
+## Evidence
 
-The aggregate harness gate requires all three runs to pass.
+The public path writes the run index, summary, review store, figures, and custom
+metrics. The private harness additionally writes its report, evidence manifest,
+attitude and estimation summaries, truth/measurement/estimate plot, single-run
+copy, and Monte Carlo checkpoints under
+`outputs/validation_harness_ric_pd_10km/`.
 
-## Evidence Artifacts
+The knowledge chain in this scenario is primarily a traceability check because
+the configured path is deterministic and near-perfect. Noise-distribution and
+filter-rejection claims belong to the dedicated sensor and
+`estimation_knowledge` suites.
 
-The public reproduction path writes:
+## Interpretation And Limits
 
-```text
-outputs/flagship_ric_pd_10km/index.md
-outputs/flagship_ric_pd_10km/master_run_summary.json
-outputs/flagship_ric_pd_10km/custom_analysis/flagship_metrics.json
-outputs/flagship_ric_pd_10km/custom_analysis/flagship_metrics.csv
-```
+Passing means the current implementation satisfies this configured acceptance
+envelope on the evaluated runtime. It protects the flagship path against
+regression and supports release review.
 
-The private harness additionally writes:
-
-```text
-outputs/validation_harness_ric_pd_10km/validation_harness_report.json
-outputs/validation_harness_ric_pd_10km/validation_harness_report.md
-outputs/validation_harness_ric_pd_10km/validation_evidence_manifest.json
-outputs/validation_harness_ric_pd_10km/validation_attitude_summary.json
-outputs/validation_harness_ric_pd_10km/validation_attitude_summary.md
-outputs/validation_harness_ric_pd_10km/validation_estimation_knowledge_summary.json
-outputs/validation_harness_ric_pd_10km/validation_estimation_knowledge_summary.md
-outputs/validation_harness_ric_pd_10km/ric_pd_10km_single_run/truth_measurement_estimate_chain.png
-```
-
-The private single-run benchmark also writes a copy of the scenario outputs under:
-
-```text
-outputs/validation_harness_ric_pd_10km/ric_pd_10km_single_run/
-outputs/validation_harness_ric_pd_10km/ric_pd_10km_monte_carlo/
-outputs/validation_harness_ric_pd_10km/ric_pd_10km_monte_carlo/mc_checkpoints/
-```
-
-## Interpretation
-
-Passing this package means the current implementation still satisfies the
-configured RIC_PD flagship acceptance envelope on the local runtime. It supports
-product confidence, release review, and regression protection for the flagship
-controller path.
-
-It does not validate:
-
-- arbitrary RPO geometries,
-- high-fidelity perturbation environments,
-- sensor-noise envelopes beyond the configured deterministic knowledge path,
-- flight-software timing,
-- actuator hardware behavior,
-- operational safety or rules of engagement.
-
-Use Monte Carlo, sensitivity, controller-bench, and HPOP-backed packages to
-expand the evidence envelope after this deterministic package is stable.
+It does not validate arbitrary RPO geometries, high-fidelity perturbations,
+hardware timing or actuators, broad sensor-noise envelopes, operational safety,
+or controller superiority. See [Validation Claims](validation-claims.md) and
+[Known Limitations](known-limitations.md) before generalizing the result.

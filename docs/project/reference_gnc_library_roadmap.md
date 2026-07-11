@@ -17,7 +17,7 @@ Use this roadmap with:
 - [Product Inventory](../product-inventory.md) for what currently ships.
 - [Controller Naming Conventions](controller_naming_conventions.md) for
   naming and migration rules.
-- [Controller Bench](../controller-bench.md) for comparative evaluation.
+- the private Controller Bench guide for comparative evaluation;
 - [Scenario YAML](../scenario-yaml.md) for plugin pointer syntax.
 
 ## Library Model

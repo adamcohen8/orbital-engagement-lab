@@ -59,13 +59,10 @@ Codex, Cursor, Claude Code, Gemini CLI, and similar tools should begin with:
 For evaluator-facing trials, use
 [`agent-evaluation-packet.md`](agent-evaluation-packet.md). For evidence-backed
 output inspection, use [`agent-review-queries.md`](agent-review-queries.md).
-For the shortest reproducible adoption workflows, use
-[`agent-golden-paths.md`](agent-golden-paths.md).
+For reproducible adoption paths and broader intent routing, use
+[`agent-capability-routing.md`](agent-capability-routing.md).
 For a machine-readable validate/run/inspect fast lane that writes reusable
 evidence packets, use [`agent-task-runner.md`](agent-task-runner.md).
-For mapping broad user intents to workflows, starting docs, evidence, and
-public-core limits, use
-[`agent-capability-routing.md`](agent-capability-routing.md).
 For public-safe upstream feedback discovered by agents, use
 [`agent-feedback-loop.md`](agent-feedback-loop.md).
 For repeatable public agent task checks, use
@@ -278,9 +275,8 @@ OD helpers.
 
 The maintained card set for these tasks lives in
 [`agent-task-cards.md`](agent-task-cards.md).
-The first-run golden paths for minimal propagation, closed-loop rendezvous, and
-mission recovery/reconstitution live in
-[`agent-golden-paths.md`](agent-golden-paths.md).
+The same routing guide contains first-run paths for propagation, rendezvous,
+and mission recovery.
 
 The agent should choose simple public defaults when the request is
 underspecified, write those defaults into the generated YAML, validate before

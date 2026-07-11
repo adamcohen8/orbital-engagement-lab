@@ -227,8 +227,7 @@ Focused regression coverage lives in:
 - `sim/tests/test_orbit_relative_mpc.py`
 - `sim/tests/test_review_store.py`
 
-The public flagship RIC_PD scenario is documented in
-`docs/flagship-ric-pd-10km.md`; its validation posture and limits are
+The public flagship RIC_PD scenario, validation posture, and limits are
 documented in `docs/validation-ric-pd-10km.md`.
 
 ## Game And Trainer References
