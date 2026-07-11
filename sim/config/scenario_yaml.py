@@ -565,6 +565,7 @@ class AnalysisSection:
     sensitivity: SensitivitySection = field(default_factory=SensitivitySection)
     covariance: CovarianceSection = field(default_factory=CovarianceSection)
     mission_recovery: MissionRecoverySection = field(default_factory=MissionRecoverySection)
+    orbital_delivery: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -2259,6 +2260,87 @@ def _parse_orbit_transfer_planner_section(
     }
 
 
+def _parse_orbital_delivery_section(value: Any) -> dict[str, Any]:
+    d = _as_dict(value, "analysis.orbital_delivery")
+    if not d:
+        return {}
+    _reject_unknown_fields(
+        d,
+        "analysis.orbital_delivery",
+        {"enabled", "deployed_object_id", "reference_object_id", "target", "feasibility"},
+    )
+    enabled = _parse_bool(d.get("enabled", True), "analysis.orbital_delivery.enabled")
+    deployed_object_id = str(d.get("deployed_object_id", "") or "").strip()
+    reference_object_id = str(d.get("reference_object_id", "") or "").strip()
+    target = _as_dict(d.get("target"), "analysis.orbital_delivery.target")
+    _reject_unknown_fields(target, "analysis.orbital_delivery.target", {"frame", "state", "coes", "anomaly_policy"})
+    if enabled and not deployed_object_id:
+        raise ValueError("analysis.orbital_delivery.deployed_object_id is required when enabled.")
+    if enabled and not target:
+        raise ValueError("analysis.orbital_delivery.target is required when enabled.")
+    if not target:
+        return {
+            "enabled": enabled,
+            "deployed_object_id": deployed_object_id,
+            "reference_object_id": reference_object_id,
+            "target": {},
+            "feasibility": {},
+        }
+    frame = str(target.get("frame", "eci") or "eci").strip().lower()
+    if frame not in {"eci", "coes", "relative_ric"}:
+        raise ValueError("analysis.orbital_delivery.target.frame must be one of: eci, coes, relative_ric.")
+    if frame == "eci":
+        state = target.get("state")
+        if not isinstance(state, list) or len(state) != 6 or not all(math.isfinite(float(x)) for x in state):
+            raise ValueError("analysis.orbital_delivery.target.state must be a finite length-6 ECI state.")
+    elif frame == "coes":
+        coes = target.get("coes", {}) or {}
+        required = {"a_km", "ecc", "inc_deg", "raan_deg", "argp_deg"}
+        if not isinstance(coes, dict) or not required.issubset(coes):
+            raise ValueError(
+                "analysis.orbital_delivery.target.coes must define a_km, ecc, inc_deg, raan_deg, and argp_deg."
+            )
+        anomaly_policy = str(target.get("anomaly_policy", "configured") or "configured").strip().lower()
+        if anomaly_policy not in {"configured", "match_actual"}:
+            raise ValueError(
+                "analysis.orbital_delivery.target.anomaly_policy must be 'configured' or 'match_actual'."
+            )
+        if anomaly_policy == "configured" and not any(key in coes for key in ("true_anomaly_deg", "ta_deg")):
+            raise ValueError(
+                "analysis.orbital_delivery.target.coes requires true_anomaly_deg when anomaly_policy is configured."
+            )
+    else:
+        state = target.get("state")
+        if not isinstance(state, list) or len(state) != 6 or not all(math.isfinite(float(x)) for x in state):
+            raise ValueError("analysis.orbital_delivery.target.state must be a finite length-6 RIC state.")
+        if not reference_object_id:
+            raise ValueError("analysis.orbital_delivery.reference_object_id is required for a relative_ric target.")
+    feasibility = _as_dict(d.get("feasibility"), "analysis.orbital_delivery.feasibility")
+    allowed_feasibility = {
+        "max_position_error_km",
+        "max_velocity_error_m_s",
+        "max_correction_dv_m_s",
+        "max_abs_a_error_km",
+        "max_abs_ecc_error",
+        "max_abs_inc_error_deg",
+        "max_abs_raan_error_deg",
+    }
+    _reject_unknown_fields(feasibility, "analysis.orbital_delivery.feasibility", allowed_feasibility)
+    normalized_feasibility = {
+        str(key): _parse_float(raw, f"analysis.orbital_delivery.feasibility.{key}")
+        for key, raw in feasibility.items()
+    }
+    if any(value < 0.0 for value in normalized_feasibility.values()):
+        raise ValueError("analysis.orbital_delivery.feasibility thresholds must be non-negative.")
+    return {
+        "enabled": enabled,
+        "deployed_object_id": deployed_object_id,
+        "reference_object_id": reference_object_id,
+        "target": dict(target),
+        "feasibility": normalized_feasibility,
+    }
+
+
 def _parse_analysis_section(value: Any) -> AnalysisSection:
     d = _as_dict(value, "analysis")
     _reject_unknown_fields(
@@ -2274,6 +2356,7 @@ def _parse_analysis_section(value: Any) -> AnalysisSection:
             "sensitivity",
             "covariance",
             "mission_recovery",
+            "orbital_delivery",
         },
     )
     metrics = d.get("metrics", []) or []
@@ -2289,6 +2372,7 @@ def _parse_analysis_section(value: Any) -> AnalysisSection:
         sensitivity=_parse_sensitivity_section(d.get("sensitivity")),
         covariance=_parse_covariance_section(d.get("covariance")),
         mission_recovery=_parse_mission_recovery_section(d.get("mission_recovery")),
+        orbital_delivery=_parse_orbital_delivery_section(d.get("orbital_delivery")),
     )
     if out.study_type not in {"monte_carlo", "sensitivity", "covariance"}:
         raise ValueError("analysis.study_type must be one of: monte_carlo, sensitivity, covariance.")
@@ -2435,6 +2519,7 @@ def _parse_outputs_section(value: Any, path_policy: ConfigPathPolicy | None = No
 
 def _validate_physics_runtime_settings(cfg: SimulationScenarioConfig) -> None:
     orbit = dict((cfg.simulator.dynamics or {}).get("orbit", {}) or {})
+    reentry = dict((cfg.simulator.dynamics or {}).get("reentry", {}) or {})
     propagation_method = str(orbit.get("propagation_method", "special") or "special").strip().lower()
     if propagation_method not in {"special", "general"}:
         raise ValueError("simulator.dynamics.orbit.propagation_method must be one of: special, general.")
@@ -2443,6 +2528,33 @@ def _validate_physics_runtime_settings(cfg: SimulationScenarioConfig) -> None:
         raise ValueError("simulator.dynamics.orbit.integrator must be one of: adaptive, dopri5, rk4, rkf78.")
 
     env = dict(cfg.simulator.environment or {})
+    if _parse_bool(reentry.get("enabled", False), "simulator.dynamics.reentry.enabled"):
+        if not _parse_bool(orbit.get("drag", False), "simulator.dynamics.orbit.drag"):
+            raise ValueError(
+                "simulator.dynamics.reentry.enabled requires simulator.dynamics.orbit.drag=true "
+                "so reported atmospheric loads and heating use a trajectory propagated with drag."
+            )
+        reentry_atmosphere = str(reentry.get("atmosphere_model", "") or "").strip().lower().replace("-", "_")
+        environment_atmosphere = str(env.get("atmosphere_model", "") or "").strip().lower().replace("-", "_")
+        atmosphere_aliases = {
+            "hp": "harris_priester",
+            "hpop_harris_priester": "harris_priester",
+            "hpop_msis86": "msis86",
+            "hpop_jacchia70": "jacchia70",
+        }
+        reentry_atmosphere = atmosphere_aliases.get(reentry_atmosphere, reentry_atmosphere)
+        environment_atmosphere = atmosphere_aliases.get(environment_atmosphere, environment_atmosphere)
+        if (
+            env.get("density_kg_m3") is None
+            and reentry_atmosphere
+            and environment_atmosphere
+            and reentry_atmosphere != environment_atmosphere
+        ):
+            raise ValueError(
+                "simulator.dynamics.reentry.atmosphere_model must match "
+                "simulator.environment.atmosphere_model. Configure the shared atmospheric model under "
+                "simulator.environment; the reentry field is a compatibility alias only."
+            )
     if _parse_bool(orbit.get("drag", False), "simulator.dynamics.orbit.drag") or _parse_bool(
         orbit.get("lift", False), "simulator.dynamics.orbit.lift"
     ):

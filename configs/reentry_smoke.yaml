@@ -29,15 +29,16 @@ simulator:
   dynamics:
     orbit:
       model: two_body
-      drag: false
+      drag: true
     reentry:
       enabled: true
       begin_altitude_km: 130.0
       object_ids:
       - capsule
-      atmosphere_model: ussa1976
     attitude:
       enabled: false
+  environment:
+    atmosphere_model: ussa1976
   termination:
     earth_impact_enabled: false
 outputs:

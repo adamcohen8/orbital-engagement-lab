@@ -5,6 +5,7 @@ from typing import Any
 
 import numpy as np
 
+from sim.analysis.orbital_delivery import build_orbital_delivery_summary
 from sim.config import SimulationScenarioConfig, default_pair_object_ids, default_reference_object_id
 from sim.dynamics.orbit.frames import frame_context_from_mapping
 from sim.ground_stations import evaluate_ground_station_access, evaluate_ground_station_measurements
@@ -273,6 +274,13 @@ def build_single_run_payload(context: SingleRunPayloadContext) -> dict[str, Any]
             "max_aero_moment_nm": _max_finite("aero_moment_nm"),
         }
         summary["rocket_metrics_summary"] = rocket_summary
+    orbital_delivery = build_orbital_delivery_summary(
+        cfg=context.cfg,
+        t_s=context.t_s,
+        truth_hist=context.truth_hist,
+    )
+    if orbital_delivery:
+        summary["orbital_delivery"] = orbital_delivery
     object_state_frames = {
         str(object_id): str(
             dict(context.object_propagation.get(object_id, {}) or {}).get("state_history_frame", "eci") or "eci"

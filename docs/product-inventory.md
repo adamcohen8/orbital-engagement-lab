@@ -47,7 +47,7 @@ explicit packaging decision.
 | RPO Trainer | Public | Flagship | `run_game.py`, game configs and debriefs | Educational; not operational training qualification. |
 | Rocket ascent, aero, and re-entry | Public | Workbench | public configs, rocket contract, model docs | First-pass engineering models with bounded validation evidence. |
 | ML/RL wrappers | Public | Experimental | [ML/RL Policy Contracts](ml-rl-contracts.md) | Optional dependencies and limited reproducible benchmark coverage. |
-| Campaigns, sensitivity, covariance, and controller bench | Pro | Reference | Private workflow guides and contracts | Not included as public workflow automation. |
+| Campaigns, sensitivity, covariance, orbital-delivery accuracy, and controller bench | Pro | Reference | Private workflow guides and contracts | Includes rocket-driven payload delivery covariance, percentile, correction-delta-v proxy, and RPO feasibility evidence; not included as public workflow automation. |
 | Batch relative/absolute orbit determination | Pro | Reference | Private OD contract and validation workflows | Public live estimators do not imply public batch-OD packaging. |
 | OEL Scale and intent-hypothesis evaluation | Pro | Experimental | Private contracts, fixtures, and roadmaps | Phase-0 product surfaces; no operational catalog or intent claim. |
 | AI-assisted reports and config assistance | Pro | Workbench | Private staged estimate/create workflows | Requires explicit provider, data, cost, and human-review decisions. |

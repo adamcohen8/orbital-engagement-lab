@@ -6,6 +6,38 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.20.2 - 2026-07-11
+
+Release thesis: `v0.20.2` makes re-entry evidence physically consistent by
+requiring diagnostic heating and load calculations to accompany a trajectory
+propagated with atmospheric drag.
+
+Private/Pro scope: `v0.20.2` also adds a rocket orbital-delivery accuracy workflow for downstream RPO feasibility studies, with deterministic dispersion sampling and review-ready evidence.
+
+### Added
+
+- Added validation coverage for drag-coupled re-entry trajectories and shared atmosphere-model configuration.
+- Added Pro orbital-delivery targets in ECI, classical elements, or relative RIC; single-run delivery errors; Monte Carlo covariance and percentiles; a bounded correction-delta-v proxy; and RPO feasibility rates.
+- Added positive rocket-stage dry-mass, propellant, thrust, and specific-impulse scale factors for deterministic campaign variation.
+- Added a Pro orbital-delivery accuracy contract and an illustrative 24-run rocket-to-payload campaign fixture with explicit non-claim language.
+
+### Changed
+
+- Re-entry diagnostics now require `simulator.dynamics.orbit.drag: true` and use the atmosphere configured under `simulator.environment`.
+- Monte Carlo summaries and output indexes now include orbital-delivery evidence when that private analysis is configured.
+
+### Fixed
+
+- Fixed configurations that could report atmospheric heating and loads for a trajectory propagated without the corresponding drag force.
+- Fixed mismatched re-entry and environment atmosphere selections by rejecting them during scenario validation.
+- Fixed orbital-delivery campaigns with no successful deployment so they report zero delivery and feasibility rates instead of omitting aggregate evidence.
+- Fixed enabled orbital-delivery sections with missing object or target definitions so they fail during validation rather than at runtime.
+
+### Migration Notes
+
+- Scenarios with re-entry diagnostics enabled must explicitly enable orbit drag and configure their atmosphere under `simulator.environment`; a legacy re-entry atmosphere alias is accepted only when it matches.
+- Orbital-delivery dispersion outputs are scenario-conditioned OEL evidence, not launch-provider accuracy claims, unless distributions are calibrated to documented mission data.
+
 ## 0.20.1 - 2026-07-11
 
 Release thesis: `v0.20.1` consolidates overlapping public documentation into

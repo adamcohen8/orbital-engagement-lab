@@ -499,10 +499,10 @@ run. Full controller-debug histories are opt-in with
 ### Atmospheric Passes And Re-Entry
 
 Atmospheric passes and re-entry diagnostics live under
-`simulator.dynamics.reentry`. This feature does not silently change the force
-model: `simulator.dynamics.orbit.drag` still controls whether atmospheric drag
-and lift affect the trajectory. Re-entry tracking is active while a selected
-object is below `begin_altitude_km`; summaries still record whether the object
+`simulator.dynamics.reentry`. Enabled re-entry diagnostics require
+`simulator.dynamics.orbit.drag: true`, so reported atmospheric loads and heating
+always accompany a trajectory propagated with drag. Re-entry tracking is active
+while a selected object is below `begin_altitude_km`; summaries still record whether the object
 ever entered, episode count, latest exit time, and cumulative heat load. That
 means a vehicle can dip below the threshold for an aero-assisted pass, burn back
 above it, and no longer be considered currently in re-entry.
@@ -538,8 +538,9 @@ simulator:
 
 When orbit drag or lift is enabled, `simulator.environment.atmosphere_model`
 or an explicit `density_kg_m3` is required; no orbital atmosphere is selected
-implicitly. `simulator.dynamics.reentry.atmosphere_model` can independently
-select the diagnostic model. Supported deterministic local models include
+implicitly. Re-entry diagnostics use that same atmospheric source. The legacy
+`simulator.dynamics.reentry.atmosphere_model` field is accepted only when it
+matches the environment model. Supported deterministic local models include
 `exponential`, `ussa1976`, `msis86`, `nrlmsise00`, `jacchia70`,
 `jb2006`, `jb2008`, and `harris_priester`. `msis86` and `nrlmsise00` are
 source-local backends copied from MATLAB HPOP and can run without external files
@@ -740,6 +741,7 @@ spherical_harmonics:
 
 The private validation tree may contain HPOP reference data, but those files are
 not bundled with the public core.
+
 
 ## Mission Recovery Analysis
 

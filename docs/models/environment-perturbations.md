@@ -131,8 +131,9 @@ Key knobs:
 
 ## Atmospheric Density, Drag, And Lift
 
-Drag is enabled by `simulator.dynamics.orbit.drag`. Re-entry diagnostics do not
-enable drag by themselves.
+Drag is enabled by `simulator.dynamics.orbit.drag`. Enabled re-entry diagnostics
+require drag so diagnostic loads and heating cannot be reported against a
+trajectory that omits the corresponding drag force.
 
 ```yaml
 simulator:
