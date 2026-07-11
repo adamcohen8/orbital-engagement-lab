@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
+import pytest
 import yaml
 
 from sim.config import scenario_config_from_dict, validate_scenario_plugins
@@ -34,15 +35,15 @@ def _reentry_config(tmp_path: Path) -> dict:
             "duration_s": 2.0,
             "dt_s": 1.0,
             "dynamics": {
-                "orbit": {"drag": False},
+                "orbit": {"drag": True},
                 "reentry": {
                     "enabled": True,
                     "begin_altitude_km": 130.0,
                     "object_ids": ["capsule"],
-                    "atmosphere_model": "ussa1976",
                 },
                 "attitude": {"enabled": False},
             },
+            "environment": {"atmosphere_model": "ussa1976"},
             "termination": {"earth_impact_enabled": False},
         },
         "outputs": {
@@ -69,6 +70,22 @@ def test_reentry_metrics_activate_and_summarize(tmp_path: Path) -> None:
     assert np.nanmax(np.array(metrics["dynamic_pressure_pa"], dtype=float)) > 0.0
     assert np.nanmax(np.array(metrics["heat_rate_w_m2"], dtype=float)) > 0.0
     assert np.nanmax(np.array(metrics["heat_load_j_m2"], dtype=float)) > 0.0
+
+
+def test_reentry_requires_drag_coupled_trajectory(tmp_path: Path) -> None:
+    raw = _reentry_config(tmp_path)
+    raw["simulator"]["dynamics"]["orbit"]["drag"] = False
+
+    with pytest.raises(ValueError, match=r"reentry\.enabled requires .*orbit\.drag=true"):
+        scenario_config_from_dict(raw)
+
+
+def test_reentry_rejects_atmosphere_model_mismatch(tmp_path: Path) -> None:
+    raw = _reentry_config(tmp_path)
+    raw["simulator"]["dynamics"]["reentry"]["atmosphere_model"] = "exponential"
+
+    with pytest.raises(ValueError, match="reentry.atmosphere_model must match"):
+        scenario_config_from_dict(raw)
 
 
 def test_reentry_relative_speed_uses_configured_drag_frame() -> None:

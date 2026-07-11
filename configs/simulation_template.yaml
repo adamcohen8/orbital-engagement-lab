@@ -353,7 +353,6 @@ simulator:
       enabled: false
       begin_altitude_km: 300.0
       object_ids: []
-      atmosphere_model: ussa1976
       heat_rate_coefficient: 0.000183
       termination:
         enabled: false

@@ -310,13 +310,24 @@ def _monte_carlo_metrics(payload: dict[str, Any]) -> list[str]:
     aggregate = dict(payload.get("aggregate_stats", {}) or {})
     commander = dict(payload.get("commander_brief", {}) or {})
     runs = list(payload.get("runs", []) or [])
-    return [
+    lines = [
         f"- Iterations: `{len(runs) if runs else _scalar(dict(payload.get('monte_carlo', {}) or {}).get('iterations'))}`",
         f"- Pass rate: `{_scalar(aggregate.get('pass_rate', commander.get('p_success')))}`",
         f"- Closest approach mean: `{_scalar(aggregate.get('closest_approach_km_mean'))} km`",
         f"- Keepout violation probability: `{_scalar(aggregate.get('p_keepout_violation', commander.get('p_keepout_violation')))}`",
         f"- Total delta-v mean: `{_scalar(aggregate.get('total_dv_m_s_mean'))} m/s`",
     ]
+    delivery = dict(payload.get("orbital_delivery", {}) or {})
+    if delivery:
+        lines.extend(
+            [
+                f"- Payload delivery success rate: `{_scalar(delivery.get('delivery_success_rate'))}`",
+                f"- RPO insertion feasibility rate: `{_scalar(delivery.get('rpo_feasibility_rate'))}`",
+                f"- Delivery position error P95: `{_scalar(dict(delivery.get('position_error_km', {}) or {}).get('p95'))} km`",
+                f"- Delivery velocity error P95: `{_scalar(dict(delivery.get('velocity_error_m_s', {}) or {}).get('p95'))} m/s`",
+            ]
+        )
+    return lines
 
 
 def _sensitivity_metrics(payload: dict[str, Any]) -> list[str]:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import inspect
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable
 
@@ -1183,7 +1183,44 @@ def _resolve_rocket_stack(specs: dict[str, Any]) -> RocketStackPreset:
     if preset not in by_name:
         valid = ", ".join(sorted(by_name.keys()))
         raise ValueError(f"Unknown rocket.specs.preset_stack '{preset}'. Valid options: {valid}")
-    return by_name[preset]
+    stack = by_name[preset]
+    scales = {
+        "dry_mass_scale": float(specs.get("dry_mass_scale", 1.0)),
+        "propellant_mass_scale": float(specs.get("propellant_mass_scale", 1.0)),
+        "thrust_scale": float(specs.get("thrust_scale", 1.0)),
+        "isp_scale": float(specs.get("isp_scale", 1.0)),
+    }
+    if any((not np.isfinite(value)) or value <= 0.0 for value in scales.values()):
+        raise ValueError("Rocket stage performance scales must be finite and positive.")
+    if all(abs(value - 1.0) <= 1e-15 for value in scales.values()):
+        return stack
+    stages = tuple(
+        replace(
+            stage,
+            dry_mass_kg=float(stage.dry_mass_kg) * scales["dry_mass_scale"],
+            propellant_mass_kg=float(stage.propellant_mass_kg) * scales["propellant_mass_scale"],
+            max_thrust_n=float(stage.max_thrust_n) * scales["thrust_scale"],
+            isp_s=float(stage.isp_s) * scales["isp_scale"],
+            sea_level_thrust_n=(
+                None
+                if stage.sea_level_thrust_n is None
+                else float(stage.sea_level_thrust_n) * scales["thrust_scale"]
+            ),
+            vacuum_thrust_n=(
+                None
+                if stage.vacuum_thrust_n is None
+                else float(stage.vacuum_thrust_n) * scales["thrust_scale"]
+            ),
+            sea_level_isp_s=(
+                None if stage.sea_level_isp_s is None else float(stage.sea_level_isp_s) * scales["isp_scale"]
+            ),
+            vacuum_isp_s=(
+                None if stage.vacuum_isp_s is None else float(stage.vacuum_isp_s) * scales["isp_scale"]
+            ),
+        )
+        for stage in stack.stages
+    )
+    return RocketStackPreset(name=f"{stack.name} (scaled)", stages=stages)
 
 
 def _build_rocket_guidance(agent_cfg: Any) -> RocketGuidanceLaw:
