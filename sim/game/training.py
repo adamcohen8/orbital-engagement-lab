@@ -652,6 +652,11 @@ class RPOTrainingTracker:
         self._thrust_ric_array = np.zeros((0, 3), dtype=float)
         self._target_thrust_array = np.zeros((0, 3), dtype=float)
         self._mean_motion_array = np.zeros(0, dtype=float)
+        self._range_array = np.zeros(0, dtype=float)
+        self._speed_array = np.zeros(0, dtype=float)
+        self._goal_error_array = np.zeros(0, dtype=float)
+        self._delta_v_interval_km_s_array = np.zeros(0, dtype=float)
+        self._target_delta_v_interval_km_s_array = np.zeros(0, dtype=float)
         self._nmt_radial_amplitude_array = np.zeros(0, dtype=float)
         self._nmt_cross_track_amplitude_array = np.zeros(0, dtype=float)
         self._nmt_radial_amplitude_error_array = np.zeros(0, dtype=float)
@@ -867,11 +872,16 @@ class RPOTrainingTracker:
         if idx >= int(self._history_capacity):
             self._grow_history_arrays(max(idx + 1, 64 if self._history_capacity <= 0 else self._history_capacity * 2))
         self._t_array[idx] = float(t_s)
-        self._rel_array[idx, :] = np.array(rel, dtype=float).reshape(6)
+        rel_arr = np.asarray(rel, dtype=float).reshape(6)
+        self._rel_array[idx, :] = rel_arr
         self._thrust_array[idx, :] = np.array(thrust, dtype=float).reshape(3)
         self._thrust_ric_array[idx, :] = np.array(thrust_ric, dtype=float).reshape(3)
         self._target_thrust_array[idx, :] = np.array(target_thrust, dtype=float).reshape(3)
         self._mean_motion_array[idx] = float(mean_motion_rad_s)
+        self._delta_v_interval_km_s_array[idx] = self._delta_v_interval_km_s(idx, thrust)
+        self._target_delta_v_interval_km_s_array[idx] = self._delta_v_interval_km_s(idx, target_thrust)
+        self._range_array[idx] = float(np.sqrt(np.sum(rel_arr[:3] * rel_arr[:3])))
+        self._speed_array[idx] = float(np.sqrt(np.sum(rel_arr[3:6] * rel_arr[3:6])))
         self._append_nmt_element_arrays(
             idx=idx,
             rel=rel,
@@ -879,7 +889,43 @@ class RPOTrainingTracker:
             target_state=target_state,
             chaser_state=chaser_state,
         )
+        self._goal_error_array[idx] = self._goal_error_value(idx, rel_arr)
         self._history_count = idx + 1
+
+    def _delta_v_interval_km_s(self, idx: int, thrust_km_s2: np.ndarray) -> float:
+        if idx <= 0:
+            return 0.0
+        dt_s = float(self._t_array[idx] - self._t_array[idx - 1])
+        thrust = np.asarray(thrust_km_s2, dtype=float).reshape(3)
+        accel_km_s2 = float(np.sqrt(np.sum(thrust * thrust)))
+        if not np.isfinite(accel_km_s2) or not np.isfinite(dt_s) or dt_s <= 0.0:
+            return float("nan")
+        return accel_km_s2 * dt_s
+
+    def _goal_error_value(self, idx: int, rel: np.ndarray) -> float:
+        position = np.asarray(rel, dtype=float).reshape(6)[:3]
+        if self.config.goal_nmt_radial_amplitude_km is not None:
+            if self.config.goal_nmt_tolerance_km is not None:
+                return float(
+                    nmt_position_error_km(
+                        position,
+                        radial_amplitude_km=float(self.config.goal_nmt_radial_amplitude_km),
+                        cross_track_amplitude_km=float(self.config.goal_nmt_cross_track_amplitude_km),
+                        cross_track_phase_deg=float(self.config.goal_nmt_cross_track_phase_deg),
+                        center_ric_km=self.config.goal_nmt_center_ric_km,
+                    )[0]
+                )
+            return float(self._nmt_element_goal_error_array[idx])
+        if self.config.goal_range_km is not None:
+            current_range = float(self._range_array[idx])
+            if self.config.goal_range_tolerance_km is None:
+                return max(current_range - float(self.config.goal_range_km), 0.0)
+            return abs(current_range - float(self.config.goal_range_km))
+        if self.config.inspection_gates:
+            gate_centers = np.vstack([gate.center_ric_km for gate in self.config.inspection_gates])
+            return float(np.min(np.linalg.norm(position.reshape(1, 3) - gate_centers, axis=1)))
+        delta = position - self.config.goal_relative_ric_km.reshape(3)
+        return float(np.sqrt(np.sum(delta * delta)))
 
     def _grow_history_arrays(self, capacity: int) -> None:
         new_capacity = int(max(capacity, 1))
@@ -903,6 +949,11 @@ class RPOTrainingTracker:
         self._thrust_ric_array = grow_2d(self._thrust_ric_array, 3)
         self._target_thrust_array = grow_2d(self._target_thrust_array, 3)
         self._mean_motion_array = grow_1d(self._mean_motion_array)
+        self._range_array = grow_1d(self._range_array)
+        self._speed_array = grow_1d(self._speed_array)
+        self._goal_error_array = grow_1d(self._goal_error_array, fill_value=float("nan"))
+        self._delta_v_interval_km_s_array = grow_1d(self._delta_v_interval_km_s_array)
+        self._target_delta_v_interval_km_s_array = grow_1d(self._target_delta_v_interval_km_s_array)
         self._nmt_radial_amplitude_array = grow_1d(self._nmt_radial_amplitude_array, fill_value=float("nan"))
         self._nmt_cross_track_amplitude_array = grow_1d(
             self._nmt_cross_track_amplitude_array, fill_value=float("nan")
@@ -1393,15 +1444,22 @@ class RPOTrainingTracker:
         coast_after_burn_satisfied, coast_after_burn_idx, coast_after_burn_s = self._coast_after_burn_status()
         guided_tutorial_burns_satisfied = self.guided_tutorial_burns_satisfied()
         guided_tutorial_speed_satisfied = self.guided_tutorial_speed_satisfied()
-        ranges = np.linalg.norm(rel[:, :3], axis=1)
-        speeds = np.linalg.norm(rel[:, 3:], axis=1)
+        if self._history_arrays_available():
+            count = int(rel.shape[0])
+            ranges = self._range_array[:count]
+            speeds = self._speed_array[:count]
+        else:
+            ranges = np.linalg.norm(rel[:, :3], axis=1)
+            speeds = np.linalg.norm(rel[:, 3:], axis=1)
         element_errors = None
         if (
             self.config.goal_nmt_radial_amplitude_km is not None
             or self.config.max_cross_track_amplitude_km is not None
         ) and n_hist.size:
             element_errors = self._nmt_element_error_arrays(rel, n_hist)
-        if self.config.goal_nmt_radial_amplitude_km is not None:
+        if self._history_arrays_available():
+            goal_err = self._goal_error_array[: int(rel.shape[0])]
+        elif self.config.goal_nmt_radial_amplitude_km is not None:
             if self.config.goal_nmt_tolerance_km is not None:
                 goal_err = nmt_position_error_km(
                     rel[:, :3],
@@ -1490,8 +1548,17 @@ class RPOTrainingTracker:
                     target_reference_range_violation = True
             else:
                 target_reference_range_violation = True
-        dv_m_s = _integrated_delta_v_m_s(thrust, t)
-        target_dv_m_s = _integrated_delta_v_m_s(target_thrust, t)
+        if self._history_arrays_available():
+            count = int(self._history_count)
+            dv_intervals = self._delta_v_interval_km_s_array[1:count]
+            target_dv_intervals = self._target_delta_v_interval_km_s_array[1:count]
+            dv_m_s = float(np.sum(dv_intervals[np.isfinite(dv_intervals)]) * 1.0e3)
+            target_dv_m_s = float(
+                np.sum(target_dv_intervals[np.isfinite(target_dv_intervals)]) * 1.0e3
+            )
+        else:
+            dv_m_s = _integrated_delta_v_m_s(thrust, t)
+            target_dv_m_s = _integrated_delta_v_m_s(target_thrust, t)
         inspection_gate_status = self._inspection_gate_status()
         goal_met_samples = np.ones(rel.shape[0], dtype=bool)
         if self.config.survival_goal:

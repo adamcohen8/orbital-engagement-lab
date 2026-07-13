@@ -97,10 +97,12 @@ class SimulatorAccelerationSection(_TypedConfigDict):
 
 class SimulatorExecutionSection(_TypedConfigDict):
     _defaults = {
+        "policy": "configured",
         "object_parallelism": {
             "enabled": False,
             "backend": "serial",
             "workers": 0,
+            "max_workers": 0,
             "reserve_workers": 1,
             "min_objects": 3,
         },
@@ -867,6 +869,12 @@ def _enforce_strict_booleans(value: Any, path: str = "root") -> None:
     if isinstance(value, dict):
         for key, child in value.items():
             child_path = f"{path}.{key}"
+            if (
+                child_path == "root.simulator.execution.object_parallelism.enabled"
+                and isinstance(child, str)
+                and child.strip().lower() == "auto"
+            ):
+                continue
             if _is_bool_like_key(str(key)) and not isinstance(child, bool):
                 raise ValueError(f"{child_path} must be a boolean true/false value, not {child!r}.")
             _enforce_strict_booleans(child, child_path)
@@ -1675,7 +1683,11 @@ def _parse_acceleration_section(value: Any) -> dict[str, Any]:
 
 def _parse_simulator_execution_section(value: Any) -> dict[str, Any]:
     d = _as_dict(value, "simulator.execution")
-    _reject_unknown_fields(d, "simulator.execution", {"object_parallelism", "runtime_profiler", "controller"})
+    _reject_unknown_fields(
+        d,
+        "simulator.execution",
+        {"policy", "object_parallelism", "runtime_profiler", "controller"},
+    )
     object_parallelism = _as_dict(d.get("object_parallelism"), "simulator.execution.object_parallelism")
     runtime_profiler = _as_dict(d.get("runtime_profiler"), "simulator.execution.runtime_profiler")
     controller = _as_dict(d.get("controller"), "simulator.execution.controller")
@@ -1683,14 +1695,42 @@ def _parse_simulator_execution_section(value: Any) -> dict[str, Any]:
     if backend not in {"serial", "process_pool"}:
         raise ValueError("simulator.execution.object_parallelism.backend must be one of: serial, process_pool.")
     workers = int(object_parallelism.get("workers", 0) or 0)
+    max_workers = int(object_parallelism.get("max_workers", 0) or 0)
     reserve_workers = int(object_parallelism.get("reserve_workers", 1) or 0)
     min_objects = int(object_parallelism.get("min_objects", 3) or 0)
     if workers < 0:
         raise ValueError("simulator.execution.object_parallelism.workers must be >= 0.")
+    if max_workers < 0:
+        raise ValueError("simulator.execution.object_parallelism.max_workers must be >= 0.")
     if reserve_workers < 0:
         raise ValueError("simulator.execution.object_parallelism.reserve_workers must be >= 0.")
     if min_objects < 1:
         raise ValueError("simulator.execution.object_parallelism.min_objects must be >= 1.")
+    policy = str(d.get("policy", "configured") or "configured").strip().lower()
+    raw_enabled = object_parallelism.get("enabled", False)
+    if isinstance(raw_enabled, str) and raw_enabled.strip().lower() == "auto":
+        if policy not in {"configured", "auto"}:
+            raise ValueError(
+                "simulator.execution.object_parallelism.enabled=auto conflicts with "
+                f"simulator.execution.policy={policy!r}."
+            )
+        policy = "auto"
+        enabled = True
+    else:
+        enabled = _parse_bool(
+            raw_enabled,
+            "simulator.execution.object_parallelism.enabled",
+        )
+    if policy not in {"configured", "serial", "parallel", "auto"}:
+        raise ValueError(
+            "simulator.execution.policy must be one of: auto, configured, parallel, serial."
+        )
+    if policy == "serial":
+        enabled = False
+        backend = "serial"
+    elif policy in {"parallel", "auto"}:
+        enabled = True
+        backend = "process_pool"
     orbit_budget_ms = _parse_float(
         controller.get("orbit_budget_ms", 2.0),
         "simulator.execution.controller.orbit_budget_ms",
@@ -1708,14 +1748,13 @@ def _parse_simulator_execution_section(value: Any) -> dict[str, Any]:
         )
     return {
         **d,
+        "policy": policy,
         "object_parallelism": {
             **object_parallelism,
-            "enabled": _parse_bool(
-                object_parallelism.get("enabled", False),
-                "simulator.execution.object_parallelism.enabled",
-            ),
+            "enabled": enabled,
             "backend": backend,
             "workers": workers,
+            "max_workers": max_workers,
             "reserve_workers": reserve_workers,
             "min_objects": min_objects,
         },

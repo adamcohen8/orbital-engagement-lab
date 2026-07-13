@@ -458,27 +458,8 @@ The legacy per-force settings `drag_frame_model`, `drag_eop_path`, and
 scenario-level default for that subsystem. Payload and review output record the
 resolved model, EOP path, and time-scale assumptions in `frame_provenance`.
 
-Single-run object stepping is serial by default. Experimental within-scenario
-object workers can be enabled for parity and profiling runs:
+The public core uses deterministic serial object stepping. Automatic within-scenario object workers and hierarchical campaign/object process planning are available in OEL Pro; see `docs/public-vs-pro.md` for the product boundary.
 
-```yaml
-simulator:
-  resource_profile: off
-  execution:
-    object_parallelism:
-      enabled: true
-      backend: process_pool
-      workers: 6
-      reserve_workers: 2
-      min_objects: 3
-```
-
-`backend: process_pool` uses a fixed-size subprocess pool with chunked object
-work while the main simulator remains the timeline orchestrator. Worker count
-may be lower than object count. Each chunk shares one immutable start-of-step
-world snapshot, and knowledge synchronization remains centralized for
-deterministic observer ordering. It remains opt-in: measure the target workload
-because small scenarios can still be slower than serial execution.
 
 Controller timing is configured independently:
 

@@ -83,7 +83,7 @@ class AttitudeEKFEstimator(Estimator):
     ) -> tuple[np.ndarray, np.ndarray]:
         dt_s = max(float(to_t_s) - float(from_t_s), 0.0)
         x_pred = self._propagate_state(x_prev, dt_s=dt_s)
-        f = self._numerical_jacobian(x_prev, dt_s=dt_s)
+        f = self._numerical_jacobian(x_prev, base=x_pred, dt_s=dt_s)
         q_scale = dt_s / self.dt_s if self.dt_s > 0.0 else 1.0
         q = np.diag(self.process_noise_diag) * max(q_scale, 0.0)
         p_pred = f @ p_prev @ f.T + q
@@ -108,20 +108,29 @@ class AttitudeEKFEstimator(Estimator):
         w_next = w + step_dt_s * w_dot
         return np.hstack((q_next, w_next))
 
-    def _numerical_jacobian(self, x: np.ndarray, *, dt_s: float | None = None) -> np.ndarray:
+    def _numerical_jacobian(
+        self,
+        x: np.ndarray,
+        *,
+        base: np.ndarray | None = None,
+        dt_s: float | None = None,
+    ) -> np.ndarray:
+        step_dt_s = self.dt_s if dt_s is None else float(dt_s)
         eps = 1e-6
-        base = self._propagate_state(x, dt_s=dt_s)
+        base_eval = base
+        if base_eval is None:
+            base_eval = self._propagate_state(x, dt_s=step_dt_s)
         if self._acceleration_enabled():
             return attitude_ekf_numerical_jacobian_kernel(
                 np.asarray(x, dtype=float).reshape(7),
-                np.asarray(base, dtype=float).reshape(7),
-                self.dt_s if dt_s is None else float(dt_s),
+                np.asarray(base_eval, dtype=float).reshape(7),
+                step_dt_s,
                 np.asarray(self.inertia_kg_m2, dtype=float).reshape(3, 3),
             )
         j = np.zeros((7, 7))
         for i in range(7):
             xp = x.copy()
             xp[i] += eps
-            yp = self._propagate_state(xp, dt_s=dt_s)
-            j[:, i] = (yp - base) / eps
+            yp = self._propagate_state(xp, dt_s=step_dt_s)
+            j[:, i] = (yp - base_eval) / eps
         return j

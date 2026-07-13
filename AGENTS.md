@@ -17,6 +17,21 @@ read `docs/agent-capability-routing.md`. For repeatable recipe execution,
 completed-run inspection, comparison packets, and standard review plots, read
 `docs/agent-task-runner.md`.
 
+## Instruction Scope And Product Boundary
+
+- Follow the closest applicable `AGENTS.md`. This root file is the public-safe
+  baseline, and `agents/public/AGENTS.md` expands public workflows. A private
+  workspace may provide closer instructions for its authorized surfaces.
+- Keep public and non-public evidence separate. Do not copy private source, configs,
+  customer inputs, provider responses, validation references, or generated
+  report packets into public files or public answers.
+- Public-core single-scenario execution uses deterministic serial object
+  stepping. Automatic within-scenario object workers, hierarchical
+  campaign/object planning, Monte Carlo, sensitivity, config queues, and
+  controller benchmarks are not public-core capabilities. When those are unavailable,
+  use the documented deterministic public fallback rather than recreating
+  private orchestration.
+
 ## Default Agent Posture
 
 - Treat scenario YAML, CLI commands, Python APIs, tests, docs, and generated
@@ -42,6 +57,9 @@ completed-run inspection, comparison packets, and standard review plots, read
 - Generate scenario YAML from natural language only when the resulting config
   can be validated before execution. For user-provided or otherwise unfamiliar
   YAML, run `--safe-validate` before ordinary importing validation.
+- Treat `--safe-validate` as an inspection boundary, not permission to execute
+  an untrusted config. Trust referenced plugins, modules, and external paths
+  before ordinary validation or execution.
 - Run `.venv/bin/python run_simulation.py --config <path> --validate-only` before running
   a new or edited scenario.
 - Treat unknown-field errors as intent failures; do not remove or rename fields
@@ -58,6 +76,13 @@ completed-run inspection, comparison packets, and standard review plots, read
 - Explain orbital mechanics, equations, controllers, and outputs from public
   source and public docs only.
 - Call out uncertainty, missing validation evidence, and model limits plainly.
+- Treat output folders as derived evidence. Confirm that artifacts belong to
+  the current config/run before citing them; rerun when provenance or freshness
+  is uncertain.
+- For performance changes, compare the same inputs before and after, require
+  deterministic output parity at the appropriate tolerance, and run the
+  applicable external validation workflow. Report timing separately from
+  physics correctness and identify the measured hardware/configuration.
 - When OEL itself appears hard to use, confusing, or missing an agent-facing
   workflow, follow `docs/agent-feedback-loop.md`: prepare a public-safe
   feedback draft, ask the user for permission, and submit only after approval.

@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.axes import Axes
 
+import sim.plotting.single_run as single_run_plotting
 import sim.plotting.style as oel_style
 from sim import SimulationConfig
 from sim.master_outputs import PLOT_PRESETS, plot_outputs
@@ -346,7 +347,7 @@ def test_ric_2d_projection_can_mark_target_burns(
     assert any(call.get("label") == "target burn" and call.get("color") == "#F97316" for call in scatter_calls)
 
 
-def test_plot_outputs_expands_public_plot_presets(tmp_path: Path) -> None:
+def test_plot_outputs_expands_public_plot_presets(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     assert "run_dashboard" in PLOT_PRESETS["minimal"]
     cfg = scenario_config_from_dict(
         {
@@ -412,6 +413,15 @@ def test_plot_outputs_expands_public_plot_presets(tmp_path: Path) -> None:
         obs: {tgt: np.array(arr, dtype=float) for tgt, arr in by_tgt.items()}
         for obs, by_tgt in dict(payload["knowledge_measurements_by_observer"]).items()
     }
+    coe_calls = 0
+    original_coe_series = single_run_plotting._classical_orbital_elements_series
+
+    def _counted_coe_series(*args: object, **kwargs: object) -> dict[str, np.ndarray]:
+        nonlocal coe_calls
+        coe_calls += 1
+        return original_coe_series(*args, **kwargs)
+
+    monkeypatch.setattr(single_run_plotting, "_classical_orbital_elements_series", _counted_coe_series)
 
     out = plot_outputs(
         cfg=cfg,
@@ -429,6 +439,7 @@ def test_plot_outputs_expands_public_plot_presets(tmp_path: Path) -> None:
         knowledge_measurement_hist=measurements,
     )
 
+    assert coe_calls == 1
     assert set(out) >= {
         "run_dashboard",
         "rendezvous_summary",
@@ -456,6 +467,123 @@ def test_plot_outputs_expands_public_plot_presets(tmp_path: Path) -> None:
         path = Path(artifact)
         assert path.exists()
         assert path.stat().st_size > 0
+
+
+def test_orbital_element_cache_preserves_line_data_exactly() -> None:
+    payload = _payload()
+    t_s = np.asarray(payload["time_s"], dtype=float)
+    truth = {
+        object_id: np.asarray(history, dtype=float)
+        for object_id, history in dict(payload["truth_by_object"]).items()
+    }
+    fig_uncached, axes_uncached = plt.subplots(3, 2)
+    fig_cached, axes_cached = plt.subplots(3, 2)
+    shared_cache: single_run_plotting.OrbitalElementSeriesCache = {}
+
+    for uncached_ax, cached_ax, element_id in zip(
+        axes_uncached.ravel(),
+        axes_cached.ravel(),
+        single_run_plotting.ORBITAL_ELEMENT_SPECS,
+    ):
+        single_run_plotting._plot_element_on_axis(
+            uncached_ax,
+            t_s=t_s,
+            truth_by_object=truth,
+            element_id=element_id,
+            object_id=None,
+        )
+        single_run_plotting._plot_element_on_axis(
+            cached_ax,
+            t_s=t_s,
+            truth_by_object=truth,
+            element_id=element_id,
+            object_id=None,
+            series_cache=shared_cache,
+        )
+        assert [line.get_label() for line in cached_ax.lines] == [line.get_label() for line in uncached_ax.lines]
+        for cached_line, uncached_line in zip(cached_ax.lines, uncached_ax.lines):
+            assert np.array_equal(cached_line.get_xdata(), uncached_line.get_xdata(), equal_nan=True)
+            assert np.array_equal(cached_line.get_ydata(), uncached_line.get_ydata(), equal_nan=True)
+
+    assert set(shared_cache) == set(truth)
+    assert all(entry[1].shape[1] == 6 for entry in shared_cache.values())
+    plt.close(fig_uncached)
+    plt.close(fig_cached)
+
+
+def test_orbital_element_cache_invalidates_for_new_history_with_same_object_id() -> None:
+    payload = _payload()
+    t_s = np.asarray(payload["time_s"], dtype=float)
+    first_history = np.asarray(dict(payload["truth_by_object"])["target"], dtype=float)
+    second_history = first_history.copy()
+    second_history[:, 0] += 1000.0
+    shared_cache: single_run_plotting.OrbitalElementSeriesCache = {}
+
+    first_fig = plot_orbital_element(
+        t_s=t_s,
+        truth_by_object={"sat": first_history},
+        element_id="a",
+        orbital_elements_cache=shared_cache,
+    )
+    second_fig = plot_orbital_element(
+        t_s=t_s,
+        truth_by_object={"sat": second_history},
+        element_id="a",
+        orbital_elements_cache=shared_cache,
+    )
+
+    expected_second = single_run_plotting._classical_orbital_elements_series(second_history)["a"]
+    assert np.array_equal(second_fig.axes[0].lines[0].get_ydata(), expected_second, equal_nan=True)
+    assert not np.array_equal(
+        first_fig.axes[0].lines[0].get_ydata(),
+        second_fig.axes[0].lines[0].get_ydata(),
+        equal_nan=True,
+    )
+    plt.close(first_fig)
+    plt.close(second_fig)
+
+
+def test_orbital_element_cache_invalidates_for_in_place_history_change() -> None:
+    payload = _payload()
+    t_s = np.asarray(payload["time_s"], dtype=float)
+    history = np.asarray(dict(payload["truth_by_object"])["target"], dtype=float)
+    shared_cache: single_run_plotting.OrbitalElementSeriesCache = {}
+
+    first_fig = plot_orbital_element(
+        t_s=t_s,
+        truth_by_object={"sat": history},
+        element_id="a",
+        orbital_elements_cache=shared_cache,
+    )
+    first_series = np.array(first_fig.axes[0].lines[0].get_ydata(), copy=True)
+    history[:, 0] += 1000.0
+    second_fig = plot_orbital_element(
+        t_s=t_s,
+        truth_by_object={"sat": history},
+        element_id="a",
+        orbital_elements_cache=shared_cache,
+    )
+
+    expected_second = single_run_plotting._classical_orbital_elements_series(history)["a"]
+    assert np.array_equal(second_fig.axes[0].lines[0].get_ydata(), expected_second, equal_nan=True)
+    assert not np.array_equal(first_series, second_fig.axes[0].lines[0].get_ydata(), equal_nan=True)
+    plt.close(first_fig)
+    plt.close(second_fig)
+
+
+def test_orbital_element_cache_accepts_float_convertible_object_history() -> None:
+    payload = _payload()
+    t_s = np.asarray(payload["time_s"], dtype=float)
+    history = np.asarray(dict(payload["truth_by_object"])["target"], dtype=object)
+
+    fig = plot_orbital_elements_summary(
+        t_s=t_s,
+        truth_by_object={"sat": history},
+    )
+
+    expected = single_run_plotting._classical_orbital_elements_series(history)["a"]
+    assert np.array_equal(fig.axes[0].lines[0].get_ydata(), expected, equal_nan=True)
+    plt.close(fig)
 
 
 def test_orbital_element_plots_tolerate_invalid_coe_samples(tmp_path: Path) -> None:

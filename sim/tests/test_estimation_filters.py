@@ -106,6 +106,39 @@ def test_attitude_ekf_update_avoids_np_inv_and_preserves_symmetric_covariance() 
     assert np.all(np.linalg.eigvalsh(updated.covariance) >= -1e-12)
 
 
+def test_attitude_ekf_predict_reuses_nominal_propagation_exactly() -> None:
+    estimator = AttitudeEKFEstimator(
+        dt_s=0.1,
+        inertia_kg_m2=np.diag([10.0, 12.0, 8.0]),
+        process_noise_diag=np.arange(1.0, 8.0) * 1e-10,
+        meas_noise_diag=np.ones(7) * 1e-6,
+    )
+    state = np.hstack(
+        (
+            normalize_quaternion(np.array([1.0, 0.01, -0.02, 0.005])),
+            np.array([0.01, -0.02, 0.03]),
+        )
+    )
+    covariance = np.diag(np.arange(1.0, 8.0) * 1e-4)
+    dt_s = 0.25
+    expected_state = estimator._propagate_state(state, dt_s=dt_s)
+    legacy_jacobian = estimator._numerical_jacobian(state, dt_s=dt_s)
+    q = np.diag(estimator.process_noise_diag) * (dt_s / estimator.dt_s)
+    expected_covariance = legacy_jacobian @ covariance @ legacy_jacobian.T + q
+
+    with patch.object(estimator, "_propagate_state", wraps=estimator._propagate_state) as propagate:
+        actual_state, actual_covariance = estimator._predict(
+            state,
+            covariance,
+            from_t_s=0.0,
+            to_t_s=dt_s,
+        )
+
+    assert propagate.call_count == 8
+    assert np.array_equal(actual_state, expected_state)
+    assert np.array_equal(actual_covariance, expected_covariance)
+
+
 def test_attitude_ekf_propagates_by_elapsed_belief_time() -> None:
     estimator = AttitudeEKFEstimator(
         dt_s=1.0,

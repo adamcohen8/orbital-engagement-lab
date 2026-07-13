@@ -1,3 +1,4 @@
+# ruff: noqa: E402 -- CLI thread policy must run before NumPy-backed imports.
 from __future__ import annotations
 
 import argparse
@@ -5,6 +6,27 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+
+_NATIVE_MATH_THREAD_ENV_VARS = (
+    "VECLIB_MAXIMUM_THREADS",
+    "OMP_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+    "BLIS_NUM_THREADS",
+)
+
+
+def _configure_cli_native_math_threads(default_threads: str = "1") -> None:
+    value = str(default_threads).strip()
+    if not value.isdigit() or int(value) <= 0:
+        raise ValueError("default native math thread count must be a positive integer.")
+    for name in _NATIVE_MATH_THREAD_ENV_VARS:
+        os.environ.setdefault(name, value)
+
+
+if __name__ == "__main__":
+    _configure_cli_native_math_threads()
 
 from sim.config import load_simulation_yaml, validate_scenario_plugins
 from sim.execution import run_simulation_config_file

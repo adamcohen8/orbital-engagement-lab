@@ -2,19 +2,34 @@ from __future__ import annotations
 
 import io
 import json
-import sqlite3
 import subprocess
 import sys
 from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
-import numpy as np
 import pytest
 import yaml
 
 import run_simulation
 from sim.execution import run_simulation_config_file
+
+
+def test_cli_native_math_thread_defaults_preserve_explicit_overrides(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for name in run_simulation._NATIVE_MATH_THREAD_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("OPENBLAS_NUM_THREADS", "4")
+
+    run_simulation._configure_cli_native_math_threads()
+
+    assert run_simulation.os.environ["OPENBLAS_NUM_THREADS"] == "4"
+    assert all(
+        run_simulation.os.environ[name] == "1"
+        for name in run_simulation._NATIVE_MATH_THREAD_ENV_VARS
+        if name != "OPENBLAS_NUM_THREADS"
+    )
 
 
 def _single_run_summary_text(summary: dict) -> str:
@@ -73,109 +88,6 @@ def test_quickstart_5min_runs_headlessly_and_writes_start_here_artifacts(tmp_pat
     assert profile["object_totals"]["chaser"]["nested_stage_total_s"] >= 0.0
     assert "satellite_step" in profile["object_totals"]["chaser"]["stages"]
     assert profile["slowest_objects"]
-
-
-def test_quickstart_process_pool_object_executor_smoke(tmp_path: Path) -> None:
-    root = Path(__file__).resolve().parents[2]
-    source_cfg = root / "configs" / "quickstart_5min.yaml"
-    config = yaml.safe_load(source_cfg.read_text(encoding="utf-8"))
-    config["objects"]["observer"] = {
-        "enabled": True,
-        "kind": "satellite",
-        "specs": {
-            "mass_kg": 100.0,
-            "mass_properties": {
-                "inertia_reference_point": "center_of_mass",
-                "inertia_kg_m2": [
-                    [10.0, 0.0, 0.0],
-                    [0.0, 10.0, 0.0],
-                    [0.0, 0.0, 10.0],
-                ]
-            },
-        },
-        "initial_state": {
-            "position_eci_km": [7010.0, 0.0, 0.0],
-            "velocity_eci_km_s": [0.0, 7.49, 0.0],
-            "angular_rate_body_rad_s": [2.0e6, 0.0, 0.0],
-        },
-    }
-    config["simulator"]["duration_s"] = 10.0
-    config["simulator"]["resource_profile"] = "off"
-    config["simulator"]["dynamics"]["attitude"]["guardrail_policy"] = "sanitize"
-    config["outputs"]["plots"]["enabled"] = False
-    config["outputs"]["plots"]["figure_ids"] = []
-    config["outputs"]["animations"]["enabled"] = False
-    config["outputs"]["animations"]["types"] = []
-
-    serial_config = yaml.safe_load(yaml.safe_dump(config, sort_keys=False))
-    serial_outdir = tmp_path / "quickstart_serial"
-    serial_config["simulator"]["execution"] = {
-        "object_parallelism": {
-            "enabled": False,
-            "backend": "serial",
-        }
-    }
-    serial_config["outputs"]["output_dir"] = str(serial_outdir)
-    serial_cfg_path = tmp_path / "quickstart_serial.yaml"
-    serial_cfg_path.write_text(yaml.safe_dump(serial_config, sort_keys=False), encoding="utf-8")
-    run_simulation_config_file(serial_cfg_path)
-
-    outdir = tmp_path / "quickstart_process_pool"
-    config["simulator"]["execution"] = {
-        "object_parallelism": {
-            "enabled": True,
-            "backend": "process_pool",
-            "workers": 2,
-            "min_objects": 3,
-        }
-    }
-    config["outputs"]["output_dir"] = str(outdir)
-
-    cfg_path = tmp_path / "quickstart_process_pool.yaml"
-    cfg_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
-
-    try:
-        run_simulation_config_file(cfg_path)
-    except RuntimeError as exc:
-        if "ProcessPoolObjectStepExecutor is unavailable" in str(exc):
-            pytest.skip(str(exc))
-        raise
-
-    serial_summary = json.loads((serial_outdir / "master_run_summary.json").read_text(encoding="utf-8"))
-    summary = json.loads((outdir / "master_run_summary.json").read_text(encoding="utf-8"))
-    profile = summary["runtime_profile"]
-    assert profile["executor"]["object_step_backend"] == "process_pool"
-    assert profile["executor"]["object_step_workers"] == 2
-    assert profile["stage_totals"]["object_step"]["count"] > 0
-    assert set(profile["object_totals"]) == {"chaser", "target", "observer"}
-    assert summary["attitude_guardrail_stats"] == serial_summary["attitude_guardrail_stats"]
-    assert summary["attitude_guardrail_stats"]["rate_clamp_events"] > 0
-    state_columns = (
-        "pos_x_eci_km, pos_y_eci_km, pos_z_eci_km, "
-        "vel_x_eci_km_s, vel_y_eci_km_s, vel_z_eci_km_s"
-    )
-    serial_db = sqlite3.connect(serial_outdir / "review" / "run.sqlite")
-    process_db = sqlite3.connect(outdir / "review" / "run.sqlite")
-    try:
-        for object_id in summary["objects"]:
-            serial_state = np.array(
-                serial_db.execute(
-                    f"SELECT {state_columns} FROM object_state WHERE object_id = ? ORDER BY time_s DESC LIMIT 1",
-                    (object_id,),
-                ).fetchone(),
-                dtype=float,
-            )
-            process_state = np.array(
-                process_db.execute(
-                    f"SELECT {state_columns} FROM object_state WHERE object_id = ? ORDER BY time_s DESC LIMIT 1",
-                    (object_id,),
-                ).fetchone(),
-                dtype=float,
-            )
-            assert np.allclose(process_state, serial_state, rtol=0.0, atol=1e-9)
-    finally:
-        serial_db.close()
-        process_db.close()
 
 
 def test_quickstart_cli_shortcut_validates() -> None:

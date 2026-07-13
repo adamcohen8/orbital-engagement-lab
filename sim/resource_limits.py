@@ -227,10 +227,15 @@ def apply_resource_profile_to_config_dict(root: dict[str, Any], profile_name: st
     simulator_execution = _dict_section(simulator, "execution")
     object_parallelism = _dict_section(simulator_execution, "object_parallelism")
     if profile.force_serial:
+        if str(simulator_execution.get("policy", "configured") or "configured").strip().lower() != "parallel":
+            simulator_execution["policy"] = "serial"
         object_parallelism["enabled"] = False
         object_parallelism["backend"] = "serial"
         object_parallelism["workers"] = 1
-    elif profile.max_parallel_workers is not None and object_parallelism.get("enabled", False):
+    elif profile.max_parallel_workers is not None and (
+        object_parallelism.get("enabled", False)
+        or str(simulator_execution.get("policy", "")).strip().lower() in {"auto", "parallel"}
+    ):
         current = int(object_parallelism.get("workers", 0) or 0)
         if current <= 0:
             object_parallelism["workers"] = int(profile.max_parallel_workers)
