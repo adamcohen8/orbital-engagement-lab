@@ -19,6 +19,10 @@ from sim.utils.quaternion import quaternion_to_dcm_bn
 
 ArrayMap = dict[str, np.ndarray]
 NestedArrayMap = dict[str, dict[str, np.ndarray]]
+OrbitalElementSeriesCache = dict[
+    str,
+    tuple[np.ndarray, np.ndarray, dict[str, np.ndarray]],
+]
 RICSummaryFrame = Literal["rectangular", "curvilinear"]
 
 ORBITAL_ELEMENT_SPECS: dict[str, tuple[str, str]] = {
@@ -800,13 +804,30 @@ def _plot_element_on_axis(
     element_id: str,
     object_id: str | None,
     label_prefix: bool = False,
+    series_cache: OrbitalElementSeriesCache | None = None,
 ) -> bool:
     plotted = False
     for oid in _orbital_element_object_ids(truth_by_object, object_id):
         hist = truth_by_object.get(oid)
         if hist is None:
             continue
-        series = _classical_orbital_elements_series(hist).get(element_id)
+        state_history = np.asarray(hist, dtype=float)
+        if state_history.ndim == 2:
+            state_history = state_history[:, :6]
+        cached = None if series_cache is None else series_cache.get(oid)
+        if (
+            cached is not None
+            and cached[0] is hist
+            and np.array_equal(cached[1], state_history, equal_nan=True)
+        ):
+            elements = cached[2]
+        else:
+            elements = _classical_orbital_elements_series(state_history)
+            if series_cache is not None:
+                source_snapshot = np.array(state_history, copy=True)
+                source_snapshot.setflags(write=False)
+                series_cache[oid] = (hist, source_snapshot, elements)
+        series = elements.get(element_id)
         if series is None:
             continue
         n = min(t_s.size, series.size)
@@ -1578,6 +1599,7 @@ def plot_orbital_element(
     t_s: np.ndarray | None = None,
     truth_by_object: ArrayMap | None = None,
     object_id: str | None = None,
+    orbital_elements_cache: OrbitalElementSeriesCache | None = None,
     out_path: str | Path | None = None,
     show: bool = False,
     close: bool = False,
@@ -1591,6 +1613,7 @@ def plot_orbital_element(
         raise ValueError(f"Unknown orbital element '{element_id}'. Valid elements: {valid}")
     t = np.array([] if t_s is None else t_s, dtype=float).reshape(-1)
     truth = dict(truth_by_object or {})
+    series_cache = orbital_elements_cache
     title, unit = ORBITAL_ELEMENT_SPECS[element_key]
 
     fig, ax = plt.subplots(figsize=cap_figsize(10, 5))
@@ -1600,6 +1623,7 @@ def plot_orbital_element(
         truth_by_object=truth,
         element_id=element_key,
         object_id=object_id,
+        series_cache=series_cache,
     )
     if not plotted:
         ax.text(0.5, 0.5, "No valid COE samples available", ha="center", va="center", transform=ax.transAxes)
@@ -1620,6 +1644,7 @@ def plot_orbital_elements_summary(
     t_s: np.ndarray | None = None,
     truth_by_object: ArrayMap | None = None,
     object_id: str | None = None,
+    orbital_elements_cache: OrbitalElementSeriesCache | None = None,
     out_path: str | Path | None = None,
     show: bool = False,
     close: bool = False,
@@ -1629,6 +1654,7 @@ def plot_orbital_elements_summary(
         t_s, truth_by_object, _, _, _, _ = _payload_arrays(payload)
     t = np.array([] if t_s is None else t_s, dtype=float).reshape(-1)
     truth = dict(truth_by_object or {})
+    series_cache = {} if orbital_elements_cache is None else orbital_elements_cache
 
     fig, axes = plt.subplots(3, 2, figsize=cap_figsize(13, 10), sharex=True)
     for ax, element_key in zip(axes.ravel(), ORBITAL_ELEMENT_SPECS.keys()):
@@ -1639,6 +1665,7 @@ def plot_orbital_elements_summary(
             truth_by_object=truth,
             element_id=element_key,
             object_id=object_id,
+            series_cache=series_cache,
         )
         if not plotted:
             ax.text(0.5, 0.5, "No valid samples", ha="center", va="center", transform=ax.transAxes)
@@ -1661,6 +1688,7 @@ def plot_orbital_elements_angles(
     t_s: np.ndarray | None = None,
     truth_by_object: ArrayMap | None = None,
     object_id: str | None = None,
+    orbital_elements_cache: OrbitalElementSeriesCache | None = None,
     out_path: str | Path | None = None,
     show: bool = False,
     close: bool = False,
@@ -1670,6 +1698,7 @@ def plot_orbital_elements_angles(
         t_s, truth_by_object, _, _, _, _ = _payload_arrays(payload)
     t = np.array([] if t_s is None else t_s, dtype=float).reshape(-1)
     truth = dict(truth_by_object or {})
+    series_cache = {} if orbital_elements_cache is None else orbital_elements_cache
     angle_ids = ("inc", "raan", "argp", "true_anomaly")
 
     fig, ax = plt.subplots(figsize=cap_figsize(11, 5.5))
@@ -1683,6 +1712,7 @@ def plot_orbital_elements_angles(
                 element_id=element_key,
                 object_id=object_id,
                 label_prefix=True,
+                series_cache=series_cache,
             )
             or plotted
         )

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from math import hypot
 from pathlib import Path
 from time import perf_counter
 from typing import Any
@@ -2851,20 +2852,31 @@ class PygameRPODashboard:
         if len(points) < 2:
             return
         pygame = self.pygame
+        draw_line = pygame.draw.line
+        screen = self.screen
+        dash = float(dash_px)
+        stride = float(dash_px + gap_px)
         for start, end in zip(points[:-1], points[1:]):
-            p0 = np.array(start, dtype=float)
-            p1 = np.array(end, dtype=float)
-            seg = p1 - p0
-            length = float(np.linalg.norm(seg))
+            x0 = float(start[0])
+            y0 = float(start[1])
+            dx = float(end[0]) - x0
+            dy = float(end[1]) - y0
+            length = hypot(dx, dy)
             if length <= 0.0:
                 continue
-            direction = seg / length
+            ux = dx / length
+            uy = dy / length
             pos = 0.0
             while pos < length:
-                a = p0 + direction * pos
-                b = p0 + direction * min(pos + dash_px, length)
-                pygame.draw.line(self.screen, color, (int(a[0]), int(a[1])), (int(b[0]), int(b[1])), width=width)
-                pos += dash_px + gap_px
+                stop = min(pos + dash, length)
+                draw_line(
+                    screen,
+                    color,
+                    (int(x0 + ux * pos), int(y0 + uy * pos)),
+                    (int(x0 + ux * stop), int(y0 + uy * stop)),
+                    width=width,
+                )
+                pos += stride
 
     def _draw_dashed_ellipse(
         self,

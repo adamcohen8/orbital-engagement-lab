@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import logging
 import os
-from concurrent.futures import ProcessPoolExecutor
+import pickle
 from copy import copy
 from dataclasses import asdict, dataclass, field, replace
+from multiprocessing import get_context
 from pathlib import Path
 from time import perf_counter
+from traceback import format_exc
 from typing import Any, Callable, Protocol
 
 import numpy as np
@@ -38,6 +40,7 @@ from sim.dynamics.reentry import (
     reentry_config_from_dynamics,
     reentry_metrics_for_state,
 )
+from sim.pro_features import FEATURE_OBJECT_PARALLELISM, require_pro_feature
 from sim.reporting.single_run_artifacts import (
     SingleRunArtifactContext,
     write_single_run_artifacts,
@@ -76,6 +79,10 @@ from sim.single_run_support import (
 )
 
 logger = logging.getLogger(__name__)
+
+OBJECT_WORKER_BUDGET_ENV = "OEL_OBJECT_WORKER_BUDGET"
+CAMPAIGN_WORKER_COUNT_ENV = "OEL_CAMPAIGN_WORKER_COUNT"
+TOTAL_PROCESS_BUDGET_ENV = "OEL_TOTAL_PROCESS_BUDGET"
 
 
 def _effective_propagation_method(cfg: SimulationScenarioConfig, agent_cfg: Any) -> str:
@@ -189,6 +196,7 @@ class ObjectStepInput:
 @dataclass(frozen=True)
 class ObjectStepMessage:
     object_id: str
+    knowledge_base: Any | None
     initial_truth: StateTruth
     world_truth_decision: dict[str, StateTruth]
     t_s: float
@@ -284,7 +292,8 @@ class ProcessPoolObjectStepExecutor:
     def __init__(self, engine: _SingleRunEngine, *, max_workers: int) -> None:
         self.engine = engine
         self.max_workers = int(max(1, max_workers))
-        self._executors: list[ProcessPoolExecutor] = []
+        self._worker_processes: list[Any] = []
+        self._worker_connections: list[Any] = []
         self._executor_index_by_object: dict[str, int] = {}
 
     def _initialize_workers(self, inputs: list[ObjectStepInput]) -> None:
@@ -298,12 +307,16 @@ class ProcessPoolObjectStepExecutor:
                     item.object_id: self.engine._process_worker_engine_snapshot(item)
                     for item in group
                 }
-                executor = ProcessPoolExecutor(
-                    max_workers=1,
-                    initializer=_persistent_object_workers_init,
-                    initargs=(snapshots,),
+                parent_connection, worker_connection = get_context().Pipe(duplex=True)
+                process = get_context().Process(
+                    target=_persistent_object_worker_loop,
+                    args=(worker_connection, snapshots),
+                    name=f"oel-object-worker-{worker_index}",
                 )
-                self._executors.append(executor)
+                process.start()
+                worker_connection.close()
+                self._worker_processes.append(process)
+                self._worker_connections.append(parent_connection)
                 for item in group:
                     self._executor_index_by_object[item.object_id] = worker_index
         except Exception as exc:
@@ -316,18 +329,19 @@ class ProcessPoolObjectStepExecutor:
     def step_objects(self, inputs: list[ObjectStepInput]) -> list[ObjectStepResult]:
         if len(inputs) <= 1:
             return [self.engine._step_object_serial(item) for item in inputs]
-        if not self._executors:
+        if not self._worker_processes:
             self._initialize_workers(inputs)
         input_ids = {item.object_id for item in inputs}
         if input_ids != set(self._executor_index_by_object):
             raise RuntimeError("Persistent object worker membership changed after initialization.")
-        chunks: list[list[tuple[int, ObjectStepMessage]]] = [[] for _ in self._executors]
+        chunks: list[list[tuple[int, ObjectStepMessage]]] = [[] for _ in self._worker_processes]
         for index, item in enumerate(inputs):
             chunks[self._executor_index_by_object[item.object_id]].append(
                 (
                     index,
                     ObjectStepMessage(
                         object_id=item.object_id,
+                        knowledge_base=item.agent.knowledge_base,
                         initial_truth=item.initial_truth,
                         world_truth_decision=item.world_truth_decision,
                         t_s=item.t_s,
@@ -336,12 +350,18 @@ class ProcessPoolObjectStepExecutor:
                     ),
                 )
             )
-        futures = [
-            self._executors[index].submit(_persistent_object_step_batch_worker, chunk)
-            for index, chunk in enumerate(chunks)
-            if chunk
-        ]
-        indexed = [row for future in futures for row in future.result()]
+        active_indices = [index for index, chunk in enumerate(chunks) if chunk]
+        for index in active_indices:
+            self._worker_connections[index].send(chunks[index])
+        indexed: list[tuple[int, ObjectStepResult]] = []
+        for index in active_indices:
+            status, payload = self._worker_connections[index].recv()
+            if status != "ok":
+                message, worker_traceback = payload
+                raise RuntimeError(
+                    f"Persistent object worker {index} failed: {message}\n{worker_traceback}"
+                )
+            indexed.extend(payload)
         indexed.sort(key=lambda row: row[0])
         return [result for _index, result in indexed]
 
@@ -358,9 +378,17 @@ class ProcessPoolObjectStepExecutor:
         return None
 
     def shutdown(self) -> None:
-        for executor in self._executors:
-            executor.shutdown(wait=True, cancel_futures=True)
-        self._executors.clear()
+        for connection in self._worker_connections:
+            try:
+                connection.send(None)
+            except (BrokenPipeError, EOFError, OSError):
+                pass
+        for connection in self._worker_connections:
+            connection.close()
+        for process in self._worker_processes:
+            process.join()
+        self._worker_connections.clear()
+        self._worker_processes.clear()
         self._executor_index_by_object.clear()
 
 
@@ -370,6 +398,22 @@ _PERSISTENT_OBJECT_WORKER_ENGINES: dict[str, _SingleRunEngine] = {}
 def _persistent_object_workers_init(engines: dict[str, _SingleRunEngine]) -> None:
     global _PERSISTENT_OBJECT_WORKER_ENGINES
     _PERSISTENT_OBJECT_WORKER_ENGINES = dict(engines)
+
+
+def _persistent_object_worker_loop(connection: Any, engines: dict[str, _SingleRunEngine]) -> None:
+    _persistent_object_workers_init(engines)
+    try:
+        while True:
+            chunk = connection.recv()
+            if chunk is None:
+                return
+            try:
+                connection.send(("ok", _persistent_object_step_batch_worker(chunk)))
+            except Exception as exc:
+                connection.send(("error", (str(exc), format_exc())))
+                return
+    finally:
+        connection.close()
 
 
 def _persistent_object_step_worker(message: ObjectStepMessage) -> ObjectStepResult:
@@ -389,12 +433,27 @@ def _persistent_object_step_batch_worker(
 def _run_object_step_worker(engine: _SingleRunEngine, message: ObjectStepMessage) -> ObjectStepResult:
     aid = str(message.object_id)
     agent = engine.agents[aid]
+    # Knowledge is updated centrally after each object step. Refresh the
+    # persistent worker's copy before its next decision so controllers and
+    # estimators observe the same state as the serial execution path.
+    agent.knowledge_base = message.knowledge_base
     activate_attitude_guardrail_stats(engine.attitude_guardrail_stats)
     guardrail_counts_before = get_attitude_guardrail_stats(engine.attitude_guardrail_stats)
     profiler_enabled = bool(getattr(engine.runtime_profiler, "enabled", True))
     engine.runtime_profiler = _RuntimeProfiler(object_ids=[aid], enabled=profiler_enabled)
     engine.controller_debug_hist = {aid: []}
-    engine.desired_attitude_hist = {aid: np.full((int(message.sample_index) + 2, 4), np.nan)}
+    desired_attitude_hist = engine.desired_attitude_hist.get(aid)
+    required_rows = int(message.sample_index) + 2
+    if desired_attitude_hist is None:
+        desired_attitude_hist = np.full((required_rows, 4), np.nan)
+    elif required_rows > int(desired_attitude_hist.shape[0]):
+        grow_to = max(required_rows, int(desired_attitude_hist.shape[0]) * 2)
+        grown = np.full((grow_to, 4), np.nan)
+        grown[: desired_attitude_hist.shape[0], :] = desired_attitude_hist
+        desired_attitude_hist = grown
+    else:
+        desired_attitude_hist[int(message.sample_index) + 1, :] = np.nan
+    engine.desired_attitude_hist = {aid: desired_attitude_hist}
     item = ObjectStepInput(
         object_id=aid,
         agent=agent,
@@ -412,9 +471,13 @@ def _run_object_step_worker(engine: _SingleRunEngine, message: ObjectStepMessage
         for name, value in guardrail_counts_after.items()
     }
     belief = agent.belief
+    # The parent owns and updates knowledge after each timestep. Do not send
+    # the unchanged worker copy back inside AgentRuntime as well as in the next
+    # message; preserving it in the parent removes a large redundant pickle.
+    updated_agent = replace(agent, knowledge_base=None)
     return replace(
         result,
-        updated_agent=agent,
+        updated_agent=updated_agent,
         controller_debug_events=list(engine.controller_debug_hist.get(aid, [])),
         profile_stage_seconds=dict(engine.runtime_profiler.object_stage_seconds.get(aid, {})),
         profile_stage_counts=dict(engine.runtime_profiler.object_stage_counts.get(aid, {})),
@@ -873,33 +936,174 @@ class _SingleRunEngine:
     def _build_object_step_executor(self) -> ObjectStepExecutor:
         execution_cfg = dict(getattr(self.cfg.simulator, "execution", {}) or {})
         object_parallelism = dict(execution_cfg.get("object_parallelism", {}) or {})
+        policy = str(execution_cfg.get("policy", "configured") or "configured").strip().lower()
         enabled = bool(object_parallelism.get("enabled", False))
         backend = str(object_parallelism.get("backend", "serial") or "serial").strip().lower()
-        if not enabled or backend == "serial":
-            return SerialObjectStepExecutor(self)
-
         profile = resource_profile(getattr(self.cfg.simulator, "resource_profile", None))
-        if bool(profile.force_serial):
-            return SerialObjectStepExecutor(self)
-
-        active_objects = sum(1 for agent in self.agents.values() if agent.active)
+        active_ids = [aid for aid, agent in self.agents.items() if agent.active]
+        active_objects = len(active_ids)
         min_objects = int(object_parallelism.get("min_objects", 3) or 3)
-        if active_objects < max(1, min_objects):
-            return SerialObjectStepExecutor(self)
-
-        if backend != "process_pool":
-            raise ValueError(f"Unsupported object step executor backend: {backend!r}.")
-
         workers = int(object_parallelism.get("workers", 0) or 0)
         if workers <= 0:
             reserve_workers = int(object_parallelism.get("reserve_workers", 1) or 0)
             workers = max(1, int(os.cpu_count() or 1) - max(0, reserve_workers))
+        max_workers = int(object_parallelism.get("max_workers", 0) or 0)
+        if max_workers > 0:
+            workers = min(workers, max_workers)
         workers = max(1, min(workers, active_objects))
         if profile.max_parallel_workers is not None:
             workers = max(1, min(workers, int(profile.max_parallel_workers)))
-        if workers <= 1:
-            return SerialObjectStepExecutor(self)
-        return ProcessPoolObjectStepExecutor(self, max_workers=workers)
+        hierarchical_object_budget: int | None = None
+        raw_hierarchical_budget = os.environ.get(OBJECT_WORKER_BUDGET_ENV)
+        if raw_hierarchical_budget not in (None, ""):
+            hierarchical_object_budget = max(int(raw_hierarchical_budget), 0)
+            workers = min(workers, hierarchical_object_budget) if hierarchical_object_budget > 0 else 1
+
+        incompatibilities: list[str] = []
+        if any(
+            agent.deploy_source in {"rocket_deployment", "rocket_insertion"}
+            for agent in self.agents.values()
+        ):
+            incompatibilities.append("dynamic object deployment is configured")
+        if self.general_propagation:
+            incompatibilities.append("mixed OGP/general-propagation objects are configured")
+        if any(agent.bridge is not None for agent in self.agents.values()):
+            incompatibilities.append("an external object bridge is configured")
+        if policy in {"auto", "parallel"} and not incompatibilities:
+            try:
+                for aid in active_ids:
+                    pickle.dumps(self.agents[aid], protocol=pickle.HIGHEST_PROTOCOL)
+            except Exception as exc:
+                incompatibilities.append(
+                    f"object {aid!r} runtime state is not process-serializable: {exc}"
+                )
+
+        work_score = self._estimated_object_parallel_work_score(active_ids)
+        selected_backend = "serial"
+        reason = "object parallelism is disabled"
+
+        if policy == "serial":
+            reason = "simulator.execution.policy=serial"
+        elif policy == "parallel":
+            failures = list(incompatibilities)
+            if bool(profile.force_serial):
+                failures.append(f"resource profile {profile.name!r} requires serial execution")
+            if active_objects < max(1, min_objects):
+                failures.append(
+                    f"active object count {active_objects} is below min_objects={min_objects}"
+                )
+            if workers <= 1:
+                failures.append("fewer than two object workers are available")
+            if failures:
+                raise RuntimeError(
+                    "Forced object-parallel execution is unavailable: " + "; ".join(failures)
+                )
+            selected_backend = "process_pool"
+            reason = "parallel policy explicitly requires supported object workers"
+        elif policy == "auto":
+            if bool(profile.force_serial):
+                reason = f"resource profile {profile.name!r} requires serial execution"
+            elif incompatibilities:
+                reason = "auto planner selected serial: " + "; ".join(incompatibilities)
+            elif active_objects < max(1, min_objects):
+                reason = (
+                    f"auto planner selected serial: active object count {active_objects} "
+                    f"is below min_objects={min_objects}"
+                )
+            elif workers <= 1:
+                reason = "auto planner selected serial: fewer than two object workers are available"
+            elif work_score < 2.5:
+                reason = (
+                    "auto planner selected serial: estimated object-step work score "
+                    f"{work_score:.2f} is below the 2.50 crossover threshold"
+                )
+            else:
+                selected_backend = "process_pool"
+                reason = (
+                    f"auto planner selected {workers} workers for {active_objects} active objects; "
+                    f"estimated work score={work_score:.2f}"
+                )
+        elif enabled and backend == "process_pool" and not bool(profile.force_serial):
+            if active_objects >= max(1, min_objects) and workers > 1:
+                selected_backend = "process_pool"
+                reason = "legacy configured object parallelism is enabled"
+            else:
+                reason = "legacy configured object parallelism did not meet worker/object thresholds"
+        elif enabled and backend not in {"serial", "process_pool"}:
+            raise ValueError(f"Unsupported object step executor backend: {backend!r}.")
+
+        allocation = self._object_worker_allocation(active_ids, workers if selected_backend == "process_pool" else 1)
+        self.object_execution_plan = {
+            "policy": policy,
+            "requested_backend": backend,
+            "selected_backend": selected_backend,
+            "selected_workers": workers if selected_backend == "process_pool" else 1,
+            "active_objects": active_objects,
+            "min_objects": min_objects,
+            "estimated_work_score": float(work_score),
+            "eligible": not incompatibilities,
+            "reason": reason,
+            "allocation": allocation,
+            "hierarchical_budget": {
+                "object_workers_per_run": hierarchical_object_budget,
+                "campaign_workers": (
+                    None
+                    if os.environ.get(CAMPAIGN_WORKER_COUNT_ENV) in (None, "")
+                    else int(os.environ[CAMPAIGN_WORKER_COUNT_ENV])
+                ),
+                "total_process_budget": (
+                    None
+                    if os.environ.get(TOTAL_PROCESS_BUDGET_ENV) in (None, "")
+                    else int(os.environ[TOTAL_PROCESS_BUDGET_ENV])
+                ),
+            },
+        }
+        if selected_backend == "process_pool":
+            require_pro_feature(FEATURE_OBJECT_PARALLELISM)
+            return ProcessPoolObjectStepExecutor(self, max_workers=workers)
+        return SerialObjectStepExecutor(self)
+
+    def _estimated_object_parallel_work_score(self, active_ids: list[str]) -> float:
+        dynamics = dict(getattr(self.cfg.simulator, "dynamics", {}) or {})
+        orbit = dict(dynamics.get("orbit", {}) or {})
+        attitude = dict(dynamics.get("attitude", {}) or {})
+        score = 1.0
+        score += 0.5 * sum(bool(orbit.get(name, False)) for name in ("j2", "j3", "j4", "drag", "srp"))
+        score += 0.75 * sum(bool(orbit.get(name, False)) for name in ("third_body_sun", "third_body_moon"))
+        spherical = dict(orbit.get("spherical_harmonics", {}) or {})
+        if bool(spherical.get("enabled", False)):
+            degree = int(spherical.get("degree", 0) or 0)
+            order = int(spherical.get("order", 0) or 0)
+            score += 2.0 + 0.1 * float(max(degree, order))
+        if bool(attitude.get("enabled", True)):
+            attitude_substep_s = float(attitude.get("attitude_substep_s", self.dt) or self.dt)
+            score += min(2.0, 0.5 * max(1.0, self.dt / max(attitude_substep_s, 1e-9)))
+        if active_ids:
+            controlled = sum(
+                self.agents[aid].orbit_controller is not None
+                or self.agents[aid].attitude_controller is not None
+                for aid in active_ids
+            )
+            knowledge = sum(self.agents[aid].knowledge_base is not None for aid in active_ids)
+            mission = sum(
+                self.agents[aid].mission_execution is not None
+                or self.agents[aid].mission_strategy is not None
+                or bool(self.agents[aid].mission_modules)
+                for aid in active_ids
+            )
+            scale = float(len(active_ids))
+            score += 1.0 * controlled / scale
+            score += 0.5 * knowledge / scale
+            score += 0.5 * mission / scale
+        return float(score)
+
+    @staticmethod
+    def _object_worker_allocation(object_ids: list[str], workers: int) -> dict[str, list[str]]:
+        count = max(1, int(workers))
+        allocation = {f"worker_{index + 1}": [] for index in range(count)}
+        for index, object_id in enumerate(object_ids):
+            allocation[f"worker_{index % count + 1}"].append(str(object_id))
+        return allocation
 
     def _resolve_reentry_object_ids(self) -> list[str]:
         if not bool(self.reentry_cfg.enabled):
@@ -1259,6 +1463,32 @@ class _SingleRunEngine:
         if provider is None:
             self.external_intent_providers.pop(oid, None)
             return
+        if isinstance(self.object_step_executor, ProcessPoolObjectStepExecutor):
+            plan = dict(getattr(self, "object_execution_plan", {}) or {})
+            if plan.get("policy") == "auto":
+                self.object_step_executor.shutdown()
+                self.object_step_executor = SerialObjectStepExecutor(self)
+                plan.update(
+                    {
+                        "selected_backend": "serial",
+                        "selected_workers": 1,
+                        "eligible": False,
+                        "reason": (
+                            "auto planner switched to serial because an external intent "
+                            f"provider was attached for object {oid!r}"
+                        ),
+                        "allocation": self._object_worker_allocation(
+                            [aid for aid, agent in self.agents.items() if agent.active],
+                            1,
+                        ),
+                    }
+                )
+                self.object_execution_plan = plan
+            else:
+                raise RuntimeError(
+                    "External intent providers are not supported by object-parallel execution. "
+                    "Use simulator.execution.policy=auto or serial."
+                )
         self.external_intent_providers[oid] = provider
 
     def _external_intent(
@@ -1489,6 +1719,7 @@ class _SingleRunEngine:
     def _apply_object_step_result(self, result: ObjectStepResult, *, sample_index: int) -> None:
         aid = result.object_id
         if result.updated_agent is not None:
+            result.updated_agent.knowledge_base = self.agents[aid].knowledge_base
             self.agents[aid] = result.updated_agent
             self._refresh_agent_role_pointers(aid, result.updated_agent)
         agent = self.agents[aid]
@@ -1888,6 +2119,7 @@ class _SingleRunEngine:
         runtime_profile["executor"] = {
             "object_step_backend": str(getattr(self.object_step_executor, "backend_name", "unknown")),
             "object_step_workers": int(getattr(self.object_step_executor, "max_workers", 1) or 1),
+            "planner": dict(getattr(self, "object_execution_plan", {}) or {}),
         }
         return build_single_run_payload(
             SingleRunPayloadContext(

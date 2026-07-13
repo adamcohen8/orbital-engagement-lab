@@ -338,6 +338,7 @@ from sim.game.training import (
     RPOTrainingConfig,
     RPOTrainingScore,
     RPOTrainingTracker,
+    _integrated_delta_v_m_s,
     nmt_curve_points_km,
     nmt_element_errors,
     nmt_position_error_km,
@@ -2038,6 +2039,78 @@ def test_game_debrief_cumulative_delta_v_matches_sampled_accel_integral() -> Non
     cumulative = _cumulative_delta_v_m_s(thrust_km_s2, t_s)
 
     assert cumulative == pytest.approx([0.0, 4.0, 4.0, 13.0])
+
+
+def test_training_tracker_cached_delta_v_matches_batch_integral_exactly() -> None:
+    tracker = RPOTrainingTracker(RPOTrainingConfig(enabled=True, scenario_id="cached-delta-v"))
+    target = np.array(
+        [7000.0, 0.0, 0.0, 0.0, 7.5, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0],
+        dtype=float,
+    )
+    chaser = target.copy()
+    chaser[1] = -1.0
+    time_s = np.array([0.0, 2.0, 5.0, 5.0, 8.0], dtype=float)
+    thrust = np.array(
+        [
+            [0.001, 0.0, 0.0],
+            [0.0, 0.002, 0.0],
+            [np.nan, 0.0, 0.0],
+            [0.003, 0.0, 0.0],
+            [0.001, 0.002, 0.003],
+        ],
+        dtype=float,
+    )
+    target_thrust = thrust[:, ::-1].copy()
+
+    for idx, sample_time_s in enumerate(time_s):
+        tracker.record(
+            type(
+                "Snapshot",
+                (),
+                {
+                    "time_s": float(sample_time_s),
+                    "truth": {"target": target, "chaser": chaser},
+                    "applied_thrust": {
+                        "chaser": thrust[idx],
+                        "target": target_thrust[idx],
+                    },
+                },
+            )()
+        )
+
+    score = tracker.score()
+
+    assert score.approximate_delta_v_m_s == _integrated_delta_v_m_s(thrust, time_s)
+    assert score.target_delta_v_m_s == _integrated_delta_v_m_s(target_thrust, time_s)
+
+
+def test_training_tracker_cached_geometry_matches_batch_score_exactly() -> None:
+    config = SimulationConfig.from_yaml("sim/game/configs/game_training_rpo_04_rendezvous.yaml")
+    training = RPOTrainingConfig.from_metadata(dict(config.scenario.metadata or {}))
+    session = SimulationSession.from_config(_attempt_config_for_training_clock(config, training))
+    snapshot = session.reset()
+    tracker = RPOTrainingTracker(training)
+
+    for index in range(8):
+        if index:
+            snapshot = session.step()
+        tracker.record(snapshot)
+
+    count = tracker._history_count
+    rel = tracker._rel_array[:count]
+    ranges = np.linalg.norm(rel[:, :3], axis=1)
+    speeds = np.linalg.norm(rel[:, 3:6], axis=1)
+    goal_error = np.linalg.norm(rel[:, :3] - training.goal_relative_ric_km.reshape(1, 3), axis=1)
+    score = tracker.score()
+
+    assert np.array_equal(tracker._range_array[:count], ranges)
+    assert np.array_equal(tracker._speed_array[:count], speeds)
+    assert np.array_equal(tracker._goal_error_array[:count], goal_error)
+    assert score.closest_approach_km == float(np.min(ranges))
+    assert score.final_range_km == float(ranges[-1])
+    assert score.final_relative_speed_km_s == float(speeds[-1])
+    assert score.final_goal_error_km == float(goal_error[-1])
+    assert score.min_goal_error_km == float(np.min(goal_error))
 
 
 def test_training_tracker_charges_terminal_step_burn_before_passing() -> None:
@@ -8800,6 +8873,55 @@ def test_dashboard_vectors_match_web_preview_scaling() -> None:
     assert PygameRPODashboard._web_thrust_vector_px(thrust, x_axis=1, y_axis=2, threshold=1.0e-4) == pytest.approx(
         [0.0, 0.0]
     )
+
+
+def test_dashboard_dashed_polyline_preserves_legacy_pixel_segments() -> None:
+    points = [(3, 5), (44, 29), (44, 29), (9, -8)]
+    expected: list[tuple[tuple[int, int], tuple[int, int]]] = []
+    for start, end in zip(points[:-1], points[1:], strict=False):
+        p0 = np.array(start, dtype=float)
+        p1 = np.array(end, dtype=float)
+        segment = p1 - p0
+        length = float(np.linalg.norm(segment))
+        if length <= 0.0:
+            continue
+        direction = segment / length
+        pos = 0.0
+        while pos < length:
+            segment_start = p0 + direction * pos
+            segment_end = p0 + direction * min(pos + 8, length)
+            expected.append(
+                (
+                    (int(segment_start[0]), int(segment_start[1])),
+                    (int(segment_end[0]), int(segment_end[1])),
+                )
+            )
+            pos += 14
+
+    calls: list[tuple[tuple[int, int], tuple[int, int]]] = []
+
+    class FakeDraw:
+        @staticmethod
+        def line(
+            screen: object,
+            color: tuple[int, int, int],
+            start: tuple[int, int],
+            end: tuple[int, int],
+            *,
+            width: int,
+        ) -> None:
+            assert screen == "screen"
+            assert color == (1, 2, 3)
+            assert width == 2
+            calls.append((start, end))
+
+    dashboard = object.__new__(PygameRPODashboard)
+    dashboard.pygame = type("FakePygame", (), {"draw": FakeDraw})()
+    dashboard.screen = "screen"
+
+    dashboard._draw_polyline_dashed(points, color=(1, 2, 3), dash_px=8, gap_px=6, width=2)
+
+    assert calls == expected
 
 
 def test_dashboard_visual_extrapolation_advances_latest_row_only() -> None:

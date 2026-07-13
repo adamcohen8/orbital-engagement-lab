@@ -6,6 +6,82 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## Unreleased
+
+No unreleased changes are currently recorded.
+
+## 0.20.3 - 2026-07-12
+
+Release thesis: `v0.20.3` improves simulation, plotting, and RPO Trainer
+performance without changing physics or gameplay, restores exact external
+
+Private/Pro scope: `v0.20.3` promotes exact-parity within-scenario ONP object
+execution to an entitled automatic planner and coordinates it with campaign
+parallelism through one hierarchical process budget.
+
+### Added
+
+- Added reproducibility manifests with canonical packet-evidence digests and
+  ordering, decoding, timestamp, and timeout qualification counts.
+- Added Pro `serial`, `parallel`, `auto`, and backward-compatible `configured`
+  object-execution policies with eligibility, cost, resource, and
+  serializability checks plus runtime planner evidence.
+- Added a global hierarchical process planner for Monte Carlo, sensitivity,
+  config queues, controller benchmarks, optimization particles, and child
+  object workers.
+- Added regression coverage for exact serial/process truth, belief, command,
+  and knowledge parity; stable object allocation; inherited worker caps; and
+  forced-parallel failure behavior.
+
+### Changed
+
+- Reduced ONP runtime overhead by synchronizing persistent worker state through
+  pipes, avoiding redundant serialization and scratch allocation, and keeping
+  the parent process authoritative for timeline and knowledge ordering.
+- Reused the attitude EKF nominal propagation during numerical Jacobian
+  construction and shared run-scoped orbital-element histories across plots.
+- Reduced RPO Trainer rendering and scoring overhead through scalar dashed-path
+  drawing and exact cached score geometry and delta-v terms.
+- Updated public and private agent guidance for safe validation, TLE propagation
+  contracts, output freshness, performance evidence, execution planning, and
+  public/private workflow boundaries.
+
+### Fixed
+
+- Restored the MATLAB SGP4 bridge's current analysis schema and native-TEME
+  comparison contract while retaining a canonical ECI cross-check.
+- Fixed stale worker belief and controller state that previously caused
+  process-execution output discrepancies in knowledge-coupled scenarios.
+- Prevented nested campaign and object process pools from independently
+  consuming the same host worker allowance.
+- Kept public exports serial-only by excluding private execution-planner
+  implementation and requiring the `object_parallelism` entitlement.
+
+### Performance Evidence
+
+- The six-spacecraft high-fidelity ONP profile improved from 254.56 s to
+  61.99 s after the core performance pass, with exact non-timing summaries and
+  exact review rows after timestamp normalization.
+- The five-chaser, 300-second ONP case measured about 9.4 s serial versus
+  4.8 s with six object workers; the one-orbit case measured 192.83 s serial
+  versus 94.24 s with six workers. These are workload- and hardware-specific
+  measurements, not universal speedup claims.
+- The 120-frame RPO Trainer dashboard benchmark improved from 0.269 s to
+  0.158 s, and the 5,000-sample training-score benchmark improved from 1.426 s
+  to 0.539 s, with unchanged gameplay results.
+
+### Migration Notes
+
+- Existing object-execution configurations retain `configured` compatibility.
+  Use `simulator.execution.policy: auto` for resource-aware Pro selection,
+  `serial` to force parent-process stepping, and `parallel` only when an
+  unsupported or under-resourced run should fail rather than fall back.
+- Public-core scenarios remain deterministic and serial at the object layer;
+  automatic object execution and hierarchical campaign/object planning require
+  the private `object_parallelism` entitlement.
+- Performance changes do not alter force models, integration contracts,
+  controller behavior, game scoring, or gameplay rules.
+
 ## 0.20.2 - 2026-07-11
 
 Release thesis: `v0.20.2` makes re-entry evidence physically consistent by

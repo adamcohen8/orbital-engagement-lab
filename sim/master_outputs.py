@@ -863,6 +863,10 @@ def _plot_outputs_impl(
         "orbital_element_true_anomaly": "true_anomaly",
     }
     orbital_object_id = str(cfg.outputs.plots.get("orbital_elements_object_id", "") or "").strip() or None
+    orbital_elements_cache: dict[
+        str,
+        tuple[np.ndarray, np.ndarray, dict[str, np.ndarray]],
+    ] = {}
     for figure_id, element_id in orbital_element_ids.items():
         if figure_id not in figure_ids:
             continue
@@ -872,6 +876,7 @@ def _plot_outputs_impl(
             truth_by_object=truth_hist,
             element_id=element_id,
             object_id=orbital_object_id,
+            orbital_elements_cache=orbital_elements_cache,
             out_path=p if save_enabled else None,
             show=show,
             close=close,
@@ -886,6 +891,7 @@ def _plot_outputs_impl(
             t_s=t_s,
             truth_by_object=truth_hist,
             object_id=orbital_object_id,
+            orbital_elements_cache=orbital_elements_cache,
             out_path=p if save_enabled else None,
             show=show,
             close=close,
@@ -900,6 +906,7 @@ def _plot_outputs_impl(
             t_s=t_s,
             truth_by_object=truth_hist,
             object_id=orbital_object_id,
+            orbital_elements_cache=orbital_elements_cache,
             out_path=p if save_enabled else None,
             show=show,
             close=close,
