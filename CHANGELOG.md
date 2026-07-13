@@ -10,6 +10,68 @@ migration-sensitive behavior explicitly.
 
 No unreleased changes are currently recorded.
 
+## 0.20.4 - 2026-07-13
+
+Release thesis: `v0.20.4` establishes the public-safe contract, security, and
+export groundwork for future OEL MCP interoperability without presenting the
+pre-v2 prototype as a generally supported agent-host integration.
+
+Private/Pro scope: `v0.20.4` adds a one-way composed Pro registry for bounded
+IHE inspection and validation, plus deployment profiles for local Mendicant
+and restricted frontier-agent use. These profiles do not authorize external
+transmission or expose hidden evaluation truth.
+
+### Added
+
+- Added an optional, dependency-free, local stdio MCP prototype for capability
+  discovery, completed-run inspection, and bounded read-only review queries.
+- Added frozen transport-independent request and response schemas, explicit
+  result projections, evidence-completeness states, effect metadata, resource
+  limits, and payload-free audit records for five Phase 0 tools.
+- Added separate public and Pro registries, with public, Pro-local, Mendicant
+  sealed/tandem, and direct-frontier-restricted deployment views.
+- Added Pro tools for inspecting visible IHE evaluation manifests and
+  validating IHE studies without exposing hidden truth or executing physics.
+- Added host-neutral conformance checks, adversarial path/SQL/size/handling
+  tests, semantic CLI/Python parity fixtures, and golden compatibility hashes
+  for discovery, success, and failure envelopes.
+- Added an MCP roadmap and official Python SDK v2 adoption, supply-chain, and
+  rollback checklist.
+
+### Changed
+
+- Extended the generated public-export allowlist to include only the
+  public-safe MCP registry, handlers, protocol adapter, conformance helper, and
+  documentation.
+- Hardened the public-export checker so Pro MCP registrations, the composed Pro
+  server, private contracts, and combined public/Pro golden fixtures remain
+  absent.
+- Separated configured MCP read roots from write roots and required explicit
+  data marking and release scope for data-bearing calls.
+
+### Security
+
+- MCP path resolution fails closed on traversal, symlink escape, unauthorized
+  roots, missing handling metadata, oversized inputs/results, unsafe SQL, and
+  deployment-ineligible tools.
+- The direct-frontier view rejects local-only data, and MCP discovery or
+  transport is explicitly not treated as entitlement, release, or
+  accreditation authority.
+- Public MCP modules do not import, probe for, advertise, or leak Pro/IHE
+  registrations or metadata.
+
+### Migration Notes
+
+- The MCP surface remains `prototype` maturity and is not installed as a core
+  dependency. Existing CLI, Python, scenario, review-store, and agent-task
+  workflows are unchanged and remain usable without MCP.
+- Do not advertise this release as general Codex, Claude, or other MCP-host
+  support. Official SDK-backed and cross-host support waits for the stable
+  Python MCP SDK v2 release and the documented interoperability gates.
+- The supported first SDK migration should replace the protocol adapter while
+  preserving the frozen handlers, schemas, registries, security policy, and
+  golden fixtures.
+
 ## 0.20.3 - 2026-07-12
 
 Release thesis: `v0.20.3` improves simulation, plotting, and RPO Trainer
