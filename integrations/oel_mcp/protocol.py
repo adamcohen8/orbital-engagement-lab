@@ -48,8 +48,8 @@ class OELMCPServer:
                 return _error(request_id, -32601, f"Method not found: {method}")
         except (TypeError, ValueError, PermissionError) as exc:
             return _error(request_id, -32602, str(exc))
-        except Exception as exc:
-            return _error(request_id, -32603, f"{type(exc).__name__}: {exc}")
+        except Exception:
+            return _error(request_id, -32603, "Internal server error without local diagnostic details.")
         return {"jsonrpc": "2.0", "id": request_id, "result": result}
 
     def serve(self, input_stream: TextIO = sys.stdin, output_stream: TextIO = sys.stdout) -> None:

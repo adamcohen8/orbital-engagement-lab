@@ -81,16 +81,20 @@ class BaseOELMCPHandlers:
     ) -> dict[str, Any]:
         argument_digest = _sha256_json(_redacted_arguments(arguments))
         try:
-            result = operation()
+            raw_result = operation()
+            status = outcome_status(raw_result) if outcome_status else "completed"
+            evidence_status = evidence(raw_result) if evidence else _evidence(complete=status == "completed")
+            result = self._project_result(raw_result)
             _enforce_response_size(result, self.max_response_bytes)
-            status = outcome_status(result) if outcome_status else "completed"
-            evidence_status = evidence(result) if evidence else _evidence(complete=status == "completed")
             error = None
         except Exception as exc:
             result = None
             status = "failed"
             evidence_status = _evidence(complete=False)
-            error = {"type": type(exc).__name__, "message": _safe_error_message(exc)}
+            error = {
+                "type": type(exc).__name__,
+                "message": _safe_error_message(exc, authorized_roots=self._authorized_roots()),
+            }
         return {
             "tool_contract_version": TOOL_CONTRACT_VERSION,
             "tool_id": contract.tool_id,
@@ -110,6 +114,14 @@ class BaseOELMCPHandlers:
             },
             "result": result,
         }
+
+    def _project_result(self, result: dict[str, Any]) -> dict[str, Any]:
+        if self.profile != "direct_frontier_restricted":
+            return result
+        return _frontier_safe_value(result, authorized_roots=self._authorized_roots())
+
+    def _authorized_roots(self) -> tuple[Path, ...]:
+        return tuple(dict.fromkeys(self.path_policy.read_roots + self.path_policy.write_roots))
 
 
 def require_file_size(path: Path, *, maximum: int) -> None:
@@ -161,12 +173,30 @@ def _enforce_response_size(result: dict[str, Any], maximum: int) -> None:
         raise ValueError("Tool result exceeds the configured response-size budget.")
 
 
-def _safe_error_message(exc: Exception) -> str:
-    if isinstance(exc, PermissionError):
-        return str(exc)
-    if isinstance(exc, FileNotFoundError):
-        return str(exc)
-    return str(exc)
+def _safe_error_message(exc: Exception, *, authorized_roots: tuple[Path, ...]) -> str:
+    if not isinstance(exc, (PermissionError, FileNotFoundError, ValueError)):
+        return "Tool operation failed without disclosing local details."
+    message = str(exc)
+    if any(str(root) in message for root in authorized_roots):
+        return "Tool operation failed without disclosing local details."
+    return message
+
+
+def _frontier_safe_value(value: Any, *, authorized_roots: tuple[Path, ...]) -> Any:
+    if isinstance(value, dict):
+        return {key: _frontier_safe_value(item, authorized_roots=authorized_roots) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_frontier_safe_value(item, authorized_roots=authorized_roots) for item in value]
+    if isinstance(value, tuple):
+        return [_frontier_safe_value(item, authorized_roots=authorized_roots) for item in value]
+    if not isinstance(value, str):
+        return value
+    if not any(str(root) in value for root in authorized_roots):
+        return value
+    normalized = value
+    for index, root in enumerate(authorized_roots):
+        normalized = normalized.replace(str(root), f"<AUTHORIZED_ROOT_{index}>")
+    return f"oel-local-ref:{hashlib.sha256(normalized.encode('utf-8')).hexdigest()[:16]}"
 
 
 def _evidence(*, complete: bool, empty: bool = False, truncated: bool = False) -> dict[str, bool]:
