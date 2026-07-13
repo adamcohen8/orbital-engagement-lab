@@ -10,6 +10,60 @@ migration-sensitive behavior explicitly.
 
 No unreleased changes are currently recorded.
 
+## 0.20.5 - 2026-07-13
+
+Release thesis: `v0.20.5` hardens the experimental pre-v2 MCP boundary without
+adding new tools or promoting the prototype to general agent-host support.
+
+Private/Pro scope: `v0.20.5` adds complete normalized public/Pro golden
+snapshots and a review-only structural diff tool while keeping those combined
+fixtures and Pro contract details outside the public export.
+
+### Added
+
+- Added a public local-stdio MCP threat model covering trusted operator
+  configuration, protected assets, deployment-profile interpretation,
+  external-host disclosure, and the stop-line before remote/authenticated use.
+- Added an actual wheel-build regression test proving that the source-checkout
+  MCP prototype and MCP dependencies remain absent from the installed OEL
+  wheel until a deliberate optional SDK v2 profile is introduced.
+- Added full normalized golden snapshots for public and Pro tool definitions,
+  capability responses, representative success/failure envelopes, and protocol
+  errors.
+- Added a private structural golden-diff command that reports exact normalized
+  field changes and never rewrites the approved fixtures.
+
+### Changed
+
+- Direct-frontier results now replace local paths under authorized roots with
+  opaque `oel-local-ref:<digest>` identifiers, including paths appearing in
+  projected query rows and inspection metadata.
+- Unexpected handler and protocol failures now return generic errors without
+  local diagnostic details; reviewed policy, validation, and query errors
+  retain their actionable safe messages.
+- Public documentation now explicitly states that deployment-profile selection
+  is trusted operator configuration rather than authentication, entitlement,
+  classification, or release approval.
+
+### Security
+
+- Prevented authorized local filesystem roots, workspace names, customer path
+  components, and unexpected backend diagnostics from crossing the
+  direct-frontier result boundary.
+- Added regression coverage for frontier path projection, query-row redaction,
+  unexpected internal errors, and absence of Pro golden/tooling material from
+  the generated public export.
+
+### Migration Notes
+
+- No MCP tool IDs, request schemas, ordinary public/Pro-local result semantics,
+  OEL physics, or existing CLI/Python workflows change in this release.
+- Direct-frontier callers must treat `oel-local-ref` values as opaque local
+  provenance references rather than filesystem paths.
+- The MCP prototype remains source-checkout-only and at `prototype` maturity;
+  supported packaging and cross-host interoperability still wait for the
+  stable official Python MCP SDK v2 release.
+
 ## 0.20.4 - 2026-07-13
 
 Release thesis: `v0.20.4` establishes the public-safe contract, security, and

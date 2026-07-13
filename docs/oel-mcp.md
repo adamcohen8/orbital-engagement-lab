@@ -17,6 +17,11 @@ From a source checkout, start the newline-delimited JSON-RPC stdio process with:
 .venv/bin/python -m integrations.oel_mcp
 ```
 
+The pre-v2 prototype is intentionally source-checkout-only. It is not included
+in the built OEL wheel and does not add an MCP package dependency. A packaging
+test freezes that boundary until the stable SDK v2 work deliberately introduces
+an optional MCP installation profile.
+
 This is a temporary protocol adapter used to freeze OEL-owned contracts before
 adopting the official Python MCP SDK v2 stable release. A local MCP server is a
 process role; it does not listen on a network port.
@@ -46,6 +51,9 @@ Data-bearing calls require handling metadata containing an authoritative
 marking and one of these release scopes: `public`, `local_only`, or
 `frontier_eligible`. Missing or conflicting handling metadata fails closed.
 A direct-frontier deployment view rejects `local_only` data.
+It also replaces local paths under authorized roots with opaque
+`oel-local-ref:<digest>` values, including paths found inside projected query
+rows. Unexpected internal errors do not return local diagnostic details.
 
 All tools return a versioned envelope containing tool ID, risk class, status,
 effects, evidence completeness/empty/truncation state, structured error, a
@@ -61,8 +69,14 @@ payload-free audit record, and an explicitly projected result.
 - Response, row, query-step, and review-store size budgets fail closed.
 - Tool discovery is deployment-specific.
 - MCP discovery and transport are not authorization or release policy.
+- Deployment-profile selection is trusted operator configuration, not
+  authentication, entitlement, or proof of caller identity.
 - Remote HTTP, simulation execution, external communication, and unrestricted
   filesystem or shell access are outside the pre-v2 prototype.
+
+See [MCP Local Stdio Threat Model](security/mcp-local-stdio-threat-model.md) for
+the trust assumptions, protected assets, deployment-profile interpretation,
+and stop-line for later remote or authenticated operation.
 
 `AGENTS.md` remains the behavioral doctrine. MCP is only a typed control
 surface, and deterministic OEL artifacts remain the evidence authority.
