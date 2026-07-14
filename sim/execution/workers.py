@@ -10,33 +10,7 @@ from sim.execution.metrics import (
     relative_range_series_from_run_payload,
 )
 from sim.single_run import _run_single_config
-
-_PARALLEL_WORKER_THREAD_ENV_VARS = (
-    "VECLIB_MAXIMUM_THREADS",
-    "OMP_NUM_THREADS",
-    "OPENBLAS_NUM_THREADS",
-    "MKL_NUM_THREADS",
-    "NUMEXPR_NUM_THREADS",
-    "BLIS_NUM_THREADS",
-)
-
-
-def set_parallel_worker_thread_limits(default_threads: str = "1") -> dict[str, str | None]:
-    """Limit native math library threads for spawned workers unless the user already set them."""
-    previous: dict[str, str | None] = {}
-    for name in _PARALLEL_WORKER_THREAD_ENV_VARS:
-        previous[name] = os.environ.get(name)
-        if previous[name] is None:
-            os.environ[name] = str(default_threads)
-    return previous
-
-
-def restore_env_vars(previous: dict[str, str | None]) -> None:
-    for name, value in previous.items():
-        if value is None:
-            os.environ.pop(name, None)
-        else:
-            os.environ[name] = value
+from sim.utils.parallel import restore_env_vars, set_parallel_worker_thread_limits, worker_progress_queue
 
 
 def run_mc_iteration_from_dict(task: dict[str, Any]) -> dict[str, Any]:
@@ -44,6 +18,8 @@ def run_mc_iteration_from_dict(task: dict[str, Any]) -> dict[str, Any]:
     cdict = dict(task.get("config_dict", {}) or {})
     strict_plugins = bool(task.get("strict_plugins", True))
     progress_queue = task.get("progress_queue")
+    if progress_queue is None:
+        progress_queue = worker_progress_queue()
     emit_every = int(task.get("progress_emit_every", 20) or 20)
     emit_every = max(1, emit_every)
     collect_relative_range_series = bool(task.get("collect_relative_range_series", False))

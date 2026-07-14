@@ -3,10 +3,13 @@ from __future__ import annotations
 from unittest.mock import patch
 
 import numpy as np
+import pytest
 
 from sim.core.models import Measurement, StateBelief
 from sim.estimation.relative_hcw_ekf import (
     HCWRelativeEKFEstimator,
+    hcw_measurement_dimension,
+    hcw_measurement_jacobian,
     hcw_measurement_vector,
     hcw_state_transition_matrix,
 )
@@ -21,7 +24,7 @@ def _estimator(
         mean_motion_rad_s=0.0011,
         dt_s=10.0,
         process_noise_diag=np.ones(6) * 1e-12,
-        meas_noise_diag=np.ones(6) * 1e-8,
+        meas_noise_diag=np.ones(hcw_measurement_dimension(measurement_model)) * 1e-8,
         measurement_model=measurement_model,
         measurement_origin=measurement_origin,
     )
@@ -50,6 +53,42 @@ def test_hcw_state_transition_matches_closed_form_components() -> None:
     )
 
     assert np.allclose(propagated, expected)
+
+
+@pytest.mark.parametrize("origin", ["chief", "deputy"])
+@pytest.mark.parametrize(
+    "model",
+    ["relative_range", "relative_range_rate", "relative_angles", "relative_angles_range_rate"],
+)
+def test_relative_measurement_analytic_jacobian_matches_central_difference(model: str, origin: str) -> None:
+    state = np.array([0.8, -0.6, 0.3, 2.0e-4, -3.0e-4, 1.0e-4])
+    analytic = hcw_measurement_jacobian(model, state, measurement_origin=origin)
+    numerical = np.zeros_like(analytic)
+    steps = np.array([1.0e-6] * 3 + [1.0e-9] * 3)
+    for axis, step in enumerate(steps):
+        plus = state.copy()
+        minus = state.copy()
+        plus[axis] += step
+        minus[axis] -= step
+        delta = hcw_measurement_vector(model, plus, measurement_origin=origin) - hcw_measurement_vector(
+            model, minus, measurement_origin=origin
+        )
+        if model.startswith("relative_angles"):
+            delta[:2] = (delta[:2] + np.pi) % (2.0 * np.pi) - np.pi
+        numerical[:, axis] = delta / (2.0 * step)
+
+    assert analytic == pytest.approx(numerical, rel=2.0e-6, abs=2.0e-8)
+
+
+def test_angular_filter_rejects_dimensionally_invalid_cartesian_noise_fallback() -> None:
+    with pytest.raises(ValueError, match=r"rad\^2"):
+        HCWRelativeEKFEstimator(
+            mean_motion_rad_s=0.0011,
+            dt_s=10.0,
+            process_noise_diag=np.ones(6) * 1e-12,
+            meas_noise_diag=np.ones(6) * 1e-8,
+            measurement_model="relative_angles_range_rate",
+        )
 
 
 def test_hcw_relative_ekf_direct_state_update_moves_toward_truth() -> None:
@@ -138,3 +177,20 @@ def test_hcw_relative_ekf_updates_at_measurement_epoch_then_propagates_to_output
 
     assert updated.last_update_t_s == 3.0
     assert np.allclose(updated.state, expected)
+
+
+def test_hcw_relative_ekf_uses_full_epoch_measurement_covariance() -> None:
+    estimator = _estimator()
+    covariance = np.diag([1.0e-8] * 3 + [1.0e-12] * 3)
+    covariance[0, 1] = covariance[1, 0] = 0.7e-8
+    estimator.set_measurement_covariance(covariance)
+    state = np.array([0.2, -0.1, 0.05, 1.0e-5, -2.0e-5, 3.0e-6])
+    belief = StateBelief(state=state, covariance=np.zeros((6, 6)), last_update_t_s=0.0)
+
+    estimator.update(belief, Measurement(vector=state, t_s=0.0), 0.0)
+
+    assert estimator.last_update_diagnostics is not None
+    np.testing.assert_allclose(
+        estimator.last_update_diagnostics.innovation_covariance,
+        covariance,
+    )

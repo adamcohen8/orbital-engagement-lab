@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import importlib
 import inspect
+import json
+import warnings
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -1474,6 +1476,139 @@ class SimulationWorkspace:
     ) -> dict[str, Any]:
         return self.run(config, step_callback=step_callback).payload
 
+    def inspect_od_input(self, value: str | Path | Mapping[str, Any]) -> dict[str, Any]:
+        """Safely inspect a versioned OD JSON input without authorizing execution."""
+
+        if isinstance(value, (str, Path)):
+            value = self._path_policy_for(value).resolve_input_file(value, purpose="OD input inspection")
+        inspect_input = _require_private_workflow(
+            "sim.estimation.productization",
+            "safely_inspect_od_input",
+            "OD input inspection",
+        )
+        return inspect_input(value)
+
+    def run_sequential_od(
+        self,
+        packet: str | Path | Mapping[str, Any],
+        *,
+        initial_state_eci_km_s: Any,
+        initial_covariance: Any,
+        output_dir: str | Path | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Run the shared EKF/UKF/RTS OD workflow through the workspace facade."""
+
+        packet_value: Mapping[str, Any]
+        if isinstance(packet, (str, Path)):
+            packet_path = self._path_policy_for(packet).resolve_input_file(packet, purpose="sequential OD packet")
+            packet_value = json.loads(packet_path.read_text(encoding="utf-8"))
+        else:
+            packet_value = packet
+        resolved_output = output_dir
+        if output_dir is not None and self._enforce_workspace_paths:
+            resolved_output = self._path_policy_for().resolve_output_dir(output_dir, purpose="sequential OD output")
+        runner = _require_private_workflow(
+            "sim.estimation.sequential_od",
+            "run_sequential_orbit_od",
+            "Sequential OD",
+        )
+        return runner(
+            packet_value,
+            initial_state_eci_km_s=initial_state_eci_km_s,
+            initial_covariance=initial_covariance,
+            output_dir=resolved_output,
+            **kwargs,
+        )
+
+    def run_integrated_relative_od(self, **kwargs: Any) -> dict[str, Any]:
+        """Run nonlinear-baseline relative batch/sequential OD through the workspace facade."""
+
+        values = dict(kwargs)
+        output_dir = values.get("output_dir")
+        if output_dir is not None and self._enforce_workspace_paths:
+            values["output_dir"] = self._path_policy_for().resolve_output_dir(
+                output_dir,
+                purpose="integrated relative OD output",
+            )
+        runner = _require_private_workflow(
+            "sim.estimation.relative_od_integrated",
+            "run_integrated_relative_od",
+            "Integrated relative OD",
+        )
+        return runner(**values)
+
+    def package_od_evidence(
+        self,
+        *,
+        task_id: str,
+        capability_id: str,
+        report: str | Path | Mapping[str, Any],
+        claim_level: str,
+        sources: Iterable[str | Path],
+        reproduction_commands: Iterable[str],
+        estimator: Mapping[str, Any],
+        propagator: Mapping[str, Any],
+        frame_policy: Mapping[str, Any],
+        output_dir: str | Path,
+        source_metadata: Mapping[str, Mapping[str, Any]] | None = None,
+        handling_classification: str = "private",
+    ) -> dict[str, Any]:
+        """Package an OD report with provenance, freshness, and reproduction metadata."""
+
+        policy = self._path_policy_for(report if isinstance(report, (str, Path)) else None)
+        if isinstance(report, (str, Path)):
+            report_path = policy.resolve_input_file(report, purpose="OD source report")
+            report_value = json.loads(report_path.read_text(encoding="utf-8"))
+        else:
+            report_path = None
+            report_value = dict(report)
+        source_paths = [policy.resolve_input_file(path, purpose="OD dataset source") for path in sources]
+        target = policy.resolve_output_dir(output_dir, purpose="OD evidence output")
+        target.mkdir(parents=True, exist_ok=True)
+        build_manifest = _require_private_workflow(
+            "sim.estimation.productization",
+            "build_od_dataset_manifest",
+            "OD evidence packaging",
+        )
+        normalize_solution = _require_private_workflow(
+            "sim.estimation.productization",
+            "normalize_od_solution",
+            "OD evidence packaging",
+        )
+        build_packet = _require_private_workflow(
+            "sim.estimation.productization",
+            "build_od_agent_evidence_packet",
+            "OD evidence packaging",
+        )
+        manifest = build_manifest(
+            dataset_id=f"od:{task_id}",
+            sources=source_paths,
+            source_metadata=source_metadata,
+            handling_classification=handling_classification,
+            output_path=target / "od_dataset_manifest.json",
+        )
+        fingerprints = {row["path"]: row["sha256"] for row in manifest["sources"]}
+        solution = normalize_solution(
+            capability_id=capability_id,
+            report=report_value,
+            claim_level=claim_level,
+            input_fingerprints=fingerprints,
+            estimator=estimator,
+            propagator=propagator,
+            frame_policy=frame_policy,
+            output_path=target / "od_solution.json",
+        )
+        packet = build_packet(
+            task_id=task_id,
+            solution=solution,
+            dataset_manifest=manifest,
+            reproduction_commands=list(reproduction_commands),
+            artifacts=(() if report_path is None else (report_path,)),
+            output_path=target / "agent_evidence_packet.json",
+        )
+        return packet
+
     def evaluate_metrics(
         self,
         config: str | Path | ScenarioArtifact | SimulationConfig | SimulationScenarioConfig | dict[str, Any],
@@ -1633,6 +1768,57 @@ class SimulationWorkspace:
 
         return self.validate(config, import_plugins=False)
 
+    def validate_candidate_config(
+        self,
+        config: str | Path | ScenarioArtifact | SimulationConfig | SimulationScenarioConfig | dict[str, Any],
+        *,
+        trust_plugins: bool = False,
+    ) -> dict[str, Any]:
+        """Validate an agent-authored candidate without treating inspection as execution permission.
+
+        Safe validation always runs first. Plugin-importing validation runs only when the
+        caller explicitly marks the candidate's referenced code and paths as trusted.
+        """
+
+        safe = self.validate_safe(config)
+        trusted: dict[str, Any] = {
+            "ok": None,
+            "status": "not_run",
+            "reason": "safe_validation_failed" if not bool(safe.get("ok", False)) else "trust_not_granted",
+        }
+        if bool(safe.get("ok", False)) and trust_plugins:
+            try:
+                trusted = self.validate(config, import_plugins=True)
+            except Exception as exc:
+                trusted = {"ok": False, "status": "failed", "errors": [str(exc)]}
+
+        if not bool(safe.get("ok", False)):
+            status = "failed"
+            ok = False
+        elif not trust_plugins:
+            status = "safe_only"
+            ok = True
+        else:
+            ok = bool(trusted.get("ok", False))
+            status = "ok" if ok else "failed"
+
+        return {
+            "workflow": "agent_authored_candidate_validation",
+            "ok": ok,
+            "status": status,
+            "execution_authorized": False,
+            "trust_plugins": bool(trust_plugins),
+            "safe_validation": safe,
+            "trusted_validation": trusted,
+            "next_step": (
+                "Review referenced plugins, modules, and external paths before trusted validation or execution."
+                if status == "safe_only"
+                else "Candidate is validated but execution remains a separate caller decision."
+                if status == "ok"
+                else "Correct the reported validation errors before execution."
+            ),
+        }
+
     def validate_report(
         self,
         config: str | Path | ScenarioArtifact | SimulationConfig | SimulationScenarioConfig | dict[str, Any],
@@ -1711,6 +1897,50 @@ class SimulationWorkspace:
             allow_custom_endpoint=allow_custom_endpoint,
         )
 
+    def prepare_report_packet(
+        self,
+        config_path: str | Path,
+        *,
+        output_dir: str | Path = "",
+        controller_bench: bool = False,
+        report_options: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Prepare deterministic evidence and instructions for an external coding agent."""
+
+        function_name = (
+            "_prepare_report_packet_from_controller_bench"
+            if controller_bench
+            else "_prepare_report_packet_from_outputs"
+        )
+        prepare = _require_private_workflow("run_simulation", function_name, "Agent report workflows")
+        return prepare(
+            str(config_path),
+            output_dir=str(output_dir or ""),
+            report_options=dict(report_options or {}),
+        )
+
+    def audit_report(
+        self,
+        report_path: str | Path,
+        packet_path: str | Path,
+        *,
+        output_dir: str | Path = "",
+        author: str = "coding_agent",
+        model: str = "",
+        fail_on_quality: bool = False,
+    ) -> dict[str, Any]:
+        """Render and audit an agent-authored report against an OEL evidence packet."""
+
+        audit = _require_private_workflow("run_simulation", "_audit_agent_report", "Agent report workflows")
+        return audit(
+            str(report_path),
+            str(packet_path),
+            output_dir=str(output_dir or ""),
+            author=str(author or "coding_agent"),
+            model=str(model or ""),
+            fail_on_quality=bool(fail_on_quality),
+        )
+
     def estimate_ai_config_cost(
         self,
         config_path: str | Path,
@@ -1720,6 +1950,12 @@ class SimulationWorkspace:
         output_dir: str | Path = "",
         ai_options: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
+        warnings.warn(
+            "estimate_ai_config_cost() is a legacy provider adapter. Prefer authoring with a coding agent "
+            "and validate_candidate_config().",
+            FutureWarning,
+            stacklevel=2,
+        )
         estimate = _require_private_workflow("run_simulation", "_estimate_ai_config_cost", "AI config workflows")
 
         return estimate(
@@ -1739,6 +1975,12 @@ class SimulationWorkspace:
         output_dir: str | Path = "",
         ai_options: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
+        warnings.warn(
+            "create_ai_config() is a legacy provider adapter. Prefer authoring with a coding agent "
+            "and validate_candidate_config().",
+            FutureWarning,
+            stacklevel=2,
+        )
         create = _require_private_workflow("run_simulation", "_create_ai_config_draft", "AI config workflows")
         options = dict(ai_options or {})
 

@@ -4,6 +4,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from sim.dynamics.orbit.relative_linear import RelativeLinearDynamics
+
 
 @dataclass(frozen=True)
 class HCWPositionTransferSolution:
@@ -38,28 +40,15 @@ def _as_unit(v: np.ndarray, eps: float = 1e-12) -> np.ndarray:
 
 
 def hcw_state_transition_matrix(mean_motion_rad_s: float, dt_s: float) -> np.ndarray:
-    n = float(mean_motion_rad_s)
-    dt = float(dt_s)
-    if n <= 0.0:
-        raise ValueError("mean_motion_rad_s must be positive.")
-    if dt < 0.0:
-        raise ValueError("dt_s must be non-negative.")
+    return RelativeLinearDynamics.hcw(mean_motion_rad_s).state_transition_matrix(dt_s)
 
-    nt = n * dt
-    c = float(np.cos(nt))
-    s = float(np.sin(nt))
 
-    return np.array(
-        [
-            [4.0 - 3.0 * c, 0.0, 0.0, s / n, 2.0 * (1.0 - c) / n, 0.0],
-            [6.0 * (s - nt), 1.0, 0.0, -2.0 * (1.0 - c) / n, (4.0 * s - 3.0 * nt) / n, 0.0],
-            [0.0, 0.0, c, 0.0, 0.0, s / n],
-            [3.0 * n * s, 0.0, 0.0, c, 2.0 * s, 0.0],
-            [-6.0 * n * (1.0 - c), 0.0, 0.0, -2.0 * s, 4.0 * c - 3.0, 0.0],
-            [0.0, 0.0, -n * s, 0.0, 0.0, c],
-        ],
-        dtype=float,
-    )
+def relative_state_transition_blocks(
+    dynamics: RelativeLinearDynamics,
+    dt_s: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    phi = dynamics.state_transition_matrix(dt_s)
+    return phi[:3, :3], phi[:3, 3:], phi[3:, :3], phi[3:, 3:]
 
 
 def hcw_state_transition_blocks(
@@ -81,10 +70,18 @@ def propagate_hcw_relative_state(x0_ric: np.ndarray, mean_motion_rad_s: float, d
     return phi @ x0
 
 
-def solve_hcw_position_rendezvous(
+def propagate_linear_relative_state(
+    x0_ric: np.ndarray,
+    dynamics: RelativeLinearDynamics,
+    dt_s: float,
+) -> np.ndarray:
+    return dynamics.propagate(np.asarray(x0_ric, dtype=float).reshape(6), dt_s)
+
+
+def solve_linear_position_rendezvous(
     initial_rel_state_ric: np.ndarray,
     target_delta_v_ric_km_s: np.ndarray,
-    mean_motion_rad_s: float,
+    dynamics: RelativeLinearDynamics,
     transfer_time_s: float,
     singularity_tol: float = 1e-10,
 ) -> HCWPositionTransferSolution:
@@ -92,32 +89,39 @@ def solve_hcw_position_rendezvous(
     dv_target = np.asarray(target_delta_v_ric_km_s, dtype=float).reshape(3)
     if transfer_time_s <= 0.0:
         raise ValueError("transfer_time_s must be positive.")
-
     x_post_target = x0.copy()
-    x_post_target[3:] = x_post_target[3:] - dv_target
-
-    phi_rr, phi_rv, _, _ = hcw_state_transition_blocks(mean_motion_rad_s=mean_motion_rad_s, dt_s=transfer_time_s)
-    det_phi_rv = float(np.linalg.det(phi_rv))
-    if abs(det_phi_rv) <= singularity_tol:
+    x_post_target[3:] -= dv_target
+    phi_rr, phi_rv, _, _ = relative_state_transition_blocks(dynamics, transfer_time_s)
+    if abs(float(np.linalg.det(phi_rv))) <= singularity_tol:
         raise ValueError(
-            "Transfer time is near an HCW singularity; choose a different rendezvous time so Phi_rv is invertible."
+            "Transfer time is near a linear-relative-dynamics singularity; choose a time with invertible Phi_rv."
         )
-
     required_postburn_velocity = np.linalg.solve(phi_rv, -(phi_rr @ x_post_target[:3]))
     required_delta_v = required_postburn_velocity - x_post_target[3:]
     x_post_chaser = np.hstack((x_post_target[:3], required_postburn_velocity))
-    x_rendezvous = propagate_hcw_relative_state(
-        x0_ric=x_post_chaser,
-        mean_motion_rad_s=mean_motion_rad_s,
-        dt_s=transfer_time_s,
-    )
     return HCWPositionTransferSolution(
         transfer_time_s=float(transfer_time_s),
         target_delta_v_ric_km_s=dv_target,
         post_target_rel_state_ric=x_post_target,
         required_post_chaser_rel_velocity_ric_km_s=required_postburn_velocity,
         required_delta_v_ric_km_s=required_delta_v,
-        rendezvous_state_ric=x_rendezvous,
+        rendezvous_state_ric=dynamics.propagate(x_post_chaser, transfer_time_s),
+    )
+
+
+def solve_hcw_position_rendezvous(
+    initial_rel_state_ric: np.ndarray,
+    target_delta_v_ric_km_s: np.ndarray,
+    mean_motion_rad_s: float,
+    transfer_time_s: float,
+    singularity_tol: float = 1e-10,
+) -> HCWPositionTransferSolution:
+    return solve_linear_position_rendezvous(
+        initial_rel_state_ric,
+        target_delta_v_ric_km_s,
+        RelativeLinearDynamics.hcw(mean_motion_rad_s),
+        transfer_time_s,
+        singularity_tol,
     )
 
 

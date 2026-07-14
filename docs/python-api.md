@@ -26,7 +26,24 @@ if not report["ok"]:
 result = workspace.run(untrusted_config)
 ```
 
-For a structural-only check in trusted local tooling, call
+For an agent-authored candidate, use
+`SimulationWorkspace.validate_candidate_config(...)`. It always performs safe
+structural/plugin-pointer validation first. It imports referenced plugins only
+when `trust_plugins=True`, and it never treats validation as permission to run:
+
+```python
+candidate = workspace.validate_candidate_config("configs/agent_candidate.yaml")
+if candidate["status"] == "safe_only":
+    print(candidate["next_step"])
+
+# Only after reviewing and trusting referenced modules and external paths:
+trusted = workspace.validate_candidate_config(
+    "configs/agent_candidate.yaml",
+    trust_plugins=True,
+)
+```
+
+For a lower-level structural-only check in trusted local tooling, call
 `SimulationWorkspace.validate_safe(...)` before ordinary importing validation.
 
 ```python

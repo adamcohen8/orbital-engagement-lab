@@ -43,6 +43,20 @@ def _installed_components() -> list[dict[str, str]]:
 
 
 def _project_version(project_name: str) -> str:
+    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    if pyproject.is_file():
+        text = pyproject.read_text(encoding="utf-8")
+        project_section = re.search(r"(?ms)^\[project\]\s*(.*?)(?=^\[|\Z)", text)
+        if project_section is not None:
+            section = project_section.group(1)
+            name_match = re.search(r'^name\s*=\s*"([^"]+)"', section, re.MULTILINE)
+            version_match = re.search(r'^version\s*=\s*"([^"]+)"', section, re.MULTILINE)
+            if (
+                name_match is not None
+                and version_match is not None
+                and _normalise_pypi_name(name_match.group(1)) == _normalise_pypi_name(project_name)
+            ):
+                return version_match.group(1)
     try:
         return metadata.version(project_name)
     except metadata.PackageNotFoundError:

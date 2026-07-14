@@ -11,6 +11,7 @@ from sim.estimation.maneuver_detection import EKFManeuverDetectionConfig, EKFMan
 from sim.estimation.orbit_ekf import OrbitEKFEstimator, OrbitEKFUpdateDiagnostics
 from sim.estimation.relative_hcw_ekf import (
     HCWRelativeEKFEstimator,
+    SSJ2RelativeEKFEstimator,
     hcw_measurement_dimension,
     hcw_measurement_vector,
     normalize_hcw_measurement_model,
@@ -195,7 +196,7 @@ class _OtherObjectStateSensor:
 class _Track:
     target_id: str
     sensor: _OtherObjectStateSensor
-    estimator: OrbitEKFEstimator | HCWRelativeEKFEstimator | THRelativeEKFEstimator | YARelativeEKFEstimator | None
+    estimator: OrbitEKFEstimator | HCWRelativeEKFEstimator | SSJ2RelativeEKFEstimator | THRelativeEKFEstimator | YARelativeEKFEstimator | None
     estimator_type: str
     measurement_model: str
     init_cov_diag: np.ndarray
@@ -233,7 +234,7 @@ class _Track:
     def step(self, observer_truth: StateTruth, target_truth: StateTruth, t_s: float) -> StateBelief | None:
         self.step_count += 1
         self.last_measurement_vector = None
-        if self.estimator_type in {"relative_hcw_ekf", "relative_th_ekf", "relative_ya_ekf"}:
+        if self.estimator_type in {"relative_hcw_ekf", "relative_ss_j2_ekf", "relative_th_ekf", "relative_ya_ekf"}:
             return self._step_relative_hcw(observer_truth, target_truth, t_s)
         meas = self.sensor.measure_relative(observer_truth, target_truth, t_s, self.measurement_model)
         detect_status = str(self.sensor.last_detection_status or "unknown")
@@ -327,7 +328,10 @@ class _Track:
             return None
         reference_state = reference_belief.state
         self._ensure_relative_estimator(reference_state, t_s)
-        assert isinstance(self.estimator, (HCWRelativeEKFEstimator, THRelativeEKFEstimator, YARelativeEKFEstimator))
+        assert isinstance(
+            self.estimator,
+            (HCWRelativeEKFEstimator, SSJ2RelativeEKFEstimator, THRelativeEKFEstimator, YARelativeEKFEstimator),
+        )
         self.relative_belief = self.estimator.update(self.relative_belief, meas, t_s)
         diag = self.estimator.last_update_diagnostics
         if diag is not None and diag.update_applied:
@@ -363,6 +367,15 @@ class _Track:
                 measurement_model=self.measurement_model,
                 measurement_origin=self.hcw_measurement_origin,
                 integration_substep_s=float(self.th_integration_substep_s),
+            )
+        elif self.estimator_type == "relative_ss_j2_ekf":
+            self.estimator = SSJ2RelativeEKFEstimator.from_chief_state(
+                reference_state,
+                dt_s=self.estimator_dt_s,
+                process_noise_diag=np.array(self.process_noise_diag, dtype=float),
+                meas_noise_diag=self._hcw_meas_noise_diag(),
+                measurement_model=self.measurement_model,
+                measurement_origin=self.hcw_measurement_origin,
             )
         else:
             self.estimator = HCWRelativeEKFEstimator(
@@ -625,10 +638,17 @@ class ObjectKnowledgeBase:
             estimator_type = _normalize_estimator_type(cfg.estimator)
             measurement_model = (
                 normalize_hcw_measurement_model(cfg.measurement_model)
-                if estimator_type in {"relative_hcw_ekf", "relative_th_ekf", "relative_ya_ekf"}
+                if estimator_type in {"relative_hcw_ekf", "relative_ss_j2_ekf", "relative_th_ekf", "relative_ya_ekf"}
                 else _normalize_measurement_model(cfg.measurement_model)
             )
-            if estimator_type not in {"ekf", "measured_state", "relative_hcw_ekf", "relative_th_ekf", "relative_ya_ekf"}:
+            if estimator_type not in {
+                "ekf",
+                "measured_state",
+                "relative_hcw_ekf",
+                "relative_ss_j2_ekf",
+                "relative_th_ekf",
+                "relative_ya_ekf",
+            }:
                 raise ValueError(f"Unsupported estimator '{cfg.estimator}' for target '{cfg.target_id}'.")
             if estimator_type == "measured_state" and measurement_model != "state":
                 raise ValueError(
@@ -757,6 +777,12 @@ def _normalize_estimator_type(value: str) -> str:
         "hcw_ekf": "relative_hcw_ekf",
         "relative_hcw": "relative_hcw_ekf",
         "relative_hcw_filter": "relative_hcw_ekf",
+        "ss": "relative_ss_j2_ekf",
+        "ss_j2": "relative_ss_j2_ekf",
+        "ss_j2_ekf": "relative_ss_j2_ekf",
+        "schweighart_sedwick": "relative_ss_j2_ekf",
+        "relative_ss_j2": "relative_ss_j2_ekf",
+        "relative_ss_j2_filter": "relative_ss_j2_ekf",
         "th": "relative_th_ekf",
         "relative_th": "relative_th_ekf",
         "relative_th_filter": "relative_th_ekf",
