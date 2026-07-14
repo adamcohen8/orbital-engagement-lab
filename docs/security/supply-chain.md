@@ -7,7 +7,7 @@ security, legal, export-control, or mission-assurance process.
 ## Supported Versions
 
 - Public releases: security fixes target the current public release line,
-  currently `v0.20.5`.
+  currently `v0.21.0`.
 - Private/Pro releases: security fixes target the active customer-supported
   release line or pilot branch named in the agreement.
 - Python compatibility target: Python 3.10 through 3.12. Blocking CI currently
@@ -45,7 +45,7 @@ CI also runs dependency audit evidence. Treat a known vulnerability as a release
 finding until it is upgraded, removed, documented as not applicable, or accepted
 by the evaluator in writing.
 
-Current release audit exception:
+Current release audit exceptions:
 
 - `CVE-2025-3000` / `GHSA-rrmf-rvhw-rf47` in `torch`: accepted for the
   optional ML profile while the audit feed advertises no fixed Torch release.
@@ -53,6 +53,14 @@ Current release audit exception:
   eager-mode model definitions and training helpers and do not call
   `torch.jit.script`. Revisit this exception when a fixed Torch release is
   available or if OEL adds TorchScript/JIT model export or execution.
+- `PYSEC-2026-3447` in the runtime copy of `setuptools`: accepted for the
+  optional ML/full profiles because `torch==2.12.0` currently requires
+  `setuptools<82`, while the advisory fix begins at `setuptools==83.0.0`.
+  OEL's isolated build environment requires `setuptools>=83`, and release
+  builds operate only on the controlled OEL source tree; they do not apply
+  `MANIFEST.in` exclusion rules to untrusted source trees. Revisit this
+  exception when Torch permits setuptools 83 or newer. This exception does not
+  apply to build isolation, which must continue to use the patched requirement.
 
 ## Reproducible Dependency Workflow
 

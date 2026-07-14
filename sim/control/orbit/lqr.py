@@ -6,6 +6,8 @@ import numpy as np
 
 from sim.core.interfaces import Controller
 from sim.core.models import Command, StateBelief
+from sim.dynamics.orbit.environment import EARTH_J2, EARTH_RADIUS_KM
+from sim.dynamics.orbit.relative_linear import RelativeLinearDynamics, normalize_relative_linear_model
 from sim.utils.frames import ric_curv_to_rect, ric_dcm_ir_from_rv
 
 
@@ -14,6 +16,11 @@ class HCWLQRController(Controller):
     mean_motion_rad_s: float
     max_accel_km_s2: float
     design_dt_s: float = 10.0
+    dynamics_model: str = "hcw"
+    reference_radius_km: float | None = None
+    reference_inclination_rad: float | None = None
+    j2: float = EARTH_J2
+    earth_radius_km: float = EARTH_RADIUS_KM
     ric_curv_state_slice: tuple[int, int] = (0, 6)
     chief_eci_state_slice: tuple[int, int] = (6, 12)
     state_signs: np.ndarray = field(default_factory=lambda: np.ones(6))
@@ -24,6 +31,7 @@ class HCWLQRController(Controller):
     _ad: np.ndarray = field(init=False, repr=False)
     _bd: np.ndarray = field(init=False, repr=False)
     _k_gain: np.ndarray = field(init=False, repr=False)
+    _relative_dynamics: RelativeLinearDynamics = field(init=False, repr=False)
 
     @staticmethod
     def _control_law_label(state_signs: np.ndarray) -> str:
@@ -168,6 +176,8 @@ class HCWLQRController(Controller):
         if self.riccati_tol <= 0.0:
             raise ValueError("riccati_tol must be positive.")
 
+        self.dynamics_model = normalize_relative_linear_model(self.dynamics_model)
+
         signs = np.array(self.state_signs, dtype=float).reshape(-1)
         if signs.size != 6:
             raise ValueError("state_signs must be length-6.")
@@ -186,30 +196,15 @@ class HCWLQRController(Controller):
         if r.size != 3 or np.any(r <= 0.0):
             raise ValueError("r_weights must be positive scalar or length-3 vector.")
 
-        n = self.mean_motion_rad_s
-        A = np.array(
-            [
-                [0.0, 0.0, 0.0, 1.0, 0.0, 0.0],
-                [0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
-                [0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
-                [3.0 * n * n, 0.0, 0.0, 0.0, 2.0 * n, 0.0],
-                [0.0, 0.0, 0.0, -2.0 * n, 0.0, 0.0],
-                [0.0, 0.0, -n * n, 0.0, 0.0, 0.0],
-            ],
-            dtype=float,
+        self._relative_dynamics = RelativeLinearDynamics(
+            model=self.dynamics_model,
+            mean_motion_rad_s=float(self.mean_motion_rad_s),
+            reference_radius_km=self.reference_radius_km,
+            reference_inclination_rad=self.reference_inclination_rad,
+            j2=float(self.j2),
+            earth_radius_km=float(self.earth_radius_km),
         )
-        B = np.array(
-            [
-                [0.0, 0.0, 0.0],
-                [0.0, 0.0, 0.0],
-                [0.0, 0.0, 0.0],
-                [1.0, 0.0, 0.0],
-                [0.0, 1.0, 0.0],
-                [0.0, 0.0, 1.0],
-            ],
-            dtype=float,
-        )
-        ad, bd = self._discretize_zoh_series(A, B, self.design_dt_s)
+        ad, bd = self._relative_dynamics.discrete_matrices(self.design_dt_s)
         self._ad = ad
         self._bd = bd
         Q = np.diag(q)
@@ -247,7 +242,9 @@ class HCWLQRController(Controller):
             thrust_eci_km_s2=a_cmd_eci,
             torque_body_nm=np.zeros(3),
             mode_flags={
-                "mode": "hcw_lqr",
+                "mode": "hcw_lqr" if self.dynamics_model == "hcw" else "ss_j2_lqr",
+                "dynamics_model": self.dynamics_model,
+                "dynamics_metadata": self._relative_dynamics.metadata(),
                 "ric_curv_state_slice": [i0, i1],
                 "chief_eci_state_slice": [j0, j1],
                 "state_signs": self.state_signs.tolist(),
@@ -306,3 +303,13 @@ class HCWLQRController(Controller):
                 break
             P = Pn
         return np.linalg.solve(R + Bd.T @ P @ Bd, Bd.T @ P @ Ad)
+
+
+@dataclass
+class SSJ2LQRController(HCWLQRController):
+    """Convenience LQR configured for Schweighart-Sedwick J2 dynamics."""
+
+    dynamics_model: str = "ss_j2"
+
+
+RelativeLinearLQRController = HCWLQRController

@@ -266,6 +266,33 @@ SAVED_REVIEW_QUERIES: dict[str, SavedReviewQuery] = {
             "FROM validation_benchmarks ORDER BY benchmark_name"
         ),
     ),
+    "od_phase9_pilots": SavedReviewQuery(
+        name="od_phase9_pilots",
+        description="Productized OD pilot capability, claim level, readiness, and evidence packet paths.",
+        sql=(
+            "SELECT case_id, capability_id, claim_level, status, passed, evidence_packet_path "
+            "FROM od_phase9_pilots ORDER BY case_id"
+        ),
+        maturity="supported",
+    ),
+    "sequential_od_summary": SavedReviewQuery(
+        name="sequential_od_summary",
+        description="Sequential OD estimator, observation decisions, and evidence state.",
+        sql=(
+            "SELECT object_id, estimator, observation_count, accepted_count, rejected_count, evidence_status "
+            "FROM sequential_od_run"
+        ),
+        maturity="supported",
+    ),
+    "integrated_relative_od_models": SavedReviewQuery(
+        name="integrated_relative_od_models",
+        description="Integrated relative OD model fit, holdout, and sequential comparison rows.",
+        sql=(
+            "SELECT model, fit_position_rms_m, holdout_position_rms_m, batch_solver_success, "
+            "sequential_position_rms_m FROM relative_od_models ORDER BY model"
+        ),
+        maturity="supported",
+    ),
 }
 
 

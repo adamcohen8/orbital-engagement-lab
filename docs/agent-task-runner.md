@@ -46,6 +46,7 @@ List bundled recipes:
 .venv/bin/python -m sim.agent_task list --json
 ```
 
+
 List named plot recipes:
 
 ```bash

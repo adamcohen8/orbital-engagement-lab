@@ -7,6 +7,8 @@ import numpy as np
 from sim.control.orbit.lqr import HCWLQRController
 from sim.core.interfaces import Controller
 from sim.core.models import Command, StateBelief
+from sim.dynamics.orbit.environment import EARTH_J2, EARTH_RADIUS_KM
+from sim.dynamics.orbit.relative_linear import RelativeLinearDynamics, normalize_relative_linear_model
 from sim.utils.frames import ric_curv_to_rect, ric_dcm_ir_from_rv
 
 
@@ -107,6 +109,11 @@ class HCWNoRadialLQRController(Controller):
     mean_motion_rad_s: float
     max_accel_km_s2: float
     design_dt_s: float = 10.0
+    dynamics_model: str = "hcw"
+    reference_radius_km: float | None = None
+    reference_inclination_rad: float | None = None
+    j2: float = EARTH_J2
+    earth_radius_km: float = EARTH_RADIUS_KM
     ric_curv_state_slice: tuple[int, int] = (0, 6)
     chief_eci_state_slice: tuple[int, int] = (6, 12)
     state_signs: np.ndarray = field(default_factory=lambda: np.ones(6))
@@ -171,31 +178,17 @@ class HCWNoRadialLQRController(Controller):
         if r.size != 2 or np.any(r <= 0.0):
             raise ValueError("r_weights must be positive scalar or length-2 vector.")
 
-        n = self.mean_motion_rad_s
-        A = np.array(
-            [
-                [0.0, 0.0, 0.0, 1.0, 0.0, 0.0],
-                [0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
-                [0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
-                [3.0 * n * n, 0.0, 0.0, 0.0, 2.0 * n, 0.0],
-                [0.0, 0.0, 0.0, -2.0 * n, 0.0, 0.0],
-                [0.0, 0.0, -n * n, 0.0, 0.0, 0.0],
-            ],
-            dtype=float,
+        self.dynamics_model = normalize_relative_linear_model(self.dynamics_model)
+        dynamics = RelativeLinearDynamics(
+            model=self.dynamics_model,
+            mean_motion_rad_s=self.mean_motion_rad_s,
+            reference_radius_km=self.reference_radius_km,
+            reference_inclination_rad=self.reference_inclination_rad,
+            j2=self.j2,
+            earth_radius_km=self.earth_radius_km,
         )
-        # Only in-track and cross-track accelerations are available.
-        B = np.array(
-            [
-                [0.0, 0.0],
-                [0.0, 0.0],
-                [0.0, 0.0],
-                [0.0, 0.0],
-                [1.0, 0.0],
-                [0.0, 1.0],
-            ],
-            dtype=float,
-        )
-        ad, bd = HCWLQRController._discretize_zoh_series(A, B, self.design_dt_s)
+        ad, bd_full = dynamics.discrete_matrices(self.design_dt_s)
+        bd = bd_full[:, 1:3]
         self._ad = ad
         self._bd = bd
         Q = np.diag(q)
@@ -210,7 +203,7 @@ class HCWNoRadialLQRController(Controller):
             state_signs=self.state_signs,
             max_accel_km_s2=self.max_accel_km_s2,
             k_gain=self._k_gain,
-            mode_name="hcw_lqr_no_radial",
+            mode_name="hcw_lqr_no_radial" if self.dynamics_model == "hcw" else "ss_j2_lqr_no_radial",
             debug_law_label=HCWLQRController._control_law_label(self.state_signs),
         )
 
@@ -259,3 +252,10 @@ class HCWNoRadialManualController(Controller):
             mode_name="hcw_manual_no_radial",
             debug_law_label="u = -Kx",
         )
+
+
+@dataclass
+class SSJ2NoRadialLQRController(HCWNoRadialLQRController):
+    """Convenience no-radial LQR configured for SS-J2 dynamics."""
+
+    dynamics_model: str = "ss_j2"

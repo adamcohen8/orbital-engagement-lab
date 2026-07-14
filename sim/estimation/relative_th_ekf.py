@@ -11,6 +11,7 @@ from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2
 from sim.estimation.relative_hcw_ekf import (
     _default_measurement_noise_for_model,
     _diag6,
+    _measurement_covariance,
     _measurement_innovation,
     _normalize_measurement_origin,
     hcw_measurement_dimension,
@@ -39,8 +40,9 @@ class THRelativeEKFEstimator(Estimator):
     The native state is deputy relative to chief in the chief-centered RIC frame:
     [R, I, C, Rdot, Idot, Cdot], using km and km/s. Propagation numerically
     integrates the linearized Tschauner-Hempel equations along a two-body chief
-    reference and estimates covariance with the corresponding finite-difference
-    transition matrix by default. This is the same eccentric-orbit model family
+    reference and estimates covariance with the corresponding variational
+    state-transition matrix by default. A finite-difference STM remains
+    available as an explicit diagnostic/compatibility option. This is the same eccentric-orbit model family
     often used with Yamanaka-Ankersen state-transition solutions.
     """
 
@@ -53,7 +55,8 @@ class THRelativeEKFEstimator(Estimator):
     measurement_origin: str = "chief"
     mu_km3_s2: float = EARTH_MU_KM3_S2
     integration_substep_s: float = 10.0
-    transition_model: str = "finite_difference"
+    transition_model: str = "variational_stm"
+    meas_noise_covariance: np.ndarray | None = None
     last_update_diagnostics: THRelativeEKFUpdateDiagnostics | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -80,6 +83,21 @@ class THRelativeEKFEstimator(Estimator):
         if np.any(meas_noise < 0.0):
             raise ValueError("meas_noise_diag must be non-negative.")
         self.meas_noise_diag = meas_noise
+        if self.meas_noise_covariance is not None:
+            self.meas_noise_covariance = _measurement_covariance(
+                self.meas_noise_covariance, meas_dim
+            )
+
+    def set_measurement_covariance(self, covariance: np.ndarray | None) -> None:
+        """Set the full covariance used by subsequent measurement updates."""
+
+        self.meas_noise_covariance = (
+            None
+            if covariance is None
+            else _measurement_covariance(
+                covariance, hcw_measurement_dimension(self.measurement_model)
+            )
+        )
 
     def set_reference_state(self, chief_state_eci_km_s: np.ndarray, t_s: float) -> None:
         """Reset the chief reference used for the next prediction interval."""
@@ -130,7 +148,11 @@ class THRelativeEKFEstimator(Estimator):
             x_pred,
             measurement_origin=self.measurement_origin,
         )
-        r_mat = np.diag(self.meas_noise_diag)
+        r_mat = (
+            np.diag(self.meas_noise_diag)
+            if self.meas_noise_covariance is None
+            else self.meas_noise_covariance
+        )
         innovation = _measurement_innovation(self.measurement_model, z, h_pred)
         s_mat = h_jac @ p_pred @ h_jac.T + r_mat
         hp_t = p_pred @ h_jac.T
@@ -673,4 +695,3 @@ def _state6(value: np.ndarray, field_name: str) -> np.ndarray:
     if not np.all(np.isfinite(arr)):
         raise ValueError(f"{field_name} must contain finite values.")
     return arr.astype(float)
-

@@ -77,6 +77,9 @@ from sim.single_run_support import (
     _SatelliteStepper,
     _TerminationMonitor,
 )
+from sim.utils.parallel import restore_env_vars, set_parallel_worker_thread_limits
+
+_AUTO_OBJECT_PARALLEL_RUN_WORK_THRESHOLD = 250.0
 
 logger = logging.getLogger(__name__)
 
@@ -263,6 +266,10 @@ class ObjectStepExecutor(Protocol):
         """Synchronize worker knowledge after the orchestrator has the step truth."""
 
 
+class ObjectStepBackendUnavailable(RuntimeError):
+    """Raised when process transport fails independently of object physics."""
+
+
 class SerialObjectStepExecutor:
     backend_name = "serial"
     max_workers = 1
@@ -301,6 +308,7 @@ class ProcessPoolObjectStepExecutor:
         groups: list[list[ObjectStepInput]] = [[] for _ in range(worker_count)]
         for index, item in enumerate(inputs):
             groups[index % worker_count].append(item)
+        thread_env_previous = set_parallel_worker_thread_limits(default_threads="1")
         try:
             for worker_index, group in enumerate(groups):
                 snapshots = {
@@ -321,10 +329,12 @@ class ProcessPoolObjectStepExecutor:
                     self._executor_index_by_object[item.object_id] = worker_index
         except Exception as exc:
             self.shutdown()
-            raise RuntimeError(
+            raise ObjectStepBackendUnavailable(
                 "ProcessPoolObjectStepExecutor is unavailable in this environment. "
                 "Use simulator.execution.object_parallelism.backend=serial or disable object_parallelism."
             ) from exc
+        finally:
+            restore_env_vars(thread_env_previous)
 
     def step_objects(self, inputs: list[ObjectStepInput]) -> list[ObjectStepResult]:
         if len(inputs) <= 1:
@@ -351,17 +361,22 @@ class ProcessPoolObjectStepExecutor:
                 )
             )
         active_indices = [index for index, chunk in enumerate(chunks) if chunk]
-        for index in active_indices:
-            self._worker_connections[index].send(chunks[index])
-        indexed: list[tuple[int, ObjectStepResult]] = []
-        for index in active_indices:
-            status, payload = self._worker_connections[index].recv()
-            if status != "ok":
-                message, worker_traceback = payload
-                raise RuntimeError(
-                    f"Persistent object worker {index} failed: {message}\n{worker_traceback}"
-                )
-            indexed.extend(payload)
+        try:
+            for index in active_indices:
+                self._worker_connections[index].send(chunks[index])
+            indexed: list[tuple[int, ObjectStepResult]] = []
+            for index in active_indices:
+                status, payload = self._worker_connections[index].recv()
+                if status != "ok":
+                    message, worker_traceback = payload
+                    raise RuntimeError(
+                        f"Persistent object worker {index} failed: {message}\n{worker_traceback}"
+                    )
+                indexed.extend(payload)
+        except (BrokenPipeError, EOFError, OSError) as exc:
+            raise ObjectStepBackendUnavailable(
+                f"Persistent object-worker transport failed: {type(exc).__name__}: {exc}"
+            ) from exc
         indexed.sort(key=lambda row: row[0])
         return [result for _index, result in indexed]
 
@@ -979,6 +994,16 @@ class _SingleRunEngine:
                 )
 
         work_score = self._estimated_object_parallel_work_score(active_ids)
+        planned_steps = max(
+            1,
+            int(
+                np.ceil(
+                    float(getattr(self.cfg.simulator, "duration_s", 0.0))
+                    / max(float(self.dt), 1.0e-12)
+                )
+            ),
+        )
+        run_work_score = float(work_score) * float(planned_steps)
         selected_backend = "serial"
         reason = "object parallelism is disabled"
 
@@ -1017,6 +1042,12 @@ class _SingleRunEngine:
                     "auto planner selected serial: estimated object-step work score "
                     f"{work_score:.2f} is below the 2.50 crossover threshold"
                 )
+            elif run_work_score < _AUTO_OBJECT_PARALLEL_RUN_WORK_THRESHOLD:
+                reason = (
+                    "auto planner selected serial: estimated run work score "
+                    f"{run_work_score:.2f} is below the "
+                    f"{_AUTO_OBJECT_PARALLEL_RUN_WORK_THRESHOLD:.2f} startup-amortization threshold"
+                )
             else:
                 selected_backend = "process_pool"
                 reason = (
@@ -1041,6 +1072,8 @@ class _SingleRunEngine:
             "active_objects": active_objects,
             "min_objects": min_objects,
             "estimated_work_score": float(work_score),
+            "planned_steps": int(planned_steps),
+            "estimated_run_work_score": float(run_work_score),
             "eligible": not incompatibilities,
             "reason": reason,
             "allocation": allocation,
@@ -1968,7 +2001,25 @@ class _SingleRunEngine:
             t_next=t_next,
             sample_index=k,
         )
-        object_results = self.object_step_executor.step_objects(object_inputs)
+        try:
+            object_results = self.object_step_executor.step_objects(object_inputs)
+        except ObjectStepBackendUnavailable as exc:
+            policy = str(dict(self.object_execution_plan or {}).get("policy", "configured"))
+            if policy != "auto":
+                raise
+            self.object_step_executor.shutdown()
+            self.object_step_executor = SerialObjectStepExecutor(self)
+            self.object_execution_plan["initial_selected_backend"] = self.object_execution_plan.get(
+                "selected_backend",
+                "process_pool",
+            )
+            self.object_execution_plan["selected_backend"] = "serial"
+            self.object_execution_plan["selected_workers"] = 1
+            self.object_execution_plan["runtime_fallback_reason"] = str(exc)
+            self.object_execution_plan["reason"] = (
+                "auto planner fell back to serial after object-worker transport became unavailable"
+            )
+            object_results = self.object_step_executor.step_objects(object_inputs)
         self._validate_object_step_results(object_inputs, object_results)
         for result in object_results:
             self._apply_object_step_result(result, sample_index=k)

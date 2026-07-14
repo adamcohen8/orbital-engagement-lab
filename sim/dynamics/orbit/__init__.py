@@ -91,6 +91,11 @@ from sim.dynamics.orbit.propagator import (
     third_body_planets_plugin,
     third_body_sun_plugin,
 )
+from sim.dynamics.orbit.relative_linear import (
+    RELATIVE_LINEAR_MODELS,
+    RelativeLinearDynamics,
+    normalize_relative_linear_model,
+)
 from sim.dynamics.orbit.sdp4 import SDP4Context, sdp4_initialize, sdp4_propagate_teme_from_context
 from sim.dynamics.orbit.sgp4 import (
     SGP4_DEEP_SPACE_PERIOD_THRESHOLD_MIN,
@@ -115,6 +120,9 @@ __all__ = [
     "EARTH_MU_KM3_S2",
     "EARTH_RADIUS_KM",
     "EARTH_J2",
+    "RELATIVE_LINEAR_MODELS",
+    "RelativeLinearDynamics",
+    "normalize_relative_linear_model",
     "EARTH_J3",
     "EARTH_J4",
     "CR3BPSystem",

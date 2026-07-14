@@ -7,6 +7,8 @@ import numpy as np
 
 from sim.core.interfaces import Controller
 from sim.core.models import Command, StateBelief
+from sim.dynamics.orbit.environment import EARTH_J2, EARTH_RADIUS_KM
+from sim.dynamics.orbit.relative_linear import RelativeLinearDynamics, normalize_relative_linear_model
 from sim.utils.frames import ric_curv_to_rect, ric_dcm_ir_from_rv
 
 
@@ -21,6 +23,10 @@ class HCWRelativeOrbitMPCController(Controller):
     max_horizon_steps: int = 400
     mu_km3_s2: float = 398600.4418
     mean_motion_rad_s: float | None = None
+    dynamics_model: str = "hcw"
+    j2: float = EARTH_J2
+    earth_radius_km: float = EARTH_RADIUS_KM
+    maximum_ss_eccentricity: float = 0.01
 
     ric_curv_state_slice: tuple[int, int] = (0, 6)
     chief_eci_state_slice: tuple[int, int] = (6, 12)
@@ -71,6 +77,7 @@ class HCWRelativeOrbitMPCController(Controller):
             raise ValueError("mu_km3_s2 must be positive.")
         if self.mean_motion_rad_s is not None and self.mean_motion_rad_s <= 0.0:
             raise ValueError("mean_motion_rad_s must be positive when provided.")
+        self.dynamics_model = normalize_relative_linear_model(self.dynamics_model)
         if self.ric_curv_state_slice[1] - self.ric_curv_state_slice[0] != 6:
             raise ValueError("ric_curv_state_slice must select exactly 6 elements.")
         if self.chief_eci_state_slice[1] - self.chief_eci_state_slice[0] != 6:
@@ -177,7 +184,7 @@ class HCWRelativeOrbitMPCController(Controller):
             return Command.zero()
         dt_model = self._resolve_model_dt(t_s)
         h_steps = int(np.clip(np.ceil(self.horizon_time_s / max(dt_model, 1e-9)), 1, self.max_horizon_steps))
-        self._refresh_discrete_model(n, dt_model)
+        self._refresh_discrete_model(n, dt_model, x_tgt)
 
         c_ir = ric_dcm_ir_from_rv(r_tgt, v_tgt)
         x_rel_rect = ric_curv_to_rect(x_rel_curv, r0_km=r0)
@@ -216,7 +223,8 @@ class HCWRelativeOrbitMPCController(Controller):
             thrust_eci_km_s2=u0_eci,
             torque_body_nm=np.zeros(3),
             mode_flags={
-                "mode": "relative_orbit_hcw_mpc",
+                "mode": "relative_orbit_hcw_mpc" if self.dynamics_model == "hcw" else "relative_orbit_ss_j2_mpc",
+                "dynamics_model": self.dynamics_model,
                 "ric_curv_state_slice": [i0, i1],
                 "chief_eci_state_slice": [j0, j1],
                 "state_signs": self.state_signs.tolist(),
@@ -246,35 +254,18 @@ class HCWRelativeOrbitMPCController(Controller):
         self._last_model_dt_s = float(max(dt_model, 1e-9))
         return self._last_model_dt_s
 
-    def _refresh_discrete_model(self, n: float, dt: float) -> None:
-        nt = float(n * dt)
-        c = float(np.cos(nt))
-        s = float(np.sin(nt))
-        n2 = float(n * n)
-
-        # Exact CW STM (solved equations) with piecewise-constant acceleration over dt.
-        self._ad = np.array(
-            [
-                [4.0 - 3.0 * c, 0.0, 0.0, s / n, 2.0 * (1.0 - c) / n, 0.0],
-                [6.0 * (s - nt), 1.0, 0.0, -2.0 * (1.0 - c) / n, (4.0 * s - 3.0 * nt) / n, 0.0],
-                [0.0, 0.0, c, 0.0, 0.0, s / n],
-                [3.0 * n * s, 0.0, 0.0, c, 2.0 * s, 0.0],
-                [-6.0 * n * (1.0 - c), 0.0, 0.0, -2.0 * s, 4.0 * c - 3.0, 0.0],
-                [0.0, 0.0, -n * s, 0.0, 0.0, c],
-            ],
-            dtype=float,
-        )
-        bd_full = np.array(
-            [
-                [(1.0 - c) / n2, 2.0 * (dt / n - s / n2), 0.0],
-                [-2.0 * (dt / n - s / n2), 4.0 * (1.0 - c) / n2 - 1.5 * dt * dt, 0.0],
-                [0.0, 0.0, (1.0 - c) / n2],
-                [s / n, 2.0 * (1.0 - c) / n, 0.0],
-                [-2.0 * (1.0 - c) / n, 4.0 * s / n - 3.0 * dt, 0.0],
-                [0.0, 0.0, s / n],
-            ],
-            dtype=float,
-        )
+    def _refresh_discrete_model(self, n: float, dt: float, chief_state_eci_km_s: np.ndarray) -> None:
+        if self.dynamics_model == "hcw":
+            dynamics = RelativeLinearDynamics.hcw(n)
+        else:
+            dynamics = RelativeLinearDynamics.ss_j2_from_chief_state(
+                chief_state_eci_km_s,
+                mu_km3_s2=self.mu_km3_s2,
+                j2=self.j2,
+                earth_radius_km=self.earth_radius_km,
+                maximum_supported_eccentricity=self.maximum_ss_eccentricity,
+            )
+        self._ad, bd_full = dynamics.discrete_matrices(dt)
         self._bd = self._control_input_matrix(bd_full)
 
     def _solve_mpc(
@@ -488,6 +479,20 @@ class HCWInTrackCrossTrackMPCController(HCWRelativeOrbitMPCController):
     def act(self, belief: StateBelief, t_s: float, budget_ms: float) -> Command:
         cmd = super().act(belief, t_s, budget_ms)
         if cmd.mode_flags:
-            cmd.mode_flags["mode"] = "relative_orbit_hcw_mpc_no_radial"
+            cmd.mode_flags["mode"] = (
+                "relative_orbit_hcw_mpc_no_radial"
+                if self.dynamics_model == "hcw"
+                else "relative_orbit_ss_j2_mpc_no_radial"
+            )
             cmd.mode_flags["control_signs"] = self.control_signs.tolist()
         return cmd
+
+
+@dataclass
+class SSJ2RelativeOrbitMPCController(HCWRelativeOrbitMPCController):
+    """Convenience MPC configured for Schweighart-Sedwick J2 dynamics."""
+
+    dynamics_model: str = "ss_j2"
+
+
+RelativeLinearOrbitMPCController = HCWRelativeOrbitMPCController

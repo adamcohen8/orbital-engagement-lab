@@ -5,10 +5,12 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from sim.control.orbit.hcw_pd import _as_gain_matrix, _as_state
-from sim.control.orbit.hcw_transfer import solve_hcw_position_rendezvous
+from sim.control.orbit.hcw_transfer import solve_linear_position_rendezvous
 from sim.control.orbit.lqr import HCWLQRController
 from sim.core.interfaces import Controller
 from sim.core.models import Command, StateBelief
+from sim.dynamics.orbit.environment import EARTH_J2, EARTH_RADIUS_KM
+from sim.dynamics.orbit.relative_linear import RelativeLinearDynamics, normalize_relative_linear_model
 from sim.utils.frames import ric_curv_to_rect, ric_dcm_ir_from_rv
 
 
@@ -32,6 +34,11 @@ class RICPDTransferController(Controller):
     max_accel_km_s2: float
     mean_motion_rad_s: float
     transfer_time_s: float
+    dynamics_model: str = "hcw"
+    reference_radius_km: float | None = None
+    reference_inclination_rad: float | None = None
+    j2: float = EARTH_J2
+    earth_radius_km: float = EARTH_RADIUS_KM
     burn_time_constant_s: float = 45.0
     correction_interval_s: float = 300.0
     velocity_deadband_m_s: float = 0.015
@@ -52,12 +59,22 @@ class RICPDTransferController(Controller):
     _planned_arrival_velocity_ric_km_s: np.ndarray = field(default_factory=lambda: np.zeros(3), init=False, repr=False)
     _terminal_gain: np.ndarray = field(default_factory=lambda: np.zeros((3, 6)), init=False, repr=False)
     _zero3: np.ndarray = field(default_factory=lambda: np.zeros(3), init=False, repr=False)
+    _relative_dynamics: RelativeLinearDynamics = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.max_accel_km_s2 < 0.0:
             raise ValueError("max_accel_km_s2 must be non-negative.")
         if self.mean_motion_rad_s <= 0.0:
             raise ValueError("mean_motion_rad_s must be positive.")
+        self.dynamics_model = normalize_relative_linear_model(self.dynamics_model)
+        self._relative_dynamics = RelativeLinearDynamics(
+            model=self.dynamics_model,
+            mean_motion_rad_s=self.mean_motion_rad_s,
+            reference_radius_km=self.reference_radius_km,
+            reference_inclination_rad=self.reference_inclination_rad,
+            j2=self.j2,
+            earth_radius_km=self.earth_radius_km,
+        )
         if self.transfer_time_s <= 0.0:
             raise ValueError("transfer_time_s must be positive.")
         if self.burn_time_constant_s <= 0.0:
@@ -114,25 +131,16 @@ class RICPDTransferController(Controller):
 
     def _terminal_accel(self, x_effective: np.ndarray) -> tuple[np.ndarray, np.ndarray, float]:
         accel_pre_limit = -(self._terminal_gain @ x_effective)
-        n = float(self.mean_motion_rad_s)
-        x, _y, z, xdot, ydot, _zdot = x_effective
-        accel_pre_limit += np.array(
-            [
-                -3.0 * n * n * x - 2.0 * n * ydot,
-                2.0 * n * xdot,
-                n * n * z,
-            ],
-            dtype=float,
-        )
+        accel_pre_limit -= self._relative_dynamics.system_matrix()[3:, :] @ x_effective
         accel, scale = _limit_vector(accel_pre_limit, float(self.max_accel_km_s2))
         return accel_pre_limit, accel, scale
 
     def _refresh_guidance(self, x_effective: np.ndarray, t_s: float, remaining_s: float) -> None:
-        solution = solve_hcw_position_rendezvous(
-            initial_rel_state_ric=x_effective,
-            target_delta_v_ric_km_s=np.zeros(3, dtype=float),
-            mean_motion_rad_s=float(self.mean_motion_rad_s),
-            transfer_time_s=float(remaining_s),
+        solution = solve_linear_position_rendezvous(
+            x_effective,
+            np.zeros(3, dtype=float),
+            self._relative_dynamics,
+            float(remaining_s),
         )
         self._target_velocity_ric_km_s = np.array(
             solution.required_post_chaser_rel_velocity_ric_km_s,
@@ -218,6 +226,8 @@ class RICPDTransferController(Controller):
             torque_body_nm=self._zero3.copy(),
             mode_flags={
                 "mode": "ric_pd_transfer",
+                "dynamics_model": self.dynamics_model,
+                "dynamics_metadata": self._relative_dynamics.metadata(),
                 "phase": phase,
                 "ric_curv_state_slice": [i0, i1],
                 "chief_eci_state_slice": [j0, j1],

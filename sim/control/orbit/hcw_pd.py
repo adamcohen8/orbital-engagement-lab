@@ -7,6 +7,8 @@ import numpy as np
 from sim.control.orbit.lqr import HCWLQRController
 from sim.core.interfaces import Controller
 from sim.core.models import Command, StateBelief
+from sim.dynamics.orbit.environment import EARTH_J2, EARTH_RADIUS_KM
+from sim.dynamics.orbit.relative_linear import RelativeLinearDynamics, normalize_relative_linear_model
 from sim.utils.frames import ric_curv_to_rect, ric_dcm_ir_from_rv
 
 
@@ -41,6 +43,11 @@ class HCWPDController(Controller):
 
     max_accel_km_s2: float
     mean_motion_rad_s: float = 0.0
+    dynamics_model: str = "hcw"
+    reference_radius_km: float | None = None
+    reference_inclination_rad: float | None = None
+    j2: float = EARTH_J2
+    earth_radius_km: float = EARTH_RADIUS_KM
     kp: np.ndarray = field(default_factory=lambda: np.eye(3) * 4.0e-6)
     kd: np.ndarray = field(default_factory=lambda: np.eye(3) * 4.0e-3)
     desired_state_ric: np.ndarray = field(default_factory=lambda: np.zeros(6))
@@ -53,6 +60,9 @@ class HCWPDController(Controller):
             raise ValueError("max_accel_km_s2 must be non-negative.")
         if self.mean_motion_rad_s < 0.0:
             raise ValueError("mean_motion_rad_s must be non-negative.")
+        self.dynamics_model = normalize_relative_linear_model(self.dynamics_model)
+        if self.dynamics_model == "ss_j2" and self.mean_motion_rad_s <= 0.0:
+            raise ValueError("SS-J2 PD feedforward requires positive mean_motion_rad_s.")
         if self.ric_curv_state_slice[1] - self.ric_curv_state_slice[0] != 6:
             raise ValueError("ric_curv_state_slice must select exactly 6 elements.")
         if self.chief_eci_state_slice[1] - self.chief_eci_state_slice[0] != 6:
@@ -96,16 +106,15 @@ class HCWPDController(Controller):
         k_gain = np.hstack((self.kp, self.kd))
         accel_ric_pre_limit = -k_gain @ x_effective
         if self.mean_motion_rad_s > 0.0:
-            n = float(self.mean_motion_rad_s)
-            x, _y, z, xdot, ydot, _zdot = x_effective
-            accel_ric_pre_limit += np.array(
-                [
-                    -3.0 * n * n * x - 2.0 * n * ydot,
-                    2.0 * n * xdot,
-                    n * n * z,
-                ],
-                dtype=float,
+            dynamics = RelativeLinearDynamics(
+                model=self.dynamics_model,
+                mean_motion_rad_s=self.mean_motion_rad_s,
+                reference_radius_km=self.reference_radius_km,
+                reference_inclination_rad=self.reference_inclination_rad,
+                j2=self.j2,
+                earth_radius_km=self.earth_radius_km,
             )
+            accel_ric_pre_limit -= dynamics.system_matrix()[3:, :] @ x_effective
         accel_ric = np.array(accel_ric_pre_limit, dtype=float)
         nrm = float(np.linalg.norm(accel_ric_pre_limit))
         limit_scale = 1.0
@@ -122,7 +131,8 @@ class HCWPDController(Controller):
             thrust_eci_km_s2=accel_eci,
             torque_body_nm=np.zeros(3),
             mode_flags={
-                "mode": "hcw_pd",
+                "mode": "hcw_pd" if self.dynamics_model == "hcw" else "ss_j2_pd",
+                "dynamics_model": self.dynamics_model,
                 "ric_curv_state_slice": [i0, i1],
                 "chief_eci_state_slice": [j0, j1],
                 "desired_state_ric": self.desired_state_ric.tolist(),
@@ -139,3 +149,13 @@ class HCWPDController(Controller):
                 ),
             },
         )
+
+
+@dataclass
+class SSJ2PDController(HCWPDController):
+    """Convenience PD controller configured for SS-J2 feedforward."""
+
+    dynamics_model: str = "ss_j2"
+
+
+RelativeLinearPDController = HCWPDController

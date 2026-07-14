@@ -703,10 +703,21 @@ def transform_state(
 
 
 def _eci_to_ecef_rotation_derivative_context(t_s: float, context: FrameContext) -> np.ndarray:
-    step_s = 0.01
+    # Julian dates near the present epoch have a floating-point spacing of
+    # roughly tens of microseconds.  A 0.01 s two-point difference therefore
+    # amplified epoch quantization into mm/s-to-m/s station-velocity errors.
+    # A symmetric five-point stencil over 30 s suppresses that roundoff while
+    # retaining fourth-order accuracy for Earth rotation and the much slower
+    # precession/nutation/EOP terms.
+    step_s = 30.0
     t = float(t_s)
-    return (eci_to_ecef_rotation_context(t + step_s, context) - eci_to_ecef_rotation_context(t - step_s, context)) / (
-        2.0 * step_s
+    return (
+        -eci_to_ecef_rotation_context(t + 2.0 * step_s, context)
+        + 8.0 * eci_to_ecef_rotation_context(t + step_s, context)
+        - 8.0 * eci_to_ecef_rotation_context(t - step_s, context)
+        + eci_to_ecef_rotation_context(t - 2.0 * step_s, context)
+    ) / (
+        12.0 * step_s
     )
 
 

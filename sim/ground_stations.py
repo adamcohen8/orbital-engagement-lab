@@ -7,8 +7,8 @@ from typing import Any
 import numpy as np
 
 from sim.config import GroundStationSection
-from sim.dynamics.orbit.environment import EARTH_RADIUS_KM, EARTH_ROT_RATE_RAD_S
-from sim.dynamics.orbit.frames import FrameContext, frame_context_from_mapping, transform_position
+from sim.dynamics.orbit.environment import EARTH_RADIUS_KM
+from sim.dynamics.orbit.frames import FrameContext, frame_context_from_mapping, transform_position, transform_state
 from sim.observations import ObservationPacket, ingest_observations
 from sim.utils.geodesy import ecef_to_enu_rotation, enu_to_ecef_rotation, geodetic_to_ecef_km
 
@@ -339,8 +339,14 @@ def _ground_measurement_geometry(
     frame_ctx = frame_context or frame_context_from_mapping({}, jd_utc_start=jd_utc_start, source="ground_station")
     target_eci = np.array(target_state_eci[:3], dtype=float)
     target_vel_eci = np.array(target_state_eci[3:6], dtype=float)
-    station_eci = transform_position(station_ecef_km, "ecef", "eci", t_s=t_s, context=frame_ctx)
-    station_vel_eci = np.cross(np.array([0.0, 0.0, EARTH_ROT_RATE_RAD_S], dtype=float), station_eci)
+    station_eci, station_vel_eci = transform_state(
+        station_ecef_km,
+        np.zeros(3),
+        "ecef",
+        "eci",
+        t_s=t_s,
+        context=frame_ctx,
+    )
     target_ecef = transform_position(target_eci, "eci", "ecef", t_s=t_s, context=frame_ctx)
     rho_ecef = target_ecef - station_ecef_km
     rng = float(np.linalg.norm(rho_ecef))

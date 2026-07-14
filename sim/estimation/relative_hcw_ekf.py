@@ -6,6 +6,8 @@ import numpy as np
 
 from sim.core.interfaces import Estimator
 from sim.core.models import Measurement, StateBelief
+from sim.dynamics.orbit.environment import EARTH_J2, EARTH_RADIUS_KM
+from sim.dynamics.orbit.relative_linear import RelativeLinearDynamics
 
 HCW_MEASUREMENT_MODELS = {
     "relative_state",
@@ -43,6 +45,7 @@ class HCWRelativeEKFEstimator(Estimator):
     meas_noise_diag: np.ndarray
     measurement_model: str = "relative_state"
     measurement_origin: str = "chief"
+    meas_noise_covariance: np.ndarray | None = None
     last_update_diagnostics: HCWRelativeEKFUpdateDiagnostics | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -64,6 +67,21 @@ class HCWRelativeEKFEstimator(Estimator):
         if np.any(meas_noise < 0.0):
             raise ValueError("meas_noise_diag must be non-negative.")
         self.meas_noise_diag = meas_noise
+        if self.meas_noise_covariance is not None:
+            self.meas_noise_covariance = _measurement_covariance(
+                self.meas_noise_covariance, meas_dim
+            )
+
+    def set_measurement_covariance(self, covariance: np.ndarray | None) -> None:
+        """Set the full covariance used by subsequent measurement updates."""
+
+        self.meas_noise_covariance = (
+            None
+            if covariance is None
+            else _measurement_covariance(
+                covariance, hcw_measurement_dimension(self.measurement_model)
+            )
+        )
 
     def update(self, belief: StateBelief, measurement: Measurement | None, t_s: float) -> StateBelief:
         output_t_s = float(t_s)
@@ -108,7 +126,11 @@ class HCWRelativeEKFEstimator(Estimator):
             x_pred,
             measurement_origin=self.measurement_origin,
         )
-        r = np.diag(self.meas_noise_diag)
+        r = (
+            np.diag(self.meas_noise_diag)
+            if self.meas_noise_covariance is None
+            else self.meas_noise_covariance
+        )
         innovation = _measurement_innovation(self.measurement_model, z, h_pred)
         s_mat = h_jac @ p_pred @ h_jac.T + r
         hp_t = p_pred @ h_jac.T
@@ -154,25 +176,97 @@ class HCWRelativeEKFEstimator(Estimator):
         return phi @ x, 0.5 * (p_pred + p_pred.T)
 
 
+@dataclass
+class SSJ2RelativeEKFEstimator(HCWRelativeEKFEstimator):
+    """EKF using homogeneous chief-centered Schweighart-Sedwick dynamics.
+
+    The measurement contract is identical to :class:`HCWRelativeEKFEstimator`.
+    The reference orbit must be circular or near-circular and its radius and
+    inclination use mean-orbit semantics.
+    """
+
+    reference_radius_km: float = 7000.0
+    reference_inclination_rad: float = 0.0
+    j2: float = EARTH_J2
+    earth_radius_km: float = EARTH_RADIUS_KM
+    reference_eccentricity: float | None = None
+    maximum_supported_eccentricity: float = 0.01
+    _relative_dynamics: RelativeLinearDynamics = field(init=False, repr=False)
+    _transition_cache: dict[float, np.ndarray] = field(default_factory=dict, init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self._relative_dynamics = RelativeLinearDynamics(
+            model="ss_j2",
+            mean_motion_rad_s=float(self.mean_motion_rad_s),
+            reference_radius_km=float(self.reference_radius_km),
+            reference_inclination_rad=float(self.reference_inclination_rad),
+            j2=float(self.j2),
+            earth_radius_km=float(self.earth_radius_km),
+            reference_eccentricity=self.reference_eccentricity,
+            maximum_supported_eccentricity=float(self.maximum_supported_eccentricity),
+        )
+
+    @classmethod
+    def from_chief_state(
+        cls,
+        chief_state_eci_km_s: np.ndarray,
+        *,
+        dt_s: float,
+        process_noise_diag: np.ndarray,
+        meas_noise_diag: np.ndarray,
+        measurement_model: str = "relative_state",
+        measurement_origin: str = "chief",
+        j2: float = EARTH_J2,
+        earth_radius_km: float = EARTH_RADIUS_KM,
+        maximum_supported_eccentricity: float = 0.01,
+    ) -> SSJ2RelativeEKFEstimator:
+        dynamics = RelativeLinearDynamics.ss_j2_from_chief_state(
+            chief_state_eci_km_s,
+            j2=j2,
+            earth_radius_km=earth_radius_km,
+            maximum_supported_eccentricity=maximum_supported_eccentricity,
+        )
+        return cls(
+            mean_motion_rad_s=dynamics.mean_motion_rad_s,
+            dt_s=dt_s,
+            process_noise_diag=process_noise_diag,
+            meas_noise_diag=meas_noise_diag,
+            measurement_model=measurement_model,
+            measurement_origin=measurement_origin,
+            reference_radius_km=float(dynamics.reference_radius_km),
+            reference_inclination_rad=float(dynamics.reference_inclination_rad),
+            j2=j2,
+            earth_radius_km=earth_radius_km,
+            reference_eccentricity=dynamics.reference_eccentricity,
+            maximum_supported_eccentricity=maximum_supported_eccentricity,
+        )
+
+    def _predict(
+        self,
+        x_prev: np.ndarray,
+        p_prev: np.ndarray,
+        *,
+        from_t_s: float,
+        to_t_s: float,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        dt_s = max(float(to_t_s) - float(from_t_s), 0.0)
+        phi = self._transition_cache.get(dt_s)
+        if phi is None:
+            phi = self._relative_dynamics.state_transition_matrix(dt_s)
+            self._transition_cache[dt_s] = phi
+        x = np.asarray(x_prev, dtype=float).reshape(6)
+        p = np.asarray(p_prev, dtype=float).reshape(6, 6)
+        q_scale = dt_s / self.dt_s if self.dt_s > 0.0 else 1.0
+        p_pred = phi @ p @ phi.T + np.diag(self.process_noise_diag) * max(q_scale, 0.0)
+        return phi @ x, 0.5 * (p_pred + p_pred.T)
+
+    def model_metadata(self) -> dict[str, object]:
+        return self._relative_dynamics.metadata()
+
+
 def hcw_state_transition_matrix(mean_motion_rad_s: float, dt_s: float) -> np.ndarray:
-    n = float(mean_motion_rad_s)
-    if n <= 0.0:
-        raise ValueError("mean_motion_rad_s must be positive.")
-    t = float(dt_s)
-    nt = n * t
-    c = float(np.cos(nt))
-    s = float(np.sin(nt))
-    return np.array(
-        [
-            [4.0 - 3.0 * c, 0.0, 0.0, s / n, 2.0 * (1.0 - c) / n, 0.0],
-            [6.0 * (s - nt), 1.0, 0.0, -2.0 * (1.0 - c) / n, (4.0 * s - 3.0 * nt) / n, 0.0],
-            [0.0, 0.0, c, 0.0, 0.0, s / n],
-            [3.0 * n * s, 0.0, 0.0, c, 2.0 * s, 0.0],
-            [6.0 * n * (c - 1.0), 0.0, 0.0, -2.0 * s, 4.0 * c - 3.0, 0.0],
-            [0.0, 0.0, -n * s, 0.0, 0.0, c],
-        ],
-        dtype=float,
-    )
+    return RelativeLinearDynamics.hcw(float(mean_motion_rad_s)).state_transition_matrix(float(dt_s))
 
 
 def normalize_hcw_measurement_model(model: str) -> str:
@@ -246,15 +340,46 @@ def hcw_measurement_jacobian(model: str, state: np.ndarray, *, measurement_origi
         sign = 1.0 if _normalize_measurement_origin(measurement_origin) == "chief" else -1.0
         return sign * np.eye(6)
     x = np.asarray(state, dtype=float).reshape(6)
-    h0 = hcw_measurement_vector(normalized, x, measurement_origin=measurement_origin)
-    jac = np.zeros((h0.size, 6), dtype=float)
-    eps = np.array([1e-5, 1e-5, 1e-5, 1e-8, 1e-8, 1e-8], dtype=float)
-    for i in range(6):
-        xp = x.copy()
-        xp[i] += eps[i]
-        hp = hcw_measurement_vector(normalized, xp, measurement_origin=measurement_origin)
-        jac[:, i] = _measurement_innovation(normalized, hp, h0) / eps[i]
-    return jac
+    r = x[:3]
+    v = x[3:]
+    rho = float(np.linalg.norm(r))
+    transverse = float(np.hypot(r[0], r[1]))
+    if rho <= 1.0e-12:
+        raise ValueError("Relative range/angle measurement Jacobian is singular at zero separation.")
+
+    range_row = np.zeros(6, dtype=float)
+    range_row[:3] = r / rho
+    range_rate_row = np.zeros(6, dtype=float)
+    radial_velocity = float(np.dot(r, v))
+    range_rate_row[:3] = v / rho - radial_velocity * r / rho**3
+    range_rate_row[3:] = r / rho
+    if normalized == "relative_range":
+        return range_row.reshape(1, 6)
+    if normalized == "relative_range_rate":
+        return np.vstack((range_row, range_rate_row))
+
+    if transverse <= 1.0e-12:
+        raise ValueError("Relative azimuth/elevation Jacobian is singular on the cross-track axis.")
+    azimuth_row = np.zeros(6, dtype=float)
+    azimuth_row[:3] = np.array([-r[1], r[0], 0.0]) / transverse**2
+    elevation_row = np.zeros(6, dtype=float)
+    elevation_row[:3] = np.array(
+        [
+            -r[0] * r[2] / (rho**2 * transverse),
+            -r[1] * r[2] / (rho**2 * transverse),
+            transverse / rho**2,
+        ],
+        dtype=float,
+    )
+    if _normalize_measurement_origin(measurement_origin) == "deputy":
+        elevation_row *= -1.0
+    if normalized == "relative_angles":
+        return np.vstack((azimuth_row, elevation_row))
+    if normalized == "relative_angles_range":
+        return np.vstack((azimuth_row, elevation_row, range_row))
+    if normalized == "relative_angles_range_rate":
+        return np.vstack((azimuth_row, elevation_row, range_row, range_rate_row))
+    raise ValueError(f"Unsupported HCW measurement_model '{model}'.")
 
 
 def _diag6(value: np.ndarray, field_name: str) -> np.ndarray:
@@ -264,6 +389,18 @@ def _diag6(value: np.ndarray, field_name: str) -> np.ndarray:
     if np.any(arr < 0.0):
         raise ValueError(f"{field_name} must be non-negative.")
     return arr
+
+
+def _measurement_covariance(value: np.ndarray, dimension: int) -> np.ndarray:
+    covariance = np.asarray(value, dtype=float)
+    if covariance.shape != (dimension, dimension) or np.any(~np.isfinite(covariance)):
+        raise ValueError(f"meas_noise_covariance must be a finite {dimension}x{dimension} matrix.")
+    if not np.allclose(covariance, covariance.T, rtol=1.0e-10, atol=1.0e-14):
+        raise ValueError("meas_noise_covariance must be symmetric.")
+    symmetric = 0.5 * (covariance + covariance.T)
+    if np.min(np.linalg.eigvalsh(symmetric)) < -1.0e-14:
+        raise ValueError("meas_noise_covariance must be positive semidefinite.")
+    return symmetric
 
 
 def _normalize_measurement_origin(value: str) -> str:
@@ -286,18 +423,16 @@ def _normalize_measurement_origin(value: str) -> str:
 def _default_measurement_noise_for_model(model: str, full_state_diag: np.ndarray) -> np.ndarray:
     pos_var = float(np.mean(np.asarray(full_state_diag[:3], dtype=float)))
     vel_var = float(np.mean(np.asarray(full_state_diag[3:6], dtype=float)))
-    angle_var = max(pos_var, 1e-18)
     normalized = normalize_hcw_measurement_model(model)
     if normalized == "relative_range":
         return np.array([pos_var], dtype=float)
     if normalized == "relative_range_rate":
         return np.array([pos_var, vel_var], dtype=float)
-    if normalized == "relative_angles":
-        return np.array([angle_var, angle_var], dtype=float)
-    if normalized == "relative_angles_range":
-        return np.array([angle_var, angle_var, pos_var], dtype=float)
-    if normalized == "relative_angles_range_rate":
-        return np.array([angle_var, angle_var, pos_var, vel_var], dtype=float)
+    if normalized in {"relative_angles", "relative_angles_range", "relative_angles_range_rate"}:
+        raise ValueError(
+            "Angular measurement covariance must be supplied in rad^2 with the exact measurement-model "
+            "dimension; Cartesian position variance cannot be converted to angle variance without range geometry."
+        )
     return np.asarray(full_state_diag, dtype=float).reshape(6)
 
 

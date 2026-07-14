@@ -78,7 +78,7 @@ Velocity conversion differentiates those expressions with
 This is a coordinate transform used by controllers and plots; OEL does not
 claim that curvilinear RIC itself is a separate high-fidelity dynamics model.
 
-## HCW Equations
+## Shared HCW And SS-J2 Equations
 
 The HCW-family controllers and transfer utilities use the rectangular RIC
 linearized circular-chief model:
@@ -93,20 +93,27 @@ dC_dot = -n^2 C + a_C
 ```
 
 `n` is `mean_motion_rad_s`. `a_R`, `a_I`, and `a_C` are commanded RIC
-accelerations. `HCWLQRController` builds the corresponding continuous `A` and
-`B` matrices, discretizes them with a zero-order-hold series using
-`design_dt_s`, and solves a discrete LQR. `HCWNoRadialLQRController` uses the
-same `A` matrix but only the in-track and cross-track columns of `B`.
+accelerations. The same shared dynamics object also supplies homogeneous,
+chief-centered Schweighart-Sedwick averaged-J2 coefficients when
+`dynamics_model: ss_j2` is selected. SS-J2 requires mean reference radius and
+inclination, assumes a near-circular Earth chief, and uses the coplanar nodal-
+drift cross-track limit. The periodic terms written for an unperturbed
+reference orbit are excluded from OEL's propagated-chief RIC state.
 
-`sim/control/orbit/hcw_transfer.py` implements the closed-form HCW state
-transition matrix and rendezvous velocity solve. It raises when the
+`HCWLQRController` obtains continuous `A` and `B` from that shared object,
+computes an exact matrix-exponential zero-order hold using `design_dt_s`, and
+solves a discrete LQR. `HCWNoRadialLQRController` uses the same matrices but
+only the in-track and cross-track columns of `B`.
+
+`sim/control/orbit/hcw_transfer.py` retains the closed-form HCW compatibility
+functions and adds model-agnostic linear STM and rendezvous solves. It raises when the
 position-velocity transition block is near singular for the requested transfer
 time.
 
 `HCWPDController` and the terminal phase of `RICPDTransferController` apply PD
 feedback in rectangular RIC and optionally add the HCW feedforward cancellation
 terms visible in the code. `RICPDTransferController` also uses
-`solve_hcw_position_rendezvous` to choose a guided coast velocity before final
+the shared linear rendezvous solver to choose a guided coast velocity before final
 cleanup.
 
 ## Controller Assumptions
@@ -122,16 +129,18 @@ from the current deputy and chief truth/estimated states. See
 convert the curvilinear state to rectangular RIC before applying their control
 law:
 
-- `HCWLQRController`: curvilinear input, rectangular HCW LQR feedback,
+- `HCWLQRController`: curvilinear input, rectangular HCW or opt-in SS-J2 LQR feedback,
   acceleration rotated to ECI for thrust.
 - `HCWCurvInputRectOutputController`: explicit wrapper showing the same
   curvilinear-input to rectangular-output pipeline.
 - `HCWNoRadialLQRController` / `HCWNoRadialManualController`: rectangular HCW
   feedback with radial acceleration forced to zero.
-- `HCWPDController`: rectangular RIC PD feedback with optional HCW terms when
+- `HCWPDController`: rectangular RIC PD feedback with optional HCW/SS-J2 terms when
   `mean_motion_rad_s > 0`.
 - `RICPDTransferController`: rectangular RIC guided-transfer and terminal PD
-  cleanup built around HCW transfer math.
+  cleanup built around shared HCW/SS-J2 linear transfer math.
+- `HCWRelativeOrbitMPCController`: exact-ZOH HCW or opt-in SS-J2 prediction;
+  the SS coefficients are refreshed from the current chief state.
 - `CurvilinearRICPDController`: feedback error is computed in curvilinear RIC;
   the commanded curvilinear acceleration is mapped to local rectangular RIC by
   a finite-difference position Jacobian before rotation to ECI.

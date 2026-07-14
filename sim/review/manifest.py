@@ -27,6 +27,35 @@ KNOWN_WORKFLOW_TABLE_COLUMNS: dict[str, list[str]] = {
     "campaign_metrics": ["iteration", "metric_name", "metric_value"],
     "validation_benchmarks": ["benchmark_name", "kind", "passed", "duration_s", "output_dir"],
     "validation_artifacts": ["artifact_key", "path"],
+    "ground_od_systematic_parameters": [
+        "parameter",
+        "systematic",
+        "scope",
+        "station_id",
+        "estimate",
+        "unit",
+        "data_identifiable",
+        "prior_dominated",
+    ],
+    "ground_od_stations": ["station_id", "lat_deg", "lon_deg", "alt_km", "location_frame", "disposition"],
+    "ground_od_exclusions": [
+        "measurement_id",
+        "station_id",
+        "time_jd_utc",
+        "time_s",
+        "measurement_type",
+        "components",
+        "reason",
+    ],
+    "ground_od_decisions": [
+        "residual_index",
+        "measurement_id",
+        "station_id",
+        "time_s",
+        "component",
+        "accepted",
+        "reasons",
+    ],
 }
 
 

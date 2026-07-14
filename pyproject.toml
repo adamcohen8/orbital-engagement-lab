@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=69", "wheel"]
+requires = ["setuptools>=83", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "orbital-engagement-lab"
-version = "0.20.5"
+version = "0.21.0"
 description = "Integrated spacecraft simulation and analysis platform for rendezvous, control, validation, and mission prototyping."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -27,7 +27,7 @@ dev = [
 ]
 game = [
   "pygame>=2.5",
-  "Pillow>=12.2.0",
+  "Pillow>=12.3.0",
   "imageio>=2.34",
   "imageio-ffmpeg>=0.4",
 ]
@@ -46,7 +46,7 @@ full = [
   "pytest>=9.0.3",
   "ruff==0.15.14",
   "pygame>=2.5",
-  "Pillow>=12.2.0",
+  "Pillow>=12.3.0",
   "imageio>=2.34",
   "imageio-ffmpeg>=0.4",
   "gymnasium>=0.29",

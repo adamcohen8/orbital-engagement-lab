@@ -8,7 +8,136 @@ migration-sensitive behavior explicitly.
 
 ## Unreleased
 
-No unreleased changes are currently recorded.
+## 0.21.0 - 2026-07-14
+
+Release thesis: `v0.21.0` turns OEL orbit determination into a coherent,
+evidence-producing capability from observation normalization and initial-orbit
+determination through batch/sequential estimation, maneuver recovery, relative
+OD, OGP mean-element fitting, covariance studies, and agent-facing pilot
+workflows.
+
+Private/Pro scope: `v0.21.0` adds the governed external OD validation campaigns,
+Scale integrations, productization packets, and campaign-scale execution work.
+The public release retains public-safe deterministic physics, relative-motion
+models, observation contracts, documentation, and reproducible fallback
+workflows without exposing private orchestration, external raw evidence, or Pro
+report packets.
+
+### Added
+
+- Added a shared HCW/Schweighart-Sedwick J2 relative-dynamics contract across
+  batch and integrated OD, live relative EKF knowledge, LQR/MPC/PD control,
+  and linear rendezvous targeting, plus an ONP-derived nonlinear relative STM
+  reference and explicit near-circular/mean-element/forcing metadata.
+- Added OD Phase 6 regime-bounded OGP mean-element fitting across named
+  OGP-SGP4 near-Earth and OGP-SDP4 synchronous, half-day-resonant, and
+  high-eccentricity deep-space families, with native TEME PV packets,
+  multi-day holdout, and queryable review evidence.
+- Added automatic nonsingular/classical parameterization, separate
+  state-space and element-space metrics, and prior/arc/postfit-identifiability
+  gates that safely remove unsupported B* or epoch-offset trials.
+- Added OD Phase 5 initial-orbit determination with geometry-gated Gibbs and
+  Herrick-Gibbs position-triplet methods, checked-in Lambert candidates, Gauss
+  angles-only roots, constrained-Lambert range hypotheses, and common batch
+  refinement.
+- Added the versioned optical RA/Dec observation contract with observer, epoch,
+  frame, covariance, bias, and quality metadata; explicit unique, ambiguous,
+  and insufficient result states; mission-input handoff; and queryable Phase 5
+  validation evidence.
+- Added the OD Phase 4 external campaign with checksum-pinned Orekit 13.1.7,
+  GMAT R2026a, IGS final SP3, ILRS CRD v2, station metadata, and governed raw
+  input provenance.
+- Added independent Orekit batch-estimation fit/holdout references for circular
+  LEO, eccentric HEO, and GEO, plus an executed GMAT DSN range/Doppler
+  estimation and sigma-editing reference.
+- Added GPS-time-aware SP3 ingestion and an IGS G01 MEO model-mismatch case.
+- Added CRD v2 normal-point parsing, iterative two-way SLR light time, and an
+  actual six-station LAGEOS-1 OGP-SDP4 fit/holdout workflow with queryable
+  review evidence and explicit calibration caveats.
+- Added Phase 3 ONP native ground-sensor OD systematics: station/shared range,
+  range-rate, angular, and clock parameters with partial priors and
+  identifiability evidence; elevation weighting; Bennett apparent-elevation
+  refraction; station exclusion/holdout screening; queryable review tables;
+  and a bounded versioned CCSDS TDM-compatible tracking adapter route.
+- Added safe-first `SimulationWorkspace.validate_candidate_config()` for
+  agent-authored YAML, with explicit trusted-plugin validation and no implied
+  execution permission.
+- Added provider-neutral agent report packet preparation and report audit
+  workflows through the Pro CLI and Python API.
+
+### Changed
+
+- Cached exact HCW/SS observation-epoch STMs in batch relative OD and made all
+  migrated controllers use the same exact ZOH discretization. SS-J2 reduces to
+  HCW at J2=0 and remains an opt-in candidate judged against nonlinear ONP
+  truth; it does not silently replace HCW or inherit HCW covariance claims.
+- Cached TH variational and YA closed-form observation-epoch STMs, made the TH
+  variational STM the default, and decoupled nonlinear truth plus sequential
+  ECI RK4 substeps from observation cadence.
+- Corrected optical RA/Dec covariance whitening, frame-consistent ground-station
+  velocity and range-rate prediction, preliminary-fit covariance scaling,
+  integrated relative-OD maneuver epoch semantics, mixed-dimension maneuver
+  gating, and UKF fixed-interval smoothing cross covariance.
+- Preserved full correlated, epoch-specific effective covariance in integrated
+  relative sequential filters; made exported relative residual whitening match
+  the solver; and recorded out-of-envelope SS-J2 rows as inapplicable instead of
+  weakening the eccentricity guard or aborting applicable comparisons.
+- Replaced relative angle/range/range-rate finite-difference Jacobians with
+  analytic forms, removed six redundant transition propagations per UKF step,
+  and added exact repeated-point caching to deterministic batch residuals.
+- Reframed direct AI report provider calls as optional headless automation and
+  direct AI config generation as a legacy compatibility adapter. Existing
+  provider workflows remain available.
+- Updated the Mendicant and MCP roadmaps so agents own configuration and report
+  authorship while OEL owns deterministic validation, evidence packets, figure
+  rendering, and report audit.
+- Applied the CLI native-math thread policy to programmatic object and Scale
+  workers, added duration-aware object-parallel crossover planning, bounded
+  campaign submissions to twice the active worker count, and cached parsed
+  Scale campaign configs per worker process.
+- Made optional progress transport independent of parallel physics execution,
+  retained already completed Monte Carlo results across backend fallback, and
+  removed a duplicate config-campaign summary serialization.
+
+### Fixed
+
+- Fixed Python-API object-worker native-thread oversubscription that could make
+  the process backend several times slower than serial despite exact physics
+  parity.
+- Fixed automatic object execution so short high-cost runs account for process
+  startup and so transport failure can fall back before any failed step is
+  applied; forced parallel execution continues to fail explicitly.
+- Fixed campaign infrastructure failures so unavailable progress transport or a
+  broken process pool does not discard completed deterministic work or
+  unnecessarily disable otherwise available parallel execution.
+
+### Performance Evidence
+
+- On the local six-object high-fidelity ONP profile, the 120-second Python-API
+  process run improved from 0.23x to 1.30x serial throughput after worker thread
+  policy parity. The post-fix 300-second run measured 1.38x serial throughput.
+- Serial and process histories were exactly equal for truth, belief, applied
+  thrust, applied torque, and synchronized object knowledge. A six-second
+  forced-process run remained startup-bound at 0.25x serial throughput and is
+  now selected as serial by automatic planning.
+
+### Migration Notes
+
+- HCW remains the default circular relative-motion model. Schweighart-Sedwick
+  J2, TH, and YA remain explicit model selections with their documented
+  envelopes; no SS-J2 covariance claim is inherited from HCW.
+- OGP remains the catalog-style SGP4/SDP4 mean-element family and ONP remains
+  OEL's numerical propagator. HPOP names remain external-validation or legacy
+  surfaces.
+- Existing scenario, CLI, Python, review-store, and MCP tool contracts remain
+  available. Runtime profiles gain duration-aware object-planner evidence, and
+  asynchronous campaign callback completion order remains non-contractual.
+- External Orekit, GMAT, IGS, and ILRS evidence is bounded to its named cases,
+  checksums, epochs, frames, and licenses. It is validation evidence, not a
+  flight-dynamics certification or operational accuracy claim.
+- The MCP prototype remains source-checkout-only and at `prototype` maturity;
+  supported SDK packaging and cross-host interoperability still wait for the
+  stable official Python MCP SDK v2 release.
 
 ## 0.20.5 - 2026-07-13
 
