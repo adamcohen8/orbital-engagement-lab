@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 import platform
 import subprocess
@@ -9,7 +10,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from sim.acceleration.settings import acceleration_settings_from_config
-from sim.config import iter_object_sections
+from sim.config import default_reference_object_id, iter_object_sections
 
 
 class SimulationMemoryBudgetError(MemoryError):
@@ -51,6 +52,8 @@ class ResourceProfile:
     disable_plots: bool = False
     checkpoint_enabled: bool = True
     throttle_enabled: bool = True
+    # Legacy config names are retained, but these floors apply to projected
+    # post-start headroom rather than the raw preflight snapshot.
     min_available_memory_mb: float | None = None
     hard_min_available_memory_mb: float | None = None
     max_load_per_cpu: float | None = None
@@ -65,6 +68,7 @@ class ResourceSnapshot:
     load_1m: float | None = None
     total_memory_mb: float | None = None
     available_memory_mb: float | None = None
+    memory_pressure_free_percent: float | None = None
     platform: str = platform.system()
 
     @property
@@ -87,12 +91,29 @@ class ResourceEstimate:
     checkpoint_enabled: bool
     estimated_history_mb_per_run: float
     estimated_parallel_history_mb: float
+    estimated_incremental_memory_mb: float
     current_available_memory_mb: float | None
+    projected_available_memory_mb: float | None
+    memory_pressure_free_percent: float | None
     load_per_cpu: float | None
     acceleration_mode: str
     acceleration_backend: str
     risk: str
     notes: tuple[str, ...] = ()
+
+    @property
+    def action(self) -> str:
+        if self.risk == "unsafe":
+            return "refuse"
+        if self.risk in {"moderate", "heavy"}:
+            return "advisory"
+        return "proceed"
+
+
+DEFAULT_PARALLEL_WORKER_OVERHEAD_MB = 192.0
+DEFAULT_PLOT_OVERHEAD_MB = 96.0
+MACOS_MEMORY_PRESSURE_WARN_PERCENT = 10.0
+MACOS_MEMORY_PRESSURE_CRITICAL_PERCENT = 5.0
 
 
 RESOURCE_PROFILES: dict[str, ResourceProfile] = {
@@ -114,8 +135,8 @@ RESOURCE_PROFILES: dict[str, ResourceProfile] = {
         disable_plots=True,
         checkpoint_enabled=True,
         throttle_enabled=True,
-        min_available_memory_mb=1536.0,
-        hard_min_available_memory_mb=768.0,
+        min_available_memory_mb=512.0,
+        hard_min_available_memory_mb=256.0,
         max_load_per_cpu=1.25,
         pause_seconds=15.0,
     ),
@@ -125,8 +146,8 @@ RESOURCE_PROFILES: dict[str, ResourceProfile] = {
         max_parallel_workers=2,
         checkpoint_enabled=True,
         throttle_enabled=True,
-        min_available_memory_mb=1024.0,
-        hard_min_available_memory_mb=512.0,
+        min_available_memory_mb=512.0,
+        hard_min_available_memory_mb=256.0,
         max_load_per_cpu=1.75,
         pause_seconds=10.0,
     ),
@@ -135,8 +156,8 @@ RESOURCE_PROFILES: dict[str, ResourceProfile] = {
         description="Checkpoint/resume stays on, but worker count follows the config unless the system is already unsafe.",
         checkpoint_enabled=True,
         throttle_enabled=True,
-        min_available_memory_mb=512.0,
-        hard_min_available_memory_mb=256.0,
+        min_available_memory_mb=256.0,
+        hard_min_available_memory_mb=128.0,
         max_load_per_cpu=3.0,
         pause_seconds=5.0,
     ),
@@ -183,6 +204,103 @@ def enforce_history_memory_budget(estimate: HistoryMemoryEstimate) -> None:
         f"knowledge_pairs={estimate.knowledge_pairs}. "
         f"Raise the caller-controlled cap with {_ENV_MAX_HISTORY_MEMORY_MB} or "
         "--max-history-memory-mb, or reduce duration/dt/object count."
+    )
+
+
+def estimate_history_memory_from_config(
+    cfg: Any,
+    *,
+    samples: int | None = None,
+) -> HistoryMemoryEstimate:
+    """Estimate retained single-run history using the engine's allocation contract.
+
+    This stays config-only so resource preflight does not instantiate dynamics,
+    controllers, bridges, or other user-provided plugins.
+    """
+
+    if samples is None:
+        duration_s = float(getattr(cfg.simulator, "duration_s", 0.0) or 0.0)
+        dt_s = max(float(getattr(cfg.simulator, "dt_s", 1.0) or 1.0), 1.0e-9)
+        sample_count = int(max(math.floor(duration_s / dt_s), 0)) + 1
+    else:
+        sample_count = int(max(samples, 0))
+
+    active = [(str(object_id), section) for object_id, section in iter_object_sections(cfg, enabled_only=True)]
+    active_ids = {object_id for object_id, _section in active}
+    active_objects = len(active)
+    attitude_cfg = dict(dict(getattr(cfg.simulator, "dynamics", {}) or {}).get("attitude", {}) or {})
+    attitude_enabled = bool(attitude_cfg.get("enabled", True))
+
+    float_columns = 1  # t_s
+    reference_id = default_reference_object_id(cfg, available_ids=active_ids)
+    reference_section = next((section for object_id, section in active if object_id == reference_id), None)
+    if reference_section is not None and bool(dict(getattr(reference_section, "reference_orbit", {}) or {}).get("enabled", False)):
+        float_columns += 6
+
+    knowledge_pairs = 0
+    retained_python_bytes_per_sample = 0
+    rocket_count = 0
+    satellite_ids: list[str] = []
+    controller_debug_enabled = bool(getattr(getattr(cfg.outputs, "stats", None), "controller_debug", False))
+
+    for object_id, section in active:
+        kind = str(getattr(section, "kind", "satellite") or "satellite").strip().lower()
+        is_rocket = kind == "rocket"
+        if is_rocket:
+            rocket_count += 1
+            belief_columns = 6
+        else:
+            satellite_ids.append(object_id)
+            belief_columns = 13 if attitude_enabled else 6
+
+        float_columns += 14  # truth
+        float_columns += belief_columns
+        float_columns += 3  # thrust
+        float_columns += 3  # torque
+        float_columns += 4  # desired attitude
+        if is_rocket:
+            float_columns += 1  # throttle history
+        elif controller_debug_enabled:
+            retained_python_bytes_per_sample += 4096
+
+        knowledge = dict(getattr(section, "knowledge", {}) or {})
+        targets = list(knowledge.get("targets", []) or [])
+        knowledge_pairs += len(targets)
+        float_columns += 12 * len(targets)  # estimated state and raw measurement histories
+
+        bridge = getattr(section, "bridge", None)
+        if bridge is not None and bool(getattr(bridge, "enabled", False)):
+            retained_python_bytes_per_sample += 512
+
+    if rocket_count:
+        float_columns += 20  # stage/q/mach plus rocket GNC/navigation metric histories
+
+    reentry_raw = dict(dict(getattr(cfg.simulator, "dynamics", {}) or {}).get("reentry", {}) or {})
+    if bool(reentry_raw.get("enabled", False)):
+        configured = reentry_raw.get("object_ids", ())
+        configured_ids = [configured] if isinstance(configured, str) else list(configured or ())
+        configured_ids = [str(item).strip() for item in configured_ids if str(item).strip()]
+        if configured_ids and not any(item in {"*", "all"} for item in configured_ids):
+            reentry_count = sum(1 for object_id in configured_ids if object_id in active_ids)
+        else:
+            reentry_count = len(satellite_ids)
+        # Keep this local to avoid importing the dynamics stack during ordinary config parsing.
+        from sim.dynamics.reentry import REENTRY_METRIC_KEYS
+
+        float_columns += reentry_count * len(REENTRY_METRIC_KEYS)
+
+    itemsize = 8
+    array_bytes = int(sample_count * float_columns * itemsize) + int(
+        sample_count * retained_python_bytes_per_sample
+    )
+    estimated_peak_bytes = int(array_bytes * 2)
+    return HistoryMemoryEstimate(
+        samples=sample_count,
+        active_objects=max(active_objects, 1),
+        knowledge_pairs=knowledge_pairs,
+        array_bytes=array_bytes,
+        estimated_peak_bytes=estimated_peak_bytes,
+        limit_bytes=bytes_from_mb(configured_history_memory_limit_mb(cfg)),
     )
 
 
@@ -343,6 +461,36 @@ def _read_macos_memory_mb() -> tuple[float | None, float | None]:
     return total_mb, available_mb
 
 
+def _parse_macos_memory_pressure(text: str) -> tuple[float | None, float | None]:
+    total_mb: float | None = None
+    free_percent: float | None = None
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("The system has "):
+            parts = stripped.split()
+            try:
+                total_bytes = int(parts[3])
+            except (IndexError, ValueError):
+                continue
+            total_mb = float(total_bytes) / (1024.0 * 1024.0)
+        elif stripped.startswith("System-wide memory free percentage:"):
+            raw = stripped.partition(":")[2].strip().rstrip("%")
+            try:
+                free_percent = float(raw)
+            except ValueError:
+                continue
+    return total_mb, free_percent
+
+
+def _read_macos_memory_pressure() -> tuple[float | None, float | None]:
+    if platform.system() != "Darwin":
+        return None, None
+    text = _run_text(["memory_pressure", "-Q"])
+    if not text:
+        return None, None
+    return _parse_macos_memory_pressure(text)
+
+
 def _parse_macos_vm_stat_mb(vm_text: str) -> tuple[float | None, float | None]:
     page_size = 4096.0
     values: dict[str, float] = {}
@@ -428,9 +576,15 @@ def current_resource_snapshot() -> ResourceSnapshot:
         load_1m = float(os.getloadavg()[0])
     except (AttributeError, OSError):
         load_1m = None
+    memory_pressure_free_percent = None
     total_mb, available_mb = _read_proc_mem_available_mb()
     if total_mb is None and available_mb is None:
         total_mb, available_mb = _read_macos_memory_mb()
+        pressure_total_mb, memory_pressure_free_percent = _read_macos_memory_pressure()
+        if pressure_total_mb is not None:
+            total_mb = pressure_total_mb
+        if total_mb is not None and memory_pressure_free_percent is not None:
+            available_mb = total_mb * memory_pressure_free_percent / 100.0
     if total_mb is None and available_mb is None:
         total_mb, available_mb = _read_windows_memory_mb()
     return ResourceSnapshot(
@@ -439,6 +593,7 @@ def current_resource_snapshot() -> ResourceSnapshot:
         load_1m=load_1m,
         total_memory_mb=total_mb,
         available_memory_mb=available_mb,
+        memory_pressure_free_percent=memory_pressure_free_percent,
     )
 
 
@@ -476,15 +631,33 @@ class ResourceGovernor:
         self.pause_seconds = float(limits.get("resource_pause_seconds", profile.pause_seconds) or profile.pause_seconds)
         self.max_wait_s = float(limits.get("resource_max_wait_s", profile.max_wait_s) or profile.max_wait_s)
         self.emit = emit
+        estimate = estimate_resource_requirements(cfg)
+        self.estimated_incremental_memory_mb = float(estimate.estimated_incremental_memory_mb)
+        self.wait_event_count = 0
+        self.total_wait_s = 0.0
 
-    def pressure_reasons(self, snapshot: ResourceSnapshot) -> list[str]:
+    def projected_available_memory_mb(self, snapshot: ResourceSnapshot) -> float | None:
+        if snapshot.available_memory_mb is None:
+            return None
+        return float(snapshot.available_memory_mb) - self.estimated_incremental_memory_mb
+
+    def pressure_reasons(self, snapshot: ResourceSnapshot, *, include_load: bool = True) -> list[str]:
         reasons: list[str] = []
-        if self.min_available_memory_mb is not None and snapshot.available_memory_mb is not None:
-            if snapshot.available_memory_mb < self.min_available_memory_mb:
+        projected_mb = self.projected_available_memory_mb(snapshot)
+        if self.min_available_memory_mb is not None and projected_mb is not None:
+            if projected_mb < self.min_available_memory_mb:
                 reasons.append(
-                    f"available memory {snapshot.available_memory_mb:.0f} MB < {self.min_available_memory_mb:.0f} MB"
+                    f"projected post-start headroom {projected_mb:.0f} MB < {self.min_available_memory_mb:.0f} MB"
                 )
-        if self.max_load_per_cpu is not None and snapshot.load_per_cpu is not None:
+        if (
+            snapshot.memory_pressure_free_percent is not None
+            and snapshot.memory_pressure_free_percent < MACOS_MEMORY_PRESSURE_WARN_PERCENT
+        ):
+            reasons.append(
+                f"macOS memory-pressure free percentage {snapshot.memory_pressure_free_percent:.0f}% "
+                f"< {MACOS_MEMORY_PRESSURE_WARN_PERCENT:.0f}%"
+            )
+        if include_load and self.max_load_per_cpu is not None and snapshot.load_per_cpu is not None:
             if snapshot.load_per_cpu > self.max_load_per_cpu:
                 reasons.append(f"load/core {snapshot.load_per_cpu:.2f} > {self.max_load_per_cpu:.2f}")
         return reasons
@@ -494,26 +667,44 @@ class ResourceGovernor:
         if not self.enabled:
             return snapshot
         if (
-            self.hard_min_available_memory_mb is not None
-            and snapshot.available_memory_mb is not None
-            and snapshot.available_memory_mb < self.hard_min_available_memory_mb
+            snapshot.memory_pressure_free_percent is not None
+            and snapshot.memory_pressure_free_percent < MACOS_MEMORY_PRESSURE_CRITICAL_PERCENT
         ):
             raise ResourcePressureError(
-                "System memory is below the hard safety floor: "
+                "macOS reports critical memory pressure: "
+                f"free={snapshot.memory_pressure_free_percent:.0f}%, "
+                f"critical={MACOS_MEMORY_PRESSURE_CRITICAL_PERCENT:.0f}%."
+            )
+        projected_mb = self.projected_available_memory_mb(snapshot)
+        if (
+            self.hard_min_available_memory_mb is not None
+            and projected_mb is not None
+            and projected_mb < self.hard_min_available_memory_mb
+        ):
+            raise ResourcePressureError(
+                "Projected post-start memory headroom is below the hard safety floor: "
                 f"available={snapshot.available_memory_mb:.0f} MB, "
+                f"estimated_increment={self.estimated_incremental_memory_mb:.1f} MB, "
+                f"projected={projected_mb:.0f} MB, "
                 f"floor={self.hard_min_available_memory_mb:.0f} MB."
             )
         return snapshot
 
-    def wait_for_capacity(self, *, context: str = "batch run") -> ResourceSnapshot:
+    def wait_for_capacity(self, *, context: str = "batch run", include_load: bool = True) -> ResourceSnapshot:
         snapshot = self.assert_safe_to_start()
         if not self.enabled:
             return snapshot
         started = time.monotonic()
         warned = False
         while True:
-            reasons = self.pressure_reasons(snapshot)
+            reasons = self.pressure_reasons(snapshot, include_load=include_load)
             if not reasons:
+                if warned:
+                    waited_s = max(time.monotonic() - started, 0.0)
+                    self.wait_event_count += 1
+                    self.total_wait_s += waited_s
+                    if self.emit is not None:
+                        self.emit(f"Resuming {context} after {waited_s:.1f}s of resource waiting.")
                 return snapshot
             if time.monotonic() - started >= self.max_wait_s:
                 raise ResourcePressureError(
@@ -526,6 +717,13 @@ class ResourceGovernor:
                 warned = True
             time.sleep(max(float(self.pause_seconds), 0.1))
             snapshot = self.assert_safe_to_start()
+
+    def telemetry(self) -> dict[str, Any]:
+        return {
+            "wait_event_count": int(self.wait_event_count),
+            "total_wait_s": float(self.total_wait_s),
+            "estimated_incremental_memory_mb": float(self.estimated_incremental_memory_mb),
+        }
 
 
 def _optional_float(value: Any, default: float | None) -> float | None:
@@ -559,6 +757,23 @@ def _sensitivity_run_count(cfg: Any) -> int:
     return int(sum(len(list(getattr(param, "values", []) or [])) for param in params))
 
 
+def _incremental_memory_mb(
+    *,
+    history_mb_per_run: float,
+    effective_workers: int,
+    plots_enabled: bool,
+) -> float:
+    workers = max(int(effective_workers), 1)
+    worker_overhead_mb = float(max(workers - 1, 0)) * DEFAULT_PARALLEL_WORKER_OVERHEAD_MB
+    plot_overhead_mb = DEFAULT_PLOT_OVERHEAD_MB if plots_enabled else 0.0
+    return float(history_mb_per_run) * float(workers) + worker_overhead_mb + plot_overhead_mb
+
+
+def _raise_risk(current: str, candidate: str) -> str:
+    order = {"safe": 0, "moderate": 1, "heavy": 2, "unsafe": 3}
+    return candidate if order[candidate] > order[current] else current
+
+
 def estimate_resource_requirements(cfg: Any) -> ResourceEstimate:
     study_type = _study_type(cfg)
     steps = int(max(float(getattr(cfg.simulator, "duration_s", 0.0)) / max(float(getattr(cfg.simulator, "dt_s", 1.0)), 1e-9), 0))
@@ -585,39 +800,65 @@ def estimate_resource_requirements(cfg: Any) -> ResourceEstimate:
     elif profile.max_parallel_workers is not None:
         effective_workers = max(1, min(effective_workers, int(profile.max_parallel_workers)))
     active_objects = _active_object_count(cfg)
-    estimated_history_mb_per_run = float(max(steps + 1, 1) * active_objects * 32 * 8) / (1024.0 * 1024.0)
+    history_estimate = estimate_history_memory_from_config(cfg)
+    estimated_history_mb_per_run = history_estimate.estimated_peak_mb
     estimated_parallel_history_mb = estimated_history_mb_per_run * effective_workers
     plots_enabled = bool(getattr(getattr(cfg, "outputs", None), "plots", {}).get("enabled", True))
+    estimated_incremental_memory_mb = _incremental_memory_mb(
+        history_mb_per_run=estimated_history_mb_per_run,
+        effective_workers=effective_workers,
+        plots_enabled=plots_enabled,
+    )
     snapshot = current_resource_snapshot()
+    projected_available_memory_mb = (
+        None
+        if snapshot.available_memory_mb is None
+        else float(snapshot.available_memory_mb) - estimated_incremental_memory_mb
+    )
     acceleration = acceleration_settings_from_config(cfg)
     min_available_mb = _optional_float(limits.get("min_available_memory_mb"), profile.min_available_memory_mb)
     hard_min_available_mb = _optional_float(
         limits.get("hard_min_available_memory_mb"), profile.hard_min_available_memory_mb
     )
+    max_load_per_cpu = _optional_float(limits.get("max_load_per_cpu"), profile.max_load_per_cpu)
     notes: list[str] = []
     risk = "safe"
     if runs >= 5 or steps >= 10000:
-        risk = "moderate"
+        risk = _raise_risk(risk, "moderate")
         notes.append("long campaign envelope")
     if effective_workers >= 3:
-        risk = "heavy"
+        risk = _raise_risk(risk, "heavy")
         notes.append("three or more concurrent workers")
     if plots_enabled and runs > 1:
         notes.append("plots enabled for a batch workflow")
-    if snapshot.available_memory_mb is not None and estimated_parallel_history_mb > snapshot.available_memory_mb * 0.35:
+    if (
+        snapshot.memory_pressure_free_percent is not None
+        and snapshot.memory_pressure_free_percent < MACOS_MEMORY_PRESSURE_CRITICAL_PERCENT
+    ):
         risk = "unsafe"
-        notes.append("estimated parallel history memory is high relative to currently available memory")
-    if hard_min_available_mb is not None and snapshot.available_memory_mb is not None:
-        if snapshot.available_memory_mb < hard_min_available_mb:
+        notes.append("macOS reports critical memory pressure")
+    elif (
+        snapshot.memory_pressure_free_percent is not None
+        and snapshot.memory_pressure_free_percent < MACOS_MEMORY_PRESSURE_WARN_PERCENT
+    ):
+        risk = _raise_risk(risk, "heavy")
+        notes.append("macOS reports elevated memory pressure")
+    if hard_min_available_mb is not None and projected_available_memory_mb is not None:
+        if projected_available_memory_mb < hard_min_available_mb:
             risk = "unsafe"
-            notes.append("current available memory is below the hard safety floor")
-    if min_available_mb is not None and snapshot.available_memory_mb is not None:
-        if snapshot.available_memory_mb < min_available_mb and risk != "unsafe":
-            risk = "heavy"
-            notes.append("current available memory is below the profile's preferred start threshold")
-    if snapshot.load_per_cpu is not None and snapshot.load_per_cpu > 2.0:
-        risk = "heavy" if risk != "unsafe" else risk
-        notes.append("current system load is already elevated")
+            notes.append("projected post-start memory is below the hard safety floor")
+    if min_available_mb is not None and projected_available_memory_mb is not None:
+        if projected_available_memory_mb < min_available_mb and risk != "unsafe":
+            risk = _raise_risk(risk, "heavy")
+            notes.append("projected post-start memory is below the profile's preferred headroom")
+    if (
+        effective_workers > 1
+        and max_load_per_cpu is not None
+        and snapshot.load_per_cpu is not None
+        and snapshot.load_per_cpu > max_load_per_cpu
+    ):
+        risk = _raise_risk(risk, "heavy")
+        notes.append("current system load is elevated for a parallel launch")
     return ResourceEstimate(
         profile=str(_resource_limits_dict(cfg).get("resource_profile", "config") or "config"),
         study_type=study_type,
@@ -630,7 +871,10 @@ def estimate_resource_requirements(cfg: Any) -> ResourceEstimate:
         checkpoint_enabled=checkpoint_enabled(cfg),
         estimated_history_mb_per_run=estimated_history_mb_per_run,
         estimated_parallel_history_mb=estimated_parallel_history_mb,
+        estimated_incremental_memory_mb=estimated_incremental_memory_mb,
         current_available_memory_mb=snapshot.available_memory_mb,
+        projected_available_memory_mb=projected_available_memory_mb,
+        memory_pressure_free_percent=snapshot.memory_pressure_free_percent,
         load_per_cpu=snapshot.load_per_cpu,
         acceleration_mode=acceleration.requested_mode,
         acceleration_backend=acceleration.effective_backend,

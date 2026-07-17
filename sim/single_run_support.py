@@ -442,7 +442,8 @@ class _SatelliteCommandBuilder:
         if e.attitude_enabled and "desired_attitude_quat_bn" in mission_out:
             q_des_log = np.array(mission_out["desired_attitude_quat_bn"], dtype=float).reshape(-1)
             if q_des_log.size == 4 and np.all(np.isfinite(q_des_log)):
-                e.desired_attitude_hist[aid][sample_index + 1, :] = q_des_log
+                history_row = 0 if bool(getattr(e, "_object_worker_compact_buffers", False)) else sample_index + 1
+                e.desired_attitude_hist[aid][history_row, :] = q_des_log
         if (
             e.attitude_enabled
             and "desired_ric_euler_rad" in mission_out

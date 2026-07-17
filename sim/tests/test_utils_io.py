@@ -20,6 +20,8 @@ def test_write_json_replaces_non_finite_numbers_with_null(tmp_path: Path) -> Non
 
     out = tmp_path / "payload.json"
     write_json(str(out), payload)
+    expected_text = json.dumps(json_safe(payload), indent=2, allow_nan=False)
+    assert out.read_text(encoding="utf-8") == expected_text
     loaded = json.loads(out.read_text(encoding="utf-8"))
 
     assert loaded["finite"] == 1.5

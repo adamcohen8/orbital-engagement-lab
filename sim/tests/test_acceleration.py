@@ -18,6 +18,7 @@ from sim.acceleration.settings import (
     ACCELERATION_ENV,
     acceleration_context_from_config,
     acceleration_settings_from_config,
+    acceleration_settings_from_mode,
 )
 from sim.acceleration.warmup import warmup_acceleration
 from sim.config import scenario_config_from_dict
@@ -75,6 +76,17 @@ class TestAcceleration(unittest.TestCase):
 
         self.assertEqual(settings.requested_mode, "off")
         self.assertFalse(settings.enabled)
+
+    def test_selected_numba_backend_requires_a_successful_runtime_import(self):
+        with (
+            patch("sim.acceleration.settings.NUMBA_AVAILABLE", True),
+            patch("sim.acceleration.settings._runtime_numba_available", return_value=False),
+        ):
+            settings = acceleration_settings_from_mode("numba", allow_env_override=False)
+
+        self.assertEqual(settings.effective_backend, "python")
+        self.assertFalse(settings.enabled)
+        self.assertEqual(settings.reason, "numba requested but unavailable")
 
     def test_orbit_kernels_match_baseline_accelerations(self):
         r = np.array([7000.0, -20.0, 30.0], dtype=float)

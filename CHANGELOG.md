@@ -8,6 +8,71 @@ migration-sensitive behavior explicitly.
 
 ## Unreleased
 
+## 0.21.1 - 2026-07-16
+
+Release thesis: `v0.21.1` makes OEL performance work reproducible across the
+full simulator, reduces time and memory overhead without changing deterministic
+outputs, and promotes Scale ONP refinement from handoff packets to resumable,
+review-store-backed execution.
+
+Private/Pro scope: `v0.21.1` adds the durable Scale ONP execution queue and
+saved MATLAB HPOP and Orekit zonal-reference validation lanes. The public
+release retains the public-safe benchmark harness, deterministic runtime and
+memory improvements, and less conservative laptop-safe resource guidance.
+
+### Added
+
+- Added the first executable OEL Scale Phase 3 boundary: canonical
+  `handoff-onp` and `materialize-onp-refinement` commands now turn current
+  handoff packets into deterministic passive two-object ONP scenario YAML,
+  derive case-start ECI states through OGP plus the explicit Vallado IAU-80
+  TEME-to-ECI reduction, enable standard review output, run safe-first and
+  trusted canonical validation, and persist config/validation/source lineage in
+  the additive Scale `0.6` `onp_refinement_cases` store table. Legacy
+  `handoff-hpop` remains available as a compatibility alias; materialization
+  does not execute ONP.
+- Added the resumable Scale ONP execution queue. The new
+  `run-onp-refinement-queue` command atomically claims validated cases,
+  rechecks config digests and canonical validation, runs serially or through a
+  bounded local process pool, records durable attempts in
+  `onp_refinement_runs`, skips completed matching configs, and supports
+  explicit recovery/retry. Each batch writes manifest and summary artifacts
+  plus a review-store-derived OGP-vs-ONP sampled comparison CSV for TCA, miss
+  distance, and relative speed.
+- Added a maintained full-path performance suite covering the Basilisk common
+  denominator, fixed and adaptive ONP propagation, the complete serial and
+  parallel satellite loop, sensing and relative estimation, modern actuators,
+  CR3BP, OGP-SGP4, rocket ascent, re-entry, campaign orchestration, and output
+  artifacts. It records exact repeated-run physics hashes separately from
+  timing evidence.
+- Added saved external-reference workflows for MATLAB HPOP full-force cases
+  and cumulative Orekit J2/J3/J4 cases, including provenance, refresh commands,
+  release-plan integration, and focused regression tests.
+
+### Changed
+
+- Reduced acceleration-off startup and steady-state memory by loading optional
+  dynamics, control, estimation, atmosphere, SciPy, and Numba paths on demand;
+  eliminating unnecessary integrator diagnostics and history temporaries; and
+  streaming large benchmark hashes and JSON artifacts. Repeated benchmark
+  outputs remain exact.
+- Improved deterministic throughput through cached signature compatibility
+  plans, force-model and frame calculations, lower-allocation state/history
+  updates, and bounded parallel campaign submission while preserving serial
+  fallback and output parity.
+- Made laptop-safe preflight use the single-run history estimate plus worker and
+  plotting overhead, distinguish advisory from refusal headroom, honor the
+  configured load threshold, prefer macOS pressure-adjusted memory, and avoid
+  self-throttling serial campaigns on their own trailing load average.
+
+### Fixed
+
+- Preserved Scale ONP materialization identity across store migrations so
+  changed refinement settings rematerialize cases instead of reusing stale
+  generated configs.
+- Kept private external-validation tests and reference tooling outside the
+  generated public surface while retaining public-safe validation guidance.
+
 ## 0.21.0 - 2026-07-14
 
 Release thesis: `v0.21.0` turns OEL orbit determination into a coherent,

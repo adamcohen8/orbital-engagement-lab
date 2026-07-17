@@ -1,0 +1,139 @@
+suite_name: oel_public_core
+description: Reproducible speed benchmark matrix for the deterministic public-core propagation, sensing, estimation, actuator, lifecycle, and output paths. Timing never replaces the applicable physics validation workflow.
+default_profile: standard
+output_root: outputs/performance
+profiles:
+  smoke:
+    warmups: 0
+    repeats: 1
+  standard:
+    warmups: 1
+    repeats: 3
+  full:
+    warmups: 1
+    repeats: 5
+cases:
+- name: zonal_rk4_accelerated
+  description: Explicit J2/J3/J4 flags through the accelerated RK4 zonal kernel.
+  category: propagation
+  kind: scenario
+  config_path: configs/performance/zonal_rk4.yaml
+  tags: [onp, rk4, j2, j3, j4, numba]
+  checks:
+    summary.runtime_profile.executor.object_step_backend: {equals: serial}
+    summary.runtime_profile.object_totals.satellite.stages.dynamics_step.count: {min: 1}
+  profiles:
+    smoke: {duration_s: 30.0}
+    standard: {duration_s: 3600.0}
+    full: {duration_s: 86400.0}
+- name: sensing_relative_ekf
+  description: LOS/range/dropout access, angles/range/range-rate measurements, relative HCW EKF, maneuver screening, and ground measurements.
+  category: sensing
+  kind: scenario
+  config_path: configs/performance/sensing_relative_ekf.yaml
+  tags: [los, dropout, relative_hcw_ekf, az_el_range_rate, maneuver_detection, ground_access]
+  checks:
+    knowledge_detection_by_observer.observer.target.detected_count: {min: 1}
+    knowledge_detection_by_observer.observer.target.nondetected_count: {min: 1}
+    knowledge_consistency_by_observer.observer.target.maneuver_detection_enabled: {truthy: true}
+    summary.runtime_profile.object_totals.observer.stages.estimator_update.count: {min: 1}
+  profiles:
+    smoke: {duration_s: 30.0}
+    standard: {duration_s: 300.0}
+    full: {duration_s: 1800.0}
+- name: modern_actuator_stack
+  description: Sustained modern actuator device and limiting paths across six satellite objects.
+  category: actuators
+  kind: scenario
+  config_path: configs/performance/actuator_stack.yaml
+  tags: [rcs, electric_propulsion, gimbal, magnetorquer, cmg, reaction_wheel, desaturation, faults]
+  checks:
+    summary.runtime_profile.object_totals.rw_sat.stages.dynamics_step.count: {min: 1}
+    summary.runtime_profile.object_totals.rcs_sat.stages.decision.count: {min: 1}
+  profiles:
+    smoke: {duration_s: 5.0}
+    standard: {duration_s: 120.0}
+    full: {duration_s: 600.0}
+- name: cr3bp_earth_moon
+  description: Earth-Moon CR3BP RK4 propagation on the maintained L2 NRHO seed.
+  category: propagation
+  kind: scenario
+  config_path: configs/performance/cr3bp.yaml
+  tags: [cr3bp, earth_moon, nrho]
+  checks:
+    summary.runtime_profile.object_totals.vehicle.stages.dynamics_step.count: {min: 1}
+  profiles:
+    smoke: {duration_s: 600.0}
+    standard: {duration_s: 86400.0}
+    full: {duration_s: 604800.0}
+- name: ogp_sgp4
+  description: Passive OGP-SGP4 catalog-style propagation, separate from ONP numerical dynamics.
+  category: propagator_family
+  kind: scenario
+  config_path: examples/configs/public_sgp4_passive_propagation.yaml
+  tags: [ogp, sgp4, tle, teme]
+  overrides:
+    simulator.resource_profile: "off"
+    outputs.review.enabled: false
+    outputs.stats.print_summary: false
+    outputs.stats.save_json: false
+  checks:
+    object_propagation.iss.general_model: {equals: sgp4}
+    object_propagation.iss.propagation_method: {equals: general}
+  profiles:
+    smoke: {duration_s: 600.0}
+    standard: {duration_s: 86400.0}
+    full: {duration_s: 604800.0}
+- name: rocket_ascent
+  description: Dedicated rocket guidance, atmosphere, aero, mass/staging, and ascent-metric runtime path.
+  category: lifecycle
+  kind: scenario
+  config_path: configs/rocket_ascent_smoke.yaml
+  tags: [rocket, guidance, staging, aero, max_q]
+  overrides:
+    simulator.resource_profile: "off"
+    outputs.plots.enabled: false
+    outputs.stats.print_summary: false
+    outputs.stats.save_json: false
+  profiles:
+    smoke: {duration_s: 10.0}
+    standard: {duration_s: 120.0}
+    full: {duration_s: 300.0}
+- name: reentry_diagnostics
+  description: Atmospheric drag plus re-entry heat, dynamic-pressure, load, and termination-diagnostic paths.
+  category: lifecycle
+  kind: scenario
+  config_path: configs/reentry_smoke.yaml
+  tags: [reentry, drag, heating, dynamic_pressure]
+  overrides:
+    simulator.resource_profile: "off"
+    outputs.plots.enabled: false
+    outputs.stats.print_summary: false
+    outputs.stats.save_json: false
+    outputs.stats.save_full_log: false
+  profiles:
+    smoke: {duration_s: 5.0}
+    standard: {duration_s: 120.0}
+    full: {duration_s: 600.0}
+- name: artifact_output_pipeline
+  description: End-to-end scenario execution plus JSON/full-log, review-store, and plot artifact generation.
+  category: output
+  kind: artifacts
+  config_path: configs/plotting_rendezvous_demo.yaml
+  tags: [artifacts, json, full_log, review_store, plots]
+  overrides:
+    simulator.resource_profile: "off"
+    outputs.stats.print_summary: false
+    outputs.stats.save_json: true
+    outputs.stats.save_full_log: true
+    outputs.review.enabled: true
+    outputs.plots.enabled: true
+  checks:
+    summary.samples: {min: 2}
+    summary.plot_outputs: {min_length: 1}
+    summary.review_sqlite_path: {path_exists: true}
+    output_index_md: {path_exists: true}
+  profiles:
+    smoke: {duration_s: 10.0}
+    standard: {duration_s: 300.0}
+    full: {duration_s: 1800.0}

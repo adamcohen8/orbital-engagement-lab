@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 import numpy as np
-from scipy.optimize import lsq_linear
 
 from sim.core.interfaces import Actuator
 from sim.core.models import Command
@@ -440,6 +439,10 @@ def _rotate_toward(current: np.ndarray, target: np.ndarray, max_angle_rad: float
 
 
 def _bounded_nonnegative_lstsq(a: np.ndarray, b: np.ndarray, upper: np.ndarray) -> np.ndarray:
+    # SciPy's optimizer imports a large solver stack. Most spacecraft never
+    # use RCS allocation, so load it only for the bounded allocation path.
+    from scipy.optimize import lsq_linear
+
     matrix = np.array(a, dtype=float)
     target = np.array(b, dtype=float).reshape(matrix.shape[0])
     upper = np.array(upper, dtype=float).reshape(matrix.shape[1])

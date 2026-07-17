@@ -899,8 +899,21 @@ budget, or raise the process budget with `--max-history-memory-mb` /
 For Monte Carlo and validation-style batch runs, `simulator.resource_profile`
 controls the resource profile. `laptop-safe` forces one case at a time, disables
 plots when the scenario is launched through `run_simulation.py` or the validation
-harness, enables checkpoint/resume, and pauses between cases when memory or CPU
-load pressure is high. The legacy
+harness, and enables checkpoint/resume. Resource preflight uses the same detailed
+history-allocation estimate as the single-run engine, adds any parallel-worker and
+plotting overhead, and reports the projected post-start memory headroom. On macOS,
+the operating system's pressure-adjusted free percentage is preferred over a raw
+free-page count. The laptop-safe advisory and hard headroom floors are 512 MB and
+256 MB respectively; critical macOS memory pressure still refuses a start.
+
+Serial campaign iterations do not pause because of their own trailing one-minute
+load average. CPU-load throttling remains active for parallel launches, while
+memory pressure remains active for both serial and parallel batches. Preflight
+prints an explicit action: `proceed`, `advisory`, or `refuse`. When a batch waits,
+runtime messages report when it resumes and the accumulated wait duration without
+changing the deterministic simulation aggregate.
+
+The legacy
 `outputs.resource_limits.resource_profile` field is still accepted for older
 configs, but new configs should use `simulator.resource_profile`. Use
 Private campaign workflows can estimate requirements before long campaign runs.

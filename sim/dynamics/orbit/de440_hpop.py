@@ -8,12 +8,35 @@ import numpy as np
 from sim.dynamics.orbit.frames import _interp_eop
 
 _EMRAT = 81.3005682214972154
+_DE440_POSITION_CACHE_KEY = "_oel_de440_position_cache"
 
 
+@lru_cache(maxsize=16)
+def _resolve_absolute_path(path_text: str) -> Path:
+    return Path(path_text).resolve()
+
+
+@lru_cache(maxsize=16)
+def _resolve_relative_path(path_text: str, cwd: str) -> Path:
+    return (Path(cwd) / path_text).resolve()
+
+
+def _resolve_path(path_value: str | Path) -> Path:
+    raw = Path(path_value)
+    if raw.is_absolute():
+        return _resolve_absolute_path(str(raw))
+    expanded = raw.expanduser()
+    if expanded.is_absolute():
+        return _resolve_absolute_path(str(expanded))
+    return _resolve_relative_path(str(expanded), str(Path.cwd()))
+
+
+@lru_cache(maxsize=1)
 def default_de440_coeff_path() -> Path:
     return (Path(__file__).resolve().parents[3] / "validation" / "data" / "DE440Coeff.mat").resolve()
 
 
+@lru_cache(maxsize=1)
 def default_hpop_eop_path() -> Path:
     return (
         Path(__file__).resolve().parents[3]
@@ -34,7 +57,7 @@ def _load_de440_coeff_matrix(path_str: str) -> np.ndarray:
             "Install a compatible SciPy in the active environment."
         ) from exc
 
-    path = Path(path_str).expanduser().resolve()
+    path = _resolve_path(path_str)
     mat = loadmat(path)
     coeff = mat.get("DE440Coeff")
     if coeff is None:
@@ -47,7 +70,7 @@ def _load_de440_coeff_matrix(path_str: str) -> np.ndarray:
 
 @lru_cache(maxsize=2)
 def _load_de440_light(path_str: str) -> dict[str, object]:
-    path = Path(path_str).expanduser().resolve()
+    path = _resolve_path(path_str)
     with np.load(path, allow_pickle=False) as data:
         fmt = str(np.asarray(data["format_version"]).item())
         if fmt != "oel_de440_light_v1":
@@ -79,13 +102,22 @@ def _cheb3d(t: float, n: int, ta: float, tb: float, cx: np.ndarray, cy: np.ndarr
     if t < ta or t > tb:
         raise ValueError("Time out of range in _cheb3d")
     tau = (2.0 * t - ta - tb) / (tb - ta)
-    f1 = np.zeros(3, dtype=float)
-    f2 = np.zeros(3, dtype=float)
+    f1x = f1y = f1z = 0.0
+    f2x = f2y = f2z = 0.0
     for i in range(int(n) - 1, 0, -1):
-        old_f1 = f1.copy()
-        f1 = 2.0 * tau * f1 - f2 + np.array([cx[i], cy[i], cz[i]], dtype=float)
-        f2 = old_f1
-    return tau * f1 - f2 + np.array([cx[0], cy[0], cz[0]], dtype=float)
+        old_f1x, old_f1y, old_f1z = f1x, f1y, f1z
+        f1x = 2.0 * tau * f1x - f2x + float(cx[i])
+        f1y = 2.0 * tau * f1y - f2y + float(cy[i])
+        f1z = 2.0 * tau * f1z - f2z + float(cz[i])
+        f2x, f2y, f2z = old_f1x, old_f1y, old_f1z
+    return np.array(
+        [
+            tau * f1x - f2x + float(cx[0]),
+            tau * f1y - f2y + float(cy[0]),
+            tau * f1z - f2z + float(cz[0]),
+        ],
+        dtype=float,
+    )
 
 
 def _subinterval_state(jd_tdb: float, t1: float, span_days: float, segments: int) -> tuple[int, float, float]:
@@ -225,7 +257,7 @@ def jd_utc_to_jd_tdb(jd_utc: float, eop_path: str | None = None, tai_utc_s: floa
 
 
 def hpop_de440_positions_m(jd_tdb: float, coeff_path: str | Path | None = None) -> dict[str, np.ndarray]:
-    path = default_de440_coeff_path() if coeff_path is None else Path(coeff_path).expanduser().resolve()
+    path = default_de440_coeff_path() if coeff_path is None else _resolve_path(coeff_path)
     if path.suffix.lower() == ".npz":
         light = _load_de440_light(str(path))
         bodies = tuple(str(v) for v in light["bodies"])  # type: ignore[index]
@@ -284,14 +316,26 @@ def hpop_de440_positions_m(jd_tdb: float, coeff_path: str | Path | None = None) 
 
 def hpop_de440_positions_km(jd_utc: float, env: dict) -> dict[str, np.ndarray]:
     coeff_path_raw = env.get("de440_coeff_path")
-    coeff_path = (
-        default_de440_coeff_path() if coeff_path_raw is None else Path(str(coeff_path_raw)).expanduser().resolve()
-    )
+    coeff_path = default_de440_coeff_path() if coeff_path_raw is None else _resolve_path(str(coeff_path_raw))
     eop_path_raw = env.get("de440_eop_path") or env.get("spherical_harmonics_eop_path") or env.get("drag_eop_path")
-    eop_path = None if eop_path_raw is None else str(Path(str(eop_path_raw)).expanduser().resolve())
+    eop_path = None if eop_path_raw is None else str(_resolve_path(str(eop_path_raw)))
     tai_utc_raw = env.get("de440_tai_utc_s")
+    cache_key = (
+        float(jd_utc),
+        str(coeff_path),
+        eop_path,
+        None if tai_utc_raw is None else float(tai_utc_raw),
+    )
+    cached = env.get(_DE440_POSITION_CACHE_KEY)
+    if isinstance(cached, tuple) and len(cached) == 2 and cached[0] == cache_key and isinstance(cached[1], dict):
+        return {str(name): np.array(value, dtype=float, copy=True) for name, value in cached[1].items()}
     jd_tdb = jd_utc_to_jd_tdb(
         float(jd_utc), eop_path=eop_path, tai_utc_s=None if tai_utc_raw is None else float(tai_utc_raw)
     )
     pos_m = hpop_de440_positions_m(jd_tdb, coeff_path=coeff_path)
-    return {k: v / 1e3 for k, v in pos_m.items()}
+    positions = {k: v / 1e3 for k, v in pos_m.items()}
+    env[_DE440_POSITION_CACHE_KEY] = (
+        cache_key,
+        {str(name): np.array(value, dtype=float, copy=True) for name, value in positions.items()},
+    )
+    return positions

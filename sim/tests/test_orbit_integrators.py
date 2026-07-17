@@ -1,14 +1,54 @@
+import subprocess
+import sys
 import unittest
 
 import numpy as np
 
 from sim.config import scenario_config_from_dict
 from sim.dynamics.orbit.accelerations import OrbitContext
-from sim.dynamics.orbit.integrators import integrate_adaptive
+from sim.dynamics.orbit.integrators import integrate_adaptive, rkf78_stage_trace, rkf78_step
 from sim.runtime_support import _build_orbit_propagator
 
 
 class TestOrbitIntegrators(unittest.TestCase):
+    def test_rkf78_production_step_matches_diagnostic_stage_trace_exactly(self):
+        x0 = np.linspace(0.1, 4.8, 48)
+        weights = np.linspace(0.01, 0.48, 48)
+
+        def deriv(t_s: float, x: np.ndarray) -> np.ndarray:
+            return weights * x + 0.001 * t_s
+
+        stages = rkf78_stage_trace(deriv, 123.0, x0, 0.25)
+        k1, k6, k7, k8 = (stages[index]["k"] for index in (0, 5, 6, 7))
+        k9, k10, k11, k12, k13 = (stages[index]["k"] for index in (8, 9, 10, 11, 12))
+        expected_state = x0 + 0.25 * (
+            (41.0 / 840.0) * k1
+            + (34.0 / 105.0) * k6
+            + (9.0 / 35.0) * k7
+            + (9.0 / 35.0) * k8
+            + (9.0 / 280.0) * k9
+            + (9.0 / 280.0) * k10
+            + (41.0 / 840.0) * k11
+        )
+        expected_error = 0.25 * (41.0 / 840.0) * (k1 + k11 - k12 - k13)
+
+        state, error = rkf78_step(deriv, 123.0, x0, 0.25)
+
+        np.testing.assert_array_equal(state, expected_state)
+        np.testing.assert_array_equal(error, expected_error)
+
+    def test_orbit_package_constant_import_does_not_eagerly_load_propagation_families(self):
+        code = (
+            "import sys; "
+            "from sim.dynamics.orbit import EARTH_MU_KM3_S2; "
+            "assert EARTH_MU_KM3_S2 > 0.0; "
+            "blocked = {'sim.dynamics.orbit.atmosphere', 'sim.dynamics.orbit.ogp', "
+            "'sim.dynamics.orbit.propagator', 'sim.dynamics.orbit.sdp4'}; "
+            "assert not blocked.intersection(sys.modules), blocked.intersection(sys.modules)"
+        )
+        proc = subprocess.run([sys.executable, "-c", code], text=True, capture_output=True, check=False)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
     def test_rkf78_adaptive_step_matches_requested_outer_dt(self):
         eval_times: list[float] = []
 

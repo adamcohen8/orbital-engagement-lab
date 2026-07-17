@@ -5,8 +5,7 @@ from dataclasses import asdict, dataclass
 
 import numpy as np
 
-from sim.acceleration.kernels.attitude import propagate_attitude_exponential_map_kernel
-from sim.acceleration.settings import acceleration_settings_from_mode
+from sim.acceleration.settings import acceleration_enabled_from_mode
 from sim.utils.quaternion import (
     normalize_quaternion,
     omega_matrix,
@@ -16,6 +15,7 @@ from sim.utils.quaternion import (
 
 _MAX_ABS_RATE_RAD_S = 1e6
 _MAX_ABS_TORQUE_NM = 1e12
+propagate_attitude_exponential_map_kernel = None
 
 
 @dataclass
@@ -91,6 +91,8 @@ def get_attitude_guardrail_stats(stats: AttitudeGuardrailStats | None = None) ->
 def _add_guardrail_counts(counts: np.ndarray) -> None:
     values = np.asarray(counts, dtype=int).reshape(-1)
     if values.size < 6:
+        return
+    if not np.any(values[:6]):
         return
     _ATTITUDE_GUARDRAIL_STATS.non_finite_input_events += int(values[0])
     _ATTITUDE_GUARDRAIL_STATS.rate_clamp_events += int(values[1])
@@ -183,7 +185,14 @@ def propagate_attitude_exponential_map(
     dt_s: float,
     acceleration_mode: str = "off",
 ) -> tuple[np.ndarray, np.ndarray]:
-    if acceleration_settings_from_mode(acceleration_mode).enabled:
+    global propagate_attitude_exponential_map_kernel
+    if acceleration_enabled_from_mode(acceleration_mode):
+        if propagate_attitude_exponential_map_kernel is None:
+            from sim.acceleration.kernels.attitude import (
+                propagate_attitude_exponential_map_kernel as accelerated_propagate,
+            )
+
+            propagate_attitude_exponential_map_kernel = accelerated_propagate
         q_next, omega_next, counts = propagate_attitude_exponential_map_kernel(
             np.asarray(quat_bn, dtype=float).reshape(4),
             np.asarray(omega_body_rad_s, dtype=float).reshape(3),

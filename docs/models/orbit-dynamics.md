@@ -229,8 +229,8 @@ Useful commands:
 
 Private validation harnesses cover orbit integrator selection/adaptive-step
 behavior, epoch and eclipse behavior, atmosphere/drag/SRP/third-body/zonal
-perturbation tests, and spherical-harmonic plugin wiring. The optional HPOP and
-precise-orbit comparison workflows provide
+perturbation tests, and spherical-harmonic plugin wiring. The saved Orekit
+cumulative J2/J3/J4 suite and optional HPOP and precise-orbit comparison workflows provide
 stronger external-reference evidence for selected configured cases when the
 required reference data and tooling are present.
 

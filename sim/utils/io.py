@@ -35,7 +35,14 @@ def json_safe(value: Any) -> Any:
 def write_json(path: str, payload: dict[str, Any]) -> None:
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
-    rendered = json.dumps(json_safe(payload), indent=2, allow_nan=False)
     tmp = out.with_name(out.name + ".tmp")
-    tmp.write_text(rendered, encoding="utf-8")
-    tmp.replace(out)
+    try:
+        with tmp.open("w", encoding="utf-8") as handle:
+            # Stream the encoder directly to disk.  Large run logs no longer
+            # require a second, full-size Unicode string (and its encoded byte
+            # buffer) in addition to the sanitized payload already in memory.
+            json.dump(json_safe(payload), handle, indent=2, allow_nan=False)
+        tmp.replace(out)
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise

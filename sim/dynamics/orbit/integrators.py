@@ -177,16 +177,130 @@ def rkf78_step(deriv_fn, t_s: float, x: np.ndarray, dt_s: float) -> tuple[np.nda
     Returns the propagated state and the embedded error estimate used for
     adaptive step-size control.
     """
-    stages = rkf78_stage_trace(deriv_fn, t_s, x, dt_s)
-    k1 = stages[0]["k"]
-    k6 = stages[5]["k"]
-    k7 = stages[6]["k"]
-    k8 = stages[7]["k"]
-    k9 = stages[8]["k"]
-    k10 = stages[9]["k"]
-    k11 = stages[10]["k"]
-    k12 = stages[11]["k"]
-    k13 = stages[12]["k"]
+    # The diagnostic trace retains a copy of every stage state and derivative.
+    # Ordinary propagation only needs the derivatives, so evaluate the same
+    # tableau directly and avoid retaining thirteen unused stage-state copies
+    # and dictionaries on every attempted adaptive step.
+    x = np.array(x, dtype=float, copy=True)
+    k1 = np.asarray(deriv_fn(t_s, x), dtype=float)
+    k2 = np.asarray(
+        deriv_fn(t_s + dt_s * (2.0 / 27.0), x + dt_s * ((2.0 / 27.0) * k1)),
+        dtype=float,
+    )
+    k3 = np.asarray(
+        deriv_fn(t_s + dt_s * (1.0 / 9.0), x + dt_s * ((1.0 / 36.0) * k1 + (1.0 / 12.0) * k2)),
+        dtype=float,
+    )
+    k4 = np.asarray(
+        deriv_fn(t_s + dt_s * (1.0 / 6.0), x + dt_s * ((1.0 / 24.0) * k1 + (1.0 / 8.0) * k3)),
+        dtype=float,
+    )
+    k5 = np.asarray(
+        deriv_fn(
+            t_s + dt_s * (5.0 / 12.0),
+            x + dt_s * ((5.0 / 12.0) * k1 - (25.0 / 16.0) * k3 + (25.0 / 16.0) * k4),
+        ),
+        dtype=float,
+    )
+    k6 = np.asarray(
+        deriv_fn(t_s + dt_s * 0.5, x + dt_s * ((1.0 / 20.0) * k1 + 0.25 * k4 + 0.2 * k5)),
+        dtype=float,
+    )
+    k7 = np.asarray(
+        deriv_fn(
+            t_s + dt_s * (5.0 / 6.0),
+            x
+            + dt_s
+            * (-(25.0 / 108.0) * k1 + (125.0 / 108.0) * k4 - (65.0 / 27.0) * k5 + (125.0 / 54.0) * k6),
+        ),
+        dtype=float,
+    )
+    k8 = np.asarray(
+        deriv_fn(
+            t_s + dt_s * (1.0 / 6.0),
+            x + dt_s * ((31.0 / 300.0) * k1 + (61.0 / 225.0) * k5 - (2.0 / 9.0) * k6 + (13.0 / 900.0) * k7),
+        ),
+        dtype=float,
+    )
+    k9 = np.asarray(
+        deriv_fn(
+            t_s + dt_s * (2.0 / 3.0),
+            x
+            + dt_s
+            * (2.0 * k1 - (53.0 / 6.0) * k4 + (704.0 / 45.0) * k5 - (107.0 / 9.0) * k6 + (67.0 / 90.0) * k7 + 3.0 * k8),
+        ),
+        dtype=float,
+    )
+    k10 = np.asarray(
+        deriv_fn(
+            t_s + dt_s * (1.0 / 3.0),
+            x
+            + dt_s
+            * (
+                -(91.0 / 108.0) * k1
+                + (23.0 / 108.0) * k4
+                - (976.0 / 135.0) * k5
+                + (311.0 / 54.0) * k6
+                - (19.0 / 60.0) * k7
+                + (17.0 / 6.0) * k8
+                - (1.0 / 12.0) * k9
+            ),
+        ),
+        dtype=float,
+    )
+    k11 = np.asarray(
+        deriv_fn(
+            t_s + dt_s,
+            x
+            + dt_s
+            * (
+                (2383.0 / 4100.0) * k1
+                - (341.0 / 164.0) * k4
+                + (4496.0 / 1025.0) * k5
+                - (301.0 / 82.0) * k6
+                + (2133.0 / 4100.0) * k7
+                + (45.0 / 82.0) * k8
+                + (45.0 / 164.0) * k9
+                + (18.0 / 41.0) * k10
+            ),
+        ),
+        dtype=float,
+    )
+    k12 = np.asarray(
+        deriv_fn(
+            t_s,
+            x
+            + dt_s
+            * (
+                (3.0 / 205.0) * k1
+                - (6.0 / 41.0) * k6
+                - (3.0 / 205.0) * k7
+                - (3.0 / 41.0) * k8
+                + (3.0 / 41.0) * k9
+                + (6.0 / 41.0) * k10
+            ),
+        ),
+        dtype=float,
+    )
+    k13 = np.asarray(
+        deriv_fn(
+            t_s + dt_s,
+            x
+            + dt_s
+            * (
+                -(1777.0 / 4100.0) * k1
+                - (341.0 / 164.0) * k4
+                + (4496.0 / 1025.0) * k5
+                - (289.0 / 82.0) * k6
+                + (2193.0 / 4100.0) * k7
+                + (51.0 / 82.0) * k8
+                + (33.0 / 164.0) * k9
+                + (12.0 / 41.0) * k10
+                + k12
+            ),
+        ),
+        dtype=float,
+    )
 
     x_next = x + dt_s * (
         (41.0 / 840.0) * k1

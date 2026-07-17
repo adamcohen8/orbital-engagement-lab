@@ -1,11 +1,40 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 
 import numpy as np
 
 from sim.core.models import StateTruth
 from sim.utils.quaternion import dcm_to_quaternion_bn, quaternion_to_dcm_bn
+
+_BASIS_3 = np.eye(3)
+
+
+@lru_cache(maxsize=64)
+def _thruster_body_basis(
+    direction: tuple[float, float, float],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    t_body = np.array(direction, dtype=float)
+    t_body_norm = float(np.linalg.norm(t_body))
+    if t_body_norm == 0.0:
+        raise ValueError("thruster_direction_body cannot be zero.")
+    t_body = t_body / t_body_norm
+
+    ref_idx = int(np.argmin(np.abs(t_body)))
+    ref_body = _BASIS_3[:, ref_idx]
+    s_body = ref_body - np.dot(ref_body, t_body) * t_body
+    s_body_norm = float(np.linalg.norm(s_body))
+    if s_body_norm == 0.0:
+        ref_body = _BASIS_3[:, (ref_idx + 1) % 3]
+        s_body = ref_body - np.dot(ref_body, t_body) * t_body
+        s_body_norm = float(np.linalg.norm(s_body))
+        if s_body_norm == 0.0:
+            raise ValueError("Could not construct an orthogonal body basis from thruster_direction_body.")
+    s_body = s_body / s_body_norm
+    u_body = np.cross(t_body, s_body)
+    u_body = u_body / max(float(np.linalg.norm(u_body)), 1e-12)
+    return t_body, s_body, np.column_stack((t_body, s_body, u_body))
 
 
 @dataclass(frozen=True)
@@ -321,29 +350,10 @@ class AttitudeAgnosticImpulsiveManeuverer:
         if dv_norm == 0.0:
             return truth.attitude_quat_bn.copy()
 
-        t_body = np.array(thruster_direction_body, dtype=float)
-        if t_body.shape != (3,):
+        direction = np.array(thruster_direction_body, dtype=float)
+        if direction.shape != (3,):
             raise ValueError("thruster_direction_body must be length-3.")
-        t_body_norm = float(np.linalg.norm(t_body))
-        if t_body_norm == 0.0:
-            raise ValueError("thruster_direction_body cannot be zero.")
-        t_body = t_body / t_body_norm
-
-        basis = np.eye(3)
-        ref_idx = int(np.argmin(np.abs(t_body)))
-        ref_body = basis[:, ref_idx]
-        s_body = ref_body - np.dot(ref_body, t_body) * t_body
-        s_body_norm = float(np.linalg.norm(s_body))
-        if s_body_norm == 0.0:
-            ref_body = basis[:, (ref_idx + 1) % 3]
-            s_body = ref_body - np.dot(ref_body, t_body) * t_body
-            s_body_norm = float(np.linalg.norm(s_body))
-            if s_body_norm == 0.0:
-                raise ValueError("Could not construct an orthogonal body basis from thruster_direction_body.")
-        s_body = s_body / s_body_norm
-        u_body = np.cross(t_body, s_body)
-        u_body = u_body / max(float(np.linalg.norm(u_body)), 1e-12)
-        b_mat = np.column_stack((t_body, s_body, u_body))
+        _t_body, s_body, b_mat = _thruster_body_basis(tuple(float(value) for value in direction))
 
         c_bn_cur = quaternion_to_dcm_bn(truth.attitude_quat_bn)
         c_nb_cur = c_bn_cur.T
@@ -354,7 +364,7 @@ class AttitudeAgnosticImpulsiveManeuverer:
         s_eci_norm = float(np.linalg.norm(s_eci))
         if s_eci_norm == 0.0:
             ref_idx_eci = int(np.argmin(np.abs(t_eci)))
-            ref_eci = basis[:, ref_idx_eci]
+            ref_eci = _BASIS_3[:, ref_idx_eci]
             s_eci = ref_eci - np.dot(ref_eci, t_eci) * t_eci
             s_eci_norm = float(np.linalg.norm(s_eci))
             if s_eci_norm == 0.0:

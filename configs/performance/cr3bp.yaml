@@ -1,0 +1,69 @@
+scenario_name: performance_cr3bp
+scenario_description: Sustained Earth-Moon CR3BP propagation workload using the maintained southern L2 NRHO seed.
+metadata:
+  owner: public
+  public_surface: public-performance
+  support_level: experimental
+  evidence_role: Performance workload for the CR3BP runtime branch.
+objects:
+  vehicle:
+    enabled: true
+    kind: satellite
+    role: target
+    specs:
+      mass_kg: 1000.0
+    initial_state:
+      cr3bp_halo:
+        system: earth_moon
+        family: l2_nrho_southern
+      attitude_quat_bn: [1.0, 0.0, 0.0, 0.0]
+      angular_rate_body_rad_s: [0.0, 0.0, 0.0]
+    orbit_control:
+      kind: python
+      module: sim.control.orbit.zero_controller
+      class_name: ZeroController
+      params: {}
+simulator:
+  duration_s: 86400.0
+  dt_s: 60.0
+  resource_profile: "off"
+  dynamics:
+    orbit:
+      model: cr3bp
+      cr3bp_system: earth_moon
+      integrator: rk4
+      orbit_substep_s: 60.0
+      j2: false
+      j3: false
+      j4: false
+      drag: false
+      srp: false
+      third_body_sun: false
+      third_body_moon: false
+      spherical_harmonics:
+        enabled: false
+    attitude:
+      enabled: false
+  execution:
+    runtime_profiler:
+      enabled: true
+    object_parallelism:
+      enabled: false
+      backend: serial
+  termination:
+    earth_impact_enabled: false
+outputs:
+  output_dir: outputs/performance/cr3bp
+  mode: save
+  stats:
+    print_summary: false
+    save_json: false
+    save_full_log: false
+  review:
+    enabled: false
+  plots:
+    enabled: false
+    figure_ids: []
+  animations:
+    enabled: false
+    types: []

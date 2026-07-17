@@ -66,6 +66,7 @@ class CompiledSphericalHarmonics:
     legendre_recur_a: np.ndarray
     legendre_recur_b: np.ndarray
     legendre_recur_c: np.ndarray
+    legendre_recurrence: tuple[tuple[int, int, float, float, float], ...]
     legendre_pnm_scratch: np.ndarray
     legendre_dpnm_scratch: np.ndarray
 
@@ -91,6 +92,7 @@ def compile_spherical_harmonic_terms(terms: list[SphericalHarmonicTerm]) -> Comp
     recur_a = np.zeros((n_max + 1, m_max + 1), dtype=float)
     recur_b = np.zeros((n_max + 1, m_max + 1), dtype=float)
     recur_c = np.zeros((n_max + 1, m_max + 1), dtype=float)
+    recurrence: list[tuple[int, int, float, float, float]] = []
     j = 0
     k = 2
     while j <= m_max:
@@ -98,6 +100,7 @@ def compile_spherical_harmonic_terms(terms: list[SphericalHarmonicTerm]) -> Comp
             recur_a[i, j] = math.sqrt((2.0 * i + 1.0) / ((i - j) * (i + j)))
             recur_b[i, j] = math.sqrt(2.0 * i - 1.0)
             recur_c[i, j] = math.sqrt(((i + j - 1.0) * (i - j - 1.0)) / (2.0 * i - 3.0))
+            recurrence.append((i, j, recur_a[i, j], recur_b[i, j], recur_c[i, j]))
         j += 1
         k += 1
     return CompiledSphericalHarmonics(
@@ -112,6 +115,7 @@ def compile_spherical_harmonic_terms(terms: list[SphericalHarmonicTerm]) -> Comp
         legendre_recur_a=recur_a,
         legendre_recur_b=recur_b,
         legendre_recur_c=recur_c,
+        legendre_recurrence=tuple(recurrence),
         legendre_pnm_scratch=np.empty((n_max + 1, m_max + 1), dtype=float),
         legendre_dpnm_scratch=np.empty((n_max + 1, m_max + 1), dtype=float),
     )
@@ -211,27 +215,29 @@ def _legendre_normalized_hpop(
             pnm[i, m] = scale * sin_f * pnm[i - 1, m]
             dpnm[i, m] = scale * (cos_f * pnm[i - 1, m] + sin_f * dpnm[i - 1, m])
 
-    j = 0
-    k = 2
-    while j <= m_max:
-        for i in range(k, n_max + 1):
-            if compiled is not None:
-                a = float(compiled.legendre_recur_a[i, j])
-                b_scale = float(compiled.legendre_recur_b[i, j])
-                c_scale = float(compiled.legendre_recur_c[i, j])
-            else:
+    if compiled is not None:
+        recurrence = compiled.legendre_recurrence
+    else:
+        recurrence_rows: list[tuple[int, int, float, float, float]] = []
+        j = 0
+        k = 2
+        while j <= m_max:
+            for i in range(k, n_max + 1):
                 a = math.sqrt((2.0 * i + 1.0) / ((i - j) * (i + j)))
                 b_scale = math.sqrt(2.0 * i - 1.0)
                 c_scale = math.sqrt(((i + j - 1.0) * (i - j - 1.0)) / (2.0 * i - 3.0))
-            b = b_scale * sin_f * pnm[i - 1, j]
-            c = c_scale * pnm[i - 2, j]
-            pnm[i, j] = a * (b - c)
-            db = b_scale * sin_f * dpnm[i - 1, j]
-            dc = b_scale * cos_f * pnm[i - 1, j]
-            dd = c_scale * dpnm[i - 2, j]
-            dpnm[i, j] = a * (db + dc - dd)
-        j += 1
-        k += 1
+                recurrence_rows.append((i, j, a, b_scale, c_scale))
+            j += 1
+            k += 1
+        recurrence = tuple(recurrence_rows)
+    for i, j, a, b_scale, c_scale in recurrence:
+        b = b_scale * sin_f * pnm[i - 1, j]
+        c = c_scale * pnm[i - 2, j]
+        pnm[i, j] = a * (b - c)
+        db = b_scale * sin_f * dpnm[i - 1, j]
+        dc = b_scale * cos_f * pnm[i - 1, j]
+        dd = c_scale * dpnm[i - 2, j]
+        dpnm[i, j] = a * (db + dc - dd)
     return pnm, dpnm
 
 
@@ -339,13 +345,17 @@ def _analytic_harmonic_accel_hpop_eci_km_s2(
         q1 = 0.0
         q2 = 0.0
         q3 = 0.0
+        pnm_n = pnm[n]
+        dpnm_n = dpnm[n]
+        c_nm_n = c_nm[n]
+        s_nm_n = s_nm[n]
         for m in range(0, min(m_max, n) + 1):
             cos_ml = cos_mlon[m]
             sin_ml = sin_mlon[m]
-            amp = c_nm[n, m] * cos_ml + s_nm[n, m] * sin_ml
-            q1 += pnm[n, m] * amp
-            q2 += dpnm[n, m] * amp
-            q3 += m * pnm[n, m] * (s_nm[n, m] * cos_ml - c_nm[n, m] * sin_ml)
+            amp = c_nm_n[m] * cos_ml + s_nm_n[m] * sin_ml
+            q1 += pnm_n[m] * amp
+            q2 += dpnm_n[m] * amp
+            q3 += m * pnm_n[m] * (s_nm_n[m] * cos_ml - c_nm_n[m] * sin_ml)
         dUdr += q1 * b1
         dUdlatgc += q2 * b2
         dUdlon += q3 * b3
