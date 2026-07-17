@@ -17,6 +17,7 @@ from sim.utils.frames import eci_relative_to_ric_rect, ric_dcm_ir_from_rv, ric_r
 from sim.utils.quaternion import dcm_to_quaternion_bn, normalize_quaternion, quaternion_to_dcm_bn
 
 logger = logging.getLogger(__name__)
+_ATTITUDE_MANEUVER_COORDINATOR = OrbitalAttitudeManeuverCoordinator()
 
 
 @dataclass
@@ -261,7 +262,7 @@ def _desired_attitude_for_thrust(
     thrust_eci_km_s2: np.ndarray,
     thruster_direction_body: np.ndarray,
 ) -> np.ndarray:
-    q_req = OrbitalAttitudeManeuverCoordinator().maneuverer.required_attitude_for_delta_v(
+    q_req = _ATTITUDE_MANEUVER_COORDINATOR.maneuverer.required_attitude_for_delta_v(
         truth=truth,
         delta_v_eci_km_s=np.array(thrust_eci_km_s2, dtype=float),
         thruster_direction_body=np.array(thruster_direction_body, dtype=float),

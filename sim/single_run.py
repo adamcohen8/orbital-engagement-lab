@@ -9,7 +9,7 @@ from multiprocessing import get_context
 from pathlib import Path
 from time import perf_counter
 from traceback import format_exc
-from typing import Any, Callable, Protocol
+from typing import TYPE_CHECKING, Any, Callable, Protocol
 
 import numpy as np
 
@@ -31,7 +31,6 @@ from sim.dynamics.attitude.rigid_body import (
 from sim.dynamics.orbit.atmosphere import altitude_km_from_eci
 from sim.dynamics.orbit.epoch import TIME_DEPENDENT_ENV_CACHE_KEY
 from sim.dynamics.orbit.frames import FrameContext, frame_context_from_mapping
-from sim.dynamics.orbit.sgp4 import SGP4EphemerisProvider
 from sim.dynamics.orbit.spherical_harmonics import configure_spherical_harmonics_env
 from sim.dynamics.orbit.tle import tle_block_initialization_metadata
 from sim.dynamics.reentry import (
@@ -48,9 +47,8 @@ from sim.reporting.single_run_artifacts import (
 from sim.reporting.single_run_payload import SingleRunPayloadContext, build_single_run_payload
 from sim.resource_limits import (
     HistoryMemoryEstimate,
-    bytes_from_mb,
-    configured_history_memory_limit_mb,
     enforce_history_memory_budget,
+    estimate_history_memory_from_config,
     resource_profile,
 )
 from sim.rocket.navigation import build_rocket_nav_state
@@ -78,6 +76,9 @@ from sim.single_run_support import (
     _TerminationMonitor,
 )
 from sim.utils.parallel import restore_env_vars, set_parallel_worker_thread_limits
+
+if TYPE_CHECKING:
+    from sim.dynamics.orbit.sgp4 import SGP4EphemerisProvider
 
 _AUTO_OBJECT_PARALLEL_RUN_WORK_THRESHOLD = 250.0
 
@@ -156,16 +157,13 @@ def _apply_frame_context_to_environment(
     return out
 
 
-def _state_truth_to_array(truth: StateTruth) -> np.ndarray:
-    return np.hstack(
-        (
-            truth.position_eci_km,
-            truth.velocity_eci_km_s,
-            truth.attitude_quat_bn,
-            truth.angular_rate_body_rad_s,
-            np.array([truth.mass_kg]),
-        )
-    )
+def _write_state_truth(row: np.ndarray, truth: StateTruth) -> None:
+    """Write one canonical truth row without allocating a temporary array."""
+    row[0:3] = truth.position_eci_km
+    row[3:6] = truth.velocity_eci_km_s
+    row[6:10] = truth.attitude_quat_bn
+    row[10:13] = truth.angular_rate_body_rad_s
+    row[13] = truth.mass_kg
 
 
 @dataclass(frozen=True)
@@ -458,16 +456,10 @@ def _run_object_step_worker(engine: _SingleRunEngine, message: ObjectStepMessage
     engine.runtime_profiler = _RuntimeProfiler(object_ids=[aid], enabled=profiler_enabled)
     engine.controller_debug_hist = {aid: []}
     desired_attitude_hist = engine.desired_attitude_hist.get(aid)
-    required_rows = int(message.sample_index) + 2
-    if desired_attitude_hist is None:
-        desired_attitude_hist = np.full((required_rows, 4), np.nan)
-    elif required_rows > int(desired_attitude_hist.shape[0]):
-        grow_to = max(required_rows, int(desired_attitude_hist.shape[0]) * 2)
-        grown = np.full((grow_to, 4), np.nan)
-        grown[: desired_attitude_hist.shape[0], :] = desired_attitude_hist
-        desired_attitude_hist = grown
+    if desired_attitude_hist is None or desired_attitude_hist.shape != (1, 4):
+        desired_attitude_hist = np.full((1, 4), np.nan)
     else:
-        desired_attitude_hist[int(message.sample_index) + 1, :] = np.nan
+        desired_attitude_hist[0, :] = np.nan
     engine.desired_attitude_hist = {aid: desired_attitude_hist}
     item = ObjectStepInput(
         object_id=aid,
@@ -502,7 +494,7 @@ def _run_object_step_worker(engine: _SingleRunEngine, message: ObjectStepMessage
             dtype=float,
         ),
         desired_attitude_quat_bn=np.array(
-            engine.desired_attitude_hist[aid][item.sample_index + 1, :],
+            engine.desired_attitude_hist[aid][0, :],
             dtype=float,
         )
         if aid in engine.desired_attitude_hist
@@ -637,6 +629,7 @@ class _SingleRunEngine:
         self.history_mode = str(history_mode or "full").strip().lower()
         if self.history_mode not in {"full", "dynamic"}:
             raise ValueError("history_mode must be 'full' or 'dynamic'.")
+        self._object_worker_compact_buffers = False
         self.dt = float(cfg.simulator.dt_s)
         controller_execution = dict(dict(getattr(cfg.simulator, "execution", {}) or {}).get("controller", {}) or {})
         self.orbit_controller_budget_ms = float(controller_execution.get("orbit_budget_ms", 2.0) or 2.0)
@@ -731,6 +724,8 @@ class _SingleRunEngine:
                 continue
             if agent.truth is None:
                 continue
+            from sim.dynamics.orbit.sgp4 import SGP4EphemerisProvider
+
             provider = SGP4EphemerisProvider.from_tle_block(
                 dict(initial_state.get("tle", {}) or {}),
                 mass_kg=float(agent.truth.mass_kg),
@@ -818,7 +813,8 @@ class _SingleRunEngine:
         self.history_memory_estimate = self._estimate_history_memory()
         enforce_history_memory_budget(self.history_memory_estimate)
 
-        self.t_s = np.arange(self.n, dtype=float) * self.dt
+        self.t_s = np.arange(self.n, dtype=float)
+        self.t_s *= self.dt
         self.outdir.mkdir(parents=True, exist_ok=True)
 
         if self.target_reference_truth is not None and self.target_reference_orbit_hist is None:
@@ -905,7 +901,7 @@ class _SingleRunEngine:
             if not agent.active:
                 continue
             truth = agent.truth if agent.kind == "satellite" else _rocket_state_to_truth(agent.rocket_state)
-            self.truth_hist[aid][0, :] = _state_truth_to_array(truth)
+            _write_state_truth(self.truth_hist[aid][0, :], truth)
             if agent.belief is not None:
                 self._ensure_belief_hist_width(aid, agent.belief.state.size)
                 self.belief_hist[aid][0, : agent.belief.state.size] = agent.belief.state
@@ -1200,52 +1196,7 @@ class _SingleRunEngine:
                 self.reentry_metric_hists[aid][key][sample_index] = float(value)
 
     def _estimate_history_memory(self) -> HistoryMemoryEstimate:
-        itemsize = np.dtype(float).itemsize
-        samples = int(max(self.n, 0))
-        active_objects = int(len(self.agents))
-        float_columns = 1  # t_s
-        if self.target_reference_truth is not None:
-            float_columns += 6
-        for agent in self.agents.values():
-            float_columns += 14  # truth
-            float_columns += int(agent.belief.state.size) if agent.belief is not None else 0
-            float_columns += 3  # thrust
-            float_columns += 3  # torque
-            float_columns += 4  # desired attitude
-            if agent.kind == "rocket":
-                float_columns += 1  # throttle history
-        if self.rocket is not None:
-            float_columns += 3  # stage index, dynamic pressure, mach
-            float_columns += 17  # rocket GNC/navigation metric histories
-        float_columns += len(getattr(self, "reentry_object_ids", []) or []) * len(REENTRY_METRIC_KEYS)
-
-        knowledge_pairs = 0
-        for agent in self.agents.values():
-            if agent.knowledge_base is None:
-                continue
-            targets = list(agent.knowledge_base.target_ids())
-            knowledge_pairs += len(targets)
-            float_columns += 12 * len(targets)  # estimated state and raw measurement histories
-
-        retained_python_bytes_per_sample = 0
-        for agent in self.agents.values():
-            if agent.kind != "rocket" and self.controller_debug_enabled:
-                retained_python_bytes_per_sample += 4096  # controller_debug_hist row estimate
-            if agent.bridge is not None:
-                retained_python_bytes_per_sample += 512  # bridge event row estimate
-
-        array_bytes = int(samples * float_columns * itemsize) + int(samples * retained_python_bytes_per_sample)
-        # Payload construction copies history arrays before serialization/plotting, so budget against likely peak.
-        estimated_peak_bytes = int(array_bytes * 2)
-        limit_bytes = bytes_from_mb(configured_history_memory_limit_mb(self.cfg))
-        return HistoryMemoryEstimate(
-            samples=samples,
-            active_objects=active_objects,
-            knowledge_pairs=knowledge_pairs,
-            array_bytes=array_bytes,
-            estimated_peak_bytes=estimated_peak_bytes,
-            limit_bytes=limit_bytes,
-        )
+        return estimate_history_memory_from_config(self.cfg, samples=int(max(self.n, 0)))
 
     @property
     def total_steps(self) -> int:
@@ -1898,11 +1849,12 @@ class _SingleRunEngine:
         worker.satellite_stepper = _SatelliteStepper(worker)
         worker.termination_monitor = _TerminationMonitor(worker)
         worker.knowledge_sync = None
+        worker._object_worker_compact_buffers = True
         worker.truth_hist = {}
         worker.belief_hist = {}
         worker.thrust_hist = {}
         worker.torque_hist = {}
-        worker.desired_attitude_hist = {aid: np.full((int(item.sample_index) + 2, 4), np.nan)}
+        worker.desired_attitude_hist = {aid: np.full((1, 4), np.nan)}
         worker.knowledge_hist = {}
         worker.knowledge_measurement_hist = {}
         worker._last_orbital_command_eval_t_s = {
@@ -2062,7 +2014,7 @@ class _SingleRunEngine:
             if not agent.active:
                 continue
             truth = agent.truth if agent.kind == "satellite" else _rocket_state_to_truth(agent.rocket_state)
-            self.truth_hist[aid][k + 1, :] = _state_truth_to_array(truth)
+            _write_state_truth(self.truth_hist[aid][k + 1, :], truth)
             if agent.belief is not None:
                 self._ensure_belief_hist_width(aid, agent.belief.state.size)
                 self.belief_hist[aid][k + 1, : agent.belief.state.size] = agent.belief.state

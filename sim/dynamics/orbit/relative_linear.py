@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
-from scipy.linalg import expm
 
 from sim.dynamics.orbit.elements import rv_to_coe_eci
 from sim.dynamics.orbit.environment import EARTH_J2, EARTH_MU_KM3_S2, EARTH_RADIUS_KM
@@ -173,9 +172,13 @@ class RelativeLinearDynamics:
             raise ValueError("dt_s must be finite and nonnegative.")
         if self.model == "hcw":
             return _hcw_state_transition_matrix(self.mean_motion_rad_s, dt)
+        from scipy.linalg import expm
+
         return np.asarray(expm(self.system_matrix() * dt), dtype=float)
 
     def discrete_matrices(self, dt_s: float) -> tuple[np.ndarray, np.ndarray]:
+        from scipy.linalg import expm
+
         dt = float(dt_s)
         if not np.isfinite(dt) or dt <= 0.0:
             raise ValueError("dt_s must be finite and positive.")

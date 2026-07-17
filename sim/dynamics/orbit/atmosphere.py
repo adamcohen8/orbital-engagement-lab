@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 from typing import Literal
 
 import numpy as np
@@ -14,11 +15,6 @@ from sim.dynamics.orbit.frames import (
     eci_to_ecef_harmonic,
     normalize_frame_model,
 )
-from sim.dynamics.orbit.harris_priester_backend import harris_priester_density
-from sim.dynamics.orbit.jacchia70_backend import jacchia70_density
-from sim.dynamics.orbit.jb2008_backend import jb2006_density, jb2008_density
-from sim.dynamics.orbit.msis86_backend import msis86_density as msis86_local_density
-from sim.dynamics.orbit.nrlmsise00_backend import nrlmsise00_density as nrlmsise00_local_density
 from sim.utils.geodesy import ecef_to_geodetic_deg_km
 
 AtmosphereModelName = Literal[
@@ -98,6 +94,41 @@ _USSA1976_HIGH_LOG_RHO = np.log(
         dtype=float,
     )
 )
+
+
+@lru_cache(maxsize=1)
+def _nrlmsise00_backend():
+    from sim.dynamics.orbit.nrlmsise00_backend import nrlmsise00_density
+
+    return nrlmsise00_density
+
+
+@lru_cache(maxsize=1)
+def _msis86_backend():
+    from sim.dynamics.orbit.msis86_backend import msis86_density
+
+    return msis86_density
+
+
+@lru_cache(maxsize=1)
+def _jb_backends():
+    from sim.dynamics.orbit.jb2008_backend import jb2006_density, jb2008_density
+
+    return jb2006_density, jb2008_density
+
+
+@lru_cache(maxsize=1)
+def _jacchia70_backend():
+    from sim.dynamics.orbit.jacchia70_backend import jacchia70_density
+
+    return jacchia70_density
+
+
+@lru_cache(maxsize=1)
+def _harris_priester_backend():
+    from sim.dynamics.orbit.harris_priester_backend import harris_priester_density
+
+    return harris_priester_density
 
 
 def _radial_altitude_km_from_eci(r_eci_km: np.ndarray) -> float:
@@ -282,7 +313,7 @@ def density_nrlmsise00(r_eci_km: np.ndarray, t_s: float, env: dict | None = None
         if _is_eop_frame_model(frame_model):
             env["nrlmsise00_lst_hr"] = _local_solar_time_hr(lon_deg, dt_utc, env)
 
-    return float(max(0.0, nrlmsise00_local_density(alt_km, lat_deg, lon_deg, dt_utc, env)))
+    return float(max(0.0, _nrlmsise00_backend()(alt_km, lat_deg, lon_deg, dt_utc, env)))
 
 
 def density_msis86(r_eci_km: np.ndarray, t_s: float, env: dict | None = None) -> float:
@@ -310,7 +341,7 @@ def density_msis86(r_eci_km: np.ndarray, t_s: float, env: dict | None = None) ->
                 )
         lat_deg = math.radians(lat_deg)
         lon_deg = math.radians(lon_deg)
-    return float(max(0.0, msis86_local_density(alt_km, lat_deg, lon_deg, dt_utc, env)))
+    return float(max(0.0, _msis86_backend()(alt_km, lat_deg, lon_deg, dt_utc, env)))
 
 
 def density_jb2008(r_eci_km: np.ndarray, t_s: float, env: dict | None = None) -> float:
@@ -329,7 +360,7 @@ def density_jb2008(r_eci_km: np.ndarray, t_s: float, env: dict | None = None) ->
     custom_fn = env.get("jb2008_density_callable", None)
     if callable(custom_fn):
         return float(max(0.0, custom_fn(alt_km, lat_deg, lon_deg, dt_utc, env)))
-    return float(max(0.0, jb2008_density(alt_km, lat_deg, lon_deg, dt_utc, env)))
+    return float(max(0.0, _jb_backends()[1](alt_km, lat_deg, lon_deg, dt_utc, env)))
 
 
 def density_jb2006(r_eci_km: np.ndarray, t_s: float, env: dict | None = None) -> float:
@@ -342,7 +373,7 @@ def density_jb2006(r_eci_km: np.ndarray, t_s: float, env: dict | None = None) ->
     custom_fn = env.get("jb2006_density_callable", None)
     if callable(custom_fn):
         return float(max(0.0, custom_fn(alt_km, lat_deg, lon_deg, dt_utc, env)))
-    return float(max(0.0, jb2006_density(alt_km, lat_deg, lon_deg, dt_utc, env)))
+    return float(max(0.0, _jb_backends()[0](alt_km, lat_deg, lon_deg, dt_utc, env)))
 
 
 def density_jacchia70(r_eci_km: np.ndarray, t_s: float, env: dict | None = None) -> float:
@@ -355,11 +386,11 @@ def density_jacchia70(r_eci_km: np.ndarray, t_s: float, env: dict | None = None)
     custom_fn = env.get("jacchia70_density_callable", None)
     if callable(custom_fn):
         return float(max(0.0, custom_fn(alt_km, lat_deg, lon_deg, dt_utc, env)))
-    return float(max(0.0, jacchia70_density(alt_km, lat_deg, lon_deg, dt_utc, env)))
+    return float(max(0.0, _jacchia70_backend()(alt_km, lat_deg, lon_deg, dt_utc, env)))
 
 
 def density_harris_priester(r_eci_km: np.ndarray, t_s: float, env: dict | None = None) -> float:
-    return harris_priester_density(r_eci_km, t_s, env=env)
+    return _harris_priester_backend()(r_eci_km, t_s, env=env)
 
 
 def atmosphere_state_from_model(

@@ -44,6 +44,9 @@ orbit/attitude EKF finite-difference Jacobian paths, or `--kind all` to run ever
 .venv/bin/python -m sim.acceleration.benchmarks --kind estimation --estimation-iterations 1000
 ```
 
+For end-to-end timing across propagation, the full satellite loop, sensing and estimation, actuators, lifecycle models,
+campaign orchestration, and artifact generation, use the [full-path performance suite](performance-benchmarks.md).
+
 ## Runtime Controls
 
 Acceleration is disabled by default. Enable it in YAML:

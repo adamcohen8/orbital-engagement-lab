@@ -1,14 +1,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Any
 
 import numpy as np
 
-try:  # pragma: no cover - exercised only when scipy is unavailable.
-    from scipy.stats import chi2 as _scipy_chi2
-except Exception:  # pragma: no cover
-    _scipy_chi2 = None
+
+@lru_cache(maxsize=1)
+def _scipy_chi_square_distribution() -> Any | None:
+    """Resolve SciPy only for a run that actually evaluates a NIS gate."""
+    try:  # pragma: no cover - fallback exercised only when scipy is unavailable.
+        from scipy.stats import chi2
+
+        return chi2
+    except Exception:  # pragma: no cover
+        return None
 
 
 @dataclass(frozen=True)
@@ -175,8 +182,9 @@ def chi_square_threshold(dof: int, probability: float) -> float:
     p = float(probability)
     if not 0.0 < p < 1.0:
         raise ValueError("probability must be between 0 and 1.")
-    if _scipy_chi2 is not None:
-        return float(_scipy_chi2.ppf(p, k))
+    scipy_chi2 = _scipy_chi_square_distribution()
+    if scipy_chi2 is not None:
+        return float(scipy_chi2.ppf(p, k))
     # Wilson-Hilferty fallback using Acklam's inverse-normal approximation.
     z = _normal_ppf(p)
     return float(k * (1.0 - 2.0 / (9.0 * k) + z * np.sqrt(2.0 / (9.0 * k))) ** 3)

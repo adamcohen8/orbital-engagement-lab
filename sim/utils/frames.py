@@ -2,26 +2,53 @@ from __future__ import annotations
 
 import numpy as np
 
-from sim.acceleration.kernels.frames import (
-    eci_relative_to_ric_rect_kernel,
-    ric_angular_rate_eci_from_rv_kernel,
-    ric_curv_to_rect_kernel,
-    ric_dcm_ir_from_rv_kernel,
-    ric_rect_state_to_eci_kernel,
-    ric_rect_to_curv_kernel,
-)
 from sim.acceleration.settings import acceleration_cache_key, acceleration_settings_from_mode
 
 _FRAME_ACCEL_CACHE_KEY: tuple[str, bool] | None = None
 _FRAME_ACCEL_CACHE_ENABLED: bool | None = None
+eci_relative_to_ric_rect_kernel = None
+ric_angular_rate_eci_from_rv_kernel = None
+ric_curv_to_rect_kernel = None
+ric_dcm_ir_from_rv_kernel = None
+ric_rect_state_to_eci_kernel = None
+ric_rect_to_curv_kernel = None
 
 
 def _frame_acceleration_enabled() -> bool:
     global _FRAME_ACCEL_CACHE_ENABLED, _FRAME_ACCEL_CACHE_KEY
+    global eci_relative_to_ric_rect_kernel, ric_angular_rate_eci_from_rv_kernel
+    global ric_curv_to_rect_kernel, ric_dcm_ir_from_rv_kernel
+    global ric_rect_state_to_eci_kernel, ric_rect_to_curv_kernel
     cache_key = acceleration_cache_key()
     if cache_key != _FRAME_ACCEL_CACHE_KEY:
         _FRAME_ACCEL_CACHE_KEY = cache_key
         _FRAME_ACCEL_CACHE_ENABLED = bool(acceleration_settings_from_mode().enabled)
+        if _FRAME_ACCEL_CACHE_ENABLED and ric_dcm_ir_from_rv_kernel is None:
+            from sim.acceleration.kernels.frames import (
+                eci_relative_to_ric_rect_kernel as accelerated_eci_relative_to_ric_rect,
+            )
+            from sim.acceleration.kernels.frames import (
+                ric_angular_rate_eci_from_rv_kernel as accelerated_ric_angular_rate,
+            )
+            from sim.acceleration.kernels.frames import (
+                ric_curv_to_rect_kernel as accelerated_ric_curv_to_rect,
+            )
+            from sim.acceleration.kernels.frames import (
+                ric_dcm_ir_from_rv_kernel as accelerated_ric_dcm,
+            )
+            from sim.acceleration.kernels.frames import (
+                ric_rect_state_to_eci_kernel as accelerated_ric_rect_state_to_eci,
+            )
+            from sim.acceleration.kernels.frames import (
+                ric_rect_to_curv_kernel as accelerated_ric_rect_to_curv,
+            )
+
+            eci_relative_to_ric_rect_kernel = accelerated_eci_relative_to_ric_rect
+            ric_angular_rate_eci_from_rv_kernel = accelerated_ric_angular_rate
+            ric_curv_to_rect_kernel = accelerated_ric_curv_to_rect
+            ric_dcm_ir_from_rv_kernel = accelerated_ric_dcm
+            ric_rect_state_to_eci_kernel = accelerated_ric_rect_state_to_eci
+            ric_rect_to_curv_kernel = accelerated_ric_rect_to_curv
     return bool(_FRAME_ACCEL_CACHE_ENABLED)
 
 

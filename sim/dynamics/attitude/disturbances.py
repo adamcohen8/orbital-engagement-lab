@@ -15,6 +15,20 @@ from sim.utils.quaternion import quaternion_to_dcm_bn
 EARTH_MAGNETIC_DIPOLE_T_M3 = 7.94e15
 
 
+def _cross3(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """Return the cross product of two three-vectors without generic axis setup."""
+    out = np.empty(3, dtype=float)
+    out[0] = a[1] * b[2] - a[2] * b[1]
+    out[1] = a[2] * b[0] - a[0] * b[2]
+    out[2] = a[0] * b[1] - a[1] * b[0]
+    return out
+
+
+def _norm3(vector: np.ndarray) -> float:
+    """Return the Euclidean norm of a three-vector without generic linalg dispatch."""
+    return float(np.sqrt(np.dot(vector, vector)))
+
+
 @dataclass(frozen=True)
 class DisturbanceTorqueConfig:
     use_gravity_gradient: bool = True
@@ -67,19 +81,19 @@ class DisturbanceTorqueModel:
 
     def _gravity_gradient_torque(self, state: StateTruth, c_bn: np.ndarray) -> np.ndarray:
         r_i_m = state.position_eci_km * 1e3
-        r_norm_m = np.linalg.norm(r_i_m)
+        r_norm_m = _norm3(r_i_m)
         if r_norm_m == 0.0:
             return np.zeros(3)
         r_hat_b = c_bn @ (r_i_m / r_norm_m)
         mu_m3_s2 = self.mu_km3_s2 * 1e9
-        return 3.0 * mu_m3_s2 / (r_norm_m**3) * np.cross(r_hat_b, self.inertia_kg_m2 @ r_hat_b)
+        return 3.0 * mu_m3_s2 / (r_norm_m**3) * _cross3(r_hat_b, self.inertia_kg_m2 @ r_hat_b)
 
     def _magnetic_torque(self, state: StateTruth, c_bn: np.ndarray, env: dict) -> np.ndarray:
         if "magnetic_field_eci_t" in env:
             b_eci = np.asarray(env["magnetic_field_eci_t"], dtype=float).reshape(3)
         else:
             r_i_m = state.position_eci_km * 1e3
-            r_norm_m = np.linalg.norm(r_i_m)
+            r_norm_m = _norm3(r_i_m)
             if r_norm_m == 0.0:
                 return np.zeros(3)
 
@@ -87,7 +101,7 @@ class DisturbanceTorqueModel:
             r_hat = r_i_m / r_norm_m
             b_eci = (3.0 * r_hat * np.dot(m_eci, r_hat) - m_eci) / (r_norm_m**3)
         b_body = c_bn @ b_eci
-        return np.cross(self.config.magnetic_dipole_body_a_m2, b_body)
+        return _cross3(self.config.magnetic_dipole_body_a_m2, b_body)
 
     def _drag_torque(self, state: StateTruth, env: dict, c_bn: np.ndarray) -> np.ndarray:
         if "density_kg_m3" in env:
@@ -101,7 +115,11 @@ class DisturbanceTorqueModel:
             )
         if "drag_v_rel_eci_m_s" in env:
             v_rel_eci_m_s = np.asarray(env["drag_v_rel_eci_m_s"], dtype=float)
-            v_norm = float(env.get("drag_v_rel_norm_m_s", np.linalg.norm(v_rel_eci_m_s)))
+            v_norm = (
+                float(env["drag_v_rel_norm_m_s"])
+                if "drag_v_rel_norm_m_s" in env
+                else _norm3(v_rel_eci_m_s)
+            )
         else:
             omega_raw = env.get("drag_earth_rotation_rad_s", EARTH_ROT_RATE_RAD_S)
             from sim.aero.core import atmosphere_relative_velocity_eci_km_s
@@ -123,7 +141,7 @@ class DisturbanceTorqueModel:
                 ddeps_rad=float(env.get("ddeps_rad", 0.0) or 0.0),
             )
             v_rel_eci_m_s = v_rel_eci_km_s * 1e3
-            v_norm = np.linalg.norm(v_rel_eci_m_s)
+            v_norm = _norm3(v_rel_eci_m_s)
         if v_norm == 0.0 or rho <= 0.0:
             return np.zeros(3)
 
@@ -160,13 +178,13 @@ class DisturbanceTorqueModel:
 
         f_drag_mag = 0.5 * rho * (v_norm**2) * self.config.drag_cd * self.config.drag_area_m2
         f_drag_body = -f_drag_mag * (v_rel_body / v_norm)
-        return np.cross(self.config.drag_cp_offset_body_m, f_drag_body)
+        return _cross3(self.config.drag_cp_offset_body_m, f_drag_body)
 
     def _srp_torque(self, state: StateTruth, env: dict, c_bn: np.ndarray) -> np.ndarray:
         sun_dir_eci = np.asarray(
             env.get("sun_dir_eci_unit", env.get("sun_dir_eci", self.config.sun_dir_eci)), dtype=float
         )
-        n = np.linalg.norm(sun_dir_eci)
+        n = _norm3(sun_dir_eci)
         if n == 0.0:
             return np.zeros(3)
         if "sun_dir_eci_unit" not in env:
@@ -210,12 +228,12 @@ class DisturbanceTorqueModel:
 
         force_mag = p_srp_base * self.config.srp_area_m2
         f_srp_body = -force_mag * sun_dir_body
-        return np.cross(self.config.srp_cp_offset_body_m, f_srp_body)
+        return _cross3(self.config.srp_cp_offset_body_m, f_srp_body)
 
     @staticmethod
     def _srp_facet_torque_body_nm(facet: dict, pressure_n_m2: float, sun_dir_body: np.ndarray) -> np.ndarray:
         normal_body = np.asarray(facet["normal_body"], dtype=float).reshape(3)
-        normal_norm = float(np.linalg.norm(normal_body))
+        normal_norm = _norm3(normal_body)
         if normal_norm <= 0.0:
             return np.zeros(3)
         normal_body = normal_body / normal_norm
@@ -226,14 +244,14 @@ class DisturbanceTorqueModel:
         area_m2 = float(facet["area_m2"])
         cp_offset_body_m = np.asarray(facet["cp_offset_body_m"], dtype=float).reshape(3)
         force_body = pressure_n_m2 * area_m2 * illum * incident_dir_body
-        return np.cross(cp_offset_body_m, force_body)
+        return _cross3(cp_offset_body_m, force_body)
 
     @staticmethod
     def _drag_facet_torque_body_nm(
         facet: dict, density_kg_m3: float, v_norm_m_s: float, v_rel_body_m_s: np.ndarray, default_cd: float
     ) -> np.ndarray:
         normal_body = np.asarray(facet["normal_body"], dtype=float).reshape(3)
-        normal_norm = float(np.linalg.norm(normal_body))
+        normal_norm = _norm3(normal_body)
         if normal_norm <= 0.0 or v_norm_m_s <= 0.0:
             return np.zeros(3)
         normal_body = normal_body / normal_norm
@@ -244,7 +262,7 @@ class DisturbanceTorqueModel:
         drag_cd = float(facet.get("drag_cd", facet.get("cd", default_cd)))
         cp_offset_body_m = np.asarray(facet["cp_offset_body_m"], dtype=float).reshape(3)
         force_body = -0.5 * float(density_kg_m3) * projected_area_m2 * drag_cd * float(v_norm_m_s) ** 2 * v_hat_body
-        return np.cross(cp_offset_body_m, force_body)
+        return _cross3(cp_offset_body_m, force_body)
 
     @property
     def _rect_prism_geometry(self) -> RectangularPrismGeometry | None:

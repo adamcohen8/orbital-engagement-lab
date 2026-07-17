@@ -4,11 +4,28 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from sim.acceleration.kernels.estimation import orbit_ekf_numerical_jacobian_kernel, propagate_two_body_rk4_kernel
 from sim.acceleration.settings import acceleration_settings_from_mode
 from sim.core.interfaces import Estimator
 from sim.core.models import Measurement, StateBelief
 from sim.dynamics.orbit.two_body import propagate_two_body_rk4
+
+orbit_ekf_numerical_jacobian_kernel = None
+propagate_two_body_rk4_kernel = None
+
+
+def _load_acceleration_kernels() -> None:
+    global orbit_ekf_numerical_jacobian_kernel, propagate_two_body_rk4_kernel
+    if propagate_two_body_rk4_kernel is not None:
+        return
+    from sim.acceleration.kernels.estimation import (
+        orbit_ekf_numerical_jacobian_kernel as accelerated_jacobian,
+    )
+    from sim.acceleration.kernels.estimation import (
+        propagate_two_body_rk4_kernel as accelerated_propagate,
+    )
+
+    orbit_ekf_numerical_jacobian_kernel = accelerated_jacobian
+    propagate_two_body_rk4_kernel = accelerated_propagate
 
 
 @dataclass(frozen=True)
@@ -43,6 +60,8 @@ class OrbitEKFEstimator(Estimator):
         self._q = np.diag(self.process_noise_diag)
         self._r = np.diag(self.meas_noise_diag)
         self._acceleration_enabled_value = bool(acceleration_settings_from_mode(self.acceleration_mode).enabled)
+        if self._acceleration_enabled_value:
+            _load_acceleration_kernels()
 
     def update(self, belief: StateBelief, measurement: Measurement | None, t_s: float) -> StateBelief:
         output_t_s = float(t_s)
@@ -124,6 +143,7 @@ class OrbitEKFEstimator(Estimator):
     def _propagate_state(self, x: np.ndarray, *, dt_s: float) -> np.ndarray:
         step_dt_s = float(dt_s)
         if self._acceleration_enabled():
+            _load_acceleration_kernels()
             return propagate_two_body_rk4_kernel(np.asarray(x, dtype=float).reshape(6), step_dt_s, float(self.mu_km3_s2))
         return propagate_two_body_rk4(
             x_eci=x,
@@ -141,6 +161,7 @@ class OrbitEKFEstimator(Estimator):
         if base_eval is None:
             base_eval = self._propagate_state(x, dt_s=step_dt_s)
         if self._acceleration_enabled():
+            _load_acceleration_kernels()
             return orbit_ekf_numerical_jacobian_kernel(
                 np.asarray(x, dtype=float).reshape(6),
                 np.asarray(base_eval, dtype=float).reshape(6),

@@ -199,13 +199,23 @@ def frame_context_from_environment(env: dict[str, Any] | None) -> FrameContext:
     )
 
 
-def eci_to_ecef_rotation(t_s: float, jd_utc_start: float | None = None) -> np.ndarray:
+@lru_cache(maxsize=8192)
+def _eci_to_ecef_rotation_components(
+    t_s: float,
+    jd_utc_start: float | None,
+) -> tuple[np.floating, np.floating]:
     if jd_utc_start is None:
         theta = EARTH_ROT_RATE_RAD_S * t_s
     else:
         theta = gmst_angle_rad_from_jd(float(jd_utc_start) + float(t_s) / 86400.0)
-    c = np.cos(theta)
-    s = np.sin(theta)
+    return np.cos(theta), np.sin(theta)
+
+
+def eci_to_ecef_rotation(t_s: float, jd_utc_start: float | None = None) -> np.ndarray:
+    c, s = _eci_to_ecef_rotation_components(
+        float(t_s),
+        None if jd_utc_start is None else float(jd_utc_start),
+    )
     return np.array([[c, s, 0.0], [-s, c, 0.0], [0.0, 0.0, 1.0]])
 
 

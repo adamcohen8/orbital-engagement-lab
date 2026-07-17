@@ -306,10 +306,10 @@ docs.
 
 The `orbit_physics` suite covers integrators, epoch handling, eclipse geometry,
 atmosphere, drag, SRP, third-body, J3/J4, spherical-harmonic, and DE440/HPOP
-support through focused pytest targets. HPOP comparison workflows and MATLAB
-bridge suites provide stronger external-reference checks when the required
-local reference data and tooling are present; treat those as case-specific
-engineering evidence.
+support through focused pytest targets. The saved Orekit cumulative J2/J3/J4
+suite and the HPOP/MATLAB workflows provide stronger external-reference checks
+when the required reference data and tooling are present; treat those as
+case-specific engineering evidence.
 
 For completed runs, prefer structured artifacts:
 

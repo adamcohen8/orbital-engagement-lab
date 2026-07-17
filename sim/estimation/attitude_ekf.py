@@ -4,14 +4,28 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from sim.acceleration.kernels.estimation import (
-    attitude_ekf_numerical_jacobian_kernel,
-    attitude_ekf_propagate_state_kernel,
-)
 from sim.acceleration.settings import acceleration_settings_from_mode
 from sim.core.interfaces import Estimator
 from sim.core.models import Measurement, StateBelief
 from sim.utils.quaternion import normalize_quaternion, omega_matrix
+
+attitude_ekf_numerical_jacobian_kernel = None
+attitude_ekf_propagate_state_kernel = None
+
+
+def _load_acceleration_kernels() -> None:
+    global attitude_ekf_numerical_jacobian_kernel, attitude_ekf_propagate_state_kernel
+    if attitude_ekf_propagate_state_kernel is not None:
+        return
+    from sim.acceleration.kernels.estimation import (
+        attitude_ekf_numerical_jacobian_kernel as accelerated_jacobian,
+    )
+    from sim.acceleration.kernels.estimation import (
+        attitude_ekf_propagate_state_kernel as accelerated_propagate,
+    )
+
+    attitude_ekf_numerical_jacobian_kernel = accelerated_jacobian
+    attitude_ekf_propagate_state_kernel = accelerated_propagate
 
 
 @dataclass
@@ -28,6 +42,8 @@ class AttitudeEKFEstimator(Estimator):
         self.process_noise_diag = np.asarray(self.process_noise_diag, dtype=float).reshape(7)
         self.meas_noise_diag = np.asarray(self.meas_noise_diag, dtype=float).reshape(7)
         self._acceleration_enabled_value = bool(acceleration_settings_from_mode(self.acceleration_mode).enabled)
+        if self._acceleration_enabled_value:
+            _load_acceleration_kernels()
 
     def _acceleration_enabled(self) -> bool:
         return self._acceleration_enabled_value
@@ -92,6 +108,7 @@ class AttitudeEKFEstimator(Estimator):
     def _propagate_state(self, x: np.ndarray, *, dt_s: float | None = None) -> np.ndarray:
         step_dt_s = self.dt_s if dt_s is None else float(dt_s)
         if self._acceleration_enabled():
+            _load_acceleration_kernels()
             return attitude_ekf_propagate_state_kernel(
                 np.asarray(x, dtype=float).reshape(7),
                 step_dt_s,
@@ -121,6 +138,7 @@ class AttitudeEKFEstimator(Estimator):
         if base_eval is None:
             base_eval = self._propagate_state(x, dt_s=step_dt_s)
         if self._acceleration_enabled():
+            _load_acceleration_kernels()
             return attitude_ekf_numerical_jacobian_kernel(
                 np.asarray(x, dtype=float).reshape(7),
                 np.asarray(base_eval, dtype=float).reshape(7),

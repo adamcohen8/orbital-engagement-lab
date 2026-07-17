@@ -12,6 +12,7 @@ from sim.dynamics.orbit.frames import eci_to_ecef_rotation_hpop_like
 from sim.utils.geodesy import WGS84_E2, geodetic_to_ecef_km
 
 
+@lru_cache(maxsize=1)
 def _default_jb2008_sol_path() -> Path:
     return (
         Path(__file__).resolve().parents[3]
@@ -19,6 +20,7 @@ def _default_jb2008_sol_path() -> Path:
     )
 
 
+@lru_cache(maxsize=1)
 def _default_jb2008_dtc_path() -> Path:
     return (
         Path(__file__).resolve().parents[3]
@@ -26,6 +28,7 @@ def _default_jb2008_dtc_path() -> Path:
     )
 
 
+@lru_cache(maxsize=1)
 def _default_jb2006_ap_path() -> Path:
     return (
         Path(__file__).resolve().parents[3]
@@ -57,6 +60,7 @@ def _load_apdata(path: str) -> np.ndarray:
     return arr.T
 
 
+@lru_cache(maxsize=8)
 def _resolve_table_path(raw: str | None, default: Path) -> str:
     p = default if raw in (None, "") else Path(str(raw)).expanduser()
     if not p.is_absolute():

@@ -5,7 +5,6 @@ from typing import Callable
 
 import numpy as np
 
-from sim.acceleration.kernels.orbit import rk4_zonal_step_state
 from sim.acceleration.settings import acceleration_settings_from_mode
 from sim.dynamics.orbit.accelerations import (
     OrbitContext,
@@ -66,6 +65,7 @@ PLANETARY_MU_KM3_S2 = {
     "pluto": PLUTO_MU_KM3_S2,
 }
 _ZERO3 = np.zeros(3, dtype=float)
+rk4_zonal_step_state = None
 
 
 def j2_plugin(t_s: float, x_eci: np.ndarray, env: dict, ctx: OrbitContext) -> np.ndarray:
@@ -408,8 +408,13 @@ class OrbitPropagator:
         return rk4_step_state(deriv_fn=deriv, t_s=t_s, x=x_eci, dt_s=dt_s)
 
     def _acceleration_enabled(self) -> bool:
+        global rk4_zonal_step_state
         if self._acceleration_enabled_cache is None:
             self._acceleration_enabled_cache = bool(acceleration_settings_from_mode(self.acceleration_mode).enabled)
+        if self._acceleration_enabled_cache and rk4_zonal_step_state is None:
+            from sim.acceleration.kernels.orbit import rk4_zonal_step_state as accelerated_step
+
+            rk4_zonal_step_state = accelerated_step
         return bool(self._acceleration_enabled_cache)
 
     def _zonal_rk4_fast_path_flags(self) -> tuple[bool, bool, bool] | None:

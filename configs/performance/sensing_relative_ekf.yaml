@@ -1,0 +1,178 @@
+scenario_name: performance_sensing_relative_ekf
+scenario_description: Sustained geometric sensing workload with LOS/range/dropout gates, azimuth/elevation/range/range-rate measurements, maneuver screening, relative EKF, and ground access.
+metadata:
+  owner: public
+  public_surface: public-performance
+  support_level: experimental
+  seed: 47053
+  evidence_role: Performance workload derived from the maintained HCW relative-estimation fixture.
+objects:
+  observer:
+    enabled: true
+    kind: satellite
+    role: chaser
+    specs:
+      preset_satellite: BASIC_SATELLITE
+      dry_mass_kg: 180.0
+      fuel_mass_kg: 0.0
+    initial_state:
+      relative_to: target
+      relative_to_target_ric:
+        frame: rect
+        state: [0.1, -0.25, 0.05, 0.00001, -0.00002, 0.00001]
+      attitude_quat_bn: [1.0, 0.0, 0.0, 0.0]
+      angular_rate_body_rad_s: [0.0, 0.0, 0.0]
+    orbit_control:
+      kind: python
+      module: sim.control.orbit.zero_controller
+      class_name: ZeroController
+      params: {}
+    attitude_control:
+      kind: python
+      module: sim.control.attitude.surrogate_snap
+      class_name: SurrogateSnapECIController
+      params:
+        desired_attitude_quat_bn: [1.0, 0.0, 0.0, 0.0]
+        cancel_rate_mag_rad_s2: 1.0
+        rate_tolerance_rad_s: 0.001
+        slew_time_180_s: 1.0
+        pointing_sigma_deg: 0.05
+        default_dt_s: 0.1
+        rng_seed: 47
+    mission_strategy:
+      kind: python
+      module: sim.mission.modules
+      class_name: HoldMissionStrategy
+      params:
+        attitude_mode: hold_eci
+    mission_execution:
+      kind: python
+      module: sim.mission.modules
+      class_name: ControllerPointingExecution
+      params:
+        require_attitude_alignment: false
+    knowledge:
+      refresh_rate_s: 2.0
+      targets: [target]
+      conditions:
+        require_line_of_sight: true
+        max_range_km: 10.0
+        dropout_prob: 0.15
+      sensor_error:
+        angle_sigma_rad: 0.0001
+        range_sigma_km: 0.001
+        range_rate_sigma_km_s: 0.00001
+      estimation:
+        type: relative_hcw_ekf
+        measurement_model: relative_angles_range_rate
+        measurement_origin: deputy
+        initial_state_ric: [0.105, -0.245, 0.045, 0.000008, -0.000018, 0.000012]
+        maneuver_detection:
+          enabled: true
+          warning_probability: 0.99
+          detection_probability: 0.999
+          window_size: 5
+          warning_count: 3
+          detection_count: 3
+          min_updates: 3
+        ekf:
+          process_noise_diag: [1.0e-11, 1.0e-11, 1.0e-11, 1.0e-13, 1.0e-13, 1.0e-13]
+          init_cov_diag: [0.0004, 0.0004, 0.0004, 4.0e-08, 4.0e-08, 4.0e-08]
+  target:
+    enabled: true
+    kind: satellite
+    role: target
+    specs:
+      preset_satellite: BASIC_SATELLITE
+      dry_mass_kg: 360.0
+      fuel_mass_kg: 0.0
+    initial_state:
+      coes:
+        a_km: 7000.0
+        ecc: 0.0
+        inc_deg: 45.0
+        raan_deg: 0.0
+        argp_deg: 0.0
+        true_anomaly_deg: 0.0
+      attitude_quat_bn: [1.0, 0.0, 0.0, 0.0]
+      angular_rate_body_rad_s: [0.0, 0.0, 0.0]
+    orbit_control:
+      kind: python
+      module: sim.control.orbit.zero_controller
+      class_name: ZeroController
+      params: {}
+    attitude_control:
+      kind: python
+      module: sim.control.attitude.zero_torque
+      class_name: ZeroTorqueController
+      params: {}
+ground_stations:
+- id: equator_prime
+  lat_deg: 0.0
+  lon_deg: 0.0
+  alt_km: 0.0
+  min_elevation_deg: 5.0
+  max_range_km: 5000.0
+  measurements:
+    enabled: true
+    measurement_type: az_el_range_rate
+    update_cadence_s: 10.0
+    noise:
+      range_sigma_km: 0.01
+      range_rate_sigma_km_s: 1.0e-5
+      angle_sigma_deg: 0.02
+simulator:
+  duration_s: 300.0
+  dt_s: 2.0
+  initial_jd_utc: 2460310.75
+  resource_profile: "off"
+  acceleration:
+    mode: auto
+    warmup: true
+  dynamics:
+    orbit:
+      model: two_body
+      integrator: rk4
+      orbit_substep_s: 2.0
+      j2: false
+      j3: false
+      j4: false
+      drag: false
+      srp: false
+    attitude:
+      enabled: true
+      attitude_substep_s: 0.2
+      disturbance_torques:
+        gravity_gradient: false
+        magnetic: false
+        drag: false
+        srp: false
+  environment:
+    ephemeris_mode: analytic_simple
+    atmosphere_env: {}
+  execution:
+    runtime_profiler:
+      enabled: true
+    object_parallelism:
+      enabled: false
+      backend: serial
+  plugin_validation:
+    strict: true
+  termination:
+    earth_impact_enabled: true
+    earth_radius_km: 6378.137
+outputs:
+  output_dir: outputs/performance/sensing_relative_ekf
+  mode: save
+  stats:
+    print_summary: false
+    save_json: false
+    save_full_log: false
+  review:
+    enabled: false
+  plots:
+    enabled: false
+    figure_ids: []
+  animations:
+    enabled: false
+    types: []
