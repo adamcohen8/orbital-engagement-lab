@@ -2,14 +2,11 @@ from __future__ import annotations
 
 import logging
 import os
-import pickle
 from copy import copy
-from dataclasses import asdict, dataclass, field, replace
-from multiprocessing import get_context
+from dataclasses import replace
 from pathlib import Path
 from time import perf_counter
-from traceback import format_exc
-from typing import TYPE_CHECKING, Any, Callable, Protocol
+from typing import TYPE_CHECKING, Any, Callable
 
 import numpy as np
 
@@ -25,7 +22,6 @@ from sim.config import (
 from sim.core.models import Command, StateBelief, StateTruth
 from sim.dynamics.attitude.rigid_body import (
     activate_attitude_guardrail_stats,
-    get_attitude_guardrail_stats,
     new_attitude_guardrail_stats,
 )
 from sim.dynamics.orbit.atmosphere import altitude_km_from_eci
@@ -39,17 +35,23 @@ from sim.dynamics.reentry import (
     reentry_config_from_dynamics,
     reentry_metrics_for_state,
 )
-from sim.pro_features import FEATURE_OBJECT_PARALLELISM, require_pro_feature
-from sim.reporting.single_run_artifacts import (
-    SingleRunArtifactContext,
-    write_single_run_artifacts,
+from sim.execution.object_step_coordinator import ObjectStepCoordinator
+from sim.execution.object_workers import (
+    ObjectKnowledgeSyncResult,
+    ObjectStepBackendUnavailable,
+    ObjectStepExecutor,
+    ObjectStepInput,
+    ObjectStepResult,
+    ProcessPoolObjectStepExecutor,
+    SerialObjectStepExecutor,
 )
-from sim.reporting.single_run_payload import SingleRunPayloadContext, build_single_run_payload
+from sim.execution.runtime_profile import _RuntimeProfiler
+from sim.execution.single_run_history import SingleRunHistoryStore
+from sim.reporting.run_payload_assembly import SingleRunPayloadAssembler, _SingleRunPayloadParts
 from sim.resource_limits import (
     HistoryMemoryEstimate,
     enforce_history_memory_budget,
     estimate_history_memory_from_config,
-    resource_profile,
 )
 from sim.rocket.navigation import build_rocket_nav_state
 from sim.runtime_support import (
@@ -75,7 +77,6 @@ from sim.single_run_support import (
     _SatelliteStepper,
     _TerminationMonitor,
 )
-from sim.utils.parallel import restore_env_vars, set_parallel_worker_thread_limits
 
 if TYPE_CHECKING:
     from sim.dynamics.orbit.sgp4 import SGP4EphemerisProvider
@@ -164,454 +165,6 @@ def _write_state_truth(row: np.ndarray, truth: StateTruth) -> None:
     row[6:10] = truth.attitude_quat_bn
     row[10:13] = truth.angular_rate_body_rad_s
     row[13] = truth.mass_kg
-
-
-@dataclass(frozen=True)
-class _SingleRunPayloadParts:
-    n_used: int
-    t_s: np.ndarray
-    truth_hist: dict[str, np.ndarray]
-    target_reference_orbit_truth: np.ndarray | None
-    belief_hist: dict[str, np.ndarray]
-    thrust_hist: dict[str, np.ndarray]
-    torque_hist: dict[str, np.ndarray]
-    desired_attitude_hist: dict[str, np.ndarray]
-    knowledge_hist: dict[str, dict[str, np.ndarray]]
-    knowledge_measurement_hist: dict[str, dict[str, np.ndarray]]
-    rocket_metrics: dict[str, np.ndarray]
-    reentry_metrics: dict[str, dict[str, np.ndarray]]
-    thrust_stats: dict[str, dict[str, Any]]
-
-
-@dataclass(frozen=True)
-class ObjectStepInput:
-    object_id: str
-    agent: AgentRuntime
-    initial_truth: StateTruth
-    world_truth_decision: dict[str, StateTruth]
-    t_s: float
-    t_next: float
-    sample_index: int
-
-
-@dataclass(frozen=True)
-class ObjectStepMessage:
-    object_id: str
-    knowledge_base: Any | None
-    initial_truth: StateTruth
-    world_truth_decision: dict[str, StateTruth]
-    t_s: float
-    t_next: float
-    sample_index: int
-
-
-@dataclass(frozen=True)
-class ObjectKnowledgeSyncResult:
-    object_id: str
-    knowledge_snapshot: dict[str, StateBelief] = field(default_factory=dict)
-    measurement_snapshot: dict[str, np.ndarray] = field(default_factory=dict)
-    detection_summary: dict[str, Any] = field(default_factory=dict)
-    consistency_summary: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class ObjectStepResult:
-    object_id: str
-    stage: str
-    elapsed_s: float
-    truth: StateTruth
-    thrust_eci_km_s2: np.ndarray
-    torque_body_nm: np.ndarray
-    delta_v_m_s: float = 0.0
-    max_accel_km_s2: float = 0.0
-    burned: bool = False
-    throttle: float | None = None
-    stage_index: float | None = None
-    q_dyn_pa: float | None = None
-    mach: float | None = None
-    metrics: dict[str, Any] = field(default_factory=dict)
-    bridge_events: list[dict[str, Any]] = field(default_factory=list)
-    bridge_elapsed_s: float = 0.0
-    updated_agent: AgentRuntime | None = None
-    controller_debug_events: list[dict[str, Any]] = field(default_factory=list)
-    profile_stage_seconds: dict[str, float] = field(default_factory=dict)
-    profile_stage_counts: dict[str, int] = field(default_factory=dict)
-    last_orbital_command_eval_t_s: float | None = None
-    latched_orbital_thrust_cmd: np.ndarray | None = None
-    desired_attitude_quat_bn: np.ndarray | None = None
-    belief_state: np.ndarray | None = None
-    belief_covariance: np.ndarray | None = None
-    belief_last_update_t_s: float | None = None
-    attitude_guardrail_count_deltas: dict[str, int] = field(default_factory=dict)
-
-
-class ObjectStepExecutor(Protocol):
-    backend_name: str
-
-    def step_objects(self, inputs: list[ObjectStepInput]) -> list[ObjectStepResult]:
-        """Advance one timestep for each object input and return ordered results."""
-
-    def shutdown(self) -> None:
-        """Release executor resources."""
-
-    def sync_after_step(
-        self,
-        *,
-        world_truth: dict[str, StateTruth],
-        sample_index: int,
-        t_s: float,
-    ) -> list[ObjectKnowledgeSyncResult] | None:
-        """Synchronize worker knowledge after the orchestrator has the step truth."""
-
-
-class ObjectStepBackendUnavailable(RuntimeError):
-    """Raised when process transport fails independently of object physics."""
-
-
-class SerialObjectStepExecutor:
-    backend_name = "serial"
-    max_workers = 1
-
-    def __init__(self, engine: _SingleRunEngine) -> None:
-        self.engine = engine
-
-    def step_objects(self, inputs: list[ObjectStepInput]) -> list[ObjectStepResult]:
-        return [self.engine._step_object_serial(item) for item in inputs]
-
-    def shutdown(self) -> None:
-        return None
-
-    def sync_after_step(
-        self,
-        *,
-        world_truth: dict[str, StateTruth],
-        sample_index: int,
-        t_s: float,
-    ) -> list[ObjectKnowledgeSyncResult] | None:
-        return None
-
-
-class ProcessPoolObjectStepExecutor:
-    backend_name = "process_pool"
-
-    def __init__(self, engine: _SingleRunEngine, *, max_workers: int) -> None:
-        self.engine = engine
-        self.max_workers = int(max(1, max_workers))
-        self._worker_processes: list[Any] = []
-        self._worker_connections: list[Any] = []
-        self._executor_index_by_object: dict[str, int] = {}
-
-    def _initialize_workers(self, inputs: list[ObjectStepInput]) -> None:
-        worker_count = min(self.max_workers, len(inputs))
-        groups: list[list[ObjectStepInput]] = [[] for _ in range(worker_count)]
-        for index, item in enumerate(inputs):
-            groups[index % worker_count].append(item)
-        thread_env_previous = set_parallel_worker_thread_limits(default_threads="1")
-        try:
-            for worker_index, group in enumerate(groups):
-                snapshots = {
-                    item.object_id: self.engine._process_worker_engine_snapshot(item)
-                    for item in group
-                }
-                parent_connection, worker_connection = get_context().Pipe(duplex=True)
-                process = get_context().Process(
-                    target=_persistent_object_worker_loop,
-                    args=(worker_connection, snapshots),
-                    name=f"oel-object-worker-{worker_index}",
-                )
-                process.start()
-                worker_connection.close()
-                self._worker_processes.append(process)
-                self._worker_connections.append(parent_connection)
-                for item in group:
-                    self._executor_index_by_object[item.object_id] = worker_index
-        except Exception as exc:
-            self.shutdown()
-            raise ObjectStepBackendUnavailable(
-                "ProcessPoolObjectStepExecutor is unavailable in this environment. "
-                "Use simulator.execution.object_parallelism.backend=serial or disable object_parallelism."
-            ) from exc
-        finally:
-            restore_env_vars(thread_env_previous)
-
-    def step_objects(self, inputs: list[ObjectStepInput]) -> list[ObjectStepResult]:
-        if len(inputs) <= 1:
-            return [self.engine._step_object_serial(item) for item in inputs]
-        if not self._worker_processes:
-            self._initialize_workers(inputs)
-        input_ids = {item.object_id for item in inputs}
-        if input_ids != set(self._executor_index_by_object):
-            raise RuntimeError("Persistent object worker membership changed after initialization.")
-        chunks: list[list[tuple[int, ObjectStepMessage]]] = [[] for _ in self._worker_processes]
-        for index, item in enumerate(inputs):
-            chunks[self._executor_index_by_object[item.object_id]].append(
-                (
-                    index,
-                    ObjectStepMessage(
-                        object_id=item.object_id,
-                        knowledge_base=item.agent.knowledge_base,
-                        initial_truth=item.initial_truth,
-                        world_truth_decision=item.world_truth_decision,
-                        t_s=item.t_s,
-                        t_next=item.t_next,
-                        sample_index=item.sample_index,
-                    ),
-                )
-            )
-        active_indices = [index for index, chunk in enumerate(chunks) if chunk]
-        try:
-            for index in active_indices:
-                self._worker_connections[index].send(chunks[index])
-            indexed: list[tuple[int, ObjectStepResult]] = []
-            for index in active_indices:
-                status, payload = self._worker_connections[index].recv()
-                if status != "ok":
-                    message, worker_traceback = payload
-                    raise RuntimeError(
-                        f"Persistent object worker {index} failed: {message}\n{worker_traceback}"
-                    )
-                indexed.extend(payload)
-        except (BrokenPipeError, EOFError, OSError) as exc:
-            raise ObjectStepBackendUnavailable(
-                f"Persistent object-worker transport failed: {type(exc).__name__}: {exc}"
-            ) from exc
-        indexed.sort(key=lambda row: row[0])
-        return [result for _index, result in indexed]
-
-    def sync_after_step(
-        self,
-        *,
-        world_truth: dict[str, StateTruth],
-        sample_index: int,
-        t_s: float,
-    ) -> list[ObjectKnowledgeSyncResult] | None:
-        # Knowledge synchronization is intentionally centralized. It avoids a
-        # full-world broadcast to every object worker and preserves one
-        # deterministic observer/target update order.
-        return None
-
-    def shutdown(self) -> None:
-        for connection in self._worker_connections:
-            try:
-                connection.send(None)
-            except (BrokenPipeError, EOFError, OSError):
-                pass
-        for connection in self._worker_connections:
-            connection.close()
-        for process in self._worker_processes:
-            process.join()
-        self._worker_connections.clear()
-        self._worker_processes.clear()
-        self._executor_index_by_object.clear()
-
-
-_PERSISTENT_OBJECT_WORKER_ENGINES: dict[str, _SingleRunEngine] = {}
-
-
-def _persistent_object_workers_init(engines: dict[str, _SingleRunEngine]) -> None:
-    global _PERSISTENT_OBJECT_WORKER_ENGINES
-    _PERSISTENT_OBJECT_WORKER_ENGINES = dict(engines)
-
-
-def _persistent_object_worker_loop(connection: Any, engines: dict[str, _SingleRunEngine]) -> None:
-    _persistent_object_workers_init(engines)
-    try:
-        while True:
-            chunk = connection.recv()
-            if chunk is None:
-                return
-            try:
-                connection.send(("ok", _persistent_object_step_batch_worker(chunk)))
-            except Exception as exc:
-                connection.send(("error", (str(exc), format_exc())))
-                return
-    finally:
-        connection.close()
-
-
-def _persistent_object_step_worker(message: ObjectStepMessage) -> ObjectStepResult:
-    aid = str(message.object_id)
-    engine = _PERSISTENT_OBJECT_WORKER_ENGINES.get(aid)
-    if engine is None:
-        raise RuntimeError(f"Persistent object worker for {aid!r} has not been initialized.")
-    return _run_object_step_worker(engine, message)
-
-
-def _persistent_object_step_batch_worker(
-    chunk: list[tuple[int, ObjectStepMessage]],
-) -> list[tuple[int, ObjectStepResult]]:
-    return [(index, _persistent_object_step_worker(message)) for index, message in chunk]
-
-
-def _run_object_step_worker(engine: _SingleRunEngine, message: ObjectStepMessage) -> ObjectStepResult:
-    aid = str(message.object_id)
-    agent = engine.agents[aid]
-    # Knowledge is updated centrally after each object step. Refresh the
-    # persistent worker's copy before its next decision so controllers and
-    # estimators observe the same state as the serial execution path.
-    agent.knowledge_base = message.knowledge_base
-    activate_attitude_guardrail_stats(engine.attitude_guardrail_stats)
-    guardrail_counts_before = get_attitude_guardrail_stats(engine.attitude_guardrail_stats)
-    profiler_enabled = bool(getattr(engine.runtime_profiler, "enabled", True))
-    engine.runtime_profiler = _RuntimeProfiler(object_ids=[aid], enabled=profiler_enabled)
-    engine.controller_debug_hist = {aid: []}
-    desired_attitude_hist = engine.desired_attitude_hist.get(aid)
-    if desired_attitude_hist is None or desired_attitude_hist.shape != (1, 4):
-        desired_attitude_hist = np.full((1, 4), np.nan)
-    else:
-        desired_attitude_hist[0, :] = np.nan
-    engine.desired_attitude_hist = {aid: desired_attitude_hist}
-    item = ObjectStepInput(
-        object_id=aid,
-        agent=agent,
-        initial_truth=message.initial_truth,
-        world_truth_decision=message.world_truth_decision,
-        t_s=message.t_s,
-        t_next=message.t_next,
-        sample_index=message.sample_index,
-    )
-    with acceleration_context_from_config(engine.cfg):
-        result = engine._step_object_serial(item)
-    guardrail_counts_after = get_attitude_guardrail_stats(engine.attitude_guardrail_stats)
-    guardrail_count_deltas = {
-        name: int(value) - int(guardrail_counts_before.get(name, 0))
-        for name, value in guardrail_counts_after.items()
-    }
-    belief = agent.belief
-    # The parent owns and updates knowledge after each timestep. Do not send
-    # the unchanged worker copy back inside AgentRuntime as well as in the next
-    # message; preserving it in the parent removes a large redundant pickle.
-    updated_agent = replace(agent, knowledge_base=None)
-    return replace(
-        result,
-        updated_agent=updated_agent,
-        controller_debug_events=list(engine.controller_debug_hist.get(aid, [])),
-        profile_stage_seconds=dict(engine.runtime_profiler.object_stage_seconds.get(aid, {})),
-        profile_stage_counts=dict(engine.runtime_profiler.object_stage_counts.get(aid, {})),
-        last_orbital_command_eval_t_s=engine._last_orbital_command_eval_t_s.get(aid),
-        latched_orbital_thrust_cmd=np.array(
-            engine._latched_orbital_thrust_cmd_by_object.get(aid, engine.zero3),
-            dtype=float,
-        ),
-        desired_attitude_quat_bn=np.array(
-            engine.desired_attitude_hist[aid][0, :],
-            dtype=float,
-        )
-        if aid in engine.desired_attitude_hist
-        else None,
-        belief_state=(None if belief is None else np.array(belief.state, dtype=float)),
-        belief_covariance=(None if belief is None else np.array(belief.covariance, dtype=float)),
-        belief_last_update_t_s=(None if belief is None else float(belief.last_update_t_s)),
-        attitude_guardrail_count_deltas=guardrail_count_deltas,
-    )
-
-
-class _RuntimeProfiler:
-    _OBJECT_WALL_STAGES = frozenset(
-        {
-            "rocket_step",
-            "general_propagation_step",
-            "satellite_step",
-            "bridge_step",
-        }
-    )
-
-    def __init__(self, *, object_ids: list[str], enabled: bool = True) -> None:
-        self.enabled = bool(enabled)
-        self.stage_seconds: dict[str, float] = {}
-        self.stage_counts: dict[str, int] = {}
-        self.object_stage_seconds: dict[str, dict[str, float]] = {str(oid): {} for oid in object_ids}
-        self.object_stage_counts: dict[str, dict[str, int]] = {str(oid): {} for oid in object_ids}
-
-    def record_stage(self, stage: str, elapsed_s: float) -> None:
-        if not self.enabled:
-            return
-        elapsed = float(elapsed_s)
-        if elapsed < 0.0:
-            return
-        key = str(stage)
-        self.stage_seconds[key] = float(self.stage_seconds.get(key, 0.0) + elapsed)
-        self.stage_counts[key] = int(self.stage_counts.get(key, 0) + 1)
-
-    def record_object(self, object_id: str, stage: str, elapsed_s: float) -> None:
-        if not self.enabled:
-            return
-        elapsed = float(elapsed_s)
-        if elapsed < 0.0:
-            return
-        oid = str(object_id)
-        key = str(stage)
-        by_stage = self.object_stage_seconds.setdefault(oid, {})
-        by_stage[key] = float(by_stage.get(key, 0.0) + elapsed)
-        by_count = self.object_stage_counts.setdefault(oid, {})
-        by_count[key] = int(by_count.get(key, 0) + 1)
-
-    def payload(self, *, completed_steps: int, object_count: int) -> dict[str, Any]:
-        steps = int(max(completed_steps, 0))
-        total_step_wall_s = float(self.stage_seconds.get("step_wall", 0.0))
-        stage_totals = {
-            key: {
-                "total_s": float(value),
-                "count": int(self.stage_counts.get(key, 0)),
-                "mean_ms": _mean_ms(value, self.stage_counts.get(key, 0)),
-                "share_of_step_wall": _safe_share(value, total_step_wall_s),
-            }
-            for key, value in sorted(self.stage_seconds.items())
-        }
-        object_totals: dict[str, Any] = {}
-        for oid, by_stage in sorted(self.object_stage_seconds.items()):
-            wall_total = float(
-                sum(value for key, value in by_stage.items() if key in self._OBJECT_WALL_STAGES)
-            )
-            nested_total = float(
-                sum(value for key, value in by_stage.items() if key not in self._OBJECT_WALL_STAGES)
-            )
-            object_totals[oid] = {
-                "total_s": wall_total,
-                "mean_ms_per_completed_step": _mean_ms(wall_total, steps),
-                "nested_stage_total_s": nested_total,
-                "stages": {
-                    key: {
-                        "total_s": float(value),
-                        "count": int(self.object_stage_counts.get(oid, {}).get(key, 0)),
-                        "mean_ms": _mean_ms(value, self.object_stage_counts.get(oid, {}).get(key, 0)),
-                    }
-                    for key, value in sorted(by_stage.items())
-                },
-            }
-        slowest = sorted(
-            (
-                {"object_id": oid, "total_s": float(data["total_s"])}
-                for oid, data in object_totals.items()
-                if float(data["total_s"]) > 0.0
-            ),
-            key=lambda item: (-float(item["total_s"]), str(item["object_id"])),
-        )[:10]
-        return {
-            "schema_version": 1,
-            "enabled": bool(self.enabled),
-            "completed_steps": steps,
-            "object_count": int(object_count),
-            "total_step_wall_s": total_step_wall_s,
-            "mean_step_wall_ms": _mean_ms(total_step_wall_s, steps),
-            "stage_totals": stage_totals,
-            "object_totals": object_totals,
-            "slowest_objects": slowest,
-            "notes": [
-                "Profiler timings use wall-clock perf_counter measurements inside the single-run engine.",
-                "Object total_s is the non-overlapping object wall time; nested_stage_total_s is diagnostic detail.",
-            ],
-        }
-
-
-def _mean_ms(total_s: float, count: int | None) -> float:
-    n = int(count or 0)
-    return 0.0 if n <= 0 else float(total_s) * 1000.0 / float(n)
-
-
-def _safe_share(value: float, total: float) -> float:
-    denom = float(total)
-    return 0.0 if denom <= 0.0 else float(value) / denom
 
 
 class _SingleRunEngine:
@@ -880,6 +433,7 @@ class _SingleRunEngine:
                     self.knowledge_hist[aid][tid] = np.full((self.n, 6), np.nan)
                     self.knowledge_measurement_hist[aid][tid] = np.full((self.n, 6), np.nan)
         self.knowledge_sync = _KnowledgeSynchronizer(self)
+        self.history_store = SingleRunHistoryStore(self)
         self.knowledge_sync.initialize()
         self.worker_knowledge_detection_by_observer: dict[str, Any] | None = None
         self.worker_knowledge_consistency_by_observer: dict[str, Any] | None = None
@@ -945,194 +499,14 @@ class _SingleRunEngine:
         self.object_step_executor = self._build_object_step_executor()
 
     def _build_object_step_executor(self) -> ObjectStepExecutor:
-        execution_cfg = dict(getattr(self.cfg.simulator, "execution", {}) or {})
-        object_parallelism = dict(execution_cfg.get("object_parallelism", {}) or {})
-        policy = str(execution_cfg.get("policy", "configured") or "configured").strip().lower()
-        enabled = bool(object_parallelism.get("enabled", False))
-        backend = str(object_parallelism.get("backend", "serial") or "serial").strip().lower()
-        profile = resource_profile(getattr(self.cfg.simulator, "resource_profile", None))
-        active_ids = [aid for aid, agent in self.agents.items() if agent.active]
-        active_objects = len(active_ids)
-        min_objects = int(object_parallelism.get("min_objects", 3) or 3)
-        workers = int(object_parallelism.get("workers", 0) or 0)
-        if workers <= 0:
-            reserve_workers = int(object_parallelism.get("reserve_workers", 1) or 0)
-            workers = max(1, int(os.cpu_count() or 1) - max(0, reserve_workers))
-        max_workers = int(object_parallelism.get("max_workers", 0) or 0)
-        if max_workers > 0:
-            workers = min(workers, max_workers)
-        workers = max(1, min(workers, active_objects))
-        if profile.max_parallel_workers is not None:
-            workers = max(1, min(workers, int(profile.max_parallel_workers)))
-        hierarchical_object_budget: int | None = None
-        raw_hierarchical_budget = os.environ.get(OBJECT_WORKER_BUDGET_ENV)
-        if raw_hierarchical_budget not in (None, ""):
-            hierarchical_object_budget = max(int(raw_hierarchical_budget), 0)
-            workers = min(workers, hierarchical_object_budget) if hierarchical_object_budget > 0 else 1
-
-        incompatibilities: list[str] = []
-        if any(
-            agent.deploy_source in {"rocket_deployment", "rocket_insertion"}
-            for agent in self.agents.values()
-        ):
-            incompatibilities.append("dynamic object deployment is configured")
-        if self.general_propagation:
-            incompatibilities.append("mixed OGP/general-propagation objects are configured")
-        if any(agent.bridge is not None for agent in self.agents.values()):
-            incompatibilities.append("an external object bridge is configured")
-        if policy in {"auto", "parallel"} and not incompatibilities:
-            try:
-                for aid in active_ids:
-                    pickle.dumps(self.agents[aid], protocol=pickle.HIGHEST_PROTOCOL)
-            except Exception as exc:
-                incompatibilities.append(
-                    f"object {aid!r} runtime state is not process-serializable: {exc}"
-                )
-
-        work_score = self._estimated_object_parallel_work_score(active_ids)
-        planned_steps = max(
-            1,
-            int(
-                np.ceil(
-                    float(getattr(self.cfg.simulator, "duration_s", 0.0))
-                    / max(float(self.dt), 1.0e-12)
-                )
-            ),
-        )
-        run_work_score = float(work_score) * float(planned_steps)
-        selected_backend = "serial"
-        reason = "object parallelism is disabled"
-
-        if policy == "serial":
-            reason = "simulator.execution.policy=serial"
-        elif policy == "parallel":
-            failures = list(incompatibilities)
-            if bool(profile.force_serial):
-                failures.append(f"resource profile {profile.name!r} requires serial execution")
-            if active_objects < max(1, min_objects):
-                failures.append(
-                    f"active object count {active_objects} is below min_objects={min_objects}"
-                )
-            if workers <= 1:
-                failures.append("fewer than two object workers are available")
-            if failures:
-                raise RuntimeError(
-                    "Forced object-parallel execution is unavailable: " + "; ".join(failures)
-                )
-            selected_backend = "process_pool"
-            reason = "parallel policy explicitly requires supported object workers"
-        elif policy == "auto":
-            if bool(profile.force_serial):
-                reason = f"resource profile {profile.name!r} requires serial execution"
-            elif incompatibilities:
-                reason = "auto planner selected serial: " + "; ".join(incompatibilities)
-            elif active_objects < max(1, min_objects):
-                reason = (
-                    f"auto planner selected serial: active object count {active_objects} "
-                    f"is below min_objects={min_objects}"
-                )
-            elif workers <= 1:
-                reason = "auto planner selected serial: fewer than two object workers are available"
-            elif work_score < 2.5:
-                reason = (
-                    "auto planner selected serial: estimated object-step work score "
-                    f"{work_score:.2f} is below the 2.50 crossover threshold"
-                )
-            elif run_work_score < _AUTO_OBJECT_PARALLEL_RUN_WORK_THRESHOLD:
-                reason = (
-                    "auto planner selected serial: estimated run work score "
-                    f"{run_work_score:.2f} is below the "
-                    f"{_AUTO_OBJECT_PARALLEL_RUN_WORK_THRESHOLD:.2f} startup-amortization threshold"
-                )
-            else:
-                selected_backend = "process_pool"
-                reason = (
-                    f"auto planner selected {workers} workers for {active_objects} active objects; "
-                    f"estimated work score={work_score:.2f}"
-                )
-        elif enabled and backend == "process_pool" and not bool(profile.force_serial):
-            if active_objects >= max(1, min_objects) and workers > 1:
-                selected_backend = "process_pool"
-                reason = "legacy configured object parallelism is enabled"
-            else:
-                reason = "legacy configured object parallelism did not meet worker/object thresholds"
-        elif enabled and backend not in {"serial", "process_pool"}:
-            raise ValueError(f"Unsupported object step executor backend: {backend!r}.")
-
-        allocation = self._object_worker_allocation(active_ids, workers if selected_backend == "process_pool" else 1)
-        self.object_execution_plan = {
-            "policy": policy,
-            "requested_backend": backend,
-            "selected_backend": selected_backend,
-            "selected_workers": workers if selected_backend == "process_pool" else 1,
-            "active_objects": active_objects,
-            "min_objects": min_objects,
-            "estimated_work_score": float(work_score),
-            "planned_steps": int(planned_steps),
-            "estimated_run_work_score": float(run_work_score),
-            "eligible": not incompatibilities,
-            "reason": reason,
-            "allocation": allocation,
-            "hierarchical_budget": {
-                "object_workers_per_run": hierarchical_object_budget,
-                "campaign_workers": (
-                    None
-                    if os.environ.get(CAMPAIGN_WORKER_COUNT_ENV) in (None, "")
-                    else int(os.environ[CAMPAIGN_WORKER_COUNT_ENV])
-                ),
-                "total_process_budget": (
-                    None
-                    if os.environ.get(TOTAL_PROCESS_BUDGET_ENV) in (None, "")
-                    else int(os.environ[TOTAL_PROCESS_BUDGET_ENV])
-                ),
-            },
-        }
-        if selected_backend == "process_pool":
-            require_pro_feature(FEATURE_OBJECT_PARALLELISM)
-            return ProcessPoolObjectStepExecutor(self, max_workers=workers)
-        return SerialObjectStepExecutor(self)
+        return ObjectStepCoordinator(self, cpu_count=os.cpu_count).build_executor()
 
     def _estimated_object_parallel_work_score(self, active_ids: list[str]) -> float:
-        dynamics = dict(getattr(self.cfg.simulator, "dynamics", {}) or {})
-        orbit = dict(dynamics.get("orbit", {}) or {})
-        attitude = dict(dynamics.get("attitude", {}) or {})
-        score = 1.0
-        score += 0.5 * sum(bool(orbit.get(name, False)) for name in ("j2", "j3", "j4", "drag", "srp"))
-        score += 0.75 * sum(bool(orbit.get(name, False)) for name in ("third_body_sun", "third_body_moon"))
-        spherical = dict(orbit.get("spherical_harmonics", {}) or {})
-        if bool(spherical.get("enabled", False)):
-            degree = int(spherical.get("degree", 0) or 0)
-            order = int(spherical.get("order", 0) or 0)
-            score += 2.0 + 0.1 * float(max(degree, order))
-        if bool(attitude.get("enabled", True)):
-            attitude_substep_s = float(attitude.get("attitude_substep_s", self.dt) or self.dt)
-            score += min(2.0, 0.5 * max(1.0, self.dt / max(attitude_substep_s, 1e-9)))
-        if active_ids:
-            controlled = sum(
-                self.agents[aid].orbit_controller is not None
-                or self.agents[aid].attitude_controller is not None
-                for aid in active_ids
-            )
-            knowledge = sum(self.agents[aid].knowledge_base is not None for aid in active_ids)
-            mission = sum(
-                self.agents[aid].mission_execution is not None
-                or self.agents[aid].mission_strategy is not None
-                or bool(self.agents[aid].mission_modules)
-                for aid in active_ids
-            )
-            scale = float(len(active_ids))
-            score += 1.0 * controlled / scale
-            score += 0.5 * knowledge / scale
-            score += 0.5 * mission / scale
-        return float(score)
+        return ObjectStepCoordinator(self, cpu_count=os.cpu_count).estimated_work_score(active_ids)
 
     @staticmethod
     def _object_worker_allocation(object_ids: list[str], workers: int) -> dict[str, list[str]]:
-        count = max(1, int(workers))
-        allocation = {f"worker_{index + 1}": [] for index in range(count)}
-        for index, object_id in enumerate(object_ids):
-            allocation[f"worker_{index % count + 1}"].append(str(object_id))
-        return allocation
+        return ObjectStepCoordinator.object_worker_allocation(object_ids, workers)
 
     def _resolve_reentry_object_ids(self) -> list[str]:
         if not bool(self.reentry_cfg.enabled):
@@ -1238,35 +612,10 @@ class _SingleRunEngine:
             self.active_step_callback = None
 
     def _ensure_belief_hist_width(self, aid: str, width: int) -> None:
-        hist = self.belief_hist[aid]
-        if hist.shape[1] >= int(width):
-            return
-        extra_columns = int(width) - int(hist.shape[1])
-        extra_array_bytes = int(self.n * extra_columns * np.dtype(float).itemsize)
-        next_estimate = HistoryMemoryEstimate(
-            samples=self.history_memory_estimate.samples,
-            active_objects=self.history_memory_estimate.active_objects,
-            knowledge_pairs=self.history_memory_estimate.knowledge_pairs,
-            array_bytes=self.history_memory_estimate.array_bytes + extra_array_bytes,
-            estimated_peak_bytes=self.history_memory_estimate.estimated_peak_bytes + (2 * extra_array_bytes),
-            limit_bytes=self.history_memory_estimate.limit_bytes,
-        )
-        enforce_history_memory_budget(next_estimate)
-        self.history_memory_estimate = next_estimate
-        expanded = np.full((self.n, int(width)), np.nan)
-        if hist.shape[1] > 0:
-            expanded[:, : hist.shape[1]] = hist
-        self.belief_hist[aid] = expanded
+        self.history_store.ensure_belief_width(aid, width)
 
     def _grow_axis0(self, arr: np.ndarray | None, rows: int, *, fill: float = np.nan) -> np.ndarray | None:
-        if arr is None:
-            return None
-        if arr.shape[0] >= int(rows):
-            return arr
-        shape = (int(rows), *arr.shape[1:])
-        expanded = np.full(shape, fill, dtype=arr.dtype)
-        expanded[: arr.shape[0], ...] = arr
-        return expanded
+        return self.history_store.grow_axis0(arr, rows, fill=fill)
 
     def _compact_axis0_latest(
         self,
@@ -1276,132 +625,19 @@ class _SingleRunEngine:
         count: int,
         fill: float = np.nan,
     ) -> np.ndarray | None:
-        if arr is None:
-            return None
-        retained = arr[int(start) : int(start) + int(count), ...].copy()
-        arr[...] = fill
-        arr[: int(count), ...] = retained
-        return arr
+        return self.history_store.compact_axis0_latest(arr, start=start, count=count, fill=fill)
 
     def _compact_event_history_latest(self, rows: list[dict[str, Any]], *, retained_start_time_s: float) -> list[dict[str, Any]]:
-        threshold = float(retained_start_time_s) - 1.0e-9
-        retained: list[dict[str, Any]] = []
-        for row in rows:
-            event_t = row.get("interval_end_t_s", row.get("t_s")) if isinstance(row, dict) else None
-            try:
-                t_s = float(event_t)
-            except (TypeError, ValueError):
-                retained.append(row)
-                continue
-            if t_s >= threshold:
-                retained.append(row)
-        return retained
+        return self.history_store.compact_event_history_latest(
+            rows,
+            retained_start_time_s=retained_start_time_s,
+        )
 
     def _compact_dynamic_history_if_needed(self, *, keep_latest: int | None = None) -> None:
-        if self.history_mode != "dynamic" or self.current_index < self.n - 1:
-            return
-        if self.n < self.max_history_samples:
-            return
-        if keep_latest is None:
-            keep_latest = max(1, (int(self.n) * 3) // 4)
-        keep = int(max(1, min(int(keep_latest), self.current_index + 1)))
-        start = int(self.current_index - keep + 1)
-        retained_start_time_s = float(self.t_s[start])
-        self.t_s = self._compact_axis0_latest(self.t_s, start=start, count=keep)
-        self.target_reference_orbit_hist = self._compact_axis0_latest(
-            self.target_reference_orbit_hist,
-            start=start,
-            count=keep,
-        )
-        self.truth_hist = {
-            aid: self._compact_axis0_latest(hist, start=start, count=keep) for aid, hist in self.truth_hist.items()
-        }
-        self.belief_hist = {
-            aid: self._compact_axis0_latest(hist, start=start, count=keep) for aid, hist in self.belief_hist.items()
-        }
-        self.thrust_hist = {
-            aid: self._compact_axis0_latest(hist, start=start, count=keep) for aid, hist in self.thrust_hist.items()
-        }
-        self.torque_hist = {
-            aid: self._compact_axis0_latest(hist, start=start, count=keep) for aid, hist in self.torque_hist.items()
-        }
-        self.desired_attitude_hist = {
-            aid: self._compact_axis0_latest(hist, start=start, count=keep)
-            for aid, hist in self.desired_attitude_hist.items()
-        }
-        self.throttle_hist = {
-            aid: self._compact_axis0_latest(hist, start=start, count=keep) for aid, hist in self.throttle_hist.items()
-        }
-        self.rocket_stage_hist = self._compact_axis0_latest(self.rocket_stage_hist, start=start, count=keep)
-        self.rocket_q_dyn_hist = self._compact_axis0_latest(self.rocket_q_dyn_hist, start=start, count=keep)
-        self.rocket_mach_hist = self._compact_axis0_latest(self.rocket_mach_hist, start=start, count=keep)
-        self.rocket_metric_hists = {
-            key: self._compact_axis0_latest(hist, start=start, count=keep)
-            for key, hist in self.rocket_metric_hists.items()
-        }
-        self.reentry_metric_hists = {
-            aid: {key: self._compact_axis0_latest(hist, start=start, count=keep) for key, hist in metrics.items()}
-            for aid, metrics in self.reentry_metric_hists.items()
-        }
-        self.knowledge_hist = {
-            obs: {tgt: self._compact_axis0_latest(hist, start=start, count=keep) for tgt, hist in by_tgt.items()}
-            for obs, by_tgt in self.knowledge_hist.items()
-        }
-        self.knowledge_measurement_hist = {
-            obs: {tgt: self._compact_axis0_latest(hist, start=start, count=keep) for tgt, hist in by_tgt.items()}
-            for obs, by_tgt in self.knowledge_measurement_hist.items()
-        }
-        self.controller_debug_hist = {
-            aid: self._compact_event_history_latest(rows, retained_start_time_s=retained_start_time_s)
-            for aid, rows in self.controller_debug_hist.items()
-        }
-        self.bridge_hist = {
-            aid: self._compact_event_history_latest(rows, retained_start_time_s=retained_start_time_s)
-            for aid, rows in self.bridge_hist.items()
-        }
-        self.sample_offset += start
-        self.current_index = keep - 1
+        self.history_store.compact_if_needed(keep_latest=keep_latest)
 
     def _ensure_sample_capacity(self, sample_index: int) -> None:
-        needed = int(sample_index) + 1
-        if needed <= self.n:
-            return
-        grow_to = max(needed, int(max(self.n * 2, self.n + 1)))
-        if self.history_mode == "dynamic":
-            grow_to = min(grow_to, self.max_history_samples)
-            if needed > grow_to:
-                raise RuntimeError("dynamic history compaction did not free space for the next sample.")
-        self.n = grow_to
-        self.t_s = self._grow_axis0(self.t_s, grow_to)
-        self.target_reference_orbit_hist = self._grow_axis0(self.target_reference_orbit_hist, grow_to)
-        self.truth_hist = {aid: self._grow_axis0(hist, grow_to) for aid, hist in self.truth_hist.items()}
-        self.belief_hist = {aid: self._grow_axis0(hist, grow_to) for aid, hist in self.belief_hist.items()}
-        self.thrust_hist = {aid: self._grow_axis0(hist, grow_to) for aid, hist in self.thrust_hist.items()}
-        self.torque_hist = {aid: self._grow_axis0(hist, grow_to) for aid, hist in self.torque_hist.items()}
-        self.desired_attitude_hist = {
-            aid: self._grow_axis0(hist, grow_to) for aid, hist in self.desired_attitude_hist.items()
-        }
-        self.throttle_hist = {aid: self._grow_axis0(hist, grow_to) for aid, hist in self.throttle_hist.items()}
-        self.rocket_stage_hist = self._grow_axis0(self.rocket_stage_hist, grow_to)
-        self.rocket_q_dyn_hist = self._grow_axis0(self.rocket_q_dyn_hist, grow_to)
-        self.rocket_mach_hist = self._grow_axis0(self.rocket_mach_hist, grow_to)
-        self.rocket_metric_hists = {
-            key: self._grow_axis0(hist, grow_to) for key, hist in self.rocket_metric_hists.items()
-        }
-        self.reentry_metric_hists = {
-            aid: {key: self._grow_axis0(hist, grow_to) for key, hist in metrics.items()}
-            for aid, metrics in self.reentry_metric_hists.items()
-        }
-        self.knowledge_hist = {
-            obs: {tgt: self._grow_axis0(hist, grow_to) for tgt, hist in by_tgt.items()}
-            for obs, by_tgt in self.knowledge_hist.items()
-        }
-        self.knowledge_measurement_hist = {
-            obs: {tgt: self._grow_axis0(hist, grow_to) for tgt, hist in by_tgt.items()}
-            for obs, by_tgt in self.knowledge_measurement_hist.items()
-        }
-        self.history_memory_estimate = self._estimate_history_memory()
-        enforce_history_memory_budget(self.history_memory_estimate)
+        self.history_store.ensure_sample_capacity(sample_index)
 
     def snapshot(self, step_index: int | None = None) -> dict[str, Any]:
         if step_index is None:
@@ -1848,6 +1084,7 @@ class _SingleRunEngine:
         worker.rocket_stepper = _RocketStepper(worker)
         worker.satellite_stepper = _SatelliteStepper(worker)
         worker.termination_monitor = _TerminationMonitor(worker)
+        worker.history_store = SingleRunHistoryStore(worker)
         worker.knowledge_sync = None
         worker._object_worker_compact_buffers = True
         worker.truth_hist = {}
@@ -2054,174 +1291,48 @@ class _SingleRunEngine:
             self.object_step_executor.shutdown()
 
     def _build_payload_parts(self) -> _SingleRunPayloadParts:
-        n_used = self.current_index + 1
-        t_out = self.t_s[:n_used]
-        truth_out = {k: v[:n_used, :] for k, v in self.truth_hist.items()}
-        target_reference_orbit_out = (
-            None if self.target_reference_orbit_hist is None else self.target_reference_orbit_hist[:n_used, :]
-        )
-        belief_out = {k: v[:n_used, :] for k, v in self.belief_hist.items()}
-        thrust_out = {k: v[:n_used, :] for k, v in self.thrust_hist.items()}
-        torque_out = {k: v[:n_used, :] for k, v in self.torque_hist.items()}
-        desired_attitude_out = {k: v[:n_used, :] for k, v in self.desired_attitude_hist.items()}
-        knowledge_out = {
-            obs: {tgt: arr[:n_used, :] for tgt, arr in by_tgt.items()}
-            for obs, by_tgt in self.knowledge_hist.items()
-        }
-        knowledge_measurements_out = {
-            obs: {tgt: arr[:n_used, :] for tgt, arr in by_tgt.items()}
-            for obs, by_tgt in getattr(self, "knowledge_measurement_hist", {}).items()
-        }
-        rocket_metrics_out: dict[str, np.ndarray] = {}
-        if self.rocket is not None:
-            rocket_object_id = str(getattr(self.rocket, "object_id", "rocket") or "rocket")
-            if self.rocket_stage_hist is not None:
-                rocket_metrics_out["stage_index"] = self.rocket_stage_hist[:n_used]
-            if self.rocket_q_dyn_hist is not None:
-                rocket_metrics_out["q_dyn_pa"] = self.rocket_q_dyn_hist[:n_used]
-            if self.rocket_mach_hist is not None:
-                rocket_metrics_out["mach"] = self.rocket_mach_hist[:n_used]
-            if rocket_object_id in self.throttle_hist:
-                rocket_metrics_out["throttle_cmd"] = self.throttle_hist[rocket_object_id][:n_used]
-            for metric_key, metric_hist in getattr(self, "rocket_metric_hists", {}).items():
-                rocket_metrics_out[metric_key] = metric_hist[:n_used]
-        reentry_metrics_out = {
-            oid: {key: hist[:n_used] for key, hist in metrics.items()}
-            for oid, metrics in getattr(self, "reentry_metric_hists", {}).items()
-        }
-
-        thrust_stats = {
-            oid: {
-                "burn_samples": int(self.burn_samples_by_object.get(oid, 0)),
-                "max_accel_km_s2": float(self.max_accel_km_s2_by_object.get(oid, 0.0)),
-                "total_dv_m_s": float(self.total_dv_m_s_by_object.get(oid, 0.0)),
-            }
-            for oid in thrust_out.keys()
-        }
-        return _SingleRunPayloadParts(
-            n_used=n_used,
-            t_s=t_out,
-            truth_hist=truth_out,
-            target_reference_orbit_truth=target_reference_orbit_out,
-            belief_hist=belief_out,
-            thrust_hist=thrust_out,
-            torque_hist=torque_out,
-            desired_attitude_hist=desired_attitude_out,
-            knowledge_hist=knowledge_out,
-            knowledge_measurement_hist=knowledge_measurements_out,
-            rocket_metrics=rocket_metrics_out,
-            reentry_metrics=reentry_metrics_out,
-            thrust_stats=thrust_stats,
-        )
+        return SingleRunPayloadAssembler(
+            self,
+            initialization_metadata_builder=_object_initialization_metadata,
+        ).build_parts()
 
     def _payload_from_parts(self, parts: _SingleRunPayloadParts) -> dict[str, Any]:
-        runtime_profile = self.runtime_profiler.payload(
-            completed_steps=int(max(parts.n_used - 1, 0)),
-            object_count=len(self.agents),
-        )
-        runtime_profile["executor"] = {
-            "object_step_backend": str(getattr(self.object_step_executor, "backend_name", "unknown")),
-            "object_step_workers": int(getattr(self.object_step_executor, "max_workers", 1) or 1),
-            "planner": dict(getattr(self, "object_execution_plan", {}) or {}),
-        }
-        return build_single_run_payload(
-            SingleRunPayloadContext(
-                cfg=self.cfg,
-                object_ids=list(self.agents.keys()),
-                dt_s=self.dt,
-                t_s=parts.t_s,
-                truth_hist=parts.truth_hist,
-                target_reference_orbit_truth=parts.target_reference_orbit_truth,
-                belief_hist=parts.belief_hist,
-                thrust_hist=parts.thrust_hist,
-                torque_hist=parts.torque_hist,
-                desired_attitude_hist=parts.desired_attitude_hist,
-                knowledge_hist=parts.knowledge_hist,
-                knowledge_measurement_hist=parts.knowledge_measurement_hist,
-                bridge_hist=self.bridge_hist,
-                controller_debug_hist=self.controller_debug_hist,
-                rocket_throttle_cmd=self._primary_rocket_throttle_history(),
-                rocket_metrics=parts.rocket_metrics,
-                reentry_metrics=parts.reentry_metrics,
-                thrust_stats=parts.thrust_stats,
-                runtime_profile=runtime_profile,
-                object_initialization=_object_initialization_metadata(self.cfg, self.object_configs),
-                object_propagation={
-                    oid: asdict(provider.metadata()) for oid, provider in self.general_propagation.items()
-                },
-                attitude_guardrail_stats=get_attitude_guardrail_stats(self.attitude_guardrail_stats),
-                knowledge_detection_by_observer={
-                    aid: agent.knowledge_base.detection_summary()
-                    for aid, agent in self.agents.items()
-                    if agent.knowledge_base is not None
-                }
-                if self.worker_knowledge_detection_by_observer is None
-                else dict(self.worker_knowledge_detection_by_observer),
-                knowledge_consistency_by_observer={
-                    aid: agent.knowledge_base.consistency_summary()
-                    for aid, agent in self.agents.items()
-                    if agent.knowledge_base is not None
-                }
-                if self.worker_knowledge_consistency_by_observer is None
-                else dict(self.worker_knowledge_consistency_by_observer),
-                terminated_early=self.terminated_early,
-                termination_reason=self.termination_reason,
-                termination_time_s=self.termination_time_s,
-                termination_object_id=self.termination_object_id,
-                rocket_inserted=self.rocket_inserted,
-                rocket_insertion_time_s=self.rocket_insertion_time_s,
-            )
-        )
+        return SingleRunPayloadAssembler(
+            self,
+            initialization_metadata_builder=_object_initialization_metadata,
+        ).payload_from_parts(parts)
 
     def _primary_rocket_throttle_history(self) -> np.ndarray:
-        if not self.throttle_hist or self.rocket is None:
-            return np.array([])
-        rocket_object_id = str(getattr(self.rocket, "object_id", "rocket") or "rocket")
-        return self.throttle_hist.get(rocket_object_id, np.array([]))
+        return SingleRunPayloadAssembler(
+            self,
+            initialization_metadata_builder=_object_initialization_metadata,
+        ).primary_rocket_throttle_history()
 
     def _ensure_full_history_payload_allowed(self) -> None:
-        if self.history_mode == "dynamic":
-            raise RuntimeError("Dynamic history mode is only supported for step-driven game sessions.")
+        SingleRunPayloadAssembler(
+            self,
+            initialization_metadata_builder=_object_initialization_metadata,
+        ).ensure_full_history_allowed()
 
     def build_run_payload(self) -> dict[str, Any]:
         """Build the in-memory run payload without rendering or writing artifacts."""
 
-        self._ensure_full_history_payload_allowed()
-        return self._payload_from_parts(self._build_payload_parts())
+        return SingleRunPayloadAssembler(
+            self,
+            initialization_metadata_builder=_object_initialization_metadata,
+        ).build_run_payload()
 
     def _write_artifacts(self, payload: dict[str, Any], parts: _SingleRunPayloadParts) -> dict[str, Any]:
-        return write_single_run_artifacts(
-            payload,
-            SingleRunArtifactContext(
-                cfg=self.cfg,
-                outdir=self.outdir,
-                t_s=parts.t_s,
-                truth_hist=parts.truth_hist,
-                target_reference_orbit_truth=parts.target_reference_orbit_truth,
-                belief_hist=parts.belief_hist,
-                thrust_hist=parts.thrust_hist,
-                torque_hist=parts.torque_hist,
-                desired_attitude_hist=parts.desired_attitude_hist,
-                knowledge_hist=parts.knowledge_hist,
-                knowledge_measurement_hist=parts.knowledge_measurement_hist,
-                rocket_metrics=parts.rocket_metrics,
-                reentry_metrics=parts.reentry_metrics,
-                bridge_hist=self.bridge_hist,
-            ),
-        )
+        return SingleRunPayloadAssembler(
+            self,
+            initialization_metadata_builder=_object_initialization_metadata,
+        ).write_artifacts(payload, parts)
 
     def build_payload(self) -> dict[str, Any]:
-        self._ensure_full_history_payload_allowed()
-        if not bool(getattr(self, "_acceleration_context_active", False)):
-            with acceleration_context_from_config(self.cfg):
-                self._acceleration_context_active = True
-                try:
-                    return self.build_payload()
-                finally:
-                    self._acceleration_context_active = False
-        parts = self._build_payload_parts()
-        payload = self._payload_from_parts(parts)
-        return self._write_artifacts(payload, parts)
+        return SingleRunPayloadAssembler(
+            self,
+            initialization_metadata_builder=_object_initialization_metadata,
+        ).build_payload()
 
 
 def _run_single_config(

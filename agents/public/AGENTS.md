@@ -70,6 +70,31 @@ worth sending upstream. Use `docs/agent-task-cards.md` for the repeatable
 public agent task-card set; task cards are evaluation fixtures, not the
 boundary of what agents can help users do.
 
+## Public Code Navigation
+
+OEL keeps established import modules as compatibility façades while focused
+packages own implementation families. Start with the supported façade, then
+use these public-safe maps before editing code:
+
+- `docs/config-api-architecture.md` for scenario configuration and `sim.api`;
+- `docs/runtime-architecture.md` for runtime construction and single-run
+  collaborators;
+- the implementation map in `docs/plotting.md` for output and plotting
+  families.
+
+External callers and examples should continue to import the stable façade.
+Maintainers should change the focused owner, preserve the façade export and
+class/import identity, and avoid copying implementation logic back into the
+façade. Remove obsolete extraction copies once parity is established so an
+agent cannot edit an apparently authoritative module while production still
+uses a duplicate elsewhere.
+
+An ownership map is a navigation aid, not proof that an excluded capability is
+available publicly. Keep the Public Execution Boundary above in force. When a
+public implementation package or architecture document is added, update the
+public surface manifest deliberately and run the exported-tree integrity and
+public test gates.
+
 ## Canonical Commands
 
 Validate environment:

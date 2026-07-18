@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 from pathlib import Path
 
 import pytest
@@ -35,6 +36,7 @@ from sim.plotting import (
     plot_run_dashboard,
     plot_sensor_access,
 )
+from sim.plotting.architecture import PLOTTING_CAPABILITY_FAMILIES, PLOTTING_SUPPORT_MODULES
 from sim.plotting.style import artifact_metadata, oel_plot_context, save_oel_animation, save_oel_figure
 from sim.utils.plotting import _draw_earth_sphere_3d
 from sim.utils.plotting_capabilities import plot_multi_ric_2d_projections
@@ -42,6 +44,26 @@ from sim.utils.plotting_capabilities import plot_multi_ric_2d_projections
 
 def scenario_config_from_dict(data: dict):
     return SimulationConfig.from_dict(data).to_scenario_config()
+
+
+def test_plotting_architecture_map_has_unique_resolvable_owners() -> None:
+    family_names = [family.name for family in PLOTTING_CAPABILITY_FAMILIES]
+    capabilities = [
+        capability
+        for family in PLOTTING_CAPABILITY_FAMILIES
+        for capability in family.capabilities
+    ]
+
+    assert len(family_names) == len(set(family_names))
+    assert len(capabilities) == len(set(capabilities))
+    for family in PLOTTING_CAPABILITY_FAMILIES:
+        implementation = importlib.import_module(family.module)
+        facade = importlib.import_module(family.facade)
+        for capability in family.capabilities:
+            assert callable(getattr(implementation, capability))
+            assert callable(getattr(facade, capability))
+    for module_name in PLOTTING_SUPPORT_MODULES:
+        assert importlib.import_module(module_name) is not None
 
 
 def _hist(pos: np.ndarray) -> np.ndarray:

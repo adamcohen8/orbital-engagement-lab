@@ -8,6 +8,46 @@ migration-sensitive behavior explicitly.
 
 ## Unreleased
 
+## 0.21.2 - 2026-07-17
+
+Release thesis: `v0.21.2` decomposes OEL's largest implementation modules into
+focused, discoverable owners while retaining stable façades and deterministic
+simulation, configuration, artifact, and command-line contracts.
+
+Private/Pro scope: `v0.21.2` gives Scale, campaign, controller-benchmark,
+orbit-determination, AI-reporting, and validation workflows explicit ownership
+maps and focused implementation families. The public release receives the
+corresponding configuration, Python API, runtime, plotting, game, mission,
+ingestion, observation, and public-export architecture improvements.
+
+### Changed
+
+- Decomposed plotting/output generation, runtime construction, object-step
+  execution, history storage, and run-payload assembly behind their stable
+  façades. Capability registries and architecture guides now route maintainers
+  to focused owners while preserving figure IDs, artifacts, execution
+  planning, histories, and deterministic simulation results.
+- Decomposed the scenario configuration and public Python API God files behind
+  their existing compatibility façades. Focused implementation packages and
+  static ownership maps now cover schema/loading and API/session/workspace
+  responsibilities without changing normalized configs, validation messages,
+  public imports, class identities, serialized forms, or simulation outputs.
+- Decomposed the private Scale SQLite store, command-line dispatcher, and Monte
+  Carlo workflow behind their existing façades. Focused modules now own schema
+  and migrations, catalog/measurement/OD/propagation/screening/refinement data,
+  workflow command registries, deterministic campaign planning, execution,
+  batch parity, quality gates, and reporting without changing database or CLI
+  contracts.
+- Decomposed the game training/dashboard/launcher/runner cluster, mission
+  strategies and executions, controller benchmarks, orbit determination,
+  campaigns, ingestion, observations, AI reports, validation harness, and
+  public-export pipeline into focused implementation families. Existing import
+  paths, CLI entry points, class identities, packets, reports, validation
+  verdicts, and export behavior remain compatibility contracts.
+- Updated the root, public, and private agent playbooks with façade-to-owner
+  navigation, single-authoritative-implementation rules, compatibility checks,
+  and explicit public-export boundary guidance.
+
 ## 0.21.1 - 2026-07-16
 
 Release thesis: `v0.21.1` makes OEL performance work reproducible across the

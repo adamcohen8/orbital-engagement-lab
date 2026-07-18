@@ -17,6 +17,11 @@ read `docs/agent-capability-routing.md`. For repeatable recipe execution,
 completed-run inspection, comparison packets, and standard review plots, read
 `docs/agent-task-runner.md`.
 
+For code navigation after the God-file decomposition, use the stable façade
+first, then follow the public implementation maps in
+`docs/config-api-architecture.md`, `docs/runtime-architecture.md`, and
+`docs/plotting.md` to the focused owner.
+
 ## Instruction Scope And Product Boundary
 
 - Follow the closest applicable `AGENTS.md`. This root file is the public-safe
@@ -86,6 +91,29 @@ completed-run inspection, comparison packets, and standard review plots, read
 - When OEL itself appears hard to use, confusing, or missing an agent-facing
   workflow, follow `docs/agent-feedback-loop.md`: prepare a public-safe
   feedback draft, ask the user for permission, and submit only after approval.
+
+## Code Navigation And Refactoring
+
+- Treat established façade modules such as `sim.api`,
+  `sim.config.scenario_yaml`, `sim.runtime_support`, `sim.master_outputs`,
+  `sim.plotting.single_run`, and `sim.utils.plotting_capabilities` as stable
+  import contracts. Use their ownership maps to locate implementation code.
+- Put behavioral changes in the focused owner. Keep façades limited to
+  compatibility exports, registries, dispatch, and explicitly documented
+  downstream patch seams; do not grow a second implementation in a façade.
+- Preserve existing names, signatures, class module paths, import identity,
+  validation errors, ordering, serialization, CLI behavior, and artifact names
+  unless the user explicitly approves a breaking change.
+- When moving code, remove superseded duplicate or unreachable implementations
+  after parity is established. One capability should have one authoritative
+  implementation owner.
+- Do not infer product availability from an implementation package or ownership
+  registry. Product entitlements and export boundaries still govern which
+  workflows may be recommended or executed.
+- For architecture changes, run the applicable `test_*_architecture.py` tests,
+  focused behavioral tests, `git diff --check`, and the public export integrity
+  gate. Add newly public packages or docs to the allowlist manifest only after
+  confirming they are public-safe.
 
 ## Scenario Generation Posture
 
