@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from array import array
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -22,6 +24,10 @@ from sim.utils.frames import eci_relative_to_ric_rect, ric_rect_state_to_eci
 from sim.utils.quaternion import quaternion_to_dcm_bn
 
 KnowledgeSummaryValue = Any
+
+
+def _float_history() -> array[float]:
+    return array("d")
 
 
 def _line_of_sight_clear(observer_eci_km: np.ndarray, target_eci_km: np.ndarray) -> bool:
@@ -215,19 +221,19 @@ class _Track:
     measurement_count: int = 0
     update_count: int = 0
     last_measurement_t_s: float | None = None
-    nis_values: list[float] = field(default_factory=list)
-    nees_values: list[float] = field(default_factory=list)
-    innovation_norm_values: list[float] = field(default_factory=list)
-    pos_error_norm_km_values: list[float] = field(default_factory=list)
-    vel_error_norm_km_s_values: list[float] = field(default_factory=list)
-    track_age_s_values: list[float] = field(default_factory=list)
+    nis_values: array[float] = field(default_factory=_float_history)
+    nees_values: array[float] = field(default_factory=_float_history)
+    innovation_norm_values: array[float] = field(default_factory=_float_history)
+    pos_error_norm_km_values: array[float] = field(default_factory=_float_history)
+    vel_error_norm_km_s_values: array[float] = field(default_factory=_float_history)
+    track_age_s_values: array[float] = field(default_factory=_float_history)
     detected_count: int = 0
     reacquisition_count: int = 0
     loss_of_detection_count: int = 0
     consecutive_missed_steps: int = 0
     max_consecutive_missed_steps: int = 0
     last_detected: bool = False
-    time_since_last_detection_s_values: list[float] = field(default_factory=list)
+    time_since_last_detection_s_values: array[float] = field(default_factory=_float_history)
     detection_status_counts: dict[str, int] = field(default_factory=dict)
     last_measurement_vector: np.ndarray | None = None
 
@@ -926,21 +932,21 @@ def _wrap_angle_rad(value: float) -> float:
     return float((value + np.pi) % (2.0 * np.pi) - np.pi)
 
 
-def _safe_stat_array(values: list[float]) -> np.ndarray:
+def _safe_stat_array(values: Sequence[float]) -> np.ndarray:
     arr = np.array(values, dtype=float)
     return arr[np.isfinite(arr)]
 
 
-def _safe_stat_mean(values: list[float]) -> float | None:
+def _safe_stat_mean(values: Sequence[float]) -> float | None:
     arr = _safe_stat_array(values)
     return float(np.mean(arr)) if arr.size else None
 
 
-def _safe_stat_percentile(values: list[float], pct: float) -> float | None:
+def _safe_stat_percentile(values: Sequence[float], pct: float) -> float | None:
     arr = _safe_stat_array(values)
     return float(np.percentile(arr, pct)) if arr.size else None
 
 
-def _safe_stat_rms(values: list[float]) -> float | None:
+def _safe_stat_rms(values: Sequence[float]) -> float | None:
     arr = _safe_stat_array(values)
     return float(np.sqrt(np.mean(arr**2))) if arr.size else None

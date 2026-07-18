@@ -47,6 +47,11 @@ class HCWRelativeEKFEstimator(Estimator):
     measurement_origin: str = "chief"
     meas_noise_covariance: np.ndarray | None = None
     last_update_diagnostics: HCWRelativeEKFUpdateDiagnostics | None = field(default=None, init=False, repr=False)
+    _q: np.ndarray = field(default_factory=lambda: np.zeros((6, 6)), init=False, repr=False)
+    _r: np.ndarray = field(default_factory=lambda: np.zeros((6, 6)), init=False, repr=False)
+    _i6: np.ndarray = field(default_factory=lambda: np.eye(6), init=False, repr=False)
+    _cached_transition_key: tuple[float, float] | None = field(default=None, init=False, repr=False)
+    _cached_transition: np.ndarray | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.mean_motion_rad_s <= 0.0:
@@ -67,6 +72,8 @@ class HCWRelativeEKFEstimator(Estimator):
         if np.any(meas_noise < 0.0):
             raise ValueError("meas_noise_diag must be non-negative.")
         self.meas_noise_diag = meas_noise
+        self._q = np.diag(self.process_noise_diag)
+        self._r = np.diag(self.meas_noise_diag)
         if self.meas_noise_covariance is not None:
             self.meas_noise_covariance = _measurement_covariance(
                 self.meas_noise_covariance, meas_dim
@@ -127,7 +134,7 @@ class HCWRelativeEKFEstimator(Estimator):
             measurement_origin=self.measurement_origin,
         )
         r = (
-            np.diag(self.meas_noise_diag)
+            self._r
             if self.meas_noise_covariance is None
             else self.meas_noise_covariance
         )
@@ -142,7 +149,7 @@ class HCWRelativeEKFEstimator(Estimator):
             k_gain = hp_t @ s_pinv
             s_y = s_pinv @ innovation
         x_upd = x_pred + k_gain @ innovation
-        i_kh = np.eye(6) - k_gain @ h_jac
+        i_kh = self._i6 - k_gain @ h_jac
         p_upd = i_kh @ p_pred @ i_kh.T + k_gain @ r @ k_gain.T
         p_upd = 0.5 * (p_upd + p_upd.T)
         self.last_update_diagnostics = HCWRelativeEKFUpdateDiagnostics(
@@ -168,11 +175,16 @@ class HCWRelativeEKFEstimator(Estimator):
         to_t_s: float,
     ) -> tuple[np.ndarray, np.ndarray]:
         dt_s = max(float(to_t_s) - float(from_t_s), 0.0)
-        phi = hcw_state_transition_matrix(float(self.mean_motion_rad_s), dt_s)
+        transition_key = (float(self.mean_motion_rad_s), dt_s)
+        phi = self._cached_transition if self._cached_transition_key == transition_key else None
+        if phi is None:
+            phi = hcw_state_transition_matrix(float(self.mean_motion_rad_s), dt_s)
+            self._cached_transition_key = transition_key
+            self._cached_transition = phi
         x = np.asarray(x_prev, dtype=float).reshape(6)
         p = np.asarray(p_prev, dtype=float).reshape(6, 6)
         q_scale = dt_s / self.dt_s if self.dt_s > 0.0 else 1.0
-        p_pred = phi @ p @ phi.T + np.diag(self.process_noise_diag) * max(q_scale, 0.0)
+        p_pred = phi @ p @ phi.T + self._q * max(q_scale, 0.0)
         return phi @ x, 0.5 * (p_pred + p_pred.T)
 
 
@@ -192,8 +204,6 @@ class SSJ2RelativeEKFEstimator(HCWRelativeEKFEstimator):
     reference_eccentricity: float | None = None
     maximum_supported_eccentricity: float = 0.01
     _relative_dynamics: RelativeLinearDynamics = field(init=False, repr=False)
-    _transition_cache: dict[float, np.ndarray] = field(default_factory=dict, init=False, repr=False)
-
     def __post_init__(self) -> None:
         super().__post_init__()
         self._relative_dynamics = RelativeLinearDynamics(
@@ -251,14 +261,16 @@ class SSJ2RelativeEKFEstimator(HCWRelativeEKFEstimator):
         to_t_s: float,
     ) -> tuple[np.ndarray, np.ndarray]:
         dt_s = max(float(to_t_s) - float(from_t_s), 0.0)
-        phi = self._transition_cache.get(dt_s)
+        transition_key = (float(self.mean_motion_rad_s), dt_s)
+        phi = self._cached_transition if self._cached_transition_key == transition_key else None
         if phi is None:
             phi = self._relative_dynamics.state_transition_matrix(dt_s)
-            self._transition_cache[dt_s] = phi
+            self._cached_transition_key = transition_key
+            self._cached_transition = phi
         x = np.asarray(x_prev, dtype=float).reshape(6)
         p = np.asarray(p_prev, dtype=float).reshape(6, 6)
         q_scale = dt_s / self.dt_s if self.dt_s > 0.0 else 1.0
-        p_pred = phi @ p @ phi.T + np.diag(self.process_noise_diag) * max(q_scale, 0.0)
+        p_pred = phi @ p @ phi.T + self._q * max(q_scale, 0.0)
         return phi @ x, 0.5 * (p_pred + p_pred.T)
 
     def model_metadata(self) -> dict[str, object]:

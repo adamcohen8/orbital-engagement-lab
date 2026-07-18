@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Any
@@ -8,12 +9,12 @@ import numpy as np
 
 
 @lru_cache(maxsize=1)
-def _scipy_chi_square_distribution() -> Any | None:
+def _scipy_inverse_regularized_gamma() -> Any | None:
     """Resolve SciPy only for a run that actually evaluates a NIS gate."""
     try:  # pragma: no cover - fallback exercised only when scipy is unavailable.
-        from scipy.stats import chi2
+        from scipy.special import gammaincinv
 
-        return chi2
+        return gammaincinv
     except Exception:  # pragma: no cover
         return None
 
@@ -76,11 +77,12 @@ class EKFManeuverDetector:
     first_confirmed_t_s: float | None = field(default=None, init=False)
     last_event_t_s: float | None = field(default=None, init=False)
     max_nis: float | None = field(default=None, init=False)
-    _history: list[tuple[float, bool, bool]] = field(default_factory=list, init=False, repr=False)
+    _history: deque[tuple[float, bool, bool]] = field(init=False, repr=False)
     _cooldown_remaining: int = field(default=0, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self.status = "nominal" if self.config.enabled else "disabled"
+        self._history = deque(maxlen=int(self.config.window_size))
 
     def update(self, diagnostics: Any, *, t_s: float) -> EKFManeuverDetectionUpdate:
         if not self.config.enabled:
@@ -108,9 +110,8 @@ class EKFManeuverDetector:
         self.max_nis = nis if self.max_nis is None else max(float(self.max_nis), nis)
 
         self._history.append((nis, above_warning, above_detection))
-        window = self._history[-int(self.config.window_size) :]
-        window_warning_count = int(sum(1 for _nis, flag, _detect in window if flag))
-        window_detection_count = int(sum(1 for _nis, _warn, flag in window if flag))
+        window_warning_count = int(sum(1 for _nis, flag, _detect in self._history if flag))
+        window_detection_count = int(sum(1 for _nis, _warn, flag in self._history if flag))
 
         enough_updates = self.sample_count >= int(self.config.min_updates)
         suspect = enough_updates and window_warning_count >= int(self.config.warning_count)
@@ -182,9 +183,16 @@ def chi_square_threshold(dof: int, probability: float) -> float:
     p = float(probability)
     if not 0.0 < p < 1.0:
         raise ValueError("probability must be between 0 and 1.")
-    scipy_chi2 = _scipy_chi_square_distribution()
-    if scipy_chi2 is not None:
-        return float(scipy_chi2.ppf(p, k))
+    return _chi_square_threshold_cached(k, p)
+
+
+@lru_cache(maxsize=64)
+def _chi_square_threshold_cached(k: int, p: float) -> float:
+    inverse_regularized_gamma = _scipy_inverse_regularized_gamma()
+    if inverse_regularized_gamma is not None:
+        # scipy.stats.chi2.ppf(p, k) is implemented as this expression. Calling
+        # the ufunc directly avoids importing the much larger scipy.stats stack.
+        return float(2.0 * inverse_regularized_gamma(0.5 * k, p))
     # Wilson-Hilferty fallback using Acklam's inverse-normal approximation.
     z = _normal_ppf(p)
     return float(k * (1.0 - 2.0 / (9.0 * k) + z * np.sqrt(2.0 / (9.0 * k))) ** 3)
