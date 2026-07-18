@@ -6,11 +6,14 @@ import numpy as np
 
 from sim import SimulationConfig
 from sim.master_outputs import (
+    AVAILABLE_FIGURE_IDS,
+    _private_bridge_figure_ids,
     _thrust_alignment_error_deg_series,
     _thruster_direction_body_by_object,
     animate_outputs,
     plot_outputs,
 )
+from sim.plotting.output_registry import PLOT_RENDERER_FAMILIES
 from sim.plotting.style import current_artifact_metadata, current_style_name
 from sim.utils.plot_windows import (
     attitude_axis_limits,
@@ -23,6 +26,19 @@ from sim.utils.thruster_plot_geometry import thruster_marker_geometry_body
 
 def scenario_config_from_dict(data: dict):
     return SimulationConfig.from_dict(data).to_scenario_config()
+
+
+def test_output_renderer_registry_has_explicit_non_overlapping_ownership() -> None:
+    assert [family.name for family in PLOT_RENDERER_FAMILIES] == [
+        "summary",
+        "trajectory",
+        "rocket",
+        "control",
+        "knowledge",
+    ]
+    owned = [figure_id for family in PLOT_RENDERER_FAMILIES for figure_id in family.figure_ids]
+    assert len(owned) == len(set(owned))
+    assert set(AVAILABLE_FIGURE_IDS) <= set(owned) | set(_private_bridge_figure_ids())
 
 
 def _truth_hist(positions_km: list[list[float]], velocities_km_s: list[list[float]] | None = None) -> np.ndarray:

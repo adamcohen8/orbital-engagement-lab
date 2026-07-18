@@ -1,2859 +1,382 @@
+"""Compatibility façade for scenario YAML schema and loading."""
+
 from __future__ import annotations
 
-import math
-from copy import deepcopy
-from dataclasses import dataclass, field, fields, is_dataclass
-from pathlib import Path
-from typing import Any
-
-from sim.security import ConfigPathPolicy
-
-
-@dataclass(frozen=True)
-class AlgorithmPointer:
-    kind: str = "python"
-    module: str | None = None
-    class_name: str | None = None
-    function: str | None = None
-    file: str | None = None
-    params: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class BridgePointer:
-    enabled: bool = False
-    mode: str = "sil"
-    endpoint: str | None = None
-    module: str | None = None
-    class_name: str | None = None
-    params: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class AgentSection:
-    object_id: str = ""
-    kind: str = "satellite"
-    enabled: bool = True
-    role: str = "agent"
-    propagation_method: str = ""
-    general: dict[str, Any] = field(default_factory=dict)
-    specs: dict[str, Any] = field(default_factory=dict)
-    initial_state: dict[str, Any] = field(default_factory=dict)
-    reference_orbit: dict[str, Any] = field(default_factory=dict)
-    guidance: AlgorithmPointer | None = None
-    base_guidance: AlgorithmPointer | None = None
-    guidance_modifiers: list[AlgorithmPointer] = field(default_factory=list)
-    orbit_control: AlgorithmPointer | None = None
-    attitude_control: AlgorithmPointer | None = None
-    mission_strategy: AlgorithmPointer | None = None
-    mission_execution: AlgorithmPointer | None = None
-    mission_objectives: list[AlgorithmPointer] = field(default_factory=list)
-    bridge: BridgePointer | None = None
-    knowledge: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class GroundStationSection:
-    id: str
-    lat_deg: float
-    lon_deg: float
-    alt_km: float = 0.0
-    min_elevation_deg: float = 0.0
-    max_range_km: float | None = None
-    enabled: bool = True
-    measurements: dict[str, Any] = field(default_factory=dict)
-
-
-class _TypedConfigDict(dict):
-    _defaults: dict[str, Any] = {}
-
-    def __init__(self, value: Any = None, **overrides: Any) -> None:
-        data = deepcopy(self._defaults)
-        if value is not None:
-            data.update(deepcopy(dict(value)))
-        data.update(deepcopy(overrides))
-        super().__init__(data)
-
-
-class SimulatorAccelerationSection(_TypedConfigDict):
-    _defaults = {
-        "mode": "off",
-        "warmup": False,
-        "env_override": True,
-    }
-
-    @property
-    def mode(self) -> str:
-        return str(self.get("mode", "off") or "off")
-
-    @property
-    def warmup(self) -> bool:
-        return bool(self.get("warmup", False))
-
-    @property
-    def env_override(self) -> bool:
-        return bool(self.get("env_override", True))
-
-
-class SimulatorExecutionSection(_TypedConfigDict):
-    _defaults = {
-        "policy": "configured",
-        "object_parallelism": {
-            "enabled": False,
-            "backend": "serial",
-            "workers": 0,
-            "max_workers": 0,
-            "reserve_workers": 1,
-            "min_objects": 3,
-        },
-        "runtime_profiler": {
-            "enabled": True,
-        },
-        "controller": {
-            "orbit_budget_ms": 2.0,
-            "attitude_budget_ms": 2.0,
-            "deadline_policy": "record",
-        },
-    }
-
-    @property
-    def object_parallelism(self) -> dict[str, Any]:
-        return dict(self.get("object_parallelism", {}) or {})
-
-    @property
-    def runtime_profiler(self) -> dict[str, Any]:
-        return dict(self.get("runtime_profiler", {}) or {})
-
-    @property
-    def controller(self) -> dict[str, Any]:
-        return dict(self.get("controller", {}) or {})
-
-
-class SimulatorFramesSection(_TypedConfigDict):
-    _defaults: dict[str, Any] = {
-        "model": "simple_gmst",
-        "eop_path": None,
-        "eop_extrapolation": "error",
-        "time_scale_model": "utc_only",
-        "tt_minus_utc_s": None,
-        "dut1_s": None,
-        "xp_arcsec": None,
-        "yp_arcsec": None,
-        "dat_s": None,
-        "ddpsi_rad": 0.0,
-        "ddeps_rad": 0.0,
-    }
-
-    @property
-    def model(self) -> str:
-        return str(self.get("model", "simple_gmst") or "simple_gmst")
-
-    @property
-    def eop_path(self) -> str | None:
-        value = self.get("eop_path")
-        return None if value in (None, "") else str(value)
-
-
-@dataclass(frozen=True)
-class SimulatorSection:
-    duration_s: float = 3600.0
-    dt_s: float = 1.0
-    initial_jd_utc: float | None = None
-    resource_profile: str | None = None
-    acceleration: SimulatorAccelerationSection = field(default_factory=lambda: SimulatorAccelerationSection())
-    execution: SimulatorExecutionSection = field(default_factory=lambda: SimulatorExecutionSection())
-    frames: SimulatorFramesSection = field(default_factory=lambda: SimulatorFramesSection())
-    dynamics: SimulatorDynamicsSection = field(default_factory=lambda: SimulatorDynamicsSection())
-    environment: SimulatorEnvironmentSection = field(default_factory=lambda: SimulatorEnvironmentSection())
-    plugin_validation: SimulatorPluginValidationSection = field(
-        default_factory=lambda: SimulatorPluginValidationSection()
-    )
-    termination: SimulatorTerminationSection = field(default_factory=lambda: SimulatorTerminationSection())
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "acceleration", SimulatorAccelerationSection(self.acceleration))
-        object.__setattr__(self, "execution", SimulatorExecutionSection(self.execution))
-        object.__setattr__(self, "frames", SimulatorFramesSection(self.frames))
-        object.__setattr__(self, "dynamics", SimulatorDynamicsSection(self.dynamics))
-        object.__setattr__(self, "environment", SimulatorEnvironmentSection(self.environment))
-        object.__setattr__(self, "plugin_validation", SimulatorPluginValidationSection(self.plugin_validation))
-        object.__setattr__(self, "termination", SimulatorTerminationSection(self.termination))
-
-class SimulatorDynamicsSection(_TypedConfigDict):
-    _defaults: dict[str, Any] = {}
-
-    @property
-    def orbit(self) -> dict[str, Any]:
-        return dict(self.get("orbit", {}) or {})
-
-    @property
-    def attitude(self) -> dict[str, Any]:
-        return dict(self.get("attitude", {}) or {})
-
-    @property
-    def rocket(self) -> dict[str, Any]:
-        return dict(self.get("rocket", {}) or {})
-
-
-class SimulatorEnvironmentSection(_TypedConfigDict):
-    _defaults: dict[str, Any] = {}
-
-    @property
-    def atmosphere_env(self) -> dict[str, Any]:
-        return dict(self.get("atmosphere_env", {}) or {})
-
-
-class SimulatorPluginValidationSection(_TypedConfigDict):
-    _defaults = {"strict": True, "strict_runtime": False}
-
-    @property
-    def strict(self) -> bool:
-        return bool(self.get("strict", True))
-
-    @property
-    def strict_runtime(self) -> bool:
-        return bool(self.get("strict_runtime", False))
-
-
-class SimulatorTerminationSection(_TypedConfigDict):
-    _defaults = {
-        "earth_impact_enabled": True,
-        "earth_radius_km": 6378.137,
-        "by_object": {},
-    }
-
-    @property
-    def earth_impact_enabled(self) -> bool:
-        return bool(self.get("earth_impact_enabled", True))
-
-    @property
-    def earth_radius_km(self) -> float:
-        return float(self.get("earth_radius_km", 6378.137))
-
-    @property
-    def by_object(self) -> dict[str, Any]:
-        return dict(self.get("by_object", {}) or {})
-
-
-class OutputStatsSection(_TypedConfigDict):
-    _defaults = {
-        "print_summary": True,
-        "save_json": True,
-        "save_full_log": True,
-        "save_history_npz": False,
-        "controller_debug": False,
-    }
-
-    @property
-    def print_summary(self) -> bool:
-        return bool(self.get("print_summary", True))
-
-    @property
-    def save_json(self) -> bool:
-        return bool(self.get("save_json", True))
-
-    @property
-    def save_full_log(self) -> bool:
-        return bool(self.get("save_full_log", True))
-
-    @property
-    def save_history_npz(self) -> bool:
-        return bool(self.get("save_history_npz", False))
-
-    @property
-    def controller_debug(self) -> bool:
-        return bool(self.get("controller_debug", False))
-
-
-class OutputPlotsSection(_TypedConfigDict):
-    _defaults = {
-        "enabled": True,
-        "figure_ids": [],
-        "dpi": 150,
-        "style": "oel_dark",
-    }
-
-    @property
-    def enabled(self) -> bool:
-        return bool(self.get("enabled", True))
-
-    @property
-    def figure_ids(self) -> list[Any]:
-        return list(self.get("figure_ids", []) or [])
-
-    @property
-    def dpi(self) -> int:
-        return int(self.get("dpi", 150))
-
-    @property
-    def style(self) -> str:
-        return str(self.get("style", "oel_dark") or "oel_dark")
-
-
-class OutputAnimationsSection(_TypedConfigDict):
-    _defaults = {
-        "enabled": False,
-        "types": [],
-        "fps": 30.0,
-    }
-
-    @property
-    def enabled(self) -> bool:
-        return bool(self.get("enabled", False))
-
-    @property
-    def types(self) -> list[Any]:
-        return list(self.get("types", []) or [])
-
-    @property
-    def fps(self) -> float:
-        return float(self.get("fps", 30.0))
-
-    @property
-    def style(self) -> str | None:
-        value = self.get("style")
-        if value in (None, ""):
-            return None
-        return str(value)
-
-
-class OutputMonteCarloSection(_TypedConfigDict):
-    _defaults = {
-        "save_histograms": False,
-        "display_histograms": False,
-        "save_ops_dashboard": True,
-        "display_ops_dashboard": False,
-        "save_iteration_summaries": False,
-        "success_termination_reasons": ["rocket_orbit_insertion"],
-    }
-
-    @property
-    def save_histograms(self) -> bool:
-        return bool(self.get("save_histograms", False))
-
-    @property
-    def display_histograms(self) -> bool:
-        return bool(self.get("display_histograms", False))
-
-    @property
-    def save_iteration_summaries(self) -> bool:
-        return bool(self.get("save_iteration_summaries", False))
-
-    @property
-    def success_termination_reasons(self) -> list[Any]:
-        return list(self.get("success_termination_reasons", ["rocket_orbit_insertion"]) or [])
-
-
-class OutputAIReportSection(_TypedConfigDict):
-    _defaults: dict[str, Any] = {}
-
-    @property
-    def enabled(self) -> bool:
-        return bool(self.get("enabled", False))
-
-    @property
-    def provider(self) -> str:
-        return str(self.get("provider", "ollama") or "ollama")
-
-    @property
-    def model(self) -> str:
-        return str(self.get("model", "") or "")
-
-
-class OutputAIConfigSection(_TypedConfigDict):
-    _defaults: dict[str, Any] = {}
-
-    @property
-    def enabled(self) -> bool:
-        return bool(self.get("enabled", True))
-
-    @property
-    def provider(self) -> str:
-        return str(self.get("provider", "ollama") or "ollama")
-
-    @property
-    def model(self) -> str:
-        return str(self.get("model", "") or "")
-
-
-class OutputResourceLimitsSection(_TypedConfigDict):
-    _defaults: dict[str, Any] = {
-        "max_history_memory_mb": None,
-    }
-
-    @property
-    def max_history_memory_mb(self) -> float | None:
-        value = self.get("max_history_memory_mb")
-        if value in (None, ""):
-            return None
-        return float(value)
-
-
-class OutputReviewSection(_TypedConfigDict):
-    _defaults: dict[str, Any] = {
-        "enabled": False,
-        "detail": "standard",
-        "strict": False,
-    }
-
-    @property
-    def enabled(self) -> bool:
-        return bool(self.get("enabled", False))
-
-    @property
-    def detail(self) -> str:
-        return str(self.get("detail", "standard") or "standard")
-
-    @property
-    def strict(self) -> bool:
-        return bool(self.get("strict", False))
-
-
-@dataclass(frozen=True)
-class OutputsSection:
-    output_dir: str = "outputs"
-    mode: str = "interactive"
-    stats: OutputStatsSection = field(default_factory=OutputStatsSection)
-    plots: OutputPlotsSection = field(default_factory=OutputPlotsSection)
-    animations: OutputAnimationsSection = field(default_factory=OutputAnimationsSection)
-    monte_carlo: OutputMonteCarloSection = field(default_factory=OutputMonteCarloSection)
-    ai_report: OutputAIReportSection = field(default_factory=OutputAIReportSection)
-    ai_config: OutputAIConfigSection = field(default_factory=OutputAIConfigSection)
-    review: OutputReviewSection = field(default_factory=OutputReviewSection)
-    resource_limits: OutputResourceLimitsSection = field(default_factory=OutputResourceLimitsSection)
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "stats", OutputStatsSection(self.stats))
-        object.__setattr__(self, "plots", OutputPlotsSection(self.plots))
-        object.__setattr__(self, "animations", OutputAnimationsSection(self.animations))
-        object.__setattr__(self, "monte_carlo", OutputMonteCarloSection(self.monte_carlo))
-        object.__setattr__(self, "ai_report", OutputAIReportSection(self.ai_report))
-        object.__setattr__(self, "ai_config", OutputAIConfigSection(self.ai_config))
-        object.__setattr__(self, "review", OutputReviewSection(self.review))
-        object.__setattr__(self, "resource_limits", OutputResourceLimitsSection(self.resource_limits))
-
-
-@dataclass(frozen=True)
-class MonteCarloVariation:
-    parameter_path: str
-    mode: str = "choice"
-    options: list[Any] = field(default_factory=list)
-    low: float | None = None
-    high: float | None = None
-    mean: float | None = None
-    std: float | None = None
-
-
-@dataclass(frozen=True)
-class MonteCarloSection:
-    enabled: bool = False
-    iterations: int = 1
-    base_seed: int = 0
-    parallel_enabled: bool = False
-    parallel_workers: int = 0
-    variations: list[MonteCarloVariation] = field(default_factory=list)
-
-
-@dataclass(frozen=True)
-class AnalysisExecutionSection:
-    parallel_enabled: bool = False
-    parallel_workers: int = 0
-    failure_policy: str = "fail_fast"
-
-
-@dataclass(frozen=True)
-class AnalysisBaselineSection:
-    enabled: bool = False
-    mode: str = "none"
-    summary_json: str = ""
-
-
-@dataclass(frozen=True)
-class AnalysisMonteCarloSection:
-    iterations: int = 1
-    base_seed: int = 0
-    variations: list[MonteCarloVariation] = field(default_factory=list)
-
-
-@dataclass(frozen=True)
-class SensitivityParameter:
-    parameter_path: str
-    values: list[Any] = field(default_factory=list)
-    distribution: str = "uniform"
-    low: float | None = None
-    high: float | None = None
-    mean: float | None = None
-    std: float | None = None
-
-
-@dataclass(frozen=True)
-class SensitivitySection:
-    method: str = "one_at_a_time"
-    samples: int = 0
-    seed: int = 0
-    parameters: list[SensitivityParameter] = field(default_factory=list)
-
-
-@dataclass(frozen=True)
-class CovarianceObjectSection:
-    enabled: bool = True
-    frame: str = "eci"
-    covariance: list[list[float]] = field(default_factory=list)
-    diagonal: list[float] = field(default_factory=list)
-    position_sigma_km: float | None = None
-    velocity_sigma_km_s: float | None = None
-
-
-@dataclass(frozen=True)
-class CovarianceCollisionScreeningSection:
-    enabled: bool = False
-    hard_body_radius_km: float = 0.01
-    method: str = "small_object"
-
-
-@dataclass(frozen=True)
-class CovariancePairSection:
-    deputy_id: str
-    chief_id: str
-    collision_screening: CovarianceCollisionScreeningSection = field(
-        default_factory=CovarianceCollisionScreeningSection
-    )
-
-
-@dataclass(frozen=True)
-class CovarianceFiniteDifferenceSection:
-    position_step_km: float = 1e-3
-    velocity_step_km_s: float = 1e-6
-
-
-@dataclass(frozen=True)
-class CovarianceProcessNoiseSection:
-    enabled: bool = False
-    acceleration_sigma_km_s2: float = 0.0
-
-
-@dataclass(frozen=True)
-class CovarianceSection:
-    enabled: bool = True
-    objects: dict[str, CovarianceObjectSection] = field(default_factory=dict)
-    pairs: list[CovariancePairSection] = field(default_factory=list)
-    finite_difference: CovarianceFiniteDifferenceSection = field(default_factory=CovarianceFiniteDifferenceSection)
-    process_noise: CovarianceProcessNoiseSection = field(default_factory=CovarianceProcessNoiseSection)
-    write_review_tables: bool = True
-
-
-@dataclass(frozen=True)
-class MissionRecoverySection:
-    enabled: bool = False
-    object_id: str = ""
-    goal: str = "orbit_shape"
-    assessment_time_s: float | str = "final"
-    slot_tolerance_deg: float = 1.0
-    max_phasing_orbits: int = 5000
-    planner: dict[str, Any] = field(default_factory=dict)
-    propulsion: dict[str, Any] = field(default_factory=dict)
-    element_tolerances: dict[str, float] = field(default_factory=dict)
-    target_orbit: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class AnalysisSection:
-    enabled: bool = False
-    study_type: str = "monte_carlo"
-    execution: AnalysisExecutionSection = field(default_factory=AnalysisExecutionSection)
-    metrics: list[Any] = field(default_factory=list)
-    baseline: AnalysisBaselineSection = field(default_factory=AnalysisBaselineSection)
-    monte_carlo: AnalysisMonteCarloSection = field(default_factory=AnalysisMonteCarloSection)
-    sensitivity: SensitivitySection = field(default_factory=SensitivitySection)
-    covariance: CovarianceSection = field(default_factory=CovarianceSection)
-    mission_recovery: MissionRecoverySection = field(default_factory=MissionRecoverySection)
-    orbital_delivery: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class SimulationScenarioConfig:
-    scenario_name: str = "unnamed_scenario"
-    scenario_description: str = ""
-    rocket: AgentSection = field(default_factory=lambda: AgentSection(enabled=False, role="rocket"))
-    chaser: AgentSection = field(default_factory=lambda: AgentSection(enabled=False, role="chaser"))
-    target: AgentSection = field(default_factory=lambda: AgentSection(enabled=True, role="target"))
-    objects: dict[str, AgentSection] = field(default_factory=dict)
-    ground_stations: list[GroundStationSection] = field(default_factory=list)
-    simulator: SimulatorSection = field(default_factory=SimulatorSection)
-    outputs: OutputsSection = field(default_factory=OutputsSection)
-    monte_carlo: MonteCarloSection = field(default_factory=MonteCarloSection)
-    analysis: AnalysisSection = field(default_factory=AnalysisSection)
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-    def to_dict(self) -> dict[str, Any]:
-        data = _plain_config_data(self)
-        for legacy_key in ("rocket", "chaser", "target", "monte_carlo"):
-            data.pop(legacy_key, None)
-        return data
-
-
-def _plain_config_data(value: Any) -> Any:
-    if is_dataclass(value) and not isinstance(value, type):
-        return {item.name: _plain_config_data(getattr(value, item.name)) for item in fields(value)}
-    if isinstance(value, dict):
-        return {_plain_config_data(k): _plain_config_data(v) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_plain_config_data(item) for item in value]
-    if isinstance(value, tuple):
-        return [_plain_config_data(item) for item in value]
-    return deepcopy(value)
-
-
-def _as_dict(value: Any, section_name: str) -> dict[str, Any]:
-    if value is None:
-        return {}
-    if not isinstance(value, dict):
-        raise ValueError(f"Section '{section_name}' must be a mapping/object.")
-    return dict(value)
-
-
-_UnsupportedAliasMap = dict[str, tuple[str, str]]
-
-
-def _reject_unsupported_aliases(
-    d: dict[str, Any],
-    section_path: str,
-    aliases: _UnsupportedAliasMap,
-) -> None:
-    for unsupported_key, (canonical_key, guidance) in aliases.items():
-        if unsupported_key not in d:
-            continue
-        unsupported_path = f"{section_path}.{unsupported_key}" if section_path else unsupported_key
-        canonical_path = f"{section_path}.{canonical_key}" if section_path else canonical_key
-        raise ValueError(f"{unsupported_path} is unsupported. Use {canonical_path}{guidance}.")
-
-
-def _reject_unknown_fields(d: dict[str, Any], section_path: str, allowed: set[str]) -> None:
-    """Reject misspelled or otherwise unconsumed configuration fields.
-
-    Extension-bearing mappings such as ``specs``, plugin ``params``, and
-    ``metadata`` deliberately remain open. Public structural sections are
-    closed so a successful validation means the requested fields were
-    actually consumed.
-    """
-
-    unknown = sorted(str(key) for key in d if str(key) not in allowed)
-    if not unknown:
-        return
-    label = section_path or "root"
-    raise ValueError(f"{label} has unsupported field(s): {', '.join(unknown)}.")
-
-
-_ROOT_UNSUPPORTED_ALIASES: _UnsupportedAliasMap = {
-    "ground_station": ("ground_stations", " as a list or mapping"),
-    "rocket": ("objects.rocket", " under the canonical objects map"),
-    "chaser": ("objects.chaser", " under the canonical objects map"),
-    "target": ("objects.target", " under the canonical objects map"),
-    "monte_carlo": ("analysis", " with analysis.enabled: true and analysis.study_type: monte_carlo"),
-}
-
-_SIMULATOR_UNSUPPORTED_ALIASES: _UnsupportedAliasMap = {
-    "scenario_type": (
-        "objects / simulator.dynamics / analysis",
-        "; scenario behavior is inferred from object kind, dynamics, bridges, and analysis settings",
-    ),
-}
-
-_OUTPUTS_UNSUPPORTED_ALIASES: _UnsupportedAliasMap = {
-    "plot": ("plots", " for plot configuration"),
-    "animation": ("animations", " for animation configuration"),
-}
-
-_OUTPUT_PLOTS_UNSUPPORTED_ALIASES: _UnsupportedAliasMap = {
-    "figure_id": ("figure_ids", " as a list"),
-}
-
-_OUTPUT_ANIMATIONS_UNSUPPORTED_ALIASES: _UnsupportedAliasMap = {
-    "type": ("types", " as a list"),
-}
-
-
-_AGENT_PRESET_KEYS = ("preset", "preset_yaml", "preset_path")
-_AGENT_FRAGMENT_KEYS = {
-    "object_id",
-    "kind",
-    "enabled",
-    "role",
-    "propagation_method",
-    "general",
-    "specs",
-    "initial_state",
-    "reference_orbit",
-    "guidance",
-    "base_guidance",
-    "guidance_modifiers",
-    "orbit_control",
-    "attitude_control",
-    "mission_strategy",
-    "mission_execution",
-    "mission_objectives",
-    "bridge",
-    "knowledge",
-}
-_PRESET_METADATA_KEYS = {
-    "name",
-    "description",
-    "preset_type",
-    "object_type",
-    "version",
-    "metadata",
-}
-
-
-def _deep_merge_dicts(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
-    merged = dict(base)
-    for key, value in override.items():
-        if isinstance(merged.get(key), dict) and isinstance(value, dict):
-            merged[key] = _deep_merge_dicts(dict(merged[key]), dict(value))
-        else:
-            merged[key] = value
-    return merged
-
-
-def _resolve_preset_path(
-    preset_ref: str,
-    base_dir: Path | None,
-    role: str,
-    path_policy: ConfigPathPolicy | None = None,
-) -> Path:
-    ref_path = Path(preset_ref).expanduser()
-    candidates: list[Path] = []
-    if ref_path.is_absolute():
-        candidates.append(ref_path)
-    else:
-        if base_dir is not None:
-            candidates.append(base_dir / ref_path)
-        candidates.append(Path.cwd() / ref_path)
-        repo_root = Path(__file__).resolve().parents[2]
-        candidates.append(repo_root / ref_path)
-        candidates.append(repo_root / "sim" / "presets" / "objects" / ref_path)
-        if ref_path.suffix == "":
-            candidates.append(repo_root / "sim" / "presets" / "objects" / ref_path.with_suffix(".yaml"))
-
-    for candidate in candidates:
-        if candidate.is_file():
-            if path_policy is None:
-                return candidate
-            return path_policy.resolve_input_file(candidate, purpose=f"{role}.preset", must_exist=True)
-
-    checked = ", ".join(str(c) for c in candidates)
-    raise FileNotFoundError(f"Could not resolve {role} preset YAML '{preset_ref}'. Checked: {checked}")
-
-
-def _load_yaml_mapping(path: Path, section_name: str) -> dict[str, Any]:
-    try:
-        import yaml  # type: ignore
-    except Exception as exc:
-        raise RuntimeError(
-            "PyYAML is required to load simulation YAML configs. Install with `pip install pyyaml`."
-        ) from exc
-    with path.open("r", encoding="utf-8") as f:
-        raw = yaml.safe_load(f) or {}
-    if not isinstance(raw, dict):
-        raise ValueError(f"{section_name} YAML root must be a mapping/object.")
-    return dict(raw)
-
-
-def _agent_fragment_from_preset(preset: dict[str, Any], role: str, preset_path: Path) -> dict[str, Any]:
-    if "specs" in preset:
-        fragment = {k: v for k, v in preset.items() if k not in _PRESET_METADATA_KEYS}
-        fragment["specs"] = dict(fragment.get("specs", {}) or {})
-        return fragment
-
-    if any(k in preset for k in _AGENT_FRAGMENT_KEYS - {"specs"}):
-        return {k: v for k, v in preset.items() if k not in _PRESET_METADATA_KEYS}
-
-    specs = {k: v for k, v in preset.items() if k not in _PRESET_METADATA_KEYS}
-    if not specs:
-        raise ValueError(f"{role} preset YAML '{preset_path}' does not define specs.")
-    return {"specs": specs}
-
-
-def _resolve_agent_preset(
-    value: Any,
-    role: str,
-    base_dir: Path | None,
-    path_policy: ConfigPathPolicy | None = None,
-) -> dict[str, Any]:
-    d = _as_dict(value, role)
-    preset_ref = next((d.get(key) for key in _AGENT_PRESET_KEYS if d.get(key) is not None), None)
-    if preset_ref is None:
-        return d
-    if not isinstance(preset_ref, str) or not preset_ref.strip():
-        raise ValueError(f"{role}.preset must be a non-empty YAML file path.")
-
-    preset_path = _resolve_preset_path(
-        preset_ref.strip(),
-        base_dir=base_dir,
-        role=role,
-        path_policy=path_policy,
-    )
-    preset_raw = _load_yaml_mapping(preset_path, f"{role} preset")
-    preset_fragment = _agent_fragment_from_preset(preset_raw, role=role, preset_path=preset_path)
-    local_fragment = {k: v for k, v in d.items() if k not in _AGENT_PRESET_KEYS}
-    merged = _deep_merge_dicts(preset_fragment, local_fragment)
-
-    local_specs = local_fragment.get("specs")
-    merged_specs = merged.get("specs")
-    if isinstance(local_specs, dict) and isinstance(merged_specs, dict):
-        if "mass_kg" in local_specs and "dry_mass_kg" not in local_specs and "fuel_mass_kg" not in local_specs:
-            merged_specs.pop("dry_mass_kg", None)
-            merged_specs.pop("fuel_mass_kg", None)
-
-    return merged
-
-
-def _resolve_agent_presets(
-    root: dict[str, Any],
-    base_dir: Path | None,
-    path_policy: ConfigPathPolicy | None = None,
-) -> dict[str, Any]:
-    resolved = dict(root)
-    objects_raw = resolved.get("objects")
-    if isinstance(objects_raw, dict):
-        resolved_objects = {}
-        for object_id, object_value in objects_raw.items():
-            resolved_objects[str(object_id)] = _resolve_agent_preset(
-                object_value,
-                role=f"objects.{object_id}",
-                base_dir=base_dir,
-                path_policy=path_policy,
-            )
-        resolved["objects"] = resolved_objects
-    return resolved
-
-
-def _parse_bool(value: Any, field_name: str) -> bool:
-    if isinstance(value, bool):
-        return value
-    raise ValueError(f"{field_name} must be a boolean true/false value, not {value!r}.")
-
-
-def _is_bool_like_key(key: str) -> bool:
-    normalized = key.strip().lower()
-    if normalized in {
-        "enabled",
-        "strict",
-        "j2",
-        "j3",
-        "j4",
-        "drag",
-        "srp",
-        "third_body_moon",
-        "third_body_sun",
-        "parallel_enabled",
-        "gravity_gradient",
-        "magnetic",
-        "magnetic_dipole",
-        "aerodynamic_drag",
-        "solar_radiation_pressure",
-    }:
-        return True
-    return normalized.startswith(
-        (
-            "use_",
-            "save_",
-            "display_",
-            "print_",
-            "require_",
-        )
-    )
-
-
-def _enforce_strict_booleans(value: Any, path: str = "root") -> None:
-    if isinstance(value, dict):
-        for key, child in value.items():
-            child_path = f"{path}.{key}"
-            if (
-                child_path == "root.simulator.execution.object_parallelism.enabled"
-                and isinstance(child, str)
-                and child.strip().lower() == "auto"
-            ):
-                continue
-            if _is_bool_like_key(str(key)) and not isinstance(child, bool):
-                raise ValueError(f"{child_path} must be a boolean true/false value, not {child!r}.")
-            _enforce_strict_booleans(child, child_path)
-    elif isinstance(value, list):
-        for idx, child in enumerate(value):
-            _enforce_strict_booleans(child, f"{path}[{idx}]")
-
-
-def _parse_float(value: Any, field_name: str) -> float:
-    try:
-        out = float(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{field_name} must be a finite number.") from exc
-    if not math.isfinite(out):
-        raise ValueError(f"{field_name} must be a finite number.")
-    return out
-
-
-def _parse_optional_float(value: Any, field_name: str) -> float | None:
-    if value is None:
-        return None
-    return _parse_float(value, field_name)
-
-
-def _validate_integer_multiple(
-    *,
-    numerator: float,
-    denominator: float,
-    numerator_name: str,
-    denominator_name: str,
-) -> None:
-    ratio = numerator / denominator
-    nearest = round(ratio)
-    tol = 1e-9 * max(1.0, abs(ratio))
-    if abs(ratio - nearest) > tol:
-        raise ValueError(
-            f"{numerator_name} must be an integer multiple of {denominator_name}; "
-            f"got {numerator_name}={numerator:g}, {denominator_name}={denominator:g}."
-        )
-
-
-def _validate_sim_timing(out: SimulatorSection) -> None:
-    if out.dt_s <= 0.0:
-        raise ValueError("simulator.dt_s must be positive.")
-    if out.duration_s <= 0.0:
-        raise ValueError("simulator.duration_s must be positive.")
-    _validate_integer_multiple(
-        numerator=out.duration_s,
-        denominator=out.dt_s,
-        numerator_name="simulator.duration_s",
-        denominator_name="simulator.dt_s",
-    )
-
-    dynamics = dict(out.dynamics or {})
-    timing_fields = (
-        ("simulator.dynamics.orbit.orbit_substep_s", dict(dynamics.get("orbit", {}) or {}).get("orbit_substep_s")),
-        (
-            "simulator.dynamics.attitude.attitude_substep_s",
-            dict(dynamics.get("attitude", {}) or {}).get("attitude_substep_s"),
-        ),
-    )
-    for field_name, raw in timing_fields:
-        substep = _parse_optional_float(raw, field_name)
-        if substep is None:
-            continue
-        if substep <= 0.0:
-            raise ValueError(f"{field_name} must be positive when provided.")
-        if substep > out.dt_s:
-            raise ValueError(f"{field_name} must be less than or equal to simulator.dt_s.")
-        _validate_integer_multiple(
-            numerator=out.dt_s,
-            denominator=substep,
-            numerator_name="simulator.dt_s",
-            denominator_name=field_name,
-        )
-
-
-_REENTRY_TERMINATION_LIMIT_FIELDS = (
-    "min_altitude_km",
-    "max_dynamic_pressure_pa",
-    "max_drag_decel_m_s2",
-    "max_g_load",
-    "max_heat_rate_w_m2",
-    "max_heat_load_j_m2",
+from sim.config.scenario.analysis import (
+    _monte_carlo_from_analysis as _monte_carlo_from_analysis,
+)
+from sim.config.scenario.analysis import (
+    _parse_analysis_baseline_section as _parse_analysis_baseline_section,
+)
+from sim.config.scenario.analysis import (
+    _parse_analysis_execution_section as _parse_analysis_execution_section,
+)
+from sim.config.scenario.analysis import (
+    _parse_analysis_monte_carlo_section as _parse_analysis_monte_carlo_section,
+)
+from sim.config.scenario.analysis import (
+    _parse_analysis_section as _parse_analysis_section,
+)
+from sim.config.scenario.analysis import (
+    _parse_covariance_collision_screening_section as _parse_covariance_collision_screening_section,
+)
+from sim.config.scenario.analysis import (
+    _parse_covariance_diagonal as _parse_covariance_diagonal,
+)
+from sim.config.scenario.analysis import (
+    _parse_covariance_matrix as _parse_covariance_matrix,
+)
+from sim.config.scenario.analysis import (
+    _parse_covariance_object_section as _parse_covariance_object_section,
+)
+from sim.config.scenario.analysis import (
+    _parse_covariance_pair_section as _parse_covariance_pair_section,
+)
+from sim.config.scenario.analysis import (
+    _parse_covariance_section as _parse_covariance_section,
+)
+from sim.config.scenario.analysis import (
+    _parse_mc_variation as _parse_mc_variation,
+)
+from sim.config.scenario.analysis import (
+    _parse_mission_recovery_planner_section as _parse_mission_recovery_planner_section,
+)
+from sim.config.scenario.analysis import (
+    _parse_mission_recovery_section as _parse_mission_recovery_section,
+)
+from sim.config.scenario.analysis import (
+    _parse_mission_recovery_target_orbit_section as _parse_mission_recovery_target_orbit_section,
+)
+from sim.config.scenario.analysis import (
+    _parse_orbit_transfer_planner_section as _parse_orbit_transfer_planner_section,
+)
+from sim.config.scenario.analysis import (
+    _parse_orbital_delivery_section as _parse_orbital_delivery_section,
+)
+from sim.config.scenario.analysis import (
+    _parse_sensitivity_parameter as _parse_sensitivity_parameter,
+)
+from sim.config.scenario.analysis import (
+    _parse_sensitivity_section as _parse_sensitivity_section,
+)
+from sim.config.scenario.loader import (
+    load_simulation_yaml as load_simulation_yaml,
+)
+from sim.config.scenario.loader import (
+    scenario_config_from_dict as scenario_config_from_dict,
+)
+from sim.config.scenario.models import (
+    AgentSection as AgentSection,
+)
+from sim.config.scenario.models import (
+    AlgorithmPointer as AlgorithmPointer,
+)
+from sim.config.scenario.models import (
+    AnalysisBaselineSection as AnalysisBaselineSection,
+)
+from sim.config.scenario.models import (
+    AnalysisExecutionSection as AnalysisExecutionSection,
+)
+from sim.config.scenario.models import (
+    AnalysisMonteCarloSection as AnalysisMonteCarloSection,
+)
+from sim.config.scenario.models import (
+    AnalysisSection as AnalysisSection,
+)
+from sim.config.scenario.models import (
+    BridgePointer as BridgePointer,
+)
+from sim.config.scenario.models import (
+    CovarianceCollisionScreeningSection as CovarianceCollisionScreeningSection,
+)
+from sim.config.scenario.models import (
+    CovarianceFiniteDifferenceSection as CovarianceFiniteDifferenceSection,
+)
+from sim.config.scenario.models import (
+    CovarianceObjectSection as CovarianceObjectSection,
+)
+from sim.config.scenario.models import (
+    CovariancePairSection as CovariancePairSection,
+)
+from sim.config.scenario.models import (
+    CovarianceProcessNoiseSection as CovarianceProcessNoiseSection,
+)
+from sim.config.scenario.models import (
+    CovarianceSection as CovarianceSection,
+)
+from sim.config.scenario.models import (
+    GroundStationSection as GroundStationSection,
+)
+from sim.config.scenario.models import (
+    MissionRecoverySection as MissionRecoverySection,
+)
+from sim.config.scenario.models import (
+    MonteCarloSection as MonteCarloSection,
+)
+from sim.config.scenario.models import (
+    MonteCarloVariation as MonteCarloVariation,
+)
+from sim.config.scenario.models import (
+    OutputAIConfigSection as OutputAIConfigSection,
+)
+from sim.config.scenario.models import (
+    OutputAIReportSection as OutputAIReportSection,
+)
+from sim.config.scenario.models import (
+    OutputAnimationsSection as OutputAnimationsSection,
+)
+from sim.config.scenario.models import (
+    OutputMonteCarloSection as OutputMonteCarloSection,
+)
+from sim.config.scenario.models import (
+    OutputPlotsSection as OutputPlotsSection,
+)
+from sim.config.scenario.models import (
+    OutputResourceLimitsSection as OutputResourceLimitsSection,
+)
+from sim.config.scenario.models import (
+    OutputReviewSection as OutputReviewSection,
+)
+from sim.config.scenario.models import (
+    OutputsSection as OutputsSection,
+)
+from sim.config.scenario.models import (
+    OutputStatsSection as OutputStatsSection,
+)
+from sim.config.scenario.models import (
+    SensitivityParameter as SensitivityParameter,
+)
+from sim.config.scenario.models import (
+    SensitivitySection as SensitivitySection,
+)
+from sim.config.scenario.models import (
+    SimulationScenarioConfig as SimulationScenarioConfig,
+)
+from sim.config.scenario.models import (
+    SimulatorAccelerationSection as SimulatorAccelerationSection,
+)
+from sim.config.scenario.models import (
+    SimulatorDynamicsSection as SimulatorDynamicsSection,
+)
+from sim.config.scenario.models import (
+    SimulatorEnvironmentSection as SimulatorEnvironmentSection,
+)
+from sim.config.scenario.models import (
+    SimulatorExecutionSection as SimulatorExecutionSection,
+)
+from sim.config.scenario.models import (
+    SimulatorFramesSection as SimulatorFramesSection,
+)
+from sim.config.scenario.models import (
+    SimulatorPluginValidationSection as SimulatorPluginValidationSection,
+)
+from sim.config.scenario.models import (
+    SimulatorSection as SimulatorSection,
+)
+from sim.config.scenario.models import (
+    SimulatorTerminationSection as SimulatorTerminationSection,
+)
+from sim.config.scenario.models import (
+    _TypedConfigDict as _TypedConfigDict,
+)
+from sim.config.scenario.objects import (
+    _INITIAL_STATE_ALLOWED_KEYS as _INITIAL_STATE_ALLOWED_KEYS,
+)
+from sim.config.scenario.objects import (
+    _INITIAL_STATE_AUX_KEYS as _INITIAL_STATE_AUX_KEYS,
+)
+from sim.config.scenario.objects import (
+    _INITIAL_STATE_FORM_KEYS as _INITIAL_STATE_FORM_KEYS,
+)
+from sim.config.scenario.objects import (
+    _parse_agent_section as _parse_agent_section,
+)
+from sim.config.scenario.objects import (
+    _parse_algorithm_pointer as _parse_algorithm_pointer,
+)
+from sim.config.scenario.objects import (
+    _parse_bridge_pointer as _parse_bridge_pointer,
+)
+from sim.config.scenario.objects import (
+    _parse_ground_station_measurements as _parse_ground_station_measurements,
+)
+from sim.config.scenario.objects import (
+    _parse_ground_station_section as _parse_ground_station_section,
+)
+from sim.config.scenario.objects import (
+    _parse_ground_stations_section as _parse_ground_stations_section,
+)
+from sim.config.scenario.objects import (
+    _parse_initial_state_section as _parse_initial_state_section,
+)
+from sim.config.scenario.objects import (
+    _parse_objects_section as _parse_objects_section,
+)
+from sim.config.scenario.objects import (
+    _reject_unsupported_agent_body_overrides as _reject_unsupported_agent_body_overrides,
+)
+from sim.config.scenario.outputs import (
+    _parse_outputs_section as _parse_outputs_section,
+)
+from sim.config.scenario.paths import (
+    _resolve_geometry_profile_path_in_specs as _resolve_geometry_profile_path_in_specs,
+)
+from sim.config.scenario.paths import (
+    _resolve_geometry_profile_paths as _resolve_geometry_profile_paths,
+)
+from sim.config.scenario.paths import (
+    _validate_config_read_paths as _validate_config_read_paths,
+)
+from sim.config.scenario.presets import (
+    _AGENT_FRAGMENT_KEYS as _AGENT_FRAGMENT_KEYS,
+)
+from sim.config.scenario.presets import (
+    _AGENT_PRESET_KEYS as _AGENT_PRESET_KEYS,
+)
+from sim.config.scenario.presets import (
+    _PRESET_METADATA_KEYS as _PRESET_METADATA_KEYS,
+)
+from sim.config.scenario.presets import (
+    _agent_fragment_from_preset as _agent_fragment_from_preset,
+)
+from sim.config.scenario.presets import (
+    _deep_merge_dicts as _deep_merge_dicts,
+)
+from sim.config.scenario.presets import (
+    _load_yaml_mapping as _load_yaml_mapping,
+)
+from sim.config.scenario.presets import (
+    _resolve_agent_preset as _resolve_agent_preset,
+)
+from sim.config.scenario.presets import (
+    _resolve_agent_presets as _resolve_agent_presets,
+)
+from sim.config.scenario.presets import (
+    _resolve_preset_path as _resolve_preset_path,
+)
+from sim.config.scenario.primitives import (
+    _OUTPUT_ANIMATIONS_UNSUPPORTED_ALIASES as _OUTPUT_ANIMATIONS_UNSUPPORTED_ALIASES,
+)
+from sim.config.scenario.primitives import (
+    _OUTPUT_PLOTS_UNSUPPORTED_ALIASES as _OUTPUT_PLOTS_UNSUPPORTED_ALIASES,
+)
+from sim.config.scenario.primitives import (
+    _OUTPUTS_UNSUPPORTED_ALIASES as _OUTPUTS_UNSUPPORTED_ALIASES,
+)
+from sim.config.scenario.primitives import (
+    _REENTRY_TERMINATION_LIMIT_FIELDS as _REENTRY_TERMINATION_LIMIT_FIELDS,
+)
+from sim.config.scenario.primitives import (
+    _ROOT_UNSUPPORTED_ALIASES as _ROOT_UNSUPPORTED_ALIASES,
+)
+from sim.config.scenario.primitives import (
+    _SIMULATOR_UNSUPPORTED_ALIASES as _SIMULATOR_UNSUPPORTED_ALIASES,
+)
+from sim.config.scenario.primitives import (
+    _as_dict as _as_dict,
+)
+from sim.config.scenario.primitives import (
+    _enforce_strict_booleans as _enforce_strict_booleans,
+)
+from sim.config.scenario.primitives import (
+    _is_bool_like_key as _is_bool_like_key,
+)
+from sim.config.scenario.primitives import (
+    _parse_bool as _parse_bool,
+)
+from sim.config.scenario.primitives import (
+    _parse_float as _parse_float,
+)
+from sim.config.scenario.primitives import (
+    _parse_optional_float as _parse_optional_float,
+)
+from sim.config.scenario.primitives import (
+    _plain_config_data as _plain_config_data,
+)
+from sim.config.scenario.primitives import (
+    _reject_unknown_fields as _reject_unknown_fields,
+)
+from sim.config.scenario.primitives import (
+    _reject_unsupported_aliases as _reject_unsupported_aliases,
+)
+from sim.config.scenario.primitives import (
+    _UnsupportedAliasMap as _UnsupportedAliasMap,
+)
+from sim.config.scenario.primitives import (
+    _validate_integer_multiple as _validate_integer_multiple,
+)
+from sim.config.scenario.primitives import (
+    _validate_sim_timing as _validate_sim_timing,
+)
+from sim.config.scenario.simulator import (
+    _normalize_dynamics_section as _normalize_dynamics_section,
+)
+from sim.config.scenario.simulator import (
+    _normalize_reentry_section as _normalize_reentry_section,
+)
+from sim.config.scenario.simulator import (
+    _normalize_reentry_termination_block as _normalize_reentry_termination_block,
+)
+from sim.config.scenario.simulator import (
+    _normalize_simulator_termination_block as _normalize_simulator_termination_block,
+)
+from sim.config.scenario.simulator import (
+    _parse_acceleration_section as _parse_acceleration_section,
+)
+from sim.config.scenario.simulator import (
+    _parse_resource_profile as _parse_resource_profile,
+)
+from sim.config.scenario.simulator import (
+    _parse_simulator_execution_section as _parse_simulator_execution_section,
+)
+from sim.config.scenario.simulator import (
+    _parse_simulator_frames_section as _parse_simulator_frames_section,
+)
+from sim.config.scenario.simulator import (
+    _parse_simulator_section as _parse_simulator_section,
+)
+from sim.config.scenario.validation import (
+    _validate_object_references as _validate_object_references,
+)
+from sim.config.scenario.validation import (
+    _validate_physics_runtime_settings as _validate_physics_runtime_settings,
 )
 
-
-def _normalize_reentry_termination_block(
-    value: Any,
-    path: str,
-    *,
-    fill_bool_defaults: bool,
-) -> dict[str, Any]:
-    termination = _as_dict(value, path)
-    if fill_bool_defaults or "enabled" in termination:
-        termination["enabled"] = _parse_bool(
-            termination.get("enabled", False),
-            f"{path}.enabled",
-        )
-    if fill_bool_defaults or "terminate_on_entry" in termination:
-        termination["terminate_on_entry"] = _parse_bool(
-            termination.get("terminate_on_entry", False),
-            f"{path}.terminate_on_entry",
-        )
-    for key in _REENTRY_TERMINATION_LIMIT_FIELDS:
-        if termination.get(key) is None:
-            continue
-        termination[key] = _parse_float(termination.get(key), f"{path}.{key}")
-        if float(termination[key]) < 0.0:
-            raise ValueError(f"{path}.{key} must be >= 0.")
-    return termination
-
-
-def _normalize_reentry_section(dynamics: dict[str, Any]) -> dict[str, Any]:
-    out = dict(dynamics or {})
-    if "reentry" not in out:
-        return out
-    raw = _as_dict(out.get("reentry"), "simulator.dynamics.reentry")
-    normalized = dict(raw)
-    normalized["enabled"] = _parse_bool(
-        normalized.get("enabled", False),
-        "simulator.dynamics.reentry.enabled",
-    )
-    normalized["begin_altitude_km"] = _parse_float(
-        normalized.get("begin_altitude_km", 300.0),
-        "simulator.dynamics.reentry.begin_altitude_km",
-    )
-    if normalized["begin_altitude_km"] < 0.0:
-        raise ValueError("simulator.dynamics.reentry.begin_altitude_km must be >= 0.")
-    if normalized.get("nose_radius_m") is not None:
-        normalized["nose_radius_m"] = _parse_float(
-            normalized.get("nose_radius_m"),
-            "simulator.dynamics.reentry.nose_radius_m",
-        )
-        if normalized["nose_radius_m"] <= 0.0:
-            raise ValueError("simulator.dynamics.reentry.nose_radius_m must be positive.")
-    normalized["heat_rate_coefficient"] = _parse_float(
-        normalized.get("heat_rate_coefficient", 1.83e-4),
-        "simulator.dynamics.reentry.heat_rate_coefficient",
-    )
-    if normalized["heat_rate_coefficient"] < 0.0:
-        raise ValueError("simulator.dynamics.reentry.heat_rate_coefficient must be >= 0.")
-    object_ids = normalized.get("object_ids", [])
-    if isinstance(object_ids, str):
-        normalized["object_ids"] = [object_ids]
-    elif isinstance(object_ids, list):
-        normalized["object_ids"] = [str(item) for item in object_ids]
-    else:
-        raise ValueError("simulator.dynamics.reentry.object_ids must be a string or list of strings.")
-    atmosphere_model = normalized.get("atmosphere_model")
-    if atmosphere_model is not None:
-        atmosphere_model = str(atmosphere_model).strip().lower()
-        if atmosphere_model not in {
-            "",
-            "exponential",
-            "ussa1976",
-            "msis86",
-            "msis-86",
-            "hpop_msis86",
-            "nrlmsise00",
-            "jacchia70",
-            "jacchia-70",
-            "hpop_jacchia70",
-            "jb2006",
-            "jb2008",
-            "harris_priester",
-            "harris-priester",
-            "hp",
-            "hpop_harris_priester",
-        }:
-            raise ValueError(
-                "simulator.dynamics.reentry.atmosphere_model must be one of: "
-                "exponential, ussa1976, msis86, nrlmsise00, jacchia70, jb2006, jb2008, harris_priester."
-            )
-        normalized["atmosphere_model"] = atmosphere_model
-    termination = dict(normalized.get("termination", {}) or {})
-    if termination:
-        by_object_raw = termination.pop("by_object", {})
-        termination = _normalize_reentry_termination_block(
-            termination,
-            "simulator.dynamics.reentry.termination",
-            fill_bool_defaults=True,
-        )
-        if by_object_raw is not None:
-            if not isinstance(by_object_raw, dict):
-                raise ValueError("simulator.dynamics.reentry.termination.by_object must be a mapping.")
-            by_object: dict[str, Any] = {}
-            for object_id, object_termination in by_object_raw.items():
-                object_path = f"simulator.dynamics.reentry.termination.by_object.{object_id}"
-                by_object[str(object_id)] = _normalize_reentry_termination_block(
-                    object_termination,
-                    object_path,
-                    fill_bool_defaults=False,
-                )
-            termination["by_object"] = by_object
-    normalized["termination"] = termination
-    out["reentry"] = normalized
-    return out
-
-
-def _parse_algorithm_pointer(value: Any) -> AlgorithmPointer | None:
-    if value is None:
-        return None
-    if isinstance(value, str):
-        return AlgorithmPointer(module=value)
-    d = _as_dict(value, "algorithm_pointer")
-    if d.get("file") not in (None, ""):
-        raise ValueError("Algorithm pointers do not support 'file'; use importable 'module' paths instead.")
-    return AlgorithmPointer(
-        kind=str(d.get("kind", "python")),
-        module=d.get("module"),
-        class_name=d.get("class_name"),
-        function=d.get("function"),
-        file=d.get("file"),
-        params=dict(d.get("params", {}) or {}),
-    )
-
-
-def _parse_bridge_pointer(value: Any) -> BridgePointer | None:
-    if value is None:
-        return None
-    d = _as_dict(value, "bridge")
-    return BridgePointer(
-        enabled=_parse_bool(d.get("enabled", False), "bridge.enabled"),
-        mode=str(d.get("mode", "sil")),
-        endpoint=d.get("endpoint"),
-        module=d.get("module"),
-        class_name=d.get("class_name"),
-        params=dict(d.get("params", {}) or {}),
-    )
-
-
-def _parse_agent_section(
-    value: Any,
-    role: str,
-    *,
-    object_id: str | None = None,
-    default_enabled: bool | None = None,
-    default_kind: str | None = None,
-) -> AgentSection:
-    d = _as_dict(value, role)
-    _reject_unsupported_agent_body_overrides(d, role)
-    _reject_unknown_fields(d, role, set(_AGENT_FRAGMENT_KEYS) | set(_AGENT_PRESET_KEYS))
-    objectives = d.get("mission_objectives", []) or []
-    if not isinstance(objectives, list):
-        raise ValueError(f"Section '{role}.mission_objectives' must be a list.")
-    guidance_modifiers = d.get("guidance_modifiers", []) or []
-    if not isinstance(guidance_modifiers, list):
-        raise ValueError(f"Section '{role}.guidance_modifiers' must be a list.")
-    default_enabled_by_role = {"rocket": False, "chaser": False, "target": True}
-    resolved_object_id = str(d.get("object_id", object_id or role)).strip()
-    if not resolved_object_id:
-        raise ValueError(f"Section '{role}.object_id' must be non-empty.")
-    resolved_role = str(d.get("role", role.split(".")[-1]))
-    resolved_kind = (
-        str(d.get("kind", default_kind or ("rocket" if resolved_role == "rocket" else "satellite"))).strip().lower()
-    )
-    if resolved_kind not in {"satellite", "rocket"}:
-        raise ValueError(f"Section '{role}.kind' must be one of: satellite, rocket.")
-    propagation_method = str(d.get("propagation_method", d.get("propagation_family", "")) or "").strip().lower()
-    if propagation_method and propagation_method not in {"special", "general"}:
-        raise ValueError(f"Section '{role}.propagation_method' must be one of: special, general.")
-    general = _as_dict(d.get("general"), f"{role}.general")
-    if resolved_kind != "rocket" and d.get("guidance") is not None:
-        raise ValueError(
-            f"Section '{role}.guidance' is no longer supported. "
-            "Use mission_objectives for mission logic and orbit_control/attitude_control for controllers."
-        )
-    base_guidance = d.get("base_guidance")
-    legacy_guidance = d.get("guidance")
-    if resolved_kind == "rocket" and base_guidance is None and legacy_guidance is not None:
-        base_guidance = legacy_guidance
-    resolved_default_enabled = (
-        bool(default_enabled_by_role.get(role, True)) if default_enabled is None else bool(default_enabled)
-    )
-    return AgentSection(
-        object_id=resolved_object_id,
-        kind=resolved_kind,
-        enabled=_parse_bool(d.get("enabled", resolved_default_enabled), f"{role}.enabled"),
-        role=resolved_role,
-        propagation_method=propagation_method,
-        general=general,
-        specs=dict(d.get("specs", {}) or {}),
-        initial_state=_parse_initial_state_section(d.get("initial_state"), role),
-        reference_orbit=dict(d.get("reference_orbit", {}) or {}),
-        guidance=_parse_algorithm_pointer(legacy_guidance),
-        base_guidance=_parse_algorithm_pointer(base_guidance),
-        guidance_modifiers=[p for p in (_parse_algorithm_pointer(x) for x in guidance_modifiers) if p is not None],
-        orbit_control=_parse_algorithm_pointer(d.get("orbit_control")),
-        attitude_control=_parse_algorithm_pointer(d.get("attitude_control")),
-        mission_strategy=_parse_algorithm_pointer(d.get("mission_strategy")),
-        mission_execution=_parse_algorithm_pointer(d.get("mission_execution")),
-        mission_objectives=[p for p in (_parse_algorithm_pointer(x) for x in objectives) if p is not None],
-        bridge=_parse_bridge_pointer(d.get("bridge")),
-        knowledge=dict(d.get("knowledge", {}) or {}),
-    )
-
-
-_INITIAL_STATE_AUX_KEYS = {
-    "attitude_quat_bn",
-    "angular_rate_body_rad_s",
-    "epoch_jd_utc",
-    "relative_to",
-    "deploy_time_s",
-    "deploy_dv_body_m_s",
-    "initialization_delay_s",
-}
-_INITIAL_STATE_FORM_KEYS = {
-    "position_eci_km",
-    "tle",
-    "coes",
-    "cr3bp_rotating",
-    "cr3bp_halo",
-    "relative_to_target_ric",
-    "relative_ric_rect",
-    "relative_ric_curv",
-    "relative_to_target_cislunar",
-    "relative_cislunar",
-    "launch_lat_deg",
-    "source",
-    "default_circular_earth",
-}
-_INITIAL_STATE_ALLOWED_KEYS = _INITIAL_STATE_AUX_KEYS | _INITIAL_STATE_FORM_KEYS | {
-    "velocity_eci_km_s",
-    "launch_lon_deg",
-    "launch_alt_km",
-    "launch_azimuth_deg",
-}
-
-
-def _parse_initial_state_section(value: Any, role: str) -> dict[str, Any]:
-    path = f"{role}.initial_state"
-    state = _as_dict(value, path)
-    if not state:
-        # Retained only for the legacy implicit quickstart/default-object path.
-        # Any non-empty state is strictly validated below so typos cannot fall
-        # through to that runtime default.
-        return {}
-    # Give a targeted diagnostic for a common indentation mistake instead of
-    # reporting only that the misplaced generic ``state`` key is unknown.
-    relative_target = state.get("relative_to_target_ric")
-    if "state" in state and isinstance(relative_target, dict) and "state" not in relative_target:
-        raise ValueError(
-            f"{path}.relative_to_target_ric.state must be a length-6 finite numeric list nested "
-            "under relative_to_target_ric."
-        )
-    _reject_unknown_fields(state, path, _INITIAL_STATE_ALLOWED_KEYS)
-
-    forms = [key for key in _INITIAL_STATE_FORM_KEYS if key in state]
-    if len(forms) != 1:
-        raise ValueError(
-            f"{path} must define exactly one orbital-state form; found: "
-            + (", ".join(sorted(forms)) if forms else "none")
-            + "."
-        )
-    form = forms[0]
-    if form == "position_eci_km" and "velocity_eci_km_s" not in state:
-        raise ValueError(f"{path}.position_eci_km requires {path}.velocity_eci_km_s.")
-    if form != "position_eci_km" and "velocity_eci_km_s" in state:
-        raise ValueError(f"{path}.velocity_eci_km_s is only valid with position_eci_km.")
-    if form == "launch_lat_deg":
-        # Azimuth is optional and has a documented/runtime due-east default.
-        required = {"launch_lat_deg", "launch_lon_deg", "launch_alt_km"}
-        missing = sorted(required - set(state))
-        if missing:
-            raise ValueError(f"{path} launch state is missing: {', '.join(missing)}.")
-    if form == "default_circular_earth" and not _parse_bool(
-        state.get("default_circular_earth"), f"{path}.default_circular_earth"
-    ):
-        raise ValueError(f"{path}.default_circular_earth must be true when selected.")
-    for key, length in (
-        ("position_eci_km", 3),
-        ("velocity_eci_km_s", 3),
-        ("angular_rate_body_rad_s", 3),
-        ("attitude_quat_bn", 4),
-        ("deploy_dv_body_m_s", 3),
-        ("relative_ric_rect", 6),
-        ("relative_ric_curv", 6),
-        ("relative_cislunar", 6),
-    ):
-        if key not in state:
-            continue
-        raw = state[key]
-        if not isinstance(raw, (list, tuple)) or len(raw) != length:
-            raise ValueError(f"{path}.{key} must be a length-{length} list.")
-        values = [_parse_float(item, f"{path}.{key}") for item in raw]
-        if key == "attitude_quat_bn" and math.sqrt(sum(item * item for item in values)) <= 0.0:
-            raise ValueError(f"{path}.attitude_quat_bn must have nonzero norm.")
-    if "initialization_delay_s" in state:
-        delay_s = _parse_float(state["initialization_delay_s"], f"{path}.initialization_delay_s")
-        if delay_s < 0.0:
-            raise ValueError(f"{path}.initialization_delay_s must be nonnegative.")
-    return dict(state)
-
-
-def _reject_unsupported_agent_body_overrides(d: dict[str, Any], role: str) -> None:
-    unsupported_root_keys = {
-        "central_body",
-        "primary_body",
-        "body",
-        "mu_km3_s2",
-        "gravitational_parameter_km3_s2",
-    }
-    root_hits = sorted(str(key) for key in d if str(key) in unsupported_root_keys)
-    if root_hits:
-        raise ValueError(
-            f"Section '{role}' has unsupported central-body field(s): {', '.join(root_hits)}. "
-            "Object-level central-body overrides are not supported; public OEL orbit scenarios are "
-            "Earth-centered except for documented CR3BP/cislunar modes."
-        )
-
-    orbit = d.get("orbit")
-    if orbit is None:
-        return
-    if not isinstance(orbit, dict):
-        raise ValueError(f"Section '{role}.orbit' must be a mapping/object when provided.")
-    unsupported_orbit_keys = sorted(str(key) for key in orbit if str(key) in unsupported_root_keys)
-    if unsupported_orbit_keys:
-        raise ValueError(
-            f"Section '{role}.orbit' has unsupported central-body field(s): "
-            f"{', '.join(unsupported_orbit_keys)}. Object-level central-body overrides are not supported; "
-            "public OEL orbit scenarios are Earth-centered except for documented CR3BP/cislunar modes."
-        )
-
-
-def _parse_ground_station_section(value: Any, index: int) -> GroundStationSection:
-    d = _as_dict(value, f"ground_stations[{index}]")
-    allowed_keys = {
-        "id",
-        "name",
-        "lat_deg",
-        "lon_deg",
-        "alt_km",
-        "altitude_km",
-        "min_elevation_deg",
-        "max_range_km",
-        "enabled",
-        "measurements",
-    }
-    unknown_keys = sorted(str(key) for key in d if str(key) not in allowed_keys)
-    if unknown_keys:
-        raise ValueError(
-            f"ground_stations[{index}] has unsupported field(s): {', '.join(unknown_keys)}. "
-            "Ground stations are fixed geometric access sites; RF links or moving platforms are not modeled here."
-        )
-    raw_id = d.get("id", d.get("name", f"ground_station_{index + 1}"))
-    station_id = str(raw_id or "").strip()
-    if not station_id:
-        raise ValueError(f"ground_stations[{index}].id must be non-empty.")
-    if "lat_deg" not in d:
-        raise ValueError(f"ground_stations[{index}].lat_deg is required.")
-    if "lon_deg" not in d:
-        raise ValueError(f"ground_stations[{index}].lon_deg is required.")
-    lat_deg = _parse_float(d.get("lat_deg"), f"ground_stations[{index}].lat_deg")
-    lon_deg = _parse_float(d.get("lon_deg"), f"ground_stations[{index}].lon_deg")
-    alt_km = _parse_float(d.get("alt_km", d.get("altitude_km", 0.0)), f"ground_stations[{index}].alt_km")
-    min_elevation_deg = _parse_float(
-        d.get("min_elevation_deg", 0.0),
-        f"ground_stations[{index}].min_elevation_deg",
-    )
-    max_range_km = _parse_optional_float(d.get("max_range_km"), f"ground_stations[{index}].max_range_km")
-    if not (-90.0 <= lat_deg <= 90.0):
-        raise ValueError(f"ground_stations[{index}].lat_deg must be between -90 and 90.")
-    if max_range_km is not None and max_range_km <= 0.0:
-        raise ValueError(f"ground_stations[{index}].max_range_km must be positive when provided.")
-    measurements = _parse_ground_station_measurements(d.get("measurements", {}), index)
-    return GroundStationSection(
-        id=station_id,
-        lat_deg=lat_deg,
-        lon_deg=lon_deg,
-        alt_km=alt_km,
-        min_elevation_deg=min_elevation_deg,
-        max_range_km=max_range_km,
-        enabled=_parse_bool(d.get("enabled", True), f"ground_stations[{index}].enabled"),
-        measurements=measurements,
-    )
-
-
-def _parse_ground_station_measurements(value: Any, index: int) -> dict[str, Any]:
-    if value in (None, False) or value == {}:
-        return {}
-    if value is True:
-        return {"enabled": True}
-    d = _as_dict(value, f"ground_stations[{index}].measurements")
-    allowed_keys = {
-        "enabled",
-        "measurement_type",
-        "update_cadence_s",
-        "seed",
-        "range_sigma_km",
-        "range_rate_sigma_km_s",
-        "angle_sigma_deg",
-        "noise",
-    }
-    unknown_keys = sorted(str(key) for key in d if str(key) not in allowed_keys)
-    if unknown_keys:
-        raise ValueError(
-            f"ground_stations[{index}].measurements has unsupported field(s): {', '.join(unknown_keys)}."
-        )
-    out = dict(d)
-    out["enabled"] = _parse_bool(out.get("enabled", True), f"ground_stations[{index}].measurements.enabled")
-    if "update_cadence_s" in out:
-        cadence = _parse_float(out.get("update_cadence_s"), f"ground_stations[{index}].measurements.update_cadence_s")
-        if cadence <= 0.0:
-            raise ValueError(f"ground_stations[{index}].measurements.update_cadence_s must be positive.")
-        out["update_cadence_s"] = cadence
-    if "seed" in out:
-        out["seed"] = int(_parse_float(out.get("seed"), f"ground_stations[{index}].measurements.seed"))
-    for key in ("range_sigma_km", "range_rate_sigma_km_s", "angle_sigma_deg"):
-        if key in out:
-            sigma = _parse_float(out.get(key), f"ground_stations[{index}].measurements.{key}")
-            if sigma < 0.0:
-                raise ValueError(f"ground_stations[{index}].measurements.{key} must be non-negative.")
-            out[key] = sigma
-    if "noise" in out:
-        noise = _as_dict(out["noise"], f"ground_stations[{index}].measurements.noise")
-        noise_allowed = {"range_sigma_km", "range_rate_sigma_km_s", "angle_sigma_deg"}
-        noise_unknown = sorted(str(key) for key in noise if str(key) not in noise_allowed)
-        if noise_unknown:
-            raise ValueError(
-                f"ground_stations[{index}].measurements.noise has unsupported field(s): {', '.join(noise_unknown)}."
-            )
-        out["noise"] = {
-            key: _parse_float(value, f"ground_stations[{index}].measurements.noise.{key}")
-            for key, value in noise.items()
-        }
-        for key, sigma in out["noise"].items():
-            if sigma < 0.0:
-                raise ValueError(f"ground_stations[{index}].measurements.noise.{key} must be non-negative.")
-    if "measurement_type" in out:
-        measurement_type = str(out["measurement_type"] or "").strip().lower()
-        if measurement_type not in {"az_el_range", "az_el_range_rate"}:
-            raise ValueError(
-                f"ground_stations[{index}].measurements.measurement_type must be "
-                "'az_el_range' or 'az_el_range_rate'."
-            )
-        out["measurement_type"] = measurement_type
-    return out
-
-
-def _parse_objects_section(
-    value: Any,
-) -> dict[str, AgentSection]:
-    objects: dict[str, AgentSection] = {}
-    if value is not None:
-        raw_objects = _as_dict(value, "objects")
-        for object_id, raw_agent in raw_objects.items():
-            oid = str(object_id).strip()
-            if not oid:
-                raise ValueError("objects keys must be non-empty object ids.")
-            agent = _parse_agent_section(
-                raw_agent,
-                role=f"objects.{oid}",
-                object_id=oid,
-                default_enabled=True,
-                default_kind="rocket" if oid == "rocket" else "satellite",
-            )
-            if agent.object_id != oid:
-                raise ValueError(f"objects.{oid}.object_id must match its object id key.")
-            objects[oid] = agent
-
-    return objects
-
-
-def _parse_ground_stations_section(value: Any) -> list[GroundStationSection]:
-    if value is None:
-        return []
-    if isinstance(value, dict):
-        items = []
-        for key, child in value.items():
-            child_dict = _as_dict(child, f"ground_stations.{key}")
-            child_dict.setdefault("id", str(key))
-            items.append(child_dict)
-    elif isinstance(value, list):
-        items = list(value)
-    else:
-        raise ValueError("ground_stations must be a list or mapping.")
-    stations = [_parse_ground_station_section(item, idx) for idx, item in enumerate(items)]
-    seen: set[str] = set()
-    for station in stations:
-        if station.id in seen:
-            raise ValueError(f"ground_stations contains duplicate id: {station.id}")
-        seen.add(station.id)
-    return stations
-
-
-def _normalize_simulator_termination_block(
-    value: Any,
-    path: str,
-    *,
-    fill_defaults: bool,
-) -> dict[str, Any]:
-    termination = _as_dict(value, path)
-    _reject_unknown_fields(termination, path, {"enabled", "earth_impact_enabled", "earth_radius_km"})
-    if "enabled" in termination and "earth_impact_enabled" not in termination:
-        termination["earth_impact_enabled"] = termination.pop("enabled")
-    elif "enabled" in termination:
-        termination.pop("enabled")
-    if fill_defaults or "earth_impact_enabled" in termination:
-        termination["earth_impact_enabled"] = _parse_bool(
-            termination.get("earth_impact_enabled", True),
-            f"{path}.earth_impact_enabled",
-        )
-    if fill_defaults or "earth_radius_km" in termination:
-        termination["earth_radius_km"] = _parse_float(
-            termination.get("earth_radius_km", 6378.137),
-            f"{path}.earth_radius_km",
-        )
-        if float(termination["earth_radius_km"]) <= 0.0:
-            raise ValueError(f"{path}.earth_radius_km must be positive.")
-    return termination
-
-
-def _parse_simulator_section(value: Any) -> SimulatorSection:
-    d = _as_dict(value, "simulator")
-    _reject_unsupported_aliases(d, "simulator", _SIMULATOR_UNSUPPORTED_ALIASES)
-    _reject_unknown_fields(
-        d,
-        "simulator",
-        {
-            "duration_s",
-            "dt_s",
-            "initial_jd_utc",
-            "resource_profile",
-            "acceleration",
-            "execution",
-            "frames",
-            "dynamics",
-            "environment",
-            "plugin_validation",
-            "termination",
-        },
-    )
-    plugin_validation = {"strict": True}
-    plugin_validation.update(dict(d.get("plugin_validation", {}) or {}))
-    _reject_unknown_fields(plugin_validation, "simulator.plugin_validation", {"strict", "strict_runtime"})
-    termination_raw = dict(d.get("termination", {}) or {})
-    termination_by_object_raw = termination_raw.pop("by_object", {})
-    termination = {"earth_impact_enabled": True, "earth_radius_km": 6378.137}
-    termination.update(termination_raw)
-    plugin_validation["strict"] = _parse_bool(
-        plugin_validation.get("strict", True), "simulator.plugin_validation.strict"
-    )
-    plugin_validation["strict_runtime"] = _parse_bool(
-        plugin_validation.get("strict_runtime", False), "simulator.plugin_validation.strict_runtime"
-    )
-    termination = _normalize_simulator_termination_block(
-        termination,
-        "simulator.termination",
-        fill_defaults=True,
-    )
-    if termination_by_object_raw is not None:
-        if not isinstance(termination_by_object_raw, dict):
-            raise ValueError("simulator.termination.by_object must be a mapping.")
-        by_object: dict[str, Any] = {}
-        for object_id, object_termination in termination_by_object_raw.items():
-            object_path = f"simulator.termination.by_object.{object_id}"
-            by_object[str(object_id)] = _normalize_simulator_termination_block(
-                object_termination,
-                object_path,
-                fill_defaults=False,
-            )
-        termination["by_object"] = by_object
-    dynamics = _normalize_dynamics_section(dict(d.get("dynamics", {}) or {}))
-    out = SimulatorSection(
-        duration_s=_parse_float(d.get("duration_s", 3600.0), "simulator.duration_s"),
-        dt_s=_parse_float(d.get("dt_s", 1.0), "simulator.dt_s"),
-        initial_jd_utc=_parse_optional_float(d.get("initial_jd_utc"), "simulator.initial_jd_utc"),
-        resource_profile=_parse_resource_profile(d.get("resource_profile"), "simulator.resource_profile"),
-        acceleration=_parse_acceleration_section(d.get("acceleration")),
-        execution=_parse_simulator_execution_section(d.get("execution")),
-        frames=_parse_simulator_frames_section(d.get("frames")),
-        dynamics=dynamics,
-        environment=dict(d.get("environment", {}) or {}),
-        plugin_validation=plugin_validation,
-        termination=termination,
-    )
-    if str(out.frames.model).strip().lower() in {"iau76_80_eop", "iau76_fk5_iau80_eop", "hpop_like", "hpop"}:
-        has_manual_eop = any(out.frames.get(key) is not None for key in ("dut1_s", "xp_arcsec", "yp_arcsec", "dat_s"))
-        has_manual_eop = has_manual_eop or any(
-            float(out.frames.get(key, 0.0) or 0.0) != 0.0 for key in ("ddpsi_rad", "ddeps_rad")
-        )
-        if (out.frames.eop_path is not None or has_manual_eop) and out.initial_jd_utc is None:
-            raise ValueError("simulator.frames EOP settings require simulator.initial_jd_utc for frame rotation.")
-    _validate_sim_timing(out)
-    return out
-
-
-def _normalize_dynamics_section(value: dict[str, Any]) -> dict[str, Any]:
-    dynamics = dict(value or {})
-    _reject_unknown_fields(dynamics, "simulator.dynamics", {"orbit", "attitude", "rocket", "reentry"})
-    orbit = _as_dict(dynamics.get("orbit"), "simulator.dynamics.orbit")
-    _reject_unknown_fields(
-        orbit,
-        "simulator.dynamics.orbit",
-        {
-            "model",
-            "cr3bp_system",
-            "propagation_method",
-            "integrator",
-            "adaptive_atol",
-            "adaptive_rtol",
-            "orbit_substep_s",
-            "j2",
-            "j3",
-            "j4",
-            "drag",
-            "lift",
-            "srp",
-            "third_body_sun",
-            "third_body_moon",
-            "atmosphere_model",
-            "drag_frame_model",
-            "drag_eop_path",
-            "drag_earth_rotation_rad_s",
-            "de440_coeff_path",
-            "de440_eop_path",
-            "spherical_harmonics",
-        },
-    )
-    attitude = _as_dict(dynamics.get("attitude"), "simulator.dynamics.attitude")
-    _reject_unknown_fields(
-        attitude,
-        "simulator.dynamics.attitude",
-        {"enabled", "attitude_substep_s", "disturbance_torques", "guardrail_policy"},
-    )
-    dynamics["orbit"] = orbit
-    dynamics["attitude"] = attitude
-    return _normalize_reentry_section(dynamics)
-
-
-def _parse_simulator_frames_section(value: Any) -> dict[str, Any]:
-    raw = _as_dict(value, "simulator.frames")
-    _reject_unknown_fields(
-        raw,
-        "simulator.frames",
-        {
-            "model",
-            "frame_model",
-            "eop_path",
-            "eop_extrapolation",
-            "time_scale_model",
-            "tt_minus_utc_s",
-            "dut1_s",
-            "xp_arcsec",
-            "yp_arcsec",
-            "dat_s",
-            "ddpsi_rad",
-            "ddeps_rad",
-        },
-    )
-    out = dict(raw)
-    model = str(out.get("model", out.get("frame_model", "simple_gmst")) or "simple_gmst").strip().lower()
-    allowed = {
-        "simple",
-        "simple_gmst",
-        "simple_earth_rotation",
-        "gmst",
-        "hpop_like",
-        "hpop",
-        "iau76_80_eop",
-        "iau76_fk5_iau80_eop",
-    }
-    if model not in allowed:
-        raise ValueError(
-            "simulator.frames.model must be one of: simple_gmst, simple_earth_rotation, "
-            "hpop_like, iau76_80_eop."
-        )
-    out["model"] = model
-    for key in ("tt_minus_utc_s", "dut1_s", "xp_arcsec", "yp_arcsec", "dat_s", "ddpsi_rad", "ddeps_rad"):
-        if out.get(key) is not None:
-            out[key] = _parse_float(out.get(key), f"simulator.frames.{key}")
-    if out.get("eop_path") in ("",):
-        out["eop_path"] = None
-    eop_extrapolation = str(out.get("eop_extrapolation", "error") or "error").strip().lower()
-    if eop_extrapolation not in {"error", "hold"}:
-        raise ValueError("simulator.frames.eop_extrapolation must be 'error' or 'hold'.")
-    out["eop_extrapolation"] = eop_extrapolation
-    if out.get("time_scale_model") is not None:
-        out["time_scale_model"] = str(out.get("time_scale_model"))
-    return out
-
-
-def _parse_resource_profile(value: Any, field_name: str) -> str | None:
-    if value in (None, ""):
-        return None
-    profile = str(value).strip().lower()
-    if profile not in {"config", "laptop-safe", "standard", "aggressive", "off"}:
-        raise ValueError(f"{field_name} must be one of: config, laptop-safe, standard, aggressive, off.")
-    return profile
-
-
-def _parse_acceleration_section(value: Any) -> dict[str, Any]:
-    d = _as_dict(value, "simulator.acceleration")
-    _reject_unknown_fields(d, "simulator.acceleration", {"mode", "warmup", "env_override"})
-    mode = str(d.get("mode", "off") or "off").strip().lower()
-    if mode not in {"off", "auto", "numba"}:
-        raise ValueError("simulator.acceleration.mode must be one of: off, auto, numba.")
-    return {
-        **d,
-        "mode": mode,
-        "warmup": _parse_bool(d.get("warmup", False), "simulator.acceleration.warmup"),
-        "env_override": _parse_bool(d.get("env_override", True), "simulator.acceleration.env_override"),
-    }
-
-
-def _parse_simulator_execution_section(value: Any) -> dict[str, Any]:
-    d = _as_dict(value, "simulator.execution")
-    _reject_unknown_fields(
-        d,
-        "simulator.execution",
-        {"policy", "object_parallelism", "runtime_profiler", "controller"},
-    )
-    object_parallelism = _as_dict(d.get("object_parallelism"), "simulator.execution.object_parallelism")
-    runtime_profiler = _as_dict(d.get("runtime_profiler"), "simulator.execution.runtime_profiler")
-    controller = _as_dict(d.get("controller"), "simulator.execution.controller")
-    backend = str(object_parallelism.get("backend", "serial") or "serial").strip().lower()
-    if backend not in {"serial", "process_pool"}:
-        raise ValueError("simulator.execution.object_parallelism.backend must be one of: serial, process_pool.")
-    workers = int(object_parallelism.get("workers", 0) or 0)
-    max_workers = int(object_parallelism.get("max_workers", 0) or 0)
-    reserve_workers = int(object_parallelism.get("reserve_workers", 1) or 0)
-    min_objects = int(object_parallelism.get("min_objects", 3) or 0)
-    if workers < 0:
-        raise ValueError("simulator.execution.object_parallelism.workers must be >= 0.")
-    if max_workers < 0:
-        raise ValueError("simulator.execution.object_parallelism.max_workers must be >= 0.")
-    if reserve_workers < 0:
-        raise ValueError("simulator.execution.object_parallelism.reserve_workers must be >= 0.")
-    if min_objects < 1:
-        raise ValueError("simulator.execution.object_parallelism.min_objects must be >= 1.")
-    policy = str(d.get("policy", "configured") or "configured").strip().lower()
-    raw_enabled = object_parallelism.get("enabled", False)
-    if isinstance(raw_enabled, str) and raw_enabled.strip().lower() == "auto":
-        if policy not in {"configured", "auto"}:
-            raise ValueError(
-                "simulator.execution.object_parallelism.enabled=auto conflicts with "
-                f"simulator.execution.policy={policy!r}."
-            )
-        policy = "auto"
-        enabled = True
-    else:
-        enabled = _parse_bool(
-            raw_enabled,
-            "simulator.execution.object_parallelism.enabled",
-        )
-    if policy not in {"configured", "serial", "parallel", "auto"}:
-        raise ValueError(
-            "simulator.execution.policy must be one of: auto, configured, parallel, serial."
-        )
-    if policy == "serial":
-        enabled = False
-        backend = "serial"
-    elif policy in {"parallel", "auto"}:
-        enabled = True
-        backend = "process_pool"
-    orbit_budget_ms = _parse_float(
-        controller.get("orbit_budget_ms", 2.0),
-        "simulator.execution.controller.orbit_budget_ms",
-    )
-    attitude_budget_ms = _parse_float(
-        controller.get("attitude_budget_ms", 2.0),
-        "simulator.execution.controller.attitude_budget_ms",
-    )
-    if orbit_budget_ms <= 0.0 or attitude_budget_ms <= 0.0:
-        raise ValueError("simulator.execution.controller budgets must be positive.")
-    deadline_policy = str(controller.get("deadline_policy", "record") or "record").strip().lower()
-    if deadline_policy not in {"record", "zero_command", "error"}:
-        raise ValueError(
-            "simulator.execution.controller.deadline_policy must be one of: error, record, zero_command."
-        )
-    return {
-        **d,
-        "policy": policy,
-        "object_parallelism": {
-            **object_parallelism,
-            "enabled": enabled,
-            "backend": backend,
-            "workers": workers,
-            "max_workers": max_workers,
-            "reserve_workers": reserve_workers,
-            "min_objects": min_objects,
-        },
-        "runtime_profiler": {
-            **runtime_profiler,
-            "enabled": _parse_bool(
-                runtime_profiler.get("enabled", True),
-                "simulator.execution.runtime_profiler.enabled",
-            ),
-        },
-        "controller": {
-            **controller,
-            "orbit_budget_ms": orbit_budget_ms,
-            "attitude_budget_ms": attitude_budget_ms,
-            "deadline_policy": deadline_policy,
-        },
-    }
-
-
-def _parse_mc_variation(value: Any) -> MonteCarloVariation:
-    d = _as_dict(value, "monte_carlo.variation")
-    path = d.get("parameter_path")
-    if not isinstance(path, str) or not path:
-        raise ValueError("monte_carlo.variations[*].parameter_path must be a non-empty string.")
-    return MonteCarloVariation(
-        parameter_path=path,
-        mode=str(d.get("mode", "choice")),
-        options=list(d.get("options", []) or []),
-        low=float(d["low"]) if d.get("low") is not None else None,
-        high=float(d["high"]) if d.get("high") is not None else None,
-        mean=float(d["mean"]) if d.get("mean") is not None else None,
-        std=float(d["std"]) if d.get("std") is not None else None,
-    )
-
-
-def _parse_analysis_execution_section(value: Any) -> AnalysisExecutionSection:
-    d = _as_dict(value, "analysis.execution")
-    out = AnalysisExecutionSection(
-        parallel_enabled=_parse_bool(
-            d.get("parallel_enabled", False),
-            "analysis.execution.parallel_enabled",
-        ),
-        parallel_workers=int(d.get("parallel_workers", 0)),
-        failure_policy=str(d.get("failure_policy", "fail_fast") or "fail_fast").strip().lower(),
-    )
-    if out.parallel_workers < 0:
-        raise ValueError("analysis.execution.parallel_workers must be >= 0.")
-    if out.failure_policy not in {"fail_fast", "continue"}:
-        raise ValueError("analysis.execution.failure_policy must be one of: fail_fast, continue.")
-    return out
-
-
-def _parse_analysis_baseline_section(value: Any) -> AnalysisBaselineSection:
-    d = _as_dict(value, "analysis.baseline")
-    summary_json = str(d.get("summary_json", "") or "")
-    enabled = _parse_bool(d.get("enabled", False), "analysis.baseline.enabled")
-    raw_mode = str(d.get("mode", "") or "").strip().lower()
-    if not raw_mode:
-        raw_mode = "file" if summary_json else ("run" if enabled else "none")
-    if raw_mode not in {"none", "run", "file"}:
-        raise ValueError("analysis.baseline.mode must be one of: none, run, file.")
-    if raw_mode == "file" and not summary_json:
-        raise ValueError("analysis.baseline.summary_json is required when mode is 'file'.")
-    return AnalysisBaselineSection(
-        enabled=bool(enabled or raw_mode in {"run", "file"}),
-        mode=raw_mode,
-        summary_json=summary_json,
-    )
-
-
-def _parse_analysis_monte_carlo_section(value: Any) -> AnalysisMonteCarloSection:
-    d = _as_dict(value, "analysis.monte_carlo")
-    vars_raw = d.get("variations")
-    if vars_raw is None:
-        variations = []
-    else:
-        if not isinstance(vars_raw, list):
-            raise ValueError("analysis.monte_carlo.variations must be a list.")
-        variations = [_parse_mc_variation(v) for v in vars_raw]
-    out = AnalysisMonteCarloSection(
-        iterations=int(d.get("iterations", 1)),
-        base_seed=int(d.get("base_seed", 0)),
-        variations=variations,
-    )
-    if out.iterations <= 0:
-        raise ValueError("analysis.monte_carlo.iterations must be positive.")
-    return out
-
-
-def _parse_sensitivity_parameter(value: Any) -> SensitivityParameter:
-    d = _as_dict(value, "analysis.sensitivity.parameter")
-    path = d.get("parameter_path", d.get("path"))
-    if not isinstance(path, str) or not path:
-        raise ValueError("analysis.sensitivity.parameters[*].parameter_path must be a non-empty string.")
-    values = d.get("values", [])
-    if not isinstance(values, list):
-        raise ValueError("analysis.sensitivity.parameters[*].values must be a list.")
-    distribution = str(d.get("distribution", "uniform")).strip().lower()
-    if distribution not in {"uniform", "normal"}:
-        raise ValueError("analysis.sensitivity.parameters[*].distribution must be one of: uniform, normal.")
-    return SensitivityParameter(
-        parameter_path=path,
-        values=list(values),
-        distribution=distribution,
-        low=float(d["low"]) if d.get("low") is not None else None,
-        high=float(d["high"]) if d.get("high") is not None else None,
-        mean=float(d["mean"]) if d.get("mean") is not None else None,
-        std=float(d["std"]) if d.get("std") is not None else None,
-    )
-
-
-def _parse_sensitivity_section(value: Any) -> SensitivitySection:
-    d = _as_dict(value, "analysis.sensitivity")
-    params_raw = d.get("parameters", []) or []
-    if not isinstance(params_raw, list):
-        raise ValueError("analysis.sensitivity.parameters must be a list.")
-    out = SensitivitySection(
-        method=str(d.get("method", "one_at_a_time")),
-        samples=int(d.get("samples", 0)),
-        seed=int(d.get("seed", 0)),
-        parameters=[_parse_sensitivity_parameter(v) for v in params_raw],
-    )
-    if out.method not in {"one_at_a_time", "lhs", "two_parameter_grid"}:
-        raise ValueError("analysis.sensitivity.method must be one of: one_at_a_time, lhs, two_parameter_grid.")
-    if out.samples < 0:
-        raise ValueError("analysis.sensitivity.samples must be >= 0.")
-    return out
-
-
-def _parse_covariance_matrix(value: Any, field_name: str) -> list[list[float]]:
-    if value in (None, "", []):
-        return []
-    if not isinstance(value, list) or len(value) != 6:
-        raise ValueError(f"{field_name} must be a 6x6 list.")
-    rows: list[list[float]] = []
-    for i, row_raw in enumerate(value):
-        if not isinstance(row_raw, list) or len(row_raw) != 6:
-            raise ValueError(f"{field_name}[{i}] must contain 6 values.")
-        rows.append([_parse_float(item, f"{field_name}[{i}]") for item in row_raw])
-    return rows
-
-
-def _parse_covariance_diagonal(value: Any, field_name: str) -> list[float]:
-    if value in (None, "", []):
-        return []
-    if not isinstance(value, list) or len(value) != 6:
-        raise ValueError(f"{field_name} must contain 6 values.")
-    out = [_parse_float(item, f"{field_name}[{i}]") for i, item in enumerate(value)]
-    if any(item < 0.0 for item in out):
-        raise ValueError(f"{field_name} values must be >= 0.")
-    return out
-
-
-def _parse_covariance_object_section(value: Any, path: str) -> CovarianceObjectSection:
-    d = _as_dict(value, path)
-    frame = str(d.get("frame", "eci") or "eci").strip().lower()
-    if frame != "eci":
-        raise ValueError(f"{path}.frame must be 'eci' for covariance analysis v0.")
-    matrix_raw = d.get("covariance", d.get("matrix"))
-    diagonal_raw = d.get("diagonal")
-    if isinstance(matrix_raw, dict):
-        diagonal_raw = matrix_raw.get("diagonal", diagonal_raw)
-        matrix_raw = matrix_raw.get("matrix")
-    covariance = _parse_covariance_matrix(matrix_raw, f"{path}.covariance")
-    diagonal = _parse_covariance_diagonal(diagonal_raw, f"{path}.diagonal")
-    position_sigma = _parse_optional_float(d.get("position_sigma_km"), f"{path}.position_sigma_km")
-    velocity_sigma = _parse_optional_float(d.get("velocity_sigma_km_s"), f"{path}.velocity_sigma_km_s")
-    if position_sigma is not None and position_sigma < 0.0:
-        raise ValueError(f"{path}.position_sigma_km must be >= 0.")
-    if velocity_sigma is not None and velocity_sigma < 0.0:
-        raise ValueError(f"{path}.velocity_sigma_km_s must be >= 0.")
-    enabled = _parse_bool(d.get("enabled", True), f"{path}.enabled")
-    if enabled and not covariance and not diagonal and position_sigma is None and velocity_sigma is None:
-        raise ValueError(f"{path} must define covariance, diagonal, position_sigma_km, or velocity_sigma_km_s.")
-    return CovarianceObjectSection(
-        enabled=enabled,
-        frame=frame,
-        covariance=covariance,
-        diagonal=diagonal,
-        position_sigma_km=position_sigma,
-        velocity_sigma_km_s=velocity_sigma,
-    )
-
-
-def _parse_covariance_collision_screening_section(value: Any, path: str) -> CovarianceCollisionScreeningSection:
-    if isinstance(value, bool):
-        d: dict[str, Any] = {"enabled": value}
-    else:
-        d = _as_dict(value, path)
-    enabled = _parse_bool(d.get("enabled", False), f"{path}.enabled")
-    method = str(d.get("method", "small_object") or "small_object").strip().lower()
-    if method not in {"small_object"}:
-        raise ValueError(f"{path}.method must be 'small_object'.")
-    radius_km_raw = d.get("hard_body_radius_km")
-    radius_m_raw = d.get("hard_body_radius_m")
-    if radius_km_raw is not None and radius_m_raw is not None:
-        raise ValueError(f"{path} must define only one of hard_body_radius_km or hard_body_radius_m.")
-    if radius_km_raw is not None:
-        radius_km = _parse_float(radius_km_raw, f"{path}.hard_body_radius_km")
-    elif radius_m_raw is not None:
-        radius_km = _parse_float(radius_m_raw, f"{path}.hard_body_radius_m") / 1000.0
-    else:
-        radius_km = 0.01
-    if radius_km <= 0.0:
-        raise ValueError(f"{path}.hard_body_radius must be positive.")
-    return CovarianceCollisionScreeningSection(
-        enabled=enabled,
-        hard_body_radius_km=radius_km,
-        method=method,
-    )
-
-
-def _parse_covariance_pair_section(value: Any, index: int) -> CovariancePairSection:
-    d = _as_dict(value, f"analysis.covariance.pairs[{index}]")
-    deputy = str(d.get("deputy_id", d.get("deputy", "")) or "").strip()
-    chief = str(d.get("chief_id", d.get("chief", "")) or "").strip()
-    if not deputy:
-        raise ValueError(f"analysis.covariance.pairs[{index}].deputy_id is required.")
-    if not chief:
-        raise ValueError(f"analysis.covariance.pairs[{index}].chief_id is required.")
-    if deputy == chief:
-        raise ValueError(f"analysis.covariance.pairs[{index}] deputy_id and chief_id must differ.")
-    collision = _parse_covariance_collision_screening_section(
-        d.get("collision_screening", d.get("conjunction_screening")),
-        f"analysis.covariance.pairs[{index}].collision_screening",
-    )
-    return CovariancePairSection(deputy_id=deputy, chief_id=chief, collision_screening=collision)
-
-
-def _parse_covariance_section(value: Any) -> CovarianceSection:
-    d = _as_dict(value, "analysis.covariance")
-    objects_raw = d.get("objects", {}) or {}
-    if not isinstance(objects_raw, dict):
-        raise ValueError("analysis.covariance.objects must be a mapping.")
-    pairs_raw = d.get("pairs", []) or []
-    if not isinstance(pairs_raw, list):
-        raise ValueError("analysis.covariance.pairs must be a list.")
-    fd = _as_dict(d.get("finite_difference"), "analysis.covariance.finite_difference")
-    pos_step = _parse_float(
-        fd.get("position_step_km", 1e-3),
-        "analysis.covariance.finite_difference.position_step_km",
-    )
-    vel_step = _parse_float(
-        fd.get("velocity_step_km_s", 1e-6),
-        "analysis.covariance.finite_difference.velocity_step_km_s",
-    )
-    if pos_step <= 0.0:
-        raise ValueError("analysis.covariance.finite_difference.position_step_km must be positive.")
-    if vel_step <= 0.0:
-        raise ValueError("analysis.covariance.finite_difference.velocity_step_km_s must be positive.")
-    process_noise = _as_dict(d.get("process_noise"), "analysis.covariance.process_noise")
-    accel_sigma = _parse_float(
-        process_noise.get("acceleration_sigma_km_s2", 0.0),
-        "analysis.covariance.process_noise.acceleration_sigma_km_s2",
-    )
-    if accel_sigma < 0.0:
-        raise ValueError("analysis.covariance.process_noise.acceleration_sigma_km_s2 must be >= 0.")
-    objects = {
-        str(object_id): _parse_covariance_object_section(obj, f"analysis.covariance.objects.{object_id}")
-        for object_id, obj in objects_raw.items()
-    }
-    pairs = [_parse_covariance_pair_section(pair, idx) for idx, pair in enumerate(pairs_raw)]
-    object_ids = set(objects)
-    for pair in pairs:
-        missing = [object_id for object_id in (pair.deputy_id, pair.chief_id) if object_id not in object_ids]
-        if missing:
-            raise ValueError(
-                "analysis.covariance.pairs "
-                f"{pair.deputy_id}:{pair.chief_id} requires covariance objects for both participants; "
-                f"missing: {', '.join(missing)}."
-            )
-    return CovarianceSection(
-        enabled=_parse_bool(d.get("enabled", True), "analysis.covariance.enabled"),
-        objects=objects,
-        pairs=pairs,
-        finite_difference=CovarianceFiniteDifferenceSection(
-            position_step_km=pos_step,
-            velocity_step_km_s=vel_step,
-        ),
-        process_noise=CovarianceProcessNoiseSection(
-            enabled=_parse_bool(process_noise.get("enabled", False), "analysis.covariance.process_noise.enabled"),
-            acceleration_sigma_km_s2=accel_sigma,
-        ),
-        write_review_tables=_parse_bool(d.get("write_review_tables", True), "analysis.covariance.write_review_tables"),
-    )
-
-
-def _parse_mission_recovery_section(value: Any) -> MissionRecoverySection:
-    d = _as_dict(value, "analysis.mission_recovery")
-    goal = str(d.get("goal", d.get("recovery_goal", "orbit_shape")) or "orbit_shape").strip().lower()
-    if goal not in {"orbit_shape", "orbit_slot"}:
-        raise ValueError("analysis.mission_recovery.goal must be one of: orbit_shape, orbit_slot.")
-    assessment_raw = d.get("assessment_time_s", "final")
-    if isinstance(assessment_raw, str):
-        assessment: float | str = assessment_raw.strip().lower()
-        if assessment != "final":
-            assessment = _parse_float(assessment_raw, "analysis.mission_recovery.assessment_time_s")
-    else:
-        assessment = _parse_float(assessment_raw, "analysis.mission_recovery.assessment_time_s")
-    slot_tolerance = _parse_float(
-        d.get("slot_tolerance_deg", 1.0),
-        "analysis.mission_recovery.slot_tolerance_deg",
-    )
-    if slot_tolerance < 0.0:
-        raise ValueError("analysis.mission_recovery.slot_tolerance_deg must be >= 0.")
-    max_phasing_orbits = int(d.get("max_phasing_orbits", 5000))
-    if max_phasing_orbits < 1:
-        raise ValueError("analysis.mission_recovery.max_phasing_orbits must be at least 1.")
-    target_orbit_raw = d.get("target_orbit", d.get("desired_orbit", {})) or {}
-    if not isinstance(target_orbit_raw, dict):
-        raise ValueError("analysis.mission_recovery.target_orbit must be a mapping.")
-    target_orbit = _parse_mission_recovery_target_orbit_section(target_orbit_raw)
-    planner = _parse_mission_recovery_planner_section(
-        d.get("planner"),
-        configured_target_orbit=bool(target_orbit),
-    )
-    propulsion = dict(d.get("propulsion", {}) or {})
-    if propulsion.get("isp_s") is not None and _parse_float(propulsion.get("isp_s"), "analysis.mission_recovery.propulsion.isp_s") <= 0.0:
-        raise ValueError("analysis.mission_recovery.propulsion.isp_s must be positive.")
-    if propulsion.get("spacecraft_mass_kg") is not None and _parse_float(
-        propulsion.get("spacecraft_mass_kg"),
-        "analysis.mission_recovery.propulsion.spacecraft_mass_kg",
-    ) <= 0.0:
-        raise ValueError("analysis.mission_recovery.propulsion.spacecraft_mass_kg must be positive.")
-    if propulsion.get("max_thrust_n") is not None and _parse_float(
-        propulsion.get("max_thrust_n"),
-        "analysis.mission_recovery.propulsion.max_thrust_n",
-    ) <= 0.0:
-        raise ValueError("analysis.mission_recovery.propulsion.max_thrust_n must be positive.")
-    tolerances_raw = d.get("element_tolerances", {}) or {}
-    if not isinstance(tolerances_raw, dict):
-        raise ValueError("analysis.mission_recovery.element_tolerances must be a mapping.")
-    tolerances = {
-        str(key): _parse_float(value, f"analysis.mission_recovery.element_tolerances.{key}")
-        for key, value in tolerances_raw.items()
-    }
-    if any(value < 0.0 for value in tolerances.values()):
-        raise ValueError("analysis.mission_recovery.element_tolerances values must be >= 0.")
-    return MissionRecoverySection(
-        enabled=_parse_bool(d.get("enabled", False), "analysis.mission_recovery.enabled"),
-        object_id=str(d.get("object_id", "") or "").strip(),
-        goal=goal,
-        assessment_time_s=assessment,
-        slot_tolerance_deg=slot_tolerance,
-        max_phasing_orbits=max_phasing_orbits,
-        planner=planner,
-        propulsion=propulsion,
-        element_tolerances=tolerances,
-        target_orbit=target_orbit,
-    )
-
-
-def _parse_mission_recovery_target_orbit_section(value: dict[str, Any]) -> dict[str, Any]:
-    d = dict(value or {})
-    if not d:
-        return {}
-    coes_raw = d.get("coes", d)
-    if not isinstance(coes_raw, dict):
-        raise ValueError("analysis.mission_recovery.target_orbit.coes must be a mapping.")
-    out: dict[str, float] = {}
-    aliases = {
-        "a_km": ("a_km", "semi_major_axis_km"),
-        "ecc": ("ecc", "e"),
-        "inc_deg": ("inc_deg", "inclination_deg"),
-        "raan_deg": ("raan_deg",),
-        "argp_deg": ("argp_deg", "arg_periapsis_deg"),
-        "true_anomaly_deg": ("true_anomaly_deg", "ta_deg"),
-    }
-    for canonical, keys in aliases.items():
-        for key in keys:
-            if key in coes_raw:
-                out[canonical] = _parse_float(
-                    coes_raw[key],
-                    f"analysis.mission_recovery.target_orbit.coes.{canonical}",
-                )
-                break
-    if "a_km" in out and out["a_km"] <= 0.0:
-        raise ValueError("analysis.mission_recovery.target_orbit.coes.a_km must be positive.")
-    if "ecc" in out and not (0.0 <= out["ecc"] < 1.0):
-        raise ValueError("analysis.mission_recovery.target_orbit.coes.ecc must satisfy 0 <= ecc < 1.")
-    return {"coes": out}
-
-
-def _parse_mission_recovery_planner_section(
-    value: Any,
-    *,
-    configured_target_orbit: bool = False,
-) -> dict[str, Any]:
-    d = _as_dict(value, "analysis.mission_recovery.planner")
-    enabled = _parse_bool(d.get("enabled", False), "analysis.mission_recovery.planner.enabled")
-    default_sources = (
-        ["analytic_reconstitution", "orbit_transfer"]
-        if configured_target_orbit
-        else ["analytic_reconstitution"]
-    )
-    raw_sources = d.get("sources", d.get("source", default_sources))
-    if isinstance(raw_sources, str):
-        sources = [raw_sources]
-    else:
-        sources = list(raw_sources or [])
-    sources = [str(source).strip().lower() for source in sources if str(source).strip()]
-    if not sources:
-        sources = list(default_sources)
-    source_aliases = {
-        "existing": "analytic_reconstitution",
-        "legacy": "analytic_reconstitution",
-        "lambert": "orbit_transfer",
-        "orbit_transfer_planner": "orbit_transfer",
-    }
-    sources = [source_aliases.get(source, source) for source in sources]
-    sources = list(dict.fromkeys(sources))
-    allowed_sources = {"analytic_reconstitution", "orbit_transfer"}
-    invalid_sources = [source for source in sources if source not in allowed_sources]
-    if invalid_sources:
-        raise ValueError(
-            "analysis.mission_recovery.planner.sources must contain only: "
-            "analytic_reconstitution, orbit_transfer."
-        )
-    raw_modes = d.get("modes", d.get("mode", ["min_delta_v", "min_time", "constrained"]))
-    if isinstance(raw_modes, str):
-        modes = [raw_modes]
-    else:
-        modes = list(raw_modes or [])
-    modes = [str(mode).strip().lower() for mode in modes if str(mode).strip()]
-    if not modes:
-        modes = ["min_delta_v", "min_time", "constrained"]
-    allowed_modes = {"min_delta_v", "min_time", "constrained"}
-    invalid = [mode for mode in modes if mode not in allowed_modes]
-    if invalid:
-        raise ValueError(
-            "analysis.mission_recovery.planner.modes must contain only: constrained, min_delta_v, min_time."
-        )
-    max_recovery_time_s = _parse_float(
-        d.get("max_recovery_time_s", 86400.0),
-        "analysis.mission_recovery.planner.max_recovery_time_s",
-    )
-    if max_recovery_time_s < 0.0:
-        raise ValueError("analysis.mission_recovery.planner.max_recovery_time_s must be >= 0.")
-    max_recovery_delta_v_m_s = d.get("max_recovery_delta_v_m_s")
-    max_recovery_delta_v = (
-        None
-        if max_recovery_delta_v_m_s in (None, "")
-        else _parse_float(
-            max_recovery_delta_v_m_s,
-            "analysis.mission_recovery.planner.max_recovery_delta_v_m_s",
-        )
-    )
-    if max_recovery_delta_v is not None and max_recovery_delta_v < 0.0:
-        raise ValueError("analysis.mission_recovery.planner.max_recovery_delta_v_m_s must be >= 0.")
-    candidate_count = int(d.get("candidate_count", 12))
-    if candidate_count < 1:
-        raise ValueError("analysis.mission_recovery.planner.candidate_count must be at least 1.")
-    simulate_candidates = _parse_bool(
-        d.get("simulate_candidates", True),
-        "analysis.mission_recovery.planner.simulate_candidates",
-    )
-    orbit_transfer = _parse_orbit_transfer_planner_section(
-        d.get("orbit_transfer", d.get("lambert")),
-        parent_enabled=enabled,
-        sources=sources,
-    )
-    return {
-        "enabled": enabled,
-        "sources": sources,
-        "modes": modes,
-        "max_recovery_time_s": max_recovery_time_s,
-        "max_recovery_delta_v_m_s": max_recovery_delta_v,
-        "candidate_count": candidate_count,
-        "simulate_candidates": simulate_candidates,
-        "orbit_transfer": orbit_transfer,
-    }
-
-
-def _parse_orbit_transfer_planner_section(
-    value: Any,
-    *,
-    parent_enabled: bool,
-    sources: list[str],
-) -> dict[str, Any]:
-    d = _as_dict(value, "analysis.mission_recovery.planner.orbit_transfer")
-    default_enabled = bool(parent_enabled and "orbit_transfer" in set(sources))
-    enabled = _parse_bool(
-        d.get("enabled", default_enabled),
-        "analysis.mission_recovery.planner.orbit_transfer.enabled",
-    )
-    departure_samples = int(d.get("departure_samples", 9))
-    if departure_samples < 1:
-        raise ValueError("analysis.mission_recovery.planner.orbit_transfer.departure_samples must be at least 1.")
-    time_of_flight_samples = int(d.get("time_of_flight_samples", 12))
-    if time_of_flight_samples < 1:
-        raise ValueError("analysis.mission_recovery.planner.orbit_transfer.time_of_flight_samples must be at least 1.")
-    target_anomaly_samples = int(d.get("target_anomaly_samples", 24))
-    if target_anomaly_samples < 1:
-        raise ValueError("analysis.mission_recovery.planner.orbit_transfer.target_anomaly_samples must be at least 1.")
-    min_tof = _parse_float(
-        d.get("min_time_of_flight_s", 60.0),
-        "analysis.mission_recovery.planner.orbit_transfer.min_time_of_flight_s",
-    )
-    if min_tof <= 0.0:
-        raise ValueError("analysis.mission_recovery.planner.orbit_transfer.min_time_of_flight_s must be positive.")
-    max_tof_raw = d.get("max_time_of_flight_s")
-    max_tof = None if max_tof_raw in (None, "") else _parse_float(
-        max_tof_raw,
-        "analysis.mission_recovery.planner.orbit_transfer.max_time_of_flight_s",
-    )
-    if max_tof is not None and max_tof <= 0.0:
-        raise ValueError("analysis.mission_recovery.planner.orbit_transfer.max_time_of_flight_s must be positive.")
-    if max_tof is not None and max_tof < min_tof:
-        raise ValueError(
-            "analysis.mission_recovery.planner.orbit_transfer.max_time_of_flight_s "
-            "must be >= min_time_of_flight_s."
-        )
-    multi_revolution_max = int(d.get("multi_revolution_max", 0))
-    if multi_revolution_max < 0:
-        raise ValueError("analysis.mission_recovery.planner.orbit_transfer.multi_revolution_max must be >= 0.")
-    if multi_revolution_max > 0:
-        raise ValueError(
-            "analysis.mission_recovery.planner.orbit_transfer.multi_revolution_max "
-            "must be 0 until multi-revolution Lambert transfers are supported."
-        )
-    impulse_epsilon_m_s = _parse_float(
-        d.get("impulse_epsilon_m_s", 1.0e-2),
-        "analysis.mission_recovery.planner.orbit_transfer.impulse_epsilon_m_s",
-    )
-    if impulse_epsilon_m_s < 0.0:
-        raise ValueError("analysis.mission_recovery.planner.orbit_transfer.impulse_epsilon_m_s must be >= 0.")
-    return {
-        "enabled": enabled,
-        "departure_samples": departure_samples,
-        "time_of_flight_samples": time_of_flight_samples,
-        "target_anomaly_samples": target_anomaly_samples,
-        "min_time_of_flight_s": min_tof,
-        "max_time_of_flight_s": max_tof,
-        "short_way": _parse_bool(d.get("short_way", True), "analysis.mission_recovery.planner.orbit_transfer.short_way"),
-        "long_way": _parse_bool(d.get("long_way", False), "analysis.mission_recovery.planner.orbit_transfer.long_way"),
-        "multi_revolution_max": multi_revolution_max,
-        "impulse_epsilon_m_s": impulse_epsilon_m_s,
-        "keep_per_time_best": _parse_bool(
-            d.get("keep_per_time_best", True),
-            "analysis.mission_recovery.planner.orbit_transfer.keep_per_time_best",
-        ),
-    }
-
-
-def _parse_orbital_delivery_section(value: Any) -> dict[str, Any]:
-    d = _as_dict(value, "analysis.orbital_delivery")
-    if not d:
-        return {}
-    _reject_unknown_fields(
-        d,
-        "analysis.orbital_delivery",
-        {"enabled", "deployed_object_id", "reference_object_id", "target", "feasibility"},
-    )
-    enabled = _parse_bool(d.get("enabled", True), "analysis.orbital_delivery.enabled")
-    deployed_object_id = str(d.get("deployed_object_id", "") or "").strip()
-    reference_object_id = str(d.get("reference_object_id", "") or "").strip()
-    target = _as_dict(d.get("target"), "analysis.orbital_delivery.target")
-    _reject_unknown_fields(target, "analysis.orbital_delivery.target", {"frame", "state", "coes", "anomaly_policy"})
-    if enabled and not deployed_object_id:
-        raise ValueError("analysis.orbital_delivery.deployed_object_id is required when enabled.")
-    if enabled and not target:
-        raise ValueError("analysis.orbital_delivery.target is required when enabled.")
-    if not target:
-        return {
-            "enabled": enabled,
-            "deployed_object_id": deployed_object_id,
-            "reference_object_id": reference_object_id,
-            "target": {},
-            "feasibility": {},
-        }
-    frame = str(target.get("frame", "eci") or "eci").strip().lower()
-    if frame not in {"eci", "coes", "relative_ric"}:
-        raise ValueError("analysis.orbital_delivery.target.frame must be one of: eci, coes, relative_ric.")
-    if frame == "eci":
-        state = target.get("state")
-        if not isinstance(state, list) or len(state) != 6 or not all(math.isfinite(float(x)) for x in state):
-            raise ValueError("analysis.orbital_delivery.target.state must be a finite length-6 ECI state.")
-    elif frame == "coes":
-        coes = target.get("coes", {}) or {}
-        required = {"a_km", "ecc", "inc_deg", "raan_deg", "argp_deg"}
-        if not isinstance(coes, dict) or not required.issubset(coes):
-            raise ValueError(
-                "analysis.orbital_delivery.target.coes must define a_km, ecc, inc_deg, raan_deg, and argp_deg."
-            )
-        anomaly_policy = str(target.get("anomaly_policy", "configured") or "configured").strip().lower()
-        if anomaly_policy not in {"configured", "match_actual"}:
-            raise ValueError(
-                "analysis.orbital_delivery.target.anomaly_policy must be 'configured' or 'match_actual'."
-            )
-        if anomaly_policy == "configured" and not any(key in coes for key in ("true_anomaly_deg", "ta_deg")):
-            raise ValueError(
-                "analysis.orbital_delivery.target.coes requires true_anomaly_deg when anomaly_policy is configured."
-            )
-    else:
-        state = target.get("state")
-        if not isinstance(state, list) or len(state) != 6 or not all(math.isfinite(float(x)) for x in state):
-            raise ValueError("analysis.orbital_delivery.target.state must be a finite length-6 RIC state.")
-        if not reference_object_id:
-            raise ValueError("analysis.orbital_delivery.reference_object_id is required for a relative_ric target.")
-    feasibility = _as_dict(d.get("feasibility"), "analysis.orbital_delivery.feasibility")
-    allowed_feasibility = {
-        "max_position_error_km",
-        "max_velocity_error_m_s",
-        "max_correction_dv_m_s",
-        "max_abs_a_error_km",
-        "max_abs_ecc_error",
-        "max_abs_inc_error_deg",
-        "max_abs_raan_error_deg",
-    }
-    _reject_unknown_fields(feasibility, "analysis.orbital_delivery.feasibility", allowed_feasibility)
-    normalized_feasibility = {
-        str(key): _parse_float(raw, f"analysis.orbital_delivery.feasibility.{key}")
-        for key, raw in feasibility.items()
-    }
-    if any(value < 0.0 for value in normalized_feasibility.values()):
-        raise ValueError("analysis.orbital_delivery.feasibility thresholds must be non-negative.")
-    return {
-        "enabled": enabled,
-        "deployed_object_id": deployed_object_id,
-        "reference_object_id": reference_object_id,
-        "target": dict(target),
-        "feasibility": normalized_feasibility,
-    }
-
-
-def _parse_analysis_section(value: Any) -> AnalysisSection:
-    d = _as_dict(value, "analysis")
-    _reject_unknown_fields(
-        d,
-        "analysis",
-        {
-            "enabled",
-            "study_type",
-            "execution",
-            "metrics",
-            "baseline",
-            "monte_carlo",
-            "sensitivity",
-            "covariance",
-            "mission_recovery",
-            "orbital_delivery",
-        },
-    )
-    metrics = d.get("metrics", []) or []
-    if not isinstance(metrics, list):
-        raise ValueError("analysis.metrics must be a list.")
-    out = AnalysisSection(
-        enabled=_parse_bool(d.get("enabled", False), "analysis.enabled"),
-        study_type=str(d.get("study_type", "monte_carlo")).strip().lower(),
-        execution=_parse_analysis_execution_section(d.get("execution")),
-        metrics=list(metrics),
-        baseline=_parse_analysis_baseline_section(d.get("baseline")),
-        monte_carlo=_parse_analysis_monte_carlo_section(d.get("monte_carlo")),
-        sensitivity=_parse_sensitivity_section(d.get("sensitivity")),
-        covariance=_parse_covariance_section(d.get("covariance")),
-        mission_recovery=_parse_mission_recovery_section(d.get("mission_recovery")),
-        orbital_delivery=_parse_orbital_delivery_section(d.get("orbital_delivery")),
-    )
-    if out.study_type not in {"monte_carlo", "sensitivity", "covariance"}:
-        raise ValueError("analysis.study_type must be one of: monte_carlo, sensitivity, covariance.")
-    if out.enabled and out.study_type == "covariance" and not out.covariance.objects:
-        raise ValueError("analysis.covariance.objects must define at least one object when study_type is covariance.")
-    return out
-
-
-def _monte_carlo_from_analysis(analysis: AnalysisSection) -> MonteCarloSection:
-    if analysis.enabled and analysis.study_type == "monte_carlo":
-        return MonteCarloSection(
-            enabled=True,
-            iterations=int(analysis.monte_carlo.iterations),
-            base_seed=int(analysis.monte_carlo.base_seed),
-            parallel_enabled=bool(analysis.execution.parallel_enabled),
-            parallel_workers=int(analysis.execution.parallel_workers),
-            variations=list(analysis.monte_carlo.variations),
-        )
-    return MonteCarloSection()
-
-
-def _parse_outputs_section(value: Any, path_policy: ConfigPathPolicy | None = None) -> OutputsSection:
-    d = _as_dict(value, "outputs")
-    _reject_unsupported_aliases(d, "outputs", _OUTPUTS_UNSUPPORTED_ALIASES)
-    _reject_unknown_fields(
-        d,
-        "outputs",
-        {
-            "output_dir",
-            "mode",
-            "stats",
-            "plots",
-            "animations",
-            "monte_carlo",
-            "ai_report",
-            "ai_config",
-            "review",
-            "resource_limits",
-        },
-    )
-    plots = _as_dict(d.get("plots"), "outputs.plots")
-    animations = _as_dict(d.get("animations"), "outputs.animations")
-    stats = _as_dict(d.get("stats"), "outputs.stats")
-    monte_carlo_outputs = _as_dict(d.get("monte_carlo"), "outputs.monte_carlo")
-    ai_report = _as_dict(d.get("ai_report"), "outputs.ai_report")
-    ai_config = _as_dict(d.get("ai_config"), "outputs.ai_config")
-    review = _as_dict(d.get("review"), "outputs.review")
-    resource_limits = _as_dict(d.get("resource_limits"), "outputs.resource_limits")
-    _reject_unsupported_aliases(plots, "outputs.plots", _OUTPUT_PLOTS_UNSUPPORTED_ALIASES)
-    _reject_unsupported_aliases(animations, "outputs.animations", _OUTPUT_ANIMATIONS_UNSUPPORTED_ALIASES)
-    _reject_unknown_fields(
-        stats,
-        "outputs.stats",
-        {"enabled", "print_summary", "save_json", "save_csv", "save_full_log", "save_history_npz", "controller_debug"},
-    )
-    _reject_unknown_fields(
-        plots,
-        "outputs.plots",
-        {
-            "enabled", "figure_ids", "dpi", "style", "preset", "reference_object_id",
-            "reference_object_label", "orbital_elements_object_id", "keepout_radius_km",
-            "burn_marker_object_ids", "ric_2d_planes", "draw_earth_map", "thrust_direction_body",
-        },
-    )
-    _reject_unknown_fields(
-        animations,
-        "outputs.animations",
-        {
-            "enabled", "types", "fps", "style", "frame_stride", "speed_multiple", "draw_earth_map",
-            "battlespace_dashboard_attitude_dims_m", "battlespace_dashboard_chaser_object_id",
-            "battlespace_dashboard_show_trajectory", "battlespace_dashboard_target_object_id",
-            "battlespace_dashboard_thruster_active_threshold_km_s2",
-            "attitude_ric_thruster_active_threshold_km_s2", "attitude_ric_thruster_dims_m",
-            "attitude_ric_thruster_object_ids", "ric_curv_prism_dims_m", "ric_curv_prism_object_ids",
-            "ric_side_by_side_dims_m", "ric_side_by_side_left_object_id", "ric_side_by_side_right_object_id",
-            "target_object_id", "target_reference_ric_curv_object_ids",
-            "target_reference_ric_curv_3d_show_trajectory", "target_reference_ric_curv_2d_show_trajectory",
-            "target_reference_ric_curv_2d_ri_show_trajectory", "target_reference_ric_curv_2d_ic_show_trajectory",
-            "target_reference_ric_curv_2d_rc_show_trajectory", "target_reference_ric_curv_2d_planes",
-        },
-    )
-    _reject_unknown_fields(
-        monte_carlo_outputs,
-        "outputs.monte_carlo",
-        {
-            "baseline_summary_json", "catastrophic_failure_reasons", "checkpoint_enabled",
-            "display_histograms", "display_ops_dashboard", "gates", "require_rocket_insertion",
-            "save_aggregate_summary", "save_histograms", "save_iteration_summaries", "save_ops_dashboard",
-            "save_raw_runs", "success_termination_reasons",
-        },
-    )
-    _reject_unknown_fields(
-        ai_report,
-        "outputs.ai_report",
-        {
-            "enabled", "provider", "model", "endpoint", "api_key_env", "timeout_s", "options", "dry_run",
-            "fail_on_error", "data_scope", "include_figure_data", "include_json_appendix", "max_examples",
-            "prompt_profile", "user_questions_file",
-        },
-    )
-    _reject_unknown_fields(
-        ai_config,
-        "outputs.ai_config",
-        {
-            "enabled", "provider", "model", "endpoint", "api_key_env", "timeout_s", "validate_timeout_s",
-            "options", "dry_run", "repair_attempts",
-        },
-    )
-    _reject_unknown_fields(review, "outputs.review", {"enabled", "detail", "strict"})
-    _reject_unknown_fields(
-        resource_limits,
-        "outputs.resource_limits",
-        {
-            "max_history_memory_mb", "checkpoint_enabled", "hard_min_available_memory_mb", "max_load_per_cpu",
-            "min_available_memory_mb", "resource_max_wait_s", "resource_pause_seconds", "resource_profile",
-            "throttle_enabled",
-        },
-    )
-    out = OutputsSection(
-        output_dir=str(d.get("output_dir", "outputs")),
-        mode=str(d.get("mode", "interactive")),
-        stats=stats,
-        plots=plots,
-        animations=animations,
-        monte_carlo=monte_carlo_outputs,
-        ai_report=ai_report,
-        ai_config=ai_config,
-        review=review,
-        resource_limits=resource_limits,
-    )
-    if out.mode not in ("interactive", "save", "both"):
-        raise ValueError("outputs.mode must be one of: interactive, save, both.")
-    if not out.output_dir.strip():
-        raise ValueError("outputs.output_dir must be non-empty.")
-    max_history_memory_mb = out.resource_limits.max_history_memory_mb
-    if max_history_memory_mb is not None and max_history_memory_mb <= 0:
-        raise ValueError("outputs.resource_limits.max_history_memory_mb must be positive when set.")
-    if out.review.detail not in {"compact", "standard", "full"}:
-        raise ValueError("outputs.review.detail must be one of: compact, standard, full.")
-    if path_policy is not None:
-        path_policy.resolve_output_dir(out.output_dir, purpose="outputs.output_dir")
-    return out
-
-
-def _validate_physics_runtime_settings(cfg: SimulationScenarioConfig) -> None:
-    orbit = dict((cfg.simulator.dynamics or {}).get("orbit", {}) or {})
-    reentry = dict((cfg.simulator.dynamics or {}).get("reentry", {}) or {})
-    propagation_method = str(orbit.get("propagation_method", "special") or "special").strip().lower()
-    if propagation_method not in {"special", "general"}:
-        raise ValueError("simulator.dynamics.orbit.propagation_method must be one of: special, general.")
-    integrator = str(orbit.get("integrator", "rk4") or "rk4").strip().lower()
-    if integrator not in {"rk4", "rkf78", "dopri5", "adaptive"}:
-        raise ValueError("simulator.dynamics.orbit.integrator must be one of: adaptive, dopri5, rk4, rkf78.")
-
-    env = dict(cfg.simulator.environment or {})
-    if _parse_bool(reentry.get("enabled", False), "simulator.dynamics.reentry.enabled"):
-        if not _parse_bool(orbit.get("drag", False), "simulator.dynamics.orbit.drag"):
-            raise ValueError(
-                "simulator.dynamics.reentry.enabled requires simulator.dynamics.orbit.drag=true "
-                "so reported atmospheric loads and heating use a trajectory propagated with drag."
-            )
-        reentry_atmosphere = str(reentry.get("atmosphere_model", "") or "").strip().lower().replace("-", "_")
-        environment_atmosphere = str(env.get("atmosphere_model", "") or "").strip().lower().replace("-", "_")
-        atmosphere_aliases = {
-            "hp": "harris_priester",
-            "hpop_harris_priester": "harris_priester",
-            "hpop_msis86": "msis86",
-            "hpop_jacchia70": "jacchia70",
-        }
-        reentry_atmosphere = atmosphere_aliases.get(reentry_atmosphere, reentry_atmosphere)
-        environment_atmosphere = atmosphere_aliases.get(environment_atmosphere, environment_atmosphere)
-        if (
-            env.get("density_kg_m3") is None
-            and reentry_atmosphere
-            and environment_atmosphere
-            and reentry_atmosphere != environment_atmosphere
-        ):
-            raise ValueError(
-                "simulator.dynamics.reentry.atmosphere_model must match "
-                "simulator.environment.atmosphere_model. Configure the shared atmospheric model under "
-                "simulator.environment; the reentry field is a compatibility alias only."
-            )
-    if _parse_bool(orbit.get("drag", False), "simulator.dynamics.orbit.drag") or _parse_bool(
-        orbit.get("lift", False), "simulator.dynamics.orbit.lift"
-    ):
-        if env.get("atmosphere_model") in (None, "") and env.get("density_kg_m3") is None:
-            raise ValueError(
-                "simulator.dynamics.orbit drag/lift requires simulator.environment.atmosphere_model "
-                "or density_kg_m3; atmosphere selection is explicit."
-            )
-    ephemeris_mode = env.get("ephemeris_mode")
-    if ephemeris_mode not in (None, ""):
-        mode = str(ephemeris_mode).strip().lower()
-        if mode not in {
-            "analytic_enhanced",
-            "enhanced",
-            "analytic_simple",
-            "simple",
-            "de440",
-            "hpop_de440",
-            "de440_hpop",
-            "spice",
-            "spiceypy",
-        }:
-            raise ValueError(
-                "simulator.environment.ephemeris_mode must be one of: analytic_enhanced, analytic_simple, "
-                "de440, hpop_de440, de440_hpop, spice, spiceypy."
-            )
-
-    model = str(orbit.get("model", "two_body") or "two_body").strip().lower()
-    if model not in {"two_body", "cr3bp"}:
-        raise ValueError("simulator.dynamics.orbit.model must be one of: cr3bp, two_body.")
-    if model == "cr3bp":
-        unsupported = []
-        for key in ("j2", "j3", "j4", "drag", "srp", "third_body_sun", "third_body_moon", "lift"):
-            if _parse_bool(orbit.get(key, False), f"simulator.dynamics.orbit.{key}"):
-                unsupported.append(key)
-        if unsupported:
-            raise ValueError(
-                "simulator.dynamics.orbit.model=cr3bp does not support two-body perturbation flags: "
-                + ", ".join(sorted(unsupported))
-                + "."
-            )
-
-    sh = dict(orbit.get("spherical_harmonics", {}) or {})
-    if _parse_bool(sh.get("enabled", False), "simulator.dynamics.orbit.spherical_harmonics.enabled"):
-        degree = int(sh.get("degree", 0) or 0)
-        source = str(sh.get("source", sh.get("model", "")) or "").strip().lower()
-        has_terms = sh.get("terms") not in (None, "")
-        has_path = sh.get("coeff_path") not in (None, "") or sh.get("source_path") not in (None, "")
-        has_explicit_zonal = any(key in sh for key in ("j2", "j3", "j4"))
-        if degree < 2 and not (has_terms or has_path or has_explicit_zonal or source in {"hpop", "hpop_ggm03", "ggm03"}):
-            raise ValueError(
-                "simulator.dynamics.orbit.spherical_harmonics.enabled requires degree >= 2, terms, "
-                "a coefficient/source path, or explicit zonal coefficients."
-            )
-
-
-def _validate_config_read_paths(root: dict[str, Any], path_policy: ConfigPathPolicy | None) -> None:
-    if path_policy is None:
-        return
-    simulator = _as_dict(root.get("simulator"), "simulator")
-    frames = _as_dict(simulator.get("frames"), "simulator.frames")
-    if frames.get("eop_path") not in (None, ""):
-        path_policy.resolve_input_file(
-            str(frames["eop_path"]),
-            purpose="simulator.frames.eop_path",
-            base_dir=path_policy.workspace_root,
-            must_exist=False,
-        )
-    dynamics = _as_dict(simulator.get("dynamics"), "simulator.dynamics")
-    orbit = _as_dict(dynamics.get("orbit"), "simulator.dynamics.orbit")
-    path_fields = (
-        ("drag_eop_path", "simulator.dynamics.orbit.drag_eop_path"),
-        ("de440_coeff_path", "simulator.dynamics.orbit.de440_coeff_path"),
-        ("de440_eop_path", "simulator.dynamics.orbit.de440_eop_path"),
-    )
-    for key, purpose in path_fields:
-        if orbit.get(key) not in (None, ""):
-            path_policy.resolve_input_file(
-                str(orbit[key]),
-                purpose=purpose,
-                base_dir=path_policy.workspace_root,
-                must_exist=False,
-            )
-    sh = _as_dict(orbit.get("spherical_harmonics"), "simulator.dynamics.orbit.spherical_harmonics")
-    sh_path_fields = (
-        ("coeff_path", "simulator.dynamics.orbit.spherical_harmonics.coeff_path"),
-        ("source_path", "simulator.dynamics.orbit.spherical_harmonics.source_path"),
-        ("eop_path", "simulator.dynamics.orbit.spherical_harmonics.eop_path"),
-    )
-    for key, purpose in sh_path_fields:
-        if sh.get(key) not in (None, ""):
-            path_policy.resolve_input_file(
-                str(sh[key]),
-                purpose=purpose,
-                base_dir=path_policy.workspace_root,
-                must_exist=False,
-            )
-    _resolve_geometry_profile_paths(root, path_policy)
-
-
-def _resolve_geometry_profile_paths(root: dict[str, Any], path_policy: ConfigPathPolicy) -> None:
-    objects = root.get("objects")
-    if isinstance(objects, dict):
-        for object_id, section in objects.items():
-            if isinstance(section, dict):
-                _resolve_geometry_profile_path_in_specs(
-                    dict(section.get("specs", {}) or {}),
-                    section,
-                    path_policy,
-                    f"objects.{object_id}.specs",
-                )
-
-
-def _resolve_geometry_profile_path_in_specs(
-    specs: dict[str, Any],
-    section: dict[str, Any],
-    path_policy: ConfigPathPolicy,
-    purpose_prefix: str,
-) -> None:
-    if not specs:
-        return
-    updates: list[tuple[dict[str, Any], str, str]] = []
-    for key in ("geometry_profile_path", "area_profile_path", "attitude_area_profile_path"):
-        value = specs.get(key)
-        if value not in (None, ""):
-            updates.append((specs, key, f"{purpose_prefix}.{key}"))
-    geometry = specs.get("geometry")
-    if isinstance(geometry, dict):
-        for key in ("profile_path", "area_profile_path", "attitude_area_profile_path"):
-            value = geometry.get(key)
-            if value not in (None, ""):
-                updates.append((geometry, key, f"{purpose_prefix}.geometry.{key}"))
-    aero = specs.get("aero")
-    if isinstance(aero, dict):
-        for key in ("geometry_profile_path", "area_profile_path"):
-            value = aero.get(key)
-            if value not in (None, ""):
-                updates.append((aero, key, f"{purpose_prefix}.aero.{key}"))
-    if not updates:
-        return
-    for target, key, purpose in updates:
-        resolved = path_policy.resolve_input_file(
-            str(target[key]),
-            purpose=purpose,
-            base_dir=path_policy.config_dir,
-            must_exist=True,
-        )
-        target[key] = str(resolved)
-    section["specs"] = specs
-
-
-def scenario_config_from_dict(
-    data: dict[str, Any],
-    source_path: str | Path | None = None,
-    path_policy: ConfigPathPolicy | None = None,
-) -> SimulationScenarioConfig:
-    root = _as_dict(data, "root")
-    _reject_unsupported_aliases(root, "", _ROOT_UNSUPPORTED_ALIASES)
-    _reject_unknown_fields(
-        root,
-        "root",
-        {
-            "scenario_name",
-            "scenario_description",
-            "objects",
-            "ground_stations",
-            "simulator",
-            "outputs",
-            "analysis",
-            "metadata",
-        },
-    )
-    base_dir = None if source_path is None else Path(source_path).expanduser().resolve().parent
-    if path_policy is None and source_path is not None:
-        path_policy = ConfigPathPolicy.default(config_path=source_path)
-    root = _resolve_agent_presets(root, base_dir=base_dir, path_policy=path_policy)
-    _validate_config_read_paths(root, path_policy)
-    _enforce_strict_booleans(root)
-    analysis = _parse_analysis_section(root.get("analysis"))
-    normalized_mc = _monte_carlo_from_analysis(analysis)
-    objects = _parse_objects_section(root.get("objects"))
-    rocket = objects.get("rocket", _parse_agent_section(None, role="rocket", object_id="rocket", default_kind="rocket"))
-    chaser = objects.get("chaser", _parse_agent_section(None, role="chaser", object_id="chaser", default_kind="satellite"))
-    target = objects.get(
-        "target",
-        _parse_agent_section(
-            None,
-            role="target",
-            object_id="target",
-            default_kind="satellite",
-            default_enabled=False if objects else None,
-        ),
-    )
-    if not objects and target.enabled:
-        objects = {"target": target}
-    rocket = objects.get("rocket", rocket)
-    chaser = objects.get("chaser", chaser)
-    target = objects.get("target", target)
-    cfg = SimulationScenarioConfig(
-        scenario_name=str(root.get("scenario_name", "unnamed_scenario")),
-        scenario_description=str(root.get("scenario_description", "") or ""),
-        rocket=rocket,
-        chaser=chaser,
-        target=target,
-        objects=objects,
-        ground_stations=_parse_ground_stations_section(root.get("ground_stations")),
-        simulator=_parse_simulator_section(root.get("simulator")),
-        outputs=_parse_outputs_section(root.get("outputs"), path_policy=path_policy),
-        monte_carlo=normalized_mc,
-        analysis=analysis,
-        metadata=dict(root.get("metadata", {}) or {}),
-    )
-    if source_path is not None:
-        object.__setattr__(cfg, "source_path", Path(source_path).expanduser().resolve())
-    for object_id, section in dict(cfg.objects or {}).items():
-        if bool(dict(section.reference_orbit or {}).get("enabled", False)) and (not bool(section.enabled)):
-            raise ValueError(f"{object_id}.reference_orbit.enabled requires {object_id}.enabled to be true.")
-    _validate_physics_runtime_settings(cfg)
-    _validate_object_references(cfg)
-    return cfg
-
-
-def _validate_object_references(cfg: SimulationScenarioConfig) -> None:
-    objects = dict(cfg.objects or {})
-    for object_id, section in objects.items():
-        initial_state = dict(getattr(section, "initial_state", {}) or {})
-        reference_id = str(initial_state.get("relative_to", "") or "").strip()
-        if not reference_id:
-            continue
-        path = f"objects.{object_id}.initial_state.relative_to"
-        if reference_id == str(object_id):
-            raise ValueError(f"{path} cannot reference the same object.")
-        reference = objects.get(reference_id)
-        if reference is None:
-            raise ValueError(f"{path} references unknown object '{reference_id}'.")
-        if not bool(getattr(reference, "enabled", False)):
-            raise ValueError(f"{path} references disabled object '{reference_id}'.")
-
-
-def load_simulation_yaml(
-    path: str | Path,
-    *,
-    path_policy: ConfigPathPolicy | None = None,
-    allow_external_config_paths: bool = False,
-    allow_external_ai_prompt_files: bool = False,
-) -> SimulationScenarioConfig:
-    try:
-        import yaml  # type: ignore
-    except Exception as exc:
-        raise RuntimeError(
-            "PyYAML is required to load simulation YAML configs. Install with `pip install pyyaml`."
-        ) from exc
-    p = Path(path)
-    with p.open("r", encoding="utf-8") as f:
-        raw = yaml.safe_load(f) or {}
-    if not isinstance(raw, dict):
-        raise ValueError("Simulation YAML root must be a mapping/object.")
-    policy = path_policy or ConfigPathPolicy.default(
-        config_path=p,
-        allow_external_config_paths=allow_external_config_paths,
-        allow_external_ai_prompt_files=allow_external_ai_prompt_files,
-    )
-    return scenario_config_from_dict(raw, source_path=p, path_policy=policy)
+AlgorithmPointer.__module__ = __name__
+BridgePointer.__module__ = __name__
+AgentSection.__module__ = __name__
+GroundStationSection.__module__ = __name__
+_TypedConfigDict.__module__ = __name__
+SimulatorAccelerationSection.__module__ = __name__
+SimulatorExecutionSection.__module__ = __name__
+SimulatorFramesSection.__module__ = __name__
+SimulatorSection.__module__ = __name__
+SimulatorDynamicsSection.__module__ = __name__
+SimulatorEnvironmentSection.__module__ = __name__
+SimulatorPluginValidationSection.__module__ = __name__
+SimulatorTerminationSection.__module__ = __name__
+OutputStatsSection.__module__ = __name__
+OutputPlotsSection.__module__ = __name__
+OutputAnimationsSection.__module__ = __name__
+OutputMonteCarloSection.__module__ = __name__
+OutputAIReportSection.__module__ = __name__
+OutputAIConfigSection.__module__ = __name__
+OutputResourceLimitsSection.__module__ = __name__
+OutputReviewSection.__module__ = __name__
+OutputsSection.__module__ = __name__
+MonteCarloVariation.__module__ = __name__
+MonteCarloSection.__module__ = __name__
+AnalysisExecutionSection.__module__ = __name__
+AnalysisBaselineSection.__module__ = __name__
+AnalysisMonteCarloSection.__module__ = __name__
+SensitivityParameter.__module__ = __name__
+SensitivitySection.__module__ = __name__
+CovarianceObjectSection.__module__ = __name__
+CovarianceCollisionScreeningSection.__module__ = __name__
+CovariancePairSection.__module__ = __name__
+CovarianceFiniteDifferenceSection.__module__ = __name__
+CovarianceProcessNoiseSection.__module__ = __name__
+CovarianceSection.__module__ = __name__
+MissionRecoverySection.__module__ = __name__
+AnalysisSection.__module__ = __name__
+SimulationScenarioConfig.__module__ = __name__

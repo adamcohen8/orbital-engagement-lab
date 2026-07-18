@@ -517,6 +517,8 @@ class _SatelliteCommandBuilder:
                 cmd.thrust_eci_km_s2 = np.array(mission_out["thrust_eci_km_s2"], dtype=float).reshape(3)
             if "torque_body_nm" in mission_out:
                 cmd.torque_body_nm = np.array(mission_out["torque_body_nm"], dtype=float).reshape(3)
+            if "command_mode_flags" in mission_out and isinstance(mission_out["command_mode_flags"], dict):
+                cmd.mode_flags.update(dict(mission_out["command_mode_flags"]))
 
         bypass_orbital_command_latch = bool(mission_out.get("mission_bypass_orbital_command_latch", False))
         orbital_command_due = (

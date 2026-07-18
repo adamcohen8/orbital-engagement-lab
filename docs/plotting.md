@@ -110,6 +110,43 @@ that config.
 
 The full list is available in `sim.master_outputs.AVAILABLE_FIGURE_IDS`.
 
+## Implementation Map
+
+`sim.master_outputs` is the stable façade for figure IDs, presets,
+`plot_outputs`, and `animate_outputs`. The implementation is split by
+capability under `sim.plotting`:
+
+- `output_registry.py`: ordered renderer-family registry and figure ownership
+- `summary_outputs.py`: dashboards, orbit/access/estimation summaries, and re-entry plots
+- `trajectory_outputs.py`: frame trajectories, RIC projections, quaternions, and body rates
+- `rocket_outputs.py`: ascent, GNC, fuel, mission-timeline, and insertion plots
+- `control_outputs.py`: thrust histories, delta-v remaining, and alignment error
+- `knowledge_outputs.py`: knowledge timelines
+- `output_animations.py`: single-run animations
+- `output_context.py` and `output_helpers.py`: shared run context and numerical helpers
+
+The public single-run plotting functions exposed through `sim.plotting` and
+`sim.plotting.single_run` are implemented in these focused families:
+
+- `dashboard_plots.py`: run dashboards, rendezvous summaries, and control effort
+- `estimation_plots.py`: estimation, knowledge-filtering, and sensor-access plots
+- `access_plots.py`: payload ground tracks and ground-station access
+- `orbital_element_plots.py`: orbital-element plots and summaries
+- `reentry_plots.py`: atmospheric-pass, aerodynamic, thermal, and re-entry summaries
+- `attitude_summary_plots.py`: attitude-control summary
+- `single_run_context.py` and `single_run_math.py`: shared payload and numerical helpers
+
+The lower-level compatibility API in `sim.utils.plotting_capabilities` is
+implemented by `frame_plots.py`, `control_plots.py`, `ground_track_plots.py`,
+`trajectory_animations.py`, `attitude_animations.py`, and
+`prism_animations.py`. Shared animation runtime behavior and geometry live in
+`capability_common.py` and `attitude_geometry.py`.
+
+Start with `PLOT_RENDERER_FAMILIES` in `output_registry.py` when locating the
+owner of a figure ID. Use `PLOTTING_CAPABILITY_FAMILIES` in
+`architecture.py` to locate the implementation owner of a public plotting
+function. External callers should continue to use the stable façades.
+
 For plots that are not built in, see [Custom Analysis](custom-analysis.md) for
 examples that load saved JSON/CSV artifacts and create Matplotlib figures.
 Ground-station access is also saved as payload data and summary metrics, so you

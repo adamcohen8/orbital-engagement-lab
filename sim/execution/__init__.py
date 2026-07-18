@@ -1,11 +1,8 @@
-from .service import (
-    SimulationExecutionService,
-    create_single_run_engine,
-    run_simulation_config_file,
-    run_simulation_scenario,
-)
-
 _PRIVATE_EXPORTS = {
+    "SimulationExecutionService": ("sim.execution.service", "SimulationExecutionService"),
+    "create_single_run_engine": ("sim.execution.service", "create_single_run_engine"),
+    "run_simulation_config_file": ("sim.execution.service", "run_simulation_config_file"),
+    "run_simulation_scenario": ("sim.execution.service", "run_simulation_scenario"),
     "can_run_monte_carlo_campaign": ("sim.execution.campaigns", "can_run_monte_carlo_campaign"),
     "load_config_campaign": ("sim.execution.campaigns", "load_config_campaign"),
     "prepare_monte_carlo_runs": ("sim.execution.campaigns", "prepare_monte_carlo_runs"),
