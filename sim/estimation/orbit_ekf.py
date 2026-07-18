@@ -49,7 +49,6 @@ class OrbitEKFEstimator(Estimator):
     acceleration_mode: str = "off"
     _q: np.ndarray = field(default_factory=lambda: np.zeros((6, 6)), init=False, repr=False)
     _r: np.ndarray = field(default_factory=lambda: np.zeros((6, 6)), init=False, repr=False)
-    _h: np.ndarray = field(default_factory=lambda: np.eye(6), init=False, repr=False)
     _i6: np.ndarray = field(default_factory=lambda: np.eye(6), init=False, repr=False)
     _zero_accel: np.ndarray = field(default_factory=lambda: np.zeros(3), init=False, repr=False)
     _acceleration_enabled_value: bool = field(default=False, init=False, repr=False)
@@ -95,8 +94,8 @@ class OrbitEKFEstimator(Estimator):
             return StateBelief(state=x_pred, covariance=p_pred, last_update_t_s=output_t_s)
         z = z[:6]
         y = z - x_pred
-        s = self._h @ p_pred @ self._h.T + self._r
-        hp_t = p_pred @ self._h.T
+        s = p_pred + self._r
+        hp_t = p_pred
         try:
             k = np.linalg.solve(s.T, hp_t.T).T
             s_y = np.linalg.solve(s, y)
@@ -105,7 +104,7 @@ class OrbitEKFEstimator(Estimator):
             k = hp_t @ s_pinv
             s_y = s_pinv @ y
         x_upd = x_pred + k @ y
-        i_kh = self._i6 - k @ self._h
+        i_kh = self._i6 - k
         p_upd = i_kh @ p_pred @ i_kh.T + k @ self._r @ k.T
         p_upd = 0.5 * (p_upd + p_upd.T)
         nis = float(y.T @ s_y)

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "orbital-engagement-lab"
-version = "0.21.2"
+version = "0.21.3"
 description = "Integrated spacecraft simulation and analysis platform for rendezvous, control, validation, and mission prototyping."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -120,6 +120,7 @@ markers = [
   "smoke: fast first-line checks for core import, API, quickstart, and release workflow health",
   "product: tests protecting documented product workflows, public contracts, and release-facing behavior",
   "regression: ordinary regression coverage for supported behavior",
+  "fast: measured sub-second and ordinary deterministic checks for rapid local feedback",
   "validation: tests or tooling checks tied to validation evidence, fidelity, or release governance",
   "slow: tests that are comparatively expensive and better suited to scheduled or full-suite runs",
   "external: tests covering optional integrations, external-tool bridges, or dependency-boundary behavior",

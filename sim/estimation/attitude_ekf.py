@@ -36,11 +36,16 @@ class AttitudeEKFEstimator(Estimator):
     meas_noise_diag: np.ndarray
     acceleration_mode: str = "off"
     _acceleration_enabled_value: bool = field(default=False, init=False, repr=False)
+    _q: np.ndarray = field(default_factory=lambda: np.zeros((7, 7)), init=False, repr=False)
+    _r: np.ndarray = field(default_factory=lambda: np.zeros((7, 7)), init=False, repr=False)
+    _i7: np.ndarray = field(default_factory=lambda: np.eye(7), init=False, repr=False)
 
     def __post_init__(self) -> None:
         self.inertia_kg_m2 = np.asarray(self.inertia_kg_m2, dtype=float).reshape(3, 3)
         self.process_noise_diag = np.asarray(self.process_noise_diag, dtype=float).reshape(7)
         self.meas_noise_diag = np.asarray(self.meas_noise_diag, dtype=float).reshape(7)
+        self._q = np.diag(self.process_noise_diag)
+        self._r = np.diag(self.meas_noise_diag)
         self._acceleration_enabled_value = bool(acceleration_settings_from_mode(self.acceleration_mode).enabled)
         if self._acceleration_enabled_value:
             _load_acceleration_kernels()
@@ -71,19 +76,17 @@ class AttitudeEKFEstimator(Estimator):
         if np.dot(z[:4], x_pred[:4]) < 0.0:
             z[:4] *= -1.0
 
-        h = np.eye(7)
-        r = np.diag(self.meas_noise_diag)
-        y = z - h @ x_pred
-        s = h @ p_pred @ h.T + r
-        hp_t = p_pred @ h.T
+        y = z - x_pred
+        s = p_pred + self._r
+        hp_t = p_pred
         try:
             k = np.linalg.solve(s.T, hp_t.T).T
         except np.linalg.LinAlgError:
             k = hp_t @ np.linalg.pinv(s)
         x_upd = x_pred + k @ y
         x_upd[:4] = normalize_quaternion(x_upd[:4])
-        i_kh = np.eye(7) - k @ h
-        p_upd = i_kh @ p_pred @ i_kh.T + k @ r @ k.T
+        i_kh = self._i7 - k
+        p_upd = i_kh @ p_pred @ i_kh.T + k @ self._r @ k.T
         p_upd = 0.5 * (p_upd + p_upd.T)
         if meas_t_s < output_t_s:
             x_upd, p_upd = self._predict(x_upd, p_upd, from_t_s=meas_t_s, to_t_s=output_t_s)
@@ -101,8 +104,7 @@ class AttitudeEKFEstimator(Estimator):
         x_pred = self._propagate_state(x_prev, dt_s=dt_s)
         f = self._numerical_jacobian(x_prev, base=x_pred, dt_s=dt_s)
         q_scale = dt_s / self.dt_s if self.dt_s > 0.0 else 1.0
-        q = np.diag(self.process_noise_diag) * max(q_scale, 0.0)
-        p_pred = f @ p_prev @ f.T + q
+        p_pred = f @ p_prev @ f.T + self._q * max(q_scale, 0.0)
         return x_pred, p_pred
 
     def _propagate_state(self, x: np.ndarray, *, dt_s: float | None = None) -> np.ndarray:

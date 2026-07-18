@@ -55,6 +55,28 @@ def test_hcw_state_transition_matches_closed_form_components() -> None:
     assert np.allclose(propagated, expected)
 
 
+def test_hcw_prediction_reuses_only_the_latest_transition_matrix() -> None:
+    estimator = _estimator()
+    belief = StateBelief(
+        state=np.array([0.2, -0.4, 0.1, 0.0001, -0.0002, 0.00005], dtype=float),
+        covariance=np.eye(6) * 1.0e-3,
+        last_update_t_s=0.0,
+    )
+
+    with patch(
+        "sim.estimation.relative_hcw_ekf.hcw_state_transition_matrix",
+        wraps=hcw_state_transition_matrix,
+    ) as transition:
+        first = estimator.update(belief, None, 10.0)
+        second = estimator.update(belief, None, 10.0)
+        estimator.mean_motion_rad_s += 1.0e-6
+        estimator.update(belief, None, 10.0)
+
+    assert transition.call_count == 2
+    assert np.array_equal(first.state, second.state)
+    assert np.array_equal(first.covariance, second.covariance)
+
+
 @pytest.mark.parametrize("origin", ["chief", "deputy"])
 @pytest.mark.parametrize(
     "model",

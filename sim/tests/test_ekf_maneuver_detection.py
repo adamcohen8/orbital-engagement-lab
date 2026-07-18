@@ -149,6 +149,24 @@ def test_ekf_maneuver_detector_rearms_after_confirmed_event_clears() -> None:
     assert detector.summary()["last_event_t_s"] == 6.0
 
 
+def test_ekf_maneuver_detector_retains_only_its_rolling_window() -> None:
+    detector = EKFManeuverDetector(
+        EKFManeuverDetectionConfig(
+            enabled=True,
+            window_size=3,
+            warning_count=2,
+            detection_count=2,
+            min_updates=2,
+        )
+    )
+
+    for index in range(20):
+        detector.update(_Diagnostic(nis=0.1), t_s=float(index))
+
+    assert len(detector._history) == 3
+    assert detector.sample_count == 20
+
+
 def test_ekf_maneuver_detector_stays_quiet_on_model_consistent_arc() -> None:
     initial = np.array([7000.0, 0.0, 0.0, 0.0, 7.546, 0.0], dtype=float)
     observer = _truth(np.array([6800.0, 10.0, 0.0, 0.0, 7.6, 0.0], dtype=float), t_s=0.0)

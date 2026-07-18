@@ -8,6 +8,35 @@ migration-sensitive behavior explicitly.
 
 ## Unreleased
 
+## 0.21.3 - 2026-07-18
+
+Release thesis: `v0.21.3` makes OEL's regression and performance feedback
+faster and more memory-efficient while preserving deterministic simulation
+outputs and the full private/public release gates.
+
+Private/Pro scope: `v0.21.3` decomposes the private Scale and shared game test
+God files into focused owners, adds measured fast feedback and exact clean-
+commit evidence reuse, and retains all private validation and generated-public
+release boundaries. The public release receives the compatible test workflow
+and estimator runtime improvements.
+
+### Changed
+
+- Decomposed the game and Scale test God files into owner-aligned suites,
+  replaced file-wide slow classification with measured test-level markers and
+  a one-minute fast-feedback lane, shared isolated public-export fixtures, and
+  added exact-clean-commit validation-evidence reuse without weakening the full
+  private or generated-public release gates.
+- Reduced estimator hot-path work by reusing invariant EKF matrices, removing
+  identity observation products, and caching the latest HCW transition matrix.
+  The maintained standard suite measured the full serial satellite case 4.1%
+  faster and the sensing/relative-EKF case 11.3% faster with exact baseline
+  physics hashes across every runnable benchmark case.
+- Reduced sensing-run peak memory by 21.5% in the isolated benchmark by using
+  the lower-level SciPy inverse-gamma primitive instead of importing
+  `scipy.stats`, bounding maneuver-screen history, caching invariant thresholds,
+  and packing long-lived knowledge statistics as doubles.
+
 ## 0.21.2 - 2026-07-17
 
 Release thesis: `v0.21.2` decomposes OEL's largest implementation modules into
