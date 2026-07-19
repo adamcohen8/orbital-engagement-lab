@@ -61,7 +61,21 @@ def quaternion_delta_from_body_rate(omega_body_rad_s: np.ndarray, dt_s: float) -
 
 
 def quaternion_to_dcm_bn(q_bn: np.ndarray) -> np.ndarray:
-    q0, q1, q2, q3 = normalize_quaternion(q_bn)
+    x = np.asarray(q_bn, dtype=float).reshape(-1)
+    if x.size != 4 or not np.all(np.isfinite(x)):
+        q0, q1, q2, q3 = 1.0, 0.0, 0.0, 0.0
+    else:
+        n2 = float(np.dot(x, x))
+        if n2 <= 0.0 or not np.isfinite(n2):
+            q0, q1, q2, q3 = 1.0, 0.0, 0.0, 0.0
+        elif n2 == 1.0:
+            q0, q1, q2, q3 = x
+        else:
+            n = float(np.sqrt(n2))
+            if n <= 0.0 or not np.isfinite(n):
+                q0, q1, q2, q3 = 1.0, 0.0, 0.0, 0.0
+            else:
+                q0, q1, q2, q3 = x / n
     return np.array(
         [
             [1.0 - 2.0 * (q2**2 + q3**2), 2.0 * (q1 * q2 + q0 * q3), 2.0 * (q1 * q3 - q0 * q2)],

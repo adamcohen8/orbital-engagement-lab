@@ -776,29 +776,6 @@ def _draw_operator_prebrief_screen(
     _draw_dialog_button(pygame, screen, continue_rect, "Script Burns", font=small_font, enabled=True, primary=True)
 
 
-def _operator_prebrief_content_rect(screen_width: int, screen_height: int) -> tuple[int, int, int, int]:
-    panel = _operator_plan_panel_rect(screen_width, screen_height)
-    return (panel[0] + 24, panel[1] + 24, max(panel[2] - 48, 1), max(panel[3] - 58, 1))
-
-
-def _operator_prebrief_content_height(
-    option: GameScenarioOption,
-    *,
-    font: Any,
-    small_font: Any,
-    width_px: int,
-) -> int:
-    y = 0
-    y += 34
-    y += len(_wrapped_budget_lines(option, small_font, width_px)) * PREVIEW_LINE_HEIGHT
-    y += PREVIEW_SECTION_GAP
-    y = _section_height(option.learning_goal, small_font, y, width_px)
-    y = _section_height(option.player_brief or option.description, small_font, y + PREVIEW_SECTION_GAP, width_px)
-    y = _bullets_height(option.pass_criteria, small_font, y + PREVIEW_SECTION_GAP, width_px)
-    y = _bullets_height(option.instructor_notes, small_font, y + PREVIEW_SECTION_GAP, width_px)
-    return max(y, _text_height(font))
-
-
 def _draw_dialog_button(
     pygame: Any,
     screen: Any,
@@ -1678,20 +1655,6 @@ def _bullets_height(items: tuple[str, ...], font: Any, y: int, width_px: int) ->
     for item in items:
         y += len(_wrap_text_px(item, font, bullet_width)) * PREVIEW_LINE_HEIGHT
     return y
-
-
-def _text(screen: Any, font: Any, text: str, pos: tuple[int, int], color: tuple[int, int, int]) -> None:
-    if not text:
-        return
-    surf = font.render(str(text), True, color)
-    screen.blit(surf, pos)
-
-
-def _text_centered(screen: Any, font: Any, text: str, center: tuple[int, int], color: tuple[int, int, int]) -> None:
-    if not text:
-        return
-    surf = font.render(str(text), True, color)
-    screen.blit(surf, (int(center[0] - surf.get_width() // 2), int(center[1] - surf.get_height() // 2)))
 
 
 def _draw_section(screen: Any, font: Any, title: str, body: str, x: int, y: int, width_px: int, max_y: int) -> int:

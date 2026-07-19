@@ -4,6 +4,13 @@ from .launcher_models import *
 from .scenario_catalog import *
 from .launcher_persistence import *
 
+
+def _operator_widget_renderer(name: str) -> Any:
+    from . import launcher_widgets
+
+    return _launcher_dep(name, getattr(launcher_widgets, name))
+
+
 def _run_operator_plan_screen(
     pygame: Any,
     screen: Any,
@@ -31,6 +38,7 @@ def _run_operator_plan_screen(
     equation_sheet_scroll_px = 0
     plot_context = _operator_plot_context(option.path, difficulty=difficulty)
     trajectory_probe: OperatorTrajectoryProbe | None = None
+    draw_operator_plan_screen = _operator_widget_renderer("_draw_operator_plan_screen")
     while True:
         width, height = screen.get_size()
         button_gap = 10
@@ -351,7 +359,7 @@ def _run_operator_plan_screen(
                         )
                     )
 
-        _draw_operator_plan_screen(
+        draw_operator_plan_screen(
             pygame,
             screen,
             option=option,
@@ -397,6 +405,7 @@ def _run_operator_prebrief_screen(
     title_font: Any,
 ) -> bool:
     scroll_px = 0
+    draw_operator_prebrief_screen = _operator_widget_renderer("_draw_operator_prebrief_screen")
     while True:
         width, height = screen.get_size()
         continue_rect = pygame.Rect(width - 214, height - 70, 162, 36)
@@ -425,7 +434,7 @@ def _run_operator_prebrief_screen(
                     return True
                 if _pos_in_bounds(mouse_pos, (cancel_rect.x, cancel_rect.y, cancel_rect.w, cancel_rect.h)):
                     return False
-        _draw_operator_prebrief_screen(
+        draw_operator_prebrief_screen(
             pygame,
             screen,
             option=option,
@@ -438,6 +447,29 @@ def _run_operator_prebrief_screen(
         )
         pygame.display.flip()
         clock.tick(60)
+
+
+def _operator_prebrief_content_rect(screen_width: int, screen_height: int) -> tuple[int, int, int, int]:
+    panel = _operator_plan_panel_rect(screen_width, screen_height)
+    return (panel[0] + 24, panel[1] + 24, max(panel[2] - 48, 1), max(panel[3] - 58, 1))
+
+
+def _operator_prebrief_content_height(
+    option: GameScenarioOption,
+    *,
+    font: Any,
+    small_font: Any,
+    width_px: int,
+) -> int:
+    y = 0
+    y += 34
+    y += len(_wrapped_budget_lines(option, small_font, width_px)) * PREVIEW_LINE_HEIGHT
+    y += PREVIEW_SECTION_GAP
+    y = _section_height(option.learning_goal, small_font, y, width_px)
+    y = _section_height(option.player_brief or option.description, small_font, y + PREVIEW_SECTION_GAP, width_px)
+    y = _bullets_height(option.pass_criteria, small_font, y + PREVIEW_SECTION_GAP, width_px)
+    y = _bullets_height(option.instructor_notes, small_font, y + PREVIEW_SECTION_GAP, width_px)
+    return max(y, _text_height(font))
 
 
 def _operator_plan_from_text(text: str, *, option: GameScenarioOption) -> tuple[OperatorBurnPlan, tuple[str, ...]]:

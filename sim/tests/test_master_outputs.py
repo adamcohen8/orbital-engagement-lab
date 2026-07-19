@@ -7,6 +7,7 @@ import numpy as np
 from sim import SimulationConfig
 from sim.master_outputs import (
     AVAILABLE_FIGURE_IDS,
+    _plot_private_bridge_outputs,
     _private_bridge_figure_ids,
     _thrust_alignment_error_deg_series,
     _thruster_direction_body_by_object,
@@ -15,6 +16,7 @@ from sim.master_outputs import (
 )
 from sim.plotting.output_registry import PLOT_RENDERER_FAMILIES
 from sim.plotting.style import current_artifact_metadata, current_style_name
+from sim.plotting.summary_outputs import _plot_private_bridge_outputs as owner_plot_private_bridge_outputs
 from sim.utils.plot_windows import (
     attitude_axis_limits,
     axis_window_from_values,
@@ -39,6 +41,10 @@ def test_output_renderer_registry_has_explicit_non_overlapping_ownership() -> No
     owned = [figure_id for family in PLOT_RENDERER_FAMILIES for figure_id in family.figure_ids]
     assert len(owned) == len(set(owned))
     assert set(AVAILABLE_FIGURE_IDS) <= set(owned) | set(_private_bridge_figure_ids())
+
+
+def test_master_outputs_preserves_private_bridge_patch_seam() -> None:
+    assert _plot_private_bridge_outputs is owner_plot_private_bridge_outputs
 
 
 def _truth_hist(positions_km: list[list[float]], velocities_km_s: list[list[float]] | None = None) -> np.ndarray:

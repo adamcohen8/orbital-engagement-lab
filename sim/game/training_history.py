@@ -4,6 +4,7 @@ from .scoring import *
 from .training_geometry import *
 from .coaching import *
 from .criteria import *
+from sim.dynamics.orbit.cr3bp import EARTH_MOON_MEAN_MOTION_RAD_S
 
 
 class RPOTrainingTracker:

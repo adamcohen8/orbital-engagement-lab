@@ -4,7 +4,10 @@ import argparse
 
 import numpy as np
 
-from sim.acceleration.kernels.attitude import propagate_attitude_exponential_map_kernel
+from sim.acceleration.kernels.attitude import (
+    propagate_attitude_builtin_disturbances_kernel,
+    propagate_attitude_exponential_map_kernel,
+)
 from sim.acceleration.kernels.de440 import (
     de440_light_core_kernel,
     de440_sun_moon_from_utc_kernel,
@@ -368,6 +371,45 @@ def warmup_acceleration(profile: str = "core") -> dict[str, object]:
         (
             "propagate_attitude_exponential_map_kernel",
             propagate_attitude_exponential_map_kernel(quat, omega, inertia, torque, 1.0),
+        )
+    )
+    empty_facets = np.empty((0, 3), dtype=float)
+    empty_scalars = np.empty(0, dtype=float)
+    calls.append(
+        (
+            "propagate_attitude_builtin_disturbances_kernel",
+            propagate_attitude_builtin_disturbances_kernel(
+                quat,
+                omega,
+                inertia,
+                torque,
+                np.array([1.0], dtype=float),
+                r,
+                EARTH_MU_KM3_S2,
+                np.array([1, 0, 0, 0], dtype=np.int64),
+                np.zeros(3, dtype=float),
+                np.zeros(3, dtype=float),
+                False,
+                0.0,
+                np.zeros(3, dtype=float),
+                0.0,
+                0,
+                0.0,
+                0.0,
+                np.zeros(3, dtype=float),
+                empty_facets,
+                empty_scalars,
+                empty_scalars,
+                empty_facets,
+                np.zeros(3, dtype=float),
+                0.0,
+                0,
+                0.0,
+                np.zeros(3, dtype=float),
+                empty_facets,
+                empty_scalars,
+                empty_facets,
+            ),
         )
     )
     calls.append(("attitude_ekf_propagate_state_kernel", att_base))

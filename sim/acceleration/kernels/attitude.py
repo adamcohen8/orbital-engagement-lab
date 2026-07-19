@@ -14,6 +14,15 @@ STAT_NON_FINITE_CORIOLIS = 3
 STAT_SINGULAR_INERTIA = 4
 STAT_NON_FINITE_OUTPUT = 5
 
+DISTURBANCE_GRAVITY_GRADIENT = 0
+DISTURBANCE_MAGNETIC = 1
+DISTURBANCE_DRAG = 2
+DISTURBANCE_SRP = 3
+
+FACET_MODE_NONE = 0
+FACET_MODE_SCALAR = 1
+FACET_MODE_FACETS = 2
+
 
 @njit_or_identity(cache=True)
 def normalize_quaternion_kernel(q: np.ndarray) -> np.ndarray:
@@ -191,6 +200,355 @@ def propagate_attitude_exponential_map_kernel(
     if not (np.isfinite(q_next[0]) and np.isfinite(q_next[1]) and np.isfinite(q_next[2]) and np.isfinite(q_next[3])):
         stats[STAT_NON_FINITE_OUTPUT] += 1
     return q_next, omega_next, stats
+
+
+@njit_or_identity(cache=True)
+def propagate_attitude_builtin_disturbances_kernel(
+    quat_bn: np.ndarray,
+    omega_body_rad_s: np.ndarray,
+    inertia_kg_m2: np.ndarray,
+    command_torque_body_nm: np.ndarray,
+    substeps_s: np.ndarray,
+    position_eci_km: np.ndarray,
+    mu_km3_s2: float,
+    enabled: np.ndarray,
+    magnetic_dipole_body_a_m2: np.ndarray,
+    magnetic_field_eci_t: np.ndarray,
+    magnetic_field_provided: bool,
+    density_kg_m3: float,
+    drag_v_rel_eci_m_s: np.ndarray,
+    drag_v_rel_norm_m_s: float,
+    drag_mode: int,
+    drag_area_m2: float,
+    drag_cd: float,
+    drag_cp_offset_body_m: np.ndarray,
+    drag_facet_normals_body: np.ndarray,
+    drag_facet_areas_m2: np.ndarray,
+    drag_facet_cd: np.ndarray,
+    drag_facet_cp_offsets_body_m: np.ndarray,
+    sun_dir_eci_unit: np.ndarray,
+    srp_pressure_scaled_n_m2: float,
+    srp_mode: int,
+    srp_area_m2: float,
+    srp_cp_offset_body_m: np.ndarray,
+    srp_facet_normals_body: np.ndarray,
+    srp_facet_areas_m2: np.ndarray,
+    srp_facet_cp_offsets_body_m: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Propagate built-in attitude disturbances across one outer dynamics step."""
+
+    q = quat_bn.copy()
+    omega = omega_body_rad_s.copy()
+    aggregate_stats = np.zeros(6, dtype=np.int64)
+    for index in range(substeps_s.size):
+        disturbance_torque = builtin_disturbance_torque_kernel(
+            q,
+            position_eci_km,
+            inertia_kg_m2,
+            mu_km3_s2,
+            enabled,
+            magnetic_dipole_body_a_m2,
+            magnetic_field_eci_t,
+            magnetic_field_provided,
+            density_kg_m3,
+            drag_v_rel_eci_m_s,
+            drag_v_rel_norm_m_s,
+            drag_mode,
+            drag_area_m2,
+            drag_cd,
+            drag_cp_offset_body_m,
+            drag_facet_normals_body,
+            drag_facet_areas_m2,
+            drag_facet_cd,
+            drag_facet_cp_offsets_body_m,
+            sun_dir_eci_unit,
+            srp_pressure_scaled_n_m2,
+            srp_mode,
+            srp_area_m2,
+            srp_cp_offset_body_m,
+            srp_facet_normals_body,
+            srp_facet_areas_m2,
+            srp_facet_cp_offsets_body_m,
+        )
+        total_torque = np.empty(3, dtype=np.float64)
+        for axis in range(3):
+            total_torque[axis] = command_torque_body_nm[axis] + disturbance_torque[axis]
+        q, omega, stats = propagate_attitude_exponential_map_kernel(
+            q,
+            omega,
+            inertia_kg_m2,
+            total_torque,
+            substeps_s[index],
+        )
+        for stat_index in range(6):
+            aggregate_stats[stat_index] += stats[stat_index]
+    return q, omega, aggregate_stats
+
+
+@njit_or_identity(cache=True)
+def builtin_disturbance_torque_kernel(
+    quat_bn: np.ndarray,
+    position_eci_km: np.ndarray,
+    inertia_kg_m2: np.ndarray,
+    mu_km3_s2: float,
+    enabled: np.ndarray,
+    magnetic_dipole_body_a_m2: np.ndarray,
+    magnetic_field_eci_t: np.ndarray,
+    magnetic_field_provided: bool,
+    density_kg_m3: float,
+    drag_v_rel_eci_m_s: np.ndarray,
+    drag_v_rel_norm_m_s: float,
+    drag_mode: int,
+    drag_area_m2: float,
+    drag_cd: float,
+    drag_cp_offset_body_m: np.ndarray,
+    drag_facet_normals_body: np.ndarray,
+    drag_facet_areas_m2: np.ndarray,
+    drag_facet_cd: np.ndarray,
+    drag_facet_cp_offsets_body_m: np.ndarray,
+    sun_dir_eci_unit: np.ndarray,
+    srp_pressure_scaled_n_m2: float,
+    srp_mode: int,
+    srp_area_m2: float,
+    srp_cp_offset_body_m: np.ndarray,
+    srp_facet_normals_body: np.ndarray,
+    srp_facet_areas_m2: np.ndarray,
+    srp_facet_cp_offsets_body_m: np.ndarray,
+) -> np.ndarray:
+    """Evaluate the numeric built-in disturbance plan in public model order."""
+
+    torque = np.zeros(3, dtype=np.float64)
+    c_bn = _quaternion_to_dcm_bn_kernel(quat_bn)
+    if enabled[DISTURBANCE_GRAVITY_GRADIENT] != 0:
+        component = _gravity_gradient_torque_kernel(position_eci_km, c_bn, inertia_kg_m2, mu_km3_s2)
+        _add3_in_place(torque, component)
+    if enabled[DISTURBANCE_MAGNETIC] != 0:
+        component = _magnetic_torque_kernel(
+            position_eci_km,
+            c_bn,
+            magnetic_dipole_body_a_m2,
+            magnetic_field_eci_t,
+            magnetic_field_provided,
+        )
+        _add3_in_place(torque, component)
+    if enabled[DISTURBANCE_DRAG] != 0:
+        component = _drag_torque_kernel(
+            c_bn,
+            density_kg_m3,
+            drag_v_rel_eci_m_s,
+            drag_v_rel_norm_m_s,
+            drag_mode,
+            drag_area_m2,
+            drag_cd,
+            drag_cp_offset_body_m,
+            drag_facet_normals_body,
+            drag_facet_areas_m2,
+            drag_facet_cd,
+            drag_facet_cp_offsets_body_m,
+        )
+        _add3_in_place(torque, component)
+    if enabled[DISTURBANCE_SRP] != 0:
+        component = _srp_torque_kernel(
+            c_bn,
+            sun_dir_eci_unit,
+            srp_pressure_scaled_n_m2,
+            srp_mode,
+            srp_area_m2,
+            srp_cp_offset_body_m,
+            srp_facet_normals_body,
+            srp_facet_areas_m2,
+            srp_facet_cp_offsets_body_m,
+        )
+        _add3_in_place(torque, component)
+    return torque
+
+
+@njit_or_identity(cache=True)
+def _quaternion_to_dcm_bn_kernel(quat_bn: np.ndarray) -> np.ndarray:
+    q = normalize_quaternion_kernel(quat_bn)
+    q0 = q[0]
+    q1 = q[1]
+    q2 = q[2]
+    q3 = q[3]
+    out = np.empty((3, 3), dtype=np.float64)
+    out[0, 0] = 1.0 - 2.0 * (q2**2 + q3**2)
+    out[0, 1] = 2.0 * (q1 * q2 + q0 * q3)
+    out[0, 2] = 2.0 * (q1 * q3 - q0 * q2)
+    out[1, 0] = 2.0 * (q1 * q2 - q0 * q3)
+    out[1, 1] = 1.0 - 2.0 * (q1**2 + q3**2)
+    out[1, 2] = 2.0 * (q2 * q3 + q0 * q1)
+    out[2, 0] = 2.0 * (q1 * q3 + q0 * q2)
+    out[2, 1] = 2.0 * (q2 * q3 - q0 * q1)
+    out[2, 2] = 1.0 - 2.0 * (q1**2 + q2**2)
+    return out
+
+
+@njit_or_identity(cache=True)
+def _gravity_gradient_torque_kernel(
+    position_eci_km: np.ndarray,
+    c_bn: np.ndarray,
+    inertia_kg_m2: np.ndarray,
+    mu_km3_s2: float,
+) -> np.ndarray:
+    r_i_m = np.empty(3, dtype=np.float64)
+    for axis in range(3):
+        r_i_m[axis] = position_eci_km[axis] * 1.0e3
+    r_norm_m = _norm3_kernel(r_i_m)
+    if r_norm_m == 0.0:
+        return np.zeros(3, dtype=np.float64)
+    r_hat_i = np.empty(3, dtype=np.float64)
+    for axis in range(3):
+        r_hat_i[axis] = r_i_m[axis] / r_norm_m
+    r_hat_b = c_bn @ r_hat_i
+    inertia_r_hat = inertia_kg_m2 @ r_hat_b
+    cross = _cross3_kernel(r_hat_b, inertia_r_hat)
+    scale = 3.0 * (mu_km3_s2 * 1.0e9) / (r_norm_m**3)
+    for axis in range(3):
+        cross[axis] *= scale
+    return cross
+
+
+@njit_or_identity(cache=True)
+def _magnetic_torque_kernel(
+    position_eci_km: np.ndarray,
+    c_bn: np.ndarray,
+    magnetic_dipole_body_a_m2: np.ndarray,
+    magnetic_field_eci_t: np.ndarray,
+    magnetic_field_provided: bool,
+) -> np.ndarray:
+    if magnetic_field_provided:
+        b_eci = magnetic_field_eci_t.copy()
+    else:
+        r_i_m = np.empty(3, dtype=np.float64)
+        for axis in range(3):
+            r_i_m[axis] = position_eci_km[axis] * 1.0e3
+        r_norm_m = _norm3_kernel(r_i_m)
+        if r_norm_m == 0.0:
+            return np.zeros(3, dtype=np.float64)
+        r_hat = np.empty(3, dtype=np.float64)
+        for axis in range(3):
+            r_hat[axis] = r_i_m[axis] / r_norm_m
+        dipole_dot_r = 7.94e15 * r_hat[2]
+        denominator = r_norm_m**3
+        b_eci = np.empty(3, dtype=np.float64)
+        b_eci[0] = 3.0 * r_hat[0] * dipole_dot_r / denominator
+        b_eci[1] = 3.0 * r_hat[1] * dipole_dot_r / denominator
+        b_eci[2] = (3.0 * r_hat[2] * dipole_dot_r - 7.94e15) / denominator
+    b_body = c_bn @ b_eci
+    return _cross3_kernel(magnetic_dipole_body_a_m2, b_body)
+
+
+@njit_or_identity(cache=True)
+def _drag_torque_kernel(
+    c_bn: np.ndarray,
+    density_kg_m3: float,
+    v_rel_eci_m_s: np.ndarray,
+    v_norm_m_s: float,
+    mode: int,
+    area_m2: float,
+    drag_cd: float,
+    cp_offset_body_m: np.ndarray,
+    facet_normals_body: np.ndarray,
+    facet_areas_m2: np.ndarray,
+    facet_cd: np.ndarray,
+    facet_cp_offsets_body_m: np.ndarray,
+) -> np.ndarray:
+    if v_norm_m_s == 0.0 or density_kg_m3 <= 0.0 or mode == FACET_MODE_NONE:
+        return np.zeros(3, dtype=np.float64)
+    v_rel_body = c_bn @ v_rel_eci_m_s
+    if mode == FACET_MODE_SCALAR:
+        force_mag = 0.5 * density_kg_m3 * (v_norm_m_s**2) * drag_cd * area_m2
+        force_body = np.empty(3, dtype=np.float64)
+        for axis in range(3):
+            force_body[axis] = -force_mag * (v_rel_body[axis] / v_norm_m_s)
+        return _cross3_kernel(cp_offset_body_m, force_body)
+
+    torque = np.zeros(3, dtype=np.float64)
+    v_hat_body = np.empty(3, dtype=np.float64)
+    for axis in range(3):
+        v_hat_body[axis] = v_rel_body[axis] / v_norm_m_s
+    for facet_index in range(facet_areas_m2.size):
+        normal = facet_normals_body[facet_index]
+        normal_norm = _norm3_kernel(normal)
+        if normal_norm <= 0.0:
+            continue
+        projected_cosine = 0.0
+        for axis in range(3):
+            projected_cosine += (normal[axis] / normal_norm) * v_hat_body[axis]
+        projected_area = facet_areas_m2[facet_index] * max(0.0, projected_cosine)
+        if projected_area <= 0.0:
+            continue
+        scale = -0.5 * density_kg_m3 * projected_area * facet_cd[facet_index] * (v_norm_m_s**2)
+        force_body = np.empty(3, dtype=np.float64)
+        for axis in range(3):
+            force_body[axis] = scale * v_hat_body[axis]
+        component = _cross3_kernel(facet_cp_offsets_body_m[facet_index], force_body)
+        _add3_in_place(torque, component)
+    return torque
+
+
+@njit_or_identity(cache=True)
+def _srp_torque_kernel(
+    c_bn: np.ndarray,
+    sun_dir_eci_unit: np.ndarray,
+    pressure_scaled_n_m2: float,
+    mode: int,
+    area_m2: float,
+    cp_offset_body_m: np.ndarray,
+    facet_normals_body: np.ndarray,
+    facet_areas_m2: np.ndarray,
+    facet_cp_offsets_body_m: np.ndarray,
+) -> np.ndarray:
+    if pressure_scaled_n_m2 <= 0.0 or mode == FACET_MODE_NONE:
+        return np.zeros(3, dtype=np.float64)
+    sun_dir_body = c_bn @ sun_dir_eci_unit
+    if mode == FACET_MODE_SCALAR:
+        force_body = np.empty(3, dtype=np.float64)
+        force_mag = pressure_scaled_n_m2 * area_m2
+        for axis in range(3):
+            force_body[axis] = -force_mag * sun_dir_body[axis]
+        return _cross3_kernel(cp_offset_body_m, force_body)
+
+    torque = np.zeros(3, dtype=np.float64)
+    for facet_index in range(facet_areas_m2.size):
+        normal = facet_normals_body[facet_index]
+        normal_norm = _norm3_kernel(normal)
+        if normal_norm <= 0.0:
+            continue
+        illumination = 0.0
+        for axis in range(3):
+            illumination += (normal[axis] / normal_norm) * sun_dir_body[axis]
+        illumination = max(0.0, illumination)
+        if illumination <= 0.0:
+            continue
+        force_body = np.empty(3, dtype=np.float64)
+        scale = -pressure_scaled_n_m2 * facet_areas_m2[facet_index] * illumination
+        for axis in range(3):
+            force_body[axis] = scale * sun_dir_body[axis]
+        component = _cross3_kernel(facet_cp_offsets_body_m[facet_index], force_body)
+        _add3_in_place(torque, component)
+    return torque
+
+
+@njit_or_identity(cache=True)
+def _cross3_kernel(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    out = np.empty(3, dtype=np.float64)
+    out[0] = a[1] * b[2] - a[2] * b[1]
+    out[1] = a[2] * b[0] - a[0] * b[2]
+    out[2] = a[0] * b[1] - a[1] * b[0]
+    return out
+
+
+@njit_or_identity(cache=True)
+def _norm3_kernel(vector: np.ndarray) -> float:
+    return np.sqrt(np.dot(vector, vector))
+
+
+@njit_or_identity(cache=True)
+def _add3_in_place(target: np.ndarray, value: np.ndarray) -> None:
+    target[0] += value[0]
+    target[1] += value[1]
+    target[2] += value[2]
 
 
 @njit_or_identity(cache=True)

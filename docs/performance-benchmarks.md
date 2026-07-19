@@ -84,3 +84,18 @@ The report writes `benchmark_results.json`, `benchmark_report.md`, effective con
 results only when the manifest/profile, hardware, Python environment, acceleration mode, measurement cache policy,
 resource policy, and output policy match. The report embeds the Git commit, dirty-worktree flag, platform, CPU count,
 Python executable, and NumPy version for that reason.
+
+Both timing rows retain the sample-time, quaternion, and body-rate histories but
+omit torque-history construction. This keeps the speed boundary symmetric:
+ordinary validation still records OEL torque history by default, while the
+Basilisk adapter does not expose matching gravity-gradient torque samples.
+
+The 2026-07-19 Apple M2 full-profile snapshot used the maintained one-warm-up,
+five-repeat policy in the same Python 3.11 / NumPy 1.26.4 environment, with
+Numba 0.65.1 and Basilisk 2.11.0 installed together. The trajectory-only
+medians were 3.077 s for accelerated OEL and 3.943 s for Basilisk over 86,400
+steps, making OEL 1.28x faster in this bounded common-denominator case. The
+result came from the current dirty release worktree at commit `1093ca29`; rerun
+the maintained cases after later performance changes instead of treating this
+snapshot as a permanent product claim. These values do not generalize to richer
+attitude-control, geometry, sensing, estimation, or artifact workflows.

@@ -134,6 +134,7 @@ class TestRectangularPrismCoupling(unittest.TestCase):
             env={"sun_dir_eci": sun_dir, "srp_shadow_model": "none"},
         )
         self.assertTrue(np.allclose(tau, expected))
+        self.assertIs(model._rect_prism_geometry, model._rect_prism_geometry)
 
     def test_geometry_profile_srp_torque_uses_profile_center_of_pressure(self):
         profile = GeometryAreaProfile(

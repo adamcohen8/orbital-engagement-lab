@@ -1014,6 +1014,39 @@ def test_settings_button_hit_test() -> None:
     assert game_launcher._settings_button_at_pos((1008, 642), width=1040, height=680) is False
 
 
+def test_launcher_widgets_import_shared_layout_helpers_directly() -> None:
+    from sim.game import launcher_widgets
+
+    helper_names = (
+        "_frame_convention_dialog_checkbox_rect",
+        "_frame_convention_dialog_choice_rects",
+        "_frame_convention_dialog_continue_rect",
+        "_frame_convention_dialog_rect",
+        "_launcher_panel_height",
+        "_mode_toggle_rect",
+        "_preview_bounds",
+        "_settings_button_rect",
+        "_visible_option_count",
+    )
+
+    assert all(callable(getattr(launcher_widgets, name, None)) for name in helper_names)
+    assert launcher_widgets._mode_toggle_rect(1040, 680) == (806, 624, 148, 34)
+
+
+def test_operator_planning_resolves_widget_renderers_after_decomposition() -> None:
+    from sim.game import launcher_widgets, operator_planning
+
+    assert (
+        operator_planning._operator_widget_renderer("_draw_operator_plan_screen")
+        is launcher_widgets._draw_operator_plan_screen
+    )
+    assert (
+        operator_planning._operator_widget_renderer("_draw_operator_prebrief_screen")
+        is launcher_widgets._draw_operator_prebrief_screen
+    )
+    assert callable(operator_planning._text)
+
+
 def test_start_screen_event_action_begins_on_any_non_escape_key() -> None:
     class FakePygame:
         QUIT = "quit"

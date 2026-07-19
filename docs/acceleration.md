@@ -135,9 +135,18 @@ mixed or unnormalized harmonic fields retain their authoritative evaluator.
 RIC frame transforms are wired into the runtime acceleration path, and re-entry scalar kernels are available for
 warmup and parity tests while they are staged for broader integration.
 
-Attitude acceleration currently covers the exponential-map rigid-body attitude propagation path used by
-`OrbitalAttitudeDynamics`. The accelerated kernel preserves quaternion normalization, angular-rate/torque clamps,
-singular-inertia handling, and guardrail event accounting through the existing Python wrapper.
+Attitude acceleration covers the exponential-map rigid-body path used by
+`OrbitalAttitudeDynamics`. A staged numeric plan can evaluate the built-in
+gravity-gradient, magnetic, scalar/facet drag, and scalar/facet SRP torques and
+propagate all attitude substeps behind one compiled boundary. The plan preserves
+the public disturbance accumulation order, quaternion normalization,
+angular-rate/torque clamps, singular-inertia handling, and guardrail event
+accounting. Custom disturbance objects, geometry lookup profiles, rectangular-
+prism face models, acceleration-off runs, and unavailable acceleration backends
+retain the authoritative Python path.
+The coupled dynamics object's owned default two-body orbit propagator inherits
+the same acceleration mode; explicitly supplied orbit propagators retain their
+own configured mode.
 
 Estimator acceleration currently covers the orbit EKF two-body RK4 propagation/Jacobian path and the attitude EKF
 propagation/Jacobian path used inside the joint-state estimator. This targets long RIC_PD-style runs where estimator

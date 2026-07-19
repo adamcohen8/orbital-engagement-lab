@@ -8,6 +8,49 @@ migration-sensitive behavior explicitly.
 
 ## Unreleased
 
+## 0.22.1 - 2026-07-19
+
+Release thesis: `v0.22.1` hardens the v0.21.2 God-file decomposition and
+extends OEL's physics-preserving acceleration work to coupled attitude
+disturbances, with a narrower and more reproducible Basilisk comparison.
+
+Private/Pro scope: `v0.22.1` adds compiled-path Basilisk sweep controls and
+backend evidence for the maintained external attitude comparison. The public
+release receives the compatible attitude kernels, stable-façade repairs,
+decomposition architecture gate, and deterministic regression coverage;
+external Basilisk execution remains behind the export boundary.
+
+### Fixed
+
+- Restored decomposed launcher layout helpers and operator planning renderers,
+  fixing launcher startup failures and the operator-mode level-launch crash.
+- Restored moved dependencies used by controller-benchmark diagnostics,
+  AI-report review and cost estimation, cislunar training history, and direct
+  validation-harness preflight calls. Restored the historical
+  `sim.master_outputs._plot_private_bridge_outputs` and
+  `sim.runtime_support.logger` compatibility seams.
+- Added an architecture regression gate that scans decomposed owner functions
+  and class methods for unresolved global references, catching the failure
+  pattern that ordinary import and façade-identity tests missed.
+
+### Changed
+
+- Added a no-fast-math compiled attitude plan that evaluates built-in gravity-
+  gradient, magnetic, scalar/facet drag, and scalar/facet SRP torques together
+  with rigid-body substep propagation. The plan preserves disturbance ordering,
+  guardrail accounting, mutable facet behavior, and the authoritative Python
+  fallback for unsupported or acceleration-off configurations.
+- Propagated coupled-dynamics acceleration mode to its owned default orbit
+  propagator without overriding explicitly supplied propagators, cached stable
+  rectangular-prism geometry, and reduced normalized-quaternion conversion
+  overhead while preserving reference output bits.
+- Made the maintained OEL/Basilisk speed comparison trajectory-only on both
+  sides, added explicit acceleration-mode/backend evidence and unavailable-
+  backend failure handling to the Basilisk sweep, and retained torque histories
+  for ordinary validation. On the documented Apple M2 full profile, accelerated
+  OEL measured a 3.077 s median versus Basilisk's 3.943 s median over 86,400
+  steps in this bounded common-denominator case.
+
 ## 0.22.0 - 2026-07-18
 
 Release thesis: `v0.22.0` makes high-fidelity ONP force evaluation materially
