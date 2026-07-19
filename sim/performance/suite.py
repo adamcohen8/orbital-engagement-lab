@@ -447,6 +447,22 @@ def _runtime_backend(payload: dict[str, Any], profile: dict[str, Any]) -> dict[s
     return dict(profile.get("executor", {}) or {})
 
 
+def _reset_scenario_measurement_caches(case: PerformanceCase) -> str:
+    """Keep compilation/data warmups while measuring atmosphere trajectories from a cold epoch cache."""
+    if case.category != "atmosphere":
+        return "warm_process_state"
+    model = str(case.base_overrides.get("simulator.environment.atmosphere_model", "")).strip().lower()
+    if model == "jacchia70":
+        backend = sys.modules.get("sim.dynamics.orbit.jacchia70_backend")
+        if backend is not None:
+            backend.clear_trajectory_epoch_caches()
+    elif model == "harris_priester":
+        backend = sys.modules.get("sim.dynamics.orbit.harris_priester_backend")
+        if backend is not None:
+            backend.clear_trajectory_epoch_caches()
+    return "cold_trajectory_epoch_cache"
+
+
 def _run_scenario_case(
     case: PerformanceCase,
     case_profile: dict[str, Any],
@@ -489,6 +505,7 @@ def _run_scenario_case(
     hashes: list[str] = []
     runtime_profiles: list[dict[str, Any]] = []
     first_measurements: dict[str, Any] | None = None
+    measurement_cache_policy = "warm_process_state"
     for index in range(repeats):
         cfg, raw = _effective_scenario_config(
             case,
@@ -496,6 +513,7 @@ def _run_scenario_case(
             output_dir=scratch_dir / "runs" / f"{index:03d}",
         )
         gc.collect()
+        measurement_cache_policy = _reset_scenario_measurement_caches(case)
         started = time.perf_counter()
         payload = execute(cfg, raw, scratch_dir / f"repeat_{index:03d}.yaml")
         elapsed.append(float(time.perf_counter() - started))
@@ -537,6 +555,7 @@ def _run_scenario_case(
         "status": "passed" if all(item["passed"] for item in checks) and len(set(hashes)) == 1 else "failed",
         "warmups": warmups,
         "repeats": repeats,
+        "measurement_cache_policy": measurement_cache_policy,
         "elapsed_s": elapsed,
         "median_elapsed_s": median_elapsed,
         "min_elapsed_s": float(min(elapsed)),
@@ -675,6 +694,8 @@ def _report_markdown(payload: dict[str, Any]) -> str:
         f"Python: `{payload['environment']['python_executable']}`  ",
         f"Git commit: `{payload['environment']['git'].get('commit')}`  ",
         f"Dirty workspace: `{payload['environment']['git'].get('dirty')}`",
+        "",
+        "Atmosphere timing policy: clear trajectory-epoch caches before every measured repetition; configured warmups may prepare code and static data.",
         "",
         "## Results",
         "",

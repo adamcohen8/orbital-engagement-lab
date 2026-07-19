@@ -3,11 +3,17 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 
 from sim.performance import load_performance_manifest, physics_payload_hash, run_performance_suite
-from sim.performance.suite import _deterministic_payload, _scenario_work_counts, _simulated_duration_s
+from sim.performance.suite import (
+    _deterministic_payload,
+    _reset_scenario_measurement_caches,
+    _scenario_work_counts,
+    _simulated_duration_s,
+)
 
 
 def test_full_path_manifest_covers_distinct_runtime_families() -> None:
@@ -34,6 +40,56 @@ def test_full_path_manifest_covers_distinct_runtime_families() -> None:
             "adaptive_high_fidelity",
             "monte_carlo_orchestration",
         } <= names
+
+
+def test_drag_model_cases_share_one_two_body_fixture() -> None:
+    manifest = load_performance_manifest()
+    expected_models = {
+        "exponential",
+        "ussa1976",
+        "msis86",
+        "nrlmsise00",
+        "jacchia70",
+        "jb2006",
+        "jb2008",
+        "harris_priester",
+    }
+    cases = {case.name: case for case in manifest.cases if case.category == "atmosphere"}
+
+    if manifest.suite_name == "oel_public_core":
+        assert cases == {}
+        return
+
+    assert set(cases) == {f"drag_{model}" for model in expected_models}
+    assert {case.config_path for case in cases.values()} == {
+        "configs/performance/drag_model_single_satellite.yaml"
+    }
+    assert {
+        str(case.base_overrides["simulator.environment.atmosphere_model"])
+        for case in cases.values()
+    } == expected_models
+    assert {case.profiles["standard"]["duration_s"] for case in cases.values()} == {1200.0}
+
+
+def test_drag_measurements_clear_only_trajectory_epoch_caches() -> None:
+    manifest = load_performance_manifest()
+    cases = {case.name: case for case in manifest.cases}
+
+    if manifest.suite_name == "oel_public_core":
+        assert not any(name.startswith("drag_") for name in cases)
+        return
+
+    with patch("sim.dynamics.orbit.jacchia70_backend.clear_trajectory_epoch_caches") as clear_jacchia:
+        policy = _reset_scenario_measurement_caches(cases["drag_jacchia70"])
+    assert policy == "cold_trajectory_epoch_cache"
+    clear_jacchia.assert_called_once_with()
+
+    with patch("sim.dynamics.orbit.harris_priester_backend.clear_trajectory_epoch_caches") as clear_harris:
+        policy = _reset_scenario_measurement_caches(cases["drag_harris_priester"])
+    assert policy == "cold_trajectory_epoch_cache"
+    clear_harris.assert_called_once_with()
+
+    assert _reset_scenario_measurement_caches(cases["zonal_rk4_accelerated"]) == "warm_process_state"
 
 
 def test_physics_hash_ignores_timing_and_output_provenance() -> None:
@@ -126,5 +182,6 @@ def test_smoke_case_repeats_with_exact_physics_parity(tmp_path) -> None:
     assert case["deterministic_parity"] is True
     assert len(set(case["physics_hashes"])) == 1
     assert case["coverage_passed"] is True
+    assert case["measurement_cache_policy"] == "warm_process_state"
     assert (tmp_path / "benchmark" / "benchmark_results.json").is_file()
     assert (tmp_path / "benchmark" / "benchmark_report.md").is_file()

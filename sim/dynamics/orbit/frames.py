@@ -285,6 +285,7 @@ def _load_eop_table(eop_path: str) -> tuple[np.ndarray, np.ndarray, np.ndarray, 
     )
 
 
+@lru_cache(maxsize=8192)
 def _interp_eop(
     mjd_utc: float,
     eop_path: str,
@@ -509,13 +510,19 @@ def _precession_nutation_matrix_iau76_80(
     return nutation @ precession, dpsi, true_eps
 
 
+@lru_cache(maxsize=8192)
 def _precession_nutation_matrix_approx(
     jd_tt: float,
     *,
     ddpsi_rad: float = 0.0,
     ddeps_rad: float = 0.0,
 ) -> tuple[np.ndarray, float, float]:
-    """Compatibility alias for the full IAU-76/FK5 + IAU-80 reduction."""
+    """Compatibility alias for the full IAU-76/FK5 + IAU-80 reduction.
+
+    The returned matrix is treated as immutable by the internal frame consumers.
+    Caching lets density/local-solar-time and body-fixed gravity share the exact
+    same epoch reduction when both are active.
+    """
 
     return _precession_nutation_matrix_iau76_80(
         jd_tt,
@@ -584,7 +591,7 @@ def _polar_motion_matrix(xp_rad: float, yp_rad: float, sp_rad: float) -> np.ndar
     return _rz(sp_rad) @ _ry(-xp_rad) @ _rx(-yp_rad)
 
 
-def eci_to_ecef_rotation_hpop_like(
+def _eci_to_ecef_rotation_hpop_like_uncached(
     t_s: float,
     jd_utc_start: float | None = None,
     eop_path: str | None = None,
@@ -630,6 +637,79 @@ def eci_to_ecef_rotation_hpop_like(
     gast = float((gmst_angle_rad_from_jd(jd_ut1) + dpsi * math.cos(true_obliquity)) % (2.0 * math.pi))
     sp = -47.0e-6 * ((jd_tt - _J2000) / _JULIAN_CENTURY_DAYS) * _ARCSEC_TO_RAD
     return _polar_motion_matrix(float(xp_arcsec) * _ARCSEC_TO_RAD, float(yp_arcsec) * _ARCSEC_TO_RAD, sp) @ _rz(gast) @ rbpn
+
+
+@lru_cache(maxsize=8192)
+def _cached_eci_to_ecef_rotation_hpop_like(
+    t_s: float,
+    jd_utc_start: float | None,
+    eop_path: str | None,
+    dut1_s: float | None,
+    xp_arcsec: float | None,
+    yp_arcsec: float | None,
+    dat_s: float | None,
+    tt_minus_utc_s: float | None,
+    ddpsi_rad: float,
+    ddeps_rad: float,
+    eop_extrapolation: str,
+) -> tuple[float, float, float, float, float, float, float, float, float]:
+    rotation = _eci_to_ecef_rotation_hpop_like_uncached(
+        t_s,
+        jd_utc_start=jd_utc_start,
+        eop_path=eop_path,
+        dut1_s=dut1_s,
+        xp_arcsec=xp_arcsec,
+        yp_arcsec=yp_arcsec,
+        dat_s=dat_s,
+        tt_minus_utc_s=tt_minus_utc_s,
+        ddpsi_rad=ddpsi_rad,
+        ddeps_rad=ddeps_rad,
+        eop_extrapolation=eop_extrapolation,
+    )
+    flattened = rotation.ravel()
+    return (
+        float(flattened[0]),
+        float(flattened[1]),
+        float(flattened[2]),
+        float(flattened[3]),
+        float(flattened[4]),
+        float(flattened[5]),
+        float(flattened[6]),
+        float(flattened[7]),
+        float(flattened[8]),
+    )
+
+
+def eci_to_ecef_rotation_hpop_like(
+    t_s: float,
+    jd_utc_start: float | None = None,
+    eop_path: str | None = None,
+    *,
+    dut1_s: float | None = None,
+    xp_arcsec: float | None = None,
+    yp_arcsec: float | None = None,
+    dat_s: float | None = None,
+    tt_minus_utc_s: float | None = None,
+    ddpsi_rad: float = 0.0,
+    ddeps_rad: float = 0.0,
+    eop_extrapolation: str = "error",
+) -> np.ndarray:
+    """Return a fresh ECI-to-ECEF rotation, reusing exact frame inputs."""
+
+    values = _cached_eci_to_ecef_rotation_hpop_like(
+        float(t_s),
+        None if jd_utc_start is None else float(jd_utc_start),
+        None if eop_path is None else str(eop_path),
+        None if dut1_s is None else float(dut1_s),
+        None if xp_arcsec is None else float(xp_arcsec),
+        None if yp_arcsec is None else float(yp_arcsec),
+        None if dat_s is None else float(dat_s),
+        None if tt_minus_utc_s is None else float(tt_minus_utc_s),
+        float(ddpsi_rad),
+        float(ddeps_rad),
+        str(eop_extrapolation),
+    )
+    return np.array(values, dtype=float).reshape(3, 3)
 
 
 def eci_to_ecef_rotation_context(t_s: float, context: FrameContext) -> np.ndarray:
@@ -745,6 +825,11 @@ def eci_to_ecef_harmonic(
     ddpsi_rad: float = 0.0,
     ddeps_rad: float = 0.0,
 ) -> np.ndarray:
+    r_eci = (
+        r_eci_km
+        if isinstance(r_eci_km, np.ndarray) and r_eci_km.dtype == np.float64
+        else np.asarray(r_eci_km, dtype=float)
+    )
     model = normalize_frame_model(frame_model)
     if model == FRAME_MODEL_IAU76_80_EOP:
         rot = eci_to_ecef_rotation_hpop_like(
@@ -759,8 +844,8 @@ def eci_to_ecef_harmonic(
             ddpsi_rad=ddpsi_rad,
             ddeps_rad=ddeps_rad,
         )
-        return rot @ np.array(r_eci_km, dtype=float)
-    return eci_to_ecef(np.array(r_eci_km, dtype=float), t_s, jd_utc_start=jd_utc_start)
+        return rot @ r_eci
+    return eci_to_ecef(r_eci, t_s, jd_utc_start=jd_utc_start)
 
 
 def ecef_to_eci_harmonic(

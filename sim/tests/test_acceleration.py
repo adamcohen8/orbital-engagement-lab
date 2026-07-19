@@ -8,7 +8,15 @@ import numpy as np
 
 from sim.acceleration.benchmarks import benchmark_attitude_kernel, benchmark_estimation_kernel, benchmark_orbit_kernel
 from sim.acceleration.kernels.frames import ric_curv_to_rect_kernel, ric_dcm_ir_from_rv_kernel, ric_rect_to_curv_kernel
-from sim.acceleration.kernels.orbit import j2_accel_eci, rk4_zonal_step_state, two_body_accel_eci
+from sim.acceleration.kernels.geodesy import ecef_to_geodetic_deg_km_kernel
+from sim.acceleration.kernels.orbit import (
+    j2_accel_eci,
+    j3_accel_eci,
+    j4_accel_eci,
+    rk4_zonal_step_state,
+    two_body_accel_eci,
+    zonal_accel_eci,
+)
 from sim.acceleration.kernels.reentry import (
     atmosphere_relative_velocity_eci_km_s_kernel,
     radial_altitude_km_kernel,
@@ -47,6 +55,7 @@ from sim.utils.frames import (
     ric_rect_state_to_eci,
     ric_rect_to_curv,
 )
+from sim.utils.geodesy import ecef_to_geodetic_deg_km, geodetic_to_ecef_km
 from sim.utils.quaternion import normalize_quaternion
 
 
@@ -67,9 +76,7 @@ class TestAcceleration(unittest.TestCase):
         self.assertIn(settings.effective_backend, {"python", "numba"})
 
     def test_acceleration_config_can_lock_out_env_override(self):
-        cfg = scenario_config_from_dict(
-            {"simulator": {"acceleration": {"mode": "off", "env_override": False}}}
-        )
+        cfg = scenario_config_from_dict({"simulator": {"acceleration": {"mode": "off", "env_override": False}}})
 
         with patch.dict(os.environ, {ACCELERATION_ENV: "auto"}, clear=False):
             settings = acceleration_settings_from_config(cfg)
@@ -107,6 +114,43 @@ class TestAcceleration(unittest.TestCase):
 
         np.testing.assert_allclose(actual, expected, rtol=1e-12, atol=1e-12)
         np.testing.assert_allclose(direct, expected, rtol=1e-12, atol=1e-12)
+
+    def test_fused_zonal_kernel_preserves_component_sum_exactly(self):
+        r = np.array([7000.0, -1200.0, 900.0], dtype=float)
+        expected = two_body_accel_eci(r, EARTH_MU_KM3_S2)
+        expected += j2_accel_eci(r, EARTH_MU_KM3_S2)
+        expected += j3_accel_eci(r, EARTH_MU_KM3_S2)
+        expected += j4_accel_eci(r, EARTH_MU_KM3_S2)
+
+        actual = zonal_accel_eci(r, EARTH_MU_KM3_S2, True, True, True)
+
+        np.testing.assert_array_equal(actual, expected)
+
+    def test_fused_zonal_rk4_preserves_legacy_step_exactly(self):
+        x = np.array([7000.0, -1200.0, 900.0, 0.0, 7.4, 1.0], dtype=float)
+        command = np.array([1.0e-9, -2.0e-9, 3.0e-9], dtype=float)
+
+        def legacy_derivative(state: np.ndarray) -> np.ndarray:
+            derivative = np.empty(6, dtype=float)
+            derivative[:3] = state[3:]
+            acceleration = two_body_accel_eci(state[:3], EARTH_MU_KM3_S2)
+            acceleration += j2_accel_eci(state[:3], EARTH_MU_KM3_S2)
+            acceleration += j3_accel_eci(state[:3], EARTH_MU_KM3_S2)
+            acceleration += j4_accel_eci(state[:3], EARTH_MU_KM3_S2)
+            derivative[3] = acceleration[0] + command[0]
+            derivative[4] = acceleration[1] + command[1]
+            derivative[5] = acceleration[2] + command[2]
+            return derivative
+
+        k1 = legacy_derivative(x)
+        k2 = legacy_derivative(x + 0.5 * k1)
+        k3 = legacy_derivative(x + 0.5 * k2)
+        k4 = legacy_derivative(x + k3)
+        expected = x + (1.0 / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
+
+        actual = rk4_zonal_step_state(x, 1.0, command, EARTH_MU_KM3_S2, True, True, True)
+
+        np.testing.assert_array_equal(actual, expected)
 
     def test_frame_kernels_match_baseline(self):
         r = np.array([7000.0, -20.0, 30.0], dtype=float)
@@ -206,6 +250,30 @@ class TestAcceleration(unittest.TestCase):
 
         self.assertEqual(result["profile"], "validation")
         self.assertGreaterEqual(int(result["kernel_count"]), 1)
+        self.assertIn("normalized_spherical_harmonic_accel_eci_kernel", result["kernels"])
+        self.assertIn("msis86_denss_kernel", result["kernels"])
+        self.assertIn("nrlmsise00_densu_kernel", result["kernels"])
+        self.assertIn("de440_light_core_kernel", result["kernels"])
+        self.assertIn("de440_sun_moon_from_utc_kernel", result["kernels"])
+        self.assertIn("srp_acceleration_kernel", result["kernels"])
+        self.assertIn("builtin_force_components_kernel", result["kernels"])
+        self.assertIn("rk4_builtin_force_plan_step_kernel", result["kernels"])
+        self.assertIn("nrlmsise00_quiet_thermosphere_density_kernel", result["kernels"])
+        self.assertIn("ecef_to_geodetic_deg_km_kernel", result["kernels"])
+
+    def test_accelerated_wgs84_conversion_is_exact_across_poles_and_altitudes(self):
+        for latitude_deg in (-90.0, -89.0, -45.0, 0.0, 45.0, 89.0, 90.0):
+            for longitude_deg in (-180.0, -37.0, 0.0, 123.0, 180.0):
+                for altitude_km in (-1.0, 0.0, 300.0, 1000.0):
+                    position = geodetic_to_ecef_km(latitude_deg, longitude_deg, altitude_km)
+                    expected = ecef_to_geodetic_deg_km(position)
+                    actual = ecef_to_geodetic_deg_km_kernel(position)
+                    with self.subTest(
+                        latitude_deg=latitude_deg,
+                        longitude_deg=longitude_deg,
+                        altitude_km=altitude_km,
+                    ):
+                        self.assertEqual(actual, expected)
 
     def test_orbit_benchmark_returns_valid_result(self):
         result = benchmark_orbit_kernel(iterations=2, warmup=False)
@@ -223,7 +291,9 @@ class TestAcceleration(unittest.TestCase):
         torque = np.array([0.001, -0.002, 0.003], dtype=float)
 
         reset_attitude_guardrail_stats()
-        q_expected, w_expected = propagate_attitude_exponential_map(q0, w0, inertia, torque, 0.1, acceleration_mode="off")
+        q_expected, w_expected = propagate_attitude_exponential_map(
+            q0, w0, inertia, torque, 0.1, acceleration_mode="off"
+        )
         stats_expected = get_attitude_guardrail_stats()
         reset_attitude_guardrail_stats()
         q_actual, w_actual = propagate_attitude_exponential_map(q0, w0, inertia, torque, 0.1, acceleration_mode="auto")
@@ -240,7 +310,9 @@ class TestAcceleration(unittest.TestCase):
         torque = np.array([np.inf, np.nan, 2.0e12], dtype=float)
 
         reset_attitude_guardrail_stats()
-        q_expected, w_expected = propagate_attitude_exponential_map(q0, w0, inertia, torque, 0.1, acceleration_mode="off")
+        q_expected, w_expected = propagate_attitude_exponential_map(
+            q0, w0, inertia, torque, 0.1, acceleration_mode="off"
+        )
         stats_expected = get_attitude_guardrail_stats()
         reset_attitude_guardrail_stats()
         q_actual, w_actual = propagate_attitude_exponential_map(q0, w0, inertia, torque, 0.1, acceleration_mode="auto")

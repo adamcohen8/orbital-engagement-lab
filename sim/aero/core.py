@@ -174,8 +174,16 @@ def atmosphere_relative_velocity_eci_km_s(
     ddpsi_rad: float = 0.0,
     ddeps_rad: float = 0.0,
 ) -> np.ndarray:
-    r = np.array(r_eci_km, dtype=float).reshape(3)
-    v = np.array(v_eci_km_s, dtype=float).reshape(3)
+    r = (
+        r_eci_km
+        if isinstance(r_eci_km, np.ndarray) and r_eci_km.dtype == np.float64 and r_eci_km.shape == (3,)
+        else np.asarray(r_eci_km, dtype=float).reshape(3)
+    )
+    v = (
+        v_eci_km_s
+        if isinstance(v_eci_km_s, np.ndarray) and v_eci_km_s.dtype == np.float64 and v_eci_km_s.shape == (3,)
+        else np.asarray(v_eci_km_s, dtype=float).reshape(3)
+    )
     model = normalize_frame_model(frame_model)
     if model in {FRAME_MODEL_SIMPLE_GMST, FRAME_MODEL_IAU76_80_EOP}:
         if model == FRAME_MODEL_IAU76_80_EOP:

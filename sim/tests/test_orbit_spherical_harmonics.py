@@ -6,15 +6,23 @@ from unittest.mock import patch
 
 import numpy as np
 
+import sim.dynamics.orbit.propagator as orbit_propagator
 import sim.dynamics.orbit.spherical_harmonics as spherical_harmonics
 from sim import SimulationConfig
-from sim.dynamics.orbit.accelerations import accel_j2
+from sim.dynamics.orbit.accelerations import OrbitContext, accel_j2
 from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2
-from sim.dynamics.orbit.propagator import j2_plugin, j3_plugin, j4_plugin, spherical_harmonics_plugin
+from sim.dynamics.orbit.propagator import (
+    OrbitPropagator,
+    j2_plugin,
+    j3_plugin,
+    j4_plugin,
+    spherical_harmonics_plugin,
+)
 from sim.dynamics.orbit.spherical_harmonics import (
     GravityModelDownload,
     SphericalHarmonicTerm,
     accel_spherical_harmonics_terms,
+    compile_spherical_harmonic_terms,
     configure_spherical_harmonics_env,
     load_icgem_gfc_terms,
     parse_spherical_harmonic_terms,
@@ -115,6 +123,108 @@ class TestOrbitSphericalHarmonics(unittest.TestCase):
         a_j2 = accel_j2(r, EARTH_MU_KM3_S2, j2=0.0010826355254902923, re_km=6378.1363)
         self.assertLess(float(np.linalg.norm(a - a_j2)), 1e-10)
 
+    def test_accelerated_normalized_terms_match_python_reference(self):
+        terms = [
+            SphericalHarmonicTerm(
+                n=degree,
+                m=order,
+                c_nm=(-1.0 if (degree + order) % 2 else 1.0) * 1.0e-5 / (degree + order + 1.0),
+                s_nm=(0.0 if order == 0 else 7.0e-6 / (degree + 2.0 * order + 1.0)),
+                normalized=True,
+            )
+            for degree in range(2, 9)
+            for order in range(degree + 1)
+        ]
+        compiled = compile_spherical_harmonic_terms(terms)
+        self.assertIsNotNone(compiled)
+        samples = (
+            (0.0, np.array([7000.0, 100.0, 200.0], dtype=float)),
+            (1234.5, np.array([-4300.0, 5100.0, 1800.0], dtype=float)),
+            (5999.0, np.array([250.0, -6900.0, 1200.0], dtype=float)),
+            (3210.25, np.array([10.0, 15.0, 7200.0], dtype=float)),
+        )
+
+        for t_s, position in samples:
+            with self.subTest(t_s=t_s, position=position.tolist()):
+                expected = accel_spherical_harmonics_terms(
+                    position,
+                    t_s,
+                    terms,
+                    mu_km3_s2=EARTH_MU_KM3_S2,
+                    re_km=6378.1363,
+                    jd_utc_start=2459669.5,
+                    frame_model="simple",
+                    compiled=compiled,
+                    use_acceleration=False,
+                )
+                actual = accel_spherical_harmonics_terms(
+                    position,
+                    t_s,
+                    terms,
+                    mu_km3_s2=EARTH_MU_KM3_S2,
+                    re_km=6378.1363,
+                    jd_utc_start=2459669.5,
+                    frame_model="simple",
+                    compiled=compiled,
+                    use_acceleration=True,
+                )
+
+                np.testing.assert_allclose(actual, expected, rtol=1.0e-12, atol=5.0e-18)
+
+    def test_orbit_propagator_acceleration_mode_dispatches_normalized_terms(self):
+        terms = [
+            SphericalHarmonicTerm(
+                n=2,
+                m=0,
+                c_nm=-4.841693259705e-4,
+                normalized=True,
+            ),
+            SphericalHarmonicTerm(
+                n=2,
+                m=2,
+                c_nm=2.43914352398e-6,
+                s_nm=-1.40016683654e-6,
+                normalized=True,
+            ),
+        ]
+        env = {
+            "jd_utc_start": 2459669.5,
+            "spherical_harmonics_terms": terms,
+            "_parsed_spherical_harmonics_terms": terms,
+            "_compiled_spherical_harmonics_terms": compile_spherical_harmonic_terms(terms),
+            "spherical_harmonics_reference_radius_km": 6378.1363,
+            "spherical_harmonics_frame_model": "simple",
+        }
+        state = np.array([7000.0, 100.0, 200.0, 0.0, 7.5, 0.1], dtype=float)
+        command = np.zeros(3, dtype=float)
+        context = OrbitContext(mu_km3_s2=EARTH_MU_KM3_S2, mass_kg=100.0)
+        for integrator, expected_calls in (("rk4", 4), ("rkf78", 13)):
+            with self.subTest(integrator=integrator):
+                baseline = OrbitPropagator(
+                    integrator=integrator,
+                    plugins=[spherical_harmonics_plugin],
+                    acceleration_mode="off",
+                )
+                accelerated = OrbitPropagator(
+                    integrator=integrator,
+                    plugins=[spherical_harmonics_plugin],
+                    acceleration_mode="auto",
+                )
+                expected = baseline.propagate(state, 1.0, 0.0, command, env, context)
+
+                with (
+                    patch.object(accelerated, "_acceleration_enabled", return_value=True),
+                    patch.object(
+                        orbit_propagator,
+                        "_accelerated_spherical_harmonics_plugin",
+                        wraps=orbit_propagator._accelerated_spherical_harmonics_plugin,
+                    ) as accelerated_evaluator,
+                ):
+                    actual = accelerated.propagate(state, 1.0, 0.0, command, env, context)
+
+                self.assertEqual(accelerated_evaluator.call_count, expected_calls)
+                np.testing.assert_allclose(actual, expected, rtol=1.0e-12, atol=1.0e-12)
+
     def test_spherical_harmonics_replaces_explicit_zonals_in_runtime_plugins(self):
         cfg = scenario_config_from_dict(
             {
@@ -142,6 +252,246 @@ class TestOrbitSphericalHarmonics(unittest.TestCase):
         self.assertNotIn(j2_plugin, propagator.plugins)
         self.assertNotIn(j3_plugin, propagator.plugins)
         self.assertNotIn(j4_plugin, propagator.plugins)
+
+    def test_inline_terms_infer_degree_and_order(self):
+        cfg = scenario_config_from_dict(
+            {
+                "rocket": {"enabled": False},
+                "target": {"enabled": True, "specs": {"mass_kg": 100.0}},
+                "chaser": {"enabled": False},
+                "simulator": {
+                    "duration_s": 1.0,
+                    "dt_s": 1.0,
+                    "dynamics": {
+                        "orbit": {
+                            "spherical_harmonics": {
+                                "enabled": True,
+                                "terms": [
+                                    {"n": 2, "m": 0, "c_nm": -4.8e-4, "normalized": True},
+                                    {"n": 4, "m": 2, "c_nm": 1.0e-6, "normalized": True},
+                                ],
+                            }
+                        }
+                    },
+                },
+            }
+        )
+
+        orbit_cfg = dict(cfg.simulator.dynamics["orbit"])
+        sh = dict(orbit_cfg["spherical_harmonics"])
+        env = configure_spherical_harmonics_env({}, orbit_cfg)
+
+        self.assertEqual(sh["degree"], 4)
+        self.assertEqual(sh["order"], 2)
+        self.assertEqual([(term.n, term.m) for term in env["spherical_harmonics_terms"]], [(2, 0), (4, 2)])
+
+    def test_enabled_degree_order_without_coefficients_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "degree and order alone do not define a gravity field"):
+            scenario_config_from_dict(
+                {
+                    "rocket": {"enabled": False},
+                    "target": {"enabled": True, "specs": {"mass_kg": 100.0}},
+                    "chaser": {"enabled": False},
+                    "simulator": {
+                        "duration_s": 1.0,
+                        "dt_s": 1.0,
+                        "dynamics": {
+                            "orbit": {
+                                "spherical_harmonics": {"enabled": True, "degree": 8, "order": 8}
+                            }
+                        },
+                    },
+                }
+            )
+
+    def test_nested_zonal_switch_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "spherical_harmonics has unsupported field.*j2"):
+            scenario_config_from_dict(
+                {
+                    "rocket": {"enabled": False},
+                    "target": {"enabled": True, "specs": {"mass_kg": 100.0}},
+                    "chaser": {"enabled": False},
+                    "simulator": {
+                        "duration_s": 1.0,
+                        "dt_s": 1.0,
+                        "dynamics": {
+                            "orbit": {"spherical_harmonics": {"enabled": True, "j2": True}}
+                        },
+                    },
+                }
+            )
+
+    def test_egm96_source_materializes_verified_real_coefficient_mode(self):
+        cfg = scenario_config_from_dict(
+            {
+                "rocket": {"enabled": False},
+                "target": {"enabled": True, "specs": {"mass_kg": 100.0}},
+                "chaser": {"enabled": False},
+                "simulator": {
+                    "duration_s": 1.0,
+                    "dt_s": 1.0,
+                    "dynamics": {
+                        "orbit": {
+                            "spherical_harmonics": {
+                                "enabled": True,
+                                "degree": 8,
+                                "order": 6,
+                                "source": "EGM96",
+                                "allow_download": False,
+                            }
+                        }
+                    },
+                },
+            }
+        )
+
+        env = configure_spherical_harmonics_env({}, cfg.simulator.dynamics["orbit"])
+
+        self.assertTrue(env["spherical_harmonics_use_real_coefficients"])
+        self.assertEqual(env["spherical_harmonics_model"], "EGM96")
+        self.assertEqual(env["spherical_harmonics_max_degree"], 8)
+        self.assertEqual(env["spherical_harmonics_max_order"], 6)
+        self.assertFalse(env["spherical_harmonics_allow_download"])
+
+    def test_egm96_explicit_file_produces_nonzero_plugin_acceleration(self):
+        gfc_txt = "\n".join(
+            [
+                "modelname EGM96_TEST",
+                "norm fully_normalized",
+                "gfc 2 0 -4.84165371736e-04 0.0 0.0 0.0",
+                "",
+            ]
+        )
+        with tempfile.TemporaryDirectory() as td:
+            coeff_path = Path(td) / "egm96-test.gfc"
+            coeff_path.write_text(gfc_txt, encoding="utf-8")
+            env = configure_spherical_harmonics_env(
+                {},
+                {
+                    "spherical_harmonics": {
+                        "enabled": True,
+                        "degree": 2,
+                        "order": 0,
+                        "source": "egm96",
+                        "coeff_path": str(coeff_path),
+                        "allow_download": False,
+                    }
+                },
+            )
+
+            class _Ctx:
+                mu_km3_s2 = EARTH_MU_KM3_S2
+
+            state = np.array([7000.0, 100.0, 200.0, 0.0, 7.5, 0.0], dtype=float)
+            acceleration = spherical_harmonics_plugin(0.0, state, env=env, ctx=_Ctx())
+
+        self.assertGreater(float(np.linalg.norm(acceleration)), 0.0)
+
+    def test_file_backed_field_requires_explicit_degree(self):
+        with self.assertRaisesRegex(ValueError, "File-backed.*requires degree >= 2"):
+            scenario_config_from_dict(
+                {
+                    "rocket": {"enabled": False},
+                    "target": {"enabled": True, "specs": {"mass_kg": 100.0}},
+                    "chaser": {"enabled": False},
+                    "simulator": {
+                        "duration_s": 1.0,
+                        "dt_s": 1.0,
+                        "dynamics": {
+                            "orbit": {
+                                "spherical_harmonics": {
+                                    "enabled": True,
+                                    "coeff_path": "gravity.gfc",
+                                }
+                            }
+                        },
+                    },
+                }
+            )
+
+    def test_unknown_coefficient_source_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "source must be one of"):
+            scenario_config_from_dict(
+                {
+                    "rocket": {"enabled": False},
+                    "target": {"enabled": True, "specs": {"mass_kg": 100.0}},
+                    "chaser": {"enabled": False},
+                    "simulator": {
+                        "duration_s": 1.0,
+                        "dt_s": 1.0,
+                        "dynamics": {
+                            "orbit": {
+                                "spherical_harmonics": {
+                                    "enabled": True,
+                                    "degree": 8,
+                                    "source": "unknown_model",
+                                }
+                            }
+                        },
+                    },
+                }
+            )
+
+    def test_icgem_source_materializes_explicit_coefficient_file(self):
+        gfc_txt = "\n".join(
+            [
+                "modelname TEST",
+                "earth_gravity_constant 4.0123456789e14",
+                "radius 7.012345e6",
+                "norm fully_normalized",
+                "gfc 2 0 -4.84165371736e-04 0.0 0.0 0.0",
+                "gfc 2 2 2.43914352398e-06 -1.40016683654e-06 0.0 0.0",
+                "",
+            ]
+        )
+        with tempfile.TemporaryDirectory() as td:
+            coeff_path = Path(td) / "test.gfc"
+            coeff_path.write_text(gfc_txt, encoding="utf-8")
+            orbit_cfg = {
+                "spherical_harmonics": {
+                    "enabled": True,
+                    "degree": 2,
+                    "order": 2,
+                    "source": "icgem",
+                    "coeff_path": str(coeff_path),
+                }
+            }
+            env = configure_spherical_harmonics_env({}, orbit_cfg)
+
+        self.assertEqual([(term.n, term.m) for term in env["spherical_harmonics_terms"]], [(2, 0), (2, 2)])
+        self.assertEqual(Path(env["spherical_harmonics_source"]), coeff_path.resolve())
+        self.assertEqual(env["spherical_harmonics_reference_radius_km"], 7012.345)
+        self.assertEqual(env["spherical_harmonics_mu_km3_s2"], 401234.56789)
+
+    def test_icgem_explicit_reference_radius_overrides_file_header(self):
+        gfc_txt = "\n".join(
+            [
+                "earth_gravity_constant 3.986004415e14",
+                "radius 7.0e6",
+                "norm fully_normalized",
+                "gfc 2 0 -4.84165371736e-04 0.0 0.0 0.0",
+                "",
+            ]
+        )
+        with tempfile.TemporaryDirectory() as td:
+            coeff_path = Path(td) / "test.gfc"
+            coeff_path.write_text(gfc_txt, encoding="utf-8")
+            env = configure_spherical_harmonics_env(
+                {},
+                {
+                    "spherical_harmonics": {
+                        "enabled": True,
+                        "degree": 2,
+                        "order": 0,
+                        "source": "icgem",
+                        "coeff_path": str(coeff_path),
+                        "reference_radius_km": 6378.0,
+                    }
+                },
+            )
+
+        self.assertEqual(env["spherical_harmonics_reference_radius_km"], 6378.0)
+        self.assertEqual(env["spherical_harmonics_mu_km3_s2"], 398600.4415)
 
     def test_load_icgem_gfc_terms_normalized_flag(self):
         gfc_txt = "\n".join(

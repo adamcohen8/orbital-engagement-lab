@@ -246,8 +246,14 @@ def resolve_sun_moon_positions(env: dict, t_s: float) -> tuple[np.ndarray, np.nd
 
     mode = str(env.get("ephemeris_mode", "analytic_enhanced")).lower()
     if mode in ("de440_hpop", "hpop_de440", "de440"):
-        from sim.dynamics.orbit.de440_hpop import hpop_de440_positions_km
+        from sim.acceleration.settings import acceleration_enabled_from_mode
+        from sim.dynamics.orbit.de440_hpop import (
+            hpop_de440_positions_km,
+            hpop_de440_sun_moon_positions_km,
+        )
 
+        if acceleration_enabled_from_mode():
+            return hpop_de440_sun_moon_positions_km(jd, env)
         pos = hpop_de440_positions_km(jd, env)
         return np.array(pos["sun"], dtype=float), np.array(pos["moon"], dtype=float)
     if mode in ("spice", "spiceypy"):
@@ -311,7 +317,12 @@ def resolved_jd_utc(env: dict, t_s: float) -> float | None:
     return None
 
 
-def resolve_time_dependent_env(env: dict, t_s: float) -> dict:
+def resolve_time_dependent_env(
+    env: dict,
+    t_s: float,
+    *,
+    cache_override: dict[tuple, dict[str, np.ndarray]] | None = None,
+) -> dict:
     out = dict(env)
     out["sim_t_s"] = float(t_s)
     jd = resolved_jd_utc(env=out, t_s=t_s)
@@ -320,10 +331,21 @@ def resolve_time_dependent_env(env: dict, t_s: float) -> dict:
     out["jd_utc"] = float(jd)
 
     mode = str(out.get("ephemeris_mode", "analytic_enhanced")).lower()
-    cache = out.get(TIME_DEPENDENT_ENV_CACHE_KEY)
-    cacheable_analytic = (
+    cache = cache_override if cache_override is not None else out.get(TIME_DEPENDENT_ENV_CACHE_KEY)
+    cacheable_ephemeris = (
         isinstance(cache, dict)
-        and mode in ("analytic", "analytic_simple", "analytic_enhanced", "enhanced", "simple", "")
+        and mode
+        in (
+            "analytic",
+            "analytic_simple",
+            "analytic_enhanced",
+            "enhanced",
+            "simple",
+            "",
+            "de440_hpop",
+            "hpop_de440",
+            "de440",
+        )
         and "ephemeris_callable" not in out
         and "sun_ephemeris_time_s" not in out
         and "moon_ephemeris_time_s" not in out
@@ -333,8 +355,19 @@ def resolve_time_dependent_env(env: dict, t_s: float) -> dict:
     )
     cache_key = None
     additions = None
-    if cacheable_analytic:
-        cache_key = (mode, float(jd))
+    if cacheable_ephemeris:
+        if mode in ("de440_hpop", "hpop_de440", "de440"):
+            cache_key = (
+                mode,
+                float(jd),
+                out.get("de440_coeff_path"),
+                out.get("de440_eop_path")
+                or out.get("spherical_harmonics_eop_path")
+                or out.get("drag_eop_path"),
+                out.get("de440_tai_utc_s"),
+            )
+        else:
+            cache_key = (mode, float(jd))
         additions = cache.get(cache_key)
         if isinstance(additions, dict):
             if "sun_pos_eci_km" not in out and "sun_pos_eci_km" in additions:
@@ -345,7 +378,18 @@ def resolve_time_dependent_env(env: dict, t_s: float) -> dict:
                 out["sun_dir_eci"] = additions["sun_dir_eci"]
             return out
 
-    if mode in ("analytic", "analytic_simple", "analytic_enhanced", "enhanced", "simple", "spice", "spiceypy"):
+    if mode in (
+        "analytic",
+        "analytic_simple",
+        "analytic_enhanced",
+        "enhanced",
+        "simple",
+        "spice",
+        "spiceypy",
+        "de440_hpop",
+        "hpop_de440",
+        "de440",
+    ):
         sun, moon = resolve_sun_moon_positions(out, t_s)
         computed_additions: dict[str, np.ndarray] = {}
         if "sun_pos_eci_km" not in out:
@@ -358,7 +402,7 @@ def resolve_time_dependent_env(env: dict, t_s: float) -> dict:
         if s_norm > 0.0 and "sun_dir_eci" not in out:
             out["sun_dir_eci"] = sun / s_norm
             computed_additions["sun_dir_eci"] = out["sun_dir_eci"]
-        if cacheable_analytic and cache_key is not None:
+        if cacheable_ephemeris and cache_key is not None:
             cache[cache_key] = computed_additions
     elif mode in ("external", "callable"):
         sun, moon = resolve_sun_moon_positions(out, t_s)

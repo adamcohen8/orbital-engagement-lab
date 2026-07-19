@@ -52,6 +52,8 @@ def _resolved_requested_mode(mode: Any = None, *, allow_env_override: bool = Tru
     context = _ACCELERATION_CONTEXT.get()
     if context is not None:
         mode, allow_env_override = context
+        if not allow_env_override:
+            return mode
     env_mode = os.environ.get(ACCELERATION_ENV)
     return _normalize_mode(env_mode if allow_env_override and env_mode not in (None, "") else mode)
 

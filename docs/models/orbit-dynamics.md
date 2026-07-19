@@ -191,8 +191,11 @@ Primary implementation files:
 - `sim/dynamics/model.py`: `OrbitalAttitudeDynamics.step`, orbit substepping,
   command acceleration application, and coupling to attitude/aero/SRP geometry.
 - `sim/dynamics/orbit/propagator.py`: `OrbitPropagator`, perturbation plugin
-  wiring, CR3BP dispatch, adaptive-step accounting, and accelerated zonal RK4
-  dispatch.
+  wiring, CR3BP dispatch, adaptive-step accounting, accelerated zonal RK4
+  dispatch, and capability/profitability routing for fused and staged compiled
+  force plans.
+- `sim/acceleration/kernels/orbit_force_plan.py`: exact compiled fixed-step and
+  per-component kernels shared by supported RK4 and RKF78 force plans.
 - `sim/dynamics/orbit/accelerations.py`: two-body, J2, J3, J4, drag, lift,
   SRP, and third-body acceleration functions.
 - `sim/dynamics/orbit/integrators.py`: RK4, RKF78, Dormand-Prince, and adaptive

@@ -27,7 +27,115 @@ __all__ = [
     '_parse_resource_profile',
     '_parse_acceleration_section',
     '_parse_simulator_execution_section',
+    '_normalize_spherical_harmonics_section',
 ]
+
+
+def _parse_nonnegative_int(value: Any, field_name: str) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f"{field_name} must be a nonnegative integer.")
+    try:
+        out = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be a nonnegative integer.") from exc
+    if not isinstance(value, int) and str(value).strip() not in {str(out), f"+{out}"}:
+        raise ValueError(f"{field_name} must be a nonnegative integer.")
+    if out < 0:
+        raise ValueError(f"{field_name} must be a nonnegative integer.")
+    return out
+
+
+def _normalize_spherical_harmonics_section(value: Any) -> dict[str, Any]:
+    path = "simulator.dynamics.orbit.spherical_harmonics"
+    raw = _as_dict(value, path)
+    _reject_unknown_fields(
+        raw,
+        path,
+        {
+            "enabled",
+            "degree",
+            "order",
+            "source",
+            "model",
+            "coeff_path",
+            "source_path",
+            "terms",
+            "normalized",
+            "reference_radius_km",
+            "frame_model",
+            "eop_path",
+            "fd_step_km",
+            "allow_download",
+        },
+    )
+    out = dict(raw)
+    out["enabled"] = _parse_bool(out.get("enabled", False), f"{path}.enabled")
+
+    if out.get("source") not in (None, "") and out.get("model") not in (None, ""):
+        source = str(out["source"]).strip().lower()
+        model = str(out["model"]).strip().lower()
+        if source != model:
+            raise ValueError(f"{path}.source and {path}.model cannot select different gravity models.")
+    source = str(out.get("source", out.get("model", "")) or "").strip().lower()
+    if not source and (out.get("coeff_path") not in (None, "") or out.get("source_path") not in (None, "")):
+        source = "icgem"
+    if source:
+        out["source"] = source
+    out.pop("model", None)
+
+    terms = out.get("terms")
+    max_term_degree = -1
+    max_term_order = -1
+    if terms not in (None, ""):
+        if not isinstance(terms, list) or not terms:
+            raise ValueError(f"{path}.terms must be a non-empty list of coefficient mappings.")
+        normalized_terms: list[dict[str, Any]] = []
+        for index, item in enumerate(terms):
+            term_path = f"{path}.terms[{index}]"
+            if not isinstance(item, dict):
+                raise ValueError(f"{term_path} must be a coefficient mapping.")
+            term = dict(item)
+            _reject_unknown_fields(term, term_path, {"n", "m", "c_nm", "s_nm", "c", "s", "normalized"})
+            if "n" not in term or "m" not in term:
+                raise ValueError(f"{term_path} requires integer n and m fields.")
+            n = _parse_nonnegative_int(term["n"], f"{term_path}.n")
+            m = _parse_nonnegative_int(term["m"], f"{term_path}.m")
+            if n < 2:
+                raise ValueError(f"{term_path}.n must be >= 2 for a perturbing geopotential term.")
+            if m > n:
+                raise ValueError(f"{term_path}.m must satisfy 0 <= m <= n.")
+            term["n"] = n
+            term["m"] = m
+            if "normalized" in term:
+                term["normalized"] = _parse_bool(term["normalized"], f"{term_path}.normalized")
+            normalized_terms.append(term)
+            max_term_degree = max(max_term_degree, n)
+            max_term_order = max(max_term_order, m)
+        out["terms"] = normalized_terms
+
+    if out.get("degree") is not None:
+        out["degree"] = _parse_nonnegative_int(out["degree"], f"{path}.degree")
+    elif max_term_degree >= 2:
+        out["degree"] = max_term_degree
+    if out.get("order") is not None:
+        out["order"] = _parse_nonnegative_int(out["order"], f"{path}.order")
+    elif max_term_order >= 0:
+        out["order"] = max_term_order
+    elif out.get("degree") is not None:
+        out["order"] = int(out["degree"])
+
+    if out.get("degree") is not None and out.get("order") is not None and int(out["order"]) > int(out["degree"]):
+        raise ValueError(f"{path}.order must satisfy 0 <= order <= degree.")
+    for key in ("normalized", "allow_download"):
+        if key in out:
+            out[key] = _parse_bool(out[key], f"{path}.{key}")
+    for key in ("reference_radius_km", "fd_step_km"):
+        if out.get(key) is None:
+            continue
+        out[key] = _parse_float(out[key], f"{path}.{key}")
+        if float(out[key]) <= 0.0:
+            raise ValueError(f"{path}.{key} must be positive.")
+    return out
 
 def _normalize_reentry_termination_block(
     value: Any,
@@ -274,6 +382,8 @@ def _normalize_dynamics_section(value: dict[str, Any]) -> dict[str, Any]:
             "spherical_harmonics",
         },
     )
+    if "spherical_harmonics" in orbit:
+        orbit["spherical_harmonics"] = _normalize_spherical_harmonics_section(orbit.get("spherical_harmonics"))
     attitude = _as_dict(dynamics.get("attitude"), "simulator.dynamics.attitude")
     _reject_unknown_fields(
         attitude,

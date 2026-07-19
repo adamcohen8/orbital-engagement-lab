@@ -720,6 +720,30 @@ spherical_harmonics:
   coeff_path: "/path/to/GGM03C.txt"
 ```
 
+ICGEM `.gfc` coefficient files use the same explicit degree/order truncation.
+OEL reads the file's `radius` and `earth_gravity_constant` headers and applies
+them to the harmonic perturbation; an explicit `reference_radius_km` remains an
+intentional radius override:
+
+```yaml
+spherical_harmonics:
+  enabled: true
+  degree: 8
+  order: 8
+  source: "icgem"
+  coeff_path: "/path/to/gravity-model.gfc"
+```
+
+`source: "egm96"` uses an explicit `.gfc` path when supplied. Without one,
+OEL downloads the pinned EGM96 model into its managed cache and verifies its
+size and SHA-256 digest before use; set `allow_download: false` to require an
+already verified cached copy. Inline terms infer degree and order when those
+fields are omitted. File-backed fields always require `degree >= 2`, and an
+enabled block containing only degree/order is rejected because it does not
+identify any coefficients. Configure lightweight zonals with the top-level
+`orbit.j2`, `orbit.j3`, and `orbit.j4` switches, not inside the spherical-
+harmonics block.
+
 The private validation tree may contain HPOP reference data, but those files are
 not bundled with the public core.
 

@@ -118,6 +118,11 @@ analytic HPOP-like normalized Legendre path. Public distributions should
 provide explicit `terms` or an explicit coefficient file path. HPOP/GGM03
 reference files are not assumed to be present in the public core.
 
+With `simulator.acceleration.mode: auto` or `numba`, fully normalized fields
+use the optional compiled Legendre and degree/order summation kernel while
+retaining the same frame calculation. Unnormalized or mixed term sets continue
+through the Python finite-difference path.
+
 Key knobs:
 
 - `spherical_harmonics.enabled`
@@ -159,8 +164,12 @@ When no density override is supplied, the explicitly selected drag model calls
 
 `density_kg_m3` in the environment overrides model lookup for drag and
 re-entry calculations. The simple exponential model is a compact scale-height
-model and returns zero above 1000 km. It is a pedagogical scale-height fixture,
-not an LEO lifetime or decay model. The USSA-1976 path uses standard
+model. Its sea-level-compatible defaults can be replaced through
+`atmosphere_env` with `exponential_reference_altitude_km`,
+`exponential_reference_density_kg_m3`, `exponential_scale_height_km`, and
+`exponential_ceiling_altitude_km`; the density is then evaluated relative to
+that reference altitude. It is a pedagogical scale-height fixture, not an LEO
+lifetime, operational density, or decay model. The USSA-1976 path uses standard
 atmosphere layers through 86 km and log-space interpolation to 1000 km. The
 other atmosphere paths are source-local or callable-backed engineering models
 with solar/geomagnetic inputs supplied through `atmosphere_env`.

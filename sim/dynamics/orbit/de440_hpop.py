@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
 
+from sim.acceleration.settings import acceleration_enabled_from_mode
 from sim.dynamics.orbit.frames import _interp_eop
 
 _EMRAT = 81.3005682214972154
 _DE440_POSITION_CACHE_KEY = "_oel_de440_position_cache"
+_DE440_LIGHT_ROW_CACHE_KEY = "_oel_de440_light_row_cache"
 
 
 @lru_cache(maxsize=16)
@@ -22,13 +25,10 @@ def _resolve_relative_path(path_text: str, cwd: str) -> Path:
 
 
 def _resolve_path(path_value: str | Path) -> Path:
-    raw = Path(path_value)
-    if raw.is_absolute():
-        return _resolve_absolute_path(str(raw))
-    expanded = raw.expanduser()
-    if expanded.is_absolute():
-        return _resolve_absolute_path(str(expanded))
-    return _resolve_relative_path(str(expanded), str(Path.cwd()))
+    expanded = os.path.expanduser(os.fspath(path_value))
+    if os.path.isabs(expanded):
+        return _resolve_absolute_path(expanded)
+    return _resolve_relative_path(expanded, os.getcwd())
 
 
 @lru_cache(maxsize=1)
@@ -83,19 +83,97 @@ def _load_de440_light(path_str: str) -> dict[str, object]:
             "row_start_jd_tdb": np.asarray(data["row_start_jd_tdb"], dtype=float),
             "row_end_jd_tdb": np.asarray(data["row_end_jd_tdb"], dtype=float),
             "bodies": bodies,
+            "body_set": frozenset(bodies),
         }
+        body_specs: dict[str, tuple[int, int, float]] = {}
+        body_records: dict[str, tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]] = {}
         for body in bodies:
             key = str(body)
-            out[f"{key}_coeffs"] = int(np.asarray(data[f"{key}_coeffs"]).item())
-            out[f"{key}_segments"] = int(np.asarray(data[f"{key}_segments"]).item())
-            out[f"{key}_span_days"] = float(np.asarray(data[f"{key}_span_days"]).item())
+            coeff_count = int(np.asarray(data[f"{key}_coeffs"]).item())
+            segments = int(np.asarray(data[f"{key}_segments"]).item())
+            span_days = float(np.asarray(data[f"{key}_span_days"]).item())
+            out[f"{key}_coeffs"] = coeff_count
+            out[f"{key}_segments"] = segments
+            out[f"{key}_span_days"] = span_days
+            body_specs[key] = (coeff_count, segments, span_days)
             if f"{key}_start_jd_tdb" in data and f"{key}_end_jd_tdb" in data:
                 out[f"{key}_start_jd_tdb"] = np.asarray(data[f"{key}_start_jd_tdb"], dtype=float)
                 out[f"{key}_end_jd_tdb"] = np.asarray(data[f"{key}_end_jd_tdb"], dtype=float)
             out[f"{key}_x"] = np.asarray(data[f"{key}_x"], dtype=float)
             out[f"{key}_y"] = np.asarray(data[f"{key}_y"], dtype=float)
             out[f"{key}_z"] = np.asarray(data[f"{key}_z"], dtype=float)
+            body_records[key] = (
+                np.asarray(out.get(f"{key}_start_jd_tdb", out["row_start_jd_tdb"]), dtype=float),
+                np.asarray(out.get(f"{key}_end_jd_tdb", out["row_end_jd_tdb"]), dtype=float),
+                out[f"{key}_x"],  # type: ignore[arg-type]
+                out[f"{key}_y"],  # type: ignore[arg-type]
+                out[f"{key}_z"],  # type: ignore[arg-type]
+            )
+        out["body_specs"] = body_specs
+        out["body_records"] = body_records
         return out
+
+
+@lru_cache(maxsize=1)
+def _compiled_de440_light_core():
+    from sim.acceleration.kernels.de440 import de440_light_core_kernel
+
+    return de440_light_core_kernel
+
+
+@lru_cache(maxsize=1)
+def _compiled_de440_sun_moon_from_utc():
+    from sim.acceleration.kernels.de440 import de440_sun_moon_from_utc_kernel
+
+    return de440_sun_moon_from_utc_kernel
+
+
+def _eval_light_core_accelerated(
+    light: dict[str, object], jd_tdb: float
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    body_specs = light["body_specs"]
+    body_records = light["body_records"]
+    if not isinstance(body_specs, dict) or not isinstance(body_records, dict):
+        raise TypeError("Invalid OEL DE440 light body metadata.")
+    earthmoon_spec = body_specs["earthmoon"]
+    moon_spec = body_specs["moon"]
+    sun_spec = body_specs["sun"]
+    earthmoon_record = body_records["earthmoon"]
+    moon_record = body_records["moon"]
+    sun_record = body_records["sun"]
+    result = _compiled_de440_light_core()(
+        float(jd_tdb),
+        *earthmoon_spec,
+        *earthmoon_record,
+        *moon_spec,
+        *moon_record,
+        *sun_spec,
+        *sun_record,
+    )
+    r_earthmoon, r_moon, r_sun, earthmoon_row, moon_row, sun_row = result
+    for body, row_index in (
+        ("earthmoon", earthmoon_row),
+        ("moon", moon_row),
+        ("sun", sun_row),
+    ):
+        if int(row_index) < 0:
+            raise ValueError(f"JD_TDB {jd_tdb} is outside OEL DE440 light coverage for body '{body}'.")
+    return r_earthmoon, r_moon, r_sun
+
+
+def _light_core_arguments(light: dict[str, object]) -> tuple[object, ...]:
+    body_specs = light["body_specs"]
+    body_records = light["body_records"]
+    if not isinstance(body_specs, dict) or not isinstance(body_records, dict):
+        raise TypeError("Invalid OEL DE440 light body metadata.")
+    return (
+        *body_specs["earthmoon"],
+        *body_records["earthmoon"],
+        *body_specs["moon"],
+        *body_records["moon"],
+        *body_specs["sun"],
+        *body_records["sun"],
+    )
 
 
 def _cheb3d(t: float, n: int, ta: float, tb: float, cx: np.ndarray, cy: np.ndarray, cz: np.ndarray) -> np.ndarray:
@@ -173,11 +251,22 @@ def _eval_body(row: np.ndarray, jd_tdb: float, body_name: str) -> np.ndarray:
 def _find_light_row(light: dict[str, object], jd_tdb: float) -> int:
     starts = np.asarray(light["row_start_jd_tdb"], dtype=float)
     ends = np.asarray(light["row_end_jd_tdb"], dtype=float)
-    mask = (starts <= float(jd_tdb)) & (float(jd_tdb) <= ends)
+    jd = float(jd_tdb)
+    row_cache = light.setdefault(_DE440_LIGHT_ROW_CACHE_KEY, {})
+    if isinstance(row_cache, dict):
+        cached = row_cache.get("")
+        if isinstance(cached, tuple) and len(cached) == 3:
+            cached_index, cached_start, cached_end = cached
+            if float(cached_start) < jd < float(cached_end):
+                return int(cached_index)
+    mask = (starts <= jd) & (jd <= ends)
     idx = np.flatnonzero(mask)
     if idx.size == 0:
         raise ValueError(f"JD_TDB {jd_tdb} is outside OEL DE440 light coverage.")
-    return int(idx[0])
+    row_index = int(idx[0])
+    if isinstance(row_cache, dict):
+        row_cache[""] = (row_index, float(starts[row_index]), float(ends[row_index]))
+    return row_index
 
 
 def _find_light_body_row(light: dict[str, object], jd_tdb: float, body: str) -> int:
@@ -186,23 +275,38 @@ def _find_light_body_row(light: dict[str, object], jd_tdb: float, body: str) -> 
     if start_key in light and end_key in light:
         starts = np.asarray(light[start_key], dtype=float)
         ends = np.asarray(light[end_key], dtype=float)
-        mask = (starts <= float(jd_tdb)) & (float(jd_tdb) <= ends)
+        jd = float(jd_tdb)
+        row_cache = light.setdefault(_DE440_LIGHT_ROW_CACHE_KEY, {})
+        if isinstance(row_cache, dict):
+            cached = row_cache.get(body)
+            if isinstance(cached, tuple) and len(cached) == 3:
+                cached_index, cached_start, cached_end = cached
+                if float(cached_start) < jd < float(cached_end):
+                    return int(cached_index)
+        mask = (starts <= jd) & (jd <= ends)
         idx = np.flatnonzero(mask)
         if idx.size == 0:
             raise ValueError(f"JD_TDB {jd_tdb} is outside OEL DE440 light coverage for body '{body}'.")
-        return int(idx[0])
+        row_index = int(idx[0])
+        if isinstance(row_cache, dict):
+            row_cache[body] = (row_index, float(starts[row_index]), float(ends[row_index]))
+        return row_index
     return _find_light_row(light, jd_tdb)
 
 
 def _eval_light_body(light: dict[str, object], jd_tdb: float, body_name: str) -> np.ndarray:
     body = str(body_name).strip().lower()
-    bodies = tuple(str(v) for v in light["bodies"])  # type: ignore[index]
-    if body not in bodies:
+    body_set = light.get("body_set", light["bodies"])
+    if body not in body_set:
         raise RuntimeError(f"Body '{body_name}' is not available in OEL DE440 light file.")
     row_index = _find_light_body_row(light, jd_tdb, body)
-    coeff_count = int(light[f"{body}_coeffs"])
-    segments = int(light[f"{body}_segments"])
-    span_days = float(light[f"{body}_span_days"])
+    body_specs = light.get("body_specs")
+    if isinstance(body_specs, dict) and body in body_specs:
+        coeff_count, segments, span_days = body_specs[body]
+    else:
+        coeff_count = int(light[f"{body}_coeffs"])
+        segments = int(light[f"{body}_segments"])
+        span_days = float(light[f"{body}_span_days"])
     start_key = f"{body}_start_jd_tdb"
     if start_key in light:
         t1 = float(np.asarray(light[start_key], dtype=float)[row_index])
@@ -260,13 +364,17 @@ def hpop_de440_positions_m(jd_tdb: float, coeff_path: str | Path | None = None) 
     path = default_de440_coeff_path() if coeff_path is None else _resolve_path(coeff_path)
     if path.suffix.lower() == ".npz":
         light = _load_de440_light(str(path))
-        bodies = tuple(str(v) for v in light["bodies"])  # type: ignore[index]
-        if not {"earthmoon", "moon", "sun"}.issubset(set(bodies)):
+        bodies = light["bodies"]
+        body_set = light.get("body_set", bodies)
+        if not {"earthmoon", "moon", "sun"}.issubset(body_set):
             raise RuntimeError("OEL DE440 light file must include earthmoon, moon, and sun for geocentric ephemerides.")
 
-        r_earthmoon = _eval_light_body(light, jd_tdb, "earthmoon")
-        r_moon = _eval_light_body(light, jd_tdb, "moon")
-        r_sun = _eval_light_body(light, jd_tdb, "sun")
+        if acceleration_enabled_from_mode():
+            r_earthmoon, r_moon, r_sun = _eval_light_core_accelerated(light, jd_tdb)
+        else:
+            r_earthmoon = _eval_light_body(light, jd_tdb, "earthmoon")
+            r_moon = _eval_light_body(light, jd_tdb, "moon")
+            r_sun = _eval_light_body(light, jd_tdb, "sun")
         emrat1 = 1.0 / (1.0 + _EMRAT)
         r_earth = r_earthmoon - emrat1 * r_moon
         out = {
@@ -339,3 +447,47 @@ def hpop_de440_positions_km(jd_utc: float, env: dict) -> dict[str, np.ndarray]:
         {str(name): np.array(value, dtype=float, copy=True) for name, value in positions.items()},
     )
     return positions
+
+
+def hpop_de440_sun_moon_positions_km(jd_utc: float, env: dict) -> tuple[np.ndarray, np.ndarray]:
+    """Return the mandatory geocentric Sun/Moon pair through the accelerated light path.
+
+    The complete dictionary-producing API remains authoritative for callers that
+    need Earth, barycentric Sun, or optional planetary bodies.
+    """
+
+    coeff_path_raw = env.get("de440_coeff_path")
+    coeff_path = default_de440_coeff_path() if coeff_path_raw is None else _resolve_path(str(coeff_path_raw))
+    if coeff_path.suffix.lower() != ".npz" or not acceleration_enabled_from_mode():
+        positions = hpop_de440_positions_km(jd_utc, env)
+        return np.array(positions["sun"], dtype=float), np.array(positions["moon"], dtype=float)
+
+    eop_path_raw = env.get("de440_eop_path") or env.get("spherical_harmonics_eop_path") or env.get("drag_eop_path")
+    eop_path = None if eop_path_raw is None else str(_resolve_path(str(eop_path_raw)))
+    tai_utc_raw = env.get("de440_tai_utc_s")
+    light = _load_de440_light(str(coeff_path))
+    body_set = light.get("body_set", light["bodies"])
+    if not {"earthmoon", "moon", "sun"}.issubset(body_set):
+        raise RuntimeError("OEL DE440 light file must include earthmoon, moon, and sun for geocentric ephemerides.")
+    if tai_utc_raw is None:
+        if eop_path:
+            _xp, _yp, _dut1, tai_utc_s = _interp_eop(float(jd_utc) - 2400000.5, eop_path)
+        else:
+            tai_utc_s = 37.0
+    else:
+        tai_utc_s = float(tai_utc_raw)
+    sun, moon, earthmoon_row, moon_row, sun_row = _compiled_de440_sun_moon_from_utc()(
+        float(jd_utc),
+        float(tai_utc_s),
+        float(_EMRAT),
+        *_light_core_arguments(light),
+    )
+    for body, row_index in (
+        ("earthmoon", earthmoon_row),
+        ("moon", moon_row),
+        ("sun", sun_row),
+    ):
+        if int(row_index) < 0:
+            jd_tdb = jd_utc_to_jd_tdb(float(jd_utc), eop_path=eop_path, tai_utc_s=float(tai_utc_s))
+            raise ValueError(f"JD_TDB {jd_tdb} is outside OEL DE440 light coverage for body '{body}'.")
+    return sun, moon

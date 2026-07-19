@@ -9,9 +9,13 @@ from sim.dynamics.orbit.epoch import sun_position_eci_km_enhanced, sun_position_
 from sim.dynamics.orbit.frames import precession_nutation_rotation_hpop_like
 from sim.utils.geodesy import ecef_to_geodetic_deg_km
 
+_BACKEND_PATH = Path(__file__).resolve()
+_DEFAULT_COEFF_PATH = str((_BACKEND_PATH.parent / "data" / "harris_priester_hpop.csv").resolve())
+_PROJECT_ROOT = _BACKEND_PATH.parents[3]
+
 
 def _default_coeff_path() -> Path:
-    return Path(__file__).resolve().parent / "data" / "harris_priester_hpop.csv"
+    return Path(_DEFAULT_COEFF_PATH)
 
 
 @lru_cache(maxsize=4)
@@ -28,21 +32,38 @@ def _load_coefficients(path: str) -> dict[int, np.ndarray]:
     return tables
 
 
-def _resolve_coeff_path(env: dict) -> str:
-    raw = env.get("harris_priester_coeff_path") or env.get("hp_coeff_path")
-    p = _default_coeff_path() if raw in (None, "") else Path(str(raw)).expanduser()
+@lru_cache(maxsize=8)
+def _resolved_coeff_path(raw: str | None) -> str:
+    if raw in (None, ""):
+        return _DEFAULT_COEFF_PATH
+    p = Path(raw).expanduser()
     if not p.is_absolute():
-        p = Path(__file__).resolve().parents[3] / p
+        p = _PROJECT_ROOT / p
     return str(p.resolve())
 
 
-def _select_f107_table(tables: dict[int, np.ndarray], env: dict) -> tuple[int, np.ndarray]:
-    raw = (
-        env.get("harris_priester_f107") or env.get("hp_f107") or env.get("solar_flux_f107") or env.get("f107") or 175.0
-    )
-    f107 = float(raw)
+def _resolve_coeff_path(env: dict) -> str:
+    raw = env.get("harris_priester_coeff_path") or env.get("hp_coeff_path")
+    return _resolved_coeff_path(None if raw in (None, "") else str(raw))
+
+
+@lru_cache(maxsize=64)
+def _selected_f107_table(path: str, f107: float) -> tuple[int, np.ndarray]:
+    tables = _load_coefficients(path)
     key = min(tables, key=lambda candidate: abs(float(candidate) - f107))
     return key, tables[key]
+
+
+@lru_cache(maxsize=4096)
+def _default_sun_position(jd_utc: float, sun_model: str) -> np.ndarray:
+    if sun_model in {"hpop_simple", "hpop_validation_simple", "validation_simple", "simple"}:
+        return sun_position_eci_km_simple(jd_utc)
+    return sun_position_eci_km_enhanced(jd_utc)
+
+
+def clear_trajectory_epoch_caches() -> None:
+    """Clear per-epoch values so a benchmark can measure a fresh trajectory."""
+    _default_sun_position.cache_clear()
 
 
 def _sun_position_from_env(jd_utc: float | None, env: dict) -> np.ndarray:
@@ -52,9 +73,7 @@ def _sun_position_from_env(jd_utc: float | None, env: dict) -> np.ndarray:
     if jd_utc is None:
         return np.array([1.0, 0.0, 0.0], dtype=float)
     sun_model = str(env.get("atmosphere_sun_model", env.get("sun_model", ""))).strip().lower()
-    if sun_model in {"hpop_simple", "hpop_validation_simple", "validation_simple", "simple"}:
-        return sun_position_eci_km_simple(float(jd_utc))
-    return sun_position_eci_km_enhanced(float(jd_utc))
+    return _default_sun_position(float(jd_utc), sun_model)
 
 
 def harris_priester_density(
@@ -69,9 +88,16 @@ def harris_priester_density(
     Density_HP formulation: altitude-indexed min/max density interpolation plus
     a solar-apex diurnal bulge term.
     """
-    env_local = {} if env is None else dict(env)
-    tables = _load_coefficients(_resolve_coeff_path(env_local))
-    _, table = _select_f107_table(tables, env_local)
+    env_local = {} if env is None else env
+    coeff_path = _resolve_coeff_path(env_local)
+    raw_f107 = (
+        env_local.get("harris_priester_f107")
+        or env_local.get("hp_f107")
+        or env_local.get("solar_flux_f107")
+        or env_local.get("f107")
+        or 175.0
+    )
+    _, table = _selected_f107_table(coeff_path, float(raw_f107))
 
     r_sat = np.asarray(r_eci_km, dtype=float).reshape(3)
     r_eval = r_sat
