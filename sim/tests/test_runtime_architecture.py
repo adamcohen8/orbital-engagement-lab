@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import importlib
+import logging
 
+import sim.runtime_support as runtime_support
 from sim.runtime.architecture import RUNTIME_CONSTRUCTION_FAMILIES, SINGLE_RUN_COLLABORATORS
 
 
@@ -23,3 +25,8 @@ def test_single_run_collaborator_modules_are_importable() -> None:
     assert len(names) == len(set(names))
     for _name, module_name in SINGLE_RUN_COLLABORATORS:
         assert importlib.import_module(module_name) is not None
+
+
+def test_runtime_support_preserves_historical_logger_namespace() -> None:
+    assert isinstance(runtime_support.logger, logging.Logger)
+    assert runtime_support.logger.name == "sim.runtime_support"

@@ -59,6 +59,7 @@ from sim.plotting.output_helpers import (
 )
 from sim.plotting.output_registry import render_plot_outputs
 from sim.plotting.style import artifact_metadata, oel_plot_context, style_name_from_config
+from sim.plotting.summary_outputs import _plot_private_bridge_outputs as _plot_private_bridge_outputs
 from sim.presets.rockets import RocketStackPreset
 
 

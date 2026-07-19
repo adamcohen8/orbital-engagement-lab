@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 import sim.aero.core as aero_core
+from sim.acceleration.settings import acceleration_enabled_from_mode
 from sim.core.interfaces import DynamicsModel
 from sim.core.models import Command, StateTruth
 from sim.dynamics.attitude.disturbances import DisturbanceTorqueModel
@@ -16,6 +17,12 @@ from sim.dynamics.orbit.environment import EARTH_ROT_RATE_RAD_S
 from sim.dynamics.orbit.propagator import OrbitPropagator
 from sim.dynamics.spacecraft_geometry import GeometryAreaProfile, RectangularPrismGeometry
 from sim.utils.quaternion import normalize_quaternion, quaternion_to_dcm_bn
+
+
+def _owned_default_orbit_propagator() -> OrbitPropagator:
+    propagator = OrbitPropagator(integrator="rk4")
+    propagator._pending_orbital_attitude_default_configuration = True
+    return propagator
 
 
 @dataclass(frozen=True)
@@ -37,8 +44,9 @@ class OrbitalAttitudeDynamics(DynamicsModel):
     orbit_substep_s: float | None = None
     attitude_substep_s: float | None = None
     propagate_attitude: bool = True
-    orbit_propagator: OrbitPropagator = field(default_factory=lambda: OrbitPropagator(integrator="rk4"))
+    orbit_propagator: OrbitPropagator = field(default_factory=_owned_default_orbit_propagator)
     acceleration_mode: str = "off"
+    _acceleration_enabled: bool = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if self.geometry_area_profile is not None and self.use_rectangular_prism_for_aero_srp:
@@ -53,6 +61,11 @@ class OrbitalAttitudeDynamics(DynamicsModel):
                     "Rectangular prism aero/SRP mode requires coupled orbit+attitude disturbance simulation "
                     "(disturbance_model must be set)."
                 )
+        acceleration_enabled = acceleration_enabled_from_mode(self.acceleration_mode)
+        object.__setattr__(self, "_acceleration_enabled", bool(acceleration_enabled))
+        if bool(getattr(self.orbit_propagator, "_pending_orbital_attitude_default_configuration", False)):
+            self.orbit_propagator.acceleration_mode = self.acceleration_mode
+            delattr(self.orbit_propagator, "_pending_orbital_attitude_default_configuration")
 
     def step(self, state: StateTruth, command: Command, env: dict, dt_s: float) -> StateTruth:
         env_local = dict(env)
@@ -201,33 +214,61 @@ class OrbitalAttitudeDynamics(DynamicsModel):
                         srp_geometry=srp_geometry,
                     )
             att_dt = self._effective_substep(self.attitude_substep_s, dt_s)
-            t_att = state.t_s
-            att_state = StateTruth(
-                position_eci_km=np.array(midpoint_truth.position_eci_km, dtype=float),
-                velocity_eci_km_s=np.array(midpoint_truth.velocity_eci_km_s, dtype=float),
-                attitude_quat_bn=np.array(q_next, dtype=float),
-                angular_rate_body_rad_s=np.array(w_next, dtype=float),
-                mass_kg=float(state.mass_kg),
-                t_s=float(midpoint_truth.t_s),
-            )
-            for h in self._substep_sequence(dt_s, att_dt):
-                att_state.attitude_quat_bn = q_next
-                att_state.angular_rate_body_rad_s = w_next
-                disturbance_torque = (
-                    np.zeros(3)
-                    if self.disturbance_model is None
-                    else self.disturbance_model.total_torque_body_nm(att_state, env_local)
-                )
-                total_torque = command.torque_body_nm + disturbance_torque
-                q_next, w_next = propagate_attitude_exponential_map(
+            attitude_substeps = np.asarray(self._substep_sequence(dt_s, att_dt), dtype=float)
+            compiled_propagator = getattr(self.disturbance_model, "try_propagate_compiled", None)
+            if type(self.disturbance_model) is DisturbanceTorqueModel:
+                compiled_result = self.disturbance_model.try_propagate_compiled(
                     quat_bn=q_next,
                     omega_body_rad_s=w_next,
-                    inertia_kg_m2=self.inertia_kg_m2,
-                    torque_body_nm=total_torque,
-                    dt_s=h,
+                    command_torque_body_nm=command.torque_body_nm,
+                    position_eci_km=midpoint_truth.position_eci_km,
+                    t_s=midpoint_truth.t_s,
+                    env=env_local,
+                    substeps_s=attitude_substeps,
+                    acceleration_mode=self.acceleration_mode,
+                    acceleration_enabled=self._acceleration_enabled,
+                )
+            elif callable(compiled_propagator):
+                compiled_result = compiled_propagator(
+                    quat_bn=q_next,
+                    omega_body_rad_s=w_next,
+                    command_torque_body_nm=command.torque_body_nm,
+                    position_eci_km=midpoint_truth.position_eci_km,
+                    t_s=midpoint_truth.t_s,
+                    env=env_local,
+                    substeps_s=attitude_substeps,
                     acceleration_mode=self.acceleration_mode,
                 )
-                t_att += h
+            else:
+                compiled_result = None
+            if compiled_result is not None:
+                q_next, w_next = compiled_result
+            else:
+                att_state = StateTruth(
+                    position_eci_km=np.array(midpoint_truth.position_eci_km, dtype=float),
+                    velocity_eci_km_s=np.array(midpoint_truth.velocity_eci_km_s, dtype=float),
+                    attitude_quat_bn=np.array(q_next, dtype=float),
+                    angular_rate_body_rad_s=np.array(w_next, dtype=float),
+                    mass_kg=float(state.mass_kg),
+                    t_s=float(midpoint_truth.t_s),
+                )
+                for h in attitude_substeps:
+                    att_state.attitude_quat_bn = q_next
+                    att_state.angular_rate_body_rad_s = w_next
+                    disturbance_torque = (
+                        np.zeros(3)
+                        if self.disturbance_model is None
+                        else self.disturbance_model.total_torque_body_nm(att_state, env_local)
+                    )
+                    total_torque = command.torque_body_nm + disturbance_torque
+                    q_next, w_next = propagate_attitude_exponential_map(
+                        quat_bn=q_next,
+                        omega_body_rad_s=w_next,
+                        inertia_kg_m2=self.inertia_kg_m2,
+                        torque_body_nm=total_torque,
+                        dt_s=float(h),
+                        acceleration_mode=self.acceleration_mode,
+                    )
 
         # Optional direct attitude state override for surrogate controller testing.
         if self.propagate_attitude:

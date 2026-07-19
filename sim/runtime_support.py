@@ -4,13 +4,16 @@ Implementations live in :mod:`sim.runtime`.  Existing imports remain valid,
 including the historical ``EARTH_MU_KM3_S2`` monkeypatch seam used by tests and
 legacy integrations.
 """
+# ruff: noqa: F401,I001
 
 from __future__ import annotations
 
+import logging
 from functools import wraps
 from typing import Any
 
 from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2, EARTH_RADIUS_KM
+from sim.dynamics.orbit.elements import coe_to_rv_eci as _coe_to_rv_eci
 from sim.runtime import knowledge_factory as _knowledge_factory
 from sim.runtime import rocket_factory as _rocket_factory
 from sim.runtime import satellite_factory as _satellite_factory
@@ -164,6 +167,8 @@ from sim.runtime.state_initialization import (
 from sim.runtime.state_initialization import (
     _resolve_relative_cislunar_init as _resolve_relative_cislunar_init,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _sync_environment_constants() -> None:

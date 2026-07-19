@@ -6,6 +6,34 @@ from __future__ import annotations
 from sim.tests.game_mode_test_support import *
 
 
+def test_training_tracker_records_cislunar_mean_motion_after_decomposition() -> None:
+    tracker = RPOTrainingTracker(
+        RPOTrainingConfig(
+            enabled=True,
+            relative_frame="cislunar",
+            target_object_id="target",
+            chaser_object_id="chaser",
+        )
+    )
+    target = np.zeros(14, dtype=float)
+    chaser = np.zeros(14, dtype=float)
+    chaser[0] = 1.0
+
+    tracker.record(
+        snapshot=type(
+            "Snapshot",
+            (),
+            {
+                "time_s": 0.0,
+                "truth": {"target": target, "chaser": chaser},
+                "applied_thrust": {},
+            },
+        )()
+    )
+
+    assert tracker.mean_motion_hist == [EARTH_MOON_MEAN_MOTION_RAD_S]
+
+
 def test_ric_translation_provider_uses_timed_input_duty_cycle() -> None:
     state = KeyboardCommandState(yaw=1.0, use_timing_accumulator=True)
     provider = ManualGameCommandProvider(

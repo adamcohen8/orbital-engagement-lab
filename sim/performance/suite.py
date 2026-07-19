@@ -594,8 +594,12 @@ def _run_attitude_reference_case(case: PerformanceCase, case_profile: dict[str, 
         if case.engine == "basilisk":
             from validation.attitude_basilisk_reference import run_basilisk_attitude_reference
 
-            return run_basilisk_attitude_reference(reference_case)
-        return run_oel_attitude_reference(reference_case, acceleration_mode=case.acceleration_mode)
+            return run_basilisk_attitude_reference(reference_case, record_torque_history=False)
+        return run_oel_attitude_reference(
+            reference_case,
+            acceleration_mode=case.acceleration_mode,
+            record_torque_history=False,
+        )
 
     warmups = int(case_profile["warmups"])
     repeats = int(case_profile["repeats"])
@@ -615,7 +619,6 @@ def _run_attitude_reference_case(case: PerformanceCase, case_profile: dict[str, 
             "time_s": history.t_s,
             "quat_bn": history.quat_bn,
             "rate_body_rad_s": history.rate_body_rad_s,
-            "torque_body_nm": history.torque_body_nm,
         }
         hashes.append(physics_payload_hash(payload))
         sample_count = int(history.t_s.size)
@@ -641,7 +644,11 @@ def _run_attitude_reference_case(case: PerformanceCase, case_profile: dict[str, 
         "deterministic_parity": len(set(hashes)) == 1,
         "coverage_checks": [],
         "coverage_passed": True,
-        "runtime_backend": {"engine": case.engine, "acceleration_mode": case.acceleration_mode},
+        "runtime_backend": {
+            "engine": case.engine,
+            "acceleration_mode": case.acceleration_mode,
+            "output_policy": "trajectory_only",
+        },
         "median_stage_total_s": {},
     }
 

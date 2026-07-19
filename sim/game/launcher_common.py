@@ -102,6 +102,73 @@ FRAME_DIALOG_WIDTH = 620
 FRAME_DIALOG_HEIGHT = 432
 FRAME_DIALOG_CHOICE_HEIGHT = 76
 
+
+def _launcher_panel_height(screen_height: int) -> int:
+    return max(int(screen_height) - PANEL_TOP - FOOTER_HEIGHT, MIN_PANEL_HEIGHT)
+
+
+def _visible_option_count(screen_height: int) -> int:
+    list_bottom = PANEL_TOP + _launcher_panel_height(screen_height)
+    return max(1, int((list_bottom - OPTION_Y) // OPTION_ROW_HEIGHT))
+
+
+def _preview_bounds(screen_width: int, screen_height: int) -> tuple[int, int, int, int]:
+    panel_height = _launcher_panel_height(screen_height)
+    return (490, PANEL_TOP, max(int(screen_width) - 532, 420), panel_height)
+
+
+def _frame_convention_dialog_rect(screen_width: int, screen_height: int) -> tuple[int, int, int, int]:
+    width = min(FRAME_DIALOG_WIDTH, max(int(screen_width) - 80, 360))
+    height = min(FRAME_DIALOG_HEIGHT, max(int(screen_height) - 80, 360))
+    return (
+        max((int(screen_width) - width) // 2, 0),
+        max((int(screen_height) - height) // 2, 0),
+        width,
+        height,
+    )
+
+
+def _frame_convention_dialog_choice_rects(
+    screen_width: int,
+    screen_height: int,
+) -> dict[str, tuple[int, int, int, int]]:
+    x, y, w, _h = _frame_convention_dialog_rect(screen_width, screen_height)
+    button_w = max(w - 84, 260)
+    button_h = FRAME_DIALOG_CHOICE_HEIGHT
+    return {
+        FRAME_CONVENTION_PRESET_OEL_DEFAULT: (x + 42, y + 122, button_w, button_h),
+        FRAME_CONVENTION_PRESET_SPACE_FORCE: (x + 42, y + 212, button_w, button_h),
+    }
+
+
+def _frame_convention_dialog_checkbox_rect(
+    screen_width: int,
+    screen_height: int,
+) -> tuple[int, int, int, int]:
+    x, y, _w, h = _frame_convention_dialog_rect(screen_width, screen_height)
+    return (x + 42, y + h - 74, 22, 22)
+
+
+def _frame_convention_dialog_continue_rect(
+    screen_width: int,
+    screen_height: int,
+) -> tuple[int, int, int, int]:
+    x, y, w, h = _frame_convention_dialog_rect(screen_width, screen_height)
+    return (x + w - 178, y + h - 80, 136, 34)
+
+
+def _settings_button_rect(screen_width: int, screen_height: int) -> tuple[int, int, int, int]:
+    x = max(int(screen_width) - MODE_TOGGLE_RIGHT_MARGIN - SETTINGS_BUTTON_SIZE, 0)
+    y = max(int(screen_height) - FOOTER_BOTTOM_MARGIN - SETTINGS_BUTTON_SIZE, PANEL_TOP)
+    return (x, y, SETTINGS_BUTTON_SIZE, SETTINGS_BUTTON_SIZE)
+
+
+def _mode_toggle_rect(screen_width: int, screen_height: int) -> tuple[int, int, int, int]:
+    settings_x, settings_y, _settings_w, _settings_h = _settings_button_rect(screen_width, screen_height)
+    x = max(settings_x - MODE_SETTINGS_GAP - MODE_TOGGLE_WIDTH, 0)
+    return (x, settings_y, MODE_TOGGLE_WIDTH, MODE_TOGGLE_HEIGHT)
+
+
 def _completed_difficulties_from_game(game: dict[str, Any]) -> tuple[str, ...]:
     progress = dict(game.get("progress", {}) or {})
     completed = progress.get("completed_difficulties", ())
@@ -250,6 +317,21 @@ def _text_height(font: Any) -> int:
     if hasattr(font, "size"):
         return int(font.size("Hg")[1])
     return PREVIEW_LINE_HEIGHT
+
+
+def _text(screen: Any, font: Any, text: str, pos: tuple[int, int], color: tuple[int, int, int]) -> None:
+    if not text:
+        return
+    surf = font.render(str(text), True, color)
+    screen.blit(surf, pos)
+
+
+def _text_centered(screen: Any, font: Any, text: str, center: tuple[int, int], color: tuple[int, int, int]) -> None:
+    if not text:
+        return
+    surf = font.render(str(text), True, color)
+    screen.blit(surf, (int(center[0] - surf.get_width() // 2), int(center[1] - surf.get_height() // 2)))
+
 
 def _preview_content_height(option: GameScenarioOption, *, font: Any, small_font: Any, width_px: int) -> int:
     y = 0

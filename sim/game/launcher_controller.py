@@ -30,15 +30,6 @@ def _option_index_at_pos(pos: tuple[int, int], *, count: int, scroll_offset: int
     return None
 
 
-def _visible_option_count(screen_height: int) -> int:
-    list_bottom = PANEL_TOP + _launcher_panel_height(screen_height)
-    return max(1, int((list_bottom - OPTION_Y) // OPTION_ROW_HEIGHT))
-
-
-def _launcher_panel_height(screen_height: int) -> int:
-    return max(int(screen_height) - PANEL_TOP - FOOTER_HEIGHT, MIN_PANEL_HEIGHT)
-
-
 def _max_scroll_offset(count: int, screen_height: int) -> int:
     return max(int(count) - _visible_option_count(screen_height), 0)
 
@@ -60,46 +51,10 @@ def _scroll_for_selection(selected: int, scroll_offset: int, *, count: int, scre
     return scroll
 
 
-def _preview_bounds(screen_width: int, screen_height: int) -> tuple[int, int, int, int]:
-    panel_height = _launcher_panel_height(screen_height)
-    return (490, PANEL_TOP, max(int(screen_width) - 532, 420), panel_height)
-
-
 def _pos_in_bounds(pos: tuple[int, int], bounds: tuple[int, int, int, int]) -> bool:
     px, py = pos
     x, y, w, h = bounds
     return x <= px <= x + w and y <= py <= y + h
-
-
-def _frame_convention_dialog_rect(screen_width: int, screen_height: int) -> tuple[int, int, int, int]:
-    width = min(FRAME_DIALOG_WIDTH, max(int(screen_width) - 80, 360))
-    height = min(FRAME_DIALOG_HEIGHT, max(int(screen_height) - 80, 360))
-    return (
-        max((int(screen_width) - width) // 2, 0),
-        max((int(screen_height) - height) // 2, 0),
-        width,
-        height,
-    )
-
-
-def _frame_convention_dialog_choice_rects(screen_width: int, screen_height: int) -> dict[str, tuple[int, int, int, int]]:
-    x, y, w, _h = _frame_convention_dialog_rect(screen_width, screen_height)
-    button_w = max(w - 84, 260)
-    button_h = FRAME_DIALOG_CHOICE_HEIGHT
-    return {
-        FRAME_CONVENTION_PRESET_OEL_DEFAULT: (x + 42, y + 122, button_w, button_h),
-        FRAME_CONVENTION_PRESET_SPACE_FORCE: (x + 42, y + 212, button_w, button_h),
-    }
-
-
-def _frame_convention_dialog_checkbox_rect(screen_width: int, screen_height: int) -> tuple[int, int, int, int]:
-    x, y, _w, h = _frame_convention_dialog_rect(screen_width, screen_height)
-    return (x + 42, y + h - 74, 22, 22)
-
-
-def _frame_convention_dialog_continue_rect(screen_width: int, screen_height: int) -> tuple[int, int, int, int]:
-    x, y, w, h = _frame_convention_dialog_rect(screen_width, screen_height)
-    return (x + w - 178, y + h - 80, 136, 34)
 
 
 def _frame_convention_dialog_action(
@@ -176,21 +131,8 @@ def _music_at_pos(pos: tuple[int, int]) -> bool:
     return x <= px <= x + w and y <= py <= y + h
 
 
-def _mode_toggle_rect(screen_width: int, screen_height: int) -> tuple[int, int, int, int]:
-    settings_x, settings_y, _settings_w, _settings_h = _settings_button_rect(screen_width, screen_height)
-    x = max(settings_x - MODE_SETTINGS_GAP - MODE_TOGGLE_WIDTH, 0)
-    y = settings_y
-    return (x, y, MODE_TOGGLE_WIDTH, MODE_TOGGLE_HEIGHT)
-
-
 def _mode_toggle_at_pos(pos: tuple[int, int], *, width: int, height: int) -> bool:
     return _pos_in_bounds(pos, _mode_toggle_rect(width, height))
-
-
-def _settings_button_rect(screen_width: int, screen_height: int) -> tuple[int, int, int, int]:
-    x = max(int(screen_width) - MODE_TOGGLE_RIGHT_MARGIN - SETTINGS_BUTTON_SIZE, 0)
-    y = max(int(screen_height) - FOOTER_BOTTOM_MARGIN - SETTINGS_BUTTON_SIZE, PANEL_TOP)
-    return (x, y, SETTINGS_BUTTON_SIZE, SETTINGS_BUTTON_SIZE)
 
 
 def _settings_button_at_pos(pos: tuple[int, int], *, width: int, height: int) -> bool:

@@ -1,6 +1,7 @@
 # ruff: noqa: F401,F403,F405,I001
 from .ai_report_models import *
 from .ai_report_evidence import *
+from .ai_report_briefs import _fmt_value, _percent
 
 def _markdown_scalar(value: Any) -> str:
     if value is None:
@@ -86,49 +87,6 @@ def _review_packet_figure_lines(packet: dict[str, Any]) -> list[str]:
     if len(lines) == 2:
         lines.append("- No requested or generated figures are in scope.")
     return lines
-
-
-def _estimate_ai_report_cost_from_request(
-    *,
-    request: dict[str, Any],
-    ai_cfg: dict[str, Any],
-    payload_kind: str,
-) -> dict[str, Any]:
-    prompt = str(request["prompt"])
-    chars_per_token = float(ai_cfg.get("chars_per_token", 4.0) or 4.0)
-    input_tokens = _approx_token_count(prompt, chars_per_token=chars_per_token)
-    output_tokens = _configured_output_token_estimate(ai_cfg)
-    input_price, output_price, currency, price_source = _pricing_from_config(ai_cfg)
-    input_cost = None if input_price is None else float(input_tokens) * float(input_price) / 1_000_000.0
-    output_cost = None if output_price is None else float(output_tokens) * float(output_price) / 1_000_000.0
-    total_cost = None if input_cost is None or output_cost is None else float(input_cost + output_cost)
-    return {
-        **DIRECT_AI_REPORT_POSTURE,
-        "generated_utc": datetime.now(timezone.utc).isoformat(),
-        "provider": str(ai_cfg.get("provider", "ollama") or "ollama"),
-        "model": str(ai_cfg.get("model", "") or ""),
-        "payload_kind": str(payload_kind),
-        "prompt_profile": str(request["prompt_profile"]),
-        "token_estimate": {
-            "method": "approx_chars_per_token",
-            "chars_per_token": chars_per_token,
-            "input_chars": int(len(prompt)),
-            "input_tokens": int(input_tokens),
-            "output_tokens": int(output_tokens),
-            "output_token_source": "configured_cap_or_default",
-        },
-        "pricing": {
-            "source": price_source,
-            "currency": currency,
-            "input_per_1m_tokens": input_price,
-            "output_per_1m_tokens": output_price,
-        },
-        "cost_estimate": {
-            "input": input_cost,
-            "output": output_cost,
-            "total": total_cost,
-        },
-    }
 
 
 def _build_ai_report_review_packet_markdown(

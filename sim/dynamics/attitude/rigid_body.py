@@ -89,6 +89,16 @@ def get_attitude_guardrail_stats(stats: AttitudeGuardrailStats | None = None) ->
 
 
 def _add_guardrail_counts(counts: np.ndarray) -> None:
+    if isinstance(counts, np.ndarray) and counts.ndim == 1 and counts.size >= 6:
+        if (
+            counts[0] == 0
+            and counts[1] == 0
+            and counts[2] == 0
+            and counts[3] == 0
+            and counts[4] == 0
+            and counts[5] == 0
+        ):
+            return
     values = np.asarray(counts, dtype=int).reshape(-1)
     if values.size < 6:
         return
