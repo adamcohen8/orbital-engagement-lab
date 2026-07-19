@@ -19,7 +19,9 @@ from sim.acceleration.kernels.estimation import (
     propagate_two_body_rk4_kernel,
 )
 from sim.acceleration.kernels.frames import (
+    apparent_sidereal_time_iau76_80_kernel,
     eci_relative_to_ric_rect_kernel,
+    eci_to_ecef_iau76_80_kernel,
     ric_angular_rate_eci_from_rv_kernel,
     ric_curv_to_rect_kernel,
     ric_dcm_ir_from_rv_kernel,
@@ -53,6 +55,7 @@ from sim.acceleration.kernels.reentry import (
 from sim.acceleration.kernels.spherical_harmonics import normalized_spherical_harmonic_accel_eci_kernel
 from sim.acceleration.kernels.srp import srp_acceleration_kernel
 from sim.acceleration.optional import NUMBA_AVAILABLE, NUMBA_IMPORT_ERROR
+from sim.dynamics.orbit.frames import _load_nut80_table
 from sim.dynamics.orbit.nrlmsise00_backend import (
     _ALPHA,
     _ZN1,
@@ -150,6 +153,7 @@ def warmup_acceleration(profile: str = "core") -> dict[str, object]:
         ephemeris_coefficients,
         ephemeris_coefficients,
     ) * 3
+    nutation_coefficients, nutation_terms = _load_nut80_table()
 
     calls: list[tuple[str, object]] = []
     calls.append(("two_body_accel_eci", two_body_accel_eci(r, EARTH_MU_KM3_S2)))
@@ -226,6 +230,37 @@ def warmup_acceleration(profile: str = "core") -> dict[str, object]:
         )
     )
     calls.append(("ecef_to_geodetic_deg_km_kernel", ecef_to_geodetic_deg_km_kernel(r)))
+    calls.append(
+        (
+            "eci_to_ecef_iau76_80_kernel",
+            eci_to_ecef_iau76_80_kernel(
+                0.0,
+                2459669.5,
+                0.05,
+                -0.03,
+                0.1,
+                37.0,
+                0.0,
+                0.0,
+                nutation_coefficients,
+                nutation_terms,
+            ),
+        )
+    )
+    calls.append(
+        (
+            "apparent_sidereal_time_iau76_80_kernel",
+            apparent_sidereal_time_iau76_80_kernel(
+                2459669.5,
+                0.1,
+                37.0,
+                0.0,
+                0.0,
+                nutation_coefficients,
+                nutation_terms,
+            ),
+        )
+    )
     calls.append(
         (
             "normalized_spherical_harmonic_accel_eci_kernel",

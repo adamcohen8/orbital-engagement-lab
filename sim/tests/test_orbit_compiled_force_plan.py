@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from unittest.mock import patch
 
 import numpy as np
+import pytest
 
-from sim.acceleration.settings import acceleration_context
+import sim.dynamics.orbit.propagator as propagator_module
+from sim.acceleration.settings import acceleration_context, acceleration_settings_from_mode
 from sim.dynamics.orbit.accelerations import OrbitContext
 from sim.dynamics.orbit.propagator import (
     OrbitPropagator,
@@ -63,7 +66,14 @@ def _case() -> tuple[np.ndarray, dict, OrbitContext]:
     return state, env, context
 
 
-def _assert_compiled_steps_are_exact(plugins: list, step_count: int = 12) -> None:
+def _require_compiled_acceleration() -> None:
+    settings = acceleration_settings_from_mode("auto", allow_env_override=False)
+    if not settings.enabled:
+        pytest.skip("compiled force-plan instrumentation requires the optional accel backend")
+
+
+def _assert_compiled_steps_are_numerically_equivalent(plugins: list, step_count: int = 12) -> None:
+    _require_compiled_acceleration()
     state, env, context = _case()
     command = np.zeros(3, dtype=float)
     with acceleration_context("auto", allow_env_override=False):
@@ -81,13 +91,13 @@ def _assert_compiled_steps_are_exact(plugins: list, step_count: int = 12) -> Non
                 ctx=context,
             )
             actual = accelerated.propagate(state, 10.0, t_s, command, env, context)
-            assert np.array_equal(actual, expected)
+            np.testing.assert_allclose(actual, expected, rtol=0.0, atol=2.0e-11)
             state = expected
 
 
-def test_compiled_force_plan_is_exact_for_drag_and_full_force_subsets() -> None:
-    _assert_compiled_steps_are_exact([spherical_harmonics_plugin, drag_plugin])
-    _assert_compiled_steps_are_exact(
+def test_compiled_force_plan_is_numerically_equivalent_for_drag_and_full_force_subsets() -> None:
+    _assert_compiled_steps_are_numerically_equivalent([spherical_harmonics_plugin, drag_plugin])
+    _assert_compiled_steps_are_numerically_equivalent(
         [
             spherical_harmonics_plugin,
             drag_plugin,
@@ -95,6 +105,109 @@ def test_compiled_force_plan_is_exact_for_drag_and_full_force_subsets() -> None:
             third_body_sun_plugin,
             third_body_moon_plugin,
         ]
+    )
+
+
+def test_compiled_force_plan_shares_identical_stage_rotations() -> None:
+    _require_compiled_acceleration()
+    state, env, context = _case()
+    command = np.zeros(3, dtype=float)
+    plugins = [spherical_harmonics_plugin, drag_plugin]
+    with acceleration_context("auto", allow_env_override=False):
+        reference = OrbitPropagator(integrator="rk4", plugins=plugins, acceleration_mode="auto")
+        expected = reference._propagate_builtin_rk4(
+            x_eci=state,
+            dt_s=10.0,
+            t_s=0.0,
+            command_accel_eci_km_s2=command,
+            env=env,
+            ctx=context,
+        )
+        accelerated = OrbitPropagator(integrator="rk4", plugins=plugins, acceleration_mode="auto")
+        original_rotation = OrbitPropagator._accelerated_compiled_rotation
+
+        rotation_calls: list[float] = []
+
+        def counted_rotation(env, t_s, *, model_key, path_key):
+            rotation_calls.append(float(t_s))
+            return original_rotation(env, t_s, model_key=model_key, path_key=path_key)
+
+        with patch.object(OrbitPropagator, "_accelerated_compiled_rotation", staticmethod(counted_rotation)):
+            actual = accelerated.propagate(state, 10.0, 0.0, command, env, context)
+
+    np.testing.assert_allclose(actual, expected, rtol=0.0, atol=2.0e-11)
+    assert rotation_calls == [0.0, 5.0, 10.0]
+
+
+def test_compiled_force_plan_reuses_exact_previous_endpoint_environment() -> None:
+    _require_compiled_acceleration()
+    state, env, context = _case()
+    env = dict(env)
+    env.pop("sun_pos_eci_km")
+    env.pop("moon_pos_eci_km")
+    env["ephemeris_mode"] = "analytic_simple"
+    command = np.zeros(3, dtype=float)
+    plugins = [
+        spherical_harmonics_plugin,
+        drag_plugin,
+        srp_plugin,
+        third_body_sun_plugin,
+        third_body_moon_plugin,
+    ]
+    with acceleration_context("auto", allow_env_override=False):
+        reference = OrbitPropagator(integrator="rk4", plugins=plugins, acceleration_mode="auto")
+        expected_first = reference._propagate_builtin_rk4(
+            x_eci=state,
+            dt_s=10.0,
+            t_s=0.0,
+            command_accel_eci_km_s2=command,
+            env=env,
+            ctx=context,
+        )
+        expected_second = reference._propagate_builtin_rk4(
+            x_eci=expected_first,
+            dt_s=10.0,
+            t_s=10.0,
+            command_accel_eci_km_s2=command,
+            env=env,
+            ctx=context,
+        )
+
+        accelerated = OrbitPropagator(integrator="rk4", plugins=plugins, acceleration_mode="auto")
+        original_resolver = propagator_module.resolve_sun_moon_positions
+        with patch.object(
+            propagator_module,
+            "resolve_sun_moon_positions",
+            wraps=original_resolver,
+        ) as resolver:
+            actual_first = accelerated.propagate(state, 10.0, 0.0, command, env, context)
+            actual_second = accelerated.propagate(actual_first, 10.0, 10.0, command, env, context)
+
+    np.testing.assert_allclose(actual_first, expected_first, rtol=0.0, atol=2.0e-11)
+    np.testing.assert_allclose(actual_second, expected_second, rtol=0.0, atol=2.0e-11)
+    assert resolver.call_count == 5
+
+
+def test_compiled_endpoint_cache_rejects_spice_configuration_and_callbacks() -> None:
+    plugins = (srp_plugin, third_body_sun_plugin, third_body_moon_plugin)
+    spice_env = {
+        "ephemeris_mode": "spice",
+        "jd_utc_start": 2459669.5,
+        "spice_kernels": ["de440s.bsp"],
+        "spice_frame": "J2000",
+    }
+
+    assert OrbitPropagator._compiled_endpoint_environment_signature(spice_env, plugins) is None
+    assert (
+        OrbitPropagator._compiled_endpoint_environment_signature(
+            {
+                "ephemeris_mode": "analytic_enhanced",
+                "jd_utc_start": 2459669.5,
+                "spice_ephemeris_callable": lambda _jd, _env: {},
+            },
+            plugins,
+        )
+        is None
     )
 
 

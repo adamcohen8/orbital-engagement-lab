@@ -25,6 +25,8 @@ def _resolve_relative_path(path_text: str, cwd: str) -> Path:
 
 
 def _resolve_path(path_value: str | Path) -> Path:
+    """Resolve a configured ephemeris resource against the current process path."""
+
     expanded = os.path.expanduser(os.fspath(path_value))
     if os.path.isabs(expanded):
         return _resolve_absolute_path(expanded)

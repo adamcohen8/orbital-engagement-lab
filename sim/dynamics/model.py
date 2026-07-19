@@ -151,27 +151,36 @@ class OrbitalAttitudeDynamics(DynamicsModel):
         )
         orbit_dt = self._effective_substep(self.orbit_substep_s, dt_s)
         x_orbit_next = x_orbit.copy()
-        t_local = state.t_s
-        for h in self._substep_sequence(dt_s, orbit_dt):
+        if orbit_dt >= dt_s:
             x_orbit_next = self.orbit_propagator.propagate(
                 x_eci=x_orbit_next,
-                dt_s=h,
-                t_s=t_local,
+                dt_s=dt_s,
+                t_s=state.t_s,
                 command_accel_eci_km_s2=command.thrust_eci_km_s2,
                 env=env_local,
                 ctx=orbit_ctx,
             )
-            t_local += h
-
-        midpoint_truth = self._midpoint_translational_truth(
-            state=state,
-            x_orbit_next=x_orbit_next,
-            dt_s=dt_s,
-        )
+        else:
+            t_local = state.t_s
+            for h in self._substep_sequence(dt_s, orbit_dt):
+                x_orbit_next = self.orbit_propagator.propagate(
+                    x_eci=x_orbit_next,
+                    dt_s=h,
+                    t_s=t_local,
+                    command_accel_eci_km_s2=command.thrust_eci_km_s2,
+                    env=env_local,
+                    ctx=orbit_ctx,
+                )
+                t_local += h
 
         q_next = state.attitude_quat_bn.copy()
         w_next = state.angular_rate_body_rad_s.copy()
         if self.propagate_attitude:
+            midpoint_truth = self._midpoint_translational_truth(
+                state=state,
+                x_orbit_next=x_orbit_next,
+                dt_s=dt_s,
+            )
             disturbance_cfg = getattr(self.disturbance_model, "config", None)
             if self.disturbance_model is not None and bool(getattr(disturbance_cfg, "use_drag", False)):
                 if "density_kg_m3" not in env_local:
