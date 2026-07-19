@@ -18,7 +18,7 @@ from sim.dynamics.orbit.frames import (
     transform_position,
     transform_state,
 )
-from sim.dynamics.orbit.propagator import drag_plugin
+from sim.dynamics.orbit.propagator import OrbitPropagator, drag_plugin
 
 
 def _write_minimal_eop(path: Path) -> None:
@@ -114,6 +114,29 @@ def test_manual_eop_frame_context_affects_rotation_without_eop_path() -> None:
 
     assert manual.metadata()["polar_motion_applied"] is True
     assert np.linalg.norm(manual_ecef - base_ecef) > 1.0e-4
+
+
+def test_accelerated_iau_frame_rotation_is_numerically_equivalent() -> None:
+    env = {
+        "spherical_harmonics_frame_model": "iau76_80_eop",
+        "jd_utc_start": 2460310.5,
+        "dut1_s": 0.30,
+        "xp_arcsec": 0.10,
+        "yp_arcsec": 0.20,
+        "dat_s": 37.0,
+        "ddpsi_rad": 1.0e-8,
+        "ddeps_rad": -2.0e-8,
+    }
+    kwargs = {
+        "model_key": "spherical_harmonics_frame_model",
+        "path_key": "spherical_harmonics_eop_path",
+    }
+
+    reference = OrbitPropagator._compiled_rotation(env, 43210.5, **kwargs)
+    accelerated = OrbitPropagator._accelerated_compiled_rotation(env, 43210.5, **kwargs)
+
+    np.testing.assert_allclose(accelerated, reference, rtol=0.0, atol=1.0e-14)
+    np.testing.assert_allclose(accelerated @ accelerated.T, np.eye(3), rtol=0.0, atol=2.0e-15)
 
 
 def test_eop_frame_context_without_epoch_does_not_claim_or_apply_eop(tmp_path: Path) -> None:

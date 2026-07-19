@@ -8,6 +8,48 @@ migration-sensitive behavior explicitly.
 
 ## Unreleased
 
+## 0.22.2 - 2026-07-19
+
+Release thesis: `v0.22.2` narrows the remaining high-fidelity ONP runtime gap
+through general frame, spherical-harmonic, and engine-overhead improvements,
+while retaining deterministic force ordering, public APIs, and bounded
+numerical-equivalence checks.
+
+Private/Pro scope: `v0.22.2` adds maintained one-day 70x70 Orekit and Basilisk
+native-engine comparison workflows with explicit timing and interpretation
+boundaries. The public release receives the compatible no-fast-math kernels,
+runtime improvements, configuration-safe fallbacks, and regression coverage;
+external-tool runners and locally supplied reference resources remain behind
+the export boundary.
+
+### Changed
+
+- Added compiled IAU-76/80 frame and apparent-sidereal-time kernels, shared
+  identical RK4 stage rotations across gravity, drag, and density, and reused
+  eligible previous-step endpoint environment products. SPICE and callable
+  ephemerides deliberately retain fresh endpoint evaluation.
+- Improved the normalized spherical-harmonic kernel with degree-major,
+  row-contiguous Legendre recurrence traversal and avoided clearing unused
+  triangular workspace. The implementation retains the configured degree/order,
+  coefficient normalization, no-fast-math posture, and force accumulation
+  order.
+- Removed unnecessary coupled-engine substep-list construction for a single
+  orbit step and deferred midpoint translational truth construction when
+  attitude propagation is disabled.
+- Generalized the maintained Orekit full-force runner to checked spherical-
+  harmonic degree/order inputs, added two-order timing runs for the one-day
+  70x70 comparison, and added a bounded Basilisk 70x70 native-engine runner
+  that records model wiring, provenance, and task-rate interpretation limits.
+
+### Fixed
+
+- Kept relative DE440 resource resolution sensitive to the current working
+  directory while retaining absolute/relative lower-level path caches.
+- Prevented cross-step endpoint reuse for mutable SPICE settings and SPICE
+  callback configurations.
+- Filtered Basilisk gravity conversion to the requested degree and order so
+  non-square configurations cannot be executed or reported as a fuller field.
+
 ## 0.22.1 - 2026-07-19
 
 Release thesis: `v0.22.1` hardens the v0.21.2 God-file decomposition and

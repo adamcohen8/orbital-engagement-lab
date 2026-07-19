@@ -171,6 +171,50 @@ class TestOrbitSphericalHarmonics(unittest.TestCase):
 
                 np.testing.assert_allclose(actual, expected, rtol=1.0e-12, atol=5.0e-18)
 
+    def test_accelerated_normalized_terms_match_reference_for_truncated_orders(self):
+        position = np.array([-4300.0, 5100.0, 1800.0], dtype=float)
+        for max_order in (0, 3, 8):
+            terms = [
+                SphericalHarmonicTerm(
+                    n=degree,
+                    m=order,
+                    c_nm=(-1.0 if (degree + order) % 2 else 1.0)
+                    * 1.0e-5
+                    / (degree + order + 1.0),
+                    s_nm=(0.0 if order == 0 else 7.0e-6 / (degree + 2.0 * order + 1.0)),
+                    normalized=True,
+                )
+                for degree in range(2, 9)
+                for order in range(min(degree, max_order) + 1)
+            ]
+            compiled = compile_spherical_harmonic_terms(terms)
+            self.assertIsNotNone(compiled)
+            expected = accel_spherical_harmonics_terms(
+                position,
+                1234.5,
+                terms,
+                mu_km3_s2=EARTH_MU_KM3_S2,
+                re_km=6378.1363,
+                jd_utc_start=2459669.5,
+                frame_model="simple",
+                compiled=compiled,
+                use_acceleration=False,
+            )
+            actual = accel_spherical_harmonics_terms(
+                position,
+                1234.5,
+                terms,
+                mu_km3_s2=EARTH_MU_KM3_S2,
+                re_km=6378.1363,
+                jd_utc_start=2459669.5,
+                frame_model="simple",
+                compiled=compiled,
+                use_acceleration=True,
+            )
+
+            with self.subTest(max_order=max_order):
+                np.testing.assert_allclose(actual, expected, rtol=1.0e-12, atol=5.0e-18)
+
     def test_orbit_propagator_acceleration_mode_dispatches_normalized_terms(self):
         terms = [
             SphericalHarmonicTerm(

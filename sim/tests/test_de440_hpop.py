@@ -9,11 +9,27 @@ from sim.dynamics.orbit.de440_hpop import (
     _find_coeff_row,
     _find_light_body_row,
     _find_light_row,
+    _resolve_path,
     hpop_de440_positions_km,
     hpop_de440_positions_m,
     hpop_de440_sun_moon_positions_km,
     mjd_tt_to_mjd_tdb,
 )
+
+
+def test_relative_resource_resolution_tracks_current_working_directory(tmp_path, monkeypatch):
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+
+    monkeypatch.chdir(first)
+    first_path = _resolve_path("resource.npz")
+    monkeypatch.chdir(second)
+    second_path = _resolve_path("resource.npz")
+
+    assert first_path == first / "resource.npz"
+    assert second_path == second / "resource.npz"
 
 
 def test_cheb3d_constant_vector():

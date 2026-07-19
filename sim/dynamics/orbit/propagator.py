@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Callable
@@ -47,9 +48,12 @@ from sim.dynamics.orbit.epoch import (
     resolve_body_position_eci_km,
     resolve_sun_moon_positions,
     resolve_time_dependent_env,
+    sun_position_eci_km_enhanced,
 )
 from sim.dynamics.orbit.frames import (
     FRAME_MODEL_IAU76_80_EOP,
+    _interp_eop,
+    _load_nut80_table,
     eci_to_ecef_rotation,
     eci_to_ecef_rotation_hpop_like,
     normalize_frame_model,
@@ -111,6 +115,20 @@ def _compiled_lift_force_component():
     from sim.acceleration.kernels.orbit_force_plan import _lift_acceleration
 
     return _lift_acceleration
+
+
+@lru_cache(maxsize=1)
+def _compiled_iau76_80_rotation():
+    from sim.acceleration.kernels.frames import eci_to_ecef_iau76_80_kernel
+
+    return eci_to_ecef_iau76_80_kernel
+
+
+@lru_cache(maxsize=1)
+def _compiled_iau76_80_sidereal_time():
+    from sim.acceleration.kernels.frames import apparent_sidereal_time_iau76_80_kernel
+
+    return apparent_sidereal_time_iau76_80_kernel
 
 
 def j2_plugin(t_s: float, x_eci: np.ndarray, env: dict, ctx: OrbitContext) -> np.ndarray:
@@ -467,6 +485,25 @@ class OrbitPropagator:
     _compiled_atmosphere_inputs: np.ndarray = field(
         default_factory=lambda: np.zeros((3, 6), dtype=float), init=False, repr=False
     )
+    _compiled_endpoint_cache_key: tuple | None = field(default=None, init=False, repr=False)
+    _compiled_endpoint_harmonic_rotation: np.ndarray = field(
+        default_factory=lambda: np.empty((3, 3), dtype=float), init=False, repr=False
+    )
+    _compiled_endpoint_density_rotation: np.ndarray = field(
+        default_factory=lambda: np.empty((3, 3), dtype=float), init=False, repr=False
+    )
+    _compiled_endpoint_drag_rotation: np.ndarray = field(
+        default_factory=lambda: np.empty((3, 3), dtype=float), init=False, repr=False
+    )
+    _compiled_endpoint_sun_position: np.ndarray = field(
+        default_factory=lambda: np.empty(3, dtype=float), init=False, repr=False
+    )
+    _compiled_endpoint_moon_position: np.ndarray = field(
+        default_factory=lambda: np.empty(3, dtype=float), init=False, repr=False
+    )
+    _compiled_endpoint_atmosphere_inputs: np.ndarray = field(
+        default_factory=lambda: np.empty(6, dtype=float), init=False, repr=False
+    )
     _compiled_scalar_parameters: np.ndarray = field(
         default_factory=lambda: np.empty(15, dtype=float), init=False, repr=False
     )
@@ -652,6 +689,240 @@ class OrbitPropagator:
             jd_utc_start=None if jd_utc_start is None else float(jd_utc_start),
         )
 
+    @staticmethod
+    def _accelerated_compiled_rotation(env: dict, t_s: float, *, model_key: str, path_key: str) -> np.ndarray:
+        """Evaluate a numerically equivalent IAU frame on the accelerated path."""
+
+        model = normalize_frame_model(env.get(model_key, "simple"))
+        jd_utc_start = env.get("jd_utc_start")
+        if model == FRAME_MODEL_IAU76_80_EOP:
+            eop_path = env.get(path_key)
+            has_eop_path = eop_path not in (None, "")
+            dut1_s = env.get("dut1_s")
+            xp_arcsec = env.get("xp_arcsec")
+            yp_arcsec = env.get("yp_arcsec")
+            dat_s = env.get("dat_s")
+            has_manual_eop = any(
+                value is not None for value in (dut1_s, xp_arcsec, yp_arcsec, dat_s)
+            ) or (
+                float(env.get("ddpsi_rad", 0.0) or 0.0) != 0.0
+                or float(env.get("ddeps_rad", 0.0) or 0.0) != 0.0
+            )
+            if jd_utc_start is not None and (has_eop_path or has_manual_eop):
+                if has_eop_path:
+                    jd_utc = float(jd_utc_start) + float(t_s) / 86400.0
+                    xp_arcsec, yp_arcsec, dut1_s, dat_s = _interp_eop(
+                        jd_utc - 2400000.5,
+                        str(eop_path),
+                    )
+                else:
+                    xp_arcsec = 0.0 if xp_arcsec is None else float(xp_arcsec)
+                    yp_arcsec = 0.0 if yp_arcsec is None else float(yp_arcsec)
+                    dut1_s = 0.0 if dut1_s is None else float(dut1_s)
+                    if dat_s is None:
+                        tt_minus_utc_s = env.get("tt_minus_utc_s")
+                        dat_s = (
+                            69.184 if tt_minus_utc_s is None else float(tt_minus_utc_s)
+                        ) - 32.184
+                    else:
+                        dat_s = float(dat_s)
+                nutation_coefficients, nutation_terms = _load_nut80_table()
+                return _compiled_iau76_80_rotation()(
+                    float(t_s),
+                    float(jd_utc_start),
+                    float(xp_arcsec),
+                    float(yp_arcsec),
+                    float(dut1_s),
+                    float(dat_s),
+                    float(env.get("ddpsi_rad", 0.0) or 0.0),
+                    float(env.get("ddeps_rad", 0.0) or 0.0),
+                    nutation_coefficients,
+                    nutation_terms,
+                )
+            return eci_to_ecef_rotation_hpop_like(
+                float(t_s),
+                jd_utc_start=None if jd_utc_start is None else float(jd_utc_start),
+                eop_path=None if eop_path is None else str(eop_path),
+                dut1_s=None if dut1_s is None else float(dut1_s),
+                xp_arcsec=None if xp_arcsec is None else float(xp_arcsec),
+                yp_arcsec=None if yp_arcsec is None else float(yp_arcsec),
+                dat_s=None if dat_s is None else float(dat_s),
+                tt_minus_utc_s=(None if env.get("tt_minus_utc_s") is None else float(env["tt_minus_utc_s"])),
+                ddpsi_rad=float(env.get("ddpsi_rad", 0.0) or 0.0),
+                ddeps_rad=float(env.get("ddeps_rad", 0.0) or 0.0),
+            )
+        return eci_to_ecef_rotation(
+            float(t_s),
+            jd_utc_start=None if jd_utc_start is None else float(jd_utc_start),
+        )
+
+    @staticmethod
+    def _accelerated_local_solar_time_epoch_terms(
+        env: dict,
+        jd_utc: float,
+        eop_path: str | None,
+    ) -> tuple[float, float]:
+        """Evaluate numerically equivalent sidereal terms for accelerated drag."""
+
+        if eop_path in (None, ""):
+            eop_path = None
+        dut1_s = env.get("dut1_s")
+        dat_s = env.get("dat_s")
+        tt_minus_utc_s = env.get("tt_minus_utc_s")
+        ddpsi_rad = float(env.get("ddpsi_rad", 0.0) or 0.0)
+        ddeps_rad = float(env.get("ddeps_rad", 0.0) or 0.0)
+        has_manual_eop = any(
+            value is not None for value in (dut1_s, dat_s, tt_minus_utc_s)
+        ) or ddpsi_rad != 0.0 or ddeps_rad != 0.0
+        if eop_path is None and not has_manual_eop:
+            return _local_solar_time_epoch_terms(
+                float(jd_utc),
+                None,
+                None,
+                None,
+                None,
+                ddpsi_rad,
+                ddeps_rad,
+            )
+        if eop_path is not None:
+            _xp_arcsec, _yp_arcsec, dut1_s, dat_s = _interp_eop(
+                float(jd_utc) - 2400000.5,
+                str(eop_path),
+            )
+        else:
+            dut1_s = 0.0 if dut1_s is None else float(dut1_s)
+            if dat_s is None:
+                dat_s = (69.184 if tt_minus_utc_s is None else float(tt_minus_utc_s)) - 32.184
+            else:
+                dat_s = float(dat_s)
+        nutation_coefficients, nutation_terms = _load_nut80_table()
+        sidereal = _compiled_iau76_80_sidereal_time()(
+            float(jd_utc),
+            float(dut1_s),
+            float(dat_s),
+            ddpsi_rad,
+            ddeps_rad,
+            nutation_coefficients,
+            nutation_terms,
+        )
+        sun_eci = sun_position_eci_km_enhanced(float(jd_utc))
+        sun_ra = math.atan2(float(sun_eci[1]), float(sun_eci[0]))
+        return float(sidereal), float(sun_ra)
+
+    @staticmethod
+    def _compiled_rotation_key(env: dict, t_s: float, *, model_key: str, path_key: str) -> tuple:
+        """Return the exact numeric request represented by a frame lookup."""
+
+        model = normalize_frame_model(env.get(model_key, "simple"))
+        jd_utc_start = env.get("jd_utc_start")
+        if model != FRAME_MODEL_IAU76_80_EOP:
+            return (
+                model,
+                float(t_s),
+                None if jd_utc_start is None else float(jd_utc_start),
+            )
+        return (
+            model,
+            float(t_s),
+            None if jd_utc_start is None else float(jd_utc_start),
+            None if env.get(path_key) is None else str(env[path_key]),
+            None if env.get("dut1_s") is None else float(env["dut1_s"]),
+            None if env.get("xp_arcsec") is None else float(env["xp_arcsec"]),
+            None if env.get("yp_arcsec") is None else float(env["yp_arcsec"]),
+            None if env.get("dat_s") is None else float(env["dat_s"]),
+            None if env.get("tt_minus_utc_s") is None else float(env["tt_minus_utc_s"]),
+            float(env.get("ddpsi_rad", 0.0) or 0.0),
+            float(env.get("ddeps_rad", 0.0) or 0.0),
+        )
+
+    @classmethod
+    def _compiled_rotation_definition_key(cls, env: dict, *, model_key: str, path_key: str) -> tuple:
+        request = cls._compiled_rotation_key(env, 0.0, model_key=model_key, path_key=path_key)
+        return request[:1] + request[2:]
+
+    @staticmethod
+    def _compiled_endpoint_environment_signature(env: dict, plugins: tuple) -> tuple | None:
+        """Describe immutable time-only inputs eligible for cross-step reuse.
+
+        Explicit ephemeris arrays and callables can be mutated between calls, so
+        those configurations deliberately retain the established preparation
+        path. Scalar configuration and quiet-Ap sequences are safe to compare.
+        """
+
+        unsafe_keys = (
+            "ephemeris_callable",
+            "ephemeris_body_callable",
+            "spice_ephemeris_callable",
+            "spice_body_ephemeris_callable",
+            "nrlmsise00_density_callable",
+            "sun_ephemeris_time_s",
+            "sun_ephemeris_eci_km",
+            "moon_ephemeris_time_s",
+            "moon_ephemeris_eci_km",
+            "sun_pos_eci_km",
+            "moon_pos_eci_km",
+            "sun_dir_eci",
+        )
+        if any(key in env for key in unsafe_keys):
+            return None
+        if str(env.get("ephemeris_mode", "analytic_enhanced")).strip().lower() in {
+            "spice",
+            "spiceypy",
+        }:
+            # SPICE positions depend on mutable kernel lists and several
+            # target/frame settings. Recompute the shared endpoint rather than
+            # risk reusing positions prepared for a different SPICE context.
+            return None
+        scalar_keys = (
+            "jd_utc",
+            "jd_utc_start",
+            "atmo_epoch_utc",
+            "spherical_harmonics_frame_model",
+            "spherical_harmonics_eop_path",
+            "drag_frame_model",
+            "drag_eop_path",
+            "density_frame_model",
+            "density_eop_path",
+            "dut1_s",
+            "xp_arcsec",
+            "yp_arcsec",
+            "dat_s",
+            "tt_minus_utc_s",
+            "ddpsi_rad",
+            "ddeps_rad",
+            "atmosphere_model",
+            "geodetic_model",
+            "f107",
+            "f107a",
+            "ap",
+            "nrlmsise00_f107",
+            "nrlmsise00_f107a",
+            "nrlmsise00_ap",
+            "nrlmsise00_sw_path",
+            "msis_sw_path",
+            "ephemeris_mode",
+            "de440_coeff_path",
+            "de440_eop_path",
+            "de440_tai_utc_s",
+        )
+        values: list[object] = [plugins]
+        for key in scalar_keys:
+            value = env.get(key)
+            if value is None or isinstance(value, (str, bool, int, float)):
+                values.append(value)
+            elif hasattr(value, "isoformat"):
+                values.append(value.isoformat())
+            else:
+                return None
+        ap_history = env.get("nrlmsise00_ap_a")
+        if ap_history is None:
+            values.append(None)
+        elif isinstance(ap_history, (list, tuple)):
+            values.append(tuple(float(value) for value in ap_history))
+        else:
+            return None
+        return tuple(values)
+
     def _try_propagate_compiled_builtin_rk4(
         self,
         *,
@@ -745,7 +1016,6 @@ class OrbitPropagator:
             m_max = int(compiled_harmonics.m_max)
 
         stage_times = (float(t_s), float(t_s) + 0.5 * float(dt_s), float(t_s) + float(dt_s))
-        stage_env_cache: dict[float, dict] = {}
         from sim.dynamics.orbit.nrlmsise00_backend import (
             _ALPHA,
             _ZN1,
@@ -760,45 +1030,114 @@ class OrbitPropagator:
             _solar_geomagnetic_inputs,
         )
 
+        needs_harmonics = spherical_harmonics_plugin in self.plugins
+        needs_drag = drag_plugin in self.plugins
         needs_sun = srp_plugin in self.plugins or third_body_sun_plugin in self.plugins
         needs_moon = third_body_moon_plugin in self.plugins
+        endpoint_environment_signature = self._compiled_endpoint_environment_signature(env, plugin_tuple)
+        harmonic_rotation_definition = (
+            self._compiled_rotation_definition_key(
+                env,
+                model_key="spherical_harmonics_frame_model",
+                path_key="spherical_harmonics_eop_path",
+            )
+            if needs_harmonics
+            else None
+        )
+        drag_rotation_definition = (
+            self._compiled_rotation_definition_key(
+                env,
+                model_key="drag_frame_model",
+                path_key="drag_eop_path",
+            )
+            if needs_drag
+            else None
+        )
+        density_rotation_definition = (
+            self._compiled_rotation_definition_key(
+                env,
+                model_key="density_frame_model",
+                path_key="density_eop_path",
+            )
+            if density_mode == DENSITY_NRLMSISE00_QUIET_THERMOSPHERE
+            else None
+        )
         for stage_index, stage_time in enumerate(stage_times):
-            stage_env = self._builtin_stage_env(env, stage_time, stage_env_cache)
-            if spherical_harmonics_plugin in self.plugins:
-                self._compiled_harmonic_rotations[stage_index] = self._compiled_rotation(
+            endpoint_key = (
+                None
+                if endpoint_environment_signature is None
+                else (float(stage_time), endpoint_environment_signature)
+            )
+            if (
+                stage_index == 0
+                and endpoint_key is not None
+                and endpoint_key == self._compiled_endpoint_cache_key
+            ):
+                if needs_harmonics:
+                    self._compiled_harmonic_rotations[stage_index] = self._compiled_endpoint_harmonic_rotation
+                if needs_drag:
+                    self._compiled_drag_rotations[stage_index] = self._compiled_endpoint_drag_rotation
+                    self._compiled_density_rotations[stage_index] = self._compiled_endpoint_density_rotation
+                    self._compiled_atmosphere_inputs[stage_index] = self._compiled_endpoint_atmosphere_inputs
+                if needs_sun:
+                    self._compiled_sun_positions[stage_index] = self._compiled_endpoint_sun_position
+                if needs_moon:
+                    self._compiled_moon_positions[stage_index] = self._compiled_endpoint_moon_position
+                continue
+
+            # The fused plan consumes only time-derived numeric artifacts. It
+            # does not need the generic per-stage environment dictionary (or
+            # its derived Sun direction), so prepare those artifacts directly
+            # from the authoritative base environment.
+            stage_env = env
+            harmonic_rotation = None
+            if needs_harmonics:
+                harmonic_rotation = self._accelerated_compiled_rotation(
                     stage_env,
                     stage_time,
                     model_key="spherical_harmonics_frame_model",
                     path_key="spherical_harmonics_eop_path",
                 )
-            if drag_plugin in self.plugins:
-                self._compiled_drag_rotations[stage_index] = self._compiled_rotation(
-                    stage_env,
-                    stage_time,
-                    model_key="drag_frame_model",
-                    path_key="drag_eop_path",
+                self._compiled_harmonic_rotations[stage_index] = harmonic_rotation
+            drag_rotation = None
+            if needs_drag:
+                drag_rotation = (
+                    harmonic_rotation
+                    if harmonic_rotation is not None
+                    and drag_rotation_definition == harmonic_rotation_definition
+                    else self._accelerated_compiled_rotation(
+                        stage_env,
+                        stage_time,
+                        model_key="drag_frame_model",
+                        path_key="drag_eop_path",
+                    )
                 )
+                self._compiled_drag_rotations[stage_index] = drag_rotation
             if density_mode == DENSITY_NRLMSISE00_QUIET_THERMOSPHERE:
-                self._compiled_density_rotations[stage_index] = self._compiled_rotation(
-                    stage_env,
-                    stage_time,
-                    model_key="density_frame_model",
-                    path_key="density_eop_path",
+                density_rotation = (
+                    harmonic_rotation
+                    if harmonic_rotation is not None
+                    and density_rotation_definition == harmonic_rotation_definition
+                    else drag_rotation
+                    if drag_rotation is not None and density_rotation_definition == drag_rotation_definition
+                    else self._accelerated_compiled_rotation(
+                        stage_env,
+                        stage_time,
+                        model_key="density_frame_model",
+                        path_key="density_eop_path",
+                    )
                 )
+                self._compiled_density_rotations[stage_index] = density_rotation
                 dt_utc = _datetime_from_env_t_s(stage_env, stage_time)
                 f107a, f107, _ap, ap_a = _solar_geomagnetic_inputs(dt_utc, stage_env)
                 if any(float(ap_a[index]) != 4.0 for index in range(2, 8)):
                     return None
                 jd_utc = datetime_to_julian_date(dt_utc)
                 eop_path = stage_env.get("density_eop_path", stage_env.get("drag_eop_path"))
-                sidereal, sun_ra = _local_solar_time_epoch_terms(
+                sidereal, sun_ra = self._accelerated_local_solar_time_epoch_terms(
+                    stage_env,
                     float(jd_utc),
                     None if eop_path is None else str(eop_path),
-                    None if stage_env.get("dut1_s") is None else float(stage_env["dut1_s"]),
-                    None if stage_env.get("dat_s") is None else float(stage_env["dat_s"]),
-                    (None if stage_env.get("tt_minus_utc_s") is None else float(stage_env["tt_minus_utc_s"])),
-                    float(stage_env.get("ddpsi_rad", 0.0) or 0.0),
-                    float(stage_env.get("ddeps_rad", 0.0) or 0.0),
                 )
                 self._compiled_atmosphere_inputs[stage_index] = (
                     float(dt_utc.timetuple().tm_yday),
@@ -819,6 +1158,19 @@ class OrbitPropagator:
                     self._compiled_sun_positions[stage_index] = np.asarray(sun, dtype=float).reshape(3)
                 if needs_moon:
                     self._compiled_moon_positions[stage_index] = np.asarray(moon, dtype=float).reshape(3)
+
+            if stage_index == 2 and endpoint_key is not None:
+                if needs_harmonics:
+                    self._compiled_endpoint_harmonic_rotation[:] = self._compiled_harmonic_rotations[stage_index]
+                if needs_drag:
+                    self._compiled_endpoint_drag_rotation[:] = self._compiled_drag_rotations[stage_index]
+                    self._compiled_endpoint_density_rotation[:] = self._compiled_density_rotations[stage_index]
+                    self._compiled_endpoint_atmosphere_inputs[:] = self._compiled_atmosphere_inputs[stage_index]
+                if needs_sun:
+                    self._compiled_endpoint_sun_position[:] = self._compiled_sun_positions[stage_index]
+                if needs_moon:
+                    self._compiled_endpoint_moon_position[:] = self._compiled_moon_positions[stage_index]
+                self._compiled_endpoint_cache_key = endpoint_key
 
         shadow_name = str(env.get("srp_shadow_model", "conical")).lower()
         shadow_model = (

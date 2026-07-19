@@ -260,6 +260,8 @@ class TestAcceleration(unittest.TestCase):
         self.assertIn("rk4_builtin_force_plan_step_kernel", result["kernels"])
         self.assertIn("nrlmsise00_quiet_thermosphere_density_kernel", result["kernels"])
         self.assertIn("ecef_to_geodetic_deg_km_kernel", result["kernels"])
+        self.assertIn("eci_to_ecef_iau76_80_kernel", result["kernels"])
+        self.assertIn("apparent_sidereal_time_iau76_80_kernel", result["kernels"])
 
     def test_accelerated_wgs84_conversion_is_exact_across_poles_and_altitudes(self):
         for latitude_deg in (-90.0, -89.0, -45.0, 0.0, 45.0, 89.0, 90.0):

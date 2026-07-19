@@ -1,8 +1,208 @@
 from __future__ import annotations
 
+import math
+
 import numpy as np
 
 from sim.acceleration.optional import njit_or_identity
+
+_ARCSEC_TO_RAD = math.pi / (180.0 * 3600.0)
+_J2000 = 2451545.0
+_JULIAN_CENTURY_DAYS = 36525.0
+
+
+@njit_or_identity(cache=True, fastmath=False)
+def _earth_frame_rx(angle_rad: float) -> np.ndarray:
+    sine = math.sin(angle_rad)
+    cosine = math.cos(angle_rad)
+    return np.array(
+        [[1.0, 0.0, 0.0], [0.0, cosine, sine], [0.0, -sine, cosine]],
+        dtype=np.float64,
+    )
+
+
+@njit_or_identity(cache=True, fastmath=False)
+def _earth_frame_ry(angle_rad: float) -> np.ndarray:
+    sine = math.sin(angle_rad)
+    cosine = math.cos(angle_rad)
+    return np.array(
+        [[cosine, 0.0, -sine], [0.0, 1.0, 0.0], [sine, 0.0, cosine]],
+        dtype=np.float64,
+    )
+
+
+@njit_or_identity(cache=True, fastmath=False)
+def _earth_frame_rz(angle_rad: float) -> np.ndarray:
+    sine = math.sin(angle_rad)
+    cosine = math.cos(angle_rad)
+    return np.array(
+        [[cosine, sine, 0.0], [-sine, cosine, 0.0], [0.0, 0.0, 1.0]],
+        dtype=np.float64,
+    )
+
+
+@njit_or_identity(cache=True, fastmath=False)
+def _iau80_nutation_angles_kernel(
+    jd_tt: float,
+    ddpsi_rad: float,
+    ddeps_rad: float,
+    nutation_coefficients: np.ndarray,
+    nutation_terms: np.ndarray,
+) -> tuple[float, float, float, float]:
+    centuries_tt = (jd_tt - _J2000) / _JULIAN_CENTURY_DAYS
+    centuries_tt2 = centuries_tt * centuries_tt
+    centuries_tt3 = centuries_tt2 * centuries_tt
+
+    fundamental_degrees = np.empty(5, dtype=np.float64)
+    fundamental_degrees[0] = (
+        ((0.064 * centuries_tt + 31.310) * centuries_tt + 1717915922.6330)
+        * centuries_tt
+        / 3600.0
+        + 134.96298139
+    )
+    fundamental_degrees[1] = (
+        ((-0.012 * centuries_tt - 0.577) * centuries_tt + 129596581.2240)
+        * centuries_tt
+        / 3600.0
+        + 357.52772333
+    )
+    fundamental_degrees[2] = (
+        ((0.011 * centuries_tt - 13.257) * centuries_tt + 1739527263.1370)
+        * centuries_tt
+        / 3600.0
+        + 93.27191028
+    )
+    fundamental_degrees[3] = (
+        ((0.019 * centuries_tt - 6.891) * centuries_tt + 1602961601.3280)
+        * centuries_tt
+        / 3600.0
+        + 297.85036306
+    )
+    fundamental_degrees[4] = (
+        ((0.008 * centuries_tt + 7.455) * centuries_tt - 6962890.5390)
+        * centuries_tt
+        / 3600.0
+        + 125.04452222
+    )
+    fundamental_arguments = np.empty(5, dtype=np.float64)
+    for index in range(5):
+        fundamental_arguments[index] = math.radians(fundamental_degrees[index] % 360.0)
+
+    delta_psi = 0.0
+    delta_epsilon = 0.0
+    for row in range(nutation_coefficients.shape[0]):
+        phase = 0.0
+        for column in range(5):
+            phase += nutation_coefficients[row, column] * fundamental_arguments[column]
+        delta_psi += (nutation_terms[row, 0] + nutation_terms[row, 1] * centuries_tt) * math.sin(phase)
+        delta_epsilon += (nutation_terms[row, 2] + nutation_terms[row, 3] * centuries_tt) * math.cos(phase)
+    delta_psi = np.fmod(delta_psi + ddpsi_rad, 2.0 * math.pi)
+    delta_epsilon = np.fmod(delta_epsilon + ddeps_rad, 2.0 * math.pi)
+
+    mean_epsilon_degrees = (
+        -46.8150 * centuries_tt
+        - 0.00059 * centuries_tt2
+        + 0.001813 * centuries_tt3
+        + 84381.448
+    ) / 3600.0
+    mean_epsilon = math.radians(mean_epsilon_degrees % 360.0)
+    true_epsilon = mean_epsilon + delta_epsilon
+    return centuries_tt, delta_psi, true_epsilon, mean_epsilon
+
+
+@njit_or_identity(cache=True, fastmath=False)
+def apparent_sidereal_time_iau76_80_kernel(
+    jd_utc: float,
+    dut1_s: float,
+    dat_s: float,
+    ddpsi_rad: float,
+    ddeps_rad: float,
+    nutation_coefficients: np.ndarray,
+    nutation_terms: np.ndarray,
+) -> float:
+    """Evaluate HPOP-style apparent sidereal time at one UTC epoch."""
+
+    jd_tt = jd_utc + (dat_s + 32.184) / 86400.0
+    _centuries_tt, delta_psi, true_epsilon, _mean_epsilon = _iau80_nutation_angles_kernel(
+        jd_tt,
+        ddpsi_rad,
+        ddeps_rad,
+        nutation_coefficients,
+        nutation_terms,
+    )
+    jd_ut1 = jd_utc + dut1_s / 86400.0
+    centuries_ut1 = (jd_ut1 - _J2000) / _JULIAN_CENTURY_DAYS
+    theta_degrees = (
+        280.46061837
+        + 360.98564736629 * (jd_ut1 - _J2000)
+        + 0.000387933 * centuries_ut1 * centuries_ut1
+        - centuries_ut1 * centuries_ut1 * centuries_ut1 / 38710000.0
+    )
+    gmst = math.radians(theta_degrees % 360.0)
+    return (gmst + delta_psi * math.cos(true_epsilon)) % (2.0 * math.pi)
+
+
+@njit_or_identity(cache=True, fastmath=False)
+def eci_to_ecef_iau76_80_kernel(
+    t_s: float,
+    jd_utc_start: float,
+    xp_arcsec: float,
+    yp_arcsec: float,
+    dut1_s: float,
+    dat_s: float,
+    ddpsi_rad: float,
+    ddeps_rad: float,
+    nutation_coefficients: np.ndarray,
+    nutation_terms: np.ndarray,
+) -> np.ndarray:
+    """Evaluate the HPOP-style IAU-76/80 ECI-to-ECEF rotation."""
+
+    jd_utc = jd_utc_start + t_s / 86400.0
+    jd_tt = jd_utc + (dat_s + 32.184) / 86400.0
+    centuries_tt, delta_psi, true_epsilon, mean_epsilon = _iau80_nutation_angles_kernel(
+        jd_tt,
+        ddpsi_rad,
+        ddeps_rad,
+        nutation_coefficients,
+        nutation_terms,
+    )
+    centuries_tt2 = centuries_tt * centuries_tt
+    centuries_tt3 = centuries_tt2 * centuries_tt
+
+    zeta = (
+        2306.2181 * centuries_tt + 0.30188 * centuries_tt2 + 0.017998 * centuries_tt3
+    ) * _ARCSEC_TO_RAD
+    theta = (
+        2004.3109 * centuries_tt - 0.42665 * centuries_tt2 - 0.041833 * centuries_tt3
+    ) * _ARCSEC_TO_RAD
+    z = (
+        2306.2181 * centuries_tt + 1.09468 * centuries_tt2 + 0.018203 * centuries_tt3
+    ) * _ARCSEC_TO_RAD
+    precession = _earth_frame_rz(-z) @ _earth_frame_ry(theta) @ _earth_frame_rz(-zeta)
+    nutation = (
+        _earth_frame_rx(-true_epsilon)
+        @ _earth_frame_rz(-delta_psi)
+        @ _earth_frame_rx(mean_epsilon)
+    )
+    rbpn = nutation @ precession
+
+    jd_ut1 = jd_utc + dut1_s / 86400.0
+    centuries_ut1 = (jd_ut1 - _J2000) / _JULIAN_CENTURY_DAYS
+    theta_degrees = (
+        280.46061837
+        + 360.98564736629 * (jd_ut1 - _J2000)
+        + 0.000387933 * centuries_ut1 * centuries_ut1
+        - centuries_ut1 * centuries_ut1 * centuries_ut1 / 38710000.0
+    )
+    gmst = math.radians(theta_degrees % 360.0)
+    gast = (gmst + delta_psi * math.cos(true_epsilon)) % (2.0 * math.pi)
+    sp = -47.0e-6 * ((jd_tt - _J2000) / _JULIAN_CENTURY_DAYS) * _ARCSEC_TO_RAD
+    polar_motion = (
+        _earth_frame_rz(sp)
+        @ _earth_frame_ry(-xp_arcsec * _ARCSEC_TO_RAD)
+        @ _earth_frame_rx(-yp_arcsec * _ARCSEC_TO_RAD)
+    )
+    return polar_motion @ _earth_frame_rz(gast) @ rbpn
 
 
 @njit_or_identity(cache=True)

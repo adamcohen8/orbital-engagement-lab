@@ -30,7 +30,7 @@ Customer or pilot agreements may define stricter response targets.
 
 ## Supported Versions
 
-Security fixes target the current public release line, currently `v0.22.1`, and
+Security fixes target the current public release line, currently `v0.22.2`, and
 active private/Pro customer-supported release lines. The project targets Python
 3.10 through 3.12. Blocking CI currently exercises Python 3.11, so evaluators
 should run acceptance on their exact target interpreter and operating system.

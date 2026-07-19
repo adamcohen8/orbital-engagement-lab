@@ -48,14 +48,20 @@ def normalized_spherical_harmonic_accel_eci_kernel(
     sin_latitude = math.sin(latitude_gc)
     cos_latitude = math.cos(latitude_gc)
 
-    p_nm = np.zeros((n_max + 1, m_max + 1), dtype=np.float64)
-    dp_nm = np.zeros((n_max + 1, m_max + 1), dtype=np.float64)
+    # Every triangular entry consumed below is overwritten.  ``empty`` avoids
+    # clearing the unused upper-right rectangle on every force evaluation.
+    p_nm = np.empty((n_max + 1, m_max + 1), dtype=np.float64)
+    dp_nm = np.empty((n_max + 1, m_max + 1), dtype=np.float64)
     p_nm[0, 0] = 1.0
+    dp_nm[0, 0] = 0.0
     if n_max >= 1 and m_max >= 1:
         sqrt_three = math.sqrt(3.0)
         p_nm[1, 1] = sqrt_three * cos_latitude
         dp_nm[1, 1] = -sqrt_three * sin_latitude
 
+    # Degree-major traversal follows the row-major array layout.  Coefficients
+    # within a degree depend only on earlier degrees, so this preserves the
+    # arithmetic for every coefficient while avoiding strided column walks.
     for degree in range(2, n_max + 1):
         if degree <= m_max:
             scale = legendre_diag_scale[degree]
@@ -75,8 +81,9 @@ def normalized_spherical_harmonic_accel_eci_kernel(
                 + sin_latitude * dp_nm[degree - 1, order]
             )
 
-    for order in range(m_max + 1):
-        for degree in range(order + 2, n_max + 1):
+    for degree in range(2, n_max + 1):
+        upper_recurrence_order = min(m_max, degree - 2)
+        for order in range(upper_recurrence_order + 1):
             a_scale = legendre_recur_a[degree, order]
             b_scale = legendre_recur_b[degree, order]
             c_scale = legendre_recur_c[degree, order]
