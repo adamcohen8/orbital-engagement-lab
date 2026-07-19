@@ -1,12 +1,17 @@
 import numpy as np
 
+from sim.acceleration.settings import acceleration_context
 from sim.dynamics.orbit.de440_hpop import (
     _BODY_SPECS,
     _cheb3d,
     _eval_body,
     _extract_axis,
     _find_coeff_row,
+    _find_light_body_row,
+    _find_light_row,
+    hpop_de440_positions_km,
     hpop_de440_positions_m,
+    hpop_de440_sun_moon_positions_km,
     mjd_tt_to_mjd_tdb,
 )
 
@@ -20,6 +25,25 @@ def test_find_coeff_row_selects_covering_interval():
     pc = np.array([[0.0, 32.0, 1.0], [32.0, 64.0, 2.0]], dtype=float)
     row = _find_coeff_row(pc, 40.0)
     assert float(row[2]) == 2.0
+
+
+def test_light_row_cache_preserves_boundary_and_nonmonotonic_selection():
+    light = {
+        "row_start_jd_tdb": np.array([1.0, 2.0]),
+        "row_end_jd_tdb": np.array([2.0, 3.0]),
+        "moon_start_jd_tdb": np.array([1.0, 2.0]),
+        "moon_end_jd_tdb": np.array([2.0, 3.0]),
+    }
+
+    assert _find_light_row(light, 1.5) == 0
+    assert _find_light_row(light, 2.5) == 1
+    assert _find_light_row(light, 2.0) == 0
+    assert _find_light_row(light, 1.25) == 0
+
+    assert _find_light_body_row(light, 1.5, "moon") == 0
+    assert _find_light_body_row(light, 2.5, "moon") == 1
+    assert _find_light_body_row(light, 2.0, "moon") == 0
+    assert _find_light_body_row(light, 1.25, "moon") == 0
 
 
 def test_eval_body_constant_segment_returns_scaled_constant():
@@ -145,3 +169,78 @@ def test_oel_de440_light_body_specific_records(tmp_path):
     assert np.allclose(out["earth"], r_earth)
     assert np.allclose(out["moon"], r_moon)
     assert np.allclose(out["sun"], -r_earth + r_sun)
+
+
+def test_oel_de440_light_acceleration_is_exact_at_boundaries_and_nonmonotonic_times(tmp_path):
+    path = tmp_path / "oel_de440_light_acceleration_parity.npz"
+    payload = {
+        "format_version": np.array("oel_de440_light_v1"),
+        "source": np.array("unit-test"),
+        "row_start_jd_tdb": np.array([2451545.0, 2451549.0], dtype=float),
+        "row_end_jd_tdb": np.array([2451549.0, 2451553.0], dtype=float),
+        "bodies": np.array(["earthmoon", "moon", "sun"]),
+    }
+    for body_index, body in enumerate(("earthmoon", "moon", "sun"), start=1):
+        payload[f"{body}_coeffs"] = np.array(2, dtype=np.int64)
+        payload[f"{body}_segments"] = np.array(1, dtype=np.int64)
+        payload[f"{body}_span_days"] = np.array(4.0, dtype=float)
+        payload[f"{body}_start_jd_tdb"] = np.array([2451545.0, 2451549.0], dtype=float)
+        payload[f"{body}_end_jd_tdb"] = np.array([2451549.0, 2451553.0], dtype=float)
+        base = float(body_index * 10)
+        payload[f"{body}_x"] = np.array([[base, 0.125], [base + 1.0, -0.25]], dtype=float)
+        payload[f"{body}_y"] = np.array([[base + 2.0, -0.375], [base + 3.0, 0.5]], dtype=float)
+        payload[f"{body}_z"] = np.array([[base + 4.0, 0.625], [base + 5.0, -0.75]], dtype=float)
+    np.savez_compressed(path, **payload)
+
+    sample_times = (2451546.25, 2451549.0, 2451551.75, 2451545.5)
+    for jd_tdb in sample_times:
+        with acceleration_context("off"):
+            expected = hpop_de440_positions_m(jd_tdb, coeff_path=path)
+        with acceleration_context("auto"):
+            actual = hpop_de440_positions_m(jd_tdb, coeff_path=path)
+        assert tuple(actual) == tuple(expected)
+        for body in expected:
+            np.testing.assert_array_equal(actual[body], expected[body])
+
+
+def test_oel_de440_light_acceleration_off_does_not_load_compiled_kernel(tmp_path):
+    row = np.zeros(900, dtype=float)
+    row[0] = 2451545.0
+    row[1] = 2451577.0
+    _constant_body(row, "earthmoon", (100.0, 200.0, 300.0))
+    _constant_body(row, "moon", (1.0, 2.0, 3.0))
+    _constant_body(row, "sun", (1000.0, 2000.0, 3000.0))
+    path = tmp_path / "oel_de440_light_acceleration_off.npz"
+    np.savez_compressed(path, **_light_payload_from_row(row))
+
+    from unittest.mock import patch
+
+    with (
+        acceleration_context("off"),
+        patch(
+            "sim.dynamics.orbit.de440_hpop._compiled_de440_light_core",
+            side_effect=AssertionError("compiled DE440 kernel must stay disabled"),
+        ),
+    ):
+        out = hpop_de440_positions_m(2451546.0, coeff_path=path)
+    assert np.linalg.norm(out["sun"]) > 0.0
+
+
+def test_oel_de440_accelerated_utc_sun_moon_pair_is_exact(tmp_path):
+    row = np.zeros(900, dtype=float)
+    row[0] = 2451545.0
+    row[1] = 2451577.0
+    _constant_body(row, "earthmoon", (100.0, 200.0, 300.0))
+    _constant_body(row, "moon", (1.0, 2.0, 3.0))
+    _constant_body(row, "sun", (1000.0, 2000.0, 3000.0))
+    path = tmp_path / "oel_de440_light_utc_pair.npz"
+    np.savez_compressed(path, **_light_payload_from_row(row))
+    env = {"de440_coeff_path": str(path), "de440_tai_utc_s": 37.0}
+
+    with acceleration_context("off"):
+        positions = hpop_de440_positions_km(2451545.5, dict(env))
+    with acceleration_context("auto"):
+        sun, moon = hpop_de440_sun_moon_positions_km(2451545.5, dict(env))
+
+    np.testing.assert_array_equal(sun, positions["sun"])
+    np.testing.assert_array_equal(moon, positions["moon"])

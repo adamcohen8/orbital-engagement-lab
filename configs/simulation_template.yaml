@@ -346,7 +346,7 @@ simulator:
       drag: true
       srp: true
       spherical_harmonics:
-        enabled: true
+        enabled: false
         degree: 8
         order: 8
     reentry:

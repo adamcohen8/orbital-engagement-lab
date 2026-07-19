@@ -48,6 +48,32 @@ VALIDATION_TEST_FILES = {
     "test_validation_release_workflow.py",
 }
 
+# This lane is deliberately opt-in.  It protects the smallest useful set of
+# import, architecture, integrator, release-governance, and supply-chain
+# contracts without turning "fast" into an alias for the entire regression
+# suite.  Keep additions measured and comfortably sub-minute on CI.
+FAST_TEST_FILES = {
+    "test_api_plugin_validation.py",
+    "test_config_api_architecture.py",
+    "test_orbit_integrators.py",
+    "test_public_imports.py",
+    "test_runtime_architecture.py",
+    "test_supply_chain_evidence.py",
+    "test_test_suite_architecture.py",
+    "test_validation_release_workflow.py",
+}
+
+# Ordinary behavioral tests default to the Python implementation in CI.  The
+# files below own compiled-backend availability, parity, fallback, and exactness
+# coverage and therefore run in a dedicated acceleration-enabled shard.
+COMPILED_TEST_FILES = {
+    "test_acceleration.py",
+    "test_de440_hpop.py",
+    "test_orbit_atmosphere_models.py",
+    "test_orbit_compiled_force_plan.py",
+    "test_orbit_spherical_harmonics.py",
+}
+
 SLOW_TESTS = {
     ("test_agent_task.py", "test_agent_task_recipe_with_plots_writes_plot_summary"),
     ("test_dynamics_orbit_determination.py", "test_fit_orbit_cli_writes_reviewable_artifacts"),
@@ -134,9 +160,11 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             item.add_marker(pytest.mark.product)
         if filename in VALIDATION_TEST_FILES:
             item.add_marker(pytest.mark.validation)
+        if filename in FAST_TEST_FILES:
+            item.add_marker(pytest.mark.fast)
+        if filename in COMPILED_TEST_FILES:
+            item.add_marker(pytest.mark.compiled)
         if (filename, _test_function_name(item)) in SLOW_TESTS:
             item.add_marker(pytest.mark.slow)
         if filename in EXTERNAL_TEST_FILES:
             item.add_marker(pytest.mark.external)
-        if item.get_closest_marker("slow") is None and item.get_closest_marker("external") is None:
-            item.add_marker(pytest.mark.fast)

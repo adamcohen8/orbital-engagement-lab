@@ -21,7 +21,8 @@ Run the short integration profile:
 .venv/bin/python -m sim.performance --profile smoke
 ```
 
-Run the default measurement profile, which warms each case and reports the median of three measured repetitions:
+Run the default measurement profile, which warms code and static data for each case and reports the median of three
+measured repetitions:
 
 ```bash
 .venv/bin/python -m sim.performance --profile standard
@@ -53,11 +54,24 @@ when optional or external coverage must be present in automation.
 The source-of-truth matrix is `configs/performance_benchmark_suite.yaml`. Purpose-built scenario fixtures live under
 `configs/performance/`; maintained product scenarios are reused where they are already the right workload.
 
+The eight `drag_*` rows intentionally share one spacecraft, orbit, epoch, RK4 step, force selection, duration, and output
+policy. Only `simulator.environment.atmosphere_model` changes between them. Compare those rows directly to study relative
+atmosphere-model runtime cost. Each measured atmospheric repetition starts with an empty trajectory-epoch cache while
+retaining any imports, compiled acceleration kernels, and static input tables prepared by the selected profile's
+warm-ups. Do not interpret equal runtime as physical agreement between the models' density predictions.
+
 ## Profiles and interpretation
 
 - `smoke` uses one short measured execution and is intended to prove that every path is callable.
 - `standard` uses one warm-up and three measured repetitions. Use this for normal before/after optimization work.
 - `full` uses one warm-up, five repetitions, and longer durations to reduce startup noise.
+
+When configured, warm-ups prepare imports, optional compiled kernels, and static model data. Before every measured
+`drag_*` repetition, the suite clears Jacchia-70 and Harris-Priester caches keyed by individual trajectory epochs.
+Consequently, `standard` and `full` atmosphere timings represent a fresh trajectory in an otherwise warmed process, not
+repeated execution of an identical cached trajectory. `smoke` has no configured warm-up, so its measurement can include
+startup work. The JSON result records the per-repetition policy as
+`measurement_cache_policy: cold_trajectory_epoch_cache`.
 
 Each case must pass its configured capability assertions. Repeated executions must also produce the same canonical
 physics hash; runtime measurements, output paths, and artifact provenance are excluded from that hash. A one-repeat smoke
@@ -67,6 +81,6 @@ run confirms coverage but does not establish repeat parity by itself, so optimiz
 The public core uses deterministic serial object stepping. The JSON result records the actual runtime backend so benchmark reports remain explicit about what was measured.
 
 The report writes `benchmark_results.json`, `benchmark_report.md`, effective configs, and per-case scratch outputs. Compare
-results only when the manifest/profile, hardware, Python environment, acceleration mode, resource policy, and output
-policy match. The report embeds the Git commit, dirty-worktree flag, platform, CPU count, Python executable, and NumPy
-version for that reason.
+results only when the manifest/profile, hardware, Python environment, acceleration mode, measurement cache policy,
+resource policy, and output policy match. The report embeds the Git commit, dirty-worktree flag, platform, CPU count,
+Python executable, and NumPy version for that reason.

@@ -5,9 +5,11 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
+from threading import local
 
 import numpy as np
 
+from sim.acceleration.settings import acceleration_enabled_from_mode
 from sim.dynamics.orbit.epoch import datetime_to_julian_date, gmst_angle_rad_from_jd
 from sim.dynamics.orbit.nrlmsise00_coeff import PAVGM, PD, PDL, PDM, PMA, PS, PT, PTL, PTM
 
@@ -32,6 +34,175 @@ PDM1 = _pad2(PDM)
 PTL1 = _pad2(PTL)
 PMA1 = _pad2(PMA)
 PAVGM1 = _pad1(PAVGM)
+
+_PT1_GLOBE = tuple(float(value) for value in PT1)
+_PS1_GLOBE = tuple(float(value) for value in PS1)
+_PD1_GLOBE = tuple(tuple(float(value) for value in row) for row in PD1)
+_PTL1_GLOBE = tuple(tuple(float(value) for value in row) for row in PTL1)
+_PMA1_GLOBE = tuple(tuple(float(value) for value in row) for row in PMA1)
+_PT1_GLOBE_FAST = np.ascontiguousarray(PT1)
+_PS1_GLOBE_FAST = np.ascontiguousarray(PS1)
+_PD1_GLOBE_FAST = np.ascontiguousarray(PD1)
+_GLOBE_FAST_BY_ID = {
+    id(_PT1_GLOBE): _PT1_GLOBE_FAST,
+    id(_PS1_GLOBE): _PS1_GLOBE_FAST,
+    **{id(_PD1_GLOBE[index]): _PD1_GLOBE_FAST[index] for index in range(len(_PD1_GLOBE))},
+}
+_ZN1 = np.array([0.0, PDL1[2, 16], 110.0, 100.0, 90.0, 72.5], dtype=float)
+_ZN2 = np.array([0.0, 72.5, 55.0, 45.0, 32.5], dtype=float)
+_ZN3 = np.array([0.0, 32.5, 20.0, 15.0, 10.0, 0.0], dtype=float)
+_ALPHA = np.array([0.0, -0.38, 0.0, 0.0, 0.0, 0.17, 0.0, -0.38, 0.0, 0.0], dtype=float)
+_ALTL = np.array([0.0, 200.0, 300.0, 160.0, 250.0, 240.0, 450.0, 320.0, 450.0], dtype=float)
+
+
+def _globe7_quiet_python(
+    p: np.ndarray,
+    doy: int,
+    sec: float,
+    g_long: float,
+    context: np.ndarray,
+) -> float:
+    """Evaluate the fixed-switch, quiet-Ap globe kernel without fast math."""
+    dfa = context[0]
+    df = context[1]
+    plg12 = context[2]
+    plg13 = context[3]
+    plg14 = context[4]
+    plg15 = context[5]
+    plg16 = context[6]
+    plg17 = context[7]
+    plg22 = context[8]
+    plg23 = context[9]
+    plg24 = context[10]
+    plg25 = context[11]
+    plg26 = context[12]
+    plg27 = context[13]
+    plg33 = context[14]
+    plg34 = context[15]
+    plg35 = context[16]
+    plg36 = context[17]
+    plg38 = context[18]
+    plg44 = context[19]
+    plg45 = context[20]
+    plg47 = context[21]
+    ctloc = context[22]
+    stloc = context[23]
+    c2tloc = context[24]
+    s2tloc = context[25]
+    s3tloc = context[26]
+    c3tloc = context[27]
+    clong = context[28]
+    slong = context[29]
+    dfa2 = context[30]
+    sr = 7.2722e-5
+    dgtr = 1.74533e-2
+    dr = 1.72142e-2
+    cd32 = math.cos(dr * (doy - p[32]))
+    cd18 = math.cos(2.0 * dr * (doy - p[18]))
+    cd14 = math.cos(dr * (doy - p[14]))
+    cd39 = math.cos(2.0 * dr * (doy - p[39]))
+
+    t1 = p[20] * df * (1.0 + p[60] * dfa) + p[21] * df * df + p[22] * dfa + p[30] * dfa2
+    f1 = 1.0 + (p[48] * dfa + p[20] * df + p[21] * df * df)
+    f2 = 1.0 + (p[50] * dfa + p[20] * df + p[21] * df * df)
+    t2 = p[2] * plg13 + p[3] * plg15 + p[23] * plg17 + p[15] * plg13 * dfa + p[27] * plg12
+    t3 = p[19] * cd32
+    t4 = (p[16] + p[17] * plg13) * cd18
+    t5 = f1 * (p[10] * plg12 + p[11] * plg14) * cd14
+    t6 = p[38] * plg12 * cd39
+
+    t71 = p[12] * plg23 * cd14
+    t72 = p[13] * plg23 * cd14
+    t7 = f2 * (
+        (p[4] * plg22 + p[5] * plg24 + p[28] * plg26 + t71) * ctloc
+        + (p[7] * plg22 + p[8] * plg24 + p[29] * plg26 + t72) * stloc
+    )
+    t81 = (p[24] * plg34 + p[36] * plg36) * cd14
+    t82 = (p[34] * plg34 + p[37] * plg36) * cd14
+    t8 = f2 * (
+        (p[6] * plg33 + p[42] * plg35 + t81) * c2tloc
+        + (p[9] * plg33 + p[43] * plg35 + t82) * s2tloc
+    )
+
+    t11 = 0.0
+    t12 = 0.0
+    if g_long > -1000.0:
+        t11 = (1.0 + p[81] * dfa) * (
+            (
+                p[65] * plg23
+                + p[66] * plg25
+                + p[67] * plg27
+                + p[104] * plg22
+                + p[105] * plg24
+                + p[106] * plg26
+                + (p[110] * plg22 + p[111] * plg24 + p[112] * plg26) * cd14
+            )
+            * clong
+            + (
+                p[91] * plg23
+                + p[92] * plg25
+                + p[93] * plg27
+                + p[107] * plg22
+                + p[108] * plg24
+                + p[109] * plg26
+                + (p[113] * plg22 + p[114] * plg24 + p[115] * plg26) * cd14
+            )
+            * slong
+        )
+        t12 = (
+            (1.0 + p[96] * plg12)
+            * (1.0 + p[82] * dfa)
+            * (1.0 + p[120] * plg12 * cd14)
+            * (p[69] * plg12 + p[70] * plg14 + p[71] * plg16)
+            * math.cos(sr * (sec - p[72]))
+        )
+        t12 += (
+            (p[77] * plg34 + p[78] * plg36 + p[79] * plg38)
+            * math.cos(sr * (sec - p[80]) + 2.0 * dgtr * g_long)
+            * (1.0 + p[138] * dfa)
+        )
+
+    t14 = f2 * (
+        (p[40] * plg44 + (p[94] * plg45 + p[47] * plg47) * cd14) * s3tloc
+        + (p[41] * plg44 + (p[95] * plg45 + p[49] * plg47) * cd14) * c3tloc
+    )
+    tinf = p[31]
+    tinf += t1
+    tinf += t2
+    tinf += t3
+    tinf += t4
+    tinf += t5
+    tinf += t6
+    tinf += t7
+    tinf += t8
+    tinf += 0.0
+    tinf += 0.0
+    tinf += t11
+    tinf += t12
+    tinf += 0.0
+    tinf += t14
+    return tinf
+
+
+@lru_cache(maxsize=1)
+def _compiled_globe7_quiet():
+    from sim.acceleration.kernels.nrlmsise00 import globe7_quiet_kernel
+
+    return globe7_quiet_kernel
+
+
+@lru_cache(maxsize=1)
+def _compiled_densu():
+    from sim.acceleration.kernels.nrlmsise00 import densu_kernel
+
+    return densu_kernel
+
+
+@lru_cache(maxsize=1)
+def _compiled_quiet_thermosphere_density():
+    from sim.acceleration.kernels.nrlmsise00 import quiet_thermosphere_density_kernel
+
+    return quiet_thermosphere_density_kernel
 
 
 @dataclass
@@ -139,10 +310,24 @@ class _NRLMSISE00:
         self.meso_tgn2 = np.zeros(3, dtype=float)
         self.meso_tgn3 = np.zeros(3, dtype=float)
         self.dfa = 0.0
-        self.plg = np.zeros((5, 10), dtype=float)
+        # Tuple-keyed Python floats avoid NumPy scalar-dispatch overhead in the
+        # repeatedly evaluated globe kernels while preserving their indexing.
+        self.plg = {(row, column): 0.0 for row in range(5) for column in range(10)}
+        self.globe_context = np.zeros(31, dtype=float)
         self.ctloc = self.stloc = self.c2tloc = self.s2tloc = self.s3tloc = self.c3tloc = 0.0
+        self.clong = self.slong = self.sin_lat = self.abs_lat = 0.0
+        self.df = self.dfa = 0.0
+        self.ap_a_quiet = False
         self.apdf = 0.0
         self.apt = np.zeros(5, dtype=float)
+        self.use_acceleration = False
+        self.flags = _Flags()
+        self.flags.switches[1] = 0.0
+        self.flags.switches[2:25] = 1.0
+        self.flags.switches[10] = -1.0
+        self._tselec(self.flags)
+        self.flags.sw = tuple(float(value) for value in self.flags.sw)
+        self.flags.swc = tuple(float(value) for value in self.flags.swc)
 
     @staticmethod
     def _tselec(flags: _Flags) -> _Flags:
@@ -358,6 +543,24 @@ class _NRLMSISE00:
         tn1: np.ndarray,
         tgn1: np.ndarray,
     ) -> tuple[float, float]:
+        if self.use_acceleration:
+            return _compiled_densu()(
+                alt,
+                dlb,
+                tinf,
+                tlb,
+                xm,
+                alpha,
+                tz,
+                zlb,
+                s2,
+                mn1,
+                zn1,
+                tn1,
+                tgn1,
+                self.gsurf,
+                self.re,
+            )
         xs = np.zeros(6, dtype=float)
         ys = np.zeros(6, dtype=float)
         za = zn1[1]
@@ -404,31 +607,32 @@ class _NRLMSISE00:
             expl2 = 50.0
         return densa * (tn1[1] / tz) ** (1.0 + alpha) * math.exp(-expl2), tz
 
-    @staticmethod
-    def _g0(a: float, p: np.ndarray) -> float:
-        p25 = abs(p[25])
-        return a - 4.0 + (p[26] - 1.0) * (a - 4.0 + (math.exp(-p25 * (a - 4.0)) - 1.0) / p25)
-
-    @staticmethod
-    def _sumex(ex: float) -> float:
-        return 1.0 + (1.0 - ex**19.0) / (1.0 - ex) * ex**0.5
-
     def _sg0(self, ex: float, p: np.ndarray, ap: np.ndarray) -> float:
+        p25 = abs(max(p[25], 1.0e-4))
+        p26m1 = p[26] - 1.0
+        g = [0.0] * 8
+        for index in range(2, 8):
+            a4 = ap[index] - 4.0
+            g[index] = a4 + p26m1 * (a4 + (math.exp(-p25 * a4) - 1.0) / p25)
         return (
-            self._g0(ap[2], p)
+            g[2]
             + (
-                self._g0(ap[3], p) * ex
-                + self._g0(ap[4], p) * ex * ex
-                + self._g0(ap[5], p) * ex**3.0
-                + (self._g0(ap[6], p) * ex**4.0 + self._g0(ap[7], p) * ex**12.0) * (1.0 - ex**8.0) / (1.0 - ex)
+                g[3] * ex
+                + g[4] * ex * ex
+                + g[5] * ex**3.0
+                + (g[6] * ex**4.0 + g[7] * ex**12.0) * (1.0 - ex**8.0) / (1.0 - ex)
             )
-        ) / self._sumex(ex)
+        ) / (1.0 + (1.0 - ex**19.0) / (1.0 - ex) * ex**0.5)
 
     def _legendre_and_local_time(self, input_: _Input, flags: _Flags) -> None:
         dgtr = 1.74533e-2
         hr = 0.2618
         c = math.sin(input_.g_lat * dgtr)
         s = math.cos(input_.g_lat * dgtr)
+        self.sin_lat = c
+        self.abs_lat = abs(input_.g_lat)
+        self.df = input_.f107 - input_.f107a
+        self.dfa = input_.f107a - 150.0
         c2 = c * c
         c4 = c2 * c2
         s2 = s * s
@@ -462,69 +666,133 @@ class _NRLMSISE00:
             self.c2tloc = math.cos(2.0 * hr * input_.lst)
             self.s3tloc = math.sin(3.0 * hr * input_.lst)
             self.c3tloc = math.cos(3.0 * hr * input_.lst)
+        if flags.sw[11] and flags.sw[12] and input_.g_long > -1000.0:
+            self.clong = math.cos(dgtr * input_.g_long)
+            self.slong = math.sin(dgtr * input_.g_long)
+        self.globe_context[:] = (
+            self.dfa,
+            self.df,
+            plg[1, 2],
+            plg[1, 3],
+            plg[1, 4],
+            plg[1, 5],
+            plg[1, 6],
+            plg[1, 7],
+            plg[2, 2],
+            plg[2, 3],
+            plg[2, 4],
+            plg[2, 5],
+            plg[2, 6],
+            plg[2, 7],
+            plg[3, 3],
+            plg[3, 4],
+            plg[3, 5],
+            plg[3, 6],
+            plg[3, 8],
+            plg[4, 4],
+            plg[4, 5],
+            plg[4, 7],
+            self.ctloc,
+            self.stloc,
+            self.c2tloc,
+            self.s2tloc,
+            self.s3tloc,
+            self.c3tloc,
+            self.clong,
+            self.slong,
+            self.dfa**2.0,
+        )
 
-    def _globe7(self, p_in: np.ndarray, input_: _Input, flags: _Flags) -> float:
-        p = np.array(p_in, dtype=float, copy=True)
-        t = np.zeros(15, dtype=float)
+    def _globe7(
+        self, p_in: np.ndarray, input_: _Input, flags: _Flags, p_fast: np.ndarray | None = None
+    ) -> float:
+        p = p_in
+        if self.ap_a_quiet and self.use_acceleration:
+            if p_fast is None:
+                p_fast = _GLOBE_FAST_BY_ID.get(id(p_in))
+            if p_fast is not None:
+                return float(
+                    _compiled_globe7_quiet()(p_fast, input_.doy, input_.sec, input_.g_long, self.globe_context)
+                )
+        t = [0.0] * 15
         sr = 7.2722e-5
         dgtr = 1.74533e-2
         dr = 1.72142e-2
         hr = 0.2618
-        self._legendre_and_local_time(input_, flags)
         plg = self.plg
+        plg12 = plg[1, 2]
+        plg13 = plg[1, 3]
+        plg14 = plg[1, 4]
+        plg15 = plg[1, 5]
+        plg16 = plg[1, 6]
+        plg17 = plg[1, 7]
+        plg22 = plg[2, 2]
+        plg23 = plg[2, 3]
+        plg24 = plg[2, 4]
+        plg25 = plg[2, 5]
+        plg26 = plg[2, 6]
+        plg27 = plg[2, 7]
+        plg33 = plg[3, 3]
+        plg34 = plg[3, 4]
+        plg35 = plg[3, 5]
+        plg36 = plg[3, 6]
+        plg38 = plg[3, 8]
+        plg44 = plg[4, 4]
+        plg45 = plg[4, 5]
+        plg47 = plg[4, 7]
         cd32 = math.cos(dr * (input_.doy - p[32]))
         cd18 = math.cos(2.0 * dr * (input_.doy - p[18]))
         cd14 = math.cos(dr * (input_.doy - p[14]))
         cd39 = math.cos(2.0 * dr * (input_.doy - p[39]))
-        df = input_.f107 - input_.f107a
-        self.dfa = input_.f107a - 150.0
+        df = self.df
         t[1] = p[20] * df * (1.0 + p[60] * self.dfa) + p[21] * df * df + p[22] * self.dfa + p[30] * self.dfa**2.0
         f1 = 1.0 + (p[48] * self.dfa + p[20] * df + p[21] * df * df) * flags.swc[2]
         f2 = 1.0 + (p[50] * self.dfa + p[20] * df + p[21] * df * df) * flags.swc[2]
         t[2] = (
-            p[2] * plg[1, 3]
-            + p[3] * plg[1, 5]
-            + p[23] * plg[1, 7]
-            + p[15] * plg[1, 3] * self.dfa * flags.swc[2]
-            + p[27] * plg[1, 2]
+            p[2] * plg13
+            + p[3] * plg15
+            + p[23] * plg17
+            + p[15] * plg13 * self.dfa * flags.swc[2]
+            + p[27] * plg12
         )
         t[3] = p[19] * cd32
-        t[4] = (p[16] + p[17] * plg[1, 3]) * cd18
-        t[5] = f1 * (p[10] * plg[1, 2] + p[11] * plg[1, 4]) * cd14
-        t[6] = p[38] * plg[1, 2] * cd39
+        t[4] = (p[16] + p[17] * plg13) * cd18
+        t[5] = f1 * (p[10] * plg12 + p[11] * plg14) * cd14
+        t[6] = p[38] * plg12 * cd39
         if flags.sw[8]:
-            t71 = p[12] * plg[2, 3] * cd14 * flags.swc[6]
-            t72 = p[13] * plg[2, 3] * cd14 * flags.swc[6]
+            t71 = p[12] * plg23 * cd14 * flags.swc[6]
+            t72 = p[13] * plg23 * cd14 * flags.swc[6]
             t[7] = f2 * (
-                (p[4] * plg[2, 2] + p[5] * plg[2, 4] + p[28] * plg[2, 6] + t71) * self.ctloc
-                + (p[7] * plg[2, 2] + p[8] * plg[2, 4] + p[29] * plg[2, 6] + t72) * self.stloc
+                (p[4] * plg22 + p[5] * plg24 + p[28] * plg26 + t71) * self.ctloc
+                + (p[7] * plg22 + p[8] * plg24 + p[29] * plg26 + t72) * self.stloc
             )
         if flags.sw[9]:
-            t81 = (p[24] * plg[3, 4] + p[36] * plg[3, 6]) * cd14 * flags.swc[6]
-            t82 = (p[34] * plg[3, 4] + p[37] * plg[3, 6]) * cd14 * flags.swc[6]
+            t81 = (p[24] * plg34 + p[36] * plg36) * cd14 * flags.swc[6]
+            t82 = (p[34] * plg34 + p[37] * plg36) * cd14 * flags.swc[6]
             t[8] = f2 * (
-                (p[6] * plg[3, 3] + p[42] * plg[3, 5] + t81) * self.c2tloc
-                + (p[9] * plg[3, 3] + p[43] * plg[3, 5] + t82) * self.s2tloc
+                (p[6] * plg33 + p[42] * plg35 + t81) * self.c2tloc
+                + (p[9] * plg33 + p[43] * plg35 + t82) * self.s2tloc
             )
         if flags.sw[15]:
             t[14] = f2 * (
-                (p[40] * plg[4, 4] + (p[94] * plg[4, 5] + p[47] * plg[4, 7]) * cd14 * flags.swc[6]) * self.s3tloc
-                + (p[41] * plg[4, 4] + (p[95] * plg[4, 5] + p[49] * plg[4, 7]) * cd14 * flags.swc[6]) * self.c3tloc
+                (p[40] * plg44 + (p[94] * plg45 + p[47] * plg47) * cd14 * flags.swc[6]) * self.s3tloc
+                + (p[41] * plg44 + (p[95] * plg45 + p[49] * plg47) * cd14 * flags.swc[6]) * self.c3tloc
             )
         if flags.sw[10] == -1:
             if p[52] != 0.0:
-                exp1 = math.exp(-10800.0 * abs(p[52]) / (1.0 + p[139] * (45.0 - abs(input_.g_lat))))
-                exp1 = min(exp1, 0.99999)
-                if p[25] < 1.0e-4:
-                    p[25] = 1.0e-4
-                self.apt[1] = self._sg0(exp1, p, input_.ap_a)
-                if flags.sw[10]:
+                if self.ap_a_quiet:
+                    self.apt[1] = 0.0
+                else:
+                    exp1 = math.exp(-10800.0 * abs(p[52]) / (1.0 + p[139] * (45.0 - self.abs_lat)))
+                    exp1 = min(exp1, 0.99999)
+                    self.apt[1] = self._sg0(exp1, p, input_.ap_a)
+                if flags.sw[10] and self.apt[1] != 0.0:
                     t[9] = self.apt[1] * (
                         p[51]
-                        + p[97] * plg[1, 3]
-                        + p[55] * plg[1, 5]
-                        + (p[126] * plg[1, 2] + p[127] * plg[1, 4] + p[128] * plg[1, 6]) * cd14 * flags.swc[6]
-                        + (p[129] * plg[2, 2] + p[130] * plg[2, 4] + p[131] * plg[2, 6])
+                        + p[97] * plg13
+                        + p[55] * plg15
+                        + (p[126] * plg12 + p[127] * plg14 + p[128] * plg16) * cd14 * flags.swc[6]
+                        + (p[129] * plg22 + p[130] * plg24 + p[131] * plg26)
                         * flags.swc[8]
                         * math.cos(hr * (input_.lst - p[132]))
                     )
@@ -535,10 +803,10 @@ class _NRLMSISE00:
             if flags.sw[10]:
                 t[9] = self.apdf * (
                     p[33]
-                    + p[46] * plg[1, 3]
-                    + p[35] * plg[1, 5]
-                    + (p[101] * plg[1, 2] + p[102] * plg[1, 4] + p[103] * plg[1, 6]) * cd14 * flags.swc[6]
-                    + (p[122] * plg[2, 2] + p[123] * plg[2, 4] + p[124] * plg[2, 6])
+                    + p[46] * plg13
+                    + p[35] * plg15
+                    + (p[101] * plg12 + p[102] * plg14 + p[103] * plg16) * cd14 * flags.swc[6]
+                    + (p[122] * plg22 + p[123] * plg24 + p[124] * plg26)
                     * flags.swc[8]
                     * math.cos(hr * (input_.lst - p[125]))
                 )
@@ -546,75 +814,75 @@ class _NRLMSISE00:
             if flags.sw[12]:
                 t[11] = (1.0 + p[81] * self.dfa * flags.swc[2]) * (
                     (
-                        p[65] * plg[2, 3]
-                        + p[66] * plg[2, 5]
-                        + p[67] * plg[2, 7]
-                        + p[104] * plg[2, 2]
-                        + p[105] * plg[2, 4]
-                        + p[106] * plg[2, 6]
-                        + flags.swc[6] * (p[110] * plg[2, 2] + p[111] * plg[2, 4] + p[112] * plg[2, 6]) * cd14
+                        p[65] * plg23
+                        + p[66] * plg25
+                        + p[67] * plg27
+                        + p[104] * plg22
+                        + p[105] * plg24
+                        + p[106] * plg26
+                        + flags.swc[6] * (p[110] * plg22 + p[111] * plg24 + p[112] * plg26) * cd14
                     )
-                    * math.cos(dgtr * input_.g_long)
+                    * self.clong
                     + (
-                        p[91] * plg[2, 3]
-                        + p[92] * plg[2, 5]
-                        + p[93] * plg[2, 7]
-                        + p[107] * plg[2, 2]
-                        + p[108] * plg[2, 4]
-                        + p[109] * plg[2, 6]
-                        + flags.swc[6] * (p[113] * plg[2, 2] + p[114] * plg[2, 4] + p[115] * plg[2, 6]) * cd14
+                        p[91] * plg23
+                        + p[92] * plg25
+                        + p[93] * plg27
+                        + p[107] * plg22
+                        + p[108] * plg24
+                        + p[109] * plg26
+                        + flags.swc[6] * (p[113] * plg22 + p[114] * plg24 + p[115] * plg26) * cd14
                     )
-                    * math.sin(dgtr * input_.g_long)
+                    * self.slong
                 )
             if flags.sw[13]:
                 t[12] = (
-                    (1.0 + p[96] * plg[1, 2])
+                    (1.0 + p[96] * plg12)
                     * (1.0 + p[82] * self.dfa * flags.swc[2])
-                    * (1.0 + p[120] * plg[1, 2] * flags.swc[6] * cd14)
-                    * (p[69] * plg[1, 2] + p[70] * plg[1, 4] + p[71] * plg[1, 6])
+                    * (1.0 + p[120] * plg12 * flags.swc[6] * cd14)
+                    * (p[69] * plg12 + p[70] * plg14 + p[71] * plg16)
                     * math.cos(sr * (input_.sec - p[72]))
                 )
                 t[12] += (
                     flags.swc[12]
-                    * (p[77] * plg[3, 4] + p[78] * plg[3, 6] + p[79] * plg[3, 8])
+                    * (p[77] * plg34 + p[78] * plg36 + p[79] * plg38)
                     * math.cos(sr * (input_.sec - p[80]) + 2.0 * dgtr * input_.g_long)
                     * (1.0 + p[138] * self.dfa * flags.swc[2])
                 )
             if flags.sw[14]:
-                if flags.sw[10] == -1 and p[52]:
+                if flags.sw[10] == -1 and p[52] and self.apt[1] != 0.0:
                     t[13] = (
                         self.apt[1]
                         * flags.swc[12]
-                        * (1.0 + p[133] * plg[1, 2])
-                        * (p[53] * plg[2, 3] + p[99] * plg[2, 5] + p[68] * plg[2, 7])
+                        * (1.0 + p[133] * plg12)
+                        * (p[53] * plg23 + p[99] * plg25 + p[68] * plg27)
                         * math.cos(dgtr * (input_.g_long - p[98]))
                         + self.apt[1]
                         * flags.swc[12]
                         * flags.swc[6]
-                        * (p[134] * plg[2, 2] + p[135] * plg[2, 4] + p[136] * plg[2, 6])
+                        * (p[134] * plg22 + p[135] * plg24 + p[136] * plg26)
                         * cd14
                         * math.cos(dgtr * (input_.g_long - p[137]))
                         + self.apt[1]
                         * flags.swc[13]
-                        * (p[56] * plg[1, 2] + p[57] * plg[1, 4] + p[58] * plg[1, 6])
+                        * (p[56] * plg12 + p[57] * plg14 + p[58] * plg16)
                         * math.cos(sr * (input_.sec - p[59]))
                     )
                 elif flags.sw[10] != -1:
                     t[13] = (
                         self.apdf
                         * flags.swc[12]
-                        * (1.0 + p[121] * plg[1, 2])
-                        * (p[61] * plg[2, 3] + p[62] * plg[2, 5] + p[63] * plg[2, 7])
+                        * (1.0 + p[121] * plg12)
+                        * (p[61] * plg23 + p[62] * plg25 + p[63] * plg27)
                         * math.cos(dgtr * (input_.g_long - p[64]))
                         + self.apdf
                         * flags.swc[12]
                         * flags.swc[6]
-                        * (p[116] * plg[2, 2] + p[117] * plg[2, 4] + p[118] * plg[2, 6])
+                        * (p[116] * plg22 + p[117] * plg24 + p[118] * plg26)
                         * cd14
                         * math.cos(dgtr * (input_.g_long - p[119]))
                         + self.apdf
                         * flags.swc[13]
-                        * (p[84] * plg[1, 2] + p[85] * plg[1, 4] + p[86] * plg[1, 6])
+                        * (p[84] * plg12 + p[85] * plg14 + p[86] * plg16)
                         * math.cos(sr * (input_.sec - p[76]))
                     )
         tinf = p[31]
@@ -623,12 +891,9 @@ class _NRLMSISE00:
         return float(tinf)
 
     def _glob7s(self, p_in: np.ndarray, input_: _Input, flags: _Flags) -> float:
-        p = np.array(p_in, dtype=float, copy=True)
-        if p[100] == 0.0:
-            p[100] = 2.0
-        t = np.zeros(15, dtype=float)
+        p = p_in
+        t = [0.0] * 15
         dr = 1.72142e-2
-        dgtr = 1.74533e-2
         plg = self.plg
         cd32 = math.cos(dr * (input_.doy - p[32]))
         cd18 = math.cos(2.0 * dr * (input_.doy - p[18]))
@@ -685,7 +950,7 @@ class _NRLMSISE00:
                     + p[76] * plg[2, 4]
                     + p[77] * plg[2, 6]
                 )
-                * math.cos(dgtr * input_.g_long)
+                * self.clong
                 + (
                     p[91] * plg[2, 3]
                     + p[92] * plg[2, 5]
@@ -694,45 +959,49 @@ class _NRLMSISE00:
                     + p[79] * plg[2, 4]
                     + p[80] * plg[2, 6]
                 )
-                * math.sin(dgtr * input_.g_long)
+                * self.slong
             )
         return float(sum(abs(flags.sw[i + 1]) * t[i] for i in range(1, 15)))
 
     def _gts7(self, input_: _Input, flags: _Flags) -> _Output:
         tz = 0.0
         output = _Output()
-        zn1 = np.array([0.0, 120.0, 110.0, 100.0, 90.0, 72.5], dtype=float)
+        zn1 = _ZN1
         mn1 = 5
-        dgtr = 1.74533e-2
         dr = 1.72142e-2
-        alpha = np.array([0.0, -0.38, 0.0, 0.0, 0.0, 0.17, 0.0, -0.38, 0.0, 0.0], dtype=float)
-        altl = np.array([0.0, 200.0, 300.0, 160.0, 250.0, 240.0, 450.0, 320.0, 450.0], dtype=float)
-        zn1[1] = PDL1[2, 16]
+        alpha = _ALPHA
+        altl = _ALTL
+        self.ap_a_quiet = all(input_.ap_a[index] == 4.0 for index in range(2, 8))
+        if self.ap_a_quiet:
+            self.apt[1] = 0.0
+        self._legendre_and_local_time(input_, flags)
 
         if input_.alt > zn1[1]:
-            tinf = PTM1[1] * PT1[1] * (1.0 + flags.sw[17] * self._globe7(PT1, input_, flags))
+            tinf = PTM1[1] * PT1[1] * (1.0 + flags.sw[17] * self._globe7(_PT1_GLOBE, input_, flags, _PT1_GLOBE_FAST))
         else:
             tinf = PTM1[1] * PT1[1]
         output.t[1] = tinf
 
         if input_.alt > zn1[5]:
-            g0 = PTM1[4] * PS1[1] * (1.0 + flags.sw[20] * self._globe7(PS1, input_, flags))
+            g0 = PTM1[4] * PS1[1] * (1.0 + flags.sw[20] * self._globe7(_PS1_GLOBE, input_, flags, _PS1_GLOBE_FAST))
         else:
             g0 = PTM1[4] * PS1[1]
-        tlb = PTM1[2] * (1.0 + flags.sw[18] * self._globe7(PD1[4, :], input_, flags)) * PD1[4, 1]
+        tlb = PTM1[2] * (1.0 + flags.sw[18] * self._globe7(_PD1_GLOBE[4], input_, flags, _PD1_GLOBE_FAST[4])) * PD1[4, 1]
         s = g0 / (tinf - tlb)
 
         if input_.alt < 300.0:
-            self.meso_tn1[2] = PTM1[7] * PTL1[1, 1] / (1.0 - flags.sw[19] * self._glob7s(PTL1[1, :], input_, flags))
-            self.meso_tn1[3] = PTM1[3] * PTL1[2, 1] / (1.0 - flags.sw[19] * self._glob7s(PTL1[2, :], input_, flags))
-            self.meso_tn1[4] = PTM1[8] * PTL1[3, 1] / (1.0 - flags.sw[19] * self._glob7s(PTL1[3, :], input_, flags))
+            self.meso_tn1[2] = PTM1[7] * PTL1[1, 1] / (1.0 - flags.sw[19] * self._glob7s(_PTL1_GLOBE[1], input_, flags))
+            self.meso_tn1[3] = PTM1[3] * PTL1[2, 1] / (1.0 - flags.sw[19] * self._glob7s(_PTL1_GLOBE[2], input_, flags))
+            self.meso_tn1[4] = PTM1[8] * PTL1[3, 1] / (1.0 - flags.sw[19] * self._glob7s(_PTL1_GLOBE[3], input_, flags))
             self.meso_tn1[5] = (
-                PTM1[5] * PTL1[4, 1] / (1.0 - flags.sw[19] * flags.sw[21] * self._glob7s(PTL1[4, :], input_, flags))
+                PTM1[5]
+                * PTL1[4, 1]
+                / (1.0 - flags.sw[19] * flags.sw[21] * self._glob7s(_PTL1_GLOBE[4], input_, flags))
             )
             self.meso_tgn1[2] = (
                 PTM1[9]
                 * PMA1[9, 1]
-                * (1.0 + flags.sw[19] * flags.sw[21] * self._glob7s(PMA1[9, :], input_, flags))
+                * (1.0 + flags.sw[19] * flags.sw[21] * self._glob7s(_PMA1_GLOBE[9], input_, flags))
                 * self.meso_tn1[5]
                 * self.meso_tn1[5]
                 / ((PTM1[5] * PTL1[4, 1]) ** 2.0)
@@ -746,9 +1015,9 @@ class _NRLMSISE00:
                 PTM1[9] * PMA1[9, 1] * self.meso_tn1[5] * self.meso_tn1[5] / ((PTM1[5] * PTL1[4, 1]) ** 2.0)
             )
 
-        g28 = flags.sw[22] * self._globe7(PD1[3, :], input_, flags)
+        g28 = flags.sw[22] * self._globe7(_PD1_GLOBE[3], input_, flags, _PD1_GLOBE_FAST[3])
         zhf = PDL1[2, 25] * (
-            1.0 + flags.sw[6] * PDL1[1, 25] * math.sin(dgtr * input_.g_lat) * math.cos(dr * (input_.doy - PT1[14]))
+            1.0 + flags.sw[6] * PDL1[1, 25] * self.sin_lat * math.cos(dr * (input_.doy - PT1[14]))
         )
         xmm = PDM1[3, 5]
         z = input_.alt
@@ -768,7 +1037,7 @@ class _NRLMSISE00:
             )
             output.d[3] = self._dnet(output.d[3], self.dm28, zhm28, xmm, 28.0)
 
-        g4 = flags.sw[22] * self._globe7(PD1[1, :], input_, flags)
+        g4 = flags.sw[22] * self._globe7(_PD1_GLOBE[1], input_, flags, _PD1_GLOBE_FAST[1])
         db04 = PDM1[1, 1] * math.exp(g4) * PD1[1, 1]
         output.d[1], output.t[2] = self._densu(
             z, db04, tinf, tlb, 4.0, alpha[1], output.t[2], PTM1[6], s, mn1, zn1, self.meso_tn1, self.meso_tgn1
@@ -797,7 +1066,7 @@ class _NRLMSISE00:
                 z, math.log(b28 * PDM1[1, 2] / b04), PDM1[1, 6] * PDL1[2, 2], PDM1[1, 5] * PDL1[2, 1]
             )
 
-        g16 = flags.sw[22] * self._globe7(PD1[2, :], input_, flags)
+        g16 = flags.sw[22] * self._globe7(_PD1_GLOBE[2], input_, flags, _PD1_GLOBE_FAST[2])
         db16 = PDM1[2, 1] * math.exp(g16) * PD1[2, 1]
         output.d[2], output.t[2] = self._densu(
             z, db16, tinf, tlb, 16.0, alpha[2], output.t[2], PTM1[6], s, mn1, zn1, self.meso_tn1, self.meso_tgn1
@@ -826,7 +1095,7 @@ class _NRLMSISE00:
             output.d[2] *= self._ccor2(z, rl, PDM1[2, 6] * PDL1[2, 4], PDM1[2, 5] * PDL1[2, 3], PDM1[2, 6] * PDL1[2, 5])
             output.d[2] *= self._ccor(z, PDM1[2, 4] * PDL1[2, 15], PDM1[2, 8] * PDL1[2, 14], PDM1[2, 7] * PDL1[2, 13])
 
-        g32 = flags.sw[22] * self._globe7(PD1[5, :], input_, flags)
+        g32 = flags.sw[22] * self._globe7(_PD1_GLOBE[5], input_, flags, _PD1_GLOBE_FAST[5])
         db32 = PDM1[4, 1] * math.exp(g32) * PD1[5, 1]
         output.d[4], output.t[2] = self._densu(
             z, db32, tinf, tlb, 32.0, alpha[4], output.t[2], PTM1[6], s, mn1, zn1, self.meso_tn1, self.meso_tgn1
@@ -860,7 +1129,7 @@ class _NRLMSISE00:
                 z, rc32, PDM1[4, 8] * PDL1[2, 23], PDM1[4, 7] * PDL1[2, 22], PDM1[4, 8] * PDL1[1, 23]
             )
 
-        g40 = flags.sw[22] * self._globe7(PD1[6, :], input_, flags)
+        g40 = flags.sw[22] * self._globe7(_PD1_GLOBE[6], input_, flags, _PD1_GLOBE_FAST[6])
         db40 = PDM1[5, 1] * math.exp(g40) * PD1[6, 1]
         output.d[5], output.t[2] = self._densu(
             z, db40, tinf, tlb, 40.0, alpha[5], output.t[2], PTM1[6], s, mn1, zn1, self.meso_tn1, self.meso_tgn1
@@ -889,7 +1158,7 @@ class _NRLMSISE00:
                 z, math.log(b28 * PDM1[5, 2] / b40), PDM1[5, 6] * PDL1[2, 10], PDM1[5, 5] * PDL1[2, 9]
             )
 
-        g1 = flags.sw[22] * self._globe7(PD1[7, :], input_, flags)
+        g1 = flags.sw[22] * self._globe7(_PD1_GLOBE[7], input_, flags, _PD1_GLOBE_FAST[7])
         db01 = PDM1[6, 1] * math.exp(g1) * PD1[7, 1]
         output.d[7], output.t[2] = self._densu(
             z, db01, tinf, tlb, 1.0, alpha[7], output.t[2], PTM1[6], s, mn1, zn1, self.meso_tn1, self.meso_tgn1
@@ -922,7 +1191,7 @@ class _NRLMSISE00:
             )
             output.d[7] *= self._ccor(z, PDM1[6, 4] * PDL1[2, 21], PDM1[6, 8] * PDL1[2, 20], PDM1[6, 7] * PDL1[2, 19])
 
-        g14 = flags.sw[22] * self._globe7(PD1[8, :], input_, flags)
+        g14 = flags.sw[22] * self._globe7(_PD1_GLOBE[8], input_, flags, _PD1_GLOBE_FAST[8])
         db14 = PDM1[7, 1] * math.exp(g14) * PD1[8, 1]
         output.d[8], output.t[2] = self._densu(
             z, db14, tinf, tlb, 14.0, alpha[8], output.t[2], PTM1[6], s, mn1, zn1, self.meso_tn1, self.meso_tgn1
@@ -952,7 +1221,7 @@ class _NRLMSISE00:
             )
             output.d[8] *= self._ccor(z, PDM1[7, 4] * PDL1[1, 6], PDM1[7, 8] * PDL1[1, 5], PDM1[7, 7] * PDL1[1, 4])
 
-        g16h = flags.sw[22] * self._globe7(PD1[9, :], input_, flags)
+        g16h = flags.sw[22] * self._globe7(_PD1_GLOBE[9], input_, flags, _PD1_GLOBE_FAST[9])
         db16h = PDM1[8, 1] * math.exp(g16h) * PD1[9, 1]
         tho = PDM1[8, 10] * PDL1[1, 7]
         dd, output.t[2] = self._densu(
@@ -983,11 +1252,10 @@ class _NRLMSISE00:
         tz = 0.0
         output = _Output()
         mn3 = 5
-        zn3 = np.array([0.0, 32.5, 20.0, 15.0, 10.0, 0.0], dtype=float)
+        zn3 = _ZN3
         mn2 = 4
-        zn2 = np.array([0.0, 72.5, 55.0, 45.0, 32.5], dtype=float)
+        zn2 = _ZN2
         zmix = 62.5
-        flags = self._tselec(flags)
         xlat = input_.g_lat if flags.sw[3] != 0.0 else 45.0
         self.gsurf, self.re = self._glatf(xlat)
         xmm = PDM1[3, 5]
@@ -1005,15 +1273,17 @@ class _NRLMSISE00:
 
         self.meso_tgn2[1] = self.meso_tgn1[2]
         self.meso_tn2[1] = self.meso_tn1[5]
-        self.meso_tn2[2] = PMA1[1, 1] * PAVGM1[1] / (1.0 - flags.sw[21] * self._glob7s(PMA1[1, :], input_, flags))
-        self.meso_tn2[3] = PMA1[2, 1] * PAVGM1[2] / (1.0 - flags.sw[21] * self._glob7s(PMA1[2, :], input_, flags))
+        self.meso_tn2[2] = PMA1[1, 1] * PAVGM1[1] / (1.0 - flags.sw[21] * self._glob7s(_PMA1_GLOBE[1], input_, flags))
+        self.meso_tn2[3] = PMA1[2, 1] * PAVGM1[2] / (1.0 - flags.sw[21] * self._glob7s(_PMA1_GLOBE[2], input_, flags))
         self.meso_tn2[4] = (
-            PMA1[3, 1] * PAVGM1[3] / (1.0 - flags.sw[21] * flags.sw[23] * self._glob7s(PMA1[3, :], input_, flags))
+            PMA1[3, 1]
+            * PAVGM1[3]
+            / (1.0 - flags.sw[21] * flags.sw[23] * self._glob7s(_PMA1_GLOBE[3], input_, flags))
         )
         self.meso_tgn2[2] = (
             PAVGM1[9]
             * PMA1[10, 1]
-            * (1.0 + flags.sw[21] * flags.sw[23] * self._glob7s(PMA1[10, :], input_, flags))
+            * (1.0 + flags.sw[21] * flags.sw[23] * self._glob7s(_PMA1_GLOBE[10], input_, flags))
             * self.meso_tn2[4]
             * self.meso_tn2[4]
             / ((PMA1[3, 1] * PAVGM1[3]) ** 2.0)
@@ -1021,14 +1291,14 @@ class _NRLMSISE00:
         self.meso_tn3[1] = self.meso_tn2[4]
         if input_.alt <= zn3[1]:
             self.meso_tgn3[1] = self.meso_tgn2[2]
-            self.meso_tn3[2] = PMA1[4, 1] * PAVGM1[4] / (1.0 - flags.sw[23] * self._glob7s(PMA1[4, :], input_, flags))
-            self.meso_tn3[3] = PMA1[5, 1] * PAVGM1[5] / (1.0 - flags.sw[23] * self._glob7s(PMA1[5, :], input_, flags))
-            self.meso_tn3[4] = PMA1[6, 1] * PAVGM1[6] / (1.0 - flags.sw[23] * self._glob7s(PMA1[6, :], input_, flags))
-            self.meso_tn3[5] = PMA1[7, 1] * PAVGM1[7] / (1.0 - flags.sw[23] * self._glob7s(PMA1[7, :], input_, flags))
+            self.meso_tn3[2] = PMA1[4, 1] * PAVGM1[4] / (1.0 - flags.sw[23] * self._glob7s(_PMA1_GLOBE[4], input_, flags))
+            self.meso_tn3[3] = PMA1[5, 1] * PAVGM1[5] / (1.0 - flags.sw[23] * self._glob7s(_PMA1_GLOBE[5], input_, flags))
+            self.meso_tn3[4] = PMA1[6, 1] * PAVGM1[6] / (1.0 - flags.sw[23] * self._glob7s(_PMA1_GLOBE[6], input_, flags))
+            self.meso_tn3[5] = PMA1[7, 1] * PAVGM1[7] / (1.0 - flags.sw[23] * self._glob7s(_PMA1_GLOBE[7], input_, flags))
             self.meso_tgn3[2] = (
                 PMA1[8, 1]
                 * PAVGM1[8]
-                * (1.0 + flags.sw[23] * self._glob7s(PMA1[8, :], input_, flags))
+                * (1.0 + flags.sw[23] * self._glob7s(_PMA1_GLOBE[8], input_, flags))
                 * self.meso_tn3[5]
                 * self.meso_tn3[5]
                 / ((PMA1[7, 1] * PAVGM1[7]) ** 2.0)
@@ -1084,25 +1354,67 @@ class _NRLMSISE00:
         return output
 
     def density(self, input_: _Input) -> float:
-        flags = _Flags()
-        flags.switches[1] = 0.0
-        flags.switches[2:25] = 1.0
-        flags.switches[10] = -1.0
-        output = self._gtd7d(input_, flags)
+        self.use_acceleration = acceleration_enabled_from_mode()
+        if (
+            self.use_acceleration
+            and input_.alt >= 300.0
+            and all(input_.ap_a[index] == 4.0 for index in range(2, 8))
+        ):
+            return float(
+                _compiled_quiet_thermosphere_density()(
+                    input_.doy,
+                    input_.sec,
+                    input_.alt,
+                    input_.g_lat,
+                    input_.g_long,
+                    input_.lst,
+                    input_.f107a,
+                    input_.f107,
+                    PT1,
+                    PS1,
+                    PD1,
+                    PDL1,
+                    PTM1,
+                    PDM1,
+                    PTL1,
+                    PMA1,
+                    _ZN1,
+                    _ALPHA,
+                )
+            )
+        output = self._gtd7d(input_, self.flags)
         return float(max(0.0, 1000.0 * output.d[6]))
 
 
+_THREAD_STATE = local()
+
+
+def _thread_model() -> _NRLMSISE00:
+    model = getattr(_THREAD_STATE, "model", None)
+    if model is None:
+        model = _NRLMSISE00()
+        _THREAD_STATE.model = model
+    return model
+
+
 def nrlmsise00_density(
-    alt_km: float, lat_deg: float, lon_deg: float, dt_utc: datetime, env: dict | None = None
+    alt_km: float,
+    lat_deg: float,
+    lon_deg: float,
+    dt_utc: datetime,
+    env: dict | None = None,
+    *,
+    lst_hr: float | None = None,
 ) -> float:
-    env = {} if env is None else dict(env)
+    env = {} if env is None else env
     if dt_utc.tzinfo is None:
         dt_utc = dt_utc.replace(tzinfo=timezone.utc)
     dt_utc = dt_utc.astimezone(timezone.utc)
     f107a, f107, ap, ap_a = _solar_geomagnetic_inputs(dt_utc, env)
     jd_utc = datetime_to_julian_date(dt_utc)
     lon_rad = math.radians(float(lon_deg))
-    lst_hr = env.get("nrlmsise00_lst_hr")
+    if lst_hr is None:
+        lst_hr = env.get("nrlmsise00_lst_hr")
     if lst_hr is None:
         lst_hr = ((lon_rad + gmst_angle_rad_from_jd(jd_utc)) % (2.0 * math.pi)) * 24.0 / (2.0 * math.pi)
     sec = dt_utc.hour * 3600.0 + dt_utc.minute * 60.0 + dt_utc.second + dt_utc.microsecond * 1e-6
@@ -1118,4 +1430,4 @@ def nrlmsise00_density(
         ap=ap,
         ap_a=ap_a,
     )
-    return _NRLMSISE00().density(input_)
+    return _thread_model().density(input_)

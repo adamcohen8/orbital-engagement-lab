@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Callable
 
 import numpy as np
 
-from sim.acceleration.settings import acceleration_settings_from_mode
+from sim.acceleration.settings import acceleration_enabled_from_mode, acceleration_settings_from_mode
 from sim.dynamics.orbit.accelerations import (
     OrbitContext,
     accel_drag_resolved,
@@ -17,7 +18,11 @@ from sim.dynamics.orbit.accelerations import (
     accel_third_body,
     accel_two_body,
 )
-from sim.dynamics.orbit.atmosphere import density_from_model
+from sim.dynamics.orbit.atmosphere import (
+    _datetime_from_env_t_s,
+    _local_solar_time_epoch_terms,
+    density_from_model,
+)
 from sim.dynamics.orbit.cr3bp import cr3bp_system, propagate_cr3bp_state
 from sim.dynamics.orbit.eclipse import resolve_srp_geometry, srp_shadow_factor
 from sim.dynamics.orbit.environment import (
@@ -31,14 +36,23 @@ from sim.dynamics.orbit.environment import (
     PLUTO_MU_KM3_S2,
     SATURN_MU_KM3_S2,
     SUN_MU_KM3_S2,
+    SUN_RADIUS_KM,
     URANUS_MU_KM3_S2,
     VENUS_MU_KM3_S2,
     srp_pressure_n_m2,
 )
 from sim.dynamics.orbit.epoch import (
+    AU_KM,
+    datetime_to_julian_date,
     resolve_body_position_eci_km,
     resolve_sun_moon_positions,
     resolve_time_dependent_env,
+)
+from sim.dynamics.orbit.frames import (
+    FRAME_MODEL_IAU76_80_EOP,
+    eci_to_ecef_rotation,
+    eci_to_ecef_rotation_hpop_like,
+    normalize_frame_model,
 )
 from sim.dynamics.orbit.integrators import (
     AdaptiveStepInfo,
@@ -65,7 +79,38 @@ PLANETARY_MU_KM3_S2 = {
     "pluto": PLUTO_MU_KM3_S2,
 }
 _ZERO3 = np.zeros(3, dtype=float)
+_IDENTITY3 = np.eye(3, dtype=float)
+_DUMMY_MATRIX = np.zeros((1, 1), dtype=float)
+_DUMMY_VECTOR = np.zeros(1, dtype=float)
 rk4_zonal_step_state = None
+
+
+@lru_cache(maxsize=1)
+def _compiled_builtin_force_plan_step():
+    from sim.acceleration.kernels.orbit_force_plan import rk4_builtin_force_plan_step_kernel
+
+    return rk4_builtin_force_plan_step_kernel
+
+
+@lru_cache(maxsize=1)
+def _compiled_builtin_force_components():
+    from sim.acceleration.kernels.orbit_force_plan import builtin_force_components_kernel
+
+    return builtin_force_components_kernel
+
+
+@lru_cache(maxsize=1)
+def _compiled_drag_force_component():
+    from sim.acceleration.kernels.orbit_force_plan import _drag_acceleration
+
+    return _drag_acceleration
+
+
+@lru_cache(maxsize=1)
+def _compiled_lift_force_component():
+    from sim.acceleration.kernels.orbit_force_plan import _lift_acceleration
+
+    return _lift_acceleration
 
 
 def j2_plugin(t_s: float, x_eci: np.ndarray, env: dict, ctx: OrbitContext) -> np.ndarray:
@@ -80,7 +125,14 @@ def j4_plugin(t_s: float, x_eci: np.ndarray, env: dict, ctx: OrbitContext) -> np
     return accel_j4(x_eci[:3], ctx.mu_km3_s2)
 
 
-def spherical_harmonics_plugin(t_s: float, x_eci: np.ndarray, env: dict, ctx: OrbitContext) -> np.ndarray:
+def _evaluate_spherical_harmonics_plugin(
+    t_s: float,
+    x_eci: np.ndarray,
+    env: dict,
+    ctx: OrbitContext,
+    *,
+    use_acceleration: bool,
+) -> np.ndarray:
     """
     Generic spherical-harmonics perturbation plugin.
 
@@ -158,7 +210,7 @@ def spherical_harmonics_plugin(t_s: float, x_eci: np.ndarray, env: dict, ctx: Or
         r_eci_km=x_eci[:3],
         t_s=t_s,
         terms=terms,
-        mu_km3_s2=ctx.mu_km3_s2,
+        mu_km3_s2=float(env.get("spherical_harmonics_mu_km3_s2", ctx.mu_km3_s2)),
         re_km=re_km,
         fd_step_km=fd_step_km,
         jd_utc_start=None if jd_utc_start is None else float(jd_utc_start),
@@ -172,6 +224,34 @@ def spherical_harmonics_plugin(t_s: float, x_eci: np.ndarray, env: dict, ctx: Or
         ddpsi_rad=ddpsi_rad,
         ddeps_rad=ddeps_rad,
         compiled=compiled,
+        use_acceleration=use_acceleration,
+    )
+
+
+def spherical_harmonics_plugin(t_s: float, x_eci: np.ndarray, env: dict, ctx: OrbitContext) -> np.ndarray:
+    """Evaluate spherical-harmonic perturbations with the Python reference path."""
+
+    return _evaluate_spherical_harmonics_plugin(
+        t_s,
+        x_eci,
+        env,
+        ctx,
+        use_acceleration=False,
+    )
+
+
+def _accelerated_spherical_harmonics_plugin(
+    t_s: float,
+    x_eci: np.ndarray,
+    env: dict,
+    ctx: OrbitContext,
+) -> np.ndarray:
+    return _evaluate_spherical_harmonics_plugin(
+        t_s,
+        x_eci,
+        env,
+        ctx,
+        use_acceleration=True,
     )
 
 
@@ -221,9 +301,7 @@ def lift_plugin(t_s: float, x_eci: np.ndarray, env: dict, ctx: OrbitContext) -> 
     density = env.get("density_kg_m3")
     if density is None:
         if env.get("atmosphere_model") in (None, ""):
-            raise ValueError(
-                "Lift requires an explicit environment.atmosphere_model or density_kg_m3."
-            )
+            raise ValueError("Lift requires an explicit environment.atmosphere_model or density_kg_m3.")
         atmo_model = str(env.get("atmosphere_model")).lower()
         density = density_from_model(
             atmo_model,
@@ -258,6 +336,24 @@ def lift_plugin(t_s: float, x_eci: np.ndarray, env: dict, ctx: OrbitContext) -> 
 
 
 def srp_plugin(t_s: float, x_eci: np.ndarray, env: dict, ctx: OrbitContext) -> np.ndarray:
+    sun_position = env.get("sun_pos_eci_km")
+    if acceleration_enabled_from_mode() and sun_position is not None:
+        shadow_name = str(env.get("srp_shadow_model", "conical")).lower()
+        shadow_model = (
+            0 if shadow_name in ("none", "off", "disabled") else 1 if shadow_name in ("cylindrical", "cylinder") else 2
+        )
+        return _compiled_srp_acceleration()(
+            x_eci[:3],
+            np.asarray(sun_position, dtype=float).reshape(3),
+            float(ctx.mass_kg),
+            float(env.get("srp_area_m2", ctx.area_m2)),
+            float(ctx.cr),
+            srp_pressure_n_m2(env),
+            float(AU_KM),
+            float(EARTH_RADIUS_KM),
+            float(SUN_RADIUS_KM),
+            shadow_model,
+        )
     srp_geometry = resolve_srp_geometry(x_eci[:3], t_s, env)
     shadow = srp_shadow_factor(
         r_sc_eci_km=x_eci[:3],
@@ -274,6 +370,13 @@ def srp_plugin(t_s: float, x_eci: np.ndarray, env: dict, ctx: OrbitContext) -> n
         shadow_factor=shadow,
         pressure_n_m2=srp_pressure_n_m2(env),
     )
+
+
+@lru_cache(maxsize=1)
+def _compiled_srp_acceleration():
+    from sim.acceleration.kernels.srp import srp_acceleration_kernel
+
+    return srp_acceleration_kernel
 
 
 def third_body_moon_plugin(t_s: float, x_eci: np.ndarray, env: dict, ctx: OrbitContext) -> np.ndarray:
@@ -332,6 +435,41 @@ class OrbitPropagator:
     _builtin_rk4_k4: np.ndarray = field(default_factory=lambda: np.empty(6, dtype=float), init=False, repr=False)
     _builtin_rk4_stage: np.ndarray = field(default_factory=lambda: np.empty(6, dtype=float), init=False, repr=False)
     _builtin_rk4_accel: np.ndarray = field(default_factory=lambda: np.empty(3, dtype=float), init=False, repr=False)
+    _builtin_time_env_cache: dict[tuple, dict[str, np.ndarray]] = field(default_factory=dict, init=False, repr=False)
+    _compiled_force_codes_cache: np.ndarray | None = field(default=None, init=False, repr=False)
+    _compiled_force_plugins_cache: tuple[AccelerationPlugin, ...] | None = field(default=None, init=False, repr=False)
+    _staged_force_plan_cache_key: tuple | None = field(default=None, init=False, repr=False)
+    _staged_planet_positions: np.ndarray = field(
+        default_factory=lambda: np.zeros((len(PLANETARY_MU_KM3_S2), 3), dtype=float),
+        init=False,
+        repr=False,
+    )
+    _staged_planet_mu: np.ndarray = field(
+        default_factory=lambda: np.zeros(len(PLANETARY_MU_KM3_S2), dtype=float),
+        init=False,
+        repr=False,
+    )
+    _compiled_harmonic_rotations: np.ndarray = field(
+        default_factory=lambda: np.empty((3, 3, 3), dtype=float), init=False, repr=False
+    )
+    _compiled_density_rotations: np.ndarray = field(
+        default_factory=lambda: np.empty((3, 3, 3), dtype=float), init=False, repr=False
+    )
+    _compiled_drag_rotations: np.ndarray = field(
+        default_factory=lambda: np.empty((3, 3, 3), dtype=float), init=False, repr=False
+    )
+    _compiled_sun_positions: np.ndarray = field(
+        default_factory=lambda: np.zeros((3, 3), dtype=float), init=False, repr=False
+    )
+    _compiled_moon_positions: np.ndarray = field(
+        default_factory=lambda: np.zeros((3, 3), dtype=float), init=False, repr=False
+    )
+    _compiled_atmosphere_inputs: np.ndarray = field(
+        default_factory=lambda: np.zeros((3, 6), dtype=float), init=False, repr=False
+    )
+    _compiled_scalar_parameters: np.ndarray = field(
+        default_factory=lambda: np.empty(15, dtype=float), init=False, repr=False
+    )
     last_adaptive_step_info: AdaptiveStepInfo | None = field(default=None, init=False, repr=False)
     adaptive_step_info: AdaptiveStepInfo | None = field(default=None, init=False, repr=False)
 
@@ -354,7 +492,8 @@ class OrbitPropagator:
             )
 
         fast_flags = self._zonal_rk4_fast_path_flags()
-        if self._acceleration_enabled() and fast_flags is not None:
+        acceleration_enabled = self._acceleration_enabled()
+        if acceleration_enabled and fast_flags is not None:
             include_j2, include_j3, include_j4 = fast_flags
             return rk4_zonal_step_state(
                 np.asarray(x_eci, dtype=float).reshape(6),
@@ -365,6 +504,26 @@ class OrbitPropagator:
                 include_j3,
                 include_j4,
             )
+        compiled_result = self._try_propagate_compiled_builtin_rk4(
+            x_eci=x_eci,
+            dt_s=dt_s,
+            t_s=t_s,
+            command_accel_eci_km_s2=command_accel_eci_km_s2,
+            env=env,
+            ctx=ctx,
+        )
+        if compiled_result is not None:
+            return compiled_result
+        staged_result = self._try_propagate_staged_compiled(
+            x_eci=x_eci,
+            dt_s=dt_s,
+            t_s=t_s,
+            command_accel_eci_km_s2=command_accel_eci_km_s2,
+            env=env,
+            ctx=ctx,
+        )
+        if staged_result is not None:
+            return staged_result
         if self._builtin_rk4_fast_path_enabled():
             return self._propagate_builtin_rk4(
                 x_eci=x_eci,
@@ -375,12 +534,17 @@ class OrbitPropagator:
                 ctx=ctx,
             )
 
+        accelerate_spherical_harmonics = acceleration_enabled and spherical_harmonics_plugin in self.plugins
+
         def deriv(t_local: float, x_local: np.ndarray) -> np.ndarray:
             dx = np.empty(6, dtype=float)
             dx[:3] = x_local[3:]
             a = accel_two_body(x_local[:3], ctx.mu_km3_s2) + command_accel_eci_km_s2
             for plugin in self.plugins:
-                a += plugin(t_local, x_local, env, ctx)
+                if accelerate_spherical_harmonics and plugin is spherical_harmonics_plugin:
+                    a += _accelerated_spherical_harmonics_plugin(t_local, x_local, env, ctx)
+                else:
+                    a += plugin(t_local, x_local, env, ctx)
             dx[3:] = a
             return dx
 
@@ -465,6 +629,613 @@ class OrbitPropagator:
         self._builtin_rk4_fast_path_enabled_cache = True
         return True
 
+    @staticmethod
+    def _compiled_rotation(env: dict, t_s: float, *, model_key: str, path_key: str) -> np.ndarray:
+        model = normalize_frame_model(env.get(model_key, "simple"))
+        jd_utc_start = env.get("jd_utc_start")
+        if model == FRAME_MODEL_IAU76_80_EOP:
+            eop_path = env.get(path_key)
+            return eci_to_ecef_rotation_hpop_like(
+                float(t_s),
+                jd_utc_start=None if jd_utc_start is None else float(jd_utc_start),
+                eop_path=None if eop_path is None else str(eop_path),
+                dut1_s=None if env.get("dut1_s") is None else float(env["dut1_s"]),
+                xp_arcsec=None if env.get("xp_arcsec") is None else float(env["xp_arcsec"]),
+                yp_arcsec=None if env.get("yp_arcsec") is None else float(env["yp_arcsec"]),
+                dat_s=None if env.get("dat_s") is None else float(env["dat_s"]),
+                tt_minus_utc_s=(None if env.get("tt_minus_utc_s") is None else float(env["tt_minus_utc_s"])),
+                ddpsi_rad=float(env.get("ddpsi_rad", 0.0) or 0.0),
+                ddeps_rad=float(env.get("ddeps_rad", 0.0) or 0.0),
+            )
+        return eci_to_ecef_rotation(
+            float(t_s),
+            jd_utc_start=None if jd_utc_start is None else float(jd_utc_start),
+        )
+
+    def _try_propagate_compiled_builtin_rk4(
+        self,
+        *,
+        x_eci: np.ndarray,
+        dt_s: float,
+        t_s: float,
+        command_accel_eci_km_s2: np.ndarray,
+        env: dict,
+        ctx: OrbitContext,
+    ) -> np.ndarray | None:
+        if not self._acceleration_enabled() or str(self.integrator).strip().lower() != "rk4":
+            return None
+        supported = {
+            spherical_harmonics_plugin,
+            drag_plugin,
+            srp_plugin,
+            third_body_sun_plugin,
+            third_body_moon_plugin,
+        }
+        if not self.plugins or any(plugin not in supported for plugin in self.plugins):
+            return None
+
+        from sim.acceleration.kernels.orbit_force_plan import (
+            DENSITY_CONSTANT,
+            DENSITY_NRLMSISE00_QUIET_THERMOSPHERE,
+            FORCE_DRAG,
+            FORCE_SPHERICAL_HARMONICS,
+            FORCE_SRP,
+            FORCE_THIRD_BODY_MOON,
+            FORCE_THIRD_BODY_SUN,
+        )
+
+        compiled_harmonics = env.get("_compiled_spherical_harmonics_terms")
+        if spherical_harmonics_plugin in self.plugins and (
+            compiled_harmonics is None or not compiled_harmonics.all_normalized
+        ):
+            return None
+
+        density_mode = DENSITY_CONSTANT
+        constant_density = float(env.get("density_kg_m3", 0.0) or 0.0)
+        if drag_plugin in self.plugins and env.get("density_kg_m3") is None:
+            if str(env.get("atmosphere_model", "")).strip().lower() != "nrlmsise00":
+                return None
+            if str(env.get("geodetic_model", "")).strip().lower() != "wgs84":
+                return None
+            if callable(env.get("nrlmsise00_density_callable")):
+                return None
+            try:
+                density_frame = normalize_frame_model(
+                    env.get("density_frame_model", env.get("drag_frame_model", "simple"))
+                )
+            except ValueError:
+                return None
+            if density_frame != FRAME_MODEL_IAU76_80_EOP:
+                return None
+            density_mode = DENSITY_NRLMSISE00_QUIET_THERMOSPHERE
+        # The existing per-force kernels remain faster for plans without the
+        # state-dependent NRLMSISE workload. Keep those configurations on the
+        # established path instead of introducing a general-case regression.
+        if density_mode != DENSITY_NRLMSISE00_QUIET_THERMOSPHERE:
+            return None
+
+        plugin_code = {
+            spherical_harmonics_plugin: FORCE_SPHERICAL_HARMONICS,
+            drag_plugin: FORCE_DRAG,
+            srp_plugin: FORCE_SRP,
+            third_body_sun_plugin: FORCE_THIRD_BODY_SUN,
+            third_body_moon_plugin: FORCE_THIRD_BODY_MOON,
+        }
+        plugin_tuple = tuple(self.plugins)
+        if self._compiled_force_plugins_cache != plugin_tuple:
+            self._compiled_force_codes_cache = np.asarray(
+                [plugin_code[plugin] for plugin in self.plugins], dtype=np.int64
+            )
+            self._compiled_force_plugins_cache = plugin_tuple
+
+        if compiled_harmonics is None:
+            c_nm = s_nm = _DUMMY_MATRIX
+            diag = subdiag = _DUMMY_VECTOR
+            recur_a = recur_b = recur_c = _DUMMY_MATRIX
+            n_max = m_max = 0
+        else:
+            c_nm = compiled_harmonics.c_nm
+            s_nm = compiled_harmonics.s_nm
+            diag = compiled_harmonics.legendre_diag_scale
+            subdiag = compiled_harmonics.legendre_subdiag_scale
+            recur_a = compiled_harmonics.legendre_recur_a
+            recur_b = compiled_harmonics.legendre_recur_b
+            recur_c = compiled_harmonics.legendre_recur_c
+            n_max = int(compiled_harmonics.n_max)
+            m_max = int(compiled_harmonics.m_max)
+
+        stage_times = (float(t_s), float(t_s) + 0.5 * float(dt_s), float(t_s) + float(dt_s))
+        stage_env_cache: dict[float, dict] = {}
+        from sim.dynamics.orbit.nrlmsise00_backend import (
+            _ALPHA,
+            _ZN1,
+            PD1,
+            PDL1,
+            PDM1,
+            PMA1,
+            PS1,
+            PT1,
+            PTL1,
+            PTM1,
+            _solar_geomagnetic_inputs,
+        )
+
+        needs_sun = srp_plugin in self.plugins or third_body_sun_plugin in self.plugins
+        needs_moon = third_body_moon_plugin in self.plugins
+        for stage_index, stage_time in enumerate(stage_times):
+            stage_env = self._builtin_stage_env(env, stage_time, stage_env_cache)
+            if spherical_harmonics_plugin in self.plugins:
+                self._compiled_harmonic_rotations[stage_index] = self._compiled_rotation(
+                    stage_env,
+                    stage_time,
+                    model_key="spherical_harmonics_frame_model",
+                    path_key="spherical_harmonics_eop_path",
+                )
+            if drag_plugin in self.plugins:
+                self._compiled_drag_rotations[stage_index] = self._compiled_rotation(
+                    stage_env,
+                    stage_time,
+                    model_key="drag_frame_model",
+                    path_key="drag_eop_path",
+                )
+            if density_mode == DENSITY_NRLMSISE00_QUIET_THERMOSPHERE:
+                self._compiled_density_rotations[stage_index] = self._compiled_rotation(
+                    stage_env,
+                    stage_time,
+                    model_key="density_frame_model",
+                    path_key="density_eop_path",
+                )
+                dt_utc = _datetime_from_env_t_s(stage_env, stage_time)
+                f107a, f107, _ap, ap_a = _solar_geomagnetic_inputs(dt_utc, stage_env)
+                if any(float(ap_a[index]) != 4.0 for index in range(2, 8)):
+                    return None
+                jd_utc = datetime_to_julian_date(dt_utc)
+                eop_path = stage_env.get("density_eop_path", stage_env.get("drag_eop_path"))
+                sidereal, sun_ra = _local_solar_time_epoch_terms(
+                    float(jd_utc),
+                    None if eop_path is None else str(eop_path),
+                    None if stage_env.get("dut1_s") is None else float(stage_env["dut1_s"]),
+                    None if stage_env.get("dat_s") is None else float(stage_env["dat_s"]),
+                    (None if stage_env.get("tt_minus_utc_s") is None else float(stage_env["tt_minus_utc_s"])),
+                    float(stage_env.get("ddpsi_rad", 0.0) or 0.0),
+                    float(stage_env.get("ddeps_rad", 0.0) or 0.0),
+                )
+                self._compiled_atmosphere_inputs[stage_index] = (
+                    float(dt_utc.timetuple().tm_yday),
+                    float(dt_utc.hour * 3600.0 + dt_utc.minute * 60.0 + dt_utc.second + dt_utc.microsecond * 1.0e-6),
+                    float(f107a),
+                    float(f107),
+                    float(sidereal),
+                    float(sun_ra),
+                )
+            if needs_sun or needs_moon:
+                sun = stage_env.get("sun_pos_eci_km")
+                moon = stage_env.get("moon_pos_eci_km")
+                if (needs_sun and sun is None) or (needs_moon and moon is None):
+                    resolved_sun, resolved_moon = resolve_sun_moon_positions(stage_env, stage_time)
+                    sun = resolved_sun if sun is None else sun
+                    moon = resolved_moon if moon is None else moon
+                if needs_sun:
+                    self._compiled_sun_positions[stage_index] = np.asarray(sun, dtype=float).reshape(3)
+                if needs_moon:
+                    self._compiled_moon_positions[stage_index] = np.asarray(moon, dtype=float).reshape(3)
+
+        shadow_name = str(env.get("srp_shadow_model", "conical")).lower()
+        shadow_model = (
+            0 if shadow_name in ("none", "off", "disabled") else 1 if shadow_name in ("cylindrical", "cylinder") else 2
+        )
+        parameters = self._compiled_scalar_parameters
+        parameters[:] = (
+            float(ctx.mu_km3_s2),
+            float(env.get("spherical_harmonics_reference_radius_km", EARTH_RADIUS_KM)),
+            float(ctx.mass_kg),
+            float(ctx.cd),
+            float(env.get("drag_area_m2", ctx.area_m2)),
+            float(env.get("drag_earth_rotation_rad_s", EARTH_ROT_RATE_RAD_S) or EARTH_ROT_RATE_RAD_S),
+            float(env.get("srp_area_m2", ctx.area_m2)),
+            float(ctx.cr),
+            srp_pressure_n_m2(env),
+            float(AU_KM),
+            float(EARTH_RADIUS_KM),
+            float(SUN_RADIUS_KM),
+            float(SUN_MU_KM3_S2),
+            float(MOON_MU_KM3_S2),
+            float(env.get("spherical_harmonics_mu_km3_s2", ctx.mu_km3_s2)),
+        )
+        result, valid = _compiled_builtin_force_plan_step()(
+            np.asarray(x_eci, dtype=float).reshape(6),
+            float(dt_s),
+            np.asarray(command_accel_eci_km_s2, dtype=float).reshape(3),
+            self._compiled_force_codes_cache,
+            self._compiled_harmonic_rotations,
+            self._compiled_density_rotations,
+            self._compiled_drag_rotations,
+            self._compiled_sun_positions,
+            self._compiled_moon_positions,
+            self._compiled_atmosphere_inputs,
+            parameters,
+            density_mode,
+            constant_density,
+            shadow_model,
+            c_nm,
+            s_nm,
+            diag,
+            subdiag,
+            recur_a,
+            recur_b,
+            recur_c,
+            n_max,
+            m_max,
+            PT1,
+            PS1,
+            PD1,
+            PDL1,
+            PTM1,
+            PDM1,
+            PTL1,
+            PMA1,
+            _ZN1,
+            _ALPHA,
+        )
+        return result if bool(valid) else None
+
+    def _try_propagate_staged_compiled(
+        self,
+        *,
+        x_eci: np.ndarray,
+        dt_s: float,
+        t_s: float,
+        command_accel_eci_km_s2: np.ndarray,
+        env: dict,
+        ctx: OrbitContext,
+    ) -> np.ndarray | None:
+        integrator_name = str(self.integrator).strip().lower()
+        if not self._acceleration_enabled() or integrator_name not in {
+            "rk4",
+            "rkf78",
+            "adaptive",
+            "dopri5",
+        }:
+            return None
+
+        from sim.acceleration.kernels.orbit_force_plan import (
+            FORCE_DRAG,
+            FORCE_J2,
+            FORCE_J3,
+            FORCE_J4,
+            FORCE_LIFT,
+            FORCE_SPHERICAL_HARMONICS,
+            FORCE_SRP,
+            FORCE_THIRD_BODY_MOON,
+            FORCE_THIRD_BODY_PLANETS,
+            FORCE_THIRD_BODY_SUN,
+        )
+
+        compiled_harmonics = env.get("_compiled_spherical_harmonics_terms")
+        plugin_code = {
+            j2_plugin: FORCE_J2,
+            j3_plugin: FORCE_J3,
+            j4_plugin: FORCE_J4,
+            drag_plugin: FORCE_DRAG,
+            lift_plugin: FORCE_LIFT,
+            srp_plugin: FORCE_SRP,
+            third_body_sun_plugin: FORCE_THIRD_BODY_SUN,
+            third_body_moon_plugin: FORCE_THIRD_BODY_MOON,
+            third_body_planets_plugin: FORCE_THIRD_BODY_PLANETS,
+        }
+        staged_cache_key = (
+            tuple(self.plugins),
+            bool(compiled_harmonics is not None and compiled_harmonics.all_normalized),
+        )
+        if self._staged_force_plan_cache_key != staged_cache_key:
+            self._compiled_force_codes_cache = np.asarray(
+                [
+                    (
+                        FORCE_SPHERICAL_HARMONICS
+                        if plugin is spherical_harmonics_plugin
+                        and compiled_harmonics is not None
+                        and compiled_harmonics.all_normalized
+                        else plugin_code.get(plugin, 0)
+                    )
+                    for plugin in self.plugins
+                ],
+                dtype=np.int64,
+            )
+            self._staged_force_plan_cache_key = staged_cache_key
+        force_codes = self._compiled_force_codes_cache
+        assert force_codes is not None
+        compiled_force_count = int(np.count_nonzero(force_codes))
+        has_lift_planet_pair = FORCE_LIFT in force_codes and FORCE_THIRD_BODY_PLANETS in force_codes
+        # Crossing the Python/compiled boundary is not free. Small plans are
+        # faster on their existing specialized evaluators, while richer plans
+        # win by batching component math here. This is a general profitability
+        # rule; every force code remains supported when it participates in a
+        # staged plan, and small plans retain their already-compiled kernels.
+        if compiled_force_count < 4 and not has_lift_planet_pair:
+            return None
+        stage_env_cache: dict[float, dict] = {}
+        command = np.asarray(command_accel_eci_km_s2, dtype=float).reshape(3)
+
+        def deriv(stage_time: float, stage_state: np.ndarray) -> np.ndarray:
+            return self._staged_compiled_derivative(
+                t_s=float(stage_time),
+                x_eci=np.asarray(stage_state, dtype=float).reshape(6),
+                command_accel=command,
+                env=env,
+                stage_env_cache=stage_env_cache,
+                ctx=ctx,
+                force_codes=force_codes,
+                compiled_harmonics=compiled_harmonics,
+            )
+
+        if integrator_name == "rk4":
+            return rk4_step_state(
+                deriv_fn=deriv,
+                t_s=float(t_s),
+                x=np.asarray(x_eci, dtype=float).reshape(6),
+                dt_s=float(dt_s),
+            )
+
+        adaptive_method = "rkf78" if integrator_name in ("rkf78", "adaptive") else "dopri5"
+        if self._rkf78_last_t_s is None or float(t_s) < float(self._rkf78_last_t_s) - 1e-12:
+            self._rkf78_h_next = None
+        x_next, step_info = integrate_adaptive(
+            deriv_fn=deriv,
+            t_s=float(t_s),
+            x=np.asarray(x_eci, dtype=float).reshape(6),
+            dt_s=float(dt_s),
+            atol=self.adaptive_atol,
+            rtol=self.adaptive_rtol,
+            method=adaptive_method,
+            h_init=self._rkf78_h_next,
+            return_info=True,
+        )
+        self._rkf78_h_next = step_info.suggested_next_step_s
+        self._rkf78_last_t_s = float(t_s + dt_s)
+        self.last_adaptive_step_info = step_info
+        previous = [] if self.adaptive_step_info is None else [self.adaptive_step_info]
+        self.adaptive_step_info = combine_adaptive_step_info(adaptive_method, [*previous, step_info])
+        return x_next
+
+    def _staged_compiled_derivative(
+        self,
+        *,
+        t_s: float,
+        x_eci: np.ndarray,
+        command_accel: np.ndarray,
+        env: dict,
+        stage_env_cache: dict[float, dict],
+        ctx: OrbitContext,
+        force_codes: np.ndarray,
+        compiled_harmonics,
+    ) -> np.ndarray:
+        from sim.acceleration.kernels.orbit_force_plan import (
+            FORCE_DRAG,
+            FORCE_LIFT,
+            FORCE_SPHERICAL_HARMONICS,
+            FORCE_SRP,
+            FORCE_THIRD_BODY_MOON,
+            FORCE_THIRD_BODY_PLANETS,
+            FORCE_THIRD_BODY_SUN,
+        )
+
+        needs_time_env = any(
+            plugin
+            in {
+                srp_plugin,
+                third_body_sun_plugin,
+                third_body_moon_plugin,
+                third_body_planets_plugin,
+            }
+            for plugin in self.plugins
+        )
+        if needs_time_env:
+            stage_env = stage_env_cache.get(float(t_s))
+            if stage_env is None:
+                stage_env = resolve_time_dependent_env(
+                    env,
+                    float(t_s),
+                    cache_override=self._builtin_time_env_cache,
+                )
+                stage_env_cache[float(t_s)] = stage_env
+                while len(self._builtin_time_env_cache) > 8:
+                    self._builtin_time_env_cache.pop(next(iter(self._builtin_time_env_cache)))
+        else:
+            stage_env = env
+
+        if compiled_harmonics is None:
+            c_nm = s_nm = _DUMMY_MATRIX
+            diag = subdiag = _DUMMY_VECTOR
+            recur_a = recur_b = recur_c = _DUMMY_MATRIX
+            n_max = m_max = 0
+            harmonic_rotation = _IDENTITY3
+        else:
+            c_nm = compiled_harmonics.c_nm
+            s_nm = compiled_harmonics.s_nm
+            diag = compiled_harmonics.legendre_diag_scale
+            subdiag = compiled_harmonics.legendre_subdiag_scale
+            recur_a = compiled_harmonics.legendre_recur_a
+            recur_b = compiled_harmonics.legendre_recur_b
+            recur_c = compiled_harmonics.legendre_recur_c
+            n_max = int(compiled_harmonics.n_max)
+            m_max = int(compiled_harmonics.m_max)
+            harmonic_rotation = (
+                self._compiled_rotation(
+                    stage_env,
+                    t_s,
+                    model_key="spherical_harmonics_frame_model",
+                    path_key="spherical_harmonics_eop_path",
+                )
+                if FORCE_SPHERICAL_HARMONICS in force_codes
+                else _IDENTITY3
+            )
+
+        has_aerodynamics = FORCE_DRAG in force_codes or FORCE_LIFT in force_codes
+        drag_rotation = (
+            self._compiled_rotation(
+                stage_env,
+                t_s,
+                model_key="drag_frame_model",
+                path_key="drag_eop_path",
+            )
+            if has_aerodynamics
+            else _IDENTITY3
+        )
+        plugin_densities = np.zeros(len(self.plugins), dtype=float)
+        lift_coefficient = float(stage_env.get("lift_coefficient", stage_env.get("cl", 0.0)) or 0.0)
+        lift_direction_raw = stage_env.get("lift_direction_eci")
+        lift_direction = (
+            np.zeros(3, dtype=float)
+            if lift_direction_raw is None
+            else np.asarray(lift_direction_raw, dtype=float).reshape(3)
+        )
+        for index, force_code in enumerate(force_codes):
+            if force_code == FORCE_DRAG or (
+                force_code == FORCE_LIFT and lift_direction_raw is not None and lift_coefficient != 0.0
+            ):
+                density = stage_env.get("density_kg_m3")
+                if density is None:
+                    atmosphere_model = stage_env.get("atmosphere_model")
+                    if atmosphere_model in (None, ""):
+                        requirement = "Drag" if force_code == FORCE_DRAG else "Lift"
+                        if requirement == "Drag":
+                            raise ValueError(
+                                "Drag requires an explicit environment.atmosphere_model or density_kg_m3; "
+                                "no orbital-decay atmosphere is selected implicitly."
+                            )
+                        raise ValueError("Lift requires an explicit environment.atmosphere_model or density_kg_m3.")
+                    density = density_from_model(
+                        str(atmosphere_model).lower(),
+                        x_eci[:3],
+                        t_s,
+                        env=env,
+                    )
+                plugin_densities[index] = float(density)
+
+        needs_sun = any(code in (FORCE_SRP, FORCE_THIRD_BODY_SUN) for code in force_codes)
+        needs_moon = FORCE_THIRD_BODY_MOON in force_codes
+        sun = stage_env.get("sun_pos_eci_km")
+        moon = stage_env.get("moon_pos_eci_km")
+        if (needs_sun and sun is None) or (needs_moon and moon is None):
+            resolved_sun, resolved_moon = resolve_sun_moon_positions(stage_env, t_s)
+            sun = resolved_sun if sun is None else sun
+            moon = resolved_moon if moon is None else moon
+        sun_position = np.zeros(3, dtype=float) if sun is None else np.asarray(sun, dtype=float).reshape(3)
+        moon_position = np.zeros(3, dtype=float) if moon is None else np.asarray(moon, dtype=float).reshape(3)
+
+        planet_count = 0
+        if FORCE_THIRD_BODY_PLANETS in force_codes:
+            selected = stage_env.get("third_body_planets", [])
+            selected_names = (
+                [selected.strip().lower()]
+                if isinstance(selected, str)
+                else [str(value).strip().lower() for value in selected]
+            )
+            if any(value in ("all", "*") for value in selected_names):
+                selected_names = list(PLANETARY_MU_KM3_S2)
+            valid_planet_names = [name for name in selected_names if name in PLANETARY_MU_KM3_S2]
+            if len(valid_planet_names) > self._staged_planet_positions.shape[0]:
+                self._staged_planet_positions = np.zeros((len(valid_planet_names), 3), dtype=float)
+                self._staged_planet_mu = np.zeros(len(valid_planet_names), dtype=float)
+            for name in valid_planet_names:
+                self._staged_planet_positions[planet_count] = resolve_body_position_eci_km(
+                    name,
+                    env=stage_env,
+                    t_s=t_s,
+                )
+                self._staged_planet_mu[planet_count] = float(
+                    stage_env.get(f"{name}_mu_km3_s2", PLANETARY_MU_KM3_S2[name])
+                )
+                planet_count += 1
+
+        shadow_name = str(stage_env.get("srp_shadow_model", "conical")).lower()
+        shadow_model = (
+            0 if shadow_name in ("none", "off", "disabled") else 1 if shadow_name in ("cylindrical", "cylinder") else 2
+        )
+        omega_raw = stage_env.get("drag_earth_rotation_rad_s")
+        parameters = self._compiled_scalar_parameters
+        parameters[:] = (
+            float(ctx.mu_km3_s2),
+            float(stage_env.get("spherical_harmonics_reference_radius_km", EARTH_RADIUS_KM)),
+            float(ctx.mass_kg),
+            float(ctx.cd),
+            float(stage_env.get("drag_area_m2", ctx.area_m2)),
+            float(EARTH_ROT_RATE_RAD_S if omega_raw is None else omega_raw),
+            float(stage_env.get("srp_area_m2", ctx.area_m2)),
+            float(ctx.cr),
+            srp_pressure_n_m2(stage_env),
+            float(AU_KM),
+            float(EARTH_RADIUS_KM),
+            float(SUN_RADIUS_KM),
+            float(SUN_MU_KM3_S2),
+            float(MOON_MU_KM3_S2),
+            float(stage_env.get("spherical_harmonics_mu_km3_s2", ctx.mu_km3_s2)),
+        )
+        lift_area_m2 = float(stage_env.get("lift_area_m2", stage_env.get("drag_area_m2", ctx.area_m2)))
+        if force_codes.size == 1 and force_codes[0] == FORCE_DRAG:
+            components = np.empty((1, 3), dtype=float)
+            components[0] = _compiled_drag_force_component()(
+                x_eci[:3],
+                x_eci[3:],
+                drag_rotation,
+                plugin_densities[0],
+                parameters[2],
+                parameters[3],
+                parameters[4],
+                parameters[5],
+            )
+        elif force_codes.size == 1 and force_codes[0] == FORCE_LIFT:
+            components = np.empty((1, 3), dtype=float)
+            components[0] = _compiled_lift_force_component()(
+                x_eci[:3],
+                x_eci[3:],
+                drag_rotation,
+                plugin_densities[0],
+                parameters[2],
+                lift_coefficient,
+                lift_area_m2,
+                parameters[5],
+                lift_direction,
+            )
+        else:
+            components = _compiled_builtin_force_components()(
+                x_eci,
+                force_codes,
+                plugin_densities,
+                harmonic_rotation,
+                drag_rotation,
+                sun_position,
+                moon_position,
+                self._staged_planet_positions,
+                self._staged_planet_mu,
+                int(planet_count),
+                parameters,
+                shadow_model,
+                lift_direction,
+                lift_coefficient,
+                lift_area_m2,
+                c_nm,
+                s_nm,
+                diag,
+                subdiag,
+                recur_a,
+                recur_b,
+                recur_c,
+                n_max,
+                m_max,
+            )
+        out = np.empty(6, dtype=float)
+        out[:3] = x_eci[3:]
+        acceleration = np.add(accel_two_body(x_eci[:3], ctx.mu_km3_s2), command_accel)
+        for index, plugin in enumerate(self.plugins):
+            if force_codes[index] == 0:
+                plugin_env = stage_env if plugin is spherical_harmonics_plugin else env
+                acceleration += plugin(t_s, x_eci, plugin_env, ctx)
+            else:
+                acceleration += components[index]
+        out[3:] = acceleration
+        return out
+
     def _propagate_builtin_rk4(
         self,
         *,
@@ -513,7 +1284,10 @@ class OrbitPropagator:
         a = self._builtin_rk4_accel
         np.add(accel_two_body(x_local[:3], ctx.mu_km3_s2), command_accel, out=a)
         for plugin in self.plugins:
-            a += plugin(t_local, x_local, stage_env, ctx)
+            if self._acceleration_enabled() and plugin is spherical_harmonics_plugin:
+                a += _accelerated_spherical_harmonics_plugin(t_local, x_local, stage_env, ctx)
+            else:
+                a += plugin(t_local, x_local, stage_env, ctx)
         out[3:] = a
 
     def _builtin_stage_env(self, env: dict, t_s: float, cache: dict[float, dict]) -> dict:
@@ -522,6 +1296,12 @@ class OrbitPropagator:
         key = float(t_s)
         stage_env = cache.get(key)
         if stage_env is None:
-            stage_env = resolve_time_dependent_env(env, key)
+            stage_env = resolve_time_dependent_env(
+                env,
+                key,
+                cache_override=self._builtin_time_env_cache,
+            )
             cache[key] = stage_env
+            while len(self._builtin_time_env_cache) > 8:
+                self._builtin_time_env_cache.pop(next(iter(self._builtin_time_env_cache)))
         return stage_env

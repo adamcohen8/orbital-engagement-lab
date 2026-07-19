@@ -96,13 +96,33 @@ def _validate_physics_runtime_settings(cfg: SimulationScenarioConfig) -> None:
     if _parse_bool(sh.get("enabled", False), "simulator.dynamics.orbit.spherical_harmonics.enabled"):
         degree = int(sh.get("degree", 0) or 0)
         source = str(sh.get("source", sh.get("model", "")) or "").strip().lower()
-        has_terms = sh.get("terms") not in (None, "")
+        terms = list(sh.get("terms", []) or [])
+        has_terms = bool(terms)
         has_path = sh.get("coeff_path") not in (None, "") or sh.get("source_path") not in (None, "")
-        has_explicit_zonal = any(key in sh for key in ("j2", "j3", "j4"))
-        if degree < 2 and not (has_terms or has_path or has_explicit_zonal or source in {"hpop", "hpop_ggm03", "ggm03"}):
+        if has_terms and (has_path or source):
             raise ValueError(
-                "simulator.dynamics.orbit.spherical_harmonics.enabled requires degree >= 2, terms, "
-                "a coefficient/source path, or explicit zonal coefficients."
+                "simulator.dynamics.orbit.spherical_harmonics must use either inline terms or a coefficient source, "
+                "not both."
+            )
+        if not has_terms and degree < 2:
+            raise ValueError(
+                "File-backed simulator.dynamics.orbit.spherical_harmonics requires degree >= 2; "
+                "inline terms infer degree and order when omitted."
+            )
+        supported_sources = {"hpop", "hpop_ggm03", "ggm03", "icgem", "gfc", "egm96"}
+        if source and source not in supported_sources:
+            choices = ", ".join(sorted(supported_sources))
+            raise ValueError(
+                f"simulator.dynamics.orbit.spherical_harmonics.source must be one of: {choices}."
+            )
+        if not has_terms and not source and not has_path:
+            raise ValueError(
+                "simulator.dynamics.orbit.spherical_harmonics.enabled requires inline terms or a supported "
+                "coefficient source/path; degree and order alone do not define a gravity field."
+            )
+        if source in {"icgem", "gfc"} and not has_path:
+            raise ValueError(
+                "ICGEM spherical harmonics require spherical_harmonics.coeff_path or source_path."
             )
 def _validate_object_references(cfg: SimulationScenarioConfig) -> None:
     objects = dict(cfg.objects or {})

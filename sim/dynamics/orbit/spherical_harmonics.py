@@ -21,6 +21,8 @@ from sim.dynamics.orbit.frames import (
     normalize_frame_model,
 )
 
+_NORMALIZED_SPHERICAL_HARMONIC_ACCEL_ECI_KERNEL = None
+
 
 @dataclass(frozen=True)
 class SphericalHarmonicTerm:
@@ -51,6 +53,14 @@ class GravityModelDownload:
     sha256: str
     min_size_bytes: int = 1
     size_bytes: int | None = None
+
+
+@dataclass(frozen=True)
+class _ICGEMGravityModel:
+    terms: tuple[SphericalHarmonicTerm, ...]
+    reference_radius_km: float | None
+    gravity_constant_km3_s2: float | None
+    normalization: str
 
 
 @dataclass(frozen=True)
@@ -373,6 +383,64 @@ def _analytic_harmonic_accel_hpop_eci_km_s2(
     return a_eci_full - _two_body_accel_km_s2(r_eci, mu_km3_s2)
 
 
+def _accelerated_harmonic_accel_hpop_eci_km_s2(
+    *,
+    r_eci_km: np.ndarray,
+    t_s: float,
+    mu_km3_s2: float,
+    re_km: float,
+    jd_utc_start: float | None,
+    frame_model: str,
+    eop_path: str | None,
+    dut1_s: float | None,
+    xp_arcsec: float | None,
+    yp_arcsec: float | None,
+    dat_s: float | None,
+    tt_minus_utc_s: float | None,
+    ddpsi_rad: float,
+    ddeps_rad: float,
+    compiled: CompiledSphericalHarmonics,
+) -> np.ndarray:
+    """Run normalized harmonic mathematics through the optional backend."""
+
+    global _NORMALIZED_SPHERICAL_HARMONIC_ACCEL_ECI_KERNEL
+    if _NORMALIZED_SPHERICAL_HARMONIC_ACCEL_ECI_KERNEL is None:
+        from sim.acceleration.kernels.spherical_harmonics import (
+            normalized_spherical_harmonic_accel_eci_kernel,
+        )
+
+        _NORMALIZED_SPHERICAL_HARMONIC_ACCEL_ECI_KERNEL = normalized_spherical_harmonic_accel_eci_kernel
+
+    rotation = _harmonic_rotation_matrix(
+        t_s=float(t_s),
+        jd_utc_start=jd_utc_start,
+        frame_model=frame_model,
+        eop_path=eop_path,
+        dut1_s=dut1_s,
+        xp_arcsec=xp_arcsec,
+        yp_arcsec=yp_arcsec,
+        dat_s=dat_s,
+        tt_minus_utc_s=tt_minus_utc_s,
+        ddpsi_rad=ddpsi_rad,
+        ddeps_rad=ddeps_rad,
+    )
+    return _NORMALIZED_SPHERICAL_HARMONIC_ACCEL_ECI_KERNEL(
+        np.asarray(r_eci_km, dtype=float).reshape(3),
+        rotation,
+        float(mu_km3_s2),
+        float(re_km),
+        compiled.c_nm,
+        compiled.s_nm,
+        compiled.legendre_diag_scale,
+        compiled.legendre_subdiag_scale,
+        compiled.legendre_recur_a,
+        compiled.legendre_recur_b,
+        compiled.legendre_recur_c,
+        int(compiled.n_max),
+        int(compiled.m_max),
+    )
+
+
 def accel_spherical_harmonics_terms(
     r_eci_km: np.ndarray,
     t_s: float,
@@ -391,6 +459,7 @@ def accel_spherical_harmonics_terms(
     ddpsi_rad: float = 0.0,
     ddeps_rad: float = 0.0,
     compiled: CompiledSphericalHarmonics | None = None,
+    use_acceleration: bool = False,
 ) -> np.ndarray:
     """
     Acceleration in ECI from arbitrary spherical-harmonic terms (n,m).
@@ -401,6 +470,24 @@ def accel_spherical_harmonics_terms(
         return np.zeros(3)
     compiled_terms = compiled if compiled is not None else compile_spherical_harmonic_terms(terms)
     if compiled_terms is not None and compiled_terms.all_normalized:
+        if use_acceleration:
+            return _accelerated_harmonic_accel_hpop_eci_km_s2(
+                r_eci_km=r_eci_km,
+                t_s=t_s,
+                mu_km3_s2=mu_km3_s2,
+                re_km=re_km,
+                jd_utc_start=jd_utc_start,
+                frame_model=frame_model,
+                eop_path=eop_path,
+                dut1_s=dut1_s,
+                xp_arcsec=xp_arcsec,
+                yp_arcsec=yp_arcsec,
+                dat_s=dat_s,
+                tt_minus_utc_s=tt_minus_utc_s,
+                ddpsi_rad=ddpsi_rad,
+                ddeps_rad=ddeps_rad,
+                compiled=compiled_terms,
+            )
         return _analytic_harmonic_accel_hpop_eci_km_s2(
             r_eci_km=r_eci_km,
             t_s=t_s,
@@ -497,15 +584,23 @@ def configure_spherical_harmonics_env(base_env: dict | None, orbit_cfg: dict | N
             env["drag_eop_path"] = str(default_eop.resolve())
         return env
 
-    degree = int(max(int(sh.get("degree", 0) or 0), 0))
+    raw_terms = sh.get("terms")
+    parsed_terms = parse_spherical_harmonic_terms(raw_terms) if raw_terms not in (None, "") else []
+    inferred_degree = max((term.n for term in parsed_terms), default=0)
+    inferred_order = max((term.m for term in parsed_terms), default=0)
+    degree = int(max(int(sh.get("degree", inferred_degree) or 0), 0))
     if degree < 2:
-        return env
-    order_raw = sh.get("order", degree)
+        raise ValueError(
+            "Enabled spherical harmonics require degree >= 2 or inline terms from which degree can be inferred."
+        )
+    order_raw = sh.get("order", inferred_order if parsed_terms else degree)
     order = int(max(min(int(degree if order_raw is None else order_raw), degree), 0))
     source = str(sh.get("source", sh.get("model", "")) or "").strip().lower()
+    coeff_path_raw = sh.get("coeff_path") or sh.get("source_path")
+    if not source and coeff_path_raw not in (None, ""):
+        source = "icgem"
 
     if source in {"hpop", "hpop_ggm03", "ggm03"}:
-        coeff_path_raw = sh.get("coeff_path") or sh.get("source_path")
         coeff_path = (
             default_hpop_ggm03_coeff_path() if coeff_path_raw in (None, "") else Path(str(coeff_path_raw)).expanduser()
         )
@@ -539,8 +634,10 @@ def configure_spherical_harmonics_env(base_env: dict | None, orbit_cfg: dict | N
         if not eop_path.is_absolute():
             eop_path = Path(__file__).resolve().parents[3] / eop_path
         env["spherical_harmonics_eop_path"] = str(eop_path.resolve())
-    elif "terms" in sh:
-        terms = parse_spherical_harmonic_terms(sh.get("terms"))
+    elif parsed_terms:
+        terms = [term for term in parsed_terms if term.n <= degree and term.m <= order]
+        if not terms:
+            raise ValueError(f"No inline spherical harmonic terms remain within degree {degree} and order {order}.")
         env["spherical_harmonics_terms"] = terms
         env["_parsed_spherical_harmonics_terms"] = terms
         compiled = compile_spherical_harmonic_terms(terms)
@@ -555,6 +652,67 @@ def configure_spherical_harmonics_env(base_env: dict | None, orbit_cfg: dict | N
             if not eop_path.is_absolute():
                 eop_path = Path(__file__).resolve().parents[3] / eop_path
             env["spherical_harmonics_eop_path"] = str(eop_path.resolve())
+    elif source in {"icgem", "gfc"}:
+        if coeff_path_raw in (None, ""):
+            raise ValueError("ICGEM spherical harmonics require coeff_path or source_path.")
+        coeff_path = Path(str(coeff_path_raw)).expanduser()
+        if not coeff_path.is_absolute():
+            coeff_path = Path(__file__).resolve().parents[3] / coeff_path
+        model = _load_icgem_gfc_model(coeff_path, max_degree=degree, max_order=order)
+        terms = list(model.terms)
+        env["spherical_harmonics_terms"] = terms
+        env["_parsed_spherical_harmonics_terms"] = terms
+        compiled = compile_spherical_harmonic_terms(terms)
+        if compiled is not None:
+            env["_compiled_spherical_harmonics_terms"] = compiled
+        env["spherical_harmonics_source"] = str(coeff_path.resolve())
+        reference_radius_km = sh.get("reference_radius_km", model.reference_radius_km)
+        env["spherical_harmonics_reference_radius_km"] = float(
+            EARTH_RADIUS_KM if reference_radius_km is None else reference_radius_km
+        )
+        if model.gravity_constant_km3_s2 is not None:
+            env["spherical_harmonics_mu_km3_s2"] = float(model.gravity_constant_km3_s2)
+        env["spherical_harmonics_frame_model"] = str(sh.get("frame_model", "simple"))
+        if sh.get("eop_path") is not None:
+            eop_path = Path(str(sh["eop_path"])).expanduser()
+            if not eop_path.is_absolute():
+                eop_path = Path(__file__).resolve().parents[3] / eop_path
+            env["spherical_harmonics_eop_path"] = str(eop_path.resolve())
+    elif source == "egm96":
+        env["spherical_harmonics_use_real_coefficients"] = True
+        env["spherical_harmonics_model"] = "EGM96"
+        env["spherical_harmonics_max_degree"] = degree
+        env["spherical_harmonics_max_order"] = order
+        env["spherical_harmonics_allow_download"] = bool(sh.get("allow_download", True))
+        model_reference_radius_km = 6378.1363
+        model_gravity_constant_km3_s2 = EARTH_MU_KM3_S2
+        if coeff_path_raw not in (None, ""):
+            coeff_path = Path(str(coeff_path_raw)).expanduser()
+            if not coeff_path.is_absolute():
+                coeff_path = Path(__file__).resolve().parents[3] / coeff_path
+            model = _load_icgem_gfc_model(coeff_path, max_degree=degree, max_order=order)
+            if model.reference_radius_km is not None:
+                model_reference_radius_km = model.reference_radius_km
+            if model.gravity_constant_km3_s2 is not None:
+                model_gravity_constant_km3_s2 = model.gravity_constant_km3_s2
+            env["spherical_harmonics_coeff_path"] = str(coeff_path.resolve())
+            env["spherical_harmonics_source"] = str(coeff_path.resolve())
+        else:
+            env["spherical_harmonics_source"] = "EGM96"
+        env["spherical_harmonics_reference_radius_km"] = float(
+            sh.get("reference_radius_km", model_reference_radius_km)
+        )
+        env["spherical_harmonics_mu_km3_s2"] = float(model_gravity_constant_km3_s2)
+        env["spherical_harmonics_frame_model"] = str(sh.get("frame_model", "simple"))
+        if sh.get("eop_path") is not None:
+            eop_path = Path(str(sh["eop_path"])).expanduser()
+            if not eop_path.is_absolute():
+                eop_path = Path(__file__).resolve().parents[3] / eop_path
+            env["spherical_harmonics_eop_path"] = str(eop_path.resolve())
+    else:
+        raise ValueError(
+            "Enabled spherical harmonics did not select inline terms or a supported coefficient source."
+        )
 
     if sh.get("fd_step_km") is not None:
         env["spherical_harmonics_fd_step_km"] = float(sh["fd_step_km"])
@@ -596,18 +754,11 @@ def parse_spherical_harmonic_terms(raw_terms: list[dict | SphericalHarmonicTerm]
     return out
 
 
-def load_icgem_gfc_terms(
+def _load_icgem_gfc_model(
     gfc_path: str | Path,
     max_degree: int,
     max_order: int | None = None,
-) -> list[SphericalHarmonicTerm]:
-    """
-    Load real gravity coefficients from an ICGEM-style .gfc file.
-
-    The parser supports coefficients on `gfc` lines:
-      gfc n m Cnm Snm ...
-    and respects the `norm` header when present.
-    """
+) -> _ICGEMGravityModel:
     path = Path(gfc_path).expanduser().resolve()
     if not path.exists():
         raise FileNotFoundError(f"Gravity coefficient file not found: {path}")
@@ -619,41 +770,78 @@ def load_icgem_gfc_terms(
     if m_max < 0:
         raise ValueError("max_order must be >= 0.")
 
+    lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
     norm_kind = "unknown"
+    reference_radius_km = None
+    gravity_constant_km3_s2 = None
+    for line in lines:
+        parts = line.strip().split()
+        if len(parts) < 2:
+            continue
+        key = parts[0].lower()
+        if key == "norm":
+            norm_kind = parts[1].strip().lower()
+        elif key == "radius":
+            reference_radius_km = float(parts[1].replace("D", "E").replace("d", "e")) / 1000.0
+        elif key == "earth_gravity_constant":
+            gravity_constant_km3_s2 = float(parts[1].replace("D", "E").replace("d", "e")) / 1.0e9
+
+    for label, value in (
+        ("radius", reference_radius_km),
+        ("earth_gravity_constant", gravity_constant_km3_s2),
+    ):
+        if value is not None and (not math.isfinite(value) or value <= 0.0):
+            raise ValueError(f"ICGEM {label} must be finite and positive in {path}.")
+
     out: list[SphericalHarmonicTerm] = []
-    with path.open("r", encoding="utf-8", errors="ignore") as f:
-        for line in f:
-            s = line.strip()
-            if not s:
-                continue
-            if s.startswith("#"):
-                continue
-            parts = s.split()
-            key = parts[0].lower()
-            if key == "norm" and len(parts) >= 2:
-                norm_kind = parts[1].strip().lower()
-                continue
-            if key != "gfc" or len(parts) < 5:
-                continue
-            n = int(parts[1])
-            m = int(parts[2])
-            if n < 2 or n > n_max or m < 0 or m > min(n, m_max):
-                continue
-            c_nm = float(parts[3])
-            s_nm = float(parts[4])
-            out.append(
-                SphericalHarmonicTerm(
-                    n=n,
-                    m=m,
-                    c_nm=c_nm,
-                    s_nm=s_nm,
-                    normalized=("unnormalized" not in norm_kind),
-                )
+    for line in lines:
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        parts = s.split()
+        if parts[0].lower() != "gfc" or len(parts) < 5:
+            continue
+        n = int(parts[1])
+        m = int(parts[2])
+        if n < 2 or n > n_max or m < 0 or m > min(n, m_max):
+            continue
+        c_nm = float(parts[3].replace("D", "E").replace("d", "e"))
+        s_nm = float(parts[4].replace("D", "E").replace("d", "e"))
+        out.append(
+            SphericalHarmonicTerm(
+                n=n,
+                m=m,
+                c_nm=c_nm,
+                s_nm=s_nm,
+                normalized=("unnormalized" not in norm_kind),
             )
+        )
 
     if not out:
         raise ValueError(f"No usable spherical harmonic terms found in {path} for n<= {n_max}, m<= {m_max}.")
-    return out
+    return _ICGEMGravityModel(
+        terms=tuple(out),
+        reference_radius_km=reference_radius_km,
+        gravity_constant_km3_s2=gravity_constant_km3_s2,
+        normalization=norm_kind,
+    )
+
+
+def load_icgem_gfc_terms(
+    gfc_path: str | Path,
+    max_degree: int,
+    max_order: int | None = None,
+) -> list[SphericalHarmonicTerm]:
+    """
+    Load real gravity coefficients from an ICGEM-style .gfc file.
+
+    The parser supports coefficients on `gfc` lines:
+      gfc n m Cnm Snm ...
+    and respects the `norm` header when present. Configuration-backed loading
+    additionally applies the file's reference radius and gravity constant.
+    """
+
+    return list(_load_icgem_gfc_model(gfc_path, max_degree=max_degree, max_order=max_order).terms)
 
 
 def load_hpop_ggm03_terms(

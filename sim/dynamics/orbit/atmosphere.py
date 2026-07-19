@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import math
+from bisect import bisect_right
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from typing import Literal
 
 import numpy as np
 
+from sim.acceleration.settings import acceleration_enabled_from_mode
 from sim.dynamics.orbit.environment import EARTH_RADIUS_KM
 from sim.dynamics.orbit.epoch import datetime_to_julian_date, julian_date_to_datetime, sun_position_eci_km_enhanced
 from sim.dynamics.orbit.frames import (
@@ -15,7 +17,7 @@ from sim.dynamics.orbit.frames import (
     eci_to_ecef_harmonic,
     normalize_frame_model,
 )
-from sim.utils.geodesy import ecef_to_geodetic_deg_km
+from sim.utils.geodesy import ecef_to_geodetic_altitude_km, ecef_to_geodetic_deg_km
 
 AtmosphereModelName = Literal[
     "exponential", "ussa1976", "msis86", "nrlmsise00", "jacchia70", "jb2006", "jb2008", "harris_priester"
@@ -94,6 +96,22 @@ _USSA1976_HIGH_LOG_RHO = np.log(
         dtype=float,
     )
 )
+_USSA1976_HIGH_ALT_KM_SCALAR = tuple(float(value) for value in _USSA1976_HIGH_ALT_KM)
+_USSA1976_HIGH_LOG_RHO_SCALAR = tuple(float(value) for value in _USSA1976_HIGH_LOG_RHO)
+_USSA1976_HIGH_LOG_RHO_SLOPE = tuple(
+    (_USSA1976_HIGH_LOG_RHO_SCALAR[index + 1] - _USSA1976_HIGH_LOG_RHO_SCALAR[index])
+    / (_USSA1976_HIGH_ALT_KM_SCALAR[index + 1] - _USSA1976_HIGH_ALT_KM_SCALAR[index])
+    for index in range(len(_USSA1976_HIGH_ALT_KM_SCALAR) - 1)
+)
+
+_EXPONENTIAL_ENV_KEYS = frozenset(
+    {
+        "exponential_ceiling_altitude_km",
+        "exponential_reference_density_kg_m3",
+        "exponential_reference_altitude_km",
+        "exponential_scale_height_km",
+    }
+)
 
 
 @lru_cache(maxsize=1)
@@ -131,19 +149,29 @@ def _harris_priester_backend():
     return harris_priester_density
 
 
+@lru_cache(maxsize=1)
+def _compiled_ecef_to_geodetic_deg_km():
+    from sim.acceleration.kernels.geodesy import ecef_to_geodetic_deg_km_kernel
+
+    return ecef_to_geodetic_deg_km_kernel
+
+
 def _radial_altitude_km_from_eci(r_eci_km: np.ndarray) -> float:
-    r_vec = np.asarray(r_eci_km, dtype=float).reshape(3)
+    if isinstance(r_eci_km, np.ndarray) and r_eci_km.dtype == np.float64 and r_eci_km.shape == (3,):
+        r_vec = r_eci_km
+    else:
+        r_vec = np.asarray(r_eci_km, dtype=float).reshape(3)
     r2 = float(np.dot(r_vec, r_vec))
     if r2 <= 0.0:
         return 0.0
-    return float(max(0.0, np.sqrt(r2) - EARTH_RADIUS_KM))
+    return max(0.0, math.sqrt(r2) - EARTH_RADIUS_KM)
 
 
 def _ecef_from_eci_for_atmosphere(r_eci_km: np.ndarray, t_s: float, env: dict) -> np.ndarray:
     frame_model = str(env.get("density_frame_model", env.get("drag_frame_model", "simple"))).strip().lower()
     eop_path = env.get("density_eop_path", env.get("drag_eop_path"))
     return eci_to_ecef_harmonic(
-        np.array(r_eci_km, dtype=float),
+        r_eci_km,
         float(t_s),
         jd_utc_start=env.get("jd_utc_start"),
         frame_model=frame_model,
@@ -158,6 +186,7 @@ def _ecef_from_eci_for_atmosphere(r_eci_km: np.ndarray, t_s: float, env: dict) -
     )
 
 
+@lru_cache(maxsize=16)
 def _is_eop_frame_model(frame_model: str) -> bool:
     try:
         return normalize_frame_model(frame_model) == FRAME_MODEL_IAU76_80_EOP
@@ -169,7 +198,7 @@ def _altitude_km_from_eci(r_eci_km: np.ndarray, t_s: float, env: dict | None = N
     env = {} if env is None else env
     r_ecef_km = _ecef_from_eci_for_atmosphere(r_eci_km, t_s, env)
     if str(env.get("geodetic_model", "")).lower() == "wgs84":
-        _, _, alt_km = ecef_to_geodetic_deg_km(r_ecef_km)
+        alt_km = ecef_to_geodetic_altitude_km(r_ecef_km)
         return float(max(alt_km, 0.0))
     return float(max(0.0, np.linalg.norm(r_ecef_km) - EARTH_RADIUS_KM))
 
@@ -189,13 +218,50 @@ def _spherical_lat_lon_deg_from_eci(r_eci_km: np.ndarray, t_s: float, env: dict 
     return float(lat), float(lon)
 
 
+def _altitude_lat_lon_deg_from_eci(
+    r_eci_km: np.ndarray,
+    t_s: float,
+    env: dict | None = None,
+) -> tuple[float, float, float]:
+    """Return atmosphere position coordinates from one ECI-to-ECEF conversion."""
+    env = {} if env is None else env
+    r_ecef_km = _ecef_from_eci_for_atmosphere(r_eci_km, t_s, env)
+    if str(env.get("geodetic_model", "")).lower() == "wgs84":
+        if acceleration_enabled_from_mode():
+            lat_deg, lon_deg, alt_km = _compiled_ecef_to_geodetic_deg_km()(r_ecef_km)
+        else:
+            lat_deg, lon_deg, alt_km = ecef_to_geodetic_deg_km(r_ecef_km)
+        return float(max(alt_km, 0.0)), float(lat_deg), float(lon_deg)
+    radius_km = float(np.linalg.norm(r_ecef_km))
+    alt_km = float(max(0.0, radius_km - EARTH_RADIUS_KM))
+    if radius_km <= 0.0:
+        return alt_km, 0.0, 0.0
+    x, y, z = r_ecef_km
+    lat_deg = np.degrees(np.arcsin(np.clip(z / radius_km, -1.0, 1.0)))
+    lon_deg = np.degrees(np.arctan2(y, x))
+    return alt_km, float(lat_deg), float(lon_deg)
+
+
 def density_exponential(r_eci_km: np.ndarray, t_s: float, env: dict | None = None) -> float:
     alt_km = _radial_altitude_km_from_eci(r_eci_km)
-    if alt_km > 1000.0:
+    if env is None or _EXPONENTIAL_ENV_KEYS.isdisjoint(env):
+        if alt_km > 1000.0:
+            return 0.0
+        return 1.225 * math.exp(-alt_km / 8.5)
+
+    ceiling_km = float(env.get("exponential_ceiling_altitude_km", 1000.0))
+    if alt_km > ceiling_km:
         return 0.0
-    rho0 = 1.225
-    h = 8.5
-    return float(rho0 * np.exp(-alt_km / h))
+    rho_ref = float(env.get("exponential_reference_density_kg_m3", 1.225))
+    reference_altitude_km = float(env.get("exponential_reference_altitude_km", 0.0))
+    scale_height_km = float(env.get("exponential_scale_height_km", 8.5))
+    if not math.isfinite(rho_ref) or rho_ref < 0.0:
+        raise ValueError("exponential_reference_density_kg_m3 must be finite and nonnegative.")
+    if not math.isfinite(reference_altitude_km):
+        raise ValueError("exponential_reference_altitude_km must be finite.")
+    if not math.isfinite(scale_height_km) or scale_height_km <= 0.0:
+        raise ValueError("exponential_scale_height_km must be finite and positive.")
+    return rho_ref * math.exp(-(alt_km - reference_altitude_km) / scale_height_km)
 
 
 def altitude_km_from_eci(r_eci_km: np.ndarray, t_s: float, env: dict | None = None) -> float:
@@ -217,21 +283,43 @@ def _datetime_from_env_t_s(env: dict, t_s: float) -> datetime:
     return datetime(2020, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=float(t_s))
 
 
-def _local_solar_time_hr(lon_deg: float, dt_utc: datetime, env: dict) -> float:
-    jd = datetime_to_julian_date(dt_utc)
-    frame_model = str(env.get("density_frame_model", env.get("drag_frame_model", ""))).strip().lower()
-    eop_path = env.get("density_eop_path", env.get("drag_eop_path")) if _is_eop_frame_model(frame_model) else None
+@lru_cache(maxsize=32768)
+def _local_solar_time_epoch_terms(
+    jd: float,
+    eop_path: str | None,
+    dut1_s: float | None,
+    dat_s: float | None,
+    tt_minus_utc_s: float | None,
+    ddpsi_rad: float,
+    ddeps_rad: float,
+) -> tuple[float, float]:
     sidereal = apparent_sidereal_time_hpop_like(
         jd,
-        None if eop_path is None else str(eop_path),
-        dut1_s=None if env.get("dut1_s") is None else float(env["dut1_s"]),
-        dat_s=None if env.get("dat_s") is None else float(env["dat_s"]),
-        tt_minus_utc_s=None if env.get("tt_minus_utc_s") is None else float(env["tt_minus_utc_s"]),
-        ddpsi_rad=float(env.get("ddpsi_rad", 0.0) or 0.0),
-        ddeps_rad=float(env.get("ddeps_rad", 0.0) or 0.0),
+        eop_path,
+        dut1_s=dut1_s,
+        dat_s=dat_s,
+        tt_minus_utc_s=tt_minus_utc_s,
+        ddpsi_rad=ddpsi_rad,
+        ddeps_rad=ddeps_rad,
     )
     sun_eci = sun_position_eci_km_enhanced(jd)
     sun_ra = math.atan2(float(sun_eci[1]), float(sun_eci[0]))
+    return float(sidereal), float(sun_ra)
+
+
+def _local_solar_time_hr(lon_deg: float, dt_utc: datetime, env: dict) -> float:
+    jd = datetime_to_julian_date(dt_utc)
+    frame_model = str(env.get("density_frame_model", env.get("drag_frame_model", ""))).strip().lower()
+    eop_path_raw = env.get("density_eop_path", env.get("drag_eop_path")) if _is_eop_frame_model(frame_model) else None
+    sidereal, sun_ra = _local_solar_time_epoch_terms(
+        float(jd),
+        None if eop_path_raw is None else str(eop_path_raw),
+        None if env.get("dut1_s") is None else float(env["dut1_s"]),
+        None if env.get("dat_s") is None else float(env["dat_s"]),
+        None if env.get("tt_minus_utc_s") is None else float(env["tt_minus_utc_s"]),
+        float(env.get("ddpsi_rad", 0.0) or 0.0),
+        float(env.get("ddeps_rad", 0.0) or 0.0),
+    )
     hour_angle = (sidereal + math.radians(float(lon_deg)) - sun_ra + math.pi) % (2.0 * math.pi) - math.pi
     return float((12.0 + hour_angle * 12.0 / math.pi) % 24.0)
 
@@ -258,7 +346,7 @@ def density_ussa1976(r_eci_km: np.ndarray, t_s: float, env: dict | None = None) 
         p0 = float(_USSA1976_PB_PA[i])
         if abs(lapse) < 1e-12:
             t = t0
-            p = p0 * np.exp(-_USSA1976_G0_M_S2 * (h - h0) / (_USSA1976_R_AIR_J_KG_K * t))
+            p = p0 * math.exp(-_USSA1976_G0_M_S2 * (h - h0) / (_USSA1976_R_AIR_J_KG_K * t))
         else:
             t = t0 + lapse * (h - h0)
             p = p0 * (t / t0) ** (-_USSA1976_G0_M_S2 / (_USSA1976_R_AIR_J_KG_K * lapse))
@@ -268,8 +356,17 @@ def density_ussa1976(r_eci_km: np.ndarray, t_s: float, env: dict | None = None) 
     if alt_km > 1000.0:
         return 0.0
 
-    lrho = np.interp(float(alt_km), _USSA1976_HIGH_ALT_KM, _USSA1976_HIGH_LOG_RHO)
-    return float(np.exp(lrho))
+    if alt_km <= _USSA1976_HIGH_ALT_KM_SCALAR[0]:
+        lrho = _USSA1976_HIGH_LOG_RHO_SCALAR[0]
+    elif alt_km >= _USSA1976_HIGH_ALT_KM_SCALAR[-1]:
+        lrho = _USSA1976_HIGH_LOG_RHO_SCALAR[-1]
+    else:
+        index = bisect_right(_USSA1976_HIGH_ALT_KM_SCALAR, alt_km) - 1
+        lrho = (
+            _USSA1976_HIGH_LOG_RHO_SLOPE[index] * (alt_km - _USSA1976_HIGH_ALT_KM_SCALAR[index])
+            + _USSA1976_HIGH_LOG_RHO_SCALAR[index]
+        )
+    return math.exp(lrho)
 
 
 def _temperature_from_altitude_k_approx(alt_km: float) -> float:
@@ -299,27 +396,41 @@ def density_nrlmsise00(r_eci_km: np.ndarray, t_s: float, env: dict | None = None
     - env-provided callable: env["nrlmsise00_density_callable"](alt_km, lat_deg, lon_deg, dt_utc, env) -> kg/m^3
     - source-local OEL backend with direct env f107/f107a/ap inputs, or optional HPOP-style SW-All table input.
     """
-    env = {} if env is None else dict(env)
-    alt_km = _altitude_km_from_eci(r_eci_km, t_s, env=env)
-    lat_deg, lon_deg = _spherical_lat_lon_deg_from_eci(r_eci_km, t_s, env=env)
+    env_source = {} if env is None else env
+    alt_km, lat_deg, lon_deg = _altitude_lat_lon_deg_from_eci(r_eci_km, t_s, env=env_source)
 
-    dt_utc = _datetime_from_env_t_s(env, t_s)
+    dt_utc = _datetime_from_env_t_s(env_source, t_s)
 
-    custom_fn = env.get("nrlmsise00_density_callable", None)
+    custom_fn = env_source.get("nrlmsise00_density_callable", None)
     if callable(custom_fn):
-        return float(max(0.0, custom_fn(alt_km, lat_deg, lon_deg, dt_utc, env)))
-    if env.get("nrlmsise00_lst_hr") is None:
-        frame_model = str(env.get("density_frame_model", env.get("drag_frame_model", ""))).strip().lower()
+        env_local = dict(env_source)
+        return float(max(0.0, custom_fn(alt_km, lat_deg, lon_deg, dt_utc, env_local)))
+    lst_hr = env_source.get("nrlmsise00_lst_hr")
+    if lst_hr is None:
+        frame_model = str(
+            env_source.get("density_frame_model", env_source.get("drag_frame_model", ""))
+        ).strip().lower()
         if _is_eop_frame_model(frame_model):
-            env["nrlmsise00_lst_hr"] = _local_solar_time_hr(lon_deg, dt_utc, env)
+            lst_hr = _local_solar_time_hr(lon_deg, dt_utc, env_source)
 
-    return float(max(0.0, _nrlmsise00_backend()(alt_km, lat_deg, lon_deg, dt_utc, env)))
+    return float(
+        max(
+            0.0,
+            _nrlmsise00_backend()(
+                alt_km,
+                lat_deg,
+                lon_deg,
+                dt_utc,
+                env_source,
+                lst_hr=None if lst_hr is None else float(lst_hr),
+            ),
+        )
+    )
 
 
 def density_msis86(r_eci_km: np.ndarray, t_s: float, env: dict | None = None) -> float:
     env = {} if env is None else dict(env)
-    alt_km = _altitude_km_from_eci(r_eci_km, t_s, env=env)
-    lat_deg, lon_deg = _spherical_lat_lon_deg_from_eci(r_eci_km, t_s, env=env)
+    alt_km, lat_deg, lon_deg = _altitude_lat_lon_deg_from_eci(r_eci_km, t_s, env=env)
 
     dt_utc = _datetime_from_env_t_s(env, t_s)
 
@@ -352,8 +463,7 @@ def density_jb2008(r_eci_km: np.ndarray, t_s: float, env: dict | None = None) ->
     - env["jb2008_density_callable"](alt_km, lat_deg, lon_deg, dt_utc, env) -> kg/m^3
     """
     env = {} if env is None else dict(env)
-    alt_km = _altitude_km_from_eci(r_eci_km, t_s, env=env)
-    lat_deg, lon_deg = _spherical_lat_lon_deg_from_eci(r_eci_km, t_s, env=env)
+    alt_km, lat_deg, lon_deg = _altitude_lat_lon_deg_from_eci(r_eci_km, t_s, env=env)
 
     dt_utc = _datetime_from_env_t_s(env, t_s)
 
@@ -365,8 +475,7 @@ def density_jb2008(r_eci_km: np.ndarray, t_s: float, env: dict | None = None) ->
 
 def density_jb2006(r_eci_km: np.ndarray, t_s: float, env: dict | None = None) -> float:
     env = {} if env is None else dict(env)
-    alt_km = _altitude_km_from_eci(r_eci_km, t_s, env=env)
-    lat_deg, lon_deg = _spherical_lat_lon_deg_from_eci(r_eci_km, t_s, env=env)
+    alt_km, lat_deg, lon_deg = _altitude_lat_lon_deg_from_eci(r_eci_km, t_s, env=env)
 
     dt_utc = _datetime_from_env_t_s(env, t_s)
 
@@ -378,8 +487,7 @@ def density_jb2006(r_eci_km: np.ndarray, t_s: float, env: dict | None = None) ->
 
 def density_jacchia70(r_eci_km: np.ndarray, t_s: float, env: dict | None = None) -> float:
     env = {} if env is None else dict(env)
-    alt_km = _altitude_km_from_eci(r_eci_km, t_s, env=env)
-    lat_deg, lon_deg = _spherical_lat_lon_deg_from_eci(r_eci_km, t_s, env=env)
+    alt_km, lat_deg, lon_deg = _altitude_lat_lon_deg_from_eci(r_eci_km, t_s, env=env)
 
     dt_utc = _datetime_from_env_t_s(env, t_s)
 

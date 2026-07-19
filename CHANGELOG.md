@@ -8,6 +8,75 @@ migration-sensitive behavior explicitly.
 
 ## Unreleased
 
+## 0.22.0 - 2026-07-18
+
+Release thesis: `v0.22.0` makes high-fidelity ONP force evaluation materially
+faster while preserving established APIs, force ordering, deterministic
+outputs, and independent external-reference validation.
+
+Private/Pro scope: `v0.22.0` adds the maintained warmed Orekit orbit-only
+comparison and immutable MATLAB HPOP 20x20/70x70 evidence. The public release
+receives the compatible acceleration kernels, configuration hardening,
+documentation, and public-core performance improvements; private validation
+data and external-tool runners remain behind the export boundary.
+
+### Changed
+
+- Fused the accelerated explicit J2/J3/J4 RK4 kernel so two-body and selected
+  zonals share one radius reduction and square root per stage, reuse
+  RK4 stage storage within each step, and avoid per-zonal component temporaries
+  in richer compiled force plans. The standalone plugin interfaces, configured
+  force order, no-fast-math policy, acceleration-off path, and numerical outputs
+  are unchanged.
+- Added capability-gated compiled force-plan execution while retaining the
+  existing `OrbitPropagator` API. The fastest fixed-step RK4 tier evaluates the
+  complete built-in quiet-thermosphere NRLMSISE-00 plan in one numeric boundary;
+  a staged tier extends compiled component evaluation to RKF78 and to explicit
+  J2/J3/J4, aerodynamic lift, selected planetary third bodies, constant-density
+  drag, every supported atmosphere family, and plans containing custom
+  acceleration callbacks. Density, frame, ephemeris, and custom-callback owners
+  remain authoritative, and plugin contributions are accumulated in configured
+  order for exact output parity. Small plans retain faster specialized kernels,
+  while acceleration-off operation and unsupported coefficient representations
+  retain their established implementations.
+  On an Apple M2, the maintained six-hour full-force case improved from 0.572 s
+  to 0.276 s with byte-identical OEL histories; OEL measured 1.14x faster than
+  Orekit's 0.316 s warmed median on that orbit-only case.
+- Added an exact no-fast-math NRLMSISE-00 quiet-thermosphere evaluator for the
+  model's standard-switch branch at and above 300 km, compiled the shared
+  iterative WGS-84 atmosphere-coordinate conversion, fused UTC-to-TDB
+  conversion into the compact-DE440 Sun/Moon kernel, and reused immutable EOP
+  interpolation results. Disturbed/lower-atmosphere and acceleration-off paths
+  retain the authoritative implementations. On an Apple M2, the maintained
+  six-hour 8x8-gravity-plus-drag row improved from 0.709 s to 0.317 s and the
+  full stack from 1.006 s to 0.572 s, reducing Orekit's warmed median advantage
+  from 3.30x to 1.78x with byte-identical OEL trajectories.
+- Fused cannonball SRP geometry, eclipse, and acceleration into an optional
+  no-fast-math kernel and combined the mandatory compact-DE440 Sun/Moon
+  Chebyshev evaluations behind one compiled boundary, retaining authoritative
+  acceleration-off fallbacks and exact trajectory outputs. On an Apple M2, the
+  maintained six-hour full-force comparison improved from 1.193 s to 1.006 s
+  (15.7%), reducing Orekit's warmed median advantage from 3.83x to 3.30x; the
+  cumulative SRP row's OEL marginal cost fell by 46.8%.
+- Added optional, no-fast-math MSIS-86 acceleration for the complete density-
+  profile calculation and the fixed-switch quiet-Ap globe path, with exact
+  acceleration-off parity and the authoritative Python fallback. On an Apple
+  M2, the maintained standard single-satellite drag case improved from 1.054 s
+  to 0.677 s (35.8%).
+- Extended optional Numba acceleration into the complete NRLMSISE-00 upper-
+  atmosphere diffusion/spline calculation without fast math, retaining the
+  authoritative Python fallback and exact density/trajectory outputs. On an
+  Apple M2, the maintained six-hour Orekit comparison improved the cumulative
+  8x8-gravity-plus-drag row by 36.4% and the full force stack by 26.4%, reducing
+  Orekit's warmed median advantage from 5.30x to 3.83x.
+- Added optional Numba acceleration for fully normalized spherical-harmonic
+  gravity fields while retaining the existing Python evaluator as the
+  acceleration-off and unnormalized-coefficient fallback, and reused exact
+  repeated IAU-76/80/EOP rotations across integrator stages.
+- Extended immutable MATLAB HPOP spherical-harmonic validation from the 8x8
+  reference case to matched 8x8, 20x20, and 70x70 cases with hash-verified
+  source provenance and routine offline comparison gates.
+
 ## 0.21.3 - 2026-07-18
 
 Release thesis: `v0.21.3` makes OEL's regression and performance feedback
