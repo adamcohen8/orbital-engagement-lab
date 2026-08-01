@@ -1,0 +1,196 @@
+{
+  "checks": {
+    "claude": {
+      "capability_result": {
+        "capability_count": 3,
+        "effects": {
+          "executes": false,
+          "external_communication": false,
+          "reads": true,
+          "writes": false
+        },
+        "evidence": {
+          "complete": true,
+          "empty": false,
+          "truncated": false
+        },
+        "host": "claude",
+        "status": "completed",
+        "tool_id": "oel.describe_capabilities.v1",
+        "transport": "stdio"
+      },
+      "deviations": [
+        "Claude Code normalizes dotted MCP tool IDs to underscores in its host-local tool name.",
+        "Claude Code lazily discovers the OEL tool through ToolSearch before the call."
+      ],
+      "host": "claude",
+      "host_version": "2.1.215 (Claude Code)",
+      "model_alias": "haiku",
+      "protocol_revision": "2026-07-28",
+      "status": "passed"
+    },
+    "codex": {
+      "capability_result": {
+        "capability_count": 3,
+        "effects": {
+          "executes": false,
+          "external_communication": false,
+          "reads": true,
+          "writes": false
+        },
+        "evidence": {
+          "complete": true,
+          "empty": false,
+          "truncated": false
+        },
+        "host": "codex",
+        "status": "completed",
+        "tool_id": "oel.describe_capabilities.v1",
+        "transport": "stdio"
+      },
+      "deviations": [
+        "The non-interactive fixture explicitly pre-approves the single trusted read-only OEL tool."
+      ],
+      "host": "codex",
+      "host_version": "codex-cli 0.146.0-alpha.3.1",
+      "protocol_revision": "2026-07-28",
+      "status": "passed"
+    },
+    "inspector": {
+      "capability_result": {
+        "capability_count": 3,
+        "effects": {
+          "executes": false,
+          "external_communication": false,
+          "reads": true,
+          "writes": false
+        },
+        "evidence": {
+          "complete": true,
+          "empty": false,
+          "truncated": false
+        },
+        "host": "inspector",
+        "status": "completed",
+        "tool_id": "oel.describe_capabilities.v1",
+        "transport": "stdio"
+      },
+      "package": "@modelcontextprotocol/inspector@2.0.0",
+      "protocol_revision": "2026-07-28",
+      "registry_integrity": "sha512-uEoeEG7/+ZbrvccPF3EsgbfjcyJ3bWVJXT4pcZtpmDUhA0zdK4T4Tuj2oUphi2Huwl66LqVdo3Mx2PkS2SUHXA==",
+      "status": "passed",
+      "tool_ids": [
+        "oel.describe_capabilities.v1",
+        "oel.inspect_run.v1",
+        "oel.query_review.v1"
+      ]
+    },
+    "official_sdk_stdio": {
+      "conformance_checks": [
+        {
+          "check_id": "protocol_version",
+          "detail": {
+            "actual": "2026-07-28",
+            "expected": [
+              "2026-07-28"
+            ]
+          },
+          "passed": true
+        },
+        {
+          "check_id": "tool_capability",
+          "detail": {},
+          "passed": true
+        },
+        {
+          "check_id": "ping",
+          "detail": {
+            "reason": "ping was removed from MCP protocol revision 2026-07-28",
+            "skipped": true
+          },
+          "passed": true
+        },
+        {
+          "check_id": "tool_registry",
+          "detail": {
+            "actual": [
+              "oel.describe_capabilities.v1",
+              "oel.inspect_run.v1",
+              "oel.query_review.v1"
+            ]
+          },
+          "passed": true
+        },
+        {
+          "check_id": "schemas_present",
+          "detail": {},
+          "passed": true
+        },
+        {
+          "check_id": "structured_result",
+          "detail": {},
+          "passed": true
+        },
+        {
+          "check_id": "no_external_effect",
+          "detail": {},
+          "passed": true
+        },
+        {
+          "check_id": "audit_without_payload",
+          "detail": {},
+          "passed": true
+        }
+      ],
+      "error_handling": {
+        "code": -32602,
+        "data": null,
+        "message": "Handling metadata is required for this operation.",
+        "passed": true
+      },
+      "lifecycle": {
+        "clean_shutdowns": 2,
+        "passed": true,
+        "ping": "not_supported_by_protocol_revision_2026-07-28",
+        "sessions": [
+          {
+            "cancelled_request": true,
+            "protocol_revision": "2026-07-28",
+            "session": 1,
+            "tool_ids": [
+              "oel.describe_capabilities.v1",
+              "oel.inspect_run.v1",
+              "oel.query_review.v1"
+            ]
+          },
+          {
+            "cancelled_request": false,
+            "protocol_revision": "2026-07-28",
+            "session": 2,
+            "tool_ids": [
+              "oel.describe_capabilities.v1",
+              "oel.inspect_run.v1",
+              "oel.query_review.v1"
+            ]
+          }
+        ]
+      },
+      "protocol_revision": "2026-07-28",
+      "sdk_version": "2.0.0",
+      "status": "passed",
+      "tool_ids": [
+        "oel.describe_capabilities.v1",
+        "oel.inspect_run.v1",
+        "oel.query_review.v1"
+      ]
+    }
+  },
+  "oel_base_commit": "d532b58364cec19aa870b6f30b1f528216f7f404",
+  "platform": "macOS-15.7.7-arm64-arm-64bit",
+  "protocol_revision": "2026-07-28",
+  "python_version": "3.11.14",
+  "review_date": "2026-07-31",
+  "schema_version": 1,
+  "sdk_version": "2.0.0",
+  "status": "passed"
+}

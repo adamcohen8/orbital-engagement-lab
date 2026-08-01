@@ -1,0 +1,317 @@
+{
+  "checks": {
+    "official_sdk_stdio": {
+      "conformance_checks": [
+        {
+          "check_id": "protocol_version",
+          "detail": {
+            "actual": "2026-07-28",
+            "expected": [
+              "2026-07-28"
+            ]
+          },
+          "passed": true
+        },
+        {
+          "check_id": "tool_capability",
+          "detail": {},
+          "passed": true
+        },
+        {
+          "check_id": "ping",
+          "detail": {
+            "reason": "ping was removed from MCP protocol revision 2026-07-28",
+            "skipped": true
+          },
+          "passed": true
+        },
+        {
+          "check_id": "tool_registry",
+          "detail": {
+            "actual": [
+              "oel.describe_capabilities.v1",
+              "oel.inspect_run.v1",
+              "oel.query_review.v1",
+              "oel.plan_run.v1",
+              "oel.validate_scenario.v1",
+              "oel.run_scenario.v1",
+              "oel.compare_runs.v1",
+              "oel.plot_evidence.v1",
+              "oel.run_agent_task.v1",
+              "oel.prepare_report_packet.v1",
+              "oel.audit_report.v1"
+            ]
+          },
+          "passed": true
+        },
+        {
+          "check_id": "schemas_present",
+          "detail": {},
+          "passed": true
+        },
+        {
+          "check_id": "structured_result",
+          "detail": {},
+          "passed": true
+        },
+        {
+          "check_id": "no_external_effect",
+          "detail": {},
+          "passed": true
+        },
+        {
+          "check_id": "audit_without_payload",
+          "detail": {},
+          "passed": true
+        }
+      ],
+      "duration_ms": 8445,
+      "error_handling": {
+        "code": -32602,
+        "data": null,
+        "message": "Handling metadata is required for this operation.",
+        "passed": true
+      },
+      "lifecycle": {
+        "clean_shutdowns": 2,
+        "passed": true,
+        "ping": "not_supported_by_protocol_revision_2026-07-28",
+        "sessions": [
+          {
+            "cancelled_request": true,
+            "operator_guide_read": true,
+            "protocol_revision": "2026-07-28",
+            "resource_uris": [
+              "oel://capabilities/tools/v1",
+              "oel://review/saved-queries/v1",
+              "oel://agent/tasks/v1",
+              "oel://docs/operator-guide/v1"
+            ],
+            "session": 1,
+            "tool_ids": [
+              "oel.describe_capabilities.v1",
+              "oel.inspect_run.v1",
+              "oel.query_review.v1",
+              "oel.plan_run.v1",
+              "oel.validate_scenario.v1",
+              "oel.run_scenario.v1",
+              "oel.compare_runs.v1",
+              "oel.plot_evidence.v1",
+              "oel.run_agent_task.v1",
+              "oel.prepare_report_packet.v1",
+              "oel.audit_report.v1"
+            ]
+          },
+          {
+            "cancelled_request": false,
+            "operator_guide_read": true,
+            "protocol_revision": "2026-07-28",
+            "resource_uris": [
+              "oel://capabilities/tools/v1",
+              "oel://review/saved-queries/v1",
+              "oel://agent/tasks/v1",
+              "oel://docs/operator-guide/v1"
+            ],
+            "session": 2,
+            "tool_ids": [
+              "oel.describe_capabilities.v1",
+              "oel.inspect_run.v1",
+              "oel.query_review.v1",
+              "oel.plan_run.v1",
+              "oel.validate_scenario.v1",
+              "oel.run_scenario.v1",
+              "oel.compare_runs.v1",
+              "oel.plot_evidence.v1",
+              "oel.run_agent_task.v1",
+              "oel.prepare_report_packet.v1",
+              "oel.audit_report.v1"
+            ]
+          }
+        ]
+      },
+      "protocol_revision": "2026-07-28",
+      "resources": {
+        "passed": true,
+        "reads": [
+          {
+            "text_content_count": 1,
+            "uri": "oel://capabilities/tools/v1"
+          },
+          {
+            "text_content_count": 1,
+            "uri": "oel://review/saved-queries/v1"
+          },
+          {
+            "text_content_count": 1,
+            "uri": "oel://agent/tasks/v1"
+          },
+          {
+            "text_content_count": 1,
+            "uri": "oel://docs/operator-guide/v1"
+          }
+        ],
+        "resource_uris": [
+          "oel://capabilities/tools/v1",
+          "oel://review/saved-queries/v1",
+          "oel://agent/tasks/v1",
+          "oel://docs/operator-guide/v1"
+        ]
+      },
+      "sdk_version": "2.0.0",
+      "status": "passed",
+      "tool_ids": [
+        "oel.describe_capabilities.v1",
+        "oel.inspect_run.v1",
+        "oel.query_review.v1",
+        "oel.plan_run.v1",
+        "oel.validate_scenario.v1",
+        "oel.run_scenario.v1",
+        "oel.compare_runs.v1",
+        "oel.plot_evidence.v1",
+        "oel.run_agent_task.v1",
+        "oel.prepare_report_packet.v1",
+        "oel.audit_report.v1"
+      ]
+    },
+    "public_workflow_acceptance": {
+      "checks": [
+        {
+          "check_id": "restricted_profile",
+          "evidence": {
+            "complete": true,
+            "empty": false,
+            "truncated": false
+          },
+          "passed": true,
+          "status": "completed",
+          "tool_id": "oel.describe_capabilities.v1"
+        },
+        {
+          "check_id": "plan",
+          "evidence": {
+            "complete": true,
+            "empty": false,
+            "truncated": false
+          },
+          "passed": true,
+          "status": "completed",
+          "tool_id": "oel.plan_run.v1"
+        },
+        {
+          "check_id": "validate",
+          "evidence": {
+            "complete": true,
+            "empty": false,
+            "truncated": false
+          },
+          "passed": true,
+          "status": "completed",
+          "tool_id": "oel.validate_scenario.v1"
+        },
+        {
+          "check_id": "execute",
+          "evidence": {
+            "complete": true,
+            "empty": false,
+            "truncated": false
+          },
+          "passed": true,
+          "status": "completed",
+          "tool_id": "oel.run_scenario.v1"
+        },
+        {
+          "check_id": "inspect",
+          "evidence": {
+            "complete": true,
+            "empty": false,
+            "truncated": false
+          },
+          "passed": true,
+          "status": "completed",
+          "tool_id": "oel.inspect_run.v1"
+        },
+        {
+          "check_id": "query",
+          "evidence": {
+            "complete": true,
+            "empty": false,
+            "truncated": false
+          },
+          "passed": true,
+          "status": "completed",
+          "tool_id": "oel.query_review.v1"
+        },
+        {
+          "check_id": "agent_task",
+          "evidence": {
+            "complete": true,
+            "empty": false,
+            "truncated": false
+          },
+          "passed": true,
+          "status": "completed",
+          "tool_id": "oel.run_agent_task.v1"
+        },
+        {
+          "check_id": "compare",
+          "evidence": {
+            "complete": true,
+            "empty": false,
+            "truncated": false
+          },
+          "passed": true,
+          "status": "completed",
+          "tool_id": "oel.compare_runs.v1"
+        },
+        {
+          "check_id": "plot",
+          "evidence": {
+            "complete": true,
+            "empty": false,
+            "truncated": false
+          },
+          "passed": true,
+          "status": "completed",
+          "tool_id": "oel.plot_evidence.v1"
+        },
+        {
+          "check_id": "prepare_report_packet",
+          "evidence": {
+            "complete": true,
+            "empty": false,
+            "truncated": false
+          },
+          "passed": true,
+          "status": "completed",
+          "tool_id": "oel.prepare_report_packet.v1"
+        },
+        {
+          "check_id": "audit_report",
+          "evidence": {
+            "complete": true,
+            "empty": false,
+            "truncated": false
+          },
+          "passed": true,
+          "status": "completed",
+          "tool_id": "oel.audit_report.v1"
+        }
+      ],
+      "duration_ms": 14985,
+      "provider_calls": 0,
+      "schema_version": 1,
+      "status": "passed",
+      "transport": "stdio"
+    }
+  },
+  "oel_commit": "5846889384d54bde303930d1dacb2d3101c43200",
+  "platform": "macOS-15.7.7-arm64-arm-64bit",
+  "protocol_revision": "2026-07-28",
+  "python_version": "3.11.14",
+  "schema_version": 1,
+  "sdk_version": "2.0.0",
+  "status": "passed",
+  "release_evidence_status": "historical_superseded",
+  "superseded_after_commit": "e6165a870ba4d5fbec95ee43877e6e1985a5612a",
+  "regenerate_on_final_v0_23_0_commit": true
+}

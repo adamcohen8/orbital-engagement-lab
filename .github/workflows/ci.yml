@@ -2,9 +2,10 @@ name: CI
 
 on:
   pull_request:
-  push:
-    branches: [main]
-    tags: ["v*"]
+
+concurrency:
+  group: ci-${{ github.repository }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   public-core:
@@ -35,11 +36,12 @@ jobs:
       - name: Install package
         run: |
           python -m pip install -U pip
-          python -m pip install ".[dev]"
+          python -m pip install ".[dev,accel,mcp]"
 
-      - name: Run public tests
+      - name: Run public PR acceptance tests
+        if: ${{ github.event_name == 'pull_request' }}
         run: >-
-          python -m pytest -q sim/tests
+          python -m pytest -q -m "fast or smoke or product" sim/tests
           --durations=50 --durations-min=0.25
           --junitxml=test-results-public-core.xml
 

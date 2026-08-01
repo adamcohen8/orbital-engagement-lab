@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol
+from pathlib import Path
+from typing import Any, Callable, Protocol
 
 from integrations.oel_mcp.protocol import MCP_PROTOCOL_VERSION, OELMCPServer
 
@@ -55,13 +56,202 @@ class DispatchConformanceClient:
         return dict(response.get("result", {}) or {})
 
 
-def run_conformance(client: ConformanceClient, *, expected_tool_ids: tuple[str, ...]) -> ConformanceResult:
+class SDKConformanceClient:
+    """Synchronous conformance adapter over the official SDK's in-memory client."""
+
+    def __init__(self, server: Any) -> None:
+        self.server = server
+
+    def initialize(self) -> dict[str, Any]:
+        return self._request("initialize")
+
+    def list_tools(self) -> list[dict[str, Any]]:
+        return list(self._request("list_tools"))
+
+    def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        return self._request("call_tool", name=name, arguments=arguments)
+
+    def ping(self) -> dict[str, Any]:
+        return self._request("ping")
+
+    def _request(self, operation: str, **kwargs: Any) -> Any:
+        try:
+            import anyio
+        except ImportError as exc:  # pragma: no cover - covered by no-MCP installation checks
+            raise RuntimeError(
+                'The optional MCP SDK is not installed. Install the OEL MCP profile with `pip install ".[mcp]"`.'
+            ) from exc
+        try:
+            return anyio.run(self._request_async, operation, kwargs)
+        except BaseException as exc:
+            from mcp import MCPError
+
+            nested = _find_nested_exception(exc, MCPError)
+            if nested is not None:
+                raise nested from None
+            raise
+
+    async def _request_async(self, operation: str, kwargs: dict[str, Any]) -> Any:
+        import warnings
+
+        try:
+            from mcp import Client, MCPDeprecationWarning
+        except ImportError as exc:  # pragma: no cover - covered by no-MCP installation checks
+            raise RuntimeError(
+                'The optional MCP SDK is not installed. Install the OEL MCP profile with `pip install ".[mcp]"`.'
+            ) from exc
+
+        async with Client(self.server, mode="legacy", cache=None) as client:
+            operations: dict[str, Callable[[], Any]] = {
+                "initialize": lambda: {
+                    "protocolVersion": client.protocol_version,
+                    "capabilities": client.server_capabilities.model_dump(by_alias=True, exclude_none=True),
+                    "serverInfo": client.server_info.model_dump(by_alias=True, exclude_none=True),
+                },
+                "list_tools": lambda: client.list_tools(cache_mode="reload"),
+                "call_tool": lambda: client.call_tool(str(kwargs["name"]), dict(kwargs["arguments"])),
+                "ping": client.send_ping,
+            }
+            if operation not in operations:
+                raise ValueError(f"Unsupported conformance operation: {operation}")
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", MCPDeprecationWarning)
+                result = operations[operation]()
+                if hasattr(result, "__await__"):
+                    result = await result
+
+        if operation == "list_tools":
+            return [tool.model_dump(by_alias=True, exclude_none=True) for tool in result.tools]
+        if operation in {"call_tool", "ping"}:
+            return result.model_dump(by_alias=True, exclude_none=True)
+        return result
+
+
+class SDKStdioConformanceClient:
+    """Official SDK client adapter that starts a fresh stdio server per operation."""
+
+    def __init__(
+        self,
+        *,
+        command: str,
+        args: tuple[str, ...],
+        cwd: str | Path,
+        env: dict[str, str],
+        mode: str = "auto",
+    ) -> None:
+        self.command = command
+        self.args = args
+        self.cwd = Path(cwd)
+        self.env = dict(env)
+        self.mode = mode
+
+    def initialize(self) -> dict[str, Any]:
+        return self._request("initialize")
+
+    def list_tools(self) -> list[dict[str, Any]]:
+        return list(self._request("list_tools"))
+
+    def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        return self._request("call_tool", name=name, arguments=arguments)
+
+    def ping(self) -> dict[str, Any]:
+        return self._request("ping")
+
+    def list_resources(self) -> list[dict[str, Any]]:
+        return list(self._request("list_resources"))
+
+    def read_resource(self, uri: str) -> dict[str, Any]:
+        return self._request("read_resource", uri=uri)
+
+    def _request(self, operation: str, **kwargs: Any) -> Any:
+        try:
+            import anyio
+        except ImportError as exc:  # pragma: no cover - covered by no-MCP installation checks
+            raise RuntimeError(
+                'The optional MCP SDK is not installed. Install the OEL MCP profile with `pip install ".[mcp]"`.'
+            ) from exc
+        try:
+            return anyio.run(self._request_async, operation, kwargs)
+        except BaseException as exc:
+            from mcp import MCPError
+
+            nested = _find_nested_exception(exc, MCPError)
+            if nested is not None:
+                raise nested from None
+            raise
+
+    async def _request_async(self, operation: str, kwargs: dict[str, Any]) -> Any:
+        import warnings
+
+        try:
+            from mcp import Client, MCPDeprecationWarning, StdioServerParameters, stdio_client
+        except ImportError as exc:  # pragma: no cover - covered by no-MCP installation checks
+            raise RuntimeError(
+                'The optional MCP SDK is not installed. Install the OEL MCP profile with `pip install ".[mcp]"`.'
+            ) from exc
+
+        parameters = StdioServerParameters(
+            command=self.command,
+            args=list(self.args),
+            cwd=self.cwd,
+            env=self.env,
+        )
+        async with Client(stdio_client(parameters), mode=self.mode, cache=None) as client:
+            operations: dict[str, Callable[[], Any]] = {
+                "initialize": lambda: {
+                    "protocolVersion": client.protocol_version,
+                    "capabilities": client.server_capabilities.model_dump(by_alias=True, exclude_none=True),
+                    "serverInfo": client.server_info.model_dump(by_alias=True, exclude_none=True),
+                },
+                "list_tools": lambda: client.list_tools(cache_mode="reload"),
+                "call_tool": lambda: client.call_tool(str(kwargs["name"]), dict(kwargs["arguments"])),
+                "ping": client.send_ping,
+                "list_resources": lambda: client.list_resources(cache_mode="reload"),
+                "read_resource": lambda: client.read_resource(str(kwargs["uri"]), cache_mode="reload"),
+            }
+            if operation not in operations:
+                raise ValueError(f"Unsupported conformance operation: {operation}")
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", MCPDeprecationWarning)
+                result = operations[operation]()
+                if hasattr(result, "__await__"):
+                    result = await result
+
+        if operation == "list_tools":
+            return [tool.model_dump(by_alias=True, exclude_none=True) for tool in result.tools]
+        if operation == "list_resources":
+            return [resource.model_dump(by_alias=True, exclude_none=True) for resource in result.resources]
+        if operation in {"call_tool", "ping", "read_resource"}:
+            return result.model_dump(by_alias=True, exclude_none=True)
+        return result
+
+
+def run_conformance(
+    client: ConformanceClient,
+    *,
+    expected_tool_ids: tuple[str, ...],
+    expected_protocol_versions: tuple[str, ...] = (MCP_PROTOCOL_VERSION,),
+    check_ping: bool = True,
+) -> ConformanceResult:
     checks: list[dict[str, Any]] = []
 
     initialized = client.initialize()
-    _check(checks, "protocol_version", initialized.get("protocolVersion") == MCP_PROTOCOL_VERSION)
+    _check(
+        checks,
+        "protocol_version",
+        initialized.get("protocolVersion") in expected_protocol_versions,
+        detail={"actual": initialized.get("protocolVersion"), "expected": expected_protocol_versions},
+    )
     _check(checks, "tool_capability", "tools" in dict(initialized.get("capabilities", {}) or {}))
-    _check(checks, "ping", client.ping() == {})
+    if check_ping:
+        _check(checks, "ping", client.ping() == {})
+    else:
+        _check(
+            checks,
+            "ping",
+            True,
+            detail={"skipped": True, "reason": "ping was removed from MCP protocol revision 2026-07-28"},
+        )
 
     tools = client.list_tools()
     names = tuple(str(item.get("name", "")) for item in tools)
@@ -89,3 +279,13 @@ def _check(
     detail: dict[str, Any] | None = None,
 ) -> None:
     checks.append({"check_id": check_id, "passed": bool(passed), "detail": dict(detail or {})})
+
+
+def _find_nested_exception(exception: BaseException, exception_type: type[BaseException]) -> BaseException | None:
+    if isinstance(exception, exception_type):
+        return exception
+    for nested in getattr(exception, "exceptions", ()):
+        found = _find_nested_exception(nested, exception_type)
+        if found is not None:
+            return found
+    return None

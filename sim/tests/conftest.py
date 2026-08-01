@@ -99,7 +99,7 @@ SLOW_TESTS = {
     ("test_oel_agents.py", "test_public_agent_task_card_review_queries_execute"),
     (
         "test_oel_mcp_phase0.py",
-        "test_core_never_imports_optional_mcp_and_pyproject_has_no_prerelease_dependency",
+        "test_core_never_imports_optional_mcp_and_sdk_dependency_is_bounded",
     ),
     (
         "test_orbit_determination_validation.py",

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "orbital-engagement-lab"
-version = "0.22.2"
+version = "0.23.0"
 description = "Integrated spacecraft simulation and analysis platform for rendezvous, control, validation, and mission prototyping."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -19,6 +19,10 @@ dependencies = [
   "PyYAML>=6.0",
   "scipy>=1.13",
 ]
+
+[project.scripts]
+oel-license = "sim.licensing.__main__:main"
+oel-mcp = "integrations.oel_mcp.public_server:main"
 
 [project.optional-dependencies]
 dev = [
@@ -42,6 +46,9 @@ accel = [
 validation = [
   "sgp4==2.23",
 ]
+mcp = [
+  "mcp>=2.0.0,<3",
+]
 full = [
   "pytest>=9.0.3",
   "ruff==0.15.14",
@@ -55,6 +62,7 @@ full = [
   "numba>=0.59",
   "scipy>=1.13",
   "sgp4==2.23",
+  "mcp>=2.0.0,<3",
 ]
 
 [tool.setuptools]
@@ -70,6 +78,9 @@ sim = [
   "game/assets/*.md",
   "game/music/*.md",
 ]
+"integrations.oel_mcp" = [
+  "resource_data/*.md",
+]
 
 [tool.setuptools.exclude-package-data]
 sim = [
@@ -77,7 +88,7 @@ sim = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["sim*", "machine_learning*"]
+include = ["sim*", "machine_learning*", "integrations.oel_mcp*"]
 exclude = ["sim.tests", "sim.tests.*"]
 
 [tool.ruff]

@@ -40,6 +40,33 @@ class MCPPathPolicy:
             raise FileNotFoundError("Required authorized input path was not found.")
         return path
 
+    def resolve_read_child(
+        self,
+        root: str | Path,
+        *parts: str,
+        kind: str = "any",
+        required: bool = True,
+    ) -> Path:
+        """Resolve a derived input while keeping it inside its authorized parent."""
+
+        parent = self.resolve_read(root, kind="directory")
+        path = parent.joinpath(*parts).resolve()
+        self._require_root(path, (parent,))
+        self._require_root(path, self.read_roots)
+        if required:
+            if kind == "file" and not path.is_file():
+                raise FileNotFoundError("Required authorized input file was not found.")
+            if kind == "directory" and not path.is_dir():
+                raise FileNotFoundError("Required authorized input directory was not found.")
+            if kind == "any" and not path.exists():
+                raise FileNotFoundError("Required authorized input path was not found.")
+        elif path.exists():
+            if kind == "file" and not path.is_file():
+                raise FileNotFoundError("Authorized optional input is not a file.")
+            if kind == "directory" and not path.is_dir():
+                raise FileNotFoundError("Authorized optional input is not a directory.")
+        return path
+
     def resolve_write(self, value: str | Path) -> Path:
         path = self._resolve(value)
         self._require_root(path, self.write_roots)

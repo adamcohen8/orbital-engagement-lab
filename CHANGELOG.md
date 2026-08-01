@@ -8,6 +8,53 @@ migration-sensitive behavior explicitly.
 
 ## Unreleased
 
+## 0.23.0 - 2026-07-31
+
+Release thesis: `v0.23.0` promotes OEL's local MCP integration onto the stable
+Python MCP SDK v2, giving connected agents a bounded, contract-driven path to
+inspect deterministic evidence, validate and run approved public workflows,
+and use separately entitled Pro-local analytical tools.
+
+Private/Pro scope: `v0.23.0` adds local-only IHE validation, execution, and
+completed-evidence inspection plus bounded OEL Scale catalog inspection and
+targeted recompute planning. Hidden truth remains unavailable through MCP,
+write and execution effects require server-configured operator approvals, and
+remote transport or frontier collaboration is not enabled.
+
+### Added
+
+- Added the optional `.[mcp]` install profile, `oel-mcp` console entry point,
+  official SDK v2 stdio transport, fixed public resources, local setup doctor,
+  host configuration generation, and offline interoperability acceptance.
+- Added supported public tools for completed-run inspection and review queries,
+  scenario planning and validation, explicitly approved deterministic runs,
+  completed-run comparison, allowlisted evidence plotting, public task recipes,
+  and provider-neutral report packet preparation and audit.
+- Added separately entitled Pro-local tools for labeled IHE and bounded OEL
+  Scale workflows, including resource, cancellation, data-handling, manifest,
+  and hidden-truth controls.
+
+### Changed
+
+- Consolidated the blocking private CI test partitions onto one dependency
+  installation, retained current-environment MCP and generated-public PR gates,
+  moved the full Python/MCP matrix and supply-chain evidence into the local
+  and extended-validation backstops in local or scheduled/manual workflows.
+  Routine private and public CI now triggers only for PRs, avoiding identical
+  reruns on merge commits and release tags.
+
+### Security
+
+- Required operator approval from every write or execution contract, including
+  deprecated Pro contracts, and bound IHE execution authorization to referenced
+  input and hypothesis-definition hashes.
+- Reauthorized resolved files derived from approved output directories so
+  review stores and completed-evidence artifacts cannot escape configured read
+  roots through symlinks.
+- Kept failed task states intact across MCP envelopes and manifests, normalized
+  SQLite BLOB values for protocol-safe serialization, and prevented report
+  preparation from emitting packets that exceed the audit size limit.
+
 ## 0.22.2 - 2026-07-19
 
 Release thesis: `v0.22.2` narrows the remaining high-fidelity ONP runtime gap
