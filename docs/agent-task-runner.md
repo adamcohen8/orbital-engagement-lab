@@ -1,5 +1,9 @@
 # Agent Task Runner
 
+Commands in this guide use `python` after the OEL virtual environment has been
+activated. See [Installing OEL](installation.md) for explicit Windows
+PowerShell and macOS/Linux paths.
+
 `sim.agent_task` is an optional orchestration layer for OEL-capable agents. It
 packages common validate/run/inspect workflows into machine-readable recipes
 and writes an `agent_evidence_packet.json` that can be cited, diffed, or handed
@@ -42,40 +46,40 @@ maturity when the evidence depends on the recipe.
 List bundled recipes:
 
 ```bash
-.venv/bin/python -m sim.agent_task list
-.venv/bin/python -m sim.agent_task list --json
+python -m sim.agent_task list
+python -m sim.agent_task list --json
 ```
 
 
 List named plot recipes:
 
 ```bash
-.venv/bin/python -m sim.agent_task list --plots
+python -m sim.agent_task list --plots
 ```
 
 Inspect semantic metric definitions:
 
 ```bash
-.venv/bin/python -m sim.agent_task semantics
-.venv/bin/python -m sim.agent_task semantics closest_approach_km --json
+python -m sim.agent_task semantics
+python -m sim.agent_task semantics closest_approach_km --json
 ```
 
 Run a recipe and write an evidence packet:
 
 ```bash
-.venv/bin/python -m sim.agent_task run quickstart_review --output-root outputs/agent_tasks --json
+python -m sim.agent_task run quickstart_review --output-root outputs/agent_tasks --json
 ```
 
 Validate a recipe without executing it:
 
 ```bash
-.venv/bin/python -m sim.agent_task run quickstart_review --output-root outputs/agent_tasks --dry-run
+python -m sim.agent_task run quickstart_review --output-root outputs/agent_tasks --dry-run
 ```
 
 Inspect a completed output directory:
 
 ```bash
-.venv/bin/python -m sim.agent_task inspect outputs/quickstart_5min \
+python -m sim.agent_task inspect outputs/quickstart_5min \
   --query run_metadata \
   --query rendezvous_closest_approach \
   --json
@@ -89,7 +93,7 @@ before citing metrics.
 Compare two configs through common review metrics:
 
 ```bash
-.venv/bin/python -m sim.agent_task compare \
+python -m sim.agent_task compare \
   --base configs/quickstart_5min.yaml \
   --candidate configs/ric_pd_10km_experiment.yaml \
   --output-dir outputs/agent_tasks/quickstart_vs_flagship \
@@ -108,7 +112,7 @@ definition.
 Create a standard plot from a completed review store:
 
 ```bash
-.venv/bin/python -m sim.agent_task plot outputs/quickstart_5min \
+python -m sim.agent_task plot outputs/quickstart_5min \
   --recipe relative_range \
   --style oel_light \
   --format png

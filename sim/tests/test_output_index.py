@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
-from sim.reporting.output_index import write_output_index
+from sim.reporting.output_index import _single_run_next_command, write_output_index
 
 
 def test_write_output_index_creates_single_run_start_here_file(tmp_path: Path) -> None:
@@ -134,5 +135,16 @@ def test_write_output_index_uses_review_query_as_next_command_when_review_exists
 
     text = index_path.read_text(encoding="utf-8")
 
-    assert ".venv/bin/python -m sim.review" in text
+    assert "python -m sim.review" in text
+    assert ".venv/bin/python" not in text
+    assert "docs/installation.md" in text
     assert "--saved-query run_metadata" in text
+
+
+def test_single_run_next_command_quotes_windows_paths() -> None:
+    with patch("sim.reporting.output_index.os.name", "nt"):
+        command = _single_run_next_command({"config_source_path": r"C:\Users\Instructor\OEL Course\scenario.yaml"})
+
+    assert command == (
+        'python run_simulation.py --config "C:\\Users\\Instructor\\OEL Course\\scenario.yaml" --validate-only'
+    )

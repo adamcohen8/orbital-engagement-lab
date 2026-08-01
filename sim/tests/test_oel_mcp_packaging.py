@@ -29,9 +29,16 @@ def test_m5_wheel_packages_supported_mcp_profiles_and_keeps_dependency_optional(
         names = set(archive.namelist())
         metadata_name = next(name for name in names if name.endswith(".dist-info/METADATA"))
         entry_points_name = next(name for name in names if name.endswith(".dist-info/entry_points.txt"))
+        wheel_metadata_name = next(name for name in names if name.endswith(".dist-info/WHEEL"))
         metadata = archive.read(metadata_name).decode("utf-8")
         entry_points = archive.read(entry_points_name).decode("utf-8")
+        wheel_metadata = archive.read(wheel_metadata_name).decode("utf-8")
 
+    assert wheel_name.endswith("-py3-none-any.whl")
+    assert "Root-Is-Purelib: true" in wheel_metadata
+    assert "Tag: py3-none-any" in wheel_metadata
+    assert "License-Expression: MIT" in metadata
+    assert "License-File: LICENSE.txt" in metadata
     assert any(name.startswith("sim/") for name in names)
     assert "integrations/oel_mcp/acceptance.py" in names
     assert "integrations/oel_mcp/diagnostics.py" in names

@@ -39,6 +39,11 @@ first, then follow the public implementation maps in
 
 ## Default Agent Posture
 
+Install and activate OEL through `docs/installation.md` before running project
+commands. Commands in this playbook use portable `python`; if activation is
+unavailable, substitute the explicit PowerShell or POSIX interpreter path from
+that guide.
+
 - Treat scenario YAML, CLI commands, Python APIs, tests, docs, and generated
   artifacts as the supported interface.
 - Treat **OGP** as the product name for the **OEL General Propagator**:
@@ -65,7 +70,7 @@ first, then follow the public implementation maps in
 - Treat `--safe-validate` as an inspection boundary, not permission to execute
   an untrusted config. Trust referenced plugins, modules, and external paths
   before ordinary validation or execution.
-- Run `.venv/bin/python run_simulation.py --config <path> --validate-only` before running
+- Run `python run_simulation.py --config <path> --validate-only` before running
   a new or edited scenario.
 - Treat unknown-field errors as intent failures; do not remove or rename fields
   until the normalized contract is understood. Non-empty Cartesian initial
@@ -75,7 +80,7 @@ first, then follow the public implementation maps in
   writers. Do not invent shortcut physics in agent scripts or reports.
 - Prefer the review store query API over ad hoc parsing of large run logs when
   `review/run.sqlite` is available.
-- Use `.venv/bin/python -m sim.agent_task` when a bundled recipe, comparison,
+- Use `python -m sim.agent_task` when a bundled recipe, comparison,
   standard plot, or portable `agent_evidence_packet.json` would make the
   workflow more reproducible.
 - Explain orbital mechanics, equations, controllers, and outputs from public
@@ -190,24 +195,24 @@ outputs:
 Then validate and run through the simulator:
 
 ```bash
-.venv/bin/python run_simulation.py --config <path> --validate-only
-.venv/bin/python run_simulation.py --config <path>
+python run_simulation.py --config <path> --validate-only
+python run_simulation.py --config <path>
 ```
 
 After the run, query the saved review DB:
 
 ```bash
-.venv/bin/python -m sim.review outputs/<scenario_name> --query "SELECT scenario_name, duration_s, samples FROM run_metadata"
-.venv/bin/python -m sim.review outputs/<scenario_name> --query "SELECT time_s, range_km FROM relative_state ORDER BY time_s LIMIT 20" --json
+python -m sim.review outputs/<scenario_name> --query "SELECT scenario_name, duration_s, samples FROM run_metadata"
+python -m sim.review outputs/<scenario_name> --query "SELECT time_s, range_km FROM relative_state ORDER BY time_s LIMIT 20" --json
 ```
 
 For a machine-readable evidence packet around common recipes or completed
 outputs, use:
 
 ```bash
-.venv/bin/python -m sim.agent_task list
-.venv/bin/python -m sim.agent_task run quickstart_review --output-root outputs/agent_tasks
-.venv/bin/python -m sim.agent_task inspect outputs/<scenario_name> --query run_metadata --json
+python -m sim.agent_task list
+python -m sim.agent_task run quickstart_review --output-root outputs/agent_tasks
+python -m sim.agent_task inspect outputs/<scenario_name> --query run_metadata --json
 ```
 
 Rules for agents:
@@ -226,14 +231,14 @@ Rules for agents:
 - If `review/run.sqlite` is missing, fall back to `index.md`,
   `master_run_summary.json`, CSV histories, and plots. Do not pretend a review
   store exists.
-- Use `sim.review.EvidencePlotter` or `.venv/bin/python -m sim.review plot`
+- Use `sim.review.EvidencePlotter` or `python -m sim.review plot`
   for custom OEL-styled plots from completed review evidence. See
   `docs/agent-custom-plots.md`.
 - Before handing off a generated plot, visually inspect it and fix obvious
   presentation defects such as legends covering data, overlapping labels,
   clipped text, unreadable tick labels, blank figures, or missing expected
   series.
-- Use `.venv/bin/python -m sim.review` for table inspection and the custom
+- Use `python -m sim.review` for table inspection and the custom
   plotting API for brief/report figures. Experimental review viewers and
   desktop workbenches are local-only until they are product-ready.
 
@@ -258,20 +263,20 @@ Rules:
 ## Public Commands
 
 ```bash
-.venv/bin/python run_simulation.py --doctor
-.venv/bin/python run_simulation.py --quickstart --validate-only
-.venv/bin/python run_simulation.py --quickstart
-.venv/bin/python run_simulation.py --config configs/automation_smoke.yaml --validate-only
-.venv/bin/python run_simulation.py --config configs/automation_smoke.yaml
-.venv/bin/python -m sim.review outputs/<scenario_name> --query "SELECT scenario_name FROM run_metadata"
-.venv/bin/python run_game.py
+python run_simulation.py --doctor
+python run_simulation.py --quickstart --validate-only
+python run_simulation.py --quickstart
+python run_simulation.py --config configs/automation_smoke.yaml --validate-only
+python run_simulation.py --config configs/automation_smoke.yaml
+python -m sim.review outputs/<scenario_name> --query "SELECT scenario_name FROM run_metadata"
+python run_game.py
 ```
 
 For generated examples and evaluation fixtures:
 
 ```bash
-.venv/bin/python run_simulation.py --config agents/examples/public_agent_single_satellite.yaml --validate-only
-.venv/bin/python run_simulation.py --config agents/examples/public_agent_single_satellite.yaml
+python run_simulation.py --config agents/examples/public_agent_single_satellite.yaml --validate-only
+python run_simulation.py --config agents/examples/public_agent_single_satellite.yaml
 ```
 
 For repeatable public agent task checks, use `docs/agent-task-cards.md`.

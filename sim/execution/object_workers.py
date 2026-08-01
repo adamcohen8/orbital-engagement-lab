@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from multiprocessing import get_context
+from multiprocessing.context import BaseContext
 from traceback import format_exc
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -16,6 +16,7 @@ from sim.dynamics.attitude.rigid_body import (
     get_attitude_guardrail_stats,
 )
 from sim.execution.runtime_profile import _RuntimeProfiler
+from sim.platform_compat import process_context
 from sim.runtime_support import AgentRuntime
 from sim.utils.parallel import restore_env_vars, set_parallel_worker_thread_limits
 
@@ -134,9 +135,16 @@ class SerialObjectStepExecutor:
 class ProcessPoolObjectStepExecutor:
     backend_name = "process_pool"
 
-    def __init__(self, engine: _SingleRunEngine, *, max_workers: int) -> None:
+    def __init__(
+        self,
+        engine: _SingleRunEngine,
+        *,
+        max_workers: int,
+        context: BaseContext | None = None,
+    ) -> None:
         self.engine = engine
         self.max_workers = int(max(1, max_workers))
+        self._context = context if context is not None else process_context()
         self._worker_processes: list[Any] = []
         self._worker_connections: list[Any] = []
         self._executor_index_by_object: dict[str, int] = {}
@@ -153,8 +161,8 @@ class ProcessPoolObjectStepExecutor:
                     item.object_id: self.engine._process_worker_engine_snapshot(item)
                     for item in group
                 }
-                parent_connection, worker_connection = get_context().Pipe(duplex=True)
-                process = get_context().Process(
+                parent_connection, worker_connection = self._context.Pipe(duplex=True)
+                process = self._context.Process(
                     target=_persistent_object_worker_loop,
                     args=(worker_connection, snapshots),
                     name=f"oel-object-worker-{worker_index}",
@@ -236,7 +244,10 @@ class ProcessPoolObjectStepExecutor:
         for connection in self._worker_connections:
             connection.close()
         for process in self._worker_processes:
-            process.join()
+            process.join(timeout=5.0)
+            if process.is_alive():
+                process.terminate()
+                process.join(timeout=5.0)
         self._worker_connections.clear()
         self._worker_processes.clear()
         self._executor_index_by_object.clear()

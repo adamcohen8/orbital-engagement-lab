@@ -46,14 +46,15 @@ Codex, Cursor, Claude Code, Gemini CLI, and similar tools should begin with:
 
 1. Read `AGENTS.md`.
 2. Read `agents/public/AGENTS.md`.
-3. Read the task-relevant docs, usually `docs/scenario-yaml.md`,
+3. Install and activate OEL using `docs/installation.md`.
+4. Read the task-relevant docs, usually `docs/scenario-yaml.md`,
    `docs/quickstart.md`, `docs/python-api.md`, or `docs/game-mode-roadmap.md`.
-4. Start from the nearest public config or example when it fits, or create a
+5. Start from the nearest public config or example when it fits, or create a
    scoped new scenario when the user's request is different.
-5. Validate any generated or edited scenario before running it.
-6. Prefer `.venv/bin/python -m sim.review` when the run includes `review/run.sqlite`.
-7. Summarize results only from generated artifacts.
-8. Use `agents/public/evaluation-rubric.md` to judge whether the scenario
+6. Validate any generated or edited scenario before running it.
+7. Prefer `python -m sim.review` when the run includes `review/run.sqlite`.
+8. Summarize results only from generated artifacts.
+9. Use `agents/public/evaluation-rubric.md` to judge whether the scenario
    supports the user's goal.
 
 For evaluator-facing trials, use
@@ -74,48 +75,52 @@ add smoke coverage when they create reusable examples.
 
 ## Canonical Commands
 
+Activate the OEL virtual environment first. The commands below intentionally
+use the portable `python` form; see [Installing OEL](installation.md) for
+explicit Windows PowerShell and macOS/Linux paths.
+
 Validate environment:
 
 ```bash
-.venv/bin/python run_simulation.py --doctor
+python run_simulation.py --doctor
 ```
 
 Validate config:
 
 ```bash
-.venv/bin/python run_simulation.py --config <scenario.yaml> --validate-only
+python run_simulation.py --config <scenario.yaml> --validate-only
 ```
 
 Run scenario:
 
 ```bash
-.venv/bin/python run_simulation.py --config <scenario.yaml>
+python run_simulation.py --config <scenario.yaml>
 ```
 
 Run public quickstart:
 
 ```bash
-.venv/bin/python run_simulation.py --quickstart --validate-only
-.venv/bin/python run_simulation.py --quickstart
+python run_simulation.py --quickstart --validate-only
+python run_simulation.py --quickstart
 ```
 
 Run smoke checks:
 
 ```bash
-.venv/bin/python -m pytest sim/tests/test_oel_agents.py
-.venv/bin/python -m pytest sim/tests/test_quickstart_5min.py
+python -m pytest sim/tests/test_oel_agents.py
+python -m pytest sim/tests/test_quickstart_5min.py
 ```
 
 Run all agent-generated example checks:
 
 ```bash
-.venv/bin/python -m pytest sim/tests/test_oel_agents.py
+python -m pytest sim/tests/test_oel_agents.py
 ```
 
 Generate public report artifacts:
 
 ```bash
-.venv/bin/python run_simulation.py --quickstart
+python run_simulation.py --quickstart
 ```
 
 The public core writes deterministic Markdown, JSON, CSV, and plot artifacts.
@@ -123,13 +128,7 @@ The public core writes deterministic Markdown, JSON, CSV, and plot artifacts.
 Inspect outputs:
 
 ```bash
-.venv/bin/python - <<'PY'
-import json
-from pathlib import Path
-
-summary_path = Path("outputs/quickstart_5min/master_run_summary.json")
-print(json.dumps(json.loads(summary_path.read_text()), indent=2))
-PY
+python -c "import json; from pathlib import Path; p = Path('outputs/quickstart_5min/master_run_summary.json'); print(json.dumps(json.loads(p.read_text()), indent=2))"
 ```
 
 For a normal completed run, inspect `index.md` first, then
@@ -138,21 +137,21 @@ When the run has `outputs.review.enabled: true`, prefer the review query API
 over ad hoc parsing of large logs:
 
 ```bash
-.venv/bin/python -m sim.review outputs/my_run --query "SELECT scenario_name, duration_s FROM run_metadata"
-.venv/bin/python -m sim.review outputs/my_run --query "SELECT time_s, range_km FROM relative_state LIMIT 20" --json
+python -m sim.review outputs/my_run --query "SELECT scenario_name, duration_s FROM run_metadata"
+python -m sim.review outputs/my_run --query "SELECT time_s, range_km FROM relative_state LIMIT 20" --json
 ```
 
 Common review queries are maintained in
 [`agent-review-queries.md`](agent-review-queries.md). Agents should state the
 query used when a conclusion depends on review-store evidence.
 
-For table review, prefer `.venv/bin/python -m sim.review`. For custom brief or
+For table review, prefer `python -m sim.review`. For custom brief or
 report figures, use the OEL-styled review plotting API described in
 [`agent-custom-plots.md`](agent-custom-plots.md):
 
 ```bash
-.venv/bin/python -m sim.review plot outputs/my_run --recipe relative_velocity_components --style light
-.venv/bin/python -m sim.review.plot outputs/my_run --sql "SELECT time_s, range_km FROM relative_state ORDER BY time_s" --x time_s --y range_km
+python -m sim.review plot outputs/my_run --recipe relative_velocity_components --style light
+python -m sim.review.plot outputs/my_run --sql "SELECT time_s, range_km FROM relative_state ORDER BY time_s" --x time_s --y range_km
 ```
 
 For repeatable agent handoffs, `sim.agent_task` can prepare review-enabled
@@ -161,9 +160,9 @@ compare two configs, create standard review plots, and write
 `agent_evidence_packet.json`:
 
 ```bash
-.venv/bin/python -m sim.agent_task list
-.venv/bin/python -m sim.agent_task run quickstart_review --output-root outputs/agent_tasks --json
-.venv/bin/python -m sim.agent_task inspect outputs/quickstart_5min --query run_metadata --json
+python -m sim.agent_task list
+python -m sim.agent_task run quickstart_review --output-root outputs/agent_tasks --json
+python -m sim.agent_task inspect outputs/quickstart_5min --query run_metadata --json
 ```
 
 Treat this as an orchestration helper around documented workflows, not as a
@@ -345,12 +344,12 @@ does not match an example:
 
 | Goal | Example | Validate |
 | --- | --- | --- |
-| Passive orbit propagation | `agents/examples/public_agent_single_satellite.yaml` | `.venv/bin/python run_simulation.py --config agents/examples/public_agent_single_satellite.yaml --validate-only` |
-| Closed-loop rendezvous | `agents/examples/public_agent_rendezvous_lqr.yaml` | `.venv/bin/python run_simulation.py --config agents/examples/public_agent_rendezvous_lqr.yaml --validate-only` |
-| Mission recovery +C burn | `agents/examples/public_agent_mission_recovery_plus_c_burn.yaml` | `.venv/bin/python run_simulation.py --config agents/examples/public_agent_mission_recovery_plus_c_burn.yaml --validate-only` |
-| Mission reconstitution trade space | `agents/examples/public_agent_mission_reconstitution_trade_space.yaml` | `.venv/bin/python run_simulation.py --config agents/examples/public_agent_mission_reconstitution_trade_space.yaml --validate-only` |
-| TLE ground-station access | `agents/examples/public_agent_ground_access.yaml` | `.venv/bin/python run_simulation.py --config agents/examples/public_agent_ground_access.yaml --validate-only` |
-| Attitude hold | `agents/examples/public_agent_attitude_hold.yaml` | `.venv/bin/python run_simulation.py --config agents/examples/public_agent_attitude_hold.yaml --validate-only` |
+| Passive orbit propagation | `agents/examples/public_agent_single_satellite.yaml` | `python run_simulation.py --config agents/examples/public_agent_single_satellite.yaml --validate-only` |
+| Closed-loop rendezvous | `agents/examples/public_agent_rendezvous_lqr.yaml` | `python run_simulation.py --config agents/examples/public_agent_rendezvous_lqr.yaml --validate-only` |
+| Mission recovery +C burn | `agents/examples/public_agent_mission_recovery_plus_c_burn.yaml` | `python run_simulation.py --config agents/examples/public_agent_mission_recovery_plus_c_burn.yaml --validate-only` |
+| Mission reconstitution trade space | `agents/examples/public_agent_mission_reconstitution_trade_space.yaml` | `python run_simulation.py --config agents/examples/public_agent_mission_reconstitution_trade_space.yaml --validate-only` |
+| TLE ground-station access | `agents/examples/public_agent_ground_access.yaml` | `python run_simulation.py --config agents/examples/public_agent_ground_access.yaml --validate-only` |
+| Attitude hold | `agents/examples/public_agent_attitude_hold.yaml` | `python run_simulation.py --config agents/examples/public_agent_attitude_hold.yaml --validate-only` |
 
 These examples enable standard review output so agents can practice querying
 `review/run.sqlite` after a successful run.
@@ -419,8 +418,8 @@ Example request:
 Example commands:
 
 ```bash
-.venv/bin/python run_simulation.py --config agents/examples/public_agent_single_satellite.yaml --validate-only
-.venv/bin/python run_simulation.py --config agents/examples/public_agent_single_satellite.yaml
+python run_simulation.py --config agents/examples/public_agent_single_satellite.yaml --validate-only
+python run_simulation.py --config agents/examples/public_agent_single_satellite.yaml
 ```
 
 ## Safety And IP Guidance

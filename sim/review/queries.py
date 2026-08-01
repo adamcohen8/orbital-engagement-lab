@@ -14,6 +14,7 @@ class SavedReviewQuery:
     source_tables: tuple[str, ...] = ()
     maturity: str = "supported"
     allow_empty: bool = False
+    max_vm_steps: int = 250_000
 
     def __post_init__(self) -> None:
         if self.maturity not in SAVED_QUERY_MATURITY_LEVELS:
@@ -21,6 +22,8 @@ class SavedReviewQuery:
             raise ValueError(f"Unknown saved review query maturity {self.maturity!r}; expected one of: {allowed}")
         if not self.sql.lstrip().upper().startswith(("SELECT", "WITH")):
             raise ValueError(f"Saved review query {self.name!r} must be read-only SELECT/WITH SQL.")
+        if int(self.max_vm_steps) <= 0:
+            raise ValueError(f"Saved review query {self.name!r} must have a positive VM step budget.")
         if not self.source_tables:
             object.__setattr__(self, "source_tables", _infer_source_tables(self.sql))
 
@@ -67,6 +70,20 @@ SAVED_REVIEW_QUERIES: dict[str, SavedReviewQuery] = {
             "ORDER BY object_id"
         ),
     ),
+    "object_state_first_last": SavedReviewQuery(
+        name="object_state_first_last",
+        description="First and final ECI position and velocity samples for each object.",
+        sql=(
+            "WITH bounds AS (SELECT object_id, MIN(sample_index) AS first_i, "
+            "MAX(sample_index) AS last_i FROM object_state GROUP BY object_id) "
+            "SELECT s.object_id, s.sample_index, s.time_s, s.pos_x_eci_km, "
+            "s.pos_y_eci_km, s.pos_z_eci_km, s.vel_x_eci_km_s, "
+            "s.vel_y_eci_km_s, s.vel_z_eci_km_s FROM object_state s "
+            "JOIN bounds b ON s.object_id = b.object_id "
+            "AND s.sample_index IN (b.first_i, b.last_i) "
+            "ORDER BY s.object_id, s.sample_index"
+        ),
+    ),
     "rendezvous_metrics": SavedReviewQuery(
         name="rendezvous_metrics",
         description="Initial range, final range, closest approach, and closest approach time.",
@@ -102,6 +119,7 @@ SAVED_REVIEW_QUERIES: dict[str, SavedReviewQuery] = {
             "MAX(accel_norm_km_s2) AS max_accel_km_s2 FROM thrust GROUP BY object_id "
             "ORDER BY object_id"
         ),
+        max_vm_steps=500_000,
     ),
     "burn_events": SavedReviewQuery(
         name="burn_events",
@@ -109,6 +127,15 @@ SAVED_REVIEW_QUERIES: dict[str, SavedReviewQuery] = {
         sql=(
             "SELECT time_s, object_id, event_type, message FROM events "
             "WHERE event_type IN ('burn_start', 'burn_end') ORDER BY time_s, event_id"
+        ),
+        allow_empty=True,
+    ),
+    "event_log": SavedReviewQuery(
+        name="event_log",
+        description="Complete ordered termination and runtime event log.",
+        sql=(
+            "SELECT time_s, object_id, event_type, severity, message FROM events "
+            "ORDER BY time_s, event_id"
         ),
         allow_empty=True,
     ),

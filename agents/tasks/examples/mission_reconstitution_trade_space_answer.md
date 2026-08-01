@@ -3,8 +3,8 @@ Status: validated and ran.
 
 Commands:
 
-- `.venv/bin/python run_simulation.py --config agents/examples/public_agent_mission_reconstitution_trade_space.yaml --validate-only`
-- `.venv/bin/python run_simulation.py --config agents/examples/public_agent_mission_reconstitution_trade_space.yaml`
+- `python run_simulation.py --config agents/examples/public_agent_mission_reconstitution_trade_space.yaml --validate-only`
+- `python run_simulation.py --config agents/examples/public_agent_mission_reconstitution_trade_space.yaml`
 
 Review queries:
 

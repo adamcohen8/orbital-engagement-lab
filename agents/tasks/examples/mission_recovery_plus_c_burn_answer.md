@@ -3,8 +3,8 @@ Status: validated and ran.
 
 Commands:
 
-- `.venv/bin/python run_simulation.py --config agents/examples/public_agent_mission_recovery_plus_c_burn.yaml --validate-only`
-- `.venv/bin/python run_simulation.py --config agents/examples/public_agent_mission_recovery_plus_c_burn.yaml`
+- `python run_simulation.py --config agents/examples/public_agent_mission_recovery_plus_c_burn.yaml --validate-only`
+- `python run_simulation.py --config agents/examples/public_agent_mission_recovery_plus_c_burn.yaml`
 
 Review queries:
 

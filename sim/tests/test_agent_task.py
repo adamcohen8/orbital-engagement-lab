@@ -372,8 +372,9 @@ def test_agent_task_compare_propagates_partial_inspection(monkeypatch, tmp_path:
 
 def test_saved_query_rows_flag_empty_result_policy(monkeypatch) -> None:
     class EmptyWorkspace:
-        def query(self, _sql: str, *, max_rows: int) -> SimpleNamespace:
+        def query(self, _sql: str, *, max_rows: int, max_vm_steps: int) -> SimpleNamespace:
             assert max_rows == 5
+            assert max_vm_steps == 250_000
             return SimpleNamespace(columns=[], rows=[], row_count=0, truncated=False)
 
     def saved_query(name: str) -> SavedReviewQuery:

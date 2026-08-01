@@ -8,6 +8,88 @@ migration-sensitive behavior explicitly.
 
 ## Unreleased
 
+## 0.23.1 - 2026-08-01
+
+Release thesis: `v0.23.1` packages the cross-platform compatibility work that
+was not included in `v0.23.0`. It makes source installation and deterministic
+OEL workflows a bounded compatibility contract for CPython 3.10 through 3.14
+across the declared Windows, Linux, and macOS targets.
+
+Private/Pro scope: this patch does not expand MCP entitlements or expose new
+remote, frontier, Scale, IHE, or hidden-truth capability. It makes the existing
+local-only MCP and deterministic OEL workflows portable across supported path
+and runtime conventions.
+
+Compatibility claims remain evidence-qualified: package metadata identifies
+the supported matrix targets, while each operating-system, architecture, and
+Python row requires its own retained packet. Hosted Windows Server evidence is
+not a substitute for the separate controlled Windows 11 desktop gate.
+
+### Added
+
+- Declared the bounded `>=3.10,<3.15` Python contract, Python 3.10-3.14 and
+  Windows/Linux/macOS package classifiers, NumPy 2 dependency ranges, and
+  focused `dev`, `game`, `accel`, `validation`, `cross-platform`, `mcp`, `ml`,
+  and `full` install profiles.
+- Added approved per-minor constraints for Python 3.10 through 3.14, including
+  Python 3.14 trainer support through `pygame-ce`, binary-wheel installation
+  checks, wheel inventories, complete freezes, SBOMs, dependency-audit
+  artifacts, and constraint digests.
+- Added an authoritative installation guide with explicit Windows PowerShell
+  and macOS/Linux commands, interpreter selection, activation-free operation,
+  classroom-safe validation, and recovery guidance.
+- Added an authoritative serial, acceleration-off compatibility acceptance
+  manifest and runner for six public scenarios plus the owning smoke, orbit,
+  RPO, attitude, sensor/estimation, and OGP reference suites.
+- Added an evidence-producing hosted compatibility matrix for Ubuntu 22.04,
+  Windows Server 2022, macOS 15 arm64, and macOS 15 Intel across Python
+  3.10-3.14, plus a separately attested Windows 11 x64 desktop gate.
+
+### Changed
+
+- Made validation-harness simulation benchmarks record an explicit successful
+  config/plugin validation gate before engine execution.
+- Repaired the three attitude acceptance configs to declare center-of-mass
+  inertia provenance and use a damped PD tuning that satisfies their existing
+  checked-in settle, rate-recovery, torque, and guardrail thresholds.
+- Reworked `run_simulation.py --doctor` into a bootstrap-safe recovery tool
+  shared by private and generated-public CLIs. It checks the bounded Python
+  range before scientific imports, reports OS/architecture/package/profile
+  details, diagnoses dependency gaps, and prints OS-appropriate constrained
+  reinstall commands.
+- Centralized native folder opening, host resource telemetry, and
+  multiprocessing-context selection in a public cross-platform compatibility
+  module. Windows object workers explicitly select `spawn` while retaining
+  deterministic process-pool behavior.
+- Split routine PR CI from the expensive compatibility matrix. Routine private
+  and public validation runs only on PRs; specialized integration and
+  extended-validation backstops remain path-scoped, scheduled, manual, or part
+  of the local versioned release workflow.
+- Made headless Matplotlib and dummy-display Pygame checks explicit, and
+  documented optional external workflows as OS-qualified integrations rather
+  than universal core capabilities.
+
+### Fixed
+
+- Removed the unconditional Unix-only `resource` import from Scale validation,
+  added Windows memory telemetry fallbacks, and made output-folder launchers
+  preserve paths containing spaces without shell command quoting.
+- Encoded review-store SQLite file URIs so read-only queries work from ordinary
+  Windows and cross-platform workspace paths containing reserved characters.
+- Normalized MCP opaque local references and golden snapshots across Windows
+  and POSIX path separators without disclosing local paths.
+- Closed review-store connections before atomic replacement on Windows and
+  made generated public exports preserve the compatibility workflow,
+  dependency-audit workflow, version-tolerant SGP4 reference gate, and required
+  public reference fixtures.
+- Hardened compatibility evidence so local diagnostics cannot claim
+  GitHub-hosted provenance, incomplete or vulnerable third-party audit
+  payloads are rejected, and every hosted row executes the authoritative
+  acceptance manifest.
+- Removed blanket vulnerability suppressions from compatibility and
+  supply-chain workflows; the evaluated full-profile dependency audit retains
+  an unsuppressed, zero-finding report.
+
 ## 0.23.0 - 2026-07-31
 
 Release thesis: `v0.23.0` promotes OEL's local MCP integration onto the stable

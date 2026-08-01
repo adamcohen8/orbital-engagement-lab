@@ -106,13 +106,15 @@ def test_public_agent_docs_define_boundaries_and_commands() -> None:
     task_cards = (ROOT / "docs" / "agent-task-cards.md").read_text(encoding="utf-8")
 
     assert "orchestrate documented workflows" in root_agents
-    assert ".venv/bin/python run_simulation.py --config <path> --validate-only" in root_agents
+    assert "python run_simulation.py --config <path> --validate-only" in root_agents
+    assert "docs/installation.md" in root_agents
     assert "Scenario Generation Rules" in public_agents
     assert "ordinary-language request -> scenario YAML -> validate -> run" in public_agents
     assert "Natural User Requests" in public_agents
     assert "Agent Scenario Evaluation Rubric" in rubric
     assert "review/run.sqlite" in rubric
-    assert ".venv/bin/python run_simulation.py --config <scenario.yaml> --validate-only" in docs
+    assert "python run_simulation.py --config <scenario.yaml> --validate-only" in docs
+    assert "Installing OEL" in docs
     assert "Natural Requests" in docs
     assert "When The User Asks Something New" in root_agents
     assert "When The User Asks Something New" in public_agents

@@ -5,29 +5,65 @@ run.
 
 ## Install
 
+OEL supports Python 3.10 through 3.14. Python 3.14 is recommended for a new
+environment. See [Installing OEL On Windows, macOS, And
+Linux](installation.md) for interpreter selection, constrained profiles, and
+troubleshooting.
+
+Windows PowerShell:
+
+```powershell
+git clone https://github.com/adamcohen8/orbital-engagement-lab.git
+Set-Location orbital-engagement-lab
+py --list
+py -3.14 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install ".[dev]"
+.\.venv\Scripts\python.exe run_simulation.py --doctor
+.\.venv\Scripts\python.exe run_simulation.py --quickstart
+```
+
+macOS or Linux:
+
 ```bash
 git clone https://github.com/adamcohen8/orbital-engagement-lab.git
 cd orbital-engagement-lab
-python3.11 -m venv .venv
-.venv/bin/python -m pip install -U pip
+python3.14 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip
 .venv/bin/python -m pip install ".[dev]"
+.venv/bin/python run_simulation.py --doctor
+.venv/bin/python run_simulation.py --quickstart
 ```
 
-Use Python 3.10 through 3.12. Replace `python3.11` with `python3.10` or
-`python3.12` if that is your installed interpreter.
+To use another supported minor, change `3.14` consistently and select its
+matching `constraints/py3XX.txt` file for constrained installs. Windows users
+can run `py --list` (or `py -0p` with an older launcher) to see installed
+interpreters.
 
-The commands below use `.venv/bin/python` so they work even on systems where
-`python` is not on `PATH`. If you activate the virtual environment first,
-`python` is equivalent.
+The remaining commands assume the environment is activated:
+
+PowerShell:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+POSIX:
+
+```bash
+source .venv/bin/activate
+```
 
 ## Check Your Environment
 
 ```bash
-.venv/bin/python run_simulation.py --doctor
+python run_simulation.py --doctor
 ```
 
-Warnings for optional plotting or game packages do not block the headless
-quickstart path.
+Doctor treats the core plotting stack as required and reports optional trainer,
+acceleration, validation, development, and ML capabilities separately. If the
+environment is incomplete, copy the OS-appropriate recovery commands printed
+at the end of the report.
 
 Only run scenario YAML files from sources you trust. Scenario configs can point
 at importable Python modules/classes for controllers, guidance, mission
@@ -37,7 +73,7 @@ untrusted Python code.
 If you only want to inspect a scenario from an unknown source, start with:
 
 ```bash
-.venv/bin/python run_simulation.py --config <path> --safe-validate
+python run_simulation.py --config <path> --safe-validate
 ```
 
 That mode avoids importing configured plugin modules. It does not make the
@@ -47,7 +83,7 @@ For shared classroom, government, or enterprise review, validate with the
 restricted profile before execution:
 
 ```bash
-.venv/bin/python run_simulation.py --config <path> --sealed-mode --validate-only
+python run_simulation.py --config <path> --sealed-mode --validate-only
 ```
 
 Sealed mode blocks arbitrary plugin modules, hosted/custom AI endpoints,
@@ -57,7 +93,7 @@ caller explicitly opts into the specific exception.
 ## Validate The Five-Minute Scenario
 
 ```bash
-.venv/bin/python run_simulation.py --quickstart --validate-only
+python run_simulation.py --quickstart --validate-only
 ```
 
 Validation loads the YAML, checks timing and plugin pointers, and confirms the
@@ -66,7 +102,7 @@ scenario is structurally ready to run.
 ## Run The Scenario
 
 ```bash
-.venv/bin/python run_simulation.py --quickstart
+python run_simulation.py --quickstart
 ```
 
 The quickstart scenario is intentionally small and headless. It propagates a
@@ -80,13 +116,13 @@ focused on the generated summary artifacts. The quickstart does write
 `review/run.sqlite`, so you can inspect the completed run with the review CLI:
 
 ```bash
-.venv/bin/python -m sim.review outputs/quickstart_5min --saved-query run_metadata
+python -m sim.review outputs/quickstart_5min --saved-query run_metadata
 ```
 
 To open the output folder automatically after the run:
 
 ```bash
-.venv/bin/python run_simulation.py --quickstart --open-output
+python run_simulation.py --quickstart --open-output
 ```
 
 ## Run The Flagship Review Scenario
@@ -95,8 +131,8 @@ After the quickstart succeeds, run the polished 10 km RIC_PD rendezvous
 workflow:
 
 ```bash
-.venv/bin/python run_simulation.py --config configs/ric_pd_10km_experiment.yaml --validate-only
-.venv/bin/python run_simulation.py --config configs/ric_pd_10km_experiment.yaml
+python run_simulation.py --config configs/ric_pd_10km_experiment.yaml --validate-only
+python run_simulation.py --config configs/ric_pd_10km_experiment.yaml
 ```
 
 This scenario is longer than the quickstart. It exercises a tuned RIC_PD orbit
@@ -113,16 +149,16 @@ When editing scenario YAML, use `config_help.py` to list valid values for a
 field or topic:
 
 ```bash
-.venv/bin/python config_help.py "ephemeris model"
-.venv/bin/python config_help.py "plot preset"
-.venv/bin/python config_help.py --list
+python config_help.py "ephemeris model"
+python config_help.py "plot preset"
+python config_help.py --list
 ```
 
 Add `--config` to inspect the value currently set in a scenario file without
 loading scenario plugins or running the simulation:
 
 ```bash
-.venv/bin/python config_help.py "ephemeris model" --config configs/ric_pd_10km_experiment.yaml
+python config_help.py "ephemeris model" --config configs/ric_pd_10km_experiment.yaml
 ```
 
 The helper accepts fuzzy queries, so near-misses such as `"emphemeris model"`
@@ -156,7 +192,7 @@ For more examples, see [Python API](python-api.md).
 The flagship scenario also has a companion analysis script:
 
 ```bash
-.venv/bin/python examples/python/flagship_analysis.py
+python examples/python/flagship_analysis.py
 ```
 
 It writes custom review metrics under
@@ -170,7 +206,7 @@ what each one demonstrates, and which output artifacts to inspect first.
 Run the compact rendezvous example:
 
 ```bash
-.venv/bin/python run_simulation.py --config examples/configs/public_closed_loop_rendezvous_lqr.yaml
+python run_simulation.py --config examples/configs/public_closed_loop_rendezvous_lqr.yaml
 ```
 
 The broader plotting example writes artifacts such as:
@@ -188,21 +224,21 @@ Atmospheric re-entry diagnostics have a short public smoke config and a longer
 interactive plotting demo:
 
 ```bash
-.venv/bin/python run_simulation.py --config configs/reentry_smoke.yaml
-.venv/bin/python run_simulation.py --config examples/configs/public_reentry_interactive_demo.yaml
+python run_simulation.py --config configs/reentry_smoke.yaml
+python run_simulation.py --config examples/configs/public_reentry_interactive_demo.yaml
 ```
 
 ## Optional Profiles
 
 ```bash
-.venv/bin/python -m pip install ".[ml]"
-.venv/bin/python -m pip install ".[full]"
+python -m pip install ".[ml]"
+python -m pip install ".[full]"
 ```
 
 The base package already installs NumPy and Matplotlib for simulation and
 plotting support. The recommended public onboarding path remains
 CLI/YAML/Python API, and the scripted review path remains
-`.venv/bin/python -m sim.review`. The ML profile enables the bundled
+`python -m sim.review`. The ML profile enables the bundled
 Gymnasium-style environments.
 
 ## Gravity Coefficient Files

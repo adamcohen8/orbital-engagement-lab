@@ -21,7 +21,9 @@ For common agent workflows, built-in saved query names are available:
 ```bash
 .venv/bin/python -m sim.review outputs/<scenario_name> --list-saved-queries
 .venv/bin/python -m sim.review outputs/<scenario_name> --saved-query run_metadata
+.venv/bin/python -m sim.review outputs/<scenario_name> --saved-query object_state_first_last
 .venv/bin/python -m sim.review outputs/<scenario_name> --saved-query rendezvous_metrics
+.venv/bin/python -m sim.review outputs/<scenario_name> --saved-query event_log
 ```
 
 Use only `SELECT` or `WITH` queries. If `review/run.sqlite` is missing, inspect

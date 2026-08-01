@@ -8,6 +8,8 @@ Expected output directory: `outputs/agents/public_agent_rendezvous_lqr`
 
 Answer example: `agents/tasks/examples/compare_one_change_answer.md`
 
+Command convention: activate OEL through [Installing OEL](../../docs/installation.md); commands below use portable `python` after activation.
+
 ## User Prompt
 
 ```text
@@ -36,13 +38,13 @@ compare final range, closest approach, burn activity, and limitations.
 Validate the baseline:
 
 ```bash
-.venv/bin/python run_simulation.py --config agents/examples/public_agent_rendezvous_lqr.yaml --validate-only
+python run_simulation.py --config agents/examples/public_agent_rendezvous_lqr.yaml --validate-only
 ```
 
 Run the baseline:
 
 ```bash
-.venv/bin/python run_simulation.py --config agents/examples/public_agent_rendezvous_lqr.yaml
+python run_simulation.py --config agents/examples/public_agent_rendezvous_lqr.yaml
 ```
 
 ## Required Review Queries

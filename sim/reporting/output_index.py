@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import shlex
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -131,7 +132,9 @@ def _linked_nested_artifact_name(
 def _default_next_steps(*, workflow: str, artifacts: dict[str, Any], base_dir: Path) -> list[str]:
     steps: list[str] = []
     if "workflow_manifest_json" in artifacts:
-        name = _linked_artifact_name(artifacts, "workflow_manifest_json", "review/workflow_manifest.json", base_dir=base_dir)
+        name = _linked_artifact_name(
+            artifacts, "workflow_manifest_json", "review/workflow_manifest.json", base_dir=base_dir
+        )
         steps.append(f"Open {name} for the common workflow review manifest.")
     if workflow == "single_run":
         if _nested_artifact_path(artifacts, "plots", "run_dashboard"):
@@ -140,9 +143,7 @@ def _default_next_steps(*, workflow: str, artifacts: dict[str, Any], base_dir: P
             )
             steps.append(f"Open {name} for the fastest visual overview.")
         if "summary_json" in artifacts:
-            name = _linked_artifact_name(
-                artifacts, "summary_json", "master_run_summary.json", base_dir=base_dir
-            )
+            name = _linked_artifact_name(artifacts, "summary_json", "master_run_summary.json", base_dir=base_dir)
             steps.append(f"Open {name} for stable run metadata and metrics.")
         if "run_log_json" in artifacts:
             name = _linked_artifact_name(artifacts, "run_log_json", "master_run_log.json", base_dir=base_dir)
@@ -256,13 +257,18 @@ def _single_run_total_dv(summary: dict[str, Any]) -> float:
 
 
 def _single_run_next_command(summary: dict[str, Any]) -> str:
+    def command_arg(value: str) -> str:
+        if os.name == "nt":
+            return subprocess.list2cmdline([value])
+        return shlex.quote(value)
+
     review_db = str(summary.get("review_sqlite_path", "") or "").strip()
     if review_db:
         review_root = Path(review_db).parent.parent
-        return f".venv/bin/python -m sim.review {shlex.quote(str(review_root))} --saved-query run_metadata"
+        return f"python -m sim.review {command_arg(str(review_root))} --saved-query run_metadata"
     config_source_path = str(summary.get("config_source_path", "") or "").strip()
     if config_source_path:
-        return f".venv/bin/python run_simulation.py --config {shlex.quote(config_source_path)} --validate-only"
+        return f"python run_simulation.py --config {command_arg(config_source_path)} --validate-only"
     return ""
 
 
@@ -413,7 +419,13 @@ def write_output_index(
             *[f"{idx}. {step}" for idx, step in enumerate(steps, start=1)],
             "",
             "## Next Command",
-            f"```bash\n{next_command}\n```" if next_command else "No default next command is defined for this workflow.",
+            (
+                "Activate the OEL virtual environment first; see `docs/installation.md` "
+                "for Windows and POSIX commands.\n\n"
+                f"```text\n{next_command}\n```"
+                if next_command
+                else "No default next command is defined for this workflow."
+            ),
             "",
             "## Artifact Inventory",
             *_artifact_lines(artifacts, base_dir=outdir),

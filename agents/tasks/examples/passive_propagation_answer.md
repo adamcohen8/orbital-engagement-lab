@@ -3,8 +3,8 @@ Status: validated and ran.
 
 Commands:
 
-- `.venv/bin/python run_simulation.py --config agents/examples/public_agent_single_satellite.yaml --validate-only`
-- `.venv/bin/python run_simulation.py --config agents/examples/public_agent_single_satellite.yaml`
+- `python run_simulation.py --config agents/examples/public_agent_single_satellite.yaml --validate-only`
+- `python run_simulation.py --config agents/examples/public_agent_single_satellite.yaml`
 
 Review queries:
 

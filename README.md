@@ -20,29 +20,55 @@ software or an operational decision system.
 
 ## Fast Proof Path
 
-Use Python 3.10 through 3.12. The commands below use Python 3.11; replace
-`python3.11` with `python3.10` or `python3.12` if that is your installed
-interpreter.
+OEL supports Python 3.10 through 3.14. Python 3.14 is recommended for a new
+environment. See [Installing OEL](docs/installation.md) for other supported
+minors, matching constraint files, activation, and troubleshooting.
+
+Windows PowerShell:
+
+```powershell
+git clone https://github.com/adamcohen8/orbital-engagement-lab.git
+Set-Location orbital-engagement-lab
+py --list
+py -3.14 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install ".[dev]"
+.\.venv\Scripts\python.exe run_simulation.py --doctor
+.\.venv\Scripts\python.exe run_simulation.py --quickstart
+```
+
+macOS or Linux:
 
 ```bash
 git clone https://github.com/adamcohen8/orbital-engagement-lab.git
 cd orbital-engagement-lab
-python3.11 -m venv .venv
-.venv/bin/python -m pip install -U pip
+python3.14 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip
 .venv/bin/python -m pip install ".[dev]"
+.venv/bin/python run_simulation.py --doctor
+.venv/bin/python run_simulation.py --quickstart
 ```
 
-Check the environment:
+The commands below use `python` after activation. In PowerShell, run
+`.\.venv\Scripts\Activate.ps1`; in Bash or Zsh, run
+`source .venv/bin/activate`. Activation is optional when using the explicit
+interpreter paths above.
+
+Check the environment again when troubleshooting:
 
 ```bash
-.venv/bin/python run_simulation.py --doctor
+python run_simulation.py --doctor
 ```
+
+Doctor runs before the scientific runtime imports, reports the exact supported
+Python range and detected install profile, and prints OS-appropriate recovery
+commands for missing or incompatible dependencies.
 
 Run the fast headless quickstart:
 
 ```bash
-.venv/bin/python run_simulation.py --quickstart --validate-only
-.venv/bin/python run_simulation.py --quickstart
+python run_simulation.py --quickstart --validate-only
+python run_simulation.py --quickstart
 ```
 
 Expected result: the run writes summary artifacts under
@@ -51,8 +77,8 @@ Expected result: the run writes summary artifacts under
 Then run the flagship 10 km RIC_PD RPO review scenario:
 
 ```bash
-.venv/bin/python run_simulation.py --config configs/ric_pd_10km_experiment.yaml --validate-only
-.venv/bin/python run_simulation.py --config configs/ric_pd_10km_experiment.yaml
+python run_simulation.py --config configs/ric_pd_10km_experiment.yaml --validate-only
+python run_simulation.py --config configs/ric_pd_10km_experiment.yaml
 ```
 
 Expected result: OEL writes a dashboard, rendezvous summary, control-effort,
@@ -88,17 +114,17 @@ query CLI/API, custom review plotting API, and the RPO trainer.
 
 | Goal | Start here |
 | --- | --- |
-| First successful run | `.venv/bin/python run_simulation.py --quickstart` |
-| Flagship RPO artifact review | `.venv/bin/python run_simulation.py --config configs/ric_pd_10km_experiment.yaml` |
-| Approximate TLE-initialized OEL propagation | `.venv/bin/python run_simulation.py --config examples/configs/public_tle_2hr_propagation.yaml` |
-| Passive OGP-SGP4 general-perturbations propagation | `.venv/bin/python run_simulation.py --config examples/configs/public_sgp4_passive_propagation.yaml` |
-| Geometric ground-station access from a TLE-initialized OEL run | `.venv/bin/python run_simulation.py --config examples/configs/public_ground_station_access_from_tle.yaml` |
-| Closed-loop public rendezvous | `.venv/bin/python run_simulation.py --config examples/configs/public_closed_loop_rendezvous_lqr.yaml` |
-| Mission-recovery evidence case | `.venv/bin/python run_simulation.py --config agents/examples/public_agent_mission_recovery_plus_c_burn.yaml` |
-| Mission-reconstitution trade space | `.venv/bin/python run_simulation.py --config agents/examples/public_agent_mission_reconstitution_trade_space.yaml` |
-| Attitude hold with disturbance torque | `.venv/bin/python run_simulation.py --config examples/configs/public_attitude_hold_disturbance.yaml` |
-| Re-entry diagnostics | `.venv/bin/python run_simulation.py --config configs/reentry_smoke.yaml` |
-| RPO trainer game | `.venv/bin/python -m pip install ".[game]"` then `.venv/bin/python run_game.py` |
+| First successful run | `python run_simulation.py --quickstart` |
+| Flagship RPO artifact review | `python run_simulation.py --config configs/ric_pd_10km_experiment.yaml` |
+| Approximate TLE-initialized OEL propagation | `python run_simulation.py --config examples/configs/public_tle_2hr_propagation.yaml` |
+| Passive OGP-SGP4 general-perturbations propagation | `python run_simulation.py --config examples/configs/public_sgp4_passive_propagation.yaml` |
+| Geometric ground-station access from a TLE-initialized OEL run | `python run_simulation.py --config examples/configs/public_ground_station_access_from_tle.yaml` |
+| Closed-loop public rendezvous | `python run_simulation.py --config examples/configs/public_closed_loop_rendezvous_lqr.yaml` |
+| Mission-recovery evidence case | `python run_simulation.py --config agents/examples/public_agent_mission_recovery_plus_c_burn.yaml` |
+| Mission-reconstitution trade space | `python run_simulation.py --config agents/examples/public_agent_mission_reconstitution_trade_space.yaml` |
+| Attitude hold with disturbance torque | `python run_simulation.py --config examples/configs/public_attitude_hold_disturbance.yaml` |
+| Re-entry diagnostics | `python run_simulation.py --config configs/reentry_smoke.yaml` |
+| RPO trainer game | `python -m pip install ".[game]"` then `python run_game.py` |
 | AI-agent workflows | [Capability Routing And Golden Paths](docs/agent-capability-routing.md) |
 
 Most TLE examples use TLE lines to initialize an ECI state, then OEL
@@ -132,8 +158,8 @@ Runs that enable `outputs.review.enabled: true` write
 saved query that supports a conclusion:
 
 ```bash
-.venv/bin/python -m sim.review outputs/my_run --saved-query run_metadata
-.venv/bin/python -m sim.review outputs/my_run --query "SELECT scenario_name, duration_s FROM run_metadata"
+python -m sim.review outputs/my_run --saved-query run_metadata
+python -m sim.review outputs/my_run --query "SELECT scenario_name, duration_s FROM run_metadata"
 ```
 
 If an agent finds public-safe workflow friction, use
@@ -151,10 +177,33 @@ evasive-target survival, cislunar rendezvous, arcade pursuit, and sandbox.
 
 Install the game extra and launch the level selector:
 
+Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install --only-binary=:all: `
+  -c constraints/py314.txt ".[game]"
+.\.venv\Scripts\python.exe -m pip check
+.\.venv\Scripts\python.exe run_simulation.py --doctor
+.\.venv\Scripts\python.exe run_game.py
+```
+
+macOS or Linux:
+
 ```bash
-.venv/bin/python -m pip install ".[game]"
+.venv/bin/python -m pip install --only-binary=:all: \
+  -c constraints/py314.txt ".[game]"
+.venv/bin/python -m pip check
+.venv/bin/python run_simulation.py --doctor
 .venv/bin/python run_game.py
 ```
+
+These commands reuse the `.venv` created in the installation section and do
+not require activation. If you selected Python 3.10, 3.11, 3.12, or 3.13,
+replace `py314.txt` with the matching constraints file. Doctor should report
+the trainer capability as available before launch. On Windows, if `py` is
+missing, install a supported CPython from python.org with the Python launcher
+and reopen PowerShell. If the environment was created with another Python
+minor or on another operating system, recreate `.venv` rather than reusing it.
 
 Use Up/Down or W/S to choose a level, Left/Right to change assists, Enter or
 Space to launch, and Escape to return to the selector. Training runs can also
@@ -225,16 +274,19 @@ keys.
 ## Install Profiles
 
 ```bash
-.venv/bin/python -m pip install .
-.venv/bin/python -m pip install ".[dev]"
-.venv/bin/python -m pip install ".[game]"
-.venv/bin/python -m pip install ".[ml]"
-.venv/bin/python -m pip install ".[full]"
+python -m pip install .
+python -m pip install ".[dev]"
+python -m pip install ".[game]"
+python -m pip install -c constraints/py314.txt ".[cross-platform]"
+python -m pip install ".[ml]"
+python -m pip install ".[full]"
 ```
 
 Public onboarding should start with the CLI/YAML/Python API path above. For
 scripted output inspection, prefer
-`.venv/bin/python -m sim.review`.
+`python -m sim.review`. The cross-platform profile is the aggregate
+dev/game/acceleration/OEL-native-validation profile. ML and `full` remain
+separately qualified and do not make a universal cross-platform promise.
 
 ## Bug Reports
 

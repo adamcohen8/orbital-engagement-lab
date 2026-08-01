@@ -1866,16 +1866,15 @@ def test_game_debrief_timeline_uses_burn_intervals() -> None:
 
 
 def test_open_game_debrief_folder_opens_report_parent(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    calls: list[list[str]] = []
+    calls: list[Path] = []
     report = tmp_path / "attempt_001" / "report.md"
     report.parent.mkdir()
     report.write_text("# Debrief\n", encoding="utf-8")
 
-    monkeypatch.setattr("sim.game.debrief.sys.platform", "darwin")
-    monkeypatch.setattr("sim.game.debrief.subprocess.Popen", lambda cmd: calls.append(list(cmd)))
+    monkeypatch.setattr("sim.game.debrief.open_folder", lambda path: calls.append(Path(path)))
 
     assert open_game_debrief_folder(report) is True
-    assert calls == [["open", str(report.parent)]]
+    assert calls == [report.parent]
 
 
 def test_game_frame_recorder_finishes_or_discards_with_fake_writer(tmp_path: Path) -> None:

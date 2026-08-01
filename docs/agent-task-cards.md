@@ -20,6 +20,11 @@ Each card includes a user prompt, assumptions, an example config, validation and
 run commands, required review queries, expected answer shape, pass criteria, and
 red flags.
 
+Before using a card, install and activate the environment through
+[Installing OEL](installation.md). Task-card commands use portable `python`
+after activation; replace it with the explicit platform interpreter path from
+the installation guide when activation is unavailable.
+
 ## Cards
 
 | Task | Card | Answer example | Example config |

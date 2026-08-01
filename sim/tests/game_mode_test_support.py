@@ -11,9 +11,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
+
 import numpy as np
 import pytest
-import tomllib
 import yaml
 
 import sim.game.arcade as game_arcade

@@ -67,7 +67,9 @@ def test_quickstart_5min_runs_headlessly_and_writes_start_here_artifacts(tmp_pat
     assert "## What Happened" in index_text
     assert "Open [`master_run_summary.json`](master_run_summary.json)" in index_text
     assert "Closest approach:" in index_text
-    assert ".venv/bin/python -m sim.review" in index_text
+    assert "python -m sim.review" in index_text
+    assert ".venv/bin/python" not in index_text
+    assert "docs/installation.md" in index_text
     assert (outdir / "review" / "run.sqlite").is_file()
     assert "Inspect generated plot or animation artifacts listed below." not in index_text
 
@@ -192,13 +194,40 @@ def test_doctor_reports_quickstart_readiness() -> None:
     )
 
     assert "ORBITAL ENGAGEMENT LAB DOCTOR" in proc.stdout
+    assert "Functional Python" in proc.stdout
+    assert "Security baseline" in proc.stdout
+    assert "Operating system" in proc.stdout
+    assert "Python executable" in proc.stdout
+    assert "OEL version" in proc.stdout
+    assert "Install profile" in proc.stdout
+    assert "Trainer" in proc.stdout
     assert "Quickstart validation" in proc.stdout
+    assert "Recovery commands" in proc.stdout
     assert proc.returncode == 0
 
 
+def test_doctor_fails_when_installed_oel_metadata_is_stale(monkeypatch, capsys) -> None:
+    from sim.project_version import ProjectVersionStatus
+
+    monkeypatch.setattr(
+        "sim.doctor.inspect_project_version",
+        lambda **_kwargs: ProjectVersionStatus(
+            source_version="0.22.2",
+            installed_version="0.21.1",
+            ok=False,
+            required=True,
+            detail="source 0.22.2; installed 0.21.1",
+        ),
+    )
+
+    assert not run_simulation._print_doctor_report(source_root=Path(__file__).resolve().parents[2])
+    output = capsys.readouterr().out
+    assert "OEL version" in output
+    assert "FAIL - source 0.22.2; installed 0.21.1" in output
+
+
 def test_open_output_folder_uses_platform_opener(tmp_path: Path) -> None:
-    with patch("run_simulation.subprocess.Popen") as popen:
+    with patch("run_simulation.open_folder") as opener:
         assert run_simulation._open_output_folder(tmp_path)
 
-    popen.assert_called_once()
-    assert str(tmp_path) in popen.call_args.args[0]
+    opener.assert_called_once_with(tmp_path)

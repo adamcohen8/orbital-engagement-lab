@@ -7,16 +7,20 @@ security, legal, export-control, or mission-assurance process.
 ## Supported Versions
 
 - Public releases: security fixes target the current public release line,
-  currently `v0.23.0`.
+  currently `v0.23.1`.
 - Private/Pro releases: security fixes target the active customer-supported
   release line or pilot branch named in the agreement.
-- Python compatibility target: Python 3.10 through 3.12. Blocking CI currently
-  exercises Python 3.11; run local acceptance on the exact interpreter used for
-  an evaluation or deployment. Python 3.9 is not a supported procurement
-  baseline because several vulnerability fixes require Python 3.10 or newer.
-- Operating systems: Linux and macOS are the primary development and test
-  targets. Windows is best-effort unless a customer package explicitly includes
-  Windows acceptance evidence.
+- Declared Python compatibility range: Python 3.10 through 3.14. Functional and
+  security support are separate; see `docs/compatibility.md` and retain
+  acceptance evidence for the exact interpreter used in an evaluation.
+- Operating-system target: Windows, Linux, and macOS for the cross-platform
+  profiles. A release claim for a specific OS/architecture/Python row requires
+  its retained compatibility evidence; package metadata alone is not evidence.
+
+Commands below use `python` after activating the environment. See
+[Installing OEL](../installation.md) for explicit Windows PowerShell and
+macOS/Linux paths and for selecting the constraints file matching the
+interpreter.
 
 ## SBOM
 
@@ -24,68 +28,74 @@ Generate a CycloneDX JSON software bill of materials for the installed Python
 environment:
 
 ```bash
-.venv/bin/python tools/generate_python_sbom.py --output outputs/supply_chain/sbom.cdx.json
+python tools/generate_python_sbom.py --output outputs/supply_chain/sbom.cdx.json
 ```
 
 The SBOM records the installed Python distributions, versions, and PyPI package
 URLs visible in the current interpreter environment. Generate it after
-installing the exact profile under review, for example `.[dev]`, `.[game]`, or
-`.[full]`.
+installing the exact profile under review. The aggregate `.[cross-platform]`
+profile excludes ML and external integrations. `.[full]` is audited on its
+named reference environment and is not a universal cross-platform promise.
 
 ## Dependency Audit
 
 Run the dependency audit after installing the evaluated profile:
 
 ```bash
-.venv/bin/python -m pip install -U pip-audit
-.venv/bin/python -m pip_audit --format json --output outputs/supply_chain/pip-audit.json
+python -m pip install -U pip-audit
+python -m pip_audit --format json --output outputs/supply_chain/pip-audit.json
 ```
 
 The regular release gate runs the complete local workflow with:
 
 ```bash
-.venv/bin/python tools/run_supply_chain_gate.py --output-dir outputs/supply_chain --install-full
+python tools/run_supply_chain_gate.py --output-dir outputs/supply_chain --install-full
 ```
 
-That command installs the full evaluated profile, writes the SBOM and freeze,
-runs the audit with the documented exceptions below, and records artifact
-hashes in `supply-chain-gate.json`. Scheduled/manual CI repeats the audit on
-Linux as an independent-environment backstop; it is not repeated on every PR.
+That command installs the constrained full profile, captures the pip install
+report and `pip check`, writes the wheel inventory, SBOM, and freeze, runs an
+unsuppressed audit, and records artifact hashes in `supply-chain-gate.json`.
+Path-scoped PR CI and scheduled/manual CI repeat the audit on Linux as an
+independent-environment backstop; merge and release events do not repeat it.
 Treat a known vulnerability as a release finding until it is upgraded, removed,
 documented as not applicable, or accepted by the evaluator in writing.
 
-Current release audit exceptions:
-
-- `CVE-2025-3000` / `GHSA-rrmf-rvhw-rf47` in `torch`: accepted for the
-  optional ML profile while the audit feed advertises no fixed Torch release.
-  The advisory applies to `torch.jit.script`; OEL's checked-in ML workflows use
-  eager-mode model definitions and training helpers and do not call
-  `torch.jit.script`. Revisit this exception when a fixed Torch release is
-  available or if OEL adds TorchScript/JIT model export or execution.
-- `PYSEC-2026-3447` in the runtime copy of `setuptools`: accepted for the
-  optional ML/full profiles because `torch==2.12.0` currently requires
-  `setuptools<82`, while the advisory fix begins at `setuptools==83.0.0`.
-  OEL's isolated build environment requires `setuptools>=83`, and release
-  builds operate only on the controlled OEL source tree; they do not apply
-  `MANIFEST.in` exclusion rules to untrusted source trees. Revisit this
-  exception when Torch permits setuptools 83 or newer. This exception does not
-  apply to build isolation, which must continue to use the patched requirement.
+The evaluated `v0.23.1` full-profile environment has no audit exceptions.
+Do not add `--ignore-vuln` to release or compatibility workflows. If an
+advisory is not applicable, document the evidence and evaluator approval
+separately while retaining the unsuppressed machine-readable audit result.
 
 ## Reproducible Dependency Workflow
 
-OEL source dependency ranges live in `pyproject.toml` and `requirements/`.
-For a procurement or release review, create an environment-specific frozen
-record after installation:
+OEL source dependency ranges live in `pyproject.toml`. Approved Python-minor
+graphs live under `constraints/`; `requirements/` remains a compatibility shim.
+The example below targets the blocking Python 3.11 baseline. Install it only
+from an activated Python 3.11 environment; otherwise substitute the constraints
+file matching the active supported minor. Retain the pip report:
 
 ```bash
-.venv/bin/python -m pip freeze --all > outputs/supply_chain/python-freeze.txt
+python -m pip install \
+  -c constraints/py311.txt \
+  ".[cross-platform]" \
+  --report outputs/supply_chain/pip-install-report.json
+python -m pip check > outputs/supply_chain/pip-check.txt
+python tools/generate_dependency_evidence.py \
+  --install-report outputs/supply_chain/pip-install-report.json \
+  --constraints constraints/py311.txt \
+  --output outputs/supply_chain/wheel-inventory.json
+python -m pip freeze --all > outputs/supply_chain/python-freeze.txt
 ```
 
-For higher-assurance installs, use the frozen record as input to a customer
-lockfile or hash-checked requirements workflow. The recommended buyer-side gate
-is:
+The wheel inventory records the constraint digest, package/version, wheel tag,
+source URL, and archive hash where pip supplies it. Constraint files are not
+hash-locked, OS-specific release locks. For higher-assurance installs, use the
+freeze and pip report as inputs to a reviewed, hash-checked release lock.
 
-- install from a clean checkout and selected profile,
+The recommended buyer-side gate is:
+
+- install from a clean checkout through the matching constraint set,
+- retain the pip installation report and wheel inventory,
+- run and retain `pip check`,
 - generate `python-freeze.txt`,
 - generate the SBOM,
 - run `pip-audit`,
@@ -94,8 +104,8 @@ is:
 
 ## GitHub Actions Pinning
 
-OEL currently uses semantic action versions such as `actions/checkout@v4` and
-`actions/setup-python@v5`. For organizations that require full SHA pinning,
+OEL currently uses semantic action versions such as `actions/checkout@v5` and
+`actions/setup-python@v6`. For organizations that require full SHA pinning,
 treat the workflow as follows:
 
 - convert each third-party `uses:` entry to a full commit SHA before a
@@ -112,7 +122,10 @@ A procurement-ready packet should include:
 
 - `outputs/supply_chain/sbom.cdx.json`,
 - `outputs/supply_chain/pip-audit.json`,
+- `outputs/supply_chain/pip-install-report.json`,
+- `outputs/supply_chain/pip-check.txt`,
 - `outputs/supply_chain/python-freeze.txt`,
+- `outputs/supply_chain/wheel-inventory.json`,
 - public/private export integrity check output,
 - validation evidence matrix and harness reports when available,
 - release checklist result and version/commit provenance.

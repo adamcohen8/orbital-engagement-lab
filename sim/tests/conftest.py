@@ -55,8 +55,10 @@ VALIDATION_TEST_FILES = {
 FAST_TEST_FILES = {
     "test_api_plugin_validation.py",
     "test_config_api_architecture.py",
+    "test_doctor.py",
     "test_orbit_integrators.py",
     "test_public_imports.py",
+    "test_platform_compat.py",
     "test_runtime_architecture.py",
     "test_supply_chain_evidence.py",
     "test_test_suite_architecture.py",

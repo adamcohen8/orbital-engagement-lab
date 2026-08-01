@@ -1,23 +1,37 @@
 [build-system]
-requires = ["setuptools>=83", "wheel"]
+requires = ["setuptools>=83,<84", "wheel>=0.46,<0.47"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "orbital-engagement-lab"
-version = "0.23.0"
+version = "0.23.1"
 description = "Integrated spacecraft simulation and analysis platform for rendezvous, control, validation, and mission prototyping."
 readme = "README.md"
-requires-python = ">=3.10"
-license = { file = "LICENSE.txt" }
+requires-python = ">=3.10,<3.15"
+license = "MIT"
+license-files = ["LICENSE.txt"]
 authors = [
   { name = "Orbital Engagement Lab Contributors" },
 ]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Operating System :: MacOS",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Scientific/Engineering",
+]
 dependencies = [
-  "numpy<2.0",
-  "matplotlib>=3.7",
-  "tqdm>=4.65",
-  "PyYAML>=6.0",
-  "scipy>=1.13",
+  "numpy>=2.1,<2.5",
+  "matplotlib>=3.8,<3.12",
+  "tqdm>=4.65,<5",
+  "PyYAML>=6.0,<7",
+  "scipy>=1.14.1,<1.18",
 ]
 
 [project.scripts]
@@ -26,42 +40,61 @@ oel-mcp = "integrations.oel_mcp.public_server:main"
 
 [project.optional-dependencies]
 dev = [
-  "pytest>=9.0.3",
+  "pytest>=9,<10",
   "ruff==0.15.14",
+  "setuptools>=83,<84",
+  "tomli>=2,<3; python_version < '3.11'",
 ]
 game = [
-  "pygame>=2.5",
-  "Pillow>=12.3.0",
-  "imageio>=2.34",
-  "imageio-ffmpeg>=0.4",
+  "pygame>=2.5,<3; python_version < '3.14'",
+  "pygame-ce>=2.5,<3; python_version >= '3.14'",
+  "Pillow>=12,<13",
+  "imageio>=2.34,<3",
+  "imageio-ffmpeg>=0.4,<1",
 ]
 ml = [
-  "gymnasium>=0.29",
-  "torch>=2.9.0",
-  "filelock>=3.20.3",
+  "gymnasium>=0.29,<2",
+  "torch>=2.9,<3",
+  "filelock>=3.20.3,<4",
 ]
 accel = [
-  "numba>=0.59",
+  "numba>=0.61,<0.67",
 ]
 validation = [
-  "sgp4==2.23",
+  "sgp4>=2.24,<3",
+]
+cross-platform = [
+  "pytest>=9,<10",
+  "ruff==0.15.14",
+  "setuptools>=83,<84",
+  "tomli>=2,<3; python_version < '3.11'",
+  "pygame>=2.5,<3; python_version < '3.14'",
+  "pygame-ce>=2.5,<3; python_version >= '3.14'",
+  "Pillow>=12,<13",
+  "imageio>=2.34,<3",
+  "imageio-ffmpeg>=0.4,<1",
+  "numba>=0.61,<0.67; platform_system != 'Darwin' or platform_machine != 'x86_64'",
+  "sgp4>=2.24,<3",
 ]
 mcp = [
   "mcp>=2.0.0,<3",
 ]
 full = [
-  "pytest>=9.0.3",
+  "pytest>=9,<10",
   "ruff==0.15.14",
-  "pygame>=2.5",
-  "Pillow>=12.3.0",
-  "imageio>=2.34",
-  "imageio-ffmpeg>=0.4",
-  "gymnasium>=0.29",
-  "torch>=2.9.0",
-  "filelock>=3.20.3",
-  "numba>=0.59",
-  "scipy>=1.13",
-  "sgp4==2.23",
+  "setuptools>=83,<84",
+  "tomli>=2,<3; python_version < '3.11'",
+  "pygame>=2.5,<3; python_version < '3.14'",
+  "pygame-ce>=2.5,<3; python_version >= '3.14'",
+  "Pillow>=12,<13",
+  "imageio>=2.34,<3",
+  "imageio-ffmpeg>=0.4,<1",
+  "gymnasium>=0.29,<2",
+  "torch>=2.9,<3",
+  "filelock>=3.20.3,<4",
+  "numba>=0.61,<0.67",
+  "scipy>=1.14.1,<1.18",
+  "sgp4>=2.24,<3",
   "mcp>=2.0.0,<3",
 ]
 
@@ -110,6 +143,7 @@ select = [
   "F",
   "I",
   "B",
+  "NPY201",
   "UP",
 ]
 ignore = [

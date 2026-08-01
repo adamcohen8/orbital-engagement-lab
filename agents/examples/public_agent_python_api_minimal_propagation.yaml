@@ -5,6 +5,7 @@ objects:
   target:
     kind: satellite
     role: target
+    propagation_method: ''
     specs:
       mass_kg: 300.0
     initial_state:
@@ -19,6 +20,27 @@ objects:
 simulator:
   duration_s: 300.0
   dt_s: 10.0
+  execution:
+    policy: configured
+    object_parallelism:
+      enabled: false
+      backend: serial
+      workers: 0
+      max_workers: 0
+      reserve_workers: 1
+      min_objects: 3
+    runtime_profiler:
+      enabled: true
+    controller:
+      orbit_budget_ms: 2.0
+      attitude_budget_ms: 2.0
+      deadline_policy: record
+  frames:
+    model: simple_gmst
+    eop_extrapolation: error
+    time_scale_model: utc_only
+    ddpsi_rad: 0.0
+    ddeps_rad: 0.0
   dynamics:
     attitude:
       enabled: false
@@ -27,8 +49,8 @@ outputs:
   mode: save
   stats:
     print_summary: false
-    save_json: true
     save_full_log: false
+    controller_debug: false
   plots:
     enabled: false
   animations:

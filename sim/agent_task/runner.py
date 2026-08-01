@@ -381,7 +381,11 @@ def _run_saved_queries(
             )
             continue
         try:
-            result = workspace.query(saved.sql, max_rows=max_rows)
+            result = workspace.query(
+                saved.sql,
+                max_rows=max_rows,
+                max_vm_steps=saved.max_vm_steps,
+            )
             empty_result = int(result.row_count) == 0
             rows.append(
                 {
@@ -392,6 +396,7 @@ def _run_saved_queries(
                     "maturity": saved.maturity,
                     "source_tables": list(saved.source_tables),
                     "allow_empty": saved.allow_empty,
+                    "max_vm_steps": saved.max_vm_steps,
                     "empty_result": empty_result,
                     "empty_result_allowed": saved.allow_empty,
                     "empty_result_unexpected": empty_result and not saved.allow_empty,
@@ -411,6 +416,7 @@ def _run_saved_queries(
                     "sql": saved.sql,
                     "maturity": saved.maturity,
                     "source_tables": list(saved.source_tables),
+                    "max_vm_steps": saved.max_vm_steps,
                     "allow_empty": saved.allow_empty,
                     "status": "failed",
                     "error": str(exc),

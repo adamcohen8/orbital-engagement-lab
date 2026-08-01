@@ -257,6 +257,7 @@ def _frontier_safe_value(value: Any, *, authorized_roots: tuple[Path, ...]) -> A
     normalized = value
     for index, root in enumerate(authorized_roots):
         normalized = normalized.replace(str(root), f"<AUTHORIZED_ROOT_{index}>")
+    normalized = normalized.replace("\\", "/")
     return f"oel-local-ref:{hashlib.sha256(normalized.encode('utf-8')).hexdigest()[:16]}"
 
 

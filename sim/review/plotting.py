@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import json
-import os
 import re
-import tempfile
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,6 +10,7 @@ from typing import Any, Sequence
 from sim.plotting.style import artifact_metadata, oel_plot_context, save_oel_figure
 from sim.review.queries import get_saved_review_query
 from sim.review.workspace import ReviewQueryResult, ReviewWorkspace
+from sim.runtime_environment import configure_headless_runtime
 
 PLOT_TYPES = ("line", "scatter", "bar", "histogram", "heatmap")
 STYLE_NAMES = ("oel_dark", "oel_light")
@@ -772,10 +771,6 @@ def _needs_legend(spec: ReviewPlotSpec) -> bool:
 
 
 def _ensure_matplotlib_cache_env() -> None:
-    cache_root = Path(tempfile.gettempdir()) / "oel-matplotlib"
-    mpl_config = cache_root / "config"
-    xdg_cache = cache_root / "cache"
-    mpl_config.mkdir(parents=True, exist_ok=True)
-    xdg_cache.mkdir(parents=True, exist_ok=True)
-    os.environ.setdefault("MPLCONFIGDIR", str(mpl_config))
-    os.environ.setdefault("XDG_CACHE_HOME", str(xdg_cache))
+    status = configure_headless_runtime(force=True)
+    if not status.ok:
+        raise RuntimeError("Could not prepare headless plotting caches: " + "; ".join(status.errors))
