@@ -8,11 +8,13 @@ short path instead of making every document look equally important.
 Start here if you want to install OEL, run a scenario, and understand the
 public simulation core.
 
-1. [Quickstart](quickstart.md)
-2. [Examples Matrix](examples-matrix.md)
-3. [Scenario YAML](scenario-yaml.md)
-4. [Python API](python-api.md)
-5. [Known Limitations](known-limitations.md)
+1. [Install On Windows, macOS, Or Linux](installation.md)
+2. [Quickstart](quickstart.md)
+3. [Compatibility And Install Profiles](compatibility.md)
+4. [Examples Matrix](examples-matrix.md)
+5. [Scenario YAML](scenario-yaml.md)
+6. [Python API](python-api.md)
+7. [Known Limitations](known-limitations.md)
 
 ## Evaluator Or Buyer
 
@@ -25,6 +27,7 @@ education, engineering prototyping, or Pro workflow evaluation.
 4. [Validation Claims](validation-claims.md)
 5. [Public Core And Pro Boundary](public-vs-pro.md)
 6. [Security And Procurement](security/supply-chain.md)
+7. [Compatibility And Install Profiles](compatibility.md)
 
 ## Agent User
 

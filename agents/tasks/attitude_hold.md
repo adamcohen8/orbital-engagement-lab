@@ -8,6 +8,8 @@ Expected output directory: `outputs/agents/public_agent_attitude_hold`
 
 Answer example: `agents/tasks/examples/attitude_hold_answer.md`
 
+Command convention: activate OEL through [Installing OEL](../../docs/installation.md); commands below use portable `python` after activation.
+
 ## User Prompt
 
 ```text
@@ -29,13 +31,13 @@ what evidence supports the attitude-control result.
 Validate:
 
 ```bash
-.venv/bin/python run_simulation.py --config agents/examples/public_agent_attitude_hold.yaml --validate-only
+python run_simulation.py --config agents/examples/public_agent_attitude_hold.yaml --validate-only
 ```
 
 Run:
 
 ```bash
-.venv/bin/python run_simulation.py --config agents/examples/public_agent_attitude_hold.yaml
+python run_simulation.py --config agents/examples/public_agent_attitude_hold.yaml
 ```
 
 ## Required Review Queries

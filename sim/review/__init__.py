@@ -1,3 +1,8 @@
+# ruff: noqa: E402 -- automation cache policy must run before plotting imports.
+from sim.runtime_environment import configure_headless_runtime
+
+configure_headless_runtime()
+
 from sim.review.manifest import (
     WORKFLOW_REVIEW_SCHEMA_VERSION,
     load_workflow_manifest,

@@ -37,12 +37,22 @@ body:
       placeholder: "v0.10.x, main, or commit SHA"
     validations:
       required: true
-  - type: input
+  - type: textarea
     id: environment
     attributes:
       label: Environment
-      description: Include OS, Python version, and install profile.
-      placeholder: "macOS 14, Python 3.11, pip install .[dev]"
+      description: Include OS, architecture, Python version, constraints file, install profile, and doctor result. Use the command for your platform.
+      placeholder: |
+        Windows PowerShell:
+        .\.venv\Scripts\python.exe --version
+        .\.venv\Scripts\python.exe run_simulation.py --doctor
+
+        macOS or Linux:
+        .venv/bin/python --version
+        .venv/bin/python run_simulation.py --doctor
+
+        Install profile and constraints:
+        .[cross-platform], constraints/py314.txt
     validations:
       required: true
   - type: textarea

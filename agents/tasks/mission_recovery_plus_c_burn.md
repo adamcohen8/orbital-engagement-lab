@@ -8,6 +8,8 @@ Expected output directory: `outputs/agents/public_agent_mission_recovery_plus_c_
 
 Answer example: `agents/tasks/examples/mission_recovery_plus_c_burn_answer.md`
 
+Command convention: activate OEL through [Installing OEL](../../docs/installation.md); commands below use portable `python` after activation.
+
 ## User Prompt
 
 ```text
@@ -32,13 +34,13 @@ artifact recommends, and what the result does not prove.
 Validate:
 
 ```bash
-.venv/bin/python run_simulation.py --config agents/examples/public_agent_mission_recovery_plus_c_burn.yaml --validate-only
+python run_simulation.py --config agents/examples/public_agent_mission_recovery_plus_c_burn.yaml --validate-only
 ```
 
 Run:
 
 ```bash
-.venv/bin/python run_simulation.py --config agents/examples/public_agent_mission_recovery_plus_c_burn.yaml
+python run_simulation.py --config agents/examples/public_agent_mission_recovery_plus_c_burn.yaml
 ```
 
 ## Required Review Queries

@@ -4,16 +4,35 @@ Thanks for taking a look at Orbital Engagement Lab.
 
 ## Development Setup
 
-Use Python 3.10 through 3.12. The commands below use Python 3.11; replace
-`python3.11` with `python3.10` or `python3.12` if that is your installed
-interpreter.
+Use Python 3.10 through 3.14. Python 3.14 is recommended for a new environment;
+use the matching `constraints/py3XX.txt` file when reproducing a qualified
+dependency graph. See [Installing OEL](docs/installation.md) for the complete
+cross-platform command convention.
+
+Windows PowerShell:
+
+```powershell
+py --list
+py -3.14 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install ".[dev]"
+.\.venv\Scripts\python.exe run_simulation.py --doctor
+```
+
+macOS or Linux:
 
 ```bash
-python3.11 -m venv .venv
+python3.14 -m venv .venv
 source .venv/bin/activate
 python -m pip install -U pip
 python -m pip install ".[dev]"
+python run_simulation.py --doctor
 ```
+
+PowerShell activation is optional. Run `.\.venv\Scripts\Activate.ps1` when
+local policy permits it; otherwise keep using the explicit
+`.\.venv\Scripts\python.exe` path. Commands below assume an activated
+environment and therefore use `python`.
 
 ## Reporting Bugs
 

@@ -8,6 +8,8 @@ Expected output directory: `outputs/agents/public_agent_mission_reconstitution_t
 
 Answer example: `agents/tasks/examples/mission_reconstitution_trade_space_answer.md`
 
+Command convention: activate OEL through [Installing OEL](../../docs/installation.md); commands below use portable `python` after activation.
+
 ## User Prompt
 
 ```text
@@ -31,13 +33,13 @@ inspect the review store, and summarize the tradeoffs.
 Validate:
 
 ```bash
-.venv/bin/python run_simulation.py --config agents/examples/public_agent_mission_reconstitution_trade_space.yaml --validate-only
+python run_simulation.py --config agents/examples/public_agent_mission_reconstitution_trade_space.yaml --validate-only
 ```
 
 Run:
 
 ```bash
-.venv/bin/python run_simulation.py --config agents/examples/public_agent_mission_reconstitution_trade_space.yaml
+python run_simulation.py --config agents/examples/public_agent_mission_reconstitution_trade_space.yaml
 ```
 
 ## Required Review Queries

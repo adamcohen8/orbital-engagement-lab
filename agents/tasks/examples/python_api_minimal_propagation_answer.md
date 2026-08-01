@@ -3,10 +3,10 @@ Status: generated through the Python API, validated, and ran.
 
 Commands:
 
-- `.venv/bin/python - <<'PY' ... ScenarioBuilder(...) ... artifact.write("agents/examples/public_agent_python_api_minimal_propagation.yaml") ... PY`
-- `.venv/bin/python run_simulation.py --config agents/examples/public_agent_python_api_minimal_propagation.yaml --validate-only`
-- `.venv/bin/python run_simulation.py --config agents/examples/public_agent_python_api_minimal_propagation.yaml`
-- `.venv/bin/python -m sim.review outputs/agents/public_agent_python_api_minimal_propagation --query "SELECT scenario_name, duration_s, samples FROM run_metadata"`
+- `python agents/examples/build_public_agent_python_api_minimal_propagation.py`
+- `python run_simulation.py --config agents/examples/public_agent_python_api_minimal_propagation.yaml --validate-only`
+- `python run_simulation.py --config agents/examples/public_agent_python_api_minimal_propagation.yaml`
+- `python -m sim.review outputs/agents/public_agent_python_api_minimal_propagation --query "SELECT scenario_name, duration_s, samples FROM run_metadata"`
 
 Review queries:
 

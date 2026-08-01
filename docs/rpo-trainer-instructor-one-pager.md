@@ -190,16 +190,45 @@ feedback would include:
 ## Try It Locally
 
 Clone the public repository, install the game dependencies, then launch the
-level selector:
+level selector. Python 3.14 is recommended; Python 3.10 through 3.14 are
+supported.
+
+Windows PowerShell:
+
+```powershell
+git clone https://github.com/adamcohen8/orbital-engagement-lab.git
+Set-Location orbital-engagement-lab
+py --list
+py -3.14 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install --only-binary=:all: `
+  -c constraints/py314.txt ".[game]"
+.\.venv\Scripts\python.exe -m pip check
+.\.venv\Scripts\python.exe run_simulation.py --doctor
+.\.venv\Scripts\python.exe run_game.py
+```
+
+macOS or Linux:
 
 ```bash
 git clone https://github.com/adamcohen8/orbital-engagement-lab.git
 cd orbital-engagement-lab
-python -m venv .venv
-source .venv/bin/activate
-.venv/bin/python -m pip install ".[game]"
+python3.14 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install --only-binary=:all: \
+  -c constraints/py314.txt ".[game]"
+.venv/bin/python -m pip check
+.venv/bin/python run_simulation.py --doctor
 .venv/bin/python run_game.py
 ```
+
+Activation is optional. On Windows, using
+`.\.venv\Scripts\python.exe` directly avoids PowerShell execution-policy
+problems. For Python 3.10, 3.11, 3.12, or 3.13, use the same minor to create
+the environment and select its matching constraints file. Doctor should report
+the trainer capability as available before launch. If it does not, confirm the
+Python minor and constraints file match; recreate `.venv` if it came from
+another interpreter or operating system.
 
 For project context, see `docs/game-mode-roadmap.md`.
 

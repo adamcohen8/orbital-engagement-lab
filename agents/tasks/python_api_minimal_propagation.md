@@ -8,6 +8,8 @@ Expected output directory: `outputs/agents/public_agent_python_api_minimal_propa
 
 Answer example: `agents/tasks/examples/python_api_minimal_propagation_answer.md`
 
+Command convention: activate OEL through [Installing OEL](../../docs/installation.md); commands below use portable `python` after activation.
+
 ## User Prompt
 
 ```text
@@ -36,48 +38,25 @@ the exact commands and evidence.
 Generate the YAML artifact:
 
 ```bash
-.venv/bin/python - <<'PY'
-from sim import ScenarioBuilder
-
-artifact = (
-    ScenarioBuilder("public_agent_python_api_minimal_propagation")
-    .duration(300.0, dt_s=10.0)
-    .target_satellite(
-        mass_kg=300.0,
-        position_eci_km=[7000.0, 0.0, 0.0],
-        velocity_eci_km_s=[0.0, 7.5, 0.0],
-    )
-    .outputs(
-        "outputs/agents/public_agent_python_api_minimal_propagation",
-        stats={"print_summary": False, "save_json": True, "save_full_log": False},
-    )
-    .review(detail="standard")
-    .artifact()
-)
-
-report = artifact.validate_report()
-if not report.ok:
-    raise SystemExit(report.to_dict())
-artifact.write("agents/examples/public_agent_python_api_minimal_propagation.yaml")
-PY
+python agents/examples/build_public_agent_python_api_minimal_propagation.py
 ```
 
 Validate:
 
 ```bash
-.venv/bin/python run_simulation.py --config agents/examples/public_agent_python_api_minimal_propagation.yaml --validate-only
+python run_simulation.py --config agents/examples/public_agent_python_api_minimal_propagation.yaml --validate-only
 ```
 
 Run:
 
 ```bash
-.venv/bin/python run_simulation.py --config agents/examples/public_agent_python_api_minimal_propagation.yaml
+python run_simulation.py --config agents/examples/public_agent_python_api_minimal_propagation.yaml
 ```
 
 Query:
 
 ```bash
-.venv/bin/python -m sim.review outputs/agents/public_agent_python_api_minimal_propagation --query "SELECT scenario_name, duration_s, samples FROM run_metadata"
+python -m sim.review outputs/agents/public_agent_python_api_minimal_propagation --query "SELECT scenario_name, duration_s, samples FROM run_metadata"
 ```
 
 ## Required Review Queries

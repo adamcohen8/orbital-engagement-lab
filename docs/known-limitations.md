@@ -45,12 +45,15 @@ loading an untrusted scenario can run untrusted Python code.
 
 ## Compatibility
 
-The package currently declares Python `>=3.10`. Public CI exercises the default
-public test suite on Python 3.11. Broader Python-version CI is planned; if you
-depend on another supported Python version, run the public test suite locally in
-that environment before relying on it. Python 3.9 is no longer a supported
-procurement baseline because several dependency vulnerability fixes require
-Python 3.10 or newer.
+The package declares Python `>=3.10,<3.15`. Blocking public CI exercises the
+default public test suite on Python 3.11. The wider release compatibility
+program requires retained evidence for claimed Python/operating-system rows;
+see [`compatibility.md`](compatibility.md). Installation and recovery commands
+for Windows, macOS, and Linux are maintained in
+[`installation.md`](installation.md). If you depend on a particular row, verify
+that release evidence and run acceptance in the target environment.
+Python 3.9 is no longer a supported procurement baseline because several
+dependency vulnerability fixes require Python 3.10 or newer.
 
 ## Modeling Limits
 

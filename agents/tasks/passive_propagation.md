@@ -8,6 +8,8 @@ Expected output directory: `outputs/agents/public_agent_single_satellite`
 
 Answer example: `agents/tasks/examples/passive_propagation_answer.md`
 
+Command convention: activate OEL through [Installing OEL](../../docs/installation.md); commands below use portable `python` after activation.
+
 ## User Prompt
 
 ```text
@@ -31,13 +33,13 @@ and summarize the run from saved artifacts.
 Validate:
 
 ```bash
-.venv/bin/python run_simulation.py --config agents/examples/public_agent_single_satellite.yaml --validate-only
+python run_simulation.py --config agents/examples/public_agent_single_satellite.yaml --validate-only
 ```
 
 Run:
 
 ```bash
-.venv/bin/python run_simulation.py --config agents/examples/public_agent_single_satellite.yaml
+python run_simulation.py --config agents/examples/public_agent_single_satellite.yaml
 ```
 
 ## Required Review Queries

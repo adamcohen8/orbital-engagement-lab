@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -51,7 +52,7 @@ class ReviewWorkspace:
         )
 
     def tables(self) -> list[str]:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn:
             rows = conn.execute(
                 """
                 SELECT name
@@ -76,7 +77,7 @@ class ReviewWorkspace:
 
     def table_columns(self) -> dict[str, list[dict[str, Any]]]:
         columns: dict[str, list[dict[str, Any]]] = {}
-        with self._connect() as conn:
+        with closing(self._connect()) as conn:
             for table in self.tables():
                 rows = conn.execute(f"PRAGMA table_info({_quote_identifier(table)})").fetchall()
                 columns[table] = [
@@ -113,7 +114,7 @@ class ReviewWorkspace:
         step_budget = int(max(max_vm_steps, 1))
         params = () if parameters is None else parameters
         try:
-            with self._connect(authorize=True) as conn:
+            with closing(self._connect(authorize=True)) as conn:
                 steps = 0
 
                 def _abort_long_query() -> int:
@@ -141,7 +142,7 @@ class ReviewWorkspace:
         )
 
     def _connect(self, *, authorize: bool = False) -> sqlite3.Connection:
-        uri = f"file:{self.db_path.as_posix()}?mode=ro"
+        uri = f"{self.db_path.resolve().as_uri()}?mode=ro"
         conn = sqlite3.connect(uri, uri=True)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA query_only = ON")

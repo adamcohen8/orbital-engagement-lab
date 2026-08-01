@@ -48,10 +48,13 @@ run, query the review store, inspect `index.md`, and state the evidence limit.
 
 Canonical loop:
 
+Activate the environment using [Installing OEL](installation.md) first. The
+same `python` commands then work in PowerShell and POSIX shells.
+
 ```bash
-.venv/bin/python run_simulation.py --config <config> --validate-only
-.venv/bin/python run_simulation.py --config <config>
-.venv/bin/python -m sim.review <output-dir> --saved-query <query>
+python run_simulation.py --config <config> --validate-only
+python run_simulation.py --config <config>
+python -m sim.review <output-dir> --saved-query <query>
 ```
 
 For propagation, report duration, timestep, dynamics/control posture, final

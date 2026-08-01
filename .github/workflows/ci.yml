@@ -1,5 +1,8 @@
 name: CI
 
+env:
+  MPLBACKEND: Agg
+
 on:
   pull_request:
 
@@ -15,18 +18,20 @@ jobs:
       NUMBA_CACHE_DIR: ${{ github.workspace }}/.cache/numba
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
         id: setup-python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip
-          cache-dependency-path: pyproject.toml
+          cache-dependency-path: |
+            pyproject.toml
+            constraints/py311.txt
 
       - name: Restore compiled-kernel cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ env.NUMBA_CACHE_DIR }}
           key: numba-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('pyproject.toml', 'sim/acceleration/**/*.py', 'sim/dynamics/orbit/**/*.py') }}
@@ -36,7 +41,8 @@ jobs:
       - name: Install package
         run: |
           python -m pip install -U pip
-          python -m pip install ".[dev,accel,mcp]"
+          python -m pip install -c constraints/py311.txt ".[dev,game,accel,mcp]"
+          python -m pip check
 
       - name: Run public PR acceptance tests
         if: ${{ github.event_name == 'pull_request' }}
@@ -45,9 +51,15 @@ jobs:
           --durations=50 --durations-min=0.25
           --junitxml=test-results-public-core.xml
 
+      - name: Smoke Pygame with the dummy display driver
+        env:
+          SDL_VIDEODRIVER: dummy
+          SDL_AUDIODRIVER: dummy
+        run: python -m pytest -q sim/tests/test_platform_compat.py -k pygame_dummy_display
+
       - name: Upload public-test timing evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: test-timing-public-core
           path: test-results-public-core.xml

@@ -32,7 +32,11 @@ def main(argv: list[str] | None = None) -> int:
     query_group.add_argument("--list-artifacts", action="store_true", help="List workflow review artifacts.")
     parser.add_argument("--list-saved-queries", action="store_true", help="List built-in saved review queries and exit.")
     parser.add_argument("--max-rows", type=int, default=50, help="Maximum rows to print.")
-    parser.add_argument("--max-vm-steps", type=int, default=250_000, help="SQLite virtual-machine step budget.")
+    parser.add_argument(
+        "--max-vm-steps",
+        type=int,
+        help="SQLite virtual-machine step budget (default: 250000, or the vetted saved-query budget).",
+    )
     parser.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
     args = parser.parse_args(argv)
 
@@ -62,6 +66,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     sql = args.query
+    saved_query = None
     if args.saved_query:
         saved_query = get_saved_review_query(args.saved_query)
         if saved_query is None:
@@ -75,10 +80,15 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         workspace = ReviewWorkspace.open(Path(args.output_dir))
+        max_vm_steps = (
+            max(int(args.max_vm_steps), 1)
+            if args.max_vm_steps is not None
+            else (saved_query.max_vm_steps if saved_query is not None else 250_000)
+        )
         result = workspace.query(
             sql,
             max_rows=max(int(args.max_rows), 1),
-            max_vm_steps=max(int(args.max_vm_steps), 1),
+            max_vm_steps=max_vm_steps,
         )
     except (ReviewStoreNotFoundError, ReviewQueryError) as exc:
         print(f"review query failed: {exc}", file=sys.stderr)

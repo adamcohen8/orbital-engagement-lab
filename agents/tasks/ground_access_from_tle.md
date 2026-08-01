@@ -8,6 +8,8 @@ Expected output directory: `outputs/agents/public_agent_ground_access`
 
 Answer example: `agents/tasks/examples/ground_access_from_tle_answer.md`
 
+Command convention: activate OEL through [Installing OEL](../../docs/installation.md); commands below use portable `python` after activation.
+
 ## User Prompt
 
 ```text
@@ -30,13 +32,13 @@ and summarize access windows. Be explicit about whether this is SGP4.
 Validate:
 
 ```bash
-.venv/bin/python run_simulation.py --config agents/examples/public_agent_ground_access.yaml --validate-only
+python run_simulation.py --config agents/examples/public_agent_ground_access.yaml --validate-only
 ```
 
 Run:
 
 ```bash
-.venv/bin/python run_simulation.py --config agents/examples/public_agent_ground_access.yaml
+python run_simulation.py --config agents/examples/public_agent_ground_access.yaml
 ```
 
 ## Required Review Queries

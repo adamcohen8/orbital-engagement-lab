@@ -1,0 +1,48 @@
+{
+  "name": "cosmos_2428_python_sgp4_2_23",
+  "description": "Native TEME SGP4 reference samples for the bundled COSMOS 2428 TLE case.",
+  "source": {
+    "label": "python-sgp4 2.23",
+    "package": "sgp4",
+    "package_version": "2.23",
+    "generated_with": "sgp4.api.Satrec.twoline2rv(...).sgp4_tsince(tsince_min)",
+    "generated_on": "2026-06-22",
+    "notes": [
+      "Reference rows are native TEME position/velocity samples.",
+      "This CI-safe reference-vector gate complements the MATLAB SGP4 bridge; it does not exercise OEL's TEME-to-ECI frame approximation."
+    ]
+  },
+  "reference_frame": "teme",
+  "time_unit": "min",
+  "tle": {
+    "line1": "1 31792U 07029A   22289.01338767 -.00000054  00000+0 -35363-5 0  9993",
+    "line2": "2 31792  70.9514 286.9916 0011175 231.8951 128.1163 14.12601030788952"
+  },
+  "samples": [
+    {
+      "tsince_min": 0.0,
+      "position_teme_km": [2114.589508558446, -6920.13948008327, -0.000343030722],
+      "velocity_teme_km_s": [2.314840477809163, 0.708114086733413, 7.01540955380116]
+    },
+    {
+      "tsince_min": 360.0,
+      "position_teme_km": [-2442.714478395911, 6674.601110804192, -1303.770514094889],
+      "velocity_teme_km_s": [-1.879881579207753, -2.034186290152296, -6.89566337942899]
+    },
+    {
+      "tsince_min": 720.0,
+      "position_teme_km": [2691.382468335503, -6212.504573387385, 2550.934834880764],
+      "velocity_teme_km_s": [1.39739707905415, 3.282720109420215, 6.507236827915451]
+    },
+    {
+      "tsince_min": 1080.0,
+      "position_teme_km": [-2849.856324265049, 5503.332082516366, -3716.462216799152],
+      "velocity_teme_km_s": [-0.885506782795565, -4.436420422712628, -5.89237165030997]
+    },
+    {
+      "tsince_min": 1440.0,
+      "position_teme_km": [2921.84374837504, -4623.939099176006, 4732.450511619809],
+      "velocity_teme_km_s": [0.364719480696218, 5.41779542967123, 5.057558318909283]
+    }
+  ]
+}

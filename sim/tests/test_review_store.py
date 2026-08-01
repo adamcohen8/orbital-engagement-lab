@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+import sim.reporting.review_store as review_store_module
 from sim import ReviewWorkspace as TopLevelReviewWorkspace
 from sim import SimulationConfig, SimulationSession
 from sim.config import scenario_config_from_dict
@@ -138,6 +139,59 @@ def test_single_run_review_store_writes_queryable_sqlite(tmp_path: Path) -> None
     }.issubset(set(artifact_paths))
 
 
+def test_review_store_closes_sqlite_before_atomic_replace(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_connect = sqlite3.connect
+    real_replace = Path.replace
+    state = {"closed": False, "replace_observed": False}
+
+    class TrackedConnection:
+        def __init__(self, path: Path) -> None:
+            self.connection = real_connect(path)
+
+        def __getattr__(self, name: str):
+            return getattr(self.connection, name)
+
+        def close(self) -> None:
+            self.connection.close()
+            state["closed"] = True
+
+    def tracked_connect(path: Path) -> TrackedConnection:
+        return TrackedConnection(path)
+
+    def checked_replace(path: Path, target: Path) -> Path:
+        if path.name == "run.sqlite.tmp":
+            assert state["closed"], "Windows cannot replace an open SQLite file"
+            state["replace_observed"] = True
+        return real_replace(path, target)
+
+    monkeypatch.setattr(review_store_module.sqlite3, "connect", tracked_connect)
+    monkeypatch.setattr(Path, "replace", checked_replace)
+
+    result = SimulationSession.from_config(
+        SimulationConfig.from_dict(_review_store_config(tmp_path))
+    ).run()
+
+    assert state["replace_observed"]
+    assert Path(result.summary["review_outputs"]["sqlite"]).is_file()
+
+
+def test_review_store_supports_workspace_paths_with_spaces(tmp_path: Path) -> None:
+    output_dir = tmp_path / "Orbital Engagement Lab" / "Windows Review Output"
+    SimulationSession.from_config(
+        SimulationConfig.from_dict(_review_store_config(output_dir))
+    ).run()
+
+    workspace = ReviewWorkspace.open(output_dir)
+    result = workspace.query("SELECT scenario_name FROM run_metadata")
+
+    assert result.rows == [{"scenario_name": "review_store_smoke"}]
+    with pytest.raises(ReviewQueryError, match="read-only"):
+        workspace.query("UPDATE run_metadata SET scenario_name = 'changed'")
+
+
 def test_single_run_review_store_writes_all_configured_relative_pairs(tmp_path: Path) -> None:
     raw = _review_store_config(tmp_path)
     raw["scenario_name"] = "review_store_multi_pair"
@@ -184,6 +238,7 @@ def test_saved_review_queries_have_machine_readable_contract() -> None:
         assert query.sql.lstrip().upper().startswith(("SELECT", "WITH"))
         assert query.source_tables, key
         assert query.maturity in SAVED_QUERY_MATURITY_LEVELS
+        assert query.max_vm_steps > 0
 
     assert SAVED_REVIEW_QUERIES["burn_events"].allow_empty is True
     try:
@@ -192,6 +247,45 @@ def test_saved_review_queries_have_machine_readable_contract() -> None:
         assert "read-only SELECT/WITH" in str(exc)
     else:  # pragma: no cover - defensive assertion branch
         raise AssertionError("SavedReviewQuery accepted mutating SQL")
+
+
+def test_flagship_scale_burn_activity_uses_vetted_saved_query_budget(tmp_path: Path) -> None:
+    review_dir = tmp_path / "review"
+    review_dir.mkdir()
+    db_path = review_dir / "run.sqlite"
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE thrust (
+                sample_index INTEGER,
+                time_s REAL,
+                object_id TEXT,
+                accel_x_eci_km_s2 REAL,
+                accel_y_eci_km_s2 REAL,
+                accel_z_eci_km_s2 REAL,
+                accel_norm_km_s2 REAL,
+                burn_active INTEGER
+            );
+            CREATE INDEX idx_thrust_object_time ON thrust(object_id, time_s);
+            """
+        )
+        rows = (
+            (index, float(index), object_id, 0.0, 0.0, 0.0, 1.0e-6 if object_id == "chaser" else 0.0, int(object_id == "chaser"))
+            for object_id in ("chaser", "target")
+            for index in range(12_001)
+        )
+        conn.executemany("INSERT INTO thrust VALUES (?, ?, ?, ?, ?, ?, ?, ?)", rows)
+
+    workspace = ReviewWorkspace.open(tmp_path)
+    saved = SAVED_REVIEW_QUERIES["burn_activity"]
+    with pytest.raises(ReviewQueryError, match="step budget"):
+        workspace.query(saved.sql)
+
+    result = workspace.query(saved.sql, max_vm_steps=saved.max_vm_steps)
+
+    assert result.row_count == 2
+    assert result.rows[0]["object_id"] == "chaser"
+    assert result.rows[0]["samples"] == 12_001
 
 
 def test_relative_evidence_plot_recipes_group_by_pair_id() -> None:

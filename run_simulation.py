@@ -3,9 +3,22 @@ from __future__ import annotations
 
 import argparse
 import os
-import subprocess
 import sys
 from pathlib import Path
+
+from sim.doctor import (
+    doctor_requested,
+    require_supported_interpreter,
+)
+from sim.doctor import print_doctor_report as _print_doctor_report
+
+if __name__ == "__main__":
+    if doctor_requested(sys.argv[1:]):
+        raise SystemExit(0 if _print_doctor_report(source_root=Path(__file__).resolve().parent) else 1)
+    require_supported_interpreter()
+
+from sim.platform_compat import open_folder
+from sim.runtime_environment import configure_headless_runtime
 
 _NATIVE_MATH_THREAD_ENV_VARS = (
     "VECLIB_MAXIMUM_THREADS",
@@ -27,6 +40,7 @@ def _configure_cli_native_math_threads(default_threads: str = "1") -> None:
 
 if __name__ == "__main__":
     _configure_cli_native_math_threads()
+    _HEADLESS_RUNTIME_STATUS = configure_headless_runtime()
 
 from sim.config import load_simulation_yaml, validate_scenario_plugins
 from sim.execution import run_simulation_config_file
@@ -61,75 +75,6 @@ def _reject_batch_analysis(cfg) -> None:
         )
 
 
-def _check_import(module_name: str) -> tuple[bool, str]:
-    code = (
-        "import importlib; "
-        f"m=importlib.import_module({module_name!r}); "
-        "print(getattr(m, '__version__', '') or 'available')"
-    )
-    try:
-        proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=False, timeout=10.0)
-    except Exception as exc:
-        return False, str(exc)
-    detail = (proc.stdout or proc.stderr or "").strip().splitlines()
-    message = detail[-1] if detail else f"exit {proc.returncode}"
-    return proc.returncode == 0, message
-
-
-def _print_doctor_report() -> bool:
-    python_ok = sys.version_info >= (3, 10)
-    python_detail = sys.version.split()[0] if python_ok else f"{sys.version.split()[0]} (requires >=3.10)"
-    checks: list[tuple[str, bool, str, bool]] = [
-        ("Python", python_ok, python_detail, True),
-        ("Quickstart config", QUICKSTART_CONFIG.exists(), str(QUICKSTART_CONFIG), True),
-    ]
-    for module_name, required in (
-        ("yaml", True),
-        ("numpy", True),
-        ("matplotlib", False),
-        ("pygame", False),
-    ):
-        ok, detail = _check_import(module_name)
-        checks.append((module_name, ok, detail, required))
-    try:
-        output_root = Path("outputs")
-        output_root.mkdir(parents=True, exist_ok=True)
-        probe = output_root / ".doctor_write_test"
-        probe.write_text("ok\n", encoding="utf-8")
-        probe.unlink()
-        checks.append(("Output directory", True, str(output_root), True))
-    except Exception as exc:
-        checks.append(("Output directory", False, str(exc), True))
-    if QUICKSTART_CONFIG.exists():
-        try:
-            cfg = load_simulation_yaml(str(QUICKSTART_CONFIG))
-            errors = list(validate_scenario_plugins(cfg))
-            checks.append(("Quickstart validation", not errors, "OK" if not errors else "; ".join(errors[:3]), True))
-        except Exception as exc:
-            checks.append(("Quickstart validation", False, str(exc), True))
-    print("")
-    print("=" * 72)
-    print("ORBITAL ENGAGEMENT LAB DOCTOR")
-    print("=" * 72)
-    overall_ok = True
-    for label, ok, detail, required in checks:
-        status = "OK" if ok else ("WARN" if not required else "FAIL")
-        print(f"{label:<22} : {status} - {detail}")
-        if required and not ok:
-            overall_ok = False
-    print("-" * 72)
-    print(
-        "Ready: run `python run_simulation.py --quickstart`."
-        if overall_ok
-        else "Not ready: fix FAIL items and rerun doctor."
-    )
-    if not overall_ok:
-        print("For Python FAIL, rerun with Python 3.10+ or the project virtual environment.")
-    print("Optional plotting/game dependencies may show WARN and are not required for quickstart.")
-    print("=" * 72)
-    return overall_ok
-
-
 def _output_index_path(out: dict, cfg) -> str:
     run = dict(out.get("run", {}) or {})
     for candidate in (run.get("output_index_md"), out.get("output_index_md")):
@@ -150,13 +95,7 @@ def _open_output_folder(path_text: str | Path) -> bool:
         print(f"Open Output: skipped; folder does not exist: {path}")
         return False
     try:
-        if sys.platform == "darwin":
-            cmd = ["open", str(path)]
-        elif os.name == "nt":  # pragma: no cover
-            cmd = ["cmd", "/c", "start", "", str(path)]
-        else:
-            cmd = ["xdg-open", str(path)]
-        subprocess.Popen(cmd)
+        open_folder(path)
         print(f"Open Output: {path}")
         return True
     except Exception as exc:
@@ -235,7 +174,7 @@ def main() -> None:
     )
     args = parser.parse_args()
     if args.doctor:
-        if not _print_doctor_report():
+        if not _print_doctor_report(source_root=Path(__file__).resolve().parent):
             raise SystemExit(1)
         return
     config_path = str(QUICKSTART_CONFIG if args.quickstart else args.config)

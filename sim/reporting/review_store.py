@@ -57,7 +57,8 @@ def write_single_run_review_store(
     generated_utc = _utc_stamp()
 
     try:
-        with sqlite3.connect(tmp_path) as conn:
+        conn = sqlite3.connect(tmp_path)
+        try:
             conn.execute("PRAGMA foreign_keys = ON")
             _create_schema(conn)
             _insert_run_metadata(conn, cfg=cfg, summary=summary, outdir=outdir, generated_utc=generated_utc)
@@ -76,6 +77,8 @@ def write_single_run_review_store(
             _insert_metrics(conn, summary=summary)
             _insert_artifacts(conn, artifacts=artifacts, outdir=outdir, generated_utc=generated_utc)
             conn.commit()
+        finally:
+            conn.close()
         tmp_path.replace(db_path)
         _write_schema_json(schema_path, generated_utc=generated_utc)
         return {

@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
-import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -11,6 +9,7 @@ from typing import Any
 import numpy as np
 
 from sim.game.training import RPOTrainingConfig
+from sim.platform_compat import open_folder
 from sim.plotting.style import OELArtifactMetadata, artifact_metadata, role_color, save_oel_figure
 
 
@@ -371,14 +370,7 @@ def open_game_debrief_folder(path: str | Path | None) -> bool:
     if not folder.exists():
         return False
     try:
-        if sys.platform == "darwin":
-            subprocess.Popen(["open", str(folder)])
-        elif sys.platform.startswith("win"):
-            import os
-
-            os.startfile(str(folder))  # type: ignore[attr-defined]
-        else:
-            subprocess.Popen(["xdg-open", str(folder)])
+        open_folder(folder)
     except Exception:
         return False
     return True

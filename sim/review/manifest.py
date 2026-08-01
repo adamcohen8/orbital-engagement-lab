@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -192,7 +193,7 @@ def _write_workflow_sqlite(
 ) -> None:
     if db_path.exists():
         db_path.unlink()
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn:
         conn.execute(
             """
             CREATE TABLE workflow_metadata (
@@ -298,7 +299,7 @@ def _write_dynamic_table(conn: sqlite3.Connection, name: str, rows: list[dict[st
 
 
 def _schema_from_db(db_path: Path, *, workflow_type: str) -> dict[str, Any]:
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn:
         tables = [
             row[0]
             for row in conn.execute(

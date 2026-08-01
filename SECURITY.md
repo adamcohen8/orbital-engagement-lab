@@ -30,13 +30,20 @@ Customer or pilot agreements may define stricter response targets.
 
 ## Supported Versions
 
-Security fixes target the current public release line, currently `v0.23.0`, and
+Security fixes target the current public release line, currently `v0.23.1`, and
 active private/Pro customer-supported release lines. The project targets Python
-3.10 through 3.12. Blocking CI currently exercises Python 3.11, so evaluators
-should run acceptance on their exact target interpreter and operating system.
+3.10 through 3.14. Blocking CI currently exercises Python 3.11, while the
+release compatibility program retains evidence for the wider matrix described
+in [`docs/compatibility.md`](docs/compatibility.md). Evaluators should run
+acceptance on their exact target interpreter and operating system.
 Python 3.9 is no longer a supported procurement baseline because several
 vulnerability fixes in the Python packaging and ML/plotting ecosystem require
 Python 3.10 or newer.
+
+Commands below use `python` after activating the environment. See
+[`docs/installation.md`](docs/installation.md) for explicit Windows PowerShell
+and macOS/Linux interpreter paths; activation is optional when using those
+paths directly.
 
 ## Supported Scope
 
@@ -61,7 +68,7 @@ Python plugin modules so it can check controller, guidance, bridge, and mission
 contracts. For a first pass over a scenario from an untrusted source, use:
 
 ```bash
-.venv/bin/python run_simulation.py --config <path> --safe-validate
+python run_simulation.py --config <path> --safe-validate
 ```
 
 Safe validation checks YAML structure, path policy, and plugin pointer shape
@@ -72,8 +79,8 @@ For shared, classroom, government, or other restricted environments, use sealed
 mode for validation and execution:
 
 ```bash
-.venv/bin/python run_simulation.py --config <path> --sealed-mode --validate-only
-.venv/bin/python run_simulation.py --config <path> --sealed-mode
+python run_simulation.py --config <path> --sealed-mode --validate-only
+python run_simulation.py --config <path> --sealed-mode
 ```
 
 Sealed mode allows built-in OEL plugin modules, but blocks arbitrary plugin
@@ -95,20 +102,24 @@ Release and scheduled CI run a Python dependency audit with `pip-audit`. Local
 release review can run the same check with:
 
 ```bash
-.venv/bin/python -m pip install -U pip-audit
-.venv/bin/python -m pip_audit
+python -m pip install -U pip-audit
+python -m pip_audit
 ```
 
 Generate supply-chain evidence for procurement review with:
 
 ```bash
-.venv/bin/python tools/generate_python_sbom.py --output outputs/supply_chain/sbom.cdx.json
-.venv/bin/python -m pip freeze --all > outputs/supply_chain/python-freeze.txt
-.venv/bin/python -m pip_audit --format json --output outputs/supply_chain/pip-audit.json
+python -m pip install -c constraints/py311.txt ".[cross-platform]" --report outputs/supply_chain/pip-install-report.json
+python -m pip check > outputs/supply_chain/pip-check.txt
+python tools/generate_dependency_evidence.py --install-report outputs/supply_chain/pip-install-report.json --constraints constraints/py311.txt --output outputs/supply_chain/wheel-inventory.json
+python tools/generate_python_sbom.py --output outputs/supply_chain/sbom.cdx.json
+python -m pip freeze --all > outputs/supply_chain/python-freeze.txt
+python -m pip_audit --format json --output outputs/supply_chain/pip-audit.json
 ```
 
 See:
 
+- `docs/compatibility.md`
 - `docs/security/supply-chain.md`
 - `docs/security/data-handling.md`
 - `docs/security/incident-response.md`

@@ -4,8 +4,8 @@ Status: validated and ran.
 
 Commands:
 
-- `.venv/bin/python run_simulation.py --config agents/examples/public_agent_attitude_hold.yaml --validate-only`
-- `.venv/bin/python run_simulation.py --config agents/examples/public_agent_attitude_hold.yaml`
+- `python run_simulation.py --config agents/examples/public_agent_attitude_hold.yaml --validate-only`
+- `python run_simulation.py --config agents/examples/public_agent_attitude_hold.yaml`
 
 Review queries:
 
