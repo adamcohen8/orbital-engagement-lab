@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "milestone": "M4_public_execution_mcp",
+  "status": "passed",
+  "review_date": "2026-07-31",
+  "oel_base_commit": "4ce3abf891191c17d9c8a333099189c42a06c01e",
+  "platform": "macOS-15.7.7-arm64-arm-64bit",
+  "python_version": "3.11.14",
+  "sdk_version": "2.0.0",
+  "protocol_revision": "2026-07-28",
+  "checks": {
+    "official_sdk_stdio": {
+      "status": "passed",
+      "tool_count": 9,
+      "resource_count": 4,
+      "repeated_sessions": 2,
+      "clean_shutdowns": 2,
+      "cancellation_recovery": true,
+      "structured_error_code": -32602
+    },
+    "inspector": {
+      "status": "passed",
+      "package": "@modelcontextprotocol/inspector@2.0.0",
+      "registry_integrity": "sha512-uEoeEG7/+ZbrvccPF3EsgbfjcyJ3bWVJXT4pcZtpmDUhA0zdK4T4Tuj2oUphi2Huwl66LqVdo3Mx2PkS2SUHXA==",
+      "tool_count": 9,
+      "resource_count": 4
+    },
+    "codex": {
+      "status": "passed",
+      "host_version": "codex-cli 0.146.0-alpha.3.1",
+      "tool_id": "oel.describe_capabilities.v1",
+      "capability_count": 9,
+      "transport": "stdio",
+      "deviations": [
+        "The isolated non-interactive fixture pre-approves only the trusted read-only capability tool."
+      ]
+    },
+    "claude": {
+      "status": "passed",
+      "host_version": "2.1.215 (Claude Code)",
+      "model_alias": "haiku",
+      "tool_id": "oel.describe_capabilities.v1",
+      "capability_count": 9,
+      "transport": "stdio",
+      "deviations": [
+        "Claude Code normalizes dotted MCP tool IDs to underscores.",
+        "Claude Code discovers the OEL tool lazily through ToolSearch.",
+        "The isolated fixture limits Claude's built-in inventory to ToolSearch."
+      ]
+    },
+    "m4_execution": {
+      "status": "passed",
+      "tools": [
+        "oel.plan_run.v1",
+        "oel.validate_scenario.v1",
+        "oel.run_scenario.v1",
+        "oel.compare_runs.v1",
+        "oel.plot_evidence.v1",
+        "oel.run_agent_task.v1"
+      ],
+      "operator_approval_default": "deny",
+      "approval_sources": [
+        "OEL_MCP_TRUST_APPROVAL_IDS",
+        "OEL_MCP_WRITE_APPROVAL_IDS",
+        "OEL_MCP_EXECUTION_APPROVAL_IDS"
+      ],
+      "validation_identity_bound_to_normalized_config": true,
+      "safe_validation_precedes_trusted_validation": true,
+      "execution_authorized_by_validation": false,
+      "resource_profiles": [
+        "laptop-safe",
+        "standard"
+      ],
+      "new_or_empty_output_required": true,
+      "execution_manifest_states": [
+        "running",
+        "completed",
+        "failed",
+        "cancelled"
+      ],
+      "sdk_execution_cancellation_manifest": "cancelled",
+      "completed_run_comparison": "passed",
+      "allowlisted_plot_artifact": "passed",
+      "supported_public_task_evidence_packet": "passed",
+      "private_or_prototype_task_rejection": "passed"
+    }
+  }
+}

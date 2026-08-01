@@ -10,7 +10,7 @@ from sim.agent_task.models import (
 )
 from sim.agent_task.plot_recipes import get_plot_recipe, list_plot_recipes
 from sim.agent_task.recipes import get_recipe, list_recipes
-from sim.agent_task.runner import compare_configs, create_plot, inspect_output, run_recipe
+from sim.agent_task.runner import compare_configs, compare_outputs, create_plot, inspect_output, run_recipe
 from sim.agent_task.semantics import get_semantic_metric, list_semantic_metrics, semantic_metric_request_rows
 
 __all__ = [
@@ -21,6 +21,7 @@ __all__ = [
     "FailureHint",
     "SemanticMetric",
     "compare_configs",
+    "compare_outputs",
     "create_plot",
     "get_plot_recipe",
     "get_recipe",

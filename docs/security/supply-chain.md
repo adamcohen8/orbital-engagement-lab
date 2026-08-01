@@ -7,7 +7,7 @@ security, legal, export-control, or mission-assurance process.
 ## Supported Versions
 
 - Public releases: security fixes target the current public release line,
-  currently `v0.22.2`.
+  currently `v0.23.0`.
 - Private/Pro releases: security fixes target the active customer-supported
   release line or pilot branch named in the agreement.
 - Python compatibility target: Python 3.10 through 3.12. Blocking CI currently
@@ -41,9 +41,18 @@ Run the dependency audit after installing the evaluated profile:
 .venv/bin/python -m pip_audit --format json --output outputs/supply_chain/pip-audit.json
 ```
 
-CI also runs dependency audit evidence. Treat a known vulnerability as a release
-finding until it is upgraded, removed, documented as not applicable, or accepted
-by the evaluator in writing.
+The regular release gate runs the complete local workflow with:
+
+```bash
+.venv/bin/python tools/run_supply_chain_gate.py --output-dir outputs/supply_chain --install-full
+```
+
+That command installs the full evaluated profile, writes the SBOM and freeze,
+runs the audit with the documented exceptions below, and records artifact
+hashes in `supply-chain-gate.json`. Scheduled/manual CI repeats the audit on
+Linux as an independent-environment backstop; it is not repeated on every PR.
+Treat a known vulnerability as a release finding until it is upgraded, removed,
+documented as not applicable, or accepted by the evaluator in writing.
 
 Current release audit exceptions:
 

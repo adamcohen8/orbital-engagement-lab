@@ -1,0 +1,23 @@
+{
+  "auditReportVersion": 2,
+  "dependencies": {
+    "dev": 266,
+    "optional": 44,
+    "peer": 80,
+    "peerOptional": 0,
+    "prod": 1,
+    "total": 266
+  },
+  "package": "@modelcontextprotocol/inspector@2.0.0",
+  "registry_integrity": "sha512-uEoeEG7/+ZbrvccPF3EsgbfjcyJ3bWVJXT4pcZtpmDUhA0zdK4T4Tuj2oUphi2Huwl66LqVdo3Mx2PkS2SUHXA==",
+  "review_date": "2026-07-31",
+  "scope": "test_only_not_packaged",
+  "vulnerabilities": {
+    "critical": 0,
+    "high": 0,
+    "info": 0,
+    "low": 0,
+    "moderate": 0,
+    "total": 0
+  }
+}

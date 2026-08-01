@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 TOOL_CONTRACT_VERSION = 1
@@ -42,14 +42,14 @@ ENVELOPE_SCHEMA: dict[str, Any] = {
     "properties": {
         "tool_contract_version": {"const": TOOL_CONTRACT_VERSION},
         "tool_id": {"type": "string"},
-        "risk_class": {"enum": ["R0_read", "R1_write"]},
+        "risk_class": {"enum": ["R0_read", "R1_write", "R2_execute", "R3_sensitive"]},
         "status": {"enum": ["completed", "partial", "failed"]},
         "effects": {
             "type": "object",
             "properties": {
                 "reads": {"type": "boolean"},
                 "writes": {"type": "boolean"},
-                "executes": {"const": False},
+                "executes": {"type": "boolean"},
                 "external_communication": {"const": False},
             },
             "required": ["reads", "writes", "executes", "external_communication"],
@@ -85,6 +85,10 @@ ENVELOPE_SCHEMA: dict[str, Any] = {
                 "tool_id": {"type": "string"},
                 "status": {"type": "string"},
                 "arguments_sha256": {"type": "string"},
+                "arguments_sha256_semantics": {
+                    "const": "argument_names_and_handling_labels_only"
+                },
+                "argument_values_retained": {"const": False},
                 "payload_retained": {"const": False},
             },
             "required": [
@@ -94,6 +98,8 @@ ENVELOPE_SCHEMA: dict[str, Any] = {
                 "tool_id",
                 "status",
                 "arguments_sha256",
+                "arguments_sha256_semantics",
+                "argument_values_retained",
                 "payload_retained",
             ],
             "additionalProperties": False,
@@ -129,11 +135,17 @@ class ToolContract:
     writes: bool
     input_schema: dict[str, Any]
     result_schema: dict[str, Any]
+    executes: bool = False
+    required_entitlement: str = ""
+    limits: dict[str, Any] = field(default_factory=dict)
     deprecated: bool = False
     replacement: str = ""
+    deprecated_since: str = ""
+    removal_after: str = ""
+    migration_guide: str = ""
 
     def capability(self) -> dict[str, Any]:
-        return {
+        capability = {
             "tool_id": self.tool_id,
             "title": self.title,
             "risk_class": self.risk_class,
@@ -142,18 +154,38 @@ class ToolContract:
             "required_install_profile": self.install_profile,
             "deployment_profiles": list(self.deployment_profiles),
             "data_classes": list(self.data_classes),
-            "effects": effects(writes=self.writes),
+            "effects": effects(writes=self.writes, executes=self.executes),
             "deprecated": self.deprecated,
             "replacement": self.replacement,
             "input_schema_sha256": _schema_sha256(self.input_schema),
             "result_schema_sha256": _schema_sha256(self.result_schema),
-            "limits": _tool_limits(self.tool_id),
+            "limits": {**_tool_limits(self.tool_id), **deepcopy(self.limits)},
         }
+        if self.required_entitlement:
+            capability["required_entitlement"] = self.required_entitlement
+        if self.deprecated:
+            capability.update(
+                {
+                    "deprecated_since": self.deprecated_since,
+                    "removal_after": self.removal_after,
+                    "migration_guide": self.migration_guide,
+                }
+            )
+        return capability
 
     def mcp_definition(self) -> dict[str, Any]:
         output_schema = deepcopy(ENVELOPE_SCHEMA)
         output_schema["properties"]["tool_id"] = {"const": self.tool_id}
         output_schema["properties"]["risk_class"] = {"const": self.risk_class}
+        output_schema["properties"]["effects"] = object_schema(
+            {
+                "reads": {"const": True},
+                "writes": {"const": self.writes},
+                "executes": {"const": self.executes},
+                "external_communication": {"const": False},
+            },
+            required=("reads", "writes", "executes", "external_communication"),
+        )
         output_schema["properties"]["result"] = deepcopy(self.result_schema)
         return {
             "name": self.tool_id,
@@ -161,6 +193,12 @@ class ToolContract:
             "description": self.description,
             "inputSchema": deepcopy(self.input_schema),
             "outputSchema": output_schema,
+            "annotations": {
+                "readOnlyHint": not self.writes and not self.executes,
+                "destructiveHint": self.writes or self.executes,
+                "idempotentHint": not self.writes and not self.executes,
+                "openWorldHint": False,
+            },
         }
 
 
@@ -183,11 +221,11 @@ def handling_properties(properties: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def effects(*, writes: bool) -> dict[str, bool]:
+def effects(*, writes: bool, executes: bool = False) -> dict[str, bool]:
     return {
         "reads": True,
         "writes": writes,
-        "executes": False,
+        "executes": executes,
         "external_communication": False,
     }
 
@@ -209,6 +247,46 @@ def _tool_limits(tool_id: str) -> dict[str, Any]:
                 "max_review_store_bytes": MAX_REVIEW_STORE_BYTES,
             }
         )
-    elif tool_id.startswith("oel.pro."):
-        limits["max_input_file_bytes"] = MAX_MANIFEST_BYTES
+    elif tool_id in {"oel.plan_run.v1", "oel.validate_scenario.v1", "oel.run_scenario.v1"}:
+        limits.update(
+            {
+                "max_scenario_bytes": 2_000_000,
+                "resource_profiles": ["laptop-safe", "standard"],
+                "new_or_empty_output_required": tool_id == "oel.run_scenario.v1",
+                "operator_approval_required": tool_id == "oel.run_scenario.v1",
+            }
+        )
+    elif tool_id == "oel.compare_runs.v1":
+        limits.update({"max_metrics": 20, "max_rows_per_query": 200})
+    elif tool_id == "oel.plot_evidence.v1":
+        limits.update({"one_plot_per_call": True, "operator_approval_required": True})
+    elif tool_id == "oel.run_agent_task.v1":
+        limits.update(
+            {
+                "public_supported_recipes_only": True,
+                "max_rows_per_query": 200,
+                "resource_profiles": ["laptop-safe", "standard"],
+                "operator_approval_required": True,
+            }
+        )
+    elif tool_id == "oel.prepare_report_packet.v1":
+        limits.update(
+            {
+                "max_artifacts": 100,
+                "max_artifact_bytes": 1_000_000_000,
+                "max_total_artifact_bytes": 2_000_000_000,
+                "max_rows_per_query": 100,
+                "operator_approval_required": True,
+                "provider_call_made": False,
+            }
+        )
+    elif tool_id == "oel.audit_report.v1":
+        limits.update(
+            {
+                "max_report_bytes": 2_000_000,
+                "operator_approval_required": True,
+                "provider_call_made": False,
+                "semantic_claim_review": False,
+            }
+        )
     return limits

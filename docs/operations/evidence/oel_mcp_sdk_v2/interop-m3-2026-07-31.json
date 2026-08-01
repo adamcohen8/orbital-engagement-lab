@@ -1,0 +1,88 @@
+{
+  "checks": {
+    "claude": {
+      "capability_count": 3,
+      "deviations": [
+        "Claude Code normalizes dotted MCP tool IDs to underscores.",
+        "Claude Code discovers the OEL tool lazily through ToolSearch.",
+        "An initial preflight attempted denied Bash; the final isolated fixture removes Bash and limits built-ins to ToolSearch."
+      ],
+      "host_version": "2.1.215 (Claude Code)",
+      "model_alias": "haiku",
+      "status": "passed",
+      "tool_id": "oel.describe_capabilities.v1",
+      "transport": "stdio"
+    },
+    "codex": {
+      "capability_count": 3,
+      "deviations": [
+        "The isolated non-interactive fixture pre-approves only the trusted read-only OEL capability tool."
+      ],
+      "host_version": "codex-cli 0.146.0-alpha.3.1",
+      "status": "passed",
+      "tool_id": "oel.describe_capabilities.v1",
+      "transport": "stdio"
+    },
+    "inspector": {
+      "package": "@modelcontextprotocol/inspector@2.0.0",
+      "registry_integrity": "sha512-uEoeEG7/+ZbrvccPF3EsgbfjcyJ3bWVJXT4pcZtpmDUhA0zdK4T4Tuj2oUphi2Huwl66LqVdo3Mx2PkS2SUHXA==",
+      "resource_uris": [
+        "oel://capabilities/tools/v1",
+        "oel://review/saved-queries/v1",
+        "oel://agent/tasks/v1",
+        "oel://docs/operator-guide/v1"
+      ],
+      "status": "passed",
+      "tool_ids": [
+        "oel.describe_capabilities.v1",
+        "oel.inspect_run.v1",
+        "oel.query_review.v1"
+      ]
+    },
+    "official_sdk_stdio": {
+      "error_handling": {
+        "code": -32602,
+        "message": "Handling metadata is required for this operation.",
+        "passed": true
+      },
+      "lifecycle": {
+        "cancellation_recovery": true,
+        "clean_shutdowns": 2,
+        "operator_guide_read_each_session": true,
+        "ping": "not_supported_by_protocol_revision_2026-07-28",
+        "repeated_sessions": 2
+      },
+      "resource_uris": [
+        "oel://capabilities/tools/v1",
+        "oel://review/saved-queries/v1",
+        "oel://agent/tasks/v1",
+        "oel://docs/operator-guide/v1"
+      ],
+      "resources_read": 4,
+      "sdk_version": "2.0.0",
+      "status": "passed",
+      "tool_ids": [
+        "oel.describe_capabilities.v1",
+        "oel.inspect_run.v1",
+        "oel.query_review.v1"
+      ]
+    },
+    "wheel_install": {
+      "console_entry_point": "oel-mcp",
+      "default_adapter": "sdk",
+      "packaged_operator_guide": true,
+      "packaged_resource_module": true,
+      "rollback_adapter": "legacy",
+      "status": "passed"
+    }
+  },
+  "milestone": "M3_supported_read_validate_mcp",
+  "oel_base_commit": "36ed8e1932eab63ec3580f34ea989d3039303d3e",
+  "platform": "macOS-15.7.7-arm64-arm-64bit",
+  "protocol_revision": "2026-07-28",
+  "python_version": "3.11.14",
+  "review_date": "2026-07-31",
+  "schema_version": 1,
+  "sdk_version": "2.0.0",
+  "status": "passed"
+}

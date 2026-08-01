@@ -15,6 +15,7 @@ from sim.agent_task.recipes import get_recipe
 from sim.agent_task.semantics import get_semantic_metric, semantic_metric_dicts, semantic_metric_request_rows
 from sim.api import SimulationWorkspace
 from sim.execution import run_simulation_config_file
+from sim.resource_limits import apply_resource_profile_to_config_dict
 from sim.review import (
     ReviewQueryError,
     ReviewStoreNotFoundError,
@@ -28,6 +29,10 @@ DEFAULT_INSPECTION_QUERIES = ("run_metadata", "objects", "artifacts")
 DEFAULT_COMPARISON_METRICS = ("initial_range_km", "final_range_km", "closest_approach_km", "closest_approach_time_s")
 
 
+class AgentTaskCancelled(RuntimeError):
+    """Raised by a caller callback to stop a task at a deterministic step boundary."""
+
+
 def run_recipe(
     recipe_id: str,
     *,
@@ -37,11 +42,18 @@ def run_recipe(
     make_plots: bool = False,
     style_name: str = "oel_dark",
     max_rows: int = 50,
+    resource_profile: str = "config",
+    step_callback: Any | None = None,
 ) -> dict[str, Any]:
     recipe = get_recipe(recipe_id)
     if recipe is None:
         raise ValueError(f"Unknown agent task recipe: {recipe_id}")
-    prepared = prepare_recipe_config(recipe, output_dir=output_dir, output_root=output_root)
+    prepared = prepare_recipe_config(
+        recipe,
+        output_dir=output_dir,
+        output_root=output_root,
+        resource_profile=resource_profile,
+    )
     task_id = recipe.recipe_id
     validation = _workspace().validate(prepared["config_path"])
     packet = EvidencePacket(
@@ -55,21 +67,26 @@ def run_recipe(
         semantic_metrics=semantic_metric_dicts(recipe.semantic_metric_names),
     )
     if not bool(validation.get("ok")):
-        packet.failure_hints = [hint.to_dict() for hint in diagnose_failure(validation=validation, output_dir=prepared["output_dir"])]
+        packet.failure_hints = [
+            hint.to_dict() for hint in diagnose_failure(validation=validation, output_dir=prepared["output_dir"])
+        ]
         return _write_packet(packet, prepared["output_dir"])
     if dry_run:
         packet.caveats.append("Dry run requested: scenario was validated but not executed.")
         return _write_packet(packet, prepared["output_dir"])
 
     try:
-        payload = run_simulation_config_file(prepared["config_path"])
+        payload = run_simulation_config_file(prepared["config_path"], step_callback=step_callback)
         packet.run = _run_summary(payload)
         packet.status = "completed"
+    except AgentTaskCancelled:
+        raise
     except Exception as exc:
         packet.status = "failed"
         packet.run = {"error": str(exc)}
         packet.failure_hints = [
-            hint.to_dict() for hint in diagnose_failure(str(exc), validation=validation, output_dir=prepared["output_dir"])
+            hint.to_dict()
+            for hint in diagnose_failure(str(exc), validation=validation, output_dir=prepared["output_dir"])
         ]
         return _write_packet(packet, prepared["output_dir"])
 
@@ -232,7 +249,10 @@ def compare_configs(
         for hint in list(inspection.get("failure_hints", []) or []):
             packet.failure_hints.append({"label": label, **dict(hint)})
     packet.run = runs
-    packet.review = {"base": inspections.get("base", {}).get("review", {}), "candidate": inspections.get("candidate", {}).get("review", {})}
+    packet.review = {
+        "base": inspections.get("base", {}).get("review", {}),
+        "candidate": inspections.get("candidate", {}).get("review", {}),
+    }
     packet.artifacts = [
         {"label": label, **artifact}
         for label, inspection in inspections.items()
@@ -253,11 +273,56 @@ def compare_configs(
     return _write_packet(packet, outdir)
 
 
+def compare_outputs(
+    base_output_dir: str | Path,
+    candidate_output_dir: str | Path,
+    *,
+    metric_names: tuple[str, ...] | list[str] | None = None,
+    max_rows: int = 50,
+) -> dict[str, Any]:
+    """Compare semantic metrics from two completed runs without executing or writing."""
+
+    metrics = tuple(metric_names or DEFAULT_COMPARISON_METRICS)
+    query_names = _comparison_query_names(metrics)
+    inspections = {
+        "base": inspect_output(
+            base_output_dir,
+            query_names=query_names,
+            max_rows=max_rows,
+            semantic_metric_names=metrics,
+            write_packet=False,
+        ),
+        "candidate": inspect_output(
+            candidate_output_dir,
+            query_names=query_names,
+            max_rows=max_rows,
+            semantic_metric_names=metrics,
+            write_packet=False,
+        ),
+    }
+    metric_table = {label: _extract_metric_values(data, metrics) for label, data in inspections.items()}
+    deltas = _metric_deltas(metric_table["base"], metric_table["candidate"])
+    statuses = {label: str(data.get("status") or "") for label, data in inspections.items()}
+    metric_status = _comparison_metric_status(metrics, metric_table, deltas, inspections)
+    summary = _summarize_comparison(metric_status, inspection_statuses=statuses)
+    return {
+        "status": "completed" if summary["complete"] else "partial",
+        "metric_names": list(metrics),
+        "query_names": list(query_names),
+        "metrics": metric_table,
+        "deltas": deltas,
+        "metric_status": metric_status,
+        "inspection_statuses": statuses,
+        "summary": summary,
+    }
+
+
 def prepare_recipe_config(
     recipe: AgentTaskRecipe,
     *,
     output_dir: str | Path | None = None,
     output_root: str | Path | None = None,
+    resource_profile: str = "config",
 ) -> dict[str, Any]:
     root = _repo_root()
     config_path = (root / recipe.config_path).resolve()
@@ -266,13 +331,22 @@ def prepare_recipe_config(
     if output_dir is None:
         data = _load_yaml(config_path)
         output_dir = data.get("outputs", {}).get("output_dir", "")
-    return _prepare_config(config_path, output_dir, label=recipe.recipe_id)
+    return _prepare_config(config_path, output_dir, label=recipe.recipe_id, resource_profile=resource_profile)
 
 
-def _prepare_config(config_path: str | Path, output_dir: str | Path, *, label: str) -> dict[str, Any]:
+def _prepare_config(
+    config_path: str | Path,
+    output_dir: str | Path,
+    *,
+    label: str,
+    resource_profile: str = "config",
+) -> dict[str, Any]:
     source = Path(config_path).expanduser().resolve()
     outdir = Path(output_dir).expanduser().resolve()
     data = _load_yaml(source)
+    if resource_profile != "config":
+        data = apply_resource_profile_to_config_dict(data, resource_profile)
+        data.setdefault("outputs", {}).setdefault("stats", {})["print_summary"] = False
     data.setdefault("outputs", {})["output_dir"] = str(outdir)
     data.setdefault("outputs", {}).setdefault("review", {})
     data["outputs"]["review"]["enabled"] = True
@@ -286,10 +360,13 @@ def _prepare_config(config_path: str | Path, output_dir: str | Path, *, label: s
         "config_path": str(task_config),
         "output_dir": str(outdir),
         "review_enabled": True,
+        "resource_profile": resource_profile,
     }
 
 
-def _run_saved_queries(workspace: ReviewWorkspace, query_names: tuple[str, ...], *, max_rows: int) -> list[dict[str, Any]]:
+def _run_saved_queries(
+    workspace: ReviewWorkspace, query_names: tuple[str, ...], *, max_rows: int
+) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for name in query_names:
         saved = get_saved_review_query(name)
@@ -373,7 +450,9 @@ def _summarize_query_rows(query_rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _make_plots_for_recipe(output_dir: str | Path, plot_recipe_ids: tuple[str, ...], *, style_name: str) -> list[dict[str, Any]]:
+def _make_plots_for_recipe(
+    output_dir: str | Path, plot_recipe_ids: tuple[str, ...], *, style_name: str
+) -> list[dict[str, Any]]:
     plots: list[dict[str, Any]] = []
     for recipe_id in plot_recipe_ids:
         try:
@@ -447,8 +526,10 @@ def _comparison_metric_status(
                 }
             )
             if not base_available or not candidate_available:
-                if metric.saved_query and query_status_by_label and all(
-                    status == "ok" for status in query_status_by_label.values()
+                if (
+                    metric.saved_query
+                    and query_status_by_label
+                    and all(status == "ok" for status in query_status_by_label.values())
                 ):
                     row["reason"] = "no_scalar_reducer"
                 else:
@@ -497,9 +578,7 @@ def _summarize_comparison(
         and not bool(row.get("delta_available"))
     ]
     partial_inspections = [
-        str(label)
-        for label, status in sorted(inspection_statuses.items())
-        if status and status != "completed"
+        str(label) for label, status in sorted(inspection_statuses.items()) if status and status != "completed"
     ]
     return {
         "total": len(metric_status),
@@ -605,13 +684,21 @@ def _plot_artifact_dict(artifact: ReviewPlotArtifact, *, recipe: AgentPlotRecipe
 
 
 def _summarize_plots(plots: list[dict[str, Any]]) -> dict[str, Any]:
-    failed = [str(item.get("recipe_id") or item.get("artifact_id") or "unknown") for item in plots if item.get("status") == "failed"]
+    failed = [
+        str(item.get("recipe_id") or item.get("artifact_id") or "unknown")
+        for item in plots
+        if item.get("status") == "failed"
+    ]
     missing = [
         str(item.get("artifact_id") or item.get("recipe_id") or item.get("path") or "unknown")
         for item in plots
         if item.get("path_exists") is False
     ]
-    truncated = [str(item.get("artifact_id") or item.get("recipe_id") or "unknown") for item in plots if bool(item.get("truncated"))]
+    truncated = [
+        str(item.get("artifact_id") or item.get("recipe_id") or "unknown")
+        for item in plots
+        if bool(item.get("truncated"))
+    ]
     ok = sum(1 for item in plots if item.get("status") == "ok")
     return {
         "total": len(plots),

@@ -38,6 +38,7 @@ inspect OEL scenarios.
 5. [Agent Review Query Recipes](agent-review-queries.md)
 6. [Agent Feedback Loop](agent-feedback-loop.md)
 7. [Agent Evaluation Packet](agent-evaluation-packet.md)
+8. [Supported Local MCP Surface](oel-mcp.md)
 
 The root `AGENTS.md` and `agents/public/AGENTS.md` are the agent playbooks.
 The docs above explain the supporting workflow, evidence, evaluation, and
@@ -59,6 +60,7 @@ Start here when you already know the kind of work you want to run.
 | Use the orbital calculator | [Orbital Calculator](orbital-calculator.md) |
 | Use game/training mode | [Video Game Mode Roadmap](game-mode-roadmap.md) |
 | Use ML/RL wrappers | [ML/RL Policy Contracts](ml-rl-contracts.md) |
+| Connect a local MCP host | [Supported Local MCP Surface](oel-mcp.md) |
 
 ## Pro Workspace User
 
