@@ -62,10 +62,12 @@ not a substitute for the separate controlled Windows 11 desktop gate.
   module. Windows object workers explicitly select `spawn` while retaining
   deterministic process-pool behavior.
 - Split routine PR CI from the expensive compatibility matrix. Routine private
-  and public validation runs only on PRs; compatibility, dependency-audit,
-  or part of the local versioned release workflow.
+  and public validation runs only on PRs; specialized integration and
+  extended-validation backstops remain path-scoped, scheduled, manual, or part
+  of the local versioned release workflow.
 - Made headless Matplotlib and dummy-display Pygame checks explicit, and
-  integrations rather than universal core capabilities.
+  documented optional external workflows as OS-qualified integrations rather
+  than universal core capabilities.
 
 ### Fixed
 
