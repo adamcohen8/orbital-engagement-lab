@@ -582,6 +582,7 @@ class RocketAscentSimulator:
             tt_minus_utc_s=env.get("tt_minus_utc_s"),
             ddpsi_rad=float(env.get("ddpsi_rad", 0.0) or 0.0),
             ddeps_rad=float(env.get("ddeps_rad", 0.0) or 0.0),
+            eop_extrapolation=str(env.get("eop_extrapolation", "error") or "error"),
         )
         v_rel_eci_m_s = v_rel_eci_km_s * 1e3 - wind_eci_m_s
         v_rel_body_m_s = c_bn @ v_rel_eci_m_s

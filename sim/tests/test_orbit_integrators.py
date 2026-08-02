@@ -94,6 +94,15 @@ class TestOrbitIntegrators(unittest.TestCase):
         self.assertEqual(info.attempted_steps, info.accepted_steps + info.rejected_steps)
         self.assertIsNotNone(info.suggested_next_step_s)
 
+    def test_adaptive_integrator_rejects_nonfinite_duration(self):
+        with self.assertRaisesRegex(ValueError, "dt_s must be finite"):
+            integrate_adaptive(
+                deriv_fn=lambda _t_s, x: x,
+                t_s=0.0,
+                x=np.array([1.0], dtype=float),
+                dt_s=float("nan"),
+            )
+
     def test_adaptive_tolerance_tightening_reduces_error(self):
         def deriv(_t_s: float, x: np.ndarray) -> np.ndarray:
             return x

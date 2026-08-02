@@ -166,6 +166,7 @@ def accel_drag(
         tt_minus_utc_s=None if env.get("tt_minus_utc_s") is None else float(env["tt_minus_utc_s"]),
         ddpsi_rad=float(env.get("ddpsi_rad", 0.0) or 0.0),
         ddeps_rad=float(env.get("ddeps_rad", 0.0) or 0.0),
+        eop_extrapolation=str(env.get("eop_extrapolation", "error") or "error"),
     )
 
 
@@ -189,6 +190,7 @@ def accel_drag_resolved(
     tt_minus_utc_s: float | None = None,
     ddpsi_rad: float = 0.0,
     ddeps_rad: float = 0.0,
+    eop_extrapolation: str = "error",
 ) -> np.ndarray:
     rho = float(density_kg_m3)
     if rho <= 0.0 or mass_kg <= 0.0:
@@ -211,6 +213,7 @@ def accel_drag_resolved(
         tt_minus_utc_s=tt_minus_utc_s,
         ddpsi_rad=ddpsi_rad,
         ddeps_rad=ddeps_rad,
+        eop_extrapolation=eop_extrapolation,
     )
     v_rel_m_s = v_rel_eci_km_s * 1e3
     v_norm2 = float(np.dot(v_rel_m_s, v_rel_m_s))
@@ -257,6 +260,7 @@ def accel_lift(
         tt_minus_utc_s=None if env.get("tt_minus_utc_s") is None else float(env["tt_minus_utc_s"]),
         ddpsi_rad=float(env.get("ddpsi_rad", 0.0) or 0.0),
         ddeps_rad=float(env.get("ddeps_rad", 0.0) or 0.0),
+        eop_extrapolation=str(env.get("eop_extrapolation", "error") or "error"),
     )
     v_rel_m_s = v_rel_eci_km_s * 1e3
     speed_m_s = float(np.linalg.norm(v_rel_m_s))

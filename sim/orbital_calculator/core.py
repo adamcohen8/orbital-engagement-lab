@@ -21,16 +21,23 @@ ENERGY_PARABOLIC_TOL = 1.0e-12
 
 def _positive(value: float, name: str) -> float:
     value = float(value)
-    if value <= 0.0:
+    if not np.isfinite(value) or value <= 0.0:
         raise ValueError(f"{name} must be positive.")
     return value
 
 
 def _nonnegative(value: float, name: str) -> float:
     value = float(value)
-    if value < 0.0:
+    if not np.isfinite(value) or value < 0.0:
         raise ValueError(f"{name} must be non-negative.")
     return value
+
+
+def _positive_int(value: float, name: str) -> int:
+    numeric = _positive(value, name)
+    if not numeric.is_integer():
+        raise ValueError(f"{name} must be an integer.")
+    return int(numeric)
 
 
 def _wrap_degrees(angle_deg: float) -> float:
@@ -1427,7 +1434,7 @@ def repeat_ground_track_approximation(
     body_radius_km: float = EARTH_RADIUS_KM,
 ) -> RepeatGroundTrackResult:
     altitude = _nonnegative(altitude_km, "altitude_km")
-    max_repeat_days = int(_positive(max_days, "max_days"))
+    max_repeat_days = _positive_int(max_days, "max_days")
     circular = circular_orbit_from_altitude(altitude, mu_km3_s2=mu_km3_s2, body_radius_km=body_radius_km)
     best: tuple[float, int, int, float] | None = None
     for days in range(1, max_repeat_days + 1):
@@ -1435,12 +1442,14 @@ def repeat_ground_track_approximation(
         orbits = max(1, int(round(ideal_orbits)))
         period_error_s = (days * SIDEREAL_DAY_S / orbits) - circular.period_s
         longitude_error_deg = 360.0 * period_error_s / circular.period_s
-        abs_error = abs(longitude_error_deg)
+        cycle_error_deg = longitude_error_deg * orbits
+        abs_error = abs(cycle_error_deg)
         if best is None or abs_error < best[0]:
             best = (abs_error, days, orbits, longitude_error_deg)
     if best is None:
         raise ValueError("max_days must include at least one day.")
-    _, days, orbits, longitude_error_deg = best
+    _, days, orbits, longitude_error_deg_per_orbit = best
+    longitude_error_deg = longitude_error_deg_per_orbit * orbits
     exact_period = days * SIDEREAL_DAY_S / orbits
     exact_radius = (float(mu_km3_s2) / ((2.0 * pi / exact_period) ** 2)) ** (1.0 / 3.0)
     return RepeatGroundTrackResult(
@@ -1551,9 +1560,7 @@ def mission_recovery_from_intrack_impulse(
     mass = _positive(spacecraft_mass_kg, "spacecraft_mass_kg")
     isp = _positive(isp_s, "isp_s")
     tolerance = _nonnegative(slot_tolerance_deg, "slot_tolerance_deg")
-    max_orbits = int(max_phasing_orbits)
-    if max_orbits < 1:
-        raise ValueError("max_phasing_orbits must be at least 1.")
+    max_orbits = _positive_int(max_phasing_orbits, "max_phasing_orbits")
 
     reference = circular_orbit_from_altitude(altitude, mu_km3_s2=mu_km3_s2, body_radius_km=body_radius_km)
     r0 = float(reference.radius_km)

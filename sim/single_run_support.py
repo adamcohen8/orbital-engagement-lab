@@ -477,6 +477,8 @@ class _SatelliteCommandBuilder:
             and agent.attitude_controller is not None
             and att_belief is not None
         ):
+            if hasattr(agent.attitude_controller, "set_actuation_interval"):
+                agent.attitude_controller.set_actuation_interval(float(t_s), float(t_s + dt_s))
             attitude_t0 = perf_counter()
             c_att = agent.attitude_controller.act(att_belief, t_s, e.attitude_controller_budget_ms)
             attitude_runtime_ms = (perf_counter() - attitude_t0) * 1000.0
@@ -875,7 +877,12 @@ class _KnowledgeSynchronizer:
             observer_truth = initial_world_truth.get(aid)
             if observer_truth is None:
                 continue
-            agent.knowledge_base.update(observer_truth=observer_truth, world_truth=initial_world_truth, t_s=0.0)
+            agent.knowledge_base.update(
+                observer_truth=observer_truth,
+                world_truth=initial_world_truth,
+                t_s=0.0,
+                observer_belief=agent.belief,
+            )
             self._record_snapshot(aid=aid, sample_index=0)
 
     def update_after_step(
@@ -892,7 +899,12 @@ class _KnowledgeSynchronizer:
             observer_truth = world_truth.get(aid)
             if observer_truth is None:
                 continue
-            agent.knowledge_base.update(observer_truth=observer_truth, world_truth=world_truth, t_s=t_s)
+            agent.knowledge_base.update(
+                observer_truth=observer_truth,
+                world_truth=world_truth,
+                t_s=t_s,
+                observer_belief=agent.belief,
+            )
             self._record_snapshot(aid=aid, sample_index=sample_index)
 
     def _record_snapshot(self, *, aid: str, sample_index: int) -> None:
@@ -980,7 +992,7 @@ class _TerminationMonitor:
             return True
         return False
 
-    def update_rocket_insertion(self, *, t_s: float) -> None:
+    def update_rocket_insertion(self, *, t_s: float, dt_s: float | None = None) -> None:
         e = self.engine
         rocket = e.rocket
         if (
@@ -1001,7 +1013,10 @@ class _TerminationMonitor:
         low_e = float(ecc_now) <= float(sim_cfg.target_eccentricity_max)
         stages_done = int(rs.active_stage_index) >= len(rocket.rocket_sim.vehicle_cfg.stack.stages)
         if near_alt and low_e and stages_done:
-            e.rocket_insertion_hold_s += float(e.dt)
+            applied_dt_s = float(e.dt if dt_s is None else dt_s)
+            if not np.isfinite(applied_dt_s) or applied_dt_s <= 0.0:
+                raise ValueError("rocket insertion update dt_s must be positive and finite.")
+            e.rocket_insertion_hold_s += applied_dt_s
             if (not e.rocket_inserted) and e.rocket_insertion_hold_s >= float(sim_cfg.insertion_hold_time_s):
                 e.rocket_inserted = True
                 e.rocket_insertion_time_s = float(t_s)

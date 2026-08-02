@@ -46,6 +46,7 @@ def evaluate_ground_station_access(
     truth_hist: dict[str, np.ndarray],
     jd_utc_start: float | None = None,
     frame_context: FrameContext | None = None,
+    object_state_frames: dict[str, str] | None = None,
 ) -> tuple[dict[str, dict[str, dict[str, Any]]], dict[str, dict[str, dict[str, Any]]]]:
     """
     Evaluate passive ground-station access to each simulated object.
@@ -74,6 +75,8 @@ def evaluate_ground_station_access(
         station_summary: dict[str, dict[str, Any]] = {}
 
         for object_id, hist in sorted(truth_hist.items()):
+            if str(dict(object_state_frames or {}).get(str(object_id), "eci") or "eci").lower() != "eci":
+                continue
             arr = np.array(hist, dtype=float)
             n = min(tt.size, arr.shape[0])
             access = np.zeros(tt.size, dtype=bool)
@@ -153,6 +156,7 @@ def evaluate_ground_station_measurements(
     truth_hist: dict[str, np.ndarray],
     jd_utc_start: float | None = None,
     frame_context: FrameContext | None = None,
+    object_state_frames: dict[str, str] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Emit opt-in ground-station sensor measurements for visible targets.
 
@@ -184,6 +188,8 @@ def evaluate_ground_station_measurements(
             "targets": {},
         }
         for object_id, hist in sorted(truth_hist.items()):
+            if str(dict(object_state_frames or {}).get(str(object_id), "eci") or "eci").lower() != "eci":
+                continue
             arr = np.array(hist, dtype=float)
             n = min(tt.size, arr.shape[0])
             rows: list[dict[str, Any]] = []

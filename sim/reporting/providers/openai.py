@@ -75,10 +75,10 @@ def _call_openai(
         data=json.dumps(body).encode("utf-8"),
         headers={
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
         },
         method="POST",
     )
+    _add_nonredirected_secret_header(request, "Authorization", f"Bearer {api_key}")
     with urllib.request.urlopen(request, timeout=timeout_s) as response:
         raw = response.read().decode("utf-8")
     payload = json.loads(raw)

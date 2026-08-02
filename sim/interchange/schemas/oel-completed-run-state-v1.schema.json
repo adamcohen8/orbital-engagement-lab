@@ -1,0 +1,212 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orbitalengagementlab.com/schemas/oel-completed-run-state-v1.schema.json",
+  "title": "OEL Completed Run State Product v1 Payload",
+  "type": "object",
+  "additionalProperties": false,
+  "$defs": {
+    "covariance": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["present", "reason"],
+          "properties": {
+            "present": {"const": false},
+            "reason": {"type": "string", "minLength": 1}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "present",
+            "frame",
+            "epoch_jd_utc",
+            "component_order",
+            "units",
+            "matrix",
+            "mathematically_valid",
+            "calibrated",
+            "calibration_scope"
+          ],
+          "properties": {
+            "present": {"const": true},
+            "frame": {"const": "ECI"},
+            "epoch_jd_utc": {"type": "number"},
+            "component_order": {"const": ["x", "y", "z", "vx", "vy", "vz"]},
+            "units": {"const": ["km", "km", "km", "km/s", "km/s", "km/s"]},
+            "matrix": {
+              "type": "array",
+              "minItems": 6,
+              "maxItems": 6,
+              "items": {
+                "type": "array",
+                "minItems": 6,
+                "maxItems": 6,
+                "items": {"type": "number"}
+              }
+            },
+            "mathematically_valid": {"type": "boolean"},
+            "calibrated": {"type": "boolean"},
+            "calibration_scope": {"type": ["string", "null"]}
+          }
+        }
+      ]
+    },
+    "associated_event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "event_id",
+        "time_s",
+        "sample_index",
+        "object_id",
+        "event_type",
+        "severity",
+        "message",
+        "source",
+        "event_row_sha256"
+      ],
+      "properties": {
+        "event_id": {"type": "string", "minLength": 1},
+        "time_s": {"type": "number", "minimum": 0},
+        "sample_index": {"type": "integer", "minimum": 0},
+        "object_id": {"type": ["string", "null"]},
+        "event_type": {"type": "string"},
+        "severity": {"type": "string"},
+        "message": {"type": "string"},
+        "source": {"type": "string"},
+        "event_row_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    }
+  },
+  "required": [
+    "object",
+    "state",
+    "covariance",
+    "object_specs",
+    "model_assumptions",
+    "source_run",
+    "selection"
+  ],
+  "properties": {
+    "object": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["object_id", "role", "kind"],
+      "properties": {
+        "object_id": {"type": "string", "minLength": 1},
+        "role": {"type": "string", "minLength": 1},
+        "kind": {"const": "satellite"}
+      }
+    },
+    "state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["representation", "frame", "epoch", "component_order", "units", "values"],
+      "properties": {
+        "representation": {"const": "cartesian_position_velocity"},
+        "frame": {"const": "ECI"},
+        "epoch": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["value", "format", "time_system"],
+          "properties": {
+            "value": {"type": "number", "exclusiveMinimum": 0},
+            "format": {"const": "jd"},
+            "time_system": {"const": "UTC"}
+          }
+        },
+        "component_order": {"const": ["x", "y", "z", "vx", "vy", "vz"]},
+        "units": {"const": ["km", "km", "km", "km/s", "km/s", "km/s"]},
+        "values": {"type": "array", "minItems": 6, "maxItems": 6, "items": {"type": "number"}}
+      }
+    },
+    "covariance": {"$ref": "#/$defs/covariance"},
+    "object_specs": {"type": "object"},
+    "model_assumptions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["orbit_force_model", "attitude"],
+      "properties": {
+        "orbit_force_model": {"type": "object"},
+        "attitude": {"type": "object"}
+      }
+    },
+    "source_run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "run_id",
+        "scenario_name",
+        "review_schema_version",
+        "generated_utc",
+        "config_sha256",
+        "review_db_sha256",
+        "initial_jd_utc"
+      ],
+      "properties": {
+        "run_id": {"type": "string", "minLength": 1},
+        "scenario_name": {"type": "string", "minLength": 1},
+        "review_schema_version": {"type": "string", "minLength": 1},
+        "generated_utc": {"type": "string", "format": "date-time"},
+        "config_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "review_db_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "initial_jd_utc": {"type": "number", "exclusiveMinimum": 0}
+      }
+    },
+    "selection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "selector_kind",
+        "requested",
+        "sample_index",
+        "time_s",
+        "state_row_sha256",
+        "associated_event"
+      ],
+      "properties": {
+        "selector_kind": {"enum": ["final", "sample_index", "time_s", "event"]},
+        "requested": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["sample"],
+              "properties": {"sample": {"const": "final"}}
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["sample_index"],
+              "properties": {"sample_index": {"type": "integer", "minimum": 0}}
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["time_s"],
+              "properties": {"time_s": {"type": "number", "minimum": 0}}
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["event_id"],
+              "properties": {"event_id": {"type": "string", "minLength": 1}}
+            }
+          ]
+        },
+        "sample_index": {"type": "integer", "minimum": 0},
+        "time_s": {"type": "number", "minimum": 0},
+        "state_row_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "associated_event": {
+          "oneOf": [
+            {"$ref": "#/$defs/associated_event"},
+            {"type": "null"}
+          ]
+        }
+      }
+    }
+  }
+}

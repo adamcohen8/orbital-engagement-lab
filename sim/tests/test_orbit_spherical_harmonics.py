@@ -104,6 +104,34 @@ class TestOrbitSphericalHarmonics(unittest.TestCase):
         a1 = spherical_harmonics_plugin(0.0, x, env=env1, ctx=_Ctx())
         self.assertFalse(np.allclose(a0, a1))
 
+    def test_spherical_harmonics_honors_eop_hold_policy(self):
+        terms = [
+            SphericalHarmonicTerm(
+                n=2,
+                m=2,
+                c_nm=1.0e-6,
+                s_nm=0.0,
+                normalized=True,
+            )
+        ]
+        with tempfile.TemporaryDirectory() as td:
+            eop_path = Path(td) / "EOP-All.txt"
+            self._write_minimal_eop(eop_path)
+            kwargs = {
+                "r_eci_km": np.array([7000.0, 100.0, 200.0], dtype=float),
+                "t_s": -86400.0,
+                "terms": terms,
+                "jd_utc_start": 2460400.5,
+                "frame_model": "iau76_80_eop",
+                "eop_path": str(eop_path),
+            }
+
+            with self.assertRaisesRegex(ValueError, "outside EOP coverage"):
+                accel_spherical_harmonics_terms(**kwargs)
+
+            held = accel_spherical_harmonics_terms(**kwargs, eop_extrapolation="hold")
+            self.assertTrue(np.all(np.isfinite(held)))
+
     def test_normalized_c20_matches_equivalent_j2_perturbation(self):
         r = np.array([7000.0, 100.0, 200.0], dtype=float)
         terms = [SphericalHarmonicTerm(n=2, m=0, c_nm=-4.841693259705e-04, s_nm=0.0, normalized=True)]
@@ -328,6 +356,37 @@ class TestOrbitSphericalHarmonics(unittest.TestCase):
         self.assertEqual(sh["degree"], 4)
         self.assertEqual(sh["order"], 2)
         self.assertEqual([(term.n, term.m) for term in env["spherical_harmonics_terms"]], [(2, 0), (4, 2)])
+
+    def test_inline_terms_require_an_explicit_finite_coefficient(self):
+        base = {
+            "simulator": {
+                "duration_s": 1.0,
+                "dt_s": 1.0,
+                "dynamics": {
+                    "orbit": {
+                        "spherical_harmonics": {
+                            "enabled": True,
+                            "terms": [{"n": 2, "m": 0}],
+                        }
+                    }
+                },
+            }
+        }
+        with self.assertRaisesRegex(ValueError, "requires at least one C or S coefficient"):
+            scenario_config_from_dict(base)
+
+        base["simulator"]["dynamics"]["orbit"]["spherical_harmonics"]["terms"] = [
+            {"n": 2, "m": 2, "s_nm": float("nan")}
+        ]
+        with self.assertRaisesRegex(ValueError, r"terms\[0\]\.s_nm must be a finite number"):
+            scenario_config_from_dict(base)
+
+        base["simulator"]["dynamics"]["orbit"]["spherical_harmonics"]["terms"] = [
+            {"n": 2, "m": 2, "s_nm": 1.0e-6}
+        ]
+        cfg = scenario_config_from_dict(base)
+        term = cfg.simulator.dynamics["orbit"]["spherical_harmonics"]["terms"][0]
+        self.assertEqual(term["s_nm"], 1.0e-6)
 
     def test_enabled_degree_order_without_coefficients_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "degree and order alone do not define a gravity field"):
@@ -657,6 +716,36 @@ class TestOrbitSphericalHarmonics(unittest.TestCase):
                     spherical_harmonics._REAL_MODEL_DOWNLOADS.pop("TESTMODEL", None)
                 else:
                     spherical_harmonics._REAL_MODEL_DOWNLOADS["TESTMODEL"] = old_spec
+
+    def test_sealed_mode_defensively_disables_gravity_model_downloads(self):
+        spherical_harmonics._cached_real_terms.cache_clear()
+        with patch.dict(
+            "os.environ",
+            {"OEL_SEALED_MODE": "1", "OEL_ALLOW_GRAVITY_MODEL_DOWNLOADS": ""},
+        ):
+            with patch.object(spherical_harmonics, "_cached_real_terms", return_value=()) as load_terms:
+                spherical_harmonics.load_real_earth_gravity_terms(
+                    max_degree=2,
+                    max_order=0,
+                    allow_download=True,
+                )
+
+        self.assertFalse(load_terms.call_args.kwargs["allow_download"])
+
+    def test_sealed_mode_allows_explicitly_approved_gravity_model_downloads(self):
+        spherical_harmonics._cached_real_terms.cache_clear()
+        with patch.dict(
+            "os.environ",
+            {"OEL_SEALED_MODE": "1", "OEL_ALLOW_GRAVITY_MODEL_DOWNLOADS": "1"},
+        ):
+            with patch.object(spherical_harmonics, "_cached_real_terms", return_value=()) as load_terms:
+                spherical_harmonics.load_real_earth_gravity_terms(
+                    max_degree=2,
+                    max_order=0,
+                    allow_download=True,
+                )
+
+        self.assertTrue(load_terms.call_args.kwargs["allow_download"])
 
 
 if __name__ == "__main__":

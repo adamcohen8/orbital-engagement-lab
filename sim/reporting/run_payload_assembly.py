@@ -45,6 +45,29 @@ class SingleRunPayloadAssembler:
         self.engine = engine
         self.initialization_metadata_builder = initialization_metadata_builder
 
+    def _events_through_termination(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        engine = self.engine
+        if not bool(engine.terminated_early) or engine.termination_time_s is None:
+            return rows
+        cutoff = float(engine.termination_time_s) + 1.0e-12
+        retained: list[dict[str, Any]] = []
+        for row in rows:
+            try:
+                row_time_s = float(dict(row).get("t_s"))
+            except (TypeError, ValueError):
+                retained.append(row)
+                continue
+            if row_time_s <= cutoff:
+                clipped = dict(row)
+                for key in ("interval_end_t_s", "end_t_s"):
+                    try:
+                        if key in clipped and float(clipped[key]) > cutoff:
+                            clipped[key] = float(engine.termination_time_s)
+                    except (TypeError, ValueError):
+                        pass
+                retained.append(clipped)
+        return retained
+
     def build_parts(self) -> _SingleRunPayloadParts:
         engine = self.engine
         n_used = engine.current_index + 1
@@ -86,14 +109,85 @@ class SingleRunPayloadAssembler:
             object_id: {key: hist[:n_used] for key, hist in metrics.items()}
             for object_id, metrics in getattr(engine, "reentry_metric_hists", {}).items()
         }
-        thrust_stats = {
-            object_id: {
-                "burn_samples": int(engine.burn_samples_by_object.get(object_id, 0)),
-                "max_accel_km_s2": float(engine.max_accel_km_s2_by_object.get(object_id, 0.0)),
-                "total_dv_m_s": float(engine.total_dv_m_s_by_object.get(object_id, 0.0)),
+        termination_time_s = getattr(engine, "termination_time_s", None)
+        if (
+            bool(getattr(engine, "terminated_early", False))
+            and termination_time_s is not None
+            and n_used >= 2
+            and float(t_out[-2]) < float(termination_time_s) < float(t_out[-1])
+        ):
+            interval_s = float(t_out[-1] - t_out[-2])
+            fraction = float((float(termination_time_s) - float(t_out[-2])) / interval_s)
+            t_out = np.array(t_out, copy=True)
+            t_out[-1] = float(termination_time_s)
+
+            def interpolate_last(hist: np.ndarray, *, unit_slice: slice | None = None) -> np.ndarray:
+                out = np.array(hist, copy=True)
+                out[-1] = out[-2] + fraction * (out[-1] - out[-2])
+                if unit_slice is not None:
+                    unit_values = np.asarray(out[-1][unit_slice], dtype=float)
+                    norm = float(np.linalg.norm(unit_values))
+                    if np.isfinite(norm) and norm > 0.0:
+                        out[-1][unit_slice] = unit_values / norm
+                return out
+
+            truth_out = {key: interpolate_last(value, unit_slice=slice(6, 10)) for key, value in truth_out.items()}
+            target_reference_orbit_out = (
+                None
+                if target_reference_orbit_out is None
+                else interpolate_last(target_reference_orbit_out)
+            )
+            belief_out = {key: interpolate_last(value) for key, value in belief_out.items()}
+            desired_attitude_out = {
+                key: interpolate_last(value, unit_slice=slice(0, 4))
+                for key, value in desired_attitude_out.items()
             }
-            for object_id in thrust_out
-        }
+            knowledge_out = {
+                observer: {target: interpolate_last(arr) for target, arr in by_target.items()}
+                for observer, by_target in knowledge_out.items()
+            }
+            knowledge_measurements_out = {
+                observer: {
+                    target: np.vstack((arr[:-1], np.full_like(arr[-1:], np.nan)))
+                    for target, arr in by_target.items()
+                }
+                for observer, by_target in knowledge_measurements_out.items()
+            }
+            rocket_metrics_out = {key: interpolate_last(value) for key, value in rocket_metrics_out.items()}
+            reentry_metrics_out = {
+                object_id: {key: interpolate_last(hist) for key, hist in metrics.items()}
+                for object_id, metrics in reentry_metrics_out.items()
+            }
+        if not bool(getattr(engine, "terminated_early", False)):
+            thrust_stats = {
+                object_id: {
+                    "burn_samples": int(engine.burn_samples_by_object.get(object_id, 0)),
+                    "max_accel_km_s2": float(engine.max_accel_km_s2_by_object.get(object_id, 0.0)),
+                    "total_dv_m_s": float(engine.total_dv_m_s_by_object.get(object_id, 0.0)),
+                }
+                for object_id in thrust_out
+            }
+        else:
+            # Runtime accumulators include the entire final integration step. Rebuild
+            # these values from the clipped output timeline after early termination so
+            # no post-termination impulse leaks into the run summary.
+            thrust_stats = {}
+            sample_dt_s = np.diff(
+                np.asarray(t_out, dtype=float),
+                prepend=float(t_out[0]) if t_out.size else 0.0,
+            )
+            for object_id, history in thrust_out.items():
+                accel = np.asarray(history, dtype=float)
+                magnitudes = np.linalg.norm(np.nan_to_num(accel, nan=0.0), axis=1)
+                n = min(sample_dt_s.size, magnitudes.size)
+                active = magnitudes[:n] > 0.0
+                thrust_stats[object_id] = {
+                    "burn_samples": int(np.count_nonzero(active & (sample_dt_s[:n] > 0.0))),
+                    "max_accel_km_s2": float(np.max(magnitudes[:n])) if n else 0.0,
+                    "total_dv_m_s": float(
+                        np.sum(magnitudes[:n] * np.clip(sample_dt_s[:n], 0.0, None)) * 1000.0
+                    ),
+                }
         return _SingleRunPayloadParts(
             n_used=n_used,
             t_s=t_out,
@@ -121,6 +215,17 @@ class SingleRunPayloadAssembler:
             "object_step_workers": int(getattr(engine.object_step_executor, "max_workers", 1) or 1),
             "planner": dict(getattr(engine, "object_execution_plan", {}) or {}),
         }
+        object_propagation = {
+            object_id: asdict(provider.metadata())
+            for object_id, provider in engine.general_propagation.items()
+        }
+        for object_id, agent in engine.agents.items():
+            if object_id in object_propagation:
+                continue
+            propagator = getattr(getattr(agent, "dynamics", None), "orbit_propagator", None)
+            if getattr(propagator, "state_frame", "eci") != "eci":
+                object_propagation[object_id] = propagator.propagation_metadata()
+
         return build_single_run_payload(
             SingleRunPayloadContext(
                 cfg=engine.cfg,
@@ -135,18 +240,17 @@ class SingleRunPayloadAssembler:
                 desired_attitude_hist=parts.desired_attitude_hist,
                 knowledge_hist=parts.knowledge_hist,
                 knowledge_measurement_hist=parts.knowledge_measurement_hist,
-                bridge_hist=engine.bridge_hist,
-                controller_debug_hist=engine.controller_debug_hist,
-                rocket_throttle_cmd=self.primary_rocket_throttle_history(),
+                bridge_hist={key: self._events_through_termination(rows) for key, rows in engine.bridge_hist.items()},
+                controller_debug_hist={
+                    key: self._events_through_termination(rows) for key, rows in engine.controller_debug_hist.items()
+                },
+                rocket_throttle_cmd=np.asarray(parts.rocket_metrics.get("throttle_cmd", np.array([]))),
                 rocket_metrics=parts.rocket_metrics,
                 reentry_metrics=parts.reentry_metrics,
                 thrust_stats=parts.thrust_stats,
                 runtime_profile=runtime_profile,
                 object_initialization=self.initialization_metadata_builder(engine.cfg, engine.object_configs),
-                object_propagation={
-                    object_id: asdict(provider.metadata())
-                    for object_id, provider in engine.general_propagation.items()
-                },
+                object_propagation=object_propagation,
                 attitude_guardrail_stats=get_attitude_guardrail_stats(engine.attitude_guardrail_stats),
                 knowledge_detection_by_observer={
                     object_id: agent.knowledge_base.detection_summary()
@@ -204,7 +308,10 @@ class SingleRunPayloadAssembler:
                 knowledge_measurement_hist=parts.knowledge_measurement_hist,
                 rocket_metrics=parts.rocket_metrics,
                 reentry_metrics=parts.reentry_metrics,
-                bridge_hist=engine.bridge_hist,
+                bridge_hist={
+                    key: self._events_through_termination(rows) for key, rows in engine.bridge_hist.items()
+                },
+                object_state_frames=dict(payload.get("object_state_frames", {}) or {}),
             ),
         )
 

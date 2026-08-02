@@ -108,6 +108,7 @@ def harris_priester_density(
             float(t_s),
             jd_utc_start=env_local.get("jd_utc_start"),
             eop_path=None if eop_path is None else str(eop_path),
+            eop_extrapolation=str(env_local.get("eop_extrapolation", "error") or "error"),
         )
         r_eval = rbpn @ r_sat
     r_norm = float(np.linalg.norm(r_eval))

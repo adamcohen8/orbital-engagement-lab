@@ -241,6 +241,7 @@ def _evaluate_spherical_harmonics_plugin(
         tt_minus_utc_s=None if tt_minus_utc_s is None else float(tt_minus_utc_s),
         ddpsi_rad=ddpsi_rad,
         ddeps_rad=ddeps_rad,
+        eop_extrapolation=str(env.get("eop_extrapolation", "error") or "error"),
         compiled=compiled,
         use_acceleration=use_acceleration,
     )
@@ -308,6 +309,7 @@ def drag_plugin(t_s: float, x_eci: np.ndarray, env: dict, ctx: OrbitContext) -> 
         tt_minus_utc_s=None if env.get("tt_minus_utc_s") is None else float(env["tt_minus_utc_s"]),
         ddpsi_rad=float(env.get("ddpsi_rad", 0.0) or 0.0),
         ddeps_rad=float(env.get("ddeps_rad", 0.0) or 0.0),
+        eop_extrapolation=str(env.get("eop_extrapolation", "error") or "error"),
     )
 
 
@@ -349,6 +351,7 @@ def lift_plugin(t_s: float, x_eci: np.ndarray, env: dict, ctx: OrbitContext) -> 
             "tt_minus_utc_s": env.get("tt_minus_utc_s"),
             "ddpsi_rad": env.get("ddpsi_rad"),
             "ddeps_rad": env.get("ddeps_rad"),
+            "eop_extrapolation": env.get("eop_extrapolation", "error"),
         },
     )
 
@@ -509,6 +512,30 @@ class OrbitPropagator:
     )
     last_adaptive_step_info: AdaptiveStepInfo | None = field(default=None, init=False, repr=False)
     adaptive_step_info: AdaptiveStepInfo | None = field(default=None, init=False, repr=False)
+
+    @property
+    def state_frame(self) -> str:
+        """Frame carried by the six-component numerical state."""
+
+        return "cr3bp_rotating" if str(self.model or "two_body").strip().lower() == "cr3bp" else "eci"
+
+    def propagation_metadata(self) -> dict[str, str]:
+        """Return frame-aware metadata for numerical propagation evidence."""
+
+        frame = self.state_frame
+        return {
+            "propagation_method": "special",
+            "propagator_family": "CR3BP" if frame == "cr3bp_rotating" else "ONP",
+            "propagator_name": (
+                f"{self.cr3bp_system_name} CR3BP" if frame == "cr3bp_rotating" else "OEL Numerical Propagator"
+            ),
+            "general_model": "",
+            "native_frame": frame,
+            "output_frame": frame,
+            "state_history_frame": frame,
+            "frame_transform": "native",
+            "command_acceleration_frame": frame,
+        }
 
     def propagate(
         self,
@@ -683,6 +710,7 @@ class OrbitPropagator:
                 tt_minus_utc_s=(None if env.get("tt_minus_utc_s") is None else float(env["tt_minus_utc_s"])),
                 ddpsi_rad=float(env.get("ddpsi_rad", 0.0) or 0.0),
                 ddeps_rad=float(env.get("ddeps_rad", 0.0) or 0.0),
+                eop_extrapolation=str(env.get("eop_extrapolation", "error") or "error"),
             )
         return eci_to_ecef_rotation(
             float(t_s),
@@ -714,6 +742,7 @@ class OrbitPropagator:
                     xp_arcsec, yp_arcsec, dut1_s, dat_s = _interp_eop(
                         jd_utc - 2400000.5,
                         str(eop_path),
+                        extrapolation=str(env.get("eop_extrapolation", "error") or "error"),
                     )
                 else:
                     xp_arcsec = 0.0 if xp_arcsec is None else float(xp_arcsec)
@@ -750,6 +779,7 @@ class OrbitPropagator:
                 tt_minus_utc_s=(None if env.get("tt_minus_utc_s") is None else float(env["tt_minus_utc_s"])),
                 ddpsi_rad=float(env.get("ddpsi_rad", 0.0) or 0.0),
                 ddeps_rad=float(env.get("ddeps_rad", 0.0) or 0.0),
+                eop_extrapolation=str(env.get("eop_extrapolation", "error") or "error"),
             )
         return eci_to_ecef_rotation(
             float(t_s),
@@ -783,11 +813,13 @@ class OrbitPropagator:
                 None,
                 ddpsi_rad,
                 ddeps_rad,
+                str(env.get("eop_extrapolation", "error") or "error"),
             )
         if eop_path is not None:
             _xp_arcsec, _yp_arcsec, dut1_s, dat_s = _interp_eop(
                 float(jd_utc) - 2400000.5,
                 str(eop_path),
+                extrapolation=str(env.get("eop_extrapolation", "error") or "error"),
             )
         else:
             dut1_s = 0.0 if dut1_s is None else float(dut1_s)
@@ -833,6 +865,7 @@ class OrbitPropagator:
             None if env.get("tt_minus_utc_s") is None else float(env["tt_minus_utc_s"]),
             float(env.get("ddpsi_rad", 0.0) or 0.0),
             float(env.get("ddeps_rad", 0.0) or 0.0),
+            str(env.get("eop_extrapolation", "error") or "error"),
         )
 
     @classmethod
@@ -890,6 +923,7 @@ class OrbitPropagator:
             "tt_minus_utc_s",
             "ddpsi_rad",
             "ddeps_rad",
+            "eop_extrapolation",
             "atmosphere_model",
             "geodetic_model",
             "f107",
@@ -1183,7 +1217,11 @@ class OrbitPropagator:
             float(ctx.mass_kg),
             float(ctx.cd),
             float(env.get("drag_area_m2", ctx.area_m2)),
-            float(env.get("drag_earth_rotation_rad_s", EARTH_ROT_RATE_RAD_S) or EARTH_ROT_RATE_RAD_S),
+            float(
+                EARTH_ROT_RATE_RAD_S
+                if env.get("drag_earth_rotation_rad_s") is None
+                else env.get("drag_earth_rotation_rad_s")
+            ),
             float(env.get("srp_area_m2", ctx.area_m2)),
             float(ctx.cr),
             srp_pressure_n_m2(env),

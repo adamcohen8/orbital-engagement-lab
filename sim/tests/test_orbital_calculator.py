@@ -239,10 +239,11 @@ def test_ground_track_drift_and_repeat_track_approximation() -> None:
     assert drift.earth_rotation_deg_per_orbit == pytest.approx(23.203, abs=0.001)
     assert drift.westward_drift_deg_per_orbit == pytest.approx(-23.203, abs=0.001)
     assert drift.orbits_per_sidereal_day == pytest.approx(15.51493, abs=1.0e-5)
-    assert repeat.repeat_days == 19
-    assert repeat.repeat_orbits == 295
-    assert repeat.ground_track_error_deg == pytest.approx(-0.26400, abs=1.0e-5)
-    assert repeat.exact_repeat_altitude_km == pytest.approx(396.686, abs=0.001)
+    assert repeat.repeat_days == 2
+    assert repeat.repeat_orbits == 31
+    assert repeat.ground_track_error_deg == pytest.approx(10.74943, abs=1.0e-5)
+    assert repeat.ground_track_error_km == pytest.approx(1196.621, abs=0.001)
+    assert repeat.exact_repeat_altitude_km == pytest.approx(404.352, abs=0.001)
 
 
 def test_entry_interface_estimate_reports_vacuum_speed_and_flight_path_angle() -> None:

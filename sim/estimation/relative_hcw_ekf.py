@@ -54,9 +54,9 @@ class HCWRelativeEKFEstimator(Estimator):
     _cached_transition: np.ndarray | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
-        if self.mean_motion_rad_s <= 0.0:
+        if not np.isfinite(self.mean_motion_rad_s) or self.mean_motion_rad_s <= 0.0:
             raise ValueError("mean_motion_rad_s must be positive.")
-        if self.dt_s <= 0.0:
+        if not np.isfinite(self.dt_s) or self.dt_s <= 0.0:
             raise ValueError("dt_s must be positive.")
         self.process_noise_diag = _diag6(self.process_noise_diag, "process_noise_diag")
         self.measurement_model = normalize_hcw_measurement_model(self.measurement_model)
@@ -69,8 +69,8 @@ class HCWRelativeEKFEstimator(Estimator):
             raise ValueError(
                 f"meas_noise_diag must be length-{meas_dim} for measurement_model={self.measurement_model!r}."
             )
-        if np.any(meas_noise < 0.0):
-            raise ValueError("meas_noise_diag must be non-negative.")
+        if np.any(~np.isfinite(meas_noise)) or np.any(meas_noise < 0.0):
+            raise ValueError("meas_noise_diag must be finite and non-negative.")
         self.meas_noise_diag = meas_noise
         self._q = np.diag(self.process_noise_diag)
         self._r = np.diag(self.meas_noise_diag)
@@ -91,10 +91,7 @@ class HCWRelativeEKFEstimator(Estimator):
         )
 
     def update(self, belief: StateBelief, measurement: Measurement | None, t_s: float) -> StateBelief:
-        output_t_s = float(t_s)
-        meas_t_s = output_t_s
-        if measurement is not None:
-            meas_t_s = float(np.clip(float(measurement.t_s), float(belief.last_update_t_s), output_t_s))
+        output_t_s, meas_t_s = _validated_update_epochs(belief, measurement, t_s)
 
         x_pred, p_pred = self._predict(belief.state, belief.covariance, from_t_s=belief.last_update_t_s, to_t_s=meas_t_s)
 
@@ -128,6 +125,8 @@ class HCWRelativeEKFEstimator(Estimator):
             )
             return StateBelief(state=x_pred, covariance=p_pred, last_update_t_s=output_t_s)
         z = z[: h_pred.size]
+        if not np.all(np.isfinite(z)):
+            raise ValueError("relative measurement vector must contain finite values.")
         h_jac = hcw_measurement_jacobian(
             self.measurement_model,
             x_pred,
@@ -398,9 +397,36 @@ def _diag6(value: np.ndarray, field_name: str) -> np.ndarray:
     arr = np.asarray(value, dtype=float).reshape(-1)
     if arr.size != 6:
         raise ValueError(f"{field_name} must be length-6.")
-    if np.any(arr < 0.0):
-        raise ValueError(f"{field_name} must be non-negative.")
+    if np.any(~np.isfinite(arr)) or np.any(arr < 0.0):
+        raise ValueError(f"{field_name} must be finite and non-negative.")
     return arr
+
+
+def _validated_update_epochs(
+    belief: StateBelief,
+    measurement: Measurement | None,
+    output_t_s: float,
+) -> tuple[float, float]:
+    """Validate the filter interval without silently moving a measurement epoch."""
+
+    output_epoch = float(output_t_s)
+    belief_epoch = float(belief.last_update_t_s)
+    if not np.isfinite(output_epoch) or not np.isfinite(belief_epoch):
+        raise ValueError("belief and output epochs must be finite.")
+    if output_epoch < belief_epoch:
+        raise ValueError("output epoch must not precede the current belief epoch.")
+    if measurement is None:
+        return output_epoch, output_epoch
+    measurement_epoch = float(measurement.t_s)
+    if not np.isfinite(measurement_epoch):
+        raise ValueError("measurement epoch must be finite.")
+    if measurement_epoch < belief_epoch:
+        raise ValueError(
+            "measurement epoch precedes the current belief epoch; out-of-sequence updates are not supported."
+        )
+    if measurement_epoch > output_epoch:
+        raise ValueError("measurement epoch must not be later than the requested output epoch.")
+    return output_epoch, measurement_epoch
 
 
 def _measurement_covariance(value: np.ndarray, dimension: int) -> np.ndarray:

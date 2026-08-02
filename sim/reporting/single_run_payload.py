@@ -193,12 +193,19 @@ def build_single_run_payload(context: SingleRunPayloadContext) -> dict[str, Any]
         jd_utc_start=context.cfg.simulator.initial_jd_utc,
         source="scenario",
     )
+    object_state_frames = {
+        str(object_id): str(
+            dict(context.object_propagation.get(object_id, {}) or {}).get("state_history_frame", "eci") or "eci"
+        ).strip().lower()
+        for object_id in context.object_ids
+    }
     ground_station_access, ground_station_access_summary = evaluate_ground_station_access(
         ground_stations=list(context.cfg.ground_stations),
         t_s=context.t_s,
         truth_hist=context.truth_hist,
         jd_utc_start=context.cfg.simulator.initial_jd_utc,
         frame_context=frame_context,
+        object_state_frames=object_state_frames,
     )
     ground_station_measurements = evaluate_ground_station_measurements(
         ground_stations=list(context.cfg.ground_stations),
@@ -206,6 +213,7 @@ def build_single_run_payload(context: SingleRunPayloadContext) -> dict[str, Any]
         truth_hist=context.truth_hist,
         jd_utc_start=context.cfg.simulator.initial_jd_utc,
         frame_context=frame_context,
+        object_state_frames=object_state_frames,
     )
     reference_object_id = default_reference_object_id(context.cfg, available_ids=context.object_ids)
     primary_pair = default_pair_object_ids(context.cfg, available_ids=context.object_ids)
@@ -281,12 +289,6 @@ def build_single_run_payload(context: SingleRunPayloadContext) -> dict[str, Any]
     )
     if orbital_delivery:
         summary["orbital_delivery"] = orbital_delivery
-    object_state_frames = {
-        str(object_id): str(
-            dict(context.object_propagation.get(object_id, {}) or {}).get("state_history_frame", "eci") or "eci"
-        )
-        for object_id in context.object_ids
-    }
     return {
         "summary": summary,
         "time_s": context.t_s.tolist(),

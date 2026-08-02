@@ -15,9 +15,11 @@ from sim.dynamics.orbit.cr3bp import (
 )
 from sim.dynamics.orbit.elements import coe_to_rv_eci as _coe_to_rv_eci
 from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2
-from sim.dynamics.orbit.tle import tle_block_to_rv_eci
+from sim.dynamics.orbit.tle import ogp_mean_elements_from_mapping, tle_block_to_rv_eci, tle_to_rv_eci_ogp
 from sim.runtime.models import AgentRuntime
 from sim.utils.frames import ric_curv_to_rect, ric_rect_state_to_eci
+
+MAX_CR3BP_HALO_PHASE_SUBSTEPS = 100_000
 
 
 def _rv_from_initial_state(s0: dict[str, Any], *, target_jd_utc: float | None = None) -> tuple[np.ndarray, np.ndarray]:
@@ -57,6 +59,13 @@ def _rv_from_initial_state(s0: dict[str, Any], *, target_jd_utc: float | None = 
             substep_s = float(halo.get("phase_substep_s", 120.0) or 120.0)
             if not np.isfinite(substep_s) or substep_s <= 0.0:
                 raise ValueError("initial_state.cr3bp_halo.phase_substep_s must be a positive finite number.")
+            phase_substeps = int(np.ceil(phase_time_s / substep_s))
+            if phase_substeps > MAX_CR3BP_HALO_PHASE_SUBSTEPS:
+                raise ValueError(
+                    "initial_state.cr3bp_halo phasing requires "
+                    f"{phase_substeps} substeps, exceeding the limit of "
+                    f"{MAX_CR3BP_HALO_PHASE_SUBSTEPS}; increase phase_substep_s or reduce phase_time_s."
+                )
             while remaining_s > 1.0e-9:
                 dt_s = min(substep_s, remaining_s)
                 state = propagate_cr3bp_state(state, dt_s, current_t_s, system=system)
@@ -77,6 +86,13 @@ def _rv_from_initial_state(s0: dict[str, Any], *, target_jd_utc: float | None = 
     if isinstance(tle, dict):
         return tle_block_to_rv_eci(tle, target_jd_utc=target_jd_utc)
 
+    mean_elements = s0.get("ogp_mean_elements")
+    if isinstance(mean_elements, dict):
+        return tle_to_rv_eci_ogp(
+            ogp_mean_elements_from_mapping(mean_elements),
+            target_jd_utc=target_jd_utc,
+        )
+
     coes = s0.get("coes")
     if isinstance(coes, dict):
         d = dict(coes)
@@ -91,7 +107,7 @@ def _rv_from_initial_state(s0: dict[str, Any], *, target_jd_utc: float | None = 
 
     raise ValueError(
         "initial_state does not contain a supported orbital-state form. "
-        "Use Cartesian position/velocity, coes, tle, CR3BP, a relative state, "
+        "Use Cartesian position/velocity, coes, tle, ogp_mean_elements, CR3BP, a relative state, "
         "or explicit default_circular_earth: true."
     )
 

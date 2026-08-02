@@ -53,6 +53,36 @@ def test_eop_out_of_range_requires_explicit_hold_policy(tmp_path: Path) -> None:
     assert held == pytest.approx((0.10, 0.20, 0.30, 37.0))
 
 
+def test_onp_compiled_rotation_honors_eop_hold_policy(tmp_path: Path) -> None:
+    eop_path = tmp_path / "EOP-All.txt"
+    _write_minimal_eop(eop_path)
+    env = {
+        "spherical_harmonics_frame_model": "iau76_80_eop",
+        "spherical_harmonics_eop_path": str(eop_path),
+        "jd_utc_start": 2460310.5,
+    }
+    kwargs = {
+        "model_key": "spherical_harmonics_frame_model",
+        "path_key": "spherical_harmonics_eop_path",
+    }
+
+    with pytest.raises(ValueError, match="outside EOP coverage"):
+        OrbitPropagator._compiled_rotation(env, -86400.0, **kwargs)
+
+    held = OrbitPropagator._compiled_rotation(
+        {**env, "eop_extrapolation": "hold"},
+        -86400.0,
+        **kwargs,
+    )
+    accelerated = OrbitPropagator._accelerated_compiled_rotation(
+        {**env, "eop_extrapolation": "hold"},
+        -86400.0,
+        **kwargs,
+    )
+    assert np.all(np.isfinite(held))
+    np.testing.assert_allclose(accelerated, held, rtol=0.0, atol=1.0e-14)
+
+
 def test_iau76_80_eop_alias_matches_legacy_hpop_like_rotation(tmp_path: Path) -> None:
     eop_path = tmp_path / "EOP-All.txt"
     _write_minimal_eop(eop_path)

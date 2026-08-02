@@ -32,7 +32,9 @@ from sim.acceleration.warmup import warmup_acceleration
 from sim.config import scenario_config_from_dict
 from sim.core.models import Measurement, StateBelief
 from sim.dynamics.attitude.rigid_body import (
+    activate_attitude_guardrail_stats,
     get_attitude_guardrail_stats,
+    new_attitude_guardrail_stats,
     propagate_attitude_exponential_map,
     reset_attitude_guardrail_stats,
 )
@@ -323,6 +325,34 @@ class TestAcceleration(unittest.TestCase):
         np.testing.assert_allclose(q_actual, q_expected, rtol=1e-12, atol=1e-12)
         np.testing.assert_allclose(w_actual, w_expected, rtol=1e-12, atol=1e-12)
         self.assertEqual(stats_actual, stats_expected)
+
+    def test_attitude_accelerated_invalid_quaternion_guardrail_matches_baseline(self):
+        q0 = np.zeros(4, dtype=float)
+        w0 = np.array([0.01, -0.02, 0.03], dtype=float)
+        inertia = np.diag([100.0, 90.0, 80.0])
+        torque = np.zeros(3, dtype=float)
+
+        reset_attitude_guardrail_stats()
+        q_expected, w_expected = propagate_attitude_exponential_map(
+            q0, w0, inertia, torque, 0.1, acceleration_mode="off"
+        )
+        stats_expected = get_attitude_guardrail_stats()
+        reset_attitude_guardrail_stats()
+        q_actual, w_actual = propagate_attitude_exponential_map(
+            q0, w0, inertia, torque, 0.1, acceleration_mode="auto"
+        )
+        stats_actual = get_attitude_guardrail_stats()
+
+        np.testing.assert_allclose(q_actual, q_expected, rtol=1e-12, atol=1e-12)
+        np.testing.assert_allclose(w_actual, w_expected, rtol=1e-12, atol=1e-12)
+        self.assertEqual(stats_actual, stats_expected)
+        self.assertGreater(stats_actual["non_finite_input_events"], 0)
+
+        strict = new_attitude_guardrail_stats(policy="error")
+        activate_attitude_guardrail_stats(strict)
+        with self.assertRaises(FloatingPointError):
+            propagate_attitude_exponential_map(q0, w0, inertia, torque, 0.1, acceleration_mode="auto")
+        reset_attitude_guardrail_stats()
 
     def test_attitude_benchmark_returns_valid_result(self):
         result = benchmark_attitude_kernel(iterations=2, warmup=False)

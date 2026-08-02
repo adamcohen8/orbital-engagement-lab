@@ -72,6 +72,32 @@ class TestOrbitAtmosphereModels(unittest.TestCase):
         self.assertAlmostEqual(noon, 12.0, places=9)
         self.assertTrue(min(midnight, 24.0 - midnight) < 1e-9)
 
+    def test_local_solar_time_honors_eop_hold_policy(self):
+        with tempfile.TemporaryDirectory() as td:
+            eop_path = Path(td) / "EOP-All.txt"
+            eop_path.write_text(
+                "\n".join(
+                    [
+                        "VERSION test",
+                        "NUM_OBSERVED_POINTS 2",
+                        "2024 01 01 60310.0 0.10 0.20 0.30 0 0 0 0 0 37",
+                        "2024 01 02 60311.0 0.11 0.21 0.31 0 0 0 0 0 37",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            dt_utc = datetime(2024, 1, 3, tzinfo=timezone.utc)
+            env = {
+                "density_frame_model": "iau76_80_eop",
+                "density_eop_path": str(eop_path),
+            }
+
+            with self.assertRaisesRegex(ValueError, "outside EOP coverage"):
+                _local_solar_time_hr(0.0, dt_utc, env)
+
+            held = _local_solar_time_hr(0.0, dt_utc, {**env, "eop_extrapolation": "hold"})
+            self.assertTrue(np.isfinite(held))
+
     @staticmethod
     def _write_minimal_jb2006_tables(sol_path: Path, ap_path: Path, dt_utc: datetime) -> None:
         jd_floor = int(np.floor(datetime_to_julian_date(dt_utc)))

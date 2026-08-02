@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 import yaml
 
 import sim.agent_task.runner as agent_task_runner
@@ -132,6 +133,36 @@ def test_agent_task_recipe_with_plots_writes_plot_summary(tmp_path: Path) -> Non
         "caveat_count": 0,
         "ready_to_cite": True,
     }
+
+
+def test_agent_task_ogp_sgp4_recipe_packages_provenance_state_and_plot(tmp_path: Path) -> None:
+    payload = run_recipe("ogp_sgp4_review", output_root=tmp_path, make_plots=True)
+
+    assert payload["status"] == "completed"
+    assert payload["recipe"]["maturity"] == "supported"
+    queries = {row["name"]: row for row in payload["review"]["queries"]}
+    propagation = queries["ogp_propagation_contract"]
+    assert propagation["status"] == "ok"
+    assert propagation["rows"] == [
+        {
+            "object_id": "catalog_object",
+            "propagation_method": "general",
+            "general_model": "sgp4",
+            "native_frame": "teme",
+            "output_frame": "teme",
+            "frame_transform": "native",
+            "state_frame": "eci",
+            "tle_epoch_jd_utc": 2460310.5,
+            "tle_age_start_days": 0.0,
+            "tle_age_end_days": pytest.approx(7200.0 / 86400.0),
+        }
+    ]
+    assert queries["passive_final_state"]["status"] == "ok"
+    assert len(queries["passive_final_state"]["rows"]) == 1
+    assert payload["plots"][0]["recipe_id"] == "object_eci_radius"
+    assert payload["plots"][0]["status"] == "ok"
+    assert Path(payload["plots"][0]["path"]).is_file()
+    assert payload["evidence_summary"]["ready_to_cite"] is True
 
 
 def test_agent_task_inspects_completed_run_and_creates_plot(tmp_path: Path) -> None:

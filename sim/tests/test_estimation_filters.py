@@ -3,6 +3,7 @@ from __future__ import annotations
 from unittest.mock import patch
 
 import numpy as np
+import pytest
 
 from sim.core.models import Measurement, StateBelief
 from sim.dynamics.orbit.accelerations import OrbitContext
@@ -218,6 +219,26 @@ def test_joint_state_estimator_uses_attitude_ekf_measurement_update() -> None:
     assert np.linalg.norm(updated.state[10:13] - np.array([0.01, -0.02, 0.03])) < 1e-5
     assert np.allclose(updated.covariance, updated.covariance.T, atol=1e-12)
     assert np.all(np.linalg.eigvalsh(updated.covariance[6:13, 6:13]) >= -1e-12)
+
+
+def test_joint_state_estimator_rejects_ambiguous_partial_measurement_layout() -> None:
+    estimator = JointStateEstimator(
+        orbit_estimator=OrbitEKFEstimator(
+            mu_km3_s2=398600.4418,
+            dt_s=1.0,
+            process_noise_diag=np.ones(6) * 1e-10,
+            meas_noise_diag=np.ones(6) * 1e-8,
+        ),
+        dt_s=1.0,
+    )
+    belief = StateBelief(
+        state=np.hstack(([7000.0, 0.0, 0.0, 0.0, 7.5, 0.0], [1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0])),
+        covariance=np.eye(13),
+        last_update_t_s=0.0,
+    )
+
+    with pytest.raises(ValueError, match="6 orbit states or 13 joint states"):
+        estimator.update(belief, Measurement(vector=np.zeros(9), t_s=1.0), 1.0)
 
 
 def test_orbit_ukf_update_avoids_np_inv_and_preserves_symmetric_covariance() -> None:

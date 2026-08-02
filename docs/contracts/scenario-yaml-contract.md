@@ -159,11 +159,18 @@ Common object fields:
 `initial_state` supports these orbital initialization forms for satellite
 objects:
 
-- `position_eci_km` with optional `velocity_eci_km_s`,
+- `position_eci_km` with required `velocity_eci_km_s`,
 - `coes`,
 - `tle`,
 - `source: rocket_deployment` with `deploy_time_s`,
 - `source: rocket_insertion`.
+
+`coes` must contain at least one finite element. Canonical keys are `a_km`,
+`ecc`, `inc_deg`, `raan_deg`, `argp_deg`, and `true_anomaly_deg`. The established
+compatibility aliases `semi_major_axis_km`, `e`, `inclination_deg`,
+`arg_periapsis_deg`, and `ta_deg` remain accepted. Omitted elements retain the
+existing converter defaults: `a_km=7000` and zero for eccentricity and all
+angles.
 
 Rocket-deployed satellites may also set `deploy_dv_body_m_s`, a body-frame
 deployment delta-v in meters per second. `initialization_delay_s` is optional

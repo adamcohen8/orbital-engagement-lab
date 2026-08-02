@@ -78,6 +78,30 @@ RECIPES: dict[str, AgentTaskRecipe] = {
         semantic_metric_names=("ground_access",),
         tags=("public", "agent_example", "ground_access"),
     ),
+    "ogp_sgp4_review": AgentTaskRecipe(
+        recipe_id="ogp_sgp4_review",
+        title="Public OGP-SGP4 Propagation Evidence",
+        description=(
+            "Validate and run a fixed public TLE through continuous passive OGP-SGP4, then package "
+            "propagation provenance, canonical ECI state evidence, and a review-store plot."
+        ),
+        config_path="agents/examples/public_agent_ogp_sgp4_propagation.yaml",
+        maturity="supported",
+        query_names=(
+            "run_metadata",
+            "objects",
+            "ogp_propagation_contract",
+            "passive_final_state",
+            "artifacts",
+        ),
+        plot_recipe_ids=("object_eci_radius",),
+        tags=("public", "agent_example", "ogp", "sgp4", "propagation", "tle"),
+        notes=(
+            "Uses a fixed historical public TLE so the workflow is deterministic and offline.",
+            "The OGP product is native TEME while review object-state histories remain canonical ECI evidence.",
+            "This workflow does not establish current or operational ephemeris accuracy.",
+        ),
+    ),
 }
 
 

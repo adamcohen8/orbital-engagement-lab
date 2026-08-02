@@ -44,7 +44,7 @@ class HCWCurvInputRectOutputController(Controller):
         # Stage 2: rectangular HCW LQR control (u_rect).
         u_rect = -self.base_lqr._k_gain @ x_rect_for_lqr
         u_norm = float(np.linalg.norm(u_rect))
-        if u_norm > self.base_lqr.max_accel_km_s2 > 0.0:
+        if u_norm > self.base_lqr.max_accel_km_s2 >= 0.0:
             u_rect *= self.base_lqr.max_accel_km_s2 / u_norm
 
         # Stage 3: rectangular RIC -> ECI for thrust command.

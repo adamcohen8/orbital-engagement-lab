@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from sim.core.models import Measurement, StateTruth
+from sim.core.models import Measurement, StateBelief, StateTruth
 from sim.knowledge.object_tracking import (
     KnowledgeConditionConfig,
     KnowledgeEKFConfig,
@@ -23,13 +23,17 @@ def _truth(
     *,
     position: np.ndarray | None = None,
     velocity: np.ndarray | None = None,
+    angular_rate: np.ndarray | None = None,
     t_s: float = 0.0,
 ) -> StateTruth:
     return StateTruth(
         position_eci_km=np.array(position if position is not None else [7000.0, 0.0, 0.0], dtype=float),
         velocity_eci_km_s=np.array(velocity if velocity is not None else [0.0, 7.5, 0.0], dtype=float),
         attitude_quat_bn=np.array([1.0, 0.0, 0.0, 0.0], dtype=float),
-        angular_rate_body_rad_s=np.array([0.01, -0.02, 0.03], dtype=float),
+        angular_rate_body_rad_s=np.array(
+            angular_rate if angular_rate is not None else [0.01, -0.02, 0.03],
+            dtype=float,
+        ),
         mass_kg=100.0,
         t_s=float(t_s),
     )
@@ -99,6 +103,22 @@ def test_composite_sensor_concatenates_synchronized_measurements() -> None:
     assert meas is not None
     assert np.isclose(meas.t_s, 8.0)
     assert np.allclose(meas.vector, np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]))
+
+
+class _DropoutSensor:
+    def measure(self, truth: StateTruth, env: dict, t_s: float) -> None:
+        return None
+
+
+def test_composite_sensor_dropout_preserves_fixed_layout_by_dropping_sample() -> None:
+    sensor = CompositeSensorModel(
+        sensors=[
+            _FixedSensor([1.0, 2.0, 3.0], sample_t_s=8.0),
+            _DropoutSensor(),
+        ]
+    )
+
+    assert sensor.measure(_truth(t_s=10.0), env={}, t_s=10.0) is None
 
 
 def test_relative_sensor_range_rate_matches_truth_geometry() -> None:
@@ -222,6 +242,72 @@ def test_object_knowledge_base_exposes_raw_state_measurement_snapshot() -> None:
     assert np.allclose(measurements["target"], target_state)
 
 
+def test_knowledge_sensor_offset_velocity_includes_body_rotation() -> None:
+    observer = _truth(
+        position=np.array([7000.0, 0.0, 0.0]),
+        velocity=np.zeros(3),
+        angular_rate=np.array([0.0, 0.0, 1.0]),
+    )
+    target = _truth(position=np.array([7001.0, 2.0, 0.0]), velocity=np.zeros(3))
+    knowledge = ObjectKnowledgeBase(
+        observer_id="chaser",
+        tracked_objects=[
+            TrackedObjectConfig(
+                target_id="target",
+                conditions=KnowledgeConditionConfig(
+                    refresh_rate_s=1.0,
+                    sensor_position_body_m=np.array([1000.0, 0.0, 0.0]),
+                ),
+                sensor_noise=KnowledgeNoiseConfig(range_sigma_km=0.0, range_rate_sigma_km_s=0.0),
+                measurement_model="relative_range_rate",
+                ekf=KnowledgeEKFConfig(initial_state_eci_km_s=np.hstack((target.position_eci_km, target.velocity_eci_km_s))),
+            )
+        ],
+        dt_s=1.0,
+        rng=np.random.default_rng(5),
+    )
+
+    knowledge.update(observer, {"target": target}, t_s=0.0)
+
+    np.testing.assert_allclose(knowledge.measurement_snapshot()["target"], [2.0, -1.0], atol=1.0e-12)
+
+
+def test_knowledge_dropout_consumes_refresh_slot() -> None:
+    observer = _truth()
+    target = _truth(position=np.array([7001.0, 0.0, 0.0]))
+    knowledge = ObjectKnowledgeBase(
+        observer_id="chaser",
+        tracked_objects=[
+            TrackedObjectConfig(
+                target_id="target",
+                conditions=KnowledgeConditionConfig(refresh_rate_s=10.0, dropout_prob=1.0),
+            )
+        ],
+        dt_s=1.0,
+        rng=np.random.default_rng(5),
+    )
+
+    knowledge.update(observer, {"target": target}, t_s=0.0)
+    knowledge.update(observer, {"target": target}, t_s=1.0)
+
+    counts = knowledge.detection_summary()["target"]["status_counts"]
+    assert counts == {"cadence": 1, "dropout": 1}
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"pos_sigma_km": np.array([-1.0])}, "pos_sigma_km"),
+        ({"vel_sigma_km_s": np.array([np.nan])}, "vel_sigma_km_s"),
+        ({"range_sigma_km": np.inf}, "range_sigma_km"),
+        ({"az_bias_rad": np.nan}, "az_bias_rad"),
+    ],
+)
+def test_knowledge_noise_rejects_invalid_domains(kwargs: dict[str, object], message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        KnowledgeNoiseConfig(**kwargs)
+
+
 def test_measured_state_estimator_trusts_latest_state_measurement() -> None:
     observer = _truth(position=np.array([7000.0, 0.0, 0.0]), velocity=np.array([0.0, 7.5, 0.0]))
     target0 = _truth(position=np.array([7001.0, 2.0, 3.0]), velocity=np.array([0.01, 7.49, -0.02]))
@@ -330,6 +416,49 @@ def test_relative_hcw_knowledge_estimator_tracks_target_from_relative_state_meas
     assert np.allclose(belief.covariance, belief.covariance.T, atol=1e-14)
     assert np.max(np.abs(belief.covariance - np.diag(np.diag(belief.covariance)))) > 1e-12
     assert knowledge.consistency_summary()["target"]["initialization_count"] == 1
+
+
+def test_relative_target_publication_uses_observer_belief_and_covariance() -> None:
+    target = _truth(position=np.array([7000.0, 0.0, 0.0]), velocity=np.array([0.0, 7.546, 0.0]))
+    observer = _truth(position=np.array([7000.1, -0.2, 0.05]), velocity=np.array([0.0, 7.546, 0.0]))
+    observer_state = np.hstack((observer.position_eci_km, observer.velocity_eci_km_s))
+    observer_belief = StateBelief(
+        state=observer_state + np.array([1.0, -2.0, 0.5, 0.001, -0.002, 0.0005]),
+        covariance=np.eye(6) * 0.25,
+        last_update_t_s=0.0,
+    )
+    knowledge = ObjectKnowledgeBase(
+        observer_id="chaser",
+        tracked_objects=[
+            TrackedObjectConfig(
+                target_id="target",
+                conditions=KnowledgeConditionConfig(refresh_rate_s=1.0),
+                sensor_noise=KnowledgeNoiseConfig(pos_sigma_km=np.zeros(3), vel_sigma_km_s=np.zeros(3)),
+                estimator="relative_hcw_ekf",
+                measurement_model="relative_state",
+                ekf=KnowledgeEKFConfig(init_cov_diag=np.ones(6) * 1.0e-9),
+            )
+        ],
+        dt_s=1.0,
+        rng=np.random.default_rng(5),
+    )
+
+    published = knowledge.update(
+        observer,
+        {"target": target},
+        t_s=0.0,
+        observer_belief=observer_belief,
+    )["target"]
+    relative_state = knowledge._tracks["target"].relative_belief
+    assert relative_state is not None
+    expected = ric_rect_state_to_eci(
+        -relative_state.state,
+        observer_belief.state[:3],
+        observer_belief.state[3:6],
+    )
+
+    np.testing.assert_allclose(published.state, expected, atol=1.0e-12)
+    assert np.trace(published.covariance) > 1.0
 
 
 def test_relative_hcw_knowledge_estimator_updates_from_angles_range_rate_measurement() -> None:

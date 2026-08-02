@@ -540,6 +540,7 @@ def apparent_sidereal_time_hpop_like(
     tt_minus_utc_s: float | None = None,
     ddpsi_rad: float = 0.0,
     ddeps_rad: float = 0.0,
+    eop_extrapolation: str = "error",
 ) -> float:
     has_manual_eop = any(value is not None for value in (dut1_s, dat_s, tt_minus_utc_s)) or (
         float(ddpsi_rad) != 0.0 or float(ddeps_rad) != 0.0
@@ -548,7 +549,11 @@ def apparent_sidereal_time_hpop_like(
         return gmst_angle_rad_from_jd(float(jd_utc))
     if eop_path:
         mjd_utc = float(jd_utc) - _MJD0
-        _xp_arcsec, _yp_arcsec, dut1_s, dat_s = _interp_eop(mjd_utc, eop_path)
+        _xp_arcsec, _yp_arcsec, dut1_s, dat_s = _interp_eop(
+            mjd_utc,
+            eop_path,
+            extrapolation=eop_extrapolation,
+        )
     else:
         dut1_s = 0.0 if dut1_s is None else float(dut1_s)
         if dat_s is None:
@@ -572,12 +577,17 @@ def precession_nutation_rotation_hpop_like(
     *,
     ddpsi_rad: float = 0.0,
     ddeps_rad: float = 0.0,
+    eop_extrapolation: str = "error",
 ) -> np.ndarray:
     if jd_utc_start is None or not eop_path:
         return np.eye(3, dtype=float)
     jd_utc = float(jd_utc_start) + float(t_s) / _DAYSEC
     mjd_utc = jd_utc - _MJD0
-    _xp_arcsec, _yp_arcsec, _dut1_s, dat_s = _interp_eop(mjd_utc, eop_path)
+    _xp_arcsec, _yp_arcsec, _dut1_s, dat_s = _interp_eop(
+        mjd_utc,
+        eop_path,
+        extrapolation=eop_extrapolation,
+    )
     jd_tt = jd_utc + (dat_s + 32.184) / _DAYSEC
     rbpn, _dpsi, _true_obliquity = _precession_nutation_matrix_approx(
         jd_tt,
@@ -801,14 +811,38 @@ def _eci_to_ecef_rotation_derivative_context(t_s: float, context: FrameContext) 
     # precession/nutation/EOP terms.
     step_s = 30.0
     t = float(t_s)
-    return (
-        -eci_to_ecef_rotation_context(t + 2.0 * step_s, context)
-        + 8.0 * eci_to_ecef_rotation_context(t + step_s, context)
-        - 8.0 * eci_to_ecef_rotation_context(t - step_s, context)
-        + eci_to_ecef_rotation_context(t - 2.0 * step_s, context)
-    ) / (
-        12.0 * step_s
-    )
+    def rotation(sample_t: float) -> np.ndarray:
+        return eci_to_ecef_rotation_context(sample_t, context)
+    try:
+        return (
+            -rotation(t + 2.0 * step_s)
+            + 8.0 * rotation(t + step_s)
+            - 8.0 * rotation(t - step_s)
+            + rotation(t - 2.0 * step_s)
+        ) / (12.0 * step_s)
+    except ValueError as centered_error:
+        # A valid state at the first/last EOP record must remain transformable.
+        # Use a fourth-order one-sided stencil when the centered stencil would
+        # leave the configured EOP coverage.
+        try:
+            return (
+                -25.0 * rotation(t)
+                + 48.0 * rotation(t + step_s)
+                - 36.0 * rotation(t + 2.0 * step_s)
+                + 16.0 * rotation(t + 3.0 * step_s)
+                - 3.0 * rotation(t + 4.0 * step_s)
+            ) / (12.0 * step_s)
+        except ValueError:
+            try:
+                return (
+                    25.0 * rotation(t)
+                    - 48.0 * rotation(t - step_s)
+                    + 36.0 * rotation(t - 2.0 * step_s)
+                    - 16.0 * rotation(t - 3.0 * step_s)
+                    + 3.0 * rotation(t - 4.0 * step_s)
+                ) / (12.0 * step_s)
+            except ValueError as backward_error:
+                raise centered_error from backward_error
 
 
 def eci_to_ecef_harmonic(
@@ -824,6 +858,7 @@ def eci_to_ecef_harmonic(
     tt_minus_utc_s: float | None = None,
     ddpsi_rad: float = 0.0,
     ddeps_rad: float = 0.0,
+    eop_extrapolation: str = "error",
 ) -> np.ndarray:
     r_eci = (
         r_eci_km
@@ -843,6 +878,7 @@ def eci_to_ecef_harmonic(
             tt_minus_utc_s=tt_minus_utc_s,
             ddpsi_rad=ddpsi_rad,
             ddeps_rad=ddeps_rad,
+            eop_extrapolation=eop_extrapolation,
         )
         return rot @ r_eci
     return eci_to_ecef(r_eci, t_s, jd_utc_start=jd_utc_start)
@@ -861,6 +897,7 @@ def ecef_to_eci_harmonic(
     tt_minus_utc_s: float | None = None,
     ddpsi_rad: float = 0.0,
     ddeps_rad: float = 0.0,
+    eop_extrapolation: str = "error",
 ) -> np.ndarray:
     model = normalize_frame_model(frame_model)
     if model == FRAME_MODEL_IAU76_80_EOP:
@@ -875,6 +912,7 @@ def ecef_to_eci_harmonic(
             tt_minus_utc_s=tt_minus_utc_s,
             ddpsi_rad=ddpsi_rad,
             ddeps_rad=ddeps_rad,
+            eop_extrapolation=eop_extrapolation,
         )
         return rot.T @ np.array(r_ecef_km, dtype=float)
     return ecef_to_eci(np.array(r_ecef_km, dtype=float), t_s, jd_utc_start=jd_utc_start)

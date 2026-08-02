@@ -418,6 +418,7 @@ PUBLIC_TOOL_CONTRACTS: tuple[ToolContract, ...] = (
                 {
                     **SCENARIO_INPUT_PROPERTIES,
                     "validation_id": {"type": "string", "minLength": 1},
+                    "trust_approval": APPROVAL_SCHEMA,
                     "approval": APPROVAL_SCHEMA,
                 }
             ),
@@ -549,6 +550,12 @@ PUBLIC_TOOL_CONTRACTS: tuple[ToolContract, ...] = (
                 {
                     "report_path": {"type": "string", "minLength": 1},
                     "packet_path": {"type": "string", "minLength": 1},
+                    "max_packet_bytes": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2_000_000,
+                        "default": 2_000_000,
+                    },
                     "audit_output_dir": {"type": "string", "minLength": 1},
                     "author": {"type": "string", "minLength": 1, "maxLength": 120},
                     "model": {"type": "string", "maxLength": 200, "default": ""},

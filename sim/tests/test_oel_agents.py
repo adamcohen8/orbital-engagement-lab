@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[2]
 AGENT_EXAMPLES = [
     ROOT / "agents" / "examples" / "public_agent_python_api_minimal_propagation.yaml",
     ROOT / "agents" / "examples" / "public_agent_single_satellite.yaml",
+    ROOT / "agents" / "examples" / "public_agent_ogp_sgp4_propagation.yaml",
     ROOT / "agents" / "examples" / "public_agent_rendezvous_lqr.yaml",
     ROOT / "agents" / "examples" / "public_agent_mission_recovery_plus_c_burn.yaml",
     ROOT / "agents" / "examples" / "public_agent_mission_reconstitution_trade_space.yaml",
@@ -34,6 +35,10 @@ GOLDEN_PATHS = {
             "agents/examples/public_agent_python_api_minimal_propagation.yaml",
         ],
         "queries": ["run_metadata", "objects", "passive_final_state", "artifacts"],
+    },
+    "ogp_sgp4_propagation": {
+        "configs": ["agents/examples/public_agent_ogp_sgp4_propagation.yaml"],
+        "queries": ["run_metadata", "objects", "ogp_propagation_contract", "passive_final_state", "artifacts"],
     },
     "closed_loop_rendezvous": {
         "configs": ["agents/examples/public_agent_rendezvous_lqr.yaml"],
@@ -194,9 +199,11 @@ def test_public_agent_task_cards_define_checked_workflows() -> None:
         "attitude_hold",
         "closed_loop_rendezvous",
         "compare_one_change",
+        "completed_run_continuation",
         "ground_access_from_tle",
         "mission_reconstitution_trade_space",
         "mission_recovery_plus_c_burn",
+        "ogp_sgp4_propagation",
         "passive_propagation",
         "python_api_minimal_propagation",
     }
@@ -335,6 +342,13 @@ def test_public_agent_saved_review_queries_execute(example_path: Path, tmp_path:
     query_names_by_example = {
         "public_agent_python_api_minimal_propagation": ["run_metadata", "objects", "artifacts", "passive_final_state"],
         "public_agent_single_satellite": ["run_metadata", "objects", "artifacts", "passive_final_state"],
+        "public_agent_ogp_sgp4_propagation": [
+            "run_metadata",
+            "objects",
+            "ogp_propagation_contract",
+            "passive_final_state",
+            "artifacts",
+        ],
         "public_agent_rendezvous_lqr": [
             "run_metadata",
             "rendezvous_metrics",

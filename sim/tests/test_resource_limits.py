@@ -320,6 +320,109 @@ def test_macos_critical_pressure_is_unsafe_even_with_nominal_available_memory(
         ResourceGovernor(cfg).assert_safe_to_start()
 
 
+def test_guarded_profile_fails_closed_when_memory_telemetry_is_unavailable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = scenario_config_from_dict(
+        apply_resource_profile_to_config_dict(_single_target_config(tmp_path / "unknown", duration_s=2.0), "laptop-safe")
+    )
+    snapshot = ResourceSnapshot(
+        timestamp_s=0.0,
+        cpu_count=8,
+        load_1m=0.0,
+        total_memory_mb=None,
+        available_memory_mb=None,
+        memory_pressure_free_percent=None,
+    )
+    monkeypatch.setattr("sim.resource_limits.current_resource_snapshot", lambda: snapshot)
+
+    estimate = estimate_resource_requirements(cfg)
+
+    assert estimate.risk == "unsafe"
+    assert "memory telemetry is unavailable for the configured safety floor" in estimate.notes
+    with pytest.raises(ResourcePressureError, match="Memory telemetry is unavailable"):
+        ResourceGovernor(cfg).assert_safe_to_start()
+
+
+def test_sensitivity_resource_estimate_scales_with_retained_payload_count(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    snapshot = ResourceSnapshot(
+        timestamp_s=0.0,
+        cpu_count=8,
+        load_1m=0.0,
+        total_memory_mb=16384.0,
+        available_memory_mb=12000.0,
+        memory_pressure_free_percent=50.0,
+    )
+    monkeypatch.setattr("sim.resource_limits.current_resource_snapshot", lambda: snapshot)
+
+    def _estimate(values: list[float]):
+        root = _single_target_config(tmp_path / f"sensitivity-{len(values)}", duration_s=12.0)
+        root["analysis"] = {
+            "enabled": True,
+            "study_type": "sensitivity",
+            "execution": {"parallel_enabled": False},
+            "sensitivity": {
+                "method": "one_at_a_time",
+                "parameters": [
+                    {"parameter_path": "objects.target.specs.mass_kg", "values": values},
+                ],
+            },
+        }
+        return estimate_resource_requirements(scenario_config_from_dict(root))
+
+    two_runs = _estimate([90.0, 110.0])
+    five_runs = _estimate([80.0, 90.0, 100.0, 110.0, 120.0])
+
+    assert five_runs.estimated_incremental_memory_mb > two_runs.estimated_incremental_memory_mb
+    assert "full run payloads retained for 2 batch runs" in two_runs.notes
+    assert "full run payloads retained for 5 batch runs" in five_runs.notes
+
+
+def test_monte_carlo_payload_gate_adds_iteration_scaled_retention_to_preflight(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    snapshot = ResourceSnapshot(
+        timestamp_s=0.0,
+        cpu_count=8,
+        load_1m=0.0,
+        total_memory_mb=16384.0,
+        available_memory_mb=12000.0,
+        memory_pressure_free_percent=50.0,
+    )
+    monkeypatch.setattr("sim.resource_limits.current_resource_snapshot", lambda: snapshot)
+
+    def _estimate(iterations: int, *, payload_gate: bool):
+        root = _single_target_config(tmp_path / f"mc-{iterations}-{payload_gate}", duration_s=12.0)
+        root["analysis"] = {
+            "enabled": True,
+            "study_type": "monte_carlo",
+            "execution": {"parallel_enabled": False},
+            "monte_carlo": {"iterations": iterations, "variations": []},
+        }
+        if payload_gate:
+            root["outputs"]["monte_carlo"] = {
+                "gates": {
+                    "metric_gates": [
+                        {"metric": "payload.truth_by_object.target", "op": "!=", "value": None},
+                    ],
+                },
+            }
+        return estimate_resource_requirements(scenario_config_from_dict(root))
+
+    two_runs = _estimate(2, payload_gate=True)
+    five_runs = _estimate(5, payload_gate=True)
+    five_runs_without_payloads = _estimate(5, payload_gate=False)
+
+    assert five_runs.estimated_incremental_memory_mb > two_runs.estimated_incremental_memory_mb
+    assert five_runs.estimated_incremental_memory_mb > five_runs_without_payloads.estimated_incremental_memory_mb
+    assert "full run payloads retained for 5 batch runs" in five_runs.notes
+
+
 def test_resource_governor_reports_wait_and_resume(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

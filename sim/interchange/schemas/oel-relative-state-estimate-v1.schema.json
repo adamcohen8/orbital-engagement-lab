@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orbitalengagementlab.com/schemas/oel-relative-state-estimate-v1.schema.json",
+  "title": "OEL Relative State Estimate Product v1 Payload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["chief", "deputy", "relative_state", "covariance", "object_specs", "model_assumptions", "estimator_evidence"],
+  "properties": {
+    "chief": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["object_id", "state_product_id"],
+      "properties": {
+        "object_id": {"type": "string", "minLength": 1},
+        "state_product_id": {"type": "string", "pattern": "^oel\\.state_estimate:[0-9a-f]{64}$"}
+      }
+    },
+    "deputy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["object_id", "role", "kind"],
+      "properties": {
+        "object_id": {"type": "string", "minLength": 1},
+        "role": {"type": "string", "minLength": 1},
+        "kind": {"const": "satellite"}
+      }
+    },
+    "relative_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["representation", "frame", "convention", "axes", "sign_convention", "epoch", "component_order", "units", "values"],
+      "properties": {
+        "representation": {"const": "cartesian_relative_position_velocity"},
+        "frame": {"const": "RIC"},
+        "convention": {"const": "rectangular"},
+        "axes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["radial", "intrack", "crosstrack"],
+          "properties": {
+            "radial": {"const": "chief_position_outward"},
+            "intrack": {"const": "chief_motion_direction"},
+            "crosstrack": {"const": "right_handed_orbit_normal"}
+          }
+        },
+        "sign_convention": {"const": "deputy_minus_chief_expressed_in_chief_ric"},
+        "epoch": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["value", "format", "time_system"],
+          "properties": {
+            "value": {"type": "number", "exclusiveMinimum": 0},
+            "format": {"const": "jd"},
+            "time_system": {"const": "UTC"}
+          }
+        },
+        "component_order": {"const": ["r_radial", "i_intrack", "c_crosstrack", "vr_radial", "vi_intrack", "vc_crosstrack"]},
+        "units": {"const": ["km", "km", "km", "km/s", "km/s", "km/s"]},
+        "values": {"type": "array", "minItems": 6, "maxItems": 6, "items": {"type": "number"}}
+      }
+    },
+    "covariance": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["present", "reason"],
+          "properties": {"present": {"const": false}, "reason": {"type": "string", "minLength": 1}}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["present", "frame", "convention", "epoch_jd_utc", "component_order", "units", "matrix", "mathematically_valid", "calibrated", "calibration_scope"],
+          "properties": {
+            "present": {"const": true},
+            "frame": {"const": "RIC"},
+            "convention": {"const": "rectangular"},
+            "epoch_jd_utc": {"type": "number", "exclusiveMinimum": 0},
+            "component_order": {"const": ["r_radial", "i_intrack", "c_crosstrack", "vr_radial", "vi_intrack", "vc_crosstrack"]},
+            "units": {"const": ["km", "km", "km", "km/s", "km/s", "km/s"]},
+            "matrix": {
+              "type": "array", "minItems": 6, "maxItems": 6,
+              "items": {"type": "array", "minItems": 6, "maxItems": 6, "items": {"type": "number"}}
+            },
+            "mathematically_valid": {"const": true},
+            "calibrated": {"type": "boolean"},
+            "calibration_scope": {"type": ["string", "null"]}
+          }
+        }
+      ]
+    },
+    "object_specs": {"type": "object"},
+    "model_assumptions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["relative_dynamics_model", "dynamics_metadata"],
+      "properties": {
+        "relative_dynamics_model": {"enum": ["hcw", "ss_j2", "th", "ya"]},
+        "dynamics_metadata": {"type": "object"}
+      }
+    },
+    "estimator_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "source_report_sha256"],
+      "properties": {
+        "method": {"type": "string", "minLength": 1},
+        "source_report_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    }
+  }
+}

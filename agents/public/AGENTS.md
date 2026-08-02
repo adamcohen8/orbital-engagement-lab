@@ -157,6 +157,21 @@ python -m sim.agent_task run quickstart_review --output-root outputs/agent_tasks
 python -m sim.agent_task inspect outputs/my_run --query run_metadata --json
 ```
 
+To continue from one exact completed-run state, export a versioned product and
+then materialize a separate validated ONP scenario:
+
+```bash
+python -m sim.handoff export-state outputs/my_run --object-id target --sample final --output outputs/my_run_final_state.json
+python -m sim.handoff materialize-onp --state-product outputs/my_run_final_state.json --scenario-name my_continuation --output outputs/my_continuation.yaml --run-output-dir outputs/my_continuation --duration-s 600 --dt-s 10
+python -m sim.handoff compare-handoff --product outputs/my_run_final_state.json --scenario outputs/my_continuation.yaml --output outputs/my_continuation.comparison.json
+```
+
+The source run must have review output, a canonical ECI state frame, and an
+absolute initial epoch. These commands select and validate evidence but do not
+execute the continuation.
+After a separately authorized run, pass `--run-output-dir` to compare the first
+consumer review row with the promoted state.
+
 When using the review store, cite the SQL query or saved view that supports the
 answer. Keep queries read-only, prefer `SELECT`/`WITH`, and inspect table names
 or sample rows before writing custom SQL against an unfamiliar table:

@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orbitalengagementlab.com/schemas/oel-scenario-patch-v1.schema.json",
+  "title": "OEL Scenario Patch Product v1 Payload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["source_scenario", "patch", "selection", "evidence"],
+  "properties": {
+    "source_scenario": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scenario_name", "sha256", "canonical_digest"],
+      "properties": {
+        "scenario_name": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "canonical_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "patch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["patch_type", "operations"],
+      "properties": {
+        "patch_type": {"enum": ["mission_recovery_candidate", "controller_optimized_variant"]},
+        "operations": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["op", "kind", "path", "value", "reason"],
+            "properties": {
+              "op": {"enum": ["replace", "append"]},
+              "kind": {"enum": ["mission_burn", "duration_extension", "controller_pointer", "scenario_override"]},
+              "path": {"type": "string", "minLength": 1},
+              "value": {},
+              "reason": {"type": "string", "minLength": 1}
+            }
+          }
+        }
+      }
+    },
+    "selection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["selection_id", "selection_kind", "rank", "recommended_modes"],
+      "properties": {
+        "selection_id": {"type": "string", "minLength": 1},
+        "selection_kind": {"enum": ["mission_recovery_candidate", "controller_optimized_variant"]},
+        "rank": {"type": "integer", "minimum": 1},
+        "recommended_modes": {"type": "array", "items": {"type": "string"}},
+        "case_name": {"type": "string", "minLength": 1},
+        "variant_name": {"type": "string", "minLength": 1}
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["objective", "constraints", "producer_evidence"],
+      "properties": {
+        "objective": {"type": "object"},
+        "constraints": {"type": "object"},
+        "producer_evidence": {"type": "object"}
+      }
+    }
+  }
+}

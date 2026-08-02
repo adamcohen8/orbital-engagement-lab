@@ -94,7 +94,11 @@ def render_summary_outputs(context: PlotOutputContext) -> dict[str, str]:
 
     cfg = context.cfg
     t_s = context.t_s
-    truth_hist = context.truth_hist
+    truth_hist = {
+        object_id: hist
+        for object_id, hist in context.truth_hist.items()
+        if context.object_state_frames.get(object_id, "eci") == "eci"
+    }
     target_reference_orbit_truth = context.target_reference_orbit_truth
     thrust_hist = context.thrust_hist
     desired_attitude_hist = context.desired_attitude_hist
@@ -245,6 +249,7 @@ def render_summary_outputs(context: PlotOutputContext) -> dict[str, str]:
             truth_hist=truth_hist,
             jd_utc_start=cfg.simulator.initial_jd_utc,
             frame_context=frame_context,
+            object_state_frames=context.object_state_frames,
         )
         p = outdir / "ground_station_access.png"
         plot_ground_station_access(

@@ -10,6 +10,68 @@ from .ai_report_budget import *
 from .ai_report_audit import *
 from .providers import *
 
+_AI_REPORT_ARTIFACT_FILENAMES = (
+    "master_ai_report.md",
+    "master_ai_report.json",
+    "master_ai_report_input.json",
+    "master_ai_report_prompt.md",
+    "master_ai_report_metadata.json",
+    "master_ai_report_quality.json",
+    "master_ai_report_review_packet.md",
+    "master_ai_report_usage.json",
+    "master_ai_report_cost_estimate.json",
+)
+
+
+def _invalidate_ai_report_artifacts(
+    *,
+    outdir: Path,
+    payload: dict[str, Any],
+    status: str,
+    reason: str,
+) -> dict[str, Any]:
+    artifacts = dict(payload.get("artifacts", {}) or {})
+    for key in list(artifacts):
+        if str(key).startswith("ai_report_"):
+            artifacts.pop(key, None)
+    existing = [name for name in _AI_REPORT_ARTIFACT_FILENAMES if (outdir / name).is_file()]
+    if not existing and not outdir.exists():
+        payload["artifacts"] = artifacts
+        return payload
+
+    outdir.mkdir(parents=True, exist_ok=True)
+    generated_utc = datetime.now(timezone.utc).isoformat()
+    status_path = outdir / "master_ai_report_status.json"
+    index_path = outdir / "master_ai_report_index.md"
+    status_payload = {
+        "generated_utc": generated_utc,
+        "active": False,
+        "status": str(status),
+        "reason": str(reason),
+        "invalidated_artifacts": existing,
+    }
+    write_json(str(status_path), status_payload)
+    index_path.write_text(
+        "\n".join(
+            [
+                "# AI Report Inactive",
+                "",
+                f"- Status: `{status}`",
+                f"- Reason: {reason}",
+                f"- Recorded UTC: `{generated_utc}`",
+                "",
+                "Any older `master_ai_report.*` files in this directory are stale and are not artifacts of the current run.",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    artifacts["ai_report_status_json"] = str(status_path)
+    artifacts["ai_report_index_md"] = str(index_path)
+    payload["artifacts"] = artifacts
+    payload["ai_report_status"] = status_payload
+    return payload
+
 def write_ai_report_artifacts(
     *,
     cfg: SimulationScenarioConfig,
@@ -25,18 +87,43 @@ def write_ai_report_artifacts(
         allow_custom_endpoint or bool(dict(ai_options or {}).get("allow_custom_endpoint", False))
     )
     if not _cfg_enabled(ai_cfg):
-        return payload
+        return _invalidate_ai_report_artifacts(
+            outdir=outdir,
+            payload=payload,
+            status="disabled",
+            reason="outputs.ai_report.enabled is false",
+        )
     if os.environ.get("OEL_SKIP_AI_REPORT", "").strip().lower() in {"1", "true", "yes"}:
-        return payload
+        return _invalidate_ai_report_artifacts(
+            outdir=outdir,
+            payload=payload,
+            status="skipped",
+            reason="OEL_SKIP_AI_REPORT requested this run to skip AI report generation",
+        )
 
     outdir.mkdir(parents=True, exist_ok=True)
-    request = build_ai_report_request(
-        cfg=cfg,
-        config_path=config_path,
+    _invalidate_ai_report_artifacts(
+        outdir=outdir,
         payload=payload,
-        payload_kind=payload_kind,
-        ai_cfg=ai_cfg,
+        status="preparing",
+        reason="AI report generation has started; prior report artifacts are inactive until completion.",
     )
+    try:
+        request = build_ai_report_request(
+            cfg=cfg,
+            config_path=config_path,
+            payload=payload,
+            payload_kind=payload_kind,
+            ai_cfg=ai_cfg,
+        )
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        _invalidate_ai_report_artifacts(
+            outdir=outdir,
+            payload=payload,
+            status="error",
+            reason=f"AI report setup failed: {type(exc).__name__}: {exc}",
+        )
+        raise
     prompt_profile = str(request["prompt_profile"])
     packet = dict(request["packet"])
     user_prompt = str(request["prompt"])
@@ -47,6 +134,7 @@ def write_ai_report_artifacts(
     quality_path = outdir / "master_ai_report_quality.json"
     review_packet_path = outdir / "master_ai_report_review_packet.md"
     usage_path = outdir / "master_ai_report_usage.json"
+    status_path = outdir / "master_ai_report_status.json"
     index_path = outdir / "master_ai_report_index.md"
     report_md_path = outdir / "master_ai_report.md"
     report_json_path = outdir / "master_ai_report.json"
@@ -170,7 +258,18 @@ def write_ai_report_artifacts(
     artifacts["ai_report_quality_json"] = str(quality_path)
     artifacts["ai_report_review_packet_md"] = str(review_packet_path)
     artifacts["ai_report_usage_json"] = str(usage_path)
+    artifacts["ai_report_status_json"] = str(status_path)
     artifacts["ai_report_index_md"] = str(index_path)
+    write_json(
+        str(status_path),
+        {
+            "generated_utc": metadata["generated_utc"],
+            "active": True,
+            "status": str(metadata.get("status", "")),
+            "report_md": str(report_md_path),
+            "metadata_json": str(metadata_path),
+        },
+    )
     index_path.write_text(
         _build_ai_report_index_markdown(
             metadata=metadata,

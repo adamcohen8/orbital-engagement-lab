@@ -92,7 +92,12 @@ def run_public_workflow_acceptance(
     executed = _call(
         client,
         "oel.run_scenario.v1",
-        {**scenario_args, "validation_id": validation_id, "approval": EXECUTE_APPROVAL},
+        {
+            **scenario_args,
+            "validation_id": validation_id,
+            "trust_approval": TRUST_APPROVAL,
+            "approval": EXECUTE_APPROVAL,
+        },
     )
     _record(checks, "execute", executed, expected="completed")
     inspected = _call(

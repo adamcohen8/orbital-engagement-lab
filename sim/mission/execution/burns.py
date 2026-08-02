@@ -1,6 +1,8 @@
 # ruff: noqa: F401,F403,F405,I001
 from ..strategies.base import *
 
+MAX_PREDICTIVE_BURN_STEPS = 100_000
+
 @dataclass
 class PredictiveBurnExecution:
     target_id: str | None = None
@@ -36,6 +38,21 @@ class PredictiveBurnExecution:
         self.alignment_tolerance_rad = _resolve_angle_tolerance_rad(
             self.alignment_tolerance_rad, self.alignment_tolerance_deg
         )
+        self._validate_prediction_horizon(self.lead_time_s, self.predict_dt_s)
+
+    @staticmethod
+    def _validate_prediction_horizon(horizon_s: float, dt_s: float) -> tuple[float, float]:
+        horizon = float(horizon_s)
+        step = float(dt_s)
+        if not np.isfinite(horizon) or horizon < 0.0:
+            raise ValueError("lead_time_s must be a nonnegative finite number.")
+        if not np.isfinite(step) or step <= 0.0:
+            raise ValueError("predict_dt_s must be a positive finite number.")
+        if int(np.floor(horizon / step)) > MAX_PREDICTIVE_BURN_STEPS:
+            raise ValueError(
+                f"predictive burn horizon exceeds the {MAX_PREDICTIVE_BURN_STEPS}-step safety limit."
+            )
+        return horizon, step
 
     def _target_state(
         self,
@@ -58,6 +75,7 @@ class PredictiveBurnExecution:
 
     def _predict_eci(self, x_eci: np.ndarray, horizon_s: float, dt_s: float) -> np.ndarray:
         x = np.array(x_eci, dtype=float).reshape(6)
+        horizon_s, dt_s = self._validate_prediction_horizon(horizon_s, dt_s)
         n_steps = int(max(np.floor(horizon_s / dt_s), 0))
         rem = float(max(horizon_s - n_steps * dt_s, 0.0))
         for _ in range(n_steps):
@@ -318,9 +336,33 @@ class ImpulsiveExecution:
     def _pulse_active(self, t_s: float) -> bool:
         period = float(max(self.pulse_period_s, 1e-9))
         width = float(np.clip(self.pulse_width_s, 0.0, period))
+        if width <= 0.0:
+            return False
+        if width >= period:
+            return True
         phase = float(self.pulse_phase_s)
         tau = (float(t_s) - phase) % period
-        return tau <= width
+        return tau < width
+
+    def _pulse_active_duration_s(self, t_s: float, dt_s: float) -> float:
+        """Return pulse-on time in the half-open interval ``[t_s, t_s + dt_s)``."""
+
+        interval_s = float(max(dt_s, 0.0))
+        period = float(max(self.pulse_period_s, 1e-9))
+        width = float(np.clip(self.pulse_width_s, 0.0, period))
+        if interval_s <= 0.0 or width <= 0.0:
+            return 0.0
+        if width >= period:
+            return interval_s
+
+        def cumulative_active_time(relative_t_s: float) -> float:
+            cycles = float(np.floor(relative_t_s / period))
+            cycle_time_s = relative_t_s - cycles * period
+            return cycles * width + min(cycle_time_s, width)
+
+        start_s = float(t_s) - float(self.pulse_phase_s)
+        active_s = cumulative_active_time(start_s + interval_s) - cumulative_active_time(start_s)
+        return float(np.clip(active_s, 0.0, interval_s))
 
     def update(
         self,
@@ -332,6 +374,7 @@ class ImpulsiveExecution:
         attitude_controller: Any | None = None,
         orb_belief: StateBelief | None = None,
         att_belief: StateBelief | None = None,
+        dt_s: float | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         _apply_orbit_controller_intent(orbit_controller, intent)
@@ -378,7 +421,14 @@ class ImpulsiveExecution:
             alignment_ok, alignment_angle_rad = PredictiveBurnExecution._alignment(
                 self, truth=truth, accel_eci_km_s2=thrust_cmd
             )
-        pulse_active = self._pulse_active(float(t_s))
+        if dt_s is None:
+            pulse_active_duration_s = 0.0
+            pulse_duty_fraction = 1.0 if self._pulse_active(float(t_s)) else 0.0
+        else:
+            interval_s = float(max(dt_s, 0.0))
+            pulse_active_duration_s = self._pulse_active_duration_s(float(t_s), interval_s)
+            pulse_duty_fraction = pulse_active_duration_s / interval_s if interval_s > 0.0 else 0.0
+        pulse_active = pulse_duty_fraction > 0.0
         fire = bool(
             pulse_active
             and float(np.linalg.norm(thrust_cmd)) > float(max(self.min_burn_accel_km_s2, 0.0))
@@ -389,19 +439,24 @@ class ImpulsiveExecution:
 
         return {
             "mission_use_integrated_command": True,
-            "thrust_eci_km_s2": thrust_cmd if fire else np.zeros(3, dtype=float),
+            "mission_bypass_orbital_command_latch": True,
+            "thrust_eci_km_s2": thrust_cmd * pulse_duty_fraction if fire else np.zeros(3, dtype=float),
             "torque_body_nm": np.array(c_att.torque_body_nm, dtype=float).reshape(3),
             "desired_attitude_quat_bn": q_des_arr,
             "command_mode_flags": {
                 **dict(c_att.mode_flags or {}),
                 "execution": "impulsive",
                 "pulse_active": bool(pulse_active),
+                "pulse_active_duration_s": float(pulse_active_duration_s),
+                "pulse_duty_fraction": float(pulse_duty_fraction),
                 "alignment_ok": bool(alignment_ok),
             },
             "mission_mode": {
                 **dict(intent.get("mission_mode", {}) or {}),
                 "execution": "impulsive",
                 "pulse_active": bool(pulse_active),
+                "pulse_active_duration_s": float(pulse_active_duration_s),
+                "pulse_duty_fraction": float(pulse_duty_fraction),
                 "fire": bool(fire),
                 "alignment_ok": bool(alignment_ok),
                 "alignment_angle_rad": float(alignment_angle_rad),
@@ -417,7 +472,7 @@ class BudgetedEndStateExecution:
     burn_dt_s: float = 1.0
     available_delta_v_km_s: float = 0.5
     require_attitude_alignment: bool = True
-    thruster_position_body_m: np.ndarray | None = None
+    thruster_position_body_m: np.ndarray | None = field(default_factory=lambda: np.zeros(3, dtype=float))
     thruster_direction_body: np.ndarray | None = field(default_factory=lambda: np.array([1.0, 0.0, 0.0], dtype=float))
     alignment_tolerance_rad: float = np.deg2rad(5.0)
     alignment_tolerance_deg: float | None = None

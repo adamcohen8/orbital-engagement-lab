@@ -31,8 +31,29 @@ def _canonicalize_api_config_dict(data: dict[str, Any]) -> dict[str, Any]:
         root["objects"] = objects
 
     legacy_mc = root.pop("monte_carlo", None)
-    if isinstance(legacy_mc, dict) and bool(legacy_mc.get("enabled", False)):
-        variations = list(legacy_mc.get("variations", []) or [])
+    if isinstance(legacy_mc, dict):
+        legacy_enabled = legacy_mc.get("enabled", False)
+        if not isinstance(legacy_enabled, bool):
+            raise ValueError("monte_carlo.enabled must be a boolean true/false value.")
+    if isinstance(legacy_mc, dict) and legacy_enabled:
+        parallel_enabled = legacy_mc.get("parallel_enabled", False)
+        if not isinstance(parallel_enabled, bool):
+            raise ValueError("monte_carlo.parallel_enabled must be a boolean true/false value.")
+        def _legacy_integer(name: str, default: int) -> int:
+            value = legacy_mc.get(name, default)
+            if isinstance(value, bool):
+                raise ValueError(f"monte_carlo.{name} must be an integer.")
+            try:
+                parsed = float(value)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"monte_carlo.{name} must be an integer.") from exc
+            if not parsed.is_integer():
+                raise ValueError(f"monte_carlo.{name} must be an integer.")
+            return int(parsed)
+        variations = [
+            dict(variation) if isinstance(variation, dict) else variation
+            for variation in (legacy_mc.get("variations", []) or [])
+        ]
         for variation in variations:
             if not isinstance(variation, dict):
                 continue
@@ -48,15 +69,15 @@ def _canonicalize_api_config_dict(data: dict[str, Any]) -> dict[str, Any]:
         analysis.setdefault(
             "execution",
             {
-                "parallel_enabled": bool(legacy_mc.get("parallel_enabled", False)),
-                "parallel_workers": int(legacy_mc.get("parallel_workers", 0) or 0),
+                "parallel_enabled": parallel_enabled,
+                "parallel_workers": _legacy_integer("parallel_workers", 0),
             },
         )
         analysis.setdefault(
             "monte_carlo",
             {
-                "iterations": int(legacy_mc.get("iterations", 1) or 1),
-                "base_seed": int(legacy_mc.get("base_seed", 0) or 0),
+                "iterations": _legacy_integer("iterations", 1),
+                "base_seed": _legacy_integer("base_seed", 0),
                 "variations": variations,
             },
         )

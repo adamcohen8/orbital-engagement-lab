@@ -1198,7 +1198,7 @@ def _intrack_recovery_candidates(
                 mass_kg=mass_kg,
                 isp_s=isp_s,
                 max_thrust_n=max_thrust_n,
-                tolerances={},
+                tolerances=tolerances,
                 max_delta_v_m_s=max_delta_v_m_s,
                 max_time_s=max_time_s,
                 simulate_candidates=simulate_candidates,

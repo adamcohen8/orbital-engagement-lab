@@ -178,6 +178,43 @@ def _range_scale(units: str) -> float:
     raise ValueError("range units must be 'km' or 'm'.")
 
 
+def _validate_event_radius_km(radius_km: float) -> float:
+    radius = float(radius_km)
+    if not np.isfinite(radius) or radius < 0.0:
+        raise ValueError("radius_km must be finite and nonnegative.")
+    return radius
+
+
+def _segment_minimum_range(
+    start: np.ndarray,
+    end: np.ndarray,
+) -> tuple[float, float]:
+    delta = end - start
+    denom = float(np.dot(delta, delta))
+    fraction = 0.0 if denom <= 0.0 else float(np.clip(-np.dot(start, delta) / denom, 0.0, 1.0))
+    return float(np.linalg.norm(start + fraction * delta)), fraction
+
+
+def _segment_sphere_entry_fraction(start: np.ndarray, end: np.ndarray, radius_km: float) -> float | None:
+    if float(np.linalg.norm(start)) <= radius_km:
+        return 0.0
+    delta = end - start
+    a = float(np.dot(delta, delta))
+    if a <= 0.0:
+        return None
+    b = 2.0 * float(np.dot(start, delta))
+    c = float(np.dot(start, start)) - radius_km * radius_km
+    discriminant = b * b - 4.0 * a * c
+    if discriminant < 0.0:
+        return None
+    sqrt_discriminant = float(np.sqrt(max(discriminant, 0.0)))
+    roots = sorted(((-b - sqrt_discriminant) / (2.0 * a), (-b + sqrt_discriminant) / (2.0 * a)))
+    for fraction in roots:
+        if 0.0 <= fraction <= 1.0:
+            return float(fraction)
+    return None
+
+
 def _records_dataframe(records: list[dict[str, Any]]) -> Any:
     try:
         import pandas as pd  # type: ignore
@@ -557,13 +594,36 @@ class SimulationResult:
         start_s: float | None = None,
         end_s: float | None = None,
     ) -> dict[str, Any]:
-        min_range_km = self.min_range(a, b, start_s=start_s, end_s=end_s, units="km")
-        hit = bool(np.isfinite(min_range_km) and min_range_km <= float(radius_km))
+        radius = _validate_event_radius_km(radius_km)
+        rel = self.relative_state(a, b, frame="eci", start_s=start_s, end_s=end_s)
+        times = self.time_s[self.time_window_mask(start_s=start_s, end_s=end_s)]
+        n = int(min(rel.shape[0], times.size))
+        min_range_km = float("nan")
+        event_time_s: float | None = None
+        if n > 0:
+            for idx in range(n):
+                pos = np.asarray(rel[idx, :3], dtype=float)
+                if not bool(np.all(np.isfinite(pos))):
+                    continue
+                candidate = float(np.linalg.norm(pos))
+                if not np.isfinite(min_range_km) or candidate < min_range_km:
+                    min_range_km = candidate
+                    event_time_s = float(times[idx])
+            for idx in range(n - 1):
+                start = np.asarray(rel[idx, :3], dtype=float)
+                end = np.asarray(rel[idx + 1, :3], dtype=float)
+                if not bool(np.all(np.isfinite(start))) or not bool(np.all(np.isfinite(end))):
+                    continue
+                candidate, fraction = _segment_minimum_range(start, end)
+                if not np.isfinite(min_range_km) or candidate < min_range_km:
+                    min_range_km = candidate
+                    event_time_s = float(times[idx] + fraction * (times[idx + 1] - times[idx]))
+        hit = bool(np.isfinite(min_range_km) and min_range_km <= radius)
         return {
             "event": hit,
-            "threshold_km": float(radius_km),
+            "threshold_km": radius,
             "min_range_km": min_range_km,
-            "time_s": self.time_of_min_range(a, b, start_s=start_s, end_s=end_s),
+            "time_s": event_time_s,
         }
 
     def keepout_violations(
@@ -575,14 +635,32 @@ class SimulationResult:
         start_s: float | None = None,
         end_s: float | None = None,
     ) -> list[dict[str, float]]:
-        ranges = self.range_between(a, b, start_s=start_s, end_s=end_s)
+        radius = _validate_event_radius_km(radius_km)
+        rel = self.relative_state(a, b, frame="eci", start_s=start_s, end_s=end_s)
         times = self.time_s[self.time_window_mask(start_s=start_s, end_s=end_s)]
-        n = int(min(ranges.size, times.size))
-        return [
-            {"time_s": float(times[idx]), "range_km": float(ranges[idx]), "threshold_km": float(radius_km)}
-            for idx in range(n)
-            if np.isfinite(ranges[idx]) and float(ranges[idx]) <= float(radius_km)
-        ]
+        n = int(min(rel.shape[0], times.size))
+        violations: list[dict[str, float]] = []
+        for idx in range(n):
+            pos = np.asarray(rel[idx, :3], dtype=float)
+            if bool(np.all(np.isfinite(pos))):
+                sample_range = float(np.linalg.norm(pos))
+                if sample_range <= radius:
+                    violations.append(
+                        {"time_s": float(times[idx]), "range_km": sample_range, "threshold_km": radius}
+                    )
+        for idx in range(n - 1):
+            start = np.asarray(rel[idx, :3], dtype=float)
+            end = np.asarray(rel[idx + 1, :3], dtype=float)
+            if not bool(np.all(np.isfinite(start))) or not bool(np.all(np.isfinite(end))):
+                continue
+            fraction = _segment_sphere_entry_fraction(start, end, radius)
+            if fraction is None or fraction <= 0.0:
+                continue
+            crossing_time = float(times[idx] + fraction * (times[idx + 1] - times[idx]))
+            if any(np.isclose(crossing_time, row["time_s"], rtol=0.0, atol=1.0e-12) for row in violations):
+                continue
+            violations.append({"time_s": crossing_time, "range_km": radius, "threshold_km": radius})
+        return sorted(violations, key=lambda row: row["time_s"])
 
     def first_crossing(
         self,

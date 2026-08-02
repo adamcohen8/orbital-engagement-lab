@@ -284,6 +284,7 @@ def _tool_limits(tool_id: str) -> dict[str, Any]:
         limits.update(
             {
                 "max_report_bytes": 2_000_000,
+                "max_packet_bytes": 2_000_000,
                 "operator_approval_required": True,
                 "provider_call_made": False,
                 "semantic_claim_review": False,

@@ -53,6 +53,33 @@ class KnowledgeConditionConfig:
     sensor_position_body_m: np.ndarray = field(default_factory=lambda: np.zeros(3))
     sensor_boresight_body: np.ndarray | None = None
 
+    def __post_init__(self) -> None:
+        if not np.isfinite(float(self.refresh_rate_s)) or float(self.refresh_rate_s) <= 0.0:
+            raise ValueError("refresh_rate_s must be positive and finite.")
+        if not np.isfinite(float(self.dropout_prob)) or not 0.0 <= float(self.dropout_prob) <= 1.0:
+            raise ValueError("dropout_prob must be finite and between 0 and 1.")
+        if self.max_range_km is not None and (
+            not np.isfinite(float(self.max_range_km)) or float(self.max_range_km) <= 0.0
+        ):
+            raise ValueError("max_range_km must be positive and finite when provided.")
+        if self.fov_half_angle_rad is not None and (
+            not np.isfinite(float(self.fov_half_angle_rad))
+            or not 0.0 <= float(self.fov_half_angle_rad) <= np.pi
+        ):
+            raise ValueError("fov_half_angle_rad must be finite and within [0, pi].")
+        if self.solid_angle_sr is not None and (
+            not np.isfinite(float(self.solid_angle_sr))
+            or not 0.0 <= float(self.solid_angle_sr) <= 4.0 * np.pi
+        ):
+            raise ValueError("solid_angle_sr must be finite and within [0, 4*pi].")
+        position = np.asarray(self.sensor_position_body_m, dtype=float).reshape(-1)
+        if position.size != 3 or not np.all(np.isfinite(position)):
+            raise ValueError("sensor_position_body_m must contain three finite values.")
+        if self.sensor_boresight_body is not None:
+            boresight = np.asarray(self.sensor_boresight_body, dtype=float).reshape(-1)
+            if boresight.size != 3 or not np.all(np.isfinite(boresight)):
+                raise ValueError("sensor_boresight_body must contain three finite values.")
+
 
 @dataclass(frozen=True)
 class KnowledgeNoiseConfig:
@@ -69,10 +96,25 @@ class KnowledgeNoiseConfig:
     el_bias_rad: float = 0.0
 
     def __post_init__(self) -> None:
-        if np.array(self.pos_sigma_km, dtype=float).reshape(-1).size not in (1, 3):
-            raise ValueError("pos_sigma_km must be scalar or length-3.")
-        if np.array(self.vel_sigma_km_s, dtype=float).reshape(-1).size not in (1, 3):
-            raise ValueError("vel_sigma_km_s must be scalar or length-3.")
+        for name in ("pos_sigma_km", "vel_sigma_km_s"):
+            values = np.asarray(getattr(self, name), dtype=float).reshape(-1)
+            if values.size not in (1, 3):
+                raise ValueError(f"{name} must be scalar or length-3.")
+            if not np.all(np.isfinite(values)) or np.any(values < 0.0):
+                raise ValueError(f"{name} must contain finite nonnegative values.")
+        for name in ("pos_bias_km", "vel_bias_km_s"):
+            values = np.asarray(getattr(self, name), dtype=float).reshape(-1)
+            if values.size not in (1, 3):
+                raise ValueError(f"{name} must be scalar or length-3.")
+            if not np.all(np.isfinite(values)):
+                raise ValueError(f"{name} must contain finite values.")
+        for name in ("range_sigma_km", "range_rate_sigma_km_s", "angle_sigma_rad"):
+            value = float(getattr(self, name))
+            if not np.isfinite(value) or value < 0.0:
+                raise ValueError(f"{name} must be finite and nonnegative.")
+        for name in ("range_bias_km", "range_rate_bias_km_s", "az_bias_rad", "el_bias_rad"):
+            if not np.isfinite(float(getattr(self, name))):
+                raise ValueError(f"{name} must be finite.")
 
 
 @dataclass(frozen=True)
@@ -87,22 +129,23 @@ class KnowledgeEKFConfig:
     integration_substep_s: float = 10.0
 
     def __post_init__(self) -> None:
-        if np.array(self.process_noise_diag, dtype=float).reshape(-1).size != 6:
-            raise ValueError("process_noise_diag must be length-6.")
-        if np.array(self.meas_noise_diag, dtype=float).reshape(-1).size != 6:
-            raise ValueError("meas_noise_diag must be length-6.")
-        if np.array(self.init_cov_diag, dtype=float).reshape(-1).size != 6:
-            raise ValueError("init_cov_diag must be length-6.")
-        if self.initial_state_eci_km_s is not None and np.array(
-            self.initial_state_eci_km_s, dtype=float
-        ).reshape(-1).size != 6:
-            raise ValueError("initial_state_eci_km_s must be length-6.")
-        if self.initial_state_ric is not None and np.array(self.initial_state_ric, dtype=float).reshape(-1).size != 6:
-            raise ValueError("initial_state_ric must be length-6.")
-        if self.mean_motion_rad_s is not None and float(self.mean_motion_rad_s) <= 0.0:
-            raise ValueError("mean_motion_rad_s must be positive when provided.")
-        if float(self.integration_substep_s) <= 0.0:
-            raise ValueError("integration_substep_s must be positive.")
+        for name in ("process_noise_diag", "meas_noise_diag", "init_cov_diag"):
+            values = np.array(getattr(self, name), dtype=float).reshape(-1)
+            if values.size != 6 or not np.all(np.isfinite(values)) or np.any(values < 0.0):
+                raise ValueError(f"{name} must contain six finite nonnegative values.")
+        for name in ("initial_state_eci_km_s", "initial_state_ric"):
+            raw = getattr(self, name)
+            if raw is None:
+                continue
+            values = np.array(raw, dtype=float).reshape(-1)
+            if values.size != 6 or not np.all(np.isfinite(values)):
+                raise ValueError(f"{name} must contain six finite values.")
+        if self.mean_motion_rad_s is not None and (
+            not np.isfinite(float(self.mean_motion_rad_s)) or float(self.mean_motion_rad_s) <= 0.0
+        ):
+            raise ValueError("mean_motion_rad_s must be positive and finite when provided.")
+        if not np.isfinite(float(self.integration_substep_s)) or float(self.integration_substep_s) <= 0.0:
+            raise ValueError("integration_substep_s must be positive and finite.")
 
 
 @dataclass(frozen=True)
@@ -147,10 +190,10 @@ class _OtherObjectStateSensor:
         ):
             self.last_detection_status = "line_of_sight"
             return None
+        self.access._last_update_t_s = float(t_s)
         if self.rng.random() < float(self.conditions.dropout_prob):
             self.last_detection_status = "dropout"
             return None
-        self.access._last_update_t_s = float(t_s)
         self.last_detection_status = "detected"
 
         pos_sigma = _expand3(self.noise.pos_sigma_km)
@@ -174,8 +217,8 @@ class _OtherObjectStateSensor:
         model = _normalize_measurement_model(measurement_model)
         if model == "state":
             return state_meas
-        sensor_position_eci_km, _ = self._sensor_pose_eci(observer_truth)
-        observer_state = np.hstack((sensor_position_eci_km, observer_truth.velocity_eci_km_s))
+        sensor_position_eci_km, sensor_velocity_eci_km_s, _ = self._sensor_state_eci(observer_truth)
+        observer_state = np.hstack((sensor_position_eci_km, sensor_velocity_eci_km_s))
         truth_state = np.hstack((target_truth.position_eci_km, target_truth.velocity_eci_km_s))
         ideal = _relative_measurement_vector(model, truth_state, observer_state)
         sigma = _relative_measurement_sigma(model, self.noise)
@@ -183,9 +226,22 @@ class _OtherObjectStateSensor:
         return Measurement(vector=ideal + bias + self.rng.normal(0.0, sigma, size=ideal.size), t_s=t_s)
 
     def _sensor_pose_eci(self, observer_truth: StateTruth) -> tuple[np.ndarray, np.ndarray | None]:
+        sensor_position_eci_km, _, sensor_boresight_eci = self._sensor_state_eci(observer_truth)
+        return sensor_position_eci_km, sensor_boresight_eci
+
+    def _sensor_state_eci(
+        self,
+        observer_truth: StateTruth,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
         c_bn = quaternion_to_dcm_bn(observer_truth.attitude_quat_bn)
         pos_body_m = np.array(self.conditions.sensor_position_body_m, dtype=float).reshape(3)
-        sensor_position_eci_km = observer_truth.position_eci_km + (c_bn.T @ pos_body_m) / 1e3
+        offset_eci_km = (c_bn.T @ pos_body_m) / 1e3
+        sensor_position_eci_km = observer_truth.position_eci_km + offset_eci_km
+        omega_eci_rad_s = c_bn.T @ np.asarray(observer_truth.angular_rate_body_rad_s, dtype=float).reshape(3)
+        sensor_velocity_eci_km_s = observer_truth.velocity_eci_km_s + np.cross(
+            omega_eci_rad_s,
+            offset_eci_km,
+        )
         boresight_body = self.conditions.sensor_boresight_body
         if boresight_body is None:
             if float(np.linalg.norm(pos_body_m)) > 1e-12:
@@ -195,7 +251,7 @@ class _OtherObjectStateSensor:
         b = np.array(boresight_body, dtype=float).reshape(3)
         bn = float(np.linalg.norm(b))
         sensor_boresight_eci = None if bn <= 0.0 else (c_bn.T @ (b / bn))
-        return sensor_position_eci_km, sensor_boresight_eci
+        return sensor_position_eci_km, sensor_velocity_eci_km_s, sensor_boresight_eci
 
 
 @dataclass
@@ -237,11 +293,17 @@ class _Track:
     detection_status_counts: dict[str, int] = field(default_factory=dict)
     last_measurement_vector: np.ndarray | None = None
 
-    def step(self, observer_truth: StateTruth, target_truth: StateTruth, t_s: float) -> StateBelief | None:
+    def step(
+        self,
+        observer_truth: StateTruth,
+        target_truth: StateTruth,
+        t_s: float,
+        observer_belief: StateBelief | None = None,
+    ) -> StateBelief | None:
         self.step_count += 1
         self.last_measurement_vector = None
         if self.estimator_type in {"relative_hcw_ekf", "relative_ss_j2_ekf", "relative_th_ekf", "relative_ya_ekf"}:
-            return self._step_relative_hcw(observer_truth, target_truth, t_s)
+            return self._step_relative_hcw(observer_truth, target_truth, t_s, observer_belief)
         meas = self.sensor.measure_relative(observer_truth, target_truth, t_s, self.measurement_model)
         detect_status = str(self.sensor.last_detection_status or "unknown")
         self.detection_status_counts[detect_status] = int(self.detection_status_counts.get(detect_status, 0)) + 1
@@ -311,6 +373,7 @@ class _Track:
         observer_truth: StateTruth,
         target_truth: StateTruth,
         t_s: float,
+        observer_belief: StateBelief | None,
     ) -> StateBelief | None:
         meas = self._measure_hcw(observer_truth, target_truth, t_s)
         if self.relative_belief is None:
@@ -323,13 +386,17 @@ class _Track:
                 last_update_t_s=float(t_s),
             )
             self.initialization_count += 1
-            self.belief = self._target_belief_from_relative(observer_truth)
+            self.belief = self._target_belief_from_relative(observer_truth, observer_belief)
             if self.belief is not None:
                 self._ensure_relative_estimator(self.belief.state, t_s)
             self._record_consistency(target_truth, None, t_s)
             return self.belief
 
-        reference_belief = self.belief if self.belief is not None else self._target_belief_from_relative(observer_truth)
+        reference_belief = (
+            self.belief
+            if self.belief is not None
+            else self._target_belief_from_relative(observer_truth, observer_belief)
+        )
         if reference_belief is None:
             return None
         reference_state = reference_belief.state
@@ -342,7 +409,7 @@ class _Track:
         diag = self.estimator.last_update_diagnostics
         if diag is not None and diag.update_applied:
             self.update_count += 1
-        self.belief = self._target_belief_from_relative(observer_truth)
+        self.belief = self._target_belief_from_relative(observer_truth, observer_belief)
         if isinstance(self.estimator, THRelativeEKFEstimator) and self.belief is not None:
             self.estimator.set_reference_state(np.array(self.belief.state, dtype=float).reshape(6), float(t_s))
         self._record_consistency(target_truth, diag, t_s)
@@ -412,7 +479,10 @@ class _Track:
                 self.time_since_last_detection_s_values.append(float(t_s - self.last_measurement_t_s))
             return None
 
-        native_truth = _observer_relative_to_target_ric(observer_truth, target_truth)
+        sensor_position_eci_km, sensor_velocity_eci_km_s, _ = self.sensor._sensor_state_eci(observer_truth)
+        sensor_state = np.hstack((sensor_position_eci_km, sensor_velocity_eci_km_s))
+        target_state = np.hstack((target_truth.position_eci_km, target_truth.velocity_eci_km_s))
+        native_truth = eci_relative_to_ric_rect(sensor_state, target_state)
         ideal = hcw_measurement_vector(
             self.measurement_model,
             native_truth,
@@ -445,7 +515,11 @@ class _Track:
             "ekf.initial_state_ric or estimation.initial_state_ric."
         )
 
-    def _target_belief_from_relative(self, observer_truth: StateTruth) -> StateBelief | None:
+    def _target_belief_from_relative(
+        self,
+        observer_truth: StateTruth,
+        observer_belief: StateBelief | None,
+    ) -> StateBelief | None:
         if self.relative_belief is None:
             return None
         # Publish an approximate target ECI belief for existing consumers. The
@@ -453,6 +527,16 @@ class _Track:
         # conversion uses the observer local RIC frame and is valid for small RPO
         # separations.
         observer_state = np.hstack((observer_truth.position_eci_km, observer_truth.velocity_eci_km_s))
+        observer_covariance = np.zeros((6, 6), dtype=float)
+        if observer_belief is not None:
+            candidate_state = np.asarray(observer_belief.state, dtype=float).reshape(-1)
+            candidate_covariance = np.asarray(observer_belief.covariance, dtype=float)
+            if candidate_state.size >= 6 and np.all(np.isfinite(candidate_state[:6])):
+                observer_state = candidate_state[:6].copy()
+            if candidate_covariance.shape[0] >= 6 and candidate_covariance.shape[1] >= 6:
+                covariance_6x6 = candidate_covariance[:6, :6]
+                if np.all(np.isfinite(covariance_6x6)):
+                    observer_covariance = covariance_6x6.copy()
         relative_state = np.array(self.relative_belief.state, dtype=float).reshape(6)
         target_from_observer_ric = -relative_state
         target_state = ric_rect_state_to_eci(target_from_observer_ric, observer_state[:3], observer_state[3:])
@@ -460,6 +544,7 @@ class _Track:
             relative_state,
             np.array(self.relative_belief.covariance, dtype=float),
             observer_state,
+            observer_covariance,
         )
         return StateBelief(
             state=target_state,
@@ -506,8 +591,8 @@ class _Track:
         if measurement is None:
             return predicted
         model = _normalize_measurement_model(self.measurement_model)
-        sensor_position_eci_km, _ = self.sensor._sensor_pose_eci(observer_truth)
-        observer_state = np.hstack((sensor_position_eci_km, observer_truth.velocity_eci_km_s))
+        sensor_position_eci_km, sensor_velocity_eci_km_s, _ = self.sensor._sensor_state_eci(observer_truth)
+        observer_state = np.hstack((sensor_position_eci_km, sensor_velocity_eci_km_s))
         z = np.asarray(measurement.vector, dtype=float).reshape(-1)
         h_pred = _relative_measurement_vector(model, predicted.state, observer_state)
         h_jac = _relative_measurement_jacobian(model, predicted.state, observer_state)
@@ -638,6 +723,11 @@ class ObjectKnowledgeBase:
         self._rng = np.random.default_rng() if rng is None else rng
         self._tracks: dict[str, _Track] = {}
 
+        target_ids = [str(cfg.target_id) for cfg in tracked_objects if str(cfg.target_id) != str(observer_id)]
+        duplicates = sorted({target_id for target_id in target_ids if target_ids.count(target_id) > 1})
+        if duplicates:
+            raise ValueError(f"tracked object target_id values must be unique; duplicates: {', '.join(duplicates)}.")
+
         for i, cfg in enumerate(tracked_objects):
             if cfg.target_id == observer_id:
                 continue
@@ -700,14 +790,18 @@ class ObjectKnowledgeBase:
         return sorted(self._tracks.keys())
 
     def update(
-        self, observer_truth: StateTruth, world_truth: dict[str, StateTruth], t_s: float
+        self,
+        observer_truth: StateTruth,
+        world_truth: dict[str, StateTruth],
+        t_s: float,
+        observer_belief: StateBelief | None = None,
     ) -> dict[str, StateBelief]:
         out: dict[str, StateBelief] = {}
         for target_id, track in self._tracks.items():
             tgt = world_truth.get(target_id)
             if tgt is None:
                 continue
-            b = track.step(observer_truth, tgt, t_s)
+            b = track.step(observer_truth, tgt, t_s, observer_belief)
             if b is not None:
                 out[target_id] = b
         return out
@@ -752,6 +846,7 @@ def _relative_covariance_to_published_eci(
     relative_state_ric: np.ndarray,
     covariance_ric: np.ndarray,
     observer_state_eci_km_s: np.ndarray,
+    observer_covariance_eci: np.ndarray | None = None,
 ) -> np.ndarray:
     rel = np.asarray(relative_state_ric, dtype=float).reshape(6)
     cov = np.asarray(covariance_ric, dtype=float).reshape(6, 6)
@@ -769,6 +864,18 @@ def _relative_covariance_to_published_eci(
         minus[idx] -= step
         jac[:, idx] = (publish_state(plus) - publish_state(minus)) / (2.0 * step)
     out = jac @ cov @ jac.T
+    if observer_covariance_eci is not None:
+        observer_covariance = np.asarray(observer_covariance_eci, dtype=float).reshape(6, 6)
+        observer_jac = np.zeros((6, 6), dtype=float)
+        for idx, step in enumerate(eps):
+            plus = observer.copy()
+            minus = observer.copy()
+            plus[idx] += step
+            minus[idx] -= step
+            plus_state = ric_rect_state_to_eci(-rel, plus[:3], plus[3:])
+            minus_state = ric_rect_state_to_eci(-rel, minus[:3], minus[3:])
+            observer_jac[:, idx] = (plus_state - minus_state) / (2.0 * step)
+        out += observer_jac @ observer_covariance @ observer_jac.T
     return 0.5 * (out + out.T)
 
 
@@ -793,6 +900,11 @@ def _normalize_estimator_type(value: str) -> str:
         "relative_th": "relative_th_ekf",
         "relative_th_filter": "relative_th_ekf",
         "tschauner_hempel": "relative_th_ekf",
+        "thya": "relative_ya_ekf",
+        "thya_ekf": "relative_ya_ekf",
+        "relative_thya": "relative_ya_ekf",
+        "relative_thya_ekf": "relative_ya_ekf",
+        "relative_thya_filter": "relative_ya_ekf",
         "ya": "relative_ya_ekf",
         "ya_ekf": "relative_ya_ekf",
         "relative_ya": "relative_ya_ekf",

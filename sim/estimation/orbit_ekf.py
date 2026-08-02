@@ -54,8 +54,15 @@ class OrbitEKFEstimator(Estimator):
     _acceleration_enabled_value: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self) -> None:
-        self.process_noise_diag = np.array(self.process_noise_diag, dtype=float)
-        self.meas_noise_diag = np.array(self.meas_noise_diag, dtype=float)
+        if not np.isfinite(float(self.mu_km3_s2)) or float(self.mu_km3_s2) < 0.0:
+            raise ValueError("mu_km3_s2 must be non-negative and finite.")
+        if not np.isfinite(float(self.dt_s)) or float(self.dt_s) <= 0.0:
+            raise ValueError("dt_s must be positive and finite.")
+        self.process_noise_diag = np.array(self.process_noise_diag, dtype=float).reshape(-1)
+        self.meas_noise_diag = np.array(self.meas_noise_diag, dtype=float).reshape(-1)
+        for name, values in (("process_noise_diag", self.process_noise_diag), ("meas_noise_diag", self.meas_noise_diag)):
+            if values.size != 6 or not np.all(np.isfinite(values)) or np.any(values < 0.0):
+                raise ValueError(f"{name} must contain six finite nonnegative values.")
         self._q = np.diag(self.process_noise_diag)
         self._r = np.diag(self.meas_noise_diag)
         self._acceleration_enabled_value = bool(acceleration_settings_from_mode(self.acceleration_mode).enabled)
@@ -64,9 +71,14 @@ class OrbitEKFEstimator(Estimator):
 
     def update(self, belief: StateBelief, measurement: Measurement | None, t_s: float) -> StateBelief:
         output_t_s = float(t_s)
+        belief_t_s = float(belief.last_update_t_s)
+        if not np.isfinite(output_t_s) or not np.isfinite(belief_t_s) or output_t_s < belief_t_s:
+            raise ValueError("output epoch must be finite and not precede the belief epoch.")
         meas_t_s = output_t_s
         if measurement is not None:
-            meas_t_s = float(np.clip(float(measurement.t_s), float(belief.last_update_t_s), output_t_s))
+            meas_t_s = float(measurement.t_s)
+            if not np.isfinite(meas_t_s) or meas_t_s < belief_t_s or meas_t_s > output_t_s:
+                raise ValueError("measurement epoch must lie within the belief-to-output interval.")
 
         x_pred, p_pred = self._predict(belief.state, belief.covariance, from_t_s=belief.last_update_t_s, to_t_s=meas_t_s)
 
@@ -93,6 +105,8 @@ class OrbitEKFEstimator(Estimator):
             )
             return StateBelief(state=x_pred, covariance=p_pred, last_update_t_s=output_t_s)
         z = z[:6]
+        if not np.all(np.isfinite(z)):
+            raise ValueError("orbit measurement vector must contain finite values.")
         y = z - x_pred
         s = p_pred + self._r
         hp_t = p_pred

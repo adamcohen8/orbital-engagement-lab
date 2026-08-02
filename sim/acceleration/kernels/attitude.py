@@ -123,6 +123,17 @@ def propagate_attitude_exponential_map_kernel(
     dt_s: float,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     stats = np.zeros(6, dtype=np.int64)
+    quaternion_bad = quat_bn.size != 4
+    quaternion_norm_sq = 0.0
+    if not quaternion_bad:
+        for i in range(4):
+            if not np.isfinite(quat_bn[i]):
+                quaternion_bad = True
+            quaternion_norm_sq += quat_bn[i] * quat_bn[i]
+        if quaternion_norm_sq <= 0.0 or not np.isfinite(quaternion_norm_sq):
+            quaternion_bad = True
+    if quaternion_bad:
+        stats[STAT_NON_FINITE_INPUT] += 1
     q = normalize_quaternion_kernel(quat_bn)
     w = np.empty(3, dtype=np.float64)
     tau = np.empty(3, dtype=np.float64)

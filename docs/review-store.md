@@ -251,6 +251,31 @@ Recommended columns:
 
 Columns may be null when a state component is unavailable for an object type.
 
+### `object_state_covariance`
+
+One optional full state-covariance row per object and retained sample. The
+table exists in review schema 0.6 but is empty unless a supported producer has
+a complete matching covariance matrix.
+
+Recommended columns:
+
+- `sample_index`
+- `time_s`
+- `object_id`
+- `frame`
+- `component_order_json`
+- `units_json`
+- `covariance_json`
+- `mathematically_valid`
+- `calibrated`
+- `calibration_scope`
+- `source`
+
+The table stores the complete 6x6 matrix so consumers do not reconstruct a
+diagonal approximation from sigma summaries. Completed-run continuation uses
+a row only when object, sample, time, frame, ordering, units, and mathematical
+validity all match the selected state.
+
 ### `relative_state`
 
 One row per object pair per retained time sample for configured/default review
@@ -340,8 +365,11 @@ Recommended columns:
 - `message`
 - `source`
 
-Examples include termination, threshold crossings, safety-zone violations,
-guardrail events, burn interval start/stop, or review-derived observations.
+The current writer records early termination and thrust-derived burn interval
+start/stop events. Threshold crossings, safety-zone violations, guardrail
+events, and review-derived observations are potential additive event classes;
+their absence from the table must not be interpreted as evidence that they did
+not occur.
 
 ### `metrics`
 
@@ -614,7 +642,6 @@ Built-in recipes compile to SQL or review API calls:
 - total delta-v by object
 - peak acceleration by object
 - ground-station access windows
-- safety or keepout violations
 - termination summary
 - artifact inventory
 

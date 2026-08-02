@@ -8,6 +8,7 @@ from pathlib import Path
 from integrations.oel_mcp.diagnostics import default_host_launch, doctor_report, host_config
 from integrations.oel_mcp.execution import ExecutionApprovalPolicy
 from integrations.oel_mcp.public_handlers import PublicOELMCPHandlers
+from integrations.oel_mcp.public_registry import public_contract_map
 from integrations.oel_mcp.reporting import MAX_REPORT_SOURCE_BYTES
 
 HANDLING = {"marking": "PUBLIC_TEST", "release_scope": "public"}
@@ -172,6 +173,29 @@ def test_report_packet_projects_oversized_source_summary_and_remains_auditable(t
     assert audited["result"]["status"] == "passed"
 
 
+def test_report_audit_rejects_packet_over_call_budget_before_creating_output(tmp_path: Path) -> None:
+    packet = tmp_path / "oversized-packet.json"
+    packet.write_text('{"source_output_dir":"' + "x" * 200 + '"}', encoding="utf-8")
+
+    audited = _handlers(tmp_path).audit_report(
+        report_path=packet,
+        packet_path=packet,
+        max_packet_bytes=100,
+        audit_output_dir=tmp_path / "oversized-audit",
+        author="test_agent",
+        approval=WRITE_APPROVAL,
+        handling=HANDLING,
+    )
+
+    assert audited["status"] == "failed"
+    assert audited["error"]["type"] == "ValueError"
+    assert "file-size budget" in audited["error"]["message"]
+    assert not (tmp_path / "oversized-audit").exists()
+    contract = public_contract_map("public_local")["oel.audit_report.v1"]
+    assert contract.input_schema["properties"]["max_packet_bytes"]["maximum"] == MAX_REPORT_SOURCE_BYTES
+    assert contract.capability()["limits"]["max_packet_bytes"] == MAX_REPORT_SOURCE_BYTES
+
+
 def test_report_audit_rejects_duplicate_artifact_identity_and_path(tmp_path: Path) -> None:
     output = _completed_output(tmp_path)
     handlers = _handlers(tmp_path)
@@ -247,7 +271,7 @@ def test_doctor_and_host_config_make_disabled_effects_explicit(tmp_path: Path, m
     assert approvals["passed"] is False
     assert approvals["required"] is False
     assert report["network_listener"] is False
-    assert report["oel_version"] == "0.23.1"
+    assert report["oel_version"] == "0.24.0"
     assert report["oel_version_source"] == "source_pyproject"
     launch = next(row for row in report["checks"] if row["check_id"] == "host_launch")
     assert launch["passed"] is True

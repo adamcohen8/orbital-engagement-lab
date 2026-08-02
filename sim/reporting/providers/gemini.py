@@ -70,10 +70,10 @@ def _call_gemini(
         data=json.dumps(body).encode("utf-8"),
         headers={
             "Content-Type": "application/json",
-            "x-goog-api-key": api_key,
         },
         method="POST",
     )
+    _add_nonredirected_secret_header(request, "x-goog-api-key", api_key)
     with urllib.request.urlopen(request, timeout=timeout_s) as response:
         raw = response.read().decode("utf-8")
     payload = json.loads(raw)

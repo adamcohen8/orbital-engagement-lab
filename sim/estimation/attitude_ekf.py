@@ -44,6 +44,11 @@ class AttitudeEKFEstimator(Estimator):
         self.inertia_kg_m2 = np.asarray(self.inertia_kg_m2, dtype=float).reshape(3, 3)
         self.process_noise_diag = np.asarray(self.process_noise_diag, dtype=float).reshape(7)
         self.meas_noise_diag = np.asarray(self.meas_noise_diag, dtype=float).reshape(7)
+        if not np.all(np.isfinite(self.inertia_kg_m2)):
+            raise ValueError("inertia_kg_m2 must contain finite values.")
+        for name, values in (("process_noise_diag", self.process_noise_diag), ("meas_noise_diag", self.meas_noise_diag)):
+            if not np.all(np.isfinite(values)) or np.any(values < 0.0):
+                raise ValueError(f"{name} must contain seven finite nonnegative values.")
         self._q = np.diag(self.process_noise_diag)
         self._r = np.diag(self.meas_noise_diag)
         self._acceleration_enabled_value = bool(acceleration_settings_from_mode(self.acceleration_mode).enabled)
@@ -55,9 +60,14 @@ class AttitudeEKFEstimator(Estimator):
 
     def update(self, belief: StateBelief, measurement: Measurement | None, t_s: float) -> StateBelief:
         output_t_s = float(t_s)
+        belief_t_s = float(belief.last_update_t_s)
+        if not np.isfinite(output_t_s) or not np.isfinite(belief_t_s) or output_t_s < belief_t_s:
+            raise ValueError("output epoch must be finite and not precede the belief epoch.")
         meas_t_s = output_t_s
         if measurement is not None:
-            meas_t_s = float(np.clip(float(measurement.t_s), float(belief.last_update_t_s), output_t_s))
+            meas_t_s = float(measurement.t_s)
+            if not np.isfinite(meas_t_s) or meas_t_s < belief_t_s or meas_t_s > output_t_s:
+                raise ValueError("measurement epoch must lie within the belief-to-output interval.")
 
         x_pred, p_pred = self._predict(belief.state, belief.covariance, from_t_s=belief.last_update_t_s, to_t_s=meas_t_s)
 
@@ -72,6 +82,8 @@ class AttitudeEKFEstimator(Estimator):
                 x_pred, p_pred = self._predict(x_pred, p_pred, from_t_s=meas_t_s, to_t_s=output_t_s)
             return StateBelief(state=x_pred, covariance=p_pred, last_update_t_s=output_t_s)
         z = z[:7].copy()
+        if not np.all(np.isfinite(z)):
+            raise ValueError("attitude measurement vector must contain finite values.")
         z[:4] = normalize_quaternion(z[:4])
         if np.dot(z[:4], x_pred[:4]) < 0.0:
             z[:4] *= -1.0

@@ -5,6 +5,7 @@ from pathlib import Path
 
 from sim.config import scenario_config_from_dict as _parse_scenario_config_dict
 from sim.config import validate_scenario_plugins
+from sim.runtime.actuator_factory import _build_satellite_actuator_stack_from_specs
 
 DEEP_SPACE_LINE1 = "1 90003U 24003A   24001.00000000  .00000000  00000+0  00000+0 0    10"
 DEEP_SPACE_LINE2 = "2 90003  10.0000  20.0000 0100000  30.0000  40.0000  4.00000000    10"
@@ -288,6 +289,33 @@ class TestPluginValidation(unittest.TestCase):
         )
 
         self.assertEqual(validate_scenario_plugins(cfg), [])
+
+    def test_knowledge_sensor_error_rejects_nonfinite_and_negative_noise(self):
+        for field_name, value in (
+            ("pos_sigma_km", [-0.01, 0.01, 0.01]),
+            ("vel_sigma_km_s", [0.0001, float("nan"), 0.0001]),
+            ("range_sigma_km", float("inf")),
+        ):
+            with self.subTest(field_name=field_name):
+                cfg = scenario_config_from_dict(
+                    {
+                        "rocket": {"enabled": False},
+                        "chaser": {"enabled": False},
+                        "target": {
+                            "enabled": True,
+                            "specs": {"mass_kg": 420.0},
+                            "knowledge": {
+                                "targets": ["chaser"],
+                                "sensor_error": {field_name: value},
+                            },
+                        },
+                        "simulator": {"duration_s": 20.0, "dt_s": 1.0},
+                    }
+                )
+
+                errs = validate_scenario_plugins(cfg)
+
+                self.assertTrue(any(field_name in err for err in errs), errs)
 
     def test_valid_plugins_pass(self):
         cfg = scenario_config_from_dict(
@@ -586,6 +614,61 @@ class TestPluginValidation(unittest.TestCase):
                                 "magnetorquers": {
                                     "max_dipole_a_m2": 10.0,
                                 },
+                            },
+                        },
+                    },
+                },
+                "simulator": {"duration_s": 20.0, "dt_s": 1.0},
+            }
+        )
+
+        self.assertEqual(validate_scenario_plugins(cfg), [])
+
+    def test_disabled_attitude_devices_are_not_instantiated(self):
+        actuator, _limits, enabled = _build_satellite_actuator_stack_from_specs(
+            {
+                "actuators": {
+                    "enabled": True,
+                    "attitude": {
+                        "reaction_wheels": {"enabled": False},
+                        "magnetorquers": {"enabled": False},
+                        "thruster_pulse": {"enabled": False},
+                        "control_moment_gyros": {"enabled": False},
+                        "wheel_desaturation": {"enabled": False},
+                    },
+                }
+            }
+        )
+
+        self.assertTrue(enabled)
+        self.assertIsNotNone(actuator)
+        attitude = actuator.attitude
+        self.assertIsNone(attitude.reaction_wheels)
+        self.assertIsNone(attitude.magnetorquers)
+        self.assertIsNone(attitude.thruster_pulse)
+        self.assertIsNone(attitude.control_moment_gyros)
+        self.assertIsNone(attitude.wheel_desaturation)
+
+    def test_redundant_reaction_wheel_configuration_passes_validation(self):
+        cfg = scenario_config_from_dict(
+            {
+                "target": {
+                    "enabled": True,
+                    "specs": {
+                        "mass_kg": 200.0,
+                        "actuators": {
+                            "enabled": True,
+                            "attitude": {
+                                "reaction_wheels": {
+                                    "max_torque_nm": [0.05, 0.05, 0.05, 0.05],
+                                    "max_momentum_nms": [0.2, 0.2, 0.2, 0.2],
+                                    "wheel_axes_body": [
+                                        [1.0, 0.0, 0.0],
+                                        [0.0, 1.0, 0.0],
+                                        [0.0, 0.0, 1.0],
+                                        [-0.577350269, -0.577350269, -0.577350269],
+                                    ],
+                                }
                             },
                         },
                     },

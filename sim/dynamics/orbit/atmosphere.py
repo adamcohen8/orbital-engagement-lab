@@ -183,6 +183,7 @@ def _ecef_from_eci_for_atmosphere(r_eci_km: np.ndarray, t_s: float, env: dict) -
         tt_minus_utc_s=None if env.get("tt_minus_utc_s") is None else float(env["tt_minus_utc_s"]),
         ddpsi_rad=float(env.get("ddpsi_rad", 0.0) or 0.0),
         ddeps_rad=float(env.get("ddeps_rad", 0.0) or 0.0),
+        eop_extrapolation=str(env.get("eop_extrapolation", "error") or "error"),
     )
 
 
@@ -292,6 +293,7 @@ def _local_solar_time_epoch_terms(
     tt_minus_utc_s: float | None,
     ddpsi_rad: float,
     ddeps_rad: float,
+    eop_extrapolation: str = "error",
 ) -> tuple[float, float]:
     sidereal = apparent_sidereal_time_hpop_like(
         jd,
@@ -301,6 +303,7 @@ def _local_solar_time_epoch_terms(
         tt_minus_utc_s=tt_minus_utc_s,
         ddpsi_rad=ddpsi_rad,
         ddeps_rad=ddeps_rad,
+        eop_extrapolation=eop_extrapolation,
     )
     sun_eci = sun_position_eci_km_enhanced(jd)
     sun_ra = math.atan2(float(sun_eci[1]), float(sun_eci[0]))
@@ -319,6 +322,7 @@ def _local_solar_time_hr(lon_deg: float, dt_utc: datetime, env: dict) -> float:
         None if env.get("tt_minus_utc_s") is None else float(env["tt_minus_utc_s"]),
         float(env.get("ddpsi_rad", 0.0) or 0.0),
         float(env.get("ddeps_rad", 0.0) or 0.0),
+        str(env.get("eop_extrapolation", "error") or "error"),
     )
     hour_angle = (sidereal + math.radians(float(lon_deg)) - sun_ra + math.pi) % (2.0 * math.pi) - math.pi
     return float((12.0 + hour_angle * 12.0 / math.pi) % 24.0)

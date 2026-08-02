@@ -44,6 +44,7 @@ class PlotOutputContext:
     close: bool
     save_enabled: bool
     draw_ground_track_map: bool
+    object_state_frames: dict[str, str]
 
 
 def build_plot_output_context(
@@ -74,6 +75,14 @@ def build_plot_output_context(
         jd_utc_start=cfg.simulator.initial_jd_utc,
         source="scenario",
     )
+    object_state_frames = {}
+    for object_id, section in dict(getattr(cfg, "objects", {}) or {}).items():
+        initial_state = dict(getattr(section, "initial_state", {}) or {})
+        object_state_frames[str(object_id)] = (
+            "cr3bp_rotating"
+            if "cr3bp_rotating" in initial_state or "cr3bp_halo" in initial_state
+            else "eci"
+        )
     reference_object_id = str(plots_cfg.get("reference_object_id", "")).strip()
     reference_object_label = str(plots_cfg.get("reference_object_label", "")).strip() or None
     reference_truth_override = None
@@ -83,18 +92,28 @@ def build_plot_output_context(
             reference_truth_override = ref_arr
     if reference_truth_override is not None:
         reference_truth = reference_truth_override
-        ric_truth_hist = dict(truth_hist)
+        ric_truth_hist = {
+            oid: hist for oid, hist in truth_hist.items() if object_state_frames.get(oid, "eci") == "eci"
+        }
         reference_object_id = ""
     else:
         if reference_object_id and reference_object_id not in truth_hist:
             reference_object_id = ""
         if not reference_object_id:
             reference_object_id = default_reference_object_id(cfg, available_ids=truth_hist.keys()) or ""
+        if reference_object_id and object_state_frames.get(reference_object_id, "eci") != "eci":
+            reference_object_id = ""
         reference_truth = truth_hist.get(reference_object_id) if reference_object_id else None
         ric_truth_hist = (
-            {oid: hist for oid, hist in truth_hist.items() if oid != reference_object_id}
+            {
+                oid: hist
+                for oid, hist in truth_hist.items()
+                if oid != reference_object_id and object_state_frames.get(oid, "eci") == "eci"
+            }
             if reference_object_id
-            else dict(truth_hist)
+            else {
+                oid: hist for oid, hist in truth_hist.items() if object_state_frames.get(oid, "eci") == "eci"
+            }
         )
     return PlotOutputContext(
         cfg=cfg,
@@ -126,4 +145,5 @@ def build_plot_output_context(
         close=mode == "save",
         save_enabled=mode in ("save", "both"),
         draw_ground_track_map=bool(plots_cfg.get("draw_earth_map", False)),
+        object_state_frames=object_state_frames,
     )

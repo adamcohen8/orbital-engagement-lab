@@ -9,9 +9,11 @@ from sim.actuators.attitude import (
     ControlMomentGyroLimits,
     MagnetorquerLimits,
     ReactionWheelLimits,
+    ThrusterPulseLimits,
     WheelDesaturationLimits,
 )
-from sim.core.models import Command
+from sim.control.attitude.wheel_desaturation import WheelDesaturationController
+from sim.core.models import Command, StateBelief
 
 
 class TestAttitudeActuatorDevices(unittest.TestCase):
@@ -87,6 +89,56 @@ class TestAttitudeActuatorDevices(unittest.TestCase):
         self.assertTrue(bool(out.mode_flags["wheel_desaturation_active"]))
         self.assertLess(float(out.torque_body_nm[0]), 0.0)
         self.assertAlmostEqual(float(np.linalg.norm(out.torque_body_nm)), 0.05, places=8)
+
+    def test_thruster_pulse_quantization_never_exceeds_torque_limit(self):
+        actuator = AttitudeActuator(
+            thruster_pulse=ThrusterPulseLimits(
+                max_torque_nm=np.array([0.1, 0.2, 0.3], dtype=float),
+                pulse_quantum_s=0.02,
+            )
+        )
+
+        out = actuator.apply(
+            Command(torque_body_nm=np.array([1.0, -1.0, 1.0], dtype=float)),
+            limits={},
+            dt_s=0.03,
+        )
+
+        self.assertTrue(np.all(np.abs(out.torque_body_nm) <= np.array([0.1, 0.2, 0.3]) + 1.0e-15))
+
+    def test_zero_desaturation_limit_produces_zero_torque(self):
+        actuator = AttitudeActuator(
+            reaction_wheels=ReactionWheelLimits(
+                max_torque_nm=np.full(3, 0.1),
+                max_momentum_nms=np.ones(3),
+                wheel_axes_body=np.eye(3),
+            ),
+            wheel_desaturation=WheelDesaturationLimits(
+                momentum_fraction_threshold=0.1,
+                unload_gain_s_inv=1.0,
+                max_unload_torque_nm=0.0,
+            ),
+        )
+        actuator.wheel_momentum_nms = np.array([1.0, 0.0, 0.0], dtype=float)
+
+        out = actuator.apply(Command.zero(), limits={}, dt_s=1.0)
+
+        self.assertTrue(bool(out.mode_flags["wheel_desaturation_active"]))
+        self.assertTrue(np.allclose(out.torque_body_nm, np.zeros(3)))
+
+        controller = WheelDesaturationController(
+            wheel_momentum_body_nms=np.array([1.0, 0.0, 0.0], dtype=float),
+            momentum_threshold_nms=0.1,
+            unload_gain_s_inv=1.0,
+            max_unload_torque_nm=0.0,
+        )
+        command = controller.act(
+            StateBelief(state=np.zeros(1), covariance=np.eye(1), last_update_t_s=0.0),
+            t_s=0.0,
+            budget_ms=1.0,
+        )
+        self.assertTrue(bool(command.mode_flags["wheel_desaturation_requested"]))
+        self.assertTrue(np.allclose(command.torque_body_nm, np.zeros(3)))
 
 
 if __name__ == "__main__":

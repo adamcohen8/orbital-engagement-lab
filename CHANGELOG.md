@@ -8,6 +8,72 @@ migration-sensitive behavior explicitly.
 
 ## Unreleased
 
+## 0.24.0 - 2026-08-02
+
+Release thesis: `v0.24.0` makes OEL's major analytical capabilities behave as
+one connected system. Versioned products now move accepted state, covariance,
+relative-state, planner, controller, native OGP, Scale, IHE, and completed-run
+evidence across explicit validation and execution boundaries without manual
+transcription or silent semantic loss.
+
+Private/Pro scope: `v0.24.0` adds private producer adapters, covariance and
+relative-OD promotion, controller optimization patches, OGP-to-Scale ingest,
+Scale-to-IHE preparation, and connected analyst workflow evidence. The public
+release receives the common contracts, inspection/materialization façade,
+completed-run continuation, typed public planner patches, semantic-parity
+packets, task cards, and fail-closed validation boundaries.
+
+### Added
+
+- Completed the OEL glue release slice as connected workflows rather than
+  isolated features. A machine-readable golden matrix now maps every supported
+  OD, covariance, planner, controller, OGP, Scale, IHE, and completed-run seam
+  to accepted and fail-closed regressions; public routing includes a completed-
+  run continuation task card; and `sim.handoff compare-handoff` writes a
+  versioned semantic-parity packet across product, scenario, manifest, and an
+  optional first consumer review row without executing the scenario.
+- Analyst-style field testing exercised accepted batch-OD and completed-run ONP
+  continuations, Scale-to-ONP refinement, IHE ambiguity/rejection, and a
+  fail-closed unverified recovery patch. It also hardened completed-run cadence
+  continuity: source orbit substeps larger than the requested consumer cadence
+  are now explicitly bounded and manifested, and parity comparison recognizes
+  only exact source-bound overrides.
+- Added interchange Phase 6 composition: accepted native OGP mean-element
+  products can materialize follow-on OGP scenarios without generated TLE text,
+  ingest into Scale with identity/age/provenance intact, and prepare bounded,
+  analyst-reviewed IHE skeletons. ONP-first Scale names are canonical while
+  existing HPOP-named interfaces remain documented compatibility aliases.
+
+- Added the OEL interchange Phase 2 golden slice: batch dynamics OD now emits a
+  provenance-bound state-estimate product, and `sim.handoff materialize-onp`
+  creates and validates a passive ONP scenario plus deterministic handoff
+  manifest while keeping execution separate.
+- Added Phase 3 covariance continuity: accepted state-bound covariance can be
+  materialized into a validated Pro covariance study with exact matrix
+  semantics, deterministic binding, downstream source-hash citation, and
+  fail-closed mismatch checks.
+- Added interchange Phase 4 promotion for sequential and relative OD:
+  sequential runs emit distinct filtered/smoothed state products with an
+  explicit materialization choice, while relative reports bind to an accepted
+  chief state product and materialize fail-closed rectangular-RIC chief/deputy
+  ONP scenarios without automatic execution.
+- Added interchange Phase 5 typed scenario patches: mission-recovery runs emit
+  explicitly selectable candidate patches, controller optimization emits a
+  standalone best variant plus one source-bound patch per case, and the common
+  handoff CLI verifies source hashes, applies allowlisted operations, validates
+  the resulting scenario, and never executes it.
+- Added interchange Phase 7 completed-run continuation: exact final,
+  sample-indexed, time-indexed, and event-associated ECI review states can be
+  exported as provenance-bound products and materialized into separate
+  validated ONP studies without mutating or executing the source run. Review
+  schema 0.6 also adds an optional complete state-covariance table so matching
+  6x6 covariance can cross the handoff without discarding correlations.
+
+### Compatibility
+
+- Retained the deprecated Pro-local IHE v1 inspection and validation tools
+  through v0.24.0. Their earliest removal is now documented as v0.25.0 and not
+  before 2026-10-31; new integrations must continue to use the v2 contracts.
 ## 0.23.1 - 2026-08-01
 
 Release thesis: `v0.23.1` packages the cross-platform compatibility work that

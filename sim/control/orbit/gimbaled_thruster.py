@@ -45,16 +45,18 @@ class GimbaledThrusterController(Controller):
     def __post_init__(self) -> None:
         self.base_controller = _construct_controller(self.base_controller)
         self.neutral_direction_body = _unit(np.array(self.neutral_direction_body, dtype=float))
+        if self.attitude_quat_slice[1] - self.attitude_quat_slice[0] != 4:
+            raise ValueError("attitude_quat_slice must select exactly 4 elements.")
 
     def act(self, belief: StateBelief, t_s: float, budget_ms: float) -> Command:
         cmd = self.base_controller.act(belief, t_s, budget_ms)
         accel = np.array(cmd.thrust_eci_km_s2, dtype=float).reshape(3)
         i0, i1 = self.attitude_quat_slice
         gimbal_angle = 0.0
-        if belief.state.size >= i1 and float(np.linalg.norm(accel)) > 0.0:
+        if belief.state.size >= max(i1, 13) and float(np.linalg.norm(accel)) > 0.0:
             q = np.array(belief.state[i0:i1], dtype=float).reshape(4)
             qn = float(np.linalg.norm(q))
-            if qn > 0.0:
+            if np.all(np.isfinite(q)) and qn > 0.0:
                 c_bn = quaternion_to_dcm_bn(q / qn)
                 desired_plume_body = -_unit(c_bn @ accel)
                 gimbal_angle = _angle(self.neutral_direction_body, desired_plume_body)

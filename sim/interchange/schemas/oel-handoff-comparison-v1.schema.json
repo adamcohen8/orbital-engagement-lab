@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oel.example/schemas/oel-handoff-comparison-v1.schema.json",
+  "title": "OEL Handoff Comparison Packet v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "comparison_id",
+    "created_utc",
+    "status",
+    "source",
+    "materialization",
+    "checks",
+    "summary",
+    "execution_evidence",
+    "data_markings",
+    "non_claims"
+  ],
+  "properties": {
+    "schema_id": {"const": "oel-handoff-comparison-v1"},
+    "schema_version": {"const": 1},
+    "comparison_id": {"type": "string", "pattern": "^oel\\.handoff_comparison:[0-9a-f]{64}$"},
+    "created_utc": {"type": "string", "minLength": 1},
+    "status": {"enum": ["equivalent", "failed"]},
+    "source": {"type": "object"},
+    "materialization": {"type": "object"},
+    "checks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["check_id", "category", "passed", "expected", "observed"],
+        "properties": {
+          "check_id": {"type": "string", "minLength": 1},
+          "category": {"type": "string", "minLength": 1},
+          "passed": {"type": "boolean"},
+          "expected": {},
+          "observed": {}
+        }
+      }
+    },
+    "summary": {"type": "object"},
+    "execution_evidence": {"type": "object"},
+    "data_markings": {"type": "object"},
+    "non_claims": {"type": "array", "items": {"type": "string"}}
+  }
+}

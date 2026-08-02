@@ -12,15 +12,17 @@ import numpy as np
 
 from sim.config import iter_object_sections, relative_reference_for_object
 from sim.plotting.style import get_oel_version
+from sim.review.generated_artifacts import clear_generated_review_artifacts
 from sim.utils.frames import eci_relative_to_ric_rect
 
-REVIEW_SCHEMA_VERSION = "0.5"
+REVIEW_SCHEMA_VERSION = "0.6"
 REVIEW_SCHEMA_COMPATIBILITY_POLICY = "pre_1_0_additive"
 REVIEW_SCHEMA_STABLE_TABLES = (
     "run_metadata",
     "objects",
     "time_samples",
     "object_state",
+    "object_state_covariance",
     "relative_state",
     "thrust",
     "metrics",
@@ -69,7 +71,14 @@ def write_single_run_review_store(
             _insert_object_state_frame(conn, payload=payload)
             _insert_time_samples(conn, t_s=t_s)
             _insert_object_state(conn, t_s=t_s, truth_hist=truth_hist)
-            _insert_relative_state(conn, t_s=t_s, truth_hist=truth_hist, summary=summary, cfg=cfg)
+            _insert_relative_state(
+                conn,
+                t_s=t_s,
+                truth_hist=truth_hist,
+                summary=summary,
+                cfg=cfg,
+                object_state_frames=dict(payload.get("object_state_frames", {}) or {}),
+            )
             _insert_thrust(conn, t_s=t_s, thrust_hist=thrust_hist)
             _insert_ground_access(conn, t_s=t_s, payload=payload)
             _insert_events(conn, t_s=t_s, summary=summary, thrust_hist=thrust_hist)
@@ -79,8 +88,9 @@ def write_single_run_review_store(
             conn.commit()
         finally:
             conn.close()
+        clear_generated_review_artifacts(review_dir)
         tmp_path.replace(db_path)
-        _write_schema_json(schema_path, generated_utc=generated_utc)
+        _write_schema_json(schema_path, generated_utc=generated_utc, db_path=db_path)
         return {
             "sqlite": str(db_path),
             "schema_json": str(schema_path),
@@ -98,29 +108,7 @@ def refresh_review_schema(db_path: str | Path) -> Path:
     if not database.is_file():
         raise FileNotFoundError(f"Review database not found: {database}")
     schema_path = database.parent / "schema.json"
-    _write_schema_json(schema_path, generated_utc=_utc_stamp())
-    schema = json.loads(schema_path.read_text(encoding="utf-8"))
-    tables = dict(schema.get("tables", {}) or {})
-    with sqlite3.connect(database) as conn:
-        table_names = [
-            str(row[0])
-            for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
-            ).fetchall()
-        ]
-        for table_name in table_names:
-            columns = [
-                {"name": str(row[1]), "type": str(row[2] or "")}
-                for row in conn.execute(f'PRAGMA table_info("{table_name}")').fetchall()
-            ]
-            entry = dict(tables.get(table_name, {}) or {})
-            entry.setdefault("description", f"Review evidence table: {table_name}.")
-            entry["columns"] = columns
-            tables[table_name] = entry
-    schema["tables"] = tables
-    tmp = schema_path.with_name(schema_path.name + ".tmp")
-    tmp.write_text(json.dumps(schema, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    tmp.replace(schema_path)
+    _write_schema_json(schema_path, generated_utc=_utc_stamp(), db_path=database)
     return schema_path
 
 
@@ -231,6 +219,22 @@ def _create_schema(conn: sqlite3.Connection) -> None:
             mass_kg REAL
         );
         CREATE INDEX idx_object_state_object_time ON object_state(object_id, time_s);
+
+        CREATE TABLE object_state_covariance (
+            sample_index INTEGER,
+            time_s REAL,
+            object_id TEXT,
+            frame TEXT,
+            component_order_json TEXT,
+            units_json TEXT,
+            covariance_json TEXT,
+            mathematically_valid INTEGER,
+            calibrated INTEGER,
+            calibration_scope TEXT,
+            source TEXT
+        );
+        CREATE INDEX idx_object_state_covariance_object_time
+        ON object_state_covariance(object_id, time_s);
 
         CREATE TABLE relative_state (
             sample_index INTEGER,
@@ -609,9 +613,15 @@ def _insert_relative_state(
     truth_hist: dict[str, np.ndarray],
     summary: dict[str, Any],
     cfg: Any,
+    object_state_frames: dict[str, str] | None = None,
 ) -> None:
     rows = []
+    state_frames = dict(object_state_frames or {})
     for deputy_id, chief_id in _relative_review_pairs(cfg=cfg, truth_hist=truth_hist, summary=summary):
+        deputy_frame = str(state_frames.get(deputy_id, "eci") or "eci").strip().lower()
+        chief_frame = str(state_frames.get(chief_id, "eci") or "eci").strip().lower()
+        if deputy_frame != "eci" or chief_frame != "eci":
+            continue
         deputy = truth_hist.get(deputy_id)
         chief = truth_hist.get(chief_id)
         if deputy is None or chief is None or deputy.shape[1] < 6 or chief.shape[1] < 6:
@@ -620,7 +630,11 @@ def _insert_relative_state(
         for i in range(n):
             rel = eci_relative_to_ric_rect(deputy[i, :6], chief[i, :6])
             rng = float(np.linalg.norm(rel[:3]))
-            range_rate = float(np.dot(rel[:3], rel[3:]) / rng) if rng > 1e-12 else 0.0
+            range_rate = (
+                float(np.dot(rel[:3], rel[3:]) / rng)
+                if math.isfinite(rng) and rng > 1e-12 and bool(np.all(np.isfinite(rel[:6])))
+                else None
+            )
             rows.append(
                 (
                     i,
@@ -752,11 +766,12 @@ def _insert_events(
         previous = False
         for i, current in enumerate(active):
             if bool(current) and not previous:
+                start_index = max(i - 1, 0)
                 rows.append(
                     (
                         f"burn_start:{object_id}:{i}",
-                        _finite_float(t_s[i]),
-                        i,
+                        _finite_float(t_s[start_index]),
+                        start_index,
                         object_id,
                         "burn_start",
                         "info",
@@ -765,11 +780,12 @@ def _insert_events(
                     )
                 )
             if previous and not bool(current):
+                end_index = max(i - 1, 0)
                 rows.append(
                     (
                         f"burn_end:{object_id}:{i}",
-                        _finite_float(t_s[i]),
-                        i,
+                        _finite_float(t_s[end_index]),
+                        end_index,
                         object_id,
                         "burn_end",
                         "info",
@@ -1006,7 +1022,7 @@ def _insert_artifacts(
     conn.executemany("INSERT OR REPLACE INTO artifacts VALUES (?, ?, ?, ?, ?, ?)", rows)
 
 
-def _write_schema_json(path: Path, *, generated_utc: str) -> None:
+def _write_schema_json(path: Path, *, generated_utc: str, db_path: Path | None = None) -> None:
     schema = {
         "schema_version": REVIEW_SCHEMA_VERSION,
         "generated_utc": generated_utc,
@@ -1058,6 +1074,30 @@ def _write_schema_json(path: Path, *, generated_utc: str) -> None:
             "artifacts": {"description": "Known artifacts in the output folder."},
         },
     }
+    if db_path is not None:
+        conn = sqlite3.connect(db_path)
+        try:
+            table_names = [
+                str(row[0])
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+                ).fetchall()
+            ]
+            for table_name in table_names:
+                entry = dict(schema["tables"].get(table_name, {}) or {})
+                entry.setdefault("description", f"Review evidence table: {table_name}.")
+                entry["columns"] = [
+                    {
+                        "name": str(row[1]),
+                        "type": str(row[2] or ""),
+                        "notnull": bool(row[3]),
+                        "primary_key": bool(row[5]),
+                    }
+                    for row in conn.execute(f'PRAGMA table_info("{table_name}")').fetchall()
+                ]
+                schema["tables"][table_name] = entry
+        finally:
+            conn.close()
     tmp_path = path.with_suffix(path.suffix + ".tmp")
     tmp_path.write_text(json.dumps(schema, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     tmp_path.replace(path)

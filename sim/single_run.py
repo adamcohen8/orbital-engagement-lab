@@ -127,6 +127,7 @@ def _apply_frame_context_to_environment(
     out["frame_model_canonical"] = frame_context.model
     out["frame_provenance"] = frame_context.metadata()
     out["time_scale_model"] = frame_context.time_scale_model
+    out["eop_extrapolation"] = frame_context.eop_extrapolation
     out["tt_minus_utc_s"] = float(frame_context.tt_minus_utc_s)
     if frame_context.eop_path is not None:
         out["eop_path"] = frame_context.eop_path
@@ -279,8 +280,7 @@ class _SingleRunEngine:
                 continue
             from sim.dynamics.orbit.sgp4 import SGP4EphemerisProvider
 
-            provider = SGP4EphemerisProvider.from_tle_block(
-                dict(initial_state.get("tle", {}) or {}),
+            provider_kwargs = dict(
                 mass_kg=float(agent.truth.mass_kg),
                 start_jd_utc=cfg.simulator.initial_jd_utc,
                 duration_s=float(cfg.simulator.duration_s),
@@ -294,6 +294,14 @@ class _SingleRunEngine:
                     else float(general.get("max_tle_age_days_warning"))
                 ),
             )
+            if isinstance(initial_state.get("ogp_mean_elements"), dict):
+                provider = SGP4EphemerisProvider.from_mean_elements(
+                    dict(initial_state["ogp_mean_elements"]), **provider_kwargs
+                )
+            else:
+                provider = SGP4EphemerisProvider.from_tle_block(
+                    dict(initial_state.get("tle", {}) or {}), **provider_kwargs
+                )
             self.general_propagation[aid] = provider
             agent.truth = provider.canonical_state_at(0.0)
             if agent.belief is not None and agent.belief.state.size >= 6:
@@ -1218,7 +1226,7 @@ class _SingleRunEngine:
             )
 
         termination_update_t0 = perf_counter()
-        self.termination_monitor.update_rocket_insertion(t_s=t_next)
+        self.termination_monitor.update_rocket_insertion(t_s=t_next, dt_s=step_dt)
         if self.rocket is not None and self.rocket_inserted:
             for aid, agent in self.agents.items():
                 if agent.kind == "satellite" and not agent.active and agent.deploy_source == "rocket_insertion":
