@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "orbital-engagement-lab"
-version = "0.23.1"
+version = "0.24.0"
 description = "Integrated spacecraft simulation and analysis platform for rendezvous, control, validation, and mission prototyping."
 readme = "README.md"
 requires-python = ">=3.10,<3.15"
@@ -35,7 +35,6 @@ dependencies = [
 ]
 
 [project.scripts]
-oel-license = "sim.licensing.__main__:main"
 oel-mcp = "integrations.oel_mcp.public_server:main"
 
 [project.optional-dependencies]
@@ -106,6 +105,10 @@ sim = [
   "presets/objects/*.yaml",
   "dynamics/orbit/data/*.csv",
   "dynamics/orbit/data/*.dat",
+  "interchange/schemas/*.json",
+  "interchange/examples/*.json",
+  "interchange/examples/*.md",
+  "scale/schemas/*.json",
   "game/configs/*.yaml",
   "game/assets/*.png",
   "game/assets/*.md",

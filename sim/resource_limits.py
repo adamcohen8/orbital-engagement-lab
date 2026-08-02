@@ -630,6 +630,10 @@ class ResourceGovernor:
         self.max_load_per_cpu = _optional_float(limits.get("max_load_per_cpu"), profile.max_load_per_cpu)
         self.pause_seconds = float(limits.get("resource_pause_seconds", profile.pause_seconds) or profile.pause_seconds)
         self.max_wait_s = float(limits.get("resource_max_wait_s", profile.max_wait_s) or profile.max_wait_s)
+        if not math.isfinite(self.pause_seconds) or self.pause_seconds <= 0.0:
+            raise ValueError("outputs.resource_limits.resource_pause_seconds must be positive and finite.")
+        if not math.isfinite(self.max_wait_s) or self.max_wait_s < 0.0:
+            raise ValueError("outputs.resource_limits.resource_max_wait_s must be nonnegative and finite.")
         self.emit = emit
         estimate = estimate_resource_requirements(cfg)
         self.estimated_incremental_memory_mb = float(estimate.estimated_incremental_memory_mb)
@@ -666,6 +670,14 @@ class ResourceGovernor:
         snapshot = current_resource_snapshot()
         if not self.enabled:
             return snapshot
+        if (
+            (self.min_available_memory_mb is not None or self.hard_min_available_memory_mb is not None)
+            and snapshot.available_memory_mb is None
+            and snapshot.memory_pressure_free_percent is None
+        ):
+            raise ResourcePressureError(
+                "Memory telemetry is unavailable, so the configured memory safety floor cannot be enforced."
+            )
         if (
             snapshot.memory_pressure_free_percent is not None
             and snapshot.memory_pressure_free_percent < MACOS_MEMORY_PRESSURE_CRITICAL_PERCENT
@@ -729,7 +741,10 @@ class ResourceGovernor:
 def _optional_float(value: Any, default: float | None) -> float | None:
     if value in (None, ""):
         return default
-    return float(value)
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise ValueError("resource limit values must be finite.")
+    return parsed
 
 
 def _active_object_count(cfg: Any) -> int:
@@ -767,6 +782,43 @@ def _incremental_memory_mb(
     worker_overhead_mb = float(max(workers - 1, 0)) * DEFAULT_PARALLEL_WORKER_OVERHEAD_MB
     plot_overhead_mb = DEFAULT_PLOT_OVERHEAD_MB if plots_enabled else 0.0
     return float(history_mb_per_run) * float(workers) + worker_overhead_mb + plot_overhead_mb
+
+
+def _metric_gate_entries(gates: Any) -> list[dict[str, Any]]:
+    if isinstance(gates, list):
+        return [dict(item) for item in gates if isinstance(item, dict)]
+    if not isinstance(gates, dict):
+        return []
+    entries: list[dict[str, Any]] = []
+    for key in ("metric_gates", "metrics", "generic"):
+        raw = gates.get(key)
+        if isinstance(raw, list):
+            entries.extend(dict(item) for item in raw if isinstance(item, dict))
+    return entries
+
+
+def _monte_carlo_retains_full_payloads(cfg: Any) -> bool:
+    monte_carlo_outputs = dict(getattr(getattr(cfg, "outputs", None), "monte_carlo", {}) or {})
+    for gate in _metric_gate_entries(monte_carlo_outputs.get("gates", {}) or {}):
+        metric_path = str(gate.get("metric", "") or gate.get("path", "") or "").strip()
+        if metric_path.startswith("payload."):
+            return True
+        if metric_path in {"derived.final_altitude_km_min", "derived.final_altitude_km_max"}:
+            return True
+    return False
+
+
+def _retained_payload_run_count(cfg: Any, *, study_type: str, runs: int) -> int:
+    if study_type == "monte_carlo":
+        return max(int(runs), 0) if _monte_carlo_retains_full_payloads(cfg) else 0
+    if study_type != "sensitivity":
+        return 0
+    retained_runs = max(int(runs), 0)
+    baseline = getattr(getattr(cfg, "analysis", None), "baseline", None)
+    baseline_mode = str(getattr(baseline, "mode", "none") or "none").strip().lower()
+    if baseline_mode == "run" or (baseline_mode == "none" and bool(getattr(baseline, "enabled", False))):
+        retained_runs += 1
+    return retained_runs
 
 
 def _raise_risk(current: str, candidate: str) -> str:
@@ -809,6 +861,9 @@ def estimate_resource_requirements(cfg: Any) -> ResourceEstimate:
         effective_workers=effective_workers,
         plots_enabled=plots_enabled,
     )
+    retained_payload_runs = _retained_payload_run_count(cfg, study_type=study_type, runs=runs)
+    if retained_payload_runs:
+        estimated_incremental_memory_mb += estimated_history_mb_per_run * retained_payload_runs
     snapshot = current_resource_snapshot()
     projected_available_memory_mb = (
         None
@@ -823,6 +878,8 @@ def estimate_resource_requirements(cfg: Any) -> ResourceEstimate:
     max_load_per_cpu = _optional_float(limits.get("max_load_per_cpu"), profile.max_load_per_cpu)
     notes: list[str] = []
     risk = "safe"
+    if retained_payload_runs:
+        notes.append(f"full run payloads retained for {retained_payload_runs} batch runs")
     if runs >= 5 or steps >= 10000:
         risk = _raise_risk(risk, "moderate")
         notes.append("long campaign envelope")
@@ -843,6 +900,13 @@ def estimate_resource_requirements(cfg: Any) -> ResourceEstimate:
     ):
         risk = _raise_risk(risk, "heavy")
         notes.append("macOS reports elevated memory pressure")
+    if (
+        (min_available_mb is not None or hard_min_available_mb is not None)
+        and snapshot.available_memory_mb is None
+        and snapshot.memory_pressure_free_percent is None
+    ):
+        risk = "unsafe"
+        notes.append("memory telemetry is unavailable for the configured safety floor")
     if hard_min_available_mb is not None and projected_available_memory_mb is not None:
         if projected_available_memory_mb < hard_min_available_mb:
             risk = "unsafe"

@@ -18,6 +18,11 @@ def _provider_options(ai_cfg: dict[str, Any]) -> dict[str, Any]:
     return dict(raw) if isinstance(raw, dict) else {}
 
 
+def _add_nonredirected_secret_header(request: urllib.request.Request, name: str, value: str) -> None:
+    """Send a credential on the initial request without forwarding it on redirects."""
+    request.add_unredirected_header(str(name), str(value))
+
+
 def _custom_endpoint_policy(ai_cfg: dict[str, Any]) -> dict[str, bool]:
     return {
         "allow_custom_endpoint_api_key": bool(ai_cfg.get("allow_custom_endpoint_api_key", False)),

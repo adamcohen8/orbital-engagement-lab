@@ -25,6 +25,16 @@ class TestHCWLQRController(unittest.TestCase):
         cmd = ctrl.act(belief, t_s=0.0, budget_ms=1.0)
         self.assertLessEqual(np.linalg.norm(cmd.thrust_eci_km_s2), 2e-5 + 1e-12)
 
+    def test_zero_max_accel_commands_zero_thrust(self):
+        ctrl = HCWLQRController(mean_motion_rad_s=0.0011, max_accel_km_s2=0.0, design_dt_s=10.0)
+        state = np.array([2.0, -1.0, 0.5, 0.01, -0.02, 0.03, 7000.0, 0.0, 0.0, 0.0, 7.5, 0.0])
+        belief = StateBelief(state=state, covariance=np.eye(12), last_update_t_s=0.0)
+
+        cmd = ctrl.act(belief, t_s=0.0, budget_ms=1.0)
+
+        self.assertTrue(np.allclose(cmd.thrust_eci_km_s2, np.zeros(3)))
+        self.assertEqual(float(cmd.mode_flags["linear_feedback_debug"]["limit_scale"]), 0.0)
+
     def test_state_slice_signs_and_frame_rotation_are_applied(self):
         ctrl = HCWLQRController(
             mean_motion_rad_s=0.0011,

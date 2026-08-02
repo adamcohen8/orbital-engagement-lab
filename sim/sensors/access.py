@@ -21,6 +21,24 @@ class AccessConfig:
     require_ground_visibility: bool = False
     ground_site: GroundSite | None = None
 
+    def __post_init__(self) -> None:
+        if not np.isfinite(float(self.update_cadence_s)) or float(self.update_cadence_s) <= 0.0:
+            raise ValueError("update_cadence_s must be positive and finite.")
+        if self.max_range_km is not None and (
+            not np.isfinite(float(self.max_range_km)) or float(self.max_range_km) <= 0.0
+        ):
+            raise ValueError("max_range_km must be positive and finite when provided.")
+        if self.fov_half_angle_rad is not None and (
+            not np.isfinite(float(self.fov_half_angle_rad))
+            or not 0.0 <= float(self.fov_half_angle_rad) <= np.pi
+        ):
+            raise ValueError("fov_half_angle_rad must be finite and within [0, pi].")
+        if self.solid_angle_sr is not None and (
+            not np.isfinite(float(self.solid_angle_sr))
+            or not 0.0 <= float(self.solid_angle_sr) <= 4.0 * np.pi
+        ):
+            raise ValueError("solid_angle_sr must be finite and within [0, 4*pi].")
+
 
 class AccessModel:
     def __init__(self, cfg: AccessConfig):

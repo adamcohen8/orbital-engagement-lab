@@ -76,10 +76,14 @@ class BaseOELMCPHandlers:
             return self.describe_capabilities()
         validate_handling(self.profile, args.get("handling"))
         _validate_arguments(contract, args)
-        if tool_id == "oel.validate_scenario.v1" and bool(args.get("trust_plugins", False)):
-            self.approval_policy.require_trust(args.get("trust_approval"))
         if contract.writes or contract.executes:
             self.approval_policy.require(args.get("approval"), executes=contract.executes)
+        requires_plugin_trust = (
+            tool_id == "oel.validate_scenario.v1" and bool(args.get("trust_plugins", False))
+            or tool_id == "oel.run_scenario.v1"
+        )
+        if requires_plugin_trust:
+            self.approval_policy.require_trust(args.get("trust_approval"))
         return self._call_contract(contract, args, cancel_event=cancel_event, progress=progress)
 
     def _call_contract(

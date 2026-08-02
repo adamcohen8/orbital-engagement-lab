@@ -93,7 +93,7 @@ class AttitudeActuator(Actuator):
             if tp.pulse_quantum_s > 0.0:
                 pulses = np.round(dt_s / tp.pulse_quantum_s)
                 scale = 0.0 if pulses <= 0 else pulses * tp.pulse_quantum_s / dt_s
-                torque *= scale
+                torque *= min(float(scale), 1.0)
 
         if self.magnetorquers is not None:
             torque, mt_diag = self._apply_magnetorquers(torque, mode_flags)
@@ -324,6 +324,8 @@ class AttitudeActuator(Actuator):
         unload = -float(max(desat.unload_gain_s_inv, 0.0)) * h_body
         unload_norm = float(np.linalg.norm(unload))
         max_unload = float(max(desat.max_unload_torque_nm, 0.0))
+        if max_unload <= 0.0:
+            unload = np.zeros(3, dtype=float)
         if unload_norm > max_unload > 0.0:
             unload *= max_unload / unload_norm
         return unload, {

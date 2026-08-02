@@ -271,6 +271,7 @@ def _harmonic_rotation_matrix(
     tt_minus_utc_s: float | None = None,
     ddpsi_rad: float = 0.0,
     ddeps_rad: float = 0.0,
+    eop_extrapolation: str = "error",
 ) -> np.ndarray:
     model = normalize_frame_model(frame_model)
     if model == FRAME_MODEL_IAU76_80_EOP:
@@ -285,6 +286,7 @@ def _harmonic_rotation_matrix(
             tt_minus_utc_s=tt_minus_utc_s,
             ddpsi_rad=ddpsi_rad,
             ddeps_rad=ddeps_rad,
+            eop_extrapolation=eop_extrapolation,
         )
     return eci_to_ecef_rotation(t_s, jd_utc_start=jd_utc_start)
 
@@ -306,6 +308,7 @@ def _analytic_harmonic_accel_hpop_eci_km_s2(
     tt_minus_utc_s: float | None = None,
     ddpsi_rad: float = 0.0,
     ddeps_rad: float = 0.0,
+    eop_extrapolation: str = "error",
     compiled: CompiledSphericalHarmonics | None = None,
 ) -> np.ndarray:
     compiled_terms = compiled if compiled is not None else compile_spherical_harmonic_terms(terms)
@@ -328,6 +331,7 @@ def _analytic_harmonic_accel_hpop_eci_km_s2(
         tt_minus_utc_s=tt_minus_utc_s,
         ddpsi_rad=ddpsi_rad,
         ddeps_rad=ddeps_rad,
+        eop_extrapolation=eop_extrapolation,
     )
     r_eci = np.array(r_eci_km, dtype=float).reshape(3)
     r_bf = e_mat @ r_eci
@@ -399,6 +403,7 @@ def _accelerated_harmonic_accel_hpop_eci_km_s2(
     tt_minus_utc_s: float | None,
     ddpsi_rad: float,
     ddeps_rad: float,
+    eop_extrapolation: str,
     compiled: CompiledSphericalHarmonics,
 ) -> np.ndarray:
     """Run normalized harmonic mathematics through the optional backend."""
@@ -423,6 +428,7 @@ def _accelerated_harmonic_accel_hpop_eci_km_s2(
         tt_minus_utc_s=tt_minus_utc_s,
         ddpsi_rad=ddpsi_rad,
         ddeps_rad=ddeps_rad,
+        eop_extrapolation=eop_extrapolation,
     )
     return _NORMALIZED_SPHERICAL_HARMONIC_ACCEL_ECI_KERNEL(
         np.asarray(r_eci_km, dtype=float).reshape(3),
@@ -458,6 +464,7 @@ def accel_spherical_harmonics_terms(
     tt_minus_utc_s: float | None = None,
     ddpsi_rad: float = 0.0,
     ddeps_rad: float = 0.0,
+    eop_extrapolation: str = "error",
     compiled: CompiledSphericalHarmonics | None = None,
     use_acceleration: bool = False,
 ) -> np.ndarray:
@@ -486,6 +493,7 @@ def accel_spherical_harmonics_terms(
                 tt_minus_utc_s=tt_minus_utc_s,
                 ddpsi_rad=ddpsi_rad,
                 ddeps_rad=ddeps_rad,
+                eop_extrapolation=eop_extrapolation,
                 compiled=compiled_terms,
             )
         return _analytic_harmonic_accel_hpop_eci_km_s2(
@@ -504,6 +512,7 @@ def accel_spherical_harmonics_terms(
             tt_minus_utc_s=tt_minus_utc_s,
             ddpsi_rad=ddpsi_rad,
             ddeps_rad=ddeps_rad,
+            eop_extrapolation=eop_extrapolation,
             compiled=compiled_terms,
         )
     r_ecef = eci_to_ecef_harmonic(
@@ -519,6 +528,7 @@ def accel_spherical_harmonics_terms(
         tt_minus_utc_s=tt_minus_utc_s,
         ddpsi_rad=ddpsi_rad,
         ddeps_rad=ddeps_rad,
+        eop_extrapolation=eop_extrapolation,
     )
 
     if fd_step_km <= 0.0:
@@ -553,6 +563,7 @@ def accel_spherical_harmonics_terms(
         tt_minus_utc_s=tt_minus_utc_s,
         ddpsi_rad=ddpsi_rad,
         ddeps_rad=ddeps_rad,
+        eop_extrapolation=eop_extrapolation,
     )
 
 
@@ -914,6 +925,19 @@ _REAL_MODEL_DOWNLOADS = {
 }
 
 
+def _gravity_model_download_allowed(requested: bool) -> bool:
+    if not requested:
+        return False
+    sealed = os.environ.get("OEL_SEALED_MODE", "").strip().lower() in {"1", "true", "yes", "on"}
+    approved = os.environ.get("OEL_ALLOW_GRAVITY_MODEL_DOWNLOADS", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    return not sealed or approved
+
+
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as f:
@@ -1038,6 +1062,6 @@ def load_real_earth_gravity_terms(
             coeff_path=None if coeff_path is None else str(Path(coeff_path).expanduser().resolve()),
             max_degree=int(max_degree),
             max_order=None if max_order is None else int(max_order),
-            allow_download=bool(allow_download),
+            allow_download=_gravity_model_download_allowed(bool(allow_download)),
         )
     )

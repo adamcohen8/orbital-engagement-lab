@@ -1,0 +1,81 @@
+{
+  "schema_id": "oel-product-envelope-v1",
+  "schema_version": 1,
+  "product_kind": "oel.state_estimate",
+  "product_id": "oel.state_estimate:7045e35571df01d33b7a974e37191ecee4d626ae0338f215247d1c99bf0811eb",
+  "created_utc": "2026-08-01T12:00:00Z",
+  "producer": {
+    "capability_id": "phase1_contract_fixture",
+    "oel_version": "0.23.0",
+    "run_id": "phase1-accepted-current"
+  },
+  "payload": {
+    "object": {
+      "object_id": "example_satellite",
+      "role": "primary",
+      "kind": "satellite"
+    },
+    "state": {
+      "representation": "cartesian_position_velocity",
+      "frame": "ECI",
+      "epoch": {
+        "value": 2461254.0,
+        "format": "jd",
+        "time_system": "UTC"
+      },
+      "component_order": ["x", "y", "z", "vx", "vy", "vz"],
+      "units": ["km", "km", "km", "km/s", "km/s", "km/s"],
+      "values": [7000.0, 10.0, -2.0, 0.01, 7.5, 0.1]
+    },
+    "covariance": {
+      "present": false,
+      "reason": "The Phase 1 contract fixture does not claim covariance evidence."
+    },
+    "object_specs": {
+      "mass_kg": 500.0
+    },
+    "model_assumptions": {
+      "orbit_force_model": {"model": "two_body"},
+      "attitude": {"source": "none"}
+    },
+    "estimator_evidence": {
+      "method": "deterministic_fixture",
+      "selected_parameters": ["state"],
+      "od_solution_id": null,
+      "source_report_sha256": "943db0465293ea024e4341978c7f78f6d584741db61a13dba3132f3ad12e9cc6"
+    }
+  },
+  "quality": {
+    "disposition": "accepted",
+    "producer_status": "ready_with_caveats",
+    "gates": {"fixture_complete": true},
+    "warnings": [],
+    "non_claims": ["Synthetic contract example; not an operational orbit estimate."]
+  },
+  "freshness": {
+    "integrity_status": "current",
+    "age_status": "not_evaluated",
+    "reference_epoch_jd_utc": 2461254.0,
+    "evaluated_utc": "2026-08-01T12:00:00Z",
+    "policy": {}
+  },
+  "provenance": {
+    "source_artifacts": [
+      {
+        "artifact_id": "source_od_report",
+        "sha256": "943db0465293ea024e4341978c7f78f6d584741db61a13dba3132f3ad12e9cc6",
+        "path": "source_od_report.json",
+        "media_type": "application/json"
+      }
+    ],
+    "source_product_ids": [],
+    "transformations": []
+  },
+  "data_markings": {
+    "scope": "public",
+    "handling": "public_example",
+    "approved_for_public_export": true,
+    "contains_customer_data": false,
+    "contains_hidden_truth": false
+  }
+}

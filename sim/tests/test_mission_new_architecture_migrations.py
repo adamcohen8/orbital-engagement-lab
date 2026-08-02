@@ -7,6 +7,7 @@ from sim.mission.modules import (
     BudgetedEndStateExecution,
     ControllerPointingExecution,
     DesiredStateMissionStrategy,
+    ImpulsiveExecution,
     IntegratedCommandExecution,
     PredictiveBurnExecution,
 )
@@ -164,6 +165,39 @@ class MissionArchitectureMigrationTests(unittest.TestCase):
             env={"attitude_disabled": True},
         )
         self.assertGreater(float(np.linalg.norm(np.array(out["thrust_eci_km_s2"], dtype=float))), 0.0)
+
+    def test_impulsive_execution_averages_pulse_over_step_interval(self) -> None:
+        execution = ImpulsiveExecution(
+            require_attitude_alignment=False,
+            pulse_period_s=2.0,
+            pulse_width_s=0.25,
+            pulse_phase_s=0.0,
+        )
+        truth = _truth()
+        commanded_accel = np.array([2.0e-5, 0.0, 0.0], dtype=float)
+        out = execution.update(
+            intent={},
+            truth=truth,
+            orbit_controller=_ConstantOrbitController(commanded_accel.tolist()),
+            orb_belief=StateBelief(
+                state=np.hstack((truth.position_eci_km, truth.velocity_eci_km_s)),
+                covariance=np.eye(6),
+                last_update_t_s=0.0,
+            ),
+            t_s=0.0,
+            dt_s=1.0,
+        )
+
+        self.assertTrue(np.allclose(out["thrust_eci_km_s2"], commanded_accel * 0.25))
+        self.assertAlmostEqual(float(out["mission_mode"]["pulse_active_duration_s"]), 0.25)
+        self.assertAlmostEqual(float(out["mission_mode"]["pulse_duty_fraction"]), 0.25)
+        self.assertTrue(out["mission_bypass_orbital_command_latch"])
+
+    def test_impulsive_execution_integrates_wrapped_and_multiple_pulses(self) -> None:
+        execution = ImpulsiveExecution(pulse_period_s=2.0, pulse_width_s=0.25, pulse_phase_s=0.0)
+
+        self.assertAlmostEqual(execution._pulse_active_duration_s(1.9, 0.5), 0.25)
+        self.assertAlmostEqual(execution._pulse_active_duration_s(0.0, 5.0), 0.75)
 
     def test_controller_pointing_execution_targets_thruster_opposite_commanded_delta_v(self) -> None:
         e = ControllerPointingExecution(

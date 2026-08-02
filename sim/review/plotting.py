@@ -99,11 +99,13 @@ EVIDENCE_PLOT_RECIPES: dict[str, EvidencePlotRecipe] = {
         title="Relative velocity components over time",
         description="RIC-frame relative velocity components from the relative_state review table.",
         sql=(
-            "SELECT time_s, v_radial_km_s, v_intrack_km_s, v_crosstrack_km_s "
-            "FROM relative_state ORDER BY time_s"
+            "SELECT time_s, deputy_id, chief_id, deputy_id || ':' || chief_id AS pair_id, "
+            "v_radial_km_s, v_intrack_km_s, v_crosstrack_km_s "
+            "FROM relative_state ORDER BY pair_id, time_s"
         ),
         x_column="time_s",
         y_columns=("v_radial_km_s", "v_intrack_km_s", "v_crosstrack_km_s"),
+        group_column="pair_id",
         x_label="Time (s)",
         y_label="Relative velocity (km/s)",
         artifact_id="evidence_relative_velocity",
@@ -394,6 +396,8 @@ def save_review_plot(
     if path is None:
         figures_dir = workspace.output_dir / "review" / "figures"
         out_path = _unique_path(figures_dir / f"{artifact_id}.{extension}")
+        artifact_id = _normalize_artifact_id(out_path.stem)
+        spec = _replace_spec(spec, artifact_id=artifact_id)
     else:
         out_path = Path(path)
         out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -489,7 +493,9 @@ def _draw_plot(ax: Any, result: ReviewQueryResult, spec: ReviewPlotSpec) -> None
         for row in rows:
             groups.setdefault(str(row.get(spec.group_column) or "n/a"), []).append(row)
         for group, group_rows in groups.items():
-            _draw_series(ax, group_rows, spec.x_column, spec.y_columns[0], plot_type, label=group)
+            for y_column in spec.y_columns:
+                label = group if len(spec.y_columns) == 1 else f"{group}:{y_column}"
+                _draw_series(ax, group_rows, spec.x_column, y_column, plot_type, label=label)
         return
     if plot_type == "bar":
         _draw_bar(ax, rows, spec)

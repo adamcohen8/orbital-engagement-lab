@@ -35,6 +35,8 @@ class JointStateEstimator(Estimator):
     def update(self, belief: StateBelief, measurement: Measurement | None, t_s: float) -> StateBelief:
         if belief.state.size < 13:
             raise ValueError("JointStateEstimator expects 13-state belief [r,v,q,w].")
+        if measurement is not None and measurement.vector.size not in {6, 13}:
+            raise ValueError("JointStateEstimator measurements must contain 6 orbit states or 13 joint states.")
 
         x = belief.state
         p = belief.covariance

@@ -232,7 +232,7 @@ class HCWLQRController(Controller):
         a_cmd_ric = np.array(a_cmd_ric_pre_limit, dtype=float)
         nrm = float(np.linalg.norm(a_cmd_ric_pre_limit))
         limit_scale = 1.0
-        if nrm > self.max_accel_km_s2 > 0.0:
+        if nrm > self.max_accel_km_s2 >= 0.0:
             limit_scale = float(self.max_accel_km_s2 / nrm)
             a_cmd_ric *= limit_scale
 

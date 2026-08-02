@@ -173,6 +173,7 @@ def atmosphere_relative_velocity_eci_km_s(
     tt_minus_utc_s: float | None = None,
     ddpsi_rad: float = 0.0,
     ddeps_rad: float = 0.0,
+    eop_extrapolation: str = "error",
 ) -> np.ndarray:
     r = (
         r_eci_km
@@ -198,6 +199,7 @@ def atmosphere_relative_velocity_eci_km_s(
                 tt_minus_utc_s=tt_minus_utc_s,
                 ddpsi_rad=ddpsi_rad,
                 ddeps_rad=ddeps_rad,
+                eop_extrapolation=eop_extrapolation,
             )
         else:
             rot = eci_to_ecef_rotation(

@@ -107,6 +107,28 @@ def test_sealed_mode_blocks_non_loopback_sil_networking() -> None:
     assert _sealed_errors(root, SealedModePolicy(allow_non_loopback_sil=True)) == []
 
 
+def test_sealed_mode_blocks_implicit_gravity_model_downloads() -> None:
+    root = _base_config()
+    root["simulator"]["dynamics"] = {
+        "orbit": {
+            "spherical_harmonics": {
+                "enabled": True,
+                "degree": 8,
+                "order": 8,
+                "source": "egm96",
+            }
+        }
+    }
+
+    errors = _sealed_errors(root)
+
+    assert any("spherical_harmonics.allow_download" in err and "blocks gravity-model downloads" in err for err in errors)
+    root["simulator"]["dynamics"]["orbit"]["spherical_harmonics"]["allow_download"] = False
+    assert _sealed_errors(root) == []
+    root["simulator"]["dynamics"]["orbit"]["spherical_harmonics"]["allow_download"] = True
+    assert _sealed_errors(root, SealedModePolicy(allow_gravity_model_downloads=True)) == []
+
+
 def test_sealed_mode_blocks_high_detail_retention() -> None:
     root = _base_config()
     root["outputs"]["stats"]["save_full_log"] = True

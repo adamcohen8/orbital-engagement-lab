@@ -23,6 +23,7 @@ from integrations.oel_mcp.execution import (
     write_materialized_config,
 )
 from integrations.oel_mcp.public_registry import public_contract_map
+from integrations.oel_mcp.reporting import MAX_REPORT_SOURCE_BYTES
 from integrations.oel_mcp.reporting import audit_report as audit_report_artifacts
 from integrations.oel_mcp.reporting import prepare_report_packet as prepare_report_packet_artifacts
 from sim.agent_task.plot_recipes import get_plot_recipe
@@ -445,7 +446,13 @@ class PublicOELMCPHandlers(BaseOELMCPHandlers):
                 raise ValueError("Only supported allowlisted plot recipes are available.")
             artifact_id = safe_artifact_id(str(arguments["artifact_id"]))
             file_format = str(arguments.get("format", "png"))
-            target = self.path_policy.resolve_write(output / "review" / "mcp_plots" / f"{artifact_id}.{file_format}")
+            target = output / "review" / "mcp_plots" / f"{artifact_id}.{file_format}"
+            suffix = 2
+            while target.exists():
+                target = output / "review" / "mcp_plots" / f"{artifact_id}_{suffix}.{file_format}"
+                suffix += 1
+            artifact_id = safe_artifact_id(target.stem)
+            target = self.path_policy.resolve_write(target)
             artifact = create_plot(
                 output,
                 recipe_id,
@@ -454,10 +461,24 @@ class PublicOELMCPHandlers(BaseOELMCPHandlers):
                 artifact_id=artifact_id,
                 path=target,
             )
+            provenance = _execution_provenance(output)
+            summary_complete = False
+            summary_path = output / "master_run_summary.json"
+            if summary_path.is_file():
+                require_file_size(summary_path, maximum=MAX_MANIFEST_BYTES)
+                summary = json.loads(summary_path.read_text(encoding="utf-8"))
+                summary_complete = isinstance(summary, dict) and str(summary.get("status", "")).lower() == "completed"
+            source_complete = bool(
+                (provenance["status"] == "completed" and provenance["artifacts_complete"])
+                or summary_complete
+            )
+            plot_complete = (
+                source_complete and artifact.get("status") == "ok" and bool(artifact.get("path_exists"))
+            )
             manifest = complete_manifest(
                 manifest_base(tool_id=contract.tool_id, approval_id=str(arguments["approval"]["approval_id"])),
-                status="completed",
-                artifacts=[str(target)],
+                status="completed" if plot_complete else "partial",
+                artifacts=[str(target)] if artifact.get("path_exists") else [],
             )
             manifest_path = write_execution_manifest(
                 output / "review" / "mcp_plots",
@@ -465,7 +486,7 @@ class PublicOELMCPHandlers(BaseOELMCPHandlers):
                 filename=f"{artifact_id}.manifest.json",
             )
             return {
-                "status": "completed" if artifact.get("status") == "ok" and artifact.get("path_exists") else "partial",
+                "status": "completed" if plot_complete else "partial",
                 "output_dir": str(output),
                 "recipe_id": recipe_id,
                 "artifact": artifact,
@@ -608,6 +629,10 @@ class PublicOELMCPHandlers(BaseOELMCPHandlers):
         def operation() -> dict[str, Any]:
             report = self.path_policy.resolve_read(arguments["report_path"], kind="file")
             packet = self.path_policy.resolve_read(arguments["packet_path"], kind="file")
+            require_file_size(
+                packet,
+                maximum=int(arguments.get("max_packet_bytes", MAX_REPORT_SOURCE_BYTES)),
+            )
             packet_payload = json.loads(packet.read_text(encoding="utf-8"))
             if not isinstance(packet_payload, dict):
                 raise ValueError("The report packet JSON root must be an object.")

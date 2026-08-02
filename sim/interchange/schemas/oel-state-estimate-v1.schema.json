@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orbitalengagementlab.com/schemas/oel-state-estimate-v1.schema.json",
+  "title": "OEL State Estimate Product v1 Payload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["object", "state", "covariance", "object_specs", "model_assumptions", "estimator_evidence"],
+  "properties": {
+    "object": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["object_id", "role", "kind"],
+      "properties": {
+        "object_id": {"type": "string", "minLength": 1},
+        "role": {"type": "string", "minLength": 1},
+        "kind": {"const": "satellite"}
+      }
+    },
+    "state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["representation", "frame", "epoch", "component_order", "units", "values"],
+      "properties": {
+        "representation": {"const": "cartesian_position_velocity"},
+        "frame": {"const": "ECI"},
+        "epoch": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["value", "format", "time_system"],
+          "properties": {
+            "value": {"type": "number", "exclusiveMinimum": 0},
+            "format": {"const": "jd"},
+            "time_system": {"const": "UTC"}
+          }
+        },
+        "component_order": {"const": ["x", "y", "z", "vx", "vy", "vz"]},
+        "units": {"const": ["km", "km", "km", "km/s", "km/s", "km/s"]},
+        "values": {
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": {"type": "number"}
+        }
+      }
+    },
+    "covariance": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["present", "reason"],
+          "properties": {
+            "present": {"const": false},
+            "reason": {"type": "string", "minLength": 1}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "present", "frame", "epoch_jd_utc", "component_order", "units", "matrix",
+            "mathematically_valid", "calibrated", "calibration_scope"
+          ],
+          "properties": {
+            "present": {"const": true},
+            "frame": {"const": "ECI"},
+            "epoch_jd_utc": {"type": "number"},
+            "component_order": {"const": ["x", "y", "z", "vx", "vy", "vz"]},
+            "units": {"const": ["km", "km", "km", "km/s", "km/s", "km/s"]},
+            "matrix": {
+              "type": "array",
+              "minItems": 6,
+              "maxItems": 6,
+              "items": {
+                "type": "array",
+                "minItems": 6,
+                "maxItems": 6,
+                "items": {"type": "number"}
+              }
+            },
+            "mathematically_valid": {"type": "boolean"},
+            "calibrated": {"type": "boolean"},
+            "calibration_scope": {"type": ["string", "null"]}
+          }
+        }
+      ]
+    },
+    "object_specs": {"type": "object"},
+    "model_assumptions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["orbit_force_model", "attitude"],
+      "properties": {
+        "orbit_force_model": {"type": "object"},
+        "attitude": {"type": "object"}
+      }
+    },
+    "estimator_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "selected_parameters", "source_report_sha256"],
+      "properties": {
+        "method": {"type": "string", "minLength": 1},
+        "selected_parameters": {"type": "array", "items": {"type": "string"}},
+        "od_solution_id": {"type": ["string", "null"]},
+        "source_report_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    }
+  }
+}

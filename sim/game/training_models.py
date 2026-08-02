@@ -207,7 +207,7 @@ class ApproachGateConfig:
             max_abs_cross_track_km=_optional_float(raw.get("max_abs_cross_track_km")),
             max_abs_radial_rate_km_s=_optional_float(raw.get("max_abs_radial_rate_km_s")),
             max_total_speed_km_s=_optional_float(raw.get("max_total_speed_km_s")),
-            required=bool(raw.get("required", True)),
+            required=_metadata_bool(raw.get("required", True), f"approach_gates[{index}].required"),
         )
 
     def samples_near_gate(self, relative_ric_state: np.ndarray) -> np.ndarray:
@@ -311,7 +311,7 @@ class SunAngleConstraintConfig:
                 field_name="allowed_center_ric",
             ),
             allowed_half_angle_deg=float(raw.get("allowed_half_angle_deg", raw.get("half_angle_deg", 35.0)) or 35.0),
-            dynamic_sun=bool(raw.get("dynamic_sun", False)),
+            dynamic_sun=_metadata_bool(raw.get("dynamic_sun", False), f"sun_angle_constraints[{index}].dynamic_sun"),
             allowed_center_mode=str(raw.get("allowed_center_mode", "configured") or "configured").strip().lower(),
             min_range_km=_optional_float(raw.get("min_range_km")),
             max_range_km=_optional_float(raw.get("max_range_km")),
@@ -487,19 +487,19 @@ class RPOTrainingConfig:
         if not raw:
             return cls(enabled=False)
         goal = np.array(raw.get("goal_relative_ric_km", [0.0, 0.0, 0.0]), dtype=float).reshape(-1)
-        if goal.size != 3:
+        if goal.size != 3 or not np.all(np.isfinite(goal)):
             raise ValueError("metadata.game.training.goal_relative_ric_km must be length 3.")
         nmt_center = np.array(raw.get("goal_nmt_center_ric_km", [0.0, 0.0, 0.0]), dtype=float).reshape(-1)
-        if nmt_center.size != 3:
+        if nmt_center.size != 3 or not np.all(np.isfinite(nmt_center)):
             raise ValueError("metadata.game.training.goal_nmt_center_ric_km must be length 3.")
         return cls(
-            enabled=bool(raw.get("enabled", True)),
+            enabled=_metadata_bool(raw.get("enabled", True), "metadata.game.training.enabled"),
             scenario_id=str(raw.get("scenario_id", "") or ""),
             level_name=str(game_cfg.get("level_name", "") or ""),
             learning_goal=str(raw.get("learning_goal", "") or ""),
-            relative_frame=str(raw.get("relative_frame", game_cfg.get("relative_frame", "ric")) or "ric")
-            .strip()
-            .lower(),
+            relative_frame=_training_relative_frame(
+                raw.get("relative_frame", game_cfg.get("relative_frame", "ric"))
+            ),
             target_object_id=str(raw.get("target_object_id", game_cfg.get("target_object_id", "target")) or "target"),
             chaser_object_id=str(raw.get("chaser_object_id", game_cfg.get("chaser_object_id", "chaser")) or "chaser"),
             target_reference_object_id=str(
@@ -532,17 +532,25 @@ class RPOTrainingConfig:
             max_delta_v_m_s=_optional_float(raw.get("max_delta_v_m_s")),
             max_target_delta_v_m_s=_optional_float(raw.get("max_target_delta_v_m_s")),
             max_target_reference_range_km=_optional_float(raw.get("max_target_reference_range_km")),
-            fail_on_delta_v_budget=bool(raw.get("fail_on_delta_v_budget", True)),
-            coast_chaser_after_delta_v_budget=bool(raw.get("coast_chaser_after_delta_v_budget", False)),
-            survival_goal=bool(raw.get("survival_goal", False)),
-            sandbox_mode=bool(raw.get("sandbox_mode", False)),
+            fail_on_delta_v_budget=_metadata_bool(
+                raw.get("fail_on_delta_v_budget", True), "metadata.game.training.fail_on_delta_v_budget"
+            ),
+            coast_chaser_after_delta_v_budget=_metadata_bool(
+                raw.get("coast_chaser_after_delta_v_budget", False),
+                "metadata.game.training.coast_chaser_after_delta_v_budget",
+            ),
+            survival_goal=_metadata_bool(raw.get("survival_goal", False), "metadata.game.training.survival_goal"),
+            sandbox_mode=_metadata_bool(raw.get("sandbox_mode", False), "metadata.game.training.sandbox_mode"),
             required_burn_axes=_burn_axes_from_metadata(raw.get("required_burn_axes")),
             required_burn_axis_threshold_km_s2=float(raw.get("required_burn_axis_threshold_km_s2", 1.0e-10)),
             required_burn_axis_min_component_fraction=float(
                 raw.get("required_burn_axis_min_component_fraction", _BURN_AXIS_MIN_COMPONENT_FRACTION)
             ),
             required_phase_burns=_required_phase_burns_from_metadata(raw.get("required_phase_burns")),
-            require_speed_multiplier_change=bool(raw.get("require_speed_multiplier_change", False)),
+            require_speed_multiplier_change=_metadata_bool(
+                raw.get("require_speed_multiplier_change", False),
+                "metadata.game.training.require_speed_multiplier_change",
+            ),
             required_coast_after_burn_s=_optional_float(raw.get("required_coast_after_burn_s")),
             axis_descriptions=_axis_descriptions_from_metadata(raw.get("axis_descriptions")),
             tutorial_stage_hints=_string_mapping_from_metadata(
@@ -565,7 +573,35 @@ def training_config_for_game_mode(config: RPOTrainingConfig, *, game_mode: str) 
 def _optional_float(value: Any) -> float | None:
     if value is None:
         return None
-    return float(value)
+    parsed = float(value)
+    if not np.isfinite(parsed):
+        raise ValueError("Training numeric metadata must contain finite values.")
+    return parsed
+
+
+def _metadata_bool(value: Any, field_name: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    raise ValueError(f"{field_name} must be a boolean.")
+
+
+def _training_relative_frame(value: Any) -> str:
+    frame = str(value or "ric").strip().lower().replace("-", "_")
+    allowed = {
+        "ric",
+        "cislunar",
+        "cislunar_l1",
+        "earth_moon_rotating",
+        "cr3bp",
+        "cr3bp_rotating",
+        "moon_ric",
+        "lunar_ric",
+        "target_moon_ric",
+        "target_lunar_ric",
+    }
+    if frame not in allowed:
+        raise ValueError(f"Unknown metadata.game.training.relative_frame {frame!r}.")
+    return frame
 
 
 def _burn_axes_from_metadata(value: Any) -> tuple[str, ...]:

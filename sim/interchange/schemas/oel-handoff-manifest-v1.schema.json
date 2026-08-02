@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orbitalengagementlab.com/schemas/oel-handoff-manifest-v1.schema.json",
+  "title": "OEL Handoff Manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "manifest_id",
+    "created_utc",
+    "source_product_ids",
+    "source_hashes",
+    "adapter",
+    "materialization_options",
+    "defaults_applied",
+    "overrides",
+    "source_markings",
+    "output_markings",
+    "output",
+    "validation",
+    "warnings",
+    "failures",
+    "recommended_next_action",
+    "execution_occurred"
+  ],
+  "properties": {
+    "schema_id": {"const": "oel-handoff-manifest-v1"},
+    "schema_version": {"const": 1},
+    "manifest_id": {"type": "string", "pattern": "^oel\\.handoff_manifest:[0-9a-f]{64}$"},
+    "created_utc": {"type": "string", "format": "date-time"},
+    "source_product_ids": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "string", "pattern": "^oel\\.[a-z0-9_.-]+:[0-9a-f]{64}$"}
+    },
+    "source_hashes": {"type": "object"},
+    "adapter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["adapter_id", "adapter_version"],
+      "properties": {
+        "adapter_id": {"type": "string", "minLength": 1},
+        "adapter_version": {"type": "string", "minLength": 1}
+      }
+    },
+    "materialization_options": {"type": "object"},
+    "defaults_applied": {"type": "object"},
+    "overrides": {"type": "array", "items": {"type": "object"}},
+    "source_markings": {"type": "object"},
+    "output_markings": {"type": "object"},
+    "output": {"type": "object"},
+    "validation": {"type": "object"},
+    "warnings": {"type": "array", "items": {"type": "string"}},
+    "failures": {"type": "array", "items": {"type": "object"}},
+    "recommended_next_action": {"type": "string", "minLength": 1},
+    "execution_occurred": {"const": false}
+  }
+}

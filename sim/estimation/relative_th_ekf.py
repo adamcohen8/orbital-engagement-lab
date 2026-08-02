@@ -14,6 +14,7 @@ from sim.estimation.relative_hcw_ekf import (
     _measurement_covariance,
     _measurement_innovation,
     _normalize_measurement_origin,
+    _validated_update_epochs,
     hcw_measurement_dimension,
     hcw_measurement_jacobian,
     hcw_measurement_vector,
@@ -62,11 +63,13 @@ class THRelativeEKFEstimator(Estimator):
     def __post_init__(self) -> None:
         self.chief_state_eci_km_s = _state6(self.chief_state_eci_km_s, "chief_state_eci_km_s")
         self.chief_epoch_t_s = float(self.chief_epoch_t_s)
-        if self.dt_s <= 0.0:
+        if not np.isfinite(self.chief_epoch_t_s):
+            raise ValueError("chief_epoch_t_s must be finite.")
+        if not np.isfinite(self.dt_s) or self.dt_s <= 0.0:
             raise ValueError("dt_s must be positive.")
-        if self.mu_km3_s2 <= 0.0:
+        if not np.isfinite(self.mu_km3_s2) or self.mu_km3_s2 <= 0.0:
             raise ValueError("mu_km3_s2 must be positive.")
-        if self.integration_substep_s <= 0.0:
+        if not np.isfinite(self.integration_substep_s) or self.integration_substep_s <= 0.0:
             raise ValueError("integration_substep_s must be positive.")
         self.transition_model = _normalize_transition_model(self.transition_model)
         self.process_noise_diag = _diag6(self.process_noise_diag, "process_noise_diag")
@@ -80,8 +83,8 @@ class THRelativeEKFEstimator(Estimator):
             raise ValueError(
                 f"meas_noise_diag must be length-{meas_dim} for measurement_model={self.measurement_model!r}."
             )
-        if np.any(meas_noise < 0.0):
-            raise ValueError("meas_noise_diag must be non-negative.")
+        if np.any(~np.isfinite(meas_noise)) or np.any(meas_noise < 0.0):
+            raise ValueError("meas_noise_diag must be finite and non-negative.")
         self.meas_noise_diag = meas_noise
         if self.meas_noise_covariance is not None:
             self.meas_noise_covariance = _measurement_covariance(
@@ -106,10 +109,7 @@ class THRelativeEKFEstimator(Estimator):
         self.chief_epoch_t_s = float(t_s)
 
     def update(self, belief: StateBelief, measurement: Measurement | None, t_s: float) -> StateBelief:
-        output_t_s = float(t_s)
-        meas_t_s = output_t_s
-        if measurement is not None:
-            meas_t_s = float(np.clip(float(measurement.t_s), float(belief.last_update_t_s), output_t_s))
+        output_t_s, meas_t_s = _validated_update_epochs(belief, measurement, t_s)
 
         x_pred, p_pred = self._predict(belief.state, belief.covariance, from_t_s=belief.last_update_t_s, to_t_s=meas_t_s)
 
@@ -143,6 +143,8 @@ class THRelativeEKFEstimator(Estimator):
             )
             return StateBelief(state=x_pred, covariance=p_pred, last_update_t_s=output_t_s)
         z = z[: h_pred.size]
+        if not np.all(np.isfinite(z)):
+            raise ValueError("relative measurement vector must contain finite values.")
         h_jac = hcw_measurement_jacobian(
             self.measurement_model,
             x_pred,

@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from collections.abc import Callable, Iterable, Iterator
 from concurrent.futures import FIRST_COMPLETED, wait
+from time import monotonic
 from typing import Any
 
 PARALLEL_WORKER_THREAD_ENV_VARS = (
@@ -15,6 +16,7 @@ PARALLEL_WORKER_THREAD_ENV_VARS = (
 )
 
 _WORKER_PROGRESS_QUEUE: Any | None = None
+_DEFAULT_BOUNDED_FUTURES_TIMEOUT_S = 24.0 * 60.0 * 60.0
 
 
 def set_parallel_worker_thread_limits(default_threads: str = "1") -> dict[str, str | None]:
@@ -54,11 +56,13 @@ def iter_bounded_futures(
     *,
     max_in_flight: int,
     poll_interval_s: float = 0.1,
+    overall_timeout_s: float | None = _DEFAULT_BOUNDED_FUTURES_TIMEOUT_S,
 ) -> Iterator[tuple[Any | None, Any | None]]:
-    """Submit only a bounded number of tasks while yielding completed futures."""
+    """Submit bounded tasks and stop waiting after the optional overall deadline."""
     task_iter = iter(tasks)
     pending: dict[Any, Any] = {}
     limit = max(1, int(max_in_flight))
+    deadline = None if overall_timeout_s is None else monotonic() + max(0.0, float(overall_timeout_s))
 
     def _fill() -> None:
         while len(pending) < limit:
@@ -70,9 +74,32 @@ def iter_bounded_futures(
 
     _fill()
     while pending:
+        remaining_s = None if deadline is None else deadline - monotonic()
+        if remaining_s is not None and remaining_s <= 0.0:
+            for future in pending:
+                future.cancel()
+            # ProcessPoolExecutor cancellation cannot stop work that has
+            # already started. Terminate only this executor's children so a
+            # surrounding context manager cannot block indefinitely on exit.
+            for process in list(dict(getattr(executor, "_processes", {}) or {}).values()):
+                try:
+                    process.terminate()
+                except (AttributeError, OSError):
+                    pass
+            try:
+                executor.shutdown(wait=False, cancel_futures=True)
+            except (AttributeError, TypeError):
+                pass
+            raise TimeoutError(
+                "Parallel execution exceeded the overall timeout of "
+                f"{float(overall_timeout_s):.3f} s with {len(pending)} task(s) pending."
+            )
+        wait_timeout_s = max(float(poll_interval_s), 0.0)
+        if remaining_s is not None:
+            wait_timeout_s = min(wait_timeout_s, max(remaining_s, 0.0))
         done_now, _ = wait(
             set(pending),
-            timeout=max(float(poll_interval_s), 0.0),
+            timeout=wait_timeout_s,
             return_when=FIRST_COMPLETED,
         )
         if not done_now:

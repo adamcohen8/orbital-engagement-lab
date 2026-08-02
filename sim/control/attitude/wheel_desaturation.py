@@ -36,6 +36,8 @@ class WheelDesaturationController(Controller):
             torque = -float(max(self.unload_gain_s_inv, 0.0)) * h_body
             n = float(np.linalg.norm(torque))
             max_torque = float(max(self.max_unload_torque_nm, 0.0))
+            if max_torque <= 0.0:
+                torque = np.zeros(3, dtype=float)
             if n > max_torque > 0.0:
                 torque *= max_torque / n
         return Command(

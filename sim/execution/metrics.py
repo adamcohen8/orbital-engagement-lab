@@ -322,6 +322,10 @@ def _coerce_gate_value(value: Any) -> float | str | bool | None:
 
 def _compare_gate(actual: Any, op: str, expected: Any) -> bool:
     op_norm = str(op or "").strip().lower()
+    # A gate is an evidence check. Missing or non-finite evidence must not
+    # satisfy negative comparisons such as ``!=`` or ``not_in``.
+    if _coerce_gate_value(actual) is None or _coerce_gate_value(expected) is None:
+        return False
     if op_norm in {"=", "==", "eq"}:
         return actual == expected
     if op_norm in {"!=", "<>", "ne"}:
@@ -362,7 +366,7 @@ def evaluate_study_metric_gates(run_output: dict[str, Any], gates: list[Any] | t
         actual = extract_study_metric(run_output, metric_path)
         try:
             passed = _compare_gate(actual, op, expected)
-            error = ""
+            error = "missing_or_non_finite_metric_evidence" if _coerce_gate_value(actual) is None else ""
         except ValueError as exc:
             passed = False
             error = str(exc)

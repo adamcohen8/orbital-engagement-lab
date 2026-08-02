@@ -31,12 +31,14 @@ the installation guide when activation is unavailable.
 | --- | --- | --- | --- |
 | Python API minimal propagation | [Python API Minimal Propagation](../agents/tasks/python_api_minimal_propagation.md) | [Answer](../agents/tasks/examples/python_api_minimal_propagation_answer.md) | `agents/examples/public_agent_python_api_minimal_propagation.yaml` |
 | Passive propagation | [Passive Propagation](../agents/tasks/passive_propagation.md) | [Answer](../agents/tasks/examples/passive_propagation_answer.md) | `agents/examples/public_agent_single_satellite.yaml` |
+| OGP-SGP4 propagation | [OGP-SGP4 Propagation](../agents/tasks/ogp_sgp4_propagation.md) | [Answer](../agents/tasks/examples/ogp_sgp4_propagation_answer.md) | `agents/examples/public_agent_ogp_sgp4_propagation.yaml` |
 | Closed-loop rendezvous | [Closed-Loop Rendezvous](../agents/tasks/closed_loop_rendezvous.md) | [Answer](../agents/tasks/examples/closed_loop_rendezvous_answer.md) | `agents/examples/public_agent_rendezvous_lqr.yaml` |
 | Mission recovery +C burn | [Mission Recovery +C Burn](../agents/tasks/mission_recovery_plus_c_burn.md) | [Answer](../agents/tasks/examples/mission_recovery_plus_c_burn_answer.md) | `agents/examples/public_agent_mission_recovery_plus_c_burn.yaml` |
 | Mission reconstitution trade space | [Mission Reconstitution Trade Space](../agents/tasks/mission_reconstitution_trade_space.md) | [Answer](../agents/tasks/examples/mission_reconstitution_trade_space_answer.md) | `agents/examples/public_agent_mission_reconstitution_trade_space.yaml` |
 | Ground access from TLE | [Ground Access From TLE](../agents/tasks/ground_access_from_tle.md) | [Answer](../agents/tasks/examples/ground_access_from_tle_answer.md) | `agents/examples/public_agent_ground_access.yaml` |
 | Attitude hold | [Attitude Hold](../agents/tasks/attitude_hold.md) | [Answer](../agents/tasks/examples/attitude_hold_answer.md) | `agents/examples/public_agent_attitude_hold.yaml` |
 | Compare one change | [Compare One Change](../agents/tasks/compare_one_change.md) | [Answer](../agents/tasks/examples/compare_one_change_answer.md) | `agents/examples/public_agent_rendezvous_lqr.yaml` |
+| Completed-run continuation | [Completed-run Continuation](../agents/tasks/completed_run_continuation.md) | [Answer](../agents/tasks/examples/completed_run_continuation_answer.md) | `agents/examples/public_agent_ground_access.yaml` |
 
 ## How To Use Them
 

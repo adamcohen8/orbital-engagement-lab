@@ -146,7 +146,11 @@ class ObjectStepCoordinator:
                     f"estimated work score={work_score:.2f}"
                 )
         elif enabled and backend == "process_pool" and not bool(profile.force_serial):
-            if active_objects >= max(1, min_objects) and workers > 1:
+            if incompatibilities:
+                reason = "legacy configured object parallelism selected serial: " + "; ".join(
+                    incompatibilities
+                )
+            elif active_objects >= max(1, min_objects) and workers > 1:
                 selected_backend = "process_pool"
                 reason = "legacy configured object parallelism is enabled"
             else:

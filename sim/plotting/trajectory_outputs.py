@@ -45,17 +45,23 @@ def render_trajectory_outputs(context: PlotOutputContext) -> dict[str, str]:
     plot_quaternion_components = context.plot_fns["plot_quaternion_components"]
     plot_ric_2d_projections = context.plot_fns["plot_ric_2d_projections"]
     plot_trajectory_frame = context.plot_fns["plot_trajectory_frame"]
+    object_state_frames = context.object_state_frames
+    eci_truth_hist = {
+        object_id: hist
+        for object_id, hist in truth_hist.items()
+        if object_state_frames.get(object_id, "eci") == "eci"
+    }
     out: dict[str, str] = {}
-    if "trajectory_eci_multi" in figure_ids:
+    if "trajectory_eci_multi" in figure_ids and eci_truth_hist:
         p = outdir / "trajectory_eci_multi.png"
-        plot_multi_trajectory_frame(t_s, truth_hist, frame="eci", mode=mode, out_path=str(p))
+        plot_multi_trajectory_frame(t_s, eci_truth_hist, frame="eci", mode=mode, out_path=str(p))
         if mode in ("save", "both"):
             out["trajectory_eci_multi"] = str(p)
-    if "trajectory_ecef_multi" in figure_ids:
+    if "trajectory_ecef_multi" in figure_ids and eci_truth_hist:
         p = outdir / "trajectory_ecef_multi.png"
         plot_multi_trajectory_frame(
             t_s,
-            truth_hist,
+            eci_truth_hist,
             frame="ecef",
             mode=mode,
             out_path=str(p),
@@ -162,6 +168,8 @@ def render_trajectory_outputs(context: PlotOutputContext) -> dict[str, str]:
 
     for oid, hist in truth_hist.items():
         if not np.any(np.isfinite(hist[:, 0])):
+            continue
+        if object_state_frames.get(oid, "eci") != "eci":
             continue
         if "quaternion_eci" in figure_ids:
             p = outdir / f"{oid}_quat_eci.png"

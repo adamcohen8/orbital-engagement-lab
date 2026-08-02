@@ -40,6 +40,7 @@ class AttitudeReplayController(Controller):
     _times: np.ndarray = field(init=False, repr=False)
     _q: np.ndarray = field(init=False, repr=False)
     _w: np.ndarray = field(init=False, repr=False)
+    _actuation_interval: tuple[float, float] | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         times = np.array(self.times_s, dtype=float).reshape(-1)
@@ -63,8 +64,20 @@ class AttitudeReplayController(Controller):
         self._q = q
         self._w = w
 
+    def set_actuation_interval(self, start_t_s: float, end_t_s: float) -> None:
+        start = float(start_t_s)
+        end = float(end_t_s)
+        if not np.isfinite(start) or not np.isfinite(end) or end < start:
+            raise ValueError("attitude replay actuation interval must be finite with end >= start.")
+        self._actuation_interval = (start, end)
+
     def act(self, belief: StateBelief, t_s: float, budget_ms: float) -> Command:
-        q, w = self._sample(float(t_s))
+        sample_t_s = float(t_s)
+        interval = self._actuation_interval
+        self._actuation_interval = None
+        if interval is not None and np.isclose(sample_t_s, interval[0], rtol=0.0, atol=1.0e-12):
+            sample_t_s = interval[1]
+        q, w = self._sample(sample_t_s)
         return Command(
             thrust_eci_km_s2=np.zeros(3),
             torque_body_nm=np.zeros(3),

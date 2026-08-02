@@ -104,6 +104,30 @@ def test_rcs_allocation_controller_allocates_eci_force_in_body_frame() -> None:
     assert np.allclose(cmd.thrust_eci_km_s2, np.array([1.0e-6, 0.0, 0.0]), atol=1e-12)
 
 
+def test_rcs_allocation_does_not_treat_relative_chief_state_as_attitude() -> None:
+    ctrl = RCSAllocationAwareController(
+        base_controller=_ConstantController(thrust=[1.0e-6, 0.0, 0.0]),
+        mass_kg=1000.0,
+        thrusters=[
+            {
+                "name": "body_x",
+                "force_direction_body": [1.0, 0.0, 0.0],
+                "max_thrust_n": 2.0,
+            }
+        ],
+    )
+    relative_state = np.array(
+        [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 7000.0, 0.0, 7.5, 0.0],
+        dtype=float,
+    )
+    belief = StateBelief(state=relative_state, covariance=np.eye(12), last_update_t_s=0.0)
+
+    cmd = ctrl.act(belief, t_s=0.0, budget_ms=1.0)
+
+    assert np.allclose(cmd.mode_flags["rcs_thruster_forces_n"], [1.0])
+    assert np.allclose(cmd.thrust_eci_km_s2, np.array([1.0e-6, 0.0, 0.0]), atol=1e-12)
+
+
 def test_electric_propulsion_controller_caps_power_limited_thrust() -> None:
     ctrl = ElectricPropulsionController(
         base_controller=_ConstantController(thrust=[1.0e-3, 0.0, 0.0]),
@@ -131,3 +155,21 @@ def test_gimbaled_thruster_controller_blanks_unreachable_direction() -> None:
     assert cmd.mode_flags["mode"] == "gimbaled_thruster_guidance"
     assert np.allclose(cmd.thrust_eci_km_s2, np.zeros(3))
     assert cmd.mode_flags["gimbal_angle_request_rad"] > np.deg2rad(5.0)
+
+
+def test_gimbaled_thruster_does_not_treat_relative_chief_state_as_attitude() -> None:
+    ctrl = GimbaledThrusterController(
+        base_controller=_ConstantController(thrust=[1.0e-6, 0.0, 0.0]),
+        neutral_direction_body=[-1.0, 0.0, 0.0],
+        max_gimbal_angle_rad=np.deg2rad(5.0),
+    )
+    relative_state = np.array(
+        [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 7000.0, 0.0, 7.5, 0.0],
+        dtype=float,
+    )
+    belief = StateBelief(state=relative_state, covariance=np.eye(12), last_update_t_s=0.0)
+
+    cmd = ctrl.act(belief, t_s=0.0, budget_ms=1.0)
+
+    assert np.allclose(cmd.thrust_eci_km_s2, np.array([1.0e-6, 0.0, 0.0]))
+    assert cmd.mode_flags["gimbal_angle_request_rad"] == 0.0

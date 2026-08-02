@@ -95,7 +95,10 @@ def _parse_outputs_section(value: Any, path_policy: ConfigPathPolicy | None = No
         {
             "enabled", "provider", "model", "endpoint", "api_key_env", "timeout_s", "options", "dry_run",
             "fail_on_error", "data_scope", "include_figure_data", "include_json_appendix", "max_examples",
-            "prompt_profile", "user_questions_file",
+            "prompt_profile", "prompt_file", "report_mode", "user_questions", "user_questions_file",
+            "include_full_config", "fail_on_quality", "pricing", "estimated_output_tokens",
+            "output_token_estimate", "max_output_tokens", "max_tokens", "max_prompt_chars", "chars_per_token",
+            "max_failure_examples", "generation_config", "generationConfig", "anthropic_version",
         },
     )
     _reject_unknown_fields(

@@ -54,6 +54,14 @@ When `model: "cr3bp"` is selected, the scenario validator rejects the
 two-body perturbation flags that belong to the Earth-centered special
 perturbations path.
 
+CR3BP is the explicit exception to the normal ECI state contract. Its
+six-component state and command acceleration are Earth-Moon synodic rotating
+frame quantities. The generic runtime `StateTruth` and `Command` attribute
+names retain their historical `*_eci_*` spelling for compatibility, but run
+evidence labels CR3BP state histories and command acceleration as
+`cr3bp_rotating`; consumers must use that frame metadata rather than infer a
+frame from the compatibility attribute names.
+
 ## Numerical Propagation
 
 The runtime propagator is `sim/dynamics/orbit/propagator.py::OrbitPropagator`.

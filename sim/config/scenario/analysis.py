@@ -24,6 +24,7 @@ from sim.config.scenario.primitives import (
     _as_dict,
     _parse_bool,
     _parse_float,
+    _parse_int,
     _parse_optional_float,
     _reject_unknown_fields,
 )
@@ -52,28 +53,50 @@ __all__ = [
 
 def _parse_mc_variation(value: Any) -> MonteCarloVariation:
     d = _as_dict(value, "monte_carlo.variation")
+    _reject_unknown_fields(
+        d,
+        "analysis.monte_carlo.variations[*]",
+        {"parameter_path", "mode", "options", "low", "high", "mean", "std"},
+    )
     path = d.get("parameter_path")
     if not isinstance(path, str) or not path:
         raise ValueError("monte_carlo.variations[*].parameter_path must be a non-empty string.")
-    return MonteCarloVariation(
+    variation = MonteCarloVariation(
         parameter_path=path,
-        mode=str(d.get("mode", "choice")),
+        mode=str(d.get("mode", "choice")).strip().lower(),
         options=list(d.get("options", []) or []),
-        low=float(d["low"]) if d.get("low") is not None else None,
-        high=float(d["high"]) if d.get("high") is not None else None,
-        mean=float(d["mean"]) if d.get("mean") is not None else None,
-        std=float(d["std"]) if d.get("std") is not None else None,
+        low=_parse_optional_float(d.get("low"), "analysis.monte_carlo.variations[*].low"),
+        high=_parse_optional_float(d.get("high"), "analysis.monte_carlo.variations[*].high"),
+        mean=_parse_optional_float(d.get("mean"), "analysis.monte_carlo.variations[*].mean"),
+        std=_parse_optional_float(d.get("std"), "analysis.monte_carlo.variations[*].std"),
     )
+    if variation.mode == "choice":
+        if not variation.options:
+            raise ValueError("analysis.monte_carlo.variations[*] with mode=choice requires options.")
+    elif variation.mode == "uniform":
+        if variation.low is None or variation.high is None:
+            raise ValueError("analysis.monte_carlo.variations[*] with mode=uniform requires low and high.")
+        if variation.high < variation.low:
+            raise ValueError("analysis.monte_carlo.variations[*].high must be >= low.")
+    elif variation.mode == "normal":
+        if variation.mean is None or variation.std is None:
+            raise ValueError("analysis.monte_carlo.variations[*] with mode=normal requires mean and std.")
+        if variation.std < 0.0:
+            raise ValueError("analysis.monte_carlo.variations[*].std must be >= 0.")
+    else:
+        raise ValueError("analysis.monte_carlo.variations[*].mode must be one of: choice, uniform, normal.")
+    return variation
 
 
 def _parse_analysis_execution_section(value: Any) -> AnalysisExecutionSection:
     d = _as_dict(value, "analysis.execution")
+    _reject_unknown_fields(d, "analysis.execution", {"parallel_enabled", "parallel_workers", "failure_policy"})
     out = AnalysisExecutionSection(
         parallel_enabled=_parse_bool(
             d.get("parallel_enabled", False),
             "analysis.execution.parallel_enabled",
         ),
-        parallel_workers=int(d.get("parallel_workers", 0)),
+        parallel_workers=_parse_int(d.get("parallel_workers", 0), "analysis.execution.parallel_workers"),
         failure_policy=str(d.get("failure_policy", "fail_fast") or "fail_fast").strip().lower(),
     )
     if out.parallel_workers < 0:
@@ -85,6 +108,7 @@ def _parse_analysis_execution_section(value: Any) -> AnalysisExecutionSection:
 
 def _parse_analysis_baseline_section(value: Any) -> AnalysisBaselineSection:
     d = _as_dict(value, "analysis.baseline")
+    _reject_unknown_fields(d, "analysis.baseline", {"enabled", "mode", "summary_json"})
     summary_json = str(d.get("summary_json", "") or "")
     enabled = _parse_bool(d.get("enabled", False), "analysis.baseline.enabled")
     raw_mode = str(d.get("mode", "") or "").strip().lower()
@@ -103,6 +127,7 @@ def _parse_analysis_baseline_section(value: Any) -> AnalysisBaselineSection:
 
 def _parse_analysis_monte_carlo_section(value: Any) -> AnalysisMonteCarloSection:
     d = _as_dict(value, "analysis.monte_carlo")
+    _reject_unknown_fields(d, "analysis.monte_carlo", {"iterations", "base_seed", "variations"})
     vars_raw = d.get("variations")
     if vars_raw is None:
         variations = []
@@ -111,8 +136,8 @@ def _parse_analysis_monte_carlo_section(value: Any) -> AnalysisMonteCarloSection
             raise ValueError("analysis.monte_carlo.variations must be a list.")
         variations = [_parse_mc_variation(v) for v in vars_raw]
     out = AnalysisMonteCarloSection(
-        iterations=int(d.get("iterations", 1)),
-        base_seed=int(d.get("base_seed", 0)),
+        iterations=_parse_int(d.get("iterations", 1), "analysis.monte_carlo.iterations"),
+        base_seed=_parse_int(d.get("base_seed", 0), "analysis.monte_carlo.base_seed"),
         variations=variations,
     )
     if out.iterations <= 0:
@@ -122,6 +147,11 @@ def _parse_analysis_monte_carlo_section(value: Any) -> AnalysisMonteCarloSection
 
 def _parse_sensitivity_parameter(value: Any) -> SensitivityParameter:
     d = _as_dict(value, "analysis.sensitivity.parameter")
+    _reject_unknown_fields(
+        d,
+        "analysis.sensitivity.parameters[*]",
+        {"parameter_path", "path", "values", "distribution", "low", "high", "mean", "std"},
+    )
     path = d.get("parameter_path", d.get("path"))
     if not isinstance(path, str) or not path:
         raise ValueError("analysis.sensitivity.parameters[*].parameter_path must be a non-empty string.")
@@ -144,13 +174,14 @@ def _parse_sensitivity_parameter(value: Any) -> SensitivityParameter:
 
 def _parse_sensitivity_section(value: Any) -> SensitivitySection:
     d = _as_dict(value, "analysis.sensitivity")
+    _reject_unknown_fields(d, "analysis.sensitivity", {"method", "samples", "seed", "parameters"})
     params_raw = d.get("parameters", []) or []
     if not isinstance(params_raw, list):
         raise ValueError("analysis.sensitivity.parameters must be a list.")
     out = SensitivitySection(
         method=str(d.get("method", "one_at_a_time")),
-        samples=int(d.get("samples", 0)),
-        seed=int(d.get("seed", 0)),
+        samples=_parse_int(d.get("samples", 0), "analysis.sensitivity.samples"),
+        seed=_parse_int(d.get("seed", 0), "analysis.sensitivity.seed"),
         parameters=[_parse_sensitivity_parameter(v) for v in params_raw],
     )
     if out.method not in {"one_at_a_time", "lhs", "two_parameter_grid"}:
@@ -336,7 +367,7 @@ def _parse_mission_recovery_section(value: Any) -> MissionRecoverySection:
     )
     if slot_tolerance < 0.0:
         raise ValueError("analysis.mission_recovery.slot_tolerance_deg must be >= 0.")
-    max_phasing_orbits = int(d.get("max_phasing_orbits", 5000))
+    max_phasing_orbits = _parse_int(d.get("max_phasing_orbits", 5000), "analysis.mission_recovery.max_phasing_orbits")
     if max_phasing_orbits < 1:
         raise ValueError("analysis.mission_recovery.max_phasing_orbits must be at least 1.")
     target_orbit_raw = d.get("target_orbit", d.get("desired_orbit", {})) or {}
@@ -480,7 +511,7 @@ def _parse_mission_recovery_planner_section(
     )
     if max_recovery_delta_v is not None and max_recovery_delta_v < 0.0:
         raise ValueError("analysis.mission_recovery.planner.max_recovery_delta_v_m_s must be >= 0.")
-    candidate_count = int(d.get("candidate_count", 12))
+    candidate_count = _parse_int(d.get("candidate_count", 12), "analysis.mission_recovery.planner.candidate_count")
     if candidate_count < 1:
         raise ValueError("analysis.mission_recovery.planner.candidate_count must be at least 1.")
     simulate_candidates = _parse_bool(
@@ -516,13 +547,13 @@ def _parse_orbit_transfer_planner_section(
         d.get("enabled", default_enabled),
         "analysis.mission_recovery.planner.orbit_transfer.enabled",
     )
-    departure_samples = int(d.get("departure_samples", 9))
+    departure_samples = _parse_int(d.get("departure_samples", 9), "analysis.mission_recovery.planner.orbit_transfer.departure_samples")
     if departure_samples < 1:
         raise ValueError("analysis.mission_recovery.planner.orbit_transfer.departure_samples must be at least 1.")
-    time_of_flight_samples = int(d.get("time_of_flight_samples", 12))
+    time_of_flight_samples = _parse_int(d.get("time_of_flight_samples", 12), "analysis.mission_recovery.planner.orbit_transfer.time_of_flight_samples")
     if time_of_flight_samples < 1:
         raise ValueError("analysis.mission_recovery.planner.orbit_transfer.time_of_flight_samples must be at least 1.")
-    target_anomaly_samples = int(d.get("target_anomaly_samples", 24))
+    target_anomaly_samples = _parse_int(d.get("target_anomaly_samples", 24), "analysis.mission_recovery.planner.orbit_transfer.target_anomaly_samples")
     if target_anomaly_samples < 1:
         raise ValueError("analysis.mission_recovery.planner.orbit_transfer.target_anomaly_samples must be at least 1.")
     min_tof = _parse_float(
@@ -543,7 +574,7 @@ def _parse_orbit_transfer_planner_section(
             "analysis.mission_recovery.planner.orbit_transfer.max_time_of_flight_s "
             "must be >= min_time_of_flight_s."
         )
-    multi_revolution_max = int(d.get("multi_revolution_max", 0))
+    multi_revolution_max = _parse_int(d.get("multi_revolution_max", 0), "analysis.mission_recovery.planner.orbit_transfer.multi_revolution_max")
     if multi_revolution_max < 0:
         raise ValueError("analysis.mission_recovery.planner.orbit_transfer.multi_revolution_max must be >= 0.")
     if multi_revolution_max > 0:

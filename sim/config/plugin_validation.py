@@ -10,7 +10,7 @@ from sim.actuators.presets import available_actuator_preset_names, resolve_actua
 from sim.config.object_refs import configured_objects, object_parameter_prefix
 from sim.config.plugin_specs import iter_nested_plugin_specs, plugin_spec_field
 from sim.digital_twin.mass_properties import validate_mass_properties
-from sim.dynamics.orbit.tle import parse_tle_lines
+from sim.dynamics.orbit.tle import ogp_mean_elements_from_mapping, parse_tle_lines
 
 
 @dataclass(frozen=True)
@@ -239,9 +239,8 @@ def _validate_object_propagation(agent: Any, propagation_method: str, path: str)
         errs.append(f"{path}.general.model must be 'sgp4' when propagation_method=general.")
     initial_state = dict(getattr(agent, "initial_state", {}) or {})
     tle_block = initial_state.get("tle")
-    if not isinstance(tle_block, dict):
-        errs.append(f"{path}.propagation_method=general with general.model=sgp4 requires initial_state.tle.")
-    else:
+    mean_element_block = initial_state.get("ogp_mean_elements")
+    if isinstance(tle_block, dict):
         try:
             lines = tle_block.get("lines")
             if isinstance(lines, (list, tuple)) and len(lines) >= 2:
@@ -257,12 +256,23 @@ def _validate_object_propagation(agent: Any, propagation_method: str, path: str)
                 errs.append(f"{path}.initial_state.tle: OGP eccentricity must be in [0, 1).")
         except Exception as ex:
             errs.append(f"{path}.initial_state.tle: invalid TLE for OGP propagation: {ex}")
-    unsupported_initial_forms = [key for key in initial_state if str(key) != "tle"]
+    elif isinstance(mean_element_block, dict):
+        try:
+            ogp_mean_elements_from_mapping(mean_element_block)
+        except Exception as ex:
+            errs.append(f"{path}.initial_state.ogp_mean_elements: invalid OGP mean elements: {ex}")
+    else:
+        errs.append(
+            f"{path}.propagation_method=general with general.model=sgp4 requires "
+            "initial_state.tle or initial_state.ogp_mean_elements."
+        )
+    selected_state_key = "ogp_mean_elements" if isinstance(mean_element_block, dict) else "tle"
+    unsupported_initial_forms = [key for key in initial_state if str(key) != selected_state_key]
     if unsupported_initial_forms:
         errs.append(
             f"{path}.propagation_method=general with general.model=sgp4 does not support initial_state field(s): "
             + ", ".join(sorted(unsupported_initial_forms))
-            + ". Use initial_state.tle."
+            + ". Use exactly one of initial_state.tle or initial_state.ogp_mean_elements."
         )
     if getattr(agent, "orbit_control", None) is not None:
         errs.append(f"{path}.orbit_control is not supported for passive general-propagation SGP4 objects.")
@@ -300,15 +310,51 @@ def _validate_object_propagation(agent: Any, propagation_method: str, path: str)
 
 def _validate_object_knowledge(knowledge: dict[str, Any], path: str) -> list[str]:
     raw = dict(knowledge or {})
-    if "sensor" not in raw:
-        return []
-    return [
-        (
+    errs: list[str] = []
+    if "sensor" in raw:
+        errs.append(
             f"{path}.sensor: unsupported modeled-sensor configuration block. "
             "Use knowledge.sensor_error for measurement error assumptions and knowledge.estimation for estimator "
             "settings; optical/radar camera hardware fields are not modeled through this config path."
         )
-    ]
+    sensor_error = raw.get("sensor_error")
+    if sensor_error is None:
+        return errs
+    if not isinstance(sensor_error, dict):
+        errs.append(f"{path}.sensor_error: must be a mapping/object.")
+        return errs
+    noise = dict(sensor_error)
+    allowed_sensor_error = {
+        "pos_sigma_km", "vel_sigma_km_s", "quat_sigma", "omega_sigma_rad_s",
+        "pos_bias_km", "vel_bias_km_s", "seed",
+    }
+    for key in sorted(set(noise) - allowed_sensor_error):
+        errs.append(f"{path}.sensor_error.{key}: unsupported field.")
+    nonnegative_vector_fields = ("pos_sigma_km", "vel_sigma_km_s", "quat_sigma", "omega_sigma_rad_s")
+    finite_vector_fields = ("pos_bias_km", "vel_bias_km_s")
+    for field_name in nonnegative_vector_fields + finite_vector_fields:
+        if field_name not in noise:
+            continue
+        value = noise[field_name]
+        values = list(value) if isinstance(value, (list, tuple)) else [value]
+        field_path = f"{path}.sensor_error.{field_name}"
+        if len(values) not in (1, 3):
+            errs.append(f"{field_path}: must be scalar or contain exactly 3 values.")
+            continue
+        for index, item in enumerate(values):
+            parsed = _parse_finite_float(item, f"{field_path}[{index}]", errs)
+            if parsed is not None and field_name in nonnegative_vector_fields and parsed < 0.0:
+                errs.append(f"{field_path}[{index}]: must be >= 0.")
+    for field_name in ("range_sigma_km", "range_rate_sigma_km_s", "angle_sigma_rad"):
+        if field_name not in noise:
+            continue
+        parsed = _parse_finite_float(noise[field_name], f"{path}.sensor_error.{field_name}", errs)
+        if parsed is not None and parsed < 0.0:
+            errs.append(f"{path}.sensor_error.{field_name}: must be >= 0.")
+    for field_name in ("range_bias_km", "range_rate_bias_km_s", "az_bias_rad", "el_bias_rad"):
+        if field_name in noise:
+            _parse_finite_float(noise[field_name], f"{path}.sensor_error.{field_name}", errs)
+    return errs
 
 
 def _validate_object_mass_properties(specs: dict[str, Any], path: str) -> list[str]:
@@ -593,6 +639,46 @@ def _validate_vector(
     return []
 
 
+def _finite_vector_values(value: Any, path: str, *, required: bool = False) -> tuple[list[float] | None, list[str]]:
+    if value is None:
+        return None, ([f"{path}: is required."] if required else [])
+    try:
+        if isinstance(value, (str, bytes)) or not hasattr(value, "__iter__"):
+            vals = [float(value)]
+        else:
+            vals = [float(x) for x in list(value)]
+    except (TypeError, ValueError):
+        return None, [f"{path}: must be a non-empty finite numeric vector."]
+    if not vals or not all(math.isfinite(x) for x in vals):
+        return None, [f"{path}: must be a non-empty finite numeric vector."]
+    return vals, []
+
+
+def _validate_wheel_axes(value: Any, path: str, *, wheel_count: int) -> list[str]:
+    if value is None:
+        return [] if wheel_count == 3 else [f"{path}: is required for {wheel_count} reaction wheels."]
+    try:
+        rows = [list(row) for row in list(value)]
+        if not rows or not rows[0] or any(len(row) != len(rows[0]) for row in rows):
+            raise ValueError
+        matrix = [[float(x) for x in row] for row in rows]
+    except (TypeError, ValueError):
+        return [f"{path}: must be a finite matrix with shape (3,N) or (N,3)."]
+    row_count = len(matrix)
+    column_count = len(matrix[0])
+    if not all(math.isfinite(x) for row in matrix for x in row):
+        return [f"{path}: must contain only finite numbers."]
+    if (row_count, column_count) == (3, wheel_count):
+        axes = [[matrix[row][column] for row in range(3)] for column in range(wheel_count)]
+    elif (row_count, column_count) == (wheel_count, 3):
+        axes = matrix
+    else:
+        return [f"{path}: must have shape (3,{wheel_count}) or ({wheel_count},3)."]
+    if any(math.sqrt(sum(x * x for x in axis)) <= 0.0 for axis in axes):
+        return [f"{path}: wheel axes must be nonzero."]
+    return []
+
+
 def _validate_orbital_actuator_block(raw: dict[str, Any], path: str) -> list[str]:
     errs: list[str] = []
     allowed = {
@@ -626,8 +712,9 @@ def _validate_rcs_cluster(raw: Any, path: str) -> list[str]:
         return []
     if not isinstance(raw, dict):
         return [f"{path}: must be a mapping/object."]
-    if not bool(raw.get("enabled", True)):
-        return []
+    enabled, enabled_errs = _validated_enabled(raw, path)
+    if enabled_errs or not enabled:
+        return enabled_errs
     errs: list[str] = []
     allowed = {
         "enabled",
@@ -694,8 +781,9 @@ def _validate_electric_propulsion(raw: Any, path: str) -> list[str]:
         return []
     if not isinstance(raw, dict):
         return [f"{path}: must be a mapping/object."]
-    if not bool(raw.get("enabled", True)):
-        return []
+    enabled, enabled_errs = _validated_enabled(raw, path)
+    if enabled_errs or not enabled:
+        return enabled_errs
     errs: list[str] = []
     allowed = {
         "enabled",
@@ -721,8 +809,9 @@ def _validate_gimbaled_thruster(raw: Any, path: str) -> list[str]:
         return []
     if not isinstance(raw, dict):
         return [f"{path}: must be a mapping/object."]
-    if not bool(raw.get("enabled", True)):
-        return []
+    enabled, enabled_errs = _validated_enabled(raw, path)
+    if enabled_errs or not enabled:
+        return enabled_errs
     errs: list[str] = []
     allowed = {
         "enabled",
@@ -763,7 +852,22 @@ def _validate_attitude_actuator_block(raw: dict[str, Any], path: str) -> list[st
     errs.extend(_validate_thruster_pulse(raw.get("thruster_pulse"), f"{path}.thruster_pulse"))
     errs.extend(_validate_cmg(raw.get("control_moment_gyros"), f"{path}.control_moment_gyros"))
     errs.extend(_validate_wheel_desaturation(raw.get("wheel_desaturation"), f"{path}.wheel_desaturation"))
+    wheel_desaturation = raw.get("wheel_desaturation")
+    reaction_wheels = raw.get("reaction_wheels")
+    if (
+        isinstance(wheel_desaturation, dict)
+        and wheel_desaturation.get("enabled", True) is True
+        and not (isinstance(reaction_wheels, dict) and reaction_wheels.get("enabled", True) is True)
+    ):
+        errs.append(f"{path}.wheel_desaturation: enabled wheel desaturation requires enabled reaction_wheels.")
     return errs
+
+
+def _validated_enabled(raw: dict[str, Any], path: str) -> tuple[bool, list[str]]:
+    value = raw.get("enabled", True)
+    if not isinstance(value, bool):
+        return False, [f"{path}.enabled: must be a boolean true/false value."]
+    return value, []
 
 
 def _validate_reaction_wheels(raw: Any, path: str) -> list[str]:
@@ -771,8 +875,9 @@ def _validate_reaction_wheels(raw: Any, path: str) -> list[str]:
         return []
     if not isinstance(raw, dict):
         return [f"{path}: must be a mapping/object."]
-    if not bool(raw.get("enabled", True)):
-        return []
+    enabled, enabled_errs = _validated_enabled(raw, path)
+    if enabled_errs or not enabled:
+        return enabled_errs
     errs: list[str] = []
     allowed = {
         "enabled",
@@ -786,8 +891,37 @@ def _validate_reaction_wheels(raw: Any, path: str) -> list[str]:
         "coulomb_friction_nm",
     }
     errs.extend(_validate_allowed_keys(raw, allowed, path))
-    errs.extend(_validate_vector(raw.get("max_torque_nm"), f"{path}.max_torque_nm", lengths=(1, 3), required=True, min_value=0.0))
-    errs.extend(_validate_vector(raw.get("max_momentum_nms"), f"{path}.max_momentum_nms", lengths=(1, 3), required=True, min_value=0.0))
+    max_torque, torque_errs = _finite_vector_values(raw.get("max_torque_nm"), f"{path}.max_torque_nm", required=True)
+    errs.extend(torque_errs)
+    wheel_count = len(max_torque) if max_torque is not None else 0
+    if max_torque is not None and any(value < 0.0 for value in max_torque):
+        errs.append(f"{path}.max_torque_nm: values must be >= 0.")
+
+    max_momentum, momentum_errs = _finite_vector_values(
+        raw.get("max_momentum_nms"), f"{path}.max_momentum_nms", required=True
+    )
+    errs.extend(momentum_errs)
+    if max_momentum is not None:
+        if any(value < 0.0 for value in max_momentum):
+            errs.append(f"{path}.max_momentum_nms: values must be >= 0.")
+        if wheel_count and len(max_momentum) not in {1, wheel_count}:
+            errs.append(f"{path}.max_momentum_nms: must be scalar or length-{wheel_count}.")
+
+    if wheel_count:
+        errs.extend(_validate_wheel_axes(raw.get("wheel_axes_body"), f"{path}.wheel_axes_body", wheel_count=wheel_count))
+        for name in (
+            "wheel_inertia_kg_m2",
+            "max_speed_rad_s",
+            "viscous_friction_nms",
+            "coulomb_friction_nm",
+        ):
+            values, value_errs = _finite_vector_values(raw.get(name), f"{path}.{name}")
+            errs.extend(value_errs)
+            if values is not None:
+                if len(values) not in {1, wheel_count}:
+                    errs.append(f"{path}.{name}: must be scalar or length-{wheel_count}.")
+                if any(value < 0.0 for value in values):
+                    errs.append(f"{path}.{name}: values must be >= 0.")
     errs.extend(_validate_finite_float(raw.get("torque_time_constant_s"), f"{path}.torque_time_constant_s", min_value=0.0))
     return errs
 
@@ -797,8 +931,9 @@ def _validate_magnetorquers(raw: Any, path: str) -> list[str]:
         return []
     if not isinstance(raw, dict):
         return [f"{path}: must be a mapping/object."]
-    if not bool(raw.get("enabled", True)):
-        return []
+    enabled, enabled_errs = _validated_enabled(raw, path)
+    if enabled_errs or not enabled:
+        return enabled_errs
     errs = _validate_allowed_keys(raw, {"enabled", "max_dipole_a_m2"}, path)
     errs.extend(_validate_vector(raw.get("max_dipole_a_m2"), f"{path}.max_dipole_a_m2", lengths=(1, 3), required=True, min_value=0.0))
     return errs
@@ -809,8 +944,9 @@ def _validate_thruster_pulse(raw: Any, path: str) -> list[str]:
         return []
     if not isinstance(raw, dict):
         return [f"{path}: must be a mapping/object."]
-    if not bool(raw.get("enabled", True)):
-        return []
+    enabled, enabled_errs = _validated_enabled(raw, path)
+    if enabled_errs or not enabled:
+        return enabled_errs
     errs = _validate_allowed_keys(raw, {"enabled", "max_torque_nm", "pulse_quantum_s"}, path)
     errs.extend(_validate_vector(raw.get("max_torque_nm"), f"{path}.max_torque_nm", lengths=(3,), required=True, min_value=0.0))
     errs.extend(_validate_finite_float(raw.get("pulse_quantum_s"), f"{path}.pulse_quantum_s", min_value=0.0))
@@ -822,8 +958,9 @@ def _validate_cmg(raw: Any, path: str) -> list[str]:
         return []
     if not isinstance(raw, dict):
         return [f"{path}: must be a mapping/object."]
-    if not bool(raw.get("enabled", True)):
-        return []
+    enabled, enabled_errs = _validated_enabled(raw, path)
+    if enabled_errs or not enabled:
+        return enabled_errs
     allowed = {"enabled", "max_torque_nm", "momentum_nms", "gimbal_rate_limit_rad_s", "torque_time_constant_s"}
     errs = _validate_allowed_keys(raw, allowed, path)
     errs.extend(_validate_vector(raw.get("max_torque_nm"), f"{path}.max_torque_nm", lengths=(1, 3), required=True, min_value=0.0))
@@ -838,8 +975,9 @@ def _validate_wheel_desaturation(raw: Any, path: str) -> list[str]:
         return []
     if not isinstance(raw, dict):
         return [f"{path}: must be a mapping/object."]
-    if not bool(raw.get("enabled", True)):
-        return []
+    enabled, enabled_errs = _validated_enabled(raw, path)
+    if enabled_errs or not enabled:
+        return enabled_errs
     allowed = {"enabled", "momentum_fraction_threshold", "unload_gain_s_inv", "max_unload_torque_nm"}
     errs = _validate_allowed_keys(raw, allowed, path)
     errs.extend(_validate_finite_float(raw.get("momentum_fraction_threshold"), f"{path}.momentum_fraction_threshold", min_value=0.0, max_value=1.0))

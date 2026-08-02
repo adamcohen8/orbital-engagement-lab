@@ -8,7 +8,7 @@ import numpy as np
 
 from sim.core.models import StateTruth
 from sim.dynamics.orbit.frames import teme_to_eci_vallado_iau80
-from sim.dynamics.orbit.tle import TLEElements, parse_tle_lines
+from sim.dynamics.orbit.tle import TLEElements, ogp_mean_elements_from_mapping, parse_tle_lines
 
 try:  # pragma: no cover - availability is environment-dependent.
     from numba import njit, prange
@@ -25,6 +25,36 @@ class SGP4State:
     position_teme_km: np.ndarray
     velocity_teme_km_s: np.ndarray
     error: str | None = None
+
+
+@dataclass(frozen=True)
+class SGP4EphemerisState:
+    """Configured-frame state returned by ``configured_state_at()``.
+
+    The neutral position/velocity names prevent native TEME products from being
+    represented by fields whose names claim ECI coordinates. The ECI aliases
+    remain available for explicitly ECI output to preserve that direct API.
+    """
+
+    position_km: np.ndarray
+    velocity_km_s: np.ndarray
+    frame: str
+    attitude_quat_bn: np.ndarray
+    angular_rate_body_rad_s: np.ndarray
+    mass_kg: float
+    t_s: float
+
+    @property
+    def position_eci_km(self) -> np.ndarray:
+        if self.frame != "eci":
+            raise AttributeError("position_eci_km is unavailable for a non-ECI ephemeris state.")
+        return self.position_km
+
+    @property
+    def velocity_eci_km_s(self) -> np.ndarray:
+        if self.frame != "eci":
+            raise AttributeError("velocity_eci_km_s is unavailable for a non-ECI ephemeris state.")
+        return self.velocity_km_s
 
 
 @dataclass(frozen=True)
@@ -80,8 +110,18 @@ class SGP4EphemerisProvider:
     max_tle_age_days_warning: float | None = None
 
     def __post_init__(self) -> None:
+        for field_name in ("mass_kg", "start_jd_utc", "duration_s"):
+            value = float(getattr(self, field_name))
+            if not math.isfinite(value):
+                raise ValueError(f"{field_name} must be finite.")
+        if float(self.mass_kg) <= 0.0:
+            raise ValueError("mass_kg must be positive.")
+        if float(self.duration_s) < 0.0:
+            raise ValueError("duration_s must be nonnegative.")
         frame = str(self.output_frame or "teme").strip().lower()
         transform = str(self.frame_transform or "").strip().lower()
+        object.__setattr__(self, "output_frame", frame)
+        object.__setattr__(self, "frame_transform", transform)
         if frame == "teme" and not transform:
             object.__setattr__(self, "frame_transform", "native")
         if frame == "eci" and not transform:
@@ -150,16 +190,97 @@ class SGP4EphemerisProvider:
             max_tle_age_days_warning=max_tle_age_days_warning,
         )
 
+    @classmethod
+    def from_mean_elements(
+        cls,
+        mean_elements: dict,
+        **kwargs,
+    ) -> SGP4EphemerisProvider:
+        """Construct an OGP provider from native fitted elements, not TLE text."""
+
+        elements = ogp_mean_elements_from_mapping(mean_elements)
+        resolved_start = kwargs.pop("start_jd_utc", None)
+        return cls(
+            elements=elements,
+            start_jd_utc=float(elements.epoch_jd_utc if resolved_start is None else resolved_start),
+            **kwargs,
+        )
+
     def state_at(self, t_s: float) -> StateTruth:
-        return self._state_at(t_s, output_frame=self.output_frame, frame_transform=self.frame_transform)
+        """Return the historical configured-frame ``StateTruth`` contract.
+
+        Native TEME output predates the ECI-specific field names on
+        :class:`StateTruth`.  That behavior remains for API compatibility, but
+        callers selecting a non-ECI product frame are directed to
+        :meth:`configured_state_at`, whose fields and frame metadata cannot
+        mislabel TEME as ECI.
+        """
+
+        if self.output_frame != "eci":
+            warnings.warn(
+                "SGP4EphemerisProvider.state_at() preserves the legacy StateTruth "
+                "contract for non-ECI output; use configured_state_at() for an "
+                "explicit, frame-neutral product state.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        return self._truth_state_at(
+            t_s,
+            output_frame=self.output_frame,
+            frame_transform=self.frame_transform,
+        )
+
+    def configured_state_at(self, t_s: float) -> SGP4EphemerisState:
+        """Return the configured product state with explicit frame metadata."""
+
+        t_s = self._validated_time(t_s)
+        pos, vel = self._position_velocity_at(
+            t_s,
+            output_frame=self.output_frame,
+            frame_transform=self.frame_transform,
+        )
+        return SGP4EphemerisState(
+            position_km=pos,
+            velocity_km_s=vel,
+            frame=str(self.output_frame),
+            attitude_quat_bn=self._attitude_quat(),
+            angular_rate_body_rad_s=self._angular_rate_body(),
+            mass_kg=float(self.mass_kg),
+            t_s=t_s,
+        )
 
     def canonical_state_at(self, t_s: float) -> StateTruth:
         """Return the engine's canonical ECI truth state regardless of product frame."""
 
-        return self._state_at(t_s, output_frame="eci", frame_transform="teme_to_eci_iau80")
+        return self._truth_state_at(
+            t_s,
+            output_frame="eci",
+            frame_transform="teme_to_eci_iau80",
+        )
 
-    def _state_at(self, t_s: float, *, output_frame: str, frame_transform: str) -> StateTruth:
-        t_s = float(t_s)
+    def _truth_state_at(self, t_s: float, *, output_frame: str, frame_transform: str) -> StateTruth:
+        t_s = self._validated_time(t_s)
+        pos, vel = self._position_velocity_at(
+            t_s,
+            output_frame=output_frame,
+            frame_transform=frame_transform,
+        )
+        return StateTruth(
+            position_eci_km=pos,
+            velocity_eci_km_s=vel,
+            attitude_quat_bn=self._attitude_quat(),
+            angular_rate_body_rad_s=self._angular_rate_body(),
+            mass_kg=float(self.mass_kg),
+            t_s=t_s,
+        )
+
+    def _position_velocity_at(
+        self,
+        t_s: float,
+        *,
+        output_frame: str,
+        frame_transform: str,
+    ) -> tuple[np.ndarray, np.ndarray]:
         jd_utc = float(self.start_jd_utc) + t_s / 86400.0
         tsince_min = (float(self.start_jd_utc) - float(self.elements.epoch_jd_utc)) * 1440.0 + t_s / 60.0
         if sgp4_orbital_period_min(self.elements) >= SGP4_DEEP_SPACE_PERIOD_THRESHOLD_MIN:
@@ -177,21 +298,28 @@ class SGP4EphemerisProvider:
             output_frame=output_frame,
             frame_transform=frame_transform,
         )
-        return StateTruth(
-            position_eci_km=np.array(pos, dtype=float),
-            velocity_eci_km_s=np.array(vel, dtype=float),
-            attitude_quat_bn=(
-                np.array([1.0, 0.0, 0.0, 0.0], dtype=float)
-                if self.attitude_quat_bn is None
-                else np.array(self.attitude_quat_bn, dtype=float)
-            ),
-            angular_rate_body_rad_s=(
-                np.zeros(3, dtype=float)
-                if self.angular_rate_body_rad_s is None
-                else np.array(self.angular_rate_body_rad_s, dtype=float)
-            ),
-            mass_kg=float(self.mass_kg),
-            t_s=t_s,
+        return np.array(pos, dtype=float), np.array(vel, dtype=float)
+
+    def _validated_time(self, t_s: float) -> float:
+        value = float(t_s)
+        if not math.isfinite(value):
+            raise ValueError("t_s must be finite.")
+        if value < 0.0 or value > float(self.duration_s) + 1.0e-12:
+            raise ValueError(f"t_s must be within [0, {float(self.duration_s):g}] seconds.")
+        return value
+
+    def _attitude_quat(self) -> np.ndarray:
+        return (
+            np.array([1.0, 0.0, 0.0, 0.0], dtype=float)
+            if self.attitude_quat_bn is None
+            else np.array(self.attitude_quat_bn, dtype=float)
+        )
+
+    def _angular_rate_body(self) -> np.ndarray:
+        return (
+            np.zeros(3, dtype=float)
+            if self.angular_rate_body_rad_s is None
+            else np.array(self.angular_rate_body_rad_s, dtype=float)
         )
 
     def metadata(self) -> SGP4PropagationMetadata:
@@ -223,10 +351,27 @@ class SGP4EphemerisProvider:
 
 
 def sgp4_orbital_period_min(elements: TLEElements) -> float:
+    """Return the SGP4-corrected (un-Kozai) orbital period in minutes."""
+
     mean_motion = float(elements.mean_motion_rev_per_day)
     if mean_motion <= 0.0:
         return math.inf
-    return 1440.0 / mean_motion
+    eccentricity = float(elements.eccentricity)
+    if not 0.0 <= eccentricity < 1.0:
+        return math.nan
+    xno = mean_motion * 2.0 * math.pi / 1440.0
+    xke = math.sqrt((3600.0 * 398600.8) / (6378.135**3))
+    a1 = (xke / xno) ** (2.0 / 3.0)
+    theta2 = math.cos(math.radians(float(elements.inclination_deg))) ** 2
+    beta2 = 1.0 - eccentricity * eccentricity
+    beta = math.sqrt(beta2)
+    ck2 = 1.0826158e-3 / 2.0
+    x3thm1 = 3.0 * theta2 - 1.0
+    del1 = 1.5 * ck2 * x3thm1 / ((a1 * a1) * beta * beta2)
+    ao = a1 * (1.0 - del1 * (1.0 / 3.0 + del1 * (1.0 + 134.0 / 81.0 * del1)))
+    delo = 1.5 * ck2 * x3thm1 / ((ao * ao) * beta * beta2)
+    no_unkozai = xno / (1.0 + delo)
+    return 2.0 * math.pi / no_unkozai
 
 
 def sgp4_unsupported_reason(elements: TLEElements) -> str | None:

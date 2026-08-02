@@ -101,6 +101,42 @@ def test_mission_recovery_planner_returns_trade_space_recommendations() -> None:
     assert all(candidate["burn_sequence"][0]["duration_s"] is not None for candidate in planner["candidates"])
 
 
+def test_same_apsis_shape_recovery_honors_element_tolerances() -> None:
+    radius_km = EARTH_RADIUS_KM + 400.0
+    circular_speed = float(np.sqrt(EARTH_MU_KM3_S2 / radius_km))
+    initial = np.zeros(14, dtype=float)
+    initial[:6] = [radius_km, 0.0, 0.0, 0.0, circular_speed, 0.0]
+    initial[13] = 100.0
+    final = initial.copy()
+    final[4] -= 0.005
+    cfg = scenario_config_from_dict(
+        {
+            "target": {"enabled": True, "specs": {"mass_kg": 100.0, "isp_s": 220.0}},
+            "analysis": {
+                "mission_recovery": {
+                    "enabled": True,
+                    "object_id": "target",
+                    "goal": "orbit_shape",
+                    "element_tolerances": {"a_km": 0.0, "ecc": 0.0},
+                    "planner": {"enabled": True, "modes": ["min_delta_v"]},
+                }
+            },
+        }
+    )
+
+    summary = build_mission_recovery_summary(
+        cfg=cfg,
+        t_s=np.array([0.0, 1.0]),
+        truth_hist={"target": np.vstack([initial, final])},
+    )
+
+    candidate = next(
+        item for item in summary["planner"]["candidates"] if item["source"] == "same_apsis_shape_recovery"
+    )
+    assert candidate["within_tolerances"] is False
+    assert candidate["verified"] is False
+
+
 def test_mission_recovery_planner_reports_signed_intrack_recovery_axis() -> None:
     radius_km = EARTH_RADIUS_KM + 400.0
     circular_speed = float(np.sqrt(EARTH_MU_KM3_S2 / radius_km))

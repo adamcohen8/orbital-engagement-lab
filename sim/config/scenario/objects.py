@@ -14,6 +14,7 @@ from sim.config.scenario.primitives import (
     _as_dict,
     _parse_bool,
     _parse_float,
+    _parse_int,
     _parse_optional_float,
     _reject_unknown_fields,
 )
@@ -143,6 +144,7 @@ _INITIAL_STATE_AUX_KEYS = {
 _INITIAL_STATE_FORM_KEYS = {
     "position_eci_km",
     "tle",
+    "ogp_mean_elements",
     "coes",
     "cr3bp_rotating",
     "cr3bp_halo",
@@ -161,6 +163,41 @@ _INITIAL_STATE_ALLOWED_KEYS = _INITIAL_STATE_AUX_KEYS | _INITIAL_STATE_FORM_KEYS
     "launch_alt_km",
     "launch_azimuth_deg",
 }
+
+_COE_INITIAL_STATE_FIELDS = (
+    "a_km",
+    "semi_major_axis_km",
+    "ecc",
+    "e",
+    "inc_deg",
+    "inclination_deg",
+    "raan_deg",
+    "argp_deg",
+    "arg_periapsis_deg",
+    "true_anomaly_deg",
+    "ta_deg",
+)
+
+
+def _parse_coes_initial_state(value: Any, path: str) -> dict[str, float]:
+    coes = _as_dict(value, path)
+    _reject_unknown_fields(coes, path, set(_COE_INITIAL_STATE_FIELDS))
+    if not coes:
+        raise ValueError(f"{path} must contain at least one orbital element.")
+
+    # Preserve the converter's established aliases, precedence, and defaults.
+    # Parsing every supplied value still rejects non-finite data even when a
+    # higher-precedence alias is also present.
+    normalized = {key: _parse_float(raw, f"{path}.{key}") for key, raw in coes.items()}
+    a_key = "a_km" if "a_km" in normalized else "semi_major_axis_km"
+    a_km = normalized.get(a_key, 7000.0)
+    ecc_key = "ecc" if "ecc" in normalized else "e"
+    ecc = normalized.get(ecc_key, 0.0)
+    if a_km <= 0.0:
+        raise ValueError(f"{path}.{a_key} must be positive.")
+    if not 0.0 <= ecc < 1.0:
+        raise ValueError(f"{path}.{ecc_key} must satisfy 0 <= eccentricity < 1.")
+    return normalized
 
 
 def _parse_initial_state_section(value: Any, role: str) -> dict[str, Any]:
@@ -203,6 +240,41 @@ def _parse_initial_state_section(value: Any, role: str) -> dict[str, Any]:
         state.get("default_circular_earth"), f"{path}.default_circular_earth"
     ):
         raise ValueError(f"{path}.default_circular_earth must be true when selected.")
+    if form == "coes":
+        state["coes"] = _parse_coes_initial_state(state["coes"], f"{path}.coes")
+    if form == "ogp_mean_elements":
+        from sim.dynamics.orbit.tle import ogp_mean_elements_from_mapping, ogp_mean_elements_to_mapping
+
+        elements = ogp_mean_elements_from_mapping(_as_dict(state[form], f"{path}.{form}"))
+        state[form] = ogp_mean_elements_to_mapping(elements)
+    if form == "cr3bp_halo":
+        halo_path = f"{path}.cr3bp_halo"
+        halo = _as_dict(state["cr3bp_halo"], halo_path)
+        _reject_unknown_fields(halo, halo_path, {"system", "family", "phase_time_s", "phase_substep_s"})
+        system = str(halo.get("system", "earth_moon") or "earth_moon").strip().lower().replace("-", "_")
+        if system not in {"earth_moon", "earthmoon", "em"}:
+            raise ValueError(f"{halo_path}.system is unsupported.")
+        family = str(halo.get("family", "l1_northern") or "l1_northern").strip().lower().replace("-", "_")
+        allowed_families = {
+            "l1_northern", "northern", "north", "l1_northern_large", "l1_large", "large",
+            "large_northern", "l1_northern_corrected_large", "l2_nrho_southern", "nrho",
+            "southern_nrho", "l2_southern_nrho", "gateway_nrho",
+        }
+        if family not in allowed_families:
+            raise ValueError(f"{halo_path}.family is unsupported.")
+        phase_time_s = _parse_float(halo.get("phase_time_s", 0.0), f"{halo_path}.phase_time_s")
+        phase_substep_s = _parse_float(halo.get("phase_substep_s", 120.0), f"{halo_path}.phase_substep_s")
+        if phase_time_s < 0.0:
+            raise ValueError(f"{halo_path}.phase_time_s must be nonnegative.")
+        if phase_substep_s <= 0.0:
+            raise ValueError(f"{halo_path}.phase_substep_s must be positive.")
+        state["cr3bp_halo"] = {
+            **halo,
+            "system": system,
+            "family": family,
+            "phase_time_s": phase_time_s,
+            "phase_substep_s": phase_substep_s,
+        }
     for key, length in (
         ("position_eci_km", 3),
         ("velocity_eci_km_s", 3),
@@ -225,6 +297,11 @@ def _parse_initial_state_section(value: Any, role: str) -> dict[str, Any]:
         delay_s = _parse_float(state["initialization_delay_s"], f"{path}.initialization_delay_s")
         if delay_s < 0.0:
             raise ValueError(f"{path}.initialization_delay_s must be nonnegative.")
+    if "deploy_time_s" in state:
+        deploy_time_s = _parse_float(state["deploy_time_s"], f"{path}.deploy_time_s")
+        if deploy_time_s < 0.0:
+            raise ValueError(f"{path}.deploy_time_s must be nonnegative.")
+        state["deploy_time_s"] = deploy_time_s
     return dict(state)
 
 
@@ -340,7 +417,7 @@ def _parse_ground_station_measurements(value: Any, index: int) -> dict[str, Any]
             raise ValueError(f"ground_stations[{index}].measurements.update_cadence_s must be positive.")
         out["update_cadence_s"] = cadence
     if "seed" in out:
-        out["seed"] = int(_parse_float(out.get("seed"), f"ground_stations[{index}].measurements.seed"))
+        out["seed"] = _parse_int(out.get("seed"), f"ground_stations[{index}].measurements.seed")
     for key in ("range_sigma_km", "range_rate_sigma_km_s", "angle_sigma_deg"):
         if key in out:
             sigma = _parse_float(out.get(key), f"ground_stations[{index}].measurements.{key}")
@@ -383,6 +460,8 @@ def _parse_objects_section(
             oid = str(object_id).strip()
             if not oid:
                 raise ValueError("objects keys must be non-empty object ids.")
+            if oid in objects:
+                raise ValueError(f"objects contains duplicate object id after normalization: {oid}")
             agent = _parse_agent_section(
                 raw_agent,
                 role=f"objects.{oid}",

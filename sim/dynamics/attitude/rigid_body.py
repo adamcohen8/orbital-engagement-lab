@@ -88,6 +88,29 @@ def get_attitude_guardrail_stats(stats: AttitudeGuardrailStats | None = None) ->
     return data
 
 
+def guard_attitude_state_output(
+    quat_bn: np.ndarray,
+    omega_body_rad_s: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Apply the active guardrail policy to externally supplied attitude state."""
+    quat = np.asarray(quat_bn, dtype=float).reshape(-1)
+    omega = np.asarray(omega_body_rad_s, dtype=float).reshape(-1)
+    if quat.size != 4 or omega.size != 3:
+        raise ValueError("attitude state override must provide a length-4 quaternion and length-3 body rate.")
+    if not np.all(np.isfinite(quat)) or not np.all(np.isfinite(omega)):
+        _ATTITUDE_GUARDRAIL_STATS.non_finite_output_events += 1
+    if np.any(np.abs(np.nan_to_num(omega, nan=0.0)) > _MAX_ABS_RATE_RAD_S):
+        _ATTITUDE_GUARDRAIL_STATS.rate_clamp_events += 1
+    guarded_omega = np.nan_to_num(
+        omega,
+        nan=0.0,
+        posinf=_MAX_ABS_RATE_RAD_S,
+        neginf=-_MAX_ABS_RATE_RAD_S,
+    )
+    guarded_omega = np.clip(guarded_omega, -_MAX_ABS_RATE_RAD_S, _MAX_ABS_RATE_RAD_S)
+    return normalize_quaternion(quat), guarded_omega
+
+
 def _add_guardrail_counts(counts: np.ndarray) -> None:
     if isinstance(counts, np.ndarray) and counts.ndim == 1 and counts.size >= 6:
         if (

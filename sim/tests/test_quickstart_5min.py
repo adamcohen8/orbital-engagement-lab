@@ -49,6 +49,7 @@ def test_quickstart_5min_runs_headlessly_and_writes_start_here_artifacts(tmp_pat
     root = Path(__file__).resolve().parents[2]
     source_cfg = root / "configs" / "quickstart_5min.yaml"
     config = yaml.safe_load(source_cfg.read_text(encoding="utf-8"))
+    assert config["simulator"]["duration_s"] == pytest.approx(300.0)
     outdir = tmp_path / "quickstart_5min"
     config["outputs"]["output_dir"] = str(outdir)
 
@@ -90,6 +91,25 @@ def test_quickstart_5min_runs_headlessly_and_writes_start_here_artifacts(tmp_pat
     assert profile["object_totals"]["chaser"]["nested_stage_total_s"] >= 0.0
     assert "satellite_step" in profile["object_totals"]["chaser"]["stages"]
     assert profile["slowest_objects"]
+
+
+def test_doctor_write_probe_does_not_follow_legacy_probe_symlink(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output_root = tmp_path / "outputs"
+    output_root.mkdir()
+    victim = tmp_path / "victim.txt"
+    victim.write_text("preserve me\n", encoding="utf-8")
+    legacy_probe = output_root / ".doctor_write_test"
+    legacy_probe.symlink_to(victim)
+    monkeypatch.chdir(tmp_path)
+
+    run_simulation._print_doctor_report()
+
+    assert victim.read_text(encoding="utf-8") == "preserve me\n"
+    assert legacy_probe.is_symlink()
+    assert not list(output_root.glob(".doctor_write_test-*"))
 
 
 def test_quickstart_cli_shortcut_validates() -> None:

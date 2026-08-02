@@ -315,6 +315,12 @@ EOP nutation corrections unless a future caller passes them explicitly. Review
 output records per-object propagation provenance in `object_propagation` and
 per-object canonical state frame labels in `object_state_frames` / `object_state_frame`.
 
+For direct Python use, `SGP4EphemerisProvider.configured_state_at()` returns
+frame-neutral `position_km` / `velocity_km_s` arrays plus an explicit `frame`.
+Use `canonical_state_at()` when ECI `StateTruth` is required. The older
+`state_at()` method retains its historical `StateTruth` return contract for
+compatibility and warns when configured for a non-ECI product frame.
+
 ## Ground Stations
 
 Ground stations are passive scene observers. They are useful when you want to

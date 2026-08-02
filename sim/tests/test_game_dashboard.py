@@ -66,7 +66,9 @@ def test_elliptic_dashboard_true_anomaly_indicator_uses_target_state() -> None:
     )
     dashboard = object.__new__(PygameRPODashboard)
     dashboard.coast_prediction_model = "tschauner_hempel"
-    dashboard.target_true_anomaly_deg = game_pygame_dashboard._true_anomaly_deg_from_state(np.hstack((target_r, target_v)))
+    dashboard.target_true_anomaly_deg = game_pygame_dashboard._true_anomaly_deg_from_state(
+        np.hstack((target_r, target_v))
+    )
 
     assert dashboard.target_true_anomaly_deg == pytest.approx(140.0)
     assert dashboard._true_anomaly_indicator_text() == "Target ν=140.0 deg"
@@ -210,9 +212,17 @@ def test_cislunar_bonus_uses_target_centered_moon_ric_panels() -> None:
 
 
 def test_cislunar_moon_background_is_right_plot_only_and_to_scale() -> None:
-    assert game_pygame_dashboard._should_draw_cislunar_moon_background(relative_frame="cislunar_l1", x_axis=1, y_axis=2) is True
-    assert game_pygame_dashboard._should_draw_cislunar_moon_background(relative_frame="cislunar_l1", x_axis=1, y_axis=0) is False
-    assert game_pygame_dashboard._should_draw_cislunar_moon_background(relative_frame="ric", x_axis=1, y_axis=2) is False
+    assert (
+        game_pygame_dashboard._should_draw_cislunar_moon_background(relative_frame="cislunar_l1", x_axis=1, y_axis=2)
+        is True
+    )
+    assert (
+        game_pygame_dashboard._should_draw_cislunar_moon_background(relative_frame="cislunar_l1", x_axis=1, y_axis=0)
+        is False
+    )
+    assert (
+        game_pygame_dashboard._should_draw_cislunar_moon_background(relative_frame="ric", x_axis=1, y_axis=2) is False
+    )
 
     rect = game_pygame_dashboard._scaled_body_rect_tuple(
         center_px=(100, 200),
@@ -548,9 +558,7 @@ def test_mission_banner_wraps_long_failure_lines_inside_fixed_box() -> None:
     dashboard.font = FakeFont()
     dashboard._mission_banner_layout_cache = {}
 
-    lines = (
-        "Result        Forbidden region violated: lower radial rail of V-bar U, lower radial floor in RC.",
-    )
+    lines = ("Result        Forbidden region violated: lower radial rail of V-bar U, lower radial floor in RC.",)
 
     wrapped = dashboard._mission_banner_body_lines(lines, width_px=360)
 
@@ -584,9 +592,7 @@ def test_pause_teaching_overlay_skips_guided_tutorial_prompts() -> None:
     training_cfg = RPOTrainingConfig(
         enabled=True,
         scenario_id="rpo_00_tutorial",
-        guided_tutorial_burns=(
-            GuidedTutorialBurnConfig(name="radial", axis="radial", sign=1, delta_v_m_s=0.01),
-        ),
+        guided_tutorial_burns=(GuidedTutorialBurnConfig(name="radial", axis="radial", sign=1, delta_v_m_s=0.01),),
     )
     runtime = game_runner.GuidedTutorialRuntime()
 
@@ -597,11 +603,14 @@ def test_pause_teaching_overlay_skips_guided_tutorial_prompts() -> None:
         runtime,
     )
     runtime.awaiting_speed_step = True
-    assert game_runner._pause_teaching_overlay_enabled(
-        game_runner.GamePhase.PAUSED,
-        replace(training_cfg, guided_tutorial_burns=()),
-        runtime,
-    ) is False
+    assert (
+        game_runner._pause_teaching_overlay_enabled(
+            game_runner.GamePhase.PAUSED,
+            replace(training_cfg, guided_tutorial_burns=()),
+            runtime,
+        )
+        is False
+    )
 
 
 def test_elliptic_linear_coast_matches_hcw_for_circular_chief() -> None:
@@ -1655,9 +1664,7 @@ def test_target_pair_camera_centers_ri_between_current_satellites() -> None:
 
 
 def test_level_zero_target_pair_camera_keeps_target_centered() -> None:
-    config_path = (
-        Path(__file__).resolve().parents[1] / "game" / "configs" / "game_training_rpo_00_tutorial.yaml"
-    )
+    config_path = Path(__file__).resolve().parents[1] / "game" / "configs" / "game_training_rpo_00_tutorial.yaml"
     config = SimulationConfig.from_yaml(config_path)
     dashboard = object.__new__(PygameRPODashboard)
     dashboard.camera_mode = game_runner._game_camera_mode(config)
@@ -1921,7 +1928,10 @@ def test_nmc_nominal_curve_is_hidden_when_boundaries_exist() -> None:
     dashboard.goal_nmt_element_tolerance_km = 0.2
 
     assert dashboard._nmt_points().size > 0
-    assert game_pygame_dashboard._should_draw_nominal_nmt(dashboard._nmt_points(), dashboard._nmt_boundary_points()) is False
+    assert (
+        game_pygame_dashboard._should_draw_nominal_nmt(dashboard._nmt_points(), dashboard._nmt_boundary_points())
+        is False
+    )
     assert game_pygame_dashboard._should_draw_nominal_nmt(dashboard._nmt_points(), ()) is True
 
 

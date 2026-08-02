@@ -22,8 +22,17 @@ class MCPPathPolicy:
         read_roots: tuple[str | Path, ...] | None = None,
         write_roots: tuple[str | Path, ...] | None = None,
     ) -> MCPPathPolicy:
-        reads = read_roots or _roots_from_environment("OEL_MCP_READ_ROOTS") or _legacy_roots() or (ROOT,)
-        writes = write_roots or _roots_from_environment("OEL_MCP_WRITE_ROOTS") or reads
+        legacy_roots = _legacy_roots()
+        reads = (
+            tuple(read_roots)
+            if read_roots is not None
+            else _roots_from_environment("OEL_MCP_READ_ROOTS") or legacy_roots or (ROOT,)
+        )
+        writes = (
+            tuple(write_roots)
+            if write_roots is not None
+            else _roots_from_environment("OEL_MCP_WRITE_ROOTS") or legacy_roots
+        )
         return cls(
             read_roots=tuple(Path(root).expanduser().resolve() for root in reads),
             write_roots=tuple(Path(root).expanduser().resolve() for root in writes),

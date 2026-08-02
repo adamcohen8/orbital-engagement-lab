@@ -60,17 +60,24 @@ class RCSAllocationAwareController(Controller):
     mass_kg: float = 100.0
     allocation_mode: Literal["force_only", "torque_only", "force_torque"] = "force_only"
     torque_body_nm: np.ndarray | None = None
+    attitude_quat_slice: tuple[int, int] = (6, 10)
 
     def __post_init__(self) -> None:
         self.base_controller = _construct_controller(self.base_controller)
         self.thrusters = tuple(dict(row or {}) for row in self.thrusters)
+        if self.attitude_quat_slice[1] - self.attitude_quat_slice[0] != 4:
+            raise ValueError("attitude_quat_slice must select exactly 4 elements.")
 
     def act(self, belief: StateBelief, t_s: float, budget_ms: float) -> Command:
         base = self.base_controller.act(belief, t_s, budget_ms)
         desired_force_n = np.array(base.thrust_eci_km_s2, dtype=float).reshape(3) * float(max(self.mass_kg, 0.0)) * 1e3
         c_bn = np.eye(3)
-        if belief.state.size >= 10:
-            c_bn = quaternion_to_dcm_bn(np.array(belief.state[6:10], dtype=float).reshape(4))
+        i0, i1 = self.attitude_quat_slice
+        if belief.state.size >= max(i1, 13):
+            q = np.array(belief.state[i0:i1], dtype=float).reshape(4)
+            q_norm = float(np.linalg.norm(q))
+            if np.all(np.isfinite(q)) and q_norm > 0.0:
+                c_bn = quaternion_to_dcm_bn(q / q_norm)
         desired_force_body_n = c_bn @ desired_force_n
         desired_torque = (
             np.array(base.torque_body_nm, dtype=float).reshape(3)

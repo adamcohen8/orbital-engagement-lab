@@ -63,11 +63,11 @@ def _call_anthropic(
         data=json.dumps(body).encode("utf-8"),
         headers={
             "Content-Type": "application/json",
-            "x-api-key": api_key,
             "anthropic-version": version,
         },
         method="POST",
     )
+    _add_nonredirected_secret_header(request, "x-api-key", api_key)
     with urllib.request.urlopen(request, timeout=timeout_s) as response:
         raw = response.read().decode("utf-8")
     payload = json.loads(raw)

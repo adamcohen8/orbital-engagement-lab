@@ -21,7 +21,9 @@ PRODUCT_TEST_FILES = {
     "test_game_runtime_input.py",
     "test_game_scenarios_arcade.py",
     "test_game_training.py",
+    "test_interchange_phase1.py",
     "test_output_index.py",
+    "test_oel_agents.py",
     "test_plotting_public.py",
     "test_product_contracts.py",
     "test_public_export_check.py",
@@ -56,6 +58,7 @@ FAST_TEST_FILES = {
     "test_api_plugin_validation.py",
     "test_config_api_architecture.py",
     "test_doctor.py",
+    "test_interchange_phase1.py",
     "test_orbit_integrators.py",
     "test_public_imports.py",
     "test_platform_compat.py",
@@ -80,6 +83,7 @@ SLOW_TESTS = {
     ("test_agent_task.py", "test_agent_task_recipe_with_plots_writes_plot_summary"),
     ("test_dynamics_orbit_determination.py", "test_fit_orbit_cli_writes_reviewable_artifacts"),
     ("test_dynamics_orbit_determination.py", "test_attitude_aware_cd_scale_moves_toward_synthetic_truth"),
+    ("test_interchange_phase2.py", "test_golden_dynamics_od_workflow_emits_accepted_product_ready_for_onp"),
     (
         "test_dynamics_orbit_determination.py",
         "test_dynamics_orbit_determination_detects_synthetic_maneuver",
@@ -142,6 +146,45 @@ EXTERNAL_TEST_FILES = {
     "test_" + "c" + "f" + "s" + "_sil.py",
 }
 
+EXTERNAL_TESTS = {
+    (
+        "test_attitude_actuator_basilisk_validation.py",
+        "test_basilisk_reaction_wheel_pd_rate_recovery_error_contracts_when_available",
+    ),
+    (
+        "test_attitude_actuator_basilisk_validation.py",
+        "test_basilisk_reaction_wheel_state_history_matches_oel_when_available",
+    ),
+    (
+        "test_attitude_actuator_basilisk_validation.py",
+        "test_basilisk_single_axis_reaction_wheel_matches_oel_sign_and_momentum_when_available",
+    ),
+    (
+        "test_attitude_actuator_basilisk_validation.py",
+        "test_basilisk_three_axis_reaction_wheels_match_oel_axis_mapping_when_available",
+    ),
+    (
+        "test_attitude_reference_validation.py",
+        "test_basilisk_centered_dipole_direct_torque_matches_oel_equation_when_available",
+    ),
+    (
+        "test_attitude_reference_validation.py",
+        "test_basilisk_centered_dipole_field_matches_oel_when_available",
+    ),
+    (
+        "test_attitude_reference_validation.py",
+        "test_basilisk_exponential_density_matches_oel_default_when_available",
+    ),
+    (
+        "test_attitude_reference_validation.py",
+        "test_basilisk_exponential_drag_direct_force_torque_matches_oel_equation_when_available",
+    ),
+    (
+        "test_attitude_reference_validation.py",
+        "test_basilisk_runner_has_clean_optional_dependency_boundary",
+    ),
+}
+
 
 def _test_filename(item: pytest.Item) -> str:
     return Path(str(item.fspath)).name
@@ -168,5 +211,5 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             item.add_marker(pytest.mark.compiled)
         if (filename, _test_function_name(item)) in SLOW_TESTS:
             item.add_marker(pytest.mark.slow)
-        if filename in EXTERNAL_TEST_FILES:
+        if filename in EXTERNAL_TEST_FILES or (filename, _test_function_name(item)) in EXTERNAL_TESTS:
             item.add_marker(pytest.mark.external)

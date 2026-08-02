@@ -75,6 +75,9 @@ missing, the scenario did not record that evidence path.
 | `run_metadata` | `scenario_name`, `duration_s`, `dt_s`, `samples`, `oel_version`, `review_schema_version` |
 | `objects` | `object_id`, `object_type`, `role`, `mass_initial_kg` |
 | `object_state` | `sample_index`, `time_s`, `object_id`, `pos_x_eci_km`, `pos_y_eci_km`, `pos_z_eci_km`, `vel_x_eci_km_s`, `vel_y_eci_km_s`, `vel_z_eci_km_s` |
+| `object_propagation` | `object_id`, `propagation_method`, `general_model`, `native_frame`, `output_frame`, `frame_transform`, `tle_epoch_jd_utc`, `tle_age_start_days`, `tle_age_end_days` |
+| `object_state_frame` | `object_id`, `state_frame` |
+| `object_state_covariance` | `sample_index`, `time_s`, `object_id`, `frame`, `component_order_json`, `units_json`, `covariance_json`, `mathematically_valid`, `calibrated`, `calibration_scope`, `source` |
 | `object_state` attitude fields | `quat_w`, `quat_x`, `quat_y`, `quat_z`, `omega_x_rad_s`, `omega_y_rad_s`, `omega_z_rad_s` |
 | `relative_state` | `time_s`, `deputy_id`, `chief_id`, `r_radial_km`, `i_intrack_km`, `c_crosstrack_km`, `range_km`, `range_rate_km_s` |
 | `thrust` | `time_s`, `object_id`, `burn_active`, `accel_norm_km_s2` |
@@ -164,6 +167,16 @@ Events:
 
 ## Passive Propagation
 
+Continuous OGP propagation and frame contract:
+
+```bash
+.venv/bin/python -m sim.review outputs/<scenario_name> --saved-query ogp_propagation_contract --json
+```
+
+The OGP product's native/output frame and the canonical review-state frame are
+separate fields. Do not infer continuous OGP behavior from a TLE alone; require
+`propagation_method: general` and the expected `general_model` row.
+
 Final object state:
 
 ```bash
@@ -195,7 +208,7 @@ Relative state samples:
 Closest approach from time history:
 
 ```bash
-.venv/bin/python -m sim.review outputs/<scenario_name> --query "SELECT time_s, deputy_id, chief_id, range_km, range_rate_km_s FROM relative_state ORDER BY range_km ASC LIMIT 1"
+.venv/bin/python -m sim.review outputs/<scenario_name> --query "SELECT time_s, deputy_id, chief_id, range_km, range_rate_km_s FROM relative_state WHERE range_km IS NOT NULL ORDER BY range_km ASC LIMIT 1"
 ```
 
 Final relative state:

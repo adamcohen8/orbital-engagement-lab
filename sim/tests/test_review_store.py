@@ -7,6 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import numpy as np
 import pytest
 import yaml
 
@@ -19,6 +20,7 @@ from sim.reporting.review_store import (
     REVIEW_SCHEMA_COMPATIBILITY_POLICY,
     REVIEW_SCHEMA_STABLE_TABLES,
     REVIEW_SCHEMA_VERSION,
+    _insert_events,
 )
 from sim.review import (
     EVIDENCE_PLOT_RECIPES,
@@ -247,6 +249,45 @@ def test_saved_review_queries_have_machine_readable_contract() -> None:
         assert "read-only SELECT/WITH" in str(exc)
     else:  # pragma: no cover - defensive assertion branch
         raise AssertionError("SavedReviewQuery accepted mutating SQL")
+
+
+def test_review_burn_events_use_applied_interval_boundaries() -> None:
+    with sqlite3.connect(":memory:") as conn:
+        conn.execute(
+            """
+            CREATE TABLE events (
+                event_id TEXT PRIMARY KEY,
+                time_s REAL,
+                sample_index INTEGER,
+                object_id TEXT,
+                event_type TEXT,
+                severity TEXT,
+                message TEXT,
+                source TEXT
+            )
+            """
+        )
+        _insert_events(
+            conn,
+            t_s=np.array([0.0, 1.0, 2.0, 3.0], dtype=float),
+            summary={},
+            thrust_hist={
+                "chaser": np.array(
+                    [
+                        [np.nan, np.nan, np.nan],
+                        [1.0e-6, 0.0, 0.0],
+                        [1.0e-6, 0.0, 0.0],
+                        [0.0, 0.0, 0.0],
+                    ],
+                    dtype=float,
+                )
+            },
+        )
+        rows = conn.execute(
+            "SELECT event_type, time_s, sample_index FROM events ORDER BY time_s, event_type"
+        ).fetchall()
+
+    assert rows == [("burn_start", 0.0, 0), ("burn_end", 2.0, 2)]
 
 
 def test_flagship_scale_burn_activity_uses_vetted_saved_query_budget(tmp_path: Path) -> None:

@@ -214,11 +214,15 @@ Current bundled task recipes include:
   Maturity: `supported`.
 - `ground_access_review`: public ground-access example with station/object
   access summaries and no-access reason counts. Maturity: `supported`.
+- `ogp_sgp4_review`: fixed public TLE propagated continuously through passive
+  OGP-SGP4 with propagation/frame provenance, final canonical ECI state, and a
+  review-store position plot. Maturity: `supported`.
 
 ## Plot Recipes
 
 Current bundled plot recipes include:
 
+- `object_eci_radius`: maturity `supported`, table `object_state`
 - `relative_range`: maturity `supported`, table `relative_state`
 - `relative_range_rate`: maturity `supported`, table `relative_state`
 - `burn_activity`: maturity `supported`, table `thrust`

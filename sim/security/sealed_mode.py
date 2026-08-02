@@ -29,6 +29,7 @@ class SealedModePolicy:
     allow_custom_ai_endpoints: bool = False
     allow_non_loopback_sil: bool = False
     allow_high_detail_outputs: bool = False
+    allow_gravity_model_downloads: bool = False
     trusted_plugin_prefixes: tuple[str, ...] = _TRUSTED_PLUGIN_PREFIXES
 
 
@@ -36,7 +37,12 @@ def sealed_mode_enabled(explicit: bool = False) -> bool:
     return bool(explicit or os.environ.get("OEL_SEALED_MODE", "").strip().lower() in {"1", "true", "yes", "on"})
 
 
-def validate_sealed_mode(cfg: Any, policy: SealedModePolicy | None = None) -> list[str]:
+def validate_sealed_mode(
+    cfg: Any,
+    policy: SealedModePolicy | None = None,
+    *,
+    offline_ai_operation: bool = False,
+) -> list[str]:
     policy = policy or SealedModePolicy()
     errors: list[str] = []
     errors.extend(_validate_plugin_modules(cfg, policy))
@@ -46,6 +52,7 @@ def validate_sealed_mode(cfg: Any, policy: SealedModePolicy | None = None) -> li
             "outputs.ai_report",
             policy,
             enabled_default=False,
+            offline_operation=offline_ai_operation,
         )
     )
     errors.extend(
@@ -54,10 +61,12 @@ def validate_sealed_mode(cfg: Any, policy: SealedModePolicy | None = None) -> li
             "outputs.ai_config",
             policy,
             enabled_default=True,
+            offline_operation=offline_ai_operation,
         )
     )
     errors.extend(_validate_sil_networking(cfg, policy))
-    errors.extend(_validate_output_retention(cfg, policy))
+    errors.extend(_validate_gravity_model_downloads(cfg, policy))
+    errors.extend(_validate_output_retention(cfg, policy, offline_ai_operation=offline_ai_operation))
     return errors
 
 
@@ -116,8 +125,11 @@ def _validate_ai_section(
     policy: SealedModePolicy,
     *,
     enabled_default: bool,
+    offline_operation: bool = False,
 ) -> list[str]:
     errors: list[str] = []
+    if offline_operation:
+        return errors
     provider = str(ai_cfg.get("provider", "ollama") or "ollama").strip().lower()
     live_call_enabled = bool(ai_cfg.get("enabled", enabled_default)) and not bool(ai_cfg.get("dry_run", False))
     if live_call_enabled and provider in _HOSTED_AI_PROVIDERS and not policy.allow_hosted_ai:
@@ -170,29 +182,58 @@ def _is_loopback_host(host: str) -> bool:
     return normalized in _LOOPBACK_HOSTS
 
 
-def _validate_output_retention(cfg: Any, policy: SealedModePolicy) -> list[str]:
+def _validate_gravity_model_downloads(cfg: Any, policy: SealedModePolicy) -> list[str]:
+    if policy.allow_gravity_model_downloads:
+        return []
+    dynamics = dict(getattr(getattr(cfg, "simulator", None), "dynamics", {}) or {})
+    orbit = dict(dynamics.get("orbit", {}) or {})
+    spherical_harmonics = dict(orbit.get("spherical_harmonics", {}) or {})
+    if not bool(spherical_harmonics.get("enabled", False)):
+        return []
+    source = str(
+        spherical_harmonics.get("source", spherical_harmonics.get("model", "")) or ""
+    ).strip().lower()
+    has_explicit_coefficients = spherical_harmonics.get("coeff_path") not in (None, "") or (
+        spherical_harmonics.get("source_path") not in (None, "")
+    )
+    if source != "egm96" or has_explicit_coefficients or not bool(spherical_harmonics.get("allow_download", True)):
+        return []
+    return [
+        "simulator.dynamics.orbit.spherical_harmonics.allow_download: sealed mode blocks gravity-model downloads. "
+        "Set allow_download: false to require a verified cached copy, provide an explicit coefficient path, or pass "
+        "--allow-gravity-model-downloads for an approved environment."
+    ]
+
+
+def _validate_output_retention(
+    cfg: Any,
+    policy: SealedModePolicy,
+    *,
+    offline_ai_operation: bool = False,
+) -> list[str]:
     if policy.allow_high_detail_outputs:
         return []
     outputs = getattr(cfg, "outputs", None)
     errors: list[str] = []
-    stats = dict(getattr(outputs, "stats", {}) or {})
-    if bool(stats.get("save_full_log", True)):
-        errors.append(
-            "outputs.stats.save_full_log: sealed mode blocks full run logs. "
-            "Set save_full_log: false or pass --allow-high-detail-outputs for approved retention."
-        )
-    review = dict(getattr(outputs, "review", {}) or {})
-    if str(review.get("detail", "standard") or "standard").strip().lower() == "full":
-        errors.append(
-            "outputs.review.detail: sealed mode blocks detail='full'. "
-            "Use compact/standard review detail or pass --allow-high-detail-outputs for approved retention."
-        )
-    monte_carlo = dict(getattr(outputs, "monte_carlo", {}) or {})
-    if bool(monte_carlo.get("save_raw_runs", False)):
-        errors.append(
-            "outputs.monte_carlo.save_raw_runs: sealed mode blocks raw Monte Carlo run payloads. "
-            "Set save_raw_runs: false or pass --allow-high-detail-outputs for approved retention."
-        )
+    if not offline_ai_operation:
+        stats = dict(getattr(outputs, "stats", {}) or {})
+        if bool(stats.get("save_full_log", True)):
+            errors.append(
+                "outputs.stats.save_full_log: sealed mode blocks full run logs. "
+                "Set save_full_log: false or pass --allow-high-detail-outputs for approved retention."
+            )
+        review = dict(getattr(outputs, "review", {}) or {})
+        if str(review.get("detail", "standard") or "standard").strip().lower() == "full":
+            errors.append(
+                "outputs.review.detail: sealed mode blocks detail='full'. "
+                "Use compact/standard review detail or pass --allow-high-detail-outputs for approved retention."
+            )
+        monte_carlo = dict(getattr(outputs, "monte_carlo", {}) or {})
+        if bool(monte_carlo.get("save_raw_runs", False)):
+            errors.append(
+                "outputs.monte_carlo.save_raw_runs: sealed mode blocks raw Monte Carlo run payloads. "
+                "Set save_raw_runs: false or pass --allow-high-detail-outputs for approved retention."
+            )
     ai_report = dict(getattr(outputs, "ai_report", {}) or {})
     if bool(ai_report.get("enabled", False)):
         data_scope = str(ai_report.get("data_scope", "summary_only") or "summary_only").strip().lower()

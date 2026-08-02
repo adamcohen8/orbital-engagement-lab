@@ -98,6 +98,9 @@ def _normalize_spherical_harmonics_section(value: Any) -> dict[str, Any]:
             _reject_unknown_fields(term, term_path, {"n", "m", "c_nm", "s_nm", "c", "s", "normalized"})
             if "n" not in term or "m" not in term:
                 raise ValueError(f"{term_path} requires integer n and m fields.")
+            coefficient_keys = {"c_nm", "s_nm", "c", "s"} & set(term)
+            if not coefficient_keys:
+                raise ValueError(f"{term_path} requires at least one C or S coefficient field.")
             n = _parse_nonnegative_int(term["n"], f"{term_path}.n")
             m = _parse_nonnegative_int(term["m"], f"{term_path}.m")
             if n < 2:
@@ -106,6 +109,8 @@ def _normalize_spherical_harmonics_section(value: Any) -> dict[str, Any]:
                 raise ValueError(f"{term_path}.m must satisfy 0 <= m <= n.")
             term["n"] = n
             term["m"] = m
+            for key in coefficient_keys:
+                term[key] = _parse_float(term[key], f"{term_path}.{key}")
             if "normalized" in term:
                 term["normalized"] = _parse_bool(term["normalized"], f"{term_path}.normalized")
             normalized_terms.append(term)
@@ -144,6 +149,11 @@ def _normalize_reentry_termination_block(
     fill_bool_defaults: bool,
 ) -> dict[str, Any]:
     termination = _as_dict(value, path)
+    _reject_unknown_fields(
+        termination,
+        path,
+        {"enabled", "terminate_on_entry", *_REENTRY_TERMINATION_LIMIT_FIELDS},
+    )
     if fill_bool_defaults or "enabled" in termination:
         termination["enabled"] = _parse_bool(
             termination.get("enabled", False),
@@ -168,6 +178,19 @@ def _normalize_reentry_section(dynamics: dict[str, Any]) -> dict[str, Any]:
     if "reentry" not in out:
         return out
     raw = _as_dict(out.get("reentry"), "simulator.dynamics.reentry")
+    _reject_unknown_fields(
+        raw,
+        "simulator.dynamics.reentry",
+        {
+            "enabled",
+            "begin_altitude_km",
+            "object_ids",
+            "nose_radius_m",
+            "heat_rate_coefficient",
+            "atmosphere_model",
+            "termination",
+        },
+    )
     normalized = dict(raw)
     normalized["enabled"] = _parse_bool(
         normalized.get("enabled", False),
@@ -390,6 +413,11 @@ def _normalize_dynamics_section(value: dict[str, Any]) -> dict[str, Any]:
         "simulator.dynamics.attitude",
         {"enabled", "attitude_substep_s", "disturbance_torques", "guardrail_policy"},
     )
+    guardrail_policy = str(attitude.get("guardrail_policy", "error") or "error").strip().lower()
+    if guardrail_policy not in {"sanitize", "error"}:
+        raise ValueError("simulator.dynamics.attitude.guardrail_policy must be one of: sanitize, error.")
+    if "guardrail_policy" in attitude:
+        attitude["guardrail_policy"] = guardrail_policy
     dynamics["orbit"] = orbit
     dynamics["attitude"] = attitude
     return _normalize_reentry_section(dynamics)
@@ -483,10 +511,26 @@ def _parse_simulator_execution_section(value: Any) -> dict[str, Any]:
     backend = str(object_parallelism.get("backend", "serial") or "serial").strip().lower()
     if backend not in {"serial", "process_pool"}:
         raise ValueError("simulator.execution.object_parallelism.backend must be one of: serial, process_pool.")
-    workers = int(object_parallelism.get("workers", 0) or 0)
-    max_workers = int(object_parallelism.get("max_workers", 0) or 0)
-    reserve_workers = int(object_parallelism.get("reserve_workers", 1) or 0)
-    min_objects = int(object_parallelism.get("min_objects", 3) or 0)
+    raw_workers = object_parallelism.get("workers", 0)
+    raw_max_workers = object_parallelism.get("max_workers", 0)
+    raw_reserve_workers = object_parallelism.get("reserve_workers", 1)
+    raw_min_objects = object_parallelism.get("min_objects", 3)
+    workers = _parse_nonnegative_int(
+        0 if raw_workers is None else raw_workers,
+        "simulator.execution.object_parallelism.workers",
+    )
+    max_workers = _parse_nonnegative_int(
+        0 if raw_max_workers is None else raw_max_workers,
+        "simulator.execution.object_parallelism.max_workers",
+    )
+    reserve_workers = _parse_nonnegative_int(
+        0 if raw_reserve_workers is None else raw_reserve_workers,
+        "simulator.execution.object_parallelism.reserve_workers",
+    )
+    min_objects = _parse_nonnegative_int(
+        0 if raw_min_objects is None else raw_min_objects,
+        "simulator.execution.object_parallelism.min_objects",
+    )
     if workers < 0:
         raise ValueError("simulator.execution.object_parallelism.workers must be >= 0.")
     if max_workers < 0:

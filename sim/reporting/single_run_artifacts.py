@@ -38,6 +38,7 @@ class SingleRunArtifactContext:
     rocket_metrics: dict[str, np.ndarray]
     reentry_metrics: dict[str, dict[str, np.ndarray]]
     bridge_hist: dict[str, list[dict[str, Any]]]
+    object_state_frames: dict[str, str]
 
 
 def format_single_run_summary(summary: dict[str, Any]) -> str:
@@ -147,6 +148,18 @@ def write_single_run_artifacts(
     )
     if mission_recovery:
         summary["mission_recovery"] = mission_recovery
+        if source_path is not None and dict(mission_recovery.get("planner", {}) or {}).get("candidates"):
+            try:
+                from sim.interchange.adapters.planning import emit_mission_recovery_scenario_patches
+
+                emission = emit_mission_recovery_scenario_patches(
+                    mission_recovery,
+                    source_scenario=source_path,
+                    output_dir=context.outdir / "scenario_patches",
+                )
+            except (OSError, ValueError) as exc:
+                emission = {"status": "not_emitted", "reason": str(exc), "selection_required": True}
+            mission_recovery["scenario_patch_emission"] = emission
     plot_outputs = _plot_outputs(
         cfg=context.cfg,
         t_s=context.t_s,
@@ -204,6 +217,10 @@ def write_single_run_artifacts(
             summary["history_binary_outputs"] = history_outputs
             payload["history_binary_outputs"] = history_outputs
             artifacts["history_npz"] = str(history_outputs["npz"])
+    else:
+        stale_history = context.outdir / "master_run_history.npz"
+        if stale_history.exists():
+            stale_history.unlink()
     if bool(context.cfg.outputs.stats.get("save_json", True)):
         artifacts["summary_json"] = str(context.outdir / "master_run_summary.json")
     if bool(context.cfg.outputs.stats.get("save_full_log", True)):
@@ -366,6 +383,10 @@ def _write_review_store(
     except Exception as exc:
         if bool(review_cfg.strict):
             raise
+        review_dir = context.outdir / "review"
+        for stale_path in (review_dir / "run.sqlite", review_dir / "schema.json"):
+            if stale_path.exists():
+                stale_path.unlink()
         status = f"failed:{type(exc).__name__}: {exc}"
         payload.setdefault("summary", {})["review_store_status"] = status
         return {}
@@ -413,6 +434,10 @@ def _add_relative_range_summary(*, summary: dict[str, Any], context: SingleRunAr
     if len(pair) != 2:
         return
     deputy_id, chief_id = pair
+    deputy_frame = str(context.object_state_frames.get(deputy_id, "eci") or "eci").strip().lower()
+    chief_frame = str(context.object_state_frames.get(chief_id, "eci") or "eci").strip().lower()
+    if deputy_frame != chief_frame:
+        return
     deputy = context.truth_hist.get(deputy_id)
     chief = context.truth_hist.get(chief_id)
     if deputy is None or chief is None or deputy.ndim != 2 or chief.ndim != 2:

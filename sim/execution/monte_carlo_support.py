@@ -136,47 +136,55 @@ def assess_mc_run(
     term_reason_txt = str(term_reason) if term_reason is not None else "none"
     terminated_early = bool(summary.get("terminated_early", False))
     closest_approach_km = safe_float(run_entry.get("closest_approach_km"))
-    duration_s = safe_float(summary.get("duration_s"), default=0.0)
-    guardrail_map = dict(summary.get("attitude_guardrail_stats", {}) or {})
+    duration_s = safe_float(summary.get("duration_s"))
+    guardrail_raw = summary.get("attitude_guardrail_stats")
+    guardrail_map = dict(guardrail_raw or {}) if isinstance(guardrail_raw, dict) else {}
     guardrail_events = int(sum(int(v) for v in guardrail_map.values())) if guardrail_map else 0
-    thrust_stats = dict(summary.get("thrust_stats", {}) or {})
+    thrust_stats_raw = summary.get("thrust_stats")
+    thrust_stats = dict(thrust_stats_raw or {}) if isinstance(thrust_stats_raw, dict) else {}
     total_dv_m_s_by_object = {
-        str(oid): safe_float(dict(ts or {}).get("total_dv_m_s"), default=0.0) for oid, ts in thrust_stats.items()
+        str(oid): safe_float(dict(ts or {}).get("total_dv_m_s")) for oid, ts in thrust_stats.items()
     }
     total_dv_m_s_total = (
-        float(np.sum(np.array(list(total_dv_m_s_by_object.values()), dtype=float))) if total_dv_m_s_by_object else 0.0
+        float(np.sum(np.array(list(total_dv_m_s_by_object.values()), dtype=float)))
+        if total_dv_m_s_by_object and all(np.isfinite(value) for value in total_dv_m_s_by_object.values())
+        else float("nan")
     )
 
     fail_reasons: list[str] = []
+    if not np.isfinite(duration_s):
+        fail_reasons.append("missing:duration_s")
+    if not np.isfinite(total_dv_m_s_total):
+        fail_reasons.append("missing:total_dv_m_s")
     if terminated_early and term_reason_txt not in success_termination_reasons:
         fail_reasons.append(f"terminated_early:{term_reason_txt}")
     if require_rocket_insertion and (not bool(summary.get("rocket_insertion_achieved", False))):
         fail_reasons.append("rocket_insertion_not_achieved")
 
     min_closest_approach_km = safe_float(legacy_gates.get("min_closest_approach_km"))
-    if (
-        np.isfinite(min_closest_approach_km)
-        and np.isfinite(closest_approach_km)
-        and closest_approach_km < min_closest_approach_km
-    ):
-        fail_reasons.append("gate:min_closest_approach_km")
+    if np.isfinite(min_closest_approach_km):
+        if not np.isfinite(closest_approach_km) or closest_approach_km < min_closest_approach_km:
+            fail_reasons.append("gate:min_closest_approach_km")
 
     max_duration_s = safe_float(legacy_gates.get("max_duration_s"))
-    if np.isfinite(max_duration_s) and duration_s > max_duration_s:
-        fail_reasons.append("gate:max_duration_s")
+    if np.isfinite(max_duration_s):
+        if not np.isfinite(duration_s) or duration_s > max_duration_s:
+            fail_reasons.append("gate:max_duration_s")
 
     max_guardrail_events = safe_float(legacy_gates.get("max_guardrail_events"))
-    if np.isfinite(max_guardrail_events) and float(guardrail_events) > max_guardrail_events:
-        fail_reasons.append("gate:max_guardrail_events")
+    if np.isfinite(max_guardrail_events):
+        if not isinstance(guardrail_raw, dict) or float(guardrail_events) > max_guardrail_events:
+            fail_reasons.append("gate:max_guardrail_events")
 
     max_total_dv_m_s = safe_float(legacy_gates.get("max_total_dv_m_s"))
-    if np.isfinite(max_total_dv_m_s) and total_dv_m_s_total > max_total_dv_m_s:
-        fail_reasons.append("gate:max_total_dv_m_s")
+    if np.isfinite(max_total_dv_m_s):
+        if not np.isfinite(total_dv_m_s_total) or total_dv_m_s_total > max_total_dv_m_s:
+            fail_reasons.append("gate:max_total_dv_m_s")
 
     max_dv_by_object = coerce_numeric_map(legacy_gates.get("max_total_dv_m_s_by_object"))
     for oid, dv_limit in max_dv_by_object.items():
-        dv = safe_float(total_dv_m_s_by_object.get(oid), default=0.0)
-        if dv > dv_limit:
+        dv = safe_float(total_dv_m_s_by_object.get(oid))
+        if not np.isfinite(dv) or dv > dv_limit:
             fail_reasons.append(f"gate:max_total_dv_m_s_by_object:{oid}")
 
     metric_gate_results = evaluate_study_metric_gates(run_entry, metric_gates)

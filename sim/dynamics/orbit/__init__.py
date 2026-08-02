@@ -145,6 +145,7 @@ _export(
     "SGP4_DEEP_SPACE_PERIOD_THRESHOLD_MIN",
     "SGP4BatchResult",
     "SGP4EphemerisProvider",
+    "SGP4EphemerisState",
     "SGP4State",
     "sgp4_propagate_teme",
     "sgp4_propagate_teme_batch_numba",

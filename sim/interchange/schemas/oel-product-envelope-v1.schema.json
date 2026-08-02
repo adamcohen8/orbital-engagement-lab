@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orbitalengagementlab.com/schemas/oel-product-envelope-v1.schema.json",
+  "title": "OEL Product Envelope v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "product_kind",
+    "product_id",
+    "created_utc",
+    "producer",
+    "payload",
+    "quality",
+    "freshness",
+    "provenance",
+    "data_markings"
+  ],
+  "properties": {
+    "schema_id": {"const": "oel-product-envelope-v1"},
+    "schema_version": {"const": 1},
+    "product_kind": {"type": "string", "pattern": "^oel\\.[a-z0-9_.-]+$"},
+    "product_id": {"type": "string", "pattern": "^oel\\.[a-z0-9_.-]+:[0-9a-f]{64}$"},
+    "created_utc": {"type": "string", "format": "date-time"},
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["capability_id", "oel_version"],
+      "properties": {
+        "capability_id": {"type": "string", "minLength": 1},
+        "oel_version": {"type": "string", "minLength": 1},
+        "run_id": {"type": ["string", "null"]}
+      }
+    },
+    "payload": {"type": "object"},
+    "quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["disposition", "producer_status", "gates", "warnings", "non_claims"],
+      "properties": {
+        "disposition": {
+          "enum": ["accepted", "review_required", "ambiguous", "rejected", "unknown"]
+        },
+        "producer_status": {"type": "string", "minLength": 1},
+        "gates": {"type": "object"},
+        "warnings": {"type": "array", "items": {"type": "string"}},
+        "non_claims": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "freshness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["integrity_status", "age_status", "policy"],
+      "properties": {
+        "integrity_status": {"enum": ["current", "stale", "not_evaluated"]},
+        "age_status": {"enum": ["current", "stale", "not_evaluated", "not_applicable"]},
+        "reference_epoch_jd_utc": {"type": ["number", "null"]},
+        "evaluated_utc": {"type": ["string", "null"], "format": "date-time"},
+        "policy": {"type": "object"}
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_artifacts", "source_product_ids", "transformations"],
+      "properties": {
+        "source_artifacts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["artifact_id", "sha256"],
+            "properties": {
+              "artifact_id": {"type": "string", "minLength": 1},
+              "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+              "path": {"type": "string", "minLength": 1},
+              "media_type": {"type": "string", "minLength": 1},
+              "size_bytes": {"type": "integer", "minimum": 0}
+            }
+          }
+        },
+        "source_product_ids": {
+          "type": "array",
+          "items": {"type": "string", "pattern": "^oel\\.[a-z0-9_.-]+:[0-9a-f]{64}$"}
+        },
+        "transformations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["transformation_id", "version", "details"],
+            "properties": {
+              "transformation_id": {"type": "string", "minLength": 1},
+              "version": {"type": "string", "minLength": 1},
+              "details": {"type": "object"}
+            }
+          }
+        }
+      }
+    },
+    "data_markings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope",
+        "handling",
+        "approved_for_public_export",
+        "contains_customer_data",
+        "contains_hidden_truth"
+      ],
+      "properties": {
+        "scope": {"enum": ["public", "private_pro", "customer_restricted", "governed_restricted"]},
+        "handling": {"type": "string", "minLength": 1},
+        "approved_for_public_export": {"type": "boolean"},
+        "contains_customer_data": {"type": "boolean"},
+        "contains_hidden_truth": {"type": "boolean"},
+        "source_markings": {"type": "array", "items": {"type": "object"}}
+      }
+    }
+  }
+}

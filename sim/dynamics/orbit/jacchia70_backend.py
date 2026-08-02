@@ -458,7 +458,11 @@ def jacchia70_density(
         eop_path = env.get("density_eop_path", env.get("drag_eop_path"))
         gast = env.get("jacchia70_gast_rad")
         if gast is None:
-            gast = apparent_sidereal_time_hpop_like(jd_utc, None if eop_path is None else str(eop_path))
+            gast = apparent_sidereal_time_hpop_like(
+                jd_utc,
+                None if eop_path is None else str(eop_path),
+                eop_extrapolation=str(env.get("eop_extrapolation", "error") or "error"),
+            )
         ra_sat = (float(gast) + math.radians(float(lon_deg))) % (2.0 * math.pi)
     else:
         r_sat_eci_km = _position_eci_from_geodetic(float(lat_deg), float(lon_deg), z, jd_utc, env)

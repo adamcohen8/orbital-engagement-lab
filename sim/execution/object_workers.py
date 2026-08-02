@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from multiprocessing.context import BaseContext
+from time import monotonic
 from traceback import format_exc
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -22,6 +23,10 @@ from sim.utils.parallel import restore_env_vars, set_parallel_worker_thread_limi
 
 if TYPE_CHECKING:
     from sim.single_run import _SingleRunEngine
+
+
+_DEFAULT_OBJECT_STEP_RESPONSE_TIMEOUT_S = 300.0
+_DEFAULT_OBJECT_WORKER_SHUTDOWN_TIMEOUT_S = 5.0
 
 
 @dataclass(frozen=True)
@@ -44,6 +49,10 @@ class ObjectStepMessage:
     t_s: float
     t_next: float
     sample_index: int
+    orbit_controller: Any | None = None
+    attitude_controller: Any | None = None
+    mission_strategy: Any | None = None
+    mission_execution: Any | None = None
 
 
 @dataclass(frozen=True)
@@ -141,10 +150,14 @@ class ProcessPoolObjectStepExecutor:
         *,
         max_workers: int,
         context: BaseContext | None = None,
+        response_timeout_s: float = _DEFAULT_OBJECT_STEP_RESPONSE_TIMEOUT_S,
+        shutdown_timeout_s: float = _DEFAULT_OBJECT_WORKER_SHUTDOWN_TIMEOUT_S,
     ) -> None:
         self.engine = engine
         self.max_workers = int(max(1, max_workers))
         self._context = context if context is not None else process_context()
+        self.response_timeout_s = max(0.0, float(response_timeout_s))
+        self.shutdown_timeout_s = max(0.0, float(shutdown_timeout_s))
         self._worker_processes: list[Any] = []
         self._worker_connections: list[Any] = []
         self._executor_index_by_object: dict[str, int] = {}
@@ -203,6 +216,10 @@ class ProcessPoolObjectStepExecutor:
                         t_s=item.t_s,
                         t_next=item.t_next,
                         sample_index=item.sample_index,
+                        orbit_controller=item.agent.orbit_controller,
+                        attitude_controller=item.agent.attitude_controller,
+                        mission_strategy=item.agent.mission_strategy,
+                        mission_execution=item.agent.mission_execution,
                     ),
                 )
             )
@@ -211,7 +228,14 @@ class ProcessPoolObjectStepExecutor:
             for index in active_indices:
                 self._worker_connections[index].send(chunks[index])
             indexed: list[tuple[int, ObjectStepResult]] = []
+            response_deadline = monotonic() + self.response_timeout_s
             for index in active_indices:
+                remaining_s = max(0.0, response_deadline - monotonic())
+                if not self._worker_connections[index].poll(remaining_s):
+                    raise ObjectStepBackendUnavailable(
+                        "Persistent object worker response timed out after "
+                        f"{self.response_timeout_s:.3f} s."
+                    )
                 status, payload = self._worker_connections[index].recv()
                 if status != "ok":
                     message, worker_traceback = payload
@@ -242,12 +266,25 @@ class ProcessPoolObjectStepExecutor:
             except (BrokenPipeError, EOFError, OSError):
                 pass
         for connection in self._worker_connections:
-            connection.close()
+            try:
+                connection.close()
+            except OSError:
+                pass
+        shutdown_deadline = monotonic() + self.shutdown_timeout_s
         for process in self._worker_processes:
-            process.join(timeout=5.0)
+            process.join(timeout=max(0.0, shutdown_deadline - monotonic()))
+        for process in self._worker_processes:
             if process.is_alive():
                 process.terminate()
-                process.join(timeout=5.0)
+        for process in self._worker_processes:
+            if process.is_alive():
+                process.join(timeout=max(0.0, shutdown_deadline - monotonic()))
+        for process in self._worker_processes:
+            if process.is_alive() and hasattr(process, "kill"):
+                process.kill()
+        for process in self._worker_processes:
+            if process.is_alive():
+                process.join(timeout=0.0)
         self._worker_connections.clear()
         self._worker_processes.clear()
         self._executor_index_by_object.clear()
@@ -265,7 +302,10 @@ def _persistent_object_worker_loop(connection: Any, engines: dict[str, _SingleRu
     _persistent_object_workers_init(engines)
     try:
         while True:
-            chunk = connection.recv()
+            try:
+                chunk = connection.recv()
+            except (EOFError, OSError):
+                return
             if chunk is None:
                 return
             try:
@@ -291,10 +331,18 @@ def _persistent_object_step_batch_worker(
     return [(index, _persistent_object_step_worker(message)) for index, message in chunk]
 
 
+def _sync_runtime_components(agent: AgentRuntime, message: ObjectStepMessage) -> None:
+    agent.knowledge_base = message.knowledge_base
+    agent.orbit_controller = message.orbit_controller
+    agent.attitude_controller = message.attitude_controller
+    agent.mission_strategy = message.mission_strategy
+    agent.mission_execution = message.mission_execution
+
+
 def _run_object_step_worker(engine: _SingleRunEngine, message: ObjectStepMessage) -> ObjectStepResult:
     aid = str(message.object_id)
     agent = engine.agents[aid]
-    agent.knowledge_base = message.knowledge_base
+    _sync_runtime_components(agent, message)
     activate_attitude_guardrail_stats(engine.attitude_guardrail_stats)
     guardrail_counts_before = get_attitude_guardrail_stats(engine.attitude_guardrail_stats)
     profiler_enabled = bool(getattr(engine.runtime_profiler, "enabled", True))

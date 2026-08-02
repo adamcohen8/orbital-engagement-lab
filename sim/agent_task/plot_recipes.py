@@ -4,6 +4,25 @@ from sim.agent_task.models import AgentPlotRecipe
 from sim.review.plotting import ReviewPlotSpec
 
 PLOT_RECIPES: dict[str, AgentPlotRecipe] = {
+    "object_eci_radius": AgentPlotRecipe(
+        recipe_id="object_eci_radius",
+        title="Canonical ECI radius",
+        description="Plots canonical ECI radius from the object_state review table.",
+        sql=(
+            "SELECT time_s, object_id, "
+            "sqrt(pos_x_eci_km * pos_x_eci_km + pos_y_eci_km * pos_y_eci_km + "
+            "pos_z_eci_km * pos_z_eci_km) AS radius_km "
+            "FROM object_state ORDER BY object_id, time_s"
+        ),
+        x_column="time_s",
+        y_columns=("radius_km",),
+        group_column="object_id",
+        plot_type="line",
+        x_label="Time (s)",
+        y_label="ECI radius (km)",
+        artifact_id="agent_object_eci_radius",
+        supported_tables=("object_state",),
+    ),
     "relative_range": AgentPlotRecipe(
         recipe_id="relative_range",
         title="Relative range over time",

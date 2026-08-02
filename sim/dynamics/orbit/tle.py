@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import calendar
 import math
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -55,6 +56,78 @@ class TLEElements:
     revolution_number: int
 
 
+_OGP_MEAN_ELEMENT_REQUIRED_FIELDS = (
+    "epoch_jd_utc",
+    "inclination_deg",
+    "raan_deg",
+    "eccentricity",
+    "argp_deg",
+    "mean_anomaly_deg",
+    "mean_motion_rev_per_day",
+)
+
+
+def ogp_mean_elements_from_mapping(value: dict[str, Any]) -> TLEElements:
+    """Build an OGP element set without manufacturing TLE text.
+
+    This is the native interchange path for fitted mean-element products.  The
+    empty ``line1``/``line2`` values are intentional: callers must not imply
+    that fitted floating-point elements are an encoded or checksum-valid TLE.
+    """
+
+    raw = dict(value or {})
+    missing = [name for name in _OGP_MEAN_ELEMENT_REQUIRED_FIELDS if name not in raw]
+    if missing:
+        raise ValueError(f"OGP mean-element state is missing required field(s): {', '.join(missing)}.")
+
+    def finite(name: str, default: float = 0.0) -> float:
+        number = float(raw.get(name, default))
+        if not math.isfinite(number):
+            raise ValueError(f"OGP mean-element field {name} must be finite.")
+        return number
+
+    epoch = finite("epoch_jd_utc")
+    eccentricity = finite("eccentricity")
+    mean_motion = finite("mean_motion_rev_per_day")
+    if epoch <= 0.0:
+        raise ValueError("OGP mean-element epoch_jd_utc must be positive.")
+    if not 0.0 <= eccentricity < 1.0:
+        raise ValueError("OGP mean-element eccentricity must be in [0, 1).")
+    if mean_motion <= 0.0:
+        raise ValueError("OGP mean-element mean_motion_rev_per_day must be positive.")
+    return TLEElements(
+        line1="",
+        line2="",
+        norad_number=str(raw.get("norad_number", "") or ""),
+        classification=str(raw.get("classification", "") or ""),
+        international_designator=str(raw.get("international_designator", "") or ""),
+        epoch_text=str(raw.get("epoch_text", "") or ""),
+        epoch_jd_utc=epoch,
+        mean_motion_derivative_rev_per_day2=finite("mean_motion_derivative_rev_per_day2"),
+        mean_motion_second_derivative_rev_per_day3=finite("mean_motion_second_derivative_rev_per_day3"),
+        bstar=finite("bstar"),
+        ephemeris_type=str(raw.get("ephemeris_type", "") or ""),
+        element_number=int(raw.get("element_number", 0) or 0),
+        inclination_deg=finite("inclination_deg"),
+        raan_deg=finite("raan_deg"),
+        eccentricity=eccentricity,
+        argp_deg=finite("argp_deg"),
+        mean_anomaly_deg=finite("mean_anomaly_deg"),
+        mean_motion_rev_per_day=mean_motion,
+        revolution_number=int(raw.get("revolution_number", 0) or 0),
+    )
+
+
+def ogp_mean_elements_to_mapping(elements: TLEElements) -> dict[str, Any]:
+    """Return the native mean-element fields, deliberately excluding TLE lines."""
+
+    return {
+        name: getattr(elements, name)
+        for name in TLEElements.__dataclass_fields__
+        if name not in {"line1", "line2"}
+    }
+
+
 def tle_epoch_to_julian_date(epoch_text: str) -> float:
     text = str(epoch_text or "").strip()
     if len(text) < 5:
@@ -62,8 +135,11 @@ def tle_epoch_to_julian_date(epoch_text: str) -> float:
     year_two = int(text[:2])
     year = 2000 + year_two if year_two < 57 else 1900 + year_two
     day_of_year = float(text[2:])
-    if day_of_year < 1.0:
-        raise ValueError("TLE epoch day-of-year must be >= 1.")
+    max_day_of_year = 366 if calendar.isleap(year) else 365
+    if not math.isfinite(day_of_year) or not (1.0 <= day_of_year < max_day_of_year + 1.0):
+        raise ValueError(
+            f"TLE epoch day-of-year must be in [1, {max_day_of_year + 1}) for year {year}."
+        )
     day_index = int(math.floor(day_of_year))
     frac_day = day_of_year - day_index
     dt = datetime(year, 1, 1, tzinfo=timezone.utc) + timedelta(days=day_index - 1, seconds=frac_day * 86400.0)
@@ -139,10 +215,12 @@ def parse_tle_lines(line1: str, line2: str, *, require_checksum: bool = False) -
     l2 = str(line2 or "").rstrip("\n")
     if not l1.startswith("1 ") or not l2.startswith("2 "):
         raise ValueError("TLE line1 must start with '1 ' and line2 must start with '2 '.")
-    if len(l1) < 63 or len(l2) < 63:
-        raise ValueError("TLE lines are too short.")
+    if len(l1) != 69 or len(l2) != 69:
+        raise ValueError("TLE lines must contain exactly 69 standard columns.")
     if require_checksum and (not _checksum_ok(l1) or not _checksum_ok(l2)):
         raise ValueError("TLE checksum validation failed.")
+    if l1[2:7] != l2[2:7]:
+        raise ValueError("TLE line1 and line2 NORAD catalog numbers must match.")
 
     ecc_text = l2[26:33].strip()
     if not ecc_text or not ecc_text.isdigit():

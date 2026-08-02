@@ -46,7 +46,7 @@ def prepare_report_packet(
         max_rows=max_rows,
         write_packet=False,
     )
-    artifacts = _artifact_inventory(inspection, source_output_dir=source_output_dir)
+    artifacts, artifacts_truncated = _artifact_inventory(inspection, source_output_dir=source_output_dir)
     required_artifacts_missing = any(row["required"] and not row["exists"] for row in artifacts)
     review = _review_projection(dict(inspection.get("review", {}) or {}))
     query_evidence = _query_evidence(review)
@@ -67,6 +67,14 @@ def prepare_report_packet(
             {
                 "code": "required_report_artifact_missing",
                 "next_step": "Restore or regenerate the required run summary and review store before authoring a report.",
+            }
+        )
+    if artifacts_truncated:
+        failure_hints.append(
+            {
+                "code": "artifact_inventory_truncated",
+                "limit": MAX_PACKET_ARTIFACTS,
+                "next_step": "Narrow the source artifact set or prepare multiple explicitly scoped report packets.",
             }
         )
     evidence_summary = _evidence_summary(
@@ -91,7 +99,8 @@ def prepare_report_packet(
         "review": review,
         "query_evidence": query_evidence,
         "execution_provenance": _report_execution_provenance(source_output_dir),
-        "artifact_summary": _artifact_summary(artifacts),
+        "artifact_summary": {**_artifact_summary(artifacts), "truncated": artifacts_truncated},
+        "artifacts_truncated": artifacts_truncated,
         "required_artifacts_missing": required_artifacts_missing,
         "artifacts": artifacts,
         "failure_hints": failure_hints,
@@ -254,7 +263,9 @@ def audit_report(
     }
 
 
-def _artifact_inventory(inspection: dict[str, Any], *, source_output_dir: Path) -> list[dict[str, Any]]:
+def _artifact_inventory(
+    inspection: dict[str, Any], *, source_output_dir: Path
+) -> tuple[list[dict[str, Any]], bool]:
     rows: list[dict[str, Any]] = []
     seen: set[str] = set()
     artifact_ids: set[str] = set()
@@ -278,8 +289,10 @@ def _artifact_inventory(inspection: dict[str, Any], *, source_output_dir: Path) 
             }
         )
     candidates.extend(dict(item or {}) for item in list(inspection.get("artifacts", []) or []))
+    truncated = False
     for index, raw in enumerate(candidates):
         if len(rows) >= MAX_PACKET_ARTIFACTS:
+            truncated = True
             break
         item = dict(raw or {})
         raw_path = str(item.get("resolved_path") or item.get("path") or "")
@@ -318,7 +331,7 @@ def _artifact_inventory(inspection: dict[str, Any], *, source_output_dir: Path) 
                 "sha256": _sha256_file(path) if exists else "",
             }
         )
-    return rows
+    return rows, truncated
 
 
 def _review_projection(review: dict[str, Any]) -> dict[str, Any]:

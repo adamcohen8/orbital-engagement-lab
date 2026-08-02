@@ -36,7 +36,7 @@ def build_ai_report_packet(
     elif data_scope != "full":
         raise ValueError("outputs.ai_report.data_scope must be one of: summary_only, selected_runs, full.")
 
-    return {
+    return _sanitize_endpoint_fields({
         "generated_utc": datetime.now(timezone.utc).isoformat(),
         "payload_kind": str(payload_kind),
         "scenario": {
@@ -61,10 +61,11 @@ def build_ai_report_packet(
             "user_questions": list(user_questions),
         },
         "user_questions": list(user_questions),
+        "source_provenance": deepcopy(dict(payload.get("ai_report_source_provenance", {}) or {})),
         "artifact_manifest": dict(payload.get("artifacts", {}) or {}),
         "figure_manifest": _build_figure_manifest(cfg=cfg, payload=payload, outdir=None),
         "payload": scoped_payload,
-    }
+    })
 
 
 def _packet_prompt(
@@ -91,11 +92,6 @@ def _packet_prompt(
             " Because user_questions are present, include a fourth top-level section named "
             "`Answers To User Questions` after `Inferences Based on the Data`; answer each question explicitly."
         )
-    truncated = False
-    if max_prompt_chars > 0 and len(packet_json) > max_prompt_chars:
-        packet_json = packet_json[:max_prompt_chars] + "\n... [truncated by outputs.ai_report.max_prompt_chars]"
-        truncated = True
-    truncation_note = "\nThe supplied packet was truncated to fit the configured prompt budget." if truncated else ""
     prompt = (
         f"{prompt_text.strip()}\n\n"
         "Write about the simulation results, not the data format. Use the REPORT SOURCE BRIEF below as your primary source. "
@@ -107,16 +103,20 @@ def _packet_prompt(
         "`[[FIGURE:master_monte_carlo_ops_dashboard]]`; these placeholders will be replaced with images after generation. "
         f"{question_section_instruction} Start directly with the Executive Summary section.\n"
     )
-    if not include_json_appendix:
-        return prompt
-    return (
-        prompt
-        + f"{truncation_note}\n\n"
-        + "SUPPORTING DATA APPENDIX. Use only to verify details. Do not summarize this appendix as a data structure.\n"
-        + "```json\n"
-        + f"{packet_json}\n"
-        + "```"
-    )
+    if include_json_appendix:
+        prompt += (
+            "\n\nSUPPORTING DATA APPENDIX. Use only to verify details. "
+            "Do not summarize this appendix as a data structure.\n"
+            "```json\n"
+            f"{packet_json}\n"
+            "```"
+        )
+    if max_prompt_chars > 0 and len(prompt) > max_prompt_chars:
+        marker = "\n... [truncated by outputs.ai_report.max_prompt_chars]"
+        if max_prompt_chars <= len(marker):
+            return marker[:max_prompt_chars]
+        return prompt[: max_prompt_chars - len(marker)] + marker
+    return prompt
 
 
 def build_ai_report_request(

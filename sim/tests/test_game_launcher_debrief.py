@@ -104,8 +104,12 @@ def test_bonus_cislunar_rendezvous_uses_cr3bp_frame() -> None:
     assert game_runner._game_camera_rule_toggle_enabled(config) is True
     assert game_runner._game_chaser_sprite_path(config) == Path("cislunar_chaser_sprite.png")
     assert game_runner._game_target_sprite_path(config) == Path("cislunar_target_sprite.png")
-    assert (Path(__file__).resolve().parents[1] / "game" / "assets" / game_runner._game_chaser_sprite_path(config)).is_file()
-    assert (Path(__file__).resolve().parents[1] / "game" / "assets" / game_runner._game_target_sprite_path(config)).is_file()
+    assert (
+        Path(__file__).resolve().parents[1] / "game" / "assets" / game_runner._game_chaser_sprite_path(config)
+    ).is_file()
+    assert (
+        Path(__file__).resolve().parents[1] / "game" / "assets" / game_runner._game_target_sprite_path(config)
+    ).is_file()
     assert game_runner._game_chaser_sprite_diameter_km(config) == pytest.approx(0.05)
     assert game_runner._game_target_sprite_diameter_km(config) == pytest.approx(0.12)
     assert game_runner._game_dashboard_fps_cap(config) == pytest.approx(45.0)
@@ -241,28 +245,22 @@ def test_bonus_cislunar_rendezvous_uses_cr3bp_frame() -> None:
 
 
 def test_level3_rbar_approach_uses_iss_target_sprite() -> None:
-    path = (
-        Path(__file__).resolve().parents[2]
-        / "sim"
-        / "game"
-        / "configs"
-        / "game_training_rpo_03_rbar_approach.yaml"
-    )
+    path = Path(__file__).resolve().parents[2] / "sim" / "game" / "configs" / "game_training_rpo_03_rbar_approach.yaml"
     config = SimulationConfig.from_yaml(path)
     sprite_path = game_runner._game_target_sprite_path(config)
 
     assert sprite_path == Path("rpo_iss_target_sprite.png")
     assert (Path(__file__).resolve().parents[1] / "game" / "assets" / sprite_path).is_file()
     assert game_runner._game_target_sprite_diameter_km(config) == pytest.approx(0.11)
-    assert RPOTrainingConfig.from_metadata(dict(config.scenario.metadata or {})).keepout_radius_km == pytest.approx(0.15)
+    assert RPOTrainingConfig.from_metadata(dict(config.scenario.metadata or {})).keepout_radius_km == pytest.approx(
+        0.15
+    )
 
 
 def test_cr3bp_large_l1_halo_seed_is_available_for_cislunar_game() -> None:
     state = cr3bp_halo_seed_state_km_s(family="l1_northern_large")
 
-    assert state - cr3bp_l1_state_km_s() == pytest.approx(
-        [-4288.472449806286, 0.0, 30752.0, 0.0, 0.198451917044, 0.0]
-    )
+    assert state - cr3bp_l1_state_km_s() == pytest.approx([-4288.472449806286, 0.0, 30752.0, 0.0, 0.198451917044, 0.0])
 
 
 def test_cr3bp_l2_nrho_seed_is_available_for_cislunar_game() -> None:
@@ -299,10 +297,16 @@ def test_cr3bp_moon_ric_batched_transform_matches_scalar_rows() -> None:
         dtype=float,
     )
     deputies = np.vstack(
-        [game_pygame_dashboard._moon_ric_rect_state_to_cr3bp(rel, reference) for rel, reference in zip(rel_rows, references)]
+        [
+            game_pygame_dashboard._moon_ric_rect_state_to_cr3bp(rel, reference)
+            for rel, reference in zip(rel_rows, references)
+        ]
     )
     scalar = np.vstack(
-        [game_pygame_dashboard._cr3bp_state_to_moon_ric_rect(deputy, reference) for deputy, reference in zip(deputies, references)]
+        [
+            game_pygame_dashboard._cr3bp_state_to_moon_ric_rect(deputy, reference)
+            for deputy, reference in zip(deputies, references)
+        ]
     )
 
     batched = game_pygame_dashboard._cr3bp_states_to_moon_ric_rect_rows(deputies, references)
@@ -347,8 +351,12 @@ def test_linearized_cr3bp_moon_ric_projection_tracks_nonlinear_for_small_offsets
     rel0 = np.array([0.1, -0.2, 0.05, 1.0e-5, -2.0e-5, 1.5e-5], dtype=float)
     times = np.linspace(0.0, 600.0, 7, dtype=float)
 
-    nonlinear = game_pygame_dashboard._nonlinear_cr3bp_moon_ric_coast_prediction(rel0, target_state=target, times=times, current_t_s=0.0)
-    linearized = game_pygame_dashboard._linearized_cr3bp_moon_ric_coast_prediction(rel0, target_state=target, times=times, current_t_s=0.0)
+    nonlinear = game_pygame_dashboard._nonlinear_cr3bp_moon_ric_coast_prediction(
+        rel0, target_state=target, times=times, current_t_s=0.0
+    )
+    linearized = game_pygame_dashboard._linearized_cr3bp_moon_ric_coast_prediction(
+        rel0, target_state=target, times=times, current_t_s=0.0
+    )
 
     assert linearized.shape == nonlinear.shape
     assert linearized[0] == pytest.approx(rel0)
@@ -387,7 +395,9 @@ def test_game_configs_and_optional_music_packaging_contract() -> None:
     for config_path in (root / "sim/game/configs").glob("*.yaml"):
         cfg = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
         expected_music.update(music_tracks(cfg))
-    package_music = {Path(pattern).name for pattern in package_data if pattern.startswith("game/music/") and pattern.endswith(".wav")}
+    package_music = {
+        Path(pattern).name for pattern in package_data if pattern.startswith("game/music/") and pattern.endswith(".wav")
+    }
 
     assert '"game/configs/*.yaml"' in text
     assert '"game/assets/*.png"' in text
@@ -656,7 +666,9 @@ def test_sandbox_setup_form_validation_and_lines() -> None:
     assert setup is None
     assert error == "Target Eccentricity must satisfy 0 <= e < 1."
 
-    lines = game_runner._sandbox_setup_briefing_lines(["0"] * 9, active_index=2, error="Target Eccentricity must satisfy 0 <= e < 1.")
+    lines = game_runner._sandbox_setup_briefing_lines(
+        ["0"] * 9, active_index=2, error="Target Eccentricity must satisfy 0 <= e < 1."
+    )
 
     assert lines[0] == "Sandbox Setup"
     assert "> Cross-Track C: 0 km" in lines
@@ -896,9 +908,7 @@ def test_launcher_settings_persist_frame_convention_preset(tmp_path: Path, monke
     settings_path = game_launcher._game_settings_path()
     settings_path.parent.mkdir(parents=True, exist_ok=True)
     settings_path.write_text(
-        "frame_convention:\n"
-        f"  preset: {FRAME_CONVENTION_PRESET_SPACE_FORCE}\n"
-        "ask_frame_convention_on_launch: false\n",
+        f"frame_convention:\n  preset: {FRAME_CONVENTION_PRESET_SPACE_FORCE}\nask_frame_convention_on_launch: false\n",
         encoding="utf-8",
     )
 
@@ -969,8 +979,16 @@ def test_frame_convention_dialog_hit_testing() -> None:
         )
         == "space_force"
     )
-    assert game_launcher._frame_convention_dialog_action((checkbox[0] + 3, checkbox[1] + 3), width=1040, height=680) == "dont_ask_again"
-    assert game_launcher._frame_convention_dialog_action((continue_rect[0] + 3, continue_rect[1] + 3), width=1040, height=680) == "continue"
+    assert (
+        game_launcher._frame_convention_dialog_action((checkbox[0] + 3, checkbox[1] + 3), width=1040, height=680)
+        == "dont_ask_again"
+    )
+    assert (
+        game_launcher._frame_convention_dialog_action(
+            (continue_rect[0] + 3, continue_rect[1] + 3), width=1040, height=680
+        )
+        == "continue"
+    )
     assert game_launcher._frame_convention_dialog_action((10, 10), width=1040, height=680) is None
 
 
@@ -1068,7 +1086,9 @@ def test_choose_game_launch_can_skip_start_screen(monkeypatch) -> None:
     calls: list[bool] = []
 
     monkeypatch.setattr(game_launcher, "_load_game_settings", lambda: GameSettings())
-    monkeypatch.setattr(game_launcher, "discover_game_scenarios_for_mode", lambda config_dir=None, *, mode="pilot": ("option",))
+    monkeypatch.setattr(
+        game_launcher, "discover_game_scenarios_for_mode", lambda config_dir=None, *, mode="pilot": ("option",)
+    )
 
     def fake_run_launcher(options, *, show_start_screen=True, initial_mode="pilot"):
         calls.append(bool(show_start_screen))
@@ -1126,7 +1146,8 @@ def test_choose_game_launch_prefers_saved_last_mode(monkeypatch) -> None:
 def test_operator_selection_defers_script_screen_to_gameplay(monkeypatch) -> None:
     config_dir = Path(__file__).resolve().parents[1] / "game" / "configs"
     option = next(
-        option for option in discover_game_scenarios_for_mode(config_dir, mode="operator")
+        option
+        for option in discover_game_scenarios_for_mode(config_dir, mode="operator")
         if option.scenario_id == "rpo_01_coast_relative_motion"
     )
     calls: list[str] = []
@@ -1230,7 +1251,9 @@ def test_launcher_preview_scroll_clamps_to_scrollable_content() -> None:
     bounds = game_launcher._preview_bounds(1040, 320)
     content_height = game_launcher._preview_content_height(option, font=font, small_font=font, width_px=bounds[2] - 40)
 
-    scroll = game_launcher._clamp_preview_scroll_px(100_000, option=option, font=font, small_font=font, preview_bounds=bounds)
+    scroll = game_launcher._clamp_preview_scroll_px(
+        100_000, option=option, font=font, small_font=font, preview_bounds=bounds
+    )
 
     assert content_height > bounds[3] - 40
     assert scroll == content_height - (bounds[3] - 40)
@@ -1257,7 +1280,9 @@ def test_launcher_preview_scroll_is_zero_when_content_fits() -> None:
         level_number=1,
     )
 
-    scroll = game_launcher._clamp_preview_scroll_px(120, option=option, font=font, small_font=font, preview_bounds=(490, 124, 420, 480))
+    scroll = game_launcher._clamp_preview_scroll_px(
+        120, option=option, font=font, small_font=font, preview_bounds=(490, 124, 420, 480)
+    )
 
     assert scroll == 0
 
@@ -1466,7 +1491,9 @@ def test_game_debrief_is_disabled_for_sandbox_and_arcade_modes() -> None:
     arcade_config = SimulationConfig.from_yaml(arcade_path)
     arcade_training = RPOTrainingConfig.from_metadata(dict(arcade_config.scenario.metadata or {}))
 
-    normal_path = Path(__file__).resolve().parents[1] / "game" / "configs" / "game_training_rpo_01_coast_relative_motion.yaml"
+    normal_path = (
+        Path(__file__).resolve().parents[1] / "game" / "configs" / "game_training_rpo_01_coast_relative_motion.yaml"
+    )
     normal_config = SimulationConfig.from_yaml(normal_path)
     normal_cfg = RPOTrainingConfig.from_metadata(dict(normal_config.scenario.metadata or {}))
 

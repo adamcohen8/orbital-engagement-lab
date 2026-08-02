@@ -18,9 +18,10 @@ class CompositeSensorModel(SensorModel):
         sample_times = []
         for sensor in self.sensors:
             m = sensor.measure(truth, env, t_s)
-            if m is not None:
-                parts.append(m.vector)
-                sample_times.append(float(m.t_s))
+            if m is None:
+                return None
+            parts.append(m.vector)
+            sample_times.append(float(m.t_s))
         if not parts:
             return None
         sample_time = sample_times[0]

@@ -125,6 +125,7 @@ class SimulationSession:
         return bool(self._done)
 
     def reset(self, seed: int | None = None) -> SimulationSnapshot | None:
+        self._shutdown_engine_workers()
         self._active_config = self._base_config.with_seed(seed) if seed is not None else self._base_config
         self._enforce_sealed_mode(self._active_config)
         self._result = None
@@ -167,12 +168,18 @@ class SimulationSession:
             raise RuntimeError("SimulationSession.step() is only available for single-run scenarios.")
         self._ensure_engine()
         assert self._engine is not None
-        if dt_s is None:
-            snap = self._engine.step()
-        else:
-            snap = self._engine.step(dt_s=float(dt_s))
+        try:
+            if dt_s is None:
+                snap = self._engine.step()
+            else:
+                snap = self._engine.step(dt_s=float(dt_s))
+        except BaseException:
+            self._shutdown_engine_workers(suppress_errors=True)
+            raise
         self._step_index = int(snap["step_index"])
         self._done = bool(self._engine.done)
+        if self._done:
+            self._shutdown_engine_workers()
         return SimulationSnapshot(
             step_index=int(snap["step_index"]),
             time_s=float(snap["time_s"]),
@@ -290,6 +297,18 @@ class SimulationSession:
             for object_id, provider in self._external_intent_providers.items():
                 self._engine.set_external_intent_provider(object_id, provider)
         self._apply_runtime_overrides()
+
+    def _shutdown_engine_workers(self, *, suppress_errors: bool = False) -> None:
+        engine = self._engine
+        executor = None if engine is None else getattr(engine, "object_step_executor", None)
+        shutdown = None if executor is None else getattr(executor, "shutdown", None)
+        if not callable(shutdown):
+            return
+        try:
+            shutdown()
+        except Exception:
+            if not suppress_errors:
+                raise
 
     def _apply_runtime_overrides(self) -> None:
         for (kind, object_id), factory in self._controller_overrides.items():

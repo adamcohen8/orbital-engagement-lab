@@ -208,6 +208,7 @@ def reentry_metrics_for_state(
         tt_minus_utc_s=env.get("tt_minus_utc_s"),
         ddpsi_rad=float(env.get("ddpsi_rad", 0.0) or 0.0),
         ddeps_rad=float(env.get("ddeps_rad", 0.0) or 0.0),
+        eop_extrapolation=str(env.get("eop_extrapolation", "error") or "error"),
     )
     v_rel_m_s = v_rel * 1000.0
     speed_m_s = float(np.linalg.norm(v_rel_m_s))

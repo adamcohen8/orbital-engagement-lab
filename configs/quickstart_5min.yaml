@@ -205,7 +205,7 @@ objects:
         type: ekf
     kind: satellite
 simulator:
-  duration_s: 180.0
+  duration_s: 300.0
   dt_s: 5.0
   dynamics:
     orbit:

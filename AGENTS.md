@@ -83,6 +83,22 @@ that guide.
 - Use `python -m sim.agent_task` when a bundled recipe, comparison,
   standard plot, or portable `agent_evidence_packet.json` would make the
   workflow more reproducible.
+- Use `python -m sim.handoff inspect <product-or-manifest.json>` and
+  `validate-product` for read-only interchange inspection. A valid product can
+  still be blocked from promotion by disposition, freshness, or compatibility;
+  inspection never materializes or executes a scenario. Use
+  `materialize-onp` only for an accepted, current, compatible state product;
+  it writes and validates a passive ONP scenario plus a handoff manifest but
+  deliberately does not execute the scenario.
+- Use `python -m sim.handoff export-state <completed-run>` to select
+  one exact final, sample-indexed, time-indexed, or event-associated ECI review
+  row. Require an absolute initial epoch, resolve multi-object runs explicitly,
+  and materialize the resulting product as a new study rather than mutating the
+  completed run.
+- After materialization, use `python -m sim.handoff compare-handoff`
+  to verify producer/product, scenario, manifest, and optional first consumer
+  review-row semantics. A parity packet is continuity evidence, not physics
+  accuracy, and comparison never authorizes or performs execution.
 - Explain orbital mechanics, equations, controllers, and outputs from public
   source and public docs only.
 - Call out uncertainty, missing validation evidence, and model limits plainly.

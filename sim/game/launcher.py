@@ -254,6 +254,9 @@ def _run_launcher(
                 selected_difficulty = DIFFICULTY_OPTIONS[difficulty_idx]
                 if event.type == pygame.QUIT:
                     return None
+                if event.type == pygame.VIDEORESIZE:
+                    screen = pygame.display.set_mode((max(event.w, 1040), max(event.h, 680)), pygame.RESIZABLE)
+                    continue
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_ESCAPE:
                         return None

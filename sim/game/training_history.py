@@ -800,7 +800,7 @@ class RPOTrainingTracker:
                 final_nmt_drift_velocity_error_km_s=float("nan"),
                 goal_met=False,
                 level_passed=False,
-                level_failed=False,
+                level_failed=True,
                 pass_fail_reasons=("No samples recorded.",),
                 keepout_violation=False,
                 hard_speed_limit_violation=False,

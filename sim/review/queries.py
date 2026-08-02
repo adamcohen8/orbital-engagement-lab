@@ -70,6 +70,16 @@ SAVED_REVIEW_QUERIES: dict[str, SavedReviewQuery] = {
             "ORDER BY object_id"
         ),
     ),
+    "ogp_propagation_contract": SavedReviewQuery(
+        name="ogp_propagation_contract",
+        description="Per-object OGP model, native/output frame, canonical state frame, and TLE-age provenance.",
+        sql=(
+            "SELECT p.object_id, p.propagation_method, p.general_model, p.native_frame, "
+            "p.output_frame, p.frame_transform, f.state_frame, p.tle_epoch_jd_utc, "
+            "p.tle_age_start_days, p.tle_age_end_days FROM object_propagation p "
+            "LEFT JOIN object_state_frame f USING (object_id) ORDER BY p.object_id"
+        ),
+    ),
     "object_state_first_last": SavedReviewQuery(
         name="object_state_first_last",
         description="First and final ECI position and velocity samples for each object.",
@@ -98,7 +108,7 @@ SAVED_REVIEW_QUERIES: dict[str, SavedReviewQuery] = {
         description="Closest relative-state sample by range.",
         sql=(
             "SELECT time_s, deputy_id, chief_id, range_km, range_rate_km_s "
-            "FROM relative_state ORDER BY range_km ASC LIMIT 1"
+            "FROM relative_state WHERE range_km IS NOT NULL ORDER BY range_km ASC LIMIT 1"
         ),
     ),
     "relative_final_state": SavedReviewQuery(

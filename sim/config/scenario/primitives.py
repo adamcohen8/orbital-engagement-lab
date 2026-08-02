@@ -23,6 +23,7 @@ __all__ = [
     '_is_bool_like_key',
     '_enforce_strict_booleans',
     '_parse_float',
+    '_parse_int',
     '_parse_optional_float',
     '_validate_integer_multiple',
     '_validate_sim_timing',
@@ -163,6 +164,16 @@ def _parse_float(value: Any, field_name: str) -> float:
     if not math.isfinite(out):
         raise ValueError(f"{field_name} must be a finite number.")
     return out
+
+
+def _parse_int(value: Any, field_name: str) -> int:
+    """Parse an integer-valued scalar without silently truncating fractions."""
+    if isinstance(value, bool):
+        raise ValueError(f"{field_name} must be an integer, not {value!r}.")
+    out = _parse_float(value, field_name)
+    if not out.is_integer():
+        raise ValueError(f"{field_name} must be an integer, not {value!r}.")
+    return int(out)
 
 
 def _parse_optional_float(value: Any, field_name: str) -> float | None:

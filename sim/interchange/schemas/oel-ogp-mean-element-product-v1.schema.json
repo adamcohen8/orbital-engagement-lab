@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orbitalengagementlab.com/schemas/oel-ogp-mean-element-product-v1.schema.json",
+  "title": "OEL OGP Mean-Element Product Payload v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["object", "mean_elements", "propagation", "estimator_evidence"],
+  "properties": {
+    "object": {
+      "type": "object", "additionalProperties": false,
+      "required": ["object_id", "kind", "norad_number", "international_designator"],
+      "properties": {
+        "object_id": {"type": "string", "minLength": 1}, "kind": {"const": "satellite"},
+        "norad_number": {"type": "string"}, "international_designator": {"type": "string"}
+      }
+    },
+    "mean_elements": {
+      "type": "object", "additionalProperties": false,
+      "required": ["representation", "frame", "epoch", "values"],
+      "properties": {
+        "representation": {"const": "ogp_mean_elements"}, "frame": {"const": "TEME"},
+        "epoch": {
+          "type": "object", "additionalProperties": false, "required": ["value", "format", "time_system"],
+          "properties": {"value": {"type": "number", "exclusiveMinimum": 0}, "format": {"const": "jd"}, "time_system": {"const": "UTC"}}
+        },
+        "values": {
+          "type": "object",
+          "required": ["epoch_jd_utc", "inclination_deg", "raan_deg", "eccentricity", "argp_deg", "mean_anomaly_deg", "mean_motion_rev_per_day"],
+          "not": {"anyOf": [{"required": ["line1"]}, {"required": ["line2"]}]},
+          "properties": {
+            "epoch_jd_utc": {"type": "number", "exclusiveMinimum": 0}, "inclination_deg": {"type": "number"},
+            "raan_deg": {"type": "number"}, "eccentricity": {"type": "number", "minimum": 0, "exclusiveMaximum": 1},
+            "argp_deg": {"type": "number"}, "mean_anomaly_deg": {"type": "number"},
+            "mean_motion_rev_per_day": {"type": "number", "exclusiveMinimum": 0}
+          }
+        }
+      }
+    },
+    "propagation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["family", "regime", "propagator_name", "not_tle_text"],
+      "properties": {"family": {"const": "OGP"}, "regime": {"enum": ["sgp4", "sdp4"]}, "propagator_name": {"type": "string", "minLength": 1}, "not_tle_text": {"const": true}}
+    },
+    "estimator_evidence": {"type": "object"}
+  }
+}

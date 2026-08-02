@@ -71,7 +71,7 @@ def _act_no_radial_common(
     a_cmd_ric = np.array([0.0, a_cmd_ic[0], a_cmd_ic[1]], dtype=float)
     nrm = float(np.linalg.norm(a_cmd_ric))
     limit_scale = 1.0
-    if nrm > max_accel_km_s2 > 0.0:
+    if nrm > max_accel_km_s2 >= 0.0:
         limit_scale = float(max_accel_km_s2 / nrm)
         a_cmd_ric *= limit_scale
         a_cmd_ic *= limit_scale

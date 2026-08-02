@@ -9,14 +9,14 @@ from sim.acceleration.settings import acceleration_enabled_from_mode
 from sim.core.interfaces import DynamicsModel
 from sim.core.models import Command, StateTruth
 from sim.dynamics.attitude.disturbances import DisturbanceTorqueModel
-from sim.dynamics.attitude.rigid_body import propagate_attitude_exponential_map
+from sim.dynamics.attitude.rigid_body import guard_attitude_state_output, propagate_attitude_exponential_map
 from sim.dynamics.orbit.accelerations import OrbitContext
 from sim.dynamics.orbit.atmosphere import density_from_model
 from sim.dynamics.orbit.eclipse import resolve_srp_geometry, srp_shadow_factor
 from sim.dynamics.orbit.environment import EARTH_ROT_RATE_RAD_S
 from sim.dynamics.orbit.propagator import OrbitPropagator
 from sim.dynamics.spacecraft_geometry import GeometryAreaProfile, RectangularPrismGeometry
-from sim.utils.quaternion import normalize_quaternion, quaternion_to_dcm_bn
+from sim.utils.quaternion import quaternion_to_dcm_bn
 
 
 def _owned_default_orbit_propagator() -> OrbitPropagator:
@@ -102,6 +102,7 @@ class OrbitalAttitudeDynamics(DynamicsModel):
                 tt_minus_utc_s=env_local.get("tt_minus_utc_s"),
                 ddpsi_rad=float(env_local.get("ddpsi_rad", 0.0) or 0.0),
                 ddeps_rad=float(env_local.get("ddeps_rad", 0.0) or 0.0),
+                eop_extrapolation=str(env_local.get("eop_extrapolation", "error") or "error"),
             )
             v_rel_body = c_bn @ v_rel_eci_km_s
             env_local["drag_area_m2"] = area_profile.projected_area_for_direction_m2(-v_rel_body)
@@ -129,6 +130,7 @@ class OrbitalAttitudeDynamics(DynamicsModel):
                 tt_minus_utc_s=env_local.get("tt_minus_utc_s"),
                 ddpsi_rad=float(env_local.get("ddpsi_rad", 0.0) or 0.0),
                 ddeps_rad=float(env_local.get("ddeps_rad", 0.0) or 0.0),
+                eop_extrapolation=str(env_local.get("eop_extrapolation", "error") or "error"),
             )
             v_rel_body = c_bn @ v_rel_eci_km_s
             env_local["drag_area_m2"] = geom.projected_area_m2(-v_rel_body)
@@ -206,6 +208,7 @@ class OrbitalAttitudeDynamics(DynamicsModel):
                     tt_minus_utc_s=env_local.get("tt_minus_utc_s"),
                     ddpsi_rad=float(env_local.get("ddpsi_rad", 0.0) or 0.0),
                     ddeps_rad=float(env_local.get("ddeps_rad", 0.0) or 0.0),
+                    eop_extrapolation=str(env_local.get("eop_extrapolation", "error") or "error"),
                 )
                 v_rel_eci_m_s = v_rel_eci_km_s * 1e3
                 env_local["drag_v_rel_eci_m_s"] = v_rel_eci_m_s
@@ -285,10 +288,7 @@ class OrbitalAttitudeDynamics(DynamicsModel):
             if att_override:
                 q_cmd = np.array(att_override.get("q_next_bn", q_next), dtype=float).reshape(-1)
                 w_cmd = np.array(att_override.get("w_next_body_rad_s", w_next), dtype=float).reshape(-1)
-                if q_cmd.size == 4:
-                    q_next = normalize_quaternion(q_cmd)
-                if w_cmd.size == 3:
-                    w_next = w_cmd
+                q_next, w_next = guard_attitude_state_output(q_cmd, w_cmd)
         delta_mass_kg = float(command.mode_flags.get("delta_mass_kg", 0.0))
         min_mass_kg = float(command.mode_flags.get("min_mass_kg", 0.0))
         if not np.isfinite(min_mass_kg):

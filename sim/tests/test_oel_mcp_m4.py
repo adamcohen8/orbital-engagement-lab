@@ -10,6 +10,7 @@ import pytest
 import yaml
 
 from integrations.oel_mcp.execution import ExecutionApprovalPolicy
+from integrations.oel_mcp.policy import MCPPathPolicy
 from integrations.oel_mcp.public_handlers import PublicOELMCPHandlers
 from integrations.oel_mcp.public_registry import PUBLIC_TOOL_CONTRACTS
 from integrations.oel_mcp.sdk_protocol import build_sdk_server
@@ -119,9 +120,18 @@ def test_plan_validate_and_run_require_external_approval_and_bound_identity(tmp_
     else:  # pragma: no cover - explicit safety assertion
         raise AssertionError("Execution unexpectedly bypassed the server approval policy.")
 
+    with pytest.raises(PermissionError, match="trust approval"):
+        handlers.run_scenario(
+            **arguments,
+            validation_id=validation_id,
+            approval=EXECUTION_APPROVAL,
+        )
+    assert not Path(str(arguments["output_dir"])).exists()
+
     mismatch = handlers.run_scenario(
         **arguments,
         validation_id="oel-m4-validation-v1:wrong",
+        trust_approval=TRUST_APPROVAL,
         approval=EXECUTION_APPROVAL,
     )
     assert mismatch["status"] == "failed"
@@ -130,6 +140,7 @@ def test_plan_validate_and_run_require_external_approval_and_bound_identity(tmp_
     completed = handlers.run_scenario(
         **arguments,
         validation_id=validation_id,
+        trust_approval=TRUST_APPROVAL,
         approval=EXECUTION_APPROVAL,
     )
     manifest = json.loads((Path(str(arguments["output_dir"])) / "mcp_execution_manifest.json").read_text())
@@ -151,6 +162,24 @@ def test_plan_validate_and_run_require_external_approval_and_bound_identity(tmp_
     assert inspected["result"]["freshness"]["content_bound_execution_recorded"] is True
 
 
+def test_unset_write_roots_do_not_inherit_read_authority(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("OEL_MCP_READ_ROOTS", str(tmp_path))
+    monkeypatch.delenv("OEL_MCP_WRITE_ROOTS", raising=False)
+    monkeypatch.delenv("OEL_MCP_ALLOWED_ROOTS", raising=False)
+
+    policy = MCPPathPolicy.configured()
+
+    assert policy.read_roots == (tmp_path.resolve(),)
+    assert policy.write_roots == ()
+    with pytest.raises(PermissionError, match="not authorized"):
+        policy.resolve_write(tmp_path / "output")
+
+    monkeypatch.setenv("OEL_MCP_ALLOWED_ROOTS", str(tmp_path))
+    legacy_policy = MCPPathPolicy.configured()
+    assert legacy_policy.read_roots == (tmp_path.resolve(),)
+    assert legacy_policy.write_roots == (tmp_path.resolve(),)
+
+
 def test_cancelled_run_is_partial_and_writes_unambiguous_manifest(tmp_path: Path) -> None:
     handlers = _handlers(tmp_path)
     arguments = _scenario_arguments(tmp_path, "cancelled")
@@ -163,6 +192,7 @@ def test_cancelled_run_is_partial_and_writes_unambiguous_manifest(tmp_path: Path
         {
             **arguments,
             "validation_id": validation["result"]["identity"]["validation_id"],
+            "trust_approval": TRUST_APPROVAL,
             "approval": EXECUTION_APPROVAL,
         },
         cancel_event=cancel_event,
@@ -213,6 +243,34 @@ def test_supported_task_comparison_and_plot_flow(tmp_path: Path) -> None:
     assert plot["status"] == "completed"
     assert Path(plot["result"]["artifact"]["path"]).is_file()
     assert Path(plot["result"]["manifest_path"]).is_file()
+
+
+def test_partial_plot_writes_incomplete_manifest(tmp_path: Path) -> None:
+    output = tmp_path / "run"
+    review = output / "review"
+    review.mkdir(parents=True)
+    (review / "run.sqlite").write_bytes(b"")
+    handlers = _handlers(tmp_path)
+    failed_artifact = {
+        "status": "error",
+        "path_exists": False,
+        "truncated": False,
+    }
+
+    with patch("integrations.oel_mcp.public_handlers.create_plot", return_value=failed_artifact):
+        plot = handlers.plot_evidence(
+            output_dir=output,
+            recipe_id="relative_range",
+            artifact_id="failed_plot",
+            approval=WRITE_APPROVAL,
+            handling=HANDLING,
+        )
+
+    manifest = json.loads((review / "mcp_plots" / "failed_plot.manifest.json").read_text(encoding="utf-8"))
+    assert plot["status"] == "partial"
+    assert manifest["status"] == "partial"
+    assert manifest["artifacts"] == []
+    assert manifest["artifacts_complete"] is False
 
 
 def test_unapproved_or_private_task_recipe_is_rejected(tmp_path: Path) -> None:
@@ -281,6 +339,7 @@ def test_sdk_cancellation_reaches_execution_callback_and_finalizes_manifest(tmp_
     call_arguments = {
         **arguments,
         "validation_id": validation["result"]["identity"]["validation_id"],
+        "trust_approval": TRUST_APPROVAL,
         "approval": EXECUTION_APPROVAL,
     }
 

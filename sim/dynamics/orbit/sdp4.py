@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from sim.dynamics.orbit import _sdp4_equations
-from sim.dynamics.orbit.sgp4 import SGP4State
+from sim.dynamics.orbit.sgp4 import SGP4State, sgp4_orbital_period_min
 from sim.dynamics.orbit.tle import TLEElements
 
 _MINUTES_PER_DAY = 1440.0
@@ -43,7 +43,7 @@ def _sdp4_validation_error(elements: TLEElements) -> str | None:
     mean_motion = float(elements.mean_motion_rev_per_day)
     if mean_motion <= 0.0:
         return "SDP4 mean motion must be positive."
-    period_min = _MINUTES_PER_DAY / mean_motion
+    period_min = sgp4_orbital_period_min(elements)
     if period_min < 225.0:
         return f"OEL OGP-SDP4 only supports deep-space TLEs with period >= 225 min; got {period_min:.3f} min."
     if float(elements.eccentricity) < 0.0 or float(elements.eccentricity) >= 1.0:
@@ -91,7 +91,7 @@ def sdp4_initialize(elements: TLEElements) -> SDP4Context:
     return SDP4Context(
         elements=elements,
         record=record,
-        period_min=_MINUTES_PER_DAY / float(elements.mean_motion_rev_per_day),
+        period_min=sgp4_orbital_period_min(elements),
     )
 
 

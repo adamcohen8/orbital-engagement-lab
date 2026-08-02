@@ -45,6 +45,8 @@ def _call_ollama(
     payload = json.loads(raw)
     message = dict(payload.get("message", {}) or {})
     content = str(message.get("content", payload.get("response", "")) or "")
+    if not content.strip():
+        raise ValueError("Ollama response did not include report text.")
     return content, payload
 
 __all__ = [name for name in globals() if not name.startswith("__")]

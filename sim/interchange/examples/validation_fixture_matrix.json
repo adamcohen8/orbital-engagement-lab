@@ -1,0 +1,49 @@
+{
+  "schema_id": "oel-interchange-validation-fixtures-v1",
+  "schema_version": 1,
+  "base_product": "state_estimate_accepted_current.json",
+  "cases": [
+    {
+      "case_id": "accepted-current-not-evaluated",
+      "quality_disposition": "accepted",
+      "integrity_status": "current",
+      "age_status": "not_evaluated",
+      "expected_valid": true,
+      "expected_promotable": true
+    },
+    {
+      "case_id": "review-required-current-current",
+      "quality_disposition": "review_required",
+      "integrity_status": "current",
+      "age_status": "current",
+      "age_policy": {"policy_id": "fixture-age-policy", "result": "pass"},
+      "expected_valid": true,
+      "expected_promotable": false
+    },
+    {
+      "case_id": "ambiguous-stale-not-applicable",
+      "quality_disposition": "ambiguous",
+      "integrity_status": "stale",
+      "age_status": "not_applicable",
+      "expected_valid": true,
+      "expected_promotable": false
+    },
+    {
+      "case_id": "rejected-current-stale",
+      "quality_disposition": "rejected",
+      "integrity_status": "current",
+      "age_status": "stale",
+      "age_policy": {"policy_id": "fixture-age-policy", "result": "fail"},
+      "expected_valid": true,
+      "expected_promotable": false
+    },
+    {
+      "case_id": "unknown-not-evaluated-not-applicable",
+      "quality_disposition": "unknown",
+      "integrity_status": "not_evaluated",
+      "age_status": "not_applicable",
+      "expected_valid": true,
+      "expected_promotable": false
+    }
+  ]
+}

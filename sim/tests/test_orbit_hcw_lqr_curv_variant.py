@@ -26,6 +26,16 @@ class TestHCWCurvVariant(unittest.TestCase):
         c_var = var.act(belief, t_s=0.0, budget_ms=1.0)
         self.assertTrue(np.allclose(c_base.thrust_eci_km_s2, c_var.thrust_eci_km_s2, atol=1e-12))
 
+    def test_zero_max_accel_commands_zero_thrust(self):
+        base = HCWLQRController(mean_motion_rad_s=0.0011, max_accel_km_s2=0.0, design_dt_s=10.0)
+        var = HCWCurvInputRectOutputController(base_lqr=base)
+        state = np.array([2.0, -1.0, 0.5, 0.01, -0.02, 0.03, 7000.0, 0.0, 0.0, 0.0, 7.5, 0.0])
+        belief = StateBelief(state=state, covariance=np.eye(12), last_update_t_s=0.0)
+
+        cmd = var.act(belief, t_s=0.0, budget_ms=1.0)
+
+        self.assertTrue(np.allclose(cmd.thrust_eci_km_s2, np.zeros(3)))
+
 
 if __name__ == "__main__":
     unittest.main()

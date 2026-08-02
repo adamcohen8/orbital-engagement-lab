@@ -349,6 +349,9 @@ def integrate_rkf78_hpop(
             return y_out, float(h_out), info
         return y_out, float(h_out)
 
+    dt_s = float(dt_s)
+    if not np.isfinite(dt_s):
+        raise ValueError("dt_s must be finite.")
     if dt_s < 0.0:
         raise ValueError("dt_s must be non-negative.")
     if dt_s == 0.0:
@@ -462,6 +465,9 @@ def integrate_adaptive(
             return state, info
         return state
 
+    dt_s = float(dt_s)
+    if not np.isfinite(dt_s):
+        raise ValueError("dt_s must be finite.")
     if dt_s < 0.0:
         raise ValueError("dt_s must be non-negative.")
     if dt_s == 0.0:

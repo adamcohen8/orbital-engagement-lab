@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from sim.review.generated_artifacts import clear_generated_review_artifacts
+
 WORKFLOW_REVIEW_SCHEMA_VERSION = "0.1"
 
 KNOWN_WORKFLOW_TABLE_COLUMNS: dict[str, list[str]] = {
@@ -127,6 +129,7 @@ def write_workflow_review(
             saved_views_tmp.write_text(json.dumps({"views": query_rows}, indent=2, sort_keys=True), encoding="utf-8")
         manifest_tmp.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
 
+        clear_generated_review_artifacts(review_dir)
         if table_rows:
             db_tmp.replace(db_path)
             schema_tmp.replace(schema_path)
@@ -440,10 +443,9 @@ def _artifact_type(key: str, path_text: str) -> str:
 
 def _relative_path(path_text: str, *, output_dir: Path) -> str:
     path = Path(path_text)
-    resolved = path if path.is_absolute() else path
+    resolved = path.resolve()
     try:
-        if resolved.is_absolute():
-            return resolved.resolve().relative_to(output_dir.resolve()).as_posix()
+        return resolved.relative_to(output_dir.resolve()).as_posix()
     except ValueError:
         pass
     return str(path_text)
