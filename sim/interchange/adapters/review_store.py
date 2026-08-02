@@ -47,6 +47,7 @@ def build_completed_run_state_product(
     sample_index: int | None = None,
     time_s: float | None = None,
     event_id: str | None = None,
+    epoch_jd_utc: float | None = None,
     data_markings: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build one state product from an exact, read-only completed-run selection."""
@@ -65,7 +66,7 @@ def build_completed_run_state_product(
         "run_metadata",
     )
     config = _verified_config(metadata)
-    initial_jd_utc = _initial_jd_utc(config)
+    initial_jd_utc, epoch_source = _initial_jd_utc(config, override=epoch_jd_utc)
 
     selector_kind = str(selector or "").strip().lower()
     _validate_selector_arguments(
@@ -177,6 +178,7 @@ def build_completed_run_state_product(
                 "config_sha256": str(metadata["config_sha256"]),
                 "review_db_sha256": starting_db_hash,
                 "initial_jd_utc": initial_jd_utc,
+                "initial_jd_utc_source": epoch_source,
             },
             "selection": selection,
         },
@@ -221,6 +223,7 @@ def build_completed_run_state_product(
                         "sample_index": selected_sample_index,
                         "time_s": selected_time_s,
                         "epoch_derivation": "initial_jd_utc + time_s / 86400",
+                        "initial_jd_utc_source": epoch_source,
                         "frame_transform_applied": False,
                     },
                 }
@@ -245,12 +248,14 @@ def export_completed_run_state(
     sample_index: int | None = None,
     time_s: float | None = None,
     event_id: str | None = None,
+    epoch_jd_utc: float | None = None,
     data_markings: Mapping[str, Any] | None = None,
     overwrite: bool = False,
 ) -> dict[str, Any]:
     """Write a deterministic state product; never mutate or execute the source run."""
 
     target = Path(output_path).expanduser().resolve()
+    target.parent.mkdir(parents=True, exist_ok=True)
     product = build_completed_run_state_product(
         completed_run,
         output_path=target,
@@ -259,6 +264,7 @@ def export_completed_run_state(
         sample_index=sample_index,
         time_s=time_s,
         event_id=event_id,
+        epoch_jd_utc=epoch_jd_utc,
         data_markings=data_markings,
     )
     text = json.dumps(product, indent=2, sort_keys=True) + "\n"
@@ -267,8 +273,6 @@ def export_completed_run_state(
             raise CompletedRunStateExportError(
                 "Output product exists with different content; pass overwrite=True explicitly to replace it."
             )
-    else:
-        target.parent.mkdir(parents=True, exist_ok=True)
     if not target.exists() or target.read_text(encoding="utf-8") != text:
         target.write_text(text, encoding="utf-8")
     report = validate_product(product, source_path=target)
@@ -329,12 +333,31 @@ def _verified_config(metadata: Mapping[str, Any]) -> dict[str, Any]:
     return config
 
 
-def _initial_jd_utc(config: Mapping[str, Any]) -> float:
+def _initial_jd_utc(
+    config: Mapping[str, Any], *, override: float | None
+) -> tuple[float, str]:
     value = dict(config.get("simulator", {}) or {}).get("initial_jd_utc")
-    epoch = _finite_float(value, "simulator.initial_jd_utc")
-    if epoch <= 0.0:
-        raise CompletedRunStateExportError("simulator.initial_jd_utc must be positive for continuation export.")
-    return epoch
+    configured: float | None = None
+    try:
+        configured = _finite_float(value, "simulator.initial_jd_utc")
+    except CompletedRunStateExportError:
+        configured = None
+    explicit: float | None = None
+    if override is not None:
+        explicit = _finite_float(override, "epoch_jd_utc override")
+        if explicit <= 0.0:
+            raise CompletedRunStateExportError("epoch_jd_utc override must be positive.")
+    if configured is not None and configured > 0.0:
+        if explicit is not None and not math.isclose(configured, explicit, rel_tol=0.0, abs_tol=1.0e-12):
+            raise CompletedRunStateExportError(
+                "epoch_jd_utc override conflicts with simulator.initial_jd_utc in the verified source config."
+            )
+        return configured, "verified_source_config"
+    if explicit is not None:
+        return explicit, "explicit_export_override"
+    raise CompletedRunStateExportError(
+        "simulator.initial_jd_utc must be finite and positive, or epoch_jd_utc must be supplied explicitly."
+    )
 
 
 def _validate_selector_arguments(

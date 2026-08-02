@@ -9,8 +9,11 @@ from typing import Any
 from .comparison import compare_handoff
 from .completed_runs import export_completed_run_state
 from .inspection import inspect_path
+from .maneuver_detection import export_maneuver_detection_product
 from .materialization import materialize_ogp, materialize_onp
+from .overlays import emit_scenario_overlay, load_scenario_overlay
 from .scenario_patches import materialize_scenario_patch, select_patch_product
+from .snapshots import export_completed_run_snapshot, materialize_snapshot_onp
 from .validation import load_interchange_document, validate_document
 
 
@@ -65,8 +68,66 @@ def build_parser() -> argparse.ArgumentParser:
     selection.add_argument("--sample-index", type=int, help="Select one exact object sample_index.")
     selection.add_argument("--time-s", type=float, help="Select one exact object-state time_s.")
     selection.add_argument("--event-id", help="Select the sample associated with one exact event_id.")
+    export_parser.add_argument(
+        "--epoch-jd-utc",
+        type=float,
+        help="Explicit epoch anchor for a relative-time source run; must match a configured source epoch when present.",
+    )
     export_parser.add_argument("--overwrite", action="store_true")
     export_parser.add_argument("--json", action="store_true")
+
+    detection_parser = subparsers.add_parser(
+        "export-maneuver-detection",
+        help="Export one confirmed maneuver-detection event and its detector evidence.",
+    )
+    detection_parser.add_argument("completed_run", type=Path)
+    detection_parser.add_argument("--output", required=True, type=Path)
+    detection_parser.add_argument("--event-id")
+    detection_parser.add_argument("--observer-id")
+    detection_parser.add_argument("--target-id")
+    detection_parser.add_argument("--overwrite", action="store_true")
+    detection_parser.add_argument("--json", action="store_true")
+
+    snapshot_parser = subparsers.add_parser(
+        "export-snapshot",
+        help="Export an atomic multi-object ECI snapshot from one completed-run sample.",
+    )
+    snapshot_parser.add_argument("completed_run", type=Path)
+    snapshot_parser.add_argument("--output", required=True, type=Path)
+    snapshot_parser.add_argument("--object-id", action="append", required=True)
+    snapshot_selection = snapshot_parser.add_mutually_exclusive_group(required=True)
+    snapshot_selection.add_argument("--sample", choices=("final",))
+    snapshot_selection.add_argument("--sample-index", type=int)
+    snapshot_selection.add_argument("--time-s", type=float)
+    snapshot_selection.add_argument("--event-id")
+    snapshot_parser.add_argument("--epoch-jd-utc", type=float)
+    snapshot_parser.add_argument("--overwrite", action="store_true")
+    snapshot_parser.add_argument("--json", action="store_true")
+
+    snapshot_onp_parser = subparsers.add_parser(
+        "materialize-snapshot-onp",
+        help="Materialize a passive multi-object ONP continuation from an atomic snapshot.",
+    )
+    snapshot_onp_parser.add_argument("--snapshot-product", required=True, type=Path)
+    snapshot_onp_parser.add_argument("--scenario-name", required=True)
+    snapshot_onp_parser.add_argument("--output", required=True, type=Path)
+    snapshot_onp_parser.add_argument("--run-output-dir", required=True, type=Path)
+    snapshot_onp_parser.add_argument("--duration-s", required=True, type=float)
+    snapshot_onp_parser.add_argument("--dt-s", required=True, type=float)
+    snapshot_onp_parser.add_argument("--trust-plugins", action="store_true")
+    snapshot_onp_parser.add_argument("--overwrite", action="store_true")
+    snapshot_onp_parser.add_argument("--json", action="store_true")
+
+    overlay_parser = subparsers.add_parser(
+        "emit-overlay",
+        help="Emit a bounded typed scenario-capability overlay without executing or materializing it.",
+    )
+    overlay_parser.add_argument("--source-scenario", required=True, type=Path)
+    overlay_parser.add_argument("--overlay", required=True, type=Path)
+    overlay_parser.add_argument("--overlay-id", required=True)
+    overlay_parser.add_argument("--rationale", required=True)
+    overlay_parser.add_argument("--output", required=True, type=Path)
+    overlay_parser.add_argument("--json", action="store_true")
 
     onp_parser = subparsers.add_parser(
         "materialize-onp",
@@ -167,9 +228,91 @@ def main(argv: list[str] | None = None) -> int:
                 sample_index=args.sample_index,
                 time_s=args.time_s,
                 event_id=args.event_id,
+                epoch_jd_utc=args.epoch_jd_utc,
                 overwrite=args.overwrite,
             )
             _print_state_export(payload, json_mode=args.json)
+            return 0
+        if args.command == "export-maneuver-detection":
+            payload = export_maneuver_detection_product(
+                args.completed_run,
+                output_path=args.output,
+                event_id=args.event_id,
+                observer_id=args.observer_id,
+                target_id=args.target_id,
+                overwrite=args.overwrite,
+            )
+            if args.json:
+                print(json.dumps(payload, indent=2, sort_keys=True))
+            else:
+                print(f"status: {payload.get('status', '')}")
+                print(f"product_path: {payload.get('product_path', '')}")
+                print(f"product_id: {payload.get('product_id', '')}")
+                print(f"event_id: {payload.get('event_id', '')}")
+                print("execution_occurred: false")
+            return 0
+        if args.command == "export-snapshot":
+            if args.sample_index is not None:
+                selector = "sample_index"
+            elif args.time_s is not None:
+                selector = "time_s"
+            elif args.event_id is not None:
+                selector = "event"
+            else:
+                selector = "final"
+            payload = export_completed_run_snapshot(
+                args.completed_run,
+                output_path=args.output,
+                object_ids=args.object_id,
+                selector=selector,
+                sample_index=args.sample_index,
+                time_s=args.time_s,
+                event_id=args.event_id,
+                epoch_jd_utc=args.epoch_jd_utc,
+                overwrite=args.overwrite,
+            )
+            if args.json:
+                print(json.dumps(payload, indent=2, sort_keys=True))
+            else:
+                print(f"status: {payload.get('status', '')}")
+                print(f"product_path: {payload.get('product_path', '')}")
+                print(f"product_id: {payload.get('product_id', '')}")
+                print(f"object_ids: {', '.join(payload.get('object_ids', []))}")
+                print("execution_occurred: false")
+            return 0
+        if args.command == "materialize-snapshot-onp":
+            payload = materialize_snapshot_onp(
+                args.snapshot_product,
+                scenario_name=args.scenario_name,
+                scenario_path=args.output,
+                output_dir=args.run_output_dir,
+                duration_s=args.duration_s,
+                dt_s=args.dt_s,
+                trust_plugins=args.trust_plugins,
+                overwrite=args.overwrite,
+            )
+            if args.json:
+                print(json.dumps(payload, indent=2, sort_keys=True))
+            else:
+                print(f"status: {payload.get('status', '')}")
+                print(f"scenario_path: {payload.get('scenario_path', '')}")
+                print(f"object_count: {payload.get('object_count', 0)}")
+                print("execution_occurred: false")
+            return 0 if payload.get("status") == "materialized" else 2
+        if args.command == "emit-overlay":
+            payload = emit_scenario_overlay(
+                args.source_scenario,
+                load_scenario_overlay(args.overlay),
+                overlay_id=args.overlay_id,
+                output_path=args.output,
+                rationale=args.rationale,
+            )
+            if args.json:
+                print(json.dumps(payload, indent=2, sort_keys=True))
+            else:
+                print(f"status: {payload.get('status', '')}")
+                print(f"product_path: {payload.get('product_path', '')}")
+                print(f"product_id: {payload.get('product_id', '')}")
             return 0
         if args.command == "materialize-onp":
             payload = materialize_onp(

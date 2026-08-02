@@ -807,6 +807,30 @@ def _insert_events(
                     "review_store",
                 )
             )
+    consistency = dict(summary.get("knowledge_consistency_by_observer", {}) or {})
+    for observer_id, targets_raw in sorted(consistency.items()):
+        for target_id, evidence_raw in sorted(dict(targets_raw or {}).items()):
+            evidence = dict(evidence_raw or {})
+            confirmed_count = int(evidence.get("maneuver_confirmed_event_count", 0) or 0)
+            confirmed_time = _float_or_none(evidence.get("maneuver_first_confirmed_t_s"))
+            if confirmed_count <= 0 or confirmed_time is None:
+                continue
+            sample_index = _sample_index_for_time(t_s, confirmed_time)
+            rows.append(
+                (
+                    f"maneuver_detection_confirmed:{observer_id}:{target_id}:{sample_index}",
+                    confirmed_time,
+                    sample_index,
+                    str(target_id),
+                    "maneuver_detection_confirmed",
+                    "warning",
+                    (
+                        f"{observer_id} confirmed a maneuver by {target_id}; "
+                        f"confirmed_event_count={confirmed_count}, max_nis={evidence.get('maneuver_max_nis')}"
+                    ),
+                    "knowledge_maneuver_detector",
+                )
+            )
     conn.executemany("INSERT INTO events VALUES (?, ?, ?, ?, ?, ?, ?, ?)", rows)
 
 

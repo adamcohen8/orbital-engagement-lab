@@ -398,6 +398,16 @@ class OrbitalActuator(Actuator):
                 mdot += float(force_n / (isp_s * g0_m_s2))
         mode_flags["rcs_thruster_names"] = names
         mode_flags["rcs_thruster_forces_n"] = forces.tolist()
+        mode_flags["rcs_thruster_max_forces_n"] = max_forces
+        mode_flags["rcs_allocation_saturated"] = bool(
+            any(
+                max_force > 0.0 and force >= max_force * duty - 1.0e-12
+                for force, max_force in zip(forces, max_forces, strict=True)
+            )
+        )
+        mode_flags["rcs_min_thrust_margin_n"] = float(
+            min((max_force * duty - force for force, max_force in zip(forces, max_forces, strict=True)), default=0.0)
+        )
         mode_flags["rcs_force_body_n"] = force_body_n.tolist()
         mode_flags["rcs_torque_body_nm"] = rcs_torque_body_nm.tolist()
         mode_flags["rcs_force_residual_n"] = (desired_force_body_n - force_body_n).tolist()

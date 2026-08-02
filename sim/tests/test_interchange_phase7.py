@@ -180,6 +180,24 @@ def test_final_completed_run_state_seeds_a_new_validated_onp_study(tmp_path: Pat
     assert list(first.rows[0].values()) == pytest.approx(product["payload"]["state"]["values"])
 
 
+def test_completed_run_export_creates_new_destination_parent_before_provenance_validation(tmp_path: Path) -> None:
+    source_output = tmp_path / "source_run"
+    _run(source_output)
+    product_path = tmp_path / "new" / "nested" / "final_state_product.json"
+
+    assert product_path.parent.exists() is False
+    emission = handoff.export_completed_run_state(
+        source_output,
+        output_path=product_path,
+        object_id="target",
+        selector="final",
+    )
+
+    assert emission["status"] == "exported"
+    assert product_path.is_file()
+    assert validate_product(_load(product_path), source_path=product_path).promotable is True
+
+
 def test_sample_time_event_and_cli_selections_are_exact_and_reproducible(tmp_path: Path, capsys) -> None:
     source_output = tmp_path / "source_run"
     db_path = _run(source_output)
@@ -267,6 +285,23 @@ def test_completed_run_export_fails_closed_on_ambiguous_or_missing_evidence(tmp_
             object_id="target",
             selector="final",
         )
+
+    override_path = tmp_path / "explicit_epoch.json"
+    exported = handoff.export_completed_run_state(
+        no_epoch_output,
+        output_path=override_path,
+        object_id="target",
+        selector="final",
+        epoch_jd_utc=2461254.5,
+    )
+    override_product = _load(override_path)
+    assert exported["status"] == "exported"
+    assert override_product["payload"]["source_run"]["initial_jd_utc_source"] == (
+        "explicit_export_override"
+    )
+    assert override_product["payload"]["state"]["epoch"]["value"] == pytest.approx(
+        2461254.5 + 2.0 / 86400.0
+    )
 
     wrong_frame_output = tmp_path / "wrong_frame"
     db_path = _run(wrong_frame_output)
@@ -390,4 +425,7 @@ def test_phase7_schema_is_closed_and_facade_exports_focused_owner() -> None:
 
     assert schema["additionalProperties"] is False
     assert schema["properties"]["state"]["properties"]["frame"]["const"] == "ECI"
+    assert "explicit_export_override" in schema["properties"]["source_run"]["properties"][
+        "initial_jd_utc_source"
+    ]["enum"]
     assert handoff.export_completed_run_state.__module__ == "sim.interchange.adapters.review_store"

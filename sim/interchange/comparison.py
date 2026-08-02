@@ -250,18 +250,40 @@ def _compare_relative_state(checks: list[dict[str, Any]], product: Mapping[str, 
 
 def _compare_scenario_patch(checks: list[dict[str, Any]], product: Mapping[str, Any], scenario: Mapping[str, Any]) -> None:
     payload = dict(product.get("payload", {}) or {})
+    patch = dict(payload.get("patch", {}) or {})
     selection = dict(payload.get("selection", {}) or {})
     handoff = dict(dict(scenario.get("metadata", {}) or {}).get("handoff", {}) or {})
     _check(checks, "patch.selection", "selection", selection, handoff.get("selection"))
-    for index, raw in enumerate(list(dict(payload.get("patch", {}) or {}).get("operations", []) or [])):
+    for index, raw in enumerate(list(patch.get("operations", []) or [])):
         operation = dict(raw or {})
         path = str(operation.get("path", "") or "")
         observed = _path_value(scenario, path)
         if operation.get("op") == "append":
             passed = isinstance(observed, list) and operation.get("value") in observed
             _check(checks, f"patch.operation.{index}", "patch", True, passed, observed=observed)
+        elif patch.get("patch_type") == "scenario_capability_overlay":
+            _check(
+                checks,
+                f"patch.operation.{index}",
+                "patch",
+                True,
+                _overlay_value_matches(observed, operation.get("value")),
+                observed=observed,
+            )
         else:
             _check(checks, f"patch.operation.{index}", "patch", operation.get("value"), observed)
+
+
+def _overlay_value_matches(observed: Any, expected: Any) -> bool:
+    if isinstance(expected, Mapping):
+        return isinstance(observed, Mapping) and _mapping_contains(observed, expected)
+    if isinstance(expected, list):
+        if not expected:
+            return observed in (None, [])
+        if not isinstance(observed, list) or len(observed) != len(expected):
+            return False
+        return all(_overlay_value_matches(actual, wanted) for actual, wanted in zip(observed, expected, strict=True))
+    return observed == expected
 
 
 def _execution_comparison(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Mapping
@@ -11,7 +12,7 @@ import yaml
 from sim.interchange.scenario_patches import build_scenario_patch_product, write_scenario_patch_product
 
 PLANNING_PATCH_ADAPTER_ID = "oel.mission_recovery.scenario_patch"
-PLANNING_PATCH_ADAPTER_VERSION = "1"
+PLANNING_PATCH_ADAPTER_VERSION = "2"
 
 
 class PlanningPatchError(ValueError):
@@ -175,6 +176,9 @@ def _candidate_operations(
         latest = max(latest, start + float(duration_value or 0.0))
     planned_end = assessment_time_s + float(candidate.get("planned_time_s", 0.0) or 0.0)
     required_duration = max(float(dict(source.get("simulator", {}) or {}).get("duration_s", 0.0) or 0.0), latest, planned_end)
+    dt_s = float(dict(source.get("simulator", {}) or {}).get("dt_s", 0.0) or 0.0)
+    if math.isfinite(dt_s) and dt_s > 0.0:
+        required_duration = float(math.ceil(required_duration / dt_s - 1.0e-12) * dt_s)
     operations.append(
         {
             "op": "replace",

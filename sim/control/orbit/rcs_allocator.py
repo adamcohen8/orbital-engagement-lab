@@ -118,6 +118,16 @@ class RCSAllocationAwareController(Controller):
                 "rcs_base_mode": mode_flags.get("mode"),
                 "rcs_thruster_names": names,
                 "rcs_thruster_forces_n": forces.tolist(),
+                "rcs_thruster_max_forces_n": max_forces,
+                "rcs_allocation_saturated": bool(
+                    any(
+                        max_force > 0.0 and force >= max_force - 1.0e-12
+                        for force, max_force in zip(forces, max_forces, strict=True)
+                    )
+                ),
+                "rcs_min_thrust_margin_n": float(
+                    min((max_force - force for force, max_force in zip(forces, max_forces, strict=True)), default=0.0)
+                ),
                 "rcs_force_body_n": achieved_force.tolist(),
                 "rcs_force_eci_n": achieved_force_eci.tolist(),
                 "rcs_force_error_n": (desired_force_body_n - achieved_force).tolist(),

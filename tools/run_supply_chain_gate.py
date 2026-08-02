@@ -16,6 +16,8 @@ if str(ROOT) not in sys.path:
 from tools.generate_dependency_evidence import write_dependency_evidence  # noqa: E402
 from tools.generate_python_sbom import write_sbom  # noqa: E402
 
+PYTORCH_CPU_INDEX_URL = "https://download.pytorch.org/whl/cpu"
+
 
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
@@ -50,12 +52,34 @@ def _run(cmd: list[str], *, cwd: Path = ROOT) -> subprocess.CompletedProcess[str
     return subprocess.run(cmd, cwd=cwd, text=True, check=False)
 
 
+def _full_install_command(
+    *,
+    python_executable: str,
+    constraints: Path,
+    install_report_path: Path,
+    torch_cpu_index: bool,
+) -> list[str]:
+    command = [
+        python_executable,
+        "-m",
+        "pip",
+        "install",
+        "-c",
+        str(constraints),
+    ]
+    if torch_cpu_index:
+        command.extend(["--extra-index-url", PYTORCH_CPU_INDEX_URL])
+    command.extend([".[full]", "--report", str(install_report_path)])
+    return command
+
+
 def run_supply_chain_gate(
     output_dir: str | Path,
     *,
     install_full: bool = False,
     python_executable: str = sys.executable,
     constraints_file: str | Path | None = None,
+    torch_cpu_index: bool = False,
 ) -> dict[str, Any]:
     output = Path(output_dir).expanduser().resolve()
     output.mkdir(parents=True, exist_ok=True)
@@ -74,17 +98,12 @@ def run_supply_chain_gate(
             raise FileNotFoundError(f"No approved constraints file for this interpreter: {constraints}")
         commands = [
             [python_executable, "-m", "pip", "install", "-U", "pip", "pip-audit"],
-            [
-                python_executable,
-                "-m",
-                "pip",
-                "install",
-                "-c",
-                str(constraints),
-                ".[full]",
-                "--report",
-                str(install_report_path),
-            ],
+            _full_install_command(
+                python_executable=python_executable,
+                constraints=constraints,
+                install_report_path=install_report_path,
+                torch_cpu_index=torch_cpu_index,
+            ),
         ]
         for cmd in commands:
             proc = _run(cmd)
@@ -168,6 +187,9 @@ def run_supply_chain_gate(
         "kind": "oel_supply_chain_gate",
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "python": python_executable,
+        "dependency_sources": {
+            "pytorch_cpu_index": PYTORCH_CPU_INDEX_URL if torch_cpu_index else None,
+        },
         "git": git_provenance(),
         "audit_exceptions": [],
         "commands": command_results,
@@ -192,11 +214,20 @@ def main(argv: list[str] | None = None) -> int:
         "--constraints",
         help="Approved constraints file (defaults to constraints/py<major><minor>.txt).",
     )
+    parser.add_argument(
+        "--torch-cpu-index",
+        action="store_true",
+        help=(
+            "Resolve Torch from PyTorch's official CPU wheel index while resolving the full profile. "
+            "Intended for disk-bounded Linux audit runners."
+        ),
+    )
     args = parser.parse_args(argv)
     manifest = run_supply_chain_gate(
         args.output_dir,
         install_full=bool(args.install_full),
         constraints_file=args.constraints,
+        torch_cpu_index=bool(args.torch_cpu_index),
     )
     print(f"Evidence manifest: {manifest['manifest']}")
     print(f"Supply-chain gate: {'PASS' if manifest['passed'] else 'FAIL'}")

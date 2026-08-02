@@ -49,6 +49,12 @@ INTERCHANGE_CAPABILITY_FAMILIES = (
         capabilities=("materialize_scenario_patch", "select_patch_product"),
     ),
     InterchangeCapabilityFamily(
+        name="overlays",
+        module="sim.interchange.overlays",
+        facade="sim.handoff",
+        capabilities=("ScenarioOverlayError", "emit_scenario_overlay", "load_scenario_overlay"),
+    ),
+    InterchangeCapabilityFamily(
         name="comparison",
         module="sim.interchange.comparison",
         facade="sim.handoff",
@@ -67,6 +73,27 @@ INTERCHANGE_CAPABILITY_FAMILIES = (
             "CompletedRunStateExportError",
             "build_completed_run_state_product",
             "export_completed_run_state",
+        ),
+    ),
+    InterchangeCapabilityFamily(
+        name="maneuver_detection",
+        module="sim.interchange.maneuver_detection",
+        facade="sim.handoff",
+        capabilities=(
+            "ManeuverDetectionExportError",
+            "build_maneuver_detection_product",
+            "export_event_centered_observations",
+            "export_maneuver_detection_product",
+        ),
+    ),
+    InterchangeCapabilityFamily(
+        name="snapshots",
+        module="sim.interchange.snapshots",
+        facade="sim.handoff",
+        capabilities=(
+            "CompletedRunSnapshotError",
+            "export_completed_run_snapshot",
+            "materialize_snapshot_onp",
         ),
     ),
 )

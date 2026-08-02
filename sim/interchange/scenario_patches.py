@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -18,7 +19,7 @@ from .provenance import canonical_json_bytes, compute_product_id, sha256_file
 from .validation import load_interchange_document, validate_product
 
 SCENARIO_PATCH_ADAPTER_ID = "oel.scenario_patch_materializer"
-SCENARIO_PATCH_ADAPTER_VERSION = "1"
+SCENARIO_PATCH_ADAPTER_VERSION = "2"
 PATCH_OPERATION_KINDS = {
     "mission_burn",
     "duration_extension",
@@ -255,6 +256,7 @@ def materialize_scenario_patch(
         write_handoff_manifest(manifest, manifest_target)
         return _result("blocked", destination, manifest_target, manifest, product_report.to_dict())
     scenario["scenario_name"] = str(scenario_name).strip()
+    _align_duration_to_timestep(scenario, base_manifest=base_manifest)
     outputs = scenario.setdefault("outputs", {})
     outputs["output_dir"] = str(output_dir)
     outputs.setdefault("review", {"enabled": True, "detail": "standard"})
@@ -277,6 +279,35 @@ def materialize_scenario_patch(
     )
 
 
+def _align_duration_to_timestep(
+    scenario: dict[str, Any], *, base_manifest: dict[str, Any]
+) -> None:
+    simulator = scenario.get("simulator")
+    if not isinstance(simulator, dict):
+        return
+    try:
+        duration_s = float(simulator.get("duration_s"))
+        dt_s = float(simulator.get("dt_s"))
+    except (TypeError, ValueError):
+        return
+    if not math.isfinite(duration_s) or not math.isfinite(dt_s) or duration_s <= 0.0 or dt_s <= 0.0:
+        return
+    steps = duration_s / dt_s
+    nearest = round(steps)
+    if math.isclose(steps, nearest, rel_tol=0.0, abs_tol=1.0e-9):
+        return
+    aligned = float(math.ceil(steps - 1.0e-12) * dt_s)
+    simulator["duration_s"] = aligned
+    base_manifest.setdefault("overrides", []).append(
+        {
+            "field": "simulator.duration_s",
+            "source_value": duration_s,
+            "output_value": aligned,
+            "reason": "Round patch-derived duration up to the next complete simulator timestep.",
+        }
+    )
+
+
 def _apply_operation(root: dict[str, Any], operation: Mapping[str, Any]) -> None:
     op = str(operation.get("op", ""))
     path = str(operation.get("path", ""))
@@ -288,7 +319,7 @@ def _apply_operation(root: dict[str, Any], operation: Mapping[str, Any]) -> None
         if not isinstance(current, dict):
             raise ScenarioPatchError(f"Patch path cannot descend through {token!r}.")
         if token not in current:
-            if op == "append" and token == tokens[-2]:
+            if op == "upsert" or (op == "append" and token == tokens[-2]):
                 current[token] = {}
             else:
                 raise ScenarioPatchError(f"Patch replace path does not exist: {path}")
@@ -305,6 +336,8 @@ def _apply_operation(root: dict[str, Any], operation: Mapping[str, Any]) -> None
         if not isinstance(target, list):
             raise ScenarioPatchError(f"Patch append path is not a list: {path}")
         target.append(deepcopy(operation.get("value")))
+    elif op == "upsert":
+        current[key] = deepcopy(operation.get("value"))
     else:
         raise ScenarioPatchError(f"Unsupported patch operation {op!r}.")
 
@@ -330,7 +363,7 @@ def _oel_version() -> str:
 
         return version("orbital-engagement-lab")
     except Exception:
-        return "0.24.0"
+        return "0.24.1"
 
 
 __all__ = [

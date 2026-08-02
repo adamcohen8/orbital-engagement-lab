@@ -46,6 +46,7 @@ jobs:
           python tools/run_supply_chain_gate.py \
             --output-dir outputs/supply_chain \
             --install-full \
+            --torch-cpu-index \
             --constraints constraints/py311.txt
 
       - name: Upload supply-chain evidence
