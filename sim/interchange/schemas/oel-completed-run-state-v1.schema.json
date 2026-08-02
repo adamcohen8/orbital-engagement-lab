@@ -153,7 +153,10 @@
         "generated_utc": {"type": "string", "format": "date-time"},
         "config_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "review_db_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-        "initial_jd_utc": {"type": "number", "exclusiveMinimum": 0}
+        "initial_jd_utc": {"type": "number", "exclusiveMinimum": 0},
+        "initial_jd_utc_source": {
+          "enum": ["verified_source_config", "explicit_export_override"]
+        }
       }
     },
     "selection": {

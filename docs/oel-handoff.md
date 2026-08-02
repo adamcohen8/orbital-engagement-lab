@@ -1,9 +1,11 @@
 # OEL Product Handoff
 
 OEL's interchange layer provides versioned product contracts, read-only
-inspection, bounded State Estimate to ONP materialization, and typed scenario
-patch application. Completed review-store runs can also export one exact state
-sample for a new validated continuation study. It lets analysts and agents determine what a product is,
+inspection, bounded State Estimate to ONP materialization, typed scenario
+patch application, atomic multi-object continuation, and confirmed maneuver
+event export. Completed review-store runs can export one exact state sample or
+one exact shared multi-object sample for a new validated continuation study. It
+lets analysts and agents determine what a product is,
 where it came from, whether
 its identity and source fingerprints are current, and whether its quality and
 semantics permit automatic promotion.
@@ -71,8 +73,8 @@ full-trajectory equivalence, or operational suitability.
 
 ## Export a Completed-run State
 
-A completed single-run review store with an absolute `initial_jd_utc` can emit
-one `oel.completed_run_state` product. Select the object explicitly whenever
+A completed single-run review store can emit one `oel.completed_run_state`
+product. Select the object explicitly whenever
 the run contains more than one eligible object:
 
 ```bash
@@ -101,6 +103,70 @@ Covariance is included only when `object_state_covariance` has one matching,
 mathematically valid full 6x6 ECI matrix for the selected object and sample.
 Ordinary runs leave that additive table empty; covariance-analysis runs can
 populate it. Sigma-only summaries are never expanded into a diagonal matrix.
+
+For a trusted relative-time fixture, `--epoch-jd-utc` supplies an explicit UTC
+anchor. The exporter rejects a missing anchor and rejects an override that
+conflicts with a configured source epoch; the choice is recorded in product
+provenance.
+
+## Export an Atomic Multi-object Snapshot
+
+Use one exact shared final, sample, time, or event selection when a continuation
+must preserve multiple objects together:
+
+```bash
+.venv/bin/python -m sim.handoff export-snapshot outputs/source_run \
+  --object-id chief --object-id deputy --sample final \
+  --output outputs/handoffs/source_snapshot.json --json
+
+.venv/bin/python -m sim.handoff materialize-snapshot-onp \
+  --snapshot-product outputs/handoffs/source_snapshot.json \
+  --scenario-name passive_pair_branch \
+  --output outputs/handoffs/passive_pair_branch.yaml \
+  --run-output-dir outputs/passive_pair_branch \
+  --duration-s 600 --dt-s 10 --trust-plugins --json
+```
+
+`oel.completed_run_snapshot` requires at least two canonical ECI states at the
+same sample and epoch and binds available relative-pair rows from that sample.
+The materializer creates one passive ONP object per state and never restores
+controller, estimator, attitude, or mission-module memory.
+
+## Export a Maneuver Detection
+
+A confirmed review event can be promoted to a versioned detection product:
+
+```bash
+.venv/bin/python -m sim.handoff export-maneuver-detection outputs/detection_run \
+  --observer-id chaser --target-id target \
+  --output outputs/handoffs/maneuver_detection.json --json
+```
+
+The `oel.maneuver_detection` payload binds the event/sample, observer, target,
+detector settings, summary evidence, source hashes, and non-claims. The Pro
+Scale adapter can export measured event-centered observations, run dynamics
+OD, and prepare a truth-free IHE input bundle and authoring skeleton. Weak fit
+or holdout evidence remains `review_required`; no intent or hypothesis is
+selected automatically.
+
+## Emit a Scenario-capability Overlay
+
+Use an overlay when an accepted scenario needs bounded, explicit access,
+control, knowledge, mission, review, termination, or supported analysis
+configuration without workflow-local YAML copying:
+
+```bash
+.venv/bin/python -m sim.handoff emit-overlay \
+  --source-scenario outputs/base.yaml \
+  --overlay overlay.yaml --overlay-id station_and_control \
+  --rationale "Bind reviewed station and control context" \
+  --output outputs/handoffs/station_and_control.json --json
+```
+
+The result is an `oel.scenario_patch` with
+`patch_type: scenario_capability_overlay`. It is source-hash bound, rejects
+unknown paths, and still requires separate materialization, validation, and
+execution.
 
 Use the normal ONP materializer on the exported product:
 
@@ -297,6 +363,8 @@ The package includes:
 - `sim/interchange/schemas/oel-scenario-patch-v1.schema.json`
 - `sim/interchange/schemas/oel-ogp-mean-element-product-v1.schema.json`
 - `sim/interchange/schemas/oel-completed-run-state-v1.schema.json`
+- `sim/interchange/schemas/oel-completed-run-snapshot-v1.schema.json`
+- `sim/interchange/schemas/oel-maneuver-detection-v1.schema.json`
 - `sim/interchange/schemas/oel-handoff-manifest-v1.schema.json`
 - `sim/interchange/schemas/oel-handoff-comparison-v1.schema.json`
 - `sim/interchange/examples/state_estimate_accepted_current.json`
@@ -312,12 +380,14 @@ Use the stable facade for programmatic inspection:
 ```python
 from sim.handoff import (
     compare_handoff,
+    export_completed_run_snapshot,
     export_completed_run_state,
     inspect_path,
     load_interchange_document,
     materialize_scenario_patch,
     materialize_ogp,
     select_patch_product,
+    materialize_snapshot_onp,
     validate_product,
 )
 
@@ -335,6 +405,13 @@ completed = export_completed_run_state(
     "outputs/source_run",
     output_path="outputs/handoffs/source_run_final_state.json",
     object_id="target",
+    selector="final",
+)
+
+snapshot = export_completed_run_snapshot(
+    "outputs/source_run",
+    output_path="outputs/handoffs/source_run_snapshot.json",
+    object_ids=["chief", "deputy"],
     selector="final",
 )
 

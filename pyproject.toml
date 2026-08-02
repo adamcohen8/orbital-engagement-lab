@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "orbital-engagement-lab"
-version = "0.24.0"
+version = "0.24.1"
 description = "Integrated spacecraft simulation and analysis platform for rendezvous, control, validation, and mission prototyping."
 readme = "README.md"
 requires-python = ">=3.10,<3.15"
@@ -53,7 +53,7 @@ game = [
 ]
 ml = [
   "gymnasium>=0.29,<2",
-  "torch>=2.9,<3",
+  "torch>=2.9,<2.11",
   "filelock>=3.20.3,<4",
 ]
 accel = [
@@ -89,7 +89,7 @@ full = [
   "imageio>=2.34,<3",
   "imageio-ffmpeg>=0.4,<1",
   "gymnasium>=0.29,<2",
-  "torch>=2.9,<3",
+  "torch>=2.9,<2.11",
   "filelock>=3.20.3,<4",
   "numba>=0.61,<0.67",
   "scipy>=1.14.1,<1.18",

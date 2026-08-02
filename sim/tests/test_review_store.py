@@ -329,6 +329,54 @@ def test_flagship_scale_burn_activity_uses_vetted_saved_query_budget(tmp_path: P
     assert result.rows[0]["samples"] == 12_001
 
 
+def test_review_events_include_confirmed_maneuver_detection() -> None:
+    with sqlite3.connect(":memory:") as conn:
+        conn.execute(
+            """
+            CREATE TABLE events (
+                event_id TEXT PRIMARY KEY,
+                time_s REAL,
+                sample_index INTEGER,
+                object_id TEXT,
+                event_type TEXT,
+                severity TEXT,
+                message TEXT,
+                source TEXT
+            )
+            """
+        )
+        _insert_events(
+            conn,
+            t_s=np.array([0.0, 1.0, 2.0, 3.0], dtype=float),
+            summary={
+                "knowledge_consistency_by_observer": {
+                    "chaser": {
+                        "target": {
+                            "maneuver_confirmed_event_count": 1,
+                            "maneuver_first_confirmed_t_s": 2.0,
+                            "maneuver_max_nis": 42.0,
+                        }
+                    }
+                }
+            },
+            thrust_hist={},
+        )
+        row = conn.execute(
+            "SELECT event_id, time_s, sample_index, object_id, event_type, severity, source "
+            "FROM events"
+        ).fetchone()
+
+    assert row == (
+        "maneuver_detection_confirmed:chaser:target:2",
+        2.0,
+        2,
+        "target",
+        "maneuver_detection_confirmed",
+        "warning",
+        "knowledge_maneuver_detector",
+    )
+
+
 def test_relative_evidence_plot_recipes_group_by_pair_id() -> None:
     for recipe_id in ("relative_range", "relative_range_rate"):
         recipe = EVIDENCE_PLOT_RECIPES[recipe_id]

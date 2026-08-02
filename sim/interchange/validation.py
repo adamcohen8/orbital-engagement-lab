@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import re
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -188,6 +189,10 @@ def validate_product(
         _validate_ogp_mean_element_product(payload, provenance=provenance, issues=issues)
     elif product_kind == "oel.completed_run_state":
         _validate_completed_run_state(payload, provenance=provenance, issues=issues)
+    elif product_kind == "oel.maneuver_detection":
+        _validate_maneuver_detection(payload, provenance=provenance, issues=issues)
+    elif product_kind == "oel.completed_run_snapshot":
+        _validate_completed_run_snapshot(payload, provenance=provenance, issues=issues)
     elif product_kind:
         _error(
             issues,
@@ -640,6 +645,7 @@ def _validate_completed_run_state(
             "config_sha256",
             "review_db_sha256",
             "initial_jd_utc",
+            "initial_jd_utc_source",
         },
         source_path,
         issues,
@@ -674,6 +680,17 @@ def _validate_completed_run_state(
             "continuation.initial_epoch_invalid",
             f"{source_path}.initial_jd_utc",
             "Initial Julian date must be positive.",
+        )
+    epoch_source = source_run.get("initial_jd_utc_source")
+    if epoch_source is not None and epoch_source not in {
+        "verified_source_config",
+        "explicit_export_override",
+    }:
+        _error(
+            issues,
+            "continuation.initial_epoch_source_invalid",
+            f"{source_path}.initial_jd_utc_source",
+            "Expected verified_source_config or explicit_export_override.",
         )
 
     selection = _required_mapping(payload, "selection", path, issues)
@@ -805,6 +822,185 @@ def _validate_completed_run_state(
                 f"{state_path}.epoch.value",
                 "State epoch must equal initial_jd_utc + selected time_s / 86400.",
             )
+
+
+def _validate_maneuver_detection(
+    payload: Mapping[str, Any],
+    *,
+    provenance: Mapping[str, Any],
+    issues: list[InterchangeValidationIssue],
+) -> None:
+    path = "$.payload"
+    _closed_mapping(
+        payload,
+        {"observer", "target", "detection", "detector", "source_run", "evidence"},
+        path,
+        issues,
+    )
+    observer = _required_mapping(payload, "observer", path, issues)
+    target = _required_mapping(payload, "target", path, issues)
+    _closed_mapping(observer, {"object_id"}, f"{path}.observer", issues)
+    _closed_mapping(target, {"object_id"}, f"{path}.target", issues)
+    observer_id = _required_string(observer, "object_id", f"{path}.observer", issues)
+    target_id = _required_string(target, "object_id", f"{path}.target", issues)
+    if observer_id and target_id and observer_id == target_id:
+        _error(issues, "maneuver_detection.identity_conflict", f"{path}.target.object_id", "Observer and target object IDs must differ.")
+
+    detection = _required_mapping(payload, "detection", path, issues)
+    detection_path = f"{path}.detection"
+    _closed_mapping(detection, {"event_id", "status", "time_s", "sample_index", "epoch_jd_utc"}, detection_path, issues)
+    _required_string(detection, "event_id", detection_path, issues)
+    _require_exact(detection, "status", "confirmed", detection_path, issues)
+    detection_time = _finite_number(detection.get("time_s"), f"{detection_path}.time_s", issues)
+    if detection_time is not None and detection_time < 0.0:
+        _error(issues, "maneuver_detection.time_invalid", f"{detection_path}.time_s", "Detection time must be non-negative.")
+    sample_index = detection.get("sample_index")
+    if isinstance(sample_index, bool) or not isinstance(sample_index, int) or sample_index < 0:
+        _error(issues, "maneuver_detection.sample_invalid", f"{detection_path}.sample_index", "Detection sample_index must be a non-negative integer.")
+    epoch = detection.get("epoch_jd_utc")
+    if epoch is not None:
+        epoch_value = _finite_number(epoch, f"{detection_path}.epoch_jd_utc", issues)
+        if epoch_value is not None and epoch_value <= 0.0:
+            _error(issues, "maneuver_detection.epoch_invalid", f"{detection_path}.epoch_jd_utc", "Detection Julian date must be positive when present.")
+
+    detector = _required_mapping(payload, "detector", path, issues)
+    detector_path = f"{path}.detector"
+    _closed_mapping(detector, {"configuration", "summary"}, detector_path, issues)
+    configuration = _required_mapping(detector, "configuration", detector_path, issues)
+    if configuration.get("enabled") is not True:
+        _error(issues, "maneuver_detection.detector_disabled", f"{detector_path}.configuration.enabled", "Source detector configuration must be enabled.")
+    summary = _required_mapping(detector, "summary", detector_path, issues)
+    confirmed_count = summary.get("maneuver_confirmed_event_count")
+    if isinstance(confirmed_count, bool) or not isinstance(confirmed_count, int) or confirmed_count <= 0:
+        _error(issues, "maneuver_detection.confirmation_missing", f"{detector_path}.summary.maneuver_confirmed_event_count", "Detector summary must report at least one confirmed event.")
+    first_confirmed = _finite_number(summary.get("maneuver_first_confirmed_t_s"), f"{detector_path}.summary.maneuver_first_confirmed_t_s", issues)
+    if first_confirmed is not None and detection_time is not None and not math.isclose(first_confirmed, detection_time, rel_tol=0.0, abs_tol=1.0e-9):
+        _error(issues, "maneuver_detection.summary_time_mismatch", f"{detector_path}.summary.maneuver_first_confirmed_t_s", "First confirmed summary time must match the selected event time.")
+
+    source_run = _required_mapping(payload, "source_run", path, issues)
+    source_path = f"{path}.source_run"
+    _closed_mapping(source_run, {"run_id", "scenario_name", "review_schema_version", "initial_jd_utc"}, source_path, issues)
+    _required_string(source_run, "run_id", source_path, issues)
+    _required_string(source_run, "scenario_name", source_path, issues)
+    _required_string(source_run, "review_schema_version", source_path, issues)
+    initial_epoch = source_run.get("initial_jd_utc")
+    if initial_epoch is not None:
+        initial_epoch_value = _finite_number(initial_epoch, f"{source_path}.initial_jd_utc", issues)
+        if initial_epoch_value is not None and initial_epoch_value <= 0.0:
+            _error(issues, "maneuver_detection.initial_epoch_invalid", f"{source_path}.initial_jd_utc", "Initial Julian date must be positive when present.")
+        if initial_epoch_value is not None and detection_time is not None and epoch is not None and isinstance(epoch, (int, float)) and not isinstance(epoch, bool) and math.isfinite(float(epoch)) and not math.isclose(float(epoch), initial_epoch_value + detection_time / 86400.0, rel_tol=0.0, abs_tol=1.0e-12):
+            _error(issues, "maneuver_detection.epoch_derivation_mismatch", f"{detection_path}.epoch_jd_utc", "Detection epoch must equal initial_jd_utc + time_s / 86400.")
+    elif epoch is not None:
+        _error(issues, "maneuver_detection.unanchored_epoch", f"{detection_path}.epoch_jd_utc", "A detection epoch requires an initial source-run epoch.")
+
+    evidence = _required_mapping(payload, "evidence", path, issues)
+    evidence_path = f"{path}.evidence"
+    _closed_mapping(evidence, {"event_row_sha256", "summary_sha256", "event_query"}, evidence_path, issues)
+    event_hash = _required_string(evidence, "event_row_sha256", evidence_path, issues)
+    summary_hash = _required_string(evidence, "summary_sha256", evidence_path, issues)
+    _required_string(evidence, "event_query", evidence_path, issues)
+    for field, value in (("event_row_sha256", event_hash), ("summary_sha256", summary_hash)):
+        if value and not _SHA256_RE.fullmatch(value):
+            _error(issues, "maneuver_detection.hash_invalid", f"{evidence_path}.{field}", "Expected 64 lowercase hex.")
+    artifact_hashes = {str(item.get("sha256", "") or "") for item in provenance.get("source_artifacts", []) if isinstance(item, Mapping)}
+    if summary_hash and summary_hash not in artifact_hashes:
+        _error(issues, "maneuver_detection.summary_unbound", f"{evidence_path}.summary_sha256", "Summary hash must match a provenance source artifact hash.")
+
+
+def _validate_completed_run_snapshot(
+    payload: Mapping[str, Any],
+    *,
+    provenance: Mapping[str, Any],
+    issues: list[InterchangeValidationIssue],
+) -> None:
+    path = "$.payload"
+    _closed_mapping(payload, {"states", "relative_pairs", "source_run", "selection"}, path, issues)
+    states = _required_sequence(payload, "states", path, issues)
+    if len(states) < 2:
+        _error(issues, "snapshot.too_few_objects", f"{path}.states", "A snapshot requires at least two object states.")
+    source_run = _required_mapping(payload, "source_run", path, issues)
+    selection = _required_mapping(payload, "selection", path, issues)
+    selection_path = f"{path}.selection"
+    _closed_mapping(
+        selection,
+        {"selector_kind", "requested", "sample_index", "time_s", "state_rows_sha256", "associated_event"},
+        selection_path,
+        issues,
+    )
+    hashes = _required_mapping(selection, "state_rows_sha256", selection_path, issues)
+    object_ids: list[str] = []
+    epochs: list[float] = []
+    for index, item in enumerate(states):
+        item_path = f"{path}.states[{index}]"
+        if not isinstance(item, Mapping):
+            _error(issues, "type.object", item_path, "Snapshot state entries must be objects.")
+            continue
+        _closed_mapping(
+            item,
+            {"object", "state", "covariance", "object_specs", "model_assumptions"},
+            item_path,
+            issues,
+        )
+        obj = dict(item.get("object", {}) or {})
+        object_id = str(obj.get("object_id", "") or "")
+        if object_id:
+            object_ids.append(object_id)
+        state_hash = hashes.get(object_id)
+        fake_selection = deepcopy(dict(selection))
+        fake_selection.pop("state_rows_sha256", None)
+        fake_selection["state_row_sha256"] = state_hash
+        fake_payload = {
+            **deepcopy(dict(item)),
+            "source_run": deepcopy(dict(source_run)),
+            "selection": fake_selection,
+        }
+        before = len(issues)
+        _validate_completed_run_state(fake_payload, provenance=provenance, issues=issues)
+        for issue_index in range(before, len(issues)):
+            issue = issues[issue_index]
+            if issue.path.startswith("$.payload"):
+                issues[issue_index] = InterchangeValidationIssue(
+                    code=issue.code,
+                    path=item_path + issue.path[len("$.payload"):],
+                    message=issue.message,
+                    severity=issue.severity,
+                )
+        epoch = dict(dict(item.get("state", {}) or {}).get("epoch", {}) or {}).get("value")
+        if isinstance(epoch, (int, float)) and not isinstance(epoch, bool) and math.isfinite(float(epoch)):
+            epochs.append(float(epoch))
+    if len(object_ids) != len(set(object_ids)):
+        _error(issues, "snapshot.duplicate_object", f"{path}.states", "Snapshot object IDs must be unique.")
+    if set(hashes) != set(object_ids):
+        _error(issues, "snapshot.hash_binding_mismatch", f"{selection_path}.state_rows_sha256", "State-row hashes must bind exactly the snapshot object IDs.")
+    for object_id, value in hashes.items():
+        if not isinstance(object_id, str) or not isinstance(value, str) or not _SHA256_RE.fullmatch(value):
+            _error(issues, "snapshot.state_hash_invalid", f"{selection_path}.state_rows_sha256", "Each object must bind one 64-character lowercase state-row hash.")
+            break
+    if epochs and any(not math.isclose(value, epochs[0], rel_tol=0.0, abs_tol=1.0e-12) for value in epochs[1:]):
+        _error(issues, "snapshot.epoch_mismatch", f"{path}.states", "All snapshot states must share one epoch.")
+
+    pairs = _required_sequence(payload, "relative_pairs", path, issues)
+    pair_keys: set[tuple[str, str]] = set()
+    expected_fields = {
+        "deputy_id", "chief_id", "r_radial_km", "i_intrack_km", "c_crosstrack_km",
+        "v_radial_km_s", "v_intrack_km_s", "v_crosstrack_km_s", "range_km", "range_rate_km_s",
+    }
+    for index, item in enumerate(pairs):
+        pair_path = f"{path}.relative_pairs[{index}]"
+        if not isinstance(item, Mapping):
+            _error(issues, "type.object", pair_path, "Relative-pair entries must be objects.")
+            continue
+        _closed_mapping(item, expected_fields, pair_path, issues)
+        deputy = _required_string(item, "deputy_id", pair_path, issues)
+        chief = _required_string(item, "chief_id", pair_path, issues)
+        if deputy not in object_ids or chief not in object_ids or deputy == chief:
+            _error(issues, "snapshot.relative_pair_unbound", pair_path, "Relative pair must bind two distinct snapshot objects.")
+        key = (deputy, chief)
+        if key in pair_keys:
+            _error(issues, "snapshot.relative_pair_duplicate", pair_path, "Relative pairs must be unique.")
+        pair_keys.add(key)
+        for field in expected_fields - {"deputy_id", "chief_id"}:
+            _finite_number(item.get(field), f"{pair_path}.{field}", issues)
 
 
 def _validate_covariance(
@@ -1049,7 +1245,11 @@ def _validate_scenario_patch(
     patch_path = f"{path}.patch"
     _closed_mapping(patch, {"patch_type", "operations"}, patch_path, issues)
     patch_type = _required_string(patch, "patch_type", patch_path, issues)
-    if patch_type and patch_type not in {"mission_recovery_candidate", "controller_optimized_variant"}:
+    if patch_type and patch_type not in {
+        "mission_recovery_candidate",
+        "controller_optimized_variant",
+        "scenario_capability_overlay",
+    }:
         _error(issues, "patch.type_unsupported", f"{patch_path}.patch_type", "Unsupported scenario patch type.")
     operations = _required_sequence(patch, "operations", patch_path, issues)
     if not operations:
@@ -1066,12 +1266,19 @@ def _validate_scenario_patch(
         _required_string(operation, "reason", operation_path, issues)
         if "value" not in operation:
             _error(issues, "patch.value_missing", f"{operation_path}.value", "Patch operation value is required.")
-        if op not in {"replace", "append"}:
-            _error(issues, "patch.operation_unsupported", f"{operation_path}.op", "Only replace and append are supported.")
+        if op not in {"replace", "append", "upsert"}:
+            _error(issues, "patch.operation_unsupported", f"{operation_path}.op", "Only replace, append, and upsert are supported.")
         if kind not in {"mission_burn", "duration_extension", "controller_pointer", "scenario_override"}:
             _error(issues, "patch.operation_kind_unsupported", f"{operation_path}.kind", "Unsupported typed operation kind.")
         if dotted:
-            _validate_patch_path(op=op, kind=kind, path=dotted, issue_path=f"{operation_path}.path", issues=issues)
+            _validate_patch_path(
+                patch_type=patch_type,
+                op=op,
+                kind=kind,
+                path=dotted,
+                issue_path=f"{operation_path}.path",
+                issues=issues,
+            )
         _validate_patch_operation_value(
             patch_type=patch_type,
             kind=kind,
@@ -1090,7 +1297,11 @@ def _validate_scenario_patch(
     )
     _required_string(selection, "selection_id", selection_path, issues)
     selection_kind = _required_string(selection, "selection_kind", selection_path, issues)
-    if selection_kind and selection_kind not in {"mission_recovery_candidate", "controller_optimized_variant"}:
+    if selection_kind and selection_kind not in {
+        "mission_recovery_candidate",
+        "controller_optimized_variant",
+        "scenario_capability_overlay",
+    }:
         _error(issues, "patch.selection_kind_unsupported", f"{selection_path}.selection_kind", "Unsupported selection kind.")
     if patch_type and selection_kind and selection_kind != patch_type:
         _error(
@@ -1116,7 +1327,13 @@ def _validate_scenario_patch(
 
 
 def _validate_patch_path(
-    *, op: str, kind: str, path: str, issue_path: str, issues: list[InterchangeValidationIssue]
+    *,
+    patch_type: str,
+    op: str,
+    kind: str,
+    path: str,
+    issue_path: str,
+    issues: list[InterchangeValidationIssue],
 ) -> None:
     tokens = [token for token in path.split(".") if token]
     valid = False
@@ -1131,10 +1348,35 @@ def _validate_patch_path(
             and tokens[0] == "objects"
             and tokens[2] in {"orbit_control", "attitude_control", "base_guidance"}
         )
+    elif kind == "scenario_override" and patch_type == "scenario_capability_overlay":
+        valid = op == "upsert" and _scenario_overlay_path_allowed(tokens)
     elif kind == "scenario_override":
         valid = op == "replace" and bool(tokens) and tokens[0] in {"objects", "simulator", "analysis", "ground_stations"}
     if not valid:
         _error(issues, "patch.path_not_allowed", issue_path, f"Path {path!r} is not allowed for operation kind {kind!r}.")
+
+
+def _scenario_overlay_path_allowed(tokens: list[str]) -> bool:
+    if tokens == ["ground_stations"]:
+        return True
+    if tokens in (["simulator", "termination"], ["outputs", "review"]):
+        return True
+    if len(tokens) == 2 and tokens[0] == "analysis":
+        return True
+    return (
+        len(tokens) == 3
+        and tokens[0] == "objects"
+        and tokens[2]
+        in {
+            "orbit_control",
+            "attitude_control",
+            "base_guidance",
+            "mission_strategy",
+            "mission_execution",
+            "mission_objectives",
+            "knowledge",
+        }
+    )
 
 
 def _validate_patch_operation_value(
@@ -1148,6 +1390,7 @@ def _validate_patch_operation_value(
     allowed_kinds = {
         "mission_recovery_candidate": {"mission_burn", "duration_extension"},
         "controller_optimized_variant": {"controller_pointer", "scenario_override"},
+        "scenario_capability_overlay": {"scenario_override"},
     }
     if patch_type in allowed_kinds and kind not in allowed_kinds[patch_type]:
         _error(

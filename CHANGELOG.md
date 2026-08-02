@@ -8,6 +8,56 @@ migration-sensitive behavior explicitly.
 
 ## Unreleased
 
+## 0.24.1 - 2026-08-02
+
+Release thesis: `v0.24.1` closes the cross-capability integration defects found
+while field-testing the v0.24 glue layer. The patch adds bounded composition and
+continuation contracts so the six golden workflows can reach their documented
+endpoints without manual YAML copying or silent evidence promotion.
+
+Private/Pro scope: `v0.24.1` adds the event-centered maneuver-detection-to-IHE
+adapter and one-command Scale refresh through ONP execution. The public release
+receives the common overlay, atomic snapshot, completed-run epoch-anchor,
+maneuver-detection, readiness-evidence, review-event, and scenario-patch fixes.
+No v0.24 compatibility aliases or deprecated MCP contracts are removed.
+
+### Added
+
+- Added six runnable cross-capability golden workflows covering observation to
+  access, plan/execute/verify/continue, relative navigation to controlled RPO
+  with an atomic passive branch, maneuver detection to an analyst-reviewed IHE
+  bundle, one-command catalog refresh through ONP execution, and integrated
+  maneuver-readiness scoring.
+- Added bounded scenario-capability overlays for station networks, object
+  control/knowledge/mission configuration, review settings, termination, and
+  supported analysis fields; atomic multi-object completed-run snapshots;
+  versioned maneuver-detection products and measured event-centered observation
+  export; and fail-closed readiness packets with allocation, saturation,
+  pointing, propellant, objective, burn, and guardrail gates.
+- Added a one-command Scale refresh-to-ONP workflow with bounded queue draining,
+  materialization, execution, and standard before/after evidence. Synthetic
+  catalog seeds now deterministically vary non-event phases while preserving
+  injected close-pair geometry.
+
+### Fixed
+
+- Rounded patch-derived durations up to a complete simulator timestep and
+  recorded the adjustment, unblocking accepted recovery-patch execution.
+- Recorded maneuver confirmations as review events and allowed completed-run
+  exports from relative-time fixtures only when an explicit UTC epoch anchor is
+  supplied; conflicting anchors still fail closed.
+- Created nested output parents before completed-run provenance checks and
+  allowed typed overlay upserts to create missing mapping ancestors.
+- Bounded the optional machine-learning profile to Torch 2.9/2.10 so its
+  dependency graph remains compatible with the release-audited Setuptools 83
+  baseline; later Torch releases require an older Setuptools runtime.
+- Removed hidden Pro-only dependencies from the public maneuver-event export
+  and maneuver-readiness acceptance tests, keeping both public glue contracts
+  runnable in the generated open-core release.
+- Corrected the maneuver-detection-to-IHE golden-matrix test owner and kept
+  Linux full-profile supply-chain audits disk-bounded by resolving Torch from
+  PyTorch's official CPU wheel index without weakening audit evidence.
+
 ## 0.24.0 - 2026-08-02
 
 Release thesis: `v0.24.0` makes OEL's major analytical capabilities behave as

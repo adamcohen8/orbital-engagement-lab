@@ -7,7 +7,7 @@ security, legal, export-control, or mission-assurance process.
 ## Supported Versions
 
 - Public releases: security fixes target the current public release line,
-  currently `v0.24.0`.
+  currently `v0.24.1`.
 - Private/Pro releases: security fixes target the active customer-supported
   release line or pilot branch named in the agreement.
 - Declared Python compatibility range: Python 3.10 through 3.14. Functional and
@@ -57,6 +57,12 @@ report and `pip check`, writes the wheel inventory, SBOM, and freeze, runs an
 unsuppressed audit, and records artifact hashes in `supply-chain-gate.json`.
 Path-scoped PR CI and scheduled/manual CI repeat the audit on Linux as an
 independent-environment backstop; merge and release events do not repeat it.
+Those disk-bounded Linux jobs add `--torch-cpu-index`, which keeps the same
+constrained `.[full]` resolution and evidence sequence while sourcing Torch
+from PyTorch's official CPU wheel index instead of installing CUDA runtime
+packages. The selected wheel URL and hash remain captured in the pip install
+report and wheel inventory, and the source policy is recorded in the gate
+manifest.
 Treat a known vulnerability as a release finding until it is upgraded, removed,
 documented as not applicable, or accepted by the evaluator in writing.
 

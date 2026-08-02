@@ -58,9 +58,25 @@ def _summarize_actuator_diagnostics(controller_debug_hist: dict[str, list[dict[s
             "max_gimbal_angle_rad": 0.0,
             "max_commanded_rcs_thruster_force_n": 0.0,
             "max_electric_propulsion_thrust_n": 0.0,
+            "rcs_allocation_saturated_samples": 0,
+            "rcs_allocation_saturated_duration_s": 0.0,
+            "max_rcs_force_residual_n": 0.0,
+            "rms_rcs_force_residual_n": None,
+            "max_rcs_torque_residual_nm": 0.0,
+            "rms_rcs_torque_residual_nm": None,
+            "min_rcs_thrust_margin_n": None,
+            "max_attitude_error_deg": None,
+            "propellant_consumed_kg": 0.0,
+            "final_propellant_remaining_kg": None,
         }
+        force_residuals: list[float] = []
+        torque_residuals: list[float] = []
+        attitude_errors: list[float] = []
+        thrust_margins: list[float] = []
+        final_propellant: float | None = None
         for row in list(rows or []):
             flags = dict(row.get("mode_flags", {}) or {})
+            attitude_flags = dict(dict(row.get("command_attitude", {}) or {}).get("mode_flags", {}) or {})
             if bool(flags.get("actuator_stack_enabled", False)):
                 object_summary["actuator_stack_samples"] += 1
             if bool(flags.get("actuator_fault_stuck_off", False)):
@@ -92,7 +108,78 @@ def _summarize_actuator_diagnostics(controller_debug_hist: dict[str, list[dict[s
                     float(object_summary["max_electric_propulsion_thrust_n"]),
                     abs(float(flags.get("electric_propulsion_thrust_n", 0.0))),
                 )
-        if any(float(v) > 0.0 for v in object_summary.values()):
+            force_residual = flags.get("rcs_force_residual_n", flags.get("rcs_force_error_n"))
+            if force_residual is not None:
+                vector = np.asarray(force_residual, dtype=float).reshape(-1)
+                if vector.size and np.all(np.isfinite(vector)):
+                    force_residuals.append(float(np.linalg.norm(vector)))
+            torque_residual = flags.get("rcs_torque_residual_nm", flags.get("rcs_torque_error_nm"))
+            if torque_residual is not None:
+                vector = np.asarray(torque_residual, dtype=float).reshape(-1)
+                if vector.size and np.all(np.isfinite(vector)):
+                    torque_residuals.append(float(np.linalg.norm(vector)))
+            if bool(flags.get("rcs_allocation_saturated", False)):
+                object_summary["rcs_allocation_saturated_samples"] += 1
+                object_summary["rcs_allocation_saturated_duration_s"] += float(row.get("dt_s", 0.0) or 0.0)
+            margin = flags.get("rcs_min_thrust_margin_n")
+            if margin is not None and np.isfinite(float(margin)):
+                thrust_margins.append(float(margin))
+            attitude_error = flags.get("attitude_error_deg", attitude_flags.get("attitude_error_deg"))
+            if attitude_error is None:
+                attitude_belief = row.get("attitude_belief") or row.get("belief")
+                override = dict(
+                    attitude_flags.get(
+                        "attitude_state_override",
+                        flags.get("attitude_state_override", {}),
+                    )
+                    or {}
+                )
+                desired_quat = override.get("q_next_bn")
+                if attitude_belief is not None and desired_quat is not None:
+                    belief_values = np.asarray(attitude_belief, dtype=float).reshape(-1)
+                    desired_values = np.asarray(desired_quat, dtype=float).reshape(-1)
+                    if belief_values.size >= 10 and desired_values.size == 4:
+                        actual_quat = belief_values[6:10]
+                        actual_norm = float(np.linalg.norm(actual_quat))
+                        desired_norm = float(np.linalg.norm(desired_values))
+                        if actual_norm > 0.0 and desired_norm > 0.0:
+                            cosine = float(
+                                np.clip(
+                                    abs(np.dot(actual_quat / actual_norm, desired_values / desired_norm)),
+                                    -1.0,
+                                    1.0,
+                                )
+                            )
+                            attitude_error = float(np.degrees(2.0 * np.arccos(cosine)))
+            if attitude_error is not None and np.isfinite(float(attitude_error)):
+                attitude_errors.append(abs(float(attitude_error)))
+            delta_mass = flags.get("delta_mass_kg")
+            if delta_mass is not None and np.isfinite(float(delta_mass)):
+                object_summary["propellant_consumed_kg"] += max(float(delta_mass), 0.0)
+            available = flags.get("available_propellant_kg")
+            if available is not None and np.isfinite(float(available)):
+                final_propellant = max(
+                    float(available) - max(float(delta_mass or 0.0), 0.0),
+                    0.0,
+                )
+        if force_residuals:
+            object_summary["max_rcs_force_residual_n"] = max(force_residuals)
+            object_summary["rms_rcs_force_residual_n"] = float(np.sqrt(np.mean(np.square(force_residuals))))
+        if torque_residuals:
+            object_summary["max_rcs_torque_residual_nm"] = max(torque_residuals)
+            object_summary["rms_rcs_torque_residual_nm"] = float(np.sqrt(np.mean(np.square(torque_residuals))))
+        if thrust_margins:
+            object_summary["min_rcs_thrust_margin_n"] = min(thrust_margins)
+        if attitude_errors:
+            object_summary["max_attitude_error_deg"] = max(attitude_errors)
+        object_summary["final_propellant_remaining_kg"] = final_propellant
+        if any(
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and np.isfinite(float(value))
+            and float(value) > 0.0
+            for value in object_summary.values()
+        ):
             summary[str(oid)] = object_summary
     return summary
 

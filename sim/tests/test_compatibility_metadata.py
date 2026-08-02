@@ -96,7 +96,8 @@ def test_direct_dependencies_and_supported_extras_are_bounded() -> None:
     assert any(item.startswith("tomli") and "python_version < '3.11'" in item for item in extras["dev"])
     assert any(item.startswith("setuptools") for item in extras["dev"])
     assert not any("torch" in item.lower() for item in extras["cross-platform"])
-    assert any("torch" in item.lower() for item in extras["full"])
+    assert "torch>=2.9,<2.11" in extras["ml"]
+    assert "torch>=2.9,<2.11" in extras["full"]
 
 
 def test_every_supported_python_minor_has_an_approved_constraint_set() -> None:

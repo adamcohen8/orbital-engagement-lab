@@ -130,6 +130,33 @@ def test_normal_mission_recovery_run_emits_patch_index(tmp_path: Path) -> None:
     assert Path(emission["index_path"]).is_file()
 
 
+def test_mission_recovery_duration_is_rounded_up_to_complete_source_timestep(
+    tmp_path: Path,
+) -> None:
+    source = _source_scenario(tmp_path / "source.yaml")
+    recovery = _mission_recovery(duration_s=2.45)
+    recovery["planner"]["candidates"][0]["planned_time_s"] = 4.45
+    emission = emit_mission_recovery_scenario_patches(
+        recovery, source_scenario=source, output_dir=tmp_path / "patches"
+    )
+    patch_path = select_patch_product(emission["index_path"], "candidate-a")
+    patch = json.loads(patch_path.read_text(encoding="utf-8"))
+    duration_operation = patch["payload"]["patch"]["operations"][-1]
+
+    assert duration_operation["value"] == 15.0
+    result = materialize_scenario_patch(
+        patch_path,
+        source,
+        scenario_name="aligned_duration",
+        scenario_path=tmp_path / "aligned.yaml",
+        output_dir=tmp_path / "run",
+        trust_plugins=True,
+    )
+    assert result["status"] == "materialized"
+    scenario = yaml.safe_load((tmp_path / "aligned.yaml").read_text(encoding="utf-8"))
+    assert scenario["simulator"]["duration_s"] == 15.0
+
+
 def test_patch_index_cli_requires_exact_selection_and_never_executes(tmp_path: Path, capsys) -> None:
     source = _source_scenario(tmp_path / "source.yaml")
     emission = emit_mission_recovery_scenario_patches(

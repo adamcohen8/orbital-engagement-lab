@@ -112,7 +112,7 @@ ACCEL_SPECS = (DependencySpec("numba", "0.61", "0.67"),)
 VALIDATION_SPECS = (DependencySpec("sgp4", "2.24", "3"),)
 ML_SPECS = (
     DependencySpec("gymnasium", "0.29", "2"),
-    DependencySpec("torch", "2.9", "3"),
+    DependencySpec("torch", "2.9", "2.11"),
     DependencySpec("filelock", "3.20.3", "4"),
 )
 

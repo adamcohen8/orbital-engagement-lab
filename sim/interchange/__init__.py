@@ -26,9 +26,17 @@ from .contracts import (
     QualityDisposition,
 )
 from .inspection import inspect_document, inspect_path
+from .maneuver_detection import (
+    ManeuverDetectionExportError,
+    build_maneuver_detection_product,
+    export_event_centered_observations,
+    export_maneuver_detection_product,
+)
 from .materialization import OGPMaterializationError, canonical_scenario_digest, materialize_ogp, materialize_onp
+from .overlays import ScenarioOverlayError, emit_scenario_overlay, load_scenario_overlay
 from .provenance import canonical_json_bytes, compute_manifest_id, compute_product_id, sha256_file
 from .scenario_patches import materialize_scenario_patch, select_patch_product
+from .snapshots import CompletedRunSnapshotError, export_completed_run_snapshot, materialize_snapshot_onp
 from .validation import (
     InterchangeValidationIssue,
     InterchangeValidationReport,
@@ -55,7 +63,10 @@ __all__ = [
     "HANDOFF_COMPARISON_SCHEMA_VERSION",
     "HandoffComparisonError",
     "CompletedRunStateExportError",
+    "CompletedRunSnapshotError",
     "OGPMaterializationError",
+    "ManeuverDetectionExportError",
+    "ScenarioOverlayError",
     "QualityDisposition",
     "canonical_json_bytes",
     "canonical_scenario_digest",
@@ -63,13 +74,20 @@ __all__ = [
     "compute_manifest_id",
     "compute_product_id",
     "build_completed_run_state_product",
+    "build_maneuver_detection_product",
+    "export_event_centered_observations",
     "export_completed_run_state",
+    "export_completed_run_snapshot",
+    "export_maneuver_detection_product",
+    "emit_scenario_overlay",
     "inspect_document",
     "inspect_path",
     "load_interchange_document",
+    "load_scenario_overlay",
     "materialize_onp",
     "materialize_ogp",
     "materialize_scenario_patch",
+    "materialize_snapshot_onp",
     "select_patch_product",
     "sha256_file",
     "validate_document",

@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orbitalengagementlab.com/schemas/oel-completed-run-snapshot-v1.schema.json",
+  "title": "OEL Atomic Completed Run Snapshot v1 Payload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["states", "relative_pairs", "source_run", "selection"],
+  "properties": {
+    "states": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["object", "state", "covariance", "object_specs", "model_assumptions"],
+        "properties": {
+          "object": {"type": "object"},
+          "state": {"type": "object"},
+          "covariance": {"type": "object"},
+          "object_specs": {"type": "object"},
+          "model_assumptions": {"type": "object"}
+        }
+      }
+    },
+    "relative_pairs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["deputy_id", "chief_id", "r_radial_km", "i_intrack_km", "c_crosstrack_km", "v_radial_km_s", "v_intrack_km_s", "v_crosstrack_km_s", "range_km", "range_rate_km_s"],
+        "properties": {
+          "deputy_id": {"type": "string", "minLength": 1},
+          "chief_id": {"type": "string", "minLength": 1},
+          "r_radial_km": {"type": "number"},
+          "i_intrack_km": {"type": "number"},
+          "c_crosstrack_km": {"type": "number"},
+          "v_radial_km_s": {"type": "number"},
+          "v_intrack_km_s": {"type": "number"},
+          "v_crosstrack_km_s": {"type": "number"},
+          "range_km": {"type": "number"},
+          "range_rate_km_s": {"type": "number"}
+        }
+      }
+    },
+    "source_run": {"type": "object"},
+    "selection": {
+      "type": "object",
+      "required": ["selector_kind", "requested", "sample_index", "time_s", "state_rows_sha256", "associated_event"],
+      "properties": {
+        "selector_kind": {"enum": ["final", "sample_index", "time_s", "event"]},
+        "requested": {"type": "object"},
+        "sample_index": {"type": "integer", "minimum": 0},
+        "time_s": {"type": "number", "minimum": 0},
+        "state_rows_sha256": {"type": "object", "minProperties": 2, "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{64}$"}},
+        "associated_event": {"type": ["object", "null"]}
+      }
+    }
+  }
+}

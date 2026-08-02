@@ -21,7 +21,7 @@
       "additionalProperties": false,
       "required": ["patch_type", "operations"],
       "properties": {
-        "patch_type": {"enum": ["mission_recovery_candidate", "controller_optimized_variant"]},
+        "patch_type": {"enum": ["mission_recovery_candidate", "controller_optimized_variant", "scenario_capability_overlay"]},
         "operations": {
           "type": "array",
           "minItems": 1,
@@ -30,7 +30,7 @@
             "additionalProperties": false,
             "required": ["op", "kind", "path", "value", "reason"],
             "properties": {
-              "op": {"enum": ["replace", "append"]},
+              "op": {"enum": ["replace", "append", "upsert"]},
               "kind": {"enum": ["mission_burn", "duration_extension", "controller_pointer", "scenario_override"]},
               "path": {"type": "string", "minLength": 1},
               "value": {},
@@ -46,7 +46,7 @@
       "required": ["selection_id", "selection_kind", "rank", "recommended_modes"],
       "properties": {
         "selection_id": {"type": "string", "minLength": 1},
-        "selection_kind": {"enum": ["mission_recovery_candidate", "controller_optimized_variant"]},
+        "selection_kind": {"enum": ["mission_recovery_candidate", "controller_optimized_variant", "scenario_capability_overlay"]},
         "rank": {"type": "integer", "minimum": 1},
         "recommended_modes": {"type": "array", "items": {"type": "string"}},
         "case_name": {"type": "string", "minLength": 1},

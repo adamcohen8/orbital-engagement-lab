@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orbitalengagementlab.com/schemas/oel-maneuver-detection-v1.schema.json",
+  "title": "OEL Maneuver Detection Product v1 Payload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["observer", "target", "detection", "detector", "source_run", "evidence"],
+  "properties": {
+    "observer": {"type": "object", "additionalProperties": false, "required": ["object_id"], "properties": {"object_id": {"type": "string", "minLength": 1}}},
+    "target": {"type": "object", "additionalProperties": false, "required": ["object_id"], "properties": {"object_id": {"type": "string", "minLength": 1}}},
+    "detection": {
+      "type": "object", "additionalProperties": false,
+      "required": ["event_id", "status", "time_s", "sample_index", "epoch_jd_utc"],
+      "properties": {
+        "event_id": {"type": "string", "minLength": 1}, "status": {"const": "confirmed"},
+        "time_s": {"type": "number", "minimum": 0}, "sample_index": {"type": "integer", "minimum": 0},
+        "epoch_jd_utc": {"type": ["number", "null"]}
+      }
+    },
+    "detector": {"type": "object", "additionalProperties": false, "required": ["configuration", "summary"], "properties": {"configuration": {"type": "object"}, "summary": {"type": "object"}}},
+    "source_run": {"type": "object", "additionalProperties": false, "required": ["run_id", "scenario_name", "review_schema_version", "initial_jd_utc"], "properties": {"run_id": {"type": "string", "minLength": 1}, "scenario_name": {"type": "string", "minLength": 1}, "review_schema_version": {"type": "string", "minLength": 1}, "initial_jd_utc": {"type": ["number", "null"]}}},
+    "evidence": {"type": "object", "additionalProperties": false, "required": ["event_row_sha256", "summary_sha256", "event_query"], "properties": {"event_row_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "summary_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "event_query": {"type": "string", "minLength": 1}}}
+  }
+}

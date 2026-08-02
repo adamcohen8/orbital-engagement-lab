@@ -92,6 +92,29 @@ def inspect_document(
                 "source_scenario_sha256": source.get("sha256"),
                 "operation_count": len(patch.get("operations", []) or []),
             }
+        elif document.get("product_kind") == "oel.maneuver_detection":
+            payload = dict(document.get("payload", {}) or {})
+            detection = dict(payload.get("detection", {}) or {})
+            summary["maneuver_detection"] = {
+                "observer_id": dict(payload.get("observer", {}) or {}).get("object_id"),
+                "target_id": dict(payload.get("target", {}) or {}).get("object_id"),
+                "event_id": detection.get("event_id"),
+                "status": detection.get("status"),
+                "time_s": detection.get("time_s"),
+                "epoch_jd_utc": detection.get("epoch_jd_utc"),
+            }
+        elif document.get("product_kind") == "oel.completed_run_snapshot":
+            payload = dict(document.get("payload", {}) or {})
+            selection = dict(payload.get("selection", {}) or {})
+            summary["completed_run_snapshot"] = {
+                "object_ids": [
+                    dict(dict(item or {}).get("object", {}) or {}).get("object_id")
+                    for item in list(payload.get("states", []) or [])
+                ],
+                "sample_index": selection.get("sample_index"),
+                "time_s": selection.get("time_s"),
+                "relative_pair_count": len(payload.get("relative_pairs", []) or []),
+            }
     elif schema_id == HANDOFF_MANIFEST_SCHEMA_ID:
         adapter = dict(document.get("adapter", {}) or {})
         output = dict(document.get("output", {}) or {})
