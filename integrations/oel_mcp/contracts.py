@@ -137,6 +137,7 @@ class ToolContract:
     result_schema: dict[str, Any]
     executes: bool = False
     required_entitlement: str = ""
+    required_entitlements: tuple[str, ...] = ()
     limits: dict[str, Any] = field(default_factory=dict)
     deprecated: bool = False
     replacement: str = ""
@@ -163,6 +164,15 @@ class ToolContract:
         }
         if self.required_entitlement:
             capability["required_entitlement"] = self.required_entitlement
+        entitlements = tuple(
+            dict.fromkeys(
+                item
+                for item in (self.required_entitlement, *self.required_entitlements)
+                if item
+            )
+        )
+        if entitlements:
+            capability["required_entitlements"] = list(entitlements)
         if self.deprecated:
             capability.update(
                 {

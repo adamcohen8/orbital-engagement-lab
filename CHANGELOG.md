@@ -8,6 +8,48 @@ migration-sensitive behavior explicitly.
 
 ## Unreleased
 
+## 0.24.2 - 2026-08-02
+
+Release thesis: `v0.24.2` brings the v0.24 glue layer into the supported local
+MCP surface, so connected agents can route typed products, materialize
+continuations, run bounded OD, and execute the approved Pro cross-capability
+workflows without bypassing OEL's deterministic APIs or evidence boundaries.
+
+Private/Pro scope: the release adds content-bound Scale refresh through an
+isolated operational-store snapshot and a separately multi-entitled,
+truth-free maneuver-detection-to-IHE preparation workflow. Bounded dynamics OD
+is exposed only through the Pro-local profile, matching the existing
+observation/solver product boundary. No deprecated MCP contract is removed.
+
+### Added
+
+- Extended the supported local MCP surface with typed handoff inspection,
+  completed-run product export, scenario overlays and patches, ONP
+  materialization, semantic handoff comparison, maneuver-readiness packets,
+  and bounded dynamics OD that emits a typed state-estimate product.
+- Added content-bound Pro Scale refresh validation, serial refresh-to-ONP
+  execution, completed refresh inspection, and a separately entitled,
+  truth-free maneuver-detection-to-IHE preparation workflow.
+- Added a public-safe `oel://handoff/product-kinds/v1` routing resource while
+  keeping private tool metadata out of public resource discovery.
+
+### Changed
+
+- Raised the optional ML/full dependency range to PyTorch 2.13 after the
+  release audit identified unresolved advisories in the former 2.9-2.10 line.
+- Enforced declared MCP result schemas at runtime, added explicit
+  multi-entitlement discovery and enforcement, and bounded dynamics OD by
+  observation count, maneuver-detection count, and seven-day arc duration.
+- Added cancellation/progress checkpoints inside Scale refresh and
+  detection-to-IHE preparation, rather than only around their outer calls.
+- Bound Scale execution to an immutable SQLite snapshot created after exact
+  config/store validation, relocated every generated output beneath the
+  approved run directory, and rejected refresh-to-ONP validation when ONP
+  handoff is disabled.
+- Expanded real SDK stdio acceptance to exercise every new public tool and the
+  complete Pro IHE, Scale-to-ONP, and detection-to-IHE paths with no provider
+  calls.
+
 ## 0.24.1 - 2026-08-02
 
 Release thesis: `v0.24.1` closes the cross-capability integration defects found

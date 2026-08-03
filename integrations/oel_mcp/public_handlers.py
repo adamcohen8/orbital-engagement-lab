@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from threading import Event
@@ -30,6 +31,20 @@ from sim.agent_task.plot_recipes import get_plot_recipe
 from sim.agent_task.recipes import get_recipe
 from sim.agent_task.runner import AgentTaskCancelled, compare_outputs, create_plot, inspect_output, run_recipe
 from sim.execution import run_simulation_config_file
+from sim.handoff import (
+    compare_handoff,
+    emit_scenario_overlay,
+    export_completed_run_snapshot,
+    export_completed_run_state,
+    export_maneuver_detection_product,
+    inspect_path,
+    load_interchange_document,
+    load_scenario_overlay,
+    materialize_onp,
+    materialize_scenario_patch,
+    materialize_snapshot_onp,
+)
+from sim.reporting import build_maneuver_readiness_packet
 from sim.review import ReviewWorkspace
 
 
@@ -82,6 +97,27 @@ class PublicOELMCPHandlers(BaseOELMCPHandlers):
     def audit_report(self, **arguments: Any) -> dict[str, Any]:
         return self.call("oel.audit_report.v1", arguments)
 
+    def inspect_handoff(self, **arguments: Any) -> dict[str, Any]:
+        return self.call("oel.inspect_handoff.v1", arguments)
+
+    def export_run_product(self, **arguments: Any) -> dict[str, Any]:
+        return self.call("oel.export_run_product.v1", arguments)
+
+    def emit_scenario_overlay(self, **arguments: Any) -> dict[str, Any]:
+        return self.call("oel.emit_scenario_overlay.v1", arguments)
+
+    def materialize_onp_handoff(self, **arguments: Any) -> dict[str, Any]:
+        return self.call("oel.materialize_onp_handoff.v1", arguments)
+
+    def materialize_scenario_patch(self, **arguments: Any) -> dict[str, Any]:
+        return self.call("oel.materialize_scenario_patch.v1", arguments)
+
+    def compare_handoff(self, **arguments: Any) -> dict[str, Any]:
+        return self.call("oel.compare_handoff.v1", arguments)
+
+    def assess_maneuver_readiness(self, **arguments: Any) -> dict[str, Any]:
+        return self.call("oel.assess_maneuver_readiness.v1", arguments)
+
     def _call_contract(
         self,
         contract: ToolContract,
@@ -110,6 +146,20 @@ class PublicOELMCPHandlers(BaseOELMCPHandlers):
             return self._prepare_report_packet(contract, arguments)
         if contract.tool_id == "oel.audit_report.v1":
             return self._audit_report(contract, arguments)
+        if contract.tool_id == "oel.inspect_handoff.v1":
+            return self._inspect_handoff(contract, arguments)
+        if contract.tool_id == "oel.export_run_product.v1":
+            return self._export_run_product(contract, arguments)
+        if contract.tool_id == "oel.emit_scenario_overlay.v1":
+            return self._emit_scenario_overlay(contract, arguments)
+        if contract.tool_id == "oel.materialize_onp_handoff.v1":
+            return self._materialize_onp_handoff(contract, arguments)
+        if contract.tool_id == "oel.materialize_scenario_patch.v1":
+            return self._materialize_scenario_patch(contract, arguments)
+        if contract.tool_id == "oel.compare_handoff.v1":
+            return self._compare_handoff(contract, arguments)
+        if contract.tool_id == "oel.assess_maneuver_readiness.v1":
+            return self._assess_maneuver_readiness(contract, arguments)
         raise PermissionError("Tool is not available in this deployment profile.")
 
     def _inspect_run(self, contract: ToolContract, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -659,6 +709,472 @@ class PublicOELMCPHandlers(BaseOELMCPHandlers):
                 "truncated": False,
             },
         )
+
+    def _inspect_handoff(self, contract: ToolContract, arguments: dict[str, Any]) -> dict[str, Any]:
+        def operation() -> dict[str, Any]:
+            source = self.path_policy.resolve_read(arguments["path"], kind="file")
+            require_file_size(source, maximum=MAX_MANIFEST_BYTES)
+            _authorize_interchange_sources(self.path_policy, source)
+            raw = inspect_path(source, verify_sources=bool(arguments.get("verify_sources", True)))
+            validation = dict(raw.get("validation", {}) or {})
+            product_kind = str(raw.get("product_kind", "") or "")
+            return {
+                "document_type": str(raw.get("document_type", "unknown")),
+                "schema_id": str(raw.get("schema_id", "")),
+                "schema_version": raw.get("schema_version"),
+                "identifier": str(raw.get("product_id") or raw.get("manifest_id") or ""),
+                "product_kind": product_kind,
+                "quality": dict(raw.get("quality", {}) or {}),
+                "freshness": dict(raw.get("freshness", {}) or {}),
+                "validation": validation,
+                "supported_next_actions": _handoff_next_actions(
+                    document_type=str(raw.get("document_type", "unknown")),
+                    product_kind=product_kind,
+                    promotable=bool(validation.get("promotable", False)),
+                ),
+                "source_path": str(source),
+            }
+
+        return self._envelope(
+            contract=contract,
+            arguments=arguments,
+            operation=operation,
+            outcome_status=lambda result: "completed" if bool(result["validation"].get("valid")) else "partial",
+            evidence=lambda result: {
+                "complete": bool(result["validation"].get("valid")),
+                "empty": False,
+                "truncated": False,
+            },
+        )
+
+    def _export_run_product(self, contract: ToolContract, arguments: dict[str, Any]) -> dict[str, Any]:
+        def operation() -> dict[str, Any]:
+            completed_run = self.path_policy.resolve_read(arguments["completed_run"], kind="directory")
+            _authorize_completed_run_export(self.path_policy, completed_run)
+            target = _new_write_file(self.path_policy, arguments["output_path"])
+            product_kind = str(arguments["product_kind"])
+            selector = str(arguments.get("selector", "final"))
+            _validate_selector(arguments, selector=selector)
+            if product_kind == "completed_run_state":
+                if arguments.get("object_ids"):
+                    raise ValueError("completed_run_state accepts object_id, not object_ids.")
+                raw = export_completed_run_state(
+                    completed_run,
+                    output_path=target,
+                    object_id=arguments.get("object_id"),
+                    selector=selector,
+                    sample_index=arguments.get("sample_index"),
+                    time_s=arguments.get("time_s"),
+                    event_id=arguments.get("event_id"),
+                    epoch_jd_utc=arguments.get("epoch_jd_utc"),
+                    overwrite=False,
+                )
+                object_ids = [str(raw.get("object_id", ""))]
+                selection = dict(raw.get("selection", {}) or {})
+                event_id = str(arguments.get("event_id", "") or "")
+            elif product_kind == "completed_run_snapshot":
+                object_ids = [str(item) for item in list(arguments.get("object_ids", []) or [])]
+                if len(object_ids) < 2:
+                    raise ValueError("completed_run_snapshot requires at least two object_ids.")
+                raw = export_completed_run_snapshot(
+                    completed_run,
+                    output_path=target,
+                    object_ids=object_ids,
+                    selector=selector,
+                    sample_index=arguments.get("sample_index"),
+                    time_s=arguments.get("time_s"),
+                    event_id=arguments.get("event_id"),
+                    epoch_jd_utc=arguments.get("epoch_jd_utc"),
+                    overwrite=False,
+                )
+                selection = {
+                    "selector": selector,
+                    "sample_index": raw.get("sample_index"),
+                    "time_s": raw.get("time_s"),
+                }
+                event_id = str(arguments.get("event_id", "") or "")
+            else:
+                if selector != "final" or any(arguments.get(key) is not None for key in ("sample_index", "time_s", "epoch_jd_utc")):
+                    raise ValueError("maneuver_detection supports event_id/observer_id/target_id selection only.")
+                raw = export_maneuver_detection_product(
+                    completed_run,
+                    output_path=target,
+                    event_id=arguments.get("event_id"),
+                    observer_id=arguments.get("observer_id"),
+                    target_id=arguments.get("target_id"),
+                    overwrite=False,
+                )
+                object_ids = [str(raw.get("observer_id", "")), str(raw.get("target_id", ""))]
+                selection = {"event_id": raw.get("event_id")}
+                event_id = str(raw.get("event_id", "") or "")
+            manifest_path = _write_operation_manifest(
+                path_policy=self.path_policy,
+                target=target,
+                tool_id=contract.tool_id,
+                approval_id=str(arguments["approval"]["approval_id"]),
+                artifacts=[str(target)],
+                extra={"product_kind": product_kind, "product_id": str(raw.get("product_id", ""))},
+            )
+            return {
+                "status": "completed",
+                "product_kind": product_kind,
+                "product_path": str(target),
+                "product_id": str(raw.get("product_id", "")),
+                "selection": selection,
+                "object_ids": object_ids,
+                "event_id": event_id,
+                "operation_manifest_path": str(manifest_path),
+                "execution_occurred": False,
+            }
+
+        return self._envelope(contract=contract, arguments=arguments, operation=operation)
+
+    def _emit_scenario_overlay(self, contract: ToolContract, arguments: dict[str, Any]) -> dict[str, Any]:
+        def operation() -> dict[str, Any]:
+            source = self.path_policy.resolve_read(arguments["source_scenario"], kind="file")
+            overlay_path = self.path_policy.resolve_read(arguments["overlay_path"], kind="file")
+            require_file_size(source, maximum=2_000_000)
+            require_file_size(overlay_path, maximum=MAX_MANIFEST_BYTES)
+            target = _new_write_file(self.path_policy, arguments["output_path"])
+            raw = emit_scenario_overlay(
+                source,
+                load_scenario_overlay(overlay_path),
+                overlay_id=str(arguments["overlay_id"]),
+                output_path=target,
+                rationale=str(arguments["rationale"]),
+            )
+            product = load_interchange_document(target)
+            operations = list(dict(dict(product.get("payload", {}) or {}).get("patch", {}) or {}).get("operations", []) or [])
+            manifest_path = _write_operation_manifest(
+                path_policy=self.path_policy,
+                target=target,
+                tool_id=contract.tool_id,
+                approval_id=str(arguments["approval"]["approval_id"]),
+                artifacts=[str(target)],
+                extra={"product_id": str(raw.get("product_id", "")), "overlay_id": str(arguments["overlay_id"])},
+            )
+            return {
+                "status": "completed",
+                "product_path": str(target),
+                "product_id": str(raw.get("product_id", "")),
+                "overlay_id": str(arguments["overlay_id"]),
+                "operation_count": len(operations),
+                "operation_manifest_path": str(manifest_path),
+                "execution_occurred": False,
+            }
+
+        return self._envelope(contract=contract, arguments=arguments, operation=operation)
+
+    def _materialize_onp_handoff(self, contract: ToolContract, arguments: dict[str, Any]) -> dict[str, Any]:
+        def operation() -> dict[str, Any]:
+            product_path = self.path_policy.resolve_read(arguments["product_path"], kind="file")
+            require_file_size(product_path, maximum=MAX_MANIFEST_BYTES)
+            _authorize_interchange_sources(self.path_policy, product_path)
+            scenario_path = _new_write_file(self.path_policy, arguments["scenario_path"])
+            run_output_dir = self.path_policy.resolve_write(arguments["run_output_dir"])
+            document = load_interchange_document(product_path)
+            product_kind = str(document.get("product_kind", ""))
+            common = {
+                "scenario_name": str(arguments["scenario_name"]),
+                "scenario_path": scenario_path,
+                "output_dir": run_output_dir,
+                "duration_s": float(arguments["duration_s"]),
+                "dt_s": float(arguments["dt_s"]),
+                "trust_plugins": bool(arguments.get("trust_plugins", False)),
+                "overwrite": False,
+            }
+            if product_kind == "oel.completed_run_snapshot":
+                raw = materialize_snapshot_onp(product_path, **common)
+                status = "materialized" if raw.get("status") == "materialized" else "blocked"
+                source_product_id = str(raw.get("source_product_id", ""))
+                handoff_manifest_path = ""
+                handoff_manifest_id = ""
+                validation = {
+                    "safe_validation": dict(raw.get("safe_validation", {}) or {}),
+                    "ordinary_validation": dict(raw.get("ordinary_validation", {}) or {}),
+                }
+                failures = [] if status == "materialized" else [{"code": "snapshot.materialization_failed"}]
+                next_action = "Validate the generated scenario before separately authorized execution."
+            elif product_kind in {"oel.state_estimate", "oel.completed_run_state"}:
+                raw = materialize_onp(product_path, **common)
+                status = str(raw.get("status", "blocked"))
+                source_product_id = str(document.get("product_id", ""))
+                handoff_manifest_path = str(raw.get("manifest_path", ""))
+                handoff_manifest_id = str(raw.get("manifest_id", ""))
+                validation = {
+                    "product": dict(raw.get("product_validation", {}) or {}),
+                    "safe_validation": dict(raw.get("safe_validation", {}) or {}),
+                    "ordinary_validation": dict(raw.get("ordinary_validation", {}) or {}),
+                }
+                failures = [dict(item) for item in list(raw.get("failures", []) or [])]
+                next_action = str(raw.get("recommended_next_action", ""))
+            else:
+                raise ValueError("ONP handoff materialization supports accepted absolute-state and atomic-snapshot products only.")
+            artifacts = [str(path) for path in (scenario_path, Path(handoff_manifest_path) if handoff_manifest_path else None) if path and Path(path).is_file()]
+            operation_manifest = _write_operation_manifest(
+                path_policy=self.path_policy,
+                target=scenario_path,
+                tool_id=contract.tool_id,
+                approval_id=str(arguments["approval"]["approval_id"]),
+                artifacts=artifacts,
+                status="completed" if status == "materialized" else "partial",
+                extra={"source_product_id": source_product_id, "handoff_manifest_id": handoff_manifest_id},
+            )
+            return {
+                "status": status,
+                "scenario_path": str(scenario_path),
+                "manifest_path": handoff_manifest_path,
+                "manifest_id": handoff_manifest_id,
+                "source_product_id": source_product_id,
+                "validation": validation,
+                "failures": failures,
+                "recommended_next_action": next_action,
+                "operation_manifest_path": str(operation_manifest),
+                "execution_occurred": False,
+                "execution_authorized": False,
+            }
+
+        return self._envelope(
+            contract=contract,
+            arguments=arguments,
+            operation=operation,
+            outcome_status=lambda result: "completed" if result["status"] == "materialized" else "partial",
+            evidence=lambda result: {"complete": result["status"] == "materialized", "empty": False, "truncated": False},
+        )
+
+    def _materialize_scenario_patch(self, contract: ToolContract, arguments: dict[str, Any]) -> dict[str, Any]:
+        def operation() -> dict[str, Any]:
+            patch_product = self.path_policy.resolve_read(arguments["patch_product"], kind="file")
+            source_scenario = self.path_policy.resolve_read(arguments["source_scenario"], kind="file")
+            require_file_size(patch_product, maximum=MAX_MANIFEST_BYTES)
+            _authorize_interchange_sources(self.path_policy, patch_product)
+            scenario_path = _new_write_file(self.path_policy, arguments["scenario_path"])
+            run_output_dir = self.path_policy.resolve_write(arguments["run_output_dir"])
+            raw = materialize_scenario_patch(
+                patch_product,
+                source_scenario,
+                scenario_name=str(arguments["scenario_name"]),
+                scenario_path=scenario_path,
+                output_dir=run_output_dir,
+                trust_plugins=bool(arguments.get("trust_plugins", False)),
+                overwrite=False,
+            )
+            product = load_interchange_document(patch_product)
+            status = str(raw.get("status", "blocked"))
+            artifacts = [str(path) for path in (scenario_path, Path(str(raw.get("manifest_path", "")))) if path.is_file()]
+            operation_manifest = _write_operation_manifest(
+                path_policy=self.path_policy,
+                target=scenario_path,
+                tool_id=contract.tool_id,
+                approval_id=str(arguments["approval"]["approval_id"]),
+                artifacts=artifacts,
+                status="completed" if status == "materialized" else "partial",
+                extra={"source_product_id": str(product.get("product_id", "")), "handoff_manifest_id": str(raw.get("manifest_id", ""))},
+            )
+            return {
+                "status": status,
+                "scenario_path": str(scenario_path),
+                "manifest_path": str(raw.get("manifest_path", "")),
+                "manifest_id": str(raw.get("manifest_id", "")),
+                "source_product_id": str(product.get("product_id", "")),
+                "validation": {
+                    "product": dict(raw.get("product_validation", {}) or {}),
+                    "safe_validation": dict(raw.get("safe_validation", {}) or {}),
+                    "ordinary_validation": dict(raw.get("ordinary_validation", {}) or {}),
+                },
+                "failures": [dict(item) for item in list(raw.get("failures", []) or [])],
+                "recommended_next_action": str(raw.get("recommended_next_action", "")),
+                "operation_manifest_path": str(operation_manifest),
+                "execution_occurred": False,
+                "execution_authorized": False,
+            }
+
+        return self._envelope(
+            contract=contract,
+            arguments=arguments,
+            operation=operation,
+            outcome_status=lambda result: "completed" if result["status"] == "materialized" else "partial",
+            evidence=lambda result: {"complete": result["status"] == "materialized", "empty": False, "truncated": False},
+        )
+
+    def _compare_handoff(self, contract: ToolContract, arguments: dict[str, Any]) -> dict[str, Any]:
+        def operation() -> dict[str, Any]:
+            product = self.path_policy.resolve_read(arguments["product_path"], kind="file")
+            scenario = self.path_policy.resolve_read(arguments["scenario_path"], kind="file")
+            manifest = (
+                self.path_policy.resolve_read(arguments["manifest_path"], kind="file")
+                if arguments.get("manifest_path")
+                else self.path_policy.resolve_read(
+                    scenario.with_name(f"{scenario.stem}.handoff_manifest.json"), kind="file"
+                )
+            )
+            run_output = (
+                self.path_policy.resolve_read(arguments["run_output_dir"], kind="directory")
+                if arguments.get("run_output_dir")
+                else None
+            )
+            if run_output is not None:
+                _authorize_review_inputs(self.path_policy, run_output, require_store=True)
+            output = _new_write_file(self.path_policy, arguments["output_path"])
+            raw = compare_handoff(
+                product,
+                scenario,
+                manifest_path=manifest,
+                run_output_dir=run_output,
+                output_path=output,
+            )
+            operation_manifest = _write_operation_manifest(
+                path_policy=self.path_policy,
+                target=output,
+                tool_id=contract.tool_id,
+                approval_id=str(arguments["approval"]["approval_id"]),
+                artifacts=[str(output)],
+                status="completed" if raw.get("status") == "equivalent" else "partial",
+                extra={"comparison_id": str(raw.get("comparison_id", ""))},
+            )
+            return {
+                "status": str(raw.get("status", "failed")),
+                "comparison_id": str(raw.get("comparison_id", "")),
+                "output_path": str(output),
+                "source": dict(raw.get("source", {}) or {}),
+                "materialization": dict(raw.get("materialization", {}) or {}),
+                "summary": dict(raw.get("summary", {}) or {}),
+                "execution_evidence": dict(raw.get("execution_evidence", {}) or {}),
+                "non_claims": [str(item) for item in list(raw.get("non_claims", []) or [])],
+                "operation_manifest_path": str(operation_manifest),
+            }
+
+        return self._envelope(
+            contract=contract,
+            arguments=arguments,
+            operation=operation,
+            outcome_status=lambda result: "completed" if result["status"] == "equivalent" else "partial",
+            evidence=lambda result: {"complete": result["status"] == "equivalent", "empty": False, "truncated": False},
+        )
+
+    def _assess_maneuver_readiness(self, contract: ToolContract, arguments: dict[str, Any]) -> dict[str, Any]:
+        def operation() -> dict[str, Any]:
+            completed_run = self.path_policy.resolve_read(arguments["completed_run"], kind="directory")
+            _authorize_completed_run_export(self.path_policy, completed_run)
+            output = _new_write_file(self.path_policy, arguments["output_path"])
+            raw = build_maneuver_readiness_packet(
+                completed_run,
+                object_id=str(arguments["object_id"]),
+                chief_id=str(arguments["chief_id"]),
+                thresholds=dict(arguments["thresholds"]),
+                output_path=output,
+            )
+            operation_manifest = _write_operation_manifest(
+                path_policy=self.path_policy,
+                target=output,
+                tool_id=contract.tool_id,
+                approval_id=str(arguments["approval"]["approval_id"]),
+                artifacts=[str(output)],
+                extra={"verdict": str(raw.get("verdict", "unknown"))},
+            )
+            return {
+                "status": "completed",
+                "verdict": str(raw.get("verdict", "unknown")),
+                "object_id": str(raw.get("object_id", "")),
+                "chief_id": str(raw.get("chief_id", "")),
+                "thresholds": dict(raw.get("thresholds", {}) or {}),
+                "metrics": dict(raw.get("metrics", {}) or {}),
+                "gates": [dict(item) for item in list(raw.get("gates", []) or [])],
+                "packet_path": str(output),
+                "operation_manifest_path": str(operation_manifest),
+                "non_claims": [str(item) for item in list(raw.get("non_claims", []) or [])],
+            }
+
+        return self._envelope(contract=contract, arguments=arguments, operation=operation)
+
+def _new_write_file(path_policy: Any, value: str | Path) -> Path:
+    target = path_policy.resolve_write(value)
+    if target.exists():
+        raise FileExistsError("The approved output file must be new.")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    return target
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _authorize_completed_run_export(path_policy: Any, output_dir: Path) -> None:
+    _authorize_review_inputs(path_policy, output_dir, require_store=True, report_sources=True)
+
+
+def _authorize_interchange_sources(path_policy: Any, source: Path) -> None:
+    document = load_interchange_document(source)
+    provenance = dict(document.get("provenance", {}) or {})
+    for artifact in list(provenance.get("source_artifacts", []) or []):
+        row = dict(artifact or {})
+        raw_path = str(row.get("path", "") or "").strip()
+        if not raw_path:
+            continue
+        candidate = Path(raw_path).expanduser()
+        if not candidate.is_absolute():
+            candidate = source.parent / candidate
+        path_policy.resolve_read(candidate, kind="file")
+
+
+def _validate_selector(arguments: dict[str, Any], *, selector: str) -> None:
+    required = {
+        "sample_index": "sample_index",
+        "time_s": "time_s",
+        "event": "event_id",
+    }
+    key = required.get(selector)
+    if key and arguments.get(key) is None:
+        raise ValueError(f"selector {selector!r} requires {key}.")
+    incompatible = {
+        "final": ("sample_index", "time_s", "event_id"),
+        "sample_index": ("time_s", "event_id"),
+        "time_s": ("sample_index", "event_id"),
+        "event": ("sample_index", "time_s"),
+    }
+    if any(arguments.get(item) is not None for item in incompatible.get(selector, ())):
+        raise ValueError("Completed-run selector arguments conflict.")
+
+
+def _handoff_next_actions(*, document_type: str, product_kind: str, promotable: bool) -> list[str]:
+    if document_type == "manifest":
+        return ["compare_handoff"]
+    if document_type != "product" or not promotable:
+        return ["resolve_validation_or_promotion_blockers"]
+    if product_kind in {"oel.state_estimate", "oel.completed_run_state", "oel.completed_run_snapshot"}:
+        return ["materialize_onp_handoff"]
+    if product_kind == "oel.scenario_patch":
+        return ["materialize_scenario_patch"]
+    if product_kind == "oel.maneuver_detection":
+        return ["prepare_measured_event_evidence"]
+    if product_kind == "oel.ogp_mean_element_product":
+        return ["materialize_ogp_through_supported_cli"]
+    return ["inspect_only"]
+
+
+def _write_operation_manifest(
+    *,
+    path_policy: Any,
+    target: Path,
+    tool_id: str,
+    approval_id: str,
+    artifacts: list[str],
+    status: str = "completed",
+    extra: dict[str, Any] | None = None,
+) -> Path:
+    manifest_target = path_policy.resolve_write(
+        target.with_name(f"{target.stem}.mcp_operation_manifest.json")
+    )
+    if manifest_target.exists():
+        raise FileExistsError("The MCP operation manifest output must be new.")
+    manifest = manifest_base(tool_id=tool_id, approval_id=approval_id)
+    manifest.update(dict(extra or {}))
+    complete_manifest(manifest, status=status, artifacts=artifacts)
+    return write_execution_manifest(manifest_target.parent, manifest, filename=manifest_target.name)
 
 
 def _run_projection(payload: dict[str, Any]) -> dict[str, Any]:

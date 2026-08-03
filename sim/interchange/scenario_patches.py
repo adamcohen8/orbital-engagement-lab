@@ -363,7 +363,7 @@ def _oel_version() -> str:
 
         return version("orbital-engagement-lab")
     except Exception:
-        return "0.24.1"
+        return "0.24.2"
 
 
 __all__ = [

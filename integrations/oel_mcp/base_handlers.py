@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Event
@@ -81,6 +82,8 @@ class BaseOELMCPHandlers:
         requires_plugin_trust = (
             tool_id == "oel.validate_scenario.v1" and bool(args.get("trust_plugins", False))
             or tool_id == "oel.run_scenario.v1"
+            or tool_id in {"oel.materialize_onp_handoff.v1", "oel.materialize_scenario_patch.v1"}
+            and bool(args.get("trust_plugins", False))
         )
         if requires_plugin_trust:
             self.approval_policy.require_trust(args.get("trust_approval"))
@@ -111,6 +114,7 @@ class BaseOELMCPHandlers:
             status = outcome_status(raw_result) if outcome_status else "completed"
             evidence_status = evidence(raw_result) if evidence else _evidence(complete=status == "completed")
             result = _json_safe_value(self._project_result(raw_result))
+            _validate_value(result, contract.result_schema, path="tool result")
             _enforce_response_size(result, self.max_response_bytes)
             error = None
         except Exception as exc:
@@ -173,6 +177,14 @@ def _validate_arguments(contract: ToolContract, arguments: dict[str, Any]) -> No
 
 def _validate_value(value: Any, schema: dict[str, Any], *, path: str) -> None:
     expected = schema.get("type")
+    if isinstance(expected, list):
+        if value is None and "null" in expected:
+            return
+        candidates = [item for item in expected if item != "null"]
+        if len(candidates) != 1:
+            raise ValueError(f"{path} has an unsupported union schema.")
+        schema = {**schema, "type": candidates[0]}
+        expected = candidates[0]
     if expected == "object":
         if not isinstance(value, dict):
             raise ValueError(f"{path} must be an object.")
@@ -199,6 +211,11 @@ def _validate_value(value: Any, schema: dict[str, Any], *, path: str) -> None:
         if isinstance(value, bool) or not isinstance(value, int):
             raise ValueError(f"{path} must be an integer.")
         if value < int(schema.get("minimum", value)) or value > int(schema.get("maximum", value)):
+            raise ValueError(f"{path} is outside its supported range.")
+    elif expected == "number":
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+            raise ValueError(f"{path} must be a finite number.")
+        if float(value) < float(schema.get("minimum", value)) or float(value) > float(schema.get("maximum", value)):
             raise ValueError(f"{path} is outside its supported range.")
     elif expected == "boolean":
         if not isinstance(value, bool):

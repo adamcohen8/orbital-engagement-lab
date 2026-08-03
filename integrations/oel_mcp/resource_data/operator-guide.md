@@ -25,6 +25,9 @@ This packaged guide covers the supported local stdio OEL MCP surface.
   relevant saved `query_names` to `inspect_run` or `prepare_report_packet` so
   analytical claims can cite stable query evidence IDs instead of only the
   entire review store.
+- Read `oel://handoff/product-kinds/v1` before routing a typed product. Inspect
+  a product before consuming it; materialization tools validate and write new
+  scenarios but never authorize or execute those scenarios.
 - Policy and approval denials occur before tool execution and may be returned
   by a host as protocol-level MCP errors. Operation failures after policy
   admission use the standard structured OEL envelope.
@@ -42,6 +45,17 @@ resource preflight, a new output directory, and a server-configured approval.
 Provider-neutral report packet and audit tools can hash completed local
 evidence and verify report structure/references. They do not call a model or
 perform semantic claim review.
+
+The glue-aware surface can export exact completed-run states, atomic snapshots,
+and maneuver detections; materialize accepted products or patches; compare
+handoff semantics; and assess maneuver readiness.
+Every write/execute effect requires an operator-configured approval, uses a new
+output target, and records a durable operation manifest.
+
+Successful results are checked against the advertised result schema. Pro Scale
+refresh runs against an isolated snapshot of the exact validated store, and
+Pro workflows that require more than one feature report and enforce every
+entitlement.
 
 Remote transport, arbitrary filesystem resources, prompts, sampling,
 unrestricted scenario generation, private campaigns, and frontier release

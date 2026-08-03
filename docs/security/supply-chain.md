@@ -7,7 +7,7 @@ security, legal, export-control, or mission-assurance process.
 ## Supported Versions
 
 - Public releases: security fixes target the current public release line,
-  currently `v0.24.1`.
+  currently `v0.24.2`.
 - Private/Pro releases: security fixes target the active customer-supported
   release line or pilot branch named in the agreement.
 - Declared Python compatibility range: Python 3.10 through 3.14. Functional and
@@ -66,7 +66,8 @@ manifest.
 Treat a known vulnerability as a release finding until it is upgraded, removed,
 documented as not applicable, or accepted by the evaluator in writing.
 
-The evaluated `v0.23.1` full-profile environment has no audit exceptions.
+The evaluated `v0.24.2` full-profile environment requires the supported
+PyTorch 2.13 release line and has no audit exceptions.
 Do not add `--ignore-vuln` to release or compatibility workflows. If an
 advisory is not applicable, document the evidence and evaluator approval
 separately while retaining the unsuppressed machine-readable audit result.

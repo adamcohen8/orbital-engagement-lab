@@ -118,6 +118,99 @@ def run_public_workflow_acceptance(
     )
     _record(checks, "query", queried, expected="completed")
 
+    handoff_path = work_root / "handoff" / "completed_state.json"
+    exported = _call(
+        client,
+        "oel.export_run_product.v1",
+        {
+            "completed_run": str(scenario_output),
+            "product_kind": "completed_run_state",
+            "object_id": "target",
+            "selector": "final",
+            "epoch_jd_utc": 2461254.5,
+            "output_path": str(handoff_path),
+            "approval": WRITE_APPROVAL,
+            "handling": PUBLIC_HANDLING,
+        },
+    )
+    _record(checks, "export_run_product", exported, expected="completed")
+    handoff = _call(
+        client,
+        "oel.inspect_handoff.v1",
+        {"path": str(handoff_path), "handling": PUBLIC_HANDLING},
+    )
+    _record(checks, "inspect_handoff", handoff, expected="completed")
+
+    materialized_state = _call(
+        client,
+        "oel.materialize_onp_handoff.v1",
+        {
+            "product_path": str(handoff_path),
+            "scenario_name": "mcp_acceptance_continuation",
+            "scenario_path": str(work_root / "handoff" / "continued.yaml"),
+            "run_output_dir": str(work_root / "handoff" / "continued_run"),
+            "duration_s": 30.0,
+            "dt_s": 10.0,
+            "trust_plugins": True,
+            "trust_approval": TRUST_APPROVAL,
+            "approval": WRITE_APPROVAL,
+            "handling": PUBLIC_HANDLING,
+        },
+    )
+    _record(checks, "materialize_onp_handoff", materialized_state, expected="completed")
+    materialized_result = dict(materialized_state.get("result", {}) or {})
+
+    overlay_path = work_root / "handoff" / "overlay.yaml"
+    overlay_path.write_text(
+        "simulator:\n  termination:\n    earth_impact_enabled: false\n"
+        "outputs:\n  review:\n    enabled: true\n    detail: standard\n",
+        encoding="utf-8",
+    )
+    overlay_product = work_root / "handoff" / "overlay_product.json"
+    emitted_overlay = _call(
+        client,
+        "oel.emit_scenario_overlay.v1",
+        {
+            "source_scenario": str(root / "configs" / "automation_smoke.yaml"),
+            "overlay_path": str(overlay_path),
+            "overlay_id": "mcp_acceptance_overlay",
+            "rationale": "Exercise typed overlay emission through real stdio.",
+            "output_path": str(overlay_product),
+            "approval": WRITE_APPROVAL,
+            "handling": PUBLIC_HANDLING,
+        },
+    )
+    _record(checks, "emit_scenario_overlay", emitted_overlay, expected="completed")
+    materialized_patch = _call(
+        client,
+        "oel.materialize_scenario_patch.v1",
+        {
+            "patch_product": str(overlay_product),
+            "source_scenario": str(root / "configs" / "automation_smoke.yaml"),
+            "scenario_name": "mcp_acceptance_overlay_materialized",
+            "scenario_path": str(work_root / "handoff" / "overlay_materialized.yaml"),
+            "run_output_dir": str(work_root / "handoff" / "overlay_run"),
+            "trust_plugins": True,
+            "trust_approval": TRUST_APPROVAL,
+            "approval": WRITE_APPROVAL,
+            "handling": PUBLIC_HANDLING,
+        },
+    )
+    _record(checks, "materialize_scenario_patch", materialized_patch, expected="completed")
+    compared_handoff = _call(
+        client,
+        "oel.compare_handoff.v1",
+        {
+            "product_path": str(handoff_path),
+            "scenario_path": str(materialized_result.get("scenario_path", "")),
+            "manifest_path": str(materialized_result.get("manifest_path", "")),
+            "output_path": str(work_root / "handoff" / "comparison.json"),
+            "approval": WRITE_APPROVAL,
+            "handling": PUBLIC_HANDLING,
+        },
+    )
+    _record(checks, "compare_handoff", compared_handoff, expected="completed")
+
     task_output = work_root / "task"
     task = _call(
         client,
@@ -133,6 +226,20 @@ def run_public_workflow_acceptance(
         },
     )
     _record(checks, "agent_task", task, expected="completed")
+    readiness = _call(
+        client,
+        "oel.assess_maneuver_readiness.v1",
+        {
+            "completed_run": str(task_output),
+            "object_id": "chaser",
+            "chief_id": "target",
+            "thresholds": {"max_final_range_km": 1000.0},
+            "output_path": str(work_root / "maneuver_readiness.json"),
+            "approval": WRITE_APPROVAL,
+            "handling": PUBLIC_HANDLING,
+        },
+    )
+    _record(checks, "assess_maneuver_readiness", readiness, expected="completed")
     compared = _call(
         client,
         "oel.compare_runs.v1",

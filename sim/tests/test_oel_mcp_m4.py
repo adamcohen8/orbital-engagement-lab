@@ -108,6 +108,7 @@ def test_plan_validate_and_run_require_external_approval_and_bound_identity(tmp_
     assert validation_id.startswith("oel-m4-validation-v1:")
     assert trusted["result"]["execution_authorized"] is False
 
+
     disabled = PublicOELMCPHandlers(read_roots=(ROOT, tmp_path), write_roots=(tmp_path,))
     try:
         disabled.run_scenario(
@@ -160,6 +161,41 @@ def test_plan_validate_and_run_require_external_approval_and_bound_identity(tmp_
     assert provenance["artifacts_complete"] is True
     assert inspected["result"]["evidence_summary"]["mcp_execution_complete"] is True
     assert inspected["result"]["freshness"]["content_bound_execution_recorded"] is True
+
+
+def test_m5_2_completed_run_product_export_and_inspection(tmp_path: Path) -> None:
+    handlers = _handlers(tmp_path)
+    arguments = _scenario_arguments(tmp_path, "glue-source")
+    validated = handlers.validate_scenario(
+        **arguments, trust_plugins=True, trust_approval=TRUST_APPROVAL
+    )
+    run = handlers.run_scenario(
+        **arguments,
+        validation_id=validated["result"]["identity"]["validation_id"],
+        trust_approval=TRUST_APPROVAL,
+        approval=EXECUTION_APPROVAL,
+    )
+    assert run["status"] == "completed"
+
+    product_path = tmp_path / "products" / "final-state.json"
+    exported = handlers.export_run_product(
+        completed_run=tmp_path / "glue-source",
+        product_kind="completed_run_state",
+        object_id="target",
+        selector="final",
+        epoch_jd_utc=2461254.5,
+        output_path=product_path,
+        handling=HANDLING,
+        approval=WRITE_APPROVAL,
+    )
+    assert exported["status"] == "completed"
+    assert exported["result"]["execution_occurred"] is False
+    assert Path(exported["result"]["operation_manifest_path"]).is_file()
+
+    inspected = handlers.inspect_handoff(path=product_path, handling=HANDLING)
+    assert inspected["status"] == "completed"
+    assert inspected["result"]["product_kind"] == "oel.completed_run_state"
+    assert "materialize_onp_handoff" in inspected["result"]["supported_next_actions"]
 
 
 def test_unset_write_roots_do_not_inherit_read_authority(tmp_path: Path, monkeypatch) -> None:
