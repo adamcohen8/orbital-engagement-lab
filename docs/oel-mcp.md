@@ -4,7 +4,7 @@ OEL MCP is an optional interoperability adapter over documented Orbital
 Engagement Lab workflows. It does not replace `AGENTS.md`, scenario YAML, the
 CLI, Python APIs, deterministic physics, or saved evidence.
 
-The supported M5.1 surface is intentionally local. It uses the
+The supported M5.2 surface is intentionally local. It uses the
 official Python MCP SDK v2 over stdio while preserving the frozen OEL handlers,
 policy, schemas, and result envelopes. In addition to the M3 discovery and
 read-only evidence tools, it supports bounded planning, structural-first
@@ -130,6 +130,13 @@ execution manifests.
 | `oel.run_agent_task.v1` | `R2_execute` | Runs one checked-in supported public scenario recipe and writes its evidence packet |
 | `oel.prepare_report_packet.v1` | `R1_write` | Writes a bounded, hashed, provider-neutral evidence packet and authoring brief from one completed run |
 | `oel.audit_report.v1` | `R1_write` | Verifies packet/artifact hashes, report structure, and evidence references without calling a model |
+| `oel.inspect_handoff.v1` | `R0_read` | Validates and summarizes a typed product or handoff manifest with supported next actions |
+| `oel.export_run_product.v1` | `R1_write` | Exports an exact state, atomic snapshot, or maneuver-detection product from completed review evidence |
+| `oel.emit_scenario_overlay.v1` | `R1_write` | Emits a source-bound typed scenario overlay; it does not apply or execute it |
+| `oel.materialize_onp_handoff.v1` | `R1_write` | Materializes and validates an ONP scenario from an accepted absolute state or atomic snapshot |
+| `oel.materialize_scenario_patch.v1` | `R1_write` | Applies an accepted source-bound patch into a new validated scenario without execution |
+| `oel.compare_handoff.v1` | `R1_write` | Writes semantic-parity evidence across product, materialization, manifest, and optional consumer evidence |
+| `oel.assess_maneuver_readiness.v1` | `R1_write` | Applies explicit thresholds and writes a fail-closed readiness packet |
 
 Data-bearing calls require handling metadata containing an authoritative
 marking and one of these release scopes: `public`, `local_only`, or
@@ -141,7 +148,9 @@ rows. Unexpected internal errors do not return local diagnostic details.
 
 All tools return a versioned envelope containing tool ID, risk class, status,
 effects, evidence completeness/empty/truncation state, structured error, a
-payload-free audit record, and an explicitly projected result.
+payload-free audit record, and an explicitly projected result. Beginning with
+v0.24.2, a projected result must satisfy the tool's advertised result schema
+before the adapter can return a successful envelope.
 
 ## Execution Contract
 
@@ -196,6 +205,7 @@ These tools are local-only and absent from `direct_frontier_restricted`.
 | `oel://review/saved-queries/v1` | Allowlisted read-only saved-query metadata | Review query registry |
 | `oel://agent/tasks/v1` | Public-tagged agent task definitions | Agent task registry |
 | `oel://docs/operator-guide/v1` | Packaged local operator guidance | MCP package data |
+| `oel://handoff/product-kinds/v1` | Public-safe product-kind producers, next actions, and non-execution rules | `sim.handoff` |
 
 Resource discovery is one bounded page. Each resource is at most 500,000
 encoded bytes, has an explicit media type, and resolves only from checked-in
@@ -212,13 +222,13 @@ private resource discovery are not supported.
 - Response, row, query-step, and review-store size budgets fail closed.
 - Tool discovery is deployment-specific; the resource catalog is public-safe
   in every profile and never includes Pro resources.
-- M4 tools are absent from `direct_frontier_restricted`, `mendicant_sealed`,
+- Workflow and glue tools are absent from `direct_frontier_restricted`, `mendicant_sealed`,
   and `mendicant_tandem`; only local public/Pro processes may discover them.
 - MCP discovery and transport are not authorization or release policy.
 - Deployment-profile selection is trusted operator configuration, not
   authentication, entitlement, or proof of caller identity.
-- Remote HTTP, unrestricted scenario generation, Pro campaigns, external
-  communication, and unrestricted filesystem or shell access are outside M4.
+- Remote HTTP, unrestricted scenario generation, external communication, and
+  unrestricted filesystem or shell access remain outside the supported surface.
 
 See [MCP Local Stdio Threat Model](security/mcp-local-stdio-threat-model.md) for
 the trust assumptions, protected assets, deployment-profile interpretation,
@@ -238,10 +248,10 @@ model-provider call:
   --output /tmp/oel-mcp-release-gate.json
 ```
 
-This verifies the restricted three-tool profile, then exercises planning,
-validation, deterministic execution, inspection, review queries, supported
-task execution, comparison, plotting, report-packet preparation, and report
-audit through real SDK stdio subprocesses. Generated exports record
+This verifies the restricted three-tool profile, then exercises all eighteen
+public tools—including product export and inspection, ONP and patch
+materialization, semantic handoff comparison, and maneuver readiness—through
+real SDK stdio subprocesses. Generated exports record
 `oel_commit: unavailable_public_export` instead of requiring `.git`. Add
 `--with-hosts` only when model-backed Codex/Claude and Inspector checks are
 intentionally authorized; those optional host checks may incur their normal

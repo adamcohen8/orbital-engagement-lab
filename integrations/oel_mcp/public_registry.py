@@ -4,6 +4,7 @@ from typing import Any
 
 from integrations.oel_mcp.contracts import (
     HANDLING_SCHEMA,
+    MAX_MANIFEST_BYTES,
     MAX_ROWS,
     MAX_VM_STEPS,
     ToolContract,
@@ -295,6 +296,198 @@ AUDIT_REPORT_RESULT_SCHEMA = object_schema(
     ),
 )
 
+INSPECT_HANDOFF_RESULT_SCHEMA = object_schema(
+    {
+        "document_type": {"enum": ["product", "manifest", "unknown"]},
+        "schema_id": {"type": "string"},
+        "schema_version": {},
+        "identifier": {"type": "string"},
+        "product_kind": {"type": "string"},
+        "quality": {"type": "object"},
+        "freshness": {"type": "object"},
+        "validation": {"type": "object"},
+        "supported_next_actions": {"type": "array", "items": {"type": "string"}},
+        "source_path": {"type": "string"},
+    },
+    required=(
+        "document_type",
+        "schema_id",
+        "schema_version",
+        "identifier",
+        "product_kind",
+        "quality",
+        "freshness",
+        "validation",
+        "supported_next_actions",
+        "source_path",
+    ),
+)
+
+EXPORT_RUN_PRODUCT_RESULT_SCHEMA = object_schema(
+    {
+        "status": {"const": "completed"},
+        "product_kind": {
+            "enum": ["completed_run_state", "completed_run_snapshot", "maneuver_detection"]
+        },
+        "product_path": {"type": "string"},
+        "product_id": {"type": "string"},
+        "selection": {"type": "object"},
+        "object_ids": {"type": "array", "items": {"type": "string"}},
+        "event_id": {"type": "string"},
+        "operation_manifest_path": {"type": "string"},
+        "execution_occurred": {"const": False},
+    },
+    required=(
+        "status",
+        "product_kind",
+        "product_path",
+        "product_id",
+        "selection",
+        "object_ids",
+        "event_id",
+        "operation_manifest_path",
+        "execution_occurred",
+    ),
+)
+
+EMIT_SCENARIO_OVERLAY_RESULT_SCHEMA = object_schema(
+    {
+        "status": {"const": "completed"},
+        "product_path": {"type": "string"},
+        "product_id": {"type": "string"},
+        "overlay_id": {"type": "string"},
+        "operation_count": {"type": "integer", "minimum": 1},
+        "operation_manifest_path": {"type": "string"},
+        "execution_occurred": {"const": False},
+    },
+    required=("status", "product_path", "product_id", "overlay_id", "operation_count", "operation_manifest_path", "execution_occurred"),
+)
+
+MATERIALIZE_HANDOFF_RESULT_SCHEMA = object_schema(
+    {
+        "status": {"enum": ["materialized", "blocked"]},
+        "scenario_path": {"type": "string"},
+        "manifest_path": {"type": "string"},
+        "manifest_id": {"type": "string"},
+        "source_product_id": {"type": "string"},
+        "validation": {"type": "object"},
+        "failures": {"type": "array", "items": {"type": "object"}},
+        "recommended_next_action": {"type": "string"},
+        "operation_manifest_path": {"type": "string"},
+        "execution_occurred": {"const": False},
+        "execution_authorized": {"const": False},
+    },
+    required=(
+        "status",
+        "scenario_path",
+        "manifest_path",
+        "manifest_id",
+        "source_product_id",
+        "validation",
+        "failures",
+        "recommended_next_action",
+        "operation_manifest_path",
+        "execution_occurred",
+        "execution_authorized",
+    ),
+)
+
+COMPARE_HANDOFF_RESULT_SCHEMA = object_schema(
+    {
+        "status": {"enum": ["equivalent", "failed"]},
+        "comparison_id": {"type": "string"},
+        "output_path": {"type": "string"},
+        "source": {"type": "object"},
+        "materialization": {"type": "object"},
+        "summary": {"type": "object"},
+        "execution_evidence": {"type": "object"},
+        "non_claims": {"type": "array", "items": {"type": "string"}},
+        "operation_manifest_path": {"type": "string"},
+    },
+    required=(
+        "status",
+        "comparison_id",
+        "output_path",
+        "source",
+        "materialization",
+        "summary",
+        "execution_evidence",
+        "non_claims",
+        "operation_manifest_path",
+    ),
+)
+
+MANEUVER_READINESS_RESULT_SCHEMA = object_schema(
+    {
+        "status": {"const": "completed"},
+        "verdict": {"enum": ["ready", "not_ready", "unknown"]},
+        "object_id": {"type": "string"},
+        "chief_id": {"type": "string"},
+        "thresholds": {"type": "object"},
+        "metrics": {"type": "object"},
+        "gates": {"type": "array", "items": {"type": "object"}},
+        "packet_path": {"type": "string"},
+        "operation_manifest_path": {"type": "string"},
+        "non_claims": {"type": "array", "items": {"type": "string"}},
+    },
+    required=(
+        "status",
+        "verdict",
+        "object_id",
+        "chief_id",
+        "thresholds",
+        "metrics",
+        "gates",
+        "packet_path",
+        "operation_manifest_path",
+        "non_claims",
+    ),
+)
+
+DYNAMICS_OD_RESULT_SCHEMA = object_schema(
+    {
+        "status": {"enum": ["completed", "partial", "failed", "cancelled"]},
+        "method": {"type": "string"},
+        "quality_gates": {"type": "object"},
+        "verdict": {"type": "object"},
+        "fit_metrics": {"type": "object"},
+        "holdout_metrics": {"type": "object"},
+        "maneuver_detection": {"type": "object"},
+        "resource_plan": {"type": "object"},
+        "state_product_path": {"type": "string"},
+        "artifacts": {"type": "array", "items": {"type": "string"}},
+        "operation_manifest_path": {"type": "string"},
+        "execution_authorized_outputs": {"const": False},
+        "non_claims": {"type": "array", "items": {"type": "string"}},
+    },
+    required=(
+        "status", "method", "quality_gates", "verdict", "fit_metrics", "holdout_metrics",
+        "maneuver_detection", "resource_plan", "state_product_path", "artifacts", "operation_manifest_path",
+        "execution_authorized_outputs", "non_claims",
+    ),
+)
+
+HANDOFF_SELECTOR_PROPERTIES: dict[str, Any] = {
+    "selector": {"type": "string", "enum": ["final", "sample_index", "time_s", "event"]},
+    "sample_index": {"type": "integer", "minimum": 0},
+    "time_s": {"type": "number", "minimum": 0.0},
+    "event_id": {"type": "string", "minLength": 1},
+    "epoch_jd_utc": {"type": "number", "minimum": 0.0},
+}
+
+READINESS_THRESHOLDS_SCHEMA = object_schema(
+    {
+        "max_final_range_km": {"type": "number", "minimum": 0.0},
+        "max_allocation_force_residual_n": {"type": "number", "minimum": 0.0},
+        "max_allocation_saturated_duration_s": {"type": "number", "minimum": 0.0},
+        "max_pointing_error_deg": {"type": "number", "minimum": 0.0},
+        "min_final_propellant_kg": {"type": "number", "minimum": 0.0},
+        "min_burn_samples": {"type": "number", "minimum": 0.0},
+        "require_no_attitude_guardrail_events": {"type": "boolean"},
+    },
+    required=(),
+)
+
 PUBLIC_TOOL_CONTRACTS: tuple[ToolContract, ...] = (
     ToolContract(
         tool_id="oel.describe_capabilities.v1",
@@ -565,6 +758,234 @@ PUBLIC_TOOL_CONTRACTS: tuple[ToolContract, ...] = (
             required=("report_path", "packet_path", "audit_output_dir", "author", "approval", "handling"),
         ),
         result_schema=AUDIT_REPORT_RESULT_SCHEMA,
+    ),
+    ToolContract(
+        tool_id="oel.inspect_handoff.v1",
+        title="Inspect OEL interchange evidence",
+        description="Inspect and validate one bounded OEL product or handoff manifest without writing or executing.",
+        risk_class="R0_read",
+        oel_api="sim.handoff.inspect_path",
+        maturity="supported",
+        install_profile="mcp",
+        deployment_profiles=M4_LOCAL_PROFILES,
+        data_classes=("interchange_product", "handoff_manifest"),
+        writes=False,
+        input_schema=object_schema(
+            handling_properties(
+                {
+                    "path": {"type": "string", "minLength": 1},
+                    "verify_sources": {"type": "boolean", "default": True},
+                }
+            ),
+            required=("path", "handling"),
+        ),
+        result_schema=INSPECT_HANDOFF_RESULT_SCHEMA,
+        limits={"max_input_file_bytes": MAX_MANIFEST_BYTES},
+    ),
+    ToolContract(
+        tool_id="oel.export_run_product.v1",
+        title="Export a typed product from completed OEL evidence",
+        description="Export one exact completed-run state, atomic snapshot, or maneuver-detection product without executing a scenario.",
+        risk_class="R1_write",
+        oel_api="sim.handoff completed-run exporters",
+        maturity="supported",
+        install_profile="mcp",
+        deployment_profiles=M4_LOCAL_PROFILES,
+        data_classes=("run_evidence", "interchange_product"),
+        writes=True,
+        input_schema=object_schema(
+            handling_properties(
+                {
+                    "completed_run": {"type": "string", "minLength": 1},
+                    "output_path": {"type": "string", "minLength": 1},
+                    "product_kind": {
+                        "type": "string",
+                        "enum": ["completed_run_state", "completed_run_snapshot", "maneuver_detection"],
+                    },
+                    "object_id": {"type": "string", "minLength": 1},
+                    "object_ids": {
+                        "type": "array",
+                        "items": {"type": "string", "minLength": 1},
+                        "minItems": 2,
+                        "maxItems": 32,
+                    },
+                    "observer_id": {"type": "string", "minLength": 1},
+                    "target_id": {"type": "string", "minLength": 1},
+                    **HANDOFF_SELECTOR_PROPERTIES,
+                    "approval": APPROVAL_SCHEMA,
+                }
+            ),
+            required=("completed_run", "output_path", "product_kind", "approval", "handling"),
+        ),
+        result_schema=EXPORT_RUN_PRODUCT_RESULT_SCHEMA,
+        limits={"new_output_required": True, "max_objects": 32, "operator_approval_required": True},
+    ),
+    ToolContract(
+        tool_id="oel.emit_scenario_overlay.v1",
+        title="Emit a bounded OEL scenario overlay",
+        description="Convert one closed scenario-capability overlay into a source-bound typed patch without materializing or executing it.",
+        risk_class="R1_write",
+        oel_api="sim.handoff.emit_scenario_overlay",
+        maturity="supported",
+        install_profile="mcp",
+        deployment_profiles=M4_LOCAL_PROFILES,
+        data_classes=("scenario_config", "scenario_overlay", "interchange_product"),
+        writes=True,
+        input_schema=object_schema(
+            handling_properties(
+                {
+                    "source_scenario": {"type": "string", "minLength": 1},
+                    "overlay_path": {"type": "string", "minLength": 1},
+                    "overlay_id": {"type": "string", "minLength": 1, "maxLength": 120},
+                    "rationale": {"type": "string", "minLength": 1, "maxLength": 1000},
+                    "output_path": {"type": "string", "minLength": 1},
+                    "approval": APPROVAL_SCHEMA,
+                }
+            ),
+            required=(
+                "source_scenario",
+                "overlay_path",
+                "overlay_id",
+                "rationale",
+                "output_path",
+                "approval",
+                "handling",
+            ),
+        ),
+        result_schema=EMIT_SCENARIO_OVERLAY_RESULT_SCHEMA,
+        limits={"new_output_required": True, "operator_approval_required": True},
+    ),
+    ToolContract(
+        tool_id="oel.materialize_onp_handoff.v1",
+        title="Materialize an ONP handoff scenario",
+        description="Materialize and validate one passive ONP scenario from an accepted state or atomic snapshot product without executing it.",
+        risk_class="R1_write",
+        oel_api="sim.handoff.materialize_onp; sim.handoff.materialize_snapshot_onp",
+        maturity="supported",
+        install_profile="mcp",
+        deployment_profiles=M4_LOCAL_PROFILES,
+        data_classes=("interchange_product", "scenario_config", "handoff_manifest"),
+        writes=True,
+        input_schema=object_schema(
+            handling_properties(
+                {
+                    "product_path": {"type": "string", "minLength": 1},
+                    "scenario_name": {"type": "string", "minLength": 1, "maxLength": 160},
+                    "scenario_path": {"type": "string", "minLength": 1},
+                    "run_output_dir": {"type": "string", "minLength": 1},
+                    "duration_s": {"type": "number", "minimum": 1e-9},
+                    "dt_s": {"type": "number", "minimum": 1e-9},
+                    "trust_plugins": {"type": "boolean", "default": False},
+                    "trust_approval": APPROVAL_SCHEMA,
+                    "approval": APPROVAL_SCHEMA,
+                }
+            ),
+            required=(
+                "product_path",
+                "scenario_name",
+                "scenario_path",
+                "run_output_dir",
+                "duration_s",
+                "dt_s",
+                "trust_plugins",
+                "approval",
+                "handling",
+            ),
+        ),
+        result_schema=MATERIALIZE_HANDOFF_RESULT_SCHEMA,
+        limits={"new_output_required": True, "execution_authorized": False, "operator_approval_required": True},
+    ),
+    ToolContract(
+        tool_id="oel.materialize_scenario_patch.v1",
+        title="Materialize a typed OEL scenario patch",
+        description="Apply one accepted source-bound scenario patch and validate the generated scenario without executing it.",
+        risk_class="R1_write",
+        oel_api="sim.handoff.materialize_scenario_patch",
+        maturity="supported",
+        install_profile="mcp",
+        deployment_profiles=M4_LOCAL_PROFILES,
+        data_classes=("interchange_product", "scenario_config", "handoff_manifest"),
+        writes=True,
+        input_schema=object_schema(
+            handling_properties(
+                {
+                    "patch_product": {"type": "string", "minLength": 1},
+                    "source_scenario": {"type": "string", "minLength": 1},
+                    "scenario_name": {"type": "string", "minLength": 1, "maxLength": 160},
+                    "scenario_path": {"type": "string", "minLength": 1},
+                    "run_output_dir": {"type": "string", "minLength": 1},
+                    "trust_plugins": {"type": "boolean", "default": False},
+                    "trust_approval": APPROVAL_SCHEMA,
+                    "approval": APPROVAL_SCHEMA,
+                }
+            ),
+            required=(
+                "patch_product",
+                "source_scenario",
+                "scenario_name",
+                "scenario_path",
+                "run_output_dir",
+                "trust_plugins",
+                "approval",
+                "handling",
+            ),
+        ),
+        result_schema=MATERIALIZE_HANDOFF_RESULT_SCHEMA,
+        limits={"new_output_required": True, "execution_authorized": False, "operator_approval_required": True},
+    ),
+    ToolContract(
+        tool_id="oel.compare_handoff.v1",
+        title="Compare OEL handoff semantics",
+        description="Write a bounded semantic-parity packet for a product, scenario, manifest, and optional first consumer evidence row.",
+        risk_class="R1_write",
+        oel_api="sim.handoff.compare_handoff",
+        maturity="supported",
+        install_profile="mcp",
+        deployment_profiles=M4_LOCAL_PROFILES,
+        data_classes=("interchange_product", "scenario_config", "handoff_manifest", "run_evidence"),
+        writes=True,
+        input_schema=object_schema(
+            handling_properties(
+                {
+                    "product_path": {"type": "string", "minLength": 1},
+                    "scenario_path": {"type": "string", "minLength": 1},
+                    "manifest_path": {"type": "string", "minLength": 1},
+                    "run_output_dir": {"type": "string", "minLength": 1},
+                    "output_path": {"type": "string", "minLength": 1},
+                    "approval": APPROVAL_SCHEMA,
+                }
+            ),
+            required=("product_path", "scenario_path", "output_path", "approval", "handling"),
+        ),
+        result_schema=COMPARE_HANDOFF_RESULT_SCHEMA,
+        limits={"new_output_required": True, "operator_approval_required": True},
+    ),
+    ToolContract(
+        tool_id="oel.assess_maneuver_readiness.v1",
+        title="Assess bounded maneuver readiness evidence",
+        description="Apply explicit engineering thresholds to one completed deterministic run and write a fail-closed readiness packet.",
+        risk_class="R1_write",
+        oel_api="sim.reporting.build_maneuver_readiness_packet",
+        maturity="supported",
+        install_profile="mcp",
+        deployment_profiles=M4_LOCAL_PROFILES,
+        data_classes=("run_evidence", "maneuver_readiness_packet"),
+        writes=True,
+        input_schema=object_schema(
+            handling_properties(
+                {
+                    "completed_run": {"type": "string", "minLength": 1},
+                    "object_id": {"type": "string", "minLength": 1},
+                    "chief_id": {"type": "string", "minLength": 1},
+                    "thresholds": READINESS_THRESHOLDS_SCHEMA,
+                    "output_path": {"type": "string", "minLength": 1},
+                    "approval": APPROVAL_SCHEMA,
+                }
+            ),
+            required=("completed_run", "object_id", "chief_id", "thresholds", "output_path", "approval", "handling"),
+        ),
+        result_schema=MANEUVER_READINESS_RESULT_SCHEMA,
+        limits={"new_output_required": True, "operator_approval_required": True},
     ),
 )
 

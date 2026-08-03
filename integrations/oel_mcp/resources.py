@@ -14,6 +14,7 @@ PUBLIC_RESOURCE_URIS = (
     "oel://review/saved-queries/v1",
     "oel://agent/tasks/v1",
     "oel://docs/operator-guide/v1",
+    "oel://handoff/product-kinds/v1",
 )
 PUBLIC_SAVED_QUERY_NAMES = frozenset(
     {
@@ -92,6 +93,14 @@ PUBLIC_RESOURCE_CONTRACTS = (
         mime_type="text/markdown",
         source="integrations.oel_mcp.resource_data/operator-guide.md",
     ),
+    ResourceContract(
+        uri=PUBLIC_RESOURCE_URIS[4],
+        name="oel-handoff-product-kinds-v1",
+        title="OEL handoff product kinds",
+        description="Public-safe routing metadata for typed OEL products and supported MCP next actions.",
+        mime_type="application/json",
+        source="sim.handoff",
+    ),
 )
 
 
@@ -108,6 +117,7 @@ def build_public_resource_catalog(
         PUBLIC_RESOURCE_URIS[1]: lambda: _json_text(_saved_query_payload()),
         PUBLIC_RESOURCE_URIS[2]: lambda: _json_text(_agent_task_payload()),
         PUBLIC_RESOURCE_URIS[3]: _operator_guide_text,
+        PUBLIC_RESOURCE_URIS[4]: lambda: _json_text(_handoff_product_payload()),
     }
     published: list[PublishedResource] = []
     for contract in PUBLIC_RESOURCE_CONTRACTS:
@@ -186,6 +196,46 @@ def _agent_task_payload() -> dict[str, Any]:
 def _operator_guide_text() -> str:
     resource = files("integrations.oel_mcp").joinpath("resource_data/operator-guide.md")
     return resource.read_text(encoding="utf-8")
+
+
+def _handoff_product_payload() -> dict[str, Any]:
+    return {
+        "schema_version": RESOURCE_SCHEMA_VERSION,
+        "resource_uri": PUBLIC_RESOURCE_URIS[4],
+        "source": "sim.handoff",
+        "product_kinds": [
+            {
+                "product_kind": "oel.state_estimate",
+                "producer_tools": [],
+                "next_actions": ["oel.inspect_handoff.v1", "oel.materialize_onp_handoff.v1"],
+            },
+            {
+                "product_kind": "oel.completed_run_state",
+                "producer_tools": ["oel.export_run_product.v1"],
+                "next_actions": ["oel.inspect_handoff.v1", "oel.materialize_onp_handoff.v1"],
+            },
+            {
+                "product_kind": "oel.completed_run_snapshot",
+                "producer_tools": ["oel.export_run_product.v1"],
+                "next_actions": ["oel.inspect_handoff.v1", "oel.materialize_onp_handoff.v1"],
+            },
+            {
+                "product_kind": "oel.maneuver_detection",
+                "producer_tools": ["oel.export_run_product.v1"],
+                "next_actions": ["oel.inspect_handoff.v1"],
+            },
+            {
+                "product_kind": "oel.scenario_patch",
+                "producer_tools": ["oel.emit_scenario_overlay.v1"],
+                "next_actions": ["oel.inspect_handoff.v1", "oel.materialize_scenario_patch.v1"],
+            },
+        ],
+        "rules": {
+            "materialization_executes": False,
+            "generated_scenarios_execution_authorized": False,
+            "inspect_before_consume": True,
+        },
+    }
 
 
 def _json_text(value: dict[str, Any]) -> str:
