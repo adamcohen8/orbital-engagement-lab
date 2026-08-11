@@ -1,11 +1,17 @@
 scenario_name: game_training_rpo_06_sun_angle_inspection
-scenario_description: GEO RPO trainer demo for teaching Sun-angle inspection
-  constraints while flying a passively safe inspection pattern.
+scenario_description: GEO RPO trainer demo for teaching Sun-angle inspection constraints
+  while flying a passively safe inspection pattern.
 metadata:
   owner: codex
   notes: Run with `python run_game.py sim/game/configs/game_training_rpo_06_sun_angle_inspection.yaml
     --speed-multiple 10`.
   game:
+    flight_software_stack: fsw.game_pilot_reference
+    input_profile: game.translation.v1
+    hardware_profile: game.ideal_wrench.v1
+    observer_policy: truth_assisted
+    scoring_policy: configured_training.v1
+    replay_support: debrief_history_v1
     level_name: Level 6 - Sun-Angle Inspection
     control_mode: ric_translation
     camera_mode: target_pair
@@ -46,10 +52,10 @@ metadata:
       learning_goal: Fly a GEO inspection pattern while keeping the chaser inside
         the target-centered Sun-angle inspection beam.
       player_brief: This GEO lesson adds lighting geometry to the safe-inspection
-        problem. The amber beam marks where the lighting geometry is acceptable.
-        Gates only count while you are inside the beam. Avoid the red proximity
-        sphere and pass through each green inspection gate. This scenario uses
-        a non-eclipse GEO epoch, so Earth shadow is not part of the lesson.
+        problem. The amber beam marks where the lighting geometry is acceptable. Gates
+        only count while you are inside the beam. Avoid the red proximity sphere and
+        pass through each green inspection gate. This scenario uses a non-eclipse
+        GEO epoch, so Earth shadow is not part of the lesson.
       pass_criteria:
       - Pass through both inspection gates inside the amber Sun-angle beam.
       - Be inside the amber Sun-angle beam when crossing each inspection gate.
@@ -58,12 +64,12 @@ metadata:
       instructor_notes:
       - The target-to-Sun direction is resolved from the configured epoch and moves
         through the target-centered RIC frame over the GEO day.
-      - The allowed inspection corridor is the amber cone centered anti-Sun from
-        the target.
-      - This is a geometry lesson first; GEO is used to slow the motion down and
-        make the Sun-angle constraint legible.
-      - The configured January GEO epoch avoids Earth eclipse season; the level
-        does not model Earth shadow blocking the Sun-angle corridor.
+      - The allowed inspection corridor is the amber cone centered anti-Sun from the
+        target.
+      - This is a geometry lesson first; GEO is used to slow the motion down and make
+        the Sun-angle constraint legible.
+      - The configured January GEO epoch avoids Earth eclipse season; the level does
+        not model Earth shadow blocking the Sun-angle corridor.
       target_object_id: target
       chaser_object_id: chaser
       inspection_gates:
@@ -147,19 +153,6 @@ objects:
       - 0.0
       - 0.0
       relative_to: target
-    orbit_control:
-      kind: python
-      module: sim.control.orbit.zero_controller
-      class_name: ZeroController
-      params: {}
-    attitude_control:
-      kind: python
-      module: sim.control.attitude.zero_torque
-      class_name: ZeroTorqueController
-      params: {}
-    mission_strategy: null
-    mission_execution: null
-    mission_objectives: []
     knowledge:
       refresh_rate_s: 10.0
       targets:
@@ -179,6 +172,12 @@ objects:
       estimation:
         type: ekf
     kind: satellite
+    flight_software:
+      stack: fsw.game_pilot_reference
+      task_period_s: null
+      hardware_profile: game.ideal_wrench.v1
+      params:
+        reference_object_id: target
   target:
     enabled: true
     role: target
@@ -203,38 +202,8 @@ objects:
       - 0.0
       - 0.0
       - 0.0
-    orbit_control:
-      kind: python
-      module: sim.control.orbit.zero_controller
-      class_name: ZeroController
-      params: {}
-    attitude_control:
-      kind: python
-      module: sim.control.attitude.zero_torque
-      class_name: ZeroTorqueController
-      params: {}
-    mission_strategy: null
-    mission_execution: null
-    mission_objectives: []
-    knowledge:
-      refresh_rate_s: 10.0
-      targets:
-      - chaser
-      conditions:
-        require_line_of_sight: false
-        max_range_km: 10000.0
-      sensor_error:
-        pos_sigma_km:
-        - 0.0
-        - 0.0
-        - 0.0
-        vel_sigma_km_s:
-        - 0.0
-        - 0.0
-        - 0.0
-      estimation:
-        type: ekf
     kind: satellite
+    runtime_profile: trajectory_only
 simulator:
   duration_s: 86400.0
   dt_s: 1.0

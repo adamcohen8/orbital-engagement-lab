@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,6 +18,7 @@ from sim.api import SimulationWorkspace
 from sim.config import scenario_config_from_dict
 from sim.resource_limits import apply_resource_profile_to_config_dict, estimate_resource_requirements
 from sim.security import ConfigPathPolicy
+from sim.security.sealed_mode import validate_sealed_mode
 
 MAX_SCENARIO_BYTES = 2_000_000
 M4_RESOURCE_PROFILES = ("laptop-safe", "standard")
@@ -86,13 +88,11 @@ def prepare_scenario(
     path_policy: MCPPathPolicy,
 ) -> PreparedScenario:
     source = path_policy.resolve_read(config_path, kind="file")
-    if source.stat().st_size > MAX_SCENARIO_BYTES:
-        raise ValueError("Authorized scenario exceeds the M4 file-size budget.")
+    raw_bytes = _read_file_nofollow(source, maximum=MAX_SCENARIO_BYTES)
     output = path_policy.resolve_write(output_dir)
     profile = str(resource_profile).strip()
     if profile not in M4_RESOURCE_PROFILES:
         raise ValueError("M4 requires the laptop-safe or standard resource profile.")
-    raw_bytes = source.read_bytes()
     raw = yaml.safe_load(raw_bytes)
     if not isinstance(raw, dict):
         raise ValueError("Scenario config must be a YAML mapping.")
@@ -115,6 +115,21 @@ def prepare_scenario(
         allow_config_dir_writes=False,
     )
     config = scenario_config_from_dict(prepared, source_path=source, path_policy=config_policy)
+    sealed_errors = validate_sealed_mode(config)
+    ai_report = dict(config.outputs.ai_report or {})
+    if bool(ai_report.get("enabled", False)) and not bool(ai_report.get("dry_run", False)):
+        sealed_errors.append(
+            "outputs.ai_report.enabled: MCP execution forbids all AI-provider calls; "
+            "disable the report or use dry_run: true."
+        )
+    ai_config = dict(config.outputs.ai_config or {})
+    if ai_config and bool(ai_config.get("enabled", True)) and not bool(ai_config.get("dry_run", False)):
+        sealed_errors.append(
+            "outputs.ai_config.enabled: MCP execution forbids all AI-provider calls; "
+            "disable the assistant or use dry_run: true."
+        )
+    if sealed_errors:
+        raise ValueError("MCP sealed execution policy failed:\n- " + "\n- ".join(sealed_errors))
     normalized = config.to_dict()
     normalized_sha256 = _sha256_json(normalized)
     validation_id = f"oel-m4-validation-v1:{normalized_sha256}"
@@ -176,14 +191,16 @@ def require_safe_resource_estimate(estimate: dict[str, Any]) -> None:
 
 
 def ensure_new_output_dir(path: Path) -> None:
-    if path.exists() and any(path.iterdir()):
-        raise FileExistsError("The approved output directory must be new or empty.")
-    path.mkdir(parents=True, exist_ok=True)
+    _ensure_directory_nofollow(path, require_empty=True)
 
 
 def write_materialized_config(prepared: PreparedScenario) -> Path:
     target = prepared.output_dir / "mcp_execution_config.yaml"
-    target.write_text(yaml.safe_dump(prepared.config_dict, sort_keys=False, allow_unicode=False), encoding="utf-8")
+    _write_child_nofollow(
+        prepared.output_dir,
+        target.name,
+        yaml.safe_dump(prepared.config_dict, sort_keys=False, allow_unicode=False).encode("utf-8"),
+    )
     return target
 
 
@@ -201,12 +218,110 @@ def write_execution_manifest(
     *,
     filename: str = EXECUTION_MANIFEST_NAME,
 ) -> Path:
-    output_dir.mkdir(parents=True, exist_ok=True)
+    _ensure_directory_nofollow(output_dir, require_empty=False)
     target = output_dir / filename
-    temporary = target.with_suffix(".tmp")
-    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
-    temporary.replace(target)
+    serialized = (json.dumps(payload, indent=2, sort_keys=True, default=str) + "\n").encode("utf-8")
+    _write_child_nofollow(output_dir, filename, serialized, atomic=True)
     return target
+
+
+def _write_child_nofollow(
+    directory: Path,
+    filename: str,
+    payload: bytes,
+    *,
+    atomic: bool = False,
+) -> None:
+    if Path(filename).name != filename:
+        raise ValueError("MCP artifact filename must be a single path component.")
+    directory_fd = _open_directory_nofollow(directory, create=False)
+    temporary_name = filename
+    try:
+        if atomic:
+            temporary_name = f".{filename}.{secrets.token_hex(12)}.tmp"
+        file_flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
+        if atomic:
+            file_flags |= os.O_EXCL
+        file_fd = os.open(temporary_name, file_flags, 0o600, dir_fd=directory_fd)
+        with os.fdopen(file_fd, "wb") as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        if atomic:
+            os.replace(
+                temporary_name,
+                filename,
+                src_dir_fd=directory_fd,
+                dst_dir_fd=directory_fd,
+            )
+    finally:
+        if atomic:
+            try:
+                os.unlink(temporary_name, dir_fd=directory_fd)
+            except FileNotFoundError:
+                pass
+        os.close(directory_fd)
+
+
+def _open_directory_nofollow(directory: Path, *, create: bool) -> int:
+    """Open an absolute directory one component at a time without symlinks."""
+
+    path = Path(directory)
+    if not path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts[1:]):
+        raise ValueError("MCP artifact directory must be an absolute normalized path")
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    current_fd = os.open(os.path.sep, flags)
+    try:
+        for part in path.parts[1:]:
+            try:
+                next_fd = os.open(part, flags, dir_fd=current_fd)
+            except FileNotFoundError:
+                if not create:
+                    raise
+                os.mkdir(part, mode=0o700, dir_fd=current_fd)
+                next_fd = os.open(part, flags, dir_fd=current_fd)
+            os.close(current_fd)
+            current_fd = next_fd
+        return current_fd
+    except Exception:
+        os.close(current_fd)
+        raise
+
+
+def _ensure_directory_nofollow(directory: Path, *, require_empty: bool) -> None:
+    directory_fd = _open_directory_nofollow(directory, create=True)
+    try:
+        if require_empty and os.listdir(directory_fd):
+            raise FileExistsError("The approved output directory must be new or empty.")
+    finally:
+        os.close(directory_fd)
+
+
+def _read_file_nofollow(path: Path, *, maximum: int) -> bytes:
+    parent_fd = _open_directory_nofollow(path.parent, create=False)
+    try:
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        file_fd = os.open(path.name, flags, dir_fd=parent_fd)
+        try:
+            size = os.fstat(file_fd).st_size
+            if size > int(maximum):
+                raise ValueError("Authorized input exceeds the MCP file-size budget.")
+            chunks: list[bytes] = []
+            remaining = int(maximum) + 1
+            while remaining > 0:
+                chunk = os.read(file_fd, min(1024 * 1024, remaining))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                remaining -= len(chunk)
+            payload = b"".join(chunks)
+            if len(payload) > int(maximum):
+                raise ValueError("Authorized input exceeds the MCP file-size budget.")
+            return payload
+        finally:
+            os.close(file_fd)
+    finally:
+        os.close(parent_fd)
 
 
 def manifest_base(

@@ -168,7 +168,13 @@ def host_config(
     raise ValueError("Supported host config targets are codex and claude.")
 
 
-def default_host_launch() -> tuple[str, tuple[str, ...], str]:
+def default_host_launch(profile: str = "public_local") -> tuple[str, tuple[str, ...], str]:
+    if str(profile).strip() not in {"public_local", "direct_frontier_restricted"}:
+        return (
+            str(Path(sys.executable).absolute()),
+            ("-m", "integrations.oel_mcp.server"),
+            "private_python_module_entrypoint",
+        )
     entrypoint = shutil.which("oel-mcp")
     if entrypoint:
         return str(Path(entrypoint).absolute()), (), "installed_console_entrypoint"
@@ -206,9 +212,14 @@ def run_server_cli(
             command = str(args.command)
             command_args = tuple(str(item) for item in args.command_args)
             if not command_args and Path(command).name.lower().startswith("python"):
-                command_args = ("-m", "integrations.oel_mcp")
+                command_args = (
+                    "-m",
+                    "integrations.oel_mcp"
+                    if str(args.profile) in {"public_local", "direct_frontier_restricted"}
+                    else "integrations.oel_mcp.server",
+                )
         else:
-            command, command_args, _source = default_host_launch()
+            command, command_args, _source = default_host_launch(str(args.profile))
         print(
             host_config(
                 host=args.print_host_config,

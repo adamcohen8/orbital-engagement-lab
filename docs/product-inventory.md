@@ -41,7 +41,7 @@ explicit packaging decision.
 | Scenario YAML, CLI, and Python API | Public | Flagship | [Quickstart](quickstart.md), engine and scenario contracts | Pre-1.0 non-contract fields may still evolve. |
 | ONP numerical propagation | Public | Reference | [Physics Model Reference](physics-models.md), public scenarios | Fidelity depends on the configured force models and validation envelope. |
 | OGP-SGP4/SDP4 passive propagation | Public | Reference | TLE examples, OGP reference suites, frame provenance | Passive catalog-style propagation; not an operational catalog service. |
-| Closed-loop RPO and attitude control | Public | Flagship | [RIC_PD scenario and validation](validation-ric-pd-10km.md) | Evidence is scenario-specific, not a general safety or robustness claim. |
+| GNC v2 complete-stack runtime and profiles | Public | Mixed | [GNC v2 evidence](gnc-v2-evidence.md), [flight-software profiles](flight-software-profiles.md) | All 18 exact profile versions are Supported only inside their declared simulation qualification envelopes; underlying stacks and arbitrary custom compositions remain Experimental. |
 | Lambert orbit-transfer planning | Public | Workbench | `configs/orbit_transfer_planner_demo.yaml`, review-store candidate tables | Bounded two-body grid search, not operational or globally optimal planning. |
 | Review store, queries, and plotting | Public | Reference | [Review Store](review-store.md), [Plotting](plotting.md) | Only recorded evidence can be queried or plotted. |
 | RPO Trainer | Public | Flagship | `run_game.py`, game configs and debriefs | Educational; not operational training qualification. |
@@ -54,7 +54,42 @@ explicit packaging decision.
 | Initial-orbit and optical angles-only determination | Pro | Experimental | [OD contract](contracts/orbit-determination-contract.md), Phase 5 synthetic campaign | Gibbs/Herrick-Gibbs and ambiguity-aware Gauss/Lambert initialization have bounded L2 synthetic evidence; no operational optical, association, or custody claim. |
 | OEL Scale and intent-hypothesis evaluation | Pro | Experimental | Private contracts, fixtures, and roadmaps | Phase-0 product surfaces; no operational catalog or intent claim. |
 | AI-assisted reports and config assistance | Pro | Workbench | Private staged estimate/create workflows | Requires explicit provider, data, cost, and human-review decisions. |
-| cFS/SIL and program integrations | Pro | Experimental | Private integration examples | Prototype timing, transport, and conformance envelopes. |
+| cFS/SIL common-boundary adapter | Pro/private | Experimental | Private cFS/SIL ICD and byte-level golden vectors | Excluded from the public export; prototype loopback transport and conformance envelope, not flight or real-time qualification. |
+
+## GNC v2 complete stacks
+
+Every satellite using the default `flight_software` runtime profile crosses one
+`SatelliteFlightSoftware` boundary. Typed
+sensor, command, load, pilot, and telemetry events enter; typed device commands
+leave. Navigation, goals, constraint handling, executive logic, guidance,
+control, allocation, and stack-owned recovery are internal implementation
+details. A propagation-only satellite with no `flight_software` declaration
+uses the v2 passive stack. An explicitly declared `runtime_profile:
+trajectory_only` bypasses onboard modeling and retains only configured
+deterministic dynamics. Any non-empty v1 satellite GNC field is rejected.
+
+| Stack | Hardware currently realized by the reference factory | Included modes | Maturity |
+| --- | --- | --- | --- |
+| `fsw.passive` | Passive | Coast and typed evidence | Experimental |
+| `fsw.attitude_reference` | Ideal torque/wrench | Quaternion hold and configured reference pointing | Experimental |
+| `fsw.orbit_reference` | Ideal wrench | Stationkeeping and orbital-element feedback | Experimental |
+| `fsw.rpo_reference` | Ideal wrench | RIC hold, axis approaches, waypoint, braking, and passive retreat | Experimental |
+| `fsw.low_thrust_reference` | Continuous engine with body-frame gimbal commands | Low-thrust phasing | Experimental |
+| `fsw.game_pilot_reference` | Ideal wrench or modeled aerodynamic effectors, by declared input profile | Pilot translation, attitude/thrust, operator input, and aerodynamic play | Experimental |
+
+The stack catalog and component catalog are intentionally separate. Public
+custom stacks can compose component math without Pro. The Pro Controller Bench
+replaces and evaluates complete stack compositions; it is not a second runtime.
+See [GNC v2 migration](gnc-v2-migration.md) and
+[GNC v2 evidence](gnc-v2-evidence.md).
+
+OEL also ships an initial catalog of 18 versioned
+[flight-software use-case profiles](flight-software-profiles.md) across
+commissioning/ADCS, absolute-orbit operations, RPO/formation applications, and
+low-thrust control. All 18 exact profile versions are Supported inside their
+declared simulation qualification envelopes. That maturity does not promote
+any underlying stack for arbitrary compositions or parameters outside the
+profile envelope.
 
 ## Mission And Dynamics Capability Inventory
 
@@ -83,9 +118,11 @@ refinements. Flat aliases such as `specs.drag_area_m2`, `specs.cd`, and
 
 ## Estimation And Knowledge
 
-These surfaces feed closed-loop object knowledge during simulation or support
-estimation-oriented validation fixtures. Batch OD workflows are covered in the
-OD contract and may be Pro/private depending on packaging.
+The first four live-knowledge rows below describe the pre-v2 component library,
+not a supported v2 satellite configuration surface. Their filter mathematics
+remain available for composition work, but a v2 stack must expose them through
+typed measurement adapters before claiming them as onboard capability. Batch OD
+workflows remain separate ground/offline estimation products.
 
 | Product surface | Packaging | Config/API surface | Status | Primary use |
 | --- | --- | --- | --- | --- |
@@ -99,25 +136,31 @@ OD contract and may be Pro/private depending on packaging.
 | ONP Native Ground-Sensor Orbit Determination | Pro | `sim.estimation.ground_station_od` / `sim.scale fit-ground-sensor-od` | Reference | Fits initial ECI Cartesian state against individual/combined azimuth, elevation, range, and range-rate rows; optional station/shared biases and clock terms carry priors and identifiability evidence, with elevation weighting, apparent-elevation refraction, station holdout/exclusion, and queryable review tables. |
 | OGP Mean-Element Orbit Determination | Pro | `sim.estimation.ogp_od` plus legacy `sim.estimation.sgp4_od` / Scale commands | Experimental reference | Fits native TEME PV across named OGP-SGP4 and OGP-SDP4 regimes with automatic nonsingular/classical parameterization, fit/holdout evidence, and gated B*/epoch trials. Legacy fixed-epoch SGP4 PV and ground-sensor routes remain supported; Phase 6 is bounded same-family synthetic OD, not precise truth or operational TLE publication. |
 
-## Orbital Controllers
+## Orbital component library
 
-Orbital controllers are configured through `orbit_control` pointers in scenario
-YAML. They emit translational commands and may be combined with mission
-execution modules that handle pointing, burn gating, or integrated
-orbit/attitude command execution.
+These implementations are retained as component mathematics and historical
+evidence. They are not top-level satellite scenario fields and their old
+Reference/Workbench labels do not promote a complete v2 stack. Use the
+component catalog when composing a custom stack, then test that composition
+through the common boundary.
 
 | Product name | Class | Module | Status | Primary use |
 | --- | --- | --- | --- | --- |
 | Zero Controller | `ZeroController` | `sim.control.orbit.zero_controller` | Reference | Coast/no-thrust baseline and config smoke tests. |
 | RIC_PD Transfer | `RICPDTransferController` | `sim.control.orbit.ric_pd` | Flagship | 10 km-class RIC-frame RPO transfer with guided coast, correction burns, and terminal PD cleanup. |
+| RIC PD Hold (HCW compatibility name) | `HCWPDController` | `sim.control.orbit.hcw_pd` | Workbench | Rectangular-RIC PD hold with optional HCW feedforward; the class name is retained until the product-facing RIC-hold migration is complete. |
 | HCW LQR | `HCWLQRController` | `sim.control.orbit.lqr` | Reference | Linear HCW rendezvous/control baseline for closed-loop RPO examples and benchmarks. |
+| SS-J2 LQR | `SSJ2LQRController` | `sim.control.orbit.lqr` | Workbench | Near-circular chief relative-orbit LQR using the shared homogeneous Schweighart-Sedwick averaged-J2 model. |
 | HCW LQR, No Radial Burn | `HCWNoRadialLQRController` | `sim.control.orbit.lqr_no_radial` | Workbench | HCW LQR variant that suppresses radial-axis burns for constrained RPO studies. |
 | HCW Manual Gain, No Radial Burn | `HCWNoRadialManualController` | `sim.control.orbit.lqr_no_radial` | Workbench | Manually supplied gain matrix for no-radial-burn tuning experiments. |
+| SS-J2 LQR, No Radial Burn | `SSJ2NoRadialLQRController` | `sim.control.orbit.lqr_no_radial` | Workbench | SS-J2 relative LQR variant constrained to in-track and cross-track acceleration. |
 | HCW Curvilinear Input Variant | `HCWCurvInputRectOutputController` | `sim.control.orbit.lqr_curv_variant` | Workbench | HCW controller variant for curvilinear-RIC inputs with rectangular-RIC output behavior. |
 | Curvilinear RIC PD | `CurvilinearRICPDController` | `sim.control.orbit.curv_pd` | Workbench | PD control in curvilinear RIC coordinates, with conversion to rectangular RIC/ECI commands. |
 | Relative Orbit MPC | `RelativeOrbitMPCController` | `sim.control.orbit.relative_mpc` | Experimental | General relative-orbit model-predictive control experiments. |
 | HCW Relative MPC | `HCWRelativeOrbitMPCController` | `sim.control.orbit.hcw_mpc` | Experimental | HCW-based MPC studies over a finite horizon. |
 | HCW Relative MPC, In/Cross Track | `HCWInTrackCrossTrackMPCController` | `sim.control.orbit.hcw_mpc` | Experimental | MPC variant constrained to in-track and cross-track control axes. |
+| SS-J2 Relative MPC | `SSJ2RelativeOrbitMPCController` | `sim.control.orbit.hcw_mpc` | Experimental | Finite-horizon relative MPC using the shared near-circular SS-J2 prediction model. |
+| SS-J2 PD | `SSJ2PDController` | `sim.control.orbit.hcw_pd` | Workbench | Convenience rectangular-RIC PD controller configured for SS-J2 feedforward. |
 | RMOE If-Then | `RMOEIfThenController` | `sim.control.orbit.rmoe` | Workbench | Rule-based relative mean orbital-element/NMC targeting with priority logic and drift limiting. |
 | Scheduled Impulse | `ScheduledImpulseController` | `sim.control.orbit.scheduled_impulse` | Reference | Deterministic delayed finite-duration impulse for validation and maneuver-detection proof scenarios. |
 | Atmospheric Pass | `AtmosphericPassController` | `sim.control.orbit.aero_assist` | Workbench | Timed coast/raise-burn controller for aero-assisted atmospheric-pass demos. |
@@ -126,6 +169,19 @@ orbit/attitude command execution.
 | COE Feedback | `OrbitalElementsFeedbackController` | `sim.control.orbit.baseline` | Reference | Classical-orbital-element tracking across selected elements. |
 | Safety Barrier | `SafetyBarrierController` | `sim.control.orbit.baseline` | Experimental | Repulsive keep-out style safety behavior inside a configured radius. |
 | Risk Threshold | `RiskThresholdController` | `sim.control.orbit.baseline` | Experimental | Switches between nominal and evasive controllers using a user-supplied risk function. |
+| RIC Relative Hold | `RICRelativeHoldController` | `sim.control.orbit.reference_rpo` | Reference | Hold a configured rectangular-RIC position and rate. |
+| V-Bar Approach | `VBarApproachController` | `sim.control.orbit.reference_rpo` | Reference | Rate-limited in-track approach with terminal slowdown. |
+| R-Bar Approach | `RBarApproachController` | `sim.control.orbit.reference_rpo` | Reference | Rate-limited radial approach with terminal slowdown. |
+| C-Bar Approach | `CBarApproachController` | `sim.control.orbit.reference_rpo` | Reference | Rate-limited cross-track approach with terminal slowdown. |
+| RIC Waypoint Path | `RICWaypointController` | `sim.control.orbit.reference_rpo` | Reference | Tolerance-gated rectangular-RIC waypoint sequence. |
+| Keep-Out Standoff | `KeepOutStandoffController` | `sim.control.orbit.reference_rpo` | Reference | Spherical geometric keep-out response and standoff recovery. |
+| Passive-Safe Retreat | `PassiveSafeRetreatController` | `sim.control.orbit.reference_rpo` | Reference | Acquire an outward relative drift rate, then coast. |
+| Terminal Braking | `TerminalBrakingController` | `sim.control.orbit.reference_rpo` | Reference | Closing-rate-limited terminal relative-state settling. |
+| RIC Flyaround | `RICFlyaroundController` | `sim.control.orbit.reference_rpo` | Reference | Cyclic polygonal inspection flyaround in an RIC plane. |
+| Low-Thrust Phasing | `LowThrustPhasingController` | `sim.control.orbit.reference_rpo` | Workbench | Low-authority along-track relative phasing baseline. |
+| Plane-Change Trim | `PlaneChangeTrimController` | `sim.control.orbit.reference_rpo` | Workbench | Cross-track relative-position/rate trim. |
+| HCW Rendezvous Planner | `HCWRendezvousPlannerController` | `sim.control.orbit.reference_rpo` | Reference | Closed-form linear velocity acquisition with finite-burn realization. |
+| Proportional Navigation | `ProportionalNavigationController` | `sim.control.orbit.reference_rpo` | Workbench | Target-directed or target-opposed local RIC proportional navigation. |
 
 Actuator-aware orbital wrappers are covered in more detail in
 [Actuators](actuators.md), but they are part of the controller inventory:
@@ -140,11 +196,11 @@ Additional orbital-control helpers, such as `PredictiveBurnScheduler`,
 `OrbitalAttitudeManeuverCoordinator`, and the HCW transfer solvers, are library
 building blocks rather than top-level user-selectable controllers.
 
-## Attitude Controllers
+## Attitude component library
 
-Attitude controllers are configured through `attitude_control` pointers. They
-emit body torque commands or actuator-aware torque requests and can receive
-targets from mission strategies and execution modules.
+These implementations are candidate component mathematics. They are not
+configured through `attitude_control` in v2, and snap/surrogate state-changing
+controllers are not physical GNC paths.
 
 | Product name | Class | Module | Status | Primary use |
 | --- | --- | --- | --- | --- |
@@ -167,24 +223,33 @@ targets from mission strategies and execution modules.
 | Magnetorquer B-dot | `MagnetorquerBdotController` | `sim.control.attitude.bdot_magnetorquer` | Workbench | B-field-aware detumble controller for magnetorquer studies. |
 | Wheel Desaturation | `WheelDesaturationController` | `sim.control.attitude.wheel_desaturation` | Workbench | Momentum unload torque request from wheel momentum state. |
 | CMG Steering | `CMGSteeringController` | `sim.control.attitude.cmg_steering` | Workbench | Caps/wraps a base attitude controller by simplified CMG authority. |
+| Thrust Align | `ThrustAlignController` | `sim.control.attitude.reference_pointing` | Reference | Point a configured body thrust axis at a supplied burn direction. |
+| Target Track | `TargetTrackController` | `sim.control.attitude.reference_pointing` | Reference | Point a configured boresight at a supplied target position. |
+| Nadir Pointing | `NadirPointingController` | `sim.control.attitude.reference_pointing` | Reference | Point a configured body axis toward Earth center. |
+| Velocity Pointing | `VelocityPointingController` | `sim.control.attitude.reference_pointing` | Reference | Prograde or retrograde body-axis pointing. |
+| Sun Pointing | `SunPointingController` | `sim.control.attitude.reference_pointing` | Reference | Point a configured body axis at a supplied Sun direction. |
+| RIC Axis Pointing | `RICAxisPointingController` | `sim.control.attitude.reference_pointing` | Reference | Point a configured body axis along R, I, C, or a mixed RIC direction. |
 
 `PoseCommandGenerator` is an attitude command helper used by mission logic for
 sun-track, spotlight, RIC-pointing, and target-facing commands. It is not a
 standalone closed-loop controller.
 
-## Mission Modules
+## Legacy mission component inventory
 
-Mission logic is split into three related surfaces:
+The tables below inventory pre-v2 mission components for archaeology and rocket
+ownership. Satellites do not execute these dictionary-producing modules. New
+satellite mission behavior belongs inside a complete stack executive and typed
+mission load; no Compatibility satellite module is a released runtime path.
+
+Historically, mission logic was split into three related surfaces:
 
 - **Mission strategies** decide intent: pursue, evade, hold, inspect,
   stationkeep, defend, or select a rocket orbital goal.
 - **Mission execution modules** convert intent into integrated commands:
   pointing, predictive burns, gated burns, impulses, direct commands, or safe
   hold.
-- **Mission modules** are compact or legacy-style modules that combine a
-  behavior into one plugin. New scenarios should usually prefer explicit
-  `mission_strategy` plus `mission_execution` blocks when that makes intent
-  easier to audit.
+- **Mission modules** combined behavior into one plugin. These divisions remain
+  relevant to rockets until their later overhaul, not to v2 satellites.
 
 ### Mission Strategies
 
@@ -200,7 +265,7 @@ Mission logic is split into three related surfaces:
 | Inspect | `InspectMissionStrategy` | `sim.mission.modules` | Workbench | Hold a relative inspection geometry while pointing at the target. |
 | Defensive | `DefensiveMissionStrategy` | `sim.mission.modules` | Workbench | Burn along a fixed RIC axis or away from a known chaser. |
 | Safe Hold | `SafeHoldMissionStrategy` | `sim.mission.modules` | Reference | Zero-thrust safe attitude hold or sun-track fallback. |
-| Mission Executive | `MissionExecutiveStrategy` | `sim.mission.modules` | Workbench | Mode machine that switches between strategy/execution pairs using range or fuel triggers. |
+| Mission Executive | `MissionExecutiveStrategy` | `sim.mission.modules` | Reference | Validated priority mode machine with range, fuel, absolute-time, and mode-elapsed triggers. |
 | Rocket Pursuit | `RocketPursuitMissionStrategy` | `sim.mission.modules` | Workbench | Select a rocket pursuit orbital goal. |
 | Rocket Predefined Orbit | `RocketPredefinedOrbitMissionStrategy` | `sim.mission.modules` | Workbench | Select a predefined rocket target altitude/eccentricity goal. |
 | Rocket Mission Strategy | `RocketMissionStrategy` | `sim.mission.modules` | Compatibility | Older combined rocket goal and launch-timing wrapper. |
@@ -219,6 +284,17 @@ Mission logic is split into three related surfaces:
 | Rocket Go Now | `RocketGoNowExecution` | `sim.mission.modules` | Reference | Immediately authorize launch. |
 | Rocket Go When Possible | `RocketGoWhenPossibleExecution` | `sim.mission.modules` | Workbench | Authorize launch only when estimated delta-v margin is sufficient. |
 | Rocket Wait Optimal | `RocketWaitOptimalExecution` | `sim.mission.modules` | Workbench | Authorize launch inside a periodic launch window. |
+| Timed Finite Burn | `TimedFiniteBurnExecution` | `sim.mission.modules` | Reference | Apply an ECI or RIC acceleration over a bounded time interval. |
+| One-Shot Impulse | `OneShotImpulseExecution` | `sim.mission.modules` | Reference | Apply delta-v as an explicit equivalent finite burn without state override. |
+| Pulse Train | `PulseTrainExecution` | `sim.mission.modules` | Reference | Periodic duty-cycle burn sequence. |
+| Slew Then Burn | `SlewThenBurnExecution` | `sim.mission.modules` | Reference | Set burn attitude, wait for alignment, then fire. |
+| Burn Until Condition | `BurnUntilConditionExecution` | `sim.mission.modules` | Reference | Burn until configured time, duration, or speed criteria. |
+| Coast Until Condition | `CoastUntilConditionExecution` | `sim.mission.modules` | Reference | Suppress direct thrust until time or observed-range release. |
+| Command Phase Sequencer | `WaypointSequencerExecution` | `sim.mission.modules` | Reference | Advance through named duration-gated command phases. |
+| Abort Safe Hold / Retreat | `AbortSafeHoldRetreatExecution` | `sim.mission.modules` | Reference | Convert abort intent into safe hold or RIC retreat. |
+| Fuel Budget Gate | `FuelBudgetGateExecution` | `sim.mission.modules` | Reference | Suppress direct thrust below a configured fuel margin. |
+| Keep-Out Gate | `KeepOutGateExecution` | `sim.mission.modules` | Reference | Override direct intent with an outward command inside a geometric keep-out boundary. |
+| Command Replay | `CommandReplayExecution` | `sim.mission.modules` | Workbench | Replay checked command histories for regression and training. |
 
 ### Compact Mission Modules
 
@@ -228,6 +304,8 @@ Mission logic is split into three related surfaces:
 | Satellite Mission Module | `SatelliteMissionModule` | `sim.mission.modules` | Compatibility | Compact satellite behavior wrapper for coast, pursuit/evade, and attitude pointing modes. |
 | Defensive RIC Axis Burn | `DefensiveRICAxisBurnMissionModule` | `sim.mission.modules` | Workbench | Defensive fixed-axis RIC burn with attitude alignment and knowledge gating. |
 | Single RIC Axis Burn | `SingleRICAxisBurnMissionModule` | `sim.mission.modules` | Workbench | One-shot RIC-frame burn/slew behavior for scripted scenarios. |
+| Multi RIC Axis Burn | `MultiRICAxisBurnMissionModule` | `sim.mission.modules` | Workbench | Ordered multi-axis RIC burn sequence with per-burn delta-v targets and attitude gating. |
+| Scheduled Vector Burn | `ScheduledVectorBurnMissionModule` | `sim.mission.modules` | Workbench | Deterministic duration-bound ECI or RIC vector burn for interchange, OD, and scripted maneuver evidence. |
 | Rocket Mission Module | `RocketMissionModule` | `sim.mission.modules` | Compatibility | Compact rocket launch authorization and goal-selection module. |
 | End State Maneuver | `EndStateManeuverMissionModule` | `sim.mission.modules` | Workbench | Combined desired-state maneuver planner with integrated attitude/burn gating. |
 | Integrated Command Mission | `IntegratedCommandMissionModule` | `sim.mission.modules` | Workbench | Compact module for integrated orbit/attitude command execution. |

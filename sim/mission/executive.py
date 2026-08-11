@@ -6,31 +6,102 @@ class MissionExecutiveStrategy:
     initial_mode: str | None = None
     modes: list[dict[str, Any]] = field(default_factory=list)
     transitions: list[dict[str, Any]] = field(default_factory=list)
+    strict_validation: bool = True
     _modes: dict[str, _MissionExecutiveMode] = field(default_factory=dict, init=False, repr=False)
     _active_mode: str | None = field(default=None, init=False, repr=False)
     _last_transition: dict[str, Any] | None = field(default=None, init=False, repr=False)
     _active_mode_enter_t_s: float | None = field(default=None, init=False, repr=False)
     _transition_armed: dict[int, bool] = field(default_factory=dict, init=False, repr=False)
+    _ordered_transitions: list[dict[str, Any]] = field(default_factory=list, init=False, repr=False)
 
     def __post_init__(self) -> None:
         built: dict[str, _MissionExecutiveMode] = {}
         for raw in list(self.modes or []):
             if not isinstance(raw, dict):
+                if self.strict_validation:
+                    raise ValueError("Every mission executive mode must be a mapping.")
                 continue
             name = str(raw.get("name", "") or "").strip()
             if not name:
+                if self.strict_validation:
+                    raise ValueError("Every mission executive mode must have a non-empty name.")
                 continue
+            if name in built:
+                raise ValueError(f"Duplicate mission executive mode name {name!r}.")
             built[name] = _MissionExecutiveMode(
                 name=name,
                 strategy=_pointer_dict_to_obj(dict(raw.get("mission_strategy", {}) or {})),
                 execution=_pointer_dict_to_obj(dict(raw.get("mission_execution", {}) or {})),
             )
         self._modes = built
-        if self.initial_mode is not None and str(self.initial_mode).strip() in self._modes:
-            self._active_mode = str(self.initial_mode).strip()
+        if self.initial_mode is not None:
+            initial = str(self.initial_mode).strip()
+            if initial not in self._modes:
+                if self.strict_validation:
+                    raise ValueError(f"initial_mode {initial!r} is not present in modes.")
+            else:
+                self._active_mode = initial
         elif self._modes:
             self._active_mode = next(iter(self._modes.keys()))
-        self._transition_armed = {i: True for i, _ in enumerate(list(self.transitions or []))}
+        self._ordered_transitions = self._validate_and_order_transitions(list(self.transitions or []))
+        self._transition_armed = {i: True for i, _ in enumerate(self._ordered_transitions)}
+
+    def _validate_and_order_transitions(self, transitions: list[Any]) -> list[dict[str, Any]]:
+        allowed = {
+            "range_lt",
+            "range_gt",
+            "fuel_below_kg",
+            "fuel_below_fraction",
+            "time_gte",
+            "mode_elapsed_gte",
+        }
+        normalized: list[tuple[int, int, dict[str, Any]]] = []
+        seen: set[tuple[str, str, str, str]] = set()
+        for index, raw in enumerate(transitions):
+            if not isinstance(raw, dict):
+                if self.strict_validation:
+                    raise ValueError("Every mission executive transition must be a mapping.")
+                continue
+            transition = dict(raw)
+            trigger = str(transition.get("trigger", "") or "").strip().lower()
+            if trigger not in allowed:
+                if self.strict_validation:
+                    raise ValueError(f"Unsupported mission executive trigger {trigger!r}; expected one of {sorted(allowed)}.")
+                continue
+            to_mode = str(transition.get("to_mode", "") or "").strip()
+            if to_mode not in self._modes:
+                if self.strict_validation:
+                    raise ValueError(f"Transition to_mode {to_mode!r} is not present in modes.")
+                continue
+            raw_from = transition.get("from_mode", "*")
+            from_modes = list(raw_from) if isinstance(raw_from, (list, tuple)) else [raw_from]
+            for from_mode_raw in from_modes:
+                from_mode = str(from_mode_raw or "*").strip()
+                if from_mode not in {"", "*"} and from_mode not in self._modes:
+                    if self.strict_validation:
+                        raise ValueError(f"Transition from_mode {from_mode!r} is not present in modes.")
+            threshold = transition.get(
+                {
+                    "range_lt": "threshold_km",
+                    "range_gt": "threshold_km",
+                    "fuel_below_kg": "threshold_kg",
+                    "fuel_below_fraction": "threshold_fraction",
+                    "time_gte": "threshold_s",
+                    "mode_elapsed_gte": "threshold_s",
+                }[trigger],
+                transition.get("threshold"),
+            )
+            if threshold is None or not np.isfinite(float(threshold)):
+                raise ValueError(f"Transition trigger {trigger!r} requires a finite threshold.")
+            signature = (repr(raw_from), to_mode, trigger, str(transition.get("target_id", "") or ""))
+            if signature in seen:
+                raise ValueError(f"Duplicate mission executive transition {signature!r}.")
+            seen.add(signature)
+            priority = int(transition.get("priority", 0) or 0)
+            transition["priority"] = priority
+            normalized.append((-priority, index, transition))
+        normalized.sort(key=lambda item: (item[0], item[1]))
+        return [item[2] for item in normalized]
 
     @staticmethod
     def _metric_suffix(trigger: str) -> str | None:
@@ -41,6 +112,8 @@ class MissionExecutiveStrategy:
             return "kg"
         if t == "fuel_below_fraction":
             return "fraction"
+        if t in {"time_gte", "mode_elapsed_gte"}:
+            return "s"
         return None
 
     def _fuel_metrics(
@@ -108,6 +181,7 @@ class MissionExecutiveStrategy:
         rocket_state: RocketState | None,
         rocket_vehicle_cfg: RocketVehicleConfig | None,
         fuel_capacity_kg: float | None,
+        t_s: float | None,
     ) -> tuple[bool, str]:
         trigger = str(transition.get("trigger", "") or "").strip().lower()
         if trigger in {"range_lt", "range_gt"}:
@@ -140,6 +214,17 @@ class MissionExecutiveStrategy:
                 return False, "fuel_fraction_unavailable"
             threshold = float(transition.get("threshold_fraction", transition.get("threshold", 0.0)) or 0.0)
             return bool(fuel_frac < threshold), f"fuel_fraction={fuel_frac:.6f}<threshold={threshold:.6f}"
+        if trigger == "time_gte":
+            if t_s is None:
+                return False, "time_unavailable"
+            threshold_s = float(transition.get("threshold_s", transition.get("threshold")))
+            return bool(t_s >= threshold_s), f"time_s={t_s:.6f}>=threshold_s={threshold_s:.6f}"
+        if trigger == "mode_elapsed_gte":
+            if t_s is None or self._active_mode_enter_t_s is None:
+                return False, "mode_elapsed_unavailable"
+            elapsed_s = float(t_s) - float(self._active_mode_enter_t_s)
+            threshold_s = float(transition.get("threshold_s", transition.get("threshold")))
+            return bool(elapsed_s >= threshold_s), f"mode_elapsed_s={elapsed_s:.6f}>=threshold_s={threshold_s:.6f}"
         return False, f"unsupported_trigger={trigger}"
 
     def _metric_value_for_transition(
@@ -152,6 +237,7 @@ class MissionExecutiveStrategy:
         rocket_state: RocketState | None,
         rocket_vehicle_cfg: RocketVehicleConfig | None,
         fuel_capacity_kg: float | None,
+        t_s: float | None,
     ) -> float | None:
         trigger = str(transition.get("trigger", "") or "").strip().lower()
         if trigger in {"range_lt", "range_gt"}:
@@ -172,6 +258,12 @@ class MissionExecutiveStrategy:
             return fuel_kg
         if trigger == "fuel_below_fraction":
             return fuel_frac
+        if trigger == "time_gte":
+            return t_s
+        if trigger == "mode_elapsed_gte":
+            if t_s is None or self._active_mode_enter_t_s is None:
+                return None
+            return float(t_s) - float(self._active_mode_enter_t_s)
         return None
 
     def _rearm_condition_met(self, *, transition: dict[str, Any], metric_value: float | None) -> bool:
@@ -210,7 +302,7 @@ class MissionExecutiveStrategy:
         if active_mode is None:
             return
         self._last_transition = None
-        for idx, transition in enumerate(list(self.transitions or [])):
+        for idx, transition in enumerate(self._ordered_transitions):
             if not isinstance(transition, dict):
                 continue
             if not self._transition_applies_to_mode(transition, active_mode):
@@ -226,6 +318,7 @@ class MissionExecutiveStrategy:
                 rocket_state=rocket_state,
                 rocket_vehicle_cfg=rocket_vehicle_cfg,
                 fuel_capacity_kg=fuel_capacity_kg,
+                t_s=t_s,
             )
             if not self._transition_armed.get(idx, True):
                 if self._rearm_condition_met(transition=transition, metric_value=metric_value):
@@ -248,6 +341,7 @@ class MissionExecutiveStrategy:
                 rocket_state=rocket_state,
                 rocket_vehicle_cfg=rocket_vehicle_cfg,
                 fuel_capacity_kg=fuel_capacity_kg,
+                t_s=t_s,
             )
             if not fired:
                 continue
@@ -260,6 +354,7 @@ class MissionExecutiveStrategy:
                 "trigger": str(transition.get("trigger", "") or ""),
                 "detail": detail,
                 "min_mode_duration_s": float(max(float(transition.get("min_mode_duration_s", 0.0) or 0.0), 0.0)),
+                "priority": int(transition.get("priority", 0) or 0),
             }
             return
 

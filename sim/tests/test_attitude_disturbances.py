@@ -33,6 +33,15 @@ class _MidpointRecordingDisturbance:
         return np.zeros(3, dtype=float)
 
 
+class _EnvironmentRecordingPropagator:
+    def __init__(self) -> None:
+        self.environment: dict | None = None
+
+    def propagate(self, *, x_eci, env, **kwargs):
+        self.environment = dict(env)
+        return np.array(x_eci, dtype=float)
+
+
 class TestAttitudeDisturbances(unittest.TestCase):
     def test_owned_default_orbit_propagator_inherits_acceleration_mode(self):
         dynamics = OrbitalAttitudeDynamics(
@@ -74,6 +83,40 @@ class TestAttitudeDisturbances(unittest.TestCase):
         self.assertIs(second.orbit_propagator, propagator)
         self.assertEqual(propagator.acceleration_mode, "off")
         self.assertFalse(hasattr(propagator, "_pending_orbital_attitude_default_configuration"))
+
+    def test_legacy_aerodynamic_mode_flags_cannot_override_physics(self):
+        propagator = _EnvironmentRecordingPropagator()
+        dynamics = OrbitalAttitudeDynamics(
+            mu_km3_s2=398600.4418,
+            inertia_kg_m2=np.eye(3),
+            propagate_attitude=False,
+            orbit_propagator=propagator,
+        )
+        state = StateTruth(
+            position_eci_km=np.array([6598.137, 0.0, 0.0]),
+            velocity_eci_km_s=np.array([0.0, 7.77, 0.0]),
+            attitude_quat_bn=np.array([1.0, 0.0, 0.0, 0.0]),
+            angular_rate_body_rad_s=np.zeros(3),
+            mass_kg=5000.0,
+            t_s=0.0,
+        )
+        command = Command(
+            mode_flags={
+                "aero_controlled": True,
+                "aero_drag_area_m2": 20.0,
+                "aero_lift_area_m2": 32.0,
+                "aero_lift_coefficient": 0.65,
+                "aero_lift_direction_eci": [0.0, 0.0, 2.0],
+            }
+        )
+
+        dynamics.step(state, command, env={}, dt_s=1.0)
+
+        assert propagator.environment is not None
+        self.assertNotIn("drag_area_m2", propagator.environment)
+        self.assertNotIn("lift_area_m2", propagator.environment)
+        self.assertNotIn("lift_coefficient", propagator.environment)
+        self.assertNotIn("lift_direction_eci", propagator.environment)
 
     def test_disturbance_torque_nonzero_for_representative_state(self):
         inertia = np.diag([120.0, 100.0, 80.0])

@@ -94,9 +94,9 @@ def _scenario_sort_key(option: GameScenarioOption) -> tuple[int, str]:
     if option.scenario_id == "rpo_bonus_cislunar_rendezvous":
         return (12, option.scenario_id)
     if option.scenario_id == "rpo_arcade_pursuit":
-        return (13, option.scenario_id)
-    if option.scenario_id == "rpo_sandbox":
         return (14, option.scenario_id)
+    if option.scenario_id == "rpo_sandbox":
+        return (15, option.scenario_id)
     return (option.level_number, option.scenario_id)
 
 

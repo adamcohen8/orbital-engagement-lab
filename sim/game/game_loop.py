@@ -7,6 +7,7 @@ from .recording_runtime import *
 from .attempt_lifecycle import *
 from .mission_metrics import *
 
+
 def run_game_mode(
     config_path: str | Path,
     *,
@@ -29,7 +30,13 @@ def run_game_mode(
     from sim.game.pygame_dashboard import PygameRPODashboard
 
     config = _force_game_acceleration_off_config(SimulationConfig.from_yaml(config_path))
-    controlled_object_id = _game_controlled_object_id(config, default=controlled_object_id or "chaser")
+    configured_controlled_object_id = _game_controlled_object_id(config, default="chaser")
+    controlled_object_id = str(controlled_object_id or configured_controlled_object_id)
+    config = _select_game_controlled_object(
+        config,
+        controlled_object_id=controlled_object_id,
+        configured_object_id=configured_controlled_object_id,
+    )
     control_mode = _game_control_mode(config)
     difficulty = str(difficulty_override or _game_difficulty(config)).strip().lower()
     game_mode = _normalize_game_mode(game_mode)
@@ -38,9 +45,7 @@ def run_game_mode(
     initial_operator_burn_plan = operator_burn_plan
     operator_burn_plan = (operator_burn_plan or OperatorBurnPlan()) if operator_playback_mode else None
     skip_initial_briefing = bool(skip_initial_briefing and operator_playback_mode)
-    operator_actuator_error_fraction = (
-        _operator_actuator_error_fraction(difficulty) if operator_playback_mode else 0.0
-    )
+    operator_actuator_error_fraction = _operator_actuator_error_fraction(difficulty) if operator_playback_mode else 0.0
     training_cfg = _training_config_with_sun_environment(
         RPOTrainingConfig.from_metadata(dict(config.scenario.metadata or {})),
         config,
@@ -128,8 +133,8 @@ def run_game_mode(
         ric_reference_object_id=ric_reference_object_id,
         operator_burn_plan=operator_burn_plan,
         operator_actuator_error_fraction=operator_actuator_error_fraction,
-        defensive_target_provider=(
-            _game_random_direction_defensive_target_provider(
+        defensive_target_profile=(
+            _game_random_direction_defensive_target_profile(
                 config,
                 round_index=arcade_round_index,
                 rng=_arcade_round_rng(int(arcade_seed_value), arcade_round_index),
@@ -161,6 +166,7 @@ def run_game_mode(
         goal_nmt_element_tolerance_km=training_cfg.goal_nmt_element_tolerance_km,
         coast_prediction_orbit_fraction=_operator_coast_prediction_orbit_fraction(game_mode, difficulty),
         coast_prediction_model=_game_coast_prediction_model(attempt_config),
+        show_coast_prediction=_game_show_coast_prediction(config),
         cr3bp_projection_mode=_game_cr3bp_projection_mode(config),
         cr3bp_coast_prediction_horizon_s=_game_cr3bp_coast_prediction_horizon_s(config) or 21600.0,
         cr3bp_active_prediction_horizon_s=_game_cr3bp_active_prediction_horizon_s(config),
@@ -189,12 +195,18 @@ def run_game_mode(
         camera_rule_toggle_enabled=_game_camera_rule_toggle_enabled(config),
         target_sprite_path=_game_target_sprite_path(config),
         chaser_sprite_path=_game_chaser_sprite_path(config),
+        chaser_sprite_ri_path=_game_chaser_plane_sprite_path(config, "ri"),
+        chaser_sprite_rc_path=_game_chaser_plane_sprite_path(config, "rc"),
         target_sprite_diameter_km=_game_target_sprite_diameter_km(config),
         chaser_sprite_diameter_km=_game_chaser_sprite_diameter_km(config),
+        chaser_sprite_ri_size_scale=_game_chaser_sprite_ri_size_scale(config),
         show_target_coast_prediction=_game_show_target_hcw_path(config),
         frame_convention=frame_convention,
         fullscreen=True,
     )
+    aero_cfg = _game_aerodynamic_control_config(config)
+    dashboard.aerodynamic_ri_pitch_max_deg = aero_cfg["ri_pitch_max_deg"]
+    _sync_dashboard_aerodynamic_control(dashboard, command_provider)
     if operator_playback_mode:
         _clear_live_prediction_burn(dashboard)
 
@@ -204,6 +216,7 @@ def run_game_mode(
             now_wall_s=perf_counter(),
             duration_s=duration_s,
         )
+
     _sync_dashboard_training_config(dashboard, training_cfg)
     _sync_dashboard_round_config(dashboard, attempt_config)
     recording_attempt = 1
@@ -248,8 +261,8 @@ def run_game_mode(
             ric_reference_object_id=ric_reference_object_id,
             operator_burn_plan=operator_burn_plan,
             operator_actuator_error_fraction=operator_actuator_error_fraction,
-            defensive_target_provider=(
-                _game_random_direction_defensive_target_provider(
+            defensive_target_profile=(
+                _game_random_direction_defensive_target_profile(
                     config,
                     round_index=arcade_round_index,
                     rng=_arcade_round_rng(int(arcade_seed_value), arcade_round_index),
@@ -271,7 +284,7 @@ def run_game_mode(
         _sync_dashboard_training_config(dashboard, training_cfg)
         _sync_dashboard_round_config(dashboard, attempt_config)
         dashboard.push_snapshot(snapshot)
-        trainer.record(snapshot)
+        trainer.record(snapshot, control_telemetry_provider=command_provider)
         if tutorial_stage is None:
             _sync_guided_tutorial_path_for_mode(
                 dashboard,
@@ -285,39 +298,6 @@ def run_game_mode(
 
     initial_snapshot_recorded = False
     try:
-        if initial_operator_plan_needed:
-            selected_plan = plan_operator_burns_for_config(
-                dashboard.pygame,
-                dashboard.screen,
-                dashboard.clock,
-                config_path,
-                font=dashboard.font,
-                small_font=dashboard.small_font,
-                title_font=dashboard.large_font,
-                initial_plan=None,
-                difficulty=difficulty,
-                frame_convention=frame_convention,
-            )
-            if selected_plan is None:
-                return GameRunResult(
-                    config_path=Path(config_path),
-                    difficulty=difficulty,
-                    level_passed=False,
-                    mode=game_mode,
-                    frame_convention=frame_convention,
-                    arcade_score=0,
-                    arcade_seed=arcade_seed_value if arcade_enabled else None,
-                )
-            if record_video:
-                recording_controller.start()
-                recording_controller.capture_hold(dashboard, duration_s=OPERATOR_SCRIPT_RECORDING_HOLD_S)
-            restart_attempt_for_operator_plan(selected_plan)
-            command_state.reset_axes()
-            command_state.paused = False
-            phase = GamePhase.PLAYING
-            briefing_lines = ()
-            initial_snapshot_recorded = True
-
         if _game_sandbox_enabled(config):
             dashboard.push_snapshot(snapshot)
             setup = _run_sandbox_setup_form(
@@ -389,8 +369,8 @@ def run_game_mode(
                 ric_reference_object_id=ric_reference_object_id,
                 operator_burn_plan=operator_burn_plan,
                 operator_actuator_error_fraction=operator_actuator_error_fraction,
-                defensive_target_provider=(
-                    _game_random_direction_defensive_target_provider(
+                defensive_target_profile=(
+                    _game_random_direction_defensive_target_profile(
                         config,
                         round_index=arcade_round_index,
                         rng=_arcade_round_rng(int(arcade_seed_value), arcade_round_index),
@@ -427,11 +407,44 @@ def run_game_mode(
             clip_recording_started_wall = None
             clip_recording_status_message = ""
             clip_recording_status_until = 0.0
+        if initial_operator_plan_needed:
+            selected_plan = plan_operator_burns_for_config(
+                dashboard.pygame,
+                dashboard.screen,
+                dashboard.clock,
+                config_path,
+                font=dashboard.font,
+                small_font=dashboard.small_font,
+                title_font=dashboard.large_font,
+                initial_plan=None,
+                difficulty=difficulty,
+                frame_convention=frame_convention,
+                config_override=config,
+            )
+            if selected_plan is None:
+                return GameRunResult(
+                    config_path=Path(config_path),
+                    difficulty=difficulty,
+                    level_passed=False,
+                    mode=game_mode,
+                    frame_convention=frame_convention,
+                    arcade_score=0,
+                    arcade_seed=arcade_seed_value if arcade_enabled else None,
+                )
+            if record_video:
+                recording_controller.start()
+                recording_controller.capture_hold(dashboard, duration_s=OPERATOR_SCRIPT_RECORDING_HOLD_S)
+            restart_attempt_for_operator_plan(selected_plan)
+            command_state.reset_axes()
+            command_state.paused = False
+            phase = GamePhase.PLAYING
+            briefing_lines = ()
+            initial_snapshot_recorded = True
         if recording_controller.recorder is None:
             recording_controller.start()
         if not initial_snapshot_recorded:
             dashboard.push_snapshot(snapshot)
-            trainer.record(snapshot)
+            trainer.record(snapshot, control_telemetry_provider=command_provider)
             _sync_guided_tutorial_path_for_mode(
                 dashboard,
                 trainer,
@@ -452,6 +465,7 @@ def run_game_mode(
             speed_multiple=current_speed_multiple,
             dt_s=float(attempt_config.scenario.simulator.dt_s),
         )
+        _sync_dashboard_aerodynamic_control(dashboard, command_provider)
         dashboard.draw(
             command_status=_game_command_status(
                 command_state,
@@ -461,7 +475,7 @@ def run_game_mode(
             ),
             coach_hint=_coach_hint_with_camera_rule(
                 _guided_tutorial_stage_hint(
-            _guided_tutorial_current_stage(training_cfg, guided_tutorial), guided_tutorial
+                    _guided_tutorial_current_stage(training_cfg, guided_tutorial), guided_tutorial
                 )
                 or trainer.current_hint(),
                 dashboard,
@@ -527,6 +541,12 @@ def run_game_mode(
             )
             if not operator_playback_mode:
                 _clear_two_rail_released_maneuver_input(config, command_state, control_mode=control_mode)
+                _request_pilot_input_poll_for_transition(
+                    session,
+                    command_provider,
+                    command_state,
+                    controlled_object_id=controlled_object_id,
+                )
             if not debrief_hotkey_enabled:
                 command_state.open_debrief_requested = False
             if command_state.quit_requested:
@@ -565,10 +585,13 @@ def run_game_mode(
                     ric_primer.elapsed_s = 0.0
                     if ric_primer.stage_index >= RIC_PRIMER_STAGE_COUNT:
                         phase = GamePhase.PLAYING
-                        command_state.paused = _guided_tutorial_current_stage(
-                            training_cfg,
-                            guided_tutorial,
-                        ) is not None
+                        command_state.paused = (
+                            _guided_tutorial_current_stage(
+                                training_cfg,
+                                guided_tutorial,
+                            )
+                            is not None
+                        )
                     else:
                         command_state.paused = True
                 if phase == GamePhase.PRIMER:
@@ -640,6 +663,7 @@ def run_game_mode(
                     read_only=True,
                     demo_title=_operator_tutorial_demo_title(operator_tutorial),
                     launch_label="Launch Demo",
+                    config_override=config,
                 )
                 last_step_wall = perf_counter()
                 last_input_wall = last_step_wall
@@ -835,6 +859,7 @@ def run_game_mode(
                         title_font=dashboard.large_font,
                         initial_plan=operator_burn_plan,
                         frame_convention=frame_convention,
+                        config_override=config,
                     )
                     last_step_wall = perf_counter()
                     last_input_wall = last_step_wall
@@ -889,8 +914,8 @@ def run_game_mode(
                     ric_reference_object_id=ric_reference_object_id,
                     operator_burn_plan=operator_burn_plan,
                     operator_actuator_error_fraction=operator_actuator_error_fraction,
-                    defensive_target_provider=(
-                        _game_random_direction_defensive_target_provider(
+                    defensive_target_profile=(
+                        _game_random_direction_defensive_target_profile(
                             config,
                             round_index=arcade_round_index,
                             rng=_arcade_round_rng(int(arcade_seed_value), arcade_round_index),
@@ -910,7 +935,7 @@ def run_game_mode(
                 _sync_dashboard_training_config(dashboard, training_cfg)
                 _sync_dashboard_round_config(dashboard, attempt_config)
                 dashboard.push_snapshot(snapshot)
-                trainer.record(snapshot)
+                trainer.record(snapshot, control_telemetry_provider=command_provider)
                 _sync_guided_tutorial_path_for_mode(
                     dashboard,
                     trainer,
@@ -1115,6 +1140,7 @@ def run_game_mode(
                 initial_score=pre_score,
                 dt_s=step_dt_s,
                 max_step_dt_s=_game_max_autonomy_step_s(config),
+                control_telemetry_provider=command_provider,
                 operator_command_provider=command_provider if game_mode == "operator" else None,
                 operator_burn_transition_callback=(
                     hold_operator_burn_cinematic_for_animation if game_mode == "operator" else None
@@ -1263,10 +1289,7 @@ def run_game_mode(
                     round_index=arcade_round_index,
                 )
                 assert arcade_remaining_time_s is not None
-                arcade_remaining_time_s = (
-                    max(float(arcade_remaining_time_s) - time_used, 0.0)
-                    + round_bonus_s
-                )
+                arcade_remaining_time_s = max(float(arcade_remaining_time_s) - time_used, 0.0) + round_bonus_s
                 cleared_round_index = arcade_round_index
                 arcade_round_index += 1
                 training_cfg = _arcade_round_training_config(
@@ -1299,7 +1322,7 @@ def run_game_mode(
                     ric_reference_object_id=ric_reference_object_id,
                     operator_burn_plan=operator_burn_plan,
                     operator_actuator_error_fraction=operator_actuator_error_fraction,
-                    defensive_target_provider=_game_random_direction_defensive_target_provider(
+                    defensive_target_profile=_game_random_direction_defensive_target_profile(
                         config,
                         round_index=arcade_round_index,
                         rng=_arcade_round_rng(int(arcade_seed_value), arcade_round_index),
@@ -1311,7 +1334,7 @@ def run_game_mode(
                 _sync_dashboard_training_config(dashboard, training_cfg)
                 _sync_dashboard_round_config(dashboard, attempt_config)
                 dashboard.push_snapshot(snapshot)
-                trainer.record(snapshot)
+                trainer.record(snapshot, control_telemetry_provider=command_provider)
                 _sync_guided_tutorial_path_for_mode(
                     dashboard,
                     trainer,
@@ -1372,6 +1395,7 @@ def run_game_mode(
                 speed_multiple=effective_speed_multiple,
                 dt_s=dt_s,
             )
+            _sync_dashboard_aerodynamic_control(dashboard, command_provider)
             dashboard.draw(
                 command_status=_game_command_status(
                     command_state,
@@ -1451,9 +1475,9 @@ def run_game_mode(
                     score=score,
                     difficulty=difficulty,
                     objective_checklist=_mission_checklist(training_cfg, score),
-                    arcade_score=arcade_total_score if arcade_enabled else _arcade_score(
-                        training_cfg, score, difficulty=difficulty
-                    ),
+                    arcade_score=arcade_total_score
+                    if arcade_enabled
+                    else _arcade_score(training_cfg, score, difficulty=difficulty),
                     arcade_seed=arcade_seed_value if arcade_enabled else None,
                     arcade_round_index=arcade_round_index if arcade_enabled else None,
                     recording_path=recording_path,
@@ -1467,11 +1491,7 @@ def run_game_mode(
             dashboard.tick(
                 _dashboard_fps_for_speed(
                     effective_speed_multiple,
-                    static_screen=(
-                        command_state.paused
-                        or phase_shows_briefing(phase)
-                        or phase_is_terminal(phase)
-                    ),
+                    static_screen=(command_state.paused or phase_shows_briefing(phase) or phase_is_terminal(phase)),
                     recording=recording_controller.recorder is not None or clip_recording_controller.recording,
                     recording_fps=recording_fps,
                     fps_cap=dashboard_fps_cap,
@@ -1513,7 +1533,9 @@ def run_game_mode(
         level_passed=bool(score.level_passed) or bool(operator_tutorial_level_passed),
         mode=game_mode,
         frame_convention=frame_convention,
-        arcade_score=final_arcade_score if arcade_enabled else _arcade_score(training_cfg, score, difficulty=difficulty),
+        arcade_score=final_arcade_score
+        if arcade_enabled
+        else _arcade_score(training_cfg, score, difficulty=difficulty),
         arcade_seed=arcade_seed_value if arcade_enabled else None,
         recording_path=recording_path,
         debrief_path=debrief_path,

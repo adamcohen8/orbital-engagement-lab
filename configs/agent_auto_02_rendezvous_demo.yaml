@@ -1,12 +1,12 @@
 scenario_name: agent_auto_02_rendezvous_demo
-scenario_description: 'Agent-generated public demo: short HCW LQR rendezvous check
+scenario_description: 'Agent-generated public demo: short v2 RIC feedback rendezvous check
   with review evidence and plots.'
 metadata:
   owner: public
   public_surface: public-agent-workflow
   support_level: supported
   notes: Generated for the weekly OEL agentic workflow post. Uses public two-body
-    dynamics, a public HCW LQR controller, and queryable review evidence.
+    dynamics, the public v2 RIC feedback stack, and queryable review evidence.
 objects:
   target:
     kind: satellite
@@ -24,10 +24,9 @@ objects:
         raan_deg: 0.0
         argp_deg: 0.0
         true_anomaly_deg: 0.0
-    orbit_control:
-      kind: python
-      module: sim.control.orbit.zero_controller
-      class_name: ZeroController
+    flight_software:
+      stack: fsw.passive
+      hardware_profile: hardware.passive.v1
       params: {}
   chaser:
     kind: satellite
@@ -49,20 +48,6 @@ objects:
         - 0.0
         - 0.0002
         - 0.0
-    orbit_control:
-      kind: python
-      module: sim.control.orbit.lqr
-      class_name: HCWLQRController
-      params:
-        mean_motion_rad_s: 0.001078
-        max_accel_km_s2: 2.0e-05
-        design_dt_s: 5.0
-        ric_curv_state_slice:
-        - 0
-        - 6
-        chief_eci_state_slice:
-        - 6
-        - 12
     knowledge:
       refresh_rate_s: 5.0
       targets:
@@ -81,6 +66,14 @@ objects:
         - 5.0e-05
       estimation:
         type: ekf
+    flight_software:
+      stack: fsw.rpo_reference
+      hardware_profile: hardware.ideal_wrench.v1
+      params:
+        max_acceleration_m_s2: 0.02
+        reference_object_id: target
+        translation_mode: ric_hold
+        goal_type: rpo.ric_hold
 simulator:
   duration_s: 1200.0
   dt_s: 5.0

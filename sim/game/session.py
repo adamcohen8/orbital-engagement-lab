@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, is_dataclass
 from typing import Any
 
 import numpy as np
 
 from sim.api import SimulationConfig, SimulationSession
-from sim.core.models import Command, StateBelief
 from sim.game.training import RPOTrainingConfig
 
 
@@ -26,6 +25,12 @@ class GamePhysicsSession:
             initial_history_capacity=retained,
             max_history_samples=retained,
         )
+        game = dict(config.scenario.metadata.get("game", {}) or {})
+        self._observer_policy = str(game.get("observer_policy", "truth_assisted") or "truth_assisted")
+        self._scoring_policy = str(game.get("scoring_policy", "configured_training.v1") or "")
+        self._controlled_object_id = str(game.get("controlled_object_id", "chaser") or "chaser")
+        self._observer_samples: list[dict[str, Any]] = []
+        self._scoring_events: list[dict[str, Any]] = []
 
     @property
     def config(self) -> SimulationConfig:
@@ -39,70 +44,87 @@ class GamePhysicsSession:
     def _engine(self) -> Any | None:
         return self._session._engine
 
-    @property
-    def _external_intent_providers(self) -> dict[str, Any]:
-        return self._session._external_intent_providers
-
     def reset(self, seed: int | None = None) -> Any:
-        return self._session.reset(seed=seed)
+        self._observer_samples.clear()
+        self._scoring_events.clear()
+        snapshot = self._session.reset(seed=seed)
+        self._record_observer(snapshot)
+        return snapshot
 
     def step(self, dt_s: float | None = None) -> Any:
-        return self._session.step(dt_s=dt_s)
+        snapshot = self._session.step(dt_s=dt_s)
+        self._record_observer(snapshot)
+        return snapshot
 
-    def set_external_intent_provider(self, object_id: str, provider: Any | None) -> None:
-        self._session.set_external_intent_provider(object_id, provider)
+    def publish_fsw_input(self, object_id: str, event: object) -> None:
+        self._session.publish_fsw_input(object_id, event)
 
+    def add_fsw_input_publisher(self, object_id: str, publisher: Any) -> None:
+        self._session.add_fsw_input_publisher(object_id, publisher)
 
-@dataclass
-class _DeltaVLimitedOrbitController:
-    base: Any
-    max_delta_v_m_s: float
-    dt_s: float
-    used_delta_v_m_s: float = 0.0
+    def request_fsw_input_publisher_poll(self, object_id: str) -> None:
+        self._session.request_fsw_input_publisher_poll(object_id)
 
-    def act(self, belief: StateBelief, t_s: float, budget_ms: float) -> Command:
-        max_delta = float(max(self.max_delta_v_m_s, 0.0))
-        if self.used_delta_v_m_s >= max_delta - 1.0e-9:
-            return Command(
-                thrust_eci_km_s2=np.zeros(3, dtype=float),
-                torque_body_nm=np.zeros(3, dtype=float),
-                mode_flags={
-                    "mode": "delta_v_limited_coast",
-                    "delta_v_limit_used_m_s": float(self.used_delta_v_m_s),
-                    "delta_v_limit_max_m_s": max_delta,
-                    "delta_v_limit_exhausted": True,
-                },
-            )
+    def record_scoring(self, score: object) -> None:
+        """Record truth-derived scoring outside the onboard input boundary."""
 
-        cmd = self.base.act(belief, t_s, budget_ms)
-        thrust = np.array(cmd.thrust_eci_km_s2, dtype=float).reshape(3)
-        planned_delta_v_m_s = float(np.linalg.norm(thrust)) * float(max(self.dt_s, 0.0)) * 1000.0
-        scale = 1.0
-        if planned_delta_v_m_s > 0.0:
-            remaining = max(max_delta - self.used_delta_v_m_s, 0.0)
-            scale = min(1.0, remaining / planned_delta_v_m_s)
-            thrust *= scale
-            self.used_delta_v_m_s += planned_delta_v_m_s * scale
-
-        mode_flags = dict(cmd.mode_flags or {})
-        mode_flags.update(
+        if not self._scoring_policy:
+            return
+        if is_dataclass(score):
+            values = asdict(score)
+        elif hasattr(score, "__dict__"):
+            values = dict(vars(score))
+        else:
+            values = {"value": str(score)}
+        event_type = (
+            "passed"
+            if bool(values.get("level_passed", False))
+            else "failed"
+            if bool(values.get("level_failed", False))
+            else "sample"
+        )
+        time_s = float(self._observer_samples[-1]["time_ns"]) / 1.0e9 if self._observer_samples else 0.0
+        self._scoring_events.append(
             {
-                "delta_v_limited": True,
-                "delta_v_limit_scale": float(scale),
-                "delta_v_limit_used_m_s": float(self.used_delta_v_m_s),
-                "delta_v_limit_max_m_s": max_delta,
-                "delta_v_limit_exhausted": bool(self.used_delta_v_m_s >= max_delta - 1.0e-9),
+                "object_id": self._controlled_object_id,
+                "time_ns": int(round(time_s * 1.0e9)),
+                "scoring_policy": self._scoring_policy,
+                "event_type": event_type,
+                "detail": values,
             }
         )
-        return Command(
-            thrust_eci_km_s2=thrust,
-            torque_body_nm=np.array(cmd.torque_body_nm, dtype=float),
-            mode_flags=mode_flags,
+
+    def game_review_evidence(self) -> dict[str, list[dict[str, Any]]]:
+        return {
+            "game_observer_samples": list(self._observer_samples),
+            "game_scoring_events": list(self._scoring_events),
+        }
+
+    def _record_observer(self, snapshot: Any | None) -> None:
+        if snapshot is None:
+            return
+        truth_assisted = self._observer_policy in {"truth_assisted", "hybrid"}
+        onboard = self._observer_policy in {"onboard_only", "hybrid"}
+        detail: dict[str, Any] = {}
+        if truth_assisted:
+            detail["truth"] = {
+                str(object_id): np.asarray(state, dtype=float).tolist()
+                for object_id, state in sorted(snapshot.truth.items())
+            }
+        if onboard:
+            detail["onboard"] = {
+                str(object_id): np.asarray(state, dtype=float).tolist()
+                for object_id, state in sorted(snapshot.belief.items())
+            }
+        self._observer_samples.append(
+            {
+                "object_id": self._controlled_object_id,
+                "time_ns": int(round(float(snapshot.time_s) * 1.0e9)),
+                "observer_policy": self._observer_policy,
+                "truth_assisted": truth_assisted,
+                "detail": detail,
+            }
         )
-
-    def __getattr__(self, item: str) -> Any:
-        return getattr(self.base, item)
-
 
 def _attempt_config_for_training_clock(config: SimulationConfig, training_cfg: RPOTrainingConfig) -> SimulationConfig:
     if training_cfg.max_time_s is None:
@@ -124,25 +146,10 @@ def _install_chaser_delta_v_limiter(
     agent = getattr(engine, "agents", {}).get(str(training_cfg.chaser_object_id)) if engine is not None else None
     if agent is None:
         return
-    current = getattr(agent, "orbit_controller", None)
-    if current is None:
+    runtime = getattr(agent, "flight_software_runtime", None)
+    if runtime is None:
         return
-    base = getattr(current, "base", current)
-    if isinstance(base, _DeltaVLimitedOrbitController):
-        return
-    limited = _DeltaVLimitedOrbitController(
-        base=base,
-        max_delta_v_m_s=float(training_cfg.max_delta_v_m_s),
-        dt_s=float(max(dt_s, 0.0)),
-    )
-    if hasattr(current, "base"):
-        current.base = limited
-        if hasattr(current, "_last_eval_t_s"):
-            current._last_eval_t_s = None
-        if hasattr(current, "_last_cmd"):
-            current._last_cmd = Command.zero()
-    else:
-        agent.orbit_controller = limited
+    runtime.max_delta_v_m_s = float(training_cfg.max_delta_v_m_s)
 
 
 def _set_chaser_delta_v_limiter_dt(
@@ -155,9 +162,5 @@ def _set_chaser_delta_v_limiter_dt(
     agent = getattr(engine, "agents", {}).get(str(training_cfg.chaser_object_id)) if engine is not None else None
     if agent is None:
         return
-    current = getattr(agent, "orbit_controller", None)
-    candidates = [current, getattr(current, "base", None)]
-    for candidate in candidates:
-        if isinstance(candidate, _DeltaVLimitedOrbitController):
-            candidate.dt_s = float(max(dt_s, 0.0))
-            return
+    # Physical delta-v accounting integrates the actual interval duration, so
+    # changing the game step needs no controller-side retiming.

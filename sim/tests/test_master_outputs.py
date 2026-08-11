@@ -609,10 +609,9 @@ def test_thrust_alignment_plot_uses_object_thruster_direction() -> None:
             "chaser": {
                 "enabled": True,
                 "specs": {"thruster": "BASIC_CHEMICAL_Z_BOTTOM"},
-                "mission_execution": {
-                    "module": "sim.mission.modules",
-                    "class_name": "IntegratedCommandExecution",
-                    "params": {"thruster_direction_body": [0.0, 0.0, 1.0]},
+                "flight_software": {
+                    "stack": "fsw.passive",
+                    "hardware_profile": "hardware.passive.v1",
                 },
             },
             "simulator": {"duration_s": 1.0, "dt_s": 1.0},

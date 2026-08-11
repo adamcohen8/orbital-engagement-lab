@@ -59,25 +59,62 @@ def sha256_file(path: str | Path) -> str:
     return digest.hexdigest()
 
 
-def _without_nonidentity_fields(value: Any) -> Any:
+def _without_nonidentity_fields(value: Any, *, parent_path: tuple[str, ...] = ()) -> Any:
     if isinstance(value, Mapping):
         result: dict[str, Any] = {}
         for key, item in value.items():
             key_text = str(key)
             if (
                 key_text in _NON_IDENTITY_KEYS
-                or key_text == "path"
-                or key_text.endswith("_path")
-                or key_text.endswith("_paths")
-                or key_text.endswith("_dir")
-                or key_text.endswith("_directory")
+                or _is_nonidentity_location(parent_path, key_text, value)
             ):
                 continue
-            result[key_text] = _without_nonidentity_fields(item)
+            result[key_text] = _without_nonidentity_fields(
+                item,
+                parent_path=(*parent_path, key_text),
+            )
         return result
     if isinstance(value, (list, tuple)):
-        return [_without_nonidentity_fields(item) for item in value]
+        return [
+            _without_nonidentity_fields(item, parent_path=(*parent_path, "[]"))
+            for item in value
+        ]
     return value
+
+
+def _is_nonidentity_location(
+    parent_path: tuple[str, ...],
+    key: str,
+    container: Mapping[str, Any],
+) -> bool:
+    """Identify presentation/provenance locations without erasing semantic paths.
+
+    Scenario-patch operation ``path`` values select the configuration field to
+    mutate and therefore participate in product identity. Other path-shaped
+    fields in interchange envelopes describe where source or output artifacts
+    happened to be stored and remain location-independent.
+    """
+
+    if key in {"parameter_path", "metric_path"} or (key == "path" and "metrics" in parent_path):
+        return False
+    is_patch_operation = (
+        key == "path"
+        and "operations" in parent_path
+        and {"op", "kind", "value"}.issubset(container)
+    )
+    if is_patch_operation:
+        return False
+    filesystem_keys = {
+        "source_path", "output_path", "scenario_path", "manifest_path",
+        "packet_path", "database_path", "review_db_path", "config_path",
+        "summary_json_path", "run_log_json_path", "output_dir", "output_directory",
+    }
+    if key in filesystem_keys or key.endswith("_file_path"):
+        return True
+    return key == "path" and any(
+        token in parent_path
+        for token in ("source", "sources", "output", "artifact", "artifacts", "provenance", "materialization")
+    )
 
 
 def product_identity_document(document: Mapping[str, Any]) -> dict[str, Any]:

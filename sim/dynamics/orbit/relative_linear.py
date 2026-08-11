@@ -11,6 +11,65 @@ from sim.dynamics.orbit.environment import EARTH_J2, EARTH_MU_KM3_S2, EARTH_RADI
 RELATIVE_LINEAR_MODELS = {"hcw", "ss_j2"}
 
 
+def solve_discrete_lqr_gain(
+    ad: np.ndarray,
+    bd: np.ndarray,
+    q: np.ndarray,
+    r: np.ndarray,
+) -> np.ndarray:
+    """Solve the discrete LQR problem with unit-balanced state and input costs.
+
+    Relative-orbit designs combine kilometre positions, kilometre-per-second
+    velocities, and very large input penalties.  Solving the raw DARE can be
+    ill-conditioned at subsecond sample periods, while a short finite Riccati
+    iteration can return a non-stabilizing gain.  Diagonal cost normalization
+    is a coordinate transformation only; the returned gain is expressed in
+    the caller's original state and input units.
+    """
+
+    from scipy.linalg import solve_discrete_are
+
+    ad = np.asarray(ad, dtype=float)
+    bd = np.asarray(bd, dtype=float)
+    q = np.asarray(q, dtype=float)
+    r = np.asarray(r, dtype=float)
+    state_count = int(ad.shape[0])
+    input_count = int(bd.shape[1])
+    if ad.shape != (state_count, state_count):
+        raise ValueError("ad must be square")
+    if bd.shape[0] != state_count:
+        raise ValueError("bd row count must match ad")
+    if q.shape != ad.shape or r.shape != (input_count, input_count):
+        raise ValueError("q and r dimensions must match the state and input dimensions")
+
+    q_diagonal = np.diag(q)
+    r_diagonal = np.diag(r)
+    if np.any(q_diagonal < 0.0) or np.any(r_diagonal <= 0.0):
+        raise ValueError("LQR diagonal Q entries must be nonnegative and R entries must be positive")
+    positive_q = q_diagonal[q_diagonal > 0.0]
+    q_reference = float(np.median(positive_q)) if positive_q.size else 1.0
+    state_scale = 1.0 / np.sqrt(np.where(q_diagonal > 0.0, q_diagonal, q_reference))
+    input_scale = 1.0 / np.sqrt(r_diagonal)
+    state_transform = np.diag(state_scale)
+    state_transform_inverse = np.diag(1.0 / state_scale)
+    input_transform = np.diag(input_scale)
+
+    balanced_ad = state_transform_inverse @ ad @ state_transform
+    balanced_bd = state_transform_inverse @ bd @ input_transform
+    balanced_q = state_transform.T @ q @ state_transform
+    balanced_r = input_transform.T @ r @ input_transform
+    p = solve_discrete_are(balanced_ad, balanced_bd, balanced_q, balanced_r)
+    balanced_gain = np.linalg.solve(
+        balanced_r + balanced_bd.T @ p @ balanced_bd,
+        balanced_bd.T @ p @ balanced_ad,
+    )
+    gain = input_transform @ balanced_gain @ state_transform_inverse
+    spectral_radius = float(np.max(np.abs(np.linalg.eigvals(ad - bd @ gain))))
+    if not np.isfinite(spectral_radius) or spectral_radius >= 1.0:
+        raise ValueError(f"Discrete LQR design is not stabilizing; closed-loop spectral radius={spectral_radius:g}")
+    return np.asarray(gain, dtype=float)
+
+
 def normalize_relative_linear_model(value: str) -> str:
     raw = str(value or "hcw").strip().lower().replace("-", "_")
     aliases = {

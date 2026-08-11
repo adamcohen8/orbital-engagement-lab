@@ -23,6 +23,10 @@ objects:
       - 0.0
       - 7.8
       - 0.0
+    flight_software:
+      stack: fsw.passive
+      hardware_profile: hardware.passive.v1
+      params: {}
 simulator:
   duration_s: 20.0
   dt_s: 1.0

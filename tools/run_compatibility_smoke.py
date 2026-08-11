@@ -149,10 +149,11 @@ def _capture_environment(
     *,
     constraints: Path,
     install_report: Path,
-    audit_result: Path,
+    audit_result: Path | None,
     evidence_dir: Path,
 ) -> None:
-    _validate_audit_result(audit_result)
+    if audit_result is not None:
+        _validate_audit_result(audit_result)
 
     pip_check = _run(
         "pip-check",
@@ -173,11 +174,12 @@ def _capture_environment(
     )
     write_sbom(evidence_dir / "sbom.cdx.json")
     report_copy = evidence_dir / "pip-install-report.json"
-    audit_copy = evidence_dir / "pip-audit.json"
     if report_copy.resolve() != install_report.resolve():
         report_copy.write_bytes(install_report.read_bytes())
-    if audit_copy.resolve() != audit_result.resolve():
-        audit_copy.write_bytes(audit_result.read_bytes())
+    if audit_result is not None:
+        audit_copy = evidence_dir / "pip-audit.json"
+        if audit_copy.resolve() != audit_result.resolve():
+            audit_copy.write_bytes(audit_result.read_bytes())
 
 
 def _check_imports(*, acceleration: str) -> dict[str, str]:
@@ -401,7 +403,7 @@ def run_acceptance(
     *,
     constraints: Path,
     install_report: Path,
-    audit_result: Path,
+    audit_result: Path | None,
     evidence_dir: Path,
     acceptance_class: str,
     expected_system: str | None,
@@ -499,7 +501,16 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--constraints", required=True)
     parser.add_argument("--install-report", required=True)
-    parser.add_argument("--audit-result", required=True)
+    audit_group = parser.add_mutually_exclusive_group(required=True)
+    audit_group.add_argument("--audit-result")
+    audit_group.add_argument(
+        "--skip-dependency-audit",
+        action="store_true",
+        help=(
+            "Skip the dependency security audit for a platform-only diagnostic. "
+            "Release and controlled-desktop evidence must provide --audit-result."
+        ),
+    )
     parser.add_argument("--output-dir", required=True)
     parser.add_argument(
         "--acceptance-class",
@@ -519,10 +530,18 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    if args.skip_dependency_audit and args.acceptance_class != HOSTED_ACCEPTANCE:
+        raise SystemExit(
+            "--skip-dependency-audit is restricted to advisory GitHub-hosted platform diagnostics."
+        )
     packet = run_acceptance(
         constraints=(ROOT / args.constraints).resolve(),
         install_report=Path(args.install_report).expanduser().resolve(),
-        audit_result=Path(args.audit_result).expanduser().resolve(),
+        audit_result=(
+            Path(args.audit_result).expanduser().resolve()
+            if args.audit_result
+            else None
+        ),
         evidence_dir=Path(args.output_dir).expanduser().resolve(),
         acceptance_class=str(args.acceptance_class),
         expected_system=args.expected_system,

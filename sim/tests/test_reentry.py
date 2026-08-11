@@ -8,7 +8,13 @@ import pytest
 import yaml
 
 from sim.config import scenario_config_from_dict, validate_scenario_plugins
-from sim.dynamics.reentry import ReentryConfig, ReentryObjectProperties, reentry_metrics_for_state
+from sim.dynamics.reentry import (
+    ReentryConfig,
+    ReentryObjectProperties,
+    ReentryTerminationConfig,
+    locate_reentry_termination_crossing,
+    reentry_metrics_for_state,
+)
 from sim.master_outputs import AVAILABLE_FIGURE_IDS
 from sim.single_run import _SingleRunEngine
 
@@ -53,6 +59,23 @@ def _reentry_config(tmp_path: Path) -> dict:
             "stats": {"print_summary": False, "save_json": False, "save_full_log": False},
         },
     }
+
+
+def test_reentry_threshold_crossing_is_localized_inside_segment() -> None:
+    cfg = ReentryConfig(
+        enabled=True,
+        termination=ReentryTerminationConfig(enabled=True, max_dynamic_pressure_pa=100.0),
+    )
+
+    crossing = locate_reentry_termination_crossing(
+        {"active": 1.0, "dynamic_pressure_pa": 40.0},
+        {"active": 1.0, "dynamic_pressure_pa": 160.0},
+        cfg,
+    )
+
+    assert crossing is not None
+    assert crossing[0] == "reentry_dynamic_pressure"
+    assert crossing[1] == pytest.approx(0.5)
 
 
 def test_reentry_metrics_activate_and_summarize(tmp_path: Path) -> None:

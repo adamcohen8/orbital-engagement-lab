@@ -4,6 +4,14 @@ from .runner_models import *
 from .runner_config import *
 from .tutorial_runtime import *
 from .recording_runtime import *
+from sim.flight_software import GamePilotInputProfile, GamePilotMode
+from sim.game.fsw_inputs import (
+    GameOperatorController,
+    GameOperatorInputAdapter,
+    GamePilotInputAdapter,
+)
+from sim.game.operator import OPERATOR_IMPULSE_DURATION_S
+
 
 def _step_game_attempt(
     *,
@@ -14,6 +22,7 @@ def _step_game_attempt(
     initial_score: Any | None = None,
     dt_s: float | None = None,
     max_step_dt_s: float | None = None,
+    control_telemetry_provider: Any | None = None,
     operator_command_provider: Any | None = None,
     operator_burn_transition_callback: Any | None = None,
 ) -> Any:
@@ -37,12 +46,21 @@ def _step_game_attempt(
                 if training_cfg is not None:
                     _set_chaser_delta_v_limiter_dt(session, training_cfg=training_cfg, dt_s=float(step_dt))
             snapshot = session.step() if step_dt is None else session.step(dt_s=float(step_dt))
+            if operator_command_provider is not None and hasattr(operator_command_provider, "observe_time"):
+                operator_command_provider.observe_time(float(snapshot.time_s))
             dashboard.push_snapshot(snapshot)
-            operator_transition_duration_s = _trigger_operator_projection_transition(dashboard, operator_command_provider)
+            operator_transition_duration_s = _trigger_operator_projection_transition(
+                dashboard, operator_command_provider
+            )
             if operator_transition_duration_s is not None and callable(operator_burn_transition_callback):
                 operator_burn_transition_callback(float(operator_transition_duration_s))
-            trainer.record(snapshot)
+            if control_telemetry_provider is None:
+                trainer.record(snapshot)
+            else:
+                trainer.record(snapshot, control_telemetry_provider=control_telemetry_provider)
             score = trainer.score()
+            if hasattr(session, "record_scoring"):
+                session.record_scoring(score)
             if bool(getattr(score, "level_passed", False)) or bool(getattr(score, "level_failed", False)):
                 break
         if session.done or bool(getattr(score, "level_passed", False)) or bool(getattr(score, "level_failed", False)):
@@ -85,9 +103,7 @@ def _split_game_step_dt(
                 boundaries.add(burn_stop_s)
     ordered = sorted(boundaries)
     return tuple(
-        float(stop - start)
-        for start, stop in zip(ordered, ordered[1:], strict=False)
-        if stop - start > 1.0e-12
+        float(stop - start) for start, stop in zip(ordered, ordered[1:], strict=False) if stop - start > 1.0e-12
     )
 
 
@@ -115,43 +131,92 @@ def _start_game_attempt(
     ric_reference_object_id: str,
     operator_burn_plan: OperatorBurnPlan | None = None,
     operator_actuator_error_fraction: float = 0.0,
-    defensive_target_provider: DefensiveTargetIntentProvider | None = None,
+    defensive_target_profile: dict[str, Any] | None = None,
 ) -> tuple[GamePhysicsSession, Any, Any]:
     config = _force_game_acceleration_off_config(config)
+    root = config.to_dict()
+    root.setdefault("metadata", {}).setdefault("game", {})["ric_reference_object_id"] = str(
+        ric_reference_object_id
+    )
+    config = SimulationConfig.from_dict(root, source_path=config.source_path)
     session = GamePhysicsSession(
         _attempt_config_for_training_clock(config, training_cfg),
         retained_history_samples=_game_retained_history_samples(config),
     )
-    if operator_burn_plan is None:
-        provider: Any = ManualGameCommandProvider(
-            command_state=command_state,
-            max_accel_km_s2=_max_accel_from_config(config, controlled_object_id),
-            attitude_rate_deg_s=attitude_rate_deg_s,
-            controlled_object_id=controlled_object_id,
-            control_mode=control_mode,
-            reference_object_id=ric_reference_object_id,
-        )
-    else:
-        provider = OperatorBurnCommandProvider(
-            operator_burn_plan,
-            controlled_object_id=controlled_object_id,
-            reference_object_id=ric_reference_object_id,
-            control_mode=control_mode,
-            relative_frame=_game_relative_frame(config),
-            actuator_error_fraction=operator_actuator_error_fraction,
-        )
-    session.set_external_intent_provider(controlled_object_id, provider)
-    target_provider = defensive_target_provider
-    if target_provider is None:
-        target_provider = _game_defensive_target_provider(config)
-    if target_provider is not None:
-        session.set_external_intent_provider(training_cfg.target_object_id, target_provider)
     snapshot = session.reset()
     if snapshot is None:
         raise RuntimeError("Game mode requires a single-run scenario.")
+    game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
+    if defensive_target_profile is not None:
+        target_id = str(training_cfg.target_object_id or "target")
+        target_runtime = session._engine.agents[target_id].flight_software_runtime
+        if target_runtime is not None and defensive_target_profile.get("max_delta_v_m_s") is not None:
+            target_runtime.max_delta_v_m_s = float(defensive_target_profile["max_delta_v_m_s"])
+    profile_mode = (
+        GamePilotMode.AERODYNAMIC
+        if str(control_mode).strip().lower() in AERODYNAMIC_CONTROL_MODES
+        else GamePilotMode.TRANSLATION
+        if str(control_mode).strip().lower() in TRANSLATION_CONTROL_MODES
+        else GamePilotMode.ATTITUDE_THRUST
+    )
+    profile = GamePilotInputProfile(str(game_cfg["input_profile"]), profile_mode)
+    if operator_burn_plan is None:
+        provider = GamePilotInputAdapter(
+            profile,
+            source_id=f"game/{controlled_object_id}/pilot",
+            boot_id="game-input-0",
+        )
+        runtime = session._engine.agents[controlled_object_id].flight_software_runtime
+        if runtime is None:
+            raise RuntimeError("Pilot mode requires a v2 flight-software runtime.")
+        aero_cfg = _game_aerodynamic_control_config(config)
+        provider.bind_physical_runtime(
+            runtime,
+            ballistic_coefficient_min_kg_m2=aero_cfg["ballistic_coefficient_min_kg_m2"],
+            ballistic_coefficient_max_kg_m2=aero_cfg["ballistic_coefficient_max_kg_m2"],
+            drag_coefficient=aero_cfg["drag_coefficient"],
+            lift_coefficient=aero_cfg["lift_coefficient"],
+            lift_area_m2=aero_cfg["lift_area_m2"],
+        )
+        session.add_fsw_input_publisher(
+            controlled_object_id,
+            lambda at: (
+                (event,)
+                if (
+                    event := provider.sample_control_interval_if_changed(
+                        command_state,
+                        at=at,
+                        control_interval_s=runtime.task_period_ns * 1.0e-9,
+                    )
+                )
+                is not None
+                else ()
+            ),
+        )
+    else:
+        operator_adapter = GameOperatorInputAdapter(
+            source_id=f"game/{controlled_object_id}/operator",
+            boot_id="game-input-0",
+        )
+        provider = GameOperatorController(
+            operator_burn_plan,
+            operator_adapter,
+            impulse_duration_s=OPERATOR_IMPULSE_DURATION_S,
+            actuator_error_fraction=operator_actuator_error_fraction,
+        )
+        runtime = session._engine.agents[controlled_object_id].flight_software_runtime
+        if runtime is None:
+            raise RuntimeError("Operator mode requires a v2 flight-software runtime.")
+        events = operator_adapter.scheduled_burn_events(
+            operator_burn_plan.burns,
+            clock_id=f"{controlled_object_id}/onboard",
+            tick_period_ns=runtime.tick_period_ns,
+            impulse_duration_s=provider.impulse_duration_s,
+            actuator_error_fraction=provider.actuator_error_fraction,
+        )
+        for event in events:
+            session.publish_fsw_input(controlled_object_id, event)
     _install_chaser_delta_v_limiter(session, training_cfg=training_cfg, dt_s=float(config.scenario.simulator.dt_s))
-    if hasattr(provider, "reset_target_to_current"):
-        provider.reset_target_to_current(snapshot.truth[controlled_object_id])
     return session, provider, snapshot
 
 
@@ -172,6 +237,20 @@ def _poll_pygame_input(
     )
 
 
+def _request_pilot_input_poll_for_transition(
+    session: GamePhysicsSession,
+    provider: Any,
+    command_state: KeyboardCommandState,
+    *,
+    controlled_object_id: str,
+) -> bool:
+    observe_transition = getattr(provider, "live_control_state_changed", None)
+    if not callable(observe_transition) or not bool(observe_transition(command_state)):
+        return False
+    session.request_fsw_input_publisher_poll(controlled_object_id)
+    return True
+
+
 def _pygame_focus_lost(pygame: Any, event: Any) -> bool:
     return game_input.pygame_focus_lost(pygame, event)
 
@@ -187,5 +266,6 @@ def _mission_state(score: Any) -> str:
 def _game_loop_should_exit(*, session_done: bool, score: Any) -> bool:
     terminal_score = bool(getattr(score, "level_passed", False)) or bool(getattr(score, "level_failed", False))
     return bool(session_done) and not terminal_score
+
 
 __all__ = [name for name in globals() if not name.startswith("__")]

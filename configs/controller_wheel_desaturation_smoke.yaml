@@ -3,13 +3,14 @@ metadata:
   owner: public
   public_surface: public-actuator
   support_level: demonstration
-scenario_description: Local smoke scenario for the public WheelDesaturationController.
+scenario_description: Attitude-reference integration smoke with momentum-management hardware metadata; v2 wheel desaturation remains a component-bench capability.
 objects:
   target:
     enabled: true
     specs:
       mass_kg: 120.0
       mass_properties:
+        inertia_reference_point: center_of_mass
         inertia_kg_m2:
         - - 12.0
           - 0.0
@@ -46,20 +47,12 @@ objects:
       - 0.0
       - 0.0
       - 0.0
-    attitude_control:
-      kind: python
-      module: sim.control.attitude.wheel_desaturation
-      class_name: WheelDesaturationController
-      params:
-        wheel_momentum_body_nms:
-        - 0.5
-        - 0.0
-        - 0.0
-        momentum_threshold_nms: 0.1
-        unload_gain_s_inv: 0.1
-        max_unload_torque_nm: 0.01
     role: target
     kind: satellite
+    flight_software:
+      stack: fsw.attitude_reference
+      hardware_profile: hardware.ideal_wrench.v1
+      params: {}
 simulator:
   duration_s: 5.0
   dt_s: 1.0

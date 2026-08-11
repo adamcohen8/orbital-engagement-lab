@@ -10,8 +10,11 @@ not flight-qualified or operational decision-grade software.
 - The public core includes a bounded two-body Lambert solver and grid-based
   orbit-transfer trade-space example. General optimization, gain tuning, Monte
   Carlo, sensitivity studies, controller benchmarking, campaign dashboards,
-  AI-assisted reporting, and custom flight-software workflows are Pro surfaces
-  and are not included in the public export.
+  AI-assisted reporting, and flight-software workbench/orchestration workflows
+  are Pro surfaces and are not included in the public export. Public users may
+  still provide an importable custom class implementing the complete
+  `SatelliteFlightSoftware` contract; public core does not provide private
+  composition, benchmarking, qualification, or promotion tooling for it.
 - The primary public surfaces are the CLI, scenario YAML, Python API, review
   query CLI/API, custom review plotting, and RPO trainer.
 - Payload and artifact shapes are documented, but some non-contract fields may

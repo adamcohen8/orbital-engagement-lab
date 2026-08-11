@@ -10,7 +10,7 @@ from sim.config.plugin_specs import instantiate_plugin_spec
 
 
 def _module_obj(pointer: Any, *, extra_kwargs: dict[str, Any] | None = None) -> Any | None:
-    if pointer is None or pointer.module is None:
+    if pointer is None or (pointer.module is None and getattr(pointer, "builtin", None) is None):
         return None
     if extra_kwargs:
         from dataclasses import replace

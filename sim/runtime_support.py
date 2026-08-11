@@ -67,9 +67,6 @@ from sim.runtime.commands import (
     _command_to_dict as _command_to_dict,
 )
 from sim.runtime.commands import (
-    _decision_truth_from_belief as _decision_truth_from_belief,
-)
-from sim.runtime.commands import (
     _deep_set as _deep_set,
 )
 from sim.runtime.commands import (
@@ -124,7 +121,6 @@ from sim.runtime.mission_runtime import (
     _run_mission_strategy as _run_mission_strategy,
 )
 from sim.runtime.models import AgentRuntime as AgentRuntime
-from sim.runtime.models import _RateLimitedController as _RateLimitedController
 from sim.runtime.rocket_factory import (
     _build_rocket_guidance as _build_rocket_guidance,
 )
@@ -212,4 +208,3 @@ def _create_rocket_runtime(*args: Any, **kwargs: Any) -> Any:
 # Preserve the legacy pickle and introspection paths while retaining one class
 # object shared by the focused implementation modules and this façade.
 AgentRuntime.__module__ = __name__
-_RateLimitedController.__module__ = __name__

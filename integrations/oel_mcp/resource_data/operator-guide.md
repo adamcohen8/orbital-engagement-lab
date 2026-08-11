@@ -25,6 +25,11 @@ This packaged guide covers the supported local stdio OEL MCP surface.
   relevant saved `query_names` to `inspect_run` or `prepare_report_packet` so
   analytical claims can cite stable query evidence IDs instead of only the
   entire review store.
+- For GNC v2 evidence, prefer `fsw_invocation_summary`,
+  `fsw_sensor_deliveries`, `actuator_command_chain`, `fsw_deadline_misses`,
+  `safety_requirement_status`, and `fsw_checkpoint_summary`. These are
+  additive saved-query names; MCP tool versions and approval semantics are
+  unchanged.
 - Read `oel://handoff/product-kinds/v1` before routing a typed product. Inspect
   a product before consuming it; materialization tools validate and write new
   scenarios but never authorize or execute those scenarios.

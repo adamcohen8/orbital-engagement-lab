@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
+import numpy as np
+
 from sim.interchange.provenance import sha256_file
 from sim.review import ReviewWorkspace
 
@@ -56,16 +58,40 @@ def build_maneuver_readiness_packet(
         max_rows=2,
     )
     relative = dict(final_relative.rows[0]) if final_relative.row_count == 1 else {}
+    realization = workspace.query(
+        "SELECT interval_start_ns, interval_end_ns, saturated, detail_json "
+        "FROM actuator_realization WHERE object_id = ? ORDER BY interval_start_ns, actuator_id",
+        (object_key,),
+        max_rows=1_000_000,
+    )
+    maximum_residual_n: float | None = None
+    saturated_duration_s = 0.0
+    for row in realization.rows:
+        detail = json.loads(str(row.get("detail_json") or "{}"))
+        requested = np.asarray(detail.get("requested_force_n", ()), dtype=float)
+        realized = np.asarray(detail.get("realized_force_n", ()), dtype=float)
+        if requested.shape == (3,) and realized.shape == (3,):
+            residual = float(np.linalg.norm(requested - realized))
+            maximum_residual_n = residual if maximum_residual_n is None else max(maximum_residual_n, residual)
+        if bool(row.get("saturated")):
+            saturated_duration_s += max(
+                int(row.get("interval_end_ns") or 0) - int(row.get("interval_start_ns") or 0),
+                0,
+            ) / 1.0e9
     metrics = {
         "final_range_km": _finite_or_none(relative.get("range_km")),
         "final_range_rate_km_s": _finite_or_none(relative.get("range_rate_km_s")),
         "burn_samples": _finite_or_none(thrust.get("burn_samples")),
         "total_delta_v_m_s": _finite_or_none(thrust.get("total_dv_m_s")),
-        "max_allocation_force_residual_n": _finite_or_none(
-            actuator.get("max_rcs_force_residual_n")
+        "max_allocation_force_residual_n": (
+            maximum_residual_n
+            if maximum_residual_n is not None
+            else _finite_or_none(actuator.get("max_rcs_force_residual_n"))
         ),
-        "allocation_saturated_duration_s": _finite_or_none(
-            actuator.get("rcs_allocation_saturated_duration_s")
+        "allocation_saturated_duration_s": (
+            saturated_duration_s
+            if realization.row_count > 0
+            else _finite_or_none(actuator.get("rcs_allocation_saturated_duration_s"))
         ),
         "max_pointing_error_deg": _finite_or_none(actuator.get("max_attitude_error_deg")),
         "final_propellant_remaining_kg": _finite_or_none(
@@ -139,6 +165,10 @@ def build_maneuver_readiness_packet(
             "final_relative_state_query": (
                 "SELECT sample_index, time_s, range_km, range_rate_km_s FROM relative_state "
                 "WHERE deputy_id = ? AND chief_id = ? ORDER BY sample_index DESC LIMIT 1"
+            ),
+            "actuator_realization_query": (
+                "SELECT interval_start_ns, interval_end_ns, saturated, detail_json FROM actuator_realization "
+                "WHERE object_id = ? ORDER BY interval_start_ns, actuator_id"
             ),
         },
         "non_claims": [

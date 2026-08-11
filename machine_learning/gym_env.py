@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import multiprocessing as mp
+from collections import defaultdict
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Protocol
@@ -36,22 +37,150 @@ except Exception as exc:  # pragma: no cover
     spaces = _FallbackSpaces()
 
 from sim.config import AlgorithmPointer, MonteCarloVariation, SimulationScenarioConfig, scenario_config_from_dict
-from sim.core.models import Command, StateBelief, StateTruth
 from sim.dynamics.orbit.environment import EARTH_RADIUS_KM
+from sim.flight_software import (
+    ControlAxisSample,
+    InputEvent,
+    InputKind,
+    PacketId,
+    PilotInputPayload,
+    Quality,
+)
 from sim.runtime_support import (
     _apply_chaser_relative_init_from_target,
-    _attitude_state13_from_belief,
     _build_knowledge_base,
-    _combine_commands,
     _create_satellite_runtime,
     _deep_set,
-    _relative_orbit_state12,
-    _run_mission_execution,
-    _run_mission_modules,
-    _run_mission_strategy,
     _sample_variation,
-    _truth_from_state6,
 )
+from sim.single_run_support import _SatelliteStepper
+
+_LEGACY_SATELLITE_GNC_FIELDS = (
+    "orbit_control",
+    "attitude_control",
+    "mission_strategy",
+    "mission_execution",
+    "mission_objectives",
+    "guidance_modifiers",
+    "bridge",
+)
+
+
+def _prepare_rl_v2_scenario(
+    scenario: dict[str, Any],
+    *,
+    controlled_ids: tuple[str, ...],
+    action_fields_by_agent: dict[str, tuple[ActionField, ...]],
+) -> None:
+    dt_s = float(dict(scenario.get("simulator", {}) or {}).get("dt_s", 1.0) or 1.0)
+    objects = dict(scenario.get("objects", {}) or {})
+    for object_id, raw in objects.items():
+        obj = raw
+        kind = str(obj.get("kind", "satellite") or "satellite").strip().lower()
+        if kind != "satellite":
+            continue
+        for field_name in _LEGACY_SATELLITE_GNC_FIELDS:
+            obj.pop(field_name, None)
+        if object_id not in controlled_ids:
+            obj["flight_software"] = {
+                "stack": "fsw.passive",
+                "hardware_profile": "hardware.passive.v1",
+                "task_period_s": dt_s,
+            }
+            continue
+        fields = action_fields_by_agent.get(object_id, ())
+        acceleration_bounds = [
+            max(abs(float(field.low)), abs(float(field.high))) * 1.0e3
+            for field in fields
+            if "thrust_eci_km_s2" in field.key
+        ]
+        max_acceleration = max(acceleration_bounds, default=0.02)
+        reference_id = "target" if object_id != "target" and "target" in objects else next(
+            (candidate for candidate in objects if candidate != object_id),
+            object_id,
+        )
+        obj["flight_software"] = {
+            "stack": "fsw.game_pilot_reference",
+            "hardware_profile": "game.ideal_wrench.v1",
+            "task_period_s": dt_s,
+            "params": {
+                "control_mode": "direct_eci",
+                "input_profile": f"rl.direct_eci.{object_id}",
+                "reference_object_id": reference_id,
+                "max_acceleration_m_s2": max_acceleration,
+            },
+        }
+
+
+def _enqueue_rl_action(owner: Any, agent_id: str, action_values: dict[str, float]) -> None:
+    agent = owner.agents[agent_id]
+    runtime = agent.flight_software_runtime
+    if runtime is None or not action_values:
+        return
+    adapter = owner.action_adapter if hasattr(owner, "action_adapter") else owner.action_adapters_by_agent.get(agent_id)
+    if adapter is None:
+        adapter = DirectActionAdapter()
+    intent = adapter.adapt(action_values=action_values, env=owner) if hasattr(adapter, "adapt") else adapter(
+        action_values=action_values, env=owner
+    )
+    acceleration = intent.get("thrust_eci_km_s2", intent.get("fallback_thrust_eci_km_s2", (0.0, 0.0, 0.0)))
+    values = [0.0 if value is None else float(value) for value in list(acceleration)]
+    if len(values) != 3:
+        values = [0.0, 0.0, 0.0]
+    max_acceleration = max(float(runtime.stack.config.max_acceleration_m_s2), 1.0e-15)
+    axes = tuple(
+        ControlAxisSample(name, float(np.clip(value * 1.0e3 / max_acceleration, -1.0, 1.0)))
+        for name, value in zip(("translate_r", "translate_i", "translate_c"), values, strict=True)
+    ) + (ControlAxisSample("throttle", 1.0),)
+    at = runtime.clock_tag(int(round(owner.current_time_s * 1.0e9)))
+    sequence = int(getattr(owner, "_rl_input_sequence", 0))
+    owner._rl_input_sequence = sequence + 1
+    runtime.enqueue(
+        InputEvent(
+            PacketId(f"rl/{agent_id}", runtime.boot_id, sequence),
+            InputKind.PILOT_INPUT,
+            at,
+            at,
+            Quality(),
+            PilotInputPayload(runtime.stack.config.profile.profile_id, axes),
+        )
+    )
+
+
+def _step_agents_with_production_runtime(
+    owner: Any,
+    action_values_by_agent: dict[str, dict[str, float]],
+) -> None:
+    assert owner.scenario_cfg is not None
+    simulator = owner.scenario_cfg.simulator
+    dynamics = dict(simulator.dynamics or {})
+    orbit = dict(dynamics.get("orbit", {}) or {})
+    attitude = dict(dynamics.get("attitude", {}) or {})
+    owner.base_environment = dict(simulator.environment or {})
+    owner.attitude_enabled = bool(attitude.get("enabled", True))
+    orbit_substep = max(float(orbit.get("orbit_substep_s", simulator.dt_s) or simulator.dt_s), 1.0e-9)
+    attitude_substep = max(float(attitude.get("attitude_substep_s", simulator.dt_s) or simulator.dt_s), 1.0e-9)
+    owner.sim_substep_s = min(orbit_substep, attitude_substep) if owner.attitude_enabled else orbit_substep
+    owner.zero3 = np.zeros(3, dtype=float)
+    if not hasattr(owner, "command_decision_hist"):
+        owner.command_decision_hist = defaultdict(list)
+    world_truth = {agent_id: agent.truth for agent_id, agent in owner.agents.items() if agent.active}
+    stepper = _SatelliteStepper(owner)
+    t_next = owner.current_time_s + float(simulator.dt_s)
+    for agent_id, agent in owner.agents.items():
+        if not agent.active:
+            continue
+        _enqueue_rl_action(owner, agent_id, action_values_by_agent.get(agent_id, {}))
+        result = stepper.step(
+            aid=agent_id,
+            agent=agent,
+            initial_truth=agent.truth,
+            world_truth_decision=world_truth,
+            t_s=owner.current_time_s,
+            t_next=t_next,
+            sample_index=owner.step_count + 1,
+        )
+        agent.truth = result.truth
 
 
 class SupportsActionAdapter(Protocol):
@@ -325,7 +454,7 @@ def _observation_dim_from_fields(fields: tuple[ObservationField, ...], probe: di
     return dim
 
 
-def _snapshot_truth(truth: StateTruth) -> dict[str, Any]:
+def _snapshot_truth(truth: Any) -> dict[str, Any]:
     return {
         "position_eci_km": np.array(truth.position_eci_km, dtype=float),
         "velocity_eci_km_s": np.array(truth.velocity_eci_km_s, dtype=float),
@@ -497,6 +626,11 @@ class GymSimulationEnv(gym.Env):
         for path, value in dict(options.get("override_parameters", {}) or {}).items():
             _deep_set(scenario_dict, path, value)
             self.sampled_parameters[path] = value
+        _prepare_rl_v2_scenario(
+            scenario_dict,
+            controlled_ids=(self.controlled_agent_id,),
+            action_fields_by_agent={self.controlled_agent_id: self.action_fields},
+        )
         self.scenario_cfg = scenario_config_from_dict(scenario_dict)
         runtime_probe = _observation_probe_from_scenario_dict(scenario_dict)
         obs_dim = _observation_dim_from_fields(self.observation_fields, runtime_probe)
@@ -579,194 +713,8 @@ class GymSimulationEnv(gym.Env):
         self.agents = agents
 
     def _step_all_agents(self, action_values: dict[str, float]) -> None:
-        assert self.scenario_cfg is not None
-        dt = float(self.scenario_cfg.simulator.dt_s)
-        dynamics_cfg = dict(self.scenario_cfg.simulator.dynamics or {})
-        orbit_cfg = dict(dynamics_cfg.get("orbit", {}) or {})
-        att_cfg = dict(dynamics_cfg.get("attitude", {}) or {})
-        base_environment = dict(self.scenario_cfg.simulator.environment or {})
-        attitude_enabled = bool(att_cfg.get("enabled", True))
-        orbit_substep_s = float(max(float(orbit_cfg.get("orbit_substep_s", dt) or dt), 1e-9))
-        attitude_substep_s = float(max(float(att_cfg.get("attitude_substep_s", dt) or dt), 1e-9))
-        sim_substep_s = float(min(orbit_substep_s, attitude_substep_s)) if attitude_enabled else orbit_substep_s
-        world_truth_live = {aid: agent.truth for aid, agent in self.agents.items() if agent.active}
-        for aid, agent in self.agents.items():
-            if not agent.active:
-                continue
-            self._step_satellite_agent(
-                agent_id=aid,
-                agent=agent,
-                action_values=(action_values if aid == self.controlled_agent_id else {}),
-                world_truth_live=world_truth_live,
-                base_environment=base_environment,
-                attitude_enabled=attitude_enabled,
-                sim_substep_s=sim_substep_s,
-                dt=dt,
-            )
-            world_truth_live[aid] = agent.truth
-        for aid, agent in self.agents.items():
-            if not agent.active or agent.knowledge_base is None:
-                continue
-            observer_truth = world_truth_live.get(aid)
-            if observer_truth is None:
-                continue
-            agent.knowledge_base.update(
-                observer_truth=observer_truth,
-                world_truth=world_truth_live,
-                t_s=float(self.current_time_s + dt),
-            )
-
-    def _step_satellite_agent(
-        self,
-        *,
-        agent_id: str,
-        agent: Any,
-        action_values: dict[str, float],
-        world_truth_live: dict[str, StateTruth],
-        base_environment: dict[str, Any],
-        attitude_enabled: bool,
-        sim_substep_s: float,
-        dt: float,
-    ) -> None:
-        t_inner = float(self.current_time_s)
-        t_next = float(self.current_time_s + dt)
-        tr_inner = agent.truth
-        world_truth_inner = world_truth_live.copy()
-        env_sensor = {"world_truth": world_truth_inner}
-        env_inner = {
-            **base_environment,
-            "world_truth": world_truth_inner,
-            "attitude_disabled": (not attitude_enabled),
-        }
-        eye6 = np.eye(6) * 1e-4
-        eye12 = np.eye(12) * 1e-4
-        orbit_state12_scratch = np.empty(12, dtype=float)
-        attitude_state13_scratch = np.empty(13, dtype=float)
-        deputy_state6_scratch = np.empty(6, dtype=float)
-        chief_state6_scratch = np.empty(6, dtype=float)
-        orbit_belief_scratch = StateBelief(state=orbit_state12_scratch, covariance=eye12, last_update_t_s=t_inner)
-        attitude_belief_scratch = StateBelief(state=attitude_state13_scratch, covariance=eye6, last_update_t_s=t_inner)
-
-        while t_inner < t_next - 1e-12:
-            h = float(min(sim_substep_s, t_next - t_inner))
-            t_eval = t_inner + h
-            world_truth_inner[agent_id] = tr_inner
-            meas = (
-                agent.sensor.measure(truth=tr_inner, env=env_sensor, t_s=t_eval) if agent.sensor is not None else None
-            )
-            if agent.estimator is not None and agent.belief is not None:
-                agent.belief = agent.estimator.update(agent.belief, meas, t_eval)
-            orb_belief = agent.belief
-            if agent.orbit_controller is not None and orb_belief is not None:
-                chief_truth = None
-                if agent.knowledge_base is not None:
-                    target_belief = agent.knowledge_base.snapshot().get("target")
-                    if target_belief is not None and target_belief.state.size >= 6:
-                        chief_truth = _truth_from_state6(target_belief.state[:6], t_s=target_belief.last_update_t_s)
-                if (
-                    chief_truth is not None
-                    and agent_id != "target"
-                    and hasattr(agent.orbit_controller, "ric_curv_state_slice")
-                ):
-                    orbit_belief_scratch.last_update_t_s = orb_belief.last_update_t_s
-                    orbit_belief_scratch.state = _relative_orbit_state12(
-                        chief_truth=chief_truth,
-                        deputy_truth=tr_inner,
-                        out=orbit_state12_scratch,
-                        deputy_state6=deputy_state6_scratch,
-                        chief_state6=chief_state6_scratch,
-                    )
-                    orb_belief = orbit_belief_scratch
-            att_belief = agent.belief
-            if attitude_enabled and att_belief is not None and att_belief.state.size < 13:
-                attitude_belief_scratch.covariance = att_belief.covariance
-                attitude_belief_scratch.last_update_t_s = att_belief.last_update_t_s
-                attitude_belief_scratch.state = _attitude_state13_from_belief(
-                    belief=att_belief,
-                    truth=tr_inner,
-                    out=attitude_state13_scratch,
-                )
-                att_belief = attitude_belief_scratch
-            if not attitude_enabled:
-                att_belief = None
-
-            env_common = dict(base_environment)
-            mission_out = _run_mission_modules(
-                agent=agent,
-                t_s=t_eval,
-                dt_s=h,
-                env=env_common,
-                orbit_controller=agent.orbit_controller,
-                attitude_controller=(agent.attitude_controller if attitude_enabled else None),
-                orb_belief=orb_belief,
-                att_belief=att_belief,
-            )
-            mission_out.update(
-                _run_mission_strategy(
-                    agent=agent,
-                    t_s=t_eval,
-                    dt_s=h,
-                    env=env_common,
-                    orbit_controller=agent.orbit_controller,
-                    attitude_controller=(agent.attitude_controller if attitude_enabled else None),
-                    orb_belief=orb_belief,
-                    att_belief=att_belief,
-                )
-            )
-            if action_values:
-                action_intent = self._adapt_action(action_values)
-                if isinstance(action_intent, dict):
-                    mission_out.update(action_intent)
-            mission_out.update(
-                _run_mission_execution(
-                    agent=agent,
-                    intent=mission_out,
-                    t_s=t_eval,
-                    dt_s=h,
-                    env=env_common,
-                    orbit_controller=agent.orbit_controller,
-                    attitude_controller=(agent.attitude_controller if attitude_enabled else None),
-                    orb_belief=orb_belief,
-                    att_belief=att_belief,
-                )
-            )
-
-            if attitude_enabled and "desired_attitude_quat_bn" in mission_out and agent.attitude_controller is not None:
-                q_des = np.array(mission_out["desired_attitude_quat_bn"], dtype=float).reshape(-1)
-                if q_des.size == 4 and hasattr(agent.attitude_controller, "set_target"):
-                    agent.attitude_controller.set_target(q_des)
-
-            use_integrated_cmd = bool(mission_out.get("mission_use_integrated_command", False))
-            c_orb = (
-                agent.orbit_controller.act(orb_belief, t_eval, 2.0)
-                if (not use_integrated_cmd) and agent.orbit_controller is not None and orb_belief is not None
-                else Command.zero()
-            )
-            c_att = (
-                agent.attitude_controller.act(att_belief, t_eval, 2.0)
-                if attitude_enabled
-                and (not use_integrated_cmd)
-                and agent.attitude_controller is not None
-                and att_belief is not None
-                else Command.zero()
-            )
-            if use_integrated_cmd:
-                cmd = Command.zero()
-                if "thrust_eci_km_s2" in mission_out:
-                    cmd.thrust_eci_km_s2 = np.array(mission_out["thrust_eci_km_s2"], dtype=float).reshape(3)
-                if "torque_body_nm" in mission_out:
-                    cmd.torque_body_nm = np.array(mission_out["torque_body_nm"], dtype=float).reshape(3)
-                if "command_mode_flags" in mission_out and isinstance(mission_out["command_mode_flags"], dict):
-                    cmd.mode_flags.update(dict(mission_out["command_mode_flags"]))
-            else:
-                cmd = _combine_commands(c_orb, c_att)
-            if not attitude_enabled:
-                cmd.torque_body_nm = np.zeros(3, dtype=float)
-            tr_inner = agent.dynamics.step(state=tr_inner, command=cmd, env=env_inner, dt_s=h)
-            t_inner = t_eval
-
-        agent.truth = tr_inner
-
+        _step_agents_with_production_runtime(self, {self.controlled_agent_id: action_values})
+        return
     def _adapt_action(self, action_values: dict[str, float]) -> dict[str, Any]:
         adapter = self.action_adapter
         if hasattr(adapter, "adapt"):
@@ -969,6 +917,11 @@ class MultiAgentSimulationEnv:
         for path, value in dict(options.get("override_parameters", {}) or {}).items():
             _deep_set(scenario_dict, path, value)
             self.sampled_parameters[path] = value
+        _prepare_rl_v2_scenario(
+            scenario_dict,
+            controlled_ids=self.controlled_agent_ids,
+            action_fields_by_agent=self.action_fields_by_agent,
+        )
         self.scenario_cfg = scenario_config_from_dict(scenario_dict)
         runtime_probe = _observation_probe_from_scenario_dict(scenario_dict)
         for agent_id in self.controlled_agent_ids:
@@ -1094,194 +1047,8 @@ class MultiAgentSimulationEnv:
         self.agents = agents
 
     def _step_all_agents_multi(self, action_values_by_agent: dict[str, dict[str, float]]) -> None:
-        assert self.scenario_cfg is not None
-        dt = float(self.scenario_cfg.simulator.dt_s)
-        dynamics_cfg = dict(self.scenario_cfg.simulator.dynamics or {})
-        orbit_cfg = dict(dynamics_cfg.get("orbit", {}) or {})
-        att_cfg = dict(dynamics_cfg.get("attitude", {}) or {})
-        base_environment = dict(self.scenario_cfg.simulator.environment or {})
-        attitude_enabled = bool(att_cfg.get("enabled", True))
-        orbit_substep_s = float(max(float(orbit_cfg.get("orbit_substep_s", dt) or dt), 1e-9))
-        attitude_substep_s = float(max(float(att_cfg.get("attitude_substep_s", dt) or dt), 1e-9))
-        sim_substep_s = float(min(orbit_substep_s, attitude_substep_s)) if attitude_enabled else orbit_substep_s
-        world_truth_live = {aid: agent.truth for aid, agent in self.agents.items() if agent.active}
-        for aid, agent in self.agents.items():
-            if not agent.active:
-                continue
-            self._step_satellite_agent_multi(
-                agent_id=aid,
-                agent=agent,
-                action_values=action_values_by_agent.get(aid, {}),
-                world_truth_live=world_truth_live,
-                base_environment=base_environment,
-                attitude_enabled=attitude_enabled,
-                sim_substep_s=sim_substep_s,
-                dt=dt,
-            )
-            world_truth_live[aid] = agent.truth
-        for aid, agent in self.agents.items():
-            if not agent.active or agent.knowledge_base is None:
-                continue
-            observer_truth = world_truth_live.get(aid)
-            if observer_truth is None:
-                continue
-            agent.knowledge_base.update(
-                observer_truth=observer_truth,
-                world_truth=world_truth_live,
-                t_s=float(self.current_time_s + dt),
-            )
-
-    def _step_satellite_agent_multi(
-        self,
-        *,
-        agent_id: str,
-        agent: Any,
-        action_values: dict[str, float],
-        world_truth_live: dict[str, StateTruth],
-        base_environment: dict[str, Any],
-        attitude_enabled: bool,
-        sim_substep_s: float,
-        dt: float,
-    ) -> None:
-        t_inner = float(self.current_time_s)
-        t_next = float(self.current_time_s + dt)
-        tr_inner = agent.truth
-        world_truth_inner = world_truth_live.copy()
-        env_sensor = {"world_truth": world_truth_inner}
-        env_inner = {
-            **base_environment,
-            "world_truth": world_truth_inner,
-            "attitude_disabled": (not attitude_enabled),
-        }
-        eye6 = np.eye(6) * 1e-4
-        eye12 = np.eye(12) * 1e-4
-        orbit_state12_scratch = np.empty(12, dtype=float)
-        attitude_state13_scratch = np.empty(13, dtype=float)
-        deputy_state6_scratch = np.empty(6, dtype=float)
-        chief_state6_scratch = np.empty(6, dtype=float)
-        orbit_belief_scratch = StateBelief(state=orbit_state12_scratch, covariance=eye12, last_update_t_s=t_inner)
-        attitude_belief_scratch = StateBelief(state=attitude_state13_scratch, covariance=eye6, last_update_t_s=t_inner)
-
-        while t_inner < t_next - 1e-12:
-            h = float(min(sim_substep_s, t_next - t_inner))
-            t_eval = t_inner + h
-            world_truth_inner[agent_id] = tr_inner
-            meas = (
-                agent.sensor.measure(truth=tr_inner, env=env_sensor, t_s=t_eval) if agent.sensor is not None else None
-            )
-            if agent.estimator is not None and agent.belief is not None:
-                agent.belief = agent.estimator.update(agent.belief, meas, t_eval)
-            orb_belief = agent.belief
-            if agent.orbit_controller is not None and orb_belief is not None:
-                chief_truth = None
-                chief_id = "target" if agent_id != "target" else "chaser"
-                if agent.knowledge_base is not None:
-                    target_belief = agent.knowledge_base.snapshot().get(chief_id)
-                    if target_belief is not None and target_belief.state.size >= 6:
-                        chief_truth = _truth_from_state6(target_belief.state[:6], t_s=target_belief.last_update_t_s)
-                if chief_truth is not None and hasattr(agent.orbit_controller, "ric_curv_state_slice"):
-                    orbit_belief_scratch.last_update_t_s = orb_belief.last_update_t_s
-                    orbit_belief_scratch.state = _relative_orbit_state12(
-                        chief_truth=chief_truth,
-                        deputy_truth=tr_inner,
-                        out=orbit_state12_scratch,
-                        deputy_state6=deputy_state6_scratch,
-                        chief_state6=chief_state6_scratch,
-                    )
-                    orb_belief = orbit_belief_scratch
-            att_belief = agent.belief
-            if attitude_enabled and att_belief is not None and att_belief.state.size < 13:
-                attitude_belief_scratch.covariance = att_belief.covariance
-                attitude_belief_scratch.last_update_t_s = att_belief.last_update_t_s
-                attitude_belief_scratch.state = _attitude_state13_from_belief(
-                    belief=att_belief,
-                    truth=tr_inner,
-                    out=attitude_state13_scratch,
-                )
-                att_belief = attitude_belief_scratch
-            if not attitude_enabled:
-                att_belief = None
-
-            env_common = dict(base_environment)
-            mission_out = _run_mission_modules(
-                agent=agent,
-                t_s=t_eval,
-                dt_s=h,
-                env=env_common,
-                orbit_controller=agent.orbit_controller,
-                attitude_controller=(agent.attitude_controller if attitude_enabled else None),
-                orb_belief=orb_belief,
-                att_belief=att_belief,
-            )
-            mission_out.update(
-                _run_mission_strategy(
-                    agent=agent,
-                    t_s=t_eval,
-                    dt_s=h,
-                    env=env_common,
-                    orbit_controller=agent.orbit_controller,
-                    attitude_controller=(agent.attitude_controller if attitude_enabled else None),
-                    orb_belief=orb_belief,
-                    att_belief=att_belief,
-                )
-            )
-            if action_values:
-                adapter = self.action_adapters_by_agent.get(agent_id) or DirectActionAdapter()
-                if hasattr(adapter, "adapt"):
-                    action_intent = adapter.adapt(action_values=action_values, env=self)
-                else:
-                    action_intent = adapter(action_values=action_values, env=self)
-                if isinstance(action_intent, dict):
-                    mission_out.update(action_intent)
-            mission_out.update(
-                _run_mission_execution(
-                    agent=agent,
-                    intent=mission_out,
-                    t_s=t_eval,
-                    dt_s=h,
-                    env=env_common,
-                    orbit_controller=agent.orbit_controller,
-                    attitude_controller=(agent.attitude_controller if attitude_enabled else None),
-                    orb_belief=orb_belief,
-                    att_belief=att_belief,
-                )
-            )
-            if attitude_enabled and "desired_attitude_quat_bn" in mission_out and agent.attitude_controller is not None:
-                q_des = np.array(mission_out["desired_attitude_quat_bn"], dtype=float).reshape(-1)
-                if q_des.size == 4 and hasattr(agent.attitude_controller, "set_target"):
-                    agent.attitude_controller.set_target(q_des)
-
-            use_integrated_cmd = bool(mission_out.get("mission_use_integrated_command", False))
-            c_orb = (
-                agent.orbit_controller.act(orb_belief, t_eval, 2.0)
-                if (not use_integrated_cmd) and agent.orbit_controller is not None and orb_belief is not None
-                else Command.zero()
-            )
-            c_att = (
-                agent.attitude_controller.act(att_belief, t_eval, 2.0)
-                if attitude_enabled
-                and (not use_integrated_cmd)
-                and agent.attitude_controller is not None
-                and att_belief is not None
-                else Command.zero()
-            )
-            if use_integrated_cmd:
-                cmd = Command.zero()
-                if "thrust_eci_km_s2" in mission_out:
-                    cmd.thrust_eci_km_s2 = np.array(mission_out["thrust_eci_km_s2"], dtype=float).reshape(3)
-                if "torque_body_nm" in mission_out:
-                    cmd.torque_body_nm = np.array(mission_out["torque_body_nm"], dtype=float).reshape(3)
-                if "command_mode_flags" in mission_out and isinstance(mission_out["command_mode_flags"], dict):
-                    cmd.mode_flags.update(dict(mission_out["command_mode_flags"]))
-            else:
-                cmd = _combine_commands(c_orb, c_att)
-            if not attitude_enabled:
-                cmd.torque_body_nm = np.zeros(3, dtype=float)
-            tr_inner = agent.dynamics.step(state=tr_inner, command=cmd, env=env_inner, dt_s=h)
-            t_inner = t_eval
-
-        agent.truth = tr_inner
-
+        _step_agents_with_production_runtime(self, action_values_by_agent)
+        return
     def _check_done_multi(
         self,
         previous_snapshot: dict[str, Any] | None,

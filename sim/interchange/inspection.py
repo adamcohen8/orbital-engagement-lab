@@ -115,6 +115,19 @@ def inspect_document(
                 "time_s": selection.get("time_s"),
                 "relative_pair_count": len(payload.get("relative_pairs", []) or []),
             }
+        elif document.get("product_kind") == "oel.satellite_checkpoint":
+            payload = dict(document.get("payload", {}) or {})
+            selection = dict(payload.get("selection", {}) or {})
+            checkpoint = dict(payload.get("checkpoint", {}) or {})
+            summary["satellite_checkpoint"] = {
+                "object_id": dict(payload.get("object", {}) or {}).get("object_id"),
+                "stack_id": checkpoint.get("stack_id"),
+                "stack_version": checkpoint.get("stack_version"),
+                "sample_index": selection.get("sample_index"),
+                "time_s": selection.get("time_s"),
+                "invocation_id": checkpoint.get("invocation_id"),
+                "context_object_count": len(payload.get("context_states", []) or []),
+            }
     elif schema_id == HANDOFF_MANIFEST_SCHEMA_ID:
         adapter = dict(document.get("adapter", {}) or {})
         output = dict(document.get("output", {}) or {})

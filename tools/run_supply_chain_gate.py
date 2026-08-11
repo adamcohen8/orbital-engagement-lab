@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -17,6 +18,14 @@ from tools.generate_dependency_evidence import write_dependency_evidence  # noqa
 from tools.generate_python_sbom import write_sbom  # noqa: E402
 
 PYTORCH_CPU_INDEX_URL = "https://download.pytorch.org/whl/cpu"
+
+
+def _package_version() -> str:
+    text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    match = re.search(r'^version\s*=\s*"([^"]+)"', text, flags=re.MULTILINE)
+    if match is None:
+        raise RuntimeError("pyproject.toml does not declare a package version")
+    return match.group(1)
 
 
 def _sha256(path: Path) -> str:
@@ -185,6 +194,8 @@ def run_supply_chain_gate(
     manifest = {
         "schema_version": 1,
         "kind": "oel_supply_chain_gate",
+        "product": "oel-pro",
+        "package_version": _package_version(),
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "python": python_executable,
         "dependency_sources": {

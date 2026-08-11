@@ -111,6 +111,26 @@ def test_tle_parser_converts_mean_elements_to_eci_state() -> None:
     assert 7.0 < np.linalg.norm(vel) < 8.0
 
 
+def test_ogp_sgp4_exact_retrograde_equatorial_inclination_initializes() -> None:
+    cfg = _sgp4_config(output_frame="teme")
+    cfg["target"]["initial_state"] = {
+        "ogp_mean_elements": {
+            "epoch_jd_utc": 2460310.5,
+            "inclination_deg": 180.0,
+            "raan_deg": 43.0,
+            "eccentricity": 0.001,
+            "argp_deg": 52.0,
+            "mean_anomaly_deg": 50.0,
+            "mean_motion_rev_per_day": 15.5,
+        }
+    }
+    session = SimulationSession.from_config(SimulationConfig.from_dict(cfg))
+
+    result = session.run()
+
+    assert np.all(np.isfinite(result.truth["target"][0, :6]))
+
+
 @pytest.mark.parametrize("epoch_text", ["24367.00000000", "23366.00000000", "24nan"])
 def test_tle_epoch_rejects_out_of_calendar_range(epoch_text: str) -> None:
     line1 = f"{ISS_LINE1[:18]}{epoch_text:14}{ISS_LINE1[32:]}"

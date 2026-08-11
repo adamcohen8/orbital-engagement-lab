@@ -12,6 +12,8 @@ MAX_VM_STEPS = 2_000_000
 MAX_MANIFEST_BYTES = 5_000_000
 MAX_REVIEW_STORE_BYTES = 1_000_000_000
 MAX_RESPONSE_BYTES = 1_000_000
+MAX_REVIEW_VALUE_BYTES = 250_000
+MAX_REVIEW_RESULT_BYTES = 750_000
 
 DEPLOYMENT_PROFILES = frozenset(
     {
@@ -196,7 +198,9 @@ class ToolContract:
             },
             required=("reads", "writes", "executes", "external_communication"),
         )
-        output_schema["properties"]["result"] = deepcopy(self.result_schema)
+        output_schema["properties"]["result"] = {
+            "anyOf": [deepcopy(self.result_schema), {"type": "null"}]
+        }
         return {
             "name": self.tool_id,
             "title": self.title,

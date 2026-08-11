@@ -18,6 +18,7 @@
           "state": {"type": "object"},
           "covariance": {"type": "object"},
           "object_specs": {"type": "object"},
+          "resource_state": {"type": "object"},
           "model_assumptions": {"type": "object"}
         }
       }

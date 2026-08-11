@@ -26,6 +26,7 @@ def _run_operator_plan_screen(
     read_only: bool = False,
     demo_title: str = "",
     launch_label: str = "Launch",
+    config_override: Any | None = None,
 ) -> OperatorBurnPlan | None:
     frame_convention = normalize_frame_convention(frame_convention)
     seed_plan = initial_plan if initial_plan is not None else _load_saved_operator_burn_plan(option.scenario_id)
@@ -36,7 +37,11 @@ def _run_operator_plan_screen(
     objectives_scroll_px = 0
     equation_sheet_visible = False
     equation_sheet_scroll_px = 0
-    plot_context = _operator_plot_context(option.path, difficulty=difficulty)
+    plot_context = _operator_plot_context(
+        option.path,
+        difficulty=difficulty,
+        config_override=config_override,
+    )
     trajectory_probe: OperatorTrajectoryProbe | None = None
     draw_operator_plan_screen = _operator_widget_renderer("_draw_operator_plan_screen")
     while True:
@@ -940,12 +945,21 @@ def _operator_initial_relative_ric_state(config_path: Path) -> tuple[float, floa
     return tuple(context.initial_relative_ric_km_s[:3])
 
 
-def _operator_plot_context(config_path: Path, *, difficulty: str = "easy") -> OperatorPlotContext:
-    try:
-        with Path(config_path).open("r", encoding="utf-8") as f:
-            raw = yaml.safe_load(f) or {}
-    except OSError:
-        return OperatorPlotContext()
+def _operator_plot_context(
+    config_path: Path,
+    *,
+    difficulty: str = "easy",
+    config_override: Any | None = None,
+) -> OperatorPlotContext:
+    if config_override is None:
+        try:
+            with Path(config_path).open("r", encoding="utf-8") as f:
+                raw = yaml.safe_load(f) or {}
+        except OSError:
+            return OperatorPlotContext()
+    else:
+        to_dict = getattr(config_override, "to_dict", None)
+        raw = to_dict() if callable(to_dict) else dict(config_override)
     metadata = dict(raw.get("metadata", {}) or {})
     try:
         training_config = RPOTrainingConfig.from_metadata(metadata)
@@ -978,6 +992,7 @@ def _operator_plot_context(config_path: Path, *, difficulty: str = "easy") -> Op
     preview_training_cfg, preview_snapshot, preview_dashboard_kwargs = _operator_pilot_first_frame_preview(
         Path(config_path),
         difficulty=difficulty,
+        config_override=config_override,
     )
     if preview_training_cfg is not None:
         common_context["training_config"] = preview_training_cfg
@@ -1055,6 +1070,7 @@ def _operator_pilot_first_frame_preview(
     config_path: Path,
     *,
     difficulty: str = "easy",
+    config_override: Any | None = None,
 ) -> tuple[RPOTrainingConfig | None, Any | None, dict[str, Any]]:
     try:
         from sim.api import SimulationConfig
@@ -1103,7 +1119,15 @@ def _operator_pilot_first_frame_preview(
         return None, None, {}
 
     try:
-        config = _force_game_acceleration_off_config(SimulationConfig.from_yaml(config_path))
+        if config_override is None:
+            config = SimulationConfig.from_yaml(config_path)
+        elif isinstance(config_override, SimulationConfig):
+            config = config_override
+        else:
+            to_dict = getattr(config_override, "to_dict", None)
+            raw_config = to_dict() if callable(to_dict) else dict(config_override)
+            config = SimulationConfig.from_dict(raw_config)
+        config = _force_game_acceleration_off_config(config)
         training_cfg = _training_config_with_sun_environment(
             RPOTrainingConfig.from_metadata(dict(config.scenario.metadata or {})),
             config,

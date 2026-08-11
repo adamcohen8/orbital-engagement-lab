@@ -21,7 +21,7 @@ cases:
   tags: [onp, rk4, j2, j3, j4, numba]
   checks:
     summary.runtime_profile.executor.object_step_backend: {equals: serial}
-    summary.runtime_profile.object_totals.satellite.stages.dynamics_step.count: {min: 1}
+    summary.runtime_profile.object_totals.satellite.stages.satellite_step.count: {min: 1}
   profiles:
     smoke: {duration_s: 30.0}
     standard: {duration_s: 3600.0}

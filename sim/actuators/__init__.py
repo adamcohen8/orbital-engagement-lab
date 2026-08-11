@@ -7,6 +7,14 @@ from sim.actuators.attitude import (
     WheelDesaturationLimits,
 )
 from sim.actuators.combined import CombinedActuator
+from sim.actuators.command_bus import (
+    ActuatorCommandBus,
+    ActuatorDemand,
+    ActuatorDeviceDefinition,
+    CommandAcceptanceRecord,
+    DemandMode,
+    ExpiryBehavior,
+)
 from sim.actuators.faults import ActuatorFaultConfig, FaultedActuator, apply_actuator_faults
 from sim.actuators.orbital import (
     ElectricPropulsionLimits,
@@ -16,6 +24,7 @@ from sim.actuators.orbital import (
     RcsClusterLimits,
     RcsThruster,
 )
+from sim.actuators.physical import ActuatorRealization, AerodynamicEffectorHardware, IdealWrenchHardware
 from sim.actuators.presets import (
     ACTUATOR_PRESETS,
     BASIC_CMG_TRIAD,
@@ -33,6 +42,15 @@ __all__ = [
     "ActuatorLimits",
     "SimpleActuator",
     "CombinedActuator",
+    "ActuatorCommandBus",
+    "ActuatorDemand",
+    "ActuatorDeviceDefinition",
+    "CommandAcceptanceRecord",
+    "DemandMode",
+    "ExpiryBehavior",
+    "ActuatorRealization",
+    "AerodynamicEffectorHardware",
+    "IdealWrenchHardware",
     "OrbitalActuator",
     "OrbitalActuatorLimits",
     "AttitudeActuator",

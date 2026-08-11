@@ -633,7 +633,14 @@ class DashboardLayoutMixin:
             scale_x=scale_x,
             scale_y=scale_y,
             fallback_radius_px=7,
+            plane=_plane_key_for_axes(x_axis=x_axis, y_axis=y_axis),
+            rotation_deg=self._aerodynamic_sprite_rotation_deg(x_axis=x_axis, y_axis=y_axis),
         )
+        if bool(getattr(self, "aerodynamic_control_enabled", False)) and (x_axis, y_axis) == (2, 0):
+            phi = np.deg2rad(float(getattr(self, "aerodynamic_lift_bank_angle_deg", 0.0)))
+            lift_rc = np.array([-np.sin(phi), np.cos(phi)], dtype=float)
+            lift_px = 46.0 * lift_rc * np.array([x_display_sign, -y_display_sign], dtype=float)
+            self._draw_vector(chaser, lift_px, color=(92, 236, 255), scale=1.0)
 
         if rel.shape[1] >= 6:
             v_px = self._web_velocity_vector_px(rel[-1], x_axis=x_axis, y_axis=y_axis)

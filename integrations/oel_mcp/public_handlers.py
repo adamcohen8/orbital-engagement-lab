@@ -7,7 +7,14 @@ from threading import Event
 from typing import Any
 
 from integrations.oel_mcp.base_handlers import BaseOELMCPHandlers, require_file_size
-from integrations.oel_mcp.contracts import MAX_MANIFEST_BYTES, MAX_RESPONSE_BYTES, MAX_REVIEW_STORE_BYTES, ToolContract
+from integrations.oel_mcp.contracts import (
+    MAX_MANIFEST_BYTES,
+    MAX_RESPONSE_BYTES,
+    MAX_REVIEW_RESULT_BYTES,
+    MAX_REVIEW_STORE_BYTES,
+    MAX_REVIEW_VALUE_BYTES,
+    ToolContract,
+)
 from integrations.oel_mcp.execution import (
     ExecutionApprovalPolicy,
     MCPExecutionCancelled,
@@ -46,6 +53,7 @@ from sim.handoff import (
 )
 from sim.reporting import build_maneuver_readiness_packet
 from sim.review import ReviewWorkspace
+from sim.security import ConfigPathPolicy
 
 
 class PublicOELMCPHandlers(BaseOELMCPHandlers):
@@ -170,13 +178,19 @@ class PublicOELMCPHandlers(BaseOELMCPHandlers):
                 output, "review", "run.sqlite", kind="file", required=False
             )
             if db_path.is_file():
-                require_file_size(db_path, maximum=MAX_REVIEW_STORE_BYTES)
+                _require_review_store_budget(db_path)
             raw = inspect_output(
                 output,
                 query_names=arguments.get("query_names"),
                 max_rows=int(arguments.get("max_rows", 50)),
                 write_packet=False,
+                max_value_bytes=MAX_REVIEW_VALUE_BYTES,
+                max_result_bytes=min(MAX_REVIEW_RESULT_BYTES, self.max_response_bytes),
             )
+            manifest_problem = _incomplete_manifest_status(output)
+            if manifest_problem:
+                raw["status"] = "failed"
+                raw.setdefault("failure_hints", []).append(manifest_problem)
             review = dict(raw.get("review", {}) or {})
             execution_provenance = _execution_provenance(output)
             artifact_summary = dict(raw.get("artifact_summary", {}) or {})
@@ -235,11 +249,13 @@ class PublicOELMCPHandlers(BaseOELMCPHandlers):
             path = self.path_policy.resolve_read(arguments["output_dir"], kind="directory")
             _authorize_review_inputs(self.path_policy, path, require_store=True)
             workspace = ReviewWorkspace.open(path)
-            require_file_size(workspace.db_path, maximum=MAX_REVIEW_STORE_BYTES)
+            _require_review_store_budget(workspace.db_path)
             result = workspace.query(
                 str(arguments["sql"]),
                 max_rows=int(arguments.get("max_rows", 100)),
                 max_vm_steps=int(arguments.get("max_vm_steps", 250_000)),
+                max_value_bytes=MAX_REVIEW_VALUE_BYTES,
+                max_result_bytes=min(MAX_REVIEW_RESULT_BYTES, self.max_response_bytes),
             )
             return {
                 "output_dir": str(workspace.output_dir),
@@ -387,14 +403,24 @@ class PublicOELMCPHandlers(BaseOELMCPHandlers):
             manifest = manifest_base(tool_id=contract.tool_id, approval_id=approval_id, prepared=prepared)
             manifest["resource_estimate"] = estimate
             manifest_path = write_execution_manifest(prepared.output_dir, manifest)
-            materialized = write_materialized_config(prepared)
-            if progress:
-                progress(1, 3, "Validated and materialized the approved scenario.")
+            materialized = prepared.output_dir / "mcp_execution_config.yaml"
             try:
+                materialized = write_materialized_config(prepared)
+                execution_path_policy = ConfigPathPolicy.default(
+                    config_path=materialized,
+                    workspace_root=Path(__file__).resolve().parents[2],
+                    read_roots=self.path_policy.read_roots,
+                    write_roots=self.path_policy.write_roots,
+                    allow_config_dir_writes=False,
+                )
+                if progress:
+                    progress(1, 3, "Validated and materialized the approved scenario.")
                 payload = run_simulation_config_file(
                     materialized,
+                    path_policy=execution_path_policy,
                     step_callback=cancellation_callback(cancel_event),
                 )
+                cancellation_callback(cancel_event)()
                 if progress:
                     progress(2, 3, "Deterministic execution completed; collecting artifacts.")
                 artifacts = _existing_artifacts(prepared.output_dir, materialized)
@@ -454,11 +480,22 @@ class PublicOELMCPHandlers(BaseOELMCPHandlers):
             candidate = self.path_policy.resolve_read(arguments["candidate_output_dir"], kind="directory")
             _authorize_review_inputs(self.path_policy, base, require_store=False)
             _authorize_review_inputs(self.path_policy, candidate, require_store=False)
+            for output in (base, candidate):
+                db = output / "review" / "run.sqlite"
+                if db.is_file():
+                    _require_review_store_budget(db)
+                problem = _incomplete_manifest_status(output)
+                if problem:
+                    raise ValueError(
+                        f"Comparison source execution is not complete: {problem['status']}."
+                    )
             raw = compare_outputs(
                 base,
                 candidate,
                 metric_names=arguments["metric_names"],
                 max_rows=int(arguments.get("max_rows", 50)),
+                max_value_bytes=MAX_REVIEW_VALUE_BYTES,
+                max_result_bytes=min(MAX_REVIEW_RESULT_BYTES, self.max_response_bytes),
             )
             return {
                 "status": raw["status"],
@@ -517,7 +554,14 @@ class PublicOELMCPHandlers(BaseOELMCPHandlers):
             if summary_path.is_file():
                 require_file_size(summary_path, maximum=MAX_MANIFEST_BYTES)
                 summary = json.loads(summary_path.read_text(encoding="utf-8"))
-                summary_complete = isinstance(summary, dict) and str(summary.get("status", "")).lower() == "completed"
+                if isinstance(summary, dict):
+                    summary_status = str(summary.get("status", "")).lower()
+                    summary_complete = summary_status == "completed" or bool(
+                        not summary_status
+                        and (output / "review" / "run.sqlite").is_file()
+                        and summary.get("scenario_name")
+                        and summary.get("samples") is not None
+                    )
             source_complete = bool(
                 (provenance["status"] == "completed" and provenance["artifacts_complete"])
                 or summary_complete
@@ -574,15 +618,24 @@ class PublicOELMCPHandlers(BaseOELMCPHandlers):
             ):
                 raise ValueError("Only supported public scenario-run task recipes are available.")
             output = self.path_policy.resolve_write(arguments["output_dir"])
+            prepared = prepare_scenario(
+                config_path=Path(__file__).resolve().parents[2] / recipe.config_path,
+                output_dir=output,
+                resource_profile=str(arguments["resource_profile"]),
+                path_policy=self.path_policy,
+            )
+            estimate = resource_estimate(prepared)
+            require_safe_resource_estimate(estimate)
             ensure_new_output_dir(output)
             manifest = manifest_base(tool_id=contract.tool_id, approval_id=str(arguments["approval"]["approval_id"]))
             manifest.update(
                 {"recipe_id": recipe_id, "resource_profile": arguments["resource_profile"], "output_dir": str(output)}
             )
+            manifest["resource_estimate"] = estimate
             manifest_path = write_execution_manifest(output, manifest)
-            if progress:
-                progress(1, 3, "Prepared the approved public task recipe.")
             try:
+                if progress:
+                    progress(1, 3, "Prepared the approved public task recipe.")
                 packet = run_recipe(
                     recipe_id,
                     output_dir=output,
@@ -592,6 +645,7 @@ class PublicOELMCPHandlers(BaseOELMCPHandlers):
                     resource_profile=str(arguments["resource_profile"]),
                     step_callback=_task_cancellation_callback(cancel_event),
                 )
+                _task_cancellation_callback(cancel_event)()
                 status = str(packet.get("status", "failed"))
                 if status not in {"completed", "partial", "failed"}:
                     status = "failed"
@@ -679,6 +733,12 @@ class PublicOELMCPHandlers(BaseOELMCPHandlers):
         def operation() -> dict[str, Any]:
             report = self.path_policy.resolve_read(arguments["report_path"], kind="file")
             packet = self.path_policy.resolve_read(arguments["packet_path"], kind="file")
+            preparation_manifest = self.path_policy.resolve_read_child(
+                packet.parent,
+                "mcp_execution_manifest.json",
+                kind="file",
+                required=False,
+            )
             require_file_size(
                 packet,
                 maximum=int(arguments.get("max_packet_bytes", MAX_REPORT_SOURCE_BYTES)),
@@ -686,9 +746,13 @@ class PublicOELMCPHandlers(BaseOELMCPHandlers):
             packet_payload = json.loads(packet.read_text(encoding="utf-8"))
             if not isinstance(packet_payload, dict):
                 raise ValueError("The report packet JSON root must be an object.")
-            self.path_policy.resolve_read(str(packet_payload.get("source_output_dir", "")), kind="directory")
+            source = self.path_policy.resolve_read(
+                str(packet_payload.get("source_output_dir", "")), kind="directory"
+            )
+            _authorize_review_inputs(self.path_policy, source, require_store=False, report_sources=True)
             output = self.path_policy.resolve_write(arguments["audit_output_dir"])
-            ensure_new_output_dir(output)
+            if output.exists() and any(output.iterdir()):
+                raise FileExistsError("The approved output directory must be new or empty.")
             return audit_report_artifacts(
                 report_path=report,
                 packet_path=packet,
@@ -696,6 +760,9 @@ class PublicOELMCPHandlers(BaseOELMCPHandlers):
                 author=str(arguments["author"]),
                 model=str(arguments.get("model", "")),
                 approval_id=str(arguments["approval"]["approval_id"]),
+                preparation_manifest_path=(
+                    preparation_manifest if preparation_manifest.is_file() else None
+                ),
             )
 
         return self._envelope(
@@ -1204,6 +1271,18 @@ def _existing_artifacts(output_dir: Path, materialized: Path) -> list[str]:
     return [str(path) for path in candidates if path.exists()]
 
 
+def _require_review_store_budget(db_path: Path) -> None:
+    sidecars = (db_path, Path(str(db_path) + "-wal"), Path(str(db_path) + "-shm"))
+    total = 0
+    for path in sidecars:
+        if not path.is_file():
+            continue
+        require_file_size(path, maximum=MAX_REVIEW_STORE_BYTES)
+        total += path.stat().st_size
+        if total > MAX_REVIEW_STORE_BYTES:
+            raise ValueError("Review store and SQLite sidecars exceed the file-size budget.")
+
+
 def _authorize_review_inputs(
     path_policy: Any,
     output_dir: Path,
@@ -1227,7 +1306,20 @@ def _authorize_review_inputs(
             ]
         )
     for parts, kind, required in children:
-        path_policy.resolve_read_child(output_dir, *parts, kind=kind, required=required)
+        resolved = path_policy.resolve_read_child(output_dir, *parts, kind=kind, required=required)
+        if resolved.is_file():
+            require_file_size(resolved, maximum=MAX_MANIFEST_BYTES if resolved.suffix != ".sqlite" else MAX_REVIEW_STORE_BYTES)
+
+
+def _incomplete_manifest_status(output_dir: Path) -> dict[str, Any] | None:
+    provenance = _execution_provenance(output_dir)
+    if not provenance["available"] or provenance["status"] == "completed":
+        return None
+    return {
+        "code": "mcp_execution_not_completed",
+        "status": provenance["status"],
+        "next_step": "Use a completed execution or rerun the source workflow.",
+    }
 
 
 def _execution_provenance(output_dir: Path) -> dict[str, Any]:

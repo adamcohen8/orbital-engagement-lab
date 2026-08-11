@@ -27,8 +27,8 @@ from sim.game.arcade import (
     _arcade_score,
     _game_arcade_enabled,
     _game_arcade_initial_time_s,
-    _game_defensive_target_provider,
-    _game_random_direction_defensive_target_provider,
+    _game_defensive_target_profile,
+    _game_random_direction_defensive_target_profile,
     _new_arcade_seed,
     _score_time_used_s,
 )
@@ -44,18 +44,17 @@ from sim.game.debrief import (
     tracker_replay_history,
     write_game_debrief,
 )
-from sim.game.defensive_target import DefensiveTargetIntentProvider
 from sim.game.formatting import format_distance_km, format_speed_km_s, format_speed_m_s
 from sim.game.frame_convention import FrameConvention, normalize_frame_convention
 from sim.game.launcher import plan_operator_burns_for_config
 from sim.game.manual import (
+    AERODYNAMIC_CONTROL_MODES,
     CISLUNAR_TRANSLATION_MODES,
     MOON_RIC_TRANSLATION_MODES,
     TRANSLATION_CONTROL_MODES,
     KeyboardCommandState,
-    ManualGameCommandProvider,
 )
-from sim.game.operator import OperatorBurn, OperatorBurnCommandProvider, OperatorBurnPlan, operator_plan_summary
+from sim.game.operator import OperatorBurn, OperatorBurnPlan, operator_plan_summary
 from sim.game.recording_controller import GameClipRecordingController, GameRecordingController
 from sim.game.session import (
     GamePhysicsSession,

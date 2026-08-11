@@ -1,5 +1,7 @@
 scenario_name: performance_actuator_stack
-scenario_description: Sustained multi-object workload for RCS, electric propulsion, gimbaled thrust, magnetorquers, CMGs, reaction-wheel device dynamics, pulse torque, desaturation, and actuator faults.
+scenario_description: Sustained multi-object workload for RCS, electric propulsion,
+  gimbaled thrust, magnetorquers, CMGs, reaction-wheel device dynamics, pulse torque,
+  desaturation, and actuator faults.
 metadata:
   owner: public
   public_surface: public-performance
@@ -13,25 +15,30 @@ objects:
     specs:
       mass_kg: 250.0
       actuator_preset: BASIC_RCS_6DOF
-    initial_state: &common_state
-      position_eci_km: [7000.0, 0.0, 0.0]
-      velocity_eci_km_s: [0.0, 7.5, 0.0]
-      attitude_quat_bn: [1.0, 0.0, 0.0, 0.0]
-      angular_rate_body_rad_s: [0.0, 0.0, 0.0]
-    orbit_control:
-      kind: python
-      module: sim.control.orbit.baseline
-      class_name: StationkeepingController
-      params: &stationkeeping_params
-        target_state: [7001.0, 0.0, 0.0, 0.0, 7.5, 0.0]
-        kp_pos: 0.001
-        kd_vel: 0.0
-        max_accel_km_s2: 0.001
-    attitude_control: &zero_attitude
-      kind: python
-      module: sim.control.attitude.zero_torque
-      class_name: ZeroTorqueController
-      params: {}
+    initial_state: &id001
+      position_eci_km: &id002
+      - 7000.0
+      - 0.0
+      - 0.0
+      velocity_eci_km_s: &id003
+      - 0.0
+      - 7.5
+      - 0.0
+      attitude_quat_bn: &id004
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      angular_rate_body_rad_s: &id006
+      - 0.0
+      - 0.0
+      - 0.0
+    flight_software:
+      stack: fsw.orbit_reference
+      hardware_profile: hardware.ideal_wrench.v1
+      params:
+        max_acceleration_m_s2: 1.0
+        translation_mode: stationkeeping
   ep_sat:
     enabled: true
     kind: satellite
@@ -47,21 +54,13 @@ objects:
             max_power_w: 100.0
             power_per_newton_w: 200.0
             throttle_time_constant_s: 1.0
-    initial_state: *common_state
-    orbit_control:
-      kind: python
-      module: sim.control.orbit.electric_propulsion
-      class_name: ElectricPropulsionController
+    initial_state: *id001
+    flight_software:
+      stack: fsw.low_thrust_reference
+      hardware_profile: hardware.continuous_engine.v1
       params:
-        mass_kg: 250.0
-        max_thrust_n: 0.25
-        max_power_w: 100.0
-        power_per_newton_w: 200.0
-        base_controller:
-          module: sim.control.orbit.baseline
-          class_name: StationkeepingController
-          params: *stationkeeping_params
-    attitude_control: *zero_attitude
+        max_acceleration_m_s2: 1.0
+        translation_mode: low_thrust_phasing
   gimbal_sat:
     enabled: true
     kind: satellite
@@ -72,112 +71,143 @@ objects:
         preset: BASIC_GIMBALED_THRUSTER
         orbital:
           gimbaled_thruster:
-            neutral_direction_body: [-1.0, 0.0, 0.0]
-            position_body_m: [0.0, 0.2, 0.0]
+            neutral_direction_body:
+            - -1.0
+            - 0.0
+            - 0.0
+            position_body_m:
+            - 0.0
+            - 0.2
+            - 0.0
             max_gimbal_angle_deg: 5.0
             max_gimbal_rate_deg_s: 2.0
             response_time_constant_s: 1.0
-    initial_state: *common_state
-    orbit_control:
-      kind: python
-      module: sim.control.orbit.gimbaled_thruster
-      class_name: GimbaledThrusterController
+    initial_state: *id001
+    flight_software:
+      stack: fsw.orbit_reference
+      hardware_profile: hardware.ideal_wrench.v1
       params:
-        neutral_direction_body: [-1.0, 0.0, 0.0]
-        max_gimbal_angle_rad: 0.0872664626
-        base_controller:
-          module: sim.control.orbit.baseline
-          class_name: StationkeepingController
-          params: *stationkeeping_params
-    attitude_control: *zero_attitude
+        max_acceleration_m_s2: 1.0
+        translation_mode: stationkeeping
   mtq_sat:
     enabled: true
     kind: satellite
     role: participant
     specs:
       mass_kg: 120.0
-      mass_properties: &inertia
+      mass_properties: &id005
         inertia_reference_point: center_of_mass
         inertia_kg_m2:
-        - [12.0, 0.0, 0.0]
-        - [0.0, 10.0, 0.0]
-        - [0.0, 0.0, 8.0]
+        - - 12.0
+          - 0.0
+          - 0.0
+        - - 0.0
+          - 10.0
+          - 0.0
+        - - 0.0
+          - 0.0
+          - 8.0
       actuator_preset: BASIC_MAGNETORQUER_TRIAD
     initial_state:
-      <<: *common_state
-      angular_rate_body_rad_s: [0.02, -0.01, 0.005]
-    orbit_control: &zero_orbit
-      kind: python
-      module: sim.control.orbit.zero_controller
-      class_name: ZeroController
+      position_eci_km: *id002
+      velocity_eci_km_s: *id003
+      attitude_quat_bn: *id004
+      angular_rate_body_rad_s:
+      - 0.02
+      - -0.01
+      - 0.005
+    flight_software:
+      stack: fsw.attitude_reference
+      hardware_profile: hardware.ideal_wrench.v1
       params: {}
-    attitude_control:
-      kind: python
-      module: sim.control.attitude.bdot_magnetorquer
-      class_name: MagnetorquerBdotController
-      params:
-        magnetic_field_body_t: [0.0, 0.0, 5.0e-05]
-        gain: 1.0e5
-        max_torque_nm: 0.0001
   cmg_sat:
     enabled: true
     kind: satellite
     role: participant
     specs:
       mass_kg: 120.0
-      mass_properties: *inertia
+      mass_properties: *id005
       actuators:
         preset: BASIC_CMG_TRIAD
         attitude:
           control_moment_gyros:
-            max_torque_nm: [0.02, 0.02, 0.02]
-            momentum_nms: [1.0, 1.0, 1.0]
-            gimbal_rate_limit_rad_s: [0.1, 0.1, 0.1]
+            max_torque_nm:
+            - 0.02
+            - 0.02
+            - 0.02
+            momentum_nms:
+            - 1.0
+            - 1.0
+            - 1.0
+            gimbal_rate_limit_rad_s:
+            - 0.1
+            - 0.1
+            - 0.1
             torque_time_constant_s: 0.5
     initial_state:
-      <<: *common_state
-      attitude_quat_bn: [0.9961947, 0.0, 0.0871557, 0.0]
-    orbit_control: *zero_orbit
-    attitude_control:
-      kind: python
-      module: sim.control.attitude.cmg_steering
-      class_name: CMGSteeringController
-      params:
-        max_torque_nm: [0.02, 0.02, 0.02]
-        momentum_nms: [1.0, 1.0, 1.0]
-        gimbal_rate_limit_rad_s: [0.1, 0.1, 0.1]
-        base_controller:
-          module: sim.control.attitude.baseline
-          class_name: QuaternionPDController
-          params:
-            desired_attitude_quat_bn: [1.0, 0.0, 0.0, 0.0]
-            kp: 0.1
-            kd: 0.02
-            max_torque_nm: 0.05
+      position_eci_km: *id002
+      velocity_eci_km_s: *id003
+      attitude_quat_bn:
+      - 0.9961947
+      - 0.0
+      - 0.0871557
+      - 0.0
+      angular_rate_body_rad_s: *id006
+    flight_software:
+      stack: fsw.attitude_reference
+      hardware_profile: hardware.ideal_wrench.v1
+      params: {}
   rw_sat:
     enabled: true
     kind: satellite
     role: participant
     specs:
       mass_kg: 120.0
-      mass_properties: *inertia
+      mass_properties: *id005
       actuators:
         enabled: true
         attitude:
           reaction_wheels:
-            max_torque_nm: [0.05, 0.05, 0.05]
-            max_momentum_nms: [0.02, 0.02, 0.02]
+            max_torque_nm:
+            - 0.05
+            - 0.05
+            - 0.05
+            max_momentum_nms:
+            - 0.02
+            - 0.02
+            - 0.02
             wheel_axes_body:
-            - [1.0, 0.0, 0.0]
-            - [0.0, 1.0, 0.0]
-            - [0.0, 0.0, 1.0]
-            wheel_inertia_kg_m2: [0.0005, 0.0005, 0.0005]
-            max_speed_rad_s: [40.0, 40.0, 40.0]
+            - - 1.0
+              - 0.0
+              - 0.0
+            - - 0.0
+              - 1.0
+              - 0.0
+            - - 0.0
+              - 0.0
+              - 1.0
+            wheel_inertia_kg_m2:
+            - 0.0005
+            - 0.0005
+            - 0.0005
+            max_speed_rad_s:
+            - 40.0
+            - 40.0
+            - 40.0
             torque_time_constant_s: 0.4
-            viscous_friction_nms: [1.0e-6, 1.0e-6, 1.0e-6]
-            coulomb_friction_nm: [1.0e-5, 1.0e-5, 1.0e-5]
+            viscous_friction_nms:
+            - 1.0e-06
+            - 1.0e-06
+            - 1.0e-06
+            coulomb_friction_nm:
+            - 1.0e-05
+            - 1.0e-05
+            - 1.0e-05
           thruster_pulse:
-            max_torque_nm: [0.04, 0.04, 0.04]
+            max_torque_nm:
+            - 0.04
+            - 0.04
+            - 0.04
             pulse_quantum_s: 0.05
           wheel_desaturation:
             momentum_fraction_threshold: 0.05
@@ -186,29 +216,27 @@ objects:
         faults:
           thrust_scale: 0.98
           torque_scale: 0.97
-          torque_bias_body_nm: [1.0e-5, 0.0, 0.0]
+          torque_bias_body_nm:
+          - 1.0e-05
+          - 0.0
+          - 0.0
     initial_state:
-      <<: *common_state
-      attitude_quat_bn: [0.9848078, 0.0, 0.1736482, 0.0]
-    orbit_control: *zero_orbit
-    attitude_control:
-      kind: python
-      module: sim.control.attitude.baseline
-      class_name: ReactionWheelPDController
-      params:
-        wheel_axes_body:
-        - [1.0, 0.0, 0.0]
-        - [0.0, 1.0, 0.0]
-        - [0.0, 0.0, 1.0]
-        wheel_torque_limits_nm: [0.05, 0.05, 0.05]
-        desired_attitude_quat_bn: [1.0, 0.0, 0.0, 0.0]
-        desired_rate_body_rad_s: [0.0, 0.0, 0.0]
-        kp: [0.2, 0.2, 0.2]
-        kd: [0.5, 0.5, 0.5]
+      position_eci_km: *id002
+      velocity_eci_km_s: *id003
+      attitude_quat_bn:
+      - 0.9848078
+      - 0.0
+      - 0.1736482
+      - 0.0
+      angular_rate_body_rad_s: *id006
+    flight_software:
+      stack: fsw.attitude_reference
+      hardware_profile: hardware.ideal_wrench.v1
+      params: {}
 simulator:
   duration_s: 120.0
   dt_s: 1.0
-  resource_profile: "off"
+  resource_profile: 'off'
   acceleration:
     mode: auto
     warmup: true

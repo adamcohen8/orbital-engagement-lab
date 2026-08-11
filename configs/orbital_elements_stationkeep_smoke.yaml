@@ -14,6 +14,10 @@ objects:
     enabled: false
     role: chaser
     kind: satellite
+    flight_software:
+      stack: fsw.passive
+      hardware_profile: hardware.passive.v1
+      params: {}
   target:
     enabled: true
     role: target
@@ -41,49 +45,14 @@ objects:
       - 0.0
       - 0.0
       - 0.0
-    orbit_control:
-      kind: python
-      module: sim.control.orbit.baseline
-      class_name: StationkeepingController
+    flight_software:
+      stack: fsw.orbit_reference
+      hardware_profile: hardware.ideal_wrench.v1
       params:
-        target_state:
-        - 0.0
-        - 0.0
-        - 0.0
-        - 0.0
-        - 0.0
-        - 0.0
-        kp_pos: 1.0e-06
-        kd_vel: 0.002
-        max_accel_km_s2: 5.0e-06
-    attitude_control:
-      kind: python
-      module: sim.control.attitude.zero_torque
-      class_name: ZeroTorqueController
-      params: {}
-    mission_strategy:
-      kind: python
-      module: sim.mission.modules
-      class_name: OrbitalElementsStationKeepMissionStrategy
-      params:
-        target_coes:
-          a_km: 7000.0
-          ecc: 0.001
-          inc_deg: 45.0
-          raan_deg: 12.0
-          argp_deg: 10.0
-        kp_pos: 1.0e-06
-        kd_vel: 0.002
-        max_accel_km_s2: 5.0e-06
-        align_to_thrust: true
-    mission_execution:
-      kind: python
-      module: sim.mission.modules
-      class_name: ControllerPointingExecution
-      params:
-        require_attitude_alignment: false
-        alignment_tolerance_deg: 180.0
-    mission_objectives: []
+        max_acceleration_m_s2: 0.005
+        translation_mode: orbital_elements
+        target_semi_major_axis_m: 7000000.0
+        target_eccentricity: 0.0
 simulator:
   duration_s: 600.0
   dt_s: 5.0

@@ -145,14 +145,7 @@ def test_profile_definitions_and_reference_ci_use_constraints_and_dependency_evi
             assert "constraints/py314.txt" in text, rel_path
             assert "installation.md" in text, rel_path
 
-    workflow = "\n".join(
-        path.read_text(encoding="utf-8")
-            for path in (
-                ROOT / ".github" / "workflows" / "ci.yml",
-                ROOT / ".github" / "workflows" / "dependency-audit.yml",
-                ROOT / "tools" / "run_supply_chain_gate.py",
-            )
-    )
+    workflow = (ROOT / "tools" / "run_supply_chain_gate.py").read_text(encoding="utf-8")
     for artifact in (
         "pip-install-report.json",
         "pip-check.txt",
@@ -177,15 +170,48 @@ def test_public_trainer_guides_include_explicit_windows_and_posix_commands() -> 
         assert "run_simulation.py --doctor" in text, rel_path
 
 
-def test_compatibility_workflow_covers_every_declared_host_and_python_row() -> None:
+def test_compatibility_workflow_runs_one_unavailable_host_row() -> None:
     path = ROOT / ".github" / "workflows" / "compatibility.yml"
     source = path.read_text(encoding="utf-8")
     workflow = yaml.safe_load(source)
     jobs = workflow["jobs"]
-    smoke = jobs["compatibility-smoke"]
+    smoke = jobs["platform-diagnostic"]
+    triggers = workflow.get("on", workflow.get(True))
+    assert set(triggers) == {"pull_request", "workflow_dispatch"}
+    assert set(jobs) == {"platform-diagnostic"}
+    assert "strategy" not in smoke
+    assert smoke["timeout-minutes"] == 20
+    inputs = triggers["workflow_dispatch"]["inputs"]
+    assert inputs["target"]["options"] == ["windows-x64", "macos-intel"]
+    assert inputs["python-version"]["options"] == list(SUPPORTED_MINORS)
+    assert ".github/workflows/compatibility.yml" in triggers["pull_request"]["paths"]
+
+    for required_text in (
+        "--only-binary=:all:",
+        "pip-install-report.json",
+        "run_compatibility_smoke.py",
+        "--acceptance-class github-hosted-automation",
+        "--skip-dependency-audit",
+        "windows-2022",
+        "macos-15-intel",
+        "actions/upload-artifact@v6",
+    ):
+        assert required_text in source
+    for prohibited_text in (
+        "schedule:",
+        "matrix:",
+        "pip_audit",
+        "pytest",
+        "validation/compatibility_acceptance.py",
+    ):
+        assert prohibited_text not in source
+
+
+def test_local_matrix_definition_still_covers_declared_compatibility_program() -> None:
     full_rows = build_matrix("full")["include"]
     canary_rows = build_matrix("canary")["include"]
-
+    assert len(full_rows) == 20
+    assert len(canary_rows) == 14
     assert {row["runner"] for row in full_rows} == {
         "ubuntu-22.04",
         "windows-2022",
@@ -193,74 +219,18 @@ def test_compatibility_workflow_covers_every_declared_host_and_python_row() -> N
         "macos-15-intel",
     }
     assert {row["python_version"] for row in full_rows} == set(SUPPORTED_MINORS)
-    assert len(full_rows) == 20
-    assert len(canary_rows) == 14
-    assert {row["python_version"] for row in canary_rows if row["system"] == "Darwin"} == {"3.10", "3.14"}
-    triggers = workflow.get("on", workflow.get(True))
-    assert "pull_request" not in triggers
-    assert "push" not in triggers
-    assert triggers["schedule"] == [{"cron": "17 6 1 * *"}]
-    assert triggers["workflow_dispatch"]["inputs"]["scope"]["default"] == "canary"
-    assert "full" in triggers["workflow_dispatch"]["inputs"]["scope"]["options"]
-    assert smoke["timeout-minutes"] == "${{ matrix.timeout_minutes }}"
-    assert {row["machine"] for row in full_rows} == {
-        "x86_64",
-        "AMD64",
-        "arm64",
-    }
-    intel_macos = next(row for row in full_rows if row["runner"] == "macos-15-intel")
-    assert intel_macos["acceleration"] == "unavailable"
-    assert smoke["needs"] == "compatibility-plan"
-    assert "fromJSON(needs.compatibility-plan.outputs.matrix)" in str(smoke["strategy"]["matrix"])
-
-    for required_text in (
-        "--only-binary=:all:",
-        "pip-install-report.json",
-        "pip-audit.json",
-        "run_compatibility_smoke.py",
-        "--acceptance-class github-hosted-automation",
-        "validation/compatibility_acceptance.py",
-        "authoritative-acceptance/compatibility_acceptance_manifest.json",
-        "['overall_passed'] is True",
-        "compatibility-evidence.json",
-        "hashFiles(format('constraints/{0}.txt'",
-        "sim/acceleration/**/*.py",
-        "actions/upload-artifact@v6",
-        "tools/compatibility_matrix.py",
-    ):
-        assert required_text in source
-
-
-def test_boundary_regression_and_capability_checks_share_smoke_environments() -> None:
-    workflow = yaml.safe_load((ROOT / ".github" / "workflows" / "compatibility.yml").read_text(encoding="utf-8"))
-    jobs = workflow["jobs"]
-    assert set(jobs) == {"compatibility-plan", "compatibility-smoke"}
-
-    full_rows = build_matrix("full")["include"]
     boundary_rows = [row for row in full_rows if row["boundary"]]
     assert len(boundary_rows) == 8
     assert {row["python_version"] for row in boundary_rows} == {"3.10", "3.14"}
     assert len({row["runner"] for row in boundary_rows}) == 4
 
-    boundary_steps = [step for step in jobs["compatibility-smoke"]["steps"] if step.get("if") == "matrix.boundary"]
-    assert {step["name"] for step in boundary_steps} == {
-        "Run full public regression on boundary interpreters",
-        "Exercise acceleration and validation boundaries",
-    }
 
-
-def test_generated_public_compatibility_workflow_matches_private_matrix() -> None:
-    private = (ROOT / ".github" / "workflows" / "compatibility.yml").read_text(encoding="utf-8")
-    generator = ROOT / "tools" / "public_export" / "workflows.py"
-    if generator.is_file():
-        from tools.public_export.workflows import PUBLIC_COMPATIBILITY_WORKFLOW
-
-        assert PUBLIC_COMPATIBILITY_WORKFLOW == private
-    else:
-        assert "push:" not in private
-        assert "schedule:" in private
-        assert "workflow_dispatch:" in private
-        assert "private-main" not in private
+def test_public_export_does_not_generate_hosted_test_workflows() -> None:
+    generator = (ROOT / "tools" / "public_export" / "workflows.py").read_text(encoding="utf-8")
+    assert "PUBLIC_PAGES_WORKFLOW" in generator
+    assert "PUBLIC_COMPATIBILITY_WORKFLOW" not in generator
+    assert "PUBLIC_CI_WORKFLOW" not in generator
+    assert "PUBLIC_DEPENDENCY_AUDIT_WORKFLOW" not in generator
 
 
 def test_desktop_evidence_requires_explicit_manual_attestations(tmp_path: Path) -> None:
@@ -313,6 +283,21 @@ def test_desktop_and_hosted_evidence_classes_cannot_be_confused(tmp_path: Path) 
             "evidence",
         ]
     ).acceptance_class == LOCAL_ACCEPTANCE
+
+    hosted = _parser().parse_args(
+        [
+            "--constraints",
+            "constraints/py311.txt",
+            "--install-report",
+            "install.json",
+            "--skip-dependency-audit",
+            "--output-dir",
+            "evidence",
+            "--acceptance-class",
+            HOSTED_ACCEPTANCE,
+        ]
+    )
+    assert hosted.skip_dependency_audit is True
 
 
 def test_hosted_evidence_requires_github_actions_provenance(

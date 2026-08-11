@@ -1,0 +1,99 @@
+scenario_name: reference_gnc_rpo_executive
+scenario_description: Maintained approach, terminal-hold, and abort mission-executive
+  pattern.
+metadata:
+  owner: public
+  public_surface: reference-gnc
+  support_level: supported
+objects:
+  target:
+    enabled: true
+    kind: satellite
+    role: target
+    specs:
+      mass_kg: 120.0
+    initial_state:
+      position_eci_km:
+      - 7000.0
+      - 0.0
+      - 0.0
+      velocity_eci_km_s:
+      - 0.0
+      - 7.546
+      - 0.0
+    flight_software:
+      stack: fsw.passive
+      hardware_profile: hardware.passive.v1
+      params: {}
+  chaser:
+    enabled: true
+    kind: satellite
+    role: chaser
+    specs:
+      dry_mass_kg: 90.0
+      fuel_mass_kg: 10.0
+      isp_s: 220.0
+    initial_state:
+      relative_to: target
+      relative_ric_rect:
+      - 0.0
+      - -1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+    knowledge:
+      refresh_rate_s: 1.0
+      targets:
+      - target
+      conditions:
+        require_line_of_sight: false
+        max_range_km: 100.0
+      sensor_error:
+        pos_sigma_km:
+        - 0.0
+        - 0.0
+        - 0.0
+        vel_sigma_km_s:
+        - 0.0
+        - 0.0
+        - 0.0
+      estimation:
+        type: ekf
+    flight_software:
+      stack: fsw.rpo_reference
+      hardware_profile: hardware.ideal_wrench.v1
+      params:
+        max_acceleration_m_s2: 0.001
+        reference_object_id: target
+        translation_mode: v_bar_approach
+        goal_type: rpo.v_bar_approach
+simulator:
+  duration_s: 90.0
+  dt_s: 5.0
+  dynamics:
+    orbit:
+      model: two_body
+    attitude:
+      enabled: false
+  termination:
+    earth_impact_enabled: false
+  plugin_validation:
+    strict: true
+outputs:
+  output_dir: outputs/reference_gnc_rpo_executive
+  mode: save
+  stats:
+    print_summary: false
+    save_json: true
+    save_full_log: true
+    controller_debug: false
+  plots:
+    enabled: false
+    figure_ids: []
+  animations:
+    enabled: false
+    types: []
+  review:
+    enabled: true
+    detail: standard

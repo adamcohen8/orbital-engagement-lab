@@ -31,37 +31,6 @@ objects:
         - 0.0
         - 0.00075
       relative_to: target
-    orbit_control:
-      kind: python
-      module: sim.control.orbit.rmoe
-      class_name: RMOEIfThenController
-      params:
-        mean_motion_rad_s: 0.001078
-        max_accel_km_s2: 2.0e-06
-        max_drift_rate_m_s: 0.05
-        close_zone_m: 50.0
-        cross_track_burn_gate_m: 75.0
-        target:
-          radial_center_m: 0.0
-          in_track_center_m: 0.0
-          in_track_drift_rate_m_s: 0.0
-          cross_track_amplitude_m: 800.0
-        tolerances:
-          radial_center_m: 20.0
-          in_track_center_m: 5.0
-          in_track_drift_rate_m_s: 0.001
-          cross_track_amplitude_m: 50.0
-        gains:
-          drift: 0.002
-          radial_center: 1.0e-06
-          in_track_center: 1.0e-05
-          cross_track_amplitude: 1.0e-05
-        ric_curv_state_slice:
-        - 0
-        - 6
-        chief_eci_state_slice:
-        - 6
-        - 12
     knowledge:
       refresh_rate_s: 1.0
       targets:
@@ -81,6 +50,17 @@ objects:
       estimation:
         type: ekf
     kind: satellite
+    flight_software:
+      stack: fsw.rpo_reference
+      hardware_profile: hardware.ideal_wrench.v1
+      params:
+        max_acceleration_m_s2: 0.002
+        reference_object_id: target
+        translation_mode: ric_hold
+        control_law: rmoe_if_then
+        rmoe_target_cross_track_amplitude_m: 750.0
+        rmoe_max_drift_rate_m_s: 0.02
+        goal_type: rpo.rmoe_nmc
   target:
     enabled: true
     role: target
@@ -96,12 +76,11 @@ objects:
         raan_deg: 0.0
         argp_deg: 0.0
         true_anomaly_deg: 0.0
-    orbit_control:
-      kind: python
-      module: sim.control.orbit.zero_controller
-      class_name: ZeroController
-      params: {}
     kind: satellite
+    flight_software:
+      stack: fsw.passive
+      hardware_profile: hardware.passive.v1
+      params: {}
 simulator:
   duration_s: 24000.0
   dt_s: 1.0

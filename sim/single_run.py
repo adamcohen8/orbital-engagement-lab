@@ -42,11 +42,11 @@ from sim.execution.object_workers import (
     ObjectStepExecutor,
     ObjectStepInput,
     ObjectStepResult,
-    ProcessPoolObjectStepExecutor,
     SerialObjectStepExecutor,
 )
 from sim.execution.runtime_profile import _RuntimeProfiler
 from sim.execution.single_run_history import SingleRunHistoryStore
+from sim.gnc.contracts import merge_mission_intent_layers
 from sim.reporting.run_payload_assembly import SingleRunPayloadAssembler, _SingleRunPayloadParts
 from sim.resource_limits import (
     HistoryMemoryEstimate,
@@ -61,7 +61,6 @@ from sim.runtime_support import (
     _build_knowledge_base,
     _create_rocket_runtime,
     _create_satellite_runtime,
-    _decision_truth_from_belief,
     _deploy_from_rocket,
     _rocket_state_to_truth,
     _run_mission_execution,
@@ -166,6 +165,11 @@ def _write_state_truth(row: np.ndarray, truth: StateTruth) -> None:
     row[6:10] = truth.attitude_quat_bn
     row[10:13] = truth.angular_rate_body_rad_s
     row[13] = truth.mass_kg
+
+
+def _onboard_belief_vector(agent: AgentRuntime) -> np.ndarray | None:
+    runtime = agent.flight_software_runtime
+    return None if runtime is None else runtime.onboard_state_vector()
 
 
 class _SingleRunEngine:
@@ -370,6 +374,16 @@ class _SingleRunEngine:
                 dt_s=self.dt,
                 rng=np.random.default_rng(int(rng.integers(0, 2**31 - 1))),
             )
+        initial_world_truth = {
+            aid: agent.truth for aid, agent in self.agents.items() if agent.kind == "satellite" and agent.active
+        }
+        for _aid, agent in self.agents.items():
+            if agent.kind == "satellite" and agent.active and agent.flight_software_runtime is not None:
+                agent.flight_software_runtime.prepare_interval(
+                    agent.truth,
+                    start_time_ns=0,
+                    world_truth=initial_world_truth,
+                )
 
         self.history_memory_estimate = self._estimate_history_memory()
         enforce_history_memory_budget(self.history_memory_estimate)
@@ -385,13 +399,24 @@ class _SingleRunEngine:
 
         self.truth_hist = {aid: np.full((self.n, 14), np.nan) for aid in self.agents.keys()}
         self.belief_hist = {
-            aid: np.full((self.n, int(agent.belief.state.size) if agent.belief is not None else 0), np.nan)
+            aid: np.full(
+                (
+                    self.n,
+                    int(agent.belief.state.size)
+                    if agent.belief is not None
+                    else int(_onboard_belief_vector(agent).size)
+                    if _onboard_belief_vector(agent) is not None
+                    else 0,
+                ),
+                np.nan,
+            )
             for aid, agent in self.agents.items()
         }
         self.thrust_hist = {aid: np.full((self.n, 3), np.nan) for aid in self.agents.keys()}
         self.torque_hist = {aid: np.full((self.n, 3), np.nan) for aid in self.agents.keys()}
         self.desired_attitude_hist = {aid: np.full((self.n, 4), np.nan) for aid in self.agents.keys()}
         self.controller_debug_hist: dict[str, list[dict[str, Any]]] = {aid: [] for aid in self.agents.keys()}
+        self.command_decision_hist: dict[str, list[dict[str, Any]]] = {aid: [] for aid in self.agents.keys()}
         self._last_orbital_command_eval_t_s: dict[str, float | None] = {aid: None for aid in self.agents.keys()}
         self._latched_orbital_thrust_cmd_by_object: dict[str, np.ndarray] = {
             aid: self.zero3.copy() for aid in self.agents.keys()
@@ -457,7 +482,6 @@ class _SingleRunEngine:
         self.burn_samples_by_object = {aid: 0 for aid in self.agents.keys()}
         self.max_accel_km_s2_by_object = {aid: 0.0 for aid in self.agents.keys()}
         self.current_index = 0
-        self.external_intent_providers: dict[str, Callable[..., dict[str, Any] | None]] = {}
 
         for aid, agent in self.agents.items():
             if not agent.active:
@@ -467,6 +491,11 @@ class _SingleRunEngine:
             if agent.belief is not None:
                 self._ensure_belief_hist_width(aid, agent.belief.state.size)
                 self.belief_hist[aid][0, : agent.belief.state.size] = agent.belief.state
+            else:
+                onboard = _onboard_belief_vector(agent)
+                if onboard is not None:
+                    self._ensure_belief_hist_width(aid, onboard.size)
+                    self.belief_hist[aid][0, : onboard.size] = onboard
             if agent.kind == "rocket" and agent.rocket_state is not None and self.rocket_stage_hist is not None:
                 self.rocket_stage_hist[0] = float(agent.rocket_state.active_stage_index)
                 if self.rocket_q_dyn_hist is not None:
@@ -560,8 +589,10 @@ class _SingleRunEngine:
         active = bool(altitude_km <= self.reentry_cfg.begin_altitude_km)
         self.reentry_active_by_object[aid] = bool(self.reentry_active_by_object.get(aid, False) or active)
         prev_heat = 0.0
+        prev_heat_rate: float | None = None
         if sample_index > 0:
             prev_heat = float(self.reentry_metric_hists[aid]["heat_load_j_m2"][sample_index - 1])
+            prev_heat_rate = float(self.reentry_metric_hists[aid]["heat_rate_w_m2"][sample_index - 1])
         metrics = reentry_metrics_for_state(
             r_eci_km=truth.position_eci_km,
             v_eci_km_s=truth.velocity_eci_km_s,
@@ -572,6 +603,7 @@ class _SingleRunEngine:
             env=self.base_environment,
             active=active,
             previous_heat_load_j_m2=prev_heat,
+            previous_heat_rate_w_m2=prev_heat_rate,
         )
         for key, value in metrics.items():
             if key in self.reentry_metric_hists[aid]:
@@ -647,7 +679,12 @@ class _SingleRunEngine:
     def _ensure_sample_capacity(self, sample_index: int) -> None:
         self.history_store.ensure_sample_capacity(sample_index)
 
-    def snapshot(self, step_index: int | None = None) -> dict[str, Any]:
+    def snapshot(
+        self,
+        step_index: int | None = None,
+        *,
+        include_flight_software: bool = True,
+    ) -> dict[str, Any]:
         if step_index is None:
             idx = self.current_index
         elif self.history_mode == "dynamic":
@@ -673,6 +710,12 @@ class _SingleRunEngine:
                         np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, target_mass_kg]),
                     )
                 )
+        flight_software = {}
+        if include_flight_software:
+            for object_id, agent in self.agents.items():
+                runtime = agent.flight_software_runtime
+                if runtime is not None and (checkpoint := runtime.checkpoint()) is not None:
+                    flight_software[object_id] = checkpoint
         return {
             "step_index": int(self.sample_offset + idx),
             "time_s": float(self.t_s[idx]),
@@ -680,92 +723,32 @@ class _SingleRunEngine:
             "belief": {oid: np.array(hist[idx], dtype=float) for oid, hist in self.belief_hist.items()},
             "applied_thrust": {oid: np.array(hist[idx], dtype=float) for oid, hist in self.thrust_hist.items()},
             "applied_torque": {oid: np.array(hist[idx], dtype=float) for oid, hist in self.torque_hist.items()},
+            "flight_software": flight_software,
         }
 
-    def set_external_intent_provider(
-        self,
-        object_id: str,
-        provider: Callable[..., dict[str, Any] | None] | None,
-    ) -> None:
-        oid = str(object_id)
-        if provider is None:
-            self.external_intent_providers.pop(oid, None)
-            return
-        if isinstance(self.object_step_executor, ProcessPoolObjectStepExecutor):
-            plan = dict(getattr(self, "object_execution_plan", {}) or {})
-            if plan.get("policy") == "auto":
-                self.object_step_executor.shutdown()
-                self.object_step_executor = SerialObjectStepExecutor(self)
-                plan.update(
-                    {
-                        "selected_backend": "serial",
-                        "selected_workers": 1,
-                        "eligible": False,
-                        "reason": (
-                            "auto planner switched to serial because an external intent "
-                            f"provider was attached for object {oid!r}"
-                        ),
-                        "allocation": self._object_worker_allocation(
-                            [aid for aid, agent in self.agents.items() if agent.active],
-                            1,
-                        ),
-                    }
-                )
-                self.object_execution_plan = plan
-            else:
-                raise RuntimeError(
-                    "External intent providers are not supported by object-parallel execution. "
-                    "Use simulator.execution.policy=auto or serial."
-                )
-        self.external_intent_providers[oid] = provider
+    def publish_fsw_input(self, object_id: str, event: object) -> None:
+        agent = self.agents.get(str(object_id))
+        runtime = None if agent is None else agent.flight_software_runtime
+        if runtime is None:
+            raise ValueError(f"Object {object_id!r} does not use a v2 SatelliteFlightSoftware runtime.")
+        runtime.enqueue(event)
 
-    def _external_intent(
-        self,
-        *,
-        ctx: _DecisionContext,
-    ) -> dict[str, Any]:
-        agent = ctx.agent
-        decision_truth = _decision_truth_from_belief(agent)
-        out: dict[str, Any] = {}
-        provider = self.external_intent_providers.get(str(agent.object_id))
-        if provider is not None:
-            out.update(self._call_external_intent_provider(provider, ctx=ctx, decision_truth=decision_truth))
-        bridge = getattr(agent, "bridge", None)
-        bridge_provider = getattr(bridge, "external_intent", None) if bridge is not None else None
-        if callable(bridge_provider):
-            out.update(self._call_external_intent_provider(bridge_provider, ctx=ctx, decision_truth=decision_truth))
-        return out
+    def add_fsw_input_publisher(self, object_id: str, publisher: Callable[..., object]) -> None:
+        agent = self.agents.get(str(object_id))
+        runtime = None if agent is None else agent.flight_software_runtime
+        if runtime is None:
+            raise ValueError(f"Object {object_id!r} does not use a v2 SatelliteFlightSoftware runtime.")
+        runtime.add_input_publisher(publisher)
 
-    def _call_external_intent_provider(
-        self,
-        provider: Callable[..., dict[str, Any] | None],
-        *,
-        ctx: _DecisionContext,
-        decision_truth: StateTruth | None,
-    ) -> dict[str, Any]:
-        agent = ctx.agent
-        try:
-            ret = provider(
-                object_id=agent.object_id,
-                truth=decision_truth,
-                belief=agent.belief,
-                own_knowledge=(agent.knowledge_base.snapshot() if agent.knowledge_base is not None else {}),
-                env=ctx.env,
-                t_s=ctx.t_s,
-                dt_s=ctx.dt_s,
-                orbit_controller=ctx.orbit_controller,
-                attitude_controller=ctx.attitude_controller,
-                orb_belief=ctx.orb_belief,
-                att_belief=ctx.att_belief,
-                dry_mass_kg=agent.dry_mass_kg,
-                fuel_capacity_kg=agent.fuel_capacity_kg,
-                thruster_direction_body=agent.thruster_direction_body,
-            )
-        except TypeError:
-            ret = provider(truth=decision_truth, t_s=ctx.t_s, dt_s=ctx.dt_s)
-        return ret if isinstance(ret, dict) else {}
+    def request_fsw_input_publisher_poll(self, object_id: str) -> None:
+        agent = self.agents.get(str(object_id))
+        runtime = None if agent is None else agent.flight_software_runtime
+        if runtime is None:
+            raise ValueError(f"Object {object_id!r} does not use a v2 SatelliteFlightSoftware runtime.")
+        time_ns = int(round(float(self.t_s[self.current_index]) * 1.0e9))
+        runtime.request_input_publisher_poll(time_ns=time_ns)
 
-    def _run_agent_decision(self, ctx: _DecisionContext, *, include_external_intent: bool = True) -> dict[str, Any]:
+    def _run_agent_decision(self, ctx: _DecisionContext) -> dict[str, Any]:
         agent = ctx.agent
         orbit_proxy = (
             None
@@ -785,7 +768,7 @@ class _SingleRunEngine:
                 deadline_policy=self.controller_deadline_policy,
             )
         )
-        mission_out = _run_mission_modules(
+        module_out = _run_mission_modules(
             agent=agent,
             t_s=ctx.t_s,
             dt_s=ctx.dt_s,
@@ -795,33 +778,40 @@ class _SingleRunEngine:
             orb_belief=ctx.orb_belief,
             att_belief=ctx.att_belief,
         )
-        mission_out.update(
-            _run_mission_strategy(
-                agent=agent,
-                t_s=ctx.t_s,
-                dt_s=ctx.dt_s,
-                env=ctx.env,
-                orbit_controller=orbit_proxy,
-                attitude_controller=attitude_proxy,
-                orb_belief=ctx.orb_belief,
-                att_belief=ctx.att_belief,
+        strategy_out = _run_mission_strategy(
+            agent=agent,
+            t_s=ctx.t_s,
+            dt_s=ctx.dt_s,
+            env=ctx.env,
+            orbit_controller=orbit_proxy,
+            attitude_controller=attitude_proxy,
+            orb_belief=ctx.orb_belief,
+            att_belief=ctx.att_belief,
+        )
+        pre_execution = merge_mission_intent_layers(
+            (
+                ("mission_modules", module_out),
+                ("mission_strategy", strategy_out),
             )
         )
-        if include_external_intent:
-            mission_out.update(self._external_intent(ctx=ctx))
-        mission_out.update(
-            _run_mission_execution(
-                agent=agent,
-                intent=mission_out,
-                t_s=ctx.t_s,
-                dt_s=ctx.dt_s,
-                env=ctx.env,
-                orbit_controller=orbit_proxy,
-                attitude_controller=attitude_proxy,
-                orb_belief=ctx.orb_belief,
-                att_belief=ctx.att_belief,
-            )
+        execution_out = _run_mission_execution(
+            agent=agent,
+            intent=dict(pre_execution.values),
+            t_s=ctx.t_s,
+            dt_s=ctx.dt_s,
+            env=ctx.env,
+            orbit_controller=orbit_proxy,
+            attitude_controller=attitude_proxy,
+            orb_belief=ctx.orb_belief,
+            att_belief=ctx.att_belief,
         )
+        mission_out = merge_mission_intent_layers(
+            (
+                ("mission_modules", module_out),
+                ("mission_strategy", strategy_out),
+                ("mission_execution", execution_out),
+            )
+        ).to_runtime_dict()
         if orbit_proxy is not None and orbit_proxy.call_count:
             mission_out["_integrated_orbit_runtime_ms"] = float(orbit_proxy.runtime_ms)
             mission_out["_integrated_orbit_deadline_missed"] = bool(orbit_proxy.deadline_missed)
@@ -1016,6 +1006,8 @@ class _SingleRunEngine:
                 )
         if result.controller_debug_events:
             self.controller_debug_hist[aid].extend(result.controller_debug_events)
+        if result.command_decision_events:
+            self.command_decision_hist[aid].extend(result.command_decision_events)
         if result.updated_agent is not None or result.last_orbital_command_eval_t_s is not None:
             self._last_orbital_command_eval_t_s[aid] = result.last_orbital_command_eval_t_s
         if result.latched_orbital_thrust_cmd is not None:
@@ -1075,6 +1067,11 @@ class _SingleRunEngine:
         aid = item.object_id
         worker = copy(self)
         worker.active_step_callback = None
+        worker._forecast_dynamics_by_object = {
+            object_id: runtime.dynamics
+            for object_id, runtime in self.agents.items()
+            if runtime.active and runtime.kind == "satellite" and runtime.dynamics is not None
+        }
         worker.agents = {aid: item.agent}
         worker.rocket = worker.agents.get(aid) if item.agent.kind == "rocket" else None
         worker.chaser = worker.agents.get(aid) if aid == "chaser" else None
@@ -1083,6 +1080,7 @@ class _SingleRunEngine:
             oid: provider for oid, provider in self.general_propagation.items() if oid == aid
         }
         worker.controller_debug_hist = {aid: []}
+        worker.command_decision_hist = {aid: []}
         worker.bridge_hist = {aid: []}
         worker.runtime_profiler = _RuntimeProfiler(
             object_ids=[aid],
@@ -1133,7 +1131,7 @@ class _SingleRunEngine:
                 finally:
                     self._acceleration_context_active = False
         if self.done:
-            return self.snapshot()
+            return self.snapshot(include_flight_software=False)
 
         step_wall_t0 = perf_counter()
         compact_t0 = perf_counter()
@@ -1147,7 +1145,7 @@ class _SingleRunEngine:
         remaining_s = max(float(self.cfg.simulator.duration_s) - t, 0.0)
         step_dt = min(step_dt, remaining_s)
         if step_dt <= 0.0:
-            return self.snapshot()
+            return self.snapshot(include_flight_software=False)
         capacity_t0 = perf_counter()
         self._ensure_sample_capacity(k + 1)
         self.runtime_profiler.record_stage("history_capacity", perf_counter() - capacity_t0)
@@ -1263,6 +1261,18 @@ class _SingleRunEngine:
             if agent.belief is not None:
                 self._ensure_belief_hist_width(aid, agent.belief.state.size)
                 self.belief_hist[aid][k + 1, : agent.belief.state.size] = agent.belief.state
+            else:
+                runtime = agent.flight_software_runtime
+                if runtime is not None:
+                    runtime.prepare_interval(
+                        truth,
+                        start_time_ns=int(round(t_next * 1.0e9)),
+                        world_truth=world_truth_live,
+                    )
+                onboard = _onboard_belief_vector(agent)
+                if onboard is not None:
+                    self._ensure_belief_hist_width(aid, onboard.size)
+                    self.belief_hist[aid][k + 1, : onboard.size] = onboard
             self._record_reentry_metrics(aid=aid, truth=truth, sample_index=k + 1, dt_s=step_dt)
         self.runtime_profiler.record_stage("history_write", perf_counter() - history_t0)
 
@@ -1273,14 +1283,14 @@ class _SingleRunEngine:
         if self.termination_monitor.check_reentry(t_s=t_next):
             self.runtime_profiler.record_stage("termination_check", perf_counter() - termination_check_t0)
             self.runtime_profiler.record_stage("step_wall", perf_counter() - step_wall_t0)
-            return self.snapshot()
+            return self.snapshot(include_flight_software=False)
         if self.termination_monitor.check_earth_impact(t_s=t_next):
             self.runtime_profiler.record_stage("termination_check", perf_counter() - termination_check_t0)
             self.runtime_profiler.record_stage("step_wall", perf_counter() - step_wall_t0)
-            return self.snapshot()
+            return self.snapshot(include_flight_software=False)
         self.runtime_profiler.record_stage("termination_check", perf_counter() - termination_check_t0)
         self.runtime_profiler.record_stage("step_wall", perf_counter() - step_wall_t0)
-        return self.snapshot()
+        return self.snapshot(include_flight_software=False)
 
     def run(self) -> dict[str, Any]:
         self._ensure_full_history_payload_allowed()
@@ -1294,9 +1304,22 @@ class _SingleRunEngine:
         try:
             while not self.done:
                 self.step()
+            self._shutdown_flight_software()
             return self.build_payload()
         finally:
-            self.object_step_executor.shutdown()
+            try:
+                self._shutdown_flight_software()
+            finally:
+                self.object_step_executor.shutdown()
+
+    def _shutdown_flight_software(self) -> None:
+        shutdown_time_ns = int(round(float(self.t_s[self.current_index]) * 1.0e9))
+        for agent in self.agents.values():
+            runtime = agent.flight_software_runtime
+            if runtime is None:
+                continue
+            aligned_time_ns = shutdown_time_ns - shutdown_time_ns % runtime.tick_period_ns
+            runtime.shutdown(time_ns=aligned_time_ns)
 
     def _build_payload_parts(self) -> _SingleRunPayloadParts:
         return SingleRunPayloadAssembler(

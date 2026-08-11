@@ -1,6 +1,5 @@
 # Orbital Engagement Lab
 
-[![CI](https://github.com/adamcohen8/orbital-engagement-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/adamcohen8/orbital-engagement-lab/actions/workflows/ci.yml)
 
 Orbital Engagement Lab is an open-core Python/YAML simulator for spacecraft
 rendezvous, proximity operations, and mission-analysis prototyping. Define a

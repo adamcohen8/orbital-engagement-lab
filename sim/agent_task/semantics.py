@@ -63,21 +63,7 @@ SEMANTIC_METRICS: dict[str, SemanticMetric] = {
         units="m/s",
         table="mission_recovery_summary",
         saved_query="mission_recovery_summary",
-    ),
-    "campaign_closest_approach_km": SemanticMetric(
-        name="campaign_closest_approach_km",
-        description="Closest approach reported for each Monte Carlo campaign run.",
-        units="km",
-        table="campaign_runs",
-        saved_query="campaign_runs",
-    ),
-    "sensitivity_effect_size": SemanticMetric(
-        name="sensitivity_effect_size",
-        description="Ranked one-at-a-time or prepared-sensitivity effect size by parameter and metric.",
-        table="sensitivity_rankings",
-        saved_query="sensitivity_rankings",
-    ),
-    "validation_passed": SemanticMetric(
+    ),    "validation_passed": SemanticMetric(
         name="validation_passed",
         description="Validation benchmark pass/fail evidence from the workflow review store.",
         table="validation_benchmarks",

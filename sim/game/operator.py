@@ -2,12 +2,8 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any
 
 import numpy as np
-
-from sim.dynamics.orbit.cr3bp import cr3bp_moon_state_km_s
-from sim.utils.frames import ric_dcm_ir_from_rv
 
 MAX_OPERATOR_BURN_DELTA_V_M_S = 5.0
 MIN_OPERATOR_BURN_SPACING_S = 10.0
@@ -36,108 +32,6 @@ class OperatorBurnPlan:
     @property
     def total_delta_v_m_s(self) -> float:
         return float(sum(burn.magnitude_m_s for burn in self.burns))
-
-
-class OperatorBurnCommandProvider:
-    """External game command provider that executes pre-scripted RIC impulses."""
-
-    def __init__(
-        self,
-        plan: OperatorBurnPlan,
-        *,
-        controlled_object_id: str,
-        reference_object_id: str,
-        control_mode: str = "ric_translation",
-        relative_frame: str = "ric",
-        actuator_error_fraction: float = 0.0,
-        impulse_duration_s: float = OPERATOR_IMPULSE_DURATION_S,
-    ) -> None:
-        self.plan = plan
-        self.controlled_object_id = str(controlled_object_id)
-        self.reference_object_id = str(reference_object_id)
-        self.control_mode = str(control_mode or "ric_translation").strip().lower()
-        self.relative_frame = str(relative_frame or "ric").strip().lower()
-        self.actuator_error_fraction = max(float(actuator_error_fraction), 0.0)
-        self.impulse_duration_s = max(float(impulse_duration_s), 1.0e-9)
-        self._next_burn_index = 0
-        self.executed_delta_v_m_s = 0.0
-        self.last_executed_burn: OperatorBurn | None = None
-        self.last_executed_delta_v_ric_m_s: tuple[float, float, float] | None = None
-
-    def next_burn_time_s(self) -> float | None:
-        if self._next_burn_index >= len(self.plan.burns):
-            return None
-        return float(self.plan.burns[self._next_burn_index].time_s)
-
-    def next_burn(self) -> OperatorBurn | None:
-        if self._next_burn_index >= len(self.plan.burns):
-            return None
-        return self.plan.burns[self._next_burn_index]
-
-    def __call__(
-        self,
-        *,
-        truth: Any,
-        own_knowledge: dict[str, Any] | None = None,
-        t_s: float,
-        dt_s: float,
-        object_id: str | None = None,
-        **_: Any,
-    ) -> dict[str, Any]:
-        if object_id is not None and str(object_id) != self.controlled_object_id:
-            return {}
-        self.last_executed_burn = None
-        self.last_executed_delta_v_ric_m_s = None
-        if self._next_burn_index >= len(self.plan.burns):
-            return self._idle_intent()
-
-        step_start_s = float(t_s)
-        due_burns: list[OperatorBurn] = []
-        while self._next_burn_index < len(self.plan.burns):
-            candidate = self.plan.burns[self._next_burn_index]
-            if candidate.time_s > step_start_s + 1.0e-9:
-                break
-            due_burns.append(candidate)
-            self._next_burn_index += 1
-        if not due_burns:
-            return self._idle_intent()
-
-        reference_state = _operator_reference_state_for_frame(
-            _state_from_knowledge(dict(own_knowledge or {}), self.reference_object_id),
-            control_mode=self.control_mode,
-            relative_frame=self.relative_frame,
-        )
-        dcm_ir = ric_dcm_ir_from_rv(reference_state[:3], reference_state[3:6])
-        planned_delta_v_ric_m_s = np.sum(
-            [np.asarray(burn.delta_v_ric_m_s, dtype=float) for burn in due_burns],
-            axis=0,
-        )
-        delta_v_ric_m_s = planned_delta_v_ric_m_s * (1.0 + self.actuator_error_fraction)
-        delta_v_eci_km_s = dcm_ir @ (delta_v_ric_m_s / 1000.0)
-        thrust_eci_km_s2 = delta_v_eci_km_s / max(float(dt_s), 1.0e-9)
-        self.executed_delta_v_m_s += float(np.linalg.norm(delta_v_ric_m_s))
-        self.last_executed_burn = due_burns[-1]
-        self.last_executed_delta_v_ric_m_s = tuple(float(v) for v in delta_v_ric_m_s)
-        return {
-            "thrust_eci_km_s2": thrust_eci_km_s2,
-            "mission_bypass_orbital_command_latch": True,
-            "command_mode_flags": {
-                "operator_mode": True,
-                "operator_burn_index": self._next_burn_index,
-                "operator_burn_count": len(due_burns),
-                "operator_burn_time_s": float(due_burns[-1].time_s),
-                "operator_burn_planned_delta_v_ric_m_s": tuple(float(v) for v in planned_delta_v_ric_m_s),
-                "operator_burn_delta_v_ric_m_s": tuple(float(v) for v in delta_v_ric_m_s),
-                "operator_actuator_error_fraction": float(self.actuator_error_fraction),
-            },
-        }
-
-    def _idle_intent(self) -> dict[str, Any]:
-        return {
-            "thrust_eci_km_s2": np.zeros(3, dtype=float),
-            "mission_bypass_orbital_command_latch": True,
-            "command_mode_flags": {"operator_mode": True},
-        }
 
 
 def parse_operator_burn_plan(text: str) -> OperatorBurnPlan:
@@ -213,39 +107,3 @@ def operator_plan_summary(plan: OperatorBurnPlan) -> tuple[str, ...]:
     if len(plan.burns) > 4:
         lines.append(f"... {len(plan.burns) - 4} more")
     return tuple(lines)
-
-
-def _state_from_knowledge(own_knowledge: dict[str, Any], object_id: str) -> np.ndarray:
-    if object_id in own_knowledge:
-        candidate = own_knowledge[object_id]
-    else:
-        candidate = own_knowledge.get(str(object_id), {})
-    if isinstance(candidate, dict):
-        if "estimated_state_eci_km_s" in candidate:
-            state = candidate["estimated_state_eci_km_s"]
-        elif "state_eci_km_s" in candidate:
-            state = candidate["state_eci_km_s"]
-        elif "state" in candidate:
-            state = candidate["state"]
-        else:
-            raise KeyError(f"No ECI state available for reference object {object_id!r}.")
-    else:
-        state = getattr(candidate, "state", candidate)
-    arr = np.asarray(state, dtype=float).reshape(-1)
-    if arr.size < 6:
-        raise ValueError(f"Reference object {object_id!r} state must contain at least 6 values.")
-    return arr[:6]
-
-
-def _operator_reference_state_for_frame(reference_state_eci_km_s: np.ndarray, *, control_mode: str, relative_frame: str) -> np.ndarray:
-    state = np.asarray(reference_state_eci_km_s, dtype=float).reshape(-1)[:6]
-    frame_key = str(relative_frame or "").strip().lower()
-    mode_key = str(control_mode or "").strip().lower()
-    if frame_key in {"moon_ric", "lunar_ric", "target_moon_ric", "target_lunar_ric"} or mode_key in {
-        "moon_ric",
-        "moon_ric_translation",
-        "lunar_ric",
-        "lunar_ric_translation",
-    }:
-        return state - cr3bp_moon_state_km_s()
-    return state

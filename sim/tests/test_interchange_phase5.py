@@ -106,10 +106,9 @@ def test_mission_recovery_candidate_emits_typed_patch_and_materializes_without_e
     assert source.read_bytes() == source_before
     assert (tmp_path / "run").exists() is False
     scenario = yaml.safe_load(destination.read_text(encoding="utf-8"))
-    burn = scenario["objects"]["target"]["mission_objectives"][-1]
-    assert burn["class_name"] == "ScheduledVectorBurnMissionModule"
-    assert burn["params"]["burn_start_s"] == 11.0
-    assert burn["params"]["delta_v_m_s"] == [0.0, 0.25, 0.0]
+    burn = scenario["objects"]["target"]["flight_software"]["params"]["scheduled_burns"][-1]
+    assert burn["start_time_s"] == 11.0
+    assert burn["delta_v_m_s"] == [0.0, 0.25, 0.0]
     assert scenario["simulator"]["duration_s"] == 14.0
     assert scenario["metadata"]["handoff"]["selection"]["selection_id"] == "candidate-a"
     assert scenario["metadata"]["handoff"]["execution_occurred"] is False
@@ -257,7 +256,7 @@ def test_scenario_patch_rejects_non_allowlisted_operation_path(tmp_path: Path) -
     assert any(issue.code == "patch.path_not_allowed" for issue in report.errors)
 
 
-def test_scenario_patch_rejects_type_mismatch_and_unchecked_mission_module(tmp_path: Path) -> None:
+def test_scenario_patch_rejects_type_mismatch_and_unchecked_burn_fields(tmp_path: Path) -> None:
     source = _source_scenario(tmp_path / "source.yaml")
     emission = emit_mission_recovery_scenario_patches(
         _mission_recovery(), source_scenario=source, output_dir=tmp_path / "patches"
@@ -272,10 +271,10 @@ def test_scenario_patch_rejects_type_mismatch_and_unchecked_mission_module(tmp_p
     assert any(issue.code == "patch.selection_kind_mismatch" for issue in mismatch_report.errors)
 
     unchecked = deepcopy(product)
-    unchecked["payload"]["patch"]["operations"][0]["value"]["module"] = "custom.mission"
+    unchecked["payload"]["patch"]["operations"][0]["value"]["direct_force_override"] = True
     unchecked["product_id"] = compute_product_id(unchecked)
     unchecked_report = validate_document(unchecked, source_path=patch)
-    assert any(issue.code == "patch.mission_module_incompatible" for issue in unchecked_report.errors)
+    assert any(issue.code == "schema.unknown_field" for issue in unchecked_report.errors)
 
 
 def test_scenario_patch_payload_schema_is_checked_in() -> None:

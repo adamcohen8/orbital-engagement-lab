@@ -2,6 +2,7 @@
 from .runner_common import *
 from .runner_models import *
 from .runner_config import *
+from .launcher_common import _pos_in_bounds
 
 def _clear_dashboard_tutorial_path(dashboard: Any) -> None:
     dashboard.tutorial_target_path_ric = np.empty((0, 6), dtype=float)
@@ -52,7 +53,10 @@ def _adjust_speed_multiple(
 
 def _has_maneuver_input(state: KeyboardCommandState, *, control_mode: str = "attitude_thrust") -> bool:
     axes_active = any(abs(float(value)) > 1.0e-9 for value in (state.pitch, state.yaw, state.roll))
-    if str(control_mode or "").strip().lower() in TRANSLATION_CONTROL_MODES:
+    mode = str(control_mode or "").strip().lower()
+    if mode in AERODYNAMIC_CONTROL_MODES:
+        return bool(abs(float(state.pitch)) > 1.0e-9 or abs(float(state.roll)) > 1.0e-9)
+    if mode in TRANSLATION_CONTROL_MODES:
         return bool(axes_active and float(state.throttle) > 0.0)
     return bool(axes_active or (state.firing and float(state.throttle) > 0.0))
 
@@ -521,24 +525,56 @@ def _sandbox_setup_from_text_values(values: list[str]) -> tuple[SandboxSetupValu
         return None, "Target Semimajor Axis must be positive."
     if not (0.0 <= parsed["target_ecc"] < 1.0):
         return None, "Target Eccentricity must satisfy 0 <= e < 1."
+    if not (0.0 <= parsed["target_inc_deg"] <= 180.0):
+        return None, "Target Inclination must satisfy 0 <= i <= 180 degrees."
     return SandboxSetupValues(**parsed), ""
 
 
-def _sandbox_setup_briefing_lines(values: list[str], *, active_index: int, error: str = "") -> tuple[str, ...]:
-    lines = [
-        "Sandbox Setup",
-        "Edit the initial relative state and target orbit, then press Enter or Space to launch.",
-        "Positions are km. Relative rates are m/s. Target anomaly is degrees.",
-    ]
-    if error:
-        lines.append(f"Input Error: {error}")
-    for idx, (label, unit, _) in enumerate(_SANDBOX_SETUP_FIELDS):
-        marker = ">" if idx == int(active_index) else " "
-        suffix = f" {unit}" if unit else ""
-        value = values[idx] if idx < len(values) else ""
-        lines.append(f"{marker} {label}: {value}{suffix}")
-    lines.append("Tab/Up/Down Change Field. Backspace Edits. Enter Starts. Esc Cancels.")
-    return tuple(lines)
+def _sandbox_setup_layout(
+    pygame: Any,
+    screen_width: int,
+    screen_height: int,
+) -> tuple[tuple[Any, Any], list[Any], Any, Any]:
+    margin_x = 54
+    gap = 24
+    panel_top = 112
+    footer_top = max(int(screen_height) - 88, panel_top + 330)
+    panel_width = max((int(screen_width) - 2 * margin_x - gap) // 2, 300)
+    panel_height = max(footer_top - panel_top - 18, 320)
+    left_panel = pygame.Rect(margin_x, panel_top, panel_width, panel_height)
+    right_panel = pygame.Rect(margin_x + panel_width + gap, panel_top, panel_width, panel_height)
+    row_height = max(40, min(58, (panel_height - 82) // 6))
+    field_rects: list[Any] = []
+    for panel in (left_panel, right_panel):
+        input_x = panel.x + max(int(panel.width * 0.57), 170)
+        input_width = max(panel.right - input_x - 18, 96)
+        for row in range(6):
+            field_rects.append(
+                pygame.Rect(
+                    input_x,
+                    panel.y + 60 + row * row_height,
+                    input_width,
+                    max(row_height - 10, 30),
+                )
+            )
+    launch_rect = pygame.Rect(int(screen_width) - 180, int(screen_height) - 70, 126, 36)
+    cancel_rect = pygame.Rect(launch_rect.x - 130, launch_rect.y, 120, 36)
+    return (left_panel, right_panel), field_rects, launch_rect, cancel_rect
+
+
+def _sandbox_setup_next_field(active_index: int, key: Any, pygame: Any) -> int:
+    index = int(active_index) % len(_SANDBOX_SETUP_FIELDS)
+    row = index % 6
+    column = index // 6
+    if key == pygame.K_UP:
+        return column * 6 + (row - 1) % 6
+    if key == pygame.K_DOWN:
+        return column * 6 + (row + 1) % 6
+    if key == getattr(pygame, "K_LEFT", object()):
+        return row
+    if key == getattr(pygame, "K_RIGHT", object()):
+        return 6 + row
+    return index
 
 
 def _run_sandbox_setup_form(
@@ -553,68 +589,112 @@ def _run_sandbox_setup_form(
     active_idx = 0
     error = ""
     allowed_chars = set("0123456789+-.eE")
-    while not getattr(dashboard, "closed", False):
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                return None
-            if event.type == getattr(pygame, "MOUSEWHEEL", object()):
-                dashboard.scroll_briefing(-int(getattr(event, "y", 0)) * BRIEFING_SCROLL_STEP_PX)
-                continue
-            if event.type != pygame.KEYDOWN:
-                continue
-            key = getattr(event, "key", None)
-            if key == pygame.K_ESCAPE:
-                return None
-            if key in {pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE}:
-                setup, error = _sandbox_setup_from_text_values(values)
-                if setup is not None:
-                    return setup
-                continue
-            if key in {pygame.K_TAB, pygame.K_DOWN}:
-                active_idx = (active_idx + 1) % len(values)
-                error = ""
-                continue
-            if key == pygame.K_UP:
-                active_idx = (active_idx - 1) % len(values)
-                error = ""
-                continue
-            if key == getattr(pygame, "K_PAGEUP", object()):
-                dashboard.scroll_briefing(-BRIEFING_SCROLL_STEP_PX * 4)
-                continue
-            if key == getattr(pygame, "K_PAGEDOWN", object()):
-                dashboard.scroll_briefing(BRIEFING_SCROLL_STEP_PX * 4)
-                continue
-            if key == getattr(pygame, "K_HOME", object()):
-                dashboard.scroll_briefing(-1000000)
-                continue
-            if key == getattr(pygame, "K_END", object()):
-                dashboard.scroll_briefing(1000000)
-                continue
-            if key == pygame.K_BACKSPACE:
-                values[active_idx] = values[active_idx][:-1]
-                error = ""
-                continue
-            if key == getattr(pygame, "K_DELETE", object()):
-                values[active_idx] = ""
-                error = ""
-                continue
-            text = str(getattr(event, "unicode", "") or "")
-            if text and all(ch in allowed_chars for ch in text):
-                values[active_idx] += text
-                error = ""
-        dashboard.draw(
-            command_status="Sandbox Setup",
-            coach_hint=error or "Choose a starting state, then launch and experiment freely.",
-            mission_state="active",
-            level_title=level_title,
-            mission_metrics=("INFO Sandbox",),
-            objective_checklist=(),
-            speed_multiple=speed_multiple,
-            selected_speed_multiple=speed_multiple,
-            briefing_lines=_sandbox_setup_briefing_lines(values, active_index=active_idx, error=error),
-        )
-        dashboard.tick(30.0)
-    return None
+    del speed_multiple
+    from sim.game.launcher_widgets import _draw_sandbox_setup_screen
+
+    get_grab = getattr(pygame.event, "get_grab", None)
+    set_grab = getattr(pygame.event, "set_grab", None)
+    mouse_api = getattr(pygame, "mouse", None)
+    get_visible = getattr(mouse_api, "get_visible", None)
+    set_visible = getattr(mouse_api, "set_visible", None)
+    previous_grab = bool(get_grab()) if callable(get_grab) else False
+    previous_visible = bool(get_visible()) if callable(get_visible) else True
+    if callable(set_grab):
+        set_grab(False)
+    if callable(set_visible):
+        set_visible(True)
+    try:
+        while not getattr(dashboard, "closed", False):
+            width, height = dashboard.screen.get_size()
+            panels, field_rects, launch_rect, cancel_rect = _sandbox_setup_layout(pygame, width, height)
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    return None
+                if event.type == getattr(pygame, "MOUSEBUTTONDOWN", object()):
+                    if int(getattr(event, "button", 0)) != 1:
+                        continue
+                    mouse_pos = getattr(event, "pos", None)
+                    if mouse_pos is None:
+                        get_pos = getattr(mouse_api, "get_pos", None)
+                        mouse_pos = get_pos() if callable(get_pos) else (-1, -1)
+                    if _pos_in_bounds(mouse_pos, (launch_rect.x, launch_rect.y, launch_rect.w, launch_rect.h)):
+                        setup, error = _sandbox_setup_from_text_values(values)
+                        if setup is not None:
+                            return setup
+                        continue
+                    if _pos_in_bounds(mouse_pos, (cancel_rect.x, cancel_rect.y, cancel_rect.w, cancel_rect.h)):
+                        return None
+                    for idx, rect in enumerate(field_rects):
+                        if _pos_in_bounds(mouse_pos, (rect.x, rect.y, rect.w, rect.h)):
+                            active_idx = idx
+                            error = ""
+                            break
+                    continue
+                if event.type != pygame.KEYDOWN:
+                    continue
+                key = getattr(event, "key", None)
+                if key == pygame.K_ESCAPE:
+                    return None
+                if key in {pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE}:
+                    setup, error = _sandbox_setup_from_text_values(values)
+                    if setup is not None:
+                        return setup
+                    continue
+                if key == pygame.K_TAB:
+                    backwards = bool(getattr(event, "mod", 0) & getattr(pygame, "KMOD_SHIFT", 0))
+                    active_idx = (active_idx + (-1 if backwards else 1)) % len(values)
+                    error = ""
+                    continue
+                if key in {
+                    pygame.K_DOWN,
+                    pygame.K_UP,
+                    getattr(pygame, "K_LEFT", object()),
+                    getattr(pygame, "K_RIGHT", object()),
+                }:
+                    active_idx = _sandbox_setup_next_field(active_idx, key, pygame)
+                    error = ""
+                    continue
+                if key == pygame.K_BACKSPACE:
+                    values[active_idx] = values[active_idx][:-1]
+                    error = ""
+                    continue
+                if key == getattr(pygame, "K_DELETE", object()):
+                    values[active_idx] = ""
+                    error = ""
+                    continue
+                text = str(getattr(event, "unicode", "") or "")
+                if text and all(ch in allowed_chars for ch in text):
+                    values[active_idx] += text
+                    error = ""
+            setup, validation_error = _sandbox_setup_from_text_values(values)
+            if validation_error:
+                error = validation_error
+            _draw_sandbox_setup_screen(
+                pygame,
+                dashboard.screen,
+                level_title=level_title,
+                values=values,
+                active_index=active_idx,
+                panels=panels,
+                field_rects=field_rects,
+                launch_rect=launch_rect,
+                cancel_rect=cancel_rect,
+                validation_message=error,
+                can_launch=setup is not None,
+                font=dashboard.font,
+                small_font=dashboard.small_font,
+                title_font=dashboard.large_font,
+            )
+            display_flip = getattr(getattr(pygame, "display", None), "flip", None)
+            if callable(display_flip):
+                display_flip()
+            dashboard.tick(60.0)
+        return None
+    finally:
+        if callable(set_grab):
+            set_grab(previous_grab)
+        if callable(set_visible):
+            set_visible(previous_visible)
 
 
 def _camera_rule_toggle_enabled_for_dashboard(dashboard: Any, training_cfg: RPOTrainingConfig) -> bool:
@@ -723,6 +803,8 @@ def _realtime_steps_due(
 
 def _command_status(state: KeyboardCommandState, *, control_mode: str = "attitude_thrust") -> str:
     mode = str(control_mode or "").strip().lower()
+    if mode in AERODYNAMIC_CONTROL_MODES:
+        return "W/S Increase/Decrease BC  Left/Right Lift CCW/CW  Space Pause  C Camera  M Music"
     if mode in CISLUNAR_TRANSLATION_MODES:
         return "W/S Earth-Moon Y  A/D Tangential X  Left/Right Normal Z  C Camera  M Music"
     if mode in MOON_RIC_TRANSLATION_MODES:
@@ -760,6 +842,12 @@ def _game_command_status(
 ) -> str:
     if _normalize_game_mode(game_mode) == "operator":
         return _operator_next_burn_status(command_provider)
+    if str(control_mode or "").strip().lower() in AERODYNAMIC_CONTROL_MODES:
+        return (
+            f"{_command_status(state, control_mode=control_mode)}\n"
+            f"BC={float(getattr(command_provider, 'ballistic_coefficient_kg_m2', 0.0)):.1f} kg/m^2  "
+            f"Lift={float(getattr(command_provider, 'lift_bank_angle_deg', 0.0)):+.0f} deg"
+        )
     return _command_status(state, control_mode=control_mode)
 
 

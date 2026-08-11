@@ -30,7 +30,7 @@ from sim.scenarios import ScenarioArtifact, ValidationReport
 from sim.scenarios import ScenarioBuilder as ScenarioBuilder
 from sim.scenarios import ValidationIssue as ValidationIssue
 from sim.security import ConfigPathPolicy
-from sim.security.sealed_mode import SealedModePolicy, validate_sealed_mode
+from sim.security.sealed_mode import SealedModePolicy, _validate_ai_section, validate_sealed_mode
 
 
 class SimulationWorkspace:
@@ -536,6 +536,15 @@ class SimulationWorkspace:
         ai_options: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         options = dict(ai_options or {})
+        if self._sealed_policy is not None:
+            errors = _validate_ai_section(
+                options,
+                "ai_options",
+                self._sealed_policy,
+                enabled_default=True,
+            )
+            if errors:
+                raise ValueError("Sealed mode policy violations:\n- " + "\n- ".join(errors))
         allow_custom_endpoint = bool(options.get("allow_custom_endpoint", False))
         if controller_bench:
             create = _require_private_workflow(
@@ -643,6 +652,15 @@ class SimulationWorkspace:
         )
         create = _require_private_workflow("run_simulation", "_create_ai_config_draft", "AI config workflows")
         options = dict(ai_options or {})
+        if self._sealed_policy is not None:
+            errors = _validate_ai_section(
+                options,
+                "ai_options",
+                self._sealed_policy,
+                enabled_default=True,
+            )
+            if errors:
+                raise ValueError("Sealed mode policy violations:\n- " + "\n- ".join(errors))
 
         return create(
             str(config_path),

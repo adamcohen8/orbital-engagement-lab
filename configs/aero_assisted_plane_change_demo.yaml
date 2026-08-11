@@ -44,40 +44,20 @@ objects:
       - 0.0
       - 0.0
       - 0.0
-    orbit_control:
-      module: sim.control.orbit.aero_assist
-      class_name: AtmosphericPassController
+    flight_software:
+      stack: fsw.orbit_reference
+      hardware_profile: hardware.ideal_wrench.v1
       params:
+        max_acceleration_m_s2: 0.3
+        translation_mode: atmospheric_pass
         raise_start_s: 240.0
         raise_end_s: 740.0
-        prograde_accel_km_s2: 0.0003
-        min_raise_altitude_km: 250.0
-    attitude_control:
-      module: sim.control.attitude.aero_assist
-      class_name: AtmosphericLiftAxisController
-      params:
-        lift_axis_body:
-        - 0.0
-        - 0.0
-        - 1.0
-        desired_lift_ric:
-        - 0.0
-        - 0.0
-        - 1.0
-        pd:
-          kp:
-          - 0.8
-          - 0.8
-          - 0.8
-          kd:
-          - 8.0
-          - 8.0
-          - 8.0
-          wheel_torque_limits_nm:
-          - 0.4
-          - 0.4
-          - 0.4
-          max_body_torque_nm: 0.4
+        prograde_acceleration_m_s2: 0.3
+        min_raise_altitude_m: 250000.0
+        attitude_reference_mode: ric
+        attitude_ric_axis: cross_track
+        attitude_boresight_body: [0.0, 0.0, 1.0]
+        max_attitude_torque_n_m: 0.4
   target:
     kind: satellite
     role: reference_vehicle
@@ -95,12 +75,10 @@ objects:
       - 0.0
       - 7.697
       - 0.0
-    orbit_control:
-      module: sim.control.orbit.zero_controller
-      class_name: ZeroController
-    attitude_control:
-      module: sim.control.attitude.zero_torque
-      class_name: ZeroTorqueController
+    flight_software:
+      stack: fsw.passive
+      hardware_profile: hardware.passive.v1
+      params: {}
 simulator:
   duration_s: 1200.0
   dt_s: 5.0

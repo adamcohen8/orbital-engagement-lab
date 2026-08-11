@@ -27,6 +27,11 @@ class _RecordingPropagator(OrbitPropagator):
         return out
 
 
+class _IdentityPropagator(OrbitPropagator):
+    def propagate(self, x_eci, dt_s, t_s, command_accel_eci_km_s2, env, ctx):
+        return np.asarray(x_eci, dtype=float).copy()
+
+
 def test_orbit_ekf_ignores_partial_measurements_instead_of_zero_padding() -> None:
     estimator = OrbitEKFEstimator(
         mu_km3_s2=398600.4418,
@@ -79,6 +84,36 @@ def test_orbit_ekf_update_avoids_np_inv_and_preserves_symmetric_covariance() -> 
 
     assert np.allclose(updated.covariance, updated.covariance.T, atol=1e-12)
     assert np.all(np.linalg.eigvalsh(updated.covariance) >= -1e-12)
+
+
+def test_orbit_ukf_measurement_update_includes_additive_process_noise() -> None:
+    estimator = OrbitUKFEstimator(
+        propagator=_IdentityPropagator(),
+        context=OrbitContext(mu_km3_s2=0.0, mass_kg=1.0),
+        dt_s=1.0,
+        process_noise_diag=np.full(6, 100.0),
+        meas_noise_diag=np.ones(6),
+    )
+    belief = StateBelief(state=np.zeros(6), covariance=np.eye(6), last_update_t_s=0.0)
+
+    updated = estimator.update(belief, Measurement(vector=np.zeros(6), t_s=1.0), 1.0)
+
+    np.testing.assert_allclose(np.diag(updated.covariance), np.full(6, 101.0 / 102.0), rtol=1.0e-8)
+
+
+@pytest.mark.parametrize("measurement_t_s", [-1.0, 2.0, float("nan")])
+def test_orbit_ukf_rejects_measurements_outside_filter_interval(measurement_t_s: float) -> None:
+    estimator = OrbitUKFEstimator(
+        propagator=_IdentityPropagator(),
+        context=OrbitContext(mu_km3_s2=0.0, mass_kg=1.0),
+        dt_s=1.0,
+        process_noise_diag=np.zeros(6),
+        meas_noise_diag=np.ones(6),
+    )
+    belief = StateBelief(state=np.zeros(6), covariance=np.eye(6), last_update_t_s=0.0)
+
+    with pytest.raises(ValueError, match="measurement epoch must lie"):
+        estimator.update(belief, Measurement(vector=np.zeros(6), t_s=measurement_t_s), 1.0)
 
 
 def test_attitude_ekf_update_avoids_np_inv_and_preserves_symmetric_covariance() -> None:

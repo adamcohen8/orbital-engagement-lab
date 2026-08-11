@@ -27,6 +27,14 @@ def _limit_vector(vec: np.ndarray, limit: float) -> tuple[np.ndarray, float]:
     return out, 1.0
 
 
+@dataclass(frozen=True, slots=True)
+class RICPDTransferGuidanceResult:
+    """Controller-independent output of the reusable transfer guidance law."""
+
+    acceleration_eci_km_s2: np.ndarray
+    mode_flags: dict[str, object]
+
+
 @dataclass
 class RICPDTransferController(Controller):
     """RIC PD rendezvous controller that acquires a planned coast arc before terminal cleanup."""
@@ -115,6 +123,43 @@ class RICPDTransferController(Controller):
             "correction_interval_s": float(self.correction_interval_s),
         }
 
+    def snapshot_state(self) -> dict[str, object]:
+        """Return the state needed to resume transfer guidance deterministically."""
+
+        return {
+            "arrival_t_s": self._arrival_t_s,
+            "next_correction_t_s": (None if not np.isfinite(self._next_correction_t_s) else self._next_correction_t_s),
+            "target_velocity_ric_km_s": (
+                None if self._target_velocity_ric_km_s is None else self._target_velocity_ric_km_s.tolist()
+            ),
+            "last_ideal_delta_v_ric_km_s": self._last_ideal_delta_v_ric_km_s.tolist(),
+            "planned_arrival_velocity_ric_km_s": self._planned_arrival_velocity_ric_km_s.tolist(),
+        }
+
+    def restore_state(self, state: dict[str, object]) -> None:
+        """Restore a state produced by :meth:`snapshot_state`."""
+
+        arrival = state.get("arrival_t_s")
+        next_correction = state.get("next_correction_t_s")
+        self._arrival_t_s = None if arrival is None else float(arrival)
+        self._next_correction_t_s = -np.inf if next_correction is None else float(next_correction)
+        if self._arrival_t_s is not None and not np.isfinite(self._arrival_t_s):
+            raise ValueError("RIC PD transfer arrival time must be finite")
+        if not np.isfinite(self._next_correction_t_s) and self._next_correction_t_s != -np.inf:
+            raise ValueError("RIC PD transfer correction time is invalid")
+        target_velocity = state.get("target_velocity_ric_km_s")
+        self._target_velocity_ric_km_s = (
+            None if target_velocity is None else _finite_state_vector(target_velocity, "target velocity")
+        )
+        self._last_ideal_delta_v_ric_km_s = _finite_state_vector(
+            state.get("last_ideal_delta_v_ric_km_s", (0.0, 0.0, 0.0)),
+            "last ideal delta-v",
+        )
+        self._planned_arrival_velocity_ric_km_s = _finite_state_vector(
+            state.get("planned_arrival_velocity_ric_km_s", (0.0, 0.0, 0.0)),
+            "planned arrival velocity",
+        )
+
     def _relative_state(self, belief: StateBelief) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
         i0, i1 = self.ric_curv_state_slice
         j0, j1 = self.chief_eci_state_slice
@@ -155,6 +200,35 @@ class RICPDTransferController(Controller):
         if rel is None:
             return Command.zero()
         x_rect, r_chief, v_chief = rel
+        result = self.guide_relative_state(x_rect, r_chief, v_chief, t_s=t_s)
+        return Command(
+            thrust_eci_km_s2=result.acceleration_eci_km_s2,
+            torque_body_nm=self._zero3.copy(),
+            mode_flags=result.mode_flags,
+        )
+
+    def guide_relative_state(
+        self,
+        relative_state_ric_rect_km: np.ndarray,
+        chief_position_eci_km: np.ndarray,
+        chief_velocity_eci_km_s: np.ndarray,
+        *,
+        t_s: float,
+    ) -> RICPDTransferGuidanceResult:
+        """Evaluate guidance without using the legacy controller command boundary.
+
+        Complete flight-software stacks use this subordinate interface with an
+        onboard relative-navigation solution. The legacy :meth:`act` method is
+        retained for component-library compatibility and delegates here.
+        """
+
+        x_rect = _finite_six_vector(relative_state_ric_rect_km, "relative state")
+        r_chief = _finite_state_vector(chief_position_eci_km, "chief position")
+        v_chief = _finite_state_vector(chief_velocity_eci_km_s, "chief velocity")
+        if float(np.linalg.norm(r_chief)) <= 0.0:
+            raise ValueError("RIC PD transfer chief position must be nonzero")
+        if not np.isfinite(t_s):
+            raise ValueError("RIC PD transfer time must be finite")
         if self._arrival_t_s is None:
             self._arrival_t_s = float(t_s) + float(self.transfer_time_s)
 
@@ -221,10 +295,9 @@ class RICPDTransferController(Controller):
         accel_eci = c_ir @ accel_ric
         i0, i1 = self.ric_curv_state_slice
         j0, j1 = self.chief_eci_state_slice
-        return Command(
-            thrust_eci_km_s2=accel_eci,
-            torque_body_nm=self._zero3.copy(),
-            mode_flags={
+        return RICPDTransferGuidanceResult(
+            accel_eci,
+            {
                 "mode": "ric_pd_transfer",
                 "dynamics_model": self.dynamics_model,
                 "dynamics_metadata": self._relative_dynamics.metadata(),
@@ -253,3 +326,17 @@ class RICPDTransferController(Controller):
                 ),
             },
         )
+
+
+def _finite_state_vector(value: object, name: str) -> np.ndarray:
+    vector = np.asarray(value, dtype=float).reshape(-1)
+    if vector.size != 3 or not np.all(np.isfinite(vector)):
+        raise ValueError(f"RIC PD transfer {name} must contain three finite values")
+    return vector
+
+
+def _finite_six_vector(value: object, name: str) -> np.ndarray:
+    vector = np.asarray(value, dtype=float).reshape(-1)
+    if vector.size != 6 or not np.all(np.isfinite(vector)):
+        raise ValueError(f"RIC PD transfer {name} must contain six finite values")
+    return vector

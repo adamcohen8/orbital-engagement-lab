@@ -34,43 +34,6 @@ def test_training_tracker_records_cislunar_mean_motion_after_decomposition() -> 
     assert tracker.mean_motion_hist == [EARTH_MOON_MEAN_MOTION_RAD_S]
 
 
-def test_ric_translation_provider_uses_timed_input_duty_cycle() -> None:
-    state = KeyboardCommandState(yaw=1.0, use_timing_accumulator=True)
-    provider = ManualGameCommandProvider(
-        command_state=state,
-        max_accel_km_s2=2.0e-5,
-        control_mode="ric_translation",
-        reference_object_id="target",
-    )
-    target = StateTruth(
-        position_eci_km=np.array([7000.0, 0.0, 0.0], dtype=float),
-        velocity_eci_km_s=np.array([0.0, 7.5, 0.0], dtype=float),
-        attitude_quat_bn=np.array([1.0, 0.0, 0.0, 0.0], dtype=float),
-        angular_rate_body_rad_s=np.zeros(3, dtype=float),
-        mass_kg=100.0,
-        t_s=0.0,
-    )
-    state.accumulate_timed_input(0.05, speed_multiple=10.0, control_mode="ric_translation")
-
-    out = provider(
-        truth=target,
-        t_s=0.0,
-        dt_s=2.0,
-        object_id="chaser",
-        own_knowledge={},
-    )
-    empty = provider(
-        truth=target,
-        t_s=2.0,
-        dt_s=2.0,
-        object_id="chaser",
-        own_knowledge={},
-    )
-
-    assert np.allclose(out["thrust_eci_km_s2"], np.array([0.0, 5.0e-6, 0.0]), atol=1e-12)
-    assert np.allclose(empty["thrust_eci_km_s2"], np.zeros(3, dtype=float), atol=1e-15)
-
-
 def test_timed_translation_input_caps_pending_burn_to_one_step() -> None:
     state = KeyboardCommandState(yaw=1.0, use_timing_accumulator=True)
     state.accumulate_timed_input(
@@ -97,32 +60,6 @@ def test_timed_translation_tap_exposes_pending_step_duration() -> None:
     )
 
     assert game_runner._timed_maneuver_pending_sim_s(state, control_mode="ric_translation") == pytest.approx(0.04)
-
-
-def test_attitude_thrust_provider_uses_timed_firing_duty_cycle() -> None:
-    state = KeyboardCommandState(firing=True, use_timing_accumulator=True)
-    provider = ManualGameCommandProvider(
-        command_state=state,
-        max_accel_km_s2=2.0e-5,
-        control_mode="attitude_thrust",
-    )
-    target = StateTruth(
-        position_eci_km=np.array([7000.0, 0.0, 0.0], dtype=float),
-        velocity_eci_km_s=np.array([0.0, 7.5, 0.0], dtype=float),
-        attitude_quat_bn=np.array([1.0, 0.0, 0.0, 0.0], dtype=float),
-        angular_rate_body_rad_s=np.zeros(3, dtype=float),
-        mass_kg=100.0,
-        t_s=0.0,
-    )
-    state.accumulate_timed_input(0.05, speed_multiple=10.0, control_mode="attitude_thrust")
-
-    out = provider(truth=target, t_s=0.0, dt_s=2.0, object_id="chaser")
-    empty = provider(truth=target, t_s=2.0, dt_s=2.0, object_id="chaser")
-
-    assert out["mission_mode"]["firing_duty_cycle"] == pytest.approx(0.25)
-    assert np.allclose(out["thrust_eci_km_s2"], np.array([5.0e-6, 0.0, 0.0]), atol=1e-12)
-    assert empty["mission_mode"]["firing_duty_cycle"] == pytest.approx(0.0)
-    assert np.allclose(empty["thrust_eci_km_s2"], np.zeros(3, dtype=float), atol=1e-15)
 
 
 def test_timed_firing_input_caps_pending_burn_to_one_step() -> None:

@@ -3,7 +3,7 @@ metadata:
   owner: public
   public_surface: public-config
   support_level: demonstration
-  notes: Two-body HCW LQR rendezvous case with radial offset.
+  notes: Two-body v2 RIC feedback rendezvous case with radial offset.
 objects:
   rocket:
     enabled: false
@@ -28,20 +28,6 @@ objects:
         - 0.0
         - 0.0
       relative_to: target
-    orbit_control:
-      kind: python
-      module: sim.control.orbit.lqr
-      class_name: HCWLQRController
-      params:
-        mean_motion_rad_s: 0.001078
-        max_accel_km_s2: 2.0e-05
-        design_dt_s: 1.0
-        ric_curv_state_slice:
-        - 0
-        - 6
-        chief_eci_state_slice:
-        - 6
-        - 12
     knowledge:
       refresh_rate_s: 1.0
       targets:
@@ -61,6 +47,15 @@ objects:
       estimation:
         type: ekf
     kind: satellite
+    flight_software:
+      stack: fsw.rpo_reference
+      hardware_profile: hardware.ideal_wrench.v1
+      params:
+        max_acceleration_m_s2: 0.02
+        reference_object_id: target
+        translation_mode: ric_hold
+        control_law: hcw_lqr
+        goal_type: rpo.ric_hold
   target:
     enabled: true
     role: target
@@ -76,12 +71,11 @@ objects:
         raan_deg: 0.0
         argp_deg: 0.0
         true_anomaly_deg: 0.0
-    orbit_control:
-      kind: python
-      module: sim.control.orbit.zero_controller
-      class_name: ZeroController
-      params: {}
     kind: satellite
+    flight_software:
+      stack: fsw.passive
+      hardware_profile: hardware.passive.v1
+      params: {}
 simulator:
   duration_s: 6000.0
   dt_s: 1.0

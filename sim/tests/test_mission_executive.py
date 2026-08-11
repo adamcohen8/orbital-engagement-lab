@@ -43,6 +43,31 @@ def _belief(position_eci_km: list[float]) -> StateBelief:
 
 
 class MissionExecutiveTests(unittest.TestCase):
+    def test_invalid_mode_and_transition_references_fail_at_construction(self) -> None:
+        with self.assertRaisesRegex(ValueError, "initial_mode"):
+            MissionExecutiveStrategy(initial_mode="missing", modes=[_mode("hold")])
+        with self.assertRaisesRegex(ValueError, "to_mode"):
+            MissionExecutiveStrategy(
+                initial_mode="hold",
+                modes=[_mode("hold")],
+                transitions=[{"from_mode": "hold", "to_mode": "missing", "trigger": "time_gte", "threshold_s": 1}],
+            )
+
+    def test_time_trigger_and_priority_are_deterministic(self) -> None:
+        executive = MissionExecutiveStrategy(
+            initial_mode="hold",
+            modes=[_mode("hold"), _mode("low"), _mode("high")],
+            transitions=[
+                {"from_mode": "hold", "to_mode": "low", "trigger": "time_gte", "threshold_s": 5, "priority": 1},
+                {"from_mode": "hold", "to_mode": "high", "trigger": "time_gte", "threshold_s": 5, "priority": 10},
+            ],
+        )
+        before = executive.update(truth=_truth([7000, 0, 0], t_s=4), own_knowledge={}, t_s=4)
+        after = executive.update(truth=_truth([7000, 0, 0], t_s=5), own_knowledge={}, t_s=5)
+        self.assertEqual(before["mission_mode"]["executive_mode"], "hold")
+        self.assertEqual(after["mission_mode"]["executive_mode"], "high")
+        self.assertEqual(after["mission_mode"]["executive_transition"]["priority"], 10)
+
     def test_targeting_does_not_fallback_without_knowledge(self) -> None:
         strategy = PursuitMissionStrategy(target_id="target", use_knowledge_for_targeting=False, max_accel_km_s2=1e-6)
 

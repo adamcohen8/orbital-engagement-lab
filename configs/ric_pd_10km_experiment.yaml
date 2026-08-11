@@ -52,110 +52,6 @@ objects:
       - 0.0
       - 0.0
       - 0.0
-    orbit_control:
-      kind: python
-      module: sim.control.orbit.ric_pd
-      class_name: RICPDTransferController
-      params:
-        max_accel_km_s2: 6.0e-05
-        mean_motion_rad_s: 0.001078
-        transfer_time_s: 4800.0
-        burn_time_constant_s: 35.0
-        correction_interval_s: 300.0
-        velocity_deadband_m_s: 0.03
-        final_brake_start_s: 0.0
-        terminal_start_s: 900.0
-        terminal_range_km: 0.15
-        terminal_kp:
-        - - 2.5e-06
-          - 0.0
-          - 0.0
-        - - 0.0
-          - 2.5e-06
-          - 0.0
-        - - 0.0
-          - 0.0
-          - 2.5e-06
-        terminal_kd:
-        - - 0.0035
-          - 0.0
-          - 0.0
-        - - 0.0
-          - 0.0035
-          - 0.0
-        - - 0.0
-          - 0.0
-          - 0.0035
-        desired_state_ric:
-        - 0.0
-        - 0.0
-        - 0.0
-        - 0.0
-        - 0.0
-        - 0.0
-        ric_curv_state_slice:
-        - 0
-        - 6
-        chief_eci_state_slice:
-        - 6
-        - 12
-        state_signs:
-        - 1.0
-        - 1.0
-        - 1.0
-        - 1.0
-        - 1.0
-        - 1.0
-    attitude_control:
-      kind: python
-      module: sim.control.attitude.baseline
-      class_name: ReactionWheelPDController
-      params:
-        wheel_axes_body:
-        - - 1.0
-          - 0.0
-          - 0.0
-        - - 0.0
-          - 1.0
-          - 0.0
-        - - 0.0
-          - 0.0
-          - 1.0
-        wheel_torque_limits_nm:
-        - 0.05
-        - 0.05
-        - 0.05
-        desired_attitude_quat_bn:
-        - 1.0
-        - 0.0
-        - 0.0
-        - 0.0
-        desired_rate_body_rad_s:
-        - 0.0
-        - 0.0
-        - 0.0
-        kp:
-        - 0.32
-        - 0.32
-        - 0.32
-        kd:
-        - 3.5
-        - 3.5
-        - 3.5
-    mission_execution:
-      kind: python
-      module: sim.mission.modules
-      class_name: IntegratedCommandExecution
-      params:
-        require_attitude_alignment: true
-        thruster_direction_body:
-        - 0.0
-        - 0.0
-        - 1.0
-        alignment_tolerance_deg: 15.0
-        min_burn_accel_km_s2: 1.0e-10
-        orbit_controller_budget_ms: 40.0
-        attitude_controller_budget_ms: 10.0
     knowledge:
       refresh_rate_s: 1.0
       targets:
@@ -175,6 +71,34 @@ objects:
       estimation:
         type: ekf
     kind: satellite
+    flight_software:
+      stack: fsw.rpo_reference
+      hardware_profile: hardware.ideal_wrench.v1
+      params:
+        max_acceleration_m_s2: 0.060000000000000005
+        reference_object_id: target
+        translation_mode: ric_pd_transfer
+        goal_type: rpo.ric_pd_transfer
+        goal_mode: maintenance
+        position_tolerance_m: 5.0
+        velocity_tolerance_m_s: 0.005
+        mean_motion_rad_s: 0.001078
+        transfer_time_s: 4800.0
+        burn_time_constant_s: 35.0
+        correction_interval_s: 300.0
+        velocity_deadband_m_s: 0.03
+        final_brake_start_s: 0.0
+        terminal_start_s: 900.0
+        terminal_range_m: 150.0
+        kp_position_s2: 2.5e-06
+        kd_velocity_s_inv: 0.0035
+        attitude_reference_mode: quaternion
+        attitude_boresight_body: [0.0, 0.0, 1.0]
+        attitude_kp: [0.32, 0.32, 0.32]
+        attitude_kd: [3.5, 3.5, 3.5]
+        max_attitude_torque_n_m: 0.05
+        pointing_tolerance_rad: 0.2617993877991494
+        require_pointing_for_translation: true
   target:
     enabled: true
     role: target
@@ -200,17 +124,11 @@ objects:
       - 0.0
       - 0.0
       - 0.0
-    orbit_control:
-      kind: python
-      module: sim.control.orbit.zero_controller
-      class_name: ZeroController
-      params: {}
-    attitude_control:
-      kind: python
-      module: sim.control.attitude.zero_torque
-      class_name: ZeroTorqueController
-      params: {}
     kind: satellite
+    flight_software:
+      stack: fsw.passive
+      hardware_profile: hardware.passive.v1
+      params: {}
 simulator:
   duration_s: 12000.0
   dt_s: 1.0

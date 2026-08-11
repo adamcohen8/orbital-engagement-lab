@@ -159,7 +159,10 @@ class TestPluginValidation(unittest.TestCase):
                             "line2": "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1004",
                         }
                     },
-                    "orbit_control": {"module": "sim.control.orbit.zero_controller", "class_name": "ZeroController"},
+                    "flight_software": {
+                        "stack": "fsw.orbit_reference",
+                        "hardware_profile": "hardware.ideal_wrench.v1",
+                    },
                 },
                 "simulator": {"duration_s": 20.0, "dt_s": 1.0},
             }
@@ -167,7 +170,7 @@ class TestPluginValidation(unittest.TestCase):
 
         errs = validate_scenario_plugins(cfg)
 
-        self.assertTrue(any("orbit_control is not supported" in err for err in errs))
+        self.assertTrue(any("flight_software must use fsw.passive" in err for err in errs))
 
     def test_general_sgp4_rejects_attitude_control(self):
         cfg = scenario_config_from_dict(
@@ -185,7 +188,10 @@ class TestPluginValidation(unittest.TestCase):
                             "line2": "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1004",
                         }
                     },
-                    "attitude_control": {"module": "sim.control.attitude.zero_torque", "class_name": "ZeroTorqueController"},
+                    "flight_software": {
+                        "stack": "fsw.attitude_reference",
+                        "hardware_profile": "hardware.ideal_wrench.v1",
+                    },
                 },
                 "simulator": {"duration_s": 20.0, "dt_s": 1.0},
             }
@@ -193,7 +199,7 @@ class TestPluginValidation(unittest.TestCase):
 
         errs = validate_scenario_plugins(cfg)
 
-        self.assertTrue(any("attitude_control is not supported" in err for err in errs))
+        self.assertTrue(any("flight_software must use fsw.passive" in err for err in errs))
 
     def test_general_sgp4_rejects_non_tle_initializers(self):
         with self.assertRaisesRegex(ValueError, "exactly one orbital-state form"):
@@ -347,25 +353,9 @@ class TestPluginValidation(unittest.TestCase):
                 },
                 "chaser": {
                     "enabled": True,
-                    "mission_strategy": {
-                        "module": "sim.mission.modules",
-                        "class_name": "PursuitMissionStrategy",
-                        "params": {},
-                    },
-                    "mission_execution": {
-                        "module": "sim.mission.modules",
-                        "class_name": "ControllerPointingExecution",
-                        "params": {},
-                    },
-                    "orbit_control": {
-                        "module": "sim.control.orbit.zero_controller",
-                        "class_name": "ZeroController",
-                        "params": {},
-                    },
-                    "attitude_control": {
-                        "module": "sim.control.attitude.zero_torque",
-                        "class_name": "ZeroTorqueController",
-                        "params": {},
+                    "flight_software": {
+                        "stack": "fsw.passive",
+                        "hardware_profile": "hardware.passive.v1",
                     },
                 },
                 "target": {"enabled": False},
@@ -418,10 +408,10 @@ class TestPluginValidation(unittest.TestCase):
                 "rocket": {"enabled": False},
                 "chaser": {
                     "enabled": True,
-                    "orbit_control": {
+                    "flight_software": {
                         "module": "module_that_must_not_be_imported_for_safe_validation",
-                        "class_name": "ControllerShapeOnly",
-                        "params": {},
+                        "class_name": "StackShapeOnly",
+                        "hardware_profile": "hardware.passive.v1",
                     },
                 },
                 "target": {"enabled": False},
@@ -439,10 +429,10 @@ class TestPluginValidation(unittest.TestCase):
                     "blue_one": {
                         "kind": "satellite",
                         "enabled": True,
-                        "orbit_control": {
+                        "flight_software": {
                             "module": "sim.rocket.guidance",
                             "class_name": "OpenLoopPitchProgramGuidance",
-                            "params": {},
+                            "hardware_profile": "hardware.passive.v1",
                         },
                     }
                 },
@@ -451,7 +441,7 @@ class TestPluginValidation(unittest.TestCase):
         )
 
         errs = validate_scenario_plugins(cfg)
-        self.assertTrue(any("objects.blue_one.orbit_control" in e for e in errs))
+        self.assertTrue(any("objects.blue_one.flight_software" in e for e in errs))
 
     def test_validation_does_not_construct_plugin_classes(self):
         with tempfile.TemporaryDirectory() as td:
@@ -459,12 +449,15 @@ class TestPluginValidation(unittest.TestCase):
             plugin_path.write_text(
                 "\n".join(
                     [
-                        "class ConstructorRaisesController:",
+                        "class ConstructorRaisesStack:",
                         "    def __init__(self, *args, **kwargs):",
                         "        raise RuntimeError('constructor should not run during validation')",
                         "",
-                        "    def act(self, **kwargs):",
-                        "        return {}",
+                        "    def boot(self, event): pass",
+                        "    def step(self, batch): pass",
+                        "    def shutdown(self, event): pass",
+                        "    def snapshot(self): pass",
+                        "    def restore(self, snapshot): pass",
                     ]
                 ),
                 encoding="utf-8",
@@ -476,9 +469,10 @@ class TestPluginValidation(unittest.TestCase):
                         "rocket": {"enabled": False},
                         "chaser": {
                             "enabled": True,
-                            "orbit_control": {
+                            "flight_software": {
                                 "module": "constructor_side_effect_plugin",
-                                "class_name": "ConstructorRaisesController",
+                                "class_name": "ConstructorRaisesStack",
+                                "hardware_profile": "hardware.passive.v1",
                                 "params": {"needs_runtime_context": True},
                             },
                         },

@@ -90,15 +90,18 @@ class OperatorBurnCinematicRuntime:
 
 @dataclass(frozen=True)
 class SandboxSetupValues:
+    target_a_km: float = 7000.0
+    target_ecc: float = 0.0
+    target_inc_deg: float = 45.0
+    target_raan_deg: float = 0.0
+    target_argp_deg: float = 0.0
+    target_true_anomaly_deg: float = 0.0
     radial_km: float = 0.0
     in_track_km: float = -3.0
     cross_track_km: float = 0.0
     radial_rate_m_s: float = 0.0
     in_track_rate_m_s: float = 0.0
     cross_track_rate_m_s: float = 0.0
-    target_a_km: float = 7000.0
-    target_ecc: float = 0.0
-    target_true_anomaly_deg: float = 0.0
 
     @property
     def relative_ric_state_km_s(self) -> list[float]:
@@ -112,16 +115,26 @@ class SandboxSetupValues:
         ]
 
 
-_SANDBOX_SETUP_FIELDS: tuple[tuple[str, str, str], ...] = (
+_SANDBOX_TARGET_COE_FIELDS: tuple[tuple[str, str, str], ...] = (
+    ("Semimajor Axis", "km", "target_a_km"),
+    ("Eccentricity", "", "target_ecc"),
+    ("Inclination", "deg", "target_inc_deg"),
+    ("RAAN", "deg", "target_raan_deg"),
+    ("Argument of Periapsis", "deg", "target_argp_deg"),
+    ("True Anomaly", "deg", "target_true_anomaly_deg"),
+)
+
+
+_SANDBOX_CHASER_RIC_FIELDS: tuple[tuple[str, str, str], ...] = (
     ("Radial R", "km", "radial_km"),
     ("In-Track I", "km", "in_track_km"),
     ("Cross-Track C", "km", "cross_track_km"),
     ("Radial Rate dR", "m/s", "radial_rate_m_s"),
     ("In-Track Rate dI", "m/s", "in_track_rate_m_s"),
     ("Cross-Track Rate dC", "m/s", "cross_track_rate_m_s"),
-    ("Target Semimajor Axis", "km", "target_a_km"),
-    ("Target Eccentricity", "", "target_ecc"),
-    ("Target True Anomaly", "deg", "target_true_anomaly_deg"),
 )
+
+
+_SANDBOX_SETUP_FIELDS = _SANDBOX_TARGET_COE_FIELDS + _SANDBOX_CHASER_RIC_FIELDS
 
 __all__ = [name for name in globals() if not name.startswith("__")]

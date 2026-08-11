@@ -48,9 +48,9 @@ def _review_store_config(output_dir: Path) -> dict:
                     "relative_to": "target",
                     "relative_ric_rect": [1.0, 0.0, 0.0, -0.001, 0.0, 0.0],
                 },
-                "orbit_control": {
-                    "module": "sim.control.orbit.zero_controller",
-                    "class_name": "ZeroController",
+                "flight_software": {
+                    "stack": "fsw.passive",
+                    "hardware_profile": "hardware.passive.v1",
                 },
             },
         },
@@ -105,7 +105,12 @@ def test_agent_task_recipe_dry_run_writes_evidence_packet(tmp_path: Path) -> Non
     }
 
 
-def test_agent_task_recipe_with_plots_writes_plot_summary(tmp_path: Path) -> None:
+def test_agent_task_recipe_with_plots_writes_plot_summary(tmp_path: Path, monkeypatch) -> None:
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_config(config_dir / "quickstart_5min.yaml", tmp_path / "unused")
+    monkeypatch.setattr(agent_task_runner, "_repo_root", lambda: tmp_path)
+
     payload = run_recipe("quickstart_review", output_root=tmp_path, make_plots=True)
 
     assert payload["status"] == "completed"

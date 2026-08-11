@@ -7,6 +7,7 @@ from sim.config.scenario.models import (
     AgentSection,
     AlgorithmPointer,
     BridgePointer,
+    FlightSoftwareSection,
     GroundStationSection,
 )
 from sim.config.scenario.presets import _AGENT_FRAGMENT_KEYS, _AGENT_PRESET_KEYS
@@ -40,15 +41,37 @@ def _parse_algorithm_pointer(value: Any) -> AlgorithmPointer | None:
     if isinstance(value, str):
         return AlgorithmPointer(module=value)
     d = _as_dict(value, "algorithm_pointer")
+    _reject_unknown_fields(
+        d,
+        "algorithm_pointer",
+        {"kind", "builtin", "module", "class_name", "function", "file", "params"},
+    )
     if d.get("file") not in (None, ""):
         raise ValueError("Algorithm pointers do not support 'file'; use importable 'module' paths instead.")
+    builtin = str(d.get("builtin", "") or "").strip() or None
+    module = d.get("module")
+    class_name = d.get("class_name")
+    function = d.get("function")
+    if builtin is not None:
+        if any(item not in (None, "") for item in (module, class_name, function)):
+            raise ValueError("Algorithm pointers using 'builtin' cannot also define module, class_name, or function.")
+        from sim.gnc.catalog import resolve_builtin_target
+
+        module, class_name = resolve_builtin_target(builtin)
+    kind = str(d.get("kind", "python") or "python").strip().lower()
+    if kind != "python":
+        raise ValueError("algorithm_pointer.kind must be 'python'.")
+    params = d.get("params", {}) or {}
+    if not isinstance(params, dict):
+        raise ValueError("algorithm_pointer.params must be a mapping.")
     return AlgorithmPointer(
-        kind=str(d.get("kind", "python")),
-        module=d.get("module"),
-        class_name=d.get("class_name"),
-        function=d.get("function"),
+        kind=kind,
+        builtin=builtin,
+        module=module,
+        class_name=class_name,
+        function=function,
         file=d.get("file"),
-        params=dict(d.get("params", {}) or {}),
+        params=dict(params),
     )
 
 
@@ -56,13 +79,97 @@ def _parse_bridge_pointer(value: Any) -> BridgePointer | None:
     if value is None:
         return None
     d = _as_dict(value, "bridge")
+    _reject_unknown_fields(d, "bridge", {"enabled", "mode", "endpoint", "module", "class_name", "params"})
+    mode = str(d.get("mode", "sil") or "sil").strip().lower()
+    if mode not in {"sil", "hil"}:
+        raise ValueError("bridge.mode must be one of: hil, sil.")
+    params = d.get("params", {}) or {}
+    if not isinstance(params, dict):
+        raise ValueError("bridge.params must be a mapping.")
     return BridgePointer(
         enabled=_parse_bool(d.get("enabled", False), "bridge.enabled"),
-        mode=str(d.get("mode", "sil")),
+        mode=mode,
         endpoint=d.get("endpoint"),
         module=d.get("module"),
         class_name=d.get("class_name"),
-        params=dict(d.get("params", {}) or {}),
+        params=dict(params),
+    )
+
+
+def _parse_flight_software_section(value: Any, role: str) -> FlightSoftwareSection | None:
+    if value is None:
+        return None
+    path = f"{role}.flight_software"
+    d = _as_dict(value, path)
+    _reject_unknown_fields(
+        d,
+        path,
+        {
+            "profile",
+            "stack",
+            "module",
+            "class_name",
+            "params",
+            "task_period_s",
+            "hardware_profile",
+            "mission_load",
+            "checkpoint",
+        },
+    )
+    profile = str(d.get("profile", "") or "").strip() or None
+    stack = str(d.get("stack", "") or "").strip() or None
+    module = str(d.get("module", "") or "").strip() or None
+    class_name = str(d.get("class_name", "") or "").strip() or None
+    task_period = _parse_optional_float(d.get("task_period_s"), f"{path}.task_period_s")
+    if task_period is not None and task_period <= 0.0:
+        raise ValueError(f"{path}.task_period_s must be positive.")
+    hardware_profile = str(d.get("hardware_profile", "") or "").strip() or None
+    params = dict(d.get("params", {}) or {})
+    if profile is not None:
+        if module is not None or class_name is not None:
+            raise ValueError(f"{path}.profile cannot be combined with module or class_name.")
+        from sim.flight_software.profiles import materialize_use_case_profile
+
+        selection = materialize_use_case_profile(
+            profile,
+            params=params,
+            hardware_profile=hardware_profile,
+            task_period_s=task_period,
+        )
+        if stack is not None and stack != selection.stack_id:
+            raise ValueError(
+                f"{path}.stack {stack!r} does not match profile {profile!r} stack {selection.stack_id!r}."
+            )
+        stack = selection.stack_id
+        hardware_profile = selection.hardware_profile
+        task_period = selection.task_period_s
+        params = selection.params
+    else:
+        if stack is None and (module is None or class_name is None):
+            raise ValueError(
+                f"{path} must select a built-in stack/profile or provide both module and class_name."
+            )
+        if stack is not None and (module is not None or class_name is not None):
+            raise ValueError(f"{path}.stack cannot be combined with module or class_name.")
+    mission_load_raw = d.get("mission_load")
+    mission_load = None if mission_load_raw is None else _as_dict(mission_load_raw, f"{path}.mission_load")
+    checkpoint_raw = d.get("checkpoint")
+    checkpoint = None if checkpoint_raw is None else _as_dict(checkpoint_raw, f"{path}.checkpoint")
+    if stack is not None:
+        from sim.flight_software.catalog import validate_stack_hardware, validate_stack_params
+
+        validate_stack_hardware(stack, hardware_profile)
+        validate_stack_params(stack, params)
+    return FlightSoftwareSection(
+        profile=profile,
+        stack=stack,
+        module=module,
+        class_name=class_name,
+        params=params,
+        task_period_s=task_period,
+        hardware_profile=hardware_profile,
+        mission_load=mission_load,
+        checkpoint=checkpoint,
     )
 
 
@@ -93,6 +200,13 @@ def _parse_agent_section(
     )
     if resolved_kind not in {"satellite", "rocket"}:
         raise ValueError(f"Section '{role}.kind' must be one of: satellite, rocket.")
+    runtime_profile = str(d.get("runtime_profile", "flight_software") or "flight_software").strip().lower()
+    if runtime_profile not in {"flight_software", "trajectory_only"}:
+        raise ValueError(
+            f"Section '{role}.runtime_profile' must be one of: flight_software, trajectory_only."
+        )
+    if resolved_kind != "satellite" and runtime_profile != "flight_software":
+        raise ValueError(f"Section '{role}.runtime_profile=trajectory_only' is only supported for satellites.")
     propagation_method = str(d.get("propagation_method", d.get("propagation_family", "")) or "").strip().lower()
     if propagation_method and propagation_method not in {"special", "general"}:
         raise ValueError(f"Section '{role}.propagation_method' must be one of: special, general.")
@@ -109,16 +223,57 @@ def _parse_agent_section(
     resolved_default_enabled = (
         bool(default_enabled_by_role.get(role, True)) if default_enabled is None else bool(default_enabled)
     )
+    flight_software = _parse_flight_software_section(d.get("flight_software"), role)
+    if resolved_kind == "satellite" and value is not None:
+        legacy_fields = tuple(
+            field
+            for field in (
+                "orbit_control",
+                "attitude_control",
+                "mission_strategy",
+                "mission_execution",
+                "mission_objectives",
+                "bridge",
+            )
+            if d.get(field) not in (None, [], {})
+        )
+        if legacy_fields:
+            raise ValueError(
+                f"Section '{role}' defines removed GNC v1 satellite field(s): "
+                f"{', '.join(legacy_fields)}. Move goals into flight_software.mission_load, select physical hardware "
+                "with flight_software.hardware_profile/specs, and remove v1 controller/mission/bridge fields."
+            )
+        if runtime_profile == "trajectory_only":
+            if flight_software is not None:
+                raise ValueError(
+                    f"Section '{role}.runtime_profile=trajectory_only' cannot declare flight_software."
+                )
+            if d.get("knowledge") not in (None, {}):
+                raise ValueError(
+                    f"Section '{role}.runtime_profile=trajectory_only' cannot declare knowledge; "
+                    "other objects may still observe this object's truth state."
+                )
+        elif flight_software is None:
+            # A satellite with no declared onboard behavior still executes the
+            # v2 boundary; it receives the explicit no-command reference stack.
+            # This keeps minimum propagation-only API scenarios concise without
+            # reviving any v1 controller or mission semantics.
+            flight_software = FlightSoftwareSection(
+                stack="fsw.passive",
+                hardware_profile="hardware.passive.v1",
+            )
     return AgentSection(
         object_id=resolved_object_id,
         kind=resolved_kind,
         enabled=_parse_bool(d.get("enabled", resolved_default_enabled), f"{role}.enabled"),
         role=resolved_role,
+        runtime_profile=runtime_profile,
         propagation_method=propagation_method,
         general=general,
         specs=dict(d.get("specs", {}) or {}),
         initial_state=_parse_initial_state_section(d.get("initial_state"), role),
         reference_orbit=dict(d.get("reference_orbit", {}) or {}),
+        flight_software=flight_software,
         guidance=_parse_algorithm_pointer(legacy_guidance),
         base_guidance=_parse_algorithm_pointer(base_guidance),
         guidance_modifiers=[p for p in (_parse_algorithm_pointer(x) for x in guidance_modifiers) if p is not None],

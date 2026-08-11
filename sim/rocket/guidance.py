@@ -7,7 +7,11 @@ import numpy as np
 from sim.dynamics.orbit.atmosphere import atmosphere_state_from_model
 from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2, EARTH_RADIUS_KM
 from sim.rocket.models import GuidanceCommand, RocketGuidanceLaw, RocketSimConfig, RocketState, RocketVehicleConfig
-from sim.rocket.navigation import _geodetic_state_from_eci, _resolve_wind_eci_m_s, build_rocket_nav_state
+from sim.rocket.navigation import (
+    _geodetic_state_from_eci,
+    atmosphere_relative_velocity_rocket_eci_m_s,
+    build_rocket_nav_state,
+)
 from sim.utils.quaternion import dcm_to_quaternion_bn, quaternion_to_dcm_bn
 
 
@@ -394,15 +398,13 @@ class MaxQThrottleLimiterGuidance(RocketGuidanceLaw):
         )
         rho = float(max(atmos["density_kg_m3"], 0.0))
         c_bn = quaternion_to_dcm_bn(state.attitude_quat_bn)
-        omega_earth = np.array([0.0, 0.0, 7.2921159e-5], dtype=float)
-        v_atm_eci_km_s = np.cross(omega_earth, state.position_eci_km)
-        wind_eci_m_s = _resolve_wind_eci_m_s(
+        v_rel_eci_m_s = atmosphere_relative_velocity_rocket_eci_m_s(
             position_eci_km=state.position_eci_km,
+            velocity_eci_km_s=state.velocity_eci_km_s,
             t_s=state.t_s,
             sim_cfg=sim_cfg,
             state=state,
         )
-        v_rel_eci_m_s = (state.velocity_eci_km_s - v_atm_eci_km_s) * 1e3 - wind_eci_m_s
         v_rel_body_m_s = c_bn @ v_rel_eci_m_s
         speed = float(np.linalg.norm(v_rel_body_m_s))
         return 0.5 * rho * speed * speed

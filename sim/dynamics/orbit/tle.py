@@ -95,7 +95,7 @@ def ogp_mean_elements_from_mapping(value: dict[str, Any]) -> TLEElements:
         raise ValueError("OGP mean-element eccentricity must be in [0, 1).")
     if mean_motion <= 0.0:
         raise ValueError("OGP mean-element mean_motion_rev_per_day must be positive.")
-    return TLEElements(
+    elements = TLEElements(
         line1="",
         line2="",
         norad_number=str(raw.get("norad_number", "") or ""),
@@ -116,6 +116,9 @@ def ogp_mean_elements_from_mapping(value: dict[str, Any]) -> TLEElements:
         mean_motion_rev_per_day=mean_motion,
         revolution_number=int(raw.get("revolution_number", 0) or 0),
     )
+    if not 0.0 <= elements.inclination_deg <= 180.0:
+        raise ValueError("OGP mean-element inclination_deg must be in [0, 180].")
+    return elements
 
 
 def ogp_mean_elements_to_mapping(elements: TLEElements) -> dict[str, Any]:
@@ -226,7 +229,7 @@ def parse_tle_lines(line1: str, line2: str, *, require_checksum: bool = False) -
     if not ecc_text or not ecc_text.isdigit():
         raise ValueError("TLE eccentricity field is invalid.")
 
-    return TLEElements(
+    elements = TLEElements(
         line1=l1,
         line2=l2,
         norad_number=l1[2:7].strip(),
@@ -247,6 +250,27 @@ def parse_tle_lines(line1: str, line2: str, *, require_checksum: bool = False) -
         mean_motion_rev_per_day=float(l2[52:63]),
         revolution_number=_parse_tle_int(l2[63:68]),
     )
+    numeric = (
+        elements.epoch_jd_utc,
+        elements.mean_motion_derivative_rev_per_day2,
+        elements.mean_motion_second_derivative_rev_per_day3,
+        elements.bstar,
+        elements.inclination_deg,
+        elements.raan_deg,
+        elements.eccentricity,
+        elements.argp_deg,
+        elements.mean_anomaly_deg,
+        elements.mean_motion_rev_per_day,
+    )
+    if not all(math.isfinite(float(value)) for value in numeric):
+        raise ValueError("TLE numeric fields must be finite.")
+    if not 0.0 <= elements.inclination_deg <= 180.0:
+        raise ValueError("TLE inclination must be in [0, 180] degrees.")
+    if not 0.0 <= elements.eccentricity < 1.0:
+        raise ValueError("TLE eccentricity must be in [0, 1).")
+    if elements.mean_motion_rev_per_day <= 0.0:
+        raise ValueError("TLE mean motion must be positive.")
+    return elements
 
 
 def _solve_eccentric_anomaly(mean_anomaly_rad: float, eccentricity: float) -> float:

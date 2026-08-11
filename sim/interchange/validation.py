@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import math
 import re
@@ -193,6 +195,8 @@ def validate_product(
         _validate_maneuver_detection(payload, provenance=provenance, issues=issues)
     elif product_kind == "oel.completed_run_snapshot":
         _validate_completed_run_snapshot(payload, provenance=provenance, issues=issues)
+    elif product_kind == "oel.satellite_checkpoint":
+        _validate_satellite_checkpoint(payload, provenance=provenance, issues=issues)
     elif product_kind:
         _error(
             issues,
@@ -584,7 +588,16 @@ def _validate_completed_run_state(
     path = "$.payload"
     _closed_mapping(
         payload,
-        {"object", "state", "covariance", "object_specs", "model_assumptions", "source_run", "selection"},
+        {
+            "object",
+            "state",
+            "covariance",
+            "object_specs",
+            "resource_state",
+            "model_assumptions",
+            "source_run",
+            "selection",
+        },
         path,
         issues,
     )
@@ -628,6 +641,54 @@ def _validate_completed_run_state(
     covariance = _required_mapping(payload, "covariance", path, issues)
     _validate_covariance(covariance, state_frame=frame, state_epoch=epoch_value, issues=issues)
     _required_mapping(payload, "object_specs", path, issues)
+    resource = payload.get("resource_state")
+    if resource is not None:
+        resource_path = f"{path}.resource_state"
+        if not isinstance(resource, Mapping):
+            _error(issues, "type.object", resource_path, "resource_state must be an object.")
+        else:
+            _closed_mapping(
+                resource,
+                {"mass_kg", "dry_mass_kg", "fuel_mass_kg", "propellant_state"},
+                resource_path,
+                issues,
+            )
+            mass = _finite_number(resource.get("mass_kg"), f"{resource_path}.mass_kg", issues)
+            if mass is not None and mass <= 0.0:
+                _error(issues, "continuation.mass_invalid", f"{resource_path}.mass_kg", "Mass must be positive.")
+            posture = _required_string(resource, "propellant_state", resource_path, issues)
+            if posture not in {"tracked", "mass_only"}:
+                _error(
+                    issues,
+                    "continuation.propellant_state_invalid",
+                    f"{resource_path}.propellant_state",
+                    "Expected tracked or mass_only.",
+                )
+            dry = resource.get("dry_mass_kg")
+            fuel = resource.get("fuel_mass_kg")
+            if posture == "tracked":
+                dry_value = _finite_number(dry, f"{resource_path}.dry_mass_kg", issues)
+                fuel_value = _finite_number(fuel, f"{resource_path}.fuel_mass_kg", issues)
+                if dry_value is not None and dry_value < 0.0:
+                    _error(issues, "continuation.dry_mass_invalid", f"{resource_path}.dry_mass_kg", "Dry mass must be nonnegative.")
+                if fuel_value is not None and fuel_value < 0.0:
+                    _error(issues, "continuation.fuel_mass_invalid", f"{resource_path}.fuel_mass_kg", "Fuel mass must be nonnegative.")
+                if None not in (mass, dry_value, fuel_value) and not math.isclose(
+                    float(mass), float(dry_value) + float(fuel_value), rel_tol=0.0, abs_tol=1.0e-9
+                ):
+                    _error(
+                        issues,
+                        "continuation.resource_mass_mismatch",
+                        resource_path,
+                        "mass_kg must equal dry_mass_kg + fuel_mass_kg.",
+                    )
+            elif dry is not None or fuel is not None:
+                _error(
+                    issues,
+                    "continuation.mass_only_components",
+                    resource_path,
+                    "mass_only resource state must use null dry and fuel masses.",
+                )
     assumptions = _required_mapping(payload, "model_assumptions", path, issues)
     _closed_mapping(assumptions, {"orbit_force_model", "attitude"}, f"{path}.model_assumptions", issues)
     _required_mapping(assumptions, "orbit_force_model", f"{path}.model_assumptions", issues)
@@ -937,7 +998,7 @@ def _validate_completed_run_snapshot(
             continue
         _closed_mapping(
             item,
-            {"object", "state", "covariance", "object_specs", "model_assumptions"},
+            {"object", "state", "covariance", "object_specs", "resource_state", "model_assumptions"},
             item_path,
             issues,
         )
@@ -1001,6 +1062,220 @@ def _validate_completed_run_snapshot(
         pair_keys.add(key)
         for field in expected_fields - {"deputy_id", "chief_id"}:
             _finite_number(item.get(field), f"{pair_path}.{field}", issues)
+
+
+def _validate_satellite_checkpoint(
+    payload: Mapping[str, Any],
+    *,
+    provenance: Mapping[str, Any],
+    issues: list[InterchangeValidationIssue],
+) -> None:
+    path = "$.payload"
+    _closed_mapping(
+        payload,
+        {
+            "object",
+            "state",
+            "attitude",
+            "covariance",
+            "resource_state",
+            "object_specs",
+            "flight_software",
+            "knowledge",
+            "checkpoint",
+            "context_states",
+            "model_assumptions",
+            "source_run",
+            "selection",
+        },
+        path,
+        issues,
+    )
+    selection = deepcopy(dict(_required_mapping(payload, "selection", path, issues)))
+    truth_hash = _required_string(selection, "truth_row_sha256", f"{path}.selection", issues)
+    checkpoint_hash = _required_string(selection, "checkpoint_row_sha256", f"{path}.selection", issues)
+    for field, value in (("truth_row_sha256", truth_hash), ("checkpoint_row_sha256", checkpoint_hash)):
+        if value and not _SHA256_RE.fullmatch(value):
+            _error(issues, "satellite_checkpoint.hash_invalid", f"{path}.selection.{field}", "Expected 64 lowercase hex.")
+    selection.pop("truth_row_sha256", None)
+    selection.pop("checkpoint_row_sha256", None)
+    assumptions = dict(_required_mapping(payload, "model_assumptions", path, issues))
+    orbital_assumptions = {
+        "orbit_force_model": deepcopy(dict(assumptions.get("orbit_force_model", {}) or {})),
+        "attitude": deepcopy(dict(assumptions.get("attitude", {}) or {})),
+    }
+    fake_payload = {
+        "object": deepcopy(dict(payload.get("object", {}) or {})),
+        "state": deepcopy(dict(payload.get("state", {}) or {})),
+        "covariance": deepcopy(dict(payload.get("covariance", {}) or {})),
+        "object_specs": deepcopy(dict(payload.get("object_specs", {}) or {})),
+        "resource_state": deepcopy(dict(payload.get("resource_state", {}) or {})),
+        "model_assumptions": orbital_assumptions,
+        "source_run": deepcopy(dict(payload.get("source_run", {}) or {})),
+        "selection": selection,
+    }
+    _validate_completed_run_state(fake_payload, provenance=provenance, issues=issues)
+
+    attitude = _required_mapping(payload, "attitude", path, issues)
+    _validate_checkpoint_attitude(attitude, f"{path}.attitude", issues)
+
+    flight_software = _required_mapping(payload, "flight_software", path, issues)
+    _required_mapping(payload, "knowledge", path, issues)
+    _closed_mapping(
+        assumptions,
+        {"orbit_force_model", "attitude", "attitude_dynamics", "environment"},
+        f"{path}.model_assumptions",
+        issues,
+    )
+    _required_mapping(assumptions, "attitude_dynamics", f"{path}.model_assumptions", issues)
+    _required_mapping(assumptions, "environment", f"{path}.model_assumptions", issues)
+
+    checkpoint = _required_mapping(payload, "checkpoint", path, issues)
+    checkpoint_path = f"{path}.checkpoint"
+    checkpoint_fields = {
+        "invocation_id",
+        "stack_id",
+        "stack_version",
+        "profile_id",
+        "active_load_id",
+        "active_load_revision",
+        "state_hash_sha256",
+        "boot_id",
+        "run_time_ns",
+        "checkpoint_time_ns",
+        "implementation_hash",
+        "fsw_snapshot",
+        "runtime_state_bytes_base64",
+        "runtime_state_hash_sha256",
+        "checkpoint_schema",
+    }
+    _closed_mapping(checkpoint, checkpoint_fields, checkpoint_path, issues)
+    _require_exact(checkpoint, "checkpoint_schema", "oel.satellite_runtime_checkpoint.v1", checkpoint_path, issues)
+    for field in ("stack_id", "stack_version", "boot_id", "implementation_hash"):
+        _required_string(checkpoint, field, checkpoint_path, issues)
+    checkpoint_profile = checkpoint.get("profile_id")
+    if checkpoint_profile is not None and (not isinstance(checkpoint_profile, str) or not checkpoint_profile):
+        _error(
+            issues,
+            "satellite_checkpoint.profile_invalid",
+            f"{checkpoint_path}.profile_id",
+            "Expected a non-empty profile ID or null.",
+        )
+    configured_profile = flight_software.get("profile")
+    if configured_profile in (None, ""):
+        configured_profile = None
+    if checkpoint_profile != configured_profile:
+        _error(
+            issues,
+            "satellite_checkpoint.profile_mismatch",
+            f"{checkpoint_path}.profile_id",
+            "Checkpoint profile does not match the verified flight-software configuration.",
+        )
+    for field in ("invocation_id", "run_time_ns", "checkpoint_time_ns"):
+        value = checkpoint.get(field)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            _error(issues, "satellite_checkpoint.integer_invalid", f"{checkpoint_path}.{field}", "Expected a nonnegative integer.")
+    for field in ("state_hash_sha256", "runtime_state_hash_sha256"):
+        value = _required_string(checkpoint, field, checkpoint_path, issues)
+        if value and not _SHA256_RE.fullmatch(value):
+            _error(issues, "satellite_checkpoint.hash_invalid", f"{checkpoint_path}.{field}", "Expected 64 lowercase hex.")
+    snapshot = _required_mapping(checkpoint, "fsw_snapshot", checkpoint_path, issues)
+    encoded_state = dict(snapshot.get("state_bytes", {}) or {}).get("$bytes_base64")
+    if not isinstance(encoded_state, str):
+        _error(issues, "satellite_checkpoint.fsw_state_missing", f"{checkpoint_path}.fsw_snapshot.state_bytes", "Expected canonical base64 state bytes.")
+    else:
+        try:
+            state_bytes = base64.b64decode(encoded_state, validate=True)
+        except (ValueError, TypeError):
+            _error(issues, "satellite_checkpoint.fsw_state_base64", f"{checkpoint_path}.fsw_snapshot.state_bytes", "Invalid base64 state bytes.")
+        else:
+            expected = str(snapshot.get("state_hash_sha256", "") or "")
+            if hashlib.sha256(state_bytes).hexdigest() != expected or expected != checkpoint.get("state_hash_sha256"):
+                _error(issues, "satellite_checkpoint.fsw_state_hash", f"{checkpoint_path}.fsw_snapshot", "FSW state hash binding failed.")
+    runtime_encoded = checkpoint.get("runtime_state_bytes_base64")
+    if not isinstance(runtime_encoded, str):
+        _error(issues, "satellite_checkpoint.runtime_state_missing", f"{checkpoint_path}.runtime_state_bytes_base64", "Expected base64 runtime state.")
+    else:
+        try:
+            runtime_bytes = base64.b64decode(runtime_encoded, validate=True)
+        except (ValueError, TypeError):
+            _error(issues, "satellite_checkpoint.runtime_state_base64", f"{checkpoint_path}.runtime_state_bytes_base64", "Invalid base64 runtime state.")
+        else:
+            if hashlib.sha256(runtime_bytes).hexdigest() != checkpoint.get("runtime_state_hash_sha256"):
+                _error(issues, "satellite_checkpoint.runtime_state_hash", checkpoint_path, "Runtime-state hash binding failed.")
+
+    contexts = _required_sequence(payload, "context_states", path, issues)
+    object_ids = {str(dict(payload.get("object", {}) or {}).get("object_id", "") or "")}
+    for index, raw in enumerate(contexts):
+        context_path = f"{path}.context_states[{index}]"
+        if not isinstance(raw, Mapping):
+            _error(issues, "type.object", context_path, "Context state must be an object.")
+            continue
+        _closed_mapping(
+            raw,
+            {"object", "state", "attitude", "resource_state", "object_specs", "state_row_sha256"},
+            context_path,
+            issues,
+        )
+        context_id = str(dict(raw.get("object", {}) or {}).get("object_id", "") or "")
+        if not context_id or context_id in object_ids:
+            _error(issues, "satellite_checkpoint.context_identity", f"{context_path}.object", "Context object ID must be unique.")
+        object_ids.add(context_id)
+        context_hash = _required_string(raw, "state_row_sha256", context_path, issues)
+        context_selection = {
+            "selector_kind": "sample_index",
+            "requested": {"sample_index": selection.get("sample_index")},
+            "sample_index": selection.get("sample_index"),
+            "time_s": selection.get("time_s"),
+            "state_row_sha256": context_hash,
+            "associated_event": None,
+        }
+        context_payload = {
+            "object": deepcopy(dict(raw.get("object", {}) or {})),
+            "state": deepcopy(dict(raw.get("state", {}) or {})),
+            "covariance": {"present": False, "reason": "Context checkpoint state carries truth without covariance."},
+            "object_specs": deepcopy(dict(raw.get("object_specs", {}) or {})),
+            "resource_state": deepcopy(dict(raw.get("resource_state", {}) or {})),
+            "model_assumptions": orbital_assumptions,
+            "source_run": deepcopy(dict(payload.get("source_run", {}) or {})),
+            "selection": context_selection,
+        }
+        before = len(issues)
+        _validate_completed_run_state(context_payload, provenance=provenance, issues=issues)
+        for issue_index in range(before, len(issues)):
+            issue = issues[issue_index]
+            if issue.path.startswith("$.payload"):
+                issues[issue_index] = InterchangeValidationIssue(
+                    code=issue.code,
+                    path=context_path + issue.path[len("$.payload"):],
+                    message=issue.message,
+                    severity=issue.severity,
+                )
+        context_attitude = _required_mapping(raw, "attitude", context_path, issues)
+        _validate_checkpoint_attitude(context_attitude, f"{context_path}.attitude", issues)
+
+
+def _validate_checkpoint_attitude(
+    attitude: Mapping[str, Any],
+    path: str,
+    issues: list[InterchangeValidationIssue],
+) -> None:
+    _closed_mapping(attitude, {"quaternion_bn", "angular_rate_body_rad_s"}, path, issues)
+    quaternion = attitude.get("quaternion_bn")
+    _finite_vector(quaternion, 4, f"{path}.quaternion_bn", issues)
+    _finite_vector(attitude.get("angular_rate_body_rad_s"), 3, f"{path}.angular_rate_body_rad_s", issues)
+    if isinstance(quaternion, list) and len(quaternion) == 4 and all(
+        isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value))
+        for value in quaternion
+    ):
+        norm = math.sqrt(sum(float(value) ** 2 for value in quaternion))
+        if not math.isclose(norm, 1.0, rel_tol=0.0, abs_tol=1.0e-6):
+            _error(
+                issues,
+                "satellite_checkpoint.quaternion_invalid",
+                f"{path}.quaternion_bn",
+                "Quaternion must be normalized.",
+            )
 
 
 def _validate_covariance(
@@ -1268,7 +1543,13 @@ def _validate_scenario_patch(
             _error(issues, "patch.value_missing", f"{operation_path}.value", "Patch operation value is required.")
         if op not in {"replace", "append", "upsert"}:
             _error(issues, "patch.operation_unsupported", f"{operation_path}.op", "Only replace, append, and upsert are supported.")
-        if kind not in {"mission_burn", "duration_extension", "controller_pointer", "scenario_override"}:
+        if kind not in {
+            "mission_burn",
+            "duration_extension",
+            "controller_pointer",
+            "flight_software_stack",
+            "scenario_override",
+        }:
             _error(issues, "patch.operation_kind_unsupported", f"{operation_path}.kind", "Unsupported typed operation kind.")
         if dotted:
             _validate_patch_path(
@@ -1338,7 +1619,12 @@ def _validate_patch_path(
     tokens = [token for token in path.split(".") if token]
     valid = False
     if kind == "mission_burn":
-        valid = op == "append" and len(tokens) == 3 and tokens[0] == "objects" and tokens[2] == "mission_objectives"
+        valid = (
+            op == "append"
+            and len(tokens) == 5
+            and tokens[0] == "objects"
+            and tokens[2:] == ["flight_software", "params", "scheduled_burns"]
+        )
     elif kind == "duration_extension":
         valid = op == "replace" and tokens == ["simulator", "duration_s"]
     elif kind == "controller_pointer":
@@ -1346,8 +1632,10 @@ def _validate_patch_path(
             op == "replace"
             and len(tokens) == 3
             and tokens[0] == "objects"
-            and tokens[2] in {"orbit_control", "attitude_control", "base_guidance"}
+            and tokens[2] == "base_guidance"
         )
+    elif kind == "flight_software_stack":
+        valid = op == "replace" and len(tokens) == 3 and tokens[0] == "objects" and tokens[2] == "flight_software"
     elif kind == "scenario_override" and patch_type == "scenario_capability_overlay":
         valid = op == "upsert" and _scenario_overlay_path_allowed(tokens)
     elif kind == "scenario_override":
@@ -1368,12 +1656,8 @@ def _scenario_overlay_path_allowed(tokens: list[str]) -> bool:
         and tokens[0] == "objects"
         and tokens[2]
         in {
-            "orbit_control",
-            "attitude_control",
             "base_guidance",
-            "mission_strategy",
-            "mission_execution",
-            "mission_objectives",
+            "flight_software",
             "knowledge",
         }
     )
@@ -1389,7 +1673,7 @@ def _validate_patch_operation_value(
 ) -> None:
     allowed_kinds = {
         "mission_recovery_candidate": {"mission_burn", "duration_extension"},
-        "controller_optimized_variant": {"controller_pointer", "scenario_override"},
+        "controller_optimized_variant": {"controller_pointer", "flight_software_stack", "scenario_override"},
         "scenario_capability_overlay": {"scenario_override"},
     }
     if patch_type in allowed_kinds and kind not in allowed_kinds[patch_type]:
@@ -1404,63 +1688,26 @@ def _validate_patch_operation_value(
         if duration is not None and duration <= 0.0:
             _error(issues, "patch.duration_invalid", issue_path, "Scenario duration must be positive.")
         return
-    if kind == "controller_pointer":
+    if kind in {"controller_pointer", "flight_software_stack"}:
         if not isinstance(value, Mapping) or not value:
-            _error(issues, "patch.controller_pointer_invalid", issue_path, "Controller pointer must be a non-empty object.")
+            _error(issues, "patch.controller_pointer_invalid", issue_path, "Controller or stack selection must be a non-empty object.")
         return
     if kind != "mission_burn":
         return
     if not isinstance(value, Mapping):
         _error(issues, "patch.mission_burn_invalid", issue_path, "Mission burn must be an object.")
         return
-    _closed_mapping(value, {"module", "class_name", "params"}, issue_path, issues)
-    if value.get("module") != "sim.mission.modules":
-        _error(
-            issues,
-            "patch.mission_module_incompatible",
-            f"{issue_path}.module",
-            "Mission patches must use the checked-in sim.mission.modules contract.",
-        )
-    if value.get("class_name") != "ScheduledVectorBurnMissionModule":
-        _error(
-            issues,
-            "patch.mission_module_incompatible",
-            f"{issue_path}.class_name",
-            "Mission patches must use ScheduledVectorBurnMissionModule.",
-        )
-    params = _required_mapping(value, "params", issue_path, issues)
-    params_path = f"{issue_path}.params"
-    _closed_mapping(
-        params,
-        {
-            "target_id",
-            "frame",
-            "delta_v_m_s",
-            "burn_start_s",
-            "burn_duration_s",
-            "require_finite_reference",
-        },
-        params_path,
-        issues,
-    )
-    _required_string(params, "target_id", params_path, issues)
-    frame = _required_string(params, "frame", params_path, issues)
+    _closed_mapping(value, {"frame", "delta_v_m_s", "start_time_s", "duration_s"}, issue_path, issues)
+    frame = _required_string(value, "frame", issue_path, issues)
     if frame and frame not in {"eci", "ric"}:
-        _error(issues, "patch.mission_frame_incompatible", f"{params_path}.frame", "Mission burn frame must be eci or ric.")
-    _finite_vector(params.get("delta_v_m_s"), 3, f"{params_path}.delta_v_m_s", issues)
-    start = _finite_number(params.get("burn_start_s"), f"{params_path}.burn_start_s", issues)
+        _error(issues, "patch.mission_frame_incompatible", f"{issue_path}.frame", "Mission burn frame must be eci or ric.")
+    _finite_vector(value.get("delta_v_m_s"), 3, f"{issue_path}.delta_v_m_s", issues)
+    start = _finite_number(value.get("start_time_s"), f"{issue_path}.start_time_s", issues)
     if start is not None and start < 0.0:
-        _error(issues, "patch.mission_start_invalid", f"{params_path}.burn_start_s", "Burn start must be non-negative.")
-    duration = _finite_number(params.get("burn_duration_s"), f"{params_path}.burn_duration_s", issues)
+        _error(issues, "patch.mission_start_invalid", f"{issue_path}.start_time_s", "Burn start must be non-negative.")
+    duration = _finite_number(value.get("duration_s"), f"{issue_path}.duration_s", issues)
     if duration is not None and duration <= 0.0:
-        _error(issues, "patch.mission_duration_invalid", f"{params_path}.burn_duration_s", "Burn duration must be positive.")
-    if not isinstance(params.get("require_finite_reference"), bool):
-        _error(
-            issues,
-            "type.boolean",
-            f"{params_path}.require_finite_reference",
-            "require_finite_reference must be a boolean.",
-        )
+        _error(issues, "patch.mission_duration_invalid", f"{issue_path}.duration_s", "Burn duration must be positive.")
 
 
 def _validate_manifest(document: Mapping[str, Any]) -> InterchangeValidationReport:

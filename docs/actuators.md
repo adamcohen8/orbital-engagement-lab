@@ -11,6 +11,13 @@ Controllers may still emit the simple command shape:
 The public actuator package turns those desired commands into achievable
 commands.
 
+V2 force-producing hardware depletes vehicle mass using its configured
+specific impulse. If a scenario gives the abstract ideal-wrench reference
+profile a positive `fuel_mass_kg` but no propulsion preset or explicit
+`isp_s`, OEL uses the established 220 s chemical-reference value. Concrete
+RCS, continuous-engine, and electric-propulsion profiles should declare their
+actual Isp (directly or through a preset).
+
 
 ## Public Actuator Presets
 
@@ -97,8 +104,8 @@ before producing achieved thrust and mount torque.
 - simplified control moment gyros through `ControlMomentGyroLimits`;
 - wheel desaturation assist through `WheelDesaturationLimits`.
 
-When no magnetic-field vector is provided, magnetorquers fall back to a
-compatibility dipole-proxy clamp so older tests and examples remain stable.
+When no magnetic-field vector is provided, the legacy actuator returns zero
+magnetorquer torque and records no fictitious field authority.
 
 
 ## Fault And Degradation Layer
@@ -188,16 +195,21 @@ than tuned mission designs:
 - `sim.control.orbit.GimbaledThrusterController`: wrapper that suppresses
   thrust directions outside a configured gimbal cone.
 
-These controllers still emit the standard `Command` shape, so they work with
-the existing controller plugin contract and can be used in YAML through the
-normal `orbit_control` and `attitude_control` pointers.
+These are component-bench APIs. They emit the pre-v2 `Command` shape and are
+not silently inserted into the v2 satellite runtime. Complete v2 stacks own
+control and allocation and publish typed device commands. Use the Controller
+Bench to exercise or adapt these components; use a `flight_software` stack and
+compatible `hardware_profile` for a physical scenario.
 
-Local smoke configs:
+Physical v2 actuator smokes:
 
 - `configs/actuator_lab_presets_smoke.yaml`
-- `configs/controller_magnetorquer_bdot_smoke.yaml`
-- `configs/controller_wheel_desaturation_smoke.yaml`
-- `configs/controller_cmg_steering_smoke.yaml`
 - `configs/controller_rcs_allocation_smoke.yaml`
 - `configs/controller_electric_propulsion_smoke.yaml`
 - `configs/controller_gimbaled_thruster_smoke.yaml`
+
+The magnetorquer B-dot, wheel-desaturation, and CMG controller fixtures remain
+component-level checks until physical v2 hardware profiles and their telemetry
+feedback contracts are promoted. Their scenario files validate hardware
+metadata and the attitude reference stack, but do not claim physical execution
+of those three component controllers.

@@ -108,6 +108,8 @@ def run_recipe(
             style_name=style_name,
         )
         packet.plot_summary = _summarize_plots(packet.plots)
+    if step_callback is not None:
+        step_callback(1, 1)
     return _write_packet(packet, prepared["output_dir"])
 
 
@@ -118,6 +120,8 @@ def inspect_output(
     max_rows: int = 50,
     semantic_metric_names: tuple[str, ...] | list[str] = (),
     write_packet: bool = True,
+    max_value_bytes: int | None = None,
+    max_result_bytes: int | None = None,
 ) -> dict[str, Any]:
     outdir = Path(output_dir).expanduser().resolve()
     query_names = tuple(query_names or DEFAULT_INSPECTION_QUERIES)
@@ -141,7 +145,13 @@ def inspect_output(
                 "saved_views": workspace.saved_views(),
             }
         )
-        review["queries"] = _run_saved_queries(workspace, query_names, max_rows=max_rows)
+        review["queries"] = _run_saved_queries(
+            workspace,
+            query_names,
+            max_rows=max_rows,
+            max_value_bytes=max_value_bytes,
+            max_result_bytes=max_result_bytes,
+        )
         review["query_summary"] = _summarize_query_rows(review["queries"])
         packet.artifacts = _artifact_rows(review["queries"], output_dir=outdir)
     except (ReviewStoreNotFoundError, ReviewQueryError, ValueError) as exc:
@@ -279,6 +289,8 @@ def compare_outputs(
     *,
     metric_names: tuple[str, ...] | list[str] | None = None,
     max_rows: int = 50,
+    max_value_bytes: int | None = None,
+    max_result_bytes: int | None = None,
 ) -> dict[str, Any]:
     """Compare semantic metrics from two completed runs without executing or writing."""
 
@@ -291,6 +303,8 @@ def compare_outputs(
             max_rows=max_rows,
             semantic_metric_names=metrics,
             write_packet=False,
+            max_value_bytes=max_value_bytes,
+            max_result_bytes=max_result_bytes,
         ),
         "candidate": inspect_output(
             candidate_output_dir,
@@ -298,6 +312,8 @@ def compare_outputs(
             max_rows=max_rows,
             semantic_metric_names=metrics,
             write_packet=False,
+            max_value_bytes=max_value_bytes,
+            max_result_bytes=max_result_bytes,
         ),
     }
     metric_table = {label: _extract_metric_values(data, metrics) for label, data in inspections.items()}
@@ -365,7 +381,12 @@ def _prepare_config(
 
 
 def _run_saved_queries(
-    workspace: ReviewWorkspace, query_names: tuple[str, ...], *, max_rows: int
+    workspace: ReviewWorkspace,
+    query_names: tuple[str, ...],
+    *,
+    max_rows: int,
+    max_value_bytes: int | None = None,
+    max_result_bytes: int | None = None,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for name in query_names:
@@ -381,11 +402,15 @@ def _run_saved_queries(
             )
             continue
         try:
-            result = workspace.query(
-                saved.sql,
-                max_rows=max_rows,
-                max_vm_steps=saved.max_vm_steps,
-            )
+            query_kwargs: dict[str, Any] = {
+                "max_rows": max_rows,
+                "max_vm_steps": saved.max_vm_steps,
+            }
+            if max_value_bytes is not None:
+                query_kwargs["max_value_bytes"] = max_value_bytes
+            if max_result_bytes is not None:
+                query_kwargs["max_result_bytes"] = max_result_bytes
+            result = workspace.query(saved.sql, **query_kwargs)
             empty_result = int(result.row_count) == 0
             rows.append(
                 {

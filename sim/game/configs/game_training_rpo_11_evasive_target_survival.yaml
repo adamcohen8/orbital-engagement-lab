@@ -6,6 +6,12 @@ metadata:
   notes: Run with `python run_game.py sim/game/configs/game_training_rpo_11_evasive_target_survival.yaml
     --speed-multiple 10`.
   game:
+    flight_software_stack: fsw.game_pilot_reference
+    input_profile: game.translation.v1
+    hardware_profile: game.ideal_wrench.v1
+    observer_policy: truth_assisted
+    scoring_policy: configured_training.v1
+    replay_support: debrief_history_v1
     level_name: Level 10 - Evasion
     control_mode: ric_translation
     controlled_object_id: target
@@ -95,68 +101,6 @@ objects:
       - 0.0
       - 0.0
       relative_to: target
-    orbit_control:
-      kind: python
-      module: sim.control.orbit.ric_pd
-      class_name: RICPDTransferController
-      params:
-        max_accel_km_s2: 6.0e-05
-        mean_motion_rad_s: 0.001078
-        transfer_time_s: 4800.0
-        burn_time_constant_s: 35.0
-        correction_interval_s: 300.0
-        velocity_deadband_m_s: 0.03
-        final_brake_start_s: 0.0
-        terminal_start_s: 900.0
-        terminal_range_km: 0.15
-        terminal_kp:
-        - - 2.5e-06
-          - 0.0
-          - 0.0
-        - - 0.0
-          - 2.5e-06
-          - 0.0
-        - - 0.0
-          - 0.0
-          - 2.5e-06
-        terminal_kd:
-        - - 0.0035
-          - 0.0
-          - 0.0
-        - - 0.0
-          - 0.0035
-          - 0.0
-        - - 0.0
-          - 0.0
-          - 0.0035
-        desired_state_ric:
-        - 0.0
-        - 0.0
-        - 0.0
-        - 0.0
-        - 0.0
-        - 0.0
-        ric_curv_state_slice:
-        - 0
-        - 6
-        chief_eci_state_slice:
-        - 6
-        - 12
-        state_signs:
-        - 1.0
-        - 1.0
-        - 1.0
-        - 1.0
-        - 1.0
-        - 1.0
-    attitude_control:
-      kind: python
-      module: sim.control.attitude.zero_torque
-      class_name: ZeroTorqueController
-      params: {}
-    mission_strategy: null
-    mission_execution: null
-    mission_objectives: []
     knowledge:
       refresh_rate_s: 1.0
       targets:
@@ -177,6 +121,14 @@ objects:
       estimation:
         type: measured_state
     kind: satellite
+    flight_software:
+      stack: fsw.rpo_reference
+      hardware_profile: hardware.ideal_wrench.v1
+      params:
+        max_acceleration_m_s2: 0.060000000000000005
+        reference_object_id: target
+        translation_mode: terminal_braking
+        goal_type: rpo.terminal_braking
   target:
     enabled: true
     role: target
@@ -201,19 +153,6 @@ objects:
       - 0.0
       - 0.0
       - 0.0
-    orbit_control:
-      kind: python
-      module: sim.control.orbit.zero_controller
-      class_name: ZeroController
-      params: {}
-    attitude_control:
-      kind: python
-      module: sim.control.attitude.zero_torque
-      class_name: ZeroTorqueController
-      params: {}
-    mission_strategy: null
-    mission_execution: null
-    mission_objectives: []
     knowledge:
       refresh_rate_s: 1.0
       targets:
@@ -234,6 +173,12 @@ objects:
       estimation:
         type: measured_state
     kind: satellite
+    flight_software:
+      stack: fsw.game_pilot_reference
+      task_period_s: null
+      hardware_profile: game.ideal_wrench.v1
+      params:
+        reference_object_id: chaser
 simulator:
   duration_s: 9000.0
   dt_s: 1.0

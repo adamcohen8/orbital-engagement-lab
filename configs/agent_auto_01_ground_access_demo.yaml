@@ -20,10 +20,9 @@ objects:
         line2: 2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1004
         require_checksum: true
         propagate_to_initial_epoch: true
-    orbit_control:
-      kind: python
-      module: sim.control.orbit.zero_controller
-      class_name: ZeroController
+    flight_software:
+      stack: fsw.passive
+      hardware_profile: hardware.passive.v1
       params: {}
 ground_stations:
 - id: colorado_springs

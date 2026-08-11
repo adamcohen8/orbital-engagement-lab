@@ -2,12 +2,52 @@
 from .runner_common import *
 from .runner_models import *
 
+
 def _force_game_acceleration_off_config(config: SimulationConfig) -> SimulationConfig:
     return (
         config.with_value("simulator.acceleration.mode", "off")
         .with_value("simulator.acceleration.warmup", False)
         .with_value("simulator.acceleration.env_override", False)
     )
+
+
+def _select_game_controlled_object(
+    config: SimulationConfig,
+    *,
+    controlled_object_id: str,
+    configured_object_id: str,
+) -> SimulationConfig:
+    """Bind the pilot stack to the selected enabled object, not just metadata."""
+
+    root = config.to_dict()
+    objects = dict(root.get("objects", {}) or {})
+    selected = dict(objects.get(controlled_object_id, {}) or {})
+    if not selected or not bool(selected.get("enabled", True)):
+        raise ValueError(
+            f"controlled object {controlled_object_id!r} must name an enabled scenario object."
+        )
+    configured = dict(objects.get(configured_object_id, {}) or {})
+    if not configured:
+        raise ValueError(f"configured controlled object {configured_object_id!r} is missing.")
+    if controlled_object_id != configured_object_id:
+        pilot_fsw = dict(configured.get("flight_software", {}) or {})
+        if str(pilot_fsw.get("stack", "")) != "fsw.game_pilot_reference":
+            raise ValueError("configured controlled object does not own the game pilot stack.")
+        configured["flight_software"] = {
+            "stack": "fsw.passive",
+            "hardware_profile": "hardware.passive.v1",
+            "params": {},
+        }
+        pilot_params = dict(pilot_fsw.get("params", {}) or {})
+        if str(pilot_params.get("reference_object_id", "")) == controlled_object_id:
+            pilot_params["reference_object_id"] = configured_object_id
+        pilot_fsw["params"] = pilot_params
+        selected["flight_software"] = pilot_fsw
+        objects[configured_object_id] = configured
+        objects[controlled_object_id] = selected
+    root["objects"] = objects
+    root.setdefault("metadata", {}).setdefault("game", {})["controlled_object_id"] = controlled_object_id
+    return SimulationConfig.from_dict(root, source_path=config.source_path)
 
 
 def _max_accel_from_config(config: SimulationConfig, controlled_object_id: str) -> float:
@@ -38,12 +78,44 @@ def _game_control_mode(config: SimulationConfig) -> str:
     game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
     training_cfg = dict(game_cfg.get("training", {}) or {})
     default = "ric_translation" if training_cfg else "attitude_thrust"
-    return str(game_cfg.get("control_mode", default) or default).strip().lower()
+    mode = str(game_cfg.get("control_mode", default) or default).strip().lower()
+    allowed = {
+        "attitude_thrust",
+        "attitude",
+        "thrust",
+        *TRANSLATION_CONTROL_MODES,
+        *AERODYNAMIC_CONTROL_MODES,
+    }
+    if mode not in allowed:
+        raise ValueError(f"Unknown game.control_mode {mode!r}.")
+    if mode in AERODYNAMIC_CONTROL_MODES:
+        orbit = dict(config.scenario.simulator.dynamics.get("orbit", {}) or {})
+        if not _game_bool(orbit.get("drag", False), field="simulator.dynamics.orbit.drag"):
+            raise ValueError("Aerodynamic game control requires simulator.dynamics.orbit.drag=true.")
+        aero = _game_aerodynamic_control_config(config)
+        if aero["lift_coefficient"] <= 0.0 or aero["lift_area_m2"] <= 0.0:
+            raise ValueError("Aerodynamic game control requires positive lift_coefficient and lift_area_m2.")
+    return mode
 
 
 def _game_relative_frame(config: SimulationConfig) -> str:
     game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
-    return str(game_cfg.get("relative_frame", "ric") or "ric").strip().lower()
+    frame = str(game_cfg.get("relative_frame", "ric") or "ric").strip().lower().replace("-", "_")
+    allowed = {
+        "ric",
+        "cislunar",
+        "cislunar_l1",
+        "earth_moon_rotating",
+        "cr3bp",
+        "cr3bp_rotating",
+        "moon_ric",
+        "lunar_ric",
+        "target_moon_ric",
+        "target_lunar_ric",
+    }
+    if frame not in allowed:
+        raise ValueError(f"Unknown game.relative_frame {frame!r}.")
+    return frame
 
 
 def _game_target_sprite_path(config: SimulationConfig) -> Path | None:
@@ -58,12 +130,109 @@ def _game_chaser_sprite_path(config: SimulationConfig) -> Path | None:
     return Path(raw) if raw else None
 
 
+def _game_chaser_plane_sprite_path(config: SimulationConfig, plane: str) -> Path | None:
+    game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
+    raw = str(game_cfg.get(f"chaser_sprite_{str(plane).strip().lower()}_path", "") or "").strip()
+    return Path(raw) if raw else None
 
 
+def _game_aerodynamic_control_config(config: SimulationConfig) -> dict[str, float]:
+    game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
+    raw_value = game_cfg.get("aerodynamic_control", {}) or {}
+    if not isinstance(raw_value, dict):
+        raise ValueError("game.aerodynamic_control must be a mapping.")
+    raw = dict(raw_value)
+    defaults = {
+        "ballistic_coefficient_min_kg_m2": 40.0,
+        "ballistic_coefficient_max_kg_m2": 200.0,
+        "ballistic_coefficient_initial_kg_m2": 100.0,
+        "ballistic_coefficient_rate_kg_m2_s": 8.0,
+        "drag_coefficient": 2.2,
+        "lift_coefficient": 0.45,
+        "lift_area_m2": 20.0,
+        "lift_bank_initial_deg": 0.0,
+        "lift_bank_rate_deg_s": 18.0,
+        "ri_pitch_max_deg": 24.0,
+    }
+    unknown = sorted(set(raw) - set(defaults))
+    if unknown:
+        raise ValueError(f"Unknown game.aerodynamic_control field(s): {', '.join(unknown)}.")
+    values = {
+        key: _finite_game_float(raw.get(key, value), field=f"game.aerodynamic_control.{key}")
+        for key, value in defaults.items()
+    }
+    positive = (
+        "ballistic_coefficient_min_kg_m2",
+        "ballistic_coefficient_max_kg_m2",
+        "drag_coefficient",
+    )
+    nonnegative = (
+        "ballistic_coefficient_rate_kg_m2_s",
+        "lift_coefficient",
+        "lift_area_m2",
+        "lift_bank_rate_deg_s",
+        "ri_pitch_max_deg",
+    )
+    for key in positive:
+        if values[key] <= 0.0:
+            raise ValueError(f"game.aerodynamic_control.{key} must be greater than zero.")
+    for key in nonnegative:
+        if values[key] < 0.0:
+            raise ValueError(f"game.aerodynamic_control.{key} must be nonnegative.")
+    if values["ballistic_coefficient_min_kg_m2"] > values["ballistic_coefficient_max_kg_m2"]:
+        raise ValueError(
+            "game.aerodynamic_control.ballistic_coefficient_min_kg_m2 must not exceed ballistic_coefficient_max_kg_m2."
+        )
+    initial = values["ballistic_coefficient_initial_kg_m2"]
+    if not values["ballistic_coefficient_min_kg_m2"] <= initial <= values["ballistic_coefficient_max_kg_m2"]:
+        raise ValueError(
+            "game.aerodynamic_control.ballistic_coefficient_initial_kg_m2 must be within the configured bounds."
+        )
+    if values["ri_pitch_max_deg"] > 90.0:
+        raise ValueError("game.aerodynamic_control.ri_pitch_max_deg must not exceed 90 degrees.")
+    return values
 
 
+def _game_show_coast_prediction(config: SimulationConfig) -> bool:
+    game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
+    return _game_bool(game_cfg.get("show_coast_prediction", True), field="game.show_coast_prediction")
 
 
+def _finite_game_float(value: Any, *, field: str) -> float:
+    try:
+        result = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field} must be a finite number.") from exc
+    if not np.isfinite(result):
+        raise ValueError(f"{field} must be a finite number.")
+    return result
+
+
+def _game_bool(value: Any, *, field: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        key = value.strip().lower()
+        if key in {"true", "yes", "on", "1"}:
+            return True
+        if key in {"false", "no", "off", "0"}:
+            return False
+    if isinstance(value, (int, np.integer)) and value in {0, 1}:
+        return bool(value)
+    raise ValueError(f"{field} must be a boolean.")
+
+
+def _sync_dashboard_aerodynamic_control(dashboard: Any, provider: Any) -> None:
+    enabled = str(getattr(provider, "control_mode", "") or "").strip().lower() in AERODYNAMIC_CONTROL_MODES
+    dashboard.aerodynamic_control_enabled = bool(enabled)
+    if not enabled:
+        return
+    dashboard.aerodynamic_ballistic_coefficient_kg_m2 = float(provider.ballistic_coefficient_kg_m2)
+    dashboard.aerodynamic_ballistic_coefficient_min_kg_m2 = float(provider.ballistic_coefficient_min_kg_m2)
+    dashboard.aerodynamic_ballistic_coefficient_max_kg_m2 = float(provider.ballistic_coefficient_max_kg_m2)
+    dashboard.aerodynamic_lift_bank_angle_deg = float(provider.lift_bank_angle_deg)
+    if hasattr(dashboard, "_frame_cache_dirty"):
+        dashboard._frame_cache_dirty = True
 
 
 def _game_target_sprite_diameter_km(config: SimulationConfig) -> float:
@@ -76,6 +245,14 @@ def _game_chaser_sprite_diameter_km(config: SimulationConfig) -> float:
     return float(game_cfg.get("chaser_sprite_diameter_km", 0.006) or 0.006)
 
 
+def _game_chaser_sprite_ri_size_scale(config: SimulationConfig) -> float:
+    game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
+    value = _finite_game_float(
+        game_cfg.get("chaser_sprite_ri_size_scale", 1.0), field="game.chaser_sprite_ri_size_scale"
+    )
+    if value <= 0.0:
+        raise ValueError("game.chaser_sprite_ri_size_scale must be greater than zero.")
+    return value
 
 
 def _game_controlled_object_id(config: SimulationConfig, default: str = "chaser") -> str:
@@ -83,7 +260,15 @@ def _game_controlled_object_id(config: SimulationConfig, default: str = "chaser"
     return str(game_cfg.get("controlled_object_id", default) or default)
 
 
-def _training_config_with_sun_environment(training_cfg: RPOTrainingConfig, config: SimulationConfig) -> RPOTrainingConfig:
+def _training_config_with_sun_environment(
+    training_cfg: RPOTrainingConfig, config: SimulationConfig
+) -> RPOTrainingConfig:
+    for field, object_id in (
+        ("target_object_id", training_cfg.target_object_id),
+        ("chaser_object_id", training_cfg.chaser_object_id),
+    ):
+        if training_cfg.enabled and object_section(config.scenario, str(object_id)) is None:
+            raise ValueError(f"metadata.game.training.{field} refers to unknown object {object_id!r}.")
     constraints = tuple(getattr(training_cfg, "sun_angle_constraints", ()) or ())
     if not constraints:
         return training_cfg
@@ -121,7 +306,7 @@ def _operator_actuator_error_fraction(difficulty: str) -> float:
 
 def _game_plot_overlays_in_zoom(config: SimulationConfig) -> bool:
     game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
-    return bool(game_cfg.get("plot_overlays_in_zoom", True))
+    return _game_bool(game_cfg.get("plot_overlays_in_zoom", True), field="game.plot_overlays_in_zoom")
 
 
 def _game_plot_overlays_in_zoom_by_plane(config: SimulationConfig) -> dict[str, bool]:
@@ -133,13 +318,13 @@ def _game_plot_overlays_in_zoom_by_plane(config: SimulationConfig) -> dict[str, 
     for plane, value in raw.items():
         key = str(plane or "").strip().upper()
         if key in {"RI", "RC", "IC"}:
-            parsed[key] = bool(value)
+            parsed[key] = _game_bool(value, field=f"game.plot_overlays_in_zoom_by_plane.{key}")
     return parsed
 
 
 def _game_plot_prediction_in_zoom(config: SimulationConfig) -> bool:
     game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
-    return bool(game_cfg.get("plot_prediction_in_zoom", False))
+    return _game_bool(game_cfg.get("plot_prediction_in_zoom", False), field="game.plot_prediction_in_zoom")
 
 
 def _game_plot_prediction_zoom_max_span_km(config: SimulationConfig) -> float | None:
@@ -149,7 +334,10 @@ def _game_plot_prediction_zoom_max_span_km(config: SimulationConfig) -> float | 
 
 def _game_plot_prediction_full_trajectory_only(config: SimulationConfig) -> bool:
     game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
-    return bool(game_cfg.get("plot_prediction_full_trajectory_only", False))
+    return _game_bool(
+        game_cfg.get("plot_prediction_full_trajectory_only", False),
+        field="game.plot_prediction_full_trajectory_only",
+    )
 
 
 def _game_cr3bp_coast_prediction_horizon_s(config: SimulationConfig) -> float | None:
@@ -309,17 +497,17 @@ def _game_maneuver_input_max_pending_steps(config: SimulationConfig) -> int:
 
 def _game_timed_input_accumulator_enabled(config: SimulationConfig) -> bool:
     game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
-    return bool(game_cfg.get("timed_input_accumulator", True))
+    return _game_bool(game_cfg.get("timed_input_accumulator", True), field="game.timed_input_accumulator")
 
 
 def _game_visual_extrapolation_enabled(config: SimulationConfig) -> bool:
     game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
-    return bool(game_cfg.get("visual_extrapolation_enabled", True))
+    return _game_bool(game_cfg.get("visual_extrapolation_enabled", True), field="game.visual_extrapolation_enabled")
 
 
 def _game_two_rail_speed_control_enabled(config: SimulationConfig) -> bool:
     game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
-    return bool(game_cfg.get("two_rail_speed_control", False))
+    return _game_bool(game_cfg.get("two_rail_speed_control", False), field="game.two_rail_speed_control")
 
 
 def _positive_float_or_none(value: Any) -> float | None:
@@ -552,7 +740,9 @@ def _game_speed_multiplier_options(config: SimulationConfig) -> tuple[float, ...
 def _game_sandbox_enabled(config: SimulationConfig) -> bool:
     game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
     training_cfg = dict(game_cfg.get("training", {}) or {})
-    return bool(game_cfg.get("sandbox", False) or training_cfg.get("sandbox_mode", False))
+    return _game_bool(game_cfg.get("sandbox", False), field="game.sandbox") or _game_bool(
+        training_cfg.get("sandbox_mode", False), field="game.training.sandbox_mode"
+    )
 
 
 def _ric_primer_enabled(training_cfg: RPOTrainingConfig, *, arcade_enabled: bool = False) -> bool:
@@ -617,6 +807,7 @@ def _operator_tutorial_status(runtime: OperatorTutorialRuntime) -> str:
         "then the next scripted burn will load."
     )
 
+
 def _operator_tutorial_complete_score(score: Any) -> Any:
     try:
         elapsed_s = float(getattr(score, "elapsed_s", 0.0))
@@ -637,7 +828,14 @@ def _sandbox_setup_from_config(config: SimulationConfig) -> SandboxSetupValues:
     chaser = config.scenario.objects.get("chaser")
     target = config.scenario.objects.get("target")
     rel_state = [0.0, -3.0, 0.0, 0.0, 0.0, 0.0]
-    coes = {"a_km": 7000.0, "ecc": 0.0, "true_anomaly_deg": 0.0}
+    coes = {
+        "a_km": 7000.0,
+        "ecc": 0.0,
+        "inc_deg": 45.0,
+        "raan_deg": 0.0,
+        "argp_deg": 0.0,
+        "true_anomaly_deg": 0.0,
+    }
     if chaser is not None:
         rel = dict(chaser.initial_state.get("relative_to_target_ric", {}) or {})
         raw_state = list(rel.get("state", rel_state) or rel_state)
@@ -646,15 +844,18 @@ def _sandbox_setup_from_config(config: SimulationConfig) -> SandboxSetupValues:
     if target is not None:
         coes.update(dict(target.initial_state.get("coes", {}) or {}))
     return SandboxSetupValues(
+        target_a_km=float(coes.get("a_km", 7000.0) or 7000.0),
+        target_ecc=float(coes.get("ecc", 0.0) or 0.0),
+        target_inc_deg=float(coes.get("inc_deg", 45.0) or 0.0),
+        target_raan_deg=float(coes.get("raan_deg", 0.0) or 0.0),
+        target_argp_deg=float(coes.get("argp_deg", 0.0) or 0.0),
+        target_true_anomaly_deg=float(coes.get("true_anomaly_deg", 0.0) or 0.0),
         radial_km=float(rel_state[0]),
         in_track_km=float(rel_state[1]),
         cross_track_km=float(rel_state[2]),
         radial_rate_m_s=float(rel_state[3]) * 1000.0,
         in_track_rate_m_s=float(rel_state[4]) * 1000.0,
         cross_track_rate_m_s=float(rel_state[5]) * 1000.0,
-        target_a_km=float(coes.get("a_km", 7000.0) or 7000.0),
-        target_ecc=float(coes.get("ecc", 0.0) or 0.0),
-        target_true_anomaly_deg=float(coes.get("true_anomaly_deg", 0.0) or 0.0),
     )
 
 
@@ -688,9 +889,12 @@ def _apply_sandbox_setup_to_config(config: SimulationConfig, setup: SandboxSetup
     target_coes = dict(target_initial.get("coes", {}) or {})
     target_coes["a_km"] = float(setup.target_a_km)
     target_coes["ecc"] = float(setup.target_ecc)
+    target_coes["inc_deg"] = float(setup.target_inc_deg)
+    target_coes["raan_deg"] = float(setup.target_raan_deg)
+    target_coes["argp_deg"] = float(setup.target_argp_deg)
     target_coes["true_anomaly_deg"] = float(setup.target_true_anomaly_deg)
     target_initial["coes"] = target_coes
-    return SimulationConfig.from_dict(root)
+    return SimulationConfig.from_dict(root, source_path=config.source_path)
 
 
 def _game_coast_chaser_after_delta_v_budget(config: RPOTrainingConfig) -> bool:
@@ -765,6 +969,7 @@ def _coast_prediction_orbit_fraction(difficulty: str) -> float:
         raise ValueError("metadata.game.difficulty must be one of: easy, medium, hard, extreme")
     return table[key]
 
+
 def _wall_step_s(dt_s: float, speed_multiple: float) -> float:
     return float(dt_s) / max(float(speed_multiple), 1.0e-9)
 
@@ -790,7 +995,10 @@ def _adjust_speed_multiple(
 
 def _has_maneuver_input(state: KeyboardCommandState, *, control_mode: str = "attitude_thrust") -> bool:
     axes_active = any(abs(float(value)) > 1.0e-9 for value in (state.pitch, state.yaw, state.roll))
-    if str(control_mode or "").strip().lower() in TRANSLATION_CONTROL_MODES:
+    mode = str(control_mode or "").strip().lower()
+    if mode in AERODYNAMIC_CONTROL_MODES:
+        return bool(abs(float(state.pitch)) > 1.0e-9 or abs(float(state.roll)) > 1.0e-9)
+    if mode in TRANSLATION_CONTROL_MODES:
         return bool(axes_active and float(state.throttle) > 0.0)
     return bool(axes_active or (state.firing and float(state.throttle) > 0.0))
 
@@ -829,5 +1037,6 @@ def _effective_speed_multiple_for_control(
         options=options,
         maneuver_control_speed_multiple=_game_maneuver_control_speed_multiple(config),
     )
+
 
 __all__ = [name for name in globals() if not name.startswith("__")]

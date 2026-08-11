@@ -1,5 +1,6 @@
 scenario_name: performance_cr3bp
-scenario_description: Sustained Earth-Moon CR3BP propagation workload using the maintained southern L2 NRHO seed.
+scenario_description: Sustained Earth-Moon CR3BP propagation workload using the maintained
+  southern L2 NRHO seed.
 metadata:
   owner: public
   public_surface: public-performance
@@ -16,17 +17,23 @@ objects:
       cr3bp_halo:
         system: earth_moon
         family: l2_nrho_southern
-      attitude_quat_bn: [1.0, 0.0, 0.0, 0.0]
-      angular_rate_body_rad_s: [0.0, 0.0, 0.0]
-    orbit_control:
-      kind: python
-      module: sim.control.orbit.zero_controller
-      class_name: ZeroController
+      attitude_quat_bn:
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      angular_rate_body_rad_s:
+      - 0.0
+      - 0.0
+      - 0.0
+    flight_software:
+      stack: fsw.passive
+      hardware_profile: hardware.passive.v1
       params: {}
 simulator:
   duration_s: 86400.0
   dt_s: 60.0
-  resource_profile: "off"
+  resource_profile: 'off'
   dynamics:
     orbit:
       model: cr3bp

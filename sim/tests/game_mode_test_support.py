@@ -58,7 +58,6 @@ from sim.game.debrief import (
     tracker_replay_history,
     write_game_debrief,
 )
-from sim.game.defensive_target import DefensiveTargetIntentProvider
 from sim.game.formatting import format_distance_km, format_speed_km_s, format_speed_m_s
 from sim.game.frame_convention import (
     FRAME_CONVENTION_PRESET_SPACE_FORCE,
@@ -66,6 +65,7 @@ from sim.game.frame_convention import (
     frame_convention_display_axis_sign,
     frame_convention_from_preset,
 )
+from sim.game.fsw_inputs import GameOperatorController, GameOperatorInputAdapter
 from sim.game.launcher import (
     GameScenarioOption,
     GameSettings,
@@ -75,10 +75,9 @@ from sim.game.launcher import (
     discover_game_scenarios_for_mode,
     record_game_progress,
 )
-from sim.game.manual import KeyboardCommandState, ManualGameCommandProvider
+from sim.game.manual import KeyboardCommandState
 from sim.game.operator import (
     OperatorBurn,
-    OperatorBurnCommandProvider,
     OperatorBurnPlan,
     parse_operator_burn_plan,
     validate_operator_burn_plan,

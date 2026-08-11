@@ -70,39 +70,18 @@ packet, private merge check, and generated-public release rehearsal also
 passed on that host.
 
 This local evidence does not establish Windows, Linux, or Intel macOS runtime
-support by extrapolation. The complete hosted matrix remains the release gate
-for those rows, and Windows 11 desktop support additionally requires the
-controlled-machine procedure below. Publish or procurement material should
-name the exact evidence packets retained for the rows it claims.
+support by extrapolation. Publish or procurement material should name the exact
+retained packets for every row it claims. Controlled local environments are the
+preferred evidence source.
 
-The automated hosted-runner baseline is:
-
-| Host | Architecture | Python rows | Evidence class |
-| --- | --- | --- | --- |
-| Ubuntu 22.04 | x64 | 3.10, 3.11, 3.12, 3.13, 3.14 | GitHub-hosted automation |
-| Windows Server 2022 | x64 | 3.10, 3.11, 3.12, 3.13, 3.14 | GitHub-hosted automation |
-| macOS 15 | arm64 | 3.10, 3.11, 3.12, 3.13, 3.14 | GitHub-hosted automation |
-| macOS 15 | Intel/x64 | 3.10, 3.11, 3.12, 3.13, 3.14 | GitHub-hosted automation |
-
-`.github/workflows/compatibility.yml` runs a 14-row canary monthly: all five
-Python versions on Ubuntu and Windows plus Python 3.10 and 3.14 on both macOS
-architectures. Release tags force the complete 20-row matrix. Manual dispatch
-accepts an explicit `canary` or `full` scope and defaults to `canary`; release
-acceptance must use `full`. Routine pushes and pull requests continue to use the
-primary CI workflow so the high-cost desktop matrix cannot exhaust hosted-runner
-capacity during ordinary development.
-
-Each compatibility row installs the constrained `cross-platform` profile from
-wheels, audits and records the environment, runs doctor, validates before
-executing quickstart, queries the review store, validates and executes an
-OGP-SGP4 case, creates plot artifacts, exercises spawn transport and the
-headless trainer, and then executes the authoritative six-scenario and
-nine-suite compatibility acceptance manifest. Python 3.10 and 3.14 also run
-full regression plus acceleration/validation boundary checks in the same
-installed job on all four host/architecture rows. Consolidating those checks
-avoids duplicate hosted-runner environments without reducing boundary
-coverage. The existing Linux Python 3.11 CI remains the primary blocking
-full-suite lane.
+`.github/workflows/compatibility.yml` is an advisory escape hatch for the two
+environments unavailable to the maintainer locally: Windows x64 and Intel
+macOS. Relevant pull requests run one Windows x64/Python 3.14 job so evidence is
+attached to the PR; manual dispatch can select Windows or Intel macOS and one
+Python minor. Each run performs only wheel installation plus the platform
+smoke. It has no schedule, matrix, full regression, authoritative release
+acceptance, or dependency audit. The latter gates remain local and
+release-blocking through `tools/release_public.py --candidate`.
 
 The smoke collector distinguishes three evidence classes:
 
@@ -120,8 +99,7 @@ vulnerability records. The locally installed first-party
 not query the local project itself. An audit file's existence alone is not a
 passing security gate.
 
-The automated macOS baseline is macOS 15. An older macOS release is not covered
-by the hosted matrix and needs retained controlled-machine evidence before it
+An untested macOS release needs retained controlled-machine evidence before it
 can be claimed for a release.
 
 ## Install Profiles

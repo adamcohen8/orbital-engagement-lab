@@ -31,6 +31,104 @@ __all__ = [
 ]
 
 
+# Closed, user-facing environment contract. Runtime-derived cache/state keys are
+# deliberately absent; callers that need non-OEL metadata can use `extensions`.
+_ENVIRONMENT_ALLOWED_FIELDS = {
+    "air_gamma", "air_gas_constant_j_kg_k", "atmosphere_env", "atmosphere_model",
+    "atmosphere_sun_model", "dat_s", "ddeps_rad", "ddpsi_rad", "de440_coeff_path",
+    "de440_eop_path", "de440_tai_utc_s", "density_eop_path", "density_frame_model",
+    "density_kg_m3", "drag_earth_rotation_rad_s", "drag_eop_path", "drag_frame_model",
+    "dut1_s", "earth_radius_km", "eop_extrapolation", "ephemeris_body_callable",
+    "ephemeris_callable", "ephemeris_mode", "extensions", "geodetic_model", "jd_utc",
+    "jd_utc_start", "moon_pos_eci_km", "nrlmsise00_density_callable", "physical_aerodynamics",
+    "solar_irradiance_w_m2", "spice_abcorr", "spice_body_ephemeris_callable",
+    "spice_body_target_map", "spice_ephemeris_callable", "spice_frame", "spice_kernels",
+    "spice_moon_target", "spice_observer", "spice_sun_target", "srp_distance_scale",
+    "srp_geometry", "srp_pressure_n_m2", "srp_shadow_factor", "srp_shadow_model",
+    "srp_sun_dir_eci", "sun_dir_eci", "sun_pos_eci_km", "third_body_planets",
+    "tt_minus_utc_s", "xp_arcsec", "yp_arcsec",
+}
+
+_ATMOSPHERE_ENV_ALLOWED_FIELDS = {
+    "ap", "atmo_epoch_utc", "dat_s", "ddeps_rad", "ddpsi_rad", "density_eop_path",
+    "density_frame_model", "drag_earth_rotation_rad_s", "drag_eop_path", "drag_frame_model",
+    "dut1_s", "eop_extrapolation", "exponential_ceiling_altitude_km",
+    "exponential_reference_altitude_km", "exponential_reference_density_kg_m3",
+    "exponential_scale_height_km", "extensions", "f107", "f107a", "harris_priester_coeff_path",
+    "harris_priester_f107", "harris_priester_lower_limit_km", "harris_priester_n",
+    "harris_priester_ra_lag_rad", "harris_priester_upper_limit_km", "hp_coeff_path", "hp_f107",
+    "jacchia70_ap", "jacchia70_density_callable", "jacchia70_f10", "jacchia70_f10b",
+    "jacchia70_gast_rad", "jacchia70_geomagnetic_index_type", "jacchia70_sw_path",
+    "jb2006_ap_path", "jb2006_density_callable", "jb2006_sol_path", "jb2008_density_callable",
+    "jb2008_dtc_path", "jb2008_sol_path", "jd_utc", "jd_utc_start", "msis86_ap",
+    "msis86_ap_a", "msis86_density_callable", "msis86_f107", "msis86_f107a",
+    "msis86_hpop_angle_compat", "msis86_lst_hr", "msis86_sw_path", "msis_sw_path",
+    "nrlmsise00_ap", "nrlmsise00_ap_a", "nrlmsise00_density_callable", "nrlmsise00_f107",
+    "nrlmsise00_f107a", "nrlmsise00_lst_hr", "nrlmsise00_sw_path", "solar_flux_f107",
+    "spherical_harmonics_eop_path", "tt_minus_utc_s", "xp_arcsec", "yp_arcsec",
+}
+
+# Atmospheric inputs may be written either directly in `environment` or in the
+# nested `atmosphere_env` block; the single-run boundary normalizes both forms.
+_ENVIRONMENT_ALLOWED_FIELDS.update(_ATMOSPHERE_ENV_ALLOWED_FIELDS)
+
+
+def _normalize_environment_section(value: Any) -> dict[str, Any]:
+    environment = _as_dict(value, "simulator.environment")
+    _reject_unknown_fields(environment, "simulator.environment", _ENVIRONMENT_ALLOWED_FIELDS)
+    normalized = dict(environment)
+    atmosphere_env = _as_dict(normalized.get("atmosphere_env"), "simulator.environment.atmosphere_env")
+    _reject_unknown_fields(
+        atmosphere_env,
+        "simulator.environment.atmosphere_env",
+        _ATMOSPHERE_ENV_ALLOWED_FIELDS,
+    )
+    extensions = normalized.get("extensions", {}) or {}
+    if not isinstance(extensions, dict):
+        raise ValueError("simulator.environment.extensions must be a mapping.")
+    atmosphere_extensions = atmosphere_env.get("extensions", {}) or {}
+    if not isinstance(atmosphere_extensions, dict):
+        raise ValueError("simulator.environment.atmosphere_env.extensions must be a mapping.")
+    if "atmosphere_env" in normalized:
+        normalized["atmosphere_env"] = atmosphere_env
+    if "extensions" in normalized:
+        normalized["extensions"] = dict(extensions)
+    atmosphere_models = {
+        "exponential", "ussa1976", "nrlmsise00", "msis86", "msis-86",
+        "hpop_msis86", "jacchia70", "jacchia-70", "hpop_jacchia70",
+        "jb2006", "jb2008", "harris_priester", "harris-priester", "hp",
+        "hpop_harris_priester",
+    }
+    for container, container_path in (
+        (normalized, "simulator.environment"),
+        (atmosphere_env, "simulator.environment.atmosphere_env"),
+    ):
+        if container.get("atmosphere_model") not in (None, ""):
+            model = str(container["atmosphere_model"]).strip().lower()
+            if model not in atmosphere_models:
+                raise ValueError(f"{container_path}.atmosphere_model is unsupported: {model!r}.")
+            container["atmosphere_model"] = model
+        for key in ("drag_frame_model", "density_frame_model"):
+            if container.get(key) not in (None, ""):
+                from sim.dynamics.orbit.frames import normalize_frame_model
+
+                configured_model = str(container[key]).strip().lower()
+                normalize_frame_model(configured_model)
+                container[key] = configured_model
+        for key in (
+            "density_kg_m3",
+            "exponential_reference_density_kg_m3",
+            "drag_earth_rotation_rad_s",
+        ):
+            if container.get(key) is not None:
+                container[key] = _parse_float(container[key], f"{container_path}.{key}")
+                if key != "drag_earth_rotation_rad_s" and container[key] < 0.0:
+                    raise ValueError(f"{container_path}.{key} must be >= 0.")
+    if "atmosphere_env" in normalized:
+        normalized["atmosphere_env"] = atmosphere_env
+    return normalized
+
+
 def _parse_nonnegative_int(value: Any, field_name: str) -> int:
     if isinstance(value, bool):
         raise ValueError(f"{field_name} must be a nonnegative integer.")
@@ -358,7 +456,7 @@ def _parse_simulator_section(value: Any) -> SimulatorSection:
         execution=_parse_simulator_execution_section(d.get("execution")),
         frames=_parse_simulator_frames_section(d.get("frames")),
         dynamics=dynamics,
-        environment=dict(d.get("environment", {}) or {}),
+        environment=_normalize_environment_section(d.get("environment")),
         plugin_validation=plugin_validation,
         termination=termination,
     )
@@ -407,6 +505,26 @@ def _normalize_dynamics_section(value: dict[str, Any]) -> dict[str, Any]:
     )
     if "spherical_harmonics" in orbit:
         orbit["spherical_harmonics"] = _normalize_spherical_harmonics_section(orbit.get("spherical_harmonics"))
+    for key in ("adaptive_atol", "adaptive_rtol"):
+        if orbit.get(key) is not None:
+            orbit[key] = _parse_float(orbit[key], f"simulator.dynamics.orbit.{key}")
+            if orbit[key] <= 0.0:
+                raise ValueError(f"simulator.dynamics.orbit.{key} must be positive.")
+    if orbit.get("atmosphere_model") not in (None, ""):
+        orbit["atmosphere_model"] = str(orbit["atmosphere_model"]).strip().lower()
+        if orbit["atmosphere_model"] not in {
+            "exponential", "ussa1976", "nrlmsise00", "msis86", "msis-86",
+            "hpop_msis86", "jacchia70", "jacchia-70", "hpop_jacchia70",
+            "jb2006", "jb2008", "harris_priester", "harris-priester", "hp",
+            "hpop_harris_priester",
+        }:
+            raise ValueError("simulator.dynamics.orbit.atmosphere_model is unsupported.")
+    if orbit.get("drag_frame_model") not in (None, ""):
+        from sim.dynamics.orbit.frames import normalize_frame_model
+
+        configured_model = str(orbit["drag_frame_model"]).strip().lower()
+        normalize_frame_model(configured_model)
+        orbit["drag_frame_model"] = configured_model
     attitude = _as_dict(dynamics.get("attitude"), "simulator.dynamics.attitude")
     _reject_unknown_fields(
         attitude,

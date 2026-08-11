@@ -13,6 +13,10 @@ objects:
     enabled: false
     role: chaser
     kind: satellite
+    flight_software:
+      stack: fsw.passive
+      hardware_profile: hardware.passive.v1
+      params: {}
   target:
     enabled: true
     role: target
@@ -35,18 +39,11 @@ objects:
       - 0.0
       - 0.0
       - 0.0
-    orbit_control:
-      kind: python
-      module: sim.control.orbit.zero_controller
-      class_name: ZeroController
-      params: {}
-    attitude_control:
-      kind: python
-      module: sim.control.attitude.zero_torque
-      class_name: ZeroTorqueController
-      params: {}
-    mission_objectives: []
     kind: satellite
+    flight_software:
+      stack: fsw.passive
+      hardware_profile: hardware.passive.v1
+      params: {}
 simulator:
   duration_s: 120.0
   dt_s: 1.0

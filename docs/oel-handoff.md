@@ -97,7 +97,10 @@ per object—not the global maximum row—requires the recorded state frame to b
 canonical ECI, and derives the state epoch as
 `initial_jd_utc + time_s / 86400`. The product binds the review database hash,
 config hash, state-row hash, selector request, selected sample, source run, and
-data markings into its semantic identity.
+data markings into its semantic identity. Completed-run exports also bind the
+selected `mass_kg`. When the source declares `dry_mass_kg`, the product derives
+and binds remaining `fuel_mass_kg`; passive continuations therefore do not
+silently reset a propulsive satellite to its launch mass.
 
 Covariance is included only when `object_state_covariance` has one matching,
 mathematically valid full 6x6 ECI matrix for the selected object and sample.
@@ -132,6 +135,38 @@ same sample and epoch and binds available relative-pair rows from that sample.
 The materializer creates one passive ONP object per state and never restores
 controller, estimator, attitude, or mission-module memory.
 
+## Export and Materialize a Satellite Checkpoint
+
+Use the separately versioned `oel.satellite_checkpoint` product when the new
+study must continue a complete GNC v2 satellite instead of only its orbit:
+
+```bash
+.venv/bin/python -m sim.handoff export-satellite-checkpoint outputs/source_run \
+  --object-id chaser --context-object-id target \
+  --output outputs/handoffs/chaser_checkpoint.json --json
+
+.venv/bin/python -m sim.handoff materialize-satellite-checkpoint \
+  --checkpoint-product outputs/handoffs/chaser_checkpoint.json \
+  --scenario-name chaser_active_continuation \
+  --output outputs/handoffs/chaser_active_continuation.yaml \
+  --run-output-dir outputs/chaser_active_continuation \
+  --duration-s 600 --dt-s 1 --trust-plugins --json
+```
+
+The product is final-sample only. It binds ECI position/velocity, attitude,
+body rate, current wet/dry/fuel mass, the verified complete
+`flight_software` configuration, opaque FSW state bytes, implementation and
+configuration compatibility evidence, boot/load/invocation identity, onboard
+clock position, pending input deliveries, actuator-command bus state, physical
+actuator state, task releases, and sensor RNG state. State bytes are base64
+encoded and independently SHA-256 bound.
+
+Context objects may be included for relative navigation. They are continued as
+passive truth-state references; their own onboard software is not restored.
+Checkpoints that depend on external interactive publishers are rejected because
+a scenario alone cannot recreate that external state. Materialization validates
+but never executes the continuation.
+
 ## Export a Maneuver Detection
 
 A confirmed review event can be promoted to a versioned detection product:
@@ -152,7 +187,7 @@ selected automatically.
 ## Emit a Scenario-capability Overlay
 
 Use an overlay when an accepted scenario needs bounded, explicit access,
-control, knowledge, mission, review, termination, or supported analysis
+complete satellite flight software, knowledge, review, termination, or supported analysis
 configuration without workflow-local YAML copying:
 
 ```bash
@@ -215,7 +250,7 @@ running the separate command:
 The materializer preserves the Cartesian state, UTC Julian-date epoch, object
 identity/specifications, compatible orbit force-model and environment
 settings, quality disposition, source hashes, and data markings. It applies
-only documented passive-study defaults: `ZeroController`, disabled attitude
+only documented passive-study defaults: `fsw.passive`, disabled attitude
 and rocket dynamics, standard review output, and disabled plots/animations.
 Duration, output cadence, scenario name, scenario path, and run output path are
 explicit caller choices.
@@ -267,8 +302,10 @@ or runs the materialized scenario.
 `oel.scenario_patch` preserves the selection ID and rank, recommendation modes,
 objective, constraints, producer evidence, source artifacts, and data
 markings. Mission patches can append checked-in scheduled-burn modules and
-extend duration. Controller patches can replace explicit controller pointers
-and apply ordered, allowlisted scenario overrides. A stale source, unknown
+extend duration. Satellite optimization patches replace a complete
+`flight_software` stack; direct controller-pointer replacement remains limited
+to rocket `base_guidance`. Patches may also apply ordered, allowlisted scenario
+overrides. A stale source, unknown
 selection, non-accepted product, failed controller rerun, or incomplete burn
 duration blocks materialization and leaves an inspectable manifest.
 
@@ -317,8 +354,21 @@ must perform and record any supported transformation.
 covariance conventions as State Estimate v1, but identifies its source as one
 selected simulator truth row rather than an estimator result. Its closed
 payload adds verified source-run metadata and an exact final, sample-index,
-time, or event selection. It does not claim to continue attitude, controller
+time, or event selection. Adapter v2 also binds current mass and, where dry
+mass is known, remaining propellant. It does not claim to continue attitude, controller
 memory, estimator memory, or mission-module state.
+
+## Satellite Checkpoint Product v1
+
+`oel.satellite_checkpoint` is the explicit active-continuation contract for a
+complete GNC v2 satellite. Unlike an orbital state product, it carries truth
+attitude/rates and hash-bound opaque FSW/runtime state. Its materializer retains
+the source stack and hardware profile and installs the checkpoint at the typed
+flight-software boundary. Stack implementation/configuration mismatches,
+corrupt state bytes, inconsistent clocks, incompatible hardware identities, or
+external publisher dependencies fail closed.
+The game-pilot stack is also excluded because it requires the surrounding
+interactive game session; game continuation remains a separate future seam.
 
 ## Relative State Estimate Product v1
 

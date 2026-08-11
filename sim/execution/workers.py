@@ -18,6 +18,7 @@ def run_mc_iteration_from_dict(task: dict[str, Any]) -> dict[str, Any]:
     cdict = dict(task.get("config_dict", {}) or {})
     strict_plugins = bool(task.get("strict_plugins", True))
     progress_queue = task.get("progress_queue")
+    cancel_event = task.get("cancel_event")
     if progress_queue is None:
         progress_queue = worker_progress_queue()
     emit_every = int(task.get("progress_emit_every", 20) or 20)
@@ -35,6 +36,8 @@ def run_mc_iteration_from_dict(task: dict[str, Any]) -> dict[str, Any]:
 
     def _on_step(step: int, total: int) -> None:
         nonlocal last_emit
+        if cancel_event is not None and cancel_event.is_set():
+            raise RuntimeError("Parallel campaign worker cancelled.")
         if progress_queue is None:
             return
         s = max(int(step), 0)
@@ -56,7 +59,10 @@ def run_mc_iteration_from_dict(task: dict[str, Any]) -> dict[str, Any]:
         except Exception:
             pass
 
-    ro = _run_single_config(ci, step_callback=_on_step if progress_queue is not None else None)
+    ro = _run_single_config(
+        ci,
+        step_callback=_on_step if progress_queue is not None or cancel_event is not None else None,
+    )
     if progress_queue is not None:
         try:
             progress_queue.put(

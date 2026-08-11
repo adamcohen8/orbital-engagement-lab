@@ -2,8 +2,9 @@
 
 `configs/ric_pd_10km_experiment.yaml` is the recommended engineering review
 scenario after the quickstart. It combines a tuned RIC_PD relative-orbit
-controller, two-body dynamics, reaction-wheel attitude control, and
-thrust-alignment gating in one deterministic run.
+transfer law inside the complete `fsw.rpo_reference` stack, two-body dynamics,
+reaction-wheel attitude control, and thrust-alignment gating in one
+deterministic run.
 
 ## Run And Review
 
@@ -29,9 +30,16 @@ Selected examples also appear in the [Plot Gallery](plot-gallery.md).
 ## What The Scenario Demonstrates
 
 - A chaser initialized approximately 10 km in-track from a passive target.
-- Public `RICPDTransferController` control on curvilinear RIC state.
+- Raw onboard own-state and relative measurements processed by
+  `fsw.rpo_reference`, with no simulator-owned controller bypass.
+- Stack-native `ric_pd_transfer` guidance: transfer acquisition, coast and
+  correction, optional final braking, and terminal cleanup on curvilinear RIC
+  state. The reusable `RICPDTransferController` is a subordinate guidance law;
+  the v2 translation controller owns SI limits and typed requested effort.
 - Deterministic two-body dynamics with perturbations disabled.
-- Chaser attitude dynamics, reaction-wheel stabilization, and thrust gating.
+- Maintained rendezvous-goal semantics after acquisition, plus chaser attitude
+  dynamics, reaction-wheel stabilization, configured +Z thrust-axis pointing,
+  and thrust gating.
 - JSON, CSV, SQLite, and PNG evidence suitable for a lightweight review.
 
 ## Validation Claim
@@ -60,19 +68,29 @@ envelope.
 | Attitude guardrail events | `0` |
 | Attitude and knowledge finite fractions | `1.0` |
 
-The private three-run perturbation envelope varies initial in-track separation
+The private release-blocking harness runs only plugin validation and this
+deterministic scenario.
+
+The private three-run perturbation envelope is an optional exploratory check.
+It varies initial in-track separation
 from `-12 km` to `-8 km`, radial velocity from `-0.25 m/s` to `+0.25 m/s`, and
 cross-track velocity from `0.7 m/s` to `1.3 m/s`. Each run must finish within
 `0.05 km` and `0.05 m/s`, remain below `12 m/s` delta-v and `11000` chaser
 burn samples, keep the target passive, and record no attitude guardrail events.
+It must be requested explicitly from the private validation workspace.
+
+Three samples cannot support calibrated percentile or uncertainty claims, so
+this Monte Carlo is not release blocking and is not run by the release plan.
 
 ## Evidence
 
 The public path writes the run index, summary, review store, figures, and custom
-metrics. The private harness additionally writes its report, evidence manifest,
-attitude and estimation summaries, truth/measurement/estimate plot, single-run
-copy, and Monte Carlo checkpoints under
+metrics. The private deterministic harness additionally writes its report,
+content-bound evidence manifest, attitude and estimation summaries,
+truth/measurement/estimate plot, and single-run copy under
 `outputs/validation_harness_ric_pd_10km/`.
+An explicitly requested exploratory Monte Carlo run writes its checkpoints in
+the same output area.
 
 The knowledge chain in this scenario is primarily a traceability check because
 the configured path is deterministic and near-perfect. Noise-distribution and

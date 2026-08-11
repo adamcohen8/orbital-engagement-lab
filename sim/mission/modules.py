@@ -13,10 +13,22 @@ from .execution import burns as _burns
 from .execution import integrated as _integrated
 from .execution import pointing as _pointing
 from .execution import safe_hold as _safe_hold
+from .execution import reference_commands as _reference_commands
 from . import legacy_modules as _legacy
 from .registries import MISSION_EXECUTION_FAMILIES, MISSION_STRATEGY_FAMILIES
 
-for _module in (_base, _satellite, _executive, _rocket, _pointing, _burns, _integrated, _safe_hold, _legacy):
+for _module in (
+    _base,
+    _satellite,
+    _executive,
+    _rocket,
+    _pointing,
+    _burns,
+    _integrated,
+    _safe_hold,
+    _reference_commands,
+    _legacy,
+):
     globals().update({name: value for name, value in vars(_module).items() if not name.startswith("__")})
 
 for _name, _value in tuple(globals().items()):

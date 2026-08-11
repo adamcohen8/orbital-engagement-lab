@@ -7,6 +7,7 @@ from sim.config import (
     SimulationScenarioConfig,
     validate_scenario_plugins,
 )
+from sim.config.object_refs import configured_objects
 from sim.core.models import Command
 from sim.execution import create_single_run_engine, run_simulation_scenario
 from sim.public_api.config import (
@@ -50,7 +51,6 @@ class SimulationSession:
         self._step_index = 0
         self._done = False
         self._engine: Any | None = None
-        self._external_intent_providers: dict[str, Callable[..., dict[str, Any] | None]] = {}
         self._controller_overrides: dict[tuple[str, str], ControllerFactory] = {}
         self._mission_overrides: dict[tuple[str, str], ControllerFactory] = {}
         self._controller_originals: dict[tuple[str, str], Any] = {}
@@ -189,19 +189,26 @@ class SimulationSession:
             applied_torque=dict(snap["applied_torque"]),
         )
 
-    def set_external_intent_provider(
-        self,
-        object_id: str,
-        provider: Callable[..., dict[str, Any] | None] | None,
-    ) -> None:
-        oid = str(object_id)
-        if provider is None:
-            self._external_intent_providers.pop(oid, None)
-        else:
-            self._ensure_runtime_override_allowed("external intent providers")
-            self._external_intent_providers[oid] = provider
-        if self._engine is not None and hasattr(self._engine, "set_external_intent_provider"):
-            self._engine.set_external_intent_provider(oid, provider)
+    def publish_fsw_input(self, object_id: str, event: object) -> None:
+        """Publish one typed input event to a satellite's flight-software bus."""
+
+        self._ensure_engine()
+        assert self._engine is not None
+        self._engine.publish_fsw_input(str(object_id), event)
+
+    def add_fsw_input_publisher(self, object_id: str, publisher: Callable[..., object]) -> None:
+        """Attach a truth-free input source sampled at flight-software releases."""
+
+        self._ensure_engine()
+        assert self._engine is not None
+        self._engine.add_fsw_input_publisher(str(object_id), publisher)
+
+    def request_fsw_input_publisher_poll(self, object_id: str) -> None:
+        """Request one attached input-publisher poll at the current simulation time."""
+
+        self._ensure_engine()
+        assert self._engine is not None
+        self._engine.request_fsw_input_publisher_poll(str(object_id))
 
     def set_orbit_controller(self, object_id: str, controller: Any | None) -> None:
         """Attach a trusted Python orbit controller object or callable to a single-run session."""
@@ -249,6 +256,7 @@ class SimulationSession:
         elif not callable(factory):
             raise TypeError("Controller factory must be callable.")
         else:
+            self._reject_satellite_v1_override(oid, f"{kind} controller")
             self._ensure_runtime_override_allowed("controller overrides")
             self._controller_overrides[key] = factory
         if self._engine is not None:
@@ -268,6 +276,7 @@ class SimulationSession:
         elif not callable(factory):
             raise TypeError("Mission factory must be callable.")
         else:
+            self._reject_satellite_v1_override(oid, f"mission {kind}")
             self._ensure_runtime_override_allowed("mission overrides")
             self._mission_overrides[key] = factory
         if self._engine is not None:
@@ -293,9 +302,6 @@ class SimulationSession:
         )
         self._controller_originals.clear()
         self._mission_originals.clear()
-        if hasattr(self._engine, "set_external_intent_provider"):
-            for object_id, provider in self._external_intent_providers.items():
-                self._engine.set_external_intent_provider(object_id, provider)
         self._apply_runtime_overrides()
 
     def _shutdown_engine_workers(self, *, suppress_errors: bool = False) -> None:
@@ -347,6 +353,11 @@ class SimulationSession:
                     setattr(agent, attr, original)
             return
         agent = self._agent_for_override(object_id)
+        if getattr(agent, "kind", None) == "satellite":
+            raise RuntimeError(
+                "GNC v1 runtime overrides are unavailable for satellites; select or provide a complete "
+                "SatelliteFlightSoftware stack in objects.<id>.flight_software."
+            )
         controller = _controller_object(factory(), command_kind=kind)
         current = getattr(agent, attr, None)
         if current is not None and hasattr(current, "base"):
@@ -374,6 +385,11 @@ class SimulationSession:
                 setattr(agent, attr, self._mission_originals.pop(key))
             return
         agent = self._agent_for_override(object_id)
+        if getattr(agent, "kind", None) == "satellite":
+            raise RuntimeError(
+                "GNC v1 runtime overrides are unavailable for satellites; select or provide a complete "
+                "SatelliteFlightSoftware stack in objects.<id>.flight_software."
+            )
         self._mission_originals.setdefault(key, getattr(agent, attr, None))
         setattr(agent, attr, _mission_object(factory()))
 
@@ -404,6 +420,15 @@ class SimulationSession:
     def _ensure_runtime_override_allowed(self, surface: str) -> None:
         if self._sealed_policy is not None:
             raise PermissionError(f"Sealed mode blocks Python API {surface}; express trusted behavior in scenario YAML.")
+
+    def _reject_satellite_v1_override(self, object_id: str, surface: str) -> None:
+        scenario = self._active_config.to_scenario_config()
+        object_cfg = configured_objects(scenario).get(str(object_id))
+        if object_cfg is not None and object_cfg.kind == "satellite":
+            raise RuntimeError(
+                f"Cannot set {surface} on satellite {object_id!r}: GNC v2 accepts only complete "
+                "SatelliteFlightSoftware stacks through objects.<id>.flight_software."
+            )
 
 
 TrustedSimulationSession = SimulationSession

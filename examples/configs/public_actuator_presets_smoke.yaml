@@ -1,5 +1,6 @@
 scenario_name: public_actuator_presets_smoke
-scenario_description: Public actuator preset smoke example covering RCS, electric propulsion, and CMG attitude steering vocabulary.
+scenario_description: Public actuator preset smoke example covering RCS, electric
+  propulsion, and CMG attitude steering vocabulary.
 metadata:
   owner: public
   public_surface: public-actuator
@@ -31,26 +32,12 @@ objects:
       - 0.0
       - 0.0
       - 0.0
-    orbit_control:
-      kind: python
-      module: sim.control.orbit.baseline
-      class_name: StationkeepingController
+    flight_software:
+      stack: fsw.orbit_reference
+      hardware_profile: hardware.ideal_wrench.v1
       params:
-        target_state:
-        - 7001.0
-        - 0.0
-        - 0.0
-        - 0.0
-        - 7.5
-        - 0.0
-        kp_pos: 0.001
-        kd_vel: 0.0
-        max_accel_km_s2: 0.001
-    attitude_control:
-      kind: python
-      module: sim.control.attitude.zero_torque
-      class_name: ZeroTorqueController
-      params: {}
+        max_acceleration_m_s2: 1.0
+        translation_mode: stationkeeping
   ep_sat:
     enabled: true
     kind: satellite
@@ -79,32 +66,12 @@ objects:
       - 0.0
       - 0.0
       - 0.0
-    orbit_control:
-      kind: python
-      module: sim.control.orbit.electric_propulsion
-      class_name: ElectricPropulsionController
+    flight_software:
+      stack: fsw.low_thrust_reference
+      hardware_profile: hardware.continuous_engine.v1
       params:
-        mass_kg: 250.0
-        max_thrust_n: 0.25
-        base_controller:
-          module: sim.control.orbit.baseline
-          class_name: StationkeepingController
-          params:
-            target_state:
-            - 7001.0
-            - 2.0
-            - 0.0
-            - 0.0
-            - 7.5
-            - 0.0
-            kp_pos: 0.001
-            kd_vel: 0.0
-            max_accel_km_s2: 0.001
-    attitude_control:
-      kind: python
-      module: sim.control.attitude.zero_torque
-      class_name: ZeroTorqueController
-      params: {}
+        max_acceleration_m_s2: 1.0
+        translation_mode: low_thrust_phasing
   cmg_sat:
     enabled: true
     kind: satellite
@@ -148,40 +115,10 @@ objects:
       - 0.0
       - 0.0
       - 0.0
-    orbit_control:
-      kind: python
-      module: sim.control.orbit.zero_controller
-      class_name: ZeroController
+    flight_software:
+      stack: fsw.attitude_reference
+      hardware_profile: hardware.ideal_wrench.v1
       params: {}
-    attitude_control:
-      kind: python
-      module: sim.control.attitude.cmg_steering
-      class_name: CMGSteeringController
-      params:
-        max_torque_nm:
-        - 0.02
-        - 0.02
-        - 0.02
-        momentum_nms:
-        - 1.0
-        - 1.0
-        - 1.0
-        gimbal_rate_limit_rad_s:
-        - 0.1
-        - 0.1
-        - 0.1
-        base_controller:
-          module: sim.control.attitude.baseline
-          class_name: QuaternionPDController
-          params:
-            desired_attitude_quat_bn:
-            - 1.0
-            - 0.0
-            - 0.0
-            - 0.0
-            kp: 0.1
-            kd: 0.02
-            max_torque_nm: 0.05
 simulator:
   duration_s: 5.0
   dt_s: 1.0

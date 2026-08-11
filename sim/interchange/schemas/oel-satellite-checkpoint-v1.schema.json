@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orbitalengagementlab.com/schemas/oel-satellite-checkpoint-v1.schema.json",
+  "title": "OEL Satellite Checkpoint Product v1 Payload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "object", "state", "attitude", "covariance", "resource_state", "object_specs",
+    "flight_software", "knowledge", "checkpoint", "context_states",
+    "model_assumptions", "source_run", "selection"
+  ],
+  "properties": {
+    "object": {"type": "object"},
+    "state": {"type": "object"},
+    "attitude": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["quaternion_bn", "angular_rate_body_rad_s"],
+      "properties": {
+        "quaternion_bn": {"type": "array", "minItems": 4, "maxItems": 4, "items": {"type": "number"}},
+        "angular_rate_body_rad_s": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "number"}}
+      }
+    },
+    "covariance": {"type": "object"},
+    "resource_state": {"type": "object"},
+    "object_specs": {"type": "object"},
+    "flight_software": {"type": "object"},
+    "knowledge": {"type": "object"},
+    "checkpoint": {"type": "object"},
+    "context_states": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["object", "state", "attitude", "resource_state", "object_specs", "state_row_sha256"],
+        "properties": {
+          "object": {"type": "object"},
+          "state": {"type": "object"},
+          "attitude": {"type": "object"},
+          "resource_state": {"type": "object"},
+          "object_specs": {"type": "object"},
+          "state_row_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        }
+      }
+    },
+    "model_assumptions": {"type": "object"},
+    "source_run": {"type": "object"},
+    "selection": {"type": "object"}
+  }
+}

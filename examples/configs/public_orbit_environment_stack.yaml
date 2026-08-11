@@ -41,17 +41,6 @@ objects:
       - -0.03
       - 0.02
       relative_to: target
-    orbit_control:
-      kind: python
-      module: sim.control.orbit.zero_controller
-      class_name: ZeroController
-      params: {}
-    attitude_control:
-      kind: python
-      module: sim.control.attitude.zero_torque
-      class_name: ZeroTorqueController
-      params: {}
-    mission_objectives: []
     knowledge:
       refresh_rate_s: 2.0
       targets:
@@ -71,6 +60,10 @@ objects:
       estimation:
         type: ekf
     kind: satellite
+    flight_software:
+      stack: fsw.passive
+      hardware_profile: hardware.passive.v1
+      params: {}
   target:
     enabled: true
     role: target
@@ -96,17 +89,6 @@ objects:
       - 0.0
       - 0.0
       - 0.0
-    orbit_control:
-      kind: python
-      module: sim.control.orbit.zero_controller
-      class_name: ZeroController
-      params: {}
-    attitude_control:
-      kind: python
-      module: sim.control.attitude.zero_torque
-      class_name: ZeroTorqueController
-      params: {}
-    mission_objectives: []
     knowledge:
       refresh_rate_s: 5.0
       targets:
@@ -126,6 +108,10 @@ objects:
       estimation:
         type: ekf
     kind: satellite
+    flight_software:
+      stack: fsw.passive
+      hardware_profile: hardware.passive.v1
+      params: {}
 simulator:
   duration_s: 900.0
   dt_s: 5.0

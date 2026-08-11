@@ -309,7 +309,7 @@ class DashboardPredictionMixin:
         return blended, True
 
     def _coast_prediction(self) -> np.ndarray:
-        if not self.rel_hist:
+        if not bool(getattr(self, "show_coast_prediction", True)) or not self.rel_hist:
             return np.empty((0, 6), dtype=float)
         live_accel = np.array(getattr(self, "live_prediction_accel_ric_km_s2", np.zeros(3)), dtype=float).reshape(3)
         active_burn = bool(np.linalg.norm(live_accel) > float(self.burn_marker_threshold_km_s2))
@@ -319,6 +319,19 @@ class DashboardPredictionMixin:
             active_burn=active_burn,
         )
 
+    def _aerodynamic_sprite_rotation_deg(self, *, x_axis: int, y_axis: int) -> float:
+        if not bool(getattr(self, "aerodynamic_control_enabled", False)):
+            return 0.0
+        if (x_axis, y_axis) == (2, 0):
+            return float(getattr(self, "aerodynamic_lift_bank_angle_deg", 0.0))
+        if (x_axis, y_axis) != (1, 0):
+            return 0.0
+        bc_min = float(getattr(self, "aerodynamic_ballistic_coefficient_min_kg_m2", 40.0))
+        bc_max = float(getattr(self, "aerodynamic_ballistic_coefficient_max_kg_m2", 200.0))
+        bc = float(getattr(self, "aerodynamic_ballistic_coefficient_kg_m2", 100.0))
+        span = max(bc_max - bc_min, 1.0e-9)
+        low_bc_fraction = 1.0 - float(np.clip((bc - bc_min) / span, 0.0, 1.0))
+        return low_bc_fraction * float(getattr(self, "aerodynamic_ri_pitch_max_deg", 24.0))
 
     def _target_coast_prediction(self, target_rel: np.ndarray | None = None) -> np.ndarray:
         if not bool(getattr(self, "show_target_coast_prediction", False)):

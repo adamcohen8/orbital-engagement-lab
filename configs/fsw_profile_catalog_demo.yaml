@@ -1,0 +1,61 @@
+scenario_name: fsw_profile_catalog_demo
+scenario_description: Experimental demonstration of selecting a versioned FSW use-case profile.
+metadata:
+  owner: public
+  public_surface: reference-gnc
+  support_level: experimental
+objects:
+  target:
+    kind: satellite
+    specs:
+      mass_kg: 250.0
+    initial_state:
+      position_eci_km: [7000.0, 0.0, 0.0]
+      velocity_eci_km_s: [0.0, 7.54605329, 0.0]
+    flight_software:
+      profile: fsw.profile.coast_monitor.v1
+  chaser:
+    kind: satellite
+    role: chaser
+    specs:
+      mass_kg: 100.0
+    initial_state:
+      relative_to: target
+      relative_ric_rect: [0.0, 1.0, 0.0, 0.0, 0.0, 0.0]
+    knowledge:
+      refresh_rate_s: 0.5
+      targets: [target]
+    flight_software:
+      profile: fsw.profile.rpo_formation_hold.v1
+      params:
+        reference_object_id: target
+        target_relative_state_ric_m: [0.0, 500.0, 0.0, 0.0, 0.0, 0.0]
+        mean_motion_rad_s: 0.0010780076
+        max_acceleration_m_s2: 0.01
+simulator:
+  duration_s: 120.0
+  dt_s: 1.0
+  dynamics:
+    orbit:
+      model: two_body
+      orbit_substep_s: 0.5
+    attitude:
+      enabled: false
+  termination:
+    earth_impact_enabled: false
+outputs:
+  output_dir: outputs/fsw_profile_catalog_demo
+  mode: save
+  stats:
+    print_summary: false
+    save_json: true
+    save_full_log: false
+  review:
+    enabled: true
+    detail: standard
+  plots:
+    enabled: false
+    figure_ids: []
+  animations:
+    enabled: false
+    types: []

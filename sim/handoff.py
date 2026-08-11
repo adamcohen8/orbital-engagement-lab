@@ -33,6 +33,11 @@ from sim.interchange.provenance import (
     compute_product_id,
     sha256_file,
 )
+from sim.interchange.satellite_checkpoints import (
+    SatelliteCheckpointError,
+    export_satellite_checkpoint,
+    materialize_satellite_checkpoint,
+)
 from sim.interchange.scenario_patches import materialize_scenario_patch, select_patch_product
 from sim.interchange.snapshots import (
     CompletedRunSnapshotError,
@@ -56,6 +61,7 @@ __all__ = [
     "OGPMaterializationError",
     "ManeuverDetectionExportError",
     "ScenarioOverlayError",
+    "SatelliteCheckpointError",
     "canonical_json_bytes",
     "canonical_scenario_digest",
     "compare_handoff",
@@ -67,6 +73,7 @@ __all__ = [
     "export_completed_run_state",
     "export_completed_run_snapshot",
     "export_maneuver_detection_product",
+    "export_satellite_checkpoint",
     "emit_scenario_overlay",
     "inspect_document",
     "inspect_path",
@@ -76,6 +83,7 @@ __all__ = [
     "materialize_ogp",
     "materialize_scenario_patch",
     "materialize_snapshot_onp",
+    "materialize_satellite_checkpoint",
     "select_patch_product",
     "sha256_file",
     "validate_document",

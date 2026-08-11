@@ -12,6 +12,7 @@ from .inspection import inspect_path
 from .maneuver_detection import export_maneuver_detection_product
 from .materialization import materialize_ogp, materialize_onp
 from .overlays import emit_scenario_overlay, load_scenario_overlay
+from .satellite_checkpoints import export_satellite_checkpoint, materialize_satellite_checkpoint
 from .scenario_patches import materialize_scenario_patch, select_patch_product
 from .snapshots import export_completed_run_snapshot, materialize_snapshot_onp
 from .validation import load_interchange_document, validate_document
@@ -117,6 +118,31 @@ def build_parser() -> argparse.ArgumentParser:
     snapshot_onp_parser.add_argument("--trust-plugins", action="store_true")
     snapshot_onp_parser.add_argument("--overwrite", action="store_true")
     snapshot_onp_parser.add_argument("--json", action="store_true")
+
+    satellite_export_parser = subparsers.add_parser(
+        "export-satellite-checkpoint",
+        help="Export one final GNC v2 satellite truth/runtime checkpoint without executing a scenario.",
+    )
+    satellite_export_parser.add_argument("completed_run", type=Path)
+    satellite_export_parser.add_argument("--output", required=True, type=Path)
+    satellite_export_parser.add_argument("--object-id", required=True)
+    satellite_export_parser.add_argument("--context-object-id", action="append", default=[])
+    satellite_export_parser.add_argument("--overwrite", action="store_true")
+    satellite_export_parser.add_argument("--json", action="store_true")
+
+    satellite_materialize_parser = subparsers.add_parser(
+        "materialize-satellite-checkpoint",
+        help="Materialize an active GNC v2 satellite continuation without executing it.",
+    )
+    satellite_materialize_parser.add_argument("--checkpoint-product", required=True, type=Path)
+    satellite_materialize_parser.add_argument("--scenario-name", required=True)
+    satellite_materialize_parser.add_argument("--output", required=True, type=Path)
+    satellite_materialize_parser.add_argument("--run-output-dir", required=True, type=Path)
+    satellite_materialize_parser.add_argument("--duration-s", required=True, type=float)
+    satellite_materialize_parser.add_argument("--dt-s", required=True, type=float)
+    satellite_materialize_parser.add_argument("--trust-plugins", action="store_true")
+    satellite_materialize_parser.add_argument("--overwrite", action="store_true")
+    satellite_materialize_parser.add_argument("--json", action="store_true")
 
     overlay_parser = subparsers.add_parser(
         "emit-overlay",
@@ -298,6 +324,36 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"scenario_path: {payload.get('scenario_path', '')}")
                 print(f"object_count: {payload.get('object_count', 0)}")
                 print("execution_occurred: false")
+            return 0 if payload.get("status") == "materialized" else 2
+        if args.command == "export-satellite-checkpoint":
+            payload = export_satellite_checkpoint(
+                args.completed_run,
+                output_path=args.output,
+                object_id=args.object_id,
+                context_object_ids=args.context_object_id,
+                overwrite=args.overwrite,
+            )
+            if args.json:
+                print(json.dumps(payload, indent=2, sort_keys=True))
+            else:
+                print(f"status: {payload.get('status', '')}")
+                print(f"product_path: {payload.get('product_path', '')}")
+                print(f"product_id: {payload.get('product_id', '')}")
+                print(f"object_id: {payload.get('object_id', '')}")
+                print("execution_occurred: false")
+            return 0
+        if args.command == "materialize-satellite-checkpoint":
+            payload = materialize_satellite_checkpoint(
+                args.checkpoint_product,
+                scenario_name=args.scenario_name,
+                scenario_path=args.output,
+                output_dir=args.run_output_dir,
+                duration_s=args.duration_s,
+                dt_s=args.dt_s,
+                trust_plugins=args.trust_plugins,
+                overwrite=args.overwrite,
+            )
+            _print_materialization(payload, json_mode=args.json)
             return 0 if payload.get("status") == "materialized" else 2
         if args.command == "emit-overlay":
             payload = emit_scenario_overlay(

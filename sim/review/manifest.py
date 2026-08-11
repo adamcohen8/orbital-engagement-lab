@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from contextlib import closing
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -101,7 +101,7 @@ def write_workflow_review(
         "workflow_type": str(workflow_type or "workflow"),
         "title": str(title or scenario_name or workflow_type or "workflow"),
         "scenario_name": str(scenario_name or title or workflow_type or "workflow"),
-        "generated_utc": datetime.now(timezone.utc).isoformat(),
+        "generated_utc": os.environ.get("OEL_GENERATED_UTC", "").strip(),
         "status": str(status or "complete"),
         "summary": _jsonable(dict(summary or {})),
         "artifacts": artifact_rows,

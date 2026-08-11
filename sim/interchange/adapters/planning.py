@@ -157,18 +157,12 @@ def _candidate_operations(
             {
                 "op": "append",
                 "kind": "mission_burn",
-                "path": f"objects.{object_id}.mission_objectives",
+                "path": f"objects.{object_id}.flight_software.params.scheduled_burns",
                 "value": {
-                    "module": "sim.mission.modules",
-                    "class_name": "ScheduledVectorBurnMissionModule",
-                    "params": {
-                        "target_id": "self",
-                        "frame": frame,
-                        "delta_v_m_s": vector,
-                        "burn_start_s": start,
-                        "burn_duration_s": duration_value,
-                        "require_finite_reference": True,
-                    },
+                    "frame": frame,
+                    "delta_v_m_s": vector,
+                    "start_time_s": start,
+                    "duration_s": duration_value,
                 },
                 "reason": f"Materialize candidate {candidate.get('candidate_id')} burn {burn.get('burn_index')}.",
             }

@@ -80,6 +80,22 @@ class TestHCWLQRController(unittest.TestCase):
         self.assertEqual(len(summary["position_channel_zeros"]), 3)
         self.assertEqual(summary["position_channel_zeros"][0]["axis"], "R")
 
+    def test_subsecond_design_is_stabilizing_and_commands_against_cross_track_error(self):
+        ctrl = HCWLQRController(
+            mean_motion_rad_s=0.0010780076,
+            max_accel_km_s2=1e-4,
+            design_dt_s=0.1,
+        )
+        self.assertLess(max(abs(np.linalg.eigvals(ctrl._ad - ctrl._bd @ ctrl._k_gain))), 1.0)
+
+        state = np.zeros(12)
+        state[2] = 0.1
+        state[6:12] = np.array([7000.0, 0.0, 0.0, 0.0, 7.5, 0.0])
+        belief = StateBelief(state=state, covariance=np.eye(12), last_update_t_s=0.0)
+        command = ctrl.act(belief, t_s=0.0, budget_ms=1.0)
+
+        self.assertLess(command.mode_flags["accel_ric_km_s2"][2], 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()

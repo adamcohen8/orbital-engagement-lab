@@ -100,6 +100,8 @@ class ResourceEstimate:
     acceleration_backend: str
     risk: str
     notes: tuple[str, ...] = ()
+    hierarchical_processes: int = 1
+    object_workers_per_run: int = 0
 
     @property
     def action(self) -> str:
@@ -852,13 +854,32 @@ def estimate_resource_requirements(cfg: Any) -> ResourceEstimate:
     elif profile.max_parallel_workers is not None:
         effective_workers = max(1, min(effective_workers, int(profile.max_parallel_workers)))
     active_objects = _active_object_count(cfg)
+    hierarchical_processes = effective_workers
+    object_workers_per_run = 0
+    if study_type in {"monte_carlo", "sensitivity"} and runs > 0:
+        try:
+            from sim.execution.hierarchical import plan_hierarchical_execution
+        except ModuleNotFoundError as exc:
+            if exc.name != "sim.execution.hierarchical":
+                raise
+        else:
+            config_root = cfg.to_dict() if callable(getattr(cfg, "to_dict", None)) else {}
+            hierarchy = plan_hierarchical_execution(
+                task_roots=(config_root,),
+                task_count=max(runs, 1),
+                requested_campaign_workers=requested_workers if parallel_enabled else 1,
+                profile=profile,
+            )
+            effective_workers = int(hierarchy.campaign_workers)
+            object_workers_per_run = int(hierarchy.object_workers_per_run)
+            hierarchical_processes = effective_workers * (1 + object_workers_per_run)
     history_estimate = estimate_history_memory_from_config(cfg)
     estimated_history_mb_per_run = history_estimate.estimated_peak_mb
-    estimated_parallel_history_mb = estimated_history_mb_per_run * effective_workers
+    estimated_parallel_history_mb = estimated_history_mb_per_run * hierarchical_processes
     plots_enabled = bool(getattr(getattr(cfg, "outputs", None), "plots", {}).get("enabled", True))
     estimated_incremental_memory_mb = _incremental_memory_mb(
         history_mb_per_run=estimated_history_mb_per_run,
-        effective_workers=effective_workers,
+        effective_workers=hierarchical_processes,
         plots_enabled=plots_enabled,
     )
     retained_payload_runs = _retained_payload_run_count(cfg, study_type=study_type, runs=runs)
@@ -883,9 +904,15 @@ def estimate_resource_requirements(cfg: Any) -> ResourceEstimate:
     if runs >= 5 or steps >= 10000:
         risk = _raise_risk(risk, "moderate")
         notes.append("long campaign envelope")
-    if effective_workers >= 3:
+    if hierarchical_processes >= 3:
         risk = _raise_risk(risk, "heavy")
         notes.append("three or more concurrent workers")
+    if object_workers_per_run:
+        notes.append(
+            f"hierarchical execution may launch {effective_workers} campaign workers plus "
+            f"{object_workers_per_run} object workers per active run "
+            f"({hierarchical_processes} worker processes total)"
+        )
     if plots_enabled and runs > 1:
         notes.append("plots enabled for a batch workflow")
     if (
@@ -916,7 +943,7 @@ def estimate_resource_requirements(cfg: Any) -> ResourceEstimate:
             risk = _raise_risk(risk, "heavy")
             notes.append("projected post-start memory is below the profile's preferred headroom")
     if (
-        effective_workers > 1
+        hierarchical_processes > 1
         and max_load_per_cpu is not None
         and snapshot.load_per_cpu is not None
         and snapshot.load_per_cpu > max_load_per_cpu
@@ -944,4 +971,6 @@ def estimate_resource_requirements(cfg: Any) -> ResourceEstimate:
         acceleration_backend=acceleration.effective_backend,
         risk=risk,
         notes=tuple(notes),
+        hierarchical_processes=hierarchical_processes,
+        object_workers_per_run=object_workers_per_run,
     )

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
@@ -199,7 +199,7 @@ def _version_from_source_pyproject() -> str | None:
 
 
 def utc_stamp() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return os.environ.get("OEL_GENERATED_UTC", "").strip()
 
 
 def current_artifact_metadata() -> OELArtifactMetadata | None:

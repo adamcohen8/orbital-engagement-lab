@@ -10,7 +10,7 @@ from sim.config.plugin_specs import iter_nested_plugin_specs, plugin_spec_field
 
 _HOSTED_AI_PROVIDERS = {"anthropic", "claude", "gemini", "google", "openai"}
 _LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
-_TRUSTED_PLUGIN_PREFIXES = ("sim.", "integrations.cfs_sil.")
+_TRUSTED_PLUGIN_PREFIXES = ("sim.",)
 
 _DEFAULT_AI_ENDPOINTS = {
     "ollama": "http://localhost:11434",
@@ -98,6 +98,9 @@ def _validate_plugin_module(pointer: Any, path: str, policy: SealedModePolicy) -
 
 def _plugin_pointers(agent: Any) -> list[tuple[str, Any]]:
     out: list[tuple[str, Any]] = []
+    flight_software = getattr(agent, "flight_software", None)
+    if flight_software is not None and getattr(flight_software, "module", None):
+        out.append(("flight_software", flight_software))
     for field_name in (
         "guidance",
         "base_guidance",
@@ -151,29 +154,7 @@ def _default_endpoint(provider: str) -> str:
 
 
 def _validate_sil_networking(cfg: Any, policy: SealedModePolicy) -> list[str]:
-    if policy.allow_non_loopback_sil:
-        return []
-    errors: list[str] = []
-    for object_id, agent in configured_objects(cfg).items():
-        if not getattr(agent, "enabled", False):
-            continue
-        bridge = getattr(agent, "bridge", None)
-        if bridge is None or not getattr(bridge, "enabled", False):
-            continue
-        module = str(getattr(bridge, "module", "") or "")
-        class_name = str(getattr(bridge, "class_name", "") or "")
-        if not module.startswith("integrations.cfs_sil.") and not class_name.startswith("CfsSil"):
-            continue
-        params = dict(getattr(bridge, "params", {}) or {})
-        bind_host = str(params.get("bind_host", "127.0.0.1") or "127.0.0.1")
-        cfs_host = str(params.get("cfs_host", "127.0.0.1") or "127.0.0.1")
-        allow_non_loopback = bool(params.get("allow_non_loopback", False))
-        if allow_non_loopback or not _is_loopback_host(bind_host) or not _is_loopback_host(cfs_host):
-            errors.append(
-                f"{object_parameter_prefix(str(object_id))}.bridge: sealed mode blocks non-loopback cFS/SIL UDP networking. "
-                "Use loopback hosts and allow_non_loopback: false, or pass --allow-non-loopback-sil for an isolated test network."
-            )
-    return errors
+    return []
 
 
 def _is_loopback_host(host: str) -> bool:

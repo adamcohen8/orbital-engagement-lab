@@ -8,7 +8,7 @@ from typing import Any
 
 from sim.actuators.presets import available_actuator_preset_names, resolve_actuator_specs_from_satellite_specs
 from sim.config.object_refs import configured_objects, object_parameter_prefix
-from sim.config.plugin_specs import iter_nested_plugin_specs, plugin_spec_field
+from sim.config.plugin_specs import instantiate_plugin_spec, iter_nested_plugin_specs, plugin_spec_field
 from sim.digital_twin.mass_properties import validate_mass_properties
 from sim.dynamics.orbit.tle import ogp_mean_elements_from_mapping, parse_tle_lines
 
@@ -21,6 +21,10 @@ class PluginContract:
 
 
 _CONTRACTS = {
+    "flight_software": PluginContract(
+        methods_all=("boot", "step", "shutdown", "snapshot", "restore"),
+        allow_function=False,
+    ),
     "guidance": PluginContract(methods_all=("command",), allow_function=False),
     "orbit_control": PluginContract(methods_all=("act",), allow_function=False),
     "attitude_control": PluginContract(methods_all=("act",), allow_function=False),
@@ -28,7 +32,7 @@ _CONTRACTS = {
     "mission_execution": PluginContract(methods_all=(), methods_any=("update", "execute", "act"), allow_function=True),
     "bridge": PluginContract(
         methods_all=(),
-        methods_any=("step", "start", "send_command", "receive_command", "external_intent"),
+        methods_any=("step", "start", "send_command", "receive_command"),
         allow_function=True,
     ),
     "mission_objective": PluginContract(
@@ -41,11 +45,22 @@ def _validate_pointer(pointer: Any, contract: PluginContract, path: str, *, impo
     errs: list[str] = []
     if pointer is None:
         return errs
+    builtin = str(plugin_spec_field(pointer, "builtin", "") or "").strip()
+    if builtin:
+        try:
+            from sim.gnc.catalog import resolve_builtin_target
+
+            resolved_module, resolved_class = resolve_builtin_target(builtin)
+        except ValueError as exc:
+            return [f"{path}: {exc}"]
+    else:
+        resolved_module = resolved_class = ""
     module_name = str(plugin_spec_field(pointer, "module", "") or "").strip()
+    module_name = module_name or resolved_module
     if not module_name:
         errs.append(f"{path}: missing 'module'.")
         return errs
-    class_name = plugin_spec_field(pointer, "class_name", None)
+    class_name = plugin_spec_field(pointer, "class_name", None) or resolved_class or None
     function = plugin_spec_field(pointer, "function", None)
     if class_name and function:
         errs.append(f"{path}: define either 'class_name' or 'function', not both.")
@@ -79,6 +94,11 @@ def _validate_pointer(pointer: Any, contract: PluginContract, path: str, *, impo
         if contract.methods_any:
             if not any(_class_has_callable(cls, m) for m in contract.methods_any):
                 errs.append(f"{path}: class '{class_name}' must implement one of {list(contract.methods_any)}.")
+        if builtin and not errs:
+            try:
+                instantiate_plugin_spec(pointer, description=f"built-in GNC {builtin}")
+            except RuntimeError as exc:
+                errs.append(f"{path}: {exc}")
         return errs
 
     if function:
@@ -108,6 +128,8 @@ def validate_scenario_plugins(cfg: Any, *, import_plugins: bool = True) -> list[
     errs: list[str] = []
     orbit_cfg = dict(getattr(getattr(getattr(cfg, "simulator", None), "dynamics", {}), "orbit", {}) or {})
     default_propagation_method = str(orbit_cfg.get("propagation_method", "special") or "special").strip().lower()
+    game_cfg = dict(getattr(cfg, "metadata", {}).get("game", {}) or {})
+    game_controlled_object_id = str(game_cfg.get("controlled_object_id", "chaser") or "chaser")
     for object_id, agent in configured_objects(cfg).items():
         if not getattr(agent, "enabled", False):
             continue
@@ -115,6 +137,12 @@ def validate_scenario_plugins(cfg: Any, *, import_plugins: bool = True) -> list[
         propagation_method = str(
             getattr(agent, "propagation_method", "") or default_propagation_method or "special"
         ).strip().lower()
+        runtime_profile = str(getattr(agent, "runtime_profile", "flight_software") or "flight_software")
+        if game_cfg and runtime_profile == "trajectory_only" and str(object_id) == game_controlled_object_id:
+            errs.append(
+                f"{path}.runtime_profile=trajectory_only cannot be the game controlled_object_id; "
+                "pilot and operator input require a flight_software runtime."
+            )
         errs.extend(_validate_object_propagation(agent, propagation_method, path))
         errs.extend(_validate_object_mass_properties(getattr(agent, "specs", {}) or {}, f"{path}.specs"))
         errs.extend(_validate_initial_state(getattr(agent, "initial_state", {}) or {}, f"{path}.initial_state"))
@@ -144,38 +172,16 @@ def validate_scenario_plugins(cfg: Any, *, import_plugins: bool = True) -> list[
                 )
         else:
             errs.extend(_validate_satellite_actuator_specs(getattr(agent, "specs", {}) or {}, f"{path}.specs"))
-        errs.extend(
-            _validate_pointer(
-                getattr(agent, "orbit_control", None),
-                _CONTRACTS["orbit_control"],
-                f"{path}.orbit_control",
-                import_plugins=import_plugins,
-            )
-        )
-        errs.extend(
-            _validate_pointer(
-                getattr(agent, "attitude_control", None),
-                _CONTRACTS["attitude_control"],
-                f"{path}.attitude_control",
-                import_plugins=import_plugins,
-            )
-        )
-        errs.extend(
-            _validate_pointer(
-                getattr(agent, "mission_strategy", None),
-                _CONTRACTS["mission_strategy"],
-                f"{path}.mission_strategy",
-                import_plugins=import_plugins,
-            )
-        )
-        errs.extend(
-            _validate_pointer(
-                getattr(agent, "mission_execution", None),
-                _CONTRACTS["mission_execution"],
-                f"{path}.mission_execution",
-                import_plugins=import_plugins,
-            )
-        )
+            flight_software = getattr(agent, "flight_software", None)
+            if flight_software is not None and getattr(flight_software, "module", None):
+                errs.extend(
+                    _validate_pointer(
+                        flight_software,
+                        _CONTRACTS["flight_software"],
+                        f"{path}.flight_software",
+                        import_plugins=import_plugins,
+                    )
+                )
         bridge = getattr(agent, "bridge", None)
         if bridge is not None and getattr(bridge, "enabled", False):
             errs.extend(_validate_pointer(bridge, _CONTRACTS["bridge"], f"{path}.bridge", import_plugins=import_plugins))
@@ -202,6 +208,9 @@ def validate_scenario_plugins(cfg: Any, *, import_plugins: bool = True) -> list[
 
 def _agent_plugin_pointers(agent: Any, base_path: str) -> list[tuple[str, Any]]:
     pointers: list[tuple[str, Any]] = []
+    flight_software = getattr(agent, "flight_software", None)
+    if flight_software is not None and getattr(flight_software, "module", None):
+        pointers.append((f"{base_path}.flight_software", flight_software))
     for field_name in (
         "guidance",
         "base_guidance",
@@ -274,10 +283,15 @@ def _validate_object_propagation(agent: Any, propagation_method: str, path: str)
             + ", ".join(sorted(unsupported_initial_forms))
             + ". Use exactly one of initial_state.tle or initial_state.ogp_mean_elements."
         )
-    if getattr(agent, "orbit_control", None) is not None:
-        errs.append(f"{path}.orbit_control is not supported for passive general-propagation SGP4 objects.")
-    if getattr(agent, "attitude_control", None) is not None:
-        errs.append(f"{path}.attitude_control is not supported for passive general-propagation SGP4 objects.")
+    flight_software = getattr(agent, "flight_software", None)
+    if flight_software is not None:
+        stack_id = str(getattr(flight_software, "stack", "") or "")
+        custom_module = str(getattr(flight_software, "module", "") or "")
+        if custom_module or stack_id not in {"", "fsw.passive"}:
+            errs.append(
+                f"{path}.flight_software must use fsw.passive, or select runtime_profile=trajectory_only, "
+                "for passive general-propagation SGP4 objects."
+            )
     if getattr(agent, "mission_strategy", None) is not None or getattr(agent, "mission_execution", None) is not None:
         errs.append(f"{path}.mission_strategy/mission_execution are not supported for passive general-propagation SGP4 objects.")
     if list(getattr(agent, "mission_objectives", []) or []):
@@ -326,7 +340,9 @@ def _validate_object_knowledge(knowledge: dict[str, Any], path: str) -> list[str
     noise = dict(sensor_error)
     allowed_sensor_error = {
         "pos_sigma_km", "vel_sigma_km_s", "quat_sigma", "omega_sigma_rad_s",
-        "pos_bias_km", "vel_bias_km_s", "seed",
+        "pos_bias_km", "vel_bias_km_s", "range_sigma_km", "range_rate_sigma_km_s",
+        "angle_sigma_rad", "range_bias_km", "range_rate_bias_km_s", "az_bias_rad",
+        "el_bias_rad", "seed",
     }
     for key in sorted(set(noise) - allowed_sensor_error):
         errs.append(f"{path}.sensor_error.{key}: unsupported field.")
@@ -674,8 +690,11 @@ def _validate_wheel_axes(value: Any, path: str, *, wheel_count: int) -> list[str
         axes = matrix
     else:
         return [f"{path}: must have shape (3,{wheel_count}) or ({wheel_count},3)."]
-    if any(math.sqrt(sum(x * x for x in axis)) <= 0.0 for axis in axes):
+    norms = [math.sqrt(sum(x * x for x in axis)) for axis in axes]
+    if any(norm <= 0.0 for norm in norms):
         return [f"{path}: wheel axes must be nonzero."]
+    if any(not math.isclose(norm, 1.0, rel_tol=1.0e-9, abs_tol=1.0e-9) for norm in norms):
+        return [f"{path}: every wheel axis must be a unit vector."]
     return []
 
 

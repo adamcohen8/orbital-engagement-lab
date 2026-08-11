@@ -103,8 +103,6 @@ Common recipes include:
 - `relative_velocity_components`
 - `burn_activity`
 - `ground_access`
-- `campaign_closest_approach`
-- `sensitivity_effects`
 
 In Python:
 

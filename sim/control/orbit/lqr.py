@@ -7,7 +7,11 @@ import numpy as np
 from sim.core.interfaces import Controller
 from sim.core.models import Command, StateBelief
 from sim.dynamics.orbit.environment import EARTH_J2, EARTH_RADIUS_KM
-from sim.dynamics.orbit.relative_linear import RelativeLinearDynamics, normalize_relative_linear_model
+from sim.dynamics.orbit.relative_linear import (
+    RelativeLinearDynamics,
+    normalize_relative_linear_model,
+    solve_discrete_lqr_gain,
+)
 from sim.utils.frames import ric_curv_to_rect, ric_dcm_ir_from_rv
 
 
@@ -292,17 +296,12 @@ class HCWLQRController(Controller):
         max_iter: int,
         tol: float,
     ) -> np.ndarray:
-        P = Q.copy()
-        K = np.zeros((Bd.shape[1], Ad.shape[0]))
-        for _ in range(max_iter):
-            s = R + Bd.T @ P @ Bd
-            K = np.linalg.solve(s, Bd.T @ P @ Ad)
-            Pn = Ad.T @ P @ Ad - Ad.T @ P @ Bd @ K + Q
-            if np.max(np.abs(Pn - P)) < tol:
-                P = Pn
-                break
-            P = Pn
-        return np.linalg.solve(R + Bd.T @ P @ Bd, Bd.T @ P @ Ad)
+        # max_iter and tol remain accepted for source compatibility with the
+        # former finite-iteration solver.  The balanced DARE is deterministic
+        # and, unlike a truncated iteration, guarantees that an unstable gain
+        # is never returned silently.
+        _ = (max_iter, tol)
+        return solve_discrete_lqr_gain(Ad, Bd, Q, R)
 
 
 @dataclass

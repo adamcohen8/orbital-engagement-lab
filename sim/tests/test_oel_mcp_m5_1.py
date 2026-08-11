@@ -196,7 +196,7 @@ def test_report_audit_rejects_packet_over_call_budget_before_creating_output(tmp
     assert contract.capability()["limits"]["max_packet_bytes"] == MAX_REPORT_SOURCE_BYTES
 
 
-def test_report_audit_rejects_duplicate_artifact_identity_and_path(tmp_path: Path) -> None:
+def test_report_audit_rejects_self_rehashed_packet_without_prepare_binding(tmp_path: Path) -> None:
     output = _completed_output(tmp_path)
     handlers = _handlers(tmp_path)
     prepared = handlers.prepare_report_packet(
@@ -236,9 +236,10 @@ def test_report_audit_rejects_duplicate_artifact_identity_and_path(tmp_path: Pat
         handling=HANDLING,
     )
 
-    assert audited["status"] == "partial"
-    assert audited["result"]["checks"]["artifact_ids_unique"] is False
-    assert audited["result"]["checks"]["artifact_paths_unique"] is False
+    assert audited["status"] == "failed"
+    assert audited["error"]["type"] == "ValueError"
+    assert "preparation manifest" in audited["error"]["message"]
+    assert not (tmp_path / "duplicate-audit").exists()
 
 
 def test_report_tools_are_local_only_and_absent_from_frontier_profile(tmp_path: Path) -> None:
@@ -271,7 +272,7 @@ def test_doctor_and_host_config_make_disabled_effects_explicit(tmp_path: Path, m
     assert approvals["passed"] is False
     assert approvals["required"] is False
     assert report["network_listener"] is False
-    assert report["oel_version"] == "0.24.2"
+    assert report["oel_version"] == "0.25.0"
     assert report["oel_version_source"] == "source_pyproject"
     launch = next(row for row in report["checks"] if row["check_id"] == "host_launch")
     assert launch["passed"] is True

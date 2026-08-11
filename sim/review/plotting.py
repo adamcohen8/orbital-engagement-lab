@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
@@ -465,7 +466,7 @@ def record_generated_artifact(workspace: ReviewWorkspace, artifact: ReviewPlotAr
             "artifact_id": artifact.artifact_id,
             "artifact_type": "figure",
             "path": artifact.relative_path,
-            "created_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "created_utc": os.environ.get("OEL_GENERATED_UTC", "").strip(),
             "source": str(dict(spec.extra or {}).get("source", "oel_review_plot_api") or "oel_review_plot_api"),
             "source_query": spec.sql,
             "plot_type": spec.plot_type,
@@ -488,6 +489,9 @@ def record_generated_artifact(workspace: ReviewWorkspace, artifact: ReviewPlotAr
 def _draw_plot(ax: Any, result: ReviewQueryResult, spec: ReviewPlotSpec) -> None:
     plot_type = _normalize_plot_type(spec.plot_type)
     rows = result.rows
+    if plot_type == "heatmap":
+        _draw_heatmap(ax, rows, spec)
+        return
     if spec.group_column:
         groups: dict[str, list[dict[str, Any]]] = {}
         for row in rows:
@@ -502,9 +506,6 @@ def _draw_plot(ax: Any, result: ReviewQueryResult, spec: ReviewPlotSpec) -> None
         return
     if plot_type == "histogram":
         _draw_histogram(ax, rows, spec)
-        return
-    if plot_type == "heatmap":
-        _draw_heatmap(ax, rows, spec)
         return
     for y_column in spec.y_columns:
         _draw_series(ax, rows, spec.x_column, y_column, plot_type, label=y_column if len(spec.y_columns) > 1 else "")
@@ -611,13 +612,14 @@ def _validate_plot_spec(spec: ReviewPlotSpec, result: ReviewQueryResult) -> None
 
 
 def _scenario_name(workspace: ReviewWorkspace) -> str:
-    try:
-        result = workspace.query("SELECT scenario_name FROM run_metadata", max_rows=1)
-    except Exception:
-        return ""
-    if not result.rows:
-        return ""
-    return str(result.rows[0].get("scenario_name") or "")
+    for table in ("run_metadata", "workflow_metadata"):
+        try:
+            result = workspace.query(f"SELECT scenario_name FROM {table}", max_rows=1)
+        except Exception:
+            continue
+        if result.rows:
+            return str(result.rows[0].get("scenario_name") or "")
+    return ""
 
 
 def _default_title(y_columns: list[str], x_column: str) -> str:
@@ -773,7 +775,9 @@ def _relative_to_output(workspace: ReviewWorkspace, path: Path) -> str:
 
 
 def _needs_legend(spec: ReviewPlotSpec) -> bool:
-    return bool(spec.group_column) or len(spec.y_columns) > 1
+    return _normalize_plot_type(spec.plot_type) != "heatmap" and (
+        bool(spec.group_column) or len(spec.y_columns) > 1
+    )
 
 
 def _ensure_matplotlib_cache_env() -> None:

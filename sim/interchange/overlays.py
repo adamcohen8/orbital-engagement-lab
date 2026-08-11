@@ -15,12 +15,8 @@ from .scenario_patches import (
 SCENARIO_OVERLAY_ADAPTER_ID = "oel.scenario_capability_overlay"
 SCENARIO_OVERLAY_ADAPTER_VERSION = "1"
 _OBJECT_FIELDS = {
-    "orbit_control",
-    "attitude_control",
     "base_guidance",
-    "mission_strategy",
-    "mission_execution",
-    "mission_objectives",
+    "flight_software",
     "knowledge",
 }
 _ANALYSIS_FIELDS = {

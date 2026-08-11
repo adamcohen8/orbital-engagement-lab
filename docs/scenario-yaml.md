@@ -382,18 +382,88 @@ Add `ground_station_access` to `outputs.plots.figure_ids` for a built-in access,
 elevation, and slant-range figure. Set `outputs.plots.draw_earth_map: true`
 when static ground-track figures should use a world-map background.
 
-## Algorithm Pointers
+## Flight-software stacks and component discovery
 
-Controllers, guidance, mission strategies, and mission execution modules are
-referenced by importable Python module paths:
+Satellite GNC is selected as one complete stack. A built-in stack declaration
+looks like:
 
 ```yaml
-orbit_control:
-  kind: "python"
-  module: "sim.control.orbit.zero_controller"
-  class_name: "ZeroController"
+flight_software:
+  stack: fsw.rpo_reference
+  task_period_s: 0.1
+  hardware_profile: hardware.ideal_wrench.v1
+  params:
+    reference_object_id: target
+    translation_mode: v_bar_approach
+    max_acceleration_m_s2: 0.001
+```
+
+A versioned use-case profile selects a coherent stack, hardware family,
+cadence, and defaults while leaving mission-specific targets explicit:
+
+```yaml
+flight_software:
+  profile: fsw.profile.rpo_formation_hold.v1
+  params:
+    reference_object_id: target
+    target_relative_state_ric_m: [0.0, 500.0, 0.0, 0.0, 0.0, 0.0]
+```
+
+All 18 exact profile versions are Supported only inside their declared
+simulation qualification envelopes. Explicit parameters override profile
+defaults only where the envelope permits them; hardware overrides are accepted
+only from the profile's declared compatibility set. See
+[Flight-Software Use-Case Profiles](flight-software-profiles.md) and use
+`.venv/bin/python -m sim.flight_software list` for discovery.
+
+Custom stacks use an importable class implementing `SatelliteFlightSoftware`:
+
+```yaml
+flight_software:
+  module: my_package.rpo_stack
+  class_name: MyRpoStack
+  hardware_profile: hardware.ideal_wrench.v1
   params: {}
 ```
+
+The factory passes only the declared `params`; it never injects truth,
+dynamics, simulator environment, or controller objects. A satellite with no
+onboard behavior declared uses `fsw.passive`. Non-empty satellite
+`orbit_control`, `attitude_control`, `mission_strategy`, `mission_execution`,
+`mission_objectives`, and `bridge` fields are removed and fail with migration
+guidance. Rocket guidance retains its current pointer surface until the later
+rocket-stack overhaul.
+
+When only the deterministic trajectory is needed, opt the satellite out of the
+onboard runtime explicitly:
+
+```yaml
+objects:
+  debris:
+    kind: satellite
+    runtime_profile: trajectory_only
+    initial_state:
+      default_circular_earth: true
+```
+
+`trajectory_only` retains the selected ONP/OGP propagation and configured
+physical force models, but creates no sensors, knowledge estimator,
+flight-software scheduler, devices, commands, or FSW telemetry. It cannot be
+combined with `flight_software` or object-owned `knowledge`; other objects may
+still observe its truth state. Omitting `runtime_profile` remains backward
+compatible and continues to select `fsw.passive`.
+
+Discover the installed catalog and parameter schemas with:
+
+```bash
+.venv/bin/python -m sim.gnc list
+.venv/bin/python -m sim.gnc show orbit.vbar_approach --json
+.venv/bin/python -m sim.gnc validate
+```
+
+The `sim.gnc` catalog now describes composable component math, independently
+from the complete-stack catalog. A component cannot be installed directly into
+the satellite runtime; compose it behind a complete stack first.
 
 File-path plugin loading is not supported in scenario YAML. Custom extensions
 should live on the Python import path and be referenced with `module`.
@@ -666,26 +736,23 @@ perpendicular to atmosphere-relative velocity before applying lift. This support
 aero-assisted passes, such as dipping into the atmosphere for plane-change
 authority and then burning back up.
 
-The product includes two first-pass controllers for that pattern:
+The v2 physical runtime accepts modeled aerodynamic-effector commands. Ordinary
+satellite scenarios select a complete stack rather than separate orbit and
+attitude controllers:
 
 ```yaml
-orbit_control:
-  module: "sim.control.orbit.aero_assist"
-  class_name: "AtmosphericPassController"
+flight_software:
+  stack: fsw.orbit_reference
+  hardware_profile: hardware.ideal_wrench.v1
   params:
-    raise_start_s: 240.0
-    raise_end_s: 740.0
-    prograde_accel_km_s2: 0.0003
-attitude_control:
-  module: "sim.control.attitude.aero_assist"
-  class_name: "AtmosphericLiftAxisController"
-  params:
-    lift_axis_body: [0.0, 0.0, 1.0]
-    desired_lift_ric: [0.0, 0.0, 1.0]
+    translation_mode: stationkeeping
+    max_acceleration_m_s2: 0.02
 ```
 
-See `configs/aero_assisted_plane_change_demo.yaml` for the canonical checked-in
-example.
+See `configs/aero_assisted_plane_change_demo.yaml` for the checked-in physical
+atmospheric-pass example. Its v2 reference stack is Experimental; the prior
+separate timed-raise/lift-axis component composition is no longer a released
+satellite runtime path.
 
 If a satellite is burning during re-entry, the burn affects the propagated
 position and velocity through the normal dynamics path before re-entry metrics

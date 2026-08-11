@@ -83,10 +83,15 @@ def plan_operator_burns_for_config(
     read_only: bool = False,
     demo_title: str = "",
     launch_label: str = "Launch",
+    config_override: Any | None = None,
 ) -> OperatorBurnPlan | None:
     path = Path(config_path)
-    with path.open("r", encoding="utf-8") as f:
-        raw = yaml.safe_load(f) or {}
+    if config_override is None:
+        with path.open("r", encoding="utf-8") as f:
+            raw = yaml.safe_load(f) or {}
+    else:
+        to_dict = getattr(config_override, "to_dict", None)
+        raw = to_dict() if callable(to_dict) else dict(config_override)
     option = _scenario_option_from_yaml(path, raw, mode="operator")
     previous_grab = bool(pygame.event.get_grab())
     previous_visible = bool(pygame.mouse.get_visible())
@@ -107,6 +112,7 @@ def plan_operator_burns_for_config(
             read_only=read_only,
             demo_title=demo_title,
             launch_label=launch_label,
+            config_override=config_override,
         )
     finally:
         pygame.event.set_grab(previous_grab)
