@@ -415,6 +415,12 @@ def _sgp4_satdata(elements: TLEElements) -> dict[str, float]:
 
 
 def sgp4_propagate_teme(elements: TLEElements, tsince_min: float) -> SGP4State:
+    try:
+        tsince = float(tsince_min)
+    except (TypeError, ValueError):
+        return SGP4State(np.zeros(3), np.zeros(3), "SGP4 time offset must be finite.")
+    if not math.isfinite(tsince):
+        return SGP4State(np.zeros(3), np.zeros(3), "SGP4 time offset must be finite.")
     satdata = _sgp4_satdata(elements)
     ae = 1.0
     tothrd = 2.0 / 3.0
@@ -507,7 +513,10 @@ def sgp4_propagate_teme(elements: TLEElements, tsince_min: float) -> SGP4State:
     xmcof = 0.0 if abs(eeta) < 1.0e-12 else -(2.0 / 3.0) * coef * satdata["bstar"] * ae / eeta
     xnodcf = 3.5 * betao2 * xhdot1 * c1
     t2cof = 1.5 * c1
-    xlcof = 0.125 * a3ovk2 * sinio * (3.0 + 5.0 * cosio) / (1.0 + cosio)
+    xlcof_denominator = 1.0 + cosio
+    if abs(xlcof_denominator) < 1.5e-12:
+        xlcof_denominator = 1.5e-12
+    xlcof = 0.125 * a3ovk2 * sinio * (3.0 + 5.0 * cosio) / xlcof_denominator
     aycof = 0.25 * a3ovk2 * sinio
     delmo = (1.0 + eta * math.cos(satdata["xmo"])) ** 3
     sinmo = math.sin(satdata["xmo"])
@@ -523,7 +532,6 @@ def sgp4_propagate_teme(elements: TLEElements, tsince_min: float) -> SGP4State:
         t4cof = 0.25 * (3.0 * d3 + c1 * (12.0 * d2 + 10.0 * c1sq))
         t5cof = 0.2 * (3.0 * d4 + 12.0 * c1 * d3 + 6.0 * d2 * d2 + 15.0 * c1sq * (2.0 * d2 + c1sq))
 
-    tsince = float(tsince_min)
     xmdf = satdata["xmo"] + xmdot * tsince
     omgadf = satdata["omegao"] + omgdot * tsince
     xnoddf = satdata["xnodeo"] + xnodot * tsince
@@ -856,7 +864,10 @@ if njit is not None:
         xmcof = 0.0 if abs(eeta) < 1.0e-12 else -(2.0 / 3.0) * coef * bstar * ae / eeta
         xnodcf = 3.5 * betao2 * xhdot1 * c1
         t2cof = 1.5 * c1
-        xlcof = 0.125 * a3ovk2 * sinio * (3.0 + 5.0 * cosio) / (1.0 + cosio)
+        xlcof_denominator = 1.0 + cosio
+        if abs(xlcof_denominator) < 1.5e-12:
+            xlcof_denominator = 1.5e-12
+        xlcof = 0.125 * a3ovk2 * sinio * (3.0 + 5.0 * cosio) / xlcof_denominator
         aycof = 0.25 * a3ovk2 * sinio
         delmo = (1.0 + eta * math.cos(xmo)) ** 3
         sinmo = math.sin(xmo)

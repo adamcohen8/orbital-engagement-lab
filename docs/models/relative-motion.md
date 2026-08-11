@@ -147,9 +147,12 @@ law:
 - `RelativeOrbitMPCController`: seeds from a rectangular RIC error, then
   predicts target and chaser ECI states with two-body RK4 over the MPC horizon.
 
-The controllers command acceleration in ECI through the shared `Command`
-interface. Actuator stacks, attitude gating, burn scheduling, and mass/fuel
-behavior are separate runtime concerns.
+Standalone component controllers command acceleration in ECI through the
+shared `Command` interface. The complete GNC v2 `fsw.rpo_reference` stack uses
+`RICPDTransferController.guide_relative_state` as a subordinate guidance API,
+then owns SI limiting, attitude gating, allocation, typed device commands, and
+receipt/realization evidence. Mass/fuel behavior remains a physical runtime
+concern outside the flight-software stack.
 
 ## Scenario Configuration Knobs
 

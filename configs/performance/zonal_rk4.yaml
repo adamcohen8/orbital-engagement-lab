@@ -1,10 +1,12 @@
 scenario_name: performance_zonal_rk4
-scenario_description: Sustained passive ONP RK4 workload for the accelerated two-body plus J2/J3/J4 zonal kernel.
+scenario_description: Sustained passive ONP RK4 workload for the accelerated two-body
+  plus J2/J3/J4 zonal kernel.
 metadata:
   owner: public
   public_surface: public-performance
   support_level: experimental
-  evidence_role: Performance workload only; use the Orekit zonal suite for external correctness evidence.
+  evidence_role: Performance workload only; use the Orekit zonal suite for external
+    correctness evidence.
 objects:
   satellite:
     enabled: true
@@ -20,15 +22,14 @@ objects:
         raan_deg: 20.0
         argp_deg: 30.0
         true_anomaly_deg: 40.0
-    orbit_control:
-      kind: python
-      module: sim.control.orbit.zero_controller
-      class_name: ZeroController
+    flight_software:
+      stack: fsw.passive
+      hardware_profile: hardware.passive.v1
       params: {}
 simulator:
   duration_s: 3600.0
   dt_s: 1.0
-  resource_profile: "off"
+  resource_profile: 'off'
   acceleration:
     mode: auto
     warmup: true

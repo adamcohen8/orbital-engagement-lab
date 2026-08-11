@@ -99,6 +99,10 @@ def test_atomic_pair_snapshot_materializes_and_preserves_both_states(tmp_path: P
         trust_plugins=True,
     )
     assert materialized["status"] == "materialized"
+    assert Path(materialized["manifest_path"]).is_file()
+    comparison = handoff.compare_handoff(product_path, scenario_path)
+    assert comparison["status"] == "equivalent"
+    assert comparison["summary"]["failed_count"] == 0
     SimulationWorkspace().run(scenario_path)
     rows = ReviewWorkspace.open(tmp_path / "continued").query(
         "SELECT object_id, pos_x_eci_km, pos_y_eci_km, pos_z_eci_km, "

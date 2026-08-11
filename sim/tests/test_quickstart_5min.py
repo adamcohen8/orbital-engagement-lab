@@ -129,6 +129,17 @@ def test_quickstart_cli_shortcut_validates() -> None:
 
 def test_flagship_ric_pd_config_validates() -> None:
     root = Path(__file__).resolve().parents[2]
+    config = yaml.safe_load((root / "configs" / "ric_pd_10km_experiment.yaml").read_text(encoding="utf-8"))
+    chaser = config["objects"]["chaser"]
+    params = chaser["flight_software"]["params"]
+
+    assert chaser["flight_software"]["stack"] == "fsw.rpo_reference"
+    assert params["translation_mode"] == "ric_pd_transfer"
+    assert params["goal_type"] == "rpo.ric_pd_transfer"
+    assert params["goal_mode"] == "maintenance"
+    assert "orbit_control" not in chaser
+    assert "attitude_control" not in chaser
+
     proc = subprocess.run(
         [sys.executable, "run_simulation.py", "--config", "configs/ric_pd_10km_experiment.yaml", "--validate-only"],
         cwd=root,

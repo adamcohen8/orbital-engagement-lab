@@ -30,7 +30,7 @@ Customer or pilot agreements may define stricter response targets.
 
 ## Supported Versions
 
-Security fixes target the current public release line, currently `v0.24.2`, and
+Security fixes target the current public release line, currently `v0.25.0`, and
 active private/Pro customer-supported release lines. The project targets Python
 3.10 through 3.14. Blocking CI currently exercises Python 3.11, while the
 release compatibility program retains evidence for the wider matrix described
@@ -84,16 +84,14 @@ python run_simulation.py --config <path> --sealed-mode
 ```
 
 Sealed mode allows built-in OEL plugin modules, but blocks arbitrary plugin
-module imports, hosted AI providers, custom AI endpoints, non-loopback cFS/SIL
-UDP networking, full run logs, full review stores, raw Monte Carlo payloads,
+module imports, hosted AI providers, custom AI endpoints, full run logs, full review stores, raw Monte Carlo payloads,
 and non-summary AI report packets by default. Each exception requires an
 explicit CLI opt-in such as `--allow-untrusted-plugin-imports`,
-`--allow-hosted-ai`, `--allow-custom-ai-endpoints`,
-`--allow-non-loopback-sil`, or `--allow-high-detail-outputs`.
+`--allow-hosted-ai`, `--allow-custom-ai-endpoints`, or
+`--allow-high-detail-outputs`.
 
 External paths, external AI prompt files, custom AI endpoints, forwarding hosted
-provider API keys to custom endpoints, insecure custom AI endpoints, and
-non-loopback cFS/SIL UDP binds all require explicit opt-in flags or environment
+provider API keys to custom endpoints, and insecure custom AI endpoints all require explicit opt-in flags or environment
 variables. Use those only for trusted local or isolated-network workflows.
 
 ## Dependency Audit

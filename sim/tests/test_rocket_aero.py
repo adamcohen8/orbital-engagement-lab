@@ -258,6 +258,23 @@ class TestRocketAero(unittest.TestCase):
         self.assertAlmostEqual(loads.moment_body_nm[1], 0.0, places=8)
         self.assertAlmostEqual(loads.moment_body_nm[2], -fx_expected, places=6)
 
+    def test_reverse_flow_drag_always_removes_energy(self):
+        cfg = RocketAeroConfig(enabled=True, cd_base=0.5, cd_supersonic=0.5, transonic_peak_cd=0.0)
+        velocity = np.array([-100.0, 0.0, 0.0])
+        state = compute_aero_state(
+            rho_kg_m3=1.0,
+            pressure_pa=101325.0,
+            temperature_k=288.0,
+            sound_speed_m_s=340.0,
+            v_rel_body_m_s=velocity,
+            alpha_limit_deg=20.0,
+            beta_limit_deg=20.0,
+        )
+
+        loads = compute_aero_loads(velocity, state, cfg)
+
+        self.assertLess(float(np.dot(loads.force_body_n, velocity)), 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()

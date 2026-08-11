@@ -33,20 +33,12 @@ objects:
         raan_deg: 0.0
         argp_deg: 0.0
         true_anomaly_deg: 0.0
-    orbit_control:
-      kind: python
-      module: sim.control.orbit.zero_controller
-      class_name: ZeroController
-      params: {}
-    mission_strategy:
-      kind: python
-      module: sim.mission.modules
-      class_name: DefensiveMissionStrategy
+    flight_software:
+      stack: fsw.orbit_reference
+      hardware_profile: hardware.ideal_wrench.v1
       params:
-        chaser_id: chaser
-        defense_mode: fixed_ric_axis
-        axis_mode: -C
-        burn_accel_km_s2: 2.0e-06
+        max_acceleration_m_s2: 0.02
+        translation_mode: stationkeeping
   chaser:
     kind: satellite
     enabled: true
@@ -67,11 +59,6 @@ objects:
         - 0.0
         - 0.0
         - 0.002
-    orbit_control:
-      kind: python
-      module: sim.control.orbit.zero_controller
-      class_name: ZeroController
-      params: {}
     knowledge:
       refresh_rate_s: 1.0
       targets:
@@ -90,6 +77,10 @@ objects:
         - 0.0
       estimation:
         type: ekf
+    flight_software:
+      stack: fsw.passive
+      hardware_profile: hardware.passive.v1
+      params: {}
 simulator:
   duration_s: 300.0
   dt_s: 1.0

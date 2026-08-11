@@ -3,13 +3,14 @@ metadata:
   owner: public
   public_surface: public-actuator
   support_level: demonstration
-scenario_description: Local smoke scenario for the public MagnetorquerBdotController.
+scenario_description: Attitude-reference integration smoke with a parsed magnetorquer hardware specification; the v2 physical path remains ideal-torque.
 objects:
   target:
     enabled: true
     specs:
       mass_kg: 120.0
       mass_properties:
+        inertia_reference_point: center_of_mass
         inertia_kg_m2:
         - - 12.0
           - 0.0
@@ -46,19 +47,12 @@ objects:
       - 0.02
       - -0.01
       - 0.005
-    attitude_control:
-      kind: python
-      module: sim.control.attitude.bdot_magnetorquer
-      class_name: MagnetorquerBdotController
-      params:
-        magnetic_field_body_t:
-        - 0.0
-        - 0.0
-        - 5.0e-05
-        gain: 1.0e5
-        max_torque_nm: 0.0001
     role: target
     kind: satellite
+    flight_software:
+      stack: fsw.attitude_reference
+      hardware_profile: hardware.ideal_wrench.v1
+      params: {}
 simulator:
   duration_s: 5.0
   dt_s: 1.0

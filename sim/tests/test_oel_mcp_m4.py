@@ -29,7 +29,7 @@ M4_IDS = (
     "oel.run_agent_task.v1",
 )
 MCP_SDK_AVAILABLE = importlib.util.find_spec("mcp") is not None
-PRO_HANDLERS_AVAILABLE = importlib.util.find_spec("integrations.oel_mcp.pro_handlers") is not None
+PRO_HANDLERS_AVAILABLE = (ROOT / "integrations" / "oel_mcp" / "pro_handlers.py").is_file()
 if PRO_HANDLERS_AVAILABLE:
     from integrations.oel_mcp.pro_handlers import ProOELMCPHandlers
 
@@ -114,6 +114,7 @@ def test_plan_validate_and_run_require_external_approval_and_bound_identity(tmp_
         disabled.run_scenario(
             **arguments,
             validation_id=validation_id,
+            trust_approval=TRUST_APPROVAL,
             approval=EXECUTION_APPROVAL,
         )
     except PermissionError as exc:
@@ -121,7 +122,7 @@ def test_plan_validate_and_run_require_external_approval_and_bound_identity(tmp_
     else:  # pragma: no cover - explicit safety assertion
         raise AssertionError("Execution unexpectedly bypassed the server approval policy.")
 
-    with pytest.raises(PermissionError, match="trust approval"):
+    with pytest.raises(ValueError, match="trust_approval"):
         handlers.run_scenario(
             **arguments,
             validation_id=validation_id,
@@ -196,6 +197,47 @@ def test_m5_2_completed_run_product_export_and_inspection(tmp_path: Path) -> Non
     assert inspected["status"] == "completed"
     assert inspected["result"]["product_kind"] == "oel.completed_run_state"
     assert "materialize_onp_handoff" in inspected["result"]["supported_next_actions"]
+@pytest.mark.parametrize(
+    "unsafe_fragment",
+    [
+        {"outputs": {"ai_report": {"enabled": True, "provider": "ollama"}}},
+        {
+            "simulator": {
+                "dynamics": {
+                    "orbit": {
+                        "spherical_harmonics": {
+                            "enabled": True,
+                            "degree": 8,
+                            "order": 8,
+                            "source": "egm96",
+                            "allow_download": True,
+                        }
+                    }
+                }
+            }
+        },
+    ],
+)
+def test_public_mcp_rejects_provider_and_download_capable_scenarios(
+    tmp_path: Path, unsafe_fragment: dict[str, object]
+) -> None:
+    source = yaml.safe_load((ROOT / "configs" / "automation_smoke.yaml").read_text(encoding="utf-8"))
+    for key, value in unsafe_fragment.items():
+        if isinstance(value, dict) and isinstance(source.get(key), dict):
+            source[key].update(value)
+        else:
+            source[key] = value
+    config = tmp_path / "unsafe.yaml"
+    config.write_text(yaml.safe_dump(source, sort_keys=False), encoding="utf-8")
+    arguments = {
+        **_scenario_arguments(tmp_path, "unsafe_run"),
+        "config_path": str(config),
+    }
+
+    result = _handlers(tmp_path).plan_run(**arguments)
+
+    assert result["status"] == "failed"
+    assert "MCP sealed execution policy failed" in result["error"]["message"]
 
 
 def test_unset_write_roots_do_not_inherit_read_authority(tmp_path: Path, monkeypatch) -> None:

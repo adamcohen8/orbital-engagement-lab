@@ -2,8 +2,18 @@ from __future__ import annotations
 
 from typing import Any
 
-from sim.game.manual import TRANSLATION_CONTROL_MODES, KeyboardCommandState
+from sim.game.manual import (
+    DIRECT_CONTROL_MODES,
+    KeyboardCommandState,
+)
+from sim.game.manual import (
+    TRANSLATION_CONTROL_MODES as _TRANSLATION_CONTROL_MODES,
+)
 from sim.game.tuning import BRIEFING_SCROLL_STEP_PX
+
+# Compatibility export retained for callers that historically imported this
+# constant through sim.game.input.
+TRANSLATION_CONTROL_MODES = _TRANSLATION_CONTROL_MODES
 
 
 def poll_pygame_input(
@@ -14,7 +24,7 @@ def poll_pygame_input(
     briefing_open: bool = False,
     terminal_open: bool = False,
 ) -> None:
-    ric_mode = str(control_mode or "").strip().lower() in TRANSLATION_CONTROL_MODES
+    direct_control_mode = str(control_mode or "").strip().lower() in DIRECT_CONTROL_MODES
     scrollable_overlay_open = bool(briefing_open or terminal_open)
     state.briefing_scroll_px = 0
     state.open_debrief_requested = False
@@ -49,15 +59,29 @@ def poll_pygame_input(
             state.quit_requested = True
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_r:
             state.restart_requested = True
-        elif event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE and ric_mode:
+        elif event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE and direct_control_mode:
             state.paused = not bool(state.paused)
-        elif scrollable_overlay_open and event.type == pygame.KEYDOWN and event.key == getattr(pygame, "K_PAGEUP", object()):
+        elif (
+            scrollable_overlay_open
+            and event.type == pygame.KEYDOWN
+            and event.key == getattr(pygame, "K_PAGEUP", object())
+        ):
             state.briefing_scroll_px -= BRIEFING_SCROLL_STEP_PX * 4
-        elif scrollable_overlay_open and event.type == pygame.KEYDOWN and event.key == getattr(pygame, "K_PAGEDOWN", object()):
+        elif (
+            scrollable_overlay_open
+            and event.type == pygame.KEYDOWN
+            and event.key == getattr(pygame, "K_PAGEDOWN", object())
+        ):
             state.briefing_scroll_px += BRIEFING_SCROLL_STEP_PX * 4
-        elif scrollable_overlay_open and event.type == pygame.KEYDOWN and event.key == getattr(pygame, "K_HOME", object()):
+        elif (
+            scrollable_overlay_open
+            and event.type == pygame.KEYDOWN
+            and event.key == getattr(pygame, "K_HOME", object())
+        ):
             state.briefing_scroll_px = -1000000
-        elif scrollable_overlay_open and event.type == pygame.KEYDOWN and event.key == getattr(pygame, "K_END", object()):
+        elif (
+            scrollable_overlay_open and event.type == pygame.KEYDOWN and event.key == getattr(pygame, "K_END", object())
+        ):
             state.briefing_scroll_px = 1000000
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_m:
             state.music_toggle_requested = True
@@ -117,7 +141,7 @@ def poll_pygame_input(
     state.pitch = _combine_axis_pulse(held_pitch, pulse_pitch)
     state.yaw = _combine_axis_pulse(held_yaw, pulse_yaw)
     state.roll = _combine_axis_pulse(held_roll, pulse_roll)
-    state.firing = False if ric_mode else bool(held_firing or pulse_firing)
+    state.firing = False if direct_control_mode else bool(held_firing or pulse_firing)
     state.pitch_event_pulse = bool(abs(float(held_pitch)) <= 1.0e-12 and abs(float(pulse_pitch)) > 1.0e-12)
     state.yaw_event_pulse = bool(abs(float(held_yaw)) <= 1.0e-12 and abs(float(pulse_yaw)) > 1.0e-12)
     state.roll_event_pulse = bool(abs(float(held_roll)) <= 1.0e-12 and abs(float(pulse_roll)) > 1.0e-12)

@@ -582,7 +582,7 @@ def _one(rows: list[dict[str, Any]], label: str) -> dict[str, Any]:
 
 
 def _normalize_utc(value: Any) -> str:
-    text = str(value or "").strip()
+    text = str(value or "").strip() or "1970-01-01T00:00:00Z"
     if text.endswith("Z"):
         return text
     if text:

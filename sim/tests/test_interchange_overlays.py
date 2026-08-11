@@ -42,13 +42,11 @@ def _overlay() -> dict:
         ],
         "objects": {
             "target": {
-                "orbit_control": {
-                    "kind": "python",
-                    "module": "sim.control.orbit.zero_controller",
-                    "class_name": "ZeroController",
-                    "params": {},
+                "flight_software": {
+                    "stack": "fsw.passive",
+                    "hardware_profile": "hardware.passive.v1",
+                    "task_period_s": 2.0,
                 },
-                "mission_objectives": [],
                 "knowledge": {
                     "refresh_rate_s": 10.0,
                     "targets": ["target"],
@@ -78,7 +76,7 @@ def test_typed_overlay_materializes_station_controller_safety_and_review(tmp_pat
     )
     assert emission["valid"] is True
     assert emission["promotable"] is True
-    assert emission["operation_count"] == 6
+    assert emission["operation_count"] == 5
 
     result = handoff.materialize_scenario_patch(
         product_path,
@@ -91,7 +89,8 @@ def test_typed_overlay_materializes_station_controller_safety_and_review(tmp_pat
     assert result["status"] == "materialized"
     scenario = yaml.safe_load((tmp_path / "materialized.yaml").read_text(encoding="utf-8"))
     assert scenario["ground_stations"][0]["id"] == "overlay_station"
-    assert scenario["objects"]["target"]["orbit_control"]["class_name"] == "ZeroController"
+    assert scenario["objects"]["target"]["flight_software"]["stack"] == "fsw.passive"
+    assert scenario["objects"]["target"]["flight_software"]["task_period_s"] == 2.0
     assert scenario["objects"]["target"]["knowledge"]["targets"] == ["target"]
     assert scenario["simulator"]["termination"] == {"earth_impact_enabled": False}
     assert scenario["outputs"]["review"] == {"enabled": True, "detail": "standard"}
@@ -132,6 +131,35 @@ def test_overlay_rejects_unbounded_fields_and_tampered_paths(tmp_path: Path) -> 
     report = validate_document(tampered, source_path=product_path)
     assert report.valid is False
     assert any(issue.code == "patch.path_not_allowed" for issue in report.errors)
+
+
+def test_scenario_patch_operation_target_participates_in_product_identity(tmp_path: Path) -> None:
+    source = _source(tmp_path)
+    product_path = tmp_path / "overlay.json"
+    emit_scenario_overlay(
+        source,
+        _overlay(),
+        overlay_id="identity_bound",
+        output_path=product_path,
+        rationale="identity regression",
+    )
+    product = json.loads(product_path.read_text(encoding="utf-8"))
+    changed = deepcopy(product)
+    changed["payload"]["patch"]["operations"][0]["path"] = "objects.target.knowledge"
+
+    assert compute_product_id(changed) != compute_product_id(product)
+
+
+@pytest.mark.parametrize("legacy_field", ("orbit_control", "attitude_control", "mission_execution"))
+def test_overlay_rejects_removed_satellite_gnc_fields(tmp_path: Path, legacy_field: str) -> None:
+    with pytest.raises(ScenarioOverlayError, match="Unsupported overlay fields for object"):
+        emit_scenario_overlay(
+            _source(tmp_path),
+            {"objects": {"target": {legacy_field: {"module": "legacy.removed"}}}},
+            overlay_id=f"legacy_{legacy_field}",
+            output_path=tmp_path / f"{legacy_field}.json",
+            rationale="Legacy GNC v1 fields must fail closed.",
+        )
 
 
 def test_overlay_cli_emits_product_without_materialization(tmp_path: Path, capsys) -> None:

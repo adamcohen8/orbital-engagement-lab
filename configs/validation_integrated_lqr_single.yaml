@@ -3,7 +3,7 @@ metadata:
   owner: public
   public_surface: public-validation
   support_level: demonstration
-  notes: Headless integrated rendezvous benchmark with EKF-fed pursuit using HCW LQR.
+  notes: Headless integrated safe-RPO benchmark with sensor-fed v2 HCW-LQR feedback to a nonzero hold point.
 objects:
   chaser:
     enabled: true
@@ -33,63 +33,6 @@ objects:
       - 0.0
       - 0.0
       - 0.0
-    orbit_control:
-      kind: python
-      module: sim.control.orbit.lqr
-      class_name: HCWLQRController
-      params:
-        mean_motion_rad_s: 0.001078
-        max_accel_km_s2: 2.0e-05
-        design_dt_s: 10.0
-        ric_curv_state_slice:
-        - 0
-        - 6
-        chief_eci_state_slice:
-        - 6
-        - 12
-    attitude_control:
-      kind: python
-      module: sim.control.attitude.surrogate_snap
-      class_name: SurrogateSnapECIController
-      params:
-        desired_attitude_quat_bn:
-        - 1.0
-        - 0.0
-        - 0.0
-        - 0.0
-        cancel_rate_mag_rad_s2: 1.0
-        rate_tolerance_rad_s: 0.001
-        slew_time_180_s: 1.0
-        pointing_sigma_deg: 0.05
-        default_dt_s: 0.05
-        rng_seed: 7
-    mission_strategy:
-      kind: python
-      module: sim.mission.modules
-      class_name: PursuitMissionStrategy
-      params:
-        target_id: target
-        use_knowledge_for_targeting: true
-        max_accel_km_s2: 2.0e-05
-        align_to_thrust: true
-    mission_execution:
-      kind: python
-      module: sim.mission.modules
-      class_name: PredictiveBurnExecution
-      params:
-        target_id: target
-        use_knowledge_for_targeting: true
-        lead_time_s: 0.0
-        predict_dt_s: 1.0
-        orbit_controller_budget_ms: 40.0
-        attitude_controller_budget_ms: 10.0
-        thruster_direction_body:
-        - 1.0
-        - 0.0
-        - 0.0
-        alignment_tolerance_deg: 15.0
-        min_burn_accel_km_s2: 1.0e-10
-    mission_objectives: []
     knowledge:
       refresh_rate_s: 1.0
       targets:
@@ -109,6 +52,16 @@ objects:
       estimation:
         type: ekf
     kind: satellite
+    flight_software:
+      stack: fsw.rpo_reference
+      hardware_profile: hardware.ideal_wrench.v1
+      params:
+        max_acceleration_m_s2: 0.02
+        reference_object_id: target
+        translation_mode: ric_hold
+        control_law: hcw_lqr
+        goal_type: rpo.ric_hold
+        target_relative_state_ric_m: [0.0, -500.0, 0.0, 0.0, 0.0, 0.0]
   target:
     enabled: true
     role: target
@@ -134,49 +87,6 @@ objects:
       - 0.0
       - 0.0
       - 0.0
-    orbit_control:
-      kind: python
-      module: sim.control.orbit.zero_controller
-      class_name: ZeroController
-      params: {}
-    attitude_control:
-      kind: python
-      module: sim.control.attitude.surrogate_snap
-      class_name: SurrogateSnapECIController
-      params:
-        desired_attitude_quat_bn:
-        - 1.0
-        - 0.0
-        - 0.0
-        - 0.0
-        cancel_rate_mag_rad_s2: 1.0
-        rate_tolerance_rad_s: 0.001
-        slew_time_180_s: 1.0
-        pointing_sigma_deg: 0.05
-        default_dt_s: 0.05
-        rng_seed: 3
-    mission_strategy:
-      kind: python
-      module: sim.mission.modules
-      class_name: HoldMissionStrategy
-      params:
-        attitude_mode: sun_track
-        boresight_body:
-        - 1.0
-        - 0.0
-        - 0.0
-    mission_execution:
-      kind: python
-      module: sim.mission.modules
-      class_name: ControllerPointingExecution
-      params:
-        thruster_direction_body:
-        - 1.0
-        - 0.0
-        - 0.0
-        alignment_tolerance_deg: 10.0
-        require_attitude_alignment: false
-    mission_objectives: []
     knowledge:
       refresh_rate_s: 5.0
       targets:
@@ -196,6 +106,10 @@ objects:
       estimation:
         type: ekf
     kind: satellite
+    flight_software:
+      stack: fsw.passive
+      hardware_profile: hardware.passive.v1
+      params: {}
 simulator:
   duration_s: 600.0
   dt_s: 5.0
@@ -209,7 +123,7 @@ simulator:
       drag: false
       srp: false
     attitude:
-      enabled: true
+      enabled: false
       attitude_substep_s: 0.1
       disturbance_torques:
         gravity_gradient: false

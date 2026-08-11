@@ -71,6 +71,10 @@ def _plot_private_bridge_outputs(
 
 
 def render_summary_outputs(context: PlotOutputContext) -> dict[str, str]:
+    if str(context.mode or "save").strip().lower() == "save":
+        import matplotlib
+
+        matplotlib.use("Agg", force=True)
     from sim.plotting import (
         plot_atmospheric_pass,
         plot_attitude_control_summary,

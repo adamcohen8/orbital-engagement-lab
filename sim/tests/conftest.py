@@ -4,6 +4,13 @@ from pathlib import Path
 
 import pytest
 
+
+@pytest.fixture(autouse=True)
+def _explicit_private_test_owner_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Private source tests opt in explicitly; production callers never inherit this."""
+
+    monkeypatch.setenv("OEL_OWNER_MODE", "1")
+
 SMOKE_TEST_FILES = {
     "test_api_plugin_validation.py",
     "test_public_imports.py",
@@ -185,6 +192,12 @@ EXTERNAL_TESTS = {
     ),
 }
 
+LOCAL_EVIDENCE_TESTS = {
+    ("test_mendicant_adapter_runtime_v07.py", "test_v07_adapter_runtime_rejects_partial_adapter"),
+    ("test_mendicant_30b_eval.py", "test_harness_freeze_is_intact"),
+    ("test_mendicant_30b_eval.py", "test_preserved_v06_predictions_replay_to_preserved_summary"),
+}
+
 
 def _test_filename(item: pytest.Item) -> str:
     return Path(str(item.fspath)).name
@@ -213,3 +226,5 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             item.add_marker(pytest.mark.slow)
         if filename in EXTERNAL_TEST_FILES or (filename, _test_function_name(item)) in EXTERNAL_TESTS:
             item.add_marker(pytest.mark.external)
+        if (filename, _test_function_name(item)) in LOCAL_EVIDENCE_TESTS:
+            item.add_marker(pytest.mark.local_evidence)

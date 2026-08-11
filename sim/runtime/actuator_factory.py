@@ -40,6 +40,23 @@ def _resolve_satellite_isp_s(specs: dict[str, Any]) -> float:
     thr = str(specs.get("thruster", "")).strip().upper()
     if thr in ("BASIC_CHEMICAL_BOTTOM_Z", "BASIC_CHEMICAL_Z_BOTTOM"):
         return float(BASIC_CHEMICAL_BOTTOM_Z.isp_s)
+    orbital = dict(dict(specs.get("actuators", {}) or {}).get("orbital", {}) or {})
+    electric = dict(orbital.get("electric_propulsion", {}) or {})
+    if electric.get("isp_s") is not None:
+        return float(electric["isp_s"])
+    rcs = dict(orbital.get("rcs_cluster", {}) or {})
+    if rcs.get("isp_s") is not None:
+        return float(rcs["isp_s"])
+    thrusters = list(rcs.get("thrusters", []) or [])
+    if thrusters and dict(thrusters[0] or {}).get("isp_s") is not None:
+        return float(dict(thrusters[0] or {})["isp_s"])
+    # The ideal-wrench reference profile historically accepted a fuel load
+    # without naming a propulsion preset.  Give that abstract force source the
+    # same chemical-reference Isp used by the legacy actuator stack so fuel is
+    # depleted instead of silently ignored.  Physical profiles continue to
+    # override this through their explicit Isp or preset.
+    if float(specs.get("fuel_mass_kg", 0.0) or 0.0) > 0.0:
+        return 220.0
     return 0.0
 
 

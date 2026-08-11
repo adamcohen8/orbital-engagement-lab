@@ -213,7 +213,8 @@ capped by `max_torque_nm`.
 Simplified CMGs are configured under `attitude.control_moment_gyros` with
 `max_torque_nm`, `momentum_nms`, `gimbal_rate_limit_rad_s`, and
 `torque_time_constant_s`. OEL does not model CMG gimbal geometry, singularity
-avoidance, or stored-gimbal state. It applies an axis-wise torque cap:
+avoidance, or physical angle-dependent torque authority. It applies an
+axis-wise torque cap:
 
 ```text
 tau_cap = min(abs(max_torque_nm), abs(momentum_nms * gimbal_rate_limit_rad_s))
@@ -223,6 +224,13 @@ tau = clamp(tau_cmd, -tau_cap, tau_cap)
 with optional first-order response. Diagnostics include `cmg_torque_body_nm`
 and `cmg_torque_cap_nm`. `CMGSteeringController` applies the same cap around a
 base attitude controller.
+
+The GNC v2 `hardware.cmg.v1` profile uses the same virtual-axis model. Its
+`gimbal_*_angle_rad` realization telemetry and checkpoint values are integrals
+of limited virtual rate commands for deterministic continuity diagnostics;
+they are not physical CMG geometry and do not change realized torque. Studies
+that depend on angle limits, singularities, or steering-law geometry require a
+separately validated external hardware model.
 
 ## Wheel Desaturation
 
@@ -309,9 +317,10 @@ Useful focused tests and smokes:
 - `configs/controller_rcs_allocation_smoke.yaml`
 - `configs/controller_electric_propulsion_smoke.yaml`
 - `configs/controller_gimbaled_thruster_smoke.yaml`
-- `configs/controller_magnetorquer_bdot_smoke.yaml`
-- `configs/controller_wheel_desaturation_smoke.yaml`
-- `configs/controller_cmg_steering_smoke.yaml`
+
+Magnetorquer B-dot, wheel-desaturation, and CMG steering remain
+component-bench capabilities in v2; their similarly named scenario fixtures
+validate configuration metadata, not physical execution of those controllers.
 
 Validation harness routing is documented in the private Validation Operations
 guide.

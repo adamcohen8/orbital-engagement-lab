@@ -29,29 +29,12 @@ objects:
       - 0.0
       - 0.0
       - 0.0
-    orbit_control:
-      module: sim.control.orbit.zero_controller
-      class_name: ZeroController
-    attitude_control:
-      module: sim.control.attitude.zero_torque
-      class_name: ZeroTorqueController
-    mission_execution:
-      module: sim.mission.modules
-      class_name: ControllerPointingExecution
+    flight_software:
+      stack: fsw.orbit_reference
+      hardware_profile: hardware.ideal_wrench.v1
       params:
-        require_attitude_alignment: false
-        use_strategy_fallback_thrust: true
-    mission_objectives:
-    - module: sim.mission.modules
-      class_name: SingleRICAxisBurnMissionModule
-      params:
-        target_id: self
-        axis_mode: +I
-        axis_kind: force
-        burn_accel_km_s2: 0.005
-        burn_start_s: 0.0
-        burn_duration_s: 1.0
-        require_finite_reference: true
+        max_acceleration_m_s2: 0.02
+        translation_mode: stationkeeping
 simulator:
   duration_s: 600.0
   dt_s: 1.0

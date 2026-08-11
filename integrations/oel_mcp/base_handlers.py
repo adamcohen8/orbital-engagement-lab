@@ -240,6 +240,8 @@ def _redacted_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
             "release_scope": str(dict(arguments.get("handling", {}) or {}).get("release_scope", "")),
             "data_label": str(dict(arguments.get("handling", {}) or {}).get("data_label", "")),
             "hidden_truth_access": dict(arguments.get("handling", {}) or {}).get("hidden_truth_access"),
+            "provider_exposure": dict(arguments.get("handling", {}) or {}).get("provider_exposure"),
+            "operational_authority": dict(arguments.get("handling", {}) or {}).get("operational_authority"),
         },
     }
 

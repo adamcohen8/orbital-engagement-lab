@@ -125,6 +125,17 @@
     },
     "covariance": {"$ref": "#/$defs/covariance"},
     "object_specs": {"type": "object"},
+    "resource_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mass_kg", "dry_mass_kg", "fuel_mass_kg", "propellant_state"],
+      "properties": {
+        "mass_kg": {"type": "number", "exclusiveMinimum": 0},
+        "dry_mass_kg": {"type": ["number", "null"], "minimum": 0},
+        "fuel_mass_kg": {"type": ["number", "null"], "minimum": 0},
+        "propellant_state": {"enum": ["tracked", "mass_only"]}
+      }
+    },
     "model_assumptions": {
       "type": "object",
       "additionalProperties": false,

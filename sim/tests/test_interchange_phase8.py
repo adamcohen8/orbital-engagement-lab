@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import sqlite3
 from pathlib import Path
 
 import jsonschema
@@ -76,6 +78,32 @@ def test_handoff_comparison_fails_on_semantic_drift(tmp_path: Path) -> None:
     assert {"manifest.scenario_digest", "state.position_eci_km"}.issubset(
         set(packet["summary"]["failed_check_ids"])
     )
+
+
+def test_execution_comparison_rejects_review_store_from_another_config(tmp_path: Path) -> None:
+    materialized = _materialize(tmp_path)
+    run_simulation_config_file(materialized["scenario_path"])
+    db = tmp_path / "run" / "review" / "run.sqlite"
+    with sqlite3.connect(db) as connection:
+        raw = connection.execute("SELECT config_json FROM run_metadata").fetchone()[0]
+        config = json.loads(raw)
+        config["scenario_name"] = "unrelated_run_with_same_initial_state"
+        changed = json.dumps(config, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        changed_hash = hashlib.sha256(changed.encode("utf-8")).hexdigest()
+        connection.execute(
+            "UPDATE run_metadata SET scenario_name = ?, config_json = ?, config_sha256 = ?",
+            (config["scenario_name"], changed, changed_hash),
+        )
+        connection.commit()
+
+    packet = compare_handoff(
+        PRODUCT,
+        materialized["scenario_path"],
+        run_output_dir=tmp_path / "run",
+    )
+
+    assert packet["status"] == "failed"
+    assert "execution.config_sha256" in packet["summary"]["failed_check_ids"]
 
 
 def test_compare_handoff_cli_writes_packet_and_never_executes(tmp_path: Path, capsys) -> None:

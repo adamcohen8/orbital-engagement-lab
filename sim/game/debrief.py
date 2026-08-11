@@ -12,6 +12,15 @@ from sim.game.training import RPOTrainingConfig
 from sim.platform_compat import open_folder
 from sim.plotting.style import OELArtifactMetadata, artifact_metadata, role_color, save_oel_figure
 
+_AERODYNAMIC_REPLAY_FIELDS = (
+    "aerodynamic_ballistic_coefficient_kg_m2",
+    "aerodynamic_drag_area_m2",
+    "aerodynamic_lift_coefficient",
+    "aerodynamic_lift_area_m2",
+    "aerodynamic_lift_bank_angle_deg",
+    "aerodynamic_control_active",
+)
+
 
 def game_debrief_path(
     *,
@@ -21,13 +30,16 @@ def game_debrief_path(
     output_dir: str | Path | None = None,
     timestamp: datetime | None = None,
 ) -> Path:
-    return game_debrief_attempt_dir(
-        scenario_id=scenario_id,
-        difficulty=difficulty,
-        attempt_index=attempt_index,
-        output_dir=output_dir,
-        timestamp=timestamp,
-    ) / "report.md"
+    return (
+        game_debrief_attempt_dir(
+            scenario_id=scenario_id,
+            difficulty=difficulty,
+            attempt_index=attempt_index,
+            output_dir=output_dir,
+            timestamp=timestamp,
+        )
+        / "report.md"
+    )
 
 
 def game_debrief_attempt_dir(
@@ -162,6 +174,15 @@ def game_debrief_payload(
             "largest_command_accel_m_s2": replay_metrics["largest_command_accel_m_s2"],
             "burn_count": replay_metrics["burn_count"],
             "active_control_time_s": replay_metrics["active_control_time_s"],
+            "aerodynamic_control_time_s": replay_metrics["aerodynamic_control_time_s"],
+            "aerodynamic_adjustment_count": replay_metrics["aerodynamic_adjustment_count"],
+            "final_ballistic_coefficient_kg_m2": replay_metrics["final_ballistic_coefficient_kg_m2"],
+            "min_ballistic_coefficient_kg_m2": replay_metrics["min_ballistic_coefficient_kg_m2"],
+            "max_ballistic_coefficient_kg_m2": replay_metrics["max_ballistic_coefficient_kg_m2"],
+            "final_drag_area_m2": replay_metrics["final_drag_area_m2"],
+            "lift_coefficient": replay_metrics["lift_coefficient"],
+            "lift_area_m2": replay_metrics["lift_area_m2"],
+            "final_lift_bank_angle_deg": replay_metrics["final_lift_bank_angle_deg"],
             "remaining_delta_v_m_s": _remaining_budget(
                 getattr(config, "max_delta_v_m_s", None), getattr(score, "approximate_delta_v_m_s", None)
             ),
@@ -207,12 +228,30 @@ def tracker_replay_history(tracker: Any) -> dict[str, Any]:
             "relative_ric": _array_list(replay.get("relative_ric", [])),
             "chaser_thrust_ric_km_s2": _array_list(replay.get("chaser_thrust_ric_km_s2", [])),
             "target_thrust_eci_km_s2": _array_list(replay.get("target_thrust_eci_km_s2", [])),
+            **{
+                key: (
+                    _bool_array_list(replay.get(key, []))
+                    if key == "aerodynamic_control_active"
+                    else _array_list(replay.get(key, []))
+                )
+                for key in _AERODYNAMIC_REPLAY_FIELDS
+            },
         }
     return {
         "time_s": _array_list(getattr(tracker, "t_s", [])),
         "relative_ric": _array_list(getattr(tracker, "rel_ric_hist", [])),
         "chaser_thrust_ric_km_s2": _array_list(getattr(tracker, "thrust_ric_hist", [])),
         "target_thrust_eci_km_s2": _array_list(getattr(tracker, "target_thrust_hist", [])),
+        "aerodynamic_ballistic_coefficient_kg_m2": _array_list(
+            getattr(tracker, "aerodynamic_ballistic_coefficient_hist", [])
+        ),
+        "aerodynamic_drag_area_m2": _array_list(getattr(tracker, "aerodynamic_drag_area_hist", [])),
+        "aerodynamic_lift_coefficient": _array_list(getattr(tracker, "aerodynamic_lift_coefficient_hist", [])),
+        "aerodynamic_lift_area_m2": _array_list(getattr(tracker, "aerodynamic_lift_area_hist", [])),
+        "aerodynamic_lift_bank_angle_deg": _array_list(getattr(tracker, "aerodynamic_lift_bank_angle_hist", [])),
+        "aerodynamic_control_active": _bool_array_list(
+            getattr(tracker, "aerodynamic_control_active_hist", [])
+        ),
     }
 
 
@@ -406,13 +445,26 @@ def _markdown_report(
         ("Target Delta V Used", _meters_per_second_text(metrics.get("target_delta_v_m_s"))),
         ("Burn Count", _int_text(metrics.get("burn_count"))),
         ("Active Control Time", _seconds_text(metrics.get("active_control_time_s"))),
+        ("Aerodynamic Control Time", _seconds_text(metrics.get("aerodynamic_control_time_s"))),
+        ("Aerodynamic Adjustments", _int_text(metrics.get("aerodynamic_adjustment_count"))),
+        ("Final Ballistic Coefficient", _kg_per_square_meter_text(metrics.get("final_ballistic_coefficient_kg_m2"))),
+        (
+            "Ballistic Coefficient Range",
+            _range_text(
+                metrics.get("min_ballistic_coefficient_kg_m2"),
+                metrics.get("max_ballistic_coefficient_kg_m2"),
+                unit="kg/m^2",
+            ),
+        ),
+        ("Final Drag Area", _square_meter_text(metrics.get("final_drag_area_m2"))),
+        ("Lift Coefficient", _decimal_text(metrics.get("lift_coefficient"))),
+        ("Lift Area", _square_meter_text(metrics.get("lift_area_m2"))),
+        ("Final Lift Bank", _degree_text(metrics.get("final_lift_bank_angle_deg"))),
         ("Largest Command", _accel_text(metrics.get("largest_command_accel_m_s2"))),
         ("Keepout Time", _seconds_text(metrics.get("time_inside_keepout_s"))),
     ]
     stats_rows = "\n".join(
-        f"| {_md_table_text(label)} | {_md_table_text(value)} |"
-        for label, value in stats
-        if value and value != "--"
+        f"| {_md_table_text(label)} | {_md_table_text(value)} |" for label, value in stats if value and value != "--"
     )
     checklist = list(payload.get("objectives", {}).get("checklist", []) or [])
     plot_blocks = "\n\n".join(
@@ -475,6 +527,7 @@ def _history_arrays_from_replay(replay_history: dict[str, Any]) -> tuple[np.ndar
 
 def _replay_metrics(replay_history: dict[str, Any]) -> dict[str, float | int | None]:
     t, rel, thrust = _history_arrays_from_replay(replay_history)
+    aerodynamic = _aerodynamic_arrays_from_replay(replay_history, count=t.size)
     if t.size == 0 or rel.shape[0] == 0:
         return {
             "initial_range_km": None,
@@ -483,23 +536,44 @@ def _replay_metrics(replay_history: dict[str, Any]) -> dict[str, float | int | N
             "largest_command_accel_m_s2": None,
             "burn_count": 0,
             "active_control_time_s": 0.0,
+            "aerodynamic_control_time_s": 0.0,
+            "aerodynamic_adjustment_count": 0,
+            "final_ballistic_coefficient_kg_m2": None,
+            "min_ballistic_coefficient_kg_m2": None,
+            "max_ballistic_coefficient_kg_m2": None,
+            "final_drag_area_m2": None,
+            "lift_coefficient": None,
+            "lift_area_m2": None,
+            "final_lift_bank_angle_deg": None,
         }
     ranges = np.linalg.norm(rel[:, :3], axis=1)
     speeds = np.linalg.norm(rel[:, 3:6], axis=1)
     thrust_norm = np.linalg.norm(thrust, axis=1)
-    active = thrust_norm > _burn_threshold_km_s2(thrust)
+    thrust_active = thrust_norm > _burn_threshold_km_s2(thrust)
+    aerodynamic_active = aerodynamic["active"]
+    active = thrust_active | aerodynamic_active
     return {
         "initial_range_km": _float_or_none(ranges[0]),
         "max_relative_speed_km_s": _float_or_none(np.nanmax(speeds)),
         "mean_relative_speed_km_s": _float_or_none(np.nanmean(speeds)),
         "largest_command_accel_m_s2": _float_or_none(np.nanmax(thrust_norm) * 1000.0),
-        "burn_count": int(_burn_segments(active)),
+        "burn_count": int(_burn_segments(thrust_active)),
         "active_control_time_s": _float_or_none(_active_time_s(active, t)),
+        "aerodynamic_control_time_s": _float_or_none(_active_time_s(aerodynamic_active, t)),
+        "aerodynamic_adjustment_count": int(_burn_segments(aerodynamic_active)),
+        "final_ballistic_coefficient_kg_m2": _last_finite(aerodynamic["ballistic_coefficient"]),
+        "min_ballistic_coefficient_kg_m2": _finite_min(aerodynamic["ballistic_coefficient"]),
+        "max_ballistic_coefficient_kg_m2": _finite_max(aerodynamic["ballistic_coefficient"]),
+        "final_drag_area_m2": _last_finite(aerodynamic["drag_area"]),
+        "lift_coefficient": _last_finite(aerodynamic["lift_coefficient"]),
+        "lift_area_m2": _last_finite(aerodynamic["lift_area"]),
+        "final_lift_bank_angle_deg": _last_finite(aerodynamic["lift_bank_angle"]),
     }
 
 
 def _event_timeline(*, config: RPOTrainingConfig, score: Any, replay_history: dict[str, Any]) -> list[dict[str, Any]]:
     t, _, thrust = _history_arrays_from_replay(replay_history)
+    aerodynamic = _aerodynamic_arrays_from_replay(replay_history, count=t.size)
     events: list[dict[str, Any]] = []
     if t.size:
         events.append({"time_s": float(t[0]), "label": "Attempt started."})
@@ -522,6 +596,22 @@ def _event_timeline(*, config: RPOTrainingConfig, score: Any, replay_history: di
                 "kind": "interval",
             }
         )
+    for start_idx, end_idx in _active_segments(aerodynamic["active"])[:12]:
+        if int(end_idx) <= 0:
+            continue
+        start_sample_idx = max(int(start_idx) - 1, 0)
+        end_sample_idx = min(int(end_idx), t.size - 1)
+        start_t = float(t[start_sample_idx])
+        end_t = float(t[end_sample_idx])
+        events.append(
+            {
+                "time_s": start_t,
+                "start_time_s": start_t,
+                "end_time_s": max(end_t, start_t),
+                "label": "Aerodynamic control input",
+                "kind": "interval",
+            }
+        )
     achieved = _float_or_none(getattr(score, "achieved_time_s", None))
     if achieved is not None:
         events.append({"time_s": achieved, "label": "Mission requirements first satisfied."})
@@ -538,16 +628,48 @@ def _event_sort_time(event: dict[str, Any]) -> float:
     return float("inf") if value is None else float(value)
 
 
-def _draw_geometry_overlays(ax: Any, *, config: RPOTrainingConfig, plane: str, patches: tuple[Any, Any, Any], colors: dict[str, str]) -> None:
+def _draw_geometry_overlays(
+    ax: Any, *, config: RPOTrainingConfig, plane: str, patches: tuple[Any, Any, Any], colors: dict[str, str]
+) -> None:
     Circle, Polygon, Rectangle = patches
     x_idx, y_idx, _, _ = _plane_axes(plane)
     if config.keepout_radius_km is not None:
-        ax.add_patch(Circle((0.0, 0.0), float(config.keepout_radius_km), fill=False, color=colors["keepout"], linestyle="--", linewidth=1.2, label="Keepout"))
+        ax.add_patch(
+            Circle(
+                (0.0, 0.0),
+                float(config.keepout_radius_km),
+                fill=False,
+                color=colors["keepout"],
+                linestyle="--",
+                linewidth=1.2,
+                label="Keepout",
+            )
+        )
     if config.goal_range_km is not None:
-        ax.add_patch(Circle((0.0, 0.0), float(config.goal_range_km), fill=False, color=colors["goal"], linestyle="-.", linewidth=1.2, label="Goal range"))
+        ax.add_patch(
+            Circle(
+                (0.0, 0.0),
+                float(config.goal_range_km),
+                fill=False,
+                color=colors["goal"],
+                linestyle="-.",
+                linewidth=1.2,
+                label="Goal range",
+            )
+        )
     if config.goal_radius_km is not None:
         center = np.array(config.goal_relative_ric_km, dtype=float).reshape(3)
-        ax.add_patch(Circle((center[x_idx], center[y_idx]), float(config.goal_radius_km), fill=False, color=colors["goal"], linestyle="-.", linewidth=1.2, label="Goal"))
+        ax.add_patch(
+            Circle(
+                (center[x_idx], center[y_idx]),
+                float(config.goal_radius_km),
+                fill=False,
+                color=colors["goal"],
+                linestyle="-.",
+                linewidth=1.2,
+                label="Goal",
+            )
+        )
     if config.goal_nmt_radial_amplitude_km is not None:
         try:
             from sim.game.training import nmt_curve_points_km
@@ -558,7 +680,9 @@ def _draw_geometry_overlays(ax: Any, *, config: RPOTrainingConfig, plane: str, p
                 cross_track_phase_deg=float(config.goal_nmt_cross_track_phase_deg),
                 center_ric_km=np.array(config.goal_nmt_center_ric_km, dtype=float),
             )
-            ax.plot(curve[:, x_idx], curve[:, y_idx], color=colors["goal"], linestyle="--", linewidth=1.2, label="NMT goal")
+            ax.plot(
+                curve[:, x_idx], curve[:, y_idx], color=colors["goal"], linestyle="--", linewidth=1.2, label="NMT goal"
+            )
         except Exception:
             pass
     for region in config.forbidden_regions:
@@ -729,7 +853,9 @@ def _save_event_timeline_plot(
     for idx, event in enumerate(point_events):
         time_s = float(event["time_s"])
         lane_y = 0.46 if idx % 2 == 0 else 0.78
-        marker_color = "#2ca02c" if "satisfied" in event["label"].lower() or "criteria" in event["label"].lower() else "#1f77b4"
+        marker_color = (
+            "#2ca02c" if "satisfied" in event["label"].lower() or "criteria" in event["label"].lower() else "#1f77b4"
+        )
         ax.vlines(time_s, timeline_y, lane_y - 0.06, color=marker_color, linewidth=1.2, alpha=0.8, zorder=2)
         ax.scatter([time_s], [timeline_y], color=marker_color, s=34, zorder=3)
         label = _timeline_label(event["label"])
@@ -766,7 +892,9 @@ def _save_event_timeline_plot(
         ax.legend(
             handles=[
                 Line2D([0], [0], color="#ff7f0e", linewidth=4, label="Control input intervals"),
-                Line2D([0], [0], marker="o", color="none", markerfacecolor="#1f77b4", markersize=6, label="Mission events"),
+                Line2D(
+                    [0], [0], marker="o", color="none", markerfacecolor="#1f77b4", markersize=6, label="Mission events"
+                ),
             ],
             loc="upper left",
             frameon=False,
@@ -806,6 +934,64 @@ def _plane_axes(plane: str) -> tuple[int, int, str, str]:
 
 def _axis_index(axis: str) -> int:
     return {"R": 0, "I": 1, "C": 2}.get(str(axis or "I").upper(), 1)
+
+
+def _aerodynamic_arrays_from_replay(replay_history: dict[str, Any], *, count: int) -> dict[str, np.ndarray]:
+    def values(key: str) -> np.ndarray:
+        raw = np.asarray(replay_history.get(key, []), dtype=float).reshape(-1)
+        out = np.full(int(count), np.nan, dtype=float)
+        out[: min(raw.size, out.size)] = raw[: out.size]
+        return out
+
+    ballistic_coefficient = values("aerodynamic_ballistic_coefficient_kg_m2")
+    lift_bank_angle = values("aerodynamic_lift_bank_angle_deg")
+    raw_active = np.asarray(replay_history.get("aerodynamic_control_active", []), dtype=bool).reshape(-1)
+    active = np.zeros(int(count), dtype=bool)
+    active[: min(raw_active.size, active.size)] = raw_active[: active.size]
+    if raw_active.size == 0 and active.size > 1:
+        bc_changed = (
+            np.isfinite(ballistic_coefficient[1:])
+            & np.isfinite(ballistic_coefficient[:-1])
+            & ~np.isclose(
+                ballistic_coefficient[1:],
+                ballistic_coefficient[:-1],
+            )
+        )
+        bank_changed = (
+            np.isfinite(lift_bank_angle[1:])
+            & np.isfinite(lift_bank_angle[:-1])
+            & ~np.isclose(
+                lift_bank_angle[1:],
+                lift_bank_angle[:-1],
+            )
+        )
+        active[1:] = bc_changed | bank_changed
+    return {
+        "ballistic_coefficient": ballistic_coefficient,
+        "drag_area": values("aerodynamic_drag_area_m2"),
+        "lift_coefficient": values("aerodynamic_lift_coefficient"),
+        "lift_area": values("aerodynamic_lift_area_m2"),
+        "lift_bank_angle": lift_bank_angle,
+        "active": active,
+    }
+
+
+def _last_finite(values: np.ndarray) -> float | None:
+    finite = np.asarray(values, dtype=float).reshape(-1)
+    finite = finite[np.isfinite(finite)]
+    return None if finite.size == 0 else float(finite[-1])
+
+
+def _finite_min(values: np.ndarray) -> float | None:
+    finite = np.asarray(values, dtype=float).reshape(-1)
+    finite = finite[np.isfinite(finite)]
+    return None if finite.size == 0 else float(np.min(finite))
+
+
+def _finite_max(values: np.ndarray) -> float | None:
+    finite = np.asarray(values, dtype=float).reshape(-1)
+    finite = finite[np.isfinite(finite)]
+    return None if finite.size == 0 else float(np.max(finite))
 
 
 def _burn_threshold_km_s2(thrust: np.ndarray) -> float:
@@ -936,6 +1122,34 @@ def _accel_text(value_m_s2: Any) -> str:
     return "--" if value_f is None else f"{value_f:.6f} m/s^2"
 
 
+def _kg_per_square_meter_text(value: Any) -> str:
+    value_f = _float_or_none(value)
+    return "--" if value_f is None else f"{value_f:.3f} kg/m^2"
+
+
+def _square_meter_text(value: Any) -> str:
+    value_f = _float_or_none(value)
+    return "--" if value_f is None else f"{value_f:.3f} m^2"
+
+
+def _degree_text(value: Any) -> str:
+    value_f = _float_or_none(value)
+    return "--" if value_f is None else f"{value_f:+.2f} deg"
+
+
+def _decimal_text(value: Any) -> str:
+    value_f = _float_or_none(value)
+    return "--" if value_f is None else f"{value_f:.4f}"
+
+
+def _range_text(low: Any, high: Any, *, unit: str) -> str:
+    low_f = _float_or_none(low)
+    high_f = _float_or_none(high)
+    if low_f is None or high_f is None:
+        return "--"
+    return f"{low_f:.3f} to {high_f:.3f} {unit}"
+
+
 def _int_text(value: Any) -> str:
     if value is None:
         return "--"
@@ -952,6 +1166,10 @@ def _array_list(value: Any) -> list[Any]:
     if arr.ndim == 0:
         return [float(arr)]
     return arr.tolist()
+
+
+def _bool_array_list(value: Any) -> list[bool]:
+    return np.asarray(value, dtype=bool).reshape(-1).tolist()
 
 
 def _float_or_none(value: Any) -> float | None:

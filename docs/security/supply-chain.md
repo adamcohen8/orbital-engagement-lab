@@ -7,7 +7,7 @@ security, legal, export-control, or mission-assurance process.
 ## Supported Versions
 
 - Public releases: security fixes target the current public release line,
-  currently `v0.24.2`.
+  currently `v0.25.0`.
 - Private/Pro releases: security fixes target the active customer-supported
   release line or pilot branch named in the agreement.
 - Declared Python compatibility range: Python 3.10 through 3.14. Functional and
@@ -96,7 +96,11 @@ python -m pip freeze --all > outputs/supply_chain/python-freeze.txt
 The wheel inventory records the constraint digest, package/version, wheel tag,
 source URL, and archive hash where pip supplies it. Constraint files are not
 hash-locked, OS-specific release locks. For higher-assurance installs, use the
-freeze and pip report as inputs to a reviewed, hash-checked release lock.
+freeze, pip report, and wheel inventory as inputs to a reviewed, platform-specific,
+hash-checked release lock. A release evidence packet applies only to its exact
+recorded environment; resolving the source ranges again produces a new candidate.
+To reproduce an archived candidate, install from its reviewed frozen record before
+running the retained validation commands.
 
 The recommended buyer-side gate is:
 

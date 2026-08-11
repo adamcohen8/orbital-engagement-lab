@@ -107,6 +107,49 @@ def _profile_options() -> tuple[ConfigOption, ...]:
     return tuple(_option(name, descriptions.get(name, "Simulation fidelity profile.")) for name in profile_choices())
 
 
+def _gnc_builtin_options(*categories: str) -> tuple[ConfigOption, ...]:
+    """Load public built-in choices from the authoritative GNC catalog."""
+    from sim.gnc import catalog_entries
+
+    selected = set(categories)
+    return tuple(
+        _option(
+            entry.builtin_id,
+            f"{entry.display_name} [{entry.maturity}] — {entry.summary}",
+        )
+        for entry in catalog_entries(include_internal=False)
+        if entry.category in selected
+    )
+
+
+def _orbit_control_builtin_options() -> tuple[ConfigOption, ...]:
+    return _gnc_builtin_options("orbit_controller", "orbit_wrapper")
+
+
+def _attitude_control_builtin_options() -> tuple[ConfigOption, ...]:
+    return _gnc_builtin_options("attitude_controller")
+
+
+def _mission_strategy_builtin_options() -> tuple[ConfigOption, ...]:
+    return _gnc_builtin_options("mission_strategy")
+
+
+def _mission_execution_builtin_options() -> tuple[ConfigOption, ...]:
+    return _gnc_builtin_options("mission_execution")
+
+
+def _flight_software_profile_options() -> tuple[ConfigOption, ...]:
+    from sim.flight_software.profiles import use_case_profiles
+
+    return tuple(
+        _option(
+            profile.profile_id,
+            f"{profile.display_name} [{profile.maturity.value}/{profile.qualification_status}] — {profile.summary}",
+        )
+        for profile in use_case_profiles()
+    )
+
+
 def _discover_named_presets(module_name: str, type_name: str) -> list[str]:
     module = importlib.import_module(module_name)
     preset_type = getattr(module, type_name)
@@ -138,7 +181,7 @@ CONFIG_HELP_ENTRIES: tuple[ConfigHelpEntry, ...] = (
             _option(
                 "analytic_simple", "Older lightweight analytic Sun/Moon model; useful for repeatable legacy cases."
             ),
-            _option("external", "Use env['ephemeris_callable'] supplied by Python code."),
+            _option("de440", "Use the configured OEL DE440 coefficient product."),
             _option("spice", "Use spiceypy and configured SPICE kernels, or env['spice_ephemeris_callable']."),
         ),
         example='simulator:\n  environment:\n    ephemeris_mode: "analytic_enhanced"',
@@ -218,6 +261,31 @@ CONFIG_HELP_ENTRIES: tuple[ConfigHelpEntry, ...] = (
         ),
     ),
     ConfigHelpEntry(
+        path="objects.<id>.runtime_profile",
+        title="Satellite Runtime Profile",
+        description=(
+            "Selects whether a satellite runs complete onboard flight software or only its configured deterministic dynamics."
+        ),
+        aliases=("trajectory only", "dynamics only", "no flight software", "passive object"),
+        options=(
+            _option("flight_software", "Default complete-stack boundary; omitted flight_software selects fsw.passive."),
+            _option("trajectory_only", "Propagate configured dynamics without sensors, knowledge, FSW tasks, devices, or commands."),
+        ),
+        example=(
+            "objects:\n"
+            "  debris:\n"
+            "    kind: satellite\n"
+            "    runtime_profile: trajectory_only\n"
+            "    initial_state:\n"
+            "      default_circular_earth: true"
+        ),
+        notes=(
+            "trajectory_only is explicit; omitting runtime_profile preserves the fsw.passive compatibility default.",
+            "A trajectory-only object cannot declare flight_software or knowledge, but other objects may observe it.",
+            "The configured ONP/OGP propagation family and physical force models remain authoritative.",
+        ),
+    ),
+    ConfigHelpEntry(
         path="objects.<id>.propagation_method",
         title="Propagation Method",
         description=(
@@ -250,7 +318,7 @@ CONFIG_HELP_ENTRIES: tuple[ConfigHelpEntry, ...] = (
         notes=(
             "SGP4 objects are passive in v1: no orbit_control, attitude_control, thrust, mission objectives, or maneuvers.",
             "TLEs with orbital period >= 225 minutes route through the supported OGP-SDP4 deep-space/resonance path.",
-            "Set general.output_frame: teme for native TEME state rows, or use the default ECI-compatible teme_as_eci approximation.",
+            "The default general.output_frame is native TEME; set teme_as_eci only for the documented legacy ECI-compatible approximation.",
             "Use frame_transform: teme_to_eci_iau80 for the opt-in Vallado IAU-80 TEME-to-ECI reduction.",
             "Scenario-level simulator.frames can supply EOP files or manual EOP/time-scale corrections for Earth-fixed transforms.",
             "Use the existing special propagation path for controlled spacecraft and OEL force-model studies.",
@@ -470,37 +538,6 @@ CONFIG_HELP_ENTRIES: tuple[ConfigHelpEntry, ...] = (
         example='outputs:\n  review:\n    enabled: true\n    detail: "standard"',
     ),
     ConfigHelpEntry(
-        path="controller_bench",
-        title="Controller Bench Workflow",
-        description=(
-            "Defines repeatable controller benchmark suites run through the simulator's "
-            "`--controller-bench <suite.yaml>` workflow. Use validate-only before executing "
-            "a suite, especially when editing cases, controllers, or optimization settings."
-        ),
-        aliases=(
-            "controller bench",
-            "controller benchmark",
-            "controller benchmarks",
-            "bench suite",
-            "benchmark suite",
-            "controller-bench",
-        ),
-        options=(
-            _option("suite_id", "Stable suite identifier reported in validation and outputs."),
-            _option("description", "Human-readable summary of what the suite exercises."),
-            _option("output_dir", "Workspace-relative directory for benchmark outputs."),
-            _option("cases", "Benchmark cases, each referencing a scenario config and optional case settings."),
-            _option("controllers", "Controller variants or plugin specs compared across cases."),
-            _option("optimization", "Optional optimizer configuration, such as PSO tuning settings."),
-        ),
-        example=(
-            "# Validate a maintained suite before running it:\n"
-            ".venv/bin/python run_simulation.py --controller-bench "
-            "configs/controller_bench_rendezvous.yaml --validate-only"
-        ),
-        notes=("See docs/controller-bench.md for the complete suite schema and workflow.",),
-    ),
-    ConfigHelpEntry(
         path="ground_stations",
         title="Ground Stations",
         description=(
@@ -591,6 +628,108 @@ CONFIG_HELP_ENTRIES: tuple[ConfigHelpEntry, ...] = (
             _option("rocket", "Launch/ascent vehicle using rocket-specific dynamics and guidance."),
         ),
         example="objects:\n  chaser:\n    kind: satellite",
+    ),
+    ConfigHelpEntry(
+        path="objects.<id>.orbit_control.builtin",
+        title="Built-In Orbit Controller",
+        description=(
+            "Selects a trusted OEL orbit controller by stable catalog ID. Constructor settings go in the sibling "
+            "params mapping; use the GNC catalog CLI to inspect parameter schemas, assumptions, limits, and evidence."
+        ),
+        aliases=("orbit controller", "built in orbit control", "GNC orbit catalog", "RPO controller"),
+        option_loader=_orbit_control_builtin_options,
+        example=(
+            "objects:\n"
+            "  chaser:\n"
+            "    orbit_control:\n"
+            "      builtin: orbit.vbar_approach\n"
+            "      params:\n"
+            "        approach_speed_m_s: 0.1"
+        ),
+        notes=("Run `.venv/bin/python -m sim.gnc show orbit.vbar_approach` for the complete descriptor.",),
+    ),
+    ConfigHelpEntry(
+        path="objects.<id>.attitude_control.builtin",
+        title="Built-In Attitude Controller",
+        description=(
+            "Selects a trusted OEL attitude controller by stable catalog ID. The catalog identifies Reference, "
+            "workbench, experimental, compatibility, and internal maturity honestly."
+        ),
+        aliases=("attitude controller", "built in attitude control", "pointing controller", "attitude catalog"),
+        option_loader=_attitude_control_builtin_options,
+        example=(
+            "objects:\n"
+            "  observer:\n"
+            "    attitude_control:\n"
+            "      builtin: attitude.nadir_pointing\n"
+            "      params:\n"
+            "        primary_axis_body: [1.0, 0.0, 0.0]"
+        ),
+    ),
+    ConfigHelpEntry(
+        path="objects.<id>.mission_strategy.builtin",
+        title="Built-In Mission Strategy",
+        description=(
+            "Selects a trusted OEL mission-intent producer by stable catalog ID. Mission strategies express intent; "
+            "mission execution modules turn that intent into deterministic commands and gates."
+        ),
+        aliases=("mission strategy", "mission intent", "built in mission strategy", "mission catalog"),
+        option_loader=_mission_strategy_builtin_options,
+        example=(
+            "objects:\n"
+            "  chaser:\n"
+            "    mission_strategy:\n"
+            "      builtin: mission.stationkeep\n"
+            "      params:\n"
+            "        target_id: target"
+        ),
+    ),
+    ConfigHelpEntry(
+        path="objects.<id>.mission_execution.builtin",
+        title="Built-In Mission Execution",
+        description=(
+            "Selects a trusted OEL command-execution or safety-gating module by stable catalog ID. Commands remain "
+            "inputs to OEL's deterministic dynamics and actuator paths; built-ins do not replace the physics engine."
+        ),
+        aliases=("mission execution", "command module", "burn execution", "safety gate", "execution catalog"),
+        option_loader=_mission_execution_builtin_options,
+        example=(
+            "objects:\n"
+            "  chaser:\n"
+            "    mission_execution:\n"
+            "      builtin: execution.integrated_command\n"
+            "      params:\n"
+            "        require_attitude_alignment: false"
+        ),
+    ),
+    ConfigHelpEntry(
+        path="objects.<id>.flight_software.profile",
+        title="Flight-Software Use-Case Profile",
+        description=(
+            "Selects a versioned use-case profile that resolves to a complete v2 stack, "
+            "declared hardware family, task cadence, and coherent defaults. Profile maturity is independent "
+            "from component and stack maturity."
+        ),
+        aliases=(
+            "flight software profile",
+            "fsw profile",
+            "satellite software profile",
+            "prebuilt flight software",
+            "gnc use case",
+        ),
+        option_loader=_flight_software_profile_options,
+        example=(
+            "objects:\n"
+            "  chaser:\n"
+            "    flight_software:\n"
+            "      profile: fsw.profile.rpo_far_field_rendezvous.v1\n"
+            "      params:\n"
+            "        reference_object_id: target"
+        ),
+        notes=(
+            "Use `.venv/bin/python -m sim.flight_software show <profile-id>` for requirements and limits.",
+            "Profile support is bounded to each exact version's documented simulation envelope and does not imply operational suitability.",
+        ),
     ),
     ConfigHelpEntry(
         path="objects.<id>.specs.mass_properties",

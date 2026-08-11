@@ -3,8 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import sqlite3
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +15,7 @@ from sim.plotting.style import get_oel_version
 from sim.review.generated_artifacts import clear_generated_review_artifacts
 from sim.utils.frames import eci_relative_to_ric_rect
 
-REVIEW_SCHEMA_VERSION = "0.6"
+REVIEW_SCHEMA_VERSION = "0.8"
 REVIEW_SCHEMA_COMPATIBILITY_POLICY = "pre_1_0_additive"
 REVIEW_SCHEMA_STABLE_TABLES = (
     "run_metadata",
@@ -25,8 +25,17 @@ REVIEW_SCHEMA_STABLE_TABLES = (
     "object_state_covariance",
     "relative_state",
     "thrust",
+    "controller_decisions",
+    "mission_modes",
+    "mission_transitions",
+    "command_gates",
     "metrics",
     "artifacts",
+    "fsw_invocations",
+    "fsw_input_events",
+    "actuator_commands",
+    "actuator_command_receipts",
+    "actuator_realization",
 )
 
 
@@ -80,6 +89,14 @@ def write_single_run_review_store(
                 object_state_frames=dict(payload.get("object_state_frames", {}) or {}),
             )
             _insert_thrust(conn, t_s=t_s, thrust_hist=thrust_hist)
+            _insert_command_decisions(conn, payload=payload)
+            _insert_flight_software_evidence(
+                conn,
+                payload=payload,
+                t_s=t_s,
+                truth_hist=truth_hist,
+            )
+            _insert_game_evidence(conn, payload=payload)
             _insert_ground_access(conn, t_s=t_s, payload=payload)
             _insert_events(conn, t_s=t_s, summary=summary, thrust_hist=thrust_hist)
             _insert_mission_recovery(conn, summary=summary)
@@ -138,7 +155,9 @@ def _create_schema(conn: sqlite3.Connection) -> None:
             object_type TEXT,
             enabled INTEGER,
             mass_initial_kg REAL,
-            role TEXT
+            role TEXT,
+            runtime_profile TEXT,
+            flight_software_stack TEXT
         );
 
         CREATE TABLE frame_provenance (
@@ -263,6 +282,230 @@ def _create_schema(conn: sqlite3.Connection) -> None:
             burn_active INTEGER
         );
         CREATE INDEX idx_thrust_object_time ON thrust(object_id, time_s);
+
+        CREATE TABLE controller_decisions (
+            decision_index INTEGER,
+            sample_index INTEGER,
+            time_s REAL,
+            interval_end_time_s REAL,
+            dt_s REAL,
+            object_id TEXT,
+            orbit_controller TEXT,
+            attitude_controller TEXT,
+            mission_strategy TEXT,
+            mission_execution TEXT,
+            requested_accel_norm_km_s2 REAL,
+            applied_accel_norm_km_s2 REAL,
+            requested_torque_norm_nm REAL,
+            applied_torque_norm_nm REAL,
+            burn_requested INTEGER,
+            burn_applied INTEGER,
+            saturated INTEGER,
+            deadline_missed INTEGER,
+            field_sources_json TEXT,
+            collisions_json TEXT,
+            detail_json TEXT
+        );
+        CREATE INDEX idx_controller_decisions_object_time
+        ON controller_decisions(object_id, time_s);
+
+        CREATE TABLE mission_modes (
+            decision_index INTEGER,
+            sample_index INTEGER,
+            time_s REAL,
+            object_id TEXT,
+            mission_strategy TEXT,
+            mission_execution TEXT,
+            mission_phase TEXT,
+            executive_mode TEXT,
+            mission_mode_json TEXT
+        );
+        CREATE INDEX idx_mission_modes_object_time ON mission_modes(object_id, time_s);
+
+        CREATE TABLE mission_transitions (
+            decision_index INTEGER,
+            sample_index INTEGER,
+            time_s REAL,
+            object_id TEXT,
+            from_mode TEXT,
+            to_mode TEXT,
+            trigger TEXT,
+            reason TEXT,
+            detail_json TEXT
+        );
+        CREATE INDEX idx_mission_transitions_object_time ON mission_transitions(object_id, time_s);
+
+        CREATE TABLE command_gates (
+            decision_index INTEGER,
+            sample_index INTEGER,
+            time_s REAL,
+            object_id TEXT,
+            burn_requested INTEGER,
+            burn_applied INTEGER,
+            alignment_error_rad REAL,
+            alignment_ok INTEGER,
+            fuel_depleted INTEGER,
+            actuator_limited INTEGER,
+            deadline_missed INTEGER,
+            gate_reason TEXT,
+            detail_json TEXT
+        );
+        CREATE INDEX idx_command_gates_object_time ON command_gates(object_id, time_s);
+
+        CREATE TABLE fsw_invocations (
+            object_id TEXT,
+            invocation_id INTEGER,
+            invocation_time_ns INTEGER,
+            stack_id TEXT,
+            stack_version TEXT,
+            profile_id TEXT,
+            input_count INTEGER,
+            command_count INTEGER,
+            telemetry_count INTEGER,
+            detail_json TEXT,
+            PRIMARY KEY (object_id, invocation_id)
+        );
+
+        CREATE TABLE fsw_input_events (
+            object_id TEXT,
+            packet_source_id TEXT,
+            packet_boot_id TEXT,
+            packet_sequence INTEGER,
+            invocation_id INTEGER,
+            kind TEXT,
+            source_time_ns INTEGER,
+            delivery_time_ns INTEGER,
+            schema TEXT,
+            detail_json TEXT,
+            PRIMARY KEY (object_id, packet_source_id, packet_boot_id, packet_sequence)
+        );
+        CREATE INDEX idx_fsw_input_events_invocation
+        ON fsw_input_events(object_id, invocation_id);
+
+        CREATE TABLE fsw_load_events (
+            object_id TEXT,
+            invocation_id INTEGER,
+            load_id TEXT,
+            revision INTEGER,
+            disposition TEXT,
+            detail_json TEXT
+        );
+
+        CREATE TABLE fsw_objectives (
+            object_id TEXT,
+            invocation_id INTEGER,
+            objective_id TEXT,
+            state TEXT,
+            detail_json TEXT
+        );
+
+        CREATE TABLE fsw_task_timing (
+            object_id TEXT,
+            invocation_id INTEGER,
+            task_id TEXT,
+            release_time_ns INTEGER,
+            modeled_execution_duration_ns INTEGER,
+            execution_budget_ns INTEGER,
+            deadline_missed INTEGER,
+            detail_json TEXT
+        );
+
+        CREATE TABLE actuator_commands (
+            object_id TEXT,
+            invocation_id INTEGER,
+            command_source_id TEXT,
+            command_boot_id TEXT,
+            command_sequence INTEGER,
+            actuator_id TEXT,
+            issued_time_ns INTEGER,
+            not_before_ns INTEGER,
+            expires_at_ns INTEGER,
+            command_schema TEXT,
+            detail_json TEXT,
+            PRIMARY KEY (object_id, command_source_id, command_boot_id, command_sequence)
+        );
+        CREATE INDEX idx_actuator_commands_invocation
+        ON actuator_commands(object_id, invocation_id);
+
+        CREATE TABLE actuator_command_receipts (
+            object_id TEXT,
+            command_source_id TEXT,
+            command_boot_id TEXT,
+            command_sequence INTEGER,
+            received_time_ns INTEGER,
+            disposition TEXT,
+            status_codes_json TEXT,
+            detail_json TEXT
+        );
+        CREATE INDEX idx_actuator_receipts_command
+        ON actuator_command_receipts(object_id, command_source_id, command_boot_id, command_sequence);
+
+        CREATE TABLE actuator_realization (
+            object_id TEXT,
+            actuator_id TEXT,
+            interval_start_ns INTEGER,
+            interval_end_ns INTEGER,
+            command_source_id TEXT,
+            command_boot_id TEXT,
+            command_sequence INTEGER,
+            demand_mode TEXT,
+            saturated INTEGER,
+            detail_json TEXT
+        );
+        CREATE INDEX idx_actuator_realization_command
+        ON actuator_realization(object_id, command_source_id, command_boot_id, command_sequence);
+
+        CREATE TABLE fsw_diagnostics (
+            object_id TEXT,
+            invocation_id INTEGER,
+            topic TEXT,
+            generated_time_ns INTEGER,
+            detail_json TEXT
+        );
+
+        CREATE TABLE safety_requirement_evidence (
+            object_id TEXT,
+            invocation_id INTEGER,
+            requirement_id TEXT,
+            satisfied INTEGER,
+            source TEXT,
+            detail_json TEXT
+        );
+
+        CREATE TABLE fsw_snapshots (
+            object_id TEXT,
+            invocation_id INTEGER,
+            stack_id TEXT,
+            stack_version TEXT,
+            state_hash_sha256 TEXT,
+            detail_json TEXT
+        );
+
+        CREATE TABLE game_input_events (
+            object_id TEXT,
+            invocation_id INTEGER,
+            packet_source_id TEXT,
+            packet_boot_id TEXT,
+            packet_sequence INTEGER,
+            input_profile TEXT,
+            detail_json TEXT
+        );
+
+        CREATE TABLE game_observer_samples (
+            object_id TEXT,
+            time_ns INTEGER,
+            observer_policy TEXT,
+            truth_assisted INTEGER,
+            detail_json TEXT
+        );
+
+        CREATE TABLE game_scoring_events (
+            object_id TEXT,
+            time_ns INTEGER,
+            scoring_policy TEXT,
+            event_type TEXT,
+            detail_json TEXT
+        );
 
         CREATE TABLE attitude_error (
             sample_index INTEGER,
@@ -468,9 +711,11 @@ def _insert_objects(conn: sqlite3.Connection, *, cfg: Any, summary: dict[str, An
                 int(bool(getattr(section, "enabled", True))),
                 _float_or_none(specs.get("mass_kg", specs.get("dry_mass_kg"))),
                 str(getattr(section, "role", "") or ""),
+                str(getattr(section, "runtime_profile", "flight_software") or "flight_software"),
+                str(getattr(getattr(section, "flight_software", None), "stack", "") or ""),
             )
         )
-    conn.executemany("INSERT INTO objects VALUES (?, ?, ?, ?, ?)", rows)
+    conn.executemany("INSERT INTO objects VALUES (?, ?, ?, ?, ?, ?, ?)", rows)
 
 
 def _insert_frame_provenance(conn: sqlite3.Connection, *, payload: dict[str, Any]) -> None:
@@ -703,6 +948,585 @@ def _insert_thrust(conn: sqlite3.Connection, *, t_s: np.ndarray, thrust_hist: di
                 )
             )
     conn.executemany("INSERT INTO thrust VALUES (?, ?, ?, ?, ?, ?, ?, ?)", rows)
+
+
+def _insert_command_decisions(conn: sqlite3.Connection, *, payload: dict[str, Any]) -> None:
+    decision_rows = []
+    mode_rows = []
+    transition_rows = []
+    gate_rows = []
+    decisions_by_object = dict(payload.get("command_decisions_by_object", {}) or {})
+    for object_id, raw_rows in sorted(decisions_by_object.items()):
+        for decision_index, raw_row in enumerate(list(raw_rows or [])):
+            row = dict(raw_row or {})
+            mission_mode = dict(row.get("mission_mode", {}) or {})
+            detail_json = json.dumps(row, sort_keys=True, separators=(",", ":"))
+            common = (
+                int(decision_index),
+                _int_or_none(row.get("sample_index")),
+                _float_or_none(row.get("time_s")),
+                str(object_id),
+            )
+            decision_rows.append(
+                (
+                    int(decision_index),
+                    _int_or_none(row.get("sample_index")),
+                    _float_or_none(row.get("time_s")),
+                    _float_or_none(row.get("interval_end_time_s")),
+                    _float_or_none(row.get("dt_s")),
+                    str(object_id),
+                    _none_or_str(row.get("orbit_controller")),
+                    _none_or_str(row.get("attitude_controller")),
+                    _none_or_str(row.get("mission_strategy")),
+                    _none_or_str(row.get("mission_execution")),
+                    _float_or_none(row.get("requested_accel_norm_km_s2")),
+                    _float_or_none(row.get("applied_accel_norm_km_s2")),
+                    _float_or_none(row.get("requested_torque_norm_nm")),
+                    _float_or_none(row.get("applied_torque_norm_nm")),
+                    _bool_int(row.get("burn_requested")),
+                    _bool_int(row.get("burn_applied")),
+                    _bool_int(row.get("saturated")),
+                    _bool_int(row.get("deadline_missed")),
+                    json.dumps(dict(row.get("field_sources", {}) or {}), sort_keys=True),
+                    json.dumps(list(row.get("collisions", []) or []), sort_keys=True),
+                    detail_json,
+                )
+            )
+            mode_rows.append(
+                (
+                    *common,
+                    _none_or_str(row.get("mission_strategy")),
+                    _none_or_str(row.get("mission_execution")),
+                    _none_or_str(row.get("mission_phase")),
+                    _none_or_str(row.get("executive_mode")),
+                    json.dumps(mission_mode, sort_keys=True, separators=(",", ":")),
+                )
+            )
+            transition = dict(mission_mode.get("executive_transition", {}) or {})
+            if transition:
+                detail = transition.get("detail")
+                reason = None
+                if isinstance(detail, dict):
+                    reason = detail.get("reason")
+                elif detail is not None:
+                    reason = str(detail)
+                transition_rows.append(
+                    (
+                        *common,
+                        _none_or_str(transition.get("from_mode")),
+                        _none_or_str(transition.get("to_mode")),
+                        _none_or_str(transition.get("trigger")),
+                        _none_or_str(reason),
+                        json.dumps(transition, sort_keys=True, separators=(",", ":")),
+                    )
+                )
+            gate_rows.append(
+                (
+                    *common,
+                    _bool_int(row.get("burn_requested")),
+                    _bool_int(row.get("burn_applied")),
+                    _float_or_none(row.get("alignment_error_rad")),
+                    _bool_int(row.get("alignment_ok")),
+                    _bool_int(row.get("fuel_depleted")),
+                    _bool_int(row.get("actuator_limited")),
+                    _bool_int(row.get("deadline_missed")),
+                    _none_or_str(row.get("gate_reason")),
+                    detail_json,
+                )
+            )
+    conn.executemany(
+        "INSERT INTO controller_decisions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        decision_rows,
+    )
+    conn.executemany("INSERT INTO mission_modes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", mode_rows)
+    conn.executemany("INSERT INTO mission_transitions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", transition_rows)
+    conn.executemany("INSERT INTO command_gates VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", gate_rows)
+
+
+def _packet_key(packet: Any) -> tuple[str, str, int | None]:
+    value = dict(packet or {})
+    return (
+        str(value.get("source_id", "") or ""),
+        str(value.get("boot_id", "") or ""),
+        _int_or_none(value.get("sequence")),
+    )
+
+
+def _clock_ns(clock: Any) -> int | None:
+    value = dict(clock or {})
+    ticks = _int_or_none(value.get("ticks"))
+    tick_period_ns = _int_or_none(value.get("tick_period_ns"))
+    if ticks is None or tick_period_ns is None:
+        return None
+    return ticks * tick_period_ns
+
+
+def _mission_load_dispositions(evidence: dict[str, Any]) -> dict[tuple[int, str, int | None], str]:
+    """Index stack-owned load decisions without treating delivery as activation."""
+
+    results: dict[tuple[int, str, int | None], str] = {}
+    for raw_output in list(evidence.get("outputs", []) or []):
+        output = dict(raw_output or {})
+        invocation_id = int(output.get("invocation_id", 0) or 0)
+        for raw_telemetry in list(output.get("telemetry", []) or []):
+            fields = {
+                str(item.get("name")): item.get("value")
+                for item in list(dict(raw_telemetry or {}).get("fields", []) or [])
+                if isinstance(item, dict) and item.get("name") is not None
+            }
+            if fields.get("mission_load_id") is None:
+                continue
+            results[
+                (
+                    invocation_id,
+                    str(fields.get("mission_load_id")),
+                    _int_or_none(fields.get("mission_load_revision")),
+                )
+            ] = str(fields.get("mission_load_disposition", "delivery_unresolved") or "delivery_unresolved")
+    return results
+
+
+def _insert_flight_software_evidence(
+    conn: sqlite3.Connection,
+    *,
+    payload: dict[str, Any],
+    t_s: np.ndarray,
+    truth_hist: dict[str, np.ndarray],
+) -> None:
+    evidence_by_object = dict(payload.get("flight_software_evidence_by_object", {}) or {})
+    invocation_rows = []
+    input_rows = []
+    load_rows = []
+    objective_rows = []
+    task_rows = []
+    command_rows = []
+    receipt_rows = []
+    realization_rows = []
+    diagnostic_rows = []
+    safety_rows = []
+    snapshot_rows = []
+    game_input_rows = []
+
+    for object_id, raw_evidence in sorted(evidence_by_object.items()):
+        evidence = dict(raw_evidence or {})
+        load_dispositions = _mission_load_dispositions(evidence)
+        packet_invocations: dict[tuple[str, str, int | None], int] = {}
+        for raw_invocation in list(evidence.get("invocations", []) or []):
+            invocation = dict(raw_invocation or {})
+            invocation_id = int(invocation.get("invocation_id", 0) or 0)
+            packet_ids = list(invocation.get("input_packet_ids", []) or [])
+            command_ids = list(invocation.get("command_ids", []) or [])
+            for packet_id in packet_ids:
+                packet_invocations[_packet_key(packet_id)] = invocation_id
+            invocation_rows.append(
+                (
+                    str(object_id),
+                    invocation_id,
+                    _int_or_none(invocation.get("invocation_time_ns")),
+                    _none_or_str(invocation.get("stack_id")),
+                    _none_or_str(invocation.get("stack_version")),
+                    _none_or_str(invocation.get("profile_id")),
+                    len(packet_ids),
+                    len(command_ids),
+                    int(invocation.get("telemetry_count", 0) or 0),
+                    json.dumps(invocation, sort_keys=True, separators=(",", ":")),
+                )
+            )
+            for raw_request in list(invocation.get("requested_next_invocations", []) or []):
+                request = dict(raw_request or {})
+                task_rows.append(
+                    (
+                        str(object_id),
+                        invocation_id,
+                        _none_or_str(request.get("task_id")),
+                        _clock_ns(request.get("release_at")),
+                        None,
+                        None,
+                        None,
+                        json.dumps(request, sort_keys=True, separators=(",", ":")),
+                    )
+                )
+            for raw_release in list(invocation.get("task_releases", []) or []):
+                release = dict(raw_release or {})
+                task_rows.append(
+                    (
+                        str(object_id),
+                        invocation_id,
+                        _none_or_str(release.get("task_id")),
+                        _int_or_none(release.get("release_time_ns")),
+                        _int_or_none(release.get("modeled_execution_duration_ns")),
+                        _int_or_none(release.get("execution_budget_ns")),
+                        int(bool(release.get("deadline_missed", False))),
+                        json.dumps(release, sort_keys=True, separators=(",", ":")),
+                    )
+                )
+
+        mission_events: list[dict[str, Any]] = []
+        for raw_event in list(evidence.get("input_events", []) or []):
+            event = dict(raw_event or {})
+            if str(event.get("kind", "")) == "mission_load":
+                mission_events.append(event)
+        accepted_activation_times_ns: list[int] = []
+        for event in mission_events:
+            manifest = dict(dict(event.get("payload", {}) or {}).get("manifest", {}) or {})
+            invocation_id = packet_invocations.get(_packet_key(event.get("packet_id")))
+            disposition = load_dispositions.get(
+                (
+                    int(invocation_id or 0),
+                    str(manifest.get("load_id", "") or ""),
+                    _int_or_none(manifest.get("revision")),
+                ),
+                "delivery_unresolved",
+            )
+            delivery_ns = _clock_ns(event.get("delivery_time"))
+            if disposition == "accepted" and delivery_ns is not None:
+                accepted_activation_times_ns.append(delivery_ns)
+        accepted_activation_times_ns.sort()
+
+        for raw_event in list(evidence.get("input_events", []) or []):
+            event = dict(raw_event or {})
+            packet = _packet_key(event.get("packet_id"))
+            invocation_id = packet_invocations.get(packet)
+            detail = json.dumps(event, sort_keys=True, separators=(",", ":"))
+            input_rows.append(
+                (
+                    str(object_id),
+                    *packet,
+                    invocation_id,
+                    _none_or_str(event.get("kind")),
+                    _clock_ns(event.get("source_time")),
+                    _clock_ns(event.get("delivery_time")),
+                    _none_or_str(event.get("schema")),
+                    detail,
+                )
+            )
+            if str(event.get("kind", "")) == "pilot_input":
+                event_payload = dict(event.get("payload", {}) or {})
+                game_input_rows.append(
+                    (
+                        str(object_id),
+                        invocation_id,
+                        *packet,
+                        _none_or_str(event_payload.get("input_profile_id")),
+                        detail,
+                    )
+                )
+            if str(event.get("kind", "")) == "mission_load":
+                event_payload = dict(event.get("payload", {}) or {})
+                manifest = dict(event_payload.get("manifest", {}) or {})
+                load_id = str(manifest.get("load_id", "") or "")
+                revision = _int_or_none(manifest.get("revision"))
+                disposition = load_dispositions.get(
+                    (int(invocation_id or 0), load_id, revision),
+                    "delivery_unresolved",
+                )
+                load_rows.append(
+                    (
+                        str(object_id),
+                        invocation_id,
+                        _none_or_str(load_id),
+                        revision,
+                        disposition,
+                        detail,
+                    )
+                )
+                for raw_requirement in list(event_payload.get("safety_requirements", []) or []):
+                    requirement = dict(raw_requirement or {})
+                    activation_ns = _clock_ns(event.get("delivery_time"))
+                    if disposition != "accepted" or activation_ns is None:
+                        satisfied, source, assessment = (
+                            None,
+                            "load_not_accepted",
+                            {"status": disposition},
+                        )
+                    else:
+                        next_activation_ns = next(
+                            (
+                                value
+                                for value in accepted_activation_times_ns
+                                if value > activation_ns
+                            ),
+                            None,
+                        )
+                        start_s = activation_ns * 1.0e-9
+                        end_s = None if next_activation_ns is None else next_activation_ns * 1.0e-9
+                        sample_mask = np.asarray(t_s, dtype=float) >= start_s
+                        if end_s is not None:
+                            sample_mask &= np.asarray(t_s, dtype=float) < end_s
+                        window_time_s = np.asarray(t_s, dtype=float)[sample_mask]
+                        window_truth = {
+                            key: np.asarray(values)[: len(sample_mask)][sample_mask[: len(np.asarray(values))]]
+                            for key, values in truth_hist.items()
+                        }
+                        satisfied, source, assessment = _assess_safety_requirement(
+                            str(object_id),
+                            requirement,
+                            t_s=window_time_s,
+                            truth_hist=window_truth,
+                        )
+                        assessment = {
+                            **assessment,
+                            "activation_start_s": start_s,
+                            "activation_end_s": end_s,
+                        }
+                    safety_rows.append(
+                        (
+                            str(object_id),
+                            invocation_id,
+                            _none_or_str(requirement.get("requirement_id")),
+                            satisfied,
+                            source,
+                            json.dumps(
+                                {**requirement, "assessment": assessment},
+                                sort_keys=True,
+                                separators=(",", ":"),
+                            ),
+                        )
+                    )
+
+        for raw_output in list(evidence.get("outputs", []) or []):
+            output = dict(raw_output or {})
+            invocation_id = int(output.get("invocation_id", 0) or 0)
+            for raw_command in list(output.get("commands", []) or []):
+                command = dict(raw_command or {})
+                packet = _packet_key(command.get("command_id"))
+                validity = dict(command.get("validity", {}) or {})
+                command_rows.append(
+                    (
+                        str(object_id),
+                        invocation_id,
+                        *packet,
+                        _none_or_str(command.get("actuator_id")),
+                        _clock_ns(command.get("issued_at")),
+                        _clock_ns(validity.get("not_before")),
+                        _clock_ns(validity.get("expires_at")),
+                        _none_or_str(dict(command.get("payload", {}) or {}).get("schema")),
+                        json.dumps(command, sort_keys=True, separators=(",", ":")),
+                    )
+                )
+            for raw_telemetry in list(output.get("telemetry", []) or []):
+                telemetry = dict(raw_telemetry or {})
+                fields = {
+                    str(item.get("name")): item.get("value")
+                    for item in list(telemetry.get("fields", []) or [])
+                    if isinstance(item, dict) and item.get("name") is not None
+                }
+                diagnostic_rows.append(
+                    (
+                        str(object_id),
+                        invocation_id,
+                        _none_or_str(telemetry.get("topic")),
+                        _clock_ns(telemetry.get("generated_at")),
+                        json.dumps(telemetry, sort_keys=True, separators=(",", ":")),
+                    )
+                )
+                if fields.get("goal_id") is not None or fields.get("goal_state") is not None:
+                    objective_rows.append(
+                        (
+                            str(object_id),
+                            invocation_id,
+                            _none_or_str(fields.get("goal_id")),
+                            _none_or_str(fields.get("goal_state")),
+                            json.dumps(
+                                {
+                                    "goal_type": fields.get("goal_type"),
+                                    "executive_phase": fields.get("executive_phase"),
+                                    "selected_mode": fields.get("selected_mode"),
+                                },
+                                sort_keys=True,
+                                separators=(",", ":"),
+                            ),
+                        )
+                    )
+
+        for raw_receipt in list(evidence.get("receipts", []) or []):
+            receipt = dict(raw_receipt or {})
+            packet = _packet_key(receipt.get("command_id"))
+            receipt_rows.append(
+                (
+                    str(object_id),
+                    *packet,
+                    _clock_ns(receipt.get("received_at")),
+                    _none_or_str(receipt.get("disposition")),
+                    json.dumps(list(receipt.get("status_codes", []) or []), sort_keys=True),
+                    json.dumps(receipt, sort_keys=True, separators=(",", ":")),
+                )
+            )
+
+        for raw_realization in list(evidence.get("realizations", []) or []):
+            realization = dict(raw_realization or {})
+            source = realization.get("source_command_id")
+            packet = _packet_key(source) if source else ("", "", None)
+            realization_rows.append(
+                (
+                    str(object_id),
+                    _none_or_str(realization.get("actuator_id")),
+                    _int_or_none(realization.get("interval_start_ns")),
+                    _int_or_none(realization.get("interval_end_ns")),
+                    *packet,
+                    _none_or_str(realization.get("demand_mode")),
+                    _bool_int(realization.get("saturated")),
+                    json.dumps(realization, sort_keys=True, separators=(",", ":")),
+                )
+            )
+
+        for raw_snapshot in list(evidence.get("snapshots", []) or []):
+            snapshot = dict(raw_snapshot or {})
+            snapshot_rows.append(
+                (
+                    str(object_id),
+                    _int_or_none(snapshot.get("invocation_id")),
+                    _none_or_str(snapshot.get("stack_id")),
+                    _none_or_str(snapshot.get("stack_version")),
+                    _none_or_str(snapshot.get("state_hash_sha256")),
+                    json.dumps(snapshot, sort_keys=True, separators=(",", ":")),
+                )
+            )
+
+    conn.executemany("INSERT INTO fsw_invocations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", invocation_rows)
+    conn.executemany("INSERT INTO fsw_input_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", input_rows)
+    conn.executemany("INSERT INTO fsw_load_events VALUES (?, ?, ?, ?, ?, ?)", load_rows)
+    conn.executemany("INSERT INTO fsw_objectives VALUES (?, ?, ?, ?, ?)", objective_rows)
+    conn.executemany("INSERT INTO fsw_task_timing VALUES (?, ?, ?, ?, ?, ?, ?, ?)", task_rows)
+    conn.executemany("INSERT INTO actuator_commands VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", command_rows)
+    conn.executemany("INSERT INTO actuator_command_receipts VALUES (?, ?, ?, ?, ?, ?, ?, ?)", receipt_rows)
+    conn.executemany("INSERT INTO actuator_realization VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", realization_rows)
+    conn.executemany("INSERT INTO fsw_diagnostics VALUES (?, ?, ?, ?, ?)", diagnostic_rows)
+    conn.executemany("INSERT INTO safety_requirement_evidence VALUES (?, ?, ?, ?, ?, ?)", safety_rows)
+    conn.executemany("INSERT INTO fsw_snapshots VALUES (?, ?, ?, ?, ?, ?)", snapshot_rows)
+    conn.executemany("INSERT INTO game_input_events VALUES (?, ?, ?, ?, ?, ?, ?)", game_input_rows)
+
+
+def _assess_safety_requirement(
+    object_id: str,
+    requirement: dict[str, Any],
+    *,
+    t_s: np.ndarray,
+    truth_hist: dict[str, np.ndarray],
+) -> tuple[int | None, str, dict[str, Any]]:
+    if str(requirement.get("evaluation", "")) != "quantitative":
+        return None, "qualitative_review_required", {"status": "not_machine_assessable"}
+    parameters = {
+        str(item.get("name")): item.get("value")
+        for item in list(requirement.get("parameters", []) or [])
+        if isinstance(item, dict) and item.get("name") is not None
+    }
+    topics = tuple(str(value) for value in list(requirement.get("evidence_topics", []) or []))
+    metric = str(parameters.get("metric", topics[0] if topics else "") or "").strip().lower()
+    aliases = {
+        "minimum_range_m": ("relative_range_m", ">=", parameters.get("minimum_range_m")),
+        "maximum_range_m": ("relative_range_m", "<=", parameters.get("maximum_range_m")),
+        "minimum_mass_kg": ("mass_kg", ">=", parameters.get("minimum_mass_kg")),
+        "maximum_angular_rate_rad_s": (
+            "angular_rate_rad_s",
+            "<=",
+            parameters.get("maximum_angular_rate_rad_s"),
+        ),
+        "maximum_speed_m_s": ("speed_m_s", "<=", parameters.get("maximum_speed_m_s")),
+    }
+    if metric in aliases:
+        metric, default_operator, named_threshold = aliases[metric]
+    else:
+        default_operator, named_threshold = "<=", None
+    operator = str(parameters.get("operator", default_operator) or default_operator)
+    threshold_raw = parameters.get("threshold", named_threshold)
+    if threshold_raw is None:
+        return None, "quantitative_configuration_error", {
+            "status": "missing_threshold",
+            "metric": metric,
+        }
+    try:
+        threshold = float(threshold_raw)
+    except (TypeError, ValueError):
+        return None, "quantitative_configuration_error", {
+            "status": "invalid_threshold",
+            "metric": metric,
+        }
+    own = truth_hist.get(object_id)
+    if own is None:
+        return None, "truth_evaluator", {"status": "object_truth_unavailable", "metric": metric}
+    if metric == "mass_kg":
+        values = own[:, 13]
+    elif metric == "angular_rate_rad_s":
+        values = np.linalg.norm(own[:, 10:13], axis=1)
+    elif metric == "speed_m_s":
+        values = np.linalg.norm(own[:, 3:6], axis=1) * 1.0e3
+    elif metric == "relative_range_m":
+        target_id = str(parameters.get("target_id", parameters.get("other_object_id", "")) or "")
+        target = truth_hist.get(target_id)
+        if target is None:
+            return None, "truth_evaluator", {
+                "status": "target_truth_unavailable",
+                "metric": metric,
+                "target_id": target_id,
+            }
+        size = min(len(own), len(target))
+        values = np.linalg.norm(own[:size, :3] - target[:size, :3], axis=1) * 1.0e3
+    else:
+        return None, "quantitative_configuration_error", {
+            "status": "unsupported_metric",
+            "metric": metric,
+        }
+    finite = np.isfinite(values)
+    if not np.any(finite):
+        return None, "truth_evaluator", {"status": "no_finite_samples", "metric": metric}
+    comparisons = {
+        "<=": values <= threshold,
+        "<": values < threshold,
+        ">=": values >= threshold,
+        ">": values > threshold,
+    }
+    if operator not in comparisons:
+        return None, "quantitative_configuration_error", {
+            "status": "unsupported_operator",
+            "operator": operator,
+            "metric": metric,
+        }
+    compliance = comparisons[operator] | ~finite
+    violation_indices = np.flatnonzero(~compliance)
+    worst_index = int(np.nanargmax(values) if operator in {"<=", "<"} else np.nanargmin(values))
+    return int(violation_indices.size == 0), "truth_evaluator", {
+        "status": "satisfied" if violation_indices.size == 0 else "violated",
+        "metric": metric,
+        "operator": operator,
+        "threshold": threshold,
+        "sample_count": int(np.count_nonzero(finite)),
+        "violation_count": int(violation_indices.size),
+        "first_violation_time_s": (
+            None if violation_indices.size == 0 else float(t_s[int(violation_indices[0])])
+        ),
+        "worst_value": float(values[worst_index]),
+        "worst_time_s": float(t_s[worst_index]),
+    }
+
+
+def _insert_game_evidence(conn: sqlite3.Connection, *, payload: dict[str, Any]) -> None:
+    observer_rows = []
+    for raw_sample in list(payload.get("game_observer_samples", []) or []):
+        sample = dict(raw_sample or {})
+        observer_rows.append(
+            (
+                _none_or_str(sample.get("object_id")),
+                _int_or_none(sample.get("time_ns")),
+                _none_or_str(sample.get("observer_policy")),
+                _bool_int(sample.get("truth_assisted")),
+                json.dumps(dict(sample.get("detail", {}) or {}), sort_keys=True, separators=(",", ":")),
+            )
+        )
+    scoring_rows = []
+    for raw_event in list(payload.get("game_scoring_events", []) or []):
+        event = dict(raw_event or {})
+        scoring_rows.append(
+            (
+                _none_or_str(event.get("object_id")),
+                _int_or_none(event.get("time_ns")),
+                _none_or_str(event.get("scoring_policy")),
+                _none_or_str(event.get("event_type")),
+                json.dumps(dict(event.get("detail", {}) or {}), sort_keys=True, separators=(",", ":")),
+            )
+        )
+    conn.executemany("INSERT INTO game_observer_samples VALUES (?, ?, ?, ?, ?)", observer_rows)
+    conn.executemany("INSERT INTO game_scoring_events VALUES (?, ?, ?, ?, ?)", scoring_rows)
 
 
 def _insert_ground_access(conn: sqlite3.Connection, *, t_s: np.ndarray, payload: dict[str, Any]) -> None:
@@ -1076,6 +1900,48 @@ def _write_schema_json(path: Path, *, generated_utc: str, db_path: Path | None =
                 "description": "RIC relative state for configured/default review object pairs."
             },
             "thrust": {"description": "Applied acceleration histories by object."},
+            "controller_decisions": {
+                "description": "Compact always-on controller and command decision records by object."
+            },
+            "mission_modes": {
+                "description": "Mission strategy, execution, phase, and executive mode for each decision."
+            },
+            "mission_transitions": {
+                "description": "Mission-executive mode transitions and their trigger evidence."
+            },
+            "command_gates": {
+                "description": "Requested/applied burn state and alignment, fuel, actuator, and deadline gates."
+            },
+            "fsw_invocations": {
+                "description": "Complete-stack invocations with exact input and command membership."
+            },
+            "fsw_input_events": {
+                "description": "Typed input events delivered across the satellite FSW boundary."
+            },
+            "fsw_load_events": {"description": "Mission and stack load lifecycle evidence."},
+            "fsw_objectives": {"description": "Onboard objective declarations and state transitions."},
+            "fsw_task_timing": {"description": "Requested and modeled onboard task releases and budgets."},
+            "actuator_commands": {
+                "description": "Typed actuator commands linked to their source stack invocation."
+            },
+            "actuator_command_receipts": {
+                "description": "Command-bus acceptance or rejection evidence linked by command identity."
+            },
+            "actuator_realization": {
+                "description": "Physical device realization linked to the active accepted command identity."
+            },
+            "fsw_diagnostics": {"description": "Onboard-declared diagnostic telemetry."},
+            "safety_requirement_evidence": {
+                "description": "Truth-derived post-run assessment of configured safety requirements."
+            },
+            "fsw_snapshots": {"description": "Checkpoint identities and hashes for complete FSW stacks."},
+            "game_input_events": {"description": "Typed game pilot events linked to stack invocations."},
+            "game_observer_samples": {
+                "description": "Presentation observer samples, kept outside the onboard input boundary."
+            },
+            "game_scoring_events": {
+                "description": "Truth-derived game scoring events, kept outside the onboard input boundary."
+            },
             "attitude_error": {"description": "Reserved for attitude error histories."},
             "ground_access": {"description": "Ground station access histories."},
             "events": {"description": "Termination and review-derived event rows."},
@@ -1203,4 +2069,4 @@ def _sample_index_for_time(t_s: np.ndarray, time_s: float | None) -> int | None:
 
 
 def _utc_stamp() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return os.environ.get("OEL_GENERATED_UTC", "").strip()

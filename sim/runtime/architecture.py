@@ -14,7 +14,7 @@ class RuntimeFamily:
 
 
 RUNTIME_CONSTRUCTION_FAMILIES: tuple[RuntimeFamily, ...] = (
-    RuntimeFamily("models", "sim.runtime.models", "sim.runtime_support", ("AgentRuntime", "_RateLimitedController")),
+    RuntimeFamily("models", "sim.runtime.models", "sim.runtime_support", ("AgentRuntime",)),
     RuntimeFamily(
         "compatibility",
         "sim.runtime.compat",
@@ -61,7 +61,7 @@ RUNTIME_CONSTRUCTION_FAMILIES: tuple[RuntimeFamily, ...] = (
         "commands",
         "sim.runtime.commands",
         "sim.runtime_support",
-        ("_combine_commands", "_command_to_dict", "_decision_truth_from_belief"),
+        ("_combine_commands", "_command_to_dict"),
     ),
 )
 

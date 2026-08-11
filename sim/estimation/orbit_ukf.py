@@ -21,11 +21,41 @@ class OrbitUKFEstimator(Estimator):
     beta: float = 2.0
     kappa: float = 0.0
 
+    def __post_init__(self) -> None:
+        if not np.isfinite(float(self.dt_s)) or float(self.dt_s) <= 0.0:
+            raise ValueError("dt_s must be finite and positive.")
+        if not np.isfinite(float(self.alpha)) or float(self.alpha) <= 0.0:
+            raise ValueError("alpha must be finite and positive.")
+        if not np.isfinite(float(self.beta)) or not np.isfinite(float(self.kappa)):
+            raise ValueError("beta and kappa must be finite.")
+        for name in ("process_noise_diag", "meas_noise_diag"):
+            values = np.asarray(getattr(self, name), dtype=float).reshape(-1)
+            if values.size == 0 or np.any(~np.isfinite(values)) or np.any(values < 0.0):
+                raise ValueError(f"{name} must contain finite, nonnegative values.")
+            setattr(self, name, values)
+
     def update(self, belief: StateBelief, measurement: Measurement | None, t_s: float) -> StateBelief:
         output_t_s = float(t_s)
+        belief_t_s = float(belief.last_update_t_s)
+        if not np.isfinite(output_t_s) or not np.isfinite(belief_t_s) or output_t_s < belief_t_s:
+            raise ValueError("output epoch must be finite and not precede the belief epoch.")
+        state = np.asarray(belief.state, dtype=float).reshape(-1)
+        covariance = np.asarray(belief.covariance, dtype=float)
+        if state.size == 0 or np.any(~np.isfinite(state)):
+            raise ValueError("belief state must contain finite values.")
+        if covariance.shape != (state.size, state.size) or np.any(~np.isfinite(covariance)):
+            raise ValueError("belief covariance must be a finite square matrix matching the state.")
+        if not np.allclose(covariance, covariance.T, rtol=1.0e-10, atol=1.0e-14):
+            raise ValueError("belief covariance must be symmetric.")
+        if np.min(np.linalg.eigvalsh(covariance)) < -1.0e-14:
+            raise ValueError("belief covariance must be positive semidefinite.")
+        if self.process_noise_diag.size != state.size or self.meas_noise_diag.size != state.size:
+            raise ValueError("UKF noise vectors must match the belief-state dimension.")
         meas_t_s = output_t_s
         if measurement is not None:
-            meas_t_s = float(np.clip(float(measurement.t_s), float(belief.last_update_t_s), output_t_s))
+            meas_t_s = float(measurement.t_s)
+            if not np.isfinite(meas_t_s) or meas_t_s < belief_t_s or meas_t_s > output_t_s:
+                raise ValueError("measurement epoch must lie within the belief-to-output interval.")
         x_pred, p_pred, sigma_pred, wm, wc = self._predict(
             belief.state,
             belief.covariance,
@@ -38,22 +68,21 @@ class OrbitUKFEstimator(Estimator):
                 x_pred, p_pred, _, _, _ = self._predict(x_pred, p_pred, from_t_s=meas_t_s, to_t_s=output_t_s)
             return StateBelief(state=x_pred, covariance=p_pred, last_update_t_s=output_t_s)
         z = np.asarray(measurement.vector, dtype=float).reshape(-1)
+        if np.any(~np.isfinite(z)):
+            raise ValueError("measurement vector must contain only finite values.")
         if z.size < x_pred.size:
             if meas_t_s < output_t_s:
                 x_pred, p_pred, _, _, _ = self._predict(x_pred, p_pred, from_t_s=meas_t_s, to_t_s=output_t_s)
             return StateBelief(state=x_pred, covariance=p_pred, last_update_t_s=output_t_s)
 
         n = x_pred.size
-        h_sigma = sigma_pred
-        z_pred = np.sum(wm[:, None] * h_sigma, axis=0)
         r = np.diag(self.meas_noise_diag)
-        s_mat = r.copy()
-        pxz = np.zeros((n, n))
-        for i in range(2 * n + 1):
-            dz = h_sigma[i] - z_pred
-            dx = sigma_pred[i] - x_pred
-            s_mat += wc[i] * np.outer(dz, dz)
-            pxz += wc[i] * np.outer(dx, dz)
+        # The standalone orbit measurement is the identity transform. Use the
+        # complete predicted covariance so additive process noise participates
+        # in both innovation covariance and state/measurement cross covariance.
+        z_pred = x_pred
+        s_mat = p_pred + r
+        pxz = p_pred
 
         try:
             k_gain = np.linalg.solve(s_mat.T, pxz.T).T
@@ -78,6 +107,8 @@ class OrbitUKFEstimator(Estimator):
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         n = np.asarray(state, dtype=float).reshape(-1).size
         lam = self.alpha**2 * (n + self.kappa) - n
+        if not np.isfinite(lam) or n + lam <= 0.0:
+            raise ValueError("UKF alpha/kappa parameters produce invalid sigma-point weights.")
         wm = np.full(2 * n + 1, 1.0 / (2.0 * (n + lam)))
         wc = wm.copy()
         wm[0] = lam / (n + lam)

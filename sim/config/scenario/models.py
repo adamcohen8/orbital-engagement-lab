@@ -8,6 +8,7 @@ __all__ = [
     '_plain_config_data',
     'AlgorithmPointer',
     'BridgePointer',
+    'FlightSoftwareSection',
     'AgentSection',
     'GroundStationSection',
     '_TypedConfigDict',
@@ -48,6 +49,17 @@ __all__ = [
 
 
 def _plain_config_data(value: Any) -> Any:
+    if isinstance(value, AlgorithmPointer) and value.builtin:
+        return {
+            "kind": str(value.kind),
+            "builtin": str(value.builtin),
+            "params": _plain_config_data(value.params),
+        }
+    if isinstance(value, AgentSection):
+        data = {item.name: _plain_config_data(getattr(value, item.name)) for item in fields(value)}
+        if value.runtime_profile == "flight_software":
+            data.pop("runtime_profile", None)
+        return data
     if is_dataclass(value) and not isinstance(value, type):
         return {item.name: _plain_config_data(getattr(value, item.name)) for item in fields(value)}
     if isinstance(value, dict):
@@ -62,6 +74,7 @@ def _plain_config_data(value: Any) -> Any:
 @dataclass(frozen=True)
 class AlgorithmPointer:
     kind: str = "python"
+    builtin: str | None = None
     module: str | None = None
     class_name: str | None = None
     function: str | None = None
@@ -80,16 +93,31 @@ class BridgePointer:
 
 
 @dataclass(frozen=True)
+class FlightSoftwareSection:
+    profile: str | None = None
+    stack: str | None = None
+    module: str | None = None
+    class_name: str | None = None
+    params: dict[str, Any] = field(default_factory=dict)
+    task_period_s: float | None = None
+    hardware_profile: str | None = None
+    mission_load: dict[str, Any] | None = None
+    checkpoint: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True)
 class AgentSection:
     object_id: str = ""
     kind: str = "satellite"
     enabled: bool = True
     role: str = "agent"
+    runtime_profile: str = "flight_software"
     propagation_method: str = ""
     general: dict[str, Any] = field(default_factory=dict)
     specs: dict[str, Any] = field(default_factory=dict)
     initial_state: dict[str, Any] = field(default_factory=dict)
     reference_orbit: dict[str, Any] = field(default_factory=dict)
+    flight_software: FlightSoftwareSection | None = None
     guidance: AlgorithmPointer | None = None
     base_guidance: AlgorithmPointer | None = None
     guidance_modifiers: list[AlgorithmPointer] = field(default_factory=list)

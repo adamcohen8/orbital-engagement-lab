@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import importlib
 import json
+import os
 import re
+import shutil
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -39,6 +43,7 @@ class SingleRunArtifactContext:
     reentry_metrics: dict[str, dict[str, np.ndarray]]
     bridge_hist: dict[str, list[dict[str, Any]]]
     object_state_frames: dict[str, str]
+    extra_artifacts: dict[str, Any] | None = None
 
 
 def format_single_run_summary(summary: dict[str, Any]) -> str:
@@ -137,6 +142,7 @@ def write_single_run_artifacts(
     context: SingleRunArtifactContext,
 ) -> dict[str, Any]:
     summary = payload.setdefault("summary", {})
+    previous_owned_artifacts = _previous_owned_artifacts(context.outdir)
     source_path = getattr(context.cfg, "source_path", None)
     if source_path is not None:
         summary["config_source_path"] = str(Path(source_path).resolve())
@@ -210,7 +216,7 @@ def write_single_run_artifacts(
         summary["bridge_extension_outputs"] = bridge_outputs
         summary["bridge_extension_summary"] = bridge_summary
 
-    artifacts: dict[str, Any] = {}
+    artifacts: dict[str, Any] = dict(context.extra_artifacts or {})
     if bool(context.cfg.outputs.stats.get("save_history_npz", False)):
         history_outputs = _write_history_npz(context=context)
         if history_outputs:
@@ -233,6 +239,11 @@ def write_single_run_artifacts(
         artifacts["ground_station_access_reports"] = access_report_paths
     if bridge_outputs:
         artifacts["bridge_extensions"] = bridge_outputs
+    _prune_stale_owned_artifacts(
+        output_dir=context.outdir,
+        previous=previous_owned_artifacts,
+        current=_artifact_file_paths(artifacts),
+    )
     artifacts["output_index_md"] = str(context.outdir / "index.md")
     if bool(context.cfg.outputs.review.enabled):
         artifacts["review_store"] = {
@@ -263,7 +274,85 @@ def write_single_run_artifacts(
         write_json(str(context.outdir / "master_run_log.json"), payload)
     if bool(context.cfg.outputs.stats.get("print_summary", True)):
         print(format_single_run_summary(summary))
+    _write_owned_artifact_inventory(context.outdir, _artifact_file_paths(artifacts))
     return payload
+
+
+def _artifact_file_paths(value: Any) -> set[Path]:
+    paths: set[Path] = set()
+    if isinstance(value, dict):
+        for child in value.values():
+            paths.update(_artifact_file_paths(child))
+    elif isinstance(value, (list, tuple)):
+        for child in value:
+            paths.update(_artifact_file_paths(child))
+    elif isinstance(value, (str, Path)) and str(value).strip():
+        paths.add(Path(value).expanduser().resolve())
+    return paths
+
+
+def _previous_owned_artifacts(output_dir: Path) -> set[Path]:
+    # Cleanup never trusts a mutable inventory or review database as deletion
+    # authority. Only fixed, simulator-owned filenames are eligible here.
+    relative_paths = (
+        "index.md",
+        "master_run_summary.json",
+        "master_run_log.json",
+        "master_run_history.npz",
+        "master_run_history_manifest.json",
+        "review/run.sqlite",
+        "review/schema.json",
+        "review/saved_views.json",
+        "review/workflow_manifest.json",
+        "review/generated_artifacts.json",
+    )
+    return {output_dir / relative for relative in relative_paths if (output_dir / relative).is_file()}
+
+
+def _prune_stale_owned_artifacts(*, output_dir: Path, previous: set[Path], current: set[Path]) -> None:
+    root = output_dir.resolve()
+    for path in sorted(previous - current):
+        try:
+            relative = path.absolute().relative_to(root)
+        except ValueError:
+            continue
+        if path.name != ".oel_run_artifacts.json":
+            _unlink_regular_child_nofollow(root, relative)
+
+
+def _unlink_regular_child_nofollow(root: Path, relative: Path) -> None:
+    if relative.is_absolute() or not relative.parts or ".." in relative.parts:
+        return
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptors: list[int] = []
+    try:
+        descriptor = os.open(root, flags)
+        descriptors.append(descriptor)
+        for part in relative.parts[:-1]:
+            descriptor = os.open(part, flags, dir_fd=descriptor)
+            descriptors.append(descriptor)
+        stat_result = os.stat(relative.name, dir_fd=descriptor, follow_symlinks=False)
+        if stat.S_ISREG(stat_result.st_mode):
+            os.unlink(relative.name, dir_fd=descriptor)
+    except (FileNotFoundError, NotADirectoryError, OSError):
+        return
+    finally:
+        for descriptor in reversed(descriptors):
+            os.close(descriptor)
+
+
+def _write_owned_artifact_inventory(output_dir: Path, paths: set[Path]) -> None:
+    inventory = output_dir / ".oel_run_artifacts.json"
+    root = output_dir.resolve()
+    owned = []
+    for path in sorted(paths):
+        try:
+            relative = path.resolve().relative_to(root)
+        except ValueError:
+            continue
+        if path.is_file() and not path.is_symlink():
+            owned.append({"path": relative.as_posix(), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()})
+    inventory.write_text(json.dumps({"version": 2, "paths": owned}, indent=2) + "\n", encoding="utf-8")
 
 
 def _write_history_npz(*, context: SingleRunArtifactContext) -> dict[str, Any]:
@@ -377,6 +466,9 @@ def _write_review_store(
 ) -> dict[str, str]:
     review_cfg = context.cfg.outputs.review
     if not bool(review_cfg.enabled):
+        review_dir = context.outdir / "review"
+        if review_dir.is_dir() and not review_dir.is_symlink():
+            shutil.rmtree(review_dir)
         return {}
     try:
         return write_single_run_review_store(payload=payload, context=context, artifacts=artifacts)

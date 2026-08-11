@@ -39,6 +39,26 @@ class TestAttitudeActuatorDevices(unittest.TestCase):
         self.assertTrue(np.allclose(out.torque_body_nm, np.zeros(3)))
         self.assertEqual(out.mode_flags["magnetorquer_mode"], "no_b_field_zero_torque")
 
+    def test_wheel_and_magnetorquer_torques_are_aggregated(self):
+        actuator = AttitudeActuator(
+            reaction_wheels=ReactionWheelLimits(
+                max_torque_nm=np.full(3, 0.1),
+                max_momentum_nms=np.ones(3),
+                wheel_axes_body=np.eye(3),
+            ),
+            magnetorquers=MagnetorquerLimits(max_dipole_a_m2=np.full(3, 10.0)),
+        )
+        command = Command(
+            torque_body_nm=np.array([0.05, 0.0, 0.0]),
+            mode_flags={"magnetic_field_body_t": np.array([1.0e-5, 0.0, 0.0])},
+        )
+
+        out = actuator.apply(command, limits={}, dt_s=1.0)
+
+        self.assertTrue(np.allclose(out.torque_body_nm, command.torque_body_nm, atol=1.0e-12))
+        self.assertTrue(np.allclose(out.mode_flags["rw_body_torque_applied_nm"], command.torque_body_nm))
+        self.assertTrue(np.allclose(out.mode_flags["magnetorquer_torque_body_nm"], np.zeros(3)))
+
     def test_control_moment_gyro_limits_torque_by_momentum_and_gimbal_rate(self):
         actuator = AttitudeActuator(
             control_moment_gyros=ControlMomentGyroLimits(

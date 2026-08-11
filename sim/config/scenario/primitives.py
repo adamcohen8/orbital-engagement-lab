@@ -233,6 +233,16 @@ def _validate_sim_timing(out: SimulatorSection) -> None:
             numerator_name="simulator.dt_s",
             denominator_name=field_name,
         )
+    orbit = dict(dynamics.get("orbit", {}) or {})
+    attitude = dict(dynamics.get("attitude", {}) or {})
+    if bool(attitude.get("enabled", True)):
+        orbit_substep = float(orbit.get("orbit_substep_s", out.dt_s) or out.dt_s)
+        attitude_substep = float(attitude.get("attitude_substep_s", out.dt_s) or out.dt_s)
+        if attitude_substep > orbit_substep:
+            raise ValueError(
+                "simulator.dynamics.attitude.attitude_substep_s must be less than or equal to "
+                "simulator.dynamics.orbit.orbit_substep_s."
+            )
 
 
 _REENTRY_TERMINATION_LIMIT_FIELDS = (

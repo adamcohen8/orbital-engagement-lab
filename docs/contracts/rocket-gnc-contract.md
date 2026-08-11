@@ -47,8 +47,9 @@ The rocket runtime state is represented by `RocketState`:
 - `t_s`: simulation time in seconds.
 - `position_eci_km`: inertial position in kilometers.
 - `velocity_eci_km_s`: inertial velocity in kilometers per second.
-- `attitude_quat_bn`: body-to-inertial attitude quaternion convention used by
-  the rest of OEL.
+- `attitude_quat_bn`: scalar-first inertial-to-body attitude quaternion. Its
+  DCM maps ECI vectors into body axes (`v_body = C_bn v_eci`), matching the
+  shared OEL attitude convention.
 - `angular_rate_body_rad_s`: body angular rate in radians per second.
 - `mass_kg`: current vehicle mass.
 - `active_stage_index`: zero-based active stage index. Values greater than or
@@ -70,7 +71,7 @@ state derivations.
 Rocket guidance emits `GuidanceCommand`:
 
 - `throttle`: commanded throttle fraction. The engine clamps this to `[0, 1]`.
-- `attitude_quat_bn_cmd`: desired body-to-inertial attitude, optional.
+- `attitude_quat_bn_cmd`: desired scalar-first inertial-to-body attitude quaternion, optional.
 - `torque_body_nm_cmd`: direct body torque command, optional.
 - `thrust_vector_body_cmd`: desired TVC thrust-vector direction in body axes,
   optional.

@@ -18,6 +18,7 @@ objects:
     specs:
       dry_mass_kg: 180.0
       fuel_mass_kg: 20.0
+      isp_s: 220.0
     initial_state:
       relative_to_target_ric:
         frame: curv
@@ -29,20 +30,6 @@ objects:
         - 0.0002
         - 0.0
       relative_to: target
-    orbit_control:
-      kind: python
-      module: sim.control.orbit.lqr
-      class_name: HCWLQRController
-      params:
-        mean_motion_rad_s: 0.001078
-        max_accel_km_s2: 2.0e-05
-        design_dt_s: 1.0
-        ric_curv_state_slice:
-        - 0
-        - 6
-        chief_eci_state_slice:
-        - 6
-        - 12
     knowledge:
       refresh_rate_s: 5.0
       targets:
@@ -63,6 +50,14 @@ objects:
       estimation:
         type: ekf
     kind: satellite
+    flight_software:
+      stack: fsw.rpo_reference
+      hardware_profile: hardware.ideal_wrench.v1
+      params:
+        max_acceleration_m_s2: 0.02
+        reference_object_id: target
+        translation_mode: ric_hold
+        goal_type: rpo.ric_hold
   target:
     enabled: true
     role: target
@@ -78,11 +73,6 @@ objects:
         raan_deg: 0.0
         argp_deg: 0.0
         true_anomaly_deg: 0.0
-    orbit_control:
-      kind: python
-      module: sim.control.orbit.zero_controller
-      class_name: ZeroController
-      params: {}
     knowledge:
       refresh_rate_s: 10.0
       targets:
@@ -102,6 +92,10 @@ objects:
       estimation:
         type: ekf
     kind: satellite
+    flight_software:
+      stack: fsw.passive
+      hardware_profile: hardware.passive.v1
+      params: {}
 ground_stations:
 - id: colorado_springs
   lat_deg: 38.803

@@ -84,6 +84,7 @@ class ObjectStepResult:
     bridge_elapsed_s: float = 0.0
     updated_agent: AgentRuntime | None = None
     controller_debug_events: list[dict[str, Any]] = field(default_factory=list)
+    command_decision_events: list[dict[str, Any]] = field(default_factory=list)
     profile_stage_seconds: dict[str, float] = field(default_factory=dict)
     profile_stage_counts: dict[str, int] = field(default_factory=dict)
     last_orbital_command_eval_t_s: float | None = None
@@ -348,6 +349,7 @@ def _run_object_step_worker(engine: _SingleRunEngine, message: ObjectStepMessage
     profiler_enabled = bool(getattr(engine.runtime_profiler, "enabled", True))
     engine.runtime_profiler = _RuntimeProfiler(object_ids=[aid], enabled=profiler_enabled)
     engine.controller_debug_hist = {aid: []}
+    engine.command_decision_hist = {aid: []}
     desired_attitude_hist = engine.desired_attitude_hist.get(aid)
     if desired_attitude_hist is None or desired_attitude_hist.shape != (1, 4):
         desired_attitude_hist = np.full((1, 4), np.nan)
@@ -376,6 +378,7 @@ def _run_object_step_worker(engine: _SingleRunEngine, message: ObjectStepMessage
         result,
         updated_agent=updated_agent,
         controller_debug_events=list(engine.controller_debug_hist.get(aid, [])),
+        command_decision_events=list(engine.command_decision_hist.get(aid, [])),
         profile_stage_seconds=dict(engine.runtime_profiler.object_stage_seconds.get(aid, {})),
         profile_stage_counts=dict(engine.runtime_profiler.object_stage_counts.get(aid, {})),
         last_orbital_command_eval_t_s=engine._last_orbital_command_eval_t_s.get(aid),

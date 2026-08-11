@@ -1,6 +1,6 @@
 scenario_name: public_agent_attitude_hold
-scenario_description: Agent-generated public five-minute attitude-hold settling
-  scenario with review-store evidence.
+scenario_description: Agent-generated public five-minute attitude-hold settling scenario
+  with review-store evidence.
 metadata:
   owner: public-oel-agents
   notes: Headless agent example for attitude-control scenario generation.
@@ -42,47 +42,10 @@ objects:
       - 0.02
       - -0.015
       - 0.01
-    orbit_control:
-      kind: python
-      module: sim.control.orbit.zero_controller
-      class_name: ZeroController
+    flight_software:
+      stack: fsw.attitude_reference
+      hardware_profile: hardware.ideal_wrench.v1
       params: {}
-    attitude_control:
-      kind: python
-      module: sim.control.attitude.baseline
-      class_name: ReactionWheelPDController
-      params:
-        wheel_axes_body:
-        - - 1.0
-          - 0.0
-          - 0.0
-        - - 0.0
-          - 1.0
-          - 0.0
-        - - 0.0
-          - 0.0
-          - 1.0
-        wheel_torque_limits_nm:
-        - 0.05
-        - 0.05
-        - 0.05
-        desired_attitude_quat_bn:
-        - 1.0
-        - 0.0
-        - 0.0
-        - 0.0
-        desired_rate_body_rad_s:
-        - 0.0
-        - 0.0
-        - 0.0
-        kp:
-        - 0.32
-        - 0.32
-        - 0.32
-        kd:
-        - 3.5
-        - 3.5
-        - 3.5
 simulator:
   duration_s: 300.0
   dt_s: 1.0

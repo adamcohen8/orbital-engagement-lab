@@ -10,7 +10,7 @@ def test_game_launcher_discovers_ordered_training_levels() -> None:
     config_dir = Path(__file__).resolve().parents[1] / "game" / "configs"
     options = discover_game_scenarios(config_dir)
 
-    assert [option.scenario_id for option in options] == [
+    release_ids = [
         "rpo_00_tutorial",
         "rpo_01_coast_relative_motion",
         "rpo_02_vbar_approach",
@@ -26,48 +26,55 @@ def test_game_launcher_discovers_ordered_training_levels() -> None:
         "rpo_bonus_cislunar_rendezvous",
         "rpo_sandbox",
     ]
-    assert options[0].title == "Level 0 - Pilot Tutorial"
-    assert options[1].title == "Level 1 - Relative Orbit"
-    assert options[2].title == "Level 2 - V-Bar Approach"
-    assert options[3].title == "Level 3 - R-Bar Approach"
-    assert options[4].title == "Level 4 - Rendezvous"
-    assert options[5].title == "Level 5 - Safe Inspection"
-    assert options[0].player_brief
-    assert options[0].pass_criteria
-    assert options[0].instructor_notes
-    assert options[0].time_budget_s == pytest.approx(18000.0)
-    assert options[0].delta_v_budget_m_s == pytest.approx(12.0)
-    assert options[0].path.name == "game_training_rpo_00_tutorial.yaml"
-    assert options[5].path.name == "game_training_rpo_05_passive_cross_track_approach.yaml"
-    assert options[6].path.name == "game_training_rpo_06_sun_angle_inspection.yaml"
-    assert options[6].title == "Level 6 - Sun-Angle Inspection"
-    assert options[7].path.name == "game_training_rpo_07_elliptic_burn_then_approach.yaml"
-    assert options[7].title == "Level 7 - Elliptical Approach"
-    assert options[8].path.name == "game_training_rpo_08_elliptic_nmc.yaml"
-    assert options[8].title == "Level 8 - Elliptical NMC"
+    assert [option.scenario_id for option in options if option.scenario_id in release_ids] == release_ids
+    by_id = {option.scenario_id: option for option in options}
+    assert by_id["rpo_00_tutorial"].title == "Level 0 - Pilot Tutorial"
+    assert by_id["rpo_01_coast_relative_motion"].title == "Level 1 - Relative Orbit"
+    assert by_id["rpo_02_vbar_approach"].title == "Level 2 - V-Bar Approach"
+    assert by_id["rpo_03_rbar_approach"].title == "Level 3 - R-Bar Approach"
+    assert by_id["rpo_04_rendezvous"].title == "Level 4 - Rendezvous"
+    assert by_id["rpo_05_passive_cross_track_approach"].title == "Level 5 - Safe Inspection"
+    tutorial = by_id["rpo_00_tutorial"]
+    assert tutorial.player_brief
+    assert tutorial.pass_criteria
+    assert tutorial.instructor_notes
+    assert tutorial.time_budget_s == pytest.approx(18000.0)
+    assert tutorial.delta_v_budget_m_s == pytest.approx(12.0)
+    assert tutorial.path.name == "game_training_rpo_00_tutorial.yaml"
+    assert by_id["rpo_05_passive_cross_track_approach"].path.name == "game_training_rpo_05_passive_cross_track_approach.yaml"
+    assert by_id["rpo_06_sun_angle_inspection"].path.name == "game_training_rpo_06_sun_angle_inspection.yaml"
+    assert by_id["rpo_06_sun_angle_inspection"].title == "Level 6 - Sun-Angle Inspection"
+    assert by_id["rpo_07_elliptic_burn_then_approach"].path.name == "game_training_rpo_07_elliptic_burn_then_approach.yaml"
+    assert by_id["rpo_07_elliptic_burn_then_approach"].title == "Level 7 - Elliptical Approach"
+    assert by_id["rpo_08_elliptic_nmc"].path.name == "game_training_rpo_08_elliptic_nmc.yaml"
+    assert by_id["rpo_08_elliptic_nmc"].title == "Level 8 - Elliptical NMC"
     operator_options = discover_game_scenarios_for_mode(config_dir, mode="operator")
     assert operator_options[0].title == "Level 0 - Operator Tutorial"
     operator_ids = {option.scenario_id for option in operator_options}
     assert "rpo_10_defensive_target_demo" not in operator_ids
     assert "rpo_arcade_pursuit" not in operator_ids
     assert "rpo_11_evasive_target_survival" in operator_ids
-    assert options[9].path.name == "game_training_rpo_09_elliptic_rendezvous.yaml"
-    assert options[9].title == "Level 9 - Elliptical Rendezvous"
-    assert options[10].path.name == "game_training_rpo_11_evasive_target_survival.yaml"
-    assert options[10].title == "Level 10 - Evasion"
-    assert options[11].path.name == "game_training_rpo_10_defensive_target_demo.yaml"
-    assert options[11].title == "Level 11 - Pursuit"
-    assert options[10].delta_v_budget_m_s == pytest.approx(25.0)
-    assert options[10].target_delta_v_budget_m_s == pytest.approx(1.0)
-    assert options[11].target_delta_v_budget_m_s == pytest.approx(0.1)
-    assert options[12].title == "Bonus Level - Cislunar Rendezvous"
-    assert options[12].path.name == "game_training_rpo_bonus_cislunar_rendezvous.yaml"
-    assert options[12].time_budget_s == pytest.approx(259200.0)
-    assert options[12].delta_v_budget_m_s == pytest.approx(75.0)
-    assert options[13].title == "Sandbox"
-    assert options[13].path.name == "game_training_rpo_sandbox.yaml"
-    assert options[13].time_budget_s == pytest.approx(20000.0)
-    assert options[13].delta_v_budget_m_s is None
+    assert by_id["rpo_09_elliptic_rendezvous"].path.name == "game_training_rpo_09_elliptic_rendezvous.yaml"
+    assert by_id["rpo_09_elliptic_rendezvous"].title == "Level 9 - Elliptical Rendezvous"
+    evasion = by_id["rpo_11_evasive_target_survival"]
+    pursuit = by_id["rpo_10_defensive_target_demo"]
+    assert evasion.path.name == "game_training_rpo_11_evasive_target_survival.yaml"
+    assert evasion.title == "Level 10 - Evasion"
+    assert pursuit.path.name == "game_training_rpo_10_defensive_target_demo.yaml"
+    assert pursuit.title == "Level 11 - Pursuit"
+    assert evasion.delta_v_budget_m_s == pytest.approx(25.0)
+    assert evasion.target_delta_v_budget_m_s == pytest.approx(1.0)
+    assert pursuit.target_delta_v_budget_m_s == pytest.approx(0.1)
+    cislunar = by_id["rpo_bonus_cislunar_rendezvous"]
+    assert cislunar.title == "Bonus Level - Cislunar Rendezvous"
+    assert cislunar.path.name == "game_training_rpo_bonus_cislunar_rendezvous.yaml"
+    assert cislunar.time_budget_s == pytest.approx(259200.0)
+    assert cislunar.delta_v_budget_m_s == pytest.approx(75.0)
+    sandbox = by_id["rpo_sandbox"]
+    assert sandbox.title == "Sandbox"
+    assert sandbox.path.name == "game_training_rpo_sandbox.yaml"
+    assert sandbox.time_budget_s == pytest.approx(20000.0)
+    assert sandbox.delta_v_budget_m_s is None
 
 
 @pytest.mark.parametrize(
@@ -440,6 +447,47 @@ def test_non_training_game_configs_default_to_attitude_thrust(tmp_path: Path) ->
     assert game_runner._game_control_mode(SimulationConfig.from_yaml(path)) == "attitude_thrust"
 
 
+def test_translation_control_modes_remains_available_from_input_module() -> None:
+    from sim.game.input import TRANSLATION_CONTROL_MODES
+    from sim.game.manual import TRANSLATION_CONTROL_MODES as MANUAL_TRANSLATION_CONTROL_MODES
+
+    assert TRANSLATION_CONTROL_MODES is MANUAL_TRANSLATION_CONTROL_MODES
+
+
+def test_game_boolean_metadata_parses_false_string(tmp_path: Path) -> None:
+    cfg = _game_config(tmp_path)
+    cfg["metadata"]["game"]["show_coast_prediction"] = "false"
+    path = tmp_path / "coast_prediction_false.yaml"
+    path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+
+    assert game_runner._game_show_coast_prediction(SimulationConfig.from_yaml(path)) is False
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "error"),
+    [
+        ("drag_coefficient", "nan", "finite number"),
+        ("ballistic_coefficient_min_kg_m2", 0.0, "greater than zero"),
+        ("ballistic_coefficient_initial_kg_m2", 500.0, "within the configured bounds"),
+        ("lift_area_m2", -1.0, "nonnegative"),
+        ("ri_pitch_max_deg", 100.0, "must not exceed 90"),
+    ],
+)
+def test_invalid_aerodynamic_game_metadata_is_rejected(
+    tmp_path: Path,
+    field: str,
+    value: Any,
+    error: str,
+) -> None:
+    cfg = _game_config(tmp_path)
+    cfg["metadata"]["game"]["aerodynamic_control"] = {field: value}
+    path = tmp_path / f"invalid_aero_{field}.yaml"
+    path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+
+    with pytest.raises(ValueError, match=error):
+        game_runner._game_aerodynamic_control_config(SimulationConfig.from_yaml(path))
+
+
 def test_public_manual_rpo_example_uses_ric_translation_controls() -> None:
     path = Path(__file__).resolve().parents[2] / "examples" / "configs" / "public_manual_rpo_training.yaml"
 
@@ -603,29 +651,35 @@ def test_sandbox_setup_form_values_update_runtime_config() -> None:
     config_path = Path(__file__).resolve().parents[1] / "game" / "configs" / "game_training_rpo_sandbox.yaml"
     config = SimulationConfig.from_yaml(config_path)
     values = [
+        "7200",
+        "0.1",
+        "30",
+        "40",
+        "50",
+        "45",
         "1.2",
         "-4.5",
         "0.25",
         "0.3",
         "-0.4",
         "0.5",
-        "7200",
-        "0.1",
-        "45",
     ]
 
     setup, error = game_runner._sandbox_setup_from_text_values(values)
     assert error == ""
     assert setup == SandboxSetupValues(
+        target_a_km=7200.0,
+        target_ecc=0.1,
+        target_inc_deg=30.0,
+        target_raan_deg=40.0,
+        target_argp_deg=50.0,
+        target_true_anomaly_deg=45.0,
         radial_km=1.2,
         in_track_km=-4.5,
         cross_track_km=0.25,
         radial_rate_m_s=0.3,
         in_track_rate_m_s=-0.4,
         cross_track_rate_m_s=0.5,
-        target_a_km=7200.0,
-        target_ecc=0.1,
-        target_true_anomaly_deg=45.0,
     )
 
     updated = game_runner._apply_sandbox_setup_to_config(config, setup)
@@ -638,6 +692,9 @@ def test_sandbox_setup_form_values_update_runtime_config() -> None:
     )
     assert target.initial_state["coes"]["a_km"] == pytest.approx(7200.0)
     assert target.initial_state["coes"]["ecc"] == pytest.approx(0.1)
+    assert target.initial_state["coes"]["inc_deg"] == pytest.approx(30.0)
+    assert target.initial_state["coes"]["raan_deg"] == pytest.approx(40.0)
+    assert target.initial_state["coes"]["argp_deg"] == pytest.approx(50.0)
     assert target.initial_state["coes"]["true_anomaly_deg"] == pytest.approx(45.0)
     assert game_runner._game_coast_prediction_model(updated) == "tschauner_hempel"
     assert game_runner._game_camera_rule_mode(updated) == "full_trajectory"
@@ -657,25 +714,19 @@ def test_sandbox_setup_form_values_update_runtime_config() -> None:
     assert {"target", "chaser"}.issubset(snapshot.truth)
 
 
-def test_sandbox_setup_form_validation_and_lines() -> None:
-    setup, error = game_runner._sandbox_setup_from_text_values(["0"] * 9)
+def test_sandbox_setup_form_validation() -> None:
+    setup, error = game_runner._sandbox_setup_from_text_values(["0"] * 12)
     assert setup is None
     assert error == "Target Semimajor Axis must be positive."
 
-    setup, error = game_runner._sandbox_setup_from_text_values(["0", "0", "0", "0", "0", "0", "7000", "1", "0"])
+    setup, error = game_runner._sandbox_setup_from_text_values(
+        ["7000", "1", "45", "0", "0", "0", "0", "0", "0", "0", "0", "0"]
+    )
     assert setup is None
     assert error == "Target Eccentricity must satisfy 0 <= e < 1."
 
-    lines = game_runner._sandbox_setup_briefing_lines(
-        ["0"] * 9, active_index=2, error="Target Eccentricity must satisfy 0 <= e < 1."
-    )
 
-    assert lines[0] == "Sandbox Setup"
-    assert "> Cross-Track C: 0 km" in lines
-    assert any(line.startswith("Input Error:") for line in lines)
-
-
-def test_sandbox_setup_form_supports_briefing_scroll() -> None:
+def test_sandbox_setup_form_uses_dedicated_two_column_screen(monkeypatch) -> None:
     class FakeEventSource:
         def __init__(self, batches: list[list[object]]) -> None:
             self._batches = list(batches)
@@ -697,39 +748,68 @@ def test_sandbox_setup_form_supports_briefing_scroll() -> None:
         K_TAB = "tab"
         K_DOWN = "down"
         K_UP = "up"
+        K_LEFT = "left"
+        K_RIGHT = "right"
+        KMOD_SHIFT = 1
         K_PAGEUP = "pageup"
         K_PAGEDOWN = "pagedown"
         K_HOME = "home"
         K_END = "end"
         K_BACKSPACE = "backspace"
         K_DELETE = "delete"
+        MOUSEBUTTONDOWN = "mousedown"
+
+        class Rect:
+            def __init__(self, x, y, w, h):
+                self.x, self.y, self.w, self.h = x, y, w, h
+                self.width, self.height = w, h
+
+            @property
+            def right(self):
+                return self.x + self.w
 
         def __init__(self, batches: list[list[object]]) -> None:
             self.event = FakeEventSource(batches)
+            self.event.get_grab = lambda: True
+            self.event.set_grab = lambda value: None
+            self.mouse = type(
+                "Mouse",
+                (),
+                {
+                    "get_visible": staticmethod(lambda: False),
+                    "set_visible": staticmethod(lambda value: None),
+                    "get_pos": staticmethod(lambda: (0, 0)),
+                },
+            )()
+            self.display = type("Display", (), {"flip": staticmethod(lambda: None)})()
 
     class FakeDashboard:
         closed = False
 
         def __init__(self, batches: list[list[object]]) -> None:
             self.pygame = FakePygame(batches)
-            self.scrolls: list[int] = []
-            self.draws = 0
-
-        def scroll_briefing(self, delta_px: int) -> None:
-            self.scrolls.append(int(delta_px))
-
-        def draw(self, **_: object) -> None:
-            self.draws += 1
+            self.screen = type("Screen", (), {"get_size": staticmethod(lambda: (1280, 800))})()
+            self.font = object()
+            self.small_font = object()
+            self.large_font = object()
 
         def tick(self, _: float) -> None:
             return None
 
-    wheel = type("WheelEvent", (), {"type": FakePygame.MOUSEWHEEL, "y": -2})()
-    page_down = type("KeyEvent", (), {"type": FakePygame.KEYDOWN, "key": FakePygame.K_PAGEDOWN, "unicode": ""})()
+    tab = type(
+        "KeyEvent",
+        (),
+        {"type": FakePygame.KEYDOWN, "key": FakePygame.K_TAB, "unicode": "", "mod": 0},
+    )()
     enter = type("KeyEvent", (), {"type": FakePygame.KEYDOWN, "key": FakePygame.K_RETURN, "unicode": ""})()
-    dashboard = FakeDashboard([[wheel, page_down], [enter]])
+    dashboard = FakeDashboard([[tab], [enter]])
     config_path = Path(__file__).resolve().parents[1] / "game" / "configs" / "game_training_rpo_sandbox.yaml"
     config = SimulationConfig.from_yaml(config_path)
+    draws: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        "sim.game.launcher_widgets._draw_sandbox_setup_screen",
+        lambda *_args, **kwargs: draws.append(kwargs),
+    )
 
     setup = game_runner._run_sandbox_setup_form(
         dashboard,
@@ -739,8 +819,9 @@ def test_sandbox_setup_form_supports_briefing_scroll() -> None:
     )
 
     assert setup == game_runner._sandbox_setup_from_config(config)
-    assert dashboard.scrolls == [96, 192]
-    assert dashboard.draws == 1
+    assert len(draws) == 1
+    assert len(draws[0]["field_rects"]) == 12
+    assert draws[0]["active_index"] == 1
 
 
 def test_launcher_hit_test_accounts_for_scroll_offset() -> None:
@@ -1467,6 +1548,66 @@ def test_tracker_replay_history_uses_array_backed_replay_stream() -> None:
     np.testing.assert_allclose(replay["relative_ric"], expected["relative_ric"])
     np.testing.assert_allclose(replay["chaser_thrust_ric_km_s2"], expected["chaser_thrust_ric_km_s2"])
     np.testing.assert_allclose(replay["target_thrust_eci_km_s2"], [[0.0, 0.0, 2.0e-6]])
+
+
+def test_aerodynamic_controls_are_preserved_in_replay_and_debrief_metrics() -> None:
+    cfg = RPOTrainingConfig(
+        enabled=True,
+        scenario_id="aerodynamic-debrief",
+        learning_goal="test",
+        goal_range_km=0.25,
+    )
+    tracker = RPOTrainingTracker(cfg)
+    provider = type("AerodynamicProvider", (), {})()
+    provider.control_mode = "aerodynamic"
+    provider.command_state = KeyboardCommandState(pitch=1.0, roll=-1.0)
+    provider.aerodynamic_drag_coefficient = 2.0
+    provider.aerodynamic_lift_coefficient = 0.5
+    provider.aerodynamic_lift_area_m2 = 25.0
+    provider.ballistic_coefficient_kg_m2 = 100.0
+    provider.lift_bank_angle_deg = 10.0
+
+    target_state6 = np.array([7000.0, 0.0, 0.0, 0.0, 7.54605329, 0.0], dtype=float)
+    rel_ric = np.array([0.0, -0.2, 0.0, 0.0, 0.0, 0.0], dtype=float)
+    chaser_state6 = ric_rect_state_to_eci(rel_ric, target_state6[:3], target_state6[3:])
+    state_tail = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 5000.0], dtype=float)
+    target_state = np.hstack((target_state6, state_tail))
+    chaser_state = np.hstack((chaser_state6, state_tail))
+
+    for time_s, bc, bank in ((0.0, 100.0, 10.0), (2.0, 120.0, 30.0)):
+        provider.ballistic_coefficient_kg_m2 = bc
+        provider.lift_bank_angle_deg = bank
+        snapshot = SimulationSnapshot(
+            step_index=int(time_s / 2.0),
+            time_s=time_s,
+            truth={"target": target_state, "chaser": chaser_state},
+            belief={},
+            applied_thrust={"target": np.zeros(3), "chaser": np.zeros(3)},
+            applied_torque={},
+        )
+        tracker.record(snapshot, control_telemetry_provider=provider)
+
+    replay = tracker_replay_history(tracker)
+    payload = game_debrief.game_debrief_payload(
+        config=cfg,
+        score=tracker.score(),
+        difficulty="easy",
+        replay_history=replay,
+    )
+
+    assert replay["aerodynamic_ballistic_coefficient_kg_m2"] == pytest.approx([100.0, 120.0])
+    assert replay["aerodynamic_drag_area_m2"] == pytest.approx([25.0, 5000.0 / 240.0])
+    assert replay["aerodynamic_lift_coefficient"] == pytest.approx([0.5, 0.5])
+    assert replay["aerodynamic_lift_area_m2"] == pytest.approx([25.0, 25.0])
+    assert replay["aerodynamic_lift_bank_angle_deg"] == pytest.approx([10.0, 30.0])
+    assert payload["metrics"]["burn_count"] == 0
+    assert payload["metrics"]["active_control_time_s"] == pytest.approx(2.0)
+    assert payload["metrics"]["aerodynamic_control_time_s"] == pytest.approx(2.0)
+    assert payload["metrics"]["aerodynamic_adjustment_count"] == 1
+    assert payload["metrics"]["final_ballistic_coefficient_kg_m2"] == pytest.approx(120.0)
+    assert payload["metrics"]["final_drag_area_m2"] == pytest.approx(5000.0 / 240.0)
+    assert payload["metrics"]["final_lift_bank_angle_deg"] == pytest.approx(30.0)
+    assert any(event["label"] == "Aerodynamic control input" for event in payload["event_timeline"])
 
 
 def test_game_debrief_attempt_index_counts_level_folders(tmp_path: Path) -> None:

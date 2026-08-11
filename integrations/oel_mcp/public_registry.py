@@ -5,6 +5,8 @@ from typing import Any
 from integrations.oel_mcp.contracts import (
     HANDLING_SCHEMA,
     MAX_MANIFEST_BYTES,
+    MAX_REVIEW_RESULT_BYTES,
+    MAX_REVIEW_VALUE_BYTES,
     MAX_ROWS,
     MAX_VM_STEPS,
     ToolContract,
@@ -554,6 +556,10 @@ PUBLIC_TOOL_CONTRACTS: tuple[ToolContract, ...] = (
             required=("output_dir", "sql", "handling"),
         ),
         result_schema=QUERY_REVIEW_RESULT_SCHEMA,
+        limits={
+            "max_review_value_bytes": MAX_REVIEW_VALUE_BYTES,
+            "max_review_result_bytes": MAX_REVIEW_RESULT_BYTES,
+        },
     ),
     ToolContract(
         tool_id="oel.plan_run.v1",
@@ -615,7 +621,7 @@ PUBLIC_TOOL_CONTRACTS: tuple[ToolContract, ...] = (
                     "approval": APPROVAL_SCHEMA,
                 }
             ),
-            required=("config_path", "output_dir", "resource_profile", "validation_id", "approval", "handling"),
+            required=("config_path", "output_dir", "resource_profile", "validation_id", "trust_approval", "approval", "handling"),
         ),
         result_schema=RUN_SCENARIO_RESULT_SCHEMA,
     ),

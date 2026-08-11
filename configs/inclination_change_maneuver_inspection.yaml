@@ -14,6 +14,10 @@ objects:
     enabled: false
     role: chaser
     kind: satellite
+    flight_software:
+      stack: fsw.passive
+      hardware_profile: hardware.passive.v1
+      params: {}
   target:
     enabled: true
     role: target
@@ -41,44 +45,12 @@ objects:
       - 0.0
       - 0.0
       - 0.0
-    orbit_control:
-      kind: python
-      module: sim.control.orbit.zero_controller
-      class_name: ZeroController
-      params: {}
-    attitude_control:
-      kind: python
-      module: sim.control.attitude.baseline
-      class_name: QuaternionPDController
+    flight_software:
+      stack: fsw.orbit_reference
+      hardware_profile: hardware.ideal_wrench.v1
       params:
-        desired_attitude_quat_bn:
-        - 1.0
-        - 0.0
-        - 0.0
-        - 0.0
-        kp: 0.8
-        kd: 1.6
-        max_torque_nm: 0.05
-    mission_strategy:
-      kind: python
-      module: sim.mission.modules
-      class_name: PursuitMissionStrategy
-      params:
-        target_id: null
-        max_accel_km_s2: 0.0002
-        blind_direction_eci:
-        - 0.0
-        - -1.0
-        - 0.0
-        align_to_thrust: true
-    mission_execution:
-      kind: python
-      module: sim.mission.modules
-      class_name: ControllerPointingExecution
-      params:
-        require_attitude_alignment: false
-        alignment_tolerance_deg: 180.0
-    mission_objectives: []
+        max_acceleration_m_s2: 0.2
+        translation_mode: stationkeeping
 simulator:
   duration_s: 6000.0
   dt_s: 1.0

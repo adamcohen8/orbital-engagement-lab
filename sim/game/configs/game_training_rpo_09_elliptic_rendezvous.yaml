@@ -6,6 +6,12 @@ metadata:
   notes: Run with `python run_game.py sim/game/configs/game_training_rpo_09_elliptic_rendezvous.yaml
     --speed-multiple 10`.
   game:
+    flight_software_stack: fsw.game_pilot_reference
+    input_profile: game.translation.v1
+    hardware_profile: game.ideal_wrench.v1
+    observer_policy: truth_assisted
+    scoring_policy: configured_training.v1
+    replay_support: debrief_history_v1
     level_name: Level 9 - Elliptical Rendezvous
     control_mode: ric_translation
     camera_mode: target_pair
@@ -99,19 +105,6 @@ objects:
       - 0.0
       - 0.0
       relative_to: target
-    orbit_control:
-      kind: python
-      module: sim.control.orbit.zero_controller
-      class_name: ZeroController
-      params: {}
-    attitude_control:
-      kind: python
-      module: sim.control.attitude.zero_torque
-      class_name: ZeroTorqueController
-      params: {}
-    mission_strategy: null
-    mission_execution: null
-    mission_objectives: []
     knowledge:
       refresh_rate_s: 1.0
       targets:
@@ -131,6 +124,12 @@ objects:
       estimation:
         type: ekf
     kind: satellite
+    flight_software:
+      stack: fsw.game_pilot_reference
+      task_period_s: null
+      hardware_profile: game.ideal_wrench.v1
+      params:
+        reference_object_id: target
   target:
     enabled: true
     role: target
@@ -155,38 +154,8 @@ objects:
       - 0.0
       - 0.0
       - 0.0
-    orbit_control:
-      kind: python
-      module: sim.control.orbit.zero_controller
-      class_name: ZeroController
-      params: {}
-    attitude_control:
-      kind: python
-      module: sim.control.attitude.zero_torque
-      class_name: ZeroTorqueController
-      params: {}
-    mission_strategy: null
-    mission_execution: null
-    mission_objectives: []
-    knowledge:
-      refresh_rate_s: 1.0
-      targets:
-      - chaser
-      conditions:
-        require_line_of_sight: false
-        max_range_km: 10000.0
-      sensor_error:
-        pos_sigma_km:
-        - 0.0
-        - 0.0
-        - 0.0
-        vel_sigma_km_s:
-        - 0.0
-        - 0.0
-        - 0.0
-      estimation:
-        type: ekf
     kind: satellite
+    runtime_profile: trajectory_only
 simulator:
   duration_s: 7200.0
   dt_s: 1.0

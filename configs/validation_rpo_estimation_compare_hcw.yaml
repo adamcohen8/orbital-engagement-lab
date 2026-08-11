@@ -3,7 +3,8 @@ metadata:
   owner: public
   public_surface: public-validation
   support_level: demonstration
-  notes: Eccentric RPO estimator comparison row using HCW relative EKF with az/el/range/range-rate measurements.
+  notes: Eccentric RPO estimator comparison row using HCW relative EKF with az/el/range/range-rate
+    measurements.
 objects:
   chaser:
     enabled: true
@@ -12,62 +13,73 @@ objects:
       preset_satellite: BASIC_SATELLITE
       dry_mass_kg: 180.0
       fuel_mass_kg: 20.0
+      isp_s: 220.0
       attitude_system: BASIC_REACTION_WHEELS_3AXIS
     initial_state:
       relative_to_target_ric:
         frame: rect
-        state: [0.08, -0.18, 0.06, 0.000006, -0.000004, 0.000003]
-      attitude_quat_bn: [1.0, 0.0, 0.0, 0.0]
-      angular_rate_body_rad_s: [0.0, 0.0, 0.0]
-    orbit_control:
-      kind: python
-      module: sim.control.orbit.zero_controller
-      class_name: ZeroController
-      params: {}
-    attitude_control:
-      kind: python
-      module: sim.control.attitude.surrogate_snap
-      class_name: SurrogateSnapECIController
-      params:
-        desired_attitude_quat_bn: [1.0, 0.0, 0.0, 0.0]
-        cancel_rate_mag_rad_s2: 1.0
-        rate_tolerance_rad_s: 0.001
-        slew_time_180_s: 1.0
-        pointing_sigma_deg: 0.05
-        default_dt_s: 0.05
-        rng_seed: 67
-    mission_strategy:
-      kind: python
-      module: sim.mission.modules
-      class_name: HoldMissionStrategy
-      params:
-        attitude_mode: hold_eci
-    mission_execution:
-      kind: python
-      module: sim.mission.modules
-      class_name: ControllerPointingExecution
-      params:
-        require_attitude_alignment: false
-    mission_objectives: []
+        state:
+        - 0.08
+        - -0.18
+        - 0.06
+        - 6.0e-06
+        - -4.0e-06
+        - 3.0e-06
+      attitude_quat_bn:
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      angular_rate_body_rad_s:
+      - 0.0
+      - 0.0
+      - 0.0
     knowledge:
       refresh_rate_s: 10.0
-      targets: [target]
+      targets:
+      - target
       conditions:
         require_line_of_sight: true
         max_range_km: 10000.0
       sensor_error:
         angle_sigma_rad: 0.0001
         range_sigma_km: 0.001
-        range_rate_sigma_km_s: 0.00001
+        range_rate_sigma_km_s: 1.0e-05
       estimation:
         type: relative_hcw_ekf
         measurement_model: relative_angles_range_rate
         measurement_origin: deputy
-        initial_state_ric: [0.09, -0.17, 0.055, 0.000005, -0.000003, 0.000004]
+        initial_state_ric:
+        - 0.09
+        - -0.17
+        - 0.055
+        - 5.0e-06
+        - -3.0e-06
+        - 4.0e-06
         ekf:
-          process_noise_diag: [1.0e-11, 1.0e-11, 1.0e-11, 1.0e-13, 1.0e-13, 1.0e-13]
-          init_cov_diag: [0.0004, 0.0004, 0.0004, 4.0e-08, 4.0e-08, 4.0e-08]
+          process_noise_diag:
+          - 1.0e-11
+          - 1.0e-11
+          - 1.0e-11
+          - 1.0e-13
+          - 1.0e-13
+          - 1.0e-13
+          init_cov_diag:
+          - 0.0004
+          - 0.0004
+          - 0.0004
+          - 4.0e-08
+          - 4.0e-08
+          - 4.0e-08
     kind: satellite
+    flight_software:
+      stack: fsw.rpo_reference
+      hardware_profile: hardware.ideal_wrench.v1
+      params:
+        max_acceleration_m_s2: 0.02
+        reference_object_id: target
+        translation_mode: ric_hold
+        goal_type: rpo.ric_hold
   target:
     enabled: true
     role: target
@@ -84,39 +96,22 @@ objects:
         raan_deg: 22.0
         argp_deg: 50.0
         true_anomaly_deg: 20.0
-      attitude_quat_bn: [1.0, 0.0, 0.0, 0.0]
-      angular_rate_body_rad_s: [0.0, 0.0, 0.0]
-    orbit_control:
-      kind: python
-      module: sim.control.orbit.zero_controller
-      class_name: ZeroController
-      params: {}
-    attitude_control:
-      kind: python
-      module: sim.control.attitude.surrogate_snap
-      class_name: SurrogateSnapECIController
-      params:
-        desired_attitude_quat_bn: [1.0, 0.0, 0.0, 0.0]
-        cancel_rate_mag_rad_s2: 1.0
-        rate_tolerance_rad_s: 0.001
-        slew_time_180_s: 1.0
-        pointing_sigma_deg: 0.05
-        default_dt_s: 0.05
-        rng_seed: 71
-    mission_strategy:
-      kind: python
-      module: sim.mission.modules
-      class_name: HoldMissionStrategy
-      params:
-        attitude_mode: hold_eci
-    mission_execution:
-      kind: python
-      module: sim.mission.modules
-      class_name: ControllerPointingExecution
-      params:
-        require_attitude_alignment: false
-    mission_objectives: []
+      attitude_quat_bn:
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      angular_rate_body_rad_s:
+      - 0.0
+      - 0.0
+      - 0.0
     kind: satellite
+    flight_software:
+      stack: fsw.orbit_reference
+      hardware_profile: hardware.ideal_wrench.v1
+      params:
+        max_acceleration_m_s2: 0.02
+        translation_mode: stationkeeping
 simulator:
   duration_s: 1800.0
   dt_s: 2.0

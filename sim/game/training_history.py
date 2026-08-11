@@ -7,6 +7,55 @@ from .criteria import *
 from sim.dynamics.orbit.cr3bp import EARTH_MOON_MEAN_MOTION_RAD_S
 
 
+def _aerodynamic_control_telemetry(
+    provider: Any | None,
+    *,
+    chaser_state: np.ndarray,
+) -> dict[str, float | bool]:
+    empty: dict[str, float | bool] = {
+        "ballistic_coefficient_kg_m2": float("nan"),
+        "drag_area_m2": float("nan"),
+        "lift_coefficient": float("nan"),
+        "lift_area_m2": float("nan"),
+        "lift_bank_angle_deg": float("nan"),
+        "control_active": False,
+    }
+    mode = str(getattr(provider, "control_mode", "") or "").strip().lower()
+    if mode not in {"aerodynamic", "aero", "aero_control", "aerodynamic_control"}:
+        return empty
+    values = dict(empty)
+    try:
+        bc = float(provider.ballistic_coefficient_kg_m2)
+        drag_coefficient = float(provider.aerodynamic_drag_coefficient)
+        mass_kg = float(chaser_state[13]) if chaser_state.size > 13 else float("nan")
+        values.update(
+            {
+                "ballistic_coefficient_kg_m2": bc,
+                "drag_area_m2": mass_kg / (drag_coefficient * bc),
+                "lift_coefficient": float(provider.aerodynamic_lift_coefficient),
+                "lift_area_m2": float(provider.aerodynamic_lift_area_m2),
+                "lift_bank_angle_deg": float(provider.lift_bank_angle_deg),
+            }
+        )
+    except (AttributeError, IndexError, TypeError, ValueError, ZeroDivisionError):
+        return empty
+    state = getattr(provider, "command_state", None)
+    values["control_active"] = bool(
+        state is not None
+        and (abs(float(getattr(state, "pitch", 0.0))) > 1.0e-9 or abs(float(getattr(state, "roll", 0.0))) > 1.0e-9)
+    )
+    for key in (
+        "ballistic_coefficient_kg_m2",
+        "drag_area_m2",
+        "lift_coefficient",
+        "lift_area_m2",
+        "lift_bank_angle_deg",
+    ):
+        if not np.isfinite(float(values[key])):
+            values[key] = float("nan")
+    return values
+
+
 class RPOTrainingTracker:
     def __init__(self, config: RPOTrainingConfig):
         self.config = config
@@ -17,6 +66,12 @@ class RPOTrainingTracker:
         self.target_thrust_hist: list[np.ndarray] = []
         self.target_reference_rel_hist: list[np.ndarray] = []
         self.mean_motion_hist: list[float] = []
+        self.aerodynamic_ballistic_coefficient_hist: list[float] = []
+        self.aerodynamic_drag_area_hist: list[float] = []
+        self.aerodynamic_lift_coefficient_hist: list[float] = []
+        self.aerodynamic_lift_area_hist: list[float] = []
+        self.aerodynamic_lift_bank_angle_hist: list[float] = []
+        self.aerodynamic_control_active_hist: list[bool] = []
         self._speed_multiplier_changed = False
         self._speed_multiplier_change_sample_idx: int | None = None
         self._score_cache: RPOTrainingScore | None = None
@@ -38,6 +93,12 @@ class RPOTrainingTracker:
         self._thrust_ric_array = np.zeros((0, 3), dtype=float)
         self._target_thrust_array = np.zeros((0, 3), dtype=float)
         self._mean_motion_array = np.zeros(0, dtype=float)
+        self._aerodynamic_ballistic_coefficient_array = np.zeros(0, dtype=float)
+        self._aerodynamic_drag_area_array = np.zeros(0, dtype=float)
+        self._aerodynamic_lift_coefficient_array = np.zeros(0, dtype=float)
+        self._aerodynamic_lift_area_array = np.zeros(0, dtype=float)
+        self._aerodynamic_lift_bank_angle_array = np.zeros(0, dtype=float)
+        self._aerodynamic_control_active_array = np.zeros(0, dtype=bool)
         self._range_array = np.zeros(0, dtype=float)
         self._speed_array = np.zeros(0, dtype=float)
         self._goal_error_array = np.zeros(0, dtype=float)
@@ -58,6 +119,12 @@ class RPOTrainingTracker:
         self.target_thrust_hist.clear()
         self.target_reference_rel_hist.clear()
         self.mean_motion_hist.clear()
+        self.aerodynamic_ballistic_coefficient_hist.clear()
+        self.aerodynamic_drag_area_hist.clear()
+        self.aerodynamic_lift_coefficient_hist.clear()
+        self.aerodynamic_lift_area_hist.clear()
+        self.aerodynamic_lift_bank_angle_hist.clear()
+        self.aerodynamic_control_active_hist.clear()
         self._speed_multiplier_changed = False
         self._speed_multiplier_change_sample_idx = None
         self._score_cache = None
@@ -92,7 +159,7 @@ class RPOTrainingTracker:
     def guided_tutorial_speed_satisfied(self) -> bool:
         return bool(self._guided_tutorial_speed_complete or self.config.guided_tutorial_speed_step is None)
 
-    def record(self, snapshot: SimulationSnapshot) -> None:
+    def record(self, snapshot: SimulationSnapshot, *, control_telemetry_provider: Any | None = None) -> None:
         if not self.config.enabled:
             return
         target = snapshot.truth.get(self.config.target_object_id)
@@ -141,6 +208,16 @@ class RPOTrainingTracker:
         target_thrust = snapshot.applied_thrust.get(self.config.target_object_id, np.zeros(3, dtype=float))
         target_thrust_eci = np.array(target_thrust, dtype=float).reshape(3)
         self.target_thrust_hist.append(target_thrust_eci)
+        aerodynamic = _aerodynamic_control_telemetry(
+            control_telemetry_provider,
+            chaser_state=np.array(chaser, dtype=float).reshape(-1),
+        )
+        self.aerodynamic_ballistic_coefficient_hist.append(aerodynamic["ballistic_coefficient_kg_m2"])
+        self.aerodynamic_drag_area_hist.append(aerodynamic["drag_area_m2"])
+        self.aerodynamic_lift_coefficient_hist.append(aerodynamic["lift_coefficient"])
+        self.aerodynamic_lift_area_hist.append(aerodynamic["lift_area_m2"])
+        self.aerodynamic_lift_bank_angle_hist.append(aerodynamic["lift_bank_angle_deg"])
+        self.aerodynamic_control_active_hist.append(bool(aerodynamic["control_active"]))
         self._append_history_arrays(
             t_s=float(snapshot.time_s),
             rel=rel,
@@ -148,6 +225,7 @@ class RPOTrainingTracker:
             thrust_ric=self.thrust_ric_hist[-1],
             target_thrust=target_thrust_eci,
             mean_motion_rad_s=n,
+            aerodynamic=aerodynamic,
             target_state=target_arr,
             chaser_state=np.array(chaser, dtype=float).reshape(-1),
         )
@@ -251,6 +329,7 @@ class RPOTrainingTracker:
         thrust_ric: np.ndarray,
         target_thrust: np.ndarray,
         mean_motion_rad_s: float,
+        aerodynamic: dict[str, float | bool],
         target_state: np.ndarray | None = None,
         chaser_state: np.ndarray | None = None,
     ) -> None:
@@ -264,6 +343,12 @@ class RPOTrainingTracker:
         self._thrust_ric_array[idx, :] = np.array(thrust_ric, dtype=float).reshape(3)
         self._target_thrust_array[idx, :] = np.array(target_thrust, dtype=float).reshape(3)
         self._mean_motion_array[idx] = float(mean_motion_rad_s)
+        self._aerodynamic_ballistic_coefficient_array[idx] = float(aerodynamic["ballistic_coefficient_kg_m2"])
+        self._aerodynamic_drag_area_array[idx] = float(aerodynamic["drag_area_m2"])
+        self._aerodynamic_lift_coefficient_array[idx] = float(aerodynamic["lift_coefficient"])
+        self._aerodynamic_lift_area_array[idx] = float(aerodynamic["lift_area_m2"])
+        self._aerodynamic_lift_bank_angle_array[idx] = float(aerodynamic["lift_bank_angle_deg"])
+        self._aerodynamic_control_active_array[idx] = bool(aerodynamic["control_active"])
         self._delta_v_interval_km_s_array[idx] = self._delta_v_interval_km_s(idx, thrust)
         self._target_delta_v_interval_km_s_array[idx] = self._delta_v_interval_km_s(idx, target_thrust)
         self._range_array[idx] = float(np.sqrt(np.sum(rel_arr[:3] * rel_arr[:3])))
@@ -335,27 +420,45 @@ class RPOTrainingTracker:
         self._thrust_ric_array = grow_2d(self._thrust_ric_array, 3)
         self._target_thrust_array = grow_2d(self._target_thrust_array, 3)
         self._mean_motion_array = grow_1d(self._mean_motion_array)
+        self._aerodynamic_ballistic_coefficient_array = grow_1d(
+            self._aerodynamic_ballistic_coefficient_array,
+            fill_value=float("nan"),
+        )
+        self._aerodynamic_drag_area_array = grow_1d(
+            self._aerodynamic_drag_area_array,
+            fill_value=float("nan"),
+        )
+        self._aerodynamic_lift_coefficient_array = grow_1d(
+            self._aerodynamic_lift_coefficient_array,
+            fill_value=float("nan"),
+        )
+        self._aerodynamic_lift_area_array = grow_1d(
+            self._aerodynamic_lift_area_array,
+            fill_value=float("nan"),
+        )
+        self._aerodynamic_lift_bank_angle_array = grow_1d(
+            self._aerodynamic_lift_bank_angle_array,
+            fill_value=float("nan"),
+        )
+        active = np.zeros(new_capacity, dtype=bool)
+        if old_count:
+            active[:old_count] = self._aerodynamic_control_active_array[:old_count]
+        self._aerodynamic_control_active_array = active
         self._range_array = grow_1d(self._range_array)
         self._speed_array = grow_1d(self._speed_array)
         self._goal_error_array = grow_1d(self._goal_error_array, fill_value=float("nan"))
         self._delta_v_interval_km_s_array = grow_1d(self._delta_v_interval_km_s_array)
         self._target_delta_v_interval_km_s_array = grow_1d(self._target_delta_v_interval_km_s_array)
         self._nmt_radial_amplitude_array = grow_1d(self._nmt_radial_amplitude_array, fill_value=float("nan"))
-        self._nmt_cross_track_amplitude_array = grow_1d(
-            self._nmt_cross_track_amplitude_array, fill_value=float("nan")
-        )
+        self._nmt_cross_track_amplitude_array = grow_1d(self._nmt_cross_track_amplitude_array, fill_value=float("nan"))
         self._nmt_radial_amplitude_error_array = grow_1d(
             self._nmt_radial_amplitude_error_array, fill_value=float("nan")
         )
         self._nmt_cross_track_amplitude_error_array = grow_1d(
             self._nmt_cross_track_amplitude_error_array, fill_value=float("nan")
         )
-        self._nmt_drift_velocity_error_array = grow_1d(
-            self._nmt_drift_velocity_error_array, fill_value=float("nan")
-        )
-        self._nmt_element_goal_error_array = grow_1d(
-            self._nmt_element_goal_error_array, fill_value=float("nan")
-        )
+        self._nmt_drift_velocity_error_array = grow_1d(self._nmt_drift_velocity_error_array, fill_value=float("nan"))
+        self._nmt_element_goal_error_array = grow_1d(self._nmt_element_goal_error_array, fill_value=float("nan"))
         self._history_capacity = new_capacity
 
     def _append_nmt_element_arrays(
@@ -452,6 +555,12 @@ class RPOTrainingTracker:
             t = self._t_array[:count]
             thrust_ric = self._thrust_ric_array[:count, :]
             target_thrust = self._target_thrust_array[:count, :]
+            ballistic_coefficient = self._aerodynamic_ballistic_coefficient_array[:count]
+            drag_area = self._aerodynamic_drag_area_array[:count]
+            lift_coefficient = self._aerodynamic_lift_coefficient_array[:count]
+            lift_area = self._aerodynamic_lift_area_array[:count]
+            lift_bank_angle = self._aerodynamic_lift_bank_angle_array[:count]
+            aerodynamic_active = self._aerodynamic_control_active_array[:count]
         else:
             rel = np.vstack(self.rel_ric_hist) if self.rel_ric_hist else np.zeros((0, 6), dtype=float)
             t = np.array(self.t_s, dtype=float).reshape(-1)
@@ -464,11 +573,23 @@ class RPOTrainingTracker:
                 else np.zeros((rel.shape[0], 3), dtype=float)
             )
             count = int(min(rel.shape[0], t.size, thrust_ric.shape[0], target_thrust.shape[0]))
+            ballistic_coefficient = np.asarray(self.aerodynamic_ballistic_coefficient_hist, dtype=float)
+            drag_area = np.asarray(self.aerodynamic_drag_area_hist, dtype=float)
+            lift_coefficient = np.asarray(self.aerodynamic_lift_coefficient_hist, dtype=float)
+            lift_area = np.asarray(self.aerodynamic_lift_area_hist, dtype=float)
+            lift_bank_angle = np.asarray(self.aerodynamic_lift_bank_angle_hist, dtype=float)
+            aerodynamic_active = np.asarray(self.aerodynamic_control_active_hist, dtype=bool)
         return {
             "time_s": t[:count].copy(),
             "relative_ric": rel[:count, :].copy(),
             "chaser_thrust_ric_km_s2": thrust_ric.copy(),
             "target_thrust_eci_km_s2": target_thrust[:count, :].copy(),
+            "aerodynamic_ballistic_coefficient_kg_m2": ballistic_coefficient[:count].copy(),
+            "aerodynamic_drag_area_m2": drag_area[:count].copy(),
+            "aerodynamic_lift_coefficient": lift_coefficient[:count].copy(),
+            "aerodynamic_lift_area_m2": lift_area[:count].copy(),
+            "aerodynamic_lift_bank_angle_deg": lift_bank_angle[:count].copy(),
+            "aerodynamic_control_active": aerodynamic_active[:count].copy(),
         }
 
     def _missing_tutorial_requirements(self) -> tuple[str, ...]:
@@ -839,8 +960,7 @@ class RPOTrainingTracker:
             speeds = np.linalg.norm(rel[:, 3:], axis=1)
         element_errors = None
         if (
-            self.config.goal_nmt_radial_amplitude_km is not None
-            or self.config.max_cross_track_amplitude_km is not None
+            self.config.goal_nmt_radial_amplitude_km is not None or self.config.max_cross_track_amplitude_km is not None
         ) and n_hist.size:
             element_errors = self._nmt_element_error_arrays(rel, n_hist)
         if self._history_arrays_available():
@@ -889,8 +1009,7 @@ class RPOTrainingTracker:
             for region in self.config.forbidden_regions:
                 sampled_inside = bool(np.any(region.contains_positions(rel[:, :3])))
                 segment_crossing = any(
-                    region.intersects_segment(rel[idx - 1, :3], rel[idx, :3])
-                    for idx in range(1, rel.shape[0])
+                    region.intersects_segment(rel[idx - 1, :3], rel[idx, :3]) for idx in range(1, rel.shape[0])
                 )
                 if sampled_inside or segment_crossing:
                     forbidden_region_names.append(region.name)
@@ -939,9 +1058,7 @@ class RPOTrainingTracker:
             dv_intervals = self._delta_v_interval_km_s_array[1:count]
             target_dv_intervals = self._target_delta_v_interval_km_s_array[1:count]
             dv_m_s = float(np.sum(dv_intervals[np.isfinite(dv_intervals)]) * 1.0e3)
-            target_dv_m_s = float(
-                np.sum(target_dv_intervals[np.isfinite(target_dv_intervals)]) * 1.0e3
-            )
+            target_dv_m_s = float(np.sum(target_dv_intervals[np.isfinite(target_dv_intervals)]) * 1.0e3)
         else:
             dv_m_s = _integrated_delta_v_m_s(thrust, t)
             target_dv_m_s = _integrated_delta_v_m_s(target_thrust, t)
@@ -1029,8 +1146,7 @@ class RPOTrainingTracker:
             and element_errors["cross_track_amplitude_km"][-1] > float(self.config.max_cross_track_amplitude_km)
         ):
             reasons.append(
-                "Cross-track amplitude above "
-                f"{_format_distance_text(float(self.config.max_cross_track_amplitude_km))}."
+                f"Cross-track amplitude above {_format_distance_text(float(self.config.max_cross_track_amplitude_km))}."
             )
         time_failed = (
             self.config.max_time_s is not None

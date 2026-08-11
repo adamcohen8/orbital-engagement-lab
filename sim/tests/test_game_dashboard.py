@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import inspect
+
 # These owner-aligned tests share deterministic builders and compatibility
 # imports from the adjacent support module.
 # ruff: noqa: F403, F405
@@ -2011,3 +2013,27 @@ def test_level2_plot_scale_can_ignore_forbidden_region_zoom_extent() -> None:
     assert ri_ignored_span == pytest.approx(0.005)
     assert rc_fixed_span > 5.0
     assert ri_full_overlay_span > 5.0
+
+
+def test_dashboard_new_options_preserve_original_positional_constructor_order() -> None:
+    names = list(inspect.signature(PygameRPODashboard).parameters)
+
+    assert names.index("cr3bp_projection_mode") == 24
+    assert names.index("frame_convention") < names.index("show_coast_prediction")
+    assert names.index("frame_convention") < names.index("chaser_sprite_ri_path")
+    assert names.index("frame_convention") < names.index("aerodynamic_control_enabled")
+
+
+def test_aerodynamic_dashboard_rotates_side_with_bc_and_rear_with_lift() -> None:
+    dashboard = object.__new__(PygameRPODashboard)
+    dashboard.aerodynamic_control_enabled = True
+    dashboard.aerodynamic_ballistic_coefficient_min_kg_m2 = 50.0
+    dashboard.aerodynamic_ballistic_coefficient_max_kg_m2 = 200.0
+    dashboard.aerodynamic_ballistic_coefficient_kg_m2 = 50.0
+    dashboard.aerodynamic_lift_bank_angle_deg = 35.0
+    dashboard.aerodynamic_ri_pitch_max_deg = 24.0
+
+    assert dashboard._aerodynamic_sprite_rotation_deg(x_axis=1, y_axis=0) == pytest.approx(24.0)
+    assert dashboard._aerodynamic_sprite_rotation_deg(x_axis=2, y_axis=0) == pytest.approx(35.0)
+    dashboard.aerodynamic_ballistic_coefficient_kg_m2 = 200.0
+    assert dashboard._aerodynamic_sprite_rotation_deg(x_axis=1, y_axis=0) == pytest.approx(0.0)

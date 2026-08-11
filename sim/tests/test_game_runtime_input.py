@@ -223,10 +223,9 @@ def test_command_status_uses_capitalized_indicators() -> None:
 
 
 def test_operator_command_status_shows_next_burn_instead_of_keyboard_controls() -> None:
-    provider = OperatorBurnCommandProvider(
+    provider = GameOperatorController(
         parse_operator_burn_plan("T= 50 s, 2.0 m/s R, 1.0 m/s I, 0.2 m/s C"),
-        controlled_object_id="chaser",
-        reference_object_id="target",
+        GameOperatorInputAdapter(source_id="test/operator", boot_id="test-boot"),
     )
 
     status = game_runner._operator_next_burn_status(provider)
@@ -250,28 +249,11 @@ def test_operator_command_status_shows_next_burn_instead_of_keyboard_controls() 
 
 
 def test_operator_command_status_shows_none_after_final_burn() -> None:
-    provider = OperatorBurnCommandProvider(
+    provider = GameOperatorController(
         parse_operator_burn_plan("T= 0 s, 1.0 m/s R"),
-        controlled_object_id="chaser",
-        reference_object_id="target",
+        GameOperatorInputAdapter(source_id="test/operator", boot_id="test-boot"),
     )
-    target_state = np.array([7000.0, 0.0, 0.0, 0.0, 7.5, 0.0], dtype=float)
-    target = StateTruth(
-        position_eci_km=target_state[:3],
-        velocity_eci_km_s=target_state[3:],
-        attitude_quat_bn=np.array([1.0, 0.0, 0.0, 0.0], dtype=float),
-        angular_rate_body_rad_s=np.zeros(3, dtype=float),
-        mass_kg=100.0,
-        t_s=0.0,
-    )
-
-    provider(
-        truth=target,
-        t_s=0.0,
-        dt_s=1.0,
-        object_id="chaser",
-        own_knowledge={"target": _knowledge_from_state6(target_state)},
-    )
+    provider.observe_time(0.0)
 
     assert game_runner._operator_next_burn_status(provider) == "Next Burn: None"
 
@@ -593,10 +575,10 @@ def test_step_game_attempt_splits_large_autonomy_tick() -> None:
 
 
 def test_operator_step_split_starts_short_impulse_at_tag() -> None:
-    provider = OperatorBurnCommandProvider(
+    provider = GameOperatorController(
         OperatorBurnPlan(burns=(OperatorBurn(time_s=10.0, delta_v_ric_m_s=(1.0, 0.0, 0.0)),)),
-        controlled_object_id="chaser",
-        reference_object_id="target",
+        GameOperatorInputAdapter(source_id="test/operator", boot_id="test-boot"),
+        impulse_duration_s=0.01,
     )
 
     chunks = game_runner._split_game_step_dt(

@@ -40,35 +40,6 @@ objects:
         pitch_final_deg: 75.0
         max_throttle: 1.0
     guidance_modifiers: []
-    orbit_control:
-      kind: python
-      module: sim.control.orbit.zero_controller
-      class_name: ZeroController
-      params: {}
-    attitude_control:
-      kind: python
-      module: sim.control.attitude.zero_torque
-      class_name: ZeroTorqueController
-      params: {}
-    mission_strategy:
-      kind: python
-      module: sim.mission.modules
-      class_name: RocketPursuitMissionStrategy
-      params:
-        target_id: target
-    mission_execution:
-      kind: python
-      module: sim.mission.modules
-      class_name: RocketGoNowExecution
-      params: {}
-    mission_objectives: []
-    bridge:
-      enabled: false
-      mode: external
-      endpoint: null
-      module: null
-      class_name: null
-      params: {}
     knowledge:
       refresh_rate_s: 1.0
       targets:
@@ -87,6 +58,14 @@ objects:
         - 0.0001
       estimation:
         type: ekf
+    flight_software:
+      stack: fsw.rpo_reference
+      hardware_profile: hardware.ideal_wrench.v1
+      params:
+        max_acceleration_m_s2: 0.02
+        reference_object_id: target
+        translation_mode: ric_hold
+        goal_type: rpo.ric_hold
   chaser:
     enabled: true
     role: chaser
@@ -146,64 +125,6 @@ objects:
       - 0.0
       - 0.0
       - 0.0
-    orbit_control:
-      kind: python
-      module: sim.control.orbit.lqr
-      class_name: HCWLQRController
-      params:
-        mean_motion_rad_s: 0.001078
-        max_accel_km_s2: 2.0e-06
-        design_dt_s: 10.0
-        ric_curv_state_slice:
-        - 0
-        - 6
-        chief_eci_state_slice:
-        - 6
-        - 12
-    attitude_control:
-      kind: python
-      module: sim.control.attitude.surrogate_snap
-      class_name: SurrogateSnapECIController
-      params:
-        desired_attitude_quat_bn:
-        - 1.0
-        - 0.0
-        - 0.0
-        - 0.0
-        cancel_rate_mag_rad_s2: 1.0
-        rate_tolerance_rad_s: 0.001
-        slew_time_180_s: 1.0
-        pointing_sigma_deg: 0.05
-        default_dt_s: 1.0
-        rng_seed: 2
-    mission_strategy:
-      kind: python
-      module: sim.mission.modules
-      class_name: PursuitMissionStrategy
-      params:
-        target_id: target
-        use_knowledge_for_targeting: true
-        max_accel_km_s2: 2.0e-06
-        align_to_thrust: true
-    mission_execution:
-      kind: python
-      module: sim.mission.modules
-      class_name: ControllerPointingExecution
-      params:
-        thruster_direction_body:
-        - 1.0
-        - 0.0
-        - 0.0
-        alignment_tolerance_deg: 10.0
-        require_attitude_alignment: true
-    mission_objectives: []
-    bridge:
-      enabled: false
-      mode: external
-      endpoint: null
-      module: null
-      class_name: null
-      params: {}
     knowledge:
       refresh_rate_s: 1.0
       targets:
@@ -222,6 +143,14 @@ objects:
         - 5.0e-05
       estimation:
         type: ekf
+    flight_software:
+      stack: fsw.rpo_reference
+      hardware_profile: hardware.ideal_wrench.v1
+      params:
+        max_acceleration_m_s2: 0.002
+        reference_object_id: target
+        translation_mode: ric_hold
+        goal_type: rpo.ric_hold
   target:
     enabled: true
     role: target
@@ -254,57 +183,6 @@ objects:
       - 0.0
       - 0.0
       - 0.0
-    orbit_control:
-      kind: python
-      module: sim.control.orbit.zero_controller
-      class_name: ZeroController
-      params: {}
-    attitude_control:
-      kind: python
-      module: sim.control.attitude.surrogate_snap
-      class_name: SurrogateSnapECIController
-      params:
-        desired_attitude_quat_bn:
-        - 1.0
-        - 0.0
-        - 0.0
-        - 0.0
-        cancel_rate_mag_rad_s2: 1.0
-        rate_tolerance_rad_s: 0.001
-        slew_time_180_s: 1.0
-        pointing_sigma_deg: 0.05
-        default_dt_s: 1.0
-        rng_seed: 3
-    mission_strategy:
-      kind: python
-      module: sim.mission.modules
-      class_name: HoldMissionStrategy
-      params:
-        attitude_mode: hold_eci
-        hold_quat_bn:
-        - 1.0
-        - 0.0
-        - 0.0
-        - 0.0
-    mission_execution:
-      kind: python
-      module: sim.mission.modules
-      class_name: ControllerPointingExecution
-      params:
-        thruster_direction_body:
-        - 1.0
-        - 0.0
-        - 0.0
-        alignment_tolerance_deg: 10.0
-        require_attitude_alignment: false
-    mission_objectives: []
-    bridge:
-      enabled: false
-      mode: external
-      endpoint: null
-      module: null
-      class_name: null
-      params: {}
     knowledge:
       refresh_rate_s: 1.0
       targets:
@@ -324,6 +202,14 @@ objects:
         - 0.0002
       estimation:
         type: ekf
+    flight_software:
+      stack: fsw.rpo_reference
+      hardware_profile: hardware.ideal_wrench.v1
+      params:
+        max_acceleration_m_s2: 0.02
+        reference_object_id: rocket
+        translation_mode: ric_hold
+        goal_type: rpo.ric_hold
 ground_stations:
 - id: colorado_springs
   lat_deg: 38.803
@@ -418,7 +304,6 @@ simulator:
         beta_limit_deg: 20.0
   environment:
     ephemeris_mode: analytic_simple
-    use_spice: false
     atmosphere_model: ussa1976
     atmosphere_env: {}
   plugin_validation:

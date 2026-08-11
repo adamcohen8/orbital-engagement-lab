@@ -20,7 +20,10 @@ from sim.reporting.review_store import (
     REVIEW_SCHEMA_COMPATIBILITY_POLICY,
     REVIEW_SCHEMA_STABLE_TABLES,
     REVIEW_SCHEMA_VERSION,
+    _assess_safety_requirement,
+    _create_schema,
     _insert_events,
+    _insert_flight_software_evidence,
 )
 from sim.review import (
     EVIDENCE_PLOT_RECIPES,
@@ -40,6 +43,122 @@ from sim.review import (
 
 ISS_LINE1 = "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9003"
 ISS_LINE2 = "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1004"
+
+
+def test_safety_requirement_assessment_records_quantitative_violations_and_qualitative_review() -> None:
+    time_s = np.array([0.0, 1.0, 2.0])
+    truth = np.zeros((3, 14), dtype=float)
+    truth[:, 13] = [10.0, 9.0, 8.0]
+    quantitative = {
+        "evaluation": "quantitative",
+        "parameters": [
+            {"name": "metric", "value": "mass_kg"},
+            {"name": "operator", "value": ">="},
+            {"name": "threshold", "value": 9.0},
+        ],
+    }
+
+    satisfied, source, assessment = _assess_safety_requirement(
+        "sat",
+        quantitative,
+        t_s=time_s,
+        truth_hist={"sat": truth},
+    )
+
+    assert satisfied == 0
+    assert source == "truth_evaluator"
+    assert assessment["violation_count"] == 1
+    assert assessment["first_violation_time_s"] == 2.0
+    assert _assess_safety_requirement(
+        "sat",
+        {"evaluation": "qualitative"},
+        t_s=time_s,
+        truth_hist={"sat": truth},
+    ) == (None, "qualitative_review_required", {"status": "not_machine_assessable"})
+
+
+def test_safety_review_uses_only_accepted_load_activation_interval() -> None:
+    def packet(sequence: int) -> dict[str, object]:
+        return {"source_id": "loader", "boot_id": "boot", "sequence": sequence}
+
+    def clock(ticks: int) -> dict[str, object]:
+        return {"clock_id": "clock", "ticks": ticks, "tick_period_ns": 1_000_000_000}
+
+    def mission_event(sequence: int, ticks: int, load_id: str, requirement_id: str) -> dict[str, object]:
+        return {
+            "packet_id": packet(sequence),
+            "kind": "mission_load",
+            "source_time": clock(ticks),
+            "delivery_time": clock(ticks),
+            "payload": {
+                "manifest": {"load_id": load_id, "revision": 1},
+                "safety_requirements": [
+                    {
+                        "requirement_id": requirement_id,
+                        "evaluation": "quantitative",
+                        "parameters": [
+                            {"name": "metric", "value": "mass_kg"},
+                            {"name": "operator", "value": ">="},
+                            {"name": "threshold", "value": 5.0},
+                        ],
+                    }
+                ],
+            },
+        }
+
+    def output(invocation_id: int, load_id: str, disposition: str) -> dict[str, object]:
+        return {
+            "invocation_id": invocation_id,
+            "commands": [],
+            "telemetry": [
+                {
+                    "topic": "fsw.status",
+                    "generated_at": clock(invocation_id),
+                    "fields": [
+                        {"name": "mission_load_id", "value": load_id},
+                        {"name": "mission_load_revision", "value": 1},
+                        {"name": "mission_load_disposition", "value": disposition},
+                    ],
+                }
+            ],
+        }
+
+    truth = np.zeros((4, 14), dtype=float)
+    truth[:, 13] = [1.0, 10.0, 10.0, 10.0]
+    evidence = {
+        "invocations": [
+            {"invocation_id": 1, "input_packet_ids": [packet(0)]},
+            {"invocation_id": 2, "input_packet_ids": [packet(1)]},
+        ],
+        "input_events": [
+            mission_event(0, 1, "accepted", "active-window"),
+            mission_event(1, 2, "rejected", "rejected-load"),
+        ],
+        "outputs": [output(1, "accepted", "accepted"), output(2, "rejected", "rejected_by_stack")],
+    }
+    with sqlite3.connect(":memory:") as conn:
+        _create_schema(conn)
+        _insert_flight_software_evidence(
+            conn,
+            payload={"flight_software_evidence_by_object": {"sat": evidence}},
+            t_s=np.array([0.0, 1.0, 2.0, 3.0]),
+            truth_hist={"sat": truth},
+        )
+        load_rows = conn.execute(
+            "SELECT load_id, disposition FROM fsw_load_events ORDER BY invocation_id"
+        ).fetchall()
+        safety_rows = conn.execute(
+            "SELECT requirement_id, satisfied, source, detail_json "
+            "FROM safety_requirement_evidence ORDER BY requirement_id"
+        ).fetchall()
+
+    assert load_rows == [("accepted", "accepted"), ("rejected", "rejected_by_stack")]
+    by_id = {row[0]: row[1:] for row in safety_rows}
+    assert by_id["active-window"][0:2] == (1, "truth_evaluator")
+    active_detail = json.loads(by_id["active-window"][2])
+    assert active_detail["assessment"]["sample_count"] == 3
+    assert active_detail["assessment"]["activation_start_s"] == 1.0
+    assert by_id["rejected-load"][0:2] == (None, "load_not_accepted")
 
 
 def _review_store_config(output_dir: Path) -> dict:
@@ -62,9 +181,8 @@ def _review_store_config(output_dir: Path) -> dict:
                     "relative_to": "target",
                     "relative_ric_rect": [1.0, 0.0, 0.0, -0.001, 0.0, 0.0],
                 },
-                "orbit_control": {
-                    "module": "sim.control.orbit.zero_controller",
-                    "class_name": "ZeroController",
+                "flight_software": {
+                    "profile": "fsw.profile.coast_monitor.v1",
                 },
             },
         },
@@ -120,6 +238,13 @@ def test_single_run_review_store_writes_queryable_sqlite(tmp_path: Path) -> None
         sample_count = conn.execute("SELECT COUNT(*) FROM time_samples").fetchone()[0]
         state_count = conn.execute("SELECT COUNT(*) FROM object_state").fetchone()[0]
         relative_count = conn.execute("SELECT COUNT(*) FROM relative_state").fetchone()[0]
+        decision_count = conn.execute("SELECT COUNT(*) FROM controller_decisions").fetchone()[0]
+        mission_mode_count = conn.execute("SELECT COUNT(*) FROM mission_modes").fetchone()[0]
+        command_gate_count = conn.execute("SELECT COUNT(*) FROM command_gates").fetchone()[0]
+        fsw_invocation_count = conn.execute("SELECT COUNT(*) FROM fsw_invocations").fetchone()[0]
+        fsw_identities = conn.execute(
+            "SELECT DISTINCT stack_id, stack_version, profile_id FROM fsw_invocations WHERE object_id = 'chaser'"
+        ).fetchall()
         min_range = conn.execute("SELECT MIN(range_km) FROM relative_state").fetchone()[0]
         artifact_paths = [row[0] for row in conn.execute("SELECT path FROM artifacts ORDER BY artifact_id")]
 
@@ -131,6 +256,11 @@ def test_single_run_review_store_writes_queryable_sqlite(tmp_path: Path) -> None
     assert sample_count == 3
     assert state_count == 6
     assert relative_count == 3
+    assert decision_count == 0
+    assert mission_mode_count == 0
+    assert command_gate_count == 0
+    assert fsw_invocation_count == 6
+    assert fsw_identities == [("fsw.passive", "2.0.0", "fsw.profile.coast_monitor.v1")]
     assert min_range == pytest.approx(result.min_range("chaser", "target"))
     assert {
         "index.md",
@@ -141,6 +271,58 @@ def test_single_run_review_store_writes_queryable_sqlite(tmp_path: Path) -> None
     }.issubset(set(artifact_paths))
 
 
+def test_v2_review_store_links_invocation_command_receipt_and_realization(tmp_path: Path) -> None:
+    raw = SimulationConfig.from_yaml("sim/game/configs/game_mode_basic.yaml").scenario.to_dict()
+    raw["scenario_name"] = "v2_review_linkage"
+    raw["simulator"]["duration_s"] = raw["simulator"]["dt_s"]
+    raw["outputs"]["output_dir"] = str(tmp_path)
+    raw["outputs"]["mode"] = "save"
+    raw["outputs"]["review"] = {"enabled": True, "detail": "standard"}
+    raw["outputs"]["plots"] = {"enabled": False, "figure_ids": []}
+    raw["outputs"]["animations"] = {"enabled": False, "types": []}
+
+    result = SimulationSession.from_config(SimulationConfig.from_dict(raw)).run()
+    db_path = Path(result.summary["review_outputs"]["sqlite"])
+
+    with sqlite3.connect(db_path) as conn:
+        command_links = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM actuator_commands AS command
+            JOIN fsw_invocations AS invocation
+              ON invocation.object_id = command.object_id
+             AND invocation.invocation_id = command.invocation_id
+            JOIN actuator_command_receipts AS receipt
+              ON receipt.object_id = command.object_id
+             AND receipt.command_source_id = command.command_source_id
+             AND receipt.command_boot_id = command.command_boot_id
+             AND receipt.command_sequence = command.command_sequence
+            """
+        ).fetchone()[0]
+        realization_links = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM actuator_realization AS realization
+            JOIN actuator_commands AS command
+              ON command.object_id = realization.object_id
+             AND command.command_source_id = realization.command_source_id
+             AND command.command_boot_id = realization.command_boot_id
+             AND command.command_sequence = realization.command_sequence
+            """
+        ).fetchone()[0]
+        input_links = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM fsw_input_events AS input
+            JOIN fsw_invocations AS invocation
+              ON invocation.object_id = input.object_id
+             AND invocation.invocation_id = input.invocation_id
+            """
+        ).fetchone()[0]
+
+    assert command_links > 0
+    assert realization_links > 0
+    assert input_links > 0
 def test_review_store_closes_sqlite_before_atomic_replace(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -948,6 +1130,7 @@ def test_quickstart_config_can_emit_review_store_tables(tmp_path: Path) -> None:
     outdir = tmp_path / "quickstart_review"
     config["outputs"]["output_dir"] = str(outdir)
     config["outputs"]["stats"]["print_summary"] = False
+    config["simulator"]["duration_s"] = 5.0
     config["outputs"].setdefault("review", {})
     config["outputs"]["review"] = {"enabled": True, "detail": "standard"}
 

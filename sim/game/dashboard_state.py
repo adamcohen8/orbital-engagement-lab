@@ -61,7 +61,11 @@ class DashboardStateMixin:
         chaser_sprite_path = _game_asset_path_or_default(self.chaser_sprite_path, CHASER_SPRITE_PATH)
         self._target_sprite = self._load_marker_sprite(target_sprite_path)
         self._chaser_sprite = self._load_marker_sprite(chaser_sprite_path)
-        self._sprite_scale_cache: dict[tuple[str, int], Any] = {}
+        chaser_ri_path = _game_asset_path_or_default(self.chaser_sprite_ri_path, chaser_sprite_path)
+        chaser_rc_path = _game_asset_path_or_default(self.chaser_sprite_rc_path, chaser_sprite_path)
+        self._chaser_ri_sprite = self._load_marker_sprite(chaser_ri_path)
+        self._chaser_rc_sprite = self._load_marker_sprite(chaser_rc_path)
+        self._sprite_scale_cache: dict[tuple[str, int, int], Any] = {}
 
     def close(self) -> None:
         self.closed = True
@@ -178,6 +182,8 @@ class DashboardStateMixin:
         scale_y: float,
         fallback_radius_px: int,
         force_icon: bool = False,
+        plane: str | None = None,
+        rotation_deg: float = 0.0,
     ) -> None:
         pygame = self.pygame
         role_key = str(role).strip().lower()
@@ -191,22 +197,37 @@ class DashboardStateMixin:
             color = CHASER_MARKER_COLOR
             cache_key = "chaser"
             diameter_km = float(getattr(self, "chaser_sprite_diameter_km", SATELLITE_SPRITE_DIAMETER_KM))
+            plane_key = str(plane or "").strip().upper()
+            if plane_key == "RI":
+                sprite = getattr(self, "_chaser_ri_sprite", None) or sprite
+                cache_key = "chaser_ri"
+            elif plane_key == "RC":
+                sprite = getattr(self, "_chaser_rc_sprite", None) or sprite
+                cache_key = "chaser_rc"
 
         sprite_size = (
             SATELLITE_ICON_SIZE_PX
             if force_icon
             else _satellite_marker_size_px(scale_x, scale_y, diameter_km=diameter_km)
         )
+        if role_key != "target" and str(plane or "").strip().upper() == "RI":
+            sprite_size = min(
+                int(round(float(sprite_size) * max(float(self.chaser_sprite_ri_size_scale), 0.0))),
+                max(int(self.chaser_sprite_ri_max_size_px), 1),
+            )
         if sprite is None or sprite_size <= 0:
             pygame.draw.circle(self.screen, color, center, int(fallback_radius_px))
             return
 
         cache = getattr(self, "_sprite_scale_cache", {})
         self._sprite_scale_cache = cache
-        cache_id = (cache_key, int(sprite_size))
+        angle_key = int(round(float(rotation_deg)))
+        cache_id = (cache_key, int(sprite_size), angle_key)
         scaled = cache.get(cache_id)
         if scaled is None:
             scaled = pygame.transform.smoothscale(sprite, (int(sprite_size), int(sprite_size)))
+            if angle_key:
+                scaled = pygame.transform.rotate(scaled, float(angle_key))
             cache[cache_id] = scaled
         rect = scaled.get_rect(center=center)
         self.screen.blit(scaled, rect)

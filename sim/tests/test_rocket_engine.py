@@ -116,7 +116,7 @@ class TestRocketAscentEngine(unittest.TestCase):
         )
 
         with patch(
-            "sim.rocket.engine.atmosphere_relative_velocity_eci_km_s",
+            "sim.rocket.navigation.atmosphere_relative_velocity_eci_km_s",
             return_value=np.array([0.0, 2.0, 0.0], dtype=float),
         ) as rel_vel:
             out = sim.step(state, GuidanceCommand(throttle=0.0), dt_s=1.0)
@@ -258,6 +258,58 @@ class TestRocketAscentEngine(unittest.TestCase):
         out = sim.run()
         self.assertGreater(out.tvc_gimbal_deg[1], 0.0)
         self.assertLessEqual(out.tvc_gimbal_deg[1], 1.1)
+
+    def test_dynamic_attitude_command_does_not_teleport_state(self):
+        sim_cfg = RocketSimConfig(
+            dt_s=0.1,
+            max_time_s=0.1,
+            enable_drag=False,
+            enable_j2=False,
+            enable_j3=False,
+            enable_j4=False,
+            attitude_mode="dynamic",
+        )
+        sim = RocketAscentSimulator(
+            sim_cfg=sim_cfg,
+            vehicle_cfg=RocketVehicleConfig(stack=self._tiny_stack(), payload_mass_kg=0.0),
+            guidance=HoldAttitudeGuidance(throttle=0.0),
+        )
+        state = sim.initial_state()
+        initial_quaternion = state.attitude_quat_bn.copy()
+        commanded_quaternion = np.array([np.sqrt(0.5), 0.0, 0.0, np.sqrt(0.5)])
+
+        stepped = sim.step(
+            state,
+            GuidanceCommand(
+                throttle=0.0,
+                attitude_quat_bn_cmd=commanded_quaternion,
+                torque_body_nm_cmd=np.zeros(3),
+            ),
+            dt_s=0.1,
+        )
+
+        np.testing.assert_allclose(stepped.attitude_quat_bn, initial_quaternion, atol=1.0e-12)
+        assert not np.allclose(stepped.attitude_quat_bn, commanded_quaternion)
+
+    def test_prelaunch_hold_tracks_rotating_pad(self):
+        sim_cfg = RocketSimConfig(launch_lat_deg=28.5, launch_lon_deg=-80.6, launch_alt_km=0.01)
+        sim = RocketAscentSimulator(
+            sim_cfg=sim_cfg,
+            vehicle_cfg=RocketVehicleConfig(stack=self._tiny_stack(), payload_mass_kg=0.0),
+            guidance=HoldAttitudeGuidance(throttle=0.0),
+        )
+        state = sim.initial_state()
+        initial_position = state.position_eci_km.copy()
+
+        sim.hold_on_launch_pad(state, t_s=120.0)
+
+        expected = sim.initial_state()
+        sim.hold_on_launch_pad(expected, t_s=120.0)
+        assert not np.allclose(state.position_eci_km, initial_position)
+        self.assertAlmostEqual(np.linalg.norm(state.position_eci_km), np.linalg.norm(initial_position), places=9)
+        np.testing.assert_allclose(state.position_eci_km, expected.position_eci_km)
+        np.testing.assert_allclose(state.velocity_eci_km_s, expected.velocity_eci_km_s)
+        assert state.t_s == 120.0
 
     def test_engine_performance_increases_toward_vacuum(self):
         stage = RocketStagePreset(

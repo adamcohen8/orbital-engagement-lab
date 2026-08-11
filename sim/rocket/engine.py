@@ -4,12 +4,11 @@ from dataclasses import dataclass, replace
 
 import numpy as np
 
-from sim.aero.core import atmosphere_relative_velocity_eci_km_s
 from sim.dynamics.attitude.rigid_body import propagate_attitude_exponential_map
 from sim.dynamics.orbit.accelerations import OrbitContext
 from sim.dynamics.orbit.atmosphere import atmosphere_state_from_model
-from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2, EARTH_RADIUS_KM, EARTH_ROT_RATE_RAD_S
-from sim.dynamics.orbit.frames import frame_context_from_environment, rotation_between, transform_position
+from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2, EARTH_RADIUS_KM
+from sim.dynamics.orbit.frames import frame_context_from_environment, transform_position, transform_state
 from sim.dynamics.orbit.propagator import OrbitPropagator, drag_plugin, j2_plugin, j3_plugin, j4_plugin, srp_plugin
 from sim.rocket.aero import RocketAeroConfig, compute_aero_loads, compute_aero_state
 from sim.rocket.models import (
@@ -20,7 +19,8 @@ from sim.rocket.models import (
     RocketState,
     RocketVehicleConfig,
 )
-from sim.utils.geodesy import ecef_to_geodetic_deg_km, enu_to_ecef_rotation, geodetic_to_ecef_km
+from sim.rocket.navigation import rocket_air_relative_state_eci_m_s
+from sim.utils.geodesy import ecef_to_geodetic_deg_km, geodetic_to_ecef_km
 from sim.utils.quaternion import normalize_quaternion, quaternion_to_dcm_bn
 
 G0_M_S2 = 9.80665
@@ -39,15 +39,25 @@ def _clamp(x: float, lo: float, hi: float) -> float:
 
 
 def _launch_position_velocity_eci(
-    lat_deg: float, lon_deg: float, alt_km: float, t_s: float
+    lat_deg: float,
+    lon_deg: float,
+    alt_km: float,
+    t_s: float,
+    *,
+    environment: dict | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     r_ecef = geodetic_to_ecef_km(lat_deg=lat_deg, lon_deg=lon_deg, alt_km=alt_km)
-    frame_context = frame_context_from_environment({})
-    r_eci = transform_position(r_ecef, "ecef", "eci", t_s=t_s, context=frame_context)
-    # Stationary on launch pad in rotating Earth frame.
-    omega = np.array([0.0, 0.0, 7.2921159e-5], dtype=float)
-    v_eci = np.cross(omega, r_eci)
-    return r_eci, v_eci
+    frame_context = frame_context_from_environment(dict(environment or {}))
+    # The pad is stationary in ECEF.  Transforming the complete state applies
+    # the configured epoch/EOP rotation and its derivative consistently.
+    return transform_state(
+        r_ecef,
+        np.zeros(3, dtype=float),
+        "ecef",
+        "eci",
+        t_s=t_s,
+        context=frame_context,
+    )
 
 
 def _geodetic_state_from_eci(
@@ -65,29 +75,6 @@ def _geodetic_state_from_eci(
         context=frame_context,
     )
     return ecef_to_geodetic_deg_km(r_ecef)
-
-
-def _resolve_wind_eci_m_s(
-    *,
-    position_eci_km: np.ndarray,
-    t_s: float,
-    sim_cfg: RocketSimConfig,
-    state: RocketState | None = None,
-) -> np.ndarray:
-    frame_context = frame_context_from_environment(dict(getattr(sim_cfg, "atmosphere_env", {}) or {}))
-    lat_deg, lon_deg, alt_km = _geodetic_state_from_eci(
-        position_eci_km,
-        t_s,
-        jd_utc_start=sim_cfg.atmosphere_env.get("jd_utc_start"),
-        frame_context=frame_context,
-    )
-    wind_enu = np.array(sim_cfg.wind_enu_m_s, dtype=float).reshape(3)
-    wind_cb = sim_cfg.wind_enu_callable
-    if callable(wind_cb):
-        wind_enu = wind_enu + np.array(wind_cb(alt_km, lat_deg, lon_deg, t_s, state, sim_cfg), dtype=float).reshape(3)
-    wind_ecef = enu_to_ecef_rotation(lat_deg, lon_deg) @ wind_enu
-    wind_eci = rotation_between("ecef", "eci", t_s=t_s, context=frame_context) @ (wind_ecef / 1e3)
-    return wind_eci * 1e3
 
 
 def _vector_angle_deg(a: np.ndarray, b: np.ndarray) -> float:
@@ -250,6 +237,7 @@ class RocketAscentSimulator:
             lon_deg=self.sim_cfg.launch_lon_deg,
             alt_km=self.sim_cfg.launch_alt_km,
             t_s=0.0,
+            environment=self.sim_cfg.atmosphere_env,
         )
         q0 = _initial_attitude_quaternion(r0, self.sim_cfg.launch_azimuth_deg)
         mass0 = float(np.sum(self._stage_dry + self._stage_prop0) + self.vehicle_cfg.payload_mass_kg)
@@ -265,6 +253,22 @@ class RocketAscentSimulator:
             payload_attached=True,
             thrust_vector_body=_unit(np.array(self.vehicle_cfg.thrust_axis_body, dtype=float)),
         )
+
+    def hold_on_launch_pad(self, state: RocketState, *, t_s: float) -> RocketState:
+        """Advance a prelaunch state while keeping it fixed to the rotating launch pad."""
+        r_eci, v_eci = _launch_position_velocity_eci(
+            lat_deg=self.sim_cfg.launch_lat_deg,
+            lon_deg=self.sim_cfg.launch_lon_deg,
+            alt_km=self.sim_cfg.launch_alt_km,
+            t_s=float(t_s),
+            environment=self.sim_cfg.atmosphere_env,
+        )
+        state.position_eci_km = r_eci
+        state.velocity_eci_km_s = v_eci
+        state.attitude_quat_bn = _initial_attitude_quaternion(r_eci, self.sim_cfg.launch_azimuth_deg)
+        state.angular_rate_body_rad_s = np.zeros(3, dtype=float)
+        state.t_s = float(t_s)
+        return state
 
     def run(self, state0: RocketState | None = None) -> RocketSimResult:
         state = self.initial_state() if state0 is None else state0.copy()
@@ -528,9 +532,6 @@ class RocketAscentSimulator:
             if s.stage_prop_remaining_kg[stage_i] <= 1e-9:
                 pending_stage_separation = True
 
-        if cmd.attitude_quat_bn_cmd is not None:
-            s.attitude_quat_bn = normalize_quaternion(np.array(cmd.attitude_quat_bn_cmd, dtype=float))
-
         nominal_thrust_axis_body = _unit(np.array(self.vehicle_cfg.thrust_axis_body, dtype=float))
         tvc_target_body = (
             nominal_thrust_axis_body
@@ -545,6 +546,11 @@ class RocketAscentSimulator:
             sim_cfg=self.sim_cfg,
         )
 
+        mode = str(self.sim_cfg.attitude_mode).strip().lower()
+        if mode == "cheater" and cmd.attitude_quat_bn_cmd is not None:
+            s.attitude_quat_bn = normalize_quaternion(
+                np.array(cmd.attitude_quat_bn_cmd, dtype=float)
+            )
         c_bn = quaternion_to_dcm_bn(s.attitude_quat_bn)
         thrust_axis_eci = c_bn.T @ s.thrust_vector_body
         accel_thrust_eci_km_s2 = (thrust_n / mass_for_thrust_kg) * thrust_axis_eci / 1e3
@@ -563,28 +569,13 @@ class RocketAscentSimulator:
         last_cd = 0.0
         last_aero_force_n = 0.0
         last_aero_moment_nm = 0.0
-        wind_eci_m_s = _resolve_wind_eci_m_s(
-            position_eci_km=s.position_eci_km, t_s=s.t_s, sim_cfg=self.sim_cfg, state=s
+        v_rel_eci_m_s, wind_eci_m_s = rocket_air_relative_state_eci_m_s(
+            position_eci_km=s.position_eci_km,
+            velocity_eci_km_s=s.velocity_eci_km_s,
+            t_s=s.t_s,
+            sim_cfg=self.sim_cfg,
+            state=s,
         )
-        omega_raw = env.get("drag_earth_rotation_rad_s", EARTH_ROT_RATE_RAD_S)
-        v_rel_eci_km_s = atmosphere_relative_velocity_eci_km_s(
-            s.position_eci_km,
-            s.velocity_eci_km_s,
-            t_s=float(s.t_s),
-            earth_rotation_rad_s=float(EARTH_ROT_RATE_RAD_S if omega_raw is None else omega_raw),
-            frame_model=str(env.get("drag_frame_model", "simple")),
-            jd_utc_start=env.get("jd_utc_start"),
-            eop_path=env.get("drag_eop_path"),
-            dut1_s=env.get("dut1_s"),
-            xp_arcsec=env.get("xp_arcsec"),
-            yp_arcsec=env.get("yp_arcsec"),
-            dat_s=env.get("dat_s"),
-            tt_minus_utc_s=env.get("tt_minus_utc_s"),
-            ddpsi_rad=float(env.get("ddpsi_rad", 0.0) or 0.0),
-            ddeps_rad=float(env.get("ddeps_rad", 0.0) or 0.0),
-            eop_extrapolation=str(env.get("eop_extrapolation", "error") or "error"),
-        )
-        v_rel_eci_m_s = v_rel_eci_km_s * 1e3 - wind_eci_m_s
         v_rel_body_m_s = c_bn @ v_rel_eci_m_s
         if self.sim_cfg.enable_drag or self.sim_cfg.aero.enabled:
             speed_m_s = float(np.linalg.norm(v_rel_eci_m_s))
@@ -612,7 +603,7 @@ class RocketAscentSimulator:
             last_wind_body_m_s = c_bn @ wind_eci_m_s
             last_alpha_deg = float(np.rad2deg(loads.state.alpha_rad))
             last_beta_deg = float(np.rad2deg(loads.state.beta_rad))
-            last_cd = float(-loads.coeff_force_body[0])
+            last_cd = float(loads.drag_coefficient)
             last_aero_force_n = float(np.linalg.norm(loads.force_body_n))
             last_aero_moment_nm = float(np.linalg.norm(loads.moment_body_nm))
 
@@ -633,7 +624,6 @@ class RocketAscentSimulator:
             ctx=ctx,
         )
 
-        mode = str(self.sim_cfg.attitude_mode).strip().lower()
         if mode == "cheater":
             if cmd.attitude_quat_bn_cmd is not None:
                 qn = normalize_quaternion(np.array(cmd.attitude_quat_bn_cmd, dtype=float))

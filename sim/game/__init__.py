@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from sim.game.manual import KeyboardCommandState, ManualGameCommandProvider
+from sim.game.manual import KeyboardCommandState
 from sim.game.training import RPOTrainingConfig, RPOTrainingScore, RPOTrainingTracker
 
 __all__ = [
     "KeyboardCommandState",
-    "ManualGameCommandProvider",
     "PygameRPODashboard",
     "RPOTrainingConfig",
     "RPOTrainingScore",

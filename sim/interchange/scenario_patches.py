@@ -24,6 +24,7 @@ PATCH_OPERATION_KINDS = {
     "mission_burn",
     "duration_extension",
     "controller_pointer",
+    "flight_software_stack",
     "scenario_override",
 }
 
@@ -363,7 +364,7 @@ def _oel_version() -> str:
 
         return version("orbital-engagement-lab")
     except Exception:
-        return "0.24.2"
+        return "0.25.0"
 
 
 __all__ = [

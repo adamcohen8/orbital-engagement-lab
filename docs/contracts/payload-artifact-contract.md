@@ -1,6 +1,6 @@
 # Payload And Artifact Contract
 
-This document defines the 0.4 contract for simulation payloads, summaries, and
+This document defines the 0.5 contract for simulation payloads, summaries, and
 output artifacts. It focuses on single-run payloads and the public review
 surface. Batch/campaign payloads are included only at a high level because their
 full schemas remain Pro/private maturity work.
@@ -42,6 +42,7 @@ A single-run payload should include these top-level keys when applicable:
 - `knowledge_consistency_by_observer`
 - `bridge_events_by_object`
 - `controller_debug_by_object`
+- `command_decisions_by_object`
 - `rocket_throttle_cmd`
 - `rocket_metrics`
 - `reentry_metrics_by_object`
@@ -49,6 +50,13 @@ A single-run payload should include these top-level keys when applicable:
 Consumers should treat `summary` as the most stable review surface. Detailed
 histories and debug maps are available for analysis, but fields not documented
 here should be considered lower stability until tests and docs promote them.
+
+`command_decisions_by_object` is the compact standard GNC record and is present
+even when detailed controller debug is disabled. Rows include controller and
+mission identities, requested/applied command vectors and norms, mission mode,
+intent-field provenance, saturation, deadline, fuel/actuator limits, alignment,
+and gate reason. `controller_debug_by_object` remains the larger opt-in
+engineering record with belief and raw component details.
 
 
 ## Summary Contract

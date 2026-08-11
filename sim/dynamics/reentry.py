@@ -159,6 +159,68 @@ def evaluate_reentry_termination(
     return None
 
 
+def locate_reentry_termination_crossing(
+    previous: dict[str, float],
+    current: dict[str, float],
+    cfg: ReentryConfig,
+    object_id: str | None = None,
+) -> tuple[str, float] | None:
+    """Locate the earliest linearly bracketed threshold crossing in one integration segment."""
+    term = reentry_termination_for_object(cfg, object_id)
+    if not bool(term.enabled):
+        return None
+    candidates: list[tuple[float, str]] = []
+    if bool(term.terminate_on_entry):
+        a0 = float(previous.get("active", 0.0))
+        a1 = float(current.get("active", 0.0))
+        if a0 <= 0.5 < a1:
+            previous_altitude = float(previous.get("altitude_km", float("nan")))
+            current_altitude = float(current.get("altitude_km", float("nan")))
+            fraction = 0.5
+            if (
+                np.isfinite(previous_altitude)
+                and np.isfinite(current_altitude)
+                and current_altitude != previous_altitude
+            ):
+                fraction = float(
+                    np.clip(
+                        (float(cfg.begin_altitude_km) - previous_altitude)
+                        / (current_altitude - previous_altitude),
+                        0.0,
+                        1.0,
+                    )
+                )
+            candidates.append((fraction, "reentry_entry"))
+        elif a1 > 0.5:
+            candidates.append((0.0, "reentry_entry"))
+    checks = (
+        ("altitude_km", term.min_altitude_km, "reentry_min_altitude", "le"),
+        ("dynamic_pressure_pa", term.max_dynamic_pressure_pa, "reentry_dynamic_pressure", "ge"),
+        ("drag_decel_m_s2", term.max_drag_decel_m_s2, "reentry_drag_decel", "ge"),
+        ("g_load", term.max_g_load, "reentry_g_load", "ge"),
+        ("heat_rate_w_m2", term.max_heat_rate_w_m2, "reentry_heat_rate", "ge"),
+        ("heat_load_j_m2", term.max_heat_load_j_m2, "reentry_heat_load", "ge"),
+    )
+    for key, threshold, reason, comparison in checks:
+        if threshold is None:
+            continue
+        v0 = float(previous.get(key, float("nan")))
+        v1 = float(current.get(key, float("nan")))
+        if not np.isfinite(v0) or not np.isfinite(v1):
+            continue
+        threshold_f = float(threshold)
+        already = v0 <= threshold_f if comparison == "le" else v0 >= threshold_f
+        crossed = v1 <= threshold_f if comparison == "le" else v1 >= threshold_f
+        if already:
+            candidates.append((0.0, reason))
+        elif crossed and v1 != v0:
+            candidates.append((float(np.clip((threshold_f - v0) / (v1 - v0), 0.0, 1.0)), reason))
+    if not candidates:
+        return None
+    fraction, reason = min(candidates, key=lambda item: item[0])
+    return reason, fraction
+
+
 def radial_altitude_km(r_eci_km: np.ndarray) -> float:
     r = float(np.linalg.norm(np.array(r_eci_km, dtype=float).reshape(3)))
     return float(r - EARTH_RADIUS_KM)
@@ -175,6 +237,7 @@ def reentry_metrics_for_state(
     env: dict[str, Any],
     active: bool,
     previous_heat_load_j_m2: float = 0.0,
+    previous_heat_rate_w_m2: float | None = None,
 ) -> dict[str, float]:
     altitude_km = altitude_km_from_eci(r_eci_km, t_s, env=env)
     out = {key: float("nan") for key in REENTRY_METRIC_KEYS}
@@ -237,7 +300,13 @@ def reentry_metrics_for_state(
         nose_radius_m=nose_radius_m,
         coefficient=float(cfg.heat_rate_coefficient),
     )
-    heat_load_j_m2 = prev_heat + max(float(dt_s), 0.0) * max(heat_rate_w_m2, 0.0)
+    previous_rate = None if previous_heat_rate_w_m2 is None else float(previous_heat_rate_w_m2)
+    prior_rate = (
+        heat_rate_w_m2
+        if previous_rate is None or not np.isfinite(previous_rate)
+        else max(previous_rate, 0.0)
+    )
+    heat_load_j_m2 = prev_heat + max(float(dt_s), 0.0) * 0.5 * (prior_rate + max(heat_rate_w_m2, 0.0))
 
     out.update(
         {

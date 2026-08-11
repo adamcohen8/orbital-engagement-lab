@@ -101,12 +101,18 @@ def compare_handoff(
         _compare_relative_state(checks, product, scenario)
     elif product_kind == "oel.scenario_patch":
         _compare_scenario_patch(checks, product, scenario)
+    elif product_kind == "oel.satellite_checkpoint":
+        _compare_satellite_checkpoint(checks, product, scenario)
+    elif product_kind == "oel.completed_run_snapshot":
+        _compare_completed_run_snapshot(checks, product, scenario)
     else:
         _check(checks, "product.kind_supported", "contract", True, False, observed=product_kind)
 
     execution = _execution_comparison(
         checks,
         product=product,
+        scenario=scenario,
+        scenario_source=scenario_source,
         run_output_dir=run_output_dir,
     )
     failed = [item["check_id"] for item in checks if item["passed"] is not True]
@@ -177,7 +183,17 @@ def _compare_absolute_state(
         dict(state.get("epoch", {}) or {}).get("value"),
         dict(scenario.get("simulator", {}) or {}).get("initial_jd_utc"),
     )
-    _check(checks, "state.object_specs", "object", dict(payload.get("object_specs", {}) or {}), scenario_obj.get("specs", {}))
+    expected_specs = deepcopy(dict(payload.get("object_specs", {}) or {}))
+    resource = dict(payload.get("resource_state", {}) or {})
+    if resource:
+        expected_specs["mass_kg"] = float(resource["mass_kg"])
+        if resource.get("propellant_state") == "tracked":
+            expected_specs["dry_mass_kg"] = float(resource["dry_mass_kg"])
+            expected_specs["fuel_mass_kg"] = float(resource["fuel_mass_kg"])
+        else:
+            expected_specs.pop("dry_mass_kg", None)
+            expected_specs.pop("fuel_mass_kg", None)
+    _check(checks, "state.object_specs", "object", expected_specs, scenario_obj.get("specs", {}))
     expected_force = deepcopy(
         dict(dict(payload.get("model_assumptions", {}) or {}).get("orbit_force_model", {}) or {})
     )
@@ -274,6 +290,103 @@ def _compare_scenario_patch(checks: list[dict[str, Any]], product: Mapping[str, 
             _check(checks, f"patch.operation.{index}", "patch", operation.get("value"), observed)
 
 
+def _compare_satellite_checkpoint(
+    checks: list[dict[str, Any]], product: Mapping[str, Any], scenario: Mapping[str, Any]
+) -> None:
+    payload = dict(product.get("payload", {}) or {})
+    obj = dict(payload.get("object", {}) or {})
+    object_id = str(obj.get("object_id", "") or "")
+    scenario_obj = dict(dict(scenario.get("objects", {}) or {}).get(object_id, {}) or {})
+    initial = dict(scenario_obj.get("initial_state", {}) or {})
+    state = dict(payload.get("state", {}) or {})
+    values = list(state.get("values", []) or [])
+    attitude = dict(payload.get("attitude", {}) or {})
+    _check(checks, "satellite.object_id", "identity", True, bool(scenario_obj), observed=object_id)
+    _check(checks, "satellite.position_eci_km", "state", values[:3], initial.get("position_eci_km"))
+    _check(checks, "satellite.velocity_eci_km_s", "state", values[3:], initial.get("velocity_eci_km_s"))
+    _check(
+        checks,
+        "satellite.attitude_quat_bn",
+        "state",
+        attitude.get("quaternion_bn"),
+        initial.get("attitude_quat_bn"),
+    )
+    _check(
+        checks,
+        "satellite.angular_rate_body_rad_s",
+        "state",
+        attitude.get("angular_rate_body_rad_s"),
+        initial.get("angular_rate_body_rad_s"),
+    )
+    expected_fsw = deepcopy(dict(payload.get("flight_software", {}) or {}))
+    expected_fsw["checkpoint"] = deepcopy(dict(payload.get("checkpoint", {}) or {}))
+    _check(checks, "satellite.flight_software", "checkpoint", expected_fsw, scenario_obj.get("flight_software"))
+    _check(
+        checks,
+        "satellite.mass_kg",
+        "state",
+        dict(payload.get("resource_state", {}) or {}).get("mass_kg"),
+        dict(scenario_obj.get("specs", {}) or {}).get("mass_kg"),
+    )
+
+
+def _compare_completed_run_snapshot(
+    checks: list[dict[str, Any]], product: Mapping[str, Any], scenario: Mapping[str, Any]
+) -> None:
+    payload = dict(product.get("payload", {}) or {})
+    states = list(payload.get("states", []) or [])
+    scenario_objects = dict(scenario.get("objects", {}) or {})
+    for item_raw in states:
+        item = dict(item_raw)
+        obj = dict(item.get("object", {}) or {})
+        object_id = str(obj.get("object_id", "") or "")
+        scenario_obj = dict(scenario_objects.get(object_id, {}) or {})
+        initial = dict(scenario_obj.get("initial_state", {}) or {})
+        values = list(dict(item.get("state", {}) or {}).get("values", []) or [])
+        _check(checks, f"snapshot.{object_id}.object_id", "identity", True, bool(scenario_obj))
+        _check(
+            checks,
+            f"snapshot.{object_id}.position_eci_km",
+            "state",
+            values[:3],
+            initial.get("position_eci_km"),
+        )
+        _check(
+            checks,
+            f"snapshot.{object_id}.velocity_eci_km_s",
+            "state",
+            values[3:],
+            initial.get("velocity_eci_km_s"),
+        )
+        resource_state = dict(item.get("resource_state", {}) or {})
+        object_specs = dict(item.get("object_specs", {}) or {})
+        scenario_specs = dict(scenario_obj.get("specs", {}) or {})
+        if resource_state.get("mass_kg") is not None:
+            _check(
+                checks,
+                f"snapshot.{object_id}.mass_kg",
+                "state",
+                resource_state.get("mass_kg"),
+                scenario_specs.get("mass_kg"),
+            )
+        _check(
+            checks,
+            f"snapshot.{object_id}.object_specs",
+            "model",
+            True,
+            _mapping_contains(scenario_specs, object_specs),
+        )
+    if states:
+        epoch = dict(dict(states[0]).get("state", {}) or {}).get("epoch", {})
+        _check(
+            checks,
+            "snapshot.epoch_jd_utc",
+            "time",
+            dict(epoch or {}).get("value"),
+            dict(scenario.get("simulator", {}) or {}).get("initial_jd_utc"),
+        )
+
+
 def _overlay_value_matches(observed: Any, expected: Any) -> bool:
     if isinstance(expected, Mapping):
         return isinstance(observed, Mapping) and _mapping_contains(observed, expected)
@@ -287,7 +400,12 @@ def _overlay_value_matches(observed: Any, expected: Any) -> bool:
 
 
 def _execution_comparison(
-    checks: list[dict[str, Any]], *, product: Mapping[str, Any], run_output_dir: str | Path | None
+    checks: list[dict[str, Any]],
+    *,
+    product: Mapping[str, Any],
+    scenario: Mapping[str, Any],
+    scenario_source: Path,
+    run_output_dir: str | Path | None,
 ) -> dict[str, Any]:
     if run_output_dir is None:
         return {"status": "not_supplied", "execution_occurred": False}
@@ -299,17 +417,47 @@ def _execution_comparison(
     payload = dict(product.get("payload", {}) or {})
     compared_row: dict[str, Any] | None = None
     with sqlite3.connect(db) as connection:
-        if product_kind in {"oel.state_estimate", "oel.completed_run_state"}:
+        metadata_rows = connection.execute(
+            "SELECT config_sha256, config_json FROM run_metadata LIMIT 2"
+        ).fetchall()
+        if len(metadata_rows) != 1:
+            raise HandoffComparisonError("Run review store must contain exactly one run_metadata row.")
+        config_sha256, config_json = metadata_rows[0]
+        config_text = str(config_json or "")
+        recorded_hash = hashlib.sha256(config_text.encode("utf-8")).hexdigest()
+        try:
+            recorded_config = json.loads(config_text)
+        except json.JSONDecodeError as exc:
+            raise HandoffComparisonError("Run review store config_json is invalid.") from exc
+        if not isinstance(recorded_config, Mapping):
+            raise HandoffComparisonError("Run review store config_json must contain an object.")
+        _check(checks, "execution.config_sha256_integrity", "execution", str(config_sha256), recorded_hash)
+        _check(
+            checks,
+            "execution.config_sha256",
+            "execution",
+            _normalized_config_sha256(scenario, source_path=scenario_source),
+            str(config_sha256),
+        )
+        if product_kind in {"oel.state_estimate", "oel.completed_run_state", "oel.satellite_checkpoint"}:
             object_id = str(dict(payload.get("object", {}) or {}).get("object_id", "") or "")
             row = connection.execute(
                 "SELECT pos_x_eci_km, pos_y_eci_km, pos_z_eci_km, "
-                "vel_x_eci_km_s, vel_y_eci_km_s, vel_z_eci_km_s "
+                "vel_x_eci_km_s, vel_y_eci_km_s, vel_z_eci_km_s, mass_kg "
                 "FROM object_state WHERE object_id = ? ORDER BY sample_index LIMIT 1",
                 (object_id,),
             ).fetchone()
-            observed = list(row) if row is not None else None
+            observed = list(row[:6]) if row is not None else None
             _check(checks, "execution.initial_absolute_state", "execution", dict(payload.get("state", {}) or {}).get("values"), observed)
-            compared_row = {"object_id": object_id, "values": observed}
+            if row is not None and payload.get("resource_state"):
+                _check(
+                    checks,
+                    "execution.initial_mass_kg",
+                    "execution",
+                    dict(payload.get("resource_state", {}) or {}).get("mass_kg"),
+                    row[6],
+                )
+            compared_row = {"object_id": object_id, "values": observed, "mass_kg": None if row is None else row[6]}
         elif product_kind == "oel.relative_state_estimate":
             chief_id = str(dict(payload.get("chief", {}) or {}).get("object_id", "") or "")
             deputy_id = str(dict(payload.get("deputy", {}) or {}).get("object_id", "") or "")
@@ -322,6 +470,31 @@ def _execution_comparison(
             observed = list(row) if row is not None else None
             _check(checks, "execution.initial_relative_state", "execution", dict(payload.get("relative_state", {}) or {}).get("values"), observed)
             compared_row = {"chief_id": chief_id, "deputy_id": deputy_id, "values": observed}
+        elif product_kind == "oel.completed_run_snapshot":
+            rows = []
+            for item_raw in list(payload.get("states", []) or []):
+                item = dict(item_raw)
+                object_id = str(dict(item.get("object", {}) or {}).get("object_id", "") or "")
+                row = connection.execute(
+                    "SELECT pos_x_eci_km, pos_y_eci_km, pos_z_eci_km, "
+                    "vel_x_eci_km_s, vel_y_eci_km_s, vel_z_eci_km_s, mass_kg "
+                    "FROM object_state WHERE object_id = ? ORDER BY sample_index LIMIT 1",
+                    (object_id,),
+                ).fetchone()
+                observed = None if row is None else list(row[:6])
+                expected = list(dict(item.get("state", {}) or {}).get("values", []) or [])
+                _check(checks, f"execution.snapshot.{object_id}.initial_state", "execution", expected, observed)
+                expected_mass = dict(item.get("resource_state", {}) or {}).get("mass_kg")
+                if expected_mass is not None:
+                    _check(
+                        checks,
+                        f"execution.snapshot.{object_id}.initial_mass_kg",
+                        "execution",
+                        expected_mass,
+                        None if row is None else row[6],
+                    )
+                rows.append({"object_id": object_id, "values": observed, "mass_kg": None if row is None else row[6]})
+            compared_row = {"states": rows} if rows else None
     return {
         "status": "compared" if compared_row is not None else "not_applicable",
         "execution_occurred": True,
@@ -349,6 +522,18 @@ def _check(
             "observed": deepcopy(actual if observed is None else observed),
         }
     )
+
+
+def _normalized_config_sha256(
+    scenario: Mapping[str, Any], *, source_path: str | Path | None = None
+) -> str:
+    from sim import SimulationConfig
+
+    normalized = SimulationConfig.from_dict(
+        deepcopy(dict(scenario)),
+        source_path=source_path,
+    ).to_dict()
+    return hashlib.sha256(canonical_json_bytes(normalized)).hexdigest()
 
 
 def _scenario_cites_product(scenario: Mapping[str, Any], product_id: str) -> bool:

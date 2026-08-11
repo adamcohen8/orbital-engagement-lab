@@ -5,6 +5,12 @@ metadata:
   owner: codex
   notes: Run with `python run_game.py sim/game/configs/game_mode_basic.yaml`.
   game:
+    flight_software_stack: fsw.game_pilot_reference
+    input_profile: game.attitude_thrust.v1
+    hardware_profile: game.reaction_wheel_engine.v1
+    observer_policy: truth_assisted
+    scoring_policy: configured_training.v1
+    replay_support: none
     player_max_accel_km_s2: 0.00018
 objects:
   rocket:
@@ -40,51 +46,6 @@ objects:
       - 0.0
       - 0.0
       relative_to: target
-    orbit_control:
-      kind: python
-      module: sim.control.orbit.zero_controller
-      class_name: ZeroController
-      params: {}
-    attitude_control:
-      kind: python
-      module: sim.control.attitude.baseline
-      class_name: ReactionWheelPDController
-      params:
-        wheel_axes_body:
-        - - 1.0
-          - 0.0
-          - 0.0
-        - - 0.0
-          - 1.0
-          - 0.0
-        - - 0.0
-          - 0.0
-          - 1.0
-        wheel_torque_limits_nm:
-        - 5.0
-        - 5.0
-        - 5.0
-        desired_attitude_quat_bn:
-        - 1.0
-        - 0.0
-        - 0.0
-        - 0.0
-        desired_rate_body_rad_s:
-        - 0.0
-        - 0.0
-        - 0.0
-        kp:
-        - 20.0
-        - 20.0
-        - 20.0
-        kd:
-        - 50.0
-        - 50.0
-        - 50.0
-        max_body_torque_nm: 5.0
-    mission_strategy: null
-    mission_execution: null
-    mission_objectives: []
     knowledge:
       refresh_rate_s: 1.0
       targets:
@@ -104,6 +65,12 @@ objects:
       estimation:
         type: ekf
     kind: satellite
+    flight_software:
+      stack: fsw.game_pilot_reference
+      task_period_s: null
+      hardware_profile: game.reaction_wheel_engine.v1
+      params:
+        reference_object_id: target
   target:
     enabled: true
     role: target
@@ -132,70 +99,6 @@ objects:
       - 0.0
       - 0.0
       - 0.0
-    orbit_control:
-      kind: python
-      module: sim.control.orbit.zero_controller
-      class_name: ZeroController
-      params: {}
-    attitude_control:
-      kind: python
-      module: sim.control.attitude.baseline
-      class_name: ReactionWheelPDController
-      params:
-        wheel_axes_body:
-        - - 1.0
-          - 0.0
-          - 0.0
-        - - 0.0
-          - 1.0
-          - 0.0
-        - - 0.0
-          - 0.0
-          - 1.0
-        wheel_torque_limits_nm:
-        - 0.05
-        - 0.05
-        - 0.05
-        desired_attitude_quat_bn:
-        - 1.0
-        - 0.0
-        - 0.0
-        - 0.0
-        desired_rate_body_rad_s:
-        - 0.0
-        - 0.0
-        - 0.0
-        kp:
-        - 0.25
-        - 0.25
-        - 0.25
-        kd:
-        - 3.0
-        - 3.0
-        - 3.0
-    mission_strategy:
-      kind: python
-      module: sim.mission.modules
-      class_name: DefensiveMissionStrategy
-      params:
-        chaser_id: chaser
-        defense_mode: fixed_ric_axis
-        axis_mode: -C
-        burn_accel_km_s2: 2.0e-06
-        require_finite_knowledge: true
-        align_to_thrust: true
-    mission_execution:
-      kind: python
-      module: sim.mission.modules
-      class_name: ControllerPointingExecution
-      params:
-        thruster_direction_body:
-        - 0.0
-        - 0.0
-        - 1.0
-        alignment_tolerance_deg: 10.0
-        require_attitude_alignment: false
-    mission_objectives: []
     knowledge:
       refresh_rate_s: 1.0
       targets:
@@ -215,6 +118,14 @@ objects:
       estimation:
         type: ekf
     kind: satellite
+    flight_software:
+      stack: fsw.rpo_reference
+      hardware_profile: hardware.ideal_wrench.v1
+      params:
+        max_acceleration_m_s2: 0.02
+        reference_object_id: chaser
+        translation_mode: passive_retreat
+        goal_type: rpo.passive_retreat
 simulator:
   duration_s: 1200.0
   dt_s: 0.25

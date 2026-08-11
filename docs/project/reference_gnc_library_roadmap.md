@@ -12,6 +12,30 @@ The goal is not to prevent custom controllers. Customization is part of the
 product. The goal is to give users a trusted shelf of reference building
 blocks before they write their own mission-specific logic.
 
+## Implementation Status
+
+The initial maturity plan is implemented in the current workspace:
+
+- `sim.gnc` is the authoritative built-in catalog with stable IDs, parameter
+  schemas, assumptions, limits, examples, tests, packaging, and maturity;
+- scenario pointers accept `builtin`, while custom importable module/class
+  pointers remain supported;
+- mission-intent precedence and field collisions are recorded explicitly;
+- compact controller decisions, mission modes, executive transitions, and
+  command gates are standard review-store evidence;
+- the missing P0/P1 reference orbit, pointing, and command primitives are
+  implemented under focused owners;
+- maintained `configs/reference_gnc_*` scenarios and a bounded RPO controller
+  bench are checked in;
+- construction, nominal behavior, edge cases, saturation, sequencing, and
+  executive validation have focused regressions; and
+- [`../reference-gnc.md`](../reference-gnc.md) is the product-facing selection,
+  tuning, evidence, and limitations guide.
+
+Remaining maturity is ongoing evidence accumulation and tuning within named
+envelopes, not a missing product architecture. No Reference label implies
+operational or flight qualification.
+
 Use this roadmap with:
 
 - [Product Inventory](../product-inventory.md) for what currently ships.
@@ -91,12 +115,14 @@ Representative configs validated:
 .venv/bin/python run_simulation.py --config configs/actuator_lab_presets_smoke.yaml --validate-only
 .venv/bin/python run_simulation.py --config configs/orbital_elements_tracking_general.yaml --validate-only
 .venv/bin/python run_simulation.py --config configs/rmoe_if_then_nmc_demo.yaml --validate-only
-.venv/bin/python run_simulation.py --config configs/controller_bench_hcw_pd_10km_verify.yaml --validate-only
 .venv/bin/python run_simulation.py --config configs/mission_reconstitution_planner_demo.yaml --validate-only
 .venv/bin/python run_simulation.py --config configs/controller_rcs_allocation_smoke.yaml --validate-only
 ```
 
 Result: all parsed and reported `Plugins: OK` and `Result: OK`.
+
+The full workspace also validated the maintained HCW-PD controller-bench suite;
+that orchestration is not a public-core command surface.
 
 ### Works Well Today
 

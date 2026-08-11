@@ -76,37 +76,6 @@ PLOT_RECIPES: dict[str, AgentPlotRecipe] = {
         semantic_metric_names=("burn_activity",),
         supported_tables=("thrust",),
     ),
-    "campaign_closest_approach": AgentPlotRecipe(
-        recipe_id="campaign_closest_approach",
-        title="Campaign closest approach by iteration",
-        description="Plots Monte Carlo closest-approach results by iteration.",
-        sql="SELECT iteration, closest_approach_km FROM campaign_runs ORDER BY iteration",
-        x_column="iteration",
-        y_columns=("closest_approach_km",),
-        plot_type="scatter",
-        x_label="Iteration",
-        y_label="Closest approach (km)",
-        artifact_id="agent_campaign_closest_approach",
-        semantic_metric_names=("campaign_closest_approach_km",),
-        supported_tables=("campaign_runs",),
-    ),
-    "sensitivity_effects": AgentPlotRecipe(
-        recipe_id="sensitivity_effects",
-        title="Sensitivity effect sizes",
-        description="Plots ranked sensitivity effect sizes by parameter.",
-        sql=(
-            "SELECT parameter_path, effect_size FROM sensitivity_rankings "
-            "ORDER BY rank, parameter_path, metric_path"
-        ),
-        x_column="parameter_path",
-        y_columns=("effect_size",),
-        plot_type="bar",
-        x_label="Parameter",
-        y_label="Effect size",
-        artifact_id="agent_sensitivity_effects",
-        semantic_metric_names=("sensitivity_effect_size",),
-        supported_tables=("sensitivity_rankings",),
-    ),
 }
 
 

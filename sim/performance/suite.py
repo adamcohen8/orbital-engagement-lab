@@ -36,6 +36,8 @@ _NONDETERMINISTIC_KEYS = {
     "elapsed_s",
     "elapsed_ms",
     "mean_step_wall_ms",
+    "modeled_execution_duration_ns",
+    "host_execution_duration_ns",
     "total_step_wall_s",
     "share_of_step_wall",
     "output_dir",
@@ -411,7 +413,10 @@ def _scenario_work_counts(payload: dict[str, Any]) -> dict[str, int]:
         )
         for object_profile in dict(profile.get("object_totals", {}) or {}).values():
             stages = dict(dict(object_profile or {}).get("stages", {}) or {})
-            dynamics_count += int(dict(stages.get("dynamics_step", {}) or {}).get("count", 0) or 0)
+            dynamics_count += int(
+                dict(stages.get("dynamics_step", stages.get("satellite_step", {})) or {}).get("count", 0)
+                or 0
+            )
             estimator_count += int(dict(stages.get("estimator_update", {}) or {}).get("count", 0) or 0)
             decision_count += int(dict(stages.get("decision", {}) or {}).get("count", 0) or 0)
     return {

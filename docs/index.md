@@ -60,6 +60,7 @@ Start here when you already know the kind of work you want to run.
 | View maintained plot examples | [Plot Gallery](plot-gallery.md) |
 | Understand physics model assumptions | [Physics Model Reference](physics-models.md) |
 | Explore actuator models | [Actuators](actuators.md) |
+| Select built-in controllers and command modules | [Built-In Reference GNC Library](reference-gnc.md) |
 | Use the orbital calculator | [Orbital Calculator](orbital-calculator.md) |
 | Use game/training mode | [Video Game Mode Roadmap](game-mode-roadmap.md) |
 | Use ML/RL wrappers | [ML/RL Policy Contracts](ml-rl-contracts.md) |

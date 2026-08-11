@@ -23,6 +23,8 @@ For common agent workflows, built-in saved query names are available:
 .venv/bin/python -m sim.review outputs/<scenario_name> --saved-query run_metadata
 .venv/bin/python -m sim.review outputs/<scenario_name> --saved-query object_state_first_last
 .venv/bin/python -m sim.review outputs/<scenario_name> --saved-query rendezvous_metrics
+.venv/bin/python -m sim.review outputs/<scenario_name> --saved-query actuator_command_chain
+.venv/bin/python -m sim.review outputs/<scenario_name> --saved-query safety_requirement_status
 .venv/bin/python -m sim.review outputs/<scenario_name> --saved-query event_log
 ```
 
@@ -73,14 +75,26 @@ missing, the scenario did not record that evidence path.
 | Table | Common columns for agents |
 | --- | --- |
 | `run_metadata` | `scenario_name`, `duration_s`, `dt_s`, `samples`, `oel_version`, `review_schema_version` |
-| `objects` | `object_id`, `object_type`, `role`, `mass_initial_kg` |
-| `object_state` | `sample_index`, `time_s`, `object_id`, `pos_x_eci_km`, `pos_y_eci_km`, `pos_z_eci_km`, `vel_x_eci_km_s`, `vel_y_eci_km_s`, `vel_z_eci_km_s` |
+| `objects` | `object_id`, `object_type`, `role`, `mass_initial_kg`, `runtime_profile`, `flight_software_stack` |
+| `object_state` | `sample_index`, `time_s`, `object_id`, ECI position/velocity, attitude quaternion/body rate, `mass_kg` |
 | `object_propagation` | `object_id`, `propagation_method`, `general_model`, `native_frame`, `output_frame`, `frame_transform`, `tle_epoch_jd_utc`, `tle_age_start_days`, `tle_age_end_days` |
 | `object_state_frame` | `object_id`, `state_frame` |
 | `object_state_covariance` | `sample_index`, `time_s`, `object_id`, `frame`, `component_order_json`, `units_json`, `covariance_json`, `mathematically_valid`, `calibrated`, `calibration_scope`, `source` |
 | `object_state` attitude fields | `quat_w`, `quat_x`, `quat_y`, `quat_z`, `omega_x_rad_s`, `omega_y_rad_s`, `omega_z_rad_s` |
 | `relative_state` | `time_s`, `deputy_id`, `chief_id`, `r_radial_km`, `i_intrack_km`, `c_crosstrack_km`, `range_km`, `range_rate_km_s` |
 | `thrust` | `time_s`, `object_id`, `burn_active`, `accel_norm_km_s2` |
+| `controller_decisions` | `time_s`, `object_id`, controller/mission identities, requested/applied command norms, `burn_requested`, `burn_applied`, `saturated`, `deadline_missed` |
+| `mission_modes` | `time_s`, `object_id`, `mission_strategy`, `mission_execution`, `mission_phase`, `executive_mode` |
+| `mission_transitions` | `time_s`, `object_id`, `from_mode`, `to_mode`, `trigger`, `reason` |
+| `command_gates` | `time_s`, `object_id`, burn state, alignment, fuel/actuator/deadline flags, `gate_reason` |
+| `fsw_invocations` | `object_id`, `invocation_id`, `invocation_time_ns`, `stack_id`, `profile_id`, input/command/telemetry counts |
+| `fsw_input_events` | packet identity, `invocation_id`, `kind`, source/delivery time, `schema` |
+| `fsw_task_timing` | `object_id`, `invocation_id`, `task_id`, release time, modeled duration, budget, `deadline_missed` |
+| `actuator_commands` | command identity, `actuator_id`, issue/not-before/expiry times, command schema |
+| `actuator_command_receipts` | command identity, receive time, `disposition`, status codes |
+| `actuator_realization` | command identity, realization interval, demand mode, `saturated`, physical detail |
+| `safety_requirement_evidence` | `object_id`, `invocation_id`, `requirement_id`, `satisfied`, `source`, detail |
+| `fsw_snapshots` | `object_id`, `invocation_id`, stack identity and state hash; opaque restart state remains in `detail_json` |
 | `ground_access` | `time_s`, `station_id`, `object_id`, `access`, `range_km`, `elevation_deg`, `reason` |
 | `events` | `time_s`, `object_id`, `event_type`, `severity`, `message` |
 | `metrics` | `metric_name`, `value`, `units`, `object_id`, `deputy_id`, `chief_id` |
@@ -150,7 +164,7 @@ Run metadata:
 Active objects:
 
 ```bash
-.venv/bin/python -m sim.review outputs/<scenario_name> --query "SELECT object_id, object_type, role, mass_initial_kg FROM objects ORDER BY object_id"
+.venv/bin/python -m sim.review outputs/<scenario_name> --query "SELECT object_id, object_type, role, mass_initial_kg, runtime_profile, flight_software_stack FROM objects ORDER BY object_id"
 ```
 
 Artifact inventory:

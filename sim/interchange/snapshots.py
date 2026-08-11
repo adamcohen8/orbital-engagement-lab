@@ -3,16 +3,21 @@ from __future__ import annotations
 import hashlib
 import json
 from copy import deepcopy
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from sim.api import SimulationWorkspace
 from sim.interchange.completed_runs import build_completed_run_state_product
-from sim.interchange.materialization import build_onp_scenario
-from sim.interchange.provenance import canonical_json_bytes, compute_product_id
+from sim.interchange.materialization import (
+    _manifest_base,
+    _onp_cadence_override,
+    _onp_compatibility_errors,
+    build_onp_scenario,
+    materialize_scenario_document,
+)
+from sim.interchange.provenance import canonical_json_bytes, compute_product_id, sha256_file
 from sim.interchange.validation import load_interchange_document, validate_product
 from sim.review import ReviewWorkspace
-from sim.scenarios import ScenarioArtifact
 
 
 class CompletedRunSnapshotError(ValueError):
@@ -119,7 +124,14 @@ def export_completed_run_snapshot(
         states.append(
             {
                 key: deepcopy(payload[key])
-                for key in ("object", "state", "covariance", "object_specs", "model_assumptions")
+                for key in (
+                    "object",
+                    "state",
+                    "covariance",
+                    "object_specs",
+                    "resource_state",
+                    "model_assumptions",
+                )
             }
         )
     product: dict[str, Any] = {
@@ -229,13 +241,19 @@ def materialize_snapshot_onp(
         "source_run": deepcopy(dict(product["payload"])["source_run"]),
         "selection": _single_selection(dict(product["payload"])["selection"], first_payload),
     }
+    compatibility_errors = _onp_compatibility_errors(first_product)
+    if compatibility_errors:
+        messages = "; ".join(str(item.get("message", item)) for item in compatibility_errors)
+        raise CompletedRunSnapshotError(
+            "Snapshot cannot be relabeled as an ECI ONP continuation: " + messages
+        )
     scenario = build_onp_scenario(
         first_product,
         scenario_name=str(scenario_name),
         output_dir=output_dir,
         duration_s=float(duration_s),
         dt_s=float(dt_s),
-        manifest_path=destination.with_name(f"{destination.stem}.snapshot_manifest.json"),
+        manifest_path=destination.with_name(f"{destination.stem}.handoff_manifest.json"),
         adapter_id="oel.completed_run_snapshot_to_onp",
         adapter_version="1",
         scenario_description=f"Passive atomic continuation from {product['product_id']}.",
@@ -258,43 +276,51 @@ def materialize_snapshot_onp(
             "enabled": True,
             "role": str(obj["role"]),
             "kind": "satellite",
-            "specs": deepcopy(dict(item.get("object_specs", {}) or {})),
+            "specs": _snapshot_object_specs(item),
             "initial_state": {
                 "position_eci_km": values[:3],
                 "velocity_eci_km_s": values[3:],
             },
-            "orbit_control": {
-                "kind": "python",
-                "module": "sim.control.orbit.zero_controller",
-                "class_name": "ZeroController",
-                "params": {},
+            "flight_software": {
+                "stack": "fsw.passive",
+                "hardware_profile": "hardware.passive.v1",
             },
         }
-    artifact = ScenarioArtifact.from_dict(scenario)
-    text = artifact.to_yaml_text()
-    if destination.exists() and destination.read_text(encoding="utf-8") != text and not overwrite:
-        raise CompletedRunSnapshotError(
-            "Scenario output exists with different content; pass overwrite=True explicitly to replace it."
-        )
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(text, encoding="utf-8")
-    workspace = SimulationWorkspace()
-    safe = workspace.validate_safe(destination)
-    ordinary = (
-        workspace.validate(destination, import_plugins=True)
-        if trust_plugins and safe.get("ok")
-        else {"ok": None, "status": "trust_required"}
+    manifest_target = destination.with_name(f"{destination.stem}.handoff_manifest.json")
+    base_manifest = _manifest_base(
+        created_utc=datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        source_id=str(product["product_id"]),
+        source_hash=sha256_file(source),
+        product=product,
+        scenario_name=scenario_name,
+        destination=destination,
+        output_dir=output_dir,
+        duration_s=duration_s,
+        dt_s=dt_s,
+        overwrite=overwrite,
     )
-    valid = bool(safe.get("ok")) and (not trust_plugins or bool(ordinary.get("ok")))
-    return {
-        "status": "materialized" if valid else "failed",
-        "scenario_path": str(destination),
-        "source_product_id": product["product_id"],
-        "object_count": len(states),
-        "safe_validation": safe,
-        "ordinary_validation": ordinary,
-        "execution_occurred": False,
+    base_manifest["adapter"] = {
+        "adapter_id": "oel.completed_run_snapshot_to_onp",
+        "adapter_version": "1",
     }
+    base_manifest["materialization_options"]["object_count"] = len(states)
+    cadence_override = _onp_cadence_override(first_product, dt_s=float(dt_s))
+    if cadence_override:
+        base_manifest["overrides"].append(cadence_override)
+    base_manifest["output"]["kind"] = "snapshot_onp_scenario"
+    result = materialize_scenario_document(
+        scenario=scenario,
+        destination=destination,
+        manifest_target=manifest_target,
+        base_manifest=base_manifest,
+        product_report=report.to_dict(),
+        output_kind="snapshot_onp_scenario",
+        trust_plugins=trust_plugins,
+        overwrite=overwrite,
+    )
+    result["source_product_id"] = product["product_id"]
+    result["object_count"] = len(states)
+    return result
 
 
 def _single_selection(selection: Mapping[str, Any], state_payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -303,6 +329,21 @@ def _single_selection(selection: Mapping[str, Any], state_payload: Mapping[str, 
     object_id = str(dict(state_payload["object"])["object_id"])
     result["state_row_sha256"] = str(hashes[object_id])
     return result
+
+
+def _snapshot_object_specs(item: Mapping[str, Any]) -> dict[str, Any]:
+    specs = deepcopy(dict(item.get("object_specs", {}) or {}))
+    resource = dict(item.get("resource_state", {}) or {})
+    if not resource:
+        return specs
+    specs["mass_kg"] = float(resource["mass_kg"])
+    if resource.get("propellant_state") == "tracked":
+        specs["dry_mass_kg"] = float(resource["dry_mass_kg"])
+        specs["fuel_mass_kg"] = float(resource["fuel_mass_kg"])
+    else:
+        specs.pop("dry_mass_kg", None)
+        specs.pop("fuel_mass_kg", None)
+    return specs
 
 
 __all__ = [

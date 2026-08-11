@@ -8,7 +8,7 @@ import pytest
 import yaml
 
 from sim import SimulationConfig, SimulationResult, SimulationSession
-from sim.config import AlgorithmPointer, load_simulation_yaml, validate_scenario_plugins
+from sim.config import load_simulation_yaml, validate_scenario_plugins
 from sim.execution import create_single_run_engine
 from sim.execution import service as execution_service
 from sim.execution.metrics import closest_approach_from_run_payload
@@ -166,11 +166,9 @@ def test_scenario_yaml_contract_validates_stable_schema_boundaries(tmp_path: Pat
                         "enabled": True,
                         "preset": "presets/target.yaml",
                         "specs": {"mass_kg": 95.0},
-                        "orbit_control": {
-                            "kind": "python",
-                            "module": "sim.control.orbit.zero_controller",
-                            "class_name": "ZeroController",
-                            "params": {},
+                        "flight_software": {
+                            "stack": "fsw.passive",
+                            "hardware_profile": "hardware.passive.v1",
                         },
                     },
                 },
@@ -200,14 +198,8 @@ def test_scenario_yaml_contract_validates_stable_schema_boundaries(tmp_path: Pat
     assert "fuel_mass_kg" not in target.specs
     assert target.specs["max_thrust_n"] == 15.0
     assert target.knowledge["refresh_rate_s"] == 5.0
-    assert target.orbit_control == AlgorithmPointer(
-        kind="python",
-        module="sim.control.orbit.zero_controller",
-        class_name="ZeroController",
-        function=None,
-        file=None,
-        params={},
-    )
+    assert target.flight_software.stack == "fsw.passive"
+    assert target.flight_software.hardware_profile == "hardware.passive.v1"
 
     with pytest.raises(ValueError, match="outputs.stats.save_json"):
         scenario_config_from_dict(
@@ -228,10 +220,16 @@ def test_scenario_yaml_contract_validates_stable_schema_boundaries(tmp_path: Pat
             }
         )
 
-    with pytest.raises(ValueError, match="Algorithm pointers do not support 'file'"):
+    with pytest.raises(ValueError, match="flight_software has unsupported field.*file"):
         scenario_config_from_dict(
             {
-                "target": {"orbit_control": {"file": "controllers.py", "class_name": "Controller"}},
+                "target": {
+                    "flight_software": {
+                        "file": "stacks.py",
+                        "class_name": "Stack",
+                        "hardware_profile": "hardware.passive.v1",
+                    }
+                },
                 "simulator": {"duration_s": 2.0, "dt_s": 1.0},
             }
         )
@@ -256,6 +254,7 @@ def test_payload_artifact_contract_exposes_stable_summary_histories_and_wrappers
         "knowledge_consistency_by_observer",
         "bridge_events_by_object",
         "controller_debug_by_object",
+        "command_decisions_by_object",
         "rocket_throttle_cmd",
         "rocket_metrics",
     }
@@ -367,15 +366,8 @@ def test_bridge_runtime_errors_are_recorded_by_default_and_strict_when_requested
         "class_name": "ContractFailingBridge",
     }
 
-    default_result = SimulationSession.from_config(SimulationConfig.from_dict(raw)).run()
-    bridge_events = default_result.payload["bridge_events_by_object"]["target"]
-    assert bridge_events[0]["bridge_error"] == "bridge boom"
-
-    strict = _contract_config(tmp_path / "strict")
-    strict["simulator"]["plugin_validation"] = {"strict_runtime": True}
-    strict["objects"]["target"]["bridge"] = raw["objects"]["target"]["bridge"]
-    with pytest.raises(RuntimeError, match="target bridge.step failed"):
-        SimulationSession.from_config(SimulationConfig.from_dict(strict)).run()
+    with pytest.raises(ValueError, match="removed GNC v1 satellite field.*bridge"):
+        SimulationConfig.from_dict(raw)
 
 
 def test_engine_runs_named_multi_satellite_objects_with_relative_initialization(tmp_path: Path) -> None:
@@ -462,12 +454,10 @@ def test_engine_timing_contract_does_not_expose_world_truth_to_agents(tmp_path: 
                     "position_eci_km": [7100.0, 0.0, 0.0],
                     "velocity_eci_km_s": [0.0, 7.5, 0.0],
                 },
-                "mission_objectives": [
-                    {
-                        "module": "sim.tests.test_product_contracts",
-                        "class_name": "ContractRecordTimingMission",
-                    }
-                ],
+                "flight_software": {
+                    "stack": "fsw.passive",
+                    "hardware_profile": "hardware.passive.v1",
+                },
             },
             "simulator": {
                 "duration_s": 1.0,
@@ -492,14 +482,12 @@ def test_engine_timing_contract_does_not_expose_world_truth_to_agents(tmp_path: 
     )
 
     result = SimulationSession.from_config(cfg).run()
-    flags = result.payload["controller_debug_by_object"]["chaser"][0]["mode_flags"]
     target_truth = result.truth["target"]
 
     assert target_truth[-1, 0] > 7000.5
-    assert flags["decision_t_s"] == 0.0
-    assert flags["own_truth_t_s"] == 0.0
-    assert flags["received_world_truth"] is False
-    assert flags["env_has_world_truth"] is False
+    evidence = result.payload["flight_software_evidence_by_object"]["chaser"]
+    assert evidence["invocations"]
+    assert "world_truth" not in json.dumps(evidence)
 
 
 def test_external_intent_provider_does_not_receive_world_truth(tmp_path: Path) -> None:
@@ -544,21 +532,8 @@ def test_external_intent_provider_does_not_receive_world_truth(tmp_path: Path) -
             "monte_carlo": {"enabled": False},
         }
     )
-    calls: list[dict[str, object]] = []
-
-    def provider(**kwargs: object) -> dict[str, object]:
-        calls.append(dict(kwargs))
-        return {}
-
     session = SimulationSession.from_config(cfg)
-    session.set_external_intent_provider("chaser", provider)
-    result = session.run()
-
-    assert calls
-    assert result.truth["target"][-1, 0] > 7000.5
-    assert all("world_truth" not in call for call in calls)
-    assert all("world_truth" not in dict(call.get("env", {})) for call in calls)
-    assert all("own_knowledge" in call for call in calls)
+    assert not hasattr(session, "set_external_intent_provider")
 
 
 def test_engine_timing_contract_estimates_after_inner_step_propagation(tmp_path: Path) -> None:
@@ -610,8 +585,11 @@ def test_engine_timing_contract_estimates_after_inner_step_propagation(tmp_path:
     result = SimulationSession.from_config(cfg).run()
     truth = result.truth["target"][-1, :6]
     belief = result.belief["target"][-1, :6]
-    debug_times = [entry["t_s"] for entry in result.payload["controller_debug_by_object"]["target"]]
+    invocation_times_ns = [
+        entry["invocation_time_ns"]
+        for entry in result.payload["flight_software_evidence_by_object"]["target"]["invocations"]
+    ]
 
     assert np.linalg.norm(belief[:3] - truth[:3]) < 1e-9
     assert np.linalg.norm(belief[3:] - truth[3:]) < 1e-12
-    assert debug_times == [0.0, 0.25, 0.5, 0.75]
+    assert invocation_times_ns == [0, 1_000_000_000]

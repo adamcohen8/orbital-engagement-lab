@@ -8,6 +8,79 @@ migration-sensitive behavior explicitly.
 
 ## Unreleased
 
+## 0.25.0 - 2026-08-11
+
+Release thesis: `v0.25.0` replaces OEL's satellite GNC orchestration with one
+flight-software boundary: typed SI sensor and external input events enter each
+satellite, and typed actuator-device commands leave it. Navigation, belief,
+mission execution, guidance, control, allocation, and recovery are now owned
+by the selected complete satellite stack.
+
+### Breaking changes
+
+- Removed the v1 satellite controller, mission-dictionary, external-intent,
+  `flight_software` stack and hardware profile; legacy satellite fields fail
+  with migration guidance rather than being silently translated at runtime.
+- Removed live satellite controller replacement from the public session API.
+  Custom behavior is supplied as a complete `SatelliteFlightSoftware` plugin.
+- Migrated maintained configs, workflows, game levels, Controller Bench, RL,
+  OD/IHE materializers, and review consumers to the sole v2 satellite path.
+
+### Added
+
+- Added 18 versioned flight-software use-case profiles spanning ADCS,
+  absolute-orbit operations, RPO/formation applications, conjunction response,
+  and low-thrust control. Profiles resolve through the sole v2 stack path,
+  declare required mission inputs and maturation gates, retain profile
+  provenance in normalized YAML and review evidence, and are discoverable with
+  `python -m sim.flight_software`.
+- Added the private flight-software profile qualification framework: the
+  complete OEL maturity taxonomy, exact-profile specifications and evidence
+  manifests, `status` and `qualify` commands, trusted scenario/Controller
+  Bench/Monte Carlo/review-query gates, portable hash-bound evidence packets,
+  stale-result promotion blocking, and shared maturation metrics. All 18 exact
+  profiles are Supported inside their declared simulation envelopes; this does
+  not promote their underlying composition stacks or imply flight
+  qualification.
+- Matured the four exact ADCS flight-software profiles with physical
+  qualification scenarios, cadence campaigns, configurable detumble
+  hysteresis, coherent Sun/target loss recovery, snapshot-safe scheduled
+  target updates, and Controller Bench receipt/realization gates.
+- Added versioned input, clock, frame, mission-load, diagnostic, actuator
+  command, receipt, realization, snapshot, and replay contracts with a static
+  and dynamic truth firewall.
+- Added deterministic independent task/input/command cadences, event-aligned
+  actuator intervals, attitude substepping no larger than the orbit step, and
+  midpoint/stage-consistent body-force coupling while retaining quaternion
+  exponential-map attitude propagation.
+- Added Experimental passive, attitude, orbit, RPO, low-thrust, atmospheric-
+  pass, and game-pilot stacks; ideal-wrench, continuous-engine, six-axis RCS,
+  reaction-wheel/magnetorquer/CMG, and variable-geometry aerodynamic physical
+  profiles; and stack-owned goals, actions, timeouts, recovery, resource
+  monitoring, stored commands, autonomous maneuvers, conjunction avoidance,
+  and mission-load lifecycle.
+- Added stack-native `fsw.rpo_reference` planned-rendezvous guidance with
+  transfer acquisition, coast/correction, optional final braking, terminal
+  cleanup, checkpoint continuity, configured thrust-axis pointing, and
+  maintained-goal operation. The flagship RIC_PD single-run and three-case
+  dispersion workflows now use this sensor-to-actuator path rather than a
+  simulator-owned controller callback.
+### Fixed
+
+- Made maneuver completion receipt-confirmed, prevented isolated ADCS backups
+  from being selected, and made detumble, momentum unloading, and conjunction
+  avoidance produce outcome-gated physical behavior.
+- Applied configured EKF noise to relative tracks and computed HCW predicted
+  miss from the clipped, commandable plan.
+- Made Controller Bench conformance require accepted command receipts and
+  linked actuator realizations, with rejected receipts counted as boundary
+  errors.
+
+All included v2 stacks remain Experimental and simulation-only. This release
+does not claim flight qualification or prescribe a universal satellite safety
+architecture; stack-owned recovery behavior and configured safety-requirement
+failures are recorded separately for review.
+
 ## 0.24.2 - 2026-08-02
 
 Release thesis: `v0.24.2` brings the v0.24 glue layer into the supported local
@@ -160,7 +233,6 @@ packets, task cards, and fail-closed validation boundaries.
   validated ONP studies without mutating or executing the source run. Review
   schema 0.6 also adds an optional complete state-covariance table so matching
   6x6 covariance can cross the handoff without discarding correlations.
-
 ### Compatibility
 
 - Retained the deprecated Pro-local IHE v1 inspection and validation tools

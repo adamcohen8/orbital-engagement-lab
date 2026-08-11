@@ -163,11 +163,6 @@ def main() -> None:
         help="In --sealed-mode, allow custom AI endpoints.",
     )
     parser.add_argument(
-        "--allow-non-loopback-sil",
-        action="store_true",
-        help="In --sealed-mode, allow cFS/SIL UDP hosts outside loopback.",
-    )
-    parser.add_argument(
         "--allow-high-detail-outputs",
         action="store_true",
         help="In --sealed-mode, allow full logs, full review stores, raw MC runs, or non-summary AI packets.",
@@ -197,7 +192,7 @@ def main() -> None:
                     allow_untrusted_plugin_imports=bool(args.allow_untrusted_plugin_imports),
                     allow_hosted_ai=bool(args.allow_hosted_ai),
                     allow_custom_ai_endpoints=bool(args.allow_custom_ai_endpoints),
-                    allow_non_loopback_sil=bool(args.allow_non_loopback_sil),
+                    allow_non_loopback_sil=False,
                     allow_high_detail_outputs=bool(args.allow_high_detail_outputs),
                 ),
             )

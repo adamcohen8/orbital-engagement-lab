@@ -31,7 +31,7 @@
             "required": ["op", "kind", "path", "value", "reason"],
             "properties": {
               "op": {"enum": ["replace", "append", "upsert"]},
-              "kind": {"enum": ["mission_burn", "duration_extension", "controller_pointer", "scenario_override"]},
+              "kind": {"enum": ["mission_burn", "duration_extension", "controller_pointer", "flight_software_stack", "scenario_override"]},
               "path": {"type": "string", "minLength": 1},
               "value": {},
               "reason": {"type": "string", "minLength": 1}

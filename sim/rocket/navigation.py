@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from sim.aero.core import atmosphere_relative_velocity_eci_km_s
 from sim.dynamics.orbit.atmosphere import atmosphere_state_from_model
 from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2, EARTH_RADIUS_KM
 from sim.dynamics.orbit.frames import frame_context_from_environment, rotation_between, transform_position
@@ -86,6 +87,62 @@ def _resolve_wind_eci_m_s(
     return wind_eci * 1e3
 
 
+def atmosphere_relative_velocity_rocket_eci_m_s(
+    *,
+    position_eci_km: np.ndarray,
+    velocity_eci_km_s: np.ndarray,
+    t_s: float,
+    sim_cfg: RocketSimConfig,
+    state: RocketState | None = None,
+) -> np.ndarray:
+    """Return the one canonical air-relative velocity used by rocket force, GNC, and telemetry."""
+    relative_velocity, _ = rocket_air_relative_state_eci_m_s(
+        position_eci_km=position_eci_km,
+        velocity_eci_km_s=velocity_eci_km_s,
+        t_s=t_s,
+        sim_cfg=sim_cfg,
+        state=state,
+    )
+    return relative_velocity
+
+
+def rocket_air_relative_state_eci_m_s(
+    *,
+    position_eci_km: np.ndarray,
+    velocity_eci_km_s: np.ndarray,
+    t_s: float,
+    sim_cfg: RocketSimConfig,
+    state: RocketState | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return canonical air-relative velocity and wind from one atmosphere evaluation."""
+    env = dict(getattr(sim_cfg, "atmosphere_env", {}) or {})
+    omega_raw = env.get("drag_earth_rotation_rad_s", 7.2921159e-5)
+    v_rel_km_s = atmosphere_relative_velocity_eci_km_s(
+        position_eci_km,
+        velocity_eci_km_s,
+        t_s=float(t_s),
+        earth_rotation_rad_s=float(7.2921159e-5 if omega_raw is None else omega_raw),
+        frame_model=str(env.get("drag_frame_model", "simple")),
+        jd_utc_start=env.get("jd_utc_start"),
+        eop_path=env.get("drag_eop_path"),
+        dut1_s=env.get("dut1_s"),
+        xp_arcsec=env.get("xp_arcsec"),
+        yp_arcsec=env.get("yp_arcsec"),
+        dat_s=env.get("dat_s"),
+        tt_minus_utc_s=env.get("tt_minus_utc_s"),
+        ddpsi_rad=float(env.get("ddpsi_rad", 0.0) or 0.0),
+        ddeps_rad=float(env.get("ddeps_rad", 0.0) or 0.0),
+        eop_extrapolation=str(env.get("eop_extrapolation", "error") or "error"),
+    )
+    wind_eci_m_s = _resolve_wind_eci_m_s(
+        position_eci_km=position_eci_km,
+        t_s=t_s,
+        sim_cfg=sim_cfg,
+        state=state,
+    )
+    return v_rel_km_s * 1e3 - wind_eci_m_s, wind_eci_m_s
+
+
 @dataclass(frozen=True)
 class RocketNavState:
     t_s: float
@@ -147,10 +204,13 @@ def build_rocket_nav_state(
         env=env,
     )
     c_bn = quaternion_to_dcm_bn(state.attitude_quat_bn)
-    omega_earth = np.array([0.0, 0.0, 7.2921159e-5], dtype=float)
-    v_atm_eci_km_s = np.cross(omega_earth, r)
-    wind_eci_m_s = _resolve_wind_eci_m_s(position_eci_km=r, t_s=state.t_s, sim_cfg=sim_cfg, state=state)
-    v_rel_eci_m_s = (v - v_atm_eci_km_s) * 1e3 - wind_eci_m_s
+    v_rel_eci_m_s = atmosphere_relative_velocity_rocket_eci_m_s(
+        position_eci_km=r,
+        velocity_eci_km_s=v,
+        t_s=state.t_s,
+        sim_cfg=sim_cfg,
+        state=state,
+    )
     v_rel_body_m_s = c_bn @ v_rel_eci_m_s
     rel_speed_m_s = float(np.linalg.norm(v_rel_body_m_s))
     q_dyn = 0.5 * float(max(atmos["density_kg_m3"], 0.0)) * rel_speed_m_s * rel_speed_m_s

@@ -8,7 +8,6 @@ import numpy as np
 from sim.api import SimulationConfig
 from sim.dynamics.orbit.elements import coes_mapping_to_rv_eci
 from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2, EARTH_RADIUS_KM
-from sim.game.defensive_target import DefensiveTargetIntentProvider
 from sim.game.formatting import format_distance_km
 from sim.game.training import RPOTrainingConfig
 from sim.utils.frames import ric_rect_state_to_eci
@@ -159,21 +158,12 @@ def _arcade_round_initial_state_rng(arcade_seed: int, round_index: int) -> np.ra
     return np.random.default_rng(seed_seq)
 
 
-def _game_defensive_target_provider(config: SimulationConfig) -> DefensiveTargetIntentProvider | None:
+def _game_defensive_target_profile(config: SimulationConfig) -> dict[str, Any] | None:
     game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
     raw = dict(game_cfg.get("defensive_target", {}) or {})
     if not bool(raw.get("enabled", False)):
         return None
-    return DefensiveTargetIntentProvider(
-        chaser_object_id=str(raw.get("chaser_object_id", "chaser") or "chaser"),
-        trigger_range_km=float(raw.get("trigger_range_km", 1.2) or 1.2),
-        trigger_closing_speed_km_s=float(raw.get("trigger_closing_speed_km_s", 0.00025) or 0.00025),
-        keepout_radius_km=float(raw.get("keepout_radius_km", 0.25) or 0.25),
-        max_accel_km_s2=float(raw.get("max_accel_km_s2", 7.5e-6) or 7.5e-6),
-        max_delta_v_m_s=_optional_float(raw.get("max_delta_v_m_s")),
-        cross_track_bias=float(raw.get("cross_track_bias", 0.65) or 0.65),
-        pulse_period_s=float(raw.get("pulse_period_s", 120.0) or 120.0),
-    )
+    return raw
 
 
 def _arcade_target_delta_v_budget_m_s(config: SimulationConfig, *, round_index: int | None) -> float | None:
@@ -188,24 +178,24 @@ def _arcade_target_delta_v_budget_m_s(config: SimulationConfig, *, round_index: 
     return float(max(base_budget + extra_rounds * max(step_m_s, 0.0), 0.0))
 
 
-def _game_random_direction_defensive_target_provider(
+def _game_random_direction_defensive_target_profile(
     config: SimulationConfig,
     *,
     round_index: int | None = None,
     rng: np.random.Generator,
-) -> DefensiveTargetIntentProvider | None:
-    provider = _game_defensive_target_provider(config)
-    if provider is None:
+) -> dict[str, Any] | None:
+    profile = _game_defensive_target_profile(config)
+    if profile is None:
         return None
-    provider.max_delta_v_m_s = _arcade_target_delta_v_budget_m_s(config, round_index=round_index)
+    profile["max_delta_v_m_s"] = _arcade_target_delta_v_budget_m_s(config, round_index=round_index)
     direction = rng.normal(size=3)
     nrm = float(np.linalg.norm(direction))
     if nrm <= 0.0 or not np.isfinite(nrm):
         direction = np.array([0.0, 0.0, 1.0], dtype=float)
     else:
         direction = direction / nrm
-    provider.fixed_direction_ric = tuple(float(x) for x in direction)
-    return provider
+    profile["fixed_direction_ric"] = tuple(float(x) for x in direction)
+    return profile
 
 
 def _arcade_mission_metrics(

@@ -49,6 +49,23 @@ def worker_progress_queue() -> Any | None:
     return _WORKER_PROGRESS_QUEUE
 
 
+def abort_process_pool(executor: Any) -> None:
+    """Cancel queued work and terminate only the supplied executor's children."""
+
+    for process in list(dict(getattr(executor, "_processes", {}) or {}).values()):
+        try:
+            process.terminate()
+        except (AttributeError, OSError):
+            pass
+    shutdown = getattr(executor, "shutdown", None)
+    if not callable(shutdown):
+        return
+    try:
+        shutdown(wait=False, cancel_futures=True)
+    except TypeError:  # pragma: no cover - compatibility with older Python
+        shutdown(wait=False)
+
+
 def iter_bounded_futures(
     executor: Any,
     worker: Callable[[Any], Any],
@@ -81,15 +98,7 @@ def iter_bounded_futures(
             # ProcessPoolExecutor cancellation cannot stop work that has
             # already started. Terminate only this executor's children so a
             # surrounding context manager cannot block indefinitely on exit.
-            for process in list(dict(getattr(executor, "_processes", {}) or {}).values()):
-                try:
-                    process.terminate()
-                except (AttributeError, OSError):
-                    pass
-            try:
-                executor.shutdown(wait=False, cancel_futures=True)
-            except (AttributeError, TypeError):
-                pass
+            abort_process_pool(executor)
             raise TimeoutError(
                 "Parallel execution exceeded the overall timeout of "
                 f"{float(overall_timeout_s):.3f} s with {len(pending)} task(s) pending."

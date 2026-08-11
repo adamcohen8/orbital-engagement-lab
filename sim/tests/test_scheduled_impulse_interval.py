@@ -50,13 +50,20 @@ def test_scheduled_impulse_survives_finer_attitude_substeps(tmp_path) -> None:
                         "position_eci_km": [7000.0, 0.0, 0.0],
                         "velocity_eci_km_s": [0.0, 7.5, 0.0],
                     },
-                    "orbit_control": {
-                        "module": "sim.control.orbit.scheduled_impulse",
-                        "class_name": "ScheduledImpulseController",
+                    "flight_software": {
+                        "stack": "fsw.orbit_reference",
+                        "hardware_profile": "hardware.ideal_wrench.v1",
+                        "task_period_s": 0.25,
                         "params": {
-                            "start_time_s": 0.5,
-                            "duration_s": 0.25,
-                            "delta_v_eci_m_s": [1.0, 0.0, 0.0],
+                            "max_acceleration_m_s2": 10.0,
+                            "scheduled_burns": [
+                                {
+                                    "start_time_s": 0.5,
+                                    "duration_s": 0.25,
+                                    "frame": "eci",
+                                    "delta_v_m_s": [1.0, 0.0, 0.0],
+                                }
+                            ],
                         },
                     },
                 }
@@ -81,11 +88,7 @@ def test_scheduled_impulse_survives_finer_attitude_substeps(tmp_path) -> None:
     )
 
     result = SimulationSession.from_config(config).run()
-    rows = result.payload["controller_debug_by_object"]["vehicle"]
-    delivered = sum(
-        np.array(row["command_applied"]["thrust_eci_km_s2"], dtype=float) * float(row["dt_s"]) * 1000.0
-        for row in rows
-    )
+    delivered = np.array(result.applied_thrust["vehicle"][1], dtype=float) * 1.0 * 1000.0
 
     np.testing.assert_allclose(delivered, np.array([1.0, 0.0, 0.0]), atol=1e-12)
 

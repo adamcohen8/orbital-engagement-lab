@@ -6,6 +6,17 @@ from importlib import import_module
 from typing import Any
 
 _EXPORTS: dict[str, tuple[str, str]] = {
+    "CoupledDerivative": ("sim.dynamics.coupled_satellite", "CoupledDerivative"),
+    "CoupledIntegratorConfig": ("sim.dynamics.coupled_satellite", "CoupledIntegratorConfig"),
+    "CoupledPropagationResult": ("sim.dynamics.coupled_satellite", "CoupledPropagationResult"),
+    "CoupledSatelliteDynamics": ("sim.dynamics.coupled_satellite", "CoupledSatelliteDynamics"),
+    "CoupledSatelliteIntegrator": ("sim.dynamics.coupled_satellite", "CoupledSatelliteIntegrator"),
+    "CoupledSatelliteState": ("sim.dynamics.coupled_satellite", "CoupledSatelliteState"),
+    "CoupledStepRecord": ("sim.dynamics.coupled_satellite", "CoupledStepRecord"),
+    "MassProperties": ("sim.dynamics.coupled_satellite", "MassProperties"),
+    "StageEffects": ("sim.dynamics.coupled_satellite", "StageEffects"),
+    "constant_mass_properties": ("sim.dynamics.coupled_satellite", "constant_mass_properties"),
+    "two_body_gravity": ("sim.dynamics.coupled_satellite", "two_body_gravity"),
     "OrbitalAttitudeDynamics": ("sim.dynamics.model", "OrbitalAttitudeDynamics"),
     "GeometryAreaProfile": ("sim.dynamics.spacecraft_geometry", "GeometryAreaProfile"),
     "GeometryProfileLookup": ("sim.dynamics.spacecraft_geometry", "GeometryProfileLookup"),

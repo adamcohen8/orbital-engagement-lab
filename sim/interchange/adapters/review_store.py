@@ -16,7 +16,7 @@ from sim.interchange.validation import validate_product
 from sim.review import ReviewWorkspace
 
 COMPLETED_RUN_STATE_ADAPTER_ID = "oel.completed_run.state_export"
-COMPLETED_RUN_STATE_ADAPTER_VERSION = "1"
+COMPLETED_RUN_STATE_ADAPTER_VERSION = "2"
 COMPLETED_RUN_SELECTOR_KINDS = frozenset({"final", "sample_index", "time_s", "event"})
 
 _STATE_COLUMNS = (
@@ -29,7 +29,9 @@ _STATE_COLUMNS = (
     "vel_x_eci_km_s",
     "vel_y_eci_km_s",
     "vel_z_eci_km_s",
+    "mass_kg",
 )
+_KINEMATIC_COLUMNS = _STATE_COLUMNS[3:9]
 _STATE_COMPONENT_ORDER = ["x", "y", "z", "vx", "vy", "vz"]
 _STATE_UNITS = ["km", "km", "km", "km/s", "km/s", "km/s"]
 
@@ -98,7 +100,8 @@ def build_completed_run_state_product(
     if event is not None:
         _verify_event_association(event, state_row)
     epoch_jd_utc = initial_jd_utc + selected_time_s / 86400.0
-    state_values = [_finite_float(state_row[name], name) for name in _STATE_COLUMNS[3:]]
+    state_values = [_finite_float(state_row[name], name) for name in _KINEMATIC_COLUMNS]
+    resource_state = _resource_state(state_row, object_config)
     covariance = _matching_covariance(
         workspace,
         object_id=resolved_object_id,
@@ -162,6 +165,7 @@ def build_completed_run_state_product(
             },
             "covariance": covariance,
             "object_specs": deepcopy(dict(object_config.get("specs", {}) or {})),
+            "resource_state": resource_state,
             "model_assumptions": {
                 "orbit_force_model": orbit_force_model,
                 "attitude": {
@@ -192,6 +196,7 @@ def build_completed_run_state_product(
                 "frame_supported": True,
                 "absolute_epoch_anchored": True,
                 "covariance_status": "matched" if covariance.get("present") is True else "not_available",
+                "resource_state_bound": True,
                 "adapter": {
                     "adapter_id": COMPLETED_RUN_STATE_ADAPTER_ID,
                     "adapter_version": COMPLETED_RUN_STATE_ADAPTER_VERSION,
@@ -225,6 +230,7 @@ def build_completed_run_state_product(
                         "epoch_derivation": "initial_jd_utc + time_s / 86400",
                         "initial_jd_utc_source": epoch_source,
                         "frame_transform_applied": False,
+                        "mass_and_propellant_bound": True,
                     },
                 }
             ],
@@ -237,6 +243,32 @@ def build_completed_run_state_product(
         messages = "; ".join(f"{issue.path}: {issue.message}" for issue in report.errors)
         raise CompletedRunStateExportError(f"Generated completed-run state product failed validation: {messages}")
     return product
+
+
+def _resource_state(state_row: Mapping[str, Any], object_config: Mapping[str, Any]) -> dict[str, Any]:
+    mass_kg = _finite_float(state_row.get("mass_kg"), "mass_kg")
+    if mass_kg <= 0.0:
+        raise CompletedRunStateExportError("Selected object-state mass_kg must be positive.")
+    specs = dict(object_config.get("specs", {}) or {})
+    dry_raw = specs.get("dry_mass_kg")
+    if dry_raw is None:
+        return {
+            "mass_kg": mass_kg,
+            "dry_mass_kg": None,
+            "fuel_mass_kg": None,
+            "propellant_state": "mass_only",
+        }
+    dry_mass_kg = _finite_float(dry_raw, "object specs dry_mass_kg")
+    if dry_mass_kg < 0.0 or dry_mass_kg > mass_kg + 1.0e-9:
+        raise CompletedRunStateExportError(
+            "Selected mass is incompatible with the configured dry_mass_kg; propellant continuity cannot be represented."
+        )
+    return {
+        "mass_kg": mass_kg,
+        "dry_mass_kg": dry_mass_kg,
+        "fuel_mass_kg": max(mass_kg - dry_mass_kg, 0.0),
+        "propellant_state": "tracked",
+    }
 
 
 def export_completed_run_state(
@@ -680,7 +712,10 @@ def _json_list(value: Any, label: str) -> list[Any]:
 
 
 def _normalize_utc(value: Any) -> str:
-    text = str(value or "").strip()
+    # Reproducible review stores written during the v0.25 transition may carry
+    # an empty provenance timestamp. Preserve their usability with the same
+    # valid sentinel now written by the review store.
+    text = str(value or "").strip() or "1970-01-01T00:00:00Z"
     try:
         parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
     except ValueError as exc:

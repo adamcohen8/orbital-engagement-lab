@@ -6,92 +6,6 @@ from __future__ import annotations
 from sim.tests.game_mode_test_support import *
 
 
-def test_defensive_target_provider_pulses_on_unsafe_closure() -> None:
-    provider = DefensiveTargetIntentProvider(
-        trigger_range_km=1.2,
-        trigger_closing_speed_km_s=0.00025,
-        max_accel_km_s2=7.5e-6,
-    )
-    target_state = np.array([7000.0, 0.0, 0.0, 0.0, 7.54605329, 0.0], dtype=float)
-    close_rel_ric = np.array([0.0, -1.0, 0.0, 0.0, 0.0005, 0.0], dtype=float)
-    far_rel_ric = np.array([0.0, -2.0, 0.0, 0.0, 0.0, 0.0], dtype=float)
-    close_chaser_state = ric_rect_state_to_eci(close_rel_ric, target_state[:3], target_state[3:])
-    far_chaser_state = ric_rect_state_to_eci(far_rel_ric, target_state[:3], target_state[3:])
-    target = StateTruth(
-        position_eci_km=target_state[:3],
-        velocity_eci_km_s=target_state[3:],
-        attitude_quat_bn=np.array([1.0, 0.0, 0.0, 0.0], dtype=float),
-        angular_rate_body_rad_s=np.zeros(3, dtype=float),
-        mass_kg=1800.0,
-        t_s=0.0,
-    )
-    active = provider(truth=target, own_knowledge={"chaser": _knowledge_from_state6(close_chaser_state)}, t_s=10.0)
-    inactive = provider(truth=target, own_knowledge={"chaser": _knowledge_from_state6(far_chaser_state)}, t_s=10.0)
-
-    assert np.isclose(np.linalg.norm(active["thrust_eci_km_s2"]), 7.5e-6)
-    assert active["command_mode_flags"]["target_defensive"] is True
-    assert np.allclose(inactive["thrust_eci_km_s2"], np.zeros(3), atol=1e-15)
-    assert inactive["command_mode_flags"]["target_defensive"] is False
-
-
-def test_defensive_target_provider_caps_delta_v_budget() -> None:
-    provider = DefensiveTargetIntentProvider(
-        trigger_range_km=1.2,
-        trigger_closing_speed_km_s=0.00025,
-        max_accel_km_s2=1.0e-3,
-        max_delta_v_m_s=5.0,
-    )
-    target_state = np.array([7000.0, 0.0, 0.0, 0.0, 7.54605329, 0.0], dtype=float)
-    rel_ric = np.array([0.0, -1.0, 0.0, 0.0, 0.0005, 0.0], dtype=float)
-    chaser_state = ric_rect_state_to_eci(rel_ric, target_state[:3], target_state[3:])
-    target = StateTruth(
-        position_eci_km=target_state[:3],
-        velocity_eci_km_s=target_state[3:],
-        attitude_quat_bn=np.array([1.0, 0.0, 0.0, 0.0], dtype=float),
-        angular_rate_body_rad_s=np.zeros(3, dtype=float),
-        mass_kg=1800.0,
-        t_s=0.0,
-    )
-    own_knowledge = {"chaser": _knowledge_from_state6(chaser_state)}
-    first = provider(truth=target, own_knowledge=own_knowledge, t_s=0.0)
-    second = provider(truth=target, own_knowledge=own_knowledge, t_s=10.0)
-    third = provider(truth=target, own_knowledge=own_knowledge, t_s=20.0)
-
-    assert np.isclose(np.linalg.norm(first["thrust_eci_km_s2"]), 1.0e-3)
-    assert np.isclose(provider.used_delta_v_m_s, 5.0)
-    assert np.isclose(np.linalg.norm(second["thrust_eci_km_s2"]), 5.0e-4)
-    assert np.allclose(third["thrust_eci_km_s2"], np.zeros(3), atol=1e-15)
-    assert third["command_mode_flags"]["target_defensive_budget_exhausted"] is True
-
-
-def test_defensive_target_provider_charges_first_timed_pulse() -> None:
-    provider = DefensiveTargetIntentProvider(
-        trigger_range_km=1.2,
-        trigger_closing_speed_km_s=0.00025,
-        max_accel_km_s2=1.0e-3,
-        max_delta_v_m_s=5.0,
-    )
-    target_state = np.array([7000.0, 0.0, 0.0, 0.0, 7.54605329, 0.0], dtype=float)
-    rel_ric = np.array([0.0, -1.0, 0.0, 0.0, 0.0005, 0.0], dtype=float)
-    chaser_state = ric_rect_state_to_eci(rel_ric, target_state[:3], target_state[3:])
-    target = StateTruth(
-        position_eci_km=target_state[:3],
-        velocity_eci_km_s=target_state[3:],
-        attitude_quat_bn=np.array([1.0, 0.0, 0.0, 0.0], dtype=float),
-        angular_rate_body_rad_s=np.zeros(3, dtype=float),
-        mass_kg=1800.0,
-        t_s=0.0,
-    )
-    own_knowledge = {"chaser": _knowledge_from_state6(chaser_state)}
-    first = provider(truth=target, own_knowledge=own_knowledge, t_s=10.0, dt_s=10.0)
-    second = provider(truth=target, own_knowledge=own_knowledge, t_s=20.0, dt_s=10.0)
-
-    assert np.isclose(np.linalg.norm(first["thrust_eci_km_s2"]), 5.0e-4)
-    assert np.isclose(provider.used_delta_v_m_s, 5.0)
-    assert np.allclose(second["thrust_eci_km_s2"], np.zeros(3), atol=1e-15)
-    assert second["command_mode_flags"]["target_defensive_budget_exhausted"] is True
-
-
 def test_level_nine_uses_target_reference_for_game_ric_frame() -> None:
     config_path = (
         Path(__file__).resolve().parents[1] / "game" / "configs" / "game_training_rpo_10_defensive_target_demo.yaml"
@@ -128,7 +42,14 @@ def test_level_nine_ric_translation_commands_use_target_reference_frame() -> Non
     ref_state = np.array(snap0.truth["target_reference"][:6], dtype=float)
     c_ir = ric_dcm_ir_from_rv(ref_state[:3], ref_state[3:6])
     expected = c_ir @ np.array([0.0, 1.5e-5, 0.0], dtype=float)
-    assert np.allclose(snap1.applied_thrust["chaser"], expected, atol=1e-12)
+    # The v2 physical path maps the requested inertial vector through the
+    # sampled body/actuator attitude before applying it.  A tiny orthogonal
+    # component is therefore expected as attitude propagates between the
+    # sensor sample and realization; the RIC direction and magnitude must
+    # remain equivalent at game-control precision.
+    applied = snap1.applied_thrust["chaser"]
+    assert np.linalg.norm(applied) == pytest.approx(np.linalg.norm(expected), rel=1e-6)
+    assert np.dot(applied, expected) / (np.linalg.norm(applied) * np.linalg.norm(expected)) > 0.9999999
 
 
 def test_game_attempt_forces_acceleration_off(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -264,39 +185,6 @@ def test_game_attempt_uses_configured_retained_history_samples(tmp_path: Path) -
     assert engine.history_mode == "dynamic"
     assert engine.planned_samples > 8
     assert engine.allocated_history_samples == 8
-
-
-def test_level_nine_restart_gets_fresh_defensive_target_provider() -> None:
-    config_path = (
-        Path(__file__).resolve().parents[1] / "game" / "configs" / "game_training_rpo_10_defensive_target_demo.yaml"
-    )
-    config = SimulationConfig.from_yaml(config_path)
-    training_cfg = RPOTrainingConfig.from_metadata(dict(config.scenario.metadata or {}))
-    state = KeyboardCommandState()
-
-    session1, _, _ = game_runner._start_game_attempt(
-        config,
-        command_state=state,
-        training_cfg=training_cfg,
-        controlled_object_id="chaser",
-        attitude_rate_deg_s=45.0,
-        control_mode="ric_translation",
-        ric_reference_object_id="target_reference",
-    )
-    session2, _, _ = game_runner._start_game_attempt(
-        config,
-        command_state=state,
-        training_cfg=training_cfg,
-        controlled_object_id="chaser",
-        attitude_rate_deg_s=45.0,
-        control_mode="ric_translation",
-        ric_reference_object_id="target_reference",
-    )
-
-    target_provider1 = session1._external_intent_providers["target"]
-    target_provider2 = session2._external_intent_providers["target"]
-    assert target_provider1 is not target_provider2
-    assert target_provider2.used_delta_v_m_s == 0.0
 
 
 def test_level_nine_goal_is_100_meter_close_approach() -> None:
@@ -861,181 +749,6 @@ def test_dashboard_goal_overlay_syncs_with_arcade_round_range() -> None:
     assert dashboard._frame_cache_dirty is True
 
 
-def test_pursuit_arcade_random_target_provider_sets_fixed_direction() -> None:
-    config_path = (
-        Path(__file__).resolve().parents[1] / "game" / "configs" / "game_training_rpo_arcade_pursuit.yaml"
-    )
-    config = SimulationConfig.from_yaml(config_path)
-    first = game_arcade._game_random_direction_defensive_target_provider(config, rng=np.random.default_rng(1))
-    second = game_arcade._game_random_direction_defensive_target_provider(config, rng=np.random.default_rng(2))
-
-    assert first is not None
-    assert second is not None
-    assert first.fixed_direction_ric is not None
-    assert second.fixed_direction_ric is not None
-    assert np.linalg.norm(first.fixed_direction_ric) == pytest.approx(1.0)
-    assert not np.allclose(first.fixed_direction_ric, second.fixed_direction_ric)
-
-
-def test_pursuit_arcade_target_delta_v_budget_ramps_after_round_twenty() -> None:
-    config_path = (
-        Path(__file__).resolve().parents[1] / "game" / "configs" / "game_training_rpo_arcade_pursuit.yaml"
-    )
-    config = SimulationConfig.from_yaml(config_path)
-
-    round1 = game_arcade._game_random_direction_defensive_target_provider(config, round_index=1, rng=np.random.default_rng(1))
-    round20 = game_arcade._game_random_direction_defensive_target_provider(config, round_index=20, rng=np.random.default_rng(1))
-    round21 = game_arcade._game_random_direction_defensive_target_provider(config, round_index=21, rng=np.random.default_rng(1))
-    round25 = game_arcade._game_random_direction_defensive_target_provider(config, round_index=25, rng=np.random.default_rng(1))
-
-    assert round1 is not None
-    assert round20 is not None
-    assert round21 is not None
-    assert round25 is not None
-    assert round1.max_delta_v_m_s == pytest.approx(0.10)
-    assert round20.max_delta_v_m_s == pytest.approx(0.10)
-    assert round21.max_delta_v_m_s == pytest.approx(0.11)
-    assert round25.max_delta_v_m_s == pytest.approx(0.15)
-
-
-def test_pursuit_arcade_round_rng_varies_by_session_seed() -> None:
-    config_path = (
-        Path(__file__).resolve().parents[1] / "game" / "configs" / "game_training_rpo_arcade_pursuit.yaml"
-    )
-    config = SimulationConfig.from_yaml(config_path)
-    seeded_a = game_arcade._game_random_direction_defensive_target_provider(config, rng=game_arcade._arcade_round_rng(1001, 1))
-    seeded_a_repeat = game_arcade._game_random_direction_defensive_target_provider(config, rng=game_arcade._arcade_round_rng(1001, 1))
-    seeded_b = game_arcade._game_random_direction_defensive_target_provider(config, rng=game_arcade._arcade_round_rng(2002, 1))
-
-    assert seeded_a is not None
-    assert seeded_a_repeat is not None
-    assert seeded_b is not None
-    assert seeded_a.fixed_direction_ric is not None
-    assert seeded_a_repeat.fixed_direction_ric is not None
-    assert seeded_b.fixed_direction_ric is not None
-    assert np.allclose(seeded_a.fixed_direction_ric, seeded_a_repeat.fixed_direction_ric)
-    assert not np.allclose(seeded_a.fixed_direction_ric, seeded_b.fixed_direction_ric)
-
-
-def test_level_ten_is_player_target_survival_against_ric_pd_chaser() -> None:
-    config_path = (
-        Path(__file__).resolve().parents[1]
-        / "game"
-        / "configs"
-        / "game_training_rpo_11_evasive_target_survival.yaml"
-    )
-    config = SimulationConfig.from_yaml(config_path)
-    training_cfg = RPOTrainingConfig.from_metadata(dict(config.scenario.metadata or {}))
-    chaser = config.scenario.objects["chaser"]
-    target = config.scenario.objects["target"]
-    chaser_initial = chaser.initial_state["relative_to_target_ric"]
-    source_config = yaml.safe_load(
-        (Path(__file__).resolve().parents[2] / "configs" / "ric_pd_10km_experiment.yaml").read_text(
-            encoding="utf-8"
-        )
-    )
-    source_control = source_config["objects"]["chaser"]["orbit_control"]
-
-    assert game_runner._game_controlled_object_id(config) == "target"
-    assert game_runner._game_control_mode(config) == "ric_translation"
-    assert game_runner._game_camera_mode(config) == "rule_toggle_pair"
-    assert game_runner._game_camera_rule_mode(config) == "current_pair"
-    assert game_runner._game_camera_rule_toggle_enabled(config) is True
-    assert game_runner._game_show_target_hcw_path(config) is True
-    assert game_runner._game_speed_multiplier_options(config) == pytest.approx((1.0, 2.0, 5.0, 10.0, 25.0, 50.0, 100.0, 200.0))
-    assert np.array(game_runner._game_speed_dt_schedule(config), dtype=float) == pytest.approx(
-        np.array(((1.0, 0.1), (10.0, 0.5), (25.0, 1.0), (50.0, 5.0), (100.0, 10.0)), dtype=float)
-    )
-    assert game_runner._game_tick_dt_s(config, 1.0) == pytest.approx(0.1)
-    assert game_runner._game_tick_dt_s(config, 5.0) == pytest.approx(0.1)
-    assert game_runner._game_tick_dt_s(config, 10.0) == pytest.approx(0.5)
-    assert game_runner._game_tick_dt_s(config, 25.0) == pytest.approx(1.0)
-    assert game_runner._game_tick_dt_s(config, 100.0) == pytest.approx(1.0)
-    assert game_runner._game_active_tick_dt_s(config, 100.0, maneuver_active=False) == pytest.approx(10.0)
-    assert game_runner._game_max_autonomy_step_s(config) == pytest.approx(1.0)
-    assert training_cfg.scenario_id == "rpo_11_evasive_target_survival"
-    assert training_cfg.survival_goal is True
-    assert training_cfg.keepout_radius_km == pytest.approx(0.1)
-    assert training_cfg.goal_range_km is None
-    assert training_cfg.max_goal_speed_km_s is None
-    assert training_cfg.max_time_s == pytest.approx(9000.0)
-    assert training_cfg.target_reference_object_id == "target_reference"
-    assert training_cfg.max_target_reference_range_km == pytest.approx(1.0)
-    assert training_cfg.max_target_delta_v_m_s == pytest.approx(1.0)
-    assert training_cfg.max_delta_v_m_s == pytest.approx(25.0)
-    assert config.scenario.simulator.duration_s == pytest.approx(9000.0)
-    assert training_cfg.fail_on_delta_v_budget is False
-    assert game_runner._game_coast_chaser_after_delta_v_budget(training_cfg) is True
-    assert chaser.orbit_control.module == "sim.control.orbit.ric_pd"
-    assert chaser.orbit_control.class_name == "RICPDTransferController"
-    assert chaser.orbit_control.module == source_control["module"]
-    assert chaser.orbit_control.class_name == source_control["class_name"]
-    assert chaser.orbit_control.params == source_control["params"]
-    assert chaser.attitude_control.module == "sim.control.attitude.zero_torque"
-    assert chaser.attitude_control.class_name == "ZeroTorqueController"
-    assert chaser.knowledge["estimation"]["type"] == "measured_state"
-    assert target.knowledge["estimation"]["type"] == "measured_state"
-    assert chaser.mission_execution is None
-    assert config.scenario.simulator.dynamics["attitude"] == {"enabled": False}
-    assert chaser_initial["frame"] == "curv"
-    assert np.allclose(chaser_initial["state"], np.array([0.0, -5.0, 0.0, 0.0, 0.0, 0.001]))
-
-
-def test_level_ten_player_controls_target_while_chaser_controller_runs() -> None:
-    config_path = (
-        Path(__file__).resolve().parents[1]
-        / "game"
-        / "configs"
-        / "game_training_rpo_11_evasive_target_survival.yaml"
-    )
-    config = SimulationConfig.from_yaml(config_path)
-    training_cfg = RPOTrainingConfig.from_metadata(dict(config.scenario.metadata or {}))
-    state = KeyboardCommandState(yaw=1.0)
-
-    session, _, snap0 = game_runner._start_game_attempt(
-        config,
-        command_state=state,
-        training_cfg=training_cfg,
-        controlled_object_id=game_runner._game_controlled_object_id(config),
-        attitude_rate_deg_s=45.0,
-        control_mode=game_runner._game_control_mode(config),
-        ric_reference_object_id=game_runner._game_ric_reference_object_id(config, training_cfg.target_object_id),
-    )
-    snap1 = session.step()
-
-    assert "target" in session._external_intent_providers
-    assert np.linalg.norm(snap1.applied_thrust["target"]) > 0.0
-    assert np.linalg.norm(snap1.applied_thrust["chaser"]) > 0.0
-    assert not np.allclose(snap1.truth["target"][:6], snap0.truth["target"][:6])
-
-
-def test_delta_v_limited_orbit_controller_coasts_after_budget() -> None:
-    class ConstantController:
-        def act(self, belief: StateBelief, t_s: float, budget_ms: float) -> Command:
-            return Command(
-                thrust_eci_km_s2=np.array([0.001, 0.0, 0.0], dtype=float),
-                torque_body_nm=np.zeros(3, dtype=float),
-                mode_flags={"mode": "constant"},
-            )
-
-    controller = game_session._DeltaVLimitedOrbitController(
-        base=ConstantController(),
-        max_delta_v_m_s=1.5,
-        dt_s=1.0,
-    )
-    belief = StateBelief(state=np.zeros(6, dtype=float), covariance=np.eye(6), last_update_t_s=0.0)
-
-    first = controller.act(belief, 0.0, 1.0)
-    second = controller.act(belief, 1.0, 1.0)
-    third = controller.act(belief, 2.0, 1.0)
-
-    assert np.allclose(first.thrust_eci_km_s2, np.array([0.001, 0.0, 0.0]))
-    assert np.allclose(second.thrust_eci_km_s2, np.array([0.0005, 0.0, 0.0]))
-    assert np.allclose(third.thrust_eci_km_s2, np.zeros(3))
-    assert controller.used_delta_v_m_s == pytest.approx(1.5)
-    assert third.mode_flags["delta_v_limit_exhausted"] is True
-
-
 def test_terminal_mission_state_keeps_game_loop_open_after_session_done() -> None:
     passed = type("Score", (), {"level_passed": True, "level_failed": False})()
     failed = type("Score", (), {"level_passed": False, "level_failed": True})()
@@ -1233,70 +946,6 @@ def test_mission_metrics_show_delta_v_remaining_with_engineering_units() -> None
 
     assert "OK Chaser dV 6.766 m/s" in metrics
     assert "OK Target dV 877.0 mm/s" in metrics
-
-
-def test_manual_game_provider_commands_attitude_target_and_thrust(tmp_path: Path) -> None:
-    state = KeyboardCommandState(roll=1.0, firing=True)
-    provider = ManualGameCommandProvider(
-        command_state=state,
-        max_accel_km_s2=2.0e-5,
-        attitude_rate_deg_s=30.0,
-        controlled_object_id="chaser",
-    )
-    session = SimulationSession.from_config(SimulationConfig.from_dict(_game_config(tmp_path)))
-    session.set_external_intent_provider("chaser", provider)
-    snap0 = session.reset()
-    assert snap0 is not None
-
-    snap1 = session.step()
-
-    assert np.linalg.norm(snap1.applied_thrust["chaser"]) > 0.0
-    assert provider.desired_attitude_quat_bn is not None
-    assert not np.allclose(provider.desired_attitude_quat_bn, snap0.truth["chaser"][6:10])
-    assert np.linalg.norm(snap1.applied_torque["chaser"]) > 0.0
-
-
-def test_external_intent_provider_can_be_removed(tmp_path: Path) -> None:
-    state = KeyboardCommandState(firing=True)
-    provider = ManualGameCommandProvider(command_state=state, max_accel_km_s2=2.0e-5)
-    session = SimulationSession.from_config(SimulationConfig.from_dict(_game_config(tmp_path)))
-    session.set_external_intent_provider("chaser", provider)
-    snap0 = session.reset()
-    assert snap0 is not None
-
-    session.set_external_intent_provider("chaser", None)
-    snap1 = session.step()
-
-    assert np.allclose(snap1.applied_thrust["chaser"], np.zeros(3), atol=1e-15)
-
-
-def test_ric_translation_provider_commands_direct_ric_thrust() -> None:
-    state = KeyboardCommandState(pitch=1.0, yaw=0.0, roll=0.0)
-    provider = ManualGameCommandProvider(
-        command_state=state,
-        max_accel_km_s2=2.0e-5,
-        control_mode="ric_translation",
-        reference_object_id="target",
-    )
-    target = StateTruth(
-        position_eci_km=np.array([7000.0, 0.0, 0.0], dtype=float),
-        velocity_eci_km_s=np.array([0.0, 7.5, 0.0], dtype=float),
-        attitude_quat_bn=np.array([1.0, 0.0, 0.0, 0.0], dtype=float),
-        angular_rate_body_rad_s=np.zeros(3, dtype=float),
-        mass_kg=100.0,
-        t_s=0.0,
-    )
-
-    out = provider(
-        truth=target,
-        t_s=0.0,
-        dt_s=1.0,
-        object_id="chaser",
-        own_knowledge={"target": _knowledge_from_state6(np.hstack((target.position_eci_km, target.velocity_eci_km_s)))},
-    )
-
-    assert out["command_mode_flags"]["player_control_mode"] == "ric_translation"
-    assert np.allclose(out["thrust_eci_km_s2"], np.array([2.0e-5, 0.0, 0.0]), atol=1e-12)
 
 
 def test_operator_burn_plan_parser_and_validation() -> None:
@@ -1601,6 +1250,35 @@ def test_operator_cislunar_preview_uses_configured_cr3bp_projection() -> None:
     assert trajectory == pytest.approx(expected, abs=1.0e-9)
 
 
+def test_operator_sandbox_preview_uses_preflight_setup_state() -> None:
+    path = Path("sim/game/configs/game_training_rpo_sandbox.yaml")
+    config = SimulationConfig.from_yaml(path)
+    setup = SandboxSetupValues(
+        target_a_km=7600.0,
+        target_ecc=0.08,
+        target_inc_deg=32.0,
+        target_raan_deg=18.0,
+        target_argp_deg=27.0,
+        target_true_anomaly_deg=41.0,
+        radial_km=1.25,
+        in_track_km=-7.5,
+        cross_track_km=0.4,
+        radial_rate_m_s=0.2,
+        in_track_rate_m_s=-0.3,
+        cross_track_rate_m_s=0.1,
+    )
+    updated = game_runner._apply_sandbox_setup_to_config(config, setup)
+
+    context = game_launcher._operator_plot_context(path, config_override=updated)
+    target_coes = updated.scenario.objects["target"].initial_state["coes"]
+    expected_target = np.hstack(coes_mapping_to_rv_eci(target_coes))
+
+    assert context.initial_relative_ric_km_s == pytest.approx(setup.relative_ric_state_km_s)
+    assert context.mean_motion_rad_s == pytest.approx(np.sqrt(EARTH_MU_KM3_S2 / setup.target_a_km**3))
+    assert context.coast_prediction_model == "tschauner_hempel"
+    assert context.reference_state_eci_km_s == pytest.approx(expected_target)
+
+
 def test_operator_burn_velocity_vector_uses_post_burn_velocity_direction() -> None:
     path = Path("sim/game/configs/game_training_rpo_01_coast_relative_motion.yaml")
     context = game_launcher._operator_plot_context(path)
@@ -1766,130 +1444,6 @@ def test_operator_rbar_script_preview_stays_target_centered_without_fixed_spans(
     assert len(game_launcher._operator_forbidden_region_projection_points(training_cfg, x_axis=2, y_axis=0, offset=target)) == 1
 
 
-def test_operator_burn_provider_executes_single_ric_impulse() -> None:
-    plan = parse_operator_burn_plan("T= 10 s, 2.0 m/s R, 1.0 m/s I, 0.2 m/s C")
-    provider = OperatorBurnCommandProvider(
-        plan,
-        controlled_object_id="chaser",
-        reference_object_id="target",
-    )
-    target = StateTruth(
-        position_eci_km=np.array([7000.0, 0.0, 0.0], dtype=float),
-        velocity_eci_km_s=np.array([0.0, 7.5, 0.0], dtype=float),
-        attitude_quat_bn=np.array([1.0, 0.0, 0.0, 0.0], dtype=float),
-        angular_rate_body_rad_s=np.zeros(3, dtype=float),
-        mass_kg=100.0,
-        t_s=0.0,
-    )
-    own_knowledge = {"target": _knowledge_from_state6(np.hstack((target.position_eci_km, target.velocity_eci_km_s)))}
-
-    before = provider(
-        truth=target,
-        t_s=8.0,
-        dt_s=1.0,
-        object_id="chaser",
-        own_knowledge=own_knowledge,
-    )
-    not_yet = provider(
-        truth=target,
-        t_s=9.5,
-        dt_s=1.0,
-        object_id="chaser",
-        own_knowledge=own_knowledge,
-    )
-    burn = provider(
-        truth=target,
-        t_s=10.0,
-        dt_s=1.0,
-        object_id="chaser",
-        own_knowledge=own_knowledge,
-    )
-    burn_delta_v_ric = provider.last_executed_delta_v_ric_m_s
-    after = provider(
-        truth=target,
-        t_s=10.5,
-        dt_s=1.0,
-        object_id="chaser",
-        own_knowledge=own_knowledge,
-    )
-
-    assert np.allclose(before["thrust_eci_km_s2"], np.zeros(3), atol=1e-15)
-    assert np.allclose(not_yet["thrust_eci_km_s2"], np.zeros(3), atol=1e-15)
-    assert np.allclose(burn["thrust_eci_km_s2"], np.array([0.002, 0.001, 0.0002]), atol=1e-12)
-    assert burn["command_mode_flags"]["operator_burn_index"] == 1
-    assert burn_delta_v_ric == pytest.approx((2.0, 1.0, 0.2))
-    assert provider.executed_delta_v_m_s == pytest.approx(np.sqrt(2.0**2 + 1.0**2 + 0.2**2))
-    assert np.allclose(after["thrust_eci_km_s2"], np.zeros(3), atol=1e-15)
-    assert provider.last_executed_delta_v_ric_m_s is None
-
-
-def test_operator_burn_provider_uses_moon_ric_frame_for_cislunar_impulse() -> None:
-    plan = parse_operator_burn_plan("T= 0 s, 1.0 m/s R")
-    provider = OperatorBurnCommandProvider(
-        plan,
-        controlled_object_id="chaser",
-        reference_object_id="target",
-        control_mode="moon_ric_translation",
-        relative_frame="moon_ric",
-    )
-    moon = cr3bp_moon_state_km_s()
-    target_state = moon + np.array([1000.0, 0.0, 0.0, 0.0, 1.0, 0.0], dtype=float)
-    target = StateTruth(
-        position_eci_km=target_state[:3],
-        velocity_eci_km_s=target_state[3:],
-        attitude_quat_bn=np.array([1.0, 0.0, 0.0, 0.0], dtype=float),
-        angular_rate_body_rad_s=np.zeros(3, dtype=float),
-        mass_kg=100.0,
-        t_s=0.0,
-    )
-    own_knowledge = {"target": _knowledge_from_state6(target_state)}
-
-    burn = provider(
-        truth=target,
-        t_s=0.0,
-        dt_s=1.0,
-        object_id="chaser",
-        own_knowledge=own_knowledge,
-    )
-
-    assert np.allclose(burn["thrust_eci_km_s2"], np.array([0.001, 0.0, 0.0]), atol=1e-12)
-    assert burn["command_mode_flags"]["operator_burn_delta_v_ric_m_s"] == pytest.approx((1.0, 0.0, 0.0))
-
-
-def test_operator_burn_provider_applies_actuator_error_to_impulse() -> None:
-    plan = parse_operator_burn_plan("T= 10 s, 2.0 m/s R, 1.0 m/s I, 0.2 m/s C")
-    provider = OperatorBurnCommandProvider(
-        plan,
-        controlled_object_id="chaser",
-        reference_object_id="target",
-        actuator_error_fraction=0.025,
-    )
-    target = StateTruth(
-        position_eci_km=np.array([7000.0, 0.0, 0.0], dtype=float),
-        velocity_eci_km_s=np.array([0.0, 7.5, 0.0], dtype=float),
-        attitude_quat_bn=np.array([1.0, 0.0, 0.0, 0.0], dtype=float),
-        angular_rate_body_rad_s=np.zeros(3, dtype=float),
-        mass_kg=100.0,
-        t_s=0.0,
-    )
-    own_knowledge = {"target": _knowledge_from_state6(np.hstack((target.position_eci_km, target.velocity_eci_km_s)))}
-
-    burn = provider(
-        truth=target,
-        t_s=10.0,
-        dt_s=1.0,
-        object_id="chaser",
-        own_knowledge=own_knowledge,
-    )
-
-    expected_delta_v_ric_m_s = np.array([2.0, 1.0, 0.2], dtype=float) * 1.025
-    assert burn["command_mode_flags"]["operator_burn_planned_delta_v_ric_m_s"] == pytest.approx((2.0, 1.0, 0.2))
-    assert burn["command_mode_flags"]["operator_burn_delta_v_ric_m_s"] == pytest.approx(expected_delta_v_ric_m_s)
-    assert burn["command_mode_flags"]["operator_actuator_error_fraction"] == pytest.approx(0.025)
-    assert provider.last_executed_delta_v_ric_m_s == pytest.approx(expected_delta_v_ric_m_s)
-    assert provider.executed_delta_v_m_s == pytest.approx(np.linalg.norm(expected_delta_v_ric_m_s))
-
-
 def test_operator_projection_transition_uses_pre_and_post_burn_ric_velocity() -> None:
     class FakeDashboard:
         def __init__(self) -> None:
@@ -1932,56 +1486,75 @@ def test_operator_projection_transition_uses_pre_and_post_burn_ric_velocity() ->
     assert np.allclose(pre_burn[3:6], post_burn[3:6] - np.array([0.002, -0.001, 0.0005]))
     assert duration_s == pytest.approx(game_runner._operator_burn_visual_duration_s(np.linalg.norm([2.0, -1.0, 0.5])))
     assert transition_duration_s == pytest.approx(duration_s)
-
-
-def test_manual_translation_bypasses_orbital_command_latch_for_tap_burns(tmp_path: Path) -> None:
-    state = KeyboardCommandState(yaw=-1.0, use_timing_accumulator=True)
-    provider = ManualGameCommandProvider(
-        command_state=state,
-        max_accel_km_s2=2.0e-5,
+def test_defensive_levels_use_onboard_rpo_stack_without_external_provider() -> None:
+    config_path = (
+        Path(__file__).resolve().parents[1]
+        / "game"
+        / "configs"
+        / "game_training_rpo_10_defensive_target_demo.yaml"
+    )
+    config = SimulationConfig.from_yaml(config_path)
+    training_cfg = RPOTrainingConfig.from_metadata(dict(config.scenario.metadata or {}))
+    first, _, _ = game_runner._start_game_attempt(
+        config,
+        command_state=KeyboardCommandState(),
+        training_cfg=training_cfg,
+        controlled_object_id="chaser",
+        attitude_rate_deg_s=45.0,
         control_mode="ric_translation",
-        reference_object_id="target",
+        ric_reference_object_id="target_reference",
     )
-    session = SimulationSession.from_config(SimulationConfig.from_dict(_game_config(tmp_path)))
-    session.set_external_intent_provider("chaser", provider)
-    session.reset()
-    state.accumulate_timed_input(0.02, speed_multiple=2.0, control_mode="ric_translation")
-    state.yaw = 0.0
-
-    burn = session.step(dt_s=0.04)
-    coast = session.step(dt_s=0.04)
-
-    assert np.linalg.norm(burn.applied_thrust["chaser"]) == pytest.approx(2.0e-5)
-    assert np.linalg.norm(coast.applied_thrust["chaser"]) == pytest.approx(0.0)
-
-
-def test_moon_ric_translation_provider_commands_target_about_moon_frame() -> None:
-    state = KeyboardCommandState(pitch=1.0, yaw=0.0, roll=0.0)
-    provider = ManualGameCommandProvider(
-        command_state=state,
-        max_accel_km_s2=2.5e-4,
-        control_mode="moon_ric_translation",
-        reference_object_id="target",
-    )
-    target_state = cr3bp_halo_seed_state_km_s(family="l2_nrho_southern")
-    target = StateTruth(
-        position_eci_km=target_state[:3],
-        velocity_eci_km_s=target_state[3:],
-        attitude_quat_bn=np.array([1.0, 0.0, 0.0, 0.0], dtype=float),
-        angular_rate_body_rad_s=np.zeros(3, dtype=float),
-        mass_kg=100.0,
-        t_s=0.0,
+    second, _, _ = game_runner._start_game_attempt(
+        config,
+        command_state=KeyboardCommandState(),
+        training_cfg=training_cfg,
+        controlled_object_id="chaser",
+        attitude_rate_deg_s=45.0,
+        control_mode="ric_translation",
+        ric_reference_object_id="target_reference",
     )
 
-    out = provider(
-        truth=target,
-        t_s=0.0,
-        dt_s=1.0,
-        object_id="chaser",
-        own_knowledge={"target": _knowledge_from_state6(target_state)},
-    )
+    first_runtime = first._engine.agents["target"].flight_software_runtime
+    second_runtime = second._engine.agents["target"].flight_software_runtime
+    assert first_runtime.stack.identity.stack_id == "fsw.rpo_reference"
+    assert second_runtime.stack.identity.stack_id == "fsw.rpo_reference"
+    assert first_runtime is not second_runtime
 
-    target_moon = target_state - cr3bp_moon_state_km_s()
-    expected = ric_dcm_ir_from_rv(target_moon[:3], target_moon[3:]) @ np.array([2.5e-4, 0.0, 0.0])
-    assert out["command_mode_flags"]["player_control_mode"] == "moon_ric_translation"
-    assert np.allclose(out["thrust_eci_km_s2"], expected, atol=1e-12)
+
+def test_arcade_defensive_profile_is_seeded_presentation_configuration() -> None:
+    config = SimulationConfig.from_yaml(
+        Path(__file__).resolve().parents[1] / "game/configs/game_training_rpo_arcade_pursuit.yaml"
+    )
+    first = game_arcade._game_random_direction_defensive_target_profile(config, rng=np.random.default_rng(1))
+    repeated = game_arcade._game_random_direction_defensive_target_profile(config, rng=np.random.default_rng(1))
+    different = game_arcade._game_random_direction_defensive_target_profile(config, rng=np.random.default_rng(2))
+
+    assert first == repeated
+    assert first["fixed_direction_ric"] != different["fixed_direction_ric"]
+    assert np.linalg.norm(first["fixed_direction_ric"]) == pytest.approx(1.0)
+
+
+def test_evasion_level_runs_player_and_ai_through_complete_stacks() -> None:
+    config_path = (
+        Path(__file__).resolve().parents[1]
+        / "game/configs/game_training_rpo_11_evasive_target_survival.yaml"
+    )
+    config = SimulationConfig.from_yaml(config_path)
+    training_cfg = RPOTrainingConfig.from_metadata(dict(config.scenario.metadata or {}))
+    session, _, _ = game_runner._start_game_attempt(
+        config,
+        command_state=KeyboardCommandState(yaw=1.0),
+        training_cfg=training_cfg,
+        controlled_object_id="target",
+        attitude_rate_deg_s=45.0,
+        control_mode="ric_translation",
+        ric_reference_object_id="target_reference",
+    )
+    session.step()
+
+    chaser_runtime = session._engine.agents["chaser"].flight_software_runtime
+    target_runtime = session._engine.agents["target"].flight_software_runtime
+    assert chaser_runtime.stack.identity.stack_id == "fsw.rpo_reference"
+    assert target_runtime.stack.identity.stack_id == "fsw.game_pilot_reference"
+    assert chaser_runtime.evidence.invocations
+    assert target_runtime.evidence.invocations

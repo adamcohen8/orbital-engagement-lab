@@ -1,3 +1,5 @@
+import pytest
+
 from sim.config.help import (
     CONFIG_HELP_ENTRIES,
     find_config_help,
@@ -41,7 +43,28 @@ def test_config_help_includes_ground_access_and_mass_property_aliases():
     assert "inertia_reference_point" in mass_text
 
 
+def test_config_help_lists_authoritative_builtin_gnc_choices():
+    orbit_text = format_config_help("orbit controller")
+    assert "objects.<id>.orbit_control.builtin" in orbit_text
+    assert "orbit.vbar_approach" in orbit_text
+    assert "orbit.robust_mpc_hook" not in orbit_text
+
+    attitude_text = format_config_help("pointing controller")
+    assert "attitude.nadir_pointing" in attitude_text
+    assert "attitude.snap" not in attitude_text
+
+    mission_text = format_config_help("mission strategy")
+    assert "mission.stationkeep" in mission_text
+
+    execution_text = format_config_help("mission execution")
+    assert "execution.integrated_command" in execution_text
+    assert "execution.keep_out_gate" in execution_text
+
+
 def test_config_help_includes_controller_bench_workflow_alias():
+    if not _has_pro_config_help():
+        pytest.skip("controller-bench help is a Pro surface")
+
     text = format_config_help("controller bench")
 
     assert "controller_bench" in text

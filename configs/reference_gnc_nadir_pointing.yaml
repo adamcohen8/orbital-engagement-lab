@@ -1,0 +1,73 @@
+scenario_name: reference_gnc_nadir_pointing
+scenario_description: Maintained nadir-pointing quaternion PD reference scenario.
+metadata:
+  owner: public
+  public_surface: reference-gnc
+  support_level: supported
+objects:
+  vehicle:
+    enabled: true
+    kind: satellite
+    role: vehicle
+    specs:
+      mass_kg: 100.0
+      attitude:
+        mass_properties:
+          inertia_kg_m2:
+          - 20.0
+          - 25.0
+          - 30.0
+          inertia_reference_point: center_of_mass
+    initial_state:
+      position_eci_km:
+      - 7000.0
+      - 0.0
+      - 0.0
+      velocity_eci_km_s:
+      - 0.0
+      - 7.546
+      - 0.0
+      attitude_quat_bn:
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      angular_rate_body_rad_s:
+      - 0.0
+      - 0.0
+      - 0.0
+    flight_software:
+      stack: fsw.attitude_reference
+      hardware_profile: hardware.ideal_wrench.v1
+      params:
+        reference_mode: nadir
+simulator:
+  duration_s: 30.0
+  dt_s: 1.0
+  dynamics:
+    orbit:
+      model: two_body
+    attitude:
+      enabled: true
+      attitude_substep_s: 0.1
+  termination:
+    earth_impact_enabled: false
+  plugin_validation:
+    strict: true
+outputs:
+  output_dir: outputs/reference_gnc_nadir_pointing
+  mode: save
+  stats:
+    print_summary: false
+    save_json: true
+    save_full_log: true
+    controller_debug: false
+  plots:
+    enabled: false
+    figure_ids: []
+  animations:
+    enabled: false
+    types: []
+  review:
+    enabled: true
+    detail: standard

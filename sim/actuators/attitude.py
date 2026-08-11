@@ -63,16 +63,21 @@ class AttitudeActuator(Actuator):
     cmg_torque_nm: np.ndarray = field(default_factory=lambda: np.zeros(3))
 
     def apply(self, command: Command, limits: dict, dt_s: float) -> Command:
-        torque = np.array(command.torque_body_nm, dtype=float)
+        requested_torque = np.array(command.torque_body_nm, dtype=float)
+        allocated_torque = np.zeros(3, dtype=float)
+        auxiliary_torque = np.zeros(3, dtype=float)
+        has_primary_device = False
         mode_flags = dict(command.mode_flags)
         pre_step_wheel_momentum_nms = np.array(self.wheel_momentum_nms, dtype=float).reshape(3)
 
         if self.reaction_wheels is not None:
-            torque, rw_diag = self._apply_reaction_wheels(
-                torque_body_cmd_nm=torque,
+            wheel_torque, rw_diag = self._apply_reaction_wheels(
+                torque_body_cmd_nm=requested_torque - allocated_torque,
                 dt_s=dt_s,
                 mode_flags=mode_flags,
             )
+            allocated_torque += wheel_torque
+            has_primary_device = True
             mode_flags.update(rw_diag)
 
         if self.wheel_desaturation is not None and self.reaction_wheels is not None:
@@ -80,24 +85,42 @@ class AttitudeActuator(Actuator):
             if np.linalg.norm(pre_step_wheel_momentum_nms) > np.linalg.norm(h_now):
                 h_now = pre_step_wheel_momentum_nms
             unload_torque, desat_diag = self._desaturation_torque(h_now)
-            torque = torque + unload_torque
+            auxiliary_torque += unload_torque
             mode_flags.update(desat_diag)
 
         if self.control_moment_gyros is not None:
-            torque, cmg_diag = self._apply_control_moment_gyros(torque, dt_s=dt_s)
+            cmg_torque, cmg_diag = self._apply_control_moment_gyros(
+                requested_torque - allocated_torque,
+                dt_s=dt_s,
+            )
+            allocated_torque += cmg_torque
+            has_primary_device = True
             mode_flags.update(cmg_diag)
 
         if self.thruster_pulse is not None:
             tp = self.thruster_pulse
-            torque = np.clip(torque, -tp.max_torque_nm, tp.max_torque_nm)
+            pulse_torque = np.clip(
+                requested_torque - allocated_torque,
+                -tp.max_torque_nm,
+                tp.max_torque_nm,
+            )
             if tp.pulse_quantum_s > 0.0:
                 pulses = np.round(dt_s / tp.pulse_quantum_s)
                 scale = 0.0 if pulses <= 0 else pulses * tp.pulse_quantum_s / dt_s
-                torque *= min(float(scale), 1.0)
+                pulse_torque *= min(float(scale), 1.0)
+            allocated_torque += pulse_torque
+            has_primary_device = True
 
         if self.magnetorquers is not None:
-            torque, mt_diag = self._apply_magnetorquers(torque, mode_flags)
+            mt_torque, mt_diag = self._apply_magnetorquers(
+                requested_torque - allocated_torque,
+                mode_flags,
+            )
+            allocated_torque += mt_torque
+            has_primary_device = True
             mode_flags.update(mt_diag)
+
+        torque = (allocated_torque if has_primary_device else requested_torque) + auxiliary_torque
 
         return Command(
             thrust_eci_km_s2=np.array(command.thrust_eci_km_s2, dtype=float),
@@ -222,18 +245,25 @@ class AttitudeActuator(Actuator):
         h_next = np.clip(j_kg_m2 * omega_next, -max_momentum_nms, max_momentum_nms)
         omega_next = h_next / j_kg_m2
 
+        # Clipping can reduce the actual momentum change below the requested
+        # net wheel torque.  Couple body torque to the realized momentum delta
+        # so saturation cannot create angular impulse from nowhere.
+        realized_tau_net = (
+            (h_next - h_now) / dt_s if dt_s > 0.0 else tau_net.copy()
+        )
+
         self.wheel_motor_torque_nm = tau_motor_eff
         self.wheel_speed_rad_s = omega_next
         self.wheel_momentum_wheels_nms = h_next
         self.wheel_momentum_nms = g @ h_next
 
-        torque_body_nm = -(g @ tau_net)
+        torque_body_nm = -(g @ realized_tau_net)
         diag = {
             "rw_num_wheels": int(n_wheels),
             "rw_torque_cmd_nm": tau_cmd.tolist(),
             "rw_motor_torque_nm": tau_motor_eff.tolist(),
             "rw_torque_applied_nm": tau_motor_eff.tolist(),
-            "rw_net_wheel_torque_nm": tau_net.tolist(),
+            "rw_net_wheel_torque_nm": realized_tau_net.tolist(),
             "rw_body_torque_applied_nm": torque_body_nm.tolist(),
             "rw_speed_rad_s": omega_next.tolist(),
             "rw_momentum_wheels_nms": h_next.tolist(),

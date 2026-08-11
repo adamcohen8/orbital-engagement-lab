@@ -201,6 +201,13 @@ Recommended columns:
 - `summary_json_path`
 - `run_log_json_path`
 
+`generated_utc` is provenance-only and is empty by default so identical review
+content remains byte-reproducible. Set `OEL_GENERATED_UTC` to an explicit ISO
+timestamp when a release or operator workflow needs a recorded generation time;
+semantic parity checks must not derive physics identity from that field. Interchange
+adapters map the empty reproducibility value to a valid deterministic timestamp in
+product envelopes whose versioned schemas require one.
+
 ### `objects`
 
 One row per active simulation object.
@@ -316,6 +323,25 @@ Recommended columns:
 
 Future versions may add RIC components for pair-aware review. If both ECI and
 RIC components are present, column names must make the frame explicit.
+
+### GNC decision tables
+
+Standard review runs record compact GNC decisions even when
+`outputs.stats.controller_debug` is false:
+
+- `controller_decisions`: controller/mission identities, requested and applied
+  acceleration/torque norms, burn state, saturation, deadlines, and field
+  provenance;
+- `mission_modes`: strategy, execution, phase, and mission-executive mode;
+- `mission_transitions`: fired executive transitions with trigger evidence;
+- `command_gates`: alignment, fuel, actuator, and deadline gating outcomes.
+
+These are decision and continuity records, not independent proof of controller
+stability or mission safety. Detailed beliefs and raw commands remain in the
+opt-in `controller_debug_by_object` payload when engineering debug is enabled.
+
+Useful saved queries are `controller_decisions`, `mission_mode_timeline`,
+`mission_transitions`, and `command_gate_activity`.
 
 ### `attitude_error`
 

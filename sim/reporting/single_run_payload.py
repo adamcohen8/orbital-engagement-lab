@@ -6,7 +6,12 @@ from typing import Any
 import numpy as np
 
 from sim.analysis.orbital_delivery import build_orbital_delivery_summary
-from sim.config import SimulationScenarioConfig, default_pair_object_ids, default_reference_object_id
+from sim.config import (
+    SimulationScenarioConfig,
+    default_pair_object_ids,
+    default_reference_object_id,
+    iter_object_sections,
+)
 from sim.dynamics.orbit.frames import frame_context_from_mapping
 from sim.ground_stations import evaluate_ground_station_access, evaluate_ground_station_measurements
 
@@ -27,6 +32,8 @@ class SingleRunPayloadContext:
     knowledge_measurement_hist: dict[str, dict[str, np.ndarray]]
     bridge_hist: dict[str, list[dict[str, Any]]]
     controller_debug_hist: dict[str, list[dict[str, Any]]]
+    command_decision_hist: dict[str, list[dict[str, Any]]]
+    flight_software_evidence: dict[str, dict[str, Any]]
     rocket_throttle_cmd: np.ndarray
     rocket_metrics: dict[str, np.ndarray]
     reentry_metrics: dict[str, dict[str, np.ndarray]]
@@ -184,6 +191,44 @@ def _summarize_actuator_diagnostics(controller_debug_hist: dict[str, list[dict[s
     return summary
 
 
+def _summarize_fsw_actuator_realizations(
+    evidence_by_object: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """Project typed v2 realization evidence into the existing report summary."""
+
+    summary: dict[str, Any] = {}
+    for object_id, evidence in dict(evidence_by_object or {}).items():
+        rows = [dict(item or {}) for item in list(dict(evidence or {}).get("realizations", []) or [])]
+        if not rows:
+            continue
+        force_norms = [
+            float(np.linalg.norm(np.asarray(row.get("realized_force_n", (0.0, 0.0, 0.0)), dtype=float)))
+            for row in rows
+        ]
+        continuous_force_norms = [
+            norm
+            for row, norm in zip(rows, force_norms, strict=True)
+            if any(
+                str(field.get("name", "")) == "throttle"
+                for field in list(row.get("device_state", []) or [])
+                if isinstance(field, dict)
+            )
+        ]
+        summary[str(object_id)] = {
+            "actuator_stack_samples": len(rows),
+            "fault_stuck_off_samples": 0,
+            "rcs_active_samples": 0,
+            "magnetorquer_active_samples": 0,
+            "cmg_active_samples": 0,
+            "wheel_desaturation_samples": 0,
+            "max_gimbal_angle_rad": 0.0,
+            "max_commanded_rcs_thruster_force_n": 0.0,
+            "max_electric_propulsion_thrust_n": max(continuous_force_norms, default=0.0),
+            "saturated_samples": sum(bool(row.get("saturated", False)) for row in rows),
+        }
+    return summary
+
+
 def _summarize_ground_station_measurements(measurements: dict[str, Any]) -> dict[str, Any]:
     summary: dict[str, Any] = {}
     for station_id, station_payload_raw in sorted(dict(measurements or {}).items()):
@@ -304,6 +349,11 @@ def build_single_run_payload(context: SingleRunPayloadContext) -> dict[str, Any]
     )
     reference_object_id = default_reference_object_id(context.cfg, available_ids=context.object_ids)
     primary_pair = default_pair_object_ids(context.cfg, available_ids=context.object_ids)
+    object_runtime_profiles = {
+        str(object_id): str(getattr(section, "runtime_profile", "flight_software") or "flight_software")
+        for object_id, section in iter_object_sections(context.cfg)
+        if str(object_id) in context.object_ids
+    }
     summary = {
         "scenario_name": context.cfg.scenario_name,
         "scenario_description": context.cfg.scenario_description,
@@ -330,7 +380,11 @@ def build_single_run_payload(context: SingleRunPayloadContext) -> dict[str, Any]
         "ground_station_measurement_summary": _summarize_ground_station_measurements(ground_station_measurements),
         "object_initialization": dict(context.object_initialization),
         "object_propagation": dict(context.object_propagation),
-        "actuator_diagnostics_summary": _summarize_actuator_diagnostics(context.controller_debug_hist),
+        "object_runtime_profiles": object_runtime_profiles,
+        "actuator_diagnostics_summary": {
+            **_summarize_actuator_diagnostics(context.controller_debug_hist),
+            **_summarize_fsw_actuator_realizations(context.flight_software_evidence),
+        },
         "plot_outputs": {},
         "animation_outputs": {},
     }
@@ -402,8 +456,11 @@ def build_single_run_payload(context: SingleRunPayloadContext) -> dict[str, Any]
         "ground_station_measurements": ground_station_measurements,
         "object_initialization": dict(context.object_initialization),
         "object_propagation": dict(context.object_propagation),
+        "object_runtime_profiles": object_runtime_profiles,
         "bridge_events_by_object": context.bridge_hist,
         "controller_debug_by_object": context.controller_debug_hist,
+        "command_decisions_by_object": context.command_decision_hist,
+        "flight_software_evidence_by_object": context.flight_software_evidence,
         "rocket_throttle_cmd": context.rocket_throttle_cmd.tolist(),
         "rocket_metrics": {k: v.tolist() for k, v in context.rocket_metrics.items()},
         "reentry_metrics_by_object": {

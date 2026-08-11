@@ -12,10 +12,16 @@ from .dashboard_overlays import DashboardOverlayMixin
 from .dashboard_camera import DashboardCameraMixin
 from .dashboard_text import DashboardTextMixin
 
+
 @dataclass
 class PygameRPODashboard(
-    DashboardStateMixin, DashboardLayoutMixin, DashboardPredictionMixin,
-    DashboardHUDMixin, DashboardOverlayMixin, DashboardCameraMixin, DashboardTextMixin,
+    DashboardStateMixin,
+    DashboardLayoutMixin,
+    DashboardPredictionMixin,
+    DashboardHUDMixin,
+    DashboardOverlayMixin,
+    DashboardCameraMixin,
+    DashboardTextMixin,
 ):
     target_object_id: str = "target"
     chaser_object_id: str = "chaser"
@@ -84,5 +90,18 @@ class PygameRPODashboard(
     plot_view_modes: dict[str, str] = field(default_factory=dict)
     mission_time_budget_s: float | None = None
     frame_convention: FrameConvention = FrameConvention()
+    # New dashboard options stay after the original constructor surface so
+    # existing positional callers retain their historical bindings.
+    show_coast_prediction: bool = True
+    chaser_sprite_ri_path: Path | str | None = None
+    chaser_sprite_rc_path: Path | str | None = None
+    chaser_sprite_ri_size_scale: float = 1.0
+    chaser_sprite_ri_max_size_px: int = 72
+    aerodynamic_control_enabled: bool = False
+    aerodynamic_ballistic_coefficient_kg_m2: float = 100.0
+    aerodynamic_ballistic_coefficient_min_kg_m2: float = 40.0
+    aerodynamic_ballistic_coefficient_max_kg_m2: float = 200.0
+    aerodynamic_lift_bank_angle_deg: float = 0.0
+    aerodynamic_ri_pitch_max_deg: float = 24.0
 
     pass

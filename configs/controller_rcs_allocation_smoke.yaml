@@ -3,12 +3,14 @@ metadata:
   owner: public
   public_surface: public-actuator
   support_level: demonstration
-scenario_description: Local smoke scenario for the public RCSAllocationAwareController.
+scenario_description: V2 physical RCS allocation, pulse-command, realization, and propellant-flow smoke.
 objects:
   target:
     enabled: true
     specs:
       mass_kg: 1000.0
+      dry_mass_kg: 999.0
+      fuel_mass_kg: 1.0
       actuators:
         enabled: true
         orbital:
@@ -44,45 +46,24 @@ objects:
       - 0.0
       - 0.0
       - 0.0
-    orbit_control:
-      kind: python
-      module: sim.control.orbit.rcs_allocator
-      class_name: RCSAllocationAwareController
-      params:
-        mass_kg: 1000.0
-        allocation_mode: force_only
-        thrusters:
-        - name: rcs-plus-x
-          position_body_m:
-          - 0.0
-          - 0.0
-          - 0.0
-          force_direction_body:
-          - 1.0
-          - 0.0
-          - 0.0
-          max_thrust_n: 0.5
-        base_controller:
-          module: sim.control.orbit.baseline
-          class_name: StationkeepingController
-          params:
-            target_state:
-            - 7001.0
-            - 0.0
-            - 0.0
-            - 0.0
-            - 7.5
-            - 0.0
-            kp_pos: 0.001
-            kd_vel: 0.0
-            max_accel_km_s2: 0.001
-    attitude_control:
-      kind: python
-      module: sim.control.attitude.zero_torque
-      class_name: ZeroTorqueController
-      params: {}
     role: target
     kind: satellite
+    flight_software:
+      stack: fsw.orbit_reference
+      hardware_profile: hardware.rcs.v1
+      params:
+        max_acceleration_m_s2: 0.001
+        max_force_n: 0.5
+        translation_mode: scheduled_burn
+        scheduled_burns:
+        - start_time_s: 0.0
+          duration_s: 5.0
+          delta_v_m_s: [0.001, 0.0, 0.0]
+          frame: eci
+        rcs_thrusters:
+        - thruster_id: rcs-plus-x
+          direction_body: [1.0, 0.0, 0.0]
+          max_thrust_n: 0.5
 simulator:
   duration_s: 5.0
   dt_s: 1.0

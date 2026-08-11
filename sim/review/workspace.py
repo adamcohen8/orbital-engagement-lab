@@ -108,6 +108,8 @@ class ReviewWorkspace:
         *,
         max_rows: int = 1000,
         max_vm_steps: int = 250_000,
+        max_value_bytes: int | None = None,
+        max_result_bytes: int | None = None,
     ) -> ReviewQueryResult:
         statement = _validate_select_sql(sql)
         limit = int(max(max_rows, 1))
@@ -115,6 +117,8 @@ class ReviewWorkspace:
         params = () if parameters is None else parameters
         try:
             with closing(self._connect(authorize=True)) as conn:
+                if max_value_bytes is not None and hasattr(conn, "setlimit"):
+                    conn.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, max(1, int(max_value_bytes)))
                 steps = 0
 
                 def _abort_long_query() -> int:
@@ -124,20 +128,38 @@ class ReviewWorkspace:
 
                 conn.set_progress_handler(_abort_long_query, 1000)
                 cursor = conn.execute(statement, params)
-                rows = cursor.fetchmany(limit + 1)
+                columns = [str(item[0]) for item in (cursor.description or [])]
+                rows: list[dict[str, Any]] = []
+                result_bytes = 0
+                truncated = False
+                for _index in range(limit + 1):
+                    row = cursor.fetchone()
+                    if row is None:
+                        break
+                    if _index == limit:
+                        truncated = True
+                        break
+                    converted: dict[str, Any] = {}
+                    for column in columns:
+                        value = row[column]
+                        value_bytes = _value_size_bytes(value)
+                        if max_value_bytes is not None and value_bytes > int(max_value_bytes):
+                            raise ReviewQueryError("Review query value exceeds the per-value byte budget.")
+                        result_bytes += len(column.encode("utf-8")) + value_bytes
+                        if max_result_bytes is not None and result_bytes > int(max_result_bytes):
+                            raise ReviewQueryError("Review query result exceeds the response-size budget (aggregate bytes).")
+                        converted[column] = value
+                    rows.append(converted)
                 conn.set_progress_handler(None, 0)
         except sqlite3.Error as exc:
             message = str(exc)
             if "interrupted" in message.lower():
                 message = "Review query exceeded the execution step budget."
             raise ReviewQueryError(message) from exc
-        columns = [str(item[0]) for item in (cursor.description or [])]
-        truncated = len(rows) > limit
-        visible_rows = rows[:limit]
         return ReviewQueryResult(
             columns=columns,
-            rows=[{column: row[column] for column in columns} for row in visible_rows],
-            row_count=len(visible_rows),
+            rows=rows,
+            row_count=len(rows),
             truncated=truncated,
         )
 
@@ -150,6 +172,15 @@ class ReviewWorkspace:
             conn.set_authorizer(_read_only_authorizer)
         return conn
 
+
+def _value_size_bytes(value: Any) -> int:
+    if value is None:
+        return 4
+    if isinstance(value, bytes):
+        return len(value)
+    if isinstance(value, str):
+        return len(value.encode("utf-8"))
+    return len(str(value).encode("utf-8"))
 
 def _validate_select_sql(sql: str) -> str:
     statement = str(sql or "").strip()

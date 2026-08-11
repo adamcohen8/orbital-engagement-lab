@@ -3,19 +3,22 @@ metadata:
   owner: public
   public_surface: public-actuator
   support_level: demonstration
-scenario_description: Local smoke scenario for the public GimbaledThrusterController.
+scenario_description: V2 physical continuous-engine smoke for bounded gimbal allocation and realization.
 objects:
   target:
     enabled: true
     specs:
       mass_kg: 500.0
+      dry_mass_kg: 499.0
+      fuel_mass_kg: 1.0
+      isp_s: 300.0
       actuators:
         enabled: true
         orbital:
           max_thrust_n: 1.0
           gimbaled_thruster:
             neutral_direction_body:
-            - -1.0
+            - 1.0
             - 0.0
             - 0.0
             position_body_m:
@@ -42,37 +45,21 @@ objects:
       - 0.0
       - 0.0
       - 0.0
-    orbit_control:
-      kind: python
-      module: sim.control.orbit.gimbaled_thruster
-      class_name: GimbaledThrusterController
-      params:
-        neutral_direction_body:
-        - -1.0
-        - 0.0
-        - 0.0
-        max_gimbal_angle_rad: 0.0872664626
-        base_controller:
-          module: sim.control.orbit.baseline
-          class_name: StationkeepingController
-          params:
-            target_state:
-            - 7001.0
-            - 0.0
-            - 0.0
-            - 0.0
-            - 7.5
-            - 0.0
-            kp_pos: 0.001
-            kd_vel: 0.0
-            max_accel_km_s2: 0.001
-    attitude_control:
-      kind: python
-      module: sim.control.attitude.zero_torque
-      class_name: ZeroTorqueController
-      params: {}
     role: target
     kind: satellite
+    flight_software:
+      stack: fsw.orbit_reference
+      hardware_profile: hardware.continuous_engine.v1
+      params:
+        max_acceleration_m_s2: 0.01
+        max_force_n: 1.0
+        gimbal_limit_rad: 0.08726646259971647
+        translation_mode: scheduled_burn
+        scheduled_burns:
+        - start_time_s: 0.0
+          duration_s: 5.0
+          delta_v_m_s: [0.001, 0.00005, 0.0]
+          frame: eci
 simulator:
   duration_s: 5.0
   dt_s: 1.0

@@ -7,6 +7,7 @@ from typing import Any, Callable
 import yaml
 
 from sim.config import SimulationScenarioConfig, load_simulation_yaml, validate_scenario_plugins
+from sim.security import ConfigPathPolicy
 from sim.single_run import _coerce_noninteractive_for_automation, _run_single_config, _SingleRunEngine
 
 StepCallback = Callable[[int, int], None]
@@ -17,8 +18,15 @@ BatchProgressCallback = Callable[[dict[str, Any]], None]
 class SimulationExecutionService:
     """Public-core execution service for deterministic single-run scenarios."""
 
-    def load_config(self, config_path: str | Path) -> SimulationScenarioConfig:
-        return _coerce_noninteractive_for_automation(load_simulation_yaml(config_path))
+    def load_config(
+        self,
+        config_path: str | Path,
+        *,
+        path_policy: ConfigPathPolicy | None = None,
+    ) -> SimulationScenarioConfig:
+        return _coerce_noninteractive_for_automation(
+            load_simulation_yaml(config_path, path_policy=path_policy)
+        )
 
     def validate_config(self, cfg: SimulationScenarioConfig) -> list[str]:
         strict_plugins = bool(cfg.simulator.plugin_validation.get("strict", True))
@@ -77,13 +85,14 @@ class SimulationExecutionService:
         self,
         config_path: str | Path,
         *,
+        path_policy: ConfigPathPolicy | None = None,
         step_callback: StepCallback | None = None,
         batch_callback: BatchCallback | None = None,
         batch_progress_callback: BatchProgressCallback | None = None,
     ) -> dict[str, Any]:
         del batch_callback, batch_progress_callback
         path = Path(config_path).expanduser().resolve()
-        cfg = self.load_config(path)
+        cfg = self.load_config(path, path_policy=path_policy)
         errors = self.validate_config(cfg)
         if errors:
             msg = "Plugin validation failed:\n- " + "\n- ".join(errors)
@@ -179,12 +188,14 @@ def run_simulation_scenario(
 def run_simulation_config_file(
     config_path: str | Path,
     *,
+    path_policy: ConfigPathPolicy | None = None,
     step_callback: StepCallback | None = None,
     batch_callback: BatchCallback | None = None,
     batch_progress_callback: BatchProgressCallback | None = None,
 ) -> dict[str, Any]:
     return _DEFAULT_SERVICE.run_config_file(
         config_path,
+        path_policy=path_policy,
         step_callback=step_callback,
         batch_callback=batch_callback,
         batch_progress_callback=batch_progress_callback,

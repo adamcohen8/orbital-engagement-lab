@@ -1,0 +1,63 @@
+scenario_name: reference_gnc_timed_burn
+scenario_description: Maintained reference timed finite-burn command module with review
+  evidence.
+metadata:
+  owner: public
+  public_surface: reference-gnc
+  support_level: supported
+objects:
+  vehicle:
+    enabled: true
+    kind: satellite
+    role: vehicle
+    specs:
+      mass_kg: 100.0
+    initial_state:
+      position_eci_km:
+      - 7000.0
+      - 0.0
+      - 0.0
+      velocity_eci_km_s:
+      - 0.0
+      - 7.546
+      - 0.0
+    flight_software:
+      stack: fsw.orbit_reference
+      hardware_profile: hardware.ideal_wrench.v1
+      params:
+        max_acceleration_m_s2: 0.02
+        translation_mode: scheduled_burn
+        scheduled_burns:
+          - start_time_s: 10.0
+            duration_s: 5.0
+            frame: eci
+            delta_v_m_s: [0.1, 0.0, 0.0]
+simulator:
+  duration_s: 45.0
+  dt_s: 5.0
+  dynamics:
+    orbit:
+      model: two_body
+    attitude:
+      enabled: false
+  termination:
+    earth_impact_enabled: false
+  plugin_validation:
+    strict: true
+outputs:
+  output_dir: outputs/reference_gnc_timed_burn
+  mode: save
+  stats:
+    print_summary: false
+    save_json: true
+    save_full_log: true
+    controller_debug: false
+  plots:
+    enabled: false
+    figure_ids: []
+  animations:
+    enabled: false
+    types: []
+  review:
+    enabled: true
+    detail: standard

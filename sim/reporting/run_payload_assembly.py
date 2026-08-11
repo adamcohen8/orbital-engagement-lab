@@ -244,6 +244,14 @@ class SingleRunPayloadAssembler:
                 controller_debug_hist={
                     key: self._events_through_termination(rows) for key, rows in engine.controller_debug_hist.items()
                 },
+                command_decision_hist={
+                    key: self._events_through_termination(rows) for key, rows in engine.command_decision_hist.items()
+                },
+                flight_software_evidence={
+                    object_id: runtime.review_evidence()
+                    for object_id, agent in engine.agents.items()
+                    if (runtime := getattr(agent, "flight_software_runtime", None)) is not None
+                },
                 rocket_throttle_cmd=np.asarray(parts.rocket_metrics.get("throttle_cmd", np.array([]))),
                 rocket_metrics=parts.rocket_metrics,
                 reentry_metrics=parts.reentry_metrics,
@@ -312,6 +320,7 @@ class SingleRunPayloadAssembler:
                     key: self._events_through_termination(rows) for key, rows in engine.bridge_hist.items()
                 },
                 object_state_frames=dict(payload.get("object_state_frames", {}) or {}),
+                extra_artifacts=dict(payload.get("extra_artifacts", {}) or {}),
             ),
         )
 

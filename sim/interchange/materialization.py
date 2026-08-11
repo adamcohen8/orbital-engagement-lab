@@ -87,6 +87,25 @@ def materialize_onp(
         write_handoff_manifest(manifest, manifest_target)
         return _result("blocked", destination, manifest_target, manifest, product_report.to_dict())
 
+    supported_kinds = {"oel.state_estimate", "oel.completed_run_state"}
+    if product.get("product_kind") not in supported_kinds:
+        issue = {
+            "code": "compatibility.product_kind",
+            "path": "$.product_kind",
+            "message": (
+                "Generic ONP materialization accepts only state estimates and completed-run states; "
+                "use the dedicated adapter for this product kind."
+            ),
+        }
+        manifest = _failed_manifest(
+            base_manifest,
+            output_status="blocked",
+            failures=[issue],
+            next_action=issue["message"],
+        )
+        write_handoff_manifest(manifest, manifest_target)
+        return _result("blocked", destination, manifest_target, manifest, product_report.to_dict())
+
     compatibility_errors = _onp_compatibility_errors(product)
     if compatibility_errors:
         manifest = _failed_manifest(
@@ -375,16 +394,14 @@ def build_onp_scenario(
                 "enabled": True,
                 "role": str(obj["role"]),
                 "kind": str(obj["kind"]),
-                "specs": deepcopy(dict(payload.get("object_specs", {}) or {})),
+                "specs": _continued_object_specs(payload),
                 "initial_state": {
                     "position_eci_km": values[:3],
                     "velocity_eci_km_s": values[3:],
                 },
-                "orbit_control": {
-                    "kind": "python",
-                    "module": "sim.control.orbit.zero_controller",
-                    "class_name": "ZeroController",
-                    "params": {},
+                "flight_software": {
+                    "stack": "fsw.passive",
+                    "hardware_profile": "hardware.passive.v1",
                 },
             }
         },
@@ -530,6 +547,22 @@ def _onp_compatibility_errors(product: Mapping[str, Any]) -> list[dict[str, str]
     return errors
 
 
+def _continued_object_specs(payload: Mapping[str, Any]) -> dict[str, Any]:
+    specs = deepcopy(dict(payload.get("object_specs", {}) or {}))
+    resource = dict(payload.get("resource_state", {}) or {})
+    if not resource:
+        return specs
+    mass_kg = float(resource["mass_kg"])
+    specs["mass_kg"] = mass_kg
+    if resource.get("propellant_state") == "tracked":
+        specs["dry_mass_kg"] = float(resource["dry_mass_kg"])
+        specs["fuel_mass_kg"] = float(resource["fuel_mass_kg"])
+    else:
+        specs.pop("dry_mass_kg", None)
+        specs.pop("fuel_mass_kg", None)
+    return specs
+
+
 def _onp_cadence_override(product: Mapping[str, Any], *, dt_s: float) -> dict[str, Any] | None:
     assumptions = dict(dict(product.get("payload", {}) or {}).get("model_assumptions", {}) or {})
     force = dict(assumptions.get("orbit_force_model", {}) or {})
@@ -592,7 +625,7 @@ def _manifest_base(
             "dt_s": float(dt_s),
         },
         "defaults_applied": {
-            "orbit_control": "ZeroController",
+            "flight_software": "fsw.passive@hardware.passive.v1",
             "attitude_enabled": False,
             "review_detail": "standard",
             "plots_enabled": False,

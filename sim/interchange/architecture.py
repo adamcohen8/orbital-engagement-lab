@@ -96,4 +96,14 @@ INTERCHANGE_CAPABILITY_FAMILIES = (
             "materialize_snapshot_onp",
         ),
     ),
+    InterchangeCapabilityFamily(
+        name="satellite_checkpoints",
+        module="sim.interchange.satellite_checkpoints",
+        facade="sim.handoff",
+        capabilities=(
+            "SatelliteCheckpointError",
+            "export_satellite_checkpoint",
+            "materialize_satellite_checkpoint",
+        ),
+    ),
 )

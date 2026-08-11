@@ -145,16 +145,20 @@ Common object fields:
 - `specs`
 - `initial_state`
 - `reference_orbit`
-- `guidance`
-- `base_guidance`
-- `guidance_modifiers`
-- `orbit_control`
-- `attitude_control`
-- `mission_strategy`
-- `mission_execution`
-- `mission_objectives`
-- `bridge`
 - `knowledge`
+- `flight_software` (satellites)
+- rocket guidance/vehicle fields documented by the rocket contract (rockets)
+
+Satellite mission loads use `flight_software.mission_load`. There is no
+top-level satellite `mission` field, and bridge adapters use the normalized
+`flight_software.module`, `flight_software.class_name`, and
+`flight_software.params` fields.
+
+The retired satellite v1 fields `guidance`, `base_guidance`,
+`guidance_modifiers`, `orbit_control`, `attitude_control`, `mission_strategy`,
+`mission_execution`, `mission_objectives`, and top-level `bridge` are rejected.
+Use the canonical complete `flight_software` boundary instead; bridge settings,
+when entitled, are nested under that boundary.
 
 `initial_state` supports these orbital initialization forms for satellite
 objects:
@@ -190,6 +194,15 @@ numerical special-perturbations force model; continuous OGP general-perturbation
 propagation requires object-level `propagation_method: general` with
 `general.model: sgp4`.
 
+Satellite `runtime_profile` accepts `flight_software` (the default) or
+`trajectory_only`. The default preserves the complete-stack boundary and
+normalizes an omitted `flight_software` section to `fsw.passive`.
+`trajectory_only` is an explicit dynamics-only posture: the configured ONP/OGP
+propagation and force models remain active, but no onboard sensors, knowledge,
+flight-software runtime, devices, commands, or FSW evidence are created. A
+trajectory-only object must not declare `flight_software` or object-owned
+`knowledge`; other objects may still observe its truth state.
+
 Preset merge contract:
 
 - Presets load before local object overrides.
@@ -220,10 +233,9 @@ Preset resolution order:
 Python plugin pointer shape:
 
 ```yaml
-orbit_control:
-  kind: "python"
-  module: "sim.control.orbit.zero_controller"
-  class_name: "ZeroController"
+flight_software:
+  module: "my_package.flight_software"
+  class_name: "MySatelliteFlightSoftware"
   params: {}
 ```
 
@@ -231,8 +243,9 @@ Pointer contract:
 
 - `module` must be an importable Python module.
 - A class pointer uses `class_name`.
-- A function pointer uses `function`, but only plugin types that explicitly
-  allow functions may use it.
+- A function pointer uses `function`, but only pointer roles that explicitly
+  allow functions may use it. The complete flight-software boundary requires a
+  class implementing `SatelliteFlightSoftware`.
 - `params` must be a mapping.
 - File-path plugin loading is not part of the scenario YAML contract.
 
@@ -356,7 +369,7 @@ Review store contract:
 Public-core scenarios should use:
 
 - deterministic single-run object sections,
-- public controller/estimator/mission modules,
+- public complete flight-software stacks or an importable custom complete stack,
 - public dynamics settings,
 - public output settings,
 - curated examples under `examples/configs`.

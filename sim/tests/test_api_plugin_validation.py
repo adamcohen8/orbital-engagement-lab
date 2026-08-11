@@ -18,9 +18,10 @@ def _invalid_plugin_config(output_dir: Path) -> dict:
                 "position_eci_km": [7000.0, 0.0, 0.0],
                 "velocity_eci_km_s": [0.0, 7.5, 0.0],
             },
-            "orbit_control": {
+            "flight_software": {
                 "module": "sim.tests.missing_controller_module",
                 "class_name": "MissingController",
+                "hardware_profile": "hardware.passive.v1",
             },
         },
         "rocket": {"enabled": False},
@@ -44,9 +45,10 @@ def _invalid_plugin_config(output_dir: Path) -> dict:
 class TestApiPluginValidation(unittest.TestCase):
     def test_hosted_validation_never_imports_plugin_modules(self) -> None:
         config = _invalid_plugin_config(Path("outputs/hosted_validation"))
-        config["target"]["orbit_control"] = {
-            "module": "sim.control.orbit.zero_controller",
-            "class_name": "ZeroController",
+        config["target"]["flight_software"] = {
+            "module": "sim.flight_software.reference_stacks",
+            "class_name": "PassiveFlightSoftwareStack",
+            "hardware_profile": "hardware.passive.v1",
         }
         workspace = HostedSimulationWorkspace()
 
@@ -58,7 +60,7 @@ class TestApiPluginValidation(unittest.TestCase):
     def test_hosted_workspace_can_run_a_valid_single_scenario(self) -> None:
         with TemporaryDirectory() as tmpdir:
             config = _invalid_plugin_config(Path(tmpdir))
-            config["target"].pop("orbit_control")
+            config["target"].pop("flight_software")
 
             result = HostedSimulationWorkspace().run(config)
 
@@ -68,17 +70,17 @@ class TestApiPluginValidation(unittest.TestCase):
     def test_hosted_workspace_confines_mapping_outputs_when_root_is_explicit(self) -> None:
         with TemporaryDirectory() as root, TemporaryDirectory() as outside:
             config = _invalid_plugin_config(Path(outside))
-            config["target"].pop("orbit_control")
+            config["target"].pop("flight_software")
 
             with self.assertRaisesRegex(ValueError, "cannot write outside allowed config roots"):
                 HostedSimulationWorkspace(workspace_root=root).run(config)
 
     def test_hosted_workspace_rejects_untrusted_nested_plugin(self) -> None:
         config = _invalid_plugin_config(Path("outputs/hosted_nested_plugin"))
-        config["target"].pop("orbit_control")
-        config["target"]["mission_strategy"] = {
-            "module": "sim.mission.modules",
-            "class_name": "MissionExecutiveStrategy",
+        config["target"]["flight_software"] = {
+            "module": "sim.flight_software.reference_stacks",
+            "class_name": "PassiveFlightSoftwareStack",
+            "hardware_profile": "hardware.passive.v1",
             "params": {
                 "nested": {
                     "module": "pathlib",
@@ -103,9 +105,10 @@ class TestApiPluginValidation(unittest.TestCase):
     def test_requested_plugin_constructor_failure_does_not_silently_coast(self) -> None:
         with TemporaryDirectory() as tmpdir:
             config = _invalid_plugin_config(Path(tmpdir))
-            config["target"]["orbit_control"] = {
-                "module": "sim.control.orbit.hcw_pd",
-                "class_name": "HCWPDController",
+            config["target"]["flight_software"] = {
+                "module": "sim.flight_software.reference_stacks",
+                "class_name": "PassiveFlightSoftwareStack",
+                "hardware_profile": "hardware.passive.v1",
                 "params": {},
             }
             session = SimulationSession.from_config(config)

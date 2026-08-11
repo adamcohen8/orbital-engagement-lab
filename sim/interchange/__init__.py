@@ -35,6 +35,11 @@ from .maneuver_detection import (
 from .materialization import OGPMaterializationError, canonical_scenario_digest, materialize_ogp, materialize_onp
 from .overlays import ScenarioOverlayError, emit_scenario_overlay, load_scenario_overlay
 from .provenance import canonical_json_bytes, compute_manifest_id, compute_product_id, sha256_file
+from .satellite_checkpoints import (
+    SatelliteCheckpointError,
+    export_satellite_checkpoint,
+    materialize_satellite_checkpoint,
+)
 from .scenario_patches import materialize_scenario_patch, select_patch_product
 from .snapshots import CompletedRunSnapshotError, export_completed_run_snapshot, materialize_snapshot_onp
 from .validation import (
@@ -67,6 +72,7 @@ __all__ = [
     "OGPMaterializationError",
     "ManeuverDetectionExportError",
     "ScenarioOverlayError",
+    "SatelliteCheckpointError",
     "QualityDisposition",
     "canonical_json_bytes",
     "canonical_scenario_digest",
@@ -79,6 +85,7 @@ __all__ = [
     "export_completed_run_state",
     "export_completed_run_snapshot",
     "export_maneuver_detection_product",
+    "export_satellite_checkpoint",
     "emit_scenario_overlay",
     "inspect_document",
     "inspect_path",
@@ -88,6 +95,7 @@ __all__ = [
     "materialize_ogp",
     "materialize_scenario_patch",
     "materialize_snapshot_onp",
+    "materialize_satellite_checkpoint",
     "select_patch_product",
     "sha256_file",
     "validate_document",

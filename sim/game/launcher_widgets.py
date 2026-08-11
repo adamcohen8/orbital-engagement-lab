@@ -452,6 +452,85 @@ def _draw_operator_plan_screen(
     _draw_dialog_button(pygame, screen, launch_rect, launch_label, font=small_font, enabled=can_launch, primary=True)
 
 
+def _draw_sandbox_setup_screen(
+    pygame: Any,
+    screen: Any,
+    *,
+    level_title: str,
+    values: list[str],
+    active_index: int,
+    panels: tuple[Any, Any],
+    field_rects: list[Any],
+    launch_rect: Any,
+    cancel_rect: Any,
+    validation_message: str,
+    can_launch: bool,
+    font: Any,
+    small_font: Any,
+    title_font: Any,
+) -> None:
+    from sim.game.runner_models import _SANDBOX_CHASER_RIC_FIELDS, _SANDBOX_TARGET_COE_FIELDS
+
+    width, _height = screen.get_size()
+    screen.fill((12, 16, 22))
+    mode_title = "Sandbox Setup"
+    _text(screen, title_font, mode_title, (54, 30), (238, 242, 248))
+    title_x = 54 + _text_width(title_font, mode_title) + 34
+    _text(
+        screen,
+        title_font,
+        _fit_text_px(level_title, title_font, max(width - title_x - 54, 120)),
+        (title_x, 30),
+        (238, 242, 248),
+    )
+    _text(
+        screen,
+        small_font,
+        "Define the target orbit and the chaser's target-centered rectangular RIC state.",
+        (56, 76),
+        (162, 178, 198),
+    )
+    panel_specs = (
+        (panels[0], "Target Classical Orbital Elements", "Two-body target orbit at scenario epoch"),
+        (panels[1], "Chaser Relative RIC State", "Position in km; relative velocity in m/s"),
+    )
+    all_specs = (_SANDBOX_TARGET_COE_FIELDS, _SANDBOX_CHASER_RIC_FIELDS)
+    for column, (panel, heading, detail) in enumerate(panel_specs):
+        pygame.draw.rect(screen, (18, 24, 32), panel, border_radius=8)
+        pygame.draw.rect(screen, (70, 82, 100), panel, width=1, border_radius=8)
+        _text(screen, font, heading, (panel.x + 18, panel.y + 14), (238, 244, 250))
+        _text(screen, small_font, detail, (panel.x + 18, panel.y + 37), (138, 154, 176))
+        for row, (label, unit, _field) in enumerate(all_specs[column]):
+            index = column * 6 + row
+            rect = field_rects[index]
+            label_text = f"{label} ({unit})" if unit else label
+            _text(
+                screen,
+                small_font,
+                _fit_text_px(label_text, small_font, max(rect.x - panel.x - 28, 70)),
+                (panel.x + 18, rect.y + 8),
+                (190, 202, 218),
+            )
+            active = index == int(active_index)
+            fill = (42, 50, 62) if active else (12, 16, 22)
+            stroke = (238, 184, 92) if active else (74, 88, 106)
+            pygame.draw.rect(screen, fill, rect, border_radius=5)
+            pygame.draw.rect(screen, stroke, rect, width=2 if active else 1, border_radius=5)
+            value = values[index] if index < len(values) else ""
+            _text(
+                screen,
+                small_font,
+                _fit_text_px(value, small_font, max(rect.width - 18, 30)),
+                (rect.x + 9, rect.y + 8),
+                (246, 240, 226) if active else (230, 238, 245),
+            )
+    message = validation_message or "Tab changes fields. Arrow keys move within or between columns."
+    message_color = (245, 126, 126) if validation_message else (138, 154, 176)
+    _text(screen, small_font, message, (56, launch_rect.y + 8), message_color)
+    _draw_dialog_button(pygame, screen, cancel_rect, "Cancel", font=small_font, enabled=True, primary=False)
+    _draw_dialog_button(pygame, screen, launch_rect, "Continue", font=small_font, enabled=can_launch, primary=True)
+
+
 def _draw_operator_objectives_overlay(
     pygame: Any,
     screen: Any,

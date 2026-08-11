@@ -140,6 +140,110 @@ SAVED_REVIEW_QUERIES: dict[str, SavedReviewQuery] = {
         ),
         allow_empty=True,
     ),
+    "controller_decisions": SavedReviewQuery(
+        name="controller_decisions",
+        description="Compact controller decisions, requested/applied commands, and runtime gate status.",
+        sql=(
+            "SELECT time_s, object_id, orbit_controller, attitude_controller, mission_strategy, "
+            "mission_execution, requested_accel_norm_km_s2, applied_accel_norm_km_s2, "
+            "burn_requested, burn_applied, saturated, deadline_missed "
+            "FROM controller_decisions ORDER BY time_s, object_id, decision_index"
+        ),
+    ),
+    "mission_mode_timeline": SavedReviewQuery(
+        name="mission_mode_timeline",
+        description="Mission phase and executive-mode timeline by object.",
+        sql=(
+            "SELECT time_s, object_id, mission_strategy, mission_execution, mission_phase, executive_mode "
+            "FROM mission_modes ORDER BY time_s, object_id, decision_index"
+        ),
+    ),
+    "mission_transitions": SavedReviewQuery(
+        name="mission_transitions",
+        description="Mission-executive transitions and trigger evidence.",
+        sql=(
+            "SELECT time_s, object_id, from_mode, to_mode, trigger, reason, detail_json "
+            "FROM mission_transitions ORDER BY time_s, object_id, decision_index"
+        ),
+        allow_empty=True,
+    ),
+    "command_gate_activity": SavedReviewQuery(
+        name="command_gate_activity",
+        description="Burn requests suppressed or limited by alignment, fuel, actuator, or deadline gates.",
+        sql=(
+            "SELECT time_s, object_id, burn_requested, burn_applied, alignment_error_rad, alignment_ok, "
+            "fuel_depleted, actuator_limited, deadline_missed, gate_reason FROM command_gates "
+            "WHERE gate_reason IS NOT NULL OR burn_requested != burn_applied "
+            "ORDER BY time_s, object_id, decision_index"
+        ),
+        allow_empty=True,
+    ),
+    "fsw_invocation_summary": SavedReviewQuery(
+        name="fsw_invocation_summary",
+        description="GNC v2 stack identity, invocation count, inputs, commands, and telemetry by satellite.",
+        sql=(
+            "SELECT object_id, stack_id, stack_version, COUNT(*) AS invocation_count, "
+            "SUM(input_count) AS input_count, SUM(command_count) AS command_count, "
+            "SUM(telemetry_count) AS telemetry_count FROM fsw_invocations "
+            "GROUP BY object_id, stack_id, stack_version ORDER BY object_id"
+        ),
+        allow_empty=True,
+    ),
+    "fsw_sensor_deliveries": SavedReviewQuery(
+        name="fsw_sensor_deliveries",
+        description="Delivered GNC v2 measurement packets and their source/delivery times.",
+        sql=(
+            "SELECT object_id, invocation_id, packet_source_id, packet_boot_id, packet_sequence, "
+            "source_time_ns, delivery_time_ns, schema FROM fsw_input_events "
+            "WHERE kind = 'measurement' ORDER BY object_id, delivery_time_ns, packet_source_id, packet_sequence"
+        ),
+        allow_empty=True,
+    ),
+    "actuator_command_chain": SavedReviewQuery(
+        name="actuator_command_chain",
+        description="GNC v2 command issue, receipt disposition, and physical realization chain.",
+        sql=(
+            "SELECT c.object_id, c.invocation_id, c.actuator_id, c.command_source_id, "
+            "c.command_boot_id, c.command_sequence, c.issued_time_ns, c.not_before_ns, c.expires_at_ns, "
+            "r.received_time_ns, r.disposition, a.interval_start_ns, a.interval_end_ns, "
+            "a.demand_mode, a.saturated FROM actuator_commands c "
+            "LEFT JOIN actuator_command_receipts r ON r.object_id = c.object_id "
+            "AND r.command_source_id = c.command_source_id AND r.command_boot_id = c.command_boot_id "
+            "AND r.command_sequence = c.command_sequence LEFT JOIN actuator_realization a "
+            "ON a.object_id = c.object_id AND a.command_source_id = c.command_source_id "
+            "AND a.command_boot_id = c.command_boot_id AND a.command_sequence = c.command_sequence "
+            "ORDER BY c.object_id, c.issued_time_ns, c.command_sequence, a.interval_start_ns"
+        ),
+        allow_empty=True,
+    ),
+    "fsw_deadline_misses": SavedReviewQuery(
+        name="fsw_deadline_misses",
+        description="GNC v2 task releases that exceeded their modeled execution budget.",
+        sql=(
+            "SELECT object_id, invocation_id, task_id, release_time_ns, modeled_execution_duration_ns, "
+            "execution_budget_ns FROM fsw_task_timing WHERE deadline_missed = 1 "
+            "ORDER BY object_id, release_time_ns, task_id"
+        ),
+        allow_empty=True,
+    ),
+    "safety_requirement_status": SavedReviewQuery(
+        name="safety_requirement_status",
+        description="Recorded post-run status for every specified flight-software safety requirement.",
+        sql=(
+            "SELECT object_id, invocation_id, requirement_id, satisfied, source, detail_json "
+            "FROM safety_requirement_evidence ORDER BY object_id, requirement_id, invocation_id"
+        ),
+        allow_empty=True,
+    ),
+    "fsw_checkpoint_summary": SavedReviewQuery(
+        name="fsw_checkpoint_summary",
+        description="GNC v2 checkpoint identities and state hashes without exposing opaque state bytes.",
+        sql=(
+            "SELECT object_id, invocation_id, stack_id, stack_version, state_hash_sha256 "
+            "FROM fsw_snapshots ORDER BY object_id, invocation_id"
+        ),
+        allow_empty=True,
+    ),
     "event_log": SavedReviewQuery(
         name="event_log",
         description="Complete ordered termination and runtime event log.",

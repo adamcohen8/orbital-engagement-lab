@@ -295,7 +295,7 @@ def drag_plugin(t_s: float, x_eci: np.ndarray, env: dict, ctx: OrbitContext) -> 
         v_eci_km_s=x_eci[3:],
         t_s=t_s,
         mass_kg=ctx.mass_kg,
-        cd=ctx.cd,
+        cd=float(env.get("drag_coefficient", ctx.cd)),
         density_kg_m3=float(density),
         area_eff_m2=float(env.get("drag_area_m2", ctx.area_m2)),
         drag_frame_model=str(env.get("drag_frame_model", "simple")).strip().lower(),
@@ -536,6 +536,31 @@ class OrbitPropagator:
             "frame_transform": "native",
             "command_acceleration_frame": frame,
         }
+
+    def acceleration_at(
+        self,
+        *,
+        t_s: float,
+        x_eci: np.ndarray,
+        command_accel_eci_km_s2: np.ndarray,
+        env: dict,
+        ctx: OrbitContext,
+    ) -> np.ndarray:
+        """Evaluate the ECI acceleration for one coupled-integrator stage."""
+
+        if self.state_frame != "eci":
+            raise ValueError("stage acceleration is available only for ECI ONP propagation")
+        state = np.asarray(x_eci, dtype=float).reshape(6)
+        acceleration = accel_two_body(state[:3], ctx.mu_km3_s2) + np.asarray(
+            command_accel_eci_km_s2, dtype=float
+        ).reshape(3)
+        accelerate_spherical_harmonics = self._acceleration_enabled() and spherical_harmonics_plugin in self.plugins
+        for plugin in self.plugins:
+            if accelerate_spherical_harmonics and plugin is spherical_harmonics_plugin:
+                acceleration += _accelerated_spherical_harmonics_plugin(t_s, state, env, ctx)
+            else:
+                acceleration += plugin(t_s, state, env, ctx)
+        return acceleration
 
     def propagate(
         self,

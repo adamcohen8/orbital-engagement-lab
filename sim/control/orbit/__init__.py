@@ -75,6 +75,23 @@ _export("sim.control.orbit.rcs_allocator", "RCSAllocationAwareController")
 _export("sim.control.orbit.relative_mpc", "RelativeOrbitMPCController")
 _export("sim.control.orbit.ric_pd", "RICPDTransferController")
 _export("sim.control.orbit.rmoe", "RMOEIfThenController", "estimate_rmoes_from_rect_ric")
+_export(
+    "sim.control.orbit.reference_rpo",
+    "CBarApproachController",
+    "KeepOutStandoffController",
+    "HCWRendezvousPlannerController",
+    "LowThrustPhasingController",
+    "PlaneChangeTrimController",
+    "ProportionalNavigationController",
+    "PassiveSafeRetreatController",
+    "RBarApproachController",
+    "RICApproachController",
+    "RICRelativeHoldController",
+    "RICFlyaroundController",
+    "RICWaypointController",
+    "TerminalBrakingController",
+    "VBarApproachController",
+)
 _export("sim.control.orbit.scheduled_impulse", "ScheduledImpulseController")
 _export("sim.control.orbit.zero_controller", "ZeroController")
 

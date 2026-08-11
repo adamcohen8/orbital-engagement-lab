@@ -45,6 +45,7 @@ class RocketAeroLoads:
     moment_body_nm: np.ndarray
     coeff_force_body: np.ndarray
     coeff_moment_body: np.ndarray
+    drag_coefficient: float
     state: RocketAeroState
 
 
@@ -109,13 +110,17 @@ def compute_aero_loads(
             moment_body_nm=z3.copy(),
             coeff_force_body=z3.copy(),
             coeff_moment_body=z3.copy(),
+            drag_coefficient=0.0,
             state=atmos,
         )
 
     cd = _cd_model(atmos.mach, atmos.alpha_rad, cfg)
     cl = float(cfg.cl_alpha_per_rad) * atmos.alpha_rad
     cy = -float(cfg.cy_beta_per_rad) * atmos.beta_rad
-    c_force = np.array([-cd, cy, -cl], dtype=float)
+    flow_hat = np.array(v_rel_body_m_s, dtype=float).reshape(3)
+    flow_norm = float(np.linalg.norm(flow_hat))
+    flow_hat = np.zeros(3, dtype=float) if flow_norm <= 1.0e-12 else flow_hat / flow_norm
+    c_force = -cd * flow_hat + np.array([0.0, cy, -cl], dtype=float)
     f_body = q * float(cfg.reference_area_m2) * c_force
 
     cm = float(cfg.cm_alpha_per_rad) * atmos.alpha_rad
@@ -132,5 +137,6 @@ def compute_aero_loads(
         moment_body_nm=m_body,
         coeff_force_body=c_force,
         coeff_moment_body=c_moment,
+        drag_coefficient=cd,
         state=atmos,
     )

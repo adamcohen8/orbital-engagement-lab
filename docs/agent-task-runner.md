@@ -226,8 +226,6 @@ Current bundled plot recipes include:
 - `relative_range`: maturity `supported`, table `relative_state`
 - `relative_range_rate`: maturity `supported`, table `relative_state`
 - `burn_activity`: maturity `supported`, table `thrust`
-- `campaign_closest_approach`: maturity `supported`, table `campaign_runs`
-- `sensitivity_effects`: maturity `supported`, table `sensitivity_rankings`
 
 Plot recipes run read-only review SQL and call the review plotting service.
 Generated plot provenance is recorded in `review/generated_artifacts.json`.

@@ -31,17 +31,10 @@ objects:
       - 0.0
       - 0.0
       - 0.0
-    orbit_control:
-      kind: python
-      module: sim.control.orbit.zero_controller
-      class_name: ZeroController
+    flight_software:
+      stack: fsw.passive
+      hardware_profile: hardware.passive.v1
       params: {}
-    attitude_control:
-      kind: python
-      module: sim.control.attitude.zero_torque
-      class_name: ZeroTorqueController
-      params: {}
-    mission_objectives: []
 simulator:
   duration_s: 300.0
   dt_s: 1.0

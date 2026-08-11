@@ -7,10 +7,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from integrations.oel_mcp.contracts import MAX_REVIEW_RESULT_BYTES, MAX_REVIEW_VALUE_BYTES
 from integrations.oel_mcp.execution import complete_manifest, manifest_base, write_execution_manifest
 from sim.agent_task.runner import inspect_output
 
-REPORT_PACKET_SCHEMA = "oel.mcp_report_evidence.v1"
+REPORT_PACKET_SCHEMA = "oel.mcp_report_evidence.v2"
+LEGACY_REPORT_PACKET_SCHEMA = "oel.mcp_report_evidence.v1"
 REPORT_AUDIT_SCHEMA = "oel.mcp_report_audit.v1"
 MAX_REPORT_SOURCE_BYTES = 2_000_000
 MAX_PACKET_ARTIFACTS = 100
@@ -45,6 +47,8 @@ def prepare_report_packet(
         query_names=query_names or None,
         max_rows=max_rows,
         write_packet=False,
+        max_value_bytes=MAX_REVIEW_VALUE_BYTES,
+        max_result_bytes=MAX_REVIEW_RESULT_BYTES,
     )
     artifacts, artifacts_truncated = _artifact_inventory(inspection, source_output_dir=source_output_dir)
     required_artifacts_missing = any(row["required"] and not row["exists"] for row in artifacts)
@@ -77,6 +81,15 @@ def prepare_report_packet(
                 "next_step": "Narrow the source artifact set or prepare multiple explicitly scoped report packets.",
             }
         )
+    execution_provenance = _report_execution_provenance(source_output_dir)
+    if execution_provenance.get("available") and execution_provenance.get("status") != "completed":
+        failure_hints.append(
+            {
+                "code": "source_execution_not_completed",
+                "status": execution_provenance.get("status"),
+                "next_step": "Use a completed run or regenerate the source evidence before report preparation.",
+            }
+        )
     evidence_summary = _evidence_summary(
         source_output_dir=source_output_dir,
         artifacts=artifacts,
@@ -98,8 +111,22 @@ def prepare_report_packet(
         "evidence_summary": evidence_summary,
         "review": review,
         "query_evidence": query_evidence,
-        "execution_provenance": _report_execution_provenance(source_output_dir),
+        "execution_provenance": execution_provenance,
+        "source_execution_manifest_sha256": _optional_file_sha256(
+            source_output_dir / "mcp_execution_manifest.json"
+        ),
         "artifact_summary": {**_artifact_summary(artifacts), "truncated": artifacts_truncated},
+        "source_evidence_identity_sha256": _sha256_json(
+            [
+                {
+                    "artifact_id": row["artifact_id"],
+                    "relative_path": row["relative_path"],
+                    "bytes": row["bytes"],
+                    "sha256": row["sha256"],
+                }
+                for row in artifacts
+            ]
+        ),
         "artifacts_truncated": artifacts_truncated,
         "required_artifacts_missing": required_artifacts_missing,
         "artifacts": artifacts,
@@ -129,6 +156,7 @@ def prepare_report_packet(
             "packet_id": packet_id,
             "source_output_dir": str(source_output_dir),
             "packet_sha256": packet["packet_sha256"],
+            "source_evidence_identity_sha256": packet["source_evidence_identity_sha256"],
             "provider_call_made": False,
         }
     )
@@ -163,12 +191,19 @@ def audit_report(
     author: str,
     model: str,
     approval_id: str,
+    preparation_manifest_path: Path | None = None,
 ) -> dict[str, Any]:
     if report_path.stat().st_size > MAX_REPORT_SOURCE_BYTES:
         raise ValueError("The report exceeds the MCP report-audit size budget.")
     if packet_path.stat().st_size > MAX_REPORT_SOURCE_BYTES:
         raise ValueError("The report packet exceeds the MCP report-audit size budget.")
     packet = _load_packet(packet_path)
+    provenance_binding = _validate_prepare_provenance(
+        packet,
+        packet_path=packet_path,
+        manifest_path=preparation_manifest_path,
+    )
+    _validate_audit_packet_budget(packet, packet_path=packet_path)
     markdown = report_path.read_text(encoding="utf-8")
     integrity = _verify_packet_artifacts(packet, packet_path=packet_path)
     references = sorted(set(_EVIDENCE_REFERENCE.findall(markdown)))
@@ -194,6 +229,7 @@ def audit_report(
     checks = {
         "packet_schema_supported": True,
         "packet_content_hash_valid": _packet_content_hash_valid(packet),
+        "prepare_provenance_bound": provenance_binding["valid"],
         "artifact_ids_unique": len(artifact_id_list) == len(set(artifact_id_list)),
         "artifact_paths_unique": len(artifact_path_list) == len(set(artifact_path_list)),
         "query_evidence_ids_unique": len(query_id_list) == len(set(query_id_list)),
@@ -217,6 +253,7 @@ def audit_report(
         "packet_id": str(packet.get("packet_id", "")),
         "checks": checks,
         "artifact_integrity": integrity,
+        "prepare_provenance": provenance_binding,
         "evidence_references": references,
         "unknown_evidence_references": unknown_references,
         "unavailable_evidence_references": unavailable_references,
@@ -228,6 +265,7 @@ def audit_report(
             "It does not call a model provider or authorize external release.",
         ],
     }
+    audit_output_dir.mkdir(parents=True, exist_ok=True)
     audit_json = audit_output_dir / "report_audit.json"
     audit_md = audit_output_dir / "report_audit.md"
     operation_manifest_path = audit_output_dir / "mcp_execution_manifest.json"
@@ -273,6 +311,8 @@ def _artifact_inventory(
     fixed_candidates = (
         ("run_summary", source_output_dir / "master_run_summary.json", "application/json", True),
         ("review_store", source_output_dir / "review" / "run.sqlite", "application/vnd.sqlite3", True),
+        ("review_store_wal", source_output_dir / "review" / "run.sqlite-wal", "application/vnd.sqlite3-wal", False),
+        ("review_store_shm", source_output_dir / "review" / "run.sqlite-shm", "application/octet-stream", False),
         ("review_schema", source_output_dir / "review" / "schema.json", "application/json", False),
         ("agent_evidence_packet", source_output_dir / "agent_evidence_packet.json", "application/json", False),
         ("run_index", source_output_dir / "index.md", "text/markdown", False),
@@ -440,13 +480,92 @@ def _report_execution_provenance(source_output_dir: Path) -> dict[str, Any]:
 
 def _load_packet(path: Path) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict) or payload.get("schema_id") != REPORT_PACKET_SCHEMA:
+    if not isinstance(payload, dict) or payload.get("schema_id") not in {
+        REPORT_PACKET_SCHEMA,
+        LEGACY_REPORT_PACKET_SCHEMA,
+    }:
         raise ValueError("The report packet does not use the supported OEL MCP report schema.")
     if not _packet_content_hash_valid(payload):
         raise ValueError("The report packet content hash does not match its content.")
     if not isinstance(payload.get("artifacts"), list) or not isinstance(payload.get("report_contract"), dict):
         raise ValueError("The report packet is missing its artifact or report contract.")
     return payload
+
+
+def _validate_prepare_provenance(
+    packet: dict[str, Any],
+    *,
+    packet_path: Path,
+    manifest_path: Path | None = None,
+) -> dict[str, Any]:
+    manifest_path = manifest_path or packet_path.parent / "mcp_execution_manifest.json"
+    if packet.get("schema_id") == LEGACY_REPORT_PACKET_SCHEMA and not manifest_path.is_file():
+        return {
+            "valid": True,
+            "compatibility": "legacy_v1_without_preparation_manifest",
+            "manifest_path": "",
+            "checks": {"legacy_schema_accepted": True},
+        }
+    if not manifest_path.is_file() or manifest_path.stat().st_size > MAX_REPORT_SOURCE_BYTES:
+        raise ValueError("The report packet is not accompanied by its bounded preparation manifest.")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if not isinstance(manifest, dict):
+        raise ValueError("The report packet preparation manifest is invalid.")
+    source_root = Path(str(packet.get("source_output_dir", ""))).expanduser().resolve()
+    expected_source_manifest = str(packet.get("source_execution_manifest_sha256", ""))
+    actual_source_manifest = _optional_file_sha256(source_root / "mcp_execution_manifest.json")
+    checks = {
+        "tool_id_matches": manifest.get("tool_id") == "oel.prepare_report_packet.v1",
+        "status_complete": manifest.get("status") in {"completed", "partial"},
+        "packet_id_matches": str(manifest.get("packet_id", "")) == str(packet.get("packet_id", "")),
+        "packet_sha256_matches": str(manifest.get("packet_sha256", "")) == str(packet.get("packet_sha256", "")),
+        "source_output_dir_matches": Path(str(manifest.get("source_output_dir", ""))).expanduser().resolve()
+        == source_root,
+        "source_execution_manifest_matches": bool(expected_source_manifest)
+        and expected_source_manifest == actual_source_manifest
+        if expected_source_manifest
+        else actual_source_manifest == "",
+        "source_evidence_identity_matches": bool(packet.get("source_evidence_identity_sha256"))
+        and str(manifest.get("source_evidence_identity_sha256", ""))
+        == str(packet.get("source_evidence_identity_sha256", "")),
+    }
+    if not all(checks.values()):
+        raise ValueError("The report packet is not bound to its preparation and source-run provenance.")
+    return {"valid": True, "manifest_path": str(manifest_path), "checks": checks}
+
+
+def _validate_audit_packet_budget(packet: dict[str, Any], *, packet_path: Path) -> None:
+    artifacts = list(packet.get("artifacts", []) or [])
+    if len(artifacts) > MAX_PACKET_ARTIFACTS:
+        raise ValueError("The report packet exceeds the audit artifact-count budget.")
+    source_root = Path(str(packet.get("source_output_dir", ""))).expanduser().resolve()
+    seen_paths: set[str] = set()
+    seen_ids: set[str] = set()
+    total_bytes = 0
+    for raw in artifacts:
+        if not isinstance(raw, dict):
+            raise ValueError("The report packet artifact inventory is invalid.")
+        artifact_id = str(raw.get("artifact_id", ""))
+        relative = str(raw.get("relative_path", ""))
+        if not artifact_id or artifact_id in seen_ids or not relative or relative in seen_paths:
+            raise ValueError("The report packet contains duplicate or empty artifact identities.")
+        seen_ids.add(artifact_id)
+        seen_paths.add(relative)
+        target = (source_root / relative).resolve()
+        if not _is_within(target, source_root):
+            raise ValueError("The report packet artifact path escapes its bound source run.")
+        if not target.is_file():
+            continue
+        size = target.stat().st_size
+        if size > MAX_REPORT_ARTIFACT_BYTES:
+            raise ValueError("An artifact exceeds the MCP report-audit size budget.")
+        total_bytes += size
+        if total_bytes > MAX_REPORT_TOTAL_ARTIFACT_BYTES:
+            raise ValueError("The artifacts exceed the MCP report-audit aggregate size budget.")
+
+
+def _optional_file_sha256(path: Path) -> str:
+    return _sha256_file(path) if path.is_file() else ""
 
 
 def _packet_content_hash_valid(packet: dict[str, Any]) -> bool:
