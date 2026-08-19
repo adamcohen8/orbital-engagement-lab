@@ -9,7 +9,8 @@ official Python MCP SDK v2 over stdio while preserving the frozen OEL handlers,
 policy, schemas, and result envelopes. In addition to the M3 discovery and
 read-only evidence tools, it supports bounded planning, structural-first
 validation, one deterministic scenario run, completed-run comparison,
-allowlisted evidence plots, and supported public task recipes. It cannot
+allowlisted evidence plots, content-bound review animations, and supported
+public task recipes. It cannot
 authorize itself, execute an untrusted config, expose private resources, start
 remote transport, or communicate externally.
 
@@ -70,6 +71,20 @@ Reproduce the checks with:
   --output /tmp/oel-mcp-interop.json
 ```
 
+An explicitly authorized model-backed routing fixture can additionally verify
+that Codex and Claude select OEL's professional RIC recipe from a natural-
+language request and receive an inspectable image:
+
+```bash
+.venv/bin/python -m integrations.oel_mcp.interop --codex --claude \
+  --plot-selection-output-dir outputs/quickstart_5min \
+  --python .venv/bin/python \
+  --output /tmp/oel-mcp-plot-selection.json
+```
+
+This opt-in check invokes the configured model-backed hosts and may incur their
+normal usage. It is not part of the offline release gate.
+
 This command invokes the configured model-backed host CLIs and may incur their
 normal usage. It isolates host configuration and enables only the read-only
 capability tool. See the
@@ -127,6 +142,10 @@ execution manifests.
 | `oel.run_scenario.v1` | `R2_execute` | Executes one matching trusted validation into a new approved output directory |
 | `oel.compare_runs.v1` | `R0_read` | Compares allowlisted semantic metrics from two completed review stores without rerunning them |
 | `oel.plot_evidence.v1` | `R1_write` | Writes one allowlisted evidence plot and operation manifest |
+| `oel.plan_review_plot.v1` | `R0_read` | Validates a typed read-only query and custom plot mapping without writing |
+| `oel.render_review_plot.v2` | `R1_write` | Renders an exact content-bound custom plot with provenance and automated QA |
+| `oel.plan_review_animation.v1` | `R0_read` | Plans one bounded supported review animation without writing |
+| `oel.render_review_animation.v1` | `R1_write` | Renders the matching content-bound movie, contact sheet, quality receipt, and manifest |
 | `oel.run_agent_task.v1` | `R2_execute` | Runs one checked-in supported public scenario recipe and writes its evidence packet |
 | `oel.prepare_report_packet.v1` | `R1_write` | Writes a bounded, hashed, provider-neutral evidence packet and authoring brief from one completed run |
 | `oel.audit_report.v1` | `R1_write` | Verifies packet/artifact hashes, report structure, and evidence references without calling a model |
@@ -137,6 +156,14 @@ execution manifests.
 | `oel.materialize_scenario_patch.v1` | `R1_write` | Applies an accepted source-bound patch into a new validated scenario without execution |
 | `oel.compare_handoff.v1` | `R1_write` | Writes semantic-parity evidence across product, materialization, manifest, and optional consumer evidence |
 | `oel.assess_maneuver_readiness.v1` | `R1_write` | Applies explicit thresholds and writes a fail-closed readiness packet |
+| `oel.fsw.describe.v1` | `R0_read` | Reports public FSW authoring templates, contracts, limits, and private boundaries |
+| `oel.fsw.inspect_candidate.v1` | `R0_read` | Hashes and inspects a candidate without importing or executing its source |
+| `oel.fsw.plan_candidate.v1` | `R0_read` | Plans one validate, component-test, or deterministic-smoke operation |
+| `oel.fsw.scaffold_candidate.v1` | `R1_write` | Creates an ADCS or RPO Python-stack starter in an approved workspace |
+| `oel.fsw.validate_candidate.v1` | `R1_write` | With separate source-trust and write approvals, validates lifecycle and smoke contracts and writes a receipt |
+| `oel.fsw.run_candidate_tests.v1` | `R2_execute` | Revalidates and runs the declared bounded component suite |
+| `oel.fsw.run_candidate_smoke.v1` | `R2_execute` | Revalidates and runs one deterministic serial smoke with ordinary OEL evidence |
+| `oel.fsw.verify_receipt.v1` | `R0_read` | Recomputes candidate and listed artifact identity without executing code |
 
 Data-bearing calls require handling metadata containing an authoritative
 marking and one of these release scopes: `public`, `local_only`, or
@@ -175,6 +202,66 @@ execution, and evidence phases.
 `public`, marked `supported`, and use the ordinary scenario-run workflow. Pro,
 prototype, experimental, and specialized private workflows fail closed.
 
+## Public FSW Authoring
+
+The eight `oel.fsw.*.v1` tools expose the bounded workflow documented in
+[`fsw-authoring.md`](fsw-authoring.md). They are available only in
+`public_local`, accept public Python complete-stack candidates, remain inside
+one authorized workspace, and never use hidden truth, private orchestration,
+hosted AI, network calls, or multiple workers.
+
+Safe inspection is read-only and does not import candidate code. Lifecycle
+validation requires an independently configured source-trust approval, and
+writing the validation receipt requires write approval. Component tests and
+the smoke scenario require execute approval and a matching validation ID. The
+handler still recomputes validation immediately before execution, so changed
+candidate content cannot reuse a stale approval artifact.
+
+The deterministic smoke is ordinary OEL simulation evidence, not Controller
+Bench, tuning, qualification, certification, hardware readiness, or
+operational approval. The private FSWDK and its cFS/SIL and external-process
+surfaces are not discoverable from the public registry.
+
+## Agent-Native Review Plotting
+
+Agents should read `oel://review/plot-recipes/v1` and use
+`oel.plot_evidence.v1` when a supported semantic recipe matches the request.
+The first professional relative-motion recipe,
+`relative_position_ric_2d`, renders equal-aspect I-R, I-C, and C-R panels from
+the recorded rectangular-RIC review columns. It never recomputes missing
+physics in the plotting layer.
+
+For other review-store data, `oel.plan_review_plot.v1` validates one bounded
+SELECT/WITH query plus a typed line, scatter, bar, histogram, or heatmap
+mapping. It returns a `plot_plan_id` bound to the exact review store and plot
+specification without authorizing a write. `oel.render_review_plot.v2` requires
+that matching plan ID and an operator-configured write approval. The render
+records query, store, style, mapping, row/truncation, and QA provenance in the
+generated-artifact and operation manifests.
+
+PNG and SVG plot calls return image content in addition to the structured
+result. Automated QA checks file existence, non-empty output, query rows,
+truncation, image dimensions, and obvious blank output. The result remains
+`visual_qa_status: pending_agent_review` until the calling agent inspects the
+image; automated QA never substitutes for visual review.
+
+## Agent-Native Review Animations
+
+Agents should read `oel://review/animation-recipes/v1` before requesting a
+movie. Version 1 supports `relative_position_ric_2d` from recorded
+rectangular-RIC review evidence. `oel.plan_review_animation.v1` validates the
+recipe and computes a content-bound frame and resource plan without writing.
+`oel.render_review_animation.v1` requires the unchanged specification,
+matching plan ID, and an operator-configured write approval.
+
+The renderer limits output to 600 frames and 30 encoded seconds, freezes one
+numeric format per axis for the sequence, enforces the declared `fixed`,
+`fit_history`, or `follow` camera policy, and checks every frame. It writes the
+MP4 or GIF, a `.quality.json` receipt, a `.contact-sheet.png`, and an operation
+manifest. Automated success remains pending visual review; inspect both the
+movie and contact sheet before handoff. See
+[`animation-quality-contract.md`](animation-quality-contract.md).
+
 ## Provider-Neutral Report Evidence
 
 `oel.prepare_report_packet.v1` inspects one completed local run, inventories at
@@ -206,6 +293,8 @@ These tools are local-only and absent from `direct_frontier_restricted`.
 | `oel://agent/tasks/v1` | Public-tagged agent task definitions | Agent task registry |
 | `oel://docs/operator-guide/v1` | Packaged local operator guidance | MCP package data |
 | `oel://handoff/product-kinds/v1` | Public-safe product-kind producers, next actions, and non-execution rules | `sim.handoff` |
+| `oel://review/plot-recipes/v1` | Supported recipes, evidence requirements, renderers, and natural-language routing triggers | `sim.review.plot_recipes` |
+| `oel://review/animation-recipes/v1` | Supported animation recipes, evidence requirements, bounds, and quality policy | `sim.review.animation_recipes` |
 
 Resource discovery is one bounded page. Each resource is at most 500,000
 encoded bytes, has an explicit media type, and resolves only from checked-in
@@ -248,9 +337,10 @@ model-provider call:
   --output /tmp/oel-mcp-release-gate.json
 ```
 
-This verifies the restricted three-tool profile, then exercises all eighteen
+This verifies the restricted three-tool profile, then exercises all thirty
 public tools—including product export and inspection, ONP and patch
-materialization, semantic handoff comparison, and maneuver readiness—through
+materialization, semantic handoff comparison, maneuver readiness, and bounded
+FSW authoring—through
 real SDK stdio subprocesses. Generated exports record
 `oel_commit: unavailable_public_export` instead of requiring `.git`. Add
 `--with-hosts` only when model-backed Codex/Claude and Inspector checks are

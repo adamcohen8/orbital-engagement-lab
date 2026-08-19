@@ -66,6 +66,9 @@ def _frame_convention_dialog_action(
     for action, rect in _frame_convention_dialog_choice_rects(width, height).items():
         if _pos_in_bounds(pos, rect):
             return action
+    for mode, rect in _frame_convention_dialog_graphics_rects(width, height).items():
+        if _pos_in_bounds(pos, rect):
+            return mode
     checkbox = _frame_convention_dialog_checkbox_rect(width, height)
     if _pos_in_bounds(pos, (checkbox[0], checkbox[1], 190, checkbox[3])):
         return "dont_ask_again"
@@ -177,6 +180,7 @@ def _selection_for_launch(
     record_video: bool,
     mode: str,
     frame_convention: FrameConvention,
+    presentation_mode: str,
     font: Any,
     small_font: Any,
     title_font: Any,
@@ -190,6 +194,7 @@ def _selection_for_launch(
         record_video=record_video,
         mode=mode_key,
         frame_convention=frame_convention,
+        presentation_mode=normalize_presentation_mode(presentation_mode),
         operator_burn_plan=None,
         skip_initial_briefing=mode_key == "operator" and not operator_tutorial,
     )

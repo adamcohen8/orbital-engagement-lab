@@ -1,3 +1,4 @@
+schema_version: oel.scenario.v1
 scenario_name: quickstart_5min
 scenario_description: 'Five-minute public quickstart: deterministic two-satellite
   rendezvous run with headless-safe outputs.'

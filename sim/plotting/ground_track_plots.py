@@ -10,13 +10,13 @@ from matplotlib.patches import Polygon, Rectangle
 
 from sim.dynamics.orbit.epoch import julian_date_to_datetime
 from sim.dynamics.orbit.frames import FrameContext
+from sim.plotting.animation_quality import STRICT_AGENT_ANIMATION_QUALITY, save_animation_with_quality
 from sim.plotting.capability_common import _object_role_color
 from sim.plotting.style import (
     OEL_DARK_PALETTE,
     OEL_LIGHT_PALETTE,
     current_style_name,
     role_color,
-    save_oel_animation,
 )
 from sim.utils.figure_size import cap_figsize
 from sim.utils.ground_track import ground_track_from_eci_history, split_ground_track_dateline
@@ -240,7 +240,12 @@ def animate_ground_track(
         zorder=10,
     )
 
-    stride = int(max(frame_stride, 1))
+    requested_stride = int(max(frame_stride, 1))
+    allowed_frames = min(
+        STRICT_AGENT_ANIMATION_QUALITY.max_frames,
+        max(2, int(np.floor(STRICT_AGENT_ANIMATION_QUALITY.max_duration_s * max(float(fps), 1.0)))),
+    )
+    stride = max(requested_stride, int(np.ceil(max(len(lon_p), 1) / allowed_frames)))
     frame_ids = np.arange(0, len(lon_p), stride, dtype=int)
     if frame_ids.size == 0 or frame_ids[-1] != (len(lon_p) - 1):
         frame_ids = np.append(frame_ids, len(lon_p) - 1)
@@ -274,7 +279,24 @@ def animate_ground_track(
             raise ValueError("out_path is required when mode is 'save' or 'both'.")
         p = Path(out_path)
         try:
-            save_oel_animation(ani, fig, p, fps=fps, artifact_id=p.stem)
+            selected_times = tuple(float(t_arr[min(int(index), t_arr.size - 1)]) for index in frame_ids)
+            save_animation_with_quality(
+                ani,
+                fig,
+                p,
+                update=update,
+                frame_values=tuple(range(int(frame_ids.size))),
+                frame_times_s=selected_times,
+                fps=fps,
+                camera_policy="fixed",
+                artifact_id=p.stem,
+                format_limits={(0, "x"): (-180.0, 180.0), (0, "y"): (-90.0, 90.0)},
+                source={
+                    "renderer_id": "ground_track",
+                    "requested_frame_stride": requested_stride,
+                    "effective_frame_stride": stride,
+                },
+            )
         except Exception as exc:
             print(f"Warning: failed to save animation ({exc}).")
         del ani
@@ -355,7 +377,12 @@ def animate_multi_ground_track(
         zorder=10,
     )
 
-    stride = int(max(frame_stride, 1))
+    requested_stride = int(max(frame_stride, 1))
+    allowed_frames = min(
+        STRICT_AGENT_ANIMATION_QUALITY.max_frames,
+        max(2, int(np.floor(STRICT_AGENT_ANIMATION_QUALITY.max_duration_s * max(float(fps), 1.0)))),
+    )
+    stride = max(requested_stride, int(np.ceil(max(n_frames, 1) / allowed_frames)))
     frame_ids = np.arange(0, max(n_frames, 1), stride, dtype=int)
     if frame_ids.size == 0 or frame_ids[-1] != (max(n_frames, 1) - 1):
         frame_ids = np.append(frame_ids, max(n_frames, 1) - 1)
@@ -397,7 +424,32 @@ def animate_multi_ground_track(
             raise ValueError("out_path is required when mode is 'save' or 'both'.")
         p = Path(out_path)
         try:
-            save_oel_animation(ani, fig, p, fps=fps, artifact_id=p.stem)
+            selected_times: list[float] = []
+            for frame_i in frame_ids:
+                t_now = 0.0
+                for oid, (lon_p, _lat_p) in tracks.items():
+                    index = min(int(frame_i), lon_p.size - 1)
+                    t_track = tracks_t.get(oid)
+                    if t_track is not None and t_track.size > 0:
+                        t_now = max(t_now, float(t_track[min(index, t_track.size - 1)]))
+                selected_times.append(t_now)
+            save_animation_with_quality(
+                ani,
+                fig,
+                p,
+                update=update,
+                frame_values=tuple(range(int(frame_ids.size))),
+                frame_times_s=tuple(selected_times),
+                fps=fps,
+                camera_policy="fixed",
+                artifact_id=p.stem,
+                format_limits={(0, "x"): (-180.0, 180.0), (0, "y"): (-90.0, 90.0)},
+                source={
+                    "renderer_id": "multi_ground_track",
+                    "requested_frame_stride": requested_stride,
+                    "effective_frame_stride": stride,
+                },
+            )
         except Exception as exc:
             print(f"Warning: failed to save animation ({exc}).")
         del ani

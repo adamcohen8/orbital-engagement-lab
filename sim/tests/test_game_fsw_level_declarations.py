@@ -32,3 +32,14 @@ def test_every_maintained_game_level_declares_its_v2_runtime_contract() -> None:
             else "debrief_history_v1"
         )
         assert game["replay_support"] == expected_replay
+
+
+def test_maintained_game_levels_do_not_enable_legacy_object_knowledge() -> None:
+    config_dir = Path(__file__).parents[1] / "game" / "configs"
+    for path in sorted(config_dir.glob("*.yaml")):
+        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+        for object_id, object_config in dict(raw.get("objects", {}) or {}).items():
+            assert "knowledge" not in dict(object_config or {}), (
+                f"{path.name}: object {object_id!r} must use its declared v2 FSW "
+                "navigation path instead of the legacy simulator knowledge subsystem"
+            )

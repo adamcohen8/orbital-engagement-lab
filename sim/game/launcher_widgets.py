@@ -104,23 +104,25 @@ def _draw_frame_convention_dialog(
     screen: Any,
     *,
     convention: FrameConvention,
+    presentation_mode: str,
     dont_ask_again: bool,
     font: Any,
     small_font: Any,
     title_font: Any,
 ) -> None:
     width, height = screen.get_size()
+    graphics_font = game_font(pygame, 13)
     overlay = pygame.Surface((width, height), pygame.SRCALPHA)
     overlay.fill((0, 0, 0, 150))
     screen.blit(overlay, (0, 0))
     rect = pygame.Rect(*_frame_convention_dialog_rect(width, height))
     pygame.draw.rect(screen, (18, 24, 32), rect, border_radius=8)
     pygame.draw.rect(screen, (238, 184, 92), rect, width=1, border_radius=8)
-    _text(screen, title_font, "Coordinate Frame Convention", (rect.x + 34, rect.y + 28), (238, 242, 248))
+    _text(screen, title_font, "RPO Trainer Settings", (rect.x + 34, rect.y + 28), (238, 242, 248))
     _text(
         screen,
         small_font,
-        "Choose the RIC display and input convention for this computer.",
+        "Choose the RIC convention and graphics mode for this computer.",
         (rect.x + 36, rect.y + 78),
         (162, 178, 198),
     )
@@ -137,6 +139,7 @@ def _draw_frame_convention_dialog(
         font=font,
         small_font=small_font,
     )
+
     _draw_frame_convention_choice(
         pygame,
         screen,
@@ -147,6 +150,17 @@ def _draw_frame_convention_dialog(
         font=font,
         small_font=small_font,
     )
+
+    _text(screen, font, "Graphics:", (rect.x + 42, rect.y + 322), (172, 186, 206))
+    selected_graphics = normalize_presentation_mode(presentation_mode)
+    for mode, bounds in _frame_convention_dialog_graphics_rects(width, height).items():
+        choice = pygame.Rect(*bounds)
+        selected = mode == selected_graphics
+        fill = (36, 72, 52) if selected else (12, 16, 22)
+        stroke = (108, 232, 142) if selected else (70, 82, 100)
+        pygame.draw.rect(screen, fill, choice, border_radius=6)
+        pygame.draw.rect(screen, stroke, choice, width=1, border_radius=6)
+        _text_centered(screen, graphics_font, GRAPHICS_MODE_LABELS[mode], choice.center, (230, 238, 245))
 
     checkbox = pygame.Rect(*_frame_convention_dialog_checkbox_rect(width, height))
     pygame.draw.rect(screen, (12, 16, 22), checkbox, border_radius=4)

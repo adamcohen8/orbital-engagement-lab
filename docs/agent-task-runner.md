@@ -225,7 +225,10 @@ Current bundled plot recipes include:
 - `object_eci_radius`: maturity `supported`, table `object_state`
 - `relative_range`: maturity `supported`, table `relative_state`
 - `relative_range_rate`: maturity `supported`, table `relative_state`
+- `relative_velocity_components`: maturity `supported`, table `relative_state`
+- `relative_position_ric_2d`: maturity `supported`, table `relative_state`, professional I-R/I-C/C-R renderer
 - `burn_activity`: maturity `supported`, table `thrust`
+- `ground_access`: maturity `supported`, table `ground_access`
 
 Plot recipes run read-only review SQL and call the review plotting service.
 Generated plot provenance is recorded in `review/generated_artifacts.json`.

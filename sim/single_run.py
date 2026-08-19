@@ -46,7 +46,6 @@ from sim.execution.object_workers import (
 )
 from sim.execution.runtime_profile import _RuntimeProfiler
 from sim.execution.single_run_history import SingleRunHistoryStore
-from sim.gnc.contracts import merge_mission_intent_layers
 from sim.reporting.run_payload_assembly import SingleRunPayloadAssembler, _SingleRunPayloadParts
 from sim.resource_limits import (
     HistoryMemoryEstimate,
@@ -268,6 +267,12 @@ class _SingleRunEngine:
         for agent in self.agents.values():
             if agent.kind == "satellite" and agent.deploy_source in {"rocket_deployment", "rocket_insertion"}:
                 agent.active = False
+        self._forecast_dynamics_by_object = {
+            object_id: runtime.dynamics
+            for object_id, runtime in self.agents.items()
+            if runtime.kind == "satellite" and runtime.dynamics is not None
+        }
+        self._forecast_truth_cache: dict[tuple[float, float, str, int, int], StateTruth] = {}
 
         self.general_propagation: dict[str, SGP4EphemerisProvider] = {}
         for aid, agent in self.agents.items():
@@ -368,12 +373,15 @@ class _SingleRunEngine:
 
         for aid, agent in self.agents.items():
             cfg_src = self.object_configs[aid]
-            agent.knowledge_base = _build_knowledge_base(
-                observer_id=aid,
-                agent_cfg=cfg_src,
-                dt_s=self.dt,
-                rng=np.random.default_rng(int(rng.integers(0, 2**31 - 1))),
-            )
+            if agent.runtime_profile == "trajectory_only":
+                agent.knowledge_base = None
+            else:
+                agent.knowledge_base = _build_knowledge_base(
+                    observer_id=aid,
+                    agent_cfg=cfg_src,
+                    dt_s=self.dt,
+                    rng=np.random.default_rng(int(rng.integers(0, 2**31 - 1))),
+                )
         initial_world_truth = {
             aid: agent.truth for aid, agent in self.agents.items() if agent.kind == "satellite" and agent.active
         }
@@ -749,6 +757,8 @@ class _SingleRunEngine:
         runtime.request_input_publisher_poll(time_ns=time_ns)
 
     def _run_agent_decision(self, ctx: _DecisionContext) -> dict[str, Any]:
+        from sim.gnc.contracts import merge_mission_intent_layers
+
         agent = ctx.agent
         orbit_proxy = (
             None
@@ -1152,6 +1162,7 @@ class _SingleRunEngine:
         t_next = float(t + step_dt)
         self.t_s[k + 1] = t_next
         self._time_dependent_env_cache = {}
+        self._forecast_truth_cache = {}
 
         if self.rocket is not None:
             for agent in self.agents.values():

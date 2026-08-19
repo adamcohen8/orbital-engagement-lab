@@ -931,6 +931,7 @@ def test_launcher_settings_persist_frame_convention(tmp_path: Path, monkeypatch)
                 positive_in_track="left",
                 positive_cross_track="clockwise",
             ),
+            presentation_mode="high_refresh",
             ask_frame_convention_on_launch=False,
             last_game_mode="operator",
             operator_burn_scripts={"rpo_01_relative_orbit": plan},
@@ -944,6 +945,7 @@ def test_launcher_settings_persist_frame_convention(tmp_path: Path, monkeypatch)
         positive_cross_track="clockwise",
     )
     assert loaded.ask_frame_convention_on_launch is False
+    assert loaded.presentation_mode == "high_refresh"
     assert loaded.last_game_mode == "operator"
     assert loaded.operator_burn_scripts["rpo_01_relative_orbit"].burns == plan.burns
 
@@ -958,11 +960,13 @@ def test_frame_convention_dialog_settings_preserve_saved_operator_scripts() -> N
     updated = game_launcher._frame_convention_dialog_settings(
         settings,
         frame_convention=frame_convention_from_preset(FRAME_CONVENTION_PRESET_SPACE_FORCE),
+        presentation_mode="auto",
         dont_ask_again=True,
         selected_mode="operator",
     )
 
     assert updated.ask_frame_convention_on_launch is False
+    assert updated.presentation_mode == "auto"
     assert updated.last_game_mode == "operator"
     assert updated.operator_burn_scripts["rpo_01_relative_orbit"].burns == plan.burns
 
@@ -1000,6 +1004,7 @@ def test_launcher_settings_persist_frame_convention_preset(tmp_path: Path, monke
         positive_cross_track="clockwise",
     )
     assert loaded.ask_frame_convention_on_launch is False
+    assert loaded.presentation_mode == "compatibility"
     assert loaded.last_game_mode is None
 
 
@@ -1041,6 +1046,7 @@ def test_operator_preview_signed_axis_labels_include_positive_and_negative_direc
 
 def test_frame_convention_dialog_hit_testing() -> None:
     choices = game_launcher._frame_convention_dialog_choice_rects(1040, 680)
+    graphics = game_launcher._frame_convention_dialog_graphics_rects(1040, 680)
     checkbox = game_launcher._frame_convention_dialog_checkbox_rect(1040, 680)
     continue_rect = game_launcher._frame_convention_dialog_continue_rect(1040, 680)
 
@@ -1060,6 +1066,15 @@ def test_frame_convention_dialog_hit_testing() -> None:
         )
         == "space_force"
     )
+    for mode in ("compatibility", "standard", "high_refresh", "auto"):
+        assert (
+            game_launcher._frame_convention_dialog_action(
+                (graphics[mode][0] + 2, graphics[mode][1] + 2),
+                width=1040,
+                height=680,
+            )
+            == mode
+        )
     assert (
         game_launcher._frame_convention_dialog_action((checkbox[0] + 3, checkbox[1] + 3), width=1040, height=680)
         == "dont_ask_again"
@@ -1257,6 +1272,7 @@ def test_operator_selection_defers_script_screen_to_gameplay(monkeypatch) -> Non
         record_video=False,
         mode="operator",
         frame_convention=FrameConvention(),
+        presentation_mode="high_refresh",
         font=_FixedWidthFont(),
         small_font=_FixedWidthFont(),
         title_font=_FixedWidthFont(),
@@ -1265,6 +1281,7 @@ def test_operator_selection_defers_script_screen_to_gameplay(monkeypatch) -> Non
     assert calls == []
     assert selection is not None
     assert selection.operator_burn_plan is None
+    assert selection.presentation_mode == "high_refresh"
     assert selection.skip_initial_briefing is True
 
 

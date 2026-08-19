@@ -48,6 +48,14 @@ python3.14 -m venv .venv
 .venv/bin/python run_simulation.py --quickstart
 ```
 
+Promoted releases also publish inspected POSIX and PowerShell bootstraps as
+assets on the public OEL GitHub release for the unified `oel` launcher. The
+stable POSIX source is
+`https://github.com/adamcohen8/orbital-engagement-lab/releases/latest/download/install.sh`.
+Those bootstraps install immutable engines outside user-owned workspaces and
+support side-by-side update, compatibility audit, and rollback. See
+[Installing OEL](docs/installation.md) and [Updating OEL](docs/updating.md).
+
 The commands below use `python` after activation. In PowerShell, run
 `.\.venv\Scripts\Activate.ps1`; in Bash or Zsh, run
 `source .venv/bin/activate`. Activation is optional when using the explicit
@@ -95,6 +103,8 @@ For the guided first-run walkthrough, see [Quickstart](docs/quickstart.md).
 - Run closed-loop chaser/target rendezvous and relative-motion scenarios.
 - Exercise public orbit and attitude controllers, estimators, sensors, mission
   modules, and actuator models.
+- Scaffold, inspect, validate, component-test, and deterministically smoke-test
+  a custom public ADCS or RPO complete-stack flight-software candidate.
 - Inspect passive ground-station access using line of sight, elevation, and
   range histories.
 - Explore perturbation models, atmosphere, SRP, third bodies, spherical
@@ -122,6 +132,7 @@ query CLI/API, custom review plotting API, and the RPO trainer.
 | Mission-recovery evidence case | `python run_simulation.py --config agents/examples/public_agent_mission_recovery_plus_c_burn.yaml` |
 | Mission-reconstitution trade space | `python run_simulation.py --config agents/examples/public_agent_mission_reconstitution_trade_space.yaml` |
 | Attitude hold with disturbance torque | `python run_simulation.py --config examples/configs/public_attitude_hold_disturbance.yaml` |
+| Author a public FSW stack | `oel fsw init my_adcs --template adcs` then [Public FSW Authoring](docs/fsw-authoring.md) |
 | Re-entry diagnostics | `python run_simulation.py --config configs/reentry_smoke.yaml` |
 | RPO trainer game | `python -m pip install ".[game]"` then `python run_game.py` |
 | AI-agent workflows | [Capability Routing And Golden Paths](docs/agent-capability-routing.md) |
@@ -247,12 +258,14 @@ boundaries, and incident response, start with:
 The public core is useful on its own: deterministic single-run simulation,
 public controllers and mission primitives, review artifacts, Python/YAML
 interfaces, examples, docs, the bounded two-body Lambert orbit-transfer
-planner, and the RPO trainer.
+planner, the Public FSW Authoring Kit, and the RPO trainer.
 
 The Pro layer adds workflow acceleration for teams that need repeatable
 analysis at scale: controller benchmarks, general optimization and gain tuning,
 Monte Carlo and sensitivity campaigns, curated validation packs, AI-assisted
 reports, custom GNC workbench scaffolding, and program-specific integrations.
+The private FSWDK adds Controller Bench, tuning, qualification, baseline
+promotion, packaged evidence, external-process candidates, and cFS/SIL.
 
 See [Public Core And Pro Boundary](docs/public-vs-pro.md) for the product and
 repository boundary. Public examples do not require hosted AI accounts or API
@@ -265,6 +278,7 @@ keys.
 - [Scenario YAML](docs/scenario-yaml.md)
 - [Python API](docs/python-api.md)
 - [Product Inventory](docs/product-inventory.md)
+- [Public FSW Authoring](docs/fsw-authoring.md)
 - [Flagship RIC_PD 10 km Scenario And Validation](docs/validation-ric-pd-10km.md)
 - [Review Store](docs/review-store.md)
 - [Examples Matrix](docs/examples-matrix.md)

@@ -35,6 +35,25 @@ def test_identical_input_timeline_reproduces_commands_across_render_rates() -> N
     assert _command_stream(1) == _command_stream(17)
 
 
+def test_game_command_fast_path_replays_exactly_after_restore() -> None:
+    config = game_stack_config(GamePilotMode.TRANSLATION)
+    stack = GamePilotReferenceFlightSoftwareStack(config)
+    stack.boot(boot_event())
+    adapter = GamePilotInputAdapter(config.profile, source_id="keyboard", boot_id="boot-wp4")
+    state = KeyboardCommandState(pitch=0.25, yaw=-0.5, throttle=1.0)
+    first_event = adapter.sample(state, at=clock(1))
+    stack.step(FlightSoftwareInputBatch(SATELLITE_ID, 1, clock(1), (ideal_event(1, 1), first_event)))
+    checkpoint = stack.snapshot()
+    second_event = adapter.sample(state, at=clock(2))
+    batch = FlightSoftwareInputBatch(SATELLITE_ID, 2, clock(2), (ideal_event(2, 2), second_event))
+
+    expected = stack.step(batch)
+    stack.restore(checkpoint)
+    replay = stack.step(batch)
+
+    assert canonical_json_bytes(replay) == canonical_json_bytes(expected)
+
+
 def test_live_adapter_publishes_only_initial_state_and_transitions() -> None:
     config = game_stack_config(GamePilotMode.TRANSLATION)
     adapter = GamePilotInputAdapter(config.profile, source_id="keyboard", boot_id="boot-wp4")

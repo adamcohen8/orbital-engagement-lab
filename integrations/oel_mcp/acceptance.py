@@ -6,7 +6,6 @@ import time
 from pathlib import Path
 from typing import Any
 
-from integrations.oel_mcp.conformance import SDKStdioConformanceClient
 from integrations.oel_mcp.public_registry import M3_PUBLIC_TOOL_IDS
 
 PUBLIC_HANDLING = {"marking": "PUBLIC_ACCEPTANCE", "release_scope": "public"}
@@ -23,14 +22,35 @@ def run_public_workflow_acceptance(
 ) -> dict[str, Any]:
     """Exercise supported public workflows through a real SDK stdio subprocess."""
 
+    try:
+        import anyio
+    except ImportError as exc:  # pragma: no cover - covered by no-MCP installation checks
+        raise RuntimeError(
+            'The optional MCP SDK is not installed. Install the OEL MCP profile with `pip install ".[mcp]"`.'
+        ) from exc
+    return anyio.run(_run_public_workflow_acceptance_async, root, python_executable, work_root)
+
+
+async def _run_public_workflow_acceptance_async(
+    root: Path,
+    python_executable: Path,
+    work_root: Path,
+) -> dict[str, Any]:
+    try:
+        from mcp import Client, StdioServerParameters, stdio_client
+    except ImportError as exc:  # pragma: no cover - covered by no-MCP installation checks
+        raise RuntimeError(
+            'The optional MCP SDK is not installed. Install the OEL MCP profile with `pip install ".[mcp]"`.'
+        ) from exc
+
     started = time.monotonic()
     work_root = work_root.expanduser().resolve()
     if work_root.exists() and any(work_root.iterdir()):
         raise FileExistsError("The MCP acceptance work root must be new or empty.")
     work_root.mkdir(parents=True, exist_ok=True)
-    client = SDKStdioConformanceClient(
+    parameters = StdioServerParameters(
         command=str(python_executable),
-        args=("-m", "integrations.oel_mcp"),
+        args=["-m", "integrations.oel_mcp"],
         cwd=root,
         env={
             **os.environ,
@@ -41,22 +61,42 @@ def run_public_workflow_acceptance(
             "OEL_MCP_WRITE_APPROVAL_IDS": WRITE_APPROVAL["approval_id"],
             "OEL_MCP_EXECUTION_APPROVAL_IDS": EXECUTE_APPROVAL["approval_id"],
         },
-        mode="auto",
     )
-    checks: list[dict[str, Any]] = []
-    restricted_client = SDKStdioConformanceClient(
+    restricted_parameters = StdioServerParameters(
         command=str(python_executable),
-        args=("-m", "integrations.oel_mcp", "--profile", "direct_frontier_restricted"),
+        args=["-m", "integrations.oel_mcp", "--profile", "direct_frontier_restricted"],
         cwd=root,
         env={
             **os.environ,
             "OEL_MCP_ADAPTER": "sdk",
             "OEL_MCP_READ_ROOTS": str(root),
         },
-        mode="auto",
     )
-    restricted_tools = tuple(str(item.get("name", "")) for item in restricted_client.list_tools())
-    restricted_capability = _call(restricted_client, "oel.describe_capabilities.v1", {})
+    async with (
+        Client(stdio_client(parameters), mode="auto", cache=None) as client,
+        Client(stdio_client(restricted_parameters), mode="auto", cache=None) as restricted_client,
+    ):
+        return await _run_public_workflow_acceptance_session(
+            root=root,
+            work_root=work_root,
+            client=client,
+            restricted_client=restricted_client,
+            started=started,
+        )
+
+
+async def _run_public_workflow_acceptance_session(
+    *,
+    root: Path,
+    work_root: Path,
+    client: Any,
+    restricted_client: Any,
+    started: float,
+) -> dict[str, Any]:
+    checks: list[dict[str, Any]] = []
+    listed_restricted = await restricted_client.list_tools(cache_mode="reload")
+    restricted_tools = tuple(str(item.name) for item in listed_restricted.tools)
+    restricted_capability = await _call(restricted_client, "oel.describe_capabilities.v1", {})
     restricted_profile = str(dict(restricted_capability.get("result", {}) or {}).get("deployment_profile", ""))
     restricted_passed = restricted_tools == M3_PUBLIC_TOOL_IDS and restricted_profile == "direct_frontier_restricted"
     checks.append(
@@ -80,16 +120,16 @@ def run_public_workflow_acceptance(
         "resource_profile": "laptop-safe",
         "handling": PUBLIC_HANDLING,
     }
-    plan = _call(client, "oel.plan_run.v1", scenario_args)
+    plan = await _call(client, "oel.plan_run.v1", scenario_args)
     _record(checks, "plan", plan, expected="completed")
-    validation = _call(
+    validation = await _call(
         client,
         "oel.validate_scenario.v1",
         {**scenario_args, "trust_plugins": True, "trust_approval": TRUST_APPROVAL},
     )
     _record(checks, "validate", validation, expected="completed")
     validation_id = str(dict(dict(validation.get("result", {}) or {}).get("identity", {}) or {}).get("validation_id", ""))
-    executed = _call(
+    executed = await _call(
         client,
         "oel.run_scenario.v1",
         {
@@ -100,13 +140,13 @@ def run_public_workflow_acceptance(
         },
     )
     _record(checks, "execute", executed, expected="completed")
-    inspected = _call(
+    inspected = await _call(
         client,
         "oel.inspect_run.v1",
         {"output_dir": str(scenario_output), "handling": PUBLIC_HANDLING},
     )
     _record(checks, "inspect", inspected, expected="completed")
-    queried = _call(
+    queried = await _call(
         client,
         "oel.query_review.v1",
         {
@@ -118,8 +158,93 @@ def run_public_workflow_acceptance(
     )
     _record(checks, "query", queried, expected="completed")
 
+    fsw_described = await _call(client, "oel.fsw.describe.v1", {"handling": PUBLIC_HANDLING})
+    _record(checks, "fsw_describe", fsw_described, expected="completed")
+    fsw_candidate_root = work_root / "fsw_candidate"
+    fsw_scaffolded = await _call(
+        client,
+        "oel.fsw.scaffold_candidate.v1",
+        {
+            "name": "acceptance_adcs",
+            "template": "adcs",
+            "output_dir": str(fsw_candidate_root),
+            "approval": WRITE_APPROVAL,
+            "handling": PUBLIC_HANDLING,
+        },
+    )
+    _record(checks, "fsw_scaffold", fsw_scaffolded, expected="completed")
+    fsw_manifest = fsw_candidate_root / "candidate.yaml"
+    fsw_inspected = await _call(
+        client,
+        "oel.fsw.inspect_candidate.v1",
+        {"manifest_path": str(fsw_manifest), "handling": PUBLIC_HANDLING},
+    )
+    _record(checks, "fsw_inspect", fsw_inspected, expected="completed")
+    fsw_planned = await _call(
+        client,
+        "oel.fsw.plan_candidate.v1",
+        {
+            "manifest_path": str(fsw_manifest),
+            "operation": "validate",
+            "output_dir": str(work_root / "fsw_validation"),
+            "handling": PUBLIC_HANDLING,
+        },
+    )
+    _record(checks, "fsw_plan", fsw_planned, expected="completed")
+    fsw_validated = await _call(
+        client,
+        "oel.fsw.validate_candidate.v1",
+        {
+            "manifest_path": str(fsw_manifest),
+            "output_dir": str(work_root / "fsw_validation"),
+            "trusted_import": True,
+            "trust_approval": TRUST_APPROVAL,
+            "approval": WRITE_APPROVAL,
+            "handling": PUBLIC_HANDLING,
+        },
+    )
+    _record(checks, "fsw_validate", fsw_validated, expected="completed")
+    fsw_validation_id = str(
+        dict(dict(fsw_validated.get("result", {}) or {}).get("result", {}) or {}).get("validation_id", "")
+    )
+    fsw_tested = await _call(
+        client,
+        "oel.fsw.run_candidate_tests.v1",
+        {
+            "manifest_path": str(fsw_manifest),
+            "output_dir": str(work_root / "fsw_tests"),
+            "validation_id": fsw_validation_id,
+            "trust_approval": TRUST_APPROVAL,
+            "approval": EXECUTE_APPROVAL,
+            "handling": PUBLIC_HANDLING,
+        },
+    )
+    _record(checks, "fsw_tests", fsw_tested, expected="completed")
+    fsw_smoked = await _call(
+        client,
+        "oel.fsw.run_candidate_smoke.v1",
+        {
+            "manifest_path": str(fsw_manifest),
+            "output_dir": str(work_root / "fsw_smoke"),
+            "validation_id": fsw_validation_id,
+            "trust_approval": TRUST_APPROVAL,
+            "approval": EXECUTE_APPROVAL,
+            "handling": PUBLIC_HANDLING,
+        },
+    )
+    _record(checks, "fsw_smoke", fsw_smoked, expected="completed")
+    fsw_verified = await _call(
+        client,
+        "oel.fsw.verify_receipt.v1",
+        {
+            "receipt_path": str(work_root / "fsw_validation" / "fsw_validation_receipt.json"),
+            "handling": PUBLIC_HANDLING,
+        },
+    )
+    _record(checks, "fsw_verify_receipt", fsw_verified, expected="completed")
+
     handoff_path = work_root / "handoff" / "completed_state.json"
-    exported = _call(
+    exported = await _call(
         client,
         "oel.export_run_product.v1",
         {
@@ -134,14 +259,14 @@ def run_public_workflow_acceptance(
         },
     )
     _record(checks, "export_run_product", exported, expected="completed")
-    handoff = _call(
+    handoff = await _call(
         client,
         "oel.inspect_handoff.v1",
         {"path": str(handoff_path), "handling": PUBLIC_HANDLING},
     )
     _record(checks, "inspect_handoff", handoff, expected="completed")
 
-    materialized_state = _call(
+    materialized_state = await _call(
         client,
         "oel.materialize_onp_handoff.v1",
         {
@@ -167,7 +292,7 @@ def run_public_workflow_acceptance(
         encoding="utf-8",
     )
     overlay_product = work_root / "handoff" / "overlay_product.json"
-    emitted_overlay = _call(
+    emitted_overlay = await _call(
         client,
         "oel.emit_scenario_overlay.v1",
         {
@@ -181,7 +306,7 @@ def run_public_workflow_acceptance(
         },
     )
     _record(checks, "emit_scenario_overlay", emitted_overlay, expected="completed")
-    materialized_patch = _call(
+    materialized_patch = await _call(
         client,
         "oel.materialize_scenario_patch.v1",
         {
@@ -197,7 +322,7 @@ def run_public_workflow_acceptance(
         },
     )
     _record(checks, "materialize_scenario_patch", materialized_patch, expected="completed")
-    compared_handoff = _call(
+    compared_handoff = await _call(
         client,
         "oel.compare_handoff.v1",
         {
@@ -212,7 +337,7 @@ def run_public_workflow_acceptance(
     _record(checks, "compare_handoff", compared_handoff, expected="completed")
 
     task_output = work_root / "task"
-    task = _call(
+    task = await _call(
         client,
         "oel.run_agent_task.v1",
         {
@@ -226,7 +351,7 @@ def run_public_workflow_acceptance(
         },
     )
     _record(checks, "agent_task", task, expected="completed")
-    readiness = _call(
+    readiness = await _call(
         client,
         "oel.assess_maneuver_readiness.v1",
         {
@@ -240,7 +365,7 @@ def run_public_workflow_acceptance(
         },
     )
     _record(checks, "assess_maneuver_readiness", readiness, expected="completed")
-    compared = _call(
+    compared = await _call(
         client,
         "oel.compare_runs.v1",
         {
@@ -252,7 +377,7 @@ def run_public_workflow_acceptance(
         },
     )
     _record(checks, "compare", compared, expected="completed")
-    plotted = _call(
+    plotted = await _call(
         client,
         "oel.plot_evidence.v1",
         {
@@ -266,9 +391,57 @@ def run_public_workflow_acceptance(
         },
     )
     _record(checks, "plot", plotted, expected="completed")
+    typed_plot_arguments = {
+        "output_dir": str(task_output),
+        "sql": "SELECT time_s, range_km FROM relative_state ORDER BY time_s",
+        "x_column": "time_s",
+        "y_columns": ["range_km"],
+        "plot_type": "line",
+        "style": "oel_light",
+        "format": "png",
+        "artifact_id": "acceptance_typed_relative_range",
+        "handling": PUBLIC_HANDLING,
+    }
+    planned_plot = await _call(client, "oel.plan_review_plot.v1", typed_plot_arguments)
+    _record(checks, "plan_review_plot", planned_plot, expected="completed")
+    rendered_plot = await _call(
+        client,
+        "oel.render_review_plot.v2",
+        {
+            **typed_plot_arguments,
+            "plot_plan_id": str(dict(planned_plot.get("result", {}) or {}).get("plot_plan_id", "")),
+            "approval": WRITE_APPROVAL,
+        },
+    )
+    _record(checks, "render_review_plot", rendered_plot, expected="completed")
+    animation_arguments = {
+        "output_dir": str(task_output),
+        "recipe_id": "relative_position_ric_2d",
+        "style": "oel_light",
+        "format": "gif",
+        "fps": 10,
+        "frame_stride": 2,
+        "camera_policy": "fit_history",
+        "artifact_id": "acceptance_relative_position_ric_2d",
+        "handling": PUBLIC_HANDLING,
+    }
+    planned_animation = await _call(client, "oel.plan_review_animation.v1", animation_arguments)
+    _record(checks, "plan_review_animation", planned_animation, expected="completed")
+    rendered_animation = await _call(
+        client,
+        "oel.render_review_animation.v1",
+        {
+            **animation_arguments,
+            "animation_plan_id": str(
+                dict(planned_animation.get("result", {}) or {}).get("animation_plan_id", "")
+            ),
+            "approval": WRITE_APPROVAL,
+        },
+    )
+    _record(checks, "render_review_animation", rendered_animation, expected="completed")
 
     packet_output = work_root / "report_packet"
-    packet = _call(
+    packet = await _call(
         client,
         "oel.prepare_report_packet.v1",
         {
@@ -303,7 +476,7 @@ def run_public_workflow_acceptance(
         ),
         encoding="utf-8",
     )
-    audit = _call(
+    audit = await _call(
         client,
         "oel.audit_report.v1",
         {
@@ -336,9 +509,9 @@ def run_public_workflow_acceptance(
     return report
 
 
-def _call(client: SDKStdioConformanceClient, tool_id: str, arguments: dict[str, Any]) -> dict[str, Any]:
-    response = client.call_tool(tool_id, arguments)
-    payload = dict(response.get("structuredContent", {}) or {})
+async def _call(client: Any, tool_id: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    response = await client.call_tool(tool_id, arguments)
+    payload = dict(response.structured_content or {})
     if not payload:
         raise RuntimeError(f"The MCP acceptance call returned no structured result: {tool_id}")
     return payload

@@ -42,6 +42,7 @@ explicit packaging decision.
 | ONP numerical propagation | Public | Reference | [Physics Model Reference](physics-models.md), public scenarios | Fidelity depends on the configured force models and validation envelope. |
 | OGP-SGP4/SDP4 passive propagation | Public | Reference | TLE examples, OGP reference suites, frame provenance | Passive catalog-style propagation; not an operational catalog service. |
 | GNC v2 complete-stack runtime and profiles | Public | Mixed | [GNC v2 evidence](gnc-v2-evidence.md), [flight-software profiles](flight-software-profiles.md) | All 18 exact profile versions are Supported only inside their declared simulation qualification envelopes; underlying stacks and arbitrary custom compositions remain Experimental. |
+| Public FSW Authoring Kit | Public | Workbench | [Public FSW Authoring](fsw-authoring.md), content-bound validation/test/smoke receipts | ADCS/RPO Python-stack authoring and one deterministic serial smoke only; no comparison, tuning, qualification, external process, or cFS/SIL workflow. |
 | Lambert orbit-transfer planning | Public | Workbench | `configs/orbit_transfer_planner_demo.yaml`, review-store candidate tables | Bounded two-body grid search, not operational or globally optimal planning. |
 | Review store, queries, and plotting | Public | Reference | [Review Store](review-store.md), [Plotting](plotting.md) | Only recorded evidence can be queried or plotted. |
 | RPO Trainer | Public | Flagship | `run_game.py`, game configs and debriefs | Educational; not operational training qualification. |
@@ -55,6 +56,7 @@ explicit packaging decision.
 | OEL Scale and intent-hypothesis evaluation | Pro | Experimental | Private contracts, fixtures, and roadmaps | Phase-0 product surfaces; no operational catalog or intent claim. |
 | AI-assisted reports and config assistance | Pro | Workbench | Private staged estimate/create workflows | Requires explicit provider, data, cost, and human-review decisions. |
 | cFS/SIL common-boundary adapter | Pro/private | Experimental | Private cFS/SIL ICD and byte-level golden vectors | Excluded from the public export; prototype loopback transport and conformance envelope, not flight or real-time qualification. |
+| FSW Development and Verification Kit | Pro/private | Workbench | Private FSWDK contract, Controller Bench, qualification, and packaging guides | Strict workflow superset of public authoring; private evidence automation does not turn simulation results into flight qualification. |
 
 ## GNC v2 complete stacks
 

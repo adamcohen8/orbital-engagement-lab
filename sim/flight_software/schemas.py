@@ -5,10 +5,10 @@ from __future__ import annotations
 import base64
 import json
 import types
-from dataclasses import fields, is_dataclass
+from dataclasses import Field, fields, is_dataclass
 from enum import Enum
 from math import isfinite
-from typing import Any, Literal, Mapping, Union, get_args, get_origin, get_type_hints
+from typing import Any, Callable, Literal, Mapping, Union, get_args, get_origin, get_type_hints
 
 from .contracts import BOUNDARY_RECORD_TYPES
 
@@ -27,10 +27,14 @@ _FORBIDDEN_FIELD_NAMES = {
     "truth_state",
     "world_truth",
 }
-_TYPE_GUARD_CACHE: dict[type[object], tuple[str, bool, tuple[object, ...] | None]] = {}
+_TYPE_GUARD_CACHE: dict[type[object], tuple[str, bool, tuple[Field[Any], ...] | None]] = {}
+_TRUSTED_DATACLASS_ENCODERS: dict[
+    type[object],
+    Callable[[object], dict[str, object]],
+] = {}
 
 
-def _type_guard_info(value_type: type[object]) -> tuple[str, bool, tuple[object, ...] | None]:
+def _type_guard_info(value_type: type[object]) -> tuple[str, bool, tuple[Field[Any], ...] | None]:
     """Cache the reflection needed by both boundary traversals."""
 
     cached = _TYPE_GUARD_CACHE.get(value_type)
@@ -88,6 +92,17 @@ def canonical_json_bytes(value: object) -> bytes:
     """Serialize a boundary value to UTF-8 canonical JSON bytes."""
 
     primitive = to_primitive(value)
+    return _canonical_primitive_json_bytes(primitive)
+
+
+def _canonical_json_bytes_trusted(value: object) -> bytes:
+    """Serialize a value already accepted by the runtime boundary adapter."""
+
+    primitive = _to_primitive_trusted(value)
+    return _canonical_primitive_json_bytes(primitive)
+
+
+def _canonical_primitive_json_bytes(primitive: object) -> bytes:
     return json.dumps(
         primitive,
         allow_nan=False,
@@ -198,10 +213,11 @@ def _to_primitive_trusted(value: object) -> object:
     value_type = type(value)
     qualified, _forbidden, dataclass_fields = _type_guard_info(value_type)
     if dataclass_fields is not None and not isinstance(value, type):
-        return {
-            item.name: _to_primitive_trusted(getattr(value, item.name))
-            for item in dataclass_fields
-        }
+        encoder = _TRUSTED_DATACLASS_ENCODERS.get(value_type)
+        if encoder is None:
+            encoder = _compile_trusted_dataclass_encoder(value_type, dataclass_fields)
+            _TRUSTED_DATACLASS_ENCODERS[value_type] = encoder
+        return encoder(value)
     if isinstance(value, Mapping):
         result: dict[str, object] = {}
         for key, item in value.items():
@@ -212,6 +228,26 @@ def _to_primitive_trusted(value: object) -> object:
     if isinstance(value, (tuple, list)):
         return [_to_primitive_trusted(item) for item in value]
     raise TypeError(f"unsupported boundary value type {qualified}")
+
+
+def _compile_trusted_dataclass_encoder(
+    value_type: type[object],
+    dataclass_fields: tuple[Field[Any], ...],
+) -> Callable[[object], dict[str, object]]:
+    """Compile direct field access for an already validated dataclass type."""
+
+    field_names = tuple(item.name for item in dataclass_fields)
+    entries = ", ".join(
+        f"{name!r}: _convert(value.{name})" for name in field_names
+    )
+    namespace: dict[str, object] = {"_convert": _to_primitive_trusted}
+    source = f"def encode(value):\n    return {{{entries}}}\n"
+    filename = f"<trusted-dataclass-encoder {value_type.__module__}.{value_type.__qualname__}>"
+    exec(compile(source, filename, "exec"), namespace)  # noqa: S102 - field names are Python identifiers
+    encoder = namespace["encode"]
+    if not callable(encoder):  # pragma: no cover - compile contract guard
+        raise RuntimeError("trusted dataclass encoder compilation failed")
+    return encoder  # type: ignore[return-value]
 
 
 def _decode(annotation: object, value: object, *, path: str, registry: Mapping[str, type[Any]]) -> Any:

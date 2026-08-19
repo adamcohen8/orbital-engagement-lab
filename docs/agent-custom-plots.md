@@ -6,6 +6,10 @@ brief, report, or inspection plot that is not already in the output folder.
 The API reads only completed-run evidence. It does not rerun simulations, invent
 missing samples, or bypass the review-store SQL guardrails.
 
+For any figure derived from OEL review evidence, this is the authoritative
+plotting surface. Connected agents should use OEL plot recipes or the typed MCP
+plan/render workflow before host-native visualization tools.
+
 ## Python API
 
 ```python
@@ -28,6 +32,10 @@ plotter.line(
 
 The plot is saved under `review/figures/` by default, styled with the OEL plot
 theme, and recorded in `review/generated_artifacts.json` with provenance.
+Static review plots also apply the supported
+[OEL Plot Quality Contract](plot-quality-contract.md), including stable
+axis-wide numeric formatting and renderer-level overlap, clipping, font, and
+legend checks. Its automated receipt does not replace the visual QA below.
 
 ## Plot QA Before Handoff
 
@@ -98,9 +106,11 @@ List available recipes:
 
 Common recipes include:
 
+- `object_eci_radius`
 - `relative_range`
 - `relative_range_rate`
 - `relative_velocity_components`
+- `relative_position_ric_2d`
 - `burn_activity`
 - `ground_access`
 
@@ -108,8 +118,40 @@ In Python:
 
 ```python
 plotter.relative_velocity_components(style="light")
+plotter.relative_position_ric_2d(style="light")
 plotter.burn_activity(artifact_id="brief_burn_activity")
 ```
+
+`relative_position_ric_2d` creates equal-aspect I-R, I-C, and C-R panels from
+the rectangular-RIC columns already recorded in `relative_state`. It marks the
+chief origin and the first and last deputy samples. It does not reconstruct or
+approximate missing RIC evidence.
+
+## MCP Workflow
+
+Read `oel://review/plot-recipes/v1` to discover the same authoritative recipe
+registry used by the CLI, Python API, agent-task runner, and MCP.
+
+Use `oel.plot_evidence.v1` when a supported recipe matches. When it does not,
+call `oel.plan_review_plot.v1` with a typed read-only query and chart mapping.
+The plan returns a content-bound `plot_plan_id` and performs no write. Echo the
+same specification and ID to `oel.render_review_plot.v2` with an operator-
+approved write reference. A changed query, chart mapping, or review store makes
+the plan ID stale and rendering fails closed.
+
+For motion rather than a static figure, read
+`oel://review/animation-recipes/v1`, call `oel.plan_review_animation.v1`, and
+render the unchanged content-bound plan with
+`oel.render_review_animation.v1`. Version 1 supports the
+`relative_position_ric_2d` recipe and produces an MP4 or GIF, a structured
+quality receipt, and a deterministic contact sheet. Inspect both visual
+artifacts before handoff; see the
+[OEL Animation Quality Contract](animation-quality-contract.md).
+
+The render result includes the artifact, query and review-store provenance,
+automated QA checks, and `visual_qa_status: pending_agent_review`. PNG and SVG
+results are also returned as MCP image content so the agent can perform the
+required visual inspection in the same workflow.
 
 ## Custom Plot Types
 

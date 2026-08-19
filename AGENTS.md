@@ -250,6 +250,19 @@ Rules for agents:
 - Use `sim.review.EvidencePlotter` or `python -m sim.review plot`
   for custom OEL-styled plots from completed review evidence. See
   `docs/agent-custom-plots.md`.
+- When OEL MCP is connected, use `oel.plot_evidence.v1` for a matching
+  supported recipe or the content-bound `oel.plan_review_plot.v1` then
+  `oel.render_review_plot.v2` workflow for a custom review query. For any plot
+  derived from OEL review evidence, use these OEL plotting surfaces before a
+  host-native visualization tool. If OEL cannot express the requested figure,
+  state the missing capability and use the documented custom-analysis fallback
+  explicitly.
+- For a supported movie derived from OEL review evidence, read
+  `oel://review/animation-recipes/v1`, plan with
+  `oel.plan_review_animation.v1`, and render the matching content-bound plan
+  with `oel.render_review_animation.v1`. Inspect both the generated contact
+  sheet and encoded movie before handoff. Do not substitute game recording or
+  an ad hoc host animation for this review-evidence workflow.
 - Before handing off a generated plot, visually inspect it and fix obvious
   presentation defects such as legends covering data, overlapping labels,
   clipped text, unreadable tick labels, blank figures, or missing expected

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import numpy as np
 import pytest
 
 from sim import SimulationConfig, SimulationSession
@@ -9,6 +10,7 @@ from sim.actuators.physical import (
     MagnetorquerHardware,
     ReactionWheelHardware,
 )
+from sim.core.models import StateTruth
 from sim.flight_software import (
     MISSION_LOAD_SCHEMA,
     ClockScale,
@@ -20,6 +22,7 @@ from sim.flight_software import (
     to_primitive,
     with_computed_content_hash,
 )
+from sim.single_run_support import _retime_decision_truth
 
 
 def _scenario(stack: str, params: dict | None = None) -> dict:
@@ -57,6 +60,60 @@ def _scenario(stack: str, params: dict | None = None) -> dict:
             "animations": {"enabled": False, "types": []},
         },
     }
+
+
+def test_retimed_world_truth_reuses_snapshot_forecasts_without_sharing_mutable_truth() -> None:
+    class CountingDynamics:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def step(self, *, state, command, env, dt_s):
+            self.calls += 1
+            predicted = state.copy()
+            predicted.position_eci_km += predicted.velocity_eci_km_s * dt_s
+            predicted.t_s += dt_s
+            return predicted
+
+    def truth(position: float) -> StateTruth:
+        return StateTruth(
+            position_eci_km=np.array([position, 0.0, 0.0]),
+            velocity_eci_km_s=np.array([1.0, 0.0, 0.0]),
+            attitude_quat_bn=np.array([1.0, 0.0, 0.0, 0.0]),
+            angular_rate_body_rad_s=np.zeros(3),
+            mass_kg=100.0,
+            t_s=0.0,
+        )
+
+    world = {
+        object_id: truth(position)
+        for object_id, position in zip(("a", "b", "c"), (0.0, 1.0, 2.0))
+    }
+    dynamics = {object_id: CountingDynamics() for object_id in world}
+    cache: dict[tuple[float, float, str, int, int], StateTruth] = {}
+
+    first = _retime_decision_truth(
+        world,
+        source_time_s=0.0,
+        target_time_s=0.5,
+        own_id="a",
+        own_truth=world["a"],
+        dynamics_by_object=dynamics,
+        forecast_cache=cache,
+    )
+    second = _retime_decision_truth(
+        world,
+        source_time_s=0.0,
+        target_time_s=0.5,
+        own_id="b",
+        own_truth=world["b"],
+        dynamics_by_object=dynamics,
+        forecast_cache=cache,
+    )
+
+    assert dynamics["c"].calls == 1
+    np.testing.assert_array_equal(first["c"].position_eci_km, second["c"].position_eci_km)
+    first["c"].position_eci_km[0] = -1.0
+    assert second["c"].position_eci_km[0] == pytest.approx(2.5)
 
 
 @pytest.mark.parametrize(

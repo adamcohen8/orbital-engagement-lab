@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oel.example/schemas/template-manifest.schema.json",
+  "title": "OEL Template Manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "template_id", "template_version", "oel_version", "generated_at", "parameters", "files"],
+  "properties": {
+    "schema_version": {"const": "oel.template-manifest.v1"},
+    "template_id": {"type": "string"},
+    "template_version": {"type": "string"},
+    "oel_version": {"type": "string"},
+    "generated_at": {"type": "string", "format": "date-time"},
+    "parameters": {"type": "object"},
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "sha256", "user_editable"],
+        "properties": {
+          "path": {"type": "string"},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "user_editable": {"type": "boolean"}
+        }
+      }
+    }
+  }
+}

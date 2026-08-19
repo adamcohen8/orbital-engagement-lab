@@ -121,6 +121,32 @@ class TestGymSimulationEnv(unittest.TestCase):
         self.assertIsInstance(truncated, bool)
         self.assertIn("metrics", info2)
 
+    def test_nonzero_action_changes_propagated_velocity(self):
+        env_cfg = GymEnvConfig(
+            scenario=_base_scenario(),
+            controlled_agent_id="chaser",
+            observation_fields=(
+                ObservationField("truth.chaser.position_eci_km"),
+                ObservationField("truth.chaser.velocity_eci_km_s"),
+            ),
+            action_fields=(
+                ActionField("thrust_eci_km_s2[0]", -1e-5, 1e-5),
+                ActionField("thrust_eci_km_s2[1]", -1e-5, 1e-5),
+                ActionField("thrust_eci_km_s2[2]", -1e-5, 1e-5),
+            ),
+        )
+        coast_env = GymSimulationEnv(env_cfg)
+        thrust_env = GymSimulationEnv(env_cfg)
+        coast_env.reset(seed=42)
+        thrust_env.reset(seed=42)
+
+        coast_obs, *_ = coast_env.step(np.zeros(3, dtype=np.float32))
+        thrust_obs, *_ = thrust_env.step(np.array([1e-5, 0.0, 0.0], dtype=np.float32))
+
+        velocity_delta_km_s = thrust_obs[3:] - coast_obs[3:]
+        self.assertGreater(float(velocity_delta_km_s[0]), 5e-6)
+        self.assertTrue(np.allclose(velocity_delta_km_s[1:], 0.0, atol=1e-9, rtol=0.0))
+
     def test_episode_variations_apply_to_scenario(self):
         env = GymSimulationEnv(
             GymEnvConfig(

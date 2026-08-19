@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "orbital-engagement-lab"
-version = "0.25.0"
+version = "0.26.0"
 description = "Integrated spacecraft simulation and analysis platform for rendezvous, control, validation, and mission prototyping."
 readme = "README.md"
 requires-python = ">=3.10,<3.15"
@@ -35,6 +35,7 @@ dependencies = [
 ]
 
 [project.scripts]
+oel = "sim.installation.cli:main"
 oel-sim = "run_simulation:main"
 oel-mcp = "integrations.oel_mcp.public_server:main"
 
@@ -102,6 +103,9 @@ full = [
 include-package-data = false
 py-modules = ["run_simulation"]
 
+[tool.setuptools.data-files]
+"share/oel/configs" = ["configs/quickstart_5min.yaml"]
+
 [tool.setuptools.package-data]
 sim = [
   "presets/objects/*.yaml",
@@ -110,6 +114,8 @@ sim = [
   "interchange/schemas/*.json",
   "interchange/examples/*.json",
   "interchange/examples/*.md",
+  "installation/schemas/*.json",
+  "fsw_authoring/schemas/*.json",
   "scale/schemas/*.json",
   "game/configs/*.yaml",
   "game/assets/*.png",

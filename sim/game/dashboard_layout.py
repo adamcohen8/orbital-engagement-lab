@@ -26,6 +26,7 @@ class DashboardLayoutMixin:
         pygame = self.pygame
         if self.closed:
             return
+        draw_t0 = perf_counter()
         width, height = self.screen.get_size()
         self._render_motion_enabled = bool(render_motion)
         self._render_wall_time_s = perf_counter()
@@ -67,12 +68,34 @@ class DashboardLayoutMixin:
                 debrief_lines=debrief_lines,
                 debrief_available=debrief_available,
             )
+        self._draw_presentation_diagnostics()
         pygame.display.flip()
+        controller = getattr(self, "presentation_controller", None)
+        if controller is not None:
+            controller.record_draw(perf_counter() - draw_t0)
+
+    def _draw_presentation_diagnostics(self) -> None:
+        controller = getattr(self, "presentation_controller", None)
+        if controller is None:
+            return
+        lines = tuple(controller.overlay_lines())
+        if not lines:
+            return
+        pygame = self.pygame
+        rendered = [self.small_font.render(str(line), True, (190, 225, 238)) for line in lines]
+        width = max((surface.get_width() for surface in rendered), default=0) + 20
+        height = len(rendered) * 19 + 14
+        panel = pygame.Surface((width, height), pygame.SRCALPHA)
+        panel.fill((4, 10, 16, 218))
+        for index, surface in enumerate(rendered):
+            panel.blit(surface, (10, 7 + index * 19))
+        self.screen.blit(panel, (12, 12))
 
     def draw_ric_primer(self, *, stage_index: int, elapsed_s: float, recording_status: str = "") -> None:
         pygame = self.pygame
         if self.closed:
             return
+        draw_t0 = perf_counter()
         width, height = self.screen.get_size()
         stage = _ric_primer_stage(stage_index)
         self.screen.fill((12, 16, 22))
@@ -98,7 +121,11 @@ class DashboardLayoutMixin:
             stage_index=stage_index,
             recording_status=recording_status,
         )
+        self._draw_presentation_diagnostics()
         pygame.display.flip()
+        controller = getattr(self, "presentation_controller", None)
+        if controller is not None:
+            controller.record_draw(perf_counter() - draw_t0)
 
     def _draw_ric_primer_top_bar(self, rect: Any, *, stage: dict[str, Any], stage_index: int) -> None:
         pygame = self.pygame

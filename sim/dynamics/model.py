@@ -20,6 +20,7 @@ from sim.dynamics.orbit.accelerations import OrbitContext
 from sim.dynamics.orbit.atmosphere import density_from_model
 from sim.dynamics.orbit.eclipse import resolve_srp_geometry, srp_shadow_factor
 from sim.dynamics.orbit.environment import EARTH_ROT_RATE_RAD_S
+from sim.dynamics.orbit.epoch import resolve_time_dependent_env
 from sim.dynamics.orbit.propagator import OrbitPropagator
 from sim.dynamics.spacecraft_geometry import GeometryAreaProfile, RectangularPrismGeometry
 from sim.utils.quaternion import quaternion_to_dcm_bn
@@ -74,18 +75,19 @@ class OrbitalAttitudeDynamics(DynamicsModel):
             delattr(self.orbit_propagator, "_pending_orbital_attitude_default_configuration")
 
     def step(self, state: StateTruth, command: Command, env: dict, dt_s: float) -> StateTruth:
+        propagate_attitude = self.propagate_attitude and not bool(env.get("attitude_disabled", False))
         force_eci_n = np.asarray(command.mode_flags.get("physical_force_eci_n", (0.0, 0.0, 0.0)), dtype=float)
         force_body_n = np.asarray(command.mode_flags.get("physical_force_body_n", (0.0, 0.0, 0.0)), dtype=float)
         mass_flow_kg_s = float(command.mode_flags.get("mass_flow_kg_s", 0.0) or 0.0)
         if (
-            self.propagate_attitude
+            propagate_attitude
             and self.orbit_propagator.state_frame == "eci"
             and (np.any(force_eci_n) or np.any(force_body_n) or mass_flow_kg_s > 0.0)
         ):
             return self._step_coupled_v2(state, command, env, dt_s)
         env_local = dict(env)
         q_force_evaluation = np.asarray(state.attitude_quat_bn, dtype=float)
-        if self.propagate_attitude and dt_s > 0.0:
+        if propagate_attitude and dt_s > 0.0:
             q_force_evaluation, _ = propagate_attitude_exponential_map(
                 quat_bn=q_force_evaluation,
                 omega_body_rad_s=np.asarray(state.angular_rate_body_rad_s, dtype=float),
@@ -216,7 +218,7 @@ class OrbitalAttitudeDynamics(DynamicsModel):
 
         q_next = state.attitude_quat_bn.copy()
         w_next = state.angular_rate_body_rad_s.copy()
-        if self.propagate_attitude:
+        if propagate_attitude:
             midpoint_truth = self._midpoint_translational_truth(
                 state=state,
                 x_orbit_next=x_orbit_next,
@@ -322,7 +324,7 @@ class OrbitalAttitudeDynamics(DynamicsModel):
                     )
 
         # Optional direct attitude state override for surrogate controller testing.
-        if self.propagate_attitude:
+        if propagate_attitude:
             att_override = dict(command.mode_flags.get("attitude_state_override", {}) or {})
             if att_override:
                 q_cmd = np.array(att_override.get("q_next_bn", q_next), dtype=float).reshape(-1)
@@ -451,6 +453,10 @@ class OrbitalAttitudeDynamics(DynamicsModel):
 
     def _coupled_stage_environment(self, state: StateTruth, env: dict) -> dict:
         stage_env = dict(env)
+        resolved_epoch = resolve_time_dependent_env(env, state.t_s)
+        for key in ("sun_pos_eci_km", "moon_pos_eci_km"):
+            if key not in stage_env and key in resolved_epoch:
+                stage_env[key] = resolved_epoch[key]
         if self.drag_area_m2 is not None:
             stage_env["drag_area_m2"] = float(self.drag_area_m2)
         if self.lift_area_m2 is not None:

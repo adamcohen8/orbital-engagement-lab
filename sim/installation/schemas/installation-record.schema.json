@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oel.example/schemas/installation-record.schema.json",
+  "title": "OEL Installation Record v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "status", "version", "edition", "channel", "installed_at", "transaction_id", "release_manifest_sha256", "release_artifact", "source", "installed_tree_manifest", "runtime", "profile", "platform", "effects"],
+  "properties": {
+    "schema_version": {"const": "oel.installation-record.v1"},
+    "status": {"enum": ["official", "developer", "incomplete"]},
+    "version": {"type": "string"},
+    "edition": {"enum": ["public", "pro"]},
+    "channel": {"enum": ["stable", "preview"]},
+    "installed_at": {"type": "string", "format": "date-time"},
+    "transaction_id": {"type": "string"},
+    "release_manifest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "release_artifact": {"type": "object"},
+    "source": {"type": "object"},
+    "installed_tree_manifest": {"const": "installed-tree.json"},
+    "runtime": {"type": "object"},
+    "profile": {"type": "string"},
+    "platform": {"type": "object"},
+    "effects": {"type": "object"}
+  }
+}

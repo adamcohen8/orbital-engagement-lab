@@ -373,6 +373,7 @@ class _SatelliteStepper:
                     {object_id: runtime.dynamics for object_id, runtime in e.agents.items()},
                 ),
                 environment=env_inner,
+                forecast_cache=getattr(e, "_forecast_truth_cache", None),
             )
             runtime.prepare_interval(
                 tr_inner,
@@ -524,6 +525,7 @@ def _retime_decision_truth(
     own_truth: StateTruth,
     dynamics_by_object: dict[str, Any] | None = None,
     environment: dict[str, Any] | None = None,
+    forecast_cache: dict[tuple[float, float, str, int, int], StateTruth] | None = None,
 ) -> dict[str, StateTruth]:
     """Put decision-snapshot objects at the exact onboard sample time.
 
@@ -540,28 +542,39 @@ def _retime_decision_truth(
         if object_id == own_id:
             continue
         dynamics = None if dynamics_by_object is None else dynamics_by_object.get(object_id)
-        if elapsed > 0.0 and dynamics is not None:
-            prediction_environment = {
-                **dict(environment or {}),
-                "world_truth": dict(world_truth),
-                # Relative sensing needs the other object's orbit at the
-                # sample epoch.  Re-propagating its attitude would both be
-                # unnecessary and double-count attitude guardrail events.
-                "attitude_disabled": True,
-            }
-            predicted = dynamics.step(
-                state=truth.copy(),
-                command=Command.zero(),
-                env=prediction_environment,
-                dt_s=elapsed,
-            )
-        else:
-            predicted = truth.copy()
-            predicted.position_eci_km = np.asarray(truth.position_eci_km, dtype=float) + elapsed * np.asarray(
-                truth.velocity_eci_km_s, dtype=float
-            )
-            predicted.t_s = float(target_time_s)
-        resolved[object_id] = predicted
+        cache_key = (
+            float(source_time_s),
+            float(target_time_s),
+            str(object_id),
+            id(truth),
+            id(dynamics),
+        )
+        predicted = None if forecast_cache is None else forecast_cache.get(cache_key)
+        if predicted is None:
+            if elapsed > 0.0 and dynamics is not None:
+                prediction_environment = {
+                    **dict(environment or {}),
+                    "world_truth": dict(world_truth),
+                    # Relative sensing needs the other object's orbit at the
+                    # sample epoch.  Re-propagating its attitude would both be
+                    # unnecessary and double-count attitude guardrail events.
+                    "attitude_disabled": True,
+                }
+                predicted = dynamics.step(
+                    state=truth.copy(),
+                    command=Command.zero(),
+                    env=prediction_environment,
+                    dt_s=elapsed,
+                )
+            else:
+                predicted = truth.copy()
+                predicted.position_eci_km = np.asarray(truth.position_eci_km, dtype=float) + elapsed * np.asarray(
+                    truth.velocity_eci_km_s, dtype=float
+                )
+                predicted.t_s = float(target_time_s)
+            if forecast_cache is not None:
+                forecast_cache[cache_key] = predicted
+        resolved[object_id] = predicted.copy()
     return resolved
 
 

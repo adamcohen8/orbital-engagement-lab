@@ -36,6 +36,7 @@ from sim.config.scenario.validation import (
     _validate_object_references,
     _validate_physics_runtime_settings,
 )
+from sim.schema_versions import LEGACY_SCENARIO_SCHEMA_VERSION, SCENARIO_SCHEMA_VERSION
 from sim.security import ConfigPathPolicy
 
 __all__ = [
@@ -54,6 +55,7 @@ def scenario_config_from_dict(
         root,
         "root",
         {
+            "schema_version",
             "scenario_name",
             "scenario_description",
             "objects",
@@ -64,6 +66,12 @@ def scenario_config_from_dict(
             "metadata",
         },
     )
+    schema_version = str(root.get("schema_version", LEGACY_SCENARIO_SCHEMA_VERSION) or "").strip()
+    if schema_version not in {SCENARIO_SCHEMA_VERSION, LEGACY_SCENARIO_SCHEMA_VERSION}:
+        raise ValueError(
+            f"schema_version must be {SCENARIO_SCHEMA_VERSION!r}; "
+            f"unversioned legacy configs are represented as {LEGACY_SCENARIO_SCHEMA_VERSION!r}."
+        )
     base_dir = None if source_path is None else Path(source_path).expanduser().resolve().parent
     if path_policy is None and source_path is not None:
         path_policy = ConfigPathPolicy.default(config_path=source_path)
@@ -91,6 +99,7 @@ def scenario_config_from_dict(
     chaser = objects.get("chaser", chaser)
     target = objects.get("target", target)
     cfg = SimulationScenarioConfig(
+        schema_version=schema_version,
         scenario_name=str(root.get("scenario_name", "unnamed_scenario")),
         scenario_description=str(root.get("scenario_description", "") or ""),
         rocket=rocket,

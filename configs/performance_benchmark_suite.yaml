@@ -36,7 +36,7 @@ cases:
     knowledge_detection_by_observer.observer.target.detected_count: {min: 1}
     knowledge_detection_by_observer.observer.target.nondetected_count: {min: 1}
     knowledge_consistency_by_observer.observer.target.maneuver_detection_enabled: {truthy: true}
-    summary.runtime_profile.object_totals.observer.stages.estimator_update.count: {min: 1}
+    summary.runtime_profile.object_totals.observer.stages.satellite_step.count: {min: 1}
   profiles:
     smoke: {duration_s: 30.0}
     standard: {duration_s: 300.0}
@@ -48,20 +48,20 @@ cases:
   config_path: configs/performance/actuator_stack.yaml
   tags: [rcs, electric_propulsion, gimbal, magnetorquer, cmg, reaction_wheel, desaturation, faults]
   checks:
-    summary.runtime_profile.object_totals.rw_sat.stages.dynamics_step.count: {min: 1}
-    summary.runtime_profile.object_totals.rcs_sat.stages.decision.count: {min: 1}
+    summary.runtime_profile.object_totals.rw_sat.stages.satellite_step.count: {min: 1}
+    summary.runtime_profile.object_totals.rcs_sat.stages.satellite_step.count: {min: 1}
   profiles:
     smoke: {duration_s: 5.0}
     standard: {duration_s: 120.0}
     full: {duration_s: 600.0}
 - name: cr3bp_earth_moon
-  description: Earth-Moon CR3BP RK4 propagation on the maintained L2 NRHO seed.
+  description: Trajectory-only Earth-Moon CR3BP RK4 propagation on the maintained L2 NRHO seed.
   category: propagation
   kind: scenario
   config_path: configs/performance/cr3bp.yaml
-  tags: [cr3bp, earth_moon, nrho]
+  tags: [cr3bp, earth_moon, nrho, trajectory_only]
   checks:
-    summary.runtime_profile.object_totals.vehicle.stages.dynamics_step.count: {min: 1}
+    summary.runtime_profile.object_totals.vehicle.stages.satellite_step.count: {min: 1}
   profiles:
     smoke: {duration_s: 600.0}
     standard: {duration_s: 86400.0}

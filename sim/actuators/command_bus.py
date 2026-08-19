@@ -19,7 +19,12 @@ from sim.flight_software.contracts import (
     ThrusterOnOffCommand,
     ThrusterPulseCommand,
 )
-from sim.flight_software.schemas import canonical_json_bytes, from_primitive, to_primitive
+from sim.flight_software.schemas import (
+    _canonical_json_bytes_trusted,
+    canonical_json_bytes,
+    from_primitive,
+    to_primitive,
+)
 
 
 class ExpiryBehavior(str, Enum):
@@ -108,8 +113,21 @@ class ActuatorCommandBus:
         return tuple(self._records)
 
     def publish(self, command: ActuatorCommand, *, received_at: ClockTag) -> ActuatorCommandReceipt | None:
+        return self._publish(command, received_at=received_at, boundary_validated=False)
+
+    def _publish(
+        self,
+        command: ActuatorCommand,
+        *,
+        received_at: ClockTag,
+        boundary_validated: bool,
+    ) -> ActuatorCommandReceipt | None:
         self._publications.append((command, received_at))
-        fingerprint = canonical_json_bytes(command)
+        fingerprint = (
+            _canonical_json_bytes_trusted(command)
+            if boundary_validated
+            else canonical_json_bytes(command)
+        )
         previous = self._ledger.get(command.command_id)
         if previous is not None:
             previous_fingerprint, previous_disposition = previous
@@ -184,6 +202,24 @@ class ActuatorCommandBus:
     ) -> tuple[ActuatorCommandReceipt, ...]:
         return tuple(
             receipt for command in commands if (receipt := self.publish(command, received_at=received_at)) is not None
+        )
+
+    def _publish_all_boundary_validated(
+        self, commands: tuple[ActuatorCommand, ...], *, received_at: ClockTag
+    ) -> tuple[ActuatorCommandReceipt, ...]:
+        """Publish commands contained in an adapter-validated FSW output."""
+
+        return tuple(
+            receipt
+            for command in commands
+            if (
+                receipt := self._publish(
+                    command,
+                    received_at=received_at,
+                    boundary_validated=True,
+                )
+            )
+            is not None
         )
 
     def demand(self, *, satellite_id: str, actuator_id: str, at: ClockTag) -> ActuatorDemand:

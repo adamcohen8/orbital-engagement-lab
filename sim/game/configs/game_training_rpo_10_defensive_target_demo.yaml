@@ -97,25 +97,6 @@ objects:
       - 0.0
       - 0.0
       relative_to: target
-    knowledge:
-      refresh_rate_s: 1.0
-      targets:
-      - target
-      - target_reference
-      conditions:
-        require_line_of_sight: false
-        max_range_km: 10000.0
-      sensor_error:
-        pos_sigma_km:
-        - 0.0
-        - 0.0
-        - 0.0
-        vel_sigma_km_s:
-        - 0.0
-        - 0.0
-        - 0.0
-      estimation:
-        type: ekf
     kind: satellite
     flight_software:
       stack: fsw.game_pilot_reference
@@ -147,29 +128,12 @@ objects:
       - 0.0
       - 0.0
       - 0.0
-    knowledge:
-      refresh_rate_s: 1.0
-      targets:
-      - chaser
-      conditions:
-        require_line_of_sight: false
-        max_range_km: 10000.0
-      sensor_error:
-        pos_sigma_km:
-        - 0.0
-        - 0.0
-        - 0.0
-        vel_sigma_km_s:
-        - 0.0
-        - 0.0
-        - 0.0
-      estimation:
-        type: ekf
     kind: satellite
     flight_software:
       stack: fsw.rpo_reference
       hardware_profile: hardware.ideal_wrench.v1
       params:
+        navigation_initialization: cold
         reference_object_id: chaser
         translation_mode: passive_retreat
         goal_type: rpo.passive_retreat

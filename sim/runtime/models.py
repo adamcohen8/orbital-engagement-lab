@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from sim.core.models import StateBelief, StateTruth
 from sim.dynamics.model import OrbitalAttitudeDynamics
-from sim.knowledge.object_tracking import ObjectKnowledgeBase
 from sim.rocket import RocketAscentSimulator, RocketState
+
+if TYPE_CHECKING:
+    from sim.knowledge.object_tracking import ObjectKnowledgeBase
 
 
 @dataclass

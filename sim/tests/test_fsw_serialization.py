@@ -40,6 +40,10 @@ from sim.flight_software import (
     from_primitive,
     to_primitive,
 )
+from sim.flight_software.schemas import (
+    _canonical_json_bytes_trusted,
+    _to_primitive_trusted,
+)
 
 
 def _time() -> ClockTag:
@@ -71,6 +75,8 @@ def test_every_required_payload_has_a_golden_round_trip(payload: object) -> None
     wire = canonical_json_bytes(payload)
     assert canonical_loads(wire) == payload
     assert canonical_json_bytes(canonical_loads(wire)) == wire
+    assert _to_primitive_trusted(payload) == to_primitive(payload)
+    assert _canonical_json_bytes_trusted(payload) == wire
 
 
 def test_canonical_json_has_stable_field_order_and_no_whitespace() -> None:
@@ -116,6 +122,8 @@ def test_nested_input_and_output_boundary_batches_round_trip() -> None:
     )
     output = FlightSoftwareOutput("sat", 1, (command,))
     assert canonical_loads(canonical_json_bytes(output)) == output
+    assert _to_primitive_trusted(input_batch) == to_primitive(input_batch)
+    assert _to_primitive_trusted(output) == to_primitive(output)
 
 
 def test_decode_rejects_unknown_fields_nonfinite_json_and_wrong_literals() -> None:

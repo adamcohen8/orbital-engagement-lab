@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import asdict
 from pathlib import Path
 from threading import Event
 from typing import Any
@@ -30,6 +31,7 @@ from integrations.oel_mcp.execution import (
     write_execution_manifest,
     write_materialized_config,
 )
+from integrations.oel_mcp.fsw_authoring_handlers import call_fsw_authoring_tool
 from integrations.oel_mcp.public_registry import public_contract_map
 from integrations.oel_mcp.reporting import MAX_REPORT_SOURCE_BYTES
 from integrations.oel_mcp.reporting import audit_report as audit_report_artifacts
@@ -52,7 +54,15 @@ from sim.handoff import (
     materialize_snapshot_onp,
 )
 from sim.reporting import build_maneuver_readiness_packet
-from sim.review import ReviewWorkspace
+from sim.review import (
+    ReviewWorkspace,
+    animation_spec_from_mapping,
+    plan_review_animation,
+    plan_review_plot,
+    plot_spec_from_mapping,
+)
+from sim.review import render_review_animation as render_planned_review_animation
+from sim.review import render_review_plot as render_planned_review_plot
 from sim.security import ConfigPathPolicy
 
 
@@ -96,6 +106,18 @@ class PublicOELMCPHandlers(BaseOELMCPHandlers):
     def plot_evidence(self, **arguments: Any) -> dict[str, Any]:
         return self.call("oel.plot_evidence.v1", arguments)
 
+    def plan_review_plot(self, **arguments: Any) -> dict[str, Any]:
+        return self.call("oel.plan_review_plot.v1", arguments)
+
+    def render_review_plot(self, **arguments: Any) -> dict[str, Any]:
+        return self.call("oel.render_review_plot.v2", arguments)
+
+    def plan_review_animation(self, **arguments: Any) -> dict[str, Any]:
+        return self.call("oel.plan_review_animation.v1", arguments)
+
+    def render_review_animation(self, **arguments: Any) -> dict[str, Any]:
+        return self.call("oel.render_review_animation.v1", arguments)
+
     def run_agent_task(self, **arguments: Any) -> dict[str, Any]:
         return self.call("oel.run_agent_task.v1", arguments)
 
@@ -134,6 +156,9 @@ class PublicOELMCPHandlers(BaseOELMCPHandlers):
         cancel_event: Event | None = None,
         progress: Any | None = None,
     ) -> dict[str, Any]:
+        fsw_result = call_fsw_authoring_tool(self, contract, arguments)
+        if fsw_result is not None:
+            return fsw_result
         if contract.tool_id == "oel.inspect_run.v1":
             return self._inspect_run(contract, arguments)
         if contract.tool_id == "oel.query_review.v1":
@@ -148,6 +173,14 @@ class PublicOELMCPHandlers(BaseOELMCPHandlers):
             return self._compare_runs(contract, arguments)
         if contract.tool_id == "oel.plot_evidence.v1":
             return self._plot_evidence(contract, arguments)
+        if contract.tool_id == "oel.plan_review_plot.v1":
+            return self._plan_review_plot(contract, arguments)
+        if contract.tool_id == "oel.render_review_plot.v2":
+            return self._render_review_plot(contract, arguments)
+        if contract.tool_id == "oel.plan_review_animation.v1":
+            return self._plan_review_animation(contract, arguments)
+        if contract.tool_id == "oel.render_review_animation.v1":
+            return self._render_review_animation(contract, arguments)
         if contract.tool_id == "oel.run_agent_task.v1":
             return self._run_agent_task(contract, arguments, cancel_event=cancel_event, progress=progress)
         if contract.tool_id == "oel.prepare_report_packet.v1":
@@ -566,11 +599,28 @@ class PublicOELMCPHandlers(BaseOELMCPHandlers):
                 (provenance["status"] == "completed" and provenance["artifacts_complete"])
                 or summary_complete
             )
+            qa = dict(artifact.get("qa", {}) or {})
             plot_complete = (
-                source_complete and artifact.get("status") == "ok" and bool(artifact.get("path_exists"))
+                source_complete
+                and artifact.get("status") == "ok"
+                and bool(artifact.get("path_exists"))
+                and not bool(artifact.get("truncated"))
+                and qa.get("automated_status") == "passed"
+            )
+            manifest = manifest_base(
+                tool_id=contract.tool_id,
+                approval_id=str(arguments["approval"]["approval_id"]),
+            )
+            manifest.update(
+                {
+                    "recipe_id": recipe_id,
+                    "recipe_version": int(getattr(recipe, "recipe_version", 1)),
+                    "query_sha256": hashlib.sha256(recipe.sql.encode("utf-8")).hexdigest(),
+                    "qa": qa,
+                }
             )
             manifest = complete_manifest(
-                manifest_base(tool_id=contract.tool_id, approval_id=str(arguments["approval"]["approval_id"])),
+                manifest,
                 status="completed" if plot_complete else "partial",
                 artifacts=[str(target)] if artifact.get("path_exists") else [],
             )
@@ -584,6 +634,205 @@ class PublicOELMCPHandlers(BaseOELMCPHandlers):
                 "output_dir": str(output),
                 "recipe_id": recipe_id,
                 "artifact": artifact,
+                "manifest_path": str(manifest_path),
+            }
+
+        return self._envelope(
+            contract=contract,
+            arguments=arguments,
+            operation=operation,
+            outcome_status=lambda result: result["status"],
+            evidence=lambda result: {
+                "complete": result["status"] == "completed",
+                "empty": False,
+                "truncated": bool(result["artifact"].get("truncated")),
+            },
+        )
+
+    def _plan_review_plot(self, contract: ToolContract, arguments: dict[str, Any]) -> dict[str, Any]:
+        def operation() -> dict[str, Any]:
+            output = self.path_policy.resolve_read(arguments["output_dir"], kind="directory")
+            _authorize_review_inputs(self.path_policy, output, require_store=True)
+            spec = plot_spec_from_mapping(arguments, source="oel_mcp_review_plot_v2")
+            return plan_review_plot(output, spec)
+
+        return self._envelope(
+            contract=contract,
+            arguments=arguments,
+            operation=operation,
+            evidence=lambda result: {
+                "complete": not bool(result["truncated"]),
+                "empty": False,
+                "truncated": bool(result["truncated"]),
+            },
+        )
+
+    def _render_review_plot(self, contract: ToolContract, arguments: dict[str, Any]) -> dict[str, Any]:
+        def operation() -> dict[str, Any]:
+            output = self.path_policy.resolve_read(arguments["output_dir"], kind="directory")
+            _authorize_review_inputs(self.path_policy, output, require_store=True)
+            self.path_policy.resolve_write(output)
+            artifact_id = safe_artifact_id(str(arguments["artifact_id"]))
+            file_format = str(arguments.get("format", "png"))
+            target = output / "review" / "mcp_plots" / f"{artifact_id}.{file_format}"
+            if target.exists():
+                raise ValueError("The planned plot target already exists; choose a new artifact_id and re-plan.")
+            target = self.path_policy.resolve_write(target)
+            spec = plot_spec_from_mapping(arguments, source="oel_mcp_review_plot_v2")
+            artifact = render_planned_review_plot(
+                output,
+                spec,
+                plot_plan_id=str(arguments["plot_plan_id"]),
+                path=target,
+            )
+            artifact_payload = {
+                "artifact_id": artifact.artifact_id,
+                "path": str(artifact.path),
+                "relative_path": artifact.relative_path,
+                "path_exists": artifact.path.is_file(),
+                "row_count": artifact.row_count,
+                "truncated": artifact.truncated,
+                "spec": asdict(artifact.spec),
+                "qa": dict(artifact.qa),
+            }
+            complete = bool(
+                artifact.path.is_file()
+                and not artifact.truncated
+                and artifact.qa.get("automated_status") == "passed"
+            )
+            manifest = manifest_base(
+                tool_id=contract.tool_id,
+                approval_id=str(arguments["approval"]["approval_id"]),
+            )
+            manifest.update(
+                {
+                    "plot_plan_id": str(arguments["plot_plan_id"]),
+                    "artifact_id": artifact.artifact_id,
+                    "query_sha256": hashlib.sha256(spec.sql.encode("utf-8")).hexdigest(),
+                    "plot_spec": asdict(spec),
+                    "qa": dict(artifact.qa),
+                }
+            )
+            manifest = complete_manifest(
+                manifest,
+                status="completed" if complete else "partial",
+                artifacts=[str(target)] if artifact.path.is_file() else [],
+            )
+            manifest_path = write_execution_manifest(
+                output / "review" / "mcp_plots",
+                manifest,
+                filename=f"{artifact_id}.manifest.json",
+            )
+            return {
+                "status": "completed" if complete else "partial",
+                "output_dir": str(output),
+                "plot_plan_id": str(arguments["plot_plan_id"]),
+                "artifact": artifact_payload,
+                "manifest_path": str(manifest_path),
+            }
+
+        return self._envelope(
+            contract=contract,
+            arguments=arguments,
+            operation=operation,
+            outcome_status=lambda result: result["status"],
+            evidence=lambda result: {
+                "complete": result["status"] == "completed",
+                "empty": False,
+                "truncated": bool(result["artifact"].get("truncated")),
+            },
+        )
+
+    def _plan_review_animation(self, contract: ToolContract, arguments: dict[str, Any]) -> dict[str, Any]:
+        def operation() -> dict[str, Any]:
+            output = self.path_policy.resolve_read(arguments["output_dir"], kind="directory")
+            _authorize_review_inputs(self.path_policy, output, require_store=True)
+            spec = animation_spec_from_mapping(arguments, source="oel_mcp_review_animation_v1")
+            return plan_review_animation(output, spec)
+
+        return self._envelope(
+            contract=contract,
+            arguments=arguments,
+            operation=operation,
+            evidence=lambda result: {
+                "complete": bool(result["render_ready"]),
+                "empty": False,
+                "truncated": bool(result["truncated"]),
+            },
+        )
+
+    def _render_review_animation(self, contract: ToolContract, arguments: dict[str, Any]) -> dict[str, Any]:
+        def operation() -> dict[str, Any]:
+            output = self.path_policy.resolve_read(arguments["output_dir"], kind="directory")
+            _authorize_review_inputs(self.path_policy, output, require_store=True)
+            self.path_policy.resolve_write(output)
+            artifact_id = safe_artifact_id(str(arguments["artifact_id"]))
+            file_format = str(arguments.get("format", "mp4"))
+            target = output / "review" / "mcp_animations" / f"{artifact_id}.{file_format}"
+            companion_paths = (
+                target,
+                target.with_suffix(".contact-sheet.png"),
+                target.with_suffix(".quality.json"),
+            )
+            if any(path.exists() for path in companion_paths):
+                raise ValueError("The planned animation target already exists; choose a new artifact_id and re-plan.")
+            target = self.path_policy.resolve_write(target)
+            spec = animation_spec_from_mapping(arguments, source="oel_mcp_review_animation_v1")
+            artifact = render_planned_review_animation(
+                output,
+                spec,
+                animation_plan_id=str(arguments["animation_plan_id"]),
+                path=target,
+            )
+            artifact_paths = [
+                artifact.path,
+                artifact.contact_sheet_path,
+                artifact.quality_receipt_path,
+            ]
+            artifact_payload = {
+                "artifact_id": artifact.artifact_id,
+                "path": str(artifact.path),
+                "relative_path": artifact.relative_path,
+                "path_exists": artifact.path.is_file(),
+                "contact_sheet_path": str(artifact.contact_sheet_path),
+                "quality_receipt_path": str(artifact.quality_receipt_path),
+                "row_count": artifact.row_count,
+                "truncated": artifact.truncated,
+                "spec": asdict(artifact.spec),
+                "qa": dict(artifact.qa),
+            }
+            complete = bool(
+                all(path.is_file() for path in artifact_paths)
+                and not artifact.truncated
+                and artifact.qa.get("automated_status") == "passed"
+            )
+            manifest = manifest_base(
+                tool_id=contract.tool_id,
+                approval_id=str(arguments["approval"]["approval_id"]),
+            )
+            manifest.update(
+                {
+                    "animation_plan_id": str(arguments["animation_plan_id"]),
+                    "artifact_id": artifact.artifact_id,
+                    "animation_spec": asdict(spec),
+                    "qa": dict(artifact.qa),
+                }
+            )
+            manifest = complete_manifest(
+                manifest,
+                status="completed" if complete else "partial",
+                artifacts=[str(path) for path in artifact_paths if path.is_file()],
+            )
+            manifest_path = write_execution_manifest(
+                output / "review" / "mcp_animations",
+                manifest,
+                filename=f"{artifact_id}.manifest.json",
+            )
+            return {
+                "status": "completed" if complete else "partial",
+                "output_dir": str(output),
+                "animation_plan_id": str(arguments["animation_plan_id"]),
+                "artifact": artifact_payload,
                 "manifest_path": str(manifest_path),
             }
 

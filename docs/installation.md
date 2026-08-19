@@ -1,11 +1,74 @@
 # Installing OEL On Windows, macOS, And Linux
 
-This is the authoritative source-installation and command-convention guide for
-Orbital Engagement Lab. OEL supports CPython 3.10 through 3.14 on its declared
-Windows, macOS, and Linux compatibility targets. Python 3.14 is the recommended
-choice for a new environment.
+This is the authoritative managed- and source-installation guide for Orbital
+Engagement Lab. OEL supports CPython 3.10 through 3.14 on its declared Windows,
+macOS, and Linux compatibility targets. Python 3.14 is recommended.
 
-## Get The Source
+## Managed Installation
+
+An official public release publishes a small `install.sh`, `install.ps1`,
+signed `release-manifest.json`, source artifact, and offline bundle as immutable
+assets on the public OEL GitHub release. The stable convenience URL below
+resolves to the installer asset on the latest promoted public release. Never
+pipe an uninspected URL from a third party. Managed OEL Pro installation is a
+separate, deferred distribution decision and does not use the public feed.
+
+POSIX:
+
+```bash
+curl --proto '=https' --tlsv1.2 -fsSLo /tmp/oel-install.sh \
+  https://github.com/adamcohen8/orbital-engagement-lab/releases/latest/download/install.sh
+less /tmp/oel-install.sh
+sh /tmp/oel-install.sh
+```
+
+After verifying the release host and script through the documented channel,
+the equivalent convenience form is:
+
+```bash
+curl --proto '=https' --tlsv1.2 -fsSL \
+  https://github.com/adamcohen8/orbital-engagement-lab/releases/latest/download/install.sh | sh
+```
+
+The download-inspect-execute form remains preferred for first use because it
+makes the small trust bootstrap visible before execution.
+
+Windows PowerShell:
+
+```powershell
+Invoke-WebRequest https://github.com/adamcohen8/orbital-engagement-lab/releases/latest/download/install.ps1 -OutFile $env:TEMP\oel-install.ps1
+Get-Content $env:TEMP\oel-install.ps1
+& $env:TEMP\oel-install.ps1
+```
+
+The bootstrap requires an existing supported CPython. It verifies the embedded
+bootstrap digest, signed release manifest, artifact size and SHA-256, and safe
+archive shape before importing release code. It installs immutable versions
+side by side under platform-native application data and writes a stable
+launcher. The rendered installer also records the official signed-channel URL
+beside OEL's trusted release keys, so future update checks do not require users
+to copy URLs or key paths. The channel URL locates signed metadata; it is not a
+replacement trust root. The bootstrap does not edit a workspace.
+
+After installation:
+
+```text
+oel update status --full
+oel update check
+oel doctor
+oel workspace init path/to/my-oel-workspace
+oel --workspace path/to/my-oel-workspace sim --quickstart --validate-only
+oel --workspace path/to/my-oel-workspace sim --quickstart
+oel --workspace path/to/my-oel-workspace review outputs/quickstart_5min --saved-query run_metadata
+```
+
+See [Updating OEL](updating.md), [OEL Workspaces](workspaces.md), and
+[Offline Installation](offline-installation.md). Managed installation and
+workspace adoption are separate operations by design.
+
+## Developer Source Installation
+
+### Get The Source
 
 Clone the public repository, or start in the root of an existing OEL checkout:
 

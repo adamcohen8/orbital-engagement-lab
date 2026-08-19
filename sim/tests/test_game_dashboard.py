@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import inspect
 
+import sim.game.dashboard_state as game_dashboard_state
+
 # These owner-aligned tests share deterministic builders and compatibility
 # imports from the adjacent support module.
 # ruff: noqa: F403, F405
@@ -119,6 +121,56 @@ def test_hcw_dashboard_does_not_compute_true_anomaly(monkeypatch: pytest.MonkeyP
     dashboard.push_snapshot(snapshot)
 
     assert dashboard.target_true_anomaly_deg is None
+
+
+def test_dashboard_skips_self_relative_ric_transforms(monkeypatch: pytest.MonkeyPatch) -> None:
+    target = np.array([7000.0, 0.0, 0.0, 0.0, 7.54605329, 0.0], dtype=float)
+    chaser = ric_rect_state_to_eci(
+        np.array([0.1, -1.0, 0.2, 1.0e-5, -2.0e-5, 3.0e-5]),
+        target[:3],
+        target[3:],
+    )
+    expected_rel = relative_state_from_arrays(target, chaser)
+    relative_calls = 0
+    original_relative = game_dashboard_state.relative_ric_state_from_arrays
+
+    def counting_relative(reference: np.ndarray, dependent: np.ndarray) -> np.ndarray:
+        nonlocal relative_calls
+        relative_calls += 1
+        return original_relative(reference, dependent)
+
+    monkeypatch.setattr(game_dashboard_state, "relative_ric_state_from_arrays", counting_relative)
+    dashboard = object.__new__(PygameRPODashboard)
+    dashboard.target_object_id = "target"
+    dashboard.chaser_object_id = "chaser"
+    dashboard.reference_object_id = "target"
+    dashboard.target_reference_object_id = None
+    dashboard.relative_frame = "ric"
+    dashboard.coast_prediction_model = "hcw"
+    dashboard.max_history = 10
+    dashboard.t_s = []
+    dashboard.rel_hist = []
+    dashboard.target_rel_hist = []
+    dashboard.thrust_hist = []
+    dashboard.thrust_ric_hist = []
+    dashboard._rel_array = np.zeros((0, 6), dtype=float)
+    dashboard._target_rel_array = np.zeros((0, 6), dtype=float)
+    dashboard._thrust_ric_array = np.zeros((0, 3), dtype=float)
+    snapshot = SimulationSnapshot(
+        step_index=0,
+        time_s=0.0,
+        truth={"target": target, "chaser": chaser},
+        belief={},
+        applied_thrust={"chaser": np.zeros(3, dtype=float)},
+        applied_torque={},
+    )
+
+    dashboard.push_snapshot(snapshot)
+
+    assert relative_calls == 1
+    np.testing.assert_array_equal(dashboard.rel_hist[-1], expected_rel)
+    np.testing.assert_array_equal(dashboard.target_rel_hist[-1], np.zeros(6))
+    np.testing.assert_array_equal(dashboard.target_reference_rel_hist[-1], np.zeros(6))
 
 
 def test_cislunar_dashboard_accepts_full_truth_arrays() -> None:
@@ -2037,3 +2089,25 @@ def test_aerodynamic_dashboard_rotates_side_with_bc_and_rear_with_lift() -> None
     assert dashboard._aerodynamic_sprite_rotation_deg(x_axis=2, y_axis=0) == pytest.approx(35.0)
     dashboard.aerodynamic_ballistic_coefficient_kg_m2 = 200.0
     assert dashboard._aerodynamic_sprite_rotation_deg(x_axis=1, y_axis=0) == pytest.approx(0.0)
+
+
+def test_aerodynamic_rc_zoom_preserves_rotated_sprite_and_margin() -> None:
+    dashboard = object.__new__(PygameRPODashboard)
+    dashboard.aerodynamic_control_enabled = True
+    dashboard.chaser_sprite_diameter_km = 0.35
+    dashboard.target_sprite_diameter_km = 0.2
+    dashboard.plot_overlays_in_zoom = False
+
+    rc_span = dashboard._minimum_plot_span_km(
+        x_axis=2,
+        y_axis=0,
+        offset=np.zeros(3, dtype=float),
+    )
+    ri_span = dashboard._minimum_plot_span_km(
+        x_axis=1,
+        y_axis=0,
+        offset=np.zeros(3, dtype=float),
+    )
+
+    assert rc_span == pytest.approx(0.5 * 0.35 * np.sqrt(2.0) * PLOT_OVERLAY_MARGIN)
+    assert ri_span == pytest.approx(MIN_PLOT_SPAN_KM)

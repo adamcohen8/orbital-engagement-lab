@@ -1,11 +1,16 @@
 from __future__ import annotations
 
-from importlib import metadata
 from pathlib import Path
 
 import sim.project_version as project_version
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+class _DistributionFixture:
+    def __init__(self, version: str, path: str) -> None:
+        self.version = version
+        self._path = Path(path)
 
 
 def test_source_project_version_finds_repository_by_default() -> None:
@@ -14,10 +19,23 @@ def test_source_project_version_finds_repository_by_default() -> None:
     )
 
 
+def test_installed_version_prefers_dist_info_over_stale_checkout_egg_info(monkeypatch) -> None:
+    monkeypatch.setattr(
+        project_version.metadata,
+        "distributions",
+        lambda **_kwargs: [
+            _DistributionFixture("0.25.0", "orbital_engagement_lab.egg-info"),
+            _DistributionFixture("0.26.0", "/venv/site-packages/orbital_engagement_lab-0.26.0.dist-info"),
+        ],
+    )
+
+    assert project_version.installed_project_version() == "0.26.0"
+
+
 def test_project_version_status_accepts_matching_source_and_metadata(monkeypatch) -> None:
     source_version = project_version.source_project_version(source_root=ROOT)
     assert source_version
-    monkeypatch.setattr(project_version.metadata, "version", lambda _name: source_version)
+    monkeypatch.setattr(project_version, "installed_project_version", lambda **_kwargs: source_version)
 
     status = project_version.inspect_project_version(source_root=ROOT)
 
@@ -30,7 +48,7 @@ def test_project_version_status_accepts_matching_source_and_metadata(monkeypatch
 def test_project_version_status_fails_stale_installed_metadata(monkeypatch) -> None:
     source_version = project_version.source_project_version(source_root=ROOT)
     assert source_version
-    monkeypatch.setattr(project_version.metadata, "version", lambda _name: "0.0.1")
+    monkeypatch.setattr(project_version, "installed_project_version", lambda **_kwargs: "0.0.1")
 
     status = project_version.inspect_project_version(source_root=ROOT)
 
@@ -42,10 +60,7 @@ def test_project_version_status_fails_stale_installed_metadata(monkeypatch) -> N
 
 
 def test_project_version_status_warns_when_source_is_not_installed(monkeypatch) -> None:
-    def _not_installed(_name: str) -> str:
-        raise metadata.PackageNotFoundError
-
-    monkeypatch.setattr(project_version.metadata, "version", _not_installed)
+    monkeypatch.setattr(project_version, "installed_project_version", lambda **_kwargs: None)
 
     status = project_version.inspect_project_version(source_root=ROOT)
 

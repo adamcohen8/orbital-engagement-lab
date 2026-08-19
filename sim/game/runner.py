@@ -8,6 +8,7 @@ from . import tutorial_runtime as _tutorial
 from . import recording_runtime as _recording
 from . import attempt_lifecycle as _attempt
 from . import mission_metrics as _metrics
+from . import presentation as _presentation
 from . import game_loop as _loop
 
 RUNNER_CAPABILITY_FAMILIES = {
@@ -17,10 +18,11 @@ RUNNER_CAPABILITY_FAMILIES = {
     "recording": "sim.game.recording_runtime",
     "attempt_lifecycle": "sim.game.attempt_lifecycle",
     "metrics": "sim.game.mission_metrics",
+    "presentation": "sim.game.presentation",
     "loop": "sim.game.game_loop",
 }
 
-for _module in (_common, _models, _config, _tutorial, _recording, _attempt, _metrics, _loop):
+for _module in (_common, _models, _config, _tutorial, _recording, _attempt, _metrics, _presentation, _loop):
     globals().update({name: value for name, value in vars(_module).items() if not name.startswith("__")})
 
 for _name in (

@@ -105,7 +105,12 @@ def _spec_from_args(plotter: EvidencePlotter, args: argparse.Namespace) -> Revie
             file_format=args.format,
             dpi=args.dpi,
             max_rows=args.max_rows,
-            extra={"source": "oel_review_plot_cli", "recipe_id": recipe.recipe_id},
+            renderer_id=recipe.renderer_id,
+            extra={
+                "source": "oel_review_plot_cli",
+                "recipe_id": recipe.recipe_id,
+                "recipe_version": recipe.recipe_version,
+            },
         )
     if args.sql:
         sql = args.sql
@@ -209,6 +214,10 @@ def _recipe_payload(recipe: Any) -> dict[str, Any]:
         "title": recipe.title,
         "description": recipe.description,
         "required_tables": list(recipe.required_tables),
+        "required_columns": list(recipe.required_columns),
+        "renderer_id": recipe.renderer_id,
+        "maturity": recipe.maturity,
+        "natural_language_triggers": list(recipe.natural_language_triggers),
     }
 
 
@@ -225,6 +234,7 @@ def _spec_payload(spec: ReviewPlotSpec) -> dict[str, Any]:
         "y_label": spec.y_label,
         "artifact_id": spec.artifact_id,
         "file_format": spec.file_format,
+        "renderer_id": spec.renderer_id,
         "extra": dict(spec.extra or {}),
     }
 

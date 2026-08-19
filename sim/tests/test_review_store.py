@@ -37,6 +37,9 @@ from sim.review import (
     SavedReviewQuery,
     load_workflow_manifest,
     numeric_columns,
+    plan_review_plot,
+    plot_spec_from_mapping,
+    render_review_plot,
     save_review_plot,
     write_workflow_review,
 )
@@ -880,6 +883,63 @@ def test_evidence_plotter_api_creates_multi_series_recipe_and_custom_plots(tmp_p
     assert manifest["artifacts"][-2]["style_name"] == "oel_light"
     assert manifest["artifacts"][-2]["y_columns"] == ["range_km", "range_rate_km_s"]
     assert manifest["artifacts"][-1]["extra"]["recipe_id"] == "relative_range_rate"
+
+
+def test_review_plotter_creates_professional_rectangular_ric_recipe(tmp_path: Path) -> None:
+    SimulationSession.from_config(SimulationConfig.from_dict(_review_store_config(tmp_path))).run()
+
+    artifact = EvidencePlotter(tmp_path).relative_position_ric_2d(style="light")
+
+    assert artifact.path.is_file()
+    assert artifact.spec.renderer_id == "ric_rectangular_2d"
+    assert artifact.qa["automated_status"] == "passed"
+    assert artifact.qa["visual_qa_status"] == "pending_agent_review"
+    assert artifact.qa["presentation_quality"]["policy_id"] == "oel.agent_strict"
+    assert artifact.qa["presentation_quality"]["policy_version"] == 1
+    manifest = json.loads((tmp_path / "review" / "generated_artifacts.json").read_text(encoding="utf-8"))
+    row = manifest["artifacts"][-1]
+    assert row["extra"] == {"source": "oel_review_plot_api", "recipe_id": "relative_position_ric_2d", "recipe_version": 1}
+    assert row["renderer_id"] == "ric_rectangular_2d"
+    assert len(row["query_sha256"]) == 64
+    assert row["qa"]["automated_status"] == "passed"
+    assert row["qa"]["presentation_quality"]["numeric_formatting"]
+
+
+def test_typed_review_plot_plan_is_content_bound_before_render(tmp_path: Path) -> None:
+    SimulationSession.from_config(SimulationConfig.from_dict(_review_store_config(tmp_path))).run()
+    arguments = {
+        "sql": "SELECT time_s, range_km FROM relative_state ORDER BY time_s",
+        "x_column": "time_s",
+        "y_columns": ["range_km"],
+        "plot_type": "line",
+        "artifact_id": "typed_range",
+        "style": "oel_light",
+        "format": "png",
+    }
+    spec = plot_spec_from_mapping(arguments, source="test_typed_review_plot_v2")
+    plan = plan_review_plot(tmp_path, spec)
+
+    assert plan["status"] == "planned"
+    assert plan["render_authorized"] is False
+    assert plan["columns"] == ["time_s", "range_km"]
+    artifact = render_review_plot(
+        tmp_path,
+        spec,
+        plot_plan_id=plan["plot_plan_id"],
+        path=tmp_path / "review" / "figures" / "typed_range.png",
+    )
+    assert artifact.path.is_file()
+    assert artifact.qa["automated_status"] == "passed"
+    assert artifact.qa["presentation_quality"]["automated_status"] == "passed"
+
+    changed = plot_spec_from_mapping({**arguments, "title": "Changed"}, source="test_typed_review_plot_v2")
+    with pytest.raises(ValueError, match="stale or does not match"):
+        render_review_plot(
+            tmp_path,
+            changed,
+            plot_plan_id=plan["plot_plan_id"],
+            path=tmp_path / "review" / "figures" / "changed.png",
+        )
 
 
 def test_evidence_plotter_histogram_heatmap_and_helpful_errors(tmp_path: Path) -> None:

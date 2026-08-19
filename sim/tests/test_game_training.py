@@ -3,6 +3,8 @@ from __future__ import annotations
 # These owner-aligned tests share deterministic builders and compatibility
 # imports from the adjacent support module.
 # ruff: noqa: F403, F405
+from dataclasses import asdict
+
 from sim.tests.game_mode_test_support import *
 
 
@@ -32,6 +34,27 @@ def test_training_tracker_records_cislunar_mean_motion_after_decomposition() -> 
     )
 
     assert tracker.mean_motion_hist == [EARTH_MOON_MEAN_MOTION_RAD_S]
+
+
+def test_game_scoring_evidence_preserves_exact_score_mapping() -> None:
+    score = RPOTrainingTracker(RPOTrainingConfig(enabled=True)).score()
+    session = object.__new__(GamePhysicsSession)
+    session._scoring_policy = "configured_training.v1"
+    session._controlled_object_id = "chaser"
+    session._observer_samples = [{"time_ns": 1_250_000_000}]
+    session._scoring_events = []
+
+    session.record_scoring(score)
+
+    assert session._scoring_events == [
+        {
+            "object_id": "chaser",
+            "time_ns": 1_250_000_000,
+            "scoring_policy": "configured_training.v1",
+            "event_type": "failed",
+            "detail": asdict(score),
+        }
+    ]
 
 
 def test_timed_translation_input_caps_pending_burn_to_one_step() -> None:

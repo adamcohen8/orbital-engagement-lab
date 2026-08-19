@@ -45,7 +45,11 @@ def _step_game_attempt(
                 training_cfg = getattr(trainer, "config", None)
                 if training_cfg is not None:
                     _set_chaser_delta_v_limiter_dt(session, training_cfg=training_cfg, dt_s=float(step_dt))
+            simulation_t0 = perf_counter()
             snapshot = session.step() if step_dt is None else session.step(dt_s=float(step_dt))
+            presentation_controller = getattr(dashboard, "presentation_controller", None)
+            if presentation_controller is not None:
+                presentation_controller.record_simulation_step(perf_counter() - simulation_t0)
             if operator_command_provider is not None and hasattr(operator_command_provider, "observe_time"):
                 operator_command_provider.observe_time(float(snapshot.time_s))
             dashboard.push_snapshot(snapshot)

@@ -20,6 +20,9 @@ except Exception as exc:  # pragma: no cover
     class _FallbackEnv:
         metadata: dict[str, Any] = {}
 
+        def reset(self, *, seed: int | None = None) -> None:
+            _ = seed
+
     class _FallbackBox:
         def __init__(self, low: np.ndarray, high: np.ndarray, shape: tuple[int, ...], dtype: Any):
             self.low = np.array(low, dtype=dtype)
@@ -616,6 +619,7 @@ class GymSimulationEnv(gym.Env):
     def reset(
         self, *, seed: int | None = None, options: dict[str, Any] | None = None
     ) -> tuple[np.ndarray, dict[str, Any]]:
+        super().reset(seed=seed)
         if seed is not None:
             self.rng = np.random.default_rng(int(seed))
         scenario_dict = deepcopy(self.base_scenario_dict)

@@ -48,6 +48,12 @@ def test_m5_wheel_packages_supported_mcp_profiles_and_keeps_dependency_optional(
     assert "integrations/oel_mcp/execution.py" in names
     assert "integrations/oel_mcp/resources.py" in names
     assert "integrations/oel_mcp/resource_data/operator-guide.md" in names
+    assert "sim/installation/cli.py" in names
+    assert "sim/installation/manager.py" in names
+    assert "sim/installation/schemas/channel-config.schema.json" in names
+    assert "sim/installation/schemas/release-manifest.schema.json" in names
+    assert "sim/schema_versions.py" in names
+    assert any(name.endswith(".data/data/share/oel/configs/quickstart_5min.yaml") for name in names)
     pro_modules = {
         "integrations/oel_mcp/pro_handlers.py",
         "integrations/oel_mcp/pro_acceptance.py",
@@ -65,6 +71,7 @@ def test_m5_wheel_packages_supported_mcp_profiles_and_keeps_dependency_optional(
         'Requires-Dist: mcp<3,>=2.0.0; extra == "full"',
     ]
     assert "oel-mcp = integrations.oel_mcp.public_server:main" in entry_points
+    assert "oel = sim.installation.cli:main" in entry_points
     environment = tmp_path / "installed"
     venv.EnvBuilder(with_pip=True, system_site_packages=True).create(environment)
     scripts = environment / ("Scripts" if os.name == "nt" else "bin")
@@ -122,5 +129,7 @@ def test_m5_wheel_packages_supported_mcp_profiles_and_keeps_dependency_optional(
         "oel://agent/tasks/v1",
         "oel://docs/operator-guide/v1",
         "oel://handoff/product-kinds/v1",
+        "oel://review/plot-recipes/v1",
+        "oel://review/animation-recipes/v1",
     )
     assert "supported local stdio OEL MCP surface" in guide

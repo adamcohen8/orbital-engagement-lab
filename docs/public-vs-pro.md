@@ -16,6 +16,9 @@ The public core includes:
 - OGP-SGP4/SDP4 passive catalog-style propagation and configurable ONP
   numerical propagation;
 - public controllers, sensors, estimators, actuators, and mission primitives;
+- the Public FSW Authoring Kit for ADCS/RPO stack scaffolding, safe inspection,
+  trusted lifecycle validation, component tests, and one deterministic serial
+  smoke run;
 - scenario YAML, CLI, Python API, review-store queries, and plotting;
 - a bounded two-body Lambert transfer planner and mission-recovery estimates;
 - public examples, the RPO Trainer, and reproducible public validation evidence;
@@ -39,14 +42,23 @@ review-ready packaging:
 - curated validation automation and private release/customer evidence;
 - AI-assisted reports and config assistance with explicit review and cost
   gates;
+- frontier-model evaluation harnesses, hidden evaluator truth, model-provider
+  execution, scoring, and campaign evidence;
 - custom GNC workbenches, spacecraft packages, cFS/SIL, and program-specific
   integrations;
+- the private FSWDK workflow superset: Controller Bench, tuning, qualification,
+  baseline promotion, packaged review evidence, and external-process candidates;
 - private `agents/pro/` instructions and capability routing for Pro workflows;
 - private onboarding, support, scenario migration, and customer deliverables.
 
 The public Lambert planner is a bounded two-body trade-space tool. It does not
 make general optimization, uncertainty analysis, or operational maneuver
 planning public.
+
+Frontier-model evaluation source, configs, tests, provider integrations, and
+generated evidence remain private. Public release notes may describe the
+boundary and compatibility work, but that does not promote the evaluator into
+the public core.
 
 ## Promotion Rule
 

@@ -103,5 +103,9 @@ class PygameRPODashboard(
     aerodynamic_ballistic_coefficient_max_kg_m2: float = 200.0
     aerodynamic_lift_bank_angle_deg: float = 0.0
     aerodynamic_ri_pitch_max_deg: float = 24.0
+    presentation_mode: str = "compatibility"
+    presentation_vsync: str = "auto"
+    presentation_reconciliation_duration_s: float = 0.08
+    presentation_reconciliation_max_error_km: float = 0.25
 
     pass

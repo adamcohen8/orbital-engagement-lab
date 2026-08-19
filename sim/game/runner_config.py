@@ -402,6 +402,30 @@ def _game_dashboard_high_speed_fps_max_multiple(config: SimulationConfig) -> flo
     return _positive_float_or_none(game_cfg.get("dashboard_high_speed_fps_max_multiple"))
 
 
+def _game_presentation_settings(
+    config: SimulationConfig,
+    *,
+    mode: str | None = None,
+    fps_cap: float | None = None,
+    refresh_rate_hz: float | None = None,
+    vsync: str | None = None,
+    diagnostics: bool | None = None,
+    diagnostics_output: str | Path | None = None,
+) -> PresentationSettings:
+    game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
+    raw = dict(game_cfg.get("presentation", {}) or {})
+    selected_output = diagnostics_output if diagnostics_output is not None else raw.get("diagnostics_output")
+    return PresentationSettings(
+        mode=normalize_presentation_mode(mode if mode is not None else raw.get("mode", "compatibility")),
+        fps_cap=fps_cap if fps_cap is not None else raw.get("fps_cap"),
+        vsync=normalize_presentation_vsync(vsync if vsync is not None else raw.get("vsync", "auto")),
+        diagnostics=bool(raw.get("diagnostics", False) if diagnostics is None else diagnostics),
+        diagnostics_output=None if selected_output in (None, "") else Path(selected_output),
+        high_refresh_ceiling_fps=float(raw.get("high_refresh_ceiling_fps", 120.0)),
+        refresh_rate_hz=(refresh_rate_hz if refresh_rate_hz is not None else raw.get("refresh_rate_hz")),
+    )
+
+
 def _game_retained_history_samples(config: SimulationConfig) -> int:
     game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
     try:

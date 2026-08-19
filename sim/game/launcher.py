@@ -150,6 +150,7 @@ def _run_launcher(
     record_video = False
     settings = _load_game_settings()
     frame_convention = settings.frame_convention
+    presentation_mode = settings.presentation_mode
     frame_dialog_open = bool(settings.ask_frame_convention_on_launch)
     frame_dialog_required = frame_dialog_open
     frame_dialog_dont_ask_again = False
@@ -192,6 +193,7 @@ def _run_launcher(
                             settings = _frame_convention_dialog_settings(
                                 settings,
                                 frame_convention=frame_convention,
+                                presentation_mode=presentation_mode,
                                 dont_ask_again=frame_dialog_dont_ask_again,
                                 selected_mode=selected_mode,
                             )
@@ -202,6 +204,9 @@ def _run_launcher(
                             frame_convention = frame_convention_from_preset(FRAME_CONVENTION_PRESET_OEL_DEFAULT)
                         elif event.key in {pygame.K_2, pygame.K_s}:
                             frame_convention = frame_convention_from_preset(FRAME_CONVENTION_PRESET_SPACE_FORCE)
+                        elif event.key == pygame.K_g:
+                            current = PRESENTATION_MODES.index(normalize_presentation_mode(presentation_mode))
+                            presentation_mode = PRESENTATION_MODES[(current + 1) % len(PRESENTATION_MODES)]
                         elif event.key == pygame.K_d:
                             frame_dialog_dont_ask_again = not frame_dialog_dont_ask_again
                     if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
@@ -214,12 +219,15 @@ def _run_launcher(
                             frame_convention = frame_convention_from_preset(FRAME_CONVENTION_PRESET_OEL_DEFAULT)
                         elif action == FRAME_CONVENTION_PRESET_SPACE_FORCE:
                             frame_convention = frame_convention_from_preset(FRAME_CONVENTION_PRESET_SPACE_FORCE)
+                        elif action in PRESENTATION_MODES:
+                            presentation_mode = normalize_presentation_mode(action)
                         elif action == "dont_ask_again":
                             frame_dialog_dont_ask_again = not frame_dialog_dont_ask_again
                         elif action == "continue":
                             settings = _frame_convention_dialog_settings(
                                 settings,
                                 frame_convention=frame_convention,
+                                presentation_mode=presentation_mode,
                                 dont_ask_again=frame_dialog_dont_ask_again,
                                 selected_mode=selected_mode,
                             )
@@ -246,6 +254,7 @@ def _run_launcher(
                         pygame,
                         screen,
                         convention=frame_convention,
+                        presentation_mode=presentation_mode,
                         dont_ask_again=frame_dialog_dont_ask_again,
                         font=font,
                         small_font=small_font,
@@ -287,6 +296,7 @@ def _run_launcher(
                             record_video=record_video,
                             mode=selected_mode,
                             frame_convention=frame_convention,
+                            presentation_mode=presentation_mode,
                             font=font,
                             small_font=small_font,
                             title_font=title_font,
@@ -348,6 +358,7 @@ def _run_launcher(
                                 record_video=record_video,
                                 mode=selected_mode,
                                 frame_convention=frame_convention,
+                                presentation_mode=presentation_mode,
                                 font=font,
                                 small_font=small_font,
                                 title_font=title_font,

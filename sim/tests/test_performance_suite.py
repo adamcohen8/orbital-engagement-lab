@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
+import yaml
 
 from sim.performance import load_performance_manifest, physics_payload_hash, run_performance_suite
 from sim.performance.suite import (
@@ -40,6 +41,18 @@ def test_full_path_manifest_covers_distinct_runtime_families() -> None:
             "adaptive_high_fidelity",
             "monte_carlo_orchestration",
         } <= names
+
+
+def test_cr3bp_performance_case_is_explicitly_trajectory_only() -> None:
+    manifest = load_performance_manifest()
+    case = next(case for case in manifest.cases if case.name == "cr3bp_earth_moon")
+    config_path = Path(__file__).resolve().parents[2] / str(case.config_path)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    vehicle = raw["objects"]["vehicle"]
+
+    assert vehicle["runtime_profile"] == "trajectory_only"
+    assert "flight_software" not in vehicle
+    assert "trajectory_only" in case.tags
 
 
 def test_drag_model_cases_share_one_two_body_fixture() -> None:

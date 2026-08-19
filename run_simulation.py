@@ -44,9 +44,10 @@ if __name__ == "__main__":
 
 from sim.config import load_simulation_yaml, validate_scenario_plugins
 from sim.execution import run_simulation_config_file
+from sim.installation.resources import quickstart_config_path
 from sim.security.sealed_mode import SealedModePolicy, validate_sealed_mode
 
-QUICKSTART_CONFIG = Path(__file__).resolve().parent / "configs" / "quickstart_5min.yaml"
+QUICKSTART_CONFIG = quickstart_config_path()
 
 
 def _print_preflight(config_path: str, cfg, errors: list[str]) -> None:
