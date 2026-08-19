@@ -137,6 +137,28 @@ def _validate_host_compatibility(manifest: Mapping[str, Any]) -> None:
         raise ContractError(f"OEL {manifest['version']} requires Python {requires}; this interpreter is {host_python}.")
 
 
+def _validate_offline_runtime_compatibility(manifest: Mapping[str, Any]) -> None:
+    qualification = dict(
+        dict(manifest.get("supply_chain", {}) or {}).get("offline_runtime_qualification", {}) or {}
+    )
+    qualified_python = str(qualification.get("python", "") or "")
+    if not qualified_python:
+        return
+    qualified = version_tuple(qualified_python)
+    if len(qualified) < 2:
+        raise ContractError("Offline bundle runtime qualification has an invalid Python version.")
+    required_minor = qualified[:2]
+    host_minor = (sys.version_info.major, sys.version_info.minor)
+    if required_minor != host_minor:
+        required_tag = f"py{required_minor[0]}{required_minor[1]}"
+        host_tag = f"py{host_minor[0]}{host_minor[1]}"
+        raise ContractError(
+            f"Offline bundle was qualified for CPython {required_minor[0]}.{required_minor[1]} "
+            f"({required_tag}), not this interpreter's CPython {host_minor[0]}.{host_minor[1]} ({host_tag}). "
+            "Use the bundle whose Python tag matches the installing OEL launcher."
+        )
+
+
 def verify_release_manifest(
     value: Mapping[str, Any],
     *,
@@ -232,6 +254,8 @@ def install_release(
         load_json_object(source_manifest_path), public_keys=public_keys, require_signature=require_signature
     )
     _validate_host_compatibility(manifest)
+    if offline_wheelhouse is not None and create_runtime:
+        _validate_offline_runtime_compatibility(manifest)
     version = manifest["version"]
     if profile not in manifest["profiles"]:
         raise ContractError(f"Install profile {profile!r} is not declared by OEL release {version}.")

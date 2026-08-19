@@ -27,6 +27,7 @@ from sim.installation.contracts import (
 )
 from sim.installation.manager import (
     _source_and_python,
+    _validate_offline_runtime_compatibility,
     activate,
     check_channel,
     configure_channel,
@@ -683,6 +684,7 @@ def test_release_build_is_reproducible_signed_and_contains_evidence(
     assert "full" in manifest["profiles"]
     assert manifest["supply_chain"]["status"] == "passed"
     assert manifest["supply_chain"]["offline_runtime_qualification"] == qualification
+    assert Path(first["offline_bundle"]).name.endswith("-py314.bundle.zip")
     assert manifest["supply_chain"]["gate"] == "release-evidence/public-supply-chain-attestation.json"
     assert [item["name"] for item in manifest["supply_chain"]["artifacts"]] == [
         "public-supply-chain-attestation.json"
@@ -724,6 +726,24 @@ def test_release_build_is_reproducible_signed_and_contains_evidence(
         ],
         "status": "passed",
     }
+
+
+def test_offline_runtime_qualification_requires_matching_python_minor() -> None:
+    matching = {
+        "supply_chain": {
+            "offline_runtime_qualification": {"python": platform.python_version()},
+        }
+    }
+    _validate_offline_runtime_compatibility(matching)
+
+    other_minor = 10 if sys.version_info.minor != 10 else 11
+    mismatched = {
+        "supply_chain": {
+            "offline_runtime_qualification": {"python": f"3.{other_minor}.0"},
+        }
+    }
+    with pytest.raises(ContractError, match="Offline bundle was qualified for CPython"):
+        _validate_offline_runtime_compatibility(mismatched)
 
 
 def test_official_signing_material_requires_strong_matching_trust_root(tmp_path: Path) -> None:

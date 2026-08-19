@@ -59,6 +59,8 @@ public/private product boundaries.
   deterministic digest attestation for the verified private supply-chain
   packet, preventing absolute workspace paths, private Git provenance, and
   private product identifiers from crossing the public release boundary.
+  Offline bundles now carry their qualified Python-minor tag and reject a
+  mismatched installing launcher before invoking pip.
 
 - Prevent aerodynamic environment construction and ideal-state packet
   canonicalization from normalizing authoritative position or attitude arrays

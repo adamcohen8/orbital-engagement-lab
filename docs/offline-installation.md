@@ -3,10 +3,13 @@
 An offline release bundle is a ZIP containing the signed release manifest,
 source artifact, trusted public release keys, checksums, installers, and the
 content-bound supply-chain evidence shipped with that release.
-Official offline bundles are platform/architecture specific and contain an
-exact signed wheel inventory. Runtime creation forces pip `--no-index` against
-that wheelhouse; a missing, extra, changed, or incomplete wheelhouse fails
-closed instead of contacting a package index.
+Official offline bundles are platform/architecture/Python-minor specific and
+contain an exact signed wheel inventory. The filename ends in a tag such as
+`arm64-py311.bundle.zip`; use the bundle whose Python tag matches the OEL
+launcher that runs `install-bundle`. Runtime creation checks that tag's signed
+qualification before invoking pip, then forces pip `--no-index` against that
+wheelhouse. A wrong Python minor or a missing, extra, changed, or incomplete
+wheelhouse fails closed instead of contacting a package index.
 
 On a connected verification host, inspect the bundle inventory, verify the
 published bundle digest through the approved out-of-band channel, and transfer

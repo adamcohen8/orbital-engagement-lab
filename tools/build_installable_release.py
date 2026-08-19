@@ -546,7 +546,16 @@ def build_release(
         trusted = output / "trusted-release-keys.json"
         shutil.copy2(public_keys, trusted)
         bundle_files.append(trusted)
-    bundle = output / f"oel-{edition}-{version}-{(architecture or platform.machine()).lower()}.bundle.zip"
+    qualified_python = str(
+        dict(offline_runtime_qualification or {}).get("python", platform.python_version())
+    )
+    qualified_match = re.fullmatch(r"(\d+)\.(\d+)(?:\.\d+)?", qualified_python)
+    if qualified_match is None:
+        raise ValueError("Offline runtime qualification has an invalid Python version.")
+    python_tag = f"py{qualified_match.group(1)}{qualified_match.group(2)}"
+    bundle = output / (
+        f"oel-{edition}-{version}-{(architecture or platform.machine()).lower()}-{python_tag}.bundle.zip"
+    )
     if wheel_files:
         _write_bundle(bundle, bundle_files, epoch=epoch)
     channel_index: dict[str, Any] = {
