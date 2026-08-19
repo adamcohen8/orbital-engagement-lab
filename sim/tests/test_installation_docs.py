@@ -68,6 +68,39 @@ def test_entry_onboarding_docs_keep_explicit_windows_and_posix_paths() -> None:
         assert "source .venv/bin/activate" in text
 
 
+def test_public_readme_leads_with_the_managed_release_installation() -> None:
+    readme = _read("docs/public-readme.md")
+
+    managed_heading = "## Install And Run"
+    contributor_heading = "## Source Installation For Contributors"
+    posix_installer = (
+        "https://github.com/adamcohen8/orbital-engagement-lab/"
+        "releases/latest/download/install.sh"
+    )
+    powershell_installer = (
+        "https://github.com/adamcohen8/orbital-engagement-lab/"
+        "releases/latest/download/install.ps1"
+    )
+    managed_commands = [
+        "curl --proto '=https' --tlsv1.2 -fsSLo /tmp/oel-install.sh",
+        "less /tmp/oel-install.sh",
+        "sh /tmp/oel-install.sh",
+        "Invoke-WebRequest",
+        "Get-Content $env:TEMP\\oel-install.ps1",
+        "oel update status --full",
+        "oel doctor",
+        "oel workspace init my-oel-workspace",
+        "oel --workspace my-oel-workspace sim --quickstart --validate-only",
+        "oel --workspace my-oel-workspace sim --quickstart",
+    ]
+
+    for expected in (posix_installer, powershell_installer, *managed_commands):
+        assert expected in readme
+    assert "does not edit or overwrite a workspace" in readme
+    assert readme.index(managed_heading) < readme.index(contributor_heading)
+    assert readme.index(posix_installer) < readme.index("git clone https://github.com/")
+
+
 def test_general_and_agent_docs_use_the_portable_activated_command_convention() -> None:
     general_docs = [
         "SECURITY.md",
