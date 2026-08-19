@@ -17,11 +17,56 @@ software or an operational decision system.
 
 ![Flagship run dashboard](docs/assets/plots/run_dashboard.png)
 
-## Fast Proof Path
+## Install And Run
 
-OEL supports Python 3.10 through 3.14. Python 3.14 is recommended for a new
-environment. See [Installing OEL](docs/installation.md) for other supported
-minors, matching constraint files, activation, and troubleshooting.
+OEL supports Python 3.10 through 3.14. Python 3.14 is recommended. Official
+public releases provide signed managed installers that keep immutable OEL
+engines separate from user-owned projects and workspaces.
+
+Inspect the small installer before running it.
+
+macOS or Linux:
+
+```bash
+curl --proto '=https' --tlsv1.2 -fsSLo /tmp/oel-install.sh \
+  https://github.com/adamcohen8/orbital-engagement-lab/releases/latest/download/install.sh
+less /tmp/oel-install.sh
+sh /tmp/oel-install.sh
+```
+
+Windows PowerShell:
+
+```powershell
+Invoke-WebRequest https://github.com/adamcohen8/orbital-engagement-lab/releases/latest/download/install.ps1 -OutFile $env:TEMP\oel-install.ps1
+Get-Content $env:TEMP\oel-install.ps1
+& $env:TEMP\oel-install.ps1
+```
+
+The bootstrap verifies the signed release metadata and exact artifact digest
+before installing OEL. It does not edit or overwrite a workspace. Create a
+project for your scenarios, flight-software source, configuration, and outputs,
+then run the managed quickstart:
+
+```text
+oel update status --full
+oel doctor
+oel workspace init my-oel-workspace
+oel --workspace my-oel-workspace sim --quickstart --validate-only
+oel --workspace my-oel-workspace sim --quickstart
+```
+
+Expected result: the run writes summary artifacts under
+`my-oel-workspace/outputs/quickstart_5min/`. Open `index.md` there first. See
+[Installing OEL](docs/installation.md), [Updating OEL](docs/updating.md), and
+[OEL Workspaces](docs/workspaces.md) for installation, updates, explicit
+workspace adoption, rollback, offline installation, and troubleshooting.
+
+## Source Installation For Contributors
+
+Cloning the repository remains the contributor workflow and manual fallback.
+It is not required for the managed installation above. See
+[Installing OEL](docs/installation.md) for other supported Python minors and
+their matching constraint files.
 
 Windows PowerShell:
 
@@ -48,18 +93,12 @@ python3.14 -m venv .venv
 .venv/bin/python run_simulation.py --quickstart
 ```
 
-Promoted releases also publish inspected POSIX and PowerShell bootstraps as
-assets on the public OEL GitHub release for the unified `oel` launcher. The
-stable POSIX source is
-`https://github.com/adamcohen8/orbital-engagement-lab/releases/latest/download/install.sh`.
-Those bootstraps install immutable engines outside user-owned workspaces and
-support side-by-side update, compatibility audit, and rollback. See
-[Installing OEL](docs/installation.md) and [Updating OEL](docs/updating.md).
-
-The commands below use `python` after activation. In PowerShell, run
-`.\.venv\Scripts\Activate.ps1`; in Bash or Zsh, run
+The source-checkout commands below use `python` after activation. In
+PowerShell, run `.\.venv\Scripts\Activate.ps1`; in Bash or Zsh, run
 `source .venv/bin/activate`. Activation is optional when using the explicit
 interpreter paths above.
+
+## Fast Proof Path For A Source Checkout
 
 Check the environment again when troubleshooting:
 
@@ -78,7 +117,7 @@ python run_simulation.py --quickstart --validate-only
 python run_simulation.py --quickstart
 ```
 
-Expected result: the run writes summary artifacts under
+Expected result: the source-checkout run writes summary artifacts under
 `outputs/quickstart_5min/`. Open `outputs/quickstart_5min/index.md` first.
 
 Then run the flagship 10 km RIC_PD RPO review scenario:
@@ -284,7 +323,7 @@ keys.
 - [Examples Matrix](docs/examples-matrix.md)
 - [Known Limitations](docs/known-limitations.md)
 
-## Install Profiles
+## Source Install Profiles
 
 ```bash
 python -m pip install .
@@ -295,8 +334,9 @@ python -m pip install ".[ml]"
 python -m pip install ".[full]"
 ```
 
-Public onboarding should start with the CLI/YAML/Python API path above. For
-scripted output inspection, prefer
+These profiles apply to source checkouts; managed release installation uses the
+signed artifact workflow at the top of this README. For scripted output
+inspection, prefer
 `python -m sim.review`. The cross-platform profile is the aggregate
 dev/game/acceleration/OEL-native-validation profile. ML and `full` remain
 separately qualified and do not make a universal cross-platform promise.
