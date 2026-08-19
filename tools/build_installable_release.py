@@ -226,8 +226,6 @@ def _collect_supply_chain_evidence(
     gate_version = str(gate.get("package_version", "") or "")
     if gate_version and gate_version != version:
         raise ValueError(f"Supply-chain evidence version {gate_version!r} does not match release {version!r}.")
-    destination = output / "release-evidence"
-    destination.mkdir(parents=True, exist_ok=True)
     source_files = [gate_path]
     for item in gate.get("artifacts", []):
         if not isinstance(item, dict) or not item.get("path"):
@@ -236,12 +234,44 @@ def _collect_supply_chain_evidence(
         if not path.is_file() or sha256_file(path) != item.get("sha256"):
             raise ValueError(f"Supply-chain evidence artifact is missing or changed: {path}")
         source_files.append(path)
-    copied: list[dict[str, Any]] = []
+    source_digests: list[dict[str, Any]] = []
+    names: set[str] = set()
     for path in source_files:
-        target = destination / path.name
-        shutil.copy2(path, target)
-        copied.append({"name": target.name, "bytes": target.stat().st_size, "sha256": sha256_file(target)})
-    return {"status": "passed", "gate": "release-evidence/supply-chain-gate.json", "artifacts": copied}
+        if path.name in names:
+            raise ValueError(f"Supply-chain evidence contains duplicate artifact name: {path.name}")
+        names.add(path.name)
+        source_digests.append(
+            {
+                "name": path.name,
+                "bytes": path.stat().st_size,
+                "sha256": sha256_file(path),
+            }
+        )
+
+    # Retained candidate evidence intentionally records exact commands, source
+    # provenance, and absolute paths. Keep that authoritative packet private
+    # and publish only a deterministic digest attestation in distributable
+    # bundles so internal workspace details cannot cross the release boundary.
+    destination = output / "release-evidence"
+    destination.mkdir(parents=True, exist_ok=True)
+    attestation = {
+        "schema_version": "oel.public-supply-chain-attestation.v1",
+        "status": "passed",
+        "package_version": version,
+        "source_evidence": source_digests,
+    }
+    attestation_path = destination / "public-supply-chain-attestation.json"
+    attestation_path.write_text(json.dumps(attestation, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    published = {
+        "name": attestation_path.name,
+        "bytes": attestation_path.stat().st_size,
+        "sha256": sha256_file(attestation_path),
+    }
+    return {
+        "status": "passed",
+        "gate": f"release-evidence/{attestation_path.name}",
+        "artifacts": [published],
+    }
 
 
 def _collect_wheelhouse(source: Path | None, output: Path, *, required: bool) -> tuple[list[Path], list[dict[str, Any]]]:

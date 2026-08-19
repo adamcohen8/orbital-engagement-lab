@@ -609,7 +609,7 @@ def test_release_build_is_reproducible_signed_and_contains_evidence(
     evidence = tmp_path / "evidence"
     evidence.mkdir()
     sbom = evidence / "sbom.cdx.json"
-    sbom.write_text("{}\n", encoding="utf-8")
+    sbom.write_text('{"private_path": "/Users/example/private-oel", "product": "oel-pro"}\n', encoding="utf-8")
     gate = {
         "schema_version": 1,
         "kind": "oel_supply_chain_gate",
@@ -683,6 +683,10 @@ def test_release_build_is_reproducible_signed_and_contains_evidence(
     assert "full" in manifest["profiles"]
     assert manifest["supply_chain"]["status"] == "passed"
     assert manifest["supply_chain"]["offline_runtime_qualification"] == qualification
+    assert manifest["supply_chain"]["gate"] == "release-evidence/public-supply-chain-attestation.json"
+    assert [item["name"] for item in manifest["supply_chain"]["artifacts"]] == [
+        "public-supply-chain-attestation.json"
+    ]
     assert "__OEL_BOOTSTRAP_SHA256__" not in Path(first["installers"][1]).read_text(encoding="utf-8")
     installer_text = Path(first["installers"][1]).read_text(encoding="utf-8")
     assert "__OEL_DEFAULT_CHANNEL_URL__" not in installer_text
@@ -696,6 +700,30 @@ def test_release_build_is_reproducible_signed_and_contains_evidence(
     )
     assert offline["installation"]["status"] == "official"
     assert offline["effects"]["network_used"] is False
+    with zipfile.ZipFile(first["offline_bundle"]) as archive:
+        names = set(archive.namelist())
+        assert "release-evidence/public-supply-chain-attestation.json" in names
+        assert "release-evidence/supply-chain-gate.json" not in names
+        assert "release-evidence/sbom.cdx.json" not in names
+        attestation_bytes = archive.read("release-evidence/public-supply-chain-attestation.json")
+    attestation_text = attestation_bytes.decode("utf-8")
+    assert str(tmp_path) not in attestation_text
+    assert "/Users/example/private-oel" not in attestation_text
+    assert "oel-pro" not in attestation_text
+    attestation = json.loads(attestation_text)
+    assert attestation == {
+        "package_version": "0.25.0",
+        "schema_version": "oel.public-supply-chain-attestation.v1",
+        "source_evidence": [
+            {
+                "bytes": (evidence / "supply-chain-gate.json").stat().st_size,
+                "name": "supply-chain-gate.json",
+                "sha256": sha256_file(evidence / "supply-chain-gate.json"),
+            },
+            {"bytes": sbom.stat().st_size, "name": "sbom.cdx.json", "sha256": sha256_file(sbom)},
+        ],
+        "status": "passed",
+    }
 
 
 def test_official_signing_material_requires_strong_matching_trust_root(tmp_path: Path) -> None:

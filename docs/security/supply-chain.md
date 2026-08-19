@@ -86,7 +86,8 @@ python tools/build_installable_release.py \
 
 Signed builds fail closed without a passing, version-matched
 `supply-chain-gate.json` and unchanged referenced artifacts. The release
-manifest binds their copied hashes. They also require an RS256 signing key of
+manifest binds their verified hashes through the public-safe attestation. They
+also require an RS256 signing key of
 at least 2048 bits whose exact public key is active in the bundled trust
 registry. Every wheel is checked as a structurally valid wheel archive, and the
 builder creates a clean runtime, performs a full-profile install with
@@ -94,6 +95,15 @@ builder creates a clean runtime, performs a full-profile install with
 before signing the release. Public artifacts must be built from the generated
 public export; the builder refuses a public artifact from the private source
 root.
+
+Distributable bundles do not copy the retained supply-chain gate or its raw
+artifacts verbatim. Private release evidence can contain absolute workspace
+paths, exact commands, and source-control provenance. The bundle instead
+contains `release-evidence/public-supply-chain-attestation.json`, a
+deterministic list of the verified source-evidence names, sizes, and SHA-256
+digests. The complete evidence remains in the private release packet; the
+published attestation binds that packet without disclosing its local content.
+
 Treat a known vulnerability as a release finding until it is upgraded, removed,
 documented as not applicable, or accepted by the evaluator in writing.
 

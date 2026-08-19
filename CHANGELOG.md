@@ -55,7 +55,10 @@ public/private product boundaries.
   Official release builds now require a matching trusted public-key registry,
   reject RSA signing keys below 2048 bits, validate every bundled wheel, and
   perform a real `--no-index` full-profile installation and import probe before
-  declaring an offline bundle ready.
+  declaring an offline bundle ready. Distributable bundles retain only a
+  deterministic digest attestation for the verified private supply-chain
+  packet, preventing absolute workspace paths, private Git provenance, and
+  private product identifiers from crossing the public release boundary.
 
 - Prevent aerodynamic environment construction and ideal-state packet
   canonicalization from normalizing authoritative position or attitude arrays
