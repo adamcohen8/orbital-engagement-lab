@@ -23,6 +23,7 @@ from sim.agent_task.plot_recipes import get_plot_recipe
 from sim.agent_task.recipes import list_recipes
 from sim.agent_task.semantics import list_semantic_metrics
 from sim.execution import run_simulation_config_file
+from sim.review.plot_recipes import REVIEW_PLOT_RECIPES
 from sim.review.queries import SAVED_REVIEW_QUERIES, SavedReviewQuery
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -665,6 +666,14 @@ def test_agent_plot_recipe_maturity_policy_is_explicit() -> None:
         assert recipe is not None
         assert recipe.group_column == "pair_id"
         assert "pair_id" in recipe.sql
+
+
+def test_agent_task_uses_authoritative_review_plot_recipe_registry() -> None:
+    from sim.agent_task.plot_recipes import PLOT_RECIPES
+
+    assert PLOT_RECIPES is REVIEW_PLOT_RECIPES
+    assert "relative_position_ric_2d" in PLOT_RECIPES
+    assert PLOT_RECIPES["relative_position_ric_2d"].renderer_id == "ric_rectangular_2d"
 
 
 def test_agent_plot_recipe_rejects_unknown_maturity_or_missing_tables() -> None:

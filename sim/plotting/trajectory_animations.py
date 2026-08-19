@@ -8,6 +8,13 @@ import numpy as np
 from matplotlib import animation
 
 from sim.dynamics.orbit.frames import FrameContext
+from sim.plotting.animation_quality import (
+    STRICT_AGENT_ANIMATION_QUALITY,
+    animation_time_decimal_places,
+    fixed_time_text_width,
+    format_animation_time,
+    save_animation_with_quality,
+)
 from sim.plotting.attitude_geometry import _symmetric_limit_from_arrays
 from sim.plotting.capability_common import _object_role_color, _play_interactive_animation
 from sim.plotting.frame_plots import _draw_earth_sphere_3d, _ric_2d_plane_axes, _trajectory_in_frame
@@ -77,40 +84,95 @@ def animate_multi_ric_2d_projections(
             (dot,) = ax.plot([], [], marker="o", markersize=4, color=color)
             line_by_plane_obj[(p, oid)] = line
             dot_by_plane_obj[(p, oid)] = dot
-    axes[0].legend(loc="best")
+    handles, labels = axes[0].get_legend_handles_labels()
+    if handles:
+        fig.legend(
+            handles,
+            labels,
+            loc="lower center",
+            bbox_to_anchor=(0.5, 0.035),
+            ncol=min(len(labels), 5),
+            frameon=True,
+        )
 
-    stride = int(max(frame_stride, 1))
+    requested_stride = int(max(frame_stride, 1))
     max_frames = max(arr.shape[0] for arr in trajectories.values())
+    allowed_frames = min(
+        STRICT_AGENT_ANIMATION_QUALITY.max_frames,
+        max(2, int(np.floor(STRICT_AGENT_ANIMATION_QUALITY.max_duration_s * max(float(fps), 1.0)))),
+    )
+    stride = max(requested_stride, int(np.ceil(max_frames / allowed_frames)))
     frame_ids = np.arange(0, max_frames, stride, dtype=int)
     if frame_ids.size == 0 or frame_ids[-1] != (max_frames - 1):
         frame_ids = np.append(frame_ids, max_frames - 1)
+
+    camera_windows: dict[str, list[tuple[tuple[float, float], tuple[float, float]]]] = {}
+    format_limits: dict[tuple[int, str], tuple[float, float]] = {}
+    for plane_index, p in enumerate(p_list):
+        ix, iy, _, _ = _ric_2d_plane_axes(p)
+        current_by_frame: list[np.ndarray] = []
+        for frame_i in frame_ids:
+            current_by_frame.append(
+                np.asarray(
+                    [arr[min(int(frame_i), arr.shape[0] - 1), :] for arr in trajectories.values()],
+                    dtype=float,
+                )
+            )
+        x_span = max((float(np.ptp(points[:, ix])) for points in current_by_frame), default=0.0)
+        y_span = max((float(np.ptp(points[:, iy])) for points in current_by_frame), default=0.0)
+        x_span = max(x_span, 1.0) * (1.0 + 2.0 * RIC_FOLLOW_MARGIN)
+        y_span = max(y_span, 1.0) * (1.0 + 2.0 * RIC_FOLLOW_MARGIN)
+        camera_windows[p] = [
+            (
+                (float(np.mean(points[:, ix])) - 0.5 * x_span, float(np.mean(points[:, ix])) + 0.5 * x_span),
+                (float(np.mean(points[:, iy])) - 0.5 * y_span, float(np.mean(points[:, iy])) + 0.5 * y_span),
+            )
+            for points in current_by_frame
+        ]
+        format_limits[(plane_index, "x")] = (-0.5 * x_span, 0.5 * x_span)
+        format_limits[(plane_index, "y")] = (-0.5 * y_span, 0.5 * y_span)
+
+    selected_times = np.asarray(
+        [float(t_s[min(int(frame_i), t_s.size - 1)]) if t_s.size else 0.0 for frame_i in frame_ids],
+        dtype=float,
+    )
+    time_decimals = animation_time_decimal_places(selected_times)
+    time_width = fixed_time_text_width(selected_times, decimal_places=time_decimals)
+    fig.suptitle(f"RIC 2D Projections Animation ({'Curvilinear' if frame == 'ric_curv' else 'Rectangular'})")
+    time_text = fig.text(
+        0.98,
+        0.905,
+        "",
+        ha="right",
+        va="top",
+        fontsize=9,
+        family="monospace",
+        gid="oel_animation_time",
+    )
+    fig.tight_layout(rect=(0.01, 0.105, 0.99, 0.85))
 
     def update(i: int):
         artists = []
         frame_i = int(frame_ids[i])
         for p in p_list:
             ix, iy, _, _ = _ric_2d_plane_axes(p)
-            current_points: list[np.ndarray] = []
             for oid, arr in trajectories.items():
                 idx = min(frame_i, arr.shape[0] - 1)
                 start = 0 if show_trajectory else idx
                 seg = arr[start : idx + 1, :]
                 line_by_plane_obj[(p, oid)].set_data(seg[:, ix], seg[:, iy])
                 dot_by_plane_obj[(p, oid)].set_data([arr[idx, ix]], [arr[idx, iy]])
-                current_points.append(arr[idx, :])
                 artists.extend([line_by_plane_obj[(p, oid)], dot_by_plane_obj[(p, oid)]])
-            (xlim, ylim) = _windows_from_points(
-                current_points,
-                axis_indices=(ix, iy),
-                min_span=1.0,
-                margin=RIC_FOLLOW_MARGIN,
-            )
+            xlim, ylim = camera_windows[p][i]
             ax_by_plane[p].set_xlim(*xlim)
             ax_by_plane[p].set_ylim(*ylim)
         t_now = float(t_s[min(frame_i, t_s.size - 1)]) if t_s.size else 0.0
-        fig.suptitle(
-            f"RIC 2D Projections Animation ({'Curvilinear' if frame == 'ric_curv' else 'Rect'})  t={t_now:.1f}s"
+        time_text.set_text(
+            "Sim time: "
+            + format_animation_time(t_now, decimal_places=time_decimals, width=time_width)
+            + " s"
         )
+        artists.append(time_text)
         return artists
 
     dt = float(np.median(np.diff(t_s))) if t_s.size > 1 else 1.0
@@ -123,7 +185,24 @@ def animate_multi_ric_2d_projections(
             raise ValueError("out_path is required when mode is 'save' or 'both'.")
         p = Path(out_path)
         try:
-            save_oel_animation(ani, fig, p, fps=fps, artifact_id=p.stem)
+            save_animation_with_quality(
+                ani,
+                fig,
+                p,
+                update=update,
+                frame_values=tuple(range(int(frame_ids.size))),
+                frame_times_s=tuple(float(value) for value in selected_times),
+                fps=fps,
+                camera_policy="follow",
+                artifact_id=p.stem,
+                format_limits=format_limits,
+                source={
+                    "renderer_id": "multi_ric_2d_projections",
+                    "frame": frame,
+                    "requested_frame_stride": requested_stride,
+                    "effective_frame_stride": stride,
+                },
+            )
         except Exception as exc:
             print(f"Warning: failed to save animation ({exc}).")
         del ani

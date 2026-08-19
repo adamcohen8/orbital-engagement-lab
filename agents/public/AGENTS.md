@@ -53,6 +53,13 @@ reference/validation workflows.
 9. Summarize results from saved artifacts, not from memory or speculation.
 10. Add tests or smoke checks for new agent-facing examples.
 
+For custom complete-stack flight software, use the bounded Public FSW
+Authoring Kit in `docs/fsw-authoring.md`. Inspect unfamiliar candidate material
+without importing it, obtain explicit source trust before lifecycle validation,
+and use only the declared component suite plus one deterministic serial smoke.
+Do not recreate private Controller Bench, tuning, qualification, packaging,
+external-process, or cFS/SIL workflows in public scripts.
+
 The preferred agent evidence loop is:
 
 ```text
@@ -124,6 +131,13 @@ Run smoke test:
 
 ```bash
 python -m pytest sim/tests/test_oel_agents.py
+```
+
+Scaffold and inspect a public FSW candidate:
+
+```bash
+oel fsw init my_adcs --template adcs
+oel fsw inspect fsw_candidates/my_adcs/candidate.yaml
 ```
 
 Generate a report-like public artifact set:

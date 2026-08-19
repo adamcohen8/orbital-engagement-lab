@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import base64
 import json
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
 from threading import Event
 from typing import Any
 
@@ -45,6 +47,7 @@ def build_sdk_server(handlers: BaseOELMCPHandlers) -> Any:
         from mcp_types import (
             Annotations,
             CallToolResult,
+            ImageContent,
             ListResourcesResult,
             ListToolsResult,
             ReadResourceResult,
@@ -89,8 +92,21 @@ def build_sdk_server(handlers: BaseOELMCPHandlers) -> Any:
             raise MCPError(-32602, str(exc)) from exc
         except Exception as exc:
             raise MCPError(-32603, "Internal server error without local diagnostic details.") from exc
+        content: list[Any] = [TextContent(text=json.dumps(payload, sort_keys=True))]
+        if str(params.name) in {"oel.plot_evidence.v1", "oel.render_review_plot.v2"}:
+            result = dict(payload.get("result", {}) or {})
+            artifact = dict(result.get("artifact", {}) or {})
+            image_path = Path(str(artifact.get("path", "") or ""))
+            mime_type = {".png": "image/png", ".svg": "image/svg+xml"}.get(image_path.suffix.lower())
+            if mime_type and image_path.is_file() and image_path.stat().st_size <= 8_000_000:
+                content.append(
+                    ImageContent(
+                        data=base64.b64encode(image_path.read_bytes()).decode("ascii"),
+                        mimeType=mime_type,
+                    )
+                )
         return CallToolResult(
-            content=[TextContent(text=json.dumps(payload, sort_keys=True))],
+            content=content,
             structuredContent=payload,
             isError=payload.get("status") == "failed",
         )
@@ -144,6 +160,8 @@ def build_sdk_server(handlers: BaseOELMCPHandlers) -> Any:
         lifespan=lifespan,
         instructions=(
             "Use OEL as the deterministic physics and evidence authority. "
+            "For any visualization derived from an OEL review store, use OEL plot recipes or the typed "
+            "plan/render plot tools before host-native visualization tools, then inspect the returned image. "
             "The active local surface requires its declared validation, entitlement, data-handling, and operator-approval policies."
         ),
         on_list_tools=list_tools,

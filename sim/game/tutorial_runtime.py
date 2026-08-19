@@ -752,6 +752,36 @@ def _dashboard_fps_for_speed(
     return float(max(fps, 1.0))
 
 
+def _presentation_fps_for_frame(
+    controller: PresentationFrameController | None,
+    speed_multiple: float,
+    *,
+    recording: bool = False,
+    static_screen: bool = False,
+    recording_fps: float = GAME_RECORDING_FPS,
+    fps_cap: float | None = None,
+    high_speed_fps: float | None = None,
+    high_speed_fps_max_multiple: float | None = None,
+) -> float:
+    compatibility_fps = _dashboard_fps_for_speed(
+        speed_multiple,
+        recording=recording,
+        static_screen=static_screen,
+        recording_fps=recording_fps,
+        fps_cap=fps_cap,
+        high_speed_fps=high_speed_fps,
+        high_speed_fps_max_multiple=high_speed_fps_max_multiple,
+    )
+    if controller is None:
+        return compatibility_fps
+    return controller.target_fps(
+        compatibility_fps=compatibility_fps,
+        recording=recording,
+        recording_fps=recording_fps,
+        static_screen=static_screen,
+    )
+
+
 def _clip_recording_status(
     controller: GameClipRecordingController,
     *,
@@ -799,6 +829,34 @@ def _realtime_steps_due(
     if due > cap:
         return steps, float(now_s)
     return steps, float(last_step_wall_s) + float(steps) * wall_step
+
+
+def _realtime_steps_due_with_backlog(
+    *,
+    now_s: float,
+    last_step_wall_s: float,
+    wall_step_s: float,
+    max_steps: int = MAX_REALTIME_STEPS_PER_FRAME,
+) -> tuple[int, float, int]:
+    wall_step = float(max(wall_step_s, 1.0e-9))
+    elapsed = max(float(now_s) - float(last_step_wall_s), 0.0)
+    due = int(elapsed // wall_step)
+    if due <= 0:
+        return 0, float(last_step_wall_s), 0
+    cap = max(int(max_steps), 1)
+    steps = min(due, cap)
+    discarded = max(due - cap, 0)
+    if due > cap:
+        return steps, float(now_s), discarded
+    return steps, float(last_step_wall_s) + float(steps) * wall_step, 0
+
+
+def _dashboard_snapshot_age_s(dashboard: Any, *, now_s: float | None = None) -> float | None:
+    samples = getattr(dashboard, "sample_wall_s", ())
+    if not samples:
+        return None
+    current = perf_counter() if now_s is None else float(now_s)
+    return max(current - float(samples[-1]), 0.0)
 
 
 def _command_status(state: KeyboardCommandState, *, control_mode: str = "attitude_thrust") -> str:

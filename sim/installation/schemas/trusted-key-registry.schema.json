@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oel.example/schemas/trusted-key-registry.schema.json",
+  "title": "OEL Trusted Release-Key Registry v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "keys", "signature"],
+  "properties": {
+    "schema_version": {"const": "oel.trusted-key-registry.v1"},
+    "published_at": {"type": "string", "format": "date-time"},
+    "keys": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key_id", "alg", "n", "e"],
+        "properties": {
+          "key_id": {"type": "string"},
+          "alg": {"const": "RS256"},
+          "n": {"type": ["string", "integer"]},
+          "e": {"type": ["string", "integer"]},
+          "not_before": {"type": "string", "format": "date-time"},
+          "expires_at": {"type": "string", "format": "date-time"},
+          "revoked": {"type": "boolean"}
+        }
+      }
+    },
+    "signature": {"type": "object"}
+  }
+}

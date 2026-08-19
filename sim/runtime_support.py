@@ -10,11 +10,11 @@ from __future__ import annotations
 
 import logging
 from functools import wraps
+from importlib import import_module
 from typing import Any
 
 from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2, EARTH_RADIUS_KM
 from sim.dynamics.orbit.elements import coe_to_rv_eci as _coe_to_rv_eci
-from sim.runtime import knowledge_factory as _knowledge_factory
 from sim.runtime import rocket_factory as _rocket_factory
 from sim.runtime import satellite_factory as _satellite_factory
 from sim.runtime import state_initialization as _state_initialization
@@ -102,12 +102,6 @@ from sim.runtime.compat import (
 from sim.runtime.compat import (
     _module_obj as _module_obj,
 )
-from sim.runtime.knowledge_factory import (
-    _knowledge_ekf_diag as _knowledge_ekf_diag,
-)
-from sim.runtime.knowledge_factory import (
-    _knowledge_maneuver_detection_config as _knowledge_maneuver_detection_config,
-)
 from sim.runtime.mission_runtime import (
     _deploy_from_rocket as _deploy_from_rocket,
 )
@@ -170,7 +164,6 @@ logger = logging.getLogger(__name__)
 def _sync_environment_constants() -> None:
     _state_initialization.EARTH_MU_KM3_S2 = EARTH_MU_KM3_S2
     _satellite_factory.EARTH_MU_KM3_S2 = EARTH_MU_KM3_S2
-    _knowledge_factory.EARTH_MU_KM3_S2 = EARTH_MU_KM3_S2
     _rocket_factory.EARTH_MU_KM3_S2 = EARTH_MU_KM3_S2
     _rocket_factory.EARTH_RADIUS_KM = EARTH_RADIUS_KM
 
@@ -193,10 +186,20 @@ def _create_satellite_runtime(*args: Any, **kwargs: Any) -> Any:
     return _satellite_factory._create_satellite_runtime(*args, **kwargs)
 
 
-@wraps(_knowledge_factory._build_knowledge_base)
 def _build_knowledge_base(*args: Any, **kwargs: Any) -> Any:
-    _sync_environment_constants()
-    return _knowledge_factory._build_knowledge_base(*args, **kwargs)
+    knowledge_factory = import_module("sim.runtime.knowledge_factory")
+    knowledge_factory.EARTH_MU_KM3_S2 = EARTH_MU_KM3_S2
+    return knowledge_factory._build_knowledge_base(*args, **kwargs)
+
+
+def _knowledge_ekf_diag(*args: Any, **kwargs: Any) -> Any:
+    knowledge_factory = import_module("sim.runtime.knowledge_factory")
+    return knowledge_factory._knowledge_ekf_diag(*args, **kwargs)
+
+
+def _knowledge_maneuver_detection_config(*args: Any, **kwargs: Any) -> Any:
+    knowledge_factory = import_module("sim.runtime.knowledge_factory")
+    return knowledge_factory._knowledge_maneuver_detection_config(*args, **kwargs)
 
 
 @wraps(_rocket_factory._create_rocket_runtime)

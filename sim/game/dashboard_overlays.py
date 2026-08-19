@@ -302,6 +302,41 @@ class DashboardOverlayMixin:
         screen = self.screen
         dash = float(dash_px)
         stride = float(dash_px + gap_px)
+        if str(getattr(self, "presentation_mode", "compatibility")) != "compatibility":
+            draw_aaline = getattr(pygame.draw, "aaline", None)
+            path_position = 0.0
+            for start, end in zip(points[:-1], points[1:], strict=False):
+                x0 = float(start[0])
+                y0 = float(start[1])
+                dx = float(end[0]) - x0
+                dy = float(end[1]) - y0
+                length = hypot(dx, dy)
+                if length <= 0.0:
+                    continue
+                ux = dx / length
+                uy = dy / length
+                segment_position = 0.0
+                while segment_position < length - 1.0e-9:
+                    pattern_position = path_position % stride
+                    drawing = pattern_position < dash
+                    pattern_remaining = (dash - pattern_position) if drawing else (stride - pattern_position)
+                    travel = min(max(pattern_remaining, 1.0e-9), length - segment_position)
+                    if drawing and travel > 1.0e-9:
+                        stop = segment_position + travel
+                        start_point = (x0 + ux * segment_position, y0 + uy * segment_position)
+                        end_point = (x0 + ux * stop, y0 + uy * stop)
+                        draw_line(
+                            screen,
+                            color,
+                            tuple(int(round(value)) for value in start_point),
+                            tuple(int(round(value)) for value in end_point),
+                            width=width,
+                        )
+                        if callable(draw_aaline):
+                            draw_aaline(screen, color, start_point, end_point, True)
+                    segment_position += travel
+                    path_position += travel
+            return
         for start, end in zip(points[:-1], points[1:]):
             x0 = float(start[0])
             y0 = float(start[1])

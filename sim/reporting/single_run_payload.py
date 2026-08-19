@@ -5,7 +5,6 @@ from typing import Any
 
 import numpy as np
 
-from sim.analysis.orbital_delivery import build_orbital_delivery_summary
 from sim.config import (
     SimulationScenarioConfig,
     default_pair_object_ids,
@@ -320,6 +319,8 @@ def _summarize_reentry_metrics(
 
 
 def build_single_run_payload(context: SingleRunPayloadContext) -> dict[str, Any]:
+    from sim.installation.provenance import execution_provenance
+
     frame_context = frame_context_from_mapping(
         dict(getattr(context.cfg.simulator, "frames", {}) or {}),
         jd_utc_start=context.cfg.simulator.initial_jd_utc,
@@ -372,6 +373,7 @@ def build_single_run_payload(context: SingleRunPayloadContext) -> dict[str, Any]
         "primary_object_pair": list(primary_pair) if primary_pair is not None else [],
         "thrust_stats": context.thrust_stats,
         "runtime_profile": dict(context.runtime_profile or {}),
+        "installation_provenance": execution_provenance(),
         "frame_provenance": frame_context.metadata(),
         "attitude_guardrail_stats": context.attitude_guardrail_stats,
         "knowledge_detection_by_observer": context.knowledge_detection_by_observer,
@@ -423,11 +425,20 @@ def build_single_run_payload(context: SingleRunPayloadContext) -> dict[str, Any]
             "max_aero_moment_nm": _max_finite("aero_moment_nm"),
         }
         summary["rocket_metrics_summary"] = rocket_summary
-    orbital_delivery = build_orbital_delivery_summary(
-        cfg=context.cfg,
-        t_s=context.t_s,
-        truth_hist=context.truth_hist,
+    trajectory_only = all(
+        str(getattr(object_cfg, "runtime_profile", "") or "") == "trajectory_only"
+        for object_cfg in context.cfg.objects.values()
     )
+    if trajectory_only:
+        orbital_delivery = {}
+    else:
+        from sim.analysis.orbital_delivery import build_orbital_delivery_summary
+
+        orbital_delivery = build_orbital_delivery_summary(
+            cfg=context.cfg,
+            t_s=context.t_s,
+            truth_hist=context.truth_hist,
+        )
     if orbital_delivery:
         summary["orbital_delivery"] = orbital_delivery
     return {

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oel.example/schemas/channel-config.schema.json",
+  "title": "OEL Update Channel Configuration v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "default", "channels"],
+  "properties": {
+    "schema_version": {"const": "oel.update-channels.v1"},
+    "default": {"type": ["string", "null"]},
+    "channels": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["edition", "channel", "url", "source", "configured_at"],
+        "properties": {
+          "edition": {"enum": ["public", "pro"]},
+          "channel": {"enum": ["stable", "preview"]},
+          "url": {"type": "string", "pattern": "^https://"},
+          "source": {"type": "string", "minLength": 1},
+          "configured_at": {"type": "string", "format": "date-time"}
+        }
+      }
+    }
+  }
+}

@@ -26,6 +26,12 @@ def run_game_mode(
     recording_fps: float = GAME_RECORDING_FPS,
     arcade_seed: int | None = None,
     debrief_output_dir: str | Path | None = None,
+    presentation_mode: str | None = None,
+    presentation_fps_cap: float | None = None,
+    presentation_refresh_hz: float | None = None,
+    presentation_vsync: str | None = None,
+    presentation_diagnostics: bool | None = None,
+    presentation_diagnostics_output: str | Path | None = None,
 ) -> GameRunResult:
     from sim.game.pygame_dashboard import PygameRPODashboard
 
@@ -42,6 +48,15 @@ def run_game_mode(
     game_mode = _normalize_game_mode(game_mode)
     operator_playback_mode = game_mode == "operator"
     frame_convention = normalize_frame_convention(frame_convention)
+    presentation_settings = _game_presentation_settings(
+        config,
+        mode=presentation_mode,
+        fps_cap=presentation_fps_cap,
+        refresh_rate_hz=presentation_refresh_hz,
+        vsync=presentation_vsync,
+        diagnostics=presentation_diagnostics,
+        diagnostics_output=presentation_diagnostics_output,
+    )
     initial_operator_burn_plan = operator_burn_plan
     operator_burn_plan = (operator_burn_plan or OperatorBurnPlan()) if operator_playback_mode else None
     skip_initial_briefing = bool(skip_initial_briefing and operator_playback_mode)
@@ -203,6 +218,13 @@ def run_game_mode(
         show_target_coast_prediction=_game_show_target_hcw_path(config),
         frame_convention=frame_convention,
         fullscreen=True,
+        presentation_mode=presentation_settings.mode,
+        presentation_vsync=presentation_settings.vsync,
+    )
+    presentation_controller = create_presentation_controller(
+        dashboard.pygame,
+        dashboard,
+        presentation_settings,
     )
     aero_cfg = _game_aerodynamic_control_config(config)
     dashboard.aerodynamic_ri_pitch_max_deg = aero_cfg["ri_pitch_max_deg"]
@@ -530,6 +552,7 @@ def run_game_mode(
             briefing_open = phase_shows_briefing(phase)
             debrief_hotkey_enabled = phase_is_terminal(phase)
             input_now = perf_counter()
+            frame_started_wall = input_now
             input_elapsed_wall = max(float(input_now) - float(last_input_wall), 0.0)
             last_input_wall = input_now
             _poll_pygame_input(
@@ -617,14 +640,25 @@ def run_game_mode(
                     )
                     recording_controller.capture(dashboard)
                     clip_recording_controller.capture(dashboard)
-                    dashboard.tick(
-                        _dashboard_fps_for_speed(
-                            current_speed_multiple,
-                            fps_cap=dashboard_fps_cap,
-                            high_speed_fps=dashboard_high_speed_fps,
-                            high_speed_fps_max_multiple=dashboard_high_speed_fps_max_multiple,
-                        )
+                    primer_target_fps = _presentation_fps_for_frame(
+                        presentation_controller,
+                        current_speed_multiple,
+                        static_screen=True,
+                        recording=(
+                            recording_controller.recorder is not None or clip_recording_controller.recording
+                        ),
+                        recording_fps=recording_fps,
+                        fps_cap=dashboard_fps_cap,
+                        high_speed_fps=dashboard_high_speed_fps,
+                        high_speed_fps_max_multiple=dashboard_high_speed_fps_max_multiple,
                     )
+                    if presentation_controller is not None:
+                        presentation_controller.observe_frame(
+                            work_s=perf_counter() - frame_started_wall,
+                            authoritative_steps=0,
+                            snapshot_age_s=_dashboard_snapshot_age_s(dashboard),
+                        )
+                    dashboard.tick(primer_target_fps)
                     continue
             if (
                 operator_tutorial is not None
@@ -1084,7 +1118,24 @@ def run_game_mode(
                 command_state.clear_timed_input()
             if command_state.paused:
                 last_step_wall = now
+            static_screen = bool(
+                command_state.paused or phase_shows_briefing(phase) or phase_is_terminal(phase)
+            )
+            recording_active = bool(
+                recording_controller.recorder is not None or clip_recording_controller.recording
+            )
+            target_presentation_fps = _presentation_fps_for_frame(
+                presentation_controller,
+                effective_speed_multiple,
+                static_screen=static_screen,
+                recording=recording_active,
+                recording_fps=recording_fps,
+                fps_cap=dashboard_fps_cap,
+                high_speed_fps=dashboard_high_speed_fps,
+                high_speed_fps_max_multiple=dashboard_high_speed_fps_max_multiple,
+            )
             steps_to_run = 0
+            discarded_backlog_steps = 0
             step_dt_s = dt_s
             pending_maneuver_sim_s = _pending_maneuver_sim_s_for_mode(
                 game_mode,
@@ -1093,11 +1144,25 @@ def run_game_mode(
             )
             if not mission_decided and not session.done and not command_state.paused:
                 if realtime:
-                    steps_to_run, last_step_wall = _realtime_steps_due(
-                        now_s=now,
-                        last_step_wall_s=last_step_wall,
-                        wall_step_s=wall_step_s,
-                    )
+                    if presentation_controller is None or not presentation_controller.trajectory_aware:
+                        steps_to_run, last_step_wall = _realtime_steps_due(
+                            now_s=now,
+                            last_step_wall_s=last_step_wall,
+                            wall_step_s=wall_step_s,
+                        )
+                    else:
+                        max_presentation_steps = presentation_controller.authoritative_step_limit(
+                            wall_step_s=wall_step_s,
+                            hard_limit=MAX_REALTIME_STEPS_PER_FRAME,
+                        )
+                        steps_to_run, last_step_wall, discarded_backlog_steps = (
+                            _realtime_steps_due_with_backlog(
+                                now_s=now,
+                                last_step_wall_s=last_step_wall,
+                                wall_step_s=wall_step_s,
+                                max_steps=max_presentation_steps,
+                            )
+                        )
                     if steps_to_run <= 0 and pending_maneuver_sim_s > 1.0e-9:
                         step_dt_s = min(float(dt_s), float(pending_maneuver_sim_s))
                         steps_to_run = 1
@@ -1488,17 +1553,14 @@ def run_game_mode(
                 debrief_folder_to_open = debrief_path.parent
                 command_state.quit_requested = True
                 break
-            dashboard.tick(
-                _dashboard_fps_for_speed(
-                    effective_speed_multiple,
-                    static_screen=(command_state.paused or phase_shows_briefing(phase) or phase_is_terminal(phase)),
-                    recording=recording_controller.recorder is not None or clip_recording_controller.recording,
-                    recording_fps=recording_fps,
-                    fps_cap=dashboard_fps_cap,
-                    high_speed_fps=dashboard_high_speed_fps,
-                    high_speed_fps_max_multiple=dashboard_high_speed_fps_max_multiple,
+            if presentation_controller is not None:
+                presentation_controller.observe_frame(
+                    work_s=perf_counter() - frame_started_wall,
+                    authoritative_steps=steps_to_run,
+                    discarded_backlog_steps=discarded_backlog_steps,
+                    snapshot_age_s=_dashboard_snapshot_age_s(dashboard),
                 )
-            )
+            dashboard.tick(target_presentation_fps)
     finally:
         recorder = recording_controller.recorder
         if recorder is not None and not recorder.saved:
@@ -1509,6 +1571,10 @@ def run_game_mode(
             audio_controller.stop()
         else:
             _stop_game_music(getattr(dashboard, "pygame", None))
+        if presentation_controller is not None:
+            diagnostics_path = presentation_controller.write_summary()
+            if diagnostics_path is not None:
+                print(f"Saved game presentation diagnostics: {diagnostics_path}")
         dashboard.close()
         if debrief_folder_to_open is not None:
             opened = open_game_debrief_folder(debrief_folder_to_open)

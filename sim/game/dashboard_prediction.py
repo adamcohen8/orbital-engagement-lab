@@ -167,9 +167,12 @@ class DashboardPredictionMixin:
         raw_target_rel = np.asarray(raw_cache["raw_target_rel"], dtype=float)
         raw_target_reference_rel = np.asarray(raw_cache["raw_target_reference_rel"], dtype=float)
         thrust = np.asarray(raw_cache["thrust"], dtype=float)
-        rel = self._visual_state_rows(raw_rel)
-        target_rel = self._visual_state_rows(raw_target_rel)
-        target_reference_rel = self._visual_state_rows(raw_target_reference_rel)
+        rel = self._visual_state_rows(raw_rel, series_name="rel")
+        target_rel = self._visual_state_rows(raw_target_rel, series_name="target_rel")
+        target_reference_rel = self._visual_state_rows(
+            raw_target_reference_rel,
+            series_name="target_reference_rel",
+        )
         live_accel = np.array(getattr(self, "live_prediction_accel_ric_km_s2", np.zeros(3)), dtype=float).reshape(3)
         active_burn = bool(np.linalg.norm(live_accel) > float(self.burn_marker_threshold_km_s2))
         target_ghost = np.array(raw_cache.get("target_ghost", np.empty((0, 6))), dtype=float)
@@ -184,19 +187,22 @@ class DashboardPredictionMixin:
         if tutorial_path.ndim != 2 or tutorial_path.shape[1] < 3:
             tutorial_path_sample = np.empty((0, 6), dtype=float)
         else:
-            tutorial_path_sample = _sample_rows(tutorial_path, MAX_GHOST_DRAW_POINTS)
+            tutorial_path_sample = _sample_rows(tutorial_path, self._presentation_ghost_draw_points())
         self._frame_cache = {
             "rel": rel,
             "target_rel": target_rel,
             "target_reference_rel": target_reference_rel,
             "thrust": thrust,
             "ghost": ghost,
-            "ghost_sample": _sample_rows(ghost, MAX_GHOST_DRAW_POINTS),
+            "ghost_sample": _sample_rows(ghost, self._presentation_ghost_draw_points()),
             "ghost_active_burn": active_burn,
             "target_ghost": target_ghost,
-            "target_ghost_sample": _sample_rows(target_ghost, MAX_GHOST_DRAW_POINTS),
-            "rel_trail": _sample_rows(rel[-self.max_history :], MAX_TRAIL_DRAW_POINTS),
-            "target_trail": _sample_rows(target_rel[-self.max_history :], MAX_TRAIL_DRAW_POINTS),
+            "target_ghost_sample": _sample_rows(target_ghost, self._presentation_ghost_draw_points()),
+            "rel_trail": _sample_rows(rel[-self.max_history :], self._presentation_trail_draw_points()),
+            "target_trail": _sample_rows(
+                target_rel[-self.max_history :],
+                self._presentation_trail_draw_points(),
+            ),
             "tutorial_path_sample": tutorial_path_sample,
             "burn_marker_rel": burn_marker_rel,
             "nmt": np.array(raw_cache.get("nmt", np.empty((0, 3))), dtype=float),
@@ -205,7 +211,7 @@ class DashboardPredictionMixin:
         }
         self._frame_cache_dirty = False
 
-    def _visual_state_rows(self, rows: np.ndarray) -> np.ndarray:
+    def _visual_state_rows(self, rows: np.ndarray, *, series_name: str = "rel") -> np.ndarray:
         arr = np.asarray(rows, dtype=float)
         if arr.ndim != 2 or arr.shape[0] == 0 or arr.shape[1] < 6:
             return arr
@@ -213,12 +219,290 @@ class DashboardPredictionMixin:
             return arr
         if not bool(getattr(self, "_render_motion_enabled", False)):
             return arr
+        if str(getattr(self, "presentation_mode", "compatibility")) != "compatibility":
+            return self._trajectory_aware_visual_state_rows(arr, series_name=series_name)
         elapsed_sim_s = self._visual_extrapolation_elapsed_sim_s()
         if elapsed_sim_s <= 0.0:
             return arr
         arr = arr.copy()
         arr[-1, :3] = arr[-1, :3] + arr[-1, 3:6] * elapsed_sim_s
         return arr
+
+    def _presentation_ghost_draw_points(self) -> int:
+        requested = max(int(getattr(self, "presentation_ghost_draw_points", MAX_GHOST_DRAW_POINTS)), 2)
+        if (
+            str(getattr(self, "presentation_mode", "compatibility")) != "compatibility"
+            and not self._uses_cr3bp_prediction_model()
+        ):
+            # HCW and elliptic propagation are vectorized and remained below a
+            # millisecond in the overloaded Level 4 trace. Preserve curve
+            # smoothness instead of degrading this inexpensive teaching aid.
+            return max(requested, 180)
+        return requested
+
+    def _presentation_trail_draw_points(self) -> int:
+        return max(int(getattr(self, "presentation_trail_draw_points", MAX_TRAIL_DRAW_POINTS)), 2)
+
+    def _trajectory_aware_visual_state_rows(self, rows: np.ndarray, *, series_name: str) -> np.ndarray:
+        elapsed_sim_s, cap_hit = self._presentation_elapsed_sim_s()
+        result = np.array(rows, dtype=float, copy=True)
+        projection_started_s = perf_counter()
+        if elapsed_sim_s > 0.0:
+            result[-1] = self._presentation_project_state(
+                result,
+                elapsed_sim_s=elapsed_sim_s,
+                series_name=series_name,
+            )
+        result[-1] = self._apply_presentation_reconciliation(series_name, result[-1])
+        last_states = getattr(self, "_presentation_last_states", None)
+        if last_states is None:
+            last_states = {}
+            self._presentation_last_states = last_states
+        last_states[str(series_name)] = np.array(result[-1], dtype=float).reshape(6).copy()
+        controller = getattr(self, "presentation_controller", None)
+        if controller is not None and series_name == "rel":
+            controller.record_projection(
+                horizon_s=elapsed_sim_s,
+                cap_hit=cap_hit,
+                computation_s=perf_counter() - projection_started_s,
+            )
+        return result
+
+    def _presentation_elapsed_sim_s(self) -> tuple[float, bool]:
+        sample_wall = getattr(self, "sample_wall_s", ())
+        if not sample_wall:
+            return 0.0, False
+        latest_wall_s = float(sample_wall[-1])
+        render_wall_s = float(getattr(self, "_render_wall_time_s", latest_wall_s))
+        elapsed_wall_s = max(render_wall_s - latest_wall_s, 0.0)
+        speed = max(float(getattr(self, "_render_speed_multiple", 1.0)), 0.0)
+        requested = elapsed_wall_s * speed
+        t_s = getattr(self, "t_s", ())
+        cap = requested
+        if t_s and len(t_s) >= 2:
+            latest_dt_s = max(float(t_s[-1]) - float(t_s[-2]), 0.0)
+            if latest_dt_s > 0.0:
+                cap = min(cap, latest_dt_s)
+        return float(max(cap, 0.0)), bool(requested > cap + 1.0e-12)
+
+    def _presentation_project_state(
+        self,
+        rows: np.ndarray,
+        *,
+        elapsed_sim_s: float,
+        series_name: str,
+    ) -> np.ndarray:
+        state = np.array(rows[-1], dtype=float).reshape(6)
+        elapsed = max(float(elapsed_sim_s), 0.0)
+        if elapsed <= 0.0:
+            return state
+        live_accel = (
+            np.array(getattr(self, "live_prediction_accel_ric_km_s2", np.zeros(3)), dtype=float).reshape(3)
+            if series_name == "rel"
+            else np.zeros(3, dtype=float)
+        )
+        active_burn = float(np.linalg.norm(live_accel)) > float(self.burn_marker_threshold_km_s2)
+        n = getattr(self, "mean_motion_rad_s", None)
+        if bool(getattr(self, "aerodynamic_control_enabled", False)):
+            acceleration = live_accel.copy()
+            if rows.shape[0] >= 2:
+                t_s = getattr(self, "t_s", ())
+                latest_dt_s = float(t_s[-1] - t_s[-2]) if len(t_s) >= 2 else 0.0
+                if latest_dt_s > 0.0:
+                    acceleration += (rows[-1, 3:6] - rows[-2, 3:6]) / latest_dt_s
+            state[:3] += state[3:6] * elapsed + 0.5 * acceleration * elapsed * elapsed
+            state[3:6] += acceleration * elapsed
+            return state
+        if active_burn and n is not None and np.isfinite(float(n)) and float(n) > 0.0:
+            if not self._uses_cr3bp_prediction_model():
+                return np.array(_cw_forced_state(state, live_accel, elapsed, float(n)), dtype=float).reshape(6)
+        if self._uses_cr3bp_prediction_model():
+            projected = self._presentation_cr3bp_state(
+                state,
+                elapsed_sim_s=elapsed,
+                series_name=series_name,
+            )
+            if projected is not None:
+                return projected
+        if self._uses_elliptic_prediction_model():
+            reference_state = getattr(self, "reference_state_eci", None)
+            if reference_state is not None:
+                reference = np.array(reference_state, dtype=float).reshape(6)
+                times = np.array([elapsed], dtype=float)
+                try:
+                    projected = _elliptic_ya_coast_states(state, times, reference)
+                    if projected.shape == (1, 6) and np.all(np.isfinite(projected)):
+                        return projected[0]
+                except (ValueError, FloatingPointError, np.linalg.LinAlgError):
+                    pass
+                projected = _elliptic_linear_coast_states(state, times, reference)
+                if projected.shape == (1, 6) and np.all(np.isfinite(projected)):
+                    return projected[0]
+        if n is not None and np.isfinite(float(n)) and float(n) > 0.0:
+            projected = _cw_coast_states(state, np.array([elapsed], dtype=float), float(n))
+            if projected.shape == (1, 6) and np.all(np.isfinite(projected)):
+                return projected[0]
+        acceleration = live_accel
+        if not active_burn and rows.shape[0] >= 2:
+            t_s = getattr(self, "t_s", ())
+            latest_dt_s = float(t_s[-1] - t_s[-2]) if len(t_s) >= 2 else 0.0
+            if latest_dt_s > 0.0:
+                acceleration = (rows[-1, 3:6] - rows[-2, 3:6]) / latest_dt_s
+        state[:3] += state[3:6] * elapsed + 0.5 * acceleration * elapsed * elapsed
+        state[3:6] += acceleration * elapsed
+        return state
+
+    def _presentation_cr3bp_state(
+        self,
+        state: np.ndarray,
+        *,
+        elapsed_sim_s: float,
+        series_name: str,
+    ) -> np.ndarray | None:
+        t_s = getattr(self, "t_s", ())
+        horizon = max(float(t_s[-1] - t_s[-2]), 0.0) if len(t_s) >= 2 else float(elapsed_sim_s)
+        horizon = max(horizon, float(elapsed_sim_s), 1.0e-9)
+        cache = getattr(self, "_presentation_trajectory_cache", None)
+        if cache is None:
+            cache = {}
+            self._presentation_trajectory_cache = cache
+        key = str(series_name)
+        current_time_s = self._current_time_s()
+        cached = cache.get(key)
+        state_key = np.asarray(state, dtype=float).tobytes()
+        if not isinstance(cached, dict) or cached.get("time_s") != current_time_s or cached.get("state") != state_key:
+            point_count = min(max(self._presentation_ghost_draw_points(), 24), 180)
+            times = np.linspace(0.0, horizon, point_count, dtype=float)
+            frame_key = _relative_frame_key(getattr(self, "relative_frame", "ric"))
+            if frame_key == "moon_ric":
+                target_state = getattr(self, "reference_state_eci", None)
+                if target_state is None:
+                    return None
+                target = np.array(target_state, dtype=float).reshape(6)
+                if _cr3bp_projection_mode_key(getattr(self, "cr3bp_projection_mode", "nonlinear")) == "linearized":
+                    states = self._linearized_cr3bp_moon_ric_coast_prediction_cached(
+                        state,
+                        target_state=target,
+                        times=times,
+                        current_t_s=current_time_s,
+                    )
+                else:
+                    states = _nonlinear_cr3bp_moon_ric_coast_prediction(
+                        state,
+                        target_state=target,
+                        times=times,
+                        current_t_s=current_time_s,
+                    )
+            else:
+                origin = cr3bp_l1_state_km_s()
+                absolute = origin + state
+                rows: list[np.ndarray] = []
+                previous_t = 0.0
+                propagation_time = current_time_s
+                for target_t in times:
+                    step_s = float(target_t - previous_t)
+                    if step_s > 0.0:
+                        absolute = propagate_cr3bp_state(absolute, step_s, propagation_time)
+                        propagation_time += step_s
+                    rows.append(absolute - origin)
+                    previous_t = float(target_t)
+                states = np.vstack(rows)
+            cached = {
+                "time_s": current_time_s,
+                "state": state_key,
+                "times": times,
+                "states": np.asarray(states, dtype=float),
+            }
+            cache[key] = cached
+        times = np.asarray(cached["times"], dtype=float)
+        states = np.asarray(cached["states"], dtype=float)
+        if states.shape != (times.size, 6) or not np.all(np.isfinite(states)):
+            return None
+        sample_time = min(max(float(elapsed_sim_s), 0.0), float(times[-1]))
+        return np.array([np.interp(sample_time, times, states[:, idx]) for idx in range(6)], dtype=float)
+
+    def _presentation_thrust_discontinuity(self, name: str, thrust: np.ndarray) -> bool:
+        signatures = getattr(self, "_presentation_thrust_signatures", None)
+        if signatures is None:
+            signatures = {}
+            self._presentation_thrust_signatures = signatures
+        current = np.array(thrust, dtype=float).reshape(3)
+        previous = signatures.get(str(name))
+        signatures[str(name)] = current.copy()
+        return previous is not None and not np.array_equal(np.asarray(previous, dtype=float), current)
+
+    def _begin_presentation_reconciliation(
+        self,
+        series_name: str,
+        authoritative_state: np.ndarray,
+        *,
+        discontinuity: bool,
+        authoritative_time_s: float | None = None,
+    ) -> None:
+        name = str(series_name)
+        cache = getattr(self, "_presentation_trajectory_cache", None)
+        if isinstance(cache, dict):
+            cache.pop(name, None)
+        reconciliations = getattr(self, "_presentation_reconciliations", None)
+        if reconciliations is None:
+            reconciliations = {}
+            self._presentation_reconciliations = reconciliations
+        if discontinuity:
+            reconciliations.pop(name, None)
+            return
+        authoritative = np.array(authoritative_state, dtype=float).reshape(6)
+        history_by_name = {
+            "rel": getattr(self, "rel_hist", ()),
+            "target_rel": getattr(self, "target_rel_hist", ()),
+            "target_reference_rel": getattr(self, "target_reference_rel_hist", ()),
+        }
+        history = history_by_name.get(name, ())
+        times = getattr(self, "t_s", ())
+        predicted: np.ndarray | None = None
+        if history and times and authoritative_time_s is not None:
+            elapsed_sim_s = max(float(authoritative_time_s) - float(times[-1]), 0.0)
+            if elapsed_sim_s > 0.0:
+                rows = np.asarray(history[-2:], dtype=float).reshape(-1, 6)
+                predicted = self._presentation_project_state(
+                    rows,
+                    elapsed_sim_s=elapsed_sim_s,
+                    series_name=name,
+                )
+        if predicted is None:
+            previous = getattr(self, "_presentation_last_states", {}).get(name)
+            if previous is None:
+                return
+            predicted = np.array(previous, dtype=float).reshape(6)
+        error = np.array(predicted, dtype=float).reshape(6)[:3] - authoritative[:3]
+        error_norm = float(np.linalg.norm(error))
+        maximum = max(float(getattr(self, "presentation_reconciliation_max_error_km", 0.25)), 0.0)
+        controller = getattr(self, "presentation_controller", None)
+        if controller is not None:
+            controller.record_reconciliation_error(error_norm)
+        if error_norm <= 1.0e-15 or error_norm > maximum:
+            reconciliations.pop(name, None)
+            return
+        reconciliations[name] = {
+            "offset_km": error,
+            "started_wall_s": perf_counter(),
+        }
+
+    def _apply_presentation_reconciliation(self, series_name: str, state: np.ndarray) -> np.ndarray:
+        result = np.array(state, dtype=float).reshape(6).copy()
+        reconciliations = getattr(self, "_presentation_reconciliations", None)
+        if not isinstance(reconciliations, dict):
+            return result
+        item = reconciliations.get(str(series_name))
+        if not isinstance(item, dict):
+            return result
+        duration = max(float(getattr(self, "presentation_reconciliation_duration_s", 0.08)), 1.0e-9)
+        alpha = (perf_counter() - float(item.get("started_wall_s", 0.0))) / duration
+        if alpha >= 1.0:
+            reconciliations.pop(str(series_name), None)
+            return result
+        offset = np.array(item.get("offset_km", np.zeros(3)), dtype=float).reshape(3)
+        result[:3] += offset * (1.0 - max(float(alpha), 0.0))
+        return result
 
     def _visual_extrapolation_elapsed_sim_s(self) -> float:
         sample_wall = getattr(self, "sample_wall_s", ())
@@ -343,7 +627,7 @@ class DashboardPredictionMixin:
             rel0 = np.array(self.target_rel_hist[-1], dtype=float).reshape(6)
         else:
             rel0 = rel.reshape(-1, 6)[-1]
-        return self._coast_prediction_from(
+        return self._measured_coast_prediction_from(
             rel0,
             cr3bp_horizon_s=getattr(self, "target_coast_prediction_horizon_s", None),
             cr3bp_dt_s=getattr(self, "target_coast_prediction_dt_s", None),
@@ -362,6 +646,7 @@ class DashboardPredictionMixin:
                     or CR3BP_PREDICTION_COAST_UPDATE_INTERVAL_S
                 )
             )
+            interval_s *= max(float(getattr(self, "presentation_prediction_interval_scale", 1.0)), 1.0)
             now_s = self._current_time_s()
             reference = self._reference_cache_state()
             cached = prediction_cache.get(str(cache_name))
@@ -377,14 +662,18 @@ class DashboardPredictionMixin:
                     if prediction is not None:
                         return np.array(prediction, dtype=float)
 
-            prediction = self._coast_prediction_from(
+            prediction = self._measured_coast_prediction_from(
                 rel0,
                 cr3bp_horizon_s=(
                     _positive_float_or_none(getattr(self, "cr3bp_active_prediction_horizon_s", None))
                     if bool(active_burn)
                     else None
                 ),
-                max_draw_points=MAX_ACTIVE_CR3BP_GHOST_DRAW_POINTS if bool(active_burn) else None,
+                max_draw_points=(
+                    min(MAX_ACTIVE_CR3BP_GHOST_DRAW_POINTS, self._presentation_ghost_draw_points())
+                    if bool(active_burn)
+                    else self._presentation_ghost_draw_points()
+                ),
             )
             prediction_cache[str(cache_name)] = {
                 "time_s": now_s,
@@ -395,7 +684,7 @@ class DashboardPredictionMixin:
             return prediction
 
         if not self._uses_elliptic_prediction_model():
-            prediction = self._coast_prediction_from(rel0)
+            prediction = self._measured_coast_prediction_from(rel0)
             prediction_cache[str(cache_name)] = {
                 "time_s": self._current_time_s(),
                 "rel0": rel0.copy(),
@@ -409,6 +698,7 @@ class DashboardPredictionMixin:
             if bool(active_burn)
             else ELLIPTIC_PREDICTION_COAST_UPDATE_INTERVAL_S
         )
+        interval_s *= max(float(getattr(self, "presentation_prediction_interval_scale", 1.0)), 1.0)
         now_s = self._current_time_s()
         reference = self._reference_cache_state()
         cached = prediction_cache.get(str(cache_name))
@@ -423,7 +713,7 @@ class DashboardPredictionMixin:
                 ):
                     return np.array(prediction, dtype=float)
 
-        prediction = self._coast_prediction_from(rel0)
+        prediction = self._measured_coast_prediction_from(rel0)
         prediction_cache[str(cache_name)] = {
             "time_s": now_s,
             "rel0": rel0.copy(),
@@ -557,6 +847,29 @@ class DashboardPredictionMixin:
         cap_value = float(cap)
         return np.clip(shifted, -cap_value, cap_value)
 
+    def _measured_coast_prediction_from(
+        self,
+        rel0: np.ndarray,
+        *,
+        cr3bp_horizon_s: float | None = None,
+        cr3bp_dt_s: float | None = None,
+        max_draw_points: int | None = None,
+    ) -> np.ndarray:
+        started_s = perf_counter()
+        try:
+            options: dict[str, float | int] = {}
+            if cr3bp_horizon_s is not None:
+                options["cr3bp_horizon_s"] = cr3bp_horizon_s
+            if cr3bp_dt_s is not None:
+                options["cr3bp_dt_s"] = cr3bp_dt_s
+            if max_draw_points is not None:
+                options["max_draw_points"] = max_draw_points
+            return self._coast_prediction_from(rel0, **options)
+        finally:
+            controller = getattr(self, "presentation_controller", None)
+            if controller is not None:
+                controller.record_prediction_recompute(perf_counter() - started_s)
+
     def _coast_prediction_from(
         self,
         rel0: np.ndarray,
@@ -599,7 +912,7 @@ class DashboardPredictionMixin:
                 300.0 if cr3bp_dt is None else float(cr3bp_dt),
                 1.0e-6,
             )
-            point_cap = max(int(max_draw_points or MAX_GHOST_DRAW_POINTS), 2)
+            point_cap = max(int(max_draw_points or self._presentation_ghost_draw_points()), 2)
             times = _front_loaded_prediction_times(horizon, dt, max_points=point_cap)
             if _relative_frame_key(getattr(self, "relative_frame", "ric")) == "moon_ric":
                 target_state = getattr(self, "reference_state_eci", None)
@@ -633,7 +946,7 @@ class DashboardPredictionMixin:
                 previous_t = float(target_t)
             return np.vstack(rows)
         dt = float(max(self.coast_prediction_dt_s, 1.0e-6))
-        point_cap = max(int(max_draw_points or MAX_GHOST_DRAW_POINTS), 2)
+        point_cap = max(int(max_draw_points or self._presentation_ghost_draw_points()), 2)
         times = _front_loaded_prediction_times(horizon, dt, max_points=point_cap)
         if _coast_prediction_model_key(getattr(self, "coast_prediction_model", "hcw")) in {
             "elliptic_linear",

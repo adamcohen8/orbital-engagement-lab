@@ -297,13 +297,10 @@ class AttitudeNavigator:
 
     def _ingest_measurement(self, measurement: MeasurementEvent) -> bool:
         payload = measurement.payload
-        mounting = self._mountings.get(measurement.sensor_id, SensorMounting(measurement.sensor_id))
-        if mounting.sensor_frame is not None and measurement.frame != mounting.sensor_frame:
+        mounting = self._mountings.get(measurement.sensor_id)
+        if mounting is not None and mounting.sensor_frame is not None and measurement.frame != mounting.sensor_frame:
             self._degraded = True
             return False
-        calibration = self._calibrations.get(measurement.sensor_id, SensorCalibration(measurement.sensor_id))
-        q_bs = np.asarray(mounting.quat_body_from_sensor, dtype=float)
-        c_bs = quaternion_to_dcm_bn(q_bs)
         if isinstance(payload, IdealOwnStateMeasurement):
             if payload.attitude_quat_body_from_inertial is not None:
                 self._attitude = tuple(payload.attitude_quat_body_from_inertial)
@@ -315,6 +312,18 @@ class AttitudeNavigator:
             if payload.velocity_m_s is not None:
                 self._velocity = tuple(payload.velocity_m_s)
             return True
+        if not isinstance(
+            payload,
+            (GyroMeasurement, StarTrackerMeasurement, SunVectorMeasurement, MagnetometerMeasurement),
+        ):
+            return False
+        if mounting is None:
+            mounting = SensorMounting(measurement.sensor_id)
+        calibration = self._calibrations.get(measurement.sensor_id)
+        if calibration is None:
+            calibration = SensorCalibration(measurement.sensor_id)
+        q_bs = np.asarray(mounting.quat_body_from_sensor, dtype=float)
+        c_bs = quaternion_to_dcm_bn(q_bs)
         if isinstance(payload, GyroMeasurement):
             self._propagate_attitude(measurement.sample_time)
             self._rate = tuple(

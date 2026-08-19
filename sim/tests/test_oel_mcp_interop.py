@@ -17,8 +17,11 @@ from integrations.oel_mcp.interop import (
     _git_commit,
     _git_source_state,
     _parse_claude_payload,
+    _parse_claude_plot_selection,
     _parse_codex_payload,
+    _parse_codex_plot_selection,
     _resolve_executable,
+    plot_selection_prompt,
     run_sdk_stdio,
 )
 from integrations.oel_mcp.public_registry import PUBLIC_TOOL_CONTRACTS
@@ -64,9 +67,22 @@ def test_supported_public_resources_are_bounded_and_exclude_private_metadata() -
     tool_catalog = json.loads(catalog[0].text)
     query_catalog = json.loads(catalog[1].text)
     task_catalog = json.loads(catalog[2].text)
+    plot_catalog = json.loads(catalog[PUBLIC_RESOURCE_URIS.index("oel://review/plot-recipes/v1")].text)
+    animation_catalog = json.loads(
+        catalog[PUBLIC_RESOURCE_URIS.index("oel://review/animation-recipes/v1")].text
+    )
     assert [tool["name"] for tool in tool_catalog["tools"]] == list(PUBLIC_TOOL_IDS)
     assert {query["name"] for query in query_catalog["queries"]} == set(PUBLIC_SAVED_QUERY_NAMES)
     assert all("public" in task["tags"] and "pro" not in task["tags"] for task in task_catalog["tasks"])
+    assert {recipe["recipe_id"] for recipe in plot_catalog["recipes"]} >= {
+        "relative_range",
+        "relative_position_ric_2d",
+    }
+    assert {recipe["recipe_id"] for recipe in animation_catalog["recipes"]} == {
+        "relative_position_ric_2d"
+    }
+    assert animation_catalog["quality_policy"]["contact_sheet_required"] is True
+    assert plot_catalog["routing"]["oel_review_evidence_plotter_is_authoritative"] is True
     assert "oel.pro." not in "".join(resource.text for resource in catalog)
 
 
@@ -161,6 +177,64 @@ def test_claude_parser_requires_normalized_tool_name_and_no_permission_denial() 
     assert _parse_claude_payload(stdout) == payload
 
 
+def _plot_selection_payload() -> dict[str, object]:
+    return {
+        "tool_id": "oel.plot_evidence.v1",
+        "status": "completed",
+        "result": {
+            "recipe_id": "relative_position_ric_2d",
+            "artifact": {
+                "artifact_id": "host_ric",
+                "path_exists": True,
+                "qa": {"visual_qa_status": "pending_agent_review"},
+            },
+        },
+    }
+
+
+def test_cross_host_natural_language_plot_selection_parsers_require_oel_recipe(tmp_path: Path) -> None:
+    payload = _plot_selection_payload()
+    codex_stdout = json.dumps(
+        {
+            "type": "item.completed",
+            "item": {
+                "type": "mcp_tool_call",
+                "server": "oel",
+                "tool": "oel.plot_evidence.v1",
+                "status": "completed",
+                "result": {"structured_content": payload},
+            },
+        }
+    )
+    claude_stdout = "\n".join(
+        (
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "id": "toolu_plot",
+                                "name": "mcp__oel__oel_plot_evidence_v1",
+                            }
+                        ]
+                    },
+                }
+            ),
+            json.dumps({"type": "user", "tool_use_result": {"structuredContent": payload}}),
+            json.dumps({"type": "result", "permission_denials": []}),
+        )
+    )
+
+    assert _parse_codex_plot_selection(codex_stdout) == payload
+    assert _parse_claude_plot_selection(claude_stdout) == payload
+    prompt = plot_selection_prompt(tmp_path, artifact_id="host_ric")
+    assert "two-dimensional relative trajectory in RIC" in prompt
+    assert '"recipe_id": "relative_position_ric_2d"' in prompt
+    assert "host-native visualization tools" in prompt
+
+
 @pytest.mark.external
 @pytest.mark.skipif(not MCP_SDK_AVAILABLE, reason="optional MCP SDK profile is not installed")
 def test_official_sdk_conformance_uses_real_repeated_stdio_processes() -> None:
@@ -202,6 +276,14 @@ def test_public_workflow_acceptance_uses_real_stdio_and_no_provider_calls(tmp_pa
         "execute",
         "inspect",
         "query",
+        "fsw_describe",
+        "fsw_scaffold",
+        "fsw_inspect",
+        "fsw_plan",
+        "fsw_validate",
+        "fsw_tests",
+        "fsw_smoke",
+        "fsw_verify_receipt",
         "export_run_product",
         "inspect_handoff",
         "materialize_onp_handoff",
@@ -212,6 +294,10 @@ def test_public_workflow_acceptance_uses_real_stdio_and_no_provider_calls(tmp_pa
         "assess_maneuver_readiness",
         "compare",
         "plot",
+        "plan_review_plot",
+        "render_review_plot",
+        "plan_review_animation",
+        "render_review_animation",
         "prepare_report_packet",
         "audit_report",
     ]

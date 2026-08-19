@@ -305,7 +305,7 @@ def add_artifact_footer(
         item.remove()
     fig.text(
         0.995,
-        0.003,
+        0.005,
         text,
         ha="right",
         va="bottom",

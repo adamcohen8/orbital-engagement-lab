@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oel.example/schemas/compatibility-report.schema.json",
+  "title": "OEL Workspace Compatibility Report v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "status", "generated_at", "workspace", "target", "configs", "candidates", "dependencies", "evidence", "issues", "effects"],
+  "properties": {
+    "schema_version": {"const": "oel.workspace-compatibility.v1"},
+    "status": {"enum": ["compatible", "compatible_with_warnings", "migration_available", "manual_review", "blocked", "invalid", "incomplete", "cancelled"]},
+    "generated_at": {"type": "string", "format": "date-time"},
+    "workspace": {"type": "object"},
+    "target": {"type": "object"},
+    "configs": {"type": "array"},
+    "candidates": {"type": "array"},
+    "dependencies": {"type": "object"},
+    "evidence": {"type": "object"},
+    "issues": {"type": "array"},
+    "effects": {"type": "object"}
+  }
+}

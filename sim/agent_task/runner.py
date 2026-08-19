@@ -709,6 +709,7 @@ def _plot_artifact_dict(artifact: ReviewPlotArtifact, *, recipe: AgentPlotRecipe
         "relative_path": artifact.relative_path,
         "row_count": artifact.row_count,
         "truncated": artifact.truncated,
+        "qa": dict(artifact.qa),
         "spec": asdict(artifact.spec),
         "status": "ok",
     }

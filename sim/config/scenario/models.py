@@ -4,6 +4,8 @@ from copy import deepcopy
 from dataclasses import dataclass, field, fields, is_dataclass
 from typing import Any
 
+from sim.schema_versions import LEGACY_SCENARIO_SCHEMA_VERSION
+
 __all__ = [
     '_plain_config_data',
     'AlgorithmPointer',
@@ -650,6 +652,7 @@ class AnalysisSection:
 
 @dataclass(frozen=True)
 class SimulationScenarioConfig:
+    schema_version: str = LEGACY_SCENARIO_SCHEMA_VERSION
     scenario_name: str = "unnamed_scenario"
     scenario_description: str = ""
     rocket: AgentSection = field(default_factory=lambda: AgentSection(enabled=False, role="rocket"))

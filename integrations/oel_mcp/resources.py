@@ -15,6 +15,8 @@ PUBLIC_RESOURCE_URIS = (
     "oel://agent/tasks/v1",
     "oel://docs/operator-guide/v1",
     "oel://handoff/product-kinds/v1",
+    "oel://review/plot-recipes/v1",
+    "oel://review/animation-recipes/v1",
 )
 PUBLIC_SAVED_QUERY_NAMES = frozenset(
     {
@@ -101,6 +103,22 @@ PUBLIC_RESOURCE_CONTRACTS = (
         mime_type="application/json",
         source="sim.handoff",
     ),
+    ResourceContract(
+        uri=PUBLIC_RESOURCE_URIS[5],
+        name="oel-public-review-plot-recipes-v1",
+        title="OEL review plot recipes",
+        description="Supported plot recipes, required evidence, renderers, and natural-language routing triggers.",
+        mime_type="application/json",
+        source="sim.review.plot_recipes",
+    ),
+    ResourceContract(
+        uri=PUBLIC_RESOURCE_URIS[6],
+        name="oel-public-review-animation-recipes-v1",
+        title="OEL review animation recipes",
+        description="Supported animation recipes, evidence requirements, renderers, and quality policy.",
+        mime_type="application/json",
+        source="sim.review.animation_recipes",
+    ),
 )
 
 
@@ -118,6 +136,8 @@ def build_public_resource_catalog(
         PUBLIC_RESOURCE_URIS[2]: lambda: _json_text(_agent_task_payload()),
         PUBLIC_RESOURCE_URIS[3]: _operator_guide_text,
         PUBLIC_RESOURCE_URIS[4]: lambda: _json_text(_handoff_product_payload()),
+        PUBLIC_RESOURCE_URIS[5]: lambda: _json_text(_plot_recipe_payload()),
+        PUBLIC_RESOURCE_URIS[6]: lambda: _json_text(_animation_recipe_payload()),
     }
     published: list[PublishedResource] = []
     for contract in PUBLIC_RESOURCE_CONTRACTS:
@@ -235,6 +255,60 @@ def _handoff_product_payload() -> dict[str, Any]:
             "generated_scenarios_execution_authorized": False,
             "inspect_before_consume": True,
         },
+    }
+
+
+def _plot_recipe_payload() -> dict[str, Any]:
+    from sim.review.plot_recipes import PLOT_RECIPE_SCHEMA_VERSION, list_review_plot_recipes
+
+    recipes = [recipe.to_dict() for recipe in list_review_plot_recipes() if recipe.maturity == "supported"]
+    return {
+        "schema_version": PLOT_RECIPE_SCHEMA_VERSION,
+        "resource_uri": PUBLIC_RESOURCE_URIS[5],
+        "source": "sim.review.plot_recipes",
+        "recipes": recipes,
+        "recipe_count": len(recipes),
+        "routing": {
+            "oel_review_evidence_plotter_is_authoritative": True,
+            "prefer_recipe_before_custom_spec": True,
+            "custom_spec_tool": "oel.render_review_plot.v2",
+            "visual_inspection_required": True,
+        },
+        "non_claims": [
+            "A plot visualizes recorded review evidence; it does not validate physics accuracy.",
+            "Missing review columns are not reconstructed or approximated by the plotting layer.",
+        ],
+    }
+
+
+def _animation_recipe_payload() -> dict[str, Any]:
+    from sim.plotting.animation_quality import STRICT_AGENT_ANIMATION_QUALITY
+    from sim.review.animation_recipes import ANIMATION_RECIPE_SCHEMA_VERSION, list_review_animation_recipes
+
+    recipes = [recipe.to_dict() for recipe in list_review_animation_recipes() if recipe.maturity == "supported"]
+    return {
+        "schema_version": ANIMATION_RECIPE_SCHEMA_VERSION,
+        "resource_uri": PUBLIC_RESOURCE_URIS[6],
+        "source": "sim.review.animation_recipes",
+        "recipes": recipes,
+        "recipe_count": len(recipes),
+        "quality_policy": {
+            "policy_id": STRICT_AGENT_ANIMATION_QUALITY.policy_id,
+            "policy_version": STRICT_AGENT_ANIMATION_QUALITY.version,
+            "max_frames": STRICT_AGENT_ANIMATION_QUALITY.max_frames,
+            "max_duration_s": STRICT_AGENT_ANIMATION_QUALITY.max_duration_s,
+            "contact_sheet_required": True,
+            "visual_inspection_required": True,
+        },
+        "routing": {
+            "prefer_supported_recipe": True,
+            "plan_tool": "oel.plan_review_animation.v1",
+            "render_tool": "oel.render_review_animation.v1",
+        },
+        "non_claims": [
+            "An animation visualizes recorded review evidence; it does not validate physics accuracy.",
+            "Automated frame and encoding checks do not replace inspection of the movie and contact sheet.",
+        ],
     }
 
 

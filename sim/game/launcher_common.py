@@ -27,6 +27,7 @@ from sim.game.frame_convention import (
     normalize_frame_convention,
 )
 from sim.game.operator import OperatorBurn, OperatorBurnPlan, parse_operator_burn_plan, validate_operator_burn_plan
+from sim.game.presentation import PRESENTATION_MODES, normalize_presentation_mode
 from sim.game.pygame_dashboard import (
     CHASER_SPRITE_PATH,
     MIN_PLOT_SPAN_KM,
@@ -99,8 +100,14 @@ OPERATOR_BURN_ROW_HEIGHT = 36
 OPERATOR_BURN_TABLE_MIN_VISIBLE_ROWS = 2
 OPERATOR_BURN_MARKER_COLOR = (255, 154, 64)
 FRAME_DIALOG_WIDTH = 620
-FRAME_DIALOG_HEIGHT = 432
+FRAME_DIALOG_HEIGHT = 500
 FRAME_DIALOG_CHOICE_HEIGHT = 76
+GRAPHICS_MODE_LABELS: dict[str, str] = {
+    "compatibility": "Legacy",
+    "standard": "Standard",
+    "high_refresh": "High Refresh",
+    "auto": "Auto",
+}
 
 
 def _launcher_panel_height(screen_height: int) -> int:
@@ -147,6 +154,21 @@ def _frame_convention_dialog_checkbox_rect(
 ) -> tuple[int, int, int, int]:
     x, y, _w, h = _frame_convention_dialog_rect(screen_width, screen_height)
     return (x + 42, y + h - 74, 22, 22)
+
+
+def _frame_convention_dialog_graphics_rects(
+    screen_width: int,
+    screen_height: int,
+) -> dict[str, tuple[int, int, int, int]]:
+    x, y, w, _h = _frame_convention_dialog_rect(screen_width, screen_height)
+    choices_x = x + 150
+    choices_w = max(w - 192, 240)
+    gap = 8
+    button_w = max((choices_w - gap * (len(PRESENTATION_MODES) - 1)) // len(PRESENTATION_MODES), 48)
+    return {
+        mode: (choices_x + index * (button_w + gap), y + 314, button_w, 34)
+        for index, mode in enumerate(PRESENTATION_MODES)
+    }
 
 
 def _frame_convention_dialog_continue_rect(

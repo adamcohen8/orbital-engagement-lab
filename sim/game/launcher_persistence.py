@@ -82,8 +82,13 @@ def _load_game_settings() -> GameSettings:
         return GameSettings()
     if not isinstance(raw, dict):
         return GameSettings()
+    try:
+        presentation_mode = normalize_presentation_mode(raw.get("presentation_mode", "compatibility"))
+    except ValueError:
+        presentation_mode = "compatibility"
     return GameSettings(
         frame_convention=normalize_frame_convention(raw.get("frame_convention", {})),
+        presentation_mode=presentation_mode,
         ask_frame_convention_on_launch=bool(raw.get("ask_frame_convention_on_launch", True)),
         last_game_mode=_game_mode_or_none(raw.get("last_game_mode")),
         operator_burn_scripts=_operator_burn_scripts_from_yaml(raw.get("operator_burn_scripts", {})),
@@ -95,6 +100,7 @@ def _save_game_settings(settings: GameSettings) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "frame_convention": frame_convention_to_yaml(settings.frame_convention),
+        "presentation_mode": normalize_presentation_mode(settings.presentation_mode),
         "ask_frame_convention_on_launch": bool(settings.ask_frame_convention_on_launch),
     }
     if settings.last_game_mode is not None:
@@ -127,12 +133,14 @@ def _frame_convention_dialog_settings(
     settings: GameSettings,
     *,
     frame_convention: FrameConvention,
+    presentation_mode: str,
     dont_ask_again: bool,
     selected_mode: str,
 ) -> GameSettings:
     return replace(
         settings,
         frame_convention=frame_convention,
+        presentation_mode=normalize_presentation_mode(presentation_mode),
         ask_frame_convention_on_launch=not bool(dont_ask_again),
         last_game_mode=_normalize_game_mode(selected_mode),
     )

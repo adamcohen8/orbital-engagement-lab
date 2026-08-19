@@ -33,6 +33,7 @@ class GameProgressRecord:
 @dataclass(frozen=True)
 class GameSettings:
     frame_convention: FrameConvention = FrameConvention()
+    presentation_mode: str = "compatibility"
     ask_frame_convention_on_launch: bool = True
     last_game_mode: str | None = None
     operator_burn_scripts: dict[str, OperatorBurnPlan] = field(default_factory=dict)
@@ -46,6 +47,7 @@ class GameLaunchSelection:
     record_video: bool = False
     mode: str = "pilot"
     frame_convention: FrameConvention = FrameConvention()
+    presentation_mode: str = "compatibility"
     operator_burn_plan: OperatorBurnPlan | None = None
     skip_initial_briefing: bool = False
 

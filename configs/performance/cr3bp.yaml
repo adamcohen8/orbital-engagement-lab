@@ -1,6 +1,6 @@
 scenario_name: performance_cr3bp
-scenario_description: Sustained Earth-Moon CR3BP propagation workload using the maintained
-  southern L2 NRHO seed.
+scenario_description: Sustained trajectory-only Earth-Moon CR3BP propagation workload
+  using the maintained southern L2 NRHO seed.
 metadata:
   owner: public
   public_surface: public-performance
@@ -11,6 +11,7 @@ objects:
     enabled: true
     kind: satellite
     role: target
+    runtime_profile: trajectory_only
     specs:
       mass_kg: 1000.0
     initial_state:
@@ -26,10 +27,6 @@ objects:
       - 0.0
       - 0.0
       - 0.0
-    flight_software:
-      stack: fsw.passive
-      hardware_profile: hardware.passive.v1
-      params: {}
 simulator:
   duration_s: 86400.0
   dt_s: 60.0

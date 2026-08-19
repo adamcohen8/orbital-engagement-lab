@@ -85,6 +85,19 @@ def main(argv: list[str] | None = None) -> int:
     materialize_parser.add_argument("--task-period-s", type=float)
     materialize_parser.add_argument("--json", action="store_true")
 
+    author_parser = sub.add_parser(
+        "author",
+        help="Run the public FSW Authoring Kit.",
+    )
+    author_parser.add_argument("author_args", nargs=argparse.REMAINDER)
+
+    if (Path(__file__).resolve().parents[1] / "fswdk").is_dir():
+        fswdk_parser = sub.add_parser(
+            "fswdk",
+            help="Run the private agent-native Flight Software Development and Verification Kit.",
+        )
+        fswdk_parser.add_argument("fswdk_args", nargs=argparse.REMAINDER)
+
     validate_parser = sub.add_parser("validate", help="Validate profile identities and stack compatibility.")
     validate_parser.add_argument("--json", action="store_true")
     qualification_available = Path(__file__).with_name("qualification.py").is_file()
@@ -100,6 +113,19 @@ def main(argv: list[str] | None = None) -> int:
         qualify_parser.add_argument("--validate-only", action="store_true")
         qualify_parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
+
+    if args.command == "author":
+        from sim.fsw_authoring.__main__ import main as authoring_main
+
+        return authoring_main(list(args.author_args))
+
+    if args.command == "fswdk":
+        try:
+            from sim.fswdk.__main__ import main as fswdk_main
+        except ModuleNotFoundError as exc:
+            parser.error("The private OEL FSWDK is unavailable in this installation.")
+            raise AssertionError from exc
+        return fswdk_main(list(args.fswdk_args))
 
     if args.command == "list":
         rows: list[dict[str, object]] = []
@@ -162,10 +188,7 @@ def main(argv: list[str] | None = None) -> int:
             for profile in use_case_profiles():
                 status = profile_qualification_status(profile.profile_id)
                 if not status["promotion_ready"]:
-                    errors.append(
-                        f"{profile.profile_id}: not promotion-ready: "
-                        + "; ".join(status["blockers"])
-                    )
+                    errors.append(f"{profile.profile_id}: not promotion-ready: " + "; ".join(status["blockers"]))
     except ModuleNotFoundError:
         if getattr(args, "require_promotion_ready", False):
             errors.append("profile qualification orchestration is unavailable")

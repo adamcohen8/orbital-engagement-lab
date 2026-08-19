@@ -61,6 +61,32 @@ def test_acceptance_duplicate_conflict_and_old_sequence_have_exact_dispositions(
     assert bus.publish(_command(1), received_at=_time(1)).disposition is CommandDisposition.REJECTED_SEQUENCE  # type: ignore[union-attr]
 
 
+def test_boundary_validated_publication_preserves_command_bus_results() -> None:
+    commands = (
+        _command(2),
+        _command(2),
+        replace(_command(2), payload=IdealWrenchCommand((0.5, 0.0, 0.0), (0.0, 0.0, 0.0))),
+        _command(1),
+    )
+    ordinary = _bus()
+    validated = _bus()
+    ordinary_receipts = tuple(
+        ordinary.publish(command, received_at=_time(1)) for command in commands
+    )
+    validated_receipts = tuple(
+        validated._publish(  # noqa: SLF001 - exercises the runtime-only fast path
+            command,
+            received_at=_time(1),
+            boundary_validated=True,
+        )
+        for command in commands
+    )
+
+    assert validated_receipts == ordinary_receipts
+    assert validated.records == ordinary.records
+    assert validated.snapshot_state() == ordinary.snapshot_state()
+
+
 def test_schema_version_target_frame_value_interlock_and_device_rejections_are_distinct() -> None:
     cases = (
         (replace(_command(1), schema="wrong"), _bus(), CommandDisposition.REJECTED_SCHEMA),

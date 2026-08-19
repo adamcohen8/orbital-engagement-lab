@@ -9,12 +9,14 @@ Start here if you want to install OEL, run a scenario, and understand the
 public simulation core.
 
 1. [Install On Windows, macOS, Or Linux](installation.md)
-2. [Quickstart](quickstart.md)
-3. [Compatibility And Install Profiles](compatibility.md)
-4. [Examples Matrix](examples-matrix.md)
-5. [Scenario YAML](scenario-yaml.md)
-6. [Python API](python-api.md)
-7. [Known Limitations](known-limitations.md)
+2. [Create And Use A Workspace](workspaces.md)
+3. [Quickstart](quickstart.md)
+4. [Update, Audit, Adopt, Or Roll Back](updating.md)
+5. [Compatibility And Install Profiles](compatibility.md)
+6. [Examples Matrix](examples-matrix.md)
+7. [Scenario YAML](scenario-yaml.md)
+8. [Python API](python-api.md)
+9. [Known Limitations](known-limitations.md)
 
 ## Evaluator Or Buyer
 
@@ -54,13 +56,18 @@ Start here when you already know the kind of work you want to run.
 | Goal | Start with |
 | --- | --- |
 | Edit or author scenario YAML | [Scenario YAML](scenario-yaml.md) |
+| Update a managed engine safely | [Updating OEL](updating.md) |
+| Migrate a scenario config explicitly | [Scenario Config Migrations](config-migrations.md) |
+| Install in an air-gapped environment | [Offline Installation](offline-installation.md) |
 | Inspect completed outputs | [Review Store Contract](review-store.md) |
 | Make custom tables or plots from a run | [Custom Analysis](custom-analysis.md) |
 | Configure built-in figures | [Plotting](plotting.md) |
+| Create and QA agent-native review animations | [Animation Quality Contract](animation-quality-contract.md) |
 | View maintained plot examples | [Plot Gallery](plot-gallery.md) |
 | Understand physics model assumptions | [Physics Model Reference](physics-models.md) |
 | Explore actuator models | [Actuators](actuators.md) |
 | Select built-in controllers and command modules | [Built-In Reference GNC Library](reference-gnc.md) |
+| Author and smoke-test a custom public FSW stack | [Public Flight Software Authoring](fsw-authoring.md) |
 | Use the orbital calculator | [Orbital Calculator](orbital-calculator.md) |
 | Use game/training mode | [Video Game Mode Roadmap](game-mode-roadmap.md) |
 | Use ML/RL wrappers | [ML/RL Policy Contracts](ml-rl-contracts.md) |
@@ -98,6 +105,7 @@ public/private packaging.
 6. [Reference GNC Library Roadmap](project/reference_gnc_library_roadmap.md)
 7. [Data Handling And Boundary Statement](security/data-handling.md)
 8. [Security Incident Process](security/incident-response.md)
+9. [Installer And Updater Threat Model](security/installer-updater-threat-model.md)
 
 Private maintainers should also use the Validation Operations and Release
 Checklist guides available in the full workspace.

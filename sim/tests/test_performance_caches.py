@@ -4,6 +4,8 @@ from unittest.mock import patch
 
 import numpy as np
 
+from sim.core.models import StateTruth
+from sim.dynamics.model import OrbitalAttitudeDynamics
 from sim.dynamics.orbit.atmosphere import _local_solar_time_epoch_terms, _local_solar_time_hr
 from sim.dynamics.orbit.de440_hpop import hpop_de440_positions_km
 from sim.dynamics.orbit.epoch import resolve_time_dependent_env
@@ -139,3 +141,33 @@ def test_de440_stage_environment_cache_is_keyed_by_model_inputs() -> None:
     np.testing.assert_array_equal(first["sun_pos_eci_km"], second["sun_pos_eci_km"])
     np.testing.assert_array_equal(changed["moon_pos_eci_km"], positions[1])
     assert resolve.call_count == 2
+
+
+def test_coupled_stage_environment_reuses_positions_without_injecting_sun_direction() -> None:
+    dynamics = OrbitalAttitudeDynamics(
+        mu_km3_s2=398600.4418,
+        inertia_kg_m2=np.eye(3),
+    )
+    truth = StateTruth(
+        position_eci_km=np.array([7000.0, 0.0, 0.0]),
+        velocity_eci_km_s=np.array([0.0, 7.5, 0.0]),
+        attitude_quat_bn=np.array([1.0, 0.0, 0.0, 0.0]),
+        angular_rate_body_rad_s=np.zeros(3),
+        mass_kg=100.0,
+        t_s=10.0,
+    )
+    env = {
+        "jd_utc_start": 2451545.0,
+        "ephemeris_mode": "analytic_enhanced",
+        "_time_dependent_env_cache": {},
+    }
+    positions = (np.array([1.0e8, 2.0, 3.0]), np.array([4.0e5, 5.0, 6.0]))
+
+    with patch("sim.dynamics.orbit.epoch.resolve_sun_moon_positions", return_value=positions) as resolve:
+        first = dynamics._coupled_stage_environment(truth, env)
+        second = dynamics._coupled_stage_environment(truth, env)
+
+    assert resolve.call_count == 1
+    np.testing.assert_array_equal(first["sun_pos_eci_km"], second["sun_pos_eci_km"])
+    np.testing.assert_array_equal(first["moon_pos_eci_km"], second["moon_pos_eci_km"])
+    assert "sun_dir_eci" not in first

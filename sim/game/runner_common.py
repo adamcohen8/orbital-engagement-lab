@@ -55,6 +55,15 @@ from sim.game.manual import (
     KeyboardCommandState,
 )
 from sim.game.operator import OperatorBurn, OperatorBurnPlan, operator_plan_summary
+from sim.game.presentation import (
+    PRESENTATION_MODES,
+    PRESENTATION_VSYNC_MODES,
+    PresentationFrameController,
+    PresentationSettings,
+    create_presentation_controller,
+    normalize_presentation_mode,
+    normalize_presentation_vsync,
+)
 from sim.game.recording_controller import GameClipRecordingController, GameRecordingController
 from sim.game.session import (
     GamePhysicsSession,

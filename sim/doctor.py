@@ -7,6 +7,7 @@ are missing or incompatible.
 
 from __future__ import annotations
 
+import os
 import platform
 import re
 import subprocess
@@ -17,6 +18,7 @@ from importlib import metadata
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
+from sim.installation.resources import ResourceNotFoundError, quickstart_config_path
 from sim.project_version import inspect_project_version
 
 SUPPORTED_PYTHON_MIN = (3, 10)
@@ -42,6 +44,8 @@ DOCTOR_CONTRACT_LABELS = (
     "Architecture",
     "Python executable",
     "OEL version",
+    "Installation state",
+    "Workspace pin",
     "Core dependencies",
     "Dependency graph",
     "Install profile",
@@ -441,7 +445,10 @@ def _profile_detail(
 
 def print_doctor_report(*, source_root: str | Path | None = None) -> bool:
     root = Path(source_root).expanduser().resolve() if source_root is not None else Path(__file__).resolve().parents[1]
-    quickstart = root / "configs" / "quickstart_5min.yaml"
+    try:
+        quickstart = quickstart_config_path()
+    except ResourceNotFoundError:
+        quickstart = root / "configs" / "quickstart_5min.yaml"
     version = tuple(sys.version_info[:2])
     python_ok = interpreter_is_supported(version)
     security_ok, security_detail = security_support_detail(version)
@@ -473,6 +480,20 @@ def print_doctor_report(*, source_root: str | Path | None = None) -> bool:
         "OEL version",
         "OK" if version_status.ok else ("WARN" if not version_status.required else "FAIL"),
         version_status.detail,
+    )
+    disposition = os.environ.get("OEL_INSTALLATION_DISPOSITION", "developer").strip() or "developer"
+    disposition_ok = disposition in {"official", "developer"}
+    _print_row(
+        "Installation state",
+        _status_text(disposition_ok),
+        f"{disposition}; use `oel update status --full` for content verification.",
+    )
+    workspace_root = os.environ.get("OEL_WORKSPACE_ROOT", "").strip()
+    workspace_version = os.environ.get("OEL_ENGINE_VERSION", "").strip()
+    _print_row(
+        "Workspace pin",
+        "INFO",
+        f"{workspace_version or 'unmanaged'} at {workspace_root}" if workspace_root else "no managed workspace selected",
     )
     sys.stdout.flush()
 
@@ -584,7 +605,8 @@ def print_doctor_report(*, source_root: str | Path | None = None) -> bool:
         _status_text(quickstart_exists),
         str(quickstart),
     )
-    output_ok, output_detail = _write_check(root / "outputs")
+    output_root = Path(os.environ.get("OEL_OUTPUT_ROOT", str(root / "outputs"))).expanduser().resolve()
+    output_ok, output_detail = _write_check(output_root)
     _print_row("Output directory", _status_text(output_ok), output_detail)
     prerequisite_ok = python_ok and platform_ok and core_ok and pip_ok and quickstart_exists
     if prerequisite_ok:

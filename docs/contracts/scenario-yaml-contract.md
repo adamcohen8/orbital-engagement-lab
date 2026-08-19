@@ -30,7 +30,6 @@ Stable enough to rely on:
 
 Still maturing:
 
-- formal schema version field,
 - migration tooling for all historical config shapes,
 - exhaustive invalid-combination diagnostics.
 
@@ -39,6 +38,8 @@ Still maturing:
 
 Recognized top-level sections:
 
+- `schema_version` (`oel.scenario.v1` for new configs; unversioned historical
+  files are admitted as `oel.scenario.legacy.v0` during the support window)
 - `scenario_name`
 - `scenario_description`
 - `metadata`

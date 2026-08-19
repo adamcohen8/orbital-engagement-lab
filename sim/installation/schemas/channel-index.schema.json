@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oel.example/schemas/channel-index.schema.json",
+  "title": "OEL Release Channel v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "edition", "channel", "latest", "manifest_url", "published_at", "signature"],
+  "properties": {
+    "schema_version": {"const": "oel.release-channel.v1"},
+    "edition": {"enum": ["public", "pro"]},
+    "channel": {"enum": ["stable", "preview"]},
+    "latest": {"type": "string"},
+    "manifest_url": {"type": "string"},
+    "published_at": {"type": "string", "format": "date-time"},
+    "signature": {"type": "object"}
+  }
+}

@@ -25,6 +25,14 @@ This packaged guide covers the supported local stdio OEL MCP surface.
   relevant saved `query_names` to `inspect_run` or `prepare_report_packet` so
   analytical claims can cite stable query evidence IDs instead of only the
   entire review store.
+- Read `oel://review/plot-recipes/v1` before plotting review evidence. Use a
+  supported OEL recipe when one matches; otherwise validate the exact query and
+  mapping with `oel.plan_review_plot.v1` before the approved
+  `oel.render_review_plot.v2` write. Inspect the returned image before handoff.
+- Read `oel://review/animation-recipes/v1` before animating review evidence.
+  Plan with `oel.plan_review_animation.v1`, then render the matching content-
+  bound plan with `oel.render_review_animation.v1` and an approved write ID.
+  Inspect both the contact sheet and encoded movie before handoff.
 - For GNC v2 evidence, prefer `fsw_invocation_summary`,
   `fsw_sensor_deliveries`, `actuator_command_chain`, `fsw_deadline_misses`,
   `safety_requirement_status`, and `fsw_checkpoint_summary`. These are

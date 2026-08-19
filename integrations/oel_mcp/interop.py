@@ -24,12 +24,33 @@ INSPECTOR_NPM_INTEGRITY = (
 )
 CAPABILITY_TOOL_ID = "oel.describe_capabilities.v1"
 CLAUDE_CAPABILITY_TOOL_ID = "mcp__oel__oel_describe_capabilities_v1"
+PLOT_SELECTION_TOOL_ID = "oel.plot_evidence.v1"
+CLAUDE_PLOT_SELECTION_TOOL_ID = "mcp__oel__oel_plot_evidence_v1"
 PUBLIC_TOOL_IDS = tuple(contract.tool_id for contract in PUBLIC_TOOL_CONTRACTS)
 HOST_PROMPT = (
     "Call the OEL MCP capability tool exactly once with an empty object. "
     "Do not use shell, web, files, or any other action tool. Then return only a compact JSON object "
     "with host, tool_id, status, transport, and capability_count copied from the tool result."
 )
+
+
+def plot_selection_prompt(output_dir: Path, *, artifact_id: str) -> str:
+    arguments = {
+        "output_dir": str(output_dir),
+        "recipe_id": "relative_position_ric_2d",
+        "style": "oel_light",
+        "format": "png",
+        "artifact_id": artifact_id,
+        "approval": {"approval_id": "host-plot-selection", "scope": "write"},
+        "handling": {"marking": "PUBLIC", "release_scope": "public"},
+    }
+    return (
+        "A user asked: Plot the completed run's two-dimensional relative trajectory in RIC and return a professional "
+        "OEL figure. Use the connected OEL evidence authority and do not use shell, web, files, or host-native "
+        "visualization tools. Make exactly one plotting tool call with these arguments: "
+        + json.dumps(arguments, sort_keys=True)
+        + ". Then report only the tool_id, status, artifact_id, and visual_qa_status from the result."
+    )
 
 
 def run_sdk_stdio(root: Path, python_executable: Path) -> dict[str, Any]:
@@ -284,6 +305,119 @@ def run_claude(
     }
 
 
+def run_codex_plot_selection(
+    root: Path,
+    python_executable: Path,
+    codex_executable: Path,
+    *,
+    output_dir: Path,
+) -> dict[str, Any]:
+    started = time.monotonic()
+    artifact_id = "host_codex_relative_position_ric_2d"
+    env = _plot_selection_server_env(root)
+    env_expression = "{" + ",".join(f"{key}={json.dumps(value)}" for key, value in env.items()) + "}"
+    command = [
+        str(codex_executable),
+        "exec",
+        "--ignore-user-config",
+        "--ephemeral",
+        "--sandbox",
+        "read-only",
+        "--json",
+        "-C",
+        str(root),
+        "-c",
+        'approval_policy="never"',
+        "-c",
+        'web_search="disabled"',
+        "-c",
+        "features.shell_tool=false",
+        "-c",
+        f"mcp_servers.oel.command={json.dumps(str(python_executable))}",
+        "-c",
+        'mcp_servers.oel.args=["-m","integrations.oel_mcp"]',
+        "-c",
+        f"mcp_servers.oel.cwd={json.dumps(str(root))}",
+        "-c",
+        f"mcp_servers.oel.env={env_expression}",
+        "-c",
+        f"mcp_servers.oel.enabled_tools=[{json.dumps(PLOT_SELECTION_TOOL_ID)}]",
+        "-c",
+        'mcp_servers.oel.default_tools_approval_mode="approve"',
+        "-c",
+        "mcp_servers.oel.required=true",
+        plot_selection_prompt(output_dir, artifact_id=artifact_id),
+    ]
+    completed = _run_command(command, cwd=root, timeout=180)
+    payload = _parse_codex_plot_selection(completed.stdout)
+    return {
+        "status": "passed",
+        "host": "codex",
+        "host_version": _version_line([str(codex_executable), "--version"], cwd=root),
+        "protocol_revision": MCP_SDK_PROTOCOL_VERSION,
+        "tool_id": payload["tool_id"],
+        "recipe_id": payload["result"]["recipe_id"],
+        "artifact_id": payload["result"]["artifact"]["artifact_id"],
+        "duration_ms": _duration_ms(started),
+    }
+
+
+def run_claude_plot_selection(
+    root: Path,
+    python_executable: Path,
+    claude_executable: Path,
+    *,
+    output_dir: Path,
+    model: str = "haiku",
+) -> dict[str, Any]:
+    started = time.monotonic()
+    artifact_id = "host_claude_relative_position_ric_2d"
+    with tempfile.TemporaryDirectory(prefix="oel-mcp-claude-plot-") as raw:
+        config_path = Path(raw) / "mcp.json"
+        config_path.write_text(
+            json.dumps(
+                _mcp_json_config(root, python_executable, env=_plot_selection_server_env(root)),
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        command = [
+            str(claude_executable),
+            "-p",
+            "--model",
+            model,
+            "--no-session-persistence",
+            "--strict-mcp-config",
+            "--mcp-config",
+            str(config_path),
+            "--tools",
+            "ToolSearch",
+            "--allowedTools",
+            CLAUDE_PLOT_SELECTION_TOOL_ID,
+            "--permission-mode",
+            "dontAsk",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            plot_selection_prompt(output_dir, artifact_id=artifact_id),
+        ]
+        completed = _run_command(command, cwd=root, timeout=180)
+    payload = _parse_claude_plot_selection(completed.stdout)
+    return {
+        "status": "passed",
+        "host": "claude",
+        "host_version": _version_line([str(claude_executable), "--version"], cwd=root),
+        "model_alias": model,
+        "protocol_revision": MCP_SDK_PROTOCOL_VERSION,
+        "tool_id": payload["tool_id"],
+        "recipe_id": payload["result"]["recipe_id"],
+        "artifact_id": payload["result"]["artifact"]["artifact_id"],
+        "duration_ms": _duration_ms(started),
+    }
+
+
 def _run_sdk_lifecycle(root: Path, python_executable: Path) -> dict[str, Any]:
     try:
         import anyio
@@ -309,7 +443,7 @@ def _run_sdk_lifecycle(root: Path, python_executable: Path) -> dict[str, Any]:
                     cancelled_request = bool(scope.cancel_called)
                 tools = await client.list_tools(cache_mode="reload")
                 listed_resources = await client.list_resources(cache_mode="reload")
-                operator_guide = await client.read_resource(PUBLIC_RESOURCE_URIS[-1], cache_mode="reload")
+                operator_guide = await client.read_resource("oel://docs/operator-guide/v1", cache_mode="reload")
                 sessions.append(
                     {
                         "session": index + 1,
@@ -337,7 +471,12 @@ def _run_sdk_lifecycle(root: Path, python_executable: Path) -> dict[str, Any]:
     return anyio.run(exercise)
 
 
-def _mcp_json_config(root: Path, python_executable: Path) -> dict[str, Any]:
+def _mcp_json_config(
+    root: Path,
+    python_executable: Path,
+    *,
+    env: dict[str, str] | None = None,
+) -> dict[str, Any]:
     return {
         "mcpServers": {
             "oel": {
@@ -345,7 +484,7 @@ def _mcp_json_config(root: Path, python_executable: Path) -> dict[str, Any]:
                 "command": str(python_executable),
                 "args": ["-m", "integrations.oel_mcp"],
                 "cwd": str(root),
-                "env": {"OEL_MCP_ADAPTER": "sdk"},
+                "env": dict(env or {"OEL_MCP_ADAPTER": "sdk"}),
             }
         }
     }
@@ -356,6 +495,15 @@ def _server_env(root: Path) -> dict[str, str]:
         **os.environ,
         "OEL_MCP_ADAPTER": "sdk",
         "OEL_MCP_READ_ROOTS": str(root),
+    }
+
+
+def _plot_selection_server_env(root: Path) -> dict[str, str]:
+    return {
+        "OEL_MCP_ADAPTER": "sdk",
+        "OEL_MCP_READ_ROOTS": str(root),
+        "OEL_MCP_WRITE_ROOTS": str(root / "outputs"),
+        "OEL_MCP_WRITE_APPROVAL_IDS": "host-plot-selection",
     }
 
 
@@ -428,6 +576,61 @@ def _parse_claude_payload(stdout: str) -> dict[str, Any]:
     if final_result.get("permission_denials"):
         raise RuntimeError(f"Claude reported permission denials: {final_result['permission_denials']!r}")
     _validate_capability_payload(payloads[0])
+    return payloads[0]
+
+
+def _validate_plot_selection_payload(payload: dict[str, Any]) -> None:
+    if payload.get("tool_id") != PLOT_SELECTION_TOOL_ID or payload.get("status") != "completed":
+        raise RuntimeError(f"Host did not complete the OEL plot selection contract: {payload!r}")
+    result = dict(payload.get("result", {}) or {})
+    artifact = dict(result.get("artifact", {}) or {})
+    qa = dict(artifact.get("qa", {}) or {})
+    if result.get("recipe_id") != "relative_position_ric_2d":
+        raise RuntimeError(f"Host selected the wrong OEL plot recipe: {result!r}")
+    if not artifact.get("path_exists") or qa.get("visual_qa_status") != "pending_agent_review":
+        raise RuntimeError(f"Host plot result is missing artifact or QA evidence: {artifact!r}")
+
+
+def _parse_codex_plot_selection(stdout: str) -> dict[str, Any]:
+    calls: list[dict[str, Any]] = []
+    for row in _json_lines(stdout):
+        item = dict(row.get("item", {}) or {})
+        if (
+            row.get("type") == "item.completed"
+            and item.get("type") == "mcp_tool_call"
+            and item.get("server") == "oel"
+            and item.get("tool") == PLOT_SELECTION_TOOL_ID
+        ):
+            calls.append(item)
+    if len(calls) != 1:
+        raise RuntimeError(f"Codex made {len(calls)} OEL plot calls; expected exactly one.")
+    result = dict(calls[0].get("result", {}) or {})
+    payload = dict(result.get("structured_content", result.get("structuredContent", {})) or {})
+    _validate_plot_selection_payload(payload)
+    return payload
+
+
+def _parse_claude_plot_selection(stdout: str) -> dict[str, Any]:
+    calls: list[str] = []
+    payloads: list[dict[str, Any]] = []
+    final_result: dict[str, Any] = {}
+    for row in _json_lines(stdout):
+        if row.get("type") == "assistant":
+            message = dict(row.get("message", {}) or {})
+            for content in list(message.get("content", []) or []):
+                if content.get("type") == "tool_use" and content.get("name") == CLAUDE_PLOT_SELECTION_TOOL_ID:
+                    calls.append(str(content.get("id", "")))
+        elif row.get("type") == "user":
+            tool_result = row.get("tool_use_result")
+            if isinstance(tool_result, dict) and isinstance(tool_result.get("structuredContent"), dict):
+                payloads.append(dict(tool_result["structuredContent"]))
+        elif row.get("type") == "result":
+            final_result = row
+    if len(calls) != 1 or len(payloads) != 1:
+        raise RuntimeError(f"Claude made {len(calls)} OEL plot calls with {len(payloads)} results; expected one.")
+    if final_result.get("permission_denials"):
+        raise RuntimeError(f"Claude reported plot permission denials: {final_result['permission_denials']!r}")
+    _validate_plot_selection_payload(payloads[0])
     return payloads[0]
 
 
@@ -541,6 +744,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--codex-executable")
     parser.add_argument("--claude-executable")
     parser.add_argument("--claude-model", default="haiku")
+    parser.add_argument(
+        "--plot-selection-output-dir",
+        type=Path,
+        help=(
+            "Opt in to model-backed Codex/Claude natural-language plot-selection checks against this completed run. "
+            "The directory must be under <root>/outputs and contain review/run.sqlite."
+        ),
+    )
     parser.add_argument("--output", type=Path)
     parser.add_argument("--acceptance-work-root", type=Path)
     args = parser.parse_args(argv)
@@ -556,6 +767,14 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("select at least one check or use --all")
 
     root = args.root.resolve()
+    if args.plot_selection_output_dir:
+        plot_output = args.plot_selection_output_dir.resolve()
+        try:
+            plot_output.relative_to(root / "outputs")
+        except ValueError:
+            parser.error("--plot-selection-output-dir must remain under <root>/outputs")
+        if not (plot_output / "review" / "run.sqlite").is_file():
+            parser.error("--plot-selection-output-dir must contain review/run.sqlite")
     python_executable = _resolve_executable(args.python_executable or sys.executable, "python")
     source_state = _git_source_state(root)
     report: dict[str, Any] = {
@@ -592,18 +811,35 @@ def main(argv: list[str] | None = None) -> int:
             _resolve_executable(args.npx_executable, "npx"),
         )
     if selected["codex"]:
+        codex_executable = _resolve_executable(args.codex_executable, "codex")
         report["checks"]["codex"] = run_codex(
             root,
             python_executable,
-            _resolve_executable(args.codex_executable, "codex"),
+            codex_executable,
         )
+        if args.plot_selection_output_dir:
+            report["checks"]["codex_plot_selection"] = run_codex_plot_selection(
+                root,
+                python_executable,
+                codex_executable,
+                output_dir=args.plot_selection_output_dir.resolve(),
+            )
     if selected["claude"]:
+        claude_executable = _resolve_executable(args.claude_executable, "claude")
         report["checks"]["claude"] = run_claude(
             root,
             python_executable,
-            _resolve_executable(args.claude_executable, "claude"),
+            claude_executable,
             model=args.claude_model,
         )
+        if args.plot_selection_output_dir:
+            report["checks"]["claude_plot_selection"] = run_claude_plot_selection(
+                root,
+                python_executable,
+                claude_executable,
+                output_dir=args.plot_selection_output_dir.resolve(),
+                model=args.claude_model,
+            )
 
     encoded = json.dumps(report, indent=2, sort_keys=True) + "\n"
     if args.output:

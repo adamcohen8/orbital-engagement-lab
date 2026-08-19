@@ -274,6 +274,39 @@ def _tool_limits(tool_id: str) -> dict[str, Any]:
         limits.update({"max_metrics": 20, "max_rows_per_query": 200})
     elif tool_id == "oel.plot_evidence.v1":
         limits.update({"one_plot_per_call": True, "operator_approval_required": True})
+    elif tool_id == "oel.plan_review_plot.v1":
+        limits.update({"max_rows": 5000, "read_only_query": True, "render_authorized": False})
+    elif tool_id == "oel.render_review_plot.v2":
+        limits.update(
+            {
+                "max_rows": 5000,
+                "one_plot_per_call": True,
+                "operator_approval_required": True,
+                "content_bound_plan": True,
+            }
+        )
+    elif tool_id == "oel.plan_review_animation.v1":
+        limits.update(
+            {
+                "max_rows": 5000,
+                "max_frames": 600,
+                "max_duration_s": 30,
+                "read_only_query": True,
+                "render_authorized": False,
+            }
+        )
+    elif tool_id == "oel.render_review_animation.v1":
+        limits.update(
+            {
+                "max_rows": 5000,
+                "max_frames": 600,
+                "max_duration_s": 30,
+                "max_file_bytes": 100_000_000,
+                "one_animation_per_call": True,
+                "operator_approval_required": True,
+                "content_bound_plan": True,
+            }
+        )
     elif tool_id == "oel.run_agent_task.v1":
         limits.update(
             {

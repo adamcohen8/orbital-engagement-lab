@@ -13,13 +13,11 @@ from typing import Any
 
 import numpy as np
 
-from sim.analysis.mission_recovery import build_mission_recovery_summary
 from sim.config import SimulationScenarioConfig
 from sim.master_outputs import _expanded_figure_ids as _expanded_plot_figure_ids
 from sim.master_outputs import animate_outputs as _animate_outputs_impl
 from sim.master_outputs import plot_outputs as _plot_outputs_impl
 from sim.reporting.ground_station_access_reports import write_ground_station_access_reports
-from sim.reporting.mission_recovery import write_mission_recovery_trade_space_plot
 from sim.reporting.output_index import write_output_index
 from sim.reporting.review_store import write_single_run_review_store
 from sim.runtime_support import _resolve_rocket_stack, _resolve_satellite_isp_s
@@ -147,11 +145,20 @@ def write_single_run_artifacts(
     if source_path is not None:
         summary["config_source_path"] = str(Path(source_path).resolve())
     _add_relative_range_summary(summary=summary, context=context)
-    mission_recovery = build_mission_recovery_summary(
-        cfg=context.cfg,
-        t_s=context.t_s,
-        truth_hist=context.truth_hist,
+    trajectory_only = all(
+        str(getattr(object_cfg, "runtime_profile", "") or "") == "trajectory_only"
+        for object_cfg in context.cfg.objects.values()
     )
+    if trajectory_only:
+        mission_recovery = {}
+    else:
+        from sim.analysis.mission_recovery import build_mission_recovery_summary
+
+        mission_recovery = build_mission_recovery_summary(
+            cfg=context.cfg,
+            t_s=context.t_s,
+            truth_hist=context.truth_hist,
+        )
     if mission_recovery:
         summary["mission_recovery"] = mission_recovery
         if source_path is not None and dict(mission_recovery.get("planner", {}) or {}).get("candidates"):
@@ -495,6 +502,8 @@ def _write_mission_recovery_trade_space_plot(
     figure_ids = _expanded_plot_figure_ids(dict(cfg.outputs.plots or {}))
     if "mission_recovery_trade_space" not in figure_ids:
         return None
+    from sim.reporting.mission_recovery import write_mission_recovery_trade_space_plot
+
     return write_mission_recovery_trade_space_plot(
         mission_recovery=mission_recovery,
         outdir=outdir,

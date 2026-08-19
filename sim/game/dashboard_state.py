@@ -15,11 +15,25 @@ class DashboardStateMixin:
         pygame.init()
         pygame.font.init()
         flags = pygame.FULLSCREEN | pygame.SCALED if self.fullscreen else pygame.RESIZABLE
-        self.screen = pygame.display.set_mode((1280, 720), flags)
+        use_new_presentation = str(getattr(self, "presentation_mode", "compatibility")) != "compatibility"
+        vsync_preference = str(getattr(self, "presentation_vsync", "auto") or "auto").strip().lower()
+        request_vsync = use_new_presentation and vsync_preference == "on"
+        self.presentation_vsync_active = False
+        if request_vsync:
+            try:
+                self.screen = pygame.display.set_mode((1280, 720), flags, vsync=1)
+                self.presentation_vsync_active = True
+            except (TypeError, pygame.error):
+                self.screen = pygame.display.set_mode((1280, 720), flags)
+        else:
+            self.screen = pygame.display.set_mode((1280, 720), flags)
         pygame.display.set_caption(self.title)
         pygame.event.set_grab(True)
         pygame.mouse.set_visible(False)
         self.clock = pygame.time.Clock()
+        self.presentation_controller = None
+        self._presentation_last_states: dict[str, np.ndarray] = {}
+        self._presentation_reconciliations: dict[str, dict[str, Any]] = {}
         self.font = game_font(pygame, 19)
         self.small_font = game_font(pygame, 15)
         self.large_font = game_font(pygame, 28)
@@ -253,12 +267,16 @@ class DashboardStateMixin:
         chaser = snapshot.truth.get(self.chaser_object_id)
         reference_id = str(self.reference_object_id or self.target_object_id)
         reference = snapshot.truth.get(reference_id)
+        reference_is_target = reference_id == self.target_object_id
         if reference is None:
             reference = target
+            reference_is_target = True
         target_reference_id = str(getattr(self, "target_reference_object_id", None) or reference_id)
         target_reference = snapshot.truth.get(target_reference_id)
+        target_reference_is_reference = target_reference_id == reference_id
         if target_reference is None:
             target_reference = reference
+            target_reference_is_reference = True
         if target is None or chaser is None or reference is None or target_reference is None:
             return
         target_state_eci = np.array(target, dtype=float).reshape(-1)[:6]
@@ -273,11 +291,23 @@ class DashboardStateMixin:
         elif frame_key == "moon_ric":
             rel = relative_moon_ric_state_from_arrays(target, chaser)
             target_rel = np.zeros(6, dtype=float)
-            target_reference_rel = relative_moon_ric_state_from_arrays(reference, target_reference)
+            target_reference_rel = (
+                np.zeros(6, dtype=float)
+                if target_reference_is_reference
+                else relative_moon_ric_state_from_arrays(reference, target_reference)
+            )
         else:
             rel = relative_ric_state_from_arrays(reference, chaser)
-            target_rel = relative_ric_state_from_arrays(reference, target)
-            target_reference_rel = relative_ric_state_from_arrays(reference, target_reference)
+            target_rel = (
+                np.zeros(6, dtype=float)
+                if reference_is_target
+                else relative_ric_state_from_arrays(reference, target)
+            )
+            target_reference_rel = (
+                np.zeros(6, dtype=float)
+                if target_reference_is_reference
+                else relative_ric_state_from_arrays(reference, target_reference)
+            )
         self.target_true_anomaly_deg = (
             _true_anomaly_deg_from_state(target) if self._uses_elliptic_prediction_model() else None
         )
@@ -299,6 +329,35 @@ class DashboardStateMixin:
             r_norm = float(np.linalg.norm(reference_arr[:3]))
             if r_norm > 0.0 and np.isfinite(r_norm):
                 self.mean_motion_rad_s = float(np.sqrt(EARTH_MU_KM3_S2 / (r_norm**3)))
+        thrust_eci = np.array(
+            snapshot.applied_thrust.get(self.chaser_object_id, np.zeros(3, dtype=float)),
+            dtype=float,
+        ).reshape(3)
+        target_thrust_eci = np.array(
+            snapshot.applied_thrust.get(self.target_object_id, np.zeros(3, dtype=float)),
+            dtype=float,
+        ).reshape(3)
+        if str(getattr(self, "presentation_mode", "compatibility")) != "compatibility":
+            chaser_discontinuity = self._presentation_thrust_discontinuity("chaser", thrust_eci)
+            target_discontinuity = self._presentation_thrust_discontinuity("target", target_thrust_eci)
+            self._begin_presentation_reconciliation(
+                "rel",
+                rel,
+                discontinuity=bool(chaser_discontinuity or target_discontinuity),
+                authoritative_time_s=float(snapshot.time_s),
+            )
+            self._begin_presentation_reconciliation(
+                "target_rel",
+                target_rel,
+                discontinuity=target_discontinuity,
+                authoritative_time_s=float(snapshot.time_s),
+            )
+            self._begin_presentation_reconciliation(
+                "target_reference_rel",
+                target_reference_rel,
+                discontinuity=target_discontinuity,
+                authoritative_time_s=float(snapshot.time_s),
+            )
         self.t_s.append(float(snapshot.time_s))
         if not hasattr(self, "sample_wall_s"):
             self.sample_wall_s = []
@@ -314,8 +373,6 @@ class DashboardStateMixin:
             self._chaser_eci_array = _new_history_ring(6, int(max(self.max_history, 2)))
         self.target_eci_hist.append(target_state_eci.astype(float))
         self.chaser_eci_hist.append(chaser_state_eci.astype(float))
-        thrust = snapshot.applied_thrust.get(self.chaser_object_id, np.zeros(3, dtype=float))
-        thrust_eci = np.array(thrust, dtype=float).reshape(3)
         self.thrust_hist.append(thrust_eci)
         self.target_rel_hist.append(target_rel)
         if not hasattr(self, "target_reference_rel_hist"):

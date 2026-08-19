@@ -6,7 +6,113 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
-## Unreleased
+## 0.26.0 - 2026-08-18
+
+Release thesis: `v0.26.0` makes OEL's agent-facing workflows reproducible and
+reviewable across simulation, evidence plotting, flight-software development,
+and managed installation while preserving deterministic physics and explicit
+public/private product boundaries.
+
+### Changed
+
+- Added a dependency-clean Public FSW Authoring Kit with ADCS/RPO scaffolds,
+  no-import inspection, explicitly trusted lifecycle validation, component
+  tests, one deterministic serial smoke, content-bound receipts, and bounded
+  public-local MCP tools. The private FSW Development Kit remains the workflow
+  superset for Controller Bench, tuning, qualification, evidence packaging,
+  authoring without advertising unavailable private FSWDK commands.
+
+- Restored Gymnasium environment compatibility after the v2 flight-software
+  migration, including deterministic `reset(seed=...)` behavior and an
+  identical-seed regression proving that a nonzero action changes propagated
+  velocity relative to a zero-action baseline.
+
+- Kept private frontier-evaluation workflows behind explicit runtime and
+  public-export boundaries. The public release contains no evaluator source,
+  hidden truth, provider execution, campaign orchestration, or scoring surface.
+
+- Added a versioned animation-quality contract and agent-native review
+  animation workflow. Supported RIC review movies now use content-bound
+  plan/render tools, sequence-wide numeric formatting, declared stable camera
+  behavior, all-frame layout checks, bounded frame/duration resources, verified
+  GIF/MP4 encoding, structured QA receipts, and deterministic contact sheets.
+  Saved ground-track and multi-object RIC animation pilots use the same quality
+  engine; other legacy, 3D, attitude, dashboard, validation, Pro, interactive,
+  and game-recording families remain explicit follow-on migrations.
+
+- Added managed OEL installation and updating: signed deterministic release
+  artifacts and offline bundles, inspected POSIX/PowerShell bootstraps,
+  side-by-side immutable engines, stable activation and rollback, safe cleanup
+  and uninstall, external version-pinned workspaces, no-execution compatibility
+  audits, explicit recoverable config migrations, template conflict planning,
+  content-bound run provenance, Pro version eligibility, and sanitized support
+  receipts. New scenarios may declare `schema_version: oel.scenario.v1` while
+  the unversioned legacy reader remains available during the supported window.
+  Official bootstraps persist their signed-channel endpoint, so existing users
+  can run `oel update check` and the verified, non-activating
+  `oel update install latest` workflow without copying release URLs or key
+  paths.
+  Official release builds now require a matching trusted public-key registry,
+  reject RSA signing keys below 2048 bits, validate every bundled wheel, and
+  perform a real `--no-index` full-profile installation and import probe before
+  declaring an offline bundle ready.
+
+- Prevent aerodynamic environment construction and ideal-state packet
+  canonicalization from normalizing authoritative position or attitude arrays
+  in place. The released aerodynamic and FSW paths retain their intended
+  outputs. Rate-style aerodynamic bank controls now hold their achieved
+  effector position after input release, and the RC camera zoom floor accounts
+  for the complete rotated sprite footprint plus margin.
+
+- Added an opt-in game presentation architecture with `standard`,
+  `high_refresh`, and adaptive `auto` modes while retaining the existing
+  compatibility architecture as the default. The candidate adds monitor-aware
+  frame targets, trajectory-aware display-only motion, bounded truth
+  reconciliation, adaptive prediction/trail quality, overload-aware catch-up
+  limits, smooth full-density analytical coast curves, non-blocking software
+  pacing by default, a diagnostics overlay, and JSON frame summaries without
+  changing physics, FSW, scoring, or replay authority.
+
+- Strengthened the private frontier-evaluation boundary between
+  candidate-visible observations and evaluator-only truth, and updated its
+  internal long-horizon diagnostic plumbing. These changes remain private and
+  do not alter public simulation APIs or establish an official scoring claim.
+
+- Avoid recursive dataclass deep-copying when the game records its immutable
+  per-tick training score as review evidence; the emitted evidence mapping and
+  gameplay scoring contract are unchanged. Skip redundant self-relative RIC
+  transforms when the dashboard target and reference objects coincide; the
+  displayed relative states are unchanged. Reduce game pilot-stack overhead
+  with bit-exact three-vector RIC math, a command-only ideal-wrench allocation
+  path, cached attitude transforms, direct quaternion-reference assembly, and
+  lazy sensor-frame work for ideal navigation. Remove the unused legacy
+  simulator-level object-knowledge estimators from maintained game scenarios;
+  game navigation remains owned by the declared v2 FSW stacks, and actuator
+  commands and gameplay behavior are unchanged.
+
+- Reuse the runtime adapter's completed FSW egress validation when canonicalizing
+  actuator commands and invocation evidence, avoiding redundant shared boundary
+  checks, and precompile direct field encoders for already validated evidence
+  dataclasses. The public command-bus validation path and canonical evidence
+  bytes remain unchanged.
+
+- Reused immutable GNC v2 decision-snapshot forecasts across serial satellites
+  and shared exact Sun/Moon position resolution across coupled RK stages. On the
+  local 8 GB Apple M2 MacBook Air, the standard 120-second six-object controlled
+  benchmark fell from an 8.70-second median to 4.40 seconds, effectively matching
+  the best preserved v1-runtime result (4.39 seconds), with an unchanged
+  deterministic physics-payload hash. Updated migrated performance coverage
+  assertions to the v2-owned `satellite_step` boundary, and restored the CR3BP
+  propagation benchmark to an explicit trajectory-only posture so it measures
+  the configured 60-second CR3BP integration rather than 1 Hz passive FSW work.
+  The standard CR3BP median fell from the preserved v1 runtime's 0.462 seconds
+  to 0.148 seconds while retaining byte-identical 1,441-sample time and truth
+  histories.
+
+- Added the v0.26.0 managed installer for the public edition, hosted through
+  immutable assets on the public OEL GitHub release. Managed OEL Pro
+  installation and its distribution channel remain deferred; private source
+  development is license-free in the canonical private Git checkout.
 
 ## 0.25.0 - 2026-08-11
 

@@ -26,6 +26,8 @@ M4_IDS = (
     "oel.run_scenario.v1",
     "oel.compare_runs.v1",
     "oel.plot_evidence.v1",
+    "oel.plan_review_plot.v1",
+    "oel.render_review_plot.v2",
     "oel.run_agent_task.v1",
 )
 MCP_SDK_AVAILABLE = importlib.util.find_spec("mcp") is not None
@@ -313,6 +315,23 @@ def test_supported_task_comparison_and_plot_flow(tmp_path: Path) -> None:
         approval=WRITE_APPROVAL,
         handling=HANDLING,
     )
+    plot_arguments = {
+        "output_dir": output,
+        "sql": "SELECT time_s, range_km FROM relative_state ORDER BY time_s",
+        "x_column": "time_s",
+        "y_columns": ["range_km"],
+        "plot_type": "line",
+        "artifact_id": "m4_typed_relative_range",
+        "style": "oel_light",
+        "format": "png",
+        "handling": HANDLING,
+    }
+    plan = handlers.plan_review_plot(**plot_arguments)
+    rendered = handlers.render_review_plot(
+        **plot_arguments,
+        plot_plan_id=plan["result"]["plot_plan_id"],
+        approval=WRITE_APPROVAL,
+    )
 
     assert task["status"] == "completed"
     assert task["result"]["evidence_summary"]["ready_to_cite"] is True
@@ -321,6 +340,47 @@ def test_supported_task_comparison_and_plot_flow(tmp_path: Path) -> None:
     assert plot["status"] == "completed"
     assert Path(plot["result"]["artifact"]["path"]).is_file()
     assert Path(plot["result"]["manifest_path"]).is_file()
+    assert plan["status"] == "completed"
+    assert plan["result"]["render_authorized"] is False
+    assert rendered["status"] == "completed"
+    assert rendered["result"]["artifact"]["qa"]["automated_status"] == "passed"
+    assert rendered["result"]["artifact"]["qa"]["visual_qa_status"] == "pending_agent_review"
+
+
+@pytest.mark.skipif(not MCP_SDK_AVAILABLE, reason="optional MCP SDK profile is not installed")
+def test_sdk_plot_call_returns_image_content(tmp_path: Path) -> None:
+    import anyio
+    from mcp import Client
+
+    handlers = _handlers(tmp_path)
+    output = tmp_path / "task"
+    handlers.run_agent_task(
+        recipe_id="quickstart_review",
+        output_dir=output,
+        resource_profile="laptop-safe",
+        make_plots=False,
+        max_rows=25,
+        approval=EXECUTION_APPROVAL,
+        handling=HANDLING,
+    )
+
+    async def exercise() -> list[str]:
+        async with Client(build_sdk_server(handlers), mode="auto", cache=None) as client:
+            result = await client.call_tool(
+                "oel.plot_evidence.v1",
+                {
+                    "output_dir": str(output),
+                    "recipe_id": "relative_position_ric_2d",
+                    "artifact_id": "sdk_ric_plot",
+                    "style": "oel_light",
+                    "format": "png",
+                    "approval": WRITE_APPROVAL,
+                    "handling": HANDLING,
+                },
+            )
+            return [str(getattr(item, "type", "")) for item in result.content]
+
+    assert anyio.run(exercise) == ["text", "image"]
 
 
 def test_partial_plot_writes_incomplete_manifest(tmp_path: Path) -> None:

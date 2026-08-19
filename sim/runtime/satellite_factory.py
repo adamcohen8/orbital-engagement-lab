@@ -34,7 +34,6 @@ from sim.runtime.actuator_factory import (
     _satellite_spec_float,
 )
 from sim.runtime.models import AgentRuntime
-from sim.runtime.satellites.factory import build_satellite_flight_software_runtime
 from sim.runtime.state_initialization import _default_truth_from_agent
 
 
@@ -265,12 +264,15 @@ def _create_satellite_runtime(
         mass_properties=dict(specs.get("mass_properties", {}) or {}),
         runtime_profile=str(getattr(agent_cfg, "runtime_profile", "flight_software") or "flight_software"),
     )
-    runtime.flight_software_runtime = build_satellite_flight_software_runtime(
-        object_id=object_id,
-        agent_cfg=agent_cfg,
-        scenario_cfg=cfg,
-        mass_kg=float(truth.mass_kg),
-        specific_impulse_s=(None if sat_isp_s <= 0.0 else float(sat_isp_s)),
-        dry_mass_kg=(0.0 if dry_mass_kg is None else float(dry_mass_kg)),
-    )
+    if runtime.runtime_profile != "trajectory_only":
+        from sim.runtime.satellites.factory import build_satellite_flight_software_runtime
+
+        runtime.flight_software_runtime = build_satellite_flight_software_runtime(
+            object_id=object_id,
+            agent_cfg=agent_cfg,
+            scenario_cfg=cfg,
+            mass_kg=float(truth.mass_kg),
+            specific_impulse_s=(None if sat_isp_s <= 0.0 else float(sat_isp_s)),
+            dry_mass_kg=(0.0 if dry_mass_kg is None else float(dry_mass_kg)),
+        )
     return runtime

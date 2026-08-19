@@ -6,6 +6,7 @@ from math import cos, sin
 import numpy as np
 import pytest
 
+import sim.gnc.attitude_v2 as attitude_v2
 from sim.actuators.command_bus import ActuatorCommandBus, ActuatorDeviceDefinition, ExpiryBehavior
 from sim.dynamics.coupled_satellite import (
     CoupledIntegratorConfig,
@@ -264,6 +265,21 @@ def test_reference_quaternion_maps_requested_inertial_axis_to_body_x() -> None:
     assert reference is not None and reference.attitude_quat_from_frame is not None
     mapped = quaternion_to_dcm_bn(np.asarray(reference.attitude_quat_from_frame)) @ np.array([0.0, 1.0, 0.0])
     np.testing.assert_allclose(mapped, (1.0, 0.0, 0.0), atol=1e-12)
+
+
+def test_ideal_attitude_navigation_skips_unused_sensor_frame_rotation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_unused_rotation(_: np.ndarray) -> np.ndarray:
+        raise AssertionError("ideal navigation should not build an unused sensor-frame DCM")
+
+    monkeypatch.setattr(attitude_v2, "quaternion_to_dcm_bn", fail_unused_rotation)
+    navigator = AttitudeNavigator(body_frame=BODY_FRAME, inertial_frame=INERTIAL_FRAME)
+    navigator.ingest((ideal_event(0, 1),))
+
+    solution = navigator.control_solution(clock(1))
+
+    assert solution.attitude_quat_bn == (1.0, 0.0, 0.0, 0.0)
 
 
 @pytest.mark.parametrize(

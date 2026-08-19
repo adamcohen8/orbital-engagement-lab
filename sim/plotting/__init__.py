@@ -23,12 +23,27 @@ __all__ = [
     "oel_plot_context",
     "role_color",
     "save_oel_animation",
+    "ANIMATION_QUALITY_POLICY_VERSION",
+    "STRICT_AGENT_ANIMATION_QUALITY",
+    "AnimationQualityPolicy",
+    "AnimationQualityReport",
+    "save_animation_with_quality",
     "show_save_close_oel",
 ]
 
 
 def __getattr__(name: str):
     if name in __all__:
+        if name in {
+            "ANIMATION_QUALITY_POLICY_VERSION",
+            "STRICT_AGENT_ANIMATION_QUALITY",
+            "AnimationQualityPolicy",
+            "AnimationQualityReport",
+            "save_animation_with_quality",
+        }:
+            from sim.plotting import animation_quality
+
+            return getattr(animation_quality, name)
         if name in {
             "OEL_STYLE_DARK",
             "OEL_STYLE_LIGHT",

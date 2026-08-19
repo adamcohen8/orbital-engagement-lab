@@ -14,6 +14,9 @@ from integrations.oel_mcp.contracts import (
     object_schema,
 )
 from integrations.oel_mcp.execution import M4_RESOURCE_PROFILES
+from integrations.oel_mcp.fsw_authoring_registry import FSW_AUTHORING_TOOL_CONTRACTS, FSW_AUTHORING_TOOL_IDS
+from sim.review.animation_recipes import list_review_animation_recipes
+from sim.review.plot_recipes import list_review_plot_recipes
 
 PUBLIC_PROFILES = ("public_local", "direct_frontier_restricted")
 M4_LOCAL_PROFILES = ("public_local",)
@@ -30,6 +33,53 @@ APPROVAL_SCHEMA: dict[str, Any] = object_schema(
     },
     required=("approval_id", "scope"),
 )
+
+SUPPORTED_REVIEW_PLOT_RECIPE_IDS = tuple(
+    recipe.recipe_id for recipe in list_review_plot_recipes() if recipe.maturity == "supported"
+)
+SUPPORTED_REVIEW_ANIMATION_RECIPE_IDS = tuple(
+    recipe.recipe_id for recipe in list_review_animation_recipes() if recipe.maturity == "supported"
+)
+
+REVIEW_PLOT_SPEC_PROPERTIES: dict[str, Any] = {
+    "output_dir": {"type": "string", "minLength": 1},
+    "sql": {"type": "string", "minLength": 1, "maxLength": 20_000},
+    "x_column": {"type": "string", "maxLength": 160},
+    "y_columns": {
+        "type": "array",
+        "items": {"type": "string", "minLength": 1, "maxLength": 160},
+        "minItems": 1,
+        "maxItems": 12,
+    },
+    "plot_type": {"type": "string", "enum": ["line", "scatter", "bar", "histogram", "heatmap"]},
+    "group_column": {"type": "string", "maxLength": 160},
+    "style": {"type": "string", "enum": ["oel_dark", "oel_light"], "default": "oel_dark"},
+    "title": {"type": "string", "maxLength": 240},
+    "subtitle": {"type": "string", "maxLength": 320},
+    "x_label": {"type": "string", "maxLength": 160},
+    "y_label": {"type": "string", "maxLength": 160},
+    "format": {"type": "string", "enum": ["png", "svg", "pdf"], "default": "png"},
+    "dpi": {"type": "integer", "minimum": 72, "maximum": 600, "default": 150},
+    "max_rows": {"type": "integer", "minimum": 1, "maximum": 5000, "default": 5000},
+    "artifact_id": {"type": "string", "minLength": 1, "maxLength": 80},
+}
+
+REVIEW_ANIMATION_SPEC_PROPERTIES: dict[str, Any] = {
+    "output_dir": {"type": "string", "minLength": 1},
+    "recipe_id": {"type": "string", "enum": list(SUPPORTED_REVIEW_ANIMATION_RECIPE_IDS)},
+    "artifact_id": {"type": "string", "minLength": 1, "maxLength": 80},
+    "style": {"type": "string", "enum": ["oel_dark", "oel_light"], "default": "oel_dark"},
+    "format": {"type": "string", "enum": ["mp4", "gif"], "default": "mp4"},
+    "fps": {"type": "number", "minimum": 1, "maximum": 60, "default": 20},
+    "frame_stride": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 1},
+    "camera_policy": {
+        "type": "string",
+        "enum": ["fixed", "fit_history", "follow"],
+        "default": "fit_history",
+    },
+    "max_rows": {"type": "integer", "minimum": 1, "maximum": 5000, "default": 5000},
+    "dpi": {"type": "integer", "minimum": 72, "maximum": 200, "default": 120},
+}
 
 SCENARIO_INPUT_PROPERTIES: dict[str, Any] = {
     "config_path": {"type": "string", "minLength": 1},
@@ -203,6 +253,100 @@ PLOT_EVIDENCE_RESULT_SCHEMA = object_schema(
         "manifest_path": {"type": "string"},
     },
     required=("status", "output_dir", "recipe_id", "artifact", "manifest_path"),
+)
+
+PLAN_REVIEW_PLOT_RESULT_SCHEMA = object_schema(
+    {
+        "status": {"const": "planned"},
+        "output_dir": {"type": "string"},
+        "review_store": {"const": "review/run.sqlite"},
+        "plot_plan_id": {"type": "string"},
+        "spec": {"type": "object"},
+        "columns": {"type": "array", "items": {"type": "string"}},
+        "numeric_columns": {"type": "array", "items": {"type": "string"}},
+        "row_count": {"type": "integer", "minimum": 1, "maximum": 5000},
+        "truncated": {"type": "boolean"},
+        "warnings": {"type": "array", "items": {"type": "string"}},
+        "render_authorized": {"const": False},
+        "visual_review_required": {"const": True},
+    },
+    required=(
+        "status",
+        "output_dir",
+        "review_store",
+        "plot_plan_id",
+        "spec",
+        "columns",
+        "numeric_columns",
+        "row_count",
+        "truncated",
+        "warnings",
+        "render_authorized",
+        "visual_review_required",
+    ),
+)
+
+RENDER_REVIEW_PLOT_RESULT_SCHEMA = object_schema(
+    {
+        "status": {"enum": ["completed", "partial"]},
+        "output_dir": {"type": "string"},
+        "plot_plan_id": {"type": "string"},
+        "artifact": {"type": "object"},
+        "manifest_path": {"type": "string"},
+    },
+    required=("status", "output_dir", "plot_plan_id", "artifact", "manifest_path"),
+)
+
+PLAN_REVIEW_ANIMATION_RESULT_SCHEMA = object_schema(
+    {
+        "status": {"const": "planned"},
+        "output_dir": {"type": "string"},
+        "review_store": {"const": "review/run.sqlite"},
+        "animation_plan_id": {"type": "string"},
+        "spec": {"type": "object"},
+        "recipe": {"type": "object"},
+        "row_count": {"type": "integer", "minimum": 1, "maximum": 5000},
+        "truncated": {"type": "boolean"},
+        "source_frame_count": {"type": "integer", "minimum": 1},
+        "render_frame_count": {"type": "integer", "minimum": 1, "maximum": 600},
+        "effective_frame_stride": {"type": "integer", "minimum": 1},
+        "encoded_duration_s": {"type": "number", "minimum": 0, "maximum": 30},
+        "resource_estimate": {"type": "object"},
+        "warnings": {"type": "array", "items": {"type": "string"}},
+        "render_ready": {"type": "boolean"},
+        "render_authorized": {"const": False},
+        "visual_review_required": {"const": True},
+    },
+    required=(
+        "status",
+        "output_dir",
+        "review_store",
+        "animation_plan_id",
+        "spec",
+        "recipe",
+        "row_count",
+        "truncated",
+        "source_frame_count",
+        "render_frame_count",
+        "effective_frame_stride",
+        "encoded_duration_s",
+        "resource_estimate",
+        "warnings",
+        "render_ready",
+        "render_authorized",
+        "visual_review_required",
+    ),
+)
+
+RENDER_REVIEW_ANIMATION_RESULT_SCHEMA = object_schema(
+    {
+        "status": {"enum": ["completed", "partial"]},
+        "output_dir": {"type": "string"},
+        "animation_plan_id": {"type": "string"},
+        "artifact": {"type": "object"},
+        "manifest_path": {"type": "string"},
+    },
+    required=("status", "output_dir", "animation_plan_id", "artifact", "manifest_path"),
 )
 
 RUN_AGENT_TASK_RESULT_SCHEMA = object_schema(
@@ -652,7 +796,10 @@ PUBLIC_TOOL_CONTRACTS: tuple[ToolContract, ...] = (
     ToolContract(
         tool_id="oel.plot_evidence.v1",
         title="Plot completed OEL review evidence",
-        description="Generate one allowlisted plot recipe inside an approved completed-run output directory.",
+        description=(
+            "Generate one supported OEL plot recipe from completed review evidence. "
+            "Use this before host-native visualization tools for OEL review-store data."
+        ),
         risk_class="R1_write",
         oel_api="sim.agent_task.runner.create_plot",
         maturity="supported",
@@ -664,7 +811,7 @@ PUBLIC_TOOL_CONTRACTS: tuple[ToolContract, ...] = (
             handling_properties(
                 {
                     "output_dir": {"type": "string", "minLength": 1},
-                    "recipe_id": {"type": "string", "minLength": 1},
+                    "recipe_id": {"type": "string", "enum": list(SUPPORTED_REVIEW_PLOT_RECIPE_IDS)},
                     "style": {"type": "string", "enum": ["oel_dark", "oel_light"], "default": "oel_dark"},
                     "format": {"type": "string", "enum": ["png", "svg", "pdf"], "default": "png"},
                     "artifact_id": {"type": "string", "minLength": 1, "maxLength": 80},
@@ -674,6 +821,140 @@ PUBLIC_TOOL_CONTRACTS: tuple[ToolContract, ...] = (
             required=("output_dir", "recipe_id", "artifact_id", "approval", "handling"),
         ),
         result_schema=PLOT_EVIDENCE_RESULT_SCHEMA,
+    ),
+    ToolContract(
+        tool_id="oel.plan_review_plot.v1",
+        title="Plan a custom OEL review plot",
+        description=(
+            "Validate one typed, read-only review query and plot mapping without writing an artifact. "
+            "Use this for OEL review-store data when no supported plot recipe matches."
+        ),
+        risk_class="R0_read",
+        oel_api="sim.review.plan_review_plot",
+        maturity="supported",
+        install_profile="mcp",
+        deployment_profiles=M4_LOCAL_PROFILES,
+        data_classes=("run_evidence", "plot_specification"),
+        writes=False,
+        input_schema=object_schema(
+            handling_properties(REVIEW_PLOT_SPEC_PROPERTIES),
+            required=(
+                "output_dir",
+                "sql",
+                "x_column",
+                "y_columns",
+                "plot_type",
+                "artifact_id",
+                "handling",
+            ),
+        ),
+        result_schema=PLAN_REVIEW_PLOT_RESULT_SCHEMA,
+        limits={"read_only_query": True, "render_authorized": False, "max_rows": 5000},
+    ),
+    ToolContract(
+        tool_id="oel.render_review_plot.v2",
+        title="Render a planned custom OEL review plot",
+        description=(
+            "Render one content-bound typed OEL review plot with style, provenance, and automated QA. "
+            "Use this before host-native visualization tools for OEL review-store data."
+        ),
+        risk_class="R1_write",
+        oel_api="sim.review.render_review_plot",
+        maturity="supported",
+        install_profile="mcp",
+        deployment_profiles=M4_LOCAL_PROFILES,
+        data_classes=("run_evidence", "plot_specification", "plot_artifact"),
+        writes=True,
+        input_schema=object_schema(
+            handling_properties(
+                {
+                    **REVIEW_PLOT_SPEC_PROPERTIES,
+                    "plot_plan_id": {"type": "string", "minLength": 1, "maxLength": 128},
+                    "approval": APPROVAL_SCHEMA,
+                }
+            ),
+            required=(
+                "output_dir",
+                "sql",
+                "x_column",
+                "y_columns",
+                "plot_type",
+                "artifact_id",
+                "plot_plan_id",
+                "approval",
+                "handling",
+            ),
+        ),
+        result_schema=RENDER_REVIEW_PLOT_RESULT_SCHEMA,
+        limits={"one_plot_per_call": True, "operator_approval_required": True, "content_bound_plan": True},
+    ),
+    ToolContract(
+        tool_id="oel.plan_review_animation.v1",
+        title="Plan an OEL review animation",
+        description=(
+            "Validate one supported, read-only review animation recipe and compute a bounded frame plan "
+            "without writing an artifact."
+        ),
+        risk_class="R0_read",
+        oel_api="sim.review.plan_review_animation",
+        maturity="supported",
+        install_profile="mcp",
+        deployment_profiles=M4_LOCAL_PROFILES,
+        data_classes=("run_evidence", "animation_specification"),
+        writes=False,
+        input_schema=object_schema(
+            handling_properties(REVIEW_ANIMATION_SPEC_PROPERTIES),
+            required=("output_dir", "recipe_id", "artifact_id", "handling"),
+        ),
+        result_schema=PLAN_REVIEW_ANIMATION_RESULT_SCHEMA,
+        limits={
+            "read_only_query": True,
+            "render_authorized": False,
+            "max_rows": 5000,
+            "max_frames": 600,
+            "max_duration_s": 30,
+        },
+    ),
+    ToolContract(
+        tool_id="oel.render_review_animation.v1",
+        title="Render a planned OEL review animation",
+        description=(
+            "Render one content-bound OEL review animation with stable formatting, temporal checks, "
+            "encoding verification, a quality receipt, and a contact sheet."
+        ),
+        risk_class="R1_write",
+        oel_api="sim.review.render_review_animation",
+        maturity="supported",
+        install_profile="mcp",
+        deployment_profiles=M4_LOCAL_PROFILES,
+        data_classes=("run_evidence", "animation_specification", "animation_artifact"),
+        writes=True,
+        input_schema=object_schema(
+            handling_properties(
+                {
+                    **REVIEW_ANIMATION_SPEC_PROPERTIES,
+                    "animation_plan_id": {"type": "string", "minLength": 1, "maxLength": 160},
+                    "approval": APPROVAL_SCHEMA,
+                }
+            ),
+            required=(
+                "output_dir",
+                "recipe_id",
+                "artifact_id",
+                "animation_plan_id",
+                "approval",
+                "handling",
+            ),
+        ),
+        result_schema=RENDER_REVIEW_ANIMATION_RESULT_SCHEMA,
+        limits={
+            "one_animation_per_call": True,
+            "operator_approval_required": True,
+            "content_bound_plan": True,
+            "max_frames": 600,
+            "max_duration_s": 30,
+            "max_file_bytes": 100_000_000,
+        },
     ),
     ToolContract(
         tool_id="oel.run_agent_task.v1",
@@ -995,6 +1276,8 @@ PUBLIC_TOOL_CONTRACTS: tuple[ToolContract, ...] = (
     ),
 )
 
+PUBLIC_TOOL_CONTRACTS = PUBLIC_TOOL_CONTRACTS + FSW_AUTHORING_TOOL_CONTRACTS
+
 
 def public_contracts_for_profile(profile: str) -> tuple[ToolContract, ...]:
     return tuple(contract for contract in PUBLIC_TOOL_CONTRACTS if profile in contract.deployment_profiles)
@@ -1011,6 +1294,7 @@ def public_tool_definitions(profile: str) -> list[dict[str, Any]]:
 __all__ = [
     "HANDLING_SCHEMA",
     "M3_PUBLIC_TOOL_IDS",
+    "FSW_AUTHORING_TOOL_IDS",
     "PUBLIC_TOOL_CONTRACTS",
     "public_contract_map",
     "public_contracts_for_profile",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -8,7 +9,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
-from sim.plotting.style import artifact_metadata, oel_plot_context, save_oel_figure
+from sim.plotting.quality import STRICT_AGENT_PLOT_QUALITY, PlotQualityReport, apply_plot_quality_policy
+from sim.plotting.style import add_artifact_footer, artifact_metadata, oel_plot_context, save_oel_figure
+from sim.review.plot_recipes import REVIEW_PLOT_RECIPES, ReviewPlotRecipe
 from sim.review.queries import get_saved_review_query
 from sim.review.workspace import ReviewQueryResult, ReviewWorkspace
 from sim.runtime_environment import configure_headless_runtime
@@ -33,6 +36,7 @@ class ReviewPlotSpec:
     file_format: str = "png"
     dpi: int = 150
     max_rows: int = 5000
+    renderer_id: str = "generic"
     extra: dict[str, Any] = field(default_factory=dict)
 
 
@@ -44,130 +48,11 @@ class ReviewPlotArtifact:
     row_count: int
     truncated: bool
     spec: ReviewPlotSpec
+    qa: dict[str, Any] = field(default_factory=dict)
 
 
-@dataclass(frozen=True)
-class EvidencePlotRecipe:
-    recipe_id: str
-    title: str
-    description: str
-    sql: str
-    x_column: str
-    y_columns: tuple[str, ...]
-    plot_type: str = "line"
-    group_column: str = ""
-    x_label: str = ""
-    y_label: str = ""
-    artifact_id: str = ""
-    required_tables: tuple[str, ...] = ()
-
-
-EVIDENCE_PLOT_RECIPES: dict[str, EvidencePlotRecipe] = {
-    "relative_range": EvidencePlotRecipe(
-        recipe_id="relative_range",
-        title="Relative range over time",
-        description="Deputy-chief range from the relative_state review table.",
-        sql=(
-            "SELECT time_s, deputy_id, chief_id, deputy_id || ':' || chief_id AS pair_id, range_km "
-            "FROM relative_state ORDER BY pair_id, time_s"
-        ),
-        x_column="time_s",
-        y_columns=("range_km",),
-        group_column="pair_id",
-        x_label="Time (s)",
-        y_label="Range (km)",
-        artifact_id="evidence_relative_range",
-        required_tables=("relative_state",),
-    ),
-    "relative_range_rate": EvidencePlotRecipe(
-        recipe_id="relative_range_rate",
-        title="Relative range rate over time",
-        description="Relative range rate from the relative_state review table.",
-        sql=(
-            "SELECT time_s, deputy_id, chief_id, deputy_id || ':' || chief_id AS pair_id, range_rate_km_s "
-            "FROM relative_state ORDER BY pair_id, time_s"
-        ),
-        x_column="time_s",
-        y_columns=("range_rate_km_s",),
-        group_column="pair_id",
-        x_label="Time (s)",
-        y_label="Range rate (km/s)",
-        artifact_id="evidence_relative_range_rate",
-        required_tables=("relative_state",),
-    ),
-    "relative_velocity_components": EvidencePlotRecipe(
-        recipe_id="relative_velocity_components",
-        title="Relative velocity components over time",
-        description="RIC-frame relative velocity components from the relative_state review table.",
-        sql=(
-            "SELECT time_s, deputy_id, chief_id, deputy_id || ':' || chief_id AS pair_id, "
-            "v_radial_km_s, v_intrack_km_s, v_crosstrack_km_s "
-            "FROM relative_state ORDER BY pair_id, time_s"
-        ),
-        x_column="time_s",
-        y_columns=("v_radial_km_s", "v_intrack_km_s", "v_crosstrack_km_s"),
-        group_column="pair_id",
-        x_label="Time (s)",
-        y_label="Relative velocity (km/s)",
-        artifact_id="evidence_relative_velocity",
-        required_tables=("relative_state",),
-    ),
-    "burn_activity": EvidencePlotRecipe(
-        recipe_id="burn_activity",
-        title="Burn activity by object",
-        description="Active thrust samples by object.",
-        sql="SELECT object_id, SUM(burn_active) AS active_samples FROM thrust GROUP BY object_id ORDER BY object_id",
-        x_column="object_id",
-        y_columns=("active_samples",),
-        plot_type="bar",
-        x_label="Object",
-        y_label="Active thrust samples",
-        artifact_id="evidence_burn_activity",
-        required_tables=("thrust",),
-    ),
-    "ground_access": EvidencePlotRecipe(
-        recipe_id="ground_access",
-        title="Ground access samples",
-        description="Access sample counts by station/object from the ground_access review table.",
-        sql=(
-            "SELECT station_id || ':' || object_id AS station_object, SUM(access) AS access_samples "
-            "FROM ground_access GROUP BY station_id, object_id ORDER BY station_id, object_id"
-        ),
-        x_column="station_object",
-        y_columns=("access_samples",),
-        plot_type="bar",
-        x_label="Station:Object",
-        y_label="Access samples",
-        artifact_id="evidence_ground_access",
-        required_tables=("ground_access",),
-    ),
-    "campaign_closest_approach": EvidencePlotRecipe(
-        recipe_id="campaign_closest_approach",
-        title="Campaign closest approach by iteration",
-        description="Monte Carlo closest-approach results by iteration.",
-        sql="SELECT iteration, closest_approach_km FROM campaign_runs ORDER BY iteration",
-        x_column="iteration",
-        y_columns=("closest_approach_km",),
-        plot_type="scatter",
-        x_label="Iteration",
-        y_label="Closest approach (km)",
-        artifact_id="evidence_campaign_closest_approach",
-        required_tables=("campaign_runs",),
-    ),
-    "sensitivity_effects": EvidencePlotRecipe(
-        recipe_id="sensitivity_effects",
-        title="Sensitivity effect sizes",
-        description="Ranked sensitivity effect sizes by parameter.",
-        sql="SELECT parameter_path, effect_size FROM sensitivity_rankings ORDER BY rank, parameter_path, metric_path",
-        x_column="parameter_path",
-        y_columns=("effect_size",),
-        plot_type="bar",
-        x_label="Parameter",
-        y_label="Effect size",
-        artifact_id="evidence_sensitivity_effects",
-        required_tables=("sensitivity_rankings",),
-    ),
-}
+EvidencePlotRecipe = ReviewPlotRecipe
+EVIDENCE_PLOT_RECIPES = REVIEW_PLOT_RECIPES
 
 
 class EvidencePlotter:
@@ -235,7 +120,11 @@ class EvidencePlotter:
             x_label=kwargs.pop("x_label", recipe.x_label),
             y_label=kwargs.pop("y_label", recipe.y_label),
             artifact_id=kwargs.pop("artifact_id", recipe.artifact_id),
-            extra={**{"recipe_id": recipe.recipe_id}, **dict(kwargs.pop("extra", {}) or {})},
+            renderer_id=kwargs.pop("renderer_id", recipe.renderer_id),
+            extra={
+                **{"recipe_id": recipe.recipe_id, "recipe_version": recipe.recipe_version},
+                **dict(kwargs.pop("extra", {}) or {}),
+            },
             **kwargs,
         )
 
@@ -247,6 +136,9 @@ class EvidencePlotter:
 
     def relative_velocity_components(self, **kwargs: Any) -> ReviewPlotArtifact:
         return self.recipe("relative_velocity_components", **kwargs)
+
+    def relative_position_ric_2d(self, **kwargs: Any) -> ReviewPlotArtifact:
+        return self.recipe("relative_position_ric_2d", **kwargs)
 
     def burn_activity(self, **kwargs: Any) -> ReviewPlotArtifact:
         return self.recipe("burn_activity", **kwargs)
@@ -290,6 +182,7 @@ class EvidencePlotter:
         dpi: int = 150,
         max_rows: int = 5000,
         output: str | Path | None = None,
+        renderer_id: str = "generic",
         extra: dict[str, Any] | None = None,
     ) -> ReviewPlotArtifact:
         spec = ReviewPlotSpec(
@@ -307,6 +200,7 @@ class EvidencePlotter:
             file_format=file_format,
             dpi=dpi,
             max_rows=max_rows,
+            renderer_id=renderer_id,
             extra={"source": "oel_review_plot_api", **dict(extra or {})},
         )
         return self.save(spec, output=output)
@@ -403,6 +297,7 @@ def save_review_plot(
         out_path = Path(path)
         out_path.parent.mkdir(parents=True, exist_ok=True)
     scenario_name = _scenario_name(workspace)
+    plot_metadata = artifact_metadata(scenario_name=scenario_name, artifact_id=artifact_id)
 
     _ensure_matplotlib_cache_env()
     import matplotlib
@@ -412,30 +307,38 @@ def save_review_plot(
 
     with oel_plot_context(
         style_name=_normalize_style(spec.style_name),
-        metadata=artifact_metadata(scenario_name=scenario_name, artifact_id=artifact_id),
+        metadata=plot_metadata,
     ):
-        fig, ax = plt.subplots(figsize=(9.5, 5.25))
-        _draw_plot(ax, result, spec)
-        ax.set_title(spec.title or _default_title(spec.y_columns, spec.x_column))
-        if spec.subtitle:
-            fig.suptitle(spec.subtitle, y=0.975, fontsize=9)
-        ax.set_xlabel(spec.x_label or spec.x_column)
-        ax.set_ylabel(spec.y_label or _default_y_label(spec.y_columns))
-        ax.grid(True, alpha=0.35)
-        if _needs_legend(spec):
-            ax.legend(loc="best")
-        fig.tight_layout(rect=(0, 0.025, 1, 0.96 if spec.subtitle else 1))
+        if spec.renderer_id == "ric_rectangular_2d":
+            fig = _draw_ric_rectangular_2d(plt, result, spec)
+        elif spec.renderer_id == "generic":
+            fig, ax = plt.subplots(figsize=(9.5, 5.25))
+            _draw_plot(ax, result, spec)
+            ax.set_title(spec.title or _default_title(spec.y_columns, spec.x_column))
+            if spec.subtitle:
+                fig.suptitle(spec.subtitle, y=0.975, fontsize=9)
+            ax.set_xlabel(spec.x_label or spec.x_column)
+            ax.set_ylabel(spec.y_label or _default_y_label(spec.y_columns))
+            ax.grid(True, alpha=0.35)
+            if _needs_legend(spec):
+                ax.legend(loc="best")
+            fig.tight_layout(rect=(0, 0.025, 1, 0.96 if spec.subtitle else 1))
+        else:
+            raise ValueError(f"Unsupported review plot renderer_id '{spec.renderer_id}'.")
+        add_artifact_footer(fig, metadata=plot_metadata, artifact_id=artifact_id)
+        presentation_qa = apply_plot_quality_policy(fig, policy=STRICT_AGENT_PLOT_QUALITY)
         save_oel_figure(
             fig,
             out_path,
             dpi=int(spec.dpi),
-            metadata=artifact_metadata(scenario_name=scenario_name, artifact_id=artifact_id),
+            metadata=plot_metadata,
             artifact_id=artifact_id,
             style_name=_normalize_style(spec.style_name),
             bbox_inches="tight",
         )
         plt.close(fig)
 
+    qa = automated_plot_qa(out_path, result=result, spec=spec, presentation_qa=presentation_qa)
     artifact = ReviewPlotArtifact(
         artifact_id=artifact_id,
         path=out_path,
@@ -443,6 +346,7 @@ def save_review_plot(
         row_count=result.row_count,
         truncated=result.truncated,
         spec=spec,
+        qa=qa,
     )
     if record:
         record_generated_artifact(workspace, artifact)
@@ -466,10 +370,12 @@ def record_generated_artifact(workspace: ReviewWorkspace, artifact: ReviewPlotAr
             "artifact_id": artifact.artifact_id,
             "artifact_type": "figure",
             "path": artifact.relative_path,
-            "created_utc": os.environ.get("OEL_GENERATED_UTC", "").strip(),
+            "created_utc": os.environ.get("OEL_GENERATED_UTC", "").strip()
+            or datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
             "source": str(dict(spec.extra or {}).get("source", "oel_review_plot_api") or "oel_review_plot_api"),
             "source_query": spec.sql,
             "plot_type": spec.plot_type,
+            "renderer_id": spec.renderer_id,
             "style_name": _normalize_style(spec.style_name),
             "x_column": spec.x_column,
             "y_columns": list(spec.y_columns),
@@ -480,10 +386,178 @@ def record_generated_artifact(workspace: ReviewWorkspace, artifact: ReviewPlotAr
             "y_label": spec.y_label,
             "row_count": artifact.row_count,
             "truncated": artifact.truncated,
+            "query_sha256": hashlib.sha256(spec.sql.encode("utf-8")).hexdigest(),
+            "review_store": _review_store_identity(workspace),
+            "qa": dict(artifact.qa),
             "extra": dict(spec.extra or {}),
         }
     )
     index_path.write_text(json.dumps({"artifacts": existing}, indent=2) + "\n", encoding="utf-8")
+
+
+def _review_store_identity(workspace: ReviewWorkspace) -> dict[str, Any]:
+    stat = workspace.db_path.stat()
+    return {
+        "relative_path": _relative_to_output(workspace, workspace.db_path),
+        "size_bytes": int(stat.st_size),
+        "mtime_ns": int(stat.st_mtime_ns),
+    }
+
+
+def automated_plot_qa(
+    path: Path,
+    *,
+    result: ReviewQueryResult,
+    spec: ReviewPlotSpec,
+    presentation_qa: PlotQualityReport | None = None,
+) -> dict[str, Any]:
+    checks: list[dict[str, Any]] = []
+    exists = path.is_file()
+    size_bytes = int(path.stat().st_size) if exists else 0
+    checks.append({"check_id": "artifact_exists", "passed": exists, "value": exists})
+    checks.append({"check_id": "artifact_nonempty", "passed": size_bytes >= 1000, "value": size_bytes})
+    checks.append({"check_id": "query_has_rows", "passed": result.row_count > 0, "value": result.row_count})
+    checks.append({"check_id": "query_not_truncated", "passed": not result.truncated, "value": result.truncated})
+
+    if exists and path.suffix.lower() == ".png":
+        try:
+            from PIL import Image, ImageStat
+
+            with Image.open(path) as image:
+                width, height = image.size
+                grayscale = image.convert("L")
+                variation = float(ImageStat.Stat(grayscale).stddev[0])
+            checks.append(
+                {
+                    "check_id": "image_dimensions",
+                    "passed": width >= 600 and height >= 300,
+                    "value": {"width": width, "height": height},
+                }
+            )
+            checks.append({"check_id": "image_not_blank", "passed": variation >= 2.0, "value": variation})
+        except Exception as exc:
+            checks.append(
+                {
+                    "check_id": "image_decode",
+                    "passed": False,
+                    "value": type(exc).__name__,
+                }
+            )
+
+    presentation = presentation_qa.to_dict() if presentation_qa is not None else {}
+    if presentation:
+        presentation_passed = presentation.get("automated_status") == "passed"
+        checks.append(
+            {
+                "check_id": "presentation_quality",
+                "passed": presentation_passed,
+                "value": {
+                    "policy_id": presentation.get("policy_id"),
+                    "policy_version": presentation.get("policy_version"),
+                    "failed_checks": list(presentation.get("failed_checks", []) or []),
+                    "repairs": list(presentation.get("repairs", []) or []),
+                },
+            }
+        )
+    failed = [str(check["check_id"]) for check in checks if not bool(check["passed"])]
+    if presentation.get("automated_status") == "failed":
+        failed.extend(str(item) for item in list(presentation.get("failed_checks", []) or []))
+    failed = list(dict.fromkeys(failed))
+    return {
+        "automated_status": "passed" if not failed else "failed",
+        "checks": checks,
+        "failed_checks": failed,
+        "visual_qa_status": "pending_agent_review",
+        "visual_review_required": True,
+        "non_claim": "Automated checks do not replace agent visual inspection.",
+        "renderer_id": spec.renderer_id,
+        "presentation_quality": presentation,
+    }
+
+
+def _draw_ric_rectangular_2d(plt: Any, result: ReviewQueryResult, spec: ReviewPlotSpec) -> Any:
+    required = {"r_radial_km", "i_intrack_km", "c_crosstrack_km"}
+    missing = sorted(required - set(result.columns))
+    if missing:
+        raise ValueError(
+            "The rectangular-RIC renderer requires query columns: " + ", ".join(sorted(required))
+        )
+    group_column = spec.group_column if spec.group_column in result.columns else ""
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in result.rows:
+        group = str(row.get(group_column) or "relative trajectory") if group_column else "relative trajectory"
+        grouped.setdefault(group, []).append(row)
+
+    planes = (
+        ("i_intrack_km", "r_radial_km", "I-R Projection", "In-track, I (km)", "Radial, R (km)"),
+        ("i_intrack_km", "c_crosstrack_km", "I-C Projection", "In-track, I (km)", "Cross-track, C (km)"),
+        ("c_crosstrack_km", "r_radial_km", "C-R Projection", "Cross-track, C (km)", "Radial, R (km)"),
+    )
+    fig, axes = plt.subplots(1, 3, figsize=(15.0, 4.8))
+    palette = ("#38BDF8", "#F97316", "#A78BFA", "#22C55E", "#EAB308", "#EC4899")
+    for axis, (x_column, y_column, title, x_label, y_label) in zip(axes, planes, strict=True):
+        for index, (group, rows) in enumerate(sorted(grouped.items())):
+            points = [
+                (float(row[x_column]), float(row[y_column]))
+                for row in rows
+                if row.get(x_column) is not None and row.get(y_column) is not None
+            ]
+            if not points:
+                continue
+            x_values = [point[0] for point in points]
+            y_values = [point[1] for point in points]
+            color = palette[index % len(palette)]
+            axis.plot(x_values, y_values, linewidth=1.8, color=color, label=group, zorder=3)
+            axis.scatter(
+                [x_values[0]],
+                [y_values[0]],
+                marker="o",
+                s=44,
+                color="#22C55E",
+                edgecolors="#0F172A",
+                linewidths=0.7,
+                label="start" if index == 0 else "_nolegend_",
+                zorder=6,
+            )
+            axis.scatter(
+                [x_values[-1]],
+                [y_values[-1]],
+                marker="X",
+                s=56,
+                color="#F97316",
+                edgecolors="#0F172A",
+                linewidths=0.7,
+                label="end" if index == 0 else "_nolegend_",
+                zorder=7,
+            )
+        axis.scatter(
+            [0.0],
+            [0.0],
+            marker="*",
+            s=95,
+            color="#F8FAFC",
+            edgecolors="#111827",
+            linewidths=0.8,
+            label="chief origin",
+            zorder=8,
+        )
+        axis.axhline(0.0, color="#94A3B8", linewidth=0.8, alpha=0.5, zorder=1)
+        axis.axvline(0.0, color="#94A3B8", linewidth=0.8, alpha=0.5, zorder=1)
+        axis.set_title(title)
+        axis.set_xlabel(x_label)
+        axis.set_ylabel(y_label)
+        axis.set_aspect("equal", adjustable="datalim")
+        axis.margins(0.08)
+        axis.grid(True, alpha=0.3)
+
+    handles, labels = axes[0].get_legend_handles_labels()
+    if handles:
+        fig.legend(handles, labels, loc="lower center", ncol=min(5, len(handles)), frameon=False)
+    fig.suptitle(spec.title or "Relative Trajectory in Rectangular RIC", y=0.98)
+    if spec.subtitle:
+        fig.text(0.5, 0.925, spec.subtitle, ha="center", va="top", fontsize=9)
+    fig.tight_layout(rect=(0.0, 0.11, 1.0, 0.91 if spec.subtitle else 0.94))
+    return fig
 
 
 def _draw_plot(ax: Any, result: ReviewQueryResult, spec: ReviewPlotSpec) -> None:
@@ -602,10 +676,20 @@ def _validate_plot_spec(spec: ReviewPlotSpec, result: ReviewQueryResult) -> None
                 f"y_column '{column}' must contain numeric values. "
                 f"Numeric columns: {', '.join(numeric_columns(result)) or '(none)'}."
             )
-    if spec.group_column and len(spec.y_columns) != 1:
-        raise ValueError("Grouped plots support exactly one y_column.")
     if _normalize_plot_type(spec.plot_type) == "heatmap" and not spec.group_column:
         raise ValueError("Heatmap plots require a group_column for the y-axis category.")
+    if spec.renderer_id == "ric_rectangular_2d":
+        required = {"r_radial_km", "i_intrack_km", "c_crosstrack_km"}
+        missing = sorted(required - columns)
+        if missing:
+            raise ValueError(
+                "The rectangular-RIC renderer requires query columns: " + ", ".join(sorted(required))
+            )
+        nonnumeric = sorted(required - numeric)
+        if nonnumeric:
+            raise ValueError("Rectangular-RIC columns must contain numeric values: " + ", ".join(nonnumeric))
+    elif spec.renderer_id != "generic":
+        raise ValueError(f"Unsupported review plot renderer_id '{spec.renderer_id}'.")
     _normalize_plot_type(spec.plot_type)
     _normalize_style(spec.style_name)
     _normalize_extension(spec.file_format)
@@ -663,6 +747,7 @@ def _spec_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
         "file_format": "file_format",
         "dpi": "dpi",
         "max_rows": "max_rows",
+        "renderer_id": "renderer_id",
     }
     out: dict[str, Any] = {}
     if "extra" in kwargs:
@@ -702,6 +787,7 @@ def _spec_to_dict(spec: ReviewPlotSpec) -> dict[str, Any]:
         "file_format": spec.file_format,
         "dpi": spec.dpi,
         "max_rows": spec.max_rows,
+        "renderer_id": spec.renderer_id,
         "extra": dict(spec.extra or {}),
     }
 

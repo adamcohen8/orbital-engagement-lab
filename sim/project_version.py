@@ -98,6 +98,24 @@ def source_project_version(*, source_root: str | Path | None = None) -> str | No
 
 
 def installed_project_version(*, distribution_name: str = OEL_DISTRIBUTION_NAME) -> str | None:
+    # A source checkout can contain stale legacy ``.egg-info`` alongside the
+    # active environment's modern ``.dist-info``. importlib.metadata.version()
+    # returns the first match on sys.path, which can make a healthy editable
+    # install look stale. Prefer installed dist-info while retaining egg-info
+    # as the compatibility fallback when it is the only metadata available.
+    try:
+        distributions = list(metadata.distributions(name=distribution_name))
+    except (metadata.PackageNotFoundError, TypeError, KeyError, AttributeError, ValueError):
+        distributions = []
+    if distributions:
+        distributions.sort(
+            key=lambda distribution: (
+                0 if str(getattr(distribution, "_path", "")).endswith(".dist-info") else 1,
+                str(getattr(distribution, "_path", "")),
+            )
+        )
+        value = str(distributions[0].version or "").strip()
+        return value or None
     try:
         value = str(metadata.version(distribution_name) or "").strip()
     except (metadata.PackageNotFoundError, TypeError, KeyError, AttributeError, ValueError):

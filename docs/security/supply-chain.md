@@ -7,7 +7,7 @@ security, legal, export-control, or mission-assurance process.
 ## Supported Versions
 
 - Public releases: security fixes target the current public release line,
-  currently `v0.25.0`.
+  currently `v0.26.0`.
 - Private/Pro releases: security fixes target the active customer-supported
   release line or pilot branch named in the agreement.
 - Declared Python compatibility range: Python 3.10 through 3.14. Functional and
@@ -52,9 +52,12 @@ The regular release gate runs the complete local workflow with:
 python tools/run_supply_chain_gate.py --output-dir outputs/supply_chain --install-full
 ```
 
-That command installs the constrained full profile, captures the pip install
-report and `pip check`, writes the wheel inventory, SBOM, and freeze, runs an
+That command creates a disposable virtual environment, installs the constrained
+full profile there, captures the pip install report and `pip check`, writes the
+wheel inventory, SBOM, and freeze from that same isolated interpreter, runs an
 unsuppressed audit, and records artifact hashes in `supply-chain-gate.json`.
+The environment is removed after evidence generation so unrelated packages in
+the developer or release checkout environment cannot enter the release audit.
 Path-scoped PR CI and scheduled/manual CI repeat the audit on Linux as an
 independent-environment backstop; merge and release events do not repeat it.
 Those disk-bounded Linux jobs add `--torch-cpu-index`, which keeps the same
@@ -63,11 +66,39 @@ from PyTorch's official CPU wheel index instead of installing CUDA runtime
 packages. The selected wheel URL and hash remain captured in the pip install
 report and wheel inventory, and the source policy is recorded in the gate
 manifest.
+
+After the exact source candidate and supply-chain gate pass, build signed
+installable artifacts from the authorized source root:
+
+```bash
+python tools/build_installable_release.py \
+  --source-root <generated-public-export-or-authorized-pro-source> \
+  --output-dir <release-artifact-directory> \
+  --edition public --channel stable \
+  --private-key <offline-release-private-key.json> \
+  --public-keys <trusted-release-keys.json> \
+  --supply-chain-evidence outputs/supply_chain \
+  --wheelhouse <exact-platform-reviewed-wheelhouse> \
+  --platform <Windows-Linux-or-Darwin> --architecture <machine> \
+  --base-url https://github.com/adamcohen8/orbital-engagement-lab/releases/download/v0.26.0 \
+  --channel-url https://github.com/adamcohen8/orbital-engagement-lab/releases/latest/download/public-stable.json
+```
+
+Signed builds fail closed without a passing, version-matched
+`supply-chain-gate.json` and unchanged referenced artifacts. The release
+manifest binds their copied hashes. They also require an RS256 signing key of
+at least 2048 bits whose exact public key is active in the bundled trust
+registry. Every wheel is checked as a structurally valid wheel archive, and the
+builder creates a clean runtime, performs a full-profile install with
+`--no-index` from the copied wheelhouse, and imports the installed package
+before signing the release. Public artifacts must be built from the generated
+public export; the builder refuses a public artifact from the private source
+root.
 Treat a known vulnerability as a release finding until it is upgraded, removed,
 documented as not applicable, or accepted by the evaluator in writing.
 
-The evaluated `v0.24.2` full-profile environment requires the supported
-PyTorch 2.13 release line and has no audit exceptions.
+A `v0.26.0` full-profile release candidate requires the supported PyTorch 2.13
+release line and an unsuppressed passing audit with no implicit exceptions.
 Do not add `--ignore-vuln` to release or compatibility workflows. If an
 advisory is not applicable, document the evidence and evaluator approval
 separately while retaining the unsuppressed machine-readable audit result.

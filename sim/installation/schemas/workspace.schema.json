@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oel.example/schemas/workspace.schema.json",
+  "title": "OEL Workspace v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "workspace_id", "created_with", "engine", "contracts", "paths", "dependencies", "policy"],
+  "properties": {
+    "schema_version": {"const": "oel.workspace.v1"},
+    "workspace_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]+$"},
+    "created_with": {"type": "string"},
+    "engine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["channel", "requirement", "locked_version"],
+      "properties": {
+        "channel": {"enum": ["stable", "preview"]},
+        "requirement": {"type": "string"},
+        "locked_version": {"type": "string"}
+      }
+    },
+    "contracts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scenario", "fsw", "candidate"],
+      "properties": {
+        "scenario": {"type": "string"},
+        "fsw": {"type": "string"},
+        "candidate": {"type": "string"}
+      }
+    },
+    "paths": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["configs", "flight_software", "tests", "outputs"],
+      "properties": {
+        "configs": {"type": "string"},
+        "flight_software": {"type": "string"},
+        "tests": {"type": "string"},
+        "outputs": {"type": "string"}
+      }
+    },
+    "dependencies": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lock"],
+      "properties": {"lock": {"type": "string"}}
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["network", "trust_user_code"],
+      "properties": {
+        "network": {"enum": ["disabled", "explicit_only"]},
+        "trust_user_code": {"type": "boolean"}
+      }
+    }
+  }
+}

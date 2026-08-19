@@ -44,6 +44,18 @@ footer metadata, role-color conventions, and show/close behavior across
 single-run, campaign, benchmark, game-debrief, validation, and animation
 workflows.
 
+Agent-native review plots additionally apply the versioned
+[OEL Plot Quality Contract](plot-quality-contract.md). It selects one stable
+numeric formatter per axis, checks rendered text and legend geometry, applies
+bounded presentation-only repairs, records the resulting quality receipt, and
+still requires agent visual inspection before handoff.
+
+Supported saved review animations apply the separate
+[OEL Animation Quality Contract](animation-quality-contract.md). It freezes
+sequence-wide numeric formatting and declared camera behavior, checks every
+frame, verifies the encoded artifact, and produces a quality receipt plus a
+contact sheet for mandatory agent visual review.
+
 For the flagship plotting scenario used by the checked-in gallery:
 
 ```bash
@@ -123,6 +135,7 @@ capability under `sim.plotting`:
 - `control_outputs.py`: thrust histories, delta-v remaining, and alignment error
 - `knowledge_outputs.py`: knowledge timelines
 - `output_animations.py`: single-run animations
+- `animation_quality.py`: versioned per-frame, temporal, encoding, receipt, and contact-sheet QA
 - `output_context.py` and `output_helpers.py`: shared run context and numerical helpers
 
 The public single-run plotting functions exposed through `sim.plotting` and

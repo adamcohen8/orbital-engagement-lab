@@ -509,7 +509,7 @@ class SatelliteFlightSoftwareRuntime:
         velocity = np.asarray(truth.velocity_eci_km_s, dtype=float)
         velocity_hat = velocity / max(float(np.linalg.norm(velocity)), 1.0e-15)
         radial = np.asarray(truth.position_eci_km, dtype=float)
-        radial /= max(float(np.linalg.norm(radial)), 1.0e-15)
+        radial = radial / max(float(np.linalg.norm(radial)), 1.0e-15)
         lift_reference = radial - float(radial @ velocity_hat) * velocity_hat
         lift_reference /= max(float(np.linalg.norm(lift_reference)), 1.0e-15)
         bank = float(positions.get("bank", 0.0))
@@ -601,7 +601,10 @@ class SatelliteFlightSoftwareRuntime:
             if release_ns <= onboard_time_ns:
                 raise ValueError("requested next invocation must be later than the requesting invocation")
             self._requested_release_ns.add(release_ns)
-        receipts = self.command_bus.publish_all(output.commands, received_at=now)
+        receipts = self.command_bus._publish_all_boundary_validated(
+            output.commands,
+            received_at=now,
+        )
         identity = self.stack.identity
         if callable(identity):
             identity = identity()
@@ -614,13 +617,19 @@ class SatelliteFlightSoftwareRuntime:
                 "stack_version": identity.stack_version,
                 "profile_id": self.profile_id,
                 "profile_params": dict(self.profile_params),
-                "input_packet_ids": [to_primitive(event.packet_id) for event in events],
-                "command_ids": [to_primitive(command.command_id) for command in output.commands],
+                "input_packet_ids": [
+                    _to_primitive_trusted(event.packet_id) for event in events
+                ],
+                "command_ids": [
+                    _to_primitive_trusted(command.command_id)
+                    for command in output.commands
+                ],
                 "telemetry_count": len(output.telemetry),
                 "missed_task_releases": self._missed_task_releases,
                 "missed_sensor_releases": self._missed_sensor_releases,
                 "requested_next_invocations": [
-                    to_primitive(request) for request in output.requested_next_invocations
+                    _to_primitive_trusted(request)
+                    for request in output.requested_next_invocations
                 ],
                 "task_releases": [
                     {
@@ -869,7 +878,7 @@ class SatelliteFlightSoftwareRuntime:
     def _ideal_own_state_event(self, truth: StateTruth, now: ClockTag) -> InputEvent:
         packet_id = PacketId(f"{self.satellite_id}/ideal_own_state", self.boot_id, self._sensor_sequence)
         self._sensor_sequence += 1
-        attitude = np.asarray(truth.attitude_quat_bn, dtype=float)
+        attitude = np.asarray(truth.attitude_quat_bn, dtype=float).copy()
         attitude /= max(float(np.linalg.norm(attitude)), 1.0e-15)
         if attitude[0] < 0.0:
             attitude *= -1.0

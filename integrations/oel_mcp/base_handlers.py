@@ -79,7 +79,7 @@ class BaseOELMCPHandlers:
         _validate_arguments(contract, args)
         if contract.writes or contract.executes:
             self.approval_policy.require(args.get("approval"), executes=contract.executes)
-        requires_plugin_trust = (
+        requires_plugin_trust = bool(contract.limits.get("source_trust_approval_required", False)) or (
             tool_id == "oel.validate_scenario.v1" and bool(args.get("trust_plugins", False))
             or tool_id == "oel.run_scenario.v1"
             or tool_id in {"oel.materialize_onp_handoff.v1", "oel.materialize_scenario_patch.v1"}

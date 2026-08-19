@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import subprocess
+
 # These owner-aligned tests share deterministic builders and compatibility
 # imports from the adjacent support module.
 # ruff: noqa: F403, F405

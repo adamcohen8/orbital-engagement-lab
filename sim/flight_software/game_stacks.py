@@ -16,9 +16,9 @@ from sim.gnc.attitude_v2 import (
     AttitudeReferenceMode,
     QuaternionTorqueController,
 )
-from sim.gnc.contracts import RequestedEffort, RequestedEffortKind
+from sim.gnc.contracts import GuidanceReference, RequestedEffort, RequestedEffortKind
 from sim.gnc.navigation_v2 import NavigationInitializationMode, OrbitNavigationSolution, OrbitNavigator
-from sim.gnc.orbit_v2 import TranslationAllocator, TranslationAllocatorConfig
+from sim.gnc.orbit_v2 import TranslationAllocator, TranslationAllocatorConfig, TranslationAllocatorKind
 from sim.utils.quaternion import (
     normalize_quaternion,
     quaternion_delta_from_body_rate,
@@ -37,6 +37,7 @@ from .contracts import (
     GroundCommandKind,
     GroundCommandPayload,
     IdealTrackedObjectStateMeasurement,
+    IdealWrenchCommand,
     InputKind,
     MeasurementEvent,
     PacketId,
@@ -108,7 +109,11 @@ class GameAerodynamicEffectorBinding:
             raise ValueError("effector limits must be finite and contain neutral")
 
     def position_for_axis(self, value: float) -> float:
-        axis = float(np.clip(value, -1.0, 1.0))
+        axis = float(value)
+        if axis < -1.0:
+            axis = -1.0
+        elif axis > 1.0:
+            axis = 1.0
         return self.neutral + (self.maximum - self.neutral) * axis if axis >= 0.0 else self.neutral + (
             self.neutral - self.minimum
         ) * axis
@@ -173,10 +178,12 @@ class GamePilotReferenceFlightSoftwareStack(ReferenceStackBase):
         config: GamePilotReferenceStackConfig,
         *,
         _live_navigation_fast_path: bool = True,
+        _live_command_fast_path: bool = True,
     ) -> None:
         super().__init__(satellite_id=config.satellite_id, identity_material=config)
         self.config = config
         self._live_navigation_fast_path = bool(_live_navigation_fast_path)
+        self._live_command_fast_path = bool(_live_command_fast_path)
         self._navigator = OrbitNavigator(
             initialization=config.navigation_initialization,
             body_frame=config.body_frame,
@@ -197,6 +204,8 @@ class GamePilotReferenceFlightSoftwareStack(ReferenceStackBase):
         self._pending_impulse_duration_s: float | None = None
         self._last_ground_command_id: str | None = None
         self._reference_state_eci_m_m_s: tuple[float, ...] | None = None
+        self._cached_allocator_attitude_bytes: bytes | None = None
+        self._cached_allocator_dcm_bn: np.ndarray | None = None
 
     def _step(self, batch: FlightSoftwareInputBatch) -> FlightSoftwareOutput:
         self._navigator.ingest(batch.events)
@@ -225,14 +234,10 @@ class GamePilotReferenceFlightSoftwareStack(ReferenceStackBase):
                     ValidityInterval(batch.invocation_time, _add_ticks(batch.invocation_time, validity_ticks)),
                     force_n=tuple(float(value) for value in force),
                 )
-                allocation = self._translation_allocator.allocate(
-                    effort,
-                    solution,
-                    next_command_id=self._next_command_id,
-                )
-                commands.extend(allocation.proposed_commands)
+                commands.extend(self._translation_commands(effort, solution))
         faulted = {component for component, _code in solution.active_faults}
-        commands = [command for command in commands if command.actuator_id not in faulted]
+        if faulted:
+            commands = [command for command in commands if command.actuator_id not in faulted]
         telemetry = ()
         if self.config.emit_diagnostics:
             fields = (
@@ -383,14 +388,34 @@ class GamePilotReferenceFlightSoftwareStack(ReferenceStackBase):
                     )
                 )
             )
-        reference = AttitudeReferenceGenerator(
-            AttitudeReferenceConfig(
-                AttitudeReferenceMode.QUATERNION,
-                quaternion_bn=self._desired_attitude,
-                validity_ticks=self.config.validity_ticks,
-            ),
-            inertial_frame=self.config.inertial_frame,
-        ).generate(attitude)
+        if self._live_command_fast_path:
+            desired = np.asarray(self._desired_attitude, dtype=float)
+            if (
+                desired.size != 4
+                or not np.all(np.isfinite(desired))
+                or abs(np.linalg.norm(desired) - 1) > 1e-10
+            ):
+                raise ValueError("quaternion_bn must be normalized")
+            quaternion = normalize_quaternion(desired)
+            reference = GuidanceReference(
+                "attitude.quaternion",
+                "attitude",
+                self.config.inertial_frame,
+                ValidityInterval(
+                    attitude.generated_at,
+                    _add_ticks(attitude.generated_at, self.config.validity_ticks),
+                ),
+                attitude_quat_from_frame=tuple(float(value) for value in quaternion),
+            )
+        else:
+            reference = AttitudeReferenceGenerator(
+                AttitudeReferenceConfig(
+                    AttitudeReferenceMode.QUATERNION,
+                    quaternion_bn=self._desired_attitude,
+                    validity_ticks=self.config.validity_ticks,
+                ),
+                inertial_frame=self.config.inertial_frame,
+            ).generate(attitude)
         if reference is None:
             return ()
         effort = self.config.attitude_controller.control(attitude, reference)
@@ -401,6 +426,43 @@ class GamePilotReferenceFlightSoftwareStack(ReferenceStackBase):
             attitude,
             command_id=self._next_command_id(),
         ).proposed_commands
+
+    def _translation_commands(
+        self,
+        effort: RequestedEffort,
+        solution: OrbitNavigationSolution,
+    ) -> tuple[ActuatorCommand, ...]:
+        allocator_config = self.config.translation_allocator
+        if not self._live_command_fast_path or allocator_config.kind is not TranslationAllocatorKind.IDEAL_WRENCH:
+            return self._translation_allocator.allocate(
+                effort,
+                solution,
+                next_command_id=self._next_command_id,
+            ).proposed_commands
+        if effort.force_n is None or solution.attitude.attitude_quat_bn is None:
+            return ()
+        requested_eci = np.asarray(effort.force_n, dtype=float)
+        requested_norm = float(np.linalg.norm(requested_eci))
+        scale = min(1.0, allocator_config.max_force_n / requested_norm) if requested_norm > 0.0 else 1.0
+        achieved_eci = requested_eci * scale
+        attitude = np.asarray(solution.attitude.attitude_quat_bn, dtype=float)
+        attitude_bytes = attitude.tobytes()
+        if attitude_bytes != self._cached_allocator_attitude_bytes:
+            self._cached_allocator_attitude_bytes = attitude_bytes
+            self._cached_allocator_dcm_bn = quaternion_to_dcm_bn(attitude)
+        assert self._cached_allocator_dcm_bn is not None
+        force_body = self._cached_allocator_dcm_bn @ achieved_eci
+        return (
+            ActuatorCommand(
+                self._next_command_id(),
+                allocator_config.satellite_id,
+                allocator_config.actuator_id,
+                effort.generated_at,
+                effort.validity,
+                allocator_config.actuator_frame,
+                IdealWrenchCommand(tuple(float(value) for value in force_body), (0.0, 0.0, 0.0)),
+            ),
+        )
 
     def _aerodynamic_commands(self, now: ClockTag) -> tuple[ActuatorCommand, ...]:
         commands: list[ActuatorCommand] = []
@@ -491,6 +553,8 @@ class GamePilotReferenceFlightSoftwareStack(ReferenceStackBase):
             self._last_ground_command_id,
             self._reference_state_eci_m_m_s,
         ) = state
+        self._cached_allocator_attitude_bytes = None
+        self._cached_allocator_dcm_bn = None
 
 
 def _ric_to_eci(
@@ -510,9 +574,22 @@ def _ric_to_eci(
     position = state[:3]
     velocity = state[3:6]
     radial = _unit(position)
-    cross_track = _unit(np.cross(position, velocity))
-    in_track = _unit(np.cross(cross_track, radial))
+    cross_track = _unit(_cross3(position, velocity))
+    in_track = _unit(_cross3(cross_track, radial))
     return np.column_stack((radial, in_track, cross_track)) @ np.asarray(vector_ric)
+
+
+def _cross3(first: np.ndarray, second: np.ndarray) -> np.ndarray:
+    a = np.asarray(first, dtype=float).reshape(3)
+    b = np.asarray(second, dtype=float).reshape(3)
+    return np.array(
+        (
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
+        ),
+        dtype=float,
+    )
 
 
 def _unit(vector: np.ndarray) -> np.ndarray:
@@ -524,7 +601,14 @@ def _unit(vector: np.ndarray) -> np.ndarray:
 
 
 def _throttle(value: float | None) -> float:
-    return 1.0 if value is None else float(np.clip(0.5 * (value + 1.0), 0.0, 1.0))
+    if value is None:
+        return 1.0
+    throttle = 0.5 * (float(value) + 1.0)
+    if throttle < 0.0:
+        return 0.0
+    if throttle > 1.0:
+        return 1.0
+    return throttle
 
 
 def _elapsed_seconds(start: ClockTag | None, end: ClockTag) -> float:

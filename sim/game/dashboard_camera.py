@@ -263,6 +263,25 @@ class DashboardCameraMixin:
         if x_axis is None or y_axis is None:
             return span
         plane = _plane_key_for_axes(x_axis=int(x_axis), y_axis=int(y_axis))
+        if plane == "RC":
+            target_diameter_km = max(
+                float(getattr(self, "target_sprite_diameter_km", SATELLITE_SPRITE_DIAMETER_KM)),
+                0.0,
+            )
+            chaser_diameter_km = max(
+                float(getattr(self, "chaser_sprite_diameter_km", SATELLITE_SPRITE_DIAMETER_KM)),
+                0.0,
+            )
+            chaser_rotation_extent = (
+                np.sqrt(2.0)
+                if bool(getattr(self, "aerodynamic_control_enabled", False))
+                else 1.0
+            )
+            sprite_diameter_km = max(
+                target_diameter_km,
+                chaser_diameter_km * chaser_rotation_extent,
+            )
+            span = max(span, 0.5 * sprite_diameter_km * PLOT_OVERLAY_MARGIN)
         overlay_zoom_by_plane = getattr(self, "plot_overlays_in_zoom_by_plane", {}) or {}
         include_overlays = bool(overlay_zoom_by_plane.get(plane, getattr(self, "plot_overlays_in_zoom", True)))
         if not include_overlays:

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from dataclasses import asdict, is_dataclass
+from dataclasses import asdict, fields, is_dataclass
 from typing import Any
 
 import numpy as np
 
 from sim.api import SimulationConfig, SimulationSession
-from sim.game.training import RPOTrainingConfig
+from sim.game.training import RPOTrainingConfig, RPOTrainingScore
+
+_RPO_TRAINING_SCORE_FIELD_NAMES = tuple(item.name for item in fields(RPOTrainingScore))
 
 
 class GamePhysicsSession:
@@ -70,7 +72,15 @@ class GamePhysicsSession:
 
         if not self._scoring_policy:
             return
-        if is_dataclass(score):
+        if type(score) is RPOTrainingScore:
+            # The frozen score contract contains only primitives and immutable
+            # tuples. Avoid dataclasses.asdict's recursive deepcopy on every
+            # gameplay tick while preserving the exact evidence mapping.
+            values = {
+                name: getattr(score, name)
+                for name in _RPO_TRAINING_SCORE_FIELD_NAMES
+            }
+        elif is_dataclass(score):
             values = asdict(score)
         elif hasattr(score, "__dict__"):
             values = dict(vars(score))

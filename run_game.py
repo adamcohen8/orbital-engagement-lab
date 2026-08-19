@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 
 from sim.game.launcher import choose_game_launch, record_game_progress
+from sim.game.presentation import PRESENTATION_MODES, PRESENTATION_VSYNC_MODES
 from sim.game.runner import run_game_mode
 
 
@@ -33,6 +34,45 @@ def main() -> None:
             "Defaults to the level's configured value, or 1x."
         ),
     )
+    parser.add_argument(
+        "--presentation-mode",
+        choices=PRESENTATION_MODES,
+        default=None,
+        help=(
+            "Display architecture. 'compatibility' preserves the current frame pacing; "
+            "'standard', 'high_refresh', and 'auto' enable the new presentation path."
+        ),
+    )
+    parser.add_argument(
+        "--presentation-fps-cap",
+        type=float,
+        default=None,
+        help="Optional live-display FPS ceiling for the new presentation path.",
+    )
+    parser.add_argument(
+        "--presentation-refresh-hz",
+        type=float,
+        default=None,
+        help="Optional monitor-refresh override when Pygame cannot detect it.",
+    )
+    parser.add_argument(
+        "--presentation-vsync",
+        choices=PRESENTATION_VSYNC_MODES,
+        default=None,
+        help="VSync preference for the new presentation path.",
+    )
+    parser.add_argument(
+        "--presentation-diagnostics",
+        action="store_true",
+        default=None,
+        help="Show the frame diagnostics overlay.",
+    )
+    parser.add_argument(
+        "--presentation-diagnostics-output",
+        type=Path,
+        default=None,
+        help="Write a machine-readable presentation diagnostics summary when the game closes.",
+    )
     args = parser.parse_args()
     if args.config:
         result = run_game_mode(
@@ -41,6 +81,12 @@ def main() -> None:
             attitude_rate_deg_s=float(args.attitude_rate_deg_s),
             realtime=not bool(args.fast),
             speed_multiple=args.speed_multiple,
+            presentation_mode=args.presentation_mode,
+            presentation_fps_cap=args.presentation_fps_cap,
+            presentation_refresh_hz=args.presentation_refresh_hz,
+            presentation_vsync=args.presentation_vsync,
+            presentation_diagnostics=args.presentation_diagnostics,
+            presentation_diagnostics_output=args.presentation_diagnostics_output,
         )
         if result.level_passed or result.arcade_score > 0:
             record_game_progress(
@@ -73,6 +119,12 @@ def main() -> None:
             frame_convention=selection.frame_convention,
             operator_burn_plan=selection.operator_burn_plan,
             skip_initial_briefing=selection.skip_initial_briefing,
+            presentation_mode=args.presentation_mode or selection.presentation_mode,
+            presentation_fps_cap=args.presentation_fps_cap,
+            presentation_refresh_hz=args.presentation_refresh_hz,
+            presentation_vsync=args.presentation_vsync,
+            presentation_diagnostics=args.presentation_diagnostics,
+            presentation_diagnostics_output=args.presentation_diagnostics_output,
         )
         if result.level_passed or result.arcade_score > 0:
             record_game_progress(

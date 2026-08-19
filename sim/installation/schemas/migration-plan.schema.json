@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oel.example/schemas/migration-plan.schema.json",
+  "title": "OEL Workspace Migration Plan v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "status", "workspace", "target", "compatibility_report", "changes", "effects"],
+  "properties": {
+    "schema_version": {"const": "oel.workspace-migration-plan.v1"},
+    "migration_id": {"type": "string"},
+    "status": {"enum": ["ready", "manual_review", "blocked", "invalid", "incomplete", "cancelled"]},
+    "generated_at": {"type": "string", "format": "date-time"},
+    "workspace": {"type": "object"},
+    "target": {"type": "object"},
+    "compatibility_report": {"type": "string"},
+    "changes": {"type": "array"},
+    "effects": {"type": "object"}
+  }
+}

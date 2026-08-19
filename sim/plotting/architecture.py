@@ -136,6 +136,8 @@ SINGLE_RUN_PLOT_FAMILIES: tuple[PlottingCapabilityFamily, ...] = (
 PLOTTING_SUPPORT_MODULES: tuple[str, ...] = (
     "sim.plotting.capability_common",
     "sim.plotting.attitude_geometry",
+    "sim.plotting.quality",
+    "sim.plotting.animation_quality",
     "sim.plotting.single_run_context",
     "sim.plotting.single_run_math",
 )

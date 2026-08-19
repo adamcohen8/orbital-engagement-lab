@@ -296,12 +296,58 @@ class GamePilotInputAdapter:
                 (self.profile.yaw_axis, "yaw"),
                 (self.profile.throttle_axis, None),
             )
-        else:
-            pairs = self.aerodynamic_axis_sources
+            return tuple(
+                ControlAxisSample(
+                    control_id,
+                    float(
+                        max(
+                            -1.0,
+                            min(
+                                1.0,
+                                throttle if attribute is None else getattr(state, attribute, 0.0),
+                            ),
+                        )
+                    ),
+                )
+                for control_id, attribute in pairs
+            )
         return tuple(
-            ControlAxisSample(control_id, float(max(-1.0, min(1.0, throttle if attribute is None else getattr(state, attribute, 0.0)))))
-            for control_id, attribute in pairs
+            ControlAxisSample(
+                control_id,
+                self._aerodynamic_axis_position(
+                    control_id,
+                    float(getattr(state, attribute, 0.0)),
+                ),
+            )
+            for control_id, attribute in self.aerodynamic_axis_sources
         )
+
+    def _aerodynamic_axis_position(self, control_id: str, raw_axis: float) -> float:
+        """Turn held bank direction into motion and released bank into hold."""
+
+        raw = float(max(-1.0, min(1.0, raw_axis)))
+        if control_id != "bank" or abs(raw) > 1.0e-12:
+            return raw
+        runtime = self._physical_runtime
+        stack_config = getattr(getattr(runtime, "stack", None), "config", None)
+        for binding in tuple(getattr(stack_config, "effectors", ()) or ()):
+            if str(getattr(binding, "control_id", "")) != control_id:
+                continue
+            actuator_id = str(getattr(binding, "actuator_id", ""))
+            hardware = getattr(runtime, "hardware", {}).get(actuator_id)
+            if hardware is None:
+                break
+            position = float(getattr(hardware, "position", binding.neutral))
+            neutral = float(binding.neutral)
+            span = (
+                float(binding.maximum) - neutral
+                if position >= neutral
+                else neutral - float(binding.minimum)
+            )
+            if span <= 1.0e-15:
+                return 0.0
+            return float(max(-1.0, min(1.0, (position - neutral) / span)))
+        return 0.0
 
 
 class GameOperatorInputAdapter:
