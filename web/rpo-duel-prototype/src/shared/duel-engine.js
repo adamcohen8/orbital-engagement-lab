@@ -153,6 +153,8 @@ export function createDuelRound({ pairSeed, rules = DUEL_PROTOTYPE_RULES } = {})
     },
     snapshot() {
       const rel = relativeRicState(sim.target, sim.chaser);
+      const targetReferenceRel = relativeRicState(sim.target_reference, sim.target);
+      const chaserReferenceRel = relativeRicState(sim.target_reference, sim.chaser);
       const rangeKm = norm([rel.r_km, rel.i_km, rel.c_km]);
       return {
         schema_version: cfg.schema_version,
@@ -161,6 +163,10 @@ export function createDuelRound({ pairSeed, rules = DUEL_PROTOTYPE_RULES } = {})
         time_s: metric(sim.time_s),
         time_remaining_s: metric(Math.max(cfg.round_duration_s - sim.time_s, 0)),
         relative_ric: roundedRelative(rel),
+        target_reference_ric: roundedRelative(targetReferenceRel),
+        chaser_reference_ric: roundedRelative(chaserReferenceRel),
+        reference_mean_motion_rad_s: metric(Math.sqrt(cfg.mu_km3_s2 / cfg.target_coes.a_km ** 3)),
+        capture_range_km: metric(cfg.capture_range_km),
         range_km: metric(rangeKm),
         relative_speed_km_s: metric(norm([rel.rd_km_s, rel.id_km_s, rel.cd_km_s])),
         delta_v_m_s: roundedMap(sim.delta_v_m_s),

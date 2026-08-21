@@ -33,6 +33,27 @@ test("duel round is deterministic for the same seed and role inputs", () => {
   assert.ok(first.delta_v_m_s.target > 0);
 });
 
+test("round snapshots expose both satellites in the propagated target-reference frame", () => {
+  const round = createDuelRound({ pairSeed: 404 });
+  const initial = round.snapshot();
+  assert.deepEqual(initial.target_reference_ric, {
+    r_km: 0, i_km: 0, c_km: 0, rd_km_s: 0, id_km_s: 0, cd_km_s: 0,
+  });
+  assert.deepEqual(initial.chaser_reference_ric, initial.relative_ric);
+  assert.ok(initial.reference_mean_motion_rad_s > 0);
+  assert.equal(initial.capture_range_km, DUEL_PROTOTYPE_RULES.capture_range_km);
+
+  round.setControls("target", { r: 1, i: 0, c: 0 });
+  round.step(10);
+  const maneuvered = round.snapshot();
+  assert.ok(Math.hypot(
+    maneuvered.target_reference_ric.r_km,
+    maneuvered.target_reference_ric.i_km,
+    maneuvered.target_reference_ric.c_km,
+  ) > 0);
+  assert.notDeepEqual(maneuvered.chaser_reference_ric, maneuvered.relative_ric);
+});
+
 test("delta-v budgets are hard coast caps rather than automatic losses", () => {
   const rules = {
     ...DUEL_PROTOTYPE_RULES,

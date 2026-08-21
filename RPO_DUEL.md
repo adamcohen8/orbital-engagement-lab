@@ -31,10 +31,13 @@ Implemented now:
   disconnect, with token-based rejoin while the match remains active;
 - ordered normalized RIC inputs shared by keyboard and touch controls;
 - responsive R/I and R/C trajectory plots using the regular RPO Trainer
-  dashboard composition: top mission bar, twin desktop plots and bottom HUD on
-  laptops, plus compact mission bar, stacked plots, HUD, and six-button touch
-  grid on phones; role/score/time/delta-v telemetry, connection state,
-  countdowns, round results, and draw-capable match results; and
+  dashboard composition: a default full-trajectory frame centered on the
+  propagated Target reference orbit, visible Target and Chaser HCW coast
+  projections, and a `C`/touch camera toggle to a satellites-only midpoint
+  view; twin plots and a bottom HUD on laptops, compact stacked plots in phone
+  portrait, and side-by-side plots with a six-button touch rail in phone
+  landscape; role/score/time/delta-v telemetry, connection state, countdowns,
+  round results, and draw-capable match results; and
 - deterministic engine tests plus HTTP, WebSocket, ordering, disconnect, and
   reconnect tests;
 - a Cloudflare Worker with one SQLite-backed Durable Object per room, a
@@ -62,8 +65,8 @@ Post-release Beta validation:
 
 Post-Beta follow-on work:
 
-- client-side physics prediction and snapshot interpolation beyond the current
-  lightweight plotted snapshot trail;
+- snapshot interpolation beyond the current lightweight plotted snapshot
+  trail and client-rendered HCW coast projections;
 - persisted final replay/result downloads and rematch UX;
 - provider usage monitoring and a lower application-level admission threshold
   if Beta traffic approaches the Workers Free daily limits.

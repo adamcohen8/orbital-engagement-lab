@@ -1,9 +1,16 @@
+import {
+  DUEL_CAMERA_MODES,
+  duelPlotFrame,
+  referenceRelativePair,
+  toggleDuelCameraMode,
+} from "./plot-model.js";
+
 const elements = Object.fromEntries([
   "landing-view", "game-view", "connection-pill", "create-tab", "join-tab", "create-form", "join-form",
   "create-name", "join-name", "join-code", "setup-error", "room-code", "round-label", "role-label", "time-label",
   "auto-time", "player-one-card", "player-two-card", "range-label", "speed-label", "dv-label", "phase-overlay",
   "phase-kicker", "phase-title", "phase-detail", "copy-invite", "own-connection-dot", "own-connection-label",
-  "opponent-connection-dot", "opponent-connection-label", "ri-canvas", "rc-canvas", "toast",
+  "opponent-connection-dot", "opponent-connection-label", "ri-canvas", "rc-canvas", "camera-toggle", "toast",
 ].map((id) => [id, document.getElementById(id)]));
 
 const state = {
@@ -21,6 +28,7 @@ const state = {
   trail: [],
   lastTrailTick: -1,
   lastRoundIndex: null,
+  cameraMode: DUEL_CAMERA_MODES.REFERENCE,
 };
 
 const keyBindings = {
@@ -33,6 +41,7 @@ restoreSession();
 populateInviteFromUrl();
 wireSetup();
 wireControls();
+paintCameraMode();
 window.addEventListener("resize", drawPlots);
 requestAnimationFrame(renderLoop);
 
@@ -153,7 +162,7 @@ function acceptSnapshot(snapshot) {
   }
   const round = snapshot.series?.round;
   if (round && round.tick !== state.lastTrailTick) {
-    state.trail.push({ ...round.relative_ric, tick: round.tick });
+    state.trail.push({ ...referenceRelativePair(round), tick: round.tick });
     if (state.trail.length > 300) state.trail.shift();
     state.lastTrailTick = round.tick;
   }
@@ -218,12 +227,18 @@ function setOverlay(kicker, title, detail) {
 
 function wireControls() {
   window.addEventListener("keydown", (event) => {
+    if (event.code === "KeyC" && !event.repeat && !isTyping()) {
+      event.preventDefault();
+      toggleCamera();
+      return;
+    }
     const binding = keyBindings[event.code];
     if (!binding || event.repeat || isTyping()) return;
     event.preventDefault();
     state.pressedKeys.add(event.code);
     updateAxisFromInputs(binding[0]);
   });
+  elements["camera-toggle"].addEventListener("click", toggleCamera);
   window.addEventListener("keyup", (event) => {
     const binding = keyBindings[event.code];
     if (!binding) return;
@@ -258,6 +273,19 @@ function wireControls() {
   }
   window.addEventListener("blur", () => neutralizeControls(true));
   document.addEventListener("visibilitychange", () => { if (document.hidden) neutralizeControls(true); });
+}
+
+function toggleCamera() {
+  state.cameraMode = toggleDuelCameraMode(state.cameraMode);
+  paintCameraMode();
+  drawPlots();
+}
+
+function paintCameraMode() {
+  const pairMode = state.cameraMode === DUEL_CAMERA_MODES.CURRENT_PAIR;
+  elements["camera-toggle"].textContent = pairMode ? "C · PAIR VIEW" : "C · REFERENCE VIEW";
+  elements["camera-toggle"].setAttribute("aria-pressed", String(pairMode));
+  elements["game-view"].dataset.cameraMode = state.cameraMode;
 }
 
 function updateAxisFromInputs(axis) {
@@ -299,11 +327,12 @@ function paintButtons() {
 
 function drawPlots() {
   const round = state.snapshot?.series?.round;
-  drawPlot(elements["ri-canvas"], state.trail, round?.relative_ric, "i_km", "r_km", "I", "R");
-  drawPlot(elements["rc-canvas"], state.trail, round?.relative_ric, "c_km", "r_km", "C", "R");
+  const frame = duelPlotFrame(round, state.trail, state.cameraMode);
+  drawPlot(elements["ri-canvas"], frame, "i_km", "r_km", "I", "R");
+  drawPlot(elements["rc-canvas"], frame, "c_km", "r_km", "C", "R");
 }
 
-function drawPlot(canvas, trail, point, xKey, yKey, xLabel, yLabel) {
+function drawPlot(canvas, frame, xKey, yKey, xLabel, yLabel) {
   if (!canvas) return;
   const rect = canvas.getBoundingClientRect();
   if (rect.width < 2 || rect.height < 2) return;
@@ -316,52 +345,127 @@ function drawPlot(canvas, trail, point, xKey, yKey, xLabel, yLabel) {
   const w = rect.width;
   const h = rect.height;
   ctx.clearRect(0, 0, w, h);
-  const points = point ? [...trail, point] : trail;
-  const extent = Math.max(1, ...points.flatMap((sample) => [Math.abs(sample?.[xKey] || 0), Math.abs(sample?.[yKey] || 0)]));
+  const pairMode = frame.cameraMode === DUEL_CAMERA_MODES.CURRENT_PAIR;
+  const centerX = frame.cameraCenter[xKey];
+  const centerY = frame.cameraCenter[yKey];
+  const points = pairMode
+    ? [frame.target, frame.chaser]
+    : [
+        ...frame.targetTrail,
+        ...frame.chaserTrail,
+        ...frame.targetProjection,
+        ...frame.chaserProjection,
+        frame.target,
+        frame.chaser,
+      ];
+  const captureRadiusKm = Number(state.snapshot?.series?.round?.capture_range_km) || .1;
+  const extent = Math.max(
+    pairMode ? .12 : 1,
+    ...points.flatMap((sample) => [
+      Math.abs((sample?.[xKey] || 0) - centerX),
+      Math.abs((sample?.[yKey] || 0) - centerY),
+    ]),
+    Math.abs(frame.target[xKey] - centerX) + captureRadiusKm,
+    Math.abs(frame.target[yKey] - centerY) + captureRadiusKm,
+  );
   const span = niceExtent(extent * 1.22);
   const pad = Math.max(22, Math.min(w, h) * .1);
-  const mapX = (value) => pad + ((value + span) / (2 * span)) * (w - pad * 2);
-  const mapY = (value) => h - pad - ((value + span) / (2 * span)) * (h - pad * 2);
+  const mapX = (value) => pad + (((value - centerX) + span) / (2 * span)) * (w - pad * 2);
+  const mapY = (value) => h - pad - (((value - centerY) + span) / (2 * span)) * (h - pad * 2);
 
-  ctx.lineWidth = 1;
-  ctx.strokeStyle = "rgba(30,38,50,.95)";
-  for (let index = -2; index <= 2; index += 1) {
-    const value = index * span / 2;
-    ctx.beginPath(); ctx.moveTo(mapX(value), pad); ctx.lineTo(mapX(value), h - pad); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(pad, mapY(value)); ctx.lineTo(w - pad, mapY(value)); ctx.stroke();
+  if (!pairMode) {
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = "rgba(30,38,50,.95)";
+    for (let index = -2; index <= 2; index += 1) {
+      const value = index * span / 2;
+      ctx.beginPath(); ctx.moveTo(mapX(value), pad); ctx.lineTo(mapX(value), h - pad); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(pad, mapY(value)); ctx.lineTo(w - pad, mapY(value)); ctx.stroke();
+    }
+    ctx.strokeStyle = "rgba(90,104,124,.95)";
+    ctx.beginPath(); ctx.moveTo(mapX(0), pad); ctx.lineTo(mapX(0), h - pad); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(pad, mapY(0)); ctx.lineTo(w - pad, mapY(0)); ctx.stroke();
+    ctx.fillStyle = "rgba(170,184,204,.9)";
+    ctx.beginPath(); ctx.arc(mapX(0), mapY(0), 3, 0, Math.PI * 2); ctx.fill();
   }
-  ctx.strokeStyle = "rgba(90,104,124,.95)";
-  ctx.beginPath(); ctx.moveTo(mapX(0), pad); ctx.lineTo(mapX(0), h - pad); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(pad, mapY(0)); ctx.lineTo(w - pad, mapY(0)); ctx.stroke();
 
-  const captureRadius = Math.max(3, Math.abs(mapX(.1) - mapX(0)));
+  const captureRadiusX = Math.max(3, Math.abs(mapX(frame.target[xKey] + captureRadiusKm) - mapX(frame.target[xKey])));
+  const captureRadiusY = Math.max(3, Math.abs(mapY(frame.target[yKey] + captureRadiusKm) - mapY(frame.target[yKey])));
   ctx.fillStyle = "rgba(245,92,92,.08)";
   ctx.strokeStyle = "rgba(245,92,92,.72)";
-  ctx.beginPath(); ctx.arc(mapX(0), mapY(0), captureRadius, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-  ctx.fillStyle = "#f55c5c";
-  ctx.beginPath(); ctx.arc(mapX(0), mapY(0), 3, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(mapX(frame.target[xKey]), mapY(frame.target[yKey]), captureRadiusX, captureRadiusY, 0, 0, Math.PI * 2);
+  ctx.fill(); ctx.stroke();
 
-  if (points.length > 1) {
-    ctx.strokeStyle = "rgba(245,205,92,.82)";
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    points.forEach((sample, index) => {
-      const x = mapX(sample[xKey]); const y = mapY(sample[yKey]);
-      if (index === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-    });
-    ctx.stroke();
+  if (!pairMode) {
+    drawPath(ctx, frame.targetTrail, xKey, yKey, mapX, mapY, "rgba(245,92,92,.7)", 1.5);
+    drawPath(ctx, frame.chaserTrail, xKey, yKey, mapX, mapY, "rgba(245,205,92,.72)", 1.5);
+    drawPath(ctx, frame.targetProjection, xKey, yKey, mapX, mapY, "rgba(245,92,92,.95)", 2, [8, 6]);
+    drawPath(ctx, frame.chaserProjection, xKey, yKey, mapX, mapY, "rgba(96,174,224,.95)", 2, [8, 6]);
   }
-  if (point) {
-    ctx.fillStyle = "#f5cd5c";
-    ctx.beginPath(); ctx.arc(mapX(point[xKey]), mapY(point[yKey]), 5, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = "rgba(245,205,92,.45)";
-    ctx.beginPath(); ctx.arc(mapX(point[xKey]), mapY(point[yKey]), 10, 0, Math.PI * 2); ctx.stroke();
-  }
+
+  drawSatellite(ctx, frame.target, xKey, yKey, mapX, mapY, "#f55c5c", "T");
+  drawSatellite(ctx, frame.chaser, xKey, yKey, mapX, mapY, "#f5cd5c", "C");
   ctx.fillStyle = "rgba(170,184,204,.92)";
   ctx.font = "11px Menlo, Consolas, monospace";
-  ctx.fillText(`+${xLabel}`, w - pad - 12, mapY(0) - 6);
-  ctx.fillText(`+${yLabel}`, mapX(0) + 6, pad + 8);
+  if (!pairMode) {
+    ctx.fillText(`+${xLabel}`, w - pad - 12, mapY(0) - 6);
+    ctx.fillText(`+${yLabel}`, mapX(0) + 6, pad + 8);
+    drawProjectionLegend(ctx, w, pad);
+  }
+  ctx.fillText(pairMode ? "PAIR · SATELLITES ONLY" : "REFERENCE ORBIT · HCW COAST", pad, 14);
   ctx.fillText(`${span >= 10 ? span.toFixed(0) : span.toFixed(1)} km`, pad, h - 8);
+}
+
+function drawProjectionLegend(ctx, width, pad) {
+  if (width < 260) return;
+  const startX = Math.max(pad + 150, width - pad - 132);
+  const entries = [
+    { color: "rgba(245,92,92,.95)", label: "T HCW" },
+    { color: "rgba(96,174,224,.95)", label: "C HCW" },
+  ];
+  entries.forEach((entry, index) => {
+    const x = startX + index * 68;
+    ctx.save();
+    ctx.strokeStyle = entry.color;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 4]);
+    ctx.beginPath(); ctx.moveTo(x, 11); ctx.lineTo(x + 17, 11); ctx.stroke();
+    ctx.restore();
+    ctx.fillStyle = entry.color;
+    ctx.font = "9px Menlo, Consolas, monospace";
+    ctx.fillText(entry.label, x + 21, 14);
+  });
+}
+
+function drawPath(ctx, points, xKey, yKey, mapX, mapY, color, width, dash = []) {
+  if (points.length < 2) return;
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.setLineDash(dash);
+  ctx.beginPath();
+  points.forEach((sample, index) => {
+    const x = mapX(sample[xKey]);
+    const y = mapY(sample[yKey]);
+    if (index === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawSatellite(ctx, point, xKey, yKey, mapX, mapY, color, label) {
+  const x = mapX(point[xKey]);
+  const y = mapY(point[yKey]);
+  ctx.fillStyle = color;
+  ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2); ctx.fill();
+  ctx.save();
+  ctx.globalAlpha = .4;
+  ctx.strokeStyle = color;
+  ctx.beginPath(); ctx.arc(x, y, 10, 0, Math.PI * 2); ctx.stroke();
+  ctx.restore();
+  ctx.fillStyle = color;
+  ctx.font = "bold 10px Menlo, Consolas, monospace";
+  ctx.fillText(label, x + 8, y - 8);
 }
 
 function renderLoop() {

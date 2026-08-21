@@ -8,6 +8,8 @@ const wrangler = JSON.parse(
 const workerSource = readFileSync(new URL("../worker/index.js", import.meta.url), "utf8");
 const roomSource = readFileSync(new URL("../src/shared/duel-room.js", import.meta.url), "utf8");
 const assetsIgnore = readFileSync(new URL("../public/.assetsignore", import.meta.url), "utf8");
+const clientSource = readFileSync(new URL("../public/src/client/app.js", import.meta.url), "utf8");
+const stylesSource = readFileSync(new URL("../public/src/client/styles.css", import.meta.url), "utf8");
 
 test("Cloudflare deployment binds one SQLite Durable Object namespace and static assets", () => {
   assert.equal(wrangler.name, "oel-rpo-duel");
@@ -25,7 +27,7 @@ test("Cloudflare deployment binds one SQLite Durable Object namespace and static
 
 test("deployed assets use a dedicated public directory", () => {
   assert.equal(assetsIgnore.trim(), ".assetsignore");
-  for (const path of ["index.html", "src/client/app.js", "src/client/styles.css"]) {
+  for (const path of ["index.html", "src/client/app.js", "src/client/plot-model.js", "src/client/styles.css"]) {
     assert.equal(existsSync(new URL(`../public/${path}`, import.meta.url)), true, path);
   }
   for (const path of ["server", "tests", "worker", "src/shared", "package.json", "package-lock.json"]) {
@@ -40,4 +42,15 @@ test("Worker contract enforces same-origin rooms, bounded payloads, persistence,
   assert.match(workerSource, /state\.storage\.put\("room"/);
   assert.match(workerSource, /Content-Security-Policy/);
   assert.match(workerSource, /Permissions-Policy/);
+});
+
+test("client contract includes the C camera shortcut and a complete landscape-phone layout", () => {
+  assert.match(clientSource, /event\.code === "KeyC"/);
+  const landscapeStart = stylesSource.indexOf("@media (max-height: 580px) and (orientation: landscape)");
+  const landscapeEnd = stylesSource.indexOf("@media (prefers-reduced-motion", landscapeStart);
+  assert.ok(landscapeStart >= 0 && landscapeEnd > landscapeStart);
+  const landscape = stylesSource.slice(landscapeStart, landscapeEnd);
+  assert.match(landscape, /\.game-view \{ position: static; display: grid;/);
+  assert.match(landscape, /\.plots \{ grid-template-columns: 1fr 1fr;/);
+  assert.match(landscape, /\.touch-controls \{ display: grid; grid-template-columns: repeat\(6,/);
 });

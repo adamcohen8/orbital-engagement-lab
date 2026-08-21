@@ -79,6 +79,12 @@ testing only; it does not expose the game outside the local network.
 | I | `A` or `-I` | `D` or `+I` |
 | C | `Left Arrow` or `-C` | `Right Arrow` or `+C` |
 
+Press `C` or use the camera button to switch between the default full-trajectory
+view centered on the propagated Target reference orbit and a satellites-only
+view centered on the current Target/Chaser midpoint. In the reference view,
+solid red/yellow lines are recorded Target/Chaser trails and dashed red/blue
+lines are their current HCW coast projections.
+
 The six on-screen controls work with mouse, pen, or touch. Players cannot set
 simulation speed. The server selects 100x while coasting and 10x while either
 spacecraft maneuvers or during the one-second neutral cooldown.
