@@ -224,6 +224,8 @@ class MagnetorquerHardware:
             raise ValueError("magnetic field must contain three finite values")
 
     def advance(self, demand: ActuatorDemand, *, start_time_ns: int, end_time_ns: int) -> ActuatorRealization:
+        if end_time_ns < start_time_ns:
+            raise ValueError("actuator interval end must not precede start")
         payload = demand.payload
         if payload is not None and not isinstance(payload, MagnetorquerDipoleCommand):
             raise TypeError("magnetorquer hardware requires MagnetorquerDipoleCommand demand")
@@ -272,6 +274,8 @@ class CmgHardware:
         self.gimbal_angle_rad = np.zeros(3)
 
     def advance(self, demand: ActuatorDemand, *, start_time_ns: int, end_time_ns: int) -> ActuatorRealization:
+        if end_time_ns < start_time_ns:
+            raise ValueError("actuator interval end must not precede start")
         payload = demand.payload
         if payload is not None and not isinstance(payload, CmgGimbalRateCommand):
             raise TypeError("CMG hardware requires CmgGimbalRateCommand demand")

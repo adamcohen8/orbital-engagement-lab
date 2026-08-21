@@ -556,9 +556,18 @@ def _validate_ogp_mean_element_product(
     propagation = _required_mapping(payload, "propagation", path, issues)
     _closed_mapping(propagation, {"family", "regime", "propagator_name", "not_tle_text"}, f"{path}.propagation", issues)
     _require_exact(propagation, "family", "OGP", f"{path}.propagation", issues)
-    if _required_string(propagation, "regime", f"{path}.propagation", issues) not in {"sgp4", "sdp4"}:
+    regime = _required_string(propagation, "regime", f"{path}.propagation", issues)
+    if regime not in {"sgp4", "sdp4"}:
         _error(issues, "ogp.regime_invalid", f"{path}.propagation.regime", "Expected sgp4 or sdp4.")
-    _required_string(propagation, "propagator_name", f"{path}.propagation", issues)
+    propagator_name = _required_string(propagation, "propagator_name", f"{path}.propagation", issues)
+    expected_propagator = {"sgp4": "OGP-SGP4", "sdp4": "OGP-SDP4"}.get(regime)
+    if expected_propagator and propagator_name != expected_propagator:
+        _error(
+            issues,
+            "ogp.propagator_regime_mismatch",
+            f"{path}.propagation.propagator_name",
+            f"Expected {expected_propagator} for regime {regime}.",
+        )
     if propagation.get("not_tle_text") is not True:
         _error(issues, "ogp.tle_claim_invalid", f"{path}.propagation.not_tle_text", "Must be true.")
 

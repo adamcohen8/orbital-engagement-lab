@@ -209,32 +209,30 @@ def resolve_sun_moon_positions(env: dict, t_s: float) -> tuple[np.ndarray, np.nd
     Resolve Sun and Moon inertial position vectors (km) using explicit env values,
     optional callable hook, then configured analytic mode.
     """
-    if "sun_ephemeris_time_s" in env and "sun_ephemeris_eci_km" in env:
-        tt = np.asarray(env["sun_ephemeris_time_s"], dtype=float).reshape(-1)
-        rr = np.asarray(env["sun_ephemeris_eci_km"], dtype=float)
-        if tt.size >= 1 and rr.ndim == 2 and rr.shape[0] == tt.size and rr.shape[1] == 3:
-            sun = np.array([np.interp(float(t_s), tt, rr[:, j]) for j in range(3)], dtype=float)
-            if "moon_ephemeris_time_s" in env and "moon_ephemeris_eci_km" in env:
-                tt_m = np.asarray(env["moon_ephemeris_time_s"], dtype=float).reshape(-1)
-                rr_m = np.asarray(env["moon_ephemeris_eci_km"], dtype=float)
-                if tt_m.size >= 1 and rr_m.ndim == 2 and rr_m.shape[0] == tt_m.size and rr_m.shape[1] == 3:
-                    moon = np.array([np.interp(float(t_s), tt_m, rr_m[:, j]) for j in range(3)], dtype=float)
-                    return sun, moon
-    if "moon_ephemeris_time_s" in env and "moon_ephemeris_eci_km" in env:
-        tt = np.asarray(env["moon_ephemeris_time_s"], dtype=float).reshape(-1)
-        rr = np.asarray(env["moon_ephemeris_eci_km"], dtype=float)
-        if tt.size >= 1 and rr.ndim == 2 and rr.shape[0] == tt.size and rr.shape[1] == 3:
-            moon = np.array([np.interp(float(t_s), tt, rr[:, j]) for j in range(3)], dtype=float)
-            if "sun_pos_eci_km" in env:
-                return np.array(env["sun_pos_eci_km"], dtype=float), moon
+    def sampled(body: str) -> np.ndarray | None:
+        time_key = f"{body}_ephemeris_time_s"
+        state_key = f"{body}_ephemeris_eci_km"
+        if time_key not in env or state_key not in env:
+            return None
+        tt = np.asarray(env[time_key], dtype=float).reshape(-1)
+        rr = np.asarray(env[state_key], dtype=float)
+        if tt.size < 1 or rr.ndim != 2 or rr.shape != (tt.size, 3):
+            return None
+        return np.array([np.interp(float(t_s), tt, rr[:, j]) for j in range(3)], dtype=float)
 
-    if "sun_pos_eci_km" in env and "moon_pos_eci_km" in env:
-        return np.array(env["sun_pos_eci_km"], dtype=float), np.array(env["moon_pos_eci_km"], dtype=float)
+    sun_explicit = sampled("sun")
+    moon_explicit = sampled("moon")
+    if sun_explicit is None and "sun_pos_eci_km" in env:
+        sun_explicit = np.array(env["sun_pos_eci_km"], dtype=float)
+    if moon_explicit is None and "moon_pos_eci_km" in env:
+        moon_explicit = np.array(env["moon_pos_eci_km"], dtype=float)
+    if sun_explicit is not None and moon_explicit is not None:
+        return sun_explicit, moon_explicit
 
     jd = resolved_jd_utc(env=env, t_s=t_s)
     if jd is None:
-        sun = np.array(env.get("sun_pos_eci_km", np.array([AU_KM, 0.0, 0.0], dtype=float)), dtype=float)
-        moon = np.array(env.get("moon_pos_eci_km", np.array([384400.0, 0.0, 0.0], dtype=float)), dtype=float)
+        sun = sun_explicit if sun_explicit is not None else np.array([AU_KM, 0.0, 0.0], dtype=float)
+        moon = moon_explicit if moon_explicit is not None else np.array([384400.0, 0.0, 0.0], dtype=float)
         return sun, moon
 
     eph_callable = env.get("ephemeris_callable", None)
@@ -242,7 +240,12 @@ def resolve_sun_moon_positions(env: dict, t_s: float) -> tuple[np.ndarray, np.nd
         out = eph_callable(float(jd), env)
         if isinstance(out, dict):
             if "sun_pos_eci_km" in out and "moon_pos_eci_km" in out:
-                return np.array(out["sun_pos_eci_km"], dtype=float), np.array(out["moon_pos_eci_km"], dtype=float)
+                sun = np.array(out["sun_pos_eci_km"], dtype=float)
+                moon = np.array(out["moon_pos_eci_km"], dtype=float)
+                return (
+                    sun_explicit if sun_explicit is not None else sun,
+                    moon_explicit if moon_explicit is not None else moon,
+                )
 
     mode = str(env.get("ephemeris_mode", "analytic_enhanced")).lower()
     if mode in ("de440_hpop", "hpop_de440", "de440"):
@@ -253,17 +256,22 @@ def resolve_sun_moon_positions(env: dict, t_s: float) -> tuple[np.ndarray, np.nd
         )
 
         if acceleration_enabled_from_mode():
-            return hpop_de440_sun_moon_positions_km(jd, env)
+            sun, moon = hpop_de440_sun_moon_positions_km(jd, env)
+            return sun_explicit if sun_explicit is not None else sun, moon_explicit if moon_explicit is not None else moon
         pos = hpop_de440_positions_km(jd, env)
-        return np.array(pos["sun"], dtype=float), np.array(pos["moon"], dtype=float)
+        sun, moon = np.array(pos["sun"], dtype=float), np.array(pos["moon"], dtype=float)
+        return sun_explicit if sun_explicit is not None else sun, moon_explicit if moon_explicit is not None else moon
     if mode in ("spice", "spiceypy"):
         from sim.dynamics.orbit.spice import spice_sun_moon_positions_eci_km
 
-        return spice_sun_moon_positions_eci_km(jd, env)
+        sun, moon = spice_sun_moon_positions_eci_km(jd, env)
+        return sun_explicit if sun_explicit is not None else sun, moon_explicit if moon_explicit is not None else moon
     if mode in ("analytic_simple", "simple"):
-        return sun_position_eci_km_simple(jd), moon_position_eci_km_simple(jd)
+        sun, moon = sun_position_eci_km_simple(jd), moon_position_eci_km_simple(jd)
+        return sun_explicit if sun_explicit is not None else sun, moon_explicit if moon_explicit is not None else moon
     if mode in ("analytic_enhanced", "enhanced", ""):
-        return sun_position_eci_km_enhanced(jd), moon_position_eci_km_enhanced(jd)
+        sun, moon = sun_position_eci_km_enhanced(jd), moon_position_eci_km_enhanced(jd)
+        return sun_explicit if sun_explicit is not None else sun, moon_explicit if moon_explicit is not None else moon
     raise ValueError(
         "ephemeris_mode must be one of: analytic_enhanced, analytic_simple, de440, hpop_de440, de440_hpop, spice, spiceypy."
     )

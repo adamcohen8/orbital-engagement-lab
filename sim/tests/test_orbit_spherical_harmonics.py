@@ -35,6 +35,15 @@ def scenario_config_from_dict(data: dict):
 
 
 class TestOrbitSphericalHarmonics(unittest.TestCase):
+    def test_duplicate_degree_order_terms_are_rejected(self):
+        with self.assertRaisesRegex(ValueError, "Duplicate spherical harmonic coefficient"):
+            parse_spherical_harmonic_terms(
+                [
+                    {"n": 2, "m": 0, "c_nm": -1.0e-3},
+                    {"n": 2, "m": 0, "c_nm": -2.0e-3},
+                ]
+            )
+
     @staticmethod
     def _write_minimal_eop(path: Path) -> None:
         path.write_text(

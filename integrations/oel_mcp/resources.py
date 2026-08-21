@@ -129,7 +129,7 @@ def build_public_resource_catalog(
 ) -> tuple[PublishedResource, ...]:
     if profile not in DEPLOYMENT_PROFILES:
         raise ValueError("Unknown OEL MCP deployment profile.")
-    public_tools = tuple(contract for contract in tool_contracts if not contract.tool_id.startswith("oel.pro."))
+    public_tools = tuple(contract for contract in tool_contracts if contract.install_profile == "mcp")
     loaders = {
         PUBLIC_RESOURCE_URIS[0]: lambda: _json_text(_tool_schema_payload(profile, public_tools)),
         PUBLIC_RESOURCE_URIS[1]: lambda: _json_text(_saved_query_payload()),
@@ -197,9 +197,9 @@ def _saved_query_payload() -> dict[str, Any]:
 
 
 def _agent_task_payload() -> dict[str, Any]:
-    from sim.agent_task.recipes import list_recipes
+    from sim.agent_task.recipes import is_public_mcp_recipe, list_recipes
 
-    recipes = [asdict(recipe) for recipe in list_recipes() if "public" in recipe.tags]
+    recipes = [asdict(recipe) for recipe in list_recipes() if is_public_mcp_recipe(recipe)]
     return {
         "schema_version": RESOURCE_SCHEMA_VERSION,
         "resource_uri": PUBLIC_RESOURCE_URIS[2],

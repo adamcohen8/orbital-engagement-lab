@@ -781,9 +781,6 @@ if njit is not None:
         ck4 = -3.0 * -1.65597e-6 / 8.0
         if xno <= 0.0:
             return 2
-        period_min = (2.0 * math.pi) / xno
-        if period_min >= SGP4_DEEP_SPACE_PERIOD_THRESHOLD_MIN:
-            return 1
         if eo < 0.0 or eo >= 1.0:
             return 3
 
@@ -802,6 +799,9 @@ if njit is not None:
         ao = a1 * (1.0 - del1 * (1.0 / 3.0 + del1 * (1.0 + 134.0 / 81.0 * del1)))
         delo = 1.5 * ck2 * x3thm1 / ((ao * ao) * betao * betao2)
         xnodp = xno / (1.0 + delo)
+        period_min = (2.0 * math.pi) / xnodp
+        if period_min >= SGP4_DEEP_SPACE_PERIOD_THRESHOLD_MIN:
+            return 1
         aodp = ao / (1.0 - delo)
 
         isimp = (aodp * (1.0 - eo) / ae) < (220.0 / xkmper + ae)

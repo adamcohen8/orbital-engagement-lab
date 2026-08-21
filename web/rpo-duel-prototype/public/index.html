@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#05070a">
+    <title>RPO Duel Beta</title>
+    <link rel="stylesheet" href="/src/client/styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="RPO Duel home">
+          <span><strong>ORBITAL ENGAGEMENT LAB</strong><small>RPO DUEL</small></span>
+        </a>
+        <div id="connection-pill" class="pill" data-tone="neutral">OFFLINE</div>
+      </header>
+
+      <section id="landing-view" class="landing-view">
+        <div class="hero-copy">
+          <p class="eyebrow">RPO TRAINER · TWO PLAYER BETA</p>
+          <h1>RPO Duel <span class="beta-badge">Beta</span></h1>
+          <p>Invite a second pilot. One flies the Chaser and one flies the Target, then roles reverse on the same initial geometry.</p>
+          <div class="rule-strip" aria-label="Prototype rules">
+            <span><b>100 m</b> capture</span>
+            <span><b>15 / 5 m/s</b> budgets</span>
+            <span><b>100x / 10x</b> auto time</span>
+          </div>
+        </div>
+
+        <div class="setup-card">
+          <div class="tab-row" role="tablist">
+            <button id="create-tab" class="tab active" type="button" role="tab" aria-selected="true">Create room</button>
+            <button id="join-tab" class="tab" type="button" role="tab" aria-selected="false">Join room</button>
+          </div>
+          <form id="create-form" class="setup-form">
+            <label>Callsign <input id="create-name" name="name" maxlength="24" autocomplete="nickname" placeholder="PLAYER 1"></label>
+            <fieldset>
+              <legend>Regulation rounds</legend>
+              <div class="round-options">
+                <label><input type="radio" name="rounds" value="2" checked><span>2</span></label>
+                <label><input type="radio" name="rounds" value="4"><span>4</span></label>
+                <label><input type="radio" name="rounds" value="6"><span>6</span></label>
+              </div>
+            </fieldset>
+            <button class="primary-button" type="submit">Create duel</button>
+          </form>
+          <form id="join-form" class="setup-form hidden">
+            <label>Callsign <input id="join-name" name="name" maxlength="24" autocomplete="nickname" placeholder="PLAYER 2"></label>
+            <label>Room code <input id="join-code" name="room" maxlength="8" autocomplete="off" autocapitalize="characters" placeholder="ABC234" required></label>
+            <button class="primary-button" type="submit">Join duel</button>
+          </form>
+          <p id="setup-error" class="form-error" role="alert"></p>
+        </div>
+      </section>
+
+      <section id="game-view" class="game-view hidden">
+        <header class="duel-top-bar">
+          <div class="duel-top-left">
+            <h1>RPO DUEL <span id="round-label">— / —</span></h1>
+            <div class="duel-top-metrics" aria-label="Duel metrics">
+              <span>INFO Range <strong id="range-label">—</strong></span>
+              <span>INFO Rel Speed <strong id="speed-label">—</strong></span>
+              <span>INFO Delta-v <strong id="dv-label">—</strong></span>
+              <span>INFO Time Left <strong id="time-label">05:00:00</strong></span>
+            </div>
+          </div>
+          <div class="duel-objective">
+            <span class="objective-heading">YOUR ROLE</span>
+            <strong id="role-label">WAITING</strong>
+            <div id="auto-time" class="auto-time"><span>AUTO TIME</span><strong>100x</strong><small>COASTING</small></div>
+          </div>
+        </header>
+
+        <section class="duel-game-layout">
+          <div class="plots">
+            <figure class="plot-card">
+              <figcaption>RI Plane <small>In-Track vs Radial</small></figcaption>
+              <canvas id="ri-canvas" aria-label="Radial and in-track relative trajectory"></canvas>
+            </figure>
+            <figure class="plot-card">
+              <figcaption>RC Plane <small>Cross-Track vs Radial</small></figcaption>
+              <canvas id="rc-canvas" aria-label="Radial and cross-track relative trajectory"></canvas>
+            </figure>
+          </div>
+
+          <div id="phase-overlay" class="phase-overlay">
+            <p id="phase-kicker">ROOM READY</p>
+            <strong id="phase-title">Waiting for opponent</strong>
+            <p id="phase-detail">Share the room link to begin.</p>
+            <button id="copy-invite" class="secondary-button" type="button">Copy invite link</button>
+          </div>
+        </section>
+
+        <aside class="duel-hud-panel">
+          <div class="duel-hud-line">
+            <div class="room-readout"><span>ROOM</span><button id="room-code" class="room-code" type="button" title="Copy invite link">------</button></div>
+            <div class="scoreboard">
+              <div id="player-one-card" class="player-score"><span class="status-dot"></span><span class="player-name">PLAYER 1</span><b>0</b></div>
+              <span class="score-divider">:</span>
+              <div id="player-two-card" class="player-score"><b>0</b><span class="player-name">PLAYER 2</span><span class="status-dot"></span></div>
+            </div>
+          </div>
+          <div class="hint-line">Any maneuver sets shared time to 10x. Both players neutral returns it to 100x.</div>
+          <div class="command-line">W/S R&nbsp;&nbsp; A/D I&nbsp;&nbsp; Left/Right C</div>
+          <div class="connection-card">
+            <div><span id="own-connection-dot" class="status-dot"></span><span id="own-connection-label">YOU · CONNECTING</span></div>
+            <div><span id="opponent-connection-dot" class="status-dot"></span><span id="opponent-connection-label">OPPONENT · WAITING</span></div>
+          </div>
+        </aside>
+
+        <section class="touch-controls" aria-label="Spacecraft maneuver controls">
+          <button class="thrust-button" data-axis="i" data-value="-1" type="button">−I<kbd>A</kbd></button>
+          <button class="thrust-button" data-axis="r" data-value="1" type="button">+R<kbd>W</kbd></button>
+          <button class="thrust-button" data-axis="i" data-value="1" type="button">+I<kbd>D</kbd></button>
+          <button class="thrust-button" data-axis="c" data-value="-1" type="button">−C<kbd>←</kbd></button>
+          <button class="thrust-button" data-axis="r" data-value="-1" type="button">−R<kbd>S</kbd></button>
+          <button class="thrust-button" data-axis="c" data-value="1" type="button">+C<kbd>→</kbd></button>
+        </section>
+      </section>
+    </main>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="/src/client/app.js"></script>
+  </body>
+</html>

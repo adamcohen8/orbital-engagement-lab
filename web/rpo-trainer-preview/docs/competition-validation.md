@@ -5,9 +5,10 @@ without running the downloadable Python/OEL engine in the cloud.
 
 ## Scope
 
-The browser competition path is a browser-native implementation of the
-downloadable Pursuit Arcade rules. It does not execute Python `run_game.py`
-inside the browser:
+The browser competition path is a browser-native implementation aligned with
+the checked-in local Pursuit Arcade scenario. Pursuit Arcade is web-only in the
+level selector and intentionally excluded from the downloadable launcher. The
+browser does not execute Python `run_game.py`:
 
 - The web arcade owns a deterministic, browser-native implementation of the
   Pursuit Arcade competition model.
@@ -15,7 +16,7 @@ inside the browser:
 - Hosted leaderboard validation replays inputs instead of trusting
   client-submitted states or scores.
 
-The current browser-native challenge is aligned with
+The current browser-native challenge is contract-checked against
 `sim/game/configs/game_training_rpo_arcade_pursuit.yaml` for the first-round
 setup and core scoring contract:
 
@@ -30,6 +31,12 @@ setup and core scoring contract:
 - target defense activates on range OR closing-speed trigger
 - desktop-style score: seconds remaining plus chaser/target delta-v remaining
   in mm/s, multiplied by difficulty
+
+The replay-versioned browser challenge retains `mu = 398600.4418 km^3/s^2`,
+while the current OEL engine constant is `398600.4415 km^3/s^2`. This bounded
+exception preserves existing `web-two-body-v2` hashes and replay packets; the
+Level 0 OEL-reference trajectory gate in `tests/preview-contract.test.mjs`
+checks the practical browser-model continuity.
 
 Implemented arcade-round parity:
 
@@ -165,7 +172,7 @@ client-submitted images.
 
 ```bash
 cd web/rpo-trainer-preview
-node --test tests/competition-engine.test.mjs
+npm test
 ```
 
 The tests cover:
@@ -179,6 +186,10 @@ The tests cover:
 - full multi-round arcade attempt validation,
 - fixture validation,
 - static SVG plot generation with burn markers.
+- downloadable-YAML parity for Level 0 copy/budgets and Pursuit Arcade
+  constants,
+- browser HCW path comparison against OEL-generated Level 0 two-body
+  references.
 
 ## Hosted Pieces
 

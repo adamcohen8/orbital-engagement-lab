@@ -106,6 +106,19 @@ def test_iau76_80_eop_alias_matches_legacy_hpop_like_rotation(tmp_path: Path) ->
     np.testing.assert_allclose(canonical, legacy, rtol=0.0, atol=0.0)
 
 
+def test_direct_eop_harmonic_transform_requires_absolute_epoch(tmp_path: Path) -> None:
+    eop_path = tmp_path / "EOP-All.txt"
+    _write_minimal_eop(eop_path)
+
+    with pytest.raises(ValueError, match="require jd_utc_start"):
+        eci_to_ecef_harmonic(
+            np.array([7000.0, 0.0, 0.0]),
+            0.0,
+            frame_model="iau76_80_eop",
+            eop_path=str(eop_path),
+        )
+
+
 def test_frame_context_records_eop_time_scale_provenance(tmp_path: Path) -> None:
     eop_path = tmp_path / "EOP-All.txt"
     _write_minimal_eop(eop_path)

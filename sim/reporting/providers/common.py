@@ -1,6 +1,15 @@
 # ruff: noqa: F401,F403,F405,I001
 from ..ai_report_models import *
 
+MAX_AI_RESPONSE_BYTES = 16 * 1024 * 1024
+
+
+def _read_bounded_response(response: Any, *, maximum: int = MAX_AI_RESPONSE_BYTES) -> bytes:
+    payload = response.read(int(maximum) + 1)
+    if len(payload) > int(maximum):
+        raise ValueError(f"AI provider response exceeds the {maximum}-byte limit.")
+    return payload
+
 def _api_key_from_env(ai_cfg: dict[str, Any], *, default_env: str, provider_name: str) -> tuple[str, str]:
     env_name = str(ai_cfg.get("api_key_env", default_env) or default_env).strip()
     if not env_name:

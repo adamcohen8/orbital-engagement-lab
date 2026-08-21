@@ -6,6 +6,45 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.27.0 - 2026-08-20
+
+Release thesis: `v0.27.0` promotes OEL's deterministic coverage and directed
+link analysis into the public workflow while turning the RPO Trainer web
+preview into a clearer product surface with an experimental two-player RPO
+Duel Beta.
+
+### Added
+
+- Added public scenario and programmatic workflows for global, regional,
+  point, constellation, and communications coverage; coverage aggregation,
+  tasking, sensitivity, and review queries; directed-link budgets and runtime
+  monitoring; rich Earth/footprint geometry; plots, reports, contracts, and a
+  validated public coverage-and-link example. The workflows remain bounded by
+  declared geometry, attitude, propagation, and communications assumptions and
+  do not imply operational availability or RF validation.
+
+- Added the experimental RPO Duel Beta: deterministic server-authoritative
+  two-player pursuit/evasion with mirrored role pairs, fixed-step browser
+  physics, automatic time control, bounded delta-v, room codes, reconnect and
+  disconnect-coast behavior, keyboard/touch controls, and responsive RI/RC
+  plots. The release includes a local Node server plus a Cloudflare Worker with
+  one SQLite-backed Durable Object per room, a narrowly scoped static asset
+  upload, persistent replay inputs, expiry alarms, same-origin API/WebSocket
+  access, bounded payloads, security headers, and local deployment tests.
+
+### Changed
+
+- Reframed the RPO Trainer website as a browser preview of the downloadable
+  game, aligned Level 0 copy and reference trajectories with the checked-in
+  OEL scenario, identified the reduced Sandbox and web-only Pursuit Arcade
+  boundaries explicitly, and added fixture/currentness checks. The selector
+  now advertises RPO Duel with a visible `Beta` label and launches its separate
+  hosted service.
+
+- Retained drag racing as an ignored local experiment. Its level, tests, and
+  assets are absent from the public export and v0.27.0 release artifacts. The
+  separate OEL Front End concept is also not part of this release.
+
 ## 0.26.0 - 2026-08-18
 
 Release thesis: `v0.26.0` makes OEL's agent-facing workflows reproducible and

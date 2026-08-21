@@ -248,6 +248,9 @@ def test_single_run_review_store_writes_queryable_sqlite(tmp_path: Path) -> None
         fsw_identities = conn.execute(
             "SELECT DISTINCT stack_id, stack_version, profile_id FROM fsw_invocations WHERE object_id = 'chaser'"
         ).fetchall()
+        standard_debug_detail = conn.execute(
+            "SELECT detail_json FROM fsw_invocations ORDER BY object_id, invocation_id LIMIT 1"
+        ).fetchone()[0]
         min_range = conn.execute("SELECT MIN(range_km) FROM relative_state").fetchone()[0]
         artifact_paths = [row[0] for row in conn.execute("SELECT path FROM artifacts ORDER BY artifact_id")]
 
@@ -264,6 +267,7 @@ def test_single_run_review_store_writes_queryable_sqlite(tmp_path: Path) -> None
     assert command_gate_count == 0
     assert fsw_invocation_count == 6
     assert fsw_identities == [("fsw.passive", "2.0.0", "fsw.profile.coast_monitor.v1")]
+    assert standard_debug_detail is None
     assert min_range == pytest.approx(result.min_range("chaser", "target"))
     assert {
         "index.md",
@@ -272,6 +276,23 @@ def test_single_run_review_store_writes_queryable_sqlite(tmp_path: Path) -> None
         "review/run.sqlite",
         "review/schema.json",
     }.issubset(set(artifact_paths))
+
+
+def test_full_review_store_retains_fsw_debug_detail(tmp_path: Path) -> None:
+    raw = _review_store_config(tmp_path)
+    raw["outputs"]["review"]["detail"] = "full"
+
+    result = SimulationSession.from_config(SimulationConfig.from_dict(raw)).run()
+    db_path = Path(result.summary["review_outputs"]["sqlite"])
+
+    with sqlite3.connect(db_path) as conn:
+        detail_json = conn.execute(
+            "SELECT detail_json FROM fsw_invocations ORDER BY object_id, invocation_id LIMIT 1"
+        ).fetchone()[0]
+
+    detail = json.loads(detail_json)
+    assert detail["invocation_id"] >= 1
+    assert "input_packet_ids" in detail
 
 
 def test_v2_review_store_links_invocation_command_receipt_and_realization(tmp_path: Path) -> None:
@@ -1101,6 +1122,7 @@ def test_review_plot_cli_dry_run_and_creates_artifact(tmp_path: Path) -> None:
 
 
 def test_workflow_review_manifest_writes_queryable_tables_and_cli_summary(tmp_path: Path) -> None:
+    (tmp_path / "controller_bench_summary.json").write_text("{}\n", encoding="utf-8")
     outputs = write_workflow_review(
         output_dir=tmp_path,
         workflow_type="controller_bench",
@@ -1164,6 +1186,7 @@ def test_workflow_review_manifest_removes_stale_store_when_tables_are_absent(tmp
         recommended_queries=[{"name": "old", "sql": "SELECT benchmark_name FROM validation_benchmarks"}],
     )
 
+    (tmp_path / "summary.json").write_text("{}\n", encoding="utf-8")
     outputs = write_workflow_review(
         output_dir=tmp_path,
         workflow_type="validation",

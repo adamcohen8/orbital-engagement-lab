@@ -17,6 +17,7 @@ import tarfile
 import tempfile
 import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -83,8 +84,24 @@ def _verify(payload: dict[str, Any], keys_payload: dict[str, Any]) -> bool:
     item = next((entry for entry in items if isinstance(entry, dict) and entry.get("key_id") == key_id), None)
     if item is None:
         return False
+    if bool(item.get("revoked", False)):
+        return False
+    now = datetime.now(timezone.utc)
+    for field, is_lower_bound in (("not_before", True), ("expires_at", False)):
+        raw_time = item.get(field)
+        if raw_time:
+            try:
+                boundary = datetime.fromisoformat(str(raw_time).replace("Z", "+00:00"))
+                if boundary.tzinfo is None:
+                    boundary = boundary.replace(tzinfo=timezone.utc)
+            except ValueError:
+                return False
+            if (is_lower_bound and now < boundary) or (not is_lower_bound and now >= boundary):
+                return False
     modulus = _decode_int(item["n"])
     exponent = _decode_int(item.get("e", "AQAB"))
+    if modulus.bit_length() < 2048 or exponent != 65537:
+        return False
     signature_text = str(signature.get("value", ""))
     raw = signature_text.encode("ascii")
     signature_bytes = base64.urlsafe_b64decode(raw + b"=" * ((4 - len(raw) % 4) % 4))

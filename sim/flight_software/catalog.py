@@ -136,6 +136,7 @@ _COMMON_PARAMS = {
 }
 _PASSIVE_PARAMS = _COMMON_PARAMS | {"measurement_stale_after_s"}
 _ATTITUDE_PARAMS = _COMMON_PARAMS | {
+    "measurement_stale_after_s",
     "reference_mode",
     "quaternion_bn",
     "ric_axis",
@@ -163,6 +164,7 @@ _ATTITUDE_PARAMS = _COMMON_PARAMS | {
     "momentum_dump_max_dipole_a_m2",
 }
 _TRANSLATION_PARAMS = _COMMON_PARAMS | {
+    "measurement_stale_after_s",
     "translation_mode",
     "max_acceleration_m_s2",
     "max_force_n",

@@ -368,6 +368,7 @@ def _review_store_identity(workspace: ReviewWorkspace) -> dict[str, Any]:
         "relative_path": _relative_to_output(workspace, workspace.db_path),
         "size_bytes": int(stat.st_size),
         "mtime_ns": int(stat.st_mtime_ns),
+        "sha256": hashlib.sha256(workspace.db_path.read_bytes()).hexdigest(),
     }
 
 

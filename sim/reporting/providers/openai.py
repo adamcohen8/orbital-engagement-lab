@@ -80,7 +80,7 @@ def _call_openai(
     )
     _add_nonredirected_secret_header(request, "Authorization", f"Bearer {api_key}")
     with urllib.request.urlopen(request, timeout=timeout_s) as response:
-        raw = response.read().decode("utf-8")
+        raw = _read_bounded_response(response).decode("utf-8")
     payload = json.loads(raw)
     return _extract_openai_response_text(payload), payload
 

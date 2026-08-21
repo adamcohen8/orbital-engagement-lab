@@ -58,28 +58,34 @@ def build_dependency_evidence(
     report = json.loads(report_path.read_text(encoding="utf-8"))
 
     packages: list[dict[str, object]] = []
+    incomplete: list[str] = []
     for item in list(report.get("install", []) or []):
         metadata = dict(item.get("metadata", {}) or {})
         download_info = dict(item.get("download_info", {}) or {})
         source_url, filename = _source_details(str(download_info.get("url", "") or ""))
+        artifact_hash = _archive_hash(download_info)
+        artifact_type = "wheel" if filename.lower().endswith(".whl") else ("source" if filename else "installed-or-local")
+        if source_url != "<local-source>" and (not artifact_hash or artifact_type != "wheel"):
+            incomplete.append(f"{metadata.get('name', '')}=={metadata.get('version', '')}")
         packages.append(
             {
                 "name": str(metadata.get("name", "") or ""),
                 "version": str(metadata.get("version", "") or ""),
                 "requested": bool(item.get("requested", False)),
                 "artifact": filename,
-                "artifact_type": (
-                    "wheel"
-                    if filename.lower().endswith(".whl")
-                    else ("source" if filename else "installed-or-local")
-                ),
+                "artifact_type": artifact_type,
                 "wheel_tags": _wheel_tags(filename),
                 "source_url": source_url,
-                "sha256": _archive_hash(download_info),
+                "sha256": artifact_hash,
             }
         )
     packages.sort(key=lambda item: (str(item["name"]).lower(), str(item["version"])))
 
+    if incomplete:
+        raise ValueError(
+            "Dependency evidence requires SHA-256-bound wheel artifacts for every non-local package: "
+            + ", ".join(sorted(incomplete))
+        )
     return {
         "schema_version": DEPENDENCY_EVIDENCE_SCHEMA_VERSION,
         "generated_utc": datetime.now(timezone.utc).isoformat(),

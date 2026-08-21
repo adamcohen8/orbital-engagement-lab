@@ -183,6 +183,29 @@ class OrbitalElementsStationKeepTests(unittest.TestCase):
 
         np.testing.assert_allclose(cmd.thrust_eci_km_s2, np.zeros(3), rtol=0.0, atol=0.0)
 
+    def test_sma_ecc_controller_corrects_when_below_nonzero_target(self) -> None:
+        truth = _truth_from_coes(
+            a_km=7000.0,
+            ecc=0.01,
+            inc_deg=0.0,
+            raan_deg=0.0,
+            argp_deg=0.0,
+            true_anomaly_deg=0.0,
+        )
+        belief = StateBelief(
+            state=np.hstack((truth.position_eci_km, truth.velocity_eci_km_s)),
+            covariance=np.eye(6),
+            last_update_t_s=0.0,
+        )
+
+        command = SemiMajorAxisEccentricityController(
+            target_a_km=7000.0,
+            target_ecc=0.02,
+        ).act(belief, 0.0, 1.0)
+
+        self.assertGreater(float(np.linalg.norm(command.thrust_eci_km_s2)), 0.0)
+        self.assertLess(float(command.mode_flags["ecc_error"]), 0.0)
+
     def test_orbital_element_feedback_handles_circular_target(self) -> None:
         r, v = coe_to_rv_eci(
             a_km=6950.0,

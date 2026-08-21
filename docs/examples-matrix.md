@@ -28,6 +28,7 @@ perturbations.
 | `public_sgp4_passive_propagation.yaml` | Passive OGP-SGP4 TLE catalog-object propagation with `propagation_method: general` and `general.model: sgp4` | summary JSON, review store, `object_propagation`, `object_state_frame`, trajectory histories | OGP-SGP4 object is passive: no thrust, controllers, or OEL force-model modifiers apply to that object's trajectory. Product metadata may request native TEME, while shared simulation histories are canonical ECI. Direct OGP/Scale interfaces provide native TEME arrays. Deep-space TLEs route to OGP-SDP4 through the same general-propagation surface. |
 | `public_sgp4_passive_eci_transform.yaml` | Passive TLE catalog-object propagation with opt-in Vallado IAU-80 TEME-to-ECI output | summary JSON, review store, `object_propagation`, `object_state_frame`, trajectory histories | Uses `output_frame: eci` and `frame_transform: teme_to_eci_iau80`. This is deterministic frame-reduction plumbing for validation and review workflows, not an EOP-driven operational frame service. |
 | `public_ground_station_access_from_tle.yaml` | Passive station access from an OGP-initialized TLE object | access summary, access/elevation/range plot, and map-backed ground track | Not continuous OGP-SGP4/SDP4 catalog propagation: uses the same TLE initializer, then ONP with J2 enabled for a quick access screen. |
+| `public_coverage_and_link_analysis.yaml` | Whole-Earth conical coverage and a directed free-space spacecraft link after one deterministic propagation | content-bound coverage/link artifacts and `coverage_*` / `link_*` review tables | Experimental engineering analysis; not calibrated sensor performance, weather/interference availability, scheduling, or operational communications assurance. |
 | `public_closed_loop_rendezvous_lqr.yaml` | Compact closed-loop chaser/target rendezvous with HCW LQR | run summary and rendezvous metrics | Fastest controller example for reading the YAML shape. |
 | `public_rendezvous_closed_loop.yaml` | Broader RPO artifact review with attitude pointing, sensing, EKF knowledge, and plots | dashboard, control, estimation, sensor-access, ground-track plots, and review store | Best public example for end-to-end closed-loop artifact review; use `public_closed_loop_rendezvous_lqr.yaml` for compact terminal range closure. |
 | `public_orbit_environment_stack.yaml` | Perturbation and environment toggles | summary JSON and optional plots | Use to inspect deterministic force-model configuration. |
@@ -85,6 +86,7 @@ also works:
   `examples/python/flagship_analysis.py`.
 - TLE-initialized numerical propagation: start with `public_tle_2hr_propagation.yaml`.
 - Ground-station access: start with `public_ground_station_access_from_tle.yaml`.
+- Coverage and directed links: start with `public_coverage_and_link_analysis.yaml`.
 - Atmospheric re-entry: start with `configs/reentry_smoke.yaml`, then use
   `public_reentry_interactive_demo.yaml` for the longer interactive plot view.
 - Rocket/ascent dynamics: start with `public_rocket_launch_to_orbit.yaml`.

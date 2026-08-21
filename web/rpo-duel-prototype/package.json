@@ -1,0 +1,20 @@
+{
+  "name": "oel-rpo-duel",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "node server/server.mjs",
+    "dev:worker": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "wrangler": "4.125.0"
+  }
+}

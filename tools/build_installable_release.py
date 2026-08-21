@@ -54,6 +54,7 @@ _EXCLUDED_PARTS = {
     "outputs",
 }
 _LOCAL_ONLY_SOURCE_PATTERNS = (
+    "examples/experiments/**",
     "sim/game/assets/drag_racing_*.png",
     "sim/game/configs/game_training_rpo_bonus_drag_racing.yaml",
     "sim/tests/test_game_drag_racing_local.py",
@@ -221,19 +222,49 @@ def _collect_supply_chain_evidence(
     if not gate_path.is_file():
         raise FileNotFoundError(f"Supply-chain gate manifest was not found: {gate_path}")
     gate = json.loads(gate_path.read_text(encoding="utf-8"))
-    if not isinstance(gate, dict) or not gate.get("passed"):
+    if (
+        not isinstance(gate, dict)
+        or gate.get("schema_version") != 1
+        or gate.get("kind") != "oel_supply_chain_gate"
+        or gate.get("product") != "oel-pro"
+        or not gate.get("passed")
+    ):
         raise ValueError("Supply-chain evidence is not a passing gate.")
     gate_version = str(gate.get("package_version", "") or "")
     if gate_version and gate_version != version:
         raise ValueError(f"Supply-chain evidence version {gate_version!r} does not match release {version!r}.")
+    required_artifacts = {
+        "pip-install-report.json",
+        "pip-check.txt",
+        "wheel-inventory.json",
+        "sbom.cdx.json",
+        "python-freeze.txt",
+        "pip-audit.json",
+    }
     source_files = [gate_path]
     for item in gate.get("artifacts", []):
         if not isinstance(item, dict) or not item.get("path"):
             continue
         path = Path(str(item["path"])).expanduser().resolve()
+        try:
+            path.relative_to(evidence_root)
+        except ValueError as exc:
+            raise ValueError(f"Supply-chain evidence artifact escapes its evidence root: {path}") from exc
         if not path.is_file() or sha256_file(path) != item.get("sha256"):
             raise ValueError(f"Supply-chain evidence artifact is missing or changed: {path}")
+        if int(item.get("bytes", -1)) != path.stat().st_size:
+            raise ValueError(f"Supply-chain evidence artifact size changed: {path}")
         source_files.append(path)
+    if {path.name for path in source_files[1:]} != required_artifacts:
+        raise ValueError("Supply-chain gate does not declare the exact required release evidence set.")
+    wheel_inventory = json.loads((evidence_root / "wheel-inventory.json").read_text(encoding="utf-8"))
+    resolved_wheels = [
+        {"name": str(row.get("artifact", "")), "sha256": str(row.get("sha256", ""))}
+        for row in list(dict(wheel_inventory).get("packages", []) or [])
+        if isinstance(row, dict) and row.get("artifact_type") == "wheel"
+    ]
+    if not resolved_wheels or any(not row["name"] or len(row["sha256"]) != 64 for row in resolved_wheels):
+        raise ValueError("Supply-chain wheel inventory is incomplete or lacks immutable wheel hashes.")
     source_digests: list[dict[str, Any]] = []
     names: set[str] = set()
     for path in source_files:
@@ -271,10 +302,17 @@ def _collect_supply_chain_evidence(
         "status": "passed",
         "gate": f"release-evidence/{attestation_path.name}",
         "artifacts": [published],
+        "resolved_wheels": resolved_wheels,
     }
 
 
-def _collect_wheelhouse(source: Path | None, output: Path, *, required: bool) -> tuple[list[Path], list[dict[str, Any]]]:
+def _collect_wheelhouse(
+    source: Path | None,
+    output: Path,
+    *,
+    required: bool,
+    expected_wheels: list[dict[str, Any]] | None = None,
+) -> tuple[list[Path], list[dict[str, Any]]]:
     if source is None:
         if required:
             raise ValueError("Signed release builds require --wheelhouse for zero-network offline installation.")
@@ -283,15 +321,20 @@ def _collect_wheelhouse(source: Path | None, output: Path, *, required: bool) ->
     wheels = sorted(wheelhouse.glob("*.whl")) if wheelhouse.is_dir() else []
     if not wheels:
         raise ValueError(f"Release wheelhouse contains no wheels: {wheelhouse}")
-    destination = output / "wheelhouse"
-    destination.mkdir(parents=True, exist_ok=True)
-    copied: list[Path] = []
-    artifacts: list[dict[str, Any]] = []
     for wheel in wheels:
         if wheel.is_symlink() or not wheel.is_file():
             raise ValueError(f"Wheelhouse entries must be regular files: {wheel}")
         if not zipfile.is_zipfile(wheel):
             raise ValueError(f"Wheelhouse entry is not a valid wheel archive: {wheel}")
+    actual_wheels = {wheel.name: sha256_file(wheel) for wheel in wheels}
+    expected = {str(row.get("name")): str(row.get("sha256")) for row in list(expected_wheels or [])}
+    if required and actual_wheels != expected:
+        raise ValueError("Release wheelhouse does not exactly match the passing gate wheel inventory.")
+    destination = output / "wheelhouse"
+    destination.mkdir(parents=True, exist_ok=True)
+    copied: list[Path] = []
+    artifacts: list[dict[str, Any]] = []
+    for wheel in wheels:
         with zipfile.ZipFile(wheel) as archive:
             names = archive.namelist()
             if archive.testzip() is not None:
@@ -418,8 +461,14 @@ def build_release(
 ) -> dict[str, Any]:
     root = source_root.expanduser().resolve()
     output = output_dir.expanduser().resolve()
-    if edition == "public" and (root / "docs" / "operations" / "public_surface_manifest.yaml").is_file():
-        raise ValueError("Public installable releases must be built from the generated public export, not the private tree.")
+    if edition == "public":
+        if (root / "docs" / "operations" / "public_surface_manifest.yaml").is_file():
+            raise ValueError("Public installable releases must be built from the generated public export, not the private tree.")
+        from tools.check_public_export import check_public_export
+
+        boundary_errors = check_public_export(root)
+        if boundary_errors:
+            raise ValueError("Public source boundary check failed:\n- " + "\n- ".join(boundary_errors))
     if edition not in {"public", "pro"} or channel not in {"stable", "preview"}:
         raise ValueError("Unsupported release edition or channel.")
     signing_key: RSAPrivateKey | None = None
@@ -465,6 +514,7 @@ def build_release(
         wheelhouse,
         output,
         required=not developer_unsigned,
+        expected_wheels=list(supply_chain.get("resolved_wheels", []) or []),
     )
     archive = output / f"orbital-engagement-lab-{version}-{edition}.tar.gz"
     _build_source_archive(root, archive, version=version, epoch=epoch)
@@ -573,6 +623,14 @@ def build_release(
             raise ValueError("Signed update channel does not verify against the embedded trusted-key registry.")
     channel_path = output / f"{edition}-{channel}.json"
     channel_path.write_text(json.dumps(channel_index, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    release_asset_paths = [
+        archive,
+        manifest_path,
+        channel_path,
+        *installers,
+        *( [bundle] if wheel_files else [] ),
+        output / "trusted-release-keys.json",
+    ]
     receipt = {
         "schema_version": "oel.release-build-receipt.v1",
         "status": "ready",
@@ -590,6 +648,10 @@ def build_release(
         "developer_unsigned": developer_unsigned,
         "supply_chain": supply_chain,
         "offline_runtime_qualification": offline_runtime_qualification,
+        "release_assets": [
+            {"name": path.name, "bytes": path.stat().st_size, "sha256": sha256_file(path)}
+            for path in sorted(release_asset_paths, key=lambda item: item.name)
+        ],
     }
     (output / "release-build-receipt.json").write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n")
     return receipt

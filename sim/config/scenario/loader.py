@@ -34,6 +34,7 @@ from sim.config.scenario.simulator import (
 )
 from sim.config.scenario.validation import (
     _validate_object_references,
+    _validate_orbital_analysis_references,
     _validate_physics_runtime_settings,
 )
 from sim.schema_versions import LEGACY_SCENARIO_SCHEMA_VERSION, SCENARIO_SCHEMA_VERSION
@@ -120,6 +121,7 @@ def scenario_config_from_dict(
             raise ValueError(f"{object_id}.reference_orbit.enabled requires {object_id}.enabled to be true.")
     _validate_physics_runtime_settings(cfg)
     _validate_object_references(cfg)
+    _validate_orbital_analysis_references(cfg)
     return cfg
 def load_simulation_yaml(
     path: str | Path,

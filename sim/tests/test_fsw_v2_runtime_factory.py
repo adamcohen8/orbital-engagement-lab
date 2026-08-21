@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from sim import SimulationConfig, SimulationSession
+from sim.actuators.command_bus import ActuatorDemand, DemandMode
 from sim.actuators.physical import (
     CmgHardware,
     ContinuousEngineHardware,
@@ -23,6 +24,27 @@ from sim.flight_software import (
     with_computed_content_hash,
 )
 from sim.single_run_support import _retime_decision_truth
+
+
+@pytest.mark.parametrize(
+    "hardware",
+    [
+        MagnetorquerHardware(
+            "torquer",
+            max_dipole_a_m2=(1.0, 1.0, 1.0),
+            magnetic_field_body_t=(0.0, 0.0, 3.0e-5),
+        ),
+        CmgHardware(
+            "cmg",
+            momentum_n_m_s=(1.0, 1.0, 1.0),
+            max_gimbal_rate_rad_s=(0.1, 0.1, 0.1),
+        ),
+    ],
+)
+def test_attitude_hardware_rejects_negative_intervals(hardware: object) -> None:
+    demand = ActuatorDemand(hardware.actuator_id, DemandMode.IDLE, None, None)  # type: ignore[attr-defined]
+    with pytest.raises(ValueError, match="interval end"):
+        hardware.advance(demand, start_time_ns=10, end_time_ns=9)  # type: ignore[attr-defined]
 
 
 def _scenario(stack: str, params: dict | None = None) -> dict:

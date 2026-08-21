@@ -750,18 +750,24 @@ def parse_spherical_harmonic_terms(raw_terms: list[dict | SphericalHarmonicTerm]
     if not raw_terms:
         return []
     out: list[SphericalHarmonicTerm] = []
+    seen: set[tuple[int, int]] = set()
     for i, item in enumerate(raw_terms):
         if isinstance(item, SphericalHarmonicTerm):
-            out.append(item)
-            continue
-        if not isinstance(item, dict):
-            raise ValueError(f"spherical harmonic term index {i} must be a dict or SphericalHarmonicTerm.")
-        n = int(item.get("n", -1))
-        m = int(item.get("m", -1))
-        c_nm = float(item.get("c_nm", item.get("c", 0.0)))
-        s_nm = float(item.get("s_nm", item.get("s", 0.0)))
-        normalized = bool(item.get("normalized", False))
-        out.append(SphericalHarmonicTerm(n=n, m=m, c_nm=c_nm, s_nm=s_nm, normalized=normalized))
+            term = item
+        else:
+            if not isinstance(item, dict):
+                raise ValueError(f"spherical harmonic term index {i} must be a dict or SphericalHarmonicTerm.")
+            n = int(item.get("n", -1))
+            m = int(item.get("m", -1))
+            c_nm = float(item.get("c_nm", item.get("c", 0.0)))
+            s_nm = float(item.get("s_nm", item.get("s", 0.0)))
+            normalized = bool(item.get("normalized", False))
+            term = SphericalHarmonicTerm(n=n, m=m, c_nm=c_nm, s_nm=s_nm, normalized=normalized)
+        key = (int(term.n), int(term.m))
+        if key in seen:
+            raise ValueError(f"Duplicate spherical harmonic coefficient for (n, m)={key} at term index {i}.")
+        seen.add(key)
+        out.append(term)
     return out
 
 

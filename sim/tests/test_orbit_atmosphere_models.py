@@ -719,6 +719,27 @@ class TestOrbitAtmosphereModels(unittest.TestCase):
 
         self.assertAlmostEqual(rho_named, rho_alias)
 
+    def test_harris_priester_frame_aliases_apply_the_same_rotation(self):
+        r = np.array([6378.137 + 500.0, 0.0, 0.0], dtype=float)
+        base_env = {
+            "sun_pos_eci_km": np.array([1.0, 0.0, 0.0]),
+            "harris_priester_f107": 175,
+            "jd_utc_start": 2460310.5,
+        }
+        with patch(
+            "sim.dynamics.orbit.harris_priester_backend.precession_nutation_rotation_hpop_like",
+            return_value=np.eye(3),
+        ) as rotation:
+            legacy = harris_priester_backend_density(r, 60.0, {**base_env, "density_frame_model": "hpop_like"})
+            canonical = harris_priester_backend_density(
+                r,
+                60.0,
+                {**base_env, "density_frame_model": "iau76_80_eop"},
+            )
+
+        self.assertEqual(rotation.call_count, 2)
+        self.assertEqual(canonical, legacy)
+
     def test_harris_priester_uses_wgs84_geodetic_height_when_requested(self):
         r = np.array([3506.788211789612, 4884.292725366271, 2667.959407741529], dtype=float)
         env = {"sun_pos_eci_km": np.array([1.0, 0.0, 0.0]), "harris_priester_f107": 175}

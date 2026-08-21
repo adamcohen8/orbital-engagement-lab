@@ -383,7 +383,13 @@ class _SingleRunEngine:
                     rng=np.random.default_rng(int(rng.integers(0, 2**31 - 1))),
                 )
         initial_world_truth = {
-            aid: agent.truth for aid, agent in self.agents.items() if agent.kind == "satellite" and agent.active
+            aid: (
+                agent.truth.copy()
+                if agent.kind == "satellite"
+                else _rocket_state_to_truth(agent.rocket_state).copy()
+            )
+            for aid, agent in self.agents.items()
+            if agent.active
         }
         for _aid, agent in self.agents.items():
             if agent.kind == "satellite" and agent.active and agent.flight_software_runtime is not None:
@@ -539,7 +545,13 @@ class _SingleRunEngine:
                             self.rocket_metric_hists[metric_key][0] = float(metric_value)
             self._record_reentry_metrics(aid=aid, truth=truth, sample_index=0, dt_s=0.0)
 
-        self.termination_monitor.check_reentry(t_s=float(self.t_s[0]))
+        # Satellites may arrive invalidly inside Earth and must fail at the
+        # initial sample. Launch vehicles legitimately begin on the pad at the
+        # surface, so their impact policy starts after the first propagation.
+        if not self.termination_monitor.check_earth_impact(
+            t_s=float(self.t_s[0]), include_rockets=False
+        ):
+            self.termination_monitor.check_reentry(t_s=float(self.t_s[0]))
         self._emit_step_callback(0)
         self.object_step_executor = self._build_object_step_executor()
 
@@ -1172,7 +1184,11 @@ class _SingleRunEngine:
 
         snapshot_t0 = perf_counter()
         world_truth_start = {
-            aid: (agent.truth if agent.kind == "satellite" else _rocket_state_to_truth(agent.rocket_state))
+            aid: (
+                agent.truth.copy()
+                if agent.kind == "satellite"
+                else _rocket_state_to_truth(agent.rocket_state).copy()
+            )
             for aid, agent in self.agents.items()
             if agent.active
         }

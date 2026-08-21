@@ -6,13 +6,17 @@ import {
   gameTickDtS,
   validateAttemptPacket,
 } from "./competition/arcade-engine.js";
+import { PREVIEW_LEVEL_CONTRACTS } from "./preview-contract.js";
+import {
+  PREVIEW_FIXED_DT_S as FIXED_DT_S,
+  PREVIEW_MAX_ACCEL_KM_S2 as MAX_ACCEL_KM_S2,
+  PREVIEW_MEAN_MOTION_RAD_S as MEAN_MOTION,
+  PREVIEW_MU_KM3_S2 as MU,
+  PREVIEW_TARGET_A_KM as TARGET_A_KM,
+  stepHcwStateInPlace,
+} from "./preview-physics.js";
 
-const MU = 398600.4418;
-const TARGET_A_KM = 7000;
-const MEAN_MOTION = Math.sqrt(MU / TARGET_A_KM ** 3);
 const ORBIT_PERIOD_S = (2 * Math.PI) / MEAN_MOTION;
-const MAX_ACCEL_KM_S2 = 1.0e-5;
-const FIXED_DT_S = 0.1;
 const MAX_STEPS_PER_FRAME = 32;
 const MAX_GHOST_DRAW_POINTS = 120;
 const TUTORIAL_TARGET_PATH_POINTS = 181;
@@ -43,12 +47,15 @@ const OPERATOR_PROJECTION_HIGHLIGHT = "rgba(255, 224, 142, 0.9)";
 const OPERATOR_BURN_MARKER_COLOR = "rgba(255, 146, 67, 0.96)";
 const OPERATOR_PROBE_COLOR = "rgba(86, 202, 245, 0.96)";
 const OPERATOR_PROBE_PICK_RADIUS_PX = 10;
-const BUILD_ID = "web-preview-operator-script-plots-2026-07-04";
+const BUILD_ID = "web-preview-product-contract-2026-08-20";
 const ARCADE_BUILD_ID = `${BUILD_ID}-competition-local`;
 const ARCADE_CHALLENGE_RECORD = buildChallengeRecord(DEFAULT_PURSUIT_CHALLENGE);
 const LEADERBOARD_REFRESH_MS = 30000;
 const PLAUSIBLE_ANALYTICS_SCRIPT_SRC = "https://plausible.io/js/script.js";
 const VERCEL_ANALYTICS_SCRIPT_SRC = "/_vercel/insights/script.js";
+const RPO_DUEL_URL =
+  document.querySelector('meta[name="oel-rpo-duel-url"]')?.content.trim() ||
+  (window.location.pathname.startsWith("/trainer") ? new URL("/", window.location.href).href : "");
 const ANALYTICS_LOCAL_HOSTNAMES = new Set(["", "localhost", "127.0.0.1", "::1"]);
 const PREVIEW_DEV_HOSTNAMES = new Set(["", "localhost", "127.0.0.1", "::1"]);
 const PRIMER_AMPLITUDES_KM = { r: 0.65, i: 0.75, c: 0.65 };
@@ -69,11 +76,13 @@ const el = {
   levelSelector: document.querySelector("#levelSelector"),
   selectorMusicButton: document.querySelector("#selectorMusicButton"),
   selectorViewButton: document.querySelector("#selectorViewButton"),
+  selectorInstallLink: document.querySelector("#selectorInstallLink"),
   selectorModeButton: document.querySelector("#selectorModeButton"),
   selectorFrameButton: document.querySelector("#selectorFrameButton"),
   selectorFrameButtons: Array.from(document.querySelectorAll("[data-selector-frame-button]")),
   selectorPreviewTitle: document.querySelector("#selectorPreviewTitle"),
   selectorPreviewBudget: document.querySelector("#selectorPreviewBudget"),
+  selectorPreviewScope: document.querySelector("#selectorPreviewScope"),
   selectorPreviewObjective: document.querySelector("#selectorPreviewObjective"),
   selectorPreviewBrief: document.querySelector("#selectorPreviewBrief"),
   selectorPreviewCriteria: document.querySelector("#selectorPreviewCriteria"),
@@ -145,30 +154,19 @@ const levelOptions = [
   {
     id: "tutorial",
     mode: "primer",
-    title: "Level 0 - Pilot Tutorial",
-    operatorTitle: "Level 0 - Operator Tutorial",
-    budget: `Time: 18000s   Chaser dV: ${formatSpeedMS(12.0)}   Speed Gate: ${formatSpeedMS(0.3)}`,
-    operatorBudget: `Time: 18000s   Max burn: ${formatSpeedMS(OPERATOR_BURN_MAX_DV_M_S)}   Scripted playback`,
-    objective:
-      "Learn what R, I, and C mean by creating six small target orbits, then use short pulse-and-coast translations to settle near a passive target.",
+    title: PREVIEW_LEVEL_CONTRACTS.tutorial.title,
+    operatorTitle: PREVIEW_LEVEL_CONTRACTS.tutorial.operator_title,
+    budget: `Time: ${PREVIEW_LEVEL_CONTRACTS.tutorial.max_time_s}s   Chaser dV: ${formatSpeedMS(PREVIEW_LEVEL_CONTRACTS.tutorial.max_delta_v_m_s)}   Speed Gate: ${formatSpeedMS(PREVIEW_LEVEL_CONTRACTS.tutorial.max_goal_speed_km_s * 1000)}`,
+    operatorBudget: `Time: ${PREVIEW_LEVEL_CONTRACTS.tutorial.max_time_s}s   Max burn: ${formatSpeedMS(OPERATOR_BURN_MAX_DV_M_S)}   Scripted playback`,
+    objective: PREVIEW_LEVEL_CONTRACTS.tutorial.learning_goal,
     operatorObjective:
       "Learn the RIC frame primer, then script impulsive RIC burns and watch the HCW projection execute without live thrust controls.",
-    brief:
-      "The yellow satellite is you. R is radial, I is in-track, and C is cross-track. The simulation pauses for each guided stage until you hold the requested control.",
+    brief: PREVIEW_LEVEL_CONTRACTS.tutorial.player_brief,
     operatorBrief:
       "The yellow satellite is you. R is radial, I is in-track, and C is cross-track. After the primer, enter burns by time and R/I/C delta-v, then launch the script.",
-    criteria: [
-      "Complete the +I and -I guided orbit demonstrations.",
-      "After +I, increase the speed multiple to 10x.",
-      "Complete the +R and -R guided orbit demonstrations.",
-      "Complete the +C and -C guided orbit demonstrations.",
-      `Get within ${formatDistanceKm(0.25)} of the passive target below ${formatSpeedMS(0.3)}.`,
-    ],
-    notes: [
-      "This level teaches the controls before introducing natural-motion matching, keepout constraints, or target evasion.",
-      "Use short pulses followed by coasting rather than continuous thrust.",
-      "RI shows in-track versus radial motion; RC shows cross-track versus radial motion.",
-    ],
+    criteria: PREVIEW_LEVEL_CONTRACTS.tutorial.pass_criteria,
+    notes: PREVIEW_LEVEL_CONTRACTS.tutorial.instructor_notes,
+    scope: PREVIEW_LEVEL_CONTRACTS.tutorial.scope,
     operatorCriteria: [
       "Complete the RIC frame primer.",
       `Script burns no larger than ${formatSpeedMS(OPERATOR_BURN_MAX_DV_M_S)} each.`,
@@ -183,10 +181,10 @@ const levelOptions = [
   {
     id: "sandbox",
     mode: "sandbox",
-    title: "Sandbox",
-    operatorTitle: "Operator Sandbox",
-    budget: "Time: 20000s",
-    operatorBudget: `Time: 20000s   Max burn: ${formatSpeedMS(OPERATOR_BURN_MAX_DV_M_S)}   Scripted playback`,
+    title: PREVIEW_LEVEL_CONTRACTS.sandbox.title,
+    operatorTitle: PREVIEW_LEVEL_CONTRACTS.sandbox.operator_title,
+    budget: `Time: ${PREVIEW_LEVEL_CONTRACTS.sandbox.max_time_s}s`,
+    operatorBudget: `Time: ${PREVIEW_LEVEL_CONTRACTS.sandbox.max_time_s}s   Max burn: ${formatSpeedMS(OPERATOR_BURN_MAX_DV_M_S)}   Scripted playback`,
     objective: "Experiment with RIC translation controls and relative orbital motion without pass/fail goals.",
     operatorObjective:
       "Script impulsive burns from a configurable starting RIC state, then watch the predicted and executed trajectory.",
@@ -208,11 +206,12 @@ const levelOptions = [
       "The ghost path updates as the script changes.",
       "Use Reset during playback to return to the script screen.",
     ],
+    scope: PREVIEW_LEVEL_CONTRACTS.sandbox.scope,
   },
   {
     id: "pursuitArcade",
     mode: "arcade",
-    title: "Pursuit Arcade",
+    title: PREVIEW_LEVEL_CONTRACTS.pursuit_arcade.title,
     budget: `Time: 12000s   Chaser dV: ${formatSpeedMS(3.0)}   Goal: ${formatDistanceKm(0.1)}`,
     objective: "Chase an evading target using RIC translation controls in a browser-native two-body arcade model.",
     brief:
@@ -223,10 +222,32 @@ const levelOptions = [
       `Stay inside the ${formatSpeedMS(3.0)} chaser delta-v budget.`,
     ],
     notes: [
-      "Beta competition prototype: browser play uses a deterministic two-body engine, not the full downloadable OEL engine.",
+      "Web-only competition prototype: browser play uses a deterministic two-body engine, not the full downloadable OEL engine.",
       "Standalone and multi-round arcade attempts can be replay-validated locally; hosted leaderboard submissions are validated before scoring.",
       "Static RI and RC plots can be generated from recomputed replay history.",
     ],
+    scope: PREVIEW_LEVEL_CONTRACTS.pursuit_arcade.scope,
+  },
+  {
+    id: "rpoDuel",
+    mode: "external",
+    title: "RPO Duel — Beta",
+    budget: "Rounds: 2, 4, or 6   Chaser dV: 15.000 m/s   Target dV: 5.000 m/s",
+    objective: "Outfly a second player in a server-authoritative browser RPO match, then reverse roles on the same initial geometry.",
+    brief:
+      "Create an invite-only room or join with a room code. One player flies the Chaser and the other flies the Target; roles alternate between rounds.",
+    criteria: [
+      "Chaser: enter the 100 m capture region before time expires.",
+      "Target: survive until time expires.",
+      "Use the shared automatic 100x coast and 10x maneuver time rails.",
+    ],
+    notes: [
+      "Beta multiplayer mode: an authoritative hosted room owns physics, scoring, and reconnect state.",
+      "A disconnected spacecraft is neutralized and coasts while the remaining player stays connected.",
+      "This browser-native two-body duel is not a replacement for the downloadable trainer's full OEL engine.",
+    ],
+    scope: "Hosted two-player Beta. Opens the standalone RPO Duel service in this tab.",
+    externalUrl: RPO_DUEL_URL,
   },
 ];
 
@@ -592,7 +613,7 @@ function selectedPlayModeFor(option = selectedLevelOption()) {
 
 function selectorPlayModeLabel() {
   if (state.activeView !== "desktop") return "Pilot Only";
-  return state.playMode === "operator" ? "Operator Mode" : "Pilot Mode";
+  return state.playMode === "operator" ? "Operator Preview" : "Pilot Preview";
 }
 
 function operatorModeActive() {
@@ -868,11 +889,17 @@ function renderLevelSelector() {
     button.setAttribute("aria-pressed", String(state.frameConvention === "space_force"));
   });
   if (el.selectorPlayButton) {
-    el.selectorPlayButton.textContent = "Play Level";
-    el.selectorPlayButton.setAttribute("aria-label", `Play ${displayTitleForOption(option)}.`);
+    const externalUnavailable = option.mode === "external" && !option.externalUrl;
+    el.selectorPlayButton.textContent = option.mode === "external" ? "Open Beta" : "Play Level";
+    el.selectorPlayButton.disabled = externalUnavailable;
+    el.selectorPlayButton.setAttribute(
+      "aria-label",
+      externalUnavailable ? "RPO Duel Beta hosting is not configured." : `Play ${displayTitleForOption(option)}.`,
+    );
   }
   el.selectorPreviewTitle.textContent = displayTitleForOption(option);
   el.selectorPreviewBudget.textContent = modeSpecificField(option, "budget");
+  el.selectorPreviewScope.textContent = modeSpecificField(option, "scope");
   el.selectorPreviewObjective.textContent = modeSpecificField(option, "objective");
   el.selectorPreviewBrief.textContent = modeSpecificField(option, "brief");
   replaceList(el.selectorPreviewCriteria, modeSpecificField(option, "criteria"));
@@ -974,6 +1001,12 @@ function selectLevel(index) {
 
 function launchSelectedLevel(source = "selector") {
   const option = selectedLevelOption();
+  if (option.mode === "external") {
+    if (!option.externalUrl) return;
+    trackEvent("rpo_duel_open", { source, destination: new URL(option.externalUrl).hostname });
+    window.location.assign(option.externalUrl);
+    return;
+  }
   state.activePlayMode = selectedPlayModeFor(option);
   state.activeLevelId = option.id;
   if (state.activePlayMode === "operator" && (option.id === "tutorial" || option.id === "sandbox")) {
@@ -1235,21 +1268,8 @@ function step(dt, forceRun = false) {
   }
   if ((!state.running && !forceRun) || state.passed) return;
   const u = currentControls();
-  const ar = u.r * MAX_ACCEL_KM_S2;
-  const ai = u.i * MAX_ACCEL_KM_S2;
-  const ac = u.c * MAX_ACCEL_KM_S2;
-  const n = MEAN_MOTION;
-  const rdd = 3 * n * n * state.sim.r + 2 * n * state.sim.id + ar;
-  const idd = -2 * n * state.sim.rd + ai;
-  const cdd = -n * n * state.sim.c + ac;
-  state.sim.rd += rdd * dt;
-  state.sim.id += idd * dt;
-  state.sim.cd += cdd * dt;
-  state.sim.r += state.sim.rd * dt;
-  state.sim.i += state.sim.id * dt;
-  state.sim.c += state.sim.cd * dt;
-  state.sim.t += dt;
-  state.sim.dv += Math.hypot(ar, ai, ac) * dt * 1000;
+  stepHcwStateInPlace(state.sim, u, dt);
+  state.sim.dv += Math.hypot(u.r, u.i, u.c) * MAX_ACCEL_KM_S2 * dt * 1000;
   state.closestKm = Math.min(state.closestKm, rangeKm());
   state.trail.push(samplePoint());
   if (state.trail.length > TRAIL_LIMIT) state.trail.shift();
@@ -2145,19 +2165,7 @@ function cwCoastPoint(seed, tS) {
 }
 
 function integrateCopy(s, u, dt) {
-  const n = MEAN_MOTION;
-  const ar = u.r * MAX_ACCEL_KM_S2;
-  const ai = u.i * MAX_ACCEL_KM_S2;
-  const ac = u.c * MAX_ACCEL_KM_S2;
-  const rdd = 3 * n * n * s.r + 2 * n * s.id + ar;
-  const idd = -2 * n * s.rd + ai;
-  const cdd = -n * n * s.c + ac;
-  s.rd += rdd * dt;
-  s.id += idd * dt;
-  s.cd += cdd * dt;
-  s.r += s.rd * dt;
-  s.i += s.id * dt;
-  s.c += s.cd * dt;
+  stepHcwStateInPlace(s, u, dt);
 }
 
 function draw() {
@@ -3694,6 +3702,9 @@ function bindEvents() {
   });
   el.downloadLink.addEventListener("click", () => {
     trackEvent("download_click", { source: "debrief", mode: state.mode });
+  });
+  el.selectorInstallLink.addEventListener("click", () => {
+    trackEvent("download_click", { source: "selector", mode: state.playMode });
   });
   el.leaderboardForm.addEventListener("submit", submitLeaderboardAttempt);
   el.leaderboardRefresh.addEventListener("click", () => refreshLeaderboard({ force: true }));

@@ -75,7 +75,7 @@ def _call_gemini(
     )
     _add_nonredirected_secret_header(request, "x-goog-api-key", api_key)
     with urllib.request.urlopen(request, timeout=timeout_s) as response:
-        raw = response.read().decode("utf-8")
+        raw = _read_bounded_response(response).decode("utf-8")
     payload = json.loads(raw)
     parts: list[str] = []
     for candidate in list(payload.get("candidates", []) or []):

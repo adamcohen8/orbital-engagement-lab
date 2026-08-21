@@ -47,3 +47,25 @@ def test_public_api_class_identity_and_module_names_remain_stable() -> None:
         cls = getattr(api, name)
         assert getattr(sim, name) is cls
         assert cls.__module__ == "sim.api"
+
+
+def test_independent_stable_api_inventory_is_exported_by_both_facades() -> None:
+    api = importlib.import_module("sim.api")
+    stable_names = (
+        "MetricStudyResult",
+        "ScenarioArtifact",
+        "ScenarioBuilder",
+        "SimulationConfig",
+        "SimulationResult",
+        "SimulationSession",
+        "TrustedSimulationSession",
+        "HostedSimulationSession",
+        "SimulationSnapshot",
+        "SimulationWorkspace",
+        "TrustedSimulationWorkspace",
+        "HostedSimulationWorkspace",
+        "ValidationIssue",
+        "ValidationReport",
+    )
+    for name in stable_names:
+        assert getattr(sim, name) is getattr(api, name)

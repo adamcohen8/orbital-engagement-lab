@@ -37,7 +37,7 @@ from integrations.oel_mcp.reporting import MAX_REPORT_SOURCE_BYTES
 from integrations.oel_mcp.reporting import audit_report as audit_report_artifacts
 from integrations.oel_mcp.reporting import prepare_report_packet as prepare_report_packet_artifacts
 from sim.agent_task.plot_recipes import get_plot_recipe
-from sim.agent_task.recipes import get_recipe
+from sim.agent_task.recipes import get_recipe, is_public_mcp_recipe
 from sim.agent_task.runner import AgentTaskCancelled, compare_outputs, create_plot, inspect_output, run_recipe
 from sim.execution import run_simulation_config_file
 from sim.handoff import (
@@ -859,12 +859,7 @@ class PublicOELMCPHandlers(BaseOELMCPHandlers):
         def operation() -> dict[str, Any]:
             recipe_id = str(arguments["recipe_id"])
             recipe = get_recipe(recipe_id)
-            if (
-                recipe is None
-                or recipe.maturity != "supported"
-                or "public" not in recipe.tags
-                or recipe.workflow != "scenario_run"
-            ):
+            if not is_public_mcp_recipe(recipe):
                 raise ValueError("Only supported public scenario-run task recipes are available.")
             output = self.path_policy.resolve_write(arguments["output_dir"])
             prepared = prepare_scenario(
@@ -876,7 +871,11 @@ class PublicOELMCPHandlers(BaseOELMCPHandlers):
             estimate = resource_estimate(prepared)
             require_safe_resource_estimate(estimate)
             ensure_new_output_dir(output)
-            manifest = manifest_base(tool_id=contract.tool_id, approval_id=str(arguments["approval"]["approval_id"]))
+            manifest = manifest_base(
+                tool_id=contract.tool_id,
+                approval_id=str(arguments["approval"]["approval_id"]),
+                prepared=prepared,
+            )
             manifest.update(
                 {"recipe_id": recipe_id, "resource_profile": arguments["resource_profile"], "output_dir": str(output)}
             )
@@ -894,9 +893,18 @@ class PublicOELMCPHandlers(BaseOELMCPHandlers):
                     resource_profile=str(arguments["resource_profile"]),
                     step_callback=_task_cancellation_callback(cancel_event),
                 )
-                _task_cancellation_callback(cancel_event)()
                 status = str(packet.get("status", "failed"))
-                if status not in {"completed", "partial", "failed"}:
+                prepared_packet = dict((packet.get("configs") or [{}])[0])
+                expected_identity = {
+                    "source_config_sha256": prepared.raw_sha256,
+                    "normalized_config_sha256": prepared.normalized_sha256,
+                    "validation_id": prepared.validation_id,
+                }
+                actual_identity = {key: prepared_packet.get(key) for key in expected_identity}
+                if status not in {"failed", "cancelled"} and actual_identity != expected_identity:
+                    raise ValueError("Executed task config does not match the preflighted scenario identity.")
+                _task_cancellation_callback(cancel_event)()
+                if status not in {"completed", "partial", "failed", "cancelled"}:
                     status = "failed"
                 artifacts = [
                     str(item.get("resolved_path") or item.get("path"))

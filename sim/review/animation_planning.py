@@ -134,6 +134,7 @@ def review_animation_plan_id(workspace: ReviewWorkspace, spec: ReviewAnimationSp
             "path": str(workspace.db_path),
             "size_bytes": int(stat.st_size),
             "mtime_ns": int(stat.st_mtime_ns),
+            "sha256": hashlib.sha256(workspace.db_path.read_bytes()).hexdigest(),
         },
         "recipe": recipe.to_dict(),
         "spec": asdict(spec),

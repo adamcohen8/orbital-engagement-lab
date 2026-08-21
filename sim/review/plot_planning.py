@@ -78,6 +78,7 @@ def review_plot_plan_id(workspace: ReviewWorkspace, spec: ReviewPlotSpec) -> str
             "path": str(workspace.db_path),
             "size_bytes": int(stat.st_size),
             "mtime_ns": int(stat.st_mtime_ns),
+            "sha256": hashlib.sha256(workspace.db_path.read_bytes()).hexdigest(),
         },
         "spec": asdict(spec),
     }

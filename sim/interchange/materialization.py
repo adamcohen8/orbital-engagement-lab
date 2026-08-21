@@ -273,7 +273,16 @@ def materialize_scenario_document(
         return _result("blocked", destination, manifest_target, manifest, product_report)
     if not existing_identical:
         destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(yaml_text, encoding="utf-8")
+        pending_manifest = deepcopy(base_manifest)
+        pending_manifest["output"] = {
+            "kind": str(output_kind),
+            "path": str(destination),
+            "status": "materializing",
+        }
+        write_handoff_manifest(pending_manifest, manifest_target)
+        temporary = destination.with_name(f".{destination.name}.materializing")
+        temporary.write_text(yaml_text, encoding="utf-8")
+        temporary.replace(destination)
 
     from sim.api import SimulationWorkspace
 
@@ -449,6 +458,7 @@ def build_ogp_scenario(
     state = dict(payload["mean_elements"])
     values = deepcopy(dict(state["values"]))
     object_id = str(obj["object_id"])
+    propagation = dict(payload.get("propagation", {}) or {})
     return {
         "scenario_name": scenario_name,
         "scenario_description": f"Passive OGP continuation materialized from {product['product_id']}.",
@@ -462,6 +472,8 @@ def build_ogp_scenario(
                 "quality_disposition": dict(product["quality"])["disposition"],
                 "manifest_path": str(manifest_path),
                 "execution_occurred": False,
+                "source_ogp_regime": str(propagation.get("regime", "")),
+                "source_ogp_propagator_name": str(propagation.get("propagator_name", "")),
             },
         },
         "objects": {

@@ -20,6 +20,21 @@ def test_cr3bp_halo_initialization_rejects_unbounded_phase_work() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    "initial_state",
+    [
+        {"relative_ric_curv": [0.0, 1.0, 0.0, 0.0, 0.0, 0.0]},
+        {"relative_to_target_cislunar": {"state": [1.0, 0.0, 0.0, 0.0, 0.0, 0.0]}},
+        {"relative_cislunar": [1.0, 0.0, 0.0, 0.0, 0.0, 0.0]},
+    ],
+)
+def test_all_relative_initial_state_forms_defer_to_reference_resolution(initial_state: dict) -> None:
+    position, velocity = _rv_from_initial_state(initial_state)
+
+    assert position.tolist() == [7000.0, 0.0, 0.0]
+    assert velocity.shape == (3,)
+
+
 def test_cr3bp_run_evidence_labels_rotating_state_and_command_frames() -> None:
     config = SimulationConfig.from_dict(
         {

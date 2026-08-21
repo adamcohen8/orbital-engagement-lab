@@ -18,6 +18,8 @@ if str(ROOT) not in sys.path:
 from tools.generate_python_sbom import write_sbom  # noqa: E402
 
 PYTORCH_CPU_INDEX_URL = "https://download.pytorch.org/whl/cpu"
+PIP_VERSION = "26.2.1"
+PIP_AUDIT_VERSION = "2.10.1"
 
 
 def _package_version() -> str:
@@ -73,6 +75,7 @@ def _full_install_command(
         "-m",
         "pip",
         "install",
+        "--only-binary=:all:",
         "-c",
         str(constraints),
     ]
@@ -121,7 +124,8 @@ def _run_supply_chain_gate_in_environment(
 
     if install_full and all(row["return_code"] == 0 for row in command_results):
         commands = [
-            [audit_python, "-m", "pip", "install", "-U", "pip", "pip-audit"],
+            [audit_python, "-m", "pip", "install", "--only-binary=:all:", f"pip=={PIP_VERSION}"],
+            [audit_python, "-m", "pip", "install", "--only-binary=:all:", f"pip-audit=={PIP_AUDIT_VERSION}"],
             _full_install_command(
                 python_executable=audit_python,
                 constraints=constraints,

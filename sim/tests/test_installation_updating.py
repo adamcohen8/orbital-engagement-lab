@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import io
 import json
 import os
@@ -208,6 +209,17 @@ def test_pro_installation_fails_closed_without_license_module(
     assert pro_installation_available() is False
     with pytest.raises(ContractError, match="Managed OEL Pro installation is unavailable"):
         install_release(manifest, paths=_paths(tmp_path), public_keys=public, create_runtime=False)
+
+
+def test_pro_installation_rejects_license_module_from_another_tree(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    external_module = tmp_path / "other-oel" / "sim" / "licensing" / "offline.py"
+    spec = importlib.util.spec_from_file_location("sim.licensing.offline", external_module)
+    monkeypatch.setattr("sim.installation.manager.importlib.util.find_spec", lambda _name: spec)
+
+    assert pro_installation_available() is False
 
 
 def test_release_contract_rejects_unknown_fields(signing_keys: tuple[object, dict[str, RSAPublicKey]]) -> None:
@@ -609,16 +621,6 @@ def test_release_build_is_reproducible_signed_and_contains_evidence(
     (source / "constraints" / "py314.txt").write_text("example==1 --hash=sha256:" + "0" * 64 + "\n", encoding="utf-8")
     evidence = tmp_path / "evidence"
     evidence.mkdir()
-    sbom = evidence / "sbom.cdx.json"
-    sbom.write_text('{"private_path": "/Users/example/private-oel", "product": "oel-pro"}\n', encoding="utf-8")
-    gate = {
-        "schema_version": 1,
-        "kind": "oel_supply_chain_gate",
-        "package_version": "0.25.0",
-        "passed": True,
-        "artifacts": [{"path": str(sbom), "bytes": sbom.stat().st_size, "sha256": sha256_file(sbom)}],
-    }
-    (evidence / "supply-chain-gate.json").write_text(json.dumps(gate), encoding="utf-8")
     private_path = tmp_path / "private-key.json"
     private_path.write_text(json.dumps(private_key_to_json(private)), encoding="utf-8")  # type: ignore[arg-type]
     public_path = tmp_path / "public-keys.json"
@@ -634,6 +636,41 @@ def test_release_build_is_reproducible_signed_and_contains_evidence(
         archive.writestr("fixture-1.0.dist-info/METADATA", "Name: fixture\nVersion: 1.0\n")
         archive.writestr("fixture-1.0.dist-info/WHEEL", "Wheel-Version: 1.0\nTag: py3-none-any\n")
         archive.writestr("fixture-1.0.dist-info/RECORD", "")
+    evidence_payloads = {
+        "pip-install-report.json": '{"install": []}\n',
+        "pip-check.txt": "No broken requirements found.\n",
+        "wheel-inventory.json": json.dumps(
+            {
+                "packages": [
+                    {
+                        "artifact": wheel.name,
+                        "artifact_type": "wheel",
+                        "sha256": sha256_file(wheel),
+                    }
+                ]
+            }
+        )
+        + "\n",
+        "sbom.cdx.json": '{"private_path": "/Users/example/private-oel", "product": "oel-pro"}\n',
+        "python-freeze.txt": "fixture==1.0\n",
+        "pip-audit.json": '{"dependencies": []}\n',
+    }
+    evidence_artifacts = []
+    for name, content in evidence_payloads.items():
+        artifact = evidence / name
+        artifact.write_text(content, encoding="utf-8")
+        evidence_artifacts.append(
+            {"path": str(artifact), "bytes": artifact.stat().st_size, "sha256": sha256_file(artifact)}
+        )
+    gate = {
+        "schema_version": 1,
+        "kind": "oel_supply_chain_gate",
+        "product": "oel-pro",
+        "package_version": "0.25.0",
+        "passed": True,
+        "artifacts": evidence_artifacts,
+    }
+    (evidence / "supply-chain-gate.json").write_text(json.dumps(gate), encoding="utf-8")
     qualification = {
         "status": "passed",
         "network_used": False,
@@ -646,6 +683,7 @@ def test_release_build_is_reproducible_signed_and_contains_evidence(
         "tools.build_installable_release._verify_offline_runtime_install",
         lambda **_kwargs: qualification,
     )
+    monkeypatch.setattr("tools.check_public_export.check_public_export", lambda _root: [])
 
     first = build_release(
         source_root=source,
@@ -713,17 +751,22 @@ def test_release_build_is_reproducible_signed_and_contains_evidence(
     assert "/Users/example/private-oel" not in attestation_text
     assert "oel-pro" not in attestation_text
     attestation = json.loads(attestation_text)
+    evidence_paths = [
+        evidence / "supply-chain-gate.json",
+        *[evidence / name for name in evidence_payloads],
+    ]
+    expected_source_evidence = [
+        {
+            "bytes": artifact.stat().st_size,
+            "name": artifact.name,
+            "sha256": sha256_file(artifact),
+        }
+        for artifact in evidence_paths
+    ]
     assert attestation == {
         "package_version": "0.25.0",
         "schema_version": "oel.public-supply-chain-attestation.v1",
-        "source_evidence": [
-            {
-                "bytes": (evidence / "supply-chain-gate.json").stat().st_size,
-                "name": "supply-chain-gate.json",
-                "sha256": sha256_file(evidence / "supply-chain-gate.json"),
-            },
-            {"bytes": sbom.stat().st_size, "name": "sbom.cdx.json", "sha256": sha256_file(sbom)},
-        ],
+        "source_evidence": expected_source_evidence,
         "status": "passed",
     }
 
@@ -948,10 +991,11 @@ def test_trusted_key_rotation_and_sanitized_support_receipt(
         json.dumps({"keys": [public_key_to_json(next(iter(keys.values())))]}),
         encoding="utf-8",
     )
-    successor = generate_rsa_private_key("successor", bits=512)
+    successor = generate_rsa_private_key("successor", bits=2048)
     registry = sign_payload(
         {
             "schema_version": "oel.trusted-key-registry.v1",
+            "published_at": "2026-08-19T00:00:00Z",
             "keys": [public_key_to_json(RSAPublicKey(key_id=successor.key_id, n=successor.n))],
         },
         private,  # type: ignore[arg-type]

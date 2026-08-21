@@ -25,12 +25,12 @@ def _path_link(path_text: Any, *, base_dir: Path) -> str:
         return "not available"
     try:
         path = Path(text)
-        resolved = path if path.is_absolute() else Path.cwd() / path
+        resolved = path if path.is_absolute() else base_dir / path
         display = str(resolved.resolve().relative_to(base_dir.resolve()))
     except ValueError:
         try:
             path = Path(text)
-            resolved = path if path.is_absolute() else Path.cwd() / path
+            resolved = path if path.is_absolute() else base_dir / path
             display = str(Path(os.path.relpath(str(resolved.resolve()), str(base_dir.resolve()))))
         except Exception:
             display = text

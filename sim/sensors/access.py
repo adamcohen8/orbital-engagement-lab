@@ -4,12 +4,22 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from sim.dynamics.orbit.environment import EARTH_ROT_RATE_RAD_S
+
 
 @dataclass(frozen=True)
 class GroundSite:
     lat_rad: float
     lon_rad: float
     min_elevation_rad: float = 0.0
+
+    def __post_init__(self) -> None:
+        if not all(np.isfinite(float(value)) for value in (self.lat_rad, self.lon_rad, self.min_elevation_rad)):
+            raise ValueError("ground-site coordinates and elevation mask must be finite")
+        if not -0.5 * np.pi <= self.lat_rad <= 0.5 * np.pi:
+            raise ValueError("ground-site latitude must be within [-pi/2, pi/2]")
+        if not 0.0 <= self.min_elevation_rad <= 0.5 * np.pi:
+            raise ValueError("ground-site minimum elevation must be within [0, pi/2]")
 
 
 @dataclass(frozen=True)
@@ -56,7 +66,12 @@ class AccessModel:
         if t_s - self._last_update_t_s < self.cfg.update_cadence_s:
             return False, "cadence"
 
-        los = target_eci_km - observer_eci_km
+        observer = np.asarray(observer_eci_km, dtype=float)
+        if self.cfg.require_ground_visibility:
+            if self.cfg.ground_site is None:
+                return False, "ground_site_missing"
+            observer = _ground_site_eci_km(self.cfg.ground_site, t_s)
+        los = np.asarray(target_eci_km, dtype=float) - observer
         rng = np.linalg.norm(los)
         if self.cfg.max_range_km is not None and rng > self.cfg.max_range_km:
             return False, "range"
@@ -66,7 +81,7 @@ class AccessModel:
             fov_half_angle_rad = _solid_angle_to_half_angle_rad(self.cfg.solid_angle_sr)
         if fov_half_angle_rad is not None and rng > 0.0:
             if boresight_eci is None:
-                boresight = observer_eci_km / max(np.linalg.norm(observer_eci_km), 1e-12)
+                boresight = observer / max(np.linalg.norm(observer), 1e-12)
             else:
                 boresight = np.array(boresight_eci, dtype=float).reshape(3)
                 bn = float(np.linalg.norm(boresight))
@@ -78,10 +93,11 @@ class AccessModel:
                 return False, "solid_angle"
 
         if self.cfg.require_ground_visibility:
-            if self.cfg.ground_site is None:
-                return False, "ground_site_missing"
-            if not _ground_visible(observer_eci_km, target_eci_km):
-                return False, "ground_visibility"
+            assert self.cfg.ground_site is not None
+            zenith = observer / np.linalg.norm(observer)
+            elevation = float(np.arcsin(np.clip(np.dot(zenith, los / max(rng, 1.0e-12)), -1.0, 1.0)))
+            if elevation < self.cfg.ground_site.min_elevation_rad:
+                return False, "ground_elevation"
 
         return True, "ok"
 
@@ -112,6 +128,15 @@ def _ground_visible(observer_eci_km: np.ndarray, target_eci_km: np.ndarray) -> b
     tau = np.clip(tau, 0.0, 1.0)
     closest = ro + tau * d
     return np.linalg.norm(closest) > 6378.137
+
+
+def _ground_site_eci_km(site: GroundSite, t_s: float) -> np.ndarray:
+    longitude = float(site.lon_rad) + EARTH_ROT_RATE_RAD_S * float(t_s)
+    cos_lat = float(np.cos(site.lat_rad))
+    return 6378.137 * np.array(
+        [cos_lat * np.cos(longitude), cos_lat * np.sin(longitude), np.sin(site.lat_rad)],
+        dtype=float,
+    )
 
 
 def _solid_angle_to_half_angle_rad(solid_angle_sr: float | None) -> float | None:

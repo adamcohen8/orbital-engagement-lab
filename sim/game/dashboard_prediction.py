@@ -908,8 +908,7 @@ class DashboardPredictionMixin:
             if cr3bp_dt is None:
                 cr3bp_dt = _positive_float_or_none(getattr(self, "cr3bp_coast_prediction_dt_s", None))
             dt = max(
-                float(getattr(self, "coast_prediction_dt_s", 10.0)),
-                300.0 if cr3bp_dt is None else float(cr3bp_dt),
+                float(getattr(self, "coast_prediction_dt_s", 10.0)) if cr3bp_dt is None else float(cr3bp_dt),
                 1.0e-6,
             )
             point_cap = max(int(max_draw_points or self._presentation_ghost_draw_points()), 2)

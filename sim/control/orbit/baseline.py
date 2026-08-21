@@ -60,8 +60,11 @@ class SemiMajorAxisEccentricityController(Controller):
             energy_rate_cmd = float(self.energy_gain_per_s) * (target_energy - energy)
 
         ecc_rate_cmd = np.zeros(3, dtype=float)
-        if e_err > float(max(self.ecc_tolerance, 0.0)):
-            ecc_rate_cmd = -float(self.eccentricity_gain_per_s) * e_vec
+        if abs(e_err) > float(max(self.ecc_tolerance, 0.0)):
+            e_norm = float(np.linalg.norm(e_vec))
+            direction = e_vec / e_norm if e_norm > 1.0e-12 else r / max(r_norm, 1.0e-12)
+            target_e_vec = float(self.target_ecc) * direction
+            ecc_rate_cmd = float(self.eccentricity_gain_per_s) * (target_e_vec - e_vec)
 
         def ecc_rate_for_accel(accel_eci: np.ndarray) -> np.ndarray:
             return (np.cross(accel_eci, h) + np.cross(v, np.cross(r, accel_eci))) / mu

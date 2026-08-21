@@ -177,12 +177,15 @@ class AttitudeReferenceStackConfig:
     health: HealthManagerConfig = HealthManagerConfig()
     momentum_unload: MomentumUnloadConfig | None = None
     mode_config: AdcsModeConfig = AdcsModeConfig()
+    measurement_stale_after_s: float = 30.0
 
     def __post_init__(self) -> None:
         if not self.satellite_id.strip():
             raise ValueError("satellite_id must be non-empty")
         if self.allocator.satellite_id != self.satellite_id:
             raise ValueError("allocator satellite_id must match stack satellite_id")
+        if not isfinite(float(self.measurement_stale_after_s)) or self.measurement_stale_after_s < 0.0:
+            raise ValueError("measurement_stale_after_s must be finite and nonnegative")
         sensor_ids = [mounting.sensor_id for mounting in self.sensor_mountings]
         if len(sensor_ids) != len(set(sensor_ids)):
             raise ValueError("sensor mounting IDs must be unique")
@@ -225,6 +228,7 @@ class TranslationReferenceStackConfig:
     resources: ResourceLimits = ResourceLimits()
     conjunction: ConjunctionConfig = ConjunctionConfig()
     autonomous_maneuver: HcwManeuverConfig = HcwManeuverConfig()
+    measurement_stale_after_s: float = 30.0
 
     def __post_init__(self) -> None:
         if not self.satellite_id.strip():
@@ -235,6 +239,8 @@ class TranslationReferenceStackConfig:
             raise ValueError("attitude allocator satellite_id must match stack satellite_id")
         if not isfinite(self.pointing_tolerance_rad) or not 0.0 <= self.pointing_tolerance_rad <= np.pi:
             raise ValueError("pointing_tolerance_rad must be finite and in [0, pi]")
+        if not isfinite(float(self.measurement_stale_after_s)) or self.measurement_stale_after_s < 0.0:
+            raise ValueError("measurement_stale_after_s must be finite and nonnegative")
         sensor_ids = [mounting.sensor_id for mounting in self.sensor_mountings]
         calibration_ids = [calibration.sensor_id for calibration in self.sensor_calibrations]
         if len(sensor_ids) != len(set(sensor_ids)) or len(calibration_ids) != len(set(calibration_ids)):
@@ -686,7 +692,11 @@ class AttitudeReferenceFlightSoftwareStack(ReferenceStackBase):
 
     def _step(self, batch: FlightSoftwareInputBatch) -> FlightSoftwareOutput:
         self._ingest_reference_commands(batch)
-        self._navigator.ingest(batch.events)
+        self._navigator.ingest(
+            batch.events,
+            generated_at=batch.invocation_time,
+            stale_after_s=self.config.measurement_stale_after_s,
+        )
         solution = self._navigator.solution(batch.invocation_time)
         health = self._health.update(batch.invocation_time, batch.events)
         rate_norm = (
@@ -1054,12 +1064,19 @@ class _TranslationReferenceFlightSoftwareStack(ReferenceStackBase):
     def _step(self, batch: FlightSoftwareInputBatch) -> FlightSoftwareOutput:
         self._update_maneuver_receipts(batch.events)
         load_results = self._ingest_mission_loads(batch)
-        self._navigator.ingest(batch.events)
+        navigation_events = tuple(
+            event
+            for event in batch.events
+            if not (event.kind is InputKind.MEASUREMENT and isinstance(event.payload, MeasurementEvent))
+            or self._measurement_is_fresh(event.payload, batch.invocation_time)
+        )
+        self._navigator.ingest(navigation_events)
         solution = (
             self._navigator.control_solution(batch.invocation_time)
             if self._live_navigation_fast_path
             else self._navigator.solution(batch.invocation_time)
         )
+        solution = self._fresh_navigation_solution(solution, batch.invocation_time)
         health = self._health.update(batch.invocation_time, batch.events)
         resources = self._resources.update(
             batch.events,
@@ -1106,6 +1123,9 @@ class _TranslationReferenceFlightSoftwareStack(ReferenceStackBase):
             mass_kg=solution.mass_kg,
             dry_mass_kg=self.config.dry_mass_kg,
         )
+        faulted_components = set(health.isolated_components) | {
+            component for component, _code in solution.active_faults
+        }
         executive = self._executive.update(batch.invocation_time, observation)
         control = None
         allocation = None
@@ -1136,7 +1156,7 @@ class _TranslationReferenceFlightSoftwareStack(ReferenceStackBase):
                     effort,
                     solution,
                     next_command_id=self._next_command_id,
-                    unavailable_actuators=frozenset(health.isolated_components),
+                    unavailable_actuators=frozenset(faulted_components),
                 )
                 commands.extend(allocation.proposed_commands)
                 if (
@@ -1180,7 +1200,7 @@ class _TranslationReferenceFlightSoftwareStack(ReferenceStackBase):
                         control.effort,
                         solution,
                         next_command_id=self._next_command_id,
-                        unavailable_actuators=frozenset(health.isolated_components),
+                        unavailable_actuators=frozenset(faulted_components),
                     )
                     commands.extend(allocation.proposed_commands)
         if (
@@ -1198,9 +1218,6 @@ class _TranslationReferenceFlightSoftwareStack(ReferenceStackBase):
                         command_id=self._next_command_id(),
                     )
                     commands.extend(pointing_allocation.proposed_commands)
-        faulted_components = set(health.isolated_components) | {
-            component for component, _code in solution.active_faults
-        }
         commands = [command for command in commands if command.actuator_id not in faulted_components]
         if (
             primary_mode is TranslationMode.SCHEDULED_BURN
@@ -1538,14 +1555,68 @@ class _TranslationReferenceFlightSoftwareStack(ReferenceStackBase):
                 event.payload, OnboardMissionConfigurationLoad
             ):
                 continue
-            result = self._mission_manager.apply(event.payload, accept=self._accept_load)
+            prepared: dict[str, object] = {}
+
+            def accept(
+                load: OnboardMissionConfigurationLoad,
+                prepared_state: dict[str, object] = prepared,
+            ) -> tuple[bool, str | None]:
+                accepted, reason = self._accept_load(load)
+                if not accepted:
+                    return accepted, reason
+                try:
+                    executive_config = self._config_for_load(load)
+                    controller = TranslationController(self._control_config_for_load(load))
+                    executive = ReferenceMissionExecutive(executive_config)
+                except (TypeError, ValueError) as exc:
+                    return False, f"mission load parameters are invalid: {exc}"
+                prepared_state.update(
+                    executive_config=executive_config,
+                    controller=controller,
+                    executive=executive,
+                )
+                return True, None
+
+            result = self._mission_manager.apply(event.payload, accept=accept)
             results.append(result)
             if result.accepted:
                 self._active_load = event.payload
-                self._executive_config = self._config_for_load(event.payload)
-                self._executive = ReferenceMissionExecutive(self._executive_config)
-                self._controller = TranslationController(self._control_config_for_load(event.payload))
+                self._executive_config = prepared["executive_config"]  # type: ignore[assignment]
+                self._executive = prepared["executive"]  # type: ignore[assignment]
+                self._controller = prepared["controller"]  # type: ignore[assignment]
         return tuple(results)
+
+    def _measurement_is_fresh(self, measurement: MeasurementEvent, now: ClockTag) -> bool:
+        try:
+            age_s = _elapsed_seconds(measurement.sample_time, now)
+        except ValueError:
+            return False
+        return 0.0 <= age_s <= self.config.measurement_stale_after_s
+
+    def _fresh_navigation_solution(
+        self,
+        solution: OrbitNavigationSolution,
+        now: ClockTag,
+    ) -> OrbitNavigationSolution:
+        def fresh(epoch: ClockTag | None) -> bool:
+            if epoch is None:
+                return False
+            try:
+                age_s = _elapsed_seconds(epoch, now)
+            except ValueError:
+                return False
+            return 0.0 <= age_s <= self.config.measurement_stale_after_s
+
+        relative_tracks = tuple(track for track in solution.relative_tracks if fresh(track.epoch))
+        if fresh(solution.own_state_epoch):
+            return replace(solution, relative_tracks=relative_tracks)
+        return replace(
+            solution,
+            position_eci_m=None,
+            velocity_eci_m_s=None,
+            mass_kg=None,
+            relative_tracks=relative_tracks,
+        )
 
     def _accept_load(self, load: OnboardMissionConfigurationLoad) -> tuple[bool, str | None]:
         mode = _mode_for_goal_type(load.primary_goal.goal_type)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 import os
 import platform
@@ -7,6 +8,7 @@ import subprocess
 import time
 from copy import deepcopy
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from sim.acceleration.settings import acceleration_settings_from_config
@@ -856,6 +858,7 @@ def estimate_resource_requirements(cfg: Any) -> ResourceEstimate:
     active_objects = _active_object_count(cfg)
     hierarchical_processes = effective_workers
     object_workers_per_run = 0
+    prepared_config_memory_mb = 0.0
     if study_type in {"monte_carlo", "sensitivity"} and runs > 0:
         try:
             from sim.execution.hierarchical import plan_hierarchical_execution
@@ -864,8 +867,32 @@ def estimate_resource_requirements(cfg: Any) -> ResourceEstimate:
                 raise
         else:
             config_root = cfg.to_dict() if callable(getattr(cfg, "to_dict", None)) else {}
+            try:
+                if study_type == "monte_carlo":
+                    from sim.execution.monte_carlo_preparation import prepare_monte_carlo_runs
+
+                    prepared = prepare_monte_carlo_runs(
+                        cfg=cfg,
+                        root=config_root,
+                        outdir=Path(str(cfg.outputs.output_dir)),
+                    )
+                else:
+                    from sim.execution.sensitivity import prepare_sensitivity_runs
+
+                    prepared = prepare_sensitivity_runs(
+                        cfg=cfg,
+                        root=config_root,
+                        outdir=Path(str(cfg.outputs.output_dir)),
+                        sensitivity_method=str(cfg.analysis.sensitivity.method),
+                    )
+                task_roots = [dict(item.get("config_dict", {}) or {}) for item in prepared]
+            except (KeyError, ValueError):
+                task_roots = [config_root]
+            prepared_config_memory_mb = sum(
+                len(json.dumps(root, sort_keys=True, default=str).encode("utf-8")) for root in task_roots
+            ) / (1024.0 * 1024.0)
             hierarchy = plan_hierarchical_execution(
-                task_roots=(config_root,),
+                task_roots=task_roots,
                 task_count=max(runs, 1),
                 requested_campaign_workers=requested_workers if parallel_enabled else 1,
                 profile=profile,
@@ -882,6 +909,7 @@ def estimate_resource_requirements(cfg: Any) -> ResourceEstimate:
         effective_workers=hierarchical_processes,
         plots_enabled=plots_enabled,
     )
+    estimated_incremental_memory_mb += prepared_config_memory_mb
     retained_payload_runs = _retained_payload_run_count(cfg, study_type=study_type, runs=runs)
     if retained_payload_runs:
         estimated_incremental_memory_mb += estimated_history_mb_per_run * retained_payload_runs
@@ -898,6 +926,8 @@ def estimate_resource_requirements(cfg: Any) -> ResourceEstimate:
     )
     max_load_per_cpu = _optional_float(limits.get("max_load_per_cpu"), profile.max_load_per_cpu)
     notes: list[str] = []
+    if prepared_config_memory_mb > 0.0:
+        notes.append(f"prepared campaign configs retain approximately {prepared_config_memory_mb:.2f} MB")
     risk = "safe"
     if retained_payload_runs:
         notes.append(f"full run payloads retained for {retained_payload_runs} batch runs")

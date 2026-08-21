@@ -618,6 +618,8 @@ def _eci_to_ecef_rotation_hpop_like_uncached(
     has_manual_eop = any(value is not None for value in (dut1_s, xp_arcsec, yp_arcsec, dat_s)) or (
         float(ddpsi_rad) != 0.0 or float(ddeps_rad) != 0.0
     )
+    if jd_utc_start is None and (eop_path or has_manual_eop):
+        raise ValueError("IAU76/80 EOP frame transforms require jd_utc_start when EOP data is configured.")
     if jd_utc_start is None or (not eop_path and not has_manual_eop):
         return eci_to_ecef_rotation(t_s, jd_utc_start=jd_utc_start)
 

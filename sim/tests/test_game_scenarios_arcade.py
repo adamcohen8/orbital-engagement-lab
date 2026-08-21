@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import subprocess
-
 # These owner-aligned tests share deterministic builders and compatibility
 # imports from the adjacent support module.
 # ruff: noqa: F403, F405
@@ -187,6 +185,8 @@ def test_game_attempt_uses_configured_retained_history_samples(tmp_path: Path) -
     assert engine.history_mode == "dynamic"
     assert engine.planned_samples > 8
     assert engine.allocated_history_samples == 8
+    assert session._observer_samples.maxlen == 8
+    assert session._scoring_events.maxlen == 8
 
 
 def test_level_nine_goal_is_100_meter_close_approach() -> None:

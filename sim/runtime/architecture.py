@@ -11,6 +11,7 @@ class RuntimeFamily:
     module: str
     facade: str
     capabilities: tuple[str, ...]
+    patch_seams: tuple[str, ...] = ()
 
 
 RUNTIME_CONSTRUCTION_FAMILIES: tuple[RuntimeFamily, ...] = (
@@ -25,7 +26,8 @@ RUNTIME_CONSTRUCTION_FAMILIES: tuple[RuntimeFamily, ...] = (
         "state_initialization",
         "sim.runtime.state_initialization",
         "sim.runtime_support",
-        ("_default_truth_from_agent", "_apply_relative_init_from_reference", "_apply_relative_cislunar_init_from_reference"),
+        ("_apply_relative_init_from_reference", "_apply_relative_cislunar_init_from_reference"),
+        ("_default_truth_from_agent",),
     ),
     RuntimeFamily(
         "actuators",
@@ -37,18 +39,21 @@ RUNTIME_CONSTRUCTION_FAMILIES: tuple[RuntimeFamily, ...] = (
         "satellites",
         "sim.runtime.satellite_factory",
         "sim.runtime_support",
-        ("_build_orbit_propagator", "_create_satellite_runtime"),
+        ("_build_orbit_propagator",),
+        ("_create_satellite_runtime",),
     ),
     RuntimeFamily(
         "rockets",
         "sim.runtime.rocket_factory",
         "sim.runtime_support",
-        ("_resolve_rocket_stack", "_build_rocket_guidance", "_create_rocket_runtime"),
+        ("_resolve_rocket_stack", "_build_rocket_guidance"),
+        ("_create_rocket_runtime",),
     ),
     RuntimeFamily(
         "knowledge",
         "sim.runtime.knowledge_factory",
         "sim.runtime_support",
+        (),
         ("_build_knowledge_base",),
     ),
     RuntimeFamily(

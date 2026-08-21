@@ -15,7 +15,7 @@ from sim.plotting.style import get_oel_version
 from sim.review.generated_artifacts import clear_generated_review_artifacts
 from sim.utils.frames import eci_relative_to_ric_rect
 
-REVIEW_SCHEMA_VERSION = "0.8"
+REVIEW_SCHEMA_VERSION = "0.9"
 REVIEW_SCHEMA_COMPATIBILITY_POLICY = "pre_1_0_additive"
 REVIEW_SCHEMA_STABLE_TABLES = (
     "run_metadata",
@@ -66,6 +66,7 @@ def write_single_run_review_store(
     truth_hist = {str(k): _as_2d_float(v) for k, v in dict(context.truth_hist or {}).items()}
     thrust_hist = {str(k): _as_2d_float(v) for k, v in dict(context.thrust_hist or {}).items()}
     generated_utc = _utc_stamp()
+    include_debug_detail = str(review_cfg.detail or "standard") == "full"
 
     try:
         conn = sqlite3.connect(tmp_path)
@@ -89,15 +90,21 @@ def write_single_run_review_store(
                 object_state_frames=dict(payload.get("object_state_frames", {}) or {}),
             )
             _insert_thrust(conn, t_s=t_s, thrust_hist=thrust_hist)
-            _insert_command_decisions(conn, payload=payload)
+            _insert_command_decisions(
+                conn,
+                payload=payload,
+                include_debug_detail=include_debug_detail,
+            )
             _insert_flight_software_evidence(
                 conn,
                 payload=payload,
                 t_s=t_s,
                 truth_hist=truth_hist,
+                include_debug_detail=include_debug_detail,
             )
             _insert_game_evidence(conn, payload=payload)
             _insert_ground_access(conn, t_s=t_s, payload=payload)
+            _insert_orbital_analysis(conn, payload=payload)
             _insert_events(conn, t_s=t_s, summary=summary, thrust_hist=thrust_hist)
             _insert_mission_recovery(conn, summary=summary)
             _insert_metrics(conn, summary=summary)
@@ -528,6 +535,107 @@ def _create_schema(conn: sqlite3.Connection) -> None:
         );
         CREATE INDEX idx_ground_access_station_object_time ON ground_access(station_id, object_id, time_s);
 
+        CREATE TABLE coverage_summary (
+            analysis_id TEXT PRIMARY KEY,
+            source_object_id TEXT,
+            state_provider_id TEXT,
+            product_kind TEXT,
+            refinement_source TEXT,
+            semantic_sha256 TEXT,
+            summary_json TEXT
+        );
+
+        CREATE TABLE coverage_samples (
+            analysis_id TEXT,
+            sample_index INTEGER,
+            time_s REAL,
+            covered_cell_count INTEGER,
+            instantaneous_covered_fraction REAL
+        );
+        CREATE INDEX idx_coverage_samples_analysis_time ON coverage_samples(analysis_id, time_s);
+
+        CREATE TABLE coverage_intervals (
+            analysis_id TEXT,
+            cell_index INTEGER,
+            interval_index INTEGER,
+            start_s REAL,
+            end_s REAL,
+            duration_s REAL,
+            start_censored INTEGER,
+            end_censored INTEGER,
+            acquisition_disposition TEXT,
+            loss_disposition TEXT,
+            acquisition_reason TEXT,
+            loss_reason TEXT
+        );
+        CREATE INDEX idx_coverage_intervals_analysis_cell ON coverage_intervals(analysis_id, cell_index, start_s);
+
+        CREATE TABLE coverage_transitions (
+            analysis_id TEXT,
+            cell_index INTEGER,
+            transition_kind TEXT,
+            time_s REAL,
+            bracket_start_s REAL,
+            bracket_end_s REAL,
+            disposition TEXT,
+            iterations INTEGER,
+            reason_before TEXT,
+            reason_after TEXT
+        );
+        CREATE INDEX idx_coverage_transitions_analysis_cell ON coverage_transitions(analysis_id, cell_index, time_s);
+
+        CREATE TABLE link_summary (
+            analysis_id TEXT PRIMARY KEY,
+            link_id TEXT,
+            tx_object_id TEXT,
+            rx_object_id TEXT,
+            tx_state_provider_id TEXT,
+            rx_state_provider_id TEXT,
+            refinement_source_json TEXT,
+            semantic_sha256 TEXT,
+            summary_json TEXT
+        );
+
+        CREATE TABLE link_samples (
+            analysis_id TEXT,
+            sample_index INTEGER,
+            time_s REAL,
+            range_km REAL,
+            margin_db REAL,
+            available INTEGER,
+            primary_reason TEXT
+        );
+        CREATE INDEX idx_link_samples_analysis_time ON link_samples(analysis_id, time_s);
+
+        CREATE TABLE link_windows (
+            analysis_id TEXT,
+            interval_index INTEGER,
+            start_s REAL,
+            end_s REAL,
+            duration_s REAL,
+            start_censored INTEGER,
+            end_censored INTEGER,
+            acquisition_disposition TEXT,
+            loss_disposition TEXT,
+            minimum_margin_db REAL,
+            mean_margin_db REAL,
+            maximum_margin_db REAL,
+            minimum_range_km REAL,
+            estimated_delivered_data_bits REAL
+        );
+
+        CREATE TABLE link_transitions (
+            analysis_id TEXT,
+            transition_kind TEXT,
+            time_s REAL,
+            bracket_start_s REAL,
+            bracket_end_s REAL,
+            disposition TEXT,
+            iterations INTEGER,
+            reason_before TEXT,
+            reason_after TEXT
+        );
+
         CREATE TABLE events (
             event_id TEXT PRIMARY KEY,
             time_s REAL,
@@ -950,7 +1058,12 @@ def _insert_thrust(conn: sqlite3.Connection, *, t_s: np.ndarray, thrust_hist: di
     conn.executemany("INSERT INTO thrust VALUES (?, ?, ?, ?, ?, ?, ?, ?)", rows)
 
 
-def _insert_command_decisions(conn: sqlite3.Connection, *, payload: dict[str, Any]) -> None:
+def _insert_command_decisions(
+    conn: sqlite3.Connection,
+    *,
+    payload: dict[str, Any],
+    include_debug_detail: bool = True,
+) -> None:
     decision_rows = []
     mode_rows = []
     transition_rows = []
@@ -960,7 +1073,7 @@ def _insert_command_decisions(conn: sqlite3.Connection, *, payload: dict[str, An
         for decision_index, raw_row in enumerate(list(raw_rows or [])):
             row = dict(raw_row or {})
             mission_mode = dict(row.get("mission_mode", {}) or {})
-            detail_json = json.dumps(row, sort_keys=True, separators=(",", ":"))
+            detail_json = _debug_json(row, include=include_debug_detail)
             common = (
                 int(decision_index),
                 _int_or_none(row.get("sample_index")),
@@ -1061,6 +1174,12 @@ def _clock_ns(clock: Any) -> int | None:
     return ticks * tick_period_ns
 
 
+def _debug_json(value: Any, *, include: bool) -> str | None:
+    if not include:
+        return None
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
 def _mission_load_dispositions(evidence: dict[str, Any]) -> dict[tuple[int, str, int | None], str]:
     """Index stack-owned load decisions without treating delivery as activation."""
 
@@ -1092,6 +1211,7 @@ def _insert_flight_software_evidence(
     payload: dict[str, Any],
     t_s: np.ndarray,
     truth_hist: dict[str, np.ndarray],
+    include_debug_detail: bool = True,
 ) -> None:
     evidence_by_object = dict(payload.get("flight_software_evidence_by_object", {}) or {})
     invocation_rows = []
@@ -1129,7 +1249,7 @@ def _insert_flight_software_evidence(
                     len(packet_ids),
                     len(command_ids),
                     int(invocation.get("telemetry_count", 0) or 0),
-                    json.dumps(invocation, sort_keys=True, separators=(",", ":")),
+                    _debug_json(invocation, include=include_debug_detail),
                 )
             )
             for raw_request in list(invocation.get("requested_next_invocations", []) or []):
@@ -1143,7 +1263,7 @@ def _insert_flight_software_evidence(
                         None,
                         None,
                         None,
-                        json.dumps(request, sort_keys=True, separators=(",", ":")),
+                        _debug_json(request, include=include_debug_detail),
                     )
                 )
             for raw_release in list(invocation.get("task_releases", []) or []):
@@ -1187,7 +1307,7 @@ def _insert_flight_software_evidence(
             event = dict(raw_event or {})
             packet = _packet_key(event.get("packet_id"))
             invocation_id = packet_invocations.get(packet)
-            detail = json.dumps(event, sort_keys=True, separators=(",", ":"))
+            detail = _debug_json(event, include=include_debug_detail)
             input_rows.append(
                 (
                     str(object_id),
@@ -1301,7 +1421,7 @@ def _insert_flight_software_evidence(
                         _clock_ns(validity.get("not_before")),
                         _clock_ns(validity.get("expires_at")),
                         _none_or_str(dict(command.get("payload", {}) or {}).get("schema")),
-                        json.dumps(command, sort_keys=True, separators=(",", ":")),
+                        _debug_json(command, include=include_debug_detail),
                     )
                 )
             for raw_telemetry in list(output.get("telemetry", []) or []):
@@ -1317,7 +1437,7 @@ def _insert_flight_software_evidence(
                         invocation_id,
                         _none_or_str(telemetry.get("topic")),
                         _clock_ns(telemetry.get("generated_at")),
-                        json.dumps(telemetry, sort_keys=True, separators=(",", ":")),
+                        _debug_json(telemetry, include=include_debug_detail),
                     )
                 )
                 if fields.get("goal_id") is not None or fields.get("goal_state") is not None:
@@ -1349,7 +1469,7 @@ def _insert_flight_software_evidence(
                     _clock_ns(receipt.get("received_at")),
                     _none_or_str(receipt.get("disposition")),
                     json.dumps(list(receipt.get("status_codes", []) or []), sort_keys=True),
-                    json.dumps(receipt, sort_keys=True, separators=(",", ":")),
+                    _debug_json(receipt, include=include_debug_detail),
                 )
             )
 
@@ -1558,6 +1678,92 @@ def _insert_ground_access(conn: sqlite3.Connection, *, t_s: np.ndarray, payload:
                     )
                 )
     conn.executemany("INSERT INTO ground_access VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
+
+
+def _insert_orbital_analysis(conn: sqlite3.Connection, *, payload: dict[str, Any]) -> None:
+    root = dict(
+        payload.get("_orbital_analysis_review", payload.get("orbital_analysis", {})) or {}
+    )
+    coverage_summary_rows = []
+    coverage_sample_rows = []
+    coverage_interval_rows = []
+    coverage_transition_rows = []
+    for raw in list(root.get("coverage", []) or []):
+        item = dict(raw or {})
+        analysis_id = str(item.get("analysis_id") or "")
+        coverage_summary_rows.append((
+            analysis_id, _none_or_str(item.get("source_object_id")), _none_or_str(item.get("state_provider_id")),
+            _none_or_str(item.get("product_kind")), _none_or_str(item.get("refinement_source")),
+            _none_or_str(item.get("semantic_sha256")), json.dumps(dict(item.get("summary", {}) or {}), sort_keys=True, separators=(",", ":")),
+        ))
+        for sample in list(item.get("samples", []) or []):
+            row = dict(sample or {})
+            coverage_sample_rows.append((analysis_id, _int_or_none(row.get("sample_index")), _float_or_none(row.get("time_s")),
+                                         _int_or_none(row.get("covered_cell_count")), _float_or_none(row.get("instantaneous_covered_fraction"))))
+        for interval in list(item.get("intervals", []) or []):
+            row = dict(interval or {})
+            coverage_interval_rows.append((
+                analysis_id, _int_or_none(row.get("cell_index")), _int_or_none(row.get("interval_index")),
+                _float_or_none(row.get("start_s")), _float_or_none(row.get("end_s")), _float_or_none(row.get("duration_s")),
+                _bool_int(row.get("start_censored")), _bool_int(row.get("end_censored")),
+                _none_or_str(row.get("acquisition_disposition")), _none_or_str(row.get("loss_disposition")),
+                _none_or_str(row.get("acquisition_reason")), _none_or_str(row.get("loss_reason")),
+            ))
+        for transition in list(item.get("transitions", []) or []):
+            row = dict(transition or {})
+            coverage_transition_rows.append((
+                analysis_id, _int_or_none(row.get("cell_index")), _none_or_str(row.get("transition_kind")),
+                _float_or_none(row.get("time_s")), _float_or_none(row.get("bracket_start_s")),
+                _float_or_none(row.get("bracket_end_s")), _none_or_str(row.get("disposition")),
+                _int_or_none(row.get("iterations")), _none_or_str(row.get("reason_before")),
+                _none_or_str(row.get("reason_after")),
+            ))
+    conn.executemany("INSERT INTO coverage_summary VALUES (?, ?, ?, ?, ?, ?, ?)", coverage_summary_rows)
+    conn.executemany("INSERT INTO coverage_samples VALUES (?, ?, ?, ?, ?)", coverage_sample_rows)
+    conn.executemany("INSERT INTO coverage_intervals VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", coverage_interval_rows)
+    conn.executemany("INSERT INTO coverage_transitions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", coverage_transition_rows)
+
+    link_summary_rows = []
+    link_sample_rows = []
+    link_window_rows = []
+    link_transition_rows = []
+    for raw in list(root.get("directed_links", []) or []):
+        item = dict(raw or {})
+        analysis_id = str(item.get("analysis_id") or "")
+        link_summary_rows.append((
+            analysis_id, _none_or_str(item.get("link_id")), _none_or_str(item.get("tx_object_id")), _none_or_str(item.get("rx_object_id")),
+            _none_or_str(item.get("tx_state_provider_id")), _none_or_str(item.get("rx_state_provider_id")),
+            json.dumps(dict(item.get("refinement_source", {}) or {}), sort_keys=True, separators=(",", ":")),
+            _none_or_str(item.get("semantic_sha256")), json.dumps(dict(item.get("summary", {}) or {}), sort_keys=True, separators=(",", ":")),
+        ))
+        for sample in list(item.get("samples", []) or []):
+            row = dict(sample or {})
+            link_sample_rows.append((analysis_id, _int_or_none(row.get("sample_index")), _float_or_none(row.get("time_s")),
+                                     _float_or_none(row.get("range_km")), _float_or_none(row.get("margin_db")),
+                                     _bool_int(row.get("available")), _none_or_str(row.get("primary_reason"))))
+        for window in list(item.get("windows", []) or []):
+            row = dict(window or {})
+            link_window_rows.append((
+                analysis_id, _int_or_none(row.get("interval_index")), _float_or_none(row.get("start_s")),
+                _float_or_none(row.get("end_s")), _float_or_none(row.get("duration_s")),
+                _bool_int(row.get("start_censored")), _bool_int(row.get("end_censored")),
+                _none_or_str(row.get("acquisition_disposition")), _none_or_str(row.get("loss_disposition")),
+                _float_or_none(row.get("minimum_margin_db")), _float_or_none(row.get("mean_margin_db")),
+                _float_or_none(row.get("maximum_margin_db")), _float_or_none(row.get("minimum_range_km")),
+                _float_or_none(row.get("estimated_delivered_data_bits")),
+            ))
+        for transition in list(item.get("transitions", []) or []):
+            row = dict(transition or {})
+            link_transition_rows.append((
+                analysis_id, _none_or_str(row.get("transition_kind")), _float_or_none(row.get("time_s")),
+                _float_or_none(row.get("bracket_start_s")), _float_or_none(row.get("bracket_end_s")),
+                _none_or_str(row.get("disposition")), _int_or_none(row.get("iterations")),
+                _none_or_str(row.get("reason_before")), _none_or_str(row.get("reason_after")),
+            ))
+    conn.executemany("INSERT INTO link_summary VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", link_summary_rows)
+    conn.executemany("INSERT INTO link_samples VALUES (?, ?, ?, ?, ?, ?, ?)", link_sample_rows)
+    conn.executemany("INSERT INTO link_windows VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", link_window_rows)
+    conn.executemany("INSERT INTO link_transitions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", link_transition_rows)
 
 
 def _insert_events(
@@ -1896,6 +2102,14 @@ def _write_schema_json(path: Path, *, generated_utc: str, db_path: Path | None =
             "object_state_frame": {"description": "Frame label for each object's state rows, e.g. eci or teme."},
             "time_samples": {"description": "Retained sample times."},
             "object_state": {"description": "Truth state histories by object; join object_state_frame for frame labels."},
+            "coverage_summary": {"description": "One source-bound summary row per whole-Earth coverage analysis."},
+            "coverage_samples": {"description": "Time-indexed whole-Earth covered-cell counts and fractions."},
+            "coverage_intervals": {"description": "Sample-bounded, provider-refined, or censored cell coverage intervals."},
+            "coverage_transitions": {"description": "Coverage acquisition/loss brackets and provider-refinement evidence."},
+            "link_summary": {"description": "One provenance-bound summary row per directed link analysis."},
+            "link_samples": {"description": "Time-indexed directed-link range, margin, availability, and reason."},
+            "link_windows": {"description": "Directed-link availability windows with margin and volume evidence."},
+            "link_transitions": {"description": "Acquisition/loss brackets and provider-refinement dispositions."},
             "relative_state": {
                 "description": "RIC relative state for configured/default review object pairs."
             },

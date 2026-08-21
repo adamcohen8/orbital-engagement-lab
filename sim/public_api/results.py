@@ -294,7 +294,7 @@ class SimulationResult:
 
     @property
     def is_batch_analysis(self) -> bool:
-        return self.analysis_study_type in {"monte_carlo", "sensitivity"}
+        return self.analysis_study_type in {"monte_carlo", "sensitivity", "covariance"}
 
     @property
     def is_monte_carlo(self) -> bool:

@@ -300,6 +300,7 @@ def build_satellite_flight_software_runtime(
                     kd=_gain3(params.get("kd", 1.0)),
                     max_torque_n_m=max_torque,
                 ),
+                measurement_stale_after_s=float(params.get("measurement_stale_after_s", 30.0)),
                 health=_health_config(
                     params,
                     default_fallbacks=(
@@ -761,6 +762,7 @@ def _build_translation_runtime(
                 params.get("navigation_relative_mean_motion_rad_s", control.mean_motion_rad_s or 0.0011)
             ),
             navigation_nis_limit=float(params.get("navigation_nis_limit", 30.0)),
+            measurement_stale_after_s=float(params.get("measurement_stale_after_s", 30.0)),
             health=_health_config(params),
             resources=ResourceLimits(
                 minimum_battery_soc=float(params.get("minimum_battery_soc", 0.15)),
@@ -825,6 +827,14 @@ def _build_translation_runtime(
     if attitude_device is not None and attitude_hardware is not None:
         devices.append(attitude_device)
         hardware["attitude"] = attitude_hardware
+    device_ids = {device.actuator_id for device in devices}
+    for primary, backup in stack.config.health.actuator_fallbacks:
+        missing = [actuator_id for actuator_id in (primary, backup) if actuator_id not in device_ids]
+        if missing:
+            raise ValueError(
+                "translation actuator_fallbacks must reference configured actuator devices; "
+                f"missing: {', '.join(sorted(set(missing)))}"
+            )
     return SatelliteFlightSoftwareRuntime(
         satellite_id=object_id,
         stack=stack,

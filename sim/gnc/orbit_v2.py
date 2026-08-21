@@ -1137,6 +1137,9 @@ class TranslationAllocatorConfig:
             and not self.rcs_thrusters
         ):
             raise ValueError("RCS allocation requires at least one thruster belief")
+        thruster_ids = [thruster.thruster_id for thruster in self.rcs_thrusters]
+        if len(thruster_ids) != len(set(thruster_ids)):
+            raise ValueError("RCS thruster IDs must be unique")
 
 
 class TranslationAllocator:

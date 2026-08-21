@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from sim.config.scenario.models import (
@@ -19,6 +20,128 @@ __all__ = [
     '_parse_outputs_section',
 ]
 
+
+def _validate_orbital_analysis_section(section: dict[str, Any]) -> None:
+    coverage_allowed = {
+        "analysis_id", "source_object_id", "sensor_id", "order", "half_angle_deg",
+        "quat_body_from_sensor", "max_range_km", "chunk_size", "max_working_memory_bytes",
+        "max_cell_time_comparisons", "transition_time_tolerance_s", "transition_max_iterations",
+        "max_transition_refinement_evaluations",
+        "include_cell_csv",
+    }
+    for index, raw in enumerate(list(section.get("coverage", []) or [])):
+        path = f"outputs.orbital_analysis.coverage[{index}]"
+        _reject_unknown_fields(raw, path, coverage_allowed)
+        for field_name in ("analysis_id", "source_object_id", "sensor_id", "order", "half_angle_deg"):
+            if raw.get(field_name) in (None, ""):
+                raise ValueError(f"{path}.{field_name} is required.")
+        order = raw["order"]
+        if isinstance(order, bool) or not isinstance(order, int) or order not in range(5, 9):
+            raise ValueError(f"{path}.order must be an integer from 5 through 8.")
+        half_angle = float(raw["half_angle_deg"])
+        if not math.isfinite(half_angle) or not 0.0 < half_angle < 90.0:
+            raise ValueError(f"{path}.half_angle_deg must be finite and within (0, 90).")
+        if raw.get("max_range_km") is not None:
+            maximum_range = float(raw["max_range_km"])
+            if not math.isfinite(maximum_range) or maximum_range <= 0.0:
+                raise ValueError(f"{path}.max_range_km must be positive and finite.")
+        quaternion = list(raw.get("quat_body_from_sensor", [1.0, 0.0, 0.0, 0.0]) or [])
+        if len(quaternion) != 4 or any(not math.isfinite(float(value)) for value in quaternion):
+            raise ValueError(f"{path}.quat_body_from_sensor must contain four finite values.")
+        if abs(math.sqrt(sum(float(value) ** 2 for value in quaternion)) - 1.0) > 1.0e-10:
+            raise ValueError(f"{path}.quat_body_from_sensor must be normalized within 1e-10.")
+        for field_name in (
+            "chunk_size",
+            "max_working_memory_bytes",
+            "max_cell_time_comparisons",
+            "max_transition_refinement_evaluations",
+        ):
+            if field_name in raw:
+                value = raw[field_name]
+                if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+                    raise ValueError(f"{path}.{field_name} must be a positive integer.")
+        refinement = ("transition_time_tolerance_s" in raw, "transition_max_iterations" in raw)
+        if refinement[0] != refinement[1]:
+            raise ValueError(f"{path} must declare transition refinement tolerance and iterations together.")
+        if refinement[0]:
+            tolerance = float(raw["transition_time_tolerance_s"])
+            iterations = raw["transition_max_iterations"]
+            if not math.isfinite(tolerance) or tolerance <= 0.0:
+                raise ValueError(f"{path}.transition_time_tolerance_s must be positive and finite.")
+            if isinstance(iterations, bool) or not isinstance(iterations, int) or iterations <= 0:
+                raise ValueError(f"{path}.transition_max_iterations must be a positive integer.")
+
+    link_allowed = {
+        "analysis_id", "link_id", "tx_object_id", "rx_object_id", "tx_terminal", "rx_terminal",
+        "carrier_frequency_hz", "tx_power_w", "data_rate_bps", "system_noise_temperature_k",
+        "required_eb_n0_db", "tx_line_loss_db", "rx_line_loss_db", "misc_loss_db", "max_range_km",
+        "transition_time_tolerance_s", "transition_max_iterations", "include_margin_plot",
+    }
+    for index, raw in enumerate(list(section.get("directed_links", []) or [])):
+        path = f"outputs.orbital_analysis.directed_links[{index}]"
+        _reject_unknown_fields(raw, path, link_allowed)
+        required = (
+            "analysis_id", "link_id", "tx_object_id", "rx_object_id", "tx_terminal", "rx_terminal",
+            "carrier_frequency_hz", "tx_power_w", "data_rate_bps", "system_noise_temperature_k", "required_eb_n0_db",
+        )
+        for field_name in required:
+            if raw.get(field_name) in (None, ""):
+                raise ValueError(f"{path}.{field_name} is required.")
+        if str(raw["tx_object_id"]) == str(raw["rx_object_id"]):
+            raise ValueError(f"{path} endpoints must name different objects.")
+        for field_name in ("carrier_frequency_hz", "tx_power_w", "data_rate_bps", "system_noise_temperature_k"):
+            value = float(raw[field_name])
+            if not math.isfinite(value) or value <= 0.0:
+                raise ValueError(f"{path}.{field_name} must be positive and finite.")
+        if not math.isfinite(float(raw["required_eb_n0_db"])):
+            raise ValueError(f"{path}.required_eb_n0_db must be finite.")
+        for field_name in ("tx_line_loss_db", "rx_line_loss_db", "misc_loss_db"):
+            if field_name in raw:
+                value = float(raw[field_name])
+                if not math.isfinite(value) or value < 0.0:
+                    raise ValueError(f"{path}.{field_name} must be nonnegative and finite.")
+        if raw.get("max_range_km") is not None:
+            maximum_range = float(raw["max_range_km"])
+            if not math.isfinite(maximum_range) or maximum_range <= 0.0:
+                raise ValueError(f"{path}.max_range_km must be positive and finite.")
+        for terminal_name in ("tx_terminal", "rx_terminal"):
+            terminal_path = f"{path}.{terminal_name}"
+            terminal = _as_dict(raw.get(terminal_name), terminal_path)
+            _reject_unknown_fields(terminal, terminal_path, {"terminal_id", "quat_body_from_terminal", "pattern"})
+            if not str(terminal.get("terminal_id") or "").strip():
+                raise ValueError(f"{terminal_path}.terminal_id is required.")
+            quaternion = list(terminal.get("quat_body_from_terminal", [1.0, 0.0, 0.0, 0.0]) or [])
+            if len(quaternion) != 4 or any(not math.isfinite(float(value)) for value in quaternion):
+                raise ValueError(f"{terminal_path}.quat_body_from_terminal must contain four finite values.")
+            if abs(math.sqrt(sum(float(value) ** 2 for value in quaternion)) - 1.0) > 1.0e-10:
+                raise ValueError(f"{terminal_path}.quat_body_from_terminal must be normalized within 1e-10.")
+            pattern_path = f"{terminal_path}.pattern"
+            pattern = _as_dict(terminal.get("pattern"), pattern_path)
+            _reject_unknown_fields(pattern, pattern_path, {"kind", "gain_dbi", "half_angle_deg"})
+            kind = str(pattern.get("kind", "constant") or "constant").lower()
+            if kind not in {"constant", "axisymmetric_hard_cone"}:
+                raise ValueError(f"{pattern_path}.kind must be constant or axisymmetric_hard_cone.")
+            if pattern.get("gain_dbi") is None or not math.isfinite(float(pattern["gain_dbi"])):
+                raise ValueError(f"{pattern_path}.gain_dbi must be finite.")
+            if kind == "axisymmetric_hard_cone":
+                if pattern.get("half_angle_deg") is None:
+                    raise ValueError(f"{pattern_path}.half_angle_deg is required for a directional pattern.")
+                angle = float(pattern.get("half_angle_deg"))
+                if not math.isfinite(angle) or not 0.0 < angle <= 180.0:
+                    raise ValueError(f"{pattern_path}.half_angle_deg must be within (0, 180].")
+            elif pattern.get("half_angle_deg") is not None:
+                raise ValueError(f"{pattern_path}.half_angle_deg is not valid for a constant pattern.")
+        refinement = ("transition_time_tolerance_s" in raw, "transition_max_iterations" in raw)
+        if refinement[0] != refinement[1]:
+            raise ValueError(f"{path} must declare transition refinement tolerance and iterations together.")
+        if refinement[0]:
+            tolerance = float(raw["transition_time_tolerance_s"])
+            iterations = raw["transition_max_iterations"]
+            if not math.isfinite(tolerance) or tolerance <= 0.0:
+                raise ValueError(f"{path}.transition_time_tolerance_s must be positive and finite.")
+            if isinstance(iterations, bool) or not isinstance(iterations, int) or iterations <= 0:
+                raise ValueError(f"{path}.transition_max_iterations must be a positive integer.")
+
 def _parse_outputs_section(value: Any, path_policy: ConfigPathPolicy | None = None) -> OutputsSection:
     d = _as_dict(value, "outputs")
     _reject_unsupported_aliases(d, "outputs", _OUTPUTS_UNSUPPORTED_ALIASES)
@@ -35,6 +158,7 @@ def _parse_outputs_section(value: Any, path_policy: ConfigPathPolicy | None = No
             "ai_report",
             "ai_config",
             "review",
+            "orbital_analysis",
             "resource_limits",
         },
     )
@@ -45,6 +169,7 @@ def _parse_outputs_section(value: Any, path_policy: ConfigPathPolicy | None = No
     ai_report = _as_dict(d.get("ai_report"), "outputs.ai_report")
     ai_config = _as_dict(d.get("ai_config"), "outputs.ai_config")
     review = _as_dict(d.get("review"), "outputs.review")
+    orbital_analysis = _as_dict(d.get("orbital_analysis"), "outputs.orbital_analysis")
     resource_limits = _as_dict(d.get("resource_limits"), "outputs.resource_limits")
     _reject_unsupported_aliases(plots, "outputs.plots", _OUTPUT_PLOTS_UNSUPPORTED_ALIASES)
     _reject_unsupported_aliases(animations, "outputs.animations", _OUTPUT_ANIMATIONS_UNSUPPORTED_ALIASES)
@@ -111,6 +236,16 @@ def _parse_outputs_section(value: Any, path_policy: ConfigPathPolicy | None = No
     )
     _reject_unknown_fields(review, "outputs.review", {"enabled", "detail", "strict"})
     _reject_unknown_fields(
+        orbital_analysis,
+        "outputs.orbital_analysis",
+        {"enabled", "coverage", "directed_links"},
+    )
+    for field_name in ("coverage", "directed_links"):
+        value = orbital_analysis.get(field_name, [])
+        if not isinstance(value, list) or any(not isinstance(item, dict) for item in value):
+            raise ValueError(f"outputs.orbital_analysis.{field_name} must be a list of mappings.")
+    _validate_orbital_analysis_section(orbital_analysis)
+    _reject_unknown_fields(
         resource_limits,
         "outputs.resource_limits",
         {
@@ -129,6 +264,7 @@ def _parse_outputs_section(value: Any, path_policy: ConfigPathPolicy | None = No
         ai_report=ai_report,
         ai_config=ai_config,
         review=review,
+        orbital_analysis=orbital_analysis,
         resource_limits=resource_limits,
     )
     if out.mode not in ("interactive", "save", "both"):

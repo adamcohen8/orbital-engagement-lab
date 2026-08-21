@@ -11,7 +11,7 @@ from sim.knowledge.object_tracking import (
     ObjectKnowledgeBase,
     TrackedObjectConfig,
 )
-from sim.sensors.access import AccessConfig, AccessModel
+from sim.sensors.access import AccessConfig, AccessModel, GroundSite
 from sim.sensors.composite import CompositeSensorModel
 from sim.sensors.joint_state import JointStateSensor
 from sim.sensors.models import OwnStateSensor, RelativeSensor, SensorNoiseConfig
@@ -170,6 +170,25 @@ def test_access_model_enforces_cadence_range_and_fov() -> None:
         12.0,
         boresight_eci=np.array([1.0, 0.0, 0.0]),
     )
+
+
+def test_access_model_uses_configured_ground_site_and_elevation_mask() -> None:
+    target = np.array([6878.137, 0.0, 0.0], dtype=float)
+    overhead = AccessModel(
+        AccessConfig(
+            require_ground_visibility=True,
+            ground_site=GroundSite(lat_rad=0.0, lon_rad=0.0, min_elevation_rad=np.deg2rad(10.0)),
+        )
+    )
+    far_side = AccessModel(
+        AccessConfig(
+            require_ground_visibility=True,
+            ground_site=GroundSite(lat_rad=0.0, lon_rad=np.pi, min_elevation_rad=np.deg2rad(10.0)),
+        )
+    )
+
+    assert overhead.evaluate(np.zeros(3), target, 0.0) == (True, "ok")
+    assert far_side.evaluate(np.zeros(3), target, 0.0) == (False, "ground_elevation")
 
 
 def test_joint_state_sensor_zero_noise_preserves_normalized_attitude_and_cadence() -> None:
