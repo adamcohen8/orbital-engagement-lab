@@ -44,13 +44,17 @@ test("Worker contract enforces same-origin rooms, bounded payloads, persistence,
   assert.match(workerSource, /Permissions-Policy/);
 });
 
-test("client contract includes the C camera shortcut and a complete landscape-phone layout", () => {
+test("client contract includes the C camera shortcut and reuses the trainer landscape layout", () => {
   assert.match(clientSource, /event\.code === "KeyC"/);
   const landscapeStart = stylesSource.indexOf("@media (max-height: 580px) and (orientation: landscape)");
   const landscapeEnd = stylesSource.indexOf("@media (prefers-reduced-motion", landscapeStart);
   assert.ok(landscapeStart >= 0 && landscapeEnd > landscapeStart);
   const landscape = stylesSource.slice(landscapeStart, landscapeEnd);
   assert.match(landscape, /\.game-view \{ position: static; display: grid;/);
+  assert.match(landscape, /grid-template-columns: minmax\(0, 1fr\) clamp\(280px, 36vw, 360px\)/);
+  assert.match(landscape, /grid-template-areas: "top top" "game game" "hud controls"/);
   assert.match(landscape, /\.plots \{ grid-template-columns: 1fr 1fr;/);
-  assert.match(landscape, /\.touch-controls \{ display: grid; grid-template-columns: repeat\(6,/);
+  assert.match(landscape, /\.duel-hud-panel \{ grid-area: hud;/);
+  assert.match(landscape, /\.touch-controls \{ grid-area: controls;/);
+  assert.match(landscape, /grid-template-columns: repeat\(3,/);
 });

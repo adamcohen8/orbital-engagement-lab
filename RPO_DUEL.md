@@ -32,10 +32,11 @@ Implemented now:
 - ordered normalized RIC inputs shared by keyboard and touch controls;
 - responsive R/I and R/C trajectory plots using the regular RPO Trainer
   dashboard composition: a default full-trajectory frame centered on the
-  propagated Target reference orbit, visible Target and Chaser HCW coast
+  propagated Target reference orbit, visible one-orbital-period Target and Chaser HCW coast
   projections, and a `C`/touch camera toggle to a satellites-only midpoint
   view; twin plots and a bottom HUD on laptops, compact stacked plots in phone
-  portrait, and side-by-side plots with a six-button touch rail in phone
+  portrait, and the existing side-by-side plots with the lower HUD and
+  right-side three-by-two touch-control group in phone
   landscape; role/score/time/delta-v telemetry, connection state, countdowns,
   round results, and draw-capable match results; and
 - deterministic engine tests plus HTTP, WebSocket, ordering, disconnect, and

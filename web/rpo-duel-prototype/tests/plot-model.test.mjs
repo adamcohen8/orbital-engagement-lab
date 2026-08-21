@@ -60,6 +60,21 @@ test("reference camera centers the target reference orbit and shows both HCW pro
   assert.equal(frame.chaserTrail.length, 1);
   assert.equal(frame.targetProjection.length, 121);
   assert.equal(frame.chaserProjection.length, 121);
+  const orbitalPeriodS = 2 * Math.PI / round.reference_mean_motion_rad_s;
+  assert.ok(Math.abs(frame.targetProjection.at(-1).t_s - orbitalPeriodS) < 1e-9);
+  assert.ok(Math.abs(frame.chaserProjection.at(-1).t_s - orbitalPeriodS) < 1e-9);
+});
+
+test("reference camera keeps a full-orbit projection even late in the round", () => {
+  const meanMotion = .001;
+  const frame = duelPlotFrame({
+    time_remaining_s: 10,
+    reference_mean_motion_rad_s: meanMotion,
+    target_reference_ric: relative(0, 0, 0),
+    chaser_reference_ric: relative(1, -2, .5),
+  });
+  assert.ok(Math.abs(frame.targetProjection.at(-1).t_s - 2 * Math.PI / meanMotion) < 1e-9);
+  assert.ok(Math.abs(frame.chaserProjection.at(-1).t_s - 2 * Math.PI / meanMotion) < 1e-9);
 });
 
 test("current-pair camera centers the satellite midpoint and suppresses trails and projections", () => {

@@ -59,10 +59,9 @@ export function duelPlotFrame(round, trail = [], cameraMode = DUEL_CAMERA_MODES.
     ? midpointPosition(current.target, current.chaser)
     : { r_km: 0, i_km: 0, c_km: 0 };
   const meanMotion = Number(round?.reference_mean_motion_rad_s);
-  const horizon = Math.min(
-    Math.max(0, Number(round?.time_remaining_s) || 0),
-    Number.isFinite(meanMotion) && meanMotion > 0 ? Math.PI / meanMotion : 0,
-  );
+  const horizon = Number.isFinite(meanMotion) && meanMotion > 0
+    ? 2 * Math.PI / meanMotion
+    : 0;
   return {
     cameraMode: pairMode ? DUEL_CAMERA_MODES.CURRENT_PAIR : DUEL_CAMERA_MODES.REFERENCE,
     cameraCenter,

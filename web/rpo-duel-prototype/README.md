@@ -83,7 +83,7 @@ Press `C` or use the camera button to switch between the default full-trajectory
 view centered on the propagated Target reference orbit and a satellites-only
 view centered on the current Target/Chaser midpoint. In the reference view,
 solid red/yellow lines are recorded Target/Chaser trails and dashed red/blue
-lines are their current HCW coast projections.
+lines are their current one-orbital-period HCW coast projections.
 
 The six on-screen controls work with mouse, pen, or touch. Players cannot set
 simulation speed. The server selects 100x while coasting and 10x while either
