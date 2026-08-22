@@ -66,3 +66,40 @@ def test_dependency_evidence_redacts_local_source_url_and_writes_json(tmp_path: 
     saved = json.loads(output.read_text(encoding="utf-8"))
     project = next(item for item in saved["packages"] if item["name"] == "orbital-engagement-lab")
     assert project["source_url"] == "<local-source>"
+
+
+def test_dependency_evidence_merges_build_dependency_report(tmp_path: Path) -> None:
+    constraints = tmp_path / "py311.txt"
+    constraints.write_text("numpy==2.4.6\nwheel==0.46.3\n", encoding="utf-8")
+    report = _pip_report(tmp_path / "pip-install-report.json")
+    build_report = tmp_path / "build-install-report.json"
+    build_report.write_text(
+        json.dumps(
+            {
+                "version": "1",
+                "pip_version": "26.0",
+                "install": [
+                    {
+                        "download_info": {
+                            "url": "https://files.pythonhosted.org/packages/wheel-0.46.3-py3-none-any.whl",
+                            "archive_info": {"hashes": {"sha256": "wheel123"}},
+                        },
+                        "metadata": {"name": "wheel", "version": "0.46.3"},
+                        "requested": True,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    payload = build_dependency_evidence(
+        install_report=report,
+        constraints_file=constraints,
+        additional_install_reports=[build_report],
+    )
+
+    wheel = next(item for item in payload["packages"] if item["name"] == "wheel")
+    assert wheel["artifact"] == "wheel-0.46.3-py3-none-any.whl"
+    assert wheel["sha256"] == "wheel123"
+    assert payload["resolver"]["additional_report_paths"] == ["build-install-report.json"]
