@@ -51,7 +51,8 @@ Duel Beta.
   report into the signed supply-chain inventory and public attestation. Clean
   dependency resolution now force-reinstalls packages inherited from bootstrap
   or audit tooling so the full-profile offline bundle records every wheel needed
-  to install the release source archive without network access.
+  to install the release source archive without network access. The official
+  build receipt now also binds the published `SHA256SUMS` asset.
 
 ## 0.26.0 - 2026-08-18
 

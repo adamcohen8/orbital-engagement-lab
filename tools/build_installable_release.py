@@ -637,6 +637,7 @@ def build_release(
         archive,
         manifest_path,
         channel_path,
+        checksum_path,
         *installers,
         *([bundle] if wheel_files else []),
     ]
