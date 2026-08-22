@@ -4,9 +4,11 @@ import argparse
 import hashlib
 import json
 import platform
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Iterable
 from urllib.parse import unquote, urlparse
 
 DEPENDENCY_EVIDENCE_SCHEMA_VERSION = 1
@@ -48,15 +50,12 @@ def _source_details(url: str) -> tuple[str, str]:
     return url, filename
 
 
-def build_dependency_evidence(
-    *,
-    install_report: str | Path,
-    constraints_file: str | Path,
-) -> dict[str, object]:
-    report_path = Path(install_report).expanduser().resolve()
-    constraints_path = Path(constraints_file).expanduser().resolve()
-    report = json.loads(report_path.read_text(encoding="utf-8"))
+def _package_key(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", str(name or "").strip().lower())
 
+
+def _report_packages(report_path: Path) -> tuple[dict[str, object], list[dict[str, object]], list[str]]:
+    report = json.loads(report_path.read_text(encoding="utf-8"))
     packages: list[dict[str, object]] = []
     incomplete: list[str] = []
     for item in list(report.get("install", []) or []):
@@ -79,6 +78,38 @@ def build_dependency_evidence(
                 "sha256": artifact_hash,
             }
         )
+    return report, packages, incomplete
+
+
+def build_dependency_evidence(
+    *,
+    install_report: str | Path,
+    constraints_file: str | Path,
+    additional_install_reports: Iterable[str | Path] = (),
+) -> dict[str, object]:
+    report_path = Path(install_report).expanduser().resolve()
+    constraints_path = Path(constraints_file).expanduser().resolve()
+    additional_report_paths = [Path(path).expanduser().resolve() for path in additional_install_reports]
+    report, report_packages, incomplete = _report_packages(report_path)
+
+    packages_by_name: dict[str, dict[str, object]] = {}
+    for package in report_packages:
+        packages_by_name[_package_key(str(package["name"]))] = package
+    for additional_path in additional_report_paths:
+        _additional_report, additional_packages, additional_incomplete = _report_packages(additional_path)
+        incomplete.extend(additional_incomplete)
+        for package in additional_packages:
+            key = _package_key(str(package["name"]))
+            existing = packages_by_name.get(key)
+            if existing is None:
+                packages_by_name[key] = package
+                continue
+            comparable_fields = ("version", "artifact", "artifact_type", "source_url", "sha256")
+            if any(existing[field] != package[field] for field in comparable_fields):
+                raise ValueError(f"Dependency evidence contains conflicting artifacts for {package['name']!r}.")
+            existing["requested"] = bool(existing["requested"] or package["requested"])
+
+    packages = list(packages_by_name.values())
     packages.sort(key=lambda item: (str(item["name"]).lower(), str(item["version"])))
 
     if incomplete:
@@ -99,6 +130,7 @@ def build_dependency_evidence(
         },
         "resolver": {
             "report_path": report_path.name,
+            "additional_report_paths": [path.name for path in additional_report_paths],
             "report_version": str(report.get("version", "") or ""),
             "pip_version": str(report.get("pip_version", "") or ""),
         },
@@ -115,12 +147,14 @@ def write_dependency_evidence(
     *,
     install_report: str | Path,
     constraints_file: str | Path,
+    additional_install_reports: Iterable[str | Path] = (),
 ) -> Path:
     path = Path(output).expanduser().resolve()
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = build_dependency_evidence(
         install_report=install_report,
         constraints_file=constraints_file,
+        additional_install_reports=additional_install_reports,
     )
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     return path
@@ -131,6 +165,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--install-report", required=True, help="JSON report written by pip install --report.")
     parser.add_argument("--constraints", required=True, help="Approved Python-minor constraints file.")
     parser.add_argument(
+        "--additional-install-report",
+        action="append",
+        default=[],
+        help="Additional pip install report whose wheel artifacts belong to the same offline closure.",
+    )
+    parser.add_argument(
         "--output",
         default="outputs/supply_chain/wheel-inventory.json",
         help="Output JSON path.",
@@ -140,6 +180,7 @@ def main(argv: list[str] | None = None) -> int:
         args.output,
         install_report=args.install_report,
         constraints_file=args.constraints,
+        additional_install_reports=args.additional_install_report,
     )
     print(f"Dependency evidence written: {output}")
     return 0

@@ -13,6 +13,11 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
+    import tomli as tomllib
+
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -107,6 +112,36 @@ def _full_install_command(
     return command
 
 
+def _build_requirements() -> tuple[str, ...]:
+    payload = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    requirements = tuple(str(item).strip() for item in payload.get("build-system", {}).get("requires", []))
+    if not requirements or any(not item for item in requirements):
+        raise RuntimeError("pyproject.toml must declare non-empty build-system requirements")
+    return requirements
+
+
+def _build_dependency_install_command(
+    *,
+    python_executable: str,
+    constraints: Path,
+    install_report_path: Path,
+) -> list[str]:
+    return [
+        python_executable,
+        "-m",
+        "pip",
+        "install",
+        "--only-binary=:all:",
+        "--index-url",
+        PYPI_INDEX_URL,
+        "-c",
+        str(constraints),
+        *_build_requirements(),
+        "--report",
+        str(install_report_path),
+    ]
+
+
 def _venv_python(environment_root: Path) -> Path:
     if sys.platform == "win32":
         return environment_root / "Scripts" / "python.exe"
@@ -163,6 +198,7 @@ def _run_supply_chain_gate_in_environment(
             audit_python = str(bootstrap_python)
 
     install_report_path = output / "pip-install-report.json"
+    build_install_report_path = output / "build-install-report.json"
     pip_check_path = output / "pip-check.txt"
     wheel_inventory_path = output / "wheel-inventory.json"
     sbom_path = output / "sbom.cdx.json"
@@ -191,6 +227,11 @@ def _run_supply_chain_gate_in_environment(
                 PYPI_INDEX_URL,
                 f"pip-audit=={PIP_AUDIT_VERSION}",
             ],
+            _build_dependency_install_command(
+                python_executable=audit_python,
+                constraints=constraints,
+                install_report_path=build_install_report_path,
+            ),
             _full_install_command(
                 python_executable=audit_python,
                 constraints=constraints,
@@ -227,6 +268,8 @@ def _run_supply_chain_gate_in_environment(
                     str(install_report_path),
                     "--constraints",
                     str(constraints),
+                    "--additional-install-report",
+                    str(build_install_report_path),
                     "--output",
                     str(wheel_inventory_path),
                 ]
@@ -285,6 +328,7 @@ def _run_supply_chain_gate_in_environment(
     artifacts = []
     for path in (
         install_report_path,
+        build_install_report_path,
         pip_check_path,
         wheel_inventory_path,
         sbom_path,

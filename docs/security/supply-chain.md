@@ -177,6 +177,8 @@ A procurement-ready packet should include:
 - `outputs/supply_chain/sbom.cdx.json`,
 - `outputs/supply_chain/pip-audit.json`,
 - `outputs/supply_chain/pip-install-report.json`,
+- `outputs/supply_chain/build-install-report.json`, which binds the declared
+  `pyproject.toml` build-system wheels needed for a zero-network source install,
 - `outputs/supply_chain/pip-check.txt`,
 - `outputs/supply_chain/python-freeze.txt`,
 - `outputs/supply_chain/wheel-inventory.json`,

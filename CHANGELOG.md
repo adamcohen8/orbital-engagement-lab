@@ -45,6 +45,12 @@ Duel Beta.
   assets are absent from the public export and v0.27.0 release artifacts. The
   separate OEL Front End concept is also not part of this release.
 
+### Fixed
+
+- Bound the declared `pyproject.toml` build-system wheels into the signed
+  supply-chain inventory so the full-profile offline bundle can install the
+  release source archive without network access.
+
 ## 0.26.0 - 2026-08-18
 
 Release thesis: `v0.26.0` makes OEL's agent-facing workflows reproducible and
