@@ -52,7 +52,9 @@ Duel Beta.
   dependency resolution now force-reinstalls packages inherited from bootstrap
   or audit tooling so the full-profile offline bundle records every wheel needed
   to install the release source archive without network access. The official
-  build receipt now also binds the published `SHA256SUMS` asset.
+  build receipt now also binds the published `SHA256SUMS` asset. Public-main
+  release attestation now excludes the clone's transport-only `.git` metadata
+  from export-boundary inspection while retaining the attested commit identity.
 
 ## 0.26.0 - 2026-08-18
 
