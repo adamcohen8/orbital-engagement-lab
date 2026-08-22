@@ -40,6 +40,10 @@ class JointStateEstimator(Estimator):
 
         x = belief.state
         p = belief.covariance
+        if p.shape == (13, 13) and (
+            np.any(np.abs(p[:6, 6:13]) > 1.0e-15) or np.any(np.abs(p[6:13, :6]) > 1.0e-15)
+        ):
+            raise ValueError("JointStateEstimator does not support orbit-attitude cross covariance.")
 
         orb_belief = StateBelief(state=x[:6], covariance=p[:6, :6], last_update_t_s=belief.last_update_t_s)
         orb_meas = None if measurement is None else Measurement(vector=measurement.vector[:6], t_s=measurement.t_s)

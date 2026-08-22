@@ -34,6 +34,7 @@ from sim.config.scenario.simulator import (
 )
 from sim.config.scenario.validation import (
     _validate_object_references,
+    _validate_orbital_analysis_references,
     _validate_physics_runtime_settings,
 )
 from sim.schema_versions import LEGACY_SCENARIO_SCHEMA_VERSION, SCENARIO_SCHEMA_VERSION
@@ -120,6 +121,7 @@ def scenario_config_from_dict(
             raise ValueError(f"{object_id}.reference_orbit.enabled requires {object_id}.enabled to be true.")
     _validate_physics_runtime_settings(cfg)
     _validate_object_references(cfg)
+    _validate_orbital_analysis_references(cfg)
     return cfg
 def load_simulation_yaml(
     path: str | Path,
@@ -134,9 +136,33 @@ def load_simulation_yaml(
         raise RuntimeError(
             "PyYAML is required to load simulation YAML configs. Install with `pip install pyyaml`."
         ) from exc
+    class _UniqueKeySafeLoader(yaml.SafeLoader):
+        pass
+
+    def _construct_unique_mapping(loader: Any, node: Any, deep: bool = False) -> dict[Any, Any]:
+        loader.flatten_mapping(node)
+        mapping: dict[Any, Any] = {}
+        for key_node, value_node in node.value:
+            key = loader.construct_object(key_node, deep=deep)
+            try:
+                duplicate = key in mapping
+            except TypeError as exc:
+                raise ValueError("YAML mapping keys must be hashable.") from exc
+            if duplicate:
+                mark = getattr(key_node, "start_mark", None)
+                location = "" if mark is None else f" at line {mark.line + 1}, column {mark.column + 1}"
+                raise ValueError(f"Duplicate YAML mapping key {key!r}{location}.")
+            mapping[key] = loader.construct_object(value_node, deep=deep)
+        return mapping
+
+    _UniqueKeySafeLoader.add_constructor(
+        yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
+        _construct_unique_mapping,
+    )
+
     p = Path(path)
     with p.open("r", encoding="utf-8") as f:
-        raw = yaml.safe_load(f) or {}
+        raw = yaml.load(f, Loader=_UniqueKeySafeLoader) or {}
     if not isinstance(raw, dict):
         raise ValueError("Simulation YAML root must be a mapping/object.")
     policy = path_policy or ConfigPathPolicy.default(

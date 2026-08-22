@@ -284,6 +284,32 @@ No-access reasons:
 .venv/bin/python -m sim.review outputs/<scenario_name> --query "SELECT station_id, object_id, reason, COUNT(*) AS samples FROM ground_access WHERE access = 0 GROUP BY station_id, object_id, reason ORDER BY station_id, object_id, samples DESC"
 ```
 
+## Coverage And Directed Links
+
+Coverage summary and sampled extrema:
+
+```bash
+python -m sim.review outputs/<scenario_name> --query "SELECT s.analysis_id, s.source_object_id, COUNT(c.sample_index) AS samples, MIN(c.instantaneous_covered_fraction) AS minimum_fraction, MAX(c.instantaneous_covered_fraction) AS maximum_fraction FROM coverage_summary s LEFT JOIN coverage_samples c USING (analysis_id) GROUP BY s.analysis_id, s.source_object_id ORDER BY s.analysis_id"
+```
+
+Coverage transitions and their refinement dispositions:
+
+```bash
+python -m sim.review outputs/<scenario_name> --query "SELECT analysis_id, transition_kind, disposition, COUNT(*) AS transitions FROM coverage_transitions GROUP BY analysis_id, transition_kind, disposition ORDER BY analysis_id, transition_kind, disposition"
+```
+
+Directed-link availability, range, and margin:
+
+```bash
+python -m sim.review outputs/<scenario_name> --query "SELECT s.analysis_id, s.link_id, COUNT(l.sample_index) AS samples, SUM(l.available) AS available_samples, MIN(l.range_km) AS minimum_range_km, MIN(l.margin_db) AS minimum_margin_db, MAX(l.margin_db) AS maximum_margin_db FROM link_summary s LEFT JOIN link_samples l USING (analysis_id) GROUP BY s.analysis_id, s.link_id ORDER BY s.analysis_id"
+```
+
+Directed-link windows:
+
+```bash
+python -m sim.review outputs/<scenario_name> --query "SELECT analysis_id, interval_index, start_s, end_s, duration_s, minimum_margin_db, estimated_delivered_data_bits, acquisition_disposition, loss_disposition FROM link_windows ORDER BY analysis_id, interval_index" --json
+```
+
 ## Attitude And Applied Commands
 
 Angular-rate samples:
@@ -322,5 +348,8 @@ it is not reaction-wheel torque, wheel speed, or full ADCS telemetry.
 - For single-object propagation, use `object_state`, `metrics`, and artifacts.
 - For access questions, use `ground_access` plus the output reports when
   present.
+- For coverage or link questions, use the matching summary plus sample,
+  interval/window, and transition tables; report cadence, censoring, and
+  refinement disposition with the result.
 - For rendezvous success, compare final range, closest approach, range rate,
   time, delta-v or burn activity, and any user-provided safety constraints.

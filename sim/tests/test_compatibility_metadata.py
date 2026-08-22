@@ -194,7 +194,7 @@ def test_compatibility_workflow_runs_one_unavailable_host_row() -> None:
         "--skip-dependency-audit",
         "windows-2022",
         "macos-15-intel",
-        "actions/upload-artifact@v6",
+        "actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6",
     ):
         assert required_text in source
     for prohibited_text in (

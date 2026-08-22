@@ -111,3 +111,14 @@ def get_recipe(recipe_id: str) -> AgentTaskRecipe | None:
 
 def list_recipes() -> list[AgentTaskRecipe]:
     return [RECIPES[key] for key in sorted(RECIPES)]
+
+
+def is_public_mcp_recipe(recipe: AgentTaskRecipe | None) -> bool:
+    """Return whether a recipe is part of the supported public MCP surface."""
+
+    return bool(
+        recipe is not None
+        and recipe.maturity == "supported"
+        and recipe.workflow == "scenario_run"
+        and "public" in recipe.tags
+    )

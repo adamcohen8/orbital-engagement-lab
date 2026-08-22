@@ -129,16 +129,27 @@ def _is_bool_like_key(key: str) -> bool:
         return True
     return normalized.startswith(
         (
+            "allow_",
+            "draw_",
+            "fail_on_",
+            "include_",
             "use_",
             "save_",
             "display_",
             "print_",
             "require_",
+            "show_",
+            "strict_",
         )
-    )
+    ) or normalized.endswith("_enabled") or normalized in {"controller_debug", "dry_run"}
 
 
 def _enforce_strict_booleans(value: Any, path: str = "root") -> None:
+    # Metadata is an application-owned extension surface.  Individual
+    # consumers normalize their own values, so scenario-schema heuristics must
+    # not reinterpret or reject arbitrary metadata keys such as UI flags.
+    if path == "root.metadata" or path.startswith("root.metadata."):
+        return
     if isinstance(value, dict):
         for key, child in value.items():
             child_path = f"{path}.{key}"

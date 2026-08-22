@@ -35,6 +35,9 @@ reference/validation workflows.
 - Automatic within-scenario object workers, hierarchical campaign/object
   planning, Monte Carlo, sensitivity, config queues, and controller benchmarks
   are outside the public core. Do not reproduce them with ad hoc public scripts.
+- The public `sim.analysis.coverage_sensitivity` helper compares explicit,
+  already-produced deterministic coverage products. It is not the automatic
+  sensitivity-campaign executor described above.
 - When such a workflow is unavailable, use the closest deterministic public
   alternative: one validated run, explicit paired runs, or a small manually
   enumerated set whose assumptions and evidence remain inspectable.
@@ -52,6 +55,15 @@ reference/validation workflows.
 8. Evaluate the run with `agents/public/evaluation-rubric.md`.
 9. Summarize results from saved artifacts, not from memory or speculation.
 10. Add tests or smoke checks for new agent-facing examples.
+
+For whole-Earth coverage or directed-link questions, start with
+`docs/coverage-link-scenario-analysis.md` and
+`examples/configs/public_coverage_and_link_analysis.yaml`. Treat the analysis
+as evidence-only post-processing unless the user explicitly requests the
+bounded authorized runtime monitor. Use the coverage/link review tables and
+state the geometry, cadence, attitude, terminal, and environmental assumptions;
+do not promote geometric visibility or a free-space margin into operational
+sensor or communications assurance.
 
 For custom complete-stack flight software, use the bounded Public FSW
 Authoring Kit in `docs/fsw-authoring.md`. Inspect unfamiliar candidate material
@@ -358,7 +370,8 @@ Examples of acceptable user requests:
 For TLE requests, inspect and state the configured propagation contract. A TLE
 may initialize an ECI-compatible state followed by configured ONP propagation,
 or it may drive continuous passive OGP propagation when the scenario selects
-`propagation_method: general` with `general.model: sgp4` or `sdp4`. Do not infer
+`propagation_method: general` with `general.model: sgp4`; deep-space mean
+elements dispatch to OGP-SDP4 automatically. Do not infer
 one path from the presence of TLE lines; use the normalized config and saved
 propagation provenance.
 - "Build an attitude-hold scenario with an initial pointing error."

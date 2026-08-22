@@ -79,6 +79,17 @@ def test_nonzero_hold_commands_back_toward_the_target_relative_state() -> None:
     assert command.force_n[0] < 0.0
 
 
+def test_translation_stack_does_not_command_from_stale_sample_hold_navigation() -> None:
+    stack = RpoReferenceFlightSoftwareStack(replace(rpo_config(), measurement_stale_after_s=0.1))
+    stack.boot(boot_event())
+    assert stack.step(navigation_batch(1)).commands
+
+    stale = stack.step(batch(3))
+
+    assert stale.commands == ()
+    assert telemetry_fields(stale)["navigation_ready"] is False
+
+
 def test_passive_retreat_commands_outward_from_the_chief() -> None:
     stack = RpoReferenceFlightSoftwareStack(rpo_config(TranslationMode.PASSIVE_RETREAT))
     stack.boot(boot_event())
@@ -86,6 +97,16 @@ def test_passive_retreat_commands_outward_from_the_chief() -> None:
     command = output.commands[-1].payload
     assert isinstance(command, IdealWrenchCommand)
     assert command.force_n[0] > 0.0
+
+
+def test_rcs_allocator_rejects_duplicate_physical_thruster_ids() -> None:
+    thruster = RcsThrusterBelief("jet", (1.0, 0.0, 0.0), 1.0)
+    with pytest.raises(ValueError, match="thruster IDs must be unique"):
+        replace(
+            rpo_config().allocator,
+            kind=TranslationAllocatorKind.RCS_PULSE,
+            rcs_thrusters=(thruster, thruster),
+        )
 
 
 def test_live_game_navigation_fast_path_preserves_rpo_outputs() -> None:

@@ -127,6 +127,9 @@ from sim.config.scenario.models import (
     OutputMonteCarloSection as OutputMonteCarloSection,
 )
 from sim.config.scenario.models import (
+    OutputOrbitalAnalysisSection as OutputOrbitalAnalysisSection,
+)
+from sim.config.scenario.models import (
     OutputPlotsSection as OutputPlotsSection,
 )
 from sim.config.scenario.models import (
@@ -362,6 +365,7 @@ __all__ = [
     'OutputAIConfigSection',
     'OutputResourceLimitsSection',
     'OutputReviewSection',
+    'OutputOrbitalAnalysisSection',
     'OutputsSection',
     'MonteCarloVariation',
     'MonteCarloSection',

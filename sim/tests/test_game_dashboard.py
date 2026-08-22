@@ -469,6 +469,7 @@ def test_cr3bp_configured_horizon_overrides_local_orbit_fraction(monkeypatch: py
     prediction = dashboard._coast_prediction_from(np.zeros(6, dtype=float))
 
     assert prediction.shape[0] == 120
+    assert captured["times"][1] == pytest.approx(1.0)
     assert captured["times"][-1] == pytest.approx(21600.0)
 
 

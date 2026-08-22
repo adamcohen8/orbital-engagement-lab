@@ -82,6 +82,39 @@ class OrbitEpochTests(unittest.TestCase):
         self.assertTrue(np.allclose(sun, np.array([1.0, 2.0, 3.0])))
         self.assertTrue(np.allclose(moon, np.array([9.0, 10.0, 11.0])))
 
+    def test_one_body_sampled_ephemeris_is_not_dropped(self):
+        sun_samples = {
+            "sun_ephemeris_time_s": [0.0, 10.0],
+            "sun_ephemeris_eci_km": [[1.0, 2.0, 3.0], [11.0, 12.0, 13.0]],
+        }
+        sun, moon = resolve_sun_moon_positions(sun_samples, t_s=5.0)
+        self.assertTrue(np.allclose(sun, np.array([6.0, 7.0, 8.0])))
+        self.assertTrue(np.allclose(moon, np.array([384400.0, 0.0, 0.0])))
+
+        moon_samples = {
+            "moon_ephemeris_time_s": [0.0, 10.0],
+            "moon_ephemeris_eci_km": [[4.0, 5.0, 6.0], [14.0, 15.0, 16.0]],
+        }
+        sun, moon = resolve_sun_moon_positions(moon_samples, t_s=5.0)
+        self.assertTrue(np.allclose(sun, np.array([149597870.7, 0.0, 0.0])))
+        self.assertTrue(np.allclose(moon, np.array([9.0, 10.0, 11.0])))
+
+    def test_explicit_ephemeris_histories_fail_closed_on_invalid_samples(self):
+        for times, states in (
+            ([0.0, 0.0], [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]),
+            ([1.0, 0.0], [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]),
+            ([0.0, 1.0], [[1.0, 2.0, 3.0], [np.nan, 5.0, 6.0]]),
+        ):
+            with self.subTest(times=times, states=states):
+                with self.assertRaises(ValueError):
+                    resolve_sun_moon_positions(
+                        {
+                            "sun_ephemeris_time_s": times,
+                            "sun_ephemeris_eci_km": states,
+                        },
+                        t_s=0.5,
+                    )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -8,6 +8,7 @@ from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Callable
 
+from .clocks import compare_clock_tags
 from .contracts import DataValidity, InputEvent, InputKind, Quality
 from .schemas import from_primitive, to_primitive
 
@@ -78,8 +79,13 @@ class InputDeliveryQueue:
     def __init__(self) -> None:
         self._queue: list[_QueuedInput] = []
         self._insertion = 0
+        self._clock_reference = None
 
     def enqueue(self, event: InputEvent, *, transport_order: int | None = None) -> None:
+        if self._clock_reference is None:
+            self._clock_reference = event.delivery_time
+        else:
+            compare_clock_tags(self._clock_reference, event.delivery_time)
         delivery_ns = event.delivery_time.ticks * event.delivery_time.tick_period_ns
         explicit_order = transport_order if transport_order is not None else 2**63 - 1
         key = (
@@ -148,3 +154,6 @@ class InputDeliveryQueue:
         self._queue = restored
         heapq.heapify(self._queue)
         self._insertion = insertion
+        self._clock_reference = None if not restored else restored[0].event.delivery_time
+        for item in restored[1:]:
+            compare_clock_tags(self._clock_reference, item.event.delivery_time)

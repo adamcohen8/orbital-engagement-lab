@@ -901,6 +901,51 @@ export function stateFromRelativeRic(target, rel) {
   };
 }
 
+export function stepControlledTwoBodyPair({
+  target,
+  chaser,
+  mu_km3_s2 = DEFAULT_PURSUIT_CHALLENGE.mu_km3_s2,
+  chaser_accel_ric_km_s2 = [0, 0, 0],
+  target_accel_ric_km_s2 = [0, 0, 0],
+  dt_s = DEFAULT_PURSUIT_CHALLENGE.dt_s,
+} = {}) {
+  const pair = rk4Step(
+    normalizeEciState(target),
+    normalizeEciState(chaser),
+    positiveNumber(mu_km3_s2, "mu_km3_s2"),
+    vector3(chaser_accel_ric_km_s2, "chaser_accel_ric_km_s2"),
+    vector3(target_accel_ric_km_s2, "target_accel_ric_km_s2"),
+    positiveNumber(dt_s, "dt_s"),
+  );
+  return {
+    target: normalizeEciState(pair.target),
+    chaser: normalizeEciState(pair.chaser),
+  };
+}
+
+export function stepTwoBodyState(
+  state,
+  mu_km3_s2 = DEFAULT_PURSUIT_CHALLENGE.mu_km3_s2,
+  dt_s = DEFAULT_PURSUIT_CHALLENGE.dt_s,
+) {
+  return normalizeEciState(
+    twoBodyStep(
+      normalizeEciState(state),
+      positiveNumber(mu_km3_s2, "mu_km3_s2"),
+      positiveNumber(dt_s, "dt_s"),
+    ),
+  );
+}
+
+export function samplePursuitInitialRic(config = DEFAULT_PURSUIT_CHALLENGE, seed = 1) {
+  const cfg = normalizeChallengeConfig(config);
+  return cloneCanonical(sampleArcadeInitialRic(cfg, mulberry32(integerSeed(seed))));
+}
+
+export function deterministicSeed(seed, index = 0, salt = 0) {
+  return roundSeed(integerSeed(seed), Math.max(Math.floor(Number(index) || 0), 0), Math.floor(Number(salt) || 0));
+}
+
 export function ellipticLinearCoastStates(rel0, timesS, chiefStateEci, muKm3S2 = DEFAULT_PURSUIT_CHALLENGE.mu_km3_s2) {
   const times = Array.isArray(timesS) ? timesS.map((time, idx) => ({ time: Math.max(Number(time) || 0, 0), idx })) : [];
   if (times.length === 0) return [];
@@ -1423,6 +1468,13 @@ function clampControls(controls) {
   const mag = Math.hypot(r, i, c);
   if (mag <= 1) return { r, i, c };
   return { r: r / mag, i: i / mag, c: c / mag };
+}
+
+function vector3(value, name) {
+  if (!Array.isArray(value) || value.length !== 3) throw new Error(`${name} must contain exactly three values.`);
+  const result = value.map(Number);
+  if (!result.every(Number.isFinite)) throw new Error(`${name} must contain finite values.`);
+  return result;
 }
 
 function historySample(sim, rel, activeControls, pulseControls = new Set()) {

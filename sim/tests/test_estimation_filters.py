@@ -276,6 +276,28 @@ def test_joint_state_estimator_rejects_ambiguous_partial_measurement_layout() ->
         estimator.update(belief, Measurement(vector=np.zeros(9), t_s=1.0), 1.0)
 
 
+def test_joint_state_estimator_rejects_cross_covariance_it_cannot_propagate() -> None:
+    estimator = JointStateEstimator(
+        orbit_estimator=OrbitEKFEstimator(
+            mu_km3_s2=398600.4418,
+            dt_s=1.0,
+            process_noise_diag=np.ones(6) * 1e-10,
+            meas_noise_diag=np.ones(6) * 1e-8,
+        ),
+        dt_s=1.0,
+    )
+    covariance = np.eye(13)
+    covariance[0, 6] = covariance[6, 0] = 0.1
+    belief = StateBelief(
+        state=np.hstack(([7000.0, 0.0, 0.0, 0.0, 7.5, 0.0], [1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0])),
+        covariance=covariance,
+        last_update_t_s=0.0,
+    )
+
+    with pytest.raises(ValueError, match="does not support orbit-attitude cross covariance"):
+        estimator.update(belief, None, 1.0)
+
+
 def test_orbit_ukf_update_avoids_np_inv_and_preserves_symmetric_covariance() -> None:
     estimator = OrbitUKFEstimator(
         propagator=OrbitPropagator(),

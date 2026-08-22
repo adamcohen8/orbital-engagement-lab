@@ -146,11 +146,13 @@ def start_game_recorder(
 ) -> GameFrameRecorder | None:
     if not bool(enabled):
         return None
-    path = game_recording_path(
-        scenario_name=str(config.scenario.scenario_name or "game"),
-        difficulty=difficulty,
-        attempt_index=attempt_index,
-        output_dir=output_dir,
+    path = next_available_recording_path(
+        game_recording_path(
+            scenario_name=str(config.scenario.scenario_name or "game"),
+            difficulty=difficulty,
+            attempt_index=attempt_index,
+            output_dir=output_dir,
+        )
     )
     try:
         return GameFrameRecorder.start(path, fps=fps)

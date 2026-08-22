@@ -190,8 +190,9 @@ Do not force new user requests into the checked-in examples. Instead:
    beyond what it proves.
 
 Use `docs/agent-capability-routing.md` to map broader requests such as TLE
-propagation, access, attitude, plotting, game/training, validation, sealed-mode,
-or comparison work to the right public workflow and evidence.
+propagation, access, whole-Earth coverage, directed-link budgets, attitude,
+plotting, game/training, validation, sealed-mode, or comparison work to the
+right public workflow and evidence.
 
 ## Review Query Workflow
 
@@ -236,8 +237,10 @@ Rules for agents:
 - Use only `SELECT` or `WITH` queries. The review API enforces read-only
   access; do not try to mutate, attach, or rewrite review databases.
 - Query tables such as `run_metadata`, `objects`, `time_samples`,
-  `object_state`, `relative_state`, `thrust`, `ground_access`, `events`,
-  `metrics`, and `artifacts` when present.
+  `object_state`, `relative_state`, `thrust`, `ground_access`,
+  `coverage_summary`, `coverage_samples`, `coverage_intervals`,
+  `coverage_transitions`, `link_summary`, `link_samples`, `link_windows`,
+  `link_transitions`, `events`, `metrics`, and `artifacts` when present.
 - Do not guess column names. Use `docs/agent-review-queries.md`,
   `review/schema.json`, or a small discovery query such as
   `SELECT * FROM object_state LIMIT 1` before writing custom SQL against an

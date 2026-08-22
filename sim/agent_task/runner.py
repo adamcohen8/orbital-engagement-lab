@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -14,6 +15,7 @@ from sim.agent_task.plot_recipes import get_plot_recipe, review_plot_spec
 from sim.agent_task.recipes import get_recipe
 from sim.agent_task.semantics import get_semantic_metric, semantic_metric_dicts, semantic_metric_request_rows
 from sim.api import SimulationWorkspace
+from sim.config import scenario_config_from_dict
 from sim.execution import run_simulation_config_file
 from sim.resource_limits import apply_resource_profile_to_config_dict
 from sim.review import (
@@ -24,6 +26,7 @@ from sim.review import (
     load_workflow_manifest,
 )
 from sim.review.plotting import ReviewPlotArtifact, save_review_plot
+from sim.security import ConfigPathPolicy
 
 DEFAULT_INSPECTION_QUERIES = ("run_metadata", "objects", "artifacts")
 DEFAULT_COMPARISON_METRICS = ("initial_range_km", "final_range_km", "closest_approach_km", "closest_approach_time_s")
@@ -79,8 +82,13 @@ def run_recipe(
         payload = run_simulation_config_file(prepared["config_path"], step_callback=step_callback)
         packet.run = _run_summary(payload)
         packet.status = "completed"
-    except AgentTaskCancelled:
-        raise
+    except AgentTaskCancelled as exc:
+        packet.status = "cancelled"
+        packet.run = {"cancelled": True, "error": str(exc)}
+        packet.artifacts = _partial_output_artifacts(prepared["output_dir"])
+        packet.artifact_summary = _summarize_artifacts(packet.artifacts)
+        packet.caveats.append("Execution was cancelled at a deterministic workflow boundary; artifacts are partial.")
+        return _write_packet(packet, prepared["output_dir"])
     except Exception as exc:
         packet.status = "failed"
         packet.run = {"error": str(exc)}
@@ -370,6 +378,23 @@ def _prepare_config(
     task_config = outdir / "agent_task_config.yaml"
     outdir.mkdir(parents=True, exist_ok=True)
     task_config.write_text(yaml.safe_dump(data, sort_keys=False, allow_unicode=False), encoding="utf-8")
+    normalization_policy = ConfigPathPolicy.default(
+        config_path=source,
+        workspace_root=_repo_root(),
+        read_roots=(source.parent,),
+        write_roots=(outdir,),
+        allow_config_dir_writes=False,
+    )
+    normalized = scenario_config_from_dict(data, source_path=source, path_policy=normalization_policy).to_dict()
+    normalized_bytes = json.dumps(
+        normalized,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+        default=str,
+    ).encode("utf-8")
+    raw_sha256 = hashlib.sha256(source.read_bytes()).hexdigest()
+    normalized_sha256 = hashlib.sha256(normalized_bytes).hexdigest()
     return {
         "label": str(label),
         "source_config": str(source),
@@ -377,6 +402,9 @@ def _prepare_config(
         "output_dir": str(outdir),
         "review_enabled": True,
         "resource_profile": resource_profile,
+        "source_config_sha256": raw_sha256,
+        "normalized_config_sha256": normalized_sha256,
+        "validation_id": f"oel-m4-validation-v1:{normalized_sha256}",
     }
 
 
@@ -641,6 +669,24 @@ def _workflow_artifacts(manifest: dict[str, Any], *, output_dir: Path) -> list[d
 
 def _artifacts_with_path_status(artifacts: list[dict[str, Any]], *, output_dir: Path) -> list[dict[str, Any]]:
     return [_artifact_with_path_status(dict(item), output_dir=output_dir) for item in artifacts]
+
+
+def _partial_output_artifacts(output_dir: str | Path, *, maximum: int = 256) -> list[dict[str, Any]]:
+    root = Path(output_dir).expanduser().resolve()
+    if not root.is_dir():
+        return []
+    artifacts: list[dict[str, Any]] = []
+    for path in sorted(root.rglob("*")):
+        if len(artifacts) >= maximum:
+            break
+        if path.is_file() and not path.is_symlink():
+            artifacts.append(
+                _artifact_with_path_status(
+                    {"artifact_id": f"partial_{len(artifacts):04d}", "path": str(path), "partial": True},
+                    output_dir=root,
+                )
+            )
+    return artifacts
 
 
 def _artifact_with_path_status(artifact: dict[str, Any], *, output_dir: Path) -> dict[str, Any]:

@@ -25,9 +25,14 @@ I_ddot = -2 n R_dot + a_I
 C_ddot = -n^2 C + a_C
 ```
 
-The reference orbit uses `a = 7000 km` and Earth `mu = 398600.4418 km^3/s^2`.
-Manual inputs produce bounded RIC accelerations and the browser integrates the
-state with a fixed-step semi-implicit Euler update.
+The reference orbit uses `a = 7000 km` and the existing browser contract's
+Earth `mu = 398600.4418 km^3/s^2`. The current OEL engine constant is
+`398600.4415 km^3/s^2`; the browser value remains pinned to preserve existing
+`web-two-body-v2` challenge hashes and replay packets. The contract test allows
+at most `1e-3 km^3/s^2` difference and the OEL-generated trajectory comparison
+below bounds the resulting path difference. A future value change requires a
+new physics version. Manual inputs produce bounded RIC accelerations and the
+browser integrates the state with a fixed-step semi-implicit Euler update.
 
 ## Pursuit Arcade Model
 
@@ -56,7 +61,7 @@ The preview does not include:
 - controller benchmarking,
 - full debrief artifact generation,
 - full Pygame parity,
-- the ten-level training pack.
+- the complete downloadable training catalog.
 
 ## Product Language
 
@@ -70,8 +75,17 @@ Avoid language like:
 
 > This is the full OEL simulator in the browser.
 
-## Future Checks
+## Contract Checks
 
-The next validation step should generate a small set of OEL reference
-trajectories for Level 0-style burns and compare the preview paths to those
-references within a documented tolerance.
+`tools/generate-oel-contract-fixtures.py` derives the checked-in Level 0,
+Sandbox, and Pursuit Arcade browser contracts from their canonical OEL scenario
+YAML. Its `--check` mode fails when those fixtures drift from the downloadable
+contracts.
+
+The same tool generates three passive Level 0-style reference trajectories
+with OEL's two-body engine: +I, +R, and +C initial relative-velocity cases.
+`tests/preview-contract.test.mjs` propagates each case with the browser's actual
+0.1 second semi-implicit Euler HCW step and checks R/I/C position at 0, 60, 300,
+and 600 seconds. The documented acceptance tolerance is `5e-5 km` (5 cm) per
+position axis. This is approximation-continuity evidence for the teaching
+preview, not a claim that HCW replaces the downloadable OEL engine.

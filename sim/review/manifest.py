@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import math
 import os
 import sqlite3
 from contextlib import closing
@@ -84,6 +86,9 @@ def write_workflow_review(
     review_dir.mkdir(parents=True, exist_ok=True)
 
     artifact_rows = _artifact_rows(artifacts or {}, output_dir=outdir)
+    missing_artifacts = [row["path"] for row in artifact_rows if not bool(row["path_exists"])]
+    if str(status or "complete") == "complete" and missing_artifacts:
+        raise FileNotFoundError("workflow review artifacts do not exist: " + ", ".join(missing_artifacts))
     query_rows = [dict(item) for item in list(recommended_queries or []) if isinstance(item, dict)]
     table_rows = {str(name): [dict(row) for row in rows] for name, rows in dict(tables or {}).items()}
     manifest_path = review_dir / "workflow_manifest.json"
@@ -229,17 +234,23 @@ def _write_workflow_sqlite(
             CREATE TABLE workflow_artifacts (
                 artifact_key TEXT,
                 artifact_type TEXT,
-                path TEXT
+                path TEXT,
+                path_exists INTEGER,
+                size_bytes INTEGER,
+                sha256 TEXT
             )
             """
         )
         conn.executemany(
-            "INSERT INTO workflow_artifacts VALUES (?, ?, ?)",
+            "INSERT INTO workflow_artifacts VALUES (?, ?, ?, ?, ?, ?)",
             [
                 (
                     row.get("artifact_key", ""),
                     row.get("artifact_type", ""),
                     row.get("path", ""),
+                    int(bool(row.get("path_exists", False))),
+                    int(row.get("size_bytes", 0) or 0),
+                    row.get("sha256", ""),
                 )
                 for row in artifact_rows
             ],
@@ -285,7 +296,20 @@ def _unlink_if_exists(path: Path) -> None:
 
 def _write_dynamic_table(conn: sqlite3.Connection, name: str, rows: list[dict[str, Any]]) -> None:
     table_name = _safe_identifier(name)
-    normalized_rows = [{_safe_identifier(str(key)): value for key, value in row.items()} for row in rows]
+    normalized_rows = []
+    for row_index, row in enumerate(rows):
+        normalized: dict[str, Any] = {}
+        source_keys: dict[str, str] = {}
+        for key, value in row.items():
+            column = _safe_identifier(str(key))
+            if column in normalized and source_keys[column] != str(key):
+                raise ValueError(
+                    f"workflow table {name!r} row {row_index} has colliding columns "
+                    f"{source_keys[column]!r} and {str(key)!r}"
+                )
+            normalized[column] = value
+            source_keys[column] = str(key)
+        normalized_rows.append(normalized)
     columns = _columns_for_rows(normalized_rows)
     if not columns:
         columns = list(KNOWN_WORKFLOW_TABLE_COLUMNS.get(table_name, ["row_index"]))
@@ -330,17 +354,23 @@ def _schema_from_db(db_path: Path, *, workflow_type: str) -> dict[str, Any]:
     }
 
 
-def _artifact_rows(artifacts: dict[str, Any], *, output_dir: Path) -> list[dict[str, str]]:
-    rows: list[dict[str, str]] = []
+def _artifact_rows(artifacts: dict[str, Any], *, output_dir: Path) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
     for key, value in _flatten_items(artifacts):
         path_text = str(value or "").strip()
         if not path_text:
             continue
+        candidate = Path(path_text).expanduser()
+        resolved = candidate.resolve() if candidate.is_absolute() else (output_dir / candidate).resolve()
+        exists = resolved.is_file()
         rows.append(
             {
                 "artifact_key": str(key),
                 "artifact_type": _artifact_type(key, path_text),
                 "path": _relative_path(path_text, output_dir=output_dir),
+                "path_exists": exists,
+                "size_bytes": int(resolved.stat().st_size) if exists else 0,
+                "sha256": hashlib.sha256(resolved.read_bytes()).hexdigest() if exists else "",
             }
         )
     return rows
@@ -386,6 +416,8 @@ def _sqlite_type(rows: list[dict[str, Any]], column: str) -> str:
 def _sqlite_value(value: Any) -> Any:
     if isinstance(value, bool):
         return int(value)
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
     if value is None or isinstance(value, (str, int, float)):
         return value
     return json.dumps(_jsonable(value), sort_keys=True)
@@ -398,6 +430,8 @@ def _jsonable(value: Any) -> Any:
         return [_jsonable(child) for child in value]
     if isinstance(value, tuple):
         return [_jsonable(child) for child in value]
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value
     return str(value)
@@ -407,6 +441,8 @@ def _scalar_text(value: Any) -> str:
     if isinstance(value, (dict, list, tuple)):
         return json.dumps(_jsonable(value), sort_keys=True)
     if value is None:
+        return ""
+    if isinstance(value, float) and not math.isfinite(value):
         return ""
     return str(value)
 
@@ -443,7 +479,7 @@ def _artifact_type(key: str, path_text: str) -> str:
 
 def _relative_path(path_text: str, *, output_dir: Path) -> str:
     path = Path(path_text)
-    resolved = path.resolve()
+    resolved = path.resolve() if path.is_absolute() else (output_dir / path).resolve()
     try:
         return resolved.relative_to(output_dir.resolve()).as_posix()
     except ValueError:

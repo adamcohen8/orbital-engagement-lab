@@ -651,7 +651,7 @@ class _TerminationMonitor:
     def __init__(self, engine: Any) -> None:
         self.engine = engine
 
-    def check_earth_impact(self, *, t_s: float) -> bool:
+    def check_earth_impact(self, *, t_s: float, include_rockets: bool = True) -> bool:
         e = self.engine
         orbit_config = dict(getattr(e.cfg.simulator.dynamics, "orbit", {}) or {})
         orbit_model = str(orbit_config.get("model", "two_body") or "two_body").strip().lower()
@@ -660,6 +660,8 @@ class _TerminationMonitor:
             system = cr3bp_system(str(orbit_config.get("cr3bp_system", "earth_moon")))
             earth_center[0] = -float(system.mu) * float(system.distance_km)
         for aid, agent in e.agents.items():
+            if agent.kind == "rocket" and not include_rockets:
+                continue
             policy = _earth_impact_policy_for_object(e.cfg.simulator.termination, aid)
             if not bool(policy.get("earth_impact_enabled", True)):
                 continue

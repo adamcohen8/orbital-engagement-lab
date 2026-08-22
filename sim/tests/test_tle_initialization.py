@@ -225,6 +225,10 @@ def test_ogp_boundary_dispatch_uses_corrected_unkozai_period() -> None:
     assert ogp_regime_for_elements(corrected_deep) == "sdp4"
     assert ogp_propagate_teme(corrected_deep, 0.0).error is None
 
+    accelerated = sgp4_propagate_teme_batch_numba([corrected_near], [0.0])
+    assert accelerated.errors[0, 0] == ""
+    assert np.all(np.isfinite(accelerated.position_teme_km[0, 0]))
+
 
 def test_ogp_batch_reference_supports_mixed_sgp4_sdp4_regimes() -> None:
     near_earth = parse_tle_lines(ISS_LINE1, ISS_LINE2)

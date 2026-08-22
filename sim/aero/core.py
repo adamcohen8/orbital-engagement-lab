@@ -9,7 +9,9 @@ from sim.dynamics.orbit.environment import EARTH_ROT_RATE_RAD_S
 from sim.dynamics.orbit.frames import (
     FRAME_MODEL_IAU76_80_EOP,
     FRAME_MODEL_SIMPLE_GMST,
+    FrameContext,
     eci_to_ecef_rotation,
+    eci_to_ecef_rotation_derivative_context,
     eci_to_ecef_rotation_hpop_like,
     normalize_frame_model,
 )
@@ -207,6 +209,28 @@ def atmosphere_relative_velocity_eci_km_s(
                 jd_utc_start=None if jd_utc_start is None else float(jd_utc_start),
             )
         r_frame = rot @ r
+        if model == FRAME_MODEL_IAU76_80_EOP:
+            context = FrameContext(
+                model=model,
+                jd_utc_start=None if jd_utc_start is None else float(jd_utc_start),
+                eop_path=None if eop_path is None else str(eop_path),
+                eop_extrapolation=eop_extrapolation,
+                tt_minus_utc_s=(
+                    69.184 if tt_minus_utc_s is None else float(tt_minus_utc_s)
+                ),
+                dut1_s=dut1_s,
+                xp_arcsec=xp_arcsec,
+                yp_arcsec=yp_arcsec,
+                dat_s=dat_s,
+                ddpsi_rad=ddpsi_rad,
+                ddeps_rad=ddeps_rad,
+                source="atmosphere_relative_velocity",
+            )
+            rot_dot = eci_to_ecef_rotation_derivative_context(float(t_s), context)
+            # A stationary atmosphere has zero ECEF velocity.  The canonical
+            # ECI->ECEF state transform therefore gives the complete relative
+            # velocity, including precession/nutation/polar-motion derivatives.
+            return rot.T @ (rot @ v + rot_dot @ r)
         v_frame = rot @ v
         v_atm_frame_km_s = np.array(
             [

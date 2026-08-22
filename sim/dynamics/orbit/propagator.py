@@ -1003,6 +1003,17 @@ class OrbitPropagator:
         }
         if not self.plugins or any(plugin not in supported for plugin in self.plugins):
             return None
+        if drag_plugin in self.plugins:
+            try:
+                drag_frame = normalize_frame_model(env.get("drag_frame_model", "simple"))
+            except ValueError:
+                return None
+            if drag_frame == FRAME_MODEL_IAU76_80_EOP:
+                # The accelerated kernel models only a fixed z-axis Earth
+                # rotation.  The authoritative EOP path now includes the full
+                # frame-rotation derivative, so retain the Python evaluator
+                # until that derivative is part of the compiled contract.
+                return None
 
         from sim.acceleration.kernels.orbit_force_plan import (
             DENSITY_CONSTANT,
@@ -1338,19 +1349,30 @@ class OrbitPropagator:
             third_body_moon_plugin: FORCE_THIRD_BODY_MOON,
             third_body_planets_plugin: FORCE_THIRD_BODY_PLANETS,
         }
+        try:
+            eop_aerodynamics = normalize_frame_model(
+                env.get("drag_frame_model", "simple")
+            ) == FRAME_MODEL_IAU76_80_EOP
+        except ValueError:
+            return None
         staged_cache_key = (
             tuple(self.plugins),
             bool(compiled_harmonics is not None and compiled_harmonics.all_normalized),
+            eop_aerodynamics,
         )
         if self._staged_force_plan_cache_key != staged_cache_key:
             self._compiled_force_codes_cache = np.asarray(
                 [
                     (
-                        FORCE_SPHERICAL_HARMONICS
-                        if plugin is spherical_harmonics_plugin
-                        and compiled_harmonics is not None
-                        and compiled_harmonics.all_normalized
-                        else plugin_code.get(plugin, 0)
+                        0
+                        if eop_aerodynamics and plugin in {drag_plugin, lift_plugin}
+                        else (
+                            FORCE_SPHERICAL_HARMONICS
+                            if plugin is spherical_harmonics_plugin
+                            and compiled_harmonics is not None
+                            and compiled_harmonics.all_normalized
+                            else plugin_code.get(plugin, 0)
+                        )
                     )
                     for plugin in self.plugins
                 ],

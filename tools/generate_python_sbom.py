@@ -19,9 +19,11 @@ def _purl(name: str, version: str) -> str:
     return f"pkg:pypi/{quote(_normalise_pypi_name(name))}@{quote(str(version))}"
 
 
-def _installed_components() -> list[dict[str, str]]:
-    components: list[dict[str, str]] = []
+def _installed_components() -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    components: list[dict[str, object]] = []
+    dependencies: list[dict[str, object]] = []
     seen: set[tuple[str, str]] = set()
+    distributions: list[tuple[str, str, str, str, list[str]]] = []
     for dist in metadata.distributions():
         name = str(dist.metadata.get("Name", "") or "").strip()
         version = str(dist.version or "").strip()
@@ -31,15 +33,45 @@ def _installed_components() -> list[dict[str, str]]:
         if key in seen:
             continue
         seen.add(key)
-        components.append(
+        metadata_text = dist.read_text("METADATA") or ""
+        license_name = str(
+            dist.metadata.get("License-Expression") or dist.metadata.get("License") or ""
+        ).strip()
+        requires = [str(item).split(";", 1)[0].strip() for item in (dist.requires or [])]
+        distributions.append((name, version, metadata_text, license_name, requires))
+
+    installed_purls = {
+        _normalise_pypi_name(name): _purl(name, version)
+        for name, version, _metadata_text, _license_name, _requires in distributions
+    }
+    for name, version, _metadata_text, license_name, requires in distributions:
+        component: dict[str, object] = {
+            "type": "library",
+            "name": name,
+            "version": version,
+            "purl": _purl(name, version),
+        }
+        if license_name:
+            component["licenses"] = [{"license": {"name": license_name}}]
+        components.append(component)
+        dependency_refs: set[str] = set()
+        for requirement in requires:
+            match = re.match(r"^[A-Za-z0-9][A-Za-z0-9._-]*", requirement)
+            if match is None:
+                continue
+            installed_ref = installed_purls.get(_normalise_pypi_name(match.group(0)))
+            if installed_ref is not None:
+                dependency_refs.add(installed_ref)
+        dependencies.append(
             {
-                "type": "library",
-                "name": name,
-                "version": version,
-                "purl": _purl(name, version),
+                "ref": _purl(name, version),
+                "dependsOn": sorted(dependency_refs),
             }
         )
-    return sorted(components, key=lambda item: (item["name"].lower(), item["version"]))
+    return (
+        sorted(components, key=lambda item: (str(item["name"]).lower(), str(item["version"]))),
+        sorted(dependencies, key=lambda item: str(item["ref"])),
+    )
 
 
 def _project_version(project_name: str) -> str:
@@ -65,6 +97,7 @@ def _project_version(project_name: str) -> str:
 
 def build_sbom(*, project_name: str = "orbital-engagement-lab") -> dict[str, object]:
     """Build a minimal CycloneDX JSON SBOM for the current Python environment."""
+    components, dependencies = _installed_components()
     return {
         "bomFormat": "CycloneDX",
         "specVersion": "1.5",
@@ -87,7 +120,8 @@ def build_sbom(*, project_name: str = "orbital-engagement-lab") -> dict[str, obj
                 "version": _project_version(project_name),
             },
         },
-        "components": _installed_components(),
+        "components": components,
+        "dependencies": dependencies,
     }
 
 

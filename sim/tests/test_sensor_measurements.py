@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from sim.core.models import Measurement, StateBelief, StateTruth
+from sim.dynamics.orbit.frames import FrameContext, eci_to_ecef_rotation_context
 from sim.knowledge.object_tracking import (
     KnowledgeConditionConfig,
     KnowledgeEKFConfig,
@@ -11,12 +12,13 @@ from sim.knowledge.object_tracking import (
     ObjectKnowledgeBase,
     TrackedObjectConfig,
 )
-from sim.sensors.access import AccessConfig, AccessModel
+from sim.sensors.access import AccessConfig, AccessModel, GroundSite
 from sim.sensors.composite import CompositeSensorModel
 from sim.sensors.joint_state import JointStateSensor
 from sim.sensors.models import OwnStateSensor, RelativeSensor, SensorNoiseConfig
 from sim.sensors.noisy_own_state import NoisyOwnStateSensor
 from sim.utils.frames import ric_rect_state_to_eci
+from sim.utils.geodesy import geodetic_to_ecef_km
 
 
 def _truth(
@@ -170,6 +172,31 @@ def test_access_model_enforces_cadence_range_and_fov() -> None:
         12.0,
         boresight_eci=np.array([1.0, 0.0, 0.0]),
     )
+
+
+def test_access_model_uses_configured_ground_site_and_elevation_mask() -> None:
+    context = FrameContext(jd_utc_start=2451545.0)
+    ecef_from_eci = eci_to_ecef_rotation_context(0.0, context)
+    target = ecef_from_eci.T @ (
+        geodetic_to_ecef_km(0.0, 0.0, 0.0) + np.array([500.0, 0.0, 0.0])
+    )
+    overhead = AccessModel(
+        AccessConfig(
+            require_ground_visibility=True,
+            ground_site=GroundSite(lat_rad=0.0, lon_rad=0.0, min_elevation_rad=np.deg2rad(10.0)),
+            frame_context=context,
+        )
+    )
+    far_side = AccessModel(
+        AccessConfig(
+            require_ground_visibility=True,
+            ground_site=GroundSite(lat_rad=0.0, lon_rad=np.pi, min_elevation_rad=np.deg2rad(10.0)),
+            frame_context=context,
+        )
+    )
+
+    assert overhead.evaluate(np.zeros(3), target, 0.0) == (True, "ok")
+    assert far_side.evaluate(np.zeros(3), target, 0.0) == (False, "ground_elevation")
 
 
 def test_joint_state_sensor_zero_noise_preserves_normalized_attitude_and_cadence() -> None:

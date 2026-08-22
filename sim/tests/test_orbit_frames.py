@@ -106,6 +106,19 @@ def test_iau76_80_eop_alias_matches_legacy_hpop_like_rotation(tmp_path: Path) ->
     np.testing.assert_allclose(canonical, legacy, rtol=0.0, atol=0.0)
 
 
+def test_direct_eop_harmonic_transform_requires_absolute_epoch(tmp_path: Path) -> None:
+    eop_path = tmp_path / "EOP-All.txt"
+    _write_minimal_eop(eop_path)
+
+    with pytest.raises(ValueError, match="require jd_utc_start"):
+        eci_to_ecef_harmonic(
+            np.array([7000.0, 0.0, 0.0]),
+            0.0,
+            frame_model="iau76_80_eop",
+            eop_path=str(eop_path),
+        )
+
+
 def test_frame_context_records_eop_time_scale_provenance(tmp_path: Path) -> None:
     eop_path = tmp_path / "EOP-All.txt"
     _write_minimal_eop(eop_path)
@@ -120,6 +133,7 @@ def test_frame_context_records_eop_time_scale_provenance(tmp_path: Path) -> None
     assert meta["legacy_frame_model"] == "hpop_like"
     assert meta["time_scale_model"] == "eop_utc_ut1_tt"
     assert meta["eop_path"] == str(eop_path.resolve())
+    assert len(meta["eop_table_sha256"]) == 64
     assert meta["dut1_s"] == 0.30
     assert meta["tt_minus_utc_s"] == 69.184
     assert meta["polar_motion_applied"] is True

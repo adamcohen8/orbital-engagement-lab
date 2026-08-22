@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from sim.control.attitude.bdot_magnetorquer import MagnetorquerBdotController
 from sim.control.attitude.cmg_steering import CMGSteeringController
@@ -155,6 +156,19 @@ def test_gimbaled_thruster_controller_blanks_unreachable_direction() -> None:
     assert cmd.mode_flags["mode"] == "gimbaled_thruster_guidance"
     assert np.allclose(cmd.thrust_eci_km_s2, np.zeros(3))
     assert cmd.mode_flags["gimbal_angle_request_rad"] > np.deg2rad(5.0)
+
+
+@pytest.mark.parametrize(
+    "direction, limit",
+    [([0.0, 0.0, 0.0], 0.1), ([1.0, 0.0, 0.0], float("nan"))],
+)
+def test_gimbaled_thruster_rejects_invalid_geometry(direction, limit) -> None:
+    with pytest.raises(ValueError):
+        GimbaledThrusterController(
+            base_controller=_ConstantController(),
+            neutral_direction_body=direction,
+            max_gimbal_angle_rad=limit,
+        )
 
 
 def test_gimbaled_thruster_does_not_treat_relative_chief_state_as_attitude() -> None:

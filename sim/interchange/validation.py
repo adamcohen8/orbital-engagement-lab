@@ -542,8 +542,22 @@ def _validate_ogp_mean_element_product(
         "epoch_jd_utc", "inclination_deg", "raan_deg", "eccentricity", "argp_deg",
         "mean_anomaly_deg", "mean_motion_rev_per_day",
     )
+    value_epoch = None
     for field in required:
-        _finite_number(values.get(field), f"{state_path}.values.{field}", issues)
+        parsed = _finite_number(values.get(field), f"{state_path}.values.{field}", issues)
+        if field == "epoch_jd_utc":
+            value_epoch = parsed
+    if (
+        epoch_value is not None
+        and value_epoch is not None
+        and not np.isclose(float(epoch_value), float(value_epoch), rtol=0.0, atol=1.0e-12)
+    ):
+        _error(
+            issues,
+            "ogp.epoch_mismatch",
+            f"{state_path}.values.epoch_jd_utc",
+            "Mean-element epoch must match the product state epoch.",
+        )
     eccentricity = values.get("eccentricity")
     if isinstance(eccentricity, (int, float)) and not 0.0 <= float(eccentricity) < 1.0:
         _error(issues, "ogp.eccentricity_invalid", f"{state_path}.values.eccentricity", "Expected [0, 1).")
@@ -556,9 +570,18 @@ def _validate_ogp_mean_element_product(
     propagation = _required_mapping(payload, "propagation", path, issues)
     _closed_mapping(propagation, {"family", "regime", "propagator_name", "not_tle_text"}, f"{path}.propagation", issues)
     _require_exact(propagation, "family", "OGP", f"{path}.propagation", issues)
-    if _required_string(propagation, "regime", f"{path}.propagation", issues) not in {"sgp4", "sdp4"}:
+    regime = _required_string(propagation, "regime", f"{path}.propagation", issues)
+    if regime not in {"sgp4", "sdp4"}:
         _error(issues, "ogp.regime_invalid", f"{path}.propagation.regime", "Expected sgp4 or sdp4.")
-    _required_string(propagation, "propagator_name", f"{path}.propagation", issues)
+    propagator_name = _required_string(propagation, "propagator_name", f"{path}.propagation", issues)
+    expected_propagator = {"sgp4": "OGP-SGP4", "sdp4": "OGP-SDP4"}.get(regime)
+    if expected_propagator and propagator_name != expected_propagator:
+        _error(
+            issues,
+            "ogp.propagator_regime_mismatch",
+            f"{path}.propagation.propagator_name",
+            f"Expected {expected_propagator} for regime {regime}.",
+        )
     if propagation.get("not_tle_text") is not True:
         _error(issues, "ogp.tle_claim_invalid", f"{path}.propagation.not_tle_text", "Must be true.")
 

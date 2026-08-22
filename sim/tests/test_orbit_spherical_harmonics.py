@@ -1,6 +1,7 @@
 import hashlib
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
 
@@ -35,6 +36,15 @@ def scenario_config_from_dict(data: dict):
 
 
 class TestOrbitSphericalHarmonics(unittest.TestCase):
+    def test_duplicate_degree_order_terms_are_rejected(self):
+        with self.assertRaisesRegex(ValueError, "Duplicate spherical harmonic coefficient"):
+            parse_spherical_harmonic_terms(
+                [
+                    {"n": 2, "m": 0, "c_nm": -1.0e-3},
+                    {"n": 2, "m": 0, "c_nm": -2.0e-3},
+                ]
+            )
+
     @staticmethod
     def _write_minimal_eop(path: Path) -> None:
         path.write_text(
@@ -198,6 +208,44 @@ class TestOrbitSphericalHarmonics(unittest.TestCase):
                 )
 
                 np.testing.assert_allclose(actual, expected, rtol=1.0e-12, atol=5.0e-18)
+
+    def test_compiled_normalized_terms_are_reentrant_across_threads(self):
+        terms = [
+            SphericalHarmonicTerm(
+                n=degree,
+                m=order,
+                c_nm=1.0e-6 / (degree + order + 1.0),
+                s_nm=0.0 if order == 0 else -8.0e-7 / (degree + 1.0),
+                normalized=True,
+            )
+            for degree in range(2, 18)
+            for order in range(degree + 1)
+        ]
+        compiled = compile_spherical_harmonic_terms(terms)
+        self.assertIsNotNone(compiled)
+        positions = [
+            np.array([7000.0 + index, -1200.0 + 3.0 * index, 800.0 - index])
+            for index in range(24)
+        ]
+
+        def evaluate(position: np.ndarray) -> np.ndarray:
+            return accel_spherical_harmonics_terms(
+                position,
+                987.0,
+                terms,
+                mu_km3_s2=EARTH_MU_KM3_S2,
+                re_km=6378.1363,
+                jd_utc_start=2459669.5,
+                frame_model="simple",
+                compiled=compiled,
+                use_acceleration=False,
+            )
+
+        expected = [evaluate(position) for position in positions]
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            actual = list(pool.map(evaluate, positions))
+        for expected_row, actual_row in zip(expected, actual, strict=True):
+            np.testing.assert_allclose(actual_row, expected_row, rtol=0.0, atol=1.0e-18)
 
     def test_accelerated_normalized_terms_match_reference_for_truncated_orders(self):
         position = np.array([-4300.0, 5100.0, 1800.0], dtype=float)

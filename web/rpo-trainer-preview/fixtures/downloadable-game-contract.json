@@ -1,0 +1,132 @@
+{
+  "arcade": {
+    "arcade": {
+      "boss": {
+        "bonus_time_s": 5000.0,
+        "coast_prediction_model": "tschauner_hempel",
+        "eccentricity_max": 0.2,
+        "eccentricity_start": 0.05,
+        "eccentricity_step": 0.05,
+        "music_track": "28_high_shred_boss_riff.wav",
+        "score_multiplier": 2.0,
+        "target_coes": {
+          "a_km": 9000.0,
+          "argp_deg": 0.0,
+          "ecc": 0.05,
+          "inc_deg": 45.0,
+          "raan_deg": 0.0,
+          "true_anomaly_deg": 0.0
+        },
+        "true_anomaly_range_deg": [
+          0.0,
+          360.0
+        ]
+      },
+      "boss_round_interval": 5,
+      "delta_v_bonus_time_per_m_s": 1000.0,
+      "enabled": true,
+      "goal_range_step_km": 0.005,
+      "initial_time_s": 12000.0,
+      "min_goal_range_km": 0.005,
+      "random_initial_state": {
+        "cross_track_range_km": [
+          -1.0,
+          1.0
+        ],
+        "cross_track_rate_range_km_s": [
+          -0.001,
+          0.001
+        ],
+        "enabled": true,
+        "in_track_range_km": [
+          -10.0,
+          10.0
+        ],
+        "min_range_km": 5.0,
+        "radial_range_km": [
+          -1.0,
+          1.0
+        ]
+      },
+      "round_bonus_time_s": 0.0
+    },
+    "challenge_id": "rpo_arcade_pursuit",
+    "chaser_initial_ric": {
+      "c_km": 0.0,
+      "cd_km_s": 0.0,
+      "i_km": -1.8,
+      "id_km_s": 0.0,
+      "r_km": 0.0,
+      "rd_km_s": 0.0
+    },
+    "difficulty": "easy",
+    "dt_s": 1.0,
+    "goal_range_km": 0.1,
+    "max_delta_v_m_s": 3.0,
+    "max_player_accel_km_s2": 1.5e-05,
+    "max_target_delta_v_m_s": 0.1,
+    "max_time_s": 12000.0,
+    "mu_km3_s2": 398600.4415,
+    "target_coes": {
+      "a_km": 7000.0,
+      "argp_deg": 0.0,
+      "ecc": 0.0,
+      "inc_deg": 45.0,
+      "raan_deg": 0.0,
+      "true_anomaly_deg": 0.0
+    },
+    "target_defense": {
+      "cross_track_bias": 0.65,
+      "delta_v_ramp_after_round": 20,
+      "delta_v_ramp_step_m_s": 0.01,
+      "enabled": true,
+      "keepout_radius_km": 0.1,
+      "max_accel_km_s2": 7.5e-06,
+      "max_delta_v_m_s": 0.1,
+      "pulse_period_s": 120.0,
+      "trigger_closing_speed_km_s": 0.00025,
+      "trigger_range_km": 1.2
+    },
+    "title": "Pursuit Arcade"
+  },
+  "generated_from": [
+    "sim/game/configs/game_training_rpo_00_tutorial.yaml",
+    "sim/game/configs/game_training_rpo_sandbox.yaml",
+    "sim/game/configs/game_training_rpo_arcade_pursuit.yaml"
+  ],
+  "sandbox": {
+    "instructor_notes": [
+      "Use this mode to demonstrate how initial relative state and target eccentricity change relative motion.",
+      "Set eccentricity to zero for HCW-style circular-orbit intuition, or nonzero for elliptical prediction."
+    ],
+    "max_time_s": 20000.0,
+    "player_brief": "Edit the starting RIC state and target orbit in the setup panel, then maneuver freely. Delta-v used remains visible, but there is no delta-v budget.",
+    "supports_target_eccentricity": true,
+    "supports_target_orbit_edit": true
+  },
+  "schema_version": 1,
+  "tutorial": {
+    "goal_range_km": 0.25,
+    "guided_burn_delta_v_m_s": 0.25,
+    "guided_speed_multiplier": 10.0,
+    "instructor_notes": [
+      "This level teaches the controls before introducing natural-motion matching, keepout constraints, or target evasion.",
+      "Encourage short pulses followed by coasting rather than continuous thrust.",
+      "The RI view shows in-track versus radial motion; the RC view shows cross-track versus radial motion."
+    ],
+    "learning_goal": "Learn what R, I, and C mean by creating six small target orbits, then use short pulse-and-coast translations to settle near a passive target.",
+    "max_delta_v_m_s": 12.0,
+    "max_goal_speed_km_s": 0.0003,
+    "max_time_s": 18000.0,
+    "pass_criteria": [
+      "Complete the +I and -I guided orbit demonstrations.",
+      "After +I, increase the speed multiple to 10x.",
+      "Complete the +R and -R guided orbit demonstrations.",
+      "Complete the +C and -C guided orbit demonstrations.",
+      "Get within 250 m of the passive target below 0.3 m/s.",
+      "Stay under the generous tutorial time and delta-v budgets."
+    ],
+    "player_brief": "The yellow satellite is you. R is radial, toward or away from Earth through the target. I is in-track, forward or backward along the target's orbit. C is cross-track, out of the target's orbital plane. For each guided stage, the simulation pauses until you hold the requested control. Follow the green path to build the shown 0.25 m/s burn, then the trainer resets for the next axis before the final approach.",
+    "title": "Level 0 - Pilot Tutorial"
+  }
+}

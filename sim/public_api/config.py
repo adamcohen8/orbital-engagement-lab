@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Union
 
@@ -20,6 +20,8 @@ if TYPE_CHECKING:
 
 MetricCallback = Callable[["SimulationResult"], Union[Mapping[str, Any], Any]]
 ControllerFactory = Callable[[], Any]
+
+
 def _canonicalize_api_config_dict(data: dict[str, Any]) -> dict[str, Any]:
     """Normalize legacy Python API dict conveniences without relaxing YAML parsing."""
     root = dict(data)
@@ -95,10 +97,13 @@ def _api_sealed_policy(
     if sealed_mode_enabled(bool(sealed_mode)):
         return SealedModePolicy()
     return None
+
+
 @dataclass(frozen=True)
 class SimulationConfig:
     scenario: SimulationScenarioConfig
     source_path: Path | None = None
+    path_policy: ConfigPathPolicy | None = field(default=None, repr=False, compare=False)
 
     @classmethod
     def from_yaml(
@@ -110,14 +115,20 @@ class SimulationConfig:
         allow_external_ai_prompt_files: bool = False,
     ) -> SimulationConfig:
         resolved = Path(path).expanduser().resolve()
+        effective_policy = path_policy or ConfigPathPolicy.default(
+            config_path=resolved,
+            allow_external_config_paths=allow_external_config_paths,
+            allow_external_ai_prompt_files=allow_external_ai_prompt_files,
+        )
         return cls(
             scenario=load_simulation_yaml(
                 resolved,
-                path_policy=path_policy,
+                path_policy=effective_policy,
                 allow_external_config_paths=allow_external_config_paths,
                 allow_external_ai_prompt_files=allow_external_ai_prompt_files,
             ),
             source_path=resolved,
+            path_policy=effective_policy,
         )
 
     @classmethod
@@ -129,13 +140,17 @@ class SimulationConfig:
         source_path: str | Path | None = None,
     ) -> SimulationConfig:
         resolved_source = None if source_path is None else Path(source_path).expanduser().resolve()
+        effective_policy = path_policy
+        if effective_policy is None and resolved_source is not None:
+            effective_policy = ConfigPathPolicy.default(config_path=resolved_source)
         return cls(
             scenario=scenario_config_from_dict(
                 _canonicalize_api_config_dict(dict(data)),
                 source_path=resolved_source,
-                path_policy=path_policy,
+                path_policy=effective_policy,
             ),
             source_path=resolved_source,
+            path_policy=effective_policy,
         )
 
     @property
@@ -152,8 +167,9 @@ class SimulationConfig:
         root = self.to_dict()
         root.setdefault("metadata", {})["seed"] = int(seed)
         return SimulationConfig(
-            scenario=scenario_config_from_dict(root),
+            scenario=scenario_config_from_dict(root, source_path=self.source_path, path_policy=self.path_policy),
             source_path=self.source_path,
+            path_policy=self.path_policy,
         )
 
     def with_value(self, parameter_path: str, value: Any) -> SimulationConfig:
@@ -162,14 +178,16 @@ class SimulationConfig:
         root = self.to_dict()
         set_parameter_path_value(root, str(parameter_path), value)
         return SimulationConfig(
-            scenario=scenario_config_from_dict(root),
+            scenario=scenario_config_from_dict(root, source_path=self.source_path, path_policy=self.path_policy),
             source_path=self.source_path,
+            path_policy=self.path_policy,
         )
 
     def with_output_dir(self, output_dir: str | Path) -> SimulationConfig:
         root = self.to_dict()
         root.setdefault("outputs", {})["output_dir"] = str(output_dir)
         return SimulationConfig(
-            scenario=scenario_config_from_dict(root),
+            scenario=scenario_config_from_dict(root, source_path=self.source_path, path_policy=self.path_policy),
             source_path=self.source_path,
+            path_policy=self.path_policy,
         )

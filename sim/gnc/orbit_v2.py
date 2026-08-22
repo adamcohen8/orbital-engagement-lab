@@ -10,6 +10,12 @@ from typing import Callable
 import numpy as np
 
 from sim.control.orbit.curv_pd import curv_accel_to_rect
+from sim.control.orbit.predictive_engagement import (
+    MAX_ACCELERATION_FRACTIONS,
+    MAX_PREDICTION_STEPS,
+    select_evasion_action,
+    select_intercept_action,
+)
 from sim.control.orbit.ric_pd import RICPDTransferController
 from sim.control.orbit.rmoe import estimate_rmoes_from_rect_ric
 from sim.dynamics.orbit.elements import (
@@ -48,6 +54,8 @@ class TranslationMode(str, Enum):
     RIC_PD_TRANSFER = "ric_pd_transfer"
     TERMINAL_BRAKING = "terminal_braking"
     PASSIVE_RETREAT = "passive_retreat"
+    INTERCEPT_COAST = "intercept_coast"
+    PREDICTIVE_EVASION = "predictive_evasion"
     LOW_THRUST_PHASING = "low_thrust_phasing"
     ATMOSPHERIC_PASS = "atmospheric_pass"
 
@@ -136,6 +144,14 @@ class TranslationControlConfig:
     thrust_window_phase_s: float = 0.0
     thrust_command_deadband_m_s2: float = 0.0
     element_averaging_window_s: float = 0.0
+    prediction_horizon_s: float = 1_800.0
+    prediction_step_s: float = 30.0
+    prediction_decision_interval_s: float = 120.0
+    prediction_pulse_duration_s: float = 60.0
+    capture_radius_m: float = 100.0
+    capture_margin_m: float = 20.0
+    opponent_max_acceleration_m_s2: float = 0.02
+    prediction_acceleration_fractions: tuple[float, ...] = (0.5, 1.0)
 
     def __post_init__(self) -> None:
         if not isinstance(self.default_mode, TranslationMode):
@@ -167,6 +183,13 @@ class TranslationControlConfig:
             ("thrust_window_phase_s", self.thrust_window_phase_s, False),
             ("thrust_command_deadband_m_s2", self.thrust_command_deadband_m_s2, False),
             ("element_averaging_window_s", self.element_averaging_window_s, False),
+            ("prediction_horizon_s", self.prediction_horizon_s, True),
+            ("prediction_step_s", self.prediction_step_s, True),
+            ("prediction_decision_interval_s", self.prediction_decision_interval_s, True),
+            ("prediction_pulse_duration_s", self.prediction_pulse_duration_s, True),
+            ("capture_radius_m", self.capture_radius_m, True),
+            ("capture_margin_m", self.capture_margin_m, False),
+            ("opponent_max_acceleration_m_s2", self.opponent_max_acceleration_m_s2, False),
         ):
             if not isfinite(value) or (value <= 0.0 if positive else value < 0.0):
                 qualifier = "positive" if positive else "nonnegative"
@@ -248,6 +271,29 @@ class TranslationControlConfig:
                 raise ValueError("thrust window duration must be positive and no greater than its period")
             if not 0.0 <= self.thrust_window_phase_s < self.thrust_window_period_s:
                 raise ValueError("thrust window phase must lie in [0, period)")
+        if self.prediction_step_s > self.prediction_pulse_duration_s:
+            raise ValueError("prediction_step_s must be no greater than prediction_pulse_duration_s")
+        if self.prediction_pulse_duration_s > self.prediction_decision_interval_s:
+            raise ValueError(
+                "prediction_pulse_duration_s must be no greater than prediction_decision_interval_s"
+            )
+        if self.prediction_decision_interval_s > self.prediction_horizon_s:
+            raise ValueError("prediction_decision_interval_s must be no greater than prediction_horizon_s")
+        if self.capture_margin_m >= self.capture_radius_m:
+            raise ValueError("capture_margin_m must be smaller than capture_radius_m")
+        if not self.prediction_acceleration_fractions or any(
+            not isfinite(value) or value <= 0.0 or value > 1.0
+            for value in self.prediction_acceleration_fractions
+        ):
+            raise ValueError("prediction_acceleration_fractions must contain values in (0, 1]")
+        if len(self.prediction_acceleration_fractions) > MAX_ACCELERATION_FRACTIONS:
+            raise ValueError(
+                f"prediction_acceleration_fractions may contain at most {MAX_ACCELERATION_FRACTIONS} values"
+            )
+        if int(np.ceil(self.prediction_horizon_s / self.prediction_step_s)) + 1 > MAX_PREDICTION_STEPS:
+            raise ValueError(
+                f"predictive horizon may require at most {MAX_PREDICTION_STEPS} propagation steps"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -281,6 +327,11 @@ class TranslationController:
         self._missed_thrust_window_count = 0
         self._thrust_window_open = True
         self._element_samples: list[tuple[int, float, float]] = []
+        self._predictive_action_ric_m_s2 = np.zeros(3)
+        self._predictive_action_until_ns: int | None = None
+        self._predictive_next_plan_ns: int | None = None
+        self._predictive_phase = "predictive_uninitialized"
+        self._predictive_capture_latched = False
 
     @property
     def thrust_window_open(self) -> bool:
@@ -336,6 +387,10 @@ class TranslationController:
         else:
             track = solution.relative_track(self.config.target_id)
             acceleration, position_error, velocity_error, phase = self._relative(selected, solution, track)
+            if selected is TranslationMode.INTERCEPT_COAST:
+                explicit_goal_satisfied = self._predictive_capture_latched or bool(
+                    track is not None and track.range_m <= self.config.capture_radius_m
+                )
         if acceleration is None:
             return TranslationControlResult(
                 selected,
@@ -388,6 +443,17 @@ class TranslationController:
                     solution.generated_at,
                     replace(solution.generated_at, ticks=burn_end_ticks),
                 )
+        if (
+            selected in {TranslationMode.INTERCEPT_COAST, TranslationMode.PREDICTIVE_EVASION}
+            and np.linalg.norm(force) > 0.0
+            and self._predictive_action_until_ns is not None
+        ):
+            predictive_end_ticks = self._predictive_action_until_ns // solution.generated_at.tick_period_ns
+            if predictive_end_ticks < validity.expires_at.ticks:
+                validity = ValidityInterval(
+                    solution.generated_at,
+                    replace(solution.generated_at, ticks=predictive_end_ticks),
+                )
         effort = RequestedEffort(
             f"translation.{selected.value}",
             RequestedEffortKind.FORCE,
@@ -439,6 +505,11 @@ class TranslationController:
             "missed_thrust_window_count": self._missed_thrust_window_count,
             "thrust_window_open": self._thrust_window_open,
             "element_samples": [list(sample) for sample in self._element_samples],
+            "predictive_action_ric_m_s2": self._predictive_action_ric_m_s2.tolist(),
+            "predictive_action_until_ns": self._predictive_action_until_ns,
+            "predictive_next_plan_ns": self._predictive_next_plan_ns,
+            "predictive_phase": self._predictive_phase,
+            "predictive_capture_latched": self._predictive_capture_latched,
             "ric_pd_transfer": (
                 None
                 if self._ric_pd_transfer is None
@@ -499,6 +570,13 @@ class TranslationController:
                 abs(semi_major - self.config.target_semi_major_axis_m) <= self.config.position_tolerance_m
                 and abs(eccentricity - self.config.target_eccentricity) <= self.config.eccentricity_tolerance
             )
+        elif selected is TranslationMode.INTERCEPT_COAST:
+            track = solution.relative_track(self.config.target_id)
+            return self._predictive_capture_latched or bool(
+                track is not None and track.range_m <= self.config.capture_radius_m
+            )
+        elif selected is TranslationMode.PREDICTIVE_EVASION:
+            return False
         else:
             track = solution.relative_track(self.config.target_id)
             if track is None:
@@ -537,6 +615,16 @@ class TranslationController:
         self._element_samples = [
             (int(sample[0]), float(sample[1]), float(sample[2])) for sample in raw_element_samples
         ]
+        predictive_action = np.asarray(state.get("predictive_action_ric_m_s2", (0.0, 0.0, 0.0)), dtype=float)
+        if predictive_action.shape != (3,) or not np.all(np.isfinite(predictive_action)):
+            raise ValueError("translation controller predictive action is invalid")
+        self._predictive_action_ric_m_s2 = predictive_action
+        predictive_until = state.get("predictive_action_until_ns")
+        predictive_next = state.get("predictive_next_plan_ns")
+        self._predictive_action_until_ns = None if predictive_until is None else int(predictive_until)
+        self._predictive_next_plan_ns = None if predictive_next is None else int(predictive_next)
+        self._predictive_phase = str(state.get("predictive_phase", "predictive_uninitialized"))
+        self._predictive_capture_latched = bool(state.get("predictive_capture_latched", False))
         transfer = state.get("ric_pd_transfer")
         if transfer is None:
             self._ric_pd_transfer = None
@@ -764,6 +852,8 @@ class TranslationController:
             return None, None, None, mode.value
         if mode is TranslationMode.RIC_PD_TRANSFER:
             return self._ric_pd_transfer_guidance(solution, track)
+        if mode in {TranslationMode.INTERCEPT_COAST, TranslationMode.PREDICTIVE_EVASION}:
+            return self._predictive_engagement_guidance(mode, solution, track)
         state = np.concatenate((track.position_m, track.velocity_m_s))
         target = np.asarray(self.config.target_relative_state_ric)
         phase = mode.value
@@ -865,6 +955,72 @@ class TranslationController:
             float(np.linalg.norm(velocity_error_vector)),
             phase,
         )
+
+    def _predictive_engagement_guidance(
+        self,
+        mode: TranslationMode,
+        solution: OrbitNavigationSolution,
+        track: RelativeStateEstimateSI,
+    ) -> tuple[np.ndarray | None, float | None, float | None, str]:
+        state = np.concatenate((track.position_m, track.velocity_m_s))
+        range_m = float(np.linalg.norm(state[:3]))
+        speed_m_s = float(np.linalg.norm(state[3:]))
+        if mode is TranslationMode.INTERCEPT_COAST and (
+            self._predictive_capture_latched or range_m <= self.config.capture_radius_m
+        ):
+            self._predictive_capture_latched = True
+            self._predictive_action_ric_m_s2 = np.zeros(3)
+            self._predictive_phase = "capture_complete"
+            return self._ric_to_eci(np.zeros(3), solution, track), range_m, speed_m_s, self._predictive_phase
+        if mode is TranslationMode.PREDICTIVE_EVASION and range_m <= self.config.capture_radius_m:
+            self._predictive_action_ric_m_s2 = np.zeros(3)
+            self._predictive_phase = "evasion_captured"
+            return self._ric_to_eci(np.zeros(3), solution, track), range_m, speed_m_s, self._predictive_phase
+
+        now_ns = _clock_ns(solution.generated_at)
+        if self._predictive_next_plan_ns is None or now_ns >= self._predictive_next_plan_ns:
+            common = {
+                "mean_motion_rad_s": self._relative_mean_motion(solution, track),
+                "horizon_s": self.config.prediction_horizon_s,
+                "step_s": self.config.prediction_step_s,
+                "pulse_duration_s": self.config.prediction_pulse_duration_s,
+                "capture_radius_m": self.config.capture_radius_m,
+                "capture_margin_m": self.config.capture_margin_m,
+                "acceleration_fractions": self.config.prediction_acceleration_fractions,
+            }
+            if mode is TranslationMode.INTERCEPT_COAST:
+                decision = select_intercept_action(
+                    state,
+                    max_acceleration_m_s2=self.config.max_acceleration_m_s2,
+                    **common,
+                )
+            else:
+                decision = select_evasion_action(
+                    state,
+                    max_acceleration_m_s2=self.config.max_acceleration_m_s2,
+                    opponent_max_acceleration_m_s2=self.config.opponent_max_acceleration_m_s2,
+                    **common,
+                )
+            self._predictive_action_ric_m_s2 = np.asarray(decision.acceleration_ric_m_s2, dtype=float)
+            self._predictive_phase = decision.phase
+            self._predictive_action_until_ns = now_ns + int(
+                round(self.config.prediction_pulse_duration_s * 1.0e9)
+            )
+            self._predictive_next_plan_ns = now_ns + int(
+                round(self.config.prediction_decision_interval_s * 1.0e9)
+            )
+
+        if self._predictive_action_until_ns is not None and now_ns < self._predictive_action_until_ns:
+            action_ric = self._predictive_action_ric_m_s2
+            phase = self._predictive_phase
+        else:
+            action_ric = np.zeros(3)
+            phase = (
+                "intercept_replan_coast"
+                if mode is TranslationMode.INTERCEPT_COAST
+                else "predictive_evasion_replan_coast"
+            )
+        return self._ric_to_eci(action_ric, solution, track), range_m, speed_m_s, phase
 
     def _ric_pd_transfer_guidance(
         self,
@@ -1137,6 +1293,9 @@ class TranslationAllocatorConfig:
             and not self.rcs_thrusters
         ):
             raise ValueError("RCS allocation requires at least one thruster belief")
+        thruster_ids = [thruster.thruster_id for thruster in self.rcs_thrusters]
+        if len(thruster_ids) != len(set(thruster_ids)):
+            raise ValueError("RCS thruster IDs must be unique")
 
 
 class TranslationAllocator:

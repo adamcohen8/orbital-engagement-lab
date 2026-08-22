@@ -165,10 +165,10 @@ def _parse_sensitivity_parameter(value: Any) -> SensitivityParameter:
         parameter_path=path,
         values=list(values),
         distribution=distribution,
-        low=float(d["low"]) if d.get("low") is not None else None,
-        high=float(d["high"]) if d.get("high") is not None else None,
-        mean=float(d["mean"]) if d.get("mean") is not None else None,
-        std=float(d["std"]) if d.get("std") is not None else None,
+        low=_parse_optional_float(d.get("low"), "analysis.sensitivity.parameters[*].low"),
+        high=_parse_optional_float(d.get("high"), "analysis.sensitivity.parameters[*].high"),
+        mean=_parse_optional_float(d.get("mean"), "analysis.sensitivity.parameters[*].mean"),
+        std=_parse_optional_float(d.get("std"), "analysis.sensitivity.parameters[*].std"),
     )
 
 
@@ -188,6 +188,21 @@ def _parse_sensitivity_section(value: Any) -> SensitivitySection:
         raise ValueError("analysis.sensitivity.method must be one of: one_at_a_time, lhs, two_parameter_grid.")
     if out.samples < 0:
         raise ValueError("analysis.sensitivity.samples must be >= 0.")
+    if out.method == "lhs":
+        for parameter in out.parameters:
+            if parameter.distribution == "uniform":
+                if parameter.low is None or parameter.high is None:
+                    raise ValueError(
+                        f"LHS parameter '{parameter.parameter_path}' requires low/high for uniform distribution."
+                    )
+                if parameter.high < parameter.low:
+                    raise ValueError(
+                        f"LHS parameter '{parameter.parameter_path}' requires high >= low for uniform distribution."
+                    )
+            elif parameter.mean is None or parameter.std is None or parameter.std <= 0.0:
+                raise ValueError(
+                    f"LHS parameter '{parameter.parameter_path}' requires mean/std with std > 0 for normal distribution."
+                )
     return out
 
 
@@ -217,12 +232,18 @@ def _parse_covariance_diagonal(value: Any, field_name: str) -> list[float]:
 
 def _parse_covariance_object_section(value: Any, path: str) -> CovarianceObjectSection:
     d = _as_dict(value, path)
+    _reject_unknown_fields(
+        d,
+        path,
+        {"enabled", "frame", "covariance", "matrix", "diagonal", "position_sigma_km", "velocity_sigma_km_s"},
+    )
     frame = str(d.get("frame", "eci") or "eci").strip().lower()
     if frame != "eci":
         raise ValueError(f"{path}.frame must be 'eci' for covariance analysis v0.")
     matrix_raw = d.get("covariance", d.get("matrix"))
     diagonal_raw = d.get("diagonal")
     if isinstance(matrix_raw, dict):
+        _reject_unknown_fields(matrix_raw, f"{path}.covariance", {"diagonal", "matrix"})
         diagonal_raw = matrix_raw.get("diagonal", diagonal_raw)
         matrix_raw = matrix_raw.get("matrix")
     covariance = _parse_covariance_matrix(matrix_raw, f"{path}.covariance")
@@ -251,6 +272,7 @@ def _parse_covariance_collision_screening_section(value: Any, path: str) -> Cova
         d: dict[str, Any] = {"enabled": value}
     else:
         d = _as_dict(value, path)
+    _reject_unknown_fields(d, path, {"enabled", "method", "hard_body_radius_km", "hard_body_radius_m"})
     enabled = _parse_bool(d.get("enabled", False), f"{path}.enabled")
     method = str(d.get("method", "small_object") or "small_object").strip().lower()
     if method not in {"small_object"}:
@@ -275,7 +297,13 @@ def _parse_covariance_collision_screening_section(value: Any, path: str) -> Cova
 
 
 def _parse_covariance_pair_section(value: Any, index: int) -> CovariancePairSection:
-    d = _as_dict(value, f"analysis.covariance.pairs[{index}]")
+    path = f"analysis.covariance.pairs[{index}]"
+    d = _as_dict(value, path)
+    _reject_unknown_fields(
+        d,
+        path,
+        {"deputy_id", "deputy", "chief_id", "chief", "collision_screening", "conjunction_screening"},
+    )
     deputy = str(d.get("deputy_id", d.get("deputy", "")) or "").strip()
     chief = str(d.get("chief_id", d.get("chief", "")) or "").strip()
     if not deputy:
@@ -293,6 +321,11 @@ def _parse_covariance_pair_section(value: Any, index: int) -> CovariancePairSect
 
 def _parse_covariance_section(value: Any) -> CovarianceSection:
     d = _as_dict(value, "analysis.covariance")
+    _reject_unknown_fields(
+        d,
+        "analysis.covariance",
+        {"enabled", "objects", "pairs", "finite_difference", "process_noise", "write_review_tables"},
+    )
     objects_raw = d.get("objects", {}) or {}
     if not isinstance(objects_raw, dict):
         raise ValueError("analysis.covariance.objects must be a mapping.")
@@ -300,6 +333,11 @@ def _parse_covariance_section(value: Any) -> CovarianceSection:
     if not isinstance(pairs_raw, list):
         raise ValueError("analysis.covariance.pairs must be a list.")
     fd = _as_dict(d.get("finite_difference"), "analysis.covariance.finite_difference")
+    _reject_unknown_fields(
+        fd,
+        "analysis.covariance.finite_difference",
+        {"position_step_km", "velocity_step_km_s"},
+    )
     pos_step = _parse_float(
         fd.get("position_step_km", 1e-3),
         "analysis.covariance.finite_difference.position_step_km",
@@ -313,6 +351,11 @@ def _parse_covariance_section(value: Any) -> CovarianceSection:
     if vel_step <= 0.0:
         raise ValueError("analysis.covariance.finite_difference.velocity_step_km_s must be positive.")
     process_noise = _as_dict(d.get("process_noise"), "analysis.covariance.process_noise")
+    _reject_unknown_fields(
+        process_noise,
+        "analysis.covariance.process_noise",
+        {"enabled", "acceleration_sigma_km_s2"},
+    )
     accel_sigma = _parse_float(
         process_noise.get("acceleration_sigma_km_s2", 0.0),
         "analysis.covariance.process_noise.acceleration_sigma_km_s2",
@@ -351,6 +394,14 @@ def _parse_covariance_section(value: Any) -> CovarianceSection:
 
 def _parse_mission_recovery_section(value: Any) -> MissionRecoverySection:
     d = _as_dict(value, "analysis.mission_recovery")
+    _reject_unknown_fields(
+        d,
+        "analysis.mission_recovery",
+        {
+            "enabled", "object_id", "goal", "recovery_goal", "assessment_time_s", "slot_tolerance_deg",
+            "max_phasing_orbits", "target_orbit", "desired_orbit", "planner", "propulsion", "element_tolerances",
+        },
+    )
     goal = str(d.get("goal", d.get("recovery_goal", "orbit_shape")) or "orbit_shape").strip().lower()
     if goal not in {"orbit_shape", "orbit_slot"}:
         raise ValueError("analysis.mission_recovery.goal must be one of: orbit_shape, orbit_slot.")
@@ -378,7 +429,12 @@ def _parse_mission_recovery_section(value: Any) -> MissionRecoverySection:
         d.get("planner"),
         configured_target_orbit=bool(target_orbit),
     )
-    propulsion = dict(d.get("propulsion", {}) or {})
+    propulsion = _as_dict(d.get("propulsion"), "analysis.mission_recovery.propulsion")
+    _reject_unknown_fields(
+        propulsion,
+        "analysis.mission_recovery.propulsion",
+        {"isp_s", "spacecraft_mass_kg", "max_thrust_n"},
+    )
     if propulsion.get("isp_s") is not None and _parse_float(propulsion.get("isp_s"), "analysis.mission_recovery.propulsion.isp_s") <= 0.0:
         raise ValueError("analysis.mission_recovery.propulsion.isp_s must be positive.")
     if propulsion.get("spacecraft_mass_kg") is not None and _parse_float(
@@ -394,6 +450,11 @@ def _parse_mission_recovery_section(value: Any) -> MissionRecoverySection:
     tolerances_raw = d.get("element_tolerances", {}) or {}
     if not isinstance(tolerances_raw, dict):
         raise ValueError("analysis.mission_recovery.element_tolerances must be a mapping.")
+    allowed_tolerances = {
+        "a_km", "ecc", "inc_deg", "raan_deg", "argp_deg", "true_anomaly_deg",
+        "position_norm_error_km", "speed_error_m_s", "slot_phase_deg",
+    }
+    _reject_unknown_fields(tolerances_raw, "analysis.mission_recovery.element_tolerances", allowed_tolerances)
     tolerances = {
         str(key): _parse_float(value, f"analysis.mission_recovery.element_tolerances.{key}")
         for key, value in tolerances_raw.items()
@@ -418,10 +479,6 @@ def _parse_mission_recovery_target_orbit_section(value: dict[str, Any]) -> dict[
     d = dict(value or {})
     if not d:
         return {}
-    coes_raw = d.get("coes", d)
-    if not isinstance(coes_raw, dict):
-        raise ValueError("analysis.mission_recovery.target_orbit.coes must be a mapping.")
-    out: dict[str, float] = {}
     aliases = {
         "a_km": ("a_km", "semi_major_axis_km"),
         "ecc": ("ecc", "e"),
@@ -430,6 +487,16 @@ def _parse_mission_recovery_target_orbit_section(value: dict[str, Any]) -> dict[
         "argp_deg": ("argp_deg", "arg_periapsis_deg"),
         "true_anomaly_deg": ("true_anomaly_deg", "ta_deg"),
     }
+    allowed_coes = {key for keys in aliases.values() for key in keys}
+    if "coes" in d:
+        _reject_unknown_fields(d, "analysis.mission_recovery.target_orbit", {"coes"})
+    else:
+        _reject_unknown_fields(d, "analysis.mission_recovery.target_orbit", allowed_coes)
+    coes_raw = d.get("coes", d)
+    if not isinstance(coes_raw, dict):
+        raise ValueError("analysis.mission_recovery.target_orbit.coes must be a mapping.")
+    _reject_unknown_fields(coes_raw, "analysis.mission_recovery.target_orbit.coes", allowed_coes)
+    out: dict[str, float] = {}
     for canonical, keys in aliases.items():
         for key in keys:
             if key in coes_raw:
@@ -451,6 +518,14 @@ def _parse_mission_recovery_planner_section(
     configured_target_orbit: bool = False,
 ) -> dict[str, Any]:
     d = _as_dict(value, "analysis.mission_recovery.planner")
+    _reject_unknown_fields(
+        d,
+        "analysis.mission_recovery.planner",
+        {
+            "enabled", "sources", "source", "modes", "mode", "max_recovery_time_s",
+            "max_recovery_delta_v_m_s", "candidate_count", "simulate_candidates", "orbit_transfer", "lambert",
+        },
+    )
     enabled = _parse_bool(d.get("enabled", False), "analysis.mission_recovery.planner.enabled")
     default_sources = (
         ["analytic_reconstitution", "orbit_transfer"]
@@ -542,6 +617,15 @@ def _parse_orbit_transfer_planner_section(
     sources: list[str],
 ) -> dict[str, Any]:
     d = _as_dict(value, "analysis.mission_recovery.planner.orbit_transfer")
+    _reject_unknown_fields(
+        d,
+        "analysis.mission_recovery.planner.orbit_transfer",
+        {
+            "enabled", "departure_samples", "time_of_flight_samples", "target_anomaly_samples",
+            "min_time_of_flight_s", "max_time_of_flight_s", "short_way", "long_way",
+            "multi_revolution_max", "impulse_epsilon_m_s", "keep_per_time_best",
+        },
+    )
     default_enabled = bool(parent_enabled and "orbit_transfer" in set(sources))
     enabled = _parse_bool(
         d.get("enabled", default_enabled),

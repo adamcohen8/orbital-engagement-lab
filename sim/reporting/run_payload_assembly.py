@@ -320,6 +320,7 @@ class SingleRunPayloadAssembler:
                     key: self._events_through_termination(rows) for key, rows in engine.bridge_hist.items()
                 },
                 object_state_frames=dict(payload.get("object_state_frames", {}) or {}),
+                object_propagation=dict(payload.get("object_propagation", {}) or {}),
                 extra_artifacts=dict(payload.get("extra_artifacts", {}) or {}),
             ),
         )

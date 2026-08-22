@@ -9,10 +9,18 @@ across three estimator paths:
 - Closed-form YA STM relative EKF for the same eccentric-chief dynamics
 - Absolute ECI orbit EKF baseline
 
-Run the bundled `rpo_estimation_comparison` validation suite from the standard
-OEL validation harness.
+The full `rpo_estimation_comparison` harness and its retained evidence are
+private release-validation surfaces. Public checkouts can exercise the shipped
+estimator behavior with:
 
-The suite writes:
+```bash
+python -m pytest sim/tests/test_relative_hcw_ekf.py sim/tests/test_relative_th_ekf.py
+```
+
+The benchmark values below are a bounded historical summary from the private
+release evidence; they are not represented as a rerunnable public harness.
+
+The private suite writes:
 
 - `outputs/validation_harness_rpo_estimation_comparison/validation_harness_report.json`
 - `outputs/validation_harness_rpo_estimation_comparison/validation_harness_report.md`

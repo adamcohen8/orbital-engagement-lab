@@ -26,6 +26,7 @@ from sim.public_api.snapshots import SimulationSnapshot
 from sim.scenarios import ScenarioArtifact
 from sim.scenarios import ScenarioBuilder as ScenarioBuilder
 from sim.scenarios import ValidationIssue as ValidationIssue
+from sim.security import ConfigPathPolicy
 from sim.security.sealed_mode import SealedModePolicy, validate_sealed_mode
 
 
@@ -461,4 +462,5 @@ class HostedSimulationSession(SimulationSession):
 
     @classmethod
     def from_yaml(cls, path: str | Path, **kwargs) -> HostedSimulationSession:
-        return cls(SimulationConfig.from_yaml(path), **kwargs)
+        policy = ConfigPathPolicy.default(config_path=path, allow_config_dir_writes=False)
+        return cls(SimulationConfig.from_yaml(path, path_policy=policy), **kwargs)

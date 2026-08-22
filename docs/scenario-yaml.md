@@ -939,7 +939,8 @@ outputs:
   stats:
     enabled: true
     save_json: true
-    save_full_log: true
+    # Enable only when downstream analysis requires the full JSON histories.
+    save_full_log: false
     # Optional binary NumPy archive for scalable history analysis.
     save_history_npz: false
   plots:
@@ -952,7 +953,7 @@ outputs:
     # Optional override; defaults to outputs.plots.style.
     style: "oel_dark"
   review:
-    enabled: false
+    enabled: true
     detail: "standard"
   resource_limits:
     # Configs may lower this cap; raise it from the caller with
@@ -980,6 +981,34 @@ Set `outputs.review.enabled: true` to write a durable SQLite review store under
 state, primary-pair relative state, thrust, ground-access, metric, event, and
 artifact tables. See [Review Store Contract](review-store.md) for the current
 schema and review CLI/API direction.
+
+Set `outputs.orbital_analysis.enabled: true` to evaluate configured whole-Earth
+conical coverage and directed free-space links after a deterministic run. The
+scenario must declare `simulator.initial_jd_utc`; directional coverage or
+terminals require achieved attitude evidence. See
+[Coverage And Link Scenario Analysis](coverage-link-scenario-analysis.md) for
+the public example, complete fields, artifacts, review tables, and claim
+boundary.
+
+For routine retained evidence, prefer `save_full_log: false` with the standard
+review store enabled. Use `save_full_log: true` only when a documented custom
+analysis needs histories that are not represented in the review schema. To
+remove an existing full log without leaving broken indexes or evidence
+metadata, first write and inspect a content-bound plan, then apply that exact
+plan:
+
+```bash
+.venv/bin/python tools/compact_outputs.py outputs/<run-or-campaign> \
+  --write-plan /tmp/oel-output-compaction-plan.json
+.venv/bin/python tools/compact_outputs.py \
+  --apply-plan /tmp/oel-output-compaction-plan.json
+```
+
+The compactor requires a valid summary, versioned owned-artifact inventory,
+and SQLite review store. It refuses tracked consumers, other output artifacts
+that still reference the full log, active SQLite sidecars, digest drift, and
+review databases referenced by tracked evidence contracts. Each applied run
+retains a content-bound `output_compaction_receipt.json`.
 
 Set `outputs.stats.save_history_npz: true` to write
 `master_run_history.npz`, a compressed NumPy archive containing time histories

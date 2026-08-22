@@ -10,7 +10,60 @@ from sim.config.scenario.primitives import (
 __all__ = [
     '_validate_physics_runtime_settings',
     '_validate_object_references',
+    '_validate_orbital_analysis_references',
 ]
+
+
+def _validate_orbital_analysis_references(cfg: SimulationScenarioConfig) -> None:
+    section = cfg.outputs.orbital_analysis
+    if not bool(section.enabled):
+        return
+    if cfg.simulator.initial_jd_utc is None:
+        raise ValueError("outputs.orbital_analysis requires simulator.initial_jd_utc.")
+    if not section.coverage and not section.directed_links:
+        raise ValueError("outputs.orbital_analysis.enabled requires coverage or directed_links entries.")
+    objects = dict(cfg.objects or {})
+
+    def require_object(object_id: str, path: str) -> object:
+        item = objects.get(object_id)
+        if item is None:
+            raise ValueError(f"{path} references unknown object {object_id!r}.")
+        if not bool(getattr(item, "enabled", False)):
+            raise ValueError(f"{path} references disabled object {object_id!r}.")
+        return item
+
+    attitude_enabled = bool(
+        dict(dict(cfg.simulator.dynamics or {}).get("attitude", {}) or {}).get("enabled", True)
+    )
+    propagation_method = str(
+        dict(dict(cfg.simulator.dynamics or {}).get("orbit", {}) or {}).get(
+            "propagation_method", "special"
+        )
+        or "special"
+    ).strip().lower()
+
+    def require_achieved_attitude(item: object, path: str) -> None:
+        trajectory_only = str(getattr(item, "runtime_profile", "") or "").strip().lower() == "trajectory_only"
+        if propagation_method == "general":
+            raise ValueError(
+                f"{path} requires achieved attitude, but general OGP propagation retains only static "
+                "initial attitude. Use special ONP propagation or an attitude-independent product."
+            )
+        if not attitude_enabled or trajectory_only:
+            raise ValueError(f"{path} requires achieved attitude from enabled non-trajectory-only dynamics.")
+
+    for index, item in enumerate(section.coverage):
+        path = f"outputs.orbital_analysis.coverage[{index}].source_object_id"
+        source = require_object(str(item["source_object_id"]), path)
+        require_achieved_attitude(source, path)
+    for index, item in enumerate(section.directed_links):
+        for endpoint in ("tx", "rx"):
+            object_path = f"outputs.orbital_analysis.directed_links[{index}].{endpoint}_object_id"
+            endpoint_object = require_object(str(item[f"{endpoint}_object_id"]), object_path)
+            terminal = dict(item[f"{endpoint}_terminal"] or {})
+            pattern = dict(terminal.get("pattern", {}) or {})
+            if str(pattern.get("kind", "constant") or "constant").lower() != "constant":
+                require_achieved_attitude(endpoint_object, object_path)
 
 def _validate_physics_runtime_settings(cfg: SimulationScenarioConfig) -> None:
     orbit = dict((cfg.simulator.dynamics or {}).get("orbit", {}) or {})
@@ -126,9 +179,43 @@ def _validate_physics_runtime_settings(cfg: SimulationScenarioConfig) -> None:
             )
 def _validate_object_references(cfg: SimulationScenarioConfig) -> None:
     objects = dict(cfg.objects or {})
+    if not objects:
+        objects = {
+            "rocket": cfg.rocket,
+            "chaser": cfg.chaser,
+            "target": cfg.target,
+        }
+    relative_forms = {
+        "relative_to_target_ric",
+        "relative_ric_rect",
+        "relative_ric_curv",
+        "relative_to_target_cislunar",
+        "relative_cislunar",
+    }
+    enabled_rockets = [
+        object_id
+        for object_id, section in objects.items()
+        if bool(getattr(section, "enabled", False)) and str(getattr(section, "kind", "")).strip().lower() == "rocket"
+    ]
+    relative_dependencies: dict[str, str] = {}
     for object_id, section in objects.items():
         initial_state = dict(getattr(section, "initial_state", {}) or {})
+        if initial_state.get("source") in {"rocket_deployment", "rocket_insertion"} and not enabled_rockets:
+            raise ValueError(
+                f"objects.{object_id}.initial_state.source requires at least one enabled rocket object."
+            )
         reference_id = str(initial_state.get("relative_to", "") or "").strip()
+        selected_forms = relative_forms.intersection(initial_state)
+        if not reference_id and selected_forms:
+            target_defaulted = (
+                bool(selected_forms.intersection({"relative_to_target_ric", "relative_to_target_cislunar"}))
+                or str(object_id) == "chaser"
+            )
+            if target_defaulted and "target" in objects:
+                reference_id = "target"
+            else:
+                path = f"objects.{object_id}.initial_state.relative_to"
+                raise ValueError(f"{path} is required for relative initial-state form '{sorted(selected_forms)[0]}'.")
         if not reference_id:
             continue
         path = f"objects.{object_id}.initial_state.relative_to"
@@ -139,3 +226,25 @@ def _validate_object_references(cfg: SimulationScenarioConfig) -> None:
             raise ValueError(f"{path} references unknown object '{reference_id}'.")
         if not bool(getattr(reference, "enabled", False)):
             raise ValueError(f"{path} references disabled object '{reference_id}'.")
+        if selected_forms:
+            relative_dependencies[str(object_id)] = reference_id
+
+    visiting: set[str] = set()
+    visited: set[str] = set()
+
+    def visit(object_id: str, chain: list[str]) -> None:
+        if object_id in visited:
+            return
+        if object_id in visiting:
+            start = chain.index(object_id)
+            cycle = chain[start:] + [object_id]
+            raise ValueError("Relative initial-state reference cycle: " + " -> ".join(cycle))
+        visiting.add(object_id)
+        reference_id = relative_dependencies.get(object_id)
+        if reference_id in relative_dependencies:
+            visit(str(reference_id), [*chain, str(reference_id)])
+        visiting.remove(object_id)
+        visited.add(object_id)
+
+    for object_id in sorted(relative_dependencies):
+        visit(object_id, [object_id])

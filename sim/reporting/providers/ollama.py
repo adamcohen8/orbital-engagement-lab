@@ -41,7 +41,7 @@ def _call_ollama(
         method="POST",
     )
     with urllib.request.urlopen(request, timeout=timeout_s) as response:
-        raw = response.read().decode("utf-8")
+        raw = _read_bounded_response(response).decode("utf-8")
     payload = json.loads(raw)
     message = dict(payload.get("message", {}) or {})
     content = str(message.get("content", payload.get("response", "")) or "")

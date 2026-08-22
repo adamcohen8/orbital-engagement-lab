@@ -361,18 +361,45 @@ def complete_manifest(
     artifacts: list[str] | None = None,
     error_type: str = "",
 ) -> dict[str, Any]:
+    artifact_paths = list(dict.fromkeys(str(path) for path in list(artifacts or []) if str(path)))
+    artifact_records: list[dict[str, Any]] = []
+    for raw_path in artifact_paths:
+        path = Path(raw_path)
+        if not path.is_file() or path.is_symlink():
+            continue
+        artifact_records.append(
+            {
+                "path": raw_path,
+                "bytes": int(path.stat().st_size),
+                "sha256": _sha256_file(path),
+            }
+        )
     manifest.update(
         {
             "status": status,
             "completed_utc": _utc_now(),
             "cancelled": cancelled,
-            "artifacts": list(artifacts or []),
-            "artifacts_complete": status == "completed" and not cancelled,
+            "artifacts": artifact_paths,
+            "artifact_records": artifact_records,
+            "artifacts_complete": (
+                status == "completed"
+                and not cancelled
+                and bool(artifact_paths)
+                and len(artifact_records) == len(artifact_paths)
+            ),
         }
     )
     if error_type:
         manifest["error_type"] = error_type
     return manifest
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def safe_artifact_id(value: str) -> str:

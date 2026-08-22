@@ -9,7 +9,11 @@ from sim.runtime.architecture import RUNTIME_CONSTRUCTION_FAMILIES, SINGLE_RUN_C
 
 def test_runtime_ownership_map_resolves_implementations_and_facade_exports() -> None:
     names = [family.name for family in RUNTIME_CONSTRUCTION_FAMILIES]
-    capabilities = [capability for family in RUNTIME_CONSTRUCTION_FAMILIES for capability in family.capabilities]
+    capabilities = [
+        capability
+        for family in RUNTIME_CONSTRUCTION_FAMILIES
+        for capability in (*family.capabilities, *family.patch_seams)
+    ]
     assert len(names) == len(set(names))
     assert len(capabilities) == len(set(capabilities))
     for family in RUNTIME_CONSTRUCTION_FAMILIES:
@@ -17,7 +21,11 @@ def test_runtime_ownership_map_resolves_implementations_and_facade_exports() -> 
         facade = importlib.import_module(family.facade)
         for capability in family.capabilities:
             assert callable(getattr(implementation, capability))
+            assert getattr(facade, capability) is getattr(implementation, capability)
+        for capability in family.patch_seams:
+            assert callable(getattr(implementation, capability))
             assert callable(getattr(facade, capability))
+            assert getattr(facade, capability) is not getattr(implementation, capability)
 
 
 def test_single_run_collaborator_modules_are_importable() -> None:

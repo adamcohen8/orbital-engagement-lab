@@ -229,7 +229,9 @@ def save_animation_with_quality(
         raise ValueError("Animation frame values and frame times must have identical lengths.")
     if len(values) > policy.max_frames:
         raise ValueError(f"Animation has {len(values)} frames; the strict policy maximum is {policy.max_frames}.")
-    fps_value = max(float(fps), 1.0)
+    fps_value = float(fps)
+    if not np.isfinite(fps_value) or fps_value <= 0.0:
+        raise ValueError("Animation fps must be positive and finite.")
     duration_s = len(values) / fps_value
     if duration_s > policy.max_duration_s + 1e-9:
         raise ValueError(
@@ -322,6 +324,7 @@ def save_animation_with_quality(
         camera_policy=camera_policy,
         scan=final_scan,
         encoding=encoding,
+        expected_fps=fps_value,
         contact_path=contact_path,
         policy=policy,
     )
@@ -379,9 +382,13 @@ def verify_animation_encoding(
                 with Image.open(target) as image:
                     width, height = (int(value) for value in image.size)
                     frame_count = int(getattr(image, "n_frames", 1))
-                    duration_ms = float(image.info.get("duration", 1000.0 / expected_fps))
-                    actual_fps = 1000.0 / duration_ms if duration_ms > 0.0 else expected_fps
-                    duration = frame_count / actual_fps if actual_fps > 0.0 else None
+                    frame_durations_ms: list[float] = []
+                    for frame_index in range(frame_count):
+                        image.seek(frame_index)
+                        frame_durations_ms.append(float(image.info.get("duration", 1000.0 / expected_fps)))
+                    total_duration_s = sum(frame_durations_ms) / 1000.0
+                    actual_fps = frame_count / total_duration_s if total_duration_s > 0.0 else None
+                    duration = total_duration_s if total_duration_s > 0.0 else None
                     image.seek(max(frame_count - 1, 0))
                     image.convert("RGB").getbbox()
             elif suffix == "mp4":
@@ -554,12 +561,14 @@ def _animation_checks(
     camera_policy: str,
     scan: Mapping[str, Any],
     encoding: AnimationEncodingReport,
+    expected_fps: float,
     contact_path: Path,
     policy: AnimationQualityPolicy,
 ) -> list[dict[str, Any]]:
     times = np.asarray(frame_times_s, dtype=float)
     monotonic = bool(times.size <= 1 or np.all(np.diff(times) >= 0.0))
-    duration = frame_count / max(float(encoding.fps or 1.0), 1e-9)
+    duration = float(encoding.duration_s or (frame_count / max(float(encoding.fps or 1.0), 1e-9)))
+    fps_tolerance = max(0.1, 0.05 * float(expected_fps))
     return [
         {"check_id": "frame_count_within_policy", "passed": frame_count <= policy.max_frames, "value": frame_count},
         {"check_id": "frame_times_monotonic", "passed": monotonic, "value": monotonic},
@@ -585,6 +594,11 @@ def _animation_checks(
             "check_id": "encoded_frame_count",
             "passed": encoding.frame_count == frame_count,
             "value": {"expected": frame_count, "actual": encoding.frame_count},
+        },
+        {
+            "check_id": "encoded_fps",
+            "passed": encoding.fps is not None and abs(float(encoding.fps) - float(expected_fps)) <= fps_tolerance,
+            "value": {"expected": expected_fps, "actual": encoding.fps, "tolerance": fps_tolerance},
         },
         {
             "check_id": "encoded_duration",

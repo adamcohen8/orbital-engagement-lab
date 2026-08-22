@@ -17,6 +17,7 @@ import tarfile
 import tempfile
 import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -83,8 +84,24 @@ def _verify(payload: dict[str, Any], keys_payload: dict[str, Any]) -> bool:
     item = next((entry for entry in items if isinstance(entry, dict) and entry.get("key_id") == key_id), None)
     if item is None:
         return False
+    if bool(item.get("revoked", False)):
+        return False
+    now = datetime.now(timezone.utc)
+    for field, is_lower_bound in (("not_before", True), ("expires_at", False)):
+        raw_time = item.get(field)
+        if raw_time:
+            try:
+                boundary = datetime.fromisoformat(str(raw_time).replace("Z", "+00:00"))
+                if boundary.tzinfo is None:
+                    boundary = boundary.replace(tzinfo=timezone.utc)
+            except ValueError:
+                return False
+            if (is_lower_bound and now < boundary) or (not is_lower_bound and now >= boundary):
+                return False
     modulus = _decode_int(item["n"])
     exponent = _decode_int(item.get("e", "AQAB"))
+    if modulus.bit_length() < 2048 or exponent != 65537:
+        return False
     signature_text = str(signature.get("value", ""))
     raw = signature_text.encode("ascii")
     signature_bytes = base64.urlsafe_b64decode(raw + b"=" * ((4 - len(raw) % 4) % 4))
@@ -146,15 +163,34 @@ def _safe_extract(archive: Path, destination: Path) -> Path:
     return roots[0]
 
 
-def _publish_user_launcher(activation: dict[str, Any]) -> dict[str, Any]:
+def _user_launcher_location() -> tuple[Path, Path]:
     if sys.platform == "win32":
         user_bin = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local")) / "Programs" / "OEL" / "bin"
-        source = Path(activation["launchers"]["windows"])
         target = user_bin / "oel.cmd"
     else:
         user_bin = Path.home() / ".local" / "bin"
-        source = Path(activation["launchers"]["posix"])
         target = user_bin / "oel"
+    return user_bin, target
+
+
+def _preflight_user_launcher() -> None:
+    user_bin, target = _user_launcher_location()
+    if target.exists() or target.is_symlink():
+        managed = target.is_file() and "sim.installation.cli" in target.read_text(
+            encoding="utf-8", errors="ignore"
+        )
+        if not managed:
+            raise RuntimeError(f"Refusing to replace a non-OEL launcher: {target}")
+    existing_parent = next((path for path in (user_bin, *user_bin.parents) if path.exists()), None)
+    if existing_parent is not None and not os.access(existing_parent, os.W_OK):
+        raise RuntimeError(f"User launcher directory is not writable: {existing_parent}")
+
+
+def _publish_user_launcher(activation: dict[str, Any]) -> dict[str, Any]:
+    user_bin, target = _user_launcher_location()
+    source = Path(
+        activation["launchers"]["windows" if sys.platform == "win32" else "posix"]
+    )
     user_bin.mkdir(parents=True, exist_ok=True)
     if target.exists() or target.is_symlink():
         managed = (
@@ -250,6 +286,9 @@ def main(argv: list[str] | None = None) -> int:
                 (args.data_root or paths.data_root).expanduser().resolve(),
                 (args.config_root or paths.config_root).expanduser().resolve(),
             )
+        # Catch deterministic launcher conflicts before install/activation
+        # changes the managed engine or current selector.
+        _preflight_user_launcher()
         result = install_release(
             manifest_path,
             paths=paths,
@@ -258,21 +297,46 @@ def main(argv: list[str] | None = None) -> int:
             profile=args.profile,
             create_runtime=True,
         )
-        activation = activate(str(manifest["version"]), paths=paths)
-        paths.trusted_release_keys.parent.mkdir(parents=True, exist_ok=True)
-        if rendered:
-            paths.trusted_release_keys.write_text(json.dumps(keys, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        activation = None
         channel_configuration = None
-        if args.channel_url:
-            channel_configuration = configure_channel(
-                args.channel_url,
-                edition=str(manifest["edition"]),
-                channel=str(manifest["channel"]),
-                paths=paths,
-                source="official-bootstrap" if not args.developer_unsigned else "developer-bootstrap",
-                allow_local_file=bool(args.developer_unsigned),
+        user_launcher = None
+        try:
+            activation = activate(str(manifest["version"]), paths=paths)
+            paths.trusted_release_keys.parent.mkdir(parents=True, exist_ok=True)
+            if rendered:
+                paths.trusted_release_keys.write_text(json.dumps(keys, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            if args.channel_url:
+                channel_configuration = configure_channel(
+                    args.channel_url,
+                    edition=str(manifest["edition"]),
+                    channel=str(manifest["channel"]),
+                    paths=paths,
+                    source="official-bootstrap" if not args.developer_unsigned else "developer-bootstrap",
+                    allow_local_file=bool(args.developer_unsigned),
+                )
+            user_launcher = _publish_user_launcher(activation)
+        except Exception as exc:
+            print(
+                json.dumps(
+                    {
+                        "status": "partial",
+                        "error": f"{type(exc).__name__}: {exc}",
+                        "installation": result,
+                        "activation": activation,
+                        "channel_configuration": channel_configuration,
+                        "user_launcher": user_launcher,
+                        "recovery": (
+                            "Resolve the reported launcher/channel problem, then rerun this bootstrap; "
+                            "the signed installation step is idempotent. If activation changed current, "
+                            "use the managed rollback command to restore the previous selector."
+                        ),
+                    },
+                    indent=2,
+                    sort_keys=True,
+                ),
+                file=sys.stderr,
             )
-        user_launcher = _publish_user_launcher(activation)
+            raise
         print(
             json.dumps(
                 {

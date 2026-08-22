@@ -217,6 +217,15 @@ class ResourceLimits:
     minimum_propellant_kg: float = 0.0
 
     def __post_init__(self) -> None:
+        values = (
+            self.minimum_battery_soc,
+            self.minimum_available_power_w,
+            self.maximum_temperature_k,
+            self.maximum_storage_fraction,
+            self.minimum_propellant_kg,
+        )
+        if not all(isfinite(float(value)) for value in values):
+            raise ValueError("resource limits must be finite")
         if not 0.0 <= self.minimum_battery_soc <= 1.0:
             raise ValueError("minimum_battery_soc must be in [0, 1]")
         if self.minimum_available_power_w < 0.0 or self.minimum_propellant_kg < 0.0:
@@ -433,9 +442,9 @@ class MomentumUnloadConfig:
             axes.ndim != 2
             or axes.shape != (len(self.wheel_max_momentum_n_m_s), 3)
             or not np.all(np.isfinite(axes))
-            or np.any(np.linalg.norm(axes, axis=1) <= 0.0)
+            or not np.allclose(np.linalg.norm(axes, axis=1), 1.0, rtol=1.0e-9, atol=1.0e-9)
         ):
-            raise ValueError("wheel_axes_body must contain one finite nonzero body axis per wheel")
+            raise ValueError("wheel_axes_body must contain one finite unit body axis per wheel")
         if self.gain <= 0.0 or self.max_dipole_a_m2 <= 0.0:
             raise ValueError("momentum unload gain and dipole limit must be positive")
         if (
@@ -557,6 +566,14 @@ class ConjunctionConfig:
     maneuver_lead_time_s: float = 30.0
 
     def __post_init__(self) -> None:
+        values = (
+            self.keep_out_radius_m,
+            self.prediction_horizon_s,
+            self.avoidance_delta_v_m_s,
+            self.maneuver_lead_time_s,
+        )
+        if not all(isfinite(float(value)) for value in values):
+            raise ValueError("conjunction thresholds must be finite")
         if self.keep_out_radius_m <= 0.0 or self.prediction_horizon_s <= 0.0:
             raise ValueError("conjunction radius and horizon must be positive")
         if self.avoidance_delta_v_m_s <= 0.0 or self.maneuver_lead_time_s <= 0.0:

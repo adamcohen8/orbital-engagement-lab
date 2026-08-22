@@ -27,11 +27,14 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Smoke static preview
         run: |
           node --check web/rpo-trainer-preview/src/app.js
+          node --check web/rpo-trainer-preview/src/preview-contract.js
+          node --check web/rpo-trainer-preview/src/preview-physics.js
+          node --test web/rpo-trainer-preview/tests/*.test.mjs
           python -m http.server 8765 --directory web/rpo-trainer-preview >/tmp/oel-pages-preview.log 2>&1 &
           server_pid=$!
           trap 'kill "$server_pid"' EXIT
@@ -40,6 +43,8 @@ jobs:
           curl -fsS http://127.0.0.1:8765/src/styles.css -o /tmp/oel-preview-styles.css
           curl -fsS http://127.0.0.1:8765/src/app.js -o /tmp/oel-preview-app.js
           curl -fsS http://127.0.0.1:8765/src/competition/arcade-engine.js -o /tmp/oel-preview-arcade-engine.js
+          curl -fsS http://127.0.0.1:8765/src/preview-contract.js -o /tmp/oel-preview-contract.js
+          curl -fsS http://127.0.0.1:8765/src/preview-physics.js -o /tmp/oel-preview-physics.js
           curl -fsS http://127.0.0.1:8765/assets/01_insert_coin_to_orbit.wav -o /tmp/oel-preview-selector-music.wav
           curl -fsS http://127.0.0.1:8765/assets/10_training_grid_sunrise.wav -o /tmp/oel-preview-tutorial-music.wav
           curl -fsS http://127.0.0.1:8765/assets/06_casting_the_orbit_line.wav -o /tmp/oel-preview-sandbox-music.wav
@@ -47,6 +52,8 @@ jobs:
           curl -fsS http://127.0.0.1:8765/assets/28_high_shred_boss_riff.wav -o /tmp/oel-preview-boss-music.wav
           grep -q "RPO Trainer Preview" /tmp/oel-preview-index.html
           grep -q "Pursuit Arcade" /tmp/oel-preview-index.html
+          grep -q 'data-level-option="rpoDuel"' /tmp/oel-preview-index.html
+          grep -q 'level-beta-badge">Beta' /tmp/oel-preview-index.html
           grep -q "createPursuitArcadeSession" /tmp/oel-preview-arcade-engine.js
           grep -q "M Music: ON" /tmp/oel-preview-index.html
           test -s /tmp/oel-preview-selector-music.wav
@@ -56,13 +63,13 @@ jobs:
           test -s /tmp/oel-preview-boss-music.wav
 
       - name: Configure Pages
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
 
       - name: Upload static site
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
         with:
           path: web/rpo-trainer-preview
 
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4

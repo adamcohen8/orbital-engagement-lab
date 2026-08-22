@@ -187,18 +187,11 @@ def _legendre_normalized_hpop(
     lat_gc_rad: float,
     compiled: CompiledSphericalHarmonics | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
-    if (
-        compiled is not None
-        and compiled.legendre_pnm_scratch.shape == (n_max + 1, m_max + 1)
-        and compiled.legendre_dpnm_scratch.shape == (n_max + 1, m_max + 1)
-    ):
-        pnm = compiled.legendre_pnm_scratch
-        dpnm = compiled.legendre_dpnm_scratch
-        pnm.fill(0.0)
-        dpnm.fill(0.0)
-    else:
-        pnm = np.zeros((n_max + 1, m_max + 1), dtype=float)
-        dpnm = np.zeros((n_max + 1, m_max + 1), dtype=float)
+    # Compiled coefficient/recurrence data are immutable and shareable.  The
+    # Legendre work arrays are evaluation-local so concurrent evaluations of a
+    # single compiled environment cannot overwrite one another.
+    pnm = np.zeros((n_max + 1, m_max + 1), dtype=float)
+    dpnm = np.zeros((n_max + 1, m_max + 1), dtype=float)
 
     sin_f = float(np.sin(lat_gc_rad))
     cos_f = float(np.cos(lat_gc_rad))
@@ -586,8 +579,9 @@ def configure_spherical_harmonics_env(base_env: dict | None, orbit_cfg: dict | N
         env["drag_eop_path"] = str(drag_eop_path.resolve())
     if orbit.get("drag_earth_rotation_rad_s") is not None:
         env["drag_earth_rotation_rad_s"] = float(orbit["drag_earth_rotation_rad_s"])
+    drag_uses_eop = normalize_frame_model(env.get("drag_frame_model", "simple")) == FRAME_MODEL_IAU76_80_EOP
     if not bool(sh.get("enabled", False)):
-        if str(env.get("drag_frame_model", "")).strip().lower() == "hpop_like" and env.get("drag_eop_path") is None:
+        if drag_uses_eop and env.get("drag_eop_path") is None:
             default_eop = (
                 Path(__file__).resolve().parents[3]
                 / "validation/High Precision Orbit Propagator_4-2/High Precision Orbit Propagator_4.2.2/EOP-All.txt"
@@ -727,7 +721,7 @@ def configure_spherical_harmonics_env(base_env: dict | None, orbit_cfg: dict | N
 
     if sh.get("fd_step_km") is not None:
         env["spherical_harmonics_fd_step_km"] = float(sh["fd_step_km"])
-    if str(env.get("drag_frame_model", "")).strip().lower() == "hpop_like" and env.get("drag_eop_path") is None:
+    if drag_uses_eop and env.get("drag_eop_path") is None:
         if env.get("spherical_harmonics_eop_path") is not None:
             env["drag_eop_path"] = str(env["spherical_harmonics_eop_path"])
         else:
@@ -750,18 +744,24 @@ def parse_spherical_harmonic_terms(raw_terms: list[dict | SphericalHarmonicTerm]
     if not raw_terms:
         return []
     out: list[SphericalHarmonicTerm] = []
+    seen: set[tuple[int, int]] = set()
     for i, item in enumerate(raw_terms):
         if isinstance(item, SphericalHarmonicTerm):
-            out.append(item)
-            continue
-        if not isinstance(item, dict):
-            raise ValueError(f"spherical harmonic term index {i} must be a dict or SphericalHarmonicTerm.")
-        n = int(item.get("n", -1))
-        m = int(item.get("m", -1))
-        c_nm = float(item.get("c_nm", item.get("c", 0.0)))
-        s_nm = float(item.get("s_nm", item.get("s", 0.0)))
-        normalized = bool(item.get("normalized", False))
-        out.append(SphericalHarmonicTerm(n=n, m=m, c_nm=c_nm, s_nm=s_nm, normalized=normalized))
+            term = item
+        else:
+            if not isinstance(item, dict):
+                raise ValueError(f"spherical harmonic term index {i} must be a dict or SphericalHarmonicTerm.")
+            n = int(item.get("n", -1))
+            m = int(item.get("m", -1))
+            c_nm = float(item.get("c_nm", item.get("c", 0.0)))
+            s_nm = float(item.get("s_nm", item.get("s", 0.0)))
+            normalized = bool(item.get("normalized", False))
+            term = SphericalHarmonicTerm(n=n, m=m, c_nm=c_nm, s_nm=s_nm, normalized=normalized)
+        key = (int(term.n), int(term.m))
+        if key in seen:
+            raise ValueError(f"Duplicate spherical harmonic coefficient for (n, m)={key} at term index {i}.")
+        seen.add(key)
+        out.append(term)
     return out
 
 

@@ -60,6 +60,7 @@ Start here when you already know the kind of work you want to run.
 | Migrate a scenario config explicitly | [Scenario Config Migrations](config-migrations.md) |
 | Install in an air-gapped environment | [Offline Installation](offline-installation.md) |
 | Inspect completed outputs | [Review Store Contract](review-store.md) |
+| Analyze whole-Earth coverage or directed links | [Coverage And Link Scenario Analysis](coverage-link-scenario-analysis.md) |
 | Make custom tables or plots from a run | [Custom Analysis](custom-analysis.md) |
 | Configure built-in figures | [Plotting](plotting.md) |
 | Create and QA agent-native review animations | [Animation Quality Contract](animation-quality-contract.md) |

@@ -2,6 +2,28 @@ from __future__ import annotations
 
 from typing import Any
 
+_PATH_VALUE_FIELDS = {
+    "output_dir",
+    "summary_json",
+    "prompt_file",
+    "eop_path",
+    "coeff_path",
+    "source_path",
+    "geometry_profile_path",
+    "area_profile_path",
+    "attitude_area_profile_path",
+    "profile_path",
+}
+
+
+def _reject_path_parameter(path: str) -> None:
+    terminal = str(path).rsplit(".", 1)[-1].split("[", 1)[0]
+    if terminal in _PATH_VALUE_FIELDS or terminal.endswith("_file"):
+        raise ValueError(
+            f"Parameter path '{path}' targets a filesystem location. "
+            "Batch and sweep parameters may not change config input/output paths."
+        )
+
 
 def deep_set(root: dict[str, Any], path: str, value: Any) -> None:
     parts = path.split(".")
@@ -81,6 +103,7 @@ def object_synced_parameter_paths(root: dict[str, Any], path: str) -> list[str]:
 
 
 def set_parameter_path_value(root: dict[str, Any], path: str, value: Any) -> None:
+    _reject_path_parameter(path)
     synced_paths = object_synced_parameter_paths(root, path)
     existing_paths = [synced_path for synced_path in synced_paths if path_exists(root, synced_path)]
     if not existing_paths:

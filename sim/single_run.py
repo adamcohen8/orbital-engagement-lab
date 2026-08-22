@@ -331,6 +331,11 @@ class _SingleRunEngine:
         self.reentry_object_ids = self._resolve_reentry_object_ids()
         self.reentry_active_by_object = {aid: False for aid in self.reentry_object_ids}
 
+        relative_forms = {
+            "relative_to_target_ric", "relative_ric_rect", "relative_ric_curv",
+            "relative_to_target_cislunar", "relative_cislunar",
+        }
+        pending_relative: dict[str, tuple[Any, dict[str, Any], str]] = {}
         for aid, agent in self.agents.items():
             if agent.kind != "satellite" or agent.deploy_source in {"rocket_deployment", "rocket_insertion"}:
                 continue
@@ -338,9 +343,22 @@ class _SingleRunEngine:
                 continue
             agent_cfg = self.object_configs.get(aid)
             initial_state = dict(getattr(agent_cfg, "initial_state", {}) or {})
+            if not relative_forms.intersection(initial_state):
+                continue
             reference_id = str(relative_reference_for_object(cfg, aid) or "").strip()
-            reference = self.agents.get(reference_id) if reference_id else None
-            if reference is not None:
+            pending_relative[aid] = (agent, initial_state, reference_id)
+        while pending_relative:
+            ready = sorted(
+                aid for aid, (_agent, _state, reference_id) in pending_relative.items()
+                if reference_id not in pending_relative
+            )
+            if not ready:
+                raise ValueError("Relative initial-state references contain an unresolved cycle.")
+            for aid in ready:
+                agent, initial_state, reference_id = pending_relative.pop(aid)
+                reference = self.agents.get(reference_id)
+                if reference is None:
+                    raise ValueError(f"Relative initial-state reference {reference_id!r} is unavailable.")
                 _apply_relative_init_from_reference(agent=agent, reference=reference, initial_state=initial_state)
                 _apply_relative_cislunar_init_from_reference(
                     agent=agent,
@@ -383,7 +401,13 @@ class _SingleRunEngine:
                     rng=np.random.default_rng(int(rng.integers(0, 2**31 - 1))),
                 )
         initial_world_truth = {
-            aid: agent.truth for aid, agent in self.agents.items() if agent.kind == "satellite" and agent.active
+            aid: (
+                agent.truth.copy()
+                if agent.kind == "satellite"
+                else _rocket_state_to_truth(agent.rocket_state).copy()
+            )
+            for aid, agent in self.agents.items()
+            if agent.active
         }
         for _aid, agent in self.agents.items():
             if agent.kind == "satellite" and agent.active and agent.flight_software_runtime is not None:
@@ -539,7 +563,13 @@ class _SingleRunEngine:
                             self.rocket_metric_hists[metric_key][0] = float(metric_value)
             self._record_reentry_metrics(aid=aid, truth=truth, sample_index=0, dt_s=0.0)
 
-        self.termination_monitor.check_reentry(t_s=float(self.t_s[0]))
+        # Satellites may arrive invalidly inside Earth and must fail at the
+        # initial sample. Launch vehicles legitimately begin on the pad at the
+        # surface, so their impact policy starts after the first propagation.
+        if not self.termination_monitor.check_earth_impact(
+            t_s=float(self.t_s[0]), include_rockets=False
+        ):
+            self.termination_monitor.check_reentry(t_s=float(self.t_s[0]))
         self._emit_step_callback(0)
         self.object_step_executor = self._build_object_step_executor()
 
@@ -1172,7 +1202,11 @@ class _SingleRunEngine:
 
         snapshot_t0 = perf_counter()
         world_truth_start = {
-            aid: (agent.truth if agent.kind == "satellite" else _rocket_state_to_truth(agent.rocket_state))
+            aid: (
+                agent.truth.copy()
+                if agent.kind == "satellite"
+                else _rocket_state_to_truth(agent.rocket_state).copy()
+            )
             for aid, agent in self.agents.items()
             if agent.active
         }
