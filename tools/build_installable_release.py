@@ -235,6 +235,7 @@ def _collect_supply_chain_evidence(
         raise ValueError(f"Supply-chain evidence version {gate_version!r} does not match release {version!r}.")
     required_artifacts = {
         "pip-install-report.json",
+        "build-install-report.json",
         "pip-check.txt",
         "wheel-inventory.json",
         "sbom.cdx.json",
