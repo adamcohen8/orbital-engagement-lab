@@ -45,6 +45,8 @@ Default public/runtime tracks:
   navigation pings, wide lunar pads, and a slower far-side cockpit feel.
 - `33_amber_terminator_demo.wav`: warm amber-cone cue for the GEO Sun-angle
   inspection lesson.
+- `39_perigee_afterburner_demo.wav`: high-energy Perigee Afterburner loop for
+  the browser-native RPO Duel Beta.
 
 Additional experimental or alternate WAVs may exist in private/local workspaces,
 but they are not included in the default public distribution unless the game

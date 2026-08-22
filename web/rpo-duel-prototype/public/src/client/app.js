@@ -1,16 +1,28 @@
 import {
   DUEL_CAMERA_MODES,
+  DUEL_VISUAL_TIMING,
+  captureRingStyle,
   duelPlotFrame,
+  duelPlotSpan,
+  interpolateDuelRound,
   referenceRelativePair,
   toggleDuelCameraMode,
 } from "./plot-model.js";
 
+const DUEL_MUSIC_SOURCE = "/assets/39_perigee_afterburner_demo.wav";
+const HOSTED_LEVEL_SELECTOR_URL = document.querySelector('meta[name="oel-level-selector-url"]')?.content.trim()
+  || "https://orbital-engagement-lab.vercel.app/";
+const duelMusic = new Audio(DUEL_MUSIC_SOURCE);
+duelMusic.loop = true;
+duelMusic.preload = "none";
+duelMusic.volume = 0.65;
+
 const elements = Object.fromEntries([
-  "landing-view", "game-view", "connection-pill", "create-tab", "join-tab", "create-form", "join-form",
-  "create-name", "join-name", "join-code", "setup-error", "room-code", "round-label", "role-label", "time-label",
+  "landing-view", "game-view", "create-tab", "join-tab", "computer-tab", "create-form", "join-form",
+  "computer-form", "create-name", "join-name", "computer-name", "join-code", "setup-error", "room-code", "round-label", "role-label", "time-label",
   "auto-time", "player-one-card", "player-two-card", "range-label", "speed-label", "dv-label", "phase-overlay",
-  "phase-kicker", "phase-title", "phase-detail", "copy-invite", "own-connection-dot", "own-connection-label",
-  "opponent-connection-dot", "opponent-connection-label", "ri-canvas", "rc-canvas", "camera-toggle", "toast", "leave-room",
+  "phase-kicker", "phase-title", "phase-detail", "copy-invite", "match-actions", "play-again", "return-lobby", "own-connection-dot", "own-connection-label",
+  "opponent-connection-dot", "opponent-connection-label", "ri-canvas", "rc-canvas", "camera-toggle", "music-toggle", "level-selector-link", "toast",
 ].map((id) => [id, document.getElementById(id)]));
 
 const state = {
@@ -27,9 +39,14 @@ const state = {
   controls: { r: 0, i: 0, c: 0 },
   pressedKeys: new Set(),
   trail: [],
+  renderFrames: [],
+  plotViewports: new Map(),
   lastTrailTick: -1,
   lastRoundIndex: null,
   cameraMode: DUEL_CAMERA_MODES.REFERENCE,
+  musicEnabled: true,
+  musicRequested: false,
+  musicAvailable: true,
 };
 
 const keyBindings = {
@@ -40,15 +57,27 @@ const keyBindings = {
 
 restoreSession();
 populateInviteFromUrl();
+configureLevelSelectorLink();
 wireSetup();
 wireControls();
 paintCameraMode();
-window.addEventListener("resize", drawPlots);
+paintMusicMode();
+duelMusic.addEventListener("error", () => {
+  state.musicAvailable = false;
+  paintMusicMode();
+});
+window.addEventListener("resize", () => drawPlots());
 requestAnimationFrame(renderLoop);
+
+function configureLevelSelectorLink() {
+  const localHost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+  elements["level-selector-link"].href = localHost ? "/trainer/" : HOSTED_LEVEL_SELECTOR_URL;
+}
 
 function wireSetup() {
   elements["create-tab"].addEventListener("click", () => selectTab("create"));
   elements["join-tab"].addEventListener("click", () => selectTab("join"));
+  elements["computer-tab"].addEventListener("click", () => selectTab("computer"));
   elements["create-form"].addEventListener("submit", async (event) => {
     event.preventDefault();
     const rounds = Number(new FormData(event.currentTarget).get("rounds"));
@@ -59,23 +88,39 @@ function wireSetup() {
     const room = cleanRoomCode(elements["join-code"].value);
     await submitRoom(`/api/rooms/${room}/join`, { name: elements["join-name"].value });
   });
+  elements["computer-form"].addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const rounds = Number(new FormData(event.currentTarget).get("rounds"));
+    await submitRoom("/api/rooms", {
+      name: elements["computer-name"].value,
+      regulation_rounds: rounds,
+      opponent: "computer",
+    });
+  });
   elements["room-code"].addEventListener("click", copyInvite);
   elements["copy-invite"].addEventListener("click", copyInvite);
-  elements["leave-room"].addEventListener("click", () => returnToLanding("Left room."));
+  elements["play-again"].addEventListener("click", requestRematch);
+  elements["return-lobby"].addEventListener("click", returnToLobby);
 }
 
 function selectTab(tab) {
   const create = tab === "create";
+  const join = tab === "join";
+  const computer = tab === "computer";
   elements["create-tab"].classList.toggle("active", create);
   elements["create-tab"].setAttribute("aria-selected", String(create));
-  elements["join-tab"].classList.toggle("active", !create);
-  elements["join-tab"].setAttribute("aria-selected", String(!create));
+  elements["join-tab"].classList.toggle("active", join);
+  elements["join-tab"].setAttribute("aria-selected", String(join));
+  elements["computer-tab"].classList.toggle("active", computer);
+  elements["computer-tab"].setAttribute("aria-selected", String(computer));
   elements["create-form"].classList.toggle("hidden", !create);
-  elements["join-form"].classList.toggle("hidden", create);
+  elements["join-form"].classList.toggle("hidden", !join);
+  elements["computer-form"].classList.toggle("hidden", !computer);
   elements["setup-error"].textContent = "";
 }
 
 async function submitRoom(path, body) {
+  requestMusicStart();
   elements["setup-error"].textContent = "";
   document.querySelectorAll(".primary-button").forEach((button) => { button.disabled = true; });
   try {
@@ -95,6 +140,7 @@ async function submitRoom(path, body) {
 }
 
 function enterRoom(roomCode, token, playerId) {
+  requestMusicStart();
   document.body.classList.add("duel-active");
   state.roomCode = roomCode;
   state.token = token;
@@ -112,7 +158,6 @@ function enterRoom(roomCode, token, playerId) {
 function connectSocket() {
   if (!state.roomCode || !state.token || state.socket?.readyState === WebSocket.OPEN) return;
   clearTimeout(state.reconnectTimer);
-  setConnectionPill("CONNECTING", "warn");
   const scheme = location.protocol === "https:" ? "wss:" : "ws:";
   const socket = new WebSocket(
     `${scheme}//${location.host}/ws?room=${encodeURIComponent(state.roomCode)}`,
@@ -122,7 +167,6 @@ function connectSocket() {
   socket.addEventListener("open", () => {
     state.reconnectAttempts = 0;
     state.lastPongAt = Date.now();
-    setConnectionPill("LIVE", "good");
     sendControls(true);
     clearInterval(state.heartbeatTimer);
     state.heartbeatTimer = setInterval(() => {
@@ -160,7 +204,6 @@ function connectSocket() {
 }
 
 function scheduleReconnect() {
-  setConnectionPill("RECONNECTING", "warn");
   const delay = Math.min(750 * 2 ** state.reconnectAttempts, 8000);
   state.reconnectAttempts += 1;
   clearTimeout(state.reconnectTimer);
@@ -181,23 +224,36 @@ function returnToLanding(message = "") {
   state.token = "";
   state.playerId = "";
   state.snapshot = null;
+  state.sequence = 0;
+  state.lastPongAt = 0;
   state.reconnectAttempts = 0;
+  state.trail = [];
+  state.renderFrames = [];
+  state.plotViewports.clear();
+  state.lastTrailTick = -1;
+  state.lastRoundIndex = null;
+  state.cameraMode = DUEL_CAMERA_MODES.REFERENCE;
   document.body.classList.remove("duel-active");
   elements["game-view"].classList.add("hidden");
   elements["landing-view"].classList.remove("hidden");
+  elements["play-again"].disabled = false;
+  elements["play-again"].textContent = "Play Again";
+  paintCameraMode();
+  selectTab("create");
   const url = new URL(window.location.href);
   url.searchParams.delete("room");
   history.replaceState(null, "", url);
   elements["setup-error"].textContent = message;
-  setConnectionPill("OFFLINE", "warn");
 }
 
 function acceptSnapshot(snapshot) {
+  recordRenderSnapshot(snapshot, performance.now());
   state.snapshot = snapshot;
   state.playerId = snapshot.you?.id || state.playerId;
   const roundIndex = snapshot.series?.round_index ?? null;
   if (roundIndex !== state.lastRoundIndex) {
     state.trail = [];
+    state.plotViewports.clear();
     state.lastTrailTick = -1;
     state.lastRoundIndex = roundIndex;
   }
@@ -232,7 +288,7 @@ function updateUi(snapshot) {
   const own = players.find((player) => player.id === state.playerId);
   const opponent = players.find((player) => player.id !== state.playerId);
   updateConnectionLine("own", own, "YOU");
-  updateConnectionLine("opponent", opponent, "OPPONENT");
+  updateConnectionLine("opponent", opponent, opponent?.kind === "computer" ? "COMPUTER" : "OPPONENT");
   const controllable = snapshot.phase === "active" && own?.connected && !series?.round?.terminal;
   document.querySelectorAll(".thrust-button").forEach((button) => { button.disabled = !controllable; });
   if (!controllable && Object.values(state.controls).some(Boolean)) neutralizeControls(true);
@@ -244,8 +300,8 @@ function updateOverlay(snapshot, own, opponent) {
   const overlay = elements["phase-overlay"];
   const series = snapshot.series;
   overlay.classList.toggle("hidden", snapshot.phase === "active");
-  elements["copy-invite"].classList.toggle("hidden", snapshot.phase !== "waiting");
-  elements["leave-room"].classList.toggle("hidden", snapshot.phase !== "complete");
+  elements["copy-invite"].classList.toggle("hidden", snapshot.phase !== "waiting" || snapshot.match_mode === "computer");
+  elements["match-actions"].classList.toggle("hidden", snapshot.phase !== "complete");
   if (snapshot.phase === "waiting") {
     setOverlay("ROOM READY", "Waiting for opponent", "Share the invite link or room code to begin.");
   } else if (snapshot.phase === "countdown") {
@@ -255,7 +311,15 @@ function updateOverlay(snapshot, own, opponent) {
     setOverlay("ROUND COMPLETE", `${winner?.name || "Player"} wins`, `${series.round.terminal_reason} Next geometry in ${Math.ceil(snapshot.phase_remaining_ms / 1000)}…`);
   } else if (snapshot.phase === "complete") {
     const winner = snapshot.players.find((player) => player.id === series.match_winner_player_id);
-    setOverlay("MATCH COMPLETE", series.match_draw ? "Draw" : `${winner?.name || "Player"} wins`, scoreSentence(snapshot.players, series.score));
+    const waiting = snapshot.rematch?.your_ready && snapshot.match_mode !== "computer";
+    const score = scoreSentence(snapshot.players, series.score);
+    setOverlay(
+      waiting ? "REMATCH READY" : "MATCH COMPLETE",
+      series.match_draw ? "Draw" : `${winner?.name || "Player"} wins`,
+      waiting ? `${score} · Waiting for opponent…` : score,
+    );
+    elements["play-again"].disabled = Boolean(snapshot.rematch?.your_ready);
+    elements["play-again"].textContent = waiting ? "Waiting…" : "Play Again";
   } else if (!own?.connected || !opponent?.connected) {
     setOverlay("CONNECTION", "Reconnecting", "Your spacecraft is coasting while this device reconnects.");
   }
@@ -267,8 +331,60 @@ function setOverlay(kicker, title, detail) {
   elements["phase-detail"].textContent = detail;
 }
 
+function requestRematch() {
+  if (state.socket?.readyState !== WebSocket.OPEN || state.snapshot?.phase !== "complete") return;
+  elements["play-again"].disabled = true;
+  state.socket.send(JSON.stringify({ type: "rematch" }));
+}
+
+function returnToLobby() {
+  const ownName = state.snapshot?.you?.name || "";
+  const socket = state.socket;
+  state.socket = null;
+  socket?.close(1000, "Returned to lobby");
+  clearTimeout(state.reconnectTimer);
+  clearInterval(state.heartbeatTimer);
+  state.reconnectTimer = null;
+  state.heartbeatTimer = null;
+  neutralizeControls(false);
+  sessionStorage.removeItem("rpo-duel-session");
+  state.roomCode = "";
+  state.token = "";
+  state.playerId = "";
+  state.snapshot = null;
+  state.sequence = 0;
+  state.lastPongAt = 0;
+  state.reconnectAttempts = 0;
+  state.trail = [];
+  state.renderFrames = [];
+  state.plotViewports.clear();
+  state.lastTrailTick = -1;
+  state.lastRoundIndex = null;
+  state.cameraMode = DUEL_CAMERA_MODES.REFERENCE;
+  document.body.classList.remove("duel-active");
+  elements["game-view"].classList.add("hidden");
+  elements["landing-view"].classList.remove("hidden");
+  elements["create-name"].value = ownName;
+  elements["join-name"].value = ownName;
+  elements["computer-name"].value = ownName;
+  elements["join-code"].value = "";
+  elements["play-again"].disabled = false;
+  elements["play-again"].textContent = "Play Again";
+  paintCameraMode();
+  selectTab("create");
+  const url = new URL(window.location.href);
+  url.searchParams.delete("room");
+  history.replaceState(null, "", url);
+}
+
 function wireControls() {
   window.addEventListener("keydown", (event) => {
+    resumeMusic();
+    if (event.code === "KeyM" && !event.repeat && !isTyping()) {
+      event.preventDefault();
+      toggleMusic();
+      return;
+    }
     if (event.code === "KeyC" && !event.repeat && !isTyping()) {
       event.preventDefault();
       toggleCamera();
@@ -281,6 +397,8 @@ function wireControls() {
     updateAxisFromInputs(binding[0]);
   });
   elements["camera-toggle"].addEventListener("click", toggleCamera);
+  elements["music-toggle"].addEventListener("click", toggleMusic);
+  window.addEventListener("pointerdown", resumeMusic, { passive: true });
   window.addEventListener("keyup", (event) => {
     const binding = keyBindings[event.code];
     if (!binding) return;
@@ -329,8 +447,33 @@ function wireControls() {
   document.addEventListener("visibilitychange", () => { if (document.hidden) neutralizeControls(true); });
 }
 
+function requestMusicStart() {
+  state.musicRequested = true;
+  resumeMusic();
+}
+
+function resumeMusic() {
+  if (!state.musicRequested || !state.musicEnabled || !state.musicAvailable || !duelMusic.paused) return;
+  duelMusic.play().catch(() => {});
+}
+
+function toggleMusic() {
+  state.musicEnabled = !state.musicEnabled;
+  if (state.musicEnabled) requestMusicStart();
+  else duelMusic.pause();
+  paintMusicMode();
+}
+
+function paintMusicMode() {
+  const button = elements["music-toggle"];
+  button.disabled = !state.musicAvailable;
+  button.textContent = state.musicAvailable ? `M · MUSIC ${state.musicEnabled ? "ON" : "OFF"}` : "M · MUSIC N/A";
+  button.setAttribute("aria-pressed", String(state.musicAvailable && state.musicEnabled));
+}
+
 function toggleCamera() {
   state.cameraMode = toggleDuelCameraMode(state.cameraMode);
+  state.plotViewports.clear();
   paintCameraMode();
   drawPlots();
 }
@@ -379,14 +522,14 @@ function paintButtons() {
   }
 }
 
-function drawPlots() {
-  const round = state.snapshot?.series?.round;
-  const frame = duelPlotFrame(round, state.trail, state.cameraMode);
-  drawPlot(elements["ri-canvas"], frame, "i_km", "r_km", "I", "R");
-  drawPlot(elements["rc-canvas"], frame, "c_km", "r_km", "C", "R");
+function drawPlots(now = performance.now()) {
+  const round = visualRound(now);
+  const frame = duelPlotFrame(round, visualTrail(round), state.cameraMode);
+  drawPlot(elements["ri-canvas"], frame, "i_km", "r_km", "I", "R", now);
+  drawPlot(elements["rc-canvas"], frame, "c_km", "r_km", "C", "R", now);
 }
 
-function drawPlot(canvas, frame, xKey, yKey, xLabel, yLabel) {
+function drawPlot(canvas, frame, xKey, yKey, xLabel, yLabel, now) {
   if (!canvas) return;
   const rect = canvas.getBoundingClientRect();
   if (rect.width < 2 || rect.height < 2) return;
@@ -400,41 +543,29 @@ function drawPlot(canvas, frame, xKey, yKey, xLabel, yLabel) {
   const h = rect.height;
   ctx.clearRect(0, 0, w, h);
   const pairMode = frame.cameraMode === DUEL_CAMERA_MODES.CURRENT_PAIR;
-  const centerX = frame.cameraCenter[xKey];
-  const centerY = frame.cameraCenter[yKey];
-  const points = pairMode
-    ? [frame.target, frame.chaser]
-    : [
-        ...frame.targetTrail,
-        ...frame.chaserTrail,
-        ...frame.targetProjection,
-        ...frame.chaserProjection,
-        frame.target,
-        frame.chaser,
-      ];
   const captureRadiusKm = Number(state.snapshot?.series?.round?.capture_range_km) || .1;
-  const extent = Math.max(
-    pairMode ? .12 : 1,
-    ...points.flatMap((sample) => [
-      Math.abs((sample?.[xKey] || 0) - centerX),
-      Math.abs((sample?.[yKey] || 0) - centerY),
-    ]),
-    Math.abs(frame.target[xKey] - centerX) + captureRadiusKm,
-    Math.abs(frame.target[yKey] - centerY) + captureRadiusKm,
-  );
-  const span = niceExtent(extent * 1.22);
+  const targetViewport = {
+    centerX: frame.cameraCenter[xKey],
+    centerY: frame.cameraCenter[yKey],
+    span: duelPlotSpan(frame, xKey, yKey, captureRadiusKm),
+  };
+  const viewport = pairMode
+    ? smoothPlotViewport(`${xKey}:${yKey}`, targetViewport, now)
+    : targetViewport;
+  const { centerX, centerY, span } = viewport;
   const pad = Math.max(22, Math.min(w, h) * .1);
   const mapX = (value) => pad + (((value - centerX) + span) / (2 * span)) * (w - pad * 2);
   const mapY = (value) => h - pad - (((value - centerY) + span) / (2 * span)) * (h - pad * 2);
 
+  ctx.lineWidth = 1;
+  for (let index = -2; index <= 2; index += 1) {
+    const xValue = centerX + index * span / 2;
+    const yValue = centerY + index * span / 2;
+    ctx.strokeStyle = index === 0 ? "rgba(48,60,76,.95)" : "rgba(30,38,50,.95)";
+    ctx.beginPath(); ctx.moveTo(mapX(xValue), pad); ctx.lineTo(mapX(xValue), h - pad); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(pad, mapY(yValue)); ctx.lineTo(w - pad, mapY(yValue)); ctx.stroke();
+  }
   if (!pairMode) {
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = "rgba(30,38,50,.95)";
-    for (let index = -2; index <= 2; index += 1) {
-      const value = index * span / 2;
-      ctx.beginPath(); ctx.moveTo(mapX(value), pad); ctx.lineTo(mapX(value), h - pad); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(pad, mapY(value)); ctx.lineTo(w - pad, mapY(value)); ctx.stroke();
-    }
     ctx.strokeStyle = "rgba(90,104,124,.95)";
     ctx.beginPath(); ctx.moveTo(mapX(0), pad); ctx.lineTo(mapX(0), h - pad); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(pad, mapY(0)); ctx.lineTo(w - pad, mapY(0)); ctx.stroke();
@@ -444,8 +575,9 @@ function drawPlot(canvas, frame, xKey, yKey, xLabel, yLabel) {
 
   const captureRadiusX = Math.max(3, Math.abs(mapX(frame.target[xKey] + captureRadiusKm) - mapX(frame.target[xKey])));
   const captureRadiusY = Math.max(3, Math.abs(mapY(frame.target[yKey] + captureRadiusKm) - mapY(frame.target[yKey])));
-  ctx.fillStyle = "rgba(245,92,92,.08)";
-  ctx.strokeStyle = "rgba(245,92,92,.72)";
+  const captureStyle = captureRingStyle(ownRole(state.snapshot?.series));
+  ctx.fillStyle = captureStyle.fill;
+  ctx.strokeStyle = captureStyle.stroke;
   ctx.beginPath();
   ctx.ellipse(mapX(frame.target[xKey]), mapY(frame.target[yKey]), captureRadiusX, captureRadiusY, 0, 0, Math.PI * 2);
   ctx.fill(); ctx.stroke();
@@ -453,9 +585,9 @@ function drawPlot(canvas, frame, xKey, yKey, xLabel, yLabel) {
   if (!pairMode) {
     drawPath(ctx, frame.targetTrail, xKey, yKey, mapX, mapY, "rgba(245,92,92,.7)", 1.5);
     drawPath(ctx, frame.chaserTrail, xKey, yKey, mapX, mapY, "rgba(245,205,92,.72)", 1.5);
-    drawPath(ctx, frame.targetProjection, xKey, yKey, mapX, mapY, "rgba(245,92,92,.95)", 2, [8, 6]);
-    drawPath(ctx, frame.chaserProjection, xKey, yKey, mapX, mapY, "rgba(96,174,224,.95)", 2, [8, 6]);
   }
+  drawPath(ctx, frame.targetProjection, xKey, yKey, mapX, mapY, "rgba(245,92,92,.95)", 2, [8, 6]);
+  drawPath(ctx, frame.chaserProjection, xKey, yKey, mapX, mapY, "rgba(96,174,224,.95)", 2, [8, 6]);
 
   drawSatellite(ctx, frame.target, xKey, yKey, mapX, mapY, "#f55c5c", "T");
   drawSatellite(ctx, frame.chaser, xKey, yKey, mapX, mapY, "#f5cd5c", "C");
@@ -464,9 +596,9 @@ function drawPlot(canvas, frame, xKey, yKey, xLabel, yLabel) {
   if (!pairMode) {
     ctx.fillText(`+${xLabel}`, w - pad - 12, mapY(0) - 6);
     ctx.fillText(`+${yLabel}`, mapX(0) + 6, pad + 8);
-    drawProjectionLegend(ctx, w, pad);
   }
-  ctx.fillText(pairMode ? "PAIR · SATELLITES ONLY" : "REFERENCE ORBIT · HCW COAST", pad, 14);
+  drawProjectionLegend(ctx, w, pad);
+  ctx.fillText(pairMode ? "PAIR · HCW COAST" : "REFERENCE ORBIT · HCW COAST", pad, 14);
   ctx.fillText(`${span >= 10 ? span.toFixed(0) : span.toFixed(1)} km`, pad, h - 8);
 }
 
@@ -522,8 +654,8 @@ function drawSatellite(ctx, point, xKey, yKey, mapX, mapY, color, label) {
   ctx.fillText(label, x + 8, y - 8);
 }
 
-function renderLoop() {
-  if (!elements["game-view"].classList.contains("hidden")) drawPlots();
+function renderLoop(now) {
+  if (!elements["game-view"].classList.contains("hidden")) drawPlots(now);
   requestAnimationFrame(renderLoop);
 }
 
@@ -535,7 +667,8 @@ function updatePlayerCard(card, player, score) {
 
 function updateConnectionLine(prefix, player, label) {
   elements[`${prefix}-connection-dot`].classList.toggle("connected", Boolean(player?.connected));
-  elements[`${prefix}-connection-label`].textContent = `${label} · ${player ? (player.connected ? "CONNECTED" : "DISCONNECTED · COASTING") : "WAITING"}`;
+  const ready = player?.kind === "computer" ? "READY" : "CONNECTED";
+  elements[`${prefix}-connection-label`].textContent = `${label} · ${player ? (player.connected ? ready : "DISCONNECTED · COASTING") : "WAITING"}`;
 }
 
 function ownRole(series) {
@@ -567,10 +700,74 @@ function formatDistance(km) {
   return km < 1 ? `${(km * 1000).toFixed(0)} m` : `${km.toFixed(km < 10 ? 2 : 1)} km`;
 }
 
-function niceExtent(value) {
-  const power = 10 ** Math.floor(Math.log10(Math.max(value, .1)));
-  const normalized = value / power;
-  return (normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10) * power;
+function recordRenderSnapshot(snapshot, receivedAtMs) {
+  const previous = state.renderFrames.at(-1);
+  const sameRound = previous?.snapshot?.series?.round_index === snapshot.series?.round_index;
+  const previousTick = previous?.snapshot?.series?.round?.tick;
+  const currentTick = snapshot.series?.round?.tick;
+  const continuous = Boolean(
+    previous
+    && previous.snapshot.phase === "active"
+    && snapshot.phase === "active"
+    && previous.snapshot.speed?.speed_multiple === 200
+    && snapshot.speed?.speed_multiple === 200
+    && sameRound
+    && Number.isFinite(previousTick)
+    && Number.isFinite(currentTick)
+    && currentTick > previousTick
+    && receivedAtMs - previous.receivedAtMs <= DUEL_VISUAL_TIMING.max_interpolation_gap_ms
+  );
+  if (!continuous) {
+    state.renderFrames = [];
+    state.plotViewports.clear();
+  }
+  state.renderFrames.push({ snapshot, receivedAtMs });
+  if (state.renderFrames.length > 5) state.renderFrames.shift();
+}
+
+function visualRound(now) {
+  const authoritative = state.snapshot?.series?.round;
+  if (!authoritative || state.renderFrames.length < 2) return authoritative;
+  const renderAt = now - DUEL_VISUAL_TIMING.render_delay_ms;
+  const first = state.renderFrames[0];
+  if (renderAt <= first.receivedAtMs) return first.snapshot.series.round;
+  for (let index = 1; index < state.renderFrames.length; index += 1) {
+    const current = state.renderFrames[index];
+    if (renderAt > current.receivedAtMs) continue;
+    const previous = state.renderFrames[index - 1];
+    const interval = current.receivedAtMs - previous.receivedAtMs;
+    const alpha = interval > 0 ? (renderAt - previous.receivedAtMs) / interval : 1;
+    return interpolateDuelRound(previous.snapshot.series.round, current.snapshot.series.round, alpha);
+  }
+  return state.renderFrames.at(-1).snapshot.series.round;
+}
+
+function visualTrail(round) {
+  if (!round || !Number.isFinite(round.tick)) return state.trail;
+  const trail = state.trail.filter((sample) => sample.tick <= round.tick);
+  const current = { ...referenceRelativePair(round), tick: round.tick };
+  if (trail.at(-1)?.tick === current.tick) trail[trail.length - 1] = current;
+  else trail.push(current);
+  return trail;
+}
+
+function smoothPlotViewport(key, target, now) {
+  const previous = state.plotViewports.get(key);
+  if (!previous || now - previous.updatedAtMs > DUEL_VISUAL_TIMING.max_interpolation_gap_ms) {
+    const initial = { ...target, updatedAtMs: now };
+    state.plotViewports.set(key, initial);
+    return initial;
+  }
+  const elapsed = Math.max(0, now - previous.updatedAtMs);
+  const alpha = 1 - Math.exp(-elapsed / DUEL_VISUAL_TIMING.camera_smoothing_ms);
+  const smoothed = {
+    centerX: previous.centerX + (target.centerX - previous.centerX) * alpha,
+    centerY: previous.centerY + (target.centerY - previous.centerY) * alpha,
+    span: previous.span + (target.span - previous.span) * alpha,
+    updatedAtMs: now,
+  };
+  state.plotViewports.set(key, smoothed);
+  return smoothed;
 }
 
 async function copyInvite() {
@@ -578,11 +775,6 @@ async function copyInvite() {
   url.searchParams.set("room", state.roomCode);
   try { await navigator.clipboard.writeText(url.toString()); showToast("Invite link copied"); }
   catch { showToast(`Room code: ${state.roomCode}`); }
-}
-
-function setConnectionPill(label, tone) {
-  elements["connection-pill"].textContent = label;
-  elements["connection-pill"].dataset.tone = tone;
 }
 
 function showToast(message) {

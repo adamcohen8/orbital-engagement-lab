@@ -44,11 +44,12 @@ button:focus-visible, input:focus-visible { outline: 2px solid rgb(96, 174, 224)
 .app-shell { width: min(1500px, 100%); min-height: 100dvh; margin: auto; padding: env(safe-area-inset-top) 36px env(safe-area-inset-bottom); }
 .topbar { height: 92px; display: flex; align-items: center; justify-content: space-between; }
 .brand { display: inline-flex; align-items: baseline; color: var(--text); text-decoration: none; font-size: 1.7rem; line-height: 1.2; }
-.brand strong { color: var(--text); }
-.brand small { color: var(--muted); font-size: .72rem; margin-left: 1rem; }
-.pill { border: 1px solid rgb(104, 130, 156); background: rgb(34, 48, 62); padding: 7px 11px; border-radius: 4px; color: rgb(220, 234, 246); font-size: .7rem; }
-.pill[data-tone="good"] { color: var(--green); border-color: rgba(113,224,161,.4); }
-.pill[data-tone="warn"] { color: var(--amber); border-color: rgba(244,186,85,.4); }
+.brand-wordmark { display: flex; align-items: baseline; gap: 1rem; }
+.brand strong { color: var(--text); font-weight: 700; }
+.brand-product { font-size: inherit; }
+.topbar-actions { display: flex; align-items: center; gap: 10px; }
+.level-selector-button { display: inline-grid; min-height: 37px; place-items: center; border: 1px solid rgb(104, 130, 156); border-radius: 4px; background: rgb(20, 27, 36); padding: 7px 11px; color: var(--text); font-size: .7rem; text-decoration: none; text-transform: uppercase; }
+.level-selector-button:hover { border-color: var(--info); background: rgb(28, 48, 66); color: var(--info); }
 
 .landing-view { min-height: calc(100dvh - 168px); display: grid; grid-template-columns: 424px minmax(420px, 1fr); gap: 24px; align-items: stretch; padding: 32px 6px 76px; }
 .hero-copy { border: 1px solid rgb(70, 82, 100); border-radius: 8px; background: var(--hud); padding: 20px; }
@@ -61,7 +62,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid rgb(96, 174, 224)
 .rule-strip span { border: 1px solid rgb(48, 60, 76); border-radius: 8px; background: var(--panel); padding: 14px 16px; color: var(--muted); font-size: .78rem; }
 .rule-strip b { color: var(--text); }
 .setup-card { border: 1px solid rgb(70, 82, 100); border-radius: 8px; background: var(--hud); overflow: hidden; }
-.tab-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 12px; border-bottom: 1px solid rgb(70, 82, 100); }
+.tab-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 12px; border-bottom: 1px solid rgb(70, 82, 100); }
 .tab { min-height: 42px; border: 1px solid rgb(48, 60, 76); border-radius: 8px; background: var(--panel); padding: 10px 18px; color: var(--muted); cursor: pointer; }
 .tab:last-child { border-right: 0; }
 .tab:hover, .tab.active { color: rgb(238, 244, 250); background: rgb(28, 48, 66); border-color: rgb(96, 174, 224); }
@@ -82,6 +83,7 @@ legend { margin-bottom: 9px; }
 .primary-button:disabled { opacity: .5; cursor: wait; }
 .secondary-button { padding: 0 18px; }
 .form-error { min-height: 20px; margin: -10px 28px 20px; color: var(--red); font-size: .78rem; }
+.computer-note { margin: -4px 0 0; color: var(--info); font-size: .72rem; line-height: 1.45; }
 
 .duel-active { overflow: hidden; }
 .duel-active .app-shell { position: relative; width: 100vw; height: 100vh; min-width: 720px; min-height: 560px; max-width: none; overflow: hidden; padding: 0; background: var(--screen); }
@@ -113,15 +115,19 @@ legend { margin-bottom: 9px; }
 .phase-overlay p { margin: 0; color: var(--muted); }
 .phase-overlay > p:first-child { color: var(--info); font-size: 13px; text-transform: uppercase; }
 .phase-overlay strong { font-size: 28px; }
-.phase-overlay .secondary-button { margin-top: 16px; }
+.phase-overlay > .secondary-button { margin-top: 16px; }
+.match-actions { display: flex; justify-content: center; gap: 10px; margin-top: 16px; }
+.match-actions .primary-button, .match-actions .secondary-button { min-width: 150px; padding: 0 18px; }
 
 .duel-hud-panel { position: absolute; left: 36px; right: 36px; bottom: 26px; height: 86px; border: 1px solid var(--stroke-hud); border-radius: 10px; background: var(--hud); color: rgb(235, 240, 245); padding: 10px 16px; font-size: 14px; line-height: 17px; }
 .duel-hud-line { position: absolute; left: 16px; top: 10px; right: 16px; display: flex; align-items: center; justify-content: space-between; gap: 18px; }
 .room-readout { display: flex; align-items: baseline; gap: 10px; color: var(--muted); }
 .room-code { min-height: 24px; border: 0; background: transparent; padding: 0; color: var(--text); font-size: 16px; letter-spacing: .16em; cursor: pointer; }
 .room-code:hover { color: var(--info); }
-.camera-toggle { min-height: 26px; border: 1px solid rgb(82, 110, 136); border-radius: 4px; background: rgb(28, 42, 56); padding: 3px 9px; color: var(--info); font-size: 10px; cursor: pointer; white-space: nowrap; }
-.camera-toggle:hover, .camera-toggle[aria-pressed="true"] { border-color: var(--hint); color: var(--hint); background: rgb(54, 46, 28); }
+.view-toggles { display: flex; align-items: center; justify-content: center; gap: 6px; }
+.camera-toggle, .music-toggle { min-height: 26px; border: 1px solid rgb(82, 110, 136); border-radius: 4px; background: rgb(28, 42, 56); padding: 3px 9px; color: var(--info); font-size: 10px; cursor: pointer; white-space: nowrap; }
+.camera-toggle:hover, .camera-toggle[aria-pressed="true"], .music-toggle:hover, .music-toggle[aria-pressed="true"] { border-color: var(--hint); color: var(--hint); background: rgb(54, 46, 28); }
+.music-toggle:disabled { opacity: .45; cursor: not-allowed; }
 .scoreboard { display: flex; align-items: center; justify-content: end; gap: 11px; }
 .player-score { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; text-transform: uppercase; }
 .player-score b { min-width: 21px; color: var(--text); font-size: 18px; }
@@ -151,16 +157,19 @@ legend { margin-bottom: 9px; }
   body.duel-active { overflow: hidden; touch-action: manipulation; }
   .duel-active .app-shell { display: block; width: min(100vw, 520px); height: 100dvh; min-width: 0; min-height: 0; margin: 0 auto; padding: max(8px, env(safe-area-inset-top)) 8px max(8px, env(safe-area-inset-bottom)); overflow: hidden; }
   .app-shell { padding-left: 8px; padding-right: 8px; }
-  .topbar { height: 58px; }
+  .topbar { height: 72px; gap: 8px; }
   .brand { font-size: 1.05rem; }
-  .brand small { display: none; }
-  .landing-view { min-height: calc(100dvh - 58px); padding: 12px 0 24px; gap: 8px; }
+  .brand-wordmark { display: grid; gap: 1px; }
+  .topbar-actions { gap: 5px; }
+  .level-selector-button { min-height: 31px; padding: 5px 7px; font-size: .56rem; }
+  .landing-view { min-height: calc(100dvh - 72px); padding: 12px 0 24px; gap: 8px; }
   .hero-copy { padding: 14px; }
   .hero-copy h1 { margin-top: 10px; font-size: 1.5rem; }
   .hero-copy > p:not(.eyebrow) { font-size: .78rem; }
   .rule-strip { margin-top: 23px; }
   .rule-strip span { padding: 10px; font-size: .67rem; }
   .setup-form { padding: 21px; }
+  .tab { padding: 8px 6px; font-size: .68rem; }
   .game-view { position: static; display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; gap: 8px; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; }
   .duel-top-bar { position: relative; inset: auto; display: grid; grid-template-columns: minmax(0, 1fr) 108px; gap: 6px; min-height: 0; padding: 8px 10px; border-radius: 10px; }
   .duel-top-left h1 { font-size: 20px; line-height: 23px; }
@@ -180,12 +189,15 @@ legend { margin-bottom: 9px; }
   .plot-card canvas { left: 12px; right: 12px; top: 34px; bottom: 10px; width: calc(100% - 24px); height: calc(100% - 44px); }
   .phase-overlay { border-radius: 8px; padding: 14px; }
   .phase-overlay strong { font-size: 20px; }
+  .match-actions { width: min(100%, 330px); }
+  .match-actions .primary-button, .match-actions .secondary-button { min-width: 0; flex: 1; padding: 0 10px; font-size: 11px; }
   .duel-hud-panel { position: relative; inset: auto; display: grid; gap: 6px; height: auto; min-height: 0; padding: 8px; border-radius: 8px; font-size: 11px; line-height: 14px; }
   .duel-hud-line, .hint-line, .connection-card { position: static; width: auto; }
   .duel-hud-line { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 6px; }
   .room-readout { gap: 5px; font-size: 10px; }
   .room-code { font-size: 11px; }
-  .camera-toggle { justify-self: center; min-height: 24px; padding: 2px 6px; font-size: 8px; }
+  .view-toggles { justify-self: center; gap: 3px; }
+  .camera-toggle, .music-toggle { min-height: 24px; padding: 2px 4px; font-size: 8px; }
   .scoreboard { gap: 4px; }
   .player-score { gap: 3px; font-size: 9px; }
   .player-score .player-name { max-width: 52px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -223,7 +235,8 @@ legend { margin-bottom: 9px; }
   .duel-hud-line { position: static; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 6px; width: auto; }
   .room-readout { gap: 4px; font-size: 8px; }
   .room-code { min-height: 20px; font-size: 9px; }
-  .camera-toggle { justify-self: center; min-height: 20px; padding: 1px 6px; font-size: 7px; }
+  .view-toggles { justify-self: center; gap: 3px; }
+  .camera-toggle, .music-toggle { min-height: 20px; padding: 1px 4px; font-size: 7px; }
   .scoreboard { gap: 4px; }
   .player-score { gap: 3px; font-size: 8px; }
   .player-score .player-name { max-width: 54px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

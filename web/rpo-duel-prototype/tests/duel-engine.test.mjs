@@ -71,6 +71,36 @@ test("delta-v budgets are hard coast caps rather than automatic losses", () => {
   assert.equal(round.hasActiveManeuver("chaser"), false);
 });
 
+test("fractional computer commands preserve the policy acceleration fraction", () => {
+  const round = createDuelRound({
+    pairSeed: 18,
+    rules: { ...DUEL_PROTOTYPE_RULES, capture_range_km: 0.000001 },
+  });
+  round.setControls("chaser", { r: 0.5, i: 0, c: 0 }, {
+    source: "computer_policy",
+    policyPhase: "intercept_burn",
+  });
+  round.step(1);
+  const result = round.result();
+  assert.equal(result.delta_v_m_s.chaser, 0.0075);
+  assert.equal(result.input_events[0].source, "computer_policy");
+  assert.equal(result.input_events[0].policy_phase, "intercept_burn");
+});
+
+test("guidance state uses each role as deputy relative to the opposing chief", () => {
+  const round = createDuelRound({ pairSeed: 181 });
+  const chaser = round.guidanceState("chaser").state_ric_si;
+  const target = round.guidanceState("target").state_ric_si;
+  const targetGuidance = round.guidanceState("target");
+  const snapshotState = Object.values(round.snapshot().relative_ric).map((value) => value * 1000);
+  chaser.forEach((value, index) => assert.ok(Math.abs(value - snapshotState[index]) < 1e-9));
+  assert.ok(Math.abs(Math.hypot(...target.slice(0, 3)) - Math.hypot(...chaser.slice(0, 3))) < 1e-6);
+  assert.ok(round.guidanceState("target").mean_motion_rad_s > 0);
+  for (const row of targetGuidance.action_basis_to_game_ric) {
+    assert.ok(Math.abs(Math.hypot(...row) - 1) < 1e-12);
+  }
+});
+
 test("time expiration awards the round to the target", () => {
   const round = createDuelRound({
     pairSeed: 22,
@@ -137,7 +167,7 @@ test("automatic time control uses maneuver rail and neutral cooldown", () => {
     reason: "neutral_cooldown",
   });
   assert.deepEqual(automaticSpeedState({ maneuvering: false, nowMs: 2500, lastManeuverMs: 1000, rules }), {
-    speed_multiple: 100,
+    speed_multiple: 200,
     reason: "coasting",
   });
 });

@@ -56,9 +56,11 @@ export class RpoDuelRoom {
           code: request.headers.get("x-oel-room-code"),
           regulationRounds: body.regulation_rounds,
           matchSeed: body.match_seed,
+          matchMode: body.opponent,
           tokenFactory: createReconnectToken,
         });
         const joined = this.room.addPlayer(body.name);
+        if (this.room.matchMode === "computer") this.room.addComputerOpponent();
         await this.persist();
         return jsonResponse(201, {
           ...this.room.publicSummary(),

@@ -6,6 +6,7 @@
     "test": "node tools/check-oel-fixtures.mjs && node --test tests/*.test.mjs",
     "test:competition": "node --test tests/competition-engine.test.mjs",
     "test:contract": "node tools/check-oel-fixtures.mjs && node --test tests/preview-contract.test.mjs",
+    "verify:hosted-duel": "node tools/verify-hosted-rpo-duel.mjs",
     "validate:attempt": "node tools/validate-attempt.mjs"
   }
 }

@@ -234,20 +234,20 @@ const levelOptions = [
     mode: "external",
     title: "RPO Duel — Beta",
     budget: "Rounds: 2, 4, or 6   Chaser dV: 15.000 m/s   Target dV: 5.000 m/s",
-    objective: "Outfly a second player in a server-authoritative browser RPO match, then reverse roles on the same initial geometry.",
+    objective: "Outfly a second player or the deterministic OEL computer in a server-authoritative browser RPO match, then reverse roles on the same initial geometry.",
     brief:
-      "Create an invite-only room or join with a room code. One player flies the Chaser and the other flies the Target; roles alternate between rounds.",
+      "Create an invite-only room, join with a room code, or choose Play computer. Chaser and Target roles alternate between rounds.",
     criteria: [
       "Chaser: enter the 100 m capture region before time expires.",
       "Target: survive until time expires.",
-      "Use the shared automatic 100x coast and 10x maneuver time rails.",
+      "Use the shared automatic 200x coast and 10x maneuver time rails.",
     ],
     notes: [
-      "Beta multiplayer mode: an authoritative hosted room owns physics, scoring, and reconnect state.",
+      "Beta player-versus-player and player-versus-computer mode: an authoritative hosted room owns physics, scoring, and reconnect state.",
       "A disconnected spacecraft is neutralized and coasts while the remaining player stays connected.",
       "This browser-native two-body duel is not a replacement for the downloadable trainer's full OEL engine.",
     ],
-    scope: "Hosted two-player Beta. Opens the standalone RPO Duel service in this tab.",
+    scope: "Hosted player-versus-player or player-versus-computer Beta. Opens the standalone RPO Duel service in this tab.",
     externalUrl: RPO_DUEL_URL,
   },
 ];

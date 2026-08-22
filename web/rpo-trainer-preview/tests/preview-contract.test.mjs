@@ -126,4 +126,9 @@ test("RPO Duel appears in the selector as a hosted Beta destination", () => {
   assert.match(previewApp, /mode: "external"/);
   assert.match(previewApp, /externalUrl: RPO_DUEL_URL/);
   assert.match(previewApp, /window\.location\.assign\(option\.externalUrl\)/);
+  assert.match(previewHtml, /Four focused experiences/);
+  assert.match(previewHtml, /Hosted PvP \/ computer match/);
+  assert.match(previewApp, /choose Play computer/);
+  assert.match(previewApp, /automatic 200x coast and 10x maneuver time rails/);
+  assert.doesNotMatch(previewApp, /automatic 100x coast/);
 });

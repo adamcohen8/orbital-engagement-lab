@@ -120,10 +120,12 @@ async function handleApi(request, response, rooms, roomRules) {
       code,
       regulationRounds: body.regulation_rounds,
       matchSeed: randomInt(0, 0x100000000),
+      matchMode: body.opponent,
       rules: roomRules,
     });
     rooms.set(code, room);
     const joined = room.addPlayer(body.name);
+    if (room.matchMode === "computer") room.addComputerOpponent();
     sendJson(response, 201, { ...room.publicSummary(), player: joined.player, reconnect_token: joined.token });
     return;
   }
@@ -223,6 +225,7 @@ function contentType(extension) {
     ".css": "text/css; charset=utf-8",
     ".svg": "image/svg+xml",
     ".png": "image/png",
+    ".wav": "audio/wav",
   }[extension] || "application/octet-stream";
 }
 

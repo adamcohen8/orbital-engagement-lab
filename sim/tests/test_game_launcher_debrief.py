@@ -402,6 +402,9 @@ def test_game_configs_and_optional_music_packaging_contract() -> None:
     for config_path in (root / "sim/game/configs").glob("*.yaml"):
         cfg = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
         expected_music.update(music_tracks(cfg))
+    expected_music.update(
+        path.name for path in (root / "web/rpo-duel-prototype/public/assets").glob("*.wav")
+    )
     package_music = {
         Path(pattern).name for pattern in package_data if pattern.startswith("game/music/") and pattern.endswith(".wav")
     }

@@ -3,11 +3,26 @@ import { test } from "node:test";
 
 import {
   DUEL_CAMERA_MODES,
+  DUEL_VISUAL_TIMING,
+  captureRingStyle,
   duelPlotFrame,
+  duelPlotSpan,
   hcwCoastProjection,
+  interpolateDuelRound,
   referenceRelativePair,
   toggleDuelCameraMode,
 } from "../public/src/client/plot-model.js";
+
+test("capture ring is green for the Chaser and red for the Target", () => {
+  assert.deepEqual(captureRingStyle("chaser"), {
+    fill: "rgba(150,235,170,.10)",
+    stroke: "rgba(150,235,170,.82)",
+  });
+  assert.deepEqual(captureRingStyle("target"), {
+    fill: "rgba(245,92,92,.08)",
+    stroke: "rgba(245,92,92,.72)",
+  });
+});
 
 const relative = (r, i, c, rd = 0, id = 0, cd = 0) => ({
   r_km: r,
@@ -46,6 +61,37 @@ test("HCW coast projection starts at the supplied state and follows cross-track 
   assert.ok(Math.abs(projection.at(-1).cd_km_s + .002) < 1e-12);
 });
 
+test("visual interpolation blends authoritative RIC states without changing endpoints", () => {
+  const previous = {
+    tick: 100,
+    time_s: 100,
+    time_remaining_s: 900,
+    range_km: 10,
+    relative_speed_km_s: .001,
+    target_reference_ric: relative(0, 0, 0, 0, 0, 0),
+    chaser_reference_ric: relative(10, -4, 2, .01, -.02, .03),
+  };
+  const current = {
+    ...previous,
+    tick: 120,
+    time_s: 120,
+    time_remaining_s: 880,
+    range_km: 8,
+    relative_speed_km_s: .003,
+    target_reference_ric: relative(2, 4, 6, .02, .04, .06),
+    chaser_reference_ric: relative(8, 0, -2, -.01, .02, -.03),
+  };
+  assert.deepEqual(interpolateDuelRound(previous, current, 0).target_reference_ric, previous.target_reference_ric);
+  assert.deepEqual(interpolateDuelRound(previous, current, 1).chaser_reference_ric, current.chaser_reference_ric);
+  const midpoint = interpolateDuelRound(previous, current, .5);
+  assert.equal(midpoint.tick, 110);
+  assert.equal(midpoint.time_remaining_s, 890);
+  assert.equal(midpoint.range_km, 9);
+  assert.deepEqual(midpoint.target_reference_ric, relative(1, 2, 3, .01, .02, .03));
+  assert.deepEqual(midpoint.chaser_reference_ric, relative(9, -2, 0, 0, 0, 0));
+  assert.equal(DUEL_VISUAL_TIMING.render_delay_ms, 120);
+});
+
 test("reference camera centers the target reference orbit and shows both HCW projections", () => {
   const round = {
     time_remaining_s: 1000,
@@ -60,6 +106,11 @@ test("reference camera centers the target reference orbit and shows both HCW pro
   assert.equal(frame.chaserTrail.length, 1);
   assert.equal(frame.targetProjection.length, 121);
   assert.equal(frame.chaserProjection.length, 121);
+  assert.ok(frame.framingPoints.includes(frame.targetProjection.at(-1)));
+  assert.ok(frame.framingPoints.includes(frame.chaserProjection.at(-1)));
+  assert.ok(frame.framingPoints.includes(frame.targetTrail[0]));
+  assert.ok(frame.framingPoints.includes(frame.chaserTrail[0]));
+  assert.equal(duelPlotSpan(frame, "i_km", "r_km", .1), 200);
   const orbitalPeriodS = 2 * Math.PI / round.reference_mean_motion_rad_s;
   assert.ok(Math.abs(frame.targetProjection.at(-1).t_s - orbitalPeriodS) < 1e-9);
   assert.ok(Math.abs(frame.chaserProjection.at(-1).t_s - orbitalPeriodS) < 1e-9);
@@ -77,7 +128,7 @@ test("reference camera keeps a full-orbit projection even late in the round", ()
   assert.ok(Math.abs(frame.chaserProjection.at(-1).t_s - 2 * Math.PI / meanMotion) < 1e-9);
 });
 
-test("current-pair camera centers the satellite midpoint and suppresses trails and projections", () => {
+test("current-pair camera frames only the satellites, suppresses trails, and still draws both projections", () => {
   const round = {
     time_remaining_s: 1000,
     reference_mean_motion_rad_s: .001,
@@ -88,6 +139,10 @@ test("current-pair camera centers the satellite midpoint and suppresses trails a
   assert.deepEqual(frame.cameraCenter, { r_km: 4, i_km: -1, c_km: 0 });
   assert.deepEqual(frame.targetTrail, []);
   assert.deepEqual(frame.chaserTrail, []);
-  assert.deepEqual(frame.targetProjection, []);
-  assert.deepEqual(frame.chaserProjection, []);
+  assert.equal(frame.targetProjection.length, 121);
+  assert.equal(frame.chaserProjection.length, 121);
+  assert.deepEqual(frame.framingPoints, [frame.target, frame.chaser]);
+  assert.ok(Math.abs(duelPlotSpan(frame, "i_km", "r_km", .1) - 3.782) < 1e-12);
+  assert.deepEqual(frame.targetProjection[0], { ...round.target_reference_ric, t_s: 0 });
+  assert.deepEqual(frame.chaserProjection[0], { ...round.chaser_reference_ric, t_s: 0 });
 });

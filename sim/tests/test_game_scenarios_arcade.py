@@ -655,6 +655,15 @@ def test_web_preview_assets_byte_match_source_game_assets() -> None:
         assert web_music.read_bytes() == source_music.read_bytes(), web_music.name
 
 
+def test_rpo_duel_music_byte_matches_source_game_asset() -> None:
+    root = Path(__file__).resolve().parents[2]
+    filename = "39_perigee_afterburner_demo.wav"
+    source_music = root / "sim" / "game" / "music" / filename
+    duel_music = root / "web" / "rpo-duel-prototype" / "public" / "assets" / filename
+
+    assert duel_music.read_bytes() == source_music.read_bytes()
+
+
 def test_pursuit_arcade_keeps_round_one_initial_state() -> None:
     config_path = (
         Path(__file__).resolve().parents[1] / "game" / "configs" / "game_training_rpo_arcade_pursuit.yaml"

@@ -18,7 +18,8 @@ http://localhost:8765
 
 ## Included
 
-- Unified level selector for Tutorial, Sandbox, and Pursuit Arcade.
+- Unified level selector for Tutorial, Sandbox, Pursuit Arcade, and the hosted
+  RPO Duel Beta.
 - Persistent Browser Preview framing plus a direct link to the full trainer's
   installation guide.
 - Computer-preview Pilot/Operator Preview selector for Tutorial and Sandbox.
@@ -91,3 +92,19 @@ Run the complete preview check from this directory:
 ```bash
 npm test
 ```
+
+## Hosted RPO Duel release gate
+
+For a release that includes RPO Duel, deploy the production Cloudflare Worker
+first, confirm that `oel-rpo-duel-url` contains its exact stable HTTPS URL, and
+then deploy this directory to the production Vercel project. After both
+deployments, run:
+
+```bash
+npm run verify:hosted-duel
+```
+
+The command bypasses ordinary browser caches and fails unless the live Vercel
+selector lists RPO Duel with a Beta label, launches the production Worker, and
+the live Duel page links back to the production selector. The release remains
+incomplete until this check and a browser launch-and-return smoke test pass.
