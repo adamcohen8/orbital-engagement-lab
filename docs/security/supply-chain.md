@@ -186,6 +186,12 @@ A procurement-ready packet should include:
 - validation evidence matrix and harness reports when available,
 - release checklist result and version/commit provenance.
 
+The build and full-profile resolver reports use `--force-reinstall` inside the
+disposable audit environment. This prevents packages installed for bootstrap or
+audit tooling from being mistaken for already-satisfied OEL dependencies and
+omitted from the signed wheel inventory, while replacing stale bootstrap copies
+with the qualified versions that are actually audited.
+
 ## Non-Claims
 
 The SBOM and audit evidence do not make OEL flight-qualified, FedRAMP
