@@ -9,7 +9,12 @@ import numpy as np
 
 from sim.acceleration.settings import acceleration_enabled_from_mode
 from sim.dynamics.orbit.epoch import datetime_to_julian_date, sun_position_eci_km_enhanced, sun_position_eci_km_simple
-from sim.dynamics.orbit.frames import apparent_sidereal_time_hpop_like, eci_to_ecef_rotation_hpop_like
+from sim.dynamics.orbit.frames import (
+    FRAME_MODEL_IAU76_80_EOP,
+    apparent_sidereal_time_hpop_like,
+    eci_to_ecef_rotation_hpop_like,
+    normalize_frame_model,
+)
 from sim.utils.geodesy import geodetic_to_ecef_km
 
 _BDATA = np.array([28.15204, -0.085586, 0.0001284, -0.000010056, -0.00001021, 0.0000015044, 0.000000099826])
@@ -430,7 +435,11 @@ def _position_eci_from_geodetic(
     lat_deg: float, lon_deg: float, alt_km: float, jd_utc: float, env: dict
 ) -> np.ndarray:
     r_ecef_km = geodetic_to_ecef_km(lat_deg, lon_deg, alt_km)
-    raw_eop_path = env.get("drag_eop_path") or env.get("spherical_harmonics_eop_path")
+    raw_eop_path = (
+        env.get("density_eop_path")
+        or env.get("drag_eop_path")
+        or env.get("spherical_harmonics_eop_path")
+    )
     eop_path = None if raw_eop_path is None else str(raw_eop_path)
     return _position_rotation(jd_utc, eop_path).T @ r_ecef_km
 
@@ -454,7 +463,7 @@ def jacchia70_density(
         ra_sun = math.atan2(float(r_sun[1]), float(r_sun[0])) % (2.0 * math.pi)
         sda = math.atan2(float(r_sun[2]), math.hypot(float(r_sun[0]), float(r_sun[1])))
     frame_model = str(env.get("density_frame_model", env.get("drag_frame_model", ""))).strip().lower()
-    if frame_model == "hpop_like":
+    if normalize_frame_model(frame_model) == FRAME_MODEL_IAU76_80_EOP:
         eop_path = env.get("density_eop_path", env.get("drag_eop_path"))
         gast = env.get("jacchia70_gast_rad")
         if gast is None:

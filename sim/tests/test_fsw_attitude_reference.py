@@ -121,6 +121,28 @@ def test_reference_modes_produce_typed_actuator_commands(
     assert output.commands[0].satellite_id == SATELLITE_ID
 
 
+def test_attitude_stack_rejects_future_stale_and_out_of_order_measurements() -> None:
+    stack = AttitudeReferenceFlightSoftwareStack(attitude_config())
+    stack.boot(boot_event())
+    stack.step(batch(1, ideal_event(1, 1, rate=(0.01, 0.02, 0.03))))
+
+    stack.step(batch(2, ideal_event(2, 5, rate=(9.0, 9.0, 9.0))))
+    stack.step(batch(3, ideal_event(0, 0, rate=(8.0, 8.0, 8.0))))
+    stack.step(batch(400, ideal_event(3, 1, rate=(7.0, 7.0, 7.0))))
+
+    solution = stack._navigator.solution(clock(400))
+    assert solution.angular_rate_body_rad_s == pytest.approx((0.01, 0.02, 0.03))
+
+
+def test_direct_reaction_wheel_allocator_requires_unit_axes() -> None:
+    with pytest.raises(ValueError, match="unit vectors"):
+        replace(
+            attitude_config().allocator,
+            kind=AttitudeAllocatorKind.REACTION_WHEEL,
+            axes_body=((2.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)),
+        )
+
+
 def test_coarse_sun_acquisition_commands_without_attitude_quaternion() -> None:
     stack = AttitudeReferenceFlightSoftwareStack(attitude_config())
     stack.boot(boot_event())

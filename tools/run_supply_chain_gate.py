@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
@@ -10,6 +11,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -18,6 +20,9 @@ if str(ROOT) not in sys.path:
 from tools.generate_python_sbom import write_sbom  # noqa: E402
 
 PYTORCH_CPU_INDEX_URL = "https://download.pytorch.org/whl/cpu"
+PYPI_INDEX_URL = "https://pypi.org/simple"
+PIP_VERSION = "26.2.1"
+PIP_AUDIT_VERSION = "2.10.1"
 
 
 def _package_version() -> str:
@@ -56,9 +61,26 @@ def git_provenance() -> dict[str, Any]:
     }
 
 
-def _run(cmd: list[str], *, cwd: Path = ROOT) -> subprocess.CompletedProcess[str]:
+def _package_environment() -> dict[str, str]:
+    environment = {key: value for key, value in os.environ.items() if not key.upper().startswith("PIP_")}
+    environment.update(
+        {
+            "PIP_CONFIG_FILE": os.devnull,
+            "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+            "PIP_INDEX_URL": PYPI_INDEX_URL,
+        }
+    )
+    return environment
+
+
+def _run(
+    cmd: list[str],
+    *,
+    cwd: Path = ROOT,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
     print("+ " + " ".join(cmd))
-    return subprocess.run(cmd, cwd=cwd, text=True, check=False)
+    return subprocess.run(cmd, cwd=cwd, env=env, text=True, check=False)
 
 
 def _full_install_command(
@@ -73,6 +95,9 @@ def _full_install_command(
         "-m",
         "pip",
         "install",
+        "--only-binary=:all:",
+        "--index-url",
+        PYPI_INDEX_URL,
         "-c",
         str(constraints),
     ]
@@ -88,10 +113,34 @@ def _venv_python(environment_root: Path) -> Path:
     return environment_root / "bin" / "python"
 
 
-def _recorded_run(command_results: list[dict[str, Any]], cmd: list[str]) -> subprocess.CompletedProcess[str]:
-    proc = _run(cmd)
+def _recorded_run(
+    command_results: list[dict[str, Any]],
+    cmd: list[str],
+    *,
+    env: dict[str, str],
+) -> subprocess.CompletedProcess[str]:
+    proc = _run(cmd, env=env)
     command_results.append({"command": cmd, "return_code": int(proc.returncode)})
     return proc
+
+
+def _validate_dependency_sources(path: Path, *, torch_cpu_index: bool) -> str | None:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    allowed_hosts = {"files.pythonhosted.org", "pypi.org"}
+    if torch_cpu_index:
+        allowed_hosts.add("download.pytorch.org")
+    unexpected: list[str] = []
+    for row in list(dict(payload).get("packages", []) or []):
+        if not isinstance(row, dict):
+            continue
+        source_url = str(row.get("source_url", "") or "")
+        if source_url == "<local-source>":
+            continue
+        if urlparse(source_url).hostname not in allowed_hosts:
+            unexpected.append(source_url or "<missing-source-url>")
+    if unexpected:
+        return "Dependency evidence contains unapproved source URLs: " + ", ".join(sorted(set(unexpected)))
+    return None
 
 
 def _run_supply_chain_gate_in_environment(
@@ -104,10 +153,11 @@ def _run_supply_chain_gate_in_environment(
     isolated_environment_root: Path | None,
 ) -> dict[str, Any]:
     command_results: list[dict[str, Any]] = []
+    package_environment = _package_environment()
     audit_python = str(bootstrap_python)
     if isolated_environment_root is not None:
         create_environment = [bootstrap_python, "-m", "venv", str(isolated_environment_root)]
-        created = _recorded_run(command_results, create_environment)
+        created = _recorded_run(command_results, create_environment, env=package_environment)
         audit_python = str(_venv_python(isolated_environment_root))
         if created.returncode != 0:
             audit_python = str(bootstrap_python)
@@ -121,7 +171,26 @@ def _run_supply_chain_gate_in_environment(
 
     if install_full and all(row["return_code"] == 0 for row in command_results):
         commands = [
-            [audit_python, "-m", "pip", "install", "-U", "pip", "pip-audit"],
+            [
+                audit_python,
+                "-m",
+                "pip",
+                "install",
+                "--only-binary=:all:",
+                "--index-url",
+                PYPI_INDEX_URL,
+                f"pip=={PIP_VERSION}",
+            ],
+            [
+                audit_python,
+                "-m",
+                "pip",
+                "install",
+                "--only-binary=:all:",
+                "--index-url",
+                PYPI_INDEX_URL,
+                f"pip-audit=={PIP_AUDIT_VERSION}",
+            ],
             _full_install_command(
                 python_executable=audit_python,
                 constraints=constraints,
@@ -130,7 +199,7 @@ def _run_supply_chain_gate_in_environment(
             ),
         ]
         for cmd in commands:
-            proc = _recorded_run(command_results, cmd)
+            proc = _recorded_run(command_results, cmd, env=package_environment)
             if proc.returncode != 0:
                 break
 
@@ -138,6 +207,7 @@ def _run_supply_chain_gate_in_environment(
             pip_check = subprocess.run(
                 [audit_python, "-m", "pip", "check"],
                 cwd=ROOT,
+                env=package_environment,
                 text=True,
                 capture_output=True,
                 check=False,
@@ -160,7 +230,19 @@ def _run_supply_chain_gate_in_environment(
                     "--output",
                     str(wheel_inventory_path),
                 ]
-                _recorded_run(command_results, dependency_evidence)
+                _recorded_run(command_results, dependency_evidence, env=package_environment)
+                if command_results[-1]["return_code"] == 0:
+                    source_error = _validate_dependency_sources(
+                        wheel_inventory_path,
+                        torch_cpu_index=torch_cpu_index,
+                    )
+                    command_results.append(
+                        {
+                            "command": ["validate-dependency-sources"],
+                            "return_code": 0 if source_error is None else 1,
+                            **({"error": source_error} if source_error is not None else {}),
+                        }
+                    )
 
     if all(row["return_code"] == 0 for row in command_results):
         if isolated_environment_root is None:
@@ -169,12 +251,14 @@ def _run_supply_chain_gate_in_environment(
             _recorded_run(
                 command_results,
                 [audit_python, "tools/generate_python_sbom.py", "--output", str(sbom_path)],
+                env=package_environment,
             )
 
     if all(row["return_code"] == 0 for row in command_results):
         freeze = subprocess.run(
             [audit_python, "-m", "pip", "freeze", "--all"],
             cwd=ROOT,
+            env=package_environment,
             text=True,
             capture_output=True,
             check=False,
@@ -196,7 +280,7 @@ def _run_supply_chain_gate_in_environment(
                 "--output",
                 str(audit_path),
             ]
-            _recorded_run(command_results, audit_cmd)
+            _recorded_run(command_results, audit_cmd, env=package_environment)
 
     artifacts = []
     for path in (
@@ -226,7 +310,9 @@ def _run_supply_chain_gate_in_environment(
         "bootstrap_python": bootstrap_python,
         "isolated_environment": isolated_environment_root is not None,
         "dependency_sources": {
+            "primary_index": PYPI_INDEX_URL,
             "pytorch_cpu_index": PYTORCH_CPU_INDEX_URL if torch_cpu_index else None,
+            "pip_environment_sanitized": True,
         },
         "git": git_provenance(),
         "audit_exceptions": [],

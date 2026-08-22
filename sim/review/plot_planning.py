@@ -6,7 +6,12 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Mapping
 
-from sim.review.plotting import ReviewPlotArtifact, ReviewPlotSpec, save_review_plot
+from sim.review.plotting import (
+    ReviewPlotArtifact,
+    ReviewPlotSpec,
+    record_generated_artifact,
+    save_review_plot,
+)
 from sim.review.workspace import ReviewWorkspace
 
 REVIEW_PLOT_PLAN_SCHEMA_VERSION = 1
@@ -67,7 +72,17 @@ def render_review_plot(
     current_id = review_plot_plan_id(workspace, spec)
     if str(plot_plan_id) != current_id:
         raise ValueError("The plot_plan_id is stale or does not match the review store and plot specification.")
-    return save_review_plot(workspace, spec, path=path)
+    dry_run = _dry_run(workspace, spec)
+    if dry_run["truncated"]:
+        raise ValueError(
+            "The planned review query is truncated at max_rows; increase the bound or narrow the query."
+        )
+    artifact = save_review_plot(workspace, spec, path=path, record=False)
+    if review_plot_plan_id(workspace, spec) != current_id:
+        artifact.path.unlink(missing_ok=True)
+        raise ValueError("The review store changed while the planned plot was rendering; no artifact was recorded.")
+    record_generated_artifact(workspace, artifact)
+    return artifact
 
 
 def review_plot_plan_id(workspace: ReviewWorkspace, spec: ReviewPlotSpec) -> str:
@@ -78,6 +93,7 @@ def review_plot_plan_id(workspace: ReviewWorkspace, spec: ReviewPlotSpec) -> str
             "path": str(workspace.db_path),
             "size_bytes": int(stat.st_size),
             "mtime_ns": int(stat.st_mtime_ns),
+            "sha256": hashlib.sha256(workspace.db_path.read_bytes()).hexdigest(),
         },
         "spec": asdict(spec),
     }

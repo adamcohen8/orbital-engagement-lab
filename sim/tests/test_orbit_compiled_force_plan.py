@@ -108,7 +108,7 @@ def test_compiled_force_plan_is_numerically_equivalent_for_drag_and_full_force_s
     )
 
 
-def test_compiled_force_plan_shares_identical_stage_rotations() -> None:
+def test_eop_drag_avoids_the_incomplete_compiled_rotation_path() -> None:
     _require_compiled_acceleration()
     state, env, context = _case()
     command = np.zeros(3, dtype=float)
@@ -136,7 +136,7 @@ def test_compiled_force_plan_shares_identical_stage_rotations() -> None:
             actual = accelerated.propagate(state, 10.0, 0.0, command, env, context)
 
     np.testing.assert_allclose(actual, expected, rtol=0.0, atol=2.0e-11)
-    assert rotation_calls == [0.0, 5.0, 10.0]
+    assert rotation_calls == []
 
 
 def test_compiled_force_plan_reuses_exact_previous_endpoint_environment() -> None:
@@ -146,6 +146,10 @@ def test_compiled_force_plan_reuses_exact_previous_endpoint_environment() -> Non
     env.pop("sun_pos_eci_km")
     env.pop("moon_pos_eci_km")
     env["ephemeris_mode"] = "analytic_simple"
+    # Exercise the compiled endpoint cache with its supported fixed-z drag
+    # frame; the full EOP rotation-derivative path deliberately stays on the
+    # authoritative Python evaluator.
+    env["drag_frame_model"] = "simple"
     command = np.zeros(3, dtype=float)
     plugins = [
         spherical_harmonics_plugin,

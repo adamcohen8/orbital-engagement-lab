@@ -376,6 +376,30 @@ Recommended columns:
 - `elevation_deg`
 - `reason`
 
+### Coverage and directed-link tables
+
+When `outputs.orbital_analysis.enabled: true`, the review store records the
+evidence-only post-processing products in eight additive tables:
+
+- `coverage_summary`: source object, state-provider identity, product kind,
+  refinement source, semantic hash, and summary JSON;
+- `coverage_samples`: time-indexed covered-cell count and instantaneous covered
+  fraction;
+- `coverage_intervals`: per-cell start/end/duration, censoring, transition
+  disposition, and reasons;
+- `coverage_transitions`: acquisition/loss time, bracket, disposition,
+  iterations, and reason change;
+- `link_summary`: directed endpoint/provider identities, refinement source,
+  semantic hash, and summary JSON;
+- `link_samples`: time-indexed range, margin, availability, and primary reason;
+- `link_windows`: interval/censoring evidence, margin statistics, minimum range,
+  and estimated delivered bits; and
+- `link_transitions`: acquisition/loss time, bracket, disposition, iterations,
+  and reason change.
+
+These rows retain analysis evidence; they do not make the review database an
+RF environment, scheduler, or causal simulation input.
+
 ### `events`
 
 One row per review event.

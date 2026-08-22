@@ -29,7 +29,7 @@ from .contracts import (
     validate_version,
     version_satisfies,
 )
-from .state import atomic_write_json, atomic_write_text, read_state
+from .state import StateLock, atomic_write_json, atomic_write_text, read_state
 
 WORKSPACE_FILENAME = "oel-workspace.yaml"
 
@@ -203,7 +203,19 @@ def init_workspace(
     return {"schema_version": "oel.workspace-init-receipt.v1", "status": "ready", "workspace": load_workspace(root)}
 
 
-def register_workspace(value: str | Path, *, registry_path: str | Path) -> dict[str, Any]:
+def register_workspace(
+    value: str | Path,
+    *,
+    registry_path: str | Path,
+    lock_path: str | Path | None = None,
+) -> dict[str, Any]:
+    registry_target = Path(registry_path)
+    transaction_lock = Path(lock_path) if lock_path is not None else registry_target.parent / "update.lock"
+    with StateLock(transaction_lock, operation="register-workspace"):
+        return _register_workspace_unlocked(value, registry_path=registry_target)
+
+
+def _register_workspace_unlocked(value: str | Path, *, registry_path: str | Path) -> dict[str, Any]:
     workspace = load_workspace(value)
     registry = read_state(registry_path, default={"schema_version": "oel.workspace-registry.v1", "workspaces": {}})
     items = dict(registry.get("workspaces", {}) or {})

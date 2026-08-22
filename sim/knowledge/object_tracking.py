@@ -175,26 +175,8 @@ class _OtherObjectStateSensor:
         self.last_detection_status: str | None = None
 
     def measure(self, observer_truth: StateTruth, target_truth: StateTruth, t_s: float) -> Measurement | None:
-        sensor_position_eci_km, sensor_boresight_eci = self._sensor_pose_eci(observer_truth)
-        access_ok, access_reason = self.access.evaluate(
-            sensor_position_eci_km,
-            target_truth.position_eci_km,
-            t_s,
-            boresight_eci=sensor_boresight_eci,
-        )
-        if not access_ok:
-            self.last_detection_status = str(access_reason)
+        if not self._detection_gate(observer_truth, target_truth, t_s):
             return None
-        if self.conditions.require_line_of_sight and not _line_of_sight_clear(
-            sensor_position_eci_km, target_truth.position_eci_km
-        ):
-            self.last_detection_status = "line_of_sight"
-            return None
-        self.access._last_update_t_s = float(t_s)
-        if self.rng.random() < float(self.conditions.dropout_prob):
-            self.last_detection_status = "dropout"
-            return None
-        self.last_detection_status = "detected"
 
         pos_sigma = _expand3(self.noise.pos_sigma_km)
         vel_sigma = _expand3(self.noise.vel_sigma_km_s)
@@ -204,6 +186,29 @@ class _OtherObjectStateSensor:
         z_vel = target_truth.velocity_eci_km_s + vel_bias + self.rng.normal(0.0, vel_sigma, size=3)
         return Measurement(vector=np.hstack((z_pos, z_vel)), t_s=t_s)
 
+    def _detection_gate(self, observer_truth: StateTruth, target_truth: StateTruth, t_s: float) -> bool:
+        sensor_position_eci_km, sensor_boresight_eci = self._sensor_pose_eci(observer_truth)
+        access_ok, access_reason = self.access.evaluate(
+            sensor_position_eci_km,
+            target_truth.position_eci_km,
+            t_s,
+            boresight_eci=sensor_boresight_eci,
+        )
+        if not access_ok:
+            self.last_detection_status = str(access_reason)
+            return False
+        if self.conditions.require_line_of_sight and not _line_of_sight_clear(
+            sensor_position_eci_km, target_truth.position_eci_km
+        ):
+            self.last_detection_status = "line_of_sight"
+            return False
+        self.access._last_update_t_s = float(t_s)
+        if self.rng.random() < float(self.conditions.dropout_prob):
+            self.last_detection_status = "dropout"
+            return False
+        self.last_detection_status = "detected"
+        return True
+
     def measure_relative(
         self,
         observer_truth: StateTruth,
@@ -211,12 +216,11 @@ class _OtherObjectStateSensor:
         t_s: float,
         measurement_model: str,
     ) -> Measurement | None:
-        state_meas = self.measure(observer_truth, target_truth, t_s)
-        if state_meas is None:
-            return None
         model = _normalize_measurement_model(measurement_model)
         if model == "state":
-            return state_meas
+            return self.measure(observer_truth, target_truth, t_s)
+        if not self._detection_gate(observer_truth, target_truth, t_s):
+            return None
         sensor_position_eci_km, sensor_velocity_eci_km_s, _ = self._sensor_state_eci(observer_truth)
         observer_state = np.hstack((sensor_position_eci_km, sensor_velocity_eci_km_s))
         truth_state = np.hstack((target_truth.position_eci_km, target_truth.velocity_eci_km_s))
@@ -466,10 +470,10 @@ class _Track:
         target_truth: StateTruth,
         t_s: float,
     ) -> Measurement | None:
-        gate = self.sensor.measure(observer_truth, target_truth, t_s)
+        detected = self.sensor._detection_gate(observer_truth, target_truth, t_s)
         detect_status = str(self.sensor.last_detection_status or "unknown")
         self.detection_status_counts[detect_status] = int(self.detection_status_counts.get(detect_status, 0)) + 1
-        if gate is None:
+        if not detected:
             if self.last_detected:
                 self.loss_of_detection_count += 1
             self.last_detected = False

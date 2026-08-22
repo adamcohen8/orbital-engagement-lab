@@ -28,7 +28,7 @@ from sim.dynamics.orbit.epoch import (
     gmst_angle_rad_from_jd,
     sun_position_eci_km_enhanced,
 )
-from sim.dynamics.orbit.frames import apparent_sidereal_time_hpop_like
+from sim.dynamics.orbit.frames import FrameContext, apparent_sidereal_time_hpop_like, transform_state
 from sim.dynamics.orbit.harris_priester_backend import (
     _default_coeff_path as harris_priester_default_coeff_path,
 )
@@ -719,6 +719,27 @@ class TestOrbitAtmosphereModels(unittest.TestCase):
 
         self.assertAlmostEqual(rho_named, rho_alias)
 
+    def test_harris_priester_frame_aliases_apply_the_same_rotation(self):
+        r = np.array([6378.137 + 500.0, 0.0, 0.0], dtype=float)
+        base_env = {
+            "sun_pos_eci_km": np.array([1.0, 0.0, 0.0]),
+            "harris_priester_f107": 175,
+            "jd_utc_start": 2460310.5,
+        }
+        with patch(
+            "sim.dynamics.orbit.harris_priester_backend.precession_nutation_rotation_hpop_like",
+            return_value=np.eye(3),
+        ) as rotation:
+            legacy = harris_priester_backend_density(r, 60.0, {**base_env, "density_frame_model": "hpop_like"})
+            canonical = harris_priester_backend_density(
+                r,
+                60.0,
+                {**base_env, "density_frame_model": "iau76_80_eop"},
+            )
+
+        self.assertEqual(rotation.call_count, 2)
+        self.assertEqual(canonical, legacy)
+
     def test_harris_priester_uses_wgs84_geodetic_height_when_requested(self):
         r = np.array([3506.788211789612, 4884.292725366271, 2667.959407741529], dtype=float)
         env = {"sun_pos_eci_km": np.array([1.0, 0.0, 0.0]), "harris_priester_f107": 175}
@@ -781,6 +802,38 @@ class TestOrbitAtmosphereModels(unittest.TestCase):
         expected = -0.5 * rho * cd * area_m2 / mass_kg * float(np.linalg.norm(v_rel_m_s)) * v_rel_m_s / 1000.0
 
         np.testing.assert_allclose(a, expected, rtol=0.0, atol=1e-18)
+
+    def test_eop_relative_velocity_matches_canonical_stationary_ecef_state(self):
+        context = FrameContext(
+            model="iau76_80_eop",
+            jd_utc_start=2460310.5,
+            dut1_s=0.15,
+            xp_arcsec=0.25,
+            yp_arcsec=-0.18,
+            ddpsi_rad=2.0e-7,
+            ddeps_rad=-3.0e-7,
+        )
+        position_eci, velocity_eci = transform_state(
+            np.array([6378.137, 0.0, 0.0]),
+            np.zeros(3),
+            "ecef",
+            "eci",
+            t_s=321.0,
+            context=context,
+        )
+        relative = atmosphere_relative_velocity_eci_km_s(
+            position_eci,
+            velocity_eci,
+            t_s=321.0,
+            frame_model=context.model,
+            jd_utc_start=context.jd_utc_start,
+            dut1_s=context.dut1_s,
+            xp_arcsec=context.xp_arcsec,
+            yp_arcsec=context.yp_arcsec,
+            ddpsi_rad=context.ddpsi_rad,
+            ddeps_rad=context.ddeps_rad,
+        )
+        np.testing.assert_allclose(relative, 0.0, rtol=0.0, atol=2.0e-12)
 
     def test_lift_projects_attitude_vector_perpendicular_to_relative_wind(self):
         r = np.array([7000.0, 0.0, 0.0], dtype=float)

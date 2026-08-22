@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 import os
 import platform
@@ -614,7 +615,7 @@ def checkpoint_enabled(cfg: Any, mc_out_cfg: dict[str, Any] | None = None) -> bo
     limits = _resource_limits_dict(cfg)
     if "checkpoint_enabled" in limits:
         return bool(limits.get("checkpoint_enabled"))
-    return True
+    return bool(resource_profile(limits.get("resource_profile", "config")).checkpoint_enabled)
 
 
 class ResourceGovernor:
@@ -856,6 +857,7 @@ def estimate_resource_requirements(cfg: Any) -> ResourceEstimate:
     active_objects = _active_object_count(cfg)
     hierarchical_processes = effective_workers
     object_workers_per_run = 0
+    prepared_config_memory_mb = 0.0
     if study_type in {"monte_carlo", "sensitivity"} and runs > 0:
         try:
             from sim.execution.hierarchical import plan_hierarchical_execution
@@ -864,6 +866,15 @@ def estimate_resource_requirements(cfg: Any) -> ResourceEstimate:
                 raise
         else:
             config_root = cfg.to_dict() if callable(getattr(cfg, "to_dict", None)) else {}
+            serialized_root_bytes = len(
+                json.dumps(config_root, sort_keys=True, default=str).encode("utf-8")
+            )
+            # Estimate retained campaign configuration memory arithmetically.
+            # Resource preflight must remain bounded and must not materialize
+            # every deep-copied trial before it can refuse an oversized study.
+            prepared_config_memory_mb = (
+                serialized_root_bytes * max(runs, 1) / (1024.0 * 1024.0)
+            )
             hierarchy = plan_hierarchical_execution(
                 task_roots=(config_root,),
                 task_count=max(runs, 1),
@@ -882,6 +893,7 @@ def estimate_resource_requirements(cfg: Any) -> ResourceEstimate:
         effective_workers=hierarchical_processes,
         plots_enabled=plots_enabled,
     )
+    estimated_incremental_memory_mb += prepared_config_memory_mb
     retained_payload_runs = _retained_payload_run_count(cfg, study_type=study_type, runs=runs)
     if retained_payload_runs:
         estimated_incremental_memory_mb += estimated_history_mb_per_run * retained_payload_runs
@@ -898,6 +910,8 @@ def estimate_resource_requirements(cfg: Any) -> ResourceEstimate:
     )
     max_load_per_cpu = _optional_float(limits.get("max_load_per_cpu"), profile.max_load_per_cpu)
     notes: list[str] = []
+    if prepared_config_memory_mb > 0.0:
+        notes.append(f"prepared campaign configs retain approximately {prepared_config_memory_mb:.2f} MB")
     risk = "safe"
     if retained_payload_runs:
         notes.append(f"full run payloads retained for {retained_payload_runs} batch runs")

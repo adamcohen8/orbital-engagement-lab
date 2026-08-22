@@ -69,6 +69,8 @@ _CAPABILITIES = {
         "planned-rendezvous-transfer",
         "terminal-braking",
         "passive-retreat",
+        "coast-aware-intercept",
+        "predictive-evasion",
         "operational-navigation",
         "autonomous-maneuver-planning",
         "conjunction-avoidance",
@@ -136,6 +138,7 @@ _COMMON_PARAMS = {
 }
 _PASSIVE_PARAMS = _COMMON_PARAMS | {"measurement_stale_after_s"}
 _ATTITUDE_PARAMS = _COMMON_PARAMS | {
+    "measurement_stale_after_s",
     "reference_mode",
     "quaternion_bn",
     "ric_axis",
@@ -163,6 +166,7 @@ _ATTITUDE_PARAMS = _COMMON_PARAMS | {
     "momentum_dump_max_dipole_a_m2",
 }
 _TRANSLATION_PARAMS = _COMMON_PARAMS | {
+    "measurement_stale_after_s",
     "translation_mode",
     "max_acceleration_m_s2",
     "max_force_n",
@@ -222,6 +226,14 @@ _TRANSLATION_PARAMS = _COMMON_PARAMS | {
     "thrust_window_phase_s",
     "thrust_command_deadband_m_s2",
     "element_averaging_window_s",
+    "prediction_horizon_s",
+    "prediction_step_s",
+    "prediction_decision_interval_s",
+    "prediction_pulse_duration_s",
+    "capture_radius_m",
+    "capture_margin_m",
+    "opponent_max_acceleration_m_s2",
+    "prediction_acceleration_fractions",
     "rcs_thrusters",
     "rcs_pulse_window_s",
     "gimbal_limit_rad",
@@ -319,6 +331,8 @@ def validate_stack_params(stack_id: str, params: dict[str, object]) -> None:
             "ric_pd_transfer",
             "terminal_braking",
             "passive_retreat",
+            "intercept_coast",
+            "predictive_evasion",
         },
         "fsw.low_thrust_reference": {"low_thrust_phasing", "orbital_elements"},
     }
@@ -360,6 +374,13 @@ def validate_stack_params(stack_id: str, params: dict[str, object]) -> None:
         "thrust_window_phase_s",
         "thrust_command_deadband_m_s2",
         "element_averaging_window_s",
+        "prediction_horizon_s",
+        "prediction_step_s",
+        "prediction_decision_interval_s",
+        "prediction_pulse_duration_s",
+        "capture_radius_m",
+        "capture_margin_m",
+        "opponent_max_acceleration_m_s2",
     ):
         if name in params:
             try:
@@ -368,6 +389,17 @@ def validate_stack_params(stack_id: str, params: dict[str, object]) -> None:
                 raise ValueError(f"flight_software.params.{name} must be finite.") from exc
             if not isfinite(value):
                 raise ValueError(f"flight_software.params.{name} must be finite.")
+    if "prediction_acceleration_fractions" in params:
+        try:
+            fractions = [float(value) for value in params["prediction_acceleration_fractions"]]  # type: ignore[union-attr]
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "flight_software.params.prediction_acceleration_fractions must contain values in (0, 1]."
+            ) from exc
+        if not fractions or any(not isfinite(value) or value <= 0.0 or value > 1.0 for value in fractions):
+            raise ValueError(
+                "flight_software.params.prediction_acceleration_fractions must contain values in (0, 1]."
+            )
     low_thrust_only = {
         "thrust_window_period_s",
         "thrust_window_duration_s",

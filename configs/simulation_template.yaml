@@ -321,7 +321,9 @@ outputs:
     print_summary: true
     save_json: true
     save_csv: false
-    save_full_log: true
+    # Full JSON histories can be very large. Enable only for custom analysis
+    # that cannot use the summary or SQLite review store.
+    save_full_log: false
     save_history_npz: false
   plots:
     enabled: true
@@ -357,6 +359,9 @@ outputs:
     speed_multiple: 5.0
     frame_stride: 2
     draw_earth_map: true
+  review:
+    enabled: true
+    detail: standard
   resource_limits:
     max_history_memory_mb: 1024
     checkpoint_enabled: true

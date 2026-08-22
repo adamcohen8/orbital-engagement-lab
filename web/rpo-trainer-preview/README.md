@@ -19,16 +19,21 @@ http://localhost:8765
 ## Included
 
 - Unified level selector for Tutorial, Sandbox, and Pursuit Arcade.
-- Computer-preview Pilot/Operator mode selector for Tutorial and Sandbox.
+- Persistent Browser Preview framing plus a direct link to the full trainer's
+  installation guide.
+- Computer-preview Pilot/Operator Preview selector for Tutorial and Sandbox.
   Operator mode scripts impulsive RIC burns and shows the planned HCW preview
   before playback.
 - Coordinate-frame convention toggle for OEL Default and Space Force-style
   positive in-track display, persisted in local browser storage.
 - Automatic mobile/computer layout detection with manual view switching.
 - Tutorial mode based on the Level 0 RIC-control lesson.
-- Curated sandbox mode with preset starts, range, drift, reset, and randomize.
-- Pursuit Arcade multi-round browser gameplay with deterministic replay
-  validation.
+- Reduced circular-orbit sandbox mode with preset starts, range, drift, reset,
+  and randomize. The downloadable Sandbox additionally supports target-orbit
+  and eccentricity editing plus elliptical prediction.
+- Web-only Pursuit Arcade multi-round gameplay with deterministic replay
+  validation. Pursuit Arcade is intentionally not listed in the downloadable
+  trainer launcher.
 - Mobile-friendly portrait and landscape controls with compact speed-multiple
   buttons, explicit camera toggling, and long-press selection suppression.
 - RI and RC canvas plots with HCW-style projection for tutorial/sandbox and
@@ -73,3 +78,16 @@ recordings, or full debrief reports. Pursuit Arcade leaderboard attempts are
 validated by replaying the browser-native deterministic arcade engine, not by
 trusting client-submitted scores. See `docs/physics-contract.md` for the model
 boundary.
+
+## Contract Checks
+
+The checked-in browser contract fixtures are generated from the downloadable
+Level 0, Sandbox, and Pursuit Arcade scenario YAML. Level 0 reference
+trajectories are generated with OEL's two-body engine and compared against the
+browser HCW integrator at the tolerance documented in `docs/physics-contract.md`.
+
+Run the complete preview check from this directory:
+
+```bash
+npm test
+```

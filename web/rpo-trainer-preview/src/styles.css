@@ -135,7 +135,7 @@ p {
 .launcher-header {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 144px 156px 148px;
+  grid-template-columns: minmax(0, 1fr) 144px 156px 170px;
   grid-template-rows: auto auto;
   align-items: start;
   column-gap: 12px;
@@ -158,6 +158,29 @@ p {
   color: var(--muted);
   font-size: 18px;
   line-height: 22px;
+}
+
+.launcher-subtitle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.preview-badge {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border: 1px solid rgb(96, 174, 224);
+  border-radius: 999px;
+  background: rgb(28, 48, 66);
+  color: rgb(196, 226, 246);
+  font-size: 11px;
+  line-height: 14px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 .launcher-music {
@@ -206,7 +229,7 @@ p {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 148px;
+  width: 170px;
   height: 30px;
   min-height: 30px;
   padding: 0 10px;
@@ -288,6 +311,20 @@ p {
   color: rgb(238, 244, 250);
 }
 
+.launcher-option .level-beta-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  padding: 2px 6px;
+  border: 1px solid rgba(87, 202, 255, 0.65);
+  border-radius: 999px;
+  color: rgb(87, 202, 255);
+  font-size: 10px;
+  line-height: 1;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+
 .launcher-option small {
   color: rgb(162, 178, 198);
   font-size: 14px;
@@ -320,6 +357,16 @@ p {
   color: rgb(162, 178, 198);
   font-size: 14px;
   line-height: 18px;
+}
+
+.launcher-preview .launcher-scope {
+  margin: -8px 0 18px;
+  padding: 9px 11px;
+  border-left: 3px solid var(--selector-accent-border);
+  background: rgba(96, 174, 224, 0.08);
+  color: rgb(196, 210, 226);
+  font-size: 12px;
+  line-height: 17px;
 }
 
 .launcher-preview section {
@@ -1427,6 +1474,17 @@ body.mobile-view .launcher-header p {
   line-height: 17px;
 }
 
+body.mobile-view .launcher-subtitle {
+  gap: 7px;
+}
+
+body.mobile-view .preview-badge {
+  min-height: 18px;
+  padding: 0 6px;
+  font-size: 9px;
+  line-height: 12px;
+}
+
 body.mobile-view .launcher-mode {
   display: none;
 }
@@ -1532,6 +1590,13 @@ body.mobile-view .launcher-preview h2 {
 
 body.mobile-view .launcher-budget {
   margin-bottom: 12px;
+  font-size: 11px;
+  line-height: 15px;
+}
+
+body.mobile-view .launcher-preview .launcher-scope {
+  margin: -4px 0 10px;
+  padding: 7px 8px;
   font-size: 11px;
   line-height: 15px;
 }
@@ -1855,6 +1920,10 @@ body.mobile-view .leaderboard-form {
     grid-row: 2;
     font-size: 11px;
     line-height: 13px;
+  }
+
+  body.mobile-view .launcher-subtitle span:last-child {
+    display: none;
   }
 
   body.mobile-view .launcher-music,

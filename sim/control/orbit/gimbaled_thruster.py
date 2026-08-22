@@ -45,6 +45,10 @@ class GimbaledThrusterController(Controller):
     def __post_init__(self) -> None:
         self.base_controller = _construct_controller(self.base_controller)
         self.neutral_direction_body = _unit(np.array(self.neutral_direction_body, dtype=float))
+        if not np.all(np.isfinite(self.neutral_direction_body)) or np.linalg.norm(self.neutral_direction_body) <= 0.0:
+            raise ValueError("neutral_direction_body must be a finite nonzero vector")
+        if not np.isfinite(float(self.max_gimbal_angle_rad)) or self.max_gimbal_angle_rad < 0.0:
+            raise ValueError("max_gimbal_angle_rad must be finite and nonnegative")
         if self.attitude_quat_slice[1] - self.attitude_quat_slice[0] != 4:
             raise ValueError("attitude_quat_slice must select exactly 4 elements.")
 

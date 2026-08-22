@@ -13,6 +13,7 @@ validated and run through the standard CLI:
 - `public_tle_2hr_propagation.yaml`: initialize from TLE lines, then predict a two-hour state history with OEL numerical propagation.
 - `public_sgp4_passive_propagation.yaml`: propagate a passive catalog-style object from TLE lines with `propagation_method: general` and `general.model: sgp4`.
 - `public_ground_station_access_from_tle.yaml`: initialize from a TLE, then compute ground-station access windows with OEL numerical propagation.
+- `public_coverage_and_link_analysis.yaml`: evaluate whole-Earth conical coverage and a directed free-space link after one deterministic propagation.
 - `public_closed_loop_rendezvous_lqr.yaml`: run a closed-loop chaser/target rendezvous with HCW LQR.
 - `public_orbit_environment_stack.yaml`: inspect perturbation/environment toggles in deterministic propagation.
 - `public_attitude_hold_disturbance.yaml`: evaluate attitude hold with initial pointing error and disturbance torque.

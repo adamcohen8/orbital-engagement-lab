@@ -63,8 +63,19 @@ def pro_installation_available() -> bool:
     """Return whether this edition contains the private Pro license verifier."""
 
     try:
-        return importlib.util.find_spec("sim.licensing.offline") is not None
+        spec = importlib.util.find_spec("sim.licensing.offline")
     except ModuleNotFoundError:
+        return False
+    if spec is None or spec.origin is None:
+        return False
+
+    # An editable private checkout can coexist with a generated public export.
+    # Only advertise Pro when the verifier belongs to this installed OEL tree;
+    # never borrow a private module discovered through another import path.
+    package_root = Path(__file__).resolve().parents[1]
+    try:
+        return Path(spec.origin).resolve().is_relative_to(package_root)
+    except (OSError, RuntimeError, ValueError):
         return False
 
 
@@ -129,7 +140,7 @@ def _validate_host_compatibility(manifest: Mapping[str, Any]) -> None:
         raise ContractError(f"OEL {manifest['version']} does not support host platform {platform.system()}.")
     expected_arch = str(manifest.get("architecture", "") or "").lower().replace("amd64", "x86_64").replace("aarch64", "arm64")
     host_arch = platform.machine().lower().replace("amd64", "x86_64").replace("aarch64", "arm64")
-    if expected_arch and expected_arch != host_arch:
+    if expected_arch and expected_arch != "any" and expected_arch != host_arch:
         raise ContractError(f"OEL {manifest['version']} targets architecture {expected_arch}, not host {host_arch}.")
     requires = str(dict(manifest.get("python", {}) or {}).get("requires", "") or "")
     host_python = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
@@ -200,11 +211,17 @@ def _install_runtime(
         if not offline_wheelhouse.is_dir() or not any(offline_wheelhouse.iterdir()):
             raise ContractError("Offline installation requires a non-empty verified wheelhouse.")
         command.extend(["--no-index", "--find-links", str(offline_wheelhouse)])
+    else:
+        command.extend(["--index-url", "https://pypi.org/simple"])
     if constraints is not None:
         command.extend(["-c", str(constraints)])
     command.append(requirement)
     environment = dict(os.environ)
+    for name in tuple(environment):
+        if name.startswith("PIP_"):
+            environment.pop(name, None)
     environment["PIP_DISABLE_PIP_VERSION_CHECK"] = "1"
+    environment["PIP_CONFIG_FILE"] = os.devnull
     if offline_wheelhouse is not None:
         environment["PIP_NO_INDEX"] = "1"
     completed = subprocess.run(command, cwd=source_root, env=environment, capture_output=True, text=True, check=False)
@@ -298,6 +315,22 @@ def install_release(
         if final_root.exists():
             existing = verify_installation(version, paths=locations, full=False)
             if existing["status"] == "official":
+                state = read_state(locations.installations_state, default=empty_installation_state())
+                installations = dict(state.get("installations", {}) or {})
+                if version not in installations:
+                    record_path = final_root / "installation-record.json"
+                    record = load_json_object(record_path)
+                    installations[version] = {
+                        "path": str(final_root),
+                        "record": str(record_path),
+                        "status": str(record.get("status", "official")),
+                        "installed_at": record.get("installed_at"),
+                    }
+                    state["installations"] = installations
+                    history = list(state.get("history", []) or [])
+                    history.append({"operation": "reconcile-install", "version": version, "at": utc_now()})
+                    state["history"] = history[-100:]
+                    atomic_write_json(locations.installations_state, state)
                 return {
                     "schema_version": UPDATE_RECEIPT_SCHEMA,
                     "status": "ready",
@@ -312,8 +345,11 @@ def install_release(
         transaction_root = locations.versions / f".{version}.{lock.transaction_id}.incomplete"
         transaction_root.mkdir(parents=True, exist_ok=False)
         try:
+            verified_archive = transaction_root / "verified-source-archive.tar.gz"
+            shutil.copyfile(archive, verified_archive)
+            verify_release_artifact(verified_archive, artifact)
             extracted = transaction_root / "source"
-            safe_extract(archive, extracted, max_bytes=MAX_RELEASE_BYTES)
+            safe_extract(verified_archive, extracted, max_bytes=MAX_RELEASE_BYTES)
             source_root = _find_source_root(extracted)
             source_version = source_project_version(source_root=source_root)
             if source_version != version:
@@ -382,6 +418,8 @@ def install_release(
             state["history"] = history[-100:]
             atomic_write_json(locations.installations_state, state)
         except Exception:
+            if final_root.exists() and not transaction_root.exists():
+                final_root.replace(transaction_root)
             if transaction_root.exists():
                 failed_record = {
                     "schema_version": INSTALLATION_RECORD_SCHEMA,
@@ -458,7 +496,7 @@ def activate(version: str, *, paths: InstallationPaths | None = None) -> dict[st
     locations = paths or InstallationPaths.default()
     locations.ensure()
     target = validate_version(version)
-    verified = verify_installation(target, paths=locations, full=False)
+    verified = verify_installation(target, paths=locations, full=True)
     if verified["status"] not in {"official", "developer"}:
         raise RuntimeError(f"Cannot activate unverified OEL installation {target}: {verified}")
     with StateLock(locations.transaction_lock, operation=f"activate:{target}") as lock:
@@ -649,6 +687,25 @@ def cleanup(*, paths: InstallationPaths | None = None, dry_run: bool = True, kee
     removed: list[str] = []
     if not dry_run:
         with StateLock(locations.transaction_lock, operation="cleanup"):
+            locked_status = installation_status(paths=locations)
+            locked_current = {
+                item for item in (locked_status.get("current"), locked_status.get("previous")) if item
+            }
+            locked_registry = read_state(locations.workspaces_state, default={})
+            locked_referenced = {
+                str(item.get("locked_version"))
+                for item in dict(locked_registry.get("workspaces", {}) or {}).values()
+                if isinstance(item, dict) and item.get("locked_version")
+            }
+            locked_candidates: list[str] = []
+            for version in candidates:
+                lease_root = locations.version_root(version) / "leases"
+                if version in locked_current or version in locked_referenced:
+                    continue
+                if lease_root.is_dir() and any(lease_root.iterdir()):
+                    continue
+                locked_candidates.append(version)
+            candidates = locked_candidates
             for version in candidates:
                 shutil.rmtree(locations.version_root(version))
                 removed.append(version)
@@ -705,6 +762,20 @@ def uninstall(
         raise RuntimeError(f"Cannot uninstall referenced OEL {target}: {blockers}")
     if not dry_run:
         with StateLock(locations.transaction_lock, operation=f"uninstall:{target}"):
+            current = read_state(locations.current_state, default={})
+            registry = read_state(locations.workspaces_state, default={})
+            lease_root = locations.version_root(target) / "leases"
+            blockers = {
+                "selectors": [name for name in ("current", "previous") if current.get(name) == target],
+                "workspaces": [
+                    str(workspace_id)
+                    for workspace_id, item in dict(registry.get("workspaces", {}) or {}).items()
+                    if isinstance(item, dict) and item.get("locked_version") == target
+                ],
+                "active_leases": sorted(path.name for path in lease_root.iterdir()) if lease_root.is_dir() else [],
+            }
+            if any(blockers.values()):
+                raise RuntimeError(f"Cannot uninstall referenced OEL {target}: {blockers}")
             root = locations.version_root(target)
             if root.is_dir():
                 shutil.rmtree(root)
@@ -904,24 +975,36 @@ def check_channel(
     latest = validate_version(payload.get("latest"), label="channel latest")
     locations = paths or InstallationPaths.default()
     locations.ensure()
-    state = read_state(locations.channel_state, default={"schema_version": "oel.channel-state.v1", "channels": {}})
     channel_id = f"{edition}:{channel}"
-    previous = dict(state.get("channels", {}) or {}).get(channel_id)
-    if previous and version_tuple(latest) < version_tuple(str(previous.get("latest", "0.0"))) and not allow_feed_rollback:
-        raise ContractError(
-            f"Release feed rollback rejected: {channel_id} previously advertised {previous['latest']}, now {latest}."
+    with StateLock(locations.transaction_lock, operation=f"check-channel:{channel_id}"):
+        state = read_state(
+            locations.channel_state,
+            default={"schema_version": "oel.channel-state.v1", "channels": {}},
         )
-    if (
-        previous
-        and version_tuple(latest) == version_tuple(str(previous.get("latest", "0.0")))
-        and str(payload.get("published_at", "")) < str(previous.get("published_at", ""))
-        and not allow_feed_rollback
-    ):
-        raise ContractError(f"Release feed timestamp rollback rejected for {channel_id} at version {latest}.")
-    channels = dict(state.get("channels", {}) or {})
-    channels[channel_id] = {"latest": latest, "published_at": payload.get("published_at"), "checked_at": utc_now()}
-    state["channels"] = channels
-    atomic_write_json(locations.channel_state, state)
+        previous = dict(state.get("channels", {}) or {}).get(channel_id)
+        if (
+            previous
+            and version_tuple(latest) < version_tuple(str(previous.get("latest", "0.0")))
+            and not allow_feed_rollback
+        ):
+            raise ContractError(
+                f"Release feed rollback rejected: {channel_id} previously advertised {previous['latest']}, now {latest}."
+            )
+        if (
+            previous
+            and version_tuple(latest) == version_tuple(str(previous.get("latest", "0.0")))
+            and str(payload.get("published_at", "")) < str(previous.get("published_at", ""))
+            and not allow_feed_rollback
+        ):
+            raise ContractError(f"Release feed timestamp rollback rejected for {channel_id} at version {latest}.")
+        channels = dict(state.get("channels", {}) or {})
+        channels[channel_id] = {
+            "latest": latest,
+            "published_at": payload.get("published_at"),
+            "checked_at": utc_now(),
+        }
+        state["channels"] = channels
+        atomic_write_json(locations.channel_state, state)
     return {
         "schema_version": "oel.update-check.v1",
         "status": "ready",
@@ -955,7 +1038,12 @@ def download_release(
         raise ContractError("Online release artifact is missing url.")
     resolved_url = urllib.parse.urljoin(manifest_url, url)
     _validate_remote_url(resolved_url, allow_local_file=allow_local_file)
-    cache_root = locations.cache / manifest["version"]
+    cache_root = (
+        locations.cache
+        / str(manifest["edition"])
+        / str(manifest["channel"])
+        / str(manifest["version"])
+    )
     cache_root.mkdir(parents=True, exist_ok=True)
     archive = cache_root / artifact["name"]
     temporary = archive.with_suffix(archive.suffix + ".partial")
@@ -1121,13 +1209,22 @@ def rotate_trusted_release_keys(
         label="trusted release-key registry",
     )
     require_keys(payload, {"schema_version", "keys", "signature"}, label="trusted release-key registry")
-    trusted = dict(current_keys or keys_from_path(None, paths=locations))
-    if not verify_payload(payload, trusted):
-        raise ContractError("Trusted release-key registry signature verification failed.")
-    replacement = load_public_keys(registry_path)
-    if not replacement or not any(not key.revoked for key in replacement.values()):
-        raise ContractError("Trusted release-key registry must retain at least one non-revoked key.")
-    atomic_write_json(locations.trusted_release_keys, payload)
+    if not str(payload.get("published_at", "") or ""):
+        raise ContractError("Trusted release-key registry must declare published_at for replay protection.")
+    with StateLock(locations.transaction_lock, operation="rotate-trusted-release-keys"):
+        trusted = dict(current_keys or keys_from_path(None, paths=locations))
+        if not verify_payload(payload, trusted):
+            raise ContractError("Trusted release-key registry signature verification failed.")
+        replacement = load_public_keys(registry_path)
+        active = [key for key in replacement.values() if not key.revoked]
+        if not active:
+            raise ContractError("Trusted release-key registry must retain at least one non-revoked key.")
+        if any(key.alg != "RS256" or key.n.bit_length() < 2048 or key.e != 65537 for key in active):
+            raise ContractError("Active trusted release keys must be RS256, RSA-2048 or stronger, with e=65537.")
+        current_payload = load_json_object(locations.trusted_release_keys)
+        if str(payload["published_at"]) <= str(current_payload.get("published_at", "")):
+            raise ContractError("Trusted release-key registry replay or timestamp rollback rejected.")
+        atomic_write_json(locations.trusted_release_keys, payload)
     return {
         "schema_version": UPDATE_RECEIPT_SCHEMA,
         "status": "ready",

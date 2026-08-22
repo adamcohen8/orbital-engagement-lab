@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from sim.control.attitude.baseline import QuaternionPDController, ReactionWheelPDController
 from sim.control.attitude.detumble_pd import ECIDetumblePDController, RICDetumblePDController
@@ -42,6 +43,14 @@ def test_quaternion_pd_damps_body_rate_and_respects_torque_limit() -> None:
     command = controller.act(_attitude_belief(), 0.0, 2.0)
     assert np.dot(command.torque_body_nm, np.array([0.01, -0.02, 0.03])) < 0.0
     assert np.linalg.norm(command.torque_body_nm) <= 0.01 + 1.0e-12
+
+
+def test_legacy_attitude_controller_rejects_nonfinite_quaternion() -> None:
+    belief = _attitude_belief()
+    belief.state[6] = float("nan")
+
+    with pytest.raises(ValueError, match="finite values"):
+        QuaternionPDController().act(belief, 0.0, 1.0)
 
 
 def test_eci_and_ric_detumble_profiles_emit_named_rate_damping_modes() -> None:

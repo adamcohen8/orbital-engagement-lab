@@ -87,6 +87,7 @@ class OrbitNavigationSolution:
     relative_tracks: tuple[RelativeStateEstimateSI, ...]
     active_faults: tuple[tuple[str, str], ...]
     belief: BeliefState
+    own_state_epoch: ClockTag | None = None
 
     @property
     def own_state_valid(self) -> bool:
@@ -323,6 +324,7 @@ class OrbitNavigator:
             tuple(sorted(self._tracks.values(), key=lambda item: item.target_id)),
             tuple(sorted({**dict(attitude.active_faults), **self._faults}.items())),
             belief,
+            own_state_epoch=self._own_epoch,
         )
 
     def control_solution(self, generated_at: ClockTag) -> OrbitNavigationSolution:
@@ -346,6 +348,7 @@ class OrbitNavigator:
             tuple(sorted(self._tracks.values(), key=lambda item: item.target_id)),
             tuple(sorted({**dict(attitude.active_faults), **self._faults}.items())),
             BeliefState(generated_at),
+            own_state_epoch=self._own_epoch,
         )
 
     def snapshot_state(self) -> dict[str, object]:

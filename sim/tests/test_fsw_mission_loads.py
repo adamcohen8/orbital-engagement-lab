@@ -48,7 +48,7 @@ def _load(revision: int, *, capability: str = "rendezvous") -> OnboardMissionCon
             ConstraintDefinition(
                 "keep-out",
                 ConstraintKind.MISSION_SAFETY_ENVELOPE,
-                "range_minimum.v1",
+                "minimum_range_m",
                 parameters=(TelemetryField("radius_m", 2.0, "m"),),
             ),
         ),

@@ -300,6 +300,7 @@ def build_satellite_flight_software_runtime(
                     kd=_gain3(params.get("kd", 1.0)),
                     max_torque_n_m=max_torque,
                 ),
+                measurement_stale_after_s=float(params.get("measurement_stale_after_s", 30.0)),
                 health=_health_config(
                     params,
                     default_fallbacks=(
@@ -466,6 +467,13 @@ def _build_translation_runtime(
     mode = TranslationMode(str(params.get("translation_mode", defaults[stack_id].value)))
     max_accel = float(params.get("max_acceleration_m_s2", 0.02))
     max_force = float(params.get("max_force_n", max(max_accel * mass_kg, 1.0e-9)))
+    if mode in {TranslationMode.INTERCEPT_COAST, TranslationMode.PREDICTIVE_EVASION}:
+        if hardware_profile != "hardware.ideal_wrench.v1":
+            raise ValueError(
+                "predictive intercept/evasion currently requires hardware.ideal_wrench.v1 so the searched "
+                "actuation envelope matches the authoritative allocator"
+            )
+        max_accel = min(max_accel, max_force / mass_kg)
     actuator_frame = FrameId(f"OEL/ACTUATOR/{object_id}/translation", "frames-v1")
     relative = FrameId(f"OEL/RIC/{reference_object_id}", "frames-v1")
     target_relative = tuple(
@@ -577,6 +585,16 @@ def _build_translation_runtime(
         thrust_window_phase_s=float(params.get("thrust_window_phase_s", 0.0)),
         thrust_command_deadband_m_s2=float(params.get("thrust_command_deadband_m_s2", 0.0)),
         element_averaging_window_s=float(params.get("element_averaging_window_s", 0.0)),
+        prediction_horizon_s=float(params.get("prediction_horizon_s", 1_800.0)),
+        prediction_step_s=float(params.get("prediction_step_s", 30.0)),
+        prediction_decision_interval_s=float(params.get("prediction_decision_interval_s", 120.0)),
+        prediction_pulse_duration_s=float(params.get("prediction_pulse_duration_s", 60.0)),
+        capture_radius_m=float(params.get("capture_radius_m", 100.0)),
+        capture_margin_m=float(params.get("capture_margin_m", 20.0)),
+        opponent_max_acceleration_m_s2=float(params.get("opponent_max_acceleration_m_s2", 0.02)),
+        prediction_acceleration_fractions=tuple(
+            float(value) for value in params.get("prediction_acceleration_fractions", (0.5, 1.0))
+        ),
     )
     use_continuous_engine = hardware_profile == "hardware.continuous_engine.v1"
     use_rcs = hardware_profile == "hardware.rcs.v1"
@@ -761,6 +779,7 @@ def _build_translation_runtime(
                 params.get("navigation_relative_mean_motion_rad_s", control.mean_motion_rad_s or 0.0011)
             ),
             navigation_nis_limit=float(params.get("navigation_nis_limit", 30.0)),
+            measurement_stale_after_s=float(params.get("measurement_stale_after_s", 30.0)),
             health=_health_config(params),
             resources=ResourceLimits(
                 minimum_battery_soc=float(params.get("minimum_battery_soc", 0.15)),
@@ -825,6 +844,14 @@ def _build_translation_runtime(
     if attitude_device is not None and attitude_hardware is not None:
         devices.append(attitude_device)
         hardware["attitude"] = attitude_hardware
+    device_ids = {device.actuator_id for device in devices}
+    for primary, backup in stack.config.health.actuator_fallbacks:
+        missing = [actuator_id for actuator_id in (primary, backup) if actuator_id not in device_ids]
+        if missing:
+            raise ValueError(
+                "translation actuator_fallbacks must reference configured actuator devices; "
+                f"missing: {', '.join(sorted(set(missing)))}"
+            )
     return SatelliteFlightSoftwareRuntime(
         satellite_id=object_id,
         stack=stack,

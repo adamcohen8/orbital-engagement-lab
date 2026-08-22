@@ -260,10 +260,15 @@ artifacts.
    `agents/examples/public_agent_ground_access.yaml` to inspect access samples
    and state that this TLE input uses OGP-backed initialization before ONP
    propagation, not continuous catalog-style propagation.
-7. Attitude hold: use
+7. Coverage and directed links: use
+   `examples/configs/public_coverage_and_link_analysis.yaml` to inspect
+   whole-Earth conical coverage and a free-space object-to-object link from one
+   deterministic propagation. State the attitude, cadence, RF, and non-claim
+   boundaries.
+8. Attitude hold: use
    `agents/examples/public_agent_attitude_hold.yaml` to inspect body-rate and
    attitude-control evidence.
-8. One-variable comparison: copy a nearby example, change one parameter, run
+9. One-variable comparison: copy a nearby example, change one parameter, run
    both cases, and compare only metrics or histories present in artifacts.
 
 Mission-input ingestion, external observation normalization, batch orbit
@@ -349,6 +354,7 @@ does not match an example:
 | Mission recovery +C burn | `agents/examples/public_agent_mission_recovery_plus_c_burn.yaml` | `python run_simulation.py --config agents/examples/public_agent_mission_recovery_plus_c_burn.yaml --validate-only` |
 | Mission reconstitution trade space | `agents/examples/public_agent_mission_reconstitution_trade_space.yaml` | `python run_simulation.py --config agents/examples/public_agent_mission_reconstitution_trade_space.yaml --validate-only` |
 | TLE ground-station access | `agents/examples/public_agent_ground_access.yaml` | `python run_simulation.py --config agents/examples/public_agent_ground_access.yaml --validate-only` |
+| Whole-Earth coverage and directed link | `examples/configs/public_coverage_and_link_analysis.yaml` | `python run_simulation.py --config examples/configs/public_coverage_and_link_analysis.yaml --validate-only` |
 | Attitude hold | `agents/examples/public_agent_attitude_hold.yaml` | `python run_simulation.py --config agents/examples/public_agent_attitude_hold.yaml --validate-only` |
 
 These examples enable standard review output so agents can practice querying

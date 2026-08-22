@@ -10,7 +10,9 @@ import base64
 import hashlib
 import json
 import math
+import os
 import secrets
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -160,16 +162,30 @@ def write_key_files(
             raise FileExistsError(f"Refusing to replace existing key file: {path}")
         path.parent.mkdir(parents=True, exist_ok=True)
     public_key = RSAPublicKey(key_id=private_key.key_id, n=private_key.n, alg=private_key.alg)
-    private_path.write_text(json.dumps(private_key_to_json(private_key), indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    public_path.write_text(
-        json.dumps({"keys": [public_key_to_json(public_key)]}, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
+    if private_path.resolve(strict=False) == public_path.resolve(strict=False):
+        raise ValueError("Private and public key outputs must be different paths.")
+    _atomic_key_write(
+        private_path,
+        json.dumps(private_key_to_json(private_key), indent=2, sort_keys=True) + "\n",
+        mode=0o600,
     )
+    _atomic_key_write(
+        public_path,
+        json.dumps({"keys": [public_key_to_json(public_key)]}, indent=2, sort_keys=True) + "\n",
+        mode=0o644,
+    )
+
+
+def _atomic_key_write(path: Path, payload: str, *, mode: int) -> None:
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
+        handle.write(payload)
+        temporary = Path(handle.name)
     try:
-        private_path.chmod(0o600)
-        public_path.chmod(0o644)
-    except OSError:
-        pass
+        os.chmod(temporary, mode)
+        temporary.replace(path)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
 
 
 def _rsa_verify_sha256(message: bytes, signature: bytes, key: RSAPublicKey) -> bool:

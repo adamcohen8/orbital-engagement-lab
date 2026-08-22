@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import math
 from dataclasses import asdict, dataclass
 from functools import lru_cache
@@ -116,10 +117,22 @@ class FrameContext:
         data["legacy_frame_model"] = sampled.legacy_frame_model
         data["sample_t_s"] = float(sample_t_s)
         data["polar_motion_applied"] = sampled.eop_rotation_available
+        if sampled.eop_path:
+            data["eop_table_sha256"] = _eop_table_sha256(sampled.eop_path)
         data["nutation_corrections_applied"] = bool(
             sampled.eop_rotation_available and (float(sampled.ddpsi_rad) != 0.0 or float(sampled.ddeps_rad) != 0.0)
         )
         return data
+
+
+@lru_cache(maxsize=16)
+def _eop_table_sha256(path_value: str) -> str:
+    digest = hashlib.sha256()
+    for array in _load_eop_table(path_value):
+        normalized = np.ascontiguousarray(np.asarray(array, dtype="<f8"))
+        digest.update(normalized.dtype.str.encode("ascii"))
+        digest.update(normalized.tobytes(order="C"))
+    return digest.hexdigest()
 
 
 def normalize_frame_model(model: Any) -> str:
@@ -618,6 +631,8 @@ def _eci_to_ecef_rotation_hpop_like_uncached(
     has_manual_eop = any(value is not None for value in (dut1_s, xp_arcsec, yp_arcsec, dat_s)) or (
         float(ddpsi_rad) != 0.0 or float(ddeps_rad) != 0.0
     )
+    if jd_utc_start is None and (eop_path or has_manual_eop):
+        raise ValueError("IAU76/80 EOP frame transforms require jd_utc_start when EOP data is configured.")
     if jd_utc_start is None or (not eop_path and not has_manual_eop):
         return eci_to_ecef_rotation(t_s, jd_utc_start=jd_utc_start)
 
@@ -843,6 +858,15 @@ def _eci_to_ecef_rotation_derivative_context(t_s: float, context: FrameContext) 
                 ) / (12.0 * step_s)
             except ValueError as backward_error:
                 raise centered_error from backward_error
+
+
+def eci_to_ecef_rotation_derivative_context(
+    t_s: float,
+    context: FrameContext,
+) -> np.ndarray:
+    """Return d(ECEF-from-ECI)/dt for the selected frame context."""
+
+    return _eci_to_ecef_rotation_derivative_context(float(t_s), context)
 
 
 def eci_to_ecef_harmonic(

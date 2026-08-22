@@ -395,6 +395,23 @@ def _parse_initial_state_section(value: Any, role: str) -> dict[str, Any]:
         state.get("default_circular_earth"), f"{path}.default_circular_earth"
     ):
         raise ValueError(f"{path}.default_circular_earth must be true when selected.")
+    if form == "source":
+        source = str(state.get("source", "") or "").strip().lower()
+        if source not in {"rocket_deployment", "rocket_insertion"}:
+            raise ValueError(f"{path}.source must be one of: rocket_deployment, rocket_insertion.")
+        if source == "rocket_deployment" and state.get("deploy_time_s") is None:
+            raise ValueError(f"{path}.deploy_time_s is required when source is rocket_deployment.")
+        state["source"] = source
+    if form == "relative_to_target_ric":
+        rel_path = f"{path}.relative_to_target_ric"
+        rel = _as_dict(state[form], rel_path)
+        _reject_unknown_fields(rel, rel_path, {"state", "frame", "reference_frame", "origin"})
+        state[form] = rel
+    if form == "relative_to_target_cislunar":
+        rel_path = f"{path}.relative_to_target_cislunar"
+        rel = _as_dict(state[form], rel_path)
+        _reject_unknown_fields(rel, rel_path, {"state"})
+        state[form] = rel
     if form == "coes":
         state["coes"] = _parse_coes_initial_state(state["coes"], f"{path}.coes")
     if form == "ogp_mean_elements":

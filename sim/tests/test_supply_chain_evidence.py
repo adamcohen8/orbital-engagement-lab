@@ -22,6 +22,7 @@ def test_generate_python_sbom_contains_project_metadata() -> None:
     assert dict(sbom["metadata"])["component"]["name"] == "orbital-engagement-lab"
     assert dict(sbom["metadata"])["component"]["version"] == _source_project_version()
     assert any(component["name"].lower() == "numpy" for component in list(sbom["components"]))
+    assert all("hashes" not in component for component in list(sbom["components"]))
 
 
 def test_write_sbom_creates_json_file(tmp_path: Path) -> None:

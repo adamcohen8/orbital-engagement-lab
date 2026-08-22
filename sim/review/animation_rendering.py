@@ -47,6 +47,7 @@ def render_review_animation_artifact(
     spec: ReviewAnimationSpec,
     *,
     path: str | Path,
+    record: bool = True,
 ) -> ReviewAnimationArtifact:
     if recipe.renderer_id != "ric_rectangular_2d":
         raise ValueError(f"Unsupported review animation renderer_id '{recipe.renderer_id}'.")
@@ -216,7 +217,8 @@ def render_review_animation_artifact(
         spec=spec,
         qa=report.to_dict(),
     )
-    record_generated_animation(workspace, artifact, recipe=recipe)
+    if record:
+        record_generated_animation(workspace, artifact, recipe=recipe)
     return artifact
 
 
@@ -368,6 +370,7 @@ def _review_store_identity(workspace: ReviewWorkspace) -> dict[str, Any]:
         "relative_path": _relative_to_output(workspace, workspace.db_path),
         "size_bytes": int(stat.st_size),
         "mtime_ns": int(stat.st_mtime_ns),
+        "sha256": hashlib.sha256(workspace.db_path.read_bytes()).hexdigest(),
     }
 
 

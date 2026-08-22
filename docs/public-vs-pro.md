@@ -20,6 +20,10 @@ The public core includes:
   trusted lifecycle validation, component tests, and one deterministic serial
   smoke run;
 - scenario YAML, CLI, Python API, review-store queries, and plotting;
+- deterministic whole-Earth coverage, point/region/rich-footprint queries,
+  free-space directed-link budgets, communications coverage, constellation
+  aggregation, bounded tasking, cadence sensitivity, event refinement, and
+  their ONP/OGP/review-history adapters;
 - a bounded two-body Lambert transfer planner and mission-recovery estimates;
 - public examples, the RPO Trainer, and reproducible public validation evidence;
 - educational rocket/ascent primitives and public rocket GNC contracts.
@@ -54,6 +58,12 @@ review-ready packaging:
 The public Lambert planner is a bounded two-body trade-space tool. It does not
 make general optimization, uncertainty analysis, or operational maneuver
 planning public.
+
+Public coverage sensitivity compares explicitly supplied deterministic
+coverage products; it does not make Pro campaign orchestration public. Public
+bounded tasking and constellation aggregation do not include managed
+multi-asset scheduling, customer catalogs, operational-scale optimization,
+weather/interference services, or proprietary calibrated equipment data.
 
 Frontier-model evaluation source, configs, tests, provider integrations, and
 generated evidence remain private. Public release notes may describe the

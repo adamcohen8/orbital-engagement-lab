@@ -9,11 +9,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
+import numpy as np
+
 from sim.plotting.quality import STRICT_AGENT_PLOT_QUALITY, PlotQualityReport, apply_plot_quality_policy
 from sim.plotting.style import add_artifact_footer, artifact_metadata, oel_plot_context, save_oel_figure
 from sim.review.plot_recipes import REVIEW_PLOT_RECIPES, ReviewPlotRecipe
 from sim.review.queries import get_saved_review_query
-from sim.review.workspace import ReviewQueryResult, ReviewWorkspace
+from sim.review.workspace import ReviewQueryError, ReviewQueryResult, ReviewWorkspace
 from sim.runtime_environment import configure_headless_runtime
 
 PLOT_TYPES = ("line", "scatter", "bar", "histogram", "heatmap")
@@ -365,6 +367,15 @@ def record_generated_artifact(workspace: ReviewWorkspace, artifact: ReviewPlotAr
         except Exception:
             existing = []
     spec = artifact.spec
+    try:
+        metadata = workspace.query(
+            "SELECT oel_version, review_schema_version FROM run_metadata LIMIT 1",
+            max_rows=1,
+        )
+    except ReviewQueryError:
+        version_row = {}
+    else:
+        version_row = metadata.rows[0] if metadata.rows else {}
     existing.append(
         {
             "artifact_id": artifact.artifact_id,
@@ -385,7 +396,12 @@ def record_generated_artifact(workspace: ReviewWorkspace, artifact: ReviewPlotAr
             "x_label": spec.x_label,
             "y_label": spec.y_label,
             "row_count": artifact.row_count,
+            "max_rows": spec.max_rows,
             "truncated": artifact.truncated,
+            "oel_version": str(version_row.get("oel_version") or "unknown"),
+            "review_schema_version": str(
+                version_row.get("review_schema_version") or "unknown"
+            ),
             "query_sha256": hashlib.sha256(spec.sql.encode("utf-8")).hexdigest(),
             "review_store": _review_store_identity(workspace),
             "qa": dict(artifact.qa),
@@ -401,6 +417,7 @@ def _review_store_identity(workspace: ReviewWorkspace) -> dict[str, Any]:
         "relative_path": _relative_to_output(workspace, workspace.db_path),
         "size_bytes": int(stat.st_size),
         "mtime_ns": int(stat.st_mtime_ns),
+        "sha256": hashlib.sha256(workspace.db_path.read_bytes()).hexdigest(),
     }
 
 
@@ -608,10 +625,15 @@ def _draw_series(
 
 
 def _draw_bar(ax: Any, rows: list[dict[str, Any]], spec: ReviewPlotSpec) -> None:
-    y_column = spec.y_columns[0]
-    labels = [str(row.get(spec.x_column)) for row in rows if row.get(y_column) is not None]
-    values = [float(row.get(y_column)) for row in rows if row.get(y_column) is not None]
-    ax.bar(labels, values, label=y_column if len(spec.y_columns) == 1 else None)
+    labels = [str(row.get(spec.x_column)) for row in rows]
+    series_count = len(spec.y_columns)
+    width = 0.8 / max(series_count, 1)
+    centers = np.arange(len(labels), dtype=float)
+    for series_index, y_column in enumerate(spec.y_columns):
+        values = [float(row[y_column]) if row.get(y_column) is not None else np.nan for row in rows]
+        offsets = centers - 0.4 + width * (series_index + 0.5)
+        ax.bar(offsets, values, width=width, label=y_column if series_count > 1 else None)
+    ax.set_xticks(centers, labels)
     if len(labels) > 8:
         ax.tick_params(axis="x", labelrotation=35)
 

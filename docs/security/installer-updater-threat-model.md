@@ -53,8 +53,9 @@ default and preserve workspaces.
 - The one-line `curl | sh` form hides inspection. OEL documentation uses
   download, inspect, then execute; the shorter pipeline is a convenience only.
 - Local administrators and malware with write access to managed roots can
-  replace launchers or state. `oel update status --full` detects source-tree
-  drift but is not an OS integrity monitor.
+  replace launchers or state. Activation and managed-engine dispatch verify
+  the installed source tree; `oel update status --full` exposes the same check
+  explicitly, but none of these is an OS integrity monitor.
 - Disk exhaustion and power loss can leave incomplete cache/transaction data.
   They must not change the current selector; stale-lock recovery requires
   confirming no updater is active.

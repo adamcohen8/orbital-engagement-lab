@@ -134,6 +134,10 @@ class SingleRunHistoryStore:
             aid: self.compact_event_history_latest(rows, retained_start_time_s=retained_start_time_s)
             for aid, rows in engine.bridge_hist.items()
         }
+        engine.command_decision_hist = {
+            aid: self.compact_event_history_latest(rows, retained_start_time_s=retained_start_time_s)
+            for aid, rows in engine.command_decision_hist.items()
+        }
         engine.sample_offset += start
         engine.current_index = keep - 1
 

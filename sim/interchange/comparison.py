@@ -243,6 +243,16 @@ def _compare_ogp_mean_elements(checks: list[dict[str, Any]], product: Mapping[st
     )
     _check(checks, "ogp.propagation_method", "model", "general", scenario_obj.get("propagation_method"))
     _check(checks, "ogp.general_model", "model", "sgp4", dict(scenario_obj.get("general", {}) or {}).get("model"))
+    propagation = dict(payload.get("propagation", {}) or {})
+    handoff = dict(dict(scenario.get("metadata", {}) or {}).get("handoff", {}) or {})
+    _check(checks, "ogp.source_regime", "provenance", propagation.get("regime"), handoff.get("source_ogp_regime"))
+    _check(
+        checks,
+        "ogp.source_propagator_name",
+        "provenance",
+        propagation.get("propagator_name"),
+        handoff.get("source_ogp_propagator_name"),
+    )
 
 
 def _compare_relative_state(checks: list[dict[str, Any]], product: Mapping[str, Any], scenario: Mapping[str, Any]) -> None:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import asdict, fields, is_dataclass
 from typing import Any
 
@@ -31,8 +32,8 @@ class GamePhysicsSession:
         self._observer_policy = str(game.get("observer_policy", "truth_assisted") or "truth_assisted")
         self._scoring_policy = str(game.get("scoring_policy", "configured_training.v1") or "")
         self._controlled_object_id = str(game.get("controlled_object_id", "chaser") or "chaser")
-        self._observer_samples: list[dict[str, Any]] = []
-        self._scoring_events: list[dict[str, Any]] = []
+        self._observer_samples: deque[dict[str, Any]] = deque(maxlen=retained)
+        self._scoring_events: deque[dict[str, Any]] = deque(maxlen=retained)
 
     @property
     def config(self) -> SimulationConfig:

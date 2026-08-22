@@ -124,14 +124,31 @@ class AttitudeNavigator:
         self._magnetic_body: tuple[float, float, float] | None = None
         self._faults: dict[str, str] = {}
         self._seen: set[PacketId] = set()
+        self._last_sequence_by_source: dict[tuple[str, str], int] = {}
+        self._last_sample_time_by_sensor: dict[str, ClockTag] = {}
         self._provenance: list[PacketId] = []
         self._degraded = False
 
-    def ingest(self, events: tuple[InputEvent, ...]) -> None:
+    def ingest(
+        self,
+        events: tuple[InputEvent, ...],
+        *,
+        generated_at: ClockTag | None = None,
+        stale_after_s: float | None = None,
+    ) -> None:
         for event in events:
             if event.packet_id in self._seen:
                 continue
             self._seen.add(event.packet_id)
+            source_key = (event.packet_id.source_id, event.packet_id.boot_id)
+            previous_sequence = self._last_sequence_by_source.get(source_key)
+            self._last_sequence_by_source[source_key] = max(
+                event.packet_id.sequence,
+                previous_sequence if previous_sequence is not None else event.packet_id.sequence,
+            )
+            if previous_sequence is not None and event.packet_id.sequence < previous_sequence:
+                self._degraded = True
+                continue
             if event.kind is InputKind.MODELED_FAULT_INDICATION:
                 self._ingest_fault(event.payload)
                 continue
@@ -146,9 +163,21 @@ class AttitudeNavigator:
                 or measurement.sample_time.validity is TimeValidity.INVALID
             ):
                 continue
+            if generated_at is not None:
+                age_s = _elapsed_seconds(measurement.sample_time, generated_at)
+                if age_s is None or age_s < 0.0 or (stale_after_s is not None and age_s > stale_after_s):
+                    self._degraded = True
+                    continue
+            previous_sample = self._last_sample_time_by_sensor.get(measurement.sensor_id)
+            if previous_sample is not None:
+                elapsed_s = _elapsed_seconds(previous_sample, measurement.sample_time)
+                if elapsed_s is None or elapsed_s < 0.0:
+                    self._degraded = True
+                    continue
             if event.quality.validity is DataValidity.SUSPECT:
                 self._degraded = True
             if self._ingest_measurement(measurement):
+                self._last_sample_time_by_sensor[measurement.sensor_id] = measurement.sample_time
                 if self._retain_full_provenance:
                     self._provenance.append(event.packet_id)
                 else:
@@ -267,6 +296,14 @@ class AttitudeNavigator:
                 {"source_id": packet.source_id, "boot_id": packet.boot_id, "sequence": packet.sequence}
                 for packet in sorted(self._seen, key=lambda item: (item.source_id, item.boot_id, item.sequence))
             ],
+            "last_sequence_by_source": [
+                {"source_id": source_id, "boot_id": boot_id, "sequence": sequence}
+                for (source_id, boot_id), sequence in sorted(self._last_sequence_by_source.items())
+            ],
+            "last_sample_time_by_sensor": {
+                sensor_id: _clock_to_dict(sample_time)
+                for sensor_id, sample_time in sorted(self._last_sample_time_by_sensor.items())
+            },
             "provenance": [
                 {"source_id": packet.source_id, "boot_id": packet.boot_id, "sequence": packet.sequence}
                 for packet in self._provenance
@@ -284,6 +321,15 @@ class AttitudeNavigator:
         self._magnetic_body = _optional_tuple(state.get("magnetic_body"), 3)
         self._faults = {str(key): str(value) for key, value in dict(state.get("faults", {})).items()}
         self._seen = {_packet_from_dict(item) for item in list(state.get("seen", []))}
+        self._last_sequence_by_source = {
+            (str(item["source_id"]), str(item["boot_id"])): int(item["sequence"])
+            for item in list(state.get("last_sequence_by_source", []))
+        }
+        self._last_sample_time_by_sensor = {
+            str(sensor_id): sample_time
+            for sensor_id, raw_time in dict(state.get("last_sample_time_by_sensor", {})).items()
+            if (sample_time := _clock_from_dict(raw_time)) is not None
+        }
         self._provenance = [_packet_from_dict(item) for item in list(state.get("provenance", []))]
         self._degraded = bool(state.get("degraded", False))
 
@@ -635,6 +681,8 @@ class AttitudeAllocatorConfig:
         if self.kind is AttitudeAllocatorKind.REACTION_WHEEL:
             if axes.ndim != 2 or axes.shape[1] != 3 or not np.all(np.isfinite(axes)):
                 raise ValueError("reaction-wheel axes must be an Nx3 finite matrix")
+            if not np.allclose(np.linalg.norm(axes, axis=1), 1.0, rtol=1.0e-9, atol=1.0e-9):
+                raise ValueError("reaction-wheel axes must contain unit vectors")
             if limits.size not in (1, axes.shape[0]):
                 raise ValueError("reaction-wheel limits must be scalar or match wheel count")
         elif limits.size not in (1, 3):

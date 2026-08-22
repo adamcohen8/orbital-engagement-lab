@@ -30,6 +30,7 @@ __all__ = [
     'OutputAIConfigSection',
     'OutputResourceLimitsSection',
     'OutputReviewSection',
+    'OutputOrbitalAnalysisSection',
     'OutputsSection',
     'MonteCarloVariation',
     'MonteCarloSection',
@@ -337,6 +338,10 @@ class OutputStatsSection(_TypedConfigDict):
         return bool(self.get("save_full_log", True))
 
     @property
+    def save_csv(self) -> bool:
+        return bool(self.get("save_csv", False))
+
+    @property
     def save_history_npz(self) -> bool:
         return bool(self.get("save_history_npz", False))
 
@@ -489,6 +494,26 @@ class OutputReviewSection(_TypedConfigDict):
         return bool(self.get("strict", False))
 
 
+class OutputOrbitalAnalysisSection(_TypedConfigDict):
+    _defaults: dict[str, Any] = {
+        "enabled": False,
+        "coverage": [],
+        "directed_links": [],
+    }
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.get("enabled", False))
+
+    @property
+    def coverage(self) -> list[dict[str, Any]]:
+        return [dict(value or {}) for value in list(self.get("coverage", []) or [])]
+
+    @property
+    def directed_links(self) -> list[dict[str, Any]]:
+        return [dict(value or {}) for value in list(self.get("directed_links", []) or [])]
+
+
 @dataclass(frozen=True)
 class OutputsSection:
     output_dir: str = "outputs"
@@ -500,6 +525,7 @@ class OutputsSection:
     ai_report: OutputAIReportSection = field(default_factory=OutputAIReportSection)
     ai_config: OutputAIConfigSection = field(default_factory=OutputAIConfigSection)
     review: OutputReviewSection = field(default_factory=OutputReviewSection)
+    orbital_analysis: OutputOrbitalAnalysisSection = field(default_factory=OutputOrbitalAnalysisSection)
     resource_limits: OutputResourceLimitsSection = field(default_factory=OutputResourceLimitsSection)
 
     def __post_init__(self) -> None:
@@ -510,6 +536,7 @@ class OutputsSection:
         object.__setattr__(self, "ai_report", OutputAIReportSection(self.ai_report))
         object.__setattr__(self, "ai_config", OutputAIConfigSection(self.ai_config))
         object.__setattr__(self, "review", OutputReviewSection(self.review))
+        object.__setattr__(self, "orbital_analysis", OutputOrbitalAnalysisSection(self.orbital_analysis))
         object.__setattr__(self, "resource_limits", OutputResourceLimitsSection(self.resource_limits))
 
 

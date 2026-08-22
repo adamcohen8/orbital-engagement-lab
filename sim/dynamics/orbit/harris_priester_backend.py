@@ -6,7 +6,11 @@ from pathlib import Path
 import numpy as np
 
 from sim.dynamics.orbit.epoch import sun_position_eci_km_enhanced, sun_position_eci_km_simple
-from sim.dynamics.orbit.frames import precession_nutation_rotation_hpop_like
+from sim.dynamics.orbit.frames import (
+    FRAME_MODEL_IAU76_80_EOP,
+    normalize_frame_model,
+    precession_nutation_rotation_hpop_like,
+)
 from sim.utils.geodesy import ecef_to_geodetic_deg_km
 
 _BACKEND_PATH = Path(__file__).resolve()
@@ -103,7 +107,7 @@ def harris_priester_density(
     r_eval = r_sat
     frame_model = str(env_local.get("density_frame_model", env_local.get("drag_frame_model", ""))).strip().lower()
     eop_path = env_local.get("density_eop_path", env_local.get("drag_eop_path"))
-    if frame_model == "hpop_like":
+    if normalize_frame_model(frame_model) == FRAME_MODEL_IAU76_80_EOP:
         rbpn = precession_nutation_rotation_hpop_like(
             float(t_s),
             jd_utc_start=env_local.get("jd_utc_start"),

@@ -28,7 +28,18 @@ def _rv_from_initial_state(s0: dict[str, Any], *, target_jd_utc: float | None = 
         spd = float(np.sqrt(EARTH_MU_KM3_S2 / np.linalg.norm(pos)))
         return pos, np.array([0.0, spd, 0.0], dtype=float)
 
-    if any(key in s0 for key in ("relative_to_target_ric", "relative_ric_rect", "source", "launch_lat_deg")):
+    if any(
+        key in s0
+        for key in (
+            "relative_to_target_ric",
+            "relative_ric_rect",
+            "relative_ric_curv",
+            "relative_to_target_cislunar",
+            "relative_cislunar",
+            "source",
+            "launch_lat_deg",
+        )
+    ):
         # These recognized state forms are resolved by their dedicated runtime
         # initializers after the object graph or launch/deployment state exists.
         pos = np.array([7000.0, 0.0, 0.0], dtype=float)

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from importlib.machinery import PathFinder
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
@@ -88,12 +90,55 @@ def _validate_plugin_modules(cfg: Any, policy: SealedModePolicy) -> list[str]:
 
 def _validate_plugin_module(pointer: Any, path: str, policy: SealedModePolicy) -> list[str]:
     module = str(plugin_spec_field(pointer, "module", "") or "").strip()
-    if not module or module.startswith(policy.trusted_plugin_prefixes):
+    if not module:
         return []
+    if module.startswith(policy.trusted_plugin_prefixes):
+        if _module_resolves_from_trusted_installation(module):
+            return []
+        return [
+            f"{path}: sealed mode blocks plugin module '{module}' because it does not resolve "
+            "from the trusted OEL installation tree. Remove the shadowing module or pass "
+            "--allow-untrusted-plugin-imports for an explicitly trusted scenario."
+        ]
     return [
         f"{path}: sealed mode blocks plugin module '{module}'. "
         "Use built-in OEL modules or pass --allow-untrusted-plugin-imports for a trusted scenario."
     ]
+
+
+def _module_resolves_from_trusted_installation(module: str) -> bool:
+    """Resolve a dotted module without importing it and verify its selected origin."""
+
+    search_path = None
+    spec = None
+    parts = module.split(".")
+    for index in range(len(parts)):
+        fullname = ".".join(parts[: index + 1])
+        spec = PathFinder.find_spec(fullname, search_path)
+        if spec is None:
+            return False
+        if index < len(parts) - 1:
+            locations = spec.submodule_search_locations
+            if locations is None:
+                return False
+            search_path = list(locations)
+    if spec is None:
+        return False
+    trusted_root = Path(__file__).resolve().parents[2]
+    origins: list[Path] = []
+    if spec.origin not in (None, "built-in", "frozen"):
+        origins.append(Path(str(spec.origin)).resolve())
+    if spec.submodule_search_locations is not None:
+        origins.extend(Path(str(location)).resolve() for location in spec.submodule_search_locations)
+    return bool(origins) and all(_path_is_within(origin, trusted_root) for origin in origins)
+
+
+def _path_is_within(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
 
 
 def _plugin_pointers(agent: Any) -> list[tuple[str, Any]]:

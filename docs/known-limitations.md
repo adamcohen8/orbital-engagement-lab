@@ -86,8 +86,15 @@ dependency vulnerability fixes require Python 3.10 or newer.
   `frame_provenance`, but this remains a validation/parity surface rather than
   an operational frame service.
 - Ground-station access is passive and geometric. It tracks line of sight,
-  elevation, and range; it does not model RF link budgets, weather, scheduling,
-  or command/telemetry behavior.
+  elevation, and range. The separate public directed-link analysis adds an
+  inspectable free-space budget with scalar or hard-cone gain, but neither
+  workflow models weather, interference, calibrated equipment, scheduling, or
+  command/telemetry behavior.
+- Public coverage and link products are sampled deterministic engineering
+  analyses. They do not establish calibrated sensor performance, operational
+  RF availability, exact swept footprints, probabilistic availability, or
+  independent external-tool parity. Runtime monitoring is limited to an
+  explicitly authorized directed link; whole-Earth coverage is postprocessed.
 - Opt-in ground-station measurements are synthetic geometric rows. The v0
   public core preserves simulator-generated azimuth/elevation/range-style
   evidence for inspection, but calibrated sensor processing, association,

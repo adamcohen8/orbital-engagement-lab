@@ -116,9 +116,26 @@ def render_review_animation(
     recipe, result = load_review_animation_evidence(workspace, spec)
     if result.truncated:
         raise ValueError("The review animation query is truncated; increase frame_stride or use a smaller study.")
-    from sim.review.animation_rendering import render_review_animation_artifact
+    from sim.review.animation_rendering import (
+        record_generated_animation,
+        render_review_animation_artifact,
+    )
 
-    return render_review_animation_artifact(workspace, recipe, result, spec, path=path)
+    artifact = render_review_animation_artifact(
+        workspace, recipe, result, spec, path=path, record=False
+    )
+    if review_animation_plan_id(workspace, spec) != current_id:
+        for generated_path in (
+            artifact.path,
+            artifact.contact_sheet_path,
+            artifact.quality_receipt_path,
+        ):
+            generated_path.unlink(missing_ok=True)
+        raise ValueError(
+            "The review store changed while the planned animation was rendering; no artifact was recorded."
+        )
+    record_generated_animation(workspace, artifact, recipe=recipe)
+    return artifact
 
 
 def review_animation_plan_id(workspace: ReviewWorkspace, spec: ReviewAnimationSpec) -> str:
@@ -134,6 +151,7 @@ def review_animation_plan_id(workspace: ReviewWorkspace, spec: ReviewAnimationSp
             "path": str(workspace.db_path),
             "size_bytes": int(stat.st_size),
             "mtime_ns": int(stat.st_mtime_ns),
+            "sha256": hashlib.sha256(workspace.db_path.read_bytes()).hexdigest(),
         },
         "recipe": recipe.to_dict(),
         "spec": asdict(spec),

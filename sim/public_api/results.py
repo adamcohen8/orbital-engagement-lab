@@ -294,7 +294,7 @@ class SimulationResult:
 
     @property
     def is_batch_analysis(self) -> bool:
-        return self.analysis_study_type in {"monte_carlo", "sensitivity"}
+        return self.analysis_study_type in {"monte_carlo", "sensitivity", "covariance"}
 
     @property
     def is_monte_carlo(self) -> bool:
@@ -354,10 +354,21 @@ class SimulationResult:
         if self.is_batch_analysis:
             return dict(self.payload.get("artifacts", {}) or {})
         summary = self.summary
-        return {
+        artifacts: dict[str, Any] = {
             "plots": dict(summary.get("plot_outputs", {}) or {}),
             "animations": dict(summary.get("animation_outputs", {}) or {}),
         }
+        orbital_analysis = dict(self.payload.get("orbital_analysis", {}) or {})
+        if orbital_analysis:
+            artifacts["orbital_analysis"] = {
+                "coverage": [dict(item.get("artifacts", {}) or {}) for item in orbital_analysis.get("coverage", [])],
+                "directed_links": [
+                    dict(item.get("artifacts", {}) or {}) for item in orbital_analysis.get("directed_links", [])
+                ],
+            }
+        if summary.get("history_binary_outputs"):
+            artifacts["history_npz"] = dict(summary.get("history_binary_outputs", {}) or {})
+        return artifacts
 
     @property
     def output_dir(self) -> Path:

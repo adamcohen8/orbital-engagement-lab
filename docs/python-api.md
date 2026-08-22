@@ -393,6 +393,33 @@ Add `ground_station_access` to `outputs.plots.figure_ids` for the built-in
 access/elevation/range figure, and set `outputs.plots.draw_earth_map: true`
 when static ground tracks should use a world-map background.
 
+## Coverage And Directed-Link Analysis
+
+The public analysis façade exposes deterministic post-processing kernels and
+history adapters:
+
+```python
+from sim.analysis import (
+    DirectedLinkConfig,
+    GlobalCoverageConfig,
+    evaluate_history_directed_link,
+    evaluate_history_global_coverage,
+    history_from_single_run,
+)
+```
+
+For the integrated scenario workflow, enable `outputs.orbital_analysis` and run
+the scenario normally. The result summary records the number and schema version
+of the analyses, content-bound artifacts are written beneath
+`orbital_analysis/`, and an enabled review store receives `coverage_*` and
+`link_*` tables. Start with
+`examples/configs/public_coverage_and_link_analysis.yaml` and
+[Coverage And Link Scenario Analysis](coverage-link-scenario-analysis.md).
+
+These analyses consume deterministic evidence after propagation. They do not
+alter the simulation unless a caller separately configures the bounded,
+authorized directed-link runtime monitor.
+
 ## Artifacts
 
 Output artifacts are recorded in the result summary. Use artifact maps instead

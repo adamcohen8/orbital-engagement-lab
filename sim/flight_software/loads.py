@@ -110,6 +110,21 @@ class ConstraintDefinition:
         if not isinstance(self.kind, ConstraintKind):
             raise TypeError("kind must be ConstraintKind")
         _nonempty("evaluator_id", self.evaluator_id)
+        allowed_evaluators = {
+            "navigation_available",
+            "minimum_range_m",
+            "maximum_range_m",
+            "maximum_rate_m_s",
+            "maximum_closing_speed_m_s",
+            "no_active_faults",
+            "maximum_active_faults",
+            "minimum_mass_kg",
+            "minimum_propellant_kg",
+            "condition_asserted",
+            "always",
+        }
+        if self.evaluator_id not in allowed_evaluators:
+            raise ValueError(f"unsupported constraint evaluator_id: {self.evaluator_id}")
         _unique_nonempty("applies_to_goal_ids", self.applies_to_goal_ids)
         if not isinstance(self.enabled, bool):
             raise TypeError("enabled must be boolean")

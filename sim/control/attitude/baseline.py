@@ -447,6 +447,8 @@ def _normalize_quaternion(q: np.ndarray) -> np.ndarray:
     qv = np.array(q, dtype=float).reshape(-1)
     if qv.size != 4:
         raise ValueError("Quaternion must be length-4.")
+    if not np.all(np.isfinite(qv)):
+        raise ValueError("Quaternion must contain only finite values.")
     n = float(np.linalg.norm(qv))
     if n == 0.0:
         return np.array([1.0, 0.0, 0.0, 0.0])

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import csv
 import hashlib
 import importlib
 import json
 import os
 import re
-import shutil
 import stat
 from dataclasses import dataclass
 from pathlib import Path
@@ -41,6 +41,7 @@ class SingleRunArtifactContext:
     reentry_metrics: dict[str, dict[str, np.ndarray]]
     bridge_hist: dict[str, list[dict[str, Any]]]
     object_state_frames: dict[str, str]
+    object_propagation: dict[str, Any] | None = None
     extra_artifacts: dict[str, Any] | None = None
 
 
@@ -140,6 +141,35 @@ def write_single_run_artifacts(
     context: SingleRunArtifactContext,
 ) -> dict[str, Any]:
     summary = payload.setdefault("summary", {})
+    if bool(context.cfg.outputs.orbital_analysis.enabled):
+        from sim.reporting.orbital_analysis import run_scenario_orbital_analysis
+
+        orbital_analysis = run_scenario_orbital_analysis(context=context)
+        payload["_orbital_analysis_review"] = orbital_analysis
+        payload["orbital_analysis"] = {
+            "schema_version": orbital_analysis.get("schema_version"),
+            "coverage": [
+                {
+                    key: value
+                    for key, value in item.items()
+                    if key not in {"samples", "intervals", "transitions"}
+                }
+                for item in orbital_analysis.get("coverage", [])
+            ],
+            "directed_links": [
+                {
+                    key: value
+                    for key, value in item.items()
+                    if key not in {"samples", "windows", "transitions"}
+                }
+                for item in orbital_analysis.get("directed_links", [])
+            ],
+        }
+        summary["orbital_analysis"] = {
+            "coverage_analysis_count": len(orbital_analysis.get("coverage", [])),
+            "directed_link_analysis_count": len(orbital_analysis.get("directed_links", [])),
+            "schema_version": orbital_analysis.get("schema_version"),
+        }
     previous_owned_artifacts = _previous_owned_artifacts(context.outdir)
     source_path = getattr(context.cfg, "source_path", None)
     if source_path is not None:
@@ -224,6 +254,13 @@ def write_single_run_artifacts(
         summary["bridge_extension_summary"] = bridge_summary
 
     artifacts: dict[str, Any] = dict(context.extra_artifacts or {})
+    if payload.get("orbital_analysis"):
+        artifacts["orbital_analysis"] = {
+            "coverage": [item.get("artifacts", {}) for item in payload["orbital_analysis"].get("coverage", [])],
+            "directed_links": [item.get("artifacts", {}) for item in payload["orbital_analysis"].get("directed_links", [])],
+        }
+    if bool(context.cfg.outputs.stats.get("save_csv", False)):
+        artifacts["history_csv"] = str(_write_history_csv(context=context))
     if bool(context.cfg.outputs.stats.get("save_history_npz", False)):
         history_outputs = _write_history_npz(context=context)
         if history_outputs:
@@ -258,6 +295,7 @@ def write_single_run_artifacts(
             "schema_json": str(context.outdir / "review" / "schema.json"),
         }
     review_outputs = _write_review_store(payload=payload, context=context, artifacts=artifacts)
+    payload.pop("_orbital_analysis_review", None)
     if review_outputs:
         summary["review_outputs"] = review_outputs
         summary["review_sqlite_path"] = str(review_outputs.get("sqlite") or "")
@@ -299,8 +337,8 @@ def _artifact_file_paths(value: Any) -> set[Path]:
 
 
 def _previous_owned_artifacts(output_dir: Path) -> set[Path]:
-    # Cleanup never trusts a mutable inventory or review database as deletion
-    # authority. Only fixed, simulator-owned filenames are eligible here.
+    # Fixed names are always owned. Dynamic names are eligible only when the
+    # prior inventory's digest still matches a regular file under this output.
     relative_paths = (
         "index.md",
         "master_run_summary.json",
@@ -313,7 +351,25 @@ def _previous_owned_artifacts(output_dir: Path) -> set[Path]:
         "review/workflow_manifest.json",
         "review/generated_artifacts.json",
     )
-    return {output_dir / relative for relative in relative_paths if (output_dir / relative).is_file()}
+    owned = {output_dir / relative for relative in relative_paths if (output_dir / relative).is_file()}
+    inventory_path = output_dir / ".oel_run_artifacts.json"
+    try:
+        inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, json.JSONDecodeError, TypeError):
+        return owned
+    root = output_dir.resolve()
+    for row in list(dict(inventory or {}).get("paths", []) or []):
+        item = dict(row or {})
+        relative = Path(str(item.get("path", "") or ""))
+        expected = str(item.get("sha256", "") or "")
+        if relative.is_absolute() or not relative.parts or ".." in relative.parts or not expected:
+            continue
+        candidate = root / relative
+        if candidate.is_file() and not candidate.is_symlink():
+            actual = hashlib.sha256(candidate.read_bytes()).hexdigest()
+            if actual == expected:
+                owned.add(candidate)
+    return owned
 
 
 def _prune_stale_owned_artifacts(*, output_dir: Path, previous: set[Path], current: set[Path]) -> None:
@@ -362,6 +418,39 @@ def _write_owned_artifact_inventory(output_dir: Path, paths: set[Path]) -> None:
     inventory.write_text(json.dumps({"version": 2, "paths": owned}, indent=2) + "\n", encoding="utf-8")
 
 
+def _write_history_csv(*, context: SingleRunArtifactContext) -> Path:
+    path = context.outdir / "master_run_history.csv"
+    state_columns = (
+        "x_eci_km", "y_eci_km", "z_eci_km", "vx_eci_km_s", "vy_eci_km_s", "vz_eci_km_s",
+        "quat_w", "quat_x", "quat_y", "quat_z", "omega_x_body_rad_s", "omega_y_body_rad_s",
+        "omega_z_body_rad_s", "mass_kg",
+    )
+    fieldnames = ["sample_index", "time_s", "object_id", *state_columns]
+    context.outdir.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=fieldnames)
+        writer.writeheader()
+        times = np.asarray(context.t_s, dtype=float).reshape(-1)
+        for object_id, raw in sorted(context.truth_hist.items()):
+            history = np.asarray(raw, dtype=float)
+            if history.ndim != 2:
+                continue
+            for sample_index in range(min(times.size, history.shape[0])):
+                row: dict[str, Any] = {
+                    "sample_index": sample_index,
+                    "time_s": float(times[sample_index]),
+                    "object_id": object_id,
+                }
+                row.update(
+                    {
+                        column: float(history[sample_index, index])
+                        for index, column in enumerate(state_columns[: history.shape[1]])
+                    }
+                )
+                writer.writerow(row)
+    return path
+
+
 def _write_history_npz(*, context: SingleRunArtifactContext) -> dict[str, Any]:
     path = context.outdir / "master_run_history.npz"
     arrays: dict[str, np.ndarray] = {"time_s": np.asarray(context.t_s, dtype=float)}
@@ -372,6 +461,8 @@ def _write_history_npz(*, context: SingleRunArtifactContext) -> dict[str, Any]:
     }
 
     def add_array(key: str, arr: np.ndarray, *, kind: str, path_label: str) -> None:
+        if key in arrays or key in manifest["arrays"]:
+            raise ValueError(f"history NPZ key collision for {path_label!r}: {key!r}")
         arrays[key] = np.asarray(arr)
         manifest["arrays"][key] = {"kind": kind, "path": path_label}
 
@@ -474,18 +565,19 @@ def _write_review_store(
     review_cfg = context.cfg.outputs.review
     if not bool(review_cfg.enabled):
         review_dir = context.outdir / "review"
-        if review_dir.is_dir() and not review_dir.is_symlink():
-            shutil.rmtree(review_dir)
+        for name in ("run.sqlite", "run.sqlite.tmp", "schema.json"):
+            path = review_dir / name
+            if path.is_file() and not path.is_symlink():
+                path.unlink()
         return {}
     try:
         return write_single_run_review_store(payload=payload, context=context, artifacts=artifacts)
     except Exception as exc:
         if bool(review_cfg.strict):
             raise
-        review_dir = context.outdir / "review"
-        for stale_path in (review_dir / "run.sqlite", review_dir / "schema.json"):
-            if stale_path.exists():
-                stale_path.unlink()
+        staged_db = context.outdir / "review" / "run.sqlite.tmp"
+        if staged_db.is_file() and not staged_db.is_symlink():
+            staged_db.unlink()
         status = f"failed:{type(exc).__name__}: {exc}"
         payload.setdefault("summary", {})["review_store_status"] = status
         return {}

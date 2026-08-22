@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import io
 import json
 import os
@@ -16,7 +17,7 @@ import pytest
 import yaml
 
 from sim.installation.archive import UnsafeArchiveError, safe_extract
-from sim.installation.cli import _build_parser, _dispatch, _source_from_record, _split_dispatch_argv
+from sim.installation.cli import _build_parser, _dispatch, _engine_lease, _source_from_record, _split_dispatch_argv
 from sim.installation.contracts import (
     CHANNEL_INDEX_SCHEMA,
     RELEASE_MANIFEST_SCHEMA,
@@ -208,6 +209,17 @@ def test_pro_installation_fails_closed_without_license_module(
     assert pro_installation_available() is False
     with pytest.raises(ContractError, match="Managed OEL Pro installation is unavailable"):
         install_release(manifest, paths=_paths(tmp_path), public_keys=public, create_runtime=False)
+
+
+def test_pro_installation_rejects_license_module_from_another_tree(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    external_module = tmp_path / "other-oel" / "sim" / "licensing" / "offline.py"
+    spec = importlib.util.spec_from_file_location("sim.licensing.offline", external_module)
+    monkeypatch.setattr("sim.installation.manager.importlib.util.find_spec", lambda _name: spec)
+
+    assert pro_installation_available() is False
 
 
 def test_release_contract_rejects_unknown_fields(signing_keys: tuple[object, dict[str, RSAPublicKey]]) -> None:
@@ -497,6 +509,55 @@ def test_download_preserves_signed_manifest_and_rejects_feed_rollback(
         check_channel(public_keys=keys, paths=paths, allow_local_file=True)
 
 
+def test_download_cache_isolated_by_edition_and_channel(
+    tmp_path: Path,
+    signing_keys: tuple[object, dict[str, RSAPublicKey]],
+) -> None:
+    private, keys = signing_keys
+    stable_manifest, _ = _release(tmp_path / "stable", "0.26.0", private)
+    preview_manifest, _ = _release(tmp_path / "preview", "0.26.0", private)
+    preview_payload = json.loads(preview_manifest.read_text(encoding="utf-8"))
+    preview_payload.pop("signature")
+    preview_payload["channel"] = "preview"
+    preview_manifest.write_text(
+        json.dumps(sign_payload(preview_payload, private)),  # type: ignore[arg-type]
+        encoding="utf-8",
+    )
+    paths = _paths(tmp_path / "managed")
+
+    stable = download_release(stable_manifest.as_uri(), paths=paths, public_keys=keys, allow_local_file=True)
+    preview = download_release(preview_manifest.as_uri(), paths=paths, public_keys=keys, allow_local_file=True)
+
+    assert Path(stable["manifest"]).parent != Path(preview["manifest"]).parent
+    assert json.loads(Path(stable["manifest"]).read_text(encoding="utf-8"))["channel"] == "stable"
+    assert json.loads(Path(preview["manifest"]).read_text(encoding="utf-8"))["channel"] == "preview"
+
+
+def test_engine_lease_checks_selected_version_while_holding_transaction_lock(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths = _paths(tmp_path)
+    version_root = paths.version_root("0.26.0")
+    version_root.mkdir(parents=True)
+
+    class RemovingLock:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def __enter__(self) -> None:
+            shutil.rmtree(version_root)
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+    monkeypatch.setattr("sim.installation.cli.StateLock", RemovingLock)
+
+    with pytest.raises(RuntimeError, match="disappeared before it could be leased"):
+        with _engine_lease(paths, "0.26.0", "official"):
+            pytest.fail("missing selected engine must not be dispatched")
+
+
 def test_install_latest_uses_configured_channel_without_activation(
     tmp_path: Path,
     signing_keys: tuple[object, dict[str, RSAPublicKey]],
@@ -609,16 +670,6 @@ def test_release_build_is_reproducible_signed_and_contains_evidence(
     (source / "constraints" / "py314.txt").write_text("example==1 --hash=sha256:" + "0" * 64 + "\n", encoding="utf-8")
     evidence = tmp_path / "evidence"
     evidence.mkdir()
-    sbom = evidence / "sbom.cdx.json"
-    sbom.write_text('{"private_path": "/Users/example/private-oel", "product": "oel-pro"}\n', encoding="utf-8")
-    gate = {
-        "schema_version": 1,
-        "kind": "oel_supply_chain_gate",
-        "package_version": "0.25.0",
-        "passed": True,
-        "artifacts": [{"path": str(sbom), "bytes": sbom.stat().st_size, "sha256": sha256_file(sbom)}],
-    }
-    (evidence / "supply-chain-gate.json").write_text(json.dumps(gate), encoding="utf-8")
     private_path = tmp_path / "private-key.json"
     private_path.write_text(json.dumps(private_key_to_json(private)), encoding="utf-8")  # type: ignore[arg-type]
     public_path = tmp_path / "public-keys.json"
@@ -634,6 +685,41 @@ def test_release_build_is_reproducible_signed_and_contains_evidence(
         archive.writestr("fixture-1.0.dist-info/METADATA", "Name: fixture\nVersion: 1.0\n")
         archive.writestr("fixture-1.0.dist-info/WHEEL", "Wheel-Version: 1.0\nTag: py3-none-any\n")
         archive.writestr("fixture-1.0.dist-info/RECORD", "")
+    evidence_payloads = {
+        "pip-install-report.json": '{"install": []}\n',
+        "pip-check.txt": "No broken requirements found.\n",
+        "wheel-inventory.json": json.dumps(
+            {
+                "packages": [
+                    {
+                        "artifact": wheel.name,
+                        "artifact_type": "wheel",
+                        "sha256": sha256_file(wheel),
+                    }
+                ]
+            }
+        )
+        + "\n",
+        "sbom.cdx.json": '{"private_path": "/Users/example/private-oel", "product": "oel-pro"}\n',
+        "python-freeze.txt": "fixture==1.0\n",
+        "pip-audit.json": '{"dependencies": []}\n',
+    }
+    evidence_artifacts = []
+    for name, content in evidence_payloads.items():
+        artifact = evidence / name
+        artifact.write_text(content, encoding="utf-8")
+        evidence_artifacts.append(
+            {"path": str(artifact), "bytes": artifact.stat().st_size, "sha256": sha256_file(artifact)}
+        )
+    gate = {
+        "schema_version": 1,
+        "kind": "oel_supply_chain_gate",
+        "product": "oel-pro",
+        "package_version": "0.25.0",
+        "passed": True,
+        "artifacts": evidence_artifacts,
+    }
+    (evidence / "supply-chain-gate.json").write_text(json.dumps(gate), encoding="utf-8")
     qualification = {
         "status": "passed",
         "network_used": False,
@@ -646,10 +732,15 @@ def test_release_build_is_reproducible_signed_and_contains_evidence(
         "tools.build_installable_release._verify_offline_runtime_install",
         lambda **_kwargs: qualification,
     )
+    monkeypatch.setattr("tools.check_public_export.check_public_export", lambda _root: [])
 
+    first_output = tmp_path / "build-one"
+    stale_evidence = first_output / "release-evidence" / "supply-chain-gate.json"
+    stale_evidence.parent.mkdir(parents=True)
+    stale_evidence.write_text('{"private": true}\n', encoding="utf-8")
     first = build_release(
         source_root=source,
-        output_dir=tmp_path / "build-one",
+        output_dir=first_output,
         edition="public",
         channel="stable",
         version="0.25.0",
@@ -713,19 +804,56 @@ def test_release_build_is_reproducible_signed_and_contains_evidence(
     assert "/Users/example/private-oel" not in attestation_text
     assert "oel-pro" not in attestation_text
     attestation = json.loads(attestation_text)
+    evidence_paths = [
+        evidence / "supply-chain-gate.json",
+        *[evidence / name for name in evidence_payloads],
+    ]
+    expected_source_evidence = [
+        {
+            "bytes": artifact.stat().st_size,
+            "name": artifact.name,
+            "sha256": sha256_file(artifact),
+        }
+        for artifact in evidence_paths
+    ]
     assert attestation == {
         "package_version": "0.25.0",
         "schema_version": "oel.public-supply-chain-attestation.v1",
-        "source_evidence": [
-            {
-                "bytes": (evidence / "supply-chain-gate.json").stat().st_size,
-                "name": "supply-chain-gate.json",
-                "sha256": sha256_file(evidence / "supply-chain-gate.json"),
-            },
-            {"bytes": sbom.stat().st_size, "name": "sbom.cdx.json", "sha256": sha256_file(sbom)},
-        ],
+        "source_evidence": expected_source_evidence,
         "status": "passed",
     }
+
+
+def test_developer_unsigned_build_does_not_require_trusted_keys(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "public-source"
+    source.mkdir()
+    (source / "pyproject.toml").write_text(
+        '[project]\nname = "orbital-engagement-lab"\nversion = "0.27.0"\n',
+        encoding="utf-8",
+    )
+    (source / "README.md").write_text("public fixture\n", encoding="utf-8")
+    monkeypatch.setattr("tools.check_public_export.check_public_export", lambda _root: [])
+
+    receipt = build_release(
+        source_root=source,
+        output_dir=tmp_path / "unsigned",
+        edition="public",
+        channel="preview",
+        version="0.27.0",
+        private_key=None,
+        public_keys=None,
+        base_url=None,
+        developer_unsigned=True,
+        epoch=315532800,
+        channel_url=None,
+    )
+
+    assert receipt["status"] == "ready"
+    assert receipt["developer_unsigned"] is True
+    assert "trusted-release-keys.json" not in {row["name"] for row in receipt["release_assets"]}
 
 
 def test_offline_runtime_qualification_requires_matching_python_minor() -> None:
@@ -948,10 +1076,11 @@ def test_trusted_key_rotation_and_sanitized_support_receipt(
         json.dumps({"keys": [public_key_to_json(next(iter(keys.values())))]}),
         encoding="utf-8",
     )
-    successor = generate_rsa_private_key("successor", bits=512)
+    successor = generate_rsa_private_key("successor", bits=2048)
     registry = sign_payload(
         {
             "schema_version": "oel.trusted-key-registry.v1",
+            "published_at": "2026-08-19T00:00:00Z",
             "keys": [public_key_to_json(RSAPublicKey(key_id=successor.key_id, n=successor.n))],
         },
         private,  # type: ignore[arg-type]
