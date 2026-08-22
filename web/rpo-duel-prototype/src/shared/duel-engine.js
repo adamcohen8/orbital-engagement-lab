@@ -23,7 +23,7 @@ export const DUEL_PROTOTYPE_RULES = deepFreeze({
   target_delta_v_budget_m_s: 5,
   chaser_max_accel_km_s2: 1.5e-5,
   target_max_accel_km_s2: 7.5e-6,
-  coast_speed_multiple: 100,
+  coast_speed_multiple: 200,
   maneuver_speed_multiple: 10,
   neutral_cooldown_ms: 1000,
   target_coes: { ...DEFAULT_PURSUIT_CHALLENGE.target_coes },
@@ -99,7 +99,12 @@ export function createDuelRound({ pairSeed, rules = DUEL_PROTOTYPE_RULES } = {})
       target_coes: clone(cfg.target_coes),
       chaser_initial_ric: clone(initialRelativeRic),
     },
-    setControls(role, nextControls, { playerId = null, sequence = null } = {}) {
+    setControls(role, nextControls, {
+      playerId = null,
+      sequence = null,
+      source = null,
+      policyPhase = null,
+    } = {}) {
       assertRole(role);
       const normalized = normalizeControls(nextControls);
       if (sameControls(controls[role], normalized)) return false;
@@ -113,6 +118,8 @@ export function createDuelRound({ pairSeed, rules = DUEL_PROTOTYPE_RULES } = {})
         role,
         player_id: playerId,
         sequence,
+        source,
+        policy_phase: policyPhase,
         controls: clone(normalized),
       });
       return true;
@@ -126,6 +133,28 @@ export function createDuelRound({ pairSeed, rules = DUEL_PROTOTYPE_RULES } = {})
         return controlMagnitude(controls[role]) > 0 && remainingDeltaV(sim, cfg, role) > 1.0e-12;
       }
       return this.hasActiveManeuver(DUEL_ROLES.CHASER) || this.hasActiveManeuver(DUEL_ROLES.TARGET);
+    },
+    guidanceState(role) {
+      assertRole(role);
+      const chief = role === DUEL_ROLES.CHASER ? sim.target : sim.chaser;
+      const deputy = role === DUEL_ROLES.CHASER ? sim.chaser : sim.target;
+      const relative = relativeRicState(chief, deputy);
+      const guidanceBasis = ricBasis(chief);
+      const gameBasis = ricBasis(sim.target);
+      return {
+        state_ric_si: [
+          relative.r_km * 1000,
+          relative.i_km * 1000,
+          relative.c_km * 1000,
+          relative.rd_km_s * 1000,
+          relative.id_km_s * 1000,
+          relative.cd_km_s * 1000,
+        ],
+        mean_motion_rad_s: Math.sqrt(cfg.mu_km3_s2 / norm(chief.r) ** 3),
+        action_basis_to_game_ric: gameBasis.map((gameAxis) => (
+          guidanceBasis.map((guidanceAxis) => dot(gameAxis, guidanceAxis))
+        )),
+      };
     },
     step(count = 1) {
       const steps = Math.max(0, Math.floor(Number(count) || 0));
@@ -280,6 +309,12 @@ export function createDuelSeries({
     neutralizePlayer(playerId, options = {}) {
       return this.setPlayerControls(playerId, neutralControls(), options);
     },
+    guidanceStateForPlayer(playerId) {
+      const assignments = roleAssignments();
+      const role = assignments.chaser === playerId ? "chaser" : assignments.target === playerId ? "target" : null;
+      if (!role) throw new Error(`Player ${playerId} is not part of this match.`);
+      return { role, ...round.guidanceState(role) };
+    },
     hasActiveManeuver() {
       return round.hasActiveManeuver();
     },
@@ -339,7 +374,14 @@ export function replayDuelRound({ pairSeed, rules = DUEL_PROTOTYPE_RULES, inputE
     ? Math.ceil(round.rules.round_duration_s / round.rules.dt_s)
     : Math.max(0, Math.floor(Number(finalTick) || 0));
   for (let tick = 0; tick <= maxTick && !round.snapshot().terminal; tick += 1) {
-    for (const event of grouped.get(tick) || []) round.setControls(event.role, event.controls, event);
+    for (const event of grouped.get(tick) || []) {
+      round.setControls(event.role, event.controls, {
+        playerId: event.player_id ?? event.playerId ?? null,
+        sequence: event.sequence,
+        source: event.source ?? null,
+        policyPhase: event.policy_phase ?? event.policyPhase ?? null,
+      });
+    }
     if (tick < maxTick) round.step(1);
   }
   return round.result();
@@ -423,7 +465,11 @@ function replaySeriesRound(series, inputEvents, finalTick) {
   const maxTick = Math.max(0, Math.floor(Number(finalTick) || 0));
   for (let tick = 0; tick <= maxTick && !series.snapshot().round_complete; tick += 1) {
     for (const event of grouped.get(tick) || []) {
-      series.setPlayerControls(event.player_id, event.controls, { sequence: event.sequence });
+      series.setPlayerControls(event.player_id, event.controls, {
+        sequence: event.sequence,
+        source: event.source ?? null,
+        policyPhase: event.policy_phase ?? null,
+      });
     }
     if (tick < maxTick) series.step(1);
   }
@@ -450,7 +496,7 @@ function appliedAcceleration(controls, maxAccel, remainingMps, dtS) {
   const direction = [controls.r, controls.i, controls.c];
   const magnitude = norm(direction);
   if (magnitude <= 0 || remainingMps <= 0) return [0, 0, 0];
-  const allowed = Math.min(maxAccel, remainingMps / 1000 / dtS);
+  const allowed = Math.min(maxAccel * Math.min(magnitude, 1), remainingMps / 1000 / dtS);
   return direction.map((value) => (value / magnitude) * allowed);
 }
 
@@ -521,6 +567,30 @@ function uint32(value) {
 
 function norm(values) {
   return Math.hypot(...values);
+}
+
+function ricBasis(state) {
+  const rHat = unit(state.r);
+  const cHat = unit(cross(state.r, state.v));
+  return [rHat, unit(cross(cHat, rHat)), cHat];
+}
+
+function unit(values) {
+  const magnitude = norm(values);
+  if (magnitude <= 0) throw new Error("Cannot form RIC basis from a zero vector.");
+  return values.map((value) => value / magnitude);
+}
+
+function cross(first, second) {
+  return [
+    first[1] * second[2] - first[2] * second[1],
+    first[2] * second[0] - first[0] * second[2],
+    first[0] * second[1] - first[1] * second[0],
+  ];
+}
+
+function dot(first, second) {
+  return first.reduce((total, value, index) => total + value * second[index], 0);
 }
 
 function clone(value) {

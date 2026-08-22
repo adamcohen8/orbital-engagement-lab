@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="theme-color" content="#05070a">
+    <meta name="oel-level-selector-url" content="https://orbital-engagement-lab.vercel.app/">
     <title>RPO Duel Beta</title>
     <link rel="stylesheet" href="/src/client/styles.css">
   </head>
@@ -11,20 +12,22 @@
     <main class="app-shell">
       <header class="topbar">
         <a class="brand" href="/" aria-label="RPO Duel home">
-          <span><strong>ORBITAL ENGAGEMENT LAB</strong><small>RPO DUEL</small></span>
+          <span class="brand-wordmark"><strong>ORBITAL ENGAGEMENT LAB</strong><strong class="brand-product">RPO DUEL</strong></span>
         </a>
-        <div id="connection-pill" class="pill" data-tone="neutral">OFFLINE</div>
+        <div class="topbar-actions">
+          <a id="level-selector-link" class="level-selector-button" href="https://orbital-engagement-lab.vercel.app/">Level Selector</a>
+        </div>
       </header>
 
       <section id="landing-view" class="landing-view">
         <div class="hero-copy">
-          <p class="eyebrow">RPO TRAINER · TWO PLAYER BETA</p>
+          <p class="eyebrow">RPO TRAINER · PLAYER + COMPUTER BETA</p>
           <h1>RPO Duel <span class="beta-badge">Beta</span></h1>
-          <p>Invite a second pilot. One flies the Chaser and one flies the Target, then roles reverse on the same initial geometry.</p>
+          <p>Invite a second pilot or fly against the deterministic OEL computer. Chaser and Target roles reverse on the same initial geometry.</p>
           <div class="rule-strip" aria-label="Prototype rules">
             <span><b>100 m</b> capture</span>
             <span><b>15 / 5 m/s</b> budgets</span>
-            <span><b>100x / 10x</b> auto time</span>
+            <span><b>200x / 10x</b> auto time</span>
           </div>
         </div>
 
@@ -32,6 +35,7 @@
           <div class="tab-row" role="tablist">
             <button id="create-tab" class="tab active" type="button" role="tab" aria-selected="true">Create room</button>
             <button id="join-tab" class="tab" type="button" role="tab" aria-selected="false">Join room</button>
+            <button id="computer-tab" class="tab" type="button" role="tab" aria-selected="false">Play computer</button>
           </div>
           <form id="create-form" class="setup-form">
             <label>Callsign <input id="create-name" name="name" maxlength="24" autocomplete="nickname" placeholder="PLAYER 1"></label>
@@ -49,6 +53,19 @@
             <label>Callsign <input id="join-name" name="name" maxlength="24" autocomplete="nickname" placeholder="PLAYER 2"></label>
             <label>Room code <input id="join-code" name="room" maxlength="8" autocomplete="off" autocapitalize="characters" placeholder="ABC234" required></label>
             <button class="primary-button" type="submit">Join duel</button>
+          </form>
+          <form id="computer-form" class="setup-form hidden">
+            <label>Callsign <input id="computer-name" name="name" maxlength="24" autocomplete="nickname" placeholder="PLAYER 1"></label>
+            <fieldset>
+              <legend>Regulation rounds</legend>
+              <div class="round-options">
+                <label><input type="radio" name="rounds" value="2" checked><span>2</span></label>
+                <label><input type="radio" name="rounds" value="4"><span>4</span></label>
+                <label><input type="radio" name="rounds" value="6"><span>6</span></label>
+              </div>
+            </fieldset>
+            <p class="computer-note">The computer uses the coast-aware pursuit policy as Chaser and bounded predictive evasion as Target.</p>
+            <button class="primary-button" type="submit">Start computer duel</button>
           </form>
           <p id="setup-error" class="form-error" role="alert"></p>
         </div>
@@ -68,7 +85,7 @@
           <div class="duel-objective">
             <span class="objective-heading">YOUR ROLE</span>
             <strong id="role-label">WAITING</strong>
-            <div id="auto-time" class="auto-time"><span>AUTO TIME</span><strong>100x</strong><small>COASTING</small></div>
+            <div id="auto-time" class="auto-time"><span>AUTO TIME</span><strong>200x</strong><small>COASTING</small></div>
           </div>
         </header>
 
@@ -89,22 +106,28 @@
             <strong id="phase-title">Waiting for opponent</strong>
             <p id="phase-detail">Share the room link to begin.</p>
             <button id="copy-invite" class="secondary-button" type="button">Copy invite link</button>
-            <button id="leave-room" class="secondary-button hidden" type="button">Leave room</button>
+            <div id="match-actions" class="match-actions hidden">
+              <button id="play-again" class="primary-button" type="button">Play Again</button>
+              <button id="return-lobby" class="secondary-button" type="button">Return to Lobby</button>
+            </div>
           </div>
         </section>
 
         <aside class="duel-hud-panel">
           <div class="duel-hud-line">
             <div class="room-readout"><span>ROOM</span><button id="room-code" class="room-code" type="button" title="Copy invite link">------</button></div>
-            <button id="camera-toggle" class="camera-toggle" type="button" aria-pressed="false">C · REFERENCE VIEW</button>
+            <div class="view-toggles">
+              <button id="camera-toggle" class="camera-toggle" type="button" aria-pressed="false">C · REFERENCE VIEW</button>
+              <button id="music-toggle" class="music-toggle" type="button" aria-pressed="true">M · MUSIC ON</button>
+            </div>
             <div class="scoreboard">
               <div id="player-one-card" class="player-score"><span class="status-dot"></span><span class="player-name">PLAYER 1</span><b>0</b></div>
               <span class="score-divider">:</span>
               <div id="player-two-card" class="player-score"><b>0</b><span class="player-name">PLAYER 2</span><span class="status-dot"></span></div>
             </div>
           </div>
-          <div class="hint-line">Any maneuver sets shared time to 10x. Both players neutral returns it to 100x.</div>
-          <div class="command-line">W/S R&nbsp;&nbsp; A/D I&nbsp;&nbsp; Left/Right C-axis&nbsp;&nbsp; C Camera</div>
+          <div class="hint-line">Any maneuver sets shared time to 10x. Both players neutral returns it to 200x.</div>
+          <div class="command-line">W/S R&nbsp;&nbsp; A/D I&nbsp;&nbsp; Left/Right C-axis&nbsp;&nbsp; C Camera&nbsp;&nbsp; M Music</div>
           <div class="connection-card">
             <div><span id="own-connection-dot" class="status-dot"></span><span id="own-connection-label">YOU · CONNECTING</span></div>
             <div><span id="opponent-connection-dot" class="status-dot"></span><span id="opponent-connection-label">OPPONENT · WAITING</span></div>

@@ -6,6 +6,38 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.27.1 - 2026-08-22
+
+Release thesis: `v0.27.1` completes the intended RPO Duel Beta experience by
+shipping the deterministic server-owned computer opponent that was omitted
+from `v0.27.0`, together with its tested gameplay and hosted-release contract.
+
+### Added
+
+- Added a `Play computer` option to RPO Duel. The computer alternates roles
+  with the human, using coast-aware predictive pursuit as Chaser and bounded-
+  response predictive evasion as Target. HCW remains prediction-only; selected
+  controls still pass through the authoritative two-body Duel engine, hard
+  delta-v caps, persistence, replay, and automatic time-control paths.
+- Added deterministic computer-policy parity, room lifecycle, restore, role-
+  alternation, rematch, HTTP, WebSocket, and Worker contract coverage. The
+  hosted release gate now requires both a remote computer match and a remote
+  two-client room.
+- Added the original procedural Perigee Afterburner loop as optional Duel music
+  with browser-gesture startup and HUD/`M` controls. Lean exports may continue
+  to omit the WAV without affecting gameplay.
+
+### Changed
+
+- The computer replans every 120 simulated seconds, commands at most a
+  30-second pulse, and burns only when the maneuver materially improves the
+  predicted capture outcome, capture timing, or closest range over coasting.
+  Automatic time now runs at 200x while both players coast and 10x while either
+  maneuvers, with a bounded deterministic catch-up backlog.
+- Refined the Duel pair camera, high-speed visual interpolation, role-colored
+  capture ring, landing navigation, and match-complete flow. Players can start
+  a deterministic same-room rematch or return cleanly to the lobby.
+
 ## 0.27.0 - 2026-08-20
 
 Release thesis: `v0.27.0` promotes OEL's deterministic coverage and directed

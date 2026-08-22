@@ -1,6 +1,6 @@
 # RPO Duel
 
-Status: public Beta deployed; v0.27.0 live two-client acceptance passed
+Status: public Beta deployed; v0.27.1 includes computer-opponent release gates
 
 Support posture: experimental browser multiplayer. The deterministic room
 server is authoritative for this game, but it is not the full downloadable OEL
@@ -10,14 +10,20 @@ physics engine and does not establish an operational mission-analysis claim.
 
 The prototype is implemented in `web/rpo-duel-prototype`. It runs one
 authoritative room server and serves one responsive browser client for both
-laptop and phone players. The v0.27.0 Beta is deployed on Cloudflare Workers
+laptop and phone players. The v0.27.1 Beta is deployed on Cloudflare Workers
 Free at `https://oel-rpo-duel.oel-rpo-duel.workers.dev`; no paid service or
 plan upgrade was connected.
 
 Implemented now:
 
 - a standalone local Duel create/join screen for desktop and mobile testing;
+- a unified Orbital Engagement Lab / RPO Duel wordmark and a Level Selector
+  button back to the hosted RPO Trainer preview;
 - create and join by six-character room code or invite URL;
+- match-complete actions for a same-room, mutually confirmed human rematch (or
+  immediate computer rematch) and a clean return to the setup lobby;
+- a `Play computer` path that creates the opponent in the authoritative room,
+  starts after the human socket connects, and requires no second browser;
 - two authenticated player sockets with reconnect tokens scoped to the match;
 - deterministic, server-authoritative two-body duel propagation using the
   existing Pursuit Arcade engine;
@@ -25,22 +31,32 @@ Implemented now:
   mirrored randomized geometry for every two-round pair;
 - the frozen `rpo-duel.prototype.v1` duration, capture, delta-v, and no-safety
   rules;
-- 100x shared coasting time, immediate 10x maneuver time, and the one-second
+- 200x shared coasting time, immediate 10x maneuver time, and the one-second
   neutral cooldown;
+- bounded 120-millisecond visual interpolation at 200x and eased pair-camera
+  center/span changes, with immediate reset on maneuvers, speed or round
+  changes, reconnect gaps, and camera toggles; authoritative server physics and
+  snapshot cadence are unchanged;
 - immediate control neutralization and continued authoritative coast on
   disconnect, with token-based rejoin while the match remains active;
 - ordered normalized RIC inputs shared by keyboard and touch controls;
+- optional looping Perigee Afterburner level music, started from a browser
+  gesture and controlled with `M` or the HUD music button;
 - responsive R/I and R/C trajectory plots using the regular RPO Trainer
   dashboard composition: a default full-trajectory frame centered on the
   propagated Target reference orbit, visible one-orbital-period Target and Chaser HCW coast
-  projections, and a `C`/touch camera toggle to a satellites-only midpoint
-  view; twin plots and a bottom HUD on laptops, compact stacked plots in phone
+  projections, and a `C`/touch camera toggle to a midpoint-centered pair view
+  that keeps the grid and both HCW projections while suppressing recorded
+  trails and framing only the current satellites plus a small margin; twin plots and a bottom HUD on laptops, compact stacked plots in phone
   portrait, and the existing side-by-side plots with the lower HUD and
   right-side three-by-two touch-control group in phone
   landscape; role/score/time/delta-v telemetry, connection state, countdowns,
-  round results, and draw-capable match results; and
+  round results, and draw-capable match results;
+- a role-aware 100-meter ring around the Target, shown green to the Chaser and
+  red to the Target;
 - deterministic engine tests plus HTTP, WebSocket, ordering, disconnect, and
-  reconnect tests;
+  reconnect tests, plus Python-to-JavaScript policy parity fixtures and
+  computer-room restore/role-alternation tests;
 - a Cloudflare Worker with one SQLite-backed Durable Object per room, a
   dedicated static upload surface, bounded request/message payloads,
   same-origin room access, reconnect-state persistence, room expiry alarms,
@@ -53,12 +69,32 @@ provisional playtesting parameter: 0.015 m/s squared for the Chaser and 0.0075
 m/s squared for the Target. The accepted hard delta-v budgets remain 15 m/s and
 5 m/s respectively.
 
-Release acceptance completed:
+The computer is a deterministic policy opponent, not a second physics engine.
+When assigned Chaser it uses the newly added coast-aware predictive pursuit
+policy. When assigned Target it uses the newly added bounded-response
+predictive evasion policy. Both use HCW only for their 1,800-second onboard
+prediction. RPO Duel configures those policies with a game-specific cadence:
+they replan every 120 simulated seconds and command at most a 30-second pulse.
+A Duel-specific supervisor accepts the proposed burn only when it changes the
+predicted capture outcome, improves predicted capture time by at least 60
+seconds, or improves closest range by at least 100 meters relative to coasting.
+The Target applies the range test only when its passive worst-case pass enters
+a 600-meter guard range; otherwise it conserves delta-v. This keeps the
+computer responsive while making automatic 200x coast periods a result of the
+policy decision rather than a forced wait. Their controls enter the same
+server-owned RIC input stream as human controls, so the authoritative two-body
+propagation, hard delta-v caps, automatic time control, terminal rules, replay,
+and room persistence remain unchanged. Recorded computer inputs carry the
+policy phase and `computer_policy` source for deterministic restore and review.
 
+Hosted release acceptance requires:
+
+- one remote computer match that starts, alternates roles, accepts human
+  controls, and completes without an error overlay; and
 - two independent remote browser clients created and joined the same room,
   received opposite roles, shared authoritative snapshots, rendered both
   trajectory planes, and propagated a maneuver/time-control transition without
-  an error overlay;
+  an error overlay.
 
 Post-release Beta validation:
 
@@ -93,10 +129,12 @@ model from scratch.
 
 ## Initial Player Experience
 
-The proposed v0.1 flow is:
+The v0.1 player flow is:
 
-1. A player creates a room and receives an invite link or short room code.
-2. A second player joins the room.
+1. A player chooses a human room or `Play computer`.
+2. For a human room, the creator receives an invite link or short room code
+   and a second player joins. For a computer room, the server immediately adds
+   the deterministic OEL computer opponent.
 3. At launch, the players select 2, 4, or 6 regulation rounds.
 4. The players receive their initial Target and Chaser roles.
 5. A short synchronized countdown begins the first round.
@@ -255,19 +293,19 @@ owns one shared time multiplier for both players.
 
 Initial proposed policy:
 
-- When both players are neutral, the simulation runs at 100x.
+- When both players are neutral, the simulation runs at 200x.
 - When either player commands a maneuver, the simulation immediately drops to
   10x.
 - The simulation remains at 10x until both players have been neutral for a
   short cooldown, initially proposed as one second of wall-clock time.
-- After the cooldown, the simulation returns automatically to 100x.
+- After the cooldown, the simulation returns automatically to 200x.
 - If either player disconnects, that player's controls are immediately forced
   to neutral and their spacecraft continues to coast. The match does not pause.
 - The HUD always displays the current automatic speed and its cause, such as
   `AUTO TIME 10x - TARGET MANEUVERING`.
 
 The cooldown prevents rapid key releases or alternating inputs from making the
-game oscillate visibly between 10x and 100x.
+game oscillate visibly between 10x and 200x.
 
 The speed multiplier must change wall-clock pacing, not the authoritative
 physics timestep. The engine should continue to integrate canonical fixed
@@ -276,8 +314,8 @@ second during high-speed coast.
 
 ### Latency Risk
 
-Network latency is magnified at high time compression. At 100x, 100
-milliseconds of latency corresponds to 10 seconds of simulation time. The
+Network latency is magnified at high time compression. At 200x, 100
+milliseconds of latency corresponds to 20 seconds of simulation time. The
 initial implementation should therefore include:
 
 - immediate input-intent messages on key-down and key-up;
@@ -286,7 +324,8 @@ initial implementation should therefore include:
 - reconciliation to authoritative server snapshots;
 - sequence numbers so delayed or duplicated inputs cannot supersede newer
   commands; and
-- playtesting of 50x as a possible coast speed if 100x feels too unforgiving.
+- a bounded server catch-up backlog so short scheduling delays do not silently
+  discard deterministic coast steps.
 
 The server remains authoritative even when the client predicts immediate visual
 feedback.
@@ -498,7 +537,7 @@ The first acceptance suite should cover:
 
 - deterministic replay from the same initial state and input sequence;
 - exact role-based input ownership;
-- automatic 100x-to-10x transition when either player maneuvers;
+- automatic 200x-to-10x transition when either player maneuvers;
 - neutral cooldown and return to coast speed;
 - no speed oscillation during alternating inputs;
 - fixed physics timestep across both speed modes;
@@ -561,8 +600,8 @@ The first acceptance suite should cover:
 
 ## Open Design Questions
 
-- Is 100x coast comfortable under real network latency, or should v0.1 begin at
-  50x?
+- Is 200x coast comfortable under real network latency across the supported
+  laptop and phone combinations?
 - How long should the neutral cooldown be before returning to high-speed coast?
 - Should a player see the opponent's active thrust vector immediately?
 - Should both players see identical plots, or should role-specific information

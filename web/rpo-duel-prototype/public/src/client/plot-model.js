@@ -3,6 +3,18 @@ export const DUEL_CAMERA_MODES = Object.freeze({
   CURRENT_PAIR: "current_pair",
 });
 
+export const DUEL_VISUAL_TIMING = Object.freeze({
+  render_delay_ms: 120,
+  max_interpolation_gap_ms: 250,
+  camera_smoothing_ms: 180,
+});
+
+export function captureRingStyle(playerRole) {
+  return playerRole === "chaser"
+    ? { fill: "rgba(150,235,170,.10)", stroke: "rgba(150,235,170,.82)" }
+    : { fill: "rgba(245,92,92,.08)", stroke: "rgba(245,92,92,.72)" };
+}
+
 export function toggleDuelCameraMode(mode) {
   return mode === DUEL_CAMERA_MODES.CURRENT_PAIR
     ? DUEL_CAMERA_MODES.REFERENCE
@@ -14,6 +26,20 @@ export function referenceRelativePair(round = {}) {
   const target = normalizeRelative(round.target_reference_ric || zero);
   const chaser = normalizeRelative(round.chaser_reference_ric || addRelative(target, round.relative_ric));
   return { target, chaser };
+}
+
+export function interpolateDuelRound(previous = {}, current = {}, alpha = 1) {
+  const amount = Math.max(0, Math.min(1, Number(alpha) || 0));
+  const interpolated = { ...current };
+  for (const key of ["target_reference_ric", "chaser_reference_ric", "relative_ric"]) {
+    if (previous[key] && current[key]) interpolated[key] = interpolateRelative(previous[key], current[key], amount);
+  }
+  for (const key of ["tick", "time_s", "time_remaining_s", "range_km", "relative_speed_km_s"]) {
+    if (Number.isFinite(previous[key]) && Number.isFinite(current[key])) {
+      interpolated[key] = previous[key] + (current[key] - previous[key]) * amount;
+    }
+  }
+  return interpolated;
 }
 
 export function hcwCoastProjection(initialState, {
@@ -62,22 +88,54 @@ export function duelPlotFrame(round, trail = [], cameraMode = DUEL_CAMERA_MODES.
   const horizon = Number.isFinite(meanMotion) && meanMotion > 0
     ? 2 * Math.PI / meanMotion
     : 0;
+  const targetTrail = pairMode ? [] : trail.map((sample) => sample.target).filter(Boolean);
+  const chaserTrail = pairMode ? [] : trail.map((sample) => sample.chaser).filter(Boolean);
+  const targetProjection = hcwCoastProjection(current.target, {
+    meanMotionRadS: meanMotion,
+    horizonS: horizon,
+  });
+  const chaserProjection = hcwCoastProjection(current.chaser, {
+    meanMotionRadS: meanMotion,
+    horizonS: horizon,
+  });
   return {
     cameraMode: pairMode ? DUEL_CAMERA_MODES.CURRENT_PAIR : DUEL_CAMERA_MODES.REFERENCE,
     cameraCenter,
     target: current.target,
     chaser: current.chaser,
-    targetTrail: pairMode ? [] : trail.map((sample) => sample.target).filter(Boolean),
-    chaserTrail: pairMode ? [] : trail.map((sample) => sample.chaser).filter(Boolean),
-    targetProjection: pairMode ? [] : hcwCoastProjection(current.target, {
-      meanMotionRadS: meanMotion,
-      horizonS: horizon,
-    }),
-    chaserProjection: pairMode ? [] : hcwCoastProjection(current.chaser, {
-      meanMotionRadS: meanMotion,
-      horizonS: horizon,
-    }),
+    targetTrail,
+    chaserTrail,
+    targetProjection,
+    chaserProjection,
+    framingPoints: pairMode
+      ? [current.target, current.chaser]
+      : [
+          ...targetProjection,
+          ...chaserProjection,
+          ...targetTrail,
+          ...chaserTrail,
+          current.target,
+          current.chaser,
+        ],
   };
+}
+
+export function duelPlotSpan(frame, xKey, yKey, captureRadiusKm = .1) {
+  const pairMode = frame.cameraMode === DUEL_CAMERA_MODES.CURRENT_PAIR;
+  const centerX = frame.cameraCenter[xKey];
+  const centerY = frame.cameraCenter[yKey];
+  const captureRadius = Math.max(0, Number(captureRadiusKm) || 0);
+  const extent = Math.max(
+    pairMode ? .12 : 1,
+    ...frame.framingPoints.flatMap((sample) => [
+      Math.abs((sample?.[xKey] || 0) - centerX),
+      Math.abs((sample?.[yKey] || 0) - centerY),
+    ]),
+    Math.abs(frame.target[xKey] - centerX) + captureRadius,
+    Math.abs(frame.target[yKey] - centerY) + captureRadius,
+  );
+  const padded = extent * 1.22;
+  return pairMode ? padded : niceExtent(padded);
 }
 
 function midpointPosition(first, second) {
@@ -86,6 +144,19 @@ function midpointPosition(first, second) {
     i_km: (first.i_km + second.i_km) / 2,
     c_km: (first.c_km + second.c_km) / 2,
   };
+}
+
+function interpolateRelative(previous, current, alpha) {
+  const first = normalizeRelative(previous);
+  const second = normalizeRelative(current);
+  return relativeState(
+    lerp(first.r_km, second.r_km, alpha),
+    lerp(first.i_km, second.i_km, alpha),
+    lerp(first.c_km, second.c_km, alpha),
+    lerp(first.rd_km_s, second.rd_km_s, alpha),
+    lerp(first.id_km_s, second.id_km_s, alpha),
+    lerp(first.cd_km_s, second.cd_km_s, alpha),
+  );
 }
 
 function normalizeRelative(value = {}) {
@@ -125,4 +196,14 @@ function relativeState(r = 0, i = 0, c = 0, rd = 0, id = 0, cd = 0) {
 function finite(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number : 0;
+}
+
+function lerp(first, second, alpha) {
+  return first + (second - first) * alpha;
+}
+
+function niceExtent(value) {
+  const power = 10 ** Math.floor(Math.log10(Math.max(value, .1)));
+  const normalized = value / power;
+  return (normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10) * power;
 }
