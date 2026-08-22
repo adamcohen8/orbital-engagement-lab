@@ -47,9 +47,10 @@ Duel Beta.
 
 ### Fixed
 
-- Bound the declared `pyproject.toml` build-system wheels into the signed
-  supply-chain inventory so the full-profile offline bundle can install the
-  release source archive without network access.
+- Bound the declared `pyproject.toml` build-system wheels and their resolver
+  report into the signed supply-chain inventory and public attestation so the
+  full-profile offline bundle can install the release source archive without
+  network access.
 
 ## 0.26.0 - 2026-08-18
 

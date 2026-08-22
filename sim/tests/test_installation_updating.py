@@ -687,6 +687,7 @@ def test_release_build_is_reproducible_signed_and_contains_evidence(
         archive.writestr("fixture-1.0.dist-info/RECORD", "")
     evidence_payloads = {
         "pip-install-report.json": '{"install": []}\n',
+        "build-install-report.json": '{"install": []}\n',
         "pip-check.txt": "No broken requirements found.\n",
         "wheel-inventory.json": json.dumps(
             {
@@ -822,6 +823,7 @@ def test_release_build_is_reproducible_signed_and_contains_evidence(
         "source_evidence": expected_source_evidence,
         "status": "passed",
     }
+    assert "build-install-report.json" in {row["name"] for row in attestation["source_evidence"]}
 
 
 def test_developer_unsigned_build_does_not_require_trusted_keys(
