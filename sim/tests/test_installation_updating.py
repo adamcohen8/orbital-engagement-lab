@@ -777,6 +777,17 @@ def test_release_build_is_reproducible_signed_and_contains_evidence(
     assert manifest["supply_chain"]["status"] == "passed"
     assert manifest["supply_chain"]["offline_runtime_qualification"] == qualification
     assert Path(first["offline_bundle"]).name.endswith("-py314.bundle.zip")
+    assert {row["name"] for row in first["release_assets"]} == {
+        "SHA256SUMS",
+        "bootstrap_install.py",
+        "install.ps1",
+        "install.sh",
+        Path(first["offline_bundle"]).name,
+        "orbital-engagement-lab-0.25.0-public.tar.gz",
+        "public-stable.json",
+        "release-manifest.json",
+        "trusted-release-keys.json",
+    }
     assert manifest["supply_chain"]["gate"] == "release-evidence/public-supply-chain-attestation.json"
     assert [item["name"] for item in manifest["supply_chain"]["artifacts"]] == [
         "public-supply-chain-attestation.json"
