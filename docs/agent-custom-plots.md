@@ -175,7 +175,10 @@ Examples:
 
 ```python
 plotter.heatmap(
-    sql="SELECT station_id, object_id, access_samples FROM access_summary",
+    sql=(
+        "SELECT station_id, object_id, SUM(access) AS access_samples "
+        "FROM ground_access GROUP BY station_id, object_id"
+    ),
     x="station_id",
     y="object_id",
     value="access_samples",

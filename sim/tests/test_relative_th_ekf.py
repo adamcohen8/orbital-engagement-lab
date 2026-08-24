@@ -10,8 +10,10 @@ from sim.estimation.relative_hcw_ekf import hcw_state_transition_matrix
 from sim.estimation.relative_th_ekf import (
     THRelativeEKFEstimator,
     YARelativeEKFEstimator,
+    _th_combined_derivative,
     th_propagate_relative_state,
     th_relative_transition_matrix,
+    th_variational_propagate_relative_state_and_stm,
     th_variational_transition_matrix,
     ya_closed_form_propagate_relative_state_and_stm,
     ya_closed_form_transition_matrix,
@@ -49,6 +51,45 @@ def _propagate_two_body(state: np.ndarray, duration_s: float, *, step_s: float =
         )
         elapsed += h
     return out
+
+
+def _reference_th_combined_derivative(state: np.ndarray) -> np.ndarray:
+    chief_r = np.array(state[:3], dtype=float)
+    chief_v = np.array(state[3:6], dtype=float)
+    rho = np.array(state[6:9], dtype=float)
+    rho_dot = np.array(state[9:12], dtype=float)
+    r_norm = float(np.linalg.norm(chief_r))
+    h_vec = np.cross(chief_r, chief_v)
+    h_norm = float(np.linalg.norm(h_vec))
+    theta_dot = h_norm / max(r_norm * r_norm, 1.0e-12)
+    radial_rate = float(np.dot(chief_r, chief_v)) / r_norm
+    theta_ddot = -2.0 * theta_dot * radial_rate / r_norm
+    omega = np.array([0.0, 0.0, theta_dot], dtype=float)
+    omega_dot = np.array([0.0, 0.0, theta_ddot], dtype=float)
+    gravity_gradient = (EARTH_MU_KM3_S2 / (r_norm**3)) * np.array([2.0 * rho[0], -rho[1], -rho[2]])
+    rho_ddot = (
+        gravity_gradient
+        - 2.0 * np.cross(omega, rho_dot)
+        - np.cross(omega_dot, rho)
+        - np.cross(omega, np.cross(omega, rho))
+    )
+    chief_acc = -EARTH_MU_KM3_S2 * chief_r / (r_norm**3)
+    return np.hstack((chief_v, chief_acc, rho_dot, rho_ddot))
+
+
+def test_th_scalar_cross_product_fast_path_is_bit_exact() -> None:
+    rng = np.random.default_rng(20260824)
+    for _ in range(2000):
+        state = np.hstack(
+            (
+                rng.normal(size=3) * 500.0 + np.array([7000.0, 0.0, 0.0]),
+                rng.normal(size=3) + np.array([0.0, 7.5, 0.0]),
+                rng.normal(size=6) * 0.1,
+            )
+        )
+        actual = _th_combined_derivative(state, EARTH_MU_KM3_S2)
+        expected = _reference_th_combined_derivative(state)
+        assert np.array_equal(actual, expected)
 
 
 def test_th_relative_propagation_reduces_to_hcw_for_circular_chief() -> None:
@@ -129,6 +170,16 @@ def test_th_relative_propagation_tracks_small_eccentric_two_body_truth() -> None
 
     assert np.linalg.norm(predicted[:3] - truth_rel[:3]) < 2.0e-4
     assert np.linalg.norm(predicted[3:] - truth_rel[3:]) < 2.0e-6
+
+
+def test_th_stm_only_path_is_bitwise_identical_to_full_variational_path() -> None:
+    chief = _eccentric_chief()
+    for dt_s in (0.0, 5.0, 120.0, 600.0, -125.0):
+        optimized = th_variational_transition_matrix(np.zeros(6), dt_s, chief, max_step_s=5.0)
+        _state, reference = th_variational_propagate_relative_state_and_stm(
+            np.zeros(6), dt_s, chief, max_step_s=5.0
+        )
+        assert np.array_equal(optimized, reference)
 
 
 def test_th_relative_ekf_direct_state_update_moves_toward_truth() -> None:

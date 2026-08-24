@@ -35,14 +35,15 @@ def _truth_quaternion_in_frame(truth_hist: np.ndarray, frame: AttitudeFrame) -> 
 
 def _rates_in_frame(truth_hist: np.ndarray, frame: AttitudeFrame) -> np.ndarray:
     w_body = np.array(truth_hist[:, 10:13], dtype=float)
-    if frame == "eci":
-        return w_body
     out = np.zeros_like(w_body)
     q_bn = np.array(truth_hist[:, 6:10], dtype=float)
     for k in range(truth_hist.shape[0]):
         r = truth_hist[k, 0:3]
         v = truth_hist[k, 3:6]
         c_bn = quaternion_to_dcm_bn(q_bn[k, :])
+        if frame == "eci":
+            out[k, :] = c_bn.T @ w_body[k, :]
+            continue
         c_ir = ric_dcm_ir_from_rv(r, v)
         c_br = c_bn @ c_ir
         out[k, :] = c_br.T @ w_body[k, :]
@@ -96,7 +97,7 @@ def plot_body_rates(
         fig, ax = plt.subplots(figsize=cap_figsize(10, 5))
         for i in range(3):
             ax.plot(t_s, w[:, i], label=labels[i])
-        ax.set_title(f"Body Angular Rates ({frame.upper()} frame)")
+        ax.set_title(f"Angular Velocity Components ({frame.upper()} frame)")
         ax.set_xlabel("Time (s)")
         ax.set_ylabel("rad/s")
         ax.grid(True, alpha=0.3)
@@ -107,7 +108,7 @@ def plot_body_rates(
             ax.plot(t_s, w[:, i], linewidth=1.3)
             ax.set_ylabel(f"{labels[i]} (rad/s)")
             ax.grid(True, alpha=0.3)
-        axes[0].set_title(f"Body Angular Rates ({frame.upper()} frame)")
+        axes[0].set_title(f"Angular Velocity Components ({frame.upper()} frame)")
         axes[-1].set_xlabel("Time (s)")
     fig.tight_layout()
     _show_save_close(fig, mode=mode, out_path=out_path)

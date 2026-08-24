@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import gzip
 import hashlib
 import json
 import math
@@ -436,9 +437,13 @@ def _selected_checkpoint(
     object_id: str,
     selected_time_ns: int,
 ) -> dict[str, Any]:
+    snapshot_columns = {
+        str(item["name"]) for item in workspace.table_columns().get("fsw_snapshots", [])
+    }
+    detail_columns = ", detail_gzip" if "detail_gzip" in snapshot_columns else ""
     result = workspace.query(
-        "SELECT invocation_id, stack_id, stack_version, state_hash_sha256, detail_json "
-        "FROM fsw_snapshots WHERE object_id = ? ORDER BY invocation_id DESC",
+        "SELECT invocation_id, stack_id, stack_version, state_hash_sha256, detail_json"
+        f"{detail_columns} FROM fsw_snapshots WHERE object_id = ? ORDER BY invocation_id DESC",
         (object_id,),
         max_rows=10001,
     )
@@ -447,8 +452,14 @@ def _selected_checkpoint(
     candidates: list[dict[str, Any]] = []
     for row in result.rows:
         try:
-            detail = json.loads(str(row.get("detail_json", "") or ""))
-        except json.JSONDecodeError:
+            if row.get("detail_json") is not None:
+                raw_detail = str(row["detail_json"])
+            elif row.get("detail_gzip") is not None:
+                raw_detail = gzip.decompress(bytes(row["detail_gzip"])).decode("utf-8")
+            else:
+                continue
+            detail = json.loads(raw_detail)
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
             continue
         if isinstance(detail, dict) and int(detail.get("run_time_ns", -1)) == selected_time_ns:
             candidates.append(detail)

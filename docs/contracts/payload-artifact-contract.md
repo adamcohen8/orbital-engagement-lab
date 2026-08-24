@@ -46,6 +46,7 @@ A single-run payload should include these top-level keys when applicable:
 - `rocket_throttle_cmd`
 - `rocket_metrics`
 - `reentry_metrics_by_object`
+- `orbital_analysis` when coverage or directed-link postprocessing is enabled
 
 Consumers should treat `summary` as the most stable review surface. Detailed
 histories and debug maps are available for analysis, but fields not documented
@@ -87,6 +88,11 @@ The single-run `summary` should include:
 - `plot_outputs`
 - `animation_outputs`
 - `review_outputs`
+- `orbital_analysis` when configured, with coverage/directed-link summaries,
+  semantic/input evidence digests, schema/product identities, and artifact
+  descriptors
+- `mission_recovery` when configured, with assessment/planner status,
+  selected recommendation, candidate/burn counts, limits, and warnings
 - `output_index_md`
 
 Compatibility expectations:
@@ -265,6 +271,8 @@ Stats artifacts:
   archive keys back to payload paths.
 - `review/run.sqlite` and `review/schema.json` are written when
   `outputs.review.enabled` is true.
+- A capsule-only store uses logical `review/run.sqlite` evidence represented by
+  `review/run.sqlite.gz` plus `review/evidence_capsule.json`.
 
 Plot and animation artifacts:
 
@@ -272,6 +280,11 @@ Plot and animation artifacts:
 - Animation artifacts are represented in `summary.animation_outputs`.
 - Consumers should read artifact maps instead of constructing filenames from
   assumptions.
+- Orbital-analysis coverage and directed-link descriptors are exposed through
+  `SimulationResult.artifacts["orbital_analysis"]` and retain their own
+  versioned schema/product metadata.
+- Mission recovery may add `plot_outputs["mission_recovery_trade_space"]`;
+  use the dedicated recovery review tables for candidate and burn evidence.
 
 Review artifacts:
 
@@ -313,6 +326,11 @@ Output directories:
 - `range_between(...)`
 - `min_range(...)`
 - `time_of_min_range(...)`
+
+`evidence_manifest()["review"]` distinguishes a physical plain database
+(`db_exists`) from logical evidence (`evidence_exists`). It reports storage,
+logical SHA-256, compressed/capsule paths, and their existence so a capsule-only
+store is not misreported as absent.
 - `collision_event(...)`
 - `keepout_violations(...)`
 - `to_records(...)`

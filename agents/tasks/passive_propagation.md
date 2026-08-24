@@ -14,7 +14,8 @@ Command convention: activate OEL through [Installing OEL](../../docs/installatio
 
 ```text
 Create a simple public OEL scenario that propagates one passive satellite in a
-7000 km circular orbit for five minutes. Keep it headless, validate it, run it,
+a circular orbit with semi-major axis `a_km: 7000` for five minutes. Keep it
+headless, validate it, run it,
 and summarize the run from saved artifacts.
 ```
 

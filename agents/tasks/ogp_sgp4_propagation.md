@@ -78,7 +78,7 @@ SELECT object_id, time_s, pos_x_eci_km, pos_y_eci_km, pos_z_eci_km, vel_x_eci_km
 - The evidence packet reports complete review queries and plot generation.
 - `ogp_propagation_contract` reports `general` plus `sgp4`.
 - `passive_final_state` returns one final canonical ECI state.
-- `review/figures/agent_object_eci_radius.png` exists.
+- `review/figures/evidence_object_eci_radius.png` exists.
 - The answer distinguishes native OGP product frame from review-state frame.
 
 ## Red Flags

@@ -459,6 +459,24 @@ print(payload["run"]["scenario_name"])
 The `SimulationSession` wrapper is the preferred public API when you need a
 stable object-oriented surface.
 
+### Session Control And FSW Inputs
+
+For trusted interactive single-run work, `SimulationSession` exposes
+`publish_fsw_input(object_id, event)`,
+`add_fsw_input_publisher(object_id, publisher)`, and
+`request_fsw_input_publisher_poll(object_id)`. Publishers are sampled only at
+flight-software release points; an explicit poll request schedules one poll at
+the current simulation time.
+
+Trusted sessions also expose object/factory pairs for orbit and attitude
+controllers, mission strategy, and mission execution:
+`set_orbit_controller[_factory]`, `set_attitude_controller[_factory]`,
+`set_mission_strategy[_factory]`, and `set_mission_execution[_factory]`.
+Factories create fresh stateful instances after an engine reset. Sealed
+sessions reject Python runtime overrides. GNC-v2 satellites reject individual
+controller/mission overrides and require one complete
+`objects.<id>.flight_software` stack in scenario YAML.
+
 See [Plotting](plotting.md) for the current single-run figure ID catalog and
 the public plotting helper functions.
 

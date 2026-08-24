@@ -25,7 +25,17 @@ def _path_link(path_text: Any, *, base_dir: Path) -> str:
         return "not available"
     try:
         path = Path(text)
-        resolved = path if path.is_absolute() else base_dir / path
+        if path.is_absolute():
+            resolved = path
+        else:
+            cwd_candidate = Path.cwd() / path
+            base_candidate = base_dir / path
+            try:
+                cwd_candidate.resolve().relative_to(base_dir.resolve())
+                is_already_output_relative = True
+            except ValueError:
+                is_already_output_relative = False
+            resolved = cwd_candidate if cwd_candidate.exists() or is_already_output_relative else base_candidate
         display = str(resolved.resolve().relative_to(base_dir.resolve()))
     except ValueError:
         try:
@@ -180,12 +190,57 @@ def _default_next_steps(*, workflow: str, artifacts: dict[str, Any], base_dir: P
 
 
 def _single_run_status(summary: dict[str, Any]) -> str:
+    review_status = str(summary.get("review_store_status", "") or "").strip()
+    if review_status.startswith("failed:"):
+        return f"partial - review store {review_status}"
     if bool(summary.get("terminated_early", False)):
         reason = str(summary.get("termination_reason") or "unknown").strip()
         if reason == "rocket_orbit_insertion":
             return "success - rocket orbit insertion achieved"
         return f"stopped early - {reason or 'unknown reason'}"
     return "nominal - full duration reached"
+
+
+def _single_run_provenance(summary: dict[str, Any]) -> list[str]:
+    propagation = dict(summary.get("object_propagation", {}) or {})
+    frame = dict(summary.get("frame_provenance", {}) or {})
+    review_status = str(summary.get("review_store_status", "not requested") or "not requested")
+    installation = dict(summary.get("installation_provenance", {}) or {})
+    families = sorted(
+        {
+            str(dict(item or {}).get("propagator_name") or dict(item or {}).get("propagator_family") or "").strip()
+            for item in propagation.values()
+            if str(dict(item or {}).get("propagator_name") or dict(item or {}).get("propagator_family") or "").strip()
+        }
+    )
+    return [
+        f"- Config source: `{_scalar(summary.get('config_source_path'))}`",
+        f"- Config SHA-256: `{_scalar(summary.get('config_sha256'))}`",
+        f"- Run generated UTC: `{_scalar(summary.get('generated_utc'))}`",
+        f"- OEL version: `{_scalar(summary.get('oel_version', installation.get('engine_version')))}`",
+        f"- Installation disposition: `{_scalar(installation.get('installation_disposition'))}`",
+        f"- Propagator(s): `{', '.join(families) if families else 'see saved configuration'}`",
+        f"- Frame model: `{_scalar(frame.get('model'))}`",
+        f"- Review evidence status: `{review_status}`",
+        f"- Review detail: `{_scalar(summary.get('review_detail'))}`",
+    ]
+
+
+def _single_run_claim_limits(summary: dict[str, Any]) -> list[str]:
+    lines = [
+        "- Engine completion means the configured duration or termination condition was reached; it is not, by itself, a mission-success verdict.",
+        "- Results apply only to the configured deterministic models, inputs, cadence, and retained samples.",
+    ]
+    if dict(summary.get("ground_station_access", {}) or {}):
+        lines.append("- Access windows use retained-sample bounds unless a refinement disposition says otherwise; run-boundary windows may be censored.")
+    if dict(summary.get("orbital_analysis", {}) or {}).get("directed_links"):
+        lines.append("- Link availability is conditional on the configured terminals, thresholds, geometry, and link-budget assumptions.")
+    if str(summary.get("review_detail", "standard") or "standard") == "compact":
+        lines.append(
+            "- Compact review detail omits diagnostic evidence; rerun with `outputs.review.detail: standard` "
+            "or `full` when controller or FSW diagnostics are required."
+        )
+    return lines
 
 
 def _guardrail_event_count(summary: dict[str, Any]) -> int:
@@ -231,6 +286,23 @@ def _single_run_narrative(summary: dict[str, Any], artifacts: dict[str, Any]) ->
             f"at `t={_scalar(range_summary.get('closest_approach_time_s'))} s`; "
             f"the final range was `{_scalar(range_summary.get('final_range_km'))} km`."
         )
+    orbital = dict(summary.get("orbital_analysis", {}) or {})
+    coverage_rows = [dict(row or {}) for row in list(orbital.get("coverage", []) or [])]
+    link_rows = [dict(row or {}) for row in list(orbital.get("directed_links", []) or [])]
+    if coverage_rows:
+        coverage_text = "; ".join(
+            f"{row.get('analysis_id')}: mean `{100.0 * float(row.get('time_weighted_mean_covered_fraction') or 0.0):.3f}%`, "
+            f"ever `{100.0 * float(row.get('ever_covered_fraction') or 0.0):.3f}%`"
+            for row in coverage_rows
+        )
+        lines.append(f"Whole-Earth coverage results: {coverage_text}.")
+    if link_rows:
+        link_text = "; ".join(
+            f"{row.get('analysis_id')}: available `{100.0 * float(row.get('sampled_available_fraction') or 0.0):.3f}%` "
+            f"for `{float(row.get('available_duration_s') or 0.0):.3f} s`"
+            for row in link_rows
+        )
+        lines.append(f"Directed-link results: {link_text}.")
     lines.append(
         f"The run used `{total_dv:.4g} m/s` total delta-v and recorded `{_guardrail_event_count(summary)}` "
         "attitude guardrail events."
@@ -265,7 +337,15 @@ def _single_run_next_command(summary: dict[str, Any]) -> str:
     review_db = str(summary.get("review_sqlite_path", "") or "").strip()
     if review_db:
         review_root = Path(review_db).parent.parent
-        return f"python -m sim.review {command_arg(str(review_root))} --saved-query run_metadata"
+        if dict(summary.get("orbital_analysis", {}) or {}).get("directed_links"):
+            query_name = "directed_link_summary"
+        elif dict(summary.get("ground_station_access_summary", {}) or {}):
+            query_name = "ground_access_summary"
+        elif _relative_range_summary(summary):
+            query_name = "rendezvous_metrics"
+        else:
+            query_name = "object_final_state"
+        return f"python -m sim.review {command_arg(str(review_root))} --saved-query {query_name}"
     config_source_path = str(summary.get("config_source_path", "") or "").strip()
     if config_source_path:
         return f"python run_simulation.py --config {command_arg(config_source_path)} --validate-only"
@@ -299,16 +379,74 @@ def _single_run_metrics(summary: dict[str, Any]) -> list[str]:
     if ground_access:
         access_pairs = 0
         access_duration = 0.0
+        access_samples = 0
+        total_samples = 0
+        reason_counts: dict[str, int] = {}
+        thresholds: set[str] = set()
         for by_target in ground_access.values():
             for row in dict(by_target or {}).values():
+                item = dict(row or {})
                 access_pairs += 1
                 try:
-                    access_duration += float(dict(row or {}).get("access_duration_s", 0.0))
+                    access_duration += float(item.get("access_duration_s", 0.0))
+                    access_samples += int(item.get("access_samples", 0))
+                    total_samples += int(item.get("samples", 0))
                 except (TypeError, ValueError):
                     pass
+                for reason, count in dict(item.get("reason_sample_count", {}) or {}).items():
+                    reason_counts[str(reason)] = reason_counts.get(str(reason), 0) + int(count)
+                thresholds.add(
+                    f"elevation >= {_scalar(item.get('minimum_elevation_deg'))} deg; "
+                    f"range <= {_scalar(item.get('maximum_range_km'))} km"
+                )
         lines.append(f"- Ground stations: `{len(ground_access)}`")
         lines.append(f"- Ground-station access pairs: `{access_pairs}`")
+        lines.append(f"- Ground-station accessible samples: `{access_samples}/{total_samples}`")
         lines.append(f"- Ground-station access duration sum: `{access_duration:.4g} s`")
+        lines.append(f"- Ground-station thresholds: `{'; '.join(sorted(thresholds))}`")
+        lines.append(
+            "- Ground-station reason samples: `"
+            + ", ".join(f"{name}={count}" for name, count in sorted(reason_counts.items()))
+            + "`"
+        )
+    orbital = dict(summary.get("orbital_analysis", {}) or {})
+    for row in list(orbital.get("coverage", []) or []):
+        item = dict(row or {})
+        lines.append(
+            f"- Coverage `{item.get('analysis_id')}` time-weighted mean: "
+            f"`{100.0 * float(item.get('time_weighted_mean_covered_fraction') or 0.0):.4g}%`"
+        )
+        lines.append(
+            f"- Coverage `{item.get('analysis_id')}` ever covered: "
+            f"`{100.0 * float(item.get('ever_covered_fraction') or 0.0):.4g}%`"
+        )
+    for row in list(orbital.get("directed_links", []) or []):
+        item = dict(row or {})
+        lines.append(
+            f"- Link `{item.get('analysis_id')}` sampled availability: "
+            f"`{100.0 * float(item.get('sampled_available_fraction') or 0.0):.4g}%`"
+        )
+        lines.append(
+            f"- Link `{item.get('analysis_id')}` available duration: "
+            f"`{float(item.get('available_duration_s') or 0.0):.4g} s`"
+        )
+        lines.append(
+            f"- Link `{item.get('analysis_id')}` available samples/windows: "
+            f"`{int(item.get('available_sample_count') or 0)}/{int(item.get('sample_count') or 0)}; "
+            f"windows={int(item.get('interval_count') or 0)}`"
+        )
+        lines.append(
+            f"- Link `{item.get('analysis_id')}` thresholds: "
+            f"`required Eb/N0={_scalar(item.get('required_eb_n0_db'))} dB; "
+            f"elevation >= {_scalar(item.get('minimum_fixed_site_elevation_deg'))} deg; "
+            f"range <= {_scalar(item.get('maximum_range_km_threshold'))} km`"
+        )
+        reasons = dict(item.get("primary_reason_sample_count", {}) or {})
+        lines.append(
+            f"- Link `{item.get('analysis_id')}` reason samples: `"
+            + ", ".join(f"{name}={count}" for name, count in sorted(reasons.items()) if int(count) > 0)
+            + "`"
+        )
     return lines
 
 
@@ -414,6 +552,12 @@ def write_output_index(
             "",
             "## Key Results",
             *key_metrics,
+            "",
+            "## Evidence Provenance",
+            *(_single_run_provenance(summary) if workflow == "single_run" else ["- See the workflow artifacts below."]),
+            "",
+            "## Claim Limits And Success Criteria",
+            *(_single_run_claim_limits(summary) if workflow == "single_run" else ["- Interpret results within the configured study scope."]),
             "",
             "## Open First",
             *[f"{idx}. {step}" for idx, step in enumerate(steps, start=1)],

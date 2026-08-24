@@ -19,7 +19,7 @@ from sim.analysis.directed_link import (
     spacecraft_endpoint_history,
 )
 from sim.analysis.global_coverage import GlobalCoverageConfig, GlobalCoverageResult, evaluate_global_coverage
-from sim.analysis.healpix import healpix_wgs84_centers
+from sim.analysis.healpix import cached_healpix_wgs84_centers
 from sim.analysis.observer_target_geometry import evaluate_surface_targets_ecef
 from sim.dynamics.orbit.frames import FrameContext, eci_to_ecef_rotation_context
 from sim.utils.geodesy import WGS84_A_KM, WGS84_B_KM
@@ -388,7 +388,7 @@ def global_coverage_refinement_evaluator(
             raise ValueError("Coverage refinement source is on or inside WGS84.")
         body_from_eci = quaternion_to_dcm_bn(state.attitude_quat_bn)
         boresight_ecef = rotation @ (body_from_eci.T @ boresight_body)
-        cells = healpix_wgs84_centers(order, np.asarray(cell_indices, dtype=np.int64))
+        cells = cached_healpix_wgs84_centers(order, np.asarray(cell_indices, dtype=np.int64))
         geometry = evaluate_surface_targets_ecef(
             observer_ecef_km=position_ecef,
             target_ecef_km=cells.ecef_km,

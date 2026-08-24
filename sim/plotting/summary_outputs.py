@@ -247,14 +247,16 @@ def render_summary_outputs(context: PlotOutputContext) -> dict[str, str]:
             out["sensor_access"] = str(p)
 
     if "ground_station_access" in figure_ids:
-        ground_access, _ = evaluate_ground_station_access(
-            ground_stations=list(cfg.ground_stations),
-            t_s=t_s,
-            truth_hist=truth_hist,
-            jd_utc_start=cfg.simulator.initial_jd_utc,
-            frame_context=frame_context,
-            object_state_frames=context.object_state_frames,
-        )
+        ground_access = context.ground_station_access
+        if ground_access is None:
+            ground_access, _ = evaluate_ground_station_access(
+                ground_stations=list(cfg.ground_stations),
+                t_s=t_s,
+                truth_hist=truth_hist,
+                jd_utc_start=cfg.simulator.initial_jd_utc,
+                frame_context=frame_context,
+                object_state_frames=context.object_state_frames,
+            )
         p = outdir / "ground_station_access.png"
         plot_ground_station_access(
             t_s=t_s,

@@ -52,6 +52,11 @@ replacement trust root. The bootstrap does not edit a workspace.
 
 After installation:
 
+On macOS or Linux, the launcher is installed at `~/.local/bin/oel`. Reopen the
+shell or ensure that directory is on `PATH` before using the short `oel`
+command, for example `export PATH="$HOME/.local/bin:$PATH"`. Until then, invoke
+`~/.local/bin/oel` explicitly.
+
 ```text
 oel update status --full
 oel update check
@@ -61,6 +66,18 @@ oel --workspace path/to/my-oel-workspace sim --quickstart --validate-only
 oel --workspace path/to/my-oel-workspace sim --quickstart
 oel --workspace path/to/my-oel-workspace review outputs/quickstart_5min --saved-query run_metadata
 ```
+
+### Declared Host Admission Matrix
+
+| Host | Architecture | Doctor admission | Maintained evidence row |
+| --- | --- | --- | --- |
+| Windows 11 or Server 2022 | x64 | Windows 11/Server 2022 x64 | Server 2022 x64 diagnostic |
+| Ubuntu 22.04 or 24.04 | x64 | Ubuntu 22.04/24.04 x64 | Ubuntu 22.04 x64 |
+| macOS 14 or newer | arm64 or x64 | macOS 14+ arm64/x64 | macOS 15 arm64 and Intel diagnostics |
+
+Admission and package metadata are not release evidence. A claim for a row
+requires its retained packet; external integrations remain separately
+qualified.
 
 See [Updating OEL](updating.md), [OEL Workspaces](workspaces.md), and
 [Offline Installation](offline-installation.md). Managed installation and

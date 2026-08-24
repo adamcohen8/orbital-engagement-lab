@@ -63,7 +63,7 @@ outputs:
   stats:
     print_summary: true
     save_json: true
-    save_full_log: true
+    save_full_log: false
   plots:
     enabled: true
     figure_ids:
@@ -72,3 +72,6 @@ outputs:
   animations:
     enabled: false
     types: []
+  review:
+    enabled: true
+    detail: standard

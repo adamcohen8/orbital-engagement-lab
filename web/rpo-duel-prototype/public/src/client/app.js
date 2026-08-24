@@ -9,7 +9,27 @@ import {
   toggleDuelCameraMode,
 } from "./plot-model.js";
 
+const previewMode = new URLSearchParams(location.search).get("preview");
+if (previewMode === "mobile-landscape" || previewMode === "mobile-portrait") {
+  document.body.classList.add(`${previewMode}-preview`);
+  syncMobilePreviewScale();
+  window.addEventListener("resize", syncMobilePreviewScale);
+}
+
+function syncMobilePreviewScale() {
+  const portrait = previewMode === "mobile-portrait";
+  const previewWidth = portrait ? 390 : 667;
+  const previewHeight = portrait ? 844 : 375;
+  const scale = Math.min(1, window.innerWidth / previewWidth, window.innerHeight / previewHeight);
+  document.documentElement.style.setProperty("--mobile-preview-scale", scale.toFixed(4));
+}
+
 const DUEL_MUSIC_SOURCE = "/assets/39_perigee_afterburner_demo.wav";
+const AUTO_TIME_STATUS_LABELS = Object.freeze({
+  coasting: "COAST",
+  neutral_cooldown: "COOL",
+  maneuvering: "BURN",
+});
 const HOSTED_LEVEL_SELECTOR_URL = document.querySelector('meta[name="oel-level-selector-url"]')?.content.trim()
   || "https://orbital-engagement-lab.vercel.app/";
 const duelMusic = new Audio(DUEL_MUSIC_SOURCE);
@@ -21,8 +41,8 @@ const elements = Object.fromEntries([
   "landing-view", "game-view", "create-tab", "join-tab", "computer-tab", "create-form", "join-form",
   "computer-form", "create-name", "join-name", "computer-name", "join-code", "setup-error", "room-code", "round-label", "role-label", "time-label",
   "auto-time", "player-one-card", "player-two-card", "range-label", "speed-label", "dv-label", "phase-overlay",
-  "phase-kicker", "phase-title", "phase-detail", "copy-invite", "match-actions", "play-again", "return-lobby", "own-connection-dot", "own-connection-label",
-  "opponent-connection-dot", "opponent-connection-label", "ri-canvas", "rc-canvas", "camera-toggle", "music-toggle", "level-selector-link", "toast",
+  "phase-kicker", "phase-title", "phase-detail", "copy-invite", "match-actions", "play-again", "return-lobby",
+  "ri-canvas", "rc-canvas", "camera-toggle", "music-toggle", "level-selector-link", "toast",
 ].map((id) => [id, document.getElementById(id)]));
 
 const state = {
@@ -48,6 +68,7 @@ const state = {
   musicRequested: false,
   musicAvailable: true,
 };
+const touchPointers = new Map();
 
 const keyBindings = {
   KeyW: ["r", 1], KeyS: ["r", -1],
@@ -276,19 +297,19 @@ function updateUi(snapshot) {
 
   const role = ownRole(series);
   elements["role-label"].textContent = role ? role.toUpperCase() : "WAITING";
+  elements["role-label"].dataset.role = role || "waiting";
   elements["time-label"].textContent = formatSimTime(series?.round?.time_remaining_s ?? 18000);
   elements["range-label"].textContent = series ? `${formatDistance(series.round.range_km)}` : "—";
   elements["speed-label"].textContent = series ? `${(series.round.relative_speed_km_s * 1000).toFixed(2)} m/s` : "—";
   elements["dv-label"].textContent = role ? `${series.round.delta_v_remaining_m_s[role].toFixed(2)} m/s` : "—";
   const auto = snapshot.speed || { speed_multiple: 100, reason: "coasting" };
   elements["auto-time"].querySelector("strong").textContent = `${auto.speed_multiple}x`;
-  elements["auto-time"].querySelector("small").textContent = auto.reason.replaceAll("_", " ").toUpperCase();
+  elements["auto-time"].querySelector("small").textContent = AUTO_TIME_STATUS_LABELS[auto.reason]
+    || auto.reason.replaceAll("_", " ").toUpperCase();
   elements["auto-time"].classList.toggle("maneuvering", auto.speed_multiple === 10);
 
   const own = players.find((player) => player.id === state.playerId);
   const opponent = players.find((player) => player.id !== state.playerId);
-  updateConnectionLine("own", own, "YOU");
-  updateConnectionLine("opponent", opponent, opponent?.kind === "computer" ? "COMPUTER" : "OPPONENT");
   const controllable = snapshot.phase === "active" && own?.connected && !series?.round?.terminal;
   document.querySelectorAll(".thrust-button").forEach((button) => { button.disabled = !controllable; });
   if (!controllable && Object.values(state.controls).some(Boolean)) neutralizeControls(true);
@@ -378,6 +399,12 @@ function returnToLobby() {
 }
 
 function wireControls() {
+  ["selectstart", "dragstart", "contextmenu"].forEach((type) => {
+    document.addEventListener(type, (event) => {
+      if (!document.body.classList.contains("duel-active")) return;
+      event.preventDefault();
+    }, { capture: true });
+  });
   window.addEventListener("keydown", (event) => {
     resumeMusic();
     if (event.code === "KeyM" && !event.repeat && !isTyping()) {
@@ -412,24 +439,15 @@ function wireControls() {
     const press = (event) => {
       event.preventDefault();
       if (button.disabled) return;
+      touchPointers.set(event.pointerId, button);
       button.setPointerCapture?.(event.pointerId);
       button.dataset.pressed = "true";
       state.controls[axis] = value;
       sendControls();
       paintButtons();
     };
-    const release = (event) => {
-      event.preventDefault();
-      delete button.dataset.pressed;
-      const otherPressed = [...document.querySelectorAll(`.thrust-button[data-axis="${axis}"][data-pressed="true"]`)].at(-1);
-      state.controls[axis] = otherPressed ? Number(otherPressed.dataset.value) : keyboardAxisValue(axis);
-      sendControls();
-      paintButtons();
-    };
     button.addEventListener("pointerdown", press);
-    button.addEventListener("pointerup", release);
-    button.addEventListener("pointercancel", release);
-    button.addEventListener("lostpointercapture", release);
+    button.addEventListener("lostpointercapture", releaseTouchPointer);
     button.addEventListener("click", (event) => {
       if (event.detail !== 0 || button.disabled) return;
       state.controls[axis] = value;
@@ -443,6 +461,8 @@ function wireControls() {
       }, 150);
     });
   }
+  window.addEventListener("pointerup", releaseTouchPointer, { capture: true });
+  window.addEventListener("pointercancel", releaseTouchPointer, { capture: true });
   window.addEventListener("blur", () => neutralizeControls(true));
   document.addEventListener("visibilitychange", () => { if (document.hidden) neutralizeControls(true); });
 }
@@ -480,9 +500,29 @@ function toggleCamera() {
 
 function paintCameraMode() {
   const pairMode = state.cameraMode === DUEL_CAMERA_MODES.CURRENT_PAIR;
-  elements["camera-toggle"].textContent = pairMode ? "C · PAIR VIEW" : "C · REFERENCE VIEW";
-  elements["camera-toggle"].setAttribute("aria-pressed", String(pairMode));
+  const projectionMode = state.cameraMode === DUEL_CAMERA_MODES.CURRENT_PROJECTIONS;
+  elements["camera-toggle"].textContent = pairMode
+    ? "C · PAIR VIEW"
+    : projectionMode
+      ? "C · PROJECTION VIEW"
+      : "C · REFERENCE VIEW";
+  elements["camera-toggle"].setAttribute("aria-pressed", String(state.cameraMode !== DUEL_CAMERA_MODES.REFERENCE));
   elements["game-view"].dataset.cameraMode = state.cameraMode;
+}
+
+function releaseTouchPointer(event) {
+  const button = touchPointers.get(event.pointerId);
+  if (!button) return;
+  event.preventDefault();
+  touchPointers.delete(event.pointerId);
+  const axis = button.dataset.axis;
+  const stillPressed = [...touchPointers.values()].some((candidate) => candidate === button);
+  if (stillPressed) return;
+  delete button.dataset.pressed;
+  const otherPressed = [...document.querySelectorAll(`.thrust-button[data-axis="${axis}"][data-pressed="true"]`)].at(-1);
+  state.controls[axis] = otherPressed ? Number(otherPressed.dataset.value) : keyboardAxisValue(axis);
+  sendControls();
+  paintButtons();
 }
 
 function updateAxisFromInputs(axis) {
@@ -503,6 +543,7 @@ function keyboardAxisValue(axis) {
 
 function neutralizeControls(send = true) {
   state.pressedKeys.clear();
+  touchPointers.clear();
   document.querySelectorAll(".thrust-button").forEach((button) => { delete button.dataset.pressed; });
   state.controls = { r: 0, i: 0, c: 0 };
   if (send) sendControls();
@@ -542,18 +583,18 @@ function drawPlot(canvas, frame, xKey, yKey, xLabel, yLabel, now) {
   const w = rect.width;
   const h = rect.height;
   ctx.clearRect(0, 0, w, h);
-  const pairMode = frame.cameraMode === DUEL_CAMERA_MODES.CURRENT_PAIR;
+  const floatingMode = frame.cameraMode !== DUEL_CAMERA_MODES.REFERENCE;
   const captureRadiusKm = Number(state.snapshot?.series?.round?.capture_range_km) || .1;
   const targetViewport = {
     centerX: frame.cameraCenter[xKey],
     centerY: frame.cameraCenter[yKey],
     span: duelPlotSpan(frame, xKey, yKey, captureRadiusKm),
   };
-  const viewport = pairMode
+  const viewport = floatingMode
     ? smoothPlotViewport(`${xKey}:${yKey}`, targetViewport, now)
     : targetViewport;
   const { centerX, centerY, span } = viewport;
-  const pad = Math.max(22, Math.min(w, h) * .1);
+  const pad = 0;
   const mapX = (value) => pad + (((value - centerX) + span) / (2 * span)) * (w - pad * 2);
   const mapY = (value) => h - pad - (((value - centerY) + span) / (2 * span)) * (h - pad * 2);
 
@@ -565,7 +606,7 @@ function drawPlot(canvas, frame, xKey, yKey, xLabel, yLabel, now) {
     ctx.beginPath(); ctx.moveTo(mapX(xValue), pad); ctx.lineTo(mapX(xValue), h - pad); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(pad, mapY(yValue)); ctx.lineTo(w - pad, mapY(yValue)); ctx.stroke();
   }
-  if (!pairMode) {
+  if (!floatingMode) {
     ctx.strokeStyle = "rgba(90,104,124,.95)";
     ctx.beginPath(); ctx.moveTo(mapX(0), pad); ctx.lineTo(mapX(0), h - pad); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(pad, mapY(0)); ctx.lineTo(w - pad, mapY(0)); ctx.stroke();
@@ -582,7 +623,7 @@ function drawPlot(canvas, frame, xKey, yKey, xLabel, yLabel, now) {
   ctx.ellipse(mapX(frame.target[xKey]), mapY(frame.target[yKey]), captureRadiusX, captureRadiusY, 0, 0, Math.PI * 2);
   ctx.fill(); ctx.stroke();
 
-  if (!pairMode) {
+  if (!floatingMode) {
     drawPath(ctx, frame.targetTrail, xKey, yKey, mapX, mapY, "rgba(245,92,92,.7)", 1.5);
     drawPath(ctx, frame.chaserTrail, xKey, yKey, mapX, mapY, "rgba(245,205,92,.72)", 1.5);
   }
@@ -593,34 +634,10 @@ function drawPlot(canvas, frame, xKey, yKey, xLabel, yLabel, now) {
   drawSatellite(ctx, frame.chaser, xKey, yKey, mapX, mapY, "#f5cd5c", "C");
   ctx.fillStyle = "rgba(170,184,204,.92)";
   ctx.font = "11px Menlo, Consolas, monospace";
-  if (!pairMode) {
+  if (!floatingMode) {
     ctx.fillText(`+${xLabel}`, w - pad - 12, mapY(0) - 6);
     ctx.fillText(`+${yLabel}`, mapX(0) + 6, pad + 8);
   }
-  drawProjectionLegend(ctx, w, pad);
-  ctx.fillText(pairMode ? "PAIR · HCW COAST" : "REFERENCE ORBIT · HCW COAST", pad, 14);
-  ctx.fillText(`${span >= 10 ? span.toFixed(0) : span.toFixed(1)} km`, pad, h - 8);
-}
-
-function drawProjectionLegend(ctx, width, pad) {
-  if (width < 260) return;
-  const startX = Math.max(pad + 150, width - pad - 132);
-  const entries = [
-    { color: "rgba(245,92,92,.95)", label: "T HCW" },
-    { color: "rgba(96,174,224,.95)", label: "C HCW" },
-  ];
-  entries.forEach((entry, index) => {
-    const x = startX + index * 68;
-    ctx.save();
-    ctx.strokeStyle = entry.color;
-    ctx.lineWidth = 2;
-    ctx.setLineDash([5, 4]);
-    ctx.beginPath(); ctx.moveTo(x, 11); ctx.lineTo(x + 17, 11); ctx.stroke();
-    ctx.restore();
-    ctx.fillStyle = entry.color;
-    ctx.font = "9px Menlo, Consolas, monospace";
-    ctx.fillText(entry.label, x + 21, 14);
-  });
 }
 
 function drawPath(ctx, points, xKey, yKey, mapX, mapY, color, width, dash = []) {
@@ -663,12 +680,6 @@ function updatePlayerCard(card, player, score) {
   card.querySelector(".player-name").textContent = player?.name || "WAITING";
   card.querySelector("b").textContent = score;
   card.querySelector(".status-dot").classList.toggle("connected", Boolean(player?.connected));
-}
-
-function updateConnectionLine(prefix, player, label) {
-  elements[`${prefix}-connection-dot`].classList.toggle("connected", Boolean(player?.connected));
-  const ready = player?.kind === "computer" ? "READY" : "CONNECTED";
-  elements[`${prefix}-connection-label`].textContent = `${label} · ${player ? (player.connected ? ready : "DISCONNECTED · COASTING") : "WAITING"}`;
 }
 
 function ownRole(series) {

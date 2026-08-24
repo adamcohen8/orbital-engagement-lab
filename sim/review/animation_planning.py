@@ -67,6 +67,7 @@ def plan_review_animation(output_dir: str | Path, spec: ReviewAnimationSpec) -> 
     workspace = ReviewWorkspace.open(output_dir)
     recipe, result = load_review_animation_evidence(workspace, spec)
     frame_plan = review_animation_frame_plan(result, spec)
+    plan_id = _review_animation_plan_id_from_evidence(workspace, spec, recipe, result)
     warnings: list[str] = []
     if result.truncated:
         warnings.append("The review query reached max_rows; rendering is blocked because the movie would omit evidence.")
@@ -78,7 +79,7 @@ def plan_review_animation(output_dir: str | Path, spec: ReviewAnimationSpec) -> 
         "status": "planned",
         "output_dir": str(workspace.output_dir),
         "review_store": "review/run.sqlite",
-        "animation_plan_id": review_animation_plan_id(workspace, spec),
+        "animation_plan_id": plan_id,
         "spec": asdict(spec),
         "recipe": recipe.to_dict(),
         "row_count": result.row_count,
@@ -108,12 +109,19 @@ def render_review_animation(
     path: str | Path,
 ) -> Any:
     workspace = ReviewWorkspace.open(output_dir)
-    current_id = review_animation_plan_id(workspace, spec)
+    recipe, result = load_review_animation_evidence(workspace, spec)
+    initial_identity = workspace.evidence_identity()
+    current_id = _review_animation_plan_id_from_evidence(
+        workspace,
+        spec,
+        recipe,
+        result,
+        review_store_identity=initial_identity,
+    )
     if str(animation_plan_id) != current_id:
         raise ValueError(
             "The animation_plan_id is stale or does not match the review store and animation specification."
         )
-    recipe, result = load_review_animation_evidence(workspace, spec)
     if result.truncated:
         raise ValueError("The review animation query is truncated; increase frame_stride or use a smaller study.")
     from sim.review.animation_rendering import (
@@ -124,7 +132,18 @@ def render_review_animation(
     artifact = render_review_animation_artifact(
         workspace, recipe, result, spec, path=path, record=False
     )
-    if review_animation_plan_id(workspace, spec) != current_id:
+    final_recipe, final_result = load_review_animation_evidence(workspace, spec)
+    final_identity = workspace.evidence_identity()
+    if (
+        _review_animation_plan_id_from_evidence(
+            workspace,
+            spec,
+            final_recipe,
+            final_result,
+            review_store_identity=final_identity,
+        )
+        != current_id
+    ):
         for generated_path in (
             artifact.path,
             artifact.contact_sheet_path,
@@ -134,25 +153,35 @@ def render_review_animation(
         raise ValueError(
             "The review store changed while the planned animation was rendering; no artifact was recorded."
         )
-    record_generated_animation(workspace, artifact, recipe=recipe)
+    record_generated_animation(
+        workspace,
+        artifact,
+        recipe=recipe,
+        review_store_identity=final_identity,
+    )
     return artifact
 
 
 def review_animation_plan_id(workspace: ReviewWorkspace, spec: ReviewAnimationSpec) -> str:
     recipe, result = load_review_animation_evidence(workspace, spec)
-    stat = workspace.db_path.stat()
+    return _review_animation_plan_id_from_evidence(workspace, spec, recipe, result)
+
+
+def _review_animation_plan_id_from_evidence(
+    workspace: ReviewWorkspace,
+    spec: ReviewAnimationSpec,
+    recipe: ReviewAnimationRecipe,
+    result: ReviewQueryResult,
+    *,
+    review_store_identity: dict[str, Any] | None = None,
+) -> str:
     payload = {
         "schema_version": REVIEW_ANIMATION_PLAN_SCHEMA_VERSION,
         "animation_quality_policy": {
             "policy_id": STRICT_AGENT_ANIMATION_QUALITY.policy_id,
             "version": STRICT_AGENT_ANIMATION_QUALITY.version,
         },
-        "review_store": {
-            "path": str(workspace.db_path),
-            "size_bytes": int(stat.st_size),
-            "mtime_ns": int(stat.st_mtime_ns),
-            "sha256": hashlib.sha256(workspace.db_path.read_bytes()).hexdigest(),
-        },
+        "review_store": review_store_identity or workspace.evidence_identity(),
         "recipe": recipe.to_dict(),
         "spec": asdict(spec),
         "frame_plan": review_animation_frame_plan(result, spec),

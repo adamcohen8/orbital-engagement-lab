@@ -27,9 +27,10 @@ Evidence:
 
 - The first/final `object_state` rows report quaternion and body angular-rate
   components.
-- The scenario uses a public reaction-wheel PD attitude controller.
+- The scenario uses a public quaternion-PD attitude controller with the
+  `hardware.ideal_wrench.v1` abstraction; it is not a physical reaction-wheel case.
 - The applied-acceleration summary is only an orbital-thrust sanity check; it is
-  not reaction-wheel torque telemetry.
+  not physical actuator torque telemetry.
 
 Conclusion:
 

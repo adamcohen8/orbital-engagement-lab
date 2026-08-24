@@ -43,6 +43,7 @@ from sim.security import ConfigPathPolicy
 __all__ = [
     'scenario_config_from_dict',
     'load_simulation_yaml',
+    'load_simulation_yaml_bytes',
 ]
 
 def scenario_config_from_dict(
@@ -123,19 +124,28 @@ def scenario_config_from_dict(
     _validate_object_references(cfg)
     _validate_orbital_analysis_references(cfg)
     return cfg
-def load_simulation_yaml(
-    path: str | Path,
+def load_simulation_yaml_bytes(
+    content: bytes,
     *,
+    source_path: str | Path,
     path_policy: ConfigPathPolicy | None = None,
     allow_external_config_paths: bool = False,
     allow_external_ai_prompt_files: bool = False,
 ) -> SimulationScenarioConfig:
+    """Parse a scenario from exact caller-supplied bytes with path provenance."""
+
+    p = Path(source_path)
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"Simulation YAML must be UTF-8: {p}") from exc
     try:
         import yaml  # type: ignore
     except Exception as exc:
         raise RuntimeError(
             "PyYAML is required to load simulation YAML configs. Install with `pip install pyyaml`."
         ) from exc
+
     class _UniqueKeySafeLoader(yaml.SafeLoader):
         pass
 
@@ -159,10 +169,7 @@ def load_simulation_yaml(
         yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
         _construct_unique_mapping,
     )
-
-    p = Path(path)
-    with p.open("r", encoding="utf-8") as f:
-        raw = yaml.load(f, Loader=_UniqueKeySafeLoader) or {}
+    raw = yaml.load(text, Loader=_UniqueKeySafeLoader) or {}
     if not isinstance(raw, dict):
         raise ValueError("Simulation YAML root must be a mapping/object.")
     policy = path_policy or ConfigPathPolicy.default(
@@ -171,3 +178,20 @@ def load_simulation_yaml(
         allow_external_ai_prompt_files=allow_external_ai_prompt_files,
     )
     return scenario_config_from_dict(raw, source_path=p, path_policy=policy)
+
+
+def load_simulation_yaml(
+    path: str | Path,
+    *,
+    path_policy: ConfigPathPolicy | None = None,
+    allow_external_config_paths: bool = False,
+    allow_external_ai_prompt_files: bool = False,
+) -> SimulationScenarioConfig:
+    p = Path(path)
+    return load_simulation_yaml_bytes(
+        p.read_bytes(),
+        source_path=p,
+        path_policy=path_policy,
+        allow_external_config_paths=allow_external_config_paths,
+        allow_external_ai_prompt_files=allow_external_ai_prompt_files,
+    )

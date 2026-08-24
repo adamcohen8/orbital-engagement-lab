@@ -9,8 +9,9 @@ from typing import Any, Mapping
 from sim.review.plotting import (
     ReviewPlotArtifact,
     ReviewPlotSpec,
+    _dry_run_from_result,
+    _save_review_plot_from_result,
     record_generated_artifact,
-    save_review_plot,
 )
 from sim.review.workspace import ReviewWorkspace
 
@@ -69,32 +70,34 @@ def render_review_plot(
     path: str | Path,
 ) -> ReviewPlotArtifact:
     workspace = ReviewWorkspace.open(output_dir)
-    current_id = review_plot_plan_id(workspace, spec)
+    initial_identity = workspace.evidence_identity()
+    current_id = review_plot_plan_id(workspace, spec, review_store_identity=initial_identity)
     if str(plot_plan_id) != current_id:
         raise ValueError("The plot_plan_id is stale or does not match the review store and plot specification.")
-    dry_run = _dry_run(workspace, spec)
+    result = workspace.query(spec.sql, max_rows=max(int(spec.max_rows), 1))
+    dry_run = _dry_run_from_result(spec, result)
     if dry_run["truncated"]:
         raise ValueError(
             "The planned review query is truncated at max_rows; increase the bound or narrow the query."
         )
-    artifact = save_review_plot(workspace, spec, path=path, record=False)
-    if review_plot_plan_id(workspace, spec) != current_id:
+    artifact = _save_review_plot_from_result(workspace, spec, result=result, path=path, record=False)
+    final_identity = workspace.evidence_identity()
+    if review_plot_plan_id(workspace, spec, review_store_identity=final_identity) != current_id:
         artifact.path.unlink(missing_ok=True)
         raise ValueError("The review store changed while the planned plot was rendering; no artifact was recorded.")
-    record_generated_artifact(workspace, artifact)
+    record_generated_artifact(workspace, artifact, review_store_identity=final_identity)
     return artifact
 
 
-def review_plot_plan_id(workspace: ReviewWorkspace, spec: ReviewPlotSpec) -> str:
-    stat = workspace.db_path.stat()
+def review_plot_plan_id(
+    workspace: ReviewWorkspace,
+    spec: ReviewPlotSpec,
+    *,
+    review_store_identity: dict[str, Any] | None = None,
+) -> str:
     payload = {
         "schema_version": REVIEW_PLOT_PLAN_SCHEMA_VERSION,
-        "review_store": {
-            "path": str(workspace.db_path),
-            "size_bytes": int(stat.st_size),
-            "mtime_ns": int(stat.st_mtime_ns),
-            "sha256": hashlib.sha256(workspace.db_path.read_bytes()).hexdigest(),
-        },
+        "review_store": review_store_identity or workspace.evidence_identity(),
         "spec": asdict(spec),
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")

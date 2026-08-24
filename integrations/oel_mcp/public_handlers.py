@@ -1561,8 +1561,16 @@ def _authorize_review_inputs(
     require_store: bool,
     report_sources: bool = False,
 ) -> None:
+    logical_store = output_dir / "review" / "run.sqlite"
+    capsule_store = output_dir / "review" / "run.sqlite.gz"
+    if require_store and not logical_store.is_file() and not capsule_store.is_file():
+        raise FileNotFoundError(
+            f"Required review evidence is missing: expected {logical_store} or {capsule_store}."
+        )
     children = [
-        (("review", "run.sqlite"), "file", require_store),
+        (("review", "run.sqlite"), "file", False),
+        (("review", "run.sqlite.gz"), "file", False),
+        (("review", "evidence_capsule.json"), "file", False),
         (("review", "schema.json"), "file", False),
         (("review", "saved_views.json"), "file", False),
         (("review", "workflow_manifest.json"), "file", False),
@@ -1579,7 +1587,11 @@ def _authorize_review_inputs(
     for parts, kind, required in children:
         resolved = path_policy.resolve_read_child(output_dir, *parts, kind=kind, required=required)
         if resolved.is_file():
-            require_file_size(resolved, maximum=MAX_MANIFEST_BYTES if resolved.suffix != ".sqlite" else MAX_REVIEW_STORE_BYTES)
+            is_review_store = resolved.name in {"run.sqlite", "run.sqlite.gz"}
+            require_file_size(
+                resolved,
+                maximum=MAX_REVIEW_STORE_BYTES if is_review_store else MAX_MANIFEST_BYTES,
+            )
 
 
 def _incomplete_manifest_status(output_dir: Path) -> dict[str, Any] | None:

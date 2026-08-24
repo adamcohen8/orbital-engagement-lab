@@ -200,6 +200,9 @@ Propagator, OEL's configurable numerical propagation path for two-body and
 special-perturbation force-model studies. Do not describe the result as
 OGP-SGP4/general-perturbations propagation unless the scenario explicitly uses
 `propagation_method: general` with `general.model: sgp4`.
+That same accepted surface automatically dispatches period-at-or-above-
+threshold/deep-space TLEs to OGP-SDP4; do not invent a `general.model: sdp4`
+field. Confirm the selected regime from propagation provenance.
 - "Build an attitude-hold scenario with an initial pointing error."
 - "Evaluate the run in this output folder and tell me whether it supports my
   goal."
@@ -245,30 +248,34 @@ artifacts.
 2. Passive propagation: use
    `agents/examples/public_agent_single_satellite.yaml` to propagate one
    satellite and inspect `object_state` evidence.
-3. Closed-loop rendezvous: use
+3. Continuous OGP-SGP4 propagation: use
+   `agents/examples/public_agent_ogp_sgp4_propagation.yaml`, inspect
+   `object_propagation`/frame provenance and final state, and distinguish the
+   native OGP frame from the canonical review frame.
+4. Closed-loop rendezvous: use
    `agents/examples/public_agent_rendezvous_lqr.yaml` to inspect relative
    range, closest approach, burn events, and whether the run supports a
    terminal-rendezvous claim.
-4. Mission recovery: use
+5. Mission recovery: use
    `agents/examples/public_agent_mission_recovery_plus_c_burn.yaml` to inspect
    a +C burn, final-vs-initial orbital elements, and recovery delta-v evidence.
-5. Mission reconstitution trade space: use
+6. Mission reconstitution trade space: use
    `agents/examples/public_agent_mission_reconstitution_trade_space.yaml` to
    compare min-time, min-delta-v, and constrained planner candidates from
    saved review evidence.
-6. Ground access: use
+7. Ground access: use
    `agents/examples/public_agent_ground_access.yaml` to inspect access samples
    and state that this TLE input uses OGP-backed initialization before ONP
    propagation, not continuous catalog-style propagation.
-7. Coverage and directed links: use
+8. Coverage and directed links: use
    `examples/configs/public_coverage_and_link_analysis.yaml` to inspect
    whole-Earth conical coverage and a free-space object-to-object link from one
    deterministic propagation. State the attitude, cadence, RF, and non-claim
    boundaries.
-8. Attitude hold: use
+9. Attitude hold: use
    `agents/examples/public_agent_attitude_hold.yaml` to inspect body-rate and
    attitude-control evidence.
-9. One-variable comparison: copy a nearby example, change one parameter, run
+10. One-variable comparison: copy a nearby example, change one parameter, run
    both cases, and compare only metrics or histories present in artifacts.
 
 Mission-input ingestion, external observation normalization, batch orbit
@@ -350,6 +357,7 @@ does not match an example:
 | Goal | Example | Validate |
 | --- | --- | --- |
 | Passive orbit propagation | `agents/examples/public_agent_single_satellite.yaml` | `python run_simulation.py --config agents/examples/public_agent_single_satellite.yaml --validate-only` |
+| Continuous passive OGP-SGP4 | `agents/examples/public_agent_ogp_sgp4_propagation.yaml` | `python run_simulation.py --config agents/examples/public_agent_ogp_sgp4_propagation.yaml --validate-only` |
 | Closed-loop rendezvous | `agents/examples/public_agent_rendezvous_lqr.yaml` | `python run_simulation.py --config agents/examples/public_agent_rendezvous_lqr.yaml --validate-only` |
 | Mission recovery +C burn | `agents/examples/public_agent_mission_recovery_plus_c_burn.yaml` | `python run_simulation.py --config agents/examples/public_agent_mission_recovery_plus_c_burn.yaml --validate-only` |
 | Mission reconstitution trade space | `agents/examples/public_agent_mission_reconstitution_trade_space.yaml` | `python run_simulation.py --config agents/examples/public_agent_mission_reconstitution_trade_space.yaml --validate-only` |

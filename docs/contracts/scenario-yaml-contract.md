@@ -129,6 +129,8 @@ Required timing rules:
   divide `dt_s` cleanly.
 - `attitude_substep_s`, when present, must be positive, no larger than `dt_s`,
   and divide `dt_s` cleanly.
+- When attitude dynamics are enabled, `attitude_substep_s` must be no larger
+  than `orbit_substep_s`.
 
 Analysis parameter sweeps should not vary timing fields unless every generated
 sample still preserves these grid rules.
@@ -161,14 +163,25 @@ The retired satellite v1 fields `guidance`, `base_guidance`,
 Use the canonical complete `flight_software` boundary instead; bridge settings,
 when entitled, are nested under that boundary.
 
-`initial_state` supports these orbital initialization forms for satellite
-objects:
+`initial_state` must select exactly one orbital initialization form. Current
+forms include:
 
 - `position_eci_km` with required `velocity_eci_km_s`,
 - `coes`,
 - `tle`,
+- `ogp_mean_elements`,
+- `relative_to_target_ric`, `relative_ric_rect`, or `relative_ric_curv`,
+- `relative_to_target_cislunar` or `relative_cislunar`,
+- `cr3bp_rotating` or `cr3bp_halo`,
+- `launch_lat_deg` launch initialization,
 - `source: rocket_deployment` with `deploy_time_s`,
-- `source: rocket_insertion`.
+- `source: rocket_insertion`,
+- `source: default_circular_earth` for the explicit default/trajectory-only path.
+
+Specialized relative, cislunar/CR3BP, launch, OGP-mean-element, and deployment
+forms retain their documented object-kind and public/Pro/experimental
+boundaries. Cartesian position requires Cartesian velocity; auxiliary epoch,
+attitude, and deployment metadata do not create a second orbital form.
 
 `coes` must contain at least one finite element. Canonical keys are `a_km`,
 `ecc`, `inc_deg`, `raan_deg`, `argp_deg`, and `true_anomaly_deg`. The established
@@ -336,6 +349,8 @@ Common fields:
 - `monte_carlo`
 - `ai_report`
 - `review`
+- `orbital_analysis`
+- `resource_limits`
 
 Output modes:
 
@@ -406,7 +421,9 @@ controller behavior, or output semantics without tests and release notes.
 
 ## Known Gaps
 
-- No formal `schema_version` field is enforced yet.
+- `schema_version` accepts the current `oel.scenario.v1` and the temporary
+  legacy identifier; omission is classified as legacy and unknown versions
+  fail closed. A generated full machine-readable schema remains incomplete.
 - Not every supported field has a generated machine-readable schema.
 - Public/Pro field boundaries are enforced mostly through export stubs, docs,
   config curation, and runtime checks rather than a standalone schema compiler.

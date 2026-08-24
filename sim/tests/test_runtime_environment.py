@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 from pathlib import Path
 
-from sim.runtime_environment import configure_headless_runtime
+from sim.runtime_environment import configure_headless_runtime, configure_runtime_caches
 
 
 def test_automation_configures_writable_matplotlib_and_font_caches(
@@ -54,3 +56,35 @@ def test_interactive_runtime_does_not_force_headless_environment(monkeypatch) ->
     assert "MPLBACKEND" not in os.environ
     assert "MPLCONFIGDIR" not in os.environ
     assert "XDG_CACHE_HOME" not in os.environ
+
+
+def test_runtime_caches_do_not_force_headless_backend(monkeypatch, tmp_path: Path) -> None:
+    for name in ("MPLBACKEND", "MPLCONFIGDIR", "XDG_CACHE_HOME"):
+        monkeypatch.delenv(name, raising=False)
+
+    mpl_dir, xdg_dir, errors = configure_runtime_caches(cache_root=tmp_path / "runtime-cache")
+
+    assert Path(mpl_dir).is_dir()
+    assert Path(xdg_dir).is_dir()
+    assert errors == ()
+    assert "MPLBACKEND" not in os.environ
+
+
+def test_agent_task_entrypoint_prepares_cache_before_plotting_import(tmp_path: Path) -> None:
+    environment = dict(os.environ)
+    for name in ("MPLCONFIGDIR", "XDG_CACHE_HOME"):
+        environment.pop(name, None)
+    environment["TMPDIR"] = str(tmp_path)
+
+    completed = subprocess.run(
+        [sys.executable, "-m", "sim.agent_task", "list"],
+        cwd=Path(__file__).resolve().parents[2],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "not a writable directory" not in completed.stderr
+    assert "created a temporary cache directory" not in completed.stderr.lower()

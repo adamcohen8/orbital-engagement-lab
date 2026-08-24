@@ -23,9 +23,13 @@ of the façade contract.
 
 `sim.api` remains the stable façade. `sim.public_api` separates configuration
 wrappers, snapshots, results, sessions, workspaces, controller adapters, and
-private-feature routing. Public classes retain `sim.api` as their
-`__module__`, so repr, pickle lookup, documented imports, and lazy exports from
-`sim` remain compatible.
+private-feature routing. The seven compatibility façade classes covered by the
+architecture identity tests retain `sim.api` as their `__module__`, so repr,
+pickle lookup, documented imports, and lazy exports from `sim` remain
+compatible. Scenario authoring and validation classes such as
+`ScenarioArtifact`, `ScenarioBuilder`, `ValidationIssue`, and
+`ValidationReport` remain owned by `sim.scenarios` while being stable façade
+exports.
 
 The static `PUBLIC_API_FAMILIES` map in `sim.public_api.architecture` provides
 the corresponding implementation index. Feature-routing remains centralized

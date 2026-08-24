@@ -96,6 +96,12 @@ def build_mission_recovery_summary(
     }
     recovery["scope"] = "original_orbit_reconstitution"
     recovery["display_name"] = "Original-Orbit Recovery Estimate"
+    recovery["recovery_time_from_assessment_s"] = recovery.get("recovery_time_s")
+    recovery["run_start_to_estimated_recovery_s"] = (
+        None
+        if recovery.get("recovery_time_s") is None
+        else float(times[assessment_idx]) + float(recovery["recovery_time_s"])
+    )
     if target_orbit_configured:
         recovery.setdefault("notes", []).append(
             "This analytical estimate remains referenced to the object's initial orbit; "
@@ -118,6 +124,13 @@ def build_mission_recovery_summary(
         recovery_estimate=recovery,
     )
     if planner:
+        for candidate in list(planner.get("candidates", []) or []):
+            if isinstance(candidate, dict):
+                candidate.setdefault("planned_time_basis", "elapsed_from_assessment_state")
+                candidate.setdefault(
+                    "run_start_to_planned_completion_s",
+                    float(times[assessment_idx]) + float(candidate.get("planned_time_s", 0.0) or 0.0),
+                )
         summary["planner"] = planner
     return summary
 
@@ -174,19 +187,7 @@ def write_mission_recovery_trade_space_plot(
         "feasible": "#3973b7",
         "infeasible": "#b94b48",
     }
-    label_offsets = [
-        (7, -16),
-        (7, 18),
-        (-72, 8),
-        (-72, -16),
-        (7, 20),
-        (-75, 20),
-        (7, -24),
-        (7, 18),
-        (-72, 8),
-        (-75, -16),
-    ]
-    for idx, row in enumerate(rows):
+    for row in rows:
         marker = "D" if row["source_family"] == "analytic_reconstitution" else "o"
         if row["verified"]:
             color = palette["verified"]
@@ -222,16 +223,16 @@ def write_mission_recovery_trade_space_plot(
             label = f"{row['candidate_id']} / {', '.join(modes)}"
             label_offset = (7, 18)
         else:
-            label = row["candidate_id"]
-            label_offset = label_offsets[idx % len(label_offsets)]
-        ax.annotate(
-            label,
-            (row["time_min"], row["delta_v_m_s"]),
-            xytext=label_offset,
-            textcoords="offset points",
-            fontsize=8.5,
-            color="#d7deea",
-        )
+            label = ""
+        if label:
+            ax.annotate(
+                label,
+                (row["time_min"], row["delta_v_m_s"]),
+                xytext=label_offset,
+                textcoords="offset points",
+                fontsize=8.5,
+                color="#d7deea",
+            )
 
     max_time_s = _finite_or_none(planner.get("max_recovery_time_s"))
     if max_time_s is not None and max_time_s > 0.0:
@@ -259,7 +260,7 @@ def write_mission_recovery_trade_space_plot(
     goal = str(mission_recovery.get("goal") or "")
     object_id = str(mission_recovery.get("object_id") or "")
     ax.set_title("Original-Orbit Recovery / Orbit Transfer Trade Space")
-    ax.set_xlabel("Planned total recovery time (min)")
+    ax.set_xlabel("Planned time after assessment state (min)")
     ax.set_ylabel("Planned total delta-V (m/s)")
     subtitle = " / ".join(part for part in (object_id, goal) if part)
     if subtitle:
@@ -881,21 +882,30 @@ def _orbit_transfer_candidate_row(
     velocity_residual_m_s = None
     simulated_delta_v = None
     simulated_recovery_time = None
+    verification_error = None
     if simulate_candidates:
         post_burn1 = np.hstack((departure_state[:3], departure_state[3:6] + burn1_km_s))
         transfer_arrival = _propagate_state(post_burn1, time_of_flight_s)
         recovered_state = np.hstack((transfer_arrival[:3], transfer_arrival[3:6] + burn2_km_s))
-        recovered_elements = rv_to_coe_eci(recovered_state[:3], recovered_state[3:6])
-        reference_elements = rv_to_coe_eci(target_state[:3], target_state[3:6]) if goal == "orbit_slot" else target_elements
-        expected_element_errors = _element_errors(reference_elements, recovered_elements, target_state, recovered_state)
-        if goal == "orbit_slot":
-            expected_element_errors["slot_phase_deg"] = _position_angle_error_deg(target_state, recovered_state)
-        expected_final_elements = _elements_dict(recovered_elements)
-        within_tolerances = _within_tolerances(expected_element_errors, tolerances)
         position_residual_km = float(np.linalg.norm(recovered_state[:3] - target_state[:3]))
         velocity_residual_m_s = float(np.linalg.norm(recovered_state[3:6] - target_state[3:6]) * 1000.0)
         simulated_delta_v = float(burn1_m_s + burn2_m_s)
         simulated_recovery_time = float(total_time_s)
+        try:
+            recovered_elements = rv_to_coe_eci(recovered_state[:3], recovered_state[3:6])
+            reference_elements = (
+                rv_to_coe_eci(target_state[:3], target_state[3:6]) if goal == "orbit_slot" else target_elements
+            )
+        except ValueError as exc:
+            feasible = False
+            within_tolerances = False
+            verification_error = str(exc)
+        else:
+            expected_element_errors = _element_errors(reference_elements, recovered_elements, target_state, recovered_state)
+            if goal == "orbit_slot":
+                expected_element_errors["slot_phase_deg"] = _position_angle_error_deg(target_state, recovered_state)
+            expected_final_elements = _elements_dict(recovered_elements)
+            within_tolerances = _within_tolerances(expected_element_errors, tolerances)
     verified = bool(simulate_candidates and feasible and within_tolerances is not False)
     if position_residual_km is not None and position_residual_km > 1.0e-2:
         verified = False
@@ -926,6 +936,8 @@ def _orbit_transfer_candidate_row(
             f"Collapsed {collapsed} Lambert impulse(s) at or below "
             f"{float(impulse_epsilon_m_s):.6g} m/s for reporting."
         )
+    if verification_error:
+        notes.append(f"Verification rejected this non-elliptical recovered state: {verification_error}")
     return {
         "candidate_id": candidate_id,
         "source": "orbit_transfer_lambert",

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, Callable
 
 import numpy as np
 
-from sim.acceleration.settings import acceleration_context_from_config
+from sim.acceleration.settings import acceleration_context_from_config, acceleration_settings_from_config
 from sim.aero import resolve_vehicle_aero_properties
 from sim.config import (
     SimulationScenarioConfig,
@@ -65,6 +65,7 @@ from sim.runtime_support import (
     _run_mission_execution,
     _run_mission_modules,
     _run_mission_strategy,
+    _scenario_uses_aerodynamic_lift,
 )
 from sim.single_run_support import (
     _BudgetedControllerProxy,
@@ -252,6 +253,7 @@ class _SingleRunEngine:
 
         self.agents: dict[str, AgentRuntime] = {}
         self.object_configs = configured_objects(cfg)
+        scenario_uses_aerodynamic_lift = _scenario_uses_aerodynamic_lift(cfg)
         for aid, agent_cfg in self.object_configs.items():
             if not bool(agent_cfg.enabled):
                 continue
@@ -263,6 +265,7 @@ class _SingleRunEngine:
                     agent_cfg,
                     cfg,
                     np.random.default_rng(int(rng.integers(0, 2**31 - 1))),
+                    scenario_uses_aerodynamic_lift=scenario_uses_aerodynamic_lift,
                 )
         for agent in self.agents.values():
             if agent.kind == "satellite" and agent.deploy_source in {"rocket_deployment", "rocket_insertion"}:
@@ -302,6 +305,7 @@ class _SingleRunEngine:
                     if general.get("max_tle_age_days_warning") is None
                     else float(general.get("max_tle_age_days_warning"))
                 ),
+                acceleration_mode=acceleration_settings_from_config(cfg).requested_mode,
             )
             if isinstance(initial_state.get("ogp_mean_elements"), dict):
                 provider = SGP4EphemerisProvider.from_mean_elements(
@@ -955,24 +959,25 @@ class _SingleRunEngine:
                     burned=bool(sat_result.burned),
                 )
 
-        bridge_events: list[dict[str, Any]] = []
-        bridge_elapsed = 0.0
-        if agent.bridge is not None:
-            bridge_t0 = perf_counter()
-            evt = {"t_s": float(item.t_next), "object_id": aid}
-            if hasattr(agent.bridge, "step"):
-                try:
-                    ret = agent.bridge.step(evt)
-                    if ret is not None:
-                        evt["bridge"] = ret
-                except Exception as ex:
-                    if bool(getattr(self.cfg.simulator.plugin_validation, "strict_runtime", False)):
-                        raise RuntimeError(f"{aid} bridge.step failed at t={float(item.t_next):.6g} s") from ex
-                    evt["bridge_error"] = str(ex)
-            bridge_events.append(evt)
-            bridge_elapsed = perf_counter() - bridge_t0
+        if agent.bridge is None:
+            return result
 
-        return replace(result, bridge_events=bridge_events, bridge_elapsed_s=bridge_elapsed)
+        bridge_t0 = perf_counter()
+        evt = {"t_s": float(item.t_next), "object_id": aid}
+        if hasattr(agent.bridge, "step"):
+            try:
+                ret = agent.bridge.step(evt)
+                if ret is not None:
+                    evt["bridge"] = ret
+            except Exception as ex:
+                if bool(getattr(self.cfg.simulator.plugin_validation, "strict_runtime", False)):
+                    raise RuntimeError(f"{aid} bridge.step failed at t={float(item.t_next):.6g} s") from ex
+                evt["bridge_error"] = str(ex)
+        return replace(
+            result,
+            bridge_events=[evt],
+            bridge_elapsed_s=perf_counter() - bridge_t0,
+        )
 
     def _apply_object_step_result(self, result: ObjectStepResult, *, sample_index: int) -> None:
         aid = result.object_id

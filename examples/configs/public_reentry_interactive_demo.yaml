@@ -1,10 +1,12 @@
+schema_version: oel.scenario.v1
 scenario_name: public_reentry_interactive_demo
 metadata:
   owner: public
   public_surface: public-reentry
   support_level: supported
-scenario_description: Interactive 10-day atmospheric re-entry diagnostics demo starting
-  at the entry threshold.
+scenario_description: Long-running 10-day atmospheric re-entry study starting at the
+  entry threshold. The CLI reports progress; use configs/reentry_smoke.yaml for a bounded
+  laptop-safe workflow check.
 objects:
   capsule:
     kind: satellite
@@ -59,14 +61,17 @@ simulator:
     earth_impact_enabled: true
 outputs:
   output_dir: outputs/examples/public_reentry_interactive_demo
-  mode: interactive
+  mode: save
   stats:
     print_summary: true
     save_json: true
-    save_full_log: true
+    save_full_log: false
   plots:
     enabled: true
     preset: reentry
     dpi: 150
   animations:
     enabled: false
+  review:
+    enabled: true
+    detail: standard

@@ -30,11 +30,13 @@ Customer or pilot agreements may define stricter response targets.
 
 ## Supported Versions
 
-Security fixes target the current public release line, currently `v0.27.1`, and
+Security fixes target the current public release line, currently `v0.27.2`, and
 active private/Pro customer-supported release lines. The project targets Python
-3.10 through 3.14. Blocking CI currently exercises Python 3.11, while the
-release compatibility program retains evidence for the wider matrix described
-in [`docs/compatibility.md`](docs/compatibility.md). Evaluators should run
+3.10 through 3.14. The authoritative local release gate exercises the blocking
+Python 3.11 lane and retains evidence for the wider compatibility matrix
+described in [`docs/compatibility.md`](docs/compatibility.md). Hosted Windows
+and native-Linux cFS workflows are manual advisory diagnostics only: they have
+no pull-request or scheduled trigger and are not release authority. Evaluators should run
 acceptance on their exact target interpreter and operating system.
 Python 3.9 is no longer a supported procurement baseline because several
 vulnerability fixes in the Python packaging and ML/plotting ecosystem require
@@ -88,7 +90,10 @@ module imports, hosted AI providers, custom AI endpoints, full run logs, full re
 and non-summary AI report packets by default. Each exception requires an
 explicit CLI opt-in such as `--allow-untrusted-plugin-imports`,
 `--allow-hosted-ai`, `--allow-custom-ai-endpoints`, or
-`--allow-high-detail-outputs`.
+`--allow-high-detail-outputs`. Sealed mode blocks **all** cFS/SIL socket
+networking, including loopback UDP, unless the separately documented isolated
+test policy opt-in is active; ordinary adapter/network scope controls are not
+sealed-mode bypasses by themselves.
 
 External paths, external AI prompt files, custom AI endpoints, forwarding hosted
 provider API keys to custom endpoints, and insecure custom AI endpoints all require explicit opt-in flags or environment
@@ -96,8 +101,9 @@ variables. Use those only for trusted local or isolated-network workflows.
 
 ## Dependency Audit
 
-Release and scheduled CI run a Python dependency audit with `pip-audit`. Local
-release review can run the same check with:
+The authoritative local release gate runs a Python dependency audit with
+`pip-audit`. Hosted diagnostics do not repeat that audit. Run the same local
+check directly with:
 
 ```bash
 python -m pip install -U pip-audit

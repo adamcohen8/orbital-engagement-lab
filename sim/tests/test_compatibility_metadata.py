@@ -49,7 +49,7 @@ def test_python_range_classifiers_and_os_classifiers_match_phase2_contract() -> 
 
     assert project["requires-python"] == ">=3.10,<3.15"
     assert SUPPORTED_PYTHON_RANGE == project["requires-python"]
-    assert project["license"] == "MIT"
+    assert project["license"] == "Apache-2.0"
     assert project["license-files"] == ["LICENSE.txt"]
     classifiers = set(project["classifiers"])
     assert not any(item.startswith("License ::") for item in classifiers)
@@ -177,14 +177,13 @@ def test_compatibility_workflow_runs_one_unavailable_host_row() -> None:
     jobs = workflow["jobs"]
     smoke = jobs["platform-diagnostic"]
     triggers = workflow.get("on", workflow.get(True))
-    assert set(triggers) == {"pull_request", "workflow_dispatch"}
+    assert set(triggers) == {"workflow_dispatch"}
     assert set(jobs) == {"platform-diagnostic"}
     assert "strategy" not in smoke
     assert smoke["timeout-minutes"] == 20
     inputs = triggers["workflow_dispatch"]["inputs"]
     assert inputs["target"]["options"] == ["windows-x64", "macos-intel"]
     assert inputs["python-version"]["options"] == list(SUPPORTED_MINORS)
-    assert ".github/workflows/compatibility.yml" in triggers["pull_request"]["paths"]
 
     for required_text in (
         "--only-binary=:all:",

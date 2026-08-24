@@ -19,8 +19,8 @@ from sim.analysis.global_coverage import (
 from sim.analysis.healpix import (
     HEALPIX_GRID_ID,
     WGS84_SURFACE_AREA_KM2,
+    cached_healpix_wgs84_centers,
     healpix_npix,
-    healpix_wgs84_centers,
     wgs84_points_to_healpix_nested,
 )
 
@@ -234,7 +234,7 @@ def validate_global_coverage_product(result: CoverageProduct) -> int:
             raise ValueError(f"Global per-cell field {field_name!r} does not match the canonical grid.")
     if result.cell_geodetic_latitude_deg.shape != (npix,) or result.cell_longitude_deg.shape != (npix,):
         raise ValueError("Global cell-center coordinates do not match the canonical grid.")
-    centers = healpix_wgs84_centers(order)
+    centers = cached_healpix_wgs84_centers(order)
     if not np.allclose(
         result.cell_geodetic_latitude_deg,
         np.rad2deg(centers.geodetic_latitude_rad),

@@ -2,8 +2,12 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import shutil
 import sys
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 from sim.doctor import (
@@ -18,7 +22,7 @@ if __name__ == "__main__":
     require_supported_interpreter()
 
 from sim.platform_compat import open_folder
-from sim.runtime_environment import configure_headless_runtime
+from sim.runtime_environment import configure_headless_runtime, configure_runtime_caches
 
 _NATIVE_MATH_THREAD_ENV_VARS = (
     "VECLIB_MAXIMUM_THREADS",
@@ -40,6 +44,7 @@ def _configure_cli_native_math_threads(default_threads: str = "1") -> None:
 
 if __name__ == "__main__":
     _configure_cli_native_math_threads()
+    configure_runtime_caches()
     _HEADLESS_RUNTIME_STATUS = configure_headless_runtime()
 
 from sim.config import load_simulation_yaml, validate_scenario_plugins
@@ -50,7 +55,7 @@ from sim.security.sealed_mode import SealedModePolicy, validate_sealed_mode
 QUICKSTART_CONFIG = quickstart_config_path()
 
 
-def _print_preflight(config_path: str, cfg, errors: list[str]) -> None:
+def _print_preflight(config_path: str, cfg, errors: list[str], *, import_plugins: bool) -> None:
     print("")
     print("=" * 72)
     print("SIMULATION PREFLIGHT")
@@ -64,7 +69,9 @@ def _print_preflight(config_path: str, cfg, errors: list[str]) -> None:
         for err in errors:
             print(f"- {err}")
     else:
-        print("Status   : OK")
+        print(f"Status   : {'OK' if import_plugins else 'STRUCTURALLY OK'}")
+        if not import_plugins:
+            print("Plugins  : SKIPPED (safe validation does not import plugins)")
     print("=" * 72)
 
 
@@ -74,6 +81,59 @@ def _reject_batch_analysis(cfg) -> None:
             "Batch analysis is not available in the public core. "
             "Use Orbital Engagement Pro for Monte Carlo, sensitivity, controller-bench, and optimization workflows."
         )
+
+
+def _prepare_cli_output_directory(cfg, *, overwrite: bool) -> None:
+    # Refuse ambiguous evidence reuse and archive only with explicit consent.
+
+    output_dir = Path(cfg.outputs.output_dir).expanduser().resolve()
+    if output_dir.exists() and not output_dir.is_dir():
+        raise SystemExit(f"Configured output path is not a directory: {output_dir}")
+    parent = output_dir.parent
+    parent.mkdir(parents=True, exist_ok=True)
+    free_bytes = int(shutil.disk_usage(parent).free)
+    object_count = max(len(list(getattr(cfg, "objects", ()) or ())), 1)
+    samples = max(int(round(float(cfg.simulator.duration_s) / float(cfg.simulator.dt_s))) + 1, 1)
+    estimated_floor = max(64 * 1024 * 1024, samples * object_count * 2048)
+    if free_bytes < estimated_floor:
+        raise SystemExit(
+            "Output preflight found insufficient filesystem headroom; refusing to start before evidence files are opened. "
+            f"Available={free_bytes / (1024 ** 2):.1f} MiB, required floor={estimated_floor / (1024 ** 2):.1f} MiB, "
+            f"output={output_dir}. Free space or choose a smaller run."
+        )
+    if not output_dir.is_dir() or not any(output_dir.iterdir()):
+        return
+    if not overwrite:
+        raise SystemExit(
+            "Configured output directory is not empty; refusing to overwrite or mix prior evidence: "
+            f"{output_dir}\nUse a distinct outputs.output_dir, or rerun with --overwrite-output "
+            "to archive the existing directory before execution."
+        )
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    archived = output_dir.with_name(f"{output_dir.name}.previous-{stamp}")
+    suffix = 2
+    while archived.exists():
+        archived = output_dir.with_name(f"{output_dir.name}.previous-{stamp}-{suffix}")
+        suffix += 1
+    output_dir.replace(archived)
+    print(f"Archived Output: {archived}")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "output_replacement_manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "oel.output-replacement.v1",
+                "generated_utc": datetime.now(timezone.utc).isoformat(),
+                "replacement_authorized_by": "cli:--overwrite-output",
+                "archived_output_dir": str(archived),
+                "new_output_dir": str(output_dir),
+                "prior_evidence_deleted": False,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 def _output_index_path(out: dict, cfg) -> str:
@@ -123,6 +183,24 @@ def _print_single_run_summary(out: dict) -> None:
     print("=" * 72)
 
 
+def _plain_progress_reporter():
+    last_percent = -10
+    last_reported = time.monotonic()
+
+    def report(step: int, total: int) -> None:
+        nonlocal last_percent, last_reported
+        if total <= 0:
+            return
+        percent = min(100, max(0, int(100 * int(step) / int(total))))
+        now = time.monotonic()
+        if percent >= last_percent + 10 or now - last_reported >= 30.0 or int(step) >= int(total):
+            print(f"Simulation progress: {int(step)}/{int(total)} steps ({percent}%)", file=sys.stderr)
+            last_percent = percent
+            last_reported = now
+
+    return report
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run a public-core Orbital Engagement Lab scenario.")
     parser.add_argument("--config", default="", help="Path to a simulation scenario YAML file.")
@@ -142,6 +220,14 @@ def main() -> None:
         "--safe-validate",
         action="store_true",
         help="Validate schema and plugin pointer shape without importing configured plugin modules.",
+    )
+    parser.add_argument(
+        "--overwrite-output",
+        action="store_true",
+        help=(
+            "Archive a non-empty configured output directory to a timestamped sibling before execution. "
+            "Without this flag, ordinary scenario runs refuse non-empty output directories."
+        ),
     )
     parser.add_argument(
         "--sealed-mode",
@@ -199,7 +285,7 @@ def main() -> None:
             )
         )
     if args.validate_only or args.safe_validate:
-        _print_preflight(config_path, cfg, errors)
+        _print_preflight(config_path, cfg, errors, import_plugins=import_plugins)
         if errors:
             raise SystemExit(1)
         return
@@ -207,7 +293,8 @@ def main() -> None:
         msg = "Plugin validation failed:\n- " + "\n- ".join(errors)
         raise SystemExit(msg)
 
-    out = run_simulation_config_file(config_path)
+    _prepare_cli_output_directory(cfg, overwrite=bool(args.overwrite_output))
+    out = run_simulation_config_file(config_path, step_callback=_plain_progress_reporter())
     run = dict(out.get("run", {}) or {})
     print("")
     print("=" * 72)
@@ -226,4 +313,11 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except (ValueError, FileNotFoundError) as exc:
+        raise SystemExit(
+            "OEL input/configuration error: "
+            f"{exc}\nHint: run this config with --safe-validate for structural inspection, "
+            "then use --validate-only after its referenced plugins and paths are trusted."
+        ) from None

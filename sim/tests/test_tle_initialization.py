@@ -5,6 +5,7 @@ from dataclasses import replace
 import numpy as np
 import pytest
 
+import sim.dynamics.orbit.sgp4 as sgp4_module
 from sim import SimulationConfig, SimulationSession
 from sim.core.models import StateTruth
 from sim.dynamics.orbit.frames import teme_to_eci_matrix_vallado_iau80
@@ -422,6 +423,99 @@ def test_sgp4_provider_dispatches_deep_space_tle_to_ogp_sdp4() -> None:
     state = provider.configured_state_at(0.0)
     assert state.frame == "teme"
     assert np.linalg.norm(state.position_km) > 10000.0
+
+
+def test_sgp4_provider_compiled_backend_stays_within_rounding_bound() -> None:
+    pytest.importorskip("numba")
+    elements = parse_tle_lines(ISS_LINE1, ISS_LINE2, require_checksum=True)
+    provider = SGP4EphemerisProvider.from_tle_block(
+        {"line1": ISS_LINE1, "line2": ISS_LINE2, "require_checksum": True},
+        mass_kg=420.0,
+        start_jd_utc=elements.epoch_jd_utc,
+        duration_s=86400.0,
+        output_frame="teme",
+        acceleration_mode="numba",
+    )
+
+    for t_s in (0.0, 120.0, 3600.0, 43200.0, 86400.0):
+        accelerated = provider.configured_state_at(t_s)
+        reference = sgp4_propagate_teme(elements, t_s / 60.0)
+        np.testing.assert_allclose(
+            accelerated.position_km,
+            reference.position_teme_km,
+            rtol=0.0,
+            atol=1.0e-12,
+        )
+        np.testing.assert_allclose(
+            accelerated.velocity_km_s,
+            reference.velocity_teme_km_s,
+            rtol=0.0,
+            atol=2.0e-15,
+        )
+
+    metadata = provider.metadata()
+    assert metadata.requested_backend == "numba_scalar"
+    assert metadata.propagation_backend == "numba_scalar"
+    assert metadata.backend_fallback_reason == ""
+    assert metadata.numerical_equivalence == "rounding_level"
+
+
+def test_sgp4_provider_compiled_backend_falls_back_to_scalar(monkeypatch) -> None:
+    pytest.importorskip("numba")
+    elements = parse_tle_lines(ISS_LINE1, ISS_LINE2, require_checksum=True)
+    provider = SGP4EphemerisProvider.from_tle_block(
+        {"line1": ISS_LINE1, "line2": ISS_LINE2, "require_checksum": True},
+        mass_kg=420.0,
+        start_jd_utc=elements.epoch_jd_utc,
+        duration_s=120.0,
+        output_frame="teme",
+        acceleration_mode="numba",
+    )
+
+    def fail_backend(*_args, **_kwargs):
+        raise RuntimeError("compiled backend unavailable")
+
+    monkeypatch.setattr(sgp4_module, "_sgp4_numba_state", fail_backend)
+    actual = provider.configured_state_at(120.0)
+    expected = sgp4_propagate_teme(elements, 2.0)
+
+    assert np.array_equal(actual.position_km, expected.position_teme_km)
+    assert np.array_equal(actual.velocity_km_s, expected.velocity_teme_km_s)
+    metadata = provider.metadata()
+    assert metadata.requested_backend == "numba_scalar"
+    assert metadata.propagation_backend == "python_scalar"
+    assert metadata.backend_fallback_reason == "RuntimeError: compiled backend unavailable"
+    assert metadata.numerical_equivalence == "bitwise_reference"
+
+
+def test_sdp4_provider_initializes_one_context_and_preserves_scalar_outputs(monkeypatch) -> None:
+    import sim.dynamics.orbit.sdp4 as sdp4_module
+
+    elements = parse_tle_lines(DEEP_SPACE_LINE1, DEEP_SPACE_LINE2, require_checksum=True)
+    initialize = sdp4_module.sdp4_initialize
+    calls = 0
+
+    def counted_initialize(candidate):
+        nonlocal calls
+        calls += 1
+        return initialize(candidate)
+
+    monkeypatch.setattr(sdp4_module, "sdp4_initialize", counted_initialize)
+    provider = SGP4EphemerisProvider.from_tle_block(
+        {"line1": DEEP_SPACE_LINE1, "line2": DEEP_SPACE_LINE2, "require_checksum": True},
+        mass_kg=420.0,
+        start_jd_utc=elements.epoch_jd_utc,
+        duration_s=86400.0,
+        output_frame="teme",
+    )
+
+    for t_s in (86400.0, 0.0, 3600.0, 43200.0):
+        contextual = provider.configured_state_at(t_s)
+        scalar = sdp4_propagate_teme(elements, t_s / 60.0)
+        assert np.array_equal(contextual.position_km, scalar.position_teme_km)
+        assert np.array_equal(contextual.velocity_km_s, scalar.velocity_teme_km_s)
+
+    assert calls == 5  # one provider context plus four scalar reference calls
 
 
 def test_satellite_initial_state_accepts_tle_lines() -> None:

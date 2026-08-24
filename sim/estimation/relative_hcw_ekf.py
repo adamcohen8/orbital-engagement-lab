@@ -8,6 +8,7 @@ from sim.core.interfaces import Estimator
 from sim.core.models import Measurement, StateBelief
 from sim.dynamics.orbit.environment import EARTH_J2, EARTH_RADIUS_KM
 from sim.dynamics.orbit.relative_linear import RelativeLinearDynamics
+from sim.estimation.orbit_ekf import _solve_innovation_gain_and_vector
 
 HCW_MEASUREMENT_MODELS = {
     "relative_state",
@@ -141,8 +142,7 @@ class HCWRelativeEKFEstimator(Estimator):
         s_mat = h_jac @ p_pred @ h_jac.T + r
         hp_t = p_pred @ h_jac.T
         try:
-            k_gain = np.linalg.solve(s_mat.T, hp_t.T).T
-            s_y = np.linalg.solve(s_mat, innovation)
+            k_gain, s_y = _solve_innovation_gain_and_vector(s_mat, hp_t, innovation)
         except np.linalg.LinAlgError:
             s_pinv = np.linalg.pinv(s_mat)
             k_gain = hp_t @ s_pinv

@@ -21,6 +21,34 @@ class HeadlessRuntimeStatus:
         return not self.errors
 
 
+def configure_runtime_caches(
+    *,
+    cache_root: str | Path | None = None,
+) -> tuple[str, str, tuple[str, ...]]:
+    """Prepare writable plotting/font caches without selecting a backend."""
+
+    root = (
+        Path(cache_root).expanduser()
+        if cache_root is not None
+        else Path(tempfile.gettempdir()) / "oel-matplotlib"
+    )
+    defaults = {
+        "MPLCONFIGDIR": str(root / "config"),
+        "XDG_CACHE_HOME": str(root / "cache"),
+    }
+    for name, value in defaults.items():
+        os.environ.setdefault(name, value)
+
+    errors: list[str] = []
+    for name in ("MPLCONFIGDIR", "XDG_CACHE_HOME"):
+        path = Path(os.environ[name]).expanduser()
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            errors.append(f"{name}={path}: {exc}")
+    return os.environ["MPLCONFIGDIR"], os.environ["XDG_CACHE_HOME"], tuple(errors)
+
+
 def configure_headless_runtime(
     *,
     force: bool = False,
@@ -36,33 +64,17 @@ def configure_headless_runtime(
     if not enabled:
         return HeadlessRuntimeStatus(enabled=False)
 
-    root = (
-        Path(cache_root).expanduser()
-        if cache_root is not None
-        else Path(tempfile.gettempdir()) / "oel-matplotlib"
+    os.environ.setdefault("MPLBACKEND", "Agg")
+    matplotlib_config_dir, xdg_cache_dir, errors = configure_runtime_caches(
+        cache_root=cache_root
     )
-    defaults = {
-        "MPLBACKEND": "Agg",
-        "MPLCONFIGDIR": str(root / "config"),
-        "XDG_CACHE_HOME": str(root / "cache"),
-    }
-    for name, value in defaults.items():
-        os.environ.setdefault(name, value)
-
-    errors: list[str] = []
-    for name in ("MPLCONFIGDIR", "XDG_CACHE_HOME"):
-        path = Path(os.environ[name]).expanduser()
-        try:
-            path.mkdir(parents=True, exist_ok=True)
-        except OSError as exc:
-            errors.append(f"{name}={path}: {exc}")
 
     return HeadlessRuntimeStatus(
         enabled=True,
         matplotlib_backend=os.environ["MPLBACKEND"],
-        matplotlib_config_dir=os.environ["MPLCONFIGDIR"],
-        xdg_cache_dir=os.environ["XDG_CACHE_HOME"],
-        errors=tuple(errors),
+        matplotlib_config_dir=matplotlib_config_dir,
+        xdg_cache_dir=xdg_cache_dir,
+        errors=errors,
     )
 
 

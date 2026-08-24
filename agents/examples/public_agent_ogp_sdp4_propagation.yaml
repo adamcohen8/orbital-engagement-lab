@@ -1,0 +1,59 @@
+schema_version: oel.scenario.v1
+scenario_name: public_agent_ogp_sdp4_propagation
+scenario_description: >-
+  Deterministic offline propagation of a synthetic GEO-like TLE through the
+  continuous deep-space OGP-SDP4 path. This is a regression/onboarding fixture,
+  not a real catalog object or operational ephemeris.
+metadata:
+  owner: public
+  public_surface: public-agent-example
+  support_level: supported
+  fixture_provenance: synthetic_geo_like_python_sgp4_2_23
+objects:
+  synthetic_geo:
+    enabled: true
+    role: passive_catalog_object
+    kind: satellite
+    propagation_method: general
+    general:
+      model: sgp4
+      output_frame: eci
+      frame_transform: teme_to_eci_iau80
+    specs:
+      mass_kg: 1000.0
+    initial_state:
+      tle:
+        line1: '1 91001U 24001A   24001.00000000  .00000000  00000+0  00000+0 0  9993'
+        line2: '2 91001   0.0500  80.0000 0001000  10.0000  20.0000  1.00270000    00'
+        require_checksum: true
+    flight_software:
+      stack: fsw.passive
+      hardware_profile: hardware.passive.v1
+      params: {}
+simulator:
+  initial_jd_utc: 2460310.5
+  duration_s: 21600.0
+  dt_s: 600.0
+  dynamics:
+    orbit:
+      model: two_body
+    attitude:
+      enabled: false
+  termination:
+    earth_impact_enabled: false
+outputs:
+  output_dir: outputs/agent_examples/public_agent_ogp_sdp4_propagation
+  mode: save
+  stats:
+    enabled: true
+    print_summary: true
+    save_json: true
+    save_full_log: false
+  plots:
+    enabled: false
+    figure_ids: []
+  animations:
+    enabled: false
+  review:
+    enabled: true
+    detail: standard

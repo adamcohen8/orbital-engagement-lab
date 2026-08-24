@@ -74,3 +74,40 @@ outputs:
   review:
     enabled: true
     detail: standard
+analysis:
+  mission_recovery:
+    enabled: true
+    object_id: target
+    goal: orbit_slot
+    assessment_time_s: final
+    slot_tolerance_deg: 1.0
+    max_phasing_orbits: 25
+    planner:
+      enabled: true
+      sources:
+      - analytic_reconstitution
+      - orbit_transfer
+      modes:
+      - min_delta_v
+      - min_time
+      - constrained
+      max_recovery_time_s: 3600.0
+      max_recovery_delta_v_m_s: 20.0
+      candidate_count: 10
+      simulate_candidates: true
+      orbit_transfer:
+        enabled: true
+        departure_samples: 5
+        time_of_flight_samples: 8
+        min_time_of_flight_s: 300.0
+        max_time_of_flight_s: 3600.0
+        short_way: true
+        long_way: false
+    propulsion:
+      spacecraft_mass_kg: 100.0
+      isp_s: 220.0
+      max_thrust_n: 20.0
+    element_tolerances:
+      a_km: 1.0
+      ecc: 0.001
+      slot_phase_deg: 1.0

@@ -36,6 +36,11 @@ Remaining maturity is ongoing evidence accumulation and tuning within named
 envelopes, not a missing product architecture. No Reference label implies
 operational or flight qualification.
 
+The former Phase 2 sequence below is retained as historical implementation
+order. Its RIC/V-bar/R-bar, waypoint/keep-out/retreat/braking, pointing, timed
+burn, pulse, slew, and conditional command primitives are implemented catalog
+entries; remaining work is evidence and maturity promotion, not creation.
+
 Use this roadmap with:
 
 - [Product Inventory](../product-inventory.md) for what currently ships.
@@ -163,7 +168,7 @@ surfaces until the listed gaps close.
 | Surface | Current issue | Recommended action |
 | --- | --- | --- |
 | `HCWPDController` | Works, but naming conflicts with product-facing RIC_PD guidance. | Reframe as `RICPDHoldController` or keep as compatibility/workbench. |
-| `CurvilinearRICPDController` | Useful, but not exposed in supported catalogs and needs stronger examples. | Add scenario, docs, and bench coverage if promoted. |
+| `CurvilinearRICPDController` | Exposed as Workbench entry `orbit.curvilinear_ric_pd`, not promoted to Reference; needs stronger examples. | Add scenario, docs, and bench coverage before Reference promotion. |
 | `RelativeOrbitMPCController` | Real nonlinear MPC, but convergence/tuning evidence is thin. | Keep Experimental; add benchmark envelopes and budget behavior tests. |
 | `HCWRelativeOrbitMPCController` | Real implementation, but still specialist-tuned. | Keep Experimental; add maintained benchmark suite and tuning notes. |
 | `HCWInTrackCrossTrackMPCController` | Good constrained variant, but lacks config/example footprint. | Add example and compare against no-radial LQR. |
@@ -266,7 +271,7 @@ a long list of loosely related classes.
    explicitly mark it compatibility/workbench.
 5. Add a table of promoted Reference GNC surfaces to the supported capability catalog.
 
-### Phase 2: Build Missing Reference Primitives
+### Historical Phase 2: Build Missing Reference Primitives (Implemented)
 
 1. Implement RIC hold, V-bar approach, R-bar approach, waypoint RIC path,
    keep-out/standoff, passive-safe retreat, and terminal braking.

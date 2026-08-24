@@ -67,23 +67,48 @@ cases:
     standard: {duration_s: 86400.0}
     full: {duration_s: 604800.0}
 - name: ogp_sgp4
-  description: Passive OGP-SGP4 catalog-style propagation, separate from ONP numerical dynamics.
+  description: Trajectory-only OGP-SGP4 catalog-style propagation, separate from ONP numerical dynamics.
   category: propagator_family
   kind: scenario
   config_path: examples/configs/public_sgp4_passive_propagation.yaml
-  tags: [ogp, sgp4, tle, teme]
+  tags: [ogp, sgp4, tle, teme, trajectory_only]
   overrides:
+    objects.iss.runtime_profile: trajectory_only
+    objects.iss.flight_software: null
     simulator.resource_profile: "off"
     outputs.review.enabled: false
     outputs.stats.print_summary: false
     outputs.stats.save_json: false
   checks:
+    summary.object_runtime_profiles.iss: {equals: trajectory_only}
     object_propagation.iss.general_model: {equals: sgp4}
     object_propagation.iss.propagation_method: {equals: general}
   profiles:
     smoke: {duration_s: 600.0}
     standard: {duration_s: 86400.0}
     full: {duration_s: 604800.0}
+- name: ogp_sdp4
+  description: Trajectory-only OGP-SDP4 deep-space/resonance propagation with reusable initialized context.
+  category: propagator_family
+  kind: scenario
+  config_path: agents/examples/public_agent_ogp_sdp4_propagation.yaml
+  tags: [ogp, sdp4, deep_space, resonance, teme, trajectory_only]
+  overrides:
+    objects.synthetic_geo.runtime_profile: trajectory_only
+    objects.synthetic_geo.flight_software: null
+    simulator.resource_profile: "off"
+    outputs.review.enabled: false
+    outputs.stats.print_summary: false
+    outputs.stats.save_json: false
+  checks:
+    summary.object_runtime_profiles.synthetic_geo: {equals: trajectory_only}
+    object_propagation.synthetic_geo.general_model: {equals: sgp4}
+    object_propagation.synthetic_geo.propagator_name: {equals: OGP-SDP4}
+    object_propagation.synthetic_geo.propagation_method: {equals: general}
+  profiles:
+    smoke: {duration_s: 600.0, dt_s: 120.0}
+    standard: {duration_s: 86400.0, dt_s: 120.0}
+    full: {duration_s: 604800.0, dt_s: 120.0}
 - name: rocket_ascent
   description: Dedicated rocket guidance, atmosphere, aero, mass/staging, and ascent-metric runtime path.
   category: lifecycle

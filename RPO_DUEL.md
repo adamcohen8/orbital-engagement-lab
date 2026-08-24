@@ -33,8 +33,8 @@ Implemented now:
   rules;
 - 200x shared coasting time, immediate 10x maneuver time, and the one-second
   neutral cooldown;
-- bounded 120-millisecond visual interpolation at 200x and eased pair-camera
-  center/span changes, with immediate reset on maneuvers, speed or round
+- bounded 120-millisecond visual interpolation at 200x and eased non-reference
+  camera center/span changes, with immediate reset on maneuvers, speed or round
   changes, reconnect gaps, and camera toggles; authoritative server physics and
   snapshot cadence are unchanged;
 - immediate control neutralization and continued authoritative coast on
@@ -43,11 +43,12 @@ Implemented now:
 - optional looping Perigee Afterburner level music, started from a browser
   gesture and controlled with `M` or the HUD music button;
 - responsive R/I and R/C trajectory plots using the regular RPO Trainer
-  dashboard composition: a default full-trajectory frame centered on the
-  propagated Target reference orbit, visible one-orbital-period Target and Chaser HCW coast
-  projections, and a `C`/touch camera toggle to a midpoint-centered pair view
-  that keeps the grid and both HCW projections while suppressing recorded
-  trails and framing only the current satellites plus a small margin; twin plots and a bottom HUD on laptops, compact stacked plots in phone
+  dashboard composition: a default reference frame tightly containing the
+  origin, both satellites, recorded trajectories, and visible one-orbital-period Target and Chaser HCW coast
+  projections, and a `C`/touch three-view camera cycle with a midpoint-centered
+  pair view plus a projection view that frames both satellites and both HCW
+  projections with a small margin without retaining the origin; the two
+  non-reference views suppress recorded trails; twin plots and a bottom HUD on laptops, compact stacked plots in phone
   portrait, and the existing side-by-side plots with the lower HUD and
   right-side three-by-two touch-control group in phone
   landscape; role/score/time/delta-v telemetry, connection state, countdowns,
@@ -104,7 +105,8 @@ Post-Beta follow-on work:
 
 - snapshot interpolation beyond the current lightweight plotted snapshot
   trail and client-rendered HCW coast projections;
-- persisted final replay/result downloads and rematch UX;
+- persisted final replay/result downloads (same-room human and computer
+  rematch actions are already implemented);
 - provider usage monitoring and a lower application-level admission threshold
   if Beta traffic approaches the Workers Free daily limits.
 
@@ -443,9 +445,8 @@ for development, a private prototype, and a modest invitation-only beta is
 
 The initial free deployment should use:
 
-- Cloudflare Pages for the web application;
-- Cloudflare Workers and SQLite-backed Durable Objects for authoritative match
-  rooms and bounded match state;
+- Cloudflare Worker static assets for the web application, with SQLite-backed
+  Durable Objects for authoritative match rooms and bounded match state;
 - the provider-supplied `pages.dev` or `workers.dev` address unless an existing
   OEL domain is appropriate;
 - no required account system, email service, public matchmaking, or external
@@ -461,7 +462,7 @@ first deployment and before any public launch:
 
 - [Cloudflare Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/)
 - [Cloudflare Durable Objects pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/)
-- [Cloudflare Pages limits](https://developers.cloudflare.com/pages/platform/limits/)
+- [Cloudflare static assets](https://developers.cloudflare.com/workers/static-assets/)
 
 The free tier is not an unlimited availability promise. If usage approaches a
 free limit, the service should fail closed by preventing new room creation
@@ -578,25 +579,20 @@ The first acceptance suite should cover:
   is reached;
 - bounded, replayable final result packets.
 
-## Proposed Implementation Sequence
+## Implementation Sequence And Current State
 
-1. Freeze a versioned multiplayer rules, physics, and network contract.
-2. Extract the current browser competition engine behind a stable pure-module
-   interface and preserve its existing replay tests.
-3. Add human-commanded target inputs and run a local two-player match in one
-   browser or deterministic test harness.
-4. Implement the authoritative room service and verify two browser clients
-   against it locally.
-5. Build the new responsive web shell, multiplayer waiting-room experience,
-   and shared keyboard/touch input protocol.
-6. Deploy a private, invitation-only prototype on free-tier infrastructure with
-   hard room, duration, storage, and usage safeguards.
-7. Playtest shared time control, latency feel, capture rules, delta-v balance,
-   and laptop/phone combinations in both roles.
-8. Measure per-match compute, messages, storage, and bandwidth before making a
-   public capacity or cost claim.
-9. Promote the new web trainer only after deterministic, networking, visual,
-   mobile/desktop, cost-safety, and deployment acceptance.
+Steps 1-6 of the original sequence are complete in the v0.27.1 public Beta:
+the rules and pure engine are versioned, human target controls and deterministic
+tests exist, the authoritative Worker/Durable Object room service and
+responsive browser shell are implemented, local two-client verification
+passes, and the bounded free-tier deployment is live. The current hosted
+release gate also exercises a remote computer match and a remote two-browser
+round trip.
+
+Remaining post-Beta work is to broaden laptop/phone/network playtesting,
+measure per-match compute/messages/storage/bandwidth, tune admission limits
+from observed use, add retained replay/result downloads, and promote beyond
+Beta only after those evidence and cost-safety gates pass.
 
 ## Open Design Questions
 

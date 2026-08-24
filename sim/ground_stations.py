@@ -8,7 +8,14 @@ import numpy as np
 
 from sim.config import GroundStationSection
 from sim.dynamics.orbit.environment import EARTH_RADIUS_KM
-from sim.dynamics.orbit.frames import FrameContext, frame_context_from_mapping, transform_position, transform_state
+from sim.dynamics.orbit.frames import (
+    FrameContext,
+    eci_to_ecef_rotation_context,
+    eci_to_ecef_rotation_derivative_context,
+    frame_context_from_mapping,
+    transform_position,
+    transform_state,
+)
 from sim.observations import ObservationPacket, ingest_observations
 from sim.utils.geodesy import ecef_to_enu_rotation, enu_to_ecef_rotation, geodetic_to_ecef_km
 
@@ -65,6 +72,8 @@ def evaluate_ground_station_access(
     summaries: dict[str, dict[str, dict[str, Any]]] = {}
     dt = np.diff(tt)
     total_duration_s = float(tt[-1] - tt[0]) if tt.size > 1 else 0.0
+    rotations_by_index: dict[int, np.ndarray] = {}
+    target_ecef_by_object_index: dict[tuple[str, int], np.ndarray] = {}
 
     for station in stations:
         station_ecef = geodetic_to_ecef_km(station.lat_deg, station.lon_deg, station.alt_km)
@@ -73,6 +82,7 @@ def evaluate_ground_station_access(
         max_range = station.max_range_km
         station_hist: dict[str, dict[str, Any]] = {}
         station_summary: dict[str, dict[str, Any]] = {}
+        station_eci_by_index: dict[int, np.ndarray] = {}
 
         for object_id, hist in sorted(truth_hist.items()):
             if str(dict(object_state_frames or {}).get(str(object_id), "eci") or "eci").lower() != "eci":
@@ -89,10 +99,20 @@ def evaluate_ground_station_access(
                 state = arr[k, :]
                 if state.size < 3 or not np.all(np.isfinite(state[:3])):
                     continue
-                t = float(tt[k])
                 target_eci = np.array(state[:3], dtype=float)
-                station_eci = transform_position(station_ecef, "ecef", "eci", t_s=t, context=frame_ctx)
-                target_ecef = transform_position(target_eci, "eci", "ecef", t_s=t, context=frame_ctx)
+                rotation = rotations_by_index.get(k)
+                if rotation is None:
+                    rotation = eci_to_ecef_rotation_context(float(tt[k]), frame_ctx)
+                    rotations_by_index[k] = rotation
+                station_eci = station_eci_by_index.get(k)
+                if station_eci is None:
+                    station_eci = rotation.T @ np.array(station_ecef, dtype=float)
+                    station_eci_by_index[k] = station_eci
+                target_key = (str(object_id), k)
+                target_ecef = target_ecef_by_object_index.get(target_key)
+                if target_ecef is None:
+                    target_ecef = rotation @ np.array(target_eci, dtype=float)
+                    target_ecef_by_object_index[target_key] = target_ecef
                 rho_ecef = target_ecef - station_ecef
                 rng = float(np.linalg.norm(rho_ecef))
                 range_km[k] = rng
@@ -131,9 +151,15 @@ def evaluate_ground_station_access(
             station_summary[str(object_id)] = {
                 "samples": int(tt.size),
                 "access_samples": int(np.count_nonzero(access)),
+                "no_access_samples": int(tt.size - np.count_nonzero(access)),
                 "access_fraction": float(np.mean(access)) if access.size else 0.0,
                 "access_duration_s": access_duration_s,
                 "total_duration_s": total_duration_s,
+                "minimum_elevation_deg": min_elev,
+                "maximum_range_km": None if max_range is None else float(max_range),
+                "reason_sample_count": {
+                    name: int(reason.count(name)) for name in sorted(set(reason))
+                },
                 "first_access_time_s": first_t,
                 "last_access_time_s": last_t,
                 "min_range_km": float(np.min(finite_range)) if finite_range.size else None,
@@ -173,6 +199,9 @@ def evaluate_ground_station_measurements(
     frame_ctx = frame_context or frame_context_from_mapping({}, jd_utc_start=jd_utc_start, source="ground_station")
 
     output: dict[str, dict[str, Any]] = {}
+    rotations_by_index: dict[int, np.ndarray] = {}
+    rotation_derivatives_by_index: dict[int, np.ndarray] = {}
+    target_ecef_by_object_index: dict[tuple[str, int], np.ndarray] = {}
     for station in stations:
         station_ecef = geodetic_to_ecef_km(station.lat_deg, station.lon_deg, station.alt_km)
         ecef_to_enu = ecef_to_enu_rotation(station.lat_deg, station.lon_deg)
@@ -187,6 +216,7 @@ def evaluate_ground_station_measurements(
             },
             "targets": {},
         }
+        station_state_by_index: dict[int, tuple[np.ndarray, np.ndarray]] = {}
         for object_id, hist in sorted(truth_hist.items()):
             if str(dict(object_state_frames or {}).get(str(object_id), "eci") or "eci").lower() != "eci":
                 continue
@@ -205,6 +235,27 @@ def evaluate_ground_station_measurements(
                 if t - last_emit_t < cfg["update_cadence_s"] - 1.0e-12:
                     skipped["cadence"] += 1
                     continue
+                rotation = rotations_by_index.get(k)
+                if rotation is None:
+                    rotation = eci_to_ecef_rotation_context(t, frame_ctx)
+                    rotations_by_index[k] = rotation
+                rotation_derivative = rotation_derivatives_by_index.get(k)
+                if rotation_derivative is None:
+                    rotation_derivative = eci_to_ecef_rotation_derivative_context(t, frame_ctx)
+                    rotation_derivatives_by_index[k] = rotation_derivative
+                station_state = station_state_by_index.get(k)
+                if station_state is None:
+                    station_position_eci = rotation.T @ np.array(station_ecef, dtype=float)
+                    station_velocity_eci = rotation.T @ (
+                        np.zeros(3) - rotation_derivative @ station_position_eci
+                    )
+                    station_state = (station_position_eci, station_velocity_eci)
+                    station_state_by_index[k] = station_state
+                target_key = (str(object_id), k)
+                target_ecef = target_ecef_by_object_index.get(target_key)
+                if target_ecef is None:
+                    target_ecef = rotation @ np.array(state[:3], dtype=float)
+                    target_ecef_by_object_index[target_key] = target_ecef
                 geometry = _ground_measurement_geometry(
                     station=station,
                     station_ecef_km=station_ecef,
@@ -213,6 +264,9 @@ def evaluate_ground_station_measurements(
                     t_s=t,
                     jd_utc_start=jd_utc_start,
                     frame_context=frame_ctx,
+                    ecef_from_eci=rotation,
+                    station_state_eci=station_state,
+                    target_ecef_km=target_ecef,
                 )
                 reason = _access_reason(
                     station=station,
@@ -341,19 +395,33 @@ def _ground_measurement_geometry(
     t_s: float,
     jd_utc_start: float | None,
     frame_context: FrameContext | None = None,
+    ecef_from_eci: np.ndarray | None = None,
+    station_state_eci: tuple[np.ndarray, np.ndarray] | None = None,
+    target_ecef_km: np.ndarray | None = None,
 ) -> dict[str, float | bool]:
     frame_ctx = frame_context or frame_context_from_mapping({}, jd_utc_start=jd_utc_start, source="ground_station")
     target_eci = np.array(target_state_eci[:3], dtype=float)
     target_vel_eci = np.array(target_state_eci[3:6], dtype=float)
-    station_eci, station_vel_eci = transform_state(
-        station_ecef_km,
-        np.zeros(3),
-        "ecef",
-        "eci",
-        t_s=t_s,
-        context=frame_ctx,
+    if station_state_eci is None:
+        station_eci, station_vel_eci = transform_state(
+            station_ecef_km,
+            np.zeros(3),
+            "ecef",
+            "eci",
+            t_s=t_s,
+            context=frame_ctx,
+        )
+    else:
+        station_eci, station_vel_eci = station_state_eci
+    target_ecef = (
+        np.asarray(target_ecef_km, dtype=float)
+        if target_ecef_km is not None
+        else (
+            transform_position(target_eci, "eci", "ecef", t_s=t_s, context=frame_ctx)
+            if ecef_from_eci is None
+            else ecef_from_eci @ np.array(target_eci, dtype=float)
+        )
     )
-    target_ecef = transform_position(target_eci, "eci", "ecef", t_s=t_s, context=frame_ctx)
     rho_ecef = target_ecef - station_ecef_km
     rng = float(np.linalg.norm(rho_ecef))
     enu = ecef_to_enu @ rho_ecef

@@ -25,7 +25,7 @@ Outputs inspected:
 
 - `outputs/agent_tasks/ogp_sgp4_review/agent_evidence_packet.json`
 - `outputs/agent_tasks/ogp_sgp4_review/review/run.sqlite`
-- `outputs/agent_tasks/ogp_sgp4_review/review/figures/agent_object_eci_radius.png`
+- `outputs/agent_tasks/ogp_sgp4_review/review/figures/evidence_object_eci_radius.png`
 
 Evidence:
 

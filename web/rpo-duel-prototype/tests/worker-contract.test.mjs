@@ -79,6 +79,8 @@ test("computer opponent remains server-owned and uses both predictive policies",
 
 test("client contract includes the C camera shortcut and reuses the trainer landscape layout", () => {
   assert.match(clientSource, /event\.code === "KeyC"/);
+  assert.match(clientSource, /previewMode === "mobile-landscape" \|\| previewMode === "mobile-portrait"/);
+  assert.match(stylesSource, /body\.mobile-portrait-preview\.duel-active \.app-shell/);
   const landscapeStart = stylesSource.indexOf("@media (max-height: 580px) and (orientation: landscape)");
   const landscapeEnd = stylesSource.indexOf("@media (prefers-reduced-motion", landscapeStart);
   assert.ok(landscapeStart >= 0 && landscapeEnd > landscapeStart);
@@ -88,8 +90,87 @@ test("client contract includes the C camera shortcut and reuses the trainer land
   assert.match(landscape, /grid-template-areas: "top top" "game game" "hud controls"/);
   assert.match(landscape, /\.plots \{ grid-template-columns: 1fr 1fr;/);
   assert.match(landscape, /\.duel-hud-panel \{ grid-area: hud;/);
+  assert.match(landscape, /grid-template-areas: "room score" "toggles score"/);
+  assert.match(landscape, /\.view-toggles \{ grid-area: toggles; justify-self: start;/);
+  assert.match(landscape, /\.scoreboard \{ position: static; grid-area: score; align-self: stretch; display: grid;/);
+  assert.match(landscape, /\.player-score b \{ grid-column: 1 \/ -1; grid-row: 2;/);
+  assert.match(landscape, /\.auto-time-heading \{ grid-column: 1; grid-row: 1; display: flex;/);
+  assert.match(landscape, /\.auto-time-heading span \{ width: auto; white-space: nowrap; \}/);
+  assert.match(landscape, /\.auto-time > strong \{ grid-row: 2; grid-column: 1; justify-self: center;/);
+  assert.match(landscape, /\.duel-objective \.objective-heading \{ grid-column: 1; grid-row: 1;[^}]*width: auto; white-space: nowrap;/);
+  assert.match(landscape, /\.duel-objective > strong \{ grid-column: 1; grid-row: 2;/);
   assert.match(landscape, /\.touch-controls \{ grid-area: controls;/);
   assert.match(landscape, /grid-template-columns: repeat\(3,/);
+});
+
+test("role label follows the satellite role palette", () => {
+  assert.match(clientSource, /elements\["role-label"\]\.dataset\.role = role \|\| "waiting"/);
+  assert.match(stylesSource, /#role-label\[data-role="chaser"\] \{ color: var\(--chaser\); \}/);
+  assert.match(stylesSource, /#role-label\[data-role="target"\] \{ color: var\(--target\); \}/);
+});
+
+test("portrait HUD stacks view toggles below the room and preserves full scoreboard names", () => {
+  const portraitStart = stylesSource.indexOf("@media (max-width: 720px)");
+  const portraitEnd = stylesSource.indexOf("@media (max-height: 580px)", portraitStart);
+  assert.ok(portraitStart >= 0 && portraitEnd > portraitStart);
+  const portrait = stylesSource.slice(portraitStart, portraitEnd);
+  assert.match(portrait, /grid-template-areas: "room score" "toggles score"/);
+  assert.match(portrait, /\.duel-objective \{ grid-template-columns: 6\.5ch minmax\(0, 1fr\)/);
+  assert.match(portrait, /\.duel-objective \.objective-heading \{ grid-column: 1; grid-row: 1; width: 4ch; white-space: normal;/);
+  assert.match(portrait, /\.auto-time \{ grid-column: 1 \/ -1; grid-row: 2;[^}]*grid-template-columns: 6\.5ch minmax\(0, 1fr\)/);
+  assert.match(portrait, /\.auto-time-heading \{ grid-column: 1; grid-row: 1; display: grid;/);
+  assert.match(portrait, /\.auto-time-heading span \{ width: 4ch; white-space: normal; \}/);
+  assert.match(portrait, /\.auto-time > strong \{ grid-column: 2; grid-row: 1; align-self: center;/);
+  assert.match(portrait, /\.view-toggles \{ grid-area: toggles; justify-self: start;/);
+  assert.match(portrait, /\.player-score \.player-name \{ align-self: center; max-width: 80px;/);
+  assert.match(portrait, /\.hint-line \{ display: none; \}/);
+});
+
+test("expanded metrics use concise labels in one shorter header row", () => {
+  assert.doesNotMatch(indexSource, />INFO (?:Range|Rel Speed|Delta-v|Time Left)/);
+  for (const label of ["Range", "Rel Speed", "Delta-v", "Time Left"]) {
+    assert.match(indexSource, new RegExp(`<span>${label} <strong`));
+  }
+  const expandedStart = stylesSource.indexOf("@media (min-width: 1000px) and (min-height: 581px)");
+  const expandedEnd = stylesSource.indexOf("@media (max-width: 920px)", expandedStart);
+  const expanded = stylesSource.slice(expandedStart, expandedEnd);
+  assert.match(expanded, /\.duel-top-bar \{ min-height: 70px;/);
+  assert.match(expanded, /\.duel-top-metrics \{ flex-wrap: nowrap;/);
+  assert.match(expanded, /\.duel-game-layout \{ top: 100px; \}/);
+  assert.match(expanded, /\.plots \{ gap: 24px; \}/);
+  assert.match(expanded, /\.plot-card canvas \{ left: 12px; right: 12px; top: 42px; bottom: 10px;/);
+});
+
+test("expanded auto-time status shares the heading row", () => {
+  assert.match(indexSource, /class="auto-time-heading"><span>AUTO TIME<\/span><small>COAST<\/small><\/div><strong>200x<\/strong>/);
+  assert.match(clientSource, /coasting: "COAST"/);
+  assert.match(clientSource, /neutral_cooldown: "COOL"/);
+  assert.match(clientSource, /maneuvering: "BURN"/);
+  const expandedStart = stylesSource.indexOf("@media (min-width: 1000px) and (min-height: 581px)");
+  const expandedEnd = stylesSource.indexOf("@media (max-width: 920px)", expandedStart);
+  const expanded = stylesSource.slice(expandedStart, expandedEnd);
+  assert.match(expanded, /grid-template-rows: 15px 30px; align-content: center;/);
+  assert.match(expanded, /\.auto-time-heading \{ grid-column: 2; grid-row: 1; display: flex;/);
+  assert.match(expanded, /white-space: nowrap;/);
+  assert.match(expanded, /\.auto-time > strong \{ grid-column: 2; grid-row: 2;/);
+});
+
+test("expanded lower controls stay with the room code without redundant shortcut text", () => {
+  assert.match(indexSource, /class="command-line">W\/S Radial&nbsp;&nbsp; A\/D In-Track&nbsp;&nbsp; Left\/Right Cross-Track<\/div>/);
+  assert.doesNotMatch(indexSource, /class="command-line"[^<]*(?:C Camera|M Music)/);
+  const expandedStart = stylesSource.indexOf("@media (min-width: 1000px) and (min-height: 581px)");
+  const expandedEnd = stylesSource.indexOf("@media (max-width: 920px)", expandedStart);
+  const expanded = stylesSource.slice(expandedStart, expandedEnd);
+  assert.match(expanded, /\.duel-hud-line \{[^}]*justify-content: flex-start;/);
+  assert.match(expanded, /\.view-toggles \{ justify-content: flex-start; \}/);
+});
+
+test("RI and RC canvases devote their overlays and scale margins to plot data", () => {
+  assert.doesNotMatch(clientSource, /drawProjectionLegend/);
+  assert.doesNotMatch(clientSource, /REFERENCE ORBIT · HCW COAST/);
+  assert.doesNotMatch(clientSource, /PAIR · SATELLITES/);
+  assert.doesNotMatch(clientSource, /span\.toFixed\([^\n]+km/);
+  assert.match(clientSource, /const pad = 0;/);
 });
 
 test("landing header uses one wordmark scale and links back to the level selector", () => {

@@ -110,6 +110,9 @@ lesson.
 - Structured RPO levels covering passive motion, V-bar/R-bar approaches,
   terminal rendezvous, eccentric-orbit cases, evasive-target survival, and
   defensive-target pursuit examples.
+- Level 11B Safe Inspection Clone, a mechanical continuity clone of Level 5.
+  Level 11 Pursuit is Pilot-only; Operator mode intentionally omits it, so the
+  two selector lists are not identical.
 - A cislunar rendezvous bonus level with Moon-centered RIC controls around an
   Earth-Moon L2 NRHO target.
 - Sandbox mode for open-ended exploration.
@@ -243,7 +246,8 @@ https://adamcohen8.github.io/orbital-engagement-lab/
 
 The web preview includes the tutorial, sandbox-style RIC controls, and Pursuit
 Arcade with browser-native replay validation and hosted leaderboard hooks. The
-full local trainer includes the complete downloadable Pilot/Operator level set,
+full local trainer includes the maintained downloadable Pilot and Operator
+level sets (with the mode-specific Level 11 exclusion noted above),
 cislunar rendezvous mode, scenario YAML support, recordings, saved operator
 burn scripts, configurable RIC display conventions, and structured debrief
 reports.

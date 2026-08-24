@@ -24,6 +24,7 @@ from sim.reporting.review_store import (
     _create_schema,
     _insert_events,
     _insert_flight_software_evidence,
+    _insert_ground_access,
 )
 from sim.review import (
     EVIDENCE_PLOT_RECIPES,
@@ -43,6 +44,7 @@ from sim.review import (
     save_review_plot,
     write_workflow_review,
 )
+from sim.review.evidence_capsule import create_evidence_capsule
 
 ISS_LINE1 = "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9003"
 ISS_LINE2 = "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1004"
@@ -241,6 +243,7 @@ def test_single_run_review_store_writes_queryable_sqlite(tmp_path: Path) -> None
         sample_count = conn.execute("SELECT COUNT(*) FROM time_samples").fetchone()[0]
         state_count = conn.execute("SELECT COUNT(*) FROM object_state").fetchone()[0]
         relative_count = conn.execute("SELECT COUNT(*) FROM relative_state").fetchone()[0]
+        element_count = conn.execute("SELECT COUNT(*) FROM object_orbital_elements").fetchone()[0]
         decision_count = conn.execute("SELECT COUNT(*) FROM controller_decisions").fetchone()[0]
         mission_mode_count = conn.execute("SELECT COUNT(*) FROM mission_modes").fetchone()[0]
         command_gate_count = conn.execute("SELECT COUNT(*) FROM command_gates").fetchone()[0]
@@ -262,6 +265,7 @@ def test_single_run_review_store_writes_queryable_sqlite(tmp_path: Path) -> None
     assert sample_count == 3
     assert state_count == 6
     assert relative_count == 3
+    assert element_count == state_count
     assert decision_count == 0
     assert mission_mode_count == 0
     assert command_gate_count == 0
@@ -343,10 +347,35 @@ def test_v2_review_store_links_invocation_command_receipt_and_realization(tmp_pa
              AND invocation.invocation_id = input.invocation_id
             """
         ).fetchone()[0]
+        normalized_diagnostic_fields = conn.execute(
+            "SELECT COUNT(*) FROM fsw_diagnostic_fields"
+        ).fetchone()[0]
+        standard_diagnostic_detail = conn.execute(
+            "SELECT COUNT(*) FROM fsw_diagnostics WHERE detail_json IS NOT NULL"
+        ).fetchone()[0]
+        standard_realization_detail = conn.execute(
+            "SELECT COUNT(*) FROM actuator_realization WHERE detail_json IS NOT NULL"
+        ).fetchone()[0]
+        standard_snapshot_detail = conn.execute(
+            "SELECT COUNT(*) FROM fsw_snapshots WHERE detail_json IS NOT NULL"
+        ).fetchone()[0]
+        compressed_snapshot_detail = conn.execute(
+            "SELECT COUNT(*) FROM fsw_snapshots WHERE detail_gzip IS NOT NULL"
+        ).fetchone()[0]
+        normalized_realization_count = conn.execute(
+            "SELECT COUNT(*) FROM actuator_realization "
+            "WHERE realized_force_x_n IS NOT NULL AND mass_flow_kg_s IS NOT NULL"
+        ).fetchone()[0]
 
     assert command_links > 0
     assert realization_links > 0
     assert input_links > 0
+    assert normalized_diagnostic_fields > 0
+    assert normalized_realization_count > 0
+    assert standard_diagnostic_detail == 0
+    assert standard_realization_detail == 0
+    assert standard_snapshot_detail == 0
+    assert compressed_snapshot_detail > 0
 def test_review_store_closes_sqlite_before_atomic_replace(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -634,6 +663,31 @@ def test_review_store_writes_object_propagation_metadata_for_sgp4(tmp_path: Path
     assert row == ("target", "general", "sgp4", "teme", "eci", "teme_as_eci")
 
 
+def test_review_store_writes_attitude_error_history_and_saved_query(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[2]
+    raw = yaml.safe_load((root / "examples/configs/public_attitude_hold_disturbance.yaml").read_text(encoding="utf-8"))
+    raw["scenario_name"] = "attitude_error_review_smoke"
+    raw["simulator"]["duration_s"] = 2.0
+    raw["outputs"]["output_dir"] = str(tmp_path)
+    raw["outputs"]["plots"] = {"enabled": False, "figure_ids": []}
+    raw["outputs"]["animations"] = {"enabled": False, "types": []}
+    raw["outputs"]["review"] = {"enabled": True, "detail": "standard"}
+
+    result = SimulationSession.from_config(SimulationConfig.from_dict(raw)).run()
+    workspace = ReviewWorkspace.open(result.summary["review_outputs"]["sqlite"])
+    rows = workspace.query(SAVED_REVIEW_QUERIES["attitude_error_first_last"].sql).rows
+
+    assert len(rows) == 2
+    assert rows[0]["quat_error_angle_deg"] is not None
+    assert rows[-1]["time_s"] == pytest.approx(2.0)
+    with sqlite3.connect(result.summary["review_outputs"]["sqlite"]) as conn:
+        desired = conn.execute(
+            "SELECT desired_quat_w, desired_quat_x, desired_quat_y, desired_quat_z "
+            "FROM attitude_error ORDER BY time_s LIMIT 1"
+        ).fetchone()
+    assert desired == pytest.approx((1.0, 0.0, 0.0, 0.0))
+
+
 def test_review_store_writes_frame_provenance(tmp_path: Path) -> None:
     raw = _review_store_config(tmp_path)
     raw["simulator"]["frames"] = {"model": "simple_gmst"}
@@ -876,6 +930,9 @@ def test_review_plot_creator_saves_styled_figure_with_provenance(tmp_path: Path)
     assert row["x_column"] == "time_s"
     assert row["y_columns"] == ["range_km"]
     assert "FROM relative_state" in row["source_query"]
+    output_index = (tmp_path / "index.md").read_text(encoding="utf-8")
+    assert "OEL_REVIEW_GENERATED_ARTIFACTS_START" in output_index
+    assert "[`review/figures/range_over_time.png`](review/figures/range_over_time.png)" in output_index
 
 
 def test_evidence_plotter_api_creates_multi_series_recipe_and_custom_plots(tmp_path: Path) -> None:
@@ -961,6 +1018,43 @@ def test_typed_review_plot_plan_is_content_bound_before_render(tmp_path: Path) -
             plot_plan_id=plan["plot_plan_id"],
             path=tmp_path / "review" / "figures" / "changed.png",
         )
+
+
+def test_capsule_only_plot_plan_and_evidence_manifest_use_logical_identity(tmp_path: Path) -> None:
+    result = SimulationSession.from_config(SimulationConfig.from_dict(_review_store_config(tmp_path))).run()
+    database = tmp_path / "review" / "run.sqlite"
+    create_evidence_capsule(database, remove_original=True)
+    spec = plot_spec_from_mapping(
+        {
+            "sql": "SELECT time_s, range_km FROM relative_state ORDER BY time_s",
+            "x_column": "time_s",
+            "y_columns": ["range_km"],
+            "plot_type": "line",
+            "artifact_id": "capsule_range",
+        },
+        source="test_capsule_plot",
+    )
+
+    first = plan_review_plot(tmp_path, spec)
+    second = plan_review_plot(tmp_path, spec)
+    assert first["plot_plan_id"] == second["plot_plan_id"]
+    artifact = render_review_plot(
+        tmp_path,
+        spec,
+        plot_plan_id=first["plot_plan_id"],
+        path=tmp_path / "review" / "figures" / "capsule_range.png",
+    )
+    assert artifact.path.is_file()
+    generated = json.loads((tmp_path / "review" / "generated_artifacts.json").read_text(encoding="utf-8"))
+    assert generated["artifacts"][-1]["review_store"]["relative_path"] == "review/run.sqlite"
+    assert generated["artifacts"][-1]["review_store"]["storage"] == "sqlite_gzip_capsule"
+
+    manifest = result.evidence_manifest()["review"]
+    assert manifest["db_exists"] is False
+    assert manifest["evidence_exists"] is True
+    assert manifest["compressed_exists"] is True
+    assert manifest["capsule_manifest_exists"] is True
+    assert len(manifest["logical_sha256"]) == 64
 
 
 def test_evidence_plotter_histogram_heatmap_and_helpful_errors(tmp_path: Path) -> None:
@@ -1056,6 +1150,37 @@ def test_review_cli_queries_output_folder(tmp_path: Path) -> None:
 
     assert unsafe.returncode == 2
     assert "must start with SELECT or WITH" in unsafe.stderr
+
+
+def test_review_cli_json_represents_blob_metadata_without_exposing_content(tmp_path: Path) -> None:
+    SimulationSession.from_config(SimulationConfig.from_dict(_review_store_config(tmp_path))).run()
+    database = tmp_path / "review" / "run.sqlite"
+    with sqlite3.connect(database) as connection:
+        connection.execute("CREATE TABLE opaque_test (payload BLOB)")
+        connection.execute("INSERT INTO opaque_test VALUES (?)", (b"opaque-review-payload",))
+
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "sim.review",
+            str(tmp_path),
+            "--query",
+            "SELECT payload FROM opaque_test",
+            "--json",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    payload = json.loads(proc.stdout)["rows"][0]["payload"]
+    assert payload == {
+        "type": "sqlite_blob",
+        "byte_count": 21,
+        "sha256": hashlib.sha256(b"opaque-review-payload").hexdigest(),
+    }
 
 
 def test_review_plot_cli_dry_run_and_creates_artifact(tmp_path: Path) -> None:
@@ -1284,6 +1409,34 @@ def test_plotting_config_review_store_indexes_plot_artifacts(tmp_path: Path) -> 
     assert relative_rows == int(summary["samples"])
     assert ground_access_rows > 0
     assert ("plots:relative_ranges", "plots", "relative_ranges.png") in artifact_rows
+
+
+def test_ground_access_windows_distinguish_sample_span_and_credited_duration() -> None:
+    payload = {
+        "ground_station_access": {
+            "station-a": {
+                "targets": {
+                    "sat-a": {
+                        "access": [False, True, True, False],
+                        "line_of_sight": [False, True, True, True],
+                        "range_km": [1200.0, 900.0, 800.0, 1000.0],
+                        "elevation_deg": [0.0, 30.0, 40.0, 10.0],
+                        "reason": ["below_horizon", "available", "available", "below_mask"],
+                    }
+                }
+            }
+        }
+    }
+    with sqlite3.connect(":memory:") as connection:
+        _create_schema(connection)
+        _insert_ground_access(connection, t_s=np.array([0.0, 10.0, 20.0, 30.0]), payload=payload)
+        row = connection.execute(
+            "SELECT start_s, end_s, duration_s, last_access_sample_s, first_no_access_sample_s, "
+            "sample_span_s, credited_duration_s, refinement_status FROM ground_access_windows"
+        ).fetchone()
+
+    assert row[:-1] == pytest.approx((10.0, 20.0, 20.0, 20.0, 30.0, 10.0, 20.0))
+    assert row[-1] == "sampled_no_interpolation"
 
 
 def _review_table_counts(db_path: Path) -> dict[str, int]:

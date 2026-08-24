@@ -35,13 +35,16 @@ Current benchmark envelope:
 | `rpo_estimation_compare_ya_stm` | `a=9000 km`, `e=0.25` | 1800 s | 10 s | `relative_angles_range_rate` |
 | `rpo_estimation_compare_eci_ekf` | `a=9000 km`, `e=0.25` | 1800 s | 10 s | `relative_angles_range_rate` |
 
-The latest local run on 2026-06-28 produced:
+The retained report generated `2026-07-12T18:46:54.648996+00:00` at
+`outputs/validation_harness_rpo_estimation_comparison/validation_harness_report.json`
+(SHA-256 `e875644448efec038a15b25f4ef9879d4fc79ac2201debf0497866331c5bbf9a`)
+produced:
 
 | Estimator row | Position RMS km | Velocity RMS km/s | NIS mean | Detection rate |
 | --- | ---: | ---: | ---: | ---: |
-| HCW relative EKF | 0.0021646067352051952 | 3.0027299876662326e-05 | 16.75977738623135 | 0.2008879023307436 |
-| TH-integrated relative EKF | 0.0012271800572850405 | 4.566926412785263e-06 | 4.263492294806171 | 0.2008879023307436 |
-| Closed-form YA STM relative EKF | 0.0012271800572323948 | 4.566926411585116e-06 | 4.263492294318839 | 0.2008879023307436 |
+| HCW relative EKF | 0.0021646203459034868 | 3.0027548762415126e-05 | 16.75997527837018 | 0.2008879023307436 |
+| TH-integrated relative EKF | 0.0012271799192070834 | 4.566930367777853e-06 | 4.263492496267751 | 0.2008879023307436 |
+| Closed-form YA STM relative EKF | 0.0012271799191286368 | 4.566930366590123e-06 | 4.26349249572062 | 0.2008879023307436 |
 | ECI orbit EKF baseline | 0.0011464816975175606 | 5.6432627571356135e-06 | 3.579648059084772 | 0.2008879023307436 |
 
 Interpretation: in this eccentric RPO case, HCW remains bounded but shows larger

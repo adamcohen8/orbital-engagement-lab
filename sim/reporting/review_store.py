@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gzip
 import hashlib
 import json
 import math
@@ -11,11 +12,13 @@ from typing import Any
 import numpy as np
 
 from sim.config import iter_object_sections, relative_reference_for_object
+from sim.dynamics.orbit.elements import rv_to_coe_eci
+from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2
 from sim.plotting.style import get_oel_version
 from sim.review.generated_artifacts import clear_generated_review_artifacts
 from sim.utils.frames import eci_relative_to_ric_rect
 
-REVIEW_SCHEMA_VERSION = "0.9"
+REVIEW_SCHEMA_VERSION = "0.12"
 REVIEW_SCHEMA_COMPATIBILITY_POLICY = "pre_1_0_additive"
 REVIEW_SCHEMA_STABLE_TABLES = (
     "run_metadata",
@@ -44,6 +47,8 @@ def write_single_run_review_store(
     payload: dict[str, Any],
     context: Any,
     artifacts: dict[str, Any],
+    config_json: str | None = None,
+    config_sha256: str | None = None,
 ) -> dict[str, str]:
     """Write a SQLite review store for a completed single-run output folder."""
 
@@ -65,7 +70,7 @@ def write_single_run_review_store(
     t_s = np.asarray(context.t_s, dtype=float).reshape(-1)
     truth_hist = {str(k): _as_2d_float(v) for k, v in dict(context.truth_hist or {}).items()}
     thrust_hist = {str(k): _as_2d_float(v) for k, v in dict(context.thrust_hist or {}).items()}
-    generated_utc = _utc_stamp()
+    generated_utc = str(summary.get("generated_utc") or _utc_stamp())
     include_standard_detail = str(review_cfg.detail or "standard") != "compact"
     include_debug_detail = str(review_cfg.detail or "standard") == "full"
 
@@ -74,7 +79,15 @@ def write_single_run_review_store(
         try:
             conn.execute("PRAGMA foreign_keys = ON")
             _create_schema(conn)
-            _insert_run_metadata(conn, cfg=cfg, summary=summary, outdir=outdir, generated_utc=generated_utc)
+            _insert_run_metadata(
+                conn,
+                cfg=cfg,
+                summary=summary,
+                outdir=outdir,
+                generated_utc=generated_utc,
+                config_json=config_json,
+                config_sha256=config_sha256,
+            )
             _insert_objects(conn, cfg=cfg, summary=summary)
             _insert_frame_provenance(conn, payload=payload)
             _insert_object_initialization(conn, payload=payload)
@@ -83,6 +96,13 @@ def write_single_run_review_store(
             if include_standard_detail:
                 _insert_time_samples(conn, t_s=t_s)
                 _insert_object_state(conn, t_s=t_s, truth_hist=truth_hist)
+                _insert_object_orbital_elements(
+                    conn,
+                    t_s=t_s,
+                    truth_hist=truth_hist,
+                    object_state_frames=dict(payload.get("object_state_frames", {}) or {}),
+                )
+                _insert_attitude_error(conn, t_s=t_s, truth_hist=truth_hist, payload=payload)
                 _insert_relative_state(
                     conn,
                     t_s=t_s,
@@ -190,13 +210,20 @@ def _create_schema(conn: sqlite3.Connection) -> None:
         CREATE TABLE object_propagation (
             object_id TEXT PRIMARY KEY,
             propagation_method TEXT,
+            propagator_family TEXT,
+            propagator_name TEXT,
             general_model TEXT,
             native_frame TEXT,
             output_frame TEXT,
+            state_history_frame TEXT,
             frame_transform TEXT,
             tle_epoch_jd_utc REAL,
             tle_age_start_days REAL,
-            tle_age_end_days REAL
+            tle_age_end_days REAL,
+            ogp_regime TEXT,
+            orbital_period_min REAL,
+            max_tle_age_days_warning REAL,
+            tle_age_warning INTEGER
         );
 
         CREATE TABLE object_initialization (
@@ -459,10 +486,39 @@ def _create_schema(conn: sqlite3.Connection) -> None:
             command_sequence INTEGER,
             demand_mode TEXT,
             saturated INTEGER,
+            mass_flow_kg_s REAL,
+            requested_force_x_n REAL,
+            requested_force_y_n REAL,
+            requested_force_z_n REAL,
+            requested_torque_x_n_m REAL,
+            requested_torque_y_n_m REAL,
+            requested_torque_z_n_m REAL,
+            realized_force_x_n REAL,
+            realized_force_y_n REAL,
+            realized_force_z_n REAL,
+            realized_torque_x_n_m REAL,
+            realized_torque_y_n_m REAL,
+            realized_torque_z_n_m REAL,
             detail_json TEXT
         );
         CREATE INDEX idx_actuator_realization_command
         ON actuator_realization(object_id, command_source_id, command_boot_id, command_sequence);
+
+        CREATE TABLE actuator_device_state (
+            object_id TEXT,
+            actuator_id TEXT,
+            interval_start_ns INTEGER,
+            device_index INTEGER,
+            field_name TEXT,
+            unit TEXT,
+            value_kind TEXT,
+            value_real REAL,
+            value_integer INTEGER,
+            value_text TEXT,
+            value_json TEXT
+        );
+        CREATE INDEX idx_actuator_device_state_object_time
+        ON actuator_device_state(object_id, actuator_id, interval_start_ns, field_name);
 
         CREATE TABLE fsw_diagnostics (
             object_id TEXT,
@@ -471,6 +527,23 @@ def _create_schema(conn: sqlite3.Connection) -> None:
             generated_time_ns INTEGER,
             detail_json TEXT
         );
+
+        CREATE TABLE fsw_diagnostic_fields (
+            object_id TEXT,
+            invocation_id INTEGER,
+            topic TEXT,
+            generated_time_ns INTEGER,
+            field_index INTEGER,
+            field_name TEXT,
+            unit TEXT,
+            value_kind TEXT,
+            value_real REAL,
+            value_integer INTEGER,
+            value_text TEXT,
+            value_json TEXT
+        );
+        CREATE INDEX idx_fsw_diagnostic_fields_object_name_time
+        ON fsw_diagnostic_fields(object_id, field_name, generated_time_ns);
 
         CREATE TABLE safety_requirement_evidence (
             object_id TEXT,
@@ -487,7 +560,8 @@ def _create_schema(conn: sqlite3.Connection) -> None:
             stack_id TEXT,
             stack_version TEXT,
             state_hash_sha256 TEXT,
-            detail_json TEXT
+            detail_json TEXT,
+            detail_gzip BLOB
         );
 
         CREATE TABLE game_input_events (
@@ -520,6 +594,14 @@ def _create_schema(conn: sqlite3.Connection) -> None:
             sample_index INTEGER,
             time_s REAL,
             object_id TEXT,
+            desired_quat_w REAL,
+            desired_quat_x REAL,
+            desired_quat_y REAL,
+            desired_quat_z REAL,
+            actual_quat_w REAL,
+            actual_quat_x REAL,
+            actual_quat_y REAL,
+            actual_quat_z REAL,
             pointing_error_deg REAL,
             quat_error_angle_deg REAL
         );
@@ -536,6 +618,44 @@ def _create_schema(conn: sqlite3.Connection) -> None:
             reason TEXT
         );
         CREATE INDEX idx_ground_access_station_object_time ON ground_access(station_id, object_id, time_s);
+
+        CREATE TABLE ground_access_windows (
+            station_id TEXT,
+            object_id TEXT,
+            window_index INTEGER,
+            start_s REAL,
+            end_s REAL,
+            duration_s REAL,
+            start_censored INTEGER,
+            end_censored INTEGER,
+            minimum_range_km REAL,
+            maximum_elevation_deg REAL,
+            boundary_semantics TEXT,
+            last_access_sample_s REAL,
+            first_no_access_sample_s REAL,
+            sample_span_s REAL,
+            credited_duration_s REAL,
+            refinement_status TEXT
+        );
+        CREATE INDEX idx_ground_access_windows_station_object ON ground_access_windows(station_id, object_id, start_s);
+
+        CREATE TABLE object_orbital_elements (
+            sample_index INTEGER,
+            time_s REAL,
+            object_id TEXT,
+            radius_km REAL,
+            speed_km_s REAL,
+            a_km REAL,
+            ecc REAL,
+            inc_deg REAL,
+            raan_deg REAL,
+            argp_deg REAL,
+            true_anomaly_deg REAL,
+            circular_conditioned INTEGER,
+            equatorial_conditioned INTEGER,
+            conversion_status TEXT
+        );
+        CREATE INDEX idx_object_orbital_elements_object_time ON object_orbital_elements(object_id, time_s);
 
         CREATE TABLE coverage_summary (
             analysis_id TEXT PRIMARY KEY,
@@ -594,6 +714,10 @@ def _create_schema(conn: sqlite3.Connection) -> None:
             link_id TEXT,
             tx_object_id TEXT,
             rx_object_id TEXT,
+            tx_endpoint_kind TEXT,
+            rx_endpoint_kind TEXT,
+            tx_terminal_parent_frame TEXT,
+            rx_terminal_parent_frame TEXT,
             tx_state_provider_id TEXT,
             rx_state_provider_id TEXT,
             tx_attitude_source_kind TEXT,
@@ -780,8 +904,16 @@ def _insert_run_metadata(
     summary: dict[str, Any],
     outdir: Path,
     generated_utc: str,
+    config_json: str | None = None,
+    config_sha256: str | None = None,
 ) -> None:
-    config_json, config_sha256 = _config_json_and_sha256(cfg)
+    canonical_config_json, canonical_config_sha256 = _config_json_and_sha256(cfg)
+    if config_json is not None and config_json != canonical_config_json:
+        raise ValueError("Precomputed config_json does not match the scenario configuration.")
+    if config_sha256 is not None and config_sha256 != canonical_config_sha256:
+        raise ValueError("Precomputed config_sha256 does not match the scenario configuration.")
+    config_json = canonical_config_json
+    config_sha256 = canonical_config_sha256
     conn.execute(
         """
         INSERT INTO run_metadata VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -898,16 +1030,25 @@ def _insert_object_propagation(conn: sqlite3.Connection, *, payload: dict[str, A
             (
                 str(object_id),
                 str(metadata.get("propagation_method", "") or ""),
+                str(metadata.get("propagator_family", "") or ""),
+                str(metadata.get("propagator_name", "") or ""),
                 str(metadata.get("general_model", "") or ""),
                 str(metadata.get("native_frame", "") or ""),
                 str(metadata.get("output_frame", "") or ""),
+                str(metadata.get("state_history_frame", "") or ""),
                 str(metadata.get("frame_transform", "") or ""),
                 _float_or_none(metadata.get("tle_epoch_jd_utc")),
                 _float_or_none(metadata.get("tle_age_start_days")),
                 _float_or_none(metadata.get("tle_age_end_days")),
+                str(metadata.get("ogp_regime", "") or ""),
+                _float_or_none(metadata.get("orbital_period_min")),
+                _float_or_none(metadata.get("max_tle_age_days_warning")),
+                _bool_int(metadata.get("tle_age_warning")),
             )
         )
-    conn.executemany("INSERT INTO object_propagation VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
+    conn.executemany(
+        "INSERT INTO object_propagation VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows
+    )
 
 
 def _insert_object_state_frame(conn: sqlite3.Connection, *, payload: dict[str, Any]) -> None:
@@ -966,6 +1107,278 @@ def _insert_object_state(
         )
         """,
         rows,
+    )
+
+
+def _insert_object_orbital_elements(
+    conn: sqlite3.Connection,
+    *,
+    t_s: np.ndarray,
+    truth_hist: dict[str, np.ndarray],
+    object_state_frames: dict[str, str],
+) -> None:
+    rows = []
+    for object_id, hist in truth_hist.items():
+        if str(object_state_frames.get(object_id, "eci") or "eci").strip().lower() != "eci" or hist.shape[1] < 6:
+            continue
+        n = int(min(t_s.size, hist.shape[0]))
+        batched = _batched_orbital_elements(np.asarray(hist[:n, :6], dtype=float))
+        for i in range(n):
+            state = np.asarray(hist[i, :6], dtype=float)
+            radius = float(np.linalg.norm(state[:3])) if np.all(np.isfinite(state[:3])) else None
+            speed = float(np.linalg.norm(state[3:6])) if np.all(np.isfinite(state[3:6])) else None
+            values: tuple[Any, ...] = (None,) * 6
+            circular = None
+            equatorial = None
+            status = "unavailable"
+            if np.all(np.isfinite(state)):
+                batch_values = batched[i]
+                if batch_values is not None:
+                    values = batch_values
+                    circular = int(values[1] <= 1.0e-8)
+                    equatorial = int(min(abs(values[2]), abs(180.0 - values[2])) <= 1.0e-8)
+                    status = "conditioned" if circular or equatorial else "ok"
+                else:
+                    # Preserve the scalar implementation as the authoritative
+                    # edge-case/error path for degenerate or unsupported states.
+                    try:
+                        coes = rv_to_coe_eci(state[:3], state[3:6])
+                        circular = int(coes.ecc <= 1.0e-8)
+                        equatorial = int(min(abs(coes.inc_deg), abs(180.0 - coes.inc_deg)) <= 1.0e-8)
+                        values = (
+                            coes.a_km,
+                            coes.ecc,
+                            coes.inc_deg,
+                            coes.raan_deg,
+                            coes.argp_deg,
+                            coes.true_anomaly_deg,
+                        )
+                        status = "conditioned" if circular or equatorial else "ok"
+                    except ValueError as exc:
+                        status = f"unsupported:{type(exc).__name__}"
+            rows.append(
+                (i, _finite_float(t_s[i]), object_id, radius, speed, *values, circular, equatorial, status)
+            )
+    conn.executemany(
+        "INSERT INTO object_orbital_elements VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows
+    )
+
+
+def _batched_orbital_elements(states: np.ndarray) -> list[tuple[float, ...] | None]:
+    """Evaluate ordinary elliptical ECI states in bulk with scalar-equivalent math."""
+
+    x = np.asarray(states, dtype=float)
+    count = int(x.shape[0]) if x.ndim == 2 and x.shape[1] >= 6 else 0
+    output: list[tuple[float, ...] | None] = [None] * count
+    if count == 0:
+        return output
+    finite = np.all(np.isfinite(x[:, :6]), axis=1)
+    if not bool(np.any(finite)):
+        return output
+    indices = np.flatnonzero(finite)
+    values = x[indices, :6]
+    r = values[:, :3]
+    v = values[:, 3:6]
+    mu = EARTH_MU_KM3_S2
+    with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+        radius = np.linalg.norm(r, axis=1)
+        speed = np.linalg.norm(v, axis=1)
+        h = np.cross(r, v)
+        h_norm = np.linalg.norm(h, axis=1)
+        k_hat = np.broadcast_to(np.array([0.0, 0.0, 1.0], dtype=float), h.shape)
+        node = np.cross(k_hat, h)
+        node_norm = np.linalg.norm(node, axis=1)
+        eccentricity_vector = np.cross(v, h) / mu - r / radius[:, None]
+        eccentricity = np.linalg.norm(eccentricity_vector, axis=1)
+        energy = 0.5 * speed * speed - mu / radius
+        semi_major_axis = -mu / (2.0 * energy)
+    ordinary = (
+        (radius > 0.0)
+        & (h_norm > 0.0)
+        & (np.abs(energy) > 1.0e-15)
+        & (semi_major_axis > 0.0)
+        & (eccentricity < 1.0)
+        & np.all(
+            np.isfinite(
+                np.column_stack(
+                    (radius, speed, h_norm, node_norm, eccentricity, energy, semi_major_axis)
+                )
+            ),
+            axis=1,
+        )
+    )
+    if not bool(np.any(ordinary)):
+        return output
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        inclination = np.arccos(np.clip(h[:, 2] / h_norm, -1.0, 1.0))
+    raan = np.zeros(indices.size, dtype=float)
+    node_mask = node_norm > 1.0e-12
+    raan[node_mask] = np.arccos(np.clip(node[node_mask, 0] / node_norm[node_mask], -1.0, 1.0))
+    raan[node_mask & (node[:, 1] < 0.0)] = 2.0 * np.pi - raan[node_mask & (node[:, 1] < 0.0)]
+
+    argp = np.zeros(indices.size, dtype=float)
+    argp_mask = node_mask & (eccentricity > 1.0e-10)
+    argp[argp_mask] = np.arccos(
+        np.clip(
+            np.sum(node[argp_mask] * eccentricity_vector[argp_mask], axis=1)
+            / (node_norm[argp_mask] * eccentricity[argp_mask]),
+            -1.0,
+            1.0,
+        )
+    )
+    argp[argp_mask & (eccentricity_vector[:, 2] < 0.0)] = (
+        2.0 * np.pi - argp[argp_mask & (eccentricity_vector[:, 2] < 0.0)]
+    )
+
+    true_anomaly = np.zeros(indices.size, dtype=float)
+    eccentric_mask = eccentricity > 1.0e-10
+    true_anomaly[eccentric_mask] = np.arccos(
+        np.clip(
+            np.sum(eccentricity_vector[eccentric_mask] * r[eccentric_mask], axis=1)
+            / (eccentricity[eccentric_mask] * radius[eccentric_mask]),
+            -1.0,
+            1.0,
+        )
+    )
+    radial_velocity = np.sum(r * v, axis=1)
+    true_anomaly[eccentric_mask & (radial_velocity < 0.0)] = (
+        2.0 * np.pi - true_anomaly[eccentric_mask & (radial_velocity < 0.0)]
+    )
+    circular_inclined = (~eccentric_mask) & node_mask
+    true_anomaly[circular_inclined] = np.arccos(
+        np.clip(
+            np.sum(node[circular_inclined] * r[circular_inclined], axis=1)
+            / (node_norm[circular_inclined] * radius[circular_inclined]),
+            -1.0,
+            1.0,
+        )
+    )
+    true_anomaly[circular_inclined & (r[:, 2] < 0.0)] = (
+        2.0 * np.pi - true_anomaly[circular_inclined & (r[:, 2] < 0.0)]
+    )
+    circular_equatorial = (~eccentric_mask) & (~node_mask)
+    true_anomaly[circular_equatorial] = np.arctan2(
+        r[circular_equatorial, 1], r[circular_equatorial, 0]
+    )
+
+    def degrees(angle: np.ndarray) -> np.ndarray:
+        return np.rad2deg(np.mod(angle, 2.0 * np.pi))
+    derived = np.column_stack(
+        (
+            semi_major_axis,
+            eccentricity,
+            degrees(inclination),
+            degrees(raan),
+            degrees(argp),
+            degrees(true_anomaly),
+        )
+    )
+    ordinary &= np.all(np.isfinite(derived), axis=1)
+    for local_index in np.flatnonzero(ordinary):
+        output[int(indices[local_index])] = tuple(float(item) for item in derived[local_index])
+    return output
+
+
+def _insert_attitude_error(
+    conn: sqlite3.Connection,
+    *,
+    t_s: np.ndarray,
+    truth_hist: dict[str, np.ndarray],
+    payload: dict[str, Any],
+) -> None:
+    desired_root = dict(payload.get("desired_attitude_by_object", {}) or {})
+    rows = []
+    for object_id, desired_raw in desired_root.items():
+        actual = truth_hist.get(str(object_id))
+        desired = np.asarray(desired_raw, dtype=float)
+        if actual is None or actual.ndim != 2 or actual.shape[1] < 10 or desired.ndim != 2 or desired.shape[1] < 4:
+            continue
+        n = int(min(t_s.size, actual.shape[0], desired.shape[0]))
+        for i in range(n):
+            q_actual = np.asarray(actual[i, 6:10], dtype=float)
+            q_desired = np.asarray(desired[i, :4], dtype=float)
+            if not np.all(np.isfinite(q_actual)) or not np.all(np.isfinite(q_desired)):
+                continue
+            actual_norm = float(np.linalg.norm(q_actual))
+            desired_norm = float(np.linalg.norm(q_desired))
+            if actual_norm <= 0.0 or desired_norm <= 0.0:
+                continue
+            q_actual = q_actual / actual_norm
+            q_desired = q_desired / desired_norm
+            angle_deg = float(np.degrees(2.0 * np.arccos(np.clip(abs(float(np.dot(q_actual, q_desired))), 0.0, 1.0))))
+            rows.append(
+                (i, _finite_float(t_s[i]), str(object_id), *q_desired.tolist(), *q_actual.tolist(), angle_deg, angle_deg)
+            )
+    populated = {str(row[2]) for row in rows}
+    fsw_root = dict(payload.get("flight_software_evidence_by_object", {}) or {})
+    for object_id, evidence_raw in fsw_root.items():
+        if str(object_id) in populated:
+            continue
+        actual = truth_hist.get(str(object_id))
+        if actual is None or actual.ndim != 2 or actual.shape[1] < 10 or t_s.size == 0:
+            continue
+        for output_raw in list(dict(evidence_raw or {}).get("outputs", []) or []):
+            for telemetry_raw in list(dict(output_raw or {}).get("telemetry", []) or []):
+                telemetry = dict(telemetry_raw or {})
+                generated = dict(telemetry.get("generated_at", {}) or {})
+                ticks = _float_or_none(generated.get("ticks"))
+                tick_period_ns = _float_or_none(generated.get("tick_period_ns"))
+                if ticks is None or tick_period_ns is None:
+                    continue
+                time_s = ticks * tick_period_ns * 1.0e-9
+                error_rad = None
+                desired_components: dict[str, float] = {}
+                for field_raw in list(telemetry.get("fields", []) or []):
+                    field = dict(field_raw or {})
+                    field_name = str(field.get("name") or "")
+                    if field_name == "attitude_error_rad":
+                        error_rad = _float_or_none(field.get("value"))
+                    elif field_name in {
+                        "desired_attitude_quat_w",
+                        "desired_attitude_quat_x",
+                        "desired_attitude_quat_y",
+                        "desired_attitude_quat_z",
+                    }:
+                        component = _float_or_none(field.get("value"))
+                        if component is not None:
+                            desired_components[field_name[-1]] = component
+                if error_rad is None:
+                    continue
+                sample_index = int(np.argmin(np.abs(t_s - time_s)))
+                q_actual = np.asarray(actual[min(sample_index, actual.shape[0] - 1), 6:10], dtype=float)
+                if not np.all(np.isfinite(q_actual)) or float(np.linalg.norm(q_actual)) <= 0.0:
+                    actual_values = (None, None, None, None)
+                else:
+                    actual_values = tuple((q_actual / float(np.linalg.norm(q_actual))).tolist())
+                angle_deg = float(np.degrees(abs(error_rad)))
+                desired_values: tuple[float | None, ...]
+                if set(desired_components) == {"w", "x", "y", "z"}:
+                    q_desired = np.asarray(
+                        [desired_components[key] for key in ("w", "x", "y", "z")],
+                        dtype=float,
+                    )
+                    norm = float(np.linalg.norm(q_desired))
+                    desired_values = (
+                        tuple((q_desired / norm).tolist())
+                        if norm > 0.0
+                        else (None, None, None, None)
+                    )
+                else:
+                    desired_values = (None, None, None, None)
+                rows.append(
+                    (
+                        sample_index,
+                        time_s,
+                        str(object_id),
+                        *desired_values,
+                        *actual_values,
+                        angle_deg,
+                        angle_deg,
+                    )
+                )
+    conn.executemany(
+        "INSERT INTO attitude_error VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows
     )
 
 
@@ -1154,7 +1567,7 @@ def _insert_command_decisions(
                     _bool_int(row.get("actuator_limited")),
                     _bool_int(row.get("deadline_missed")),
                     _none_or_str(row.get("gate_reason")),
-                    detail_json,
+                    None,
                 )
             )
     conn.executemany(
@@ -1188,6 +1601,45 @@ def _debug_json(value: Any, *, include: bool) -> str | None:
     if not include:
         return None
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
+def _typed_review_value(value: Any) -> tuple[str, float | None, int | None, str | None, str | None]:
+    if value is None:
+        return "null", None, None, None, None
+    if isinstance(value, (bool, np.bool_)):
+        return "boolean", None, int(bool(value)), None, None
+    if isinstance(value, (int, np.integer)):
+        return "integer", None, int(value), None, None
+    if isinstance(value, (float, np.floating)):
+        return "real", _finite_float(value), None, None, None
+    if isinstance(value, str):
+        return "text", None, None, value, None
+    return "json", None, None, None, json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
+def _vector3(value: Any) -> tuple[float | None, float | None, float | None]:
+    try:
+        vector = list(value or [])
+    except TypeError:
+        vector = []
+    return tuple(_float_or_none(vector[index]) if index < len(vector) else None for index in range(3))  # type: ignore[return-value]
+
+
+def _standard_task_release_detail(release: dict[str, Any], *, include_debug_detail: bool) -> str:
+    if include_debug_detail:
+        return json.dumps(release, sort_keys=True, separators=(",", ":"))
+    return json.dumps(
+        {"release_reasons": list(release.get("release_reasons", []) or [])},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def _snapshot_storage(snapshot: dict[str, Any], *, include_debug_detail: bool) -> tuple[str | None, bytes | None]:
+    encoded = json.dumps(snapshot, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    if include_debug_detail:
+        return encoded.decode("utf-8"), None
+    return None, gzip.compress(encoded, compresslevel=1, mtime=0)
 
 
 def _mission_load_dispositions(evidence: dict[str, Any]) -> dict[tuple[int, str, int | None], str]:
@@ -1232,7 +1684,9 @@ def _insert_flight_software_evidence(
     command_rows = []
     receipt_rows = []
     realization_rows = []
+    device_state_rows = []
     diagnostic_rows = []
+    diagnostic_field_rows = []
     safety_rows = []
     snapshot_rows = []
     game_input_rows = []
@@ -1287,7 +1741,7 @@ def _insert_flight_software_evidence(
                         _int_or_none(release.get("modeled_execution_duration_ns")),
                         _int_or_none(release.get("execution_budget_ns")),
                         int(bool(release.get("deadline_missed", False))),
-                        json.dumps(release, sort_keys=True, separators=(",", ":")),
+                        _standard_task_release_detail(release, include_debug_detail=include_debug_detail),
                     )
                 )
 
@@ -1436,20 +1890,46 @@ def _insert_flight_software_evidence(
                 )
             for raw_telemetry in list(output.get("telemetry", []) or []):
                 telemetry = dict(raw_telemetry or {})
+                topic = _none_or_str(telemetry.get("topic"))
+                generated_time_ns = _clock_ns(telemetry.get("generated_at"))
+                telemetry_fields = [
+                    item for item in list(telemetry.get("fields", []) or []) if isinstance(item, dict)
+                ]
                 fields = {
                     str(item.get("name")): item.get("value")
-                    for item in list(telemetry.get("fields", []) or [])
-                    if isinstance(item, dict) and item.get("name") is not None
+                    for item in telemetry_fields if item.get("name") is not None
                 }
                 diagnostic_rows.append(
                     (
                         str(object_id),
                         invocation_id,
-                        _none_or_str(telemetry.get("topic")),
-                        _clock_ns(telemetry.get("generated_at")),
+                        topic,
+                        generated_time_ns,
                         _debug_json(telemetry, include=include_debug_detail),
                     )
                 )
+                for field_index, field in enumerate(telemetry_fields):
+                    if field.get("name") is None:
+                        continue
+                    kind, value_real, value_integer, value_text, value_json = _typed_review_value(
+                        field.get("value")
+                    )
+                    diagnostic_field_rows.append(
+                        (
+                            str(object_id),
+                            invocation_id,
+                            topic,
+                            generated_time_ns,
+                            field_index,
+                            str(field["name"]),
+                            _none_or_str(field.get("unit", field.get("units"))),
+                            kind,
+                            value_real,
+                            value_integer,
+                            value_text,
+                            value_json,
+                        )
+                    )
                 if fields.get("goal_id") is not None or fields.get("goal_state") is not None:
                     objective_rows.append(
                         (
@@ -1487,21 +1967,51 @@ def _insert_flight_software_evidence(
             realization = dict(raw_realization or {})
             source = realization.get("source_command_id")
             packet = _packet_key(source) if source else ("", "", None)
+            interval_start_ns = _int_or_none(realization.get("interval_start_ns"))
+            actuator_id = _none_or_str(realization.get("actuator_id"))
             realization_rows.append(
                 (
                     str(object_id),
-                    _none_or_str(realization.get("actuator_id")),
-                    _int_or_none(realization.get("interval_start_ns")),
+                    actuator_id,
+                    interval_start_ns,
                     _int_or_none(realization.get("interval_end_ns")),
                     *packet,
                     _none_or_str(realization.get("demand_mode")),
                     _bool_int(realization.get("saturated")),
-                    json.dumps(realization, sort_keys=True, separators=(",", ":")),
+                    _float_or_none(realization.get("mass_flow_kg_s")),
+                    *_vector3(realization.get("requested_force_n")),
+                    *_vector3(realization.get("requested_torque_n_m")),
+                    *_vector3(realization.get("realized_force_n")),
+                    *_vector3(realization.get("realized_torque_n_m")),
+                    _debug_json(realization, include=include_debug_detail),
                 )
             )
+            for device_index, raw_field in enumerate(list(realization.get("device_state", []) or [])):
+                field = dict(raw_field or {})
+                if field.get("name") is None:
+                    continue
+                kind, value_real, value_integer, value_text, value_json = _typed_review_value(field.get("value"))
+                device_state_rows.append(
+                    (
+                        str(object_id),
+                        actuator_id,
+                        interval_start_ns,
+                        device_index,
+                        str(field["name"]),
+                        _none_or_str(field.get("unit", field.get("units"))),
+                        kind,
+                        value_real,
+                        value_integer,
+                        value_text,
+                        value_json,
+                    )
+                )
 
         for raw_snapshot in list(evidence.get("snapshots", []) or []):
             snapshot = dict(raw_snapshot or {})
+            detail_json, detail_gzip = _snapshot_storage(
+                snapshot, include_debug_detail=include_debug_detail
+            )
             snapshot_rows.append(
                 (
                     str(object_id),
@@ -1509,7 +2019,8 @@ def _insert_flight_software_evidence(
                     _none_or_str(snapshot.get("stack_id")),
                     _none_or_str(snapshot.get("stack_version")),
                     _none_or_str(snapshot.get("state_hash_sha256")),
-                    json.dumps(snapshot, sort_keys=True, separators=(",", ":")),
+                    detail_json,
+                    detail_gzip,
                 )
             )
 
@@ -1520,10 +2031,17 @@ def _insert_flight_software_evidence(
     conn.executemany("INSERT INTO fsw_task_timing VALUES (?, ?, ?, ?, ?, ?, ?, ?)", task_rows)
     conn.executemany("INSERT INTO actuator_commands VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", command_rows)
     conn.executemany("INSERT INTO actuator_command_receipts VALUES (?, ?, ?, ?, ?, ?, ?, ?)", receipt_rows)
-    conn.executemany("INSERT INTO actuator_realization VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", realization_rows)
+    conn.executemany(
+        "INSERT INTO actuator_realization VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        realization_rows,
+    )
+    conn.executemany("INSERT INTO actuator_device_state VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", device_state_rows)
     conn.executemany("INSERT INTO fsw_diagnostics VALUES (?, ?, ?, ?, ?)", diagnostic_rows)
+    conn.executemany(
+        "INSERT INTO fsw_diagnostic_fields VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", diagnostic_field_rows
+    )
     conn.executemany("INSERT INTO safety_requirement_evidence VALUES (?, ?, ?, ?, ?, ?)", safety_rows)
-    conn.executemany("INSERT INTO fsw_snapshots VALUES (?, ?, ?, ?, ?, ?)", snapshot_rows)
+    conn.executemany("INSERT INTO fsw_snapshots VALUES (?, ?, ?, ?, ?, ?, ?)", snapshot_rows)
     conn.executemany("INSERT INTO game_input_events VALUES (?, ?, ?, ?, ?, ?, ?)", game_input_rows)
 
 
@@ -1661,6 +2179,7 @@ def _insert_game_evidence(conn: sqlite3.Connection, *, payload: dict[str, Any]) 
 
 def _insert_ground_access(conn: sqlite3.Connection, *, t_s: np.ndarray, payload: dict[str, Any]) -> None:
     rows = []
+    window_rows = []
     access_root = dict(payload.get("ground_station_access", {}) or {})
     for station_id, station_payload in access_root.items():
         targets = dict(dict(station_payload or {}).get("targets", {}) or {})
@@ -1687,7 +2206,58 @@ def _insert_ground_access(conn: sqlite3.Connection, *, t_s: np.ndarray, payload:
                         None if _list_get(reasons, i) is None else str(_list_get(reasons, i)),
                     )
                 )
+            access_flags = [bool(_list_get(access, i)) for i in range(n)]
+            window_index = 0
+            i = 0
+            while i < n:
+                if not access_flags[i]:
+                    i += 1
+                    continue
+                start_i = i
+                while i + 1 < n and access_flags[i + 1]:
+                    i += 1
+                end_i = i
+                window_ranges = [_float_or_none(_list_get(ranges, j)) for j in range(start_i, end_i + 1)]
+                window_elevations = [_float_or_none(_list_get(elevations, j)) for j in range(start_i, end_i + 1)]
+                finite_ranges = [value for value in window_ranges if value is not None]
+                finite_elevations = [value for value in window_elevations if value is not None]
+                start_s = _finite_float(t_s[start_i])
+                end_s = _finite_float(t_s[end_i])
+                first_no_access_s = _finite_float(t_s[end_i + 1]) if end_i + 1 < n else None
+                sample_span_s = None if start_s is None or end_s is None else end_s - start_s
+                credited_end_s = first_no_access_s if first_no_access_s is not None else end_s
+                credited_duration_s = (
+                    None if start_s is None or credited_end_s is None else credited_end_s - start_s
+                )
+                window_rows.append(
+                    (
+                        str(station_id),
+                        str(object_id),
+                        window_index,
+                        start_s,
+                        end_s,
+                        credited_duration_s,
+                        int(start_i == 0),
+                        int(end_i == n - 1),
+                        min(finite_ranges) if finite_ranges else None,
+                        max(finite_elevations) if finite_elevations else None,
+                        (
+                            "start_s/end_s are first/last retained access samples; duration_s is the "
+                            "left-endpoint credited duration through first_no_access_sample_s when present"
+                        ),
+                        end_s,
+                        first_no_access_s,
+                        sample_span_s,
+                        credited_duration_s,
+                        "sampled_no_interpolation",
+                    )
+                )
+                window_index += 1
+                i += 1
     conn.executemany("INSERT INTO ground_access VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
+    conn.executemany(
+        "INSERT INTO ground_access_windows VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", window_rows
+    )
 
 
 def _insert_orbital_analysis(conn: sqlite3.Connection, *, payload: dict[str, Any]) -> None:
@@ -1744,6 +2314,8 @@ def _insert_orbital_analysis(conn: sqlite3.Connection, *, payload: dict[str, Any
         analysis_id = str(item.get("analysis_id") or "")
         link_summary_rows.append((
             analysis_id, _none_or_str(item.get("link_id")), _none_or_str(item.get("tx_object_id")), _none_or_str(item.get("rx_object_id")),
+            _none_or_str(item.get("tx_endpoint_kind")), _none_or_str(item.get("rx_endpoint_kind")),
+            _none_or_str(item.get("tx_terminal_parent_frame")), _none_or_str(item.get("rx_terminal_parent_frame")),
             _none_or_str(item.get("tx_state_provider_id")), _none_or_str(item.get("rx_state_provider_id")),
             _none_or_str(item.get("tx_attitude_source_kind")), _none_or_str(item.get("tx_attitude_provider_id")),
             _none_or_str(item.get("rx_attitude_source_kind")), _none_or_str(item.get("rx_attitude_provider_id")),
@@ -1775,7 +2347,10 @@ def _insert_orbital_analysis(conn: sqlite3.Connection, *, payload: dict[str, Any
                 _none_or_str(row.get("disposition")), _int_or_none(row.get("iterations")),
                 _none_or_str(row.get("reason_before")), _none_or_str(row.get("reason_after")),
             ))
-    conn.executemany("INSERT INTO link_summary VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", link_summary_rows)
+    conn.executemany(
+        "INSERT INTO link_summary VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        link_summary_rows,
+    )
     conn.executemany("INSERT INTO link_samples VALUES (?, ?, ?, ?, ?, ?, ?)", link_sample_rows)
     conn.executemany("INSERT INTO link_windows VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", link_window_rows)
     conn.executemany("INSERT INTO link_transitions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", link_transition_rows)
@@ -2113,7 +2688,9 @@ def _write_schema_json(path: Path, *, generated_utc: str, db_path: Path | None =
             "object_initialization": {
                 "description": "Per-object initial-state provenance, including TLE recovery handoffs."
             },
-            "object_propagation": {"description": "Per-object propagation-family provenance for GP/SP workflows."},
+            "object_propagation": {
+                "description": "Resolved per-object propagator family/name, OGP regime, frames, period, and TLE-age provenance."
+            },
             "object_state_frame": {"description": "Frame label for each object's state rows, e.g. eci or teme."},
             "time_samples": {"description": "Retained sample times."},
             "object_state": {"description": "Truth state histories by object; join object_state_frame for frame labels."},
@@ -2157,9 +2734,17 @@ def _write_schema_json(path: Path, *, generated_utc: str, db_path: Path | None =
                 "description": "Command-bus acceptance or rejection evidence linked by command identity."
             },
             "actuator_realization": {
-                "description": "Physical device realization linked to the active accepted command identity."
+                "description": "Normalized force, torque, mass-flow, saturation, and command-linked realization evidence."
             },
-            "fsw_diagnostics": {"description": "Onboard-declared diagnostic telemetry."},
+            "actuator_device_state": {
+                "description": "Typed per-device state fields linked to actuator realization intervals."
+            },
+            "fsw_diagnostics": {
+                "description": "Diagnostic envelope identities; full detail_json is retained only at full detail."
+            },
+            "fsw_diagnostic_fields": {
+                "description": "Typed qualification-safe diagnostic telemetry fields without duplicated envelopes."
+            },
             "safety_requirement_evidence": {
                 "description": "Truth-derived post-run assessment of configured safety requirements."
             },
@@ -2171,8 +2756,19 @@ def _write_schema_json(path: Path, *, generated_utc: str, db_path: Path | None =
             "game_scoring_events": {
                 "description": "Truth-derived game scoring events, kept outside the onboard input boundary."
             },
-            "attitude_error": {"description": "Reserved for attitude error histories."},
+            "attitude_error": {
+                "description": "Attitude error histories; desired/actual quaternion fields are populated when retained, otherwise controller telemetry supplies the error angle."
+            },
             "ground_access": {"description": "Ground station access histories."},
+            "ground_access_windows": {
+                "description": (
+                    "Normalized sampled access windows with explicit retained-sample bounds, first no-access "
+                    "sample, credited duration, refinement status, and run-boundary censoring flags."
+                )
+            },
+            "object_orbital_elements": {
+                "description": "Derived ECI radius, speed, and classical elements with circular/equatorial conditioning flags."
+            },
             "events": {"description": "Termination and review-derived event rows."},
             "metrics": {"description": "Scalar summary and review metrics."},
             "mission_recovery_summary": {
@@ -2229,6 +2825,8 @@ def _review_column_metadata(column_name: str) -> dict[str, Any]:
     name = str(column_name)
     unit: str | None = None
     for suffix, candidate in (
+        ("_n_m", "N m"),
+        ("_kg_s", "kg/s"),
         ("_km_s", "km/s"),
         ("_rad_s", "rad/s"),
         ("_db_hz", "dB-Hz"),
@@ -2240,6 +2838,8 @@ def _review_column_metadata(column_name: str) -> dict[str, Any]:
         ("_wh", "Wh"),
         ("_hz", "Hz"),
         ("_bytes", "byte"),
+        ("_ns", "ns"),
+        ("_n", "N"),
         ("_s", "s"),
         ("_fraction", "1"),
     ):

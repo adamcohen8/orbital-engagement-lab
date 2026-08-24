@@ -16,6 +16,7 @@ from sim.analysis.global_coverage import CoverageCellMetrics, summarize_sampled_
 from sim.analysis.healpix import HEALPIX_GRID_ID, WGS84_SURFACE_AREA_KM2, healpix_npix
 
 CONSTELLATION_COVERAGE_CONTRACT_VERSION = "oel.constellation-coverage-aggregation.v0.2"
+_MAX_MULTIPLICITY_MEMBERS = int(np.iinfo(np.uint16).max)
 
 
 @dataclass(frozen=True)
@@ -37,6 +38,11 @@ class ConstellationCoverageConfig:
         members = tuple(sorted(str(value or "").strip() for value in self.member_analysis_ids))
         if len(members) < 2 or any(not value for value in members) or len(set(members)) != len(members):
             raise ValueError("member_analysis_ids must contain at least two unique non-empty IDs.")
+        if len(members) > _MAX_MULTIPLICITY_MEMBERS:
+            raise ValueError(
+                "member_analysis_ids exceeds the uint16 multiplicity contract limit of "
+                f"{_MAX_MULTIPLICITY_MEMBERS}."
+            )
         if isinstance(self.order, (bool, np.bool_)) or int(self.order) != self.order:
             raise ValueError("order must be an integer.")
         multiplicity = self.required_multiplicity
@@ -178,15 +184,18 @@ def evaluate_constellation_coverage(
     }
     if values > config.max_asset_cell_time_values:
         raise ValueError("Constellation aggregation exceeds max_asset_cell_time_values.")
-    member_masks = np.asarray([_dense_mask(product) for product in products], dtype=np.uint8)
-    multiplicity = np.sum(member_masks, axis=0, dtype=np.uint16)
+    multiplicity = np.zeros((sample_count, cell_count), dtype=np.uint16)
+    active_assets = np.zeros(sample_count, dtype=np.int64)
+    for product in products:
+        member_mask = _dense_mask(product)
+        np.add(multiplicity, member_mask, out=multiplicity, casting="unsafe")
+        active_assets += np.any(member_mask, axis=1)
     qualified = multiplicity >= config.required_multiplicity
     metrics = summarize_sampled_coverage_mask(qualified, reference.times_s)
     covered = np.count_nonzero(qualified, axis=1).astype(np.int64)
     mean_multiplicity = np.mean(multiplicity, axis=0)
     max_multiplicity = np.max(multiplicity, axis=0)
     maximum_by_sample = np.max(multiplicity, axis=1)
-    active_assets = np.count_nonzero(np.any(member_masks.astype(bool), axis=2), axis=0)
     histogram = np.bincount(
         multiplicity.reshape(-1).astype(np.int64),
         minlength=len(products) + 1,

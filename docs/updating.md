@@ -25,7 +25,7 @@ An installation created before channel persistence can configure its official
 endpoint once:
 
 ```text
-oel update configure-channel https://<official-oel-host>/stable/channel.json
+oel update configure-channel https://github.com/adamcohen8/orbital-engagement-lab/releases/latest/download/public-stable.json
 oel update check
 ```
 
@@ -77,8 +77,8 @@ The audit reads YAML, manifests, lock metadata, and prior evidence without
 importing candidate code, executing a simulation, or using the network.
 Possible dispositions are `compatible`, `compatible_with_warnings`,
 `migration_available`, `manual_review`, `blocked`, `invalid`, `incomplete`,
-and `cancelled`. `workspace use` accepts only installed verified engines and a
-compatible audit. Migrations require a content-bound plan and explicit apply;
+and `cancelled`. `workspace use` accepts only installed verified engines and
+an audit status of `compatible` or `compatible_with_warnings`. Migrations require a content-bound plan and explicit apply;
 backups and a receipt remain beneath `.oel/migrations/`.
 
 ## Cleanup And Uninstall

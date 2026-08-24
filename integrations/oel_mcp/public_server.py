@@ -1,10 +1,17 @@
 import os
 from typing import Sequence
 
-from integrations.oel_mcp.diagnostics import run_server_cli
-from integrations.oel_mcp.protocol import OELMCPServer
-from integrations.oel_mcp.public_handlers import PublicOELMCPHandlers
-from integrations.oel_mcp.public_registry import M3_PUBLIC_TOOL_IDS, PUBLIC_PROFILES
+from sim.runtime_environment import configure_runtime_caches
+
+configure_runtime_caches()
+
+from integrations.oel_mcp.diagnostics import run_server_cli  # noqa: E402
+from integrations.oel_mcp.protocol import OELMCPServer  # noqa: E402
+from integrations.oel_mcp.public_handlers import PublicOELMCPHandlers  # noqa: E402
+from integrations.oel_mcp.public_registry import (  # noqa: E402
+    M3_PUBLIC_TOOL_IDS,
+    PUBLIC_PROFILES,
+)
 
 
 def handlers_for_profile(profile: str) -> PublicOELMCPHandlers:

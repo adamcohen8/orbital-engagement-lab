@@ -45,6 +45,12 @@ itself is receiving upstream security fixes.
 
 ## Compatibility Matrix
 
+The exact declared host admission matrix is Windows 11 or Server 2022 x64,
+Ubuntu 22.04 or 24.04 x64, and macOS 14+ on arm64 or x64. Maintained evidence
+rows are Windows Server 2022 x64, Ubuntu 22.04 x64, and macOS 15 arm64/Intel.
+These are distinct from package admission and from separately qualified
+external integrations.
+
 | Profile | Python | Windows | Linux | macOS |
 | --- | --- | --- | --- | --- |
 | Core CLI/YAML/API/review | 3.10-3.14 | Supported matrix target | Supported matrix target | Supported matrix target |
@@ -60,9 +66,10 @@ release claim for an individual row requires retained compatibility evidence
 from that row; package metadata and resolver success alone are not runtime or
 physics evidence.
 
-### v0.23.1 Release Qualification
+### Historical v0.23.1 Release Qualification
 
-The `v0.23.1` release source completed clean local installation and runtime
+This retained historical packet is not qualification evidence for the current
+`0.27.1` source. The `v0.23.1` release source completed clean local installation and runtime
 smoke checks on macOS 15 arm64 with each supported Python minor, 3.10 through
 3.14. Boundary-minor full regression and acceleration/validation checks, the
 blocking Python 3.11 full suite, the authoritative compatibility acceptance
@@ -76,12 +83,12 @@ preferred evidence source.
 
 `.github/workflows/compatibility.yml` is an advisory escape hatch for the two
 environments unavailable to the maintainer locally: Windows x64 and Intel
-macOS. Relevant pull requests run one Windows x64/Python 3.14 job so evidence is
-attached to the PR; manual dispatch can select Windows or Intel macOS and one
-Python minor. Each run performs only wheel installation plus the platform
-smoke. It has no schedule, matrix, full regression, authoritative release
-acceptance, or dependency audit. The latter gates remain local and
-release-blocking through `tools/release_public.py --candidate`.
+macOS. It never runs automatically; explicit manual dispatch can select Windows
+or Intel macOS and one Python minor. Each run performs only wheel installation
+plus the platform smoke. It has no pull-request trigger, schedule, matrix, full
+regression, authoritative release acceptance, or dependency audit. The latter
+gates remain local and release-blocking through
+`tools/release_public.py --candidate`.
 
 The smoke collector distinguishes three evidence classes:
 

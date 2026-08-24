@@ -177,14 +177,38 @@ mission-specific parameters are supplied:
   --json
 ```
 
-## Evidence boundary
+## Qualification boundary
 
-The public export includes profile selection, validation, materialization, and
-runtime behavior, but it does not include the private exact-profile qualification
-specifications or packets. Accordingly, `list` and `show` distinguish declared
-catalog maturity from effective public maturity and report qualification evidence
-as unavailable. The `status` and `qualify` commands are intentionally absent.
+The public export includes profile discovery, validation, materialization, and
+the declared Supported-within-envelope catalog status. It does not include the
+private Pro qualification runner, qualification specifications, manifests, or
+campaign evidence, so public users should not expect `status` or `qualify`
+subcommands to be available. Public custom authoring ends at content-bound
+validation, contract tests, and deterministic smoke evidence; see
+[Public Core And Pro Boundary](public-vs-pro.md).
 
-`Experimental*` in the table therefore means that the implementation is available
-for deterministic simulation, while a Supported evidence claim cannot be audited
-from this distribution alone.
+In an authorized private Pro source workspace, FSWDK owns profile comparison
+and qualification. A passing private packet is still simulation evidence for
+the exact profile and envelope, not automatic promotion or flight
+qualification. This public page intentionally does not expose private evidence
+paths as reproducible public commands.
+
+## Maturation contract
+
+Each profile records its assumptions, known limits, required mission-specific
+parameters, compatible hardware, and the common qualification gates. Promotion
+requires evidence for the exact profile and version covering:
+
+1. Closed-loop propagated-truth outcomes.
+2. Sensor and navigation envelopes.
+3. Accepted actuator commands and physical realization.
+4. Mode transitions and stack-owned recovery.
+5. Deterministic snapshot and replay.
+6. Off-nominal and fault response.
+7. Monte Carlo robustness.
+8. Documented assumptions, limits, and tuning envelope.
+
+The review store records `profile_id` beside `stack_id` in `fsw_invocations`.
+This permits future evidence manifests and qualification tools to bind results
+to the selected use-case profile without changing the sensor-to-actuator
+runtime boundary.

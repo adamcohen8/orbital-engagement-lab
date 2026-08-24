@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -70,7 +71,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.saved_query:
         saved_query = get_saved_review_query(args.saved_query)
         if saved_query is None:
-            print(f"unknown saved review query: {args.saved_query}", file=sys.stderr)
+            print(
+                f"unknown saved review query: {args.saved_query}; "
+                "run `python -m sim.review --list-saved-queries` to discover supported names",
+                file=sys.stderr,
+            )
             return 2
         sql = saved_query.sql
     if not sql:
@@ -99,7 +104,7 @@ def main(argv: list[str] | None = None) -> int:
             json.dumps(
                 {
                     "columns": result.columns,
-                    "rows": result.rows,
+                    "rows": _json_safe(result.rows),
                     "row_count": result.row_count,
                     "truncated": result.truncated,
                 },
@@ -159,6 +164,22 @@ def _fmt(value: Any) -> str:
     if isinstance(value, float):
         return f"{value:.9g}"
     return str(value)
+
+
+def _json_safe(value: Any) -> Any:
+    """Represent opaque SQLite BLOBs without crashing or exposing their contents."""
+
+    if isinstance(value, bytes):
+        return {
+            "type": "sqlite_blob",
+            "byte_count": len(value),
+            "sha256": hashlib.sha256(value).hexdigest(),
+        }
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    return value
 
 
 if __name__ == "__main__":

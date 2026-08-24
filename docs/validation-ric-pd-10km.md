@@ -67,6 +67,9 @@ envelope.
 | Chaser max acceleration | `<= 6.000001e-5 km/s^2` |
 | Attitude guardrail events | `0` |
 | Attitude and knowledge finite fractions | `1.0` |
+| Chaser final attitude-rate norm | `<= 0.1 deg/s` |
+| Chaser-target knowledge update rate | `>= 0.99` |
+| Chaser-target knowledge position-error RMS | `<= 1e-9 km` |
 
 The private release-blocking harness runs only plugin validation and this
 deterministic scenario.

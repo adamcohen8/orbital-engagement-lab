@@ -1,7 +1,8 @@
 schema_version: oel.scenario.v1
 scenario_name: quickstart_5min
 scenario_description: 'Five-minute public quickstart: deterministic two-satellite
-  rendezvous run with headless-safe outputs.'
+  relative-motion/RPO hold demonstration with headless-safe outputs. Full-duration
+  completion is not a terminal-rendezvous success criterion.'
 metadata:
   owner: public
   public_surface: public-quickstart

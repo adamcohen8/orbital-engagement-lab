@@ -41,8 +41,8 @@ Python module paths use lowercase snake case:
 
 ```text
 sim.control.orbit.ric_pd
-sim.control.orbit.rmoe_if_then
-sim.control.attitude.reaction_wheel_pd
+sim.control.orbit.rmoe
+sim.control.attitude.baseline
 ```
 
 Python classes use domain/method/purpose CamelCase:
@@ -51,7 +51,7 @@ Python classes use domain/method/purpose CamelCase:
 RICPDTransferController
 RMOEIfThenController
 ReactionWheelPDController
-RocketTVCTrackingController
+TVCSteeringGuidance
 ```
 
 Controller `mode` strings use lowercase snake case and should align with the
@@ -60,9 +60,13 @@ product-facing identity:
 ```text
 ric_pd_transfer
 rmoe_if_then
-reaction_wheel_pd
-rocket_tvc_tracking
+rw_pd
+tvc_guidance
 ```
+
+The authoritative current mapping, maturity, and availability is
+`sim.gnc.catalog`; these examples must not be used to infer an import path not
+present in that catalog.
 
 Scenario IDs, config filenames, output directories, and report/doc slugs should
 share the same product-facing stem:

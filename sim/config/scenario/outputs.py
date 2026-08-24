@@ -44,7 +44,7 @@ def _validate_orbital_analysis_section(section: dict[str, Any]) -> None:
         "quat_body_from_sensor", "max_range_km", "chunk_size", "max_working_memory_bytes",
         "max_cell_time_comparisons", "transition_time_tolerance_s", "transition_max_iterations",
         "max_transition_refinement_evaluations",
-        "include_cell_csv",
+        "include_cell_csv", "include_fraction_plot",
     }
     for index, raw in enumerate(list(section.get("coverage", []) or [])):
         path = f"outputs.orbital_analysis.coverage[{index}]"
@@ -58,6 +58,8 @@ def _validate_orbital_analysis_section(section: dict[str, Any]) -> None:
         coverage_analysis_ids.add(analysis_id)
         if "include_cell_csv" in raw and not isinstance(raw["include_cell_csv"], bool):
             raise ValueError(f"{path}.include_cell_csv must be a boolean true/false value.")
+        if "include_fraction_plot" in raw and not isinstance(raw["include_fraction_plot"], bool):
+            raise ValueError(f"{path}.include_fraction_plot must be a boolean true/false value.")
         order = raw["order"]
         if isinstance(order, bool) or not isinstance(order, int) or order not in range(5, 9):
             raise ValueError(f"{path}.order must be an integer from 5 through 8.")
@@ -95,16 +97,18 @@ def _validate_orbital_analysis_section(section: dict[str, Any]) -> None:
                 raise ValueError(f"{path}.transition_max_iterations must be a positive integer.")
 
     link_allowed = {
-        "analysis_id", "link_id", "tx_object_id", "rx_object_id", "tx_terminal", "rx_terminal",
+        "analysis_id", "link_id", "tx_object_id", "rx_object_id", "tx_ground_station_id",
+        "rx_ground_station_id", "tx_terminal", "rx_terminal",
         "carrier_frequency_hz", "tx_power_w", "data_rate_bps", "system_noise_temperature_k",
         "required_eb_n0_db", "tx_line_loss_db", "rx_line_loss_db", "misc_loss_db", "max_range_km",
-        "transition_time_tolerance_s", "transition_max_iterations", "include_margin_plot",
+        "min_fixed_site_elevation_deg", "transition_time_tolerance_s", "transition_max_iterations",
+        "include_margin_plot",
     }
     for index, raw in enumerate(list(section.get("directed_links", []) or [])):
         path = f"outputs.orbital_analysis.directed_links[{index}]"
         _reject_unknown_fields(raw, path, link_allowed)
         required = (
-            "analysis_id", "link_id", "tx_object_id", "rx_object_id", "tx_terminal", "rx_terminal",
+            "analysis_id", "link_id", "tx_terminal", "rx_terminal",
             "carrier_frequency_hz", "tx_power_w", "data_rate_bps", "system_noise_temperature_k", "required_eb_n0_db",
         )
         for field_name in required:
@@ -120,8 +124,23 @@ def _validate_orbital_analysis_section(section: dict[str, Any]) -> None:
         link_ids.add(link_id)
         if "include_margin_plot" in raw and not isinstance(raw["include_margin_plot"], bool):
             raise ValueError(f"{path}.include_margin_plot must be a boolean true/false value.")
-        if str(raw["tx_object_id"]) == str(raw["rx_object_id"]):
-            raise ValueError(f"{path} endpoints must name different objects.")
+        endpoints: dict[str, tuple[str, str]] = {}
+        for endpoint in ("tx", "rx"):
+            selectors = [
+                ("object", str(raw.get(f"{endpoint}_object_id") or "").strip()),
+                ("ground_station", str(raw.get(f"{endpoint}_ground_station_id") or "").strip()),
+            ]
+            selected = [(kind, identifier) for kind, identifier in selectors if identifier]
+            if len(selected) != 1:
+                raise ValueError(
+                    f"{path} must declare exactly one of {endpoint}_object_id or "
+                    f"{endpoint}_ground_station_id."
+                )
+            endpoints[endpoint] = selected[0]
+        if endpoints["tx"] == endpoints["rx"]:
+            raise ValueError(f"{path} endpoints must name different assets.")
+        if endpoints["tx"][0] == endpoints["rx"][0] == "ground_station":
+            raise ValueError(f"{path} does not support ground-station to ground-station links.")
         for field_name in ("carrier_frequency_hz", "tx_power_w", "data_rate_bps", "system_noise_temperature_k"):
             value = float(raw[field_name])
             if not math.isfinite(value) or value <= 0.0:
@@ -137,17 +156,36 @@ def _validate_orbital_analysis_section(section: dict[str, Any]) -> None:
             maximum_range = float(raw["max_range_km"])
             if not math.isfinite(maximum_range) or maximum_range <= 0.0:
                 raise ValueError(f"{path}.max_range_km must be positive and finite.")
+        if raw.get("min_fixed_site_elevation_deg") is not None:
+            minimum_elevation = float(raw["min_fixed_site_elevation_deg"])
+            if not math.isfinite(minimum_elevation) or not -90.0 <= minimum_elevation <= 90.0:
+                raise ValueError(f"{path}.min_fixed_site_elevation_deg must be within [-90, 90].")
         for terminal_name in ("tx_terminal", "rx_terminal"):
             terminal_path = f"{path}.{terminal_name}"
             terminal = _as_dict(raw.get(terminal_name), terminal_path)
-            _reject_unknown_fields(terminal, terminal_path, {"terminal_id", "quat_body_from_terminal", "pattern"})
+            _reject_unknown_fields(
+                terminal,
+                terminal_path,
+                {"terminal_id", "quat_parent_from_terminal", "quat_body_from_terminal", "pattern"},
+            )
             if not str(terminal.get("terminal_id") or "").strip():
                 raise ValueError(f"{terminal_path}.terminal_id is required.")
-            quaternion = list(terminal.get("quat_body_from_terminal", [1.0, 0.0, 0.0, 0.0]) or [])
+            if "quat_parent_from_terminal" in terminal and "quat_body_from_terminal" in terminal:
+                raise ValueError(
+                    f"{terminal_path} must not declare both quat_parent_from_terminal and "
+                    "quat_body_from_terminal."
+                )
+            quaternion = list(
+                terminal.get(
+                    "quat_parent_from_terminal",
+                    terminal.get("quat_body_from_terminal", [1.0, 0.0, 0.0, 0.0]),
+                )
+                or []
+            )
             if len(quaternion) != 4 or any(not math.isfinite(float(value)) for value in quaternion):
-                raise ValueError(f"{terminal_path}.quat_body_from_terminal must contain four finite values.")
+                raise ValueError(f"{terminal_path} terminal quaternion must contain four finite values.")
             if abs(math.sqrt(sum(float(value) ** 2 for value in quaternion)) - 1.0) > 1.0e-10:
-                raise ValueError(f"{terminal_path}.quat_body_from_terminal must be normalized within 1e-10.")
+                raise ValueError(f"{terminal_path} terminal quaternion must be normalized within 1e-10.")
             pattern_path = f"{terminal_path}.pattern"
             pattern = _as_dict(terminal.get("pattern"), pattern_path)
             _reject_unknown_fields(pattern, pattern_path, {"kind", "gain_dbi", "half_angle_deg"})

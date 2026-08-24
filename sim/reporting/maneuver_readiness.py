@@ -59,7 +59,9 @@ def build_maneuver_readiness_packet(
     )
     relative = dict(final_relative.rows[0]) if final_relative.row_count == 1 else {}
     realization = workspace.query(
-        "SELECT interval_start_ns, interval_end_ns, saturated, detail_json "
+        "SELECT interval_start_ns, interval_end_ns, saturated, "
+        "requested_force_x_n, requested_force_y_n, requested_force_z_n, "
+        "realized_force_x_n, realized_force_y_n, realized_force_z_n "
         "FROM actuator_realization WHERE object_id = ? ORDER BY interval_start_ns, actuator_id",
         (object_key,),
         max_rows=1_000_000,
@@ -67,10 +69,23 @@ def build_maneuver_readiness_packet(
     maximum_residual_n: float | None = None
     saturated_duration_s = 0.0
     for row in realization.rows:
-        detail = json.loads(str(row.get("detail_json") or "{}"))
-        requested = np.asarray(detail.get("requested_force_n", ()), dtype=float)
-        realized = np.asarray(detail.get("realized_force_n", ()), dtype=float)
-        if requested.shape == (3,) and realized.shape == (3,):
+        requested = np.asarray(
+            [
+                row.get("requested_force_x_n"),
+                row.get("requested_force_y_n"),
+                row.get("requested_force_z_n"),
+            ],
+            dtype=float,
+        )
+        realized = np.asarray(
+            [
+                row.get("realized_force_x_n"),
+                row.get("realized_force_y_n"),
+                row.get("realized_force_z_n"),
+            ],
+            dtype=float,
+        )
+        if np.all(np.isfinite(requested)) and np.all(np.isfinite(realized)):
             residual = float(np.linalg.norm(requested - realized))
             maximum_residual_n = residual if maximum_residual_n is None else max(maximum_residual_n, residual)
         if bool(row.get("saturated")):
@@ -167,7 +182,9 @@ def build_maneuver_readiness_packet(
                 "WHERE deputy_id = ? AND chief_id = ? ORDER BY sample_index DESC LIMIT 1"
             ),
             "actuator_realization_query": (
-                "SELECT interval_start_ns, interval_end_ns, saturated, detail_json FROM actuator_realization "
+                "SELECT interval_start_ns, interval_end_ns, saturated, "
+                "requested_force_x_n, requested_force_y_n, requested_force_z_n, "
+                "realized_force_x_n, realized_force_y_n, realized_force_z_n FROM actuator_realization "
                 "WHERE object_id = ? ORDER BY interval_start_ns, actuator_id"
             ),
         },

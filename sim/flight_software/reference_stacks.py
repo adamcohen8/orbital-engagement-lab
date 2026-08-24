@@ -67,6 +67,7 @@ from sim.gnc.orbit_v2 import (
 )
 from sim.utils.quaternion import quaternion_to_dcm_bn
 
+from .clocks import clock_tag_elapsed_ns
 from .contracts import (
     ActuatorCommand,
     ActuatorCommandReceipt,
@@ -794,6 +795,14 @@ class AttitudeReferenceFlightSoftwareStack(ReferenceStackBase):
             if reference is not None:
                 fields.append(TelemetryField("reference_id", reference.reference_id))
                 if reference.attitude_quat_from_frame is not None and solution.attitude_quat_bn is not None:
+                    for component, value in zip(
+                        ("w", "x", "y", "z"),
+                        reference.attitude_quat_from_frame,
+                        strict=True,
+                    ):
+                        fields.append(
+                            TelemetryField(f"desired_attitude_quat_{component}", float(value))
+                        )
                     alignment = abs(
                         float(
                             np.dot(
@@ -1294,6 +1303,44 @@ class _TranslationReferenceFlightSoftwareStack(ReferenceStackBase):
                     fields.append(
                         TelemetryField("requested_force_n", float(np.linalg.norm(control.effort.force_n)), "N")
                     )
+                if control.phase == "finite_burn":
+                    now_ns = clock_tag_elapsed_ns(batch.invocation_time)
+                    active_burn = next(
+                        (
+                            burn
+                            for burn in self.config.control.scheduled_burns
+                            if burn.start_time_ns <= now_ns < burn.start_time_ns + burn.duration_ns
+                        ),
+                        None,
+                    )
+                    if active_burn is not None:
+                        original_accel = float(np.linalg.norm(active_burn.acceleration_m_s2))
+                        command_mass = (
+                            float(solution.mass_kg)
+                            if solution.mass_kg is not None
+                            else float(self.config.control.assumed_mass_kg)
+                        )
+                        fields.extend(
+                            (
+                                TelemetryField(
+                                    "scheduled_burn_original_accel_m_s2", original_accel, "m/s^2"
+                                ),
+                                TelemetryField(
+                                    "scheduled_burn_original_force_n", original_accel * command_mass, "N"
+                                ),
+                                TelemetryField(
+                                    "scheduled_burn_original_delta_v_m_s",
+                                    original_accel * active_burn.duration_ns * 1.0e-9,
+                                    "m/s",
+                                ),
+                                TelemetryField(
+                                    "scheduled_burn_duration_s",
+                                    active_burn.duration_ns * 1.0e-9,
+                                    "s",
+                                ),
+                                TelemetryField("scheduled_burn_controller_clipped", control.saturated),
+                            )
+                        )
             if allocation is not None:
                 fields.append(TelemetryField("translation_allocation_status", allocation.status.value))
                 fields.extend(allocation.status_details)

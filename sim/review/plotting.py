@@ -215,14 +215,7 @@ class EvidencePlotter:
 
     def dry_run(self, spec: ReviewPlotSpec) -> dict[str, Any]:
         result = self.workspace.query(spec.sql, max_rows=max(int(spec.max_rows), 1))
-        _validate_plot_spec(spec, result)
-        return {
-            "spec": _spec_to_dict(spec),
-            "columns": result.columns,
-            "row_count": result.row_count,
-            "truncated": result.truncated,
-            "numeric_columns": numeric_columns(result),
-        }
+        return _dry_run_from_result(spec, result)
 
     def _require_tables(self, tables: Sequence[str], *, recipe_id: str) -> None:
         available = set(self.workspace.tables())
@@ -286,6 +279,28 @@ def save_review_plot(
     record: bool = True,
 ) -> ReviewPlotArtifact:
     result = workspace.query(spec.sql, max_rows=max(int(spec.max_rows), 1))
+    return _save_review_plot_from_result(workspace, spec, result=result, path=path, record=record)
+
+
+def _dry_run_from_result(spec: ReviewPlotSpec, result: ReviewQueryResult) -> dict[str, Any]:
+    _validate_plot_spec(spec, result)
+    return {
+        "spec": _spec_to_dict(spec),
+        "columns": result.columns,
+        "row_count": result.row_count,
+        "truncated": result.truncated,
+        "numeric_columns": numeric_columns(result),
+    }
+
+
+def _save_review_plot_from_result(
+    workspace: ReviewWorkspace,
+    spec: ReviewPlotSpec,
+    *,
+    result: ReviewQueryResult,
+    path: str | Path | None = None,
+    record: bool = True,
+) -> ReviewPlotArtifact:
     _validate_plot_spec(spec, result)
     spec = _replace_spec(spec, style_name=_normalize_style_alias(spec.style_name))
     artifact_id = _normalize_artifact_id(spec.artifact_id or _default_artifact_id(spec))
@@ -313,6 +328,8 @@ def save_review_plot(
     ):
         if spec.renderer_id == "ric_rectangular_2d":
             fig = _draw_ric_rectangular_2d(plt, result, spec)
+        elif spec.renderer_id == "directed_link_margin":
+            fig = _draw_directed_link_margin(plt, result, spec)
         elif spec.renderer_id == "generic":
             fig, ax = plt.subplots(figsize=(9.5, 5.25))
             _draw_plot(ax, result, spec)
@@ -355,7 +372,12 @@ def save_review_plot(
     return artifact
 
 
-def record_generated_artifact(workspace: ReviewWorkspace, artifact: ReviewPlotArtifact) -> None:
+def record_generated_artifact(
+    workspace: ReviewWorkspace,
+    artifact: ReviewPlotArtifact,
+    *,
+    review_store_identity: dict[str, Any] | None = None,
+) -> None:
     index_path = workspace.output_dir / "review" / "generated_artifacts.json"
     index_path.parent.mkdir(parents=True, exist_ok=True)
     existing: list[dict[str, Any]] = []
@@ -403,22 +425,45 @@ def record_generated_artifact(workspace: ReviewWorkspace, artifact: ReviewPlotAr
                 version_row.get("review_schema_version") or "unknown"
             ),
             "query_sha256": hashlib.sha256(spec.sql.encode("utf-8")).hexdigest(),
-            "review_store": _review_store_identity(workspace),
+            "review_store": review_store_identity or _review_store_identity(workspace),
             "qa": dict(artifact.qa),
             "extra": dict(spec.extra or {}),
         }
     )
     index_path.write_text(json.dumps({"artifacts": existing}, indent=2) + "\n", encoding="utf-8")
+    _refresh_output_index_generated_artifacts(workspace.output_dir, existing)
+
+
+def _refresh_output_index_generated_artifacts(
+    output_dir: Path,
+    artifacts: list[dict[str, Any]],
+) -> None:
+    index_path = output_dir / "index.md"
+    if not index_path.is_file():
+        return
+    start = "<!-- OEL_REVIEW_GENERATED_ARTIFACTS_START -->"
+    end = "<!-- OEL_REVIEW_GENERATED_ARTIFACTS_END -->"
+    rows = [start, "## Review-Generated Artifacts", ""]
+    for artifact in artifacts:
+        relative = str(artifact.get("path", "") or "").strip()
+        if not relative:
+            continue
+        artifact_id = str(artifact.get("artifact_id", "review figure") or "review figure")
+        rows.append(f"- `{artifact_id}`: [`{relative}`]({relative})")
+    rows.extend([end, ""])
+    section = "\n".join(rows)
+    text = index_path.read_text(encoding="utf-8")
+    if start in text and end in text:
+        prefix, remainder = text.split(start, 1)
+        _old, suffix = remainder.split(end, 1)
+        updated = prefix.rstrip() + "\n\n" + section + suffix.lstrip("\n")
+    else:
+        updated = text.rstrip() + "\n\n" + section
+    index_path.write_text(updated, encoding="utf-8")
 
 
 def _review_store_identity(workspace: ReviewWorkspace) -> dict[str, Any]:
-    stat = workspace.db_path.stat()
-    return {
-        "relative_path": _relative_to_output(workspace, workspace.db_path),
-        "size_bytes": int(stat.st_size),
-        "mtime_ns": int(stat.st_mtime_ns),
-        "sha256": hashlib.sha256(workspace.db_path.read_bytes()).hexdigest(),
-    }
+    return workspace.evidence_identity()
 
 
 def automated_plot_qa(
@@ -577,6 +622,55 @@ def _draw_ric_rectangular_2d(plt: Any, result: ReviewQueryResult, spec: ReviewPl
     return fig
 
 
+def _draw_directed_link_margin(plt: Any, result: ReviewQueryResult, spec: ReviewPlotSpec) -> Any:
+    required = {"analysis_id", "time_s", "margin_db", "available"}
+    missing = sorted(required - set(result.columns))
+    if missing:
+        raise ValueError(
+            "The directed-link margin renderer requires query columns: "
+            + ", ".join(sorted(required))
+        )
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in result.rows:
+        grouped.setdefault(str(row.get("analysis_id") or "directed link"), []).append(row)
+    fig, ax = plt.subplots(figsize=(9.5, 5.25))
+    palette = ("#38BDF8", "#F97316", "#A78BFA", "#22C55E", "#EAB308", "#EC4899")
+    for index, (group, rows) in enumerate(sorted(grouped.items())):
+        points = [
+            (float(row["time_s"]), float(row["margin_db"]), bool(row["available"]))
+            for row in rows
+            if row.get("time_s") is not None and row.get("margin_db") is not None
+        ]
+        if not points:
+            continue
+        x_values = np.asarray([point[0] for point in points], dtype=float)
+        y_values = np.asarray([point[1] for point in points], dtype=float)
+        available = np.asarray([point[2] for point in points], dtype=bool)
+        color = palette[index % len(palette)]
+        ax.plot(x_values, y_values, color=color, linewidth=1.8, label=group, zorder=3)
+        ax.fill_between(
+            x_values,
+            y_values,
+            0.0,
+            where=available,
+            color=color,
+            alpha=0.16,
+            interpolate=False,
+            label="RF-qualified samples" if index == 0 else "_nolegend_",
+            zorder=2,
+        )
+    ax.axhline(0.0, color="#F59E0B", linewidth=1.2, linestyle="--", label="Closure threshold")
+    ax.set_title(spec.title or "Directed-link margin")
+    if spec.subtitle:
+        fig.suptitle(spec.subtitle, y=0.975, fontsize=9)
+    ax.set_xlabel(spec.x_label or "Analysis time (s)")
+    ax.set_ylabel(spec.y_label or "Margin (dB)")
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc="best")
+    fig.tight_layout(rect=(0, 0.025, 1, 0.96 if spec.subtitle else 1))
+    return fig
+
+
 def _draw_plot(ax: Any, result: ReviewQueryResult, spec: ReviewPlotSpec) -> None:
     plot_type = _normalize_plot_type(spec.plot_type)
     rows = result.rows
@@ -710,6 +804,20 @@ def _validate_plot_spec(spec: ReviewPlotSpec, result: ReviewQueryResult) -> None
         nonnumeric = sorted(required - numeric)
         if nonnumeric:
             raise ValueError("Rectangular-RIC columns must contain numeric values: " + ", ".join(nonnumeric))
+    elif spec.renderer_id == "directed_link_margin":
+        required = {"analysis_id", "time_s", "margin_db", "available"}
+        missing = sorted(required - columns)
+        if missing:
+            raise ValueError(
+                "The directed-link margin renderer requires query columns: "
+                + ", ".join(sorted(required))
+            )
+        nonnumeric = sorted({"time_s", "margin_db", "available"} - numeric)
+        if nonnumeric:
+            raise ValueError(
+                "Directed-link margin numeric columns must contain numeric values: "
+                + ", ".join(nonnumeric)
+            )
     elif spec.renderer_id != "generic":
         raise ValueError(f"Unsupported review plot renderer_id '{spec.renderer_id}'.")
     _normalize_plot_type(spec.plot_type)

@@ -37,7 +37,7 @@ def test_m5_wheel_packages_supported_mcp_profiles_and_keeps_dependency_optional(
     assert wheel_name.endswith("-py3-none-any.whl")
     assert "Root-Is-Purelib: true" in wheel_metadata
     assert "Tag: py3-none-any" in wheel_metadata
-    assert "License-Expression: MIT" in metadata
+    assert "License-Expression: Apache-2.0" in metadata
     assert "License-File: LICENSE.txt" in metadata
     assert any(name.startswith("sim/") for name in names)
     assert "integrations/oel_mcp/acceptance.py" in names

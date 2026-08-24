@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import sys
 from pathlib import Path
@@ -79,43 +80,51 @@ def main(argv: list[str] | None = None) -> int:
             if get_recipe(args.recipe_id) is None:
                 print(f"unknown recipe: {args.recipe_id}", file=sys.stderr)
                 return 2
-            payload = run_recipe(
-                args.recipe_id,
-                output_dir=args.output_dir,
-                output_root=args.output_root,
-                dry_run=args.dry_run,
-                make_plots=args.plot,
-                style_name=args.style,
-                max_rows=args.max_rows,
-            )
+            with _operation_stdout(args.json):
+                payload = run_recipe(
+                    args.recipe_id,
+                    output_dir=args.output_dir,
+                    output_root=args.output_root,
+                    dry_run=args.dry_run,
+                    make_plots=args.plot,
+                    style_name=args.style,
+                    max_rows=args.max_rows,
+                )
             _print_packet(payload, json_mode=args.json)
             return 0 if payload.get("status") in {"completed", "validated"} else 2
         if args.command == "inspect":
-            payload = inspect_output(args.output_dir, query_names=tuple(args.queries or ()), max_rows=args.max_rows)
+            with _operation_stdout(args.json):
+                payload = inspect_output(
+                    args.output_dir,
+                    query_names=tuple(args.queries or ()),
+                    max_rows=args.max_rows,
+                )
             _print_packet(payload, json_mode=args.json)
             return 0 if payload.get("status") in {"completed", "partial"} else 2
         if args.command == "compare":
-            payload = compare_configs(
-                args.base,
-                args.candidate,
-                output_dir=args.output_dir,
-                metric_names=tuple(args.metrics or ()),
-                max_rows=args.max_rows,
-            )
+            with _operation_stdout(args.json):
+                payload = compare_configs(
+                    args.base,
+                    args.candidate,
+                    output_dir=args.output_dir,
+                    metric_names=tuple(args.metrics or ()),
+                    max_rows=args.max_rows,
+                )
             _print_packet(payload, json_mode=args.json)
             return 0 if payload.get("status") == "completed" else 2
         if args.command == "plot":
             if get_plot_recipe(args.recipe) is None:
                 print(f"unknown plot recipe: {args.recipe}", file=sys.stderr)
                 return 2
-            payload = create_plot(
-                args.output_dir,
-                args.recipe,
-                style_name=args.style,
-                file_format=args.format,
-                artifact_id=args.artifact_id,
-                path=Path(args.path) if args.path else None,
-            )
+            with _operation_stdout(args.json):
+                payload = create_plot(
+                    args.output_dir,
+                    args.recipe,
+                    style_name=args.style,
+                    file_format=args.format,
+                    artifact_id=args.artifact_id,
+                    path=Path(args.path) if args.path else None,
+                )
             _print(payload, json_mode=args.json)
             return 0
     except Exception as exc:
@@ -142,6 +151,12 @@ def _print(payload: dict[str, Any], *, json_mode: bool) -> None:
             print(f"{item.get('name')}{units}{maturity}{source}: {item.get('description')}")
         return
     print(json.dumps(payload, indent=2))
+
+
+def _operation_stdout(json_mode: bool):
+    """Keep stdout machine-parseable while preserving simulation progress on stderr."""
+
+    return contextlib.redirect_stdout(sys.stderr) if json_mode else contextlib.nullcontext()
 
 
 def _print_packet(payload: dict[str, Any], *, json_mode: bool) -> None:

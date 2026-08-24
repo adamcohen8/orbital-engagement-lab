@@ -7,7 +7,7 @@ security, legal, export-control, or mission-assurance process.
 ## Supported Versions
 
 - Public releases: security fixes target the current public release line,
-  currently `v0.27.1`.
+  currently `v0.27.2`.
 - Private/Pro releases: security fixes target the active customer-supported
   release line or pilot branch named in the agreement.
 - Declared Python compatibility range: Python 3.10 through 3.14. Functional and
@@ -58,14 +58,10 @@ wheel inventory, SBOM, and freeze from that same isolated interpreter, runs an
 unsuppressed audit, and records artifact hashes in `supply-chain-gate.json`.
 The environment is removed after evidence generation so unrelated packages in
 the developer or release checkout environment cannot enter the release audit.
-Path-scoped PR CI and scheduled/manual CI repeat the audit on Linux as an
-independent-environment backstop; merge and release events do not repeat it.
-Those disk-bounded Linux jobs add `--torch-cpu-index`, which keeps the same
-constrained `.[full]` resolution and evidence sequence while sourcing Torch
-from PyTorch's official CPU wheel index instead of installing CUDA runtime
-packages. The selected wheel URL and hash remain captured in the pip install
-report and wheel inventory, and the source policy is recorded in the gate
-manifest.
+No pull-request or scheduled GitHub workflow repeats this audit. It is a local,
+release-authoritative gate. When a controlled Linux environment needs the
+disk-bounded CPU-only Torch source, add `--torch-cpu-index`; the selected wheel
+URL and hash remain captured in the install report and wheel inventory.
 
 After the exact source candidate and supply-chain gate pass, build signed
 installable artifacts from the authorized source root. Official signing is run
@@ -74,7 +70,7 @@ checker; `--source-root` points at the generated public export:
 
 ```bash
 python tools/build_installable_release.py \
-  --source-root <generated-public-export-or-authorized-pro-source> \
+  --source-root <generated-public-export> \
   --output-dir <release-artifact-directory> \
   --edition public --channel stable \
   --private-key <offline-release-private-key.json> \
@@ -82,9 +78,13 @@ python tools/build_installable_release.py \
   --supply-chain-evidence outputs/supply_chain \
   --wheelhouse <exact-platform-reviewed-wheelhouse> \
   --platform <Windows-Linux-or-Darwin> --architecture <machine> \
-  --base-url https://github.com/adamcohen8/orbital-engagement-lab/releases/download/v0.27.1 \
+  --base-url https://github.com/adamcohen8/orbital-engagement-lab/releases/download/v0.27.2 \
   --channel-url https://github.com/adamcohen8/orbital-engagement-lab/releases/latest/download/public-stable.json
 ```
+
+For an authorized Pro artifact, run the builder with an explicitly authorized
+Pro source root and Pro edition/package policy; never combine a private source
+root with `--edition public`.
 
 Signed builds fail closed without a passing, version-matched
 `supply-chain-gate.json` and unchanged referenced artifacts. The release
@@ -109,7 +109,7 @@ published attestation binds that packet without disclosing its local content.
 Treat a known vulnerability as a release finding until it is upgraded, removed,
 documented as not applicable, or accepted by the evaluator in writing.
 
-A `v0.27.1` full-profile release candidate requires the supported PyTorch 2.13
+A `v0.27.2` full-profile release candidate requires the supported PyTorch 2.13
 release line and an unsuppressed passing audit with no implicit exceptions.
 Do not add `--ignore-vuln` to release or compatibility workflows. If an
 advisory is not applicable, document the evidence and evaluator approval
@@ -158,17 +158,16 @@ The recommended buyer-side gate is:
 
 ## GitHub Actions Pinning
 
-OEL currently uses semantic action versions such as `actions/checkout@v5` and
-`actions/setup-python@v6`. For organizations that require full SHA pinning,
-treat the workflow as follows:
+Every checked-in third-party `uses:` reference must be pinned to a full
+40-character commit SHA. The repository audit rejects semantic tags. Maintain
+the upstream tag only as a review comment and:
 
-- convert each third-party `uses:` entry to a full commit SHA before a
-  controlled release branch is approved,
 - record the upstream action repository, tag, and resolved SHA in the release
   evidence packet,
 - review and refresh pinned SHAs on a planned cadence or when GitHub issues a
   security advisory,
-- keep the public release PR draft until CI has passed on the pinned workflow.
+- validate the manual advisory workflow and local release gate after a pin
+  update; do not treat hosted diagnostics as release acceptance.
 
 ## Release Evidence Packet
 

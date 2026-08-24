@@ -13,6 +13,23 @@ orbit_ekf_numerical_jacobian_kernel = None
 propagate_two_body_rk4_kernel = None
 
 
+def _solve_innovation_gain_and_vector(
+    innovation_covariance: np.ndarray,
+    state_measurement_cross_covariance: np.ndarray,
+    innovation: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Solve gain and NIS systems with one factorization when S is exactly symmetric."""
+
+    matrix = np.asarray(innovation_covariance, dtype=float)
+    cross = np.asarray(state_measurement_cross_covariance, dtype=float)
+    vector = np.asarray(innovation, dtype=float).reshape(-1)
+    if np.array_equal(matrix, matrix.T):
+        state_dimension = int(cross.shape[0])
+        solved = np.linalg.solve(matrix, np.column_stack((cross.T, vector)))
+        return solved[:, :state_dimension].T, solved[:, state_dimension]
+    return np.linalg.solve(matrix.T, cross.T).T, np.linalg.solve(matrix, vector)
+
+
 def _load_acceleration_kernels() -> None:
     global orbit_ekf_numerical_jacobian_kernel, propagate_two_body_rk4_kernel
     if propagate_two_body_rk4_kernel is not None:
@@ -111,8 +128,7 @@ class OrbitEKFEstimator(Estimator):
         s = p_pred + self._r
         hp_t = p_pred
         try:
-            k = np.linalg.solve(s.T, hp_t.T).T
-            s_y = np.linalg.solve(s, y)
+            k, s_y = _solve_innovation_gain_and_vector(s, hp_t, y)
         except np.linalg.LinAlgError:
             s_pinv = np.linalg.pinv(s)
             k = hp_t @ s_pinv

@@ -52,11 +52,18 @@ button {
   cursor: pointer;
 }
 
-button:hover,
 button.active {
   border-color: rgb(248, 84, 100);
   background: rgb(96, 22, 32);
   color: rgb(255, 220, 224);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  body:not(.mobile-view) button:hover {
+    border-color: rgb(248, 84, 100);
+    background: rgb(96, 22, 32);
+    color: rgb(255, 220, 224);
+  }
 }
 
 .music-button.active {
@@ -1408,6 +1415,13 @@ body.mobile-view .trainer-shell {
   user-select: none;
 }
 
+body.mobile-view .trainer-shell:not(.selector-mode),
+body.mobile-view .trainer-shell:not(.selector-mode) * {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 body.mobile-view button,
 body.mobile-view canvas,
 body.mobile-view .plot-panel,
@@ -1826,6 +1840,12 @@ body.mobile-view .touch-controls button {
   padding: 5px;
   font-size: 14px;
   font-weight: 700;
+}
+
+body.mobile-view .touch-controls button:hover:not(.active) {
+  border-color: rgb(104, 130, 156);
+  background: rgb(34, 48, 62);
+  color: rgb(220, 234, 246);
 }
 
 body.mobile-view .mobile-speed-controls button {

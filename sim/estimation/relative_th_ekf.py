@@ -8,6 +8,7 @@ from sim.core.interfaces import Estimator
 from sim.core.models import Measurement, StateBelief
 from sim.dynamics.orbit.elements import rv_to_coe_eci
 from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2
+from sim.estimation.orbit_ekf import _solve_innovation_gain_and_vector
 from sim.estimation.relative_hcw_ekf import (
     _default_measurement_noise_for_model,
     _diag6,
@@ -159,8 +160,7 @@ class THRelativeEKFEstimator(Estimator):
         s_mat = h_jac @ p_pred @ h_jac.T + r_mat
         hp_t = p_pred @ h_jac.T
         try:
-            k_gain = np.linalg.solve(s_mat.T, hp_t.T).T
-            s_y = np.linalg.solve(s_mat, innovation)
+            k_gain, s_y = _solve_innovation_gain_and_vector(s_mat, hp_t, innovation)
         except np.linalg.LinAlgError:
             s_pinv = np.linalg.pinv(s_mat)
             k_gain = hp_t @ s_pinv
@@ -345,14 +345,21 @@ def th_variational_transition_matrix(
 ) -> np.ndarray:
     """Return the variational STM for linearized eccentric-chief RIC motion."""
 
-    _, phi = th_variational_propagate_relative_state_and_stm(
-        relative_state_ric,
-        dt_s,
-        chief_state_eci_km_s,
-        mu_km3_s2=mu_km3_s2,
-        max_step_s=max_step_s,
+    # Preserve validation of the public argument even though the linear TH STM
+    # is independent of the relative state.  Integrating only chief+STM avoids
+    # carrying six identically-zero relative-state entries through every RK4
+    # stage while retaining the exact chief and STM operation ordering.
+    _state6(relative_state_ric, "relative_state_ric")
+    chief = _state6(chief_state_eci_km_s, "chief_state_eci_km_s")
+    state = np.hstack((chief, np.eye(6, dtype=float).reshape(36))).astype(float)
+    propagated = _integrate_state(
+        state,
+        float(dt_s),
+        float(mu_km3_s2),
+        float(max_step_s),
+        _th_variational_stm_derivative,
     )
-    return phi
+    return propagated[6:42].reshape(6, 6)
 
 
 def ya_closed_form_propagate_relative_state_and_stm(
@@ -505,14 +512,32 @@ def _th_combined_derivative(state: np.ndarray, mu_km3_s2: float) -> np.ndarray:
     theta_dot = h_norm / max(r_norm * r_norm, 1.0e-12)
     radial_rate = float(np.dot(chief_r, chief_v)) / r_norm
     theta_ddot = -2.0 * theta_dot * radial_rate / r_norm
-    omega = np.array([0.0, 0.0, theta_dot], dtype=float)
-    omega_dot = np.array([0.0, 0.0, theta_ddot], dtype=float)
     gravity_gradient = (float(mu_km3_s2) / (r_norm**3)) * np.array([2.0 * rho[0], -rho[1], -rho[2]])
+    # These are the closed-form cross products for z-axis frame rotation.  Keep
+    # the same operation grouping as the vector form so the optimized path is
+    # bit-for-bit identical while avoiding four tiny ``np.cross`` dispatches at
+    # every RK4 derivative evaluation.
+    coriolis_cross = np.array(
+        [-theta_dot * rho_dot[1], theta_dot * rho_dot[0], 0.0],
+        dtype=float,
+    )
+    euler_cross = np.array(
+        [-theta_ddot * rho[1], theta_ddot * rho[0], 0.0],
+        dtype=float,
+    )
+    omega_cross_rho = np.array(
+        [-theta_dot * rho[1], theta_dot * rho[0], 0.0],
+        dtype=float,
+    )
+    centrifugal_cross = np.array(
+        [-theta_dot * omega_cross_rho[1], theta_dot * omega_cross_rho[0], 0.0],
+        dtype=float,
+    )
     rho_ddot = (
         gravity_gradient
-        - 2.0 * np.cross(omega, rho_dot)
-        - np.cross(omega_dot, rho)
-        - np.cross(omega, np.cross(omega, rho))
+        - 2.0 * coriolis_cross
+        - euler_cross
+        - centrifugal_cross
     )
     chief_acc = -float(mu_km3_s2) * chief_r / (r_norm**3)
     return np.hstack((chief_v, chief_acc, rho_dot, rho_ddot))
@@ -525,6 +550,20 @@ def _th_variational_combined_derivative(state: np.ndarray, mu_km3_s2: float) -> 
     phi = np.array(state[12:48], dtype=float).reshape(6, 6)
     a_mat = _th_relative_dynamics_matrix(chief_r, chief_v, float(mu_km3_s2))
     return np.hstack((base, (a_mat @ phi).reshape(36)))
+
+
+def _th_variational_stm_derivative(state: np.ndarray, mu_km3_s2: float) -> np.ndarray:
+    """Chief+STM derivative used when no relative-state propagation is needed."""
+
+    chief_r = np.array(state[:3], dtype=float)
+    chief_v = np.array(state[3:6], dtype=float)
+    r_norm = float(np.linalg.norm(chief_r))
+    if r_norm <= 1.0e-9 or not np.isfinite(r_norm):
+        return np.zeros_like(state)
+    chief_acc = -float(mu_km3_s2) * chief_r / (r_norm**3)
+    phi = np.array(state[6:42], dtype=float).reshape(6, 6)
+    a_mat = _th_relative_dynamics_matrix(chief_r, chief_v, float(mu_km3_s2))
+    return np.hstack((chief_v, chief_acc, (a_mat @ phi).reshape(36)))
 
 
 def _th_relative_dynamics_matrix(

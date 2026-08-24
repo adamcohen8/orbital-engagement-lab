@@ -51,10 +51,13 @@ outputs:
   stats:
     print_summary: true
     save_json: true
-    save_full_log: true
+    save_full_log: false
   plots:
     enabled: true
     preset: reentry
     dpi: 150
   animations:
     enabled: false
+  review:
+    enabled: true
+    detail: standard

@@ -103,7 +103,28 @@ def test_agent_task_recipe_dry_run_writes_evidence_packet(tmp_path: Path) -> Non
         "failure_hint_count": 0,
         "caveat_count": 1,
         "ready_to_cite": False,
+        "packet_mode": "inspection_only",
+        "readiness_blockers": ["status:validated", "run_evidence_absent"],
     }
+
+
+def test_agent_task_prepared_config_cache_requires_exact_file_bytes(tmp_path: Path) -> None:
+    prepared = agent_task_runner._prepare_config(
+        ROOT / "configs" / "quickstart_5min.yaml",
+        tmp_path / "prepared",
+        label="guarded",
+    )
+    task_path = Path(prepared["config_path"])
+
+    assert agent_task_runner._guarded_prepared_config(task_path) is not None
+
+    task_path.write_bytes(task_path.read_bytes() + b"\n# changed after preparation\n")
+
+    with pytest.raises(RuntimeError, match="changed after validation"):
+        agent_task_runner._guarded_prepared_config(task_path)
+
+    with pytest.raises(RuntimeError, match="changed after validation"):
+        agent_task_runner._run_prepared_config(task_path)
 
 
 def test_agent_task_recipe_with_plots_writes_plot_summary(tmp_path: Path, monkeypatch) -> None:
@@ -138,6 +159,8 @@ def test_agent_task_recipe_with_plots_writes_plot_summary(tmp_path: Path, monkey
         "failure_hint_count": 0,
         "caveat_count": 0,
         "ready_to_cite": True,
+        "packet_mode": "execution",
+        "readiness_blockers": [],
     }
 
 
@@ -151,16 +174,23 @@ def test_agent_task_ogp_sgp4_recipe_packages_provenance_state_and_plot(tmp_path:
     assert propagation["status"] == "ok"
     assert propagation["rows"] == [
         {
-            "object_id": "catalog_object",
-            "propagation_method": "general",
-            "general_model": "sgp4",
-            "native_frame": "teme",
-            "output_frame": "teme",
-            "frame_transform": "native",
-            "state_frame": "eci",
-            "tle_epoch_jd_utc": 2460310.5,
-            "tle_age_start_days": 0.0,
-            "tle_age_end_days": pytest.approx(7200.0 / 86400.0),
+                "object_id": "catalog_object",
+                "propagation_method": "general",
+                "propagator_family": "OGP",
+                "propagator_name": "OGP-SGP4",
+                "general_model": "sgp4",
+                "ogp_regime": "near_earth",
+                "orbital_period_min": pytest.approx(92.9135521221465),
+                "native_frame": "teme",
+                "output_frame": "teme",
+                "state_history_frame": "eci",
+                "frame_transform": "native",
+                "state_frame": "eci",
+                "tle_epoch_jd_utc": 2460310.5,
+                "tle_age_start_days": 0.0,
+                "tle_age_end_days": pytest.approx(7200.0 / 86400.0),
+                "max_tle_age_days_warning": None,
+                "tle_age_warning": 0,
         }
     ]
     assert queries["passive_final_state"]["status"] == "ok"
@@ -231,6 +261,8 @@ def test_agent_task_inspects_completed_run_and_creates_plot(tmp_path: Path) -> N
     assert artifact_by_id["summary_json"]["path_exists"] is True
     assert Path(artifact_by_id["summary_json"]["resolved_path"]).is_file()
     assert artifact_by_id["run_log_json"]["path_exists"] is True
+    assert artifact_by_id["effective_config_json"]["path"] == "effective_config.json"
+    assert artifact_by_id["effective_config_json"]["path_exists"] is True
     assert artifact_by_id["output_index_md"]["path"] == "index.md"
     assert artifact_by_id["output_index_md"]["path_exists"] is True
     assert artifact_by_id["review_store:sqlite"]["path"] == "review/run.sqlite"
@@ -238,8 +270,8 @@ def test_agent_task_inspects_completed_run_and_creates_plot(tmp_path: Path) -> N
     assert artifact_by_id["review_store:schema_json"]["path"] == "review/schema.json"
     assert artifact_by_id["review_store:schema_json"]["path_exists"] is True
     assert payload["artifact_summary"] == {
-        "total": 5,
-        "existing": 5,
+        "total": 6,
+        "existing": 6,
         "missing": 0,
         "path_status_unknown": 0,
         "missing_artifacts": [],
@@ -436,6 +468,27 @@ def test_saved_query_rows_flag_empty_result_policy(monkeypatch) -> None:
     assert by_name["allowed_empty"]["empty_result_unexpected"] is False
 
 
+def test_default_inspection_queries_include_present_coverage_and_link_evidence() -> None:
+    class DomainWorkspace:
+        def tables(self) -> list[str]:
+            return ["coverage_summary", "link_summary"]
+
+        def query(self, sql: str, *, max_rows: int) -> SimpleNamespace:
+            assert max_rows == 1
+            assert "coverage_summary" in sql or "link_summary" in sql
+            return SimpleNamespace(rows=[{"present": 1}])
+
+    assert agent_task_runner._default_inspection_queries(DomainWorkspace()) == (
+        "run_metadata",
+        "objects",
+        "artifacts",
+        "coverage_summary",
+        "coverage_transition_summary",
+        "directed_link_summary",
+        "directed_link_windows",
+    )
+
+
 def test_saved_query_rows_flag_unknown_query() -> None:
     rows = agent_task_runner._run_saved_queries(object(), ("not_a_saved_query",), max_rows=5)
 
@@ -596,6 +649,15 @@ def test_packet_evidence_summary_flags_incomplete_components() -> None:
         "failure_hint_count": 1,
         "caveat_count": 1,
         "ready_to_cite": False,
+        "packet_mode": "inspection_only",
+        "readiness_blockers": [
+            "run_evidence_absent",
+            "validation_failed",
+            "review_evidence_incomplete",
+            "artifacts_incomplete",
+            "plots_incomplete",
+            "failure_hints_present",
+        ],
     }
 
 
@@ -613,6 +675,31 @@ def test_agent_task_cli_lists_recipes_as_json() -> None:
     assert any(item["recipe_id"] == "quickstart_review" for item in payload["items"])
     by_id = {item["recipe_id"]: item for item in payload["items"]}
     assert by_id["quickstart_review"]["maturity"] == "supported"
+
+
+def test_agent_task_json_run_keeps_stdout_machine_parseable(tmp_path: Path) -> None:
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "sim.agent_task",
+            "run",
+            "quickstart_review",
+            "--output-root",
+            str(tmp_path),
+            "--dry-run",
+            "--json",
+        ],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    payload = json.loads(proc.stdout)
+    assert payload["task_id"] == "quickstart_review"
+    assert payload["status"] == "validated"
 
 
 def test_agent_task_plain_list_surfaces_recipe_maturity() -> None:

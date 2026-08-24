@@ -74,9 +74,65 @@ RECIPES: dict[str, AgentTaskRecipe] = {
         description="Run the public ground-access example and package station/object access evidence.",
         config_path="agents/examples/public_agent_ground_access.yaml",
         maturity="supported",
-        query_names=("run_metadata", "objects", "ground_access_summary", "ground_access_no_access_reasons", "artifacts"),
+        query_names=(
+            "run_metadata",
+            "objects",
+            "ground_access_summary",
+            "ground_access_windows",
+            "ground_access_no_access_reasons",
+            "artifacts",
+        ),
         semantic_metric_names=("ground_access",),
         tags=("public", "agent_example", "ground_access"),
+    ),
+    "attitude_hold_review": AgentTaskRecipe(
+        recipe_id="attitude_hold_review",
+        title="Public Attitude-Hold Review Evidence",
+        description=(
+            "Run the public disturbed attitude-hold example and package desired-versus-actual "
+            "quaternion error, body-rate, controller, and plot evidence."
+        ),
+        config_path="examples/configs/public_attitude_hold_disturbance.yaml",
+        maturity="supported",
+        query_names=(
+            "run_metadata",
+            "objects",
+            "attitude_error_first_last",
+            "attitude_state_first_last",
+            "artifacts",
+        ),
+        plot_recipe_ids=("attitude_error", "attitude_body_rates"),
+        tags=("public", "agent_example", "attitude", "ideal_wrench", "control"),
+        notes=(
+            "The configured hardware profile is hardware.ideal_wrench.v1, not a physical reaction-wheel model.",
+            "Results are deterministic simulation evidence, not flight-qualified ADCS performance.",
+        ),
+    ),
+    "coverage_link_review": AgentTaskRecipe(
+        recipe_id="coverage_link_review",
+        title="Coverage and Directed-Link Review Evidence",
+        description=(
+            "Run the public whole-Earth coverage and directed-link example, then package "
+            "coverage, availability-window, margin, and artifact evidence."
+        ),
+        config_path="examples/configs/public_coverage_and_link_analysis.yaml",
+        maturity="supported",
+        query_names=(
+            "run_metadata",
+            "objects",
+            "coverage_summary",
+            "coverage_transition_summary",
+            "directed_link_summary",
+            "directed_link_windows",
+            "artifacts",
+        ),
+        plot_recipe_ids=("coverage_fraction", "directed_link_margin"),
+        semantic_metric_names=("coverage_fraction", "directed_link_margin_db"),
+        tags=("public", "agent_example", "coverage", "link_budget", "communications"),
+        notes=(
+            "Coverage and link results are evidence-only post-processing over one deterministic run.",
+            "This workflow does not establish calibrated payload performance or operational RF assurance.",
+        ),
     ),
     "ogp_sgp4_review": AgentTaskRecipe(
         recipe_id="ogp_sgp4_review",
@@ -99,6 +155,31 @@ RECIPES: dict[str, AgentTaskRecipe] = {
         notes=(
             "Uses a fixed historical public TLE so the workflow is deterministic and offline.",
             "The OGP product is native TEME while review object-state histories remain canonical ECI evidence.",
+            "This workflow does not establish current or operational ephemeris accuracy.",
+        ),
+    ),
+    "ogp_sdp4_review": AgentTaskRecipe(
+        recipe_id="ogp_sdp4_review",
+        title="Public OGP-SDP4 Deep-Space Propagation Evidence",
+        description=(
+            "Validate and run a synthetic GEO-like TLE through continuous passive OGP-SDP4, then package "
+            "resolved regime, period, frame, canonical ECI state, and radius evidence."
+        ),
+        config_path="agents/examples/public_agent_ogp_sdp4_propagation.yaml",
+        maturity="supported",
+        query_names=(
+            "run_metadata",
+            "objects",
+            "ogp_propagation_contract",
+            "object_final_state",
+            "object_eci_radius_extrema",
+            "artifacts",
+        ),
+        plot_recipe_ids=("object_eci_radius",),
+        tags=("public", "agent_example", "ogp", "sdp4", "deep_space", "propagation", "tle"),
+        notes=(
+            "The fixed synthetic TLE has valid checksums and is not a real catalog object.",
+            "The review contract must resolve OGP-SDP4, deep_space, and an orbital period above 225 minutes.",
             "This workflow does not establish current or operational ephemeris accuracy.",
         ),
     ),
