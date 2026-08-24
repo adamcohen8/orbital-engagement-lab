@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "orbital-engagement-lab"
-version = "0.27.1"
+version = "0.27.2"
 description = "Integrated spacecraft simulation and analysis platform for rendezvous, control, validation, and mission prototyping."
 readme = "README.md"
 requires-python = ">=3.10,<3.15"
-license = "MIT"
+license = "Apache-2.0"
 license-files = ["LICENSE.txt"]
 authors = [
   { name = "Orbital Engagement Lab Contributors" },
@@ -117,6 +117,7 @@ sim = [
   "installation/schemas/*.json",
   "fsw_authoring/schemas/*.json",
   "scale/schemas/*.json",
+  "*/data/*.txt",
   "game/configs/*.yaml",
   "game/assets/*.png",
   "game/assets/*.md",

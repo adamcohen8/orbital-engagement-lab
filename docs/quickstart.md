@@ -136,7 +136,8 @@ python run_simulation.py --config configs/ric_pd_10km_experiment.yaml
 ```
 
 This scenario is longer than the quickstart. It exercises a tuned RIC_PD orbit
-controller, attitude dynamics, reaction-wheel control, and thrust-alignment
+controller, attitude dynamics, quaternion attitude control through the configured
+ideal-wrench abstraction, and thrust-alignment
 gating, then writes review artifacts under `outputs/flagship_ric_pd_10km/`.
 Open `outputs/flagship_ric_pd_10km/index.md` first.
 
@@ -220,8 +221,10 @@ outputs/examples/public_rendezvous_closed_loop/sensor_access.png
 See [Plotting](plotting.md) for the maintained plot presets, figure IDs, and
 map-backed ground-track option.
 
-Atmospheric re-entry diagnostics have a short public smoke config and a longer
-interactive plotting demo:
+Atmospheric re-entry diagnostics have a short laptop-safe smoke config and a
+long-running ten-day study. The long study reports CLI progress, saves review
+evidence, and avoids a redundant full JSON history; it can still take substantial
+time depending on the machine:
 
 ```bash
 python run_simulation.py --config configs/reentry_smoke.yaml
@@ -247,3 +250,8 @@ The public core supports spherical-harmonic gravity from inline YAML terms or
 from coefficient files you provide. HPOP/GGM03 validation data is not bundled in
 the public distribution, so scenarios that set `source: "hpop_ggm03"` should also
 set `coeff_path` to a local coefficient file.
+
+`source: "egm96"` is the exception: it can resolve the managed digest-pinned
+EGM96 model without `coeff_path`. Set `allow_download` explicitly; downloads
+remain unavailable in sealed mode. `source: "icgem"` still requires a local
+coefficient file.

@@ -20,6 +20,8 @@ class AgentTaskRecipe:
     workflow: str = "scenario_run"
     query_names: tuple[str, ...] = ()
     plot_recipe_ids: tuple[str, ...] = ()
+    plots_generated_by_default: bool = False
+    plot_cli_option: str = "--plot"
     semantic_metric_names: tuple[str, ...] = ()
     tags: tuple[str, ...] = ()
     notes: tuple[str, ...] = ()
@@ -28,6 +30,8 @@ class AgentTaskRecipe:
         if self.maturity not in AGENT_TASK_MATURITY_LEVELS:
             allowed = ", ".join(sorted(AGENT_TASK_MATURITY_LEVELS))
             raise ValueError(f"Unknown agent task recipe maturity {self.maturity!r}; expected one of: {allowed}")
+        if self.plot_recipe_ids and not self.plot_cli_option:
+            raise ValueError("Recipes with plot_recipe_ids must name the CLI option that renders them.")
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

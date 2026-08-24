@@ -5,8 +5,9 @@ Status: **frozen for Directed Link Analysis v0.1**.
 Implementation status as of 2026-08-20: the additive programmatic kernel,
 sample/window artifacts, evidence packet, and margin review plot are
 implemented in `sim.analysis.directed_link`. A separate authorized causal
-task-boundary monitor adapter is implemented. Directed object-to-object links
-now also have evidence-only Scenario YAML, completed ONP/review and ECI OGP
+task-boundary monitor adapter is implemented. Directed spacecraft-to-spacecraft
+and spacecraft-to-fixed-site links now also have evidence-only Scenario YAML,
+completed ONP/review and ECI OGP
 history adapters, primary review-store tables, and provider-identified
 transition refinement. Concrete ONP-consumer integration and an independent
 external matched-assumption comparison remain pending. A behavior change that

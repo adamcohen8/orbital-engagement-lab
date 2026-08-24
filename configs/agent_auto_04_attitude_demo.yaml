@@ -1,5 +1,6 @@
 scenario_name: agent_auto_04_attitude_demo
-scenario_description: 'Agent-generated public demo: reaction-wheel attitude hold from
+scenario_description: 'Agent-generated public demo: quaternion attitude hold using the
+  ideal-wrench hardware abstraction from
   an initial pointing and rate error.'
 metadata:
   owner: public

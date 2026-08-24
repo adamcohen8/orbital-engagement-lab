@@ -35,9 +35,11 @@ For restricted environments, use sealed mode:
 .venv/bin/python run_simulation.py --config <path> --sealed-mode --validate-only
 ```
 
-Sealed mode blocks arbitrary plugin imports, hosted/custom AI endpoints,
-non-loopback cFS/SIL networking, and high-detail output retention unless the
-caller explicitly opts into the specific exception.
+Sealed mode blocks arbitrary plugin imports, hosted/custom AI endpoints, all
+cFS/SIL socket networking including loopback UDP, and high-detail output
+retention unless the caller explicitly opts into the specific exception. A
+separate sealed-policy isolated-test opt-in and any adapter-level network opt-in
+are both required; loopback is not implicitly allowed.
 
 ## Public Repository Boundary
 

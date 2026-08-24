@@ -30,6 +30,7 @@ from sim.review import (
     plan_review_animation,
     render_review_animation,
 )
+from sim.review.evidence_capsule import create_evidence_capsule
 
 
 def _write_review_store(root: Path, *, samples: int = 7) -> None:
@@ -210,6 +211,33 @@ def test_review_animation_plan_render_and_stale_plan_boundary(tmp_path: Path) ->
             animation_plan_id=plan["animation_plan_id"],
             path=tmp_path / "review" / "animations" / "stale.gif",
         )
+
+
+def test_capsule_only_animation_plan_is_stable_and_provenance_is_durable(tmp_path: Path) -> None:
+    _write_review_store(tmp_path)
+    create_evidence_capsule(tmp_path / "review" / "run.sqlite", remove_original=True)
+    spec = ReviewAnimationSpec(
+        recipe_id="relative_position_ric_2d",
+        artifact_id="capsule_ric",
+        file_format="gif",
+        fps=5.0,
+    )
+
+    first = plan_review_animation(tmp_path, spec)
+    second = plan_review_animation(tmp_path, spec)
+    assert first["animation_plan_id"] == second["animation_plan_id"]
+    artifact = render_review_animation(
+        tmp_path,
+        spec,
+        animation_plan_id=first["animation_plan_id"],
+        path=tmp_path / "review" / "animations" / "capsule_ric.gif",
+    )
+    assert artifact.path.is_file()
+    index_path = tmp_path / "review" / "generated_artifacts.json"
+    generated = json.loads(index_path.read_text(encoding="utf-8"))
+    row = generated["artifacts"][-1]
+    assert row["review_store"]["relative_path"] == "review/run.sqlite"
+    assert row["review_store"]["storage"] == "sqlite_gzip_capsule"
 
 
 def test_review_animation_planner_increases_stride_to_resource_limit(tmp_path: Path) -> None:

@@ -96,14 +96,16 @@ testing only; it does not expose the game outside the local network.
 | I | `A` or `-I` | `D` or `+I` |
 | C | `Left Arrow` or `-C` | `Right Arrow` or `+C` |
 
-Press `C` or use the camera button to switch between the default full-trajectory
-view centered on the propagated Target reference orbit and a pair view centered
-on the current Target/Chaser midpoint. The pair view keeps the grid, suppresses
-recorded trails, and sizes the frame only around the two current satellites plus
-a small margin. Both one-orbital-period HCW projections remain drawn and may
-continue beyond the pair view. The reference view keeps the full recorded and
-projected trajectories in frame. Solid red/yellow lines are recorded
-Target/Chaser trails; in both views, dashed red/blue lines are the current HCW
+Press `C` or use the camera button to cycle among the default full-trajectory
+view tightly framing the origin, both satellites, recorded trajectories, and
+both HCW projections, a pair view centered
+on the current Target/Chaser midpoint, and a projection view that tightly frames
+the two satellites plus both one-orbital-period HCW coast projections with a
+small margin without keeping the origin in frame. The pair view suppresses
+recorded trails and sizes the frame only around the two current satellites, so
+the projections may continue beyond it. The reference view includes only the
+margin needed around all of its required content. Solid red/yellow lines are recorded
+Target/Chaser trails; in all three views, dashed red/blue lines are the current HCW
 coast projections.
 
 Press `M` or use the music button to toggle the looping Perigee Afterburner
@@ -114,7 +116,8 @@ simulation speed. The server selects 200x while coasting and 10x while either
 spacecraft maneuvers or during the one-second neutral cooldown.
 
 At 200x, the client renders the authoritative snapshots through a bounded
-120-millisecond interpolation buffer and eases the pair camera center and span.
+120-millisecond interpolation buffer and eases the pair and projection camera
+centers and spans.
 This is visual-only: the server's fixed-step physics, inputs, timing, and
 broadcast cadence remain authoritative. The buffer and camera easing reset on
 maneuvers, speed changes, round changes, reconnect gaps, and camera toggles so

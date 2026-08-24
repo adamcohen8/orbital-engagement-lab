@@ -20,6 +20,10 @@ vehicle properties such as `mass_kg`, `drag_area_m2`, `srp_area_m2`, `cd`, and
 - Epoch-dependent behavior: `simulator.initial_jd_utc` populates
   `jd_utc_start` so Sun/Moon ephemerides, Earth rotation, atmosphere local
   quantities, and ECEF conversions can be time dependent.
+- Mode-driven `analytic_*`, DE440, and SPICE Sun/Moon ephemerides require that
+  absolute epoch. Without it, the mode is not evaluated and the resolver uses
+  fixed default Sun/Moon vectors unless explicit vectors, sampled histories,
+  or a callback are supplied.
 - Environment assembly: `simulator.environment` forms the base runtime
   environment. The nested `atmosphere_env` dictionary is flattened into that
   base. Drag and lift require an explicit shared `atmosphere_model` or
@@ -114,9 +118,14 @@ U_nm = mu/r * (Re/r)^n * P_nm(sin(phi)) *
 The generic path computes the gradient of the perturbing potential in the
 Earth-fixed frame with a configurable finite-difference step, then rotates the
 acceleration back to ECI. Fully normalized HPOP/GGM03-style terms use the
-analytic HPOP-like normalized Legendre path. Public distributions should
-provide explicit `terms` or an explicit coefficient file path. HPOP/GGM03
-reference files are not assumed to be present in the public core.
+analytic HPOP-like normalized Legendre path.
+
+| Source | Public input contract |
+| --- | --- |
+| Inline | Provide `terms` in scenario YAML. |
+| `hpop_ggm03` | Provide an explicit local `coeff_path`; private reference files are not bundled. |
+| `icgem` | Provide an explicit ICGEM `coeff_path`. |
+| `egm96` | May use the managed, digest-pinned EGM96 cache without `coeff_path`; `allow_download` controls network materialization and sealed mode blocks downloads. |
 
 With `simulator.acceleration.mode: auto` or `numba`, fully normalized fields
 use the optional compiled Legendre and degree/order summation kernel while

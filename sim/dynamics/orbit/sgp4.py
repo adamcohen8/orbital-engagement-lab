@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import math
 import warnings
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
+from sim.acceleration.settings import acceleration_settings_from_mode
 from sim.core.models import StateTruth
 from sim.dynamics.orbit.frames import teme_to_eci_vallado_iau80
 from sim.dynamics.orbit.tle import TLEElements, ogp_mean_elements_from_mapping, parse_tle_lines
@@ -90,9 +91,15 @@ class SGP4PropagationMetadata:
     output_frame: str
     state_history_frame: str
     frame_transform: str
+    propagation_backend: str
+    requested_backend: str
+    backend_fallback_reason: str
+    numerical_equivalence: str
     tle_epoch_jd_utc: float
     tle_age_start_days: float
     tle_age_end_days: float
+    ogp_regime: str
+    orbital_period_min: float
     max_tle_age_days_warning: float | None
     tle_age_warning: bool
 
@@ -108,6 +115,12 @@ class SGP4EphemerisProvider:
     attitude_quat_bn: np.ndarray | None = None
     angular_rate_body_rad_s: np.ndarray | None = None
     max_tle_age_days_warning: float | None = None
+    acceleration_mode: str = "off"
+    _sdp4_context: object | None = field(default=None, init=False, repr=False, compare=False)
+    _sgp4_numeric_elements: np.ndarray | None = field(default=None, init=False, repr=False, compare=False)
+    _propagation_backend: str = field(default="python_scalar", init=False, repr=False, compare=False)
+    _requested_backend: str = field(default="python_scalar", init=False, repr=False, compare=False)
+    _backend_fallback_reason: str = field(default="", init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         for field_name in ("mass_kg", "start_jd_utc", "duration_s"):
@@ -126,6 +139,29 @@ class SGP4EphemerisProvider:
             object.__setattr__(self, "frame_transform", "native")
         if frame == "eci" and not transform:
             object.__setattr__(self, "frame_transform", "teme_to_eci_iau80")
+        if sgp4_orbital_period_min(self.elements) >= SGP4_DEEP_SPACE_PERIOD_THRESHOLD_MIN:
+            from sim.dynamics.orbit.sdp4 import sdp4_initialize
+
+            object.__setattr__(self, "_sdp4_context", sdp4_initialize(self.elements))
+            object.__setattr__(self, "_propagation_backend", "sdp4_context")
+            object.__setattr__(self, "_requested_backend", "sdp4_context")
+        else:
+            acceleration = acceleration_settings_from_mode(
+                self.acceleration_mode,
+                allow_env_override=False,
+            )
+            object.__setattr__(self, "acceleration_mode", acceleration.requested_mode)
+            requested_backend = "numba_scalar" if acceleration.requested_mode != "off" else "python_scalar"
+            object.__setattr__(self, "_requested_backend", requested_backend)
+            if acceleration.enabled and njit is not None:
+                numeric_elements = _sgp4_numeric_element_array([self.elements])[0]
+                numeric_elements.setflags(write=False)
+                object.__setattr__(self, "_sgp4_numeric_elements", numeric_elements)
+                object.__setattr__(self, "_propagation_backend", "numba_scalar")
+            else:
+                object.__setattr__(self, "_propagation_backend", "python_scalar")
+                if requested_backend == "numba_scalar":
+                    object.__setattr__(self, "_backend_fallback_reason", acceleration.reason or "Numba unavailable")
         threshold = self.max_tle_age_days_warning
         if threshold is not None:
             threshold = float(threshold)
@@ -159,6 +195,7 @@ class SGP4EphemerisProvider:
         attitude_quat_bn: np.ndarray | None = None,
         angular_rate_body_rad_s: np.ndarray | None = None,
         max_tle_age_days_warning: float | None = None,
+        acceleration_mode: str = "off",
     ) -> SGP4EphemerisProvider:
         block = dict(tle_block or {})
         lines = block.get("lines")
@@ -188,6 +225,7 @@ class SGP4EphemerisProvider:
             attitude_quat_bn=attitude_quat_bn,
             angular_rate_body_rad_s=angular_rate_body_rad_s,
             max_tle_age_days_warning=max_tle_age_days_warning,
+            acceleration_mode=acceleration_mode,
         )
 
     @classmethod
@@ -283,10 +321,35 @@ class SGP4EphemerisProvider:
     ) -> tuple[np.ndarray, np.ndarray]:
         jd_utc = float(self.start_jd_utc) + t_s / 86400.0
         tsince_min = (float(self.start_jd_utc) - float(self.elements.epoch_jd_utc)) * 1440.0 + t_s / 60.0
-        if sgp4_orbital_period_min(self.elements) >= SGP4_DEEP_SPACE_PERIOD_THRESHOLD_MIN:
-            from sim.dynamics.orbit.sdp4 import sdp4_propagate_teme
+        if self._sdp4_context is not None:
+            from sim.dynamics.orbit.sdp4 import sdp4_propagate_teme_from_context
 
-            native = sdp4_propagate_teme(self.elements, tsince_min)
+            native = sdp4_propagate_teme_from_context(self._sdp4_context, tsince_min)
+        elif self._propagation_backend == "numba_scalar" and self._sgp4_numeric_elements is not None:
+            position = np.empty(3, dtype=float)
+            velocity = np.empty(3, dtype=float)
+            try:
+                error_code = _sgp4_numba_state(
+                    *self._sgp4_numeric_elements,
+                    float(tsince_min),
+                    position,
+                    velocity,
+                )
+            except Exception as exc:  # pragma: no cover - backend/runtime dependent.
+                object.__setattr__(self, "_propagation_backend", "python_scalar")
+                object.__setattr__(
+                    self,
+                    "_backend_fallback_reason",
+                    f"{type(exc).__name__}: {exc}",
+                )
+                native = sgp4_propagate_teme(self.elements, tsince_min)
+            else:
+                if int(error_code) == 0:
+                    native = SGP4State(position, velocity)
+                else:
+                    # Preserve the scalar reference's detailed error contract;
+                    # accelerated error codes are only a fast success-path gate.
+                    native = sgp4_propagate_teme(self.elements, tsince_min)
         else:
             native = sgp4_propagate_teme(self.elements, tsince_min)
         if native.error:
@@ -325,9 +388,10 @@ class SGP4EphemerisProvider:
     def metadata(self) -> SGP4PropagationMetadata:
         start_age = float(self.start_jd_utc) - float(self.elements.epoch_jd_utc)
         end_age = start_age + float(self.duration_s) / 86400.0
+        orbital_period_min = sgp4_orbital_period_min(self.elements)
         propagator_name = (
             "OGP-SDP4"
-            if sgp4_orbital_period_min(self.elements) >= SGP4_DEEP_SPACE_PERIOD_THRESHOLD_MIN
+            if orbital_period_min >= SGP4_DEEP_SPACE_PERIOD_THRESHOLD_MIN
             else "OGP-SGP4"
         )
         return SGP4PropagationMetadata(
@@ -339,9 +403,19 @@ class SGP4EphemerisProvider:
             output_frame=self.output_frame,
             state_history_frame="eci",
             frame_transform=self.frame_transform,
+            propagation_backend=self._propagation_backend,
+            requested_backend=self._requested_backend,
+            backend_fallback_reason=self._backend_fallback_reason,
+            numerical_equivalence=(
+                "rounding_level"
+                if self._propagation_backend == "numba_scalar"
+                else "bitwise_reference"
+            ),
             tle_epoch_jd_utc=float(self.elements.epoch_jd_utc),
             tle_age_start_days=float(start_age),
             tle_age_end_days=float(end_age),
+            ogp_regime="deep_space" if propagator_name == "OGP-SDP4" else "near_earth",
+            orbital_period_min=float(orbital_period_min),
             max_tle_age_days_warning=self.max_tle_age_days_warning,
             tle_age_warning=bool(
                 self.max_tle_age_days_warning is not None

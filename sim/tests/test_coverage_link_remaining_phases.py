@@ -598,6 +598,37 @@ def test_global_communications_coverage_requires_rf_closure_and_query_compatibil
     np.testing.assert_array_equal(query.regions[0].covered_cell_count, passing.covered_cell_count)
 
 
+def test_communications_direct_cosine_mode_is_opt_in_and_provenanced() -> None:
+    times = np.array([0.0, 60.0, 120.0])
+    context, positions, attitudes = _fixed_ecef_spacecraft_evidence(
+        times,
+        position_ecef=np.array([WGS84_A_KM + 500.0, 0.0, 0.0]),
+        boresight_ecef=np.array([-1.0, 0.0, 0.0]),
+    )
+    exact = evaluate_communications_coverage(
+        _communications_config(analysis_id="comm_exact"),
+        times_s=times,
+        positions_eci_km=positions,
+        attitudes_quat_bn=attitudes,
+        frame_context=context,
+    )
+    optimized = evaluate_communications_coverage(
+        _communications_config(analysis_id="comm_cosine"),
+        times_s=times,
+        positions_eci_km=positions,
+        attitudes_quat_bn=attitudes,
+        frame_context=context,
+        pattern_gate_mode="direct_cosine",
+    )
+    np.testing.assert_array_equal(optimized.covered_cell_count, exact.covered_cell_count)
+    assert "pattern_gate" not in exact.summary
+    assert optimized.summary["pattern_gate"] == {
+        "mode": "direct_cosine",
+        "equivalence": "rounding_level",
+        "provenance": "explicit_analysis_call",
+    }
+
+
 def test_constant_communications_terminal_does_not_require_attitude_evidence() -> None:
     times = np.array([0.0, 60.0])
     context, positions, attitudes = _fixed_ecef_spacecraft_evidence(

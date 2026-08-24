@@ -47,6 +47,7 @@ The detailed pages under `docs/models/` are organized by model family:
 | Attitude dynamics | [Attitude Dynamics](models/attitude-dynamics.md) | Quaternion and body-rate propagation, rigid-body torque response, attitude substepping, and disturbance coupling. |
 | Environment perturbations | [Environment Perturbations](models/environment-perturbations.md) | Gravity harmonics, atmosphere/drag, SRP, third bodies, eclipse, and re-entry diagnostics. |
 | Actuators | [Actuator Models](models/actuators.md) | Force and torque limits, allocation, propulsion devices, attitude actuators, faults, and applied-command logging. |
+| Sensors and measurements | [Sensor And Measurement Models](models/sensors-and-measurements.md) | Synthetic own-state/relative measurements, access, cadence, latency, dropout, composition, and typed event boundaries. |
 | Evidence traceability | Private Model Validation Map | How model specs connect to tests, validation suites, reference comparisons, review stores, and explicit non-claims. |
 
 ## Traceability Pattern

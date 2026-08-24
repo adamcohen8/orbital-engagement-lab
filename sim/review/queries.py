@@ -44,11 +44,10 @@ def _infer_source_tables(sql: str) -> tuple[str, ...]:
 SAVED_REVIEW_QUERIES: dict[str, SavedReviewQuery] = {
     "run_metadata": SavedReviewQuery(
         name="run_metadata",
-        description="Run name, duration, timestep, samples, OEL version, and review schema version.",
-        sql=(
-            "SELECT scenario_name, duration_s, dt_s, samples, oel_version, "
-            "review_schema_version FROM run_metadata"
+        description=(
+            "Run identity, timing, engine/review versions, generated time, config digest, and source reference."
         ),
+        sql="SELECT * FROM run_metadata",
     ),
     "objects": SavedReviewQuery(
         name="objects",
@@ -62,7 +61,7 @@ SAVED_REVIEW_QUERIES: dict[str, SavedReviewQuery] = {
     ),
     "passive_final_state": SavedReviewQuery(
         name="passive_final_state",
-        description="Final ECI state for each object.",
+        description="Compatibility alias for final ECI state; the run may be passive or controlled.",
         sql=(
             "SELECT object_id, time_s, pos_x_eci_km, pos_y_eci_km, pos_z_eci_km, "
             "vel_x_eci_km_s, vel_y_eci_km_s, vel_z_eci_km_s FROM object_state "
@@ -70,14 +69,69 @@ SAVED_REVIEW_QUERIES: dict[str, SavedReviewQuery] = {
             "ORDER BY object_id"
         ),
     ),
+    "object_final_state": SavedReviewQuery(
+        name="object_final_state",
+        description="Final ECI state with derived radius and speed for every object.",
+        sql=(
+            "SELECT s.object_id, s.time_s, s.pos_x_eci_km, s.pos_y_eci_km, s.pos_z_eci_km, "
+            "s.vel_x_eci_km_s, s.vel_y_eci_km_s, s.vel_z_eci_km_s, "
+            "e.radius_km, e.speed_km_s FROM object_state s "
+            "LEFT JOIN object_orbital_elements e USING (sample_index, time_s, object_id) "
+            "WHERE s.sample_index = (SELECT MAX(sample_index) FROM object_state) ORDER BY s.object_id"
+        ),
+    ),
+    "object_eci_radius_extrema": SavedReviewQuery(
+        name="object_eci_radius_extrema",
+        description="Minimum and maximum sampled ECI radius and speed by object.",
+        sql=(
+            "SELECT object_id, COUNT(*) AS samples, MIN(radius_km) AS minimum_radius_km, "
+            "MAX(radius_km) AS maximum_radius_km, MIN(speed_km_s) AS minimum_speed_km_s, "
+            "MAX(speed_km_s) AS maximum_speed_km_s FROM object_orbital_elements "
+            "GROUP BY object_id ORDER BY object_id"
+        ),
+    ),
+    "object_orbital_elements_first_last": SavedReviewQuery(
+        name="object_orbital_elements_first_last",
+        description="First/final derived classical elements with conditioning flags.",
+        sql=(
+            "WITH bounds AS (SELECT object_id, MIN(sample_index) first_i, MAX(sample_index) last_i "
+            "FROM object_orbital_elements GROUP BY object_id) SELECT e.* FROM object_orbital_elements e "
+            "JOIN bounds b ON e.object_id=b.object_id AND e.sample_index IN (b.first_i,b.last_i) "
+            "ORDER BY e.object_id,e.sample_index"
+        ),
+    ),
     "ogp_propagation_contract": SavedReviewQuery(
         name="ogp_propagation_contract",
         description="Per-object OGP model, native/output frame, canonical state frame, and TLE-age provenance.",
         sql=(
-            "SELECT p.object_id, p.propagation_method, p.general_model, p.native_frame, "
-            "p.output_frame, p.frame_transform, f.state_frame, p.tle_epoch_jd_utc, "
-            "p.tle_age_start_days, p.tle_age_end_days FROM object_propagation p "
+            "SELECT p.object_id, p.propagation_method, p.propagator_family, p.propagator_name, "
+            "p.general_model, p.ogp_regime, p.orbital_period_min, p.native_frame, "
+            "p.output_frame, p.state_history_frame, p.frame_transform, f.state_frame, p.tle_epoch_jd_utc, "
+            "p.tle_age_start_days, p.tle_age_end_days, p.max_tle_age_days_warning, p.tle_age_warning "
+            "FROM object_propagation p "
             "LEFT JOIN object_state_frame f USING (object_id) ORDER BY p.object_id"
+        ),
+    ),
+    "object_propagation_contract": SavedReviewQuery(
+        name="object_propagation_contract",
+        description=(
+            "Branch-aware per-object initialization and continuous-propagation provenance, including "
+            "TLE-to-ONP handoffs as well as continuous OGP runs."
+        ),
+        sql=(
+            "SELECT o.object_id, i.source AS initialization_source, i.initialization_model, "
+            "i.initialization_propagator_family, i.initialization_propagator_name, "
+            "i.handoff_propagation_method, p.propagation_method, p.propagator_family, "
+            "p.propagator_name, p.general_model, p.ogp_regime, p.orbital_period_min, "
+            "COALESCE(p.native_frame, i.native_frame) AS native_frame, "
+            "COALESCE(p.output_frame, i.output_frame) AS output_frame, p.state_history_frame, "
+            "COALESCE(p.frame_transform, i.frame_transform) AS frame_transform, f.state_frame, "
+            "COALESCE(p.tle_epoch_jd_utc, i.tle_epoch_jd_utc) AS tle_epoch_jd_utc, "
+            "i.tle_age_initialization_days, p.tle_age_start_days, p.tle_age_end_days, "
+            "p.max_tle_age_days_warning, p.tle_age_warning FROM objects o "
+            "LEFT JOIN object_initialization i USING(object_id) "
+            "LEFT JOIN object_propagation p USING(object_id) "
+            "LEFT JOIN object_state_frame f USING(object_id) ORDER BY o.object_id"
         ),
     ),
     "object_state_first_last": SavedReviewQuery(
@@ -129,6 +183,46 @@ SAVED_REVIEW_QUERIES: dict[str, SavedReviewQuery] = {
             "MAX(accel_norm_km_s2) AS max_accel_km_s2 FROM thrust GROUP BY object_id "
             "ORDER BY object_id"
         ),
+        max_vm_steps=500_000,
+    ),
+    "burn_command_summary": SavedReviewQuery(
+        name="burn_command_summary",
+        description=(
+            "Original scheduled-burn request, controller command, applied acceleration, saturation, and "
+            "realized delta-v evidence by object. "
+            "Applied thrust rows are retained samples, so active-sample counts are not continuous burn duration."
+        ),
+        sql=(
+            "WITH decisions AS (SELECT object_id, COUNT(*) decision_samples, SUM(burn_requested) requested_samples, "
+            "SUM(burn_applied) applied_decision_samples, SUM(saturated) saturated_samples, "
+            "MAX(requested_accel_norm_km_s2) max_requested_accel_km_s2, "
+            "MAX(applied_accel_norm_km_s2) max_applied_accel_km_s2 FROM controller_decisions GROUP BY object_id), "
+            "realized AS (SELECT object_id, SUM(burn_active) active_thrust_samples, "
+            "MAX(accel_norm_km_s2) max_realized_accel_km_s2 FROM thrust GROUP BY object_id), "
+            "diagnostics AS (SELECT object_id, "
+            "MAX(CASE WHEN field_name='scheduled_burn_original_accel_m_s2' THEN value_real END) "
+            "original_requested_accel_m_s2, "
+            "MAX(CASE WHEN field_name='scheduled_burn_original_force_n' THEN value_real END) "
+            "original_requested_force_n, "
+            "MAX(CASE WHEN field_name='scheduled_burn_original_delta_v_m_s' THEN value_real END) "
+            "original_requested_delta_v_m_s, "
+            "MAX(CASE WHEN field_name='scheduled_burn_duration_s' THEN value_real END) scheduled_burn_duration_s, "
+            "MAX(CASE WHEN field_name='requested_force_n' THEN value_real END) controller_requested_force_n, "
+            "MAX(CASE WHEN field_name='scheduled_burn_controller_clipped' THEN value_integer END) "
+            "controller_clipped FROM fsw_diagnostic_fields GROUP BY object_id), "
+            "dv AS (SELECT object_id, value realized_delta_v_m_s FROM metrics WHERE metric_name='total_dv_m_s'), "
+            "object_ids AS (SELECT object_id FROM decisions UNION SELECT object_id FROM realized "
+            "UNION SELECT object_id FROM diagnostics) "
+            "SELECT ids.object_id, d.decision_samples, d.requested_samples, d.applied_decision_samples, "
+            "d.saturated_samples, d.max_requested_accel_km_s2, d.max_applied_accel_km_s2, "
+            "g.original_requested_accel_m_s2, g.original_requested_force_n, "
+            "g.original_requested_delta_v_m_s, g.scheduled_burn_duration_s, "
+            "g.controller_requested_force_n, g.controller_clipped, "
+            "r.active_thrust_samples, r.max_realized_accel_km_s2, dv.realized_delta_v_m_s "
+            "FROM object_ids ids LEFT JOIN decisions d USING(object_id) LEFT JOIN diagnostics g USING(object_id) "
+            "LEFT JOIN realized r USING(object_id) LEFT JOIN dv USING(object_id) ORDER BY ids.object_id"
+        ),
+        allow_empty=True,
         max_vm_steps=500_000,
     ),
     "burn_events": SavedReviewQuery(
@@ -188,6 +282,21 @@ SAVED_REVIEW_QUERIES: dict[str, SavedReviewQuery] = {
             "GROUP BY object_id, stack_id, stack_version ORDER BY object_id"
         ),
         allow_empty=True,
+    ),
+    "fsw_diagnostic_field_inventory": SavedReviewQuery(
+        name="fsw_diagnostic_field_inventory",
+        description=(
+            "Bounded diagnostic topic/field inventory with sample counts and time bounds; use the returned "
+            "field_name in a selective follow-up query instead of scanning full diagnostic envelopes."
+        ),
+        sql=(
+            "SELECT object_id, topic, field_name, unit, value_kind, COUNT(*) AS samples, "
+            "MIN(generated_time_ns) AS first_time_ns, MAX(generated_time_ns) AS last_time_ns "
+            "FROM fsw_diagnostic_fields GROUP BY object_id, topic, field_name, unit, value_kind "
+            "ORDER BY object_id, topic, field_name"
+        ),
+        allow_empty=True,
+        max_vm_steps=750_000,
     ),
     "fsw_sensor_deliveries": SavedReviewQuery(
         name="fsw_sensor_deliveries",
@@ -294,11 +403,18 @@ SAVED_REVIEW_QUERIES: dict[str, SavedReviewQuery] = {
     ),
     "ground_access_summary": SavedReviewQuery(
         name="ground_access_summary",
-        description="Access sample counts, minimum range, and maximum elevation by station/object.",
+        description=(
+            "Access sample counts, left-endpoint credited duration, minimum range, and maximum elevation "
+            "by station/object."
+        ),
         sql=(
+            "WITH samples AS (SELECT *, LEAD(time_s) OVER (PARTITION BY station_id, object_id "
+            "ORDER BY sample_index) AS next_time_s FROM ground_access) "
             "SELECT station_id, object_id, COUNT(*) AS samples, SUM(access) AS access_samples, "
-            "MIN(range_km) AS min_range_km, MAX(elevation_deg) AS max_elevation_deg "
-            "FROM ground_access GROUP BY station_id, object_id ORDER BY station_id, object_id"
+            "SUM(CASE WHEN access = 1 THEN COALESCE(next_time_s - time_s, 0.0) ELSE 0.0 END) "
+            "AS credited_access_duration_s, MIN(range_km) AS min_range_km, "
+            "MAX(elevation_deg) AS max_elevation_deg FROM samples "
+            "GROUP BY station_id, object_id ORDER BY station_id, object_id"
         ),
     ),
     "ground_access_no_access_reasons": SavedReviewQuery(
@@ -310,6 +426,84 @@ SAVED_REVIEW_QUERIES: dict[str, SavedReviewQuery] = {
             "ORDER BY station_id, object_id, samples DESC"
         ),
     ),
+    "ground_access_windows": SavedReviewQuery(
+        name="ground_access_windows",
+        description=(
+            "Access windows with sampled bounds, explicit first-no-access boundary, credited duration, "
+            "extrema, refinement status, and run-boundary censoring."
+        ),
+        sql=(
+            "SELECT station_id, object_id, window_index, start_s, end_s, duration_s, "
+            "last_access_sample_s, first_no_access_sample_s, sample_span_s, credited_duration_s, "
+            "start_censored, end_censored, minimum_range_km, maximum_elevation_deg, refinement_status, "
+            "boundary_semantics "
+            "FROM ground_access_windows ORDER BY station_id, object_id, window_index"
+        ),
+        allow_empty=True,
+    ),
+    "coverage_summary": SavedReviewQuery(
+        name="coverage_summary",
+        description=(
+            "Whole-Earth coverage sample count, instantaneous extrema, time-weighted mean, "
+            "and ever-covered fraction by analysis."
+        ),
+        sql=(
+            "SELECT s.analysis_id, s.source_object_id, "
+            "json_extract(s.summary_json, '$.sensor_id') AS sensor_id, "
+            "json_extract(s.summary_json, '$.order') AS grid_order, "
+            "COUNT(c.sample_index) AS samples, "
+            "MIN(c.instantaneous_covered_fraction) AS minimum_fraction, "
+            "MAX(c.instantaneous_covered_fraction) AS maximum_fraction, "
+            "json_extract(s.summary_json, '$.time_weighted_mean_covered_fraction') "
+            "AS time_weighted_mean_covered_fraction, "
+            "json_extract(s.summary_json, '$.ever_covered_fraction') AS ever_covered_fraction "
+            "FROM coverage_summary s LEFT JOIN coverage_samples c USING (analysis_id) "
+            "GROUP BY s.analysis_id, s.source_object_id, s.summary_json "
+            "ORDER BY s.analysis_id"
+        ),
+    ),
+    "coverage_transition_summary": SavedReviewQuery(
+        name="coverage_transition_summary",
+        description="Coverage acquisition/loss counts by refinement disposition.",
+        sql=(
+            "SELECT analysis_id, transition_kind, disposition, COUNT(*) AS transitions "
+            "FROM coverage_transitions GROUP BY analysis_id, transition_kind, disposition "
+            "ORDER BY analysis_id, transition_kind, disposition"
+        ),
+        allow_empty=True,
+    ),
+    "directed_link_summary": SavedReviewQuery(
+        name="directed_link_summary",
+        description=(
+            "Directed-link sampled availability, range, and margin extrema by analysis."
+        ),
+        sql=(
+            "SELECT s.analysis_id, s.link_id, s.tx_object_id, s.rx_object_id, "
+            "s.tx_endpoint_kind, s.rx_endpoint_kind, s.tx_terminal_parent_frame, s.rx_terminal_parent_frame, "
+            "COUNT(l.sample_index) AS samples, SUM(l.available) AS available_samples, "
+            "MIN(l.range_km) AS minimum_range_km, MAX(l.range_km) AS maximum_range_km, "
+            "MIN(l.margin_db) AS minimum_margin_db, MAX(l.margin_db) AS maximum_margin_db, "
+            "json_extract(s.summary_json, '$.available_duration_s') AS available_duration_s, "
+            "json_extract(s.summary_json, '$.estimated_delivered_data_bits') "
+            "AS estimated_delivered_data_bits "
+            "FROM link_summary s LEFT JOIN link_samples l USING (analysis_id) "
+            "GROUP BY s.analysis_id, s.link_id, s.tx_object_id, s.rx_object_id, "
+            "s.tx_endpoint_kind, s.rx_endpoint_kind, s.tx_terminal_parent_frame, s.rx_terminal_parent_frame, "
+            "s.summary_json "
+            "ORDER BY s.analysis_id"
+        ),
+    ),
+    "directed_link_windows": SavedReviewQuery(
+        name="directed_link_windows",
+        description="Directed-link availability windows with margin and refinement evidence.",
+        sql=(
+            "SELECT analysis_id, interval_index, start_s, end_s, duration_s, "
+            "minimum_margin_db, mean_margin_db, maximum_margin_db, "
+            "estimated_delivered_data_bits, acquisition_disposition, loss_disposition "
+            "FROM link_windows ORDER BY analysis_id, interval_index"
+        ),
+        allow_empty=True,
+    ),
     "attitude_rates_first_last": SavedReviewQuery(
         name="attitude_rates_first_last",
         description="First and final angular-rate samples by object.",
@@ -320,6 +514,19 @@ SAVED_REVIEW_QUERIES: dict[str, SavedReviewQuery] = {
             "s.omega_z_rad_s FROM object_state s JOIN bounds b ON s.object_id = b.object_id "
             "AND s.sample_index IN (b.first_i, b.last_i) ORDER BY s.object_id, s.sample_index"
         ),
+    ),
+    "attitude_error_first_last": SavedReviewQuery(
+        name="attitude_error_first_last",
+        description="First/final attitude error for each object, from retained desired quaternions or controller telemetry.",
+        sql=(
+            "WITH bounds AS (SELECT object_id, MIN(rowid) AS first_rowid, "
+            "MAX(rowid) AS last_rowid FROM attitude_error GROUP BY object_id) "
+            "SELECT a.object_id, a.sample_index, a.time_s, a.pointing_error_deg, "
+            "a.quat_error_angle_deg FROM attitude_error a JOIN bounds b "
+            "ON a.object_id = b.object_id AND a.rowid IN (b.first_rowid, b.last_rowid) "
+            "ORDER BY a.object_id, a.time_s, a.rowid"
+        ),
+        allow_empty=True,
     ),
     "attitude_state_first_last": SavedReviewQuery(
         name="attitude_state_first_last",

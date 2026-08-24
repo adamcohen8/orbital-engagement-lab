@@ -25,6 +25,11 @@ This packaged guide covers the supported local stdio OEL MCP surface.
   relevant saved `query_names` to `inspect_run` or `prepare_report_packet` so
   analytical claims can cite stable query evidence IDs instead of only the
   entire review store.
+- Coverage studies can request `coverage_summary` and
+  `coverage_transition_summary`; directed-link studies can request
+  `directed_link_summary` and `directed_link_windows`. These queries require
+  the corresponding coverage or link tables in the completed review store;
+  their presence is not inferred and they may legitimately return no rows.
 - Read `oel://review/plot-recipes/v1` before plotting review evidence. Use a
   supported OEL recipe when one matches; otherwise validate the exact query and
   mapping with `oel.plan_review_plot.v1` before the approved

@@ -54,6 +54,9 @@ def test_write_output_index_creates_single_run_start_here_file(tmp_path: Path) -
     assert "Open [`run_dashboard.png`](run_dashboard.png) for the fastest visual overview." in text
     assert "Open [`master_run_summary.json`](master_run_summary.json)" in text
     assert "## Next Command" in text
+    assert "## Evidence Provenance" in text
+    assert "## Claim Limits And Success Criteria" in text
+    assert "not, by itself, a mission-success verdict" in text
     assert "master_run_log.json" in text
     assert "plots.run_dashboard" in text
 
@@ -138,7 +141,7 @@ def test_write_output_index_uses_review_query_as_next_command_when_review_exists
     assert "python -m sim.review" in text
     assert ".venv/bin/python" not in text
     assert "docs/installation.md" in text
-    assert "--saved-query run_metadata" in text
+    assert "--saved-query object_final_state" in text
 
 
 def test_single_run_next_command_quotes_windows_paths() -> None:
@@ -148,3 +151,91 @@ def test_single_run_next_command_quotes_windows_paths() -> None:
     assert command == (
         'python run_simulation.py --config "C:\\Users\\Instructor\\OEL Course\\scenario.yaml" --validate-only'
     )
+
+
+def test_output_index_resolves_repo_relative_artifact_without_duplicating_output_dir(
+    tmp_path: Path, monkeypatch
+) -> None:
+    outdir = tmp_path / "outputs" / "run"
+    outdir.mkdir(parents=True)
+    artifact = outdir / "ground_track.png"
+    artifact.write_bytes(b"png")
+    monkeypatch.chdir(tmp_path)
+
+    index_path = write_output_index(
+        outdir=outdir,
+        workflow="single_run",
+        title="paths",
+        summary={"scenario_name": "paths"},
+        artifacts={"plots": {"ground_track": "outputs/run/ground_track.png"}},
+    )
+
+    text = index_path.read_text(encoding="utf-8")
+    assert "[`ground_track.png`](ground_track.png)" in text
+    assert "outputs/run/outputs/run" not in text
+
+
+def test_output_index_does_not_duplicate_output_prefix_for_pending_artifact(
+    tmp_path: Path, monkeypatch
+) -> None:
+    outdir = tmp_path / "outputs" / "run"
+    outdir.mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)
+
+    index_path = write_output_index(
+        outdir=outdir,
+        workflow="single_run",
+        title="paths",
+        summary={"scenario_name": "paths"},
+        artifacts={"plots": {"ground_track": "outputs/run/pending-ground-track.png"}},
+    )
+
+    text = index_path.read_text(encoding="utf-8")
+    assert "[`pending-ground-track.png`](pending-ground-track.png)" in text
+    assert "outputs/run/outputs/run" not in text
+
+
+def test_output_index_headline_closes_negative_access_and_link_results(tmp_path: Path) -> None:
+    index_path = write_output_index(
+        outdir=tmp_path,
+        workflow="single_run",
+        title="negative evidence",
+        summary={
+            "scenario_name": "negative-evidence",
+            "ground_station_access_summary": {
+                "station-a": {
+                    "sat-a": {
+                        "samples": 3,
+                        "access_samples": 0,
+                        "access_duration_s": 0.0,
+                        "minimum_elevation_deg": 25.0,
+                        "maximum_range_km": 1000.0,
+                        "reason_sample_count": {"below_minimum_elevation": 3},
+                    }
+                }
+            },
+            "orbital_analysis": {
+                "directed_links": [
+                    {
+                        "analysis_id": "link-a",
+                        "sample_count": 3,
+                        "available_sample_count": 0,
+                        "interval_count": 0,
+                        "sampled_available_fraction": 0.0,
+                        "available_duration_s": 0.0,
+                        "required_eb_n0_db": 6.0,
+                        "minimum_fixed_site_elevation_deg": 25.0,
+                        "maximum_range_km_threshold": 1000.0,
+                        "primary_reason_sample_count": {"below_minimum_elevation": 3},
+                    }
+                ]
+            },
+        },
+        artifacts={},
+    )
+
+    text = index_path.read_text(encoding="utf-8")
+    assert "Ground-station accessible samples: `0/3`" in text
+    assert "below_minimum_elevation=3" in text
+    assert "available samples/windows: `0/3; windows=0`" in text
+    assert "required Eb/N0=6 dB" in text

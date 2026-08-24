@@ -48,9 +48,10 @@ loading an untrusted scenario can run untrusted Python code.
 
 ## Compatibility
 
-The package declares Python `>=3.10,<3.15`. Blocking public CI exercises the
-default public test suite on Python 3.11. The wider release compatibility
-program requires retained evidence for claimed Python/operating-system rows;
+The package declares Python `>=3.10,<3.15`. The blocking local release gate
+exercises the default public acceptance path on Python 3.11. Hosted workflows
+are manual advisory diagnostics, not public CI gates. The wider release
+compatibility program requires retained evidence for claimed Python/operating-system rows;
 see [`compatibility.md`](compatibility.md). Installation and recovery commands
 for Windows, macOS, and Linux are maintained in
 [`installation.md`](installation.md). If you depend on a particular row, verify
@@ -100,8 +101,11 @@ dependency vulnerability fixes require Python 3.10 or newer.
   evidence for inspection, but calibrated sensor processing, association,
   bias estimation, orbit determination, and covariance-derived tracking
   evidence are Pro/private workflows.
-- Spherical-harmonic gravity can use inline terms or user-provided coefficient
-  files. HPOP/GGM03 reference data is not distributed with the public core.
+- Spherical-harmonic gravity can use inline terms, user-provided coefficient
+  files, or the managed digest-pinned EGM96 source. HPOP/GGM03 reference data
+  is not distributed with the public core; ICGEM and HPOP/GGM03 require an
+  explicit local path. Managed downloads require `allow_download` and are
+  blocked in sealed mode.
 - Atmospheric re-entry diagnostics are first-pass aero/thermal estimates. They
   use atmosphere-relative speed, configured drag area/coefficient, and
   Sutton-Graves heat rate. Optional satellite lift is coefficient/vector based

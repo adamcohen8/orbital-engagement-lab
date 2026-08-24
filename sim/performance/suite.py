@@ -44,6 +44,7 @@ _NONDETERMINISTIC_KEYS = {
     "output_index_md",
     "review_sqlite_path",
     "config_source_path",
+    "effective_config_path",
     "invocation_path",
     "config_path",
     "plot_outputs",
@@ -386,10 +387,33 @@ def _aggregate_runtime_profile(payload: dict[str, Any]) -> dict[str, Any]:
         for profile in profiles
         for name in dict(profile.get("stage_totals", {}) or {})
     }
+    if any(
+        "general_propagation_step"
+        in dict(dict(object_profile or {}).get("stages", {}) or {})
+        for profile in profiles
+        for object_profile in dict(profile.get("object_totals", {}) or {}).values()
+    ):
+        stage_names.add("general_propagation_step")
     stage_totals = {
         name: {
             "total_s": sum(
                 float(dict(dict(profile.get("stage_totals", {}) or {}).get(name, {}) or {}).get("total_s", 0.0))
+                + (
+                    sum(
+                        float(
+                            dict(
+                                dict(dict(object_profile or {}).get("stages", {}) or {}).get(
+                                    "general_propagation_step", {}
+                                )
+                                or {}
+                            ).get("total_s", 0.0)
+                            or 0.0
+                        )
+                        for object_profile in dict(profile.get("object_totals", {}) or {}).values()
+                    )
+                    if name == "general_propagation_step"
+                    else 0.0
+                )
                 for profile in profiles
             )
         }
@@ -406,6 +430,7 @@ def _scenario_work_counts(payload: dict[str, Any]) -> dict[str, int]:
     dynamics_count = 0
     estimator_count = 0
     decision_count = 0
+    general_propagation_count = 0
     for profile in profiles:
         outer_steps += int(profile.get("completed_steps", 0) or 0)
         object_steps += int(
@@ -413,6 +438,9 @@ def _scenario_work_counts(payload: dict[str, Any]) -> dict[str, int]:
         )
         for object_profile in dict(profile.get("object_totals", {}) or {}).values():
             stages = dict(dict(object_profile or {}).get("stages", {}) or {})
+            general_propagation_count += int(
+                dict(stages.get("general_propagation_step", {}) or {}).get("count", 0) or 0
+            )
             dynamics_count += int(
                 dict(stages.get("dynamics_step", stages.get("satellite_step", {})) or {}).get("count", 0)
                 or 0
@@ -425,6 +453,7 @@ def _scenario_work_counts(payload: dict[str, Any]) -> dict[str, int]:
         "dynamics_steps": dynamics_count,
         "estimator_updates": estimator_count,
         "decisions": decision_count,
+        "general_propagation_steps": general_propagation_count,
     }
 
 
@@ -507,6 +536,7 @@ def _run_scenario_case(
         gc.collect()
 
     elapsed: list[float] = []
+    propagation_elapsed: list[float] = []
     hashes: list[str] = []
     runtime_profiles: list[dict[str, Any]] = []
     first_measurements: dict[str, Any] | None = None
@@ -525,6 +555,17 @@ def _run_scenario_case(
         hashes.append(physics_payload_hash(payload))
         runtime_profile = _aggregate_runtime_profile(payload)
         runtime_profiles.append(runtime_profile)
+        propagation_elapsed.append(
+            float(
+                dict(
+                    dict(runtime_profile.get("stage_totals", {}) or {}).get(
+                        "general_propagation_step", {}
+                    )
+                    or {}
+                ).get("total_s", 0.0)
+                or 0.0
+            )
+        )
         if first_measurements is None:
             summary = dict(payload.get("summary", {}) or {})
             run_summaries = [
@@ -553,6 +594,7 @@ def _run_scenario_case(
 
     assert first_measurements is not None
     median_elapsed = float(statistics.median(elapsed))
+    median_propagation_elapsed = float(statistics.median(propagation_elapsed))
     duration_s = float(first_measurements["duration_s"])
     work_counts = dict(first_measurements["work_counts"])
     checks = list(first_measurements["checks"])
@@ -565,11 +607,28 @@ def _run_scenario_case(
         "median_elapsed_s": median_elapsed,
         "min_elapsed_s": float(min(elapsed)),
         "max_elapsed_s": float(max(elapsed)),
+        # ``elapsed_s`` remains the backwards-compatible end-to-end session
+        # measurement.  The dedicated propagation series is accumulated by
+        # the runtime profiler immediately around catalog propagator calls and
+        # therefore excludes engine construction, payload assembly, and
+        # artifact writes while retaining those operations in every repeat.
+        "end_to_end_elapsed_s": elapsed,
+        "median_end_to_end_elapsed_s": median_elapsed,
+        "min_end_to_end_elapsed_s": float(min(elapsed)),
+        "max_end_to_end_elapsed_s": float(max(elapsed)),
+        "propagation_elapsed_s": propagation_elapsed,
+        "median_propagation_elapsed_s": median_propagation_elapsed,
+        "min_propagation_elapsed_s": float(min(propagation_elapsed)),
+        "max_propagation_elapsed_s": float(max(propagation_elapsed)),
         "duration_s": duration_s,
         "simulated_seconds_per_wall_second": duration_s / max(median_elapsed, 1.0e-12),
         "work_counts": work_counts,
         "outer_steps_per_wall_second": work_counts["outer_steps"] / max(median_elapsed, 1.0e-12),
         "dynamics_steps_per_wall_second": work_counts["dynamics_steps"] / max(median_elapsed, 1.0e-12),
+        "general_propagation_steps_per_propagation_second": work_counts[
+            "general_propagation_steps"
+        ]
+        / max(median_propagation_elapsed, 1.0e-12),
         "physics_hashes": hashes,
         "deterministic_parity": len(set(hashes)) == 1,
         "coverage_checks": checks,
@@ -711,28 +770,38 @@ def _report_markdown(payload: dict[str, Any]) -> str:
         "",
         "## Results",
         "",
-        "| Case | Category | Status | Median wall s | Sim-time speed | Dynamics steps/s | Parity | Coverage |",
-        "|---|---|---:|---:|---:|---:|---:|---:|",
+        "| Case | Category | Status | End-to-end median s | Propagation median s | Sim-time speed | Dynamics steps/s | Propagation steps/s | Parity | Coverage |",
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for item in payload["cases"]:
         if item["status"] == "skipped":
             lines.append(
-                f"| {item['name']} | {item['category']} | skipped | — | — | — | — | — |"
+                f"| {item['name']} | {item['category']} | skipped | — | — | — | — | — | — | — |"
             )
             continue
         if "median_elapsed_s" not in item:
             lines.append(
-                f"| {item['name']} | {item['category']} | {item['status']} | — | — | — | — | — |"
+                f"| {item['name']} | {item['category']} | {item['status']} | — | — | — | — | — | — | — |"
             )
             continue
         lines.append(
-            "| {name} | {category} | {status} | {median:.6f} | {speed:.1f}x | {dynamics:.1f} | {parity} | {coverage} |".format(
+            "| {name} | {category} | {status} | {median:.6f} | {propagation} | {speed:.1f}x | {dynamics:.1f} | {general_propagation} | {parity} | {coverage} |".format(
                 name=item["name"],
                 category=item["category"],
                 status=item["status"],
                 median=float(item["median_elapsed_s"]),
+                propagation=(
+                    f"{float(item.get('median_propagation_elapsed_s', 0.0)):.6f}"
+                    if int(dict(item.get("work_counts", {}) or {}).get("general_propagation_steps", 0) or 0) > 0
+                    else "—"
+                ),
                 speed=float(item["simulated_seconds_per_wall_second"]),
                 dynamics=float(item["dynamics_steps_per_wall_second"]),
+                general_propagation=(
+                    f"{float(item.get('general_propagation_steps_per_propagation_second', 0.0)):.1f}"
+                    if int(dict(item.get("work_counts", {}) or {}).get("general_propagation_steps", 0) or 0) > 0
+                    else "—"
+                ),
                 parity="pass" if item["deterministic_parity"] else "FAIL",
                 coverage="pass" if item["coverage_passed"] else "FAIL",
             )
@@ -761,6 +830,7 @@ def _report_markdown(payload: dict[str, Any]) -> str:
             "## Interpretation",
             "",
             "Timing and physics correctness are separate. Each repeated case must produce one deterministic physics hash, and configured coverage assertions must pass. External validation remains the correctness authority for the applicable physics model.",
+            "For OGP cases, propagation timing is measured immediately around catalog propagator calls; end-to-end timing still includes engine construction, payload assembly, and artifact writes.",
             "",
             "Comparisons are meaningful only for the same profile, case manifest, hardware, Python environment, acceleration mode, resource policy, and output policy.",
             "",

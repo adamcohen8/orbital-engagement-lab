@@ -19,7 +19,11 @@ from sim.analysis.event_refinement import (
     refine_availability_transitions,
 )
 from sim.analysis.global_coverage import _validated_quaternion
-from sim.dynamics.orbit.frames import FrameContext, eci_to_ecef_rotation_context, transform_state
+from sim.dynamics.orbit.frames import (
+    FrameContext,
+    eci_to_ecef_rotation_context,
+    eci_to_ecef_rotation_derivative_context,
+)
 from sim.utils.geodesy import (
     WGS84_A_KM,
     WGS84_B_KM,
@@ -335,6 +339,7 @@ class DirectedLinkArtifacts:
     transitions_json: Path
     evidence_packet_json: Path
     margin_plot_png: Path | None
+    margin_plot_quality_json: Path | None
 
 
 @dataclass(frozen=True)
@@ -433,15 +438,14 @@ def fixed_wgs84_site_history(
     velocities = np.empty_like(positions)
     parent_dcm = np.empty((times.size, 3, 3), dtype=float)
     for index, time_s in enumerate(times):
-        positions[index], velocities[index] = transform_state(
-            site_ecef,
-            np.zeros(3),
-            "ecef",
-            "eci",
-            t_s=float(time_s),
-            context=frame_context,
-        )
         ecef_from_eci = eci_to_ecef_rotation_context(float(time_s), frame_context)
+        rotation_derivative = eci_to_ecef_rotation_derivative_context(
+            float(time_s), frame_context
+        )
+        positions[index] = ecef_from_eci.T @ np.array(site_ecef, dtype=float)
+        velocities[index] = ecef_from_eci.T @ (
+            np.zeros(3) - rotation_derivative @ positions[index]
+        )
         parent_dcm[index] = ecef_from_enu @ ecef_from_eci
     return LinkEndpointHistory(
         asset_id=_required_id(asset_id, "asset_id"),
@@ -672,16 +676,20 @@ def evaluate_directed_link(
 
     times = tx_history.times_s
     axes = np.array([WGS84_A_KM, WGS84_A_KM, WGS84_B_KM])
-    endpoint_positions_ecef: dict[str, np.ndarray] = {}
-    for label, history in (("Transmitting", tx_history), ("Receiving", rx_history)):
-        positions_ecef = np.asarray(
-            [
-                eci_to_ecef_rotation_context(float(time_s), frame_context)
-                @ history.position_eci_km[index]
-                for index, time_s in enumerate(times)
-            ]
+    endpoint_positions_ecef: dict[str, np.ndarray] = {
+        "Transmitting": np.empty_like(tx_history.position_eci_km),
+        "Receiving": np.empty_like(rx_history.position_eci_km),
+    }
+    for index, time_s in enumerate(times):
+        rotation = eci_to_ecef_rotation_context(float(time_s), frame_context)
+        endpoint_positions_ecef["Transmitting"][index] = (
+            rotation @ tx_history.position_eci_km[index]
         )
-        endpoint_positions_ecef[label] = positions_ecef
+        endpoint_positions_ecef["Receiving"][index] = (
+            rotation @ rx_history.position_eci_km[index]
+        )
+    for label, history in (("Transmitting", tx_history), ("Receiving", rx_history)):
+        positions_ecef = endpoint_positions_ecef[label]
         ellipsoid_level = np.sum((positions_ecef / axes[None, :]) ** 2, axis=1)
         if history.endpoint_kind == "spacecraft" and np.any(ellipsoid_level <= 1.0):
             index = int(np.flatnonzero(ellipsoid_level <= 1.0)[0])
@@ -967,6 +975,13 @@ def _link_summary(
             float(samples.available[0]) if duration == 0.0 else available_duration / duration
         ),
         "interval_count": len(intervals),
+        "required_eb_n0_db": config.required_eb_n0_db,
+        "minimum_fixed_site_elevation_deg": (
+            None
+            if config.min_fixed_site_elevation_rad is None
+            else float(np.rad2deg(config.min_fixed_site_elevation_rad))
+        ),
+        "maximum_range_km_threshold": config.max_range_km,
         "estimated_delivered_data_bits": available_duration * config.data_rate_bps,
         "margin_db": {
             "minimum": float(np.min(samples.margin_db)),
@@ -1067,6 +1082,7 @@ def write_directed_link_artifacts(
     output_dir: str | Path,
     *,
     include_margin_plot: bool = False,
+    plot_scenario_name: str = "",
 ) -> DirectedLinkArtifacts:
     """Write deterministic link samples, windows, summary, and evidence packet."""
 
@@ -1080,6 +1096,7 @@ def write_directed_link_artifacts(
     transitions_path = destination / "link_transitions.json"
     packet_path = destination / "link_evidence_packet.json"
     plot_path = destination / "link_margin.png" if include_margin_plot else None
+    plot_quality_path = destination / "link_margin.quality.json" if include_margin_plot else None
     manifest_path = destination / "link_analysis_manifest.json"
     _json_dump(summary_path, result.summary)
     samples = result.samples
@@ -1161,7 +1178,7 @@ def write_directed_link_artifacts(
     if plot_path is not None:
         from sim.analysis.link_plotting import write_link_margin_plot
 
-        write_link_margin_plot(result, plot_path)
+        write_link_margin_plot(result, plot_path, scenario_name=plot_scenario_name)
     artifact_paths = [
         summary_path,
         samples_path,
@@ -1171,6 +1188,8 @@ def write_directed_link_artifacts(
     ]
     if plot_path is not None:
         artifact_paths.append(plot_path)
+    if plot_quality_path is not None:
+        artifact_paths.append(plot_quality_path)
     _json_dump(
         manifest_path,
         {
@@ -1198,6 +1217,7 @@ def write_directed_link_artifacts(
         transitions_json=transitions_path,
         evidence_packet_json=packet_path,
         margin_plot_png=plot_path,
+        margin_plot_quality_json=plot_quality_path,
     )
 
 

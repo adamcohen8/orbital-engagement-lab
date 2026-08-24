@@ -33,9 +33,10 @@ const relative = (r, i, c, rd = 0, id = 0, cd = 0) => ({
   cd_km_s: cd,
 });
 
-test("C camera toggle alternates reference and current-pair modes", () => {
+test("C camera toggle cycles reference, current-pair, and current-projections modes", () => {
   assert.equal(toggleDuelCameraMode(DUEL_CAMERA_MODES.REFERENCE), DUEL_CAMERA_MODES.CURRENT_PAIR);
-  assert.equal(toggleDuelCameraMode(DUEL_CAMERA_MODES.CURRENT_PAIR), DUEL_CAMERA_MODES.REFERENCE);
+  assert.equal(toggleDuelCameraMode(DUEL_CAMERA_MODES.CURRENT_PAIR), DUEL_CAMERA_MODES.CURRENT_PROJECTIONS);
+  assert.equal(toggleDuelCameraMode(DUEL_CAMERA_MODES.CURRENT_PROJECTIONS), DUEL_CAMERA_MODES.REFERENCE);
 });
 
 test("reference-relative pair preserves target motion and supports legacy snapshots", () => {
@@ -92,7 +93,7 @@ test("visual interpolation blends authoritative RIC states without changing endp
   assert.equal(DUEL_VISUAL_TIMING.render_delay_ms, 120);
 });
 
-test("reference camera centers the target reference orbit and shows both HCW projections", () => {
+test("reference camera tightly frames the origin, satellites, trails, and both HCW projections", () => {
   const round = {
     time_remaining_s: 1000,
     reference_mean_motion_rad_s: .001,
@@ -101,7 +102,7 @@ test("reference camera centers the target reference orbit and shows both HCW pro
   };
   const trail = [{ target: relative(.3, -.1, .1), chaser: relative(3, -5, .7) }];
   const frame = duelPlotFrame(round, trail, DUEL_CAMERA_MODES.REFERENCE);
-  assert.deepEqual(frame.cameraCenter, { r_km: 0, i_km: 0, c_km: 0 });
+  assert.notDeepEqual(frame.cameraCenter, { r_km: 0, i_km: 0, c_km: 0 });
   assert.equal(frame.targetTrail.length, 1);
   assert.equal(frame.chaserTrail.length, 1);
   assert.equal(frame.targetProjection.length, 121);
@@ -110,7 +111,14 @@ test("reference camera centers the target reference orbit and shows both HCW pro
   assert.ok(frame.framingPoints.includes(frame.chaserProjection.at(-1)));
   assert.ok(frame.framingPoints.includes(frame.targetTrail[0]));
   assert.ok(frame.framingPoints.includes(frame.chaserTrail[0]));
-  assert.equal(duelPlotSpan(frame, "i_km", "r_km", .1), 200);
+  assert.ok(frame.framingPoints.some((point) => point.r_km === 0 && point.i_km === 0 && point.c_km === 0));
+  for (const [xKey, yKey] of [["i_km", "r_km"], ["c_km", "r_km"]]) {
+    const span = duelPlotSpan(frame, xKey, yKey, .1);
+    for (const point of frame.framingPoints) {
+      assert.ok(Math.abs(point[xKey] - frame.cameraCenter[xKey]) < span);
+      assert.ok(Math.abs(point[yKey] - frame.cameraCenter[yKey]) < span);
+    }
+  }
   const orbitalPeriodS = 2 * Math.PI / round.reference_mean_motion_rad_s;
   assert.ok(Math.abs(frame.targetProjection.at(-1).t_s - orbitalPeriodS) < 1e-9);
   assert.ok(Math.abs(frame.chaserProjection.at(-1).t_s - orbitalPeriodS) < 1e-9);
@@ -145,4 +153,32 @@ test("current-pair camera frames only the satellites, suppresses trails, and sti
   assert.ok(Math.abs(duelPlotSpan(frame, "i_km", "r_km", .1) - 3.782) < 1e-12);
   assert.deepEqual(frame.targetProjection[0], { ...round.target_reference_ric, t_s: 0 });
   assert.deepEqual(frame.chaserProjection[0], { ...round.chaser_reference_ric, t_s: 0 });
+});
+
+test("current-projections camera frames satellites and both HCW projections without the origin", () => {
+  const round = {
+    reference_mean_motion_rad_s: .001,
+    target_reference_ric: relative(20, 30, 4, 0, .0001, 0),
+    chaser_reference_ric: relative(24, 36, 6, 0, .0002, 0),
+  };
+  const frame = duelPlotFrame(
+    round,
+    [{ target: relative(-100, -100, -100), chaser: relative(-90, -90, -90) }],
+    DUEL_CAMERA_MODES.CURRENT_PROJECTIONS,
+  );
+  assert.equal(frame.cameraMode, DUEL_CAMERA_MODES.CURRENT_PROJECTIONS);
+  assert.deepEqual(frame.targetTrail, []);
+  assert.deepEqual(frame.chaserTrail, []);
+  assert.ok(frame.framingPoints.includes(frame.target));
+  assert.ok(frame.framingPoints.includes(frame.chaser));
+  assert.ok(frame.framingPoints.includes(frame.targetProjection.at(-1)));
+  assert.ok(frame.framingPoints.includes(frame.chaserProjection.at(-1)));
+  assert.notDeepEqual(frame.cameraCenter, { r_km: 0, i_km: 0, c_km: 0 });
+  for (const [xKey, yKey] of [["i_km", "r_km"], ["c_km", "r_km"]]) {
+    const span = duelPlotSpan(frame, xKey, yKey, .1);
+    for (const point of frame.framingPoints) {
+      assert.ok(Math.abs(point[xKey] - frame.cameraCenter[xKey]) < span);
+      assert.ok(Math.abs(point[yKey] - frame.cameraCenter[yKey]) < span);
+    }
+  }
 });

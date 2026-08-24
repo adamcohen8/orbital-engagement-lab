@@ -18,27 +18,16 @@ PUBLIC_RESOURCE_URIS = (
     "oel://review/plot-recipes/v1",
     "oel://review/animation-recipes/v1",
 )
-PUBLIC_SAVED_QUERY_NAMES = frozenset(
-    {
-        "artifacts",
-        "attitude_rates_first_last",
-        "attitude_state_first_last",
-        "burn_activity",
-        "burn_events",
-        "ground_access_no_access_reasons",
-        "ground_access_summary",
-        "mission_recovery_burns",
-        "mission_recovery_candidates",
-        "mission_recovery_elements",
-        "mission_recovery_summary",
-        "objects",
-        "passive_final_state",
-        "relative_final_state",
-        "rendezvous_closest_approach",
-        "rendezvous_metrics",
-        "run_metadata",
-    }
-)
+
+
+def _public_saved_query_names() -> frozenset[str]:
+    """Return the public registry names while preserving the legacy export."""
+    from sim.review.queries import list_saved_review_queries
+
+    return frozenset(query.name for query in list_saved_review_queries())
+
+
+PUBLIC_SAVED_QUERY_NAMES = _public_saved_query_names()
 
 
 @dataclass(frozen=True)
@@ -180,7 +169,6 @@ def _saved_query_payload() -> dict[str, Any]:
             "allow_empty": query.allow_empty,
         }
         for query in list_saved_review_queries()
-        if query.name in PUBLIC_SAVED_QUERY_NAMES
     ]
     return {
         "schema_version": RESOURCE_SCHEMA_VERSION,
@@ -320,6 +308,7 @@ __all__ = [
     "MAX_RESOURCE_BYTES",
     "PUBLIC_RESOURCE_CONTRACTS",
     "PUBLIC_RESOURCE_URIS",
+    "PUBLIC_SAVED_QUERY_NAMES",
     "PublishedResource",
     "ResourceContract",
     "build_public_resource_catalog",

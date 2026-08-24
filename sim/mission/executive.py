@@ -175,54 +175,39 @@ class MissionExecutiveStrategy:
         self,
         *,
         transition: dict[str, Any],
-        truth: StateTruth,
-        own_knowledge: dict[str, StateBelief],
-        dry_mass_kg: float | None,
-        rocket_state: RocketState | None,
-        rocket_vehicle_cfg: RocketVehicleConfig | None,
-        fuel_capacity_kg: float | None,
-        t_s: float | None,
+        metric_value: float | None,
     ) -> tuple[bool, str]:
         trigger = str(transition.get("trigger", "") or "").strip().lower()
         if trigger in {"range_lt", "range_gt"}:
-            range_km = self._range_km(
-                truth=truth,
-                own_knowledge=own_knowledge,
-                target_id=(None if transition.get("target_id") is None else str(transition.get("target_id"))),
-                use_knowledge=bool(transition.get("use_knowledge_for_targeting", True)),
-            )
-            if range_km is None:
+            if metric_value is None:
                 return False, "range_unavailable"
+            range_km = metric_value
             threshold_km = float(transition.get("threshold_km", transition.get("threshold", 0.0)) or 0.0)
             if trigger == "range_lt":
                 return bool(range_km < threshold_km), f"range_km={range_km:.6f}<threshold_km={threshold_km:.6f}"
             return bool(range_km > threshold_km), f"range_km={range_km:.6f}>threshold_km={threshold_km:.6f}"
-        fuel_kg, fuel_frac = self._fuel_metrics(
-            truth=truth,
-            dry_mass_kg=dry_mass_kg,
-            fuel_capacity_kg=fuel_capacity_kg,
-            rocket_state=rocket_state,
-            rocket_vehicle_cfg=rocket_vehicle_cfg,
-        )
         if trigger == "fuel_below_kg":
-            if fuel_kg is None:
+            if metric_value is None:
                 return False, "fuel_kg_unavailable"
+            fuel_kg = metric_value
             threshold_kg = float(transition.get("threshold_kg", transition.get("threshold", 0.0)) or 0.0)
             return bool(fuel_kg < threshold_kg), f"fuel_kg={fuel_kg:.6f}<threshold_kg={threshold_kg:.6f}"
         if trigger == "fuel_below_fraction":
-            if fuel_frac is None:
+            if metric_value is None:
                 return False, "fuel_fraction_unavailable"
+            fuel_frac = metric_value
             threshold = float(transition.get("threshold_fraction", transition.get("threshold", 0.0)) or 0.0)
             return bool(fuel_frac < threshold), f"fuel_fraction={fuel_frac:.6f}<threshold={threshold:.6f}"
         if trigger == "time_gte":
-            if t_s is None:
+            if metric_value is None:
                 return False, "time_unavailable"
+            t_s = metric_value
             threshold_s = float(transition.get("threshold_s", transition.get("threshold")))
             return bool(t_s >= threshold_s), f"time_s={t_s:.6f}>=threshold_s={threshold_s:.6f}"
         if trigger == "mode_elapsed_gte":
-            if t_s is None or self._active_mode_enter_t_s is None:
+            if metric_value is None:
                 return False, "mode_elapsed_unavailable"
-            elapsed_s = float(t_s) - float(self._active_mode_enter_t_s)
+            elapsed_s = metric_value
             threshold_s = float(transition.get("threshold_s", transition.get("threshold")))
             return bool(elapsed_s >= threshold_s), f"mode_elapsed_s={elapsed_s:.6f}>=threshold_s={threshold_s:.6f}"
         return False, f"unsupported_trigger={trigger}"
@@ -335,13 +320,7 @@ class MissionExecutiveStrategy:
                 continue
             fired, detail = self._evaluate_transition(
                 transition=transition,
-                truth=truth,
-                own_knowledge=own_knowledge,
-                dry_mass_kg=dry_mass_kg,
-                rocket_state=rocket_state,
-                rocket_vehicle_cfg=rocket_vehicle_cfg,
-                fuel_capacity_kg=fuel_capacity_kg,
-                t_s=t_s,
+                metric_value=metric_value,
             )
             if not fired:
                 continue

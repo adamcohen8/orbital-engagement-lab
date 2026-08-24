@@ -71,6 +71,7 @@ Start here when you already know the kind of work you want to run.
 | Author and smoke-test a custom public FSW stack | [Public Flight Software Authoring](fsw-authoring.md) |
 | Use the orbital calculator | [Orbital Calculator](orbital-calculator.md) |
 | Use game/training mode | [Video Game Mode Roadmap](game-mode-roadmap.md) |
+| Explore the browser multiplayer Beta | [RPO Duel Beta](../RPO_DUEL.md) |
 | Use ML/RL wrappers | [ML/RL Policy Contracts](ml-rl-contracts.md) |
 | Connect a local MCP host | [Supported Local MCP Surface](oel-mcp.md) |
 
@@ -89,6 +90,8 @@ processes.
 7. Pro AI Config Assistant
 8. Pro GNC Workbench
 9. Validation Operations
+10. Pro Communications Analysis Contract
+11. Pro Capability Routing (including communications workflows)
 
 In the Pro workspace, use the repository root README for buyer-facing Pro
 positioning and local handoff notes for project continuity.

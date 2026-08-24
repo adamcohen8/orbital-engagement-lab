@@ -8,7 +8,9 @@ ellipsoid.
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass
+from threading import RLock
 
 import numpy as np
 
@@ -21,6 +23,12 @@ _WGS84_E = float(np.sqrt(WGS84_E2))
 _HALF_PI = 0.5 * np.pi
 _JRLL = np.array([2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4], dtype=np.int64)
 _JPLL = np.array([1, 3, 5, 7, 0, 2, 4, 6, 1, 3, 5, 7], dtype=np.int64)
+_CENTER_CACHE_MAX_BYTES = 128 * 1024 * 1024
+_CENTER_CACHE_MAX_ENTRIES = 256
+_CENTER_CACHE_ENTRY_OVERHEAD_BYTES = 512
+_CENTER_CACHE: OrderedDict[tuple[int, tuple[int, ...]], tuple[HealpixWGS84Centers, int]] = OrderedDict()
+_CENTER_CACHE_BYTES = 0
+_CENTER_CACHE_LOCK = RLock()
 
 
 def _authalic_q(geodetic_latitude_rad: np.ndarray) -> np.ndarray:
@@ -294,6 +302,15 @@ def wgs84_points_to_healpix_nested(
     return healpix_nested_cell_indices(order, beta, np.deg2rad(longitude))
 
 
+def _immutable_array_copy(values: np.ndarray) -> np.ndarray:
+    """Return a C-order array whose ultimate backing store is immutable bytes."""
+
+    contiguous = np.ascontiguousarray(values)
+    return np.frombuffer(contiguous.tobytes(order="C"), dtype=contiguous.dtype).reshape(
+        contiguous.shape
+    )
+
+
 def healpix_wgs84_centers(
     order: int,
     cell_indices: np.ndarray | None = None,
@@ -330,6 +347,82 @@ def healpix_wgs84_centers(
         ecef_km=ecef,
         outward_normal_ecef=normal,
     )
+
+
+def cached_healpix_wgs84_centers(
+    order: int,
+    cell_indices: np.ndarray | None = None,
+) -> HealpixWGS84Centers:
+    """Return immutable exact-shape centers from a bounded process-local cache.
+
+    The cache key retains the exact requested index vector.  This matters for
+    bitwise reproducibility because the inverse-authalic convergence test is
+    evaluated over the supplied vector rather than independently per cell.
+    """
+
+    indices = _validate_cell_indices(order, cell_indices).copy()
+    contiguous = indices.size > 1 and np.all(np.diff(indices) == 1)
+    if contiguous:
+        index_key = (-1, int(indices[0]), int(indices[-1]) + 1)
+    elif indices.size > 4096:
+        return healpix_wgs84_centers(order, indices)
+    else:
+        index_key = (-2, *(int(value) for value in indices))
+    key = (int(order), index_key)
+    with _CENTER_CACHE_LOCK:
+        cached = _CENTER_CACHE.get(key)
+        if cached is not None:
+            _CENTER_CACHE.move_to_end(key)
+            return cached[0]
+
+    computed = healpix_wgs84_centers(order, indices)
+    centers = HealpixWGS84Centers(
+        order=computed.order,
+        cell_index=_immutable_array_copy(computed.cell_index),
+        authalic_latitude_rad=_immutable_array_copy(computed.authalic_latitude_rad),
+        longitude_rad=_immutable_array_copy(computed.longitude_rad),
+        geodetic_latitude_rad=_immutable_array_copy(computed.geodetic_latitude_rad),
+        ecef_km=_immutable_array_copy(computed.ecef_km),
+        outward_normal_ecef=_immutable_array_copy(computed.outward_normal_ecef),
+    )
+    arrays = (
+        centers.cell_index,
+        centers.authalic_latitude_rad,
+        centers.longitude_rad,
+        centers.geodetic_latitude_rad,
+        centers.ecef_km,
+        centers.outward_normal_ecef,
+    )
+    size_bytes = (
+        sum(int(values.nbytes) for values in arrays)
+        + _CENTER_CACHE_ENTRY_OVERHEAD_BYTES
+        + len(index_key) * 32
+    )
+    global _CENTER_CACHE_BYTES
+    with _CENTER_CACHE_LOCK:
+        existing = _CENTER_CACHE.get(key)
+        if existing is not None:
+            _CENTER_CACHE.move_to_end(key)
+            return existing[0]
+        while _CENTER_CACHE and (
+            _CENTER_CACHE_BYTES + size_bytes > _CENTER_CACHE_MAX_BYTES
+            or len(_CENTER_CACHE) >= _CENTER_CACHE_MAX_ENTRIES
+        ):
+            _, (_, evicted_bytes) = _CENTER_CACHE.popitem(last=False)
+            _CENTER_CACHE_BYTES -= evicted_bytes
+        if size_bytes <= _CENTER_CACHE_MAX_BYTES:
+            _CENTER_CACHE[key] = (centers, size_bytes)
+            _CENTER_CACHE_BYTES += size_bytes
+    return centers
+
+
+def clear_healpix_center_cache() -> None:
+    """Clear the internal center cache for deterministic cache-state tests."""
+
+    global _CENTER_CACHE_BYTES
+    with _CENTER_CACHE_LOCK:
+        _CENTER_CACHE.clear()
+        _CENTER_CACHE_BYTES = 0
 
 
 __all__ = [

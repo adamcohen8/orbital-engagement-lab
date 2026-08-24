@@ -585,9 +585,13 @@ def _normalize_utc(value: Any) -> str:
     text = str(value or "").strip() or "1970-01-01T00:00:00Z"
     if text.endswith("Z"):
         return text
-    if text:
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
         return text
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _markings(config: Mapping[str, Any]) -> dict[str, Any]:

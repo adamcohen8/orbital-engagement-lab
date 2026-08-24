@@ -381,11 +381,15 @@ class SimulationResult:
 
     def evidence_manifest(self) -> dict[str, Any]:
         from sim.plotting.style import get_oel_version
+        from sim.review.evidence_capsule import evidence_file_exists, evidence_file_sha256
 
         output_dir = self.output_dir
         review_db = output_dir / "review" / "run.sqlite"
         review_schema = output_dir / "review" / "schema.json"
         review_saved_views = output_dir / "review" / "saved_views.json"
+        review_compressed = output_dir / "review" / "run.sqlite.gz"
+        review_capsule = output_dir / "review" / "evidence_capsule.json"
+        review_evidence_exists = evidence_file_exists(review_db)
         return {
             "schema_version": 1,
             "scenario_name": self.config.scenario_name,
@@ -406,6 +410,19 @@ class SimulationResult:
                 "detail": str(self.config.scenario.outputs.review.detail),
                 "db_path": str(review_db),
                 "db_exists": review_db.is_file(),
+                "evidence_exists": review_evidence_exists,
+                "storage": (
+                    "sqlite"
+                    if review_db.is_file()
+                    else "sqlite_gzip_capsule"
+                    if review_evidence_exists
+                    else "missing"
+                ),
+                "logical_sha256": evidence_file_sha256(review_db) if review_evidence_exists else None,
+                "compressed_path": str(review_compressed),
+                "compressed_exists": review_compressed.is_file(),
+                "capsule_manifest_path": str(review_capsule),
+                "capsule_manifest_exists": review_capsule.is_file(),
                 "schema_path": str(review_schema),
                 "schema_exists": review_schema.is_file(),
                 "saved_views_path": str(review_saved_views),

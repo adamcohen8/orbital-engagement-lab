@@ -90,6 +90,10 @@ Optional paths:
 - `review/generated_artifacts.json`: custom figures/tables saved from the
   workbench or agent review API.
 - `review/figures/`: OEL-styled custom figures generated from review queries.
+- `review/run.sqlite.gz` plus `review/evidence_capsule.json`: a content-bound
+  compressed review store. `ReviewWorkspace`, the review CLI, profile
+  qualification, and maturation readers hydrate this form into a hash-checked
+  temporary file and remove the temporary copy when the reader closes.
 
 Legacy output folders without `review/run.sqlite` should still open in limited
 mode by reading `master_run_summary.json`, `master_run_log.json`, CSV files, and
@@ -111,7 +115,11 @@ Recommended detail levels:
 - `compact`: metadata, summary metrics, artifact inventory, events, and
   downsampled or derived histories.
 - `standard`: compact plus per-sample state, relative state, thrust, attitude
-  errors, and configured access/mission diagnostics.
+  errors, normalized FSW diagnostic fields, normalized actuator realization
+  vectors/device state, and configured access/mission diagnostics. Standard
+  detail does not repeat complete FSW envelopes, snapshots, task releases, or
+  realization records in `detail_json`; restartable snapshot state is retained
+  in the compressed `fsw_snapshots.detail_gzip` column.
 - `full`: standard plus lower-stability debug histories that are useful for
   engineering review but may be large.
 
@@ -142,6 +150,33 @@ Rules:
 
 The review store should be treated as derived evidence. The authoritative
 simulation is still the scenario config plus deterministic simulator behavior.
+
+### Evidence capsules
+
+Large retained SQLite stores can be converted with a content-bound two-step
+workflow:
+
+```bash
+.venv/bin/python tools/evidence_capsules.py plan \
+  outputs/<run>/review/run.sqlite \
+  --output /tmp/oel-evidence-capsule-plan.json
+.venv/bin/python tools/evidence_capsules.py apply \
+  /tmp/oel-evidence-capsule-plan.json
+```
+
+The apply step refuses file size, modification-time, or SHA-256 drift. Before
+removing the exact source it records and verifies the original and compressed
+digests, SQLite `quick_check`, per-table row counts, run/config provenance,
+known qualification-query results, reader/writer source hashes, verification
+time, and a restoration command. Restore a logical database explicitly with:
+
+```bash
+.venv/bin/python tools/evidence_capsules.py restore \
+  outputs/<run>/review/run.sqlite
+```
+
+An unmanifested or changed gzip file is never accepted as review evidence.
+Plain `run.sqlite` remains preferred when both forms are present.
 
 ## Query And Schema Discovery
 
@@ -175,9 +210,23 @@ Workflow review stores expose common tables such as `workflow_metadata`,
 - Monte Carlo: `campaign_runs` and `campaign_metrics`,
 - validation: `validation_benchmarks` and `validation_artifacts`.
 
-## Initial Schema
+## Current Single-Run Schema
 
-The initial single-run schema should include the following tables.
+The per-run `review/schema.json` is authoritative. In addition to the core
+tables described below, current stores may include these conditional families:
+
+- frame/object provenance: `frame_provenance`, `object_propagation`,
+  `object_initialization`, and `object_state_frame`;
+- flight-software evidence: loads, invocations, task timing, objectives,
+  commands/receipts/realization, raw and normalized diagnostics, snapshots, and
+  device state;
+- game evidence: input events, observer policy, and scoring rows;
+- recovery evidence: summary, elements, metrics, candidates, burns, and
+  `mission_recovery_candidate_elements`;
+- coverage and link summaries/samples/windows/transitions.
+
+Conditional tables can be absent or empty when their producer was disabled;
+detail-heavy diagnostic rows depend on configured review detail.
 
 ### `run_metadata`
 
@@ -261,7 +310,7 @@ Columns may be null when a state component is unavailable for an object type.
 ### `object_state_covariance`
 
 One optional full state-covariance row per object and retained sample. The
-table exists in review schema 0.6 but is empty unless a supported producer has
+table is part of the additive current schema but is empty unless a supported producer has
 a complete matching covariance matrix.
 
 Recommended columns:
@@ -396,6 +445,11 @@ evidence-only post-processing products in eight additive tables:
   and estimated delivered bits; and
 - `link_transitions`: acquisition/loss time, bracket, disposition, iterations,
   and reason change.
+
+For compatibility, the link tables name generalized endpoint-ID fields
+`tx_object_id` and `rx_object_id`. A fixed site uses the same columns. Endpoint
+kind remains in the orbital-analysis run summary/config and is not
+independently established by a review row.
 
 These rows retain analysis evidence; they do not make the review database an
 RF environment, scheduler, or causal simulation input.
@@ -670,7 +724,8 @@ A generated artifact should record:
 
 - artifact path
 - source query or saved view ID
-- chart/table options
+- chart options (the `table()` helper creates a table-shaped figure; it does
+  not export a durable data-table artifact)
 - generated UTC
 - OEL version
 - review schema version
@@ -683,17 +738,18 @@ visually match simulator-generated artifacts. Saved figures are written under
 
 ## Built-In Insight Recipes
 
-Built-in recipes compile to SQL or review API calls:
+The following are calculation patterns. Registered equivalents are named in
+parentheses; patterns without a registered name require explicit SQL:
 
-- closest approach
-- first range threshold crossing
-- final relative state
-- burn intervals
-- total delta-v by object
-- peak acceleration by object
-- ground-station access windows
-- termination summary
-- artifact inventory
+- closest approach (`rendezvous_closest_approach`)
+- first range threshold crossing (custom SQL)
+- final relative state (`relative_state` with ordering/limit)
+- burn intervals (`burn_events`)
+- total delta-v by object (custom aggregation over `thrust`)
+- peak acceleration by object (`burn_activity` plus a custom peak query)
+- ground-station access windows (`ground_access_windows`)
+- termination summary (`run_metadata` or `event_log`)
+- artifact inventory (`artifacts`)
 
 Recipes should be transparent: users should be able to inspect the generated
 query or the documented calculation.
@@ -716,6 +772,10 @@ Compatibility rules:
   changes require a schema-version bump.
 - Stable core tables are `run_metadata`, `objects`, `time_samples`,
   `object_state`, `relative_state`, `thrust`, `metrics`, and `artifacts`.
+- Legacy FSW query rewriting is narrow and is applied only by profile
+  qualification/maturation readers for selected diagnostic/receipt forms.
+  General CLI and `ReviewWorkspace.query()` calls do not rewrite SQL; author
+  them against normalized current tables and the run's `schema.json`.
 
 ## Public And Pro Boundary
 

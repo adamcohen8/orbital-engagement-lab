@@ -1,6 +1,6 @@
 # MCP Local Stdio Threat Model
 
-Status: supported M5.1 local stdio surface
+Status: supported M5.2 local stdio surface
 
 ## Scope
 
@@ -56,7 +56,7 @@ open a network listener or communicate externally.
 | Data release confusion | Required marking/release scope; direct frontier rejects `local_only` | Metadata authenticity depends on the trusted caller or future release broker |
 | Resource exhaustion | File, database, row, query-step, and response-size budgets | No multi-tenant concurrency or service-level admission control exists |
 | Protocol/log injection | Official SDK stdio framing; stdout is protocol-only | The parent process still controls stderr collection and display |
-| Resource path or metadata disclosure | Four fixed public URIs, no arbitrary resolver, public allowlists, explicit media types, and a 500,000-byte limit | Resource contents still require ordinary public-release review |
+| Resource path or metadata disclosure | Seven fixed public URIs, no arbitrary resolver, public allowlists, explicit media types, and a 500,000-byte limit | Resource contents still require ordinary public-release review |
 | External exfiltration | No network transport or external-communication tool effect | The parent host may itself be external; direct-frontier use is therefore treated as disclosure |
 | Dependency compromise | Bounded optional `mcp>=2.0.0,<3`; exact wheel hashes, licenses, SBOM, offline install, and zero-finding audit recorded | Point-in-time evidence must be regenerated for later releases |
 | Model self-authorization | Write/execute calls must match operator-configured approval-ID allowlists; direct-frontier and Mendicant profiles do not discover M4 tools | The operator remains responsible for granting and revoking the server process's approval scope |

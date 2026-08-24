@@ -384,20 +384,32 @@ def _assert_truth_free(value: object, *, path: list[str], seen: set[int]) -> Non
         raise TypeError(f"{_path_text(path)} contains forbidden simulator-owned value {qualified}")
     if dataclass_fields is not None and not isinstance(value, type):
         for item in dataclass_fields:
+            child = getattr(value, item.name)
+            # Boundary records contain large numbers of scalar telemetry and
+            # vector leaves.  They are terminal by contract, so avoid another
+            # Python call and path mutation while retaining recursive checks
+            # for every container or wrapper that could conceal simulator
+            # truth.
+            if child is None or isinstance(child, (str, bool, int, float, bytes, Enum)):
+                continue
             path.append(f".{item.name}")
-            _assert_truth_free(getattr(value, item.name), path=path, seen=seen)
+            _assert_truth_free(child, path=path, seen=seen)
             path.pop()
         return
     if isinstance(value, Mapping):
         for key, item in value.items():
             if str(key).lower() in _FORBIDDEN_FIELD_NAMES:
                 raise TypeError(f"{_path_text(path)}.{key} is a forbidden simulator-truth field")
+            if item is None or isinstance(item, (str, bool, int, float, bytes, Enum)):
+                continue
             path.append(f".{key}")
             _assert_truth_free(item, path=path, seen=seen)
             path.pop()
         return
     if isinstance(value, (tuple, list)):
         for index, item in enumerate(value):
+            if item is None or isinstance(item, (str, bool, int, float, bytes, Enum)):
+                continue
             path.append(f"[{index}]")
             _assert_truth_free(item, path=path, seen=seen)
             path.pop()

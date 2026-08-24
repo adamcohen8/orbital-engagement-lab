@@ -48,6 +48,7 @@ presets, import configured plugin classes, or run the simulation.
 ## Top-Level Shape
 
 ```yaml
+schema_version: oel.scenario.v1
 scenario_name: "my_scenario"
 
 objects:
@@ -453,6 +454,14 @@ combined with `flight_software` or object-owned `knowledge`; other objects may
 still observe its truth state. Omitting `runtime_profile` remains backward
 compatible and continues to select `fsw.passive`.
 
+Cadence has two distinct meanings. `simulator.dt_s` is the retained simulation
+and scheduler cadence, while `simulator.dynamics.orbit.orbit_substep_s` is the
+physical ONP integrator cadence inside each retained step. A timestep comparison
+must hold scheduler/runtime behavior fixed or select `runtime_profile:
+trajectory_only`; otherwise controller and estimator scheduling can causally
+change the result. Review `run_metadata.dt_s` together with the saved config's
+orbit substep rather than describing either value as a generic timestep.
+
 Discover the installed catalog and parameter schemas with:
 
 ```bash
@@ -493,7 +502,8 @@ simulator:
 ```
 
 `duration_s` must be a positive integer multiple of `dt_s`. Substeps must divide
-the main time step cleanly.
+the main time step cleanly. When attitude dynamics are enabled,
+`attitude_substep_s` must be no larger than `orbit_substep_s`.
 
 `resource_profile` is optional and defaults to config behavior. Set it to
 `laptop-safe`, `standard`, `aggressive`, or `off` to select the runtime resource
@@ -590,7 +600,7 @@ simulator:
           chaser:
             max_g_load: 12.0
   environment:
-    atmosphere_model: "harris_priester"
+    atmosphere_model: "ussa1976"
 ```
 
 When orbit drag or lift is enabled, `simulator.environment.atmosphere_model`
@@ -785,12 +795,15 @@ The `hpop_ggm03` source expects an explicit coefficient file path in public
 distributions:
 
 ```yaml
-spherical_harmonics:
-  enabled: true
-  degree: 8
-  order: 8
-  source: "hpop_ggm03"
-  coeff_path: "/path/to/GGM03C.txt"
+simulator:
+  dynamics:
+    orbit:
+      spherical_harmonics:
+        enabled: true
+        degree: 8
+        order: 8
+        source: "hpop_ggm03"
+        coeff_path: "/path/to/GGM03C.txt"
 ```
 
 ICGEM `.gfc` coefficient files use the same explicit degree/order truncation.
@@ -799,12 +812,15 @@ them to the harmonic perturbation; an explicit `reference_radius_km` remains an
 intentional radius override:
 
 ```yaml
-spherical_harmonics:
-  enabled: true
-  degree: 8
-  order: 8
-  source: "icgem"
-  coeff_path: "/path/to/gravity-model.gfc"
+simulator:
+  dynamics:
+    orbit:
+      spherical_harmonics:
+        enabled: true
+        degree: 8
+        order: 8
+        source: "icgem"
+        coeff_path: "/path/to/gravity-model.gfc"
 ```
 
 `source: "egm96"` uses an explicit `.gfc` path when supplied. Without one,
@@ -813,9 +829,9 @@ size and SHA-256 digest before use; set `allow_download: false` to require an
 already verified cached copy. Inline terms infer degree and order when those
 fields are omitted. File-backed fields always require `degree >= 2`, and an
 enabled block containing only degree/order is rejected because it does not
-identify any coefficients. Configure lightweight zonals with the top-level
-`orbit.j2`, `orbit.j3`, and `orbit.j4` switches, not inside the spherical-
-harmonics block.
+identify any coefficients. Configure lightweight zonals with
+`simulator.dynamics.orbit.j2`, `simulator.dynamics.orbit.j3`, and
+`simulator.dynamics.orbit.j4`, not inside the spherical-harmonics block.
 
 The private validation tree may contain HPOP reference data, but those files are
 not bundled with the public core.
@@ -983,9 +999,15 @@ artifact tables. See [Review Store Contract](review-store.md) for the current
 schema and review CLI/API direction.
 
 Set `outputs.orbital_analysis.enabled: true` to evaluate configured whole-Earth
-conical coverage and directed free-space links after a deterministic run. The
-scenario must declare `simulator.initial_jd_utc`; directional coverage or
-terminals require achieved attitude evidence. See
+conical coverage and directed free-space links after a deterministic run. Link
+endpoints may select active objects with `tx_object_id`/`rx_object_id` or one
+configured ground station with `tx_ground_station_id`/`rx_ground_station_id`.
+Each endpoint declares exactly one selector; fixed-site-to-fixed-site links are
+not supported. The scenario must declare `simulator.initial_jd_utc`;
+directional spacecraft terminals require achieved attitude evidence, while a
+ground-station terminal uses its physical local ENU frame. Set
+`include_fraction_plot` and `include_margin_plot` to place strict-QA native
+figures in the run's ordinary plot inventory. See
 [Coverage And Link Scenario Analysis](coverage-link-scenario-analysis.md) for
 the public example, complete fields, artifacts, review tables, and claim
 boundary.

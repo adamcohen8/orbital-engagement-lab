@@ -67,7 +67,7 @@ Run the focused public checks before opening a pull request:
 ```bash
 python -m ruff check <changed-python-files>
 python -m ruff format --check <changed-python-files>
-python -m pytest -q sim/tests/test_scenario_yaml_config.py sim/tests/test_app_io.py sim/tests/test_api.py sim/tests/test_master_simulator.py
+python -m pytest -q sim/tests/test_scenario_yaml_config.py sim/tests/test_utils_io.py sim/tests/test_api.py sim/tests/test_master_simulator.py
 python run_simulation.py --config configs/automation_smoke.yaml --validate-only
 ```
 

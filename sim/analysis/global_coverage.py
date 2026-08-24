@@ -19,8 +19,8 @@ from sim.analysis.healpix import (
     HEALPIX_GRID_ID,
     WGS84_AUTHALIC_RADIUS_KM,
     WGS84_SURFACE_AREA_KM2,
+    cached_healpix_wgs84_centers,
     healpix_npix,
-    healpix_wgs84_centers,
 )
 from sim.analysis.observer_target_geometry import evaluate_surface_targets_ecef
 from sim.dynamics.orbit.frames import FrameContext, eci_to_ecef_rotation_context
@@ -209,6 +209,8 @@ class GlobalCoverageArtifacts:
     samples_csv: Path
     cells_csv: Path | None
     intervals_npz: Path
+    fraction_plot_png: Path | None
+    fraction_plot_quality_json: Path | None
 
 
 def _validated_quaternion(values: Any, field_name: str) -> np.ndarray:
@@ -685,7 +687,7 @@ def evaluate_global_coverage(
     for start in range(0, npix, int(config.chunk_size)):
         stop = min(start + int(config.chunk_size), npix)
         cells = np.arange(start, stop, dtype=np.int64)
-        centers = healpix_wgs84_centers(config.order, cells)
+        centers = cached_healpix_wgs84_centers(config.order, cells)
         latitude_chunks.append(np.rad2deg(centers.geodetic_latitude_rad))
         longitude_chunks.append(np.rad2deg(centers.longitude_rad))
         mask = np.zeros((times.size, cells.size), dtype=bool)
@@ -814,6 +816,8 @@ def write_global_coverage_artifacts(
     output_dir: str | Path,
     *,
     include_cell_csv: bool = True,
+    include_fraction_plot: bool = False,
+    plot_scenario_name: str = "",
 ) -> GlobalCoverageArtifacts:
     """Write the frozen Phase 1 summary, sparse intervals, and review tables."""
 
@@ -825,6 +829,8 @@ def write_global_coverage_artifacts(
     samples_path = destination / "coverage_samples.csv"
     cells_path = destination / "coverage_cells.csv" if include_cell_csv else None
     intervals_path = destination / "coverage_intervals.npz"
+    plot_path = destination / "coverage_fraction.png" if include_fraction_plot else None
+    plot_quality_path = destination / "coverage_fraction.quality.json" if include_fraction_plot else None
     manifest_path = destination / "coverage_analysis_manifest.json"
 
     _write_json(summary_path, result.summary)
@@ -932,6 +938,17 @@ def write_global_coverage_artifacts(
     }
     if cells_path is not None:
         artifacts["coverage_cells.csv"] = {"sha256": _sha256_file(cells_path)}
+    if plot_path is not None:
+        from sim.analysis.coverage_plotting import write_global_coverage_fraction_plot
+
+        write_global_coverage_fraction_plot(
+            result,
+            plot_path,
+            scenario_name=plot_scenario_name,
+        )
+        artifacts[plot_path.name] = {"sha256": _sha256_file(plot_path)}
+    if plot_quality_path is not None:
+        artifacts[plot_quality_path.name] = {"sha256": _sha256_file(plot_quality_path)}
     manifest = {
         "contract_version": GLOBAL_COVERAGE_CONTRACT_VERSION,
         "analysis_id": result.config.analysis_id,
@@ -960,6 +977,8 @@ def write_global_coverage_artifacts(
         samples_csv=samples_path,
         cells_csv=cells_path,
         intervals_npz=intervals_path,
+        fraction_plot_png=plot_path,
+        fraction_plot_quality_json=plot_quality_path,
     )
 
 

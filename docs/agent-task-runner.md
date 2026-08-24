@@ -41,6 +41,13 @@ Public-tagged bundled recipes must be `supported`. Pro/private recipes may be
 `supported`, `prototype`, or `experimental`, but the answer should name that
 maturity when the evidence depends on the recipe.
 
+Recipe maturity describes orchestration, query, plot, and packet stability; it
+does not promote the underlying scientific/product claim. For example,
+`coverage_link_review` is a supported wrapper around an experimental,
+evidence-only coverage/RF analysis. Answers must carry that domain support
+level and its calibration, weather, interference, scheduling, and assurance
+non-claims.
+
 ## Commands
 
 List bundled recipes:
@@ -70,6 +77,15 @@ Run a recipe and write an evidence packet:
 python -m sim.agent_task run quickstart_review --output-root outputs/agent_tasks --json
 ```
 
+`plot_recipe_ids` advertises available follow-up figures; recipes do not render
+them by default. Pass the machine-readable `plot_cli_option` (currently
+`--plot`) when the task needs those artifacts:
+
+```bash
+python -m sim.agent_task run attitude_hold_review \
+  --output-root outputs/agent_tasks --plot --json
+```
+
 Validate a recipe without executing it:
 
 ```bash
@@ -89,6 +105,11 @@ When inspecting an existing directory, treat the packet as evidence for that
 directory's current contents, not proof that the source scenario still produces
 the same result. If a local output may be stale, rerun the recipe or scenario
 before citing metrics.
+
+Default inspection and MCP report packets automatically add the named Coverage
+and Directed-Link summary/window queries when those domain tables contain
+evidence. Runs without those analyses retain the compact metadata/object/artifact
+default instead of receiving unexpected-empty domain queries.
 
 Compare two configs through common review metrics:
 
@@ -214,9 +235,18 @@ Current bundled task recipes include:
   Maturity: `supported`.
 - `ground_access_review`: public ground-access example with station/object
   access summaries and no-access reason counts. Maturity: `supported`.
+- `coverage_link_review`: public whole-Earth coverage and directed-link example
+  with named summary/window queries and standard coverage-fraction and
+  link-margin plots. Maturity: `supported`.
 - `ogp_sgp4_review`: fixed public TLE propagated continuously through passive
   OGP-SGP4 with propagation/frame provenance, final canonical ECI state, and a
   review-store position plot. Maturity: `supported`.
+- `ogp_sdp4_review`: fixed synthetic GEO-like TLE with valid checksums propagated
+  continuously through passive OGP-SDP4, including resolved deep-space regime,
+  period, frame, final-state, extrema, and plot evidence. Maturity: `supported`.
+- `attitude_hold_review`: disturbed ideal-wrench attitude-hold example with
+  desired/actual quaternion error, body rates, controller evidence, and supported
+  review plots. Maturity: `supported`.
 
 ## Plot Recipes
 
@@ -229,6 +259,10 @@ Current bundled plot recipes include:
 - `relative_position_ric_2d`: maturity `supported`, table `relative_state`, professional I-R/I-C/C-R renderer
 - `burn_activity`: maturity `supported`, table `thrust`
 - `ground_access`: maturity `supported`, table `ground_access`
+- `attitude_error`: maturity `supported`, table `attitude_error`
+- `attitude_body_rates`: maturity `supported`, table `object_state`
+- `coverage_fraction`: maturity `supported`, table `coverage_samples`
+- `directed_link_margin`: maturity `supported`, table `link_samples`, specialized closure-threshold renderer
 
 Plot recipes run read-only review SQL and call the review plotting service.
 Generated plot provenance is recorded in `review/generated_artifacts.json`.

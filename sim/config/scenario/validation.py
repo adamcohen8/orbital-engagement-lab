@@ -23,6 +23,10 @@ def _validate_orbital_analysis_references(cfg: SimulationScenarioConfig) -> None
     if not section.coverage and not section.directed_links:
         raise ValueError("outputs.orbital_analysis.enabled requires coverage or directed_links entries.")
     objects = dict(cfg.objects or {})
+    ground_stations = {
+        str(station.id): station
+        for station in list(cfg.ground_stations or [])
+    }
 
     def require_object(object_id: str, path: str) -> object:
         item = objects.get(object_id)
@@ -58,12 +62,25 @@ def _validate_orbital_analysis_references(cfg: SimulationScenarioConfig) -> None
         require_achieved_attitude(source, path)
     for index, item in enumerate(section.directed_links):
         for endpoint in ("tx", "rx"):
-            object_path = f"outputs.orbital_analysis.directed_links[{index}].{endpoint}_object_id"
-            endpoint_object = require_object(str(item[f"{endpoint}_object_id"]), object_path)
+            object_id = str(item.get(f"{endpoint}_object_id") or "").strip()
+            station_id = str(item.get(f"{endpoint}_ground_station_id") or "").strip()
+            endpoint_path = f"outputs.orbital_analysis.directed_links[{index}].{endpoint}"
             terminal = dict(item[f"{endpoint}_terminal"] or {})
             pattern = dict(terminal.get("pattern", {}) or {})
-            if str(pattern.get("kind", "constant") or "constant").lower() != "constant":
-                require_achieved_attitude(endpoint_object, object_path)
+            if object_id:
+                endpoint_object = require_object(object_id, f"{endpoint_path}_object_id")
+                if str(pattern.get("kind", "constant") or "constant").lower() != "constant":
+                    require_achieved_attitude(endpoint_object, f"{endpoint_path}_object_id")
+            elif station_id:
+                station = ground_stations.get(station_id)
+                if station is None:
+                    raise ValueError(
+                        f"{endpoint_path}_ground_station_id references unknown ground station {station_id!r}."
+                    )
+                if not bool(station.enabled):
+                    raise ValueError(
+                        f"{endpoint_path}_ground_station_id references disabled ground station {station_id!r}."
+                    )
 
 def _validate_physics_runtime_settings(cfg: SimulationScenarioConfig) -> None:
     orbit = dict((cfg.simulator.dynamics or {}).get("orbit", {}) or {})

@@ -22,10 +22,7 @@ objects:
         raan_deg: 20.0
         argp_deg: 30.0
         true_anomaly_deg: 40.0
-    flight_software:
-      stack: fsw.passive
-      hardware_profile: hardware.passive.v1
-      params: {}
+    runtime_profile: trajectory_only
 simulator:
   duration_s: 3600.0
   dt_s: 1.0

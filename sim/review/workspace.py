@@ -4,9 +4,17 @@ import json
 import re
 import sqlite3
 from contextlib import closing
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
+
+from sim.review.evidence_capsule import (
+    MaterializedEvidence,
+    evidence_file_mtime_ns,
+    materialize_evidence,
+)
+from sim.utils.io import sha256_file
 
 
 class ReviewStoreNotFoundError(FileNotFoundError):
@@ -25,31 +33,85 @@ class ReviewQueryResult:
     truncated: bool = False
 
 
-@dataclass(frozen=True)
+@dataclass
 class ReviewWorkspace:
     output_dir: Path
     db_path: Path
     schema_path: Path
     saved_views_path: Path
+    _materialized: MaterializedEvidence | None = field(default=None, repr=False, compare=False)
 
     @classmethod
     def open(cls, path: str | Path) -> ReviewWorkspace:
         root = Path(path).expanduser().resolve()
-        if root.is_file() and root.name == "run.sqlite":
+        if root.name in {"run.sqlite", "run.sqlite.gz"}:
+            if root.name.endswith(".gz"):
+                root = root.with_name(root.name.removesuffix(".gz"))
             db_path = root
             output_dir = root.parent.parent
         else:
             output_dir = root
             db_path = output_dir / "review" / "run.sqlite"
-        if not db_path.is_file():
-            raise ReviewStoreNotFoundError(f"Review store not found: {db_path}")
+        try:
+            materialized = materialize_evidence(db_path)
+        except (FileNotFoundError, ValueError) as exc:
+            raise ReviewStoreNotFoundError(f"Review store not found or invalid: {db_path}") from exc
         review_dir = db_path.parent
         return cls(
             output_dir=output_dir,
-            db_path=db_path,
+            db_path=materialized.path,
             schema_path=review_dir / "schema.json",
             saved_views_path=review_dir / "saved_views.json",
+            _materialized=materialized,
         )
+
+    def close(self) -> None:
+        if self._materialized is not None:
+            self._materialized.close()
+            self._materialized = None
+
+    @property
+    def logical_db_path(self) -> Path:
+        """Stable review-store identity, independent of capsule hydration."""
+
+        if self._materialized is not None:
+            return self._materialized.logical_path
+        return self.output_dir / "review" / "run.sqlite"
+
+    @property
+    def review_dir(self) -> Path:
+        """Durable review artifact directory for the logical output."""
+
+        return self.logical_db_path.parent
+
+    def evidence_identity(self) -> dict[str, Any]:
+        """Return content identity without exposing a temporary hydration path."""
+
+        logical = self.logical_db_path
+        try:
+            relative_path = str(logical.resolve().relative_to(self.output_dir.resolve()))
+        except ValueError:
+            relative_path = str(logical.resolve())
+        digest, size_bytes = _sqlite_evidence_digest(self.db_path)
+        mtime_ns = int(evidence_file_mtime_ns(logical))
+        wal_path = logical.with_name(logical.name + "-wal")
+        try:
+            mtime_ns = max(mtime_ns, int(wal_path.stat().st_mtime_ns))
+        except OSError:
+            pass
+        return {
+            "relative_path": relative_path,
+            "size_bytes": size_bytes,
+            "mtime_ns": mtime_ns,
+            "sha256": digest,
+            "storage": "sqlite" if logical.is_file() else "sqlite_gzip_capsule",
+        }
+
+    def __enter__(self) -> ReviewWorkspace:
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        self.close()
 
     def tables(self) -> list[str]:
         with closing(self._connect()) as conn:
@@ -78,7 +140,18 @@ class ReviewWorkspace:
     def table_columns(self) -> dict[str, list[dict[str, Any]]]:
         columns: dict[str, list[dict[str, Any]]] = {}
         with closing(self._connect()) as conn:
-            for table in self.tables():
+            tables = [
+                str(row["name"])
+                for row in conn.execute(
+                    """
+                    SELECT name
+                    FROM sqlite_schema
+                    WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+                    ORDER BY name
+                    """
+                ).fetchall()
+            ]
+            for table in tables:
                 rows = conn.execute(f"PRAGMA table_info({_quote_identifier(table)})").fetchall()
                 columns[table] = [
                     {
@@ -171,6 +244,27 @@ class ReviewWorkspace:
         if authorize:
             conn.set_authorizer(_read_only_authorizer)
         return conn
+
+
+def _sqlite_evidence_digest(db_path: Path) -> tuple[str, int]:
+    """Hash a consistent logical DB snapshot when live content resides in WAL."""
+
+    resolved = db_path.resolve()
+    uri = f"{resolved.as_uri()}?mode=ro"
+    with closing(sqlite3.connect(uri, uri=True)) as source:
+        source.execute("PRAGMA query_only = ON")
+        source.execute("BEGIN")
+        source.execute("SELECT rootpage FROM sqlite_schema LIMIT 1").fetchone()
+        journal_mode = str(source.execute("PRAGMA journal_mode").fetchone()[0] or "").lower()
+        if journal_mode != "wal":
+            # The read transaction holds a shared lock, so rollback-journal
+            # writers cannot change the main database during the streamed hash.
+            return sha256_file(resolved), int(resolved.stat().st_size)
+        with TemporaryDirectory(prefix="oel-review-identity-") as temporary_dir:
+            snapshot_path = Path(temporary_dir) / "snapshot.sqlite"
+            with closing(sqlite3.connect(snapshot_path)) as destination:
+                source.backup(destination)
+            return sha256_file(snapshot_path), int(snapshot_path.stat().st_size)
 
 
 def _value_size_bytes(value: Any) -> int:

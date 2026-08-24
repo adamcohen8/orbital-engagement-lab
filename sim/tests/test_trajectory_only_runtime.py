@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 import pytest
 
 from sim.api import SimulationConfig, SimulationSession
 from sim.config import scenario_config_from_dict, validate_scenario_plugins
+from sim.core.models import Command
 
 
 def _scenario(tmp_path: Path, *, trajectory_only: bool) -> dict:
@@ -157,6 +159,29 @@ def test_trajectory_only_matches_passive_two_body_truth_exactly(tmp_path: Path) 
     assert trajectory.payload["object_runtime_profiles"] == {"sat": "trajectory_only"}
 
 
+def test_trajectory_only_reuses_zero_command_across_builtin_substeps(tmp_path: Path) -> None:
+    raw = _scenario(tmp_path / "substeps", trajectory_only=True)
+    raw["simulator"]["duration_s"] = 1.0
+    raw["simulator"]["dynamics"]["orbit"]["orbit_substep_s"] = 0.25
+    session = SimulationSession.from_config(SimulationConfig.from_dict(raw))
+    session._ensure_engine()
+
+    with patch.object(Command, "zero", wraps=Command.zero) as zero_command:
+        session.run()
+
+    assert zero_command.call_count == 1
+
+
+def test_serial_object_step_does_not_clone_result_without_bridge(tmp_path: Path) -> None:
+    raw = _scenario(tmp_path / "no_bridge", trajectory_only=True)
+    raw["simulator"]["duration_s"] = 1.0
+    session = SimulationSession.from_config(SimulationConfig.from_dict(raw))
+    session._ensure_engine()
+
+    with patch("sim.single_run.replace", side_effect=AssertionError("unexpected result clone")):
+        session.run()
+
+
 def test_review_store_records_trajectory_only_without_fsw_rows(tmp_path: Path) -> None:
     result = SimulationSession.from_config(
         SimulationConfig.from_dict(_scenario(tmp_path / "review", trajectory_only=True))
@@ -173,19 +198,42 @@ def test_review_store_records_trajectory_only_without_fsw_rows(tmp_path: Path) -
     assert invocation_count == 0
 
 
-def test_trajectory_only_matches_passive_ogp_sgp4_truth_exactly(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("case_id", "general", "line1", "line2"),
+    (
+        (
+            "sgp4",
+            {"model": "sgp4", "output_frame": "teme"},
+            "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9003",
+            "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1004",
+        ),
+        (
+            "sdp4",
+            {"model": "sgp4", "output_frame": "eci", "frame_transform": "teme_to_eci_iau80"},
+            "1 91001U 24001A   24001.00000000  .00000000  00000+0  00000+0 0  9993",
+            "2 91001   0.0500  80.0000 0001000  10.0000  20.0000  1.00270000    00",
+        ),
+    ),
+)
+def test_trajectory_only_matches_passive_ogp_truth_exactly(
+    tmp_path: Path,
+    case_id: str,
+    general: dict[str, str],
+    line1: str,
+    line2: str,
+) -> None:
     base = {
-        "scenario_name": "trajectory_only_ogp",
+        "scenario_name": f"trajectory_only_ogp_{case_id}",
         "objects": {
             "catalog_object": {
                 "kind": "satellite",
                 "propagation_method": "general",
-                "general": {"model": "sgp4", "output_frame": "teme"},
+                "general": general,
                 "specs": {"mass_kg": 420000.0},
                 "initial_state": {
                     "tle": {
-                        "line1": "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  9003",
-                        "line2": "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1004",
+                        "line1": line1,
+                        "line2": line2,
                         "require_checksum": True,
                     }
                 },
@@ -215,7 +263,7 @@ def test_trajectory_only_matches_passive_ogp_sgp4_truth_exactly(tmp_path: Path) 
                 },
             }
         },
-        "outputs": {**base["outputs"], "output_dir": str(tmp_path / "passive_ogp")},
+        "outputs": {**base["outputs"], "output_dir": str(tmp_path / f"passive_ogp_{case_id}")},
     }
     trajectory_raw = {
         **base,
@@ -225,7 +273,7 @@ def test_trajectory_only_matches_passive_ogp_sgp4_truth_exactly(tmp_path: Path) 
                 "runtime_profile": "trajectory_only",
             }
         },
-        "outputs": {**base["outputs"], "output_dir": str(tmp_path / "trajectory_ogp")},
+        "outputs": {**base["outputs"], "output_dir": str(tmp_path / f"trajectory_ogp_{case_id}")},
     }
 
     passive = SimulationSession.from_config(SimulationConfig.from_dict(passive_raw)).run()

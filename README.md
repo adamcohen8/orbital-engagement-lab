@@ -1,3 +1,4 @@
+<!-- Source template: tools/export_public.py copies this file to the public export root as README.md. Root-relative links below are intentional. -->
 # Orbital Engagement Lab
 
 
@@ -262,6 +263,14 @@ Space to launch, and Escape to return to the selector. Training runs can also
 write debriefs and recordings under `outputs/`; see
 [Video Game Mode Roadmap](docs/game-mode-roadmap.md) for controls, debriefs,
 recording, and level-design notes.
+
+### RPO Duel Beta And Browser Preview
+
+The public export also includes the experimental browser-native
+[RPO Duel Beta](RPO_DUEL.md) and a standalone trainer web preview. Duel is a
+multiplayer game surface, not a browser port of the deterministic OEL physics
+engine. Follow its local/deployment guide and treat the preview as an interface
+demonstration rather than simulation evidence.
 
 During supported RPO levels, `O` and `P` swap the RI or RC plot into an
 orbit-plane view. In `Bonus Level - Cislunar Rendezvous`, that swapped view is

@@ -279,6 +279,7 @@ def plot_outputs(
     knowledge_measurement_hist: dict[str, dict[str, np.ndarray]] | None = None,
     bridge_hist: dict[str, list[dict[str, Any]]] | None = None,
     reentry_metrics: dict[str, dict[str, np.ndarray]] | None = None,
+    ground_station_access: dict[str, Any] | None = None,
 ) -> dict[str, str]:
     if not bool(cfg.outputs.plots.get("enabled", True)):
         return {}
@@ -301,6 +302,7 @@ def plot_outputs(
             knowledge_measurement_hist=knowledge_measurement_hist,
             bridge_hist=bridge_hist,
             reentry_metrics=reentry_metrics,
+            ground_station_access=ground_station_access,
         )
 
 
@@ -321,6 +323,7 @@ def _plot_outputs_impl(
     knowledge_measurement_hist: dict[str, dict[str, np.ndarray]] | None = None,
     bridge_hist: dict[str, list[dict[str, Any]]] | None = None,
     reentry_metrics: dict[str, dict[str, np.ndarray]] | None = None,
+    ground_station_access: dict[str, Any] | None = None,
 ) -> dict[str, str]:
     if not bool(cfg.outputs.plots.get("enabled", True)):
         return {}
@@ -345,6 +348,7 @@ def _plot_outputs_impl(
         knowledge_measurement_hist=knowledge_measurement_hist,
         bridge_hist=bridge_hist,
         reentry_metrics=reentry_metrics,
+        ground_station_access=ground_station_access,
     )
     return render_plot_outputs(context)
 

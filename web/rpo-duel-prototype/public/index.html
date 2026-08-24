@@ -76,16 +76,16 @@
           <div class="duel-top-left">
             <h1>RPO DUEL <span id="round-label">— / —</span></h1>
             <div class="duel-top-metrics" aria-label="Duel metrics">
-              <span>INFO Range <strong id="range-label">—</strong></span>
-              <span>INFO Rel Speed <strong id="speed-label">—</strong></span>
-              <span>INFO Delta-v <strong id="dv-label">—</strong></span>
-              <span>INFO Time Left <strong id="time-label">05:00:00</strong></span>
+              <span>Range <strong id="range-label">—</strong></span>
+              <span>Rel Speed <strong id="speed-label">—</strong></span>
+              <span>Delta-v <strong id="dv-label">—</strong></span>
+              <span>Time Left <strong id="time-label">05:00:00</strong></span>
             </div>
           </div>
           <div class="duel-objective">
             <span class="objective-heading">YOUR ROLE</span>
             <strong id="role-label">WAITING</strong>
-            <div id="auto-time" class="auto-time"><span>AUTO TIME</span><strong>200x</strong><small>COASTING</small></div>
+            <div id="auto-time" class="auto-time"><div class="auto-time-heading"><span>AUTO TIME</span><small>COAST</small></div><strong>200x</strong></div>
           </div>
         </header>
 
@@ -126,12 +126,8 @@
               <div id="player-two-card" class="player-score"><b>0</b><span class="player-name">PLAYER 2</span><span class="status-dot"></span></div>
             </div>
           </div>
-          <div class="hint-line">Any maneuver sets shared time to 10x. Both players neutral returns it to 200x.</div>
-          <div class="command-line">W/S R&nbsp;&nbsp; A/D I&nbsp;&nbsp; Left/Right C-axis&nbsp;&nbsp; C Camera&nbsp;&nbsp; M Music</div>
-          <div class="connection-card">
-            <div><span id="own-connection-dot" class="status-dot"></span><span id="own-connection-label">YOU · CONNECTING</span></div>
-            <div><span id="opponent-connection-dot" class="status-dot"></span><span id="opponent-connection-label">OPPONENT · WAITING</span></div>
-          </div>
+          <div class="hint-line">Any maneuver: shared time 10x. Both players neutral: 200x.</div>
+          <div class="command-line">W/S Radial&nbsp;&nbsp; A/D In-Track&nbsp;&nbsp; Left/Right Cross-Track</div>
         </aside>
 
         <section class="touch-controls" aria-label="Spacecraft maneuver controls">

@@ -8,6 +8,7 @@ from typing import Any
 import numpy as np
 
 from sim.core.models import Command, StateBelief, StateTruth
+from sim.dynamics.model import OrbitalAttitudeDynamics
 from sim.dynamics.orbit.cr3bp import cr3bp_system
 from sim.dynamics.orbit.environment import EARTH_RADIUS_KM
 from sim.dynamics.orbit.epoch import TIME_DEPENDENT_ENV_CACHE_KEY
@@ -494,6 +495,10 @@ class _SatelliteStepper:
             "attitude_disabled": (not e.attitude_enabled),
             TIME_DEPENDENT_ENV_CACHE_KEY: getattr(e, "_time_dependent_env_cache", {}),
         }
+        # Checked-in dynamics treat commands as immutable inputs. Reuse one
+        # zero command across internal substeps while retaining the historical
+        # fresh-command behavior for third-party dynamics implementations.
+        zero_command = Command.zero() if isinstance(agent.dynamics, OrbitalAttitudeDynamics) else None
         while current_s < final_s:
             h = min(substep_s, final_s - current_s)
             if h <= 0.0:
@@ -501,7 +506,7 @@ class _SatelliteStepper:
             environment["world_truth"] = {**world_truth_decision, aid: tr_inner}
             tr_inner = agent.dynamics.step(
                 state=tr_inner,
-                command=Command.zero(),
+                command=zero_command if zero_command is not None else Command.zero(),
                 env=environment,
                 dt_s=h,
             )

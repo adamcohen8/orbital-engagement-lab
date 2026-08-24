@@ -1,3 +1,4 @@
+schema_version: oel.scenario.v1
 scenario_name: public_agent_mission_reconstitution_trade_space
 scenario_description: 'Public agent example: apply a simple +I in-track burn, then
   generate a simulator-backed mission reconstitution trade space with min-time, min-delta-v,
@@ -34,7 +35,12 @@ objects:
       hardware_profile: hardware.ideal_wrench.v1
       params:
         max_acceleration_m_s2: 0.02
-        translation_mode: stationkeeping
+        translation_mode: scheduled_burn
+        scheduled_burns:
+        - start_time_s: 10.0
+          duration_s: 5.0
+          frame: ric
+          delta_v_m_s: [0.0, 0.1, 0.0]
 simulator:
   duration_s: 600.0
   dt_s: 1.0
@@ -78,6 +84,9 @@ analysis:
     max_phasing_orbits: 25
     planner:
       enabled: true
+      sources:
+      - analytic_reconstitution
+      - orbit_transfer
       modes:
       - min_delta_v
       - min_time
@@ -86,6 +95,14 @@ analysis:
       max_recovery_delta_v_m_s: 15.0
       candidate_count: 8
       simulate_candidates: true
+      orbit_transfer:
+        enabled: true
+        departure_samples: 5
+        time_of_flight_samples: 8
+        min_time_of_flight_s: 300.0
+        max_time_of_flight_s: 86400.0
+        short_way: true
+        long_way: false
     propulsion:
       spacecraft_mass_kg: 100.0
       isp_s: 220.0

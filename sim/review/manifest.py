@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 import os
@@ -10,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from sim.review.generated_artifacts import clear_generated_review_artifacts
+from sim.utils.io import sha256_file
 
 WORKFLOW_REVIEW_SCHEMA_VERSION = "0.1"
 
@@ -370,7 +370,7 @@ def _artifact_rows(artifacts: dict[str, Any], *, output_dir: Path) -> list[dict[
                 "path": _relative_path(path_text, output_dir=output_dir),
                 "path_exists": exists,
                 "size_bytes": int(resolved.stat().st_size) if exists else 0,
-                "sha256": hashlib.sha256(resolved.read_bytes()).hexdigest() if exists else "",
+                "sha256": sha256_file(resolved) if exists else "",
             }
         )
     return rows

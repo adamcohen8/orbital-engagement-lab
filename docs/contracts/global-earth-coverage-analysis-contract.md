@@ -15,7 +15,11 @@ versioned declared regions without rerunning geometry, maps WGS84 points with
 the canonical HEALPix rule, and writes deterministic query evidence bound to
 the source interval hash. Canonical conical coverage has evidence-only
 scenario, completed ONP/review, ECI OGP, and primary review-store adapters.
-Agent-tool adapters are not yet implemented.
+The canonical conical/directed-link workflow also has a supported
+`coverage_link_review` agent recipe, named saved queries, and content-bound
+plot recipes. Rich footprints, communications coverage, aggregation, tasking,
+and a concrete causal ONP/FSW consumer do not yet have equivalent public agent
+adapters.
 
 Rich rectangular/pushbroom FOVs, explicit service constraints, and sampled
 footprint-boundary review geometry are governed separately by

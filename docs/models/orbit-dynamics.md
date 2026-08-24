@@ -91,11 +91,14 @@ small RK4 helper used by selected controllers, estimators, and mission-analysis
 modules. It uses the same two-body acceleration form plus a constant command
 acceleration over the step.
 
-The optional acceleration layer can replace a narrow fixed-step path with an
-accelerated kernel when the active force stack is limited to two-body gravity,
-J2, J3, J4, and constant command acceleration for the step. Drag, SRP,
-spherical harmonics, third bodies, adaptive integrators, and custom plugins use
-the standard Python path.
+The optional acceleration layer has specialized, fused, and staged force-plan
+tiers. Profitable staged plans can cover fixed-step RK4 and adaptive RKF78,
+`adaptive`, or `dopri5` integration with J2/J3/J4, drag/lift, normalized
+spherical harmonics, SRP, and Sun/Moon/planetary third bodies. Acceleration
+availability, force-plan size, coefficient normalization, atmosphere,
+EOP/ephemeris inputs, and supported callback boundaries determine routing.
+Custom callbacks remain Python-authoritative and may be interleaved with
+compiled built-in components; unsupported plans fall back to the Python path.
 
 ## Frames, Units, And Signs
 
@@ -160,9 +163,11 @@ Common related controls include:
 
 - `simulator.acceleration.mode`: `off`, `auto`, or `numba` for optional numeric
   acceleration.
-- `simulator.dynamics.orbit.atmosphere_model` and
-  `simulator.environment.atmosphere_env`: density-model selection and model
-  inputs for drag/lift.
+- `simulator.environment.atmosphere_model` (or explicit `density_kg_m3`) and
+  `simulator.environment.atmosphere_env`: the primary shared density-model
+  selection and inputs for drag/lift. The orbit-level `atmosphere_model` is a
+  legacy direct-runtime compatibility alias and does not satisfy validate-first
+  scenario ownership by itself.
 - object `specs.mass_kg`, `drag_area_m2`, `area_m2`, `cd`, `srp_area_m2`,
   `cr`, and related aero/SRP fields: spacecraft properties used by drag, lift,
   and SRP.
@@ -171,6 +176,12 @@ Common related controls include:
 - `spherical_harmonics.terms`, `coeff_path`, `degree`, `order`,
   `reference_radius_km`, `frame_model`, and `eop_path`: spherical-harmonic
   gravity inputs.
+
+Mode-driven analytic, DE440, and SPICE Sun/Moon ephemerides require an
+absolute epoch. Without one, the mode branch is not activated and the resolver
+uses fixed default vectors (Sun at `[AU_KM, 0, 0]`, Moon at
+`[384400, 0, 0]` km) unless explicit vectors, sampled histories, or a callback
+are supplied.
 
 Scenario validation enforces strict boolean values for orbit booleans and
 rejects unsupported CR3BP/perturbation combinations. Users should validate new

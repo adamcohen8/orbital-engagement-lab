@@ -3472,17 +3472,11 @@ function bindCommandButton(button, handler) {
 }
 
 function suppressMobileSelectionEvents() {
-  const protectedSelectors = [
-    ".touch-controls",
-    ".mobile-speed-controls",
-    ".hud-actions",
-    ".plot-panel",
-    "canvas",
-  ].join(",");
   const shouldSuppress = (event) => {
     if (state.activeView !== "mobile") return false;
+    if (state.mode === "selector") return false;
     if (isEditableControlTarget(event.target)) return false;
-    return Boolean(event.target?.closest?.(protectedSelectors));
+    return true;
   };
   ["selectstart", "dragstart", "contextmenu"].forEach((type) => {
     document.addEventListener(
@@ -3498,14 +3492,34 @@ function suppressMobileSelectionEvents() {
 
 function bindEvents() {
   suppressMobileSelectionEvents();
+  const touchPointers = new Map();
+  const clearTouchPointer = (event) => {
+    const entry = touchPointers.get(event.pointerId);
+    if (!entry) return;
+    event.preventDefault();
+    touchPointers.delete(event.pointerId);
+    const stillPressed = [...touchPointers.values()].some((candidate) => candidate.button === entry.button);
+    if (stillPressed) return;
+    touch.delete(entry.value);
+    entry.button.classList.remove("active");
+    delete entry.button.dataset.pressed;
+    refreshInputState();
+  };
   const clearManeuverInputs = () => {
     keys.clear();
     keyPulses.clear();
     touch.clear();
     touchPulses.clear();
+    touchPointers.clear();
+    document.querySelectorAll("[data-touch]").forEach((button) => {
+      button.classList.remove("active");
+      delete button.dataset.pressed;
+    });
     refreshInputState();
   };
   window.addEventListener("blur", clearManeuverInputs);
+  window.addEventListener("pointerup", clearTouchPointer, { capture: true });
+  window.addEventListener("pointercancel", clearTouchPointer, { capture: true });
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState !== "visible") clearManeuverInputs();
   });
@@ -3594,22 +3608,18 @@ function bindEvents() {
     const value = button.dataset.touch;
     const start = (event) => {
       event.preventDefault();
+      if (button.disabled) return;
       playMusicFromGesture();
+      touchPointers.set(event.pointerId, { button, value });
+      button.setPointerCapture?.(event.pointerId);
+      button.dataset.pressed = "true";
+      button.classList.add("active");
       touch.add(value);
       touchPulses.add(value);
       refreshInputState();
     };
-    const stop = () => {
-      touch.delete(value);
-      refreshInputState();
-    };
     button.addEventListener("pointerdown", start);
-    button.addEventListener("touchstart", start, { passive: false });
-    button.addEventListener("pointerup", stop);
-    button.addEventListener("pointerleave", stop);
-    button.addEventListener("pointercancel", stop);
-    button.addEventListener("touchend", stop);
-    button.addEventListener("touchcancel", stop);
+    button.addEventListener("lostpointercapture", clearTouchPointer);
   });
   bindCommandButton(el.pauseButton, () => {
     playMusicFromGesture();

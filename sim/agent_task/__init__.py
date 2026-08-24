@@ -1,8 +1,9 @@
 # ruff: noqa: E402 -- automation cache policy must run before plotting imports.
 """Agent-oriented OEL workflow recipes and evidence packets."""
 
-from sim.runtime_environment import configure_headless_runtime
+from sim.runtime_environment import configure_headless_runtime, configure_runtime_caches
 
+configure_runtime_caches()
 configure_headless_runtime()
 
 from sim.agent_task.models import (

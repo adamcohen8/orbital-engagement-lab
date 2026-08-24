@@ -51,7 +51,37 @@ they are missing, score submission still succeeds and the API returns
 
 ## API Contract
 
-Submit a validated leaderboard attempt:
+Submit a validated leaderboard attempt. Do not hand-author the nested attempt;
+generate it from the active challenge and recorded replay so its identifiers,
+rounds, claims, and input events remain content-consistent:
+
+```js
+import {
+  buildChallengeRecord,
+  createPursuitArcadeSession,
+  validateArcadeAttemptPacket,
+} from "../src/competition/arcade-engine.js";
+
+const challenge = buildChallengeRecord();
+const session = createPursuitArcadeSession(challenge.config, { seed: 4242 });
+session.step(1); // record a contiguous first-round replay
+const attempt = session.attemptPacket({
+  challengeRecord: challenge,
+  username: "ORBITACE",
+  email: "optional@example.edu",
+  client_build_hash: "deployed-build-id",
+});
+if (validateArcadeAttemptPacket(attempt, challenge).status === "invalid") {
+  throw new Error("Refusing to submit an invalid arcade attempt");
+}
+await fetch("/api/submit-attempt", {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ username: attempt.username, email: attempt.email, attempt }),
+});
+```
+
+The HTTP wrapper accepted by the API is:
 
 ```http
 POST /api/submit-attempt
@@ -62,13 +92,14 @@ Content-Type: application/json
 {
   "username": "ORBITACE",
   "email": "optional@example.edu",
-  "attempt": {
-    "schema_version": 2,
-    "attempt_type": "arcade_run",
-    "round_attempts": []
-  }
+  "attempt": "the generated makeArcadeAttemptPacket-shaped object"
 }
 ```
+
+The generated object includes the active challenge/physics/scoring/config
+identifiers, seed, claimed score and metrics, and at least one contiguous round
+with `final_tick` and `input_events`. An empty `round_attempts` array is invalid
+and returns HTTP 422.
 
 Read public leaderboard rows:
 

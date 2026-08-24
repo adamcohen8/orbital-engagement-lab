@@ -23,8 +23,8 @@ from sim.analysis.healpix import (
     HEALPIX_GRID_ID,
     WGS84_AUTHALIC_RADIUS_KM,
     WGS84_SURFACE_AREA_KM2,
+    cached_healpix_wgs84_centers,
     healpix_npix,
-    healpix_wgs84_centers,
 )
 from sim.analysis.sensor_footprint_geometry import (
     PRIMARY_REASON_NAMES,
@@ -170,6 +170,7 @@ class RichCoverageArtifacts:
     intervals_npz: Path
     footprints_npz: Path
     footprint_plot_png: Path | None
+    footprint_plot_quality_json: Path | None
 
 
 def estimate_rich_coverage_resources(
@@ -594,7 +595,7 @@ def evaluate_rich_coverage(
     for start in range(0, npix, config.chunk_size):
         stop = min(start + config.chunk_size, npix)
         cells = np.arange(start, stop, dtype=np.int64)
-        centers = healpix_wgs84_centers(config.order, cells)
+        centers = cached_healpix_wgs84_centers(config.order, cells)
         latitude_chunks.append(np.rad2deg(centers.geodetic_latitude_rad))
         longitude_chunks.append(np.rad2deg(centers.longitude_rad))
         mask = np.zeros((times.size, cells.size), dtype=bool)
@@ -675,6 +676,7 @@ def write_rich_coverage_artifacts(
     *,
     include_cell_csv: bool = True,
     include_footprint_plot: bool = False,
+    plot_scenario_name: str = "",
 ) -> RichCoverageArtifacts:
     """Write deterministic Phase 3 evidence and an optional review overlay."""
 
@@ -688,6 +690,7 @@ def write_rich_coverage_artifacts(
     intervals_path = destination / "rich_coverage_intervals.npz"
     footprints_path = destination / "rich_coverage_footprints.npz"
     plot_path = destination / "rich_coverage_footprints.png" if include_footprint_plot else None
+    plot_quality_path = destination / "rich_coverage_footprints.quality.json" if include_footprint_plot else None
     manifest_path = destination / "rich_coverage_analysis_manifest.json"
 
     _write_json(summary_path, result.summary)
@@ -794,7 +797,7 @@ def write_rich_coverage_artifacts(
     if plot_path is not None:
         from sim.analysis.coverage_plotting import write_coverage_footprint_plot
 
-        write_coverage_footprint_plot(result, plot_path)
+        write_coverage_footprint_plot(result, plot_path, scenario_name=plot_scenario_name)
 
     artifacts: dict[str, dict[str, Any]] = {
         summary_path.name: {"sha256": _sha256_file(summary_path)},
@@ -815,6 +818,8 @@ def write_rich_coverage_artifacts(
             "sha256": _sha256_file(plot_path),
             "disposition": "review_visual_not_scientific_identity",
         }
+    if plot_quality_path is not None:
+        artifacts[plot_quality_path.name] = {"sha256": _sha256_file(plot_quality_path)}
     _write_json(
         manifest_path,
         {
@@ -839,6 +844,7 @@ def write_rich_coverage_artifacts(
         intervals_npz=intervals_path,
         footprints_npz=footprints_path,
         footprint_plot_png=plot_path,
+        footprint_plot_quality_json=plot_quality_path,
     )
 
 

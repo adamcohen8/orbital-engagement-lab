@@ -366,7 +366,7 @@ def test_orbit_reference_executes_scheduled_finite_burn_through_hardware() -> No
                     "start_time_s": 0.1,
                     "duration_s": 0.1,
                     "frame": "eci",
-                    "delta_v_m_s": [0.001, 0.0, 0.0],
+                    "delta_v_m_s": [0.002, 0.0, 0.0],
                 }
             ],
         },
@@ -383,6 +383,16 @@ def test_orbit_reference_executes_scheduled_finite_burn_through_hardware() -> No
     ]
     assert active
     assert active[0].realized_force_n[0] > 0.0
+    fields = {
+        field.name: field.value
+        for output in runtime.evidence.outputs
+        for telemetry in output.telemetry
+        for field in telemetry.fields
+    }
+    assert fields["scheduled_burn_original_accel_m_s2"] == pytest.approx(0.02)
+    assert fields["scheduled_burn_original_delta_v_m_s"] == pytest.approx(0.002)
+    assert fields["scheduled_burn_controller_clipped"] is True
+    assert fields["requested_force_n"] < fields["scheduled_burn_original_force_n"]
 
 
 def test_yaml_actions_constraints_and_alpha_beta_filter_reach_the_complete_stack() -> None:

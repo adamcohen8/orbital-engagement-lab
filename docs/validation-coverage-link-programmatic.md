@@ -7,12 +7,14 @@ deferred to a future release**.
 This record covers the deterministic kernels introduced through Coverage
 Phases 1-6. It is not a release-readiness or operational-authority claim.
 
-Canonical conical coverage and directed object-to-object links now also have
+Canonical conical coverage and directed spacecraft-to-spacecraft or
+spacecraft-to-ground-station links now also have
 evidence-only scenario YAML execution, completed ONP/review and ECI OGP history
 normalization, primary review-store tables, and provider-backed event
-refinement. These adapters have focused integration coverage. Rich coverage,
-communications coverage, aggregation, tasking, causal ONP consumers, and
-agent-facing execution still require separate adapters.
+refinement. They are exposed through a supported agent task recipe, named MCP
+review queries, content-bound plot recipes, run-summary/index results, and
+strict-QA native figures. Rich coverage, communications coverage, aggregation,
+tasking, and causal ONP consumers still require separate adapters.
 
 ## Reproducible Gate
 
@@ -48,8 +50,9 @@ The acceptance fixtures cover:
   rejection, and artifact fixtures;
 - exact bounded task selection with source and asset bindings, slew/settling,
   duty, storage, horizon energy, downlink, stable tie behavior, and artifacts;
-- authorized next-boundary runtime delivery with consumer isolation and exact
-  link-configuration binding; and
+- standalone authorized next-boundary monitor delivery with consumer isolation
+  and exact link-configuration binding. This proves the causal adapter
+  protocol, not integration with an ONP or flight-software consumer; and
 - source-bound cadence sensitivity evidence with nested epochs, matched
   non-refinement assumptions, and explicit caller limits.
 

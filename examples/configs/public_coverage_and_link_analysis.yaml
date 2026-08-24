@@ -1,3 +1,4 @@
+schema_version: oel.scenario.v1
 scenario_name: public_coverage_and_link_analysis
 scenario_description: >-
   Public experimental example: propagate two passive spacecraft once, then
@@ -88,6 +89,7 @@ outputs:
         transition_time_tolerance_s: 0.25
         transition_max_iterations: 30
         include_cell_csv: false
+        include_fraction_plot: true
     directed_links:
       - analysis_id: satellite_a_to_b
         link_id: satellite_a_to_b
@@ -110,4 +112,4 @@ outputs:
         required_eb_n0_db: 5.0
         transition_time_tolerance_s: 0.25
         transition_max_iterations: 30
-        include_margin_plot: false
+        include_margin_plot: true

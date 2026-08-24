@@ -22,6 +22,9 @@ For common agent workflows, built-in saved query names are available:
 .venv/bin/python -m sim.review outputs/<scenario_name> --list-saved-queries
 .venv/bin/python -m sim.review outputs/<scenario_name> --saved-query run_metadata
 .venv/bin/python -m sim.review outputs/<scenario_name> --saved-query object_state_first_last
+.venv/bin/python -m sim.review outputs/<scenario_name> --saved-query object_final_state
+.venv/bin/python -m sim.review outputs/<scenario_name> --saved-query object_eci_radius_extrema
+.venv/bin/python -m sim.review outputs/<scenario_name> --saved-query object_orbital_elements_first_last
 .venv/bin/python -m sim.review outputs/<scenario_name> --saved-query rendezvous_metrics
 .venv/bin/python -m sim.review outputs/<scenario_name> --saved-query actuator_command_chain
 .venv/bin/python -m sim.review outputs/<scenario_name> --saved-query safety_requirement_status
@@ -62,6 +65,13 @@ Each saved query carries machine-readable metadata in `sim.review.queries`:
 Treat zero rows from a query with `allow_empty: false` as evidence to investigate
 the scenario or review store before making a claim.
 
+For maneuver interpretation, use `burn_command_summary` together with raw
+`controller_decisions` and `thrust`. Configured `delta_v_m_s` is a request;
+available acceleration, duration, gates, and saturation determine applied and
+realized values. Retained active-thrust rows are sampled states, not continuous
+interval endpoints, so do not infer burn duration by multiplying row count
+without stating the discrete-time convention.
+
 For first-run propagation, rendezvous, and mission-recovery workflows, start
 with [`agent-capability-routing.md`](agent-capability-routing.md). It names the exact
 configs, output directories, and saved queries that should be run before an
@@ -77,10 +87,14 @@ missing, the scenario did not record that evidence path.
 | `run_metadata` | `scenario_name`, `duration_s`, `dt_s`, `samples`, `oel_version`, `review_schema_version` |
 | `objects` | `object_id`, `object_type`, `role`, `mass_initial_kg`, `runtime_profile`, `flight_software_stack` |
 | `object_state` | `sample_index`, `time_s`, `object_id`, ECI position/velocity, attitude quaternion/body rate, `mass_kg` |
-| `object_propagation` | `object_id`, `propagation_method`, `general_model`, `native_frame`, `output_frame`, `frame_transform`, `tle_epoch_jd_utc`, `tle_age_start_days`, `tle_age_end_days` |
+| `object_propagation` | resolved propagator family/name, `ogp_regime`, `orbital_period_min`, native/output/history frames, transform, TLE epoch/age/warning |
 | `object_state_frame` | `object_id`, `state_frame` |
+| `frame_provenance` | resolved frame model, epoch/time-scale, EOP source, and transform provenance |
+| `object_initialization` | object ID, initial-state form/source, frame, epoch, and initializer provenance |
 | `object_state_covariance` | `sample_index`, `time_s`, `object_id`, `frame`, `component_order_json`, `units_json`, `covariance_json`, `mathematically_valid`, `calibrated`, `calibration_scope`, `source` |
 | `object_state` attitude fields | `quat_w`, `quat_x`, `quat_y`, `quat_z`, `omega_x_rad_s`, `omega_y_rad_s`, `omega_z_rad_s` |
+| `object_orbital_elements` | sampled radius/speed and classical elements plus circular/equatorial conditioning and conversion status |
+| `attitude_error` | desired/actual quaternion components, shortest-arc quaternion error angle, and pointing-error alias |
 | `relative_state` | `time_s`, `deputy_id`, `chief_id`, `r_radial_km`, `i_intrack_km`, `c_crosstrack_km`, `range_km`, `range_rate_km_s` |
 | `thrust` | `time_s`, `object_id`, `burn_active`, `accel_norm_km_s2` |
 | `controller_decisions` | `time_s`, `object_id`, controller/mission identities, requested/applied command norms, `burn_requested`, `burn_applied`, `saturated`, `deadline_missed` |
@@ -88,20 +102,30 @@ missing, the scenario did not record that evidence path.
 | `mission_transitions` | `time_s`, `object_id`, `from_mode`, `to_mode`, `trigger`, `reason` |
 | `command_gates` | `time_s`, `object_id`, burn state, alignment, fuel/actuator/deadline flags, `gate_reason` |
 | `fsw_invocations` | `object_id`, `invocation_id`, `invocation_time_ns`, `stack_id`, `profile_id`, input/command/telemetry counts |
+| `fsw_loads` | object/load identity, schema, source/delivery clocks, acceptance, and status |
+| `fsw_objectives` | object/invocation/objective identity, state, priority, and detail |
 | `fsw_input_events` | packet identity, `invocation_id`, `kind`, source/delivery time, `schema` |
 | `fsw_task_timing` | `object_id`, `invocation_id`, `task_id`, release time, modeled duration, budget, `deadline_missed` |
 | `actuator_commands` | command identity, `actuator_id`, issue/not-before/expiry times, command schema |
 | `actuator_command_receipts` | command identity, receive time, `disposition`, status codes |
-| `actuator_realization` | command identity, realization interval, demand mode, `saturated`, physical detail |
+| `actuator_realization` | command identity, realization interval, demand mode, `saturated`, mass flow, and requested/realized force and torque components |
+| `actuator_device_state` | realization interval, device field name/unit, and typed numeric/text/JSON value |
+| `fsw_diagnostic_fields` | diagnostic topic/time, field name/unit, and typed numeric/text/JSON value |
+| `fsw_diagnostics` | raw diagnostic topic/time/schema/detail; prefer normalized fields for ordinary queries |
 | `safety_requirement_evidence` | `object_id`, `invocation_id`, `requirement_id`, `satisfied`, `source`, detail |
-| `fsw_snapshots` | `object_id`, `invocation_id`, stack identity and state hash; opaque restart state remains in `detail_json` |
+| `fsw_snapshots` | `object_id`, `invocation_id`, stack identity and state hash; opaque restart state is `detail_gzip` at standard detail and `detail_json` at full detail |
 | `ground_access` | `time_s`, `station_id`, `object_id`, `access`, `range_km`, `elevation_deg`, `reason` |
+| `ground_access_windows` | sampled start/end/duration, range/elevation extrema, run-boundary censoring, and boundary semantics |
 | `events` | `time_s`, `object_id`, `event_type`, `severity`, `message` |
 | `metrics` | `metric_name`, `value`, `units`, `object_id`, `deputy_id`, `chief_id` |
 | `mission_recovery_summary` | `object_id`, `goal`, `method`, `recovery_delta_v_m_s`, `recovery_time_s`, `propellant_kg`, `slot_recovery_time_s` |
 | `mission_recovery_elements` | `object_id`, `state_label`, `a_km`, `ecc`, `inc_deg`, `raan_deg`, `argp_deg`, `true_anomaly_deg` |
 | `mission_recovery_candidates` | `candidate_id`, `object_id`, `goal`, `source`, `planned_delta_v_m_s`, `planned_time_s`, `feasible`, `verified` |
 | `mission_recovery_burns` | `candidate_id`, `burn_index`, `start_time_s`, `frame`, `axis`, `delta_v_m_s` |
+| `mission_recovery_candidate_elements` | candidate ID plus resulting/target element and error details |
+| `game_input_events` / `game_observer_policy` / `game_scoring` | typed operator input, observer-policy, and truth-separated scoring evidence |
+| `coverage_summary` / `coverage_samples` / `coverage_intervals` / `coverage_transitions` | coverage identity, sampled fractions, intervals, and transitions |
+| `link_summary` / `link_samples` / `link_windows` / `link_transitions` | typed endpoint identity and terminal parent frames, sampled RF/geometric closure, censored windows, and transitions |
 | `artifacts` | `artifact_type`, `artifact_id`, `path` |
 | `workflow_metadata` | `workflow_type`, `scenario_name`, `title`, `status`, `generated_utc`, `review_schema_version`, `source_config` |
 | `workflow_artifacts` | `artifact_key`, `artifact_type`, `path` |
@@ -185,6 +209,14 @@ Continuous OGP propagation and frame contract:
 
 ```bash
 .venv/bin/python -m sim.review outputs/<scenario_name> --saved-query ogp_propagation_contract --json
+```
+
+For FSW diagnostics, begin with the bounded field inventory and then select a
+specific `field_name`; avoid broad joins over full diagnostic envelopes:
+
+```bash
+.venv/bin/python -m sim.review outputs/<scenario_name> \
+  --saved-query fsw_diagnostic_field_inventory --json
 ```
 
 The OGP product's native/output frame and the canonical review-state frame are
@@ -289,25 +321,31 @@ No-access reasons:
 Coverage summary and sampled extrema:
 
 ```bash
-python -m sim.review outputs/<scenario_name> --query "SELECT s.analysis_id, s.source_object_id, COUNT(c.sample_index) AS samples, MIN(c.instantaneous_covered_fraction) AS minimum_fraction, MAX(c.instantaneous_covered_fraction) AS maximum_fraction FROM coverage_summary s LEFT JOIN coverage_samples c USING (analysis_id) GROUP BY s.analysis_id, s.source_object_id ORDER BY s.analysis_id"
+python -m sim.review outputs/<scenario_name> --saved-query coverage_summary
 ```
 
 Coverage transitions and their refinement dispositions:
 
 ```bash
-python -m sim.review outputs/<scenario_name> --query "SELECT analysis_id, transition_kind, disposition, COUNT(*) AS transitions FROM coverage_transitions GROUP BY analysis_id, transition_kind, disposition ORDER BY analysis_id, transition_kind, disposition"
+python -m sim.review outputs/<scenario_name> --saved-query coverage_transition_summary
 ```
 
 Directed-link availability, range, and margin:
 
 ```bash
-python -m sim.review outputs/<scenario_name> --query "SELECT s.analysis_id, s.link_id, COUNT(l.sample_index) AS samples, SUM(l.available) AS available_samples, MIN(l.range_km) AS minimum_range_km, MIN(l.margin_db) AS minimum_margin_db, MAX(l.margin_db) AS maximum_margin_db FROM link_summary s LEFT JOIN link_samples l USING (analysis_id) GROUP BY s.analysis_id, s.link_id ORDER BY s.analysis_id"
+python -m sim.review outputs/<scenario_name> --saved-query directed_link_summary
 ```
+
+The link-table names `tx_object_id` and `rx_object_id` are legacy generalized
+endpoint-ID columns. A fixed WGS84 site is stored there by configured ID; the
+row has no endpoint-kind column. Confirm endpoint kind from the source config,
+orbital-analysis artifacts, or `master_run_summary.json` before calling either
+endpoint a spacecraft.
 
 Directed-link windows:
 
 ```bash
-python -m sim.review outputs/<scenario_name> --query "SELECT analysis_id, interval_index, start_s, end_s, duration_s, minimum_margin_db, estimated_delivered_data_bits, acquisition_disposition, loss_disposition FROM link_windows ORDER BY analysis_id, interval_index" --json
+python -m sim.review outputs/<scenario_name> --saved-query directed_link_windows --json
 ```
 
 ## Attitude And Applied Commands

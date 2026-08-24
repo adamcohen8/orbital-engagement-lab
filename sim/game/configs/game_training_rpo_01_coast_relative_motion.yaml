@@ -192,3 +192,6 @@ outputs:
     fps: 30
     speed_multiple: 1.0
     frame_stride: 1
+  review:
+    enabled: true
+    detail: standard

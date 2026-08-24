@@ -17,6 +17,7 @@ from sim.agent_task.semantics import get_semantic_metric, semantic_metric_dicts,
 from sim.api import SimulationWorkspace
 from sim.config import scenario_config_from_dict
 from sim.execution import run_simulation_config_file
+from sim.execution.service import SimulationExecutionService
 from sim.resource_limits import apply_resource_profile_to_config_dict
 from sim.review import (
     ReviewQueryError,
@@ -29,7 +30,19 @@ from sim.review.plotting import ReviewPlotArtifact, save_review_plot
 from sim.security import ConfigPathPolicy
 
 DEFAULT_INSPECTION_QUERIES = ("run_metadata", "objects", "artifacts")
-DEFAULT_COMPARISON_METRICS = ("initial_range_km", "final_range_km", "closest_approach_km", "closest_approach_time_s")
+DEFAULT_COMPARISON_METRICS = (
+    "initial_range_km",
+    "final_range_km",
+    "final_range_rate_km_s",
+    "closest_approach_km",
+    "closest_approach_time_s",
+    "total_delta_v_m_s",
+)
+
+_PREPARED_CONFIG_CACHE: dict[str, tuple[str, Any]] = {}
+_EXPECTED_PREPARED_CONFIG_DIGESTS: dict[str, str] = {}
+_AGENT_TASK_EXECUTION_SERVICE = SimulationExecutionService()
+_RUN_SIMULATION_CONFIG_FILE_ORIGINAL = run_simulation_config_file
 
 
 class AgentTaskCancelled(RuntimeError):
@@ -73,13 +86,15 @@ def run_recipe(
         packet.failure_hints = [
             hint.to_dict() for hint in diagnose_failure(validation=validation, output_dir=prepared["output_dir"])
         ]
+        _discard_prepared_config(prepared["config_path"])
         return _write_packet(packet, prepared["output_dir"])
     if dry_run:
         packet.caveats.append("Dry run requested: scenario was validated but not executed.")
+        _discard_prepared_config(prepared["config_path"])
         return _write_packet(packet, prepared["output_dir"])
 
     try:
-        payload = run_simulation_config_file(prepared["config_path"], step_callback=step_callback)
+        payload = _run_prepared_config(prepared["config_path"], step_callback=step_callback)
         packet.run = _run_summary(payload)
         packet.status = "completed"
     except AgentTaskCancelled as exc:
@@ -109,6 +124,8 @@ def run_recipe(
     packet.artifacts = list(inspection.get("artifacts", []) or [])
     packet.artifact_summary = dict(inspection.get("artifact_summary", {}) or _summarize_artifacts(packet.artifacts))
     packet.failure_hints.extend(list(inspection.get("failure_hints", []) or []))
+    if str(inspection.get("status") or "") != "completed":
+        packet.status = "partial"
     if make_plots:
         packet.plots = _make_plots_for_recipe(
             prepared["output_dir"],
@@ -116,6 +133,28 @@ def run_recipe(
             style_name=style_name,
         )
         packet.plot_summary = _summarize_plots(packet.plots)
+        failed_plots = [
+            dict(item)
+            for item in packet.plots
+            if str(item.get("status", "")).strip().lower() != "ok"
+            or item.get("path_exists") is False
+            or bool(item.get("truncated"))
+        ]
+        if failed_plots:
+            packet.status = "partial"
+            packet.failure_hints.append(
+                {
+                    "code": "review_plots_incomplete",
+                    "plot_recipe_ids": [
+                        str(item.get("recipe_id") or item.get("artifact_id") or "unknown")
+                        for item in failed_plots
+                    ],
+                    "next_step": (
+                        "Inspect each failed plot record and regenerate only after its renderer, "
+                        "query, and source evidence are complete."
+                    ),
+                }
+            )
     if step_callback is not None:
         step_callback(1, 1)
     return _write_packet(packet, prepared["output_dir"])
@@ -132,7 +171,7 @@ def inspect_output(
     max_result_bytes: int | None = None,
 ) -> dict[str, Any]:
     outdir = Path(output_dir).expanduser().resolve()
-    query_names = tuple(query_names or DEFAULT_INSPECTION_QUERIES)
+    requested_query_names = None if query_names is None else tuple(query_names)
     packet = EvidencePacket(
         task_id=f"inspect_{outdir.name}",
         status="completed",
@@ -145,6 +184,11 @@ def inspect_output(
     review: dict[str, Any] = {"output_dir": str(outdir), "queries": []}
     try:
         workspace = ReviewWorkspace.open(outdir)
+        effective_query_names = (
+            _default_inspection_queries(workspace)
+            if requested_query_names is None
+            else requested_query_names
+        )
         review.update(
             {
                 "db_path": str(workspace.db_path),
@@ -155,12 +199,24 @@ def inspect_output(
         )
         review["queries"] = _run_saved_queries(
             workspace,
-            query_names,
+            effective_query_names,
             max_rows=max_rows,
             max_value_bytes=max_value_bytes,
             max_result_bytes=max_result_bytes,
         )
         review["query_summary"] = _summarize_query_rows(review["queries"])
+        if not bool(review["query_summary"].get("evidence_complete", False)):
+            packet.status = "partial"
+            packet.failure_hints.append(
+                {
+                    "code": "review_queries_incomplete",
+                    "query_summary": dict(review["query_summary"]),
+                    "next_step": (
+                        "Run `python -m sim.review --list-saved-queries`, select a known query, "
+                        "and inspect schema columns before writing custom SQL."
+                    ),
+                }
+            )
         packet.artifacts = _artifact_rows(review["queries"], output_dir=outdir)
     except (ReviewStoreNotFoundError, ReviewQueryError, ValueError) as exc:
         packet.status = "partial"
@@ -176,6 +232,29 @@ def inspect_output(
     if write_packet:
         return _write_packet(packet, outdir)
     return packet.to_dict()
+
+
+def _default_inspection_queries(workspace: ReviewWorkspace) -> tuple[str, ...]:
+    """Add domain summaries only when the completed run contains that evidence."""
+
+    names = list(DEFAULT_INSPECTION_QUERIES)
+    available = set(workspace.tables())
+    for table_name, query_names in (
+        (
+            "coverage_summary",
+            ("coverage_summary", "coverage_transition_summary"),
+        ),
+        (
+            "link_summary",
+            ("directed_link_summary", "directed_link_windows"),
+        ),
+    ):
+        if table_name not in available:
+            continue
+        result = workspace.query(f'SELECT EXISTS(SELECT 1 FROM "{table_name}" LIMIT 1) AS present', max_rows=1)
+        if result.rows and bool(result.rows[0].get("present")):
+            names.extend(query_names)
+    return tuple(names)
 
 
 def create_plot(
@@ -235,6 +314,8 @@ def compare_configs(
             for report in validations.values()
             for hint in diagnose_failure(validation=report, output_dir=report.get("output_dir"))
         ]
+        for item in configs:
+            _discard_prepared_config(item["config_path"])
         return _write_packet(packet, outdir)
 
     runs: dict[str, Any] = {}
@@ -243,7 +324,7 @@ def compare_configs(
     for item in configs:
         label = str(item["label"])
         try:
-            runs[label] = _run_summary(run_simulation_config_file(item["config_path"]))
+            runs[label] = _run_summary(_run_prepared_config(item["config_path"]))
             inspections[label] = inspect_output(
                 item["output_dir"],
                 query_names=comparison_query_names,
@@ -378,6 +459,9 @@ def _prepare_config(
     task_config = outdir / "agent_task_config.yaml"
     outdir.mkdir(parents=True, exist_ok=True)
     task_config.write_text(yaml.safe_dump(data, sort_keys=False, allow_unicode=False), encoding="utf-8")
+    task_bytes = task_config.read_bytes()
+    task_digest = hashlib.sha256(task_bytes).hexdigest()
+    prepared_cfg = _AGENT_TASK_EXECUTION_SERVICE.load_config(task_config)
     normalization_policy = ConfigPathPolicy.default(
         config_path=source,
         workspace_root=_repo_root(),
@@ -395,6 +479,8 @@ def _prepare_config(
     ).encode("utf-8")
     raw_sha256 = hashlib.sha256(source.read_bytes()).hexdigest()
     normalized_sha256 = hashlib.sha256(normalized_bytes).hexdigest()
+    _PREPARED_CONFIG_CACHE[str(task_config)] = (task_digest, prepared_cfg)
+    _EXPECTED_PREPARED_CONFIG_DIGESTS[str(task_config)] = task_digest
     return {
         "label": str(label),
         "source_config": str(source),
@@ -406,6 +492,69 @@ def _prepare_config(
         "normalized_config_sha256": normalized_sha256,
         "validation_id": f"oel-m4-validation-v1:{normalized_sha256}",
     }
+
+
+def _guarded_prepared_config(config_path: str | Path) -> Any | None:
+    """Return a prepared config, failing closed if its exact bytes changed."""
+
+    path = Path(config_path).expanduser().resolve()
+    path_text = str(path)
+    expected_digest = _EXPECTED_PREPARED_CONFIG_DIGESTS.get(path_text)
+    if expected_digest is None:
+        return None
+    cached = _PREPARED_CONFIG_CACHE.get(path_text)
+    if cached is None:
+        raise RuntimeError(f"prepared agent-task config cache is missing for {path}")
+    try:
+        current_digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError as exc:
+        raise RuntimeError(f"prepared agent-task config is unavailable: {path}") from exc
+    if current_digest != expected_digest or cached[0] != expected_digest:
+        raise RuntimeError(f"prepared agent-task config changed after validation: {path}")
+    return cached[1]
+
+
+def _discard_prepared_config(config_path: str | Path) -> None:
+    path_text = str(Path(config_path).expanduser().resolve())
+    _PREPARED_CONFIG_CACHE.pop(path_text, None)
+    _EXPECTED_PREPARED_CONFIG_DIGESTS.pop(path_text, None)
+
+
+def _run_prepared_config(
+    config_path: str | Path,
+    *,
+    step_callback: Any | None = None,
+) -> dict[str, Any]:
+    """Execute an exactly guarded parsed task config, falling back to the file API."""
+
+    path = Path(config_path).expanduser().resolve()
+    cfg = _guarded_prepared_config(path)
+    if run_simulation_config_file is not _RUN_SIMULATION_CONFIG_FILE_ORIGINAL:
+        try:
+            if step_callback is None:
+                return run_simulation_config_file(path)
+            return run_simulation_config_file(path, step_callback=step_callback)
+        finally:
+            if cfg is not None:
+                _discard_prepared_config(path)
+    if cfg is None:
+        return run_simulation_config_file(path, step_callback=step_callback)
+    try:
+        study_type = _AGENT_TASK_EXECUTION_SERVICE.study_type(cfg)
+        if study_type == "single_run":
+            payload = _AGENT_TASK_EXECUTION_SERVICE.run_single(cfg, step_callback=step_callback)
+            return _AGENT_TASK_EXECUTION_SERVICE.wrap_single_file_payload(
+                payload=payload,
+                cfg=cfg,
+                config_path=path,
+            )
+        return _AGENT_TASK_EXECUTION_SERVICE.run_session_payload(
+            cfg,
+            source_path=path,
+            step_callback=step_callback,
+        )
+    finally:
+        _discard_prepared_config(path)
 
 
 def _run_saved_queries(
@@ -533,7 +682,9 @@ def _extract_metric_values(inspection: dict[str, Any], metric_names: tuple[str, 
     values: dict[str, Any] = {}
     review = dict(inspection.get("review", {}) or {})
     for query in list(review.get("queries", []) or []):
-        for row in list(query.get("rows", []) or []):
+        query_name = str(query.get("name", "") or "")
+        rows = [dict(row or {}) for row in list(query.get("rows", []) or [])]
+        for row in rows:
             metric_name = str(row.get("metric_name", "") or "")
             if metric_name in wanted and "value" in row:
                 values[metric_name] = row.get("value")
@@ -541,6 +692,22 @@ def _extract_metric_values(inspection: dict[str, Any], metric_names: tuple[str, 
                 values.setdefault("closest_approach_km", row.get("range_km"))
             if query.get("name") == "rendezvous_closest_approach" and "closest_approach_time_s" in wanted:
                 values.setdefault("closest_approach_time_s", row.get("time_s"))
+        if query_name == "relative_final_state" and len(rows) == 1 and "final_range_rate_km_s" in wanted:
+            values["final_range_rate_km_s"] = rows[0].get("range_rate_km_s")
+        if query_name == "object_final_state" and len(rows) == 1:
+            if "final_radius_km" in wanted:
+                values["final_radius_km"] = rows[0].get("radius_km")
+            if "final_speed_km_s" in wanted:
+                values["final_speed_km_s"] = rows[0].get("speed_km_s")
+        if query_name == "object_orbital_elements_first_last" and rows:
+            object_ids = {str(row.get("object_id", "")) for row in rows}
+            if len(object_ids) == 1 and "final_semi_major_axis_km" in wanted:
+                final_row = max(rows, key=lambda row: float(row.get("time_s", 0.0) or 0.0))
+                values["final_semi_major_axis_km"] = final_row.get("a_km")
+        if query_name == "burn_command_summary" and "total_delta_v_m_s" in wanted:
+            realized = [row.get("realized_delta_v_m_s") for row in rows]
+            if realized and all(value is not None for value in realized):
+                values["total_delta_v_m_s"] = sum(float(value) for value in realized)
     return values
 
 
@@ -808,8 +975,28 @@ def _summarize_packet_evidence(packet: EvidencePacket) -> dict[str, Any]:
         and comparison_complete is not False
         and failure_hint_count == 0
     )
+    readiness_blockers: list[str] = []
+    if packet.status != "completed":
+        readiness_blockers.append(f"status:{packet.status}")
+    if not packet.run:
+        readiness_blockers.append("run_evidence_absent")
+    if validation_ok is False:
+        readiness_blockers.append("validation_failed")
+    elif validation_ok is None:
+        readiness_blockers.append("validation_evidence_absent")
+    if review_complete is False:
+        readiness_blockers.append("review_evidence_incomplete")
+    if artifacts_complete is False:
+        readiness_blockers.append("artifacts_incomplete")
+    if plots_complete is False:
+        readiness_blockers.append("plots_incomplete")
+    if comparison_complete is False:
+        readiness_blockers.append("comparison_incomplete")
+    if failure_hint_count:
+        readiness_blockers.append("failure_hints_present")
     return {
         "status": packet.status,
+        "packet_mode": "execution" if bool(packet.run) else "inspection_only",
         "validation_ok": validation_ok,
         "review_evidence_complete": review_complete,
         "artifacts_complete": artifacts_complete,
@@ -818,6 +1005,7 @@ def _summarize_packet_evidence(packet: EvidencePacket) -> dict[str, Any]:
         "failure_hint_count": failure_hint_count,
         "caveat_count": len(packet.caveats),
         "ready_to_cite": ready,
+        "readiness_blockers": readiness_blockers,
     }
 
 

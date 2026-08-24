@@ -15,6 +15,7 @@ from sim.analysis.history_adapters import (
 )
 from sim.api import SimulationConfig, SimulationSession
 from sim.dynamics.orbit.frames import FrameContext, eci_to_ecef_rotation_context
+from sim.review import EvidencePlotter
 from sim.utils.geodesy import WGS84_A_KM
 from sim.utils.quaternion import dcm_to_quaternion_bn
 
@@ -198,11 +199,14 @@ def test_scenario_adapter_writes_coverage_and_link_review_tables(tmp_path) -> No
         },
     }
     result = SimulationSession.from_config(SimulationConfig.from_dict(config)).run()
-    assert result.summary["orbital_analysis"] == {
-        "coverage_analysis_count": 1,
-        "directed_link_analysis_count": 1,
-        "schema_version": "oel.scenario-orbital-analysis.v1",
-    }
+    orbital_summary = result.summary["orbital_analysis"]
+    assert orbital_summary["coverage_analysis_count"] == 1
+    assert orbital_summary["directed_link_analysis_count"] == 1
+    assert orbital_summary["schema_version"] == "oel.scenario-orbital-analysis.v1"
+    assert orbital_summary["coverage"][0]["analysis_id"] == "earth_view"
+    assert orbital_summary["coverage"][0]["time_weighted_mean_covered_fraction"] > 0.0
+    assert orbital_summary["directed_links"][0]["analysis_id"] == "tx_to_rx"
+    assert orbital_summary["directed_links"][0]["sampled_available_fraction"] == 1.0
     assert (tmp_path / "master_run_history.csv").is_file()
     assert result.artifacts["orbital_analysis"]["coverage"][0]["summary_json"].endswith(
         "coverage_summary.json"
@@ -219,9 +223,99 @@ def test_scenario_adapter_writes_coverage_and_link_review_tables(tmp_path) -> No
             "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'coverage_transitions'"
         ).fetchone()[0] == 1
         assert conn.execute("SELECT analysis_id FROM link_summary").fetchone() == ("tx_to_rx",)
+        assert conn.execute(
+            "SELECT tx_endpoint_kind, rx_endpoint_kind, tx_terminal_parent_frame, rx_terminal_parent_frame "
+            "FROM link_summary"
+        ).fetchone() == ("spacecraft", "spacecraft", "body", "body")
         assert conn.execute("SELECT COUNT(*) FROM link_samples").fetchone()[0] == 3
         disposition = conn.execute("SELECT acquisition_disposition FROM link_windows").fetchone()[0]
         assert disposition in {"study_start_censored", "provider_refined"}
+    link_plot = EvidencePlotter(tmp_path).recipe("directed_link_margin")
+    assert link_plot.path.is_file()
+    assert link_plot.spec.renderer_id == "directed_link_margin"
+    assert link_plot.qa["automated_status"] == "passed"
+
+
+def test_scenario_link_accepts_configured_ground_station_endpoint(tmp_path) -> None:
+    config = {
+        "scenario_name": "ground_station_link_adapter_smoke",
+        "objects": {
+            "sat": {
+                "enabled": True,
+                "initial_state": {
+                    "position_eci_km": [0.0, 0.0, 6878.137],
+                    "velocity_eci_km_s": [7.612, 0.0, 0.0],
+                },
+            },
+        },
+        "ground_stations": [
+            {
+                "id": "north_site",
+                "lat_deg": 90.0,
+                "lon_deg": 0.0,
+                "alt_km": 0.0,
+                "min_elevation_deg": 5.0,
+                "max_range_km": 2000.0,
+            }
+        ],
+        "simulator": {
+            "duration_s": 2.0,
+            "dt_s": 1.0,
+            "initial_jd_utc": 2451545.0,
+            "dynamics": {"attitude": {"enabled": False}},
+            "termination": {"earth_impact_enabled": False},
+        },
+        "outputs": {
+            "output_dir": str(tmp_path),
+            "mode": "save",
+            "stats": {"print_summary": False, "save_json": True, "save_full_log": True},
+            "plots": {"enabled": False},
+            "animations": {"enabled": False},
+            "review": {"enabled": True, "detail": "standard"},
+            "orbital_analysis": {
+                "enabled": True,
+                "directed_links": [
+                    {
+                        "analysis_id": "sat_to_north_site",
+                        "link_id": "sat_to_north_site",
+                        "tx_object_id": "sat",
+                        "rx_ground_station_id": "north_site",
+                        "tx_terminal": {
+                            "terminal_id": "sat.rf",
+                            "pattern": {"kind": "constant", "gain_dbi": 20.0},
+                        },
+                        "rx_terminal": {
+                            "terminal_id": "north_site.rf",
+                            "quat_parent_from_terminal": [1.0, 0.0, 0.0, 0.0],
+                            "pattern": {"kind": "constant", "gain_dbi": 20.0},
+                        },
+                        "carrier_frequency_hz": 2.0e9,
+                        "tx_power_w": 10.0,
+                        "data_rate_bps": 1.0e6,
+                        "system_noise_temperature_k": 300.0,
+                        "required_eb_n0_db": 5.0,
+                        "transition_time_tolerance_s": 0.05,
+                        "transition_max_iterations": 20,
+                        "include_margin_plot": True,
+                    }
+                ],
+            },
+        },
+    }
+    result = SimulationSession.from_config(SimulationConfig.from_dict(config)).run()
+    link = result.summary["orbital_analysis"]["directed_links"][0]
+    assert link["tx_endpoint_kind"] == "spacecraft"
+    assert link["rx_endpoint_kind"] == "fixed_wgs84_site"
+    assert link["rx_endpoint_id"] == "north_site"
+    assert link["sampled_available_fraction"] == 1.0
+    assert "directed_link:sat_to_north_site" in result.summary["plot_outputs"]
+    quality_path = tmp_path / "orbital_analysis" / "directed_links" / "sat_to_north_site" / "link_margin.quality.json"
+    assert json.loads(quality_path.read_text(encoding="utf-8"))["automated_status"] == "passed"
+    with sqlite3.connect(tmp_path / "review" / "run.sqlite") as conn:
+        assert conn.execute(
+            "SELECT tx_object_id, rx_object_id, tx_endpoint_kind, rx_endpoint_kind, "
+            "tx_terminal_parent_frame, rx_terminal_parent_frame FROM link_summary"
+        ).fetchone() == ("sat", "north_site", "spacecraft", "fixed_wgs84_site", "body", "enu")
 
 
 def test_scenario_directional_analysis_fails_closed_without_attitude(tmp_path) -> None:

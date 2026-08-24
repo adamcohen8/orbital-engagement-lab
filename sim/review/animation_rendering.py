@@ -227,8 +227,9 @@ def record_generated_animation(
     artifact: ReviewAnimationArtifact,
     *,
     recipe: ReviewAnimationRecipe,
+    review_store_identity: dict[str, Any] | None = None,
 ) -> None:
-    index_path = workspace.db_path.parent / "generated_artifacts.json"
+    index_path = workspace.review_dir / "generated_artifacts.json"
     if index_path.is_file():
         payload = json.loads(index_path.read_text(encoding="utf-8"))
         existing = list(payload.get("artifacts", []) or []) if isinstance(payload, dict) else []
@@ -246,7 +247,7 @@ def record_generated_animation(
             "source": str(dict(artifact.spec.extra or {}).get("source", "oel_review_animation_api")),
             "source_query": recipe.sql,
             "query_sha256": hashlib.sha256(recipe.sql.encode("utf-8")).hexdigest(),
-            "review_store": _review_store_identity(workspace),
+            "review_store": review_store_identity or _review_store_identity(workspace),
             "recipe_id": recipe.recipe_id,
             "recipe_version": recipe.recipe_version,
             "renderer_id": recipe.renderer_id,
@@ -365,13 +366,7 @@ def _scenario_name(workspace: ReviewWorkspace) -> str:
 
 
 def _review_store_identity(workspace: ReviewWorkspace) -> dict[str, Any]:
-    stat = workspace.db_path.stat()
-    return {
-        "relative_path": _relative_to_output(workspace, workspace.db_path),
-        "size_bytes": int(stat.st_size),
-        "mtime_ns": int(stat.st_mtime_ns),
-        "sha256": hashlib.sha256(workspace.db_path.read_bytes()).hexdigest(),
-    }
+    return workspace.evidence_identity()
 
 
 def _relative_to_output(workspace: ReviewWorkspace, path: Path) -> str:

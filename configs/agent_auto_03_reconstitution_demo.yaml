@@ -75,3 +75,28 @@ outputs:
   review:
     enabled: true
     detail: standard
+analysis:
+  mission_recovery:
+    enabled: true
+    object_id: target
+    goal: orbit_slot
+    assessment_time_s: final
+    slot_tolerance_deg: 1.0
+    max_phasing_orbits: 40
+    planner:
+      enabled: true
+      modes:
+      - min_delta_v
+      - min_time
+      - constrained
+      max_recovery_time_s: 86400.0
+      max_recovery_delta_v_m_s: 12.0
+      candidate_count: 10
+      simulate_candidates: true
+    propulsion:
+      spacecraft_mass_kg: 120.0
+      isp_s: 220.0
+      max_thrust_n: 20.0
+    element_tolerances:
+      a_km: 1.0
+      ecc: 0.001

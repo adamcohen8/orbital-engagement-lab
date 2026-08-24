@@ -490,6 +490,8 @@ def test_artifacts_and_plot_are_deterministic_and_source_bound(tmp_path) -> None
     assert first.summary_json.read_bytes() == second.summary_json.read_bytes()
     assert first.samples_csv.read_bytes() == second.samples_csv.read_bytes()
     assert first.footprint_plot_png is not None and first.footprint_plot_png.stat().st_size > 1000
+    assert first.footprint_plot_quality_json is not None
+    assert json.loads(first.footprint_plot_quality_json.read_text(encoding="utf-8"))["automated_status"] == "passed"
     manifest = json.loads(first.manifest_json.read_text(encoding="utf-8"))
     assert manifest["input_evidence_sha256"] == result.input_evidence_sha256
     assert manifest["semantic_sha256"] == result.interval_semantic_sha256

@@ -11,8 +11,13 @@ import numpy as np
 
 from sim.analysis.directed_link import (
     DirectedLinkConfig,
+    LinkEndpointHistory,
     LinkTerminal,
     TerminalPattern,
+    evaluate_directed_link,
+    evaluate_directed_link_sample,
+    fixed_wgs84_site_history,
+    spacecraft_endpoint_history,
     write_directed_link_artifacts,
 )
 from sim.analysis.global_coverage import (
@@ -21,7 +26,6 @@ from sim.analysis.global_coverage import (
 )
 from sim.analysis.history_adapters import (
     AnalysisHistory,
-    evaluate_history_directed_link,
     evaluate_history_global_coverage,
     history_from_single_run,
 )
@@ -78,9 +82,9 @@ def _coverage_interval_rows(product: Any) -> list[dict[str, Any]]:
     return rows
 
 
-def _terminal(value: Any, *, asset_id: str, path: str) -> LinkTerminal:
+def _terminal(value: Any, *, asset_id: str, parent_frame: str, path: str) -> LinkTerminal:
     data = dict(value or {})
-    _only(data, {"terminal_id", "quat_body_from_terminal", "pattern"}, path)
+    _only(data, {"terminal_id", "quat_parent_from_terminal", "quat_body_from_terminal", "pattern"}, path)
     pattern_data = dict(data.get("pattern", {}) or {})
     _only(pattern_data, {"kind", "gain_dbi", "half_angle_deg"}, f"{path}.pattern")
     kind = str(pattern_data.get("kind", "constant"))
@@ -88,14 +92,114 @@ def _terminal(value: Any, *, asset_id: str, path: str) -> LinkTerminal:
     return LinkTerminal(
         terminal_id=str(data.get("terminal_id") or ""),
         asset_id=asset_id,
-        parent_frame="body",
-        quat_parent_from_terminal=tuple(data.get("quat_body_from_terminal", (1.0, 0.0, 0.0, 0.0))),
+        parent_frame=parent_frame,
+        quat_parent_from_terminal=tuple(
+            data.get(
+                "quat_parent_from_terminal",
+                data.get("quat_body_from_terminal", (1.0, 0.0, 0.0, 0.0)),
+            )
+        ),
         pattern=TerminalPattern(
             kind=kind,
             gain_dbi=float(pattern_data.get("gain_dbi")),
             half_angle_rad=None if half_angle is None else float(np.deg2rad(float(half_angle))),
         ),
     )
+
+
+def _spacecraft_endpoint_at_time(
+    history: AnalysisHistory,
+    *,
+    time_s: float,
+    require_attitude: bool,
+) -> LinkEndpointHistory:
+    state = history.state_at(time_s)
+    attitude = None if state.attitude_quat_bn is None else np.asarray([state.attitude_quat_bn])
+    if require_attitude and attitude is None:
+        raise ValueError(f"Directional terminal on {history.object_id!r} requires attitude evidence.")
+    return spacecraft_endpoint_history(
+        asset_id=history.object_id,
+        state_provider_id=history.state_provider_id,
+        times_s=np.asarray([time_s], dtype=float),
+        positions_eci_km=np.asarray([state.position_eci_km], dtype=float),
+        velocities_eci_km_s=np.asarray([state.velocity_eci_km_s], dtype=float),
+        attitudes_quat_bn=attitude,
+        attitude_source_kind=history.attitude_source_kind if attitude is not None else "not_required",
+        attitude_provider_id=history.attitude_provider_id if attitude is not None else None,
+    )
+
+
+def _scenario_endpoint_history(
+    *,
+    kind: str,
+    source: Any,
+    terminal: LinkTerminal,
+    times_s: np.ndarray,
+    frame_context: Any,
+    scenario_name: str,
+) -> LinkEndpointHistory:
+    if kind == "spacecraft":
+        if np.array_equal(np.asarray(times_s, dtype=float), source.times_s):
+            return source.link_endpoint(require_attitude=not terminal.pattern.attitude_independent)
+        if np.asarray(times_s).size != 1:
+            raise ValueError("Refined spacecraft endpoint requests must contain exactly one epoch.")
+        return _spacecraft_endpoint_at_time(
+            source,
+            time_s=float(np.asarray(times_s, dtype=float)[0]),
+            require_attitude=not terminal.pattern.attitude_independent,
+        )
+    return fixed_wgs84_site_history(
+        asset_id=str(source.id),
+        state_provider_id=f"scenario:{scenario_name}:ground_station:{source.id}",
+        times_s=np.asarray(times_s, dtype=float),
+        geodetic_latitude_deg=float(source.lat_deg),
+        longitude_deg=float(source.lon_deg),
+        ellipsoidal_height_km=float(source.alt_km),
+        frame_context=frame_context,
+    )
+
+
+def _link_refinement_evaluator(
+    *,
+    config: DirectedLinkConfig,
+    tx_spec: tuple[str, Any, LinkTerminal],
+    rx_spec: tuple[str, Any, LinkTerminal],
+    frame_context: Any,
+    scenario_name: str,
+) -> Any:
+    def evaluate(time_s: float) -> tuple[bool, str]:
+        sample_time = np.asarray([time_s], dtype=float)
+        tx_kind, tx_source, tx_terminal = tx_spec
+        rx_kind, rx_source, rx_terminal = rx_spec
+        sample = evaluate_directed_link_sample(
+            config,
+            tx_history=_scenario_endpoint_history(
+                kind=tx_kind,
+                source=tx_source,
+                terminal=tx_terminal,
+                times_s=sample_time,
+                frame_context=frame_context,
+                scenario_name=scenario_name,
+            ),
+            rx_history=_scenario_endpoint_history(
+                kind=rx_kind,
+                source=rx_source,
+                terminal=rx_terminal,
+                times_s=sample_time,
+                frame_context=frame_context,
+                scenario_name=scenario_name,
+            ),
+            frame_context=frame_context,
+        )
+        return bool(sample.samples.available[0]), str(sample.samples.primary_reason[0])
+
+    return evaluate
+
+
+def _endpoint_refinement_source(*, kind: str, source: Any, scenario_name: str) -> str:
+    if kind == "spacecraft":
+        return f"{source.state_provider_id}:{source.refinement_source}"
+    return f"scenario:{scenario_name}:ground_station:{source.id}:fixed_wgs84_analytic"
 
 
 def _histories(context: Any, *, object_ids: set[str]) -> dict[str, AnalysisHistory]:
@@ -139,7 +243,9 @@ def run_scenario_orbital_analysis(*, context: Any) -> dict[str, Any]:
     }
     for item in section.directed_links:
         referenced_object_ids.update(
-            {str(item.get("tx_object_id") or ""), str(item.get("rx_object_id") or "")}
+            str(item.get(key) or "")
+            for key in ("tx_object_id", "rx_object_id")
+            if str(item.get(key) or "").strip()
         )
     histories = _histories(context, object_ids=referenced_object_ids)
     frame_context = frame_context_from_mapping(
@@ -155,7 +261,7 @@ def run_scenario_orbital_analysis(*, context: Any) -> dict[str, Any]:
         "quat_body_from_sensor", "max_range_km", "chunk_size", "max_working_memory_bytes",
         "max_cell_time_comparisons", "transition_time_tolerance_s", "transition_max_iterations",
         "max_transition_refinement_evaluations",
-        "include_cell_csv",
+        "include_cell_csv", "include_fraction_plot",
     }
     for index, raw in enumerate(section.coverage):
         data = dict(raw)
@@ -195,7 +301,11 @@ def run_scenario_orbital_analysis(*, context: Any) -> dict[str, Any]:
         destination = root / "coverage" / config.analysis_id
         _replace_derived_directory(destination, root=Path(context.outdir))
         artifacts = write_global_coverage_artifacts(
-            product, destination, include_cell_csv=bool(data.get("include_cell_csv", False))
+            product,
+            destination,
+            include_cell_csv=bool(data.get("include_cell_csv", False)),
+            include_fraction_plot=bool(data.get("include_fraction_plot", True)),
+            plot_scenario_name=str(context.cfg.scenario_name or ""),
         )
         result["coverage"].append({
             "analysis_id": config.analysis_id, "source_object_id": source_id,
@@ -217,19 +327,50 @@ def run_scenario_orbital_analysis(*, context: Any) -> dict[str, Any]:
         })
 
     link_allowed = {
-        "analysis_id", "link_id", "tx_object_id", "rx_object_id", "tx_terminal", "rx_terminal",
+        "analysis_id", "link_id", "tx_object_id", "rx_object_id", "tx_ground_station_id",
+        "rx_ground_station_id", "tx_terminal", "rx_terminal",
         "carrier_frequency_hz", "tx_power_w", "data_rate_bps", "system_noise_temperature_k",
         "required_eb_n0_db", "tx_line_loss_db", "rx_line_loss_db", "misc_loss_db", "max_range_km",
-        "transition_time_tolerance_s", "transition_max_iterations", "include_margin_plot",
+        "min_fixed_site_elevation_deg", "transition_time_tolerance_s", "transition_max_iterations",
+        "include_margin_plot",
+    }
+    stations = {
+        str(station.id): station
+        for station in list(context.cfg.ground_stations or [])
+        if bool(station.enabled)
     }
     for index, raw in enumerate(section.directed_links):
         data = dict(raw)
         _only(data, link_allowed, f"outputs.orbital_analysis.directed_links[{index}]")
-        tx_id, rx_id = str(data.get("tx_object_id") or ""), str(data.get("rx_object_id") or "")
-        if tx_id not in histories or rx_id not in histories:
-            raise ValueError("Directed link endpoints must name active scenario objects.")
-        tx_terminal = _terminal(data.get("tx_terminal"), asset_id=tx_id, path=f"directed_links[{index}].tx_terminal")
-        rx_terminal = _terminal(data.get("rx_terminal"), asset_id=rx_id, path=f"directed_links[{index}].rx_terminal")
+        endpoint_specs: dict[str, tuple[str, str, Any]] = {}
+        for endpoint in ("tx", "rx"):
+            object_id = str(data.get(f"{endpoint}_object_id") or "").strip()
+            station_id = str(data.get(f"{endpoint}_ground_station_id") or "").strip()
+            if object_id:
+                endpoint_specs[endpoint] = ("spacecraft", object_id, histories[object_id])
+            else:
+                endpoint_specs[endpoint] = ("fixed_wgs84_site", station_id, stations[station_id])
+        tx_kind, tx_id, tx_source = endpoint_specs["tx"]
+        rx_kind, rx_id, rx_source = endpoint_specs["rx"]
+        tx_terminal = _terminal(
+            data.get("tx_terminal"),
+            asset_id=tx_id,
+            parent_frame="body" if tx_kind == "spacecraft" else "enu",
+            path=f"directed_links[{index}].tx_terminal",
+        )
+        rx_terminal = _terminal(
+            data.get("rx_terminal"),
+            asset_id=rx_id,
+            parent_frame="body" if rx_kind == "spacecraft" else "enu",
+            path=f"directed_links[{index}].rx_terminal",
+        )
+        fixed_station = tx_source if tx_kind == "fixed_wgs84_site" else rx_source if rx_kind == "fixed_wgs84_site" else None
+        minimum_elevation_deg = data.get("min_fixed_site_elevation_deg")
+        if minimum_elevation_deg is None and fixed_station is not None:
+            minimum_elevation_deg = fixed_station.min_elevation_deg
+        maximum_range_km = data.get("max_range_km")
+        if maximum_range_km is None and fixed_station is not None:
+            maximum_range_km = fixed_station.max_range_km
         config = DirectedLinkConfig(
             analysis_id=str(data.get("analysis_id") or ""), link_id=str(data.get("link_id") or ""),
             tx_terminal=tx_terminal, rx_terminal=rx_terminal,
@@ -239,7 +380,10 @@ def run_scenario_orbital_analysis(*, context: Any) -> dict[str, Any]:
             required_eb_n0_db=float(data.get("required_eb_n0_db")),
             tx_line_loss_db=float(data.get("tx_line_loss_db", 0.0)),
             rx_line_loss_db=float(data.get("rx_line_loss_db", 0.0)), misc_loss_db=float(data.get("misc_loss_db", 0.0)),
-            max_range_km=data.get("max_range_km"),
+            min_fixed_site_elevation_rad=(
+                None if minimum_elevation_deg is None else float(np.deg2rad(float(minimum_elevation_deg)))
+            ),
+            max_range_km=maximum_range_km,
             transition_time_tolerance_s=(
                 None
                 if "transition_time_tolerance_s" not in data
@@ -251,18 +395,59 @@ def run_scenario_orbital_analysis(*, context: Any) -> dict[str, Any]:
                 else int(data["transition_max_iterations"])
             ),
         )
-        tx_history, rx_history = histories[tx_id], histories[rx_id]
-        product = evaluate_history_directed_link(
-            config, tx_history=tx_history, rx_history=rx_history, frame_context=frame_context
+        scenario_name = str(context.cfg.scenario_name or "")
+        sample_times = np.asarray(context.t_s, dtype=float)
+        tx_history = _scenario_endpoint_history(
+            kind=tx_kind,
+            source=tx_source,
+            terminal=tx_terminal,
+            times_s=sample_times,
+            frame_context=frame_context,
+            scenario_name=scenario_name,
+        )
+        rx_history = _scenario_endpoint_history(
+            kind=rx_kind,
+            source=rx_source,
+            terminal=rx_terminal,
+            times_s=sample_times,
+            frame_context=frame_context,
+            scenario_name=scenario_name,
+        )
+
+        refine = config.transition_time_tolerance_s is not None
+        evaluator_at_time = _link_refinement_evaluator(
+            config=config,
+            tx_spec=(tx_kind, tx_source, tx_terminal),
+            rx_spec=(rx_kind, rx_source, rx_terminal),
+            frame_context=frame_context,
+            scenario_name=scenario_name,
+        )
+        refinement_provider_id = (
+            f"tx={_endpoint_refinement_source(kind=tx_kind, source=tx_source, scenario_name=scenario_name)};"
+            f"rx={_endpoint_refinement_source(kind=rx_kind, source=rx_source, scenario_name=scenario_name)}"
+        )
+        product = evaluate_directed_link(
+            config,
+            tx_history=tx_history,
+            rx_history=rx_history,
+            frame_context=frame_context,
+            evaluator_at_time=evaluator_at_time if refine else None,
+            refinement_provider_id=refinement_provider_id if refine else None,
         )
         destination = root / "directed_links" / config.analysis_id
         _replace_derived_directory(destination, root=Path(context.outdir))
         artifacts = write_directed_link_artifacts(
-            product, destination, include_margin_plot=bool(data.get("include_margin_plot", True))
+            product,
+            destination,
+            include_margin_plot=bool(data.get("include_margin_plot", True)),
+            plot_scenario_name=str(context.cfg.scenario_name or ""),
         )
         result["directed_links"].append({
             "analysis_id": config.analysis_id, "link_id": config.link_id,
             "tx_object_id": tx_id, "rx_object_id": rx_id,
+            "tx_endpoint_kind": tx_kind, "rx_endpoint_kind": rx_kind,
+            "tx_terminal_parent_frame": tx_terminal.parent_frame,
+            "rx_terminal_parent_frame": rx_terminal.parent_frame,
             "tx_state_provider_id": tx_history.state_provider_id, "rx_state_provider_id": rx_history.state_provider_id,
             "tx_attitude_source_kind": tx_history.attitude_source_kind,
             "tx_attitude_provider_id": tx_history.attitude_provider_id,

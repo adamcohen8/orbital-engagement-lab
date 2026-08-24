@@ -48,13 +48,7 @@ simulator:
       drag: false
       srp: false
     attitude:
-      enabled: true
-      attitude_substep_s: 0.1
-      disturbance_torques:
-        gravity_gradient: false
-        magnetic: false
-        drag: false
-        srp: false
+      enabled: false
     rocket:
       enabled: false
   environment:

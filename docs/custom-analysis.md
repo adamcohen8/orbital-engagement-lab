@@ -13,6 +13,14 @@ public core does not provide, the intended path is:
 Built-in plots are useful defaults. Saved artifacts are the escape hatch for
 custom engineering questions.
 
+When `outputs.review.enabled: true`, prefer the queryable review store before
+loading the full run log. Confirm `review/run.sqlite` and its schema with
+`result.evidence_manifest()`, open it with `result.review()`, or use
+`python -m sim.review <output-dir> --query <SELECT-or-WITH-query>`. Discover
+columns from `review/schema.json` or a small `SELECT * ... LIMIT 1` query. The
+review API is read-only. Fall back to `master_run_log.json` only when the
+required signal was not recorded in review.
+
 ## Choose The Right Artifact
 
 For a single run:
@@ -20,6 +28,8 @@ For a single run:
 - `index.md`: start-here output guide and artifact inventory.
 - `master_run_summary.json`: stable summary metrics and artifact maps.
 - `master_run_log.json`: full time histories for custom plots.
+- `review/run.sqlite` and `review/schema.json`: queryable, provenance-bound
+  evidence when review output was enabled.
 
 Pro adds campaign-scale Monte Carlo, sensitivity, controller-benchmark, and
 reporting artifacts. The public custom-analysis path focuses on deterministic

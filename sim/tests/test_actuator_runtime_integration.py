@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 import pytest
@@ -19,8 +21,10 @@ from sim.flight_software import (
     ReactionWheelTorqueCommand,
     ValidityInterval,
 )
+from sim.flight_software.schemas import _to_primitive_trusted
+from sim.runtime.satellite_factory import _scenario_uses_aerodynamic_lift
 from sim.runtime.satellites.flight_software_runtime import SatelliteFlightSoftwareRuntime
-from sim.single_run import _run_single_config
+from sim.single_run import _run_single_config, _SingleRunEngine
 
 
 def _actuator_config(tmp_path: Path) -> dict:
@@ -271,3 +275,64 @@ def test_runtime_records_skipped_periodic_releases_in_audit_and_checkpoint_state
     restored_state = restored._runtime_state(run_time_ns=0)
     assert restored_state["missed_task_releases"] == 2
     assert restored_state["missed_sensor_releases"] == 2
+
+
+def test_runtime_evidence_is_exactly_equal_to_typed_evidence_conversion() -> None:
+    runtime, truth = _mixed_propulsion_attitude_runtime(dry_mass_kg=0.0)
+    runtime.prepare_interval(truth, start_time_ns=0)
+    runtime.command_interval(truth, start_time_ns=0, end_time_ns=1_000_000_000)
+    runtime.shutdown(time_ns=1_000_000_000)
+
+    expected = {
+        "invocations": _to_primitive_trusted(runtime.evidence.invocations),
+        "input_events": _to_primitive_trusted(runtime.evidence.input_events),
+        "outputs": _to_primitive_trusted(runtime.evidence.outputs),
+        "receipts": _to_primitive_trusted(runtime.evidence.receipts),
+        "realizations": _to_primitive_trusted(runtime.evidence.realizations),
+        "snapshots": _to_primitive_trusted(runtime.evidence.snapshots),
+    }
+
+    assert runtime.review_evidence() == expected
+
+
+def test_review_evidence_callers_cannot_mutate_nested_records() -> None:
+    runtime, truth = _mixed_propulsion_attitude_runtime(dry_mass_kg=0.0)
+    runtime.prepare_interval(truth, start_time_ns=0)
+    runtime.command_interval(truth, start_time_ns=0, end_time_ns=1_000_000_000)
+    runtime.shutdown(time_ns=1_000_000_000)
+    first = runtime.review_evidence()
+    expected = deepcopy(first)
+
+    first["outputs"][0]["commands"].append({"injected": True})
+    first["snapshots"][0]["fsw_snapshot"]["stack_id"] = "corrupted"
+    first["invocations"].clear()
+
+    assert runtime.review_evidence() == expected
+
+
+def test_aerodynamic_lift_detection_reflects_nested_config_mutation(tmp_path: Path) -> None:
+    cfg = scenario_config_from_dict(_actuator_config(tmp_path))
+    assert _scenario_uses_aerodynamic_lift(cfg) is False
+
+    cfg.objects["target"].specs.update(
+        {
+            "cl": 0.5,
+            "lift_area_m2": 2.0,
+            "lift_axis_body": [0.0, 0.0, 1.0],
+        }
+    )
+
+    assert _scenario_uses_aerodynamic_lift(cfg) is True
+
+
+def test_single_run_computes_scenario_aerodynamic_lift_need_once(tmp_path: Path) -> None:
+    cfg = scenario_config_from_dict(_actuator_config(tmp_path))
+    with patch(
+        "sim.single_run._scenario_uses_aerodynamic_lift",
+        wraps=_scenario_uses_aerodynamic_lift,
+    ) as detector:
+        engine = _SingleRunEngine(cfg)
+    try:
+        assert detector.call_count == 1
+    finally:
+        engine.object_step_executor.shutdown()

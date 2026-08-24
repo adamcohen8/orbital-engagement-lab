@@ -8,6 +8,7 @@ import os
 import re
 import stat
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +22,7 @@ from sim.reporting.ground_station_access_reports import write_ground_station_acc
 from sim.reporting.output_index import write_output_index
 from sim.reporting.review_store import write_single_run_review_store
 from sim.runtime_support import _resolve_rocket_stack, _resolve_satellite_isp_s
-from sim.utils.io import write_json
+from sim.utils.io import sha256_file, write_json
 
 
 @dataclass(frozen=True)
@@ -72,6 +73,9 @@ def format_single_run_summary(summary: dict[str, Any]) -> str:
         )
     else:
         lines.append("Termination: nominal (full duration reached)")
+    review_status = str(summary.get("review_store_status", "") or "").strip()
+    if review_status:
+        lines.append(f"Evidence   : {review_status}")
     if "rocket" in objects and "rocket_insertion_achieved" in summary:
         ins_ok = bool(summary.get("rocket_insertion_achieved", False))
         ins_t = summary.get("rocket_insertion_time_s")
@@ -104,7 +108,8 @@ def format_single_run_summary(summary: dict[str, Any]) -> str:
             f"{estimate.get('display_name', 'Original-Orbit Recovery Estimate')}: "
             f"{mission_recovery.get('object_id', '')} {mission_recovery.get('goal', '')} "
             f"dV={_fmt_optional_float(estimate.get('recovery_delta_v_m_s'), 3)} m/s "
-            f"time={_fmt_optional_float(estimate.get('recovery_time_s'), 1)} s "
+            f"post-assessment time={_fmt_optional_float(estimate.get('recovery_time_s'), 1)} s "
+            f"run-start completion={_fmt_optional_float(estimate.get('run_start_to_estimated_recovery_s'), 1)} s "
             f"method={estimate.get('method', '')}"
         )
         planner = dict(mission_recovery.get("planner", {}) or {})
@@ -121,11 +126,27 @@ def format_single_run_summary(summary: dict[str, Any]) -> str:
             lines.append(
                 f"  {mode:<13}: "
                 f"{_fmt_optional_float(candidate.get('planned_delta_v_m_s'), 3)} m/s, "
-                f"{_fmt_optional_float(candidate.get('planned_time_s'), 1)} s, "
+                f"post-assessment {_fmt_optional_float(candidate.get('planned_time_s'), 1)} s "
+                f"(run-start {_fmt_optional_float(candidate.get('run_start_to_planned_completion_s'), 1)} s), "
                 f"verified={bool(candidate.get('verified', False))}, "
                 f"source={candidate.get('source_family', candidate.get('source', ''))}, "
                 f"target={candidate.get('target_basis', '')}"
             )
+    orbital = dict(summary.get("orbital_analysis", {}) or {})
+    for row in list(orbital.get("coverage", []) or []):
+        item = dict(row or {})
+        lines.append(
+            "Coverage   : "
+            f"{item.get('analysis_id', '')} mean={100.0 * float(item.get('time_weighted_mean_covered_fraction', 0.0)):.3f}% "
+            f"ever={100.0 * float(item.get('ever_covered_fraction', 0.0)):.3f}%"
+        )
+    for row in list(orbital.get("directed_links", []) or []):
+        item = dict(row or {})
+        lines.append(
+            "Link       : "
+            f"{item.get('analysis_id', '')} available={100.0 * float(item.get('sampled_available_fraction', 0.0)):.3f}% "
+            f"duration={float(item.get('available_duration_s', 0.0)):.3f} s"
+        )
     plot_outputs = dict(summary.get("plot_outputs", {}) or {})
     anim_outputs = dict(summary.get("animation_outputs", {}) or {})
     guardrails = dict(summary.get("attitude_guardrail_stats", {}) or {})
@@ -141,6 +162,7 @@ def write_single_run_artifacts(
     context: SingleRunArtifactContext,
 ) -> dict[str, Any]:
     summary = payload.setdefault("summary", {})
+    orbital_analysis: dict[str, Any] = {}
     if bool(context.cfg.outputs.orbital_analysis.enabled):
         from sim.reporting.orbital_analysis import run_scenario_orbital_analysis
 
@@ -169,11 +191,74 @@ def write_single_run_artifacts(
             "coverage_analysis_count": len(orbital_analysis.get("coverage", [])),
             "directed_link_analysis_count": len(orbital_analysis.get("directed_links", [])),
             "schema_version": orbital_analysis.get("schema_version"),
+            "coverage": [
+                {
+                    "analysis_id": item.get("analysis_id"),
+                    "source_object_id": item.get("source_object_id"),
+                    "sample_count": dict(item.get("summary", {}) or {}).get("sample_count"),
+                    "instantaneous_covered_fraction_min": dict(item.get("summary", {}) or {}).get(
+                        "instantaneous_covered_fraction_min"
+                    ),
+                    "instantaneous_covered_fraction_max": dict(item.get("summary", {}) or {}).get(
+                        "instantaneous_covered_fraction_max"
+                    ),
+                    "time_weighted_mean_covered_fraction": dict(item.get("summary", {}) or {}).get(
+                        "time_weighted_mean_covered_fraction"
+                    ),
+                    "ever_covered_fraction": dict(item.get("summary", {}) or {}).get("ever_covered_fraction"),
+                }
+                for item in orbital_analysis.get("coverage", [])
+            ],
+            "directed_links": [
+                {
+                    "analysis_id": item.get("analysis_id"),
+                    "link_id": item.get("link_id"),
+                    "tx_endpoint_id": item.get("tx_object_id"),
+                    "rx_endpoint_id": item.get("rx_object_id"),
+                    "tx_endpoint_kind": item.get("tx_endpoint_kind", "spacecraft"),
+                    "rx_endpoint_kind": item.get("rx_endpoint_kind", "spacecraft"),
+                    "sample_count": dict(item.get("summary", {}) or {}).get("sample_count"),
+                    "available_sample_count": dict(item.get("summary", {}) or {}).get(
+                        "available_sample_count"
+                    ),
+                    "interval_count": dict(item.get("summary", {}) or {}).get("interval_count"),
+                    "sampled_available_fraction": dict(item.get("summary", {}) or {}).get(
+                        "sampled_available_fraction"
+                    ),
+                    "available_duration_s": dict(item.get("summary", {}) or {}).get("available_duration_s"),
+                    "minimum_margin_db": dict(dict(item.get("summary", {}) or {}).get("margin_db", {}) or {}).get(
+                        "minimum"
+                    ),
+                    "maximum_margin_db": dict(dict(item.get("summary", {}) or {}).get("margin_db", {}) or {}).get(
+                        "maximum"
+                    ),
+                    "estimated_delivered_data_bits": dict(item.get("summary", {}) or {}).get(
+                        "estimated_delivered_data_bits"
+                    ),
+                    "required_eb_n0_db": dict(item.get("summary", {}) or {}).get("required_eb_n0_db"),
+                    "minimum_fixed_site_elevation_deg": dict(item.get("summary", {}) or {}).get(
+                        "minimum_fixed_site_elevation_deg"
+                    ),
+                    "maximum_range_km_threshold": dict(item.get("summary", {}) or {}).get(
+                        "maximum_range_km_threshold"
+                    ),
+                    "primary_reason_sample_count": dict(item.get("summary", {}) or {}).get(
+                        "primary_reason_sample_count"
+                    ),
+                }
+                for item in orbital_analysis.get("directed_links", [])
+            ],
         }
     previous_owned_artifacts = _previous_owned_artifacts(context.outdir)
     source_path = getattr(context.cfg, "source_path", None)
     if source_path is not None:
         summary["config_source_path"] = str(Path(source_path).resolve())
+    config_data = context.cfg.to_dict()
+    config_json = json.dumps(config_data, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    config_sha256 = hashlib.sha256(config_json.encode("utf-8")).hexdigest()
+    summary["config_sha256"] = config_sha256
+    summary["generated_utc"] = datetime.now(timezone.utc).isoformat()
+    summary["review_detail"] = str(context.cfg.outputs.review.detail)
     _add_relative_range_summary(summary=summary, context=context)
     trajectory_only = all(
         str(getattr(object_cfg, "runtime_profile", "") or "") == "trajectory_only"
@@ -216,8 +301,19 @@ def write_single_run_artifacts(
         rocket_metrics=context.rocket_metrics if context.rocket_metrics else None,
         reentry_metrics=context.reentry_metrics,
         bridge_hist=context.bridge_hist,
+        ground_station_access=dict(payload.get("ground_station_access", {}) or {}),
         outdir=context.outdir,
     )
+    if orbital_analysis:
+        plot_outputs = dict(plot_outputs)
+        for item in orbital_analysis.get("coverage", []):
+            plot_path = str(dict(item.get("artifacts", {}) or {}).get("fraction_plot_png") or "")
+            if plot_path:
+                plot_outputs[f"coverage:{item.get('analysis_id')}"] = plot_path
+        for item in orbital_analysis.get("directed_links", []):
+            plot_path = str(dict(item.get("artifacts", {}) or {}).get("margin_plot_png") or "")
+            if plot_path:
+                plot_outputs[f"directed_link:{item.get('analysis_id')}"] = plot_path
     mission_recovery_plot = _write_mission_recovery_trade_space_plot(
         cfg=context.cfg,
         mission_recovery=mission_recovery,
@@ -253,7 +349,13 @@ def write_single_run_artifacts(
         summary["bridge_extension_outputs"] = bridge_outputs
         summary["bridge_extension_summary"] = bridge_summary
 
-    artifacts: dict[str, Any] = dict(context.extra_artifacts or {})
+    effective_config_path = context.outdir / "effective_config.json"
+    write_json(str(effective_config_path), config_data)
+    summary["effective_config_path"] = str(effective_config_path)
+    artifacts: dict[str, Any] = {
+        **dict(context.extra_artifacts or {}),
+        "effective_config_json": str(effective_config_path),
+    }
     if payload.get("orbital_analysis"):
         artifacts["orbital_analysis"] = {
             "coverage": [item.get("artifacts", {}) for item in payload["orbital_analysis"].get("coverage", [])],
@@ -294,7 +396,13 @@ def write_single_run_artifacts(
             "sqlite": str(context.outdir / "review" / "run.sqlite"),
             "schema_json": str(context.outdir / "review" / "schema.json"),
         }
-    review_outputs = _write_review_store(payload=payload, context=context, artifacts=artifacts)
+    review_outputs = _write_review_store(
+        payload=payload,
+        context=context,
+        artifacts=artifacts,
+        config_json=config_json,
+        config_sha256=config_sha256,
+    )
     payload.pop("_orbital_analysis_review", None)
     if review_outputs:
         summary["review_outputs"] = review_outputs
@@ -352,6 +460,7 @@ def _previous_owned_artifacts(output_dir: Path) -> set[Path]:
         "review/generated_artifacts.json",
     )
     owned = {output_dir / relative for relative in relative_paths if (output_dir / relative).is_file()}
+    fixed_owned = {path.resolve() for path in owned}
     inventory_path = output_dir / ".oel_run_artifacts.json"
     try:
         inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
@@ -365,8 +474,12 @@ def _previous_owned_artifacts(output_dir: Path) -> set[Path]:
         if relative.is_absolute() or not relative.parts or ".." in relative.parts or not expected:
             continue
         candidate = root / relative
+        if candidate.resolve() in fixed_owned:
+            # Fixed artifacts are already unconditionally owned above; hashing
+            # them again can reread hundreds of megabytes on every rerun.
+            continue
         if candidate.is_file() and not candidate.is_symlink():
-            actual = hashlib.sha256(candidate.read_bytes()).hexdigest()
+            actual = sha256_file(candidate)
             if actual == expected:
                 owned.add(candidate)
     return owned
@@ -414,7 +527,7 @@ def _write_owned_artifact_inventory(output_dir: Path, paths: set[Path]) -> None:
         except ValueError:
             continue
         if path.is_file() and not path.is_symlink():
-            owned.append({"path": relative.as_posix(), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()})
+            owned.append({"path": relative.as_posix(), "sha256": sha256_file(path)})
     inventory.write_text(json.dumps({"version": 2, "paths": owned}, indent=2) + "\n", encoding="utf-8")
 
 
@@ -561,6 +674,8 @@ def _write_review_store(
     payload: dict[str, Any],
     context: SingleRunArtifactContext,
     artifacts: dict[str, Any],
+    config_json: str,
+    config_sha256: str,
 ) -> dict[str, str]:
     review_cfg = context.cfg.outputs.review
     if not bool(review_cfg.enabled):
@@ -571,7 +686,15 @@ def _write_review_store(
                 path.unlink()
         return {}
     try:
-        return write_single_run_review_store(payload=payload, context=context, artifacts=artifacts)
+        outputs = write_single_run_review_store(
+            payload=payload,
+            context=context,
+            artifacts=artifacts,
+            config_json=config_json,
+            config_sha256=config_sha256,
+        )
+        payload.setdefault("summary", {})["review_store_status"] = "complete" if outputs else "missing"
+        return outputs
     except Exception as exc:
         if bool(review_cfg.strict):
             raise
@@ -671,6 +794,7 @@ def _plot_outputs(
     rocket_metrics: dict[str, np.ndarray] | None,
     reentry_metrics: dict[str, dict[str, np.ndarray]] | None,
     bridge_hist: dict[str, list[dict[str, Any]]] | None,
+    ground_station_access: dict[str, Any] | None,
     outdir: Path,
 ) -> dict[str, str]:
     return _plot_outputs_impl(
@@ -686,6 +810,7 @@ def _plot_outputs(
         rocket_metrics=rocket_metrics,
         reentry_metrics=reentry_metrics or {},
         bridge_hist=bridge_hist,
+        ground_station_access=ground_station_access,
         outdir=outdir,
         resolve_rocket_stack=_resolve_rocket_stack,
         resolve_satellite_isp_s=_resolve_satellite_isp_s,
@@ -719,4 +844,7 @@ def _fmt_float(x: float, digits: int = 3) -> str:
 def _fmt_optional_float(x: Any, digits: int = 3) -> str:
     if x is None:
         return "n/a"
-    return _fmt_float(float(x), digits)
+    value = float(x)
+    if value != 0.0 and abs(value) < 10.0 ** (-digits):
+        return f"{value:.3g}"
+    return _fmt_float(value, digits)

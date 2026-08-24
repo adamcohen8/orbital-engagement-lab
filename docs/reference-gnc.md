@@ -69,9 +69,10 @@ underlying stacks remain Experimental for arbitrary composition.
   output sampling may run at independent deterministic cadences. The reference
   runtime is event-driven: a due sensor sample or other releasable input invokes
   the complete stack at that boundary; it is not a separately scheduled sensor
-  task inside the stack. Review `fsw_task_timing.detail_json` records every
-  release reason, measured execution duration, cadence budget, and deadline
-  disposition.
+  task inside the stack. Standard review detail records release reasons in
+  `fsw_task_timing.detail_json`. Modeled duration, execution budget, deadline,
+  and missed-deadline disposition are separate columns; host profiling is
+  distinct from modeled onboard timing.
 - The attitude substep may be smaller than the orbit substep and never larger.
   Quaternion propagation retains the exponential-map evolution inside the
   stage-consistent coupled integrator.
@@ -93,7 +94,7 @@ outputs:
 .venv/bin/python -m sim.review outputs/<run> --query \
   "SELECT object_id, invocation_id, stack_id, profile_id, input_count, command_count FROM fsw_invocations"
 .venv/bin/python -m sim.review outputs/<run> --query \
-  "SELECT object_id, actuator_id, disposition FROM actuator_command_receipts"
+  "SELECT object_id, command_source_id, command_boot_id, command_sequence, disposition FROM actuator_command_receipts"
 .venv/bin/python -m sim.review outputs/<run> --query \
   "SELECT object_id, objective_id, state FROM fsw_objectives"
 ```
@@ -101,6 +102,10 @@ outputs:
 Commands link to their source invocation and receipt. Physical realization links
 to the accepted command identity. Onboard diagnostics remain structurally
 separate from truth-derived review and scoring evidence.
+
+To include actuator identity, join `actuator_command_receipts` to
+`actuator_realization` on object ID plus command source, boot ID, and sequence;
+one accepted command may have more than one realization row.
 
 ## Maintained examples
 

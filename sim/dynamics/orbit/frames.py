@@ -437,6 +437,7 @@ def _nutation_iau1980_vallado_matrix(
     return deltapsi, trueeps, meaneps_rad, omega, nut
 
 
+@lru_cache(maxsize=8192)
 def teme_to_eci_matrix_vallado_iau80(
     jd_utc: float,
     *,
@@ -449,6 +450,10 @@ def teme_to_eci_matrix_vallado_iau80(
     The implementation mirrors the MATLAB SGP4 package's ``teme2eci.m`` path.
     The default TT-UTC value matches 2024-era TLE validation cases; callers with
     EOP data can pass a different value and nutation corrections explicitly.
+
+    Cached arrays are backed by immutable ``bytes`` rather than owning mutable
+    NumPy storage. A caller therefore cannot make the shared value writeable and
+    poison later cache hits.
     """
     jd_tt = float(jd_utc) + float(tt_minus_utc_s) / _DAYSEC
     prec = _precession_iau1976_vallado_matrix(jd_tt)
@@ -466,7 +471,8 @@ def teme_to_eci_matrix_vallado_iau80(
         ],
         dtype=float,
     )
-    return prec @ nut @ eqe.T
+    rotation = prec @ nut @ eqe.T
+    return np.frombuffer(rotation.tobytes(order="C"), dtype=np.float64).reshape((3, 3))
 
 
 def teme_to_eci_vallado_iau80(

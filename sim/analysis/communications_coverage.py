@@ -22,8 +22,8 @@ from sim.analysis.global_coverage import (
 from sim.analysis.healpix import (
     HEALPIX_GRID_ID,
     WGS84_SURFACE_AREA_KM2,
+    cached_healpix_wgs84_centers,
     healpix_npix,
-    healpix_wgs84_centers,
 )
 from sim.dynamics.orbit.frames import FrameContext, eci_to_ecef_rotation_context
 from sim.utils.geodesy import WGS84_A_KM, WGS84_B_KM
@@ -275,9 +275,15 @@ def _prepared_source(
 def _pattern_pass(
     pattern: TerminalPattern,
     direction_terminal: np.ndarray,
+    *,
+    gate_mode: str,
 ) -> tuple[np.ndarray, np.ndarray]:
     if pattern.attitude_independent:
         return np.zeros(direction_terminal.shape[0]), np.ones(direction_terminal.shape[0], dtype=bool)
+    if gate_mode == "direct_cosine":
+        threshold_cosine = np.cos(float(pattern.half_angle_rad) + _ANGULAR_TOLERANCE_RAD)
+        cosine = np.clip(direction_terminal[:, 2], -1.0, 1.0)
+        return np.zeros(direction_terminal.shape[0]), cosine >= threshold_cosine
     angle = np.arccos(np.clip(direction_terminal[:, 2], -1.0, 1.0))
     return angle, angle <= float(pattern.half_angle_rad) + _ANGULAR_TOLERANCE_RAD
 
@@ -324,15 +330,22 @@ def _semantic_hash(
     metrics: CoverageCellMetrics,
     reasons: np.ndarray,
     best_margin: np.ndarray,
+    pattern_gate_mode: str = "exact_arccos",
 ) -> str:
+    identity = {
+        "config": _scientific_config(config),
+        "contract_version": COMMUNICATIONS_COVERAGE_CONTRACT_VERSION,
+        "grid_identity": HEALPIX_GRID_ID,
+        "input_evidence_sha256": input_hash,
+    }
+    if pattern_gate_mode != "exact_arccos":
+        identity["pattern_gate"] = {
+            "mode": pattern_gate_mode,
+            "equivalence": "rounding_level",
+        }
     digest = hashlib.sha256(
         json.dumps(
-            {
-                "config": _scientific_config(config),
-                "contract_version": COMMUNICATIONS_COVERAGE_CONTRACT_VERSION,
-                "grid_identity": HEALPIX_GRID_ID,
-                "input_evidence_sha256": input_hash,
-            },
+            identity,
             sort_keys=True,
             separators=(",", ":"),
             allow_nan=False,
@@ -377,9 +390,18 @@ def evaluate_communications_coverage(
     positions_eci_km: np.ndarray,
     attitudes_quat_bn: np.ndarray | None,
     frame_context: FrameContext,
+    pattern_gate_mode: str = "exact_arccos",
 ) -> CommunicationsCoverageResult:
-    """Evaluate global Earth cells against an explicit terminal service profile."""
+    """Evaluate global Earth cells against an explicit terminal service profile.
 
+    ``exact_arccos`` is the bitwise-compatible default pattern gate.  The
+    explicit ``direct_cosine`` option records rounding-level provenance in the
+    result summary and scientific hash.
+    """
+
+    normalized_gate_mode = str(pattern_gate_mode or "").strip().lower()
+    if normalized_gate_mode not in {"exact_arccos", "direct_cosine"}:
+        raise ValueError("pattern_gate_mode must be exact_arccos or direct_cosine.")
     if config.attitude_source_kind == "not_required":
         if attitudes_quat_bn is not None:
             raise ValueError(
@@ -441,7 +463,7 @@ def evaluate_communications_coverage(
     for start in range(0, npix, config.chunk_size):
         stop = min(start + config.chunk_size, npix)
         cells = np.arange(start, stop, dtype=np.int64)
-        centers = healpix_wgs84_centers(config.order, cells)
+        centers = cached_healpix_wgs84_centers(config.order, cells)
         latitude_chunks.append(np.rad2deg(centers.geodetic_latitude_rad))
         longitude_chunks.append(np.rad2deg(centers.longitude_rad))
         mask = np.zeros((times.size, cells.size), dtype=bool)
@@ -459,17 +481,12 @@ def evaluate_communications_coverage(
                 )
                 > _RANGE_TOLERANCE_KM
             )
-            elevation = np.arcsin(
-                np.clip(
-                    np.einsum(
-                        "ij,ij->i",
-                        centers.outward_normal_ecef,
-                        cell_to_source,
-                    ),
-                    -1.0,
-                    1.0,
-                )
+            earth_terminal_cosine = np.einsum(
+                "ij,ij->i",
+                centers.outward_normal_ecef,
+                cell_to_source,
             )
+            elevation = np.arcsin(np.clip(earth_terminal_cosine, -1.0, 1.0))
             elevation_pass = (
                 elevation
                 >= config.earth_terminal_profile.minimum_elevation_rad
@@ -482,27 +499,28 @@ def evaluate_communications_coverage(
             _, source_pattern_pass = _pattern_pass(
                 config.source_terminal_pattern,
                 source_direction_terminal,
-            )
-            earth_direction_terminal = np.column_stack(
-                (
-                    np.zeros(cells.size),
-                    np.zeros(cells.size),
-                    np.einsum(
-                        "ij,ij->i",
-                        centers.outward_normal_ecef,
-                        cell_to_source,
-                    ),
-                )
+                gate_mode=normalized_gate_mode,
             )
             # Only the +Z cosine is needed for the axisymmetric profile.
             if earth_pattern.attitude_independent:
                 earth_pattern_pass = np.ones(cells.size, dtype=bool)
             else:
-                earth_off_axis = np.arccos(np.clip(earth_direction_terminal[:, 2], -1.0, 1.0))
-                earth_pattern_pass = (
-                    earth_off_axis
-                    <= float(earth_pattern.half_angle_rad) + _ANGULAR_TOLERANCE_RAD
-                )
+                if normalized_gate_mode == "direct_cosine":
+                    threshold_cosine = np.cos(
+                        float(earth_pattern.half_angle_rad) + _ANGULAR_TOLERANCE_RAD
+                    )
+                    earth_pattern_pass = (
+                        np.clip(earth_terminal_cosine, -1.0, 1.0)
+                        >= threshold_cosine
+                    )
+                else:
+                    earth_off_axis = np.arccos(
+                        np.clip(earth_terminal_cosine, -1.0, 1.0)
+                    )
+                    earth_pattern_pass = (
+                        earth_off_axis
+                        <= float(earth_pattern.half_angle_rad) + _ANGULAR_TOLERANCE_RAD
+                    )
             if config.direction == "spacecraft_to_earth":
                 tx_gain = config.source_terminal_pattern.gain_dbi
                 rx_gain = earth_pattern.gain_dbi
@@ -564,8 +582,15 @@ def evaluate_communications_coverage(
         metrics,
         reason_count,
         best_margin,
+        normalized_gate_mode,
     )
     summary = _summary(config, times, covered_count, metrics, reason_count, best_margin)
+    if normalized_gate_mode != "exact_arccos":
+        summary["pattern_gate"] = {
+            "mode": normalized_gate_mode,
+            "equivalence": "rounding_level",
+            "provenance": "explicit_analysis_call",
+        }
     return CommunicationsCoverageResult(
         config=config,
         frame_metadata=frame_metadata,

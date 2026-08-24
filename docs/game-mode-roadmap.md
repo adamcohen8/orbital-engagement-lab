@@ -111,16 +111,27 @@ Bundled training scenarios:
    Pass by tracking the maneuvering target and closing within 100 meters while
    staying under the chaser delta-v budget.
 
+11B. `game_training_rpo_11b_safe_inspection_clone`
+   Safe Inspection Clone. This is a mechanical continuity clone of Level 5,
+   retained so the selector can offer a non-pursuit inspection lesson beside
+   the defensive sequence. It is not a new dynamics model.
+
+Selector availability differs by mode: Level 11 Pursuit (the
+`rpo_10_defensive_target_demo` scenario ID retained for compatibility) is
+Pilot-only; Level 11B is available in both Pilot and Operator modes. The web
+arcade is excluded from the downloadable selector in both modes.
+
 Web-preview arcade variant:
 
 - `rpo_arcade_pursuit`
-  Repeat the Level 10 pursuit problem across randomized target-evasion rounds.
+  Repeat the Level 11 pursuit problem across randomized target-evasion rounds.
   Each cleared round resets fuel, changes the target evasion direction, tightens
   the goal radius by 5 meters down to a 5 meter floor, and rolls the weighted
-  round score into the run total. The chaser has a 3 m/s round delta-v budget;
+  round score into the run total. Round 1 preserves the Level 11 pursuit setup.
+  The chaser has a 3 m/s round delta-v budget;
   cleared rounds award 75% of the target orbital period plus conserved chaser
-  delta-v at 1000 seconds per unused m/s. Round 1 preserves the Level 9 start;
-  later rounds randomize the chaser's RIC state while matching target/chaser
+  delta-v at 1000 seconds per unused m/s. Later rounds randomize the chaser's
+  RIC state while matching target/chaser
   orbital energy. Every fifth round becomes a boss round with an elliptical
   target orbit, randomized target true anomaly, elliptical coast projection,
   boss scoring, boss music, and an additional 5000 second flat time bonus. Boss
@@ -249,12 +260,14 @@ scoped to the final free-maneuver phase.
 - Done: `rpo_03_rbar_approach`.
 - Done: `rpo_04_rendezvous`.
 - Done: `rpo_05_passive_cross_track_approach`.
-- Demo: `rpo_06_sun_angle_inspection`.
+- Done: `rpo_06_sun_angle_inspection` (supported educational selector level;
+  its lighting corridor remains a demonstration model, not sensor assurance).
 - Done: `rpo_07_elliptic_burn_then_approach`.
 - Done: `rpo_08_elliptic_nmc`.
 - Done: `rpo_09_elliptic_rendezvous`.
 - Done: Level 10 Evasion.
 - Done: Level 11 Pursuit.
+- Done: Level 11B Safe Inspection Clone, mechanically matched to Level 5.
 - Done: `rpo_bonus_cislunar_rendezvous`.
 - Done: add instructor notes for each scenario.
 - Done for implemented levels: add success thresholds and scorecards.
@@ -290,7 +303,10 @@ scoped to the final free-maneuver phase.
 
 - Reintroduce attitude/thruster coupling as an advanced lesson.
 - Add target defensive behaviors as structured exercises.
-- Add two-player PvP after the single-player trainer is stable.
+- Beta delivered: two-player RPO Duel with an authoritative Cloudflare
+  Worker/Durable Object room service, plus a computer-opponent path. Remaining
+  work is post-Beta network/device playtesting, usage measurement, persistence,
+  and promotion—not initial PvP implementation.
 
 ## Near-Term Implementation Target
 

@@ -810,10 +810,12 @@ canonical semantic content hash. Focused
 reference, attitude, interval, chunk-parity, fail-closed, and artifact tests are
 checked in alongside it.
 
-The implementation is currently a Python API accepting explicit state and
-attitude evidence. Scenario YAML, automatic completed-run extraction,
-review-store tables, plots, and agent-facing execution remain follow-on
-adapters.
+The programmatic API accepts explicit state and attitude evidence. The
+canonical conical product is also implemented through Scenario YAML,
+completed ONP/review and ECI OGP history normalization, review tables, native
+plots, saved queries, and the supported `coverage_link_review` agent recipe.
+Rich footprints, communications coverage, aggregation, tasking, and concrete
+causal consumers remain separate adapter scopes.
 
 ### Phase 2: Regional and point queries
 
@@ -1061,11 +1063,11 @@ assurance or a geometric footprint into calibrated sensor performance.
 
 ## Public and Pro Product Boundary
 
-The implemented coverage and link-analysis stack is public core. This includes
-the deterministic kernels, plots, artifacts, contracts, sensitivity evidence,
-constellation aggregation, bounded single-asset tasking, runtime monitor,
-history adapters, scenario adapters, review tables, examples, and tests built
-under this plan.
+The transparent deterministic kernels are public core, but availability differs
+by integration layer. The canonical conical/directed-link product has the
+public Scenario/review/agent path; several richer families remain public
+programmatic kernels only. A separate governed communications workflow is an
+implemented private Pro, export-excluded v0.2 surface.
 
 This promotion does not change the maturity or claim boundary: the current
 stack remains experimental engineering analysis pending independent external
@@ -1077,28 +1079,48 @@ validation.
 - Global Earth coverage for conical and implemented rich hard-field-of-view
   geometries, plus point and regional queries over those products.
 - Simple, inspectable free-space link budgets.
-- Implemented communications coverage, constellation aggregation, bounded
-  tasking, cadence sensitivity, and authorized single-link runtime monitoring.
+- Programmatic communications coverage, constellation aggregation, bounded
+  tasking, cadence sensitivity, and a standalone authorized single-link causal
+  monitor protocol. The monitor has no concrete ONP/FSW consumer integration.
 - ONP, completed-review, and ECI OGP history adapters.
 - Documented equations, assumptions, examples, review tables, plots, tests,
   and bounded acceptance evidence.
 
-### Possible future Pro/private additions
+### Implemented private Pro v0.2 workflow
+
+The governed Pro communications workflow adds named ITU atmospheric models,
+RF-qualified HEALPix coverage, constellation aggregation and sensitivity,
+bounded downlink scheduling/adaptive-rate delivery, seeded campaigns,
+ground-network/constellation trades, and governed equipment/customer adapters.
+It is local, separately entitled, experimental, and excluded from public
+export. Its declared profiles are illustrative; it does not claim measured RF,
+current weather/interference, calibrated probability, packet assurance, or
+operational availability.
+
+### Still future or outside the current product
 
 - Imported or calibrated antenna patterns.
-- Higher-fidelity atmospheric and weather loss models.
-- Interference and richer RF environments.
-- Multi-terminal networks and availability models.
-- Large multi-asset contact scheduling and resource-conflict optimization.
+- Current-weather assimilation and calibrated atmospheric availability.
+- Measured interference and operational RF environments.
+- Operational multi-terminal networks, routing, and availability assurance.
+- Unbounded multi-asset scheduling and resource-conflict optimization.
 - High-fidelity time-varying storage, power, thermal, payload, and downlink
   coupling.
 - Constellation design and orbit optimization at operational scale.
-- Managed campaigns and uncertainty orchestration.
-- Customer-specific terminal, station, or sensor catalogs.
+- Operationally calibrated uncertainty campaigns.
+- Distributed customer-catalog services beyond the governed local adapters.
 
-No implemented capability is withheld solely because it was developed under
-this plan. Future Pro placement should follow analyst value, proprietary-data
-needs, scale, workflow leverage, validation burden, and maintainability.
+Public kernels are not silently withheld, but the governed Pro workflow is an
+intentional private product surface because it composes proprietary profiles,
+campaign/scheduling automation, separate entitlement, and a private evidence
+contract. Packaging does not change the scientific non-claims above.
+
+| Family | Public kernel | Public Scenario/review | Public agent recipe | Private Pro workflow | External validation |
+| --- | --- | --- | --- | --- | --- |
+| Canonical conical coverage/direct link | yes | yes | yes | reusable input | coverage reference retained; directed-link comparison pending |
+| Rich footprints | yes | no | no | reusable input | internal fixtures only |
+| Communications coverage/aggregation/tasking | yes | no | no | yes, governed v0.2 | named seam comparisons only |
+| Runtime causal monitor | standalone protocol | no concrete consumer | no | no concrete consumer | protocol fixtures only |
 
 ## Pre-Implementation Freeze Gates
 
@@ -1513,7 +1535,9 @@ MCP surface, install a dependency, or claim production readiness.
 9. **Complete for the primary run-review adapter:** add typed
    link-term samples, intervals, summary, margin plot, and evidence packet.
    Scenario runs populate `link_summary`, `link_samples`, `link_windows`, and
-   `link_transitions`. Saved-query aliases remain follow-on convenience.
+   `link_transitions`. The supported aliases are `coverage_summary`,
+   `coverage_transition_summary`, `directed_link_summary`, and
+   `directed_link_windows`.
 10. **Complete for conical scenario/completed-history adapters:** deliver global Earth
     conical-sensor coverage using achieved or explicitly assumed attitude and
     the frozen cell/intersection contract. Scenario runs populate
@@ -1564,7 +1588,8 @@ MCP surface, install a dependency, or claim production readiness.
 This remains a working development sequence rather than a release commitment.
 The programmatic directed-link, global sensor/region/point/rich footprint,
 global communications, constellation aggregation, and bounded tasking cores
-are complete. Canonical conical coverage and directed object-to-object links
+are complete. Canonical conical coverage and directed spacecraft-to-spacecraft
+or spacecraft-to-fixed-site links (ground-to-ground is excluded)
 also have evidence-only scenario adapters, normalized ONP/review/ECI-OGP
 history adapters, primary review tables, and provider-backed transition
 refinement. Rich footprints, communications coverage, aggregation, tasking,

@@ -1,5 +1,5 @@
 scenario_name: public_attitude_hold_disturbance
-scenario_description: 'Public example: five-minute reaction-wheel attitude hold with
+scenario_description: 'Public example: five-minute quaternion attitude hold using the ideal-wrench hardware abstraction with
   initial attitude/rate error and gravity-gradient disturbance torque.'
 metadata:
   owner: public
@@ -80,7 +80,6 @@ outputs:
     - attitude
     - quaternion_error
     - rates_eci
-    - control_effort
   animations:
     enabled: false
     types: []

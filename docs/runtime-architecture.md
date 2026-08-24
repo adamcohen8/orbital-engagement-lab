@@ -24,6 +24,12 @@ Its focused collaborators are:
 - `sim.execution.single_run_history`: history growth, retention, and compaction
 - `sim.reporting.run_payload_assembly`: reporting views, payload construction, and artifact dispatch
 
+Public-core single-scenario execution uses deterministic serial object
+stepping. Process-pool object stepping is a Pro-entitled feature. `auto` may
+select a compatible available backend or fall back to serial under resource or
+compatibility constraints; explicitly forcing an unavailable parallel backend
+fails the applicable feature/validation check.
+
 External callers should continue using `sim.execution`, `sim.api`, or the
 existing compatibility modules. These implementation modules are ownership
 boundaries, not a replacement public API.

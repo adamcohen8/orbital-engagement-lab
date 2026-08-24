@@ -6,6 +6,57 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.27.2 - 2026-08-24
+
+Release thesis: `v0.27.2` hardens public agent workflows from an independent
+public-export acceptance pass and accelerates deterministic analysis without
+weakening the physics or evidence contracts. It protects prior evidence from
+silent overwrite, makes review persistence and partial plot status explicit,
+adds bounded OGP-SDP4 onboarding, improves responsive RPO Duel layouts, and
+reduces runtime across propagation, orbit determination, Scale, campaign,
+review, and reporting workloads.
+
+### Added
+
+- Add a deterministic synthetic OGP-SDP4 onboarding scenario, task card,
+  resolved-regime evidence, and checked-in deep-space reference fixtures with
+  explicit shared-lineage and non-operational claim limits.
+- Add parity, mutation, provenance, and evidence-integrity regressions for the
+  accelerated propagation, OD, Scale, analysis, review, reporting, and
+  campaign paths.
+
+### Fixed
+
+- Refuse non-empty output targets by default and archive prior evidence only
+  with the explicit `--overwrite-output` option; preflight filesystem headroom.
+- Preserve public-safe mission-recovery analysis when exporting public planner
+  scenarios, and validate the resulting public analysis boundary.
+- Register directed-link-margin review plotting and downgrade incomplete plot
+  packets instead of reporting them as wholly complete.
+- Accept `run.sqlite.gz` review capsules through the same read-only MCP
+  authorization boundary as ordinary review stores.
+- Label safe validation as structural validation when plugin imports are
+  intentionally skipped.
+- Add resolved propagator, endpoint, access-window, attitude-error, radius, and
+  orbital-element evidence to the review contract.
+
+### Changed
+
+- Agent-facing attitude examples now describe their actual ideal-wrench
+  abstraction, and long-running re-entry/TLE examples save standard review
+  evidence without a redundant full JSON history.
+- Generated indexes now include evidence provenance and explicit claim limits.
+- Accelerate deterministic propagation, orbit determination, Scale screening,
+  campaign orchestration, review queries, and report generation while
+  preserving default output parity; optional rounding-level backends remain
+  explicit and provenance-tagged.
+- Isolate OGP performance measurements from passive flight-software overhead
+  by using dedicated trajectory-only benchmark fixtures.
+- Refine RPO Duel desktop, tablet, and mobile layouts and add responsive worker
+  contract coverage.
+- Correct package license metadata and wheel verification to Apache-2.0, which
+  matches the repository's longstanding `LICENSE.txt` and public README.
+
 ## 0.27.1 - 2026-08-22
 
 Release thesis: `v0.27.1` completes the intended RPO Duel Beta experience by

@@ -43,8 +43,12 @@ ECI acceleration plus any mount torque. Common limiting is:
 a_max = min(max_accel_km_s2, max_thrust_n / mass_kg / 1000)
 ```
 
-when both limits are configured. A zero or unavailable thrust cap produces zero
-acceleration. The model also supports acceleration-rate limiting
+when both positive limits are configured. The effective cap is the minimum of
+the positive configured caps. A positive `max_accel_km_s2` remains usable when
+`max_thrust_n` is absent; acceleration is zero only when no positive effective
+cap exists or an explicitly supplied thrust cap is non-positive. The runtime
+factory's omitted-acceleration default is intentionally permissive and is not a
+physical hardware limit. The model also supports acceleration-rate limiting
 `max_throttle_rate_km_s2_s`, first-order lag `lag_tau_s`, a velocity impulse
 deadband `min_impulse_bit_km_s`, and mass use:
 

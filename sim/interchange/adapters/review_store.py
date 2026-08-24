@@ -118,7 +118,10 @@ def build_completed_run_state_product(
         source_artifacts.append(
             _source_artifact(workspace.schema_path, target=target, artifact_id="completed_run_review_schema")
         )
-    created_utc = _normalize_utc(metadata["generated_utc"])
+    created_utc = _normalize_utc(
+        metadata["generated_utc"],
+        fallback=_schema_generated_utc(workspace.schema_path),
+    )
     selection = {
         "selector_kind": selector_kind,
         "requested": _selector_request(
@@ -711,11 +714,23 @@ def _json_list(value: Any, label: str) -> list[Any]:
     return parsed
 
 
-def _normalize_utc(value: Any) -> str:
-    # Reproducible review stores written during the v0.25 transition may carry
-    # an empty provenance timestamp. Preserve their usability with the same
-    # valid sentinel now written by the review store.
-    text = str(value or "").strip() or "1970-01-01T00:00:00Z"
+def _schema_generated_utc(schema_path: Path) -> str:
+    if not schema_path.is_file():
+        return ""
+    try:
+        payload = json.loads(schema_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ""
+    return str(dict(payload or {}).get("generated_utc", "") or "").strip()
+
+
+def _normalize_utc(value: Any, *, fallback: Any = None) -> str:
+    text = str(value or "").strip() or str(fallback or "").strip()
+    if not text:
+        raise CompletedRunStateExportError(
+            "Completed-run provenance has no generated_utc in run_metadata or review/schema.json; "
+            "rerun the scenario before exporting a handoff product."
+        )
     try:
         parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
     except ValueError as exc:

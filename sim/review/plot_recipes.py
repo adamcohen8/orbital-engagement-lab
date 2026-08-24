@@ -199,6 +199,91 @@ REVIEW_PLOT_RECIPES: dict[str, ReviewPlotRecipe] = {
         required_columns=("station_object", "access_samples"),
         natural_language_triggers=("plot ground access", "show access samples by station"),
     ),
+    "attitude_error": ReviewPlotRecipe(
+        recipe_id="attitude_error",
+        title="Attitude tracking error",
+        description="Shortest-arc desired-versus-actual quaternion error by object.",
+        sql=(
+            "SELECT time_s, object_id, quat_error_angle_deg FROM attitude_error "
+            "ORDER BY object_id, time_s"
+        ),
+        x_column="time_s",
+        y_columns=("quat_error_angle_deg",),
+        group_column="object_id",
+        x_label="Time (s)",
+        y_label="Quaternion error angle (deg)",
+        artifact_id="evidence_attitude_error",
+        semantic_metric_names=("attitude_error_deg",),
+        supported_tables=("attitude_error",),
+        required_columns=("time_s", "object_id", "quat_error_angle_deg"),
+        natural_language_triggers=("plot attitude error", "show pointing error over time"),
+    ),
+    "attitude_body_rates": ReviewPlotRecipe(
+        recipe_id="attitude_body_rates",
+        title="Body angular rates",
+        description="Body angular-rate components from retained object-state evidence.",
+        sql=(
+            "SELECT time_s, object_id, omega_x_rad_s, omega_y_rad_s, omega_z_rad_s "
+            "FROM object_state ORDER BY object_id, time_s"
+        ),
+        x_column="time_s",
+        y_columns=("omega_x_rad_s", "omega_y_rad_s", "omega_z_rad_s"),
+        group_column="object_id",
+        x_label="Time (s)",
+        y_label="Body rate (rad/s)",
+        artifact_id="evidence_attitude_body_rates",
+        semantic_metric_names=("attitude_body_rate_rad_s",),
+        supported_tables=("object_state",),
+        required_columns=("time_s", "object_id", "omega_x_rad_s", "omega_y_rad_s", "omega_z_rad_s"),
+        natural_language_triggers=("plot body rates", "show angular rates over time"),
+    ),
+    "coverage_fraction": ReviewPlotRecipe(
+        recipe_id="coverage_fraction",
+        title="Instantaneous whole-Earth coverage",
+        description="Covered HEALPix cell-center fraction by analysis and sample time.",
+        sql=(
+            "SELECT analysis_id, time_s, "
+            "100.0 * instantaneous_covered_fraction AS covered_percent "
+            "FROM coverage_samples ORDER BY analysis_id, time_s"
+        ),
+        x_column="time_s",
+        y_columns=("covered_percent",),
+        group_column="analysis_id",
+        x_label="Analysis time (s)",
+        y_label="Covered cell centers (%)",
+        artifact_id="evidence_coverage_fraction",
+        semantic_metric_names=("coverage_fraction",),
+        supported_tables=("coverage_samples",),
+        required_columns=("analysis_id", "time_s", "covered_percent"),
+        natural_language_triggers=(
+            "plot coverage fraction",
+            "show whole-Earth coverage over time",
+        ),
+    ),
+    "directed_link_margin": ReviewPlotRecipe(
+        recipe_id="directed_link_margin",
+        title="Directed-link margin",
+        description="Link margin, zero-dB closure threshold, and qualified samples by directed link.",
+        sql=(
+            "SELECT analysis_id, time_s, margin_db, available "
+            "FROM link_samples ORDER BY analysis_id, time_s"
+        ),
+        x_column="time_s",
+        y_columns=("margin_db",),
+        group_column="analysis_id",
+        x_label="Analysis time (s)",
+        y_label="Margin (dB)",
+        artifact_id="evidence_directed_link_margin",
+        semantic_metric_names=("directed_link_margin_db",),
+        supported_tables=("link_samples",),
+        required_columns=("analysis_id", "time_s", "margin_db", "available"),
+        renderer_id="directed_link_margin",
+        natural_language_triggers=(
+            "plot link margin",
+            "show link closure",
+            "plot directed-link availability",
+        ),
+    ),
     "campaign_closest_approach": ReviewPlotRecipe(
         recipe_id="campaign_closest_approach",
         title="Campaign closest approach by iteration",

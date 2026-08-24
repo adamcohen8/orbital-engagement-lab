@@ -30,6 +30,7 @@ class PlotOutputContext:
     knowledge_measurement_hist: dict[str, dict[str, np.ndarray]] | None
     bridge_hist: dict[str, list[dict[str, Any]]] | None
     reentry_metrics: dict[str, dict[str, np.ndarray]] | None
+    ground_station_access: dict[str, Any] | None
     figure_ids: tuple[str, ...]
     plot_fns: dict[str, Any]
     mode: str
@@ -66,6 +67,7 @@ def build_plot_output_context(
     knowledge_measurement_hist: dict[str, dict[str, np.ndarray]] | None = None,
     bridge_hist: dict[str, list[dict[str, Any]]] | None = None,
     reentry_metrics: dict[str, dict[str, np.ndarray]] | None = None,
+    ground_station_access: dict[str, Any] | None = None,
 ) -> PlotOutputContext:
     plots_cfg = dict(cfg.outputs.plots or {})
     mode = cfg.outputs.mode
@@ -131,6 +133,7 @@ def build_plot_output_context(
         knowledge_measurement_hist=knowledge_measurement_hist,
         bridge_hist=bridge_hist,
         reentry_metrics=reentry_metrics,
+        ground_station_access=ground_station_access,
         figure_ids=tuple(figure_ids),
         plot_fns=plot_fns,
         mode=mode,

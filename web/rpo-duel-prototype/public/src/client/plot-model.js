@@ -1,6 +1,7 @@
 export const DUEL_CAMERA_MODES = Object.freeze({
   REFERENCE: "reference",
   CURRENT_PAIR: "current_pair",
+  CURRENT_PROJECTIONS: "current_projections",
 });
 
 export const DUEL_VISUAL_TIMING = Object.freeze({
@@ -16,9 +17,9 @@ export function captureRingStyle(playerRole) {
 }
 
 export function toggleDuelCameraMode(mode) {
-  return mode === DUEL_CAMERA_MODES.CURRENT_PAIR
-    ? DUEL_CAMERA_MODES.REFERENCE
-    : DUEL_CAMERA_MODES.CURRENT_PAIR;
+  if (mode === DUEL_CAMERA_MODES.REFERENCE) return DUEL_CAMERA_MODES.CURRENT_PAIR;
+  if (mode === DUEL_CAMERA_MODES.CURRENT_PAIR) return DUEL_CAMERA_MODES.CURRENT_PROJECTIONS;
+  return DUEL_CAMERA_MODES.REFERENCE;
 }
 
 export function referenceRelativePair(round = {}) {
@@ -80,10 +81,9 @@ export function hcwCoastProjection(initialState, {
 
 export function duelPlotFrame(round, trail = [], cameraMode = DUEL_CAMERA_MODES.REFERENCE) {
   const current = referenceRelativePair(round);
+  const origin = relativeState();
   const pairMode = cameraMode === DUEL_CAMERA_MODES.CURRENT_PAIR;
-  const cameraCenter = pairMode
-    ? midpointPosition(current.target, current.chaser)
-    : { r_km: 0, i_km: 0, c_km: 0 };
+  const projectionMode = cameraMode === DUEL_CAMERA_MODES.CURRENT_PROJECTIONS;
   const meanMotion = Number(round?.reference_mean_motion_rad_s);
   const horizon = Number.isFinite(meanMotion) && meanMotion > 0
     ? 2 * Math.PI / meanMotion
@@ -98,35 +98,51 @@ export function duelPlotFrame(round, trail = [], cameraMode = DUEL_CAMERA_MODES.
     meanMotionRadS: meanMotion,
     horizonS: horizon,
   });
+  const projectionFramingPoints = [
+    ...targetProjection,
+    ...chaserProjection,
+    current.target,
+    current.chaser,
+  ];
+  const referenceFramingPoints = [
+    origin,
+    ...projectionFramingPoints,
+    ...targetTrail,
+    ...chaserTrail,
+  ];
+  const cameraCenter = pairMode
+    ? midpointPosition(current.target, current.chaser)
+    : projectionMode
+      ? boundingCenter(projectionFramingPoints)
+      : boundingCenter(referenceFramingPoints);
   return {
-    cameraMode: pairMode ? DUEL_CAMERA_MODES.CURRENT_PAIR : DUEL_CAMERA_MODES.REFERENCE,
+    cameraMode: pairMode
+      ? DUEL_CAMERA_MODES.CURRENT_PAIR
+      : projectionMode
+        ? DUEL_CAMERA_MODES.CURRENT_PROJECTIONS
+        : DUEL_CAMERA_MODES.REFERENCE,
     cameraCenter,
     target: current.target,
     chaser: current.chaser,
-    targetTrail,
-    chaserTrail,
+    targetTrail: pairMode || projectionMode ? [] : targetTrail,
+    chaserTrail: pairMode || projectionMode ? [] : chaserTrail,
     targetProjection,
     chaserProjection,
     framingPoints: pairMode
       ? [current.target, current.chaser]
-      : [
-          ...targetProjection,
-          ...chaserProjection,
-          ...targetTrail,
-          ...chaserTrail,
-          current.target,
-          current.chaser,
-        ],
+      : projectionMode
+        ? projectionFramingPoints
+        : referenceFramingPoints,
   };
 }
 
 export function duelPlotSpan(frame, xKey, yKey, captureRadiusKm = .1) {
-  const pairMode = frame.cameraMode === DUEL_CAMERA_MODES.CURRENT_PAIR;
+  const floatingMode = frame.cameraMode !== DUEL_CAMERA_MODES.REFERENCE;
   const centerX = frame.cameraCenter[xKey];
   const centerY = frame.cameraCenter[yKey];
   const captureRadius = Math.max(0, Number(captureRadiusKm) || 0);
   const extent = Math.max(
-    pairMode ? .12 : 1,
+    floatingMode ? .12 : 1,
     ...frame.framingPoints.flatMap((sample) => [
       Math.abs((sample?.[xKey] || 0) - centerX),
       Math.abs((sample?.[yKey] || 0) - centerY),
@@ -135,7 +151,7 @@ export function duelPlotSpan(frame, xKey, yKey, captureRadiusKm = .1) {
     Math.abs(frame.target[yKey] - centerY) + captureRadius,
   );
   const padded = extent * 1.22;
-  return pairMode ? padded : niceExtent(padded);
+  return padded;
 }
 
 function midpointPosition(first, second) {
@@ -144,6 +160,15 @@ function midpointPosition(first, second) {
     i_km: (first.i_km + second.i_km) / 2,
     c_km: (first.c_km + second.c_km) / 2,
   };
+}
+
+function boundingCenter(points) {
+  const center = {};
+  for (const key of ["r_km", "i_km", "c_km"]) {
+    const values = points.map((point) => finite(point?.[key]));
+    center[key] = (Math.min(...values) + Math.max(...values)) / 2;
+  }
+  return center;
 }
 
 function interpolateRelative(previous, current, alpha) {
@@ -200,10 +225,4 @@ function finite(value) {
 
 function lerp(first, second, alpha) {
   return first + (second - first) * alpha;
-}
-
-function niceExtent(value) {
-  const power = 10 ** Math.floor(Math.log10(Math.max(value, .1)));
-  const normalized = value / power;
-  return (normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10) * power;
 }

@@ -90,7 +90,11 @@ def _scenario_uses_aerodynamic_lift(cfg: SimulationScenarioConfig) -> bool:
     return False
 
 
-def _build_orbit_propagator(cfg: SimulationScenarioConfig) -> OrbitPropagator:
+def _build_orbit_propagator(
+    cfg: SimulationScenarioConfig,
+    *,
+    scenario_uses_aerodynamic_lift: bool | None = None,
+) -> OrbitPropagator:
     orbit = dict(cfg.simulator.dynamics.get("orbit", {}) or {})
     acceleration = dict(getattr(cfg.simulator, "acceleration", {}) or {})
     sh = dict(orbit.get("spherical_harmonics", {}) or {})
@@ -106,7 +110,12 @@ def _build_orbit_propagator(cfg: SimulationScenarioConfig) -> OrbitPropagator:
         plugins.append(spherical_harmonics_plugin)
     if bool(orbit.get("drag", False)):
         plugins.append(drag_plugin)
-        if _scenario_uses_aerodynamic_lift(cfg):
+        uses_aerodynamic_lift = (
+            _scenario_uses_aerodynamic_lift(cfg)
+            if scenario_uses_aerodynamic_lift is None
+            else bool(scenario_uses_aerodynamic_lift)
+        )
+        if uses_aerodynamic_lift:
             plugins.append(lift_plugin)
     if bool(orbit.get("srp", False)):
         plugins.append(srp_plugin)
@@ -130,6 +139,8 @@ def _create_satellite_runtime(
     agent_cfg: Any,
     cfg: SimulationScenarioConfig,
     rng: np.random.Generator,
+    *,
+    scenario_uses_aerodynamic_lift: bool | None = None,
 ) -> AgentRuntime:
     initial_state = dict(agent_cfg.initial_state or {})
     truth = _default_truth_from_agent(agent_cfg, t_s=0.0, target_jd_utc=cfg.simulator.initial_jd_utc)
@@ -207,7 +218,10 @@ def _create_satellite_runtime(
         if att_cfg.get("attitude_substep_s") is not None
         else None,
         propagate_attitude=attitude_enabled,
-        orbit_propagator=_build_orbit_propagator(cfg),
+        orbit_propagator=_build_orbit_propagator(
+            cfg,
+            scenario_uses_aerodynamic_lift=scenario_uses_aerodynamic_lift,
+        ),
         acceleration_mode=str(acceleration.get("mode", "off") or "off"),
     )
     sat_isp_s = _resolve_satellite_isp_s(specs)

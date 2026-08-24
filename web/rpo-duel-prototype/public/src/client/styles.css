@@ -86,6 +86,7 @@ legend { margin-bottom: 9px; }
 .computer-note { margin: -4px 0 0; color: var(--info); font-size: .72rem; line-height: 1.45; }
 
 .duel-active { overflow: hidden; }
+.duel-active, .duel-active * { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 .duel-active .app-shell { position: relative; width: 100vw; height: 100vh; min-width: 720px; min-height: 560px; max-width: none; overflow: hidden; padding: 0; background: var(--screen); }
 .duel-active .topbar { display: none; }
 .game-view { position: relative; width: 100%; height: 100vh; min-width: 720px; min-height: 560px; overflow: hidden; }
@@ -98,14 +99,17 @@ legend { margin-bottom: 9px; }
 .duel-top-metrics strong { font-weight: 400; }
 .duel-objective { min-width: 0; display: grid; align-content: center; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; color: var(--metric); font-size: 14px; line-height: 16px; }
 .duel-objective .objective-heading { grid-column: 1; color: var(--muted); text-transform: uppercase; }
-.duel-objective > strong { grid-column: 1; color: var(--green); font-size: 16px; }
+.duel-objective > strong { grid-column: 1; color: var(--muted); font-size: 16px; }
+#role-label[data-role="chaser"] { color: var(--chaser); }
+#role-label[data-role="target"] { color: var(--target); }
 .auto-time { grid-column: 2; grid-row: 1 / 3; justify-self: end; display: grid; grid-template-columns: auto auto; column-gap: 8px; align-items: center; text-align: right; }
-.auto-time span { color: var(--muted); font-size: 11px; }
-.auto-time strong { grid-row: 1 / 3; grid-column: 2; color: var(--info); font-size: 22px; }
-.auto-time small { color: var(--muted); font-size: 10px; }
-.auto-time.maneuvering strong { color: var(--hint); }
+.auto-time-heading { grid-column: 1; grid-row: 1 / 3; display: grid; align-content: center; }
+.auto-time-heading span { color: var(--muted); font-size: 11px; }
+.auto-time > strong { grid-row: 1 / 3; grid-column: 2; color: var(--info); font-size: 22px; }
+.auto-time-heading small { color: var(--muted); font-size: 10px; }
+.auto-time.maneuvering > strong { color: var(--hint); }
 
-.duel-game-layout { position: absolute; left: 36px; right: 36px; top: 124px; bottom: 122px; }
+.duel-game-layout { position: absolute; left: 36px; right: 36px; top: 124px; bottom: 132px; }
 .plots { position: absolute; inset: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 36px; min-height: 0; }
 .plot-card { position: relative; min-width: 200px; min-height: 250px; margin: 0; border: 1px solid var(--stroke); border-radius: 10px; background: var(--panel); overflow: hidden; }
 .plot-card figcaption { position: absolute; left: 14px; right: 14px; top: 10px; height: 24px; z-index: 1; display: flex; align-items: baseline; justify-content: space-between; gap: 12px; color: var(--text); font-size: 18px; font-weight: 700; }
@@ -119,7 +123,7 @@ legend { margin-bottom: 9px; }
 .match-actions { display: flex; justify-content: center; gap: 10px; margin-top: 16px; }
 .match-actions .primary-button, .match-actions .secondary-button { min-width: 150px; padding: 0 18px; }
 
-.duel-hud-panel { position: absolute; left: 36px; right: 36px; bottom: 26px; height: 86px; border: 1px solid var(--stroke-hud); border-radius: 10px; background: var(--hud); color: rgb(235, 240, 245); padding: 10px 16px; font-size: 14px; line-height: 17px; }
+.duel-hud-panel { position: absolute; left: 36px; right: 36px; bottom: 26px; height: 96px; border: 1px solid var(--stroke-hud); border-radius: 10px; background: var(--hud); color: rgb(235, 240, 245); padding: 10px 16px; font-size: 14px; line-height: 17px; }
 .duel-hud-line { position: absolute; left: 16px; top: 10px; right: 16px; display: flex; align-items: center; justify-content: space-between; gap: 18px; }
 .room-readout { display: flex; align-items: baseline; gap: 10px; color: var(--muted); }
 .room-code { min-height: 24px; border: 0; background: transparent; padding: 0; color: var(--text); font-size: 16px; letter-spacing: .16em; cursor: pointer; }
@@ -136,15 +140,46 @@ legend { margin-bottom: 9px; }
 .status-dot.connected { background: var(--green); box-shadow: 0 0 9px rgba(150,235,170,.35); }
 .hint-line { position: absolute; left: 16px; top: 40px; right: 16px; color: var(--hint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .command-line { position: absolute; left: 16px; bottom: 8px; color: rgb(195, 205, 220); }
-.connection-card { position: absolute; right: 16px; bottom: 8px; display: flex; gap: 18px; color: var(--footer); font-size: 12px; }
-.connection-card div { display: flex; align-items: center; gap: 7px; }
 .touch-controls { display: none; }
 .thrust-button { min-width: 0; min-height: 38px; border: 1px solid rgb(104, 130, 156); border-radius: 4px; background: rgb(34, 48, 62); color: rgb(220, 234, 246); cursor: pointer; touch-action: none; user-select: none; -webkit-user-select: none; position: relative; font-weight: 700; }
-.thrust-button:hover, .thrust-button.active { border-color: var(--danger); background: var(--danger-bg); color: rgb(255, 220, 224); }
+.thrust-button.active { border-color: var(--danger); background: var(--danger-bg); color: rgb(255, 220, 224); }
+@media (hover: hover) and (pointer: fine) {
+  .thrust-button:hover { border-color: var(--danger); background: var(--danger-bg); color: rgb(255, 220, 224); }
+}
 .thrust-button kbd { display: none; }
 .thrust-button:disabled { opacity: .35; cursor: not-allowed; }
 .toast { position: fixed; z-index: 20; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom)); transform: translate(-50%, 20px); padding: 10px 14px; color: var(--text); background: var(--hud); border: 1px solid var(--stroke-hud); border-radius: 4px; font-size: .75rem; opacity: 0; pointer-events: none; transition: .2s ease; }
 .toast.visible { opacity: 1; transform: translate(-50%, 0); }
+
+@media (min-width: 1000px) and (min-height: 581px) {
+  .duel-top-bar { min-height: 70px; padding-top: 3px; padding-bottom: 3px; }
+  .duel-top-left { align-self: center; }
+  .duel-top-metrics { flex-wrap: nowrap; column-gap: 14px; row-gap: 0; margin-top: 2px; font-size: 13px; line-height: 16px; }
+  .duel-game-layout { top: 100px; }
+  .plots { gap: 24px; }
+  .plot-card canvas { left: 12px; right: 12px; top: 42px; bottom: 10px; width: calc(100% - 24px); height: calc(100% - 52px); }
+  .duel-objective { grid-template-columns: 1fr 1fr; grid-template-rows: 15px 30px; align-content: center; align-items: center; column-gap: 16px; text-align: center; font-size: 13px; line-height: 15px; }
+  .duel-objective .objective-heading { grid-column: 1; grid-row: 1; justify-self: center; }
+  .duel-objective > strong { grid-column: 1; grid-row: 2; justify-self: center; align-self: center; font-size: 23px; line-height: 30px; }
+  .auto-time { display: contents; text-align: center; }
+  .auto-time-heading { grid-column: 2; grid-row: 1; display: flex; justify-content: center; align-items: baseline; gap: 6px; white-space: nowrap; }
+  .auto-time-heading span { font-size: 11px; }
+  .auto-time-heading small { font-size: 10px; }
+  .auto-time > strong { grid-column: 2; grid-row: 2; justify-self: stretch; align-self: center; font-size: 29px; line-height: 30px; }
+  .duel-hud-line { top: 8px; bottom: auto; min-height: 30px; padding-right: 378px; align-items: center; justify-content: flex-start; }
+  .view-toggles { justify-content: flex-start; }
+  .hint-line { top: 43px; right: 394px; font-size: 13px; }
+  .command-line { bottom: 8px; }
+  .scoreboard { position: absolute; top: 0; right: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: stretch; width: 360px; min-width: 360px; height: 80px; min-height: 0; gap: 12px; }
+  .player-score { display: grid; grid-template-columns: auto auto; grid-template-rows: 18px minmax(0, 1fr); justify-content: center; justify-items: center; align-content: stretch; width: 100%; gap: 0 7px; font-size: 12px; line-height: 13px; }
+  #player-one-card .status-dot { grid-column: 1; grid-row: 1; }
+  #player-one-card .player-name { grid-column: 2; grid-row: 1; }
+  #player-two-card .player-name { grid-column: 1; grid-row: 1; }
+  #player-two-card .status-dot { grid-column: 2; grid-row: 1; }
+  .player-score b { grid-column: 1 / -1; grid-row: 2; align-self: center; min-width: 30px; font-size: 29px; line-height: 31px; }
+  .score-divider { align-self: center; font-size: 28px; }
+  .scoreboard .status-dot { width: 8px; height: 8px; }
+}
 
 @media (max-width: 920px) {
   .app-shell { padding-left: 12px; padding-right: 12px; }
@@ -175,12 +210,15 @@ legend { margin-bottom: 9px; }
   .duel-top-left h1 { font-size: 20px; line-height: 23px; }
   .duel-top-left h1 span { font-size: 13px; }
   .duel-top-metrics { gap: 6px 10px; margin-top: 3px; font-size: 10px; line-height: 13px; }
-  .duel-objective { grid-template-columns: 1fr; grid-template-rows: auto auto auto; gap: 2px; font-size: 10px; line-height: 13px; }
-  .duel-objective .objective-heading, .duel-objective > strong { grid-column: 1; }
-  .duel-objective > strong { font-size: 12px; }
-  .auto-time { grid-column: 1; grid-row: 3; justify-self: start; display: flex; gap: 5px; text-align: left; }
+  .duel-objective { grid-template-columns: 6.5ch minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 4px; row-gap: 6px; font-size: 10px; line-height: 12px; }
+  .duel-objective .objective-heading { grid-column: 1; grid-row: 1; width: 4ch; white-space: normal; }
+  .duel-objective > strong { grid-column: 2; grid-row: 1; align-self: center; justify-self: start; font-size: 18px; line-height: 20px; }
+  .auto-time { grid-column: 1 / -1; grid-row: 2; justify-self: stretch; display: grid; grid-template-columns: 6.5ch minmax(0, 1fr); grid-template-rows: auto; column-gap: 4px; text-align: left; }
+  .auto-time-heading { grid-column: 1; grid-row: 1; display: grid; gap: 0; white-space: normal; }
+  .auto-time-heading span { width: 4ch; white-space: normal; }
+  .auto-time-heading small { white-space: nowrap; }
   .auto-time span, .auto-time small { font-size: 9px; }
-  .auto-time strong { font-size: 13px; }
+  .auto-time > strong { grid-column: 2; grid-row: 1; align-self: center; justify-self: start; font-size: 20px; line-height: 22px; }
   .duel-game-layout { position: relative; inset: auto; min-height: 0; overflow: hidden; }
   .plots { position: absolute; inset: 0; grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
   .plot-card { min-width: 0; min-height: 0; border-radius: 8px; }
@@ -191,38 +229,50 @@ legend { margin-bottom: 9px; }
   .phase-overlay strong { font-size: 20px; }
   .match-actions { width: min(100%, 330px); }
   .match-actions .primary-button, .match-actions .secondary-button { min-width: 0; flex: 1; padding: 0 10px; font-size: 11px; }
-  .duel-hud-panel { position: relative; inset: auto; display: grid; gap: 6px; height: auto; min-height: 0; padding: 8px; border-radius: 8px; font-size: 11px; line-height: 14px; }
-  .duel-hud-line, .hint-line, .connection-card { position: static; width: auto; }
-  .duel-hud-line { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 6px; }
+  .duel-hud-panel { position: relative; inset: auto; display: grid; gap: 0; height: 68px; min-height: 68px; padding: 7px 8px; border-radius: 8px; font-size: 11px; line-height: 14px; }
+  .duel-hud-line, .hint-line { position: static; width: auto; }
+  .duel-hud-line { display: grid; grid-template-columns: minmax(0, 1fr) 190px; grid-template-rows: 24px minmax(0, 1fr); grid-template-areas: "room score" "toggles score"; align-items: center; gap: 2px 6px; height: 100%; }
+  .room-readout { grid-area: room; }
   .room-readout { gap: 5px; font-size: 10px; }
   .room-code { font-size: 11px; }
-  .view-toggles { justify-self: center; gap: 3px; }
+  .view-toggles { grid-area: toggles; justify-self: start; gap: 3px; }
   .camera-toggle, .music-toggle { min-height: 24px; padding: 2px 4px; font-size: 8px; }
-  .scoreboard { gap: 4px; }
-  .player-score { gap: 3px; font-size: 9px; }
-  .player-score .player-name { max-width: 52px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .player-score b { min-width: 12px; font-size: 12px; }
-  .hint-line { color: var(--hint); white-space: normal; font-size: 10px; line-height: 13px; }
+  .scoreboard { position: static; grid-area: score; align-self: stretch; display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: stretch; width: 190px; min-width: 190px; height: 100%; gap: 6px; }
+  .player-score { display: grid; grid-template-columns: auto auto; grid-template-rows: 20px minmax(0, 1fr); justify-content: center; justify-items: center; align-content: stretch; width: 100%; gap: 0 4px; font-size: 9px; line-height: 11px; }
+  #player-one-card .status-dot { grid-column: 1; grid-row: 1; }
+  #player-one-card .player-name { grid-column: 2; grid-row: 1; }
+  #player-two-card .player-name { grid-column: 1; grid-row: 1; }
+  #player-two-card .status-dot { grid-column: 2; grid-row: 1; }
+  .player-score .player-name { align-self: center; max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .player-score b { grid-column: 1 / -1; grid-row: 2; align-self: center; min-width: 20px; font-size: 20px; line-height: 22px; }
+  .score-divider { align-self: center; font-size: 18px; }
+  .scoreboard .status-dot { align-self: center; width: 8px; height: 8px; }
+  .hint-line { display: none; }
   .command-line { display: none; }
-  .connection-card { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; font-size: 9px; }
   .touch-controls { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
   .thrust-button { min-height: 38px; padding: 5px; font-size: 14px; }
+  .thrust-button:hover:not(.active) { border-color: rgb(104, 130, 156); background: rgb(34, 48, 62); color: rgb(220, 234, 246); }
 }
 
 @media (max-height: 580px) and (orientation: landscape) {
   body.duel-active { overflow: hidden; touch-action: manipulation; }
   .duel-active .app-shell { display: block; width: 100vw; height: 100dvh; min-width: 0; min-height: 0; max-width: none; margin: 0; padding: max(4px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) max(4px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); overflow: hidden; }
-  .game-view { position: static; display: grid; grid-template-columns: minmax(0, 1fr) clamp(280px, 36vw, 360px); grid-template-rows: auto minmax(92px, 1fr) auto; grid-template-areas: "top top" "game game" "hud controls"; gap: 6px; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; }
+  .game-view { position: static; display: grid; grid-template-columns: minmax(0, 1fr) clamp(280px, 36vw, 360px); grid-template-rows: auto minmax(92px, 1fr) 78px; grid-template-areas: "top top" "game game" "hud controls"; gap: 6px; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; }
   .duel-top-bar { grid-area: top; position: relative; inset: auto; display: grid; grid-template-columns: minmax(0, 1fr) 142px; gap: 6px; min-height: 0; padding: 5px 8px; border-radius: 7px; }
   .duel-top-left h1 { font-size: 17px; line-height: 20px; }
   .duel-top-left h1 span { font-size: 11px; }
   .duel-top-metrics { gap: 2px 10px; margin-top: 1px; font-size: 9px; line-height: 11px; }
   .duel-objective { grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto; gap: 1px 4px; font-size: 9px; line-height: 11px; }
-  .duel-objective .objective-heading, .duel-objective > strong { grid-column: 1; }
+  .duel-objective { min-height: 0; padding-top: 0; border-top: 0; text-align: left; }
+  .duel-objective .objective-heading { grid-column: 1; grid-row: 1; justify-self: start; width: auto; white-space: nowrap; transform: translateX(-18px); }
+  .duel-objective > strong { grid-column: 1; grid-row: 2; justify-self: start; transform: translateX(-18px); }
   .duel-objective > strong { font-size: 11px; }
-  .auto-time { grid-column: 2; grid-row: 1 / 3; justify-self: end; display: grid; grid-template-columns: auto auto; gap: 3px; text-align: right; }
-  .auto-time span, .auto-time small { font-size: 7px; }
-  .auto-time strong { grid-row: 1 / 3; grid-column: 2; font-size: 13px; }
+  .auto-time { grid-column: 2; grid-row: 1 / 3; justify-self: end; display: grid; grid-template-columns: auto; grid-template-rows: auto auto; gap: 1px; text-align: center; }
+  .auto-time-heading { grid-column: 1; grid-row: 1; display: flex; align-items: baseline; gap: 4px; white-space: nowrap; }
+  .auto-time-heading span { width: auto; white-space: nowrap; }
+  .auto-time-heading small { white-space: nowrap; }
+  .auto-time span, .auto-time small { font-size: 9px; }
+  .auto-time > strong { grid-row: 2; grid-column: 1; justify-self: center; font-size: 13px; }
   .duel-game-layout { grid-area: game; position: relative; inset: auto; min-height: 0; overflow: hidden; }
   .plots { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr; gap: 8px; }
   .plot-card { min-width: 0; min-height: 0; border-radius: 7px; }
@@ -231,20 +281,133 @@ legend { margin-bottom: 9px; }
   .plot-card canvas { left: 8px; right: 8px; top: 26px; bottom: 6px; width: calc(100% - 16px); height: calc(100% - 32px); }
   .phase-overlay { border-radius: 7px; padding: 10px; }
   .phase-overlay strong { font-size: 17px; }
-  .duel-hud-panel { grid-area: hud; position: relative; inset: auto; align-self: stretch; display: grid; height: auto; min-height: 0; padding: 4px 7px; border-radius: 7px; font-size: 9px; line-height: 11px; }
-  .duel-hud-line { position: static; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 6px; width: auto; }
-  .room-readout { gap: 4px; font-size: 8px; }
+  .duel-hud-panel { grid-area: hud; position: relative; inset: auto; align-self: stretch; display: grid; height: 78px; min-height: 78px; padding: 5px 7px; border-radius: 7px; font-size: 9px; line-height: 11px; }
+  .duel-hud-line { position: static; display: grid; grid-template-columns: minmax(0, 1fr) 190px; grid-template-rows: 22px minmax(0, 1fr); grid-template-areas: "room score" "toggles score"; align-items: center; gap: 2px 8px; width: auto; height: 100%; }
+  .room-readout { grid-area: room; gap: 4px; font-size: 8px; }
   .room-code { min-height: 20px; font-size: 9px; }
-  .view-toggles { justify-self: center; gap: 3px; }
+  .view-toggles { grid-area: toggles; justify-self: start; gap: 3px; }
   .camera-toggle, .music-toggle { min-height: 20px; padding: 1px 4px; font-size: 7px; }
-  .scoreboard { gap: 4px; }
-  .player-score { gap: 3px; font-size: 8px; }
-  .player-score .player-name { max-width: 54px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .player-score b { min-width: 10px; font-size: 10px; }
-  .hint-line, .connection-card { display: none; }
+  .scoreboard { position: static; grid-area: score; align-self: stretch; display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: stretch; width: 190px; min-width: 190px; height: 100%; gap: 6px; }
+  .player-score { display: grid; grid-template-columns: auto auto; grid-template-rows: 22px minmax(0, 1fr); justify-content: center; justify-items: center; align-content: stretch; width: 100%; gap: 0 4px; font-size: 9px; line-height: 11px; }
+  #player-one-card .status-dot { grid-column: 1; grid-row: 1; }
+  #player-one-card .player-name { grid-column: 2; grid-row: 1; }
+  #player-two-card .player-name { grid-column: 1; grid-row: 1; }
+  #player-two-card .status-dot { grid-column: 2; grid-row: 1; }
+  .player-score .player-name { align-self: center; max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .player-score b { grid-column: 1 / -1; grid-row: 2; align-self: center; min-width: 26px; font-size: 26px; line-height: 28px; }
+  .score-divider { align-self: center; font-size: 22px; }
+  .scoreboard .status-dot { align-self: center; width: 9px; height: 9px; }
+  .hint-line { display: none; }
   .command-line { display: none; }
   .touch-controls { grid-area: controls; position: static; align-self: stretch; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)); height: 100%; gap: 4px; }
   .thrust-button { min-height: 28px; padding: 2px; font-size: 12px; }
+  .thrust-button:hover:not(.active) { border-color: rgb(104, 130, 156); background: rgb(34, 48, 62); color: rgb(220, 234, 246); }
 }
+
+/* Local sidebar QA mode: preserve the phone landscape layout after the host viewport resets. */
+body.mobile-landscape-preview.duel-active { overflow: hidden; touch-action: manipulation; }
+body.mobile-landscape-preview.duel-active .app-shell { display: block; width: 667px; height: 375px; min-width: 0; min-height: 0; max-width: none; margin: 0 auto; padding: 4px 8px; overflow: hidden; zoom: var(--mobile-preview-scale, 1); }
+.mobile-landscape-preview .game-view { position: static; display: grid; grid-template-columns: minmax(0, 1fr) 280px; grid-template-rows: auto minmax(92px, 1fr) 78px; grid-template-areas: "top top" "game game" "hud controls"; gap: 6px; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; }
+.mobile-landscape-preview .duel-top-bar { grid-area: top; position: relative; inset: auto; display: grid; grid-template-columns: minmax(0, 1fr) 142px; gap: 6px; min-height: 0; padding: 5px 8px; border-radius: 7px; }
+.mobile-landscape-preview .duel-top-left { align-self: auto; }
+.mobile-landscape-preview .duel-top-left h1 { font-size: 17px; line-height: 20px; }
+.mobile-landscape-preview .duel-top-left h1 span { font-size: 11px; }
+.mobile-landscape-preview .duel-top-metrics { flex-wrap: wrap; gap: 2px 10px; margin-top: 1px; font-size: 9px; line-height: 11px; }
+.mobile-landscape-preview .duel-objective { grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto; gap: 1px 4px; min-height: 0; padding-top: 0; border-top: 0; text-align: left; font-size: 9px; line-height: 11px; }
+.mobile-landscape-preview .duel-objective .objective-heading { grid-column: 1; grid-row: 1; justify-self: start; width: auto; white-space: nowrap; transform: translateX(-18px); }
+.mobile-landscape-preview .duel-objective > strong { grid-column: 1; grid-row: 2; justify-self: start; transform: translateX(-18px); }
+.mobile-landscape-preview .duel-objective > strong { font-size: 11px; line-height: normal; }
+.mobile-landscape-preview .auto-time { grid-column: 2; grid-row: 1 / 3; justify-self: end; display: grid; grid-template-columns: auto; grid-template-rows: auto auto; gap: 1px; text-align: center; }
+.mobile-landscape-preview .auto-time-heading { grid-column: 1; grid-row: 1; display: flex; align-items: baseline; gap: 4px; white-space: nowrap; }
+.mobile-landscape-preview .auto-time-heading span { width: auto; white-space: nowrap; }
+.mobile-landscape-preview .auto-time-heading small { white-space: nowrap; }
+.mobile-landscape-preview .auto-time span,
+.mobile-landscape-preview .auto-time small { font-size: 9px; }
+.mobile-landscape-preview .auto-time > strong { grid-row: 2; grid-column: 1; justify-self: center; font-size: 13px; line-height: normal; }
+.mobile-landscape-preview .duel-game-layout { grid-area: game; position: relative; inset: auto; min-height: 0; overflow: hidden; }
+.mobile-landscape-preview .plots { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr; gap: 8px; }
+.mobile-landscape-preview .plot-card { min-width: 0; min-height: 0; border-radius: 7px; }
+.mobile-landscape-preview .plot-card figcaption { left: 8px; right: 8px; top: 4px; height: 18px; font-size: 11px; }
+.mobile-landscape-preview .plot-card figcaption small { font-size: 8px; }
+.mobile-landscape-preview .plot-card canvas { left: 8px; right: 8px; top: 26px; bottom: 6px; width: calc(100% - 16px); height: calc(100% - 32px); }
+.mobile-landscape-preview .phase-overlay { border-radius: 7px; padding: 10px; }
+.mobile-landscape-preview .phase-overlay strong { font-size: 17px; }
+.mobile-landscape-preview .duel-hud-panel { grid-area: hud; position: relative; inset: auto; align-self: stretch; display: grid; height: 78px; min-height: 78px; padding: 5px 7px; border-radius: 7px; font-size: 9px; line-height: 11px; }
+.mobile-landscape-preview .duel-hud-line { position: static; display: grid; grid-template-columns: minmax(0, 1fr) 190px; grid-template-rows: 22px minmax(0, 1fr); grid-template-areas: "room score" "toggles score"; align-items: center; gap: 2px 8px; width: auto; height: 100%; min-height: 0; padding-right: 0; }
+.mobile-landscape-preview .room-readout { grid-area: room; gap: 4px; font-size: 8px; }
+.mobile-landscape-preview .room-code { min-height: 20px; font-size: 9px; }
+.mobile-landscape-preview .view-toggles { grid-area: toggles; justify-self: start; gap: 3px; }
+.mobile-landscape-preview .camera-toggle,
+.mobile-landscape-preview .music-toggle { min-height: 20px; padding: 1px 4px; font-size: 7px; }
+.mobile-landscape-preview .scoreboard { position: static; grid-area: score; align-self: stretch; display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: stretch; width: 190px; min-width: 190px; height: 100%; gap: 6px; }
+.mobile-landscape-preview .player-score { display: grid; grid-template-columns: auto auto; grid-template-rows: 22px minmax(0, 1fr); justify-content: center; justify-items: center; align-content: stretch; width: 100%; gap: 0 4px; font-size: 9px; line-height: 11px; }
+.mobile-landscape-preview #player-one-card .status-dot { grid-column: 1; grid-row: 1; }
+.mobile-landscape-preview #player-one-card .player-name { grid-column: 2; grid-row: 1; }
+.mobile-landscape-preview #player-two-card .player-name { grid-column: 1; grid-row: 1; }
+.mobile-landscape-preview #player-two-card .status-dot { grid-column: 2; grid-row: 1; }
+.mobile-landscape-preview .player-score .player-name { align-self: center; max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mobile-landscape-preview .player-score b { grid-column: 1 / -1; grid-row: 2; align-self: center; min-width: 26px; font-size: 26px; line-height: 28px; }
+.mobile-landscape-preview .score-divider { align-self: center; font-size: 22px; }
+.mobile-landscape-preview .scoreboard .status-dot { align-self: center; width: 9px; height: 9px; }
+.mobile-landscape-preview .hint-line,
+.mobile-landscape-preview .command-line { display: none; }
+.mobile-landscape-preview .touch-controls { grid-area: controls; position: static; align-self: stretch; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)); height: 100%; gap: 4px; }
+.mobile-landscape-preview .thrust-button { min-height: 28px; padding: 2px; font-size: 12px; }
+.mobile-landscape-preview .thrust-button:hover:not(.active) { border-color: rgb(104, 130, 156); background: rgb(34, 48, 62); color: rgb(220, 234, 246); }
+
+/* Local sidebar QA mode: preserve the portrait phone layout after the host viewport resets. */
+body.mobile-portrait-preview.duel-active { overflow: hidden; touch-action: manipulation; }
+body.mobile-portrait-preview.duel-active .app-shell { display: block; width: 390px; height: 844px; min-width: 0; min-height: 0; margin: 0 auto; padding: 8px; overflow: hidden; zoom: var(--mobile-preview-scale, 1); }
+.mobile-portrait-preview .game-view { position: static; display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; gap: 8px; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; }
+.mobile-portrait-preview .duel-top-bar { position: relative; inset: auto; display: grid; grid-template-columns: minmax(0, 1fr) 108px; gap: 6px; min-height: 0; padding: 8px 10px; border-radius: 10px; }
+.mobile-portrait-preview .duel-top-left { align-self: auto; }
+.mobile-portrait-preview .duel-top-left h1 { font-size: 20px; line-height: 23px; }
+.mobile-portrait-preview .duel-top-left h1 span { font-size: 13px; }
+.mobile-portrait-preview .duel-top-metrics { flex-wrap: wrap; gap: 6px 10px; margin-top: 3px; font-size: 10px; line-height: 13px; }
+.mobile-portrait-preview .duel-objective { grid-template-columns: 6.5ch minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 4px; row-gap: 6px; font-size: 10px; line-height: 12px; text-align: left; }
+.mobile-portrait-preview .duel-objective .objective-heading { grid-column: 1; grid-row: 1; justify-self: start; width: 4ch; white-space: normal; transform: none; }
+.mobile-portrait-preview .duel-objective > strong { grid-column: 2; grid-row: 1; align-self: center; justify-self: start; font-size: 18px; line-height: 20px; transform: none; }
+.mobile-portrait-preview .auto-time { grid-column: 1 / -1; grid-row: 2; justify-self: stretch; display: grid; grid-template-columns: 6.5ch minmax(0, 1fr); grid-template-rows: auto; column-gap: 4px; text-align: left; }
+.mobile-portrait-preview .auto-time-heading { grid-column: 1; grid-row: 1; display: grid; gap: 0; white-space: normal; }
+.mobile-portrait-preview .auto-time-heading span { width: 4ch; white-space: normal; }
+.mobile-portrait-preview .auto-time-heading small { white-space: nowrap; }
+.mobile-portrait-preview .auto-time span,
+.mobile-portrait-preview .auto-time small { font-size: 9px; }
+.mobile-portrait-preview .auto-time > strong { grid-column: 2; grid-row: 1; align-self: center; justify-self: start; font-size: 20px; line-height: 22px; }
+.mobile-portrait-preview .duel-game-layout { position: relative; inset: auto; min-height: 0; overflow: hidden; }
+.mobile-portrait-preview .plots { position: absolute; inset: 0; grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+.mobile-portrait-preview .plot-card { min-width: 0; min-height: 0; border-radius: 8px; }
+.mobile-portrait-preview .plot-card figcaption { left: 10px; right: 10px; top: 7px; height: 20px; font-size: 13px; }
+.mobile-portrait-preview .plot-card figcaption small { font-size: 10px; }
+.mobile-portrait-preview .plot-card canvas { left: 12px; right: 12px; top: 34px; bottom: 10px; width: calc(100% - 24px); height: calc(100% - 44px); }
+.mobile-portrait-preview .phase-overlay { border-radius: 8px; padding: 14px; }
+.mobile-portrait-preview .phase-overlay strong { font-size: 20px; }
+.mobile-portrait-preview .match-actions { width: min(100%, 330px); }
+.mobile-portrait-preview .match-actions .primary-button,
+.mobile-portrait-preview .match-actions .secondary-button { min-width: 0; flex: 1; padding: 0 10px; font-size: 11px; }
+.mobile-portrait-preview .duel-hud-panel { position: relative; inset: auto; display: grid; gap: 0; height: 68px; min-height: 68px; padding: 7px 8px; border-radius: 8px; font-size: 11px; line-height: 14px; }
+.mobile-portrait-preview .duel-hud-line,
+.mobile-portrait-preview .hint-line { position: static; width: auto; }
+.mobile-portrait-preview .duel-hud-line { display: grid; grid-template-columns: minmax(0, 1fr) 190px; grid-template-rows: 24px minmax(0, 1fr); grid-template-areas: "room score" "toggles score"; align-items: center; gap: 2px 6px; height: 100%; padding-right: 0; }
+.mobile-portrait-preview .room-readout { grid-area: room; gap: 5px; font-size: 10px; }
+.mobile-portrait-preview .room-code { min-height: 24px; font-size: 11px; }
+.mobile-portrait-preview .view-toggles { grid-area: toggles; justify-self: start; gap: 3px; }
+.mobile-portrait-preview .camera-toggle,
+.mobile-portrait-preview .music-toggle { min-height: 24px; padding: 2px 4px; font-size: 8px; }
+.mobile-portrait-preview .scoreboard { position: static; grid-area: score; align-self: stretch; display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: stretch; width: 190px; min-width: 190px; height: 100%; gap: 6px; }
+.mobile-portrait-preview .player-score { display: grid; grid-template-columns: auto auto; grid-template-rows: 20px minmax(0, 1fr); justify-content: center; justify-items: center; align-content: stretch; width: 100%; gap: 0 4px; font-size: 9px; line-height: 11px; }
+.mobile-portrait-preview #player-one-card .status-dot { grid-column: 1; grid-row: 1; }
+.mobile-portrait-preview #player-one-card .player-name { grid-column: 2; grid-row: 1; }
+.mobile-portrait-preview #player-two-card .player-name { grid-column: 1; grid-row: 1; }
+.mobile-portrait-preview #player-two-card .status-dot { grid-column: 2; grid-row: 1; }
+.mobile-portrait-preview .player-score .player-name { align-self: center; max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mobile-portrait-preview .player-score b { grid-column: 1 / -1; grid-row: 2; align-self: center; min-width: 20px; font-size: 20px; line-height: 22px; }
+.mobile-portrait-preview .score-divider { align-self: center; font-size: 18px; }
+.mobile-portrait-preview .scoreboard .status-dot { align-self: center; width: 8px; height: 8px; }
+.mobile-portrait-preview .hint-line { display: none; }
+.mobile-portrait-preview .command-line { display: none; }
+.mobile-portrait-preview .touch-controls { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: auto; gap: 6px; height: auto; }
+.mobile-portrait-preview .thrust-button { min-height: 38px; padding: 5px; font-size: 14px; }
+.mobile-portrait-preview .thrust-button:hover:not(.active) { border-color: rgb(104, 130, 156); background: rgb(34, 48, 62); color: rgb(220, 234, 246); }
 
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; } }

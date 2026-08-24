@@ -11,6 +11,7 @@ import yaml
 from sim.performance import load_performance_manifest, physics_payload_hash, run_performance_suite
 from sim.performance.suite import (
     _deterministic_payload,
+    _effective_scenario_config,
     _reset_scenario_measurement_caches,
     _scenario_work_counts,
     _simulated_duration_s,
@@ -26,9 +27,10 @@ def test_full_path_manifest_covers_distinct_runtime_families() -> None:
         "zonal_rk4_accelerated",
         "sensing_relative_ekf",
         "modern_actuator_stack",
-        "cr3bp_earth_moon",
-        "ogp_sgp4",
-        "rocket_ascent",
+            "cr3bp_earth_moon",
+            "ogp_sgp4",
+            "ogp_sdp4",
+            "rocket_ascent",
         "reentry_diagnostics",
         "artifact_output_pipeline",
     } <= names
@@ -53,6 +55,50 @@ def test_cr3bp_performance_case_is_explicitly_trajectory_only() -> None:
     assert vehicle["runtime_profile"] == "trajectory_only"
     assert "flight_software" not in vehicle
     assert "trajectory_only" in case.tags
+
+
+def test_onp_propagation_performance_fixtures_are_trajectory_only() -> None:
+    root = Path(__file__).resolve().parents[2]
+    fixture_paths = tuple(
+        root / relative_path
+        for relative_path in (
+        "configs/performance/zonal_rk4.yaml",
+        "configs/performance/adaptive_high_fidelity.yaml",
+        "configs/performance/drag_model_single_satellite.yaml",
+        )
+    )
+    assert fixture_paths[0].is_file()
+    for fixture_path in fixture_paths:
+        if not fixture_path.is_file():
+            continue
+        raw = yaml.safe_load(fixture_path.read_text(encoding="utf-8"))
+        satellite = raw["objects"]["satellite"]
+        assert satellite["runtime_profile"] == "trajectory_only"
+        assert "flight_software" not in satellite
+
+
+def test_ogp_performance_cases_override_compatibility_fsw_with_trajectory_only(tmp_path: Path) -> None:
+    manifest = load_performance_manifest()
+    cases = {case.name: case for case in manifest.cases}
+
+    for case_name, object_id in (("ogp_sgp4", "iss"), ("ogp_sdp4", "synthetic_geo")):
+        case = cases[case_name]
+        profile = dict(manifest.profile_defaults["smoke"])
+        profile.update(case.profiles["smoke"])
+        cfg, effective = _effective_scenario_config(
+            case,
+            profile,
+            output_dir=tmp_path / case_name,
+        )
+        object_config = effective["objects"][object_id]
+        runtime_object = cfg.scenario.objects[object_id]
+
+        assert object_config["runtime_profile"] == "trajectory_only"
+        assert object_config["flight_software"] is None
+        assert runtime_object.runtime_profile == "trajectory_only"
+        assert runtime_object.flight_software is None
+        assert "trajectory_only" in case.tags
+        assert case.checks[f"summary.object_runtime_profiles.{object_id}"] == {"equals": "trajectory_only"}
 
 
 def test_drag_model_cases_share_one_two_body_fixture() -> None:
@@ -177,6 +223,7 @@ def test_campaign_work_is_aggregated_across_runs() -> None:
         "dynamics_steps": 4,
         "estimator_updates": 4,
         "decisions": 4,
+        "general_propagation_steps": 0,
     }
 
 
@@ -196,5 +243,33 @@ def test_smoke_case_repeats_with_exact_physics_parity(tmp_path) -> None:
     assert len(set(case["physics_hashes"])) == 1
     assert case["coverage_passed"] is True
     assert case["measurement_cache_policy"] == "warm_process_state"
+    assert case["end_to_end_elapsed_s"] == case["elapsed_s"]
+    assert case["median_end_to_end_elapsed_s"] == case["median_elapsed_s"]
+    assert len(case["propagation_elapsed_s"]) == 2
     assert (tmp_path / "benchmark" / "benchmark_results.json").is_file()
     assert (tmp_path / "benchmark" / "benchmark_report.md").is_file()
+
+
+def test_ogp_case_reports_propagation_separately_from_end_to_end(tmp_path: Path) -> None:
+    payload = run_performance_suite(
+        profile="smoke",
+        case_names={"ogp_sdp4"},
+        warmups=0,
+        repeats=1,
+        output_dir=tmp_path / "ogp_benchmark",
+    )
+
+    case = payload["cases"][0]
+    assert case["work_counts"]["general_propagation_steps"] > 0
+    assert case["median_propagation_elapsed_s"] > 0.0
+    assert case["median_end_to_end_elapsed_s"] > case["median_propagation_elapsed_s"]
+    assert case["general_propagation_steps_per_propagation_second"] > 0.0
+    report = (tmp_path / "ogp_benchmark" / "benchmark_report.md").read_text(encoding="utf-8")
+    assert "| Dynamics steps/s | Propagation steps/s | Parity |" in report
+    expected_rate = f"{case['general_propagation_steps_per_propagation_second']:.1f}"
+    ogp_row = next(line for line in report.splitlines() if line.startswith("| ogp_sdp4 |"))
+    assert ogp_row == (
+        f"| ogp_sdp4 | {case['category']} | passed | {case['median_elapsed_s']:.6f} | "
+        f"{case['median_propagation_elapsed_s']:.6f} | "
+        f"{case['simulated_seconds_per_wall_second']:.1f}x | 0.0 | {expected_rate} | pass | pass |"
+    )

@@ -42,6 +42,9 @@ review-ready packaging:
 - OEL Scale catalog screening, refinement, operational stores, and synthetic
   data generation;
 - intent-hypothesis evaluation and maneuver-investigation workflows;
+- governed RF link budgets, atmospheric availability, RF-qualified coverage,
+  bounded contact scheduling, communications campaigns, and declared
+  ground-network or constellation trade evidence;
 - orbit determination against external observations or precise products;
 - curated validation automation and private release/customer evidence;
 - AI-assisted reports and config assistance with explicit review and cost

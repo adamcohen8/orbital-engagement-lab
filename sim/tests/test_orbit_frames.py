@@ -15,6 +15,7 @@ from sim.dynamics.orbit.frames import (
     eci_to_ecef_rotation_context,
     frame_context_from_mapping,
     normalize_frame_model,
+    teme_to_eci_matrix_vallado_iau80,
     transform_position,
     transform_state,
 )
@@ -40,6 +41,28 @@ def test_frame_model_aliases_are_canonical() -> None:
     assert normalize_frame_model("simple_earth_rotation") == FRAME_MODEL_SIMPLE_GMST
     assert normalize_frame_model("hpop_like") == FRAME_MODEL_IAU76_80_EOP
     assert normalize_frame_model("iau76_80_eop") == FRAME_MODEL_IAU76_80_EOP
+
+
+def test_teme_to_eci_rotation_cache_is_bounded_and_immutable() -> None:
+    teme_to_eci_matrix_vallado_iau80.cache_clear()
+    first = teme_to_eci_matrix_vallado_iau80(2460310.5)
+    second = teme_to_eci_matrix_vallado_iau80(2460310.5)
+    distinct = teme_to_eci_matrix_vallado_iau80(2460310.5, ddpsi_rad=1.0e-12)
+
+    assert first is second
+    assert first is not distinct
+    assert first.flags.writeable is False
+    assert teme_to_eci_matrix_vallado_iau80.cache_info().maxsize == 8192
+    assert teme_to_eci_matrix_vallado_iau80.cache_info().hits == 1
+    with pytest.raises(ValueError, match="read-only"):
+        first[0, 0] = 0.0
+    with pytest.raises(ValueError, match="cannot set WRITEABLE flag"):
+        first.setflags(write=True)
+    np.testing.assert_array_equal(
+        teme_to_eci_matrix_vallado_iau80(2460310.5),
+        second,
+    )
+    teme_to_eci_matrix_vallado_iau80.cache_clear()
 
 
 def test_eop_out_of_range_requires_explicit_hold_policy(tmp_path: Path) -> None:

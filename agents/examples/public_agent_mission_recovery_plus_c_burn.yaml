@@ -1,3 +1,4 @@
+schema_version: oel.scenario.v1
 scenario_name: public_agent_mission_recovery_plus_c_burn
 scenario_description: 'Public agent example: apply a simple +C cross-track burn to
   one satellite, then use simulator-backed mission recovery to compare the final orbit
@@ -34,7 +35,12 @@ objects:
       hardware_profile: hardware.ideal_wrench.v1
       params:
         max_acceleration_m_s2: 0.02
-        translation_mode: stationkeeping
+        translation_mode: scheduled_burn
+        scheduled_burns:
+        - start_time_s: 10.0
+          duration_s: 5.0
+          frame: ric
+          delta_v_m_s: [0.0, 0.0, 0.1]
 simulator:
   duration_s: 600.0
   dt_s: 1.0

@@ -2,18 +2,82 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import matplotlib.pyplot as plt
 import numpy as np
 
 from sim.plotting.ground_track_plots import _setup_ground_track_axes
-from sim.plotting.style import role_color
+from sim.plotting.quality import STRICT_AGENT_PLOT_QUALITY, apply_plot_quality_policy
+from sim.plotting.style import (
+    add_artifact_footer,
+    apply_oel_style_to_figure,
+    artifact_metadata,
+    oel_plot_context,
+    role_color,
+    save_oel_figure,
+)
+from sim.runtime_environment import configure_headless_runtime
 from sim.utils.ground_track import split_ground_track_dateline
 
 if TYPE_CHECKING:
+    from sim.analysis.global_coverage import GlobalCoverageResult
     from sim.analysis.rich_coverage import RichCoverageResult
+
+
+def write_global_coverage_fraction_plot(
+    result: GlobalCoverageResult,
+    output_path: str | Path,
+    *,
+    scenario_name: str = "",
+    style_name: str = "oel_light",
+) -> Path:
+    """Write whole-Earth cell-center coverage fraction with a strict QA receipt."""
+
+    destination = Path(output_path).expanduser().resolve()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    configure_headless_runtime()
+    import matplotlib
+
+    matplotlib.use("Agg", force=True)
+    import matplotlib.pyplot as plt
+
+    artifact_id = "global_coverage_fraction"
+    metadata = artifact_metadata(scenario_name=scenario_name, artifact_id=artifact_id)
+    with oel_plot_context(style_name=style_name, metadata=metadata):
+        figure, axes = plt.subplots(figsize=(9.2, 4.8))
+        axes.plot(
+            result.times_s,
+            100.0 * result.instantaneous_covered_fraction,
+            color=role_color("actual"),
+            linewidth=1.8,
+            label="Covered cell centers",
+        )
+        axes.set_title(f"Whole-Earth Coverage — {result.config.analysis_id}")
+        axes.set_xlabel("Analysis time (s)")
+        axes.set_ylabel("Covered cell centers (%)")
+        axes.set_ylim(bottom=0.0)
+        axes.grid(True, alpha=0.25)
+        axes.legend(loc="best", fontsize=8)
+        figure.tight_layout(rect=(0.0, 0.035, 1.0, 1.0))
+        add_artifact_footer(figure, metadata=metadata, artifact_id=artifact_id)
+        quality = apply_plot_quality_policy(figure, policy=STRICT_AGENT_PLOT_QUALITY)
+        save_oel_figure(
+            figure,
+            destination,
+            dpi=180,
+            metadata=metadata,
+            artifact_id=artifact_id,
+            style_name=style_name,
+            bbox_inches="tight",
+        )
+        plt.close(figure)
+    destination.with_suffix(".quality.json").write_text(
+        json.dumps(quality.to_dict(), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return destination
 
 
 def _selected_samples(sample_count: int, maximum: int = 12) -> np.ndarray:
@@ -52,11 +116,19 @@ def write_coverage_footprint_plot(
     *,
     sample_indices: np.ndarray | None = None,
     draw_earth_map: bool = True,
+    scenario_name: str = "",
+    style_name: str = "oel_light",
 ) -> Path:
     """Write a ground-track and sampled FOV-boundary review overlay."""
 
     destination = Path(output_path).expanduser().resolve()
     destination.parent.mkdir(parents=True, exist_ok=True)
+    configure_headless_runtime()
+    import matplotlib
+
+    matplotlib.use("Agg", force=True)
+    import matplotlib.pyplot as plt
+
     footprint = result.footprint_boundary
     if sample_indices is None:
         selected = _selected_samples(result.times_s.size)
@@ -132,10 +204,27 @@ def write_coverage_footprint_plot(
         bbox={"facecolor": "white", "alpha": 0.72, "edgecolor": "none", "pad": 3.0},
         zorder=10,
     )
-    figure.tight_layout()
-    figure.savefig(destination, dpi=180, bbox_inches="tight")
+    artifact_id = "rich_coverage_footprints"
+    metadata = artifact_metadata(scenario_name=scenario_name, artifact_id=artifact_id)
+    apply_oel_style_to_figure(figure, style_name=style_name)
+    figure.tight_layout(rect=(0.0, 0.035, 1.0, 1.0))
+    add_artifact_footer(figure, metadata=metadata, artifact_id=artifact_id)
+    quality = apply_plot_quality_policy(figure, policy=STRICT_AGENT_PLOT_QUALITY)
+    save_oel_figure(
+        figure,
+        destination,
+        dpi=180,
+        metadata=metadata,
+        artifact_id=artifact_id,
+        style_name=style_name,
+        bbox_inches="tight",
+    )
     plt.close(figure)
+    destination.with_suffix(".quality.json").write_text(
+        json.dumps(quality.to_dict(), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
     return destination
 
 
-__all__ = ["write_coverage_footprint_plot"]
+__all__ = ["write_coverage_footprint_plot", "write_global_coverage_fraction_plot"]
