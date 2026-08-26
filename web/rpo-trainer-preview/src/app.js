@@ -4,6 +4,11 @@ import {
   DEFAULT_PURSUIT_CHALLENGE,
   ellipticLinearCoastStates,
   gameTickDtS,
+  keplerianToEci,
+  relativeRicState,
+  stateFromRelativeRic,
+  stepControlledTwoBodyPair,
+  stepTwoBodyState,
   validateAttemptPacket,
 } from "./competition/arcade-engine.js";
 import { PREVIEW_LEVEL_CONTRACTS } from "./preview-contract.js";
@@ -15,6 +20,15 @@ import {
   PREVIEW_TARGET_A_KM as TARGET_A_KM,
   stepHcwStateInPlace,
 } from "./preview-physics.js";
+import {
+  DEFAULT_SANDBOX_SETUP,
+  SANDBOX_SETUP_FIELDS,
+  sandboxOrbitPeriodS,
+  sandboxRelativeSeed,
+  sandboxSetupInputValues,
+  sandboxTargetCoes,
+  validateSandboxSetup,
+} from "./sandbox-setup.js";
 
 const ORBIT_PERIOD_S = (2 * Math.PI) / MEAN_MOTION;
 const MAX_STEPS_PER_FRAME = 32;
@@ -125,7 +139,17 @@ const el = {
   rMeter: document.querySelector("#rMeter"),
   iMeter: document.querySelector("#iMeter"),
   cMeter: document.querySelector("#cMeter"),
-  sandboxPanel: document.querySelector("#sandboxPanel"),
+  sandboxSetupScreen: document.querySelector("#sandboxSetupScreen"),
+  sandboxSetupForm: document.querySelector("#sandboxSetupForm"),
+  sandboxSetupLevelTitle: document.querySelector("#sandboxSetupLevelTitle"),
+  sandboxSetupStatus: document.querySelector("#sandboxSetupStatus"),
+  sandboxSetupContinue: document.querySelector("#sandboxSetupContinue"),
+  sandboxSetupCancel: document.querySelector("#sandboxSetupCancel"),
+  sandboxSetupBack: document.querySelector("#sandboxSetupBack"),
+  sandboxSetupNext: document.querySelector("#sandboxSetupNext"),
+  sandboxSetupStepButtons: [...document.querySelectorAll("[data-sandbox-setup-step]")],
+  sandboxSetupPanels: [...document.querySelectorAll("[data-sandbox-setup-panel]")],
+  sandboxSetupInputs: [...document.querySelectorAll("[data-sandbox-field]")],
   operatorPanel: document.querySelector("#operatorPanel"),
   operatorBurnRows: document.querySelector("#operatorBurnRows"),
   operatorAddBurn: document.querySelector("#operatorAddBurn"),
@@ -134,11 +158,6 @@ const el = {
   equationSheet: document.querySelector("#equationSheet"),
   equationSheetButton: document.querySelector("#equationSheetButton"),
   equationSheetClose: document.querySelector("#equationSheetClose"),
-  presetSelect: document.querySelector("#presetSelect"),
-  rangeSlider: document.querySelector("#rangeSlider"),
-  driftSlider: document.querySelector("#driftSlider"),
-  applySandbox: document.querySelector("#applySandbox"),
-  randomSandbox: document.querySelector("#randomSandbox"),
   debriefPanel: document.querySelector("#debriefPanel"),
   debriefTitle: document.querySelector("#debriefTitle"),
   debriefText: document.querySelector("#debriefText"),
@@ -190,9 +209,9 @@ const levelOptions = [
     operatorObjective:
       "Script impulsive burns from a configurable starting RIC state, then watch the predicted and executed trajectory.",
     brief:
-      "Edit the starting RIC state in the setup panel, then maneuver freely. Delta-v used remains visible, but there is no delta-v budget.",
+      "Complete the Sandbox Setup screen, then maneuver freely. Delta-v used remains visible, but there is no delta-v budget.",
     operatorBrief:
-      "Edit the starting RIC state in the setup panel before launching operator mode, then build a time-ordered burn script and observe the result.",
+      "Complete the Sandbox Setup screen before planning, then build a time-ordered burn script and observe the result.",
     criteria: ["No pass/fail objective; experiment freely."],
     operatorCriteria: [
       "No pass/fail objective; experiment freely.",
@@ -200,8 +219,8 @@ const levelOptions = [
       `Burns must be at least ${OPERATOR_BURN_SPACING_S} seconds apart.`,
     ],
     notes: [
-      "Use this mode to demonstrate how initial relative state changes relative motion.",
-      "Circular-orbit HCW prediction is shown for the browser preview.",
+      "Use this mode to demonstrate how the target orbit and initial relative state change relative motion.",
+      "The browser setup uses the same target COE and chaser RIC field contract as the downloadable Sandbox.",
     ],
     operatorNotes: [
       "The ghost path updates as the script changes.",
@@ -395,7 +414,13 @@ const state = {
   playMode: normalizePlayMode(readLocalPreference(PLAY_MODE_KEY) || "pilot"),
   activePlayMode: "pilot",
   activeLevelId: "",
-  frameConvention: normalizeFrameConvention(readLocalPreference(FRAME_CONVENTION_KEY) || "oel_default"),
+  sandboxSetup: { ...DEFAULT_SANDBOX_SETUP },
+  sandboxPair: null,
+  frameConvention: normalizeFrameConvention(
+    new URLSearchParams(window.location.search).get("frame_convention")
+      || readLocalPreference(FRAME_CONVENTION_KEY)
+      || "oel_default",
+  ),
   operatorBurnRows: [],
   operatorPlan: [],
   operatorPlanPath: [],
@@ -628,6 +653,10 @@ function operatorScriptModeActive() {
   );
 }
 
+function sandboxExperienceActive(mode = state.mode) {
+  return mode === "sandbox" || mode === "operatorSandbox" || mode === "operatorScriptSandbox";
+}
+
 function operatorExperienceActive() {
   return operatorModeActive() || operatorScriptModeActive();
 }
@@ -721,7 +750,11 @@ function toggleSelectorPlayMode() {
 function toggleFrameConvention() {
   state.frameConvention = state.frameConvention === "space_force" ? "oel_default" : "space_force";
   writeLocalPreference(FRAME_CONVENTION_KEY, state.frameConvention);
+  const url = new URL(window.location.href);
+  url.searchParams.set("frame_convention", state.frameConvention);
+  window.history.replaceState(null, "", url);
   renderLevelSelector();
+  syncTouchControlLabels();
   updateGhost();
   draw();
   trackEvent("frame_convention_toggle", { frame_convention: state.frameConvention });
@@ -787,7 +820,7 @@ function makeState(seed) {
 function currentControls() {
   if (operatorExperienceActive()) return { r: 0, i: 0, c: 0 };
   const r = axisValue("w", "s", "rPlus", "rMinus");
-  const i = axisValue("d", "a", "iPlus", "iMinus");
+  const i = displayAxisSign("i") * axisValue("d", "a", "iPlus", "iMinus");
   const c = axisValue("arrowright", "arrowleft", "cPlus", "cMinus");
   const mag = Math.hypot(r, i, c);
   if (mag > 1) {
@@ -815,6 +848,7 @@ function resetState(seed = presets.behind) {
   clearControlPulses();
   clearOperatorBurnCinematic();
   state.sim = makeState(seed);
+  state.sandboxPair = sandboxExperienceActive() ? sandboxPairFromSeed(state.sim) : null;
   state.trail = [samplePoint()];
   state.targetTrail = [];
   state.targetGhost = [];
@@ -849,7 +883,8 @@ function showLevelSelector(options = {}) {
   el.debriefPanel.classList.add("hidden");
   setLeaderboardFormVisible(false);
   el.shell.classList.add("selector-mode");
-  el.shell.classList.remove(...SHELL_GAME_MODE_CLASSES);
+  el.shell.classList.remove("sandbox-setup-mode", ...SHELL_GAME_MODE_CLASSES);
+  el.sandboxSetupScreen.classList.add("hidden");
   setMusicTrackForMode("selector");
   renderLevelSelector();
   syncMusicButton();
@@ -1004,8 +1039,13 @@ function launchSelectedLevel(source = "selector") {
   const option = selectedLevelOption();
   if (option.mode === "external") {
     if (!option.externalUrl) return;
-    trackEvent("rpo_duel_open", { source, destination: new URL(option.externalUrl).hostname });
-    window.location.assign(option.externalUrl);
+    const destination = externalLevelUrl(option);
+    trackEvent("rpo_duel_open", {
+      source,
+      destination: destination.hostname,
+      frame_convention: state.frameConvention,
+    });
+    window.location.assign(destination.href);
     return;
   }
   state.activePlayMode = selectedPlayModeFor(option);
@@ -1020,6 +1060,11 @@ function launchSelectedLevel(source = "selector") {
     state.operatorTrajectoryProbe = null;
     state.operatorPanelSignature = "";
   }
+  if (option.id === "sandbox") {
+    showSandboxSetup({ source });
+    playMusicFromGesture();
+    return;
+  }
   const mode =
     state.activePlayMode === "operator" && option.id === "sandbox"
       ? "operatorScriptSandbox"
@@ -1027,9 +1072,7 @@ function launchSelectedLevel(source = "selector") {
         ? "primer"
         : option.mode;
   setMode(mode);
-  if (option.id === "sandbox") {
-    trackEvent("sandbox_start", { source, play_mode: state.activePlayMode });
-  } else if (option.id === "pursuitArcade") {
+  if (option.id === "pursuitArcade") {
     trackEvent("arcade_start", { source });
   } else {
     trackEvent("tutorial_start", { source, entry: option.mode, play_mode: state.activePlayMode });
@@ -1037,9 +1080,128 @@ function launchSelectedLevel(source = "selector") {
   playMusicFromGesture();
 }
 
+function showSandboxSetup(options = {}) {
+  state.mode = "sandboxSetup";
+  state.running = false;
+  state.passed = false;
+  state.stepAccumulatorS = 0;
+  keys.clear();
+  touch.clear();
+  clearControlPulses();
+  el.shell.classList.remove("selector-mode", ...SHELL_GAME_MODE_CLASSES);
+  el.shell.classList.add("sandbox-setup-mode");
+  el.sandboxSetupScreen.classList.remove("hidden");
+  el.sandboxSetupLevelTitle.textContent =
+    state.activePlayMode === "operator" ? "Operator Sandbox" : "Pilot Sandbox";
+  const values = sandboxSetupInputValues(state.sandboxSetup);
+  el.sandboxSetupInputs.forEach((input) => {
+    input.value = values[input.dataset.sandboxField] ?? "";
+    input.removeAttribute("aria-invalid");
+  });
+  setSandboxSetupStep("target");
+  syncSandboxSetupValidation();
+  setMusicTrackForMode("sandbox");
+  trackEvent("sandbox_setup_open", {
+    source: options.source || "selector",
+    play_mode: state.activePlayMode,
+  });
+  updateDebugState();
+  requestAnimationFrame(() => el.sandboxSetupInputs[0]?.focus());
+}
+
+function sandboxPortraitSetupActive() {
+  return (
+    document.body.classList.contains("mobile-view") &&
+    window.matchMedia("(orientation: portrait) and (max-width: 760px)").matches
+  );
+}
+
+function setSandboxSetupStep(step, options = {}) {
+  const selectedStep = step === "chaser" ? "chaser" : "target";
+  el.sandboxSetupScreen.dataset.sandboxStep = selectedStep;
+  el.sandboxSetupStepButtons.forEach((button) => {
+    if (button.dataset.sandboxSetupStep === selectedStep) button.setAttribute("aria-current", "step");
+    else button.removeAttribute("aria-current");
+  });
+  if (options.focus) {
+    requestAnimationFrame(() => {
+      el.sandboxSetupPanels
+        .find((panel) => panel.dataset.sandboxSetupPanel === selectedStep)
+        ?.querySelector("input")
+        ?.focus();
+    });
+  }
+}
+
+function sandboxSetupInstruction() {
+  if (!sandboxPortraitSetupActive()) {
+    return "Tab changes fields. Continue applies this setup before simulation or planning.";
+  }
+  return el.sandboxSetupScreen.dataset.sandboxStep === "chaser"
+    ? "Step 2 of 2. Set the chaser RIC state."
+    : "Step 1 of 2. Set the target orbit.";
+}
+
+function readSandboxSetupForm() {
+  const rawValues = Object.fromEntries(
+    el.sandboxSetupInputs.map((input) => [input.dataset.sandboxField, input.value]),
+  );
+  return validateSandboxSetup(rawValues);
+}
+
+function syncSandboxSetupValidation() {
+  const result = readSandboxSetupForm();
+  const message = result.error || sandboxSetupInstruction();
+  el.sandboxSetupStatus.textContent = message;
+  el.sandboxSetupStatus.dataset.error = String(Boolean(result.error));
+  el.sandboxSetupContinue.disabled = Boolean(result.error);
+  el.sandboxSetupInputs.forEach((input) => input.removeAttribute("aria-invalid"));
+  if (result.error) {
+    const invalidField = SANDBOX_SETUP_FIELDS.find((field) => result.error.includes(field.label));
+    el.sandboxSetupInputs
+      .find((input) => input.dataset.sandboxField === invalidField?.key)
+      ?.setAttribute("aria-invalid", "true");
+  }
+  return result;
+}
+
+function advanceSandboxSetupStep() {
+  const result = syncSandboxSetupValidation();
+  const invalidInput = el.sandboxSetupInputs.find((input) => input.getAttribute("aria-invalid") === "true");
+  if (result.error && invalidInput?.closest('[data-sandbox-setup-panel="target"]')) {
+    invalidInput.focus();
+    return;
+  }
+  setSandboxSetupStep("chaser", { focus: true });
+  syncSandboxSetupValidation();
+}
+
+function continueSandboxSetup() {
+  const result = syncSandboxSetupValidation();
+  if (!result.value) return;
+  state.sandboxSetup = result.value;
+  el.sandboxSetupScreen.classList.add("hidden");
+  el.shell.classList.remove("sandbox-setup-mode");
+  const mode = state.activePlayMode === "operator" ? "operatorScriptSandbox" : "sandbox";
+  setMode(mode);
+  trackEvent("sandbox_start", {
+    source: "sandbox_setup_continue",
+    play_mode: state.activePlayMode,
+    target_ecc: state.sandboxSetup.target_ecc,
+    target_a_km: state.sandboxSetup.target_a_km,
+  });
+}
+
+function externalLevelUrl(option) {
+  const destination = new URL(option.externalUrl, window.location.href);
+  if (option.id === "rpoDuel") destination.searchParams.set("frame_convention", state.frameConvention);
+  return destination;
+}
+
 function setMode(mode) {
   state.mode = mode;
-  el.shell.classList.remove("selector-mode");
+  el.shell.classList.remove("selector-mode", "sandbox-setup-mode");
+  el.sandboxSetupScreen.classList.add("hidden");
   state.running = false;
   state.speedIndex = 0;
   state.cameraRuleMode =
@@ -1120,30 +1282,73 @@ function advancePrimer() {
 }
 
 function sandboxSeed() {
-  const base = { ...presets[el.presetSelect.value] };
-  const range = Number(el.rangeSlider.value);
-  const drift = Number(el.driftSlider.value) / 1000;
-  const norm = Math.hypot(base.r, base.i, base.c) || 1;
-  base.r = (base.r / norm) * range;
-  base.i = (base.i / norm) * range;
-  base.c = (base.c / norm) * range;
-  base.id += drift;
-  return base;
+  return sandboxRelativeSeed(state.sandboxSetup);
 }
 
-function randomSandboxSeed() {
-  const range = 0.25 + Math.random() * 2.9;
-  const theta = Math.random() * Math.PI * 2;
-  const z = Math.random() * 2 - 1;
-  const plane = Math.sqrt(Math.max(1 - z * z, 0));
+function sandboxTargetStateAt(timeS = 0) {
+  let target = keplerianToEci(sandboxTargetCoes(state.sandboxSetup), MU);
+  let remainingS = Math.max(Number(timeS || 0), 0);
+  while (remainingS > 1.0e-9) {
+    const dtS = Math.min(remainingS, 60);
+    target = stepTwoBodyState(target, MU, dtS);
+    remainingS -= dtS;
+  }
+  return target;
+}
+
+function sandboxPairFromSeed(seed) {
+  const timeS = Math.max(Number(seed?.t || 0), 0);
+  const target = sandboxTargetStateAt(timeS);
+  const chaser = stateFromRelativeRic(target, {
+    r_km: Number(seed?.r || 0),
+    i_km: Number(seed?.i || 0),
+    c_km: Number(seed?.c || 0),
+    rd_km_s: Number(seed?.rd || 0),
+    id_km_s: Number(seed?.id || 0),
+    cd_km_s: Number(seed?.cd || 0),
+  });
+  return { target, chaser, timeS };
+}
+
+function stepSandboxPair(pair, durationS, chaserAccelRic = [0, 0, 0]) {
+  let next = { target: pair.target, chaser: pair.chaser };
+  let remainingS = Math.max(Number(durationS || 0), 0);
+  while (remainingS > 1.0e-9) {
+    const dtS = Math.min(remainingS, 10);
+    next = stepControlledTwoBodyPair({
+      target: next.target,
+      chaser: next.chaser,
+      mu_km3_s2: MU,
+      chaser_accel_ric_km_s2: chaserAccelRic,
+      dt_s: dtS,
+    });
+    remainingS -= dtS;
+  }
+  return { ...next, timeS: Number(pair.timeS || 0) + Math.max(Number(durationS || 0), 0) };
+}
+
+function sandboxPairRelativeState(pair, previous = {}) {
+  const rel = relativeRicState(pair.target, pair.chaser);
   return {
-    r: range * plane * Math.cos(theta),
-    i: range * plane * Math.sin(theta),
-    c: range * z,
-    rd: (Math.random() - 0.5) * 0.0004,
-    id: (Math.random() - 0.5) * 0.0004,
-    cd: (Math.random() - 0.5) * 0.0004,
+    r: rel.r_km,
+    i: rel.i_km,
+    c: rel.c_km,
+    rd: rel.rd_km_s,
+    id: rel.id_km_s,
+    cd: rel.cd_km_s,
+    t: Number(pair.timeS || 0),
+    dv: Number(previous.dv || 0),
   };
+}
+
+function sandboxCoastPoint(seed, durationS) {
+  const pair = sandboxPairFromSeed(seed);
+  const nextPair = stepSandboxPair(pair, durationS);
+  return sandboxPairRelativeState(nextPair, seed);
+}
+
+function currentOrbitPeriodS() {
+  return sandboxExperienceActive() ? sandboxOrbitPeriodS(state.sandboxSetup, MU) : ORBIT_PERIOD_S;
 }
 
 function startArcadeSession() {
@@ -1269,12 +1474,25 @@ function step(dt, forceRun = false) {
   }
   if ((!state.running && !forceRun) || state.passed) return;
   const u = currentControls();
-  stepHcwStateInPlace(state.sim, u, dt);
+  if (state.mode === "sandbox") {
+    stepSandboxLive(dt, u);
+  } else {
+    stepHcwStateInPlace(state.sim, u, dt);
+  }
   state.sim.dv += Math.hypot(u.r, u.i, u.c) * MAX_ACCEL_KM_S2 * dt * 1000;
   state.closestKm = Math.min(state.closestKm, rangeKm());
   state.trail.push(samplePoint());
   if (state.trail.length > TRAIL_LIMIT) state.trail.shift();
   updateTutorial(dt, u);
+}
+
+function stepSandboxLive(dtS, controls) {
+  if (!state.sandboxPair || Math.abs(Number(state.sandboxPair.timeS || 0) - Number(state.sim.t || 0)) > 1.0e-6) {
+    state.sandboxPair = sandboxPairFromSeed(state.sim);
+  }
+  const accelRic = [controls.r, controls.i, controls.c].map((value) => Number(value || 0) * MAX_ACCEL_KM_S2);
+  state.sandboxPair = stepSandboxPair(state.sandboxPair, dtS, accelRic);
+  state.sim = sandboxPairRelativeState(state.sandboxPair, state.sim);
 }
 
 function operatorBurnVisualDurationS(deltaVMps) {
@@ -1345,7 +1563,7 @@ function stepOperator(dt, forceRun = false) {
     const nextStopS = nextBurn ? Math.min(targetTimeS, nextBurn.timeS) : targetTimeS;
     const coastDt = Math.max(nextStopS - state.sim.t, 0);
     if (coastDt > 1.0e-9) {
-      const nextState = cwCoastPoint(state.sim, coastDt);
+      const nextState = coastPoint(state.sim, coastDt);
       state.sim.r = nextState.r;
       state.sim.i = nextState.i;
       state.sim.c = nextState.c;
@@ -1558,6 +1776,7 @@ function updateMissionText() {
     renderLevelSelector();
     return;
   }
+  if (state.mode === "sandboxSetup") return;
   el.shell.classList.remove("selector-mode");
   el.shell.classList.toggle("primer-mode", state.mode === "primer");
   el.shell.classList.toggle("mode-arcade", state.mode === "arcade");
@@ -1651,7 +1870,6 @@ function updateMissionText() {
           : operatorModeActive()
             ? "Script"
             : "Reset";
-  el.sandboxPanel.classList.toggle("hidden", state.mode !== "sandbox" || state.running);
   if (!operatorScriptModeActive()) state.equationSheetVisible = false;
   renderOperatorPanel();
   syncEquationSheet();
@@ -1763,7 +1981,7 @@ function updateGhost() {
     return;
   }
   if (operatorModeActive()) {
-    state.ghost = predictGhost(operatorBurnProjectionSeed(), ORBIT_PERIOD_S, MAX_GHOST_DRAW_POINTS);
+    state.ghost = predictGhost(operatorBurnProjectionSeed(), currentOrbitPeriodS(), MAX_GHOST_DRAW_POINTS);
     state.tutorialTargetPath = [];
     return;
   }
@@ -1772,7 +1990,7 @@ function updateGhost() {
     state.tutorialTargetPath = [];
     return;
   }
-  state.ghost = predictGhost(livePredictionSeed(), ORBIT_PERIOD_S, MAX_GHOST_DRAW_POINTS);
+  state.ghost = predictGhost(livePredictionSeed(), currentOrbitPeriodS(), MAX_GHOST_DRAW_POINTS);
   state.tutorialTargetPath = [];
   if (state.mode !== "tutorial") return;
   const stage = tutorialStages[state.activeStage];
@@ -2095,6 +2313,7 @@ function operatorInitialSeed() {
 
 function buildOperatorPreviewArtifacts(seed, burns) {
   if (!operatorExperienceActive()) return { path: [], markers: [] };
+  if (sandboxExperienceActive()) return buildSandboxOperatorPreviewArtifacts(seed, burns);
   const validBurns = Array.isArray(burns) ? burns : [];
   const horizonS = operatorPlaybackEndS(validBurns);
   const sampleCount = Math.max(2, OPERATOR_PREVIEW_POINTS);
@@ -2123,12 +2342,48 @@ function buildOperatorPreviewArtifacts(seed, burns) {
   return { path, markers };
 }
 
+function buildSandboxOperatorPreviewArtifacts(seed, burns) {
+  const validBurns = Array.isArray(burns) ? burns : [];
+  const horizonS = operatorPlaybackEndS(validBurns);
+  const sampleCount = Math.max(2, OPERATOR_PREVIEW_POINTS);
+  const path = [];
+  const markers = [];
+  let pair = sandboxPairFromSeed({ ...seed, t: 0 });
+  let burnIdx = 0;
+  for (let idx = 0; idx < sampleCount; idx += 1) {
+    const absoluteTimeS = (horizonS * idx) / (sampleCount - 1);
+    while (burnIdx < validBurns.length && validBurns[burnIdx].timeS <= absoluteTimeS) {
+      const burn = validBurns[burnIdx];
+      pair = stepSandboxPair(pair, burn.timeS - pair.timeS);
+      const burnState = sandboxPairRelativeState(pair);
+      burnState.rd += burn.rMps / 1000;
+      burnState.id += burn.iMps / 1000;
+      burnState.cd += burn.cMps / 1000;
+      pair.chaser = stateFromRelativeRic(pair.target, {
+        r_km: burnState.r,
+        i_km: burnState.i,
+        c_km: burnState.c,
+        rd_km_s: burnState.rd,
+        id_km_s: burnState.id,
+        cd_km_s: burnState.cd,
+      });
+      markers.push({ ...burnState, burnIndex: burnIdx + 1, timeS: burn.timeS });
+      burnIdx += 1;
+    }
+    pair = stepSandboxPair(pair, absoluteTimeS - pair.timeS);
+    path.push(sandboxPairRelativeState(pair));
+  }
+  return { path, markers };
+}
+
 function operatorPlaybackEndS(burns = state.operatorPlan) {
   const lastBurnS = burns.length > 0 ? Math.max(...burns.map((burn) => burn.timeS)) : 0;
-  return Math.max(lastBurnS + ORBIT_PERIOD_S, ORBIT_PERIOD_S);
+  const orbitPeriodS = currentOrbitPeriodS();
+  return Math.max(lastBurnS + orbitPeriodS, orbitPeriodS);
 }
 
 function predictGhost(seed, horizonS, samples) {
+  if (sandboxExperienceActive()) return predictSandboxGhost(seed, horizonS, samples);
   const ghost = [];
   const count = Math.max(Math.floor(samples), 2);
   for (let idx = 0; idx < count; idx += 1) {
@@ -2136,6 +2391,24 @@ function predictGhost(seed, horizonS, samples) {
     ghost.push(cwCoastPoint(seed, t));
   }
   return ghost;
+}
+
+function predictSandboxGhost(seed, horizonS, samples) {
+  const ghost = [];
+  const count = Math.max(Math.floor(samples), 2);
+  let pair = sandboxPairFromSeed(seed);
+  let previousTimeS = 0;
+  for (let idx = 0; idx < count; idx += 1) {
+    const timeS = count <= 1 ? 0 : (Number(horizonS) * idx) / (count - 1);
+    pair = stepSandboxPair(pair, timeS - previousTimeS);
+    ghost.push(sandboxPairRelativeState(pair, seed));
+    previousTimeS = timeS;
+  }
+  return ghost;
+}
+
+function coastPoint(seed, tS) {
+  return sandboxExperienceActive() ? sandboxCoastPoint(seed, tS) : cwCoastPoint(seed, tS);
 }
 
 function cwCoastPoint(seed, tS) {
@@ -2170,7 +2443,7 @@ function integrateCopy(s, u, dt) {
 }
 
 function draw() {
-  if (state.mode === "selector") {
+  if (state.mode === "selector" || state.mode === "sandboxSetup") {
     updateDebugState();
     return;
   }
@@ -2191,6 +2464,8 @@ function updateDebugState() {
     playMode: state.playMode,
     activePlayMode: state.activePlayMode,
     activeLevelId: state.activeLevelId,
+    sandboxSetup: { ...state.sandboxSetup },
+    sandboxPhysics: sandboxExperienceActive() ? "two_body_target_relative" : "hcw",
     frameConvention: state.frameConvention,
     viewPreference: state.viewPreference,
     activeView: state.activeView,
@@ -2358,8 +2633,9 @@ function commandStatusLine() {
   }
   if (operatorScriptModeActive()) return state.mode === "operatorScriptTutorial" ? "Review the scripted burn, then press Launch Demo." : "Script RIC burns, then press Launch.";
   if (operatorModeActive()) return "";
-  if (state.mode === "arcade") return "W/S R  A/D I  Left/Right C  Space Start  R Reset";
-  return "W/S R  A/D I  Left/Right C  C Camera  M Music";
+  const inTrackKeys = displayAxisSign("i") > 0 ? "A -I / D +I" : "A +I / D -I";
+  if (state.mode === "arcade") return `W/S R  ${inTrackKeys}  Left/Right C  Space Start  R Reset`;
+  return `W/S R  ${inTrackKeys}  Left/Right C  C Camera  M Music`;
 }
 
 function nextOperatorBurnText() {
@@ -2373,7 +2649,11 @@ function nextOperatorBurnText() {
 }
 
 function tutorialStageInstruction(stage) {
-  if (state.activeView !== "mobile") return stage.text;
+  if (state.activeView !== "mobile") {
+    if (stage.axis !== "i") return stage.text;
+    const key = stage.sign * displayAxisSign("i") > 0 ? "D" : "A";
+    return String(stage.text || "").replace(/^Hold [AD]/, `Hold ${key}`);
+  }
   const label = `${stage.sign > 0 ? "+" : "-"}${String(stage.axis || "").toUpperCase()}`;
   if (stage.id === "plusI") return `Hold ${label}, then coast.`;
   if (stage.id === "minusI") return `Hold ${label}, then coast.`;
@@ -2382,6 +2662,14 @@ function tutorialStageInstruction(stage) {
   if (stage.id === "plusC") return `Hold ${label}, then coast.`;
   if (stage.id === "minusC") return `Hold ${label}, then coast.`;
   return stage.text;
+}
+
+function syncTouchControlLabels() {
+  const positiveOnRight = displayAxisSign("i") > 0;
+  const left = document.querySelector('[data-touch="iMinus"]');
+  const right = document.querySelector('[data-touch="iPlus"]');
+  if (left) left.textContent = positiveOnRight ? "-I" : "+I";
+  if (right) right.textContent = positiveOnRight ? "+I" : "-I";
 }
 
 function formatBurnProgressMS(progressMps, targetMps) {
@@ -3474,7 +3762,7 @@ function bindCommandButton(button, handler) {
 function suppressMobileSelectionEvents() {
   const shouldSuppress = (event) => {
     if (state.activeView !== "mobile") return false;
-    if (state.mode === "selector") return false;
+    if (state.mode === "selector" || state.mode === "sandboxSetup") return false;
     if (isEditableControlTarget(event.target)) return false;
     return true;
   };
@@ -3730,17 +4018,32 @@ function bindEvents() {
   });
   el.leaderboardForm.addEventListener("submit", submitLeaderboardAttempt);
   el.leaderboardRefresh.addEventListener("click", () => refreshLeaderboard({ force: true }));
-  el.applySandbox.addEventListener("click", () => {
+  el.sandboxSetupInputs.forEach((input) => input.addEventListener("input", syncSandboxSetupValidation));
+  el.sandboxSetupForm.addEventListener("submit", (event) => {
+    event.preventDefault();
     playMusicFromGesture();
-    resetState(sandboxSeed());
-    state.running = false;
-    updateMissionText();
+    if (sandboxPortraitSetupActive() && el.sandboxSetupScreen.dataset.sandboxStep === "target") {
+      advanceSandboxSetupStep();
+      return;
+    }
+    continueSandboxSetup();
   });
-  el.randomSandbox.addEventListener("click", () => {
-    playMusicFromGesture();
-    resetState(randomSandboxSeed());
-    state.running = false;
-    updateMissionText();
+  el.sandboxSetupNext.addEventListener("click", advanceSandboxSetupStep);
+  el.sandboxSetupBack.addEventListener("click", () => {
+    setSandboxSetupStep("target", { focus: true });
+    syncSandboxSetupValidation();
+  });
+  el.sandboxSetupStepButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      if (button.dataset.sandboxSetupStep === "chaser") advanceSandboxSetupStep();
+      else {
+        setSandboxSetupStep("target", { focus: true });
+        syncSandboxSetupValidation();
+      }
+    });
+  });
+  el.sandboxSetupCancel.addEventListener("click", () => {
+    showLevelSelector({ track: true, source: "sandbox_setup_cancel" });
   });
   window.addEventListener("resize", draw);
   const viewQuery = window.matchMedia("(max-width: 760px), (max-height: 620px)");
@@ -3753,6 +4056,7 @@ function bindEvents() {
 
 bindEvents();
 initializeViewPreference();
+syncTouchControlLabels();
 initAnalytics();
 trackEventOnce("preview_view", { build: BUILD_ID });
 if (!launchInitialLevelFromUrl()) showLevelSelector();

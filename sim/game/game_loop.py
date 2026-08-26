@@ -494,10 +494,13 @@ def run_game_mode(
                 control_mode=control_mode,
                 game_mode=game_mode,
                 command_provider=command_provider,
+                frame_convention=frame_convention,
             ),
             coach_hint=_coach_hint_with_camera_rule(
                 _guided_tutorial_stage_hint(
-                    _guided_tutorial_current_stage(training_cfg, guided_tutorial), guided_tutorial
+                    _guided_tutorial_current_stage(training_cfg, guided_tutorial),
+                    guided_tutorial,
+                    frame_convention=frame_convention,
                 )
                 or trainer.current_hint(),
                 dashboard,
@@ -561,6 +564,7 @@ def run_game_mode(
                 control_mode=control_mode,
                 briefing_open=briefing_open,
                 terminal_open=debrief_hotkey_enabled,
+                frame_convention=frame_convention,
             )
             if not operator_playback_mode:
                 _clear_two_rail_released_maneuver_input(config, command_state, control_mode=control_mode)
@@ -1467,6 +1471,7 @@ def run_game_mode(
                     control_mode=control_mode,
                     game_mode=game_mode,
                     command_provider=command_provider,
+                    frame_convention=frame_convention,
                 ),
                 coach_hint=_coach_hint_with_camera_rule(
                     (_operator_tutorial_status(operator_tutorial) if operator_tutorial is not None else "")
@@ -1476,7 +1481,9 @@ def run_game_mode(
                         else ""
                     )
                     or _guided_tutorial_stage_hint(
-                        _guided_tutorial_current_stage(training_cfg, guided_tutorial), guided_tutorial
+                        _guided_tutorial_current_stage(training_cfg, guided_tutorial),
+                        guided_tutorial,
+                        frame_convention=frame_convention,
                     )
                     or trainer.current_hint(),
                     dashboard,

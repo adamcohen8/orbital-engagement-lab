@@ -20,6 +20,10 @@ from sim.orbital_calculator import mission_recovery_from_intrack_impulse, rocket
 from sim.presets.thrusters import resolve_thruster_max_thrust_n_from_specs
 
 
+class _UnsupportedOrbitTransferCandidate(ValueError):
+    """A sampled transfer cannot be represented by the supported orbit contract."""
+
+
 def build_mission_recovery_summary(
     *,
     cfg: Any,
@@ -503,7 +507,7 @@ def _build_recovery_planner(
         "constrained",
     ]
     simulate_candidates = bool(planner_cfg.get("simulate_candidates", True))
-    candidates = _generate_recovery_candidates(
+    candidates, candidate_rejections = _generate_recovery_candidates(
         section=section,
         goal=goal,
         assessment_time_s=assessment_time_s,
@@ -537,6 +541,7 @@ def _build_recovery_planner(
         )
         for mode in modes
     }
+    warnings = _candidate_rejection_warnings(candidate_rejections)
     return {
         "enabled": True,
         "sources": sources,
@@ -557,6 +562,11 @@ def _build_recovery_planner(
             for candidate in candidates
             if candidate.get("source_family") == "analytic_reconstitution"
         ],
+        "candidate_rejections": {
+            "total": int(sum(candidate_rejections.values())),
+            "by_reason": dict(candidate_rejections),
+        },
+        "warnings": warnings,
         "recommended": recommendations,
         "candidates": candidates,
     }
@@ -583,8 +593,9 @@ def _generate_recovery_candidates(
     candidate_count: int,
     simulate_candidates: bool,
     planner_cfg: dict[str, Any],
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
     candidates: list[dict[str, Any]] = []
+    candidate_rejections: dict[str, int] = {}
     sources = set(
         str(source)
         for source in list(
@@ -670,31 +681,31 @@ def _generate_recovery_candidates(
 
     orbit_transfer_cfg = dict(planner_cfg.get("orbit_transfer", {}) or {})
     if bool(orbit_transfer_cfg.get("enabled", False)) or "orbit_transfer" in sources:
-        candidates.extend(
-            _orbit_transfer_lambert_candidates(
-                section=section,
-                goal=goal,
-                assessment_time_s=assessment_time_s,
-                initial_state=initial_state,
-                final_state=final_state,
-                target_elements=target_elements,
-                target_reference_state=target_reference_state,
-                mass_kg=mass_kg,
-                isp_s=isp_s,
-                max_thrust_n=max_thrust_n,
-                tolerances=tolerances,
-                max_delta_v_m_s=max_delta_v_m_s,
-                max_time_s=max_time_s,
-                simulate_candidates=simulate_candidates,
-                planner_cfg=orbit_transfer_cfg,
-                target_basis=(
-                    "configured_target_orbit"
-                    if bool(getattr(section, "target_orbit", {}) or {})
-                    else "initial_orbit"
-                ),
-                start_index=len(candidates) + 1,
-            )
+        transfer_candidates, transfer_rejections = _orbit_transfer_lambert_candidates(
+            section=section,
+            goal=goal,
+            assessment_time_s=assessment_time_s,
+            initial_state=initial_state,
+            final_state=final_state,
+            target_elements=target_elements,
+            target_reference_state=target_reference_state,
+            mass_kg=mass_kg,
+            isp_s=isp_s,
+            max_thrust_n=max_thrust_n,
+            tolerances=tolerances,
+            max_delta_v_m_s=max_delta_v_m_s,
+            max_time_s=max_time_s,
+            simulate_candidates=simulate_candidates,
+            planner_cfg=orbit_transfer_cfg,
+            target_basis=(
+                "configured_target_orbit"
+                if bool(getattr(section, "target_orbit", {}) or {})
+                else "initial_orbit"
+            ),
+            start_index=len(candidates) + 1,
         )
+        candidates.extend(transfer_candidates)
+        candidate_rejections.update(transfer_rejections)
 
     unique: dict[tuple[str, float], dict[str, Any]] = {}
     for candidate in candidates:
@@ -723,10 +734,13 @@ def _generate_recovery_candidates(
     candidate_families = {str(item.get("source_family") or "") for item in ranked}
     if {"analytic_reconstitution", "orbit_transfer"}.issubset(candidate_families):
         ranked = _retain_transfer_with_analytical_baseline(ranked, candidate_count)
-    return [
-        {**candidate, "candidate_id": f"candidate_{idx:03d}"}
-        for idx, candidate in enumerate(ranked[:candidate_count], start=1)
-    ]
+    return (
+        [
+            {**candidate, "candidate_id": f"candidate_{idx:03d}"}
+            for idx, candidate in enumerate(ranked[:candidate_count], start=1)
+        ],
+        candidate_rejections,
+    )
 
 
 def _orbit_transfer_lambert_candidates(
@@ -748,9 +762,9 @@ def _orbit_transfer_lambert_candidates(
     planner_cfg: dict[str, Any],
     target_basis: str,
     start_index: int,
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
     if max_time_s <= 0.0:
-        return []
+        return [], {}
     departure_samples = max(int(planner_cfg.get("departure_samples", 9) or 9), 1)
     tof_samples = max(int(planner_cfg.get("time_of_flight_samples", 12) or 12), 1)
     anomaly_samples = max(int(planner_cfg.get("target_anomaly_samples", 24) or 24), 1)
@@ -759,7 +773,7 @@ def _orbit_transfer_lambert_candidates(
     max_tof_cfg = planner_cfg.get("max_time_of_flight_s")
     max_tof = max_time_s if max_tof_cfg in (None, "") else min(float(max_tof_cfg), max_time_s)
     if max_tof < min_tof:
-        return []
+        return [], {}
     branches: list[bool] = []
     if bool(planner_cfg.get("short_way", True)):
         branches.append(True)
@@ -770,7 +784,8 @@ def _orbit_transfer_lambert_candidates(
 
     departure_times = _sample_transfer_axis(0.0, max(0.0, max_time_s - min_tof), departure_samples)
     candidates: list[dict[str, Any]] = []
-    failures = 0
+    solver_rejections = 0
+    unsupported_orbit_rejections = 0
     for departure_wait_s in departure_times:
         remaining = max_time_s - float(departure_wait_s)
         if remaining < min_tof:
@@ -798,15 +813,15 @@ def _orbit_transfer_lambert_candidates(
                             revolutions=0,
                         )
                     except ValueError:
-                        failures += 1
+                        solver_rejections += 1
                         continue
                     burn1_km_s = solution.v1_km_s - departure_state[3:6]
                     burn2_km_s = target_state[3:6] - solution.v2_km_s
                     burn1_m_s = float(np.linalg.norm(burn1_km_s) * 1000.0)
                     burn2_m_s = float(np.linalg.norm(burn2_km_s) * 1000.0)
                     total_delta_v_m_s = burn1_m_s + burn2_m_s
-                    candidates.append(
-                        _orbit_transfer_candidate_row(
+                    try:
+                        candidate = _orbit_transfer_candidate_row(
                             candidate_id=f"candidate_{start_index + len(candidates):03d}",
                             goal=goal,
                             total_delta_v_m_s=total_delta_v_m_s,
@@ -834,16 +849,37 @@ def _orbit_transfer_lambert_candidates(
                             target_basis=target_basis,
                             impulse_epsilon_m_s=impulse_epsilon_m_s,
                         )
-                    )
+                    except _UnsupportedOrbitTransferCandidate:
+                        unsupported_orbit_rejections += 1
+                        continue
+                    candidates.append(candidate)
 
     if bool(planner_cfg.get("keep_per_time_best", True)):
         candidates = _best_orbit_transfer_candidates_per_time(candidates)
-    if failures:
+    if solver_rejections or unsupported_orbit_rejections:
         for candidate in candidates:
             notes = list(candidate.get("notes", []) or [])
-            notes.append(f"Orbit Transfer Planner skipped {failures} non-converged or singular Lambert grid points.")
+            if solver_rejections:
+                notes.append(
+                    "Orbit Transfer Planner skipped "
+                    f"{solver_rejections} non-converged or singular Lambert grid points."
+                )
+            if unsupported_orbit_rejections:
+                notes.append(
+                    "Orbit Transfer Planner rejected "
+                    f"{unsupported_orbit_rejections} candidate grid points whose simulated post-transfer "
+                    "states were not supported elliptical Earth-centered orbits."
+                )
             candidate["notes"] = notes
-    return candidates
+    rejection_counts = {
+        reason: count
+        for reason, count in (
+            ("lambert_solver", solver_rejections),
+            ("unsupported_post_transfer_orbit", unsupported_orbit_rejections),
+        )
+        if count
+    }
+    return candidates, rejection_counts
 
 
 def _orbit_transfer_candidate_row(
@@ -882,7 +918,6 @@ def _orbit_transfer_candidate_row(
     velocity_residual_m_s = None
     simulated_delta_v = None
     simulated_recovery_time = None
-    verification_error = None
     if simulate_candidates:
         post_burn1 = np.hstack((departure_state[:3], departure_state[3:6] + burn1_km_s))
         transfer_arrival = _propagate_state(post_burn1, time_of_flight_s)
@@ -893,19 +928,18 @@ def _orbit_transfer_candidate_row(
         simulated_recovery_time = float(total_time_s)
         try:
             recovered_elements = rv_to_coe_eci(recovered_state[:3], recovered_state[3:6])
-            reference_elements = (
-                rv_to_coe_eci(target_state[:3], target_state[3:6]) if goal == "orbit_slot" else target_elements
-            )
         except ValueError as exc:
-            feasible = False
-            within_tolerances = False
-            verification_error = str(exc)
-        else:
-            expected_element_errors = _element_errors(reference_elements, recovered_elements, target_state, recovered_state)
-            if goal == "orbit_slot":
-                expected_element_errors["slot_phase_deg"] = _position_angle_error_deg(target_state, recovered_state)
-            expected_final_elements = _elements_dict(recovered_elements)
-            within_tolerances = _within_tolerances(expected_element_errors, tolerances)
+            raise _UnsupportedOrbitTransferCandidate(
+                "Simulated post-transfer state is outside the supported elliptical Earth-centered orbit domain."
+            ) from exc
+        reference_elements = (
+            rv_to_coe_eci(target_state[:3], target_state[3:6]) if goal == "orbit_slot" else target_elements
+        )
+        expected_element_errors = _element_errors(reference_elements, recovered_elements, target_state, recovered_state)
+        if goal == "orbit_slot":
+            expected_element_errors["slot_phase_deg"] = _position_angle_error_deg(target_state, recovered_state)
+        expected_final_elements = _elements_dict(recovered_elements)
+        within_tolerances = _within_tolerances(expected_element_errors, tolerances)
     verified = bool(simulate_candidates and feasible and within_tolerances is not False)
     if position_residual_km is not None and position_residual_km > 1.0e-2:
         verified = False
@@ -936,8 +970,6 @@ def _orbit_transfer_candidate_row(
             f"Collapsed {collapsed} Lambert impulse(s) at or below "
             f"{float(impulse_epsilon_m_s):.6g} m/s for reporting."
         )
-    if verification_error:
-        notes.append(f"Verification rejected this non-elliptical recovered state: {verification_error}")
     return {
         "candidate_id": candidate_id,
         "source": "orbit_transfer_lambert",
@@ -971,6 +1003,24 @@ def _orbit_transfer_candidate_row(
         "burn_sequence": burn_sequence,
         "notes": notes,
     }
+
+
+def _candidate_rejection_warnings(candidate_rejections: dict[str, int]) -> list[str]:
+    warnings: list[str] = []
+    solver_rejections = int(candidate_rejections.get("lambert_solver", 0) or 0)
+    if solver_rejections:
+        warnings.append(
+            "Orbit Transfer Planner skipped "
+            f"{solver_rejections} non-converged or singular Lambert grid points and continued."
+        )
+    unsupported_rejections = int(candidate_rejections.get("unsupported_post_transfer_orbit", 0) or 0)
+    if unsupported_rejections:
+        warnings.append(
+            "Orbit Transfer Planner rejected "
+            f"{unsupported_rejections} candidate grid points outside the supported elliptical "
+            "Earth-centered orbit domain and continued without aborting the planner."
+        )
+    return warnings
 
 
 def _orbit_transfer_type(

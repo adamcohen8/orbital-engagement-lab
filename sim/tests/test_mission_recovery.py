@@ -354,6 +354,58 @@ def test_mission_recovery_orbit_transfer_planner_collapses_zero_impulse_slot_can
     assert any("Collapsed 2 Lambert impulse" in note for note in candidate["notes"])
 
 
+def test_orbit_transfer_planner_rejects_unsupported_candidate_states_and_continues() -> None:
+    initial = np.zeros(14, dtype=float)
+    initial[:6] = [4792.866637, 0.0, -4792.866637, 0.0, 7.668558, 0.0]
+    initial[13] = 100.0
+    final = initial.copy()
+    final[4] += 0.0001
+    cfg = scenario_config_from_dict(
+        {
+            "target": {"enabled": True, "specs": {"mass_kg": 100.0}},
+            "analysis": {
+                "mission_recovery": {
+                    "enabled": True,
+                    "object_id": "target",
+                    "goal": "orbit_slot",
+                    "assessment_time_s": "final",
+                    "slot_tolerance_deg": 1.0,
+                    "max_phasing_orbits": 25,
+                    "planner": {
+                        "enabled": True,
+                        "sources": ["analytic_reconstitution", "orbit_transfer"],
+                        "modes": ["min_delta_v", "min_time", "constrained"],
+                        "max_recovery_time_s": 86400.0,
+                        "max_recovery_delta_v_m_s": 15.0,
+                        "candidate_count": 12,
+                        "simulate_candidates": True,
+                    },
+                    "propulsion": {
+                        "spacecraft_mass_kg": 100.0,
+                        "isp_s": 220.0,
+                        "max_thrust_n": 20.0,
+                    },
+                    "element_tolerances": {"a_km": 1.0, "ecc": 0.001},
+                }
+            },
+        }
+    )
+
+    summary = build_mission_recovery_summary(
+        cfg=cfg,
+        t_s=np.array([0.0, 45.0]),
+        truth_hist={"target": np.vstack([initial, final])},
+    )
+
+    planner = summary["planner"]
+    rejections = planner["candidate_rejections"]
+    assert rejections["by_reason"]["unsupported_post_transfer_orbit"] > 0
+    assert rejections["total"] == sum(rejections["by_reason"].values())
+    assert any(item["source_family"] == "analytic_reconstitution" for item in planner["candidates"])
+    assert any(item["source_family"] == "orbit_transfer" for item in planner["candidates"])
+    assert any("continued without aborting" in warning for warning in planner["warnings"])
+
+
 def test_orbit_transfer_planner_reports_one_impulse_departure_when_arrival_burn_collapses() -> None:
     radius_km = 7000.0
     circular_speed = float(np.sqrt(EARTH_MU_KM3_S2 / radius_km))

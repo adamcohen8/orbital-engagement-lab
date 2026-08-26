@@ -50,6 +50,47 @@ ISS_LINE1 = "1 25544U 98067A   24001.00000000  .00016717  00000+0  10270-3 0  90
 ISS_LINE2 = "2 25544  51.6416  43.6012 0005423  52.3066  50.1234 15.50000000  1004"
 
 
+def test_review_store_records_mission_recovery_candidate_rejections_as_warning_events() -> None:
+    summary = {
+        "mission_recovery": {
+            "object_id": "target",
+            "assessment_time_s": 45.0,
+            "planner": {
+                "candidate_rejections": {
+                    "total": 3,
+                    "by_reason": {
+                        "lambert_solver": 1,
+                        "unsupported_post_transfer_orbit": 2,
+                    },
+                }
+            },
+        }
+    }
+    with sqlite3.connect(":memory:") as conn:
+        _create_schema(conn)
+        _insert_events(
+            conn,
+            t_s=np.array([0.0, 45.0]),
+            summary=summary,
+            thrust_hist={},
+        )
+        row = conn.execute(
+            "SELECT time_s, sample_index, object_id, event_type, severity, message, source FROM events"
+        ).fetchone()
+
+    assert row is not None
+    assert row[:5] == (
+        45.0,
+        1,
+        "target",
+        "mission_recovery_candidate_rejection",
+        "warning",
+    )
+    assert "rejected 3 sampled candidate grid points" in row[5]
+    assert "unsupported_post_transfer_orbit=2" in row[5]
+    assert row[6] == "mission_recovery_planner"
+
+
 def test_safety_requirement_assessment_records_quantitative_violations_and_qualitative_review() -> None:
     time_s = np.array([0.0, 1.0, 2.0])
     truth = np.zeros((3, 14), dtype=float)

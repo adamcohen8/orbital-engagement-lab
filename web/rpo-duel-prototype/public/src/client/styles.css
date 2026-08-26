@@ -48,8 +48,9 @@ button:focus-visible, input:focus-visible { outline: 2px solid rgb(96, 174, 224)
 .brand strong { color: var(--text); font-weight: 700; }
 .brand-product { font-size: inherit; }
 .topbar-actions { display: flex; align-items: center; gap: 10px; }
-.level-selector-button { display: inline-grid; min-height: 37px; place-items: center; border: 1px solid rgb(104, 130, 156); border-radius: 4px; background: rgb(20, 27, 36); padding: 7px 11px; color: var(--text); font-size: .7rem; text-decoration: none; text-transform: uppercase; }
-.level-selector-button:hover { border-color: var(--info); background: rgb(28, 48, 66); color: var(--info); }
+.level-selector-button, .frame-convention-button { display: inline-grid; min-height: 37px; place-items: center; border: 1px solid rgb(104, 130, 156); border-radius: 4px; background: rgb(20, 27, 36); padding: 7px 11px; color: var(--text); font-size: .7rem; text-decoration: none; text-transform: uppercase; white-space: nowrap; }
+.frame-convention-button { cursor: pointer; }
+.level-selector-button:hover, .frame-convention-button:hover { border-color: var(--info); background: rgb(28, 48, 66); color: var(--info); }
 
 .landing-view { min-height: calc(100dvh - 168px); display: grid; grid-template-columns: 424px minmax(420px, 1fr); gap: 24px; align-items: stretch; padding: 32px 6px 76px; }
 .hero-copy { border: 1px solid rgb(70, 82, 100); border-radius: 8px; background: var(--hud); padding: 20px; }
@@ -196,7 +197,7 @@ legend { margin-bottom: 9px; }
   .brand { font-size: 1.05rem; }
   .brand-wordmark { display: grid; gap: 1px; }
   .topbar-actions { gap: 5px; }
-  .level-selector-button { min-height: 31px; padding: 5px 7px; font-size: .56rem; }
+  .level-selector-button, .frame-convention-button { min-height: 31px; padding: 5px 7px; font-size: .56rem; }
   .landing-view { min-height: calc(100dvh - 72px); padding: 12px 0 24px; gap: 8px; }
   .hero-copy { padding: 14px; }
   .hero-copy h1 { margin-top: 10px; font-size: 1.5rem; }

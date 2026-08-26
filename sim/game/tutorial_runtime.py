@@ -333,9 +333,15 @@ def _guided_tutorial_wrong_input_active(state: KeyboardCommandState, stage: Any)
     return not _guided_tutorial_input_matches(state, stage)
 
 
-def _guided_tutorial_expected_key(stage: Any) -> str:
+def _guided_tutorial_expected_key(
+    stage: Any,
+    *,
+    frame_convention: FrameConvention | dict[str, Any] | None = None,
+) -> str:
     axis = str(getattr(stage, "axis", ""))
     sign = 1 if int(getattr(stage, "sign", 1)) >= 0 else -1
+    if axis == "in_track":
+        sign *= int(frame_convention_display_axis_sign(frame_convention, 1))
     return {
         ("radial", 1): "W",
         ("radial", -1): "S",
@@ -387,12 +393,24 @@ def _guided_tutorial_delta_v_m_s(trainer: RPOTrainingTracker, stage: Any) -> flo
     return float(np.sum(component[valid] * dt[valid]) * 1000.0)
 
 
-def _guided_tutorial_stage_hint(stage: Any | None, runtime: GuidedTutorialRuntime) -> str:
+def _guided_tutorial_stage_hint(
+    stage: Any | None,
+    runtime: GuidedTutorialRuntime,
+    *,
+    frame_convention: FrameConvention | dict[str, Any] | None = None,
+) -> str:
     if stage is None:
         return ""
     if runtime.wrong_key_active:
-        return f"Wrong key - hold {_guided_tutorial_expected_key(stage)} for {stage.display_label}."
+        return (
+            f"Wrong key - hold {_guided_tutorial_expected_key(stage, frame_convention=frame_convention)} "
+            f"for {stage.display_label}."
+        )
     hint = str(getattr(stage, "hint", "") or "").strip()
+    if str(getattr(stage, "axis", "")) == "in_track" and hint:
+        expected_key = _guided_tutorial_expected_key(stage, frame_convention=frame_convention)
+        if hint.startswith("Hold A") or hint.startswith("Hold D"):
+            hint = f"Hold {expected_key}{hint[6:]}"
     if not hint:
         hint = f"Hold {stage.display_label} until the burn reaches the green target path."
     progress = float(max(runtime.active_stage_delta_v_m_s, 0.0))
@@ -859,7 +877,12 @@ def _dashboard_snapshot_age_s(dashboard: Any, *, now_s: float | None = None) -> 
     return max(current - float(samples[-1]), 0.0)
 
 
-def _command_status(state: KeyboardCommandState, *, control_mode: str = "attitude_thrust") -> str:
+def _command_status(
+    state: KeyboardCommandState,
+    *,
+    control_mode: str = "attitude_thrust",
+    frame_convention: FrameConvention | dict[str, Any] | None = None,
+) -> str:
     mode = str(control_mode or "").strip().lower()
     if mode in AERODYNAMIC_CONTROL_MODES:
         return "W/S Increase/Decrease BC  Left/Right Lift CCW/CW  Space Pause  C Camera  M Music"
@@ -868,7 +891,9 @@ def _command_status(state: KeyboardCommandState, *, control_mode: str = "attitud
     if mode in MOON_RIC_TRANSLATION_MODES:
         return "W/S R about Moon  A/D I about Moon  Left/Right C about Moon  C Camera  O/P ECI  M Music"
     if mode in TRANSLATION_CONTROL_MODES:
-        return "W/S R  A/D I  Left/Right C  C Camera  O/P ECI  M Music"
+        in_track_sign = frame_convention_display_axis_sign(frame_convention, 1)
+        in_track_keys = "A -I / D +I" if in_track_sign > 0 else "A +I / D -I"
+        return f"W/S R  {in_track_keys}  Left/Right C  C Camera  O/P ECI  M Music"
     burn = "FIRE" if state.firing else "Coast"
     return (
         "W/S Pitch  A/D Yaw  Left/Right Roll  Space Fire  M Music  R Reset  Esc Quit\n"
@@ -897,16 +922,17 @@ def _game_command_status(
     control_mode: str,
     game_mode: str,
     command_provider: Any,
+    frame_convention: FrameConvention | dict[str, Any] | None = None,
 ) -> str:
     if _normalize_game_mode(game_mode) == "operator":
         return _operator_next_burn_status(command_provider)
     if str(control_mode or "").strip().lower() in AERODYNAMIC_CONTROL_MODES:
         return (
-            f"{_command_status(state, control_mode=control_mode)}\n"
+            f"{_command_status(state, control_mode=control_mode, frame_convention=frame_convention)}\n"
             f"BC={float(getattr(command_provider, 'ballistic_coefficient_kg_m2', 0.0)):.1f} kg/m^2  "
             f"Lift={float(getattr(command_provider, 'lift_bank_angle_deg', 0.0)):+.0f} deg"
         )
-    return _command_status(state, control_mode=control_mode)
+    return _command_status(state, control_mode=control_mode, frame_convention=frame_convention)
 
 
 def _live_prediction_accel_ric(

@@ -45,7 +45,11 @@ from sim.game.debrief import (
     write_game_debrief,
 )
 from sim.game.formatting import format_distance_km, format_speed_km_s, format_speed_m_s
-from sim.game.frame_convention import FrameConvention, normalize_frame_convention
+from sim.game.frame_convention import (
+    FrameConvention,
+    frame_convention_display_axis_sign,
+    normalize_frame_convention,
+)
 from sim.game.launcher import plan_operator_burns_for_config
 from sim.game.manual import (
     AERODYNAMIC_CONTROL_MODES,

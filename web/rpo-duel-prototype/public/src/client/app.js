@@ -8,6 +8,14 @@ import {
   referenceRelativePair,
   toggleDuelCameraMode,
 } from "./plot-model.js";
+import {
+  frameConventionDisplayAxisSign,
+  frameConventionDisplayValue,
+  frameConventionFromSearch,
+  frameConventionLabel,
+  nextFrameConvention,
+  urlWithFrameConvention,
+} from "./frame-convention.js";
 
 const previewMode = new URLSearchParams(location.search).get("preview");
 if (previewMode === "mobile-landscape" || previewMode === "mobile-portrait") {
@@ -42,7 +50,7 @@ const elements = Object.fromEntries([
   "computer-form", "create-name", "join-name", "computer-name", "join-code", "setup-error", "room-code", "round-label", "role-label", "time-label",
   "auto-time", "player-one-card", "player-two-card", "range-label", "speed-label", "dv-label", "phase-overlay",
   "phase-kicker", "phase-title", "phase-detail", "copy-invite", "match-actions", "play-again", "return-lobby",
-  "ri-canvas", "rc-canvas", "camera-toggle", "music-toggle", "level-selector-link", "toast",
+  "ri-canvas", "rc-canvas", "camera-toggle", "music-toggle", "level-selector-link", "frame-convention-button", "frame-convention-label", "command-line", "toast",
 ].map((id) => [id, document.getElementById(id)]));
 
 const state = {
@@ -64,6 +72,7 @@ const state = {
   lastTrailTick: -1,
   lastRoundIndex: null,
   cameraMode: DUEL_CAMERA_MODES.REFERENCE,
+  frameConvention: frameConventionFromSearch(location.search),
   musicEnabled: true,
   musicRequested: false,
   musicAvailable: true,
@@ -78,6 +87,7 @@ const keyBindings = {
 
 restoreSession();
 populateInviteFromUrl();
+paintFrameConvention();
 configureLevelSelectorLink();
 wireSetup();
 wireControls();
@@ -92,7 +102,43 @@ requestAnimationFrame(renderLoop);
 
 function configureLevelSelectorLink() {
   const localHost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
-  elements["level-selector-link"].href = localHost ? "/trainer/" : HOSTED_LEVEL_SELECTOR_URL;
+  const destination = localHost ? "/trainer/" : HOSTED_LEVEL_SELECTOR_URL;
+  elements["level-selector-link"].href = urlWithFrameConvention(
+    destination,
+    state.frameConvention,
+    window.location.href,
+  ).href;
+}
+
+function paintFrameConvention() {
+  const label = frameConventionLabel(state.frameConvention);
+  const inTrackDisplaySign = frameConventionDisplayAxisSign(state.frameConvention, "i");
+  document.body.dataset.frameConvention = state.frameConvention;
+  elements["frame-convention-button"].textContent = `Frame: ${label}`;
+  elements["frame-convention-button"].setAttribute(
+    "aria-label",
+    `Frame convention: ${label}. Activate to switch.`,
+  );
+  elements["frame-convention-label"].textContent = `Frame: ${label}`;
+  elements["command-line"].textContent = inTrackDisplaySign > 0
+    ? "W/S Radial  A −I / D +I  Left/Right Cross-Track"
+    : "W/S Radial  A +I / D −I  Left/Right Cross-Track";
+  for (const button of document.querySelectorAll('.thrust-button[data-axis="i"]')) {
+    const spatialSign = button.dataset.spatialDirection === "right" ? 1 : -1;
+    const canonicalValue = spatialSign * inTrackDisplaySign;
+    button.dataset.value = String(canonicalValue);
+    button.querySelector("[data-thrust-label]").textContent = canonicalValue > 0 ? "+I" : "−I";
+  }
+}
+
+function toggleFrameConvention() {
+  neutralizeControls(false);
+  state.frameConvention = nextFrameConvention(state.frameConvention);
+  const currentUrl = urlWithFrameConvention(window.location.href, state.frameConvention);
+  window.history.replaceState(window.history.state, "", currentUrl.href);
+  paintFrameConvention();
+  configureLevelSelectorLink();
+  showToast(`Frame convention: ${frameConventionLabel(state.frameConvention)}`);
 }
 
 function wireSetup() {
@@ -122,6 +168,7 @@ function wireSetup() {
   elements["copy-invite"].addEventListener("click", copyInvite);
   elements["play-again"].addEventListener("click", requestRematch);
   elements["return-lobby"].addEventListener("click", returnToLobby);
+  elements["frame-convention-button"].addEventListener("click", toggleFrameConvention);
 }
 
 function selectTab(tab) {
@@ -435,10 +482,10 @@ function wireControls() {
   });
   for (const button of document.querySelectorAll(".thrust-button")) {
     const axis = button.dataset.axis;
-    const value = Number(button.dataset.value);
     const press = (event) => {
       event.preventDefault();
       if (button.disabled) return;
+      const value = Number(button.dataset.value);
       touchPointers.set(event.pointerId, button);
       button.setPointerCapture?.(event.pointerId);
       button.dataset.pressed = "true";
@@ -450,6 +497,7 @@ function wireControls() {
     button.addEventListener("lostpointercapture", releaseTouchPointer);
     button.addEventListener("click", (event) => {
       if (event.detail !== 0 || button.disabled) return;
+      const value = Number(button.dataset.value);
       state.controls[axis] = value;
       sendControls();
       paintButtons();
@@ -536,7 +584,10 @@ function keyboardAxisValue(axis) {
   let value = 0;
   for (const code of state.pressedKeys) {
     const binding = keyBindings[code];
-    if (binding?.[0] === axis) value += binding[1];
+    if (binding?.[0] === axis) {
+      const inputSign = axis === "i" ? frameConventionDisplayAxisSign(state.frameConvention, "i") : 1;
+      value += binding[1] * inputSign;
+    }
   }
   return Math.max(-1, Math.min(1, value));
 }
@@ -594,9 +645,13 @@ function drawPlot(canvas, frame, xKey, yKey, xLabel, yLabel, now) {
     ? smoothPlotViewport(`${xKey}:${yKey}`, targetViewport, now)
     : targetViewport;
   const { centerX, centerY, span } = viewport;
+  const xSign = frameConventionDisplayAxisSign(state.frameConvention, xKey);
+  const ySign = frameConventionDisplayAxisSign(state.frameConvention, yKey);
+  const displayCenterX = frameConventionDisplayValue(state.frameConvention, xKey, centerX);
+  const displayCenterY = frameConventionDisplayValue(state.frameConvention, yKey, centerY);
   const pad = 0;
-  const mapX = (value) => pad + (((value - centerX) + span) / (2 * span)) * (w - pad * 2);
-  const mapY = (value) => h - pad - (((value - centerY) + span) / (2 * span)) * (h - pad * 2);
+  const mapX = (value) => pad + (((frameConventionDisplayValue(state.frameConvention, xKey, value) - displayCenterX) + span) / (2 * span)) * (w - pad * 2);
+  const mapY = (value) => h - pad - (((frameConventionDisplayValue(state.frameConvention, yKey, value) - displayCenterY) + span) / (2 * span)) * (h - pad * 2);
 
   ctx.lineWidth = 1;
   for (let index = -2; index <= 2; index += 1) {
@@ -635,8 +690,10 @@ function drawPlot(canvas, frame, xKey, yKey, xLabel, yLabel, now) {
   ctx.fillStyle = "rgba(170,184,204,.92)";
   ctx.font = "11px Menlo, Consolas, monospace";
   if (!floatingMode) {
-    ctx.fillText(`+${xLabel}`, w - pad - 12, mapY(0) - 6);
-    ctx.fillText(`+${yLabel}`, mapX(0) + 6, pad + 8);
+    ctx.textAlign = xSign > 0 ? "right" : "left";
+    ctx.fillText(`+${xLabel}`, xSign > 0 ? w - pad - 4 : pad + 4, mapY(0) - 6);
+    ctx.textAlign = "left";
+    ctx.fillText(`+${yLabel}`, mapX(0) + 6, ySign > 0 ? pad + 12 : h - pad - 4);
   }
 }
 
@@ -782,7 +839,7 @@ function smoothPlotViewport(key, target, now) {
 }
 
 async function copyInvite() {
-  const url = new URL(window.location.origin);
+  const url = urlWithFrameConvention(window.location.origin, state.frameConvention);
   url.searchParams.set("room", state.roomCode);
   try { await navigator.clipboard.writeText(url.toString()); showToast("Invite link copied"); }
   catch { showToast(`Room code: ${state.roomCode}`); }

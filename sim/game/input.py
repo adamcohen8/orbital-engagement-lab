@@ -2,10 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from sim.game.manual import (
-    DIRECT_CONTROL_MODES,
-    KeyboardCommandState,
-)
+from sim.game.frame_convention import frame_convention_display_axis_sign
+from sim.game.manual import DIRECT_CONTROL_MODES, KeyboardCommandState
 from sim.game.manual import (
     TRANSLATION_CONTROL_MODES as _TRANSLATION_CONTROL_MODES,
 )
@@ -23,8 +21,17 @@ def poll_pygame_input(
     control_mode: str = "attitude_thrust",
     briefing_open: bool = False,
     terminal_open: bool = False,
+    frame_convention: Any = None,
 ) -> None:
     direct_control_mode = str(control_mode or "").strip().lower() in DIRECT_CONTROL_MODES
+    ric_translation_mode = str(control_mode or "").strip().lower() in {
+        "ric",
+        "ric_translation",
+        "translation",
+    }
+    in_track_input_sign = (
+        frame_convention_display_axis_sign(frame_convention, 1) if ric_translation_mode else 1.0
+    )
     scrollable_overlay_open = bool(briefing_open or terminal_open)
     state.briefing_scroll_px = 0
     state.open_debrief_requested = False
@@ -139,7 +146,7 @@ def poll_pygame_input(
     held_roll = opposing_key_axis(keys, positive_key=pygame.K_RIGHT, negative_key=pygame.K_LEFT)
     held_firing = bool(keys[pygame.K_SPACE])
     state.pitch = _combine_axis_pulse(held_pitch, pulse_pitch)
-    state.yaw = _combine_axis_pulse(held_yaw, pulse_yaw)
+    state.yaw = in_track_input_sign * _combine_axis_pulse(held_yaw, pulse_yaw)
     state.roll = _combine_axis_pulse(held_roll, pulse_roll)
     state.firing = False if direct_control_mode else bool(held_firing or pulse_firing)
     state.pitch_event_pulse = bool(abs(float(held_pitch)) <= 1.0e-12 and abs(float(pulse_pitch)) > 1.0e-12)

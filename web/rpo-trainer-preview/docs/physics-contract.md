@@ -15,9 +15,9 @@ browser arcade competition surface:
 - gentle final approach under a relative-speed limit.
 - deterministic browser replay validation for Pursuit Arcade attempts.
 
-## Tutorial And Sandbox Model
+## Tutorial Model
 
-Tutorial and Sandbox use a deterministic circular-reference Hill-frame model:
+Tutorial uses a deterministic circular-reference Hill-frame model:
 
 ```text
 R_ddot = 3 n^2 R + 2 n I_dot + a_R
@@ -33,6 +33,19 @@ at most `1e-3 km^3/s^2` difference and the OEL-generated trajectory comparison
 below bounds the resulting path difference. A future value change requires a
 new physics version. Manual inputs produce bounded RIC accelerations and the
 browser integrates the state with a fixed-step semi-implicit Euler update.
+
+## Sandbox Model
+
+Sandbox mirrors the downloadable preflight field contract: six target
+classical orbital elements and six chaser target-centered rectangular RIC
+state values. The browser converts those values into target and chaser ECI
+states, propagates both under central Earth two-body gravity, and maps bounded
+manual RIC acceleration into ECI at each deterministic step. Operator previews
+and playback use the same configured target orbit and relative initial state.
+
+This includes elliptical target orbits, but it remains a browser-native
+two-body model. It does not add OEL scenario loading, perturbations, estimator
+behavior, recordings, or OEL engine validation.
 
 ## Pursuit Arcade Model
 
@@ -89,3 +102,7 @@ with OEL's two-body engine: +I, +R, and +C initial relative-velocity cases.
 and 600 seconds. The documented acceptance tolerance is `5e-5 km` (5 cm) per
 position axis. This is approximation-continuity evidence for the teaching
 preview, not a claim that HCW replaces the downloadable OEL engine.
+
+`tests/sandbox-setup.test.mjs` pins the downloadable Sandbox field order,
+defaults, numeric bounds, target COE mapping, and the m/s-to-km/s conversion for
+chaser RIC relative rates.

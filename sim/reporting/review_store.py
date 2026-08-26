@@ -2378,6 +2378,34 @@ def _insert_events(
                 "summary",
             )
         )
+    mission_recovery = dict(summary.get("mission_recovery", {}) or {})
+    planner = dict(mission_recovery.get("planner", {}) or {})
+    rejections = dict(planner.get("candidate_rejections", {}) or {})
+    rejection_counts = {
+        str(reason): int(count)
+        for reason, count in dict(rejections.get("by_reason", {}) or {}).items()
+        if int(count) > 0
+    }
+    rejection_total = int(sum(rejection_counts.values()))
+    if rejection_total:
+        event_time = _float_or_none(mission_recovery.get("assessment_time_s"))
+        object_id = _none_or_str(mission_recovery.get("object_id"))
+        reason_text = ", ".join(f"{reason}={count}" for reason, count in sorted(rejection_counts.items()))
+        rows.append(
+            (
+                f"mission_recovery_candidate_rejection:{object_id or 'unknown'}",
+                event_time,
+                _sample_index_for_time(t_s, event_time),
+                object_id,
+                "mission_recovery_candidate_rejection",
+                "warning",
+                (
+                    f"Mission-recovery planner rejected {rejection_total} sampled candidate grid points "
+                    f"and continued without aborting the planner ({reason_text})."
+                ),
+                "mission_recovery_planner",
+            )
+        )
     for object_id, hist in thrust_hist.items():
         if hist.shape[1] < 3:
             continue
