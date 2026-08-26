@@ -36,6 +36,11 @@ The local Node server also exposes the regular RPO Trainer web preview at
 `http://localhost:8787/trainer/` for side-by-side testing. RPO Duel remains a
 standalone experience at `http://localhost:8787/`; the preview's RPO Duel Beta
 selector entry resolves to that root while using this combined local server.
+The selector carries its OEL Default or Space Force frame convention into Duel
+through the `frame_convention` URL parameter. This changes only the displayed
+in-track direction; the client maps physical controls back to canonical RIC,
+while server-authoritative physics and the input payload schema remain unchanged.
+Duel invite and Level Selector return links preserve the convention.
 
 ## Run the deployed-shaped Worker locally
 

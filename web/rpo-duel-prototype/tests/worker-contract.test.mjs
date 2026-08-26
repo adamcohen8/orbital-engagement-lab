@@ -36,7 +36,7 @@ test("Cloudflare deployment binds one SQLite Durable Object namespace and static
 
 test("deployed assets use a dedicated public directory", () => {
   assert.equal(assetsIgnore.trim(), ".assetsignore");
-  for (const path of ["index.html", "assets/39_perigee_afterburner_demo.wav", "src/client/app.js", "src/client/plot-model.js", "src/client/styles.css"]) {
+  for (const path of ["index.html", "assets/39_perigee_afterburner_demo.wav", "src/client/app.js", "src/client/frame-convention.js", "src/client/plot-model.js", "src/client/styles.css"]) {
     assert.equal(existsSync(new URL(`../public/${path}`, import.meta.url)), true, path);
   }
   for (const path of ["server", "tests", "worker", "src/shared", "package.json", "package-lock.json"]) {
@@ -156,7 +156,10 @@ test("expanded auto-time status shares the heading row", () => {
 });
 
 test("expanded lower controls stay with the room code without redundant shortcut text", () => {
-  assert.match(indexSource, /class="command-line">W\/S Radial&nbsp;&nbsp; A\/D In-Track&nbsp;&nbsp; Left\/Right Cross-Track<\/div>/);
+  assert.match(indexSource, /id="frame-convention-label">Frame: OEL<\/span>/);
+  assert.match(clientSource, /document\.body\.dataset\.frameConvention = state\.frameConvention/);
+  assert.match(clientSource, /urlWithFrameConvention\(window\.location\.origin, state\.frameConvention\)/);
+  assert.match(indexSource, /id="command-line">W\/S Radial&nbsp;&nbsp; A −I \/ D \+I&nbsp;&nbsp; Left\/Right Cross-Track<\/div>/);
   assert.doesNotMatch(indexSource, /class="command-line"[^<]*(?:C Camera|M Music)/);
   const expandedStart = stylesSource.indexOf("@media (min-width: 1000px) and (min-height: 581px)");
   const expandedEnd = stylesSource.indexOf("@media (max-width: 920px)", expandedStart);
@@ -178,8 +181,14 @@ test("landing header uses one wordmark scale and links back to the level selecto
   assert.match(stylesSource, /\.brand strong \{ color: var\(--text\); font-weight: 700; \}/);
   assert.match(stylesSource, /\.brand-product \{ font-size: inherit; \}/);
   assert.match(indexSource, /id="level-selector-link"[^>]+>Level Selector<\/a>/);
+  assert.match(indexSource, /id="frame-convention-button"[^>]+>Frame: OEL<\/button>/);
   assert.match(indexSource, /name="oel-level-selector-url" content="https:\/\/orbital-engagement-lab\.vercel\.app\/"/);
   assert.match(clientSource, /localHost \? "\/trainer\/" : HOSTED_LEVEL_SELECTOR_URL/);
+  assert.match(clientSource, /frameConvention: frameConventionFromSearch\(location\.search\)/);
+  assert.match(clientSource, /window\.history\.replaceState\(window\.history\.state, "", currentUrl\.href\)/);
+  assert.match(clientSource, /spatialSign \* inTrackDisplaySign/);
+  assert.match(clientSource, /binding\[1\] \* inputSign/);
+  assert.match(clientSource, /frame-convention-button"\]\.addEventListener\("click", toggleFrameConvention\)/);
   assert.doesNotMatch(indexSource, /id="connection-pill"/);
   assert.doesNotMatch(clientSource, /setConnectionPill/);
 });

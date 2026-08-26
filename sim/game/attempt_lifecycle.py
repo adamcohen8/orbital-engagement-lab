@@ -231,6 +231,7 @@ def _poll_pygame_input(
     control_mode: str = "attitude_thrust",
     briefing_open: bool = False,
     terminal_open: bool = False,
+    frame_convention: FrameConvention | dict[str, Any] | None = None,
 ) -> None:
     game_input.poll_pygame_input(
         pygame,
@@ -238,6 +239,7 @@ def _poll_pygame_input(
         control_mode=control_mode,
         briefing_open=briefing_open,
         terminal_open=terminal_open,
+        frame_convention=frame_convention,
     )
 
 

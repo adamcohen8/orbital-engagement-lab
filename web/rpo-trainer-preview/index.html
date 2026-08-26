@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="Orbital Engagement Lab RPO Trainer Preview: a browser tutorial, reduced circular-orbit sandbox, web-only Pursuit Arcade, and hosted RPO Duel Beta."
+      content="Orbital Engagement Lab RPO Trainer Preview: a browser tutorial, configurable sandbox, web-only Pursuit Arcade, and hosted RPO Duel Beta."
     />
     <meta name="supported-views" content="auto,mobile,desktop" />
     <meta name="oel-analytics-provider" content="plausible,vercel" />
@@ -19,7 +19,7 @@
     />
     <title>Orbital Engagement Lab RPO Trainer Preview</title>
     <link rel="icon" href="./src/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="./src/styles.css?v=web-preview-product-contract-2026-08-20" />
+    <link rel="stylesheet" href="./src/styles.css?v=web-preview-sandbox-landscape-2026-08-25" />
   </head>
   <body>
     <main class="trainer-shell selector-mode">
@@ -29,11 +29,13 @@
           <button class="launcher-frame launcher-frame-mobile" id="selectorFrameButtonMobile" data-selector-frame-button type="button">
             Frame: OEL
           </button>
-          <button class="launcher-music" id="selectorMusicButton" type="button">Music: ON</button>
-          <button class="launcher-view" id="selectorViewButton" type="button">View: Auto</button>
-          <a class="launcher-repo" id="selectorInstallLink" href="https://github.com/adamcohen8/orbital-engagement-lab/blob/main/docs/installation.md" target="_blank" rel="noreferrer">
-            Get Full Trainer
-          </a>
+          <div class="launcher-actions">
+            <button class="launcher-music" id="selectorMusicButton" type="button">Music: ON</button>
+            <button class="launcher-view" id="selectorViewButton" type="button">View: Auto</button>
+            <a class="launcher-repo" id="selectorInstallLink" href="https://github.com/adamcohen8/orbital-engagement-lab/blob/main/docs/installation.md" target="_blank" rel="noreferrer">
+              Get Full Trainer
+            </a>
+          </div>
           <p class="launcher-subtitle"><span class="preview-badge">Browser Preview</span><span>Four focused experiences; the full trainer runs locally.</span></p>
         </header>
 
@@ -45,7 +47,7 @@
             </button>
             <button class="launcher-option" data-level-option="sandbox" type="button">
               <span>Sandbox</span>
-              <small>Reduced circular-orbit preview</small>
+              <small>Configurable target orbit and RIC state</small>
             </button>
             <button class="launcher-option" data-level-option="pursuitArcade" type="button">
               <span>Pursuit Arcade</span>
@@ -100,6 +102,63 @@
         </footer>
       </section>
 
+      <section class="sandbox-setup-screen hidden" id="sandboxSetupScreen" aria-labelledby="sandboxSetupTitle">
+        <header class="sandbox-setup-header">
+          <div>
+            <h1 id="sandboxSetupTitle">Sandbox Setup</h1>
+            <p id="sandboxSetupLevelTitle">Sandbox</p>
+          </div>
+          <p>Configure the target orbit and chaser RIC state.</p>
+        </header>
+
+        <nav class="sandbox-setup-steps" aria-label="Sandbox setup steps">
+          <button data-sandbox-setup-step="target" type="button" aria-current="step">1 · Target Orbit</button>
+          <button data-sandbox-setup-step="chaser" type="button">2 · Chaser RIC</button>
+        </nav>
+
+        <form class="sandbox-setup-form" id="sandboxSetupForm" novalidate>
+          <div class="sandbox-setup-columns">
+            <fieldset class="sandbox-setup-group sandbox-target-group" data-sandbox-setup-panel="target">
+              <legend>
+                <span class="sandbox-group-title-wide">Target Classical Orbital Elements</span>
+                <span class="sandbox-group-title-compact">Target Orbit (COEs)</span>
+              </legend>
+              <p>Two-body target orbit at scenario epoch</p>
+              <label><span>Semimajor Axis <small>(km)</small></span><input data-sandbox-field="target_a_km" inputmode="decimal" /></label>
+              <label><span>Eccentricity</span><input data-sandbox-field="target_ecc" inputmode="decimal" /></label>
+              <label><span>Inclination <small>(deg)</small></span><input data-sandbox-field="target_inc_deg" inputmode="decimal" /></label>
+              <label><span>RAAN <small>(deg)</small></span><input data-sandbox-field="target_raan_deg" inputmode="decimal" /></label>
+              <label><span>Argument of Periapsis <small>(deg)</small></span><input data-sandbox-field="target_argp_deg" inputmode="decimal" /></label>
+              <label><span>True Anomaly <small>(deg)</small></span><input data-sandbox-field="target_true_anomaly_deg" inputmode="decimal" /></label>
+            </fieldset>
+
+            <fieldset class="sandbox-setup-group sandbox-chaser-group" data-sandbox-setup-panel="chaser">
+              <legend>
+                <span class="sandbox-group-title-wide">Chaser Relative RIC State</span>
+                <span class="sandbox-group-title-compact">Chaser RIC State</span>
+              </legend>
+              <p>Position in km; relative velocity in m/s</p>
+              <label><span>Radial R <small>(km)</small></span><input data-sandbox-field="radial_km" inputmode="decimal" /></label>
+              <label><span>In-Track I <small>(km)</small></span><input data-sandbox-field="in_track_km" inputmode="decimal" /></label>
+              <label><span>Cross-Track C <small>(km)</small></span><input data-sandbox-field="cross_track_km" inputmode="decimal" /></label>
+              <label><span>Radial Rate dR <small>(m/s)</small></span><input data-sandbox-field="radial_rate_m_s" inputmode="decimal" /></label>
+              <label><span>In-Track Rate dI <small>(m/s)</small></span><input data-sandbox-field="in_track_rate_m_s" inputmode="decimal" /></label>
+              <label><span>Cross-Track Rate dC <small>(m/s)</small></span><input data-sandbox-field="cross_track_rate_m_s" inputmode="decimal" /></label>
+            </fieldset>
+          </div>
+
+          <footer class="sandbox-setup-footer">
+            <p id="sandboxSetupStatus" role="status">Step 1 of 2. Set the target orbit.</p>
+            <div>
+              <button id="sandboxSetupCancel" type="button">Cancel</button>
+              <button class="sandbox-setup-back" id="sandboxSetupBack" type="button">Back</button>
+              <button class="sandbox-setup-next" id="sandboxSetupNext" type="button">Next</button>
+              <button id="sandboxSetupContinue" type="submit">Continue</button>
+            </div>
+          </footer>
+        </form>
+      </section>
+
       <header class="top-bar">
         <div class="top-left">
           <h1 id="levelLabel">LEVEL 0 - TUTORIAL</h1>
@@ -133,30 +192,6 @@
             <canvas id="rcCanvas"></canvas>
           </section>
         </div>
-
-        <section class="sandbox-panel hidden" id="sandboxPanel" aria-label="Sandbox setup">
-          <label>
-            Start
-            <select id="presetSelect">
-              <option value="behind">Behind Target</option>
-              <option value="radial">Radial Offset</option>
-              <option value="crossTrack">Cross-Track Offset</option>
-              <option value="close">Close Approach</option>
-            </select>
-          </label>
-          <label>
-            Initial range
-            <input id="rangeSlider" type="range" min="0.2" max="3.5" step="0.1" value="1.2" />
-          </label>
-          <label>
-            Initial drift
-            <input id="driftSlider" type="range" min="-0.8" max="0.8" step="0.05" value="0" />
-          </label>
-          <div class="button-row">
-            <button id="applySandbox" type="button">Apply</button>
-            <button id="randomSandbox" type="button">Randomize</button>
-          </div>
-        </section>
 
         <section class="operator-panel hidden" id="operatorPanel" aria-label="Operator burn script">
           <div class="operator-panel-head">
@@ -265,6 +300,6 @@
       </section>
     </main>
 
-    <script src="./src/app.js?v=web-preview-product-contract-2026-08-20" type="module"></script>
+    <script src="./src/app.js?v=web-preview-frame-controls-2026-08-25" type="module"></script>
   </body>
 </html>

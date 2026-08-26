@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#05070a">
     <meta name="oel-level-selector-url" content="https://orbital-engagement-lab.vercel.app/">
     <title>RPO Duel Beta</title>
-    <link rel="stylesheet" href="/src/client/styles.css">
+    <link rel="stylesheet" href="/src/client/styles.css?v=frame-lobby-2026-08-25">
   </head>
   <body>
     <main class="app-shell">
@@ -16,6 +16,7 @@
         </a>
         <div class="topbar-actions">
           <a id="level-selector-link" class="level-selector-button" href="https://orbital-engagement-lab.vercel.app/">Level Selector</a>
+          <button id="frame-convention-button" class="frame-convention-button" type="button">Frame: OEL</button>
         </div>
       </header>
 
@@ -126,14 +127,14 @@
               <div id="player-two-card" class="player-score"><b>0</b><span class="player-name">PLAYER 2</span><span class="status-dot"></span></div>
             </div>
           </div>
-          <div class="hint-line">Any maneuver: shared time 10x. Both players neutral: 200x.</div>
-          <div class="command-line">W/S Radial&nbsp;&nbsp; A/D In-Track&nbsp;&nbsp; Left/Right Cross-Track</div>
+          <div class="hint-line"><span id="frame-convention-label">Frame: OEL</span> · Any maneuver: shared time 10x. Both players neutral: 200x.</div>
+          <div class="command-line" id="command-line">W/S Radial&nbsp;&nbsp; A −I / D +I&nbsp;&nbsp; Left/Right Cross-Track</div>
         </aside>
 
         <section class="touch-controls" aria-label="Spacecraft maneuver controls">
-          <button class="thrust-button" data-axis="i" data-value="-1" type="button">−I<kbd>A</kbd></button>
+          <button class="thrust-button" data-axis="i" data-spatial-direction="left" data-value="-1" type="button"><span data-thrust-label>−I</span><kbd>A</kbd></button>
           <button class="thrust-button" data-axis="r" data-value="1" type="button">+R<kbd>W</kbd></button>
-          <button class="thrust-button" data-axis="i" data-value="1" type="button">+I<kbd>D</kbd></button>
+          <button class="thrust-button" data-axis="i" data-spatial-direction="right" data-value="1" type="button"><span data-thrust-label>+I</span><kbd>D</kbd></button>
           <button class="thrust-button" data-axis="c" data-value="-1" type="button">−C<kbd>←</kbd></button>
           <button class="thrust-button" data-axis="r" data-value="-1" type="button">−R<kbd>S</kbd></button>
           <button class="thrust-button" data-axis="c" data-value="1" type="button">+C<kbd>→</kbd></button>
@@ -141,6 +142,6 @@
       </section>
     </main>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
-    <script type="module" src="/src/client/app.js"></script>
+    <script type="module" src="/src/client/app.js?v=frame-controls-2026-08-25"></script>
   </body>
 </html>

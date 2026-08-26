@@ -61,11 +61,13 @@ function requireMatch(content, pattern, message) {
 async function verifyHostedRoundTrip({ selectorUrl, duelUrl }) {
   const selectorAppUrl = new URL("src/app.js", selectorUrl).toString();
   const duelAppUrl = new URL("src/client/app.js", `${duelUrl}/`).toString();
-  const [selectorHtml, selectorApp, duelHtml, duelApp] = await Promise.all([
+  const duelFrameConventionUrl = new URL("src/client/frame-convention.js", `${duelUrl}/`).toString();
+  const [selectorHtml, selectorApp, duelHtml, duelApp, duelFrameConvention] = await Promise.all([
     fetchText(selectorUrl),
     fetchText(selectorAppUrl),
     fetchText(`${duelUrl}/`),
     fetchText(duelAppUrl),
+    fetchText(duelFrameConventionUrl),
   ]);
 
   requireMatch(selectorHtml, /data-level-option="rpoDuel"/, "Production selector does not list RPO Duel.");
@@ -76,7 +78,8 @@ async function verifyHostedRoundTrip({ selectorUrl, duelUrl }) {
     `Production selector does not point to ${duelUrl}.`,
   );
   requireMatch(selectorApp, /id: "rpoDuel"/, "Production selector client does not define the RPO Duel option.");
-  requireMatch(selectorApp, /window\.location\.assign\(option\.externalUrl\)/, "Production selector client does not launch its external destination.");
+  requireMatch(selectorApp, /destination\.searchParams\.set\("frame_convention", state\.frameConvention\)/, "Production selector client does not carry the selected frame convention into RPO Duel.");
+  requireMatch(selectorApp, /window\.location\.assign\(destination\.href\)/, "Production selector client does not launch its external destination.");
 
   requireMatch(duelHtml, /id="level-selector-link"/, "Production RPO Duel page has no Level Selector action.");
   requireMatch(
@@ -85,6 +88,11 @@ async function verifyHostedRoundTrip({ selectorUrl, duelUrl }) {
     `Production RPO Duel page does not return to ${selectorUrl}.`,
   );
   requireMatch(duelApp, /localHost \? "\/trainer\/" : HOSTED_LEVEL_SELECTOR_URL/, "Production RPO Duel client does not use its hosted selector URL.");
+  requireMatch(duelHtml, /id="frame-convention-label"/, "Production RPO Duel page does not display its active frame convention.");
+  requireMatch(duelApp, /frameConventionFromSearch\(location\.search\)/, "Production RPO Duel client does not read the selector frame convention.");
+  requireMatch(duelApp, /urlWithFrameConvention\(window\.location\.origin, state\.frameConvention\)/, "Production RPO Duel invite links do not retain the frame convention.");
+  requireMatch(duelFrameConvention, /frame_convention/, "Production RPO Duel frame module does not define the URL contract.");
+  requireMatch(duelFrameConvention, /inTrackAxis[^\n]+i_km/, "Production RPO Duel frame module does not map the in-track display axis.");
 }
 
 try {

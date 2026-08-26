@@ -419,6 +419,30 @@ def test_guided_tutorial_wrong_key_hint_names_expected_control() -> None:
     assert game_runner._guided_tutorial_expected_key(stage) == "D"
     assert game_runner._guided_tutorial_stage_hint(stage, runtime) == "Wrong key - hold D for +I burn."
 
+    space_force = frame_convention_from_preset(FRAME_CONVENTION_PRESET_SPACE_FORCE)
+    assert game_runner._guided_tutorial_expected_key(stage, frame_convention=space_force) == "A"
+    assert (
+        game_runner._guided_tutorial_stage_hint(stage, runtime, frame_convention=space_force)
+        == "Wrong key - hold A for +I burn."
+    )
+
+
+def test_guided_tutorial_stage_hint_swaps_in_track_key_for_space_force() -> None:
+    stage = GuidedTutorialBurnConfig(
+        name="plus_i",
+        axis="in_track",
+        sign=1,
+        delta_v_m_s=0.25,
+        hint="Hold D for +I, then coast.",
+    )
+    runtime = game_runner.GuidedTutorialRuntime()
+    space_force = frame_convention_from_preset(FRAME_CONVENTION_PRESET_SPACE_FORCE)
+
+    assert game_runner._guided_tutorial_stage_hint(stage, runtime).startswith("Hold D for +I")
+    assert game_runner._guided_tutorial_stage_hint(stage, runtime, frame_convention=space_force).startswith(
+        "Hold A for +I"
+    )
+
 
 def test_guided_tutorial_target_path_applies_requested_burn() -> None:
     rel0 = np.array([0.0, -0.8, 0.0, 0.0, 0.0, 0.0], dtype=float)

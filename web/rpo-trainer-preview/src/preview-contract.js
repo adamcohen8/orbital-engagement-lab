@@ -35,11 +35,11 @@ export const PREVIEW_LEVEL_CONTRACTS = deepFreeze({
       "Browser preview of downloadable Level 0. The full trainer adds the complete scenario-backed catalog, difficulty and progress tracking, recordings, and full debriefs.",
   },
   sandbox: {
-    title: "Reduced Circular-Orbit Sandbox",
-    operator_title: "Reduced Operator Sandbox",
+    title: "Sandbox",
+    operator_title: "Operator Sandbox",
     max_time_s: 20000.0,
     scope:
-      "Reduced circular-orbit browser sandbox. The downloadable Sandbox also edits the target orbit and eccentricity and supports elliptical prediction.",
+      "Browser Sandbox mirrors the downloadable preflight fields for target classical orbital elements and chaser RIC state, then applies them to deterministic two-body propagation.",
   },
   pursuit_arcade: {
     title: "Pursuit Arcade",

@@ -56,6 +56,69 @@ def test_opposing_ric_translation_keys_cancel_axis() -> None:
     assert game_runner._opposing_key_axis(FakeKeys({"d", "a"}), positive_key="d", negative_key="a") == 0.0
 
 
+def test_space_force_ric_input_flips_a_and_d_without_changing_attitude_yaw() -> None:
+    class FakeKeys:
+        def __init__(self, pressed: set[str]) -> None:
+            self.pressed = pressed
+
+        def __getitem__(self, key):
+            return key in self.pressed
+
+    class FakePygame:
+        QUIT = "quit"
+        KEYDOWN = "keydown"
+        K_w = "w"
+        K_s = "s"
+        K_d = "d"
+        K_a = "a"
+        K_RIGHT = "right"
+        K_LEFT = "left"
+        K_SPACE = "space"
+        K_r = "r"
+        K_m = "m"
+
+        class event:
+            @staticmethod
+            def get():
+                return []
+
+        class key:
+            pressed = {"d"}
+
+            @classmethod
+            def get_pressed(cls):
+                return FakeKeys(cls.pressed)
+
+    space_force = frame_convention_from_preset(FRAME_CONVENTION_PRESET_SPACE_FORCE)
+    state = KeyboardCommandState()
+
+    game_runner._poll_pygame_input(
+        FakePygame,
+        state,
+        control_mode="ric_translation",
+        frame_convention=space_force,
+    )
+    assert state.yaw == -1.0
+
+    FakePygame.key.pressed = {"a"}
+    game_runner._poll_pygame_input(
+        FakePygame,
+        state,
+        control_mode="ric_translation",
+        frame_convention=space_force,
+    )
+    assert state.yaw == 1.0
+
+    FakePygame.key.pressed = {"d"}
+    game_runner._poll_pygame_input(
+        FakePygame,
+        state,
+        control_mode="attitude_thrust",
+        frame_convention=space_force,
+    )
+    assert state.yaw == 1.0
+
+
 def test_speed_multiple_converts_sim_dt_to_wall_step() -> None:
     assert game_runner._wall_step_s(10.0, 10.0) == 1.0
     assert game_runner._wall_step_s(0.25, 2.0) == 0.125
@@ -213,13 +276,20 @@ def test_command_status_uses_capitalized_indicators() -> None:
     ric_status = game_runner._command_status(KeyboardCommandState(paused=True, yaw=1.0), control_mode="ric_translation")
     attitude_status = game_runner._command_status(KeyboardCommandState(firing=False), control_mode="attitude_thrust")
 
-    assert ric_status == "W/S R  A/D I  Left/Right C  C Camera  O/P ECI  M Music"
+    assert ric_status == "W/S R  A -I / D +I  Left/Right C  C Camera  O/P ECI  M Music"
     assert "M Music" in ric_status
     assert "PAUSED" not in ric_status
     assert "Throttle=" not in ric_status
     assert "W/S Pitch" in attitude_status
     assert "Space Fire" in attitude_status
     assert "Thrust=Coast" in attitude_status
+
+    space_force_status = game_runner._command_status(
+        KeyboardCommandState(),
+        control_mode="ric_translation",
+        frame_convention=frame_convention_from_preset(FRAME_CONVENTION_PRESET_SPACE_FORCE),
+    )
+    assert "A +I / D -I" in space_force_status
 
 
 def test_operator_command_status_shows_next_burn_instead_of_keyboard_controls() -> None:

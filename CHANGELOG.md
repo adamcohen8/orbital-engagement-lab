@@ -6,6 +6,33 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.27.3 - 2026-08-26
+
+Release thesis: `v0.27.3` aligns RPO frame controls and Sandbox setup across
+the downloadable game, web preview, and Duel while hardening the
+mission-recovery planner against unsupported sampled transfer states. It also
+polishes the responsive preview launcher and gameplay HUD without changing the
+deterministic physics boundary.
+
+### Fixed
+
+- Reject unsupported post-transfer Lambert grid points individually instead
+  of aborting mission-recovery planning; retain valid analytical and transfer
+  candidates and record structured rejection counts, warnings, and a review-
+  store warning event.
+- Keep preview launcher actions inside the header across desktop and narrow
+  layouts, and keep the Sandbox HUD and touch controls usable on short mobile
+  landscape viewports.
+
+### Changed
+
+- Align Space Force and OEL in-track control conventions across the
+  downloadable game, web Sandbox, and RPO Duel, with explicit frame controls
+  and contract coverage.
+- Bring the web Sandbox preflight and setup flow into parity with the
+  downloadable trainer while preserving deterministic runtime inputs and the
+  public export boundary.
+
 ## 0.27.2 - 2026-08-24
 
 Release thesis: `v0.27.2` hardens public agent workflows from an independent

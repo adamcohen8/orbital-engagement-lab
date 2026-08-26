@@ -23,23 +23,26 @@ http://localhost:8765
 - Persistent Browser Preview framing plus a direct link to the full trainer's
   installation guide.
 - Computer-preview Pilot/Operator Preview selector for Tutorial and Sandbox.
-  Operator mode scripts impulsive RIC burns and shows the planned HCW preview
-  before playback.
+  Operator mode scripts impulsive RIC burns and shows the planned deterministic
+  trajectory before playback.
 - Coordinate-frame convention toggle for OEL Default and Space Force-style
-  positive in-track display, persisted in local browser storage.
+  positive in-track display, persisted in local browser storage and carried
+  into RPO Duel through its launch and return URLs.
 - Automatic mobile/computer layout detection with manual view switching.
 - Tutorial mode based on the Level 0 RIC-control lesson.
-- Reduced circular-orbit sandbox mode with preset starts, range, drift, reset,
-  and randomize. The downloadable Sandbox additionally supports target-orbit
-  and eccentricity editing plus elliptical prediction.
+- Sandbox preflight matching the downloadable field contract: all six target
+  classical orbital elements plus all six chaser target-centered RIC position
+  and relative-rate values. Pilot and Operator Sandbox apply the edited values
+  before simulation or burn planning and use deterministic two-body propagation.
 - Web-only Pursuit Arcade multi-round gameplay with deterministic replay
   validation. Pursuit Arcade is intentionally not listed in the downloadable
   trainer launcher.
 - Mobile-friendly portrait and landscape controls with compact speed-multiple
   buttons, explicit camera toggling, and long-press selection suppression.
-- RI and RC canvas plots with HCW-style projection for tutorial/sandbox and
-  browser-native arcade projections for Pursuit Arcade, including stable goal
-  rings and exact pass-tick clear range reporting.
+- RI and RC canvas plots with HCW projection for the circular tutorial,
+  target-orbit-aware Sandbox projection, and browser-native arcade projections
+  for Pursuit Arcade, including stable goal rings and exact pass-tick clear
+  range reporting.
 - Keyboard controls for computer users and touch controls for mobile users.
 - Browser-started music matched to each mode.
 - Hosted leaderboard submission hooks with optional email ownership
@@ -86,6 +89,8 @@ The checked-in browser contract fixtures are generated from the downloadable
 Level 0, Sandbox, and Pursuit Arcade scenario YAML. Level 0 reference
 trajectories are generated with OEL's two-body engine and compared against the
 browser HCW integrator at the tolerance documented in `docs/physics-contract.md`.
+Sandbox contract checks also pin the downloadable setup field order, defaults,
+numeric bounds, and RIC velocity unit conversion.
 
 Run the complete preview check from this directory:
 

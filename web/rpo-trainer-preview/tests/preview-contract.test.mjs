@@ -14,6 +14,7 @@ const trajectories = JSON.parse(
 );
 const previewHtml = readFileSync(new URL("../index.html", import.meta.url), "utf8");
 const previewApp = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+const previewStyles = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
 
 function tutorialComparable(contract) {
   return {
@@ -84,12 +85,12 @@ test("Pursuit Arcade browser constants match the checked-in OEL scenario contrac
   );
 });
 
-test("the browser Sandbox truthfully identifies its reduced scope", () => {
+test("the browser Sandbox identifies its mirrored preflight scope", () => {
   assert.equal(downloadable.sandbox.supports_target_orbit_edit, true);
   assert.equal(downloadable.sandbox.supports_target_eccentricity, true);
-  assert.match(PREVIEW_LEVEL_CONTRACTS.sandbox.title, /Reduced/);
-  assert.match(PREVIEW_LEVEL_CONTRACTS.sandbox.scope, /downloadable Sandbox/i);
-  assert.match(PREVIEW_LEVEL_CONTRACTS.sandbox.scope, /target orbit and eccentricity/i);
+  assert.equal(PREVIEW_LEVEL_CONTRACTS.sandbox.title, "Sandbox");
+  assert.match(PREVIEW_LEVEL_CONTRACTS.sandbox.scope, /mirrors the downloadable preflight fields/i);
+  assert.match(PREVIEW_LEVEL_CONTRACTS.sandbox.scope, /target classical orbital elements and chaser RIC state/i);
 });
 
 test("Pursuit Arcade is explicitly identified as web-only", () => {
@@ -116,6 +117,8 @@ test("browser HCW paths remain within tolerance of OEL Level 0 two-body referenc
 });
 
 test("RPO Duel appears in the selector as a hosted Beta destination", () => {
+  assert.match(previewHtml, /styles\.css\?v=web-preview-sandbox-landscape-2026-08-25/);
+  assert.match(previewHtml, /src\/app\.js\?v=web-preview-frame-controls-2026-08-25/);
   assert.match(previewHtml, /data-level-option="rpoDuel"/);
   assert.match(previewHtml, /level-beta-badge">Beta</);
   assert.match(
@@ -125,10 +128,90 @@ test("RPO Duel appears in the selector as a hosted Beta destination", () => {
   assert.match(previewApp, /id: "rpoDuel"/);
   assert.match(previewApp, /mode: "external"/);
   assert.match(previewApp, /externalUrl: RPO_DUEL_URL/);
-  assert.match(previewApp, /window\.location\.assign\(option\.externalUrl\)/);
+  assert.match(previewApp, /destination\.searchParams\.set\("frame_convention", state\.frameConvention\)/);
+  assert.match(previewApp, /window\.location\.assign\(destination\.href\)/);
   assert.match(previewHtml, /Four focused experiences/);
   assert.match(previewHtml, /Hosted PvP \/ computer match/);
   assert.match(previewApp, /choose Play computer/);
   assert.match(previewApp, /automatic 200x coast and 10x maneuver time rails/);
   assert.doesNotMatch(previewApp, /automatic 100x coast/);
+});
+
+test("frame convention keeps spatial controls fixed while swapping in-track commands", () => {
+  assert.match(previewApp, /const i = displayAxisSign\("i"\) \* axisValue\("d", "a", "iPlus", "iMinus"\)/);
+  assert.match(previewApp, /positiveOnRight \? "-I" : "\+I"/);
+  assert.match(previewApp, /positiveOnRight \? "\+I" : "-I"/);
+  assert.match(previewApp, /stage\.sign \* displayAxisSign\("i"\) > 0 \? "D" : "A"/);
+  assert.match(previewApp, /"A \+I \/ D -I"/);
+});
+
+test("mobile landscape selector reserves enough width for the product title", () => {
+  assert.match(
+    previewStyles,
+    /@media \(orientation: landscape\) and \(max-height: 520px\)[\s\S]*?\.launcher-header \{[\s\S]*?grid-template-columns: minmax\(0, 1fr\) repeat\(4, 94px\);/,
+  );
+  assert.match(
+    previewStyles,
+    /@media \(orientation: landscape\) and \(max-height: 520px\)[\s\S]*?\.sandbox-setup-screen \{[\s\S]*?width: 100%;/,
+  );
+  assert.match(
+    previewStyles,
+    /\.trainer-shell\.sandbox-setup-mode \{[\s\S]*?grid-template-columns: minmax\(0, 1fr\);[\s\S]*?grid-template-areas: "setup";/,
+  );
+});
+
+test("computer preview keeps its launcher actions on the title row at sidebar widths", () => {
+  assert.match(
+    previewStyles,
+    /@media \(min-width: 901px\) and \(max-width: 1120px\)[\s\S]*?\.launcher-actions \{[^}]*grid-column: 3;[^}]*grid-row: 1;/,
+  );
+  assert.doesNotMatch(
+    previewStyles,
+    /@media \(min-width: 901px\) and \(max-width: 1120px\)[\s\S]*?\.launcher-actions \{[^}]*grid-row: 3;/,
+  );
+});
+
+test("mobile landscape gameplay HUD can shrink without clipping its controls", () => {
+  assert.match(
+    previewStyles,
+    /\.trainer-shell\.mode-sandbox \.hud-panel \{\s+grid-template-columns: minmax\(0, 1\.7fr\) minmax\(0, 1fr\);/,
+  );
+  assert.doesNotMatch(
+    previewStyles,
+    /\.trainer-shell\.mode-sandbox \.hud-panel \{\s+grid-template-columns: minmax\(275px,[^\n]+minmax\(160px,/,
+  );
+});
+
+test("Sandbox launches through the mirrored preflight form before simulation or operator planning", () => {
+  const fieldKeys = [...previewHtml.matchAll(/data-sandbox-field="([^"]+)"/g)].map((match) => match[1]);
+  assert.deepEqual(fieldKeys, [
+    "target_a_km",
+    "target_ecc",
+    "target_inc_deg",
+    "target_raan_deg",
+    "target_argp_deg",
+    "target_true_anomaly_deg",
+    "radial_km",
+    "in_track_km",
+    "cross_track_km",
+    "radial_rate_m_s",
+    "in_track_rate_m_s",
+    "cross_track_rate_m_s",
+  ]);
+  assert.match(previewHtml, /id="sandboxSetupForm"/);
+  assert.match(previewHtml, /id="sandboxSetupContinue"/);
+  assert.match(previewHtml, /data-sandbox-setup-step="target"/);
+  assert.match(previewHtml, /data-sandbox-setup-step="chaser"/);
+  assert.match(previewHtml, /sandbox-group-title-compact">Target Orbit \(COEs\)</);
+  assert.match(previewHtml, /sandbox-group-title-compact">Chaser RIC State/);
+  assert.doesNotMatch(previewHtml, /id="presetSelect"|id="rangeSlider"|id="randomSandbox"/);
+  assert.match(
+    previewStyles,
+    /@media \(orientation: portrait\) and \(max-width: 760px\)[\s\S]*?\.sandbox-setup-steps \{[\s\S]*?display: grid;[\s\S]*?data-sandbox-step="target"[\s\S]*?\.sandbox-chaser-group/,
+  );
+  assert.match(previewApp, /function advanceSandboxSetupStep\(\)/);
+  assert.match(previewApp, /setSandboxSetupStep\("chaser", \{ focus: true \}\)/);
+  assert.match(previewApp, /if \(option\.id === "sandbox"\) \{\s+showSandboxSetup\(\{ source \}\);/);
+  assert.match(previewApp, /state\.sandboxSetup = result\.value;[\s\S]*?setMode\(mode\);/);
+  assert.match(previewApp, /sandboxPhysics: sandboxExperienceActive\(\) \? "two_body_target_relative" : "hcw"/);
 });
