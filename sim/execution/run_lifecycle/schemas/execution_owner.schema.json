@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.orbitalengagementlab.com/oel.execution-owner.v1.json",
+  "title": "OEL Execution Owner v1",
+  "type": "object",
+  "required": ["schema_version", "run_id", "owner_token", "pid", "host_sha256", "status", "started_at", "updated_at", "heartbeat_interval_s", "stale_after_s", "owner_sha256"],
+  "properties": {
+    "schema_version": {"const": "oel.execution-owner.v1"},
+    "run_id": {"type": "string", "format": "uuid"},
+    "owner_token": {"type": "string", "minLength": 1},
+    "pid": {"type": "integer", "minimum": 1},
+    "host_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "status": {"enum": ["active", "exited"]},
+    "started_at": {"type": "string"},
+    "updated_at": {"type": "string"},
+    "heartbeat_interval_s": {"type": "number", "exclusiveMinimum": 0},
+    "stale_after_s": {"type": "number", "exclusiveMinimum": 0},
+    "owner_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  },
+  "additionalProperties": false
+}

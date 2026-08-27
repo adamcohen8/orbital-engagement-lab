@@ -5,6 +5,7 @@ import {
   DEFAULT_SANDBOX_SETUP,
   SANDBOX_CHASER_FIELDS,
   SANDBOX_TARGET_FIELDS,
+  sandboxProjectionModel,
   sandboxRelativeSeed,
   sandboxTargetCoes,
   validateSandboxSetup,
@@ -75,4 +76,13 @@ test("Sandbox setup maps target COEs and chaser RIC rates without changing units
     id: -0.003,
     cd: 0.0005,
   });
+});
+
+test("Sandbox projection selects TH for every nonzero eccentricity", () => {
+  assert.equal(sandboxProjectionModel({ ...DEFAULT_SANDBOX_SETUP, target_ecc: 0 }), "two_body");
+  assert.equal(
+    sandboxProjectionModel({ ...DEFAULT_SANDBOX_SETUP, target_ecc: Number.MIN_VALUE }),
+    "tschauner_hempel",
+  );
+  assert.equal(sandboxProjectionModel({ ...DEFAULT_SANDBOX_SETUP, target_ecc: 0.12 }), "tschauner_hempel");
 });

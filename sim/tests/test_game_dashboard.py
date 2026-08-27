@@ -52,6 +52,8 @@ def test_coast_prediction_model_aliases_support_elliptic_levels() -> None:
     assert game_pygame_dashboard._coast_prediction_model_key("HCW") == "hcw"
     assert game_pygame_dashboard._coast_prediction_model_key("elliptic") == "elliptic_linear"
     assert game_pygame_dashboard._coast_prediction_model_key("Tschauner-Hempel") == "tschauner_hempel"
+    assert game_pygame_dashboard._coast_prediction_model_key("Yamanaka-Ankersen") == "yamanaka_ankersen"
+    assert game_pygame_dashboard._coast_prediction_model_key("YA") == "yamanaka_ankersen"
     assert game_pygame_dashboard._cr3bp_projection_mode_key("STM") == "linearized"
     assert game_pygame_dashboard._cr3bp_projection_mode_key("linearized") == "linearized"
     assert game_pygame_dashboard._cr3bp_projection_mode_key("nonlinear") == "nonlinear"
@@ -69,7 +71,7 @@ def test_elliptic_dashboard_true_anomaly_indicator_uses_target_state() -> None:
         }
     )
     dashboard = object.__new__(PygameRPODashboard)
-    dashboard.coast_prediction_model = "tschauner_hempel"
+    dashboard.coast_prediction_model = "yamanaka_ankersen"
     dashboard.target_true_anomaly_deg = game_pygame_dashboard._true_anomaly_deg_from_state(
         np.hstack((target_r, target_v))
     )
@@ -1451,7 +1453,7 @@ def test_dashboard_uses_elliptic_prediction_model_when_configured(monkeypatch: p
     dashboard.coast_prediction_orbit_fraction = None
     dashboard.coast_prediction_horizon_s = 120.0
     dashboard.coast_prediction_dt_s = 60.0
-    dashboard.coast_prediction_model = "tschauner_hempel"
+    dashboard.coast_prediction_model = "yamanaka_ankersen"
     rel0 = np.array([0.1, -1.0, 0.2, 0.0, 0.001, -0.001], dtype=float)
     calls: list[float] = []
     original = game_pygame_dashboard.ya_closed_form_transition_matrix

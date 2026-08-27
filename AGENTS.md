@@ -80,6 +80,13 @@ that guide.
   writers. Do not invent shortcut physics in agent scripts or reports.
 - Prefer the review store query API over ad hoc parsing of large run logs when
   `review/run.sqlite` is available.
+- For a trusted deterministic single-scenario OEL run expected to take about
+  30 seconds or longer, prefer the durable lifecycle: use `oel runs start`,
+  retain its full accepted handle, perform one bounded `oel runs await`, and
+  identity-bind both await and inspect with the accepted manifest reference and
+  normalized-config digest before reading simulation evidence. See
+  `docs/agent-run-lifecycle.md`. Do not use the lifecycle for arbitrary commands
+  or release workflows.
 - Use `python -m sim.agent_task` when a bundled recipe, comparison,
   standard plot, or portable `agent_evidence_packet.json` would make the
   workflow more reproducible.

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.orbitalengagementlab.com/oel.run-state.v1.json",
+  "title": "OEL Run State v1",
+  "type": "object",
+  "required": ["schema_version", "run_id", "manifest_ref", "state", "terminal", "sequence", "phase", "manifest_sha256"],
+  "properties": {
+    "schema_version": {"const": "oel.run-state.v1"},
+    "run_id": {"type": "string", "format": "uuid"},
+    "manifest_ref": {"type": "string", "pattern": "^oel-run-ref:[0-9a-f]{64}$"},
+    "state": {"enum": ["accepted", "starting", "running", "finalizing", "cancelling", "completed", "failed", "cancelled", "interrupted"]},
+    "terminal": {"type": "boolean"},
+    "sequence": {"type": "integer", "minimum": 1},
+    "phase": {"enum": ["accepted", "materializing", "executing", "collecting_artifacts", "committing_terminal_state"]},
+    "manifest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  },
+  "additionalProperties": true
+}

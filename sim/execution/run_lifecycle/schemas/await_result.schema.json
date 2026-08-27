@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.orbitalengagementlab.com/oel.await-result.v1.json",
+  "title": "OEL Await Result v1",
+  "type": "object",
+  "required": ["schema_version", "outcome", "run_id", "wait_requested_s", "wait_observed_s", "run_state_changed"],
+  "properties": {
+    "schema_version": {"const": "oel.await-result.v1"},
+    "outcome": {"enum": ["terminal", "event", "still_running", "owner_lost", "not_found", "identity_mismatch", "malformed_state", "observer_error"]},
+    "run_id": {"type": "string"},
+    "wait_requested_s": {"type": "number", "minimum": 0, "maximum": 3600},
+    "wait_observed_s": {"type": "number", "minimum": 0},
+    "run_state_changed": {"const": false}
+  },
+  "additionalProperties": true
+}

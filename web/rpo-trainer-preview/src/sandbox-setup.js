@@ -88,3 +88,7 @@ export function sandboxTargetCoes(setup = DEFAULT_SANDBOX_SETUP) {
 export function sandboxOrbitPeriodS(setup = DEFAULT_SANDBOX_SETUP, muKm3S2 = 398600.4418) {
   return 2 * Math.PI * Math.sqrt(Number(setup.target_a_km) ** 3 / Number(muKm3S2));
 }
+
+export function sandboxProjectionModel(setup = DEFAULT_SANDBOX_SETUP) {
+  return Number(setup.target_ecc) === 0 ? "two_body" : "tschauner_hempel";
+}

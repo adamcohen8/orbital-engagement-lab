@@ -90,6 +90,14 @@ worth sending upstream. Use `docs/agent-task-cards.md` for the repeatable
 public agent task-card set; task cards are evaluation fixtures, not the
 boundary of what agents can help users do.
 
+For a long trusted single-scenario run, use `docs/agent-run-lifecycle.md`.
+Preserve the accepted handle, perform a bounded await, and inspect the durable
+terminal manifest before reading simulation evidence. Treat wake notification
+as a reason to inspect committed state, never as evidence that the physics run
+passed. If await reports `owner_lost`, use the explicit `reconcile` operation
+to commit `interrupted`; await itself remains read-only. Do not use the
+lifecycle as an arbitrary command runner.
+
 ## Public Code Navigation
 
 OEL keeps established import modules as compatibility façades while focused
@@ -143,6 +151,13 @@ Run smoke test:
 
 ```bash
 python -m pytest sim/tests/test_oel_agents.py
+```
+
+Start and await a trusted foreground run:
+
+```bash
+oel runs start --config configs/automation_smoke.yaml --output-dir agent-smoke --jsonl
+oel runs await RUN_ID --timeout 900
 ```
 
 Scaffold and inspect a public FSW candidate:

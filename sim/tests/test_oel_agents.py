@@ -110,10 +110,17 @@ def test_public_agent_docs_define_boundaries_and_commands() -> None:
     review_queries = (ROOT / "docs" / "agent-review-queries.md").read_text(encoding="utf-8")
     feedback_loop = (ROOT / "docs" / "agent-feedback-loop.md").read_text(encoding="utf-8")
     task_cards = (ROOT / "docs" / "agent-task-cards.md").read_text(encoding="utf-8")
+    root_agents_normalized = " ".join(root_agents.split())
 
     assert "orchestrate documented workflows" in root_agents
     assert "python run_simulation.py --config <path> --validate-only" in root_agents
     assert "docs/installation.md" in root_agents
+    assert "docs/agent-run-lifecycle.md" in root_agents
+    assert "oel runs start" in root_agents
+    assert "oel runs await" in root_agents
+    assert "accepted manifest reference" in root_agents
+    assert "normalized-config digest" in root_agents
+    assert "arbitrary commands or release workflows" in root_agents_normalized
     assert "Scenario Generation Rules" in public_agents
     assert "ordinary-language request -> scenario YAML -> validate -> run" in public_agents
     assert "Natural User Requests" in public_agents

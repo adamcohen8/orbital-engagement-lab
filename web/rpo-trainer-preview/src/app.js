@@ -4,11 +4,9 @@ import {
   DEFAULT_PURSUIT_CHALLENGE,
   ellipticLinearCoastStates,
   gameTickDtS,
-  keplerianToEci,
   relativeRicState,
   stateFromRelativeRic,
   stepControlledTwoBodyPair,
-  stepTwoBodyState,
   validateAttemptPacket,
 } from "./competition/arcade-engine.js";
 import { PREVIEW_LEVEL_CONTRACTS } from "./preview-contract.js";
@@ -24,11 +22,15 @@ import {
   DEFAULT_SANDBOX_SETUP,
   SANDBOX_SETUP_FIELDS,
   sandboxOrbitPeriodS,
+  sandboxProjectionModel,
   sandboxRelativeSeed,
   sandboxSetupInputValues,
-  sandboxTargetCoes,
   validateSandboxSetup,
 } from "./sandbox-setup.js";
+import {
+  sandboxEllipticLinearCoastStates,
+  sandboxTargetStateAt,
+} from "./sandbox-projection.js";
 
 const ORBIT_PERIOD_S = (2 * Math.PI) / MEAN_MOTION;
 const MAX_STEPS_PER_FRAME = 32;
@@ -1285,20 +1287,9 @@ function sandboxSeed() {
   return sandboxRelativeSeed(state.sandboxSetup);
 }
 
-function sandboxTargetStateAt(timeS = 0) {
-  let target = keplerianToEci(sandboxTargetCoes(state.sandboxSetup), MU);
-  let remainingS = Math.max(Number(timeS || 0), 0);
-  while (remainingS > 1.0e-9) {
-    const dtS = Math.min(remainingS, 60);
-    target = stepTwoBodyState(target, MU, dtS);
-    remainingS -= dtS;
-  }
-  return target;
-}
-
 function sandboxPairFromSeed(seed) {
   const timeS = Math.max(Number(seed?.t || 0), 0);
-  const target = sandboxTargetStateAt(timeS);
+  const target = sandboxTargetStateAt(state.sandboxSetup, timeS, MU);
   const chaser = stateFromRelativeRic(target, {
     r_km: Number(seed?.r || 0),
     i_km: Number(seed?.i || 0),
@@ -1345,6 +1336,15 @@ function sandboxCoastPoint(seed, durationS) {
   const pair = sandboxPairFromSeed(seed);
   const nextPair = stepSandboxPair(pair, durationS);
   return sandboxPairRelativeState(nextPair, seed);
+}
+
+function sandboxEllipticProjectionActive() {
+  return sandboxProjectionModel(state.sandboxSetup) === "tschauner_hempel";
+}
+
+function sandboxProjectionCoastPoint(seed, durationS) {
+  if (!sandboxEllipticProjectionActive()) return sandboxCoastPoint(seed, durationS);
+  return sandboxEllipticLinearCoastStates(state.sandboxSetup, seed, [durationS], MU)[0] || { ...seed };
 }
 
 function currentOrbitPeriodS() {
@@ -2343,6 +2343,9 @@ function buildOperatorPreviewArtifacts(seed, burns) {
 }
 
 function buildSandboxOperatorPreviewArtifacts(seed, burns) {
+  if (sandboxEllipticProjectionActive()) {
+    return buildSandboxEllipticOperatorPreviewArtifacts(seed, burns);
+  }
   const validBurns = Array.isArray(burns) ? burns : [];
   const horizonS = operatorPlaybackEndS(validBurns);
   const sampleCount = Math.max(2, OPERATOR_PREVIEW_POINTS);
@@ -2376,6 +2379,31 @@ function buildSandboxOperatorPreviewArtifacts(seed, burns) {
   return { path, markers };
 }
 
+function buildSandboxEllipticOperatorPreviewArtifacts(seed, burns) {
+  const validBurns = Array.isArray(burns) ? burns : [];
+  const horizonS = operatorPlaybackEndS(validBurns);
+  const sampleCount = Math.max(2, OPERATOR_PREVIEW_POINTS);
+  const path = [];
+  const markers = [];
+  let segmentSeed = { ...seed, t: 0 };
+  let burnIdx = 0;
+  for (let idx = 0; idx < sampleCount; idx += 1) {
+    const absoluteTimeS = (horizonS * idx) / (sampleCount - 1);
+    while (burnIdx < validBurns.length && validBurns[burnIdx].timeS <= absoluteTimeS) {
+      const burn = validBurns[burnIdx];
+      segmentSeed = sandboxProjectionCoastPoint(segmentSeed, burn.timeS - segmentSeed.t);
+      segmentSeed.rd += burn.rMps / 1000;
+      segmentSeed.id += burn.iMps / 1000;
+      segmentSeed.cd += burn.cMps / 1000;
+      segmentSeed.t = burn.timeS;
+      markers.push({ ...segmentSeed, burnIndex: burnIdx + 1, timeS: burn.timeS });
+      burnIdx += 1;
+    }
+    path.push(sandboxProjectionCoastPoint(segmentSeed, absoluteTimeS - segmentSeed.t));
+  }
+  return { path, markers };
+}
+
 function operatorPlaybackEndS(burns = state.operatorPlan) {
   const lastBurnS = burns.length > 0 ? Math.max(...burns.map((burn) => burn.timeS)) : 0;
   const orbitPeriodS = currentOrbitPeriodS();
@@ -2394,6 +2422,14 @@ function predictGhost(seed, horizonS, samples) {
 }
 
 function predictSandboxGhost(seed, horizonS, samples) {
+  if (sandboxEllipticProjectionActive()) {
+    return sandboxEllipticLinearCoastStates(
+      state.sandboxSetup,
+      seed,
+      ghostTimes(horizonS, samples),
+      MU,
+    );
+  }
   const ghost = [];
   const count = Math.max(Math.floor(samples), 2);
   let pair = sandboxPairFromSeed(seed);

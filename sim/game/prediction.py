@@ -119,12 +119,24 @@ def _coast_prediction_model_key(value: str) -> str:
         "cr3bp_rotating": "cr3bp",
         "tschauner_hempel": "tschauner_hempel",
         "th": "tschauner_hempel",
+        "yamanaka_ankersen": "yamanaka_ankersen",
+        "ya": "yamanaka_ankersen",
         "ts": "ts",
         "elliptic": "elliptic_linear",
         "elliptical": "elliptic_linear",
         "elliptic_linear": "elliptic_linear",
     }
     return aliases.get(key, key or "hcw")
+
+
+ELLIPTIC_PREDICTION_MODELS = frozenset(
+    {
+        "elliptic_linear",
+        "tschauner_hempel",
+        "ts",
+        "yamanaka_ankersen",
+    }
+)
 
 
 def _cr3bp_projection_mode_key(value: str) -> str:

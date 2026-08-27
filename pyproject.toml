@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "orbital-engagement-lab"
-version = "0.27.4"
+version = "0.28.0"
 description = "Integrated spacecraft simulation and analysis platform for rendezvous, control, validation, and mission prototyping."
 readme = "README.md"
 requires-python = ">=3.10,<3.15"
@@ -115,6 +115,7 @@ sim = [
   "interchange/examples/*.json",
   "interchange/examples/*.md",
   "installation/schemas/*.json",
+  "execution/run_lifecycle/schemas/*.json",
   "fsw_authoring/schemas/*.json",
   "scale/schemas/*.json",
   "*/data/*.txt",

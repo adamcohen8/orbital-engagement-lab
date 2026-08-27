@@ -723,11 +723,10 @@ class DashboardPredictionMixin:
         return prediction
 
     def _uses_elliptic_prediction_model(self) -> bool:
-        return _coast_prediction_model_key(getattr(self, "coast_prediction_model", "hcw")) in {
-            "elliptic_linear",
-            "tschauner_hempel",
-            "ts",
-        }
+        return (
+            _coast_prediction_model_key(getattr(self, "coast_prediction_model", "hcw"))
+            in ELLIPTIC_PREDICTION_MODELS
+        )
 
     def _uses_cr3bp_prediction_model(self) -> bool:
         return _coast_prediction_model_key(getattr(self, "coast_prediction_model", "hcw")) in {
@@ -947,11 +946,10 @@ class DashboardPredictionMixin:
         dt = float(max(self.coast_prediction_dt_s, 1.0e-6))
         point_cap = max(int(max_draw_points or self._presentation_ghost_draw_points()), 2)
         times = _front_loaded_prediction_times(horizon, dt, max_points=point_cap)
-        if _coast_prediction_model_key(getattr(self, "coast_prediction_model", "hcw")) in {
-            "elliptic_linear",
-            "tschauner_hempel",
-            "ts",
-        }:
+        if (
+            _coast_prediction_model_key(getattr(self, "coast_prediction_model", "hcw"))
+            in ELLIPTIC_PREDICTION_MODELS
+        ):
             reference_state = getattr(self, "reference_state_eci", None)
             if reference_state is not None:
                 reference = np.array(reference_state, dtype=float).reshape(6)
