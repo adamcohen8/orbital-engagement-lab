@@ -42,9 +42,14 @@ state values. The browser converts those values into target and chaser ECI
 states, propagates both under central Earth two-body gravity, and maps bounded
 manual RIC acceleration into ECI at each deterministic step. Operator previews
 and playback use the same configured target orbit and relative initial state.
+For a circular target, the displayed coast overlay retains the target-aware
+two-body projection. For any nonzero target eccentricity, Pilot and Operator
+coast overlays switch to the numerical Tschauner-Hempel linearized relative
+projection already used by the browser competition engine. Authoritative live
+motion remains the deterministic two-body pair propagation in both cases.
 
-This includes elliptical target orbits, but it remains a browser-native
-two-body model. It does not add OEL scenario loading, perturbations, estimator
+This includes elliptical target orbits, but it remains a browser-native model.
+It does not add OEL scenario loading, perturbations, estimator
 behavior, recordings, or OEL engine validation.
 
 ## Pursuit Arcade Model

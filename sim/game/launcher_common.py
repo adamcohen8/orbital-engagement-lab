@@ -30,6 +30,7 @@ from sim.game.operator import OperatorBurn, OperatorBurnPlan, parse_operator_bur
 from sim.game.presentation import PRESENTATION_MODES, normalize_presentation_mode
 from sim.game.pygame_dashboard import (
     CHASER_SPRITE_PATH,
+    ELLIPTIC_PREDICTION_MODELS,
     MIN_PLOT_SPAN_KM,
     PLOT_OVERLAY_MARGIN,
     TARGET_SPRITE_PATH,

@@ -699,7 +699,7 @@ def test_sandbox_setup_form_values_update_runtime_config() -> None:
     assert target.initial_state["coes"]["raan_deg"] == pytest.approx(40.0)
     assert target.initial_state["coes"]["argp_deg"] == pytest.approx(50.0)
     assert target.initial_state["coes"]["true_anomaly_deg"] == pytest.approx(45.0)
-    assert game_runner._game_coast_prediction_model(updated) == "tschauner_hempel"
+    assert game_runner._game_coast_prediction_model(updated) == "yamanaka_ankersen"
     assert game_runner._game_camera_rule_mode(updated) == "full_trajectory"
     assert game_runner._game_target_centered_plot_planes(updated) == ("RI", "RC")
     assert training_cfg.sandbox_mode is True
@@ -715,6 +715,14 @@ def test_sandbox_setup_form_values_update_runtime_config() -> None:
     session = SimulationSession.from_config(attempt_config)
     snapshot = session.step()
     assert {"target", "chaser"}.issubset(snapshot.truth)
+
+
+def test_sandbox_projection_switches_for_any_nonzero_eccentricity() -> None:
+    assert game_runner._sandbox_coast_prediction_model(SandboxSetupValues(target_ecc=0.0)) == "hcw"
+    assert (
+        game_runner._sandbox_coast_prediction_model(SandboxSetupValues(target_ecc=np.nextafter(0.0, 1.0)))
+        == "yamanaka_ankersen"
+    )
 
 
 def test_sandbox_setup_form_validation() -> None:

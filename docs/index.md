@@ -39,11 +39,12 @@ inspect OEL scenarios.
 1. [OEL Agents](oel-agents.md)
 2. [Agent Capability Routing And Golden Paths](agent-capability-routing.md)
 3. [Agent Task Runner](agent-task-runner.md)
-4. [Agent Task Cards](agent-task-cards.md)
-5. [Agent Review Query Recipes](agent-review-queries.md)
-6. [Agent Feedback Loop](agent-feedback-loop.md)
-7. [Agent Evaluation Packet](agent-evaluation-packet.md)
-8. [Supported Local MCP Surface](oel-mcp.md)
+4. [Agent Run Lifecycle: Tip And Nap](agent-run-lifecycle.md)
+5. [Agent Task Cards](agent-task-cards.md)
+6. [Agent Review Query Recipes](agent-review-queries.md)
+7. [Agent Feedback Loop](agent-feedback-loop.md)
+8. [Agent Evaluation Packet](agent-evaluation-packet.md)
+9. [Supported Local MCP Surface](oel-mcp.md)
 
 The root `AGENTS.md` and `agents/public/AGENTS.md` are the agent playbooks.
 The docs above explain the supporting workflow, evidence, evaluation, and
@@ -74,6 +75,7 @@ Start here when you already know the kind of work you want to run.
 | Explore the browser multiplayer Beta | [RPO Duel Beta](../RPO_DUEL.md) |
 | Use ML/RL wrappers | [ML/RL Policy Contracts](ml-rl-contracts.md) |
 | Connect a local MCP host | [Supported Local MCP Surface](oel-mcp.md) |
+| Start an agent run and await durable completion | [Agent Run Lifecycle](agent-run-lifecycle.md) |
 
 ## Pro Workspace User
 

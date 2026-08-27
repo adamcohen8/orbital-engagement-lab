@@ -884,7 +884,7 @@ def _sandbox_setup_from_config(config: SimulationConfig) -> SandboxSetupValues:
 
 
 def _sandbox_coast_prediction_model(setup: SandboxSetupValues) -> str:
-    return "hcw" if abs(float(setup.target_ecc)) <= 1.0e-12 else "tschauner_hempel"
+    return "hcw" if float(setup.target_ecc) == 0.0 else "yamanaka_ankersen"
 
 
 def _apply_sandbox_setup_to_config(config: SimulationConfig, setup: SandboxSetupValues) -> SimulationConfig:

@@ -322,7 +322,9 @@ Current implementation:
   coast-projection overlay used by the eccentric-orbit levels. The live trainer
   now uses a YA closed-form STM projection for this path, with the previous
   numerical TH-style projection retained as fallback; older circular levels
-  keep the HCW projection by default.
+  keep the HCW projection by default. Sandbox setup records
+  `yamanaka_ankersen` for every nonzero target eccentricity and `hcw` only for
+  an exactly circular target.
 - The Pygame view launches fullscreen, grabs input through SDL, and uses Escape
   as a reliable level-exit path. Selector-launched runs return to the level
   selector; direct config launches exit the game process.

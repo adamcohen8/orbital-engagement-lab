@@ -172,6 +172,8 @@ def _dispatch(command: str, arguments: list[str], *, paths: InstallationPaths, w
         argv.extend(["--doctor"] if command == "doctor" else arguments)
     elif command == "review":
         argv = [str(python), "-m", "sim.review", *arguments]
+    elif command == "runs":
+        argv = [str(python), "-m", "sim.execution.run_lifecycle", *arguments]
     elif command == "fsw":
         argv = [str(python), "-m", "sim.fsw_authoring"]
         if workspace_path is not None:
@@ -256,7 +258,7 @@ def _fswdk_available() -> bool:
 
 
 def _dispatch_commands() -> tuple[str, ...]:
-    commands = ["sim", "review", "fsw"]
+    commands = ["sim", "review", "runs", "fsw"]
     if _fswdk_available():
         commands.append("fswdk")
     commands.append("mcp")

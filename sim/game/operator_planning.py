@@ -1589,7 +1589,7 @@ def _operator_cr3bp_reference_coast_states(
 
 
 def _operator_uses_ya_planned_coast(coast_prediction_model: str) -> bool:
-    return _coast_prediction_model_key(coast_prediction_model) in {"elliptic_linear", "tschauner_hempel", "ts"}
+    return _coast_prediction_model_key(coast_prediction_model) in ELLIPTIC_PREDICTION_MODELS
 
 
 def _operator_reference_coast_states(chief_state_eci: np.ndarray | None, times_s: np.ndarray) -> np.ndarray:

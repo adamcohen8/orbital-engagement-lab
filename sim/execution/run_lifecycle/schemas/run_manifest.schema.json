@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.orbitalengagementlab.com/oel.run-manifest.v1.json",
+  "title": "OEL Run Manifest v1",
+  "type": "object",
+  "required": ["schema_version", "identity", "state", "sequence", "phase", "created_at", "updated_at", "execution", "artifacts", "review", "manifest_sha256"],
+  "properties": {
+    "schema_version": {"const": "oel.run-manifest.v1"},
+    "identity": {
+      "type": "object",
+      "required": ["run_id", "manifest_ref", "normalized_config_sha256", "validation_id", "output_dir", "resource_profile", "resource_plan_sha256", "execution_mode"],
+      "additionalProperties": true
+    },
+    "state": {"type": "string"},
+    "sequence": {"type": "integer", "minimum": 1},
+    "phase": {"type": "string"},
+    "created_at": {"type": "string"},
+    "updated_at": {"type": "string"},
+    "execution": {"type": "object"},
+    "artifacts": {"type": "object"},
+    "review": {"type": "object"},
+    "manifest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  },
+  "additionalProperties": true
+}

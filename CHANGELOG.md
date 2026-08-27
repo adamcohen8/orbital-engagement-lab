@@ -6,6 +6,50 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.28.0 - 2026-08-27
+
+Release thesis: `v0.28.0` makes deterministic agent runs and signed release
+workflows recoverable without weakening their fail-closed boundaries, migrates
+routine external orbit-reference evidence from live MATLAB dependencies to
+checksum-bound Orekit fixtures, and aligns eccentric Sandbox trajectory
+projections across the downloadable game and browser preview.
+
+### Added
+
+- Add a provider-neutral, foreground `oel runs` lifecycle with content-bound
+  handles, durable manifests and events, bounded await, owner heartbeats,
+  explicit lost-owner reconciliation, standard review evidence, and no daemon,
+  queue, retry, cancellation, or MCP dependency.
+- Add content-bound checkpoint and resume support for validation commands,
+  generated-public testing, release evidence, and signed installable builds.
+- Add provider-neutral external-reference manifests, pinned Orekit runtime
+  receipts, offline orbit/fixed-state/TLE fixtures, and retirement auditing that
+  preserves historical MATLAB evidence without relabeling its provenance.
+
+### Changed
+
+- Route every nonzero-eccentricity Sandbox projection through the elliptic
+  linear model in the downloadable game and the numerical Tschauner-Hempel
+  projection in the browser while retaining nonlinear two-body live motion.
+- Keep final live MATLAB-command deprecation pending until its replacement
+  gates pass from a clean committed checkout; saved external-reference lanes
+  remain non-release-blocking evidence with explicit claim boundaries.
+
+### Fixed
+
+- Exclude private external-reference migration tests from generated public
+  exports alongside the private validation implementation they exercise.
+- Recover a lifecycle transition lock only when its content is stable and its
+  recorded local owner process is no longer alive, allowing explicit
+  reconciliation to commit `interrupted` after a hard process loss.
+- Bind checkpointed files and directory trees to permission modes as well as
+  paths, sizes, and content digests so executable-bit drift invalidates reuse.
+- Run local public-release rehearsals through the same complete collection and
+  curated, measured public acceptance suite used by the candidate gate.
+- Keep Phase 4 checksum tests deterministic in partially provisioned private
+  workspaces while continuing to fail the explicit asset verifier when a full
+  declared bundle is incomplete.
+
 ## 0.27.4 - 2026-08-27
 
 Release thesis: `v0.27.4` refines the web trainer's mobile presentation without

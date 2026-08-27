@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.orbitalengagementlab.com/oel.run-handle.v1.json",
+  "title": "OEL Run Handle v1",
+  "type": "object",
+  "required": ["schema_version", "run_id", "state", "sequence", "manifest_ref", "normalized_config_sha256", "validation_id", "resource_profile", "authorization_disposition", "execution_mode"],
+  "properties": {
+    "schema_version": {"const": "oel.run-handle.v1"},
+    "run_id": {"type": "string", "format": "uuid"},
+    "state": {"const": "accepted"},
+    "sequence": {"const": 1},
+    "created_at": {"type": "string"},
+    "manifest_ref": {"type": "string", "pattern": "^oel-run-ref:[0-9a-f]{64}$"},
+    "normalized_config_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "validation_id": {"type": "string"},
+    "resource_profile": {"const": "laptop-safe"},
+    "authorization_disposition": {"const": "explicit_local_invocation"},
+    "execution_mode": {"const": "foreground"}
+  },
+  "additionalProperties": true
+}

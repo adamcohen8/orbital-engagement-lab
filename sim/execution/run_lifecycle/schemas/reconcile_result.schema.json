@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.orbitalengagementlab.com/oel.reconcile-result.v1.json",
+  "title": "OEL Reconcile Result v1",
+  "type": "object",
+  "required": ["schema_version", "outcome", "run_id", "run_state_changed"],
+  "properties": {
+    "schema_version": {"const": "oel.reconcile-result.v1"},
+    "outcome": {"enum": ["interrupted", "already_terminal", "owner_active", "no_owner", "owner_unverifiable", "transition_race", "not_found", "identity_mismatch", "malformed_state", "observer_error"]},
+    "run_id": {"type": "string"},
+    "state": {"type": ["object", "null"]},
+    "owner": {"type": ["object", "null"]},
+    "error": {"type": ["object", "null"]},
+    "run_state_changed": {"type": "boolean"}
+  },
+  "additionalProperties": true
+}

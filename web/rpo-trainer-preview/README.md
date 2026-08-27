@@ -33,7 +33,10 @@ http://localhost:8765
 - Sandbox preflight matching the downloadable field contract: all six target
   classical orbital elements plus all six chaser target-centered RIC position
   and relative-rate values. Pilot and Operator Sandbox apply the edited values
-  before simulation or burn planning and use deterministic two-body propagation.
+  before simulation or burn planning. Live motion uses deterministic two-body
+  propagation; the coast overlay uses that target-aware path for a circular
+  target and the numerical Tschauner-Hempel projection for any nonzero target
+  eccentricity.
 - Web-only Pursuit Arcade multi-round gameplay with deterministic replay
   validation. Pursuit Arcade is intentionally not listed in the downloadable
   trainer launcher.

@@ -1286,7 +1286,7 @@ def test_operator_sandbox_preview_uses_preflight_setup_state() -> None:
 
     assert context.initial_relative_ric_km_s == pytest.approx(setup.relative_ric_state_km_s)
     assert context.mean_motion_rad_s == pytest.approx(np.sqrt(EARTH_MU_KM3_S2 / setup.target_a_km**3))
-    assert context.coast_prediction_model == "tschauner_hempel"
+    assert context.coast_prediction_model == "yamanaka_ankersen"
     assert context.reference_state_eci_km_s == pytest.approx(expected_target)
 
 

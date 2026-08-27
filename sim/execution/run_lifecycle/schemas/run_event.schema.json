@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.orbitalengagementlab.com/oel.run-event.v1.json",
+  "title": "OEL Run Event v1",
+  "type": "object",
+  "required": ["schema_version", "run_id", "sequence", "event", "state", "phase", "emitted_at", "manifest_sha256"],
+  "properties": {
+    "schema_version": {"const": "oel.run-event.v1"},
+    "run_id": {"type": "string", "format": "uuid"},
+    "sequence": {"type": "integer", "minimum": 1},
+    "event": {"type": "string", "minLength": 1},
+    "state": {"type": "string"},
+    "phase": {"type": "string"},
+    "emitted_at": {"type": "string"},
+    "manifest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  },
+  "additionalProperties": true
+}
