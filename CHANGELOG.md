@@ -6,6 +6,19 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.27.4 - 2026-08-27
+
+Release thesis: `v0.27.4` refines the web trainer's mobile presentation without
+changing simulation behavior or the deterministic physics boundary.
+
+### Fixed
+
+- Keep the Tutorial, Sandbox, and Pursuit Arcade HUD readable on short mobile
+  landscape viewports with compact two-significant-figure range and relative-
+  speed fields and a non-wrapping camera label.
+- Match the active mobile speed-multiplier control to the red active-burn state
+  while preserving the existing computer and RPO Duel presentations.
+
 ## 0.27.3 - 2026-08-26
 
 Release thesis: `v0.27.3` aligns RPO frame controls and Sandbox setup across

@@ -171,10 +171,48 @@ test("computer preview keeps its launcher actions on the title row at sidebar wi
   );
 });
 
+test("mobile speed selection uses the same active red as burn controls", () => {
+  assert.match(
+    previewStyles,
+    /body\.mobile-view \.mobile-speed-controls button\.active \{\s+border-color: rgb\(248, 84, 100\);\s+background: rgb\(96, 22, 32\);\s+color: rgb\(255, 220, 224\);/,
+  );
+});
+
+test("mobile landscape uses two significant figures only for the shared gameplay HUD line", () => {
+  assert.match(
+    previewApp,
+    /function mobileLandscapeHudSigFigs\(\) \{[\s\S]*?state\.activeView === "mobile"[\s\S]*?\(orientation: landscape\) and \(max-height: 520px\)[\s\S]*?\? 2\s+: 4;/,
+  );
+  assert.match(previewApp, /const hudRangeText = formatDistanceKm\(currentRangeKm, hudSigFigs\);/);
+  assert.match(previewApp, /const hudSpeedText = formatSpeedKmS\(currentRelativeSpeedKmS, hudSigFigs\);/);
+  assert.match(previewApp, /const compactLandscapeHud = hudSigFigs === 2;/);
+  assert.match(
+    previewApp,
+    /compactLandscapeHud\s+\? `T=\$\{state\.sim\.t\.toFixed\(1\)\}s R=\$\{hudRangeText\} Vrel=\$\{hudSpeedText\}`\s+: `T=\$\{state\.sim\.t\.toFixed\(1\)\.padStart\(7, " "\)\}s   Range=\$\{hudRangeText\}   Rel Speed=\$\{hudSpeedText\}`;/,
+  );
+  assert.match(previewApp, /el\.topRangeMetric\.textContent = `INFO Range \$\{rangeText\}`;/);
+  assert.match(previewApp, /el\.topSpeedMetric\.textContent = `INFO Rel Speed \$\{speedText\}`;/);
+});
+
+test("mobile Camera fields omit sentence punctuation from trajectory labels", () => {
+  assert.equal(
+    [...previewApp.matchAll(/if \(state\.activeView === "mobile"\) return `\$\{cameraLabel\}: \$\{label\}`;/g)].length,
+    2,
+  );
+  assert.doesNotMatch(
+    previewApp,
+    /if \(state\.activeView === "mobile"\) return `\$\{cameraLabel\}: \$\{label\}\.`;/,
+  );
+});
+
 test("mobile landscape gameplay HUD can shrink without clipping its controls", () => {
   assert.match(
     previewStyles,
-    /\.trainer-shell\.mode-sandbox \.hud-panel \{\s+grid-template-columns: minmax\(0, 1\.7fr\) minmax\(0, 1fr\);/,
+    /\.trainer-shell\.mode-sandbox \.hud-panel \{\s+grid-template-columns: minmax\(0, 1fr\) max-content;\s+column-gap: 4px;/,
+  );
+  assert.match(
+    previewStyles,
+    /\.trainer-shell\.mode-sandbox \.hint-line \{\s+font-size: clamp\(9px, 1\.5vw, 10px\);\s+white-space: nowrap;/,
   );
   assert.doesNotMatch(
     previewStyles,
