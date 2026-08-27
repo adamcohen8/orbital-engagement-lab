@@ -2528,8 +2528,14 @@ function updateHud() {
     return;
   }
   const u = currentControls();
-  const rangeText = formatDistanceKm(rangeKm());
-  const speedText = formatSpeedKmS(relativeSpeedKmS());
+  const currentRangeKm = rangeKm();
+  const currentRelativeSpeedKmS = relativeSpeedKmS();
+  const rangeText = formatDistanceKm(currentRangeKm);
+  const speedText = formatSpeedKmS(currentRelativeSpeedKmS);
+  const hudSigFigs = mobileLandscapeHudSigFigs();
+  const compactLandscapeHud = hudSigFigs === 2;
+  const hudRangeText = formatDistanceKm(currentRangeKm, hudSigFigs);
+  const hudSpeedText = formatSpeedKmS(currentRelativeSpeedKmS, hudSigFigs);
   const arcadePlayerDvUsed = Number(state.arcadeSnapshot?.player_delta_v_m_s || state.sim.dv || 0);
   const arcadeTargetDvUsed = Number(state.arcadeSnapshot?.target_delta_v_m_s || 0);
   const arcadePlayerDvBudget = Number(state.arcadeSnapshot?.max_delta_v_m_s ?? DEFAULT_PURSUIT_CHALLENGE.max_delta_v_m_s ?? 0);
@@ -2565,7 +2571,9 @@ function updateHud() {
     el.topSpeedMetric.textContent = `INFO Rel Speed ${speedText}`;
     el.topDvMetric.textContent = `INFO Delta-v ${dvText}`;
   }
-  el.hudLine.textContent = `T=${state.sim.t.toFixed(1).padStart(7, " ")}s   Range=${rangeText}   Rel Speed=${speedText}`;
+  el.hudLine.textContent = compactLandscapeHud
+    ? `T=${state.sim.t.toFixed(1)}s R=${hudRangeText} Vrel=${hudSpeedText}`
+    : `T=${state.sim.t.toFixed(1).padStart(7, " ")}s   Range=${hudRangeText}   Rel Speed=${hudSpeedText}`;
   el.coachHint.textContent = currentCoachHint();
   el.commandLine.textContent = commandStatusLine();
   const spaceAction =
@@ -2586,7 +2594,7 @@ function currentCoachHint() {
   if (state.mode === "sandbox") {
     const label = state.cameraRuleMode === "full_trajectory" ? "Full Trajectory" : "Satellites Only";
     const cameraLabel = state.activeView === "mobile" ? "Camera" : "C Camera";
-    if (state.activeView === "mobile") return `${cameraLabel}: ${label}.`;
+    if (state.activeView === "mobile") return `${cameraLabel}: ${label}`;
     return `Use small pulses, then coast and watch the target-centered RIC motion. ${cameraLabel}: ${label}.`;
   }
   if (operatorScriptModeActive()) {
@@ -2607,7 +2615,7 @@ function currentCoachHint() {
     }
     if (snap?.terminal) return `${snap.terminal_reason} Local validator score: ${snap.score}.`;
     const cameraLabel = state.activeView === "mobile" ? "Camera" : "C Camera";
-    if (state.activeView === "mobile") return `${cameraLabel}: ${label}.`;
+    if (state.activeView === "mobile") return `${cameraLabel}: ${label}`;
     return `${snap?.is_boss_round ? "Boss round. " : ""}Clear rounds to tighten the goal and grow the score. ${cameraLabel}: ${label}.`;
   }
   const stage = tutorialStages[state.activeStage] || tutorialStages[tutorialStages.length - 1];
@@ -3404,6 +3412,12 @@ function formatDistanceKm(valueKm, sigFigs = 4) {
   if (magnitude >= 1.0) return `${formatSigFig(value, sigFigs)} km`;
   if (magnitude >= 1.0e-3) return `${formatSigFig(value * 1000.0, sigFigs)} m`;
   return `${formatSigFig(value * 1.0e6, sigFigs)} mm`;
+}
+
+function mobileLandscapeHudSigFigs() {
+  return state.activeView === "mobile" && window.matchMedia("(orientation: landscape) and (max-height: 520px)").matches
+    ? 2
+    : 4;
 }
 
 function formatSpeedKmS(valueKmS, sigFigs = 4) {

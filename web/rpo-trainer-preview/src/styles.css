@@ -2301,9 +2301,9 @@ body.mobile-view .mobile-speed-controls button {
 }
 
 body.mobile-view .mobile-speed-controls button.active {
-  border-color: rgb(96, 174, 224);
-  background: rgb(28, 48, 66);
-  color: rgb(238, 244, 250);
+  border-color: rgb(248, 84, 100);
+  background: rgb(96, 22, 32);
+  color: rgb(255, 220, 224);
 }
 
 body.mobile-view .debrief-panel {
@@ -2760,7 +2760,18 @@ body.mobile-view .leaderboard-form {
   body.mobile-view .trainer-shell.mode-arcade .hud-panel,
   body.mobile-view .trainer-shell.mode-tutorial .hud-panel,
   body.mobile-view .trainer-shell.mode-sandbox .hud-panel {
-    grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) max-content;
+    column-gap: 4px;
+  }
+
+  body.mobile-view .trainer-shell.mode-arcade .hud-line,
+  body.mobile-view .trainer-shell.mode-arcade .hint-line,
+  body.mobile-view .trainer-shell.mode-tutorial .hud-line,
+  body.mobile-view .trainer-shell.mode-tutorial .hint-line,
+  body.mobile-view .trainer-shell.mode-sandbox .hud-line,
+  body.mobile-view .trainer-shell.mode-sandbox .hint-line {
+    font-size: clamp(9px, 1.5vw, 10px);
+    white-space: nowrap;
   }
 
   body.mobile-view .touch-controls {
