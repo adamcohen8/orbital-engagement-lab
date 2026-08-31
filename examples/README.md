@@ -30,6 +30,92 @@ integrates the configured OEL force model. The explicit
 `public_sgp4_passive_propagation.yaml` example is the continuous catalog-style
 OGP exception and is passive by design.
 
+## CCSDS TDM Tracking OD
+
+The bounded public tracking-data example parses reduced-geometric CCSDS TDM
+2.0 KVN AZEL/range observations, fits a declared arc, and repropagates the
+solution against an untouched holdout:
+
+```bash
+.venv/bin/python -m sim.tracking_od inspect-tdm \
+  examples/tracking_od/public_reduced_geometric_azel_range.tdm
+.venv/bin/python -m sim.tracking_od fit \
+  examples/tracking_od/public_reduced_geometric_azel_range.tdm \
+  examples/tracking_od/public_tdm_fit_holdout_problem.json \
+  --output-dir outputs/public_tdm_fit_holdout
+```
+
+See [CCSDS TDM Tracking Orbit Determination](../docs/tracking-od.md) for the
+supported profile, evidence interpretation, and public/Pro boundary.
+
+## Multi-Asset Mission Scheduling
+
+Solve and authoritatively replay the bounded two-spacecraft collection and
+downlink example:
+
+```bash
+.venv/bin/python -m sim.mission_scheduling solve \
+  examples/mission_scheduling/public_two_asset_collection_problem.json \
+  --output-dir outputs/public_two_asset_collection
+.venv/bin/python -m sim.mission_scheduling replay \
+  outputs/public_two_asset_collection
+```
+
+See [Bounded Multi-Asset Mission Scheduling](../docs/mission-scheduling.md) for
+problem semantics, validation, evidence interpretation, and the Public/Pro
+boundary.
+
+To generate the observation and link products with OEL before building and
+replaying their schedule:
+
+```bash
+.venv/bin/python examples/python/mission_scheduling_source_chain.py \
+  --output-root outputs/public_mission_source_chain
+```
+
+## Spacecraft Power
+
+Solve the public schedule, couple SAT-A's selected activities to a two-body
+orbit spanning eclipse, assess solar-array and battery feasibility, replay the
+scientific evidence, and retain it as a verified study:
+
+```bash
+.venv/bin/python examples/python/spacecraft_power_schedule_chain.py \
+  --output-root outputs/public_spacecraft_power
+```
+
+See [Spacecraft Power Analysis](../docs/spacecraft-power.md) for direct CLI
+usage, evidence interpretation, validation, and the Public/Pro boundary.
+
+## Orbit Lifetime
+
+Propagate one declared ONP drag case to refined altitude thresholds, compare
+four atmosphere assumptions with identical non-atmosphere inputs, replay both
+products, and retain the single case as a verified study:
+
+```bash
+.venv/bin/python examples/python/orbit_lifetime_workflow.py \
+  --output-root outputs/public_orbit_lifetime
+```
+
+See [Deterministic Orbit Lifetime Analysis](../docs/orbit-lifetime.md) for
+direct CLI usage, evidence interpretation, validation, and the Public/Pro
+boundary.
+
+## Integrated Study Lifecycle
+
+Run real trajectory-targeting, conjunction-assessment, and mission-scheduling
+examples, then retain each result as a verified content-bound study:
+
+```bash
+.venv/bin/python examples/python/study_lifecycle_three_domains.py \
+  --output-root outputs/study_lifecycle_three_domains
+```
+
+The generated summaries distinguish lifecycle identity replay from each
+domain's authoritative physics replay. See
+[Integrated Study Lifecycle](../docs/study-lifecycle.md).
+
 ## Flagship Built-In Scenario
 
 After the quickstart, the recommended public review path is the built-in RIC_PD

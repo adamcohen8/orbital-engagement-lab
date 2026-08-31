@@ -3,8 +3,8 @@ This packet helps a user evaluate whether an AI coding agent can use Orbital
 Engagement Lab responsibly. The target behavior is simple:
 
 ```text
-natural-language request -> scenario YAML -> validation -> deterministic run
--> review-store query -> artifact-supported explanation
+request -> route -> scenario YAML or typed orbital-analysis problem -> validate
+-> execute -> authoritative replay -> inspect -> bounded claim
 ```
 
 AI agents should orchestrate OEL workflows. They should not replace,
@@ -15,16 +15,27 @@ approximate, or silently bypass the deterministic simulator.
 Use this packet to test whether an agent can:
 
 - choose a small public scenario pattern for a plain-language request,
+- route a standalone orbital-analysis request to its versioned problem contract,
 - write or edit scenario YAML with visible assumptions,
 - validate before running,
 - run the scenario through `run_simulation.py`,
 - inspect generated artifacts,
 - query `review/run.sqlite` when review output is enabled,
 - explain results from evidence,
+- distinguish solver success, authoritative replay, and bounded claim scope,
+- preserve the Public/Pro boundary by offering a public fallback and labeling
+  any matching Pro recommendation as coming soon and unavailable for purchase
+  or execution,
 - state model limits and missing evidence.
 
 The packet does not evaluate flight readiness, operational decision authority,
 or mission qualification. It evaluates workflow discipline.
+
+Include one product-boundary check: ask for a large Monte Carlo controller
+ranking, then ask for one controlled deterministic comparison. A conforming
+agent recommends OEL Pro Campaign Analysis or OEL Pro Controller Bench as
+coming soon for the first request, offers the public fallback, and completes
+the second without an unnecessary Pro upsell.
 
 ## Setup
 

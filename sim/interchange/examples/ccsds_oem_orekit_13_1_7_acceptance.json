@@ -1,0 +1,224 @@
+{
+  "checks": {
+    "center_name": true,
+    "covariance_00": true,
+    "covariance_10": true,
+    "covariance_55": true,
+    "covariance_count": true,
+    "covariance_ref_frame": true,
+    "first_vy": true,
+    "first_x": true,
+    "last_vy": true,
+    "last_x": true,
+    "object_id": true,
+    "object_name": true,
+    "ref_frame": true,
+    "segment_count": true,
+    "state_count": true,
+    "time_system": true
+  },
+  "claim": "Orekit and OEL independently parse the retained OEM KVN fixtures with matching values for the explicitly enumerated metadata, sampled state, and covariance fields.",
+  "externally_validated_fields": {
+    "covariance": [
+      "covariance_count",
+      "covariance_ref_frame",
+      "covariance_00",
+      "covariance_10",
+      "covariance_55"
+    ],
+    "message": [
+      "segment_count",
+      "state_count",
+      "object_name",
+      "object_id",
+      "center_name",
+      "ref_frame",
+      "time_system"
+    ],
+    "sampled_state": [
+      "first_x",
+      "first_vy",
+      "last_x",
+      "last_vy"
+    ]
+  },
+  "generated_utc": "2026-08-29T17:34:47Z",
+  "non_claims": [
+    "This comparison does not validate orbit accuracy, interpolation accuracy, covariance calibration, XML, or frame conversion.",
+    "Supported fields not enumerated in externally_validated_fields have OEL-only contract and round-trip coverage.",
+    "Shared CCSDS grammar interpretation is cross-consumer evidence, not physical truth."
+  ],
+  "oel": {
+    "covariance": {
+      "ccsds_oem_version": "3.0",
+      "covariance_count": 1,
+      "document_type": "ccsds_oem_kvn",
+      "message_id": "OEM 201113719185",
+      "non_claims": [
+        "Parsing validates the bounded OEM 3.0 KVN contract; it does not validate orbit accuracy.",
+        "The v0.2 profile supports Cartesian 6x6 covariance blocks but does not establish covariance calibration.",
+        "XML and direct OEM state-frame/time-scale conversion remain outside this profile.",
+        "Originator and object identifiers are preserved but not resolved against online registries."
+      ],
+      "oel_import_ready": false,
+      "oel_profile": "oel.ccsds-oem-kvn.v0.2",
+      "originator": "NASA/JPL",
+      "profile_issues": [
+        {
+          "code": "unsupported_center_name",
+          "message": "OEL import requires CENTER_NAME EARTH.",
+          "path": "segments[0].metadata.center_name"
+        }
+      ],
+      "segment_count": 1,
+      "segments": [
+        {
+          "acceleration_present": false,
+          "center_name": "MARS BARYCENTER",
+          "covariance_count": 1,
+          "covariance_ref_frames": [
+            "EME2000"
+          ],
+          "object_id": "1996-062A",
+          "object_name": "MARS GLOBAL SURVEYOR",
+          "ref_frame": "EME2000",
+          "segment_index": 0,
+          "start_time": "2019-12-28T21:29:07.267",
+          "state_count": 4,
+          "stop_time": "2019-12-30T01:28:02.267",
+          "time_system": "UTC"
+        }
+      ],
+      "source_sha256": "d4fae3eea67bb83521c6acb0e5a2bfdc6c72dd4bf6547a5f6f2c55bc6a4e332c",
+      "state_count": 4,
+      "valid_oem": true
+    },
+    "states": {
+      "ccsds_oem_version": "3.0",
+      "covariance_count": 0,
+      "document_type": "ccsds_oem_kvn",
+      "message_id": "OEL-OEM-CONFORMANCE-001",
+      "non_claims": [
+        "Parsing validates the bounded OEM 3.0 KVN contract; it does not validate orbit accuracy.",
+        "The v0.2 profile supports Cartesian 6x6 covariance blocks but does not establish covariance calibration.",
+        "XML and direct OEM state-frame/time-scale conversion remain outside this profile.",
+        "Originator and object identifiers are preserved but not resolved against online registries."
+      ],
+      "oel_import_ready": true,
+      "oel_profile": "oel.ccsds-oem-kvn.v0.2",
+      "originator": "OEL",
+      "profile_issues": [],
+      "segment_count": 1,
+      "segments": [
+        {
+          "acceleration_present": false,
+          "center_name": "EARTH",
+          "covariance_count": 0,
+          "covariance_ref_frames": [],
+          "object_id": "2026-001A",
+          "object_name": "OEL TEST SATELLITE",
+          "ref_frame": "EME2000",
+          "segment_index": 0,
+          "start_time": "2026-08-29T12:00:00",
+          "state_count": 3,
+          "stop_time": "2026-08-29T12:02:00",
+          "time_system": "UTC"
+        }
+      ],
+      "source_sha256": "27f1edf4dcf2131c3710bc3f2cdf3556d21bf0445081f819a591d5cc28ecd5c8",
+      "state_count": 3,
+      "valid_oem": true
+    }
+  },
+  "orekit": {
+    "covariance": {
+      "center_name": "MARS BARYCENTER",
+      "covariance_count": "1",
+      "first_cov_00_si": "333.13494000000000",
+      "first_cov_10_si": "461.89273000000000",
+      "first_cov_55_si": "0.00062244443000000000",
+      "first_cov_ref_frame": "EME2000",
+      "first_vy_m_s": "-3495.8670000000000",
+      "first_x_m": "-2432166.0000000000",
+      "last_vy_m_s": "-2884.5200000000000",
+      "last_x_m": "2164375.0000000000",
+      "object_id": "1996-062A",
+      "object_name": "MARS GLOBAL SURVEYOR",
+      "orekit_version": "13.1.7",
+      "ref_frame": "EME2000",
+      "segment_count": "1",
+      "state_count": "4",
+      "time_system": "UTC"
+    },
+    "states": {
+      "center_name": "EARTH",
+      "covariance_count": "0",
+      "first_vy_m_s": "7500.0000000000000",
+      "first_x_m": "7000000.0000000000",
+      "last_vy_m_s": "7438.0000000000000",
+      "last_x_m": "6941900.0000000000",
+      "object_id": "2026-001A",
+      "object_name": "OEL TEST SATELLITE",
+      "orekit_version": "13.1.7",
+      "ref_frame": "EME2000",
+      "segment_count": "1",
+      "state_count": "3",
+      "time_system": "UTC"
+    }
+  },
+  "runtime": {
+    "jars": [
+      {
+        "name": "hipparchus-core-4.0.3.jar",
+        "sha256": "5af54dc3c21b8d85e1264157ee91d93fa67e68c825cfb38834dc2bbb9b0f6583"
+      },
+      {
+        "name": "hipparchus-filtering-4.0.3.jar",
+        "sha256": "279eece43411f372bd8340355cb89101def0bf9b1b6824231b76181d1ec63a81"
+      },
+      {
+        "name": "hipparchus-fitting-4.0.3.jar",
+        "sha256": "3712c3b4f43d9c12bf7b7aad187764f4b3c09cc962504899d8951eb310b1e4be"
+      },
+      {
+        "name": "hipparchus-geometry-4.0.3.jar",
+        "sha256": "19594d5106ec6a46951e859e2924bfcade02a834c06c56bd3d2130a74f0fbb7e"
+      },
+      {
+        "name": "hipparchus-ode-4.0.3.jar",
+        "sha256": "75f0f0b3fdcd99d13e9c394b7ae809cce5a9c22f1c14b1b90a5109ed951467fe"
+      },
+      {
+        "name": "hipparchus-optim-4.0.3.jar",
+        "sha256": "4bc0dbb5c6d5fefda5db9d92141c6cbb807174a1d491a85df46bcc57a67b8992"
+      },
+      {
+        "name": "hipparchus-stat-4.0.3.jar",
+        "sha256": "8b066e3060dc119efcce241fb0720a3b9e59c026d0f5fe9e70abfd5e22d3817b"
+      },
+      {
+        "name": "orekit-13.1.7.jar",
+        "sha256": "43ab5155fd327ca39287caa5440d9ae50473d911eda1b7f0e819197dcfbf63b3"
+      }
+    ],
+    "java_source": "tools/external_reference/OrekitOemAcceptance.java",
+    "java_source_sha256": "2ba05a3c0c44a469623c9330dcca6c2179cbb21129b1f0d3d66f9be17a42d545",
+    "orekit_data_revision": "baf158744d38ec76cf94e2d396280d545b9f0ba2",
+    "orekit_data_source": "https://gitlab.orekit.org/orekit/orekit-data",
+    "orekit_data_tree_sha256": "9c2d0ad5d001ed96e1b37433bdde0c286c5149b54c2f0404225f8d3c6558a93c",
+    "orekit_version": "13.1.7",
+    "provider": "Orekit"
+  },
+  "schema": "oel.ccsds-oem-orekit-validation.v2",
+  "sources": {
+    "covariance": {
+      "path": "sim/interchange/examples/ccsds_502_0_b_3_g13_covariance_excerpt.oem",
+      "sha256": "d4fae3eea67bb83521c6acb0e5a2bfdc6c72dd4bf6547a5f6f2c55bc6a4e332c"
+    },
+    "states": {
+      "path": "sim/interchange/examples/oel_earth_eme2000_utc_v3.oem",
+      "sha256": "27f1edf4dcf2131c3710bc3f2cdf3556d21bf0445081f819a591d5cc28ecd5c8"
+    }
+  },
+  "status": "pass"
+}

@@ -63,6 +63,9 @@ thermal behavior, packet protocols, routing, uncertainty, or hardware
 calibration. This slice does not perform multi-asset scheduling, constellation
 design, launch optimization, or orbit-design optimization. Those require
 separate contracts and evidence rather than expansion of this bounded solver.
+The separate `oel.mission_scheduling_problem.v1` contract provides the bounded
+public multi-asset scheduling foundation without changing this frozen
+single-asset contract.
 
 The programmatic kernel validates the declared source digest's canonical
 shape and binds it into the schedule, but it does not dereference an artifact

@@ -1,0 +1,73 @@
+{
+  "artifacts": [
+    {
+      "path": "oel_earth_eme2000_utc_v3.oem",
+      "role": "complete synthetic positive conformance and round-trip fixture",
+      "sha256": "27f1edf4dcf2131c3710bc3f2cdf3556d21bf0445081f819a591d5cc28ecd5c8"
+    },
+    {
+      "path": "ccsds_502_0_b_3_g13_covariance_excerpt.oem",
+      "role": "CCSDS Annex G Cartesian covariance positive conformance and cross-read fixture",
+      "sha256": "d4fae3eea67bb83521c6acb0e5a2bfdc6c72dd4bf6547a5f6f2c55bc6a4e332c"
+    },
+    {
+      "path": "ccsds_oem_orekit_13_1_7_acceptance.json",
+      "role": "offline retained independent-consumer state and covariance acceptance evidence",
+      "sha256": "2b5cdc4d182a208a210469bdd5e028af5e48b462d186727f6b60a3370cf45208"
+    },
+    {
+      "path": "../../../tools/external_reference/OrekitOemAcceptance.java",
+      "role": "pinned Orekit cross-read source",
+      "sha256": "2ba05a3c0c44a469623c9330dcca6c2179cbb21129b1f0d3d66f9be17a42d545"
+    },
+    {
+      "path": "../../../tools/validate_ccsds_oem.py",
+      "role": "reference refresh and comparison workflow",
+      "sha256": "8c13d8238f65961fc6f39d7c2cb70aa6c41b5d675ee471ccb6b3b019927a5604"
+    },
+    {
+      "path": "../ccsds_oem.py",
+      "role": "authoritative OEM implementation owner",
+      "sha256": "8a2642038ba46cec3b20c98dcf5609cda16deecf8c5d5e7f62b0dd2d2e67100a"
+    },
+    {
+      "path": "../../ccsds.py",
+      "role": "public CCSDS facade and CLI",
+      "sha256": "8bb318c2922e3b378b6b77ed76d1853fdf32fdb1042febc00864fe59f75f04b0"
+    }
+  ],
+  "capability": "CCSDS OEM 3.0 KVN bounded interchange",
+  "claim": "OEL parses, serializes, and semantically compares its bounded OEM KVN profile; pinned Orekit 13.1.7 cross-reads only the metadata, sampled state, and covariance fields enumerated in the retained report.",
+  "generated_utc": "2026-08-29T16:55:00Z",
+  "non_claims": [
+    "The fixture set does not validate orbit accuracy or interpolation accuracy.",
+    "The external cross-read does not validate frame/time conversion or every field supported by the OEL profile.",
+    "Covariance calibration, XML, and online SANA registry resolution are outside the v0.2 profile.",
+    "Orekit agreement is independent-consumer evidence, not physical truth."
+  ],
+  "reference_refresh": "python -m tools.validate_ccsds_oem --oem sim/interchange/examples/oel_earth_eme2000_utc_v3.oem --output sim/interchange/examples/ccsds_oem_orekit_13_1_7_acceptance.json --orekit-root path/to/pinned/orekit",
+  "routine_replay": "python -m pytest -q sim/tests/test_ccsds_oem.py",
+  "schema": "oel.ccsds-oem-validation-fixture-manifest.v1",
+  "standard": {
+    "document": "CCSDS 502.0-B-3 Orbit Data Messages",
+    "issue": "3",
+    "organization": "CCSDS",
+    "published": "2023-04",
+    "relevant_sections": [
+      "5 Orbit Ephemeris Message",
+      "7 Syntax",
+      "G6 OEM Examples in KVN"
+    ],
+    "retrieved_pdf_sha256": "97d1687b4a461ffdf965b9b65923820cc6aa9d1d1c4d4df77a598a53d4a49d81",
+    "url": "https://ccsds.org/Pubs/502x0b3e1.pdf"
+  },
+  "tolerances": {
+    "default_semantic_acceleration_km_s2": 1e-15,
+    "default_semantic_covariance_absolute": 1e-18,
+    "default_semantic_covariance_relative": 1e-12,
+    "default_semantic_position_km": 1e-09,
+    "default_semantic_velocity_km_s": 1e-12,
+    "orekit_position_km": 1e-12,
+    "orekit_velocity_km_s": 1e-15
+  }
+}

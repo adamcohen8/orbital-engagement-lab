@@ -1,0 +1,37 @@
+{
+  "schema_version": "oel.spacecraft_power_problem.v1",
+  "analysis_id": "public-schedule-orbit-power",
+  "asset_id": "SAT-A",
+  "epoch_jd_utc": 2461041.5,
+  "horizon_start_s": 0.0,
+  "horizon_end_s": 6000.0,
+  "integration_step_s": 30.0,
+  "transition_time_tolerance_s": 0.01,
+  "transition_max_iterations": 80,
+  "shadow_model": "conical",
+  "ephemeris_model": "analytic_enhanced",
+  "orientation_mode": "sun_tracking_ideal",
+  "solar_array": {
+    "area_m2": 2.0,
+    "efficiency": 0.28,
+    "solar_flux_w_m2": 1361.0,
+    "maximum_generation_w": 650.0,
+    "normal_body": [
+      1.0,
+      0.0,
+      0.0
+    ]
+  },
+  "battery": {
+    "capacity_wh": 400.0,
+    "initial_soc_fraction": 0.75,
+    "minimum_soc_fraction": 0.2,
+    "maximum_soc_fraction": 1.0,
+    "maximum_charge_power_w": 300.0,
+    "maximum_discharge_power_w": 250.0,
+    "charge_efficiency": 0.94,
+    "discharge_efficiency": 0.92
+  },
+  "base_load_w": 65.0,
+  "activities": []
+}

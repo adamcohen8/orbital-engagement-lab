@@ -29,9 +29,31 @@ The public repository supports these claims:
   scenario YAML, and payload contracts.
 - Selected external-reference validation evidence should be public when the
   reference material, commands, tolerances, and artifacts are redistributable.
-  HPOP/MATLAB orbit comparisons and Basilisk attitude dynamics/actuator
-  comparisons are the strongest trust signals for OEL, but they support only
-  the specific tested cases and not general mission-assurance claims.
+  Primary saved Orekit comparisons, precise-orbit/public-data cases, optional
+  Basilisk comparisons, and historical HPOP/MATLAB references support only the
+  exact tested cases and do not establish general mission assurance.
+
+For v0.29's new public surfaces, the bounded claims are narrower:
+
+- frame/time external evidence covers the retained epoch, state, EOP inputs,
+  and stated residual envelopes; routine replay recomputes retained Orekit
+  residuals against the current implementation;
+- OEM and OPM/OMM external cross-reads cover only the metadata, selected state,
+  covariance, maneuver-count, and mean-element fields enumerated by their
+  retained reports; other supported fields have OEL-only contract/round-trip coverage;
+- orbit-lifetime evidence combines analytic checks, deterministic authoritative
+  replay, and fixed-state external component diagnostics, but has no independent
+  end-to-end propagated-lifetime reference; and
+- study-lifecycle evidence validates content identity and citation binding.
+  Its `VC-0` through `VC-4` values are an authoring vocabulary, while every v1
+  capability is capped at `VC-1`; acceptance within that ceiling is not an
+  independent maturity assessment.
+
+These rows are registered in `configs/validation_evidence_matrix.yaml` as
+non-release-blocking and are centrally owned by
+`configs/validation_harness_v029_foundations.yaml`. A row remains visibly
+`MISSING_MANIFEST`, `FAIL`, `STALE`, or `INCOMPLETE` unless the exact focused
+tests and retained replay have produced current content-bound evidence.
 
 ## Explicit Non-Claims
 
@@ -66,12 +88,12 @@ Review:
 For the focused validation claim and gates, see
 [RIC_PD 10 km Validation Package](validation-ric-pd-10km.md).
 
-Some external-reference harnesses, HPOP comparison workflows, Basilisk attitude
-reference sweeps, and evidence manifests currently exist in the Pro/private
-workspace. Public-safe slices of that evidence should be promoted into the
-public trust baseline as they are redacted, reproduced, and tied to bounded
-claims. Larger automation, private release evidence, proprietary reference
-data, and customer-specific validation packages remain Pro/private.
+Some external-reference harnesses, historical HPOP comparison workflows,
+Basilisk attitude reference sweeps, and evidence manifests exist in the
+Pro/private workspace. Public-safe slices of that evidence should be promoted
+into the public trust baseline as they are redacted, reproduced, and tied to
+bounded claims. Larger automation, private release evidence, proprietary
+reference data, and customer-specific validation packages remain Pro/private.
 
 Model-reference pages are part of that traceability chain. They document what
 equations and assumptions a validation result exercised, but they do not replace

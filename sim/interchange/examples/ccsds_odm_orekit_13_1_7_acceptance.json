@@ -1,0 +1,121 @@
+{
+  "checks": {
+    "omm_eccentricity": true,
+    "omm_frame": true,
+    "omm_inclination": true,
+    "omm_mean_motion": true,
+    "omm_norad_id": true,
+    "omm_object_id": true,
+    "omm_roundtrip": true,
+    "omm_theory": true,
+    "omm_version": true,
+    "opm_covariance_presence": true,
+    "opm_frame": true,
+    "opm_maneuver_count": true,
+    "opm_object_id": true,
+    "opm_position": true,
+    "opm_roundtrip": true,
+    "opm_velocity": true,
+    "opm_version": true
+  },
+  "claim": "OEL and pinned Orekit 13.1.7 agree on the exact OPM and OMM fields enumerated by this frozen selected-field cross-read.",
+  "externally_validated_fields": {
+    "omm": [
+      "version",
+      "object_id",
+      "frame",
+      "mean_element_theory",
+      "mean_motion",
+      "eccentricity",
+      "inclination",
+      "norad_id"
+    ],
+    "opm": [
+      "version",
+      "object_id",
+      "frame",
+      "maneuver_count",
+      "position",
+      "velocity",
+      "covariance_presence"
+    ]
+  },
+  "fixtures": {
+    "omm": {
+      "path": "sim/interchange/examples/oel_sgp4_mean_elements_v3.omm",
+      "sha256": "0dfe0facb19796a728e806926e4fcdd973d146fdde4c4e195db0ed427230c31e"
+    },
+    "opm": {
+      "path": "sim/interchange/examples/oel_earth_eme2000_utc_v3.opm",
+      "sha256": "4a44c9cab9a65ff2886f704de7007c1c30922cc2dd135490ea242fb319507569"
+    }
+  },
+  "generated_utc": "2026-08-29T18:16:32Z",
+  "non_claims": [
+    "Syntax and frozen semantic agreement do not establish orbit, maneuver, or covariance accuracy.",
+    "OMM remains a preserved mean-element product; this validation does not authorize silent osculating conversion.",
+    "The bounded public profile is not a claim of complete CCSDS 502.0-B-3 coverage.",
+    "Supported fields not enumerated in externally_validated_fields have OEL-only contract and round-trip coverage."
+  ],
+  "orekit": {
+    "omm_eccentricity": "0.0010000000000000000",
+    "omm_frame": "TEME",
+    "omm_inclination_rad": "0.90058989402907410",
+    "omm_mean_motion_rad_s": "0.0011090112955380634",
+    "omm_norad_id": "99999",
+    "omm_object_id": "2024-001A",
+    "omm_theory": "SGP4",
+    "omm_version": "3.0000000000000000",
+    "opm_covariance_present": "true",
+    "opm_frame": "EME2000",
+    "opm_maneuver_count": "1",
+    "opm_object_id": "2024-001A",
+    "opm_position_m": "7000000.0000000000,120000.00000000000,30000.000000000000",
+    "opm_velocity_m_s": "-200.00000000000000,7450.0000000000000,1100.0000000000000",
+    "opm_version": "3.0000000000000000"
+  },
+  "runtime": {
+    "jars": [
+      {
+        "name": "hipparchus-core-4.0.3.jar",
+        "sha256": "5af54dc3c21b8d85e1264157ee91d93fa67e68c825cfb38834dc2bbb9b0f6583"
+      },
+      {
+        "name": "hipparchus-filtering-4.0.3.jar",
+        "sha256": "279eece43411f372bd8340355cb89101def0bf9b1b6824231b76181d1ec63a81"
+      },
+      {
+        "name": "hipparchus-fitting-4.0.3.jar",
+        "sha256": "3712c3b4f43d9c12bf7b7aad187764f4b3c09cc962504899d8951eb310b1e4be"
+      },
+      {
+        "name": "hipparchus-geometry-4.0.3.jar",
+        "sha256": "19594d5106ec6a46951e859e2924bfcade02a834c06c56bd3d2130a74f0fbb7e"
+      },
+      {
+        "name": "hipparchus-ode-4.0.3.jar",
+        "sha256": "75f0f0b3fdcd99d13e9c394b7ae809cce5a9c22f1c14b1b90a5109ed951467fe"
+      },
+      {
+        "name": "hipparchus-optim-4.0.3.jar",
+        "sha256": "4bc0dbb5c6d5fefda5db9d92141c6cbb807174a1d491a85df46bcc57a67b8992"
+      },
+      {
+        "name": "hipparchus-stat-4.0.3.jar",
+        "sha256": "8b066e3060dc119efcce241fb0720a3b9e59c026d0f5fe9e70abfd5e22d3817b"
+      },
+      {
+        "name": "orekit-13.1.7.jar",
+        "sha256": "43ab5155fd327ca39287caa5440d9ae50473d911eda1b7f0e819197dcfbf63b3"
+      }
+    ],
+    "java_source": "tools/external_reference/OrekitOdmAcceptance.java",
+    "java_source_sha256": "54beabf3401ff9200a58762a1f70500930814c6c477717e9f7544dba706b4f59",
+    "orekit_data_revision": "baf158744d38ec76cf94e2d396280d545b9f0ba2",
+    "orekit_data_tree_sha256": "9c2d0ad5d001ed96e1b37433bdde0c286c5149b54c2f0404225f8d3c6558a93c",
+    "orekit_version": "13.1.7",
+    "provider": "Orekit"
+  },
+  "schema": "oel.ccsds-opm-omm-orekit-validation.v1",
+  "status": "pass"
+}

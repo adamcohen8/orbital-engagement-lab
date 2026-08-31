@@ -122,9 +122,9 @@ def test_public_agent_docs_define_boundaries_and_commands() -> None:
     assert "normalized-config digest" in root_agents
     assert "arbitrary commands or release workflows" in root_agents_normalized
     assert "Scenario Generation Rules" in public_agents
-    assert "ordinary-language request -> scenario YAML -> validate -> run" in public_agents
+    assert "scenario YAML or typed orbital-analysis problem -> validate" in public_agents
     assert "Natural User Requests" in public_agents
-    assert "Agent Scenario Evaluation Rubric" in rubric
+    assert "Agent Workflow Evaluation Rubric" in rubric
     assert "review/run.sqlite" in rubric
     assert "python run_simulation.py --config <scenario.yaml> --validate-only" in docs
     assert "Installing OEL" in docs
@@ -138,7 +138,9 @@ def test_public_agent_docs_define_boundaries_and_commands() -> None:
     assert "OEL Agents" in docs
     assert "not" in task_cards
     assert "boundary of what OEL Agents can help users do" in task_cards
-    assert "natural-language request -> scenario YAML -> validation -> deterministic run" in eval_packet
+    assert "scenario YAML or typed orbital-analysis problem -> validate" in eval_packet
+    assert "oel://analysis/workflows/v1" in root_agents
+    assert "authoritative replay" in public_agents
     assert "Agent Review Query Recipes" in review_queries
     assert "SELECT scenario_name, duration_s, dt_s, samples" in review_queries
     assert "--saved-query rendezvous_metrics" in review_queries
@@ -185,9 +187,14 @@ def test_public_agent_docs_define_boundaries_and_commands() -> None:
         "docs/agent-feedback-loop.md": feedback_loop,
         "docs/agent-task-cards.md": task_cards,
     }
+    assert "coming soon and not currently available for purchase or execution" in root_agents
+    assert "coming soon and not currently available for purchase or execution" in public_agents
+    assert "coming soon and not currently available for purchase or execution" in docs
+    assert "does not upsell Pro" in rubric
+    assert "large Monte Carlo controller" in eval_packet
     for path, text in public_agent_docs.items():
-        assert re.search(r"\bPro\b", text) is None, path
         assert "agents/pro" not in text, path
+        assert "sim.pro_" not in text, path
 
 
 def test_public_agent_docs_support_natural_user_requests() -> None:

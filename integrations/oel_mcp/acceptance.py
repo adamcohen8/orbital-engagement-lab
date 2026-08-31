@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -157,6 +159,68 @@ async def _run_public_workflow_acceptance_session(
         },
     )
     _record(checks, "query", queried, expected="completed")
+
+    study_root = work_root / "study_lifecycle"
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(root / "examples" / "python" / "study_lifecycle_three_domains.py"),
+            "--output-root",
+            str(study_root),
+        ],
+        cwd=root,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError("The public study-lifecycle acceptance fixture failed to build.")
+    study_bundle = study_root / "trajectory-targeting-canonical-v1"
+    inspected_study = await _call(
+        client,
+        "oel.inspect_study.v1",
+        {"bundle_dir": str(study_bundle), "handling": PUBLIC_HANDLING},
+    )
+    _record(checks, "inspect_study", inspected_study, expected="completed")
+    replayed_study = await _call(
+        client,
+        "oel.replay_study.v1",
+        {"bundle_dir": str(study_bundle), "handling": PUBLIC_HANDLING},
+    )
+    _record(checks, "replay_study", replayed_study, expected="completed")
+    compared_studies = await _call(
+        client,
+        "oel.compare_studies.v1",
+        {
+            "left_bundle_dir": str(study_bundle),
+            "right_bundle_dir": str(study_bundle),
+            "handling": PUBLIC_HANDLING,
+        },
+    )
+    _record(checks, "compare_studies", compared_studies, expected="completed")
+    inspected_ccsds = await _call(
+        client,
+        "oel.inspect_ccsds.v1",
+        {
+            "path": str(root / "sim" / "interchange" / "examples" / "oel_earth_eme2000_utc_v3.oem"),
+            "product_kind": "oem",
+            "handling": PUBLIC_HANDLING,
+        },
+    )
+    _record(checks, "inspect_ccsds", inspected_ccsds, expected="completed")
+    converted_epoch = await _call(
+        client,
+        "oel.convert_frame_time.v1",
+        {
+            "operation": "convert_epoch",
+            "epoch": "2024-01-01T00:00:00Z",
+            "from_scale": "UTC",
+            "to_scale": "TAI",
+            "handling": PUBLIC_HANDLING,
+        },
+    )
+    _record(checks, "convert_frame_time", converted_epoch, expected="completed")
 
     fsw_described = await _call(client, "oel.fsw.describe.v1", {"handling": PUBLIC_HANDLING})
     _record(checks, "fsw_describe", fsw_described, expected="completed")

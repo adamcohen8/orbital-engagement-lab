@@ -13,6 +13,7 @@ numpy==2.4.6
 packaging==26.2
 pillow==12.3.0
 pluggy==1.6.0
+pyerfa==2.0.1.5
 pygame==2.6.1
 pygments==2.20.0
 pyparsing==3.3.2

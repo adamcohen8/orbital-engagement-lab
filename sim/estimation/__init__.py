@@ -8,8 +8,9 @@ from sim.estimation.orbit_ukf import OrbitUKFEstimator
 
 def _unavailable(*args, **kwargs):
     raise ImportError(
-        "Batch orbit determination and estimated-parameter workflows are part of "
-        "Orbital Engagement Pro. The public core supports runtime EKF/UKF state estimation."
+        "General dynamics OD and unrestricted estimated-parameter workflows are part of "
+        "Orbital Engagement Pro. The public core supports runtime EKF/UKF state estimation "
+        "and the bounded sim.tracking_od TDM fit/holdout workflow."
     )
 
 

@@ -13,8 +13,12 @@ evidence-only scenario YAML execution, completed ONP/review and ECI OGP history
 normalization, primary review-store tables, and provider-backed event
 refinement. They are exposed through a supported agent task recipe, named MCP
 review queries, content-bound plot recipes, run-summary/index results, and
-strict-QA native figures. Rich coverage, communications coverage, aggregation,
-tasking, and causal ONP consumers still require separate adapters.
+strict-QA native figures. Bounded mission scheduling now has a content-bound
+adapter for completed optical-collection and directed-link products. Bounded
+constellation design now composes ONP, ideal-nadir coverage, constellation
+aggregation, and fixed-site directed links for an explicit small candidate
+inventory. Other rich coverage, communications coverage, and causal ONP
+consumers still require separate adapters.
 
 ## Reproducible Gate
 
@@ -26,6 +30,9 @@ MPLBACKEND=Agg python -m pytest \
   sim/tests/test_global_coverage_phase2.py \
   sim/tests/test_global_coverage_phase3.py \
   sim/tests/test_coverage_link_remaining_phases.py \
+  sim/tests/test_constellation_design.py \
+  sim/tests/test_mission_scheduling.py \
+  sim/tests/test_mission_scheduling_sources.py \
   sim/tests/test_orbital_analysis_adapters.py -q
 ```
 
@@ -48,8 +55,16 @@ The acceptance fixtures cover:
 - exact synthetic constellation union, overlap, required multiplicity, failed
   cells, dwell, revisit, uniform domain/service identity, malformed-source
   rejection, and artifact fixtures;
+- analytic Walker Delta/Star/shell spacing and circular-radius checks, bounded
+  ONP-to-coverage/link composition, independent recomputation of retained
+  coverage and union-availability series, strict resource rejection, stable
+  ranking, receipt tamper rejection, and authoritative replay;
 - exact bounded task selection with source and asset bindings, slew/settling,
   duty, storage, horizon energy, downlink, stable tie behavior, and artifacts;
+- exact multi-asset scheduling plus retained-source conversion from real OEL
+  optical-collection and directed-link products, including shared-station
+  contention, delivered-data accounting, epoch/horizon/endpoint parity,
+  capacity units, tamper rejection, and authoritative source-aware replay;
 - standalone authorized next-boundary monitor delivery with consumer isolation
   and exact link-configuration binding. This proves the causal adapter
   protocol, not integration with an ONP or flight-software consumer; and

@@ -268,11 +268,11 @@ def test_doctor_and_host_config_make_disabled_effects_explicit(tmp_path: Path, m
     approvals = next(row for row in report["checks"] if row["check_id"] == "operator_approvals")
 
     assert report["status"] == "ready_with_disabled_effects"
-    assert registry["detail"]["tool_count"] == 30
+    assert registry["detail"]["tool_count"] == 35
     assert approvals["passed"] is False
     assert approvals["required"] is False
     assert report["network_listener"] is False
-    assert report["oel_version"] == "0.28.0"
+    assert report["oel_version"] == "0.29.0"
     assert report["oel_version_source"] == "source_pyproject"
     launch = next(row for row in report["checks"] if row["check_id"] == "host_launch")
     assert launch["passed"] is True

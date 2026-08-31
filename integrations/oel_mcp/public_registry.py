@@ -162,6 +162,140 @@ QUERY_REVIEW_RESULT_SCHEMA: dict[str, Any] = object_schema(
     ),
 )
 
+INSPECT_STUDY_RESULT_SCHEMA: dict[str, Any] = object_schema(
+    {
+        "schema_version": {"type": "string"},
+        "status": {"const": "verified"},
+        "study_id": {"type": "string"},
+        "bundle_semantic_sha256": {"type": "string"},
+        "request_sha256": {"type": "string"},
+        "plan_sha256": {"type": "string"},
+        "run_sha256": {"type": "string"},
+        "evidence_sha256": {"type": "string"},
+        "claims_sha256": {"type": "string"},
+        "step_count": {"type": "integer", "minimum": 0},
+        "claim_count": {"type": "integer", "minimum": 0},
+        "non_claim_count": {"type": "integer", "minimum": 0},
+        "title": {"type": "string"},
+        "question": {"type": "string"},
+        "capabilities": {"type": "array", "items": {"type": "string"}},
+        "steps": {"type": "array", "items": {"type": "object"}},
+        "claims": {"type": "array", "items": {"type": "object"}},
+        "non_claims": {"type": "array", "items": {"type": "string"}},
+    },
+    required=(
+        "schema_version",
+        "status",
+        "study_id",
+        "bundle_semantic_sha256",
+        "request_sha256",
+        "plan_sha256",
+        "run_sha256",
+        "evidence_sha256",
+        "claims_sha256",
+        "step_count",
+        "claim_count",
+        "non_claim_count",
+        "title",
+        "question",
+        "capabilities",
+        "steps",
+        "claims",
+        "non_claims",
+    ),
+)
+
+REPLAY_STUDY_RESULT_SCHEMA: dict[str, Any] = object_schema(
+    {
+        key: value
+        for key, value in INSPECT_STUDY_RESULT_SCHEMA["properties"].items()
+        if key not in {"title", "question", "capabilities", "steps", "claims", "non_claims"}
+    }
+    | {"replay_status": {"const": "identity_verified"}},
+    required=(
+        "schema_version",
+        "status",
+        "study_id",
+        "bundle_semantic_sha256",
+        "request_sha256",
+        "plan_sha256",
+        "run_sha256",
+        "evidence_sha256",
+        "claims_sha256",
+        "step_count",
+        "claim_count",
+        "non_claim_count",
+        "replay_status",
+    ),
+)
+
+COMPARE_STUDIES_RESULT_SCHEMA: dict[str, Any] = object_schema(
+    {
+        "schema_version": {"type": "string"},
+        "status": {"enum": ["equivalent", "different"]},
+        "same_bundle": {"type": "boolean"},
+        "left_study_id": {"type": "string"},
+        "right_study_id": {"type": "string"},
+        "left_bundle_semantic_sha256": {"type": "string"},
+        "right_bundle_semantic_sha256": {"type": "string"},
+        "changed_records": {"type": "array", "items": {"type": "string"}},
+        "changed_evidence_steps": {"type": "array", "items": {"type": "string"}},
+    },
+    required=(
+        "schema_version",
+        "status",
+        "same_bundle",
+        "left_study_id",
+        "right_study_id",
+        "left_bundle_semantic_sha256",
+        "right_bundle_semantic_sha256",
+        "changed_records",
+        "changed_evidence_steps",
+    ),
+)
+
+INSPECT_CCSDS_RESULT_SCHEMA: dict[str, Any] = object_schema(
+    {
+        "status": {"const": "inspected"},
+        "product_kind": {"enum": ["oem", "odm", "tdm", "cdm"]},
+        "source_path": {"type": "string"},
+        "source_sha256": {"type": "string"},
+        "inspection": {"type": "object"},
+        "execution_occurred": {"const": False},
+        "non_claims": {"type": "array", "items": {"type": "string"}},
+    },
+    required=(
+        "status",
+        "product_kind",
+        "source_path",
+        "source_sha256",
+        "inspection",
+        "execution_occurred",
+        "non_claims",
+    ),
+)
+
+FRAME_TIME_RESULT_SCHEMA: dict[str, Any] = object_schema(
+    {
+        "status": {"enum": ["converted", "inspected"]},
+        "operation": {"enum": ["convert_epoch", "inspect_eop", "transform_state", "transform_covariance"]},
+        "result": {"type": "object"},
+        "receipt": {"type": ["object", "null"]},
+        "eop_source": {"type": ["object", "null"]},
+        "execution_occurred": {"const": False},
+        "non_claims": {"type": "array", "items": {"type": "string"}},
+    },
+    required=(
+        "status",
+        "operation",
+        "result",
+        "receipt",
+        "eop_source",
+        "execution_occurred",
+        "non_claims",
+    ),
+)
+
 PLAN_RUN_RESULT_SCHEMA = object_schema(
     {
         "scenario": {"type": "object"},
@@ -1273,6 +1407,132 @@ PUBLIC_TOOL_CONTRACTS: tuple[ToolContract, ...] = (
         ),
         result_schema=MANEUVER_READINESS_RESULT_SCHEMA,
         limits={"new_output_required": True, "operator_approval_required": True},
+    ),
+    ToolContract(
+        tool_id="oel.inspect_study.v1",
+        title="Inspect a completed OEL study bundle",
+        description="Verify and summarize one content-bound public OEL study bundle without executing analysis.",
+        risk_class="R0_read",
+        oel_api="sim.study.inspect_study_bundle",
+        maturity="supported",
+        install_profile="mcp",
+        deployment_profiles=M4_LOCAL_PROFILES,
+        data_classes=("study_bundle", "analysis_evidence"),
+        writes=False,
+        input_schema=object_schema(
+            handling_properties({"bundle_dir": {"type": "string", "minLength": 1}}),
+            required=("bundle_dir", "handling"),
+        ),
+        result_schema=INSPECT_STUDY_RESULT_SCHEMA,
+        limits={"max_steps": 12, "max_evidence_file_bytes": 16 * 1024 * 1024},
+    ),
+    ToolContract(
+        tool_id="oel.replay_study.v1",
+        title="Replay OEL study bundle identity",
+        description="Recompute the authoritative identity and citation bindings of one completed public OEL study bundle.",
+        risk_class="R0_read",
+        oel_api="sim.study.replay_study_bundle",
+        maturity="supported",
+        install_profile="mcp",
+        deployment_profiles=M4_LOCAL_PROFILES,
+        data_classes=("study_bundle", "analysis_evidence"),
+        writes=False,
+        input_schema=object_schema(
+            handling_properties({"bundle_dir": {"type": "string", "minLength": 1}}),
+            required=("bundle_dir", "handling"),
+        ),
+        result_schema=REPLAY_STUDY_RESULT_SCHEMA,
+        limits={"identity_replay_only": True, "analysis_execution": False},
+    ),
+    ToolContract(
+        tool_id="oel.compare_studies.v1",
+        title="Compare two completed OEL study bundles",
+        description="Compare content-bound study identities, root records, and evidence steps without rerunning analysis.",
+        risk_class="R0_read",
+        oel_api="sim.study.compare_study_bundles",
+        maturity="supported",
+        install_profile="mcp",
+        deployment_profiles=M4_LOCAL_PROFILES,
+        data_classes=("study_bundle", "analysis_evidence"),
+        writes=False,
+        input_schema=object_schema(
+            handling_properties(
+                {
+                    "left_bundle_dir": {"type": "string", "minLength": 1},
+                    "right_bundle_dir": {"type": "string", "minLength": 1},
+                }
+            ),
+            required=("left_bundle_dir", "right_bundle_dir", "handling"),
+        ),
+        result_schema=COMPARE_STUDIES_RESULT_SCHEMA,
+        limits={"analysis_execution": False},
+    ),
+    ToolContract(
+        tool_id="oel.inspect_ccsds.v1",
+        title="Inspect a bounded CCSDS navigation message",
+        description="Parse and inspect one public OEM, ODM, TDM, or CDM file without converting or executing it.",
+        risk_class="R0_read",
+        oel_api="sim.ccsds.inspect_oem/inspect_odm/inspect_tdm/inspect_cdm",
+        maturity="supported",
+        install_profile="mcp",
+        deployment_profiles=M4_LOCAL_PROFILES,
+        data_classes=("ccsds_navigation_message",),
+        writes=False,
+        input_schema=object_schema(
+            handling_properties(
+                {
+                    "path": {"type": "string", "minLength": 1},
+                    "product_kind": {"type": "string", "enum": ["oem", "odm", "tdm", "cdm"]},
+                }
+            ),
+            required=("path", "product_kind", "handling"),
+        ),
+        result_schema=INSPECT_CCSDS_RESULT_SCHEMA,
+        limits={"max_input_file_bytes": MAX_MANIFEST_BYTES, "execution": False},
+    ),
+    ToolContract(
+        tool_id="oel.convert_frame_time.v1",
+        title="Inspect or convert bounded frame and time data",
+        description="Convert one epoch, inspect one EOP source, or transform one Cartesian state or covariance under the public frame/time contract.",
+        risk_class="R0_read",
+        oel_api="sim.frame_time",
+        maturity="supported",
+        install_profile="mcp",
+        deployment_profiles=M4_LOCAL_PROFILES,
+        data_classes=("frame_time_input", "earth_orientation_data"),
+        writes=False,
+        input_schema=object_schema(
+            handling_properties(
+                {
+                    "operation": {
+                        "type": "string",
+                        "enum": ["convert_epoch", "inspect_eop", "transform_state", "transform_covariance"],
+                    },
+                    "epoch": {"type": "string", "minLength": 1},
+                    "from_scale": {"type": "string", "enum": ["UTC", "TAI", "TT", "UT1"]},
+                    "to_scale": {"type": "string", "enum": ["UTC", "TAI", "TT", "UT1"]},
+                    "time_scale": {"type": "string", "enum": ["UTC", "TAI", "TT", "UT1"]},
+                    "dut1_s": {"type": "number", "minimum": -2.0, "maximum": 2.0},
+                    "source_frame": {"type": "string", "enum": ["EME2000", "TEME", "ITRF", "GCRF"]},
+                    "target_frame": {"type": "string", "enum": ["EME2000", "TEME", "ITRF", "GCRF"]},
+                    "position_km": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
+                    "velocity_km_s": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
+                    "covariance": {
+                        "type": "array",
+                        "items": {"type": "array", "items": {"type": "number"}, "minItems": 6, "maxItems": 6},
+                        "minItems": 6,
+                        "maxItems": 6,
+                    },
+                    "eop_path": {"type": "string", "minLength": 1},
+                    "eop_format": {"type": "string", "enum": ["auto", "finals2000a", "c04_csv"]},
+                    "as_of": {"type": "string", "minLength": 1},
+                    "max_observed_age_days": {"type": "number", "minimum": 0.0, "maximum": 3650.0},
+                }
+            ),
+            required=("operation", "handling"),
+        ),
+        result_schema=FRAME_TIME_RESULT_SCHEMA,
+        limits={"max_eop_file_bytes": MAX_MANIFEST_BYTES, "execution": False},
     ),
 )
 

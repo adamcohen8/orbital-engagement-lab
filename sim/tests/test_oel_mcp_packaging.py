@@ -131,5 +131,6 @@ def test_m5_wheel_packages_supported_mcp_profiles_and_keeps_dependency_optional(
         "oel://handoff/product-kinds/v1",
         "oel://review/plot-recipes/v1",
         "oel://review/animation-recipes/v1",
+        "oel://analysis/workflows/v1",
     )
     assert "supported local stdio OEL MCP surface" in guide

@@ -156,6 +156,11 @@ execution manifests.
 | `oel.materialize_scenario_patch.v1` | `R1_write` | Applies an accepted source-bound patch into a new validated scenario without execution |
 | `oel.compare_handoff.v1` | `R1_write` | Writes semantic-parity evidence across product, materialization, manifest, and optional consumer evidence |
 | `oel.assess_maneuver_readiness.v1` | `R1_write` | Applies explicit thresholds and writes a fail-closed readiness packet |
+| `oel.inspect_study.v1` | `R0_read` | Verifies and summarizes one content-bound public study bundle |
+| `oel.replay_study.v1` | `R0_read` | Recomputes a study bundle's identity and citation bindings without rerunning domain analysis |
+| `oel.compare_studies.v1` | `R0_read` | Compares study identities, root records, and evidence-step digests |
+| `oel.inspect_ccsds.v1` | `R0_read` | Parses and inspects one bounded OEM, ODM, TDM, or CDM source |
+| `oel.convert_frame_time.v1` | `R0_read` | Converts one epoch, audits one EOP source, or transforms one state/covariance |
 | `oel.fsw.describe.v1` | `R0_read` | Reports public FSW authoring templates, contracts, limits, and private boundaries |
 | `oel.fsw.inspect_candidate.v1` | `R0_read` | Hashes and inspects a candidate without importing or executing its source |
 | `oel.fsw.plan_candidate.v1` | `R0_read` | Plans one validate, component-test, or deterministic-smoke operation |
@@ -295,6 +300,7 @@ These tools are local-only and absent from `direct_frontier_restricted`.
 | `oel://handoff/product-kinds/v1` | Public-safe product-kind producers, next actions, and non-execution rules | `sim.handoff` |
 | `oel://review/plot-recipes/v1` | Supported recipes, evidence requirements, renderers, and natural-language routing triggers | `sim.review.plot_recipes` |
 | `oel://review/animation-recipes/v1` | Supported animation recipes, evidence requirements, bounds, and quality policy | `sim.review.animation_recipes` |
+| `oel://analysis/workflows/v1` | Public standalone-analysis routing, evidence, replay, and MCP support | `docs/agent-capability-routing.md`; `sim.analysis` |
 
 Resource discovery is one bounded page. Each resource is at most 500,000
 encoded bytes, has an explicit media type, and resolves only from checked-in
@@ -337,10 +343,10 @@ model-provider call:
   --output /tmp/oel-mcp-release-gate.json
 ```
 
-This verifies the restricted three-tool profile, then exercises all thirty
+This verifies the restricted three-tool profile, then exercises all thirty-five
 public tools—including product export and inspection, ONP and patch
 materialization, semantic handoff comparison, maneuver readiness, and bounded
-FSW authoring—through
+FSW authoring, plus read-only study, CCSDS, and frame/time adapters—through
 real SDK stdio subprocesses. Generated exports record
 `oel_commit: unavailable_public_export` instead of requiring `.git`. Add
 `--with-hosts` only when model-backed Codex/Claude and Inspector checks are

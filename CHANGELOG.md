@@ -6,6 +6,175 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.29.0 - 2026-08-31
+
+Release thesis: `v0.29.0` turns OEL's agent-native analysis layer into a
+broader set of bounded, typed, replayable public engineering workflows while
+adding separately entitled Pro optimization and orbit-determination
+foundations. Public agents can identify matching Pro product families when a
+request exceeds Public, but those recommendations remain explicitly coming
+soon, non-commercial, and non-executable in this release.
+
+### Added
+
+- Add public-safe, recommendation-only **coming soon** metadata for matching
+  Pro product families when a user's request materially exceeds Public. Agents
+  must still offer the public fallback; the metadata exposes no Pro execution
+  tools and makes no claim of purchase access, entitlement, pricing, or launch
+  timing.
+
+- Add a bounded public constellation and ground-network design workflow for up
+  to eight explicit Walker Delta, Walker Star, or circular shell candidates,
+  with ONP propagation, ideal-nadir coverage, same-epoch free-space ground
+  links, transparent scoring, retained sampled evidence, resource bounds, and
+  receipt-checked authoritative replay.
+- Register completed constellation-design evidence as the sixth public study
+  lifecycle capability and expose CLI/Python discovery without adding a
+  generic MCP execution surface.
+- Add OEL Pro Constellation Design under the `constellation_optimization`
+  entitlement, with bounded discrete orbit/site generation, exhaustive or
+  deterministic seeded search, analyst-declared cost feasibility, Pareto
+  ranking, mandatory public-evaluator reevaluation of promoted designs,
+  resumable content-bound checkpoints, atomic evidence, and authoritative
+  replay. The capability remains excluded from generated public exports.
+
+- Add a separately entitled Pro sequential tracking-OD workflow for reduced
+  ground range/range-rate and optical RA/Dec observations, with mandatory
+  untouched holdout covariance prediction, CLI/Python entry points,
+  content-bound evidence, and authoritative replay.
+- Add a separately entitled Pro ILRS/SLR OD workflow that safely captures CRD
+  v2 normal points, performs an OGP mean-element/station-bias batch fit, runs
+  fit-only EKF/RTS processing, separates validation from untouched holdout
+  prediction, and retains content-bound replay evidence with explicit
+  covariance and geodetic-quality non-claims.
+- Add a content-addressed, replayable two-day actual-ILRS qualification
+  campaign with fixed fit/validation/untouched-holdout partitions,
+  station-transfer diagnostics, residual-whiteness and covariance gates, and a
+  retained non-qualification when the recorded arc fails its predeclared
+  autocorrelation limits.
+- Define reduced tracking OD and ILRS/SLR OD as discoverable capabilities of
+  one **OEL Pro Orbit Determination** family while retaining the v0.29
+  `tracking_od` entitlement key for license compatibility.
+- Add central harness ownership for the five v0.29 frame/time, OEM, ODM,
+  orbit-lifetime, and study-lifecycle validation rows plus descriptor-anchored,
+  no-follow bounded reads for new evidence workflows.
+
+- Add bounded public CCSDS OEM 3.0 KVN inspection, deterministic
+  serialization, semantic comparison, Earth/EME2000/UTC mission-input
+  conversion, and canonical completed-run export with content-bound receipts.
+- Add official-example and malformed-input coverage plus retained,
+  checksum-bound Orekit 13.1.7 cross-read evidence; STK, ODTK, and paid
+  services are not required for this interoperability slice.
+- Add the public `oel.frame-time.v1` contract for leap-second-aware
+  UTC/TAI/TT and sampled-UT1 conversion plus EME2000/TEME/GCRF/ITRF Cartesian
+  state and 6x6 covariance transformation, including an IAU 2006/2000A GCRF
+  path with content-bound EOP provenance.
+- Extend OEM to `oel.ccsds-oem-kvn.v0.2` with bounded Cartesian covariance
+  parsing, serialization, semantic comparison, import provenance, and optional
+  completed-run covariance export.
+- Add bounded public CCSDS OPM/OMM 3.0 KVN inspection, deterministic
+  serialization, semantic comparison, Earth/EME2000/UTC OPM state import, and
+  mean-element-preserving OMM interchange without silent materialization.
+- Add a bounded public conjunction-assessment foundation with CCSDS CDM 1.0
+  KVN inspection/round-trip, refined two-object TCA and encounter geometry,
+  transparent educational 2D Pc integration, and targeter-backed impulsive
+  candidates that require full-window repropagation and explicit secondary
+  rescreen evidence.
+- Add bounded public optical collection-opportunity analysis for one WGS84
+  target and hard-FOV payload, including refined geometry/illumination windows,
+  gimbal/slew/settling screens, transparent first-order resolution and
+  footprint evidence, and optional storage/content-bound downlink feasibility.
+- Add a bounded public CCSDS TDM 2.0 KVN tracking-OD workflow for
+  analyst-declared reduced-geometric UTC AZEL and one-way unambiguous range,
+  including canonical round-trip, normalized content-bound measurements, one
+  batch fit, mandatory holdout repropagation, residual/covariance/convergence
+  evidence, and a synthetic independently checked example.
+- Add bounded exact multi-asset mission scheduling for up to 18 supplied
+  opportunities, including per-asset slew/settling, energy, storage, and duty
+  limits; shared-station contention; observation-to-downlink delivered-data
+  accounting; content-bound JSON/CSV evidence; and authoritative exact replay.
+- Add a content-bound source adapter that verifies completed OEL optical
+  collection and directed-link products, converts their observations and link
+  intervals into the bounded scheduler, retains portable source copies, and
+  rebuilds the problem plus exact solution during source-aware replay.
+- Add a bounded public integrated study lifecycle for completed trajectory
+  targeting, conjunction assessment, and mission scheduling evidence, with six
+  versioned records, a combined JSON Schema, deterministic content bindings,
+  evidence-cited claims and non-claims, atomic bundle creation, verified
+  inspection, provenance replay, semantic comparison, and a real three-domain
+  canonical example.
+- Add bounded public spacecraft-power feasibility for one retained ECI history
+  and declared load timeline, including analytic Sun geometry, cylindrical or
+  conical eclipse, ideal or retained-attitude array incidence, rate/efficiency/
+  reserve-limited battery accounting, refined transitions, conservation
+  residuals, schedule digest binding, complete JSON/CSV evidence, authoritative
+  replay, study-lifecycle registration, and a schedule-coupled canonical
+  example.
+- Add bounded public ONP orbit-decay and lifetime analysis for one supplied ECI
+  state, with explicit frozen atmosphere inputs, refined warning/disposal/
+  reentry-altitude events, osculating-orbit and drag histories, energy
+  accounting, identical-input atmosphere comparisons, strict JSON/CSV
+  evidence, authoritative replay, study-lifecycle registration, and an
+  analytically checked and deterministically replayable canonical workflow.
+- Add a private Pro constrained trajectory-optimization workflow with bounded
+  scaled variables, weighted objectives, equality/inequality/path/resource
+  constraints, impulsive and finite burns with mass depletion, state-and-mass
+  multiple shooting, SLSQP and trust-constr adapters, deterministic
+  multi-start and local robustness, mandatory ONP repropagation, and atomic
+  digest-bound evidence replay under the `trajectory_optimization` entitlement.
+- Add a public MCP orbital-analysis workflow resource plus read-only study,
+  CCSDS, and frame/time adapters, and add local-only entitled Pro trajectory-
+  optimization validation, solve/evidence, and authoritative replay tools.
+- Update root, public, and Pro agent guidance to route requests through scenario
+  YAML or versioned standalone analysis problems and to require authoritative
+  replay before bounded claims.
+
+### Fixed
+
+- Make linked-worktree pytest runs portable by isolating generated qualification
+  evidence in its unit test and skipping explicitly marked local-evidence tests
+  unless requested. The measured private suite opts those tests back into
+  strict execution, while frozen test sources and evidence hashes remain
+  unchanged.
+
+### Known limitations
+
+- OEM XML, non-Earth-center conversion, EOP prediction, covariance calibration,
+  and full ephemeris replay remain outside the bounded public contracts.
+- Public conjunction assessment does not provide catalog monitoring,
+  covariance propagation/calibration, nonlinear or multiple Pc methods,
+  constrained avoidance optimization, full-catalog rescreening, or operational
+  maneuver authority.
+- Public optical collection analysis does not provide terrain/weather/cloud
+  effects, calibrated image quality, achieved attitude dynamics, exact swept
+  overlap, multi-observation scheduling or resource timelines, radar
+  performance, or operational collection authority.
+- Public TDM tracking OD does not reduce raw radiometric data or support XML,
+  Doppler, broader angle/range conventions, light-time/media/transponder
+  calibration, association/custody, calibrated predicted orbit accuracy,
+  campaign-scale processing, or operational tracking authority.
+- Public mission scheduling does not create or validate access windows and does
+  not model batteries, thermal state, crosslinks, routing, uncertainty,
+  disruption recovery, rolling-horizon replanning, or operational-scale
+  optimization.
+- Source-aware scheduling verifies supported OEL product structure, identity,
+  epochs, intervals, and receipts but does not independently requalify upstream
+  physics, infer missing link pointing, establish operational freshness, or
+  authorize collection or communications.
+- Public study replay verifies retained records, citations, and evidence
+  identity; it does not rerun domain physics. V1 has no managed execution,
+  cancellation/resume, migration, campaign, viewer, team-signoff, customer
+  governance, or operational-authorization workflow.
+- Public spacecraft-power analysis does not model thermal state, degradation,
+  self-shadowing, regulator/bus topology, uncertainty, probabilistic
+  availability, detailed EPS hardware, qualification, or operational power
+  authority.
+- Public orbit-lifetime analysis is a bounded deterministic propagation with
+  frozen scalar atmosphere inputs. It does not ingest or predict space weather,
+  calibrate density or ballistic coefficient, quantify uncertainty, establish
+  disposal compliance, assess surviving-debris risk, maintain custody, qualify
+  software, or authorize operations.
+
 ## 0.28.0 - 2026-08-27
 
 Release thesis: `v0.28.0` makes deterministic agent runs and signed release

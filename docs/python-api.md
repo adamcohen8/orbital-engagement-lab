@@ -60,8 +60,36 @@ print(result.summary["scenario_name"])
 ```
 
 The private Pro distribution adds controller-bench, campaign, and saved-output
-report workflows on top of this facade. Public-core Python workflows are
-limited to deterministic single-run scenarios.
+report workflows on top of this facade. Public core also provides bounded,
+versioned standalone analysis APIs; those remain separate from the scenario
+workspace façade and keep their own contracts and evidence.
+
+## Bounded constellation-design API
+
+Use `sim.constellation_design` to validate, evaluate, publish, or replay a
+small explicit Walker/shell and ground-network trade:
+
+```python
+import json
+from pathlib import Path
+
+from sim.constellation_design import (
+    ConstellationDesignProblem,
+    solve_constellation_design,
+    verify_constellation_design_artifacts,
+    write_constellation_design_artifacts,
+)
+
+payload = json.loads(Path("my_constellation_trade.json").read_text())
+problem = ConstellationDesignProblem.from_mapping(payload)
+result = solve_constellation_design(problem)
+artifacts = write_constellation_design_artifacts(result, "outputs/my_trade")
+verified = verify_constellation_design_artifacts(artifacts.output_dir)
+```
+
+See [Constellation And Ground-Network Design](constellation-design.md) for the
+resource envelope, evidence semantics, validation plan, and Public/Pro
+boundary.
 
 ## Scenario Artifacts
 

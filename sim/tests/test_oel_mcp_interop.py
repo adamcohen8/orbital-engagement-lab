@@ -71,6 +71,7 @@ def test_supported_public_resources_are_bounded_and_exclude_private_metadata() -
     animation_catalog = json.loads(
         catalog[PUBLIC_RESOURCE_URIS.index("oel://review/animation-recipes/v1")].text
     )
+    workflow_catalog = json.loads(catalog[PUBLIC_RESOURCE_URIS.index("oel://analysis/workflows/v1")].text)
     assert [tool["name"] for tool in tool_catalog["tools"]] == list(PUBLIC_TOOL_IDS)
     assert {query["name"] for query in query_catalog["queries"]} == set(PUBLIC_SAVED_QUERY_NAMES)
     assert all("public" in task["tags"] and "pro" not in task["tags"] for task in task_catalog["tasks"])
@@ -83,7 +84,28 @@ def test_supported_public_resources_are_bounded_and_exclude_private_metadata() -
     }
     assert animation_catalog["quality_policy"]["contact_sheet_required"] is True
     assert plot_catalog["routing"]["oel_review_evidence_plotter_is_authoritative"] is True
-    assert "oel.pro." not in "".join(resource.text for resource in catalog)
+    pro_escalations = [
+        workflow["pro_escalation"]
+        for workflow in workflow_catalog["workflows"]
+        if "pro_escalation" in workflow
+    ] + workflow_catalog["cross_cutting_pro_escalations"]
+    assert {capability_id for item in pro_escalations for capability_id in item["capability_ids"]} == {
+        "constellation_design.optimization",
+        "oel.pro.campaign.monte_carlo.v1",
+        "oel.pro.campaign.sensitivity.v1",
+        "oel.pro.controller.benchmark.v1",
+        "oel.pro.scale.screening.v1",
+        "oel.pro.trajectory_optimization.v1",
+        "orbit_determination.ilrs_slr",
+        "orbit_determination.reduced_tracking",
+    }
+    assert all(item["availability"] == "coming_soon" for item in pro_escalations)
+    assert all(item["recommendation_only"] is True for item in pro_escalations)
+    assert all(item["execution_available"] is False and item["mcp_tools"] == [] for item in pro_escalations)
+    public_resource_text = "".join(resource.text for resource in catalog)
+    assert "sim.pro_" not in public_resource_text
+    assert "agents/pro" not in public_resource_text
+    assert "/Users/" not in public_resource_text
 
 
 def test_sdk_resource_reader_rejects_unlisted_uri_without_path_details() -> None:
@@ -276,6 +298,11 @@ def test_public_workflow_acceptance_uses_real_stdio_and_no_provider_calls(tmp_pa
         "execute",
         "inspect",
         "query",
+        "inspect_study",
+        "replay_study",
+        "compare_studies",
+        "inspect_ccsds",
+        "convert_frame_time",
         "fsw_describe",
         "fsw_scaffold",
         "fsw_inspect",

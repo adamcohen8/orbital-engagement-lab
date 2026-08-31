@@ -6,9 +6,10 @@ Orbital Engagement Lab core.
 ## Mission
 
 Public OEL Agents make the project easier to understand, modify, and run. They
-can help users generate valid public scenario YAML, validate configs, run
-approved simulations, inspect outputs, explain public models/controllers, and
-support educational or game workflows.
+can help users generate valid public scenario YAML or typed standalone
+orbital-analysis problems, validate inputs, run approved workflows, replay and
+inspect evidence, explain public models/controllers, and support educational
+or game workflows.
 
 Agents should be transparent contributors. They should cite the files or docs
 they used, prefer public examples over invention, and leave deterministic
@@ -16,8 +17,9 @@ simulation and reporting to OEL itself.
 
 Examples are rails, not boundaries. Use them when they fit the user's request,
 but do not reduce OEL Agents to a fixed example catalog. The durable agent
-interface is the documented workflow: scenario YAML, validation, deterministic
-runs, review queries, artifacts, tests, and honest limits.
+interface is the documented workflow: scenario YAML or a versioned analysis
+problem, validation, deterministic execution, authoritative replay, review
+queries, artifacts, tests, and honest limits.
 
 Terminology: **OGP** means the **OEL General Propagator**, OEL's catalog-style
 general-perturbations family for TLE/mean-element products. **OGP-SGP4** is the
@@ -45,14 +47,17 @@ reference/validation workflows.
 ## Supported Workflows
 
 1. Install and activate OEL using `docs/installation.md`.
-2. Read the relevant docs and examples.
-3. Draft or edit scenario YAML.
-4. Validate the config before execution.
-5. Run the scenario through `run_simulation.py`.
-6. Inspect generated `index.md`, `master_run_summary.json`, CSV, and plot
-   artifacts.
-7. Use `python -m sim.review` when a run includes `review/run.sqlite`.
-8. Evaluate the run with `agents/public/evaluation-rubric.md`.
+2. Read `docs/agent-capability-routing.md` and the relevant workflow docs.
+3. Choose scenario YAML for simulator time histories, or the documented
+   versioned problem/product contract for a standalone orbital analysis.
+4. Validate the selected input before execution.
+   For scenario YAML, validate before running it.
+5. Execute only through the documented CLI or Python API.
+6. Run the workflow's authoritative replay or identity verification when it
+   exists; replay is separate from solver success.
+7. Inspect generated evidence, including review queries for scenario runs and
+   typed receipts/manifests for standalone analyses.
+8. Evaluate the result with `agents/public/evaluation-rubric.md`.
 9. Summarize results from saved artifacts, not from memory or speculation.
 10. Add tests or smoke checks for new agent-facing examples.
 
@@ -75,9 +80,32 @@ external-process, or cFS/SIL workflows in public scripts.
 The preferred agent evidence loop is:
 
 ```text
-ordinary-language request -> scenario YAML -> validate -> run
--> review query or artifact inspection -> evidence-backed answer
+request -> route -> scenario YAML or typed orbital-analysis problem -> validate
+-> execute -> authoritative replay -> inspect -> bounded claim
 ```
+
+Public standalone analysis includes bounded CCSDS interchange, canonical
+frame/time conversion, trajectory targeting, conjunction assessment,
+collection analysis, tracking-data OD, mission scheduling, bounded
+constellation design, spacecraft power, orbit lifetime, and the content-bound
+study lifecycle. Use
+`oel://analysis/workflows/v1` for MCP-connected discovery. Only the study,
+CCSDS, and frame/time read-only adapters are currently exposed through MCP;
+use the documented CLI or Python API for the other public workflows.
+
+That resource may also name a recommendation-only Pro escalation when the
+user's request materially exceeds a public workflow. Describe it as
+**coming soon and not currently available for purchase or execution**, and
+offer the listed public fallback. Do not treat the metadata as entitlement or
+execution authority, invent a launch date or price, expose private interfaces,
+or upsell Pro when the public workflow is sufficient.
+
+For a small explicit Walker/shell and ground-site trade, use
+`docs/constellation-design.md` and `python -m sim.constellation_design`. Keep
+the public workflow inside its declared candidate and work bounds. Do not turn
+it into automatic design-space generation, large optimization, ground-site
+placement, crosslink routing, capacity planning, or a managed campaign; those
+remain excluded private or future workflows.
 
 Use `docs/agent-evaluation-packet.md` to evaluate whether an agent follows this
 loop. Use `docs/agent-capability-routing.md` for first-run paths and broader
@@ -283,22 +311,22 @@ Agents should generalize from OEL's documented interfaces, not from memorized
 example outcomes. For a request that is not exactly one of the checked-in
 examples:
 
-1. Translate the request into a small OEL study: objects, initial state,
-   dynamics, controller posture, duration, outputs, and success evidence.
-2. Decide whether an existing public example is close enough to copy, or
-   whether a new scenario YAML file is clearer.
-3. Keep only the complexity required by the user's goal.
-4. Validate the generated config before execution.
-5. Run the deterministic simulator and inspect saved artifacts.
-6. Use `python -m sim.review` when a review store exists.
-7. State assumptions, missing evidence, and model limits in the answer.
+1. Translate the request into the minimum OEL workflow and acceptance evidence.
+2. Decide whether it needs simulator time history and scenario YAML, or a
+   supported versioned standalone analysis problem/product.
+3. Reuse an example only when its contract genuinely fits the request.
+4. Validate the selected input before execution.
+5. Execute through the documented interface and retain the complete evidence.
+6. Perform authoritative replay or identity verification when available, then
+   inspect review tables, typed receipts, manifests, and artifacts.
+7. State assumptions, missing evidence, non-claims, and model limits.
 
 If no public-core workflow can answer the request, say so and point to the
 nearest public alternative instead of pretending an example proves more than it
 does.
 
-Use `docs/agent-capability-routing.md` before choosing an example or customizing
-a first-run scenario. It covers workflow evidence and clarifying-question
+Use `docs/agent-capability-routing.md` before choosing an example, customizing
+a first-run scenario, or authoring a standalone problem. It covers workflow evidence and clarifying-question
 triggers for propagation, TLEs, rendezvous, access, attitude, plotting, game
 training, comparison, validation, sealed mode, and public-core boundaries.
 
@@ -372,8 +400,8 @@ python run_game.py examples/configs/public_manual_rpo_training.yaml
 
 Users should be able to ask for OEL work in ordinary language. Do not require
 them to provide a structured template. Interpret the request, choose the
-nearest public workflow, create or edit YAML, validate, run, inspect outputs,
-and evaluate the result.
+nearest public workflow, create or edit scenario YAML or a typed analysis
+problem, validate, execute, replay, inspect evidence, and evaluate the result.
 
 Examples of acceptable user requests:
 
