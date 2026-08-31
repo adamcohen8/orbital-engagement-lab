@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import asdict
+from datetime import datetime, timezone
 from pathlib import Path
 from threading import Event
 from typing import Any
@@ -39,7 +40,20 @@ from integrations.oel_mcp.reporting import prepare_report_packet as prepare_repo
 from sim.agent_task.plot_recipes import get_plot_recipe
 from sim.agent_task.recipes import get_recipe, is_public_mcp_recipe
 from sim.agent_task.runner import AgentTaskCancelled, compare_outputs, create_plot, inspect_output, run_recipe
+from sim.ccsds import inspect_cdm, inspect_odm, inspect_oem, inspect_tdm
 from sim.execution import run_simulation_config_file
+from sim.frame_time import (
+    FrameTimeError,
+    FrameTransformContext,
+    TimeScale,
+    audit_eop_series,
+    epoch_conversion_receipt,
+    frame_transform_receipt,
+    load_iers_eop,
+    parse_epoch,
+    transform_cartesian_state,
+    transform_covariance,
+)
 from sim.handoff import (
     compare_handoff,
     emit_scenario_overlay,
@@ -64,6 +78,7 @@ from sim.review import (
 from sim.review import render_review_animation as render_planned_review_animation
 from sim.review import render_review_plot as render_planned_review_plot
 from sim.security import ConfigPathPolicy
+from sim.study import compare_study_bundles, inspect_study_bundle, replay_study_bundle
 
 
 class PublicOELMCPHandlers(BaseOELMCPHandlers):
@@ -148,6 +163,21 @@ class PublicOELMCPHandlers(BaseOELMCPHandlers):
     def assess_maneuver_readiness(self, **arguments: Any) -> dict[str, Any]:
         return self.call("oel.assess_maneuver_readiness.v1", arguments)
 
+    def inspect_study(self, **arguments: Any) -> dict[str, Any]:
+        return self.call("oel.inspect_study.v1", arguments)
+
+    def replay_study(self, **arguments: Any) -> dict[str, Any]:
+        return self.call("oel.replay_study.v1", arguments)
+
+    def compare_studies(self, **arguments: Any) -> dict[str, Any]:
+        return self.call("oel.compare_studies.v1", arguments)
+
+    def inspect_ccsds(self, **arguments: Any) -> dict[str, Any]:
+        return self.call("oel.inspect_ccsds.v1", arguments)
+
+    def convert_frame_time(self, **arguments: Any) -> dict[str, Any]:
+        return self.call("oel.convert_frame_time.v1", arguments)
+
     def _call_contract(
         self,
         contract: ToolContract,
@@ -201,7 +231,166 @@ class PublicOELMCPHandlers(BaseOELMCPHandlers):
             return self._compare_handoff(contract, arguments)
         if contract.tool_id == "oel.assess_maneuver_readiness.v1":
             return self._assess_maneuver_readiness(contract, arguments)
+        if contract.tool_id == "oel.inspect_study.v1":
+            return self._inspect_study(contract, arguments)
+        if contract.tool_id == "oel.replay_study.v1":
+            return self._replay_study(contract, arguments)
+        if contract.tool_id == "oel.compare_studies.v1":
+            return self._compare_studies(contract, arguments)
+        if contract.tool_id == "oel.inspect_ccsds.v1":
+            return self._inspect_ccsds(contract, arguments)
+        if contract.tool_id == "oel.convert_frame_time.v1":
+            return self._convert_frame_time(contract, arguments)
         raise PermissionError("Tool is not available in this deployment profile.")
+
+    def _inspect_study(self, contract: ToolContract, arguments: dict[str, Any]) -> dict[str, Any]:
+        def operation() -> dict[str, Any]:
+            bundle = self.path_policy.resolve_read(arguments["bundle_dir"], kind="directory")
+            _authorize_study_bundle(self.path_policy, bundle)
+            return inspect_study_bundle(bundle)
+
+        return self._envelope(
+            contract=contract,
+            arguments=arguments,
+            operation=operation,
+            outcome_status=lambda _result: "completed",
+            evidence=lambda _result: {"complete": True, "empty": False, "truncated": False},
+        )
+
+    def _replay_study(self, contract: ToolContract, arguments: dict[str, Any]) -> dict[str, Any]:
+        def operation() -> dict[str, Any]:
+            bundle = self.path_policy.resolve_read(arguments["bundle_dir"], kind="directory")
+            _authorize_study_bundle(self.path_policy, bundle)
+            return replay_study_bundle(bundle)
+
+        return self._envelope(
+            contract=contract,
+            arguments=arguments,
+            operation=operation,
+            outcome_status=lambda _result: "completed",
+            evidence=lambda _result: {"complete": True, "empty": False, "truncated": False},
+        )
+
+    def _compare_studies(self, contract: ToolContract, arguments: dict[str, Any]) -> dict[str, Any]:
+        def operation() -> dict[str, Any]:
+            left = self.path_policy.resolve_read(arguments["left_bundle_dir"], kind="directory")
+            right = self.path_policy.resolve_read(arguments["right_bundle_dir"], kind="directory")
+            _authorize_study_bundle(self.path_policy, left)
+            _authorize_study_bundle(self.path_policy, right)
+            return compare_study_bundles(left, right)
+
+        return self._envelope(
+            contract=contract,
+            arguments=arguments,
+            operation=operation,
+            outcome_status=lambda _result: "completed",
+            evidence=lambda _result: {"complete": True, "empty": False, "truncated": False},
+        )
+
+    def _inspect_ccsds(self, contract: ToolContract, arguments: dict[str, Any]) -> dict[str, Any]:
+        inspectors = {"oem": inspect_oem, "odm": inspect_odm, "tdm": inspect_tdm, "cdm": inspect_cdm}
+
+        def operation() -> dict[str, Any]:
+            source = self.path_policy.resolve_read(arguments["path"], kind="file")
+            require_file_size(source, maximum=MAX_MANIFEST_BYTES)
+            product_kind = str(arguments["product_kind"])
+            return {
+                "status": "inspected",
+                "product_kind": product_kind,
+                "source_path": str(source),
+                "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+                "inspection": inspectors[product_kind](source),
+                "execution_occurred": False,
+                "non_claims": [
+                    "CCSDS parsing and profile inspection do not certify upstream navigation accuracy.",
+                    "Inspection does not execute a scenario or authorize use of the message for operations.",
+                ],
+            }
+
+        return self._envelope(
+            contract=contract,
+            arguments=arguments,
+            operation=operation,
+            outcome_status=lambda _result: "completed",
+            evidence=lambda _result: {"complete": True, "empty": False, "truncated": False},
+        )
+
+    def _convert_frame_time(self, contract: ToolContract, arguments: dict[str, Any]) -> dict[str, Any]:
+        def operation() -> dict[str, Any]:
+            operation_id = str(arguments["operation"])
+            if operation_id == "convert_epoch":
+                _require_argument_fields(arguments, operation_id, "epoch", "from_scale", "to_scale")
+                dut1_s = arguments.get("dut1_s")
+                epoch = parse_epoch(arguments["epoch"], arguments["from_scale"], dut1_s=dut1_s)
+                receipt = epoch_conversion_receipt(epoch, arguments["to_scale"], dut1_s=dut1_s)
+                return _frame_time_projection(operation_id, result=dict(receipt["output"]), receipt=receipt)
+            if operation_id == "inspect_eop":
+                _require_argument_fields(arguments, operation_id, "eop_path")
+                source = self.path_policy.resolve_read(arguments["eop_path"], kind="file")
+                require_file_size(source, maximum=MAX_MANIFEST_BYTES)
+                series = load_iers_eop(source, source_format=str(arguments.get("eop_format", "auto")))
+                audit = audit_eop_series(
+                    series,
+                    as_of=_parse_utc_datetime(arguments.get("as_of")),
+                    max_observed_age_days=float(arguments.get("max_observed_age_days", 45.0)),
+                )
+                return _frame_time_projection(
+                    operation_id,
+                    status="inspected",
+                    result=audit,
+                    receipt=audit,
+                    eop_source=series.receipt(),
+                )
+            _require_argument_fields(arguments, operation_id, "epoch", "time_scale", "source_frame", "target_frame")
+            context, eop_receipt = self._frame_time_context(arguments)
+            if operation_id == "transform_state":
+                _require_argument_fields(arguments, operation_id, "position_km", "velocity_km_s")
+                position, velocity = transform_cartesian_state(
+                    arguments["position_km"],
+                    arguments["velocity_km_s"],
+                    arguments["source_frame"],
+                    arguments["target_frame"],
+                    context=context,
+                )
+                result = {"position_km": position.tolist(), "velocity_km_s": velocity.tolist()}
+            else:
+                _require_argument_fields(arguments, operation_id, "covariance")
+                result = {
+                    "covariance": transform_covariance(
+                        arguments["covariance"],
+                        arguments["source_frame"],
+                        arguments["target_frame"],
+                        context=context,
+                    ).tolist()
+                }
+            receipt = frame_transform_receipt(arguments["source_frame"], arguments["target_frame"], context=context)
+            return _frame_time_projection(operation_id, result=result, receipt=receipt, eop_source=eop_receipt)
+
+        return self._envelope(
+            contract=contract,
+            arguments=arguments,
+            operation=operation,
+            outcome_status=lambda _result: "completed",
+            evidence=lambda _result: {"complete": True, "empty": False, "truncated": False},
+        )
+
+    def _frame_time_context(self, arguments: dict[str, Any]) -> tuple[FrameTransformContext, dict[str, Any] | None]:
+        scale = TimeScale(str(arguments["time_scale"]).upper())
+        series = None
+        if arguments.get("eop_path"):
+            source = self.path_policy.resolve_read(arguments["eop_path"], kind="file")
+            require_file_size(source, maximum=MAX_MANIFEST_BYTES)
+            series = load_iers_eop(source, source_format=str(arguments.get("eop_format", "auto")))
+        if scale is TimeScale.UT1 and series is None:
+            raise FrameTimeError("UT1 input requires an epoch-matched EOP source.")
+        if scale is TimeScale.UT1:
+            provisional = parse_epoch(arguments["epoch"], scale, dut1_s=0.0)
+            epoch_eop = series.sample(provisional)
+            epoch = parse_epoch(arguments["epoch"], scale, dut1_s=epoch_eop.dut1_s)
+        else:
+            epoch = parse_epoch(arguments["epoch"], scale)
+        eop = None if series is None else series.sample(epoch)
+        return FrameTransformContext(epoch=epoch, earth_orientation=eop), None if series is None else series.receipt()
 
     def _inspect_run(self, contract: ToolContract, arguments: dict[str, Any]) -> dict[str, Any]:
         def operation() -> dict[str, Any]:
@@ -1592,6 +1781,62 @@ def _authorize_review_inputs(
                 resolved,
                 maximum=MAX_REVIEW_STORE_BYTES if is_review_store else MAX_MANIFEST_BYTES,
             )
+
+
+def _authorize_study_bundle(path_policy: Any, bundle: Path) -> None:
+    entries = list(bundle.rglob("*"))
+    if len(entries) > 64:
+        raise ValueError("Study bundle exceeds the bounded 64-entry inspection limit.")
+    total_bytes = 0
+    for entry in entries:
+        relative = entry.relative_to(bundle)
+        resolved = path_policy.resolve_read_child(
+            bundle, *relative.parts, kind="directory" if entry.is_dir() else "file"
+        )
+        if resolved.is_symlink():
+            raise ValueError("Study bundle entries must not be symlinks.")
+        if resolved.is_file():
+            require_file_size(resolved, maximum=16 * 1024 * 1024)
+            total_bytes += resolved.stat().st_size
+    if total_bytes > 64 * 1024 * 1024:
+        raise ValueError("Study bundle exceeds the bounded 64 MiB inspection limit.")
+
+
+def _require_argument_fields(arguments: dict[str, Any], operation: str, *names: str) -> None:
+    missing = [name for name in names if arguments.get(name) is None]
+    if missing:
+        raise ValueError(f"{operation} requires fields: {', '.join(missing)}.")
+
+
+def _parse_utc_datetime(value: Any) -> datetime:
+    if value is None:
+        return datetime.now(timezone.utc)
+    text = str(value)
+    normalized = text[:-1] + "+00:00" if text.endswith("Z") else text
+    parsed = datetime.fromisoformat(normalized)
+    return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
+
+
+def _frame_time_projection(
+    operation: str,
+    *,
+    result: dict[str, Any],
+    receipt: dict[str, Any] | None,
+    eop_source: dict[str, Any] | None = None,
+    status: str = "converted",
+) -> dict[str, Any]:
+    return {
+        "status": status,
+        "operation": operation,
+        "result": result,
+        "receipt": receipt,
+        "eop_source": eop_source,
+        "execution_occurred": False,
+        "non_claims": [
+            "Frame and time conversion does not validate the physical accuracy of upstream state data.",
+            "Earth-orientation freshness and provenance remain part of the returned evidence contract.",
+        ],
+    }
 
 
 def _incomplete_manifest_status(output_dir: Path) -> dict[str, Any] | None:

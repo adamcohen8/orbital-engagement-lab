@@ -1,0 +1,56 @@
+{
+  "artifacts": [
+    {
+      "path": "oel_earth_eme2000_utc_v3.opm",
+      "role": "bounded OPM KVN validation fixture",
+      "sha256": "4a44c9cab9a65ff2886f704de7007c1c30922cc2dd135490ea242fb319507569"
+    },
+    {
+      "path": "oel_sgp4_mean_elements_v3.omm",
+      "role": "bounded OMM KVN validation fixture",
+      "sha256": "0dfe0facb19796a728e806926e4fcdd973d146fdde4c4e195db0ed427230c31e"
+    },
+    {
+      "path": "ccsds_odm_orekit_13_1_7_acceptance.json",
+      "role": "retained independent implementation acceptance evidence",
+      "sha256": "b5e562aada500f4bb6632ee6109e948e776f4785576b8bd8067b7f3e81cedb32"
+    },
+    {
+      "path": "../../../tools/external_reference/OrekitOdmAcceptance.java",
+      "role": "pinned Orekit reference computation source",
+      "sha256": "54beabf3401ff9200a58762a1f70500930814c6c477717e9f7544dba706b4f59"
+    },
+    {
+      "path": "../../../tools/validate_ccsds_odm.py",
+      "role": "reference refresh and comparison workflow",
+      "sha256": "7b558a89497559be4b0e75e9355c69ce22984ec19d98e3ec4b675fe2c105f494"
+    },
+    {
+      "path": "../ccsds_odm.py",
+      "role": "authoritative ODM implementation owner",
+      "sha256": "5f5cbdad3a3ee3e1c00fcfd788cc3840969782429dc21e38a5415428cb53d943"
+    },
+    {
+      "path": "../../ccsds.py",
+      "role": "public CCSDS facade and CLI",
+      "sha256": "8bb318c2922e3b378b6b77ed76d1853fdf32fdb1042febc00864fe59f75f04b0"
+    }
+  ],
+  "authority": {
+    "document": "Navigation Data Messages, CCSDS 502.0-B-3",
+    "organization": "Consultative Committee for Space Data Systems",
+    "url": "https://ccsds.org/Pubs/502x0b3e1.pdf"
+  },
+  "capability": "Bounded CCSDS 502.0-B-3 OPM/OMM 3.0 KVN inspection, semantic round-trip, and OPM mission-input conversion",
+  "claim": "OEL and pinned Orekit 13.1.7 agree on the exact OPM and OMM selected fields enumerated by the retained cross-read report.",
+  "generated_utc": "2026-08-29T18:20:00Z",
+  "non_claims": [
+    "The profile is intentionally bounded and is not complete CCSDS 502.0-B-3 coverage.",
+    "OMM import does not silently convert mean elements to an osculating Cartesian state.",
+    "OPM maneuvers are preserved but are not scheduled or executed.",
+    "Parsing and semantic parity do not establish orbit, maneuver, or covariance accuracy."
+  ],
+  "reference_refresh": "python -m tools.validate_ccsds_odm --output sim/interchange/examples/ccsds_odm_orekit_13_1_7_acceptance.json --orekit-root path/to/pinned/orekit",
+  "routine_replay": "python -m pytest -q sim/tests/test_ccsds_odm.py",
+  "schema": "oel.ccsds-opm-omm-validation-manifest.v1"
+}

@@ -1,0 +1,84 @@
+{
+  "analysis_id": "public_walker_ground_network_trade",
+  "coverage": {
+    "half_angle_deg": 35.0,
+    "order": 5,
+    "required_multiplicity": 1
+  },
+  "designs": [
+    {
+      "altitude_km": 550.0,
+      "design_id": "delta_4_2_1",
+      "ground_site_ids": [
+        "colorado_springs"
+      ],
+      "inclination_deg": 53.0,
+      "initial_phase_deg": 0.0,
+      "pattern": "walker_delta",
+      "phasing": 1,
+      "plane_count": 2,
+      "raan_span_deg": null,
+      "raan_start_deg": 0.0,
+      "satellite_count": 4
+    },
+    {
+      "altitude_km": 550.0,
+      "design_id": "star_4_2_1_two_sites",
+      "ground_site_ids": [
+        "colorado_springs",
+        "canberra"
+      ],
+      "inclination_deg": 70.0,
+      "initial_phase_deg": 0.0,
+      "pattern": "walker_star",
+      "phasing": 1,
+      "plane_count": 2,
+      "raan_span_deg": null,
+      "raan_start_deg": 0.0,
+      "satellite_count": 4
+    }
+  ],
+  "duration_s": 3600.0,
+  "ground_sites": [
+    {
+      "ellipsoidal_height_km": 1.84,
+      "geodetic_latitude_deg": 38.8339,
+      "longitude_deg": -104.8214,
+      "site_id": "colorado_springs"
+    },
+    {
+      "ellipsoidal_height_km": 0.691,
+      "geodetic_latitude_deg": -35.398,
+      "longitude_deg": 148.981,
+      "site_id": "canberra"
+    }
+  ],
+  "initial_jd_utc": 2461041.5,
+  "link_budget": {
+    "carrier_frequency_hz": 2200000000.0,
+    "data_rate_bps": 1000000.0,
+    "minimum_elevation_deg": 10.0,
+    "misc_loss_db": 2.0,
+    "required_eb_n0_db": 8.0,
+    "rx_gain_dbi": 24.0,
+    "rx_line_loss_db": 1.0,
+    "system_noise_temperature_k": 290.0,
+    "tx_gain_dbi": 6.0,
+    "tx_line_loss_db": 1.0,
+    "tx_power_w": 20.0
+  },
+  "objective": {
+    "coverage_weight": 1.0,
+    "ground_site_penalty": 0.01,
+    "minimum_coverage_fraction": 0.0,
+    "minimum_network_availability_fraction": 0.0,
+    "network_weight": 0.5,
+    "satellite_penalty": 0.005
+  },
+  "propagation": {
+    "integration_step_s": 60.0,
+    "model": "onp_j2"
+  },
+  "sample_step_s": 600.0,
+  "schema_version": "oel.constellation_design_problem.v1"
+}

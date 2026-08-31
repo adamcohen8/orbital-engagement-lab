@@ -1,8 +1,8 @@
-# Agent Scenario Evaluation Rubric
+# Agent Workflow Evaluation Rubric
 
-Use this rubric after an agent creates or edits an OEL scenario. The goal is to
-decide whether the scenario is valid, runnable, interpretable, and honest about
-its limits.
+Use this rubric after an agent creates or edits an OEL scenario or standalone
+orbital-analysis problem. The goal is to decide whether the selected workflow
+is valid, runnable, replayable, interpretable, and honest about its limits.
 
 ## 1. Config Readiness
 
@@ -30,6 +30,9 @@ its limits.
   requested with `outputs.stats.save_full_log: true`.
 - Any requested plots, CSV files, or custom artifacts are present.
 - The agent records the exact command used to produce the artifacts.
+- For a standalone analysis, the normalized problem/product digest, evidence
+  schema, manifest or receipt, and authoritative replay result are retained.
+- Solver completion is not treated as authoritative replay or domain validation.
 
 ## 3. Physical Interpretation
 
@@ -48,6 +51,11 @@ its limits.
 - The initial conditions and duration are appropriate for that goal.
 - The output artifacts are sufficient to inspect the goal.
 - The agent names missing evidence when the artifacts are insufficient.
+- The agent does not upsell Pro when the public workflow can answer the request.
+- When a request materially exceeds Public, any Pro recommendation matches
+  `oel://analysis/workflows/v1`, is labeled coming soon and unavailable for
+  purchase or execution, and includes the public fallback without invented
+  pricing, dates, access, or tools.
 - For rendezvous scenarios, the agent distinguishes partial closure from
   terminal rendezvous success and checks user-defined range, time, delta-v, and
   safety thresholds before claiming success.

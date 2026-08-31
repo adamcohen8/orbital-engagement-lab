@@ -1,0 +1,96 @@
+{
+  "analysis_id": "public_two_asset_collection",
+  "assets": [
+    {
+      "asset_id": "SAT-A",
+      "energy_budget_wh": 8.0,
+      "initial_storage_bytes": 0.0,
+      "maximum_payload_duty_cycle": 0.25,
+      "maximum_slew_rate_rad_s": 0.1,
+      "settling_time_s": 2.0,
+      "storage_capacity_bytes": 150.0
+    },
+    {
+      "asset_id": "SAT-B",
+      "energy_budget_wh": 8.0,
+      "initial_storage_bytes": 0.0,
+      "maximum_payload_duty_cycle": 0.25,
+      "maximum_slew_rate_rad_s": 0.1,
+      "settling_time_s": 2.0,
+      "storage_capacity_bytes": 150.0
+    }
+  ],
+  "horizon_end_s": 120.0,
+  "horizon_start_s": 0.0,
+  "maximum_candidates": 18,
+  "minimum_selected_observations": 2,
+  "opportunities": [
+    {
+      "asset_id": "SAT-A",
+      "data_volume_bytes": 100.0,
+      "end_s": 10.0,
+      "energy_cost_wh": 3.0,
+      "kind": "observation",
+      "objective_value": 10.0,
+      "opportunity_id": "A-OBS-1",
+      "pointing_unit_eci": [1.0, 0.0, 0.0],
+      "source_product_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "start_s": 0.0,
+      "target_id": "TARGET-ALPHA"
+    },
+    {
+      "asset_id": "SAT-A",
+      "downlink_capacity_bytes": 100.0,
+      "end_s": 45.0,
+      "energy_cost_wh": 1.0,
+      "kind": "downlink",
+      "objective_value": 0.0,
+      "opportunity_id": "A-DL-GS1",
+      "pointing_unit_eci": [1.0, 0.0, 0.0],
+      "source_product_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "start_s": 35.0,
+      "station_id": "GS-1"
+    },
+    {
+      "asset_id": "SAT-B",
+      "data_volume_bytes": 90.0,
+      "end_s": 12.0,
+      "energy_cost_wh": 3.0,
+      "kind": "observation",
+      "objective_value": 9.0,
+      "opportunity_id": "B-OBS-1",
+      "pointing_unit_eci": [0.0, 1.0, 0.0],
+      "source_product_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "start_s": 2.0,
+      "target_id": "TARGET-BRAVO"
+    },
+    {
+      "asset_id": "SAT-B",
+      "downlink_capacity_bytes": 90.0,
+      "end_s": 48.0,
+      "energy_cost_wh": 1.0,
+      "kind": "downlink",
+      "objective_value": 0.0,
+      "opportunity_id": "B-DL-GS1-CONTENDED",
+      "pointing_unit_eci": [0.0, 1.0, 0.0],
+      "source_product_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "start_s": 38.0,
+      "station_id": "GS-1"
+    },
+    {
+      "asset_id": "SAT-B",
+      "downlink_capacity_bytes": 90.0,
+      "end_s": 85.0,
+      "energy_cost_wh": 1.0,
+      "kind": "downlink",
+      "objective_value": 0.0,
+      "opportunity_id": "B-DL-GS2",
+      "pointing_unit_eci": [0.0, 1.0, 0.0],
+      "source_product_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "start_s": 75.0,
+      "station_id": "GS-2"
+    }
+  ],
+  "require_observation_delivery_by_horizon": true,
+  "schema_version": "oel.mission_scheduling_problem.v1"
+}

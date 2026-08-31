@@ -7,21 +7,24 @@ physics engine, controllers, validators, or output writers.
 
 The central promise is general help with OEL workflows, not completion of a
 fixed example catalog. Examples, task cards, and answer keys exist to onboard
-and evaluate agents; the durable interface is documented scenario YAML,
-validation, deterministic execution, review evidence, generated artifacts, and
+and evaluate agents; the durable interface is documented scenario YAML or a
+versioned standalone orbital-analysis problem, validation, deterministic
+execution, authoritative replay, review evidence, generated artifacts, and
 honest interpretation.
 
 The intended user loop is:
 
 ```text
-ask an agent -> generate or edit YAML -> validate -> run -> inspect artifacts -> evaluate
+ask an agent -> route -> scenario YAML or typed analysis problem -> validate
+-> execute -> authoritative replay -> inspect -> bounded claim
 ```
 
 The product wedge is:
 
 ```text
-natural-language request -> scenario YAML -> validation -> deterministic run
--> review-store query -> artifact-supported explanation
+natural-language request -> scenario YAML or typed orbital-analysis problem
+-> validation -> deterministic execution -> authoritative replay
+-> artifact-supported explanation
 ```
 
 Agents orchestrate the workflow. OEL's deterministic simulator, validators,
@@ -34,6 +37,8 @@ Public OEL Agents can:
 
 - help users understand and modify public code;
 - generate valid public scenario YAML from natural language;
+- author supported public standalone analysis problems and inspect typed products;
+- evaluate bounded explicit Walker/shell and ground-network design candidates;
 - validate configs before execution;
 - run public simulations through approved commands;
 - explain public orbital mechanics models, equations, controllers, and outputs;
@@ -49,12 +54,15 @@ Codex, Cursor, Claude Code, Gemini CLI, and similar tools should begin with:
 3. Install and activate OEL using `docs/installation.md`.
 4. Read the task-relevant docs, usually `docs/scenario-yaml.md`,
    `docs/quickstart.md`, `docs/python-api.md`, or `docs/game-mode-roadmap.md`.
-5. Start from the nearest public config or example when it fits, or create a
-   scoped new scenario when the user's request is different.
-6. Validate any generated or edited scenario before running it.
-7. Prefer `python -m sim.review` when the run includes `review/run.sqlite`.
-8. Summarize results only from generated artifacts.
-9. Use `agents/public/evaluation-rubric.md` to judge whether the scenario
+5. Route the request to scenario YAML or the supported standalone analysis
+   contract before choosing an example.
+6. Validate any generated or edited input before execution.
+7. Execute through the documented CLI or Python API and run authoritative
+   replay or identity verification when available.
+8. Prefer `python -m sim.review` for scenario review stores; use typed receipts
+   and manifests for standalone analyses.
+9. Summarize results only from generated artifacts and bounded non-claims.
+10. Use `agents/public/evaluation-rubric.md` to judge whether the evidence
    supports the user's goal.
 
 For evaluator-facing trials, use
@@ -212,8 +220,8 @@ field. Confirm the selected regime from propagation provenance.
 Agents should generalize from the documented OEL workflow:
 
 ```text
-intent -> minimal scenario design -> YAML -> validate -> run
--> review query or artifact inspection -> evidence-backed answer
+intent -> scenario YAML or typed orbital-analysis problem -> validate
+-> execute -> authoritative replay -> inspect -> bounded claim
 ```
 
 For new requests:
@@ -229,7 +237,12 @@ For new requests:
 
 Do not force a new request into a task card just because a task card exists. If
 the public core cannot answer the request, say so and point to the nearest
-public alternative.
+public alternative. When `oel://analysis/workflows/v1` identifies a matching
+Pro escalation for a request that materially exceeds Public, the agent may
+also recommend the named family as
+**coming soon and not currently available for purchase or execution**. It must
+still offer the public fallback and must not invent access, price, launch
+timing, or private execution interfaces.
 
 Use [`agent-capability-routing.md`](agent-capability-routing.md) when the
 request is broader than an example. It maps common intents to public workflows,

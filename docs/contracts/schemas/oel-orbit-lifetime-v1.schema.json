@@ -1,0 +1,375 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orbitalengagementlab.com/schemas/oel-orbit-lifetime-v1.schema.json",
+  "title": "OEL deterministic orbit-lifetime contracts v1",
+  "description": "Strict public contracts for bounded ONP orbit-lifetime problems, comparisons, evidence summaries, and manifests.",
+  "oneOf": [
+    { "$ref": "#/$defs/problem" },
+    { "$ref": "#/$defs/evidence" },
+    { "$ref": "#/$defs/manifest" },
+    { "$ref": "#/$defs/comparisonProblem" },
+    { "$ref": "#/$defs/comparisonEvidence" },
+    { "$ref": "#/$defs/comparisonManifest" }
+  ],
+  "$defs": {
+    "text": { "type": "string", "minLength": 1 },
+    "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "numberOrNull": { "type": ["number", "null"] },
+    "vector3": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": { "type": "number" }
+    },
+    "atmosphere": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["model", "parameters"],
+          "properties": {
+            "model": { "const": "constant" },
+            "parameters": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["density_kg_m3"],
+              "properties": { "density_kg_m3": { "type": "number", "exclusiveMinimum": 0 } }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["model", "parameters"],
+          "properties": {
+            "model": { "const": "exponential" },
+            "parameters": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["reference_density_kg_m3", "reference_altitude_km", "scale_height_km", "ceiling_altitude_km"],
+              "properties": {
+                "reference_density_kg_m3": { "type": "number", "exclusiveMinimum": 0 },
+                "reference_altitude_km": { "type": "number", "minimum": 0 },
+                "scale_height_km": { "type": "number", "exclusiveMinimum": 0 },
+                "ceiling_altitude_km": { "type": "number", "exclusiveMinimum": 0 }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["model", "parameters"],
+          "properties": {
+            "model": { "const": "ussa1976" },
+            "parameters": { "type": "object", "additionalProperties": false, "maxProperties": 0 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["model", "parameters"],
+          "properties": {
+            "model": { "const": "nrlmsise00" },
+            "parameters": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["f107", "f107a", "ap", "ap_a"],
+              "properties": {
+                "f107": { "type": "number", "exclusiveMinimum": 0 },
+                "f107a": { "type": "number", "exclusiveMinimum": 0 },
+                "ap": { "type": "number", "minimum": 0 },
+                "ap_a": {
+                  "type": "array",
+                  "minItems": 7,
+                  "maxItems": 7,
+                  "items": { "type": "number", "minimum": 0 }
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["model", "parameters"],
+          "properties": {
+            "model": { "const": "harris_priester" },
+            "parameters": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["f107"],
+              "properties": { "f107": { "enum": [65, 75, 100, 125, 150, 175, 200, 225, 250, 275] } }
+            }
+          }
+        }
+      ]
+    },
+    "thresholds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["warning_altitude_km", "disposal_altitude_km", "reentry_altitude_km"],
+      "properties": {
+        "warning_altitude_km": { "type": "number", "minimum": 80, "maximum": 2000 },
+        "disposal_altitude_km": { "type": "number", "minimum": 80, "maximum": 2000 },
+        "reentry_altitude_km": { "type": "number", "minimum": 80, "maximum": 2000 }
+      }
+    },
+    "problem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "analysis_id", "asset_id", "epoch_jd_utc",
+        "initial_position_eci_km", "initial_velocity_eci_km_s", "duration_s",
+        "integration_step_s", "output_step_s", "transition_time_tolerance_s",
+        "transition_max_iterations", "mass_kg", "drag_area_m2", "drag_coefficient",
+        "drag_enabled", "include_j2", "stop_at_reentry", "atmosphere", "thresholds"
+      ],
+      "properties": {
+        "schema_version": { "const": "oel.orbit_lifetime_problem.v1" },
+        "analysis_id": { "$ref": "#/$defs/text" },
+        "asset_id": { "$ref": "#/$defs/text" },
+        "epoch_jd_utc": { "type": "number", "minimum": 1721425.5, "maximum": 5373393.5 },
+        "initial_position_eci_km": { "$ref": "#/$defs/vector3" },
+        "initial_velocity_eci_km_s": { "$ref": "#/$defs/vector3" },
+        "duration_s": { "type": "number", "exclusiveMinimum": 0, "maximum": 7776000 },
+        "integration_step_s": { "type": "number", "exclusiveMinimum": 0, "maximum": 120 },
+        "output_step_s": { "type": "number", "exclusiveMinimum": 0 },
+        "transition_time_tolerance_s": { "type": "number", "exclusiveMinimum": 0 },
+        "transition_max_iterations": { "type": "integer", "minimum": 1 },
+        "mass_kg": { "type": "number", "exclusiveMinimum": 0 },
+        "drag_area_m2": { "type": "number", "exclusiveMinimum": 0 },
+        "drag_coefficient": { "type": "number", "exclusiveMinimum": 0 },
+        "drag_enabled": { "type": "boolean" },
+        "include_j2": { "type": "boolean" },
+        "stop_at_reentry": { "type": "boolean" },
+        "atmosphere": { "$ref": "#/$defs/atmosphere" },
+        "thresholds": { "$ref": "#/$defs/thresholds" }
+      }
+    },
+    "thresholdResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["altitude_km", "reached", "time_s", "elapsed_days", "disposition"],
+      "properties": {
+        "altitude_km": { "type": "number" },
+        "reached": { "type": "boolean" },
+        "time_s": { "$ref": "#/$defs/numberOrNull" },
+        "elapsed_days": { "$ref": "#/$defs/numberOrNull" },
+        "disposition": { "type": ["string", "null"] }
+      }
+    },
+    "endpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["altitude_km", "semi_major_axis_km", "perigee_altitude_km", "apogee_altitude_km"],
+      "properties": {
+        "time_s": { "type": "number" },
+        "elapsed_days": { "type": "number" },
+        "altitude_km": { "type": "number" },
+        "semi_major_axis_km": { "type": "number" },
+        "perigee_altitude_km": { "type": "number" },
+        "apogee_altitude_km": { "type": "number" }
+      }
+    },
+    "altitudeDomain": {
+      "type": "object", "additionalProperties": false,
+      "required": ["minimum_altitude_km", "minimum_inclusive", "maximum_altitude_km", "maximum_inclusive"],
+      "properties": {
+        "minimum_altitude_km": { "type": "number" },
+        "minimum_inclusive": { "type": "boolean" },
+        "maximum_altitude_km": { "$ref": "#/$defs/numberOrNull" },
+        "maximum_inclusive": { "type": "boolean" }
+      }
+    },
+    "atmosphereEffective": {
+      "type": "object", "additionalProperties": false,
+      "required": ["normalized_atmosphere", "altitude_domain", "harris_priester_f107_table"],
+      "properties": {
+        "normalized_atmosphere": { "$ref": "#/$defs/atmosphere" },
+        "altitude_domain": { "$ref": "#/$defs/altitudeDomain" },
+        "harris_priester_f107_table": { "$ref": "#/$defs/numberOrNull" }
+      }
+    },
+    "implementationIdentity": {
+      "type": "object", "additionalProperties": false,
+      "required": ["algorithm_id", "source_tree_sha256", "files"],
+      "properties": {
+        "algorithm_id": { "const": "oel.orbit_lifetime.v1" },
+        "source_tree_sha256": { "$ref": "#/$defs/digest" },
+        "files": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/receipt" } }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "analysis_id", "asset_id", "status", "outcome",
+        "problem_semantic_sha256", "result_semantic_sha256", "propagator", "atmosphere",
+        "atmosphere_effective", "implementation_identity",
+        "spacecraft", "resource_use", "initial", "final", "extrema", "changes",
+        "energy_accounting", "thresholds", "claim_limits"
+      ],
+      "properties": {
+        "schema_version": { "const": "oel.orbit_lifetime_evidence.v1" },
+        "analysis_id": { "$ref": "#/$defs/text" },
+        "asset_id": { "$ref": "#/$defs/text" },
+        "status": { "const": "completed" },
+        "outcome": { "enum": ["horizon_complete", "reentry_threshold_reached", "earth_surface_reached", "atmosphere_domain_limit_reached"] },
+        "problem_semantic_sha256": { "$ref": "#/$defs/digest" },
+        "result_semantic_sha256": { "$ref": "#/$defs/digest" },
+        "propagator": {
+          "type": "object", "additionalProperties": false,
+          "required": ["family", "integrator", "force_models", "state_frame", "drag_frame_model"],
+          "properties": {
+            "family": { "const": "ONP" }, "integrator": { "const": "rk4" },
+            "force_models": { "type": "array", "uniqueItems": true, "items": { "enum": ["J2", "drag"] } },
+            "state_frame": { "const": "eci" }, "drag_frame_model": { "const": "simple" }
+          }
+        },
+        "atmosphere": { "$ref": "#/$defs/atmosphere" },
+        "atmosphere_effective": { "$ref": "#/$defs/atmosphereEffective" },
+        "implementation_identity": { "$ref": "#/$defs/implementationIdentity" },
+        "spacecraft": {
+          "type": "object", "additionalProperties": false,
+          "required": ["mass_kg", "drag_area_m2", "drag_coefficient", "ballistic_coefficient_kg_m2"],
+          "properties": {
+            "mass_kg": { "type": "number" }, "drag_area_m2": { "type": "number" },
+            "drag_coefficient": { "type": "number" }, "ballistic_coefficient_kg_m2": { "type": "number" }
+          }
+        },
+        "resource_use": {
+          "type": "object", "additionalProperties": false,
+          "required": ["integration_steps", "output_samples", "event_count", "propagated_duration_s"],
+          "properties": {
+            "integration_steps": { "type": "integer", "minimum": 0 },
+            "output_samples": { "type": "integer", "minimum": 1 },
+            "event_count": { "type": "integer", "minimum": 0 },
+            "propagated_duration_s": { "type": "number", "minimum": 0 }
+          }
+        },
+        "initial": { "$ref": "#/$defs/endpoint" },
+        "final": {
+          "allOf": [
+            { "$ref": "#/$defs/endpoint" },
+            { "required": ["time_s", "elapsed_days"] }
+          ]
+        },
+        "extrema": {
+          "type": "object", "additionalProperties": false,
+          "required": ["minimum_altitude_km", "minimum_perigee_altitude_km", "maximum_density_kg_m3", "maximum_drag_acceleration_m_s2"],
+          "properties": {
+            "minimum_altitude_km": { "type": "number" }, "minimum_perigee_altitude_km": { "type": "number" },
+            "maximum_density_kg_m3": { "type": "number" }, "maximum_drag_acceleration_m_s2": { "type": "number" }
+          }
+        },
+        "changes": {
+          "type": "object", "additionalProperties": false,
+          "required": ["semi_major_axis_km", "specific_energy_km2_s2", "angular_momentum_km2_s"],
+          "properties": {
+            "semi_major_axis_km": { "type": "number" }, "specific_energy_km2_s2": { "type": "number" },
+            "angular_momentum_km2_s": { "type": "number" }
+          }
+        },
+        "energy_accounting": {
+          "type": "object", "additionalProperties": false,
+          "required": ["applicable", "integrated_drag_work_km2_s2", "kepler_energy_change_km2_s2", "residual_km2_s2", "reason"],
+          "properties": {
+            "applicable": { "type": "boolean" }, "integrated_drag_work_km2_s2": { "type": "number" },
+            "kepler_energy_change_km2_s2": { "type": "number" }, "residual_km2_s2": { "$ref": "#/$defs/numberOrNull" },
+            "reason": { "type": ["string", "null"] }
+          }
+        },
+        "thresholds": {
+          "type": "object", "additionalProperties": false,
+          "required": ["warning", "disposal", "reentry"],
+          "properties": {
+            "warning": { "$ref": "#/$defs/thresholdResult" },
+            "disposal": { "$ref": "#/$defs/thresholdResult" },
+            "reentry": { "$ref": "#/$defs/thresholdResult" }
+          }
+        },
+        "claim_limits": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/text" } }
+      }
+    },
+    "receipt": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "bytes", "sha256"],
+      "properties": {
+        "path": { "$ref": "#/$defs/text" },
+        "bytes": { "type": "integer", "minimum": 1, "maximum": 134217728 },
+        "sha256": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "manifest": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "analysis_id", "asset_id", "status", "outcome", "problem_semantic_sha256", "result_semantic_sha256", "implementation_identity", "claim_limits", "artifacts"],
+      "properties": {
+        "schema_version": { "const": "oel.orbit_lifetime_manifest.v1" },
+        "analysis_id": { "$ref": "#/$defs/text" }, "asset_id": { "$ref": "#/$defs/text" },
+        "status": { "const": "completed" }, "outcome": { "enum": ["horizon_complete", "reentry_threshold_reached", "earth_surface_reached", "atmosphere_domain_limit_reached"] },
+        "problem_semantic_sha256": { "$ref": "#/$defs/digest" }, "result_semantic_sha256": { "$ref": "#/$defs/digest" },
+        "implementation_identity": { "$ref": "#/$defs/implementationIdentity" },
+        "claim_limits": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/text" } },
+        "artifacts": { "type": "array", "minItems": 4, "maxItems": 4, "items": { "$ref": "#/$defs/receipt" } }
+      }
+    },
+    "comparisonProblem": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "comparison_id", "base_problem", "cases"],
+      "properties": {
+        "schema_version": { "const": "oel.orbit_lifetime_comparison_problem.v1" },
+        "comparison_id": { "$ref": "#/$defs/text" },
+        "base_problem": { "$ref": "#/$defs/problem" },
+        "cases": {
+          "type": "array", "minItems": 2, "maxItems": 8,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["case_id", "atmosphere"],
+            "properties": {
+              "case_id": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$" },
+              "atmosphere": { "$ref": "#/$defs/atmosphere" }
+            }
+          }
+        }
+      }
+    },
+    "comparisonEvidence": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "comparison_id", "status", "comparison_semantic_sha256", "result_semantic_sha256", "case_count", "identical_non_atmosphere_inputs", "implementation_identity", "cases", "claim_limits"],
+      "properties": {
+        "schema_version": { "const": "oel.orbit_lifetime_comparison_evidence.v1" },
+        "comparison_id": { "$ref": "#/$defs/text" }, "status": { "const": "completed" },
+        "comparison_semantic_sha256": { "$ref": "#/$defs/digest" }, "result_semantic_sha256": { "$ref": "#/$defs/digest" },
+        "case_count": { "type": "integer", "minimum": 2, "maximum": 8 },
+        "identical_non_atmosphere_inputs": { "const": true },
+        "implementation_identity": { "$ref": "#/$defs/implementationIdentity" },
+        "cases": {
+          "type": "array", "minItems": 2, "maxItems": 8,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["case_id", "atmosphere", "result"],
+            "properties": {
+              "case_id": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$" },
+              "atmosphere": { "$ref": "#/$defs/atmosphere" },
+              "result": { "$ref": "#/$defs/evidence" }
+            }
+          }
+        },
+        "claim_limits": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/text" } }
+      }
+    },
+    "comparisonManifest": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "comparison_id", "status", "comparison_semantic_sha256", "result_semantic_sha256", "implementation_identity", "claim_limits", "artifacts"],
+      "properties": {
+        "schema_version": { "const": "oel.orbit_lifetime_comparison_manifest.v1" },
+        "comparison_id": { "$ref": "#/$defs/text" }, "status": { "const": "completed" },
+        "comparison_semantic_sha256": { "$ref": "#/$defs/digest" }, "result_semantic_sha256": { "$ref": "#/$defs/digest" },
+        "implementation_identity": { "$ref": "#/$defs/implementationIdentity" },
+        "claim_limits": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/text" } },
+        "artifacts": { "type": "array", "minItems": 3, "maxItems": 3, "items": { "$ref": "#/$defs/receipt" } }
+      }
+    }
+  }
+}

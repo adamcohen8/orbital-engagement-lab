@@ -1,0 +1,77 @@
+{
+  "artifacts": [
+    {
+      "path": "leap_seconds_iers_bulletin_c_72.json",
+      "role": "packaged table-bounded leap-second authority",
+      "sha256": "b330b0a0216b7fdfaafaaa807ba96b1c979d7f32adc712db8ac4ed24bf0f1d73"
+    },
+    {
+      "path": "finals2000a_2024_01_01_04_excerpt.txt",
+      "role": "hash-bound IERS finals2000A observed-value validation excerpt",
+      "sha256": "2ff45c2c41388ac883559b11f71ee6d80f6db918f3ef0da06e2c3c85f51fc37d"
+    },
+    {
+      "path": "frame_time_orekit_13_1_7_acceptance.json",
+      "role": "retained independent implementation acceptance evidence",
+      "sha256": "aa500405aa0fe1903d1a0044141142096a82820fb1106fa2d2676acfc4389a3b"
+    },
+    {
+      "path": "../../../../tools/external_reference/OrekitFrameTimeAcceptance.java",
+      "role": "pinned Orekit reference computation source",
+      "sha256": "50e5c0632adf964efabe604a82c337accf80e11bb3560277fea8a5f6aa3c70b2"
+    },
+    {
+      "path": "../../../../tools/validate_frame_time.py",
+      "role": "reference refresh and comparison workflow",
+      "sha256": "910f32ec0e3859d8519732ac086110f22401c99c4b6a07cd2d0cc580023bd830"
+    },
+    {
+      "path": "../frame_time.py",
+      "role": "authoritative frame/time implementation owner",
+      "sha256": "fdac4fd6c77a6718cf79ef2cbd41e0913360a1210ac299975e737e7d15fec8a9"
+    },
+    {
+      "path": "../eop.py",
+      "role": "authoritative Earth-orientation input implementation owner",
+      "sha256": "22ae999f97cc1d4c93c4d1c5d033cecabe9317fe2fda6faa5e56f5ea9043d261"
+    },
+    {
+      "path": "../../../frame_time.py",
+      "role": "public frame/time facade and CLI",
+      "sha256": "d1121288fa9890c04c1fea8ee842835ef8eb69d9dc1f9af594558fe64d0466ad"
+    }
+  ],
+  "authorities": [
+    {
+      "document": "Bulletin C 72",
+      "organization": "IERS Earth Orientation Centre",
+      "published": "2026-07-06",
+      "url": "https://datacenter.iers.org/data/html/bulletinc-072.html"
+    },
+    {
+      "document": "UTC-TAI history",
+      "organization": "IERS Earth Orientation Centre",
+      "url": "https://hpiers.obspm.fr/eoppc/bul/bulc/UTC-TAI.history"
+    }
+  ],
+  "capability": "Canonical UTC/TAI/TT/sampled-UT1 and EME2000/TEME/GCRF/ITRF transformations",
+  "claim": "OEL's bounded IAU-76/FK5 + IAU-80 and IAU 2006/2000A frame/time contracts preserve leap-second semantics and agree with pinned Orekit 13.1.7 inside frozen state, Jacobian, and covariance-transform envelopes.",
+  "generated_utc": "2026-08-29T17:34:08Z",
+  "non_claims": [
+    "The contract ingests and audits Earth-orientation parameters but does not predict them or certify their accuracy.",
+    "The frozen comparison covers one epoch and does not establish long-horizon interpolation accuracy.",
+    "Covariance transformation is mathematical continuity evidence, not covariance calibration or operational qualification."
+  ],
+  "reference_refresh": "python -m tools.validate_frame_time --output sim/dynamics/orbit/data/frame_time_orekit_13_1_7_acceptance.json --orekit-root path/to/pinned/orekit",
+  "routine_replay": "python -m pytest -q sim/tests/test_frame_time.py",
+  "schema": "oel.frame-time-validation-manifest.v1",
+  "tolerances": {
+    "covariance_normalized_max": 2e-06,
+    "frame_position_max_m": 2.0,
+    "frame_velocity_max_m_s": 0.003,
+    "gcrf_frame_position_max_m": 0.25,
+    "gcrf_frame_velocity_max_m_s": 0.0005,
+    "gcrf_state_jacobian_max_abs": 5e-08,
+    "state_jacobian_max_abs": 2e-07
+  }
+}

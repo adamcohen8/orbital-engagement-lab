@@ -41,6 +41,12 @@ v0.1 is an engineering free-space calculation. It is not operational
 communications assurance and does not establish spectrum compatibility,
 availability in weather, packet delivery, or mission success.
 
+The separate `oel.mission_scheduling_source_plan.v1` adapter can verify a
+completed directed-link artifact directory and convert its retained intervals
+and capacities into bounded scheduler opportunities. Because this contract
+does not retain an absolute interval pointing vector, slew-constrained source
+plans must supply that vector explicitly rather than infer it from RF evidence.
+
 ## Supported v0.1 Envelope
 
 The frozen envelope supports:

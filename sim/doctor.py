@@ -101,6 +101,7 @@ CORE_SPECS = (
     DependencySpec("tqdm", "4.65", "5"),
     DependencySpec("PyYAML", "6.0", "7"),
     DependencySpec("scipy", "1.14.1", "1.18"),
+    DependencySpec("pyerfa", "2.0.1.5", "3"),
 )
 DEV_SPECS_BASE = (
     DependencySpec("pytest", "9", "10"),

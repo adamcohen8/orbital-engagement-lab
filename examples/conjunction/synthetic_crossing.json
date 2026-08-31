@@ -1,0 +1,36 @@
+{
+  "schema_version": "oel.conjunction_assessment_problem.v1",
+  "name": "public_synthetic_crossing",
+  "duration_s": 240.0,
+  "propagation": {"step_s": 10.0, "integrator": "rk4", "force_model": []},
+  "primary": {
+    "object_id": "PRIMARY",
+    "initial_state_eci_km_km_s": [7000.0, 0.0, 0.0, 0.0, 7.546, 0.0],
+    "covariance_eci_km_at_tca": [[0.0001,0,0,0,0,0],[0,0.0001,0,0,0,0],[0,0,0.0001,0,0,0],[0,0,0,0.0001,0,0],[0,0,0,0,0.0001,0],[0,0,0,0,0,0.0001]],
+    "hard_body_radius_m": 5.0
+  },
+  "secondary": {
+    "object_id": "SECONDARY",
+    "initial_state_eci_km_km_s": [7000.02, -1.0, 0.0, 0.0, 7.556, 0.0],
+    "covariance_eci_km_at_tca": [[0.0001,0,0,0,0,0],[0,0.0001,0,0,0,0],[0,0,0.0001,0,0,0],[0,0,0,0.0001,0,0],[0,0,0,0,0.0001,0],[0,0,0,0,0,0.0001]],
+    "hard_body_radius_m": 5.0
+  },
+  "screening_objects": [{
+    "object_id": "SCREEN-2",
+    "initial_state_eci_km_km_s": [7000.5, -1.0, 0.0, 0.0, 7.556, 0.001],
+    "covariance_eci_km_at_tca": [[0.0001,0,0,0,0,0],[0,0.0001,0,0,0,0],[0,0,0.0001,0,0,0],[0,0,0,0.0001,0,0],[0,0,0,0,0.0001,0],[0,0,0,0,0,0.0001]],
+    "hard_body_radius_m": 5.0
+  }],
+  "avoidance_candidates": [{
+    "name": "radial_terminal_offset",
+    "burn_time_s": 0.0,
+    "frame": "ric",
+    "burn_component": "r",
+    "terminal_quantity": "position_x_km",
+    "target_offset": 0.05,
+    "tolerance": 0.00001,
+    "initial_delta_v_m_s": 0.0,
+    "perturbation_m_s": 0.001,
+    "max_abs_delta_v_m_s": 10.0
+  }]
+}

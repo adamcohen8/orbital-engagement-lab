@@ -1,0 +1,258 @@
+{
+  "checks": {
+    "covariance_jacobian": true,
+    "eme2000_itrf_position": true,
+    "eme2000_itrf_velocity": true,
+    "gcrf_eme2000_position": true,
+    "gcrf_eme2000_velocity": true,
+    "gcrf_itrf_position": true,
+    "gcrf_itrf_velocity": true,
+    "gcrf_state_jacobian": true,
+    "seconds_before_to_leap": true,
+    "seconds_leap_to_after": true,
+    "state_jacobian": true,
+    "teme_eme2000_position": true,
+    "teme_eme2000_velocity": true,
+    "tt_minus_tai_2026": true,
+    "utc_after": true,
+    "utc_before": true,
+    "utc_leap": true,
+    "utc_minus_tai_2026": true
+  },
+  "claim": "OEL's bounded IAU-76/FK5 + IAU-80 and IAU 2006/2000A frame/time contracts agree with pinned Orekit 13.1.7 inside frozen residual envelopes.",
+  "generated_utc": "2026-08-29T18:32:53Z",
+  "input": {
+    "covariance_diagonal_m_m_s": [
+      400.0,
+      900.0,
+      1600.0,
+      0.0004,
+      0.0009,
+      0.0016
+    ],
+    "epoch_utc": "2024-01-01T00:00:00",
+    "position_km": [
+      7000.0,
+      120.0,
+      30.0
+    ],
+    "velocity_km_s": [
+      -0.2,
+      7.45,
+      1.1
+    ]
+  },
+  "metrics": {
+    "covariance_normalized_max": 1.2165459346859357e-07,
+    "eme2000_itrf_position_max_m": 0.567381969496239,
+    "eme2000_itrf_velocity_max_m_s": 0.0004230178010100616,
+    "gcrf_eme2000_position_max_m": 6.215870484993502e-06,
+    "gcrf_eme2000_velocity_max_m_s": 7.273959212739101e-09,
+    "gcrf_itrf_position_max_m": 0.006921268870030417,
+    "gcrf_itrf_velocity_max_m_s": 0.00026694051058484547,
+    "gcrf_state_jacobian_max_abs": 2.4855006140809925e-09,
+    "state_jacobian_max_abs": 8.492986371339342e-08,
+    "teme_eme2000_position_max_m": 1.4947547344164036,
+    "teme_eme2000_velocity_max_m_s": 0.00019853408894654478
+  },
+  "non_claims": [
+    "This does not validate EOP prediction, long-horizon EOP interpolation accuracy, or covariance calibration.",
+    "Orekit comparison is independent implementation evidence, not operational qualification."
+  ],
+  "oel": {
+    "eop_source": {
+      "contract": "oel.iers-eop.v1",
+      "coverage_mjd_utc": [
+        60310.0,
+        60313.0
+      ],
+      "interpolation": "linear; no extrapolation",
+      "last_observed_mjd_utc": 60313.0,
+      "prediction_present": false,
+      "record_count": 4,
+      "schema": "oel.iers-eop-receipt.v1",
+      "source_format": "finals2000a",
+      "source_label": "finals2000a_2024_01_01_04_excerpt.txt",
+      "source_sha256": "2ff45c2c41388ac883559b11f71ee6d80f6db918f3ef0da06e2c3c85f51fc37d"
+    },
+    "frame_transform": {
+      "contract": "oel.frame-time.v1",
+      "eop": {
+        "ddeps_rad": -2.798344567364242e-08,
+        "ddpsi_rad": -5.354864070591047e-07,
+        "dut1_s": 0.008781101322246389,
+        "dx_mas": 0.0,
+        "dy_mas": 0.0,
+        "source": "Orekit 13.1.7 IERS 1996 EOP sample",
+        "source_sha256": "9c2d0ad5d001ed96e1b37433bdde0c286c5149b54c2f0404225f8d3c6558a93c",
+        "xp_arcsec": 0.13736279178180366,
+        "yp_arcsec": 0.20204607212357628
+      },
+      "epoch_tai": "2024-01-01T00:00:37",
+      "epoch_tt": "2024-01-01T00:01:09.184",
+      "epoch_utc": "2024-01-01T00:00:00",
+      "leap_seconds": {
+        "resource": "sim/dynamics/orbit/data/leap_seconds_iers_bulletin_c_72.json",
+        "schema": "oel.leap-second-table-receipt.v1",
+        "sha256": "b330b0a0216b7fdfaafaaa807ba96b1c979d7f32adc712db8ac4ed24bf0f1d73",
+        "source": {
+          "bulletin": "C 72",
+          "bulletin_url": "https://datacenter.iers.org/data/html/bulletinc-072.html",
+          "claim": "UTC-TAI remains -37 s and no leap second will be introduced at the end of December 2026.",
+          "history_url": "https://hpiers.obspm.fr/eoppc/bul/bulc/UTC-TAI.history",
+          "organization": "IERS Earth Orientation Centre",
+          "published": "2026-07-06"
+        },
+        "table_id": "iers-bulletin-c-72-2026-07-06",
+        "valid_from_utc": "1972-01-01T00:00:00",
+        "valid_through_utc": "2026-12-31T23:59:59.999999"
+      },
+      "model": "oel.iau76-fk5-iau80-eop.v1",
+      "non_claims": [
+        "EME2000/ITRF uses OEL's IAU-76/FK5 + IAU-80 EOP reduction, not IAU 2000/2006.",
+        "TEME/EME2000 follows the existing Vallado IAU-80 state-vector rotation contract.",
+        "GCRF/ITRF uses ERFA's IAU 2006/2000A CIO chain with explicit EOP; GCRF is not treated as EME2000."
+      ],
+      "schema": "oel.frame-transform-receipt.v1",
+      "source_frame": "EME2000",
+      "target_frame": "ITRF"
+    },
+    "gcrf_frame_transform": {
+      "contract": "oel.frame-time.v1",
+      "eop": {
+        "ddeps_rad": 0.0,
+        "ddpsi_rad": 0.0,
+        "dut1_s": 0.0087572,
+        "dx_mas": 0.283,
+        "dy_mas": -0.183,
+        "source": "finals2000a_2024_01_01_04_excerpt.txt (finals2000a, linearly interpolated)",
+        "source_sha256": "2ff45c2c41388ac883559b11f71ee6d80f6db918f3ef0da06e2c3c85f51fc37d",
+        "xp_arcsec": 0.136894,
+        "yp_arcsec": 0.202185
+      },
+      "epoch_tai": "2024-01-01T00:00:37",
+      "epoch_tt": "2024-01-01T00:01:09.184",
+      "epoch_utc": "2024-01-01T00:00:00",
+      "leap_seconds": {
+        "resource": "sim/dynamics/orbit/data/leap_seconds_iers_bulletin_c_72.json",
+        "schema": "oel.leap-second-table-receipt.v1",
+        "sha256": "b330b0a0216b7fdfaafaaa807ba96b1c979d7f32adc712db8ac4ed24bf0f1d73",
+        "source": {
+          "bulletin": "C 72",
+          "bulletin_url": "https://datacenter.iers.org/data/html/bulletinc-072.html",
+          "claim": "UTC-TAI remains -37 s and no leap second will be introduced at the end of December 2026.",
+          "history_url": "https://hpiers.obspm.fr/eoppc/bul/bulc/UTC-TAI.history",
+          "organization": "IERS Earth Orientation Centre",
+          "published": "2026-07-06"
+        },
+        "table_id": "iers-bulletin-c-72-2026-07-06",
+        "valid_from_utc": "1972-01-01T00:00:00",
+        "valid_through_utc": "2026-12-31T23:59:59.999999"
+      },
+      "model": "oel.iau2006-iau2000a-cio-eop.v1",
+      "non_claims": [
+        "EME2000/ITRF uses OEL's IAU-76/FK5 + IAU-80 EOP reduction, not IAU 2000/2006.",
+        "TEME/EME2000 follows the existing Vallado IAU-80 state-vector rotation contract.",
+        "GCRF/ITRF uses ERFA's IAU 2006/2000A CIO chain with explicit EOP; GCRF is not treated as EME2000."
+      ],
+      "schema": "oel.frame-transform-receipt.v1",
+      "source_frame": "GCRF",
+      "target_frame": "ITRF"
+    },
+    "leap_second_table": {
+      "resource": "sim/dynamics/orbit/data/leap_seconds_iers_bulletin_c_72.json",
+      "schema": "oel.leap-second-table-receipt.v1",
+      "sha256": "b330b0a0216b7fdfaafaaa807ba96b1c979d7f32adc712db8ac4ed24bf0f1d73",
+      "source": {
+        "bulletin": "C 72",
+        "bulletin_url": "https://datacenter.iers.org/data/html/bulletinc-072.html",
+        "claim": "UTC-TAI remains -37 s and no leap second will be introduced at the end of December 2026.",
+        "history_url": "https://hpiers.obspm.fr/eoppc/bul/bulc/UTC-TAI.history",
+        "organization": "IERS Earth Orientation Centre",
+        "published": "2026-07-06"
+      },
+      "table_id": "iers-bulletin-c-72-2026-07-06",
+      "valid_from_utc": "1972-01-01T00:00:00",
+      "valid_through_utc": "2026-12-31T23:59:59.999999"
+    }
+  },
+  "orekit": {
+    "ddeps_rad": "-2.7983445673642420e-08",
+    "ddpsi_rad": "-5.3548640705910470e-07",
+    "dut1_s": "0.0087811013222463890",
+    "eme2000_to_itrf_jacobian": "-0.17098593128007410,0.98527340262026690,0.00036523056731927990,0.0000000000000000,0.0000000000000000,0.0000000000000000,-0.98527073713588250,-0.17098631834575628,0.0022920476169627797,0.0000000000000000,0.0000000000000000,0.0000000000000000,0.0023207429845858480,3.2056906037431854e-05,0.99999730655854970,0.0000000000000000,0.0000000000000000,0.0000000000000000,-7.1847076300327380e-05,-1.2468519182398042e-05,1.6720811682568030e-07,-0.17098593128007410,0.98527340262026690,0.00036523056731927990,1.2468491079105718e-05,-7.1847270829843810e-05,-2.6581429777254820e-08,-0.98527073713588250,-0.17098631834575628,0.0022920476169627797,6.2704336858308420e-11,-5.9520954815077180e-11,-1.4361297902441236e-13,0.0023207429845858480,3.2056906037431854e-05,0.99999730655854970",
+    "eme2000_to_itrf_position_m": "-1078657.7537290677,-6917344.7567241590,46248.966917581914",
+    "eme2000_to_itrf_velocity_m_s": "6870.4650492403800,-995.61570425878320,1099.7721443510013",
+    "gcrf_to_eme2000_position_m": "6999999.9939228890,120000.49647137552,29999.432097534160",
+    "gcrf_to_eme2000_velocity_m_s": "-200.00043871345116,7450.0000222098730,1099.9997698123843",
+    "gcrf_to_itrf_jacobian": "-0.17098586094829948,0.98527341481840720,0.00036525038482967975,0.0000000000000000,0.0000000000000000,0.0000000000000000,-0.98527074953187800,-0.17098624806290252,0.0022919620988922232,0.0000000000000000,0.0000000000000000,0.0000000000000000,0.0023206621167154630,3.2022592312012845e-05,0.99999730674731980,0.0000000000000000,0.0000000000000000,0.0000000000000000,-7.1847077236447120e-05,-1.2468514062880800e-05,1.6720188546704400e-07,-0.17098586094829948,0.98527341481840720,0.00036525038482967975,1.2468485956050100e-05,-7.1847271751542280e-05,-2.6582859646845983e-08,-0.98527074953187800,-0.17098624806290252,0.0022919620988922232,6.2720159752539010e-11,-5.9522924631680640e-11,-1.4364660721997007e-13,0.0023206621167154630,3.2022592312012845e-05,0.99999730674731980",
+    "gcrf_to_itrf_position_m": "-1078657.2593483440,-6917344.8376277280,46248.396730505280",
+    "gcrf_to_itrf_velocity_m_s": "6870.4651417239940,-995.61530825708970,1099.7719052054915",
+    "orekit_version": "13.1.7",
+    "seconds_before_to_leap": "1.0000000000000000",
+    "seconds_leap_to_after": "1.0000000000000000",
+    "teme_to_eme2000_position_m": "7000593.9890751300,82431.222557249190,13743.859463101748",
+    "teme_to_eme2000_velocity_m_s": "-157.46023403265883,7451.0022375128020,1100.1236015987395",
+    "tt_minus_tai_2026_s": "32.184000000000000",
+    "utc_after": "2017-01-01T00:00:00.000000",
+    "utc_before": "2016-12-31T23:59:59.000000",
+    "utc_leap": "2016-12-31T23:59:60.000000",
+    "utc_minus_tai_2026_s": "-37.000000000000000",
+    "xp_arcsec": "0.13736279178180366",
+    "yp_arcsec": "0.20204607212357628"
+  },
+  "runtime": {
+    "jars": [
+      {
+        "name": "hipparchus-core-4.0.3.jar",
+        "sha256": "5af54dc3c21b8d85e1264157ee91d93fa67e68c825cfb38834dc2bbb9b0f6583"
+      },
+      {
+        "name": "hipparchus-filtering-4.0.3.jar",
+        "sha256": "279eece43411f372bd8340355cb89101def0bf9b1b6824231b76181d1ec63a81"
+      },
+      {
+        "name": "hipparchus-fitting-4.0.3.jar",
+        "sha256": "3712c3b4f43d9c12bf7b7aad187764f4b3c09cc962504899d8951eb310b1e4be"
+      },
+      {
+        "name": "hipparchus-geometry-4.0.3.jar",
+        "sha256": "19594d5106ec6a46951e859e2924bfcade02a834c06c56bd3d2130a74f0fbb7e"
+      },
+      {
+        "name": "hipparchus-ode-4.0.3.jar",
+        "sha256": "75f0f0b3fdcd99d13e9c394b7ae809cce5a9c22f1c14b1b90a5109ed951467fe"
+      },
+      {
+        "name": "hipparchus-optim-4.0.3.jar",
+        "sha256": "4bc0dbb5c6d5fefda5db9d92141c6cbb807174a1d491a85df46bcc57a67b8992"
+      },
+      {
+        "name": "hipparchus-stat-4.0.3.jar",
+        "sha256": "8b066e3060dc119efcce241fb0720a3b9e59c026d0f5fe9e70abfd5e22d3817b"
+      },
+      {
+        "name": "orekit-13.1.7.jar",
+        "sha256": "43ab5155fd327ca39287caa5440d9ae50473d911eda1b7f0e819197dcfbf63b3"
+      }
+    ],
+    "java_source": "tools/external_reference/OrekitFrameTimeAcceptance.java",
+    "java_source_sha256": "50e5c0632adf964efabe604a82c337accf80e11bb3560277fea8a5f6aa3c70b2",
+    "orekit_data_revision": "baf158744d38ec76cf94e2d396280d545b9f0ba2",
+    "orekit_data_source": "https://gitlab.orekit.org/orekit/orekit-data",
+    "orekit_data_tree_sha256": "9c2d0ad5d001ed96e1b37433bdde0c286c5149b54c2f0404225f8d3c6558a93c",
+    "orekit_version": "13.1.7",
+    "provider": "Orekit"
+  },
+  "schema": "oel.frame-time-orekit-validation.v1",
+  "status": "pass",
+  "tolerances": {
+    "covariance_normalized_max": 2e-06,
+    "frame_position_max_m": 2.0,
+    "frame_velocity_max_m_s": 0.003,
+    "gcrf_frame_position_max_m": 0.25,
+    "gcrf_frame_velocity_max_m_s": 0.0005,
+    "gcrf_state_jacobian_max_abs": 5e-08,
+    "state_jacobian_max_abs": 2e-07
+  }
+}

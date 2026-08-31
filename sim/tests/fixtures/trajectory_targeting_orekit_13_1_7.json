@@ -1,0 +1,88 @@
+{
+  "schema": "oel.trajectory_targeting_open_reference.v1",
+  "provider": "Orekit",
+  "provider_version": "13.1.7",
+  "hipparchus_version": "4.0.3",
+  "reference_kind": "independent_analytical_keplerian_propagation",
+  "frame": "GCRF",
+  "epoch": "J2000_EPOCH",
+  "mu_km3_s2": 398600.4418,
+  "orekit_data_required": false,
+  "generator_source": "sim/tests/external_references/OrekitTrajectoryTargetingReference.java",
+  "generator_source_sha256": "580549168c5b124acd53d2b2d5a7ac3b66cb37cfd6c1e3eeabe041fc5aa98051",
+  "raw_csv": "sim/tests/fixtures/trajectory_targeting_orekit_13_1_7_raw.csv",
+  "raw_csv_sha256": "4c8ec77c0e9733fdaa9da7f57c5c4eb3e45a4b8c723c1078c08db709aa808c78",
+  "runtime_sha256": {
+    "orekit-13.1.7.jar": "43ab5155fd327ca39287caa5440d9ae50473d911eda1b7f0e819197dcfbf63b3",
+    "hipparchus-core-4.0.3.jar": "5af54dc3c21b8d85e1264157ee91d93fa67e68c825cfb38834dc2bbb9b0f6583"
+  },
+  "cases": {
+    "hohmann_half_transfer": {
+      "time_s": 3560.54078879,
+      "state_eci_km_km_s": [
+        -9000.0,
+        -9.60251322038342e-12,
+        -0.0,
+        7.5907731186767e-15,
+        -6.22517636140179,
+        0.0
+      ]
+    },
+    "rendezvous_seed": {
+      "time_s": 900.0,
+      "state_eci_km_km_s": [
+        3968.13295129858,
+        5771.90327020718,
+        1.53099800442521,
+        -6.21123775318929,
+        4.26641691164732,
+        0.00113166757514693
+      ]
+    },
+    "rendezvous_plus_x": {
+      "time_s": 900.0,
+      "state_eci_km_km_s": [
+        3968.24276156674,
+        5771.92076948771,
+        1.53100264611137,
+        -6.21108853630732,
+        4.26648849986917,
+        0.00113168656393099
+      ]
+    },
+    "rendezvous_minus_x": {
+      "time_s": 900.0,
+      "state_eci_km_km_s": [
+        3968.0231408449,
+        5771.88577049058,
+        1.53099336262337,
+        -6.21138697026711,
+        4.26634532137653,
+        0.00113164858581939
+      ]
+    },
+    "rendezvous_plus_y": {
+      "time_s": 900.0,
+      "state_eci_km_km_s": [
+        3968.14871023836,
+        5771.99021873295,
+        1.53100076262524,
+        -6.21117737391887,
+        4.26652810112571,
+        0.00113168205922903
+      ]
+    },
+    "rendezvous_minus_y": {
+      "time_s": 900.0,
+      "state_eci_km_km_s": [
+        3968.11719224051,
+        5771.81632181862,
+        1.5309952461884,
+        -6.21129813349165,
+        4.26630572234321,
+        0.00113165309072687
+      ]
+    }
+  },
+  "claim_boundary": "Independent open-source evidence for deterministic Earth two-body propagation, one Hohmann transfer, one Cartesian terminal target, and its local burn Jacobian."
+}

@@ -17,6 +17,7 @@ PUBLIC_RESOURCE_URIS = (
     "oel://handoff/product-kinds/v1",
     "oel://review/plot-recipes/v1",
     "oel://review/animation-recipes/v1",
+    "oel://analysis/workflows/v1",
 )
 
 
@@ -108,6 +109,14 @@ PUBLIC_RESOURCE_CONTRACTS = (
         mime_type="application/json",
         source="sim.review.animation_recipes",
     ),
+    ResourceContract(
+        uri=PUBLIC_RESOURCE_URIS[7],
+        name="oel-public-analysis-workflows-v1",
+        title="OEL public orbital-analysis workflows",
+        description="Versioned routing contracts for standalone public orbital-analysis problems, evidence, replay, and MCP support.",
+        mime_type="application/json",
+        source="docs/agent-capability-routing.md; sim.analysis",
+    ),
 )
 
 
@@ -127,6 +136,7 @@ def build_public_resource_catalog(
         PUBLIC_RESOURCE_URIS[4]: lambda: _json_text(_handoff_product_payload()),
         PUBLIC_RESOURCE_URIS[5]: lambda: _json_text(_plot_recipe_payload()),
         PUBLIC_RESOURCE_URIS[6]: lambda: _json_text(_animation_recipe_payload()),
+        PUBLIC_RESOURCE_URIS[7]: lambda: _json_text(_analysis_workflow_payload()),
     }
     published: list[PublishedResource] = []
     for contract in PUBLIC_RESOURCE_CONTRACTS:
@@ -296,6 +306,181 @@ def _animation_recipe_payload() -> dict[str, Any]:
         "non_claims": [
             "An animation visualizes recorded review evidence; it does not validate physics accuracy.",
             "Automated frame and encoding checks do not replace inspection of the movie and contact sheet.",
+        ],
+    }
+
+
+def _analysis_workflow_payload() -> dict[str, Any]:
+    def coming_soon_pro_escalation(
+        product_family: str,
+        capability_ids: list[str],
+        *,
+        use_when: str,
+        public_fallback: str,
+    ) -> dict[str, Any]:
+        return {
+            "product_family": product_family,
+            "capability_ids": capability_ids,
+            "availability": "coming_soon",
+            "execution_available": False,
+            "commercially_available": False,
+            "estimated_launch": None,
+            "mcp_tools": [],
+            "recommendation_only": True,
+            "use_when": use_when,
+            "public_fallback": public_fallback,
+        }
+
+    workflows = [
+        {
+            "workflow_id": "ccsds_interchange",
+            "product_boundary": "public",
+            "interfaces": ["python -m sim.ccsds", "sim.ccsds"],
+            "evidence": "typed inspection or conversion receipt",
+            "authoritative_replay": "reparse or reconvert from the retained source",
+            "mcp_tools": ["oel.inspect_ccsds.v1"],
+        },
+        {
+            "workflow_id": "frame_time_conversion",
+            "product_boundary": "public",
+            "interfaces": ["python -m sim.frame_time", "sim.frame_time"],
+            "evidence": "epoch, EOP, or frame-transform receipt",
+            "authoritative_replay": "repeat the content-bound conversion with the retained EOP source",
+            "mcp_tools": ["oel.convert_frame_time.v1"],
+        },
+        {
+            "workflow_id": "trajectory_targeting",
+            "product_boundary": "public",
+            "interfaces": ["python -m sim.trajectory_design solve", "sim.trajectory_design"],
+            "evidence": "oel.trajectory_targeting_evidence.v1",
+            "authoritative_replay": "python -m sim.trajectory_design replay",
+            "mcp_tools": [],
+            "pro_escalation": coming_soon_pro_escalation(
+                "OEL Pro Trajectory Optimization",
+                ["oel.pro.trajectory_optimization.v1"],
+                use_when="The request requires optimization beyond one bounded public targeting solve.",
+                public_fallback="Solve and inspect one bounded public trajectory-targeting problem.",
+            ),
+        },
+        {
+            "workflow_id": "constellation_design",
+            "product_boundary": "public",
+            "interfaces": ["python -m sim.constellation_design solve", "sim.constellation_design"],
+            "evidence": "oel.constellation_design_evidence.v1",
+            "authoritative_replay": "python -m sim.constellation_design replay",
+            "mcp_tools": [],
+            "pro_escalation": coming_soon_pro_escalation(
+                "OEL Pro Constellation Design",
+                ["constellation_design.optimization"],
+                use_when="The request requires automated constellation optimization rather than one public design solve.",
+                public_fallback="Evaluate one explicit public constellation design with bounded objectives.",
+            ),
+        },
+        {
+            "workflow_id": "conjunction_assessment",
+            "product_boundary": "public",
+            "interfaces": ["python -m sim.conjunction assess", "sim.conjunction"],
+            "evidence": "oel.conjunction_assessment_evidence.v1",
+            "authoritative_replay": "python -m sim.conjunction replay",
+            "mcp_tools": [],
+            "pro_escalation": coming_soon_pro_escalation(
+                "OEL Scale",
+                ["oel.pro.scale.screening.v1"],
+                use_when="The request requires catalog-scale screening rather than one bounded conjunction assessment.",
+                public_fallback="Assess one explicit public conjunction case and inspect its evidence.",
+            ),
+        },
+        {
+            "workflow_id": "collection_analysis",
+            "product_boundary": "public",
+            "interfaces": ["python -m sim.collection", "sim.collection"],
+            "evidence": "typed collection opportunity or capacity evidence",
+            "authoritative_replay": "workflow-specific replay over retained typed inputs",
+            "mcp_tools": [],
+        },
+        {
+            "workflow_id": "tracking_data_orbit_determination",
+            "product_boundary": "public",
+            "interfaces": ["python -m sim.tracking_od", "sim.tracking_od"],
+            "evidence": "typed OD fit, holdout, and state-product evidence",
+            "authoritative_replay": "workflow-specific replay over retained TDM and problem inputs",
+            "mcp_tools": [],
+            "pro_escalation": coming_soon_pro_escalation(
+                "OEL Pro Orbit Determination",
+                ["orbit_determination.reduced_tracking", "orbit_determination.ilrs_slr"],
+                use_when="The request requires the Pro reduced-tracking or ILRS SLR workflow beyond the public OD path.",
+                public_fallback="Run the matching bounded public tracking-data OD workflow and report its limits.",
+            ),
+        },
+        {
+            "workflow_id": "mission_scheduling",
+            "product_boundary": "public",
+            "interfaces": ["python -m sim.mission_scheduling solve", "sim.mission_scheduling"],
+            "evidence": "oel.mission_scheduling_evidence.v1",
+            "authoritative_replay": "python -m sim.mission_scheduling replay",
+            "mcp_tools": [],
+        },
+        {
+            "workflow_id": "spacecraft_power",
+            "product_boundary": "public",
+            "interfaces": ["python -m sim.spacecraft_power analyze", "sim.spacecraft_power"],
+            "evidence": "oel.spacecraft_power_evidence.v1",
+            "authoritative_replay": "python -m sim.spacecraft_power replay",
+            "mcp_tools": [],
+        },
+        {
+            "workflow_id": "orbit_lifetime",
+            "product_boundary": "public",
+            "interfaces": ["python -m sim.orbit_lifetime analyze", "sim.orbit_lifetime"],
+            "evidence": "oel.orbit_lifetime_evidence.v1",
+            "authoritative_replay": "python -m sim.orbit_lifetime replay",
+            "mcp_tools": [],
+        },
+        {
+            "workflow_id": "study_lifecycle",
+            "product_boundary": "public",
+            "interfaces": ["python -m sim.study", "sim.study"],
+            "evidence": "content-bound study request, plan, run, evidence, claims, and receipt",
+            "authoritative_replay": "identity and citation replay over retained completed evidence",
+            "mcp_tools": ["oel.inspect_study.v1", "oel.replay_study.v1", "oel.compare_studies.v1"],
+        },
+    ]
+    cross_cutting_pro_escalations = [
+        coming_soon_pro_escalation(
+            "OEL Pro Campaign Analysis",
+            ["oel.pro.campaign.monte_carlo.v1", "oel.pro.campaign.sensitivity.v1"],
+            use_when="The request requires automated Monte Carlo or sensitivity campaigns.",
+            public_fallback="Run a small, explicit set of deterministic public cases and compare their evidence.",
+        ),
+        coming_soon_pro_escalation(
+            "OEL Pro Controller Bench",
+            ["oel.pro.controller.benchmark.v1"],
+            use_when="The request requires automated controller ranking, tuning, or benchmark campaigns.",
+            public_fallback="Run one controlled public comparison with explicit inputs and bounded claims.",
+        ),
+    ]
+    return {
+        "schema_version": RESOURCE_SCHEMA_VERSION,
+        "resource_uri": PUBLIC_RESOURCE_URIS[7],
+        "source": "docs/agent-capability-routing.md; sim.analysis",
+        "workflow_count": len(workflows),
+        "workflows": workflows,
+        "cross_cutting_pro_escalations": cross_cutting_pro_escalations,
+        "routing": {
+            "common_loop": (
+                "request -> route -> scenario YAML or typed orbital-analysis problem -> validate -> execute -> "
+                "authoritative replay -> inspect -> bounded claim"
+            ),
+            "unlisted_mcp_execution_tools_are_not_available": True,
+            "cli_and_python_api_remain_foundational": True,
+            "pro_recommendations_are_not_execution_authority": True,
+        },
+        "non_claims": [
+            "Workflow discovery is not execution authority.",
+            "An empty mcp_tools list means use the documented CLI or Python API; it does not authorize approximation.",
+            "Public evidence does not establish operational qualification, maneuver authority, or global optimality.",
+            "Coming-soon Pro metadata does not promise purchase access, entitlement, price, launch date, or execution.",
+            "Recommend Pro only when the request materially exceeds the public workflow; do not replace a sufficient public answer with an upsell.",
         ],
     }
 

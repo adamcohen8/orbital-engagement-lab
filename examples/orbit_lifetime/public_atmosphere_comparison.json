@@ -1,0 +1,74 @@
+{
+  "schema_version": "oel.orbit_lifetime_comparison_problem.v1",
+  "comparison_id": "public-atmosphere-comparison-v1",
+  "base_problem": {
+    "schema_version": "oel.orbit_lifetime_problem.v1",
+    "analysis_id": "public-atmosphere-comparison-base-v1",
+    "asset_id": "SAT-A",
+    "epoch_jd_utc": 2461041.5,
+    "initial_position_eci_km": [800.9589366233281, 4377.520407717024, 4844.343738075695],
+    "initial_velocity_eci_km_s": [-7.43928435247673, -0.9478175979281773, 2.0864853339117673],
+    "duration_s": 1800.0,
+    "integration_step_s": 10.0,
+    "output_step_s": 300.0,
+    "transition_time_tolerance_s": 0.01,
+    "transition_max_iterations": 80,
+    "mass_kg": 100.0,
+    "drag_area_m2": 10.0,
+    "drag_coefficient": 2.2,
+    "drag_enabled": true,
+    "include_j2": false,
+    "stop_at_reentry": false,
+    "atmosphere": {
+      "model": "exponential",
+      "parameters": {
+        "reference_density_kg_m3": 1e-9,
+        "reference_altitude_km": 200.0,
+        "scale_height_km": 30.0,
+        "ceiling_altitude_km": 1000.0
+      }
+    },
+    "thresholds": {
+      "warning_altitude_km": 190.0,
+      "disposal_altitude_km": 150.0,
+      "reentry_altitude_km": 120.0
+    }
+  },
+  "cases": [
+    {
+      "case_id": "exponential",
+      "atmosphere": {
+        "model": "exponential",
+        "parameters": {
+          "reference_density_kg_m3": 1e-9,
+          "reference_altitude_km": 200.0,
+          "scale_height_km": 30.0,
+          "ceiling_altitude_km": 1000.0
+        }
+      }
+    },
+    {
+      "case_id": "harris-priester",
+      "atmosphere": {
+        "model": "harris_priester",
+        "parameters": {"f107": 150.0}
+      }
+    },
+    {
+      "case_id": "nrlmsise00",
+      "atmosphere": {
+        "model": "nrlmsise00",
+        "parameters": {
+          "f107": 150.0,
+          "f107a": 150.0,
+          "ap": 4.0,
+          "ap_a": [4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0]
+        }
+      }
+    },
+    {
+      "case_id": "ussa1976",
+      "atmosphere": {"model": "ussa1976", "parameters": {}}
+    }
+  ]
+}

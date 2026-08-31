@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -196,7 +197,9 @@ LOCAL_EVIDENCE_TESTS = {
     ("test_mendicant_adapter_runtime_v07.py", "test_v07_adapter_runtime_rejects_partial_adapter"),
     ("test_mendicant_30b_eval.py", "test_harness_freeze_is_intact"),
     ("test_mendicant_30b_eval.py", "test_preserved_v06_predictions_replay_to_preserved_summary"),
+    ("test_orbit_runtime_speedups.py", "test_adaptive_trajectory_fixture_stays_within_approved_rounding_bound"),
 }
+LOCAL_EVIDENCE_OPT_IN_ENV = "OEL_RUN_LOCAL_EVIDENCE_TESTS"
 
 
 def _test_filename(item: pytest.Item) -> str:
@@ -205,6 +208,14 @@ def _test_filename(item: pytest.Item) -> str:
 
 def _test_function_name(item: pytest.Item) -> str:
     return str(item.name).split("[", 1)[0]
+
+
+def pytest_runtest_setup(item: pytest.Item) -> None:
+    key = (_test_filename(item), _test_function_name(item))
+    if key in LOCAL_EVIDENCE_TESTS and os.environ.get(LOCAL_EVIDENCE_OPT_IN_ENV) != "1":
+        pytest.skip(
+            f"requires preserved local-only evidence; set {LOCAL_EVIDENCE_OPT_IN_ENV}=1 to run strictly"
+        )
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:

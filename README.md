@@ -174,6 +174,7 @@ query CLI/API, custom review plotting API, and the RPO trainer.
 | Closed-loop public rendezvous | `python run_simulation.py --config examples/configs/public_closed_loop_rendezvous_lqr.yaml` |
 | Mission-recovery evidence case | `python run_simulation.py --config agents/examples/public_agent_mission_recovery_plus_c_burn.yaml` |
 | Mission-reconstitution trade space | `python run_simulation.py --config agents/examples/public_agent_mission_reconstitution_trade_space.yaml` |
+| Event-driven impulsive trajectory target | `python -m sim.trajectory_design solve examples/trajectory_targeting/hohmann_apoapsis.json --output outputs/trajectory_targeting/hohmann_evidence.json` |
 | Attitude hold with disturbance torque | `python run_simulation.py --config examples/configs/public_attitude_hold_disturbance.yaml` |
 | Author a public FSW stack | `oel fsw init my_adcs --template adcs` then [Public FSW Authoring](docs/fsw-authoring.md) |
 | Re-entry diagnostics | `python run_simulation.py --config configs/reentry_smoke.yaml` |
@@ -309,8 +310,9 @@ boundaries, and incident response, start with:
 The public core is useful on its own: deterministic single-run simulation,
 public controllers and mission primitives, review artifacts, Python/YAML
 interfaces, examples, docs, the bounded two-body Lambert orbit-transfer
-planner, deterministic coverage and directed-link analysis, the Public FSW
-Authoring Kit, and the RPO trainer.
+planner, the transparent event-driven single-shooting targeter with
+authoritative ONP repropagation, deterministic coverage and directed-link
+analysis, the Public FSW Authoring Kit, and the RPO trainer.
 
 The Pro layer adds workflow acceleration for teams that need repeatable
 analysis at scale: controller benchmarks, general optimization and gain tuning,
@@ -328,6 +330,8 @@ keys.
 - [Documentation Index](docs/index.md)
 - [Quickstart](docs/quickstart.md)
 - [Scenario YAML](docs/scenario-yaml.md)
+- [CCSDS OPM And OMM Interoperability](docs/ccsds-odm.md)
+- [Event-Driven Trajectory Targeting](docs/trajectory-targeting.md)
 - [Coverage And Link Scenario Analysis](docs/coverage-link-scenario-analysis.md)
 - [Python API](docs/python-api.md)
 - [Product Inventory](docs/product-inventory.md)

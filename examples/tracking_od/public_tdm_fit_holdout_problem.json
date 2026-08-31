@@ -1,0 +1,42 @@
+{
+  "schema_version": "oel.tracking_od_problem.v1",
+  "name": "public_tdm_fit_holdout",
+  "object_id": "OEL-SAT",
+  "measurement_semantics": "reduced_geometric",
+  "stations": [
+    {
+      "station_id": "OEL-STATION",
+      "latitude_deg": 10.0,
+      "longitude_deg": 79.53938163,
+      "altitude_km": 0.0
+    }
+  ],
+  "initial_state_eci_km_km_s": [
+    6878.637,
+    -0.4,
+    0.3,
+    0.0005,
+    6.592312067068919,
+    3.806604
+  ],
+  "initial_state_epoch_utc": "2000-01-01T12:00:00Z",
+  "initial_state_frame": "ECI",
+  "frame_model": "simple_gmst",
+  "uncertainties": {
+    "angle_sigma_deg": 0.005,
+    "range_sigma_km": 0.01
+  },
+  "fit_duration_s": 420.0,
+  "holdout_duration_s": 300.0,
+  "propagation": {
+    "dynamics_model": "two_body",
+    "step_s": 60.0,
+    "j2": false
+  },
+  "solver": {
+    "max_nfev": 60,
+    "robust_loss": "linear",
+    "robust_f_scale": 1.0,
+    "sigma_clip_threshold": null
+  }
+}

@@ -1,0 +1,323 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orbitalengagementlab.com/schemas/oel-study-lifecycle-v1.schema.json",
+  "title": "OEL Study Lifecycle Records v1",
+  "oneOf": [
+    {"$ref": "#/$defs/request"},
+    {"$ref": "#/$defs/plan"},
+    {"$ref": "#/$defs/run"},
+    {"$ref": "#/$defs/evidence"},
+    {"$ref": "#/$defs/claims"},
+    {"$ref": "#/$defs/receipt"}
+  ],
+  "$defs": {
+    "identifier": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]{2,127}$"},
+    "stepIdentifier": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "digestOrAuto": {
+      "oneOf": [
+        {"$ref": "#/$defs/sha256"},
+        {"const": "auto"}
+      ]
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "study_id", "title", "question", "capabilities",
+        "assumptions", "clarifications", "context", "fidelity", "acceptance_criteria"
+      ],
+      "properties": {
+        "schema_version": {"const": "oel.study_request.v1"},
+        "study_id": {"$ref": "#/$defs/identifier"},
+        "title": {"type": "string", "minLength": 1},
+        "question": {"type": "string", "minLength": 1},
+        "capabilities": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": ["conjunction_assessment", "constellation_design", "mission_scheduling", "orbit_lifetime", "spacecraft_power", "trajectory_targeting"]
+          }
+        },
+        "assumptions": {
+          "type": "array", "minItems": 1, "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "clarifications": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["question", "resolution"],
+            "properties": {
+              "question": {"type": "string", "minLength": 1},
+              "resolution": {"type": "string", "minLength": 1}
+            }
+          }
+        },
+        "context": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["epoch", "time_system", "frame", "units"],
+          "properties": {
+            "epoch": {"type": "string", "minLength": 1},
+            "time_system": {"type": "string", "minLength": 1},
+            "frame": {"type": "string", "minLength": 1},
+            "units": {"type": "string", "minLength": 1}
+          }
+        },
+        "fidelity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["level", "description"],
+          "properties": {
+            "level": {"type": "string", "minLength": 1},
+            "description": {"type": "string", "minLength": 1}
+          }
+        },
+        "acceptance_criteria": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["criterion_id", "description"],
+            "properties": {
+              "criterion_id": {"$ref": "#/$defs/stepIdentifier"},
+              "description": {"type": "string", "minLength": 1}
+            }
+          }
+        }
+      }
+    },
+    "planStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "step_id", "capability", "analysis_interface", "expected_evidence_schema",
+        "depends_on", "acceptance_criterion_ids"
+      ],
+      "properties": {
+        "step_id": {"$ref": "#/$defs/stepIdentifier"},
+        "depends_on": {
+          "type": "array", "uniqueItems": true,
+          "items": {"$ref": "#/$defs/stepIdentifier"}
+        },
+        "acceptance_criterion_ids": {
+          "type": "array", "minItems": 1, "uniqueItems": true,
+          "items": {"$ref": "#/$defs/stepIdentifier"}
+        },
+        "capability": {"type": "string"},
+        "analysis_interface": {"type": "string"},
+        "expected_evidence_schema": {"type": "string"}
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "capability": {"const": "constellation_design"},
+            "analysis_interface": {"const": "python -m sim.constellation_design solve"},
+            "expected_evidence_schema": {"const": "oel.constellation_design_evidence.v1"}
+          }
+        },
+        {
+          "properties": {
+            "capability": {"const": "conjunction_assessment"},
+            "analysis_interface": {"const": "python -m sim.conjunction assess"},
+            "expected_evidence_schema": {"const": "oel.conjunction_assessment_evidence.v1"}
+          }
+        },
+        {
+          "properties": {
+            "capability": {"const": "mission_scheduling"},
+            "analysis_interface": {"const": "python -m sim.mission_scheduling solve"},
+            "expected_evidence_schema": {"const": "oel.mission_scheduling_evidence.v1"}
+          }
+        },
+        {
+          "properties": {
+            "capability": {"const": "orbit_lifetime"},
+            "analysis_interface": {"const": "python -m sim.orbit_lifetime analyze"},
+            "expected_evidence_schema": {"const": "oel.orbit_lifetime_evidence.v1"}
+          }
+        },
+        {
+          "properties": {
+            "capability": {"const": "spacecraft_power"},
+            "analysis_interface": {"const": "python -m sim.spacecraft_power analyze"},
+            "expected_evidence_schema": {"const": "oel.spacecraft_power_evidence.v1"}
+          }
+        },
+        {
+          "properties": {
+            "capability": {"const": "trajectory_targeting"},
+            "analysis_interface": {"const": "python -m sim.trajectory_design solve"},
+            "expected_evidence_schema": {"const": "oel.trajectory_targeting_evidence.v1"}
+          }
+        }
+      ]
+    },
+    "plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "study_id", "request_sha256", "resource_profile", "steps"],
+      "properties": {
+        "schema_version": {"const": "oel.study_plan.v1"},
+        "study_id": {"$ref": "#/$defs/identifier"},
+        "request_sha256": {"$ref": "#/$defs/digestOrAuto"},
+        "resource_profile": {"enum": ["off", "laptop-safe", "standard"]},
+        "steps": {
+          "type": "array", "minItems": 1, "maxItems": 12,
+          "items": {"$ref": "#/$defs/planStep"}
+        }
+      }
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "study_id", "plan_sha256", "status", "execution_mode",
+        "resource_profile", "steps"
+      ],
+      "properties": {
+        "schema_version": {"const": "oel.study_run.v1"},
+        "study_id": {"$ref": "#/$defs/identifier"},
+        "plan_sha256": {"$ref": "#/$defs/sha256"},
+        "status": {"const": "completed"},
+        "execution_mode": {"const": "bound_completed_evidence"},
+        "resource_profile": {"enum": ["off", "laptop-safe", "standard"]},
+        "steps": {
+          "type": "array", "minItems": 1, "maxItems": 12,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["step_id", "status", "evidence_sha256"],
+            "properties": {
+              "step_id": {"$ref": "#/$defs/stepIdentifier"},
+              "status": {"const": "evidence_bound"},
+              "evidence_sha256": {"$ref": "#/$defs/sha256"}
+            }
+          }
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "study_id", "plan_sha256", "status", "steps"],
+      "properties": {
+        "schema_version": {"const": "oel.study_evidence.v1"},
+        "study_id": {"$ref": "#/$defs/identifier"},
+        "plan_sha256": {"$ref": "#/$defs/sha256"},
+        "status": {"const": "complete"},
+        "steps": {
+          "type": "array", "minItems": 1, "maxItems": 12,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "step_id", "capability", "schema_version", "status", "retained_path",
+              "bytes", "sha256", "semantic_sha256"
+            ],
+            "properties": {
+              "step_id": {"$ref": "#/$defs/stepIdentifier"},
+              "capability": {
+                "enum": ["conjunction_assessment", "constellation_design", "mission_scheduling", "orbit_lifetime", "spacecraft_power", "trajectory_targeting"]
+              },
+              "schema_version": {"type": "string", "minLength": 1},
+              "status": {"type": "string", "minLength": 1},
+              "retained_path": {"type": "string", "pattern": "^evidence/[a-z][a-z0-9_-]{0,63}\\.json$"},
+              "bytes": {"type": "integer", "minimum": 1, "maximum": 16777216},
+              "sha256": {"$ref": "#/$defs/sha256"},
+              "semantic_sha256": {"$ref": "#/$defs/sha256"}
+            }
+          }
+        }
+      }
+    },
+    "evidenceReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["step_id", "json_pointer"],
+      "properties": {
+        "step_id": {"$ref": "#/$defs/stepIdentifier"},
+        "json_pointer": {"type": "string", "pattern": "^/"}
+      }
+    },
+    "claims": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "study_id", "plan_sha256", "claims", "non_claims"],
+      "properties": {
+        "schema_version": {"const": "oel.study_claims.v1"},
+        "study_id": {"$ref": "#/$defs/identifier"},
+        "plan_sha256": {"$ref": "#/$defs/digestOrAuto"},
+        "claims": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["claim_id", "statement", "validation_level", "criterion_ids", "evidence"],
+            "properties": {
+              "claim_id": {"$ref": "#/$defs/stepIdentifier"},
+              "statement": {"type": "string", "minLength": 1},
+              "validation_level": {
+                "description": "Author-declared validation-level label. Schema acceptance does not substantiate the claimed level, and the lifecycle capability registry may impose a lower maximum.",
+                "enum": ["VC-0", "VC-1", "VC-2", "VC-3", "VC-4"]
+              },
+              "criterion_ids": {
+                "type": "array", "minItems": 1, "uniqueItems": true,
+                "items": {"$ref": "#/$defs/stepIdentifier"}
+              },
+              "evidence": {
+                "type": "array", "minItems": 1,
+                "items": {"$ref": "#/$defs/evidenceReference"}
+              }
+            }
+          }
+        },
+        "non_claims": {
+          "type": "array", "minItems": 1, "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "recordReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "bytes", "sha256", "semantic_sha256"],
+      "properties": {
+        "path": {
+          "enum": [
+            "study_request.json", "study_plan.json", "study_run.json",
+            "study_evidence.json", "study_claims.json"
+          ]
+        },
+        "bytes": {"type": "integer", "minimum": 1},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "semantic_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "study_id", "status", "records", "bundle_semantic_sha256", "limitations"
+      ],
+      "properties": {
+        "schema_version": {"const": "oel.study_receipt.v1"},
+        "study_id": {"$ref": "#/$defs/identifier"},
+        "status": {"const": "verified"},
+        "records": {
+          "type": "array", "minItems": 5, "maxItems": 5,
+          "items": {"$ref": "#/$defs/recordReceipt"}
+        },
+        "bundle_semantic_sha256": {"$ref": "#/$defs/sha256"},
+        "limitations": {
+          "type": "array", "minItems": 1,
+          "items": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  }
+}

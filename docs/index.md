@@ -76,6 +76,18 @@ Start here when you already know the kind of work you want to run.
 | Use ML/RL wrappers | [ML/RL Policy Contracts](ml-rl-contracts.md) |
 | Connect a local MCP host | [Supported Local MCP Surface](oel-mcp.md) |
 | Start an agent run and await durable completion | [Agent Run Lifecycle](agent-run-lifecycle.md) |
+| Inspect, import, export, or compare CCSDS OEM ephemerides | [CCSDS OEM Interoperability](ccsds-oem.md) |
+| Inspect, import, round-trip, or compare CCSDS OPM/OMM products | [CCSDS OPM And OMM Interoperability](ccsds-odm.md) |
+| Convert canonical frames, time scales, states, or covariances | [Canonical Frames And Time](frame-time.md) |
+| Build and solve a deterministic event-driven coast/burn target | [Event-Driven Trajectory Targeting](trajectory-targeting.md) |
+| Inspect a CDM or assess a bounded two-object conjunction | [Conjunction Assessment](conjunction-assessment.md) |
+| Generate a bounded optical collection opportunity | [Optical Collection Opportunity Analysis](collection-opportunity-analysis.md) |
+| Fit reduced-geometric CCSDS TDM observations and inspect holdout predictions | [CCSDS TDM Tracking Orbit Determination](tracking-od.md) |
+| Schedule supplied observations and downlinks across a small multi-asset fleet | [Bounded Multi-Asset Mission Scheduling](mission-scheduling.md) |
+| Compare a bounded set of Walker/shell constellations and ground networks | [Constellation And Ground-Network Design](constellation-design.md) |
+| Check eclipse-coupled solar-array and battery feasibility for one orbit and load timeline | [Spacecraft Power Analysis](spacecraft-power.md) |
+| Propagate one deterministic drag-decay case or compare frozen atmosphere assumptions | [Deterministic Orbit Lifetime Analysis](orbit-lifetime.md) |
+| Bind completed analyses into one evidence-cited, content-bound study | [Integrated Study Lifecycle](study-lifecycle.md) |
 
 ## Pro Workspace User
 

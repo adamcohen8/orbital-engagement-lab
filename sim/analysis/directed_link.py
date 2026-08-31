@@ -7,7 +7,7 @@ import hashlib
 import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping, Sequence
 
 import numpy as np
 
@@ -915,6 +915,75 @@ def _normalized_config(config: DirectedLinkConfig) -> dict[str, Any]:
     return record
 
 
+def recompute_directed_link_semantic_sha256(
+    *,
+    normalized_config: Mapping[str, Any],
+    input_evidence_sha256: str,
+    time_s: Sequence[float] | np.ndarray,
+    range_km: Sequence[float] | np.ndarray,
+    margin_db: Sequence[float] | np.ndarray,
+    available: Sequence[bool] | np.ndarray,
+    primary_reason: Sequence[str],
+    intervals: Sequence[Mapping[str, Any]],
+    transitions: Sequence[Mapping[str, Any]],
+    refinement_provider_id: str | None,
+) -> str:
+    """Rebuild the directed-link semantic identity from retained evidence."""
+
+    config = dict(normalized_config)
+    if config.get("contract_version") != DIRECTED_LINK_CONTRACT_VERSION:
+        raise ValueError("Unsupported normalized directed-link contract version.")
+    input_digest = str(input_evidence_sha256 or "").strip().lower()
+    if len(input_digest) != 64 or any(character not in "0123456789abcdef" for character in input_digest):
+        raise ValueError("input_evidence_sha256 must be a lowercase SHA-256 digest.")
+    times = np.asarray(time_s, dtype=float)
+    ranges = np.asarray(range_km, dtype=float)
+    margins = np.asarray(margin_db, dtype=float)
+    mask = np.asarray(available, dtype=bool)
+    reasons = tuple(str(value) for value in primary_reason)
+    if (
+        times.ndim != 1
+        or times.size == 0
+        or ranges.shape != times.shape
+        or margins.shape != times.shape
+        or mask.shape != times.shape
+        or len(reasons) != times.size
+        or np.any(~np.isfinite(times))
+        or np.any(~np.isfinite(ranges))
+        or np.any(~np.isfinite(margins))
+    ):
+        raise ValueError("Retained directed-link semantic sample columns are inconsistent.")
+    try:
+        reason_codes = np.asarray([LINK_REASON_NAMES.index(value) for value in reasons])
+        interval_rows = np.asarray(
+            [
+                [float(value["start_s"]), float(value["end_s"]), float(value["duration_s"])]
+                for value in intervals
+            ],
+            dtype=float,
+        ).reshape(-1, 3)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("Retained directed-link intervals or reason codes are invalid.") from exc
+    if np.any(~np.isfinite(interval_rows)):
+        raise ValueError("Retained directed-link interval rows must be finite.")
+    return _hash_arrays(
+        {
+            **config,
+            "input_evidence_sha256": input_digest,
+            "refinement_provider_id": refinement_provider_id,
+            "transitions": [dict(value) for value in transitions],
+        },
+        (
+            ("time_s", times, "<f8"),
+            ("range_km", ranges, "<f8"),
+            ("margin_db", margins, "<f8"),
+            ("available", mask, "|u1"),
+            ("primary_reason_code", reason_codes, "|u1"),
+            ("interval_rows", interval_rows, "<f8"),
+        ),
+    )
+
+
 def _semantic_hash(
     config: DirectedLinkConfig,
     input_hash: str,
@@ -923,26 +992,17 @@ def _semantic_hash(
     transitions: tuple[RefinedTransition, ...],
     refinement_provider_id: str | None = None,
 ) -> str:
-    reason_codes = np.asarray([LINK_REASON_NAMES.index(value) for value in samples.primary_reason])
-    interval_rows = np.asarray(
-        [[value.start_s, value.end_s, value.duration_s] for value in intervals],
-        dtype=float,
-    ).reshape(-1, 3)
-    return _hash_arrays(
-        {
-            **_normalized_config(config),
-            "input_evidence_sha256": input_hash,
-            "refinement_provider_id": refinement_provider_id,
-            "transitions": [asdict(value) for value in transitions],
-        },
-        (
-            ("time_s", samples.time_s, "<f8"),
-            ("range_km", samples.range_km, "<f8"),
-            ("margin_db", samples.margin_db, "<f8"),
-            ("available", samples.available, "|u1"),
-            ("primary_reason_code", reason_codes, "|u1"),
-            ("interval_rows", interval_rows, "<f8"),
-        ),
+    return recompute_directed_link_semantic_sha256(
+        normalized_config=_normalized_config(config),
+        input_evidence_sha256=input_hash,
+        time_s=samples.time_s,
+        range_km=samples.range_km,
+        margin_db=samples.margin_db,
+        available=samples.available,
+        primary_reason=samples.primary_reason,
+        intervals=[asdict(value) for value in intervals],
+        transitions=[asdict(value) for value in transitions],
+        refinement_provider_id=refinement_provider_id,
     )
 
 
@@ -1258,6 +1318,7 @@ __all__ = [
     "evaluate_directed_link_sample",
     "free_space_link_ledger",
     "fixed_wgs84_site_history",
+    "recompute_directed_link_semantic_sha256",
     "spacecraft_endpoint_history",
     "write_directed_link_artifacts",
 ]

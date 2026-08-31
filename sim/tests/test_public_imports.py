@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from pathlib import Path
 
 
 def test_import_sim_keeps_heavy_feature_modules_lazy() -> None:
@@ -71,3 +72,48 @@ print(json.dumps({name: name in sys.modules for name in blocked}, sort_keys=True
     imported = json.loads(proc.stdout)
 
     assert imported == {name: False for name in imported}
+
+
+def test_public_workflow_imports_resolve_within_active_checkout() -> None:
+    code = r"""
+import importlib
+import json
+import sys
+from pathlib import Path
+
+root = Path.cwd().resolve()
+for name in (
+    "sim.ccsds",
+    "sim.collection",
+    "sim.conjunction",
+    "sim.frame_time",
+    "sim.mission_scheduling",
+    "sim.orbit_lifetime",
+    "sim.spacecraft_power",
+    "sim.study",
+    "sim.tracking_od",
+    "sim.trajectory_design",
+):
+    importlib.import_module(name)
+
+leaks = {}
+for name, module in sorted(sys.modules.items()):
+    if name != "sim" and not name.startswith("sim."):
+        continue
+    value = getattr(module, "__file__", None)
+    if not value:
+        continue
+    path = Path(value).resolve()
+    if path != root and root not in path.parents:
+        leaks[name] = str(path)
+print(json.dumps(leaks, sort_keys=True))
+"""
+    proc = subprocess.run(
+        [sys.executable, "-c", code],
+        text=True,
+        capture_output=True,
+        check=True,
+        cwd=Path.cwd(),
+    )
+
+    assert json.loads(proc.stdout) == {}

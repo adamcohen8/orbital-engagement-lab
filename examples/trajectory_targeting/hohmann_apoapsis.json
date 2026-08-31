@@ -1,0 +1,65 @@
+{
+  "schema_version": "oel.trajectory_targeting_problem.v1",
+  "name": "public_hohmann_apoapsis_target",
+  "initial_state_eci_km_km_s": [
+    7000.0,
+    0.0,
+    0.0,
+    0.0,
+    7.546053290107542,
+    0.0
+  ],
+  "propagation": {
+    "step_s": 10.0,
+    "integrator": "rk4",
+    "force_model": [],
+    "event_time_tolerance_s": 1e-6,
+    "event_value_tolerance": 1e-10
+  },
+  "segments": [
+    {
+      "type": "impulsive_burn",
+      "name": "departure",
+      "frame": "ric",
+      "delta_v_m_s": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "type": "coast",
+      "name": "coast_to_apoapsis",
+      "stop": {
+        "quantity": "radial_velocity_km_s",
+        "target": 0.0,
+        "direction": "decreasing",
+        "minimum_elapsed_s": 60.0,
+        "max_duration_s": 5000.0
+      }
+    }
+  ],
+  "variables": [
+    {
+      "name": "departure_intrack_m_s",
+      "segment": "departure",
+      "field": "delta_v_i_m_s",
+      "initial": 300.0,
+      "perturbation": 0.1
+    }
+  ],
+  "constraints": [
+    {
+      "name": "apoapsis_radius",
+      "quantity": "radius_km",
+      "target": 9000.0,
+      "tolerance": 0.01
+    }
+  ],
+  "solver": {
+    "max_iterations": 12,
+    "rank_rcond": 1e-10,
+    "minimum_line_search_scale": 0.0078125,
+    "correction_limit": 1000.0
+  }
+}

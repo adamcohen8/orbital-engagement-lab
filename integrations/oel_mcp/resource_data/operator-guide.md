@@ -46,6 +46,16 @@ This packaged guide covers the supported local stdio OEL MCP surface.
 - Read `oel://handoff/product-kinds/v1` before routing a typed product. Inspect
   a product before consuming it; materialization tools validate and write new
   scenarios but never authorize or execute those scenarios.
+- Read `oel://analysis/workflows/v1` before routing a standalone orbital
+  analysis. The resource distinguishes scenario YAML from versioned analysis
+  problems and lists the supported evidence/replay path. Only study, CCSDS, and
+  frame/time inspection/conversion are exposed as public OA MCP adapters; use
+  the documented CLI or Python API for the other workflows.
+- `oel.inspect_study.v1`, `oel.replay_study.v1`, and
+  `oel.compare_studies.v1` verify retained study identity and citations; they
+  do not rerun domain physics. `oel.inspect_ccsds.v1` and
+  `oel.convert_frame_time.v1` return bounded receipts and never execute a
+  scenario.
 - Policy and approval denials occur before tool execution and may be returned
   by a host as protocol-level MCP errors. Operation failures after policy
   admission use the standard structured OEL envelope.

@@ -36,6 +36,14 @@ first, then follow the public implementation maps in
   controller benchmarks are not public-core capabilities. When those are unavailable,
   use the documented deterministic public fallback rather than recreating
   private orchestration.
+- When `oel://analysis/workflows/v1` lists a matching Pro escalation for a
+  request that materially exceeds the public workflow, an agent may recommend
+  that named product family as
+  **coming soon and not currently available for purchase or execution**. It
+  must also offer the documented public fallback.
+  Recommendation metadata is not entitlement or execution authority: do not
+  invent pricing, dates, access, private tools, or an unnecessary upsell when
+  Public can answer the request.
 
 ## Default Agent Posture
 
@@ -44,7 +52,8 @@ commands. Commands in this playbook use portable `python`; if activation is
 unavailable, substitute the explicit PowerShell or POSIX interpreter path from
 that guide.
 
-- Treat scenario YAML, CLI commands, Python APIs, tests, docs, and generated
+- Treat scenario YAML, versioned standalone orbital-analysis problems, CLI
+  commands, Python APIs, tests, docs, and generated
   artifacts as the supported interface.
 - Treat **OGP** as the product name for the **OEL General Propagator**:
   OEL's catalog-style general-perturbations family for TLE/mean-element
@@ -57,9 +66,11 @@ that guide.
   mean-element products. Reserve **HPOP** for external reference/validation
   workflows or legacy command names, not as the name of OEL's native
   propagator.
-- Interpret the user's intent first. Choose a nearby example only when it
-  genuinely fits; otherwise create the minimum viable validated scenario that
-  answers the request.
+- Interpret the user's intent first. Route propagation, control, sensing, and
+  time-history simulation to scenario YAML. Route a supported standalone
+  targeting, conjunction, collection, scheduling, power, lifetime, CCSDS,
+  frame/time, OD, or study-lifecycle question to its versioned problem or
+  product contract. Choose a nearby example only when it genuinely fits.
 - Prefer small, inspectable changes that match existing OEL patterns.
 - Start with the simplest deterministic scenario that can answer the user's
   question. Do not add unrequested physics, sensors, estimators, controllers,
@@ -119,6 +130,18 @@ that guide.
 - When OEL itself appears hard to use, confusing, or missing an agent-facing
   workflow, follow `docs/agent-feedback-loop.md`: prepare a public-safe
   feedback draft, ask the user for permission, and submit only after approval.
+
+The common agent loop is:
+
+```text
+request -> route -> scenario YAML or typed orbital-analysis problem -> validate
+-> execute -> authoritative replay -> inspect -> bounded claim
+```
+
+Do not force a standalone analysis into scenario YAML, and do not invent an
+MCP execution surface when the documented CLI or Python API is the supported
+interface. For MCP-connected discovery, read `oel://analysis/workflows/v1`;
+resource discovery is not execution authority.
 
 ## Code Navigation And Refactoring
 

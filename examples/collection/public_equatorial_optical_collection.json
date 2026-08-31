@@ -1,0 +1,64 @@
+{
+  "schema_version": "oel.collection_opportunity_problem.v1",
+  "name": "public_equatorial_optical_collection",
+  "epoch_utc": "2000-01-01T12:00:00Z",
+  "duration_s": 600.0,
+  "spacecraft": {
+    "asset_id": "PUBLIC-IMAGER",
+    "initial_state_eci_km_km_s": [6878.137, 0.0, 0.0, 0.0, 7.612608, 0.0]
+  },
+  "target": {
+    "target_id": "SYNTHETIC-EQUATORIAL-TARGET",
+    "latitude_deg": 0.0,
+    "longitude_deg": 79.53938163,
+    "altitude_km": 0.0
+  },
+  "sensor": {
+    "sensor_id": "PUBLIC-OPTICAL-1",
+    "pattern": {
+      "kind": "rectangular_hard_fov",
+      "x_half_angle_deg": 10.0,
+      "y_half_angle_deg": 6.0
+    },
+    "pointing_mode": "target_track_gimbal",
+    "maximum_gimbal_off_nadir_deg": 45.0,
+    "maximum_slew_rate_deg_s": 1.0,
+    "settling_time_s": 5.0,
+    "minimum_collection_duration_s": 10.0,
+    "aperture_m": 0.2,
+    "wavelength_nm": 550.0,
+    "focal_length_m": 0.5,
+    "detector_pitch_um": 5.0,
+    "data_generation_rate_mbps": 10.0,
+    "boundary_samples_per_edge": 8
+  },
+  "constraints": {
+    "maximum_target_off_nadir_deg": 45.0,
+    "maximum_incidence_deg": 50.0,
+    "minimum_sun_elevation_deg": -90.0,
+    "maximum_effective_resolution_m": 25.0,
+    "minimum_spacecraft_illumination_fraction": 0.0
+  },
+  "resources": {
+    "enabled": true,
+    "storage_capacity_bytes": 1000000000.0,
+    "initial_storage_bytes": 0.0,
+    "require_downlink_by_horizon": true,
+    "downlink_windows": [
+      {
+        "window_id": "SYNTHETIC-DOWNLINK-1",
+        "source_product_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "start_s": 300.0,
+        "end_s": 500.0,
+        "delivered_data_bytes": 1000000000.0
+      }
+    ]
+  },
+  "propagation": {
+    "step_s": 10.0,
+    "integrator": "rk4",
+    "force_model": []
+  },
+  "transition_time_tolerance_s": 0.01,
+  "transition_max_iterations": 60
+}
