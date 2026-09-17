@@ -20,6 +20,10 @@ from sim.review import (
 def main(argv: list[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
+    if argv and argv[0] == "cr3bp":
+        from sim.review.cr3bp import main as cr3bp_main
+
+        return cr3bp_main(argv[1:])
     if argv and argv[0] == "plot":
         from sim.review.plot import main as plot_main
 

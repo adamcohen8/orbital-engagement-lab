@@ -201,3 +201,23 @@ plotter.heatmap(
   artifacts instead of presenting them as finished.
 
 For table inspection without plotting, use `.venv/bin/python -m sim.review`.
+
+## CR3BP research figures and movies
+
+For Earth–Moon CR3BP evidence, use the frame-aware local
+[CR3BP research workflow](cr3bp-research.md): `python -m sim.review cr3bp` or
+`sim.review.render_cr3bp_research`. It provides rotating/nonrotating and
+barycenter/P1/P2 trajectory projections, zero-velocity slices with forbidden
+regions, Jacobi diagnostics, and GIF/MP4 animations with contact sheets.
+Do not route rotating states through ECI recipes merely because legacy review
+columns contain `eci` in their names. This experimental local renderer is not
+an advertised MCP recipe; state that limitation when using the local fallback.
+Read its frame, slice, conservation, and visual-QA rules before presenting output.
+
+For a maneuvering CR3BP spacecraft, select `--jacobi-mode instantaneous` with
+`--kind zero_velocity --movie-format mp4` (or GIF) to animate the contour and
+forbidden shading from recorded C(t). Explain that this is an instantaneous
+coast boundary, not a conserved barrier during thrust. Check sample cadence,
+coast stability, contour motion during the burn, per-frame C/time provenance,
+and both encoded movie and contact sheet. The default fixed-C mode remains
+appropriate for an unforced reference contour.

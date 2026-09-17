@@ -16,6 +16,8 @@ configure_runtime_caches()
 configure_headless_runtime()
 
 _EXPORTS = {
+    "render_cr3bp_research": "sim.review.cr3bp",
+    "load_cr3bp_history": "sim.review.cr3bp",
     "EVIDENCE_CAPSULE_MANIFEST": "sim.review.evidence_capsule",
     "EVIDENCE_CAPSULE_SCHEMA": "sim.review.evidence_capsule",
     "ANIMATION_RECIPE_SCHEMA_VERSION": "sim.review.animation_recipes",

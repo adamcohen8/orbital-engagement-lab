@@ -5,13 +5,11 @@ from dataclasses import dataclass
 import numpy as np
 
 from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2, MOON_MU_KM3_S2
-from sim.dynamics.orbit.integrators import rk4_step_state
+from sim.dynamics.orbit.integrators import AdaptiveStepInfo, integrate_adaptive, rk4_step_state
 
 EARTH_MOON_DISTANCE_KM = 384400.0
 EARTH_MOON_MU = MOON_MU_KM3_S2 / (EARTH_MU_KM3_S2 + MOON_MU_KM3_S2)
-EARTH_MOON_MEAN_MOTION_RAD_S = float(
-    np.sqrt((EARTH_MU_KM3_S2 + MOON_MU_KM3_S2) / (EARTH_MOON_DISTANCE_KM**3))
-)
+EARTH_MOON_MEAN_MOTION_RAD_S = float(np.sqrt((EARTH_MU_KM3_S2 + MOON_MU_KM3_S2) / (EARTH_MOON_DISTANCE_KM**3)))
 
 
 @dataclass(frozen=True)
@@ -131,6 +129,27 @@ def cr3bp_relative_state(deputy_state: np.ndarray, reference_state: np.ndarray) 
     return np.array(deputy_state, dtype=float).reshape(6) - np.array(reference_state, dtype=float).reshape(6)
 
 
+def _integrate_cr3bp(deriv, state, dt_s, t_s, *, integrator, adaptive_atol, adaptive_rtol, h_init):
+    method = str(integrator).strip().lower()
+    if method == "rk4":
+        return rk4_step_state(deriv_fn=deriv, t_s=float(t_s), x=state, dt_s=float(dt_s)), None
+    if method not in {"rkf78", "adaptive", "dopri5"}:
+        raise ValueError(f"Unsupported CR3BP integrator '{integrator}'.")
+    if not np.isfinite([adaptive_atol, adaptive_rtol]).all() or adaptive_atol <= 0 or adaptive_rtol <= 0:
+        raise ValueError("CR3BP adaptive tolerances must be positive and finite.")
+    return integrate_adaptive(
+        deriv_fn=deriv,
+        t_s=float(t_s),
+        x=state,
+        dt_s=float(dt_s),
+        atol=adaptive_atol,
+        rtol=adaptive_rtol,
+        method="rkf78" if method == "adaptive" else method,
+        h_init=h_init,
+        return_info=True,
+    )
+
+
 def propagate_cr3bp_state(
     state_km_s: np.ndarray,
     dt_s: float,
@@ -138,14 +157,34 @@ def propagate_cr3bp_state(
     command_accel_km_s2: np.ndarray | None = None,
     *,
     system: CR3BPSystem | None = None,
-) -> np.ndarray:
+    integrator: str = "rk4",
+    adaptive_atol: float = 1e-9,
+    adaptive_rtol: float = 1e-7,
+    h_init: float | None = None,
+    return_info: bool = False,
+) -> np.ndarray | tuple[np.ndarray, AdaptiveStepInfo | None]:
+    """Propagate physical rotating state; optional diagnostics are None for RK4."""
     sys = EARTH_MOON_CR3BP if system is None else system
-    command = np.zeros(3, dtype=float) if command_accel_km_s2 is None else np.array(command_accel_km_s2, dtype=float).reshape(3)
+    command = (
+        np.zeros(3, dtype=float)
+        if command_accel_km_s2 is None
+        else np.array(command_accel_km_s2, dtype=float).reshape(3)
+    )
 
     def deriv(t_local: float, x_local: np.ndarray) -> np.ndarray:
         return cr3bp_derivative_physical(x_local, command_accel_km_s2=command, system=sys)
 
-    return rk4_step_state(deriv_fn=deriv, t_s=float(t_s), x=np.array(state_km_s, dtype=float).reshape(6), dt_s=float(dt_s))
+    out, info = _integrate_cr3bp(
+        deriv,
+        np.array(state_km_s, dtype=float).reshape(6),
+        dt_s,
+        t_s,
+        integrator=integrator,
+        adaptive_atol=adaptive_atol,
+        adaptive_rtol=adaptive_rtol,
+        h_init=h_init,
+    )
+    return (out, info) if return_info else out
 
 
 def propagate_cr3bp_reference_stm(
@@ -155,7 +194,17 @@ def propagate_cr3bp_reference_stm(
     t_s: float,
     *,
     system: CR3BPSystem | None = None,
-) -> tuple[np.ndarray, np.ndarray]:
+    integrator: str = "rk4",
+    adaptive_atol: float = 1e-9,
+    adaptive_rtol: float = 1e-7,
+    h_init: float | None = None,
+    return_info: bool = False,
+) -> tuple[np.ndarray, np.ndarray] | tuple[np.ndarray, np.ndarray, AdaptiveStepInfo | None]:
+    """Integrate the 42-component reference/STM system with shared adaptive steps.
+
+    Scalar tolerances apply componentwise to the physical state and STM entries.
+    Default return shape and RK4 stepping preserve Trainer compatibility.
+    """
     sys = EARTH_MOON_CR3BP if system is None else system
     augmented = np.hstack(
         (
@@ -170,8 +219,18 @@ def propagate_cr3bp_reference_stm(
         a = cr3bp_jacobian_physical(reference, system=sys)
         return np.hstack((cr3bp_derivative_physical(reference, system=sys), (a @ phi).reshape(36)))
 
-    out = rk4_step_state(deriv_fn=deriv, t_s=float(t_s), x=augmented, dt_s=float(dt_s))
-    return out[:6].copy(), out[6:].reshape(6, 6).copy()
+    out, info = _integrate_cr3bp(
+        deriv,
+        augmented,
+        dt_s,
+        t_s,
+        integrator=integrator,
+        adaptive_atol=adaptive_atol,
+        adaptive_rtol=adaptive_rtol,
+        h_init=h_init,
+    )
+    result = (out[:6].copy(), out[6:].reshape(6, 6).copy())
+    return (*result, info) if return_info else result
 
 
 def cr3bp_derivative_physical(
@@ -249,15 +308,9 @@ def cr3bp_potential_hessian_nondimensional(state_nd: np.ndarray, *, mu: float = 
     r1_5 = r1**5
     r2_5 = r2**5
 
-    u_xx = 1.0 - mu1 * (1.0 / r1_3 - 3.0 * x1 * x1 / r1_5) - mu2 * (
-        1.0 / r2_3 - 3.0 * x2 * x2 / r2_5
-    )
-    u_yy = 1.0 - mu1 * (1.0 / r1_3 - 3.0 * y * y / r1_5) - mu2 * (
-        1.0 / r2_3 - 3.0 * y * y / r2_5
-    )
-    u_zz = -mu1 * (1.0 / r1_3 - 3.0 * z * z / r1_5) - mu2 * (
-        1.0 / r2_3 - 3.0 * z * z / r2_5
-    )
+    u_xx = 1.0 - mu1 * (1.0 / r1_3 - 3.0 * x1 * x1 / r1_5) - mu2 * (1.0 / r2_3 - 3.0 * x2 * x2 / r2_5)
+    u_yy = 1.0 - mu1 * (1.0 / r1_3 - 3.0 * y * y / r1_5) - mu2 * (1.0 / r2_3 - 3.0 * y * y / r2_5)
+    u_zz = -mu1 * (1.0 / r1_3 - 3.0 * z * z / r1_5) - mu2 * (1.0 / r2_3 - 3.0 * z * z / r2_5)
     u_xy = 3.0 * mu1 * x1 * y / r1_5 + 3.0 * mu2 * x2 * y / r2_5
     u_xz = 3.0 * mu1 * x1 * z / r1_5 + 3.0 * mu2 * x2 * z / r2_5
     u_yz = 3.0 * mu1 * y * z / r1_5 + 3.0 * mu2 * y * z / r2_5

@@ -572,13 +572,27 @@ class OrbitPropagator:
         ctx: OrbitContext,
     ) -> np.ndarray:
         if str(self.model or "two_body").strip().lower() == "cr3bp":
-            return propagate_cr3bp_state(
+            if self._rkf78_last_t_s is None or float(t_s) < float(self._rkf78_last_t_s) - 1e-12:
+                self._rkf78_h_next = None
+            x_next, step_info = propagate_cr3bp_state(
                 x_eci,
                 dt_s,
                 t_s,
                 command_accel_eci_km_s2,
                 system=cr3bp_system(self.cr3bp_system_name),
+                integrator=self.integrator,
+                adaptive_atol=self.adaptive_atol,
+                adaptive_rtol=self.adaptive_rtol,
+                h_init=self._rkf78_h_next,
+                return_info=True,
             )
+            self.last_adaptive_step_info = step_info
+            if step_info is not None:
+                self._rkf78_h_next = step_info.suggested_next_step_s
+                self._rkf78_last_t_s = float(t_s + dt_s)
+                previous = [] if self.adaptive_step_info is None else [self.adaptive_step_info]
+                self.adaptive_step_info = combine_adaptive_step_info(step_info.method, [*previous, step_info])
+            return x_next
 
         fast_flags = self._zonal_rk4_fast_path_flags()
         acceleration_enabled = self._acceleration_enabled()
