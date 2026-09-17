@@ -1055,18 +1055,14 @@ def test_training_configs_load_forbidden_regions_for_bar_approaches() -> None:
     assert bool(vbar_rc_boxes[1].contains_positions(np.array([[-1.0, -2.0, 0.0]], dtype=float))[0]) is True
     assert bool(vbar_rc_boxes[0].contains_positions(np.array([[0.0, -2.0, 1.0]], dtype=float))[0]) is False
     assert bool(vbar_rc_boxes[1].contains_positions(np.array([[0.0, -2.0, -1.0]], dtype=float))[0]) is False
-    assert len(rbar.forbidden_regions) == 2
-    assert any("R-bar" in region.name for region in rbar.forbidden_regions)
-    assert {region.plot_planes for region in rbar.forbidden_regions} == {("RI",), ("RC",)}
-    ri_arch = next(region for region in rbar.forbidden_regions if region.plane == "RI")
-    rc_arch = next(region for region in rbar.forbidden_regions if region.plane == "RC")
-    assert {region.kind for region in rbar.forbidden_regions} == {"annular_sector"}
-    assert bool(ri_arch.contains_positions(np.array([[1.0, 0.0, 0.0]], dtype=float))[0]) is True
-    assert bool(ri_arch.contains_positions(np.array([[-0.75, 0.0, 0.0]], dtype=float))[0]) is False
-    assert bool(ri_arch.contains_positions(np.array([[1.0, 0.0, 1.1]], dtype=float))[0]) is False
-    assert bool(rc_arch.contains_positions(np.array([[1.0, 0.0, 1.0]], dtype=float))[0]) is True
-    assert bool(rc_arch.contains_positions(np.array([[-0.75, 0.0, 0.0]], dtype=float))[0]) is False
-    assert bool(rc_arch.contains_positions(np.array([[1.0, 1.3, 1.0]], dtype=float))[0]) is False
+    assert len(rbar.forbidden_regions) == 1
+    shell = rbar.forbidden_regions[0]
+    assert shell.kind == "spherical_corridor"
+    assert shell.plot_planes == ("RI", "RC")
+    assert shell.cone_half_angle_deg == 25.0
+    assert shell.contains_positions([[1., 1.3, 1.]])[0]
+    assert not shell.contains_positions([[-0.75, 0., 0.]])[0]
+    assert not shell.contains_positions([[-3., 0., 0.]])[0]
     assert rbar.goal_range_km == 0.75
     assert rbar.goal_range_tolerance_km is None
     assert rbar.goal_radius_km is None
@@ -2037,10 +2033,12 @@ def test_training_tracker_survival_goal_fails_on_keepout_violation() -> None:
     assert score.keepout_violation is True
 
 
-def test_training_tracker_survival_goal_enforces_target_delta_v_budget() -> None:
+@pytest.mark.parametrize("coast", [False, True])
+def test_training_tracker_survival_goal_enforces_target_delta_v_budget(coast: bool) -> None:
     cfg = RPOTrainingConfig(
         enabled=True,
         scenario_id="unit-survival-target-dv",
+        coast_target_after_delta_v_budget=coast,
         keepout_radius_km=0.1,
         survival_goal=True,
         max_time_s=10.0,
@@ -2072,9 +2070,9 @@ def test_training_tracker_survival_goal_enforces_target_delta_v_budget() -> None
     score = tracker.score()
 
     assert score.target_delta_v_m_s == pytest.approx(2.0)
-    assert score.level_passed is False
-    assert score.level_failed is True
-    assert any("Target delta-v budget exceeded" in reason for reason in score.pass_fail_reasons)
+    assert score.level_passed is coast
+    assert score.level_failed is (not coast)
+    assert any("Target delta-v budget exceeded" in reason for reason in score.pass_fail_reasons) is (not coast)
 
 
 def test_training_tracker_survival_goal_enforces_target_reference_range() -> None:

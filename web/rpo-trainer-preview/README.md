@@ -25,6 +25,16 @@ http://localhost:8765
 - Computer-preview Pilot/Operator Preview selector for Tutorial and Sandbox.
   Operator mode scripts impulsive RIC burns and shows the planned deterministic
   trajectory before playback.
+- Optional 3D view for computer Sandbox play and Operator Sandbox playback.
+  Use the `3D`/`2D` button, mouse drag to orbit, Shift-drag or middle-drag to
+  pan, and the scroll wheel to zoom. Axes share one scale, +R starts upward,
+  and automatic zoom keeps both satellites visible. Camera interaction
+  temporarily limits playback to 1x, then restores the selected speed;
+  paused playback stays paused. Recenter, Fit both, and RI/RC/IC presets are
+  available. Mobile Sandbox supports 3D in landscape: one-finger rotation and
+  pinch zoom stay locked on the target, with automatic zoom to retain the
+  chaser. Portrait temporarily uses 2D and restores the 3D selection and angle
+  on return to landscape. Other levels and the Operator burn editor retain 2D.
 - Coordinate-frame convention toggle for OEL Default and Space Force-style
   positive in-track display, persisted in local browser storage and carried
   into RPO Duel through its launch and return URLs.

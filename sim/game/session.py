@@ -151,16 +151,18 @@ def _install_chaser_delta_v_limiter(
     training_cfg: RPOTrainingConfig,
     dt_s: float,
 ) -> None:
-    if not bool(getattr(training_cfg, "coast_chaser_after_delta_v_budget", False)) or training_cfg.max_delta_v_m_s is None:
-        return
+    # Retain the existing lifecycle hook for both vehicles' physical fuel caps.
     engine = getattr(session, "_engine", None)
-    agent = getattr(engine, "agents", {}).get(str(training_cfg.chaser_object_id)) if engine is not None else None
-    if agent is None:
-        return
-    runtime = getattr(agent, "flight_software_runtime", None)
-    if runtime is None:
-        return
-    runtime.max_delta_v_m_s = float(training_cfg.max_delta_v_m_s)
+    agents = getattr(engine, "agents", {})
+    for enabled, object_id, budget in (
+        (training_cfg.coast_chaser_after_delta_v_budget, training_cfg.chaser_object_id, training_cfg.max_delta_v_m_s),
+        (training_cfg.coast_target_after_delta_v_budget, training_cfg.target_object_id, training_cfg.max_target_delta_v_m_s),
+    ):
+        if not enabled or budget is None:
+            continue
+        runtime = getattr(agents.get(str(object_id)), "flight_software_runtime", None)
+        if runtime is not None:
+            runtime.max_delta_v_m_s = float(budget)
 
 
 def _set_chaser_delta_v_limiter_dt(

@@ -323,12 +323,6 @@ def _interp_eop(
     return xp, yp, dut1, dat
 
 
-def _mean_obliquity_iau1980_rad(jd_tt: float) -> float:
-    t = (float(jd_tt) - _J2000) / _JULIAN_CENTURY_DAYS
-    eps_arcsec = 84381.448 - 46.8150 * t - 0.00059 * (t**2) + 0.001813 * (t**3)
-    return float(eps_arcsec * _ARCSEC_TO_RAD)
-
-
 def _precession_iau1976_matrix(jd_tt: float) -> np.ndarray:
     t = (float(jd_tt) - _J2000) / _JULIAN_CENTURY_DAYS
     zeta = (2306.2181 * t + 0.30188 * (t**2) + 0.017998 * (t**3)) * _ARCSEC_TO_RAD
@@ -491,26 +485,6 @@ def teme_to_eci_vallado_iau80(
         ddeps_rad=ddeps_rad,
     )
     return rot @ np.array(position_teme_km, dtype=float), rot @ np.array(velocity_teme_km_s, dtype=float)
-
-
-def _short_nutation_1980_rad(jd_tt: float) -> tuple[float, float]:
-    t = (float(jd_tt) - _J2000) / _JULIAN_CENTURY_DAYS
-    mean_sun_long = math.radians((280.4665 + 36000.7698 * t) % 360.0)
-    mean_moon_long = math.radians((218.3165 + 481267.8813 * t) % 360.0)
-    omega = math.radians((125.04452 - 1934.136261 * t + 0.0020708 * (t**2) + (t**3) / 450000.0) % 360.0)
-    dpsi_arcsec = (
-        -17.20 * math.sin(omega)
-        - 1.32 * math.sin(2.0 * mean_sun_long)
-        - 0.23 * math.sin(2.0 * mean_moon_long)
-        + 0.21 * math.sin(2.0 * omega)
-    )
-    deps_arcsec = (
-        9.20 * math.cos(omega)
-        + 0.57 * math.cos(2.0 * mean_sun_long)
-        + 0.10 * math.cos(2.0 * mean_moon_long)
-        - 0.09 * math.cos(2.0 * omega)
-    )
-    return float(dpsi_arcsec * _ARCSEC_TO_RAD), float(deps_arcsec * _ARCSEC_TO_RAD)
 
 
 def _precession_nutation_matrix_iau76_80(

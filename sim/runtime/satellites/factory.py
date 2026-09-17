@@ -60,6 +60,7 @@ from sim.gnc.orbit_v2 import (
     TranslationControlLaw,
     TranslationMode,
 )
+from sim.knowledge.object_tracking import KnowledgeConditionConfig
 from sim.presets.thrusters import resolve_thruster_max_thrust_n_from_specs
 from sim.runtime.satellites.flight_software_runtime import (
     SatelliteFlightSoftwareRuntime,
@@ -111,6 +112,11 @@ def build_satellite_flight_software_runtime(
     sensor_period_s = float(knowledge.get("refresh_rate_s", task_period_s) or task_period_s)
     sensor_period_ns = max(1, int(round(sensor_period_s * 1.0e9)))
     sensor_error = dict(knowledge.get("sensor_error", {}) or {})
+    sensor_conditions = (
+        KnowledgeConditionConfig.from_knowledge(knowledge, default_period_s=sensor_period_s)
+        if knowledge.get("conditions")
+        else None
+    )
     navigation_mode = NavigationInitializationMode(
         str(params.get("navigation_initialization", "cold" if knowledge else "ideal"))
     )
@@ -160,6 +166,7 @@ def build_satellite_flight_software_runtime(
             dry_mass_kg=dry_mass_kg,
             ideal_navigation=ideal_navigation,
             sensor_error=sensor_error,
+            sensor_conditions=sensor_conditions,
             sensor_seed=sensor_seed,
             initial_checkpoint=initial_checkpoint,
         )
@@ -342,6 +349,7 @@ def build_satellite_flight_software_runtime(
             dry_mass_kg=dry_mass_kg,
             ideal_navigation=ideal_navigation,
             sensor_error=sensor_error,
+            sensor_conditions=sensor_conditions,
             sensor_seed=sensor_seed,
             initial_checkpoint=initial_checkpoint,
         )
@@ -366,11 +374,10 @@ def build_satellite_flight_software_runtime(
             dry_mass_kg=dry_mass_kg,
             navigation_initialization=navigation_mode,
             sensor_error=sensor_error,
+            sensor_conditions=sensor_conditions,
             sensor_seed=sensor_seed,
             initial_checkpoint=initial_checkpoint,
-            live_game_fast_path=bool(
-                dict(getattr(scenario_cfg, "metadata", {}).get("game", {}) or {})
-            ),
+            live_game_fast_path=bool(dict(getattr(scenario_cfg, "metadata", {}).get("game", {}) or {})),
         )
     if stack_id == "fsw.game_pilot_reference":
         return build_game_flight_software_runtime(
@@ -429,6 +436,7 @@ def build_satellite_flight_software_runtime(
             dry_mass_kg=dry_mass_kg,
             ideal_navigation=ideal_navigation,
             sensor_error=sensor_error,
+            sensor_conditions=sensor_conditions,
             sensor_seed=sensor_seed,
             initial_checkpoint=initial_checkpoint,
         )
@@ -454,6 +462,7 @@ def _build_translation_runtime(
     dry_mass_kg: float,
     navigation_initialization: NavigationInitializationMode,
     sensor_error: dict[str, Any],
+    sensor_conditions: KnowledgeConditionConfig | None,
     sensor_seed: int,
     sensor_period_ns: int,
     initial_checkpoint: dict[str, object] | None,
@@ -512,9 +521,7 @@ def _build_translation_runtime(
             if params.get("target_state_eci_m_m_s") is None
             else tuple(float(value) for value in params["target_state_eci_m_m_s"])
         ),
-        target_semi_major_axis_m=(
-            None if target_semi_major_axis_m is None else float(target_semi_major_axis_m)
-        ),
+        target_semi_major_axis_m=(None if target_semi_major_axis_m is None else float(target_semi_major_axis_m)),
         target_eccentricity=float(target_eccentricity),
         eccentricity_tolerance=float(params.get("eccentricity_tolerance", 1.0e-4)),
         target_relative_state_ric=target_relative,
@@ -879,6 +886,7 @@ def _build_translation_runtime(
         dry_mass_kg=dry_mass_kg,
         ideal_navigation=navigation_initialization is NavigationInitializationMode.IDEAL,
         sensor_error=sensor_error,
+        sensor_conditions=sensor_conditions,
         sensor_seed=sensor_seed,
         initial_checkpoint=initial_checkpoint,
     )

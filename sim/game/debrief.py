@@ -722,8 +722,10 @@ def _draw_forbidden_region(ax: Any, *, region: Any, plane: str, patches: tuple[A
     Polygon, Rectangle = patches
     x_idx, y_idx, _, _ = _plane_axes(plane)
     kind = str(getattr(region, "kind", "box") or "box")
-    if kind == "annular_sector":
-        pts = region.sector_polygon_ric()
+    if kind in {"annular_sector", "spherical_corridor"}:
+        from sim.game import spherical_corridor
+        pts = (spherical_corridor.section(region, x_idx, y_idx)
+               if kind == "spherical_corridor" else region.sector_polygon_ric())
         if pts.size:
             ax.add_patch(Polygon(pts[:, [x_idx, y_idx]], closed=True, color=color, alpha=0.16))
         return

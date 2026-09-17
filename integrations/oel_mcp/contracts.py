@@ -6,6 +6,8 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
 
+from integrations.oel_mcp.recovery import RECOVERY_SCHEMA
+
 TOOL_CONTRACT_VERSION = 1
 MAX_ROWS = 1000
 MAX_VM_STEPS = 2_000_000
@@ -72,7 +74,10 @@ ENVELOPE_SCHEMA: dict[str, Any] = {
                 {"type": "null"},
                 {
                     "type": "object",
-                    "properties": {"type": {"type": "string"}, "message": {"type": "string"}},
+                    "properties": {
+                        "type": {"type": "string"}, "message": {"type": "string"},
+                        "recovery": RECOVERY_SCHEMA,
+                    },
                     "required": ["type", "message"],
                     "additionalProperties": False,
                 },

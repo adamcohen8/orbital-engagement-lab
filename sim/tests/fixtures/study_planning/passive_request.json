@@ -1,0 +1,27 @@
+{
+  "question": "Propagate the selected automation-smoke scenario and return a completed run with review evidence.",
+  "inputs": [
+    {
+      "input_id": "scenario_input",
+      "kind": "scenario_config",
+      "content_sha256": "007e7dc16a5e06a35573cf17fd180a7d4aa26af26b86fc22e008b22c2c92baf3",
+      "description": "User-selected OEL scenario YAML.",
+      "required": true
+    }
+  ],
+  "required_choices": [
+    {
+      "choice_id": "fidelity_choice",
+      "description": "Use the fidelity already declared in the selected scenario.",
+      "value": "as_configured",
+      "source": "user",
+      "material": true
+    }
+  ],
+  "clarifications": [],
+  "handling": {
+    "marking": "PUBLIC TEST FIXTURE",
+    "release_scope": "public",
+    "owner": "OEL"
+  }
+}

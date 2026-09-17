@@ -192,7 +192,12 @@ def init_candidate(
         ),
         result={"root_dir": str(result.root_dir), "manifest_path": str(result.manifest_path)},
     ).to_dict()
-    _write_json(result.root_dir / ".oel" / "fsw_authoring_scaffold_receipt.json", receipt)
+    receipt_path = _inside_workspace(
+        result.root_dir / ".oel" / "fsw_authoring_scaffold_receipt.json",
+        Path(workspace_root).expanduser().resolve(),
+        label="Scaffold receipt",
+    )
+    _write_json(receipt_path, receipt)
     return receipt
 
 
@@ -470,7 +475,7 @@ def run_smoke(
         write_roots=(candidate.workspace_root,),
     )
     with _candidate_import_path(candidate.workspace_root):
-        clear_candidate_imports(candidate.source.entrypoint.module)
+        clear_candidate_imports(candidate.source.entrypoint.module, source_root=candidate.source.root)
         result = workspace.run(scenario)
     run_output = Path(str(result.payload.get("output_dir") or output / "run"))
     packet = {

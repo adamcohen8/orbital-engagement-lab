@@ -117,8 +117,8 @@ test("browser HCW paths remain within tolerance of OEL Level 0 two-body referenc
 });
 
 test("RPO Duel appears in the selector as a hosted Beta destination", () => {
-  assert.match(previewHtml, /styles\.css\?v=web-preview-sandbox-landscape-2026-08-25/);
-  assert.match(previewHtml, /src\/app\.js\?v=web-preview-frame-controls-2026-08-25/);
+  assert.match(previewHtml, /styles\.css\?v=web-preview-mobile-game-gestures-2026-09-15/);
+  assert.match(previewHtml, /src\/app\.js\?v=web-preview-mobile-game-gestures-2026-09-15/);
   assert.match(previewHtml, /data-level-option="rpoDuel"/);
   assert.match(previewHtml, /level-beta-badge">Beta</);
   assert.match(

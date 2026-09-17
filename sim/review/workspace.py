@@ -202,6 +202,10 @@ class ReviewWorkspace:
                 conn.set_progress_handler(_abort_long_query, 1000)
                 cursor = conn.execute(statement, params)
                 columns = [str(item[0]) for item in (cursor.description or [])]
+                if len(set(columns)) != len(columns):
+                    raise ReviewQueryError(
+                        "Review query column names must be unique; use explicit aliases for duplicate columns."
+                    )
                 rows: list[dict[str, Any]] = []
                 result_bytes = 0
                 truncated = False
@@ -213,8 +217,10 @@ class ReviewWorkspace:
                         truncated = True
                         break
                     converted: dict[str, Any] = {}
-                    for column in columns:
-                        value = row[column]
+                    for column_index, column in enumerate(columns):
+                        # sqlite3.Row name lookup is case-insensitive; positional
+                        # lookup preserves distinct aliases such as Range/range.
+                        value = row[column_index]
                         value_bytes = _value_size_bytes(value)
                         if max_value_bytes is not None and value_bytes > int(max_value_bytes):
                             raise ReviewQueryError("Review query value exceeds the per-value byte budget.")

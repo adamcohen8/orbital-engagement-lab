@@ -1,0 +1,18 @@
+{
+  "question": "Can the chaser rendezvous with the target?",
+  "inputs": [],
+  "required_choices": [],
+  "clarifications": [
+    {
+      "clarification_id": "time_horizon",
+      "question": "What time horizon should define rendezvous feasibility?",
+      "answer": null,
+      "material": true
+    }
+  ],
+  "handling": {
+    "marking": "PUBLIC TEST FIXTURE",
+    "release_scope": "public",
+    "owner": "OEL"
+  }
+}

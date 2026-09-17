@@ -162,6 +162,7 @@ def run_game_mode(
     anim_cfg = dict(config.scenario.outputs.animations or {})
     dashboard_target_id, dashboard_chaser_id = _dashboard_object_ids(training_cfg, anim_cfg)
     dashboard = PygameRPODashboard(
+        sandbox_3d_enabled=_game_3d_enabled(config),
         target_object_id=dashboard_target_id,
         chaser_object_id=dashboard_chaser_id,
         controlled_object_id=controlled_object_id,
@@ -565,6 +566,7 @@ def run_game_mode(
                 briefing_open=briefing_open,
                 terminal_open=debrief_hotkey_enabled,
                 frame_convention=frame_convention,
+                camera_event_handler=dashboard.handle_camera_event if _game_3d_enabled(config) else None,
             )
             if not operator_playback_mode:
                 _clear_two_rail_released_maneuver_input(config, command_state, control_mode=control_mode)
@@ -1059,6 +1061,13 @@ def run_game_mode(
                 control_mode=control_mode,
                 options=speed_multiplier_options,
             )
+            if _game_3d_enabled(config):
+                camera_adjusting = dashboard._sandbox_camera().active()
+                if camera_adjusting != getattr(dashboard, "_camera_was_adjusting", False):
+                    # Do not convert residual wall time into a burst on either camera rail transition.
+                    last_step_wall = now
+                dashboard._camera_was_adjusting = camera_adjusting
+                base_next_effective_speed_multiple = dashboard.camera_effective_speed(base_next_effective_speed_multiple)
             base_next_dt_s = _game_active_tick_dt_s(
                 config,
                 base_next_effective_speed_multiple,

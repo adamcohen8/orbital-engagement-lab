@@ -269,7 +269,11 @@ def test_official_sdk_conformance_uses_real_repeated_stdio_processes() -> None:
         "passed": True,
         "code": -32602,
         "message": "Handling metadata is required for this operation.",
-        "data": None,
+        "data": {"recovery": {
+            "code": "handling.review_required",
+            "actor": "operator",
+            "action": "Establish authoritative handling metadata for this input; do not relabel data to bypass policy.",
+        }},
     }
     assert report["resources"]["passed"] is True
     assert report["resources"]["resource_uris"] == list(PUBLIC_RESOURCE_URIS)

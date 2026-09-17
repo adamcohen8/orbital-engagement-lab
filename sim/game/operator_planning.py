@@ -1766,8 +1766,10 @@ def _operator_forbidden_region_projection_points(
     for region in training_cfg.forbidden_regions:
         if not _region_visible_on_plane(region, x_axis=int(x_axis), y_axis=int(y_axis)):
             continue
-        if region.kind == "annular_sector":
-            polygon = region.sector_polygon_ric()
+        if region.kind in {"annular_sector", "spherical_corridor"}:
+            from sim.game import spherical_corridor
+            polygon = (spherical_corridor.section(region, x_axis, y_axis)
+                       if region.kind == "spherical_corridor" else region.sector_polygon_ric())
             if polygon.size:
                 polygon = polygon.copy()
                 polygon[:, :3] += np.array(offset, dtype=float).reshape(1, 3)
@@ -2187,8 +2189,10 @@ def _draw_operator_forbidden_regions(
     for region in training_cfg.forbidden_regions:
         if not _region_visible_on_plane(region, x_axis=int(x_axis), y_axis=int(y_axis)):
             continue
-        if region.kind == "annular_sector":
-            polygon = region.sector_polygon_ric()
+        if region.kind in {"annular_sector", "spherical_corridor"}:
+            from sim.game import spherical_corridor
+            polygon = (spherical_corridor.section(region, x_axis, y_axis)
+                       if region.kind == "spherical_corridor" else region.sector_polygon_ric())
             if not polygon.size:
                 continue
             polygon = polygon.copy()

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
 from sim.core.interfaces import SensorModel
 from sim.core.models import Measurement, StateTruth
+from sim.sensors.access import _cadence_due
 from sim.utils.quaternion import normalize_quaternion
 
 
@@ -17,11 +18,11 @@ class JointStateSensor(SensorModel):
     omega_sigma_rad_s: float = 1e-4
     update_cadence_s: float = 1.0
     dropout_prob: float = 0.0
-    rng: np.random.Generator = np.random.default_rng(0)
+    rng: np.random.Generator = field(default_factory=lambda: np.random.default_rng(0))
     _last_update_t_s: float = -np.inf
 
     def measure(self, truth: StateTruth, env: dict, t_s: float) -> Measurement | None:
-        if t_s - self._last_update_t_s < self.update_cadence_s:
+        if not _cadence_due(t_s, self._last_update_t_s, self.update_cadence_s):
             return None
         self._last_update_t_s = t_s
         if self.rng.random() < self.dropout_prob:

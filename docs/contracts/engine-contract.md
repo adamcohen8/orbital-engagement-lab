@@ -144,10 +144,12 @@ conceptual order.
 5. For each active object, execute its runtime path:
    - rocket path: mission modules, mission strategy, mission execution,
      guidance, rocket propagation, belief update, thrust/mass/stage metrics;
-   - satellite path: internal substep loop with current-time mission modules,
-     mission strategy, external intent, mission execution, controller
-     evaluation, actuator limiting, dynamics propagation, post-propagation
-     sensing/estimation, and debug logging.
+   - satellite path: the v2 runtime releases due typed sensor and external
+     input packets to the complete flight-software stack, whose navigator,
+     executive, guidance, control and allocator produce typed device commands;
+     the adapter validates and realizes them before physical propagation.
+     Explicit `trajectory_only` satellites bypass onboard logic. Non-empty
+     retired satellite controller/mission fields are rejected.
 6. Update bridges for objects with enabled bridge integrations.
 7. Update object knowledge bases from the post-step world truth.
 8. Write truth, belief, knowledge, applied thrust, applied torque, desired
@@ -156,15 +158,17 @@ conceptual order.
 10. Evaluate termination conditions.
 11. Return a snapshot for the current index when stepping interactively.
 
-The key invariant is that agents decide from current estimated information. At
-an internal satellite substep beginning at `t_i`, mission logic and controllers
-observe belief-derived own state and observer-owned knowledge at `t_i`, then
-produce the command applied over `[t_i, t_{i+1}]`. Sensors and estimators then
-update belief to `t_{i+1}` after dynamics propagation. Raw world truth is not
-exposed to agent decision logic, either as a direct `world_truth` argument or
-inside the decision-facing environment; perfect information should be modeled
-with zero-error sensors/knowledge, not by reading simulator truth.
+The decision boundary contains typed observable packets, never raw world-truth
+objects. The runtime owns sensor generation and applies configured range,
+FOV, Earth line-of-sight and dropout conditions before target packet delivery.
+The stack owns navigation propagation, measurement acceptance and command
+selection. Missing observations therefore remain missing, including when
+navigation initialization is `ideal` but access conditions are explicit.
 
+The separate observer knowledge base is a reporting/analysis path, not the
+source of the v2 stack's navigation solution. Both paths use the same access
+policy implementation; their schedules and stochastic histories are separate.
+See [Flight-software observations](../flight-software-observations.md).
 
 ## Truth, Belief, And Knowledge Timing
 
@@ -172,47 +176,47 @@ Truth:
 
 - Truth at index `0` is the initial condition.
 - Truth at index `k + 1` represents propagated state at `t_{k+1}`.
-- Single-run decision logic sees belief-derived own state and observer-owned
-  knowledge. It should not see raw simulator truth for other objects.
-- Mission target/reference resolution does not fall back to raw `world_truth`;
-  if a target is not present in observer-owned knowledge, target-dependent
-  decisions must hold, coast, or use an explicitly configured blind/explicit
-  mode.
-- Dynamics may receive an object-local world-truth context for perturbations,
-  sensors, knowledge generation, and integration support, but controller and
-  mission decisions are based on estimated current-time state.
+- Satellite decision logic receives typed sensor/input packets and constructs
+  its own navigation state. It cannot fall back to raw simulator truth.
+- The selected stack determines how stale or missing target estimates affect
+  control. Loading an initial state or using ideal measurements is explicit.
+- Dynamics and the runtime adapter may access physical truth for propagation,
+  sensor generation and device realization.
 
 Belief:
 
-- Belief at index `0` is the initial belief.
-- Estimator updates occur after propagation using measurements associated with
-  the post-propagation evaluation time.
-- Estimators propagate by elapsed time from `belief.last_update_t_s` to the
-  requested update time; they must not advance by a fixed outer `dt_s` for each
-  internal substep update.
-- If no estimator/belief is configured for a satellite path, a truth-derived
-  fallback belief may be created for control continuity.
+- Satellite API belief is the latest navigation state published by the stack
+  through `oel.navigation_state.v1` telemetry. It is not the latest sensor
+  measurement and the adapter never advances a filter just to report a value.
+- Telemetry generation time identifies the invocation. State epoch and age
+  distinguish held state from a propagated estimate. Outer samples retain the
+  latest published state; inspect these times when task cadence is slower.
+- Raw measurements remain distinct in `fsw_input_events`; estimated state and
+  its metadata are available in `fsw_diagnostic_fields`.
+- A stack that publishes no navigation state has unavailable belief (NaN components, or an empty vector before any state shape is known).
+  Missing components are not filled from truth or raw measurements.
+- Orbit vectors in API history retain km and km/s; boundary telemetry uses SI.
+  Quaternion/rate components, when published, retain their existing ordering.
 
 Knowledge:
 
-- Knowledge bases are observer-owned.
-- Knowledge updates occur after active objects have reached the post-step world
-  truth for `t_{k+1}`.
-- If a target belief is unavailable at a sample, the prior knowledge sample may
-  be carried forward when appropriate.
+- Knowledge bases are observer-owned and update after the outer propagation
+  step. Their estimator is selected by `knowledge.estimation`.
+- The complete stack's orbit filter is selected independently by
+  `flight_software.params.navigation_filter`.
+- These are separate estimates. A reporting detection statistic is not proof
+  that a particular packet entered the stack; inspect the typed packet stream.
 
-Controllers and mission modules should not assume that truth, belief, and
-knowledge are the same thing. Truth is simulation state; belief is the
-controller/estimator state; knowledge is the observer's tracked state about
-other objects.
-
+Truth is physical simulation state; belief is published onboard navigation;
+knowledge is a separate observer track. Replay verifies reproducibility of
+these quantities, not their physical accuracy.
 
 ## Controller And Actuator Timing
 
 Satellite control:
 
 - Orbit and attitude controllers may be evaluated during internal substeps.
-- Controllers act on belief and observer-owned knowledge corresponding to the
+- Stack controllers act on their own navigation solution corresponding to the
   start of the interval they command.
 - Mission modules, mission strategy, external intent providers, and mission
   execution can modify or replace controller commands.
@@ -231,10 +235,9 @@ Actuator limiting:
 
 Runtime budgets:
 
-- The lower-level kernel can evaluate controller runtime against a budget and,
-  in realtime mode, replace overrun commands with zero command.
-- The current high-level single-run path records controller runtime/debug data
-  but should not be treated as a hard realtime scheduler.
+- The runtime records host execution duration separately from modeled task
+  timing. It is not a hard realtime scheduler and does not revive the removed
+  kernel's overrun-command substitution behavior.
 
 
 ## Snapshots

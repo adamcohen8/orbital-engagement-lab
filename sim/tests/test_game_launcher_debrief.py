@@ -1015,7 +1015,7 @@ def test_launcher_settings_persist_frame_convention_preset(tmp_path: Path, monke
         positive_cross_track="clockwise",
     )
     assert loaded.ask_frame_convention_on_launch is False
-    assert loaded.presentation_mode == "compatibility"
+    assert loaded.presentation_mode == "auto"
     assert loaded.last_game_mode is None
 
 
@@ -2280,8 +2280,9 @@ def test_safe_inspection_clone_matches_level_5_mechanics() -> None:
     level_5["outputs"]["output_dir"] = level_11b["outputs"]["output_dir"]
 
     assert level_11b == level_5
-    by_id = {option.scenario_id: option for option in discover_game_scenarios(config_dir)}
-    assert by_id["rpo_11b_safe_inspection_clone"].title == "Level 11B - Safe Inspection Clone"
+    for mode in ("pilot", "operator"):
+        by_id = {option.scenario_id: option for option in discover_game_scenarios_for_mode(config_dir, mode=mode)}
+        assert "rpo_11b_safe_inspection_clone" not in by_id
 
 
 def test_recording_controller_capture_hold_repeats_current_frame(tmp_path: Path, monkeypatch) -> None:

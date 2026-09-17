@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import ast
 import importlib
+import importlib.util
 import json
 import math
 import re
 import sys
+import sysconfig
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
@@ -113,11 +115,73 @@ def _entrypoint_source_path(module: str, *, workspace_root: Path) -> Path:
     )
 
 
-def clear_candidate_imports(module_name: str) -> None:
+def _candidate_source_modules(module_name: str, root: Path) -> dict[str, Path]:
+    """Find local source imports without importing packages or scanning the repository."""
+    runtime_paths = sysconfig.get_paths()
+    runtime_roots = tuple(
+        Path(runtime_paths[key]).resolve()
+        for key in ("stdlib", "platstdlib", "purelib", "platlib")
+        if runtime_paths.get(key)
+    )
+    pending = [module_name]
+    found: dict[str, Path] = {}
+    visited: set[str] = set()
+    while pending:
+        name = pending.pop()
+        if name in visited:
+            continue
+        visited.add(name)
+        # OEL framework imports are not editable candidate helper modules.
+        if name != module_name and (name == "sim" or name.startswith("sim.")):
+            continue
+        source = None
+        for entry in sys.path:
+            base = Path(entry or ".").joinpath(*name.split("."))
+            # Python resolves a regular package before a same-named module file.
+            choices = (base / "__init__.py", base.with_suffix(".py"))
+            existing = next((path for path in choices if path.is_file()), None)
+            if existing is not None:
+                resolved = existing.resolve()
+                installed_runtime = (
+                    any(resolved.is_relative_to(path) for path in runtime_roots)
+                    or "site-packages" in resolved.parts
+                    or "dist-packages" in resolved.parts
+                )
+                if resolved.is_relative_to(root) and not installed_runtime:
+                    source = resolved
+                break
+        if source is None:
+            continue
+        found[name] = source
+        package = name if source.name == "__init__.py" else name.rpartition(".")[0]
+        if package and package != name:
+            pending.append(package)
+        for node in ast.walk(ast.parse(source.read_bytes(), filename=str(source))):
+            if isinstance(node, ast.Import):
+                pending.extend(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                target = ("." * node.level) + (node.module or "")
+                if node.level:
+                    if not package:
+                        continue
+                    target = importlib.util.resolve_name(target, package)
+                if target:
+                    pending.append(target)
+                    pending.extend(f"{target}.{alias.name}" for alias in node.names if alias.name != "*")
+    return found
+
+
+def clear_candidate_imports(module_name: str, *, source_root: Path | None = None) -> None:
+    """Evict the candidate and its statically imported local helpers before trusted reload."""
+    sources = {} if source_root is None else _candidate_source_modules(module_name, Path(source_root).resolve())
+    for source in sources.values():
+        cache = Path(importlib.util.cache_from_source(str(source)))
+        cache.resolve().relative_to(Path(source_root).resolve())
+        cache.unlink(missing_ok=True)
     parts = module_name.split(".")
     prefixes = {".".join(parts[:index]) for index in range(1, len(parts) + 1)}
     for name in list(sys.modules):
-        if name in prefixes or name == module_name or name.startswith(f"{module_name}."):
+        if name in sources or name in prefixes or name == module_name or name.startswith(f"{module_name}."):
             sys.modules.pop(name, None)
     importlib.invalidate_caches()
 
@@ -316,7 +380,7 @@ def validate_candidate(
         checks["public_execution_boundary"] = "passed"
         if trusted_import:
             with _workspace_import_path(candidate.workspace_root):
-                clear_candidate_imports(candidate.source.entrypoint.module)
+                clear_candidate_imports(candidate.source.entrypoint.module, source_root=candidate.source.root)
                 plugin_errors = validate_scenario_plugins(cfg)
             if plugin_errors:
                 issues.extend(
@@ -334,7 +398,7 @@ def validate_candidate(
     if trusted_import:
         try:
             with _workspace_import_path(candidate.workspace_root):
-                clear_candidate_imports(candidate.source.entrypoint.module)
+                clear_candidate_imports(candidate.source.entrypoint.module, source_root=candidate.source.root)
                 module = importlib.import_module(candidate.source.entrypoint.module)
                 imported_path = Path(str(module.__file__ or "")).resolve()
                 _inside(imported_path, candidate.source.root, label="imported candidate module")

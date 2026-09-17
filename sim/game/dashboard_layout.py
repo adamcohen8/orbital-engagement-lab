@@ -3,6 +3,7 @@ from .dashboard_common import *
 from .geometry import *
 from .prediction import *
 from .camera import *
+from . import spherical_corridor
 
 class DashboardLayoutMixin:
     def draw(
@@ -48,8 +49,13 @@ class DashboardLayoutMixin:
             objective_checklist=objective_checklist,
         )
         left_panel, right_panel = self._plot_panel_specs()
-        self._draw_panel(left, left_panel[0], x_axis=left_panel[1], y_axis=left_panel[2])
-        self._draw_panel(right, right_panel[0], x_axis=right_panel[1], y_axis=right_panel[2])
+        if self.sandbox_3d_enabled and self._sandbox_camera().enabled:
+            self._draw_sandbox_3d(left.union(right))
+        else:
+            self._draw_panel(left, left_panel[0], x_axis=left_panel[1], y_axis=left_panel[2])
+            self._draw_panel(right, right_panel[0], x_axis=right_panel[1], y_axis=right_panel[2])
+        if self.sandbox_3d_enabled:
+            self._draw_camera_buttons(left.union(right))
         self._draw_hud(
             hud,
             command_status=command_status,
@@ -1110,8 +1116,9 @@ class DashboardLayoutMixin:
         for region in self.forbidden_regions:
             if not _region_visible_on_plane(region, x_axis=x_axis, y_axis=y_axis):
                 continue
-            if region.kind == "annular_sector":
-                polygon = region.sector_polygon_ric()
+            if region.kind in {"annular_sector", "spherical_corridor"}:
+                polygon = (spherical_corridor.section(region, x_axis, y_axis)
+                           if region.kind == "spherical_corridor" else region.sector_polygon_ric())
                 if polygon.size:
                     polygon = polygon.copy()
                     polygon[:, :3] += np.array(offset, dtype=float).reshape(1, 3)
@@ -1155,8 +1162,9 @@ class DashboardLayoutMixin:
         for region in self.forbidden_regions:
             if not _region_visible_on_plane(region, x_axis=x_axis, y_axis=y_axis):
                 continue
-            if region.kind == "annular_sector":
-                polygon = region.sector_polygon_ric()
+            if region.kind in {"annular_sector", "spherical_corridor"}:
+                polygon = (spherical_corridor.section(region, x_axis, y_axis)
+                           if region.kind == "spherical_corridor" else region.sector_polygon_ric())
                 if not polygon.size:
                     continue
                 polygon = polygon.copy()

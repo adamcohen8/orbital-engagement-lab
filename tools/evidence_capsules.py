@@ -85,7 +85,8 @@ def build_plan(
     root = workspace_root.resolve()
     candidates: list[dict[str, Any]] = []
     for raw_path in paths:
-        path = Path(raw_path).expanduser().resolve()
+        source_path = Path(raw_path).expanduser()
+        path = source_path.resolve()
         blockers: list[str] = []
         try:
             relative = _relative(path, root)
@@ -94,7 +95,7 @@ def build_plan(
             blockers.append(str(exc))
         if path.name != "run.sqlite":
             blockers.append("automatic capsule plans currently support review/run.sqlite only")
-        if not path.is_file() or path.is_symlink():
+        if not path.is_file() or source_path.is_symlink():
             blockers.append("source is missing, non-regular, or a symlink")
         for suffix in ("-wal", "-shm"):
             if path.with_name(path.name + suffix).exists():

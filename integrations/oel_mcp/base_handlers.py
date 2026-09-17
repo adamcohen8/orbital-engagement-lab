@@ -8,9 +8,11 @@ from pathlib import Path
 from threading import Event
 from typing import Any, Callable
 
+from integrations.oel_mcp.agent_guidance import BOOTSTRAP_URI, WORKFLOWS_URI
 from integrations.oel_mcp.contracts import MAX_RESPONSE_BYTES, TOOL_CONTRACT_VERSION, ToolContract, effects
 from integrations.oel_mcp.execution import ExecutionApprovalPolicy
 from integrations.oel_mcp.policy import MCPPathPolicy, validate_handling
+from integrations.oel_mcp.recovery import annotate_error, recovery_details
 
 
 class BaseOELMCPHandlers:
@@ -40,6 +42,13 @@ class BaseOELMCPHandlers:
             "transport": "stdio",
             "deployment_profile": self.profile,
             "capabilities": [item.capability() for item in self.contracts.values()],
+            "agent_guide_uri": BOOTSTRAP_URI,
+            "workflow_routes_uri": WORKFLOWS_URI,
+            "readiness": {
+                "semantics": "Process configuration only; inputs, handling, trust and exact approvals are checked on every call.",
+                "execution_authorized": False,
+                "tools": [self._tool_readiness(item) for item in self.contracts.values()],
+            },
             "dependency_direction": "mcp_consumes_oel",
             "compatibility": {
                 "additive_optional_fields_allowed": True,
@@ -59,6 +68,37 @@ class BaseOELMCPHandlers:
         }
         return self._envelope(contract=contract, arguments={}, operation=lambda: result)
 
+    def _tool_readiness(self, contract: ToolContract) -> dict[str, Any]:
+        blockers = []
+        policy = self.approval_policy
+        scope = "execute" if contract.executes else "write" if contract.writes else None
+        if scope and not (policy.execution_approval_ids if contract.executes else policy.write_approval_ids):
+            blockers.append(f"{scope}_approval_not_configured")
+        needs_write_root = contract.writes or contract.executes or contract.tool_id in {
+            "oel.plan_run.v1", "oel.validate_scenario.v1"
+        }
+        if needs_write_root and not self.path_policy.write_roots:
+            blockers.append("write_root_not_configured")
+        required = set(contract.input_schema.get("required", ()))
+        trust_required = "trust_approval" in required or bool(contract.limits.get("source_trust_approval_required"))
+        if trust_required and not policy.trust_approval_ids:
+            blockers.append("trust_approval_not_configured")
+        entitlement = self._entitlement_readiness(contract)
+        if entitlement not in {"not_required", "available"}:
+            blockers.append("entitlement_" + entitlement)
+        return {
+            "tool_id": contract.tool_id, "registered": True,
+            "configuration_ready": not blockers, "blockers": blockers,
+            "entitlement_status": entitlement,
+            "trust_approval_required": trust_required,
+            "conditional_trust_available": bool(policy.trust_approval_ids) if "trust_approval" in
+            contract.input_schema.get("properties", {}) else None,
+            "execution_authorized": False,
+        }
+
+    def _entitlement_readiness(self, contract: ToolContract) -> str:
+        return "not_checked" if contract.required_entitlement or contract.required_entitlements else "not_required"
+
     def call(
         self,
         tool_name: str,
@@ -70,12 +110,16 @@ class BaseOELMCPHandlers:
         tool_id = str(tool_name)
         contract = self.contracts.get(tool_id)
         if contract is None:
-            raise PermissionError("Tool is not available in this deployment profile.")
+            raise annotate_error(PermissionError("Tool is not available in this deployment profile."), "tool.unavailable")
         args = dict(arguments or {})
         if tool_id == "oel.describe_capabilities.v1":
             _validate_arguments(contract, args)
             return self.describe_capabilities()
-        validate_handling(self.profile, args.get("handling"))
+        try:
+            validate_handling(self.profile, args.get("handling"))
+        except PermissionError as exc:
+            annotate_error(exc, "handling.review_required")
+            raise
         _validate_arguments(contract, args)
         if contract.writes or contract.executes:
             self.approval_policy.require(args.get("approval"), executes=contract.executes)
@@ -125,6 +169,9 @@ class BaseOELMCPHandlers:
                 "type": type(exc).__name__,
                 "message": _safe_error_message(exc, authorized_roots=self._authorized_roots()),
             }
+            recovery = recovery_details(exc)
+            if recovery is not None:
+                error["recovery"] = recovery
         return {
             "tool_contract_version": TOOL_CONTRACT_VERSION,
             "tool_id": contract.tool_id,
@@ -172,7 +219,11 @@ def _json_safe_value(value: Any) -> Any:
 
 
 def _validate_arguments(contract: ToolContract, arguments: dict[str, Any]) -> None:
-    _validate_value(arguments, contract.input_schema, path="tool arguments")
+    try:
+        _validate_value(arguments, contract.input_schema, path="tool arguments")
+    except ValueError as exc:
+        annotate_error(exc, "tool.arguments_invalid")
+        raise
 
 
 def _validate_value(value: Any, schema: dict[str, Any], *, path: str) -> None:

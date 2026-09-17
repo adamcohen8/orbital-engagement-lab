@@ -2,6 +2,19 @@
 
 This packaged guide covers the supported local stdio OEL MCP surface.
 
+Agents should start with `oel.describe_capabilities.v1`, then read
+`oel://agent/bootstrap/v1` and `oel://agent/workflows/v1`. The bootstrap is also
+installed as `AGENTS.md` in new managed workspaces. Workflow routes distinguish
+tools registered here from the separate `oel-study-mcp` planning prototype.
+Configure that connection through the host operator only when needed.
+
+Discovery's `readiness.tools` reports process-configuration blockers and local
+entitlement status without exposing approval IDs or granting authority. A
+`configuration_ready` tool still checks input handling, exact approval IDs,
+trust, paths, validation and resource bounds on every call. For errors, use
+optional `error.recovery` in tool envelopes or `data.recovery` in SDK admission
+errors. These contain a stable code, the actor needed and an applicable action.
+
 - Install with `python -m pip install "orbital-engagement-lab[mcp]"`.
 - Start with `oel-mcp`; the official SDK adapter is the default.
 - Run `oel-mcp --doctor` before connecting a host. Use

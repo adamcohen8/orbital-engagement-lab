@@ -1,11 +1,28 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 import numpy as np
 
 from sim.dynamics.orbit.frames import FrameContext, eci_to_ecef_rotation_context
 from sim.utils.geodesy import geodetic_to_ecef_km
+
+
+def _cadence_due(t_s: float, last_update_t_s: float, cadence_s: float) -> bool:
+    """Allow roundoff at a due boundary without admitting extra samples."""
+    if not math.isfinite(t_s):
+        raise ValueError("sensor time_s must be finite.")
+    elapsed = t_s - last_update_t_s
+    if elapsed >= cadence_s:
+        return True
+    if elapsed <= 0.0 or not math.isfinite(elapsed):
+        return False
+    tolerance = min(
+        cadence_s * 1.0e-9,
+        4.0 * max(math.ulp(t_s), math.ulp(last_update_t_s), math.ulp(cadence_s)),
+    )
+    return cadence_s - elapsed <= tolerance
 
 
 @dataclass(frozen=True)
@@ -75,10 +92,15 @@ class AccessModel:
         *,
         boresight_eci: np.ndarray | None = None,
     ) -> tuple[bool, str]:
-        if t_s - self._last_update_t_s < self.cfg.update_cadence_s:
+        if not _cadence_due(t_s, self._last_update_t_s, self.cfg.update_cadence_s):
             return False, "cadence"
 
         observer = np.asarray(observer_eci_km, dtype=float)
+        target = np.asarray(target_eci_km, dtype=float)
+        boresight = None if boresight_eci is None else np.asarray(boresight_eci, dtype=float)
+        for name, vector in (("observer", observer), ("target", target), ("boresight", boresight)):
+            if vector is not None and (vector.shape != (3,) or not np.all(np.isfinite(vector))):
+                raise ValueError(f"access {name} must contain three finite coordinates.")
         ground_zenith: np.ndarray | None = None
         if self.cfg.require_ground_visibility:
             if self.cfg.ground_site is None:
@@ -89,7 +111,7 @@ class AccessModel:
                 t_s,
                 self.cfg.frame_context,
             )
-        los = np.asarray(target_eci_km, dtype=float) - observer
+        los = target - observer
         rng = np.linalg.norm(los)
         if self.cfg.max_range_km is not None and rng > self.cfg.max_range_km:
             return False, "range"
@@ -135,20 +157,6 @@ class AccessModel:
         return True
 
 
-def _ground_visible(observer_eci_km: np.ndarray, target_eci_km: np.ndarray) -> bool:
-    # Simple Earth occultation check: LOS not intersecting Earth sphere.
-    ro = observer_eci_km
-    rt = target_eci_km
-    d = rt - ro
-    denom = np.dot(d, d)
-    if denom <= 0.0:
-        return True
-    tau = -np.dot(ro, d) / denom
-    tau = np.clip(tau, 0.0, 1.0)
-    closest = ro + tau * d
-    return np.linalg.norm(closest) > 6378.137
-
-
 def _ground_site_geometry_eci(
     site: GroundSite,
     t_s: float,
@@ -167,14 +175,6 @@ def _ground_site_geometry_eci(
     )
     ecef_from_eci = eci_to_ecef_rotation_context(float(t_s), frame_context)
     return ecef_from_eci.T @ position_ecef, ecef_from_eci.T @ up_ecef
-
-
-def _ground_site_eci_km(
-    site: GroundSite,
-    t_s: float,
-    frame_context: FrameContext,
-) -> np.ndarray:
-    return _ground_site_geometry_eci(site, t_s, frame_context)[0]
 
 
 def _solid_angle_to_half_angle_rad(solid_angle_sr: float | None) -> float | None:

@@ -90,13 +90,6 @@ def _artifact_lines(artifacts: dict[str, Any], *, base_dir: Path, limit: int = 6
     return lines
 
 
-def _artifact_basename(artifacts: dict[str, Any], key: str, fallback: str) -> str:
-    value = artifacts.get(key)
-    if isinstance(value, (str, os.PathLike)) and str(value).strip():
-        return Path(value).name
-    return fallback
-
-
 def _artifact_path(artifacts: dict[str, Any], key: str) -> str:
     value = artifacts.get(key)
     if isinstance(value, (str, os.PathLike)) and str(value).strip():

@@ -75,6 +75,7 @@ from sim.flight_software.schemas import (
     from_primitive,
     to_primitive,
 )
+from sim.knowledge.object_tracking import KnowledgeConditionConfig, ObjectDetectionGate
 from sim.utils.frames import eci_relative_to_ric_rect
 from sim.utils.quaternion import (
     normalize_quaternion,
@@ -150,6 +151,7 @@ class FlightSoftwareRuntimeEvidence:
     receipts: list[ActuatorCommandReceipt] = field(default_factory=list)
     realizations: list[ActuatorRealization] = field(default_factory=list)
     snapshots: list[dict[str, Any]] = field(default_factory=list)
+    sensor_access: list[dict[str, Any]] = field(default_factory=list)
 
 
 InputPublisher = Callable[[ClockTag], Iterable[InputEvent]]
@@ -204,13 +206,12 @@ class SatelliteFlightSoftwareRuntime:
         ideal_navigation: bool = True,
         sensor_error: Mapping[str, object] | None = None,
         sensor_seed: int = 0,
+        sensor_conditions: KnowledgeConditionConfig | None = None,
         initial_checkpoint: Mapping[str, object] | None = None,
     ) -> None:
         if task_period_ns <= 0 or tick_period_ns <= 0 or task_period_ns % tick_period_ns:
             raise ValueError("task period must be a positive whole number of clock ticks")
-        if sensor_period_ns is not None and (
-            sensor_period_ns <= 0 or sensor_period_ns % tick_period_ns
-        ):
+        if sensor_period_ns is not None and (sensor_period_ns <= 0 or sensor_period_ns % tick_period_ns):
             raise ValueError("sensor period must be a positive whole number of clock ticks")
         if set(hardware) != {device.actuator_id for device in devices}:
             raise ValueError("every declared actuator device must have exactly one physical hardware model")
@@ -222,9 +223,7 @@ class SatelliteFlightSoftwareRuntime:
         # firewall; third-party stacks continue through their public step().
         from sim.flight_software.reference_stacks import ReferenceStackBase
 
-        self._builtin_reference_stack_base = (
-            ReferenceStackBase if isinstance(stack, ReferenceStackBase) else None
-        )
+        self._builtin_reference_stack_base = ReferenceStackBase if isinstance(stack, ReferenceStackBase) else None
         self.inertial_frame = inertial_frame
         self.body_frame = body_frame
         self.task_period_ns = int(task_period_ns)
@@ -243,6 +242,13 @@ class SatelliteFlightSoftwareRuntime:
         self.ideal_navigation = bool(ideal_navigation)
         self.sensor_error = dict(sensor_error or {})
         self._sensor_rng = np.random.default_rng(int(sensor_seed))
+        # Independent noise/access streams keep existing unbounded measurements
+        # stable and make packet loss replayable without consuming noise draws.
+        self._target_access = (
+            None
+            if sensor_conditions is None
+            else ObjectDetectionGate(sensor_conditions, np.random.default_rng(int(sensor_seed)))
+        )
         self.command_bus = ActuatorCommandBus(devices)
         self.hardware = dict(hardware)
         self.inputs = InputDeliveryQueue()
@@ -319,9 +325,7 @@ class SatelliteFlightSoftwareRuntime:
         if self._last_invocation_ns is not None and onboard_time_ns < self._last_invocation_ns:
             raise ValueError("publisher poll cannot be requested before the latest invocation")
         pending = self._publisher_poll_requested_ns
-        self._publisher_poll_requested_ns = (
-            onboard_time_ns if pending is None else min(pending, onboard_time_ns)
-        )
+        self._publisher_poll_requested_ns = onboard_time_ns if pending is None else min(pending, onboard_time_ns)
 
     def enqueue(self, event: InputEvent) -> None:
         self.inputs.enqueue(event)
@@ -347,8 +351,7 @@ class SatelliteFlightSoftwareRuntime:
 
         onboard_start_ns = self._clock_offset_ns + start_time_ns
         publisher_due = (
-            self._publisher_poll_requested_ns is not None
-            and self._publisher_poll_requested_ns <= onboard_start_ns
+            self._publisher_poll_requested_ns is not None and self._publisher_poll_requested_ns <= onboard_start_ns
         )
         input_due = self.inputs.next_delivery_time_ns_for(_TASK_RELEASING_INPUT_KINDS)
         if (
@@ -359,15 +362,15 @@ class SatelliteFlightSoftwareRuntime:
             return
         task_due = self._next_task_ns <= onboard_start_ns
         sensor_due = self._next_sensor_ns <= onboard_start_ns
-        missed_task_releases = (
-            (onboard_start_ns - self._next_task_ns) // self.task_period_ns if task_due else 0
-        )
-        missed_sensor_releases = (
-            (onboard_start_ns - self._next_sensor_ns) // self.sensor_period_ns if sensor_due else 0
-        )
+        missed_task_releases = (onboard_start_ns - self._next_task_ns) // self.task_period_ns if task_due else 0
+        missed_sensor_releases = (onboard_start_ns - self._next_sensor_ns) // self.sensor_period_ns if sensor_due else 0
         requested_due = any(value <= onboard_start_ns for value in self._requested_release_ns)
-        if task_due or sensor_due or requested_due or publisher_due or (
-            input_due is not None and input_due <= onboard_start_ns
+        if (
+            task_due
+            or sensor_due
+            or requested_due
+            or publisher_due
+            or (input_due is not None and input_due <= onboard_start_ns)
         ):
             self._missed_task_releases += int(missed_task_releases)
             self._missed_sensor_releases += int(missed_sensor_releases)
@@ -389,9 +392,7 @@ class SatelliteFlightSoftwareRuntime:
                 sample_sensors=sensor_due,
                 release_reasons=release_reasons,
             )
-            self._requested_release_ns = {
-                value for value in self._requested_release_ns if value > onboard_start_ns
-            }
+            self._requested_release_ns = {value for value in self._requested_release_ns if value > onboard_start_ns}
             if publisher_due:
                 self._publisher_poll_requested_ns = None
             if task_due:
@@ -550,7 +551,13 @@ class SatelliteFlightSoftwareRuntime:
             if self.ideal_magnetic_field_body_t is not None:
                 self._enqueue_runtime_owned(self._ideal_magnetometer_event(now))
         reference_id = self.reference_object_id
-        if sample_sensors and reference_id is not None and world_truth is not None and reference_id in world_truth:
+        if (
+            sample_sensors
+            and reference_id is not None
+            and world_truth is not None
+            and reference_id in world_truth
+            and self._target_detected(truth, world_truth[reference_id], now)
+        ):
             if self.ideal_navigation:
                 self._enqueue_runtime_owned(
                     self._ideal_tracked_state_event(reference_id, world_truth[reference_id], now)
@@ -617,19 +624,13 @@ class SatelliteFlightSoftwareRuntime:
                 "stack_version": identity.stack_version,
                 "profile_id": self.profile_id,
                 "profile_params": dict(self.profile_params),
-                "input_packet_ids": [
-                    _to_primitive_trusted(event.packet_id) for event in events
-                ],
-                "command_ids": [
-                    _to_primitive_trusted(command.command_id)
-                    for command in output.commands
-                ],
+                "input_packet_ids": [_to_primitive_trusted(event.packet_id) for event in events],
+                "command_ids": [_to_primitive_trusted(command.command_id) for command in output.commands],
                 "telemetry_count": len(output.telemetry),
                 "missed_task_releases": self._missed_task_releases,
                 "missed_sensor_releases": self._missed_sensor_releases,
                 "requested_next_invocations": [
-                    _to_primitive_trusted(request)
-                    for request in output.requested_next_invocations
+                    _to_primitive_trusted(request) for request in output.requested_next_invocations
                 ],
                 "task_releases": [
                     {
@@ -651,6 +652,20 @@ class SatelliteFlightSoftwareRuntime:
         for receipt in receipts:
             self._enqueue_runtime_owned(self._receipt_event(receipt, now))
         self._last_invocation_ns = onboard_time_ns
+
+    def _target_detected(self, observer: StateTruth, target: StateTruth, now: ClockTag) -> bool:
+        if self._target_access is None:
+            return True
+        detected = self._target_access.detect(observer, target, now.ticks * now.tick_period_ns / 1e9)
+        self.evidence.sensor_access.append(
+            {
+                "target_id": self.reference_object_id,
+                "sample_time": _to_primitive_trusted(now),
+                "detected": detected,
+                "status": self._target_access.last_detection_status,
+            }
+        )
+        return detected
 
     def _validate_requested_release(self, release_at: ClockTag, now: ClockTag) -> int:
         if (
@@ -739,12 +754,23 @@ class SatelliteFlightSoftwareRuntime:
             "max_delta_v_m_s": self.max_delta_v_m_s,
             "used_delta_v_m_s": self.used_delta_v_m_s,
             "sensor_rng_state": self._sensor_rng.bit_generator.state,
+            "target_access_state": (
+                None
+                if self._target_access is None
+                else {
+                    "rng_state": self._target_access.rng.bit_generator.state,
+                    "last_update_t_s": (
+                        float(self._target_access.access._last_update_t_s)
+                        if np.isfinite(self._target_access.access._last_update_t_s)
+                        else None
+                    ),
+                }
+            ),
             "external_publisher_count": len(self._input_publishers),
             "command_bus": self.command_bus.snapshot_state(),
             "input_delivery": self.inputs.snapshot_state(),
             "hardware": {
-                actuator_id: hardware.snapshot_state()
-                for actuator_id, hardware in sorted(self.hardware.items())
+                actuator_id: hardware.snapshot_state() for actuator_id, hardware in sorted(self.hardware.items())
             },
         }
 
@@ -799,22 +825,16 @@ class SatelliteFlightSoftwareRuntime:
         self._sensor_sequence = int(state["sensor_sequence"])
         self._receipt_sequence = int(state["receipt_sequence"])
         self._telemetry_sequence = int(state["telemetry_sequence"])
-        self._last_invocation_ns = (
-            None if state.get("last_invocation_ns") is None else int(state["last_invocation_ns"])
-        )
+        self._last_invocation_ns = None if state.get("last_invocation_ns") is None else int(state["last_invocation_ns"])
         self._next_task_ns = int(state["next_task_ns"])
         self._next_sensor_ns = int(state["next_sensor_ns"])
         self._missed_task_releases = int(state.get("missed_task_releases", 0))
         self._missed_sensor_releases = int(state.get("missed_sensor_releases", 0))
         self._requested_release_ns = {int(value) for value in state.get("requested_release_ns", [])}  # type: ignore[arg-type]
         self._publisher_poll_requested_ns = (
-            None
-            if state.get("publisher_poll_requested_ns") is None
-            else int(state["publisher_poll_requested_ns"])
+            None if state.get("publisher_poll_requested_ns") is None else int(state["publisher_poll_requested_ns"])
         )
-        self.max_delta_v_m_s = (
-            None if state.get("max_delta_v_m_s") is None else float(state["max_delta_v_m_s"])
-        )
+        self.max_delta_v_m_s = None if state.get("max_delta_v_m_s") is None else float(state["max_delta_v_m_s"])
         self.used_delta_v_m_s = float(state.get("used_delta_v_m_s", 0.0))
         if int(state.get("external_publisher_count", 0)) != 0:
             raise ValueError(
@@ -824,6 +844,13 @@ class SatelliteFlightSoftwareRuntime:
         if not isinstance(sensor_rng_state, dict):
             raise ValueError("runtime checkpoint sensor RNG state is invalid")
         self._sensor_rng.bit_generator.state = sensor_rng_state
+        access_state = state.get("target_access_state")
+        if access_state is not None:
+            if self._target_access is None or not isinstance(access_state, dict):
+                raise ValueError("runtime checkpoint target access configuration is incompatible")
+            self._target_access.rng.bit_generator.state = access_state["rng_state"]
+            last_update = access_state.get("last_update_t_s")
+            self._target_access.access._last_update_t_s = -np.inf if last_update is None else float(last_update)
         self.command_bus.restore_state(state.get("command_bus"))
         self.inputs.restore_state(state.get("input_delivery"))
         hardware_state = state.get("hardware")
@@ -843,6 +870,8 @@ class SatelliteFlightSoftwareRuntime:
             "realizations": _to_primitive_trusted(self.evidence.realizations),
             "snapshots": _to_primitive_trusted(self.evidence.snapshots),
         }
+        if self.evidence.sensor_access:
+            evidence["sensor_access"] = _to_primitive_trusted(self.evidence.sensor_access)
         transport_evidence = getattr(self.stack, "transport_evidence", None)
         if callable(transport_evidence):
             # Bridge evidence is supplied by an external transport owner and
@@ -851,6 +880,33 @@ class SatelliteFlightSoftwareRuntime:
         return evidence
 
     def onboard_state_vector(self) -> np.ndarray | None:
+        """Report published navigation; preserve legacy widths with NaN for gaps."""
+        measured = self.onboard_measurement_vector()
+        unavailable = None if measured is None else np.full(measured.shape, np.nan)
+        if not self.evidence.outputs:
+            return unavailable
+        fields = {}
+        for record in self.evidence.outputs[-1].telemetry:
+            if record.topic == "oel.navigation_state.v1":
+                fields = {item.name: item.value for item in record.fields}
+        if (
+            not fields
+            or fields.get("frame_id") != self.inertial_frame.name
+            or fields.get("frame_registry_version") != self.inertial_frame.registry_version
+        ):
+            return unavailable
+        position = [fields.get(f"position_{axis}_m") for axis in "xyz"]
+        velocity = [fields.get(f"velocity_{axis}_m_s") for axis in "xyz"]
+        values = [np.nan if value is None else float(value) / 1000 for value in (*position, *velocity)]
+        quaternion = [fields.get(f"q_{axis}") for axis in "wxyz"]
+        rate = [fields.get(f"omega_{axis}_rad_s") for axis in "xyz"]
+        if any(value is not None for value in quaternion) or (measured is not None and measured.size >= 10):
+            values.extend(np.nan if value is None else float(value) for value in quaternion)
+            if any(value is not None for value in rate) or (measured is not None and measured.size >= 13):
+                values.extend(np.nan if value is None else float(value) for value in rate)
+        return np.asarray(values, dtype=float)
+
+    def onboard_measurement_vector(self) -> np.ndarray | None:
         """Return the latest onboard own-state measurement for reporting only."""
 
         for event in reversed(self.evidence.input_events):
@@ -902,7 +958,9 @@ class SatelliteFlightSoftwareRuntime:
         velocity_m_s = np.asarray(truth.velocity_eci_km_s, dtype=float) * 1.0e3
         gnss = GnssOwnStateMeasurement(
             tuple(float(value) for value in position_m + position_bias + self._sensor_rng.normal(0.0, position_sigma)),
-            tuple(float(value) for value in velocity_m_s + velocity_bias + self._sensor_rng.normal(0.0, velocity_sigma)),
+            tuple(
+                float(value) for value in velocity_m_s + velocity_bias + self._sensor_rng.normal(0.0, velocity_sigma)
+            ),
         )
         events.append(self._measurement_input("gnss", gnss, now, self.inertial_frame))
         omega_sigma = _expand3(self.sensor_error.get("omega_sigma_rad_s", 0.0))
@@ -962,9 +1020,7 @@ class SatelliteFlightSoftwareRuntime:
         )
         velocity_m_s += self._sensor_rng.normal(
             0.0,
-            _expand3(
-                self.sensor_error.get("relative_vel_sigma_km_s", self.sensor_error.get("vel_sigma_km_s", 0.0))
-            )
+            _expand3(self.sensor_error.get("relative_vel_sigma_km_s", self.sensor_error.get("vel_sigma_km_s", 0.0)))
             * 1.0e3,
         )
         range_m = float(np.linalg.norm(position_m))
@@ -1031,11 +1087,11 @@ class SatelliteFlightSoftwareRuntime:
             *realization.device_state,
         )
         payload = ActuatorTelemetryPayload(realization.actuator_id, fields)
-        packet_id = PacketId(f"{self.satellite_id}/{realization.actuator_id}/telemetry", self.boot_id, self._telemetry_sequence)
-        self._telemetry_sequence += 1
-        self._enqueue_runtime_owned(
-            InputEvent(packet_id, InputKind.ACTUATOR_TELEMETRY, at, at, Quality(), payload)
+        packet_id = PacketId(
+            f"{self.satellite_id}/{realization.actuator_id}/telemetry", self.boot_id, self._telemetry_sequence
         )
+        self._telemetry_sequence += 1
+        self._enqueue_runtime_owned(InputEvent(packet_id, InputKind.ACTUATOR_TELEMETRY, at, at, Quality(), payload))
 
 
 def ideal_wrench_device(

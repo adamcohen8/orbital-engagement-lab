@@ -95,6 +95,7 @@ from .contracts import (
     ValidityInterval,
 )
 from .loads import MissionLoadManager, MissionLoadResult, OnboardMissionConfigurationLoad
+from .navigation_reporting import navigation_telemetry
 from .schemas import assert_truth_free, canonical_json_bytes, from_primitive, to_primitive
 
 STACK_VERSION: Final = "2.0.0"
@@ -586,6 +587,8 @@ class PassiveFlightSoftwareStack(ReferenceStackBase):
             if self.config.emit_diagnostics
             else ()
         )
+        if solution is not None:
+            telemetry += navigation_telemetry(solution, self.config.inertial_frame)
         return FlightSoftwareOutput(batch.satellite_id, batch.invocation_id, telemetry=telemetry)
 
     def _snapshot_stack_state(self) -> dict[str, object]:
@@ -829,6 +832,7 @@ class AttitudeReferenceFlightSoftwareStack(ReferenceStackBase):
             if allocation is not None:
                 fields.append(TelemetryField("allocation_status", allocation.status.value))
             telemetry = (DiagnosticTelemetry("fsw.attitude_reference.status", batch.invocation_time, tuple(fields)),)
+        telemetry += navigation_telemetry(solution, self.config.inertial_frame)
         return FlightSoftwareOutput(batch.satellite_id, batch.invocation_id, tuple(commands), telemetry)
 
     def _detumble_effort(self, solution) -> RequestedEffort | None:
@@ -1391,6 +1395,7 @@ class _TranslationReferenceFlightSoftwareStack(ReferenceStackBase):
                     )
                 )
             telemetry = (DiagnosticTelemetry(f"{self.stack_id}.status", batch.invocation_time, tuple(fields)),)
+        telemetry += navigation_telemetry(solution, self.config.inertial_frame)
         next_command_release = self._command_service.next_release_at
         requested_releases = (
             ()

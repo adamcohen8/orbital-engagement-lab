@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import sys
 import tempfile
@@ -7,13 +8,24 @@ from pathlib import Path
 
 import pytest
 
-from sim.utils.io import SafeReadError, read_regular_file_nofollow
+from sim.utils.io import SafeReadError, read_regular_file_nofollow, sha256_regular_file_nofollow
 
 
 def test_bounded_nofollow_read_accepts_regular_file(tmp_path: Path) -> None:
     source = tmp_path / "evidence.json"
     source.write_bytes(b'{"status":"ok"}\n')
     assert read_regular_file_nofollow(source, min_bytes=1, max_bytes=100) == source.read_bytes()
+
+
+def test_bounded_nofollow_hash_streams_regular_file(tmp_path: Path) -> None:
+    source = tmp_path / "large-input.bin"
+    payload = b"hosted-package-data" * 100_000
+    source.write_bytes(payload)
+
+    digest, byte_count = sha256_regular_file_nofollow(source, min_bytes=1, max_bytes=3_000_000)
+
+    assert digest == hashlib.sha256(payload).hexdigest()
+    assert byte_count == len(payload)
 
 
 def test_bounded_nofollow_read_rejects_size_and_non_file(tmp_path: Path) -> None:

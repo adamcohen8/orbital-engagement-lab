@@ -87,6 +87,20 @@ SCENARIO_INPUT_PROPERTIES: dict[str, Any] = {
     "resource_profile": {"type": "string", "enum": list(M4_RESOURCE_PROFILES), "default": "laptop-safe"},
 }
 
+TOOL_READINESS_SCHEMA = object_schema(
+    {
+        "tool_id": {"type": "string"}, "registered": {"const": True},
+        "configuration_ready": {"type": "boolean"},
+        "blockers": {"type": "array", "items": {"type": "string"}},
+        "entitlement_status": {"enum": ["not_required", "available", "unavailable", "not_checked"]},
+        "trust_approval_required": {"type": "boolean"},
+        "conditional_trust_available": {"type": ["boolean", "null"]},
+        "execution_authorized": {"const": False},
+    },
+    required=("tool_id", "registered", "configuration_ready", "blockers", "entitlement_status",
+              "trust_approval_required", "conditional_trust_available", "execution_authorized"),
+)
+
 DESCRIBE_RESULT_SCHEMA: dict[str, Any] = object_schema(
     {
         "status": {"const": "available"},
@@ -97,6 +111,12 @@ DESCRIBE_RESULT_SCHEMA: dict[str, Any] = object_schema(
         "dependency_direction": {"const": "mcp_consumes_oel"},
         "compatibility": {"type": "object"},
         "non_claims": {"type": "array", "items": {"type": "string"}},
+        "agent_guide_uri": {"type": "string"},
+        "workflow_routes_uri": {"type": "string"},
+        "readiness": object_schema({
+            "semantics": {"type": "string"}, "execution_authorized": {"const": False},
+            "tools": {"type": "array", "items": TOOL_READINESS_SCHEMA},
+        }, required=("semantics", "execution_authorized", "tools")),
     },
     required=(
         "status",

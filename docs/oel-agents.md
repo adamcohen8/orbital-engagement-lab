@@ -15,7 +15,7 @@ honest interpretation.
 The intended user loop is:
 
 ```text
-ask an agent -> route -> scenario YAML or typed analysis problem -> validate
+ask an agent -> discover route -> scenario YAML or typed analysis problem -> validate
 -> execute -> authoritative replay -> inspect -> bounded claim
 ```
 
@@ -53,7 +53,7 @@ Codex, Cursor, Claude Code, Gemini CLI, and similar tools should begin with:
 2. Read `agents/public/AGENTS.md`.
 3. Install and activate OEL using `docs/installation.md`.
 4. Read the task-relevant docs, usually `docs/scenario-yaml.md`,
-   `docs/quickstart.md`, `docs/python-api.md`, or `docs/game-mode-roadmap.md`.
+   `docs/quickstart.md`, `docs/python-api.md`, or `docs/rpo-trainer.md`.
 5. Route the request to scenario YAML or the supported standalone analysis
    contract before choosing an example.
 6. Validate any generated or edited input before execution.
@@ -70,6 +70,9 @@ For evaluator-facing trials, use
 output inspection, use [`agent-review-queries.md`](agent-review-queries.md).
 For reproducible adoption paths and broader intent routing, use
 [`agent-capability-routing.md`](agent-capability-routing.md).
+For open-ended, non-executing study-plan preflight and content-bound review,
+use [`study-planning.md`](study-planning.md); `PLAN_VALID` is not execution or
+payment authorization.
 For a machine-readable validate/run/inspect fast lane that writes reusable
 evidence packets, use [`agent-task-runner.md`](agent-task-runner.md).
 For public-safe upstream feedback discovered by agents, use

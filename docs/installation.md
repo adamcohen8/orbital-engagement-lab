@@ -50,6 +50,12 @@ beside OEL's trusted release keys, so future update checks do not require users
 to copy URLs or key paths. The channel URL locates signed metadata; it is not a
 replacement trust root. The bootstrap does not edit a workspace.
 
+The standard installer includes RPO Trainer and adds a per-user launcher: `RPO Trainer.app` in `~/Applications` on macOS, `RPO Trainer.exe` with a Start Menu shortcut on Windows, or an application-menu entry on Linux. Double-click it to open the Trainer. The launcher follows the active managed version after updates or rollback. Existing supported Python is still required. Set `OEL_INSTALL_PROFILE=core` before running the shell installer (PowerShell: `$env:OEL_INSTALL_PROFILE="core"`) for a command-line-only installation. The Python bootstrap also accepts `--profile core`.
+
+You can also launch the Trainer with `oel trainer`. Saved Trainer progress remains in your user account. Updates inherit the active dependency profile unless you explicitly choose another one. macOS and Windows desktop launch logs are saved under the managed data directory at `logs/trainer.log`.
+
+To remove desktop integration, delete `~/Applications/RPO Trainer.app` on macOS, the RPO Trainer Start Menu shortcut on Windows, or `$XDG_DATA_HOME/applications/oel-rpo-trainer.desktop` (normally `~/.local/share/applications/oel-rpo-trainer.desktop`) on Linux. This does not remove OEL or saved progress. Rerunning the installer recreates the shortcut.
+
 After installation:
 
 On macOS or Linux, the launcher is installed at `~/.local/bin/oel`. Reopen the
@@ -304,3 +310,22 @@ Common recovery rules:
 For the guided simulation walkthrough, continue to [Quickstart](quickstart.md).
 For support boundaries and evidence requirements, read
 [Compatibility And Install Profiles](compatibility.md).
+
+### Updating from RPO Trainer
+
+Official managed public installations check their configured release channel in the
+background when the level selector opens. The start screen does not check or show
+updates. A newer signed release displays an update notice in the selector footer.
+Click it or press Ctrl+U (also Cmd+U on macOS) to install and relaunch Trainer.
+The check alone never downloads or installs a release.
+
+Installation preserves the active dependency profile and uses signed-channel,
+signed-manifest, and artifact verification before activation. Levels cannot launch
+while installation is in progress. If installation fails, the current Trainer stays
+open and offers retry; details are recorded in the managed cache's
+`trainer-update-error.log`. Saved progress and settings are preserved. If relaunch
+fails, the selector asks you to close and reopen Trainer.
+
+This integration is for official managed public desktop installations. Source
+checkouts, developer installations, Pro installations, and the web preview do not
+automatically check or install updates from the game.

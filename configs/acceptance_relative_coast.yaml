@@ -1,0 +1,42 @@
+scenario_name: acceptance_relative_coast
+scenario_description: Does a 500-metre radial offset remain fixed without control?
+metadata:
+  owner: public
+  public_surface: public-example
+  support_level: demonstration
+objects:
+  chief:
+    kind: satellite
+    runtime_profile: trajectory_only
+    initial_state:
+      position_eci_km: [7000.0, 0.0, 0.0]
+      velocity_eci_km_s: [0.0, 7.546053287267836, 0.0]
+  deputy:
+    kind: satellite
+    runtime_profile: trajectory_only
+    initial_state:
+      relative_to: chief
+      relative_ric_rect: [0.5, 0.0, 0.0, 0.0, 0.0, 0.0]
+simulator:
+  duration_s: 600.0
+  dt_s: 5.0
+  dynamics:
+    orbit:
+      model: two_body
+      orbit_substep_s: 5.0
+    attitude:
+      enabled: false
+outputs:
+  output_dir: outputs/acceptance_relative_coast
+  mode: save
+  stats:
+    print_summary: false
+    save_json: true
+    save_full_log: false
+  review:
+    enabled: true
+    detail: standard
+  plots:
+    enabled: false
+  animations:
+    enabled: false

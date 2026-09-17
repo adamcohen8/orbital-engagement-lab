@@ -255,3 +255,6 @@ set `coeff_path` to a local coefficient file.
 EGM96 model without `coeff_path`. Set `allow_download` explicitly; downloads
 remain unavailable in sealed mode. `source: "icgem"` still requires a local
 coefficient file.
+
+For a bounded passive two-satellite question with explicit assumptions and
+review queries, continue with [Your first relative-motion study](first-relative-study.md).

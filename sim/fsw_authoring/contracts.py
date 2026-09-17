@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -53,10 +54,21 @@ def sha256_tree(path: str | Path, *, suffixes: frozenset[str] | None = None) -> 
     if root.is_file():
         return sha256_file(root)
     rows: list[dict[str, str]] = []
-    for item in sorted(root.rglob("*")):
+    ignored = {".oel", "__pycache__", ".pytest_cache", ".ruff_cache"}
+    candidates: list[Path] = []
+
+    def onerror(error: OSError) -> None:
+        # Match pathlib traversal: unreadable directories are skipped, while
+        # unexpected I/O failures must not produce a misleading partial hash.
+        if not isinstance(error, PermissionError):
+            raise error
+
+    walk = os.walk(root, followlinks=False, onerror=onerror) if root.is_dir() else ()
+    for directory, directories, files in walk:
+        directories[:] = [name for name in directories if name not in ignored]
+        candidates.extend(Path(directory) / name for name in (*directories, *files) if name not in ignored)
+    for item in sorted(candidates):
         relative = item.relative_to(root)
-        if any(part in {".oel", "__pycache__", ".pytest_cache", ".ruff_cache"} for part in relative.parts):
-            continue
         if item.is_symlink():
             raise ValueError(f"Content-bound candidate trees may not contain symbolic links: {item}")
         if not item.is_file() or suffixes is not None and item.suffix.lower() not in suffixes:

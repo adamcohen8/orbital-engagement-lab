@@ -44,7 +44,9 @@ def _mission_metrics(config: RPOTrainingConfig, score: Any) -> tuple[str, ...]:
     if config.max_target_delta_v_m_s is not None:
         remain = max(float(config.max_target_delta_v_m_s) - float(getattr(score, "target_delta_v_m_s", 0.0)), 0.0)
         ratio = remain / max(float(config.max_target_delta_v_m_s), 1.0e-9)
-        metrics.append(f"{_status_tag(remain > 0.0, ratio > 0.2)} Target dV {format_speed_m_s(remain)}")
+        tag = "OK" if config.coast_target_after_delta_v_budget else _status_tag(remain > 0.0, ratio > 0.2)
+        suffix = " Coast" if config.coast_target_after_delta_v_budget and remain <= 0.0 else ""
+        metrics.append(f"{tag} Target dV {format_speed_m_s(remain)}{suffix}")
     if config.max_target_reference_range_km is not None:
         limit = float(config.max_target_reference_range_km)
         current = float(getattr(score, "final_target_reference_range_km", float("nan")))
@@ -204,7 +206,7 @@ def _mission_checklist(config: RPOTrainingConfig, score: Any) -> tuple[str, ...]
     if config.max_delta_v_m_s is not None and config.fail_on_delta_v_budget:
         used = float(getattr(score, "approximate_delta_v_m_s", 0.0))
         checklist.append(f"{'OK' if used <= float(config.max_delta_v_m_s) else 'FAIL'} Chaser dV")
-    if config.max_target_delta_v_m_s is not None:
+    if config.max_target_delta_v_m_s is not None and not config.coast_target_after_delta_v_budget:
         used = float(getattr(score, "target_delta_v_m_s", 0.0))
         checklist.append(f"{'OK' if used <= float(config.max_target_delta_v_m_s) else 'FAIL'} Target dV")
     if config.max_target_reference_range_km is not None:

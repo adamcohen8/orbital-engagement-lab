@@ -761,6 +761,15 @@ def _game_speed_multiplier_options(config: SimulationConfig) -> tuple[float, ...
     return tuple(sorted(parsed))
 
 
+def _game_3d_enabled(config: SimulationConfig) -> bool:
+    """Desktop 3D is available except for cislunar and drag-racing levels."""
+    game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
+    training = dict(game_cfg.get("training", {}) or {})
+    scenario = str(training.get("scenario_id", ""))
+    frame = str(game_cfg.get("relative_frame", training.get("relative_frame", "ric"))).lower()
+    return scenario not in {"rpo_bonus_cislunar_rendezvous", "rpo_bonus_drag_racing"} and frame == "ric"
+
+
 def _game_sandbox_enabled(config: SimulationConfig) -> bool:
     game_cfg = dict(config.scenario.metadata.get("game", {}) or {})
     training_cfg = dict(game_cfg.get("training", {}) or {})

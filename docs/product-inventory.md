@@ -11,8 +11,8 @@ Use this page with:
 - the private Controller Bench guide for comparative evaluation workflows;
 - [Controller Naming Conventions](project/controller_naming_conventions.md) for
   naming rules when adding or renaming controllers.
-- [Reference GNC Library Roadmap](project/reference_gnc_library_roadmap.md) for
-  controller and command-module promotion planning.
+- [Built-In Reference GNC Library](reference-gnc.md) for maintained controller
+  and command-module behavior and support posture.
 - [Public Core And Pro Boundary](public-vs-pro.md) for public/pro packaging
   posture.
 
@@ -57,7 +57,7 @@ used to imply a launch date, price, or operational qualification.
 | Deterministic orbit-lifetime analysis | Public | Experimental | [Orbit-lifetime workflow](orbit-lifetime.md), frozen-atmosphere comparison example | One bounded ONP drag-decay case with frozen inputs; not calibrated lifetime, compliance, surviving-debris risk, custody, or operational authority. |
 | Integrated study lifecycle | Public | Workbench | [Study lifecycle](study-lifecycle.md), six-domain registry and canonical studies | Local content-bound records, claims, inspection, replay, and comparison over completed evidence; no managed execution, domain-physics replay, team workflow, or authorization. |
 | Governed communications engineering | Pro | Experimental, unreleased private-worktree surface | Private Pro communications workflow, governed profiles, validation manifest, and content-bound evidence bundle | Enforced by the `pro_communications` feature at direct workflow entry points. Source must be tracked and included in a future Pro package candidate before distribution; included terminals/sites are illustrative, and measured RF, current weather/interference, packet assurance, and operational availability are not claimed. |
-| GNC v2 complete-stack runtime and profiles | Public | Mixed | [Flight-software profiles](flight-software-profiles.md) and exported profile qualification evidence | All 18 exact profile versions are Supported only inside their declared simulation qualification envelopes; underlying stacks and arbitrary custom compositions remain Experimental. |
+| GNC v2 complete-stack runtime and profiles | Public | Mixed | [GNC v2 evidence](gnc-v2-evidence.md), [flight-software profiles](flight-software-profiles.md) | All 18 exact profiles declare Supported within bounded simulation envelopes; effective maturity requires current qualification evidence (see profile discovery); underlying stacks and arbitrary custom compositions remain Experimental. |
 | Public FSW Authoring Kit | Public | Workbench | [Public FSW Authoring](fsw-authoring.md), content-bound validation/test/smoke receipts | ADCS/RPO Python-stack authoring and one deterministic serial smoke only; no comparison, tuning, qualification, external process, or cFS/SIL workflow. |
 | Lambert orbit-transfer planning | Public | Workbench | `configs/orbit_transfer_planner_demo.yaml`, review-store candidate tables | Bounded two-body grid search, not operational or globally optimal planning. |
 | Event-driven trajectory targeting | Public | Workbench | [Trajectory-targeting workflow](trajectory-targeting.md), Hohmann and open-reference fixtures | Local single-shooting equality correction with authoritative ONP repropagation; no bounds, inequalities, finite burns, multiple shooting, global search, or maneuver authority. |
@@ -108,8 +108,10 @@ the full workspace.
 OEL also ships an initial catalog of 18 versioned
 [flight-software use-case profiles](flight-software-profiles.md) across
 commissioning/ADCS, absolute-orbit operations, RPO/formation applications, and
-low-thrust control. All 18 exact profile versions are Supported inside their
-declared simulation qualification envelopes. That maturity does not promote
+low-thrust control. Their declared Supported maturity applies only inside the
+qualification envelope and is distinct from current effective maturity. Use
+`python -m sim.flight_software list --kind profile --json` to inspect effective
+status; missing or stale evidence yields Experimental. That maturity does not promote
 any underlying stack for arbitrary compositions or parameters outside the
 profile envelope.
 
@@ -344,9 +346,8 @@ additional workbench or compatibility items beyond the product-facing inventory.
 When adding a new controller or mission behavior:
 
 1. Follow [Controller Naming Conventions](project/controller_naming_conventions.md).
-2. Check the [Reference GNC Library Roadmap](project/reference_gnc_library_roadmap.md)
-   to decide whether the behavior is Reference, Workbench, Experimental,
-   Compatibility, or Internal/Hook.
+2. Check the [Built-In Reference GNC Library](reference-gnc.md) and this
+   inventory to decide whether the behavior is product-facing and cataloged.
 3. Add or update at least one runnable YAML example when the behavior is
    product-facing.
 4. Update this inventory if users should know the feature ships with the

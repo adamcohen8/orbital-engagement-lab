@@ -6,6 +6,7 @@ import numpy as np
 
 from sim.core.interfaces import SensorModel
 from sim.core.models import Measurement, StateTruth
+from sim.sensors.access import _cadence_due
 
 
 @dataclass
@@ -17,7 +18,7 @@ class NoisyOwnStateSensor(SensorModel):
     _last_update_t_s: float = -np.inf
 
     def measure(self, truth: StateTruth, env: dict, t_s: float) -> Measurement | None:
-        if t_s - self._last_update_t_s < self.update_cadence_s:
+        if not _cadence_due(t_s, self._last_update_t_s, self.update_cadence_s):
             return None
         self._last_update_t_s = t_s
         pos_noise = self.rng.normal(0.0, self.pos_sigma_km, size=3)

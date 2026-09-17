@@ -8,10 +8,16 @@ targets remain explicit inputs.
 
 Profiles began as productization groundwork rather than qualification claims.
 Maturity attaches to the exact profile version and its declared envelope, not
-to every profile that uses the same stack. The full product catalog declares 18 exact profiles Supported only when its
-matching qualification packets are current. Those private qualification packets
-are not part of the public export, so public discovery conservatively reports the
-profiles' effective maturity as **Experimental**.
+to every profile that uses the same stack. All 18 exact catalog profiles have a **declared Supported** maturity inside
+bounded simulation qualification envelopes. Effective maturity depends on
+current qualification evidence for the exact source and profile version.
+Missing or stale evidence downgrades the effective status to Experimental.
+
+Use `python -m sim.flight_software list --kind profile --json` or `show` for
+the effective status and its separate `declared_maturity` field. In public
+packages without private qualification evidence, the effective status is
+Experimental with `qualification_evidence_unavailable`. This is a limit on
+available proof, not a claim that every profile fails its simulated outcomes.
 
 ## Selecting a profile
 
@@ -41,7 +47,7 @@ Use the maintained demo as a starting point:
 
 ## Initial catalog
 
-| Domain | Profile | Maturity | Groundwork provided |
+| Domain | Profile | Declared maturity | Groundwork provided |
 | --- | --- | --- | --- |
 | Baseline | `fsw.profile.coast_monitor.v1` | Experimental* | Passive typed-boundary, anomaly-monitoring, cadence, replay, and review evidence |
 | Attitude | `fsw.profile.adcs_commissioning.v1` | Experimental* | Detumble, coarse-Sun recovery, Sun pointing, momentum unloading, and stack-owned FDIR |
@@ -67,11 +73,11 @@ conjunction assessment, distributed formation consensus, flexible-body
 pointing, long-arc low-thrust optimization, or certified safe-mode behavior.
 Those require additional stack behavior and evidence rather than a new label.
 
-### Catalog qualification coast-monitor envelope
+### Declared support envelope: coast-monitor envelope
 
 `fsw.profile.coast_monitor.v1` is supported for deterministic simulation with
 `hardware.passive.v1` and task periods from 0.1 through 10 seconds. It samples
-typed onboard measurements, emits one diagnostic record per invocation,
+typed onboard measurements, emits monitoring diagnostics per invocation,
 records missing batches and duplicate, out-of-order, stale, suspect, invalid,
 and unexpected-frame measurements, and never issues actuator commands. Its
 qualification covers a six-hour two-body coast, exact snapshot/replay,
@@ -79,7 +85,7 @@ three-cadence Controller Bench conformance, and a nine-run seeded orbit/cadence
 campaign. The claim does not include safety action, autonomous recovery,
 sensor-data repair, hardware real-time behavior, or flight certification.
 
-### Catalog qualification ADCS envelopes
+### Declared support envelope: ADCS envelopes
 
 The four exact ADCS profiles use the same rigid-spacecraft qualification
 family: diagonal center-of-mass inertia of 12, 10, and 8 kg·m², three
@@ -107,7 +113,7 @@ Electrical energy or power-positive behavior is not claimed without a power
 model; qualification instead bounds physical torque realization, saturation,
 integrated control effort, wheel momentum, attitude error, and body rate.
 
-### Catalog qualification orbit-operations and RPO envelopes
+### Declared support envelope: orbit-operations and RPO envelopes
 
 The four orbit profiles share a maintained 600-second near-Earth J2-plus-drag scenario,
 three seeded bounded variations, and onboard task periods from 0.25 through
@@ -131,7 +137,7 @@ Surface-coverage optimization, docking/contact dynamics, distributed
 formation coordination, mission-specific keep-out geometry, and operational
 conjunction assessment remain excluded.
 
-### Catalog qualification low-thrust envelopes
+### Declared support envelope: low-thrust envelopes
 
 The two exact low-thrust profiles are supported for deterministic simulation
 inside the checked-in six-hour native ONP near-Earth envelope with J2,
@@ -180,7 +186,9 @@ mission-specific parameters are supplied:
 ## Qualification boundary
 
 The public export includes profile discovery, validation, materialization, and
-the declared Supported-within-envelope catalog status. It does not include the
+the declared Supported-within-envelope catalog status. Discovery reports
+effective maturity separately and fails closed when qualification evidence is
+unavailable. It does not include the
 private Pro qualification runner, qualification specifications, manifests, or
 campaign evidence, so public users should not expect `status` or `qualify`
 subcommands to be available. Public custom authoring ends at content-bound

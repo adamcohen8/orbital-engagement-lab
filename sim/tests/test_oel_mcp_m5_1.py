@@ -272,7 +272,9 @@ def test_doctor_and_host_config_make_disabled_effects_explicit(tmp_path: Path, m
     assert approvals["passed"] is False
     assert approvals["required"] is False
     assert report["network_listener"] is False
-    assert report["oel_version"] == "0.29.0"
+    from sim.project_version import source_project_version
+
+    assert report["oel_version"] == source_project_version()
     assert report["oel_version_source"] == "source_pyproject"
     launch = next(row for row in report["checks"] if row["check_id"] == "host_launch")
     assert launch["passed"] is True

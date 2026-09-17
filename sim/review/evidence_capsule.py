@@ -40,6 +40,19 @@ def _is_sqlite(path: Path) -> bool:
     return path.name.endswith(".sqlite")
 
 
+def _verification_query_rows(connection: sqlite3.Connection, query: str) -> list[list[Any]]:
+    # Hydration consumes manifest-supplied SQL, so enforce the same read-only
+    # boundary as ordinary review queries (query_only alone allows ATTACH).
+    from sim.review.workspace import _read_only_authorizer, _validate_select_sql
+
+    connection.set_authorizer(_read_only_authorizer)
+    try:
+        statement = _validate_select_sql(query)
+        return [list(row) for row in connection.execute(statement).fetchall()]
+    except (ValueError, sqlite3.Error) as exc:
+        raise EvidenceCapsuleError(f"Invalid read-only evidence verification query: {exc}") from exc
+
+
 def _sqlite_verification(path: Path) -> dict[str, Any]:
     uri = f"{path.resolve().as_uri()}?mode=ro"
     with sqlite3.connect(uri, uri=True) as connection:
@@ -213,7 +226,7 @@ def materialize_evidence(
                         query_results.append(
                             {
                                 "query": item["query"],
-                                "rows": [list(row) for row in connection.execute(item["query"]).fetchall()],
+                                "rows": _verification_query_rows(connection, item["query"]),
                             }
                         )
                 verification["queries"] = query_results
@@ -244,7 +257,10 @@ def create_evidence_capsule(
 ) -> dict[str, Any]:
     """Create and verify a gzip capsule; optionally remove the exact source file."""
 
-    path = Path(logical_path).expanduser().resolve()
+    source_path = Path(logical_path).expanduser()
+    if source_path.is_symlink():
+        raise EvidenceCapsuleError(f"Evidence source is missing or unsafe: {source_path}")
+    path = source_path.resolve()
     if not path.is_file() or path.is_symlink():
         raise EvidenceCapsuleError(f"Evidence source is missing or unsafe: {path}")
     if path.name.endswith(("-wal", "-shm")):
@@ -277,11 +293,8 @@ def create_evidence_capsule(
         with sqlite3.connect(uri, uri=True) as connection:
             connection.execute("PRAGMA query_only = ON")
             for query in verification_queries:
-                normalized = str(query).strip().lower()
-                if not normalized.startswith(("select ", "with ")) or ";" in str(query).rstrip(";"):
-                    raise EvidenceCapsuleError("verification queries must be one read-only SELECT or WITH statement")
                 query_results.append(
-                    {"query": str(query), "rows": [list(row) for row in connection.execute(str(query)).fetchall()]}
+                    {"query": str(query), "rows": _verification_query_rows(connection, str(query))}
                 )
         verification["queries"] = query_results
     provenance: list[dict[str, Any]] = []

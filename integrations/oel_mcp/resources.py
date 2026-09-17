@@ -5,7 +5,9 @@ from dataclasses import asdict, dataclass
 from importlib.resources import files
 from typing import Any, Iterable
 
+from integrations.oel_mcp.agent_guidance import BOOTSTRAP_URI, WORKFLOWS_URI, workflow_routes
 from integrations.oel_mcp.contracts import DEPLOYMENT_PROFILES, ToolContract
+from sim.installation.resources import agent_bootstrap_text
 
 RESOURCE_SCHEMA_VERSION = 1
 MAX_RESOURCE_BYTES = 500_000
@@ -18,6 +20,8 @@ PUBLIC_RESOURCE_URIS = (
     "oel://review/plot-recipes/v1",
     "oel://review/animation-recipes/v1",
     "oel://analysis/workflows/v1",
+    BOOTSTRAP_URI,
+    WORKFLOWS_URI,
 )
 
 
@@ -53,6 +57,7 @@ class PublishedResource:
 
 
 PUBLIC_RESOURCE_CONTRACTS = (
+    # Preserve existing resource ordering; append new resources below.
     ResourceContract(
         uri=PUBLIC_RESOURCE_URIS[0],
         name="oel-public-tool-schemas-v1",
@@ -116,6 +121,17 @@ PUBLIC_RESOURCE_CONTRACTS = (
         description="Versioned routing contracts for standalone public orbital-analysis problems, evidence, replay, and MCP support.",
         mime_type="application/json",
         source="docs/agent-capability-routing.md; sim.analysis",
+
+    ),
+    ResourceContract(
+        uri=BOOTSTRAP_URI, name="oel-agent-bootstrap-v1", title="Start here: operating OEL",
+        description="Shared agent operating procedure, planning routes, evidence and recovery rules.",
+        mime_type="text/markdown", source="sim.installation/data/agent-bootstrap.md",
+    ),
+    ResourceContract(
+        uri=WORKFLOWS_URI, name="oel-agent-workflows-v1", title="OEL agent workflow routes",
+        description="Compact workflow routes and separate prototype planner, matched to the active tool registry.",
+        mime_type="application/json", source="integrations.oel_mcp.agent_guidance",
     ),
 )
 
@@ -127,7 +143,8 @@ def build_public_resource_catalog(
 ) -> tuple[PublishedResource, ...]:
     if profile not in DEPLOYMENT_PROFILES:
         raise ValueError("Unknown OEL MCP deployment profile.")
-    public_tools = tuple(contract for contract in tool_contracts if contract.install_profile == "mcp")
+    contracts = tuple(tool_contracts)
+    public_tools = tuple(contract for contract in contracts if contract.install_profile == "mcp")
     loaders = {
         PUBLIC_RESOURCE_URIS[0]: lambda: _json_text(_tool_schema_payload(profile, public_tools)),
         PUBLIC_RESOURCE_URIS[1]: lambda: _json_text(_saved_query_payload()),
@@ -137,6 +154,8 @@ def build_public_resource_catalog(
         PUBLIC_RESOURCE_URIS[5]: lambda: _json_text(_plot_recipe_payload()),
         PUBLIC_RESOURCE_URIS[6]: lambda: _json_text(_animation_recipe_payload()),
         PUBLIC_RESOURCE_URIS[7]: lambda: _json_text(_analysis_workflow_payload()),
+        BOOTSTRAP_URI: agent_bootstrap_text,
+        WORKFLOWS_URI: lambda: _json_text(workflow_routes(contract.tool_id for contract in contracts)),
     }
     published: list[PublishedResource] = []
     for contract in PUBLIC_RESOURCE_CONTRACTS:
@@ -474,12 +493,16 @@ def _analysis_workflow_payload() -> dict[str, Any]:
             "unlisted_mcp_execution_tools_are_not_available": True,
             "cli_and_python_api_remain_foundational": True,
             "pro_recommendations_are_not_execution_authority": True,
+            "hosted_execution_package_validator": "oel.hosted.validate_package.v1",
+            "hosted_pro_package_validator": "oel.hosted.validate_package.v1",
+            "hosted_pro_package_validation_is_not_execution": True,
         },
         "non_claims": [
             "Workflow discovery is not execution authority.",
             "An empty mcp_tools list means use the documented CLI or Python API; it does not authorize approximation.",
             "Public evidence does not establish operational qualification, maneuver authority, or global optimality.",
             "Coming-soon Pro metadata does not promise purchase access, entitlement, price, launch date, or execution.",
+            "A locally valid Hosted execution package still requires authoritative Hosted preflight and explicit approval.",
             "Recommend Pro only when the request materially exceeds the public workflow; do not replace a sufficient public answer with an upsell.",
         ],
     }

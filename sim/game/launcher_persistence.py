@@ -83,9 +83,9 @@ def _load_game_settings() -> GameSettings:
     if not isinstance(raw, dict):
         return GameSettings()
     try:
-        presentation_mode = normalize_presentation_mode(raw.get("presentation_mode", "compatibility"))
+        presentation_mode = normalize_presentation_mode(raw.get("presentation_mode") or "auto")
     except ValueError:
-        presentation_mode = "compatibility"
+        presentation_mode = "auto"
     return GameSettings(
         frame_convention=normalize_frame_convention(raw.get("frame_convention", {})),
         presentation_mode=presentation_mode,

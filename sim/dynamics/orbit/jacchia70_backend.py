@@ -111,10 +111,6 @@ def _solar_geomagnetic_inputs(dt_utc: datetime, env: dict) -> tuple[float, float
     return f10, f10b, gi, i1
 
 
-def _jgrav(alt_km: float) -> float:
-    return 9.80665 / (1.0 + float(alt_km) / 6356.766) ** 2
-
-
 def _jmweight(alt_km: float) -> float:
     if alt_km > 105.0:
         return 1.0
@@ -209,12 +205,6 @@ def _compiled_jgauss():
     from numba import njit
 
     return njit(cache=True, fastmath=False)(_jgauss_kernel)
-
-
-def _jgauss(z1: float, z2: float, nmin: int, tx: float, t1: float, t3: float, t4: float, a2: float) -> float:
-    if acceleration_enabled_from_mode():
-        return float(_compiled_jgauss()(z1, z2, nmin, tx, t1, t3, t4, a2))
-    return _jgauss_python(z1, z2, nmin, tx, t1, t3, t4, a2)
 
 
 def _jacchia_python(z_km: float, tinf_k: float) -> tuple[float, float, float, float, np.ndarray]:

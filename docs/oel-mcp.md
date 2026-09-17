@@ -132,6 +132,25 @@ execution manifests.
 
 ## Public Tools
 
+Start with `oel.describe_capabilities.v1` and the shared agent bootstrap at
+`oel://agent/bootstrap/v1`. `oel://agent/workflows/v1` connects common workflows
+to tools actually registered on this connection and identifies the separate
+study-planning prototype. It does not connect another server or change policy.
+
+Discovery includes additive `agent_guide_uri`, `workflow_routes_uri` and
+`readiness` fields. Per-tool `configuration_ready` describes configured process
+prerequisites only. `entitlement_status` is `not_required`, `available`,
+`unavailable` or `not_checked`; unknown checks never imply availability.
+Conditional source trust remains a separate requirement. No approval IDs, paths,
+license payloads or secrets are returned in readiness, and
+`execution_authorized` stays false. Every call still enforces its full contract.
+
+Failed envelopes may include additive `error.recovery` with `code`, `actor`
+(`agent` or `operator`) and `action`. SDK admission errors retain code `-32602`
+and their existing message, with the same guidance in `data.recovery` when
+available. These diagnostics never automatically edit inputs or authorize a
+retry. MCP policy messages do not recommend unsupported CLI retention switches.
+
 | Tool | Risk | Behavior |
 | --- | --- | --- |
 | `oel.describe_capabilities.v1` | `R0_read` | Reports the active registry, maturity, effects, limits, and non-claims |
@@ -297,6 +316,8 @@ These tools are local-only and absent from `direct_frontier_restricted`.
 | `oel://review/saved-queries/v1` | Allowlisted read-only saved-query metadata | Review query registry |
 | `oel://agent/tasks/v1` | Public-tagged agent task definitions | Agent task registry |
 | `oel://docs/operator-guide/v1` | Packaged local operator guidance | MCP package data |
+| `oel://agent/bootstrap/v1` | Shared installed-workspace agent operating procedure | `sim.installation` package data |
+| `oel://agent/workflows/v1` | Compact routes matched to this registry and separate prototype planner | Active tool registry |
 | `oel://handoff/product-kinds/v1` | Public-safe product-kind producers, next actions, and non-execution rules | `sim.handoff` |
 | `oel://review/plot-recipes/v1` | Supported recipes, evidence requirements, renderers, and natural-language routing triggers | `sim.review.plot_recipes` |
 | `oel://review/animation-recipes/v1` | Supported animation recipes, evidence requirements, bounds, and quality policy | `sim.review.animation_recipes` |

@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orbitalengagementlab.com/schemas/oel-hosted-execution-package-v1.schema.json",
+  "title": "OEL Hosted execution package",
+  "type": "object",
+  "properties": {
+    "schema": {"const": "oel.hosted_execution_package.v1"},
+    "package_name": {"type": "string", "pattern": "[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}"},
+    "request_path": {"type": "string", "minLength": 1, "maxLength": 500},
+    "plan_path": {"type": "string", "minLength": 1, "maxLength": 500},
+    "inputs": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 128,
+      "items": {
+        "type": "object",
+        "properties": {
+          "input_id": {"type": "string", "pattern": "[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}"},
+          "relative_path": {"type": "string", "minLength": 1, "maxLength": 500},
+          "media_type": {
+            "type": "string",
+            "enum": [
+              "application/json",
+              "application/yaml",
+              "application/ccsds-kvn",
+              "text/csv",
+              "text/plain",
+              "application/octet-stream"
+            ]
+          },
+          "config_ref": {"type": ["string", "null"], "maxLength": 160}
+        },
+        "required": ["input_id", "relative_path", "media_type", "config_ref"],
+        "additionalProperties": false
+      }
+    },
+    "retention": {
+      "type": "object",
+      "properties": {
+        "policy_id": {
+          "type": "string",
+          "enum": [
+            "oel.retention.ephemeral-7d.v1",
+            "oel.retention.standard-30d.v1",
+            "oel.retention.extended-90d.v1"
+          ]
+        },
+        "delete_incomplete_uploads": {"const": true},
+        "local_originals_retained": {"const": true}
+      },
+      "required": ["policy_id", "delete_incomplete_uploads", "local_originals_retained"],
+      "additionalProperties": false
+    }
+  },
+  "required": ["schema", "package_name", "request_path", "plan_path", "inputs", "retention"],
+  "additionalProperties": false
+}

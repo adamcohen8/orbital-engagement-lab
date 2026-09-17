@@ -41,6 +41,36 @@ def read_regular_file_nofollow(
         raise SafeReadError(f"Could not safely read regular file {lexical}: {exc}") from exc
 
 
+def sha256_regular_file_nofollow(
+    path: str | Path,
+    *,
+    max_bytes: int,
+    min_bytes: int = 0,
+) -> tuple[str, int]:
+    """Stream one stable regular file and return its SHA-256 and byte count.
+
+    This is the bounded, memory-efficient companion to
+    :func:`read_regular_file_nofollow`. Path components and the final file are
+    opened without following symlinks where the platform supports descriptor-
+    relative ``O_NOFOLLOW`` traversal.
+    """
+
+    maximum = int(max_bytes)
+    minimum = int(min_bytes)
+    if maximum < 0 or minimum < 0 or minimum > maximum:
+        raise ValueError("hash bounds must satisfy 0 <= min_bytes <= max_bytes.")
+    lexical = Path(os.path.abspath(os.fspath(Path(path).expanduser())))
+    lexical = _canonicalize_platform_compatibility_root(lexical)
+    try:
+        if os.name == "posix" and os.open in os.supports_dir_fd:
+            return _hash_posix_nofollow(lexical, minimum=minimum, maximum=maximum)
+        return _hash_portable_nofollow(lexical, minimum=minimum, maximum=maximum)
+    except SafeReadError:
+        raise
+    except OSError as exc:
+        raise SafeReadError(f"Could not safely hash regular file {lexical}: {exc}") from exc
+
+
 def _canonicalize_platform_compatibility_root(path: Path) -> Path:
     """Expand only immutable macOS compatibility roots before no-follow traversal.
 
@@ -108,6 +138,80 @@ def _read_portable_nofollow(path: Path, *, minimum: int, maximum: int) -> bytes:
         return _read_stable_descriptor(descriptor, path=path, minimum=minimum, maximum=maximum)
     finally:
         os.close(descriptor)
+
+
+def _hash_posix_nofollow(path: Path, *, minimum: int, maximum: int) -> tuple[str, int]:
+    parts = path.parts
+    if not parts or parts[0] != os.sep or len(parts) < 2:
+        raise SafeReadError(f"Expected an absolute file path: {path}")
+    directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    descriptors: list[int] = []
+    try:
+        current = os.open(os.sep, directory_flags)
+        descriptors.append(current)
+        for component in parts[1:-1]:
+            if component in {"", ".", ".."}:
+                raise SafeReadError(f"Unsafe path component in {path}")
+            current = os.open(component, directory_flags | nofollow, dir_fd=current)
+            descriptors.append(current)
+        name = parts[-1]
+        if name in {"", ".", ".."}:
+            raise SafeReadError(f"Unsafe file name in {path}")
+        descriptor = os.open(name, os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | nofollow, dir_fd=current)
+        descriptors.append(descriptor)
+        return _hash_stable_descriptor(descriptor, path=path, minimum=minimum, maximum=maximum)
+    finally:
+        for descriptor in reversed(descriptors):
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+
+
+def _hash_portable_nofollow(path: Path, *, minimum: int, maximum: int) -> tuple[str, int]:
+    current = Path(path.anchor)
+    for component in path.parts[1:]:
+        current = current / component
+        if current.is_symlink():
+            raise SafeReadError(f"Symbolic links are not permitted in evidence paths: {current}")
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_CLOEXEC", 0))
+    try:
+        return _hash_stable_descriptor(descriptor, path=path, minimum=minimum, maximum=maximum)
+    finally:
+        os.close(descriptor)
+
+
+def _hash_stable_descriptor(
+    descriptor: int,
+    *,
+    path: Path,
+    minimum: int,
+    maximum: int,
+) -> tuple[str, int]:
+    before = os.fstat(descriptor)
+    if not stat.S_ISREG(before.st_mode):
+        raise SafeReadError(f"Evidence input must be a regular file: {path}")
+    if before.st_size < minimum or before.st_size > maximum:
+        raise SafeReadError(f"Evidence input must contain between {minimum} and {maximum} bytes: {path}")
+    digest = hashlib.sha256()
+    total = 0
+    while True:
+        chunk = os.read(descriptor, 1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > maximum:
+            raise SafeReadError(f"Evidence input exceeds {maximum} bytes: {path}")
+        digest.update(chunk)
+    after = os.fstat(descriptor)
+    identity_before = (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns)
+    identity_after = (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns)
+    if identity_after != identity_before or total != before.st_size:
+        raise SafeReadError(f"Evidence input changed while it was being hashed: {path}")
+    if total < minimum or total > maximum:
+        raise SafeReadError(f"Evidence input must contain between {minimum} and {maximum} bytes: {path}")
+    return digest.hexdigest(), total
 
 
 def _read_stable_descriptor(descriptor: int, *, path: Path, minimum: int, maximum: int) -> bytes:

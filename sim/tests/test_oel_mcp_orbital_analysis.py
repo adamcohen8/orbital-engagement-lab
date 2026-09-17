@@ -56,6 +56,8 @@ def test_analysis_workflow_resource_routes_typed_problems_without_expanding_exec
     collection = next(item for item in payload["workflows"] if item["workflow_id"] == "collection_analysis")
     assert "pro_escalation" not in collection
     assert payload["routing"]["pro_recommendations_are_not_execution_authority"] is True
+    assert payload["routing"]["hosted_pro_package_validator"] == "oel.hosted.validate_package.v1"
+    assert payload["routing"]["hosted_pro_package_validation_is_not_execution"] is True
     assert all(item["mcp_tools"] == [] for item in payload["cross_cutting_pro_escalations"])
     assert '"mcp_tools": []' in workflow.text
     assert "scenario YAML or typed orbital-analysis problem" in workflow.text

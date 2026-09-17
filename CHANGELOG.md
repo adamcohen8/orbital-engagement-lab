@@ -6,6 +6,84 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.30.0 - 2026-09-16
+
+- The Evasion level’s autonomous pursuer now uses the flagship RIC PD transfer guidance and gains, with the level’s existing ungated attitude behavior.
+
+- The installed public Trainer checks for signed updates from the level selector; its notice supports click, Ctrl+U, and Cmd+U on macOS to install and relaunch.
+
+- Standard installation now includes RPO Trainer and per-user native desktop launchers for macOS, Windows, and Linux; `oel trainer` opens the Trainer directly.
+
+### RPO Trainer
+
+- Evasion now cuts off player thrust when fuel is exhausted and continues the mission on a coast trajectory.
+
+- Default landing-screen graphics settings to Auto and place Auto first; retain
+  explicitly saved graphics choices.
+
+- Add orthographic 3D viewing to the downloadable trainer except Cislunar
+  Rendezvous and Drag Racing, with equal axis scaling, mouse orbit/pan/zoom,
+  plane presets, automatic spacecraft visibility, and temporary 1x speed during
+  camera interaction. Display mission constraints and guidance in 3D.
+- Replace Level 3 planar forbidden sectors with a spherical forbidden shell
+  and a -R approach cone, including matching segment-crossing checks and views.
+- Remove retired Level 11B from the Pilot and Operator selectors.
+- Add Sandbox 3D to the browser preview for desktop and landscape mobile,
+  including Operator playback, touch rotation/pinch zoom, and portrait fallback.
+  Website deployment is separate from the downloadable release.
+
+### Hosted client availability
+
+- Bundle the public Hosted client and local package validator with explicit
+  closed-alpha messaging. Hosted access is not publicly available; installing
+  OEL or validating a package grants no service access.
+- Recommend free local execution for public plans. Unconfigured clients do not
+  present Hosted execution as available; Pro plans explain the boundary and
+  suggest a public fallback or revised plan. Invited operator profiles still
+  require service authorization and exact approval of an alpha offer.
+
+### Reliability
+
+- Preserve existing simulation evidence before materializing resource-profile configs.
+- Isolate representative FSW demonstration outputs and read accepted command receipts
+  from their normalized review columns.
+
+- Harden review-column integrity, checkpoint identity, result imports,
+  qualification dependency checks, and flight-software authoring paths.
+- Consolidate current user guidance and retire superseded planning documents.
+
+
+### Agent workflow
+
+- New managed workspaces receive the same operational agent bootstrap served
+  through MCP, with compact workflow routes to the separate study-planning
+  prototype and existing execution/evidence tools.
+- MCP discovery reports configured prerequisites and local entitlement status
+  separately from authorization. Additive structured recovery guidance identifies
+  agent repairs versus operator actions without exposing approval references.
+- Make the relative-coast acceptance example compatible with MCP's full-log
+  policy and keep retention-error suggestions valid for the active MCP interface.
+
+### Fixed
+
+- Apply configured target range, line-of-sight, field-of-view and dropout
+  conditions to v2 flight-software observations, including ideal navigation.
+  Preserve deterministic sampling and access-gate checkpoint state.
+- Publish the navigator's estimate separately from raw measurements, with
+  explicit frame, epoch and freshness telemetry. API belief histories now use
+  that estimate; unavailable components retain their vector slots as NaN.
+- Resolve relative Monte Carlo and sensitivity output directories before
+  reporting artifact paths, and check their workflow review evidence at CLI
+  completion so valid campaigns do not fail a single-run-only check.
+- Allow exact-profile qualification to refresh its dependency manifest only
+  after passing its gates on stable source. Clarify declared versus effective
+  maturity and the current v2 execution contract.
+
+### Added
+
+- Add a public ten-minute relative-coast exercise covering validation,
+  execution, review queries and interpretation limits in a managed workspace.
+
 ## 0.29.0 - 2026-08-31
 
 Release thesis: `v0.29.0` turns OEL's agent-native analysis layer into a

@@ -71,34 +71,13 @@ metadata:
       goal_range_km: 0.75
       max_goal_speed_km_s: 0.0003
       forbidden_regions:
-      - name: RI R-bar arch safety envelope
-        kind: annular_sector
-        plane: RI
-        plot_planes:
-        - RI
-        center_ric_km:
-        - 0.0
-        - 0.0
-        - 0.0
+      - name: R-bar spherical approach envelope
+        kind: spherical_corridor
+        plot_planes: [RI, RC]
+        center_ric_km: [0.0, 0.0, 0.0]
         inner_radius_km: 0.95
         outer_radius_km: 5.8
-        angle_min_deg: -65.0
-        angle_max_deg: 245.0
-        max_abs_out_of_plane_km: 0.9
-      - name: RC R-bar arch safety envelope
-        kind: annular_sector
-        plane: RC
-        plot_planes:
-        - RC
-        center_ric_km:
-        - 0.0
-        - 0.0
-        - 0.0
-        inner_radius_km: 0.95
-        outer_radius_km: 5.8
-        angle_min_deg: -65.0
-        angle_max_deg: 245.0
-        max_abs_out_of_plane_km: 1.2
+        cone_half_angle_deg: 25.0
       max_time_s: 12000.0
       max_delta_v_m_s: 12.0
 objects:

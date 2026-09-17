@@ -131,6 +131,11 @@ def scaffold_candidate(
         manifest_path: yaml.safe_dump(manifest, sort_keys=False),
         readme_path: _readme(name, manifest_path.relative_to(root), template),
     }
+    for path in files:
+        try:
+            path.resolve().relative_to(root)
+        except ValueError as exc:
+            raise ValueError("Candidate output must remain inside the authorized workspace.") from exc
     written: list[Path] = []
     for path, content in files.items():
         if _write_new(path, content, force=force):

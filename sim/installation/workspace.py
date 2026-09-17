@@ -147,6 +147,7 @@ def init_workspace(
     engine_version: str | None = None,
     engine_requirement: str | None = None,
     quickstart_config: str | Path | None = None,
+    example_configs: tuple[str | Path, ...] = (),
 ) -> dict[str, Any]:
     root = Path(destination).expanduser().resolve()
     if root.exists() and any(root.iterdir()):
@@ -177,7 +178,12 @@ def init_workspace(
     }
     atomic_write_text(root / WORKSPACE_FILENAME, yaml.safe_dump(manifest, sort_keys=False))
     atomic_write_text(root / "requirements.lock", "# Workspace-specific dependencies. Keep hashes when adding packages.\n")
-    generated: list[dict[str, Any]] = []
+    from .resources import agent_bootstrap_text
+
+    atomic_write_text(root / "AGENTS.md", agent_bootstrap_text())
+    generated: list[dict[str, Any]] = [
+        {"path": "AGENTS.md", "sha256": sha256_file(root / "AGENTS.md"), "user_editable": True}
+    ]
     if quickstart_config is not None:
         source = Path(quickstart_config).expanduser().resolve()
         if not source.is_file():
@@ -188,6 +194,17 @@ def init_workspace(
             raise ContractError("Quickstart config must contain a mapping/object.")
         raw["schema_version"] = SCENARIO_SCHEMA_VERSION
         raw.setdefault("outputs", {})["output_dir"] = "outputs/quickstart_5min"
+        atomic_write_text(target, yaml.safe_dump(raw, sort_keys=False))
+        generated.append({"path": target.relative_to(root).as_posix(), "sha256": sha256_file(target), "user_editable": True})
+    for example in example_configs:
+        source = Path(example).expanduser().resolve()
+        target = root / "configs" / source.name
+        if target.exists():
+            raise FileExistsError(f"Workspace template config names must be unique: {source.name}")
+        raw = yaml.safe_load(source.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict):
+            raise ContractError("Example config must contain a mapping/object.")
+        raw["schema_version"] = SCENARIO_SCHEMA_VERSION
         atomic_write_text(target, yaml.safe_dump(raw, sort_keys=False))
         generated.append({"path": target.relative_to(root).as_posix(), "sha256": sha256_file(target), "user_editable": True})
     template = {

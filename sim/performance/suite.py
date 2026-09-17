@@ -25,6 +25,11 @@ from sim.security.config_paths import ConfigPathPolicy
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_MANIFEST_PATH = REPO_ROOT / "configs" / "performance_benchmark_suite.yaml"
 
+# Encoding state is local to each encode() call; reuse only the fixed options.
+_PHYSICS_JSON_ENCODER = json.JSONEncoder(
+    sort_keys=True, separators=(",", ":"), allow_nan=True,
+)
+
 _NONDETERMINISTIC_KEYS = {
     "generated_at",
     "generated_at_utc",
@@ -205,6 +210,21 @@ def _iter_deterministic_json(value: Any) -> Iterator[str]:
         yield "}"
         return
     if isinstance(value, np.ndarray):
+        # Encode bounded numeric chunks in C without changing scalar JSON values.
+        # Subclasses and object arrays retain the general recursive contract.
+        if type(value) is np.ndarray and value.ndim == 1 and (
+            value.dtype.kind in "biu" or (value.dtype.kind == "f" and value.dtype.itemsize <= 8)
+        ):
+            yield "["
+            for offset in range(0, value.size, 1024):
+                if offset:
+                    yield ","
+                yield json.dumps(
+                    value[offset:offset + 1024].tolist(), sort_keys=True,
+                    separators=(",", ":"), allow_nan=True,
+                )[1:-1]
+            yield "]"
+            return
         if value.ndim == 0:
             yield from _iter_deterministic_json(value.item())
             return
@@ -228,7 +248,7 @@ def _iter_deterministic_json(value: Any) -> Iterator[str]:
         return
     if isinstance(value, Path):
         value = str(value)
-    yield json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=True)
+    yield _PHYSICS_JSON_ENCODER.encode(value)
 
 
 def _set_parameter(root: dict[str, Any], path: str, value: Any) -> None:

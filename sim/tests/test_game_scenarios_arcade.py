@@ -1569,3 +1569,37 @@ def test_evasion_level_runs_player_and_ai_through_complete_stacks() -> None:
     assert target_runtime.stack.identity.stack_id == "fsw.game_pilot_reference"
     assert chaser_runtime.evidence.invocations
     assert target_runtime.evidence.invocations
+
+
+def test_evasion_empty_player_fuel_cuts_off_thrust_without_failing() -> None:
+    from dataclasses import replace
+
+    config_path = Path(__file__).resolve().parents[1] / "game/configs/game_training_rpo_11_evasive_target_survival.yaml"
+    config = SimulationConfig.from_yaml(config_path)
+    training_cfg = RPOTrainingConfig.from_metadata(dict(config.scenario.metadata or {}))
+    assert training_cfg.coast_target_after_delta_v_budget
+    # Exhaust a small budget quickly while holding the player's maneuver input.
+    training_cfg = replace(training_cfg, max_target_delta_v_m_s=0.001)
+    session, _, initial = game_runner._start_game_attempt(
+        config,
+        command_state=KeyboardCommandState(yaw=1.0),
+        training_cfg=training_cfg,
+        controlled_object_id="target",
+        attitude_rate_deg_s=45.0,
+        control_mode="ric_translation",
+        ric_reference_object_id="target_reference",
+    )
+    runtime = session._engine.agents["target"].flight_software_runtime
+    assert runtime.max_delta_v_m_s == 0.001
+    tracker = RPOTrainingTracker(training_cfg)
+    tracker.record(snapshot=initial)
+    thrust_seen = False
+    for _ in range(5):
+        snapshot = session.step()
+        tracker.record(snapshot=snapshot)
+        thrust_seen |= bool(np.linalg.norm(snapshot.applied_thrust["target"]) > 0.0)
+    assert thrust_seen
+    assert runtime.used_delta_v_m_s == pytest.approx(0.001)
+    np.testing.assert_allclose(snapshot.applied_thrust["target"], 0.0, atol=1e-15)
+    assert snapshot.time_s > initial.time_s
+    assert not tracker.score().level_failed

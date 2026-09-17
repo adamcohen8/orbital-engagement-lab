@@ -453,6 +453,70 @@ def test_managed_dispatch_disables_source_bytecode_writes(tmp_path: Path, monkey
     assert environment["PYTHONDONTWRITEBYTECODE"] == "1"
 
 
+def test_managed_dispatch_routes_hosted_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    paths = _paths(tmp_path)
+    version_root = paths.version_root("0.26.0")
+    version_root.mkdir(parents=True)
+    atomic_write_json(
+        version_root / "installation-record.json",
+        {
+            "edition": "public",
+            "release_manifest_sha256": "fixture-manifest",
+            "transaction_id": "fixture-transaction",
+        },
+    )
+    source = tmp_path / "installed source"
+    source.mkdir()
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        "sim.installation.cli._selected_engine",
+        lambda _paths, _workspace: ("0.26.0", source, Path(sys.executable), "official"),
+    )
+
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        captured["command"] = command
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr("sim.installation.cli.subprocess.run", fake_run)
+
+    assert _dispatch("hosted", ["--help"], paths=paths, workspace_path=None) == 0
+    assert captured["command"] == [sys.executable, "-m", "sim.hosted_client", "--help"]
+
+
+@pytest.mark.parametrize(
+    ("arguments", "module"),
+    [
+        (["capabilities", "--scope", "discovery"], "sim.study_planning"),
+        (["schema", "oel.hosted_study_plan.v2"], "sim.study_planning"),
+        (["preflight", "--help"], "sim.study_planning"),
+        (["plan-review", "--help"], "sim.study_planning"),
+        (["prepare-feedback", "--help"], "sim.study_planning"),
+        (["build", "--help"], "sim.study"),
+        (["inspect", "bundle"], "sim.study"),
+        (["replay", "bundle"], "sim.study"),
+        (["--help"], "sim.study"),
+    ],
+)
+def test_dispatch_preserves_both_study_cli_workflows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, arguments: list[str], module: str
+) -> None:
+    paths = _paths(tmp_path)
+    monkeypatch.setattr(
+        "sim.installation.cli._selected_engine",
+        lambda _paths, _workspace: (None, tmp_path, Path(sys.executable), "developer"),
+    )
+    captured = []
+
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        captured.append(command)
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr("sim.installation.cli.subprocess.run", fake_run)
+    assert _dispatch("study", arguments, paths=paths, workspace_path=None) == 0
+    assert captured == [[sys.executable, "-m", module, *arguments]]
+
+
 def test_wrong_platform_and_source_version_are_rejected(
     tmp_path: Path,
     signing_keys: tuple[object, dict[str, RSAPublicKey]],
@@ -649,7 +713,9 @@ def test_template_sync_classifies_user_and_upstream_changes(tmp_path: Path) -> N
     )
 
     assert plan["status"] == "manual_review"
-    assert plan["changes"][0]["classification"] == "conflict"
+    changes = {row["path"]: row for row in plan["changes"]}
+    assert changes["configs/quickstart_5min.yaml"]["classification"] == "conflict"
+    assert changes["AGENTS.md"]["classification"] == "upstream_removed"
     assert current.read_text(encoding="utf-8").endswith("# user edit\n")
 
 
@@ -1108,3 +1174,20 @@ def test_trusted_key_rotation_and_sanitized_support_receipt(
     serialized = receipt_path.read_text(encoding="utf-8")
     assert support["receipt"]["privacy"]["user_source_included"] is False
     assert str(tmp_path) not in serialized
+
+
+def test_workspace_includes_hash_bound_relative_study_example(tmp_path: Path) -> None:
+    from sim.installation.resources import resource_path
+
+    source = resource_path("configs", "acceptance_relative_coast.yaml")
+    root = tmp_path / "study"
+    init_workspace(root, engine_version="0.28.0", example_configs=(source,))
+    target = root / "configs" / source.name
+    raw = yaml.safe_load(target.read_text())
+    assert raw["scenario_name"] == "acceptance_relative_coast"
+    assert raw["outputs"]["output_dir"] == "outputs/acceptance_relative_coast"
+    receipt = json.loads((root / ".oel/template-manifest.json").read_text())
+    assert receipt["files"] == [
+        {"path": "AGENTS.md", "sha256": sha256_file(root / "AGENTS.md"), "user_editable": True},
+        {"path": "configs/acceptance_relative_coast.yaml", "sha256": sha256_file(target), "user_editable": True},
+    ]
