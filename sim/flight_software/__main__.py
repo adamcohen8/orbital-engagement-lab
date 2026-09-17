@@ -111,6 +111,16 @@ def main(argv: list[str] | None = None) -> int:
         qualify_parser.add_argument("profile_id")
         qualify_parser.add_argument("--output-dir")
         qualify_parser.add_argument("--validate-only", action="store_true")
+        qualify_parser.add_argument(
+            "--overwrite-output",
+            action="store_true",
+            help="Archive existing scenario outputs before qualification execution.",
+        )
+        qualify_parser.add_argument(
+            "--refresh-manifest",
+            action="store_true",
+            help="Refresh dependency hashes only after all qualification gates pass on stable source.",
+        )
         qualify_parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
 
@@ -174,6 +184,8 @@ def main(argv: list[str] | None = None) -> int:
             args.profile_id,
             output_dir=args.output_dir,
             validate_only=args.validate_only,
+            refresh_manifest=args.refresh_manifest,
+            overwrite_output=args.overwrite_output,
         )
         _print(payload, json_mode=args.json)
         if args.validate_only:

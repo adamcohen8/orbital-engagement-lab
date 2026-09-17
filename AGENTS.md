@@ -1,5 +1,15 @@
 # OEL Agent Instructions
 
+For operating OEL on a user's behalf, start with
+[`sim/installation/data/agent-bootstrap.md`](sim/installation/data/agent-bootstrap.md).
+Managed workspaces receive that same guide as `AGENTS.md`; MCP serves it at
+`oel://agent/bootstrap/v1`. Discover active workflow routes with
+`oel://agent/workflows/v1` and process readiness with
+`oel.describe_capabilities.v1`. The detailed rules below also cover repository
+maintenance. For the separate typed study-planning prototype, see
+[`docs/study-planning.md`](docs/study-planning.md); do not assume its tools are
+available on the main MCP connection.
+
 Orbital Engagement Lab agents should orchestrate documented workflows. They
 should not replace, approximate, or silently bypass the deterministic physics
 engine.
@@ -98,6 +108,13 @@ that guide.
   normalized-config digest before reading simulation evidence. See
   `docs/agent-run-lifecycle.md`. Do not use the lifecycle for arbitrary commands
   or release workflows.
+- For open-ended study planning without execution, use the public `oel study`
+  capabilities, preflight, and plan-review contracts or the restricted
+  `oel-study-mcp` adapter described in `docs/study-planning.md`. Treat
+  `PLAN_VALID` as a reviewable proposal only: it is not execution approval,
+  payment authorization, entitlement, scientific qualification, or permission
+  for an agent to approve its own plan. Public-local plans keep a zero OEL
+  execution amount; unavailable Pro descriptors remain non-executable.
 - Use `python -m sim.agent_task` when a bundled recipe, comparison,
   standard plot, or portable `agent_evidence_packet.json` would make the
   workflow more reproducible.
@@ -119,6 +136,12 @@ that guide.
   accuracy, and comparison never authorizes or performs execution.
 - Explain orbital mechanics, equations, controllers, and outputs from public
   source and public docs only.
+- Before claiming profile support, inspect effective maturity with
+  `python -m sim.flight_software list --kind profile --json`; a catalog's declared
+  maturity is not current qualification evidence.
+- Distinguish stack navigation belief from raw measurements and the separate
+  knowledge estimator. See `docs/flight-software-observations.md` for access
+  conditions, navigation selection, and timestamped review evidence.
 - Call out uncertainty, missing validation evidence, and model limits plainly.
 - Treat output folders as derived evidence. Confirm that artifacts belong to
   the current config/run before citing them; rerun when provenance or freshness

@@ -9,6 +9,7 @@ import numpy as np
 from sim.api import SimulationSnapshot
 from sim.dynamics.orbit.epoch import resolve_sun_moon_positions
 from sim.game.training_geometry import *
+from sim.game import spherical_corridor
 from sim.utils.frames import ric_dcm_ir_from_rv
 
 EARTH_MU_KM3_S2 = 398600.4418
@@ -54,6 +55,7 @@ class ForbiddenRegionConfig:
     axis: str = "I"
     radius_km: float | None = None
     height_km: float | None = None
+    cone_half_angle_deg: float | None = None
 
     @classmethod
     def from_mapping(cls, raw: dict[str, Any], *, index: int) -> ForbiddenRegionConfig:
@@ -75,6 +77,7 @@ class ForbiddenRegionConfig:
             axis=str(raw.get("axis", "I") or "I").strip().upper(),
             radius_km=_optional_float(raw.get("radius_km")),
             height_km=_optional_float(raw.get("height_km")),
+            cone_half_angle_deg=_optional_float(raw.get("cone_half_angle_deg")),
         )
 
     def contains_positions(self, ric_positions_km: np.ndarray) -> np.ndarray:
@@ -83,6 +86,8 @@ class ForbiddenRegionConfig:
             pos = pos.reshape(1, -1)
         if pos.shape[1] < 3:
             raise ValueError("ric_positions_km must contain R, I, and C components.")
+        if self.kind == "spherical_corridor":
+            return spherical_corridor.contains(self, pos)
         if self.kind == "annular_sector":
             return self._contains_annular_sector(pos)
         if self.kind == "cylinder":
@@ -102,6 +107,8 @@ class ForbiddenRegionConfig:
             return False
         if bool(np.any(self.contains_positions(np.vstack((start, end))))):
             return True
+        if self.kind == "spherical_corridor":
+            return spherical_corridor.intersects(self, start, end)
         if self.kind == "sphere":
             if self.radius_km is None:
                 return False
@@ -467,6 +474,7 @@ class RPOTrainingConfig:
     max_target_reference_range_km: float | None = None
     fail_on_delta_v_budget: bool = True
     coast_chaser_after_delta_v_budget: bool = False
+    coast_target_after_delta_v_budget: bool = False
     survival_goal: bool = False
     sandbox_mode: bool = False
     required_burn_axes: tuple[str, ...] = ()
@@ -538,6 +546,10 @@ class RPOTrainingConfig:
             coast_chaser_after_delta_v_budget=_metadata_bool(
                 raw.get("coast_chaser_after_delta_v_budget", False),
                 "metadata.game.training.coast_chaser_after_delta_v_budget",
+            ),
+            coast_target_after_delta_v_budget=_metadata_bool(
+                raw.get("coast_target_after_delta_v_budget", False),
+                "metadata.game.training.coast_target_after_delta_v_budget",
             ),
             survival_goal=_metadata_bool(raw.get("survival_goal", False), "metadata.game.training.survival_goal"),
             sandbox_mode=_metadata_bool(raw.get("sandbox_mode", False), "metadata.game.training.sandbox_mode"),
@@ -762,7 +774,9 @@ def _forbidden_regions_from_metadata(value: Any) -> tuple[ForbiddenRegionConfig,
         region = ForbiddenRegionConfig.from_mapping(item, index=idx)
         if region.kind == "box" and np.any(region.min_ric_km > region.max_ric_km):
             raise ValueError(f"Forbidden region '{region.name}' has min_ric_km greater than max_ric_km.")
-        if region.kind == "annular_sector":
+        if region.kind == "spherical_corridor":
+            spherical_corridor.validate(region)
+        elif region.kind == "annular_sector":
             _validate_annular_sector_region(region)
         elif region.kind == "cylinder":
             _validate_cylinder_region(region)

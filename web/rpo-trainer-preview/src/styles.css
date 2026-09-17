@@ -1632,6 +1632,12 @@ body.mobile-view {
   touch-action: manipulation;
 }
 
+/* Reserve gestures across the display for gameplay, including panel margins. */
+html:has(body.mobile-view .trainer-shell:not(.selector-mode):not(.sandbox-setup-mode)),
+body.mobile-view:has(.trainer-shell:not(.selector-mode):not(.sandbox-setup-mode)) {
+  touch-action: none;
+}
+
 body.mobile-view .trainer-shell {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto auto auto;
@@ -2860,5 +2866,81 @@ body.mobile-view .trainer-shell.mode-sandbox .objective-checklist {
 
   body.mobile-view .trainer-shell.mode-arcade #topRangeMetric {
     grid-column: auto;
+  }
+}
+
+/* Mouse-only Sandbox camera. Other preview layouts retain their existing panels. */
+.sandbox-3d-panel { grid-column: 1 / -1; grid-row: 1 / -1; }
+.sandbox-3d-panel[hidden], .camera-3d-toggle[hidden] { display: none !important; }
+.camera-3d-toolbar { display: flex; gap: 6px; }
+.camera-3d-toolbar button, .camera-3d-toggle { padding: 3px 9px; font-size: 12px; min-height: 25px; }
+.sandbox-3d-panel canvas { touch-action: none; cursor: grab; }
+.sandbox-3d-panel canvas:active { cursor: grabbing; }
+body:not(.mobile-view) .sandbox-3d-panel canvas { bottom: 36px; height: calc(100% - 100px); }
+.camera-3d-help { position: absolute; bottom: 8px; left: 14px; font-size: 12px; color: #a5b8c9; pointer-events: none; }
+
+/* Mobile camera gestures belong only to the landscape Sandbox viewport. */
+body.mobile-view .sandbox-3d-panel .plot-title { height: 28px; }
+body.mobile-view .camera-3d-toolbar { gap: 4px; }
+body.mobile-view .camera-3d-toggle { min-height: 36px; min-width: 36px; padding: 4px 6px; }
+body.mobile-view .camera-3d-toolbar button { min-height: 28px; min-width: 36px; padding: 2px 6px; }
+body.mobile-view .camera-3d-toolbar button[hidden] { display: none; }
+body.mobile-view .sandbox-3d-panel canvas {
+  top: 38px; bottom: 22px; height: calc(100% - 60px);
+}
+body.mobile-view .camera-3d-help { bottom: 5px; left: 8px; font-size: 10px; }
+
+/* Desktop gameplay reserves the same space on either side of the plots. */
+body.desktop-view .trainer-shell:not(.selector-mode):not(.sandbox-setup-mode):not(.mode-operator-script) {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 22px;
+  padding: 18px 36px 26px;
+}
+body.desktop-view .trainer-shell:not(.mode-operator-script) > .top-bar {
+  position: relative;
+  inset: auto;
+  grid-row: 1;
+}
+body.desktop-view .trainer-shell:not(.mode-operator-script) > .game-layout {
+  position: relative;
+  inset: auto;
+  min-height: 0;
+  grid-row: 2;
+}
+body.desktop-view .trainer-shell:not(.mode-operator-script) > .hud-panel {
+  position: relative;
+  inset: auto;
+  grid-row: 3;
+}
+
+body.desktop-view .top-bar:has(> .camera-3d-toggle:not([hidden])) {
+  grid-template-columns: minmax(0, 1fr) minmax(120px, 300px) auto;
+}
+body.desktop-view .top-bar > .camera-3d-toggle {
+  align-self: center;
+  min-width: 48px;
+  min-height: 34px;
+}
+@media (max-width: 900px) {
+  body.desktop-view .top-bar:has(> .camera-3d-toggle:not([hidden])) {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  body.desktop-view .top-bar:has(> .camera-3d-toggle:not([hidden])) > .top-left {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (orientation: landscape) {
+  body.mobile-view .top-bar:has(> .camera-3d-toggle:not([hidden])) {
+    grid-template-columns: minmax(0, 1fr) minmax(118px, 0.48fr) auto;
+    column-gap: 8px;
+  }
+  body.mobile-view .top-bar > .camera-3d-toggle {
+    grid-column: 3;
+    grid-row: 1;
+    align-self: center;
+    min-width: 44px;
+    min-height: 36px;
   }
 }

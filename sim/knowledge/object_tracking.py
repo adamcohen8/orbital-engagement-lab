@@ -63,13 +63,11 @@ class KnowledgeConditionConfig:
         ):
             raise ValueError("max_range_km must be positive and finite when provided.")
         if self.fov_half_angle_rad is not None and (
-            not np.isfinite(float(self.fov_half_angle_rad))
-            or not 0.0 <= float(self.fov_half_angle_rad) <= np.pi
+            not np.isfinite(float(self.fov_half_angle_rad)) or not 0.0 <= float(self.fov_half_angle_rad) <= np.pi
         ):
             raise ValueError("fov_half_angle_rad must be finite and within [0, pi].")
         if self.solid_angle_sr is not None and (
-            not np.isfinite(float(self.solid_angle_sr))
-            or not 0.0 <= float(self.solid_angle_sr) <= 4.0 * np.pi
+            not np.isfinite(float(self.solid_angle_sr)) or not 0.0 <= float(self.solid_angle_sr) <= 4.0 * np.pi
         ):
             raise ValueError("solid_angle_sr must be finite and within [0, 4*pi].")
         position = np.asarray(self.sensor_position_body_m, dtype=float).reshape(-1)
@@ -79,6 +77,25 @@ class KnowledgeConditionConfig:
             boresight = np.asarray(self.sensor_boresight_body, dtype=float).reshape(-1)
             if boresight.size != 3 or not np.all(np.isfinite(boresight)):
                 raise ValueError("sensor_boresight_body must contain three finite values.")
+
+    @classmethod
+    def from_knowledge(cls, knowledge: dict, *, default_period_s: float) -> KnowledgeConditionConfig:
+        """Resolve the same access settings for reporting and onboard sensors."""
+        conditions = dict(knowledge.get("conditions", {}) or {})
+        return cls(
+            refresh_rate_s=float(knowledge.get("refresh_rate_s", default_period_s)),
+            max_range_km=conditions.get("max_range_km"),
+            fov_half_angle_rad=conditions.get("fov_half_angle_rad"),
+            solid_angle_sr=conditions.get("solid_angle_sr"),
+            require_line_of_sight=bool(conditions.get("require_line_of_sight", False)),
+            dropout_prob=float(conditions.get("dropout_prob", 0.0)),
+            sensor_position_body_m=np.asarray(conditions.get("sensor_position_body_m", [0.0, 0.0, 0.0]), dtype=float),
+            sensor_boresight_body=(
+                None
+                if conditions.get("sensor_boresight_body") is None
+                else np.asarray(conditions["sensor_boresight_body"], dtype=float)
+            ),
+        )
 
 
 @dataclass(frozen=True)
@@ -159,10 +176,11 @@ class TrackedObjectConfig:
     maneuver_detection: EKFManeuverDetectionConfig = EKFManeuverDetectionConfig()
 
 
-class _OtherObjectStateSensor:
-    def __init__(self, conditions: KnowledgeConditionConfig, noise: KnowledgeNoiseConfig, rng: np.random.Generator):
+class ObjectDetectionGate:
+    """Shared observer access policy; measurement generation is a separate owner."""
+
+    def __init__(self, conditions: KnowledgeConditionConfig, rng: np.random.Generator):
         self.conditions = conditions
-        self.noise = noise
         self.rng = rng
         self.access = AccessModel(
             AccessConfig(
@@ -174,19 +192,7 @@ class _OtherObjectStateSensor:
         )
         self.last_detection_status: str | None = None
 
-    def measure(self, observer_truth: StateTruth, target_truth: StateTruth, t_s: float) -> Measurement | None:
-        if not self._detection_gate(observer_truth, target_truth, t_s):
-            return None
-
-        pos_sigma = _expand3(self.noise.pos_sigma_km)
-        vel_sigma = _expand3(self.noise.vel_sigma_km_s)
-        pos_bias = _expand3(self.noise.pos_bias_km)
-        vel_bias = _expand3(self.noise.vel_bias_km_s)
-        z_pos = target_truth.position_eci_km + pos_bias + self.rng.normal(0.0, pos_sigma, size=3)
-        z_vel = target_truth.velocity_eci_km_s + vel_bias + self.rng.normal(0.0, vel_sigma, size=3)
-        return Measurement(vector=np.hstack((z_pos, z_vel)), t_s=t_s)
-
-    def _detection_gate(self, observer_truth: StateTruth, target_truth: StateTruth, t_s: float) -> bool:
+    def detect(self, observer_truth: StateTruth, target_truth: StateTruth, t_s: float) -> bool:
         sensor_position_eci_km, sensor_boresight_eci = self._sensor_pose_eci(observer_truth)
         access_ok, access_reason = self.access.evaluate(
             sensor_position_eci_km,
@@ -208,26 +214,6 @@ class _OtherObjectStateSensor:
             return False
         self.last_detection_status = "detected"
         return True
-
-    def measure_relative(
-        self,
-        observer_truth: StateTruth,
-        target_truth: StateTruth,
-        t_s: float,
-        measurement_model: str,
-    ) -> Measurement | None:
-        model = _normalize_measurement_model(measurement_model)
-        if model == "state":
-            return self.measure(observer_truth, target_truth, t_s)
-        if not self._detection_gate(observer_truth, target_truth, t_s):
-            return None
-        sensor_position_eci_km, sensor_velocity_eci_km_s, _ = self._sensor_state_eci(observer_truth)
-        observer_state = np.hstack((sensor_position_eci_km, sensor_velocity_eci_km_s))
-        truth_state = np.hstack((target_truth.position_eci_km, target_truth.velocity_eci_km_s))
-        ideal = _relative_measurement_vector(model, truth_state, observer_state)
-        sigma = _relative_measurement_sigma(model, self.noise)
-        bias = _relative_measurement_bias(model, self.noise)
-        return Measurement(vector=ideal + bias + self.rng.normal(0.0, sigma, size=ideal.size), t_s=t_s)
 
     def _sensor_pose_eci(self, observer_truth: StateTruth) -> tuple[np.ndarray, np.ndarray | None]:
         sensor_position_eci_km, _, sensor_boresight_eci = self._sensor_state_eci(observer_truth)
@@ -258,11 +244,58 @@ class _OtherObjectStateSensor:
         return sensor_position_eci_km, sensor_velocity_eci_km_s, sensor_boresight_eci
 
 
+class _OtherObjectStateSensor(ObjectDetectionGate):
+    def __init__(self, conditions: KnowledgeConditionConfig, noise: KnowledgeNoiseConfig, rng: np.random.Generator):
+        super().__init__(conditions, rng)
+        self.noise = noise
+
+    _detection_gate = ObjectDetectionGate.detect
+
+    def measure(self, observer_truth: StateTruth, target_truth: StateTruth, t_s: float) -> Measurement | None:
+        if not self._detection_gate(observer_truth, target_truth, t_s):
+            return None
+
+        pos_sigma = _expand3(self.noise.pos_sigma_km)
+        vel_sigma = _expand3(self.noise.vel_sigma_km_s)
+        pos_bias = _expand3(self.noise.pos_bias_km)
+        vel_bias = _expand3(self.noise.vel_bias_km_s)
+        z_pos = target_truth.position_eci_km + pos_bias + self.rng.normal(0.0, pos_sigma, size=3)
+        z_vel = target_truth.velocity_eci_km_s + vel_bias + self.rng.normal(0.0, vel_sigma, size=3)
+        return Measurement(vector=np.hstack((z_pos, z_vel)), t_s=t_s)
+
+    def measure_relative(
+        self,
+        observer_truth: StateTruth,
+        target_truth: StateTruth,
+        t_s: float,
+        measurement_model: str,
+    ) -> Measurement | None:
+        model = _normalize_measurement_model(measurement_model)
+        if model == "state":
+            return self.measure(observer_truth, target_truth, t_s)
+        if not self._detection_gate(observer_truth, target_truth, t_s):
+            return None
+        sensor_position_eci_km, sensor_velocity_eci_km_s, _ = self._sensor_state_eci(observer_truth)
+        observer_state = np.hstack((sensor_position_eci_km, sensor_velocity_eci_km_s))
+        truth_state = np.hstack((target_truth.position_eci_km, target_truth.velocity_eci_km_s))
+        ideal = _relative_measurement_vector(model, truth_state, observer_state)
+        sigma = _relative_measurement_sigma(model, self.noise)
+        bias = _relative_measurement_bias(model, self.noise)
+        return Measurement(vector=ideal + bias + self.rng.normal(0.0, sigma, size=ideal.size), t_s=t_s)
+
+
 @dataclass
 class _Track:
     target_id: str
     sensor: _OtherObjectStateSensor
-    estimator: OrbitEKFEstimator | HCWRelativeEKFEstimator | SSJ2RelativeEKFEstimator | THRelativeEKFEstimator | YARelativeEKFEstimator | None
+    estimator: (
+        OrbitEKFEstimator
+        | HCWRelativeEKFEstimator
+        | SSJ2RelativeEKFEstimator
+        | THRelativeEKFEstimator
+        | YARelativeEKFEstimator
+        | None
+    )
     estimator_type: str
     measurement_model: str
     init_cov_diag: np.ndarray
@@ -355,7 +388,7 @@ class _Track:
                         f"tracked target {self.target_id!r} uses measurement_model={self.measurement_model!r}; "
                         "relative-only tracking requires ekf.initial_state_eci_km_s or "
                         "estimation.initial_state_eci_km_s instead of truth-seeded initialization."
-                )
+                    )
                 init_state = np.array(self.initial_state_eci_km_s, dtype=float).reshape(6)
             self.belief = StateBelief(state=init_state, covariance=np.diag(self.init_cov_diag), last_update_t_s=t_s)
             self.initialization_count += 1
@@ -782,7 +815,9 @@ class ObjectKnowledgeBase:
                     else np.array(cfg.ekf.initial_state_eci_km_s, dtype=float).reshape(6)
                 ),
                 initial_state_ric=(
-                    None if cfg.ekf.initial_state_ric is None else np.array(cfg.ekf.initial_state_ric, dtype=float).reshape(6)
+                    None
+                    if cfg.ekf.initial_state_ric is None
+                    else np.array(cfg.ekf.initial_state_ric, dtype=float).reshape(6)
                 ),
                 hcw_mean_motion_rad_s=cfg.ekf.mean_motion_rad_s,
                 hcw_measurement_origin=str(cfg.ekf.measurement_origin),

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from integrations.oel_mcp.contracts import DEPLOYMENT_PROFILES
+from integrations.oel_mcp.recovery import annotate_error
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -96,7 +97,7 @@ class MCPPathPolicy:
     @staticmethod
     def _require_root(path: Path, roots: tuple[Path, ...]) -> None:
         if not any(_is_relative_to(path, root) for root in roots):
-            raise PermissionError("Path is not authorized for this operation.")
+            raise annotate_error(PermissionError("Path is not authorized for this operation."), "path.not_authorized")
 
 
 def validate_handling(profile: str, handling: dict[str, Any] | None) -> dict[str, str]:

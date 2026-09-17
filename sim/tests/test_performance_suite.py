@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
 
@@ -181,6 +182,10 @@ def test_streaming_physics_hash_matches_legacy_canonical_encoding() -> None:
         "z": np.array([[1.0, float("nan")], [float("inf"), -2.5]]),
         "a": (Path("relative/output.txt"), np.int64(4), {"keep": True, "elapsed_ms": 99.0}),
         2: "numeric-key",
+        "scalars": [None, False, -0.0, float("-inf"), 10**90, 1e-300, 1e300, "é☄\"\\\n"],
+        "numpy_scalar": np.float32(0.1),
+        "zero_dimensional": np.array(1.25),
+        "colliding_keys": {1: "first", "1": "last"},
         "runtime_profile": {"ignored": "timing"},
     }
     legacy_json = json.dumps(
@@ -191,6 +196,26 @@ def test_streaming_physics_hash_matches_legacy_canonical_encoding() -> None:
     ).encode("utf-8")
 
     assert physics_payload_hash(payload) == hashlib.sha256(legacy_json).hexdigest()
+
+
+def test_physics_hash_encoder_reuse_is_independent_across_threads() -> None:
+    payloads = [
+        {"sample": index, "values": [index / 7.0, -0.0, None, "é"], "elapsed_ms": index}
+        for index in range(64)
+    ]
+    expected = [
+        hashlib.sha256(
+            json.dumps(
+                _deterministic_payload(payload),
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=True,
+            ).encode("utf-8")
+        ).hexdigest()
+        for payload in payloads
+    ]
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        assert list(executor.map(physics_payload_hash, payloads * 3)) == expected * 3
 
 
 def test_campaign_work_is_aggregated_across_runs() -> None:

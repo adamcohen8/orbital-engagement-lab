@@ -69,7 +69,8 @@ def test_entry_onboarding_docs_keep_explicit_windows_and_posix_paths() -> None:
 
 
 def test_public_readme_leads_with_the_managed_release_installation() -> None:
-    readme = _read("docs/public-readme.md")
+    # The export installs this maintained source as its root README.
+    readme = _read("docs/public-readme.md" if (ROOT / "docs/public-readme.md").is_file() else "README.md")
 
     managed_heading = "## Install And Run"
     contributor_heading = "## Source Installation For Contributors"

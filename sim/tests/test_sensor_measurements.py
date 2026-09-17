@@ -647,3 +647,56 @@ def test_relative_ya_knowledge_estimator_updates_from_angles_range_rate_measurem
         prior_belief.state[:3] - target.position_eci_km
     )
     assert knowledge.consistency_summary()["target"]["update_count"] == 1
+
+
+@pytest.mark.parametrize("sensor_kind", ["access", "joint", "own"])
+@pytest.mark.parametrize("start_s", [0.0, 86400.0])
+def test_fractional_sensor_cadence_does_not_drop_due_samples(sensor_kind, start_s) -> None:
+    truth = _truth()
+    if sensor_kind == "access":
+        sensor = AccessModel(AccessConfig(update_cadence_s=0.3))
+    elif sensor_kind == "joint":
+        sensor = JointStateSensor(update_cadence_s=0.3)
+    else:
+        sensor = NoisyOwnStateSensor(0.0, 0.0, np.random.default_rng(0), update_cadence_s=0.3)
+    def sample(t):
+        if isinstance(sensor, AccessModel):
+            return sensor.can_update(truth.position_eci_km, truth.position_eci_km, t)
+        return sensor.measure(truth, {}, t) is not None
+
+    for index in range(20):
+        t_s = start_s + index * 0.3
+        assert sample(t_s), f"due sample lost at {t_s}"
+        assert not sample(t_s)
+        assert not sample(t_s + 0.15)
+
+
+def test_default_joint_sensor_rng_is_local_to_each_instance() -> None:
+    first = JointStateSensor()
+    second = JointStateSensor()
+    assert first.rng is not second.rng
+    np.testing.assert_array_equal(first.measure(_truth(), {}, 0.0).vector, second.measure(_truth(), {}, 0.0).vector)
+
+
+@pytest.mark.parametrize("value", [np.nan, np.inf, -np.inf])
+def test_access_rejects_nonfinite_epoch_without_consuming_cadence(value) -> None:
+    access = AccessModel(AccessConfig())
+    position = np.array([7000.0, 0.0, 0.0])
+    with pytest.raises(ValueError, match="time_s must be finite"):
+        access.can_update(position, position, value)
+    assert access.can_update(position, position, 0.0)
+
+
+@pytest.mark.parametrize("field", ["observer", "target", "boresight"])
+@pytest.mark.parametrize("value", [np.nan, np.inf, -np.inf])
+def test_access_rejects_nonfinite_geometry_without_consuming_cadence(field, value) -> None:
+    access = AccessModel(AccessConfig(max_range_km=10.0, fov_half_angle_rad=0.5))
+    vectors = {
+        "observer": np.array([7000.0, 0.0, 0.0]),
+        "target": np.array([7001.0, 0.0, 0.0]),
+        "boresight": np.array([1.0, 0.0, 0.0]),
+    }
+    vectors[field][1] = value
+    with pytest.raises(ValueError, match="finite"):
+        access.can_update(vectors["observer"], vectors["target"], 0.0, boresight_eci=vectors["boresight"])
+    assert access.can_update(np.array([7000.0, 0.0, 0.0]), np.array([7001.0, 0.0, 0.0]), 0.0)

@@ -38,7 +38,7 @@ from .manager import (
     write_support_receipt,
 )
 from .paths import InstallationPaths
-from .resources import quickstart_config_path
+from .resources import quickstart_config_path, resource_path
 from .state import StateLock, atomic_write_json, atomic_write_text, read_state
 from .workspace import (
     WORKSPACE_FILENAME,
@@ -149,6 +149,7 @@ def _dispatch(command: str, arguments: list[str], *, paths: InstallationPaths, w
     environment["OEL_ENGINE_VERSION"] = str(version or "unknown")
     environment["OEL_INSTALLATION_DISPOSITION"] = disposition
     environment["OEL_MANAGED_DATA_ROOT"] = str(paths.data_root)
+    environment["OEL_MANAGED_CONFIG_ROOT"] = str(paths.config_root)
     if version and paths.version_root(version).is_dir():
         # Managed source trees are content-bound installation evidence. Keep
         # normal Python imports from adding bytecode caches beside that source.
@@ -167,7 +168,9 @@ def _dispatch(command: str, arguments: list[str], *, paths: InstallationPaths, w
         environment["OEL_OUTPUT_ROOT"] = str(Path(workspace["root"]) / workspace["paths"]["outputs"])
     else:
         environment["OEL_OUTPUT_ROOT"] = str(paths.data_root / "outputs")
-    if command in {"sim", "doctor"}:
+    if command == "trainer":
+        argv = [str(python), str(source / "run_game.py"), *arguments]
+    elif command in {"sim", "doctor"}:
         argv = [str(python), str(source / "run_simulation.py")]
         argv.extend(["--doctor"] if command == "doctor" else arguments)
     elif command == "review":
@@ -175,7 +178,9 @@ def _dispatch(command: str, arguments: list[str], *, paths: InstallationPaths, w
     elif command == "runs":
         argv = [str(python), "-m", "sim.execution.run_lifecycle", *arguments]
     elif command == "study":
-        argv = [str(python), "-m", "sim.study", *arguments]
+        planning_commands = {"schema", "capabilities", "preflight", "plan-review", "prepare-feedback"}
+        module = "sim.study_planning" if arguments and arguments[0] in planning_commands else "sim.study"
+        argv = [str(python), "-m", module, *arguments]
     elif command == "power":
         argv = [str(python), "-m", "sim.spacecraft_power", *arguments]
     elif command == "lifetime":
@@ -192,11 +197,17 @@ def _dispatch(command: str, arguments: list[str], *, paths: InstallationPaths, w
         argv.extend(arguments)
     elif command == "mcp":
         argv = [str(python), "-m", "integrations.oel_mcp", *arguments]
+    elif command == "hosted":
+        argv = [str(python), "-m", "sim.hosted_client", *arguments]
     else:
         raise ValueError(f"Unsupported dispatch command: {command}")
     execution_cwd = workspace_path.parent if workspace_path is not None else Path.cwd()
+    if command == "trainer":
+        execution_cwd = paths.data_root
+        execution_cwd.mkdir(parents=True, exist_ok=True)
     with _engine_lease(paths, version, disposition):
-        completed = subprocess.run(argv, cwd=execution_cwd, env=environment, check=False)
+        launch_options = {"creationflags": subprocess.CREATE_NO_WINDOW} if command == "trainer" and os.name == "nt" else {}
+        completed = subprocess.run(argv, cwd=execution_cwd, env=environment, check=False, **launch_options)
     return int(completed.returncode)
 
 
@@ -264,7 +275,7 @@ def _fswdk_available() -> bool:
 
 
 def _dispatch_commands() -> tuple[str, ...]:
-    commands = ["sim", "review", "runs", "study", "power", "lifetime", "fsw"]
+    commands = ["sim", "review", "runs", "study", "power", "lifetime", "fsw", "hosted", "trainer"]
     if _fswdk_available():
         commands.append("fswdk")
     commands.append("mcp")
@@ -304,7 +315,7 @@ def _build_parser() -> argparse.ArgumentParser:
     install = update_sub.add_parser("install")
     install.add_argument("manifest", help="Local signed manifest path, or 'latest' for the configured channel.")
     install.add_argument("--public-keys", type=Path)
-    install.add_argument("--profile", default="core")
+    install.add_argument("--profile", default=None, help="Dependency profile; defaults to the active installation profile.")
     install.add_argument("--channel-url")
     install.add_argument("--edition", choices=installation_editions, default="public")
     install.add_argument("--channel", choices=("stable", "preview"), default="stable")
@@ -412,6 +423,8 @@ def main(argv: list[str] | None = None) -> int:
     workspace_path = workspace_option if workspace_option and workspace_option.name == WORKSPACE_FILENAME else (
         workspace_option / WORKSPACE_FILENAME if workspace_option else _find_workspace()
     )
+    if args.command == "trainer":
+        workspace_path = None
     try:
         if args.command in {*_dispatch_commands(), "doctor"}:
             arguments = list(getattr(args, "arguments", []) or [])
@@ -442,6 +455,10 @@ def main(argv: list[str] | None = None) -> int:
                     public_keys=keys_from_path(args.public_keys, paths=paths),
                 )
             elif command == "install":
+                if args.profile is None:
+                    current = read_state(paths.current_state, default={}).get("current")
+                    record = paths.version_root(str(current)) / "installation-record.json"
+                    args.profile = load_json_object(record).get("profile", "core") if current and record.is_file() else "core"
                 unsigned = bool(args.developer_unsigned)
                 license_keys = None
                 if args.license_public_keys:
@@ -535,6 +552,7 @@ def main(argv: list[str] | None = None) -> int:
                     engine_version=engine_version,
                     engine_requirement=args.engine_requirement,
                     quickstart_config=quickstart,
+                    example_configs=(resource_path("configs", "acceptance_relative_coast.yaml"),),
                 )
                 register_workspace(args.path, registry_path=paths.workspaces_state, lock_path=paths.transaction_lock)
             elif command == "register":

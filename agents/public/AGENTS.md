@@ -1,5 +1,10 @@
 # Public OEL Agents
 
+Start with the shared [operational bootstrap](../../sim/installation/data/agent-bootstrap.md).
+MCP serves the identical guide at `oel://agent/bootstrap/v1` and compact active
+routes at `oel://agent/workflows/v1`. The [study planner](../../docs/study-planning.md)
+is a separate prototype; its tools are usable only when listed by the connection.
+
 Use this playbook when an AI coding agent is helping with the open-source
 Orbital Engagement Lab core.
 
@@ -43,6 +48,13 @@ reference/validation workflows.
 - When such a workflow is unavailable, use the closest deterministic public
   alternative: one validated run, explicit paired runs, or a small manually
   enumerated set whose assumptions and evidence remain inspectable.
+- When the user explicitly intends Hosted OEL Pro execution, public OEL may
+  prepare and validate the public package contract in
+  `docs/hosted-pro-package.md`. This plans a published Pro capability and binds
+  selected bytes; it does not reproduce the Pro executor locally.
+- Treat `CLIENT_VALID` as permission to request authoritative Hosted preflight
+  only. It is not proof of availability, entitlement, price, payment approval,
+  scientific qualification, or execution authority.
 
 ## Supported Workflows
 
@@ -60,6 +72,23 @@ reference/validation workflows.
 8. Evaluate the result with `agents/public/evaluation-rubric.md`.
 9. Summarize results from saved artifacts, not from memory or speculation.
 10. Add tests or smoke checks for new agent-facing examples.
+
+For an open-ended question that needs a reviewable operation graph before any
+execution, use the non-executing `oel study` workflow in
+`docs/study-planning.md`. `PLAN_VALID` means only that deterministic preflight
+accepted the proposal. It does not approve execution or payment, entitle a Pro
+capability, or let the agent approve its own plan. Stop at plan review unless a
+separate documented execution surface and explicit user authorization exist.
+
+When the user wants Hosted OEL to execute an analysis, an agent may prepare
+the public package format in `docs/hosted-pro-package.md` and run
+`oel hosted validate-package <package> --workspace-root <root>`. Treat
+`CLIENT_VALID` as local package-integrity and planning evidence only. It does
+not establish remote availability or entitlement, upload files, create a quote,
+authorize payment, or execute anything. A public-only package may run locally
+for free or receive an optional Hosted quote; a Pro package cannot run in the
+public installation. Hosted OEL must revalidate the exact sealed bytes before
+offering execution terms.
 
 For whole-Earth coverage or directed-link questions, start with
 `docs/coverage-link-scenario-analysis.md` and
@@ -110,6 +139,8 @@ remain excluded private or future workflows.
 Use `docs/agent-evaluation-packet.md` to evaluate whether an agent follows this
 loop. Use `docs/agent-capability-routing.md` for first-run paths and broader
 intent routing, including evidence, questions, and public-core limits. Use
+`docs/study-planning.md` for the restricted non-executing BYO-agent planning
+loop. Use
 `docs/agent-task-runner.md` when a repeatable recipe, comparison, plot, or
 portable `agent_evidence_packet.json` would help another agent inspect the same
 evidence. Use `docs/agent-review-queries.md` for reusable review-store SQL. Use

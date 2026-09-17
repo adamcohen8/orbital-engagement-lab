@@ -52,7 +52,7 @@ metadata:
       - Maintain at least 100 m separation from the chaser.
       - Stay within 1 km of the target reference orbit to remain mission capable.
       - Survive until the timer expires.
-      - Stay under the target delta-v budget.
+      - When your fuel runs out, coast without further maneuvers until time expires.
       instructor_notes:
       - This is the reverse of level 11: the player flies the target, not the chaser.
       - The chaser uses the public flagship 10 km RIC_PD orbital guidance without
@@ -68,6 +68,7 @@ metadata:
       max_time_s: 9000.0
       max_target_reference_range_km: 1.0
       max_target_delta_v_m_s: 1.0
+      coast_target_after_delta_v_budget: true
       max_delta_v_m_s: 25.0
       fail_on_delta_v_budget: false
       coast_chaser_after_delta_v_budget: true
@@ -109,8 +110,23 @@ objects:
         navigation_initialization: cold
         max_acceleration_m_s2: 0.060000000000000005
         reference_object_id: target
-        translation_mode: terminal_braking
-        goal_type: rpo.terminal_braking
+        # Keep orbital guidance aligned with configs/ric_pd_10km_experiment.yaml.
+        translation_mode: ric_pd_transfer
+        goal_type: rpo.ric_pd_transfer
+        goal_mode: maintenance
+        position_tolerance_m: 5.0
+        velocity_tolerance_m_s: 0.005
+        mean_motion_rad_s: 0.001078
+        transfer_time_s: 4800.0
+        burn_time_constant_s: 35.0
+        correction_interval_s: 300.0
+        velocity_deadband_m_s: 0.03
+        final_brake_start_s: 0.0
+        terminal_start_s: 900.0
+        terminal_range_m: 150.0
+        kp_position_s2: 2.5e-06
+        kd_velocity_s_inv: 0.0035
+        require_pointing_for_translation: false
   target:
     enabled: true
     role: target

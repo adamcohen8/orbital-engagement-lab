@@ -1,3 +1,4 @@
+import { createSandbox3D } from "./sandbox-camera-3d.js?v=mobile-game-gestures-2026-09-15";
 import {
   buildChallengeRecord,
   createPursuitArcadeSession,
@@ -1664,6 +1665,11 @@ function currentStepDtS(controls = currentControls()) {
   return gameTickDtS({ baseDtS, speedMultiple: effectiveSpeedMultiple(controls) });
 }
 
+const sandbox3d = createSandbox3D({
+  getState: () => state, fitCanvas, drawMarker: drawSpacecraftMarker, drawPath,
+  onChange: () => draw(),
+});
+
 function currentSpeedMultiple() {
   return SPEED_OPTIONS[state.speedIndex];
 }
@@ -1690,6 +1696,7 @@ function operatorBurnCinematicShouldClamp() {
 }
 
 function effectiveSpeedMultiple(controls = currentControls()) {
+  if (sandbox3d.interacting()) return Math.min(currentSpeedMultiple(), 1);
   if (operatorBurnCinematicShouldClamp()) {
     return Math.min(currentSpeedMultiple(), OPERATOR_BURN_CINEMATIC_SPEED_MULTIPLE);
   }
@@ -1700,13 +1707,13 @@ function effectiveSpeedMultiple(controls = currentControls()) {
 function speedBadgeText(controls = currentControls()) {
   const selected = currentSpeedMultiple();
   const effective = effectiveSpeedMultiple(controls);
-  return effective === selected ? `${selected}x` : `${effective}x burn`;
+  return effective === selected ? `${selected}x` : `${effective}x ${sandbox3d.interacting() ? "camera" : "burn"}`;
 }
 
 function speedFooterText(controls = currentControls()) {
   const selected = currentSpeedMultiple();
   const effective = effectiveSpeedMultiple(controls);
-  return effective === selected ? `${selected.toFixed(0)}x` : `${effective.toFixed(0)}x Burn (${selected.toFixed(0)}x Coast)`;
+  return effective === selected ? `${selected.toFixed(0)}x` : `${effective.toFixed(0)}x ${sandbox3d.interacting() ? "Camera" : "Burn"} (${selected.toFixed(0)}x Coast)`;
 }
 
 function refreshInputState() {
@@ -2479,14 +2486,18 @@ function integrateCopy(s, u, dt) {
 }
 
 function draw() {
+  const use3D = sandbox3d.sync();
   if (state.mode === "selector" || state.mode === "sandboxSetup") {
     updateDebugState();
     return;
   }
   updateHud();
   updateDebugState();
-  drawPlot(el.riCanvas, "i", "r", "ri");
-  drawPlot(el.rcCanvas, "c", "r", "rc");
+  if (use3D) sandbox3d.render();
+  else {
+    drawPlot(el.riCanvas, "i", "r", "ri");
+    drawPlot(el.rcCanvas, "c", "r", "rc");
+  }
 }
 
 function updateDebugState() {
@@ -2507,6 +2518,7 @@ function updateDebugState() {
     activeView: state.activeView,
     speedMultiple: currentSpeedMultiple(),
     effectiveSpeedMultiple: effectiveSpeedMultiple(),
+    camera3d: sandbox3d.debug(),
     cameraRuleMode: state.cameraRuleMode,
     musicSrc: music.currentSrc || music.src,
     analytics: {
@@ -2628,6 +2640,7 @@ function currentCoachHint() {
     return activePrimerStage().hint;
   }
   if (state.mode === "sandbox") {
+    if (state.activeView === "mobile" && sandbox3d.active()) return "Camera: Target Locked";
     const label = state.cameraRuleMode === "full_trajectory" ? "Full Trajectory" : "Satellites Only";
     const cameraLabel = state.activeView === "mobile" ? "Camera" : "C Camera";
     if (state.activeView === "mobile") return `${cameraLabel}: ${label}`;
@@ -3662,6 +3675,9 @@ function bucketRangeKm(value) {
 }
 
 function frame(nowMs) {
+  const cameraAdjusting = sandbox3d.interacting();
+  if (cameraAdjusting !== Boolean(state.cameraWasAdjusting)) state.stepAccumulatorS = 0;
+  state.cameraWasAdjusting = cameraAdjusting;
   if (!state.lastFrameMs) state.lastFrameMs = nowMs;
   const elapsedS = Math.min((nowMs - state.lastFrameMs) / 1000, 0.2);
   state.lastFrameMs = nowMs;

@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+import json
 import os
 import site
 import subprocess
+import sys
 import venv
 import zipfile
 from pathlib import Path
 
 import pytest
-from setuptools.build_meta import build_wheel
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -23,7 +24,13 @@ def test_m5_wheel_packages_supported_mcp_profiles_and_keeps_dependency_optional(
     monkeypatch.chdir(ROOT)
     wheel_dir = tmp_path / "wheel"
     wheel_dir.mkdir()
-    wheel_name = build_wheel(str(wheel_dir))
+    subprocess.run(
+        [sys.executable, "-c",
+         "from setuptools.build_meta import build_wheel; import sys; build_wheel(sys.argv[1])",
+         str(wheel_dir)],
+        check=True,
+    )
+    wheel_name = next(wheel_dir.glob("*.whl")).name
 
     with zipfile.ZipFile(wheel_dir / wheel_name) as archive:
         names = set(archive.namelist())
@@ -51,6 +58,7 @@ def test_m5_wheel_packages_supported_mcp_profiles_and_keeps_dependency_optional(
     assert "sim/installation/cli.py" in names
     assert "sim/installation/manager.py" in names
     assert "sim/installation/schemas/channel-config.schema.json" in names
+    assert "sim/installation/data/agent-bootstrap.md" in names
     assert "sim/installation/schemas/release-manifest.schema.json" in names
     assert "sim/schema_versions.py" in names
     assert any(name.endswith(".data/data/share/oel/configs/quickstart_5min.yaml") for name in names)
@@ -89,6 +97,9 @@ def test_m5_wheel_packages_supported_mcp_profiles_and_keeps_dependency_optional(
         site.getsitepackages()[0] + "\n",
         encoding="utf-8",
     )
+    installed_env = dict(os.environ)
+    installed_env.pop("PYTHONPATH", None)
+    installed_env["PIP_DISABLE_PIP_VERSION_CHECK"] = "1"
     subprocess.run(
         [
             str(python),
@@ -97,23 +108,42 @@ def test_m5_wheel_packages_supported_mcp_profiles_and_keeps_dependency_optional(
             "install",
             "--force-reinstall",
             "--no-deps",
+            "--no-index",
             str(wheel_dir / wheel_name),
         ],
         cwd=tmp_path,
         check=True,
         capture_output=True,
         text=True,
+        env=installed_env,
     )
+
+    # Prove the wheel owns imports and seeds its packaged guide outside the checkout.
+    identity = subprocess.run(
+        [str(python), "-c",
+         "import json,sys,sim; from pathlib import Path; "
+         "from sim.installation.workspace import init_workspace; "
+         "from sim.installation.resources import agent_bootstrap_text; "
+         "p=Path(sys.argv[1]); init_workspace(p,engine_version='0.28.0'); "
+         "assert (p/'AGENTS.md').read_text()==agent_bootstrap_text(); "
+         "print(json.dumps({'sim':sim.__file__,'bootstrap':agent_bootstrap_text()}))",
+         str(tmp_path / "installed-workspace")],
+        cwd=tmp_path, env=installed_env, check=True, capture_output=True, text=True,
+    )
+    installed_identity = json.loads(identity.stdout)
+    assert Path(installed_identity["sim"]).is_relative_to(installed_site)
 
     async def exercise() -> tuple[str, tuple[str, ...], str]:
         parameters = StdioServerParameters(
             command=str(entrypoint),
             cwd=tmp_path,
-            env={**os.environ, "OEL_MCP_READ_ROOTS": str(tmp_path)},
+            env={**installed_env, "OEL_MCP_READ_ROOTS": str(tmp_path)},
         )
         async with Client(stdio_client(parameters), mode="auto", cache=None) as client:
             resources = await client.list_resources(cache_mode="reload")
             guide = await client.read_resource("oel://docs/operator-guide/v1", cache_mode="reload")
+            bootstrap = await client.read_resource("oel://agent/bootstrap/v1", cache_mode="reload")
+            assert bootstrap.contents[0].text == installed_identity["bootstrap"]
             return (
                 client.protocol_version,
                 tuple(resource.uri for resource in resources.resources),
@@ -132,5 +162,8 @@ def test_m5_wheel_packages_supported_mcp_profiles_and_keeps_dependency_optional(
         "oel://review/plot-recipes/v1",
         "oel://review/animation-recipes/v1",
         "oel://analysis/workflows/v1",
+
+        "oel://agent/bootstrap/v1",
+        "oel://agent/workflows/v1",
     )
     assert "supported local stdio OEL MCP surface" in guide

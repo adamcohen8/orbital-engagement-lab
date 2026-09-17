@@ -144,3 +144,41 @@ def test_capsule_plan_refuses_content_drift(tmp_path: Path) -> None:
         evidence_capsules.apply_plan(plan_path, workspace_root=tmp_path)
 
     assert database.is_file()
+
+
+def test_capsule_hydration_rejects_manifest_nonquery_sql(tmp_path: Path) -> None:
+    database = _review_fixture(tmp_path)
+    create_evidence_capsule(database, remove_original=True)
+    manifest_path = database.parent / "evidence_capsule.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["artifacts"][0]["verification"]["queries"] = [
+        {"query": "ATTACH DATABASE ':memory:' AS unrelated", "rows": []}
+    ]
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(EvidenceCapsuleError, match="read-only"):
+        with materialized_evidence_file(database):
+            pass
+
+
+def test_capsule_verification_queries_round_trip(tmp_path: Path) -> None:
+    database = _review_fixture(tmp_path)
+    create_evidence_capsule(
+        database, remove_original=True,
+        verification_queries=["SELECT value FROM metrics WHERE name='answer'"],
+    )
+    with materialized_evidence_file(database) as restored:
+        with sqlite3.connect(restored) as connection:
+            assert connection.execute("SELECT value FROM metrics").fetchall() == [(42.0,)]
+
+
+def test_capsule_creation_rejects_symlink_before_resolving_target(tmp_path: Path) -> None:
+    database = _review_fixture(tmp_path)
+    link = tmp_path / "alias.sqlite"
+    link.symlink_to(database)
+    plan = evidence_capsules.build_plan([link], workspace_root=tmp_path)
+    assert plan["summary"]["eligible_count"] == 0
+    assert any("symlink" in reason for reason in plan["candidates"][0]["blockers"])
+    with pytest.raises(EvidenceCapsuleError, match="unsafe"):
+        create_evidence_capsule(link, remove_original=True)
+    assert database.is_file()
+    assert link.is_symlink()

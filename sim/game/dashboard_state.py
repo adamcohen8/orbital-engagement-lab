@@ -29,7 +29,7 @@ class DashboardStateMixin:
             self.screen = pygame.display.set_mode((1280, 720), flags)
         pygame.display.set_caption(self.title)
         pygame.event.set_grab(True)
-        pygame.mouse.set_visible(False)
+        pygame.mouse.set_visible(bool(self.sandbox_3d_enabled))
         self.clock = pygame.time.Clock()
         self.presentation_controller = None
         self._presentation_last_states: dict[str, np.ndarray] = {}

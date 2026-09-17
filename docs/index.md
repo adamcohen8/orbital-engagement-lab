@@ -11,6 +11,7 @@ public simulation core.
 1. [Install On Windows, macOS, Or Linux](installation.md)
 2. [Create And Use A Workspace](workspaces.md)
 3. [Quickstart](quickstart.md)
+   — then try [your first relative-motion study](first-relative-study.md).
 4. [Update, Audit, Adopt, Or Roll Back](updating.md)
 5. [Compatibility And Install Profiles](compatibility.md)
 6. [Examples Matrix](examples-matrix.md)
@@ -45,6 +46,9 @@ inspect OEL scenarios.
 7. [Agent Feedback Loop](agent-feedback-loop.md)
 8. [Agent Evaluation Packet](agent-evaluation-packet.md)
 9. [Supported Local MCP Surface](oel-mcp.md)
+10. [Local BYO Study Planning Prototype](study-planning.md)
+11. [Public Hosted OEL Client](hosted-oel-client.md)
+12. [Hosted Execution Package Contract](hosted-pro-package.md)
 
 The root `AGENTS.md` and `agents/public/AGENTS.md` are the agent playbooks.
 The docs above explain the supporting workflow, evidence, evaluation, and
@@ -71,10 +75,13 @@ Start here when you already know the kind of work you want to run.
 | Select built-in controllers and command modules | [Built-In Reference GNC Library](reference-gnc.md) |
 | Author and smoke-test a custom public FSW stack | [Public Flight Software Authoring](fsw-authoring.md) |
 | Use the orbital calculator | [Orbital Calculator](orbital-calculator.md) |
-| Use game/training mode | [Video Game Mode Roadmap](game-mode-roadmap.md) |
-| Explore the browser multiplayer Beta | [RPO Duel Beta](../RPO_DUEL.md) |
+| Use game/training mode | [RPO Trainer](rpo-trainer.md) |
+| Explore the browser multiplayer Beta | [RPO Duel Beta](../web/rpo-duel-prototype/README.md) |
 | Use ML/RL wrappers | [ML/RL Policy Contracts](ml-rl-contracts.md) |
 | Connect a local MCP host | [Supported Local MCP Surface](oel-mcp.md) |
+| Preflight an open-ended BYO-agent study proposal | [Local BYO Study Planning Prototype](study-planning.md) |
+| Prepare and locally validate a Hosted analysis package | [Hosted Execution Package Contract](hosted-pro-package.md) |
+| Route an approved proposal to public-local or Hosted OEL | [Public Hosted OEL Client](hosted-oel-client.md) |
 | Start an agent run and await durable completion | [Agent Run Lifecycle](agent-run-lifecycle.md) |
 | Inspect, import, export, or compare CCSDS OEM ephemerides | [CCSDS OEM Interoperability](ccsds-oem.md) |
 | Inspect, import, round-trip, or compare CCSDS OPM/OMM products | [CCSDS OPM And OMM Interoperability](ccsds-odm.md) |
@@ -120,7 +127,7 @@ public/private packaging.
 3. [Payload And Artifact Contract](contracts/payload-artifact-contract.md)
 4. [Review Store Contract](review-store.md)
 5. [Controller Naming Conventions](project/controller_naming_conventions.md)
-6. [Reference GNC Library Roadmap](project/reference_gnc_library_roadmap.md)
+6. [Built-In Reference GNC Library](reference-gnc.md)
 7. [Data Handling And Boundary Statement](security/data-handling.md)
 8. [Security Incident Process](security/incident-response.md)
 9. [Installer And Updater Threat Model](security/installer-updater-threat-model.md)

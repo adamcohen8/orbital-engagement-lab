@@ -233,7 +233,7 @@ the trainer capability as available before launch. If it does not, confirm the
 Python minor and constraints file match; recreate `.venv` if it came from
 another interpreter or operating system.
 
-For project context, see `docs/game-mode-roadmap.md`.
+For current product and classroom-use guidance, see `docs/rpo-trainer.md`.
 
 ## Web Preview
 

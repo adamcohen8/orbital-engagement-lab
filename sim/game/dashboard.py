@@ -11,10 +11,12 @@ from .dashboard_hud import DashboardHUDMixin
 from .dashboard_overlays import DashboardOverlayMixin
 from .dashboard_camera import DashboardCameraMixin
 from .dashboard_text import DashboardTextMixin
+from .dashboard_3d import Dashboard3DMixin
 
 
 @dataclass
 class PygameRPODashboard(
+    Dashboard3DMixin,
     DashboardStateMixin,
     DashboardLayoutMixin,
     DashboardPredictionMixin,
@@ -108,4 +110,4 @@ class PygameRPODashboard(
     presentation_reconciliation_duration_s: float = 0.08
     presentation_reconciliation_max_error_km: float = 0.25
 
-    pass
+    sandbox_3d_enabled: bool = False

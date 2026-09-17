@@ -22,6 +22,7 @@ def poll_pygame_input(
     briefing_open: bool = False,
     terminal_open: bool = False,
     frame_convention: Any = None,
+    camera_event_handler: Any = None,
 ) -> None:
     direct_control_mode = str(control_mode or "").strip().lower() in DIRECT_CONTROL_MODES
     ric_translation_mode = str(control_mode or "").strip().lower() in {
@@ -50,6 +51,8 @@ def poll_pygame_input(
     pulse_roll = 0.0
     pulse_firing = False
     for event in pygame.event.get():
+        if camera_event_handler is not None and camera_event_handler(event, blocked=scrollable_overlay_open):
+            continue
         if event.type == pygame.KEYDOWN:
             pulse_pitch += _event_axis_value(pygame, event, positive_name="K_w", negative_name="K_s")
             pulse_yaw += _event_axis_value(pygame, event, positive_name="K_d", negative_name="K_a")

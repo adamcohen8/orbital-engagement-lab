@@ -262,13 +262,13 @@ minor or on another operating system, recreate `.venv` rather than reusing it.
 Use Up/Down or W/S to choose a level, Left/Right to change assists, Enter or
 Space to launch, and Escape to return to the selector. Training runs can also
 write debriefs and recordings under `outputs/`; see
-[Video Game Mode Roadmap](docs/game-mode-roadmap.md) for controls, debriefs,
-recording, and level-design notes.
+[RPO Trainer](docs/rpo-trainer.md) for controls, debriefs, recording, and
+classroom-use notes.
 
 ### RPO Duel Beta And Browser Preview
 
 The public export also includes the experimental browser-native
-[RPO Duel Beta](RPO_DUEL.md) and a standalone trainer web preview. Duel is a
+[RPO Duel Beta](web/rpo-duel-prototype/README.md) and a standalone trainer web preview. Duel is a
 multiplayer game surface, not a browser port of the deterministic OEL physics
 engine. Follow its local/deployment guide and treat the preview as an interface
 demonstration rather than simulation evidence.
@@ -390,3 +390,10 @@ generated report packets in public issues.
 ## License
 
 Apache License 2.0. See [LICENSE.txt](LICENSE.txt).
+
+## Hosted access in v0.30.0
+
+**Closed alpha: access is not publicly available.** Public OEL remains free to
+run locally without a Hosted account. The bundled client and package validator
+do not grant service access. Only invited operators with a configured profile
+can request alpha offers; the alpha uses simulated settlement, not real payments.

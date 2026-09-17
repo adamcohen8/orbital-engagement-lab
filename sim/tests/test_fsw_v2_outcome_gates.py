@@ -390,7 +390,8 @@ def test_every_advertised_orbit_mode_has_a_physical_truth_outcome(
             diagnostics = []
             for output in evidence["outputs"]:
                 for packet in output["telemetry"]:
-                    diagnostics.append({field["name"]: field["value"] for field in packet["fields"]})
+                    if packet["topic"] == "fsw.orbit_reference.status":
+                        diagnostics.append({field["name"]: field["value"] for field in packet["fields"]})
             assert any(row.get("scheduled_burn_pending_receipts", 0) > 0 for row in diagnostics)
             assert diagnostics[-1]["scheduled_burn_receipt_confirmed"] is True
             assert diagnostics[-1]["scheduled_burn_receipt_failed"] is False

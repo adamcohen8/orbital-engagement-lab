@@ -6,7 +6,7 @@ $BootstrapSha256 = "__OEL_BOOTSTRAP_SHA256__"
 $InstallerRendered = "__OEL_INSTALLER_RENDERED__"
 $BaseUrl = if ($env:OEL_INSTALL_BASE_URL) { $env:OEL_INSTALL_BASE_URL } else { $DefaultBaseUrl }
 $ChannelUrl = if ($env:OEL_UPDATE_CHANNEL_URL) { $env:OEL_UPDATE_CHANNEL_URL } else { $DefaultChannelUrl }
-$Profile = if ($env:OEL_INSTALL_PROFILE) { $env:OEL_INSTALL_PROFILE } else { "core" }
+$Profile = if ($env:OEL_INSTALL_PROFILE) { $env:OEL_INSTALL_PROFILE } else { "game" }
 
 if ($InstallerRendered -ne "true" -and (-not $env:OEL_INSTALL_BASE_URL -or -not $env:OEL_UPDATE_CHANNEL_URL)) {
     throw "This installer template has not been rendered for a release. Set OEL_INSTALL_BASE_URL and OEL_UPDATE_CHANNEL_URL, or use a released installer."

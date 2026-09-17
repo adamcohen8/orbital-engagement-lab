@@ -37,7 +37,7 @@ def test_security_procurement_docs_match_project_version() -> None:
     root = Path(__file__).resolve().parents[2]
     release_line = f"v{_source_project_version()}"
 
-    for rel_path in ("SECURITY.md", "docs/security/supply-chain.md", "docs/project/product_maturity_roadmap.md"):
+    for rel_path in ("SECURITY.md", "docs/security/supply-chain.md"):
         path = root / rel_path
         if not path.exists():
             continue

@@ -14,6 +14,7 @@ from typing import Any, Callable
 import yaml
 
 from integrations.oel_mcp.policy import MCPPathPolicy
+from integrations.oel_mcp.recovery import annotate_error
 from sim.api import SimulationWorkspace
 from sim.config import scenario_config_from_dict
 from sim.resource_limits import apply_resource_profile_to_config_dict, estimate_resource_requirements
@@ -46,25 +47,25 @@ class ExecutionApprovalPolicy:
 
     def require(self, approval: dict[str, Any] | None, *, executes: bool) -> str:
         if not isinstance(approval, dict):
-            raise PermissionError("Operator approval metadata is required for this operation.")
+            raise annotate_error(PermissionError("Operator approval metadata is required for this operation."), "approval.required")
         approval_id = str(approval.get("approval_id", "")).strip()
         scope = str(approval.get("scope", "")).strip()
         expected_scope = "execute" if executes else "write"
         allowed = self.execution_approval_ids if executes else self.write_approval_ids
         if scope != expected_scope or not approval_id or approval_id not in allowed:
-            raise PermissionError("The operation is not enabled by the server's operator approval policy.")
+            raise annotate_error(PermissionError("The operation is not enabled by the server's operator approval policy."), "approval.required")
         return approval_id
 
     def require_trust(self, approval: dict[str, Any] | None) -> str:
         if not isinstance(approval, dict):
-            raise PermissionError("Operator trust approval is required before importing scenario plugins.")
+            raise annotate_error(PermissionError("Operator trust approval is required before importing scenario plugins."), "trust.required")
         approval_id = str(approval.get("approval_id", "")).strip()
         if (
             str(approval.get("scope", "")).strip() != "trust"
             or not approval_id
             or approval_id not in self.trust_approval_ids
         ):
-            raise PermissionError("Plugin trust is not enabled by the server's operator approval policy.")
+            raise annotate_error(PermissionError("Plugin trust is not enabled by the server's operator approval policy."), "trust.required")
         return approval_id
 
 
@@ -129,7 +130,14 @@ def prepare_scenario(
             "disable the assistant or use dry_run: true."
         )
     if sealed_errors:
-        raise ValueError("MCP sealed execution policy failed:\n- " + "\n- ".join(sealed_errors))
+        # CLI retention switches are not arguments of the MCP contract.
+        sealed_errors = [message.replace(
+            " or pass --allow-high-detail-outputs for approved retention", ""
+        ) for message in sealed_errors]
+        raise annotate_error(
+            ValueError("MCP sealed execution policy failed:\n- " + "\n- ".join(sealed_errors)),
+            "scenario.policy_blocked",
+        )
     normalized = config.to_dict()
     normalized_sha256 = _sha256_json(normalized)
     validation_id = f"oel-m4-validation-v1:{normalized_sha256}"

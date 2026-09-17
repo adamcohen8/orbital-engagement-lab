@@ -11,7 +11,7 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any, Iterable
 
-PRESENTATION_MODES = ("compatibility", "standard", "high_refresh", "auto")
+PRESENTATION_MODES = ("auto", "compatibility", "standard", "high_refresh")
 PRESENTATION_VSYNC_MODES = ("auto", "on", "off")
 DEFAULT_HIGH_REFRESH_FPS = 120.0
 DEFAULT_REFRESH_FALLBACK_HZ = 60.0

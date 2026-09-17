@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sysconfig
+from importlib.resources import files
 from pathlib import Path
 
 
@@ -26,3 +27,8 @@ def resource_path(*parts: str) -> Path:
 
 def quickstart_config_path() -> Path:
     return resource_path("configs", "quickstart_5min.yaml")
+
+
+def agent_bootstrap_text() -> str:
+    """One packaged operational guide for managed workspaces and MCP."""
+    return files("sim.installation").joinpath("data/agent-bootstrap.md").read_text(encoding="utf-8")

@@ -1162,7 +1162,11 @@ class RPOTrainingTracker:
                 dv_failed = True
                 reasons.append(f"Delta-v budget exceeded ({format_speed_m_s(float(self.config.max_delta_v_m_s))}).")
         target_dv_failed = False
-        if self.config.max_target_delta_v_m_s is not None and target_dv_m_s > float(self.config.max_target_delta_v_m_s):
+        if (
+            not self.config.coast_target_after_delta_v_budget
+            and self.config.max_target_delta_v_m_s is not None
+            and target_dv_m_s > float(self.config.max_target_delta_v_m_s)
+        ):
             budget_ok = False
             target_dv_failed = True
             reasons.append(

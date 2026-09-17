@@ -34,6 +34,7 @@ from integrations.oel_mcp.execution import (
 )
 from integrations.oel_mcp.fsw_authoring_handlers import call_fsw_authoring_tool
 from integrations.oel_mcp.public_registry import public_contract_map
+from integrations.oel_mcp.recovery import annotate_error
 from integrations.oel_mcp.reporting import MAX_REPORT_SOURCE_BYTES
 from integrations.oel_mcp.reporting import audit_report as audit_report_artifacts
 from integrations.oel_mcp.reporting import prepare_report_packet as prepare_report_packet_artifacts
@@ -617,7 +618,10 @@ class PublicOELMCPHandlers(BaseOELMCPHandlers):
             prepared = self._prepared(arguments)
             validation = validate_prepared_scenario(prepared, path_policy=self.path_policy, trust_plugins=True)
             if not validation["execution_ready"] or arguments["validation_id"] != prepared.validation_id:
-                raise PermissionError("The trusted validation id does not match the exact execution-normalized config.")
+                raise annotate_error(
+                    PermissionError("The trusted validation id does not match the exact execution-normalized config."),
+                    "validation.stale",
+                )
             estimate = resource_estimate(prepared)
             require_safe_resource_estimate(estimate)
             ensure_new_output_dir(prepared.output_dir)

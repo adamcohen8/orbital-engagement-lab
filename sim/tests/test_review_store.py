@@ -1495,3 +1495,26 @@ def _review_table_counts(db_path: Path) -> dict[str, int]:
     ]
     with sqlite3.connect(db_path) as conn:
         return {table: int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]) for table in tables}
+
+
+@pytest.fixture
+def column_integrity_workspace(tmp_path: Path):
+    review_dir = tmp_path / "review"
+    review_dir.mkdir()
+    with sqlite3.connect(review_dir / "run.sqlite") as conn:
+        conn.execute("CREATE TABLE evidence (value REAL)")
+        conn.execute("INSERT INTO evidence VALUES (2.0)")
+    with ReviewWorkspace.open(tmp_path) as opened:
+        yield opened
+
+
+def test_case_distinct_aliases_preserve_their_own_values(column_integrity_workspace):
+    result = column_integrity_workspace.query("SELECT value AS Range, value * 3 AS range FROM evidence")
+    assert result.columns == ["Range", "range"]
+    assert result.rows == [{"Range": 2.0, "range": 6.0}]
+
+
+@pytest.mark.parametrize("where", ["", " WHERE 0"])
+def test_duplicate_names_require_explicit_unique_aliases(column_integrity_workspace, where):
+    with pytest.raises(ReviewQueryError, match="unique.*aliases"):
+        column_integrity_workspace.query("SELECT a.value, b.value FROM evidence a JOIN evidence b" + where)

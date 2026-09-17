@@ -45,12 +45,12 @@ def _build_knowledge_base(
     targets = list(knowledge.get("targets", []) or [])
     if not targets:
         return None
-    conditions = dict(knowledge.get("conditions", {}) or {})
     noise = dict(knowledge.get("sensor_error", {}) or {})
     estimation = dict(knowledge.get("estimation", {}) or {})
     ekf_cfg = dict(estimation.get("ekf", knowledge.get("ekf", {})) or {})
     maneuver_detection_cfg = dict(
-        estimation.get("maneuver_detection", ekf_cfg.get("maneuver_detection", knowledge.get("maneuver_detection", {}))) or {}
+        estimation.get("maneuver_detection", ekf_cfg.get("maneuver_detection", knowledge.get("maneuver_detection", {})))
+        or {}
     )
     initial_track_state = ekf_cfg.get("initial_state_eci_km_s", estimation.get("initial_state_eci_km_s"))
     tracked: list[TrackedObjectConfig] = []
@@ -58,22 +58,7 @@ def _build_knowledge_base(
         tracked.append(
             TrackedObjectConfig(
                 target_id=str(target_id),
-                conditions=KnowledgeConditionConfig(
-                    refresh_rate_s=float(knowledge.get("refresh_rate_s", dt_s)),
-                    max_range_km=conditions.get("max_range_km"),
-                    fov_half_angle_rad=conditions.get("fov_half_angle_rad"),
-                    solid_angle_sr=conditions.get("solid_angle_sr"),
-                    require_line_of_sight=bool(conditions.get("require_line_of_sight", False)),
-                    dropout_prob=float(conditions.get("dropout_prob", 0.0)),
-                    sensor_position_body_m=np.array(
-                        conditions.get("sensor_position_body_m", [0.0, 0.0, 0.0]), dtype=float
-                    ),
-                    sensor_boresight_body=(
-                        np.array(conditions.get("sensor_boresight_body"), dtype=float)
-                        if conditions.get("sensor_boresight_body") is not None
-                        else None
-                    ),
-                ),
+                conditions=KnowledgeConditionConfig.from_knowledge(knowledge, default_period_s=dt_s),
                 sensor_noise=KnowledgeNoiseConfig(
                     pos_sigma_km=np.array(noise.get("pos_sigma_km", [0.01, 0.01, 0.01]), dtype=float),
                     vel_sigma_km_s=np.array(noise.get("vel_sigma_km_s", [1e-4, 1e-4, 1e-4]), dtype=float),
@@ -103,21 +88,23 @@ def _build_knowledge_base(
                         [1.0, 1.0, 1.0, 1e-2, 1e-2, 1e-2],
                     ),
                     initial_state_eci_km_s=(
-                        None
-                        if initial_track_state is None
-                        else np.array(initial_track_state, dtype=float).reshape(6)
+                        None if initial_track_state is None else np.array(initial_track_state, dtype=float).reshape(6)
                     ),
                     initial_state_ric=(
                         None
                         if ekf_cfg.get("initial_state_ric", estimation.get("initial_state_ric")) is None
-                        else np.array(ekf_cfg.get("initial_state_ric", estimation.get("initial_state_ric")), dtype=float).reshape(6)
+                        else np.array(
+                            ekf_cfg.get("initial_state_ric", estimation.get("initial_state_ric")), dtype=float
+                        ).reshape(6)
                     ),
                     mean_motion_rad_s=(
                         None
                         if ekf_cfg.get("mean_motion_rad_s", estimation.get("mean_motion_rad_s")) is None
                         else float(ekf_cfg.get("mean_motion_rad_s", estimation.get("mean_motion_rad_s")))
                     ),
-                    measurement_origin=str(ekf_cfg.get("measurement_origin", estimation.get("measurement_origin", "deputy"))),
+                    measurement_origin=str(
+                        ekf_cfg.get("measurement_origin", estimation.get("measurement_origin", "deputy"))
+                    ),
                     integration_substep_s=float(ekf_cfg.get("integration_substep_s", 10.0)),
                 ),
                 maneuver_detection=_knowledge_maneuver_detection_config(maneuver_detection_cfg),

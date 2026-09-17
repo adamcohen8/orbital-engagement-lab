@@ -1,0 +1,145 @@
+{
+  "question_answered": "Propagate the selected automation-smoke scenario and return a completed run with review evidence.",
+  "operations": [
+    {
+      "operation_id": "validate",
+      "capability_id": "oel.config.validate.v1",
+      "depends_on": [],
+      "input_refs": [
+        {
+          "ref_id": "scenario_input",
+          "kind": "scenario_config",
+          "port_id": "input_scenario_config",
+          "schema_id": "oel.artifact.scenario_config.v1",
+          "metadata": {
+            "content_sha256": "007e7dc16a5e06a35573cf17fd180a7d4aa26af26b86fc22e008b22c2c92baf3"
+          }
+        }
+      ],
+      "output_refs": [
+        {
+          "ref_id": "validate.output_validation_receipt",
+          "kind": "validation_receipt",
+          "port_id": "output_validation_receipt",
+          "schema_id": "oel.artifact.validation_receipt.v1",
+          "metadata": {"producer_operation_id": "validate", "semantic_role": "validation_receipt"}
+        },
+        {
+          "ref_id": "validate.output_validated_scenario",
+          "kind": "validated_scenario",
+          "port_id": "output_validated_scenario",
+          "schema_id": "oel.artifact.validated_scenario.v1",
+          "metadata": {"producer_operation_id": "validate", "semantic_role": "validated_scenario"}
+        },
+        {
+          "ref_id": "validate.output_normalized_config",
+          "kind": "normalized_config",
+          "port_id": "output_normalized_config",
+          "schema_id": "oel.artifact.normalized_config.v1",
+          "metadata": {"producer_operation_id": "validate", "semantic_role": "normalized_config"}
+        },
+        {
+          "ref_id": "validate.output_resource_estimate",
+          "kind": "resource_estimate",
+          "port_id": "output_resource_estimate",
+          "schema_id": "oel.artifact.resource_estimate.v1",
+          "metadata": {"producer_operation_id": "validate", "semantic_role": "resource_estimate"}
+        }
+      ],
+      "config_ref": "scenario_main",
+      "parameters": {"safe_only": true},
+      "bounds": {"max_cases": 1, "max_wall_time_s": 30.0}
+    },
+    {
+      "operation_id": "execute",
+      "capability_id": "oel.scenario.execute.v1",
+      "depends_on": ["validate"],
+      "input_refs": [
+        {
+          "ref_id": "validate.output_validated_scenario",
+          "kind": "validated_scenario",
+          "port_id": "input_validated_scenario",
+          "schema_id": "oel.artifact.validated_scenario.v1",
+          "metadata": {"producer_operation_id": "validate", "semantic_role": "validated_scenario"}
+        }
+      ],
+      "output_refs": [
+        {
+          "ref_id": "execute.output_completed_run",
+          "kind": "completed_run",
+          "port_id": "output_completed_run",
+          "schema_id": "oel.artifact.completed_run.v1",
+          "metadata": {"producer_operation_id": "execute", "semantic_role": "completed_run"}
+        },
+        {
+          "ref_id": "execute.output_review_store",
+          "kind": "review_store",
+          "port_id": "output_review_store",
+          "schema_id": "oel.artifact.review_store.v1",
+          "metadata": {"producer_operation_id": "execute", "semantic_role": "review_store"}
+        },
+        {
+          "ref_id": "execute.output_artifact_manifest",
+          "kind": "artifact_manifest",
+          "port_id": "output_artifact_manifest",
+          "schema_id": "oel.artifact.artifact_manifest.v1",
+          "metadata": {"producer_operation_id": "execute", "semantic_role": "artifact_manifest"}
+        }
+      ],
+      "config_ref": "scenario_main",
+      "parameters": {"approval_required": true},
+      "bounds": {"max_cases": 1, "max_wall_time_s": 60.0}
+    }
+  ],
+  "config_constraints": [
+    {
+      "constraint_id": "scenario_identity",
+      "config_ref": "scenario_main",
+      "path": "/scenario_name",
+      "operator": "equals",
+      "expected": "automation_smoke",
+      "material": true,
+      "rationale": "The approved plan must execute the selected scenario identity."
+    }
+  ],
+  "assumptions": ["The selected scenario contains the intended initial state and duration."],
+  "allowed_defaults": [],
+  "forbidden_capabilities": ["oel.pro.campaign.monte_carlo.v1"],
+  "evidence_requirements": [
+    {
+      "evidence_id": "run_evidence",
+      "kind": "completed_run",
+      "description": "A terminal deterministic run bound to the selected configuration.",
+      "source_operation_ids": ["execute"]
+    }
+  ],
+  "acceptance_criteria": [
+    {
+      "criterion_id": "run_completed",
+      "description": "The selected deterministic scenario reaches a completed terminal manifest.",
+      "evidence_ids": ["run_evidence"]
+    }
+  ],
+  "claims": [
+    {
+      "claim_id": "execution_claim",
+      "statement": "The selected scenario was executed to its declared duration.",
+      "evidence_ids": ["run_evidence"]
+    }
+  ],
+  "non_claims": ["This plan does not establish operational or flight qualification."],
+  "transfers": [
+    {
+      "input_id": "scenario_input",
+      "purpose": "Validate and execute the user-selected scenario.",
+      "required": true,
+      "content_sha256": "007e7dc16a5e06a35573cf17fd180a7d4aa26af26b86fc22e008b22c2c92baf3"
+    }
+  ],
+  "resource_envelope": {
+    "resource_profile": "laptop-safe",
+    "max_operations": 4,
+    "max_total_cases": 4,
+    "max_wall_time_s": 300.0
+  }
+}

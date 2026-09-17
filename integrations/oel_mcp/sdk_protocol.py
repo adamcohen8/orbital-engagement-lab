@@ -11,6 +11,7 @@ from typing import Any
 
 from integrations.oel_mcp.base_handlers import BaseOELMCPHandlers
 from integrations.oel_mcp.protocol import SERVER_INFO, tool_definitions
+from integrations.oel_mcp.recovery import recovery_details
 from integrations.oel_mcp.resources import (
     PublishedResource,
     build_public_resource_catalog,
@@ -89,7 +90,8 @@ def build_sdk_server(handlers: BaseOELMCPHandlers) -> Any:
             cancel_event.set()
             raise
         except (TypeError, ValueError, PermissionError) as exc:
-            raise MCPError(-32602, str(exc)) from exc
+            recovery = recovery_details(exc)
+            raise MCPError(-32602, str(exc), data={"recovery": recovery} if recovery else None) from exc
         except Exception as exc:
             raise MCPError(-32603, "Internal server error without local diagnostic details.") from exc
         content: list[Any] = [TextContent(text=json.dumps(payload, sort_keys=True))]
@@ -159,6 +161,9 @@ def build_sdk_server(handlers: BaseOELMCPHandlers) -> Any:
         version=SDK_SERVER_INFO["version"],
         lifespan=lifespan,
         instructions=(
+            "Start with oel.describe_capabilities.v1 and oel://agent/bootstrap/v1; "
+            "read oel://agent/workflows/v1 for active routes and the separate study-planning prototype. "
+            "Process readiness is not exact-run authorization. "
             "Use OEL as the deterministic physics and evidence authority. "
             "For any visualization derived from an OEL review store, use OEL plot recipes or the typed "
             "plan/render plot tools before host-native visualization tools, then inspect the returned image. "

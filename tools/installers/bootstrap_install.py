@@ -226,7 +226,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Install one signed OEL release.")
     parser.add_argument("--manifest-url", required=True)
     parser.add_argument("--channel-url")
-    parser.add_argument("--profile", default="core")
+    parser.add_argument("--profile", default="game")
     parser.add_argument("--data-root", type=Path)
     parser.add_argument("--config-root", type=Path)
     parser.add_argument("--developer-unsigned", action="store_true")
@@ -315,6 +315,9 @@ def main(argv: list[str] | None = None) -> int:
                     allow_local_file=bool(args.developer_unsigned),
                 )
             user_launcher = _publish_user_launcher(activation)
+            from sim.installation.desktop import publish_trainer
+
+            user_launcher["trainer"] = publish_trainer(paths)
         except Exception as exc:
             print(
                 json.dumps(

@@ -70,6 +70,12 @@ The public core includes:
   spacecraft-power evidence, including strict validation, content-bound
   inspection, identity replay, and semantic comparison;
 - public examples, the RPO Trainer, and reproducible public validation evidence;
+- the public-safe Hosted OEL client for capability discovery, explicit file
+  grants, user-approved submission, durable status, and verified result import;
+- the public Hosted execution package contract and offline local validator for
+  exact file identity, typed public or Pro planning, visible bounds, a local
+  recommendation for public-only plans, and explicit handoff to authoritative
+  hosted preflight without distributing Pro executors;
 - educational rocket/ascent primitives and public rocket GNC contracts.
 
 The public core is intended for research, education, prototyping, and
@@ -176,6 +182,10 @@ avoidance optimization, full-catalog rescreening, or operational collision-
 avoidance authority. Those scale, uncertainty, optimization, and governed
 workflow layers remain Pro.
 
+The public Hosted OEL client is an access and verification surface. It does
+not make hosted executors, Pro source, private worker images, campaigns, or
+review-packaging implementations part of the public core.
+
 Public coverage sensitivity compares explicitly supplied deterministic
 coverage products; it does not make Pro campaign orchestration public. Public
 bounded tasking, constellation aggregation, and exact multi-asset scheduling
@@ -273,3 +283,10 @@ and any security, procurement, data-handling, or export constraints.
 
 For detailed private workflows, use the Pro User Guide in the full workspace.
 For public limitations, use [Known Limitations](known-limitations.md).
+
+## Hosted access in v0.30.0
+
+**Closed alpha: access is not publicly available.** Public OEL remains free to
+run locally without a Hosted account. The bundled client and package validator
+do not grant service access. Only invited operators with a configured profile
+can request alpha offers; the alpha uses simulated settlement, not real payments.

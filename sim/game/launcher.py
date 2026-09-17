@@ -1,6 +1,7 @@
 # ruff: noqa: F401,F821,I001
 """Compatibility façade for scenario discovery and game launch control."""
 
+from . import trainer_updates as _updates
 from . import launcher_common as _common
 from . import launcher_models as _models
 from . import scenario_catalog as _catalog
@@ -155,6 +156,7 @@ def _run_launcher(
     frame_dialog_required = frame_dialog_open
     frame_dialog_dont_ask_again = False
     start_screen_open = bool(show_start_screen)
+    updater = None
 
     try:
         while True:
@@ -264,8 +266,18 @@ def _run_launcher(
                     clock.tick(60)
                     continue
 
+            if updater is None:
+                updater = _updates.installed_updater()
+                if updater is not None:
+                    updater.check()
+            if updater is not None:
+                updater.poll()
+                if updater.relaunch():
+                    return None
             preview_bounds = _preview_bounds(width, height)
             for event in pygame.event.get():
+                if _updates.update_event(updater, pygame, event, width, height):
+                    continue
                 selected_difficulty = DIFFICULTY_OPTIONS[difficulty_idx]
                 if event.type == pygame.QUIT:
                     return None
@@ -433,6 +445,7 @@ def _run_launcher(
                 small_font=small_font,
                 title_font=title_font,
             )
+            _updates.draw_update(updater, pygame, screen, small_font)
             pygame.display.flip()
             clock.tick(60)
     finally:

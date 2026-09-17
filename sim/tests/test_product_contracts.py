@@ -547,6 +547,10 @@ def test_engine_timing_contract_estimates_after_inner_step_propagation(tmp_path:
                     "position_eci_km": [7000.0, 0.0, 0.0],
                     "velocity_eci_km_s": [0.0, 7.546049108166282, 0.0],
                 },
+                "flight_software": {
+                    "stack": "fsw.passive",
+                    "params": {"navigation_initialization": "ideal"},
+                },
                 "knowledge": {
                     "sensor_error": {
                         "pos_sigma_km": [0.0],

@@ -16,6 +16,7 @@ The default layout is:
 
 ```text
 workspace/
+  AGENTS.md
   oel-workspace.yaml
   requirements.lock
   configs/
@@ -28,6 +29,11 @@ workspace/
     migrations/
     receipts/
 ```
+
+`AGENTS.md` is the packaged operational bootstrap also served through MCP at
+`oel://agent/bootstrap/v1`. It is user-editable and hash-bound in the template
+manifest. Initialization never replaces an existing non-empty workspace or its
+instructions; existing workspaces can read the MCP resource without migration.
 
 `oel-workspace.yaml` uses `oel.workspace.v1`. It records a supported engine
 range, an exact `locked_version`, independently versioned scenario/FSW/candidate

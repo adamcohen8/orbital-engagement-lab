@@ -355,6 +355,12 @@ print(result.applied_thrust.keys())
 For single-run scenarios, snapshots provide one indexed view of truth, belief,
 and applied commands.
 
+For v2 satellites, `belief` is the latest navigation estimate published by the
+stack. It is distinct from raw sensor measurements. Unavailable components are
+NaN; a stack with no measurement shape yet may have an empty vector. Read
+[flight-software observations](flight-software-observations.md) for the frame,
+epoch, freshness and raw-packet inspection contracts.
+
 ```python
 snap = result.snapshot(0)
 
