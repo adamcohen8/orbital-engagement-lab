@@ -6,6 +6,24 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.30.1 - 2026-09-16
+
+### Added
+- Experimental Earth–Moon CR3BP research tools: rotating/inertial coordinate
+  transformations with barycenter/Earth/Moon origins, Jacobi diagnostics,
+  all five libration points, and zero-velocity slices.
+- Frame-checked completed-run CR3BP figures and GIF/MP4 movies with provenance
+  receipts, including maneuver-responsive instantaneous Jacobi contours.
+- A public CR3BP research example and documented local Python/CLI workflow.
+
+### Changed
+- CR3BP runtime and reference/STM propagation now support RKF78 and DOPRI5
+  adaptive integration. RK4 remains the default; Trainer defaults are unchanged.
+
+### Scope
+- Numerical verification covers ideal circular-primary CR3BP. This does not
+  add ephemeris alignment, differential correction, continuation, or manifolds.
+
 ## 0.30.0 - 2026-09-16
 
 - The Evasion level’s autonomous pursuer now uses the flagship RIC PD transfer guidance and gains, with the level’s existing ungated attitude behavior.

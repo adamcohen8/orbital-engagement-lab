@@ -57,6 +57,15 @@ _export(
     "cr3bp_system",
     "propagate_cr3bp_state",
 )
+_export(
+    "sim.dynamics.orbit.cr3bp_research",
+    "transform_cr3bp_state",
+    "cr3bp_effective_potential",
+    "cr3bp_jacobi_constant",
+    "cr3bp_jacobi_diagnostics",
+    "cr3bp_libration_points",
+    "cr3bp_zero_velocity_grid",
+)
 _export("sim.dynamics.orbit.eclipse", "srp_shadow_factor")
 _export(
     "sim.dynamics.orbit.elements",

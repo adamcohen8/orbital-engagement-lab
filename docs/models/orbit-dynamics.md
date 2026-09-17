@@ -79,6 +79,10 @@ and advances the state with one of the configured numerical integrators from
 - `rkf78` or `adaptive`: adaptive Fehlberg 7(8)-style stepping.
 - `dopri5`: adaptive Dormand-Prince 5(4)-style stepping.
 
+These selections also apply to the CR3BP runtime path. Its state and augmented
+reference/STM helpers accept the same integrator and tolerance options; see
+[CR3BP research](../cr3bp-research.md#adaptive-cr3bp-integration).
+
 The outer simulator step is controlled by `simulator.dt_s`. If
 `simulator.dynamics.orbit.orbit_substep_s` is set, `OrbitalAttitudeDynamics`
 breaks each outer step into smaller orbit substeps before calling the
