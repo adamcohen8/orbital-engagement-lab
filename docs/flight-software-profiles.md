@@ -220,3 +220,26 @@ The review store records `profile_id` beside `stack_id` in `fsw_invocations`.
 This permits future evidence manifests and qualification tools to bind results
 to the selected use-case profile without changing the sensor-to-actuator
 runtime boundary.
+
+### Mounted RCS and wheel rotor limits
+
+For `hardware.rcs.v1`, each `params.rcs_thrusters` entry may supply
+`position_body_m`: the mounting lever arm measured **from the center of mass**,
+expressed in body axes in meters. `direction_body` is the normalized direction of
+vehicle force, not exhaust. Native RCS hardware realizes both force and
+`position_body_m × force`; omitted positions retain the zero-arm behavior.
+Per-jet `isp_s` may override the shared specific impulse. Propellant-limited
+realization scales the mounting torque with thrust.
+
+Reaction-wheel hardware optionally accepts `wheel_inertia_kg_m2` and
+`wheel_max_speed_rad_s` together. Both arrays must be positive and finite and
+match the wheel count (a single value broadcasts). The physical momentum limit
+is the smaller of the supplied momentum limit and inertia times speed limit;
+telemetry includes rotor speed when inertia is configured. Existing wheel
+configurations without those fields retain their previous behavior.
+
+Translation reference stacks can use physical reaction wheels for an explicitly
+configured attitude reference by selecting
+`attitude_hardware_profile: hardware.reaction_wheels.v1` and supplying
+`wheel_axes_body`, `wheel_max_torque_n_m`, and `wheel_max_momentum_n_m_s`.
+The default coupled attitude hardware remains unchanged.

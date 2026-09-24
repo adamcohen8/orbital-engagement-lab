@@ -7,7 +7,9 @@ security, legal, export-control, or mission-assurance process.
 ## Supported Versions
 
 - Public releases: security fixes target the current public release line,
-  currently `v0.30.1`.
+  currently `v0.30.1`. At this documentation snapshot, `v0.31.0` is still in
+  development and is not a published release or a changed support target. Update
+  this version after a later public release is published.
 - Private/Pro releases: security fixes target the active customer-supported
   release line or pilot branch named in the agreement.
 - Declared Python compatibility range: Python 3.10 through 3.14. Functional and
@@ -78,9 +80,13 @@ python tools/build_installable_release.py \
   --supply-chain-evidence outputs/supply_chain \
   --wheelhouse <exact-platform-reviewed-wheelhouse> \
   --platform <Windows-Linux-or-Darwin> --architecture <machine> \
-  --base-url https://github.com/adamcohen8/orbital-engagement-lab/releases/download/v0.30.1 \
-  --channel-url https://github.com/adamcohen8/orbital-engagement-lab/releases/latest/download/public-stable.json
+  --base-url https://github.com/adamcohen8/orbital-engineering-lab/releases/download/v0.30.1 \
+  --channel-url https://github.com/adamcohen8/orbital-engineering-lab/releases/latest/download/public-stable.json
 ```
+
+The `v0.30.1` base URL above is the last published public release at this
+snapshot. Substitute the exact tag for a later release candidate; keep the
+channel URL pointed at the stable metadata endpoint.
 
 For an authorized Pro artifact, run the builder with an explicitly authorized
 Pro source root and Pro edition/package policy; never combine a private source
@@ -109,11 +115,14 @@ published attestation binds that packet without disclosing its local content.
 Treat a known vulnerability as a release finding until it is upgraded, removed,
 documented as not applicable, or accepted by the evaluator in writing.
 
-A `v0.30.1` full-profile release candidate requires the supported PyTorch 2.13
-release line and an unsuppressed passing audit with no implicit exceptions.
-Do not add `--ignore-vuln` to release or compatibility workflows. If an
-advisory is not applicable, document the evidence and evaluator approval
-separately while retaining the unsuppressed machine-readable audit result.
+The published `v0.30.1` full-profile release candidate required the supported
+PyTorch 2.13 release line and an unsuppressed passing audit with no implicit
+exceptions. The active `pyproject.toml` still constrains the full profile to
+that PyTorch line; each later candidate must be gated against its own dependency
+contract and resolved environment. Do not add `--ignore-vuln` to release or
+compatibility workflows. If an advisory is not applicable, document the
+evidence and evaluator approval separately while retaining the unsuppressed
+machine-readable audit result.
 
 ## Reproducible Dependency Workflow
 

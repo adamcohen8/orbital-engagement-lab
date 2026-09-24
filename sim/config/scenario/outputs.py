@@ -226,6 +226,7 @@ def _parse_outputs_section(value: Any, path_policy: ConfigPathPolicy | None = No
             "plots",
             "animations",
             "monte_carlo",
+            "campaign_retention",
             "ai_report",
             "ai_config",
             "review",
@@ -237,6 +238,11 @@ def _parse_outputs_section(value: Any, path_policy: ConfigPathPolicy | None = No
     animations = _as_dict(d.get("animations"), "outputs.animations")
     stats = _as_dict(d.get("stats"), "outputs.stats")
     monte_carlo_outputs = _as_dict(d.get("monte_carlo"), "outputs.monte_carlo")
+    campaign_retention = _as_dict(d.get("campaign_retention"), "outputs.campaign_retention")
+    if campaign_retention:
+        from sim.execution.campaign_retention import validate_campaign_retention
+
+        validate_campaign_retention(campaign_retention)
     ai_report = _as_dict(d.get("ai_report"), "outputs.ai_report")
     ai_config = _as_dict(d.get("ai_config"), "outputs.ai_config")
     review = _as_dict(d.get("review"), "outputs.review")
@@ -341,6 +347,7 @@ def _parse_outputs_section(value: Any, path_policy: ConfigPathPolicy | None = No
         plots=plots,
         animations=animations,
         monte_carlo=monte_carlo_outputs,
+        campaign_retention=campaign_retention,
         ai_report=ai_report,
         ai_config=ai_config,
         review=review,

@@ -26,7 +26,7 @@ Install the bounded optional profile and start its packaged console command:
 For an installed distribution, the equivalent profile is:
 
 ```bash
-.venv/bin/python -m pip install "orbital-engagement-lab[mcp]"
+.venv/bin/python -m pip install "orbital-engineering-lab[mcp]"
 oel-mcp
 ```
 

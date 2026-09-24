@@ -94,7 +94,7 @@ def test_doctor_runs_without_site_packages_and_reports_recovery() -> None:
     )
 
     assert result.returncode == 1
-    assert "ORBITAL ENGAGEMENT LAB DOCTOR" in result.stdout
+    assert "ORBITAL ENGINEERING LAB DOCTOR" in result.stdout
     assert "Core dependencies" in result.stdout
     assert "missing distributions/wheels" in result.stdout
     assert "Quickstart validation  : FAIL - not attempted" in result.stdout

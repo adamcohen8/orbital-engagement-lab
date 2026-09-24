@@ -231,6 +231,9 @@ def extract_study_metric(run_output: dict[str, Any], metric_path: str) -> Any:
     path = str(metric_path or "").strip()
     if not path:
         return None
+    cached = run_output.get("metric_cache")
+    if isinstance(cached, dict) and path in cached:
+        return cached[path]
     if path == "derived.closest_approach_km":
         existing = run_output.get("closest_approach_km")
         if isinstance(existing, (int, float, np.integer, np.floating)) and np.isfinite(float(existing)):

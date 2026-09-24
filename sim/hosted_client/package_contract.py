@@ -35,7 +35,7 @@ _RELATIVE_PATH = {"type": "string", "minLength": 1, "maxLength": 500}
 
 HOSTED_PRO_PACKAGE_SCHEMA: dict[str, Any] = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "$id": "https://orbitalengagementlab.com/schemas/oel-hosted-pro-package-v1.schema.json",
+    "$id": "https://orbital-engineering-lab.vercel.app/schemas/oel-hosted-pro-package-v1.schema.json",
     "title": "OEL Hosted Pro package",
     "type": "object",
     "properties": {
@@ -94,7 +94,7 @@ HOSTED_PRO_PACKAGE_SCHEMA: dict[str, Any] = {
 HOSTED_EXECUTION_PACKAGE_SCHEMA: dict[str, Any] = deepcopy(HOSTED_PRO_PACKAGE_SCHEMA)
 HOSTED_EXECUTION_PACKAGE_SCHEMA.update(
     {
-        "$id": "https://orbitalengagementlab.com/schemas/oel-hosted-execution-package-v1.schema.json",
+        "$id": "https://orbital-engineering-lab.vercel.app/schemas/oel-hosted-execution-package-v1.schema.json",
         "title": "OEL Hosted execution package",
     }
 )

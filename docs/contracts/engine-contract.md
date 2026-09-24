@@ -1,6 +1,6 @@
 # Engine Contract
 
-This document defines the current execution contract for Orbital Engagement Lab
+This document defines the current execution contract for Orbital Engineering Lab
 single-run simulation workflows. It is intentionally narrower than the full
 implementation: it describes behavior users, tests, docs, and future
 integrations may rely on, and it calls out areas that are still being

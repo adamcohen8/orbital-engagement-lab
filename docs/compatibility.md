@@ -102,7 +102,7 @@ The smoke collector distinguishes three evidence classes:
 Audit JSON is accepted only when it covers every installed third-party
 distribution, matches every audited version, and contains no unresolved
 vulnerability records. The locally installed first-party
-`orbital-engagement-lab` distribution may be absent because `pip-audit` does
+`orbital-engineering-lab` distribution may be absent because `pip-audit` does
 not query the local project itself. An audit file's existence alone is not a
 passing security gate.
 
@@ -178,7 +178,7 @@ spawn-serializable module-level worker targets, and a shared platform helper
 for native folder opening and host resource telemetry. Windows folder opening
 uses the shell API directly rather than command-string quoting. Review-store
 connections use encoded file URIs, so ordinary workspace names containing
-spaces (including `Orbital Engagement Lab`) are supported.
+spaces (including `Orbital Engineering Lab`) are supported.
 
 CI forces Matplotlib's non-interactive `Agg` backend. Trainer acceptance uses
 Pygame's dummy video and audio drivers when no desktop display is available.

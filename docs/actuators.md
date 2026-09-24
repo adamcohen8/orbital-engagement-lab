@@ -1,6 +1,6 @@
 # Actuators
 
-Orbital Engagement Lab models actuator output as the force and torque actually
+Orbital Engineering Lab models actuator output as the force and torque actually
 applied to the vehicle after actuator limits, allocation, and device dynamics.
 Controllers may still emit the simple command shape:
 

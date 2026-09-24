@@ -427,6 +427,29 @@ Add `ground_station_access` to `outputs.plots.figure_ids` for the built-in
 access/elevation/range figure, and set `outputs.plots.draw_earth_map: true`
 when static ground tracks should use a world-map background.
 
+## Ground and spacecraft resource snapshots
+
+The ground-segment demo enables both layers for object `sat`. Load and run it
+to inspect both from one snapshot:
+
+```python
+from sim import SimulationConfig, SimulationSession
+
+cfg = SimulationConfig.from_yaml("configs/ground_segment_demo.yaml")
+result = SimulationSession.from_config(cfg).run()
+snap = result.snapshot(10)
+print(snap.ground_segment.get("objects", {}).get("sat"))
+print(snap.spacecraft_resources.get("sat"))
+```
+
+`ground_segment` contains received packets, station service status, retained
+telemetry, and the ground-side orbit posterior/prediction. The
+`spacecraft_resources` mapping contains simulation-truth temperature and
+electrical-resource values. These truth values are not onboard measurements or
+ground knowledge; only the separately modeled ground segment receives its
+configured ideal telemetry packets. See [Ground Segment](models/ground-segment.md)
+and [Spacecraft Resources](models/spacecraft-resources.md) for the model limits.
+
 ## Coverage And Directed-Link Analysis
 
 The public analysis façade exposes deterministic post-processing kernels and

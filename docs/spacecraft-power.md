@@ -1,9 +1,16 @@
 # Spacecraft Power Analysis
 
-OEL v0.29 can determine whether one declared spacecraft load timeline is
-power-feasible along a retained orbit. The public workflow resolves eclipse,
-solar-array generation, charge/discharge limits, battery reserve, curtailment,
-and unmet load, then writes replayable JSON and CSV evidence.
+This public workflow determines whether one declared spacecraft load timeline
+is power-feasible along a retained orbit. It resolves eclipse, solar-array
+generation, charge/discharge limits, battery reserve, curtailment, and unmet
+load, then writes replayable JSON and CSV evidence.
+
+This is a retained-history analysis: it consumes an ECI orbit history and a
+declared load timeline. It is separate from the in-simulation ONP resource model
+configured with `objects.<id>.specs.thermal` and `specs.power`. That model
+integrates one thermal node and a bounded battery during propagation and writes
+resource state into run evidence. See
+[Spacecraft Thermal and Power Resources](models/spacecraft-resources.md).
 
 ## Run the canonical schedule-coupled example
 
@@ -84,8 +91,9 @@ returns `status: verified`.
 
 The strict contracts, deterministic local analysis, review-history and
 schedule adapters, complete evidence, replay, schema, and small examples are
-public. Pro or future work includes uncertainty and Monte Carlo, degradation,
-thermal coupling, detailed EPS/network models, managed environmental data,
-optimization and campaign trades, customer spacecraft models, dashboards,
-and qualification evidence. Neither edition turns this v1 result into flight
-or operational authorization.
+public. This analysis does not model thermal coupling; the separate ONP resource
+model has only a single body thermal node and simple electrical losses. Higher
+fidelity thermal/EPS networks, degradation, managed environmental data,
+uncertainty, optimization and campaign trades, customer spacecraft models,
+dashboards, and qualification evidence remain outside this workflow. Neither
+workflow grants flight or operational authority.

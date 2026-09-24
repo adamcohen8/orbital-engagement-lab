@@ -85,7 +85,7 @@ def _draw_start_screen(
         rect = pygame.Rect(0, 0, radius * 2, int(radius * 0.72))
         rect.center = (center[0], center[1] - 30)
         pygame.draw.ellipse(screen, (22, 38, 56), rect, width=1)
-    _text_centered(screen, hero_font, "Orbital Engagement Lab", (center[0], center[1] - 150), (238, 244, 250))
+    _text_centered(screen, hero_font, "Orbital Engineering Lab", (center[0], center[1] - 150), (238, 244, 250))
     title_y = center[1] - 82
     _text_centered(screen, hero_font, "RPO TRAINER", (center[0] + 3, title_y + 3), (10, 42, 68))
     _text_centered(screen, hero_font, "RPO TRAINER", (center[0], title_y), (210, 246, 255))
@@ -221,7 +221,7 @@ def _draw_launcher(
 ) -> None:
     width, height = screen.get_size()
     screen.fill((12, 16, 22))
-    _text(screen, title_font, "Orbital Engagement Lab", (54, 36), (238, 242, 248))
+    _text(screen, title_font, "Orbital Engineering Lab", (54, 36), (238, 242, 248))
     _draw_music_button(pygame, screen, enabled=music_enabled, mode=selected_mode, font=small_font)
     _draw_record_video_button(pygame, screen, enabled=record_video, mode=selected_mode, font=small_font)
     _draw_clear_progress_button(pygame, screen, mode=selected_mode, font=small_font)

@@ -95,7 +95,7 @@ def _project_version(project_name: str) -> str:
         return "unknown"
 
 
-def build_sbom(*, project_name: str = "orbital-engagement-lab") -> dict[str, object]:
+def build_sbom(*, project_name: str = "orbital-engineering-lab") -> dict[str, object]:
     """Build a minimal CycloneDX JSON SBOM for the current Python environment."""
     components, dependencies = _installed_components()
     return {
@@ -125,7 +125,7 @@ def build_sbom(*, project_name: str = "orbital-engagement-lab") -> dict[str, obj
     }
 
 
-def write_sbom(path: str | Path, *, project_name: str = "orbital-engagement-lab") -> Path:
+def write_sbom(path: str | Path, *, project_name: str = "orbital-engineering-lab") -> Path:
     output = Path(path).expanduser().resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(build_sbom(project_name=project_name), indent=2) + "\n", encoding="utf-8")
@@ -141,7 +141,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--project-name",
-        default="orbital-engagement-lab",
+        default="orbital-engineering-lab",
         help="Application component name to record in SBOM metadata.",
     )
     args = parser.parse_args(argv)

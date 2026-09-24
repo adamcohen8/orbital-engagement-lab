@@ -1,6 +1,6 @@
 # Physics Model Reference
 
-This page is the entry point for Orbital Engagement Lab's physics-model
+This page is the entry point for Orbital Engineering Lab's physics-model
 documentation. It explains how model equations, implementation code,
 configuration, and validation evidence fit together.
 

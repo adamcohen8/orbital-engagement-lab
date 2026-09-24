@@ -501,8 +501,62 @@ def _normalize_dynamics_section(value: dict[str, Any]) -> dict[str, Any]:
             "de440_coeff_path",
             "de440_eop_path",
             "spherical_harmonics",
+            "ocean_tides",
+            "solid_earth_tides",
+            "schwarzschild",
+            "earth_radiation",
         },
     )
+    if "schwarzschild" in orbit:
+        path = "simulator.dynamics.orbit.schwarzschild"
+        relativity = _as_dict(orbit["schwarzschild"], path)
+        _reject_unknown_fields(relativity, path, {"enabled"})
+        relativity["enabled"] = _parse_bool(relativity.get("enabled", False), f"{path}.enabled")
+        orbit["schwarzschild"] = relativity
+    if "earth_radiation" in orbit:
+        path = "simulator.dynamics.orbit.earth_radiation"
+        radiation = _as_dict(orbit["earth_radiation"], path)
+        _reject_unknown_fields(radiation, path, {"enabled", "albedo", "infrared", "quadrature_order"})
+        for key, default in (("enabled", False), ("albedo", True), ("infrared", True)):
+            radiation[key] = _parse_bool(radiation.get(key, default), f"{path}.{key}")
+        order = radiation.get("quadrature_order", 32)
+        if isinstance(order, bool) or not isinstance(order, int) or not 8 <= order <= 128:
+            raise ValueError(f"{path}.quadrature_order must be an integer from 8 to 128.")
+        radiation["quadrature_order"] = order
+        if radiation["enabled"] and not radiation["albedo"] and not radiation["infrared"]:
+            raise ValueError(f"{path} requires albedo and/or infrared.")
+        orbit["earth_radiation"] = radiation
+    if "ocean_tides" in orbit:
+        path = "simulator.dynamics.orbit.ocean_tides"
+        ocean = _as_dict(orbit["ocean_tides"], path)
+        _reject_unknown_fields(ocean, path, {"enabled", "pole_tide", "degree", "order", "coeff_path"})
+        ocean["enabled"] = _parse_bool(ocean.get("enabled", False), f"{path}.enabled")
+        ocean["pole_tide"] = _parse_bool(ocean.get("pole_tide", True), f"{path}.pole_tide")
+        for key in ("degree", "order"):
+            value = ocean.get(key, 6)
+            if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 20:
+                raise ValueError(f"{path}.{key} must be an integer from 0 to 20.")
+            ocean[key] = value
+        if ocean["degree"] < 2 or ocean["order"] > ocean["degree"]:
+            raise ValueError(f"{path} requires 2 <= degree <= 20 and order <= degree.")
+        if ocean["pole_tide"] and ocean["order"] < 1:
+            raise ValueError(f"{path}.pole_tide requires order >= 1.")
+        if ocean["enabled"] and (not isinstance(ocean.get("coeff_path"), str) or not ocean["coeff_path"].strip()):
+            raise ValueError(f"{path}.coeff_path must name a normalized FES Cnm-Snm file.")
+        orbit["ocean_tides"] = ocean
+    if "solid_earth_tides" in orbit:
+        path = "simulator.dynamics.orbit.solid_earth_tides"
+        tides = _as_dict(orbit["solid_earth_tides"], path)
+        _reject_unknown_fields(tides, path, {"enabled", "tide_system", "pole_tide"})
+        tides["enabled"] = _parse_bool(tides.get("enabled", False), f"{path}.enabled")
+        tides["pole_tide"] = _parse_bool(tides.get("pole_tide", True), f"{path}.pole_tide")
+        if "tide_system" in tides:
+            tides["tide_system"] = str(tides["tide_system"]).strip().lower()
+            if tides["tide_system"] not in {"tide_free", "zero_tide"}:
+                raise ValueError(f"{path}.tide_system must be tide_free or zero_tide.")
+        if tides["enabled"] and "tide_system" not in tides:
+            raise ValueError(f"{path}.tide_system must explicitly describe the static gravity field.")
+        orbit["solid_earth_tides"] = tides
     if "spherical_harmonics" in orbit:
         orbit["spherical_harmonics"] = _normalize_spherical_harmonics_section(orbit.get("spherical_harmonics"))
     for key in ("adaptive_atol", "adaptive_rtol"):

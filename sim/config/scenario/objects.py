@@ -187,6 +187,11 @@ def _parse_agent_section(
     objectives = d.get("mission_objectives", []) or []
     if not isinstance(objectives, list):
         raise ValueError(f"Section '{role}.mission_objectives' must be a list.")
+    force_models = d.get("force_models", [])
+    if not isinstance(force_models, list):
+        raise ValueError(f"Section '{role}.force_models' must be a list.")
+    if any(item is None for item in force_models):
+        raise ValueError(f"Section '{role}.force_models' cannot contain null entries.")
     guidance_modifiers = d.get("guidance_modifiers", []) or []
     if not isinstance(guidance_modifiers, list):
         raise ValueError(f"Section '{role}.guidance_modifiers' must be a list.")
@@ -262,6 +267,22 @@ def _parse_agent_section(
                 stack="fsw.passive",
                 hardware_profile="hardware.passive.v1",
             )
+    from sim.spacecraft_resources import validate_resource_specs
+
+    thermal, power = validate_resource_specs(dict(d.get("specs", {}) or {}), f"{role}.specs")
+    if thermal.get("area_mode") == "geometry":
+        resource_specs = dict(d.get("specs", {}) or {})
+        sources = (
+            (resource_specs, ("geometry_profile_path", "area_profile_path", "attitude_area_profile_path")),
+            (dict(resource_specs.get("geometry", {}) or {}), ("profile_path", "area_profile_path", "attitude_area_profile_path")),
+            (dict(resource_specs.get("aero", {}) or {}), ("geometry_profile_path", "area_profile_path")),
+        )
+        if not any(mapping.get(key) not in (None, "") for mapping, keys in sources for key in keys):
+            raise ValueError(f"{role}.specs.thermal.area_mode=geometry requires a geometry profile")
+    if (thermal.get("enabled") or power.get("enabled")) and (
+        resolved_kind != "satellite" or propagation_method == "general"
+    ):
+        raise ValueError(f"{role}: spacecraft resources require an ONP satellite")
     return AgentSection(
         object_id=resolved_object_id,
         kind=resolved_kind,
@@ -282,6 +303,7 @@ def _parse_agent_section(
         mission_strategy=_parse_algorithm_pointer(d.get("mission_strategy")),
         mission_execution=_parse_algorithm_pointer(d.get("mission_execution")),
         mission_objectives=[p for p in (_parse_algorithm_pointer(x) for x in objectives) if p is not None],
+        force_models=[_parse_algorithm_pointer(x) for x in force_models],
         bridge=_parse_bridge_pointer(d.get("bridge")),
         knowledge=dict(d.get("knowledge", {}) or {}),
     )

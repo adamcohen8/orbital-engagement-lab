@@ -21,6 +21,11 @@ def workflow_routes(tool_ids: Iterable[str]) -> dict:
         ("plot", "Plan and render a custom evidence plot", (
             "oel.plan_review_plot.v1", "oel.render_review_plot.v2")),
     )
+    if "oel.pro.twin.capabilities.v1" in active:
+        routes += (("spacecraft_twin", "Build a source-backed spacecraft model from engineering files", (
+            "oel.pro.twin.capabilities.v1", "oel.pro.twin.intake.v1", "oel.pro.twin.geometry.v1",
+            "oel.pro.twin.propose.v1", "oel.pro.twin.inspect.v1", "oel.pro.twin.accept.v1",
+            "oel.pro.twin.verify.v1", "oel.pro.twin.materialize.v1")),)
     return {
         "schema_version": 1,
         "bootstrap_uri": BOOTSTRAP_URI,

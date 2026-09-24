@@ -1,6 +1,6 @@
 # Custom Analysis
 
-Orbital Engagement Lab writes JSON, CSV, Markdown, and image artifacts that can
+Orbital Engineering Lab writes JSON, CSV, Markdown, and image artifacts that can
 be used outside the built-in plotting system. If you want a plot that the
 public core does not provide, the intended path is:
 

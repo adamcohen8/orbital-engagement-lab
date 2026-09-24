@@ -515,15 +515,19 @@ class _SingleRunEngine:
         self.rocket_insertion_time_s: float | None = None
         self.rocket_insertion_hold_s = 0.0
         self.total_dv_m_s_by_object = {aid: 0.0 for aid in self.agents.keys()}
+        self.impulsive_maneuvers: list[dict[str, Any]] = []
         self.burn_samples_by_object = {aid: 0 for aid in self.agents.keys()}
         self.max_accel_km_s2_by_object = {aid: 0.0 for aid in self.agents.keys()}
         self.current_index = 0
+        self.resource_hist = {}
 
         for aid, agent in self.agents.items():
             if not agent.active:
                 continue
             truth = agent.truth if agent.kind == "satellite" else _rocket_state_to_truth(agent.rocket_state)
             _write_state_truth(self.truth_hist[aid][0, :], truth)
+            if truth.resource_state is not None:
+                self.resource_hist[aid] = [{**truth.resource_state, "time_s": float(truth.t_s)}]
             if agent.belief is not None:
                 self._ensure_belief_hist_width(aid, agent.belief.state.size)
                 self.belief_hist[aid][0, : agent.belief.state.size] = agent.belief.state
@@ -574,6 +578,18 @@ class _SingleRunEngine:
             t_s=float(self.t_s[0]), include_rockets=False
         ):
             self.termination_monitor.check_reentry(t_s=float(self.t_s[0]))
+        self.ground_segment = None
+        if cfg.ground_segment.get("enabled", False):
+            from sim.ground_segment import SimulatedGroundSegment
+
+            self.ground_segment = SimulatedGroundSegment(
+                cfg.ground_segment,
+                stations=cfg.ground_stations,
+                object_ids=list(self.agents),
+                jd_utc_start=cfg.simulator.initial_jd_utc,
+                frame_context=self.frame_context,
+            )
+            self._advance_ground_segment(0)
         self._emit_step_callback(0)
         self.object_step_executor = self._build_object_step_executor()
 
@@ -721,6 +737,17 @@ class _SingleRunEngine:
     def _ensure_sample_capacity(self, sample_index: int) -> None:
         self.history_store.ensure_sample_capacity(sample_index)
 
+    def _advance_ground_segment(self, index: int) -> None:
+        if self.ground_segment is not None:
+            from sim.spacecraft_resources.artifacts import resource_snapshot
+
+            t = float(self.t_s[index])
+            self.ground_segment.step(
+                t,
+                truth={oid: hist[index] for oid, hist in self.truth_hist.items()},
+                resources=resource_snapshot(self.resource_hist, t),
+            )
+
     def snapshot(
         self,
         step_index: int | None = None,
@@ -752,6 +779,8 @@ class _SingleRunEngine:
                         np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, target_mass_kg]),
                     )
                 )
+        from sim.spacecraft_resources.artifacts import resource_snapshot
+
         flight_software = {}
         if include_flight_software:
             for object_id, agent in self.agents.items():
@@ -766,6 +795,8 @@ class _SingleRunEngine:
             "applied_thrust": {oid: np.array(hist[idx], dtype=float) for oid, hist in self.thrust_hist.items()},
             "applied_torque": {oid: np.array(hist[idx], dtype=float) for oid, hist in self.torque_hist.items()},
             "flight_software": flight_software,
+            "spacecraft_resources": resource_snapshot(self.resource_hist, float(self.t_s[idx])),
+            "ground_segment": self.ground_segment.ground.snapshot(float(self.t_s[idx])) if self.ground_segment else {},
         }
 
     def publish_fsw_input(self, object_id: str, event: object) -> None:
@@ -1166,6 +1197,53 @@ class _SingleRunEngine:
                 f"expected={input_ids!r}, received={result_ids!r}"
             )
 
+    def apply_impulse(
+        self,
+        object_id: str,
+        delta_v_eci_m_s: tuple[float, float, float] | np.ndarray,
+        *,
+        maneuver_id: str,
+    ) -> dict[str, Any]:
+        """Apply an exact ECI velocity jump at the current sample boundary.
+
+        This explicit run operation is limited to passive ONP satellites. The
+        pre/post pair is retained separately because object_state has one row
+        per object and sample, whose event-time row is the post-impulse state.
+        """
+        if self.terminated_early or self.done:
+            raise ValueError("Cannot apply an impulse after the run has ended")
+        agent = self.agents.get(object_id)
+        if agent is None or not agent.active or agent.kind != "satellite" or agent.truth is None:
+            raise ValueError("Impulse object must be an active satellite")
+        if object_id in self.general_propagation or agent.dynamics is None:
+            raise ValueError("Impulse requires an ONP numerical satellite")
+        if agent.flight_software_runtime is not None and str(agent.runtime_profile) != "trajectory_only":
+            raise ValueError("Impulse execution currently requires a passive trajectory_only object")
+        if not maneuver_id or any(row["maneuver_id"] == maneuver_id for row in self.impulsive_maneuvers):
+            raise ValueError("maneuver_id must be nonempty and unique in this run")
+        dv = np.asarray(delta_v_eci_m_s, dtype=float)
+        if dv.shape != (3,) or not np.isfinite(dv).all() or not 0.0 < float(np.linalg.norm(dv)) <= 100_000.0:
+            raise ValueError("Impulse delta_v_eci_m_s must be a finite nonzero three-vector within 100 km/s")
+        index = int(self.current_index)
+        t_s = float(self.t_s[index])
+        pre = np.concatenate((agent.truth.position_eci_km, agent.truth.velocity_eci_km_s))
+        agent.truth.velocity_eci_km_s = agent.truth.velocity_eci_km_s + dv / 1000.0
+        post = np.concatenate((agent.truth.position_eci_km, agent.truth.velocity_eci_km_s))
+        _write_state_truth(self.truth_hist[object_id][index, :], agent.truth)
+        self._forecast_truth_cache = {}
+        row = {
+            "maneuver_id": maneuver_id,
+            "object_id": object_id,
+            "sample_index": index,
+            "time_s": t_s,
+            "frame": "eci",
+            "delta_v_eci_m_s": dv.tolist(),
+            "pre_state_eci": pre.tolist(),
+            "post_state_eci": post.tolist(),
+        }
+        self.impulsive_maneuvers.append(row)
+        return dict(row)
+
     def step(self, dt_s: float | None = None) -> dict[str, Any]:
         activate_attitude_guardrail_stats(self.attitude_guardrail_stats)
         if not bool(getattr(self, "_acceleration_context_active", False)):
@@ -1184,6 +1262,8 @@ class _SingleRunEngine:
         self.runtime_profiler.record_stage("dynamic_history_compaction", perf_counter() - compact_t0)
         k = int(self.current_index)
         t = float(self.t_s[k])
+        if self.ground_segment is not None and dt_s is not None and float(dt_s) != self.dt:
+            raise ValueError("ground_segment requires the configured fixed simulator.dt_s")
         step_dt = self.dt if dt_s is None else float(dt_s)
         if not np.isfinite(step_dt) or step_dt <= 0.0:
             raise ValueError("step dt_s must be positive.")
@@ -1308,6 +1388,8 @@ class _SingleRunEngine:
                 continue
             truth = agent.truth if agent.kind == "satellite" else _rocket_state_to_truth(agent.rocket_state)
             _write_state_truth(self.truth_hist[aid][k + 1, :], truth)
+            if truth.resource_state is not None:
+                self.resource_hist.setdefault(aid, []).append(dict(truth.resource_state))
             if agent.belief is not None:
                 self._ensure_belief_hist_width(aid, agent.belief.state.size)
                 self.belief_hist[aid][k + 1, : agent.belief.state.size] = agent.belief.state
@@ -1327,6 +1409,7 @@ class _SingleRunEngine:
         self.runtime_profiler.record_stage("history_write", perf_counter() - history_t0)
 
         self.current_index = k + 1
+        self._advance_ground_segment(self.current_index)
         self._emit_step_callback(self.current_index)
 
         termination_check_t0 = perf_counter()

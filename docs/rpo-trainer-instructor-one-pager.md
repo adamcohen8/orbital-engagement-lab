@@ -1,11 +1,11 @@
-# Orbital Engagement Lab RPO Trainer
+# Orbital Engineering Lab RPO Trainer
 
 Interactive RIC-frame intuition training for rendezvous and proximity
 operations education.
 
 ## What It Is
 
-The Orbital Engagement Lab RPO Trainer is a public, open-source educational
+The Orbital Engineering Lab RPO Trainer is a public, open-source educational
 tool that lets cadets either manually command radial, in-track, and cross-track
 maneuvers in Pilot Mode or script impulsive burns in Operator Mode, observe the
 resulting relative orbital motion, and review structured after-action debriefs
@@ -199,8 +199,8 @@ supported.
 Windows PowerShell:
 
 ```powershell
-git clone https://github.com/adamcohen8/orbital-engagement-lab.git
-Set-Location orbital-engagement-lab
+git clone https://github.com/adamcohen8/orbital-engineering-lab.git
+Set-Location orbital-engineering-lab
 py --list
 py -3.14 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
@@ -214,8 +214,8 @@ py -3.14 -m venv .venv
 macOS or Linux:
 
 ```bash
-git clone https://github.com/adamcohen8/orbital-engagement-lab.git
-cd orbital-engagement-lab
+git clone https://github.com/adamcohen8/orbital-engineering-lab.git
+cd orbital-engineering-lab
 python3.14 -m venv .venv
 .venv/bin/python -m pip install --upgrade pip
 .venv/bin/python -m pip install --only-binary=:all: \
@@ -241,7 +241,7 @@ A lightweight browser preview is available for quick demos without installing
 the Python package:
 
 ```text
-https://adamcohen8.github.io/orbital-engagement-lab/
+https://adamcohen8.github.io/orbital-engineering-lab/
 ```
 
 The web preview includes the tutorial, sandbox-style RIC controls, and Pursuit

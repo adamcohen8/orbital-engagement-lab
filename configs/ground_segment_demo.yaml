@@ -1,0 +1,168 @@
+scenario_name: ground_segment_demo
+metadata:
+  owner: public
+  public_surface: public-example
+  support_level: experimental
+scenario_description: Ground orbit estimation and ideal resource telemetry with latency
+  and a scheduled outage.
+objects:
+  sat:
+    kind: satellite
+    runtime_profile: trajectory_only
+    specs:
+      mass_kg: 100.0
+      thermal:
+        enabled: true
+        initial_temperature_k: 290.0
+        heat_capacity_j_k: 80000.0
+        solar_absorptivity: 0.3
+        infrared_emissivity: 0.8
+        projected_area_m2: 1.0
+        radiating_area_m2: 4.0
+        internal_heat_w: 0.0
+        earth_albedo: 0.3
+        earth_ir_w_m2: 237.0
+        max_step_s: 1.0
+      power:
+        enabled: true
+        panels:
+        - area_m2: 2.0
+          normal_body:
+          - 1.0
+          - 0.0
+          - 0.0
+          efficiency: 0.3
+        baseline_load_w: 150.0
+        battery_capacity_wh: 500.0
+        initial_soc: 0.6
+        max_charge_w: 200.0
+        max_discharge_w: 300.0
+        charge_efficiency: 0.95
+        discharge_efficiency: 0.95
+        conversion_efficiency: 0.95
+        load_heat_fraction: 1.0
+        max_step_s: 1.0
+    initial_state:
+      position_eci_km:
+      - 6998.711086962564
+      - -134.32468584471806
+      - 0.0
+      velocity_eci_km_s:
+      - 0.14411979697852517
+      - 7.509065177569284
+      - 0.0
+      attitude_quat_bn:
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      angular_rate_body_rad_s:
+      - 0.0
+      - 0.0
+      - 0.0
+simulator:
+  duration_s: 60.0
+  dt_s: 1.0
+  initial_jd_utc: 2461303.5
+  dynamics:
+    orbit:
+      model: two_body
+      orbit_substep_s: 1.0
+      srp: false
+    attitude:
+      enabled: false
+  environment:
+    sun_pos_eci_km:
+    - 149597870.7
+    - 0.0
+    - 0.0
+    srp_shadow_model: conical
+outputs:
+  output_dir: outputs/ground_segment_demo
+  mode: save
+  stats:
+    enabled: true
+    print_summary: false
+    save_json: true
+    save_full_log: false
+  review:
+    enabled: true
+    detail: standard
+  plots:
+    enabled: false
+  animations:
+    enabled: false
+ground_stations:
+- id: test
+  lat_deg: 0.0
+  lon_deg: 0.0
+  alt_km: 0.0
+  min_elevation_deg: 0.0
+  max_range_km: null
+  enabled: true
+  measurements:
+    enabled: true
+    update_cadence_s: 1.0
+    noise:
+      range_sigma_km: 0.01
+      angle_sigma_deg: 0.02
+      range_rate_sigma_km_s: 1.0e-05
+    seed: 4
+ground_segment:
+  enabled: true
+  priors:
+    sat:
+      state:
+      - 6999.711086962564
+      - -134.32468584471806
+      - 0.0
+      - 0.14411979697852517
+      - 7.509065177569284
+      - 0.0
+      covariance:
+      - - 1.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 1.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 1.0
+        - 0.0
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 0.0
+        - 0.001
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.001
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.001
+      epoch_s: 0.0
+  latency_s: 2.0
+  outages:
+  - station_id: test
+    start_s: 20.0
+    end_s: 40.0
+    services:
+    - tracking
+    - downlink
+    - uplink

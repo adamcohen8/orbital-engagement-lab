@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from sim.config.campaign_file_paths import is_campaign_input_file_path, is_file_location_path
 from sim.config.scenario.primitives import (
     _as_dict,
 )
@@ -86,6 +87,12 @@ def _validate_config_read_paths(root: dict[str, Any], path_policy: ConfigPathPol
                 base_dir=input_base_dir,
                 must_exist=False,
             ))
+    ocean = _as_dict(orbit.get("ocean_tides"), "simulator.dynamics.orbit.ocean_tides")
+    if ocean.get("coeff_path") not in (None, ""):
+        ocean["coeff_path"] = str(path_policy.resolve_input_file(
+            str(ocean["coeff_path"]), purpose="simulator.dynamics.orbit.ocean_tides.coeff_path",
+            base_dir=input_base_dir, must_exist=False,
+        ))
     sh = _as_dict(orbit.get("spherical_harmonics"), "simulator.dynamics.orbit.spherical_harmonics")
     sh_path_fields = (
         ("coeff_path", "simulator.dynamics.orbit.spherical_harmonics.coeff_path"),
@@ -102,6 +109,29 @@ def _validate_config_read_paths(root: dict[str, Any], path_policy: ConfigPathPol
             ))
     _resolve_geometry_profile_paths(root, path_policy)
     analysis = _as_dict(root.get("analysis"), "analysis")
+    mc = _as_dict(analysis.get("monte_carlo"), "analysis.monte_carlo")
+    for bundle_index, bundle in enumerate(mc.get("bundles", []) or []):
+        if not isinstance(bundle, dict):
+            continue  # The analysis parser reports the shape error.
+        for option_index, option in enumerate(bundle.get("options", []) or []):
+            if not isinstance(option, dict):
+                continue
+            values = option.get("values", {})
+            if not isinstance(values, dict):
+                continue  # The analysis parser reports the shape error.
+            for parameter_path, raw_value in values.items():
+                if not is_file_location_path(str(parameter_path)):
+                    continue
+                if not is_campaign_input_file_path(str(parameter_path)):
+                    raise ValueError(f"Monte Carlo bundle file path is not an allowlisted input: {parameter_path}")
+                if raw_value is None:
+                    continue
+                values[parameter_path] = str(path_policy.resolve_input_file(
+                    str(raw_value),
+                    purpose=f"analysis.monte_carlo.bundles[{bundle_index}].options[{option_index}].values[{parameter_path}]",
+                    base_dir=input_base_dir,
+                    must_exist=True,
+                ))
     baseline = _as_dict(analysis.get("baseline"), "analysis.baseline")
     if baseline.get("summary_json") not in (None, ""):
         baseline["summary_json"] = str(path_policy.resolve_input_file(

@@ -103,6 +103,10 @@ availability, force-plan size, coefficient normalization, atmosphere,
 EOP/ephemeris inputs, and supported callback boundaries determine routing.
 Custom callbacks remain Python-authoritative and may be interleaved with
 compiled built-in components; unsupported plans fall back to the Python path.
+The public `objects.<id>.force_models` contract exposes these additive ONP
+callbacks through trusted scenario pointers. Each receives a read-only ECI
+state in km and km/s plus an absolute UTC Julian date, and returns ECI
+acceleration in km/s². See [scenario YAML](../scenario-yaml.md#custom-onp-force-models).
 
 ## Frames, Units, And Signs
 
@@ -217,6 +221,8 @@ Primary implementation files:
   wiring, CR3BP dispatch, adaptive-step accounting, accelerated zonal RK4
   dispatch, and capability/profitability routing for fused and staged compiled
   force plans.
+- `sim/dynamics/orbit/custom_force.py`: validation and stage-time adapter for
+  opt-in external acceleration models.
 - `sim/acceleration/kernels/orbit_force_plan.py`: exact compiled fixed-step and
   per-component kernels shared by supported RK4 and RKF78 force plans.
 - `sim/dynamics/orbit/accelerations.py`: two-body, J2, J3, J4, drag, lift,

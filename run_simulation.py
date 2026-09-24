@@ -79,7 +79,7 @@ def _reject_batch_analysis(cfg) -> None:
     if bool(cfg.analysis.enabled) or bool(cfg.monte_carlo.enabled):
         raise SystemExit(
             "Batch analysis is not available in the public core. "
-            "Use Orbital Engagement Pro for Monte Carlo, sensitivity, controller-bench, and optimization workflows."
+            "Use Orbital Engineering Lab Pro for Monte Carlo, sensitivity, controller-bench, and optimization workflows."
         )
 
 
@@ -202,7 +202,7 @@ def _plain_progress_reporter():
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run a public-core Orbital Engagement Lab scenario.")
+    parser = argparse.ArgumentParser(description="Run a public-core Orbital Engineering Lab scenario.")
     parser.add_argument("--config", default="", help="Path to a simulation scenario YAML file.")
     parser.add_argument("--quickstart", action="store_true", help="Run the bundled five-minute quickstart scenario.")
     parser.add_argument(

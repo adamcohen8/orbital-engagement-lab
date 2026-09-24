@@ -1,4 +1,4 @@
-const DEFAULT_SELECTOR_URL = "https://orbital-engagement-lab.vercel.app/";
+const DEFAULT_SELECTOR_URL = "https://orbital-engineering-lab.vercel.app/";
 const DEFAULT_DUEL_URL = "https://oel-rpo-duel.oel-rpo-duel.workers.dev";
 
 function parseArguments(argv) {

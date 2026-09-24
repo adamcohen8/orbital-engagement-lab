@@ -1,4 +1,4 @@
-"""Optional MCP adapter over documented Orbital Engagement Lab workflows."""
+"""Optional MCP adapter over documented Orbital Engineering Lab workflows."""
 
 from sim.runtime_environment import configure_runtime_caches
 

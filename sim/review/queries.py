@@ -227,10 +227,10 @@ SAVED_REVIEW_QUERIES: dict[str, SavedReviewQuery] = {
     ),
     "burn_events": SavedReviewQuery(
         name="burn_events",
-        description="Burn start/end events.",
+        description="Finite-burn start/end and instantaneous maneuver events.",
         sql=(
             "SELECT time_s, object_id, event_type, message FROM events "
-            "WHERE event_type IN ('burn_start', 'burn_end') ORDER BY time_s, event_id"
+            "WHERE event_type IN ('burn_start', 'burn_end', 'impulsive_maneuver') ORDER BY time_s, event_id"
         ),
         allow_empty=True,
     ),

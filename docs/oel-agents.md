@@ -1,7 +1,7 @@
 # OEL Agents
 
 OEL Agents are instructions, examples, and checks that help AI coding agents
-use Orbital Engagement Lab safely and productively. They are an orchestration
+use Orbital Engineering Lab safely and productively. They are an orchestration
 layer around documented OEL workflows. They do not replace the deterministic
 physics engine, controllers, validators, or output writers.
 
@@ -204,6 +204,16 @@ Example user requests:
 - "Create a short rendezvous case where the chaser starts 3 km behind the
   target."
 - "Can you check when this TLE is visible from Colorado Springs?"
+- "Show how this satellite's onboard temperature and battery state change over
+  the run."
+- "Review the tracking and telemetry received through delayed ground contacts
+  and outages."
+
+Route onboard resource histories through the optional ONP thermal/power models
+in [Spacecraft thermal and electrical resources](models/spacecraft-resources.md).
+Route received ground knowledge through the separate headless
+[ground-segment workflow](models/ground-segment.md); do not treat its delayed
+posterior or held telemetry as simulation truth.
 
 For TLE requests, say explicitly that OEL uses TLE lines to initialize an ECI
 state and then runs configured **ONP** propagation. ONP means the OEL Numerical

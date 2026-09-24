@@ -1,9 +1,9 @@
-"""Orbital Engagement Pro data-ingestion tools are not included in the public core."""
+"""Orbital Engineering Lab Pro data-ingestion tools are not included in the public core."""
 
 
 def _unavailable(*args, **kwargs):
     raise ImportError(
-        "Data ingestion and observation normalization are part of Orbital Engagement Pro. "
+        "Data ingestion and observation normalization are part of Orbital Engineering Lab Pro. "
         "The public core supports deterministic scenarios and local simulation artifacts."
     )
 

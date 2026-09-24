@@ -18,13 +18,14 @@ from sim.plotting.style import get_oel_version
 from sim.review.generated_artifacts import clear_generated_review_artifacts
 from sim.utils.frames import eci_relative_to_ric_rect
 
-REVIEW_SCHEMA_VERSION = "0.12"
+REVIEW_SCHEMA_VERSION = "0.13"
 REVIEW_SCHEMA_COMPATIBILITY_POLICY = "pre_1_0_additive"
 REVIEW_SCHEMA_STABLE_TABLES = (
     "run_metadata",
     "objects",
     "time_samples",
     "object_state",
+    "impulsive_maneuvers",
     "object_state_covariance",
     "relative_state",
     "thrust",
@@ -89,6 +90,7 @@ def write_single_run_review_store(
                 config_sha256=config_sha256,
             )
             _insert_objects(conn, cfg=cfg, summary=summary)
+            _insert_impulsive_maneuvers(conn, payload=payload)
             _insert_frame_provenance(conn, payload=payload)
             _insert_object_initialization(conn, payload=payload)
             _insert_object_propagation(conn, payload=payload)
@@ -127,7 +129,13 @@ def write_single_run_review_store(
                 _insert_game_evidence(conn, payload=payload)
                 _insert_ground_access(conn, t_s=t_s, payload=payload)
                 _insert_orbital_analysis(conn, payload=payload)
-            _insert_events(conn, t_s=t_s, summary=summary, thrust_hist=thrust_hist)
+            from sim.spacecraft_resources.artifacts import insert_resource_review
+
+            insert_resource_review(conn, payload.get("spacecraft_resources", {}))
+            from sim.ground_segment.artifacts import insert_ground_review
+            insert_ground_review(conn, payload.get("ground_segment", []))
+            _insert_events(conn, t_s=t_s, summary=summary, thrust_hist=thrust_hist,
+                           impulsive_maneuvers=payload.get("impulsive_maneuvers", ()))
             _insert_mission_recovery(conn, summary=summary)
             _insert_metrics(conn, summary=summary)
             _insert_artifacts(conn, artifacts=artifacts, outdir=outdir, generated_utc=generated_utc)
@@ -274,6 +282,30 @@ def _create_schema(conn: sqlite3.Connection) -> None:
             mass_kg REAL
         );
         CREATE INDEX idx_object_state_object_time ON object_state(object_id, time_s);
+
+        CREATE TABLE impulsive_maneuvers (
+            maneuver_id TEXT PRIMARY KEY,
+            object_id TEXT NOT NULL,
+            sample_index INTEGER NOT NULL,
+            time_s REAL NOT NULL,
+            frame TEXT NOT NULL,
+            dv_x_eci_m_s REAL NOT NULL,
+            dv_y_eci_m_s REAL NOT NULL,
+            dv_z_eci_m_s REAL NOT NULL,
+            pre_pos_x_eci_km REAL NOT NULL,
+            pre_pos_y_eci_km REAL NOT NULL,
+            pre_pos_z_eci_km REAL NOT NULL,
+            pre_vel_x_eci_km_s REAL NOT NULL,
+            pre_vel_y_eci_km_s REAL NOT NULL,
+            pre_vel_z_eci_km_s REAL NOT NULL,
+            post_pos_x_eci_km REAL NOT NULL,
+            post_pos_y_eci_km REAL NOT NULL,
+            post_pos_z_eci_km REAL NOT NULL,
+            post_vel_x_eci_km_s REAL NOT NULL,
+            post_vel_y_eci_km_s REAL NOT NULL,
+            post_vel_z_eci_km_s REAL NOT NULL
+        );
+        CREATE INDEX idx_impulsive_maneuvers_object_time ON impulsive_maneuvers(object_id, time_s);
 
         CREATE TABLE object_state_covariance (
             sample_index INTEGER,
@@ -2356,12 +2388,33 @@ def _insert_orbital_analysis(conn: sqlite3.Connection, *, payload: dict[str, Any
     conn.executemany("INSERT INTO link_transitions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", link_transition_rows)
 
 
+def _insert_impulsive_maneuvers(conn: sqlite3.Connection, *, payload: dict[str, Any]) -> None:
+    rows = []
+    for item in payload.get("impulsive_maneuvers", ()):
+        event = dict(item)
+        dv = list(event["delta_v_eci_m_s"])
+        pre = list(event["pre_state_eci"])
+        post = list(event["post_state_eci"])
+        if len(dv) != 3 or len(pre) != 6 or len(post) != 6:
+            raise ValueError("Malformed impulsive maneuver state evidence")
+        rows.append((
+            str(event["maneuver_id"]), str(event["object_id"]), int(event["sample_index"]),
+            float(event["time_s"]), str(event["frame"]),
+            *(float(value) for value in (*dv, *pre, *post)),
+        ))
+    conn.executemany(
+        "INSERT INTO impulsive_maneuvers VALUES (" + ", ".join("?" for _ in range(20)) + ")",
+        rows,
+    )
+
+
 def _insert_events(
     conn: sqlite3.Connection,
     *,
     t_s: np.ndarray,
     summary: dict[str, Any],
     thrust_hist: dict[str, np.ndarray],
+    impulsive_maneuvers: list[dict[str, Any]] | tuple[dict[str, Any], ...] = (),
 ) -> None:
     rows = []
     if bool(summary.get("terminated_early", False)):
@@ -2406,6 +2459,15 @@ def _insert_events(
                 "mission_recovery_planner",
             )
         )
+    for impulse in impulsive_maneuvers:
+        dv = np.asarray(impulse["delta_v_eci_m_s"], dtype=float)
+        rows.append((
+            f"impulsive_maneuver:{impulse['maneuver_id']}",
+            float(impulse["time_s"]), int(impulse["sample_index"]),
+            str(impulse["object_id"]), "impulsive_maneuver", "info",
+            f"{impulse['maneuver_id']} applied {float(np.linalg.norm(dv)):.9g} m/s ECI impulse",
+            "impulsive_maneuvers",
+        ))
     for object_id, hist in thrust_hist.items():
         if hist.shape[1] < 3:
             continue

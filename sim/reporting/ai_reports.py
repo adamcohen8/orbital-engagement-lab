@@ -1,9 +1,9 @@
-"""Orbital Engagement Pro AI reports are not included in the public core."""
+"""Orbital Engineering Lab Pro AI reports are not included in the public core."""
 
 
 def _unavailable(*args, **kwargs):
     raise ImportError(
-        "AI-assisted campaign reports are part of Orbital Engagement Pro. "
+        "AI-assisted campaign reports are part of Orbital Engineering Lab Pro. "
         "The public core includes deterministic single-run simulation, public plots, "
         "examples, and APIs without hosted LLM provider integrations."
     )

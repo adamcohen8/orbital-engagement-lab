@@ -180,13 +180,6 @@ class HostedClient:
         ):
             raise ValueError("Hosted result transfer does not match the requested job and tenant.")
 
-        if (
-            not isinstance(transfer, Mapping)
-            or transfer.get("job_id") != str(job_id)
-            or transfer.get("tenant_id") != self.profile["tenant_id"]
-        ):
-            raise ValueError("Hosted result transfer does not match the requested job and tenant.")
-
         def read_file(artifact_id: str, relative_path: str) -> bytes:
             response = self.transport.call(
                 "read_result_file",
@@ -223,6 +216,65 @@ class HostedClient:
                 "artifact_count": len(receipt["artifacts"]),
                 "artifact_bytes": total_bytes,
             },
+        )
+        return receipt
+
+    def pull_review_slice(
+        self,
+        job_id: str,
+        destination: str | Path,
+        *,
+        start_s: float,
+        end_s: float,
+        object_ids: Sequence[str] = (),
+        families: Sequence[str] = ("state", "relative", "control", "events"),
+    ) -> dict[str, Any]:
+        selection = {
+            "start_s": float(start_s), "end_s": float(end_s),
+            "object_ids": sorted(set(map(str, object_ids))),
+            "families": sorted(set(map(str, families))),
+        }
+        transfer = self.transport.call(
+            "prepare_review_slice_transfer",
+            {"token": self.token, "job_id": str(job_id), **selection},
+        )
+        if (
+            not isinstance(transfer, Mapping)
+            or transfer.get("job_id") != str(job_id)
+            or transfer.get("tenant_id") != self.profile["tenant_id"]
+            or transfer.get("selection") != selection
+            or len(transfer.get("artifacts", [])) != 1
+            or transfer["artifacts"][0].get("kind") != "review_slice"
+        ):
+            raise ValueError("Hosted review slice transfer does not match the requested job, tenant, or selection.")
+        slice_id = str(transfer["slice_id"])
+
+        def read_file(artifact_id: str, relative_path: str) -> bytes:
+            if artifact_id != f"review_slice:{slice_id}":
+                raise ValueError("Hosted review slice artifact identity changed.")
+            response = self.transport.call(
+                "read_review_slice_file",
+                {"token": self.token, "job_id": str(job_id), "slice_id": slice_id,
+                 "relative_path": relative_path},
+            )
+            payload = base64.b64decode(str(response["content_base64"]), validate=True)
+            if (
+                response.get("artifact_id") != artifact_id
+                or response.get("relative_path") != relative_path
+                or response.get("bytes") != len(payload)
+                or response.get("content_sha256") != hashlib.sha256(payload).hexdigest()
+            ):
+                raise ValueError("Hosted review slice file failed transport verification.")
+            return payload
+
+        receipt = import_result_transfer(transfer, destination, read_file=read_file)
+        append_event(
+            self.ledger_path,
+            "review_slice_imported",
+            {"job_id": str(job_id), "slice_id": slice_id,
+             "transfer_sha256": receipt["transfer_sha256"],
+             "receipt_sha256": receipt["receipt_sha256"],
+             "artifact_bytes": sum(int(row["bytes"]) for row in receipt["artifacts"][0]["files"])},
         )
         return receipt
 

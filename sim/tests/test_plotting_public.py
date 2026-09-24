@@ -151,7 +151,7 @@ def test_oel_plot_style_adds_public_safe_footer(tmp_path: Path) -> None:
 
     assert path.exists()
     assert path.parent.exists()
-    assert any("Orbital Engagement Lab" in text for text in footer_texts)
+    assert any("Orbital Engineering Lab" in text for text in footer_texts)
     assert any("scenario: style_smoke" in text for text in footer_texts)
 
 
@@ -198,7 +198,7 @@ def test_oel_animation_save_adds_public_safe_footer(tmp_path: Path) -> None:
     assert path.parent.exists()
     assert captured["path"] == str(path)
     assert captured["fps"] == 4.0
-    assert any("Orbital Engagement Lab" in text for text in footer_texts)
+    assert any("Orbital Engineering Lab" in text for text in footer_texts)
     assert any("artifact: style_smoke_movie" in text for text in footer_texts)
 
 

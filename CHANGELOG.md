@@ -1,10 +1,53 @@
 # Changelog
 
-All notable changes to Orbital Engagement Lab will be tracked in this file.
+All notable changes to Orbital Engineering Lab will be tracked in this file.
 
 This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
+
+## 0.31.0 - 2026-09-24
+
+### Public core
+
+- Rename the product to Orbital Engineering Lab, use the renamed public GitHub
+  repository and Vercel address, and publish 23 public JSON Schemas at the
+  engineering-name Vercel `/schemas/` path. The former Vercel address redirects.
+- Add an opt-in headless ground segment with contact and outage gating,
+  delayed tracking and resource telemetry, ground-side orbit estimation,
+  freshness-aware snapshots, and review-store evidence. Orbit estimation
+  requires an explicit prior and remains experimental.
+- Add opt-in ONP spacecraft thermal and power models: one thermal node with
+  solar/albedo/Earth-IR heating, fixed solar panels, bounded battery storage,
+  energy ledgers, live truth snapshots, and CSV/JSON/SQLite review evidence.
+- Extend native RCS hardware with optional COM-relative mounting moments and
+  reaction wheels with optional inertia/speed limits. Existing centered-jet and
+  momentum-only wheel configurations retain their behavior.
+- Add opt-in custom ONP force-model plugins with module-path and runtime-output
+  validation. Plugin code must be trusted before ordinary scenario execution.
+- Add content-bound review slices for selected completed-run evidence.
+
+### Pro and private services
+
+- Add a separate experimental private package for force-configurable impulsive
+  trajectory targeting with bounded event-based coast/burn studies and
+  external-reference checks. The existing public targeter stays public.
+- Add Pro Monte Carlo design methods, campaign review-retention policies and
+  datasets, bounded campaign summary/report evidence, and explicit campaign
+  file-path validation.
+- Add opt-in Pro solid/ocean tides, Earth radiation, and Schwarzschild
+  perturbations with declared model limits. Selected kernels have optional
+  Numba acceleration with Python fallback and numerical-parity checks.
+- Add private Hosted control-plane transfer for review slices. Public Hosted
+  client surfaces remain access and verification tools, not service access.
+
+### Compatibility and release operations
+
+- Keep the signed v1 release-manifest product value, established `oel`
+  command, desktop bundle ID, and existing user state readable by older
+  installations. New package and artifact names use Orbital Engineering Lab.
+- Add release-artifact retention tooling and tighten public-export inventory
+  tests so Pro-only suites remain outside the generated public tree.
 
 ## 0.30.1 - 2026-09-16
 

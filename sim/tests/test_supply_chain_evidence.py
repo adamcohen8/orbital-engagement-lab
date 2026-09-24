@@ -15,11 +15,11 @@ def _source_project_version() -> str:
 
 
 def test_generate_python_sbom_contains_project_metadata() -> None:
-    sbom = build_sbom(project_name="orbital-engagement-lab")
+    sbom = build_sbom(project_name="orbital-engineering-lab")
 
     assert sbom["bomFormat"] == "CycloneDX"
     assert sbom["specVersion"] == "1.5"
-    assert dict(sbom["metadata"])["component"]["name"] == "orbital-engagement-lab"
+    assert dict(sbom["metadata"])["component"]["name"] == "orbital-engineering-lab"
     assert dict(sbom["metadata"])["component"]["version"] == _source_project_version()
     assert any(component["name"].lower() == "numpy" for component in list(sbom["components"]))
     assert all("hashes" not in component for component in list(sbom["components"]))

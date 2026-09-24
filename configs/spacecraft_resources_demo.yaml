@@ -1,0 +1,74 @@
+scenario_name: spacecraft_resources_demo
+metadata:
+  owner: public
+  public_surface: public-example
+  support_level: experimental
+scenario_description: Single-node thermal and battery truth through a LEO day/night cycle.
+objects:
+  spacecraft:
+    kind: satellite
+    runtime_profile: trajectory_only
+    specs:
+      mass_kg: 100.0
+      thermal:
+        enabled: true
+        initial_temperature_k: 290.0
+        heat_capacity_j_k: 80000.0
+        solar_absorptivity: 0.3
+        infrared_emissivity: 0.8
+        projected_area_m2: 1.0
+        radiating_area_m2: 4.0
+        internal_heat_w: 0.0
+        earth_albedo: 0.3
+        earth_ir_w_m2: 237.0
+        max_step_s: 1.0
+      power:
+        enabled: true
+        panels:
+          - area_m2: 2.0
+            normal_body: [1.0, 0.0, 0.0]
+            efficiency: 0.3
+        baseline_load_w: 150.0
+        battery_capacity_wh: 500.0
+        initial_soc: 0.6
+        max_charge_w: 200.0
+        max_discharge_w: 300.0
+        charge_efficiency: 0.95
+        discharge_efficiency: 0.95
+        conversion_efficiency: 0.95
+        load_heat_fraction: 1.0
+        max_step_s: 1.0
+    initial_state:
+      position_eci_km: [7000.0, 0.0, 0.0]
+      velocity_eci_km_s: [0.0, 7.5460532901, 0.0]
+      attitude_quat_bn: [1.0, 0.0, 0.0, 0.0]
+      angular_rate_body_rad_s: [0.0, 0.0, 0.0]
+simulator:
+  duration_s: 6000.0
+  dt_s: 10.0
+  initial_jd_utc: 2461303.5
+  dynamics:
+    orbit:
+      model: two_body
+      orbit_substep_s: 10.0
+      srp: false
+    attitude:
+      enabled: false
+  environment:
+    sun_pos_eci_km: [149597870.7, 0.0, 0.0]
+    srp_shadow_model: conical
+outputs:
+  output_dir: outputs/spacecraft_resources_demo
+  mode: save
+  stats:
+    enabled: true
+    print_summary: false
+    save_json: true
+    save_full_log: false
+  review:
+    enabled: true
+    detail: standard
+  plots:
+    enabled: false
+  animations:
+    enabled: false

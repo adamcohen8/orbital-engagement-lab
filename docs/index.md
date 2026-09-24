@@ -92,7 +92,9 @@ Start here when you already know the kind of work you want to run.
 | Fit reduced-geometric CCSDS TDM observations and inspect holdout predictions | [CCSDS TDM Tracking Orbit Determination](tracking-od.md) |
 | Schedule supplied observations and downlinks across a small multi-asset fleet | [Bounded Multi-Asset Mission Scheduling](mission-scheduling.md) |
 | Compare a bounded set of Walker/shell constellations and ground networks | [Constellation And Ground-Network Design](constellation-design.md) |
-| Check eclipse-coupled solar-array and battery feasibility for one orbit and load timeline | [Spacecraft Power Analysis](spacecraft-power.md) |
+| Check eclipse-coupled solar-array and battery feasibility from a retained orbit and load timeline | [Spacecraft Power Analysis](spacecraft-power.md) |
+| Simulate one-node thermal and bounded battery state during ONP propagation | [Spacecraft Thermal and Power Resources](models/spacecraft-resources.md) |
+| Model delayed ground tracking, telemetry, and service outages | [Headless Ground Segment](models/ground-segment.md) |
 | Propagate one deterministic drag-decay case or compare frozen atmosphere assumptions | [Deterministic Orbit Lifetime Analysis](orbit-lifetime.md) |
 | Bind completed analyses into one evidence-cited, content-bound study | [Integrated Study Lifecycle](study-lifecycle.md) |
 

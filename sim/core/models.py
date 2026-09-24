@@ -14,6 +14,7 @@ class StateTruth:
     angular_rate_body_rad_s: np.ndarray
     mass_kg: float
     t_s: float
+    resource_state: dict[str, float] | None = None
 
     def copy(self) -> StateTruth:
         return StateTruth(
@@ -23,6 +24,7 @@ class StateTruth:
             angular_rate_body_rad_s=self.angular_rate_body_rad_s.copy(),
             mass_kg=float(self.mass_kg),
             t_s=float(self.t_s),
+            resource_state=None if self.resource_state is None else dict(self.resource_state),
         )
 
 

@@ -231,6 +231,18 @@ def build_parameter_sensitivity_rankings(run_details: list[dict[str, Any]]) -> l
         name: np.array([safe_float(dict(d.get("gate_metrics", {}) or {}).get(name)) for d in run_details], dtype=float)
         for name in gate_metric_names
     }
+    study_metric_names = sorted(
+        {
+            str(name)
+            for detail in run_details
+            for name in dict(detail.get("metrics", {}) or {}).keys()
+            if str(name)
+        }
+    )
+    study_metric_arrays = {
+        name: np.array([safe_float(dict(d.get("metrics", {}) or {}).get(name)) for d in run_details], dtype=float)
+        for name in study_metric_names
+    }
 
     for path in sorted(all_paths):
         vals: list[float] = []
@@ -265,7 +277,10 @@ def build_parameter_sensitivity_rankings(run_details: list[dict[str, Any]]) -> l
         corr_ca = _abs_corr(ca_arr)
         corr_dv = _abs_corr(dv_arr)
         metric_corrs = {name: _abs_corr(arr) for name, arr in gate_metric_arrays.items()}
-        finite_corrs = np.array([corr_pass, corr_ca, corr_dv, *metric_corrs.values()], dtype=float)
+        study_metric_corrs = {name: _abs_corr(arr) for name, arr in study_metric_arrays.items()}
+        finite_corrs = np.array(
+            [corr_pass, corr_ca, corr_dv, *metric_corrs.values(), *study_metric_corrs.values()], dtype=float
+        )
         finite_corrs = finite_corrs[np.isfinite(finite_corrs)]
         importance = float(np.max(finite_corrs)) if finite_corrs.size else float("nan")
         if not np.isfinite(importance):
@@ -278,6 +293,7 @@ def build_parameter_sensitivity_rankings(run_details: list[dict[str, Any]]) -> l
                 "abs_corr_closest_approach_km": corr_ca,
                 "abs_corr_total_dv_m_s": corr_dv,
                 "abs_corr_gate_metrics": metric_corrs,
+                "abs_corr_study_metrics": study_metric_corrs,
                 "importance_score": importance,
             }
         )

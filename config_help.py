@@ -8,7 +8,7 @@ from sim.config.help import format_config_help, format_config_help_list, load_co
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Show valid options and descriptions for Orbital Engagement Lab YAML config fields."
+        description="Show valid options and descriptions for Orbital Engineering Lab YAML config fields."
     )
     parser.add_argument("query", nargs="*", help='Field/topic to look up, for example: "ephemeris model".')
     parser.add_argument("--list", action="store_true", help="List known config help topics.")

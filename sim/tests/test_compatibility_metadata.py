@@ -399,8 +399,10 @@ def test_compatibility_packet_rejects_incomplete_or_vulnerable_audit(
         )
 
 
+@pytest.mark.parametrize("project_name", ("orbital-engineering-lab", "orbital-engagement-lab"))
 def test_compatibility_packet_allows_only_the_local_first_party_project_to_be_unaudited(
     tmp_path: Path,
+    project_name: str,
 ) -> None:
     audit = tmp_path / "pip-audit.json"
     audit.write_text(
@@ -417,7 +419,7 @@ def test_compatibility_packet_allows_only_the_local_first_party_project_to_be_un
         audit,
         installed_versions={
             "numpy": "2.4.6",
-            "orbital-engagement-lab": "0.23.1",
+            project_name: "0.23.1",
         },
     )
 

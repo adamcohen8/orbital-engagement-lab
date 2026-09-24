@@ -105,6 +105,16 @@ def _parser() -> argparse.ArgumentParser:
     _add_connection(pull)
     pull.add_argument("job_id")
     pull.add_argument("--destination", type=Path, required=True)
+    review_slice = commands.add_parser(
+        "pull-review-slice", help="Export only a bounded review slice from a completed hosted job."
+    )
+    _add_connection(review_slice)
+    review_slice.add_argument("job_id")
+    review_slice.add_argument("--destination", type=Path, required=True)
+    review_slice.add_argument("--start-s", type=float, required=True)
+    review_slice.add_argument("--end-s", type=float, required=True)
+    review_slice.add_argument("--object", action="append", default=[])
+    review_slice.add_argument("--family", action="append", default=[])
     return parser
 
 
@@ -189,6 +199,13 @@ def main(argv: list[str] | None = None) -> int:
             result = _client(args).get_job(args.job_id)
         elif args.command == "cancel":
             result = _client(args).cancel(args.job_id)
+        elif args.command == "pull-review-slice":
+            result = _client(args).pull_review_slice(
+                args.job_id, args.destination,
+                start_s=args.start_s, end_s=args.end_s,
+                object_ids=args.object,
+                families=args.family or ("state", "relative", "control", "events"),
+            )
         else:
             result = _client(args).pull_results(args.job_id, args.destination)
         _print(result)

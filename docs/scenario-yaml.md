@@ -87,8 +87,10 @@ ID. The conventional IDs `rocket`, `chaser`, and `target` are names rather than
 fixed engine slots. Legacy top-level `rocket`, `chaser`, and `target` sections
 are no longer accepted; use `objects.<id>` entries instead.
 
-Passive ground stations can be defined at the top level. They do not control or
-estimate spacecraft state; they only record access to active scene objects.
+Ground stations can be defined at the top level for passive access histories.
+The separate `ground_segment` layer can also consume configured station
+measurements and service availability to maintain ground-side state and
+telemetry; stations do not control spacecraft.
 
 ```yaml
 ground_stations:
@@ -324,9 +326,10 @@ compatibility and warns when configured for a non-ECI product frame.
 
 ## Ground Stations
 
-Ground stations are passive scene observers. They are useful when you want to
-know when a site can see configured objects without adding a sensor, estimator,
-controller, or mission behavior to the object itself.
+Ground stations define site geometry for passive access reports. To use their
+tracking measurements and service availability in a delayed ground-knowledge
+model, enable the separate top-level `ground_segment` section below. This does
+not add a controller or ground-estimator behavior to the spacecraft itself.
 
 ```yaml
 ground_stations:
@@ -382,6 +385,56 @@ to `2026-01-01T00:00:00Z`.
 Add `ground_station_access` to `outputs.plots.figure_ids` for a built-in access,
 elevation, and slant-range figure. Set `outputs.plots.draw_earth_map: true`
 when static ground-track figures should use a world-map background.
+
+## Ground Segment
+
+Ground stations remain passive access observers unless the top-level
+`ground_segment` section is enabled. The ground segment can receive the
+stations' configured tracking measurements and ideal resource telemetry after
+a delay, apply explicit service outages, and maintain a separate ground-side
+orbit estimate. See
+[`ground_segment_demo.yaml`](../configs/ground_segment_demo.yaml) for a
+complete example.
+
+```yaml
+ground_segment:
+  enabled: true
+  cadence_s: 1.0
+  latency_s: 2.0
+  stale_after_s: 10.0
+  prediction_step_s: 1.0
+  priors:
+    sat:
+      state: [6999.7, -134.3, 0.0, 0.144, 7.509, 0.0] # ECI km, km/s
+      covariance:
+        - [1, 0, 0, 0, 0, 0]
+        - [0, 1, 0, 0, 0, 0]
+        - [0, 0, 1, 0, 0, 0]
+        - [0, 0, 0, 0.001, 0, 0]
+        - [0, 0, 0, 0, 0.001, 0]
+        - [0, 0, 0, 0, 0, 0.001]
+      epoch_s: 0.0
+  outages:
+    - station_id: test
+      start_s: 20.0
+      end_s: 40.0
+      services: [tracking, downlink]
+```
+
+Use station `measurements.enabled: true` for tracking updates. A
+`priors.<object_id>` entry is required to initialize that object's orbit
+posterior; without one, received tracking is retained but no orbit is estimated.
+The prior state is ECI position and velocity, its 6x6 covariance uses the
+corresponding squared and cross units, and `epoch_s` is relative to scenario
+start and must be zero or earlier. Cadences must be integer multiples of
+`simulator.dt_s`; outage intervals include their start and exclude their end.
+
+The ground estimate predicts with two-body dynamics and has no access to truth
+forces, maneuvers, or faults. Its stale threshold is a display policy, not an
+accuracy guarantee. This experimental layer models geometric access and
+explicit outages; it does not model RF budgets, weather, bandwidth, packet loss,
+or command execution. See [Ground Segment](models/ground-segment.md) for the
+full data and scope contract.
 
 ## Flight-software stacks and component discovery
 
@@ -476,6 +529,52 @@ the satellite runtime; compose it behind a complete stack first.
 
 File-path plugin loading is not supported in scenario YAML. Custom extensions
 should live on the Python import path and be referenced with `module`.
+
+### Custom ONP force models
+
+This experimental extension lets an ONP satellite opt into one or more
+object-scoped acceleration models:
+
+```yaml
+simulator:
+  initial_jd_utc: 2460000.5
+  dynamics:
+    orbit:
+      model: two_body
+objects:
+  capsule:
+    kind: satellite
+    runtime_profile: trajectory_only
+    initial_state:
+      default_circular_earth: true
+    force_models:
+      - module: my_forces
+        class_name: MyForce
+        params:
+          strength_km_s2: 0.000001
+```
+
+`MyForce(**params)` must implement
+`acceleration(state_eci_km_km_s, epoch_jd_utc)`. A stateless model may use
+`function: my_force` in place of `class_name`; function pointers do not accept
+`params`. The input is a read-only six-element snapshot: ECI position in km,
+then ECI velocity in km/s. The epoch is the absolute UTC Julian date for the
+current integrator evaluation, including intermediate and rejected adaptive
+stages. The return value must be exactly three finite ECI acceleration
+components in km/s². OEL adds each result to its normal two-body, configured
+perturbation, and command accelerations; disable a built-in force if a plugin
+replaces that same force to avoid double counting. Models must be deterministic
+and safe to call multiple times at the same or nonmonotonic epochs. Each
+satellite gets its own class instance.
+
+Force models require `simulator.initial_jd_utc` and ECI ONP special
+propagation. They are unavailable in OGP and rotating CR3BP propagation.
+Arbitrary Python modules are trusted local code: use `--safe-validate` before
+importing validation for unfamiliar scenarios, and review the module before
+running it. Sealed mode blocks untrusted module imports unless explicitly
+allowed. Users must validate the plugin's physics, inputs, and rights to use
+its data. This acceleration interface does not supply atmospheric density,
+winds, heating, or reentry diagnostics; those need separate model interfaces.
 
 ## Dynamics And Timing
 
@@ -1089,3 +1188,11 @@ outputs:
 
 Use `configs/automation_smoke.yaml` for the smallest headless example and
 `configs/simulation_template.yaml` for the broader reference template.
+
+## Spacecraft thermal and power resources
+
+ONP satellites may independently enable `specs.thermal` and `specs.power`.
+See [Spacecraft resources](models/spacecraft-resources.md) for the single-node
+heat balance, fixed-panel generation, bounded battery, units, geometry contract,
+and evidence fields. The [example](../configs/spacecraft_resources_demo.yaml)
+includes Earth albedo/IR and eclipse with SRP acceleration disabled.

@@ -362,7 +362,7 @@ def _oel_version() -> str:
     try:
         from importlib.metadata import version
 
-        return version("orbital-engagement-lab")
+        return version("orbital-engineering-lab")
     except Exception:
         return "0.25.0"
 

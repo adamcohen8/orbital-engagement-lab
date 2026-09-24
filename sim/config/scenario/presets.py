@@ -27,6 +27,7 @@ _AGENT_FRAGMENT_KEYS = {
     "mission_strategy",
     "mission_execution",
     "mission_objectives",
+    "force_models",
     "bridge",
     "knowledge",
 }

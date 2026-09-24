@@ -39,7 +39,7 @@ const AUTO_TIME_STATUS_LABELS = Object.freeze({
   maneuvering: "BURN",
 });
 const HOSTED_LEVEL_SELECTOR_URL = document.querySelector('meta[name="oel-level-selector-url"]')?.content.trim()
-  || "https://orbital-engagement-lab.vercel.app/";
+  || "https://orbital-engineering-lab.vercel.app/";
 const duelMusic = new Audio(DUEL_MUSIC_SOURCE);
 duelMusic.loop = true;
 duelMusic.preload = "none";

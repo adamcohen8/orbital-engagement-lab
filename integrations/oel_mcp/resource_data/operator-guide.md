@@ -15,7 +15,7 @@ trust, paths, validation and resource bounds on every call. For errors, use
 optional `error.recovery` in tool envelopes or `data.recovery` in SDK admission
 errors. These contain a stable code, the actor needed and an applicable action.
 
-- Install with `python -m pip install "orbital-engagement-lab[mcp]"`.
+- Install with `python -m pip install "orbital-engineering-lab[mcp]"`.
 - Start with `oel-mcp`; the official SDK adapter is the default.
 - Run `oel-mcp --doctor` before connecting a host. Use
   `oel-mcp --print-host-config codex` or `claude` for a launchable starting
@@ -82,6 +82,14 @@ deterministic scenario run, completed-run comparison, allowlisted plots, and
 supported public scenario-task recipes. Validation never authorizes execution.
 Run tools require a matching trusted validation ID where applicable, a safe
 resource preflight, a new output directory, and a server-configured approval.
+
+The ordinary scenario tools can run a supported existing config that opts into
+the headless `ground_segment` layer or ONP `specs.thermal`/`specs.power` models;
+these are scenario features, not standalone analysis tools. Use the
+`docs/agent-capability-routing.md` entry points and the corresponding
+`docs/models/ground-segment.md` or `docs/models/spacecraft-resources.md` contract
+to prepare and interpret those runs. There is no separate MCP tool that authors
+these scenario sections.
 
 Provider-neutral report packet and audit tools can hash completed local
 evidence and verify report structure/references. They do not call a model or

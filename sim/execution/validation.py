@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from sim.config import SimulationScenarioConfig, validate_scenario_plugins
+from sim.config import SimulationScenarioConfig, scenario_config_from_dict, validate_scenario_plugins
 from sim.execution.study import analysis_study_type
 
 
@@ -54,32 +54,56 @@ def validate_generated_batch_configs(
             import_plugins=import_plugins,
         )
 
-    errors: list[dict[str, Any]] = []
-    for idx, item in enumerate(prepared):
-        config_dict = dict(item.get("config_dict", {}) or {})
-        try:
-            run_cfg = item.get("cfg")
-            if run_cfg is None:
-                from sim.config import scenario_config_from_dict
+    report, _validated = validate_prepared_monte_carlo_runs(
+        prepared=prepared,
+        strict_plugins=strict_plugins,
+        import_plugins=import_plugins,
+    )
+    return report
 
-                run_cfg = scenario_config_from_dict(config_dict)
-            if strict_plugins:
-                errors.extend(
-                    {
-                        "iteration": idx,
-                        "parameter_path": None,
-                        "parameter_value": None,
-                        "error": str(err),
-                    }
-                    for err in validate_scenario_plugins(run_cfg, import_plugins=import_plugins)
-                )
+
+def validate_prepared_monte_carlo_runs(
+    *,
+    prepared: list[dict[str, Any]],
+    strict_plugins: bool,
+    import_plugins: bool = True,
+) -> tuple[dict[str, Any], list[SimulationScenarioConfig | None]]:
+    """Validate every sampled scenario before a Monte Carlo worker starts."""
+
+    errors: list[dict[str, Any]] = []
+    validated: list[SimulationScenarioConfig | None] = []
+    for item in prepared:
+        iteration = int(item.get("iteration", len(validated)))
+        sampled = dict(item.get("sampled_parameters", {}) or {})
+        try:
+            run_cfg = scenario_config_from_dict(dict(item.get("config_dict", {}) or {}))
+            plugin_errors = validate_scenario_plugins(run_cfg, import_plugins=import_plugins) if strict_plugins else []
         except Exception as exc:
+            validated.append(None)
+            plugin_errors = [str(exc)]
+        else:
+            validated.append(run_cfg)
+        for error in plugin_errors:
             errors.append(
                 {
-                    "iteration": idx,
-                    "parameter_path": None,
-                    "parameter_value": None,
-                    "error": str(exc),
+                    "iteration": iteration,
+                    "parameter_path": next(iter(sampled), None) if len(sampled) == 1 else None,
+                    "parameter_value": next(iter(sampled.values()), None) if len(sampled) == 1 else None,
+                    "sampled_parameters": sampled,
+                    "error": str(error),
                 }
             )
-    return {"run_count": len(prepared), "errors": errors}
+    return {"run_count": len(prepared), "errors": errors}, validated
+
+
+def raise_for_monte_carlo_preflight_errors(report: dict[str, Any]) -> None:
+    errors = list(report.get("errors", []) or [])
+    if not errors:
+        return
+    details = [
+        f"iteration {error.get('iteration')} ({dict(error.get('sampled_parameters', {}) or {})}): {error.get('error')}"
+        for error in errors[:10]
+    ]
+    if len(errors) > 10:
+        details.append(f"... and {len(errors) - 10} more error(s)")
+    raise ValueError("Monte Carlo generated-run preflight failed:\n- " + "\n- ".join(details))

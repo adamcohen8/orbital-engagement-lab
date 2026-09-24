@@ -128,6 +128,10 @@ def _scale_translational_realizations(
             realization = replace(
                 realization,
                 realized_force_n=tuple(float(value) * scale for value in realization.realized_force_n),
+                realized_torque_n_m=(
+                    tuple(float(value) * scale for value in realization.realized_torque_n_m)
+                    if isinstance(hardware, RcsThrusterHardware) else realization.realized_torque_n_m
+                ),
                 mass_flow_kg_s=float(realization.mass_flow_kg_s) * scale,
                 saturated=True,
             )
@@ -1006,7 +1010,14 @@ class SatelliteFlightSoftwareRuntime:
         now: ClockTag,
     ) -> InputEvent:
         target_state = np.hstack((target.position_eci_km, target.velocity_eci_km_s))
-        observer_state = np.hstack((observer.position_eci_km, observer.velocity_eci_km_s))
+        if self._target_access is None:
+            observer_position = observer.position_eci_km
+            observer_velocity = observer.velocity_eci_km_s
+        else:
+            # The access gate and measurement share the sensor phase center,
+            # including velocity from body rotation about the spacecraft COM.
+            observer_position, observer_velocity, _ = self._target_access._sensor_state_eci(observer)
+        observer_state = np.hstack((observer_position, observer_velocity))
         # Canonical RPO convention: the controlled satellite is the deputy and
         # the tracked/reference object is the chief.  State is therefore
         # deputy relative to chief, expressed in the chief's RIC frame.
@@ -1153,6 +1164,8 @@ def reaction_wheel_device(
     max_torque_n_m: tuple[float, ...],
     max_momentum_n_m_s: tuple[float, ...],
     initial_momentum_n_m_s: tuple[float, ...] | None = None,
+    inertia_kg_m2: tuple[float, ...] | None = None,
+    max_speed_rad_s: tuple[float, ...] | None = None,
 ) -> tuple[ActuatorDeviceDefinition, ReactionWheelHardware]:
     return (
         ActuatorDeviceDefinition(
@@ -1172,6 +1185,8 @@ def reaction_wheel_device(
             max_torque_n_m=max_torque_n_m,
             max_momentum_n_m_s=max_momentum_n_m_s,
             initial_momentum_n_m_s=initial_momentum_n_m_s,
+            inertia_kg_m2=inertia_kg_m2,
+            max_speed_rad_s=max_speed_rad_s,
         ),
     )
 
@@ -1239,6 +1254,7 @@ def rcs_thruster_device(
     *,
     direction_body: tuple[float, float, float],
     max_thrust_n: float,
+    position_body_m: tuple[float, float, float] = (0.0, 0.0, 0.0),
     specific_impulse_s: float | None = None,
 ) -> tuple[ActuatorDeviceDefinition, RcsThrusterHardware]:
     return (
@@ -1253,6 +1269,7 @@ def rcs_thruster_device(
             actuator_id,
             direction_body=direction_body,
             max_thrust_n=max_thrust_n,
+            position_body_m=position_body_m,
             specific_impulse_s=specific_impulse_s,
         ),
     )

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -510,6 +511,19 @@ class SimulationResult:
             belief=belief,
             applied_thrust=thrust,
             applied_torque=torque,
+            ground_segment=deepcopy(
+                next(
+                    (r for r in self.payload.get("ground_segment", [])
+                     if abs(r["time_s"] - float(self.time_s[step_index])) < 1e-9),
+                    {},
+                )
+            ),
+            spacecraft_resources={
+                oid: dict(row)
+                for oid, rows in self.payload.get("spacecraft_resources", {}).items()
+                for row in rows
+                if abs(row["time_s"] - float(self.time_s[step_index])) < 1e-9
+            },
         )
 
     def state_history(self, object_id: str) -> np.ndarray:

@@ -3,4 +3,4 @@ SUPABASE_SERVICE_ROLE_KEY=your-server-only-service-role-key
 OEL_ARCADE_ALLOWED_ORIGIN=https://your-preview-domain.example
 OEL_ARCADE_PUBLIC_ORIGIN=https://your-preview-domain.example
 RESEND_API_KEY=re_your-server-only-resend-api-key
-OEL_ARCADE_EMAIL_FROM=Orbital Engagement Lab <arcade@your-domain.example>
+OEL_ARCADE_EMAIL_FROM=Orbital Engineering Lab <arcade@your-domain.example>

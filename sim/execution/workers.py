@@ -4,6 +4,7 @@ import os
 from typing import Any
 
 from sim.config import scenario_config_from_dict, validate_scenario_plugins
+from sim.execution.campaign_retention import compact_iteration_result, policy_from_config
 from sim.execution.metrics import (
     closest_approach_from_run_payload,
     relative_motion_summary_from_run_payload,
@@ -90,6 +91,13 @@ def run_mc_iteration_from_dict(task: dict[str, Any]) -> dict[str, Any]:
         result["payload"] = ro
     if collect_relative_range_series:
         result["relative_range_series"] = relative_range_series_from_run_payload(ro)
+    policy = policy_from_config(cdict)
+    if policy:
+        result = compact_iteration_result(
+            ro, result, policy=policy,
+            metric_paths=list(task.get("metric_paths", []) or []),
+            output_dir=str(dict(cdict.get("outputs", {}) or {}).get("output_dir", "")),
+        )
     return result
 
 

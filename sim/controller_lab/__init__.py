@@ -1,9 +1,9 @@
-"""Orbital Engagement Pro controller-bench tools are not included in the public core."""
+"""Orbital Engineering Lab Pro controller-bench tools are not included in the public core."""
 
 
 def _unavailable(*args, **kwargs):
     raise ImportError(
-        "Controller-benchmark suites are part of Orbital Engagement Pro. "
+        "Controller-benchmark suites are part of Orbital Engineering Lab Pro. "
         "The public core supports single-run simulation, controllers, estimators, "
         "scenario YAML, and API workflows."
     )

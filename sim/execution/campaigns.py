@@ -1,9 +1,9 @@
-"""Orbital Engagement Pro campaign tools are not included in the public core."""
+"""Orbital Engineering Lab Pro campaign tools are not included in the public core."""
 
 
 def _unavailable(*args, **kwargs):
     raise ImportError(
-        "Monte Carlo campaign orchestration is part of Orbital Engagement Pro. "
+        "Monte Carlo campaign orchestration is part of Orbital Engineering Lab Pro. "
         "The public core supports deterministic single-run simulation and scenario YAML."
     )
 

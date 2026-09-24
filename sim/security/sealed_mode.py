@@ -161,6 +161,8 @@ def _plugin_pointers(agent: Any) -> list[tuple[str, Any]]:
         out.append((f"guidance_modifiers[{idx}]", pointer))
     for idx, pointer in enumerate(getattr(agent, "mission_objectives", []) or []):
         out.append((f"mission_objectives[{idx}]", pointer))
+    for idx, pointer in enumerate(getattr(agent, "force_models", []) or []):
+        out.append((f"force_models[{idx}]", pointer))
     bridge = getattr(agent, "bridge", None)
     if bridge is not None and getattr(bridge, "enabled", False):
         out.append(("bridge", bridge))

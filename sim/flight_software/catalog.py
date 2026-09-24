@@ -156,6 +156,8 @@ _ATTITUDE_PARAMS = _COMMON_PARAMS | {
     "wheel_max_torque_n_m",
     "wheel_max_momentum_n_m_s",
     "wheel_initial_momentum_n_m_s",
+    "wheel_inertia_kg_m2",
+    "wheel_max_speed_rad_s",
     "max_dipole_a_m2",
     "magnetic_field_body_t",
     "cmg_momentum_n_m_s",
@@ -235,6 +237,12 @@ _TRANSLATION_PARAMS = _COMMON_PARAMS | {
     "opponent_max_acceleration_m_s2",
     "prediction_acceleration_fractions",
     "rcs_thrusters",
+    "attitude_hardware_profile",
+    "wheel_axes_body",
+    "wheel_max_torque_n_m",
+    "wheel_max_momentum_n_m_s",
+    "wheel_inertia_kg_m2",
+    "wheel_max_speed_rad_s",
     "rcs_pulse_window_s",
     "gimbal_limit_rad",
     "attitude_reference_mode",
@@ -316,6 +324,21 @@ def validate_stack_params(stack_id: str, params: dict[str, object]) -> None:
             for axis in axes
         ):
             raise ValueError("flight_software.params.wheel_axes_body must contain unit vectors.")
+    if ("wheel_inertia_kg_m2" in params) != ("wheel_max_speed_rad_s" in params):
+        raise ValueError("wheel_inertia_kg_m2 and wheel_max_speed_rad_s must be supplied together.")
+    for key in ("wheel_inertia_kg_m2", "wheel_max_speed_rad_s"):
+        if key in params:
+            try:
+                values = [float(value) for value in params[key]]
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"flight_software.params.{key} must be a positive finite array.") from exc
+            count = len(params.get("wheel_axes_body", ((1,0,0),(0,1,0),(0,0,1))))
+            if len(values) not in {1, count} or any(not isfinite(v) or v <= 0 for v in values):
+                raise ValueError(f"flight_software.params.{key} must match wheel count and be positive finite.")
+    if params.get("attitude_hardware_profile") not in (None, "hardware.ideal_wrench.v1", "hardware.reaction_wheels.v1"):
+        raise ValueError("Unsupported coupled attitude_hardware_profile.")
+    if "attitude_hardware_profile" in params and params.get("attitude_reference_mode") in (None, "", "none"):
+        raise ValueError("attitude_hardware_profile requires an attitude_reference_mode.")
     navigation = str(params.get("navigation_initialization", "ideal"))
     if navigation not in {"cold", "loaded", "ideal"}:
         raise ValueError("flight_software.params.navigation_initialization must be cold, loaded, or ideal.")

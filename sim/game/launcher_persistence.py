@@ -61,14 +61,21 @@ def _game_progress_path() -> Path:
     override = os.environ.get(GAME_PROGRESS_PATH_ENV)
     if override:
         return Path(override).expanduser()
-    return Path.home() / ".orbital_engagement_lab" / "game_progress.yaml"
+    return _user_state_path("game_progress.yaml")
 
 
 def _game_settings_path() -> Path:
     override = os.environ.get(GAME_SETTINGS_PATH_ENV)
     if override:
         return Path(override).expanduser()
-    return Path.home() / ".orbital_engagement_lab" / "game_settings.yaml"
+    return _user_state_path("game_settings.yaml")
+
+
+def _user_state_path(filename: str) -> Path:
+    current = Path.home() / ".orbital_engineering_lab" / filename
+    legacy = Path.home() / ".orbital_engagement_lab" / filename
+    # Keep existing user state in place; new users write under the new name.
+    return legacy if not current.exists() and legacy.exists() else current
 
 
 def _load_game_settings() -> GameSettings:

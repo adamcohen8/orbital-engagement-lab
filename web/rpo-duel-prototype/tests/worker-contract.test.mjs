@@ -182,7 +182,7 @@ test("landing header uses one wordmark scale and links back to the level selecto
   assert.match(stylesSource, /\.brand-product \{ font-size: inherit; \}/);
   assert.match(indexSource, /id="level-selector-link"[^>]+>Level Selector<\/a>/);
   assert.match(indexSource, /id="frame-convention-button"[^>]+>Frame: OEL<\/button>/);
-  assert.match(indexSource, /name="oel-level-selector-url" content="https:\/\/orbital-engagement-lab\.vercel\.app\/"/);
+  assert.match(indexSource, /name="oel-level-selector-url" content="https:\/\/orbital-engineering-lab\.vercel\.app\/"/);
   assert.match(clientSource, /localHost \? "\/trainer\/" : HOSTED_LEVEL_SELECTOR_URL/);
   assert.match(clientSource, /frameConvention: frameConventionFromSearch\(location\.search\)/);
   assert.match(clientSource, /window\.history\.replaceState\(window\.history\.state, "", currentUrl\.href\)/);

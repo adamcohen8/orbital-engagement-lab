@@ -459,7 +459,7 @@ def print_doctor_report(*, source_root: str | Path | None = None) -> bool:
 
     print("")
     print("=" * 88)
-    print("ORBITAL ENGAGEMENT LAB DOCTOR")
+    print("ORBITAL ENGINEERING LAB DOCTOR")
     print("=" * 88)
     print("Environment")
     _print_row(

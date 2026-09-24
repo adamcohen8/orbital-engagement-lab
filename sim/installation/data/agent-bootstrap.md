@@ -84,8 +84,11 @@ Keep private inputs and evidence within their authorized handling boundary.
 
 Detailed source-checkout references: `docs/agent-capability-routing.md`,
 `docs/scenario-yaml.md`, `docs/agent-run-lifecycle.md`, and
-`docs/flight-software-observations.md`. Repository maintenance and refactoring
-rules remain in the repository's own `AGENTS.md`; this workspace guide operates OEL.
+`docs/flight-software-observations.md`. For delayed ground tracking and telemetry,
+read `docs/models/ground-segment.md`; for onboard thermal and electrical resource
+histories, read `docs/models/spacecraft-resources.md`. Repository maintenance and
+refactoring rules remain in the repository's own `AGENTS.md`; this workspace guide
+operates OEL.
 
 ## Hosted access
 

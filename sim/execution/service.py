@@ -123,7 +123,7 @@ class SimulationExecutionService:
                 yaml.safe_dump(cfg.to_dict(), tmp, sort_keys=False)
             self._reject_batch_analysis(cfg)
             raise ImportError(
-                "Batch execution from in-memory configs is part of Orbital Engagement Pro. "
+                "Batch execution from in-memory configs is part of Orbital Engineering Lab Pro. "
                 "The public core runs deterministic single scenarios."
             )
         finally:
@@ -152,7 +152,7 @@ class SimulationExecutionService:
         if self.is_batch_analysis(cfg):
             raise ImportError(
                 "Monte Carlo, sensitivity, and other batch-analysis workflows are part of "
-                "Orbital Engagement Pro. The public core runs deterministic single scenarios."
+                "Orbital Engineering Lab Pro. The public core runs deterministic single scenarios."
             )
 
 

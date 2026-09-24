@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for taking a look at Orbital Engagement Lab.
+Thanks for taking a look at Orbital Engineering Lab.
 
 ## Development Setup
 

@@ -8,10 +8,12 @@ from typing import Any
 import numpy as np
 
 from sim.aero import aero_spec_get, resolve_vehicle_aero_properties
-from sim.config import SimulationScenarioConfig
+from sim.config import AlgorithmPointer, SimulationScenarioConfig
+from sim.config.plugin_specs import instantiate_plugin_spec, plugin_spec_field
 from sim.digital_twin.mass_properties import resolve_center_of_mass_body_m
 from sim.dynamics.attitude.disturbances import DisturbanceTorqueConfig, DisturbanceTorqueModel
 from sim.dynamics.model import OrbitalAttitudeDynamics
+from sim.dynamics.orbit.custom_force import CustomForceModel
 from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2
 from sim.dynamics.orbit.propagator import (
     OrbitPropagator,
@@ -94,6 +96,8 @@ def _build_orbit_propagator(
     cfg: SimulationScenarioConfig,
     *,
     scenario_uses_aerodynamic_lift: bool | None = None,
+    radiation_area_m2: float | None = None,
+    force_models: list[AlgorithmPointer] | None = None,
 ) -> OrbitPropagator:
     orbit = dict(cfg.simulator.dynamics.get("orbit", {}) or {})
     acceleration = dict(getattr(cfg.simulator, "acceleration", {}) or {})
@@ -108,6 +112,61 @@ def _build_orbit_propagator(
         plugins.append(j4_plugin)
     if sh_enabled:
         plugins.append(spherical_harmonics_plugin)
+    if bool(dict(orbit.get("schwarzschild", {}) or {}).get("enabled", False)):
+        try:
+            from sim.pro_perturbations.schwarzschild import SchwarzschildAcceleration
+        except ModuleNotFoundError as exc:
+            if exc.name not in {"sim.pro_perturbations", "sim.pro_perturbations.schwarzschild"}:
+                raise
+            raise ValueError("Schwarzschild acceleration requires the OEL Pro perturbation package.") from exc
+        plugins.append(SchwarzschildAcceleration(acceleration_mode=str(acceleration.get("mode", "off"))))
+    radiation = dict(orbit.get("earth_radiation", {}) or {})
+    if bool(radiation.get("enabled", False)):
+        try:
+            from sim.pro_perturbations.earth_radiation import EarthRadiationPressure
+        except ModuleNotFoundError as exc:
+            if exc.name not in {"sim.pro_perturbations", "sim.pro_perturbations.earth_radiation"}:
+                raise
+            raise ValueError("Earth radiation requires the OEL Pro perturbation package.") from exc
+        from sim.dynamics.orbit.frames import frame_context_from_mapping
+        plugins.append(EarthRadiationPressure(
+            frames=frame_context_from_mapping(dict(cfg.simulator.frames), jd_utc_start=cfg.simulator.initial_jd_utc),
+            albedo=bool(radiation.get("albedo", True)),
+            infrared=bool(radiation.get("infrared", True)),
+            quadrature_order=int(radiation.get("quadrature_order", 32)),
+            area_m2=radiation_area_m2,
+            acceleration_mode=str(acceleration.get("mode", "off")),
+        ))
+    ocean = dict(orbit.get("ocean_tides", {}) or {})
+    if bool(ocean.get("enabled", False)):
+        try:
+            from sim.pro_perturbations.ocean_tides import OceanTides
+        except ModuleNotFoundError as exc:
+            if exc.name not in {"sim.pro_perturbations", "sim.pro_perturbations.ocean_tides"}:
+                raise
+            raise ValueError("Ocean tides require the OEL Pro perturbation package.") from exc
+        from sim.dynamics.orbit.frames import frame_context_from_mapping
+        plugins.append(OceanTides(
+            frames=frame_context_from_mapping(dict(cfg.simulator.frames), jd_utc_start=cfg.simulator.initial_jd_utc),
+            acceleration_mode=str(acceleration.get("mode", "off")),
+            coeff_path=ocean["coeff_path"], degree=int(ocean.get("degree", 6)),
+            order=int(ocean.get("order", 6)), pole_tide=bool(ocean.get("pole_tide", True)),
+        ))
+    tides = dict(orbit.get("solid_earth_tides", {}) or {})
+    if bool(tides.get("enabled", False)):
+        try:
+            from sim.pro_perturbations.solid_earth_tides import SolidEarthTides
+        except ModuleNotFoundError as exc:
+            if exc.name not in {"sim.pro_perturbations", "sim.pro_perturbations.solid_earth_tides"}:
+                raise
+            raise ValueError("Solid Earth tides requires the OEL Pro perturbation package.") from exc
+        from sim.dynamics.orbit.frames import frame_context_from_mapping
+        plugins.append(SolidEarthTides(
+            frames=frame_context_from_mapping(dict(cfg.simulator.frames), jd_utc_start=cfg.simulator.initial_jd_utc),
+            tide_system=tides["tide_system"],
+            acceleration_mode=str(acceleration.get("mode", "off")),
+            pole_tide=bool(tides.get("pole_tide", True)),
+        ))
     if bool(orbit.get("drag", False)):
         plugins.append(drag_plugin)
         uses_aerodynamic_lift = (
@@ -123,6 +182,22 @@ def _build_orbit_propagator(
         plugins.append(third_body_sun_plugin)
     if bool(orbit.get("third_body_moon", False)):
         plugins.append(third_body_moon_plugin)
+    if force_models and cfg.simulator.initial_jd_utc is None:
+        raise ValueError("force models require simulator.initial_jd_utc")
+    for index, pointer in enumerate(force_models or []):
+        if plugin_spec_field(pointer, "builtin"):
+            raise ValueError(f"force model {index} requires an importable module, not builtin")
+        if plugin_spec_field(pointer, "function") and plugin_spec_field(pointer, "params"):
+            raise ValueError(f"force model {index} function does not accept params; use a class")
+        target = instantiate_plugin_spec(pointer, description=f"force model {index}")
+        acceleration_fn = getattr(target, "acceleration", None) if plugin_spec_field(pointer, "class_name") else target
+        if not callable(acceleration_fn):
+            raise ValueError(f"force model {index} must provide a callable acceleration method or function")
+        plugins.append(CustomForceModel(
+            acceleration=acceleration_fn,
+            initial_jd_utc=float(cfg.simulator.initial_jd_utc),
+            name=f"{plugin_spec_field(pointer, 'module')}.{plugin_spec_field(pointer, 'class_name') or plugin_spec_field(pointer, 'function')}",
+        ))
     return OrbitPropagator(
         model=str(orbit.get("model", "two_body") or "two_body"),
         cr3bp_system_name=str(orbit.get("cr3bp_system", "earth_moon") or "earth_moon"),
@@ -200,7 +275,13 @@ def _create_satellite_runtime(
         inertia_kg_m2=inertia_kg_m2,
         config=DisturbanceTorqueConfig(**disturbance_config_kwargs),
     )
+    from sim.spacecraft_resources import SpacecraftResources
+
+    resource_model = SpacecraftResources.from_specs(specs, geometry=geometry_area_profile)
+    if resource_model is not None:
+        truth.resource_state = resource_model.initial_state()
     dynamics = OrbitalAttitudeDynamics(
+        resource_model=resource_model,
         mu_km3_s2=EARTH_MU_KM3_S2,
         inertia_kg_m2=inertia_kg_m2,
         disturbance_model=disturbance_model if attitude_enabled else None,
@@ -220,7 +301,9 @@ def _create_satellite_runtime(
         propagate_attitude=attitude_enabled,
         orbit_propagator=_build_orbit_propagator(
             cfg,
+            radiation_area_m2=srp_area_m2,
             scenario_uses_aerodynamic_lift=scenario_uses_aerodynamic_lift,
+            force_models=agent_cfg.force_models,
         ),
         acceleration_mode=str(acceleration.get("mode", "off") or "off"),
     )

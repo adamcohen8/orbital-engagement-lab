@@ -1,9 +1,9 @@
-"""Orbital Engagement Pro covariance analysis tools are not included in the public core."""
+"""Orbital Engineering Lab Pro covariance analysis tools are not included in the public core."""
 
 
 def _unavailable(*args, **kwargs):
     raise ImportError(
-        "Covariance analysis is part of Orbital Engagement Pro. "
+        "Covariance analysis is part of Orbital Engineering Lab Pro. "
         "The public core supports deterministic single-run simulation and scenario YAML."
     )
 
