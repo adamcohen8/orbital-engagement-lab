@@ -1,12 +1,12 @@
 name: Bug report
-description: Report a non-security bug in Orbital Engagement Lab.
+description: Report a non-security bug in Orbital Engineering Lab.
 title: "[Bug]: "
 labels: ["bug"]
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for helping improve Orbital Engagement Lab.
+        Thanks for helping improve Orbital Engineering Lab.
 
         Use this form for non-security bugs. Do not include secrets, API keys,
         customer data, CUI, export-controlled data, classified information, or

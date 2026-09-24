@@ -351,6 +351,7 @@ class _SatelliteStepper:
             "attitude_disabled": (not e.attitude_enabled),
             TIME_DEPENDENT_ENV_CACHE_KEY: getattr(e, "_time_dependent_env_cache", {}),
         }
+        missing_forecast_dynamics = object()
         substep_ns = max(1, int(round(float(e.sim_substep_s) * 1.0e9)))
         while current_ns < final_interval_ns:
             start_ns = current_ns
@@ -362,17 +363,22 @@ class _SatelliteStepper:
             )
             if control_available_ns is not None and start_ns < control_available_ns <= maximum_end_ns:
                 maximum_end_ns = control_available_ns
+            forecast_dynamics_by_object = getattr(
+                e,
+                "_forecast_dynamics_by_object",
+                missing_forecast_dynamics,
+            )
+            if forecast_dynamics_by_object is missing_forecast_dynamics:
+                forecast_dynamics_by_object = {
+                    object_id: runtime.dynamics for object_id, runtime in e.agents.items()
+                }
             world_truth_inner = _retime_decision_truth(
                 world_truth_decision,
                 source_time_s=t_s,
                 target_time_s=start_ns / 1.0e9,
                 own_id=aid,
                 own_truth=tr_inner,
-                dynamics_by_object=getattr(
-                    e,
-                    "_forecast_dynamics_by_object",
-                    {object_id: runtime.dynamics for object_id, runtime in e.agents.items()},
-                ),
+                dynamics_by_object=forecast_dynamics_by_object,
                 environment=env_inner,
                 forecast_cache=getattr(e, "_forecast_truth_cache", None),
             )

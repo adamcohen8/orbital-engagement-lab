@@ -94,6 +94,10 @@ class SingleRunHistoryStore:
         keep = int(max(1, min(int(keep_latest), engine.current_index + 1)))
         start = int(engine.current_index - keep + 1)
         retained_start_time_s = float(engine.t_s[start])
+        if getattr(engine, "ground_segment", None) is not None:
+            engine.ground_segment.ground.retain_from(retained_start_time_s)
+        for aid, rows in getattr(engine, "resource_hist", {}).items():
+            engine.resource_hist[aid] = [row for row in rows if row["time_s"] >= retained_start_time_s]
         engine.t_s = self.compact_axis0_latest(engine.t_s, start=start, count=keep)
         engine.target_reference_orbit_hist = self.compact_axis0_latest(
             engine.target_reference_orbit_hist,

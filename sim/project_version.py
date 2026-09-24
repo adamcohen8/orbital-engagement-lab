@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from importlib import metadata
 from pathlib import Path
 
-OEL_DISTRIBUTION_NAME = "orbital-engagement-lab"
+OEL_DISTRIBUTION_NAME = "orbital-engineering-lab"
 
 
 @dataclass(frozen=True)

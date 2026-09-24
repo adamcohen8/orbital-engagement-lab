@@ -6,7 +6,7 @@ routes at `oel://agent/workflows/v1`. The [study planner](../../docs/study-plann
 is a separate prototype; its tools are usable only when listed by the connection.
 
 Use this playbook when an AI coding agent is helping with the open-source
-Orbital Engagement Lab core.
+Orbital Engineering Lab core.
 
 ## Mission
 
@@ -98,6 +98,18 @@ bounded authorized runtime monitor. Use the coverage/link review tables and
 state the geometry, cadence, attitude, terminal, and environmental assumptions;
 do not promote geometric visibility or a free-space margin into operational
 sensor or communications assurance.
+
+For headless ground tracking and delayed telemetry, use the optional top-level
+`ground_segment` scenario layer documented in `docs/models/ground-segment.md`.
+Keep its posterior and received/held channels separate from simulation truth;
+orbit estimation needs an explicit prior, and prediction is two-body. This is a
+reusable simulation capability, not an Operator Trainer interface.
+
+For time histories of onboard temperature or electrical resources, see
+`docs/models/spacecraft-resources.md`. Enable `specs.thermal` and `specs.power`
+only when the study needs them; their outputs are simulation truth and do not
+become telemetry or navigation belief unless a separate observation boundary
+is configured.
 
 For custom complete-stack flight software, use the bounded Public FSW
 Authoring Kit in `docs/fsw-authoring.md`. Inspect unfamiliar candidate material

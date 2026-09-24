@@ -3,6 +3,8 @@ from __future__ import annotations
 import math
 from typing import Any
 
+import numpy as np
+
 from sim.config.scenario.models import (
     AnalysisBaselineSection,
     AnalysisExecutionSection,
@@ -15,6 +17,11 @@ from sim.config.scenario.models import (
     CovarianceProcessNoiseSection,
     CovarianceSection,
     MissionRecoverySection,
+    MonteCarloBundle,
+    MonteCarloBundleOption,
+    MonteCarloComparison,
+    MonteCarloConstraint,
+    MonteCarloCorrelatedNormal,
     MonteCarloSection,
     MonteCarloVariation,
     SensitivityParameter,
@@ -56,15 +63,19 @@ def _parse_mc_variation(value: Any) -> MonteCarloVariation:
     _reject_unknown_fields(
         d,
         "analysis.monte_carlo.variations[*]",
-        {"parameter_path", "mode", "options", "low", "high", "mean", "std"},
+        {"parameter_path", "mode", "options", "weights", "low", "high", "mean", "std"},
     )
     path = d.get("parameter_path")
     if not isinstance(path, str) or not path:
         raise ValueError("monte_carlo.variations[*].parameter_path must be a non-empty string.")
+    weights_raw = d.get("weights", []) or []
+    if not isinstance(weights_raw, list):
+        raise ValueError("analysis.monte_carlo.variations[*].weights must be a list.")
     variation = MonteCarloVariation(
         parameter_path=path,
         mode=str(d.get("mode", "choice")).strip().lower(),
         options=list(d.get("options", []) or []),
+        weights=[_parse_float(v, "analysis.monte_carlo.variations[*].weights[*]") for v in weights_raw],
         low=_parse_optional_float(d.get("low"), "analysis.monte_carlo.variations[*].low"),
         high=_parse_optional_float(d.get("high"), "analysis.monte_carlo.variations[*].high"),
         mean=_parse_optional_float(d.get("mean"), "analysis.monte_carlo.variations[*].mean"),
@@ -73,6 +84,12 @@ def _parse_mc_variation(value: Any) -> MonteCarloVariation:
     if variation.mode == "choice":
         if not variation.options:
             raise ValueError("analysis.monte_carlo.variations[*] with mode=choice requires options.")
+        if variation.weights and (
+            len(variation.weights) != len(variation.options)
+            or any(weight < 0 for weight in variation.weights)
+            or not any(weight > 0 for weight in variation.weights)
+        ):
+            raise ValueError("analysis.monte_carlo.variations[*].weights must match options and contain positive weight.")
     elif variation.mode == "uniform":
         if variation.low is None or variation.high is None:
             raise ValueError("analysis.monte_carlo.variations[*] with mode=uniform requires low and high.")
@@ -83,9 +100,122 @@ def _parse_mc_variation(value: Any) -> MonteCarloVariation:
             raise ValueError("analysis.monte_carlo.variations[*] with mode=normal requires mean and std.")
         if variation.std < 0.0:
             raise ValueError("analysis.monte_carlo.variations[*].std must be >= 0.")
+    elif variation.mode == "truncated_normal":
+        if any(value is None for value in (variation.mean, variation.std, variation.low, variation.high)):
+            raise ValueError("analysis.monte_carlo.variations[*] with mode=truncated_normal requires mean, std, low, high.")
+        if variation.std <= 0.0 or variation.high <= variation.low:
+            raise ValueError("analysis.monte_carlo.variations[*] truncated_normal requires std > 0 and high > low.")
     else:
-        raise ValueError("analysis.monte_carlo.variations[*].mode must be one of: choice, uniform, normal.")
+        raise ValueError("analysis.monte_carlo.variations[*].mode must be one of: choice, uniform, normal, truncated_normal.")
+    if variation.weights and variation.mode != "choice":
+        raise ValueError("analysis.monte_carlo.variations[*].weights are only valid for choice mode.")
     return variation
+
+
+def _parse_mc_bundle(value: Any) -> MonteCarloBundle:
+    d = _as_dict(value, "analysis.monte_carlo.bundles[*]")
+    _reject_unknown_fields(d, "analysis.monte_carlo.bundles[*]", {"name", "options"})
+    name = d.get("name")
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("analysis.monte_carlo.bundles[*].name must be a non-empty string.")
+    raw_options = d.get("options")
+    if not isinstance(raw_options, list) or not raw_options:
+        raise ValueError(f"Monte Carlo bundle '{name}' requires non-empty options.")
+    options: list[MonteCarloBundleOption] = []
+    for index, raw in enumerate(raw_options):
+        option = _as_dict(raw, f"analysis.monte_carlo.bundles[{name}].options[{index}]")
+        _reject_unknown_fields(option, f"analysis.monte_carlo.bundles[{name}].options[{index}]", {"label", "values", "weight"})
+        label = option.get("label")
+        values = option.get("values")
+        if not isinstance(label, str) or not label.strip() or not isinstance(values, dict) or not values:
+            raise ValueError(f"Monte Carlo bundle '{name}' option {index} requires a label and non-empty values map.")
+        if any(not isinstance(path, str) or not path for path in values):
+            raise ValueError(f"Monte Carlo bundle '{name}' option {index} has an invalid parameter path.")
+        weight = _parse_float(option.get("weight", 1.0), f"analysis.monte_carlo.bundles[{name}].options[{index}].weight")
+        if weight < 0:
+            raise ValueError(f"Monte Carlo bundle '{name}' weights must be >= 0.")
+        options.append(MonteCarloBundleOption(label=label.strip(), values=dict(values), weight=weight))
+    labels = [option.label for option in options]
+    if len(set(labels)) != len(labels):
+        raise ValueError(f"Monte Carlo bundle '{name}' option labels must be unique.")
+    path_set = set(options[0].values)
+    if any(set(option.values) != path_set for option in options[1:]):
+        raise ValueError(f"Monte Carlo bundle '{name}' options must assign the same parameter paths.")
+    if not any(option.weight > 0 for option in options):
+        raise ValueError(f"Monte Carlo bundle '{name}' needs a positive option weight.")
+    return MonteCarloBundle(name=name.strip(), options=options)
+
+
+def _parse_mc_comparison(value: Any) -> MonteCarloComparison | None:
+    if value is None:
+        return None
+    d = _as_dict(value, "analysis.monte_carlo.comparison")
+    _reject_unknown_fields(d, "analysis.monte_carlo.comparison", {"bundle", "runs_per_option", "paired"})
+    bundle = d.get("bundle")
+    if not isinstance(bundle, str) or not bundle.strip():
+        raise ValueError("analysis.monte_carlo.comparison.bundle must name a bundle.")
+    runs = _parse_int(d.get("runs_per_option"), "analysis.monte_carlo.comparison.runs_per_option")
+    if runs <= 0:
+        raise ValueError("analysis.monte_carlo.comparison.runs_per_option must be positive.")
+    return MonteCarloComparison(
+        bundle=bundle.strip(), runs_per_option=runs,
+        paired=_parse_bool(d.get("paired", True), "analysis.monte_carlo.comparison.paired"),
+    )
+
+
+def _parse_mc_constraint(value: Any) -> MonteCarloConstraint:
+    d = _as_dict(value, "analysis.monte_carlo.constraints[*]")
+    _reject_unknown_fields(d, "analysis.monte_carlo.constraints[*]", {"left_path", "op", "right_path", "right_value"})
+    left = d.get("left_path")
+    op = d.get("op")
+    if not isinstance(left, str) or not left or op not in {"<", "<=", ">", ">=", "==", "!="}:
+        raise ValueError("Monte Carlo constraints require left_path and op (<, <=, >, >=, ==, !=).")
+    has_right_path = d.get("right_path") is not None
+    has_right_value = "right_value" in d
+    if has_right_path and d.get("right_value") is not None:
+        raise ValueError("Monte Carlo constraints require exactly one of right_path or right_value.")
+    if not has_right_path and not has_right_value:
+        raise ValueError("Monte Carlo constraints require exactly one of right_path or right_value.")
+    right = d.get("right_path")
+    if has_right_path and (not isinstance(right, str) or not right):
+        raise ValueError("Monte Carlo constraint right_path must be a non-empty string.")
+    return MonteCarloConstraint(left_path=left, op=op, right_path=right, right_value=d.get("right_value"))
+
+
+def _parse_mc_correlated_normal(value: Any) -> MonteCarloCorrelatedNormal:
+    d = _as_dict(value, "analysis.monte_carlo.correlated_normals[*]")
+    _reject_unknown_fields(
+        d, "analysis.monte_carlo.correlated_normals[*]",
+        {"name", "parameter_paths", "means", "stds", "correlation"},
+    )
+    name = d.get("name")
+    paths = d.get("parameter_paths")
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("Monte Carlo correlated normal groups need a non-empty name.")
+    if not isinstance(paths, list) or len(paths) < 2 or any(not isinstance(path, str) or not path for path in paths):
+        raise ValueError(f"Monte Carlo correlated normal '{name}' needs at least two parameter paths.")
+    if len(set(paths)) != len(paths):
+        raise ValueError(f"Monte Carlo correlated normal '{name}' parameter paths must be unique.")
+    means_raw, stds_raw, matrix_raw = d.get("means"), d.get("stds"), d.get("correlation")
+    count = len(paths)
+    if not isinstance(means_raw, list) or not isinstance(stds_raw, list) or len(means_raw) != count or len(stds_raw) != count:
+        raise ValueError(f"Monte Carlo correlated normal '{name}' means and stds must match parameter_paths.")
+    means = [_parse_float(item, f"analysis.monte_carlo.correlated_normals[{name}].means") for item in means_raw]
+    stds = [_parse_float(item, f"analysis.monte_carlo.correlated_normals[{name}].stds") for item in stds_raw]
+    if any(std <= 0 for std in stds):
+        raise ValueError(f"Monte Carlo correlated normal '{name}' stds must be positive.")
+    if not isinstance(matrix_raw, list) or len(matrix_raw) != count or any(not isinstance(row, list) or len(row) != count for row in matrix_raw):
+        raise ValueError(f"Monte Carlo correlated normal '{name}' correlation must be a square matrix.")
+    matrix = [[_parse_float(item, f"analysis.monte_carlo.correlated_normals[{name}].correlation") for item in row]
+              for row in matrix_raw]
+    array = np.asarray(matrix, dtype=float)
+    if not np.allclose(array, array.T, atol=1e-10, rtol=0) or not np.allclose(np.diag(array), 1.0, atol=1e-10, rtol=0):
+        raise ValueError(f"Monte Carlo correlated normal '{name}' correlation must be symmetric with diagonal 1.")
+    if np.min(np.linalg.eigvalsh(array)) < -1e-10:
+        raise ValueError(f"Monte Carlo correlated normal '{name}' correlation must be positive semidefinite.")
+    return MonteCarloCorrelatedNormal(
+        name=name.strip(), parameter_paths=list(paths), means=means, stds=stds, correlation=matrix,
+    )
 
 
 def _parse_analysis_execution_section(value: Any) -> AnalysisExecutionSection:
@@ -127,7 +257,10 @@ def _parse_analysis_baseline_section(value: Any) -> AnalysisBaselineSection:
 
 def _parse_analysis_monte_carlo_section(value: Any) -> AnalysisMonteCarloSection:
     d = _as_dict(value, "analysis.monte_carlo")
-    _reject_unknown_fields(d, "analysis.monte_carlo", {"iterations", "base_seed", "variations"})
+    _reject_unknown_fields(
+        d, "analysis.monte_carlo",
+        {"iterations", "base_seed", "variations", "bundles", "comparison", "constraints", "correlated_normals", "max_attempts"},
+    )
     vars_raw = d.get("variations")
     if vars_raw is None:
         variations = []
@@ -135,10 +268,50 @@ def _parse_analysis_monte_carlo_section(value: Any) -> AnalysisMonteCarloSection
         if not isinstance(vars_raw, list):
             raise ValueError("analysis.monte_carlo.variations must be a list.")
         variations = [_parse_mc_variation(v) for v in vars_raw]
+    bundles_raw = d.get("bundles", []) or []
+    constraints_raw = d.get("constraints", []) or []
+    correlated_raw = d.get("correlated_normals", []) or []
+    if not all(isinstance(item, list) for item in (bundles_raw, constraints_raw, correlated_raw)):
+        raise ValueError("analysis.monte_carlo.bundles, constraints, and correlated_normals must be lists.")
+    bundles = [_parse_mc_bundle(item) for item in bundles_raw]
+    constraints = [_parse_mc_constraint(item) for item in constraints_raw]
+    correlated = [_parse_mc_correlated_normal(item) for item in correlated_raw]
+    comparison = _parse_mc_comparison(d.get("comparison"))
+    names = [bundle.name for bundle in bundles]
+    if len(set(names)) != len(names) or len({group.name for group in correlated}) != len(correlated):
+        raise ValueError("Monte Carlo bundle and correlated-normal group names must be unique within their lists.")
+    claimed_paths = [variation.parameter_path for variation in variations]
+    claimed_paths += [path for bundle in bundles for path in bundle.options[0].values]
+    claimed_paths += [path for group in correlated for path in group.parameter_paths]
+    if len(set(claimed_paths)) != len(claimed_paths):
+        raise ValueError("Monte Carlo variations and bundles must assign distinct parameter paths.")
+    if comparison is not None:
+        matches = [bundle for bundle in bundles if bundle.name == comparison.bundle]
+        if not matches:
+            raise ValueError(f"Monte Carlo comparison bundle '{comparison.bundle}' does not exist.")
+        if len(matches[0].options) < 2:
+            raise ValueError("Monte Carlo comparison requires at least two bundle options.")
+        if any(option.weight != 1.0 for option in matches[0].options):
+            raise ValueError("Monte Carlo comparison uses balanced options; bundle weights must all be 1.")
+        expected = len(matches[0].options) * comparison.runs_per_option
+        if "iterations" in d and _parse_int(d["iterations"], "analysis.monte_carlo.iterations") != expected:
+            raise ValueError(f"Monte Carlo comparison requires iterations={expected}.")
+        if comparison.paired and "metadata.seed" in claimed_paths:
+            raise ValueError("Paired Monte Carlo comparison owns metadata.seed; remove its variation.")
+    else:
+        expected = _parse_int(d.get("iterations", 1), "analysis.monte_carlo.iterations")
+    max_attempts = _parse_int(d.get("max_attempts", 1000), "analysis.monte_carlo.max_attempts")
+    if max_attempts <= 0:
+        raise ValueError("analysis.monte_carlo.max_attempts must be positive.")
     out = AnalysisMonteCarloSection(
-        iterations=_parse_int(d.get("iterations", 1), "analysis.monte_carlo.iterations"),
+        iterations=expected,
         base_seed=_parse_int(d.get("base_seed", 0), "analysis.monte_carlo.base_seed"),
         variations=variations,
+        bundles=bundles,
+        comparison=comparison,
+        constraints=constraints,
+        correlated_normals=correlated,
+        max_attempts=max_attempts,
     )
     if out.iterations <= 0:
         raise ValueError("analysis.monte_carlo.iterations must be positive.")
@@ -820,5 +993,10 @@ def _monte_carlo_from_analysis(analysis: AnalysisSection) -> MonteCarloSection:
             parallel_enabled=bool(analysis.execution.parallel_enabled),
             parallel_workers=int(analysis.execution.parallel_workers),
             variations=list(analysis.monte_carlo.variations),
+            bundles=list(analysis.monte_carlo.bundles),
+            comparison=analysis.monte_carlo.comparison,
+            constraints=list(analysis.monte_carlo.constraints),
+            correlated_normals=list(analysis.monte_carlo.correlated_normals),
+            max_attempts=int(analysis.monte_carlo.max_attempts),
         )
     return MonteCarloSection()

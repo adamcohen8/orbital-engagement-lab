@@ -5,6 +5,23 @@ engine never rewrites scenario YAML, flight-software source, dependency locks,
 tests, or prior outputs. A registered workspace keeps its exact engine pin
 until its owner audits and explicitly adopts another version.
 
+The product display name is Orbital Engineering Lab and new Python builds use
+the `orbital-engineering-lab` distribution name. Existing `oel` commands and
+managed data directories keep their names. Signed v1 release manifests retain
+the `orbital-engagement-lab` product field so previously installed updaters can
+accept a new release; new readers also accept the branded value. Existing RPO
+Trainer progress and settings are read in place from `~/.orbital_engagement_lab`
+when no corresponding file exists under `~/.orbital_engineering_lab`. New files
+use the new directory. Public schema files use the engineering-name Vercel URLs;
+previously produced packets can still carry their original schema IDs. The
+desktop app bundle ID stays stable for update compatibility.
+
+The public project website is `https://orbital-engineering-lab.vercel.app/`.
+The former `https://orbital-engagement-lab.vercel.app/` address permanently
+redirects to it. Older GitHub repository links continue through GitHub's
+repository rename redirect; new installation instructions use the renamed
+repository directly.
+
 ## Check And Install The Latest Release
 
 ```text
@@ -25,7 +42,7 @@ An installation created before channel persistence can configure its official
 endpoint once:
 
 ```text
-oel update configure-channel https://github.com/adamcohen8/orbital-engagement-lab/releases/latest/download/public-stable.json
+oel update configure-channel https://github.com/adamcohen8/orbital-engineering-lab/releases/latest/download/public-stable.json
 oel update check
 ```
 

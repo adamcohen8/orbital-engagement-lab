@@ -1,9 +1,9 @@
-"""Orbital Engagement Pro optimization tools are not included in the public core."""
+"""Orbital Engineering Lab Pro optimization tools are not included in the public core."""
 
 
 def _unavailable(*args, **kwargs):
     raise ImportError(
-        "Optimization and gain-tuning workflows are part of Orbital Engagement Pro. "
+        "Optimization and gain-tuning workflows are part of Orbital Engineering Lab Pro. "
         "The public core supports single-run simulation, controllers, estimators, "
         "scenario YAML, and API workflows."
     )

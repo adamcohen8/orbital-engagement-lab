@@ -1,6 +1,6 @@
 # Optional Acceleration
 
-Orbital Engagement Lab includes an optional acceleration layer for hot numeric kernels. The first supported backend is
+Orbital Engineering Lab includes an optional acceleration layer for hot numeric kernels. The first supported backend is
 Numba/JIT, exposed as an opt-in feature so ordinary installs and validation runs remain reproducible on machines without
 Numba.
 

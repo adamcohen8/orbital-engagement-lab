@@ -1,6 +1,6 @@
 # Plotting
 
-Orbital Engagement Lab includes public single-run plotting for quick inspection,
+Orbital Engineering Lab includes public single-run plotting for quick inspection,
 debugging, and documentation artifacts. Campaign, benchmark, optimization, and
 sensitivity plots live in the pro layer.
 

@@ -1,9 +1,9 @@
-"""Orbital Engagement Pro observation data models are not included in the public core."""
+"""Orbital Engineering Lab Pro observation data models are not included in the public core."""
 
 
 def _unavailable(*args, **kwargs):
     raise ImportError(
-        "Observation data ingestion and normalization are part of Orbital Engagement Pro. "
+        "Observation data ingestion and normalization are part of Orbital Engineering Lab Pro. "
         "The public core supports simulator-generated sensor and truth histories."
     )
 

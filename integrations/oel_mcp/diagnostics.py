@@ -37,7 +37,7 @@ def _doctor_report_base(
     sdk_version = installed_sdk_version()
     launch_command, launch_args, launch_source = default_host_launch()
     source_version = _source_project_version()
-    distribution_version = _installed_version("orbital-engagement-lab")
+    distribution_version = _installed_version("orbital-engineering-lab")
     checks: list[dict[str, Any]] = []
     _check(checks, "adapter", adapter in {"sdk", "legacy"}, detail={"selected": adapter})
     _check(

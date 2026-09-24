@@ -145,6 +145,8 @@ class SimulationSession:
             belief=dict(snap["belief"]),
             applied_thrust=dict(snap["applied_thrust"]),
             applied_torque=dict(snap["applied_torque"]),
+            spacecraft_resources=dict(snap.get("spacecraft_resources", {})),
+            ground_segment=snap.get("ground_segment", {}),
         )
 
     def run(self, *, step_callback: Any | None = None) -> SimulationResult:
@@ -188,6 +190,8 @@ class SimulationSession:
             belief=dict(snap["belief"]),
             applied_thrust=dict(snap["applied_thrust"]),
             applied_torque=dict(snap["applied_torque"]),
+            spacecraft_resources=dict(snap.get("spacecraft_resources", {})),
+            ground_segment=snap.get("ground_segment", {}),
         )
 
     def publish_fsw_input(self, object_id: str, event: object) -> None:

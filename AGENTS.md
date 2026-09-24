@@ -10,7 +10,7 @@ maintenance. For the separate typed study-planning prototype, see
 [`docs/study-planning.md`](docs/study-planning.md); do not assume its tools are
 available on the main MCP connection.
 
-Orbital Engagement Lab agents should orchestrate documented workflows. They
+Orbital Engineering Lab agents should orchestrate documented workflows. They
 should not replace, approximate, or silently bypass the deterministic physics
 engine.
 

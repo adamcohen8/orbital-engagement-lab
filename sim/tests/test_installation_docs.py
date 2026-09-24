@@ -75,11 +75,11 @@ def test_public_readme_leads_with_the_managed_release_installation() -> None:
     managed_heading = "## Install And Run"
     contributor_heading = "## Source Installation For Contributors"
     posix_installer = (
-        "https://github.com/adamcohen8/orbital-engagement-lab/"
+        "https://github.com/adamcohen8/orbital-engineering-lab/"
         "releases/latest/download/install.sh"
     )
     powershell_installer = (
-        "https://github.com/adamcohen8/orbital-engagement-lab/"
+        "https://github.com/adamcohen8/orbital-engineering-lab/"
         "releases/latest/download/install.ps1"
     )
     managed_commands = [

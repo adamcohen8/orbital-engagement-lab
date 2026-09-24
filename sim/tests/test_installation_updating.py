@@ -849,7 +849,7 @@ def test_release_build_is_reproducible_signed_and_contains_evidence(
         "install.ps1",
         "install.sh",
         Path(first["offline_bundle"]).name,
-        "orbital-engagement-lab-0.25.0-public.tar.gz",
+        "orbital-engineering-lab-0.25.0-public.tar.gz",
         "public-stable.json",
         "release-manifest.json",
         "trusted-release-keys.json",

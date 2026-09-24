@@ -147,7 +147,7 @@ def _enter_operator_fullscreen(pygame: Any, screen: Any) -> OperatorDisplayState
     flags = pygame.FULLSCREEN | pygame.SCALED
     _reset_pygame_display(pygame)
     pygame.display.set_mode((1280, 720), flags)
-    pygame.display.set_caption("Orbital Engagement Lab - Operator Mode")
+    pygame.display.set_caption("Orbital Engineering Lab - Operator Mode")
     pygame.mouse.set_visible(True)
     pygame.event.set_grab(False)
     return OperatorDisplayState(previous_size=(previous_size[0], previous_size[1]))
@@ -158,7 +158,7 @@ def _restore_operator_display(pygame: Any, state: OperatorDisplayState) -> None:
     height = max(int(state.previous_size[1]), 480)
     _reset_pygame_display(pygame)
     pygame.display.set_mode((width, height), pygame.RESIZABLE)
-    pygame.display.set_caption("Orbital Engagement Lab - Level Select")
+    pygame.display.set_caption("Orbital Engineering Lab - Level Select")
     pygame.mouse.set_visible(True)
     pygame.event.set_grab(False)
 

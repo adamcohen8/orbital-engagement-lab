@@ -1,6 +1,6 @@
 # Public Core And Pro Boundary
 
-Orbital Engagement Lab is an open-core project. The public repository is a
+Orbital Engineering Lab is an open-core project. The public repository is a
 complete, inspectable simulation foundation; the private Pro repository adds
 workflow acceleration, scale, and customer-specific engineering support.
 
@@ -15,11 +15,19 @@ The public core includes:
 - deterministic single-run orbit and attitude simulation;
 - OGP-SGP4/SDP4 passive catalog-style propagation and configurable ONP
   numerical propagation;
+- opt-in Earth-centered ONP spacecraft resources with one body thermal node,
+  fixed solar panels, a bounded battery, and saved simulation-truth histories;
+- a headless ground segment for geometric service availability, delayed
+  tracking/resource packets, explicit outages, and two-body orbit estimates
+  initialized from supplied priors;
 - public controllers, sensors, estimators, actuators, and mission primitives;
 - the Public FSW Authoring Kit for ADCS/RPO stack scaffolding, safe inspection,
   trusted lifecycle validation, component tests, and one deterministic serial
   smoke run;
 - scenario YAML, CLI, Python API, review-store queries, and plotting;
+- opt-in custom ONP force-model plugins for trusted local modules, with
+  module-path and runtime-output validation;
+- content-bound review slices for selected completed-run evidence;
 - bounded CCSDS OEM 3.0 KVN inspection, import, completed-run export,
   Cartesian covariance interchange, semantic comparison, and public validation
   fixtures;
@@ -87,6 +95,10 @@ operational decision system.
 Pro adds workflows whose value comes from repeatability, scale, search, or
 review-ready packaging:
 
+- selected opt-in environmental and relativistic ONP force-model extensions
+  with model-specific input and comparison contracts;
+- the experimental private `sim.trajectory_targeting` package for
+  force-configurable impulsive coast/burn studies and reference comparisons;
 - Monte Carlo, sensitivity, calibrated covariance analysis, and campaign
   orchestration;
 - controller benchmarks, comparison reports, optimization, and gain tuning;
@@ -126,6 +138,11 @@ does not include bounds, inequality/path constraints, finite-burn optimization,
 multiple shooting, collocation, multi-start/global search, campaign-scale
 robustness analysis, or operational maneuver authorization. Those workflow and
 optimization layers remain Pro.
+
+The experimental `sim.trajectory_targeting` package is a separate private
+research interface. Its force-configurable ONP adapter, multi-burn examples,
+tests, and reference packets are excluded from the generated public repository.
+It does not change the existing public targeter contract.
 
 The private `sim.pro_trajectory_optimization` package now implements the first
 of those Pro layers: bounded objectives and constraints, finite-burn mass
@@ -195,11 +212,28 @@ services, or proprietary calibrated equipment data. The separate public power
 workflow can replay one selected schedule against a supplied orbit and lumped
 battery; it does not add battery state to the scheduling solver itself.
 
-The public spacecraft-power surface is a bounded deterministic resource check,
-not an electrical-power-system or qualification model. Thermal state,
-temperature-dependent behavior, degradation, self-shadowing, detailed bus and
-regulator topology, uncertainty, managed environmental feeds, optimization,
-campaigns, customer models, and qualification packages remain Pro or future.
+The public `spacecraft-power` workflow is a retained-history feasibility
+analysis over one supplied ECI history and declared load timeline. It does not
+run the ONP spacecraft resource model or add battery state to the scheduling
+solver itself. The separate public ONP `specs.thermal` and `specs.power`
+models integrate one body thermal node, fixed ideal solar panels, and a bounded
+battery for supported Earth-centered satellite runs. Their resource histories
+are simulation truth, not sensor measurements.
+
+Those ONP resource models do not include a multi-node thermal network, panel
+temperature or panel-to-body conduction, temperature-dependent cell behavior,
+battery aging, detailed bus/regulator topology, brownout, or automatic load
+shedding. They are not supported for OGP or CR3BP and do not provide thermal or
+power qualification. Higher-fidelity spacecraft resource models and
+calibrated/uncertainty-driven resource analysis remain outside the current
+public workflow.
+
+The public headless ground segment uses geometric access and explicit service
+outages, seeded station measurements, delayed packet delivery, ideal onboard
+resource telemetry, and a two-body ground estimator initialized by an explicit
+prior. It has no RF/link-budget threshold, weather, bandwidth, packet-loss,
+command-execution, onboard-recorder, or out-of-sequence smoothing model, and is
+not an operational tracking qualification.
 
 The public orbit-lifetime surface is one bounded deterministic ONP propagation,
 not a calibrated lifetime, compliance, or reentry-risk service. Managed current
@@ -276,15 +310,16 @@ the private working tree directly to the public repository.
 
 ## Access Model
 
-Public examples require neither Pro nor hosted AI accounts. Early Pro access is
-handled through private engineering pilots whose scope should state supported
-workflows and versions, license terms, expected evidence, support boundaries,
-and any security, procurement, data-handling, or export constraints.
+Public examples require neither Pro nor hosted AI accounts. OEL Pro is not
+currently offered for purchase or public self-service execution. Any future
+pilot access will be announced separately with its supported workflows,
+versions, license terms, evidence expectations, support boundaries, and
+applicable security, procurement, data-handling, and export constraints.
 
 For detailed private workflows, use the Pro User Guide in the full workspace.
 For public limitations, use [Known Limitations](known-limitations.md).
 
-## Hosted access in v0.30.0
+## Hosted availability
 
 **Closed alpha: access is not publicly available.** Public OEL remains free to
 run locally without a Hosted account. The bundled client and package validator

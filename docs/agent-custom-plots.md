@@ -32,6 +32,9 @@ plotter.line(
 
 The plot is saved under `review/figures/` by default, styled with the OEL plot
 theme, and recorded in `review/generated_artifacts.json` with provenance.
+`ReviewWorkspace` and `EvidencePlotter` open complete run or workflow review
+stores. Partial review slices are intentionally query-only and must be opened
+with `python -m sim.review slice query`; they are not plotter inputs.
 Static review plots also apply the supported
 [OEL Plot Quality Contract](plot-quality-contract.md), including stable
 axis-wide numeric formatting and renderer-level overlap, clipping, font, and
@@ -113,6 +116,11 @@ Common recipes include:
 - `relative_position_ric_2d`
 - `burn_activity`
 - `ground_access`
+
+The campaign recipes use workflow review tables at the campaign output root:
+`campaign_closest_approach` reads Monte Carlo runs, and `sensitivity_effects`
+reads sensitivity rankings. They need those recorded tables and are not
+single-run scenario plots.
 
 In Python:
 

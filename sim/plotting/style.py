@@ -171,7 +171,7 @@ def get_oel_version() -> str:
     if pyproject_version:
         return pyproject_version
     try:
-        value = str(version("orbital-engagement-lab") or "").strip()
+        value = str(version("orbital-engineering-lab") or "").strip()
         if value and value.lower() != "none":
             return value
     except (PackageNotFoundError, TypeError, KeyError, AttributeError, ValueError):
@@ -269,7 +269,7 @@ def oel_plot_context(
 
 
 def _footer_text(metadata: OELArtifactMetadata, artifact_id: str = "") -> str:
-    parts = ["Orbital Engagement Lab"]
+    parts = ["Orbital Engineering Lab"]
     if metadata.version:
         parts.append(f"v{metadata.version}")
     scenario = metadata.scenario_name

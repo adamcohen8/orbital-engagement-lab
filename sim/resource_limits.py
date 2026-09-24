@@ -266,6 +266,11 @@ def estimate_history_memory_from_config(
         elif controller_debug_enabled:
             retained_python_bytes_per_sample += 4096
 
+        if getattr(cfg, "ground_segment", {}).get("enabled", False):
+            retained_python_bytes_per_sample += 8192 + 4096 * len(cfg.ground_stations)
+        specs = dict(getattr(section, "specs", {}) or {})
+        if any(dict(specs.get(name, {}) or {}).get("enabled", False) for name in ("thermal", "power")):
+            retained_python_bytes_per_sample += 4096  # resource row dict, values, cumulative ledgers
         knowledge = dict(getattr(section, "knowledge", {}) or {})
         targets = list(knowledge.get("targets", []) or [])
         knowledge_pairs += len(targets)

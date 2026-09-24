@@ -213,6 +213,8 @@ def build_satellite_flight_software_runtime(
                 max_torque_n_m=coordinate_limits,
                 max_momentum_n_m_s=wheel_momentum_limits,
                 initial_momentum_n_m_s=initial_wheel_momentum,
+                inertia_kg_m2=params.get("wheel_inertia_kg_m2"),
+                max_speed_rad_s=params.get("wheel_max_speed_rad_s"),
             )
             if hardware_profile == "hardware.reaction_wheels_magnetorquer.v1":
                 torquer_frame = FrameId(f"OEL/ACTUATOR/{object_id}/momentum_dump", "frames-v1")
@@ -687,6 +689,20 @@ def _build_translation_runtime(
             max_force_n=0.0,
             max_torque_n_m=max_attitude_torque,
         )
+        if params.get("attitude_hardware_profile") == "hardware.reaction_wheels.v1":
+            wheel_axes = tuple(tuple(float(v) for v in axis) for axis in params["wheel_axes_body"])
+            wheel_torque = tuple(float(v) for v in params["wheel_max_torque_n_m"])
+            attitude_allocator = AttitudeAllocatorConfig(
+                object_id, AttitudeAllocatorKind.REACTION_WHEEL, "attitude", attitude_frame,
+                limits=wheel_torque, axes_body=wheel_axes,
+            )
+            attitude_device, attitude_hardware = reaction_wheel_device(
+                object_id, "attitude", attitude_frame, axes_body=wheel_axes,
+                max_torque_n_m=wheel_torque,
+                max_momentum_n_m_s=tuple(float(v) for v in params["wheel_max_momentum_n_m_s"]),
+                inertia_kg_m2=params.get("wheel_inertia_kg_m2"),
+                max_speed_rad_s=params.get("wheel_max_speed_rad_s"),
+            )
     goal = GoalDefinition(
         str(params.get("goal_id", "primary")),
         str(params.get("goal_type", mode.value)),
@@ -826,14 +842,15 @@ def _build_translation_runtime(
     elif use_rcs:
         devices = []
         hardware = {}
-        for thruster in rcs_beliefs:
+        for thruster, source_row in zip(rcs_beliefs, rcs_rows, strict=True):
             device, model = rcs_thruster_device(
                 object_id,
                 thruster.thruster_id,
                 actuator_frame,
                 direction_body=thruster.force_direction_body,
                 max_thrust_n=thruster.max_thrust_n,
-                specific_impulse_s=specific_impulse_s,
+                position_body_m=tuple(float(value) for value in source_row.get("position_body_m", (0.0, 0.0, 0.0))),
+                specific_impulse_s=source_row.get("isp_s", specific_impulse_s),
             )
             devices.append(device)
             hardware[thruster.thruster_id] = model

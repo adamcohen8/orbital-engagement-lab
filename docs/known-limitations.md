@@ -1,6 +1,6 @@
 # Known Limitations
 
-Orbital Engagement Lab is a public beta simulation core. It is useful for
+Orbital Engineering Lab is a public beta simulation core. It is useful for
 research, education, prototyping, and pre-flight engineering analysis, but it is
 not flight-qualified or operational decision-grade software.
 

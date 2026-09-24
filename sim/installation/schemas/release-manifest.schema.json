@@ -7,7 +7,7 @@
   "required": ["schema_version", "product", "edition", "version", "channel", "published_at", "artifacts", "platforms", "python", "profiles", "contracts"],
   "properties": {
     "schema_version": {"const": "oel.release-manifest.v1"},
-    "product": {"const": "orbital-engagement-lab"},
+    "product": {"enum": ["orbital-engagement-lab", "orbital-engineering-lab"]},
     "edition": {"enum": ["public", "pro"]},
     "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+(?:\\.[0-9]+)?(?:[-+][0-9A-Za-z.-]+)?$"},
     "source_commit": {"type": ["string", "null"]},

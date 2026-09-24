@@ -1,6 +1,6 @@
 # Agent Feedback Loop
 
-OEL Agents can help improve Orbital Engagement Lab when they encounter
+OEL Agents can help improve Orbital Engineering Lab when they encounter
 workflow friction, confusing documentation, missing examples, validation
 messages that are hard to act on, or output artifacts that do not support the
 user's question.

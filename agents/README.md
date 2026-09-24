@@ -1,7 +1,7 @@
 # OEL Agents
 
 This directory contains agent-facing instructions, examples, and templates for
-using Orbital Engagement Lab with AI coding assistants.
+using Orbital Engineering Lab with AI coding assistants.
 
 - `public/AGENTS.md` is the public-safe playbook for open-source OEL agents.
 - `public/evaluation-rubric.md` is the checklist for judging generated

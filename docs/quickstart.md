@@ -13,8 +13,8 @@ troubleshooting.
 Windows PowerShell:
 
 ```powershell
-git clone https://github.com/adamcohen8/orbital-engagement-lab.git
-Set-Location orbital-engagement-lab
+git clone https://github.com/adamcohen8/orbital-engineering-lab.git
+Set-Location orbital-engineering-lab
 py --list
 py -3.14 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
@@ -26,8 +26,8 @@ py -3.14 -m venv .venv
 macOS or Linux:
 
 ```bash
-git clone https://github.com/adamcohen8/orbital-engagement-lab.git
-cd orbital-engagement-lab
+git clone https://github.com/adamcohen8/orbital-engineering-lab.git
+cd orbital-engineering-lab
 python3.14 -m venv .venv
 .venv/bin/python -m pip install --upgrade pip
 .venv/bin/python -m pip install ".[dev]"
@@ -203,6 +203,18 @@ It writes custom review metrics under
 
 See [Examples Matrix](examples-matrix.md) for the maintained public examples,
 what each one demonstrates, and which output artifacts to inspect first.
+
+Two additional headless examples cover spacecraft resources and ground
+knowledge:
+
+- Run `python run_simulation.py --config configs/spacecraft_resources_demo.yaml`
+  for the opt-in ONP thermal and battery model. See
+  [Spacecraft Resources](models/spacecraft-resources.md) for its assumptions
+  and output fields.
+- Run `python run_simulation.py --config configs/ground_segment_demo.yaml`
+  for delayed station tracking and ideal resource telemetry. See
+  [Ground Segment](models/ground-segment.md) for priors, packet timing, and
+  freshness semantics.
 
 Run the compact rendezvous example:
 

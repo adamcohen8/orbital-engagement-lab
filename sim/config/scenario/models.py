@@ -33,6 +33,11 @@ __all__ = [
     'OutputOrbitalAnalysisSection',
     'OutputsSection',
     'MonteCarloVariation',
+    'MonteCarloBundleOption',
+    'MonteCarloBundle',
+    'MonteCarloComparison',
+    'MonteCarloConstraint',
+    'MonteCarloCorrelatedNormal',
     'MonteCarloSection',
     'AnalysisExecutionSection',
     'AnalysisBaselineSection',
@@ -62,6 +67,13 @@ def _plain_config_data(value: Any) -> Any:
         data = {item.name: _plain_config_data(getattr(value, item.name)) for item in fields(value)}
         if value.runtime_profile == "flight_software":
             data.pop("runtime_profile", None)
+        if not value.force_models:
+            data.pop("force_models", None)
+        return data
+    if isinstance(value, OutputsSection):
+        data = {item.name: _plain_config_data(getattr(value, item.name)) for item in fields(value)}
+        if not value.campaign_retention:
+            data.pop("campaign_retention", None)
         return data
     if is_dataclass(value) and not isinstance(value, type):
         return {item.name: _plain_config_data(getattr(value, item.name)) for item in fields(value)}
@@ -129,6 +141,7 @@ class AgentSection:
     mission_strategy: AlgorithmPointer | None = None
     mission_execution: AlgorithmPointer | None = None
     mission_objectives: list[AlgorithmPointer] = field(default_factory=list)
+    force_models: list[AlgorithmPointer] = field(default_factory=list)
     bridge: BridgePointer | None = None
     knowledge: dict[str, Any] = field(default_factory=dict)
 
@@ -522,6 +535,7 @@ class OutputsSection:
     plots: OutputPlotsSection = field(default_factory=OutputPlotsSection)
     animations: OutputAnimationsSection = field(default_factory=OutputAnimationsSection)
     monte_carlo: OutputMonteCarloSection = field(default_factory=OutputMonteCarloSection)
+    campaign_retention: dict[str, Any] = field(default_factory=dict)
     ai_report: OutputAIReportSection = field(default_factory=OutputAIReportSection)
     ai_config: OutputAIConfigSection = field(default_factory=OutputAIConfigSection)
     review: OutputReviewSection = field(default_factory=OutputReviewSection)
@@ -545,10 +559,48 @@ class MonteCarloVariation:
     parameter_path: str
     mode: str = "choice"
     options: list[Any] = field(default_factory=list)
+    weights: list[float] = field(default_factory=list)
     low: float | None = None
     high: float | None = None
     mean: float | None = None
     std: float | None = None
+
+
+@dataclass(frozen=True)
+class MonteCarloBundleOption:
+    label: str
+    values: dict[str, Any]
+    weight: float = 1.0
+
+
+@dataclass(frozen=True)
+class MonteCarloBundle:
+    name: str
+    options: list[MonteCarloBundleOption] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class MonteCarloComparison:
+    bundle: str
+    runs_per_option: int
+    paired: bool = True
+
+
+@dataclass(frozen=True)
+class MonteCarloConstraint:
+    left_path: str
+    op: str
+    right_path: str | None = None
+    right_value: Any = None
+
+
+@dataclass(frozen=True)
+class MonteCarloCorrelatedNormal:
+    name: str
+    parameter_paths: list[str]
+    means: list[float]
+    stds: list[float]
+    correlation: list[list[float]]
 
 
 @dataclass(frozen=True)
@@ -559,6 +611,11 @@ class MonteCarloSection:
     parallel_enabled: bool = False
     parallel_workers: int = 0
     variations: list[MonteCarloVariation] = field(default_factory=list)
+    bundles: list[MonteCarloBundle] = field(default_factory=list)
+    comparison: MonteCarloComparison | None = None
+    constraints: list[MonteCarloConstraint] = field(default_factory=list)
+    correlated_normals: list[MonteCarloCorrelatedNormal] = field(default_factory=list)
+    max_attempts: int = 1000
 
 
 @dataclass(frozen=True)
@@ -580,6 +637,11 @@ class AnalysisMonteCarloSection:
     iterations: int = 1
     base_seed: int = 0
     variations: list[MonteCarloVariation] = field(default_factory=list)
+    bundles: list[MonteCarloBundle] = field(default_factory=list)
+    comparison: MonteCarloComparison | None = None
+    constraints: list[MonteCarloConstraint] = field(default_factory=list)
+    correlated_normals: list[MonteCarloCorrelatedNormal] = field(default_factory=list)
+    max_attempts: int = 1000
 
 
 @dataclass(frozen=True)
@@ -692,9 +754,12 @@ class SimulationScenarioConfig:
     monte_carlo: MonteCarloSection = field(default_factory=MonteCarloSection)
     analysis: AnalysisSection = field(default_factory=AnalysisSection)
     metadata: dict[str, Any] = field(default_factory=dict)
+    ground_segment: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         data = _plain_config_data(self)
+        if not self.ground_segment:
+            data.pop("ground_segment", None)
         for legacy_key in ("rocket", "chaser", "target", "monte_carlo"):
             data.pop(legacy_key, None)
         return data

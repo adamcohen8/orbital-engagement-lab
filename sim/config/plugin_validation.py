@@ -38,6 +38,7 @@ _CONTRACTS = {
     "mission_objective": PluginContract(
         methods_all=(), methods_any=("evaluate", "update", "check", "act"), allow_function=True
     ),
+    "force_model": PluginContract(methods_all=("acceleration",), allow_function=True),
 }
 
 
@@ -128,6 +129,7 @@ def validate_scenario_plugins(cfg: Any, *, import_plugins: bool = True) -> list[
     errs: list[str] = []
     orbit_cfg = dict(getattr(getattr(getattr(cfg, "simulator", None), "dynamics", {}), "orbit", {}) or {})
     default_propagation_method = str(orbit_cfg.get("propagation_method", "special") or "special").strip().lower()
+    orbit_model = str(orbit_cfg.get("model", "two_body") or "two_body").strip().lower()
     game_cfg = dict(getattr(cfg, "metadata", {}).get("game", {}) or {})
     game_controlled_object_id = str(game_cfg.get("controlled_object_id", "chaser") or "chaser")
     for object_id, agent in configured_objects(cfg).items():
@@ -144,6 +146,24 @@ def validate_scenario_plugins(cfg: Any, *, import_plugins: bool = True) -> list[
                 "pilot and operator input require a flight_software runtime."
             )
         errs.extend(_validate_object_propagation(agent, propagation_method, path))
+        force_models = getattr(agent, "force_models", []) or []
+        if force_models:
+            if str(getattr(agent, "kind", "satellite") or "satellite").strip().lower() != "satellite":
+                errs.append(f"{path}.force_models requires a satellite object.")
+            if propagation_method != "special" or orbit_model == "cr3bp":
+                errs.append(f"{path}.force_models requires ECI ONP special propagation.")
+            if getattr(cfg.simulator, "initial_jd_utc", None) is None:
+                errs.append(f"{path}.force_models requires simulator.initial_jd_utc.")
+        for index, pointer in enumerate(force_models):
+            pointer_path = f"{path}.force_models[{index}]"
+            if plugin_spec_field(pointer, "builtin"):
+                errs.append(f"{pointer_path}: use an importable module and class_name or function, not builtin.")
+                continue
+            if plugin_spec_field(pointer, "function") and plugin_spec_field(pointer, "params"):
+                errs.append(f"{pointer_path}: function force models do not accept params; use a class for parameters.")
+            errs.extend(_validate_pointer(
+                pointer, _CONTRACTS["force_model"], pointer_path, import_plugins=import_plugins
+            ))
         errs.extend(_validate_object_mass_properties(getattr(agent, "specs", {}) or {}, f"{path}.specs"))
         errs.extend(_validate_initial_state(getattr(agent, "initial_state", {}) or {}, f"{path}.initial_state"))
         errs.extend(_validate_object_knowledge(getattr(agent, "knowledge", {}) or {}, f"{path}.knowledge"))
@@ -225,6 +245,8 @@ def _agent_plugin_pointers(agent: Any, base_path: str) -> list[tuple[str, Any]]:
     for field_name in ("guidance_modifiers", "mission_objectives"):
         for index, pointer in enumerate(getattr(agent, field_name, []) or []):
             pointers.append((f"{base_path}.{field_name}[{index}]", pointer))
+    for index, pointer in enumerate(getattr(agent, "force_models", []) or []):
+        pointers.append((f"{base_path}.force_models[{index}]", pointer))
     bridge = getattr(agent, "bridge", None)
     if bridge is not None and getattr(bridge, "enabled", False):
         pointers.append((f"{base_path}.bridge", bridge))

@@ -62,6 +62,7 @@ def scenario_config_from_dict(
             "scenario_description",
             "objects",
             "ground_stations",
+            "ground_segment",
             "simulator",
             "outputs",
             "analysis",
@@ -100,6 +101,8 @@ def scenario_config_from_dict(
     rocket = objects.get("rocket", rocket)
     chaser = objects.get("chaser", chaser)
     target = objects.get("target", target)
+    from sim.ground_segment.config import normalize_config, validate_scenario
+
     cfg = SimulationScenarioConfig(
         schema_version=schema_version,
         scenario_name=str(root.get("scenario_name", "unnamed_scenario")),
@@ -109,6 +112,7 @@ def scenario_config_from_dict(
         target=target,
         objects=objects,
         ground_stations=_parse_ground_stations_section(root.get("ground_stations")),
+        ground_segment=normalize_config(root.get("ground_segment")),
         simulator=_parse_simulator_section(root.get("simulator")),
         outputs=_parse_outputs_section(root.get("outputs"), path_policy=path_policy),
         monte_carlo=normalized_mc,
@@ -120,6 +124,7 @@ def scenario_config_from_dict(
     for object_id, section in dict(cfg.objects or {}).items():
         if bool(dict(section.reference_orbit or {}).get("enabled", False)) and (not bool(section.enabled)):
             raise ValueError(f"{object_id}.reference_orbit.enabled requires {object_id}.enabled to be true.")
+    validate_scenario(cfg)
     _validate_physics_runtime_settings(cfg)
     _validate_object_references(cfg)
     _validate_orbital_analysis_references(cfg)

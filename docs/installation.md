@@ -17,7 +17,7 @@ POSIX:
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSLo /tmp/oel-install.sh \
-  https://github.com/adamcohen8/orbital-engagement-lab/releases/latest/download/install.sh
+  https://github.com/adamcohen8/orbital-engineering-lab/releases/latest/download/install.sh
 less /tmp/oel-install.sh
 sh /tmp/oel-install.sh
 ```
@@ -27,7 +27,7 @@ the equivalent convenience form is:
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://github.com/adamcohen8/orbital-engagement-lab/releases/latest/download/install.sh | sh
+  https://github.com/adamcohen8/orbital-engineering-lab/releases/latest/download/install.sh | sh
 ```
 
 The download-inspect-execute form remains preferred for first use because it
@@ -36,7 +36,7 @@ makes the small trust bootstrap visible before execution.
 Windows PowerShell:
 
 ```powershell
-Invoke-WebRequest https://github.com/adamcohen8/orbital-engagement-lab/releases/latest/download/install.ps1 -OutFile $env:TEMP\oel-install.ps1
+Invoke-WebRequest https://github.com/adamcohen8/orbital-engineering-lab/releases/latest/download/install.ps1 -OutFile $env:TEMP\oel-install.ps1
 Get-Content $env:TEMP\oel-install.ps1
 & $env:TEMP\oel-install.ps1
 ```
@@ -96,7 +96,7 @@ workspace adoption are separate operations by design.
 Clone the public repository, or start in the root of an existing OEL checkout:
 
 ```text
-https://github.com/adamcohen8/orbital-engagement-lab.git
+https://github.com/adamcohen8/orbital-engineering-lab.git
 ```
 
 The checkout directory may contain spaces. Run the commands below from the

@@ -27,6 +27,9 @@ LEGACY_SCENARIO_SCHEMA = LEGACY_SCENARIO_SCHEMA_VERSION
 
 SUPPORTED_RELEASE_EDITIONS = frozenset({"public", "pro"})
 SUPPORTED_CHANNELS = frozenset({"stable", "preview"})
+# The signed v1 product is a wire identity. Existing updaters still require
+# the former value; readers accept either spelling.
+SUPPORTED_RELEASE_PRODUCTS = frozenset({"orbital-engagement-lab", "orbital-engineering-lab"})
 INSTALLATION_DISPOSITIONS = frozenset({"official", "modified", "incomplete", "developer"})
 COMPATIBILITY_STATUSES = frozenset(
     {
@@ -231,8 +234,8 @@ def validate_release_manifest(value: Mapping[str, Any]) -> dict[str, Any]:
     reject_unknown_keys(value, allowed, label="release manifest")
     if value["schema_version"] != RELEASE_MANIFEST_SCHEMA:
         raise ContractError(f"release manifest schema_version must be {RELEASE_MANIFEST_SCHEMA!r}.")
-    if value["product"] != "orbital-engagement-lab":
-        raise ContractError("release manifest product must be 'orbital-engagement-lab'.")
+    if value["product"] not in SUPPORTED_RELEASE_PRODUCTS:
+        raise ContractError(f"release manifest product must be one of {sorted(SUPPORTED_RELEASE_PRODUCTS)}.")
     edition = str(value["edition"])
     if edition not in SUPPORTED_RELEASE_EDITIONS:
         raise ContractError(f"release manifest edition must be one of {sorted(SUPPORTED_RELEASE_EDITIONS)}.")

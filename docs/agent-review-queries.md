@@ -102,7 +102,7 @@ missing, the scenario did not record that evidence path.
 | `mission_transitions` | `time_s`, `object_id`, `from_mode`, `to_mode`, `trigger`, `reason` |
 | `command_gates` | `time_s`, `object_id`, burn state, alignment, fuel/actuator/deadline flags, `gate_reason` |
 | `fsw_invocations` | `object_id`, `invocation_id`, `invocation_time_ns`, `stack_id`, `profile_id`, input/command/telemetry counts |
-| `fsw_loads` | object/load identity, schema, source/delivery clocks, acceptance, and status |
+| `fsw_load_events` | object/load identity, schema, source/delivery clocks, acceptance, and status |
 | `fsw_objectives` | object/invocation/objective identity, state, priority, and detail |
 | `fsw_input_events` | packet identity, `invocation_id`, `kind`, source/delivery time, `schema` |
 | `fsw_task_timing` | `object_id`, `invocation_id`, `task_id`, release time, modeled duration, budget, `deadline_missed` |
@@ -116,6 +116,9 @@ missing, the scenario did not record that evidence path.
 | `fsw_snapshots` | `object_id`, `invocation_id`, stack identity and state hash; opaque restart state is `detail_gzip` at standard detail and `detail_json` at full detail |
 | `ground_access` | `time_s`, `station_id`, `object_id`, `access`, `range_km`, `elevation_deg`, `reason` |
 | `ground_access_windows` | sampled start/end/duration, range/elevation extrema, run-boundary censoring, and boundary semantics |
+| `ground_segment_state` | `time_s`, `object_id`, `orbit_json`, `telemetry_json`, `tracking_json` |
+| `ground_segment_contacts` | `time_s`, `station_id`, `object_id`, tracking/downlink/uplink flags, access reason, disabled services |
+| `ground_segment_packets` | processing `time_s`, measurement/reception epochs, station/object, kind, disposition, `data_json` |
 | `events` | `time_s`, `object_id`, `event_type`, `severity`, `message` |
 | `metrics` | `metric_name`, `value`, `units`, `object_id`, `deputy_id`, `chief_id` |
 | `mission_recovery_summary` | `object_id`, `goal`, `method`, `recovery_delta_v_m_s`, `recovery_time_s`, `propellant_kg`, `slot_recovery_time_s` |
@@ -123,7 +126,9 @@ missing, the scenario did not record that evidence path.
 | `mission_recovery_candidates` | `candidate_id`, `object_id`, `goal`, `source`, `planned_delta_v_m_s`, `planned_time_s`, `feasible`, `verified` |
 | `mission_recovery_burns` | `candidate_id`, `burn_index`, `start_time_s`, `frame`, `axis`, `delta_v_m_s` |
 | `mission_recovery_candidate_elements` | candidate ID plus resulting/target element and error details |
-| `game_input_events` / `game_observer_policy` / `game_scoring` | typed operator input, observer-policy, and truth-separated scoring evidence |
+| `game_input_events` | typed operator input linked to the receiving invocation |
+| `game_observer_samples` | observer policy, truth-assisted flag, and observer sample detail |
+| `game_scoring_events` | scoring policy and truth-derived scoring events |
 | `coverage_summary` / `coverage_samples` / `coverage_intervals` / `coverage_transitions` | coverage identity, sampled fractions, intervals, and transitions |
 | `link_summary` / `link_samples` / `link_windows` / `link_transitions` | typed endpoint identity and terminal parent frames, sampled RF/geometric closure, censored windows, and transitions |
 | `artifacts` | `artifact_type`, `artifact_id`, `path` |
@@ -391,3 +396,18 @@ it is not reaction-wheel torque, wheel speed, or full ADCS telemetry.
   refinement disposition with the result.
 - For rendezvous success, compare final range, closest approach, range rate,
   time, delta-v or burn activity, and any user-provided safety constraints.
+
+### Ground segment knowledge
+
+For runs with `ground_segment.enabled: true`, `ground_segment_state` stores
+`time_s`, `object_id`, `orbit_json`, `telemetry_json`, and `tracking_json`.
+`ground_segment_contacts` records per-station/object tracking, downlink and uplink
+availability. `ground_segment_packets` records processing (`time_s`), measurement
+and reception epochs, packet kind, disposition, and data. These are ground
+knowledge products, separate from `object_state` truth and onboard belief.
+See [Ground segment](models/ground-segment.md) for model limits and timestamps.
+
+```sql
+SELECT time_s, station_id, object_id, measurement_time_s, received_time_s, kind, disposition
+FROM ground_segment_packets ORDER BY time_s, station_id, object_id
+```

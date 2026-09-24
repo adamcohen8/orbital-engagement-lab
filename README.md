@@ -1,8 +1,8 @@
 <!-- Source template: tools/export_public.py copies this file to the public export root as README.md. Root-relative links below are intentional. -->
-# Orbital Engagement Lab
+# Orbital Engineering Lab
 
 
-Orbital Engagement Lab is an open-core Python/YAML simulator for spacecraft
+Orbital Engineering Lab is an open-core Python/YAML simulator for spacecraft
 rendezvous, proximity operations, and mission-analysis prototyping. Define a
 scenario, run a deterministic simulation, and inspect review-ready Markdown,
 JSON, CSV, SQLite, and plot artifacts.
@@ -30,7 +30,7 @@ macOS or Linux:
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSLo /tmp/oel-install.sh \
-  https://github.com/adamcohen8/orbital-engagement-lab/releases/latest/download/install.sh
+  https://github.com/adamcohen8/orbital-engineering-lab/releases/latest/download/install.sh
 less /tmp/oel-install.sh
 sh /tmp/oel-install.sh
 ```
@@ -38,7 +38,7 @@ sh /tmp/oel-install.sh
 Windows PowerShell:
 
 ```powershell
-Invoke-WebRequest https://github.com/adamcohen8/orbital-engagement-lab/releases/latest/download/install.ps1 -OutFile $env:TEMP\oel-install.ps1
+Invoke-WebRequest https://github.com/adamcohen8/orbital-engineering-lab/releases/latest/download/install.ps1 -OutFile $env:TEMP\oel-install.ps1
 Get-Content $env:TEMP\oel-install.ps1
 & $env:TEMP\oel-install.ps1
 ```
@@ -72,8 +72,8 @@ their matching constraint files.
 Windows PowerShell:
 
 ```powershell
-git clone https://github.com/adamcohen8/orbital-engagement-lab.git
-Set-Location orbital-engagement-lab
+git clone https://github.com/adamcohen8/orbital-engineering-lab.git
+Set-Location orbital-engineering-lab
 py --list
 py -3.14 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
@@ -85,8 +85,8 @@ py -3.14 -m venv .venv
 macOS or Linux:
 
 ```bash
-git clone https://github.com/adamcohen8/orbital-engagement-lab.git
-cd orbital-engagement-lab
+git clone https://github.com/adamcohen8/orbital-engineering-lab.git
+cd orbital-engineering-lab
 python3.14 -m venv .venv
 .venv/bin/python -m pip install --upgrade pip
 .venv/bin/python -m pip install ".[dev]"
@@ -147,6 +147,10 @@ For the guided first-run walkthrough, see [Quickstart](docs/quickstart.md).
   a custom public ADCS or RPO complete-stack flight-software candidate.
 - Inspect passive ground-station access using line of sight, elevation, and
   range histories.
+- Simulate headless ground tracking, packet delay, telemetry freshness, and
+  service outages; see [Ground Segment](docs/models/ground-segment.md).
+- Enable one-node thermal balance and bounded battery state in supported ONP
+  satellite runs; see [Spacecraft Resources](docs/models/spacecraft-resources.md).
 - Evaluate whole-Earth coverage and directed free-space links from deterministic
   ONP, completed-review, or ECI OGP histories.
 - Explore perturbation models, atmosphere, SRP, third bodies, spherical
@@ -170,6 +174,8 @@ query CLI/API, custom review plotting API, and the RPO trainer.
 | Approximate TLE-initialized OEL propagation | `python run_simulation.py --config examples/configs/public_tle_2hr_propagation.yaml` |
 | Passive OGP-SGP4 general-perturbations propagation | `python run_simulation.py --config examples/configs/public_sgp4_passive_propagation.yaml` |
 | Geometric ground-station access from a TLE-initialized OEL run | `python run_simulation.py --config examples/configs/public_ground_station_access_from_tle.yaml` |
+| Simulate spacecraft thermal and battery resources | `python run_simulation.py --config configs/spacecraft_resources_demo.yaml` |
+| Simulate delayed ground tracking and telemetry | `python run_simulation.py --config configs/ground_segment_demo.yaml` |
 | Whole-Earth coverage and directed free-space link analysis | `python run_simulation.py --config examples/configs/public_coverage_and_link_analysis.yaml` |
 | Closed-loop public rendezvous | `python run_simulation.py --config examples/configs/public_closed_loop_rendezvous_lqr.yaml` |
 | Mission-recovery evidence case | `python run_simulation.py --config agents/examples/public_agent_mission_recovery_plus_c_burn.yaml` |
@@ -279,7 +285,7 @@ Moon-centered and shows the target NRHO with the chaser's current position.
 
 ## Trust, Limits, And Safety
 
-Orbital Engagement Lab is an independent personal-capacity software project. It
+Orbital Engineering Lab is an independent personal-capacity software project. It
 is not an official product, program, or endorsement of the Department of
 Defense, Department of the Air Force, United States Space Force, or any other
 U.S. Government organization.
@@ -391,7 +397,7 @@ generated report packets in public issues.
 
 Apache License 2.0. See [LICENSE.txt](LICENSE.txt).
 
-## Hosted access in v0.30.0
+## Hosted availability
 
 **Closed alpha: access is not publicly available.** Public OEL remains free to
 run locally without a Hosted account. The bundled client and package validator

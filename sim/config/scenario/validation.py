@@ -148,8 +148,66 @@ def _validate_physics_runtime_settings(cfg: SimulationScenarioConfig) -> None:
             )
 
     model = str(orbit.get("model", "two_body") or "two_body").strip().lower()
+    for oid, obj in cfg.objects.items():
+        if any(dict(obj.specs.get(name, {}) or {}).get("enabled", False) for name in ("thermal", "power")):
+            propagation = obj.propagation_method or orbit.get("propagation_method", "special")
+            if model != "two_body" or propagation == "general":
+                raise ValueError(f"objects.{oid}: spacecraft resources require Earth-centered ONP dynamics")
     if model not in {"two_body", "cr3bp"}:
         raise ValueError("simulator.dynamics.orbit.model must be one of: cr3bp, two_body.")
+    for oid, obj in cfg.objects.items():
+        if not obj.enabled or not obj.force_models:
+            continue
+        path = f"objects.{oid}.force_models"
+        if obj.kind != "satellite" or model != "two_body" or (obj.propagation_method or propagation_method) != "special":
+            raise ValueError(f"{path} requires ECI ONP special propagation for a satellite.")
+        if cfg.simulator.initial_jd_utc is None:
+            raise ValueError(f"{path} requires simulator.initial_jd_utc.")
+    if bool(dict(orbit.get("schwarzschild", {}) or {}).get("enabled", False)):
+        if model != "two_body" or propagation_method != "special":
+            raise ValueError("schwarzschild requires Earth-centered special ONP propagation.")
+        for oid, obj in cfg.objects.items():
+            if obj.enabled and (obj.propagation_method or propagation_method) == "general":
+                raise ValueError(f"objects.{oid}: schwarzschild cannot be applied to general OGP propagation.")
+    radiation = dict(orbit.get("earth_radiation", {}) or {})
+    if radiation.get("enabled", False):
+        if model != "two_body" or propagation_method != "special":
+            raise ValueError("earth_radiation requires Earth-centered special ONP propagation.")
+        if cfg.simulator.initial_jd_utc is None:
+            raise ValueError("earth_radiation requires simulator.initial_jd_utc.")
+        if not env.get("ephemeris_mode"):
+            raise ValueError("earth_radiation requires an explicit environment.ephemeris_mode.")
+        for oid, obj in cfg.objects.items():
+            if obj.enabled and (obj.propagation_method or propagation_method) == "general":
+                raise ValueError(f"objects.{oid}: earth_radiation cannot be applied to general OGP propagation.")
+    tides = dict(orbit.get("ocean_tides", {}) or {})
+    if tides.get("enabled", False):
+        if model != "two_body" or propagation_method != "special":
+            raise ValueError("ocean_tides requires Earth-centered special ONP propagation.")
+        for oid, obj in cfg.objects.items():
+            if obj.enabled and (obj.propagation_method or propagation_method) == "general":
+                raise ValueError(f"objects.{oid}: ocean_tides cannot be applied to general OGP propagation.")
+        from sim.dynamics.orbit.frames import frame_context_from_mapping
+        frame = frame_context_from_mapping(dict(cfg.simulator.frames), jd_utc_start=cfg.simulator.initial_jd_utc)
+        if frame.jd_utc_start is None or not frame.eop_rotation_available:
+            raise ValueError("ocean_tides requires an absolute epoch and EOP-backed simulator.frames.")
+        if not frame.eop_path and any(getattr(frame, k) is None for k in ("dut1_s", "dat_s", "xp_arcsec", "yp_arcsec")):
+            raise ValueError("ocean_tides requires EOP data or explicit dut1_s, dat_s, xp_arcsec, yp_arcsec.")
+    tides = dict(orbit.get("solid_earth_tides", {}) or {})
+    if tides.get("enabled", False):
+        if model != "two_body" or propagation_method != "special":
+            raise ValueError("solid_earth_tides requires Earth-centered special ONP propagation.")
+        for oid, obj in cfg.objects.items():
+            if obj.enabled and (obj.propagation_method or propagation_method) == "general":
+                raise ValueError(f"objects.{oid}: solid_earth_tides cannot be applied to general OGP propagation.")
+        from sim.dynamics.orbit.frames import frame_context_from_mapping
+        frame = frame_context_from_mapping(dict(cfg.simulator.frames), jd_utc_start=cfg.simulator.initial_jd_utc)
+        if frame.jd_utc_start is None or not frame.eop_rotation_available:
+            raise ValueError("solid_earth_tides requires an absolute epoch and EOP-backed simulator.frames.")
+        if not frame.eop_path and any(getattr(frame, k) is None for k in ("dut1_s", "dat_s", "xp_arcsec", "yp_arcsec")):
+            raise ValueError("solid_earth_tides requires EOP data or explicit dut1_s, dat_s, xp_arcsec, yp_arcsec.")
+        if not env.get("ephemeris_mode"):
+            raise ValueError("solid_earth_tides requires an explicit environment.ephemeris_mode.")
     if model == "cr3bp":
         unsupported = []
         for key in ("j2", "j3", "j4", "drag", "srp", "third_body_sun", "third_body_moon", "lift"):

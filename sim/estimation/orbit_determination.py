@@ -1,10 +1,10 @@
-"""Orbital Engagement Pro dynamics OD workflow tools are not included in the public core."""
+"""Orbital Engineering Lab Pro dynamics OD workflow tools are not included in the public core."""
 
 
 def _unavailable(*args, **kwargs):
     raise ImportError(
         "Dynamics orbit determination, fit/holdout OD artifacts, and estimated-parameter "
-        "workflows are part of Orbital Engagement Pro. The public core supports deterministic "
+        "workflows are part of Orbital Engineering Lab Pro. The public core supports deterministic "
         "scenario YAML and runtime EKF/UKF state estimation."
     )
 

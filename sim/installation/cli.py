@@ -173,6 +173,8 @@ def _dispatch(command: str, arguments: list[str], *, paths: InstallationPaths, w
     elif command in {"sim", "doctor"}:
         argv = [str(python), str(source / "run_simulation.py")]
         argv.extend(["--doctor"] if command == "doctor" else arguments)
+    elif command == "twin":
+        argv = [str(python), "-m", "sim.spacecraft_twin", *arguments]
     elif command == "review":
         argv = [str(python), "-m", "sim.review", *arguments]
     elif command == "runs":
@@ -278,6 +280,8 @@ def _dispatch_commands() -> tuple[str, ...]:
     commands = ["sim", "review", "runs", "study", "power", "lifetime", "fsw", "hosted", "trainer"]
     if _fswdk_available():
         commands.append("fswdk")
+    if importlib.util.find_spec("sim.spacecraft_twin") is not None:
+        commands.append("twin")
     commands.append("mcp")
     return tuple(commands)
 
@@ -287,7 +291,7 @@ def _installation_editions() -> tuple[str, ...]:
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Install, update, and run Orbital Engagement Lab.")
+    parser = argparse.ArgumentParser(description="Install, update, and run Orbital Engineering Lab.")
     parser.add_argument("--data-root", type=Path, help="Override the managed OEL data root.")
     parser.add_argument("--config-root", type=Path, help="Override the managed OEL config root.")
     parser.add_argument("--workspace", type=Path, help="Explicit OEL workspace or workspace manifest.")

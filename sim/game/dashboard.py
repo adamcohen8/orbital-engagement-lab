@@ -44,7 +44,7 @@ class PygameRPODashboard(
     goal_nmt_element_tolerance_km: float | None = None
     fullscreen: bool = True
     max_history: int = 900
-    title: str = "Orbital Engagement Lab - RPO Trainer"
+    title: str = "Orbital Engineering Lab - RPO Trainer"
     coast_prediction_horizon_s: float = 300.0
     coast_prediction_orbit_fraction: float | None = 1.0
     coast_prediction_dt_s: float = 10.0

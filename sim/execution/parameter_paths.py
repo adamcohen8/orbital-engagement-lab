@@ -1,27 +1,22 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
-_PATH_VALUE_FIELDS = {
-    "output_dir",
-    "summary_json",
-    "prompt_file",
-    "eop_path",
-    "coeff_path",
-    "source_path",
-    "geometry_profile_path",
-    "area_profile_path",
-    "attitude_area_profile_path",
-    "profile_path",
-}
+from sim.config.campaign_file_paths import is_campaign_input_file_path, is_file_location_path
 
 
-def _reject_path_parameter(path: str) -> None:
-    terminal = str(path).rsplit(".", 1)[-1].split("[", 1)[0]
-    if terminal in _PATH_VALUE_FIELDS or terminal.endswith("_file"):
+def _reject_path_parameter(path: str, *, allow_input_file: bool = False, value: Any = None) -> None:
+    if is_file_location_path(path):
+        if allow_input_file and is_campaign_input_file_path(path):
+            if value is None:
+                return
+            if not isinstance(value, str) or not Path(value).is_absolute() or not Path(value).is_file():
+                raise ValueError(f"Monte Carlo bundle input '{path}' must name an existing absolute file or null.")
+            return
         raise ValueError(
             f"Parameter path '{path}' targets a filesystem location. "
-            "Batch and sweep parameters may not change config input/output paths."
+            "Only allowlisted Monte Carlo bundle inputs may change file paths."
         )
 
 
@@ -102,8 +97,8 @@ def object_synced_parameter_paths(root: dict[str, Any], path: str) -> list[str]:
     return _dedupe(paths)
 
 
-def set_parameter_path_value(root: dict[str, Any], path: str, value: Any) -> None:
-    _reject_path_parameter(path)
+def set_parameter_path_value(root: dict[str, Any], path: str, value: Any, *, allow_input_file: bool = False) -> None:
+    _reject_path_parameter(path, allow_input_file=allow_input_file, value=value)
     synced_paths = object_synced_parameter_paths(root, path)
     existing_paths = [synced_path for synced_path in synced_paths if path_exists(root, synced_path)]
     if not existing_paths:

@@ -226,7 +226,7 @@ class SingleRunPayloadAssembler:
             if getattr(propagator, "state_frame", "eci") != "eci":
                 object_propagation[object_id] = propagator.propagation_metadata()
 
-        return build_single_run_payload(
+        payload = build_single_run_payload(
             SingleRunPayloadContext(
                 cfg=engine.cfg,
                 object_ids=list(engine.agents.keys()),
@@ -282,6 +282,29 @@ class SingleRunPayloadAssembler:
                 rocket_insertion_time_s=engine.rocket_insertion_time_s,
             )
         )
+
+        resources = {
+            aid: [row for row in rows if row["time_s"] <= float(parts.t_s[-1]) + 1e-9]
+            for aid, rows in getattr(engine, "resource_hist", {}).items()
+        }
+        if getattr(engine, "ground_segment", None) is not None:
+            from copy import deepcopy
+            payload["ground_segment"] = deepcopy([r for r in engine.ground_segment.ground.history if r["time_s"] <= float(parts.t_s[-1]) + 1e-9])
+        if resources:
+            payload["spacecraft_resources"] = resources
+        payload["impulsive_maneuvers"] = list(engine.impulsive_maneuvers)
+        if engine.impulsive_maneuvers:
+            payload["summary"]["impulsive_maneuvers"] = {
+                "count": len(engine.impulsive_maneuvers),
+                "total_delta_v_m_s_by_object": {
+                    object_id: float(sum(
+                        np.linalg.norm(row["delta_v_eci_m_s"])
+                        for row in engine.impulsive_maneuvers if row["object_id"] == object_id
+                    ))
+                    for object_id in sorted({row["object_id"] for row in engine.impulsive_maneuvers})
+                },
+            }
+        return payload
 
     def primary_rocket_throttle_history(self) -> np.ndarray:
         engine = self.engine

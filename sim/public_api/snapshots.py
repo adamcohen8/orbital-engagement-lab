@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -16,6 +16,9 @@ class SimulationSnapshot:
     belief: dict[str, np.ndarray]
     applied_thrust: dict[str, np.ndarray]
     applied_torque: dict[str, np.ndarray]
+    spacecraft_resources: dict[str, dict[str, float]] = field(default_factory=dict)
+
+    ground_segment: dict = field(default_factory=dict)
 
     @property
     def object_ids(self) -> tuple[str, ...]:

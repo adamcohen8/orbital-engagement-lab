@@ -361,6 +361,13 @@ def write_single_run_artifacts(
             "coverage": [item.get("artifacts", {}) for item in payload["orbital_analysis"].get("coverage", [])],
             "directed_links": [item.get("artifacts", {}) for item in payload["orbital_analysis"].get("directed_links", [])],
         }
+    if payload.get("ground_segment"):
+        from sim.ground_segment.artifacts import write_ground_artifacts
+        artifacts.update(write_ground_artifacts(context.outdir, payload["ground_segment"]))
+    if payload.get("spacecraft_resources"):
+        from sim.spacecraft_resources.artifacts import write_resource_artifacts
+
+        artifacts.update(write_resource_artifacts(context.outdir, payload["spacecraft_resources"]))
     if bool(context.cfg.outputs.stats.get("save_csv", False)):
         artifacts["history_csv"] = str(_write_history_csv(context=context))
     if bool(context.cfg.outputs.stats.get("save_history_npz", False)):

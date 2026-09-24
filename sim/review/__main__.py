@@ -28,6 +28,10 @@ def main(argv: list[str] | None = None) -> int:
         from sim.review.plot import main as plot_main
 
         return plot_main(argv[1:])
+    if argv and argv[0] == "slice":
+        from sim.review.slice import main as slice_main
+
+        return slice_main(argv[1:])
     parser = argparse.ArgumentParser(description="Query an OEL output review store.")
     parser.add_argument("output_dir", nargs="?", help="Output directory or review/run.sqlite path.")
     query_group = parser.add_mutually_exclusive_group()

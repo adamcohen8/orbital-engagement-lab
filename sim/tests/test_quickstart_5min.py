@@ -224,7 +224,7 @@ def test_doctor_reports_quickstart_readiness() -> None:
         check=False,
     )
 
-    assert "ORBITAL ENGAGEMENT LAB DOCTOR" in proc.stdout
+    assert "ORBITAL ENGINEERING LAB DOCTOR" in proc.stdout
     assert "Functional Python" in proc.stdout
     assert "Security baseline" in proc.stdout
     assert "Operating system" in proc.stdout

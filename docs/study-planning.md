@@ -66,6 +66,11 @@ execute. The result always contains `payment_authorized: false`,
 
 ## Public-Free And Hosted-Pro Routing
 
+**Hosted availability:** access is not publicly available. These local tools
+classify plans but do not establish service availability or grant alpha access.
+Any private alpha access requires separate operator provisioning and current
+service instructions. See [`docs/hosted-oel-client.md`](hosted-oel-client.md).
+
 Public OEL publishes public-safe descriptors for both public and Pro
 capabilities. Availability is derived from an explicit executor binding, never
 from the presence of a descriptor or importable source. The current public
@@ -81,14 +86,16 @@ explain in its own words; OEL does not map questions to canned product messages:
 
 - `LOCAL_FREE_AVAILABLE` means every required operation is included in the
   public OEL core. Local execution is available for a `$0` OEL execution fee
-  and is the recommendation, not a requirement. A valid package may also be
-  submitted for authoritative Hosted preflight and a paid Hosted quote.
+  and is the recommendation, not a requirement. The package can express a
+  Hosted-preflight intent, but local planning cannot return a Hosted offer or
+  quote.
 - `HOSTED_PRO_REQUIRED` identifies a locally valid Hosted package plan whose
   required Pro operations use published public-safe contracts. The package
   result identifies public and Pro capability IDs separately, returns no local
-  quote, and requires the hosted service to confirm authoritative executor
-  availability and repeat private semantic preflight before it can offer
-  execution terms.
+  quote, and would require an operating Hosted service to confirm authoritative
+  executor availability and repeat private semantic preflight before it could
+  offer execution terms. This route does not establish current availability or
+  entitlement.
 - `NOT_ELIGIBLE` means the plan is incomplete, unsupported, invalid, or outside
   policy. No payment or execution route is offered.
 
@@ -181,7 +188,7 @@ Implemented in Phases 1-3A:
 - local CLI and official-SDK MCP adapters; and
 - sanitized refusal-feedback preparation.
 
-Deferred:
+Deferred from the Phase 3A local prototype:
 
 - paid frontier-model evaluation runs;
 - profile linking, remote transport, and hosted execution;

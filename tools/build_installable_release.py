@@ -106,7 +106,7 @@ def _source_files(root: Path) -> list[Path]:
 
 
 def _build_source_archive(root: Path, output: Path, *, version: str, epoch: int) -> None:
-    prefix = f"orbital-engagement-lab-{version}"
+    prefix = f"orbital-engineering-lab-{version}"
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open("wb") as raw:
         with gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=epoch, compresslevel=9) as compressed:
@@ -424,7 +424,7 @@ def _verify_offline_runtime_install(
                 "-c",
                 (
                     "import importlib.metadata; import sim; import sim.installation.cli; "
-                    f"assert importlib.metadata.version('orbital-engagement-lab') == {version!r}"
+                    f"assert importlib.metadata.version('orbital-engineering-lab') == {version!r}"
                 ),
             ],
             capture_output=True,
@@ -526,7 +526,7 @@ def build_release(
         required=not developer_unsigned,
         expected_wheels=list(supply_chain.get("resolved_wheels", []) or []),
     )
-    archive = output / f"orbital-engagement-lab-{version}-{edition}.tar.gz"
+    archive = output / f"orbital-engineering-lab-{version}-{edition}.tar.gz"
     _build_source_archive(root, archive, version=version, epoch=epoch)
     offline_runtime_qualification = None
     if not developer_unsigned:
@@ -547,6 +547,7 @@ def build_release(
     published_at = datetime.fromtimestamp(epoch, tz=timezone.utc).isoformat().replace("+00:00", "Z")
     manifest: dict[str, Any] = {
         "schema_version": RELEASE_MANIFEST_SCHEMA,
+        # Preserve the v1 wire identity for already-installed updaters.
         "product": "orbital-engagement-lab",
         "edition": edition,
         "version": version,

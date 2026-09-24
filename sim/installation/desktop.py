@@ -137,7 +137,7 @@ def publish_trainer(paths: InstallationPaths, *, home: Path | None = None, syste
             raise ValueError("Desktop launcher path contains unsupported characters")
         target.write_text(
             "[Desktop Entry]\nType=Application\nName=RPO Trainer\n"
-            "Comment=Orbital Engagement Lab RPO Trainer\n"
+            "Comment=Orbital Engineering Lab RPO Trainer\n"
             f'Exec="{command}" trainer\nTerminal=false\nCategories=Education;Science;\n'
         )
         target.chmod(0o755)

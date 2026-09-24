@@ -1,6 +1,6 @@
 # Actuator Model Reference
 
-Orbital Engagement Lab treats actuators as the layer between controller intent
+Orbital Engineering Lab treats actuators as the layer between controller intent
 and the force or torque integrated by the dynamics. Controllers emit the public
 `Command` shape:
 

@@ -561,6 +561,8 @@ def _onp_compatibility_errors(product: Mapping[str, Any]) -> list[dict[str, str]
 
 def _continued_object_specs(payload: Mapping[str, Any]) -> dict[str, Any]:
     specs = deepcopy(dict(payload.get("object_specs", {}) or {}))
+    if any(dict(specs.get(name, {}) or {}).get("enabled", False) for name in ("thermal", "power")):
+        raise ValueError("Thermal/power continuation requires a resource-state handoff; this product cannot restore it.")
     resource = dict(payload.get("resource_state", {}) or {})
     if not resource:
         return specs

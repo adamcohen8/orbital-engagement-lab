@@ -183,6 +183,7 @@ def evaluate_ground_station_measurements(
     jd_utc_start: float | None = None,
     frame_context: FrameContext | None = None,
     object_state_frames: dict[str, str] | None = None,
+    stream_state: dict | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Emit opt-in ground-station sensor measurements for visible targets.
 
@@ -226,6 +227,9 @@ def evaluate_ground_station_measurements(
             skipped = {"cadence": 0, "line_of_sight": 0, "elevation": 0, "range": 0, "invalid_state": 0}
             last_emit_t = -np.inf
             rng = np.random.default_rng(_measurement_seed(cfg["seed"], station.id, str(object_id)))
+            stream_key = (station.id, str(object_id))
+            if stream_state is not None and stream_key in stream_state:
+                last_emit_t, rng = stream_state[stream_key]
             for k in range(n):
                 state = arr[k, :]
                 if state.size < 6 or not np.all(np.isfinite(state[:6])):
@@ -309,6 +313,8 @@ def evaluate_ground_station_measurements(
                     }
                 )
                 last_emit_t = t
+            if stream_state is not None:
+                stream_state[stream_key] = (last_emit_t, rng)
             station_payload["targets"][str(object_id)] = {
                 "measurements": rows,
                 "measurement_count": len(rows),

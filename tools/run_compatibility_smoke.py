@@ -30,7 +30,7 @@ DESKTOP_ATTESTATIONS = (
     "keyboard_input_verified",
     "display_rendering_verified",
 )
-FIRST_PARTY_DISTRIBUTIONS = {"orbital-engagement-lab"}
+FIRST_PARTY_DISTRIBUTIONS = {"orbital-engineering-lab", "orbital-engagement-lab"}
 
 
 def _sha256(path: Path) -> str:

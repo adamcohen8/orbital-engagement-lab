@@ -53,6 +53,7 @@ class OrbitalAttitudeDynamics(DynamicsModel):
     propagate_attitude: bool = True
     orbit_propagator: OrbitPropagator = field(default_factory=_owned_default_orbit_propagator)
     acceleration_mode: str = "off"
+    resource_model: object | None = None
     _acceleration_enabled: bool = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
@@ -75,6 +76,26 @@ class OrbitalAttitudeDynamics(DynamicsModel):
             delattr(self.orbit_propagator, "_pending_orbital_attitude_default_configuration")
 
     def step(self, state: StateTruth, command: Command, env: dict, dt_s: float) -> StateTruth:
+        if self.resource_model is None:
+            return self._step_mechanical(state, command, env, dt_s)
+        if self.orbit_propagator.state_frame != "eci":
+            raise ValueError("spacecraft resources currently require Earth-centered ECI dynamics")
+        if not np.isfinite(dt_s) or dt_s <= 0.0:
+            raise ValueError("resource timestep must be finite and positive")
+        count = max(1, int(np.ceil(dt_s / self.resource_model.max_step_s)))
+        h = dt_s / count
+        current = state
+        subcommand = Command(
+            command.thrust_eci_km_s2, command.torque_body_nm,
+            {**command.mode_flags, "delta_mass_kg": float(command.mode_flags.get("delta_mass_kg", 0.0)) / count},
+        )
+        for _ in range(count):
+            following = self._step_mechanical(current, subcommand, env, h)
+            following.resource_state = self.resource_model.advance(current, following, env, h)
+            current = following
+        return current
+
+    def _step_mechanical(self, state: StateTruth, command: Command, env: dict, dt_s: float) -> StateTruth:
         propagate_attitude = self.propagate_attitude and not bool(env.get("attitude_disabled", False))
         force_eci_n = np.asarray(command.mode_flags.get("physical_force_eci_n", (0.0, 0.0, 0.0)), dtype=float)
         force_body_n = np.asarray(command.mode_flags.get("physical_force_body_n", (0.0, 0.0, 0.0)), dtype=float)
@@ -371,7 +392,11 @@ class OrbitalAttitudeDynamics(DynamicsModel):
                 mass_kg=stage.mass_kg,
                 t_s=t_s,
             )
-            stage_env = self._coupled_stage_environment(stage_truth, environment)
+            stage_env = self._coupled_stage_environment(
+                stage_truth,
+                environment,
+                attitude_dcm_bn=c_bn,
+            )
             orbit_ctx = OrbitContext(
                 mu_km3_s2=self.mu_km3_s2,
                 mass_kg=stage.mass_kg,
@@ -451,7 +476,13 @@ class OrbitalAttitudeDynamics(DynamicsModel):
             t_s=final.t_s,
         )
 
-    def _coupled_stage_environment(self, state: StateTruth, env: dict) -> dict:
+    def _coupled_stage_environment(
+        self,
+        state: StateTruth,
+        env: dict,
+        *,
+        attitude_dcm_bn: np.ndarray | None = None,
+    ) -> dict:
         stage_env = dict(env)
         resolved_epoch = resolve_time_dependent_env(env, state.t_s)
         for key in ("sun_pos_eci_km", "moon_pos_eci_km"):
@@ -463,7 +494,11 @@ class OrbitalAttitudeDynamics(DynamicsModel):
             stage_env["lift_area_m2"] = float(self.lift_area_m2)
         if self.srp_area_m2 is not None:
             stage_env["srp_area_m2"] = float(self.srp_area_m2)
-        c_bn = quaternion_to_dcm_bn(state.attitude_quat_bn)
+        c_bn = (
+            quaternion_to_dcm_bn(state.attitude_quat_bn)
+            if attitude_dcm_bn is None
+            else attitude_dcm_bn
+        )
         if self.lift_axis_body is not None and float(self.lift_coefficient) != 0.0:
             axis = np.asarray(self.lift_axis_body, dtype=float).reshape(3)
             norm = float(np.linalg.norm(axis))

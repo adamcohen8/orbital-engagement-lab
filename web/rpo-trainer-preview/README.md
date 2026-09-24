@@ -1,4 +1,4 @@
-# Orbital Engagement Lab RPO Trainer Preview
+# Orbital Engineering Lab RPO Trainer Preview
 
 This is the browser-native OEL RPO Trainer Preview. It is a lightweight web app
 intended for social-media clickthroughs, quick demos, and small Pursuit Arcade
@@ -76,7 +76,7 @@ static page reads its analytics configuration from:
 <meta name="oel-analytics-provider" content="plausible,vercel" />
 <meta name="oel-analytics-domain" content="adamcohen8.github.io" />
 <meta name="oel-vercel-analytics-script" content="/_vercel/insights/script.js" />
-<meta name="oel-vercel-analytics-hosts" content=".vercel.app,orbital-engagement-lab.vercel.app" />
+<meta name="oel-vercel-analytics-hosts" content=".vercel.app,orbital-engineering-lab.vercel.app" />
 ```
 
 Completion events use coarse buckets for time, delta-v, and closest range.
@@ -110,6 +110,15 @@ Run the complete preview check from this directory:
 ```bash
 npm test
 ```
+
+## Published Schemas
+
+The `schemas/` directory serves the 23 public JSON Schema IDs at
+`https://orbital-engineering-lab.vercel.app/schemas/`. Its files are byte-for-byte
+copies of their authoritative public source schemas. Run
+`node tools/sync-schemas.mjs --write` after changing a source schema; `npm test`
+checks the exact public inventory, URLs, and content. Pro-only schemas are
+distributed with Pro source and are not copied into the public site.
 
 ## Hosted RPO Duel release gate
 

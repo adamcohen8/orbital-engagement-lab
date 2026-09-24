@@ -9,7 +9,7 @@ from sim.game.runner import run_game_mode
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run Orbital Engagement Lab game mode.")
+    parser = argparse.ArgumentParser(description="Run Orbital Engineering Lab game mode.")
     parser.add_argument(
         "config",
         nargs="?",

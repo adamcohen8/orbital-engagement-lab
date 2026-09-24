@@ -133,7 +133,7 @@ def _run_launcher(
     pygame.init()
     pygame.font.init()
     screen = pygame.display.set_mode((1040, 680), pygame.RESIZABLE)
-    pygame.display.set_caption("Orbital Engagement Lab - Level Select")
+    pygame.display.set_caption("Orbital Engineering Lab - Level Select")
     pygame.event.set_grab(False)
     pygame.mouse.set_visible(True)
     clock = pygame.time.Clock()

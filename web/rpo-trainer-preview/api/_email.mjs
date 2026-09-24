@@ -30,7 +30,7 @@ export function publicOrigin(req) {
   if (allowed && allowed !== "*") return allowed;
   const host = req?.headers?.host;
   const proto = req?.headers?.["x-forwarded-proto"] || "https";
-  return host ? `${proto}://${host}` : "https://orbital-engagement-lab.vercel.app";
+  return host ? `${proto}://${host}` : "https://orbital-engineering-lab.vercel.app";
 }
 
 export function verificationUrl(req, token) {

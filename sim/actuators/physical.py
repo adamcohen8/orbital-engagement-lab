@@ -127,6 +127,8 @@ class ReactionWheelHardware:
         max_torque_n_m: tuple[float, ...],
         max_momentum_n_m_s: tuple[float, ...],
         initial_momentum_n_m_s: tuple[float, ...] | None = None,
+        inertia_kg_m2: tuple[float, ...] | None = None,
+        max_speed_rad_s: tuple[float, ...] | None = None,
     ) -> None:
         axes = np.asarray(axes_body, dtype=float)
         if not actuator_id.strip() or axes.ndim != 2 or axes.shape[1] != 3 or not np.all(np.isfinite(axes)):
@@ -138,6 +140,15 @@ class ReactionWheelHardware:
         self.axes_body = axes
         self.max_torque_n_m = _coordinate_limits(max_torque_n_m, axes.shape[0], "wheel torque")
         self.max_momentum_n_m_s = _coordinate_limits(max_momentum_n_m_s, axes.shape[0], "wheel momentum")
+        if (inertia_kg_m2 is None) != (max_speed_rad_s is None):
+            raise ValueError("wheel inertia and speed limits must be supplied together")
+        self.inertia_kg_m2 = None
+        if inertia_kg_m2 is not None:
+            self.inertia_kg_m2 = _coordinate_limits(inertia_kg_m2, axes.shape[0], "wheel inertia")
+            speed_limits = _coordinate_limits(max_speed_rad_s, axes.shape[0], "wheel speed")
+            if np.any(self.inertia_kg_m2 <= 0) or np.any(speed_limits <= 0):
+                raise ValueError("wheel inertia and speed limits must be positive")
+            self.max_momentum_n_m_s = np.minimum(self.max_momentum_n_m_s, self.inertia_kg_m2 * speed_limits)
         initial = (
             np.zeros(axes.shape[0])
             if initial_momentum_n_m_s is None
@@ -187,7 +198,10 @@ class ReactionWheelHardware:
             device_state=tuple(
                 TelemetryField(f"wheel_{index}_momentum_n_m_s", float(value), "N*m*s")
                 for index, value in enumerate(self.momentum_n_m_s)
-            ),
+            ) + (() if self.inertia_kg_m2 is None else tuple(
+                TelemetryField(f"wheel_{index}_speed_rad_s", float(value), "rad/s")
+                for index, value in enumerate(self.momentum_n_m_s / self.inertia_kg_m2)
+            )),
             saturated=bool(np.any(np.abs(requested - realized_wheel_torque) > 1.0e-15)),
         )
 
@@ -380,7 +394,7 @@ class ContinuousEngineHardware:
 
 
 class RcsThrusterHardware:
-    """One body-fixed, force-only RCS jet."""
+    """One body-fixed RCS jet with an optional COM-relative mounting arm."""
 
     def __init__(
         self,
@@ -388,6 +402,7 @@ class RcsThrusterHardware:
         *,
         direction_body: Vector3,
         max_thrust_n: float,
+        position_body_m: Vector3 = (0.0, 0.0, 0.0),
         specific_impulse_s: float | None = None,
     ) -> None:
         direction = np.asarray(direction_body, dtype=float)
@@ -396,6 +411,10 @@ class RcsThrusterHardware:
             raise ValueError("RCS identity and positive finite thrust are required")
         if direction.shape != (3,) or not np.all(np.isfinite(direction)) or abs(norm - 1.0) > 1.0e-10:
             raise ValueError("RCS body direction must be a normalized three-vector")
+        position = np.asarray(position_body_m, dtype=float)
+        if position.shape != (3,) or not np.all(np.isfinite(position)):
+            raise ValueError("RCS position must be a finite COM-relative body-frame three-vector")
+        self.position_body_m = position
         self.actuator_id = actuator_id
         self.direction_body = direction
         self.max_thrust_n = float(max_thrust_n)
@@ -415,6 +434,7 @@ class RcsThrusterHardware:
         if payload is not None and payload.thruster_id != self.actuator_id:
             raise ValueError("RCS command thruster_id does not match physical device")
         force = tuple(float(value) for value in self.direction_body * (self.max_thrust_n if enabled else 0.0))
+        torque = tuple(float(value) if value != 0.0 else 0.0 for value in np.cross(self.position_body_m, force))
         return ActuatorRealization(
             self.actuator_id,
             start_time_ns,
@@ -422,9 +442,9 @@ class RcsThrusterHardware:
             None if demand.source_command is None else demand.source_command.command_id,
             demand.mode,
             force,
-            (0.0, 0.0, 0.0),
+            torque,
             force,
-            (0.0, 0.0, 0.0),
+            torque,
             _mass_flow_kg_s(force, self.specific_impulse_s),
             (TelemetryField("valve_open", enabled),),
         )

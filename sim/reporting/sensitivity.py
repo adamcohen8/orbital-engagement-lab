@@ -1,9 +1,9 @@
-"""Orbital Engagement Pro sensitivity reports are not included in the public core."""
+"""Orbital Engineering Lab Pro sensitivity reports are not included in the public core."""
 
 
 def _unavailable(*args, **kwargs):
     raise ImportError(
-        "Sensitivity reporting is part of Orbital Engagement Pro. "
+        "Sensitivity reporting is part of Orbital Engineering Lab Pro. "
         "The public core includes single-run outputs and lightweight validation helpers."
     )
 

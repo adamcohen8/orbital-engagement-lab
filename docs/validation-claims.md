@@ -1,7 +1,11 @@
 # Validation Claims
 
-This page states the current public validation posture for Orbital Engagement
-Lab. It is intentionally conservative: the public core should be useful and
+This page states public validation claims only where the evidence names a
+bounded use and retained source/config identity. At this documentation
+snapshot, `v0.30.1` is the latest published public release and `v0.31.0` remains
+in development. Development changes do not inherit these claims until the
+release-specific evidence supports them and the release is published. This
+page is intentionally conservative: the public core should be useful and
 credible without implying decision-grade mission assurance.
 
 ## Current Public Claims
@@ -33,7 +37,8 @@ The public repository supports these claims:
   Basilisk comparisons, and historical HPOP/MATLAB references support only the
   exact tested cases and do not establish general mission assurance.
 
-For v0.29's new public surfaces, the bounded claims are narrower:
+For public surfaces first introduced in v0.29, the bounded claims are limited
+to the following retained evidence; they do not qualify later additions:
 
 - frame/time external evidence covers the retained epoch, state, EOP inputs,
   and stated residual envelopes; routine replay recomputes retained Orekit

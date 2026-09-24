@@ -178,6 +178,40 @@ time, and a restoration command. Restore a logical database explicitly with:
 An unmanifested or changed gzip file is never accepted as review evidence.
 Plain `run.sqlite` remains preferred when both forms are present.
 
+### Partial single-run review slices
+
+Status: experimental.
+
+A completed single-run store can produce a smaller, separately identified
+artifact without changing the source run:
+
+```bash
+.venv/bin/python -m sim.review slice create outputs/my_run /tmp/my-review-slice \
+  --start-s 120 --end-s 180 --object chaser --object target \
+  --family state --family relative --family control --family events
+.venv/bin/python -m sim.review slice query /tmp/my-review-slice \
+  --sql "SELECT time_s, range_km FROM relative_state ORDER BY time_s LIMIT 20"
+```
+
+The new directory contains `review_slice.sqlite` and `slice_manifest.json`.
+The manifest records the source review digest, run/config identity, exact
+selection, retained row counts, slice digest, and a self-check digest. Slice
+times and sample indices retain
+their original values. Object filtering requires both objects for pair rows.
+Run/config identity remains, while output and source file paths that would
+point back into the original workspace are cleared from `run_metadata`.
+Available families are `state`, `relative`, `control`, `fsw`, `access`, `events`,
+and `global_metrics`; global metrics describe the original full run, even when
+the slice window is narrow. Metadata stays for provenance. Artifact references,
+recovery, game, and orbital-analysis tables are omitted in this first version.
+
+A slice is partial review evidence, never a replacement for a completed run or
+a continuation source. The normal `ReviewWorkspace.open` path deliberately does
+not open it; use the slice query command, which verifies the manifest and
+database digest. Creating a slice temporarily needs enough space to copy the
+source SQLite database before pruning and vacuuming. Source retention and any
+later retirement are separate decisions.
+
 ## Query And Schema Discovery
 
 Use `.venv/bin/python -m sim.review` for routine agent and scripted inspection. Keep
@@ -217,12 +251,15 @@ tables described below, current stores may include these conditional families:
 
 - frame/object provenance: `frame_provenance`, `object_propagation`,
   `object_initialization`, and `object_state_frame`;
+- ground segment knowledge: `ground_segment_state`,
+  `ground_segment_contacts`, and `ground_segment_packets` when enabled;
 - flight-software evidence: loads, invocations, task timing, objectives,
   commands/receipts/realization, raw and normalized diagnostics, snapshots, and
   device state;
 - game evidence: input events, observer policy, and scoring rows;
 - recovery evidence: summary, elements, metrics, candidates, burns, and
   `mission_recovery_candidate_elements`;
+- normalized access windows: `ground_access_windows`;
 - coverage and link summaries/samples/windows/transitions.
 
 Conditional tables can be absent or empty when their producer was disabled;
@@ -306,6 +343,29 @@ Recommended columns:
 - `mass_kg`
 
 Columns may be null when a state component is unavailable for an object type.
+
+### `object_orbital_elements`
+
+Derived ECI radius, speed, and classical orbital elements for each object and
+retained sample. Conversion status and circular/equatorial conditioning flags
+identify cases where angular elements need careful interpretation.
+
+Recommended columns:
+
+- `sample_index`
+- `time_s`
+- `object_id`
+- `radius_km`
+- `speed_km_s`
+- `a_km`
+- `ecc`
+- `inc_deg`
+- `raan_deg`
+- `argp_deg`
+- `true_anomaly_deg`
+- `circular_conditioned`
+- `equatorial_conditioned`
+- `conversion_status`
 
 ### `object_state_covariance`
 
@@ -424,6 +484,39 @@ Recommended columns:
 - `range_km`
 - `elevation_deg`
 - `reason`
+
+### `ground_access_windows`
+
+Normalized access intervals retain sampled bounds and explicitly record
+run-boundary censoring and any event-refinement disposition. These windows are
+derived from the recorded access samples; they do not imply finer evidence than
+the stored cadence and refinement result support.
+
+Recommended columns include `station_id`, `object_id`, `start_s`, `end_s`,
+`duration_s`, `start_censored`, `end_censored`, `minimum_range_km`,
+`maximum_elevation_deg`, `boundary_semantics`, `last_access_sample_s`,
+`first_no_access_sample_s`, `sample_span_s`, `credited_duration_s`, and
+`refinement_status`.
+
+### Ground segment knowledge tables
+
+When `ground_segment.enabled: true` and review output is enabled, the store may
+include:
+
+- `ground_segment_state`: one row per recorded ground-segment time and object,
+  with `orbit_json`, `telemetry_json`, and `tracking_json`;
+- `ground_segment_contacts`: one row per time, station, and object, with
+  `tracking`, `downlink`, `uplink`, `access_reason`, and
+  `disabled_services_json`;
+- `ground_segment_packets`: packet processing time in `time_s`, measurement
+  epoch in `measurement_time_s`, reception epoch in `received_time_s`, plus
+  station/object identity, kind, disposition, and `data_json`.
+
+These are ground knowledge and contact records, separate from `object_state`
+simulation truth and onboard navigation belief. Contact flags describe
+geometric availability and configured service outages; they are not an RF
+link-budget or command-execution result. See
+[Ground segment](models/ground-segment.md) for timing and model limits.
 
 ### Coverage and directed-link tables
 
